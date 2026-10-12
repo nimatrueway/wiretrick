@@ -265,6 +265,81 @@ function send<T = any>(msg: any): Promise<T> {
     });
 }
 
+// ---- dedicated scripts folder: pick once, edits sync both ways ----
+function markFolderSynced(): void {
+    const btn = $("#btn-vscode");
+    btn.classList.add("active");
+    btn.textContent = "Folder ✓ (sync on)";
+}
+
+const folderSyncHandlers: fsBridge.FolderSyncHandlers = {
+    onFileChanged: async (fileName, js) => {
+        const target = scripts.find((sc) => fsBridge.matchesFile(sc.meta.name, fileName));
+        if (!target) return;
+        await send({ type: "saveScript", id: target.id, code: js, name: target.meta.name });
+        await refresh();
+        status(`hot-reloaded ${fileName} from VS Code ✓`);
+        const updated = scripts.find((sc) => sc.id === target.id);
+        if (updated && updated.id === selectedId) {
+            setEditorValue(updated.code);
+        }
+    },
+    onFileAdded: async (fileName, js) => {
+        await send({ type: "saveScript", id: newId(), code: js, name: displayNameFromFile(fileName) });
+        await refresh();
+        status(`imported new script from ${fileName} ✓`);
+    },
+    onFileRemoved: async (fileName) => {
+        const target = scripts.find((sc) => fsBridge.matchesFile(sc.meta.name, fileName));
+        if (!target) return;
+        await send({ type: "deleteScript", id: target.id });
+        await refresh();
+        status(`script deleted with ${fileName} ✓`);
+    },
+    onRenamed: async (oldName, newName, js) => {
+        const target = scripts.find((sc) => fsBridge.matchesFile(sc.meta.name, oldName));
+        const newNameTaken = scripts.some((sc) => fsBridge.matchesFile(sc.meta.name, newName));
+        if (target && !newNameTaken) {
+            await send({ type: "saveScript", id: target.id, code: js, name: displayNameFromFile(newName) });
+            await refresh();
+            status(`renamed ${oldName} → ${newName} ✓`);
+        } else if (!target) {
+            await send({ type: "saveScript", id: newId(), code: js, name: displayNameFromFile(newName) });
+            await refresh();
+            status(`imported new script from ${newName} ✓`);
+        }
+    },
+};
+
+function displayNameFromFile(fileName: string): string {
+    return fileName.replace(/\.ts$/, "").replace(/_/g, " ").slice(0, 60) || "Imported script";
+}
+
+function newId(): string {
+    return "s_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
+}
+
+async function autoReconnectFolder(): Promise<void> {
+    if (!fsBridge.isSupported()) return;
+    const st = await fsBridge.autoReconnect();
+    const btn = $("#btn-vscode");
+    if (st === "synced") {
+        markFolderSynced();
+    } else if (st === "prompt") {
+        // one click re-grants (Chrome drops FS grants between restarts)
+        status("scripts folder needs reconnect — click 'Folder…'");
+        btn.textContent = "Folder… (reconnect)";
+        btn.addEventListener("click", async () => {
+            if (fsBridge.isSyncing()) return;
+            const ok = await fsBridge.reconnectClicked(folderSyncHandlers);
+            if (ok) {
+                markFolderSynced();
+                status("scripts folder reconnected ✓");
+            }
+        }, { once: true });
+    }
+}
+
 // ---- movable panels ----
 interface PanelLayout {
     sidebarW?: number;
@@ -459,21 +534,12 @@ async function main(): Promise<void> {
                 btn.textContent = "VS Code…";
                 return;
             }
-            await fsBridge.openFolder(async () => scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code })));
-            (window as any).__resFbOnFileChanged = async (fileName: string, js: string) => {
-                const target = scripts.find((s) => fsBridge.matchesFile(s.meta.name, fileName));
-                if (!target) return;
-                await send({ type: "saveScript", id: target.id, code: js, name: target.meta.name });
-                await refresh();
-                status(`hot-reloaded ${fileName} from VS Code ✓`);
-                // keep the open editor in sync with the folder
-                const updated = scripts.find((s) => s.id === target.id);
-                if (updated && updated.id === selectedId) {
-                    setEditorValue(updated.code);
-                }
-            };
+            await fsBridge.openFolder(
+                async () => scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code })),
+                folderSyncHandlers
+            );
             btn.classList.add("active");
-            btn.textContent = "VS Code ✓ (sync on)";
+            btn.textContent = "Folder ✓ (sync on)";
         });
     } else {
         btn.setAttribute("disabled", "");
@@ -519,6 +585,7 @@ async function main(): Promise<void> {
     makeLogMovable();
     makeLogFind();
     startKeepAlive();
+    void autoReconnectFolder();
 
     // remember the manager is open → the background reopens it after an
     // extension reload (the renderer itself cannot survive)

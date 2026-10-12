@@ -17,6 +17,7 @@ interface FolderSyncState {
 
 let state: FolderSyncState | null = null;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+let syncHandlers: FolderSyncHandlers | null = null;
 
 /** contents we wrote ourselves, so the poller can ignore its own echo */
 const lastWritten = new Map<string, string>();
@@ -25,13 +26,122 @@ export function isSupported(): boolean {
     return typeof (window as any).showDirectoryPicker === "function";
 }
 
+// ---- persistent handle: the picked folder becomes the dedicated
+// scripts folder, remembered across browser restarts ----
+function idb(): Promise<IDBDatabase> {
+    return new Promise((resolve, reject) => {
+        const req = indexedDB.open("resoverride", 1);
+        req.onupgradeneeded = () => req.result.createObjectStore("handles");
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function saveHandle(handle: any): Promise<void> {
+    const db = await idb();
+    await new Promise((resolve, reject) => {
+        const tx = db.transaction("handles", "readwrite");
+        tx.objectStore("handles").put(handle, "scriptFolder");
+        tx.oncomplete = () => resolve(null);
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+export async function loadSavedHandle(): Promise<any | null> {
+    try {
+        const db = await idb();
+        return await new Promise((resolve, reject) => {
+            const tx = db.transaction("handles", "readonly");
+            const req = tx.objectStore("handles").get("scriptFolder");
+            req.onsuccess = () => resolve(req.result || null);
+            req.onerror = () => reject(req.error);
+        });
+    } catch {
+        return null;
+    }
+}
+
+export async function clearSavedHandle(): Promise<void> {
+    try {
+        const db = await idb();
+        await new Promise((resolve) => {
+            const tx = db.transaction("handles", "readwrite");
+            tx.objectStore("handles").delete("scriptFolder");
+            tx.oncomplete = () => resolve(null);
+            tx.onerror = () => resolve(null);
+        });
+    } catch {}
+}
+
 export function isSyncing(): boolean {
     return state !== null;
 }
 
-export async function openFolder(getScripts: () => Promise<{ id: string; name: string; code: string }[]>): Promise<void> {
-    const dirHandle = await (window as any).showDirectoryPicker({ mode: "readwrite" });
+/**
+ * Try to reconnect the saved dedicated folder silently. Returns:
+ *   "synced"   — reconnected and watching
+ *   "prompt"   — handle exists but needs a permission click (call
+ *                reconnectClicked())
+ *   "none"     — no folder chosen yet
+ */
+export async function autoReconnect(): Promise<"synced" | "prompt" | "none"> {
+    if (state) return "synced";
+    const handle = await loadSavedHandle();
+    if (!handle) return "none";
+    try {
+        const perm = await handle.queryPermission({ mode: "readwrite" });
+        if (perm !== "granted") return "prompt";
+        await connect(handle);
+        return "synced";
+    } catch {
+        return "prompt";
+    }
+}
+
+/** User-gesture path: finish the reconnect after Chrome's permission prompt. */
+export async function reconnectClicked(handlers?: FolderSyncHandlers): Promise<boolean> {
+    const handle = await loadSavedHandle();
+    if (!handle) return false;
+    try {
+        if ((await handle.requestPermission({ mode: "readwrite" })) !== "granted") return false;
+        syncHandlers = handlers || null;
+        await connect(handle);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+export interface FolderSyncHandlers {
+    /** content of an existing script's file changed in VS Code */
+    onFileChanged(fileName: string, js: string): void;
+    /** a new .ts file appeared → create a script */
+    onFileAdded(fileName: string, js: string): void;
+    /** a .ts file was deleted → remove its script */
+    onFileRemoved(fileName: string): void;
+    /** exactly one file disappeared while another appeared → rename/move */
+    onRenamed(oldName: string, newName: string, js: string): void;
+}
+
+async function connect(dirHandle: any): Promise<void> {
     state = { dirHandle, known: new Map() };
+    await saveHandle(dirHandle);
+    await refreshKnown();
+    startPolling();
+}
+
+export async function openFolder(
+    getScripts: () => Promise<{ id: string; name: string; code: string }[]>,
+    handlers?: FolderSyncHandlers
+): Promise<void> {
+    const dirHandle = await (window as any).showDirectoryPicker({
+        mode: "readwrite",
+        startIn: "documents",
+        suggestedName: undefined,
+    } as any);
+    syncHandlers = handlers || null;
+
+    await connect(dirHandle);
 
     const scripts = await getScripts();
     const apiDts = await fetch(chrome.runtime.getURL(RES_API_DTS_URL)).then((r) => r.text());
@@ -56,7 +166,6 @@ export async function openFolder(getScripts: () => Promise<{ id: string; name: s
         await writeText(dirHandle, fileNameFor(s.id, s.name), s.code);
     }
     await refreshKnown();
-    startPolling();
 }
 
 /** File name for a script (script names are assumed unique). */
@@ -76,6 +185,7 @@ export function stopSync(): void {
     }
     state = null;
     lastWritten.clear();
+    void clearSavedHandle();
 }
 
 function startPolling(): void {
@@ -90,35 +200,88 @@ function startPolling(): void {
     }, POLL_MS);
 }
 
+export type FileSig = { lastModified: number; size: number };
+
+export interface FolderEvents {
+    changed: string[];
+    added: string[];
+    removed: string[];
+    /** one file vanished while one appeared in the same poll → rename/move */
+    rename: { oldName: string; newName: string } | null;
+}
+
+/** Pure diff between the previously seen file set and the current one. */
+export function computeEvents(prev: Map<string, FileSig>, seen: Map<string, FileSig>): FolderEvents {
+    const changed: string[] = [];
+    const added: string[] = [];
+    const removed: string[] = [];
+    for (const [name, sig] of seen) {
+        const p = prev.get(name);
+        if (!p) added.push(name);
+        else if (p.lastModified !== sig.lastModified || p.size !== sig.size) changed.push(name);
+    }
+    for (const name of prev.keys()) {
+        if (!seen.has(name)) removed.push(name);
+    }
+    const rename = added.length === 1 && removed.length === 1 ? { oldName: removed[0], newName: added[0] } : null;
+    return { changed, added, removed, rename };
+}
+
 async function pollOnce(): Promise<void> {
     if (!state) return;
     const dir = state.dirHandle;
-    const seen = new Map<string, { lastModified: number; size: number }>();
-    const changed: string[] = [];
+    const seen = new Map<string, FileSig>();
 
     for await (const entry of dir.values()) {
         if (entry.kind !== "file" || !entry.name.endsWith(".ts")) continue;
         const file = await entry.getFile();
-        const sig = { lastModified: file.lastModified, size: file.size };
-        seen.set(entry.name, sig);
-        const prev = state.known.get(entry.name);
-        if (!prev || prev.lastModified !== sig.lastModified || prev.size !== sig.size) {
-            changed.push(entry.name);
-        }
+        seen.set(entry.name, { lastModified: file.lastModified, size: file.size });
     }
+    const events = computeEvents(state.known, seen);
+    const { changed, added, removed, rename } = events;
     state.known = seen;
 
-    for (const fileName of changed) {
+    const read = async (fileName: string): Promise<string> => {
         const entry = await dir.getFileHandle(fileName);
-        const file = await entry.getFile();
-        const text = await file.text();
+        return await (await entry.getFile()).text();
+    };
+
+    for (const fileName of changed) {
+        if (rename && fileName === rename.oldName) continue;
+        const text = await read(fileName);
         // our own write-back: same content we pushed, nothing to import
         if (lastWritten.get(fileName) === text) {
             lastWritten.delete(fileName);
             continue;
         }
-        const js = transpile(text);
-        (window as any).__resFbOnFileChanged?.(fileName, js);
+        syncHandlers?.onFileChanged(fileName, transpile(text));
+    }
+
+    for (const fileName of added) {
+        if (rename) continue;
+        const text = await read(fileName);
+        // echo of our own write-back (script created from the manager)
+        if (lastWritten.get(fileName) === text) {
+            lastWritten.delete(fileName);
+            continue;
+        }
+        syncHandlers?.onFileAdded(fileName, transpile(text));
+    }
+
+    for (const fileName of removed) {
+        if (rename) continue;
+        // echo of our own deleteFile
+        if (lastWritten.delete(fileName)) continue;
+        syncHandlers?.onFileRemoved(fileName);
+    }
+
+    if (rename) {
+        const text = await read(rename.newName);
+        if (lastWritten.get(rename.newName) === text) {
+            lastWritten.delete(rename.newName);
+        } else {
+            syncHandlers?.onRenamed(rename.oldName, rename.newName, transpile(text));
+        }
     }
 }
 

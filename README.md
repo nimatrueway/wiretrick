@@ -43,12 +43,18 @@ The manager page embeds **Monaco** (the VS Code editor) with full TypeScript
 IntelliSense for the `res` API — completions, hover docs, and diagnostics work
 out of the box. Cmd/Ctrl+S saves and hot-applies the script.
 
-### Open in VS Code
+### Dedicated scripts folder
 
-Click **VS Code…**, pick a folder, and every script is written there as a `.ts`
-file along with `res-api.d.ts` and `jsconfig.json`. Edit in real VS Code with the
-same completions; on save the extension transpiles the file in-page and hot-reloads
-the engine — no manual re-import.
+Click **Folder…** and pick a folder (e.g. `~/ResScripts`) — that becomes your
+scripts home: every script is written there as a `.ts` file along with
+`res-api.d.ts` and `jsconfig.json`. Edit in VS Code (or any editor) with full
+TypeScript completions; saves hot-reload into the engine instantly.
+
+Sync is two-way and watches the folder for **creates, renames/moves and
+deletes** too: a new `.ts` file becomes a script, deleting a file removes its
+script, renaming a file renames the script. The folder choice is remembered —
+the manager reconnects automatically on open (one click to re-grant after a
+browser restart, per Chrome's File System Access rules).
 
 ## How body interception works (`res.modifyResponse`)
 
