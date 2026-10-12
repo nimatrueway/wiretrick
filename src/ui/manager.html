@@ -15,25 +15,30 @@
                     <button id="btn-import" title="Import scripts">Import</button>
                     <button id="btn-export" title="Export all scripts">Export</button>
                     <button id="btn-vscode" title="Sync scripts with a VS Code folder">VS Code…</button>
-                    <button id="btn-logs" title="Download debug logs for troubleshooting">⬇ Logs</button>
                 </div>
             </div>
             <ul id="script-list"></ul>
-            <div id="log-panel">
-                <div id="log-header">
-                    <span>Log</span>
-                    <button id="btn-clear-log">clear</button>
-                </div>
-                <div id="log-entries"></div>
-            </div>
         </aside>
+        <div id="split-v" title="Drag to resize"></div>
         <main id="editor-pane">
             <div id="editor-toolbar">
                 <input id="script-name" type="text" placeholder="Script name" disabled>
                 <span id="editor-status"></span>
                 <button id="btn-save" disabled>Save (⌘S)</button>
             </div>
-            <div id="monaco-host"></div>
+            <div id="editor-area">
+                <div id="monaco-host"></div>
+                <div id="split-h" title="Drag to resize"></div>
+                <div id="log-panel">
+                    <div id="log-header" title="Drag right to dock beside the editor, drag left for bottom">
+                        <span id="log-header-title">Log</span>
+                        <input id="log-find" type="text" placeholder="find…" title="Filter log lines (regex ok)">
+                        <button id="btn-clear-log" title="Clear the log panel">clear</button>
+                        <button id="btn-logs" title="Download the full debug log (engine + hook + page console)">⬇ download</button>
+                    </div>
+                    <div id="log-entries"></div>
+                </div>
+            </div>
         </main>
     </div>
 

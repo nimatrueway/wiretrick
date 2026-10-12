@@ -54,11 +54,32 @@ import { dlog } from "../shared/debugLog";
     }
 
     /** forward log entries to the background through the bridge */
-    function logUp(msg: string): void {
+    function logUp(msg: string, level: "info" | "warn" | "error" = "info"): void {
         dlog("hook", msg);
         try {
-            window.postMessage({ source: HOOK_SOURCE, kind: "log", msg }, window.location.origin);
+            window.postMessage({ source: HOOK_SOURCE, kind: "log", msg, level }, window.location.origin);
         } catch {}
+    }
+
+    // ---- capture the page console into the manager LOG panel ----
+    // skip our own [res:*] entries (already forwarded via logUp/dlog)
+    const CONSOLE_CAP = 500;
+    let consoleCaptured = 0;
+    const origConsole: Record<string, (...args: any[]) => void> = {};
+    function wrapConsole(level: "info" | "warn" | "error", method: string): void {
+        const orig = (console as any)[method];
+        origConsole[method] = orig;
+        (console as any)[method] = function (...args: any[]) {
+            orig.apply(console, args);
+            if (consoleCaptured >= CONSOLE_CAP) return;
+            const first = String(args[0] ?? "");
+            if (first.startsWith("[res:")) return; // ours — already relayed
+            consoleCaptured++;
+            try {
+                const msg = args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
+                window.postMessage({ source: HOOK_SOURCE, kind: "log", msg: `page.console: ${msg.slice(0, 300)}`, level }, window.location.origin);
+            } catch {}
+        };
     }
 
     function acceptBundle(bundle: any): void {
@@ -73,6 +94,16 @@ import { dlog } from "../shared/debugLog";
         patchFetch();
         patchXHR();
         logUp(`patches installed (${compiled.filter((c) => c.script.handlers.modifyResponse).length} modify, ${compiled.filter((c) => c.script.handlers.replaceResponse).length} replace)`);
+
+        // page console → manager panel (installed after the first bundle;
+        // wrap only once)
+        if (!(w as any).__resConsoleWrapped) {
+            (w as any).__resConsoleWrapped = true;
+            wrapConsole("info", "log");
+            wrapConsole("info", "info");
+            wrapConsole("warn", "warn");
+            wrapConsole("error", "error");
+        }
     }
 
     window.addEventListener("message", (event: MessageEvent) => {

@@ -43,6 +43,13 @@ export function log(tabId: number, message: string, level: LogEntry["level"] = "
     }
 }
 
+/** Stream an arbitrary entry (e.g. debug log mirror) to the UI ports. */
+export function broadcastEntry(entry: LogEntry): void {
+    for (const port of uiPorts) {
+        port.postMessage({ type: "log", entry });
+    }
+}
+
 export function clearTab(tabId: number): void {
     tabLogs.delete(tabId);
 }

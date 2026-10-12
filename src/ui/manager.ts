@@ -18,7 +18,7 @@ const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => document.quer
 const $input = (sel: string): HTMLInputElement => document.querySelector(sel) as HTMLInputElement;
 
 // ---- helpers ----
-function send<T = any>(msg: any): Promise<T> {
+function sendRaw<T = any>(msg: any): Promise<T> {
     return new Promise((resolve, reject) => {
         chrome.runtime.sendMessage(msg, (resp: T) => {
             const err = (chrome.runtime as any).lastError;
@@ -153,15 +153,247 @@ function connectLogs(): void {
     });
 }
 
+let logFindRe: RegExp | null = null;
+
 function appendLog(entry: any): void {
     const box = $("#log-entries");
     const line = document.createElement("div");
     line.className = "log-line " + entry.level;
+    line.dataset.text = entry.message;
     const time = new Date(entry.at).toLocaleTimeString();
-    line.textContent = `[${time}] ${entry.message}`;
+    const text = `[${time}] ${entry.message}`;
+
+    if (logFindRe) {
+        line.innerHTML = "";
+        const match = text.match(logFindRe);
+        if (!match) {
+            line.style.display = "none";
+        } else {
+            // highlight the first match
+            const idx = text.indexOf(match[0]);
+            if (idx >= 0) {
+                line.append(
+                    document.createTextNode(text.slice(0, idx)),
+                    Object.assign(document.createElement("mark"), { textContent: match[0] }),
+                    document.createTextNode(text.slice(idx + match[0].length))
+                );
+            } else {
+                line.textContent = text;
+            }
+        }
+    } else {
+        line.textContent = text;
+    }
+
     box.appendChild(line);
-    while (box.children.length > 300) box.removeChild(box.firstChild as Node);
+    while (box.children.length > 500) box.removeChild(box.firstChild as Node);
     box.scrollTop = box.scrollHeight;
+}
+
+function makeLogFind(): void {
+    const input = $("#log-find") as HTMLInputElement;
+    input.addEventListener("input", () => {
+        const q = input.value.trim();
+        try {
+            logFindRe = q ? new RegExp(q, "i") : null;
+            input.style.borderColor = "";
+        } catch {
+            // fall back to plain substring on invalid regex
+            logFindRe = q ? new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") : null;
+            input.style.borderColor = "";
+        }
+        // re-apply filtering to existing lines
+        const box = $("#log-entries");
+        for (const line of Array.from(box.children) as HTMLElement[]) {
+            const text = line.dataset.text || line.textContent || "";
+            if (!logFindRe) {
+                line.style.display = "";
+                if (!line.textContent?.startsWith("[")) line.textContent = text;
+                continue;
+            }
+            const m = text.match(logFindRe);
+            const time = text.split("] ")[0] + "]";
+            if (!m) {
+                line.style.display = "none";
+            } else {
+                line.style.display = "";
+                line.innerHTML = "";
+                const idx = text.indexOf(m[0]);
+                line.append(
+                    document.createTextNode(text.slice(0, idx)),
+                    Object.assign(document.createElement("mark"), { textContent: m[0] }),
+                    document.createTextNode(text.slice(idx + m[0].length))
+                );
+                void time;
+            }
+        }
+    });
+}
+
+// ---- survive extension reloads ----
+// after a reload the old page's chrome bindings die ("Extension context
+// invalidated") — detect it and reload the tab, which reconnects to the
+// freshly restarted extension with all state re-fetched.
+let reloading = false;
+function startKeepAlive(): void {
+    setInterval(() => {
+        if (reloading) return;
+        try {
+            chrome.runtime.getPlatformInfo(() => {
+                if (chrome.runtime.lastError || !(chrome as any).runtime?.id) {
+                    reloading = true;
+                    status("extension reloaded — reconnecting…");
+                    location.reload();
+                }
+            });
+        } catch {
+            reloading = true;
+            location.reload();
+        }
+    }, 2000);
+}
+
+// also catch invalidated-context errors from any message send
+function send<T = any>(msg: any): Promise<T> {
+    return sendRaw<T>(msg).catch((e: any) => {
+        if (String(e).includes("context invalidated") && !reloading) {
+            reloading = true;
+            status("extension reloaded — reconnecting…");
+            location.reload();
+        }
+        throw e;
+    });
+}
+
+// ---- movable panels ----
+interface PanelLayout {
+    sidebarW?: number;
+    logH?: number;
+    logDock?: "bottom" | "right";
+}
+const LAYOUT_KEY = "resPanelLayout";
+
+function loadLayout(): PanelLayout {
+    try {
+        return JSON.parse(localStorage.getItem(LAYOUT_KEY) || "{}");
+    } catch {
+        return {};
+    }
+}
+
+function saveLayout(l: PanelLayout): void {
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify(l));
+}
+
+function applyLayout(): void {
+    const l = loadLayout();
+    if (l.sidebarW) $("#sidebar").style.width = `${l.sidebarW}px`;
+    if (l.logH) $("#log-panel").style.height = `${l.logH}px`;
+    if (l.logDock === "right") {
+        document.getElementById("app")?.classList.add("log-right");
+        $("#editor-area")?.appendChild($("#log-panel").parentElement === $("#editor-area") ? $("#log-panel") : $("#log-panel"));
+    }
+}
+
+function makeSplitV(): void {
+    const handle = $("#split-v");
+    handle.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        handle.classList.add("dragging");
+        const move = (ev: MouseEvent) => {
+            const w = Math.min(620, Math.max(200, ev.clientX));
+            $("#sidebar").style.width = `${w}px`;
+        };
+        const up = () => {
+            handle.classList.remove("dragging");
+            document.removeEventListener("mousemove", move);
+            document.removeEventListener("mouseup", up);
+            const l = loadLayout();
+            l.sidebarW = $("#sidebar").offsetWidth;
+            saveLayout(l);
+        };
+        document.addEventListener("mousemove", move);
+        document.addEventListener("mouseup", up);
+    });
+}
+
+function makeSplitH(): void {
+    const handle = $("#split-h");
+    handle.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        if (document.getElementById("app")?.classList.contains("log-right")) {
+            // right-dock mode: adjust log width instead
+            handle.classList.add("dragging");
+            const move = (ev: MouseEvent) => {
+                const w = Math.min(620, Math.max(200, window.innerWidth - ev.clientX));
+                $("#log-panel").style.width = `${w}px`;
+            };
+            const up = () => {
+                handle.classList.remove("dragging");
+                document.removeEventListener("mousemove", move);
+                document.removeEventListener("mouseup", up);
+                const l = loadLayout();
+                l.logH = $("#log-panel").offsetHeight;
+                saveLayout(l);
+            };
+            document.addEventListener("mousemove", move);
+            document.addEventListener("mouseup", up);
+            return;
+        }
+        handle.classList.add("dragging");
+        const startY = e.clientY;
+        const startH = $("#log-panel").offsetHeight;
+        const move = (ev: MouseEvent) => {
+            const h = Math.min(window.innerHeight - 220, Math.max(80, startH + (startY - ev.clientY)));
+            $("#log-panel").style.height = `${h}px`;
+        };
+        const up = () => {
+            handle.classList.remove("dragging");
+            document.removeEventListener("mousemove", move);
+            document.removeEventListener("mouseup", up);
+            const l = loadLayout();
+            l.logH = $("#log-panel").offsetHeight;
+            saveLayout(l);
+        };
+        document.addEventListener("mousemove", move);
+        document.addEventListener("mouseup", up);
+    });
+}
+
+function makeLogMovable(): void {
+    const header = $("#log-header");
+    header.addEventListener("mousedown", (e) => {
+        // don't start a drag from the find input or the clear button —
+        // preventDefault would block focusing the input
+        const tag = (e.target as HTMLElement).tagName;
+        if (tag === "BUTTON" || tag === "INPUT") return;
+        e.preventDefault();
+        const startX = e.clientX;
+        const app = document.getElementById("app");
+        const wasRight = app?.classList.contains("log-right");
+        const move = (ev: MouseEvent) => {
+            const dx = ev.clientX - startX;
+            if (!wasRight && dx > 120) {
+                app?.classList.add("log-right");
+                app?.appendChild($("#log-panel")); // move into the app row (right of editor)
+                const l = loadLayout();
+                l.logDock = "right";
+                saveLayout(l);
+            } else if (wasRight && dx < -120) {
+                app?.classList.remove("log-right");
+                $("#editor-area")?.appendChild($("#log-panel")); // back under the editor
+                const l = loadLayout();
+                l.logDock = "bottom";
+                saveLayout(l);
+            }
+        };
+        const up = () => {
+            document.removeEventListener("mousemove", move);
+            document.removeEventListener("mouseup", up);
+        };
+        document.addEventListener("mousemove", move);
+        document.addEventListener("mouseup", up);
+    });
 }
 
 // ---- wiring ----
@@ -279,6 +511,22 @@ async function main(): Promise<void> {
             await refresh();
         };
         input.click();
+    });
+
+    applyLayout();
+    makeSplitV();
+    makeSplitH();
+    makeLogMovable();
+    makeLogFind();
+    startKeepAlive();
+
+    // remember the manager is open → the background reopens it after an
+    // extension reload (the renderer itself cannot survive)
+    chrome.storage.local.set({ resManagerOpen: true });
+    window.addEventListener("beforeunload", () => {
+        // only clear when the user actually closed the tab; a killed
+        // renderer (extension reload) skips beforeunload entirely
+        chrome.storage.local.set({ resManagerOpen: false });
     });
 
     // ensure the Tier-B proxy service worker is active

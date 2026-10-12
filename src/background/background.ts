@@ -5,9 +5,9 @@ import { WebRequestStrategy } from "./engine/strategies/webRequestStrategy";
 import { ChromeBodyStrategy } from "./engine/strategies/chromeBodyStrategy";
 import { CdpStrategy } from "./engine/strategies/cdpStrategy";
 import { createPipeline } from "./engine/pipeline";
-import { addUiPort, clearTab } from "./engine/logs";
+import { addUiPort, clearTab, broadcastEntry } from "./engine/logs";
 import { onScriptsChanged, listScripts } from "./engine/scriptStore";
-import { dlog, getDebugBuffer, pushEntry, clearDebugBuffer } from "../shared/debugLog";
+import { dlog, getDebugBuffer, pushEntry, clearDebugBuffer, setSink } from "../shared/debugLog";
 import { badgeSetText, badgeSetColor, tabsQueryAll, tabsGet } from "../shared/chromeApi";
 import { matchAny } from "../shared/matcher";
 
@@ -16,6 +16,11 @@ const IS_FIREFOX =
     typeof (globalThis as any).browser.webRequest?.filterResponseData === "function";
 
 dlog("bg", "background starting", { firefox: (globalThis as any).browser !== undefined });
+
+// mirror every debug entry into the manager's LOG panel
+setSink((e) =>
+    broadcastEntry({ tabId: -1, scriptId: null, level: e.level || "info", message: `[${e.src}] ${e.msg}`, at: e.at })
+);
 
 const webRequestStrategy = new WebRequestStrategy();
 const chromeBody = new ChromeBodyStrategy();
@@ -34,7 +39,7 @@ chrome.runtime.onConnect.addListener((port) => {
 // ---- debug log relay: hook/sw/push entries + download support ----
 chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
     if (msg && msg.type === "debugLog" && msg.entry) {
-        pushEntry(msg.entry);
+        pushEntry(msg.entry); // also mirrors to the UI via the sink
         sendResponse({});
         return false;
     }
@@ -71,6 +76,19 @@ if (chrome.debugger) {
 
 // ---- tab lifecycle logging ----
 chrome.tabs.onRemoved.addListener((tabId) => clearTab(tabId));
+
+// ---- reopen the manager after an extension reload (Chrome kills the
+// old page's renderer; the fresh instance restores it) ----
+chrome.runtime.onInstalled.addListener(() => {
+    chrome.storage.local.get("resManagerOpen", (d) => {
+        if (!d || !d.resManagerOpen) return;
+        chrome.tabs.query({}, (tabs) => {
+            if (tabs.some((t) => t.url && t.url.includes("manager.html"))) return;
+            dlog("bg", "extension reloaded with manager open → reopening");
+            chrome.windows.create({ url: chrome.runtime.getURL("manager.html"), width: 1100, height: 750 });
+        });
+    });
+});
 
 // ---- badge: per-tab count of enabled scripts matching the tab URL ----
 async function countMatching(url: string | undefined): Promise<number> {
