@@ -6,6 +6,7 @@
  */
 import { matchAny } from "../../../shared/matcher";
 import { compileScript, type HandlerFn } from "../../../shared/compile";
+import { storageGet, storageSet } from "../../../shared/chromeApi";
 import type { Script } from "../scriptStore";
 import { log } from "../logs";
 import { dlog } from "../../../shared/debugLog";
@@ -18,10 +19,18 @@ interface CdpScript {
     transform: HandlerFn;
 }
 
+const LEARN_KEY = "resCdpLearn";
+const XHR_TYPES = new Set(["xmlhttprequest", "websocket"]);
+const MIN_OBSERVATIONS = 3;
+
 export class CdpStrategy {
     /** tabId → attached */
     private attached = new Set<number>();
     private scripts: CdpScript[] = [];
+    /** scriptId → resource types it has matched (banner-minimization learning) */
+    private learn: { [scriptId: string]: { [type: string]: number } } = {};
+    /** tabId → timer for idle auto-detach */
+    private idleTimers = new Map<number, ReturnType<typeof setTimeout>>();
 
     reload(scripts: Script[]): void {
         this.scripts = [];
@@ -48,13 +57,70 @@ export class CdpStrategy {
     /** Injected by background: are hook-claimed URLs skipped? */
     isClaimed: (url: string) => boolean = () => false;
 
+    /** Learn what resource types each script actually matches. */
+    noteResourceType(scriptIds: string[], type: string): void {
+        let changed = false;
+        for (const id of scriptIds) {
+            const entry = this.learn[id] || (this.learn[id] = {});
+            entry[type] = (entry[type] || 0) + 1;
+            changed = true;
+        }
+        if (changed) void storageSet({ [LEARN_KEY]: this.learn });
+    }
+
     /**
-     * Pre-attach whenever any body script exists: subresources match
-     * request urls, not the page url, so page-url gating misses them.
-     * The debugger stays attached; pauses are cheap and skipped quickly.
+     * A script that has only ever matched fetch/XHR resources is handled
+     * banner-free by the page hook — don't let it trigger the debugger.
      */
-    private shouldAttach(_url: string): boolean {
-        return this.scripts.length > 0;
+    private isXhrOnly(scriptId: string): boolean {
+        const entry = this.learn[scriptId];
+        if (!entry) return false;
+        const total = Object.values(entry).reduce((a, b) => a + b, 0);
+        if (total < MIN_OBSERVATIONS) return false;
+        return Object.keys(entry).every((t) => XHR_TYPES.has(t));
+    }
+
+    /** Scripts matching url that still legitimately need the debugger. */
+    cdpRelevantScripts(url: string): CdpScript[] {
+        return this.matchingScripts(url).filter((s) => !this.isXhrOnly(s.scriptId));
+    }
+
+    /** Forget per-tab state on tab close. */
+    forgetTab(tabId: number): void {
+        const t = this.idleTimers.get(tabId);
+        if (t) clearTimeout(t);
+        this.idleTimers.delete(tabId);
+    }
+
+    /** Detach when the page settled — the banner disappears while the user browses. */
+    scheduleIdleDetach(tabId: number, graceMs = 8000): void {
+        const prev = this.idleTimers.get(tabId);
+        if (prev) clearTimeout(prev);
+        const t = setTimeout(() => {
+            this.idleTimers.delete(tabId);
+            if (this.attached.has(tabId)) {
+                void this.detach(tabId);
+                dlog("cdp", "idle detach (banner cleared)", { tabId });
+            }
+        }, graceMs);
+        this.idleTimers.set(tabId, t);
+    }
+
+    /** Cancel a scheduled idle detach (a new body transform came in). */
+    cancelIdleDetach(tabId: number): void {
+        const t = this.idleTimers.get(tabId);
+        if (t) {
+            clearTimeout(t);
+            this.idleTimers.delete(tabId);
+        }
+    }
+
+    /**
+     * Pre-attach only when a script that plausibly needs the debugger
+     * matches this url (not ones learned to be hook-only).
+     */
+    private shouldAttach(url: string): boolean {
+        return this.cdpRelevantScripts(url).length > 0;
     }
 
     /** Wire up a tab when a CDP-strategy script matches it. */

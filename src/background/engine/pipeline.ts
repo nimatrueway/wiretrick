@@ -38,14 +38,22 @@ export function createPipeline(
     chrome.tabs.onUpdated.addListener((tabId, info) => {
         if (info.url) {
             tabUrls.set(tabId, info.url);
-            // pre-attach CDP when a body script matches this tab's page URL,
-            // so the debugger is ready before the page's subresource requests
-            void cdp.ensureAttached(tabId, info.url);
+            // pre-attach only when a CDP-relevant (non hook-only) body
+            // script matches the page URL, and schedule an idle detach so
+            // the banner disappears once the page settles
+            if (cdp.cdpRelevantScripts(info.url).length > 0) {
+                void cdp.ensureAttached(tabId, info.url);
+                cdp.scheduleIdleDetach(tabId);
+            }
+        }
+        if (info.status === "complete") {
+            cdp.scheduleIdleDetach(tabId);
         }
     });
     chrome.tabs.onRemoved.addListener((tabId) => {
         tabUrls.delete(tabId);
         chromeBody.forgetTab(tabId);
+        cdp.forgetTab(tabId);
     });
 
     function tabUrlFor(tabId: number, requestUrl: string): string | null {
@@ -110,6 +118,12 @@ export function createPipeline(
             }
             case "needsCdp": {
                 dlog("pipeline", "needsCdp → attach", { url: details.url, tabId: details.tabId });
+                // banner minimization: this tab is actively using the debugger
+                cdp.cancelIdleDetach(details.tabId);
+                // learn which resource types each matching script hits, so
+                // hook-covered (xhr-only) scripts stop triggering attaches
+                const matchedScripts = chromeBody.matchingBodyScripts(details.url).map((x) => x.scriptId);
+                if (matchedScripts.length) cdp.noteResourceType(matchedScripts, details.type);
                 // gate on the REQUEST url — it matched a body script
                 void cdp.ensureAttached(details.tabId, details.url);
                 return {};
@@ -236,7 +250,7 @@ export function createPipeline(
         dlog("pipeline", "reload", { total: scripts.length, enabled: scripts.filter((x) => x.enabled).map((x) => x.meta.name) });
         webRequestStrategy.reload(scripts);
         chromeBody.reload(scripts);
-        cdp.reload(scripts);
+        void cdp.reload(scripts);
     }
 
     const off = onScriptsChanged(() => void reload());
