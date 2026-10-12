@@ -66,6 +66,8 @@ const server = http.createServer((req: http.IncomingMessage, res: http.ServerRes
         return send("text/html", `<html><body><script>setTimeout(()=>{fetch('/api').then(r=>r.json()).then(j=>{document.body.innerHTML='RESULT:'+j.value;});},400)</script></body></html>`);
     if (url.pathname === "/page-xhr")
         return send("text/html", `<html><body><script>setTimeout(()=>{const x=new XMLHttpRequest();x.open('GET','/api');x.onload=()=>{document.body.innerHTML='RESULT:'+JSON.parse(x.responseText).value;};x.send();},700)</script></body></html>`);
+    if (url.pathname === "/page-title")
+        return send("text/html", `<html><body><h1>SITE-TITLE-PLACEHOLDER</h1></body></html>`);
     if (url.pathname === "/page-with-script")
         return send("text/html", `<html><body><script>setTimeout(()=>{const s=document.createElement('script');s.src='/app.js';s.onload=()=>{setTimeout(()=>{fetch('/report',{method:'POST',body:window.__marker});},200);};document.head.appendChild(s);},900)</script></body></html>`);
     if (url.pathname === "/page-img")
@@ -131,6 +133,7 @@ const SCRIPTS: Record<string, SampleScript> = {
     modifyTierA: { id: "s_modifya", name: "modify response (hook tier)", code: `// ==ResScript==\n// @name       modify tier A\n// @match      ${ORIGIN}/api\n// ==/ResScript==\nres.modifyResponse((ctx, body) => body.replace("original-value", "TIERA-VALUE"));` },
     modifyCdp: { id: "s_modifycdp", name: "modify response (cdp tier)", code: `// ==ResScript==\n// @name       modify cdp\n// @match      ${ORIGIN}/app.js\n// ==/ResScript==\nres.modifyResponse((ctx, body) => body.replace("ORIGINAL-MARKER", "CDP-MARKER"));` },
     badgeProbe: { id: "s_badge", name: "badge probe", code: `// ==ResScript==\n// @name       badge probe\n// @match      ${ORIGIN}/page-fetch*\n// ==/ResScript==\nres.onRequest(() => {});` },
+    modifyMain: { id: "s_modifymain", name: "modify main frame html", code: `// ==ResScript==\n// @name       modify main frame\n// @match      ${ORIGIN}/page-title\n// ==/ResScript==\nres.modifyResponse((ctx, body) => (typeof body === "string" ? body : new TextDecoder().decode(body)).replace("SITE-TITLE-PLACEHOLDER", "CDP-HTML-MARKER"));` },
 };
 for (const s of Object.values(SCRIPTS)) await saveScript(s.id, s.code, s.name);
 
@@ -249,6 +252,16 @@ if (HEADLESS) {
     await p9r.close();
     check("modifyResponse: <script src> (CDP tier)", r9 === "CDP-MARKER", `marker=${r9}`);
 }
+
+// ---------- 9b. modifyResponse on the main frame HTML (CDP tier) ----------
+// first navigation may race the attach; the second one is the stable case
+const p9m = await newPage("/page-title");
+await newPage("/page-fetch");
+await p9m.reload({ waitUntil: "domcontentloaded" });
+await p9m.waitForTimeout(1500);
+const r9m = await p9m.evaluate(() => document.querySelector("h1")?.textContent);
+check("modifyResponse: main frame HTML (CDP tier)", r9m === "CDP-HTML-MARKER", `h1=${r9m}`);
+await p9m.close();
 
 // ---------- 10. disable a script → behavior stops ----------
 await setEnabled("s_modifya", false);

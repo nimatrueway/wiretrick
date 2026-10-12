@@ -121,17 +121,10 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
             return { kind: "needsCdp" };
         }
 
-        if (details.type === "main_frame") {
-            // Main-frame HTML: a proxy redirect would clobber the address bar;
-            // leave to CDP (opt-in) or the data-URL static-replace path.
-            return { kind: "allow" };
-        }
-
-        // Non-hookable resource (script tag, image, css, main frame, ...):
-        // MV2 extension service workers do not intercept page-initiated loads,
-        // so the proxy tier cannot serve them — let the request proceed and
-        // have the CDP strategy transform the response. Handled by
-        // needsCdp in the pipeline + pre-attach on navigation.
+        // Everything the hook cannot see (main frame HTML, script tags,
+        // images, css, fonts, ...) goes through the CDP strategy: let the
+        // request proceed and transform the response there. The attach is
+        // sticky per tab, so only the first navigation races the attach.
         log(details.tabId, `[CDP] body transform via debugger for ${shortUrl(details.url)}`, "info");
         return { kind: "needsCdp" };
     }
