@@ -81,8 +81,9 @@ const profile = mkdtempSync(path.join(tmpdir(), "reso-e2e-"));
 const HEADLESS = process.env.E2E_HEADLESS !== "0";
 const chromeProc = spawn(CHROMIUM, [
     // new headless supports extensions (MV2 APIs included) and never
-    // steals focus; set E2E_HEADLESS=0 to watch it run in a window
-    ...(HEADLESS ? ["--headless=new"] : []),
+    // steals focus; set E2E_HEADLESS=0 for headed runs — the window is
+    // positioned offscreen so it still doesn't take over the screen
+    ...(HEADLESS ? ["--headless=new"] : ["--window-position=-32000,-32000", "--window-size=1400,900"]),
     `--user-data-dir=${profile}`,
     `--load-extension=${EXT_ROOT}`,
     "--remote-debugging-port=0", // playwright resolves the actual port via ws

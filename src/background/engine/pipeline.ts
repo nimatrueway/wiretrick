@@ -45,6 +45,7 @@ export function createPipeline(
     });
     chrome.tabs.onRemoved.addListener((tabId) => {
         tabUrls.delete(tabId);
+        chromeBody.forgetTab(tabId);
     });
 
     function tabUrlFor(tabId: number, requestUrl: string): string | null {

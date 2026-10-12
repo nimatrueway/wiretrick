@@ -20,6 +20,7 @@ import { compileScript, serializeHandlers } from "../../../shared/compile";
 import type { BodyScriptInfo, HookDisposition, InterceptionStrategy, WebRequestDetailsLike } from "./types";
 import type { Script } from "../scriptStore";
 import { log } from "../logs";
+import { dlog } from "../../../shared/debugLog";
 
 const PROXY_PATH = "__resproxy?p=";
 
@@ -36,6 +37,8 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
 
     private bodyScripts: BodyScriptEntry[] = [];
     private claimedUrls = new Map<string, number>();
+    /** tabs where the page hook confirmed its bundle arrived */
+    private hookReadyTabs = new Set<number>();
 
     reload(scripts: Script[]): void {
         this.bodyScripts = [];
@@ -72,6 +75,15 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
     isClaimed(url: string): boolean {
         const t = this.claimedUrls.get(url);
         return t !== undefined && Date.now() - t < 10_000;
+    }
+
+    /** Called after the background served a hook bundle to a tab. */
+    markHookReady(tabId: number): void {
+        this.hookReadyTabs.add(tabId);
+    }
+
+    forgetTab(tabId: number): void {
+        this.hookReadyTabs.delete(tabId);
     }
 
     matchingBodyScripts(url: string): BodyScriptEntry[] {
@@ -115,9 +127,14 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
 
         if (details.type === "xmlhttprequest" || details.type === "websocket") {
             // The hook owns page-initiated traffic and claims every fetch it
-            // sees. An UNCLAIMED request means the hook wasn't installed yet
-            // (cold start) — fall back to CDP. Claims are what prevent
-            // double-transformation.
+            // sees. The claim races this decision (claim arrives a few ms
+            // after onBeforeRequest), so instead of speculatively attaching
+            // the debugger we only fall back to CDP when the hook never
+            // confirmed installation in this tab (cold start).
+            if (this.hookReadyTabs.has(details.tabId)) {
+                return { kind: "allow" };
+            }
+            dlog("cdp", "hook not ready → CDP fallback", { url: shortUrl(details.url), tabId: details.tabId });
             return { kind: "needsCdp" };
         }
 
@@ -140,6 +157,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
     dispose(): void {
         this.bodyScripts = [];
         this.claimedUrls.clear();
+        this.hookReadyTabs.clear();
     }
 }
 
