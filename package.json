@@ -1,0 +1,22 @@
+{
+  "name": "resource-override",
+  "version": "2.0.0",
+  "description": "Script-based request/response override extension (TypeScript rewrite)",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.280",
+    "rolldown": "^1.0.0-beta.3",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  },
+  "dependencies": {
+    "monaco-editor": "^0.52.0"
+  }
+}

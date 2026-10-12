@@ -1,30 +1,48 @@
 {
-  "name": "Resource Override",
-  "version": "1.3.2",
-  "description": "An extension to help you gain full control of any website by redirecting traffic, replacing, editing, or inserting new content.",
-  "icons": {
-    "16": "icons/icon-16x16.png",
-    "48": "icons/icon-48x48.png",
-    "128": "icons/icon-128x128.png"
-  },
-  "browser_action": {
-    "default_icon": {
-      "16": "icons/icon-16x16.png"
+    "name": "ResScript Override",
+    "version": "2.0.0",
+    "description": "Script-based request and response override: write TypeScript-style scripts that redirect, modify headers, or transform response bodies.",
+    "icons": {
+        "16": "icons/icon-16x16.png",
+        "48": "icons/icon-48x48.png",
+        "128": "icons/icon-128x128.png"
+    },
+    "browser_action": {
+        "default_title": "ResScript Manager",
+        "default_icon": {
+            "16": "icons/icon-16x16.png"
+        }
+    },
+    "options_ui": {
+        "page": "manager.html",
+        "open_in_tab": true
+    },
+    "background": {
+        "page": "background.html"
+    },
+    "content_scripts": [
+        {
+            "matches": ["*://*/*"],
+            "js": ["hook.js"],
+            "all_frames": true,
+            "run_at": "document_start",
+            "world": "MAIN"
+        }
+    ],
+    "permissions": [
+        "webRequest",
+        "webRequestBlocking",
+        "storage",
+        "unlimitedStorage",
+        "tabs",
+        "debugger",
+        "<all_urls>"
+    ],
+    "web_accessible_resources": ["hook.js"],
+    "manifest_version": 2,
+    "browser_specific_settings": {
+        "gecko": {
+            "strict_min_version": "115.0"
+        }
     }
-  },
-  "devtools_page": "src/ui/devtools.html",
-  "options_ui": {
-    "page": "src/ui/devtoolstab.html"
-  },
-  "background": {
-    "page": "src/background/background.html"
-  },
-  "content_scripts": [{
-      "matches" : ["*://*/*"],
-      "js": ["src/inject/scriptInjector.js"],
-      "all_frames": true,
-      "run_at": "document_start"
-  }],
-  "permissions": ["webRequest", "webRequestBlocking", "<all_urls>", "tabs"],
-  "manifest_version": 2
 }

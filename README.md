@@ -1,34 +1,84 @@
-# Resource Override
+# ResScript Override (v2 — TypeScript rewrite)
 
-## !!! Development on RO has stopped indefinitely !!!
+A ground-up TypeScript rewrite of [Resource Override](https://github.com/kylepaulsen/ResourceOverride).
+Instead of rule lists, the entire interface is a **script editor**: you write small
+scripts (Violentmonkey/Tampermonkey style) that declare which URLs they activate on
+and what they do — redirect requests, modify request/response headers, transform
+response bodies, or replace them entirely. Each script has an enable/disable toggle.
 
-If you still need to override stuff - see how chrome can override content natively: https://www.youtube.com/watch?v=KxjGYcHZ_uI
+## Writing scripts
 
-You can try to use my half baked [MV3 branch here](https://github.com/kylepaulsen/ResourceOverride/tree/mv3), but it is untested and I won't be supporting it.
+```ts
+// ==ResScript==
+// @name       Mock /api/user
+// @match      *://app.example.com/api/user*
+// @phase      request,response
+// ==/ResScript==
 
-I don't plan to work on RO anymore so it's very unlikly this will ever be
-finished. I'm not the biggest fan of what MV3 is forcing upon
-people, so I don't have very much motivation to finish this.
-Additionally, most modern web development doesn't really need/work
-with an extension like this, and even if there are use cases,
-Chrome supports overriding content natively within their debug
-tools: https://www.youtube.com/watch?v=KxjGYcHZ_uI
+// Redirect / cancel / request headers (synchronous):
+res.onRequest((ctx) => {
+    // return { redirect: "https://myserver/user.json" };
+    // return { cancel: true };
+    return { headers: { set: { "x-debug": "1" } } };
+});
 
-Anyway, I apologize if this is disappointing news. You are welcome
-to build the extension yourself or use the source code in other
-ways, as it is under the MIT license. Maybe someday I will really
-wish I finished this and have a bad need for it - but until that
-day, this will be my last commit.
+// Response headers:
+res.onResponseHeaders((ctx) => {
+    return { headers: { set: { "access-control-allow-origin": "*" } } };
+});
 
-Thanks everyone for using RO.
+// Replace the whole body:
+// res.replaceResponse(() => JSON.stringify({ mocked: true }));
 
-I wish you the best.
+// Stream-modify the body:
+res.modifyResponse((ctx, body) => body.replace('"role":"user"', '"role":"admin"'));
+```
 
-### Old Readme text:
+Supported metadata: `@name`, `@match` (repeatable), `@include`, `@phase`
+(`request`, `response`), `@strategy` (`auto` | `hook` | `proxy` | `cdp` | `webrequest`).
 
-Resource Override is an extension to help you gain full control of any website by redirecting traffic, replacing, editing, or inserting new content.
+## Editor
 
-[Get the chrome extension here](https://chrome.google.com/webstore/detail/resource-override/pkoacgokdfckfpndoffpifphamojphii).
+The manager page embeds **Monaco** (the VS Code editor) with full TypeScript
+IntelliSense for the `res` API — completions, hover docs, and diagnostics work
+out of the box. Cmd/Ctrl+S saves and hot-applies the script.
 
-### Now on firefox!
-[Get the FireFox extension here](https://addons.mozilla.org/en-US/firefox/addon/resourceoverride/)
+### Open in VS Code
+
+Click **VS Code…**, pick a folder, and every script is written there as a `.ts`
+file along with `res-api.d.ts` and `jsconfig.json`. Edit in real VS Code with the
+same completions; on save the extension transpiles the file in-page and hot-reloads
+the engine — no manual re-import.
+
+## How body interception works (`res.modifyResponse`)
+
+- **Firefox** — network-level via `webRequest.filterResponseData`. Nothing else needed.
+- **Chrome** — `webRequest` cannot touch bodies there, so three banner-free-first tiers:
+  1. **Hook** — a MAIN-world content script overrides `fetch`/`XMLHttpRequest` and
+     streams page-initiated responses through your transform (covers most traffic).
+  2. **Proxy** — other resources (scripts, CSS, images, fonts) are redirected to an
+     extension service worker that fetches the original, transforms it, and serves it
+     with the right Content-Type.
+  3. **CDP (opt-in)** — `@strategy cdp` uses `chrome.debugger` + Fetch domain for
+     main-frame HTML and anything the first two tiers cannot see. Shows the
+     "debugging" banner only while active.
+
+## MV3 readiness
+
+All browser-specific behavior lives behind one `InterceptionStrategy` interface
+(`src/background/engine/strategies/`). Migrating to MV3 later means: Tier A is
+unchanged, Tier B swaps the webRequest redirect for `declarativeNetRequest`, Tier C
+is unchanged — the pipeline, runtime, and editor don't move.
+
+## Development
+
+```bash
+npm install
+npm run build        # bundle to dist/
+npm run watch        # rebuild on change
+npm test             # vitest — matcher (ported), metaParser, engine pipeline
+npm run typecheck
+```
+
+Load the extension from `dist/` ("Load unpacked", MV2; requires Chrome 111+ for the
+MAIN-world content script, or any recent Firefox).

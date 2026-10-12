@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>ResScript Manager</title>
+    <link rel="stylesheet" href="ui.css">
+</head>
+<body>
+    <div id="app">
+        <aside id="sidebar">
+            <div id="brand">
+                <h1>ResScript</h1>
+                <div id="toolbar">
+                    <button id="btn-new" title="New script">+ New</button>
+                    <button id="btn-import" title="Import scripts">Import</button>
+                    <button id="btn-export" title="Export all scripts">Export</button>
+                    <button id="btn-vscode" title="Sync scripts with a VS Code folder">VS Code…</button>
+                </div>
+            </div>
+            <ul id="script-list"></ul>
+            <div id="log-panel">
+                <div id="log-header">
+                    <span>Log</span>
+                    <button id="btn-clear-log">clear</button>
+                </div>
+                <div id="log-entries"></div>
+            </div>
+        </aside>
+        <main id="editor-pane">
+            <div id="editor-toolbar">
+                <input id="script-name" type="text" placeholder="Script name" disabled>
+                <span id="editor-status"></span>
+                <button id="btn-save" disabled>Save (⌘S)</button>
+            </div>
+            <div id="monaco-host"></div>
+        </main>
+    </div>
+
+    <script src="lib/typescript.js"></script>
+    <script src="lib/monaco-loader.js"></script>
+    <script src="manager.js"></script>
+</body>
+</html>
