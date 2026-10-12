@@ -119,6 +119,14 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
             return { kind: "allow" };
         }
 
+        // Only proxy resource types the page loads directly; "other", "ping",
+        // site-SW-initiated traffic etc. are left alone (they often cannot
+        // follow a redirect across origins without breaking).
+        const PROXYABLE = new Set(["script", "image", "stylesheet", "font", "media"]);
+        if (!PROXYABLE.has(details.type)) {
+            return { kind: "allow" };
+        }
+
         // Tier B: redirect to the extension proxy service worker.
         const proxyUrl =
             chrome.runtime.getURL(PROXY_PATH + encodeURIComponent(details.url)) +

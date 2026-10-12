@@ -256,6 +256,13 @@ async function main(): Promise<void> {
         input.click();
     });
 
+    // ensure the Tier-B proxy service worker is active
+    try {
+        await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+    } catch (e) {
+        console.warn("[ResOverride] proxy SW registration failed", e);
+    }
+
     connectLogs();
     await refresh();
 

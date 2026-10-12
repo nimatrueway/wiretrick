@@ -59,6 +59,12 @@ function render(scripts: ScriptInfo[]): void {
 async function main(): Promise<void> {
     $("#btn-manager").addEventListener("click", () => openManager());
     render(await send({ type: "listScripts" }));
+    // ensure the Tier-B proxy service worker is active (persists after close)
+    try {
+        await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+    } catch (e) {
+        console.warn("[ResOverride] proxy SW registration failed", e);
+    }
 }
 
 main();
