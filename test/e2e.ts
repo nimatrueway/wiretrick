@@ -238,7 +238,14 @@ if (HEADLESS) {
         chrome.runtime.sendMessage({ type: "openTab", url: "http://127.0.0.1:8907/page-with-script" }, () => r(null));
     }));
     // warm reload: on a cold event page the first navigation's subresource
-    // requests can race the engine wake-up — a reload is the realistic case
+    // requests can race the engine wake-up — reload once the tab URL exists
+    for (let i = 0; i < 10; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        const found = await mgr.evaluate(() => new Promise((r) => {
+            chrome.tabs.query({}, (tabs) => r(tabs.some((x) => x.url && x.url.includes("/page-with-script"))));
+        }));
+        if (found) break;
+    }
     await mgr.evaluate(() => new Promise((r) => {
         chrome.tabs.query({}, (tabs) => {
             const t = tabs.find((x) => x.url && x.url.includes("/page-with-script"));

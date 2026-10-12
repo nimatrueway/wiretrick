@@ -274,30 +274,32 @@ import { dlog } from "../shared/debugLog";
 
             if (compiled.length === 0) return response;
 
+            const transforms = transformsFor(url);
+            if (transforms.length === 0) return response;
+
             try {
                 const contentType = response.headers.get("content-type") || "";
                 const isText = isTextual(contentType) || (await looksTextual(response));
+                let original: string | Uint8Array;
                 if (isText) {
-                    const text = await response.clone().text();
-                    const transformed = await applyTransforms(url, method, text, { contentType, status: response.status });
-                    const out = typeof transformed === "string" ? transformed : dec.decode(transformed as Uint8Array);
-                    return new Response(out, {
-                        status: response.status,
-                        statusText: response.statusText,
-                        headers: response.headers,
-                    });
+                    original = await response.clone().text();
                 } else {
-                    const bytes = new Uint8Array(await response.clone().arrayBuffer());
-                    const transformed = await applyTransforms(url, method, bytes, { contentType, status: response.status });
-                    const outBytes = typeof transformed === "string" ? enc.encode(transformed) : (transformed as Uint8Array);
-                    return new Response(outBytes as any, {
-                        status: response.status,
-                        statusText: response.statusText,
-                        headers: response.headers,
-                    });
+                    original = new Uint8Array(await response.clone().arrayBuffer());
                 }
+                const transformed = await applyTransforms(url, method, original, { contentType, status: response.status });
+                // nothing changed (or null-body status): pass the original
+                // response through — new Response(204) throws
+                if (transformed === original || response.status === 204 || response.status === 304) {
+                    return response;
+                }
+                const out = typeof transformed === "string" ? transformed : (transformed instanceof Uint8Array ? transformed : enc.encode(String(transformed)));
+                return new Response(out as any, {
+                    status: response.status,
+                    statusText: response.statusText,
+                    headers: response.headers,
+                });
             } catch (e: any) {
-                console.error("[ResOverride hook] fetch transform failed:", e.message || e);
+                logUp(`fetch transform failed: ${e.message || e}`, "error");
                 return response;
             }
         };

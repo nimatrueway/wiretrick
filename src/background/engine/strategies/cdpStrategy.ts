@@ -10,7 +10,7 @@ import { storageGet, storageSet } from "../../../shared/chromeApi";
 import type { Script } from "../scriptStore";
 import { log } from "../logs";
 import { dlog } from "../../../shared/debugLog";
-import { debuggerAttach, debuggerSend } from "../../../shared/chromeApi";
+import { debuggerAttach, debuggerSend, debuggerDetach } from "../../../shared/chromeApi";
 
 interface CdpScript {
     scriptId: string;
@@ -31,6 +31,8 @@ export class CdpStrategy {
     private learn: { [scriptId: string]: { [type: string]: number } } = {};
     /** tabId → timer for idle auto-detach */
     private idleTimers = new Map<number, ReturnType<typeof setTimeout>>();
+    /** tabId → in-flight ensureAttached promise (dedup concurrent calls) */
+    private attachInFlight = new Map<number, Promise<void>>();
 
     reload(scripts: Script[]): void {
         this.scripts = [];
@@ -123,21 +125,45 @@ export class CdpStrategy {
         return this.cdpRelevantScripts(url).length > 0;
     }
 
-    /** Wire up a tab when a CDP-strategy script matches it. */
+    /** Wire up a tab when a CDP-strategy script matches it. Concurrent calls dedup. */
     async ensureAttached(tabId: number, mainFrameUrl: string | null): Promise<void> {
-        if (!mainFrameUrl || !this.shouldAttach(mainFrameUrl) || this.attached.has(tabId)) return;
+        if (!mainFrameUrl || this.attached.has(tabId)) return;
+        if (!this.shouldAttach(mainFrameUrl)) return;
+        const inFlight = this.attachInFlight.get(tabId);
+        if (inFlight) return inFlight;
+        const p = this.doEnsureAttached(tabId, mainFrameUrl).finally(() => this.attachInFlight.delete(tabId));
+        this.attachInFlight.set(tabId, p);
+        return p;
+    }
+
+    private async doEnsureAttached(tabId: number, mainFrameUrl: string): Promise<void> {
         dlog("cdp", "ensureAttached", { tabId, mainFrameUrl, scripts: this.scripts.map((s) => s.name) });
         for (let attempt = 0; attempt < 2; attempt++) {
             try {
-                await debuggerAttach(tabId);
-                await debuggerSend(tabId, "Fetch.enable", { patterns: [{ requestStage: "Response" }] });
+                try {
+                    await debuggerAttach(tabId);
+                } catch (e: any) {
+                    // our own concurrent attach won the race — it enabled
+                    // Fetch below and marked the tab attached
+                    if (/already attached/i.test(e.message || "")) {
+                        if (this.attached.has(tabId)) return;
+                        throw e;
+                    }
+                    throw e;
+                }
+                try {
+                    await debuggerSend(tabId, "Fetch.enable", { patterns: [{ requestStage: "Response" }] });
+                } catch (e: any) {
+                    // enable failed while attached (evicted mid-flight) —
+                    // detach so we never leave an orphan debugger attached
+                    await debuggerDetach(tabId).catch(() => {});
+                    throw e;
+                }
                 this.attached.add(tabId);
                 dlog("cdp", "attached + Fetch.enabled", { tabId, attempt });
                 log(tabId, "[Tier C] debugger attached (CDP body interception active)", "warn");
                 return;
             } catch (e: any) {
-                // another debugger evicted us between attach and enable —
-                // retry once before giving up
                 dlog("cdp", `attach attempt ${attempt} failed`, { tabId, error: e.message || e });
                 if (attempt === 1) {
                     dlog("cdp", "ATTACH FAILED", { tabId, error: e.message || e });
