@@ -1,0 +1,94 @@
+body {
+    margin: 0;
+    width: 300px;
+    background: #1e1e1e;
+    color: #ccc;
+    font: 13px/1.4 -apple-system, "Segoe UI", sans-serif;
+}
+
+#header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: #252526;
+    border-bottom: 1px solid #3c3c3c;
+}
+
+#title { font-weight: 600; }
+
+#header button {
+    background: #007acc;
+    border: none;
+    color: #fff;
+    border-radius: 3px;
+    padding: 3px 8px;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+#script-list {
+    list-style: none;
+    margin: 0;
+    padding: 4px 0;
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+.script-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+}
+
+.script-item:hover { background: #2a2d2e; }
+
+.script-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.script-name.error::after { content: " ⚠"; }
+
+.btn-edit {
+    background: none;
+    border: 1px solid #3c3c3c;
+    color: #858585;
+    border-radius: 3px;
+    font-size: 11px;
+    padding: 2px 7px;
+    cursor: pointer;
+}
+.btn-edit:hover { color: #ccc; border-color: #007acc; }
+
+.switch {
+    width: 28px;
+    height: 15px;
+    border-radius: 8px;
+    background: #4a4a4a;
+    position: relative;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.15s;
+}
+.switch::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: #ddd;
+    transition: transform 0.15s;
+}
+.switch.on { background: #007acc; }
+.switch.on::after { transform: translateX(13px); }
+
+#empty {
+    padding: 14px 12px;
+    color: #858585;
+}
+.hidden { display: none; }

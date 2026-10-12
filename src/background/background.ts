@@ -6,6 +6,7 @@ import { ChromeBodyStrategy } from "./engine/strategies/chromeBodyStrategy";
 import { CdpStrategy } from "./engine/strategies/cdpStrategy";
 import { createPipeline } from "./engine/pipeline";
 import { addUiPort, clearTab } from "./engine/logs";
+import { onScriptsChanged, listScripts } from "./engine/scriptStore";
 
 const IS_FIREFOX =
     typeof (globalThis as any).browser !== "undefined" &&
@@ -43,5 +44,20 @@ if (chrome.debugger) {
 
 // ---- tab lifecycle logging ----
 chrome.tabs.onRemoved.addListener((tabId) => clearTab(tabId));
+
+// ---- badge: number of active scripts ----
+const action = (chrome.browserAction ?? chrome.action) as any;
+async function updateBadge(): Promise<void> {
+    try {
+        const scripts = await listScripts();
+        const active = scripts.filter((s) => s.enabled).length;
+        await action.setBadgeBackgroundColor({ color: "#4ec9b0" });
+        await action.setBadgeText({ text: active > 0 ? String(active) : "" });
+    } catch {
+        /* browserAction unavailable */
+    }
+}
+onScriptsChanged(() => void updateBadge());
+void updateBadge();
 
 console.log(`[ResOverride] background ready (${IS_FIREFOX ? "firefox/webRequest+filterResponseData" : "chrome/tiered"})`);

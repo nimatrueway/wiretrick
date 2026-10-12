@@ -258,6 +258,12 @@ async function main(): Promise<void> {
 
     connectLogs();
     await refresh();
+
+    // deep link from the popup: manager.html?script=<id>
+    const wanted = new URLSearchParams(location.search).get("script");
+    if (wanted && scripts.some((s) => s.id === wanted)) {
+        selectReal(wanted);
+    }
 }
 
 void renderEditorEmpty;
