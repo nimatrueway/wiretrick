@@ -7,6 +7,7 @@ import { CdpStrategy } from "./engine/strategies/cdpStrategy";
 import { createPipeline } from "./engine/pipeline";
 import { addUiPort, clearTab } from "./engine/logs";
 import { onScriptsChanged, listScripts } from "./engine/scriptStore";
+import { matchAny } from "../shared/matcher";
 
 const IS_FIREFOX =
     typeof (globalThis as any).browser !== "undefined" &&
@@ -45,19 +46,47 @@ if (chrome.debugger) {
 // ---- tab lifecycle logging ----
 chrome.tabs.onRemoved.addListener((tabId) => clearTab(tabId));
 
-// ---- badge: number of active scripts ----
+// ---- badge: per-tab count of enabled scripts matching the tab URL ----
 const action = (chrome.browserAction ?? chrome.action) as any;
-async function updateBadge(): Promise<void> {
+
+async function countMatching(url: string | undefined): Promise<number> {
+    if (!url || !/^https?:/i.test(url)) return 0;
+    const scripts = await listScripts();
+    return scripts.filter((s) => s.enabled && matchAny(s.meta.match, url)).length;
+}
+
+async function updateTabBadge(tabId: number, url: string | undefined): Promise<void> {
     try {
-        const scripts = await listScripts();
-        const active = scripts.filter((s) => s.enabled).length;
+        const n = await countMatching(url);
         await action.setBadgeBackgroundColor({ color: "#4ec9b0" });
-        await action.setBadgeText({ text: active > 0 ? String(active) : "" });
+        await action.setBadgeText({ tabId, text: n > 0 ? String(n) : "" });
     } catch {
-        /* browserAction unavailable */
+        /* tab gone */
     }
 }
-onScriptsChanged(() => void updateBadge());
-void updateBadge();
+
+async function updateAllTabs(): Promise<void> {
+    try {
+        for (const tab of await chrome.tabs.query({})) {
+            if (tab.id !== undefined) void updateTabBadge(tab.id, tab.url);
+        }
+    } catch {
+        /* no tabs access */
+    }
+}
+
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+    chrome.tabs
+        .get(tabId)
+        .then((tab) => updateTabBadge(tabId, tab.url))
+        .catch(() => {});
+});
+chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
+    if (info.url !== undefined || info.status === "complete") {
+        void updateTabBadge(tabId, tab.url);
+    }
+});
+onScriptsChanged(() => void updateAllTabs());
+void updateAllTabs();
 
 console.log(`[ResOverride] background ready (${IS_FIREFOX ? "firefox/webRequest+filterResponseData" : "chrome/tiered"})`);
