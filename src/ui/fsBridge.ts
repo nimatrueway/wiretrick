@@ -18,6 +18,9 @@ interface FolderSyncState {
 let state: FolderSyncState | null = null;
 let pollTimer: number | null = null;
 
+/** contents we wrote ourselves, so the poller can ignore its own echo */
+const lastWritten = new Map<string, string>();
+
 export function isSupported(): boolean {
     return typeof (window as any).showDirectoryPicker === "function";
 }
@@ -72,6 +75,7 @@ export function stopSync(): void {
         pollTimer = null;
     }
     state = null;
+    lastWritten.clear();
 }
 
 function startPolling(): void {
@@ -108,6 +112,11 @@ async function pollOnce(): Promise<void> {
         const entry = await dir.getFileHandle(fileName);
         const file = await entry.getFile();
         const text = await file.text();
+        // our own write-back: same content we pushed, nothing to import
+        if (lastWritten.get(fileName) === text) {
+            lastWritten.delete(fileName);
+            continue;
+        }
         const js = transpile(text);
         (window as any).__resFbOnFileChanged?.(fileName, js);
     }
@@ -126,9 +135,22 @@ function transpile(source: string): string {
     return out.outputText;
 }
 
+/** Push extension-side changes into the folder (two-way sync). */
 export async function writeBack(fileName: string, content: string): Promise<void> {
     if (!state) return;
+    lastWritten.set(fileName, content);
     await writeText(state.dirHandle, fileName, content);
+}
+
+/** Remove the file for a script deleted in the manager. */
+export async function deleteFile(fileName: string): Promise<void> {
+    if (!state) return;
+    lastWritten.delete(fileName);
+    try {
+        await state.dirHandle.removeEntry(fileName);
+    } catch {
+        /* file already gone */
+    }
 }
 
 async function writeText(dirHandle: any, name: string, content: string): Promise<void> {

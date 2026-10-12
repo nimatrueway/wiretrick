@@ -76,6 +76,9 @@ function renderList(): void {
             e.stopPropagation();
             if (!confirm(`Delete "${script.meta.name}"?`)) return;
             await send({ type: "deleteScript", id: script.id });
+            if (fsBridge.isSyncing()) {
+                await fsBridge.deleteFile(fsBridge.fileNameFor(script.id, script.meta.name));
+            }
             await refresh();
         });
 
@@ -128,6 +131,10 @@ async function saveCurrent(): Promise<void> {
         status("saved ✓");
     }
     dirty = false;
+    // two-way sync: push the saved source into the VS Code folder
+    if (fsBridge.isSyncing()) {
+        await fsBridge.writeBack(fsBridge.fileNameFor(selectedId, name), code);
+    }
     await refresh();
     renderList();
 }
