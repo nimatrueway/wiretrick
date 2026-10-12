@@ -11,6 +11,7 @@ let scripts: Script[] = [];
 let selectedId: string | null = null;
 let editor: any = null;
 let dirty = false;
+let applyingExternal = false;
 
 // ---- elements ----
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => document.querySelector(sel) as T;
@@ -93,6 +94,17 @@ async function renderEditorEmpty(): Promise<void> {
     }
 }
 
+/** Programmatic editor update (select / external hot-reload). */
+function setEditorValue(code: string): void {
+    if (!editor) return;
+    applyingExternal = true;
+    editor.setValue(code);
+    editor.clearHistory?.();
+    applyingExternal = false;
+    dirty = false;
+    status("saved ✓");
+}
+
 function selectReal(id: string): void {
     selectedId = id;
     renderList();
@@ -101,12 +113,7 @@ function selectReal(id: string): void {
     $input("#script-name").value = script.meta.name;
     $("#script-name").removeAttribute("disabled");
     $("#btn-save").removeAttribute("disabled");
-    if (editor) {
-        editor.setValue(script.code);
-        editor.clearHistory?.();
-    }
-    dirty = false;
-    status("saved");
+    setEditorValue(script.code);
 }
 
 async function saveCurrent(): Promise<void> {
@@ -158,6 +165,7 @@ async function main(): Promise<void> {
     editor.addCommand((window as any).monaco.KeyMod.CtrlCmd | (window as any).monaco.KeyCode.KeyS, () => void saveCurrent());
 
     editor.onDidChangeModelContent(() => {
+        if (applyingExternal) return;
         dirty = true;
         status("unsaved…", "dirty");
     });
@@ -193,8 +201,13 @@ async function main(): Promise<void> {
                 const target = id ? scripts.find((s) => s.id === id) : undefined;
                 if (!target) return;
                 await send({ type: "saveScript", id: target.id, code: js, name: target.meta.name });
-                status(`hot-reloaded ${fileName} from VS Code ✓`);
                 await refresh();
+                status(`hot-reloaded ${fileName} from VS Code ✓`);
+                // keep the open editor in sync with the folder
+                const updated = scripts.find((s) => s.id === target.id);
+                if (updated && updated.id === selectedId) {
+                    setEditorValue(updated.code);
+                }
             };
             btn.classList.add("active");
             btn.textContent = "VS Code ✓ (sync on)";
