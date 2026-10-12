@@ -157,7 +157,7 @@ res.onResponseHeaders(() => ({ headers: { set: { "access-control-allow-origin": 
 });
 
 describe("ChromeBodyStrategy", () => {
-    it("tier B: redirects non-JS resources to the proxy", () => {
+    it("non-JS resources → needsCdp (CDP intercepts the response)", () => {
         const s = new ChromeBodyStrategy();
         s.reload([
             makeScript("a", `// ==ResScript==
@@ -167,11 +167,7 @@ describe("ChromeBodyStrategy", () => {
 res.modifyResponse((ctx, body) => body.replace("foo", "bar"));`),
         ]);
         const d = s.handleBeforeRequest(details({ type: "script", url: "https://cdn.example.com/lib.js" }), null);
-        expect(d.kind).toBe("redirect");
-        if (d.kind === "redirect") {
-            expect(d.url).toContain("chrome-extension://testid/__resproxy?p=");
-            expect(decodeURIComponent(d.url)).toContain("https://cdn.example.com/lib.js");
-        }
+        expect(d.kind).toBe("needsCdp");
     });
 
     it("claimed urls (tier A) are left alone", () => {

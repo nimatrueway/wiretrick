@@ -70,6 +70,12 @@ All browser-specific behavior lives behind one `InterceptionStrategy` interface
 unchanged, Tier B swaps the webRequest redirect for `declarativeNetRequest`, Tier C
 is unchanged — the pipeline, runtime, and editor don't move.
 
+## Debugging
+
+The manager page has a **⬇ Logs** button that downloads the full debug log —
+every engine decision (webRequest dispatches, hook bundles, CDP pauses,
+transforms) with timestamps. Attach it when reporting issues.
+
 ## Development
 
 ```bash
@@ -78,7 +84,19 @@ npm run build        # bundle to dist/
 npm run watch        # rebuild on change
 npm test             # vitest — matcher (ported), metaParser, engine pipeline
 npm run typecheck
+npm run test:e2e     # full browser e2e (needs E2E_CHROMIUM, see below)
 ```
 
-Load the extension from `dist/` ("Load unpacked", MV2; requires Chrome 111+ for the
-MAIN-world content script, or any recent Firefox).
+The e2e suite (`test/e2e.ts`) launches a fresh MV2-capable Chromium, loads the
+extension, seeds sample scripts through the real manager page, and verifies
+every tier against a local HTTP server: matcher, redirect, cancel, request +
+response headers, replaceResponse (main frame + fetch), modifyResponse (fetch /
+XHR / script-tag CDP), per-tab badge, and enable/disable toggling.
+
+```bash
+# any Chromium that still supports MV2 (Chrome for Testing ≤ ~126 works):
+E2E_CHROMIUM="/path/to/Google Chrome for Testing" npm run test:e2e
+```
+
+Load the extension from `dist/` ("Load unpacked", MV2), or any recent Firefox
+(callback-based APIs work everywhere).

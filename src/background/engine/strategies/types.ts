@@ -24,7 +24,10 @@ export type HookDisposition =
     | { kind: "allow" }
     | { kind: "redirect"; url: string }
     | { kind: "cancel" }
-    | { kind: "headers"; changes: HeaderChanges };
+    | { kind: "headers"; changes: HeaderChanges }
+    /** Chrome: body transform needed for a resource the hook can't see —
+     *  let it proceed while the CDP strategy intercepts the response. */
+    | { kind: "needsCdp" };
 
 export interface BodyScriptInfo {
     scriptId: string;

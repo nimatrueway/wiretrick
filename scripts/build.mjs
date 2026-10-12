@@ -39,6 +39,10 @@ const entries = [
         input: path.join(root, "src/ui/popup.ts"),
         output: { file: path.join(dist, "popup.js"), format: "iife" },
     },
+    {
+        input: path.join(root, "src/ui/serve.ts"),
+        output: { file: path.join(dist, "serve.js"), format: "iife" },
+    },
 ];
 
 async function buildOnce() {
@@ -61,6 +65,7 @@ async function copyStatic() {
     await copyFile(path.join(root, "src/ui/ui.css"), path.join(dist, "ui.css"));
     await copyFile(path.join(root, "src/ui/popup.html"), path.join(dist, "popup.html"));
     await copyFile(path.join(root, "src/ui/popup.css"), path.join(dist, "popup.css"));
+    await copyFile(path.join(root, "src/ui/serve.html"), path.join(dist, "serve.html"));
 
     // TypeScript UMD for in-page transpilation (VS Code bridge)
     const tsLib = path.join(root, "node_modules/typescript/lib/typescript.js");

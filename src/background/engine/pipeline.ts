@@ -9,6 +9,8 @@ import type { CdpStrategy } from "./strategies/cdpStrategy";
 import type { HeaderChanges } from "./strategies/types";
 import type { Script } from "./scriptStore";
 import { listScripts, onScriptsChanged, saveScript, deleteScript, setEnabled, newId } from "./scriptStore";
+import { serveStore } from "./strategies/webRequestStrategy";
+import { dlog } from "../../shared/debugLog";
 import { log } from "./logs";
 import { serializeHandlers, type HandlerSources } from "../../shared/compile";
 
@@ -36,6 +38,9 @@ export function createPipeline(
     chrome.tabs.onUpdated.addListener((tabId, info) => {
         if (info.url) {
             tabUrls.set(tabId, info.url);
+            // pre-attach CDP when a body script matches this tab's page URL,
+            // so the debugger is ready before the page's subresource requests
+            void cdp.ensureAttached(tabId, info.url);
         }
     });
     chrome.tabs.onRemoved.addListener((tabId) => {
@@ -80,6 +85,7 @@ export function createPipeline(
     // ---- webRequest wiring ----
     const onBeforeRequest = (details: any) => {
         const tabUrl = tabUrlFor(details.tabId, details.url);
+        dlog("pipeline", "onBeforeRequest", { url: details.url, type: details.type, tabId: details.tabId });
 
         // let the CDP strategy ensure attachment for main frames
         if (details.type === "main_frame" && tabUrl !== null) {
@@ -100,6 +106,12 @@ export function createPipeline(
             case "cancel": {
                 log(details.tabId, `cancelled ${details.url}`, "warn");
                 return { cancel: true };
+            }
+            case "needsCdp": {
+                dlog("pipeline", "needsCdp → attach", { url: details.url, tabId: details.tabId });
+                // gate on the REQUEST url — it matched a body script
+                void cdp.ensureAttached(details.tabId, details.url);
+                return {};
             }
             default:
                 return {};
@@ -169,6 +181,17 @@ export function createPipeline(
             setEnabled(msg.id, msg.enabled).then(() => sendResponse({}));
             return true;
         }
+        if (msg && msg.type === "openTab") {
+            chrome.windows.create({ url: msg.url, width: 1100, height: 750 }, () => void (chrome.runtime as any).lastError);
+            sendResponse({});
+            return false;
+        }
+        if (msg && msg.type === "getServe") {
+            const entry = serveStore.get(msg.rid);
+            serveStore.delete(msg.rid);
+            sendResponse(entry || { content: null });
+            return false;
+        }
 
         if (msg && msg.type === "claimRequest") {
             chromeBody.claimRequest(msg.url);
@@ -178,14 +201,17 @@ export function createPipeline(
         if (msg && msg.type === "getHookBundle") {
             // full script sources: the hook compiles them itself so handlers
             // keep their `res` binding and top-level scope
+            // ship ALL enabled body scripts — body transforms match request
+            // URLs, not the page URL, so the hook filters per-request itself
             const bundle = {
-                scripts: chromeBody.matchingBodyScripts(msg.url).map((s) => ({
+                scripts: chromeBody.allBodyScripts().map((s) => ({
                     scriptId: s.scriptId,
                     name: s.name,
                     match: s.match,
                     code: s.code,
                 })),
             };
+            dlog("pipeline", "getHookBundle responding", { count: bundle.scripts.length, url: msg.url });
             sendResponse(bundle);
             return false;
         }
@@ -206,6 +232,7 @@ export function createPipeline(
     // ---- reload plumbing ----
     async function reload(): Promise<void> {
         const scripts = (await listScripts()) as ScriptWithSources[];
+        dlog("pipeline", "reload", { total: scripts.length, enabled: scripts.filter((x) => x.enabled).map((x) => x.meta.name) });
         webRequestStrategy.reload(scripts);
         chromeBody.reload(scripts);
         cdp.reload(scripts);

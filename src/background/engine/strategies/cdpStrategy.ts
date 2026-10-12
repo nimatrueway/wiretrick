@@ -8,6 +8,8 @@ import { matchAny } from "../../../shared/matcher";
 import { compileScript, type HandlerFn } from "../../../shared/compile";
 import type { Script } from "../scriptStore";
 import { log } from "../logs";
+import { dlog } from "../../../shared/debugLog";
+import { debuggerAttach, debuggerSend } from "../../../shared/chromeApi";
 
 interface CdpScript {
     scriptId: string;
@@ -23,8 +25,10 @@ export class CdpStrategy {
 
     reload(scripts: Script[]): void {
         this.scripts = [];
+        // Every enabled script with a modifyResponse handler may need CDP on
+        // Chrome (hook covers page fetch/XHR; CDP covers everything else).
         for (const s of scripts) {
-            if (!s.enabled || s.meta.strategy !== "cdp") continue;
+            if (!s.enabled) continue;
             const c = compileScript(s.code);
             if (c.handlers.modifyResponse) {
                 this.scripts.push({
@@ -41,21 +45,30 @@ export class CdpStrategy {
         return this.scripts.filter((s) => matchAny(s.match, url));
     }
 
-    private shouldAttach(url: string): boolean {
-        return this.matchingScripts(url).length > 0;
+    /** Injected by background: are hook-claimed URLs skipped? */
+    isClaimed: (url: string) => boolean = () => false;
+
+    /**
+     * Pre-attach whenever any body script exists: subresources match
+     * request urls, not the page url, so page-url gating misses them.
+     * The debugger stays attached; pauses are cheap and skipped quickly.
+     */
+    private shouldAttach(_url: string): boolean {
+        return this.scripts.length > 0;
     }
 
     /** Wire up a tab when a CDP-strategy script matches it. */
     async ensureAttached(tabId: number, mainFrameUrl: string | null): Promise<void> {
         if (!mainFrameUrl || !this.shouldAttach(mainFrameUrl) || this.attached.has(tabId)) return;
+        dlog("cdp", "ensureAttached", { tabId, mainFrameUrl, scripts: this.scripts.map((s) => s.name) });
         try {
-            await chrome.debugger.attach({ tabId }, "1.3");
-            await chrome.debugger.sendCommand({ tabId }, "Fetch.enable", {
-                patterns: [{ requestStage: "Response" }],
-            });
+            await debuggerAttach(tabId);
+            await debuggerSend(tabId, "Fetch.enable", { patterns: [{ requestStage: "Response" }] });
             this.attached.add(tabId);
+            dlog("cdp", "attached + Fetch.enabled", { tabId });
             log(tabId, "[Tier C] debugger attached (CDP body interception active)", "warn");
         } catch (e: any) {
+            dlog("cdp", "ATTACH FAILED", { tabId, error: e.message || e });
             log(tabId, `[Tier C] debugger attach failed: ${e.message || e}`, "error");
         }
     }
@@ -63,21 +76,25 @@ export class CdpStrategy {
     async handlePaused(tabId: number, params: any): Promise<void> {
         const { requestId, request } = params;
         if (!params.responseStatusCode) {
-            await chrome.debugger.sendCommand({ tabId }, "Fetch.continueRequest", { requestId });
+            await debuggerSend(tabId, "Fetch.continueRequest", { requestId });
             return;
         }
         const url: string = request.url;
         const cdpScripts = this.matchingScripts(url);
-        if (cdpScripts.length === 0) {
-            await chrome.debugger.sendCommand({ tabId }, "Fetch.continueRequest", { requestId });
+        dlog("cdp", "handlePaused decision", { url, matching: cdpScripts.length, claimed: this.isClaimed(url), scripts: this.scripts.map((x) => `${x.name}=${x.match.join(",")}`) });
+        if (cdpScripts.length === 0 || this.isClaimed(url)) {
+            // not ours, or the page hook already transformed it
+            await debuggerSend(tabId, "Fetch.continueRequest", { requestId });
             return;
         }
 
         try {
-            const bodyResp: any = await chrome.debugger.sendCommand({ tabId }, "Fetch.getResponseBody", { requestId });
-            let body: string | Uint8Array = bodyResp.base64Encoded
-                ? base64ToBytes(bodyResp.body)
-                : bodyResp.body;
+            const bodyResp: any = await debuggerSend(tabId, "Fetch.getResponseBody", { requestId });
+            dlog("cdp", "got body", { url, base64: bodyResp.base64Encoded, len: bodyResp.body ? bodyResp.body.length : 0 });
+            let bytes = bodyResp.base64Encoded ? base64ToBytes(bodyResp.body) : new TextEncoder().encode(bodyResp.body);
+            // textual bodies are handed to transforms as strings — most
+            // transforms are string-oriented; binary stays bytes
+            let body: string | Uint8Array = looksTextual(bytes) ? new TextDecoder().decode(bytes) : bytes;
 
             const headers: { [n: string]: string } = {};
             for (const h of params.responseHeaders || []) {
@@ -97,22 +114,25 @@ export class CdpStrategy {
                 try {
                     const out = await s.transform(ctx, body);
                     if (out !== undefined && out !== null) body = out;
+                    dlog("cdp", `transform ${s.name} applied`);
                 } catch (e: any) {
+                    dlog("cdp", `transform ${s.name} THREW: ${e.message || e}`);
                     log(tabId, `[${s.name}] modifyResponse (cdp) threw: ${e.message || e}`, "error", s.scriptId);
                 }
             }
 
-            const bytes = typeof body === "string" ? new TextEncoder().encode(body) : body;
-            await chrome.debugger.sendCommand({ tabId }, "Fetch.fulfillRequest", {
+            const outBytes = typeof body === "string" ? new TextEncoder().encode(body) : body;
+            dlog("cdp", "fulfilling", { url, outLen: outBytes.length });
+            await debuggerSend(tabId, "Fetch.fulfillRequest", {
                 requestId,
                 responseCode: params.responseStatusCode,
                 responseHeaders: params.responseHeaders,
-                body: bytesToBase64(bytes),
+                body: bytesToBase64(outBytes),
             });
         } catch (e: any) {
             log(tabId, `[Tier C] body interception failed: ${e.message || e}`, "error");
             try {
-                await chrome.debugger.sendCommand({ tabId }, "Fetch.continueRequest", { requestId });
+                await debuggerSend(tabId, "Fetch.continueRequest", { requestId });
             } catch {
                 /* detach race */
             }
@@ -133,6 +153,14 @@ export class CdpStrategy {
             }
         }
     }
+}
+
+function looksTextual(bytes: Uint8Array): boolean {
+    const n = Math.min(bytes.length, 512);
+    for (let i = 0; i < n; i++) {
+        if (bytes[i] === 0) return false;
+    }
+    return true;
 }
 
 function base64ToBytes(b64: string): Uint8Array {

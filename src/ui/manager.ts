@@ -19,7 +19,13 @@ const $input = (sel: string): HTMLInputElement => document.querySelector(sel) as
 
 // ---- helpers ----
 function send<T = any>(msg: any): Promise<T> {
-    return chrome.runtime.sendMessage(msg);
+    return new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(msg, (resp: T) => {
+            const err = (chrome.runtime as any).lastError;
+            if (err) reject(new Error(err.message));
+            else resolve(resp);
+        });
+    });
 }
 
 function uuid(): string {
@@ -186,6 +192,25 @@ async function main(): Promise<void> {
     });
     $("#btn-clear-log").addEventListener("click", () => {
         $("#log-entries").innerHTML = "";
+        void send({ type: "clearDebugLogs" });
+    });
+    $("#btn-logs").addEventListener("click", async () => {
+        const bg = await send({ type: "getDebugLogs" });
+        const lines: string[] = [
+            `ResScript debug log — ${new Date().toISOString()}`,
+            `UA: ${bg.ua} | extension v${bg.ver}`,
+            `entries: ${bg.entries ? bg.entries.length : 0}`,
+            "",
+            ...(bg.entries || []).map((e: any) => `${new Date(e.at).toISOString()} [${e.src}] ${e.msg}`),
+        ];
+        const blob = new Blob([lines.join("\n")], { type: "text/plain" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `rescript-debug-${Date.now()}.log`;
+        a.click();
+        URL.revokeObjectURL(url);
+        status("debug log downloaded");
     });
     $("#script-name").addEventListener("input", () => {
         dirty = true;

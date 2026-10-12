@@ -8,11 +8,15 @@
     "build": "node scripts/build.mjs",
     "watch": "node scripts/build.mjs --watch",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:e2e": "tsx test/e2e.ts"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.280",
+    "@types/node": "^26.6.5",
+    "playwright-core": "^1.64.0",
     "rolldown": "^1.0.0-beta.3",
+    "tsx": "^4.23.15",
     "typescript": "^5.6.3",
     "vitest": "^2.1.4"
   },

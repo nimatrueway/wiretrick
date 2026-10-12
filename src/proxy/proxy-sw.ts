@@ -7,6 +7,7 @@
  * result with the original Content-Type.
  */
 import { compileScript } from "../shared/compile";
+import { dlog } from "../shared/debugLog";
 
 const PROXY_MARKER = "/__resproxy?p=";
 
@@ -16,18 +17,28 @@ interface ProxyTransform {
     code: string;
 }
 
-async function getTransforms(originalUrl: string): Promise<ProxyTransform[]> {
-    try {
-        const resp = await chrome.runtime.sendMessage({ type: "getProxyTransform", url: originalUrl });
-        return (resp && resp.transforms) || [];
-    } catch (e) {
-        console.error("[ResOverride proxy] could not reach background", e);
-        return [];
-    }
+function getTransforms(originalUrl: string): Promise<ProxyTransform[]> {
+    return new Promise((resolve) => {
+        try {
+            chrome.runtime.sendMessage({ type: "getProxyTransform", url: originalUrl }, (resp: any) => {
+                if (chrome.runtime.lastError) {
+                    dlog("sw", "getProxyTransform lastError:", chrome.runtime.lastError.message);
+                    resolve([]);
+                    return;
+                }
+                resolve((resp && resp.transforms) || []);
+            });
+        } catch (e: any) {
+            dlog("sw", "getProxyTransform threw:", e.message || e);
+            resolve([]);
+        }
+    });
 }
 
 async function handleProxy(request: Request, originalUrl: string, method: string): Promise<Response> {
+    dlog("sw", "proxy fetch", { originalUrl, method });
     const transforms = await getTransforms(originalUrl);
+    dlog("sw", "transforms", { count: transforms.length, names: transforms.map((t) => t.name) });
     const origResp = await fetch(originalUrl, { method, credentials: "include" });
     const contentType = origResp.headers.get("content-type") || "application/octet-stream";
     const isText = /text\/|json|javascript|xml/i.test(contentType);
@@ -72,6 +83,7 @@ const sw = self as any;
 
 sw.addEventListener("fetch", (event: any) => {
     const url: string = event.request.url;
+    dlog("sw", "fetch event", { url: url.slice(0, 140) });
     const markerIdx = url.indexOf(PROXY_MARKER);
     if (markerIdx === -1) return;
 
@@ -89,4 +101,5 @@ sw.addEventListener("install", () => {
 
 sw.addEventListener("activate", (event: any) => {
     event.waitUntil(sw.clients.claim());
+    dlog("sw", "activated");
 });

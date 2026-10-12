@@ -17,6 +17,25 @@ export interface Script {
 const STORE_KEY = "resScripts";
 const ORDER_KEY = "resScriptOrder";
 
+// MV2 browsers don't support promise-based chrome.storage — wrap callbacks.
+function storageGet(keys: string | string[] | null): Promise<Record<string, any>> {
+    return new Promise((resolve) => {
+        chrome.storage.local.get(keys as any, (d) => {
+            void chrome.runtime.lastError; // treat as empty
+            resolve(d || {});
+        });
+    });
+}
+
+function storageSet(items: Record<string, any>): Promise<void> {
+    return new Promise((resolve) => {
+        chrome.storage.local.set(items, () => {
+            void chrome.runtime.lastError;
+            resolve();
+        });
+    });
+}
+
 const listeners = new Set<() => void>();
 
 export function onScriptsChanged(fn: () => void): () => void {
@@ -29,19 +48,19 @@ function notify(): void {
 }
 
 export async function listScripts(): Promise<Script[]> {
-    const obj = await chrome.storage.local.get([STORE_KEY, ORDER_KEY]);
+    const obj = await storageGet([STORE_KEY, ORDER_KEY]);
     const byId: { [id: string]: Script } = obj[STORE_KEY] || {};
     const order: string[] = obj[ORDER_KEY] || Object.keys(byId);
     return order.filter((id) => byId[id]).map((id) => byId[id]);
 }
 
 export async function getScript(id: string): Promise<Script | undefined> {
-    const obj = await chrome.storage.local.get(STORE_KEY);
+    const obj = await storageGet(STORE_KEY);
     return (obj[STORE_KEY] || {})[id];
 }
 
 export async function saveScript(partial: Pick<Script, "id" | "code"> & Partial<Script>): Promise<Script> {
-    const obj = await chrome.storage.local.get([STORE_KEY, ORDER_KEY]);
+    const obj = await storageGet([STORE_KEY, ORDER_KEY]);
     const byId: { [id: string]: Script } = obj[STORE_KEY] || {};
     const order: string[] = obj[ORDER_KEY] || Object.keys(byId);
     const prev = byId[partial.id];
@@ -59,17 +78,17 @@ export async function saveScript(partial: Pick<Script, "id" | "code"> & Partial<
     if (!order.includes(partial.id)) {
         order.push(partial.id);
     }
-    await chrome.storage.local.set({ [STORE_KEY]: byId, [ORDER_KEY]: order });
+    await storageSet({ [STORE_KEY]: byId, [ORDER_KEY]: order });
     notify();
     return script;
 }
 
 export async function deleteScript(id: string): Promise<void> {
-    const obj = await chrome.storage.local.get([STORE_KEY, ORDER_KEY]);
+    const obj = await storageGet([STORE_KEY, ORDER_KEY]);
     const byId: { [id: string]: Script } = obj[STORE_KEY] || {};
     const order: string[] = obj[ORDER_KEY] || [];
     delete byId[id];
-    await chrome.storage.local.set({
+    await storageSet({
         [STORE_KEY]: byId,
         [ORDER_KEY]: order.filter((x) => x !== id),
     });
@@ -91,14 +110,14 @@ export function newId(): string {
 const SCRIPT_STORE_PREFIX = "resStore.";
 
 export async function scriptStorageGet(scriptId: string, key: string): Promise<any> {
-    const obj = await chrome.storage.local.get(SCRIPT_STORE_PREFIX + scriptId);
+    const obj = await storageGet(SCRIPT_STORE_PREFIX + scriptId);
     return (obj[SCRIPT_STORE_PREFIX + scriptId] || {})[key];
 }
 
 export async function scriptStorageSet(scriptId: string, key: string, value: any): Promise<void> {
     const storeKey = SCRIPT_STORE_PREFIX + scriptId;
-    const obj = await chrome.storage.local.get(storeKey);
+    const obj = await storageGet(storeKey);
     const data = obj[storeKey] || {};
     data[key] = value;
-    await chrome.storage.local.set({ [storeKey]: data });
+    await storageSet({ [storeKey]: data });
 }

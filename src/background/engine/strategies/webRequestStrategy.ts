@@ -120,9 +120,16 @@ export class WebRequestStrategy implements InterceptionStrategy {
                 ? guessMime(fileRef, details.url)
                 : guessMime(null, details.url, details.type === "xmlhttprequest" ? "application/json" : undefined);
 
-        const serve = (mime: string, content: string | Uint8Array) => {
+        const serve = (mime: string, content: string | Uint8Array): HookDisposition => {
             log(details.tabId, `[${script.meta.name}] replaceResponse → ${mime} (${content.length} bytes)`, "info", scriptId);
-            return { kind: "redirect" as const, url: toDataUrl(mime, content) } as HookDisposition;
+            // Chrome blocks top-level data: navigations — serve main frames
+            // from an extension page instead
+            if (details.type === "main_frame") {
+                const rid = "serve_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+                serveStore.set(rid, { content: typeof content === "string" ? content : new TextDecoder().decode(content), mime });
+                return { kind: "redirect", url: chrome.runtime.getURL("serve.html?rid=" + rid) };
+            }
+            return { kind: "redirect", url: toDataUrl(mime, content) };
         };
 
         if (replacement && typeof replacement === "object" && !ArrayBuffer.isView(replacement) && replacement.file) {
@@ -280,6 +287,9 @@ function looksBinary(bytes: Uint8Array): boolean {
     }
     return false;
 }
+
+/** in-memory store for main-frame served replacements */
+export const serveStore = new Map<string, { content: string; mime: string }>();
 
 /** requestId → script awaiting a Firefox stream filter */
 const pendingFirefoxStreams = new Map<string, { entry: { id: string; compiled: CompiledScript }; tabUrl: string | null }>();

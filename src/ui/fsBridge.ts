@@ -16,7 +16,7 @@ interface FolderSyncState {
 }
 
 let state: FolderSyncState | null = null;
-let pollTimer: number | null = null;
+let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 /** contents we wrote ourselves, so the poller can ignore its own echo */
 const lastWritten = new Map<string, string>();

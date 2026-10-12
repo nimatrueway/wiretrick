@@ -78,6 +78,11 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
         return this.bodyScripts.filter((s) => matchAny(s.match, url));
     }
 
+    /** All enabled body scripts — the hook filters per-request itself. */
+    allBodyScripts(): BodyScriptEntry[] {
+        return this.bodyScripts;
+    }
+
     getTransformsForUrl(url: string, _tabUrl: string | null): BodyScriptInfo[] {
         return this.matchingBodyScripts(url).map((s) => ({
             scriptId: s.scriptId,
@@ -109,8 +114,11 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
         }
 
         if (details.type === "xmlhttprequest" || details.type === "websocket") {
-            // The hook owns page-initiated traffic; it should have claimed this.
-            return { kind: "allow" };
+            // The hook owns page-initiated traffic and claims every fetch it
+            // sees. An UNCLAIMED request means the hook wasn't installed yet
+            // (cold start) — fall back to CDP. Claims are what prevent
+            // double-transformation.
+            return { kind: "needsCdp" };
         }
 
         if (details.type === "main_frame") {
@@ -119,20 +127,13 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
             return { kind: "allow" };
         }
 
-        // Only proxy resource types the page loads directly; "other", "ping",
-        // site-SW-initiated traffic etc. are left alone (they often cannot
-        // follow a redirect across origins without breaking).
-        const PROXYABLE = new Set(["script", "image", "stylesheet", "font", "media"]);
-        if (!PROXYABLE.has(details.type)) {
-            return { kind: "allow" };
-        }
-
-        // Tier B: redirect to the extension proxy service worker.
-        const proxyUrl =
-            chrome.runtime.getURL(PROXY_PATH + encodeURIComponent(details.url)) +
-            "&rt=" + details.type + "&m=" + encodeURIComponent(details.method);
-        log(details.tabId, `[Tier B] proxying ${shortUrl(details.url)} through extension proxy`, "info");
-        return { kind: "redirect", url: proxyUrl };
+        // Non-hookable resource (script tag, image, css, main frame, ...):
+        // MV2 extension service workers do not intercept page-initiated loads,
+        // so the proxy tier cannot serve them — let the request proceed and
+        // have the CDP strategy transform the response. Handled by
+        // needsCdp in the pipeline + pre-attach on navigation.
+        log(details.tabId, `[CDP] body transform via debugger for ${shortUrl(details.url)}`, "info");
+        return { kind: "needsCdp" };
     }
 
     handleBeforeSendHeaders(_d: WebRequestDetailsLike, _t: string | null): null {

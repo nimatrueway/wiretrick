@@ -8,6 +8,7 @@
  * Built as a standalone IIFE (no imports in output).
  */
 import { compileScript, type CompiledScript } from "../shared/compile";
+import { dlog } from "../shared/debugLog";
 
 (() => {
     const w = window as any;
@@ -52,16 +53,26 @@ import { compileScript, type CompiledScript } from "../shared/compile";
         } catch {}
     }
 
+    /** forward log entries to the background through the bridge */
+    function logUp(msg: string): void {
+        dlog("hook", msg);
+        try {
+            window.postMessage({ source: HOOK_SOURCE, kind: "log", msg }, window.location.origin);
+        } catch {}
+    }
+
     function acceptBundle(bundle: any): void {
         const scripts: BundledScript[] = bundle && bundle.scripts;
+        logUp(`bundle: ${scripts ? scripts.length : 0} script(s)`);
         if (!scripts || scripts.length === 0) return;
         compiled = scripts.map((s) => {
             const script = compileScript(s.code);
-            if (script.error) console.error(`[ResOverride hook] ${s.name}:`, script.error.split("\n")[0]);
+            if (script.error) logUp(`compile error in ${s.name}: ${script.error.split("\n")[0]}`);
             return { scriptId: s.scriptId, name: s.name, match: s.match, script };
         });
         patchFetch();
         patchXHR();
+        logUp(`patches installed (${compiled.filter((c) => c.script.handlers.modifyResponse).length} modify, ${compiled.filter((c) => c.script.handlers.replaceResponse).length} replace)`);
     }
 
     window.addEventListener("message", (event: MessageEvent) => {
@@ -69,6 +80,12 @@ import { compileScript, type CompiledScript } from "../shared/compile";
         if (!data || data.source !== BRIDGE_SOURCE || data.kind !== "bundle") return;
         acceptBundle(data.bundle);
     });
+
+    // the bridge may have posted the bundle before this script tag finished
+    // loading — announce readiness so it re-sends
+    try {
+        window.postMessage({ source: HOOK_SOURCE, kind: "ready" }, window.location.origin);
+    } catch {}
 
     function makeCtx(url: string, method: string, extra?: any): any {
         return {
@@ -89,6 +106,43 @@ import { compileScript, type CompiledScript } from "../shared/compile";
                 name: c.name,
                 fn: c.script.handlers.modifyResponse as any,
             }));
+    }
+
+    function replaceHandlersFor(url: string): { name: string; fn: (ctx: any) => any }[] {
+        return compiled
+            .filter((c) => c.script.handlers.replaceResponse && urlMatches(c.match, url))
+            .map((c) => ({ name: c.name, fn: c.script.handlers.replaceResponse as any }));
+    }
+
+    function makeReplaceCtx(url: string, method: string, contentType?: string): any {
+        return { url, method, tabUrl: location.href, resourceType: "xmlhttprequest", requestHeaders: {}, mime: contentType };
+    }
+
+    function guessHookMime(url: string, fallback = "application/json"): string {
+        const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "";
+        const table: any = { js: "application/javascript", json: "application/json", css: "text/css", html: "text/html", xml: "application/xml", txt: "text/plain" };
+        return table[ext] || fallback;
+    }
+
+    /**
+     * replaceResponse short-circuit for page-initiated requests: Chrome
+     * forbids redirects to data: URLs on fetch/XHR, so the hook serves the
+     * replacement itself. Sync handlers only.
+     */
+    function applyReplaceSync(url: string, method: string): { mime: string; content: string | Uint8Array } | null {
+        for (const { name, fn } of replaceHandlersFor(url)) {
+            try {
+                const out = fn(makeReplaceCtx(url, method));
+                if (out !== undefined && out !== null) {
+                    const content = out && typeof out === "object" && out.file ? out.file : out;
+                    const mime = guessHookMime(url);
+                    return { mime, content: content as string | Uint8Array };
+                }
+            } catch (e: any) {
+                console.error(`[ResOverride hook] ${name} replaceResponse threw:`, e.message || e);
+            }
+        }
+        return null;
     }
 
     /** Apply transforms synchronously when every handler is sync; null if async. */
@@ -122,8 +176,9 @@ import { compileScript, type CompiledScript } from "../shared/compile";
             try {
                 const result = await t.fn(makeCtx(url, method, extra), out);
                 if (result !== undefined && result !== null) out = result;
+                dlog("hook", `transform ${t.name} applied →`, typeof out === "string" ? out.slice(0, 80) : "bytes");
             } catch (e: any) {
-                console.error(`[ResOverride hook] ${t.name} transform threw:`, e.message || e);
+                logUp(`transform ${t.name} threw: ${e.message || e}`);
             }
         }
         return out;
@@ -134,14 +189,31 @@ import { compileScript, type CompiledScript } from "../shared/compile";
 
     function patchFetch(): void {
         window.fetch = async function (input: any, init?: RequestInit): Promise<Response> {
-            const url =
+            const rawUrl =
                 typeof input === "string" ? input : input instanceof URL ? input.href : input && input.url;
             const method =
                 (init && init.method) ||
                 (typeof input === "object" && input && input.method) ||
                 "GET";
 
+            // patterns are absolute; page code often fetches relative urls
+            let url: string;
+            try {
+                url = new URL(rawUrl, location.href).href;
+            } catch {
+                url = rawUrl;
+            }
+
+            dlog("hook", "fetch", { url, method });
             claim(url);
+
+            const replacement = applyReplaceSync(url, method);
+            if (replacement) {
+                return new Response(replacement.content as any, {
+                    status: 200,
+                    headers: { "content-type": replacement.mime },
+                });
+            }
 
             const response = await origFetch(input, init);
 
@@ -209,6 +281,13 @@ import { compileScript, type CompiledScript } from "../shared/compile";
                     return;
                 }
                 try {
+                    // replaceResponse takes precedence over transform
+                    const replacement = applyReplaceSync(absUrl, xhr.__resMethod);
+                    if (replacement) {
+                        redefineResponseText(xhr, typeof replacement.content === "string" ? replacement.content : dec.decode(replacement.content as Uint8Array));
+                        if (origOnRsc) origOnRsc.call(xhr, ev);
+                        return;
+                    }
                     const raw = xhr.response;
                     // only string bodies are safely rewritable
                     if (typeof raw !== "string" && raw !== null && raw !== "") {

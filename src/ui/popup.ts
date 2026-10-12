@@ -13,7 +13,13 @@ interface ScriptInfo {
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => document.querySelector(sel) as T;
 
 function send<T = any>(msg: any): Promise<T> {
-    return chrome.runtime.sendMessage(msg);
+    return new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(msg, (resp: T) => {
+            const err = (chrome.runtime as any).lastError;
+            if (err) reject(new Error(err.message));
+            else resolve(resp);
+        });
+    });
 }
 
 function openManager(scriptId?: string): void {
@@ -62,8 +68,9 @@ async function main(): Promise<void> {
     // ensure the Tier-B proxy service worker is active (persists after close)
     try {
         await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+        console.log("[res:popup] proxy SW registered");
     } catch (e) {
-        console.warn("[ResOverride] proxy SW registration failed", e);
+        console.warn("[res:popup] proxy SW registration failed", e);
     }
 }
 
