@@ -112,4 +112,12 @@ declare const res: {
 
     /** Log to the manager's log panel for the current tab. */
     log(...args: unknown[]): void;
+
+    /**
+     * Run at DOM-ready in the page (MAIN world). Use this for DOM and
+     * document.title changes — especially on sites whose HTML is served
+     * from a service worker (webRequest/CDP never see that response) or
+     * where hydration re-renders your transformed markup.
+     */
+    onDom(handler: (ctx: ResOverride.RequestCtx) => void): void;
 };

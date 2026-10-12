@@ -91,8 +91,10 @@ import { dlog } from "../shared/debugLog";
             if (script.error) logUp(`compile error in ${s.name}: ${script.error.split("\n")[0]}`);
             return { scriptId: s.scriptId, name: s.name, match: s.match, script };
         });
+        logUp("compiled: " + compiled.map((c) => `${c.name}[mod=${!!c.script.handlers.modifyResponse} dom=${!!c.script.handlers.onDom}]`).join(" "));
         patchFetch();
         patchXHR();
+        runDomHandlers();
         logUp(`patches installed (${compiled.filter((c) => c.script.handlers.modifyResponse).length} modify, ${compiled.filter((c) => c.script.handlers.replaceResponse).length} replace)`);
 
         // page console → manager panel (installed after the first bundle;
@@ -213,6 +215,28 @@ import { dlog } from "../shared/debugLog";
             }
         }
         return out;
+    }
+
+    /** onDom: user DOM/title manipulation at document-ready, @match gated. */
+    function runDomHandlers(): void {
+        const fire = () => {
+            const domScripts = compiled.filter((c) => c.script.handlers.onDom && urlMatches(c.match, location.href));
+            logUp(`onDom firing (${domScripts.length} handler(s), readyState=${document.readyState})`);
+            for (const c of domScripts) {
+                const handler = c.script.handlers.onDom;
+                if (!handler) continue;
+                try {
+                    handler(makeCtx(location.href, "GET"));
+                } catch (e: any) {
+                    logUp(`onDom ${c.name} threw: ${e.message || e}`, "error");
+                }
+            }
+        };
+        if (document.readyState === "loading") {
+            document.addEventListener("DOMContentLoaded", fire, { once: true });
+        } else {
+            fire();
+        }
     }
 
     // ---- fetch patch ----

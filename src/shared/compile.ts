@@ -13,6 +13,8 @@ export interface ScriptHandlers {
     onResponseHeaders: HandlerFn | null;
     replaceResponse: HandlerFn | null;
     modifyResponse: HandlerFn | null;
+    /** run at DOM-ready in the page — DOM/title manipulation */
+    onDom: HandlerFn | null;
 }
 
 export interface CompiledScript {
@@ -28,6 +30,7 @@ export interface HandlerSources {
     onResponseHeaders: string | null;
     replaceResponse: string | null;
     modifyResponse: string | null;
+    onDom: string | null;
 }
 
 export interface ResApiOverrides {
@@ -57,6 +60,7 @@ export function compileFromSources(meta: ResMeta, sources: HandlerSources): Comp
         ["onResponseHeaders", "onResponseHeaders"],
         ["replaceResponse", "replaceResponse"],
         ["modifyResponse", "modifyResponse"],
+        ["onDom", "onDom"],
     ];
     for (const [srcKey, hKey] of pairs) {
         const src = sources[srcKey];
@@ -79,6 +83,7 @@ export function serializeHandlers(s: CompiledScript): HandlerSources {
         onResponseHeaders: s.handlers.onResponseHeaders ? s.handlers.onResponseHeaders.toString() : null,
         replaceResponse: s.handlers.replaceResponse ? s.handlers.replaceResponse.toString() : null,
         modifyResponse: s.handlers.modifyResponse ? s.handlers.modifyResponse.toString() : null,
+        onDom: s.handlers.onDom ? s.handlers.onDom.toString() : null,
     };
 }
 
@@ -88,6 +93,7 @@ function emptyHandlers(): ScriptHandlers {
         onResponseHeaders: null,
         replaceResponse: null,
         modifyResponse: null,
+        onDom: null,
     };
 }
 
@@ -97,6 +103,7 @@ function createCollector(): ScriptHandlers {
         onResponseHeaders: null,
         replaceResponse: null,
         modifyResponse: null,
+        onDom: null,
     };
 }
 
@@ -106,6 +113,7 @@ function makeCollectorShim(store: any, overrides?: ResApiOverrides) {
         onResponseHeaders: (fn: HandlerFn) => (store.onResponseHeaders = fn),
         replaceResponse: (fn: HandlerFn) => (store.replaceResponse = fn),
         modifyResponse: (fn: HandlerFn) => (store.modifyResponse = fn),
+        onDom: (fn: HandlerFn) => (store.onDom = fn),
         storage: overrides?.storage || {
             get: () => undefined,
             set: () => undefined,

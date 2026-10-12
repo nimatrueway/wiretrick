@@ -134,7 +134,7 @@ const SCRIPTS: Record<string, SampleScript> = {
     modifyTierA: { id: "s_modifya", name: "modify response (hook tier)", code: `// ==ResScript==\n// @name       modify tier A\n// @match      ${ORIGIN}/api\n// ==/ResScript==\nres.modifyResponse((ctx, body) => body.replace("original-value", "TIERA-VALUE"));` },
     modifyCdp: { id: "s_modifycdp", name: "modify response (cdp tier)", code: `// ==ResScript==\n// @name       modify cdp\n// @match      ${ORIGIN}/app.js\n// ==/ResScript==\nres.modifyResponse((ctx, body) => body.replace("ORIGINAL-MARKER", "CDP-MARKER"));` },
     badgeProbe: { id: "s_badge", name: "badge probe", code: `// ==ResScript==\n// @name       badge probe\n// @match      ${ORIGIN}/page-fetch*\n// ==/ResScript==\nres.onRequest(() => {});` },
-    modifyMain: { id: "s_modifymain", name: "modify main frame html", code: `// ==ResScript==\n// @name       modify main frame\n// @match      ${ORIGIN}/page-title\n// ==/ResScript==\nres.modifyResponse((ctx, body) => (typeof body === "string" ? body : new TextDecoder().decode(body)).replace("SITE-TITLE-PLACEHOLDER", "CDP-HTML-MARKER"));` },
+    modifyMain: { id: "s_modifymain", name: "modify main frame html", code: `// ==ResScript==\n// @name       modify main frame\n// @match      ${ORIGIN}/page-title\n// ==/ResScript==\nres.modifyResponse((ctx, body) => (typeof body === "string" ? body : new TextDecoder().decode(body)).replace("SITE-TITLE-PLACEHOLDER", "CDP-HTML-MARKER"));\nres.onDom(() => { document.title = "DOM-HOOK-TITLE"; });` },
 };
 for (const s of Object.values(SCRIPTS)) await saveScript(s.id, s.code, s.name);
 
@@ -278,6 +278,17 @@ if (HEADLESS) {
     const r9m: string = await p9m.evaluate(async (u) => await (await fetch(u)).text(), `${ORIGIN}/report-value`).catch(() => "(fetch failed)");
     await p9m.close();
     check("modifyResponse: main frame HTML (CDP tier)", r9m === "CDP-HTML-MARKER", `h1=${r9m}`);
+
+}
+
+// ---------- 9c. onDom: DOM/title hook (works everywhere — it is page-level JS) ----------
+{
+    const p9d = await ctx.newPage();
+    await p9d.goto(`${ORIGIN}/page-title`, { waitUntil: "domcontentloaded" }).catch(() => {});
+    await p9d.waitForTimeout(2500);
+    const domState = await p9d.evaluate(() => ({ title: document.title, h1: document.querySelector("h1")?.textContent }));
+    check("onDom: document.title rewritten in page", domState.title === "DOM-HOOK-TITLE", JSON.stringify(domState));
+    await p9d.close();
 }
 
 // ---------- 10. disable a script → behavior stops ----------
@@ -360,7 +371,7 @@ if (failed.length) {
     try {
         const dbg: any = await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "getDebugLogs" }, (x) => r(x))));
         console.log("--- background debug log (last 40) ---");
-        for (const e of (dbg.entries || []).slice(-400)) console.log(`  ${e.src}: ${e.msg.slice(0, 130)}`);
+        for (const e of (dbg.entries || []).slice(-400)) console.log(`  ${e.src}: ${e.msg.slice(0, 500)}`);
     } catch { console.log("(could not fetch bg logs)"); }
 }
 console.log(`\n${results.length - failed.length}/${results.length} passed`);
