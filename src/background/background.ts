@@ -27,7 +27,7 @@ const chromeBody = new ChromeBodyStrategy();
 const cdp = new CdpStrategy();
 cdp.isClaimed = (url: string) => chromeBody.isClaimed(url);
 
-createPipeline(webRequestStrategy, chromeBody, cdp, updateTabBadge);
+createPipeline(webRequestStrategy, chromeBody, cdp, updateTabBadge, noteRequestForBadge);
 
 // ---- manager UI port: logs stream over it ----
 chrome.runtime.onConnect.addListener((port) => {
@@ -75,7 +75,10 @@ if (chrome.debugger) {
 }
 
 // ---- tab lifecycle logging ----
-chrome.tabs.onRemoved.addListener((tabId) => clearTab(tabId));
+chrome.tabs.onRemoved.addListener((tabId) => {
+    clearTab(tabId);
+    tabActiveScripts.delete(tabId);
+});
 
 // ---- reopen the manager after an extension reload (Chrome kills the
 // old page's renderer; the fresh instance restores it) ----
@@ -90,20 +93,50 @@ chrome.runtime.onInstalled.addListener(() => {
     });
 });
 
-// ---- badge: per-tab count of enabled scripts matching the tab URL ----
-async function countMatching(url: string | undefined): Promise<number> {
-    if (!url || !/^https?:/i.test(url)) return 0;
-    const scripts = await listScripts();
-    return scripts.filter((s) => s.enabled && matchAny(s.meta.match, url)).length;
+// ---- badge: per-tab count of enabled scripts active on the tab
+// (matching the page URL or any underlying resource request) ----
+const tabActiveScripts = new Map<number, Set<string>>();
+let cachedScripts: import("./engine/scriptStore").Script[] = [];
+
+async function refreshCache(): Promise<void> {
+    cachedScripts = await listScripts();
+}
+onScriptsChanged(() => void refreshCache());
+
+/** Record scripts matching a request from a tab; returns the active count. */
+function noteRequestForBadge(tabId: number, url: string): number {
+    if (!/^https?:/i.test(url)) return 0;
+    let set = tabActiveScripts.get(tabId);
+    if (!set) {
+        set = new Set();
+        tabActiveScripts.set(tabId, set);
+    }
+    for (const s of cachedScripts) {
+        if (s.enabled && matchAny(s.meta.match, url)) set.add(s.id);
+    }
+    return set.size;
 }
 
+function activeCountForTab(tabId: number, tabUrl: string | undefined): number {
+    if (!tabUrl || !/^https?:/i.test(tabUrl)) return 0;
+    let set = tabActiveScripts.get(tabId);
+    if (!set) {
+        set = new Set();
+        tabActiveScripts.set(tabId, set);
+    }
+    for (const s of cachedScripts) {
+        if (s.enabled && matchAny(s.meta.match, tabUrl)) set.add(s.id);
+    }
+    return set.size;
+}
 async function updateTabBadge(tabId: number, url: string | undefined): Promise<void> {
-    const n = await countMatching(url);
+    const n = activeCountForTab(tabId, url);
     await badgeSetColor("#4ec9b0", tabId);
     await badgeSetText(n > 0 ? String(n) : "", tabId);
 }
 
 async function updateAllTabs(): Promise<void> {
+    await refreshCache();
     for (const tab of await tabsQueryAll()) {
         if (tab.id !== undefined) void updateTabBadge(tab.id, tab.url);
     }

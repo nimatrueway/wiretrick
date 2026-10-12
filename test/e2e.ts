@@ -165,15 +165,16 @@ await p3.waitForFunction(() => document.body.innerText.includes("RESULT:"), null
 const r3 = await p3.evaluate(() => document.body.innerText.trim());
 check("modifyResponse: fetch (tier A hook)", r3.includes("TIERA-VALUE"), r3);
 
-// badge: /page-fetch matches only the badge probe script
+// badge: /page-fetch page URL + its /api resource — three scripts are
+// active on this tab: badge probe (page), modify hook-tier + response
+// header (both on /api)
 const badge: any = await mgr.evaluate((): Promise<any> => new Promise((r) => {
     chrome.tabs.query({ active: true, currentWindow: false }, (tabs) => {
-        // fall back to any tab on our origin
         if (!tabs.length) { chrome.tabs.query({}, (all) => { const t = all.find((t) => t.url && t.url.includes("/page-fetch")); r({ tabId: t && t.id }); }); return; }
         r({ tabId: tabs[0].id });
     });
 })).then(({ tabId }) => tabId ? mgr.evaluate((tabId) => new Promise((r) => chrome.browserAction.getBadgeText({ tabId }, (t) => r(t))), tabId) : "?");
-check("badge: per-tab active script count", badge === "1", `badge=${JSON.stringify(badge)}`);
+check("badge: per-tab active scripts (page + resources)", badge === "3", `badge=${JSON.stringify(badge)}`);
 await p3.close();
 
 // ---------- 4. modifyResponse via Tier-A hook (XHR) ----------

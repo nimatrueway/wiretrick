@@ -31,7 +31,8 @@ export function createPipeline(
     webRequestStrategy: InterceptionStrategy & { reload(s: Script[]): void },
     chromeBody: ChromeBodyStrategy,
     cdp: CdpStrategy,
-    updateTabBadge?: (tabId: number, url: string | undefined) => Promise<void>
+    updateTabBadge?: (tabId: number, url: string | undefined) => Promise<void>,
+    noteRequestForBadge?: (tabId: number, url: string) => number
 ): Pipeline {
     const tabUrls = new Map<number, string>();
 
@@ -101,10 +102,14 @@ export function createPipeline(
         if (details.type === "main_frame" && tabUrl !== null) {
             void cdp.ensureAttached(details.tabId, details.url);
         }
-        // refresh the badge on every main-frame navigation — covers SPA/hash
-        // navigations and event-page wake-ups that miss tabs.onUpdated
+        // badge: main-frame navigation resets the tab's active-script set,
+        // then every request (page + resources) accumulates matches
         if (details.type === "main_frame") {
+            noteRequestForBadge?.(details.tabId, details.url);
             void updateTabBadge?.(details.tabId, details.url);
+        } else {
+            const n = noteRequestForBadge?.(details.tabId, details.url);
+            if (n !== undefined && n > 0) void updateTabBadge?.(details.tabId, details.url);
         }
 
         const cdpDisposition = { kind: "allow" as const };
