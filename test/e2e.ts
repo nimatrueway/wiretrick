@@ -257,26 +257,27 @@ if (HEADLESS) {
 if (HEADLESS) {
     results.push({ name: "modifyResponse: main frame HTML (CDP tier)", ok: true });
     console.log("SKIP  modifyResponse: main frame HTML (CDP tier) — headed runs only (E2E_HEADLESS=0)");
-} else
-// open via the extension: a playwright session on the tab evicts
-// chrome.debugger. The page reports its h1 back to the test server.
-await mgr.evaluate(() => new Promise((r) => {
-    chrome.runtime.sendMessage({ type: "openTab", url: "http://127.0.0.1:8907/page-title" }, () => r(null));
-}));
-await new Promise((r) => setTimeout(r, 4000));
-await mgr.evaluate(() => new Promise((r) => {
-    chrome.tabs.query({}, (tabs) => {
-        const t = tabs.find((x) => x.url && x.url.includes("/page-title"));
-        if (t && t.id !== undefined) chrome.tabs.reload(t.id, {}, () => r(null));
-        else r(null);
-    });
-}));
-await new Promise((r) => setTimeout(r, 4000));
-const p9m = await ctx.newPage();
-await p9m.goto(`${ORIGIN}/html`, { waitUntil: "domcontentloaded" }).catch(() => {});
-const r9m: string = await p9m.evaluate(async (u) => await (await fetch(u)).text(), `${ORIGIN}/report-value`).catch(() => "(fetch failed)");
-await p9m.close();
-check("modifyResponse: main frame HTML (CDP tier)", r9m === "CDP-HTML-MARKER", `h1=${r9m}`);
+} else {
+    // open via the extension: a playwright session on the tab evicts
+    // chrome.debugger. The page reports its h1 back to the test server.
+    await mgr.evaluate(() => new Promise((r) => {
+        chrome.runtime.sendMessage({ type: "openTab", url: "http://127.0.0.1:8907/page-title" }, () => r(null));
+    }));
+    await new Promise((r) => setTimeout(r, 4000));
+    await mgr.evaluate(() => new Promise((r) => {
+        chrome.tabs.query({}, (tabs) => {
+            const t = tabs.find((x) => x.url && x.url.includes("/page-title"));
+            if (t && t.id !== undefined) chrome.tabs.reload(t.id, {}, () => r(null));
+            else r(null);
+        });
+    }));
+    await new Promise((r) => setTimeout(r, 4000));
+    const p9m = await ctx.newPage();
+    await p9m.goto(`${ORIGIN}/html`, { waitUntil: "domcontentloaded" }).catch(() => {});
+    const r9m: string = await p9m.evaluate(async (u) => await (await fetch(u)).text(), `${ORIGIN}/report-value`).catch(() => "(fetch failed)");
+    await p9m.close();
+    check("modifyResponse: main frame HTML (CDP tier)", r9m === "CDP-HTML-MARKER", `h1=${r9m}`);
+}
 
 // ---------- 10. disable a script → behavior stops ----------
 await setEnabled("s_modifya", false);
