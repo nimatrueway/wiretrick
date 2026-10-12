@@ -5,7 +5,7 @@
 export interface LogEntry {
     tabId: number;
     scriptId: string | null;
-    level: "info" | "warn" | "error";
+    level: "debug" | "info" | "warn" | "error";
     message: string;
     at: number;
 }

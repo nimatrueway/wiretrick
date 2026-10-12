@@ -4,11 +4,13 @@
  * background uses this to stream entries into the manager's LOG panel).
  */
 
+export type DebugLevel = "debug" | "info" | "warn" | "error";
+
 export interface DebugEntry {
     at: number;
     src: string;
     msg: string;
-    level?: "info" | "warn" | "error";
+    level?: DebugLevel;
 }
 
 const MAX = 3000;
@@ -21,22 +23,23 @@ export function setSink(fn: (e: DebugEntry) => void): void {
 }
 
 export function dlog(src: string, ...args: unknown[]): void {
-    let level: DebugEntry["level"] = "info";
-    const msg = args
-        .map((a) => {
-            if (a instanceof Error) {
-                level = "error";
-                return a.message || String(a);
-            }
-            if (typeof a === "string") return a;
-            try {
-                return JSON.stringify(a);
-            } catch {
-                return String(a);
-            }
-        })
-        .join(" ");
-    pushEntry({ at: Date.now(), src, msg, level });
+    dlogLevel(src, "debug", ...args);
+}
+
+/** Explicit-level variant; Errors bump to error automatically. */
+export function dlogLevel(src: string, level: DebugEntry["level"], ...args: unknown[]): void {
+    const inferred = args.find((a) => a instanceof Error) ? "error" : undefined;
+    pushEntry({ at: Date.now(), src, msg: args.map(fmt).join(" "), level: inferred || level });
+}
+
+function fmt(a: unknown): string {
+    if (a instanceof Error) return a.message || String(a);
+    if (typeof a === "string") return a;
+    try {
+        return JSON.stringify(a);
+    } catch {
+        return String(a);
+    }
 }
 
 export function getDebugBuffer(): DebugEntry[] {

@@ -3,6 +3,8 @@
  */
 
 import { loadMonaco, STARTER_TEMPLATE } from "./monacoSetup";
+import { API_REFERENCE } from "./apiReference";
+import { SAMPLES } from "./samples";
 import * as fsBridge from "./fsBridge";
 import type { Script } from "../background/engine/scriptStore";
 
@@ -154,79 +156,79 @@ function connectLogs(): void {
 }
 
 let logFindRe: RegExp | null = null;
+const LEVEL_ORDER: Record<string, number> = { debug: 0, info: 1, warn: 2, error: 3 };
+let minLevel = 1; // info+
+
+function linePassesFilters(text: string, level: string): boolean {
+    if ((LEVEL_ORDER[level] ?? 1) < minLevel) return false;
+    if (logFindRe && !logFindRe.test(text)) return false;
+    return true;
+}
+
+function renderLogLine(line: HTMLElement, text: string, level: string): void {
+    line.dataset.text = text;
+    line.dataset.level = level;
+    line.innerHTML = "";
+    if (!linePassesFilters(text, level)) {
+        line.style.display = "none";
+        return;
+    }
+    line.style.display = "";
+    const badge = document.createElement("span");
+    badge.className = "lv " + level;
+    badge.textContent = level;
+    line.appendChild(badge);
+    if (logFindRe) {
+        const m = text.match(logFindRe);
+        if (m) {
+            const idx = text.indexOf(m[0]);
+            line.append(
+                document.createTextNode(text.slice(0, idx)),
+                Object.assign(document.createElement("mark"), { textContent: m[0] }),
+                document.createTextNode(text.slice(idx + m[0].length))
+            );
+            return;
+        }
+    }
+    line.appendChild(document.createTextNode(text));
+}
 
 function appendLog(entry: any): void {
     const box = $("#log-entries");
     const line = document.createElement("div");
     line.className = "log-line " + entry.level;
-    line.dataset.text = entry.message;
     const time = new Date(entry.at).toLocaleTimeString();
-    const text = `[${time}] ${entry.message}`;
-
-    if (logFindRe) {
-        line.innerHTML = "";
-        const match = text.match(logFindRe);
-        if (!match) {
-            line.style.display = "none";
-        } else {
-            // highlight the first match
-            const idx = text.indexOf(match[0]);
-            if (idx >= 0) {
-                line.append(
-                    document.createTextNode(text.slice(0, idx)),
-                    Object.assign(document.createElement("mark"), { textContent: match[0] }),
-                    document.createTextNode(text.slice(idx + match[0].length))
-                );
-            } else {
-                line.textContent = text;
-            }
-        }
-    } else {
-        line.textContent = text;
-    }
-
+    renderLogLine(line, `[${time}] ${entry.message}`, entry.level || "info");
     box.appendChild(line);
     while (box.children.length > 500) box.removeChild(box.firstChild as Node);
     box.scrollTop = box.scrollHeight;
 }
 
-function makeLogFind(): void {
+function refilterLog(): void {
+    const box = $("#log-entries");
+    for (const line of Array.from(box.children) as HTMLElement[]) {
+        const text = line.dataset.text || line.textContent || "";
+        const level = line.dataset.level || "info";
+        renderLogLine(line, text, level);
+    }
+}
+
+function makeLogFilters(): void {
     const input = $("#log-find") as HTMLInputElement;
     input.addEventListener("input", () => {
         const q = input.value.trim();
         try {
             logFindRe = q ? new RegExp(q, "i") : null;
-            input.style.borderColor = "";
         } catch {
             // fall back to plain substring on invalid regex
             logFindRe = q ? new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") : null;
-            input.style.borderColor = "";
         }
-        // re-apply filtering to existing lines
-        const box = $("#log-entries");
-        for (const line of Array.from(box.children) as HTMLElement[]) {
-            const text = line.dataset.text || line.textContent || "";
-            if (!logFindRe) {
-                line.style.display = "";
-                if (!line.textContent?.startsWith("[")) line.textContent = text;
-                continue;
-            }
-            const m = text.match(logFindRe);
-            const time = text.split("] ")[0] + "]";
-            if (!m) {
-                line.style.display = "none";
-            } else {
-                line.style.display = "";
-                line.innerHTML = "";
-                const idx = text.indexOf(m[0]);
-                line.append(
-                    document.createTextNode(text.slice(0, idx)),
-                    Object.assign(document.createElement("mark"), { textContent: m[0] }),
-                    document.createTextNode(text.slice(idx + m[0].length))
-                );
-                void time;
-            }
-        }
+        refilterLog();
+    });
+    const levelSel = $("#log-level") as HTMLSelectElement;
+    levelSel.addEventListener("change", () => {
+        minLevel = LEVEL_ORDER[levelSel.value] ?? 1;
+        refilterLog();
     });
 }
 
@@ -263,6 +265,104 @@ function send<T = any>(msg: any): Promise<T> {
         }
         throw e;
     });
+}
+
+// ---- dialogs: settings / help / samples ----
+function openDialog(id: string): void {
+    document.getElementById(id)?.classList.remove("hidden");
+}
+function closeDialog(el: Element): void {
+    el.classList.add("hidden");
+}
+
+function setupDialogs(): void {
+    $("#btn-settings").addEventListener("click", () => openDialog("settings-panel"));
+    $("#btn-help").addEventListener("click", () => openDialog("help-panel"));
+    $("#btn-samples").addEventListener("click", () => {
+        renderSamples();
+        openDialog("samples-panel");
+    });
+    for (const overlay of document.querySelectorAll(".overlay")) {
+        overlay.addEventListener("mousedown", (e) => {
+            if (e.target === overlay) closeDialog(overlay);
+        });
+        for (const btn of overlay.querySelectorAll("[data-close]")) {
+            btn.addEventListener("click", () => closeDialog(overlay));
+        }
+    }
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") document.querySelectorAll(".overlay:not(.hidden)").forEach(closeDialog);
+    });
+
+    // settings: default log level
+    const sel = $("#settings-log-level") as HTMLSelectElement;
+    chrome.storage.local.get("resLogLevel", (d) => {
+        if (d && d.resLogLevel) {
+            sel.value = d.resLogLevel;
+            applyLogLevel(d.resLogLevel);
+        }
+    });
+    sel.addEventListener("change", () => {
+        chrome.storage.local.set({ resLogLevel: sel.value });
+        applyLogLevel(sel.value);
+    });
+
+    renderHelp();
+}
+
+function applyLogLevel(level: string): void {
+    const sel = $("#log-level") as HTMLSelectElement;
+    sel.value = level;
+    sel.dispatchEvent(new Event("change"));
+}
+
+function renderHelp(): void {
+    const body = $("#help-body");
+    body.innerHTML = "";
+    for (const section of API_REFERENCE) {
+        const div = document.createElement("div");
+        div.className = "api-section";
+        const title = document.createElement("div");
+        title.className = "api-title";
+        title.textContent = section.title;
+        const pre = document.createElement("pre");
+        pre.textContent = section.body;
+        div.append(title, pre);
+        body.appendChild(div);
+    }
+}
+
+function renderSamples(): void {
+    const body = $("#samples-body");
+    body.innerHTML = "";
+    for (const sample of SAMPLES) {
+        const card = document.createElement("div");
+        card.className = "sample";
+        const head = document.createElement("div");
+        head.className = "sample-head";
+        const name = document.createElement("span");
+        name.className = "sample-name";
+        name.textContent = sample.name;
+        const use = document.createElement("button");
+        use.className = "btn-use";
+        use.textContent = "Use this";
+        use.addEventListener("click", async () => {
+            const id = newId();
+            await send({ type: "saveScript", id, code: sample.code, name: sample.name });
+            await refresh();
+            selectReal(id);
+            document.getElementById("samples-panel")?.classList.add("hidden");
+            status(`sample "${sample.name}" added ✓`);
+        });
+        head.append(name, use);
+        const blurb = document.createElement("div");
+        blurb.className = "sample-blurb";
+        blurb.textContent = sample.blurb;
+        const pre = document.createElement("pre");
+        pre.textContent = sample.code;
+        card.append(head, blurb, pre);
+        body.appendChild(card);
+    }
 }
 
 // ---- dedicated scripts folder: pick once, edits sync both ways ----
@@ -583,8 +683,12 @@ async function main(): Promise<void> {
     makeSplitV();
     makeSplitH();
     makeLogMovable();
-    makeLogFind();
+    makeLogFilters();
     startKeepAlive();
+    setupDialogs();
+    
+
+    // ensure the Tier-B proxy service worker is active
     void autoReconnectFolder();
 
     // remember the manager is open → the background reopens it after an

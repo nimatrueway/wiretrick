@@ -94,7 +94,7 @@ export function createPipeline(
     // ---- webRequest wiring ----
     const onBeforeRequest = (details: any) => {
         const tabUrl = tabUrlFor(details.tabId, details.url);
-        dlog("pipeline", "onBeforeRequest", { url: details.url, type: details.type, tabId: details.tabId });
+        dlog("pipeline", "onBeforeRequest", { url: details.url, type: details.type, tabId: details.tabId }); // debug-level chatter
 
         // let the CDP strategy ensure attachment for main frames
         if (details.type === "main_frame" && tabUrl !== null) {
