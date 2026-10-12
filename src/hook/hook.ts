@@ -87,7 +87,9 @@ import { dlog } from "../shared/debugLog";
         logUp(`bundle: ${scripts ? scripts.length : 0} script(s)`);
         if (!scripts || scripts.length === 0) return;
         compiled = scripts.map((s) => {
-            const script = compileScript(s.code);
+            const script = compileScript(s.code, {
+                log: (...args: any[]) => logUp(`res.log: ${args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")}`),
+            });
             if (script.error) logUp(`compile error in ${s.name}: ${script.error.split("\n")[0]}`);
             return { scriptId: s.scriptId, name: s.name, match: s.match, script };
         });
