@@ -56,17 +56,14 @@ export async function openFolder(getScripts: () => Promise<{ id: string; name: s
     startPolling();
 }
 
-/**
- * Injective file name: sanitized display name + script id suffix, so distinct
- * scripts can never collide and a changed file resolves back to exactly one id.
- */
-export function fileNameFor(id: string, name: string): string {
-    return `${safeName(name)}--${id}.ts`;
+/** File name for a script (script names are assumed unique). */
+export function fileNameFor(_id: string, name: string): string {
+    return safeName(name) + ".ts";
 }
 
-export function idFromFileName(fileName: string): string | null {
-    const m = fileName.match(/--(s_[0-9a-z_]+)\.ts$/);
-    return m ? m[1] : null;
+/** Does this script's display name correspond to this file? */
+export function matchesFile(scriptName: string, fileName: string): boolean {
+    return safeName(scriptName) + ".ts" === fileName;
 }
 
 export function stopSync(): void {

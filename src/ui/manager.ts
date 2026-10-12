@@ -197,8 +197,7 @@ async function main(): Promise<void> {
             }
             await fsBridge.openFolder(async () => scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code })));
             (window as any).__resFbOnFileChanged = async (fileName: string, js: string) => {
-                const id = fsBridge.idFromFileName(fileName);
-                const target = id ? scripts.find((s) => s.id === id) : undefined;
+                const target = scripts.find((s) => fsBridge.matchesFile(s.meta.name, fileName));
                 if (!target) return;
                 await send({ type: "saveScript", id: target.id, code: js, name: target.meta.name });
                 await refresh();
