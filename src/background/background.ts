@@ -27,7 +27,7 @@ const chromeBody = new ChromeBodyStrategy();
 const cdp = new CdpStrategy();
 cdp.isClaimed = (url: string) => chromeBody.isClaimed(url);
 
-createPipeline(webRequestStrategy, chromeBody, cdp);
+createPipeline(webRequestStrategy, chromeBody, cdp, updateTabBadge);
 
 // ---- manager UI port: logs stream over it ----
 chrome.runtime.onConnect.addListener((port) => {

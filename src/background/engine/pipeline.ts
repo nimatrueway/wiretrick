@@ -30,7 +30,8 @@ interface ScriptWithSources extends Script {
 export function createPipeline(
     webRequestStrategy: InterceptionStrategy & { reload(s: Script[]): void },
     chromeBody: ChromeBodyStrategy,
-    cdp: CdpStrategy
+    cdp: CdpStrategy,
+    updateTabBadge?: (tabId: number, url: string | undefined) => Promise<void>
 ): Pipeline {
     const tabUrls = new Map<number, string>();
 
@@ -99,6 +100,11 @@ export function createPipeline(
         // let the CDP strategy ensure attachment for main frames
         if (details.type === "main_frame" && tabUrl !== null) {
             void cdp.ensureAttached(details.tabId, details.url);
+        }
+        // refresh the badge on every main-frame navigation — covers SPA/hash
+        // navigations and event-page wake-ups that miss tabs.onUpdated
+        if (details.type === "main_frame") {
+            void updateTabBadge?.(details.tabId, details.url);
         }
 
         const cdpDisposition = { kind: "allow" as const };
