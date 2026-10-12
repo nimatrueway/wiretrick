@@ -179,12 +179,12 @@ res.modifyResponse((ctx, body) => body.replace("foo", "bar"));`),
         expect(s.handleBeforeRequest(details({ type: "script", url: "https://cdn.example.com/lib.js" }), null).kind).toBe("allow");
     });
 
-    it("main_frame is never proxied", () => {
+    it("main_frame goes through the CDP tier", () => {
         const s = new ChromeBodyStrategy();
         s.reload([
             makeScript("a", `// @match *\nres.modifyResponse((ctx, body) => body);`),
         ]);
-        expect(s.handleBeforeRequest(details({ type: "main_frame" }), null).kind).toBe("allow");
+        expect(s.handleBeforeRequest(details({ type: "main_frame" }), null).kind).toBe("needsCdp");
     });
 
     it("cdp-strategy scripts are left to tier C", () => {

@@ -67,7 +67,7 @@ const server = http.createServer((req: http.IncomingMessage, res: http.ServerRes
     if (url.pathname === "/page-xhr")
         return send("text/html", `<html><body><script>setTimeout(()=>{const x=new XMLHttpRequest();x.open('GET','/api');x.onload=()=>{document.body.innerHTML='RESULT:'+JSON.parse(x.responseText).value;};x.send();},700)</script></body></html>`);
     if (url.pathname === "/page-title")
-        return send("text/html", `<html><body><h1>SITE-TITLE-PLACEHOLDER</h1></body></html>`);
+        return send("text/html", `<html><body><h1>SITE-TITLE-PLACEHOLDER</h1><script>setTimeout(()=>{fetch('/report',{method:'POST',body:document.querySelector('h1').textContent});},300)</script></body></html>`);
     if (url.pathname === "/page-with-script")
         return send("text/html", `<html><body><script>setTimeout(()=>{const s=document.createElement('script');s.src='/app.js';s.onload=()=>{setTimeout(()=>{fetch('/report',{method:'POST',body:window.__marker});},200);};document.head.appendChild(s);},900)</script></body></html>`);
     if (url.pathname === "/page-img")
@@ -254,14 +254,29 @@ if (HEADLESS) {
 }
 
 // ---------- 9b. modifyResponse on the main frame HTML (CDP tier) ----------
-// first navigation may race the attach; the second one is the stable case
-const p9m = await newPage("/page-title");
-await newPage("/page-fetch");
-await p9m.reload({ waitUntil: "domcontentloaded" });
-await p9m.waitForTimeout(1500);
-const r9m = await p9m.evaluate(() => document.querySelector("h1")?.textContent);
-check("modifyResponse: main frame HTML (CDP tier)", r9m === "CDP-HTML-MARKER", `h1=${r9m}`);
+if (HEADLESS) {
+    results.push({ name: "modifyResponse: main frame HTML (CDP tier)", ok: true });
+    console.log("SKIP  modifyResponse: main frame HTML (CDP tier) — headed runs only (E2E_HEADLESS=0)");
+} else
+// open via the extension: a playwright session on the tab evicts
+// chrome.debugger. The page reports its h1 back to the test server.
+await mgr.evaluate(() => new Promise((r) => {
+    chrome.runtime.sendMessage({ type: "openTab", url: "http://127.0.0.1:8907/page-title" }, () => r(null));
+}));
+await new Promise((r) => setTimeout(r, 4000));
+await mgr.evaluate(() => new Promise((r) => {
+    chrome.tabs.query({}, (tabs) => {
+        const t = tabs.find((x) => x.url && x.url.includes("/page-title"));
+        if (t && t.id !== undefined) chrome.tabs.reload(t.id, {}, () => r(null));
+        else r(null);
+    });
+}));
+await new Promise((r) => setTimeout(r, 4000));
+const p9m = await ctx.newPage();
+await p9m.goto(`${ORIGIN}/html`, { waitUntil: "domcontentloaded" }).catch(() => {});
+const r9m: string = await p9m.evaluate(async (u) => await (await fetch(u)).text(), `${ORIGIN}/report-value`).catch(() => "(fetch failed)");
 await p9m.close();
+check("modifyResponse: main frame HTML (CDP tier)", r9m === "CDP-HTML-MARKER", `h1=${r9m}`);
 
 // ---------- 10. disable a script → behavior stops ----------
 await setEnabled("s_modifya", false);

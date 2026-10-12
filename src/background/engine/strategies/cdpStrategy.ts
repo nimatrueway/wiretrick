@@ -61,15 +61,25 @@ export class CdpStrategy {
     async ensureAttached(tabId: number, mainFrameUrl: string | null): Promise<void> {
         if (!mainFrameUrl || !this.shouldAttach(mainFrameUrl) || this.attached.has(tabId)) return;
         dlog("cdp", "ensureAttached", { tabId, mainFrameUrl, scripts: this.scripts.map((s) => s.name) });
-        try {
-            await debuggerAttach(tabId);
-            await debuggerSend(tabId, "Fetch.enable", { patterns: [{ requestStage: "Response" }] });
-            this.attached.add(tabId);
-            dlog("cdp", "attached + Fetch.enabled", { tabId });
-            log(tabId, "[Tier C] debugger attached (CDP body interception active)", "warn");
-        } catch (e: any) {
-            dlog("cdp", "ATTACH FAILED", { tabId, error: e.message || e });
-            log(tabId, `[Tier C] debugger attach failed: ${e.message || e}`, "error");
+        for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+                await debuggerAttach(tabId);
+                await debuggerSend(tabId, "Fetch.enable", { patterns: [{ requestStage: "Response" }] });
+                this.attached.add(tabId);
+                dlog("cdp", "attached + Fetch.enabled", { tabId, attempt });
+                log(tabId, "[Tier C] debugger attached (CDP body interception active)", "warn");
+                return;
+            } catch (e: any) {
+                // another debugger evicted us between attach and enable —
+                // retry once before giving up
+                dlog("cdp", `attach attempt ${attempt} failed`, { tabId, error: e.message || e });
+                if (attempt === 1) {
+                    dlog("cdp", "ATTACH FAILED", { tabId, error: e.message || e });
+                    log(tabId, `[Tier C] debugger attach failed: ${e.message || e}`, "error");
+                    return;
+                }
+                await new Promise((r) => setTimeout(r, 150));
+            }
         }
     }
 
