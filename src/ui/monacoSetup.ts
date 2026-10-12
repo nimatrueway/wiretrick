@@ -8,6 +8,13 @@ let monacoApi: any = null;
 export async function loadMonaco(): Promise<any> {
     if (monacoApi) return monacoApi;
 
+    // Monaco's AMD build wraps workers in a blob URL, which the extension CSP
+    // blocks — point it at the real worker file instead.
+    (window as any).MonacoEnvironment = {
+        getWorkerUrl: () =>
+            chrome.runtime.getURL("lib/monaco/vs/base/worker/workerMain.js"),
+    };
+
     const resApiDts = await fetch(chrome.runtime.getURL("lib/res-api.d.ts")).then((r) => r.text());
 
     await new Promise<void>((resolve, reject) => {
