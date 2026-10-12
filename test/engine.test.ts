@@ -135,11 +135,14 @@ res.onResponseHeaders(() => ({ headers: { set: { "access-control-allow-origin": 
         expect(changes!.remove).toEqual(["x-frame-options"]);
     });
 
-    it("request header modification via onRequest", () => {
+    it("request header modification via onRequest (run once, cached for header phase)", () => {
         const s = new WebRequestStrategy();
-        s.reload([
-            makeScript("a", `// @match *://api.example.com/*\nres.onRequest(() => ({ headers: { set: { authorization: "Bearer x" } } }));`),
-        ]);
+        const code = `// @match *://api.example.com/*\nres.onRequest(() => ({ headers: { set: { authorization: "Bearer x" } } }));`;
+        s.reload([makeScript("a", code)]);
+        // header phase alone does nothing (cache empty — onRequest hasn't run)
+        expect(s.handleBeforeSendHeaders(details(), null)).toBeNull();
+        // request phase runs onRequest and caches the header mods
+        s.handleBeforeRequest(details(), null);
         const changes = s.handleBeforeSendHeaders(details(), null);
         expect(changes!.set).toEqual({ authorization: "Bearer x" });
     });

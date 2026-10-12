@@ -187,10 +187,10 @@ async function main(): Promise<void> {
                 btn.textContent = "VS Code…";
                 return;
             }
-            await fsBridge.openFolder(async () => scripts.map((s) => ({ name: s.meta.name, code: s.code })));
+            await fsBridge.openFolder(async () => scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code })));
             (window as any).__resFbOnFileChanged = async (fileName: string, js: string) => {
-                const name = fileName.replace(/\.ts$/, "");
-                const target = scripts.find((s) => s.meta.name.replace(/[^a-zA-Z0-9_-]+/g, "_").slice(0, 60) === name);
+                const id = fsBridge.idFromFileName(fileName);
+                const target = id ? scripts.find((s) => s.id === id) : undefined;
                 if (!target) return;
                 await send({ type: "saveScript", id: target.id, code: js, name: target.meta.name });
                 status(`hot-reloaded ${fileName} from VS Code ✓`);

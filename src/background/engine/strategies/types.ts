@@ -28,8 +28,8 @@ export type HookDisposition =
 
 export interface BodyScriptInfo {
     scriptId: string;
-    /** serialized modifyResponse transform source */
-    transformSrc: string;
+    /** full script source — hook/proxy compile it locally so closures survive */
+    code: string;
     meta: import("../../../shared/metaParser").ResMeta;
 }
 
@@ -56,6 +56,9 @@ export interface InterceptionStrategy {
      * to obtain the transform for an original URL).
      */
     getTransformsForUrl(url: string, tabUrl: string | null): BodyScriptInfo[];
+
+    /** free per-request caches for a request that will never complete normally */
+    pruneRequest?(requestId: string): void;
 
     dispose(): void;
 }

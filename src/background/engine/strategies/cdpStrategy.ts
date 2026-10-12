@@ -5,7 +5,7 @@
  * requests are in flight for a matching script.
  */
 import { matchAny } from "../../../shared/matcher";
-import { compileScript, serializeHandlers } from "../../../shared/compile";
+import { compileScript, type HandlerFn } from "../../../shared/compile";
 import type { Script } from "../scriptStore";
 import { log } from "../logs";
 
@@ -13,7 +13,7 @@ interface CdpScript {
     scriptId: string;
     name: string;
     match: string[];
-    transformSrc: string;
+    transform: HandlerFn;
 }
 
 export class CdpStrategy {
@@ -26,9 +26,13 @@ export class CdpStrategy {
         for (const s of scripts) {
             if (!s.enabled || s.meta.strategy !== "cdp") continue;
             const c = compileScript(s.code);
-            const src = serializeHandlers(c).modifyResponse;
-            if (src) {
-                this.scripts.push({ scriptId: s.id, name: s.meta.name, match: s.meta.match, transformSrc: src });
+            if (c.handlers.modifyResponse) {
+                this.scripts.push({
+                    scriptId: s.id,
+                    name: s.meta.name,
+                    match: s.meta.match,
+                    transform: c.handlers.modifyResponse,
+                });
             }
         }
     }
@@ -81,7 +85,6 @@ export class CdpStrategy {
             }
 
             for (const s of cdpScripts) {
-                const fn = new Function(`return (${s.transformSrc});`)();
                 const ctx = {
                     url,
                     method: request.method,
@@ -92,7 +95,7 @@ export class CdpStrategy {
                     contentType: headers["content-type"],
                 };
                 try {
-                    const out = await fn(ctx, body);
+                    const out = await s.transform(ctx, body);
                     if (out !== undefined && out !== null) body = out;
                 } catch (e: any) {
                     log(tabId, `[${s.name}] modifyResponse (cdp) threw: ${e.message || e}`, "error", s.scriptId);

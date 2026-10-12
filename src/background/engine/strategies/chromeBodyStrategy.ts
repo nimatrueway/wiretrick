@@ -27,7 +27,7 @@ interface BodyScriptEntry {
     scriptId: string;
     name: string;
     match: string[];
-    transformSrc: string;
+    code: string;
     strategy: string;
 }
 
@@ -43,13 +43,12 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
             if (!s.enabled) continue;
             if (!/res\s*\.\s*modifyResponse|res\s*\.\s*replaceResponse/.test(s.code)) continue;
             const compiled = compileScript(s.code);
-            const src = serializeHandlers(compiled).modifyResponse;
-            if (!src) continue;
+            if (!compiled.handlers.modifyResponse) continue;
             this.bodyScripts.push({
                 scriptId: s.id,
                 name: s.meta.name,
                 match: s.meta.match,
-                transformSrc: src,
+                code: s.code,
                 strategy: s.meta.strategy,
             });
         }
@@ -82,7 +81,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
     getTransformsForUrl(url: string, _tabUrl: string | null): BodyScriptInfo[] {
         return this.matchingBodyScripts(url).map((s) => ({
             scriptId: s.scriptId,
-            transformSrc: s.transformSrc,
+            code: s.code,
             meta: {
                 name: s.name,
                 match: s.match,
@@ -121,7 +120,9 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
         }
 
         // Tier B: redirect to the extension proxy service worker.
-        const proxyUrl = chrome.runtime.getURL(PROXY_PATH + encodeURIComponent(details.url) + "&rt=" + details.type);
+        const proxyUrl =
+            chrome.runtime.getURL(PROXY_PATH + encodeURIComponent(details.url)) +
+            "&rt=" + details.type + "&m=" + encodeURIComponent(details.method);
         log(details.tabId, `[Tier B] proxying ${shortUrl(details.url)} through extension proxy`, "info");
         return { kind: "redirect", url: proxyUrl };
     }

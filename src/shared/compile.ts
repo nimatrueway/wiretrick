@@ -19,6 +19,8 @@ export interface CompiledScript {
     meta: ResMeta;
     handlers: ScriptHandlers;
     error: string | null;
+    /** original full source */
+    code: string;
 }
 
 export interface HandlerSources {
@@ -28,17 +30,22 @@ export interface HandlerSources {
     modifyResponse: string | null;
 }
 
+export interface ResApiOverrides {
+    storage?: { get(key: string): Promise<any>; set(key: string, value: any): Promise<void> };
+    log?: (...args: any[]) => void;
+}
+
 /** Compile from full source (background storage path). */
-export function compileScript(code: string): CompiledScript {
+export function compileScript(code: string, overrides?: ResApiOverrides): CompiledScript {
     const meta = parseMeta(code);
     try {
         // eslint-disable-next-line no-new-func
         const fn = new Function("res", `"use strict";\n${code}`);
         const store = createCollector();
-        fn(makeCollectorShim(store));
-        return { meta, handlers: store, error: null };
+        fn(makeCollectorShim(store, overrides));
+        return { meta, handlers: store, error: null, code };
     } catch (e: any) {
-        return { meta, handlers: emptyHandlers(), error: e && e.stack ? e.stack : String(e) };
+        return { meta, handlers: emptyHandlers(), error: e && e.stack ? e.stack : String(e), code };
     }
 }
 
@@ -62,7 +69,7 @@ export function compileFromSources(meta: ResMeta, sources: HandlerSources): Comp
             }
         }
     }
-    return { meta, handlers: store, error: null };
+    return { meta, handlers: store, error: null, code: "" };
 }
 
 /** Serialize compiled handlers so they can be shipped to hook/proxy contexts. */
@@ -93,16 +100,16 @@ function createCollector(): ScriptHandlers {
     };
 }
 
-function makeCollectorShim(store: any) {
+function makeCollectorShim(store: any, overrides?: ResApiOverrides) {
     return {
         onRequest: (fn: HandlerFn) => (store.onRequest = fn),
         onResponseHeaders: (fn: HandlerFn) => (store.onResponseHeaders = fn),
         replaceResponse: (fn: HandlerFn) => (store.replaceResponse = fn),
         modifyResponse: (fn: HandlerFn) => (store.modifyResponse = fn),
-        storage: {
+        storage: overrides?.storage || {
             get: () => undefined,
             set: () => undefined,
         },
-        log: (...args: any[]) => console.log("[ResScript]", ...args),
+        log: overrides?.log || ((...args: any[]) => console.log("[ResScript]", ...args)),
     };
 }

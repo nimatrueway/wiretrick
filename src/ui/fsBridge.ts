@@ -26,7 +26,7 @@ export function isSyncing(): boolean {
     return state !== null;
 }
 
-export async function openFolder(getScripts: () => Promise<{ name: string; code: string }[]>): Promise<void> {
+export async function openFolder(getScripts: () => Promise<{ id: string; name: string; code: string }[]>): Promise<void> {
     const dirHandle = await (window as any).showDirectoryPicker({ mode: "readwrite" });
     state = { dirHandle, known: new Map() };
 
@@ -50,10 +50,23 @@ export async function openFolder(getScripts: () => Promise<{ name: string; code:
         )
     );
     for (const s of scripts) {
-        await writeText(dirHandle, safeName(s.name) + ".ts", s.code);
+        await writeText(dirHandle, fileNameFor(s.id, s.name), s.code);
     }
     await refreshKnown();
     startPolling();
+}
+
+/**
+ * Injective file name: sanitized display name + script id suffix, so distinct
+ * scripts can never collide and a changed file resolves back to exactly one id.
+ */
+export function fileNameFor(id: string, name: string): string {
+    return `${safeName(name)}--${id}.ts`;
+}
+
+export function idFromFileName(fileName: string): string | null {
+    const m = fileName.match(/--(s_[0-9a-z_]+)\.ts$/);
+    return m ? m[1] : null;
 }
 
 export function stopSync(): void {
@@ -74,11 +87,6 @@ function startPolling(): void {
             console.error("[fsBridge] poll failed:", e.message || e);
         }
     }, POLL_MS);
-}
-
-export interface ChangedScript {
-    fileName: string;
-    code: string; // transpiled javascript-ready source (with metadata block intact)
 }
 
 async function pollOnce(): Promise<void> {

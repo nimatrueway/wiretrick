@@ -23,6 +23,10 @@ const entries = [
         output: { file: path.join(dist, "hook.js"), format: "iife" },
     },
     {
+        input: path.join(root, "src/hook/bridge.ts"),
+        output: { file: path.join(dist, "bridge.js"), format: "iife" },
+    },
+    {
         input: path.join(root, "src/proxy/proxy-sw.ts"),
         output: { file: path.join(dist, "sw.js"), format: "iife" },
     },

@@ -51,23 +51,28 @@ export function createPipeline(
         headers: { name: string; value?: string }[],
         changes: HeaderChanges
     ): { name: string; value?: string }[] {
-        const removeSet = new Set((changes.remove || []).map((n) => n.toLowerCase()));
-        const out = headers
-            .filter((h) => !removeSet.has(h.name.toLowerCase()))
-            .map((h) => {
-                const lower = h.name.toLowerCase();
-                if (changes.set && lower in changes.set) {
-                    return { name: h.name, value: changes.set[lower] };
+        // normalize set keys case-insensitively, preserving original casing
+        // for headers that end up appended
+        const setMap = new Map<string, { name: string; value: string }>();
+        for (const [name, value] of Object.entries(changes.set || {})) {
+            setMap.set(name.toLowerCase(), { name, value });
+        }
+        const removeSet = new Set([...(changes.remove || []).map((n) => n.toLowerCase()), ...setMap.keys()]);
+        const out: { name: string; value?: string }[] = [];
+        for (const h of headers) {
+            const lower = h.name.toLowerCase();
+            if (removeSet.has(lower)) {
+                const replacement = setMap.get(lower);
+                if (replacement) {
+                    out.push({ name: h.name, value: replacement.value });
+                    setMap.delete(lower);
                 }
-                return h;
-            });
-        if (changes.set) {
-            const existing = new Set(out.map((h) => h.name.toLowerCase()));
-            for (const [name, value] of Object.entries(changes.set)) {
-                if (!existing.has(name.toLowerCase())) {
-                    out.push({ name, value });
-                }
+                continue;
             }
+            out.push(h);
+        }
+        for (const replacement of setMap.values()) {
+            out.push({ name: replacement.name, value: replacement.value });
         }
         return out;
     }
@@ -123,13 +128,22 @@ export function createPipeline(
     chrome.webRequest.onBeforeSendHeaders.addListener(onBeforeSendHeaders, FILTER, ["requestHeaders", "blocking"]);
     chrome.webRequest.onHeadersReceived.addListener(onHeadersReceived, FILTER, ["responseHeaders", "blocking"]);
 
+    // per-request caches must not leak for requests that never reach the
+    // response-header phase
+    const onDone = (details: any) => {
+        webRequestStrategy.pruneRequest?.(details.requestId);
+    };
+    chrome.webRequest.onCompleted.addListener(onDone, FILTER);
+    chrome.webRequest.onErrorOccurred.addListener(onDone, FILTER);
+
     // ---- manager protocol ----
     function injectName(code: string, name: string): string {
         if (!name) return code;
         if (/^\s*\/\/\s*@name\s+.*$/m.test(code)) {
             return code.replace(/^(\s*\/\/\s*@name\s+).*$/m, `$1${name}`);
         }
-        return code;
+        // no @name line: inject one so the manager's name sticks
+        return `// @name ${name}\n${code}`;
     }
 
     chrome.runtime.onMessage.addListener((msg: any, _sender, sendResponse) => {
@@ -162,15 +176,15 @@ export function createPipeline(
             return false;
         }
         if (msg && msg.type === "getHookBundle") {
-            // everything the page hook needs for this tab URL
+            // full script sources: the hook compiles them itself so handlers
+            // keep their `res` binding and top-level scope
             const bundle = {
                 scripts: chromeBody.matchingBodyScripts(msg.url).map((s) => ({
                     scriptId: s.scriptId,
                     name: s.name,
                     match: s.match,
-                    transformSrc: s.transformSrc,
+                    code: s.code,
                 })),
-                headerScripts: [] as any[],
             };
             sendResponse(bundle);
             return false;
@@ -181,7 +195,7 @@ export function createPipeline(
                 transforms: scripts.map((s) => ({
                     scriptId: s.scriptId,
                     name: s.meta.name,
-                    transformSrc: s.transformSrc,
+                    code: s.code,
                 })),
             });
             return false;
@@ -209,6 +223,8 @@ export function createPipeline(
             chrome.webRequest.onBeforeRequest.removeListener(onBeforeRequest);
             chrome.webRequest.onBeforeSendHeaders.removeListener(onBeforeSendHeaders);
             chrome.webRequest.onHeadersReceived.removeListener(onHeadersReceived);
+            chrome.webRequest.onCompleted.removeListener(onDone);
+            chrome.webRequest.onErrorOccurred.removeListener(onDone);
             webRequestStrategy.dispose();
             chromeBody.dispose();
         },

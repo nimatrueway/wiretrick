@@ -19,53 +19,68 @@ const IS_FIREFOX = typeof (globalThis as any).browser !== "undefined" &&
 export class WebRequestStrategy implements InterceptionStrategy {
     readonly name = "webrequest";
 
-    private compiled: CompiledScript[] = [];
+    private compiled: { id: string; compiled: CompiledScript }[] = [];
 
     reload(scripts: Script[]): void {
-        this.compiled = scripts.filter((s) => s.enabled).map((s) => {
-            const c = compileScript(s.code);
-            c.meta = s.meta;
-            if (c.error) scriptError(s.id, c.error);
-            return c;
-        });
+        this.compiled = scripts
+            .filter((s) => s.enabled)
+            .map((s) => {
+                const compiled = compileScript(s.code, {
+                    storage: {
+                        get: (key: string) => scriptStorageGet(s.id, key),
+                        set: (key: string, value: any) => scriptStorageSet(s.id, key, value),
+                    },
+                });
+                compiled.meta = s.meta;
+                if (compiled.error) scriptError(s.id, compiled.error);
+                return { id: s.id, compiled };
+            });
+    }
+
+    /** Free per-request caches (also called by the pipeline on error/complete). */
+    pruneRequest(requestId: string): void {
+        pendingFirefoxStreams.delete(requestId);
+        pendingRequestHeaderMods.delete(requestId);
     }
 
     supportsBodyModification(): boolean {
         return IS_FIREFOX;
     }
 
-    private scriptsFor(url: string, phase: "request" | "response"): CompiledScript[] {
+    private scriptsFor(url: string, phase: "request" | "response"): { id: string; compiled: CompiledScript }[] {
         return this.compiled.filter(
-            (c) => matchAny(c.meta.match, url) && c.meta.phase.includes(phase)
+            (c) => matchAny(c.compiled.meta.match, url) && c.compiled.meta.phase.includes(phase)
         );
     }
 
     handleBeforeRequest(details: WebRequestDetailsLike, tabUrl: string | null): HookDisposition {
-        for (const script of this.scriptsFor(details.url, "request")) {
-            if (tabUrl && !matchAny(tabUrl === details.url ? ["<all>"] : script.meta.match, tabUrl) && script.meta.match.length === 0) {
-                continue;
-            }
+        for (const entry of this.scriptsFor(details.url, "request")) {
+            const script = entry.compiled;
             try {
                 if (script.handlers.onRequest) {
                     const result = script.handlers.onRequest(makeCtx(details, tabUrl));
-                    if (result && (result.redirect || result.cancel || result.headers)) {
-                        log(details.tabId, `[${script.meta.name}] onRequest → ${JSON.stringify(result).slice(0, 200)}`, "info", scriptIdOf(script));
+                    // cache header mods so onBeforeSendHeaders doesn't re-run the handler
+                    if (result && result.headers && (result.headers.set || result.headers.remove)) {
+                        pendingRequestHeaderMods.set(details.requestId, result.headers);
+                    }
+                    if (result && (result.redirect || result.cancel)) {
+                        log(details.tabId, `[${script.meta.name}] onRequest → ${JSON.stringify(result).slice(0, 200)}`, "info", entry.id);
                         return normalize(result);
                     }
                 }
                 if (script.handlers.replaceResponse) {
                     const replacement = script.handlers.replaceResponse(makeCtx(details, tabUrl));
                     if (replacement !== undefined && replacement !== null) {
-                        return this.staticReplace(details, script, replacement);
+                        return this.staticReplace(details, script, replacement, entry.id);
                     }
                 }
                 if (script.handlers.modifyResponse && IS_FIREFOX) {
                     // Firefox: stream via filterResponseData at onHeadersReceived time;
                     // here we only mark the request so the header-phase hook wires the filter.
-                    pendingFirefoxStreams.set(details.requestId, script);
+                    pendingFirefoxStreams.set(details.requestId, { entry, tabUrl });
                 }
             } catch (e: any) {
-                scriptError(scriptIdOf(script), `onRequest threw: ${e.message || e}`);
+                scriptError(entry.id, `onRequest threw: ${e.message || e}`);
             }
         }
         return { kind: "allow" };
@@ -80,18 +95,18 @@ export class WebRequestStrategy implements InterceptionStrategy {
         const pending = pendingFirefoxStreams.get(details.requestId);
         if (pending && IS_FIREFOX) {
             pendingFirefoxStreams.delete(details.requestId);
-            this.wireFirefoxStream(details, pending, tabUrl);
+            this.wireFirefoxStream(details, pending.entry.compiled, pending.tabUrl ?? tabUrl, pending.entry.id);
         }
         return this.collectHeaderChanges(details, tabUrl, "response", "headers");
     }
 
-    getTransformsForUrl(url: string, tabUrl: string | null): BodyScriptInfo[] {
+    getTransformsForUrl(url: string, _tabUrl: string | null): BodyScriptInfo[] {
         return this.scriptsFor(url, "request")
-            .filter((s) => s.handlers.modifyResponse)
-            .map((s) => ({
-                scriptId: scriptIdOf(s),
-                transformSrc: s.handlers.modifyResponse!.toString(),
-                meta: s.meta,
+            .filter((e) => e.compiled.handlers.modifyResponse)
+            .map((e) => ({
+                scriptId: e.id,
+                code: e.compiled.code,
+                meta: e.compiled.meta,
             }));
     }
 
@@ -99,14 +114,14 @@ export class WebRequestStrategy implements InterceptionStrategy {
         this.compiled = [];
     }
 
-    private staticReplace(details: WebRequestDetailsLike, script: CompiledScript, replacement: any): HookDisposition {
+    private staticReplace(details: WebRequestDetailsLike, script: CompiledScript, replacement: any, scriptId: string): HookDisposition {
         const mimeFor = (fileRef: string | null) =>
             fileRef
                 ? guessMime(fileRef, details.url)
                 : guessMime(null, details.url, details.type === "xmlhttprequest" ? "application/json" : undefined);
 
         const serve = (mime: string, content: string | Uint8Array) => {
-            log(details.tabId, `[${script.meta.name}] replaceResponse → ${mime} (${content.length} bytes)`, "info", scriptIdOf(script));
+            log(details.tabId, `[${script.meta.name}] replaceResponse → ${mime} (${content.length} bytes)`, "info", scriptId);
             return { kind: "redirect" as const, url: toDataUrl(mime, content) } as HookDisposition;
         };
 
@@ -130,15 +145,21 @@ export class WebRequestStrategy implements InterceptionStrategy {
     ): HeaderChanges | null {
         let changes: HeaderChanges | null = null;
         const ctxPhase = phase === "response" ? "response" : "request";
-        for (const script of this.scriptsFor(details.url, ctxPhase)) {
-            const handler = ctxPhase === "response" ? script.handlers.onResponseHeaders : script.handlers.onRequest;
+
+        // request-phase header mods were computed once in handleBeforeRequest
+        if (ctxPhase === "request") {
+            const cached = pendingRequestHeaderMods.get(details.requestId);
+            if (cached) return { ...cached };
+            return null;
+        }
+
+        for (const entry of this.scriptsFor(details.url, ctxPhase)) {
+            const handler = entry.compiled.handlers.onResponseHeaders;
             if (!handler) continue;
             try {
                 const ctx = makeCtx(details, tabUrl);
-                if (ctxPhase === "response") {
-                    (ctx as any).statusLine = details.statusLine || "";
-                    (ctx as any).responseHeaders = details.responseHeaders || [];
-                }
+                (ctx as any).statusLine = details.statusLine || "";
+                (ctx as any).responseHeaders = details.responseHeaders || [];
                 const result = handler(ctx);
                 const mods = result?.headers;
                 if (mods && (mods.set || mods.remove)) {
@@ -147,13 +168,13 @@ export class WebRequestStrategy implements InterceptionStrategy {
                     changes.remove = [...(changes.remove || []), ...(mods.remove || [])];
                 }
             } catch (e: any) {
-                scriptError(scriptIdOf(script), `header handler threw: ${e.message || e}`);
+                scriptError(entry.id, `header handler threw: ${e.message || e}`);
             }
         }
         return changes;
     }
 
-    private wireFirefoxStream(details: WebRequestDetailsLike, script: CompiledScript, tabUrl: string | null): void {
+    private wireFirefoxStream(details: WebRequestDetailsLike, script: CompiledScript, tabUrl: string | null, scriptId: string): void {
         try {
             const filter = ((globalThis as any).browser?.webRequest ?? chrome.webRequest).filterResponseData(details.requestId);
             const decoder = new TextDecoder("utf-8");
@@ -176,14 +197,14 @@ export class WebRequestStrategy implements InterceptionStrategy {
                     const out = await script.handlers.modifyResponse!(ctx, body);
                     body = out === undefined || out === null ? body : out;
                 } catch (e: any) {
-                    scriptError(scriptIdOf(script), `modifyResponse threw: ${e.message || e}`);
+                    scriptError(scriptId, `modifyResponse threw: ${e.message || e}`);
                 }
                 const outBytes = typeof body === "string" ? encoder.encode(body) : body;
                 filter.write(outBytes);
                 filter.close();
             };
         } catch (e: any) {
-            scriptError(scriptIdOf(script), `filterResponseData failed: ${e.message || e}`);
+            scriptError(scriptId, `filterResponseData failed: ${e.message || e}`);
         }
     }
 }
@@ -202,11 +223,6 @@ export function makeCtx(details: WebRequestDetailsLike, tabUrl: string | null): 
         resourceType: details.type,
         requestHeaders: headers,
     };
-}
-
-export function scriptIdOf(_s: CompiledScript): string {
-    // CompiledScripts don't carry ids; logs use the script name instead.
-    return "";
 }
 
 export function normalize(result: any): HookDisposition {
@@ -266,4 +282,7 @@ function looksBinary(bytes: Uint8Array): boolean {
 }
 
 /** requestId → script awaiting a Firefox stream filter */
-const pendingFirefoxStreams = new Map<string, CompiledScript>();
+const pendingFirefoxStreams = new Map<string, { entry: { id: string; compiled: CompiledScript }; tabUrl: string | null }>();
+
+/** requestId → request header mods already computed by onRequest (issue: run once) */
+const pendingRequestHeaderMods = new Map<string, HeaderChanges>();
