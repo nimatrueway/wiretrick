@@ -313,6 +313,21 @@ html, body {
 }
 #btn-save:disabled { opacity: 0.4; cursor: default; }
 
+#btn-open-vscode {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 4px 8px;
+    cursor: pointer;
+}
+#btn-open-vscode:hover { border-color: var(--accent); background: var(--bg-hover); }
+#btn-open-vscode:disabled { opacity: 0.4; cursor: default; }
+#btn-open-vscode:disabled:hover { border-color: var(--border); background: var(--bg); }
+#btn-open-vscode svg { display: block; }
+
 #monaco-host {
     flex: 1;
     min-height: 0;
