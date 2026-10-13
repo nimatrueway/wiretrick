@@ -131,6 +131,13 @@ function setEditorValue(code: string): void {
     status("saved ✓");
 }
 
+/** Enable ↗ VS Code only while folder sync is active and a script is selected. */
+function updateOpenVscode(): void {
+    const b = $("#btn-open-vscode") as HTMLButtonElement;
+    if ((window as any).__resSyncActive && selectedId) b.removeAttribute("disabled");
+    else b.setAttribute("disabled", "");
+}
+
 function selectReal(id: string): void {
     selectedId = id;
     renderList();
@@ -141,6 +148,7 @@ function selectReal(id: string): void {
     $("#btn-save").removeAttribute("disabled");
     setEditorValue(script.code);
     setDirty(false);
+    updateOpenVscode();
 }
 
 async function saveCurrent(): Promise<void> {
@@ -478,6 +486,7 @@ async function markFolderSynced(): Promise<void> {
     btn.textContent = "Scripts Folder ✓";
     (window as any).__resSyncActive = true;
     fsBridge.setCachedActive(true);
+    updateOpenVscode();
     const st = await fsBridge.queryStatus();
     $("#folder-state").textContent = st.path || "(syncing)";
 }
@@ -663,6 +672,14 @@ async function main(): Promise<void> {
     });
 
     $("#btn-save").addEventListener("click", () => void saveCurrent());
+    $("#btn-open-vscode").addEventListener("click", () => {
+        const script = scripts.find((s) => s.id === selectedId);
+        if (!script) return;
+        chrome.runtime.sendMessage({ type: "openInVscode", fileName: fsBridge.fileNameFor(script.id, script.meta.name) }, (r: any) => {
+            if (!r || !r.ok) status(r?.error || "could not open in VS Code");
+            else status(`opened ${fsBridge.fileNameFor(script.id, script.meta.name)} in VS Code`);
+        });
+    });
     $("#btn-new").addEventListener("click", async () => {
         const id = uuid();
         await send({ type: "saveScript", id, code: STARTER_TEMPLATE, name: "My first script" });
@@ -707,6 +724,7 @@ async function main(): Promise<void> {
                 btn.classList.remove("active");
                 btn.textContent = "Scripts Folder…";
                 $("#folder-state").textContent = "";
+                updateOpenVscode();
                 return;
             }
             await fsBridge.openFolder(async () => scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code })));
