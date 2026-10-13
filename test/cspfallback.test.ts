@@ -20,9 +20,9 @@ describe("hook CSP-blocked fallback", () => {
         const s = new ChromeBodyStrategy();
         s.reload([makeScript("a", `// @match *\nres.modifyResponse((c, b) => b);`)]);
         s.markHookReady(7);
-        expect(s.handleBeforeRequest(xhr(), null).kind).toBe("allow");
+        expect((s.handleBeforeRequest(xhr(), null) as any).kind).toBe("allow");
         s.markHookBroken(7);
-        expect(s.handleBeforeRequest(xhr(), null).kind).toBe("needsCdp");
+        expect((s.handleBeforeRequest(xhr(), null) as any).kind).toBe("needsCdp");
     });
 
     it("forgetTab clears the broken state (fresh navigation can retry the hook)", () => {
@@ -32,6 +32,6 @@ describe("hook CSP-blocked fallback", () => {
         s.markHookBroken(7);
         s.forgetTab(7);
         // after forgetting, cold-start fallback still routes to CDP (safe)
-        expect(s.handleBeforeRequest(xhr(), null).kind).toBe("needsCdp");
+        expect((s.handleBeforeRequest(xhr(), null) as any).kind).toBe("needsCdp");
     });
 });

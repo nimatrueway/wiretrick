@@ -8,12 +8,15 @@ import type { ChromeBodyStrategy } from "./strategies/chromeBodyStrategy";
 import type { CdpStrategy } from "./strategies/cdpStrategy";
 import type { HeaderChanges } from "./strategies/types";
 import type { Script } from "./scriptStore";
-import { listScripts, onScriptsChanged, saveScript, deleteScript, setEnabled, newId } from "./scriptStore";
+import { listScripts, onScriptsChanged, saveScript, deleteScript, setEnabled, newId, scriptStorageGet, scriptStorageSet } from "./scriptStore";
+import { compileScript } from "../../shared/compile";
+import { matchAny } from "../../shared/matcher";
 import { serveStore } from "./strategies/webRequestStrategy";
 import { dlogLevel } from "../../shared/debugLog";
 import { isThenable } from "../../shared/compile";
 import { toRunnableJs } from "../../shared/compile";
 import "../../shared/transpile";
+void toRunnableJs;
 import { log } from "./logs";
 import { serializeHandlers, type HandlerSources } from "../../shared/compile";
 
@@ -29,6 +32,8 @@ export interface Pipeline {
 interface ScriptWithSources extends Script {
     _sources?: HandlerSources;
 }
+
+let _lastActiveScriptId = "";
 
 export function createPipeline(
     webRequestStrategy: InterceptionStrategy & { reload(s: Script[]): void },
@@ -258,30 +263,68 @@ export function createPipeline(
             return false;
         }
         if (msg && msg.type === "getHookBundle") {
+            void (async () => {
             // full script sources: the hook compiles them itself so handlers
             // keep their `res` binding and top-level scope
             // ship ALL enabled body scripts — body transforms match request
             // URLs, not the page URL, so the hook filters per-request itself
             // deliver runnable JS: the page hook has no TS compiler
-            const bundle = {
-                scripts: chromeBody.allBodyScripts().map((s) => ({
-                    scriptId: s.scriptId,
-                    name: s.name,
-                    match: s.match,
-                    code: toRunnableJs(s.code),
-                })),
-            };
-            dlogLevel("pipeline", "debug", "getHookBundle responding", { count: bundle.scripts.length, url: msg.url });
-            sendResponse(bundle);
-            return false;
+            // Transforms run in the background (the hook is eval-free and
+            // immune to page CSP). onDom handler SOURCES ship to the page:
+            // onDom needs the page's window, so it runs in the MAIN world
+            // when the page CSP allows, with the bridge as the fallback.
+            const domHandlers: { name: string; when: string; src: string }[] = [];
+            {
+                const pageScripts = await listScripts();
+                for (const s of pageScripts) {
+                    if (!s.enabled || !matchAny(s.meta.match, msg.url || "")) continue;
+                    const compiled = compileScript(s.code);
+                    if (compiled.handlers.onDom) {
+                        _lastActiveScriptId = s.id;
+                        domHandlers.push({
+                            name: s.meta.name,
+                            when: (compiled.handlers as any).onDomOptions?.when || "DOMContentLoaded",
+                            src: compiled.handlers.onDom.toString(),
+                        });
+                    }
+                }
+            }
+            dlogLevel("pipeline", "debug", "getHookBundle responding", {
+                count: chromeBody.allBodyScripts().length,
+                dom: domHandlers.length,
+                url: msg.url,
+            });
+                sendResponse({ count: chromeBody.allBodyScripts().length, domHandlers });
+            })();
+            return true; // async sendResponse above
+        }
+        if (msg && msg.type === "scriptStorageGet") {
+            scriptStorageGet(_lastActiveScriptId, msg.key).then((value: any) => sendResponse({ value }));
+            return true;
+        }
+        if (msg && msg.type === "scriptStorageSet") {
+            scriptStorageSet(_lastActiveScriptId, msg.key, msg.value).then(() => sendResponse({}));
+            return true;
+        }
+        if (msg && msg.type === "runTransform") {
+            chromeBody
+                .runTransform(msg.url, msg.method || "GET", msg.body || "", { status: msg.status, contentType: msg.contentType })
+                .then((body) => sendResponse({ body }));
+            return true;
+        }
+        if (msg && msg.type === "runReplace") {
+            chromeBody.runReplace(msg.url, msg.method || "GET").then((r) => sendResponse(r || { content: null }));
+            return true;
         }
         if (msg && msg.type === "getProxyTransform") {
             const scripts = chromeBody.getTransformsForUrl(msg.url, null);
+            // proxy tier is MV3-reserved; code omitted on MV2 (the MV2
+            // service worker cannot intercept page-initiated loads)
             sendResponse({
                 transforms: scripts.map((s) => ({
                     scriptId: s.scriptId,
                     name: s.meta.name,
-                    code: toRunnableJs(s.code),
+                    code: "",
                 })),
             });
             return false;

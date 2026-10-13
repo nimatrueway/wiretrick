@@ -29,7 +29,10 @@ interface BodyScriptEntry {
     scriptId: string;
     name: string;
     match: string[];
-    code: string;
+    /** compiled modifyResponse transform (async awaited) */
+    transform: (ctx: any, body: any) => any;
+    /** compiled replaceResponse handler, if registered */
+    replace: ((ctx: any) => any) | undefined;
     /** comma-separated strategy priority list, e.g. "hook,cdp" */
     strategy: string;
 }
@@ -58,10 +61,51 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
                 scriptId: s.id,
                 name: s.meta.name,
                 match: s.meta.match,
-                code: s.code,
+                transform: compiled.handlers.modifyResponse,
+                replace: compiled.handlers.replaceResponse || undefined,
                 strategy: s.meta.strategy,
             });
         }
+    }
+
+    /** Hook tier: chained modifyResponse over the body (async handlers awaited). */
+    async runTransform(url: string, method: string, body: string, extra?: { status?: number; contentType?: string }): Promise<string | null> {
+        let out: string | Uint8Array = body;
+        let touched = false;
+        for (const s of this.matchingBodyScripts(url)) {
+            try {
+                const result: any = await s.transform(
+                    { url, method, tabUrl: url, resourceType: "xmlhttprequest", requestHeaders: {}, contentType: extra?.contentType, status: extra?.status },
+                    out
+                );
+                if (result !== undefined && result !== null) {
+                    out = typeof result === "string" ? result : result instanceof Uint8Array ? result : JSON.stringify(result);
+                    touched = true;
+                }
+            } catch (e: any) {
+                log(-1, `script.console: transform ${s.name} threw: ${e.message || e}`, "error", s.scriptId);
+            }
+        }
+        return touched ? (typeof out === "string" ? out : new TextDecoder().decode(out)) : null;
+    }
+
+    /** Hook tier: first replaceResponse handler's result, or null. */
+    async runReplace(url: string, method: string): Promise<{ mime: string; content: string } | null> {
+        for (const s of this.matchingBodyScripts(url)) {
+            if (!s.replace) continue;
+            try {
+                const out = await s.replace({ url, method, tabUrl: url, resourceType: "xmlhttprequest", requestHeaders: {} });
+                if (out !== undefined && out !== null) {
+                    const content = out && typeof out === "object" && (out as any).file ? (out as any).file : out;
+                    const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "";
+                    const mimes: Record<string, string> = { js: "application/javascript", json: "application/json", css: "text/css", html: "text/html", xml: "application/xml" };
+                    return { mime: mimes[ext] || "application/json", content: typeof content === "string" ? content : String(content) };
+                }
+            } catch (e: any) {
+                log(-1, `script.console: replaceResponse ${s.name} threw: ${e.message || e}`, "error", s.scriptId);
+            }
+        }
+        return null;
     }
 
     supportsBodyModification(): boolean {
@@ -112,7 +156,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
     getTransformsForUrl(url: string, _tabUrl: string | null): BodyScriptInfo[] {
         return this.matchingBodyScripts(url).map((s) => ({
             scriptId: s.scriptId,
-            code: s.code,
+            code: "",
             meta: {
                 name: s.name,
                 match: s.match,
