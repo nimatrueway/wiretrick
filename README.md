@@ -6,6 +6,14 @@ scripts (Violentmonkey/Tampermonkey style) that declare which URLs they activate
 and what they do — redirect requests, modify request/response headers, transform
 response bodies, or replace them entirely. Each script has an enable/disable toggle.
 
+**The manager** (script list, Monaco editor with IntelliSense, live LOG panel):
+
+![ResScript manager — script list, Monaco editor, LOG panel](docs/shots/manager.png)
+
+**The popup** (toolbar quick-toggle for the active tab's scripts):
+
+![ResScript popup — scripts active on the current tab](docs/shots/popup.png)
+
 ## Writing scripts
 
 ```ts
