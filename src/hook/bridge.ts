@@ -68,53 +68,55 @@
         }
     });
 
-    // ---- res.onDom: compiled in this isolated world, DOM shared with page ----
-    interface DomHandler { name: string; when: string; src: string }
-
-    function compileHandler(src: string): ((ctx: any) => any) | null {
-        try {
-            return new Function(`return (${src});`)();
-        } catch (e: any) {
-            dlog("onDom compile failed:", e.message || e);
-            return null;
-        }
-    }
-
-    function makeShim() {
-        return {
-            log: (...args: any[]) => {
-                const msg = args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
-                try {
-                    chrome.runtime.sendMessage(
-                        { type: "debugLog", entry: { at: Date.now(), src: "hook", msg: `res.log: ${msg}` } },
-                        () => void chrome.runtime.lastError
-                    );
-                } catch {}
-            },
-            storage: {
-                get: (key: string) => new Promise((r) => chrome.runtime.sendMessage({ type: "scriptStorageGet", key }, (x: any) => r(x && x.value))),
-                set: (key: string, value: any) => new Promise((r) => chrome.runtime.sendMessage({ type: "scriptStorageSet", key, value }, () => r(null))),
-            },
-        };
-    }
-
-    function fetchDomHandlers(): Promise<DomHandler[]> {
-        return new Promise((resolve) => {
-            chrome.runtime.sendMessage({ type: "getDomHandlers", url: location.href }, (resp: any) => {
-                resolve((resp && resp.handlers) || []);
-            });
-        });
-    }
+    // ---- res.onDom fallback (isolated world): compiles the FULL script
+    // source with a shim so top-level helpers/closures survive; the DOM is
+    // shared with the page, window (page JS globals) is not ----
+    interface DomHandler { scriptId: string; name: string; when: string; src: string }
 
     async function runDomHandlers(hot: boolean): Promise<void> {
-        const handlers = await fetchDomHandlers();
-        dlog(`onDom: ${handlers.length} handler(s)${hot ? " (hot update refire)" : ""}`);
+        // handlers come embedded in the hook bundle (getHookBundle)
+        const bundle = await new Promise<any>((resolve) => {
+            chrome.runtime.sendMessage({ type: "getHookBundle", url: location.href }, (r: any) => resolve(r || { domHandlers: [] }));
+        });
+        const handlers: DomHandler[] = bundle.domHandlers || [];
+        dlog(`onDom (isolated fallback): ${handlers.length} script(s)${hot ? " (hot refire)" : ""}`);
         for (const h of handlers) {
-            const fn = compileHandler(h.src);
-            if (!fn) continue;
+            const store: any = { onDom: null, onDomOptions: {} };
+            const shim = {
+                onRequest: () => {},
+                onResponseHeaders: () => {},
+                replaceResponse: () => {},
+                modifyResponse: () => {},
+                onDom: (fn: any, opts?: any) => {
+                    store.onDom = fn;
+                    store.onDomOptions = opts || {};
+                },
+                log: (...args: any[]) => {
+                    const msg = args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
+                    try {
+                        chrome.runtime.sendMessage(
+                            { type: "debugLog", entry: { at: Date.now(), src: "hook", msg: `res.log: ${msg}` } },
+                            () => void chrome.runtime.lastError
+                        );
+                    } catch {}
+                },
+                storage: {
+                    get: (key: string) =>
+                        new Promise((r) => chrome.runtime.sendMessage({ type: "scriptStorageGet", scriptId: h.scriptId, key }, (x: any) => r(x && x.value))),
+                    set: (key: string, value: any) =>
+                        new Promise((r) => chrome.runtime.sendMessage({ type: "scriptStorageSet", scriptId: h.scriptId, key, value }, () => r(null))),
+                },
+            };
+            try {
+                new Function("res", `"use strict";\n${h.src}`)(shim);
+            } catch (e: any) {
+                dlog(`onDom ${h.name} compile failed (isolated):`, e.message || e);
+                continue;
+            }
+            if (!store.onDom) continue;
             const run = () => {
                 try {
-                    fn({ url: location.href, method: "GET", tabUrl: location.href, ...makeShim() });
+                    store.onDom({ url: location.href, method: "GET", tabUrl: location.href });
                 } catch (e: any) {
                     dlog(`onDom ${h.name} threw: ${e.message || e}`);
                 }
@@ -125,7 +127,6 @@
                 if (document.readyState === "complete") run();
                 else window.addEventListener("load", run, { once: true });
             } else {
-                // DOMContentLoaded / document_end
                 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", run, { once: true });
                 else run();
             }

@@ -33,8 +33,6 @@ interface ScriptWithSources extends Script {
     _sources?: HandlerSources;
 }
 
-let _lastActiveScriptId = "";
-
 export function createPipeline(
     webRequestStrategy: InterceptionStrategy & { reload(s: Script[]): void },
     chromeBody: ChromeBodyStrategy,
@@ -273,18 +271,20 @@ export function createPipeline(
             // immune to page CSP). onDom handler SOURCES ship to the page:
             // onDom needs the page's window, so it runs in the MAIN world
             // when the page CSP allows, with the bridge as the fallback.
-            const domHandlers: { name: string; when: string; src: string }[] = [];
+            const domHandlers: { scriptId: string; name: string; when: string; src: string }[] = [];
             {
                 const pageScripts = await listScripts();
                 for (const s of pageScripts) {
                     if (!s.enabled || !matchAny(s.meta.match, msg.url || "")) continue;
                     const compiled = compileScript(s.code);
                     if (compiled.handlers.onDom) {
-                        _lastActiveScriptId = s.id;
+                        // FULL transpiled source: the runner compiles it with
+                        // a shim so top-level helpers/closures survive
                         domHandlers.push({
+                            scriptId: s.id,
                             name: s.meta.name,
                             when: (compiled.handlers as any).onDomOptions?.when || "DOMContentLoaded",
-                            src: compiled.handlers.onDom.toString(),
+                            src: toRunnableJs(s.code),
                         });
                     }
                 }
@@ -299,11 +299,11 @@ export function createPipeline(
             return true; // async sendResponse above
         }
         if (msg && msg.type === "scriptStorageGet") {
-            scriptStorageGet(_lastActiveScriptId, msg.key).then((value: any) => sendResponse({ value }));
+            scriptStorageGet(msg.scriptId, msg.key).then((value: any) => sendResponse({ value }));
             return true;
         }
         if (msg && msg.type === "scriptStorageSet") {
-            scriptStorageSet(_lastActiveScriptId, msg.key, msg.value).then(() => sendResponse({}));
+            scriptStorageSet(msg.scriptId, msg.key, msg.value).then(() => sendResponse({}));
             return true;
         }
         if (msg && msg.type === "runTransform") {

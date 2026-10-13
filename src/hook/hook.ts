@@ -16,7 +16,7 @@
 
     let active = false; // any body scripts exist (bundle metadata says so)
     let patched = false;
-    let domHandlers: { name: string; when: string; src: string }[] = [];
+    let domHandlers: { scriptId: string; name: string; when: string; src: string }[] = [];
     let domFired = false;
     let reqSeq = 0;
     const pending = new Map<number, (v: any) => void>();
@@ -77,18 +77,23 @@
 
     /**
      * onDom handlers compile in THIS world (MAIN) so the handler sees the
-     * page's window (window.PARAMS etc.). Sources are background-transpiled
-     * plain JS. If the page CSP forbids eval, report it — the bridge then
-     * runs the handlers in the isolated world (shared DOM, no page window).
+     * page's window (window.PARAMS etc.). The FULL script source is
+     * compiled with a shim, so top-level helpers/closures survive. If the
+     * page CSP forbids eval, report it — the bridge then runs the whole
+     * script in the isolated world (shared DOM, no page window).
      */
     function compileAndScheduleDom(hot: boolean): void {
         if (domHandlers.length === 0) return;
         const compiledDom: { name: string; when: string; fn: (ctx: any) => any }[] = [];
         let cspBlocked = false;
         for (const d of domHandlers) {
+            const store: any = { onDom: null, onDomOptions: {} };
             try {
-                const fn = new Function(`return (${d.src});`)();
-                compiledDom.push({ name: d.name, when: d.when, fn });
+                const fn = new Function("res", `"use strict";\n${d.src}`);
+                fn(makeDomShim(d.scriptId, store));
+                if (store.onDom) {
+                    compiledDom.push({ name: d.name, when: store.onDomOptions.when || "DOMContentLoaded", fn: store.onDom });
+                }
             } catch (e: any) {
                 if (/Evaluating a string as JavaScript|unsafe-eval/i.test(e.message || "")) {
                     cspBlocked = true;
@@ -137,6 +142,25 @@
         try {
             window.postMessage({ source: HOOK_SOURCE, kind: "status?" }, window.location.origin);
         } catch {}
+    }
+
+    /** shim for compiled dom scripts: log → logUp, storage → bridge relay */
+    function makeDomShim(scriptId: string, store: any): any {
+        return {
+            onRequest: (f: any) => {},
+            onResponseHeaders: (f: any) => {},
+            replaceResponse: (f: any) => {},
+            modifyResponse: (f: any) => {},
+            onDom: (f: any, opts?: any) => {
+                store.onDom = f;
+                store.onDomOptions = opts || {};
+            },
+            log: (...args: any[]) => logUp(`res.log: ${args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")}`),
+            storage: {
+                get: (key: string) => viaBridge({ op: "storageGet", scriptId, key }),
+                set: (key: string, value: any) => viaBridge({ op: "storageSet", scriptId, key, value }),
+            },
+        };
     }
 
     function claim(url: string): void {
@@ -230,12 +254,27 @@
         (window.XMLHttpRequest.prototype as any).open = function (...args: any[]) {
             this.__resUrl = args[1];
             this.__resMethod = args[0] || "GET";
+            this.__resSync = args[2] === false;
+            this.__resHeaders = {};
             return OrigOpen.apply(this, args as any);
+        };
+        const OrigSetReqHeader = XMLHttpRequest.prototype.setRequestHeader;
+        (window.XMLHttpRequest.prototype as any).setRequestHeader = function (k: string, v: string) {
+            (this.__resHeaders ||= {})[k] = v;
+            return OrigSetReqHeader.call(this, k, v);
         };
 
         (window.XMLHttpRequest.prototype as any).send = function (...args: any[]) {
             const xhr = this as any;
             if (!active || !xhr.__resUrl) {
+                return OrigSend.apply(this, args as any);
+            }
+            // only text-shaped XHRs are shim-able; async only (sync XHRs
+            // cannot await the transform round-trip)
+            if (xhr.responseType !== "" && xhr.responseType !== "text") {
+                return OrigSend.apply(this, args as any);
+            }
+            if (xhr.__resSync === true) {
                 return OrigSend.apply(this, args as any);
             }
 
@@ -247,40 +286,58 @@
             }
             claim(absUrl);
 
-            const origOnRsc = xhr.onreadystatechange;
-            xhr.onreadystatechange = function (ev: any) {
-                if (xhr.readyState !== 4) {
-                    if (origOnRsc) origOnRsc.call(xhr, ev);
-                    return;
-                }
-                // async pipeline: onreadystatechange-property consumers get
-                // the transformed body; addEventListener("load") consumers
-                // may observe the original (platform limitation)
-                void (async () => {
-                    try {
-                        const repl = await viaBridge({ op: "replace", url: absUrl, method: xhr.__resMethod });
-                        if (repl && repl.content !== null && repl.content !== undefined) {
-                            redefineBody(xhr, String(repl.content));
-                            if (origOnRsc) origOnRsc.call(xhr, ev);
-                            return;
-                        }
-                        const raw = xhr.response;
-                        if (typeof raw !== "string" && raw !== null && raw !== "") {
-                            if (origOnRsc) origOnRsc.call(xhr, ev);
-                            return;
-                        }
-                        const out = await viaBridge({ op: "transform", url: absUrl, method: xhr.__resMethod, body: typeof raw === "string" ? raw : "", status: xhr.status });
-                        if (out && typeof out.body === "string" && out.body !== raw) {
-                            redefineBody(xhr, out.body);
-                        }
-                    } catch (e: any) {
-                        logUp(`xhr pipeline error: ${e.message || e}`, "error");
-                    }
-                    if (origOnRsc) origOnRsc.call(xhr, ev);
-                })();
-            };
+            // BECOME the transport: fetch (patched → replace/transform
+            // applies), then populate the xhr and dispatch the events
+            // ourselves — onload/addEventListener consumers see the result
+            void (async () => {
+                try {
+                    const headers: Record<string, string> = {};
+                    for (const [k, v] of Object.entries(xhr.__resHeaders || {})) headers[k] = String(v);
+                    const method = (xhr.__resMethod || "GET").toUpperCase();
+                    const body = args[0] ?? null;
 
-            return OrigSend.apply(this, args as any);
+                    // 1. replace short-circuit
+                    const repl = await viaBridge({ op: "replace", url: absUrl, method });
+                    let status = 200;
+                    let statusText = "OK";
+                    let respHeaders = new Headers({ "content-type": repl?.mime || "text/plain" });
+                    let text: string;
+
+                    if (repl && repl.content !== null && repl.content !== undefined) {
+                        text = String(repl.content);
+                    } else {
+                        // 2. real request via patched fetch (transform applies)
+                        const resp = await w.fetch(absUrl, { method, headers, body });
+                        status = resp.status;
+                        statusText = resp.statusText;
+                        respHeaders = resp.headers;
+                        text = await resp.text();
+                        // 3. transform round-trip
+                        const out = await viaBridge({ op: "transform", url: absUrl, method, body: text, status });
+                        if (out && typeof out.body === "string" && out.body !== text) text = out.body;
+                    }
+
+                    Object.defineProperty(xhr, "readyState", { get: () => 4, configurable: true });
+                    Object.defineProperty(xhr, "status", { get: () => status, configurable: true });
+                    Object.defineProperty(xhr, "statusText", { get: () => statusText, configurable: true });
+                    redefineBody(xhr, text);
+                    const headerLines = [...respHeaders.entries()].map(([k, v]) => `${k}: ${v}`).join("\r\n");
+                    Object.defineProperty(xhr, "getAllResponseHeaders", {
+                        value: () => headerLines,
+                        configurable: true,
+                    });
+
+                    if (typeof xhr.onreadystatechange === "function") xhr.onreadystatechange({ target: xhr } as any);
+                    xhr.dispatchEvent(new Event("readystatechange"));
+                    if (typeof xhr.onload === "function") xhr.onload({ target: xhr } as any);
+                    xhr.dispatchEvent(new ProgressEvent("load"));
+                    xhr.dispatchEvent(new ProgressEvent("loadend"));
+                } catch (e: any) {
+                    logUp(`xhr shim failed: ${e.message || e}`, "error");
+                    // fall back to the native path
+                    OrigSend.apply(xhr, args as any);
+                }
+            })();
         };
     }
 
@@ -291,6 +348,33 @@
                 Object.defineProperty(xhr, "response", { get: () => newText, configurable: true });
             }
         } catch {}
+    }
+
+    // ---- page console capture (static — no eval) ----
+    {
+        const CAP = 2000;
+        let captured = 0;
+        const wrap = (method: string, level: "info" | "warn" | "error") => {
+            const orig = (console as any)[method];
+            (console as any)[method] = function (...args: any[]) {
+                orig.apply(console, args);
+                if (captured >= CAP) return;
+                const first = String(args[0] ?? "");
+                if (first.startsWith("[res:")) return; // our own chatter
+                captured++;
+                try {
+                    const msg = args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
+                    window.postMessage(
+                        { source: HOOK_SOURCE, kind: "log", msg: `page.console: ${msg.slice(0, 300)}`, level },
+                        window.location.origin
+                    );
+                } catch {}
+            };
+        };
+        wrap("log", "info");
+        wrap("info", "info");
+        wrap("warn", "warn");
+        wrap("error", "error");
     }
 
     requestStatus();
