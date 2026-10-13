@@ -57,19 +57,6 @@ chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
         sendResponse(folderSync.getStatus());
         return false;
     }
-    if (msg && msg.type === "openInVscode") {
-        const st = folderSync.getStatus();
-        if (!st.active || !st.path || !msg.fileName) {
-            sendResponse({ ok: false, error: "Scripts Folder sync is not active" });
-            return false;
-        }
-        // external-protocol launch: Chrome resolves vscode:// via the OS
-        // handler (prompts once, then opens the file in VS Code)
-        const file = st.path.replace(/\/+$/, "") + "/" + msg.fileName;
-        chrome.tabs.create({ url: "vscode://file" + file.split("/").map(encodeURIComponent).join("/") });
-        sendResponse({ ok: true });
-        return false;
-    }
     if (msg && msg.type === "folderWriteBack") {
         folderSync.writeBack(msg.fileName, msg.content).then(() => sendResponse({}));
         return true;

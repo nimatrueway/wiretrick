@@ -488,6 +488,7 @@ async function markFolderSynced(): Promise<void> {
     fsBridge.setCachedActive(true);
     updateOpenVscode();
     const st = await fsBridge.queryStatus();
+    (window as any).__resSyncPath = st.path || "";
     $("#folder-state").textContent = st.path || "(syncing)";
 }
 
@@ -674,11 +675,17 @@ async function main(): Promise<void> {
     $("#btn-save").addEventListener("click", () => void saveCurrent());
     $("#btn-open-vscode").addEventListener("click", () => {
         const script = scripts.find((s) => s.id === selectedId);
-        if (!script) return;
-        chrome.runtime.sendMessage({ type: "openInVscode", fileName: fsBridge.fileNameFor(script.id, script.meta.name) }, (r: any) => {
-            if (!r || !r.ok) status(r?.error || "could not open in VS Code");
-            else status(`opened ${fsBridge.fileNameFor(script.id, script.meta.name)} in VS Code`);
-        });
+        const folder = (window as any).__resSyncPath as string;
+        if (!script || !folder) return;
+        const file = folder.replace(/\/+$/, "") + "/" + fsBridge.fileNameFor(script.id, script.meta.name);
+        // launch from THIS page (user gesture): external-protocol requests
+        // from the background page are dropped by Chromium
+        const a = document.createElement("a");
+        a.href = "vscode://file" + file.split("/").map(encodeURIComponent).join("/");
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        status(`opening ${file} in VS Code…`);
     });
     $("#btn-new").addEventListener("click", async () => {
         const id = uuid();
