@@ -52,6 +52,7 @@ html, body {
     border-left: 1px solid var(--border);
 }
 #log-header { cursor: move; }
+#log-header select, #log-header input, #log-header button { cursor: auto; }
 
 /* ---- sidebar ---- */
 #sidebar {

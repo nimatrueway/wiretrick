@@ -588,10 +588,10 @@ function makeSplitH(): void {
 function makeLogMovable(): void {
     const header = $("#log-header");
     header.addEventListener("mousedown", (e) => {
-        // don't start a drag from the find input or the clear button —
-        // preventDefault would block focusing the input
+        // don't start a drag from the find input, level select, or the
+        // clear button — preventDefault would block focusing/opening them
         const tag = (e.target as HTMLElement).tagName;
-        if (tag === "BUTTON" || tag === "INPUT") return;
+        if (tag === "BUTTON" || tag === "INPUT" || tag === "SELECT" || tag === "OPTION") return;
         e.preventDefault();
         const startX = e.clientX;
         const app = document.getElementById("app");
