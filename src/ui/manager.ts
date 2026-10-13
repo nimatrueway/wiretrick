@@ -158,6 +158,7 @@ function connectLogs(): void {
 let logFindRe: RegExp | null = null;
 const LEVEL_ORDER: Record<string, number> = { debug: 0, info: 1, warn: 2, error: 3 };
 let minLevel = 1; // info+
+let logCap = 500; // rendered lines kept in the DOM
 
 function linePassesFilters(text: string, level: string): boolean {
     if ((LEVEL_ORDER[level] ?? 1) < minLevel) return false;
@@ -199,7 +200,7 @@ const logEntries: { text: string; level: string }[] = [];
 function appendLog(entry: any): void {
     const time = new Date(entry.at).toLocaleTimeString();
     logEntries.push({ text: `[${time}] ${entry.message}`, level: entry.level || "info" });
-    if (logEntries.length > 2000) logEntries.splice(0, logEntries.length - 2000);
+    if (logEntries.length > 2000) logEntries.splice(0, logEntries.length - 2000); // absolute buffer cap
 
     const text = logEntries[logEntries.length - 1].text;
     const level = logEntries[logEntries.length - 1].level;
@@ -210,7 +211,7 @@ function appendLog(entry: any): void {
     line.className = "log-line " + level;
     renderLogLine(line, text, level);
     box.appendChild(line);
-    while (box.children.length > 500) box.removeChild(box.firstChild as Node);
+    while (box.children.length > logCap) box.removeChild(box.firstChild as Node);
     box.scrollTop = box.scrollHeight;
 }
 
@@ -224,7 +225,7 @@ function refilterLog(): void {
         renderLogLine(line, text, level);
         box.appendChild(line);
     }
-    while (box.children.length > 500) box.removeChild(box.firstChild as Node);
+    while (box.children.length > logCap) box.removeChild(box.firstChild as Node);
     box.scrollTop = box.scrollHeight;
 }
 
@@ -320,6 +321,22 @@ function setupDialogs(): void {
     sel.addEventListener("change", () => {
         chrome.storage.local.set({ resLogLevel: sel.value });
         applyLogLevel(sel.value);
+    });
+
+    // panel history size
+    const capInput = $("#settings-log-cap") as HTMLInputElement;
+    chrome.storage.local.get("resLogCap", (d) => {
+        if (d && d.resLogCap) {
+            logCap = d.resLogCap;
+            capInput.value = String(logCap);
+        }
+    });
+    capInput.addEventListener("change", () => {
+        const n = Math.max(100, Math.min(10000, Number(capInput.value) || 500));
+        capInput.value = String(n);
+        logCap = n;
+        chrome.storage.local.set({ resLogCap: n });
+        refilterLog();
     });
 
     renderHelp();
