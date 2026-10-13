@@ -12,12 +12,33 @@
 export type Phase = "request" | "response";
 export type Strategy = "auto" | "hook" | "proxy" | "cdp" | "webrequest";
 
+/**
+ * @strategy accepts a comma-separated priority list, e.g.
+ *   @strategy hook,cdp       (try the page hook first, then the debugger)
+ *   @strategy cdp            (debugger only)
+ *   @strategy auto           (engine default: hook → proxy → cdp)
+ * A single name is just a one-element list.
+ */
+export type StrategyList = Strategy[];
+
+export function parseStrategyList(raw: string | StrategyList | undefined): StrategyList {
+    if (!raw) return ["auto"];
+    if (Array.isArray(raw)) return raw;
+    const valid: Strategy[] = ["auto", "hook", "proxy", "cdp", "webrequest"];
+    const out = raw
+        .split(",")
+        .map((x) => x.trim().toLowerCase())
+        .filter((x): x is Strategy => valid.includes(x as Strategy));
+    return out.length ? out : ["auto"];
+}
+
 export interface ResMeta {
     name: string;
     match: string[];
     include: string[];
     phase: Phase[];
-    strategy: Strategy;
+    /** raw @strategy value (comma-separated list) */
+    strategy: string;
     runAt: string;
     /** false (via `@mainframes off`) = never intercept main-frame HTML (no debugger banner) */
     mainFrames: boolean;
@@ -35,6 +56,11 @@ export const DEFAULT_META: ResMeta = {
 
 const VALID_PHASES: Phase[] = ["request", "response"];
 const VALID_STRATEGIES: Strategy[] = ["auto", "hook", "proxy", "cdp", "webrequest"];
+
+function sanitizeStrategyList(raw: string): string {
+    const parts = parseStrategyList(raw).filter((x) => VALID_STRATEGIES.includes(x));
+    return parts.length ? parts.join(",") : "auto";
+}
 
 export function parseMeta(code: string): ResMeta {
     const meta: ResMeta = { ...DEFAULT_META, match: [], include: [], phase: [] };
@@ -66,8 +92,7 @@ export function parseMeta(code: string): ResMeta {
                 }
             }
             if (key === "strategy") {
-                const s = value.toLowerCase() as Strategy;
-                if (VALID_STRATEGIES.includes(s)) meta.strategy = s;
+                meta.strategy = sanitizeStrategyList(value);
             }
             if (key === "mainframes") {
                 meta.mainFrames = value.toLowerCase() !== "off";
@@ -104,11 +129,9 @@ export function parseMeta(code: string): ResMeta {
                 }
                 break;
             }
-            case "strategy": {
-                const s = value.toLowerCase() as Strategy;
-                if (VALID_STRATEGIES.includes(s)) meta.strategy = s;
+            case "strategy":
+                meta.strategy = sanitizeStrategyList(value);
                 break;
-            }
             case "run-at":
                 meta.runAt = value;
                 break;

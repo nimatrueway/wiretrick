@@ -30,6 +30,7 @@ interface BodyScriptEntry {
     name: string;
     match: string[];
     code: string;
+    /** comma-separated strategy priority list, e.g. "hook,cdp" */
     strategy: string;
     /** @mainframes off → never intercept main-frame HTML (no debugger) */
     mainFrames: boolean;
@@ -129,37 +130,66 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
             return { kind: "allow" };
         }
 
-        if (matching.some((s) => s.strategy === "cdp")) {
-            return { kind: "allow" }; // cdpStrategy owns these
+        // walk each matching script's strategy priority list in order and
+        // combine: the first viable tier per script wins
+        let anyCdp = false;
+        for (const script of matching) {
+            const list = script.strategy.split(",").map((x) => x.trim());
+            let chosen: string | null = null;
+            for (const tier of list) {
+                if (tier === "auto") {
+                    // default priority: hook → (proxy later/mv3) → cdp
+                    if (details.type === "xmlhttprequest" || details.type === "websocket") {
+                        chosen = this.hookReadyTabs.has(details.tabId) ? "hook" : "cdp";
+                    } else if (details.type === "main_frame" && !script.mainFrames) {
+                        chosen = "none"; // @mainframes off: onDom covers the page
+                    } else {
+                        chosen = "cdp";
+                    }
+                    break;
+                }
+                if (tier === "hook") {
+                    // only viable for page-initiated traffic once the hook is
+                    // ready; otherwise continue down the list
+                    if (
+                        (details.type === "xmlhttprequest" || details.type === "websocket") &&
+                        this.hookReadyTabs.has(details.tabId)
+                    ) {
+                        chosen = "hook";
+                        break;
+                    }
+                    continue;
+                }
+                if (tier === "cdp") {
+                    if (details.type === "main_frame" && !script.mainFrames) {
+                        chosen = "none";
+                    } else {
+                        chosen = "cdp";
+                    }
+                    break;
+                }
+                if (tier === "webrequest") {
+                    // Firefox-only network path; on Chrome = no body work
+                    chosen = "none";
+                    break;
+                }
+                // proxy: reserved for the MV3 DNR path
+            }
+            if (chosen === "cdp") {
+                anyCdp = true;
+                break;
+            }
+            if (chosen === "hook") {
+                return { kind: "allow" }; // hook-owned: no debugger
+            }
+            // chosen === null → fall through to next script in list
         }
 
-        if (details.type === "xmlhttprequest" || details.type === "websocket") {
-            // The hook owns page-initiated traffic and claims every fetch it
-            // sees. The claim races this decision (claim arrives a few ms
-            // after onBeforeRequest), so instead of speculatively attaching
-            // the debugger we only fall back to CDP when the hook never
-            // confirmed installation in this tab (cold start).
-            if (this.hookReadyTabs.has(details.tabId)) {
-                return { kind: "allow" };
-            }
-            dlog("cdp", "hook not ready → CDP fallback", { url: shortUrl(details.url), tabId: details.tabId });
+        if (anyCdp) {
+            log(details.tabId, `[CDP] body transform via debugger for ${shortUrl(details.url)}`, "info");
             return { kind: "needsCdp" };
         }
-
-        // Everything the hook cannot see (main frame HTML, script tags,
-        // images, css, fonts, ...) goes through the CDP strategy: let the
-        // request proceed and transform the response there. The attach is
-        // sticky per tab, so only the first navigation races the attach.
-        if (details.type === "main_frame") {
-            // @mainframes off (any/all): the debugger banner is not worth
-            // it — those scripts cover the page via their onDom hooks
-            const cdpWanted = matching.filter((s) => s.mainFrames);
-            if (cdpWanted.length === 0) {
-                return { kind: "allow" };
-            }
-        }
-        log(details.tabId, `[CDP] body transform via debugger for ${shortUrl(details.url)}`, "info");
-        return { kind: "needsCdp" };
+        return { kind: "allow" };
     }
 
     handleBeforeSendHeaders(_d: WebRequestDetailsLike, _t: string | null): null {

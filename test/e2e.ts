@@ -14,8 +14,10 @@
  *   - enable/disable toggling
  *
  * Usage: npm run build && npm run test:e2e
- * Env:   E2E_CHROMIUM — path to an MV2-capable Chromium (default: the
- *        homebrew ungoogled-chromium; modern stable Chrome lost MV2)
+ * Env:   E2E_CHROMIUM — explicit browser path. Otherwise the suite
+ *        auto-resolves: installed ungoogled-chromium → Chrome for Testing
+ *        ≤126 → auto-download (brew cask or CfT 125 zip). Modern stable
+ *        Chrome lost MV2 and cannot run this engine.
  */
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -23,10 +25,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import http from "node:http";
 import { chromium } from "playwright-core";
+import { resolveBrowser } from "./browserSetup";
 
 const EXT_ROOT = path.join(new URL("..", import.meta.url).pathname, "dist");
-const CHROMIUM = process.env.E2E_CHROMIUM ||
-    "/opt/homebrew/Caskroom/ungoogled-chromium/152.0.7977.82-1.1/Chromium.app/Contents/MacOS/Chromium";
+
 const PORT = 8907;
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const EXT_ID = "mgbfmgeopkkpfcgjafmmdlnplkdnglki"; // derived from the dist path
@@ -77,6 +79,7 @@ const server = http.createServer((req: http.IncomingMessage, res: http.ServerRes
 await new Promise((r) => server.listen(PORT, "127.0.0.1", r as () => void));
 
 // ---------- launch fresh chromium ----------
+const CHROMIUM = await resolveBrowser();
 const profile = mkdtempSync(path.join(tmpdir(), "reso-e2e-"));
 const HEADLESS = process.env.E2E_HEADLESS !== "0";
 const chromeProc = spawn(CHROMIUM, [

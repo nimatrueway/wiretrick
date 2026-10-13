@@ -187,7 +187,7 @@ res.modifyResponse((ctx, body) => body.replace("foo", "bar"));`),
         expect(s.handleBeforeRequest(details({ type: "main_frame" }), null).kind).toBe("needsCdp");
     });
 
-    it("cdp-strategy scripts are left to tier C", () => {
+    it("@strategy cdp dispatches needsCdp (cdpStrategy owns the response)", () => {
         const s = new ChromeBodyStrategy();
         s.reload([
             makeScript("a", `// ==ResScript==
@@ -197,6 +197,6 @@ res.modifyResponse((ctx, body) => body.replace("foo", "bar"));`),
 // ==/ResScript==
 res.modifyResponse((ctx, body) => body);`),
         ]);
-        expect(s.handleBeforeRequest(details({ type: "script" }), null).kind).toBe("allow");
+        expect(s.handleBeforeRequest(details({ type: "script" }), null).kind).toBe("needsCdp");
     });
 });
