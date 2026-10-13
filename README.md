@@ -18,6 +18,31 @@ response bodies, or replace them entirely. Each script has an enable/disable tog
 
 ![ResScript samples dialog](docs/shots/samples.png)
 
+## Install
+
+**From a release (recommended):**
+
+1. Grab `rescript-override-vX.Y.Z.zip` from [Releases](https://github.com/nimatrueway/rescript-override/releases) and unzip it.
+2. Open `chrome://extensions` (or `about:debugging#/runtime/this-firefox` on Firefox).
+3. Enable **Developer mode** (top-right), click **Load unpacked**, and select the unzipped `dist` folder.
+4. Pin the 🧩 icon — the badge shows how many scripts are active on the current tab.
+
+**From source:**
+
+```bash
+git clone https://github.com/nimatrueway/rescript-override.git
+cd rescript-override
+npm install && npm run build
+# then: chrome://extensions → Developer mode → Load unpacked → dist/
+```
+
+> Requires an MV2-capable Chromium (ungoogled-chromium or any Chromium ≤ ~126) or
+> Firefox. Modern stable Chrome (155+) removed MV2 and will refuse to load it.
+
+**Releases are automated** — pushing a `vX.Y.Z` tag runs the GitHub Action
+(typecheck → tests → build → zip → GitHub release), so the zip always matches
+the tagged `manifest.json` version.
+
 ## Writing scripts
 
 ```ts
