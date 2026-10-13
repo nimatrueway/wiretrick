@@ -7,7 +7,7 @@
 import { computeEvents, loadSavedHandle, clearSavedHandle, saveHandle, type FileSig } from "../shared/folderSync";
 import { saveScript, deleteScript, newId, listScripts } from "./engine/scriptStore";
 import { broadcastToUi } from "./engine/logs";
-import { dlog } from "../shared/debugLog";
+import { dlogLevel } from "../shared/debugLog";
 function injectName(code: string, name: string): string {
     if (!name) return code;
     if (/^\s*\/\/\s*@name\s+.*$/m.test(code)) {
@@ -87,7 +87,7 @@ async function applyEvents(events: ReturnType<typeof computeEvents>): Promise<vo
         const target = await findScriptByFile(fileName);
         if (!target) continue;
         await saveScript({ id: target.id, code: injectName(text, target.meta.name) });
-        dlog("sync", "external change applied", { file: fileName, script: target.meta.name });
+        dlogLevel("sync", "info", "external change applied", { file: fileName, script: target.meta.name });
         broadcastToUi({ type: "scriptsChanged", source: "folder", file: fileName } as any);
     }
 
@@ -99,7 +99,7 @@ async function applyEvents(events: ReturnType<typeof computeEvents>): Promise<vo
             continue;
         }
         await saveScript({ id: newId(), code: injectName(text, displayNameFromFile(fileName)) });
-        dlog("sync", "external file added → script created", { file: fileName });
+        dlogLevel("sync", "info", "external file added → script created", { file: fileName });
         broadcastToUi({ type: "scriptsChanged", source: "folder", file: fileName } as any);
     }
 
@@ -109,7 +109,7 @@ async function applyEvents(events: ReturnType<typeof computeEvents>): Promise<vo
         const target = await findScriptByFile(fileName);
         if (!target) continue;
         await deleteScript(target.id);
-        dlog("sync", "external delete → script removed", { file: fileName });
+        dlogLevel("sync", "info", "external delete → script removed", { file: fileName });
         broadcastToUi({ type: "scriptsChanged", source: "folder", file: fileName } as any);
     }
 
@@ -121,7 +121,7 @@ async function applyEvents(events: ReturnType<typeof computeEvents>): Promise<vo
             const target = await findScriptByFile(rename.oldName);
             if (target) {
                 await saveScript({ id: target.id, code: injectName(text, displayNameFromFile(rename.newName)) });
-                dlog("sync", "external rename applied", { from: rename.oldName, to: rename.newName });
+                dlogLevel("sync", "info", "external rename applied", { from: rename.oldName, to: rename.newName });
                 broadcastToUi({ type: "scriptsChanged", source: "folder", file: rename.newName } as any);
             }
         }
@@ -141,7 +141,7 @@ async function pollOnce(): Promise<void> {
         known = seen;
         await applyEvents(events);
     } catch (e: any) {
-        dlog("sync", "poll failed", { error: e.message || e });
+        dlogLevel("sync", "warn", "poll failed", { error: e.message || e });
     }
 }
 
@@ -159,7 +159,7 @@ export async function startFromStoredHandle(): Promise<boolean> {
     await refreshKnown();
     startPolling();
     broadcastStatus();
-    dlog("sync", "watching scripts folder", { path: displayPath });
+    dlogLevel("sync", "info", "watching scripts folder", { path: displayPath });
     return true;
 }
 
@@ -174,7 +174,7 @@ export async function writeBack(fileName: string, content: string): Promise<void
         await w.close();
     } catch (e: any) {
         lastWritten.delete(fileName);
-        dlog("sync", "writeBack failed", { file: fileName, error: e.message || e });
+        dlogLevel("sync", "warn", "writeBack failed", { file: fileName, error: e.message || e });
     }
 }
 
@@ -208,12 +208,12 @@ export async function initFromStorage(): Promise<void> {
     try {
         const perm = await handle.queryPermission({ mode: "readwrite" });
         if (perm !== "granted") {
-            dlog("sync", "saved folder needs re-grant (browser restart)");
+            dlogLevel("sync", "info", "saved folder needs re-grant (browser restart)");
             return;
         }
         await startFromStoredHandle();
     } catch (e: any) {
-        dlog("sync", "init failed", { error: e.message || e });
+        dlogLevel("sync", "warn", "init failed", { error: e.message || e });
     }
 }
 

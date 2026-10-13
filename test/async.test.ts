@@ -19,6 +19,8 @@ beforeEach(() => {
     };
     // not Firefox in unit tests
     delete (globalThis as any).browser;
+    // clear the module-static per-request caches between tests
+    new WebRequestStrategy().pruneRequest("r1");
 });
 
 function makeScript(id: string, code: string): Script {
@@ -58,6 +60,30 @@ describe("handler stacking", () => {
         ]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d).toEqual({ kind: "redirect", url: "https://second.com" });
+    });
+
+    it("onRequest: header changes from MULTIPLE scripts merge (later set wins, removes accumulate)", () => {
+        const s = new WebRequestStrategy();
+        s.reload([
+            makeScript("a", `// @match *\nres.onRequest(() => ({ headers: { set: { "x-a": "1", "x-b": "old" }, remove: ["x-r1"] } }));`),
+            makeScript("b", `// @match *\nres.onRequest(() => ({ headers: { set: { "x-b": "new", "x-c": "3" }, remove: ["x-r2"] } }));`),
+        ]);
+        s.handleBeforeRequest(details(), null); // runs both, caches merged mods
+        const c = s.handleBeforeSendHeaders(details(), null) as any;
+        expect(c.set).toEqual({ "x-a": "1", "x-b": "new", "x-c": "3" });
+        expect(c.remove).toEqual(["x-r1", "x-r2"]);
+    });
+
+    it("onRequest: headers from an earlier non-terminal script APPLY even when a later script redirects", () => {
+        const s = new WebRequestStrategy();
+        s.reload([
+            makeScript("a", `// @match *\nres.onRequest(() => ({ headers: { set: { "x-keep": "yes" } } }));`),
+            makeScript("b", `// @match *\nres.onRequest(() => ({ redirect: "https://win.com" }));`),
+        ]);
+        const d = s.handleBeforeRequest(details(), null) as any;
+        expect(d.kind).toBe("redirect");
+        const c = s.handleBeforeSendHeaders(details(), null) as any;
+        expect(c.set).toEqual({ "x-keep": "yes" });
     });
 
     it("onResponseHeaders: multiple scripts MERGE — set overwritten by later, removes accumulate", () => {

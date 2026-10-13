@@ -10,7 +10,7 @@ import type { HeaderChanges } from "./strategies/types";
 import type { Script } from "./scriptStore";
 import { listScripts, onScriptsChanged, saveScript, deleteScript, setEnabled, newId } from "./scriptStore";
 import { serveStore } from "./strategies/webRequestStrategy";
-import { dlog } from "../../shared/debugLog";
+import { dlogLevel } from "../../shared/debugLog";
 import { isThenable } from "../../shared/compile";
 import { toRunnableJs } from "../../shared/compile";
 import "../../shared/transpile";
@@ -99,7 +99,7 @@ export function createPipeline(
     // ---- webRequest wiring ----
     const onBeforeRequest = (details: any) => {
         const tabUrl = tabUrlFor(details.tabId, details.url);
-        dlog("pipeline", "onBeforeRequest", { url: details.url, type: details.type, tabId: details.tabId }); // debug-level chatter
+        dlogLevel("pipeline", "debug", "onBeforeRequest", { url: details.url, type: details.type, tabId: details.tabId });
 
         // let the CDP strategy ensure attachment for main frames
         if (details.type === "main_frame" && tabUrl !== null) {
@@ -149,7 +149,7 @@ export function createPipeline(
                 return { cancel: true };
             }
             case "needsCdp": {
-                dlog("pipeline", "needsCdp → attach", { url: details.url, tabId: details.tabId });
+                dlogLevel("pipeline", "debug", "needsCdp → attach", { url: details.url, tabId: details.tabId });
                 // banner minimization: this tab is actively using the debugger
                 cdp.cancelIdleDetach(details.tabId);
                 // learn which resource types each matching script hits, so
@@ -271,7 +271,7 @@ export function createPipeline(
                     code: toRunnableJs(s.code),
                 })),
             };
-            dlog("pipeline", "getHookBundle responding", { count: bundle.scripts.length, url: msg.url });
+            dlogLevel("pipeline", "debug", "getHookBundle responding", { count: bundle.scripts.length, url: msg.url });
             sendResponse(bundle);
             return false;
         }
@@ -292,7 +292,7 @@ export function createPipeline(
     // ---- reload plumbing ----
     async function reload(): Promise<void> {
         const scripts = (await listScripts()) as ScriptWithSources[];
-        dlog("pipeline", "reload", { total: scripts.length, enabled: scripts.filter((x) => x.enabled).map((x) => x.meta.name) });
+        dlogLevel("pipeline", "info", "reload", { total: scripts.length, enabled: scripts.filter((x) => x.enabled).map((x) => x.meta.name) });
         webRequestStrategy.reload(scripts);
         chromeBody.reload(scripts);
         void cdp.reload(scripts);

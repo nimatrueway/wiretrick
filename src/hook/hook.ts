@@ -8,7 +8,7 @@
  * Built as a standalone IIFE (no imports in output).
  */
 import { compileScript, isThenable, type CompiledScript, type HandlerFn } from "../shared/compile";
-import { dlog } from "../shared/debugLog";
+import { dlogLevel } from "../shared/debugLog";
 
 (() => {
     const w = window as any;
@@ -55,7 +55,7 @@ import { dlog } from "../shared/debugLog";
 
     /** forward log entries to the background through the bridge */
     function logUp(msg: string, level: "info" | "warn" | "error" = "info"): void {
-        dlog("hook", msg);
+        dlogLevel("hook", "debug", msg);
         try {
             window.postMessage({ source: HOOK_SOURCE, kind: "log", msg, level }, window.location.origin);
         } catch {}
@@ -236,7 +236,7 @@ import { dlog } from "../shared/debugLog";
             try {
                 const result = await t.fn(makeCtx(url, method, extra), out);
                 if (result !== undefined && result !== null) out = result;
-                dlog("hook", `transform ${t.name} applied →`, typeof out === "string" ? out.slice(0, 80) : "bytes");
+                dlogLevel("hook", "debug", `transform ${t.name} applied →`, typeof out === "string" ? out.slice(0, 80) : "bytes");
             } catch (e: any) {
                 logUp(`transform ${t.name} threw: ${e.message || e}`);
             }
@@ -328,7 +328,7 @@ import { dlog } from "../shared/debugLog";
                 url = rawUrl;
             }
 
-            dlog("hook", "fetch", { url, method });
+            dlogLevel("hook", "debug", "fetch", { url, method });
             claim(url);
 
             const replacement = applyReplaceSync(url, method);

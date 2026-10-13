@@ -11,7 +11,7 @@ import { storageGet, storageSet } from "../../../shared/chromeApi";
 import type { Script } from "../scriptStore";
 import { log } from "../logs";
 import { scriptStorageGet, scriptStorageSet } from "../scriptStore";
-import { dlog } from "../../../shared/debugLog";
+import { dlogLevel } from "../../../shared/debugLog";
 import { debuggerAttach, debuggerSend, debuggerDetach } from "../../../shared/chromeApi";
 
 interface CdpScript {
@@ -133,7 +133,7 @@ export class CdpStrategy {
             this.idleTimers.delete(tabId);
             if (this.attached.has(tabId)) {
                 void this.detach(tabId);
-                dlog("cdp", "idle detach (banner cleared)", { tabId });
+                dlogLevel("cdp", "debug", "idle detach (banner cleared)", { tabId });
             }
         }, graceMs);
         this.idleTimers.set(tabId, t);
@@ -168,7 +168,7 @@ export class CdpStrategy {
     }
 
     private async doEnsureAttached(tabId: number, mainFrameUrl: string): Promise<void> {
-        dlog("cdp", "ensureAttached", { tabId, mainFrameUrl, scripts: this.scripts.map((s) => s.name) });
+        dlogLevel("cdp", "debug", "ensureAttached", { tabId, mainFrameUrl, scripts: this.scripts.map((s) => s.name) });
         for (let attempt = 0; attempt < 2; attempt++) {
             try {
                 try {
@@ -193,13 +193,13 @@ export class CdpStrategy {
                     throw e;
                 }
                 this.attached.add(tabId);
-                dlog("cdp", "attached + Fetch.enabled", { tabId, attempt });
+                dlogLevel("cdp", "info", "attached + Fetch.enabled", { tabId, attempt });
                 log(tabId, "[Tier C] debugger attached (CDP body interception active)", "warn");
                 return;
             } catch (e: any) {
-                dlog("cdp", `attach attempt ${attempt} failed`, { tabId, error: e.message || e });
+                dlogLevel("cdp", "warn", `attach attempt ${attempt} failed`, { tabId, error: e.message || e });
                 if (attempt === 1) {
-                    dlog("cdp", "ATTACH FAILED", { tabId, error: e.message || e });
+                    dlogLevel("cdp", "error", "ATTACH FAILED", { tabId, error: e.message || e });
                     log(tabId, `[Tier C] debugger attach failed: ${e.message || e}`, "error");
                     return;
                 }
@@ -231,12 +231,12 @@ export class CdpStrategy {
                     const resolved = isThenable(result) ? await result : result;
                     if (!resolved) continue;
                     if (resolved.cancel) {
-                        dlog("cdp", "async onRequest → cancel", { url, script: s.name });
+                        dlogLevel("cdp", "info", "async onRequest → cancel", { url, script: s.name });
                         await debuggerSend(tabId, "Fetch.failRequest", { requestId, errorReason: "BlockedByClient" });
                         return;
                     }
                     if (resolved.redirect) {
-                        dlog("cdp", "async onRequest → redirect", { url, to: resolved.redirect, script: s.name });
+                        dlogLevel("cdp", "info", "async onRequest → redirect", { url, to: resolved.redirect, script: s.name });
                         await debuggerSend(tabId, "Fetch.continueRequest", { requestId, url: resolved.redirect });
                         return;
                     }
@@ -252,7 +252,7 @@ export class CdpStrategy {
 
         // ---- Response stage ----
         const cdpScripts = this.matchingScripts(url);
-        dlog("cdp", "handlePaused decision", { url, matching: cdpScripts.length, claimed: this.isClaimed(url), scripts: this.scripts.map((x) => `${x.name}=${x.match.join(",")}`) });
+        dlogLevel("cdp", "debug", "handlePaused decision", { url, matching: cdpScripts.length, claimed: this.isClaimed(url), scripts: this.scripts.map((x) => `${x.name}=${x.match.join(",")}`) });
         const hasReplace = cdpScripts.some((s) => s.replaceResponse);
         if ((cdpScripts.length === 0 || this.isClaimed(url)) && !cdpScripts.some((s) => s.onResponseHeaders)) {
             // not ours, or the page hook already transformed it
@@ -283,7 +283,7 @@ export class CdpStrategy {
             }
 
             const bodyResp: any = await debuggerSend(tabId, "Fetch.getResponseBody", { requestId });
-            dlog("cdp", "got body", { url, base64: bodyResp.base64Encoded, len: bodyResp.body ? bodyResp.body.length : 0 });
+            dlogLevel("cdp", "debug", "got body", { url, base64: bodyResp.base64Encoded, len: bodyResp.body ? bodyResp.body.length : 0 });
             let bytes = bodyResp.base64Encoded ? base64ToBytes(bodyResp.body) : new TextEncoder().encode(bodyResp.body);
             // textual bodies are handed to transforms as strings — most
             // transforms are string-oriented; binary stays bytes
@@ -296,11 +296,11 @@ export class CdpStrategy {
                     const out = await s.replaceResponse({ url, method: request.method, tabUrl: url, resourceType: params.resourceType || "other", requestHeaders: {}, status: params.responseStatusCode, contentType: headerContentType(responseHeaders) });
                     if (out !== undefined && out !== null) {
                         body = typeof out === "string" || out instanceof Uint8Array ? out : JSON.stringify(out);
-                        dlog("cdp", `replaceResponse ${s.name} applied`, { outLen: typeof body === "string" ? body.length : body.length });
+                        dlogLevel("cdp", "info", `replaceResponse ${s.name} applied`, { outLen: typeof body === "string" ? body.length : body.length });
                         break;
                     }
                 } catch (e: any) {
-                    dlog("cdp", `replaceResponse ${s.name} THREW: ${e.message || e}`);
+                    dlogLevel("cdp", "error", `replaceResponse ${s.name} THREW: ${e.message || e}`);
                     log(tabId, `[${s.name}] async replaceResponse threw: ${e.message || e}`, "error", s.scriptId);
                 }
             }
@@ -324,15 +324,15 @@ export class CdpStrategy {
                     const out = await s.transform(ctx, body);
                     if (out !== undefined && out !== null) body = out;
                     const before = typeof body === "string" ? body.length : body.length;
-                    dlog("cdp", `transform ${s.name} applied`, { outLen: before });
+                    dlogLevel("cdp", "info", `transform ${s.name} applied`, { outLen: before });
                 } catch (e: any) {
-                    dlog("cdp", `transform ${s.name} THREW: ${e.message || e}`);
+                    dlogLevel("cdp", "error", `transform ${s.name} THREW: ${e.message || e}`);
                     log(tabId, `[${s.name}] modifyResponse (cdp) threw: ${e.message || e}`, "error", s.scriptId);
                 }
             }
 
             const outBytes = typeof body === "string" ? new TextEncoder().encode(body) : body;
-            dlog("cdp", "fulfilling", { url, outLen: outBytes.length });
+            dlogLevel("cdp", "debug", "fulfilling", { url, outLen: outBytes.length });
             await debuggerSend(tabId, "Fetch.fulfillRequest", {
                 requestId,
                 responseCode: params.responseStatusCode,

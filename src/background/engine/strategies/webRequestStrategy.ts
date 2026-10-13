@@ -66,7 +66,10 @@ export class WebRequestStrategy implements InterceptionStrategy {
                             // Firefox blocking listeners accept promises natively
                             return result.then((r: any): HookDisposition => {
                                 if (r && r.headers && (r.headers.set || r.headers.remove)) {
-                                    pendingRequestHeaderMods.set(details.requestId, r.headers);
+                                    pendingRequestHeaderMods.set(
+                                        details.requestId,
+                                        mergeHeaderMods(pendingRequestHeaderMods.get(details.requestId), r.headers)
+                                    );
                                 }
                                 return r && (r.redirect || r.cancel) ? normalize(r) : { kind: "allow" };
                             });
@@ -78,7 +81,13 @@ export class WebRequestStrategy implements InterceptionStrategy {
                     }
                     // cache header mods so onBeforeSendHeaders doesn't re-run the handler
                     if (result && result.headers && (result.headers.set || result.headers.remove)) {
-                        pendingRequestHeaderMods.set(details.requestId, result.headers);
+                        // MERGE across stacked scripts (set: later wins per
+                        // key; remove accumulates) — matches the
+                        // onResponseHeaders semantics
+                        pendingRequestHeaderMods.set(
+                            details.requestId,
+                            mergeHeaderMods(pendingRequestHeaderMods.get(details.requestId), result.headers)
+                        );
                     }
                     if (result && (result.redirect || result.cancel)) {
                         log(details.tabId, `[${script.meta.name}] onRequest → ${JSON.stringify(result).slice(0, 200)}`, "info", entry.id);
@@ -326,6 +335,14 @@ function looksBinary(bytes: Uint8Array): boolean {
 
 /** in-memory store for main-frame served replacements */
 export const serveStore = new Map<string, { content: string; mime: string }>();
+
+/** Merge stacked header mods: set keys later-wins, removes accumulate. */
+export function mergeHeaderMods(base: HeaderChanges | undefined, add: HeaderChanges): HeaderChanges {
+    return {
+        set: { ...(base?.set || {}), ...(add.set || {}) },
+        remove: [...(base?.remove || []), ...(add.remove || [])],
+    };
+}
 
 /** requestId → script awaiting a Firefox stream filter */
 const pendingFirefoxStreams = new Map<string, { entry: { id: string; compiled: CompiledScript }; tabUrl: string | null }>();
