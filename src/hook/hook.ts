@@ -89,8 +89,10 @@
         for (const d of domHandlers) {
             const store: any = { onDom: null, onDomOptions: {} };
             try {
-                const fn = new Function("res", `"use strict";\n${d.src}`);
-                fn(makeDomShim(d.scriptId, store));
+                // shadow `console` inside the script so its console.* calls
+                // are attributed to the script (and still reach the page)
+                const fn = new Function("res", "console", `"use strict";\n${d.src}`);
+                fn(makeDomShim(d.scriptId, d.name, store), makeScriptConsole(d.name));
                 if (store.onDom) {
                     compiledDom.push({ name: d.name, when: store.onDomOptions.when || "DOMContentLoaded", fn: store.onDom });
                 }
@@ -147,8 +149,39 @@
         } catch {}
     }
 
-    /** shim for compiled dom scripts: log → logUp, storage → bridge relay */
-    function makeDomShim(scriptId: string, store: any): any {
+    /** shim for compiled dom scripts: log → logUp (script-tagged), storage → bridge relay */
+    function fmtArgs(args: any[]): string {
+        return args.map((a) => {
+            if (typeof a === "string") return a;
+            try {
+                return JSON.stringify(a);
+            } catch {
+                return String(a);
+            }
+        }).join(" ");
+    }
+
+    /** console shadow for a dom script: forwards to the real page console
+     * and mirrors each call into the script-attributed log stream. */
+    function makeScriptConsole(name: string): any {
+        const real = console;
+        const shim: any = {};
+        for (const method of ["log", "info", "warn", "error", "debug"]) {
+            const level = method === "error" ? "error" : method === "warn" ? "warn" : "info";
+            shim[method] = (...args: any[]) => {
+                try {
+                    (real as any)[method](...args);
+                } catch {}
+                logUp(`script.console: ${fmtArgs(args)}`, level, name);
+            };
+        }
+        // uncommon methods pass straight through
+        return new Proxy(shim, {
+            get: (t, k) => (k in t ? t[k as any] : (real as any)[k]),
+        });
+    }
+
+    function makeDomShim(scriptId: string, name: string, store: any): any {
         return {
             onRequest: (f: any) => {},
             onResponseHeaders: (f: any) => {},
@@ -158,7 +191,7 @@
                 store.onDom = f;
                 store.onDomOptions = opts || {};
             },
-            log: (...args: any[]) => logUp(`res.log: ${args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")}`),
+            log: (...args: any[]) => logUp(`res.log: ${fmtArgs(args)}`, "info", name),
             storage: {
                 get: (key: string) => viaBridge({ op: "storageGet", scriptId, key }),
                 set: (key: string, value: any) => viaBridge({ op: "storageSet", scriptId, key, value }),

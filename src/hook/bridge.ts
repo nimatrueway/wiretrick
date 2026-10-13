@@ -105,10 +105,10 @@
                     store.onDomOptions = opts || {};
                 },
                 log: (...args: any[]) => {
-                    const msg = args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
+                    const msg = `res.log: ${args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")}`;
                     try {
                         chrome.runtime.sendMessage(
-                            { type: "debugLog", entry: { at: Date.now(), src: "hook", msg: `res.log: ${msg}` } },
+                            { type: "debugLog", entry: { at: Date.now(), src: h.name, msg } },
                             () => void chrome.runtime.lastError
                         );
                     } catch {}
@@ -121,7 +121,22 @@
                 },
             };
             try {
-                new Function("res", `"use strict";\n${h.src}`)(shim);
+                // shadow console like the MAIN-world path: script console.*
+                // calls are attributed to the script and still hit the page
+                const sc: any = {};
+                for (const method of ["log", "info", "warn", "error", "debug"]) {
+                    const level = method === "error" ? "error" : method === "warn" ? "warn" : "info";
+                    sc[method] = (...args: any[]) => {
+                        try {
+                            (console as any)[method](...args);
+                        } catch {}
+                        const m = `script.console: ${args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")}`;
+                        try {
+                            chrome.runtime.sendMessage({ type: "debugLog", entry: { at: Date.now(), src: h.name, msg: m, level } }, () => void chrome.runtime.lastError);
+                        } catch {}
+                    };
+                }
+                new Function("res", "console", `"use strict";\n${h.src}`)(shim, new Proxy(sc, { get: (t, k) => (k in t ? t[k as any] : (console as any)[k]) }));
             } catch (e: any) {
                 dlog(`onDom ${h.name} compile failed (isolated):`, e.message || e);
                 continue;
