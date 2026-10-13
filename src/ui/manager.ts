@@ -134,8 +134,16 @@ function setEditorValue(code: string): void {
 /** Enable ↗ VS Code only while folder sync is active and a script is selected. */
 function updateOpenVscode(): void {
     const b = $("#btn-open-vscode") as HTMLButtonElement;
-    if ((window as any).__resSyncActive && selectedId) b.removeAttribute("disabled");
+    const off = ((window as any).__resLaunchMode || "vscode") === "off";
+    b.style.display = off ? "none" : "";
+    if (!off && (window as any).__resSyncActive && selectedId) b.removeAttribute("disabled");
     else b.setAttribute("disabled", "");
+}
+
+/** Protocol scheme for the launch button (vscode | vscode-insiders | off). */
+function vscodeScheme(): string {
+    const mode = (window as any).__resLaunchMode || "vscode";
+    return mode === "vscode-insiders" ? "vscode-insiders://file" : "vscode://file";
 }
 
 function selectReal(id: string): void {
@@ -430,6 +438,20 @@ function setupDialogs(): void {
         chrome.storage.local.set({ resVscodePath: pathInput.value.trim() }, () => void refreshSyncPath());
     });
 
+    // launch target for the ↗ button (vscode | vscode-insiders | off)
+    const launchSel = $("#settings-vscode-launch") as HTMLSelectElement;
+    chrome.storage.local.get("resVscodeLaunch", (d) => {
+        const mode = (d && d.resVscodeLaunch) || "vscode";
+        (window as any).__resLaunchMode = mode;
+        launchSel.value = mode;
+        updateOpenVscode();
+    });
+    launchSel.addEventListener("change", () => {
+        (window as any).__resLaunchMode = launchSel.value;
+        chrome.storage.local.set({ resVscodeLaunch: launchSel.value });
+        updateOpenVscode();
+    });
+
     renderHelp();
 }
 
@@ -701,7 +723,7 @@ async function main(): Promise<void> {
         const folder = (window as any).__resSyncPath as string;
         if (!script || !folder) return;
         const file = folder.replace(/\/+$/, "") + "/" + fsBridge.fileNameFor(script.id, script.meta.name);
-        const url = "vscode://file" + file.split("/").map(encodeURIComponent).join("/");        // launch from THIS page (user gesture): external-protocol requests
+        const url = vscodeScheme() + file.split("/").map(encodeURIComponent).join("/");        // launch from THIS page (user gesture): external-protocol requests
         // from the background page are dropped by Chromium
         const a = document.createElement("a");
         a.href = url;

@@ -63,6 +63,14 @@
                 </div>
                 <p class="muted">Absolute folder path — used by the ↗ VS Code button (the browser can't read the real path itself).</p>
                 <input id="settings-vscode-path" type="text" placeholder="/Users/you/ResScript" title="Absolute path of the synced scripts folder, for the Open in VS Code button" style="width:100%">
+                <div style="margin-top:6px">
+                    <label>Open button launches</label>
+                    <select id="settings-vscode-launch">
+                        <option value="vscode" selected>VS Code</option>
+                        <option value="vscode-insiders">VS Code Insiders</option>
+                        <option value="off">Nothing — hide the button</option>
+                    </select>
+                </div>
 
                 <h3>Import / Export</h3>
                 <p class="muted">Export all scripts to a JSON bundle, or import scripts from a bundle or a single .ts/.js file.</p>
