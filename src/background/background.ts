@@ -102,13 +102,16 @@ if (chrome.debugger) {
     chrome.debugger.onEvent.addListener((source, method, params) => {
         if (method === "Fetch.requestPaused" && source.tabId !== undefined) {
             const pp = params as any; dlog("cdp", "requestPaused", { tabId: source.tabId, url: pp?.request?.url, status: pp?.responseStatusCode });
-            void cdp.handlePaused(source.tabId, params);
+            void cdp.handlePaused(`tab:${source.tabId}`, params);
         }
     });
     chrome.debugger.onDetach.addListener((source) => {
         if (source.tabId !== undefined) {
             dlog("cdp", "detached", { tabId: source.tabId });
-            void cdp.handleDetach(source.tabId);
+            void cdp.handleDetach(`tab:${source.tabId}`);
+        } else if (source.targetId) {
+            dlog("cdp", "detached", { targetId: source.targetId });
+            void cdp.handleDetach(`tgt:${source.targetId}`);
         }
     });
     chrome.tabs.onRemoved.addListener((tabId) => {

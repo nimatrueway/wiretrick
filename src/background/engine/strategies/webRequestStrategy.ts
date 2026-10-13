@@ -11,6 +11,7 @@ import { compileScript, isThenable, type CompiledScript } from "../../../shared/
 import type { BodyScriptInfo, HeaderChanges, HookDisposition, InterceptionStrategy, MaybePromise, WebRequestDetailsLike } from "./types";
 import type { Script } from "../scriptStore";
 import { log, scriptError } from "../logs";
+import { dlogLevel } from "../../../shared/debugLog";
 import { scriptStorageGet, scriptStorageSet } from "../scriptStore";
 
 const IS_FIREFOX = typeof (globalThis as any).browser !== "undefined" &&
@@ -93,6 +94,14 @@ export class WebRequestStrategy implements InterceptionStrategy {
                     if (result && result.respond) {
                         const body = serializeRespondBody(result.respond.body);
                         const mime = result.respond.mime || guessMime(null, details.url, "application/json");
+                        // data-URL redirects cannot carry a status — non-200
+                        // responds need the CDP tier (request-stage fulfill
+                        // honors status); the hook tier short-circuits first
+                        // for page-initiated requests
+                        if (result.respond.status && result.respond.status !== 200) {
+                            return { kind: "needsCdp" };
+                        }
+                        // status 200 (or none): data-URL is exact
                         return this.staticServe(details, script, body, mime, entry.id);
                     }
                     if (result && (result.redirect || result.cancel)) {

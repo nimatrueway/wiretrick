@@ -51,11 +51,11 @@ export function createPipeline(
             // the banner disappears once the page settles
             if (cdp.hasCdpListedScripts(info.url) && cdp.cdpRelevantScripts(info.url).length > 0) {
                 void cdp.ensureAttached(tabId, info.url);
-                cdp.scheduleIdleDetach(tabId);
+                cdp.scheduleIdleDetach(`tab:${tabId}`);
             }
         }
         if (info.status === "complete") {
-            cdp.scheduleIdleDetach(tabId);
+            cdp.scheduleIdleDetach(`tab:${tabId}`);
         }
     });
     chrome.tabs.onRemoved.addListener((tabId) => {
@@ -113,6 +113,11 @@ export function createPipeline(
         if (details.type === "main_frame") {
             noteRequestForBadge?.(details.tabId, details.url);
             void updateTabBadge?.(details.tabId, details.url);
+            // workers/service-workers can't host the hook — sweep their
+            // targets so respond-with-status works for worker fetches too
+            if (chromeBody.allBodyScripts().length > 0) {
+                void cdp.ensureWorkerAttached(details.url);
+            }
         } else {
             const n = noteRequestForBadge?.(details.tabId, details.url);
             if (n !== undefined && n > 0) void updateTabBadge?.(details.tabId, details.url);
@@ -154,13 +159,22 @@ export function createPipeline(
             case "needsCdp": {
                 dlogLevel("pipeline", "debug", "needsCdp → attach", { url: details.url, tabId: details.tabId });
                 // banner minimization: this tab is actively using the debugger
-                cdp.cancelIdleDetach(details.tabId);
+                cdp.cancelIdleDetach(`tab:${details.tabId}`);
                 // learn which resource types each matching script hits, so
                 // hook-covered (xhr-only) scripts stop triggering attaches
                 const matchedScripts = chromeBody.matchingBodyScripts(details.url).map((x) => x.scriptId);
                 if (matchedScripts.length) cdp.noteResourceType(matchedScripts, details.type);
-                // gate on the REQUEST url — it matched a body script
-                void cdp.ensureAttached(details.tabId, details.url);
+                if (details.tabId === -1) {
+                    // worker/service-worker initiated (no content scripts
+                    // there) — attach to the worker targets directly
+                    void cdp.ensureWorkerAttached(details.url);
+                } else {
+                    // forced: this request explicitly needs CDP (e.g. a
+                    // respond-with-status the hook cannot serve)
+                    void cdp.ensureAttachedForced(details.tabId, details.url);
+                    // cover worker-initiated twins of the same origin
+                    void cdp.ensureWorkerAttached(details.url);
+                }
                 return {};
             }
             default:

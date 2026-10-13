@@ -12,7 +12,7 @@ import type { Script } from "../scriptStore";
 import { log } from "../logs";
 import { scriptStorageGet, scriptStorageSet } from "../scriptStore";
 import { dlogLevel } from "../../../shared/debugLog";
-import { debuggerAttach, debuggerSend, debuggerDetach } from "../../../shared/chromeApi";
+import { debuggerAttach, debuggerSend, debuggerDetach, debuggerGetTargets, type Debuggee } from "../../../shared/chromeApi";
 
 interface CdpScript {
     scriptId: string;
@@ -48,8 +48,8 @@ const XHR_TYPES = new Set(["xmlhttprequest", "websocket"]);
 const MIN_OBSERVATIONS = 3;
 
 export class CdpStrategy {
-    /** tabId → attached */
-    private attached = new Set<number>();
+    /** attached sessions, keyed "tab:<id>" or "tgt:<targetId>" */
+    private attached = new Set<string>();
     private scripts: CdpScript[] = [];
     /** scriptId → resource types it has matched (banner-minimization learning) */
     private learn: { [scriptId: string]: { [type: string]: number } } = {};
@@ -65,17 +65,15 @@ export class CdpStrategy {
         for (const s of scripts) {
             if (!s.enabled) continue;
             const c = compileScript(s.code, makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, msg) => log(-1, `res.log: ${msg}`, "info", id), (id, level, msg) => log(-1, `script.console: ${msg}`, level, id)));
-            // async-only for onRequest/onResponseHeaders/replaceResponse —
-            // sync handlers are served by the blocking webRequest tier
             // CDP is the fallback tier for everything the hook cannot do
-            // (main frames, script tags, cold starts) — any body handler
-            // loads here. ASYNC onRequest/onResponseHeaders handlers also
-            // load (only the CDP tier can honor their results on Chrome).
+            // (main frames, script tags, worker fetches, cold starts) — any
+            // handler loads here, sync or async. Sync onRequest handlers
+            // matter for respond-with-status at the Request stage.
             const wantsCdp =
                 c.handlers.modifyResponse.length > 0 ||
                 c.handlers.replaceResponse.length > 0 ||
-                c.handlers.onRequest.some(isAsyncFn) ||
-                c.handlers.onResponseHeaders.some(isAsyncFn);
+                c.handlers.onRequest.length > 0 ||
+                c.handlers.onResponseHeaders.length > 0;
             if (!wantsCdp) continue;
             this.scripts.push({
                 scriptId: s.id,
@@ -133,31 +131,83 @@ export class CdpStrategy {
 
     /** Forget per-tab state on tab close. */
     forgetTab(tabId: number): void {
-        const t = this.idleTimers.get(tabId);
+        const key = `tab:${tabId}`;
+        const t = this.idleTimers.get(key as any);
         if (t) clearTimeout(t);
-        this.idleTimers.delete(tabId);
+        this.idleTimers.delete(key as any);
+        this.attached.delete(key);
+    }
+
+    private keyOf(d: Debuggee): string {
+        return "tabId" in d ? `tab:${d.tabId}` : `tgt:${d.targetId}`;
+    }
+
+    private debuggeeOf(key: string): Debuggee {
+        return key.startsWith("tab:") ? { tabId: Number(key.slice(4)) } : { targetId: key.slice(4) };
+    }
+
+    private async detachByKey(key: string): Promise<void> {
+        this.attached.delete(key);
+        try {
+            if (key.startsWith("tab:")) await debuggerDetach({ tabId: Number(key.slice(4)) });
+            else await debuggerDetach({ targetId: key.slice(4) });
+        } catch {}
+    }
+
+    /**
+     * Worker/service-worker initiated requests (tabId −1): the hook can
+     * never see them, so CDP attaches to the WORKER targets whose origin
+     * matches — the only status-honoring respond path for those.
+     */
+    async ensureWorkerAttached(url: string): Promise<void> {
+        let origin = "";
+        try { origin = new URL(url).origin; } catch { return; }
+        // workers spawn during page load — sweep a few times so they get
+        // attached as they appear
+        for (let round = 0; round < 5; round++) {
+            const targets = await debuggerGetTargets();
+            let pending = 0;
+            for (const t of targets) {
+                if (!t.url.startsWith(origin)) continue;
+                const key = `tgt:${t.targetId}`;
+                if (this.attached.has(key)) continue;
+                pending++;
+                try {
+                    await debuggerAttach({ targetId: t.targetId });
+                    await debuggerSend({ targetId: t.targetId }, "Fetch.enable", {
+                        patterns: [{ requestStage: "Request" }, { requestStage: "Response" }],
+                    });
+                    this.attached.add(key);
+                    dlogLevel("cdp", "info", "worker target attached", { url: t.url.slice(0, 80) });
+                } catch (e: any) {
+                    dlogLevel("cdp", "warn", "worker attach failed", { target: t.url.slice(0, 60), error: e.message || e });
+                }
+            }
+            if (pending === 0) break;
+            await new Promise((r) => setTimeout(r, 400));
+        }
     }
 
     /** Detach when the page settled — the banner disappears while the user browses. */
-    scheduleIdleDetach(tabId: number, graceMs = 8000): void {
-        const prev = this.idleTimers.get(tabId);
+    scheduleIdleDetach(key: string, graceMs = 8000): void {
+        const prev = this.idleTimers.get(key as any);
         if (prev) clearTimeout(prev);
         const t = setTimeout(() => {
-            this.idleTimers.delete(tabId);
-            if (this.attached.has(tabId)) {
-                void this.detach(tabId);
-                dlogLevel("cdp", "debug", "idle detach (banner cleared)", { tabId });
+            this.idleTimers.delete(key as any);
+            if (this.attached.has(key)) {
+                void this.detachByKey(key);
+                dlogLevel("cdp", "debug", "idle detach (banner cleared)", { key });
             }
         }, graceMs);
-        this.idleTimers.set(tabId, t);
+        this.idleTimers.set(key as any, t);
     }
 
     /** Cancel a scheduled idle detach (a new body transform came in). */
-    cancelIdleDetach(tabId: number): void {
-        const t = this.idleTimers.get(tabId);
+    cancelIdleDetach(key: string): void {
+        const t = this.idleTimers.get(key as any);
         if (t) {
             clearTimeout(t);
-            this.idleTimers.delete(tabId);
+            this.idleTimers.delete(key as any);
         }
     }
 
@@ -169,43 +219,55 @@ export class CdpStrategy {
         return this.cdpRelevantScripts(url).length > 0;
     }
 
+    /**
+     * FORCED attach: the pipeline explicitly routed a request here
+     * (needsCdp — e.g. a respond-with-status the hook cannot serve), so
+     * the strategy-list gate does not apply.
+     */
+    async ensureAttachedForced(tabId: number, mainFrameUrl: string | null): Promise<void> {
+        const key = `tab:${tabId}`;
+        if (!mainFrameUrl || this.attached.has(key)) return;
+        const inFlight = this.attachInFlight.get(key as any);
+        if (inFlight) return inFlight;
+        const p = this.doEnsureAttached(tabId, mainFrameUrl).finally(() => this.attachInFlight.delete(key as any));
+        this.attachInFlight.set(key as any, p);
+        return p;
+    }
+
     /** Wire up a tab when a CDP-strategy script matches it. Concurrent calls dedup. */
     async ensureAttached(tabId: number, mainFrameUrl: string | null): Promise<void> {
-        if (!mainFrameUrl || this.attached.has(tabId)) return;
+        const key = `tab:${tabId}`;
+        if (!mainFrameUrl || this.attached.has(key)) return;
         if (!this.shouldAttach(mainFrameUrl)) return;
-        const inFlight = this.attachInFlight.get(tabId);
+        const inFlight = this.attachInFlight.get(key as any);
         if (inFlight) return inFlight;
-        const p = this.doEnsureAttached(tabId, mainFrameUrl).finally(() => this.attachInFlight.delete(tabId));
+        const p = this.doEnsureAttached(tabId, mainFrameUrl).finally(() => this.attachInFlight.delete(key as any));
         this.attachInFlight.set(tabId, p);
         return p;
     }
 
     private async doEnsureAttached(tabId: number, mainFrameUrl: string): Promise<void> {
+        const key = `tab:${tabId}`;
         dlogLevel("cdp", "debug", "ensureAttached", { tabId, mainFrameUrl, scripts: this.scripts.map((s) => s.name) });
         for (let attempt = 0; attempt < 2; attempt++) {
             try {
                 try {
-                    await debuggerAttach(tabId);
+                    await debuggerAttach({ tabId });
                 } catch (e: any) {
-                    // our own concurrent attach won the race — it enabled
-                    // Fetch below and marked the tab attached
-                    if (/already attached/i.test(e.message || "")) {
-                        if (this.attached.has(tabId)) return;
-                        throw e;
-                    }
+                    if (/already attached/i.test(e.message || "") && this.attached.has(key)) return;
                     throw e;
                 }
                 try {
-                    await debuggerSend(tabId, "Fetch.enable", {
-                patterns: [{ requestStage: "Request" }, { requestStage: "Response" }],
-            });
+                    await debuggerSend(this.debuggeeOf(key), "Fetch.enable", {
+                        patterns: [{ requestStage: "Request" }, { requestStage: "Response" }],
+                    });
                 } catch (e: any) {
                     // enable failed while attached (evicted mid-flight) —
                     // detach so we never leave an orphan debugger attached
-                    await debuggerDetach(tabId).catch(() => {});
+                    await debuggerDetach({ tabId }).catch(() => {});
                     throw e;
                 }
-                this.attached.add(tabId);
+                this.attached.add(key);
                 dlogLevel("cdp", "info", "attached + Fetch.enabled", { tabId, attempt });
                 log(tabId, "[Tier C] debugger attached (CDP body interception active)", "warn");
                 return;
@@ -221,19 +283,20 @@ export class CdpStrategy {
         }
     }
 
-    async handlePaused(tabId: number, params: any): Promise<void> {
+    async handlePaused(key: string, params: any): Promise<void> {
+        const tabId: number = key.startsWith("tab:") ? Number(key.slice(4)) : -1;
         const { requestId, request } = params;
         const url: string = request.url;
 
         // ---- Request stage: async onRequest (redirect / cancel) ----
         if (!params.responseStatusCode) {
             if (this.isClaimed(url)) {
-                await debuggerSend(tabId, "Fetch.continueRequest", { requestId });
+                await debuggerSend(this.debuggeeOf(key), "Fetch.continueRequest", { requestId });
                 return;
             }
             const requestScripts = this.matchingScripts(url).filter((s) => s.onRequest);
             if (requestScripts.length === 0) {
-                await debuggerSend(tabId, "Fetch.continueRequest", { requestId });
+                await debuggerSend(this.debuggeeOf(key), "Fetch.continueRequest", { requestId });
                 return;
             }
             // run every matching script's onRequest handlers in order;
@@ -267,7 +330,7 @@ export class CdpStrategy {
                             ...Object.entries(r.headers?.set || {}).map(([name, value]) => ({ name, value: String(value) })),
                         ];
                         dlogLevel("cdp", "info", "async onRequest → respond", { url, script: s.name });
-                        await debuggerSend(tabId, "Fetch.fulfillRequest", {
+                        await debuggerSend(this.debuggeeOf(key), "Fetch.fulfillRequest", {
                             requestId,
                             responseCode: r.status || 200,
                             responseHeaders: headers,
@@ -277,12 +340,12 @@ export class CdpStrategy {
                     }
                     if (resolved.cancel) {
                         dlogLevel("cdp", "info", "async onRequest → cancel", { url, script: s.name });
-                        await debuggerSend(tabId, "Fetch.failRequest", { requestId, errorReason: "BlockedByClient" });
+                        await debuggerSend(this.debuggeeOf(key), "Fetch.failRequest", { requestId, errorReason: "BlockedByClient" });
                         return;
                     }
                     if (resolved.redirect) {
                         dlogLevel("cdp", "info", "async onRequest → redirect", { url, to: resolved.redirect, script: s.name });
-                        await debuggerSend(tabId, "Fetch.continueRequest", { requestId, url: resolved.redirect });
+                        await debuggerSend(this.debuggeeOf(key), "Fetch.continueRequest", { requestId, url: resolved.redirect });
                         return;
                     }
                     if (resolved.headers && (resolved.headers.set || resolved.headers.remove)) {
@@ -292,7 +355,7 @@ export class CdpStrategy {
                 void terminal;
             }
             if (headerPromises.length) this.pendingAsyncHeaders.set(requestId, Promise.all(headerPromises));
-            await debuggerSend(tabId, "Fetch.continueRequest", { requestId });
+            await debuggerSend(this.debuggeeOf(key), "Fetch.continueRequest", { requestId });
             return;
         }
 
@@ -302,7 +365,7 @@ export class CdpStrategy {
         const hasReplace = cdpScripts.some((s) => s.replaceResponse);
         if ((cdpScripts.length === 0 || this.isClaimed(url)) && !cdpScripts.some((s) => s.onResponseHeaders)) {
             // not ours, or the page hook already transformed it
-            await debuggerSend(tabId, "Fetch.continueRequest", { requestId });
+            await debuggerSend(this.debuggeeOf(key), "Fetch.continueRequest", { requestId });
             return;
         }
 
@@ -330,7 +393,7 @@ export class CdpStrategy {
                 responseHeaders = mergeHeaderChanges(params.responseHeaders || [], headerChanges);
             }
 
-            const bodyResp: any = await debuggerSend(tabId, "Fetch.getResponseBody", { requestId });
+            const bodyResp: any = await debuggerSend(this.debuggeeOf(key), "Fetch.getResponseBody", { requestId });
             dlogLevel("cdp", "debug", "got body", { url, base64: bodyResp.base64Encoded, len: bodyResp.body ? bodyResp.body.length : 0 });
             let bytes = bodyResp.base64Encoded ? base64ToBytes(bodyResp.body) : new TextEncoder().encode(bodyResp.body);
             // textual bodies are handed to transforms as strings — most
@@ -385,7 +448,7 @@ export class CdpStrategy {
 
             const outBytes = typeof body === "string" ? new TextEncoder().encode(body) : body;
             dlogLevel("cdp", "debug", "fulfilling", { url, outLen: outBytes.length });
-            await debuggerSend(tabId, "Fetch.fulfillRequest", {
+            await debuggerSend(this.debuggeeOf(key), "Fetch.fulfillRequest", {
                 requestId,
                 responseCode: params.responseStatusCode,
                 responseHeaders,
@@ -394,20 +457,21 @@ export class CdpStrategy {
         } catch (e: any) {
             log(tabId, `[Tier C] body interception failed: ${e.message || e}`, "error");
             try {
-                await debuggerSend(tabId, "Fetch.continueRequest", { requestId });
+                await debuggerSend(this.debuggeeOf(key), "Fetch.continueRequest", { requestId });
             } catch {
                 /* detach race */
             }
         }
     }
 
-    async handleDetach(tabId: number): Promise<void> {
-        this.attached.delete(tabId);
+    async handleDetach(key: string): Promise<void> {
+        this.attached.delete(key);
     }
 
     async detach(tabId: number): Promise<void> {
-        if (this.attached.has(tabId)) {
-            this.attached.delete(tabId);
+        const key = `tab:${tabId}`;
+        if (this.attached.has(key)) {
+            this.attached.delete(key);
             try {
                 await chrome.debugger.detach({ tabId });
             } catch {

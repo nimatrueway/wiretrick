@@ -14,9 +14,12 @@ export function runtimeSendMessage<T = any>(msg: any): Promise<T> {
     });
 }
 
-export function debuggerSend(tabId: number, command: string, params?: any): Promise<any> {
+/** A debugger target: a tab (by id) or a worker/service-worker (by targetId). */
+export type Debuggee = { tabId: number } | { targetId: string };
+
+export function debuggerSend(debuggee: Debuggee, command: string, params?: any): Promise<any> {
     return new Promise((resolve, reject) => {
-        chrome.debugger.sendCommand({ tabId } as any, command as any, params as any, (resp: any) => {
+        chrome.debugger.sendCommand(debuggee as any, command as any, params as any, (resp: any) => {
             const err = (chrome.runtime as any).lastError;
             if (err) reject(new Error(err.message));
             else resolve(resp);
@@ -24,9 +27,9 @@ export function debuggerSend(tabId: number, command: string, params?: any): Prom
     });
 }
 
-export function debuggerAttach(tabId: number): Promise<void> {
+export function debuggerAttach(debuggee: Debuggee): Promise<void> {
     return new Promise((resolve, reject) => {
-        chrome.debugger.attach({ tabId }, "1.3" as any, () => {
+        chrome.debugger.attach(debuggee as any, "1.3" as any, () => {
             const err = (chrome.runtime as any).lastError;
             if (err) reject(new Error(err.message));
             else resolve();
@@ -34,9 +37,22 @@ export function debuggerAttach(tabId: number): Promise<void> {
     });
 }
 
-export function debuggerDetach(tabId: number): Promise<void> {
+export function debuggerDetach(debuggee: Debuggee): Promise<void> {
     return new Promise((resolve) => {
-        chrome.debugger.detach({ tabId }, () => { void (chrome.runtime as any).lastError; resolve(); });
+        chrome.debugger.detach(debuggee as any, () => { void (chrome.runtime as any).lastError; resolve(); });
+    });
+}
+
+/** All worker/service-worker debuggee targets. */
+export function debuggerGetTargets(): Promise<{ targetId: string; type: string; url: string }[]> {
+    return new Promise((resolve) => {
+        chrome.debugger.getTargets((targets: any[]) => {
+            resolve(
+                (targets || [])
+                    .filter((t) => t.type === "worker" || t.type === "service_worker")
+                    .map((t) => ({ targetId: t.targetId, type: t.type, url: t.url }))
+            );
+        });
     });
 }
 
