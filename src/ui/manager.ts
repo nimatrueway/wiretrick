@@ -678,14 +678,18 @@ async function main(): Promise<void> {
         const folder = (window as any).__resSyncPath as string;
         if (!script || !folder) return;
         const file = folder.replace(/\/+$/, "") + "/" + fsBridge.fileNameFor(script.id, script.meta.name);
+        const url = "vscode://file" + file.split("/").map(encodeURIComponent).join("/");
         // launch from THIS page (user gesture): external-protocol requests
         // from the background page are dropped by Chromium
         const a = document.createElement("a");
-        a.href = "vscode://file" + file.split("/").map(encodeURIComponent).join("/");
+        a.href = url;
         document.body.appendChild(a);
         a.click();
         a.remove();
         status(`opening ${file} in VS Code…`);
+        const msg = `openInVscode → launching ${url}`;
+        appendLog({ at: Date.now(), message: `[manager] ${msg}`, level: "info" });
+        chrome.runtime.sendMessage({ type: "debugLog", entry: { at: Date.now(), src: "manager", msg, level: "info" } }, () => void chrome.runtime.lastError);
     });
     $("#btn-new").addEventListener("click", async () => {
         const id = uuid();
