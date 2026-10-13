@@ -33,6 +33,12 @@ createPipeline(webRequestStrategy, chromeBody, cdp, updateTabBadge, noteRequestF
 // ---- scripts folder sync (watching runs here: persistent page, never throttled) ----
 void folderSync.initFromStorage();
 chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
+    if (msg && msg.type === "folderSyncAdopt") {
+        // handle was stored to IndexedDB by the sender (handles can't cross
+        // runtime messaging — JSON only)
+        folderSync.startFromStoredHandle().then((ok) => sendResponse({ ok }));
+        return true;
+    }
     if (msg && msg.type === "folderSyncStart") {
         folderSync.startFromStoredHandle().then((ok) => sendResponse({ ok }));
         return true;

@@ -25,9 +25,14 @@ export function isSupported(): boolean {
     return typeof (window as any).showDirectoryPicker === "function";
 }
 
+let cachedActive = false;
+
 export function isSyncing(): boolean {
-    // ask the background (source of truth)
-    return (window as any).__resSyncActive === true;
+    return cachedActive === true;
+}
+
+export function setCachedActive(v: boolean): void {
+    cachedActive = v;
 }
 
 export async function queryStatus(): Promise<{ active: boolean; path: string }> {
@@ -46,6 +51,14 @@ export function sendRaw(msg: any): Promise<any> {
  * Pick a folder (user gesture required) and hand it to the background
  * watcher. Existing scripts are written out as .ts files + typings.
  */
+/** Test/e2e seam: watch an arbitrary handle (e.g. OPFS) — manager-side. */
+export async function adoptForWatch(handle: any): Promise<boolean> {
+    await saveHandle(handle);
+    return new Promise((resolve) => {
+        chrome.runtime.sendMessage({ type: "folderSyncAdopt" }, (r: any) => resolve(!!(r && r.ok)));
+    });
+}
+
 export async function openFolder(
     getScripts: () => Promise<{ id: string; name: string; code: string }[]>,
     handlers?: FolderSyncHandlers

@@ -180,6 +180,7 @@ function connectLogs(): void {
         }
         if (msg.type === "sync") {
             (window as any).__resSyncActive = msg.status.active;
+            fsBridge.setCachedActive(msg.status.active);
             if (msg.status.active) {
                 markFolderSynced();
             } else {
@@ -446,6 +447,7 @@ async function markFolderSynced(): Promise<void> {
     btn.classList.add("active");
     btn.textContent = "Scripts Folder ✓";
     (window as any).__resSyncActive = true;
+    fsBridge.setCachedActive(true);
     const st = await fsBridge.queryStatus();
     $("#folder-state").textContent = st.path || "(syncing)";
 }
@@ -671,6 +673,7 @@ async function main(): Promise<void> {
             if (fsBridge.isSyncing()) {
                 await fsBridge.stopSync();
                 (window as any).__resSyncActive = false;
+                fsBridge.setCachedActive(false);
                 btn.classList.remove("active");
                 btn.textContent = "Scripts Folder…";
                 $("#folder-state").textContent = "";
