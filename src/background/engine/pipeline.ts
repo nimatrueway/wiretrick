@@ -49,7 +49,7 @@ export function createPipeline(
             // pre-attach only when a CDP-relevant (non hook-only) body
             // script matches the page URL, and schedule an idle detach so
             // the banner disappears once the page settles
-            if (cdp.cdpRelevantScripts(info.url).length > 0) {
+            if (cdp.hasCdpListedScripts(info.url) && cdp.cdpRelevantScripts(info.url).length > 0) {
                 void cdp.ensureAttached(tabId, info.url);
                 cdp.scheduleIdleDetach(tabId);
             }

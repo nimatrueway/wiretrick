@@ -232,7 +232,15 @@
             const abortP = abortRace(signal);
 
             try {
-                // 1. replaceResponse? (background runs the handler)
+                // 1. respond (onRequest terminal result) — no network at all
+                const resp0 = abortP ? await Promise.race([viaBridge({ op: "respond", url, method }), abortP]) : await viaBridge({ op: "respond", url, method });
+                if (resp0 && resp0.content !== null && resp0.content !== undefined) {
+                    const hdrs = new Headers({ "content-type": resp0.mime || "text/plain" });
+                    for (const [k, v] of Object.entries(resp0.headers || {})) hdrs.set(k, String(v));
+                    return new Response(resp0.content, { status: resp0.status || 200, headers: hdrs });
+                }
+
+                // 2. replaceResponse? (background runs the handler)
                 const repl = abortP ? await Promise.race([viaBridge({ op: "replace", url, method }), abortP]) : await viaBridge({ op: "replace", url, method });
                 if (repl && repl.content !== null && repl.content !== undefined) {
                     return new Response(repl.content, { status: 200, headers: { "content-type": repl.mime || "text/plain" } });
@@ -419,6 +427,10 @@
         wrap("warn", "warn");
         wrap("error", "error");
     }
+
+    // debug seam: live hook state for e2e/diagnostics
+    (w as any).__resHookState = () => ({ active, patched, domFired, domHandlers: domHandlers.length });
+    (w as any).__resViaBridge = viaBridge;
 
     requestStatus();
 })();

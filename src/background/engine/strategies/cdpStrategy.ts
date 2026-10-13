@@ -18,6 +18,8 @@ interface CdpScript {
     scriptId: string;
     name: string;
     match: string[];
+    /** the script's raw @strategy list (comma-separated) */
+    strategyRaw: string;
     /** async modifyResponse transforms (compose in order) */
     transform: HandlerFn[];
     /** async onRequest handlers (first terminal result wins at Request stage) */
@@ -29,9 +31,11 @@ interface CdpScript {
 }
 
 /**
- * Tier C participation rule: the debugger is used ONLY when the script's
- * strategy list explicitly contains "cdp", or is exactly ["auto"]
- * (auto's documented default is hook → cdp).
+ * Tier C participation rule: the debugger PRE-ATTACHES only for scripts
+ * whose strategy list explicitly contains "cdp" (or the single default
+ * "auto"). ALL body scripts are still LOADED into this strategy — when the
+ * hook tier is unavailable (page CSP blocked it, cold start), an explicit
+ * needsCdp dispatch from the pipeline may route their transforms here.
  */
 function usesCdp(strategyRaw: string): boolean {
     const list = parseStrategyList(strategyRaw);
@@ -58,11 +62,8 @@ export class CdpStrategy {
 
     reload(scripts: Script[]): void {
         this.scripts = [];
-        // Only scripts whose strategy list admits CDP participate — an
-        // explicit "hook"/"webrequest" list never touches the debugger.
         for (const s of scripts) {
             if (!s.enabled) continue;
-            if (!usesCdp(s.meta.strategy)) continue;
             const c = compileScript(s.code, makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, msg) => log(-1, `res.log: ${msg}`, "info", id), (id, level, msg) => log(-1, `script.console: ${msg}`, level, id)));
             // async-only for onRequest/onResponseHeaders/replaceResponse —
             // sync handlers are served by the blocking webRequest tier
@@ -80,6 +81,7 @@ export class CdpStrategy {
                 scriptId: s.id,
                 name: s.meta.name,
                 match: s.meta.match,
+                strategyRaw: s.meta.strategy,
                 transform: c.handlers.modifyResponse,
                 onRequest: c.handlers.onRequest.some(isAsyncFn) ? c.handlers.onRequest : undefined,
                 onResponseHeaders: c.handlers.onResponseHeaders.some(isAsyncFn) ? c.handlers.onResponseHeaders : undefined,
@@ -119,8 +121,14 @@ export class CdpStrategy {
     }
 
     /** Scripts matching url that still legitimately need the debugger. */
+    /** Scripts that justify a PRE-ATTACH: cdp-listed and not hook-learned. */
     cdpRelevantScripts(url: string): CdpScript[] {
-        return this.matchingScripts(url).filter((s) => !this.isXhrOnly(s.scriptId));
+        return this.matchingScripts(url).filter((s) => usesCdp(s.strategyRaw) && !this.isXhrOnly(s.scriptId));
+    }
+
+    /** True when any script matching the url has cdp in its strategy list. */
+    hasCdpListedScripts(url: string): boolean {
+        return this.matchingScripts(url).some((s) => usesCdp(s.strategyRaw));
     }
 
     /** Forget per-tab state on tab close. */

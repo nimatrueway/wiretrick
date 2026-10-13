@@ -59,7 +59,7 @@
             return;
         }
         if (data.kind === "call") {
-            const bgType = data.op === "replace" ? "runReplace" : data.op === "request" ? "runRequestDecision" : "runTransform";
+            const bgType = data.op === "replace" ? "runReplace" : data.op === "respond" ? "runRequestDecision" : "runTransform";
             chrome.runtime.sendMessage(
                 { type: bgType, url: data.url, method: data.method, body: data.body, status: data.status, contentType: data.contentType },
                 (resp: any) => {
