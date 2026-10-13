@@ -97,6 +97,11 @@ request wins:
 
 Invalid names are dropped; a list that ends up empty falls back to `auto`.
 
+**Tier C participation is strict**: the debugger is only ever used when the
+script's list explicitly contains `cdp` (or is the single default `auto`).
+A script with `@strategy hook` / `hook,proxy` / `webrequest` will never
+attach the debugger for any request.
+
 ### Banner minimization (what the engine does on its own)
 
 - **Learning**: the engine records which resource types each script actually

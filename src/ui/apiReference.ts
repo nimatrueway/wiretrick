@@ -110,7 +110,9 @@ Scripts that only ever match fetch/XHR are learned to be hook-only and never tri
 @strategy hook          // strictly banner-free; unhookable requests pass through
 @strategy webrequest,hook // Firefox network-level first
 
-See the README's "Interception strategies" section for the full matrix,
-@mainframes off, and the engine's automatic banner minimization.`,
+Tier C (debugger) participates ONLY when the list contains "cdp" or is
+the single default "auto" — explicit hook/webrequest lists never show
+the banner. See the README's "Interception strategies" section for the
+full matrix, @mainframes off, and automatic banner minimization.`,
     },
 ];

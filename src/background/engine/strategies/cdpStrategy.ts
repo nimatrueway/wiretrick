@@ -5,6 +5,7 @@
  * requests are in flight for a matching script.
  */
 import { matchAny } from "../../../shared/matcher";
+import { parseStrategyList } from "../../../shared/metaParser";
 import { compileScript, makeScriptOverrides, type HandlerFn } from "../../../shared/compile";
 import { storageGet, storageSet } from "../../../shared/chromeApi";
 import type { Script } from "../scriptStore";
@@ -18,6 +19,17 @@ interface CdpScript {
     name: string;
     match: string[];
     transform: HandlerFn;
+}
+
+/**
+ * Tier C participation rule: the debugger is used ONLY when the script's
+ * strategy list explicitly contains "cdp", or is exactly ["auto"]
+ * (auto's documented default is hook → cdp).
+ */
+function usesCdp(strategyRaw: string): boolean {
+    const list = parseStrategyList(strategyRaw);
+    if (list.includes("cdp")) return true;
+    return list.length === 1 && list[0] === "auto";
 }
 
 const LEARN_KEY = "resCdpLearn";
@@ -37,10 +49,11 @@ export class CdpStrategy {
 
     reload(scripts: Script[]): void {
         this.scripts = [];
-        // Every enabled script with a modifyResponse handler may need CDP on
-        // Chrome (hook covers page fetch/XHR; CDP covers everything else).
+        // Only scripts whose strategy list admits CDP participate — an
+        // explicit "hook"/"webrequest" list never touches the debugger.
         for (const s of scripts) {
             if (!s.enabled) continue;
+            if (!usesCdp(s.meta.strategy)) continue;
             const c = compileScript(s.code, makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, msg) => log(-1, `res.log: ${msg}`, "info", id), (id, level, msg) => log(-1, `script.console: ${msg}`, level, id)));
             if (c.handlers.modifyResponse) {
                 this.scripts.push({
