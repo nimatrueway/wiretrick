@@ -56,18 +56,71 @@ script, renaming a file renames the script. The folder choice is remembered —
 the manager reconnects automatically on open (one click to re-grant after a
 browser restart, per Chrome's File System Access rules).
 
-## How body interception works (`res.modifyResponse`)
+## Interception strategies — how bodies get modified
 
-- **Firefox** — network-level via `webRequest.filterResponseData`. Nothing else needed.
-- **Chrome** — `webRequest` cannot touch bodies there, so three banner-free-first tiers:
-  1. **Hook** — a MAIN-world content script overrides `fetch`/`XMLHttpRequest` and
-     streams page-initiated responses through your transform (covers most traffic).
-  2. **Proxy** — other resources (scripts, CSS, images, fonts) are redirected to an
-     extension service worker that fetches the original, transforms it, and serves it
-     with the right Content-Type.
-  3. **CDP (opt-in)** — `@strategy cdp` uses `chrome.debugger` + Fetch domain for
-     main-frame HTML and anything the first two tiers cannot see. Shows the
-     "debugging" banner only while active.
+Chrome and Firefox have fundamentally different extension APIs, and Chrome
+itself can only reach some resources through some paths. ResScript therefore
+has **interception strategies** — pickable per script, individually or as a
+**comma-separated priority list**:
+
+```ts
+// ==ResScript==
+// @name       My script
+// @match      *://api.example.com/*
+// @strategy   hook,cdp        ← try these in order
+// ==/ResScript==
+```
+
+| strategy | how it works | can see | banner? | notes |
+|---|---|---|---|---|
+| `hook` | MAIN-world content script overrides `fetch`, `XMLHttpRequest`, `Response` consumers | any request the page's own JS makes (fetch/XHR — the majority of API traffic) | **never** | misses `<script src>`, `<img>`, documents; requires the page context |
+| `cdp` | `chrome.debugger` + CDP Fetch domain: pause response → read body → transform → fulfill | **everything**: documents, script tags, images, fonts, XHR — even requests the page didn't initiate | **yes** — Chrome shows a yellow "being debugged" bar while attached | the only network-level path for main-frame HTML and non-JS resources on Chrome; attach/detach is lazy and automatic |
+| `proxy` | extension service worker fetches the original and serves it transformed | resources that follow redirects | never | reserved for the MV3 path (DNR-redirect); on MV2 extension SWs can't intercept page loads, so it's only used where wired up |
+| `webrequest` | blocking `webRequest` + `filterResponseData` | everything | never | **Firefox-only** (Firefox keeps MV2 network APIs); on Chrome this tier is a no-op |
+| `auto` (default) | engine picks per request | — | minimized | resolves to `hook` when the page hook is ready, else `cdp`; skips CDP for main frames when `@mainframes off` |
+
+### Priority lists
+
+Strategies are tried **in listed order** — the first viable one for a given
+request wins:
+
+- `@strategy hook,cdp` — banner-free for page fetch/XHR; the debugger only as
+  a cold-start fallback (e.g. the very first navigation before the hook loads).
+- `@strategy cdp` — debugger only. Main-frame HTML and script-tag rewrites
+  always work, at the cost of the banner while requests are in flight.
+- `@strategy cdp,hook` — debugger first even for XHR (rare; useful when the
+  page's fetch wrapper is hostile to monkey-patching).
+- `@strategy hook` — strictly banner-free; requests the hook can't see pass
+  through untouched.
+- `@strategy webrequest,hook` — Firefox-first: network-level streaming when
+  available, page hook otherwise.
+
+Invalid names are dropped; a list that ends up empty falls back to `auto`.
+
+### Banner minimization (what the engine does on its own)
+
+- **Learning**: the engine records which resource types each script actually
+  matches. A script observed ≥3 times matching only fetch/XHR is treated as
+  permanently hook-covered — it will never trigger the debugger again.
+- **Lazy attach**: the debugger attaches only when a CDP-relevant script
+  matches an in-flight request, and detaches ~8s after the page settles —
+  the banner clears while you keep browsing.
+- **`@mainframes off`**: declare that a script only targets API/subresource
+  responses. Main-frame HTML is then never intercepted by CDP for it
+  (combine with `res.onDom` for page changes — see below).
+- **Claim dedup**: when the hook transforms a request, the CDP tier skips it
+  (no double transforms).
+
+### Which strategy for which job?
+
+- Mock/transform **JSON APIs** → default `auto` (hook covers it; no banner).
+- Rewrite **page HTML / titles in the raw response** → `cdp` (or default
+  auto; the main frame always goes through CDP on Chrome).
+- Change **title/DOM after render** → `res.onDom` — no network interception
+  at all, works even when the HTML is service-worker served or hydration
+  re-renders it (this is the resilient choice for SPA title/DOM tweaks).
+- **Firefox users** → everything is network-level via `webrequest`, no
+  banners, ever.
 
 ## MV3 readiness
 

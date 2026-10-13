@@ -87,4 +87,17 @@ proxy — extension service worker (reserved for the MV3 path).
 cdp — chrome.debugger + Fetch domain. Sees everything, but Chrome shows a "debugging" banner while attached; the engine attaches only while needed and detaches when idle.
 Scripts that only ever match fetch/XHR are learned to be hook-only and never trigger the banner.`,
     },
+    {
+        title: "@strategy — comma-separated priority list",
+        body: `Pick strategies per script; the first viable one per request wins.
+
+@strategy hook,cdp      // banner-free for XHR; debugger only as cold-start fallback
+@strategy cdp           // debugger only (main-frame HTML + script tags always work)
+@strategy cdp,hook      // debugger first, even for XHR
+@strategy hook          // strictly banner-free; unhookable requests pass through
+@strategy webrequest,hook // Firefox network-level first
+
+See the README's "Interception strategies" section for the full matrix,
+@mainframes off, and the engine's automatic banner minimization.`,
+    },
 ];
