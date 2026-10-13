@@ -193,12 +193,22 @@ function renderLogLine(line: HTMLElement, text: string, level: string): void {
     line.appendChild(document.createTextNode(text));
 }
 
+/** All received entries — filtered ones stay here (re-renderable), just not in the DOM. */
+const logEntries: { text: string; level: string }[] = [];
+
 function appendLog(entry: any): void {
+    const time = new Date(entry.at).toLocaleTimeString();
+    logEntries.push({ text: `[${time}] ${entry.message}`, level: entry.level || "info" });
+    if (logEntries.length > 2000) logEntries.splice(0, logEntries.length - 2000);
+
+    const text = logEntries[logEntries.length - 1].text;
+    const level = logEntries[logEntries.length - 1].level;
+    if (!linePassesFilters(text, level)) return; // don't let hidden entries churn the DOM ring
+
     const box = $("#log-entries");
     const line = document.createElement("div");
-    line.className = "log-line " + entry.level;
-    const time = new Date(entry.at).toLocaleTimeString();
-    renderLogLine(line, `[${time}] ${entry.message}`, entry.level || "info");
+    line.className = "log-line " + level;
+    renderLogLine(line, text, level);
     box.appendChild(line);
     while (box.children.length > 500) box.removeChild(box.firstChild as Node);
     box.scrollTop = box.scrollHeight;
@@ -206,11 +216,16 @@ function appendLog(entry: any): void {
 
 function refilterLog(): void {
     const box = $("#log-entries");
-    for (const line of Array.from(box.children) as HTMLElement[]) {
-        const text = line.dataset.text || line.textContent || "";
-        const level = line.dataset.level || "info";
+    box.innerHTML = "";
+    for (const { text, level } of logEntries) {
+        if (!linePassesFilters(text, level)) continue;
+        const line = document.createElement("div");
+        line.className = "log-line " + level;
         renderLogLine(line, text, level);
+        box.appendChild(line);
     }
+    while (box.children.length > 500) box.removeChild(box.firstChild as Node);
+    box.scrollTop = box.scrollHeight;
 }
 
 function makeLogFilters(): void {
