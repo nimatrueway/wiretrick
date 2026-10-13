@@ -31,6 +31,8 @@ interface BodyScriptEntry {
     match: string[];
     code: string;
     strategy: string;
+    /** @mainframes off → never intercept main-frame HTML (no debugger) */
+    mainFrames: boolean;
 }
 
 export class ChromeBodyStrategy implements InterceptionStrategy {
@@ -57,6 +59,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
                 match: s.meta.match,
                 code: s.code,
                 strategy: s.meta.strategy,
+                mainFrames: s.meta.mainFrames !== false,
             });
         }
     }
@@ -110,6 +113,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
                 phase: ["request", "response"],
                 strategy: s.strategy as any,
                 runAt: "document_start",
+                mainFrames: s.mainFrames,
             },
         }));
     }
@@ -146,6 +150,14 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
         // images, css, fonts, ...) goes through the CDP strategy: let the
         // request proceed and transform the response there. The attach is
         // sticky per tab, so only the first navigation races the attach.
+        if (details.type === "main_frame") {
+            // @mainframes off (any/all): the debugger banner is not worth
+            // it — those scripts cover the page via their onDom hooks
+            const cdpWanted = matching.filter((s) => s.mainFrames);
+            if (cdpWanted.length === 0) {
+                return { kind: "allow" };
+            }
+        }
         log(details.tabId, `[CDP] body transform via debugger for ${shortUrl(details.url)}`, "info");
         return { kind: "needsCdp" };
     }

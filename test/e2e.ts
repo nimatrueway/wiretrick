@@ -13,9 +13,9 @@
  *   - per-tab badge counting
  *   - enable/disable toggling
  *
- * Usage: npm run build && node test/e2e.mjs
- * Env:   E2E_CHROMIUM — path to an MV2-capable Chromium/Chrome-for-Testing
- *        (must support blocking webRequest; modern stable Chrome won't do)
+ * Usage: npm run build && npm run test:e2e
+ * Env:   E2E_CHROMIUM — path to an MV2-capable Chromium (default: the
+ *        homebrew ungoogled-chromium; modern stable Chrome lost MV2)
  */
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -26,7 +26,7 @@ import { chromium } from "playwright-core";
 
 const EXT_ROOT = path.join(new URL("..", import.meta.url).pathname, "dist");
 const CHROMIUM = process.env.E2E_CHROMIUM ||
-    "/tmp/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing";
+    "/opt/homebrew/Caskroom/ungoogled-chromium/152.0.7977.82-1.1/Chromium.app/Contents/MacOS/Chromium";
 const PORT = 8907;
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const EXT_ID = "mgbfmgeopkkpfcgjafmmdlnplkdnglki"; // derived from the dist path
