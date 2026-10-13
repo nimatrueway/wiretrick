@@ -62,6 +62,13 @@ declare namespace ResOverride {
         get(key: string): Promise<any>;
         set(key: string, value: any): Promise<void>;
     }
+
+    /** Options for the res.onDom hook (see res.onDom docs). */
+    interface DomOptions {
+        watch?: boolean;
+        watchInterval?: number;
+        maxRuns?: number;
+    }
 }
 
 /**
@@ -114,10 +121,46 @@ declare const res: {
     log(...args: unknown[]): void;
 
     /**
-     * Run at DOM-ready in the page (MAIN world). Use this for DOM and
-     * document.title changes — especially on sites whose HTML is served
-     * from a service worker (webRequest/CDP never see that response) or
-     * where hydration re-renders your transformed markup.
+     * Run a handler in the page (MAIN world) when the DOM is ready — the
+     * resilient way to change titles, text, and DOM content.
+     *
+     * WHEN IT RUNS (default): the handler executes exactly once, when
+     * `DOMContentLoaded` fires — the full document is parsed and queryable,
+     * but stylesheets/images may still be loading and framework hydration
+     * (React/Vue) has NOT necessarily finished. If the script bundle arrives
+     * after DOMContentLoaded already fired (late bundle, bfcache restore),
+     * the handler runs immediately at registration instead.
+     *
+     * Because it runs as page JS it works no matter how the response
+     * arrived — service-worker-served HTML, cached pages, or hydration
+     * overwriting a network-tier transform.
+     *
+     * SPA CAVEAT: pushState soft-navigations do NOT refire
+     * DOMContentLoaded. Pass `{ watch: true }` to re-run on DOM mutations.
+     *
+     * @param handler  (ctx) => void — same ctx shape as onRequest (url,
+     *                 method, tabUrl, ...). May be async (fire-and-forget).
+     * @param opts     Optional behavior:
+     *   watch         — re-run the handler on DOM mutations (childList,
+     *                   subtree, characterData). Use for SPA soft navigations
+     *                   and hydration re-renders. Default: false.
+     *   watchInterval — debounce in ms between watch-triggered runs.
+     *                   Default: 250. Higher = less CPU on chatty pages.
+     *   maxRuns       — safety cap on total executions per page load.
+     *                   Default: 1 without watch, unlimited with watch.
+     *
+     * @example
+     * res.onDom(() => { document.title = "🎯 " + document.title; });
+     *
+     * @example
+     * // SPA: keep re-applying as React re-renders
+     * res.onDom(() => {
+     *     const el = document.querySelector("h1");
+     *     if (el) el.textContent = "Intercepted";
+     * }, { watch: true, watchInterval: 500, maxRuns: 100 });
      */
-    onDom(handler: (ctx: ResOverride.RequestCtx) => void): void;
+    onDom(
+        handler: (ctx: ResOverride.RequestCtx) => void | Promise<void>,
+        opts?: ResOverride.DomOptions
+    ): void;
 };

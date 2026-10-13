@@ -222,7 +222,16 @@ import { dlog } from "../shared/debugLog";
         return out;
     }
 
-    /** onDom: user DOM/title manipulation at document-ready, @match gated. */
+    /**
+     * onDom: user DOM/title manipulation.
+     *
+     * Options (2nd arg of res.onDom):
+     *   watch       — re-run on DOM mutations (SPA soft navs, hydration).
+     *                 Default false.
+     *   watchInterval — debounce ms between watch runs. Default 250.
+     *   maxRuns     — cap total executions per page load. Default Infinity
+     *                 (1 when watch is off).
+     */
     function runDomHandlers(): void {
         const fire = () => {
             const domScripts = compiled.filter((c) => c.script.handlers.onDom && urlMatches(c.match, location.href));
@@ -230,10 +239,44 @@ import { dlog } from "../shared/debugLog";
             for (const c of domScripts) {
                 const handler = c.script.handlers.onDom;
                 if (!handler) continue;
-                try {
-                    handler(makeCtx(location.href, "GET"));
-                } catch (e: any) {
-                    logUp(`onDom ${c.name} threw: ${e.message || e}`, "error");
+                const opts = c.script.handlers.onDomOptions || {};
+                const maxRuns = opts.maxRuns ?? (opts.watch ? Infinity : 1);
+                let runs = 0;
+
+                const run = () => {
+                    if (runs >= maxRuns) return;
+                    runs++;
+                    try {
+                        handler(makeCtx(location.href, "GET"));
+                    } catch (e: any) {
+                        logUp(`onDom ${c.name} threw: ${e.message || e}`, "error");
+                    }
+                };
+
+                run();
+
+                if (opts.watch && runs < maxRuns) {
+                    let last = 0;
+                    const observer = new MutationObserver(() => {
+                        const now = Date.now();
+                        if (now - last < (opts.watchInterval ?? 250)) return;
+                        last = now;
+                        if (runs >= maxRuns) {
+                            observer.disconnect();
+                            return;
+                        }
+                        run();
+                    });
+                    observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+                    // auto-disconnect at the cap
+                    if (maxRuns !== Infinity) {
+                        const check = setInterval(() => {
+                            if (runs >= maxRuns) {
+                                observer.disconnect();
+                                clearInterval(check);
+                            }
+                        }, 1000);
+                    }
                 }
             }
         };

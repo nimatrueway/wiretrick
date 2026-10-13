@@ -8,6 +8,23 @@ import { parseMeta, type ResMeta } from "./metaParser";
 
 export type HandlerFn = (...args: any[]) => any;
 
+/** Options for the onDom hook (2nd argument of res.onDom). */
+export interface DomOptions {
+    /**
+     * Also re-run the handler when the page mutates the DOM (SPA soft
+     * navigations, hydration re-renders). Default: false (run once at
+     * DOMContentLoaded / late-registration).
+     */
+    watch?: boolean;
+    /** Milliseconds between watch re-runs (debounce). Default: 250. */
+    watchInterval?: number;
+    /**
+     * Stop watching after this many mutations fired the handler
+     * (safety cap for very chatty pages). Default: Infinity.
+     */
+    maxRuns?: number;
+}
+
 export interface ScriptHandlers {
     onRequest: HandlerFn | null;
     onResponseHeaders: HandlerFn | null;
@@ -15,6 +32,7 @@ export interface ScriptHandlers {
     modifyResponse: HandlerFn | null;
     /** run at DOM-ready in the page — DOM/title manipulation */
     onDom: HandlerFn | null;
+    onDomOptions: DomOptions;
 }
 
 export interface CompiledScript {
@@ -116,7 +134,7 @@ export function compileFromSources(meta: ResMeta, sources: HandlerSources): Comp
             }
         }
     }
-    return { meta, handlers: store, error: null, code: "" };
+    return { meta, handlers: { ...store, onDomOptions: {} }, error: null, code: "" };
 }
 
 /** Serialize compiled handlers so they can be shipped to hook/proxy contexts. */
@@ -137,6 +155,7 @@ function emptyHandlers(): ScriptHandlers {
         replaceResponse: null,
         modifyResponse: null,
         onDom: null,
+        onDomOptions: {},
     };
 }
 
@@ -147,6 +166,7 @@ function createCollector(): ScriptHandlers {
         replaceResponse: null,
         modifyResponse: null,
         onDom: null,
+        onDomOptions: {},
     };
 }
 
@@ -175,7 +195,10 @@ function makeCollectorShim(store: any, overrides?: ResApiOverrides) {
         onResponseHeaders: (fn: HandlerFn) => (store.onResponseHeaders = fn),
         replaceResponse: (fn: HandlerFn) => (store.replaceResponse = fn),
         modifyResponse: (fn: HandlerFn) => (store.modifyResponse = fn),
-        onDom: (fn: HandlerFn) => (store.onDom = fn),
+        onDom: (fn: HandlerFn, opts?: DomOptions) => {
+            store.onDom = fn;
+            store.onDomOptions = opts || {};
+        },
         storage: overrides?.storage || {
             get: () => undefined,
             set: () => undefined,

@@ -62,13 +62,24 @@ Tiers on Chrome: page fetch/XHR goes through a banner-free hook; documents, scri
     },
     {
         title: "res.onDom — DOM & title changes",
-        body: `Runs at DOM-ready in the page. Best way to change titles, text and DOM — it works even when the HTML is service-worker served or hydration re-renders it.
+        body: `Runs at DOM-ready in the page (MAIN world): the handler executes once when DOMContentLoaded fires (DOM parsed; hydration not finished). If the bundle arrives after that, it runs immediately. Works even when the HTML is service-worker served or hydration re-renders it.
 
 res.onDom(() => {
     document.title = "🎯 " + document.title;
     const h = document.querySelector("h1");
     if (h) h.textContent = "Hello!";
-});`,
+});
+
+Options (2nd argument) — SPA soft navigations don't refire DOMContentLoaded, so watch mutations:
+
+res.onDom(() => {
+    const el = document.querySelector("h1");
+    if (el) el.textContent = "Intercepted";
+}, { watch: true, watchInterval: 500, maxRuns: 100 });
+
+watch (default false): re-run on DOM mutations (childList/subtree/characterData).
+watchInterval (default 250): debounce ms between watch runs.
+maxRuns (default 1, unlimited with watch): cap per page load; observer auto-disconnects.`,
     },
     {
         title: "res.storage / res.log",
