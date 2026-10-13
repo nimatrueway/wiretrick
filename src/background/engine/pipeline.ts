@@ -11,6 +11,8 @@ import type { Script } from "./scriptStore";
 import { listScripts, onScriptsChanged, saveScript, deleteScript, setEnabled, newId } from "./scriptStore";
 import { serveStore } from "./strategies/webRequestStrategy";
 import { dlog } from "../../shared/debugLog";
+import { toRunnableJs } from "../../shared/compile";
+import "../../shared/transpile";
 import { log } from "./logs";
 import { serializeHandlers, type HandlerSources } from "../../shared/compile";
 
@@ -229,12 +231,13 @@ export function createPipeline(
             // keep their `res` binding and top-level scope
             // ship ALL enabled body scripts — body transforms match request
             // URLs, not the page URL, so the hook filters per-request itself
+            // deliver runnable JS: the page hook has no TS compiler
             const bundle = {
                 scripts: chromeBody.allBodyScripts().map((s) => ({
                     scriptId: s.scriptId,
                     name: s.name,
                     match: s.match,
-                    code: s.code,
+                    code: toRunnableJs(s.code),
                 })),
             };
             dlog("pipeline", "getHookBundle responding", { count: bundle.scripts.length, url: msg.url });
@@ -247,7 +250,7 @@ export function createPipeline(
                 transforms: scripts.map((s) => ({
                     scriptId: s.scriptId,
                     name: s.meta.name,
-                    code: s.code,
+                    code: toRunnableJs(s.code),
                 })),
             });
             return false;

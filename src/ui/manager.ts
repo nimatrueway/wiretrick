@@ -369,7 +369,7 @@ function renderSamples(): void {
 function markFolderSynced(): void {
     const btn = $("#btn-vscode");
     btn.classList.add("active");
-    btn.textContent = "Folder ✓ (sync on)";
+    btn.textContent = "Scripts Folder ✓";
 }
 
 const folderSyncHandlers: fsBridge.FolderSyncHandlers = {
@@ -421,14 +421,14 @@ function newId(): string {
 
 async function autoReconnectFolder(): Promise<void> {
     if (!fsBridge.isSupported()) return;
-    const st = await fsBridge.autoReconnect();
+    const st = await fsBridge.autoReconnect(folderSyncHandlers);
     const btn = $("#btn-vscode");
     if (st === "synced") {
         markFolderSynced();
     } else if (st === "prompt") {
         // one click re-grants (Chrome drops FS grants between restarts)
-        status("scripts folder needs reconnect — click 'Folder…'");
-        btn.textContent = "Folder… (reconnect)";
+        status("scripts folder needs reconnect — click 'Scripts Folder…'");
+        btn.textContent = "Scripts Folder… (reconnect)";
         btn.addEventListener("click", async () => {
             if (fsBridge.isSyncing()) return;
             const ok = await fsBridge.reconnectClicked(folderSyncHandlers);
@@ -631,7 +631,7 @@ async function main(): Promise<void> {
             if (fsBridge.isSyncing()) {
                 fsBridge.stopSync();
                 btn.classList.remove("active");
-                btn.textContent = "VS Code…";
+                btn.textContent = "Scripts Folder…";
                 return;
             }
             await fsBridge.openFolder(
@@ -639,7 +639,7 @@ async function main(): Promise<void> {
                 folderSyncHandlers
             );
             btn.classList.add("active");
-            btn.textContent = "Folder ✓ (sync on)";
+            btn.textContent = "Scripts Folder ✓";
         });
     } else {
         btn.setAttribute("disabled", "");

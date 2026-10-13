@@ -67,12 +67,6 @@ async function copyStatic() {
     await copyFile(path.join(root, "src/ui/popup.css"), path.join(dist, "popup.css"));
     await copyFile(path.join(root, "src/ui/serve.html"), path.join(dist, "serve.html"));
 
-    // TypeScript UMD for in-page transpilation (VS Code bridge)
-    const tsLib = path.join(root, "node_modules/typescript/lib/typescript.js");
-    if (existsSync(tsLib)) {
-        await copyFile(tsLib, path.join(dist, "lib/typescript.js"));
-    }
-
     // Monaco classic AMD build
     const monacoSrc = path.join(root, "node_modules/monaco-editor/min/vs");
     const monacoDst = path.join(dist, "lib/monaco/vs");

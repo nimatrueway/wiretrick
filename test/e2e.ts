@@ -97,7 +97,7 @@ await new Promise((r) => setTimeout(r, 5000));
 // find the CDP port from DevToolsActivePort
 const { readFileSync } = await import("node:fs");
 const [port] = readFileSync(path.join(profile, "DevToolsActivePort"), "utf8").split("\n");
-const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
+const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 90000 });
 const ctx = browser.contexts()[0];
 
 // ---------- open the manager page ----------
@@ -163,7 +163,7 @@ const p3 = await newPage("/page-fetch");
 await p3.reload({ waitUntil: "domcontentloaded" }); // warm background → hook patched before the page fetches
 await p3.waitForFunction(() => document.body.innerText.includes("RESULT:"), null, { timeout: 8000 }).catch(() => {});
 const r3 = await p3.evaluate(() => document.body.innerText.trim());
-check("modifyResponse: fetch (tier A hook)", r3.includes("TIERA-VALUE"), r3);
+check("modifyResponse: fetch (tier A hook, TypeScript script)", r3.includes("TIERA-VALUE"), r3);
 
 // badge: /page-fetch page URL + its /api resource — three scripts are
 // active on this tab: badge probe (page), modify hook-tier + response

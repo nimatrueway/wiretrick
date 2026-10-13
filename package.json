@@ -21,6 +21,7 @@
     "vitest": "^2.1.4"
   },
   "dependencies": {
-    "monaco-editor": "^0.52.0"
+    "monaco-editor": "^0.52.0",
+    "sucrase": "^3.35.1"
   }
 }

@@ -38,12 +38,35 @@ export interface ResApiOverrides {
     log?: (...args: any[]) => void;
 }
 
+type Transpiler = (code: string) => string;
+let transpiler: Transpiler | null = null;
+
+/** Register the TS stripper (done by the background via shared/transpile). */
+export function setTranspiler(fn: Transpiler): void {
+    transpiler = fn;
+}
+
+/**
+ * Scripts may be written in TypeScript. Where a transpiler was registered
+ * (background), types are stripped with formatting preserved; contexts
+ * without one (the page hook) receive already-transpiled code.
+ */
+export function toRunnableJs(code: string): string {
+    if (!transpiler) return code;
+    try {
+        return transpiler(code);
+    } catch {
+        return code;
+    }
+}
+
 /** Compile from full source (background storage path). */
 export function compileScript(code: string, overrides?: ResApiOverrides): CompiledScript {
     const meta = parseMeta(code);
     try {
+        const js = toRunnableJs(code);
         // eslint-disable-next-line no-new-func
-        const fn = new Function("res", `"use strict";\n${code}`);
+        const fn = new Function("res", `"use strict";\n${js}`);
         const store = createCollector();
         fn(makeCollectorShim(store, overrides));
         return { meta, handlers: store, error: null, code };

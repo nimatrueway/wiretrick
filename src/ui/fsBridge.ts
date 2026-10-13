@@ -84,13 +84,14 @@ export function isSyncing(): boolean {
  *                reconnectClicked())
  *   "none"     — no folder chosen yet
  */
-export async function autoReconnect(): Promise<"synced" | "prompt" | "none"> {
+export async function autoReconnect(handlers?: FolderSyncHandlers): Promise<"synced" | "prompt" | "none"> {
     if (state) return "synced";
     const handle = await loadSavedHandle();
     if (!handle) return "none";
     try {
         const perm = await handle.queryPermission({ mode: "readwrite" });
         if (perm !== "granted") return "prompt";
+        syncHandlers = handlers || null;
         await connect(handle);
         return "synced";
     } catch {
@@ -254,7 +255,10 @@ async function pollOnce(): Promise<void> {
             lastWritten.delete(fileName);
             continue;
         }
-        syncHandlers?.onFileChanged(fileName, transpile(text));
+        // raw source (TS included) — the engine transpiles at compile time;
+        // transpiling here would overwrite the user's source and lose
+        // blank lines + types
+        syncHandlers?.onFileChanged(fileName, text);
     }
 
     for (const fileName of added) {
@@ -265,7 +269,7 @@ async function pollOnce(): Promise<void> {
             lastWritten.delete(fileName);
             continue;
         }
-        syncHandlers?.onFileAdded(fileName, transpile(text));
+        syncHandlers?.onFileAdded(fileName, text);
     }
 
     for (const fileName of removed) {
@@ -280,22 +284,9 @@ async function pollOnce(): Promise<void> {
         if (lastWritten.get(rename.newName) === text) {
             lastWritten.delete(rename.newName);
         } else {
-            syncHandlers?.onRenamed(rename.oldName, rename.newName, transpile(text));
+            syncHandlers?.onRenamed(rename.oldName, rename.newName, text);
         }
     }
-}
-
-/** Minimal TS transpile in-page using the UMD typescript build. */
-function transpile(source: string): string {
-    const ts = (window as any).ts;
-    if (!ts) return source;
-    const out = ts.transpileModule(source, {
-        compilerOptions: {
-            target: ts.ScriptTarget.ES2020,
-            module: ts.ModuleKind.None,
-        },
-    });
-    return out.outputText;
 }
 
 /** Push extension-side changes into the folder (two-way sync). */
