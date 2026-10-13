@@ -113,6 +113,6 @@ Scripts that only ever match fetch/XHR are learned to be hook-only and never tri
 Tier C (debugger) participates ONLY when the list contains "cdp" or is
 the single default "auto" — explicit hook/webrequest lists never show
 the banner. See the README's "Interception strategies" section for the
-full matrix, @mainframes off, and automatic banner minimization.`,
+full matrix and the engine's automatic banner minimization.`,
     },
 ];

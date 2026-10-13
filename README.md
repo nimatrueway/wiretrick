@@ -77,7 +77,7 @@ has **interception strategies** — pickable per script, individually or as a
 | `cdp` | `chrome.debugger` + CDP Fetch domain: pause response → read body → transform → fulfill | **everything**: documents, script tags, images, fonts, XHR — even requests the page didn't initiate | **yes** — Chrome shows a yellow "being debugged" bar while attached | the only network-level path for main-frame HTML and non-JS resources on Chrome; attach/detach is lazy and automatic |
 | `proxy` | extension service worker fetches the original and serves it transformed | resources that follow redirects | never | reserved for the MV3 path (DNR-redirect); on MV2 extension SWs can't intercept page loads, so it's only used where wired up |
 | `webrequest` | blocking `webRequest` + `filterResponseData` | everything | never | **Firefox-only** (Firefox keeps MV2 network APIs); on Chrome this tier is a no-op |
-| `auto` (default) | engine picks per request | — | minimized | resolves to `hook` when the page hook is ready, else `cdp`; skips CDP for main frames when `@mainframes off` |
+| `auto` (default) | engine picks per request | — | minimized | resolves to `hook` when the page hook is ready, else `cdp` |
 
 ### Priority lists
 
@@ -110,9 +110,9 @@ attach the debugger for any request.
 - **Lazy attach**: the debugger attaches only when a CDP-relevant script
   matches an in-flight request, and detaches ~8s after the page settles —
   the banner clears while you keep browsing.
-- **`@mainframes off`**: declare that a script only targets API/subresource
-  responses. Main-frame HTML is then never intercepted by CDP for it
-  (combine with `res.onDom` for page changes — see below).
+- **Strict tier gating**: a script whose list has no `cdp` (e.g.
+  `@strategy hook`) never attaches the debugger for anything — main frames
+  included; use `res.onDom` for page changes instead.
 - **Claim dedup**: when the hook transforms a request, the CDP tier skips it
   (no double transforms).
 
@@ -172,7 +172,9 @@ title/DOM changes on SPAs.
   auto; the main frame always goes through CDP on Chrome).
 - Change **title/DOM after render** → `res.onDom` — no network interception
   at all, works even when the HTML is service-worker served or hydration
-  re-renders it (this is the resilient choice for SPA title/DOM tweaks).
+  re-renders it (the resilient choice for SPA title/DOM tweaks).
+- **Never see the banner at all** → `@strategy hook` and combine with
+  `res.onDom` for anything the hook can't reach.
 - **Firefox users** → everything is network-level via `webrequest`, no
   banners, ever.
 

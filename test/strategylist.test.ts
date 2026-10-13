@@ -48,13 +48,13 @@ describe("@strategy priority lists", () => {
         expect(s.handleBeforeRequest(xhr(), null).kind).toBe("needsCdp");
     });
 
-    it("cdp-only: main frame → needsCdp; @mainframes off overrides", () => {
+    it("cdp-only: main frame → needsCdp; hook-only list never touches CDP", () => {
         const s = new ChromeBodyStrategy();
         s.reload([makeScript("a", `// ==ResScript==\n// @strategy cdp\n// @match *\n// ==/ResScript==\nres.modifyResponse((c, b) => b);`)]);
         expect(s.handleBeforeRequest(mainFrame(), null).kind).toBe("needsCdp");
 
         const s2 = new ChromeBodyStrategy();
-        s2.reload([makeScript("b", `// ==ResScript==\n// @strategy cdp\n// @mainframes off\n// @match *\n// ==/ResScript==\nres.modifyResponse((c, b) => b);`)]);
+        s2.reload([makeScript("b", `// ==ResScript==\n// @strategy hook\n// @match *\n// ==/ResScript==\nres.modifyResponse((c, b) => b);`)]);
         expect(s2.handleBeforeRequest(mainFrame(), null).kind).toBe("allow");
     });
 

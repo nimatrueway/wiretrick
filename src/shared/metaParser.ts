@@ -40,8 +40,6 @@ export interface ResMeta {
     /** raw @strategy value (comma-separated list) */
     strategy: string;
     runAt: string;
-    /** false (via `@mainframes off`) = never intercept main-frame HTML (no debugger banner) */
-    mainFrames: boolean;
 }
 
 export const DEFAULT_META: ResMeta = {
@@ -51,7 +49,6 @@ export const DEFAULT_META: ResMeta = {
     phase: ["request", "response"],
     strategy: "auto",
     runAt: "document_start",
-    mainFrames: true,
 };
 
 const VALID_PHASES: Phase[] = ["request", "response"];
@@ -94,9 +91,6 @@ export function parseMeta(code: string): ResMeta {
             if (key === "strategy") {
                 meta.strategy = sanitizeStrategyList(value);
             }
-            if (key === "mainframes") {
-                meta.mainFrames = value.toLowerCase() !== "off";
-            }
         }
         if (meta.phase.length === 0) {
             meta.phase = [...DEFAULT_META.phase];
@@ -134,9 +128,6 @@ export function parseMeta(code: string): ResMeta {
                 break;
             case "run-at":
                 meta.runAt = value;
-                break;
-            case "mainframes":
-                meta.mainFrames = value.toLowerCase() !== "off";
                 break;
             default:
                 // unknown keys are ignored for forward compatibility

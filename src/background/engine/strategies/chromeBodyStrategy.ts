@@ -32,8 +32,6 @@ interface BodyScriptEntry {
     code: string;
     /** comma-separated strategy priority list, e.g. "hook,cdp" */
     strategy: string;
-    /** @mainframes off → never intercept main-frame HTML (no debugger) */
-    mainFrames: boolean;
 }
 
 export class ChromeBodyStrategy implements InterceptionStrategy {
@@ -60,7 +58,6 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
                 match: s.meta.match,
                 code: s.code,
                 strategy: s.meta.strategy,
-                mainFrames: s.meta.mainFrames !== false,
             });
         }
     }
@@ -114,7 +111,6 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
                 phase: ["request", "response"],
                 strategy: s.strategy as any,
                 runAt: "document_start",
-                mainFrames: s.mainFrames,
             },
         }));
     }
@@ -141,8 +137,6 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
                     // default priority: hook → (proxy later/mv3) → cdp
                     if (details.type === "xmlhttprequest" || details.type === "websocket") {
                         chosen = this.hookReadyTabs.has(details.tabId) ? "hook" : "cdp";
-                    } else if (details.type === "main_frame" && !script.mainFrames) {
-                        chosen = "none"; // @mainframes off: onDom covers the page
                     } else {
                         chosen = "cdp";
                     }
@@ -161,11 +155,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
                     continue;
                 }
                 if (tier === "cdp") {
-                    if (details.type === "main_frame" && !script.mainFrames) {
-                        chosen = "none";
-                    } else {
-                        chosen = "cdp";
-                    }
+                    chosen = "cdp";
                     break;
                 }
                 if (tier === "webrequest") {
