@@ -106,8 +106,9 @@ describe("handler stacking", () => {
         let out: string | Uint8Array = "base";
         for (const sc of chain) {
             const c = compileScript(sc.code);
-            const fn = c.handlers.modifyResponse!;
-            out = await fn({ url: "x" }, out);
+            for (const fn of c.handlers.modifyResponse) {
+                out = await fn({ url: "x" }, out);
+            }
         }
         expect(out).toBe("base-A-B");
     });
@@ -121,8 +122,9 @@ describe("handler stacking", () => {
         let out: string | Uint8Array = "base";
         for (const sc of chain) {
             const c = compileScript(sc.code);
-            const fn = c.handlers.modifyResponse!;
-            out = await fn({ url: "x" }, out);
+            for (const fn of c.handlers.modifyResponse) {
+                out = await fn({ url: "x" }, out);
+            }
         }
         expect(out).toBe("base-A-B");
     });
@@ -163,10 +165,10 @@ describe("async handlers (CDP tier loading)", () => {
         expect(c.cdpRelevantScripts("https://x.com/").length).toBe(1);
     });
 
-    it("SYNC replaceResponse script (static) is NOT loaded into CdpStrategy", () => {
+    it("SYNC replaceResponse script IS loaded (CDP is the fallback for main frames)", () => {
         const c = new CdpStrategy();
         c.reload([makeScript("a", `// ==ResScript==\n// @strategy cdp\n// @match *\n// ==/ResScript==\nres.replaceResponse(() => "x");`)]);
-        expect(c.cdpRelevantScripts("https://x.com/")).toEqual([]);
+        expect(c.cdpRelevantScripts("https://x.com/").length).toBe(1);
     });
 
     it("async onRequest script is loaded (request-stage redirect/cancel)", () => {

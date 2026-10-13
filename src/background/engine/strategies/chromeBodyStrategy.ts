@@ -41,12 +41,12 @@ interface BodyScriptEntry {
     scriptId: string;
     name: string;
     match: string[];
-    /** compiled onRequest handler (respond results power the hook tier) */
-    onRequest?: (ctx: any) => any;
-    /** compiled modifyResponse transform (async awaited) */
-    transform: ((ctx: any, body: any) => any) | undefined;
-    /** compiled replaceResponse handler, if registered */
-    replace: ((ctx: any) => any) | undefined;
+    /** compiled onRequest handlers (stacked; first terminal result wins) */
+    onRequest: ((ctx: any) => any)[];
+    /** compiled modifyResponse transforms (compose in order) */
+    transform: ((ctx: any, body: any) => any)[];
+    /** compiled replaceResponse handlers (first non-null wins) */
+    replace: ((ctx: any) => any)[];
     /** comma-separated strategy priority list, e.g. "hook,cdp" */
     strategy: string;
 }
@@ -75,9 +75,9 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
                 scriptId: s.id,
                 name: s.meta.name,
                 match: s.meta.match,
-                onRequest: compiled.handlers.onRequest || undefined,
-                transform: compiled.handlers.modifyResponse || undefined,
-                replace: compiled.handlers.replaceResponse || undefined,
+                onRequest: compiled.handlers.onRequest,
+                transform: compiled.handlers.modifyResponse,
+                replace: compiled.handlers.replaceResponse,
                 strategy: s.meta.strategy,
             });
         }
@@ -94,9 +94,9 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
     ): Promise<{ kind: "respond"; mime: string; content: string; status?: number; headers?: any } | { kind: "redirect"; url: string } | { kind: "cancel" } | { kind: "headers"; changes: any } | null> {
         let headerMods: any = null;
         for (const s of this.matchingBodyScripts(url)) {
-            if (!s.onRequest) continue;
+            for (const onRequest of s.onRequest) {
             try {
-                const result = await s.onRequest({ url, method, tabUrl: url, resourceType: "xmlhttprequest", requestHeaders: {} });
+                const result = await onRequest({ url, method, tabUrl: url, resourceType: "xmlhttprequest", requestHeaders: {} });
                 if (!result) continue;
                 if ((result as any).respond) {
                     const r = (result as any).respond;
@@ -116,6 +116,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
             } catch (e: any) {
                 log(-1, `script.console: onRequest ${s.name} threw: ${e.message || e}`, "error", s.scriptId);
             }
+            }
         }
         return headerMods ? { kind: "headers", changes: headerMods } : null;
     }
@@ -125,9 +126,9 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
         let out: string | Uint8Array = body;
         let touched = false;
         for (const s of this.matchingBodyScripts(url)) {
-            if (!s.transform) continue;
+            for (const transform of s.transform) {
             try {
-                const result: any = await s.transform(
+                const result: any = await transform(
                     { url, method, tabUrl: url, resourceType: "xmlhttprequest", requestHeaders: {}, contentType: extra?.contentType, status: extra?.status },
                     out
                 );
@@ -138,6 +139,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
             } catch (e: any) {
                 log(-1, `script.console: transform ${s.name} threw: ${e.message || e}`, "error", s.scriptId);
             }
+            }
         }
         return touched ? (typeof out === "string" ? out : new TextDecoder().decode(out)) : null;
     }
@@ -145,17 +147,18 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
     /** Hook tier: first replaceResponse handler's result, or null. */
     async runReplace(url: string, method: string): Promise<{ mime: string; content: string } | null> {
         for (const s of this.matchingBodyScripts(url)) {
-            if (!s.replace) continue;
-            try {
-                const out = await s.replace({ url, method, tabUrl: url, resourceType: "xmlhttprequest", requestHeaders: {} });
-                if (out !== undefined && out !== null) {
-                    const content = out && typeof out === "object" && (out as any).file ? (out as any).file : out;
-                    const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "";
-                    const mimes: Record<string, string> = { js: "application/javascript", json: "application/json", css: "text/css", html: "text/html", xml: "application/xml" };
-                    return { mime: mimes[ext] || "application/json", content: typeof content === "string" ? content : String(content) };
+            for (const replace of s.replace) {
+                try {
+                    const out = await replace({ url, method, tabUrl: url, resourceType: "xmlhttprequest", requestHeaders: {} });
+                    if (out !== undefined && out !== null) {
+                        const content = out && typeof out === "object" && (out as any).file ? (out as any).file : out;
+                        const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "";
+                        const mimes: Record<string, string> = { js: "application/javascript", json: "application/json", css: "text/css", html: "text/html", xml: "application/xml" };
+                        return { mime: mimes[ext] || "application/json", content: typeof content === "string" ? content : String(content) };
+                    }
+                } catch (e: any) {
+                    log(-1, `script.console: replaceResponse ${s.name} threw: ${e.message || e}`, "error", s.scriptId);
                 }
-            } catch (e: any) {
-                log(-1, `script.console: replaceResponse ${s.name} threw: ${e.message || e}`, "error", s.scriptId);
             }
         }
         return null;

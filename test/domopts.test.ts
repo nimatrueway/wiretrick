@@ -17,12 +17,12 @@ describe("res.onDom options", () => {
     it("captures handler + options", () => {
         const c = compileScript(`// @match *\nres.onDom(() => {}, { when: "document_idle" });`);
         expect(c.error).toBeNull();
-        expect(c.handlers.onDom).toBeTruthy();
-        expect(c.handlers.onDomOptions).toEqual({ when: "document_idle" });
+        expect(c.handlers.onDom.length).toBe(1);
+        expect(c.handlers.onDom[0].when).toBe("document_idle");
     });
 
     it("defaults: no options → {}", () => {
         const c = compileScript(`// @match *\nres.onDom(() => {});`);
-        expect(c.handlers.onDomOptions).toEqual({ when: "DOMContentLoaded" });
+        expect(c.handlers.onDom[0]?.when).toBe("DOMContentLoaded");
     });
 });

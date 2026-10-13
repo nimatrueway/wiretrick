@@ -50,8 +50,8 @@ async function handleProxy(request: Request, originalUrl: string, method: string
     for (const t of transforms) {
         try {
             const compiled = compileScript(t.code);
-            if (!compiled.handlers.modifyResponse) continue;
-            const out = await compiled.handlers.modifyResponse(
+            for (const modify of compiled.handlers.modifyResponse) {
+            const out = await modify(
                 {
                     url: originalUrl,
                     method,
@@ -64,6 +64,7 @@ async function handleProxy(request: Request, originalUrl: string, method: string
                 body
             );
             if (out !== undefined && out !== null) body = out;
+            }
         } catch (e: any) {
             console.error(`[ResOverride proxy] ${t.name} transform threw:`, e.message || e);
         }

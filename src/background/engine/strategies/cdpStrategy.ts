@@ -18,13 +18,14 @@ interface CdpScript {
     scriptId: string;
     name: string;
     match: string[];
-    transform: HandlerFn;
-    /** async onRequest handler (redirect/cancel/respond honored at Request stage) */
-    onRequest?: HandlerFn;
-    /** async onResponseHeaders handler (merged at Response stage) */
-    onResponseHeaders?: HandlerFn;
-    /** async replaceResponse handler (fulfills the body) */
-    replaceResponse?: HandlerFn;
+    /** async modifyResponse transforms (compose in order) */
+    transform: HandlerFn[];
+    /** async onRequest handlers (first terminal result wins at Request stage) */
+    onRequest?: HandlerFn[];
+    /** async onResponseHeaders handlers (merged at Response stage) */
+    onResponseHeaders?: HandlerFn[];
+    /** async replaceResponse handlers (first non-null fulfills the body) */
+    replaceResponse?: HandlerFn[];
 }
 
 /**
@@ -65,20 +66,24 @@ export class CdpStrategy {
             const c = compileScript(s.code, makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, msg) => log(-1, `res.log: ${msg}`, "info", id), (id, level, msg) => log(-1, `script.console: ${msg}`, level, id)));
             // async-only for onRequest/onResponseHeaders/replaceResponse —
             // sync handlers are served by the blocking webRequest tier
+            // CDP is the fallback tier for everything the hook cannot do
+            // (main frames, script tags, cold starts) — any body handler
+            // loads here. ASYNC onRequest/onResponseHeaders handlers also
+            // load (only the CDP tier can honor their results on Chrome).
             const wantsCdp =
-                !!c.handlers.modifyResponse ||
-                isAsyncFn(c.handlers.onRequest) ||
-                isAsyncFn(c.handlers.onResponseHeaders) ||
-                isAsyncFn(c.handlers.replaceResponse);
+                c.handlers.modifyResponse.length > 0 ||
+                c.handlers.replaceResponse.length > 0 ||
+                c.handlers.onRequest.some(isAsyncFn) ||
+                c.handlers.onResponseHeaders.some(isAsyncFn);
             if (!wantsCdp) continue;
             this.scripts.push({
                 scriptId: s.id,
                 name: s.meta.name,
                 match: s.meta.match,
-                transform: c.handlers.modifyResponse as HandlerFn,
-                onRequest: isAsyncFn(c.handlers.onRequest) ? c.handlers.onRequest! : undefined,
-                onResponseHeaders: isAsyncFn(c.handlers.onResponseHeaders) ? c.handlers.onResponseHeaders! : undefined,
-                replaceResponse: isAsyncFn(c.handlers.replaceResponse) ? c.handlers.replaceResponse! : undefined,
+                transform: c.handlers.modifyResponse,
+                onRequest: c.handlers.onRequest.some(isAsyncFn) ? c.handlers.onRequest : undefined,
+                onResponseHeaders: c.handlers.onResponseHeaders.some(isAsyncFn) ? c.handlers.onResponseHeaders : undefined,
+                replaceResponse: c.handlers.replaceResponse.some(isAsyncFn) ? c.handlers.replaceResponse : undefined,
             });
         }
     }
@@ -223,19 +228,36 @@ export class CdpStrategy {
                 await debuggerSend(tabId, "Fetch.continueRequest", { requestId });
                 return;
             }
-            // stash async onResponseHeaders promises for the response stage
+            // run every matching script's onRequest handlers in order;
+            // the first TERMINAL result (respond/cancel/redirect) wins and
+            // stops the chain — non-terminal headers accumulate
             const headerPromises: Promise<any>[] = [];
+            let terminal = false;
             for (const s of requestScripts) {
-                try {
-                    const result = s.onRequest!({ url, method: request.method, tabUrl: url, resourceType: params.resourceType || "other", requestHeaders: {} });
-                    const resolved = isThenable(result) ? await result : result;
+                for (const handler of s.onRequest!) {
+                    let resolved: any;
+                    try {
+                        const result = handler({ url, method: request.method, tabUrl: url, resourceType: params.resourceType || "other", requestHeaders: {} });
+                        resolved = isThenable(result) ? await result : result;
+                    } catch (e: any) {
+                        log(tabId, `[${s.name}] async onRequest threw: ${e.message || e}`, "error", s.scriptId);
+                        continue;
+                    }
                     if (!resolved) continue;
-                    if ((resolved as any).respond) {
+
+                    if (resolved.respond) {
                         // synthesize the response at the Request stage —
                         // the network is never contacted
-                        const r = (resolved as any).respond;
-                        const body = typeof r.body === "string" ? r.body : r.body instanceof Uint8Array ? bytesToBase64(r.body) : bytesToBase64(new TextEncoder().encode(JSON.stringify(r.body)));
-                        const headers = [{ name: "content-type", value: r.mime || "application/json" }, ...Object.entries(r.headers?.set || {}).map(([name, value]) => ({ name, value: String(value) }))];
+                        const r = resolved.respond;
+                        const body = typeof r.body === "string"
+                            ? bytesToBase64(new TextEncoder().encode(r.body))
+                            : r.body instanceof Uint8Array
+                                ? bytesToBase64(r.body)
+                                : bytesToBase64(new TextEncoder().encode(JSON.stringify(r.body)));
+                        const headers = [
+                            { name: "content-type", value: r.mime || "application/json" },
+                            ...Object.entries(r.headers?.set || {}).map(([name, value]) => ({ name, value: String(value) })),
+                        ];
                         dlogLevel("cdp", "info", "async onRequest → respond", { url, script: s.name });
                         await debuggerSend(tabId, "Fetch.fulfillRequest", {
                             requestId,
@@ -255,10 +277,11 @@ export class CdpStrategy {
                         await debuggerSend(tabId, "Fetch.continueRequest", { requestId, url: resolved.redirect });
                         return;
                     }
-                    if (resolved.headers) headerPromises.push(Promise.resolve(resolved.headers));
-                } catch (e: any) {
-                    log(tabId, `[${s.name}] async onRequest threw: ${e.message || e}`, "error", s.scriptId);
+                    if (resolved.headers && (resolved.headers.set || resolved.headers.remove)) {
+                        headerPromises.push(Promise.resolve(resolved.headers));
+                    }
                 }
+                void terminal;
             }
             if (headerPromises.length) this.pendingAsyncHeaders.set(requestId, Promise.all(headerPromises));
             await debuggerSend(tabId, "Fetch.continueRequest", { requestId });
@@ -285,11 +308,13 @@ export class CdpStrategy {
             }
             for (const s of cdpScripts) {
                 if (!s.onResponseHeaders) continue;
-                try {
-                    const r = await s.onResponseHeaders({ url, method: request.method, tabUrl: url, resourceType: params.resourceType || "other", requestHeaders: {}, statusLine: "", responseHeaders: params.responseHeaders || [] });
-                    if (r && r.headers) headerChanges.push(r.headers);
-                } catch (e: any) {
-                    log(tabId, `[${s.name}] async onResponseHeaders threw: ${e.message || e}`, "error", s.scriptId);
+                for (const handler of s.onResponseHeaders) {
+                    try {
+                        const r = await handler({ url, method: request.method, tabUrl: url, resourceType: params.resourceType || "other", requestHeaders: {}, statusLine: "", responseHeaders: params.responseHeaders || [] });
+                        if (r && r.headers) headerChanges.push(r.headers);
+                    } catch (e: any) {
+                        log(tabId, `[${s.name}] async onResponseHeaders threw: ${e.message || e}`, "error", s.scriptId);
+                    }
                 }
             }
             let responseHeaders = params.responseHeaders;
@@ -305,27 +330,29 @@ export class CdpStrategy {
             let body: string | Uint8Array = looksTextual(bytes) ? new TextDecoder().decode(bytes) : bytes;
 
             // async replaceResponse: first non-null result fulfills the body
-            for (const s of cdpScripts) {
+            replaceOuter: for (const s of cdpScripts) {
                 if (!s.replaceResponse) continue;
-                try {
-                    const out = await s.replaceResponse({ url, method: request.method, tabUrl: url, resourceType: params.resourceType || "other", requestHeaders: {}, status: params.responseStatusCode, contentType: headerContentType(responseHeaders) });
-                    if (out !== undefined && out !== null) {
-                        body = typeof out === "string" || out instanceof Uint8Array ? out : JSON.stringify(out);
-                        dlogLevel("cdp", "info", `replaceResponse ${s.name} applied`, { outLen: typeof body === "string" ? body.length : body.length });
-                        break;
+                for (const handler of s.replaceResponse) {
+                    try {
+                        const out = await handler({ url, method: request.method, tabUrl: url, resourceType: params.resourceType || "other", requestHeaders: {}, status: params.responseStatusCode, contentType: headerContentType(responseHeaders) });
+                        if (out !== undefined && out !== null) {
+                            body = typeof out === "string" || out instanceof Uint8Array ? out : JSON.stringify(out);
+                            dlogLevel("cdp", "info", `replaceResponse ${s.name} applied`, { outLen: typeof body === "string" ? body.length : body.length });
+                            break replaceOuter;
+                        }
+                    } catch (e: any) {
+                        dlogLevel("cdp", "error", `replaceResponse ${s.name} THREW: ${e.message || e}`);
+                        log(tabId, `[${s.name}] async replaceResponse threw: ${e.message || e}`, "error", s.scriptId);
                     }
-                } catch (e: any) {
-                    dlogLevel("cdp", "error", `replaceResponse ${s.name} THREW: ${e.message || e}`);
-                    log(tabId, `[${s.name}] async replaceResponse threw: ${e.message || e}`, "error", s.scriptId);
                 }
             }
-
             const headers: { [n: string]: string } = {};
             for (const h of params.responseHeaders || []) {
                 headers[h.name.toLowerCase()] = h.value || "";
             }
 
             for (const s of cdpScripts) {
+                if (!s.transform) continue;
                 const ctx = {
                     url,
                     method: request.method,
@@ -335,14 +362,16 @@ export class CdpStrategy {
                     status: params.responseStatusCode,
                     contentType: headers["content-type"],
                 };
-                try {
-                    const out = await s.transform(ctx, body);
-                    if (out !== undefined && out !== null) body = out;
-                    const before = typeof body === "string" ? body.length : body.length;
-                    dlogLevel("cdp", "info", `transform ${s.name} applied`, { outLen: before });
-                } catch (e: any) {
-                    dlogLevel("cdp", "error", `transform ${s.name} THREW: ${e.message || e}`);
-                    log(tabId, `[${s.name}] modifyResponse (cdp) threw: ${e.message || e}`, "error", s.scriptId);
+                for (const handler of s.transform) {
+                    try {
+                        const out = await handler(ctx, body);
+                        if (out !== undefined && out !== null) body = out;
+                        const len = typeof body === "string" ? body.length : body.length;
+                        dlogLevel("cdp", "info", `transform ${s.name} applied`, { outLen: len });
+                    } catch (e: any) {
+                        dlogLevel("cdp", "error", `transform ${s.name} THREW: ${e.message || e}`);
+                        log(tabId, `[${s.name}] modifyResponse (cdp) threw: ${e.message || e}`, "error", s.scriptId);
+                    }
                 }
             }
 

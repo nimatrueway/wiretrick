@@ -25,14 +25,17 @@ export interface DomOptions {
     when?: DomWhen;
 }
 
+/**
+ * Registrations STACK within a script: multiple res.onRequest(...) calls
+ * all run, in registration order (same semantics as across scripts).
+ */
 export interface ScriptHandlers {
-    onRequest: HandlerFn | null;
-    onResponseHeaders: HandlerFn | null;
-    replaceResponse: HandlerFn | null;
-    modifyResponse: HandlerFn | null;
+    onRequest: HandlerFn[];
+    onResponseHeaders: HandlerFn[];
+    replaceResponse: HandlerFn[];
+    modifyResponse: HandlerFn[];
     /** run at DOM-ready in the page — DOM/title manipulation */
-    onDom: HandlerFn | null;
-    onDomOptions: DomOptions;
+    onDom: { fn: HandlerFn; when: DomWhen }[];
 }
 
 export interface CompiledScript {
@@ -44,10 +47,11 @@ export interface CompiledScript {
 }
 
 export interface HandlerSources {
-    onRequest: string | null;
-    onResponseHeaders: string | null;
-    replaceResponse: string | null;
-    modifyResponse: string | null;
+    onRequest: string[] | null;
+    onResponseHeaders: string[] | null;
+    replaceResponse: string[] | null;
+    modifyResponse: string[] | null;
+    /** JSON: [{ when, src }] */
     onDom: string | null;
 }
 
@@ -126,57 +130,52 @@ export function compileScript(code: string, overrides?: ResApiOverrides): Compil
 /** Rebuild handlers from serialized sources (hook / proxy path). */
 export function compileFromSources(meta: ResMeta, sources: HandlerSources): CompiledScript {
     const store = createCollector();
-    const pairs: [keyof HandlerSources, keyof ScriptHandlers][] = [
-        ["onRequest", "onRequest"],
-        ["onResponseHeaders", "onResponseHeaders"],
-        ["replaceResponse", "replaceResponse"],
-        ["modifyResponse", "modifyResponse"],
-        ["onDom", "onDom"],
-    ];
-    for (const [srcKey, hKey] of pairs) {
-        const src = sources[srcKey];
-        if (src) {
-            try {
-                // eslint-disable-next-line no-new-func
-                store[hKey] = new Function(`return (${src});`)();
-            } catch (e) {
-                // a handler that fails to rebuild is treated as absent
-            }
+    const rebuild = (src: string): HandlerFn => {
+        // eslint-disable-next-line no-new-func
+        return new Function(`return (${src});`)();
+    };
+    for (const key of ["onRequest", "onResponseHeaders", "replaceResponse", "modifyResponse"] as const) {
+        const srcs = sources[key];
+        if (srcs) for (const src of srcs) {
+            try { store[key].push(rebuild(src)); } catch { /* absent */ }
         }
     }
-    return { meta, handlers: { ...store, onDomOptions: {} }, error: null, code: "" };
+    if (sources.onDom) {
+        try {
+            const list = JSON.parse(sources.onDom) as { when: DomWhen; src: string }[];
+            for (const d of list) {
+                try { store.onDom.push({ fn: rebuild(d.src), when: d.when }); } catch {}
+            }
+        } catch {}
+    }
+    return { meta, handlers: store, error: null, code: "" };
 }
 
 /** Serialize compiled handlers so they can be shipped to hook/proxy contexts. */
 export function serializeHandlers(s: CompiledScript): HandlerSources {
+    const arr = (fns: HandlerFn[]) => (fns.length ? fns.map((f) => f.toString()) : null);
     return {
-        onRequest: s.handlers.onRequest ? s.handlers.onRequest.toString() : null,
-        onResponseHeaders: s.handlers.onResponseHeaders ? s.handlers.onResponseHeaders.toString() : null,
-        replaceResponse: s.handlers.replaceResponse ? s.handlers.replaceResponse.toString() : null,
-        modifyResponse: s.handlers.modifyResponse ? s.handlers.modifyResponse.toString() : null,
-        onDom: s.handlers.onDom ? s.handlers.onDom.toString() : null,
+        onRequest: arr(s.handlers.onRequest),
+        onResponseHeaders: arr(s.handlers.onResponseHeaders),
+        replaceResponse: arr(s.handlers.replaceResponse),
+        modifyResponse: arr(s.handlers.modifyResponse),
+        onDom: s.handlers.onDom.length
+            ? JSON.stringify(s.handlers.onDom.map((d) => ({ when: d.when, src: d.fn.toString() })))
+            : null,
     };
 }
 
 function emptyHandlers(): ScriptHandlers {
-    return {
-        onRequest: null,
-        onResponseHeaders: null,
-        replaceResponse: null,
-        modifyResponse: null,
-        onDom: null,
-        onDomOptions: {},
-    };
+    return createCollector();
 }
 
 function createCollector(): ScriptHandlers {
     return {
-        onRequest: null,
-        onResponseHeaders: null,
-        replaceResponse: null,
-        modifyResponse: null,
-        onDom: null,
-        onDomOptions: {},
+        onRequest: [],
+        onResponseHeaders: [],
+        replaceResponse: [],
+        modifyResponse: [],
+        onDom: [],
     };
 }
 
@@ -201,13 +200,12 @@ function makeForwardingConsole(sink?: ResApiOverrides["consoleSink"]): Console {
 
 function makeCollectorShim(store: any, overrides?: ResApiOverrides) {
     return {
-        onRequest: (fn: HandlerFn) => (store.onRequest = fn),
-        onResponseHeaders: (fn: HandlerFn) => (store.onResponseHeaders = fn),
-        replaceResponse: (fn: HandlerFn) => (store.replaceResponse = fn),
-        modifyResponse: (fn: HandlerFn) => (store.modifyResponse = fn),
+        onRequest: (fn: HandlerFn) => { store.onRequest.push(fn); },
+        onResponseHeaders: (fn: HandlerFn) => { store.onResponseHeaders.push(fn); },
+        replaceResponse: (fn: HandlerFn) => { store.replaceResponse.push(fn); },
+        modifyResponse: (fn: HandlerFn) => { store.modifyResponse.push(fn); },
         onDom: (fn: HandlerFn, opts?: DomOptions) => {
-            store.onDom = fn;
-            store.onDomOptions = { when: "DOMContentLoaded", ...(opts || {}) };
+            store.onDom.push({ fn, when: opts?.when || "DOMContentLoaded" });
         },
         storage: overrides?.storage || {
             get: () => undefined,

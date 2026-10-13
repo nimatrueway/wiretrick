@@ -59,8 +59,8 @@ export class WebRequestStrategy implements InterceptionStrategy {
         for (const entry of this.scriptsFor(details.url, "request")) {
             const script = entry.compiled;
             try {
-                if (script.handlers.onRequest) {
-                    const result = script.handlers.onRequest(makeCtx(details, tabUrl));
+                for (const onRequestHandler of script.handlers.onRequest) {
+                    const result = onRequestHandler(makeCtx(details, tabUrl));
                     if (isThenable(result)) {
                         if (IS_FIREFOX) {
                             // Firefox blocking listeners accept promises natively
@@ -100,8 +100,12 @@ export class WebRequestStrategy implements InterceptionStrategy {
                         return normalize(result);
                     }
                 }
-                if (script.handlers.replaceResponse) {
-                    const replacement = script.handlers.replaceResponse(makeCtx(details, tabUrl));
+                if (script.handlers.replaceResponse.length) {
+                    let replacement: any = undefined;
+                    for (const replaceHandler of script.handlers.replaceResponse) {
+                        replacement = replaceHandler(makeCtx(details, tabUrl));
+                        if (replacement !== undefined && replacement !== null) break;
+                    }
                     if (isThenable(replacement)) {
                         if (IS_FIREFOX) {
                             return replacement.then((r: any) => {
@@ -117,7 +121,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                         return this.staticReplace(details, script, replacement, entry.id);
                     }
                 }
-                if (script.handlers.modifyResponse && IS_FIREFOX) {
+                if (script.handlers.modifyResponse.length && IS_FIREFOX) {
                     // Firefox: stream via filterResponseData at onHeadersReceived time;
                     // here we only mark the request so the header-phase hook wires the filter.
                     pendingFirefoxStreams.set(details.requestId, { entry, tabUrl });
@@ -214,8 +218,9 @@ export class WebRequestStrategy implements InterceptionStrategy {
         }
 
         for (const entry of this.scriptsFor(details.url, ctxPhase)) {
-            const handler = entry.compiled.handlers.onResponseHeaders;
-            if (!handler) continue;
+            const handlers = entry.compiled.handlers.onResponseHeaders;
+            if (!handlers.length) continue;
+            for (const handler of handlers) {
             try {
                 const ctx = makeCtx(details, tabUrl);
                 (ctx as any).statusLine = details.statusLine || "";
@@ -229,7 +234,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                     scriptError(entry.id, "async onResponseHeaders: Chrome's blocking webRequest cannot await. Add 'cdp' to @strategy to apply async header changes in the debugger tier.");
                     continue;
                 }
-                const mods = result?.headers;
+                const mods = (result as any)?.headers;
                 if (mods && (mods.set || mods.remove)) {
                     changes = changes || {};
                     changes.set = { ...changes.set, ...mods.set };
@@ -237,6 +242,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                 }
             } catch (e: any) {
                 scriptError(entry.id, `header handler threw: ${e.message || e}`);
+            }
             }
         }
         return changes;
@@ -261,11 +267,13 @@ export class WebRequestStrategy implements InterceptionStrategy {
                 }
                 let body: string | Uint8Array = looksBinary(bytes) ? bytes : decoder.decode(bytes);
                 const ctx = { ...makeCtx(details, tabUrl), contentType: contentTypeOf(details.responseHeaders) };
-                try {
-                    const out = await script.handlers.modifyResponse!(ctx, body);
-                    body = out === undefined || out === null ? body : out;
-                } catch (e: any) {
-                    scriptError(scriptId, `modifyResponse threw: ${e.message || e}`);
+                for (const transform of script.handlers.modifyResponse) {
+                    try {
+                        const out = await transform(ctx, body);
+                        if (out !== undefined && out !== null) body = out;
+                    } catch (e: any) {
+                        scriptError(scriptId, `modifyResponse threw: ${e.message || e}`);
+                    }
                 }
                 const outBytes = typeof body === "string" ? encoder.encode(body) : body;
                 filter.write(outBytes);
