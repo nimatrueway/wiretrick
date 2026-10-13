@@ -87,8 +87,15 @@ chrome.runtime.onInstalled.addListener(() => {
         if (!d || !d.resManagerOpen) return;
         chrome.tabs.query({}, (tabs) => {
             if (tabs.some((t) => t.url && t.url.includes("manager.html"))) return;
-            dlog("bg", "extension reloaded with manager open → reopening");
-            chrome.windows.create({ url: chrome.runtime.getURL("manager.html"), width: 1100, height: 750 });
+            dlog("bg", "extension reloaded with manager open → reopening as a tab");
+            // reopen in a tab of the last focused window — not a new window
+            chrome.windows.getLastFocused((win) => {
+                if (win && win.id !== undefined) {
+                    chrome.tabs.create({ windowId: win.id, url: chrome.runtime.getURL("manager.html") });
+                } else {
+                    chrome.windows.create({ url: chrome.runtime.getURL("manager.html"), width: 1100, height: 750 });
+                }
+            });
         });
     });
 });

@@ -210,7 +210,13 @@ export function createPipeline(
             return true;
         }
         if (msg && msg.type === "openTab") {
-            chrome.windows.create({ url: msg.url, width: 1100, height: 750 }, () => void (chrome.runtime as any).lastError);
+            chrome.windows.getLastFocused((win) => {
+                if (win && win.id !== undefined) {
+                    chrome.tabs.create({ windowId: win.id, url: msg.url });
+                } else {
+                    chrome.windows.create({ url: msg.url, width: 1100, height: 750 });
+                }
+            });
             sendResponse({});
             return false;
         }
