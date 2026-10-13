@@ -38,6 +38,22 @@ export interface ResApiOverrides {
     log?: (...args: any[]) => void;
 }
 
+/** Standard overrides for a stored script: storage wired by id, log → sink. */
+export function makeScriptOverrides(
+    scriptId: string,
+    storage: { get(scriptId: string, key: string): Promise<any>; set(scriptId: string, key: string, v: any): Promise<void> },
+    logSink: (scriptId: string, msg: string) => void
+): ResApiOverrides {
+    return {
+        storage: {
+            get: (key: string) => storage.get(scriptId, key),
+            set: (key: string, value: any) => storage.set(scriptId, key, value),
+        },
+        log: (...args: any[]) =>
+            logSink(scriptId, args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")),
+    };
+}
+
 type Transpiler = (code: string) => string;
 let transpiler: Transpiler | null = null;
 

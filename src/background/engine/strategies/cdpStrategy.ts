@@ -5,10 +5,11 @@
  * requests are in flight for a matching script.
  */
 import { matchAny } from "../../../shared/matcher";
-import { compileScript, type HandlerFn } from "../../../shared/compile";
+import { compileScript, makeScriptOverrides, type HandlerFn } from "../../../shared/compile";
 import { storageGet, storageSet } from "../../../shared/chromeApi";
 import type { Script } from "../scriptStore";
 import { log } from "../logs";
+import { scriptStorageGet, scriptStorageSet } from "../scriptStore";
 import { dlog } from "../../../shared/debugLog";
 import { debuggerAttach, debuggerSend, debuggerDetach } from "../../../shared/chromeApi";
 
@@ -40,7 +41,7 @@ export class CdpStrategy {
         // Chrome (hook covers page fetch/XHR; CDP covers everything else).
         for (const s of scripts) {
             if (!s.enabled) continue;
-            const c = compileScript(s.code);
+            const c = compileScript(s.code, makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, msg) => log(-1, `res.log: ${msg}`, "info", id)));
             if (c.handlers.modifyResponse) {
                 this.scripts.push({
                     scriptId: s.id,
@@ -216,7 +217,8 @@ export class CdpStrategy {
                 try {
                     const out = await s.transform(ctx, body);
                     if (out !== undefined && out !== null) body = out;
-                    dlog("cdp", `transform ${s.name} applied`);
+                    const before = typeof body === "string" ? body.length : body.length;
+                    dlog("cdp", `transform ${s.name} applied`, { outLen: before });
                 } catch (e: any) {
                     dlog("cdp", `transform ${s.name} THREW: ${e.message || e}`);
                     log(tabId, `[${s.name}] modifyResponse (cdp) threw: ${e.message || e}`, "error", s.scriptId);

@@ -16,10 +16,11 @@
  *                      main-frame HTML and anything A/B cannot see.
  */
 import { matchAny } from "../../../shared/matcher";
-import { compileScript, serializeHandlers } from "../../../shared/compile";
+import { compileScript, makeScriptOverrides } from "../../../shared/compile";
 import type { BodyScriptInfo, HookDisposition, InterceptionStrategy, WebRequestDetailsLike } from "./types";
 import type { Script } from "../scriptStore";
 import { log } from "../logs";
+import { scriptStorageGet, scriptStorageSet } from "../scriptStore";
 import { dlog } from "../../../shared/debugLog";
 
 const PROXY_PATH = "__resproxy?p=";
@@ -45,7 +46,10 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
         for (const s of scripts) {
             if (!s.enabled) continue;
             if (!/res\s*\.\s*modifyResponse|res\s*\.\s*replaceResponse/.test(s.code)) continue;
-            const compiled = compileScript(s.code);
+            const compiled = compileScript(
+                s.code,
+                makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, msg) => log(-1, `res.log: ${msg}`, "info", id))
+            );
             if (!compiled.handlers.modifyResponse) continue;
             this.bodyScripts.push({
                 scriptId: s.id,
