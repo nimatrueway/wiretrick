@@ -99,6 +99,22 @@ export async function autoReconnect(handlers?: FolderSyncHandlers): Promise<"syn
     }
 }
 
+/** Display name of the synced folder; getPath() when Chrome supports it. */
+let folderDisplayPath = "";
+
+export function folderPath(): string {
+    return folderDisplayPath;
+}
+
+async function describeHandle(handle: any): Promise<string> {
+    try {
+        if (typeof handle.getPath === "function") {
+            return await handle.getPath(); // Chrome 129+: full path
+        }
+    } catch {}
+    return handle.name || "(picked folder)";
+}
+
 /** User-gesture path: finish the reconnect after Chrome's permission prompt. */
 export async function reconnectClicked(handlers?: FolderSyncHandlers): Promise<boolean> {
     const handle = await loadSavedHandle();
@@ -126,6 +142,7 @@ export interface FolderSyncHandlers {
 
 async function connect(dirHandle: any): Promise<void> {
     state = { dirHandle, known: new Map() };
+    folderDisplayPath = await describeHandle(dirHandle);
     await saveHandle(dirHandle);
     await refreshKnown();
     startPolling();

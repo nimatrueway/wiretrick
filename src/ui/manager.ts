@@ -370,6 +370,7 @@ function markFolderSynced(): void {
     const btn = $("#btn-vscode");
     btn.classList.add("active");
     btn.textContent = "Scripts Folder ✓";
+    $("#folder-state").textContent = fsBridge.folderPath();
 }
 
 const folderSyncHandlers: fsBridge.FolderSyncHandlers = {
@@ -429,6 +430,7 @@ async function autoReconnectFolder(): Promise<void> {
         // one click re-grants (Chrome drops FS grants between restarts)
         status("scripts folder needs reconnect — click 'Scripts Folder…'");
         btn.textContent = "Scripts Folder… (reconnect)";
+        $("#folder-state").textContent = "reconnect needed";
         btn.addEventListener("click", async () => {
             if (fsBridge.isSyncing()) return;
             const ok = await fsBridge.reconnectClicked(folderSyncHandlers);
