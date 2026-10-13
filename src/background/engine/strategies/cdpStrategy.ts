@@ -19,7 +19,7 @@ interface CdpScript {
     name: string;
     match: string[];
     transform: HandlerFn;
-    /** async onRequest handler (redirect/cancel honored at Request stage) */
+    /** async onRequest handler (redirect/cancel/respond honored at Request stage) */
     onRequest?: HandlerFn;
     /** async onResponseHeaders handler (merged at Response stage) */
     onResponseHeaders?: HandlerFn;
@@ -230,6 +230,21 @@ export class CdpStrategy {
                     const result = s.onRequest!({ url, method: request.method, tabUrl: url, resourceType: params.resourceType || "other", requestHeaders: {} });
                     const resolved = isThenable(result) ? await result : result;
                     if (!resolved) continue;
+                    if ((resolved as any).respond) {
+                        // synthesize the response at the Request stage —
+                        // the network is never contacted
+                        const r = (resolved as any).respond;
+                        const body = typeof r.body === "string" ? r.body : r.body instanceof Uint8Array ? bytesToBase64(r.body) : bytesToBase64(new TextEncoder().encode(JSON.stringify(r.body)));
+                        const headers = [{ name: "content-type", value: r.mime || "application/json" }, ...Object.entries(r.headers?.set || {}).map(([name, value]) => ({ name, value: String(value) }))];
+                        dlogLevel("cdp", "info", "async onRequest → respond", { url, script: s.name });
+                        await debuggerSend(tabId, "Fetch.fulfillRequest", {
+                            requestId,
+                            responseCode: r.status || 200,
+                            responseHeaders: headers,
+                            body,
+                        });
+                        return;
+                    }
                     if (resolved.cancel) {
                         dlogLevel("cdp", "info", "async onRequest → cancel", { url, script: s.name });
                         await debuggerSend(tabId, "Fetch.failRequest", { requestId, errorReason: "BlockedByClient" });

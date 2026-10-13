@@ -89,6 +89,12 @@ export class WebRequestStrategy implements InterceptionStrategy {
                             mergeHeaderMods(pendingRequestHeaderMods.get(details.requestId), result.headers)
                         );
                     }
+                    // respond: synthesize the response (terminal, first wins)
+                    if (result && result.respond) {
+                        const body = serializeRespondBody(result.respond.body);
+                        const mime = result.respond.mime || guessMime(null, details.url, "application/json");
+                        return this.staticServe(details, script, body, mime, entry.id);
+                    }
                     if (result && (result.redirect || result.cancel)) {
                         log(details.tabId, `[${script.meta.name}] onRequest → ${JSON.stringify(result).slice(0, 200)}`, "info", entry.id);
                         return normalize(result);
@@ -149,6 +155,16 @@ export class WebRequestStrategy implements InterceptionStrategy {
 
     dispose(): void {
         this.compiled = [];
+    }
+
+    private staticServe(details: WebRequestDetailsLike, script: CompiledScript, content: string | Uint8Array, mime: string, scriptId: string): HookDisposition {
+        log(details.tabId, `[${script.meta.name}] serve ${mime} (${content.length}b)`, "info", scriptId);
+        if (details.type === "main_frame") {
+            const rid = "serve_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+            serveStore.set(rid, { content: typeof content === "string" ? content : new TextDecoder().decode(content), mime });
+            return { kind: "redirect", url: chrome.runtime.getURL("serve.html?rid=" + rid) };
+        }
+        return { kind: "redirect", url: toDataUrl(mime, content) };
     }
 
     private staticReplace(details: WebRequestDetailsLike, script: CompiledScript, replacement: any, scriptId: string): HookDisposition {
@@ -278,6 +294,7 @@ export function makeCtx(details: WebRequestDetailsLike, tabUrl: string | null): 
 }
 
 export function normalize(result: any): HookDisposition {
+    if (result.respond) return { kind: "respond", serve: result.respond } as any;
     if (result.cancel) return { kind: "cancel" };
     if (result.redirect) return { kind: "redirect", url: result.redirect };
     if (result.headers) return { kind: "headers", changes: result.headers };
@@ -335,6 +352,12 @@ function looksBinary(bytes: Uint8Array): boolean {
 
 /** in-memory store for main-frame served replacements */
 export const serveStore = new Map<string, { content: string; mime: string }>();
+
+function serializeRespondBody(body: any): string | Uint8Array {
+    if (typeof body === "string") return body;
+    if (body instanceof Uint8Array) return body;
+    return JSON.stringify(body);
+}
 
 /** Merge stacked header mods: set keys later-wins, removes accumulate. */
 export function mergeHeaderMods(base: HeaderChanges | undefined, add: HeaderChanges): HeaderChanges {

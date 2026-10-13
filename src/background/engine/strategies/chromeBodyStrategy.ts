@@ -21,6 +21,18 @@ import type { BodyScriptInfo, HeaderChanges, HookDisposition, InterceptionStrate
 import type { Script } from "../scriptStore";
 import { log } from "../logs";
 import { scriptStorageGet, scriptStorageSet } from "../scriptStore";
+
+function guessMimeFromUrl(url: string): string {
+    const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "";
+    const m: Record<string, string> = { js: "application/javascript", json: "application/json", css: "text/css", html: "text/html", xml: "application/xml" };
+    return m[ext] || "application/json";
+}
+
+function serializeRespondBody(body: any): string {
+    if (typeof body === "string") return body;
+    if (body instanceof Uint8Array) return new TextDecoder().decode(body);
+    return JSON.stringify(body);
+}
 import { dlog } from "../../../shared/debugLog";
 
 const PROXY_PATH = "__resproxy?p=";
@@ -29,8 +41,10 @@ interface BodyScriptEntry {
     scriptId: string;
     name: string;
     match: string[];
+    /** compiled onRequest handler (respond results power the hook tier) */
+    onRequest?: (ctx: any) => any;
     /** compiled modifyResponse transform (async awaited) */
-    transform: (ctx: any, body: any) => any;
+    transform: ((ctx: any, body: any) => any) | undefined;
     /** compiled replaceResponse handler, if registered */
     replace: ((ctx: any) => any) | undefined;
     /** comma-separated strategy priority list, e.g. "hook,cdp" */
@@ -51,21 +65,59 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
         this.bodyScripts = [];
         for (const s of scripts) {
             if (!s.enabled) continue;
-            if (!/res\s*\.\s*modifyResponse|res\s*\.\s*replaceResponse/.test(s.code)) continue;
+            if (!/res\s*\.\s*(modifyResponse|replaceResponse|onRequest)/.test(s.code)) continue;
             const compiled = compileScript(
                 s.code,
                 makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, msg) => log(-1, `res.log: ${msg}`, "info", id), (id, level, msg) => log(-1, `script.console: ${msg}`, level, id))
             );
-            if (!compiled.handlers.modifyResponse) continue;
+            if (!compiled.handlers.modifyResponse && !compiled.handlers.onRequest && !compiled.handlers.replaceResponse) continue;
             this.bodyScripts.push({
                 scriptId: s.id,
                 name: s.meta.name,
                 match: s.meta.match,
-                transform: compiled.handlers.modifyResponse,
+                onRequest: compiled.handlers.onRequest || undefined,
+                transform: compiled.handlers.modifyResponse || undefined,
                 replace: compiled.handlers.replaceResponse || undefined,
                 strategy: s.meta.strategy,
             });
         }
+    }
+
+    /**
+     * Hook tier: runs the matching scripts' onRequest handlers ONCE and
+     * returns the first terminal decision (respond | redirect | cancel) or
+     * merged headers. Null = no terminal decision (normal flow proceeds).
+     */
+    async runRequestDecision(
+        url: string,
+        method: string
+    ): Promise<{ kind: "respond"; mime: string; content: string; status?: number; headers?: any } | { kind: "redirect"; url: string } | { kind: "cancel" } | { kind: "headers"; changes: any } | null> {
+        let headerMods: any = null;
+        for (const s of this.matchingBodyScripts(url)) {
+            if (!s.onRequest) continue;
+            try {
+                const result = await s.onRequest({ url, method, tabUrl: url, resourceType: "xmlhttprequest", requestHeaders: {} });
+                if (!result) continue;
+                if ((result as any).respond) {
+                    const r = (result as any).respond;
+                    return {
+                        kind: "respond",
+                        mime: r.mime || guessMimeFromUrl(url),
+                        content: serializeRespondBody(r.body),
+                        status: r.status,
+                        headers: r.headers?.set,
+                    };
+                }
+                if (result.redirect) return { kind: "redirect", url: result.redirect };
+                if (result.cancel) return { kind: "cancel" };
+                if (result.headers && (result.headers.set || result.headers.remove)) {
+                    headerMods = { set: { ...(headerMods?.set || {}), ...(result.headers.set || {}) }, remove: [...(headerMods?.remove || []), ...(result.headers.remove || [])] };
+                }
+            } catch (e: any) {
+                log(-1, `script.console: onRequest ${s.name} threw: ${e.message || e}`, "error", s.scriptId);
+            }
+        }
+        return headerMods ? { kind: "headers", changes: headerMods } : null;
     }
 
     /** Hook tier: chained modifyResponse over the body (async handlers awaited). */
@@ -73,6 +125,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
         let out: string | Uint8Array = body;
         let touched = false;
         for (const s of this.matchingBodyScripts(url)) {
+            if (!s.transform) continue;
             try {
                 const result: any = await s.transform(
                     { url, method, tabUrl: url, resourceType: "xmlhttprequest", requestHeaders: {}, contentType: extra?.contentType, status: extra?.status },

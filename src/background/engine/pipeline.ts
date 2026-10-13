@@ -306,6 +306,10 @@ export function createPipeline(
             scriptStorageSet(msg.scriptId, msg.key, msg.value).then(() => sendResponse({}));
             return true;
         }
+        if (msg && msg.type === "runRequestDecision") {
+            chromeBody.runRequestDecision(msg.url, msg.method || "GET").then((r) => sendResponse(r || null));
+            return true;
+        }
         if (msg && msg.type === "runTransform") {
             chromeBody
                 .runTransform(msg.url, msg.method || "GET", msg.body || "", { status: msg.status, contentType: msg.contentType })

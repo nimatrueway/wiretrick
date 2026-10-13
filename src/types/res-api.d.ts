@@ -28,12 +28,25 @@ declare namespace ResOverride {
         remove?: string[];
     }
 
+    interface RespondOptions {
+        /** Response body: string, bytes, or any object (JSON-serialized). */
+        body: string | Uint8Array | object;
+        /** Response status. Default 200. */
+        status?: number;
+        /** Content-Type. Default guessed from the request URL extension. */
+        mime?: string;
+        /** Extra response headers. */
+        headers?: { set?: { [name: string]: string } };
+    }
+
     interface RequestResult {
-        /** Redirect the request to another URL. */
+        /** Respond immediately without contacting the network (terminal). */
+        respond?: RespondOptions;
+        /** Redirect the request to another URL (terminal). */
         redirect?: string;
-        /** Block the request entirely. */
+        /** Block the request entirely (terminal). */
         cancel?: boolean;
-        /** Modify request headers (applied on the way out). */
+        /** Modify request headers (non-terminal; applied on the way out). */
         headers?: HeaderMod;
     }
 
@@ -92,11 +105,26 @@ declare namespace ResOverride {
  */
 declare const res: {
     /**
-     * Intercept a request before it is sent. Return { redirect }, { cancel },
-     * { headers } or any combination. May be async — see the stacking/async
-     * notes above (on Chrome the async result is honored in the cdp tier,
-     * @strategy hook,cdp).
-     */
+     * Intercept a request before it is sent. Return { respond }, { redirect },
+     * { cancel }, { headers } or a combination. May be async — see the
+     * stacking/async notes above (on Chrome the async result is honored in
+     * the cdp tier, @strategy hook,cdp).
+     *
+     * TERMINAL results (first one wins, stops the script chain):
+     *   respond  — synthesize the response immediately; the network is never
+     *              contacted. body/status/mime/headers all honored on the
+     *              hook and cdp tiers; the webRequest tier serves it as a
+     *              data-URL redirect (status becomes 200 there).
+     *   redirect — continue at another URL.
+     *   cancel   — fail the request.
+     * NON-terminal: { headers } — applies and lets later scripts run.
+     *
+     * @example
+     * res.onRequest((ctx) => {
+     *     if (ctx.url.includes("/user")) return {
+     *         respond: { body: { id: 1, name: "Mock" }, mime: "application/json" },
+     *     };
+     * });
     onRequest(
         handler: (ctx: ResOverride.RequestCtx) => ResOverride.RequestResult | void | Promise<ResOverride.RequestResult | void>
     ): void;

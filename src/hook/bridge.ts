@@ -45,8 +45,21 @@
             chrome.runtime.sendMessage({ type: "claimRequest", url: data.url }, () => void chrome.runtime.lastError);
             return;
         }
+        if (data.kind === "call" && (data.op === "storageGet" || data.op === "storageSet")) {
+            const storageType = data.op === "storageGet" ? "scriptStorageGet" : "scriptStorageSet";
+            chrome.runtime.sendMessage(
+                { type: storageType, scriptId: data.scriptId, key: data.key, value: data.value },
+                (resp: any) => {
+                    window.postMessage(
+                        { source: MAIN_SOURCE, kind: "callResult", reqId: data.reqId, result: resp || null },
+                        window.location.origin
+                    );
+                }
+            );
+            return;
+        }
         if (data.kind === "call") {
-            const bgType = data.op === "replace" ? "runReplace" : "runTransform";
+            const bgType = data.op === "replace" ? "runReplace" : data.op === "request" ? "runRequestDecision" : "runTransform";
             chrome.runtime.sendMessage(
                 { type: bgType, url: data.url, method: data.method, body: data.body, status: data.status, contentType: data.contentType },
                 (resp: any) => {

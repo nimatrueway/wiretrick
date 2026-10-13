@@ -232,9 +232,30 @@ When several enabled scripts match the same request, they run in **list
 order** (top to bottom in the manager) with per-hook rules:
 
 **`res.onRequest`** — the first script that returns a *terminal* result
-(`redirect` or `cancel`) wins and stops the chain; later scripts don't run
-for that request. Scripts that return nothing (or only `headers`) don't stop
-the chain. Header changes from the winning script are applied.
+(`respond`, `redirect`, or `cancel`) wins and stops the chain; later scripts
+don't run for that request. Scripts that return nothing (or only `headers`)
+don't stop the chain — their header changes merge (later `set` wins per key,
+`remove` accumulates) and apply even when a later script terminates.
+
+**`respond`** — a terminal result that synthesizes the response immediately,
+**without the network request ever happening**:
+
+```ts
+res.onRequest((ctx) => ({
+    respond: {
+        body: { id: 1, name: "Mocked User" },  // object → JSON; strings/bytes pass through
+        status: 200,                            // default 200
+        mime: "application/json",               // default: guessed from the URL
+        headers: { set: { "x-mock": "1" } },
+    },
+}));
+```
+
+It stacks like every terminal result: first script to `respond` wins. On the
+hook tier (fetch/XHR) the response is fully synthesized (status/headers
+included); on the webRequest tier it materializes as a data-URL redirect
+(status becomes 200 there); with `cdp` in `@strategy` the request-stage
+fulfill honors status and headers.
 
 **`res.onResponseHeaders`** — all matching scripts run and their changes
 **merge**: `set` keys are applied in order (a later script's `set` of the

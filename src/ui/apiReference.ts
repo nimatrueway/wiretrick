@@ -84,6 +84,21 @@ Timing: { when: "DOMContentLoaded" (default) | "document_start" | "document_end"
 - document_idle — after window load (page fully settled); runs immediately if already loaded`,
     },
     {
+        title: "onRequest.respond — mock without the network",
+        body: `A terminal result that synthesizes the response immediately — the request never leaves the browser. First script to respond wins (stacking).
+
+res.onRequest((ctx) => ({
+    respond: {
+        body: { id: 1, name: "Mocked User" },  // object → JSON
+        status: 200,
+        mime: "application/json",
+        headers: { set: { "x-mock": "1" } },
+    },
+}));
+
+Full status/headers support on the hook and cdp tiers; the webRequest tier serves it as a data-URL redirect (status becomes 200 there).`,
+    },
+    {
         title: "Multiple scripts — stacking order",
         body: `Scripts run in list order (top of the manager first) when several match one request:
 
