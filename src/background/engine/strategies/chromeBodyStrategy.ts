@@ -45,9 +45,9 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
         this.bodyScripts = [];
         for (const s of scripts) {
             if (!s.enabled) continue;
-            if (!/res\s*\.\s*modifyResponse|res\s*\.\s*replaceResponse/.test((s as any)._bundled?.code || s.code)) continue;
+            if (!/res\s*\.\s*modifyResponse|res\s*\.\s*replaceResponse/.test(s.code)) continue;
             const compiled = compileScript(
-                (s as any)._bundled?.code || s.code,
+                s.code,
                 makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, msg) => log(-1, `res.log: ${msg}`, "info", id), (id, level, msg) => log(-1, `script.console: ${msg}`, level, id))
             );
             if (!compiled.handlers.modifyResponse) continue;
@@ -55,7 +55,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
                 scriptId: s.id,
                 name: s.meta.name,
                 match: s.meta.match,
-                code: (s as any)._bundled?.code || s.code,
+                code: s.code,
                 strategy: s.meta.strategy,
             });
         }

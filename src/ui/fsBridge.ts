@@ -172,8 +172,6 @@ export async function openFolder(
                 compilerOptions: {
                     target: "es2020",
                     lib: ["es2020", "dom"],
-                    module: "esnext",
-                    moduleResolution: "bundler",
                     allowNonTsExtensions: true,
                     noEmit: true,
                 },
@@ -186,13 +184,6 @@ export async function openFolder(
         await writeText(dirHandle, fileNameFor(s.id, s.name), s.code);
     }
     await refreshKnown();
-    // pick up any existing lib/ content so imports resolve right away
-    try {
-        const files = await readLibFiles(dirHandle);
-        if (Object.keys(files).length) {
-            await chrome.runtime.sendMessage({ type: "saveLibFiles", files });
-        }
-    } catch {}
 }
 
 /** File name for a script (script names are assumed unique). */
@@ -254,60 +245,19 @@ export function computeEvents(prev: Map<string, FileSig>, seen: Map<string, File
     return { changed, added, removed, rename };
 }
 
-async function walkLib(dir: any, prefix: string, seen: Map<string, FileSig>): Promise<void> {
-    for await (const entry of dir.values()) {
-        if (entry.kind === "directory") {
-            if (entry.name === "node_modules") continue;
-            await walkLib(entry, prefix + entry.name + "/", seen);
-        } else if (/\.(ts|tsx|js|jsx)$/.test(entry.name)) {
-            const fh = await dir.getFileHandle(entry.name);
-            const f = await fh.getFile();
-            seen.set(prefix + entry.name, { lastModified: f.lastModified, size: f.size });
-        }
-    }
-}
-
-async function readLibFiles(dir: any): Promise<Record<string, string>> {
-    const sigs = new Map<string, FileSig>();
-    await walkLib(dir, "", sigs);
-    const files: Record<string, string> = {};
-    for (const id of sigs.keys()) {
-        const fh = await dir.getFileHandle(id);
-        files[id] = await (await fh.getFile()).text();
-    }
-    return files;
-}
-
 async function pollOnce(): Promise<void> {
     if (!state) return;
     const dir = state.dirHandle;
     const seen = new Map<string, FileSig>();
 
     for await (const entry of dir.values()) {
-        if (entry.kind === "directory") {
-            // subdirectories are library modules (imported by scripts), not scripts
-            if (entry.name === "node_modules") continue;
-            await walkLib(entry, entry.name + "/", seen);
-            continue;
-        }
-        if (!entry.name.endsWith(".ts")) continue;
+        if (entry.kind !== "file" || !entry.name.endsWith(".ts")) continue;
         const file = await entry.getFile();
         seen.set(entry.name, { lastModified: file.lastModified, size: file.size });
     }
     const events = computeEvents(state.known, seen);
     const { changed, added, removed, rename } = events;
     state.known = seen;
-
-    // lib module changes → ship the new lib map to the background
-    const libEvent = [...changed, ...added, ...removed].some((n) => n.includes("/"));
-    if (libEvent) {
-        try {
-            const files = await readLibFiles(dir);
-            await chrome.runtime.sendMessage({ type: "saveLibFiles", files });
-        } catch (e: any) {
-            console.warn("[fsBridge] lib harvest failed:", e.message || e);
-        }
-    }
 
     const read = async (fileName: string): Promise<string> => {
         const entry = await dir.getFileHandle(fileName);
