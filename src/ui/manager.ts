@@ -703,10 +703,22 @@ async function main(): Promise<void> {
     }
 
     // import / export
-    $("#btn-export").addEventListener("click", () => {
-        const blob = new Blob([JSON.stringify(scripts.map((s) => ({ name: s.meta.name, code: s.code, enabled: s.enabled })))], {
-            type: "application/json",
-        });
+    $("#btn-export").addEventListener("click", async () => {
+        // scripts + settings travel together
+        const settings: Record<string, any> = await new Promise((r) =>
+            chrome.storage.local.get(["resLogLevel", "resLogCap"], (d) => r(d || {}))
+        );
+        const payload = {
+            format: "rescript-bundle",
+            version: 1,
+            exportedAt: new Date().toISOString(),
+            settings: {
+                logLevel: settings.resLogLevel,
+                logCap: settings.resLogCap,
+            },
+            scripts: scripts.map((s) => ({ name: s.meta.name, code: s.code, enabled: s.enabled })),
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
@@ -724,11 +736,32 @@ async function main(): Promise<void> {
             const text = await file.text();
             if (file.name.endsWith(".json")) {
                 const parsed = JSON.parse(text);
-                for (const item of Array.isArray(parsed) ? parsed : [parsed]) {
+                const isBundle = parsed && parsed.format === "rescript-bundle";
+                const items = isBundle ? parsed.scripts : parsed;
+                for (const item of Array.isArray(items) ? items : [items]) {
                     await send({ type: "saveScript", id: uuid(), code: item.code, name: item.name, enabled: item.enabled });
                 }
+                // bundle: restore settings too
+                if (isBundle && parsed.settings) {
+                    const restore: Record<string, any> = {};
+                    if (parsed.settings.logLevel) restore.resLogLevel = parsed.settings.logLevel;
+                    if (parsed.settings.logCap) restore.resLogCap = parsed.settings.logCap;
+                    if (Object.keys(restore).length) {
+                        await new Promise((r) => chrome.storage.local.set(restore, () => r(null)));
+                        if (restore.resLogLevel) applyLogLevel(restore.resLogLevel);
+                        if (restore.resLogCap) {
+                            logCap = restore.resLogCap;
+                            (document.querySelector("#settings-log-cap") as HTMLInputElement).value = String(logCap);
+                            refilterLog();
+                        }
+                    }
+                    status(`imported ${items.length} script(s) + settings ✓`);
+                    return;
+                }
+                status(`imported ${items.length} script(s) ✓`);
             } else {
                 await send({ type: "saveScript", id: uuid(), code: text, name: "Imported script" });
+                status("imported script ✓");
             }
             await refresh();
         };
