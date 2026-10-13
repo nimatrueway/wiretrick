@@ -197,51 +197,41 @@ let logFindRe: RegExp | null = null;
 const LEVEL_ORDER: Record<string, number> = { debug: 0, info: 1, warn: 2, error: 3 };
 let minLevel = 1; // info+
 let logCap = 500; // rendered lines kept in the DOM
-let logSource: string | null = null; // selected [source] tag, null = all
+let logSource = ""; // source-tag filter text, "" = all
 
-/** Extract the source tag of a line: "[pipeline] …" → "pipeline"; "script.console: …" → "script.console". */
-function sourceOf(text: string): string {
-    const bracket = text.match(/^\[[^\]]*\]/);
-    if (bracket) return bracket[0].slice(1, -1);
-    const dot = text.match(/^[a-zA-Z0-9_.-]+:/);
-    return dot ? dot[0].slice(0, -1) : "(untagged)";
+/** Extract the source tag of a message: "[pipeline] …" → "pipeline"; "script.console: …" → "script.console". */
+function sourceOf(message: string): string {
+    const bracket = message.match(/^\s*\[([^\]]*)\]/);
+    if (bracket) return bracket[1];
+    const dot = message.match(/^\s*([a-zA-Z0-9_.-]+):/);
+    return dot ? dot[1] : "(untagged)";
 }
 
-/** Sources seen in the buffer, newest-discovered last — drives the dropdown. */
+/** Sources seen in the buffer — drives the autocomplete datalist. */
 const logSources = new Set<string>();
 
-function syncLogSources(): void {
-    const sel = $("#log-source") as HTMLSelectElement;
-    const current = sel.value;
-    sel.innerHTML = "";
-    const all = document.createElement("option");
-    all.value = "";
-    all.textContent = "All sources";
-    sel.appendChild(all);
-    for (const s of [...logSources].sort((a, b) => a.localeCompare(b))) {
-        const o = document.createElement("option");
-        o.value = s;
-        o.textContent = s;
-        sel.appendChild(o);
-    }
-    sel.value = current;
-    if (sel.value !== current) { // previously selected source rotated out of the buffer
-        logSource = null;
-    }
+function rememberSource(src: string): void {
+    if (logSources.has(src)) return;
+    logSources.add(src);
+    const list = $("#log-source-options") as HTMLDataListElement;
+    const o = document.createElement("option");
+    o.value = src;
+    list.appendChild(o);
 }
 
-function linePassesFilters(text: string, level: string): boolean {
+function linePassesFilters(text: string, level: string, source: string): boolean {
     if ((LEVEL_ORDER[level] ?? 1) < minLevel) return false;
-    if (logSource && sourceOf(text) !== logSource) return false;
+    if (logSource && !source.toLowerCase().includes(logSource.toLowerCase())) return false;
     if (logFindRe && !logFindRe.test(text)) return false;
     return true;
 }
 
-function renderLogLine(line: HTMLElement, text: string, level: string): void {
+function renderLogLine(line: HTMLElement, text: string, level: string, source: string): void {
     line.dataset.text = text;
     line.dataset.level = level;
+    line.dataset.source = source;
     line.innerHTML = "";
-    if (!linePassesFilters(text, level)) {
+    if (!linePassesFilters(text, level, source)) {
         line.style.display = "none";
         return;
     }
@@ -272,26 +262,23 @@ function renderLogLine(line: HTMLElement, text: string, level: string): void {
 }
 
 /** All received entries — filtered ones stay here (re-renderable), just not in the DOM. */
-const logEntries: { text: string; level: string }[] = [];
+const logEntries: { text: string; level: string; source: string }[] = [];
 
 function appendLog(entry: any): void {
     const time = new Date(entry.at).toLocaleTimeString();
-    logEntries.push({ text: `[${time}] ${entry.message}`, level: entry.level || "info" });
+    const source = sourceOf(entry.message || "");
+    logEntries.push({ text: `[${time}] ${entry.message}`, level: entry.level || "info", source });
     if (logEntries.length > 2000) logEntries.splice(0, logEntries.length - 2000); // absolute buffer cap
-    const src = sourceOf(logEntries[logEntries.length - 1].text);
-    if (!logSources.has(src)) {
-        logSources.add(src);
-        syncLogSources();
-    }
+    rememberSource(source);
 
     const text = logEntries[logEntries.length - 1].text;
     const level = logEntries[logEntries.length - 1].level;
-    if (!linePassesFilters(text, level)) return; // don't let hidden entries churn the DOM ring
+    if (!linePassesFilters(text, level, source)) return; // don't let hidden entries churn the DOM ring
 
     const box = $("#log-entries");
     const line = document.createElement("div");
     line.className = "log-line " + level;
-    renderLogLine(line, text, level);
+    renderLogLine(line, text, level, source);
     box.appendChild(line);
     while (box.children.length > logCap) box.removeChild(box.firstChild as Node);
     box.scrollTop = box.scrollHeight;
@@ -300,11 +287,11 @@ function appendLog(entry: any): void {
 function refilterLog(): void {
     const box = $("#log-entries");
     box.innerHTML = "";
-    for (const { text, level } of logEntries) {
-        if (!linePassesFilters(text, level)) continue;
+    for (const { text, level, source } of logEntries) {
+        if (!linePassesFilters(text, level, source)) continue;
         const line = document.createElement("div");
         line.className = "log-line " + level;
-        renderLogLine(line, text, level);
+        renderLogLine(line, text, level, source);
         box.appendChild(line);
     }
     while (box.children.length > logCap) box.removeChild(box.firstChild as Node);
@@ -328,9 +315,9 @@ function makeLogFilters(): void {
         minLevel = LEVEL_ORDER[levelSel.value] ?? 1;
         refilterLog();
     });
-    const sourceSel = $("#log-source") as HTMLSelectElement;
-    sourceSel.addEventListener("change", () => {
-        logSource = sourceSel.value || null;
+    const sourceSel = $("#log-source") as HTMLInputElement;
+    sourceSel.addEventListener("input", () => {
+        logSource = sourceSel.value.trim();
         refilterLog();
     });
 }

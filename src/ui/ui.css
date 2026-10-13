@@ -222,6 +222,10 @@ html, body {
     text-transform: none;
     letter-spacing: normal;
 }
+#log-source {
+    width: 110px;
+}
+#log-source:focus { border-color: var(--accent); outline: none; }
 
 .log-line .lv {
     font-size: 9px;
