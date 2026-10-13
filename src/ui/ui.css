@@ -284,6 +284,7 @@ html, body {
     font-size: 12px;
 }
 #btn-save:disabled { opacity: 0.4; cursor: default; }
+#btn-save.dim { opacity: 0.55; }
 
 #monaco-host {
     flex: 1;

@@ -13,6 +13,21 @@ let scripts: Script[] = [];
 let selectedId: string | null = null;
 let editor: any = null;
 let dirty = false;
+
+/** Central dirty-state toggle: dims/undims Save. */
+function setDirty(v: boolean): void {
+    dirty = v;
+    const btn = $("#btn-save");
+    if (v) {
+        btn.removeAttribute("disabled");
+        btn.classList.add("dim");
+        btn.textContent = "Save…";
+    } else {
+        btn.setAttribute("disabled", "");
+        btn.classList.remove("dim");
+        btn.textContent = "Save (⌘S)";
+    }
+}
 let applyingExternal = false;
 
 // ---- elements ----
@@ -125,6 +140,7 @@ function selectReal(id: string): void {
     $("#script-name").removeAttribute("disabled");
     $("#btn-save").removeAttribute("disabled");
     setEditorValue(script.code);
+    setDirty(false);
 }
 
 async function saveCurrent(): Promise<void> {
@@ -138,7 +154,7 @@ async function saveCurrent(): Promise<void> {
     } else {
         status("saved ✓");
     }
-    dirty = false;
+    setDirty(false);
     // two-way sync: push the saved source into the VS Code folder
     if (fsBridge.isSyncing()) {
         await fsBridge.writeBack(fsBridge.fileNameFor(selectedId, name), code);
@@ -620,7 +636,7 @@ async function main(): Promise<void> {
 
     editor.onDidChangeModelContent(() => {
         if (applyingExternal) return;
-        dirty = true;
+        setDirty(true);
         status("unsaved…", "dirty");
     });
 
@@ -654,7 +670,7 @@ async function main(): Promise<void> {
         status("debug log downloaded");
     });
     $("#script-name").addEventListener("input", () => {
-        dirty = true;
+        setDirty(true);
         status("unsaved (name) — save to apply", "dirty");
     });
 
