@@ -181,6 +181,26 @@
         return { url, method, tabUrl: location.href, resourceType: "xmlhttprequest", requestHeaders: {}, ...extra };
     }
 
+    // ---- abort semantics ----
+    function isAbort(e: any): boolean {
+        return e && (e.name === "AbortError" || (typeof DOMException !== "undefined" && e instanceof DOMException && e.code === 17));
+    }
+
+    function abortError(signal: AbortSignal): Error {
+        return (signal as any).reason instanceof Error
+            ? (signal as any).reason
+            : new DOMException("The operation was aborted.", "AbortError");
+    }
+
+    /** Rejects when the page's signal aborts; null when there's no signal. */
+    function abortRace(signal: AbortSignal | undefined | null): Promise<never> | null {
+        if (!signal) return null;
+        if (signal.aborted) throw abortError(signal);
+        return new Promise<never>((_, rej) => {
+            signal.addEventListener("abort", () => rej(abortError(signal)), { once: true });
+        });
+    }
+
     // ---- fetch patch ----
     function patchFetch(): void {
         w.__resOrigFetch = w.fetch;
@@ -205,14 +225,20 @@
 
             claim(url);
 
+            // page aborts are normal (React cleanup, timeouts, cascades) —
+            // race them against our round-trips and propagate silently
+            const signal: AbortSignal | undefined =
+                (input instanceof Request && input.signal) || (init && init.signal) || undefined;
+            const abortP = abortRace(signal);
+
             try {
                 // 1. replaceResponse? (background runs the handler)
-                const repl = await viaBridge({ op: "replace", url, method });
+                const repl = abortP ? await Promise.race([viaBridge({ op: "replace", url, method }), abortP]) : await viaBridge({ op: "replace", url, method });
                 if (repl && repl.content !== null && repl.content !== undefined) {
                     return new Response(repl.content, { status: 200, headers: { "content-type": repl.mime || "text/plain" } });
                 }
 
-                // 2. real request
+                // 2. real request (abort propagates natively)
                 const response = await origFetch(input, init);
 
                 // 3. transform? only for readable, non-null-body responses
@@ -228,7 +254,9 @@
                 }
 
                 const text = await response.clone().text();
-                const out = await viaBridge({ op: "transform", url, method, body: text, status: response.status, contentType });
+                const out = abortP
+                    ? await Promise.race([viaBridge({ op: "transform", url, method, body: text, status: response.status, contentType }), abortP])
+                    : await viaBridge({ op: "transform", url, method, body: text, status: response.status, contentType });
                 if (!out || typeof out.body !== "string" || out.body === text) return response;
 
                 return new Response(out.body, {
@@ -237,6 +265,7 @@
                     headers: response.headers,
                 });
             } catch (e: any) {
+                if (isAbort(e)) throw e; // normal — page owns the abort
                 logUp(`fetch pipeline error: ${e.message || e}`, "error");
                 // last resort: original unpatched fetch
                 return origFetch(input, init);
@@ -289,6 +318,16 @@
             // BECOME the transport: fetch (patched → replace/transform
             // applies), then populate the xhr and dispatch the events
             // ourselves — onload/addEventListener consumers see the result
+            const abortCtl = new AbortController();
+            const origAbort = xhr.abort;
+            xhr.abort = function () {
+                abortCtl.abort(new DOMException("The operation was aborted.", "AbortError"));
+                try {
+                    if (typeof origAbort === "function") origAbort.call(xhr);
+                } catch {}
+                xhr.dispatchEvent(new ProgressEvent("abort"));
+                xhr.dispatchEvent(new ProgressEvent("loadend"));
+            };
             void (async () => {
                 try {
                     const headers: Record<string, string> = {};
@@ -306,14 +345,17 @@
                     if (repl && repl.content !== null && repl.content !== undefined) {
                         text = String(repl.content);
                     } else {
-                        // 2. real request via patched fetch (transform applies)
-                        const resp = await w.fetch(absUrl, { method, headers, body });
+                        // 2. real request via patched fetch (transform applies; abort wired)
+                        const resp = await w.fetch(absUrl, { method, headers, body, signal: abortCtl.signal });
                         status = resp.status;
                         statusText = resp.statusText;
                         respHeaders = resp.headers;
                         text = await resp.text();
-                        // 3. transform round-trip
-                        const out = await viaBridge({ op: "transform", url: absUrl, method, body: text, status });
+                        // 3. transform round-trip (raced against abort)
+                        const out = await Promise.race([
+                            viaBridge({ op: "transform", url: absUrl, method, body: text, status }),
+                            new Promise<null>((_, rej) => abortCtl.signal.addEventListener("abort", () => rej(abortCtl.signal.reason || new DOMException("aborted", "AbortError")), { once: true })),
+                        ]);
                         if (out && typeof out.body === "string" && out.body !== text) text = out.body;
                     }
 
@@ -333,6 +375,7 @@
                     xhr.dispatchEvent(new ProgressEvent("load"));
                     xhr.dispatchEvent(new ProgressEvent("loadend"));
                 } catch (e: any) {
+                    if (isAbort(e)) return; // abort events already dispatched
                     logUp(`xhr shim failed: ${e.message || e}`, "error");
                     // fall back to the native path
                     OrigSend.apply(xhr, args as any);
