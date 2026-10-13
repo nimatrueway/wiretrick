@@ -14,6 +14,10 @@ response bodies, or replace them entirely. Each script has an enable/disable tog
 
 ![ResScript popup — scripts active on the current tab](docs/shots/popup.png)
 
+**Sample scripts** (? → Samples — ten one-click starters):
+
+![ResScript samples dialog](docs/shots/samples.png)
+
 ## Writing scripts
 
 ```ts
