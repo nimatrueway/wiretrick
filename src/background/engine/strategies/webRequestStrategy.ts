@@ -31,8 +31,8 @@ export class WebRequestStrategy implements InterceptionStrategy {
                         get: (key: string) => scriptStorageGet(s.id, key),
                         set: (key: string, value: any) => scriptStorageSet(s.id, key, value),
                     },
-                    log: (...args: any[]) => log(-1, `res.log: ${args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")}`, "info", s.id),
-                    consoleSink: (level, msg) => log(-1, `script.console: ${msg}`, level, s.id),
+                    log: (...args: any[]) => log(-1, `[${s.meta.name}] res.log: ${args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")}`, "info", s.id),
+                    consoleSink: (level, msg) => log(-1, `[${s.meta.name}] console.log: ${msg}`, level, s.id),
                 });
                 compiled.meta = s.meta;
                 if (compiled.error) scriptError(s.id, compiled.error);

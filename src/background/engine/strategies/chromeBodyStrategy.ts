@@ -68,7 +68,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
             if (!/res\s*\.\s*(modifyResponse|replaceResponse|onRequest)/.test(s.code)) continue;
             const compiled = compileScript(
                 s.code,
-                makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, msg) => log(-1, `res.log: ${msg}`, "info", id), (id, level, msg) => log(-1, `script.console: ${msg}`, level, id))
+                makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, msg) => log(-1, `[${s.meta.name}] res.log: ${msg}`, "info", id), (id, level, msg) => log(-1, `[${s.meta.name}] console.log: ${msg}`, level, id))
             );
             if (!compiled.handlers.modifyResponse && !compiled.handlers.onRequest && !compiled.handlers.replaceResponse) continue;
             this.bodyScripts.push({
@@ -127,7 +127,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
                     headerMods = { set: { ...(headerMods?.set || {}), ...(result.headers.set || {}) }, remove: [...(headerMods?.remove || []), ...(result.headers.remove || [])] };
                 }
             } catch (e: any) {
-                log(-1, `script.console: onRequest ${s.name} threw: ${e.message || e}`, "error", s.scriptId);
+                log(-1, `console.log: onRequest ${s.name} threw: ${e.message || e}`, "error", s.scriptId);
             }
             }
         }
@@ -158,7 +158,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
                     touched = true;
                 }
             } catch (e: any) {
-                log(-1, `script.console: transform ${s.name} threw: ${e.message || e}`, "error", s.scriptId);
+                log(-1, `console.log: transform ${s.name} threw: ${e.message || e}`, "error", s.scriptId);
             }
             }
         }
@@ -181,7 +181,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
                         return { mime, content: body };
                     }
                 } catch (e: any) {
-                    log(-1, `script.console: replaceResponse ${s.name} threw: ${e.message || e}`, "error", s.scriptId);
+                    log(-1, `console.log: replaceResponse ${s.name} threw: ${e.message || e}`, "error", s.scriptId);
                 }
             }
         }

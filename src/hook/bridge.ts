@@ -130,7 +130,7 @@
                         try {
                             (console as any)[method](...args);
                         } catch {}
-                        const m = `script.console: ${args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")}`;
+                        const m = `console.log: ${args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")}`;
                         try {
                             chrome.runtime.sendMessage({ type: "debugLog", entry: { at: Date.now(), src: h.name, msg: m, level } }, () => void chrome.runtime.lastError);
                         } catch {}

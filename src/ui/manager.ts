@@ -215,7 +215,7 @@ let minLevel = 1; // info+
 let logCap = 500; // rendered lines kept in the DOM
 let logSource = ""; // source-tag filter text, "" = all
 
-/** Extract the source tag of a message: "[pipeline] …" → "pipeline"; "script.console: …" → "script.console". */
+/** Extract the source tag of a message: "[pipeline] …" → "pipeline"; "console.log: …" → "console.log". */
 function sourceOf(message: string): string {
     const bracket = message.match(/^\s*\[([^\]]*)\]/);
     if (bracket) return bracket[1];

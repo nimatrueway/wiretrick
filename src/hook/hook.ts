@@ -172,7 +172,7 @@
                 try {
                     (real as any)[method](...args);
                 } catch {}
-                logUp(`script.console: ${fmtArgs(args)}`, level, name);
+                logUp(`console.log: ${fmtArgs(args)}`, level, name);
             };
         }
         // uncommon methods pass straight through
