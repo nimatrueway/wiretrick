@@ -21,10 +21,10 @@
     let reqSeq = 0;
     const pending = new Map<number, (v: any) => void>();
 
-    function logUp(msg: string, level: "info" | "warn" | "error" = "info"): void {
+    function logUp(msg: string, level: "info" | "warn" | "error" = "info", src = "hook"): void {
         console.log(`[res:hook] ${msg}`);
         try {
-            window.postMessage({ source: HOOK_SOURCE, kind: "log", msg, level }, window.location.origin);
+            window.postMessage({ source: HOOK_SOURCE, kind: "log", msg, level, src }, window.location.origin);
         } catch {}
     }
 
@@ -98,7 +98,7 @@
                 if (/Evaluating a string as JavaScript|unsafe-eval/i.test(e.message || "")) {
                     cspBlocked = true;
                 } else {
-                    logUp(`onDom ${d.name} compile failed: ${e.message || e}`, "error");
+                    logUp(`onDom compile failed: ${e.message || e}`, "error", d.name);
                 }
             }
         }
@@ -111,17 +111,15 @@
         if (compiledDom.length === 0) return;
 
         const fire = () => {
-            const names = compiledDom.map((d) => d.name).join(", ");
             const injected = (document.currentScript as HTMLScriptElement | null)
                 ? "document.currentScript"
                 : (document.querySelector("script[data-res-override-hook]") ? "script tag (already in DOM)" : "bundle message");
-            logUp(`onDom firing (${compiledDom.length}: ${names}) on ${location.href} [${document.readyState}] — hook injected via ${injected}`);
-            for (const { name, fn } of compiledDom) {
+            for (const { name, when, fn } of compiledDom) {
                 try {
-                    logUp(`onDom ${name} → running (${(compiledDom.find((d) => d.name === name) as any).when})`);
+                    logUp(`onDom → running (${when}) on ${location.href} [${document.readyState}] — hook injected via ${injected}`, "info", name);
                     fn(makeCtx(location.href, "GET"));
                 } catch (e: any) {
-                    logUp(`onDom ${name} threw: ${e.message || e}`, "error");
+                    logUp(`onDom threw: ${e.message || e}`, "error", name);
                 }
             }
         };

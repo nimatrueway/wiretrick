@@ -74,7 +74,7 @@
         if (data.kind === "log") {
             try {
                 chrome.runtime.sendMessage(
-                    { type: "debugLog", entry: { at: Date.now(), src: "hook", msg: data.msg, level: data.level || "info" } },
+                    { type: "debugLog", entry: { at: Date.now(), src: data.src || "hook", msg: data.msg, level: data.level || "info" } },
                     () => void chrome.runtime.lastError
                 );
             } catch {}
