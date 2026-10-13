@@ -212,7 +212,7 @@ html, body {
 }
 #log-find:focus { border-color: var(--accent); outline: none; }
 
-#log-level {
+#log-level, #log-source {
     background: var(--bg);
     border: 1px solid var(--border);
     color: var(--fg);

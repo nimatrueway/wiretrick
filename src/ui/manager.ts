@@ -197,9 +197,42 @@ let logFindRe: RegExp | null = null;
 const LEVEL_ORDER: Record<string, number> = { debug: 0, info: 1, warn: 2, error: 3 };
 let minLevel = 1; // info+
 let logCap = 500; // rendered lines kept in the DOM
+let logSource: string | null = null; // selected [source] tag, null = all
+
+/** Extract the source tag of a line: "[pipeline] …" → "pipeline"; "script.console: …" → "script.console". */
+function sourceOf(text: string): string {
+    const bracket = text.match(/^\[[^\]]*\]/);
+    if (bracket) return bracket[0].slice(1, -1);
+    const dot = text.match(/^[a-zA-Z0-9_.-]+:/);
+    return dot ? dot[0].slice(0, -1) : "(untagged)";
+}
+
+/** Sources seen in the buffer, newest-discovered last — drives the dropdown. */
+const logSources = new Set<string>();
+
+function syncLogSources(): void {
+    const sel = $("#log-source") as HTMLSelectElement;
+    const current = sel.value;
+    sel.innerHTML = "";
+    const all = document.createElement("option");
+    all.value = "";
+    all.textContent = "All sources";
+    sel.appendChild(all);
+    for (const s of [...logSources].sort((a, b) => a.localeCompare(b))) {
+        const o = document.createElement("option");
+        o.value = s;
+        o.textContent = s;
+        sel.appendChild(o);
+    }
+    sel.value = current;
+    if (sel.value !== current) { // previously selected source rotated out of the buffer
+        logSource = null;
+    }
+}
 
 function linePassesFilters(text: string, level: string): boolean {
     if ((LEVEL_ORDER[level] ?? 1) < minLevel) return false;
+    if (logSource && sourceOf(text) !== logSource) return false;
     if (logFindRe && !logFindRe.test(text)) return false;
     return true;
 }
@@ -245,6 +278,11 @@ function appendLog(entry: any): void {
     const time = new Date(entry.at).toLocaleTimeString();
     logEntries.push({ text: `[${time}] ${entry.message}`, level: entry.level || "info" });
     if (logEntries.length > 2000) logEntries.splice(0, logEntries.length - 2000); // absolute buffer cap
+    const src = sourceOf(logEntries[logEntries.length - 1].text);
+    if (!logSources.has(src)) {
+        logSources.add(src);
+        syncLogSources();
+    }
 
     const text = logEntries[logEntries.length - 1].text;
     const level = logEntries[logEntries.length - 1].level;
@@ -288,6 +326,11 @@ function makeLogFilters(): void {
     const levelSel = $("#log-level") as HTMLSelectElement;
     levelSel.addEventListener("change", () => {
         minLevel = LEVEL_ORDER[levelSel.value] ?? 1;
+        refilterLog();
+    });
+    const sourceSel = $("#log-source") as HTMLSelectElement;
+    sourceSel.addEventListener("change", () => {
+        logSource = sourceSel.value || null;
         refilterLog();
     });
 }
