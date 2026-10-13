@@ -421,6 +421,15 @@ function setupDialogs(): void {
         refilterLog();
     });
 
+    // absolute folder path for the ↗ VS Code button
+    const pathInput = $("#settings-vscode-path") as HTMLInputElement;
+    chrome.storage.local.get("resVscodePath", (d) => {
+        if (d && d.resVscodePath) pathInput.value = d.resVscodePath;
+    });
+    pathInput.addEventListener("change", () => {
+        chrome.storage.local.set({ resVscodePath: pathInput.value.trim() }, () => void refreshSyncPath());
+    });
+
     renderHelp();
 }
 
@@ -488,8 +497,22 @@ async function markFolderSynced(): Promise<void> {
     fsBridge.setCachedActive(true);
     updateOpenVscode();
     const st = await fsBridge.queryStatus();
-    (window as any).__resSyncPath = st.path || "";
     $("#folder-state").textContent = st.path || "(syncing)";
+    await refreshSyncPath();
+}
+
+/** Absolute path used by the ↗ VS Code button. The sync-reported path is
+ * absolute when Chrome can read it (handle.getPath); otherwise fall back
+ * to the user-provided path from Settings. */
+async function refreshSyncPath(): Promise<void> {
+    const st = await fsBridge.queryStatus();
+    if (st.path && st.path.startsWith("/")) {
+        (window as any).__resSyncPath = st.path;
+        return;
+    }
+    chrome.storage.local.get("resVscodePath", (d) => {
+        (window as any).__resSyncPath = (d && d.resVscodePath) || "";
+    });
 }
 
 function displayNameFromFile(fileName: string): string {
@@ -678,8 +701,7 @@ async function main(): Promise<void> {
         const folder = (window as any).__resSyncPath as string;
         if (!script || !folder) return;
         const file = folder.replace(/\/+$/, "") + "/" + fsBridge.fileNameFor(script.id, script.meta.name);
-        const url = "vscode://file" + file.split("/").map(encodeURIComponent).join("/");
-        // launch from THIS page (user gesture): external-protocol requests
+        const url = "vscode://file" + file.split("/").map(encodeURIComponent).join("/");        // launch from THIS page (user gesture): external-protocol requests
         // from the background page are dropped by Chromium
         const a = document.createElement("a");
         a.href = url;
