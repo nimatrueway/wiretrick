@@ -43,6 +43,13 @@ export function log(tabId: number, message: string, level: LogEntry["level"] = "
     }
 }
 
+/** Push an arbitrary message to all connected manager/popup pages. */
+export function broadcastToUi(msg: any): void {
+    for (const port of uiPorts) {
+        port.postMessage(msg);
+    }
+}
+
 /** Stream an arbitrary entry (e.g. debug log mirror) to the UI ports. */
 export function broadcastEntry(entry: LogEntry): void {
     for (const port of uiPorts) {

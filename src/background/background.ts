@@ -8,6 +8,7 @@ import { createPipeline } from "./engine/pipeline";
 import { addUiPort, clearTab, broadcastEntry } from "./engine/logs";
 import { onScriptsChanged, listScripts } from "./engine/scriptStore";
 import { dlog, getDebugBuffer, pushEntry, clearDebugBuffer, setSink } from "../shared/debugLog";
+import * as folderSync from "./folderSync";
 import { badgeSetText, badgeSetColor, tabsQueryAll, tabsGet } from "../shared/chromeApi";
 import { matchAny } from "../shared/matcher";
 
@@ -28,6 +29,32 @@ const cdp = new CdpStrategy();
 cdp.isClaimed = (url: string) => chromeBody.isClaimed(url);
 
 createPipeline(webRequestStrategy, chromeBody, cdp, updateTabBadge, noteRequestForBadge);
+
+// ---- scripts folder sync (watching runs here: persistent page, never throttled) ----
+void folderSync.initFromStorage();
+chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
+    if (msg && msg.type === "folderSyncStart") {
+        folderSync.startFromStoredHandle().then((ok) => sendResponse({ ok }));
+        return true;
+    }
+    if (msg && msg.type === "folderSyncStop") {
+        folderSync.stop().then(() => sendResponse({}));
+        return true;
+    }
+    if (msg && msg.type === "folderSyncStatus") {
+        sendResponse(folderSync.getStatus());
+        return false;
+    }
+    if (msg && msg.type === "folderWriteBack") {
+        folderSync.writeBack(msg.fileName, msg.content).then(() => sendResponse({}));
+        return true;
+    }
+    if (msg && msg.type === "folderDelete") {
+        folderSync.deleteFile(msg.fileName).then(() => sendResponse({}));
+        return true;
+    }
+    return false;
+});
 
 // ---- manager UI port: logs stream over it ----
 chrome.runtime.onConnect.addListener((port) => {
@@ -54,6 +81,9 @@ chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
     }
     return false;
 });
+
+// debug seam: raw buffer access for e2e/diagnostics
+(globalThis as any).__resDebugBuffer = getDebugBuffer;
 
 // ---- CDP debugger events (Tier C) ----
 if (chrome.debugger) {

@@ -64,6 +64,20 @@
         }
     }
 
+    // background pushes bundle updates (script edited/disabled) → forward
+    // into the MAIN world as a hot update
+    chrome.runtime.onMessage.addListener((msg: any) => {
+        if (msg && msg.type === "bundleUpdate") {
+            void (async () => {
+                const bundle = await fetchBundle();
+                if (bundle) {
+                    window.postMessage({ source: MAIN_SOURCE, kind: "bundle", bundle, hot: true }, window.location.origin);
+                }
+            })();
+        }
+        return false;
+    });
+
     window.addEventListener("message", (event: MessageEvent) => {
         if (event.source !== window) return;
         const data = event.data;

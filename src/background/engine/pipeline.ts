@@ -296,6 +296,17 @@ export function createPipeline(
         webRequestStrategy.reload(scripts);
         chromeBody.reload(scripts);
         void cdp.reload(scripts);
+
+        // HOT RELOAD: push the new bundle to every open tab's hook so
+        // changes apply without reloading the target tab
+        chrome.tabs.query({}, (tabs) => {
+            for (const t of tabs) {
+                if (t.id === undefined) continue;
+                try {
+                    chrome.tabs.sendMessage(t.id, { type: "bundleUpdate" }, () => void (chrome.runtime as any).lastError);
+                } catch {}
+            }
+        });
     }
 
     const off = onScriptsChanged(() => void reload());

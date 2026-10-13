@@ -100,7 +100,7 @@ function renderList(): void {
             if (!confirm(`Delete "${script.meta.name}"?`)) return;
             await send({ type: "deleteScript", id: script.id });
             if (fsBridge.isSyncing()) {
-                await fsBridge.deleteFile(fsBridge.fileNameFor(script.id, script.meta.name));
+                await send({ type: "folderDelete", fileName: fsBridge.fileNameFor(script.id, script.meta.name) });
             }
             await refresh();
         });
@@ -157,7 +157,7 @@ async function saveCurrent(): Promise<void> {
     setDirty(false);
     // two-way sync: push the saved source into the VS Code folder
     if (fsBridge.isSyncing()) {
-        await fsBridge.writeBack(fsBridge.fileNameFor(selectedId, name), code);
+        await send({ type: "folderWriteBack", fileName: fsBridge.fileNameFor(selectedId, name), content: code });
     }
     await refresh();
     renderList();
@@ -168,6 +168,27 @@ function connectLogs(): void {
     const port = chrome.runtime.connect({ name: "logs" });
     port.onMessage.addListener((msg: any) => {
         if (msg.type === "log") appendLog(msg.entry);
+        // background applied an external folder change (or any script
+        // change) — refresh list + editor if untouched
+        if (msg.type === "scriptsChanged") {
+            void (async () => {
+                await refresh();
+                const updated = scripts.find((sc) => sc.id === selectedId);
+                if (updated && !dirty) setEditorValue(updated.code);
+                if (updated && dirty) status("script changed on disk — editor has unsaved edits", "dirty");
+            })();
+        }
+        if (msg.type === "sync") {
+            (window as any).__resSyncActive = msg.status.active;
+            if (msg.status.active) {
+                markFolderSynced();
+            } else {
+                const btn = $("#btn-vscode");
+                btn.classList.remove("active");
+                btn.textContent = "Scripts Folder…";
+                $("#folder-state").textContent = "";
+            }
+        }
     });
 }
 
@@ -420,51 +441,14 @@ function renderSamples(): void {
 }
 
 // ---- dedicated scripts folder: pick once, edits sync both ways ----
-function markFolderSynced(): void {
+async function markFolderSynced(): Promise<void> {
     const btn = $("#btn-vscode");
     btn.classList.add("active");
     btn.textContent = "Scripts Folder ✓";
-    $("#folder-state").textContent = fsBridge.folderPath();
+    (window as any).__resSyncActive = true;
+    const st = await fsBridge.queryStatus();
+    $("#folder-state").textContent = st.path || "(syncing)";
 }
-
-const folderSyncHandlers: fsBridge.FolderSyncHandlers = {
-    onFileChanged: async (fileName, js) => {
-        const target = scripts.find((sc) => fsBridge.matchesFile(sc.meta.name, fileName));
-        if (!target) return;
-        await send({ type: "saveScript", id: target.id, code: js, name: target.meta.name });
-        await refresh();
-        status(`hot-reloaded ${fileName} from VS Code ✓`);
-        const updated = scripts.find((sc) => sc.id === target.id);
-        if (updated && updated.id === selectedId) {
-            setEditorValue(updated.code);
-        }
-    },
-    onFileAdded: async (fileName, js) => {
-        await send({ type: "saveScript", id: newId(), code: js, name: displayNameFromFile(fileName) });
-        await refresh();
-        status(`imported new script from ${fileName} ✓`);
-    },
-    onFileRemoved: async (fileName) => {
-        const target = scripts.find((sc) => fsBridge.matchesFile(sc.meta.name, fileName));
-        if (!target) return;
-        await send({ type: "deleteScript", id: target.id });
-        await refresh();
-        status(`script deleted with ${fileName} ✓`);
-    },
-    onRenamed: async (oldName, newName, js) => {
-        const target = scripts.find((sc) => fsBridge.matchesFile(sc.meta.name, oldName));
-        const newNameTaken = scripts.some((sc) => fsBridge.matchesFile(sc.meta.name, newName));
-        if (target && !newNameTaken) {
-            await send({ type: "saveScript", id: target.id, code: js, name: displayNameFromFile(newName) });
-            await refresh();
-            status(`renamed ${oldName} → ${newName} ✓`);
-        } else if (!target) {
-            await send({ type: "saveScript", id: newId(), code: js, name: displayNameFromFile(newName) });
-            await refresh();
-            status(`imported new script from ${newName} ✓`);
-        }
-    },
-};
 
 function displayNameFromFile(fileName: string): string {
     return fileName.replace(/\.ts$/, "").replace(/_/g, " ").slice(0, 60) || "Imported script";
@@ -476,10 +460,10 @@ function newId(): string {
 
 async function autoReconnectFolder(): Promise<void> {
     if (!fsBridge.isSupported()) return;
-    const st = await fsBridge.autoReconnect(folderSyncHandlers);
+    const st = await fsBridge.autoReconnect();
     const btn = $("#btn-vscode");
     if (st === "synced") {
-        markFolderSynced();
+        await markFolderSynced();
     } else if (st === "prompt") {
         // one click re-grants (Chrome drops FS grants between restarts)
         status("scripts folder needs reconnect — click 'Scripts Folder…'");
@@ -487,9 +471,9 @@ async function autoReconnectFolder(): Promise<void> {
         $("#folder-state").textContent = "reconnect needed";
         btn.addEventListener("click", async () => {
             if (fsBridge.isSyncing()) return;
-            const ok = await fsBridge.reconnectClicked(folderSyncHandlers);
+            const ok = await fsBridge.reconnectClicked();
             if (ok) {
-                markFolderSynced();
+                await markFolderSynced();
                 status("scripts folder reconnected ✓");
             }
         }, { once: true });
@@ -685,17 +669,15 @@ async function main(): Promise<void> {
     if (fsBridge.isSupported()) {
         btn.addEventListener("click", async () => {
             if (fsBridge.isSyncing()) {
-                fsBridge.stopSync();
+                await fsBridge.stopSync();
+                (window as any).__resSyncActive = false;
                 btn.classList.remove("active");
                 btn.textContent = "Scripts Folder…";
+                $("#folder-state").textContent = "";
                 return;
             }
-            await fsBridge.openFolder(
-                async () => scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code })),
-                folderSyncHandlers
-            );
-            btn.classList.add("active");
-            btn.textContent = "Scripts Folder ✓";
+            await fsBridge.openFolder(async () => scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code })));
+            await markFolderSynced();
         });
     } else {
         btn.setAttribute("disabled", "");

@@ -82,10 +82,22 @@ import { dlog } from "../shared/debugLog";
         };
     }
 
-    function acceptBundle(bundle: any): void {
+    /** once-per-page flags so re-sent bundles don't double-patch */
+    let patchesInstalled = false;
+    let domFired = false;
+
+    function acceptBundle(bundle: any, hot = false): void {
         const scripts: BundledScript[] = bundle && bundle.scripts;
-        logUp(`bundle: ${scripts ? scripts.length : 0} script(s)`);
-        if (!scripts || scripts.length === 0) return;
+        logUp(`bundle: ${scripts ? scripts.length : 0} script(s)${hot ? " (hot update)" : ""}`);
+        if (!scripts || scripts.length === 0) {
+            // empty bundle (all scripts disabled/deleted) must CLEAR stale
+            // handlers so effects stop on the open tab too
+            if (hot) {
+                compiled = [];
+                domFired = true;
+            }
+            return;
+        }
         compiled = scripts.map((s) => {
             // no consoleSink here: the page-console capture forwards script
             // console calls ("page.console: …"); a forwarding console would
@@ -97,9 +109,18 @@ import { dlog } from "../shared/debugLog";
             return { scriptId: s.scriptId, name: s.name, match: s.match, script };
         });
         logUp("compiled: " + compiled.map((c) => `${c.name}[mod=${!!c.script.handlers.modifyResponse} dom=${!!c.script.handlers.onDom}]`).join(" "));
-        patchFetch();
-        patchXHR();
-        runDomHandlers();
+        if (!patchesInstalled) {
+            patchFetch();
+            patchXHR();
+            patchesInstalled = true;
+        }
+        // hot updates re-fire onDom so DOM/title changes are visible
+        // without reloading the tab (initial + ready re-send fire once)
+        const shouldFireDom = hot || !domFired;
+        if (shouldFireDom) {
+            domFired = true;
+            runDomHandlers();
+        }
         logUp(`patches installed (${compiled.filter((c) => c.script.handlers.modifyResponse).length} modify, ${compiled.filter((c) => c.script.handlers.replaceResponse).length} replace)`);
 
         // page console → manager panel (installed after the first bundle;
@@ -116,7 +137,7 @@ import { dlog } from "../shared/debugLog";
     window.addEventListener("message", (event: MessageEvent) => {
         const data = event.data;
         if (!data || data.source !== BRIDGE_SOURCE || data.kind !== "bundle") return;
-        acceptBundle(data.bundle);
+        acceptBundle(data.bundle, !!data.hot);
     });
 
     // the bridge may have posted the bundle before this script tag finished
