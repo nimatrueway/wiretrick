@@ -125,6 +125,7 @@ declare const res: {
      *         respond: { body: { id: 1, name: "Mock" }, mime: "application/json" },
      *     };
      * });
+     */
     onRequest(
         handler: (ctx: ResOverride.RequestCtx) => ResOverride.RequestResult | void | Promise<ResOverride.RequestResult | void>
     ): void;
