@@ -106,6 +106,19 @@ export function newId(): string {
     return "s_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
 }
 
+// ---- lib modules (imports for folder-synced scripts) ----
+const LIB_KEY = "resLibFiles";
+
+export async function getLibFiles(): Promise<Record<string, string>> {
+    const obj = await storageGet(LIB_KEY);
+    return obj[LIB_KEY] || {};
+}
+
+export async function saveLibFiles(files: Record<string, string>): Promise<void> {
+    await storageSet({ [LIB_KEY]: files });
+    notify();
+}
+
 // ---- per-script KV storage ----
 const SCRIPT_STORE_PREFIX = "resStore.";
 

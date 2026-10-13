@@ -8,12 +8,16 @@ import type { ChromeBodyStrategy } from "./strategies/chromeBodyStrategy";
 import type { CdpStrategy } from "./strategies/cdpStrategy";
 import type { HeaderChanges } from "./strategies/types";
 import type { Script } from "./scriptStore";
-import { listScripts, onScriptsChanged, saveScript, deleteScript, setEnabled, newId } from "./scriptStore";
+import { listScripts, onScriptsChanged, saveScript, deleteScript, setEnabled, newId, getLibFiles, saveLibFiles } from "./scriptStore";
+import { bundleEntry } from "../../shared/bundler";
 import { serveStore } from "./strategies/webRequestStrategy";
 import { dlog } from "../../shared/debugLog";
 import { toRunnableJs } from "../../shared/compile";
 import "../../shared/transpile";
-import { log } from "./logs";
+import { log, scriptError } from "./logs";
+function scriptErrorLog(id: string, msg: string): void {
+    scriptError(id, msg);
+}
 import { serializeHandlers, type HandlerSources } from "../../shared/compile";
 
 const FILTER: chrome.webRequest.RequestFilter = { urls: ["<all_urls>"] };
@@ -27,6 +31,8 @@ export interface Pipeline {
 
 interface ScriptWithSources extends Script {
     _sources?: HandlerSources;
+    /** bundler output (lib imports inlined, TS transpiled) */
+    _bundled?: { code: string; error: string | null };
 }
 
 export function createPipeline(
@@ -209,6 +215,10 @@ export function createPipeline(
             setEnabled(msg.id, msg.enabled).then(() => sendResponse({}));
             return true;
         }
+        if (msg && msg.type === "saveLibFiles") {
+            saveLibFiles(msg.files || {}).then(() => sendResponse({}));
+            return true;
+        }
         if (msg && msg.type === "openTab") {
             chrome.windows.getLastFocused((win) => {
                 if (win && win.id !== undefined) {
@@ -268,12 +278,30 @@ export function createPipeline(
     async function reload(): Promise<void> {
         const scripts = (await listScripts()) as ScriptWithSources[];
         dlog("pipeline", "reload", { total: scripts.length, enabled: scripts.filter((x) => x.enabled).map((x) => x.meta.name) });
+
+        // scripts may import lib modules from the scripts folder — bundle
+        // them (transpiles TS along the way) so every tier runs plain JS
+        if (scripts.some((s) => /^\s*import\s/m.test(s.code))) {
+            const libFiles = await getLibFiles();
+            const lookup = (id: string) => (id in libFiles ? libFiles[id] : null);
+            for (const s of scripts) {
+                if (!/^\s*import\s/m.test(s.code)) continue;
+                const b = await bundleEntry(s.code, lookup);
+                s._bundled = { code: b.code, error: b.error };
+                if (b.error) scriptErrorLog(s.id, `bundle: ${b.error}`);
+                else if (b.deps.length) dlog("pipeline", `bundled ${s.meta.name}`, { deps: b.deps });
+            }
+        }
+
         webRequestStrategy.reload(scripts);
         chromeBody.reload(scripts);
         void cdp.reload(scripts);
     }
 
     const off = onScriptsChanged(() => void reload());
+    chrome.storage.onChanged.addListener((changes, area) => {
+        if (area === "local" && changes.resLibFiles) void reload();
+    });
     void reload();
 
     return {

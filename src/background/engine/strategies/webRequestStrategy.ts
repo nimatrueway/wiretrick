@@ -25,7 +25,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
         this.compiled = scripts
             .filter((s) => s.enabled)
             .map((s) => {
-                const compiled = compileScript(s.code, {
+                const compiled = compileScript((s as any)._bundled?.code || s.code, {
                     storage: {
                         get: (key: string) => scriptStorageGet(s.id, key),
                         set: (key: string, value: any) => scriptStorageSet(s.id, key, value),
