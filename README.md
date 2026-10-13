@@ -111,6 +111,39 @@ Invalid names are dropped; a list that ends up empty falls back to `auto`.
 - **Claim dedup**: when the hook transforms a request, the CDP tier skips it
   (no double transforms).
 
+### `res.onDom` — exact execution semantics
+
+`res.onDom` is not a network strategy — it registers a **DOM-ready callback
+that runs inside the page's MAIN world** (the same world as the page's own
+JS). Exact timing:
+
+1. **Injection**: our bridge content script (`document_start`, isolated
+   world) injects `hook.js` into the page via a script tag before any page
+   script runs. The hook loads, fetches the scripts matching this page from
+   the background, compiles them, and patches `fetch`/`XMLHttpRequest`.
+2. **Registration**: while compiling, any `res.onDom(handler)` calls are
+   captured (the handler is stored, not yet run).
+3. **Execution**: the captured handlers run exactly once, when the
+   `DOMContentLoaded` event fires — i.e. the full DOM is parsed and queryable,
+   but stylesheets/images may still be loading, and framework hydration
+   (React/Vue) has *not* necessarily finished yet.
+   - If the hook's bundle arrives **after** `DOMContentLoaded` already fired
+     (late bundle, bfcache restore), handlers run immediately at
+     registration time.
+4. **Context**: handlers run as page JS — full DOM access, `document.title`
+   writes, observers, etc. They can be `async` (the engine doesn't await
+   them). `ctx` is the same request-context shape (`url`, `method`, …) with
+   the page URL.
+5. **Re-execution**: on SPA soft navigations (pushState) the DOM changes but
+   `DOMContentLoaded` does not refire — use a `MutationObserver` inside your
+   handler if you need to re-apply changes. On hard navigations the hook
+   re-runs everything (new page, new bundle).
+
+Because it runs as page JS, `res.onDom` works regardless of how the response
+arrived — service-worker-served HTML, cached pages, or hydration overwriting
+a CDP transform — which is exactly why it's the resilient choice for
+title/DOM changes on SPAs.
+
 ### Which strategy for which job?
 
 - Mock/transform **JSON APIs** → default `auto` (hook covers it; no banner).
