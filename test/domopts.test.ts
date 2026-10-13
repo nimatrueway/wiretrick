@@ -15,14 +15,14 @@ function makeHookScaffold() {
 
 describe("res.onDom options", () => {
     it("captures handler + options", () => {
-        const c = compileScript(`// @match *\nres.onDom(() => {}, { watch: true, watchInterval: 400, maxRuns: 10 });`);
+        const c = compileScript(`// @match *\nres.onDom(() => {}, { when: "document_idle" });`);
         expect(c.error).toBeNull();
         expect(c.handlers.onDom).toBeTruthy();
-        expect(c.handlers.onDomOptions).toEqual({ watch: true, watchInterval: 400, maxRuns: 10 });
+        expect(c.handlers.onDomOptions).toEqual({ when: "document_idle" });
     });
 
     it("defaults: no options → {}", () => {
         const c = compileScript(`// @match *\nres.onDom(() => {});`);
-        expect(c.handlers.onDomOptions).toEqual({});
+        expect(c.handlers.onDomOptions).toEqual({ when: "DOMContentLoaded" });
     });
 });

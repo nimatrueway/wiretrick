@@ -65,9 +65,7 @@ declare namespace ResOverride {
 
     /** Options for the res.onDom hook (see res.onDom docs). */
     interface DomOptions {
-        watch?: boolean;
-        watchInterval?: number;
-        maxRuns?: number;
+        when?: "DOMContentLoaded" | "document_start" | "document_end" | "document_idle";
     }
 }
 
@@ -116,6 +114,56 @@ declare const res: {
 
     /** Per-script key/value storage. */
     storage: ResOverride.Storage;
+
+    /** Log to the manager's log panel for the current tab. */
+    log(...args: unknown[]): void;
+
+    /**
+     * Run a handler in the page (MAIN world) — the resilient way to change
+     * titles, text, and DOM content. Works no matter how the response
+     * arrived (service-worker-served HTML, cached pages, hydration).
+     *
+     * @param handler  (ctx) => void — same ctx shape as onRequest. May be
+     *                 async (fire-and-forget).
+     * @param opts.when  When to run the handler (mirrors content-script
+     *   run_at moments; defaults to "DOMContentLoaded"):
+     *
+     *   "DOMContentLoaded" (default)
+     *       Full DOM is parsed and queryable, but stylesheets/images may
+     *       still be loading and framework hydration (React/Vue) has NOT
+     *       necessarily finished. The usual choice for title/DOM tweaks.
+     *       If the script bundle arrives after DOMContentLoaded already
+     *       fired (late bundle, bfcache restore), the handler runs
+     *       immediately instead.
+     *
+     *   "document_start"
+     *       Runs immediately at hook install — before the page's scripts
+     *       execute and before the DOM body exists. Use to register
+     *       observers or stub page APIs ahead of page code. document.body
+     *       is NOT available yet.
+     *
+     *   "document_end"
+     *       DOM fully parsed (same moment as DOMContentLoaded in practice);
+     *       provided for symmetry with content-script run_at values.
+     *
+     *   "document_idle"
+     *       After the window `load` event — page fully settled, all
+     *       resources loaded. Safest moment to measure final state; slowest.
+     *       If load already happened, runs immediately.
+     *
+     * @example
+     * res.onDom(() => { document.title = "🎯 " + document.title; });
+     *
+     * @example
+     * res.onDom(() => {
+     *     const el = document.querySelector("h1");
+     *     if (el) el.textContent = "Intercepted";
+     * }, { when: "document_idle" }); // after everything settled
+     */
+    onDom(
+        handler: (ctx: ResOverride.RequestCtx) => void | Promise<void>,
+        opts?: { when?: "DOMContentLoaded" | "document_start" | "document_end" | "document_idle" }
+    ): void;
 
     /** Log to the manager's log panel for the current tab. */
     log(...args: unknown[]): void;

@@ -8,21 +8,21 @@ import { parseMeta, type ResMeta } from "./metaParser";
 
 export type HandlerFn = (...args: any[]) => any;
 
+/** When an onDom handler should fire (2nd argument of res.onDom). */
+export type DomWhen = "document_start" | "document_end" | "document_idle" | "DOMContentLoaded";
+
 /** Options for the onDom hook (2nd argument of res.onDom). */
 export interface DomOptions {
     /**
-     * Also re-run the handler when the page mutates the DOM (SPA soft
-     * navigations, hydration re-renders). Default: false (run once at
-     * DOMContentLoaded / late-registration).
+     * When to run the handler:
+     *  - "DOMContentLoaded" (default) — full DOM parsed, before hydration
+     *  - "document_start" — immediately at hook install (DOM barely exists;
+     *    use for registering observers before page scripts run)
+     *  - "document_end" — DOM parsed (same as DOMContentLoaded in practice)
+     *  - "document_idle" — after `load` (page fully settled; safest for
+     *    measuring final state)
      */
-    watch?: boolean;
-    /** Milliseconds between watch re-runs (debounce). Default: 250. */
-    watchInterval?: number;
-    /**
-     * Stop watching after this many mutations fired the handler
-     * (safety cap for very chatty pages). Default: Infinity.
-     */
-    maxRuns?: number;
+    when?: DomWhen;
 }
 
 export interface ScriptHandlers {
@@ -197,7 +197,7 @@ function makeCollectorShim(store: any, overrides?: ResApiOverrides) {
         modifyResponse: (fn: HandlerFn) => (store.modifyResponse = fn),
         onDom: (fn: HandlerFn, opts?: DomOptions) => {
             store.onDom = fn;
-            store.onDomOptions = opts || {};
+            store.onDomOptions = { when: "DOMContentLoaded", ...(opts || {}) };
         },
         storage: overrides?.storage || {
             get: () => undefined,

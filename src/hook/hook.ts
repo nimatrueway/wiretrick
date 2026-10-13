@@ -7,7 +7,7 @@
  *
  * Built as a standalone IIFE (no imports in output).
  */
-import { compileScript, type CompiledScript } from "../shared/compile";
+import { compileScript, type CompiledScript, type HandlerFn } from "../shared/compile";
 import { dlog } from "../shared/debugLog";
 
 (() => {
@@ -222,15 +222,9 @@ import { dlog } from "../shared/debugLog";
         return out;
     }
 
-    /**
+        /**
      * onDom: user DOM/title manipulation.
-     *
-     * Options (2nd arg of res.onDom):
-     *   watch       — re-run on DOM mutations (SPA soft navs, hydration).
-     *                 Default false.
-     *   watchInterval — debounce ms between watch runs. Default 250.
-     *   maxRuns     — cap total executions per page load. Default Infinity
-     *                 (1 when watch is off).
+     * Options: { when: "DOMContentLoaded" | "document_start" | "document_end" | "document_idle" }
      */
     function runDomHandlers(): void {
         const fire = () => {
@@ -239,51 +233,39 @@ import { dlog } from "../shared/debugLog";
             for (const c of domScripts) {
                 const handler = c.script.handlers.onDom;
                 if (!handler) continue;
-                const opts = c.script.handlers.onDomOptions || {};
-                const maxRuns = opts.maxRuns ?? (opts.watch ? Infinity : 1);
-                let runs = 0;
-
-                const run = () => {
-                    if (runs >= maxRuns) return;
-                    runs++;
-                    try {
-                        handler(makeCtx(location.href, "GET"));
-                    } catch (e: any) {
-                        logUp(`onDom ${c.name} threw: ${e.message || e}`, "error");
-                    }
-                };
-
-                run();
-
-                if (opts.watch && runs < maxRuns) {
-                    let last = 0;
-                    const observer = new MutationObserver(() => {
-                        const now = Date.now();
-                        if (now - last < (opts.watchInterval ?? 250)) return;
-                        last = now;
-                        if (runs >= maxRuns) {
-                            observer.disconnect();
-                            return;
-                        }
-                        run();
-                    });
-                    observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
-                    // auto-disconnect at the cap
-                    if (maxRuns !== Infinity) {
-                        const check = setInterval(() => {
-                            if (runs >= maxRuns) {
-                                observer.disconnect();
-                                clearInterval(check);
-                            }
-                        }, 1000);
-                    }
+                const when = c.script.handlers.onDomOptions?.when || "DOMContentLoaded";
+                if (when !== "document_start") {
+                    scheduleDomHandler(handler, when, c.name);
+                    continue;
+                }
+                try {
+                    handler(makeCtx(location.href, "GET"));
+                } catch (e: any) {
+                    logUp(`onDom ${c.name} threw: ${e.message || e}`, "error");
                 }
             }
         };
+        fire();
+    }
+
+    function scheduleDomHandler(handler: HandlerFn, when: string, name: string): void {
+        const run = () => {
+            try {
+                handler(makeCtx(location.href, "GET"));
+            } catch (e: any) {
+                logUp(`onDom ${name} threw: ${e.message || e}`, "error");
+            }
+        };
+        if (when === "document_idle") {
+            if (document.readyState === "complete") run();
+            else window.addEventListener("load", run, { once: true });
+            return;
+        }
+        // "document_end" and "DOMContentLoaded" both = DOM parsed
         if (document.readyState === "loading") {
-            document.addEventListener("DOMContentLoaded", fire, { once: true });
+            document.addEventListener("DOMContentLoaded", run, { once: true });
         } else {
-            fire();
+            run();
         }
     }
 

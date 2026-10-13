@@ -70,16 +70,18 @@ res.onDom(() => {
     if (h) h.textContent = "Hello!";
 });
 
-Options (2nd argument) — SPA soft navigations don't refire DOMContentLoaded, so watch mutations:
+Options (2nd argument): { when: ... } — choose the moment:
 
 res.onDom(() => {
     const el = document.querySelector("h1");
     if (el) el.textContent = "Intercepted";
-}, { watch: true, watchInterval: 500, maxRuns: 100 });
+}, { when: "document_idle" });
 
-watch (default false): re-run on DOM mutations (childList/subtree/characterData).
-watchInterval (default 250): debounce ms between watch runs.
-maxRuns (default 1, unlimited with watch): cap per page load; observer auto-disconnects.`,
+Timing: { when: "DOMContentLoaded" (default) | "document_start" | "document_end" | "document_idle" }
+- DOMContentLoaded — DOM parsed, hydration not guaranteed
+- document_start — at hook install, before page scripts; no document.body yet
+- document_end — same moment as DOMContentLoaded
+- document_idle — after window load (page fully settled); runs immediately if already loaded`,
     },
     {
         title: "res.storage / res.log",

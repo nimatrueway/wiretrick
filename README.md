@@ -134,10 +134,26 @@ JS). Exact timing:
    writes, observers, etc. They can be `async` (the engine doesn't await
    them). `ctx` is the same request-context shape (`url`, `method`, …) with
    the page URL.
-5. **Re-execution**: on SPA soft navigations (pushState) the DOM changes but
-   `DOMContentLoaded` does not refire — use a `MutationObserver` inside your
-   handler if you need to re-apply changes. On hard navigations the hook
-   re-runs everything (new page, new bundle).
+5. **Timing options**: pass `{ when }` as the second argument to choose the
+   moment (mirrors content-script `run_at`):
+
+   ```ts
+   res.onDom(() => { ... });                             // default: DOMContentLoaded
+   res.onDom(() => { ... }, { when: "document_start" }); // at hook install, pre-DOM
+   res.onDom(() => { ... }, { when: "document_end" });   // DOM parsed
+   res.onDom(() => { ... }, { when: "document_idle" });  // after window load
+   ```
+
+   - `DOMContentLoaded` (default) — DOM parsed; hydration not guaranteed.
+   - `document_start` — runs immediately at hook install, before page
+     scripts and before `document.body` exists (register observers/stubs).
+   - `document_end` — same moment as DOMContentLoaded.
+   - `document_idle` — after `load`; the whole page settled. Runs
+     immediately if load already happened.
+
+   On hard navigations the hook re-runs everything (new page, new bundle).
+   On SPA soft navigations (pushState) no hook re-fires — register your own
+   MutationObserver inside the handler.
 
 Because it runs as page JS, `res.onDom` works regardless of how the response
 arrived — service-worker-served HTML, cached pages, or hydration overwriting
