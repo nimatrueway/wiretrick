@@ -17,7 +17,7 @@
  */
 import { matchAny } from "../../../shared/matcher";
 import { compileScript, makeScriptOverrides } from "../../../shared/compile";
-import type { BodyScriptInfo, HookDisposition, InterceptionStrategy, WebRequestDetailsLike } from "./types";
+import type { BodyScriptInfo, HeaderChanges, HookDisposition, InterceptionStrategy, MaybePromise, WebRequestDetailsLike } from "./types";
 import type { Script } from "../scriptStore";
 import { log } from "../logs";
 import { scriptStorageGet, scriptStorageSet } from "../scriptStore";
@@ -115,7 +115,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
         }));
     }
 
-    handleBeforeRequest(details: WebRequestDetailsLike, _tabUrl: string | null): HookDisposition {
+    handleBeforeRequest(details: WebRequestDetailsLike, _tabUrl: string | null): MaybePromise<HookDisposition> {
         // Tier-A claims win: the page hook owns this request's body.
         if (this.isClaimed(details.url)) {
             return { kind: "allow" };
@@ -182,11 +182,11 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
         return { kind: "allow" };
     }
 
-    handleBeforeSendHeaders(_d: WebRequestDetailsLike, _t: string | null): null {
+    handleBeforeSendHeaders(_d: WebRequestDetailsLike, _t: string | null): MaybePromise<HeaderChanges | null> {
         return null; // header mods live in webRequestStrategy
     }
 
-    handleHeadersReceived(_d: WebRequestDetailsLike, _t: string | null): null {
+    handleHeadersReceived(_d: WebRequestDetailsLike, _t: string | null): MaybePromise<HeaderChanges | null> {
         return null;
     }
 

@@ -82,7 +82,7 @@ describe("WebRequestStrategy", () => {
 // ==/ResScript==
 res.onRequest((ctx) => ({ redirect: "https://mocked.example.com/data" }));`),
         ]);
-        const d = s.handleBeforeRequest(details(), "https://app.example.com/");
+        const d = s.handleBeforeRequest(details(), "https://app.example.com/") as any;
         expect(d).toEqual({ kind: "redirect", url: "https://mocked.example.com/data" });
     });
 
@@ -91,7 +91,7 @@ res.onRequest((ctx) => ({ redirect: "https://mocked.example.com/data" }));`),
         s.reload([
             makeScript("a", `// @match *://other.com/*\nres.onRequest(() => ({ redirect: "https://x.com" }));`),
         ]);
-        expect(s.handleBeforeRequest(details(), null).kind).toBe("allow");
+        expect((s.handleBeforeRequest(details(), null) as any).kind).toBe("allow");
     });
 
     it("disabled script does nothing", () => {
@@ -99,7 +99,7 @@ res.onRequest((ctx) => ({ redirect: "https://mocked.example.com/data" }));`),
         s.reload([
             makeScript("a", `// @match *\nres.onRequest(() => ({ cancel: true }));`, false),
         ]);
-        expect(s.handleBeforeRequest(details(), null).kind).toBe("allow");
+        expect((s.handleBeforeRequest(details(), null) as any).kind).toBe("allow");
     });
 
     it("static replaceResponse → data url redirect", () => {
@@ -111,7 +111,7 @@ res.onRequest((ctx) => ({ redirect: "https://mocked.example.com/data" }));`),
 // ==/ResScript==
 res.replaceResponse(() => JSON.stringify({ mocked: true }));`),
         ]);
-        const d = s.handleBeforeRequest(details(), null);
+        const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("redirect");
         if (d.kind === "redirect") {
             expect(d.url).toContain("data:application/json");
@@ -129,7 +129,7 @@ res.replaceResponse(() => JSON.stringify({ mocked: true }));`),
 // ==/ResScript==
 res.onResponseHeaders(() => ({ headers: { set: { "access-control-allow-origin": "*" }, remove: ["x-frame-options"] } }));`),
         ]);
-        const changes = s.handleHeadersReceived(details(), null);
+        const changes = s.handleHeadersReceived(details(), null) as any;
         expect(changes).not.toBeNull();
         expect(changes!.set).toEqual({ "access-control-allow-origin": "*" });
         expect(changes!.remove).toEqual(["x-frame-options"]);
@@ -143,7 +143,7 @@ res.onResponseHeaders(() => ({ headers: { set: { "access-control-allow-origin": 
         expect(s.handleBeforeSendHeaders(details(), null)).toBeNull();
         // request phase runs onRequest and caches the header mods
         s.handleBeforeRequest(details(), null);
-        const changes = s.handleBeforeSendHeaders(details(), null);
+        const changes = s.handleBeforeSendHeaders(details(), null) as any;
         expect(changes!.set).toEqual({ authorization: "Bearer x" });
     });
 
@@ -152,7 +152,7 @@ res.onResponseHeaders(() => ({ headers: { set: { "access-control-allow-origin": 
         s.reload([
             makeScript("a", `// @match *\nres.onRequest(() => { throw new Error("boom"); });`),
         ]);
-        expect(s.handleBeforeRequest(details(), null).kind).toBe("allow");
+        expect((s.handleBeforeRequest(details(), null) as any).kind).toBe("allow");
     });
 });
 
@@ -166,7 +166,7 @@ describe("ChromeBodyStrategy", () => {
 // ==/ResScript==
 res.modifyResponse((ctx, body) => body.replace("foo", "bar"));`),
         ]);
-        const d = s.handleBeforeRequest(details({ type: "script", url: "https://cdn.example.com/lib.js" }), null);
+        const d = s.handleBeforeRequest(details({ type: "script", url: "https://cdn.example.com/lib.js" }), null) as any;
         expect(d.kind).toBe("needsCdp");
     });
 
@@ -176,7 +176,7 @@ res.modifyResponse((ctx, body) => body.replace("foo", "bar"));`),
             makeScript("a", `// @match *\nres.modifyResponse((ctx, body) => body);`),
         ]);
         s.claimRequest("https://cdn.example.com/lib.js");
-        expect(s.handleBeforeRequest(details({ type: "script", url: "https://cdn.example.com/lib.js" }), null).kind).toBe("allow");
+        expect((s.handleBeforeRequest(details({ type: "script", url: "https://cdn.example.com/lib.js" }), null) as any).kind).toBe("allow");
     });
 
     it("main_frame goes through the CDP tier", () => {
@@ -184,7 +184,7 @@ res.modifyResponse((ctx, body) => body.replace("foo", "bar"));`),
         s.reload([
             makeScript("a", `// @match *\nres.modifyResponse((ctx, body) => body);`),
         ]);
-        expect(s.handleBeforeRequest(details({ type: "main_frame" }), null).kind).toBe("needsCdp");
+        expect((s.handleBeforeRequest(details({ type: "main_frame" }), null) as any).kind).toBe("needsCdp");
     });
 
     it("@strategy cdp dispatches needsCdp (cdpStrategy owns the response)", () => {
@@ -197,6 +197,6 @@ res.modifyResponse((ctx, body) => body.replace("foo", "bar"));`),
 // ==/ResScript==
 res.modifyResponse((ctx, body) => body);`),
         ]);
-        expect(s.handleBeforeRequest(details({ type: "script" }), null).kind).toBe("needsCdp");
+        expect((s.handleBeforeRequest(details({ type: "script" }), null) as any).kind).toBe("needsCdp");
     });
 });

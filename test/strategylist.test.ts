@@ -32,30 +32,30 @@ describe("@strategy priority lists", () => {
         const s = new ChromeBodyStrategy();
         s.reload([makeScript("a", `// ==ResScript==\n// @strategy hook,cdp\n// @match *\n// ==/ResScript==\nres.modifyResponse((c, b) => b);`)]);
         s.markHookReady(1);
-        expect(s.handleBeforeRequest(xhr(), null).kind).toBe("allow");
+        expect((s.handleBeforeRequest(xhr(), null) as any).kind).toBe("allow");
     });
 
     it("hook,cdp: hook NOT ready → needsCdp (cold start fallback)", () => {
         const s = new ChromeBodyStrategy();
         s.reload([makeScript("a", `// ==ResScript==\n// @strategy hook,cdp\n// @match *\n// ==/ResScript==\nres.modifyResponse((c, b) => b);`)]);
-        expect(s.handleBeforeRequest(xhr(), null).kind).toBe("needsCdp");
+        expect((s.handleBeforeRequest(xhr(), null) as any).kind).toBe("needsCdp");
     });
 
     it("cdp,hook: debugger first, even when hook is ready", () => {
         const s = new ChromeBodyStrategy();
         s.reload([makeScript("a", `// ==ResScript==\n// @strategy cdp,hook\n// @match *\n// ==/ResScript==\nres.modifyResponse((c, b) => b);`)]);
         s.markHookReady(1);
-        expect(s.handleBeforeRequest(xhr(), null).kind).toBe("needsCdp");
+        expect((s.handleBeforeRequest(xhr(), null) as any).kind).toBe("needsCdp");
     });
 
     it("cdp-only: main frame → needsCdp; hook-only list never touches CDP", () => {
         const s = new ChromeBodyStrategy();
         s.reload([makeScript("a", `// ==ResScript==\n// @strategy cdp\n// @match *\n// ==/ResScript==\nres.modifyResponse((c, b) => b);`)]);
-        expect(s.handleBeforeRequest(mainFrame(), null).kind).toBe("needsCdp");
+        expect((s.handleBeforeRequest(mainFrame(), null) as any).kind).toBe("needsCdp");
 
         const s2 = new ChromeBodyStrategy();
         s2.reload([makeScript("b", `// ==ResScript==\n// @strategy hook\n// @match *\n// ==/ResScript==\nres.modifyResponse((c, b) => b);`)]);
-        expect(s2.handleBeforeRequest(mainFrame(), null).kind).toBe("allow");
+        expect((s2.handleBeforeRequest(mainFrame(), null) as any).kind).toBe("allow");
     });
 
     it("multiple scripts: first script's hook choice wins before second's cdp", () => {
@@ -65,6 +65,6 @@ describe("@strategy priority lists", () => {
             makeScript("b", `// ==ResScript==\n// @strategy cdp\n// @match *\n// ==/ResScript==\nres.modifyResponse((c, b) => b);`),
         ]);
         s.markHookReady(1);
-        expect(s.handleBeforeRequest(xhr(), null).kind).toBe("allow");
+        expect((s.handleBeforeRequest(xhr(), null) as any).kind).toBe("allow");
     });
 });

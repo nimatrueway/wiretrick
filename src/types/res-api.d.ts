@@ -70,32 +70,54 @@ declare namespace ResOverride {
 }
 
 /**
- * The global script API. Register exactly one handler per hook; the last
- * registration wins. Handlers for onRequest / onResponseHeaders must be
- * synchronous (Chrome's blocking webRequest cannot await promises).
+ * The global script API.
+ *
+ * STACKING (multiple scripts matching one request) — scripts run in list
+ * order (top to bottom in the manager):
+ *  - onRequest: first script returning a TERMINAL result (redirect/cancel)
+ *    wins and stops the chain; non-terminal results (headers-only, void)
+ *    don't stop it. Header changes from the winning script apply.
+ *  - onResponseHeaders: ALL matching scripts run; `set` applied in order
+ *    (later overwrites), `remove` accumulates.
+ *  - modifyResponse: transforms COMPOSE — each script's output is the next
+ *    script's input, in list order.
+ *  - replaceResponse: first script returning a body wins; later ones skip.
+ *
+ * ASYNC: every hook accepts an async handler (a Promise-returning function).
+ * Result handling differs per tier — see the README's "Async handlers"
+ * section. Short version: async replaceResponse/modifyResponse/onDom work
+ * everywhere; async onRequest/onResponseHeaders are honored natively on
+ * Firefox, and on Chrome require 'cdp' in @strategy (a warning is logged
+ * otherwise and the result is ignored).
  */
 declare const res: {
     /**
      * Intercept a request before it is sent. Return { redirect }, { cancel },
-     * { headers } or any combination.
+     * { headers } or any combination. May be async — see the stacking/async
+     * notes above (on Chrome the async result is honored in the cdp tier,
+     * @strategy hook,cdp).
      */
     onRequest(
-        handler: (ctx: ResOverride.RequestCtx) => ResOverride.RequestResult | void
+        handler: (ctx: ResOverride.RequestCtx) => ResOverride.RequestResult | void | Promise<ResOverride.RequestResult | void>
     ): void;
 
     /**
-     * Inspect / modify response headers. Synchronous only.
+     * Inspect / modify response headers. May be async — see the stacking /
+     * async notes above.
      */
     onResponseHeaders(
-        handler: (ctx: ResOverride.ResponseHeaderCtx) => ResOverride.ResponseHeaderResult | void
+        handler: (ctx: ResOverride.ResponseHeaderCtx) => ResOverride.ResponseHeaderResult | void | Promise<ResOverride.ResponseHeaderResult | void>
     ): void;
 
     /**
      * Replace the response body completely. Return a string, Uint8Array, or
      * { file: "<path or data url>" }. Return nothing to leave the body alone.
+     * May be async — the awaited result fulfills the response (hook tier
+     * short-circuits the page's fetch/XHR; cdp tier fulfills the network
+     * response).
      */
     replaceResponse(
-        handler: (ctx: ResOverride.ReplaceCtx) => string | Uint8Array | { file: string } | null | void
+        handler: (ctx: ResOverride.ReplaceCtx) => string | Uint8Array | { file: string } | null | void | Promise<string | Uint8Array | { file: string } | null | void>
     ): void;
 
     /**

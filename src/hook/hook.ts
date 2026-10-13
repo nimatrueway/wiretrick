@@ -7,7 +7,7 @@
  *
  * Built as a standalone IIFE (no imports in output).
  */
-import { compileScript, type CompiledScript, type HandlerFn } from "../shared/compile";
+import { compileScript, isThenable, type CompiledScript, type HandlerFn } from "../shared/compile";
 import { dlog } from "../shared/debugLog";
 
 (() => {
@@ -171,6 +171,7 @@ import { dlog } from "../shared/debugLog";
         for (const { name, fn } of replaceHandlersFor(url)) {
             try {
                 const out = fn(makeReplaceCtx(url, method));
+                if (isThenable(out)) continue; // async handler — handled by the async path
                 if (out !== undefined && out !== null) {
                     const content = out && typeof out === "object" && out.file ? out.file : out;
                     const mime = guessHookMime(url);
@@ -269,6 +270,23 @@ import { dlog } from "../shared/debugLog";
         }
     }
 
+    /** Async replaceResponse: awaits each matching handler's result. */
+    async function applyReplaceAsync(url: string, method: string): Promise<{ mime: string; content: string | Uint8Array } | null> {
+        for (const { name, fn } of replaceHandlersFor(url)) {
+            try {
+                const out = await fn(makeReplaceCtx(url, method));
+                if (out !== undefined && out !== null) {
+                    const content = out && typeof out === "object" && (out as any).file ? (out as any).file : out;
+                    const mime = guessHookMime(url);
+                    return { mime, content: content as string | Uint8Array };
+                }
+            } catch (e: any) {
+                logUp(`replaceResponse ${name} threw: ${e.message || e}`, "error");
+            }
+        }
+        return null;
+    }
+
     // ---- fetch patch ----
     const origFetch = window.fetch.bind(window);
 
@@ -297,6 +315,16 @@ import { dlog } from "../shared/debugLog";
                 return new Response(replacement.content as any, {
                     status: 200,
                     headers: { "content-type": replacement.mime },
+                });
+            }
+
+            // async replaceResponse handlers: awaited (the page's fetch call
+            // simply takes as long as the handler needs)
+            const asyncReplacement = await applyReplaceAsync(url, method);
+            if (asyncReplacement) {
+                return new Response(asyncReplacement.content as any, {
+                    status: 200,
+                    headers: { "content-type": asyncReplacement.mime },
                 });
             }
 
@@ -375,6 +403,12 @@ import { dlog } from "../shared/debugLog";
                         if (origOnRsc) origOnRsc.call(xhr, ev);
                         return;
                     }
+                    // async replaceResponse handlers: await, redefine, then
+                    // release the original handler (same semantics as async
+                    // transforms — `load` listeners may see the original)
+                    const pendingAsyncReplace = replaceHandlersFor(absUrl).length
+                        ? applyReplaceAsync(absUrl, xhr.__resMethod)
+                        : null;
                     const raw = xhr.response;
                     // only string bodies are safely rewritable
                     if (typeof raw !== "string" && raw !== null && raw !== "") {
@@ -394,10 +428,16 @@ import { dlog } from "../shared/debugLog";
                         return;
                     }
                     // async handlers: onreadystatechange-property consumers get
-                    // the transformed body; `load`/addEventListener consumers
-                    // may see the original (documented limitation)
-                    console.warn("[ResOverride hook] async transform on XHR: load listeners may see the original body");
+                    // the transformed/replaced body; `load`/addEventListener
+                    // consumers may see the original (documented limitation)
+                    console.warn("[ResOverride hook] async handler on XHR: load listeners may see the original body");
                     void (async () => {
+                        const asyncRepl = await pendingAsyncReplace;
+                        if (asyncRepl) {
+                            redefineResponseText(xhr, typeof asyncRepl.content === "string" ? asyncRepl.content : dec.decode(asyncRepl.content as Uint8Array));
+                            if (origOnRsc) origOnRsc.call(xhr, ev);
+                            return;
+                        }
                         const transformed = await applyTransforms(absUrl, xhr.__resMethod, typeof raw === "string" ? raw : "", {
                             contentType,
                             status: xhr.status,

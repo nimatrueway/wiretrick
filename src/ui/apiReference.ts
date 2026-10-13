@@ -84,6 +84,38 @@ Timing: { when: "DOMContentLoaded" (default) | "document_start" | "document_end"
 - document_idle — after window load (page fully settled); runs immediately if already loaded`,
     },
     {
+        title: "Multiple scripts — stacking order",
+        body: `Scripts run in list order (top of the manager first) when several match one request:
+
+onRequest — first TERMINAL result (redirect/cancel) wins and stops the chain; headers-only/void results don't stop it.
+onResponseHeaders — ALL matching scripts run; set applied in order (later overwrites), remove accumulates.
+modifyResponse — transforms COMPOSE: each output feeds the next script.
+replaceResponse — first script returning a body wins.
+
+@strategy lists decide the tier per script, not the stacking order.`,
+    },
+    {
+        title: "Async handlers",
+        body: `Every hook accepts async handlers. replaceResponse/modifyResponse/onDom async works everywhere.
+
+onRequest/onResponseHeaders async results: honored natively on Firefox; on Chrome they need 'cdp' in @strategy (the blocking webRequest can't await — a warning is logged and the result ignored otherwise).
+
+// async mock:
+res.replaceResponse(async () => {
+    const data = await fetch("https://myserver/fixture").then(r => r.json());
+    return JSON.stringify(data);
+});
+
+// async redirect via cdp tier:
+// ==ResScript==
+// @strategy hook,cdp
+// ==/ResScript==
+res.onRequest(async (ctx) => {
+    const target = await decideUpstream(ctx.url);
+    return { redirect: target };
+});`,
+    },
+    {
         title: "res.storage / res.log",
         body: `Per-script key/value storage (async), and logging into the LOG panel.
 

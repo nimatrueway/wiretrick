@@ -51,6 +51,16 @@ export interface HandlerSources {
     onDom: string | null;
 }
 
+/** true if the value looks like a Promise (thenable). */
+export function isThenable(v: any): v is Promise<any> {
+    return !!v && typeof v.then === "function";
+}
+
+/** true if the function was declared `async` (returns a Promise by construction). */
+export function isAsyncFn(fn: any): boolean {
+    return typeof fn === "function" && fn.constructor?.name === "AsyncFunction";
+}
+
 export interface ResApiOverrides {
     storage?: { get(key: string): Promise<any>; set(key: string, value: any): Promise<void> };
     log?: (...args: any[]) => void;

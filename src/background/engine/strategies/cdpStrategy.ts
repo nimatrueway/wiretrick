@@ -6,7 +6,7 @@
  */
 import { matchAny } from "../../../shared/matcher";
 import { parseStrategyList } from "../../../shared/metaParser";
-import { compileScript, makeScriptOverrides, type HandlerFn } from "../../../shared/compile";
+import { compileScript, makeScriptOverrides, isThenable, isAsyncFn, type HandlerFn } from "../../../shared/compile";
 import { storageGet, storageSet } from "../../../shared/chromeApi";
 import type { Script } from "../scriptStore";
 import { log } from "../logs";
@@ -19,6 +19,12 @@ interface CdpScript {
     name: string;
     match: string[];
     transform: HandlerFn;
+    /** async onRequest handler (redirect/cancel honored at Request stage) */
+    onRequest?: HandlerFn;
+    /** async onResponseHeaders handler (merged at Response stage) */
+    onResponseHeaders?: HandlerFn;
+    /** async replaceResponse handler (fulfills the body) */
+    replaceResponse?: HandlerFn;
 }
 
 /**
@@ -46,6 +52,8 @@ export class CdpStrategy {
     private idleTimers = new Map<number, ReturnType<typeof setTimeout>>();
     /** tabId → in-flight ensureAttached promise (dedup concurrent calls) */
     private attachInFlight = new Map<number, Promise<void>>();
+    /** requestId → stashed async request-header changes from onRequest */
+    private pendingAsyncHeaders = new Map<string, Promise<any[]>>();
 
     reload(scripts: Script[]): void {
         this.scripts = [];
@@ -55,14 +63,23 @@ export class CdpStrategy {
             if (!s.enabled) continue;
             if (!usesCdp(s.meta.strategy)) continue;
             const c = compileScript(s.code, makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, msg) => log(-1, `res.log: ${msg}`, "info", id), (id, level, msg) => log(-1, `script.console: ${msg}`, level, id)));
-            if (c.handlers.modifyResponse) {
-                this.scripts.push({
-                    scriptId: s.id,
-                    name: s.meta.name,
-                    match: s.meta.match,
-                    transform: c.handlers.modifyResponse,
-                });
-            }
+            // async-only for onRequest/onResponseHeaders/replaceResponse —
+            // sync handlers are served by the blocking webRequest tier
+            const wantsCdp =
+                !!c.handlers.modifyResponse ||
+                isAsyncFn(c.handlers.onRequest) ||
+                isAsyncFn(c.handlers.onResponseHeaders) ||
+                isAsyncFn(c.handlers.replaceResponse);
+            if (!wantsCdp) continue;
+            this.scripts.push({
+                scriptId: s.id,
+                name: s.meta.name,
+                match: s.meta.match,
+                transform: c.handlers.modifyResponse as HandlerFn,
+                onRequest: isAsyncFn(c.handlers.onRequest) ? c.handlers.onRequest! : undefined,
+                onResponseHeaders: isAsyncFn(c.handlers.onResponseHeaders) ? c.handlers.onResponseHeaders! : undefined,
+                replaceResponse: isAsyncFn(c.handlers.replaceResponse) ? c.handlers.replaceResponse! : undefined,
+            });
         }
     }
 
@@ -166,7 +183,9 @@ export class CdpStrategy {
                     throw e;
                 }
                 try {
-                    await debuggerSend(tabId, "Fetch.enable", { patterns: [{ requestStage: "Response" }] });
+                    await debuggerSend(tabId, "Fetch.enable", {
+                patterns: [{ requestStage: "Request" }, { requestStage: "Response" }],
+            });
                 } catch (e: any) {
                     // enable failed while attached (evicted mid-flight) —
                     // detach so we never leave an orphan debugger attached
@@ -191,26 +210,100 @@ export class CdpStrategy {
 
     async handlePaused(tabId: number, params: any): Promise<void> {
         const { requestId, request } = params;
+        const url: string = request.url;
+
+        // ---- Request stage: async onRequest (redirect / cancel) ----
         if (!params.responseStatusCode) {
+            if (this.isClaimed(url)) {
+                await debuggerSend(tabId, "Fetch.continueRequest", { requestId });
+                return;
+            }
+            const requestScripts = this.matchingScripts(url).filter((s) => s.onRequest);
+            if (requestScripts.length === 0) {
+                await debuggerSend(tabId, "Fetch.continueRequest", { requestId });
+                return;
+            }
+            // stash async onResponseHeaders promises for the response stage
+            const headerPromises: Promise<any>[] = [];
+            for (const s of requestScripts) {
+                try {
+                    const result = s.onRequest!({ url, method: request.method, tabUrl: url, resourceType: params.resourceType || "other", requestHeaders: {} });
+                    const resolved = isThenable(result) ? await result : result;
+                    if (!resolved) continue;
+                    if (resolved.cancel) {
+                        dlog("cdp", "async onRequest → cancel", { url, script: s.name });
+                        await debuggerSend(tabId, "Fetch.failRequest", { requestId, errorReason: "BlockedByClient" });
+                        return;
+                    }
+                    if (resolved.redirect) {
+                        dlog("cdp", "async onRequest → redirect", { url, to: resolved.redirect, script: s.name });
+                        await debuggerSend(tabId, "Fetch.continueRequest", { requestId, url: resolved.redirect });
+                        return;
+                    }
+                    if (resolved.headers) headerPromises.push(Promise.resolve(resolved.headers));
+                } catch (e: any) {
+                    log(tabId, `[${s.name}] async onRequest threw: ${e.message || e}`, "error", s.scriptId);
+                }
+            }
+            if (headerPromises.length) this.pendingAsyncHeaders.set(requestId, Promise.all(headerPromises));
             await debuggerSend(tabId, "Fetch.continueRequest", { requestId });
             return;
         }
-        const url: string = request.url;
+
+        // ---- Response stage ----
         const cdpScripts = this.matchingScripts(url);
         dlog("cdp", "handlePaused decision", { url, matching: cdpScripts.length, claimed: this.isClaimed(url), scripts: this.scripts.map((x) => `${x.name}=${x.match.join(",")}`) });
-        if (cdpScripts.length === 0 || this.isClaimed(url)) {
+        const hasReplace = cdpScripts.some((s) => s.replaceResponse);
+        if ((cdpScripts.length === 0 || this.isClaimed(url)) && !cdpScripts.some((s) => s.onResponseHeaders)) {
             // not ours, or the page hook already transformed it
             await debuggerSend(tabId, "Fetch.continueRequest", { requestId });
             return;
         }
 
         try {
+            // async response-header handlers + stashed request-stage headers
+            let headerChanges: any[] = [];
+            const pending = this.pendingAsyncHeaders.get(requestId);
+            if (pending) {
+                this.pendingAsyncHeaders.delete(requestId);
+                headerChanges.push(...(await pending));
+            }
+            for (const s of cdpScripts) {
+                if (!s.onResponseHeaders) continue;
+                try {
+                    const r = await s.onResponseHeaders({ url, method: request.method, tabUrl: url, resourceType: params.resourceType || "other", requestHeaders: {}, statusLine: "", responseHeaders: params.responseHeaders || [] });
+                    if (r && r.headers) headerChanges.push(r.headers);
+                } catch (e: any) {
+                    log(tabId, `[${s.name}] async onResponseHeaders threw: ${e.message || e}`, "error", s.scriptId);
+                }
+            }
+            let responseHeaders = params.responseHeaders;
+            if (headerChanges.length) {
+                responseHeaders = mergeHeaderChanges(params.responseHeaders || [], headerChanges);
+            }
+
             const bodyResp: any = await debuggerSend(tabId, "Fetch.getResponseBody", { requestId });
             dlog("cdp", "got body", { url, base64: bodyResp.base64Encoded, len: bodyResp.body ? bodyResp.body.length : 0 });
             let bytes = bodyResp.base64Encoded ? base64ToBytes(bodyResp.body) : new TextEncoder().encode(bodyResp.body);
             // textual bodies are handed to transforms as strings — most
             // transforms are string-oriented; binary stays bytes
             let body: string | Uint8Array = looksTextual(bytes) ? new TextDecoder().decode(bytes) : bytes;
+
+            // async replaceResponse: first non-null result fulfills the body
+            for (const s of cdpScripts) {
+                if (!s.replaceResponse) continue;
+                try {
+                    const out = await s.replaceResponse({ url, method: request.method, tabUrl: url, resourceType: params.resourceType || "other", requestHeaders: {}, status: params.responseStatusCode, contentType: headerContentType(responseHeaders) });
+                    if (out !== undefined && out !== null) {
+                        body = typeof out === "string" || out instanceof Uint8Array ? out : JSON.stringify(out);
+                        dlog("cdp", `replaceResponse ${s.name} applied`, { outLen: typeof body === "string" ? body.length : body.length });
+                        break;
+                    }
+                } catch (e: any) {
+                    dlog("cdp", `replaceResponse ${s.name} THREW: ${e.message || e}`);
+                    log(tabId, `[${s.name}] async replaceResponse threw: ${e.message || e}`, "error", s.scriptId);
+                }
+            }
 
             const headers: { [n: string]: string } = {};
             for (const h of params.responseHeaders || []) {
@@ -243,7 +336,7 @@ export class CdpStrategy {
             await debuggerSend(tabId, "Fetch.fulfillRequest", {
                 requestId,
                 responseCode: params.responseStatusCode,
-                responseHeaders: params.responseHeaders,
+                responseHeaders,
                 body: bytesToBase64(outBytes),
             });
         } catch (e: any) {
@@ -270,6 +363,36 @@ export class CdpStrategy {
             }
         }
     }
+}
+
+function headerContentType(headers: { name: string; value?: string }[]): string | undefined {
+    const h = headers.find((x) => x.name.toLowerCase() === "content-type");
+    return h?.value;
+}
+
+function mergeHeaderChanges(
+    headers: { name: string; value?: string }[],
+    changes: any[]
+): { name: string; value?: string }[] {
+    const removeSet = new Set<string>();
+    const setMap = new Map<string, { name: string; value: string }>();
+    for (const c of changes) {
+        for (const [n, v] of Object.entries(c.set || {})) setMap.set(n.toLowerCase(), { name: n, value: String(v) });
+        for (const n of c.remove || []) removeSet.add(n.toLowerCase());
+    }
+    const out: { name: string; value?: string }[] = [];
+    for (const h of headers) {
+        const lower = h.name.toLowerCase();
+        if (removeSet.has(lower) || setMap.has(lower)) {
+            const repl = setMap.get(lower);
+            if (repl) out.push({ name: h.name, value: repl.value });
+            setMap.delete(lower);
+            continue;
+        }
+        out.push(h);
+    }
+    for (const repl of setMap.values()) out.push(repl);
+    return out;
 }
 
 function looksTextual(bytes: Uint8Array): boolean {

@@ -36,6 +36,8 @@ export interface BodyScriptInfo {
     meta: import("../../../shared/metaParser").ResMeta;
 }
 
+export type MaybePromise<T> = T | Promise<T>;
+
 export interface InterceptionStrategy {
     readonly name: string;
 
@@ -44,15 +46,15 @@ export interface InterceptionStrategy {
 
     /**
      * Decide what to do with a request before it goes out.
-     * Called for every request; must return synchronously.
+     * May return a promise on Firefox (blocking webRequest accepts them).
      */
-    handleBeforeRequest(details: WebRequestDetailsLike, tabUrl: string | null): HookDisposition;
+    handleBeforeRequest(details: WebRequestDetailsLike, tabUrl: string | null): MaybePromise<HookDisposition>;
 
-    /** Apply response header changes, if any. */
-    handleHeadersReceived(details: WebRequestDetailsLike, tabUrl: string | null): HeaderChanges | null;
+    /** Apply response header changes, if any (promise on Firefox). */
+    handleHeadersReceived(details: WebRequestDetailsLike, tabUrl: string | null): MaybePromise<HeaderChanges | null>;
 
-    /** Apply request header changes, if any. */
-    handleBeforeSendHeaders(details: WebRequestDetailsLike, tabUrl: string | null): HeaderChanges | null;
+    /** Apply request header changes, if any (promise on Firefox). */
+    handleBeforeSendHeaders(details: WebRequestDetailsLike, tabUrl: string | null): MaybePromise<HeaderChanges | null>;
 
     /**
      * Fetch + transform a body server-side (used by the Tier-B proxy worker

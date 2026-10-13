@@ -222,6 +222,61 @@ All browser-specific behavior lives behind one `InterceptionStrategy` interface
 unchanged, Tier B swaps the webRequest redirect for `declarativeNetRequest`, Tier C
 is unchanged — the pipeline, runtime, and editor don't move.
 
+## Multiple scripts — how handlers stack
+
+When several enabled scripts match the same request, they run in **list
+order** (top to bottom in the manager) with per-hook rules:
+
+**`res.onRequest`** — the first script that returns a *terminal* result
+(`redirect` or `cancel`) wins and stops the chain; later scripts don't run
+for that request. Scripts that return nothing (or only `headers`) don't stop
+the chain. Header changes from the winning script are applied.
+
+**`res.onResponseHeaders`** — all matching scripts run and their changes
+**merge**: `set` keys are applied in order (a later script's `set` of the
+same header overwrites earlier ones), `remove` lists accumulate.
+
+**`res.modifyResponse`** — transforms **compose** like a pipeline: script A's
+output becomes script B's input, in list order.
+
+```text
+body → [script 1 transform] → [script 2 transform] → … → page
+```
+
+**`res.replaceResponse`** — the first script that returns a body wins;
+later ones are skipped.
+
+**Across strategies**: a script's `@strategy` list only decides *which tier*
+runs its handler — stacking order between scripts is unchanged regardless of
+which tier each one uses.
+
+## Async handlers
+
+All `res.*` hooks accept `async` handlers (returning a Promise). What happens
+with the result depends on the tier:
+
+| hook | hook tier (page fetch/XHR) | webRequest tier (Chrome) | webRequest tier (Firefox) | cdp tier (Chrome, `@strategy cdp`) |
+|---|---|---|---|---|
+| `onRequest` redirect/cancel | n/a (hook doesn't redirect) | ⚠ result ignored, warning logged — blocking webRequest can't await; use `@strategy cdp` | ✅ awaited natively | ✅ awaited at the Request stage (redirect/cancel honored) |
+| `onRequest` headers | n/a | ⚠ ignored + warning | ✅ awaited | ✅ awaited, applied at the Response stage |
+| `onResponseHeaders` | n/a | ⚠ ignored + warning | ✅ awaited | ✅ awaited, merged into the fulfilled headers |
+| `replaceResponse` | ✅ awaited — the page's `fetch`/XHR promise simply takes as long as the handler needs | ⚠ result ignored (a sync data-URL can't be built late) → the request is re-routed to the cdp tier | ✅ awaited, then redirect | ✅ awaited, fulfills the body |
+| `modifyResponse` | ✅ awaited (chained between scripts) | — (re-routed to cdp) | ✅ awaited per chunk | ✅ awaited |
+| `onDom` | ✅ awaited (fire-and-forget) | — | — | — |
+
+Practical rules of thumb:
+
+- **Mocking/transforming APIs (fetch/XHR)?** Async just works — write
+  `res.modifyResponse(async (ctx, body) => { const j = await translate(body); return …; })`.
+- **Redirect/cancel decided asynchronously** (e.g. after an API lookup)?
+  Add `cdp` to `@strategy` (`@strategy hook,cdp`) so the CDP tier can await
+  your handler; note the debugger banner appears while such requests are
+  intercepted. Without `cdp`, an async `onRequest` on Chrome logs a warning
+  and the request proceeds unmodified.
+- **Async header changes** on Chrome likewise need `@strategy cdp`.
+- **Static replacement from an async source** (file read, fetch): async
+  `replaceResponse` + default strategy is all you need.
+
 ## Debugging
 
 The manager page has a **⬇ Logs** button that downloads the full debug log —

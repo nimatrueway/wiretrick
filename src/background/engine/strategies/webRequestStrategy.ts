@@ -7,8 +7,8 @@
  * chromeBodyStrategy takes over for bodies.
  */
 import { match, matchReplace, matchAny } from "../../../shared/matcher";
-import { compileScript, serializeHandlers, type CompiledScript } from "../../../shared/compile";
-import type { BodyScriptInfo, HeaderChanges, HookDisposition, InterceptionStrategy, WebRequestDetailsLike } from "./types";
+import { compileScript, isThenable, type CompiledScript } from "../../../shared/compile";
+import type { BodyScriptInfo, HeaderChanges, HookDisposition, InterceptionStrategy, MaybePromise, WebRequestDetailsLike } from "./types";
 import type { Script } from "../scriptStore";
 import { log, scriptError } from "../logs";
 import { scriptStorageGet, scriptStorageSet } from "../scriptStore";
@@ -55,12 +55,27 @@ export class WebRequestStrategy implements InterceptionStrategy {
         );
     }
 
-    handleBeforeRequest(details: WebRequestDetailsLike, tabUrl: string | null): HookDisposition {
+    handleBeforeRequest(details: WebRequestDetailsLike, tabUrl: string | null): MaybePromise<HookDisposition> {
         for (const entry of this.scriptsFor(details.url, "request")) {
             const script = entry.compiled;
             try {
                 if (script.handlers.onRequest) {
                     const result = script.handlers.onRequest(makeCtx(details, tabUrl));
+                    if (isThenable(result)) {
+                        if (IS_FIREFOX) {
+                            // Firefox blocking listeners accept promises natively
+                            return result.then((r: any): HookDisposition => {
+                                if (r && r.headers && (r.headers.set || r.headers.remove)) {
+                                    pendingRequestHeaderMods.set(details.requestId, r.headers);
+                                }
+                                return r && (r.redirect || r.cancel) ? normalize(r) : { kind: "allow" };
+                            });
+                        }
+                        // Chrome: blocking webRequest cannot await — the
+                        // result would be decided too late
+                        scriptError(entry.id, "async onRequest: Chrome's blocking webRequest cannot await. Return synchronously for redirect/cancel/headers, or add 'cdp' to @strategy to handle it in the debugger tier.");
+                        continue;
+                    }
                     // cache header mods so onBeforeSendHeaders doesn't re-run the handler
                     if (result && result.headers && (result.headers.set || result.headers.remove)) {
                         pendingRequestHeaderMods.set(details.requestId, result.headers);
@@ -72,6 +87,17 @@ export class WebRequestStrategy implements InterceptionStrategy {
                 }
                 if (script.handlers.replaceResponse) {
                     const replacement = script.handlers.replaceResponse(makeCtx(details, tabUrl));
+                    if (isThenable(replacement)) {
+                        if (IS_FIREFOX) {
+                            return replacement.then((r: any) => {
+                                if (r === undefined || r === null) return { kind: "allow" } as HookDisposition;
+                                return this.staticReplace(details, script, r, entry.id);
+                            });
+                        }
+                        // Chrome: let the request continue; the CDP tier awaits
+                        // the handler and fulfills the body
+                        return { kind: "needsCdp" };
+                    }
                     if (replacement !== undefined && replacement !== null) {
                         return this.staticReplace(details, script, replacement, entry.id);
                     }
@@ -88,11 +114,11 @@ export class WebRequestStrategy implements InterceptionStrategy {
         return { kind: "allow" };
     }
 
-    handleBeforeSendHeaders(details: WebRequestDetailsLike, tabUrl: string | null): HeaderChanges | null {
+    handleBeforeSendHeaders(details: WebRequestDetailsLike, tabUrl: string | null): MaybePromise<HeaderChanges | null> {
         return this.collectHeaderChanges(details, tabUrl, "request", "headers");
     }
 
-    handleHeadersReceived(details: WebRequestDetailsLike, tabUrl: string | null): HeaderChanges | null {
+    handleHeadersReceived(details: WebRequestDetailsLike, tabUrl: string | null): MaybePromise<HeaderChanges | null> {
         // Firefox streaming: wire the filter when response headers arrive.
         const pending = pendingFirefoxStreams.get(details.requestId);
         if (pending && IS_FIREFOX) {
@@ -151,7 +177,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
         tabUrl: string | null,
         phase: "request" | "response",
         _unused: string
-    ): HeaderChanges | null {
+    ): MaybePromise<HeaderChanges | null> {
         let changes: HeaderChanges | null = null;
         const ctxPhase = phase === "response" ? "response" : "request";
 
@@ -170,6 +196,14 @@ export class WebRequestStrategy implements InterceptionStrategy {
                 (ctx as any).statusLine = details.statusLine || "";
                 (ctx as any).responseHeaders = details.responseHeaders || [];
                 const result = handler(ctx);
+                if (isThenable(result)) {
+                    if (IS_FIREFOX) {
+                        // resolved below by the pipeline passthrough
+                        return result.then((r: any) => (r && r.headers ? { ...r.headers } : null));
+                    }
+                    scriptError(entry.id, "async onResponseHeaders: Chrome's blocking webRequest cannot await. Add 'cdp' to @strategy to apply async header changes in the debugger tier.");
+                    continue;
+                }
                 const mods = result?.headers;
                 if (mods && (mods.set || mods.remove)) {
                     changes = changes || {};

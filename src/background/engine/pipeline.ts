@@ -11,6 +11,7 @@ import type { Script } from "./scriptStore";
 import { listScripts, onScriptsChanged, saveScript, deleteScript, setEnabled, newId } from "./scriptStore";
 import { serveStore } from "./strategies/webRequestStrategy";
 import { dlog } from "../../shared/debugLog";
+import { isThenable } from "../../shared/compile";
 import { toRunnableJs } from "../../shared/compile";
 import "../../shared/transpile";
 import { log } from "./logs";
@@ -118,12 +119,30 @@ export function createPipeline(
         void cdpDisposition;
 
         const disposition = webRequestStrategy.handleBeforeRequest(details, tabUrl);
-        const bodyDisposition = disposition.kind === "allow" ? chromeBody.handleBeforeRequest(details, tabUrl) : disposition;
 
-        switch (bodyDisposition.kind) {
+        // Firefox: blocking listeners accept promises — pass straight through
+        if (isThenable(disposition)) {
+            return disposition.then((d: any) => this2.applyDisposition(d, details));
+        }
+
+        return this2.applyDisposition(
+            disposition.kind === "allow" ? (chromeBody.handleBeforeRequest(details, tabUrl) as any) : disposition,
+            details
+        );
+    };
+
+    const self = {
+        applyDisposition,
+    };
+    const this2 = {
+        applyDisposition,
+    };
+
+    function applyDisposition(disposition: any, details: any): any {
+        switch (disposition.kind) {
             case "redirect": {
-                log(details.tabId, `${details.url} → ${bodyDisposition.url}`, "info");
-                return { redirectUrl: bodyDisposition.url };
+                log(details.tabId, `${details.url} → ${disposition.url}`, "info");
+                return { redirectUrl: disposition.url };
             }
             case "cancel": {
                 log(details.tabId, `cancelled ${details.url}`, "warn");
@@ -144,13 +163,16 @@ export function createPipeline(
             default:
                 return {};
         }
-    };
+    }
 
     const onBeforeSendHeaders = (details: any) => {
         const tabUrl = tabUrlFor(details.tabId, details.url);
         const changes =
             webRequestStrategy.handleBeforeSendHeaders(details, tabUrl) ||
             chromeBody.handleBeforeSendHeaders(details, tabUrl);
+        if (isThenable(changes)) {
+            return changes.then((c: any) => (c ? { requestHeaders: applyHeaderChanges(details.requestHeaders || [], c) } : {}));
+        }
         if (!changes) return {};
         return { requestHeaders: applyHeaderChanges(details.requestHeaders || [], changes) };
     };
@@ -160,13 +182,16 @@ export function createPipeline(
         const changes =
             webRequestStrategy.handleHeadersReceived(details, tabUrl) ||
             chromeBody.handleHeadersReceived(details, tabUrl);
+        if (isThenable(changes)) {
+            return changes.then((c: any) => (c ? { responseHeaders: applyHeaderChanges(details.responseHeaders || [], c) } : {}));
+        }
         if (!changes) return {};
         return { responseHeaders: applyHeaderChanges(details.responseHeaders || [], changes) };
     };
 
-    chrome.webRequest.onBeforeRequest.addListener(onBeforeRequest, FILTER, ["blocking"]);
-    chrome.webRequest.onBeforeSendHeaders.addListener(onBeforeSendHeaders, FILTER, ["requestHeaders", "blocking"]);
-    chrome.webRequest.onHeadersReceived.addListener(onHeadersReceived, FILTER, ["responseHeaders", "blocking"]);
+    chrome.webRequest.onBeforeRequest.addListener(onBeforeRequest as any, FILTER, ["blocking"] as any);
+    chrome.webRequest.onBeforeSendHeaders.addListener(onBeforeSendHeaders as any, FILTER, ["requestHeaders", "blocking"] as any);
+    chrome.webRequest.onHeadersReceived.addListener(onHeadersReceived as any, FILTER, ["responseHeaders", "blocking"] as any);
 
     // per-request caches must not leak for requests that never reach the
     // response-header phase
@@ -283,8 +308,8 @@ export function createPipeline(
         dispose() {
             off();
             chrome.webRequest.onBeforeRequest.removeListener(onBeforeRequest);
-            chrome.webRequest.onBeforeSendHeaders.removeListener(onBeforeSendHeaders);
-            chrome.webRequest.onHeadersReceived.removeListener(onHeadersReceived);
+            chrome.webRequest.onBeforeSendHeaders.removeListener(onBeforeSendHeaders as any);
+            chrome.webRequest.onHeadersReceived.removeListener(onHeadersReceived as any);
             chrome.webRequest.onCompleted.removeListener(onDone);
             chrome.webRequest.onErrorOccurred.removeListener(onDone);
             webRequestStrategy.dispose();
