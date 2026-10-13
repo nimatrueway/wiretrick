@@ -41,7 +41,7 @@ export class CdpStrategy {
         // Chrome (hook covers page fetch/XHR; CDP covers everything else).
         for (const s of scripts) {
             if (!s.enabled) continue;
-            const c = compileScript(s.code, makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, msg) => log(-1, `res.log: ${msg}`, "info", id)));
+            const c = compileScript(s.code, makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, msg) => log(-1, `res.log: ${msg}`, "info", id), (id, level, msg) => log(-1, `script.console: ${msg}`, level, id)));
             if (c.handlers.modifyResponse) {
                 this.scripts.push({
                     scriptId: s.id,

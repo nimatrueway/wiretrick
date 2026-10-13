@@ -63,7 +63,7 @@ import { dlog } from "../shared/debugLog";
 
     // ---- capture the page console into the manager LOG panel ----
     // skip our own [res:*] entries (already forwarded via logUp/dlog)
-    const CONSOLE_CAP = 500;
+    const CONSOLE_CAP = 2000;
     let consoleCaptured = 0;
     const origConsole: Record<string, (...args: any[]) => void> = {};
     function wrapConsole(level: "info" | "warn" | "error", method: string): void {
@@ -87,6 +87,9 @@ import { dlog } from "../shared/debugLog";
         logUp(`bundle: ${scripts ? scripts.length : 0} script(s)`);
         if (!scripts || scripts.length === 0) return;
         compiled = scripts.map((s) => {
+            // no consoleSink here: the page-console capture forwards script
+            // console calls ("page.console: …"); a forwarding console would
+            // double-report them
             const script = compileScript(s.code, {
                 log: (...args: any[]) => logUp(`res.log: ${args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")}`),
             });

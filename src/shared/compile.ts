@@ -36,13 +36,16 @@ export interface HandlerSources {
 export interface ResApiOverrides {
     storage?: { get(key: string): Promise<any>; set(key: string, value: any): Promise<void> };
     log?: (...args: any[]) => void;
+    /** receives formatted console.log/warn/error from user scripts */
+    consoleSink?: (level: "info" | "warn" | "error", msg: string) => void;
 }
 
 /** Standard overrides for a stored script: storage wired by id, log → sink. */
 export function makeScriptOverrides(
     scriptId: string,
     storage: { get(scriptId: string, key: string): Promise<any>; set(scriptId: string, key: string, v: any): Promise<void> },
-    logSink: (scriptId: string, msg: string) => void
+    logSink: (scriptId: string, msg: string) => void,
+    consoleSink?: (scriptId: string, level: "info" | "warn" | "error", msg: string) => void
 ): ResApiOverrides {
     return {
         storage: {
@@ -51,6 +54,7 @@ export function makeScriptOverrides(
         },
         log: (...args: any[]) =>
             logSink(scriptId, args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")),
+        consoleSink: consoleSink ? (level, msg) => consoleSink(scriptId, level, msg) : undefined,
     };
 }
 
@@ -82,9 +86,9 @@ export function compileScript(code: string, overrides?: ResApiOverrides): Compil
     try {
         const js = toRunnableJs(code);
         // eslint-disable-next-line no-new-func
-        const fn = new Function("res", `"use strict";\n${js}`);
+        const fn = new Function("res", "console", `"use strict";\n${js}`);
         const store = createCollector();
-        fn(makeCollectorShim(store, overrides));
+        fn(makeCollectorShim(store, overrides), makeForwardingConsole(overrides?.consoleSink));
         return { meta, handlers: store, error: null, code };
     } catch (e: any) {
         return { meta, handlers: emptyHandlers(), error: e && e.stack ? e.stack : String(e), code };
@@ -144,6 +148,25 @@ function createCollector(): ScriptHandlers {
         modifyResponse: null,
         onDom: null,
     };
+}
+
+/** Console shadow for compiled scripts: mirrors into the UI log sink. */
+function makeForwardingConsole(sink?: ResApiOverrides["consoleSink"]): Console {
+    if (!sink) return console;
+    const fmt = (args: any[]) =>
+        args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
+    const wrap = (level: "info" | "warn" | "error") => (...args: any[]) => {
+        // eslint-disable-next-line no-console
+        (level === "error" ? console.error : level === "warn" ? console.warn : console.log)(...args);
+        sink(level, fmt(args));
+    };
+    return {
+        log: wrap("info"),
+        info: wrap("info"),
+        debug: wrap("info"),
+        warn: wrap("warn"),
+        error: wrap("error"),
+    } as unknown as Console;
 }
 
 function makeCollectorShim(store: any, overrides?: ResApiOverrides) {

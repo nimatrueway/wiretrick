@@ -48,7 +48,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
             if (!/res\s*\.\s*modifyResponse|res\s*\.\s*replaceResponse/.test(s.code)) continue;
             const compiled = compileScript(
                 s.code,
-                makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, msg) => log(-1, `res.log: ${msg}`, "info", id))
+                makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, msg) => log(-1, `res.log: ${msg}`, "info", id), (id, level, msg) => log(-1, `script.console: ${msg}`, level, id))
             );
             if (!compiled.handlers.modifyResponse) continue;
             this.bodyScripts.push({
