@@ -111,9 +111,14 @@
         if (compiledDom.length === 0) return;
 
         const fire = () => {
-            logUp(`onDom firing (${compiledDom.length})`);
+            const names = compiledDom.map((d) => d.name).join(", ");
+            const injected = (document.currentScript as HTMLScriptElement | null)
+                ? "document.currentScript"
+                : (document.querySelector("script[data-res-override-hook]") ? "script tag (already in DOM)" : "bundle message");
+            logUp(`onDom firing (${compiledDom.length}: ${names}) on ${location.href} [${document.readyState}] — hook injected via ${injected}`);
             for (const { name, fn } of compiledDom) {
                 try {
+                    logUp(`onDom ${name} → running (${(compiledDom.find((d) => d.name === name) as any).when})`);
                     fn(makeCtx(location.href, "GET"));
                 } catch (e: any) {
                     logUp(`onDom ${name} threw: ${e.message || e}`, "error");
