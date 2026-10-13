@@ -441,11 +441,17 @@ export class CdpStrategy {
                 for (const handler of s.transform) {
                     try {
                         const before = typeof body === "string" ? body.length : body.byteLength;
+                        const prevBody = body;
                         const out = await handler(ctx, body);
-                        if (out !== undefined && out !== null) body = out;
-                        const len = typeof body === "string" ? body.length : body.byteLength;
-                        dlogLevel("cdp", "info", `transform ${s.name} applied`, { outLen: len });
-                        if (out !== undefined && out !== null) log(tabId, `[${s.name}] modifyResponse applied (${before}b → ${len}b) ${url}`, "info", s.scriptId);
+                        if (out !== undefined && out !== null) {
+                            body = out;
+                            const len = typeof body === "string" ? body.length : body.byteLength;
+                            dlogLevel("cdp", "info", `transform ${s.name} applied`, { outLen: len });
+                            // unchanged output = do-nothing, don't log it
+                            if (out !== prevBody) {
+                                log(tabId, `[${s.name}] modifyResponse applied (${before}b → ${len}b) ${url}`, "info", s.scriptId);
+                            }
+                        }
                     } catch (e: any) {
                         dlogLevel("cdp", "error", `transform ${s.name} THREW: ${e.message || e}`);
                         log(tabId, `[${s.name}] modifyResponse (cdp) threw: ${e.message || e}`, "error", s.scriptId);

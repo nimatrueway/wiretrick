@@ -119,10 +119,10 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
                     log(-1, `[${s.name}] onRequest → cancel ${url}`, "info", s.scriptId);
                     return { kind: "cancel" };
                 }
-                if (result.headers && (result.headers.set || result.headers.remove)) {
+                if (result.headers && ((result.headers.set && Object.keys(result.headers.set).length) || (result.headers.remove && result.headers.remove.length))) {
                     const parts: string[] = [];
-                    if (result.headers.set) parts.push(`set ${Object.keys(result.headers.set).join(", ")}`);
-                    if (result.headers.remove) parts.push(`remove ${result.headers.remove.join(", ")}`);
+                    if (result.headers.set && Object.keys(result.headers.set).length) parts.push(`set ${Object.keys(result.headers.set).join(", ")}`);
+                    if (result.headers.remove && result.headers.remove.length) parts.push(`remove ${result.headers.remove.join(", ")}`);
                     log(-1, `[${s.name}] onRequest → request headers (${parts.join("; ")}) ${url}`, "info", s.scriptId);
                     headerMods = { set: { ...(headerMods?.set || {}), ...(result.headers.set || {}) }, remove: [...(headerMods?.remove || []), ...(result.headers.remove || [])] };
                 }
@@ -147,9 +147,14 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
                 );
                 if (result !== undefined && result !== null) {
                     const before = typeof out === "string" ? out.length : out.byteLength;
-                    out = typeof result === "string" ? result : result instanceof Uint8Array ? result : JSON.stringify(result);
-                    const after = typeof out === "string" ? out.length : out.byteLength;
-                    log(-1, `[${s.name}] modifyResponse applied (${before}b → ${after}b) ${url}`, "info", s.scriptId);
+                    const prevOut = out;
+                    const next = typeof result === "string" ? result : result instanceof Uint8Array ? result : JSON.stringify(result);
+                    const after = typeof next === "string" ? next.length : next.byteLength;
+                    out = next;
+                    // unchanged output = do-nothing, don't log it
+                    if (next !== prevOut) {
+                        log(-1, `[${s.name}] modifyResponse applied (${before}b → ${after}b) ${url}`, "info", s.scriptId);
+                    }
                     touched = true;
                 }
             } catch (e: any) {
