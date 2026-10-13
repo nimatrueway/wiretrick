@@ -99,6 +99,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                         // honors status); the hook tier short-circuits first
                         // for page-initiated requests
                         if (result.respond.status && result.respond.status !== 200) {
+                            log(details.tabId, `[${script.meta.name}] onRequest → respond ${result.respond.status} (via debugger tier) ${details.url}`, "info", entry.id);
                             return { kind: "needsCdp" };
                         }
                         // status 200 (or none): data-URL is exact

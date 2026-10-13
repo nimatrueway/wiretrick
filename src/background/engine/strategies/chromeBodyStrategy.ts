@@ -100,17 +100,30 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
                 if (!result) continue;
                 if ((result as any).respond) {
                     const r = (result as any).respond;
+                    const mime = r.mime || guessMimeFromUrl(url);
+                    const content = serializeRespondBody(r.body);
+                    log(-1, `[${s.name}] onRequest → respond ${r.status || 200} ${mime} (${content.length}b) ${url}`, "info", s.scriptId);
                     return {
                         kind: "respond",
-                        mime: r.mime || guessMimeFromUrl(url),
-                        content: serializeRespondBody(r.body),
+                        mime,
+                        content,
                         status: r.status,
                         headers: r.headers?.set,
                     };
                 }
-                if (result.redirect) return { kind: "redirect", url: result.redirect };
-                if (result.cancel) return { kind: "cancel" };
+                if (result.redirect) {
+                    log(-1, `[${s.name}] onRequest → redirect → ${result.redirect}`, "info", s.scriptId);
+                    return { kind: "redirect", url: result.redirect };
+                }
+                if (result.cancel) {
+                    log(-1, `[${s.name}] onRequest → cancel ${url}`, "info", s.scriptId);
+                    return { kind: "cancel" };
+                }
                 if (result.headers && (result.headers.set || result.headers.remove)) {
+                    const parts: string[] = [];
+                    if (result.headers.set) parts.push(`set ${Object.keys(result.headers.set).join(", ")}`);
+                    if (result.headers.remove) parts.push(`remove ${result.headers.remove.join(", ")}`);
+                    log(-1, `[${s.name}] onRequest → request headers (${parts.join("; ")}) ${url}`, "info", s.scriptId);
                     headerMods = { set: { ...(headerMods?.set || {}), ...(result.headers.set || {}) }, remove: [...(headerMods?.remove || []), ...(result.headers.remove || [])] };
                 }
             } catch (e: any) {
@@ -133,7 +146,10 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
                     out
                 );
                 if (result !== undefined && result !== null) {
+                    const before = typeof out === "string" ? out.length : out.byteLength;
                     out = typeof result === "string" ? result : result instanceof Uint8Array ? result : JSON.stringify(result);
+                    const after = typeof out === "string" ? out.length : out.byteLength;
+                    log(-1, `[${s.name}] modifyResponse applied (${before}b → ${after}b) ${url}`, "info", s.scriptId);
                     touched = true;
                 }
             } catch (e: any) {
@@ -154,7 +170,10 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
                         const content = out && typeof out === "object" && (out as any).file ? (out as any).file : out;
                         const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "";
                         const mimes: Record<string, string> = { js: "application/javascript", json: "application/json", css: "text/css", html: "text/html", xml: "application/xml" };
-                        return { mime: mimes[ext] || "application/json", content: typeof content === "string" ? content : String(content) };
+                        const mime = mimes[ext] || "application/json";
+                        const body = typeof content === "string" ? content : String(content);
+                        log(-1, `[${s.name}] replaceResponse → ${mime} (${body.length}b) ${url}`, "info", s.scriptId);
+                        return { mime, content: body };
                     }
                 } catch (e: any) {
                     log(-1, `script.console: replaceResponse ${s.name} threw: ${e.message || e}`, "error", s.scriptId);

@@ -330,6 +330,7 @@ export class CdpStrategy {
                             ...Object.entries(r.headers?.set || {}).map(([name, value]) => ({ name, value: String(value) })),
                         ];
                         dlogLevel("cdp", "info", "async onRequest → respond", { url, script: s.name });
+                        log(tabId, `[${s.name}] onRequest → respond ${r.status || 200} ${r.mime || "application/json"} (debugger tier) ${url}`, "info", s.scriptId);
                         await debuggerSend(this.debuggeeOf(key), "Fetch.fulfillRequest", {
                             requestId,
                             responseCode: r.status || 200,
@@ -340,11 +341,13 @@ export class CdpStrategy {
                     }
                     if (resolved.cancel) {
                         dlogLevel("cdp", "info", "async onRequest → cancel", { url, script: s.name });
+                        log(tabId, `[${s.name}] onRequest → cancel ${url}`, "info", s.scriptId);
                         await debuggerSend(this.debuggeeOf(key), "Fetch.failRequest", { requestId, errorReason: "BlockedByClient" });
                         return;
                     }
                     if (resolved.redirect) {
                         dlogLevel("cdp", "info", "async onRequest → redirect", { url, to: resolved.redirect, script: s.name });
+                        log(tabId, `[${s.name}] onRequest → redirect → ${resolved.redirect} ${url}`, "info", s.scriptId);
                         await debuggerSend(this.debuggeeOf(key), "Fetch.continueRequest", { requestId, url: resolved.redirect });
                         return;
                     }
@@ -408,7 +411,9 @@ export class CdpStrategy {
                         const out = await handler({ url, method: request.method, tabUrl: url, resourceType: params.resourceType || "other", requestHeaders: {}, status: params.responseStatusCode, contentType: headerContentType(responseHeaders) });
                         if (out !== undefined && out !== null) {
                             body = typeof out === "string" || out instanceof Uint8Array ? out : JSON.stringify(out);
-                            dlogLevel("cdp", "info", `replaceResponse ${s.name} applied`, { outLen: typeof body === "string" ? body.length : body.length });
+                            const outLen = typeof body === "string" ? body.length : body.byteLength;
+                            dlogLevel("cdp", "info", `replaceResponse ${s.name} applied`, { outLen });
+                            log(tabId, `[${s.name}] replaceResponse → (${outLen}b) ${url}`, "info", s.scriptId);
                             break replaceOuter;
                         }
                     } catch (e: any) {
@@ -435,10 +440,12 @@ export class CdpStrategy {
                 };
                 for (const handler of s.transform) {
                     try {
+                        const before = typeof body === "string" ? body.length : body.byteLength;
                         const out = await handler(ctx, body);
                         if (out !== undefined && out !== null) body = out;
-                        const len = typeof body === "string" ? body.length : body.length;
+                        const len = typeof body === "string" ? body.length : body.byteLength;
                         dlogLevel("cdp", "info", `transform ${s.name} applied`, { outLen: len });
+                        if (out !== undefined && out !== null) log(tabId, `[${s.name}] modifyResponse applied (${before}b → ${len}b) ${url}`, "info", s.scriptId);
                     } catch (e: any) {
                         dlogLevel("cdp", "error", `transform ${s.name} THREW: ${e.message || e}`);
                         log(tabId, `[${s.name}] modifyResponse (cdp) threw: ${e.message || e}`, "error", s.scriptId);
