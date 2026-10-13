@@ -20,12 +20,12 @@ function setDirty(v: boolean): void {
     const btn = $("#btn-save");
     if (v) {
         btn.removeAttribute("disabled");
-        btn.classList.add("dim");
-        btn.textContent = "Save…";
+        btn.classList.remove("dim");
+        btn.textContent = "Save";
     } else {
         btn.setAttribute("disabled", "");
-        btn.classList.remove("dim");
-        btn.textContent = "Save (⌘S)";
+        btn.classList.add("dim");
+        btn.textContent = "Save";
     }
 }
 let applyingExternal = false;
@@ -191,10 +191,16 @@ function renderLogLine(line: HTMLElement, text: string, level: string): void {
         return;
     }
     line.style.display = "";
+    const timeEl = document.createElement("time");
+    timeEl.textContent = text.match(/^\[[^\]]*\]/)?.[0] || "";
+    line.appendChild(timeEl);
+    const rest = text.replace(/^\[[^\]]*\]\s*/, "");
+    line.dataset.body = rest;
     const badge = document.createElement("span");
     badge.className = "lv " + level;
     badge.textContent = level;
     line.appendChild(badge);
+    void rest;
     if (logFindRe) {
         const m = text.match(logFindRe);
         if (m) {
