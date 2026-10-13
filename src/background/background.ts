@@ -33,6 +33,12 @@ createPipeline(webRequestStrategy, chromeBody, cdp, updateTabBadge, noteRequestF
 // ---- scripts folder sync (watching runs here: persistent page, never throttled) ----
 void folderSync.initFromStorage();
 chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
+    if (msg && msg.type === "hookCspBlocked" && _s && _s.tab && _s.tab.id !== undefined) {
+        chromeBody.markHookBroken(_s.tab.id);
+        dlog("bg", "hook CSP-blocked → CDP fallback", { tabId: _s.tab.id });
+        sendResponse({});
+        return false;
+    }
     if (msg && msg.type === "folderSyncAdopt") {
         // handle was stored to IndexedDB by the sender (handles can't cross
         // runtime messaging — JSON only)

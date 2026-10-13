@@ -152,6 +152,10 @@ attach the debugger for any request.
   included; use `res.onDom` for page changes instead.
 - **Claim dedup**: when the hook transforms a request, the CDP tier skips it
   (no double transforms).
+- **Strict page CSP fallback**: if a page's own CSP forbids `eval` (so the
+  hook cannot compile scripts in that page at all), the hook reports it and
+  the tab automatically falls back to the CDP tier for body transforms —
+  features keep working, the banner shows while it does.
 
 ### `res.onDom` — exact execution semantics
 

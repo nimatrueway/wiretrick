@@ -92,6 +92,12 @@
             dlog("hook ready → re-sending bundle");
             window.postMessage({ source: MAIN_SOURCE, kind: "bundle", bundle: lastBundle }, window.location.origin);
         }
+        if (data.kind === "cspBlocked") {
+            dlog("page CSP blocked hook compilation → CDP fallback");
+            try {
+                chrome.runtime.sendMessage({ type: "hookCspBlocked" }, () => void chrome.runtime.lastError);
+            } catch {}
+        }
         if (data.kind === "log" && data.msg) {
             try {
                 chrome.runtime.sendMessage({ type: "debugLog", entry: { at: Date.now(), src: "hook", msg: data.msg } }).catch(() => {});

@@ -41,6 +41,8 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
     private claimedUrls = new Map<string, number>();
     /** tabs where the page hook confirmed its bundle arrived */
     private hookReadyTabs = new Set<number>();
+    /** tabs where page CSP blocked hook compilation — CDP fallback required */
+    private hookBrokenTabs = new Set<number>();
 
     reload(scripts: Script[]): void {
         this.bodyScripts = [];
@@ -89,6 +91,13 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
 
     forgetTab(tabId: number): void {
         this.hookReadyTabs.delete(tabId);
+        this.hookBrokenTabs.delete(tabId);
+    }
+
+    /** Page CSP blocked hook compilation in this tab → CDP handles all bodies. */
+    markHookBroken(tabId: number): void {
+        this.hookReadyTabs.delete(tabId);
+        this.hookBrokenTabs.add(tabId);
     }
 
     matchingBodyScripts(url: string): BodyScriptEntry[] {
@@ -194,6 +203,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
         this.bodyScripts = [];
         this.claimedUrls.clear();
         this.hookReadyTabs.clear();
+        this.hookBrokenTabs.clear();
     }
 }
 
