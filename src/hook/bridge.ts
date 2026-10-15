@@ -84,7 +84,7 @@
     // ---- res.onDom fallback (isolated world): compiles the FULL script
     // source with a shim so top-level helpers/closures survive; the DOM is
     // shared with the page, window (page JS globals) is not ----
-    interface DomHandler { scriptId: string; name: string; when: string; src: string }
+    interface DomHandler { scriptId: string; name: string; when: string; src: string; params?: Record<string, any> }
 
     async function runDomHandlers(hot: boolean): Promise<void> {
         // handlers come embedded in the hook bundle (getHookBundle)
@@ -104,6 +104,8 @@
                     store.onDom = fn;
                     store.onDomOptions = opts || {};
                 },
+                // meta applied upstream; script gets its resolved params
+                declareScript: () => h.params || {},
                 log: (...args: any[]) => {
                     const msg = `res.log: ${args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")}`;
                     try {

@@ -60,11 +60,11 @@ export class CdpStrategy {
     /** requestId → stashed async request-header changes from onRequest */
     private pendingAsyncHeaders = new Map<string, Promise<any[]>>();
 
-    reload(scripts: Script[]): void {
+    reload(scripts: Script[], paramValues?: { [scriptId: string]: Record<string, any> }): void {
         this.scripts = [];
         for (const s of scripts) {
             if (!s.enabled) continue;
-            const c = compileScript(s.code, makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, msg) => log(-1, `[${s.meta.name}] res.log: ${msg}`, "info", id), (id, level, msg) => log(-1, `[${s.meta.name}] console.log: ${msg}`, level, id)));
+            const c = compileScript(s.code, makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, msg) => log(-1, `[${s.meta.name}] res.log: ${msg}`, "info", id), (id, level, msg) => log(-1, `[${s.meta.name}] console.log: ${msg}`, level, id), paramValues?.[s.id]));
             // CDP is the fallback tier for everything the hook cannot do
             // (main frames, script tags, worker fetches, cold starts) — any
             // handler loads here, sync or async. Sync onRequest handlers

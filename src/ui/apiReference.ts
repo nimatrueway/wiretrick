@@ -21,6 +21,26 @@ export const API_REFERENCE: ApiSection[] = [
 Patterns are star patterns: * matches anything, ** the same (groups are remembered for replace patterns).`,
     },
     {
+        title: "res.declareScript — meta + parameters, type-safe",
+        body: `Programmatic alternative to the comment block — everything you pass overrides the directives. Params are adjustable from the popup's ⚙ dialog without editing the script, and come back typed:
+
+const cfg = res.declareScript({
+    name: "My script",
+    match: ["*://example.com/*"],
+    strategy: ["hook", "cdp"],
+    runAt: "document_idle",
+    params: {
+        enabled: { type: "boolean", default: true, description: "Master switch" },
+        status: { type: "enum", choices: ["500", "503"], default: "500" },
+        note: { type: "string", default: "forced" },
+        hosts: { type: "stringList", default: [] },
+    },
+});
+// cfg.enabled: boolean, cfg.status: "500" | "503", cfg.note: string, cfg.hosts: string[]
+
+Scripts sync to the folder as <name>.script.ts so VS Code tells them apart from other TypeScript files.`,
+    },
+    {
         title: "res.onRequest — redirect, cancel, request headers",
         body: `Runs before the request leaves the browser. Must be synchronous.
 

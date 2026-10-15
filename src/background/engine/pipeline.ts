@@ -8,7 +8,7 @@ import type { ChromeBodyStrategy } from "./strategies/chromeBodyStrategy";
 import type { CdpStrategy } from "./strategies/cdpStrategy";
 import type { HeaderChanges } from "./strategies/types";
 import type { Script } from "./scriptStore";
-import { listScripts, onScriptsChanged, saveScript, deleteScript, setEnabled, newId, scriptStorageGet, scriptStorageSet } from "./scriptStore";
+import { listScripts, onScriptsChanged, saveScript, deleteScript, setEnabled, newId, scriptStorageGet, scriptStorageSet, loadAllParamValues, getParamValues, setParamValue } from "./scriptStore";
 import { compileScript } from "../../shared/compile";
 import { matchAny } from "../../shared/matcher";
 import { serveStore } from "./strategies/webRequestStrategy";
@@ -19,6 +19,7 @@ import "../../shared/transpile";
 void toRunnableJs;
 import { log } from "./logs";
 import { serializeHandlers, type HandlerSources } from "../../shared/compile";
+import { resolveParamValues } from "../../shared/scriptDef";
 
 const FILTER: chrome.webRequest.RequestFilter = { urls: ["<all_urls>"] };
 
@@ -34,7 +35,7 @@ interface ScriptWithSources extends Script {
 }
 
 export function createPipeline(
-    webRequestStrategy: InterceptionStrategy & { reload(s: Script[]): void },
+    webRequestStrategy: InterceptionStrategy & { reload(s: Script[], paramValues?: { [scriptId: string]: Record<string, any> }): void },
     chromeBody: ChromeBodyStrategy,
     cdp: CdpStrategy,
     updateTabBadge?: (tabId: number, url: string | undefined) => Promise<void>,
@@ -230,7 +231,15 @@ export function createPipeline(
 
     chrome.runtime.onMessage.addListener((msg: any, _sender, sendResponse) => {
         if (msg && msg.type === "listScripts") {
-            listScripts().then((scripts) => sendResponse(scripts));
+            listScripts().then((scripts) => {
+                // scripts saved before declareScript existed have no stored
+                // paramDefs — compile them on the fly so the UI can offer ⚙
+                sendResponse(
+                    scripts.map((s) =>
+                        s.paramDefs === undefined ? { ...s, paramDefs: compileScript(s.code).paramDefs || {} } : s
+                    )
+                );
+            });
             return true;
         }
         if (msg && msg.type === "saveScript") {
@@ -285,12 +294,12 @@ export function createPipeline(
             // immune to page CSP). onDom handler SOURCES ship to the page:
             // onDom needs the page's window, so it runs in the MAIN world
             // when the page CSP allows, with the bridge as the fallback.
-            const domHandlers: { scriptId: string; name: string; when: string; src: string }[] = [];
+            const domHandlers: { scriptId: string; name: string; when: string; src: string; params: Record<string, any> }[] = [];
             {
                 const pageScripts = await listScripts();
                 for (const s of pageScripts) {
                     if (!s.enabled || !matchAny(s.meta.match, msg.url || "")) continue;
-                    const compiled = compileScript(s.code);
+                    const compiled = compileScript(s.code, { paramValues: await getParamValues(s.id) });
                     if (compiled.handlers.onDom) {
                         // FULL transpiled source: the runner compiles it with
                         // a shim so top-level helpers/closures survive
@@ -299,6 +308,7 @@ export function createPipeline(
                             name: s.meta.name,
                             when: (compiled.handlers as any).onDomOptions?.when || "DOMContentLoaded",
                             src: toRunnableJs(s.code),
+                            params: resolveParamValues(compiled.paramDefs || {}, await getParamValues(s.id)),
                         });
                     }
                 }
@@ -314,6 +324,35 @@ export function createPipeline(
         }
         if (msg && msg.type === "scriptStorageGet") {
             scriptStorageGet(msg.scriptId, msg.key).then((value: any) => sendResponse({ value }));
+            return true;
+        }
+        if (msg && msg.type === "getScriptParams") {
+            void (async () => {
+                const scripts = await listScripts();
+                const s = scripts.find((x) => x.id === msg.scriptId);
+                if (!s) {
+                    sendResponse({ defs: {}, values: {} });
+                    return;
+                }
+                const compiled = compileScript(s.code, { paramValues: await getParamValues(s.id) });
+                sendResponse({
+                    defs: compiled.paramDefs || {},
+                    values: resolveParamValues(compiled.paramDefs || {}, await getParamValues(s.id)),
+                    name: s.meta.name,
+                });
+            })();
+            return true;
+        }
+        if (msg && msg.type === "setScriptParam") {
+            void (async () => {
+                const scripts = await listScripts();
+                const s = scripts.find((x) => x.id === msg.scriptId);
+                if (s) {
+                    await setParamValue(s.id, msg.key, msg.value);
+                    log(-1, `[${s.meta.name}] param ${msg.key} = ${JSON.stringify(msg.value)}`, "info", s.id);
+                }
+                sendResponse({});
+            })();
             return true;
         }
         if (msg && msg.type === "scriptStorageSet") {
@@ -353,10 +392,11 @@ export function createPipeline(
     // ---- reload plumbing ----
     async function reload(): Promise<void> {
         const scripts = (await listScripts()) as ScriptWithSources[];
+        const paramValues = await loadAllParamValues();
         dlogLevel("pipeline", "info", "reload", { total: scripts.length, enabled: scripts.filter((x) => x.enabled).map((x) => x.meta.name) });
-        webRequestStrategy.reload(scripts);
-        chromeBody.reload(scripts);
-        void cdp.reload(scripts);
+        webRequestStrategy.reload(scripts, paramValues);
+        chromeBody.reload(scripts, paramValues);
+        void cdp.reload(scripts, paramValues);
 
         // HOT RELOAD: push the new bundle to every open tab's hook so
         // changes apply without reloading the target tab

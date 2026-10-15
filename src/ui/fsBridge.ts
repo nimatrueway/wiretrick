@@ -109,14 +109,15 @@ export function stopSync(): Promise<void> {
     });
 }
 
-/** Injective file name: sanitized display name. */
+/** Injective file name: sanitized display name + .script.ts (marks the
+ * file as a ResScript — plain .ts files in the folder are left alone). */
 export function fileNameFor(_id: string, name: string): string {
-    return safeName(name) + ".ts";
+    return safeName(name) + ".script.ts";
 }
 
 /** Does this script's display name correspond to this file? */
 export function matchesFile(scriptName: string, fileName: string): boolean {
-    return safeName(scriptName) + ".ts" === fileName;
+    return fileNameFor("", scriptName) === fileName;
 }
 
 function safeName(name: string): string {

@@ -146,4 +146,30 @@ res.onRequest(async (ctx) => {
     res.log("request #" + hits, ctx.url);
 });`,
     },
+    {
+        name: "Parameters (declareScript)",
+        blurb: "Adjustable knobs the user changes from the popup's ⚙ dialog — no code edits.",
+        code: `const cfg = res.declareScript({
+    name: "Params example",
+    match: ["*://api.example.com/*"],
+    strategy: ["hook", "cdp"],
+    params: {
+        enabled: { type: "boolean", default: true, description: "Master switch" },
+        status: { type: "enum", choices: ["500", "502", "503"], default: "500", description: "Status to return" },
+        message: { type: "string", default: "forced failure" },
+        extraHeaders: { type: "stringList", default: [], description: "Extra x-tag values" },
+    },
+});
+
+res.onRequest((ctx) => {
+    if (!cfg.enabled || !ctx.url.includes("/api/")) return;
+    return {
+        respond: {
+            status: Number(cfg.status),
+            body: { error: cfg.message, tags: cfg.extraHeaders },
+            mime: "application/json",
+        },
+    };
+});`,
+    },
 ];

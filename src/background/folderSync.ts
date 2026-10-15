@@ -17,9 +17,22 @@ function injectName(code: string, name: string): string {
 }
 
 const POLL_MS = 1000;
+const SCRIPT_EXT = ".script.ts";
+
+/** canonical script file name for a display name */
+function canonicalFileName(name: string): string {
+    return safeName(name) + SCRIPT_EXT;
+}
+
+/** legacy bare-<name>.ts → canonical <name>.script.ts */
+function canonicalizeFileName(fileName: string): string {
+    return fileName.endsWith(SCRIPT_EXT) ? fileName : fileName.replace(/\.ts$/, SCRIPT_EXT);
+}
 
 let dirHandle: any = null;
 let known = new Map<string, FileSig>();
+/** canonical name → actual on-disk name when a legacy file stands in for it */
+let realNameOf = new Map<string, string>();
 let timer: ReturnType<typeof setInterval> | null = null;
 let displayPath = "";
 /** contents we wrote ourselves — the poller skips its own echo */
@@ -41,23 +54,58 @@ function describeHandle(handle: any): Promise<string> {
 }
 
 async function refreshKnown(): Promise<void> {
-    const seen = new Map<string, FileSig>();
-    for await (const entry of dirHandle.values()) {
-        if (entry.kind !== "file" || !entry.name.endsWith(".ts")) continue;
-        const f = await entry.getFile();
-        seen.set(entry.name, { lastModified: f.lastModified, size: f.size });
-    }
+    const { seen, aliases } = await scanFolder();
     known = seen;
+    realNameOf = aliases;
+}
+
+/**
+ * List script files as canonical names. Only *.script.ts files (plus legacy
+ * bare .ts, pending migration) are scripts — other .ts files and .d.ts are
+ * ignored. Legacy files stand in for their canonical name (canonical wins
+ * when both exist).
+ */
+async function scanFolder(): Promise<{ seen: Map<string, FileSig>; aliases: Map<string, string> }> {
+    const seen = new Map<string, FileSig>();
+    const aliases = new Map<string, string>();
+    const legacy: { name: string; sig: FileSig }[] = [];
+    for await (const entry of dirHandle.values()) {
+        if (entry.kind !== "file" || !entry.name.endsWith(".ts") || entry.name.endsWith(".d.ts")) continue;
+        const f = await entry.getFile();
+        const sig = { lastModified: f.lastModified, size: f.size };
+        if (entry.name.endsWith(SCRIPT_EXT)) seen.set(entry.name, sig);
+        else legacy.push({ name: entry.name, sig });
+    }
+    for (const { name, sig } of legacy) {
+        const canonical = canonicalizeFileName(name);
+        if (!seen.has(canonical)) {
+            seen.set(canonical, sig);
+            aliases.set(canonical, name);
+        }
+    }
+    return { seen, aliases };
 }
 
 async function readText(fileName: string): Promise<string> {
-    const fh = await dirHandle.getFileHandle(fileName);
+    const fh = await dirHandle.getFileHandle(realNameOf.get(fileName) || fileName);
     return await (await fh.getFile()).text();
+}
+
+/** Legacy <name>.ts standing in for <name>.script.ts → write canonical, drop legacy. */
+async function migrateLegacy(fileName: string, content: string): Promise<void> {
+    const real = realNameOf.get(fileName);
+    if (!real) return;
+    await writeBack(fileName, content);
+    try {
+        await dirHandle.removeEntry(real);
+        dlogLevel("sync", "info", "legacy file migrated", { from: real, to: fileName });
+    } catch {}
+    realNameOf.delete(fileName);
 }
 
 /** Script-id lookup: filename → enabled script (fileNameFor is name-based). */
 async function findScriptByFile(fileName: string) {
-    const nameNoExt = fileName.replace(/\.ts$/, "");
+    const nameNoExt = fileName.replace(new RegExp(`${SCRIPT_EXT.replace(".", "\\.")}$`), "").replace(/\.ts$/, "");
     const scripts = await listScripts();
     return scripts.find((s) => sanitize(s.meta.name) === nameNoExt) || null;
 }
@@ -71,7 +119,8 @@ function sanitize(displayName: string): string {
 }
 
 function displayNameFromFile(fileName: string): string {
-    return fileName.replace(/\.ts$/, "").replace(/_/g, " ").slice(0, 60) || "Imported script";
+    const base = fileName.endsWith(SCRIPT_EXT) ? fileName.slice(0, -SCRIPT_EXT.length) : fileName.replace(/\.ts$/, "");
+    return base.replace(/_/g, " ").slice(0, 60) || "Imported script";
 }
 
 async function applyEvents(events: ReturnType<typeof computeEvents>): Promise<void> {
@@ -87,6 +136,7 @@ async function applyEvents(events: ReturnType<typeof computeEvents>): Promise<vo
         const target = await findScriptByFile(fileName);
         if (!target) continue;
         await saveScript({ id: target.id, code: injectName(text, target.meta.name) });
+        await migrateLegacy(fileName, injectName(text, target.meta.name));
         dlogLevel("sync", "info", "external change applied", { file: fileName, script: target.meta.name });
         broadcastToUi({ type: "scriptsChanged", source: "folder", file: fileName } as any);
     }
@@ -98,7 +148,16 @@ async function applyEvents(events: ReturnType<typeof computeEvents>): Promise<vo
             lastWritten.delete(fileName); // echo of a manager-created script
             continue;
         }
-        await saveScript({ id: newId(), code: injectName(text, displayNameFromFile(fileName)) });
+        const existing = await findScriptByFile(fileName);
+        const code = injectName(text, displayNameFromFile(fileName));
+        if (existing) {
+            // canonical appeared for a known script (e.g. manager wrote the
+            // new .script.ts name) — content already matches; just migrate
+            await migrateLegacy(fileName, code);
+            continue;
+        }
+        await saveScript({ id: newId(), code });
+        await migrateLegacy(fileName, code);
         dlogLevel("sync", "info", "external file added → script created", { file: fileName });
         broadcastToUi({ type: "scriptsChanged", source: "folder", file: fileName } as any);
     }
@@ -131,14 +190,10 @@ async function applyEvents(events: ReturnType<typeof computeEvents>): Promise<vo
 async function pollOnce(): Promise<void> {
     if (!dirHandle) return;
     try {
-        const seen = new Map<string, FileSig>();
-        for await (const entry of dirHandle.values()) {
-            if (entry.kind !== "file" || !entry.name.endsWith(".ts")) continue;
-            const f = await entry.getFile();
-            seen.set(entry.name, { lastModified: f.lastModified, size: f.size });
-        }
+        const { seen, aliases } = await scanFolder();
         const events = computeEvents(known, seen);
         known = seen;
+        realNameOf = aliases;
         await applyEvents(events);
     } catch (e: any) {
         dlogLevel("sync", "warn", "poll failed", { error: e.message || e });
@@ -178,13 +233,19 @@ export async function writeBack(fileName: string, content: string): Promise<void
     }
 }
 
-/** Manager deleted a script → remove its file. */
+/** Manager deleted a script → remove its file (canonical or legacy). */
 export async function deleteFile(fileName: string): Promise<void> {
     if (!dirHandle) return;
     lastWritten.delete(fileName);
     try {
         await dirHandle.removeEntry(fileName);
     } catch {}
+    const legacy = realNameOf.get(fileName) || fileName.replace(/\.script\.ts$/, ".ts");
+    if (legacy !== fileName) {
+        try {
+            await dirHandle.removeEntry(legacy);
+        } catch {}
+    }
 }
 
 export async function stop(): Promise<void> {

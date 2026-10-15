@@ -2,7 +2,7 @@
  * chrome.storage.local backed script store.
  */
 import type { ResMeta } from "../../shared/metaParser";
-import { parseMeta } from "../../shared/metaParser";
+import { compileScript } from "../../shared/compile";
 
 export interface Script {
     id: string;
@@ -12,6 +12,8 @@ export interface Script {
     updatedAt: number;
     error: string | null;
     meta: ResMeta;
+    /** param definitions from res.declareScript (captured at save time) */
+    paramDefs?: Record<string, import("../../shared/scriptDef").ParamDef>;
 }
 
 const STORE_KEY = "resScripts";
@@ -64,7 +66,8 @@ export async function saveScript(partial: Pick<Script, "id" | "code"> & Partial<
     const byId: { [id: string]: Script } = obj[STORE_KEY] || {};
     const order: string[] = obj[ORDER_KEY] || Object.keys(byId);
     const prev = byId[partial.id];
-    const meta = parseMeta(partial.code);
+    // compile (not just parse) so res.declareScript values land in meta
+    const compiled = compileScript(partial.code);
     const script: Script = {
         id: partial.id,
         code: partial.code,
@@ -72,7 +75,8 @@ export async function saveScript(partial: Pick<Script, "id" | "code"> & Partial<
         createdAt: prev?.createdAt ?? Date.now(),
         updatedAt: Date.now(),
         error: null,
-        meta,
+        meta: compiled.meta,
+        paramDefs: compiled.paramDefs ?? prev?.paramDefs,
     };
     byId[partial.id] = script;
     if (!order.includes(partial.id)) {
@@ -120,4 +124,24 @@ export async function scriptStorageSet(scriptId: string, key: string, value: any
     const data = obj[storeKey] || {};
     data[key] = value;
     await storageSet({ [storeKey]: data });
+}
+
+// ---- per-script parameter values (res.declareScript params) ----
+const PARAMS_KEY = "resParams";
+
+/** Load all stored param values: { scriptId: { key: value } }. */
+export async function loadAllParamValues(): Promise<{ [scriptId: string]: Record<string, any> }> {
+    const obj = await storageGet(PARAMS_KEY);
+    return obj[PARAMS_KEY] || {};
+}
+
+export async function getParamValues(scriptId: string): Promise<Record<string, any>> {
+    return (await loadAllParamValues())[scriptId] || {};
+}
+
+export async function setParamValue(scriptId: string, key: string, value: any): Promise<void> {
+    const all = await loadAllParamValues();
+    all[scriptId] = { ...(all[scriptId] || {}), [key]: value };
+    await storageSet({ [PARAMS_KEY]: all });
+    notify();
 }

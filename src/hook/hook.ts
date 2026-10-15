@@ -16,7 +16,7 @@
 
     let active = false; // any body scripts exist (bundle metadata says so)
     let patched = false;
-    let domHandlers: { scriptId: string; name: string; when: string; src: string }[] = [];
+    let domHandlers: { scriptId: string; name: string; when: string; src: string; params?: Record<string, any> }[] = [];
     let domFired = false;
     let reqSeq = 0;
     const pending = new Map<number, (v: any) => void>();
@@ -92,7 +92,7 @@
                 // shadow `console` inside the script so its console.* calls
                 // are attributed to the script (and still reach the page)
                 const fn = new Function("res", "console", `"use strict";\n${d.src}`);
-                fn(makeDomShim(d.scriptId, d.name, store), makeScriptConsole(d.name));
+                fn(makeDomShim(d.scriptId, d.name, store, d.params || {}), makeScriptConsole(d.name));
                 if (store.onDom) {
                     compiledDom.push({ name: d.name, when: store.onDomOptions.when || "DOMContentLoaded", fn: store.onDom });
                 }
@@ -181,7 +181,7 @@
         });
     }
 
-    function makeDomShim(scriptId: string, name: string, store: any): any {
+    function makeDomShim(scriptId: string, name: string, store: any, params: Record<string, any> = {}): any {
         return {
             onRequest: (f: any) => {},
             onResponseHeaders: (f: any) => {},
@@ -191,6 +191,9 @@
                 store.onDom = f;
                 store.onDomOptions = opts || {};
             },
+            // meta is already applied upstream; the script receives its
+            // resolved param values here
+            declareScript: () => params,
             log: (...args: any[]) => logUp(`res.log: ${fmtArgs(args)}`, "info", name),
             storage: {
                 get: (key: string) => viaBridge({ op: "storageGet", scriptId, key }),

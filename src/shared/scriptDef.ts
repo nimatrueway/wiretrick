@@ -1,0 +1,91 @@
+/**
+ * Declarative script definition: res.declareScript({...}).
+ * Type-safe alternative/complement to the ==ResScript== comment block —
+ * values provided here override the comment directives.
+ */
+
+export interface ParamDefBoolean {
+    type: "boolean";
+    default?: boolean;
+    description?: string;
+}
+export interface ParamDefString {
+    type: "string";
+    default?: string;
+    description?: string;
+}
+export interface ParamDefEnum {
+    type: "enum";
+    choices: string[];
+    default?: string;
+    description?: string;
+}
+export interface ParamDefStringList {
+    type: "stringList";
+    default?: string[];
+    description?: string;
+}
+export type ParamDef = ParamDefBoolean | ParamDefString | ParamDefEnum | ParamDefStringList;
+
+export type ParamValue<D extends ParamDef> = D extends ParamDefBoolean
+    ? boolean
+    : D extends ParamDefString
+      ? string
+      : D extends ParamDefEnum
+        ? D["choices"][number]
+        : D extends ParamDefStringList
+          ? string[]
+          : never;
+
+export type ParamsOf<T extends Record<string, ParamDef>> = {
+    readonly [K in keyof T]: ParamValue<T[K]>;
+};
+
+export interface ScriptDef<T extends Record<string, ParamDef> = Record<string, ParamDef>> {
+    name?: string;
+    /** URL patterns the script activates on (same syntax as @match) */
+    match?: string[];
+    include?: string[];
+    /** interception tier priority list, e.g. ["hook", "cdp"] */
+    strategy?: ("auto" | "hook" | "proxy" | "cdp" | "webrequest")[];
+    runAt?: "document_start" | "document_end" | "document_idle" | "DOMContentLoaded";
+    params?: T;
+}
+
+export function paramDefault(def: ParamDef): any {
+    if (def.default !== undefined) return def.default;
+    switch (def.type) {
+        case "boolean":
+            return false;
+        case "string":
+            return "";
+        case "enum":
+            return def.choices[0] ?? "";
+        case "stringList":
+            return [];
+    }
+}
+
+/** Merge user-provided values over defaults; invalid values fall back. */
+export function resolveParamValues(defs: Record<string, ParamDef>, stored: Record<string, any> | undefined): Record<string, any> {
+    const out: Record<string, any> = {};
+    for (const [key, def] of Object.entries(defs)) {
+        const v = stored?.[key];
+        out[key] = isValidParamValue(def, v) ? v : paramDefault(def);
+    }
+    return out;
+}
+
+export function isValidParamValue(def: ParamDef, v: any): boolean {
+    if (v === undefined || v === null) return false;
+    switch (def.type) {
+        case "boolean":
+            return typeof v === "boolean";
+        case "string":
+            return typeof v === "string";
+        case "enum":
+            return typeof v === "string" && def.choices.includes(v);
+        case "stringList":
+            return Array.isArray(v) && v.every((x) => typeof x === "string");
+    }
+}

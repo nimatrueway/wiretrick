@@ -5,6 +5,7 @@
  * re-evaluates handler sources with `new Function`.
  */
 import { parseMeta, type ResMeta } from "./metaParser";
+import { resolveParamValues } from "./scriptDef";
 
 export type HandlerFn = (...args: any[]) => any;
 
@@ -44,6 +45,8 @@ export interface CompiledScript {
     error: string | null;
     /** original full source */
     code: string;
+    /** parameter definitions collected from res.declareScript (if any) */
+    paramDefs?: Record<string, import("./scriptDef").ParamDef>;
 }
 
 export interface HandlerSources {
@@ -70,6 +73,8 @@ export interface ResApiOverrides {
     log?: (...args: any[]) => void;
     /** receives formatted console.log/warn/error from user scripts */
     consoleSink?: (level: "info" | "warn" | "error", msg: string) => void;
+    /** stored parameter values, merged over declareScript defaults */
+    paramValues?: Record<string, any>;
 }
 
 /** Standard overrides for a stored script: storage wired by id, log → sink. */
@@ -77,7 +82,8 @@ export function makeScriptOverrides(
     scriptId: string,
     storage: { get(scriptId: string, key: string): Promise<any>; set(scriptId: string, key: string, v: any): Promise<void> },
     logSink: (scriptId: string, msg: string) => void,
-    consoleSink?: (scriptId: string, level: "info" | "warn" | "error", msg: string) => void
+    consoleSink?: (scriptId: string, level: "info" | "warn" | "error", msg: string) => void,
+    paramValues?: Record<string, any>
 ): ResApiOverrides {
     return {
         storage: {
@@ -87,6 +93,7 @@ export function makeScriptOverrides(
         log: (...args: any[]) =>
             logSink(scriptId, args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")),
         consoleSink: consoleSink ? (level, msg) => consoleSink(scriptId, level, msg) : undefined,
+        paramValues,
     };
 }
 
@@ -120,8 +127,11 @@ export function compileScript(code: string, overrides?: ResApiOverrides): Compil
         // eslint-disable-next-line no-new-func
         const fn = new Function("res", "console", `"use strict";\n${js}`);
         const store = createCollector();
-        fn(makeCollectorShim(store, overrides), makeForwardingConsole(overrides?.consoleSink));
-        return { meta, handlers: store, error: null, code };
+        const declare = createDeclareShim(meta, overrides?.paramValues);
+        const shim = makeCollectorShim(store, overrides);
+        shim.declareScript = declare.run;
+        fn(shim, makeForwardingConsole(overrides?.consoleSink));
+        return { meta, handlers: store, error: null, code, paramDefs: declare.defs };
     } catch (e: any) {
         return { meta, handlers: emptyHandlers(), error: e && e.stack ? e.stack : String(e), code };
     }
@@ -198,7 +208,7 @@ function makeForwardingConsole(sink?: ResApiOverrides["consoleSink"]): Console {
     } as unknown as Console;
 }
 
-function makeCollectorShim(store: any, overrides?: ResApiOverrides) {
+function makeCollectorShim(store: any, overrides?: ResApiOverrides): any {
     return {
         onRequest: (fn: HandlerFn) => { store.onRequest.push(fn); },
         onResponseHeaders: (fn: HandlerFn) => { store.onResponseHeaders.push(fn); },
@@ -207,10 +217,35 @@ function makeCollectorShim(store: any, overrides?: ResApiOverrides) {
         onDom: (fn: HandlerFn, opts?: DomOptions) => {
             store.onDom.push({ fn, when: opts?.when || "DOMContentLoaded" });
         },
+        // replaced per-compile by the meta-applying variant
+        declareScript: (def: any) => def?.params || {},
         storage: overrides?.storage || {
             get: () => undefined,
             set: () => undefined,
         },
         log: overrides?.log || ((...args: any[]) => console.log("[ResScript]", ...args)),
     };
+}
+
+/**
+ * Builds res.declareScript: applies name/match/strategy/runAt onto the
+ * parsed meta (comment block stays as the fallback), collects param defs,
+ * and returns the resolved param values for the script to use.
+ */
+function createDeclareShim(meta: ResMeta, storedValues?: Record<string, any>) {
+    const state: { defs?: Record<string, import("./scriptDef").ParamDef> } = {};
+    const run = (def: import("./scriptDef").ScriptDef): any => {
+        if (!def || typeof def !== "object") return {};
+        if (def.name) meta.name = def.name;
+        if (def.match?.length) meta.match = [...def.match];
+        if (def.include?.length) meta.include = [...def.include];
+        if (def.strategy?.length) meta.strategy = def.strategy.join(",");
+        if (def.runAt) meta.runAt = def.runAt;
+        if (def.params) {
+            state.defs = def.params;
+            return resolveParamValues(def.params, storedValues);
+        }
+        return {};
+    };
+    return { run, get defs() { return state.defs; } };
 }

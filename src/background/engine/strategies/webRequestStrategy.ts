@@ -22,7 +22,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
 
     private compiled: { id: string; compiled: CompiledScript }[] = [];
 
-    reload(scripts: Script[]): void {
+    reload(scripts: Script[], paramValues?: { [scriptId: string]: Record<string, any> }): void {
         this.compiled = scripts
             .filter((s) => s.enabled)
             .map((s) => {
@@ -33,6 +33,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                     },
                     log: (...args: any[]) => log(-1, `[${s.meta.name}] res.log: ${args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")}`, "info", s.id),
                     consoleSink: (level, msg) => log(-1, `[${s.meta.name}] console.log: ${msg}`, level, s.id),
+                    paramValues: paramValues?.[s.id],
                 });
                 compiled.meta = s.meta;
                 if (compiled.error) scriptError(s.id, compiled.error);

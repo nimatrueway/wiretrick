@@ -45,12 +45,22 @@ export const STARTER_TEMPLATE = `// ==ResScript==
 // @phase      request,response
 // ==/ResScript==
 
+// Declarative meta + adjustable parameters (type-safe; editable from
+// the popup's ⚙ dialog without touching this code):
+const cfg = res.declareScript({
+    match: ["*://*.example.com/*"],
+    params: {
+        debug: { type: "boolean", default: true, description: "Log every request" },
+        headerValue: { type: "string", default: "1", description: "Value of the x-debug header" },
+    },
+});
+
 // Modify request headers / redirect / cancel:
 res.onRequest((ctx) => {
-    res.log("request to", ctx.url);
+    if (cfg.debug) res.log("request to", ctx.url);
     // return { redirect: "https://example.com/other" };
     // return { cancel: true };
-    // return { headers: { set: { "x-debug": "1" } } };
+    // return { headers: { set: { "x-debug": cfg.headerValue } } };
 });
 
 // Modify response headers:

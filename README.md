@@ -74,6 +74,42 @@ res.modifyResponse((ctx, body) => body.replace('"role":"user"', '"role":"admin"'
 Supported metadata: `@name`, `@match` (repeatable), `@include`, `@phase`
 (`request`, `response`), `@strategy` (`auto` | `hook` | `proxy` | `cdp` | `webrequest`).
 
+### res.declareScript — type-safe meta + adjustable parameters
+
+The programmatic alternative to the comment block (anything you pass
+overrides the directives). `params` are typed knobs the user changes from
+the popup's ⚙ dialog without touching the script:
+
+```ts
+const cfg = res.declareScript({
+    name: "Mock /api/user",
+    match: ["*://app.example.com/*"],
+    strategy: ["hook", "cdp"],
+    params: {
+        enabled: { type: "boolean", default: true, description: "Master switch" },
+        status:  { type: "enum", choices: ["500", "503"], default: "500" },
+        note:    { type: "string", default: "forced failure" },
+        tags:    { type: "stringList", default: [] },
+    },
+});
+// cfg.enabled: boolean · cfg.status: "500" | "503" · cfg.note: string · cfg.tags: string[]
+
+res.onRequest((ctx) => {
+    if (!cfg.enabled) return;
+    return { respond: { status: Number(cfg.status), body: { error: cfg.note, tags: cfg.tags } } };
+});
+```
+
+Param values persist per script and apply on save — the change hot-reloads
+like a code edit. Parameter types: `boolean` (switch), `string` (text),
+`enum` (dropdown of `choices`), `stringList` (add/remove list).
+
+### Scripts folder files
+
+Synced scripts are written as **`<name>.script.ts`** so VS Code (and the
+watcher) can tell them apart from ordinary TypeScript files in the folder.
+Legacy `<name>.ts` files are migrated automatically on the next sync tick.
+
 ## Editor
 
 The manager page embeds **Monaco** (the VS Code editor) with full TypeScript

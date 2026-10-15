@@ -92,3 +92,112 @@ body {
     color: #858585;
 }
 .hidden { display: none; }
+
+.btn-icon {
+    background: none;
+    border: 1px solid #3c3c3c;
+    color: #858585;
+    border-radius: 3px;
+    padding: 2px 6px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    line-height: 0;
+}
+.btn-icon:hover { color: #ccc; border-color: #007acc; }
+.btn-icon svg { display: block; }
+
+#config-panel {
+    border-top: 1px solid #3c3c3c;
+    background: #252526;
+    max-height: 300px;
+    overflow-y: auto;
+}
+#config-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    font-weight: 600;
+    border-bottom: 1px solid #3c3c3c;
+    position: sticky;
+    top: 0;
+    background: #252526;
+}
+#config-close {
+    background: none;
+    border: none;
+    color: #858585;
+    cursor: pointer;
+    font-size: 13px;
+}
+#config-close:hover { color: #ccc; }
+#config-body { padding: 8px 12px; }
+.param-row { margin-bottom: 10px; }
+.param-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: 600;
+    font-size: 12px;
+    margin-bottom: 2px;
+}
+.param-desc { color: #858585; font-size: 11px; margin-bottom: 4px; }
+.param-row input[type="text"] {
+    width: 100%;
+    box-sizing: border-box;
+    background: #1e1e1e;
+    border: 1px solid #3c3c3c;
+    color: #ccc;
+    border-radius: 3px;
+    padding: 3px 6px;
+    font-size: 12px;
+}
+.param-row select {
+    width: 100%;
+    background: #1e1e1e;
+    border: 1px solid #3c3c3c;
+    color: #ccc;
+    border-radius: 3px;
+    padding: 3px 4px;
+    font-size: 12px;
+}
+.param-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
+.param-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: #1e1e1e;
+    border: 1px solid #3c3c3c;
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-size: 11px;
+}
+.param-tag button {
+    background: none;
+    border: none;
+    color: #858585;
+    cursor: pointer;
+    padding: 0;
+    font-size: 11px;
+}
+.param-tag button:hover { color: #f44; }
+.param-add { display: flex; gap: 4px; }
+.param-add input {
+    flex: 1;
+    background: #1e1e1e;
+    border: 1px solid #3c3c3c;
+    color: #ccc;
+    border-radius: 3px;
+    padding: 3px 6px;
+    font-size: 12px;
+}
+.param-add button {
+    background: #007acc;
+    border: none;
+    color: #fff;
+    border-radius: 3px;
+    padding: 2px 8px;
+    font-size: 11px;
+    cursor: pointer;
+}

@@ -61,14 +61,14 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
     /** tabs where page CSP blocked hook compilation — CDP fallback required */
     private hookBrokenTabs = new Set<number>();
 
-    reload(scripts: Script[]): void {
+    reload(scripts: Script[], paramValues?: { [scriptId: string]: Record<string, any> }): void {
         this.bodyScripts = [];
         for (const s of scripts) {
             if (!s.enabled) continue;
             if (!/res\s*\.\s*(modifyResponse|replaceResponse|onRequest)/.test(s.code)) continue;
             const compiled = compileScript(
                 s.code,
-                makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, msg) => log(-1, `[${s.meta.name}] res.log: ${msg}`, "info", id), (id, level, msg) => log(-1, `[${s.meta.name}] console.log: ${msg}`, level, id))
+                makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, msg) => log(-1, `[${s.meta.name}] res.log: ${msg}`, "info", id), (id, level, msg) => log(-1, `[${s.meta.name}] console.log: ${msg}`, level, id), paramValues?.[s.id])
             );
             if (!compiled.handlers.modifyResponse && !compiled.handlers.onRequest && !compiled.handlers.replaceResponse) continue;
             this.bodyScripts.push({

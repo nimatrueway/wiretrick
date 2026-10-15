@@ -80,6 +80,63 @@ declare namespace ResOverride {
     interface DomOptions {
         when?: "DOMContentLoaded" | "document_start" | "document_end" | "document_idle";
     }
+
+    // ---- declareScript: declarative meta + typed parameters ----
+
+    interface ParamDefBoolean {
+        type: "boolean";
+        default?: boolean;
+        description?: string;
+    }
+    interface ParamDefString {
+        type: "string";
+        default?: string;
+        description?: string;
+    }
+    interface ParamDefEnum {
+        type: "enum";
+        choices: string[];
+        default?: string;
+        description?: string;
+    }
+    interface ParamDefStringList {
+        type: "stringList";
+        default?: string[];
+        description?: string;
+    }
+    type ParamDef = ParamDefBoolean | ParamDefString | ParamDefEnum | ParamDefStringList;
+
+    type ParamValue<D extends ParamDef> = D extends ParamDefBoolean
+        ? boolean
+        : D extends ParamDefString
+          ? string
+          : D extends ParamDefEnum
+            ? D["choices"][number]
+            : D extends ParamDefStringList
+              ? string[]
+              : never;
+
+    /** Resolved parameter values, typed from the defs you passed. */
+    type ParamsOf<T extends Record<string, ParamDef>> = {
+        readonly [K in keyof T]: ParamValue<T[K]>;
+    };
+
+    interface ScriptDef<T extends Record<string, ParamDef> = Record<string, ParamDef>> {
+        /** Display name (overrides @name). */
+        name?: string;
+        /** URL patterns the script activates on (same syntax as @match). */
+        match?: string[];
+        include?: string[];
+        /** Interception tier priority list (overrides @strategy). */
+        strategy?: ("auto" | "hook" | "proxy" | "cdp" | "webrequest")[];
+        /** Default onDom timing (overrides @run-at). */
+        runAt?: "document_start" | "document_end" | "document_idle" | "DOMContentLoaded";
+        /**
+         * Adjustable parameters — editable from the popup's ⚙ dialog and
+         * the manager without touching the script. Returned typed.
+         */
+        params?: T;
+    }
 }
 
 /**
@@ -262,4 +319,32 @@ declare const res: {
         handler: (ctx: ResOverride.RequestCtx) => void | Promise<void>,
         opts?: ResOverride.DomOptions
     ): void;
+
+    /**
+     * Declarative script definition — the type-safe way to set the meta
+     * (name/match/strategy/runAt) and declare adjustable parameters.
+     * Anything you pass here overrides the ==ResScript== comment block.
+     *
+     * Returns the resolved parameter values (stored UI values merged over
+     * your defaults), typed from your `params` defs — so the script never
+     * hard-codes toggles; users change them from the ⚙ dialog in the popup
+     * or the manager.
+     *
+     * @example
+     * const cfg = res.declareScript({
+     *     name: "Force-fail inference",
+     *     match: ["*://cloud*.mongodb.com/*"],
+     *     strategy: ["hook", "cdp"],
+     *     params: {
+     *         enabled: { type: "boolean", default: true, description: "Return 500s" },
+     *         status:  { type: "enum", choices: ["500", "503"], default: "500" },
+     *         note:    { type: "string", default: "API force failed" },
+     *         extra:   { type: "stringList", default: [] },
+     *     },
+     * });
+     * res.onRequest((ctx) => cfg.enabled ? { respond: { status: Number(cfg.status), body: { error: cfg.note } } } : undefined);
+     */
+    declareScript<T extends Record<string, ResOverride.ParamDef>>(
+        def: ResOverride.ScriptDef<T>
+    ): ResOverride.ParamsOf<T>;
 };
