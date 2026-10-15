@@ -7,22 +7,37 @@ export interface ApiSection {
 
 export const API_REFERENCE: ApiSection[] = [
     {
-        title: "Script structure",
-        body: `Every script starts with a metadata block. @match (repeatable) decides when it activates; @phase narrows which events run.
+        title: "Script structure — res.declareScript",
+        body: `Every active script declares itself with res.declareScript. A source file WITHOUT it is a library: inert on its own (never matches, hidden from the popup) but importable by other scripts.
 
-// ==ResScript==
-// @name       My script
-// @match      *://example.com/*
-// @match      *://api.example.com/v1/*
-// @phase      request,response
-// @strategy   auto | hook | proxy | cdp
-// ==/ResScript==
+const cfg = res.declareScript({
+    name: "My script",
+    match: ["*://example.com/*", "*://api.example.com/v1/*"],
+    include: [],                        // extra URL patterns
+    phase: ["request", "response"],     // which events run (default: both)
+    strategy: ["auto"],                 // or hook | proxy | cdp | webrequest priority list
+    runAt: "document_idle",             // default onDom timing
+});
 
 Patterns are star patterns: * matches anything, ** the same (groups are remembered for replace patterns).`,
     },
     {
+        title: "Libraries — import other scripts",
+        body: `Any saved script that doesn't call res.declareScript is a library module. Import its exports from another script by name:
+
+// library script named "utils" (saved as utils.ts):
+export function double(n: number) { return n * 2; }
+
+// in your script:
+import { double } from "./utils";
+res.declareScript({ name: "uses utils", match: ["*://example.com/*"] });
+res.log(double(21)); // 42
+
+Imports work in every tier (background compiles + the page-side onDom hook); libraries ship with the page bundle automatically. "./utils", "utils", "utils.ts" all resolve.`,
+    },
+    {
         title: "res.declareScript — meta + parameters, type-safe",
-        body: `Programmatic alternative to the comment block — everything you pass overrides the directives. Params are adjustable from the popup's ⚙ dialog without editing the script, and come back typed:
+        body: `Meta + parameters in one type-safe call. Params are adjustable from the popup's ⚙ dialog without editing the script, and come back typed:
 
 const cfg = res.declareScript({
     name: "My script",
@@ -38,7 +53,7 @@ const cfg = res.declareScript({
 });
 // cfg.enabled: boolean, cfg.status: "500" | "503", cfg.note: string, cfg.hosts: string[]
 
-Scripts sync to the folder as <name>.script.ts so VS Code tells them apart from other TypeScript files.`,
+Scripts sync to the folder as plain <name>.ts files.`,
     },
     {
         title: "res.onRequest — redirect, cancel, request headers",
@@ -78,7 +93,7 @@ res.modifyResponse((ctx, body) => {
     return text.replace("old", "new");
 });
 
-Tiers on Chrome: page fetch/XHR goes through a banner-free hook; documents, script tags and other "direct" resources go through the debugger (a yellow banner appears briefly while they load). On Firefox everything is network-level without a banner. Pin a tier with @strategy.`,
+Tiers on Chrome: page fetch/XHR goes through a banner-free hook; documents, script tags and other "direct" resources go through the debugger (a yellow banner appears briefly while they load). On Firefox everything is network-level without a banner. Pin a tier with the strategy field in res.declareScript.`,
     },
     {
         title: "res.onDom — DOM & title changes",
@@ -127,13 +142,13 @@ onResponseHeaders — ALL matching scripts run; set applied in order (later over
 modifyResponse — transforms COMPOSE: each output feeds the next script.
 replaceResponse — first script returning a body wins.
 
-@strategy lists decide the tier per script, not the stacking order.`,
+strategy lists (res.declareScript) decide the tier per script, not the stacking order.`,
     },
     {
         title: "Async handlers",
         body: `Every hook accepts async handlers. replaceResponse/modifyResponse/onDom async works everywhere.
 
-onRequest/onResponseHeaders async results: honored natively on Firefox; on Chrome they need 'cdp' in @strategy (the blocking webRequest can't await — a warning is logged and the result ignored otherwise).
+onRequest/onResponseHeaders async results: honored natively on Firefox; on Chrome they need "cdp" in the strategy list (the blocking webRequest can't await — a warning is logged and the result ignored otherwise).
 
 // async mock:
 res.replaceResponse(async () => {
@@ -142,9 +157,7 @@ res.replaceResponse(async () => {
 });
 
 // async redirect via cdp tier:
-// ==ResScript==
-// @strategy hook,cdp
-// ==/ResScript==
+res.declareScript({ name: "async redirect", match: ["*://example.com/*"], strategy: ["hook", "cdp"] });
 res.onRequest(async (ctx) => {
     const target = await decideUpstream(ctx.url);
     return { redirect: target };
@@ -168,14 +181,14 @@ cdp — chrome.debugger + Fetch domain. Sees everything, but Chrome shows a "deb
 Scripts that only ever match fetch/XHR are learned to be hook-only and never trigger the banner.`,
     },
     {
-        title: "@strategy — comma-separated priority list",
+        title: "strategy — priority list (res.declareScript)",
         body: `Pick strategies per script; the first viable one per request wins.
 
-@strategy hook,cdp      // banner-free for XHR; debugger only as cold-start fallback
-@strategy cdp           // debugger only (main-frame HTML + script tags always work)
-@strategy cdp,hook      // debugger first, even for XHR
-@strategy hook          // strictly banner-free; unhookable requests pass through
-@strategy webrequest,hook // Firefox network-level first
+strategy: ["hook", "cdp"]   // banner-free for XHR; debugger only as cold-start fallback
+strategy: ["cdp"]           // debugger only (main-frame HTML + script tags always work)
+strategy: ["cdp", "hook"]         // debugger first, even for XHR
+strategy: ["hook"]                // strictly banner-free; unhookable requests pass through
+strategy: ["webrequest", "hook"]  // Firefox network-level first
 
 Tier C (debugger) participates ONLY when the list contains "cdp" or is
 the single default "auto" — explicit hook/webrequest lists never show

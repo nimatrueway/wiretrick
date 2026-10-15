@@ -39,12 +39,10 @@ export async function loadMonaco(): Promise<any> {
     return monacoApi;
 }
 
-export const STARTER_TEMPLATE = `// ==ResScript==
-// @name       My first script
-// @match      *://*.example.com/*
-// @phase      request,response
-// ==/ResScript==
-
+export const STARTER_TEMPLATE = `res.declareScript({
+    name: "My first script",
+    match: ["*://*.example.com/*"],
+});
 // Declarative meta + adjustable parameters (type-safe; editable from
 // the popup's ⚙ dialog without touching this code):
 const cfg = res.declareScript({

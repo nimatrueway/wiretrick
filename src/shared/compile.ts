@@ -4,7 +4,7 @@
  * proxy service worker — each provides its own minimal `res` API shim and
  * re-evaluates handler sources with `new Function`.
  */
-import { parseMeta, type ResMeta } from "./metaParser";
+import { defaultMeta, type ResMeta } from "./metaParser";
 import { resolveParamValues } from "./scriptDef";
 
 export type HandlerFn = (...args: any[]) => any;
@@ -47,6 +47,8 @@ export interface CompiledScript {
     code: string;
     /** parameter definitions collected from res.declareScript (if any) */
     paramDefs?: Record<string, import("./scriptDef").ParamDef>;
+    /** the module's exports (library scripts: importable by others) */
+    exports?: any;
 }
 
 export interface HandlerSources {
@@ -75,6 +77,8 @@ export interface ResApiOverrides {
     consoleSink?: (level: "info" | "warn" | "error", msg: string) => void;
     /** stored parameter values, merged over declareScript defaults */
     paramValues?: Record<string, any>;
+    /** resolves ES import specifiers ("./utils", "utils") to module exports */
+    importModule?: (spec: string) => any;
 }
 
 /** Standard overrides for a stored script: storage wired by id, log → sink. */
@@ -83,7 +87,8 @@ export function makeScriptOverrides(
     storage: { get(scriptId: string, key: string): Promise<any>; set(scriptId: string, key: string, v: any): Promise<void> },
     logSink: (scriptId: string, msg: string) => void,
     consoleSink?: (scriptId: string, level: "info" | "warn" | "error", msg: string) => void,
-    paramValues?: Record<string, any>
+    paramValues?: Record<string, any>,
+    importModule?: (spec: string) => any
 ): ResApiOverrides {
     return {
         storage: {
@@ -94,6 +99,7 @@ export function makeScriptOverrides(
             logSink(scriptId, args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")),
         consoleSink: consoleSink ? (level, msg) => consoleSink(scriptId, level, msg) : undefined,
         paramValues,
+        importModule,
     };
 }
 
@@ -119,22 +125,83 @@ export function toRunnableJs(code: string): string {
     }
 }
 
-/** Compile from full source (background storage path). */
+/**
+ * Compile from full source (background storage path). The ONLY way to
+ * activate a script is res.declareScript — a source without it compiles
+ * as a library module (handlers inert, exports importable).
+ */
 export function compileScript(code: string, overrides?: ResApiOverrides): CompiledScript {
-    const meta = parseMeta(code);
+    const meta = defaultMeta(overrides?.log ? undefined : undefined);
     try {
         const js = toRunnableJs(code);
+        const moduleObj = { exports: {} as any };
         // eslint-disable-next-line no-new-func
-        const fn = new Function("res", "console", `"use strict";\n${js}`);
+        const fn = new Function("res", "console", "require", "module", "exports", `"use strict";\n${js}`);
         const store = createCollector();
         const declare = createDeclareShim(meta, overrides?.paramValues);
         const shim = makeCollectorShim(store, overrides);
         shim.declareScript = declare.run;
-        fn(shim, makeForwardingConsole(overrides?.consoleSink));
-        return { meta, handlers: store, error: null, code, paramDefs: declare.defs };
+        const requireShim = overrides?.importModule
+            ? overrides.importModule
+            : (spec: string) => {
+                  throw new Error(`cannot import "${spec}" here — imports resolve in the background/hook contexts`);
+              };
+        fn(shim, makeForwardingConsole(overrides?.consoleSink), requireShim, moduleObj, moduleObj.exports);
+        return { meta, handlers: store, error: null, code, paramDefs: declare.defs, exports: moduleObj.exports };
     } catch (e: any) {
         return { meta, handlers: emptyHandlers(), error: e && e.stack ? e.stack : String(e), code };
     }
+}
+
+/**
+ * Module registry over the stored scripts: ES `import ... from "./utils"`
+ * resolves against script names (case-insensitive, "./x", "x.ts" all match
+ * the script named "x"). Libs compile lazily and memoize; circular imports
+ * get the partially-initialized exports.
+ */
+export function makeModuleResolver(
+    scripts: { id: string; name: string; code: string }[],
+    overridesFor: (s: { id: string; name: string; code: string }) => ResApiOverrides
+): { resolve: (spec: string) => any; deps: Set<string> } {
+    const cache = new Map<string, any>();
+    const compiling = new Set<string>();
+    const deps = new Set<string>();
+    const norm = (spec: string) =>
+        spec
+            .replace(/^\.\//, "")
+            .replace(/\.(ts|js)$/, "")
+            .toLowerCase();
+    const byKey = new Map<string, { id: string; name: string; code: string }>();
+    for (const s of scripts) {
+        const key = s.name.replace(/[^a-zA-Z0-9_-]+/g, "_").toLowerCase();
+        if (!byKey.has(key)) byKey.set(key, s);
+        const plain = s.name.toLowerCase();
+        if (!byKey.has(plain)) byKey.set(plain, s);
+    }
+    const resolve = (spec: string): any => {
+        const key = norm(spec);
+        if (cache.has(key)) return cache.get(key);
+        const lib = byKey.get(key);
+        if (!lib) throw new Error(`unknown module "${spec}" — no script named "${spec.replace(/^\.\//, "").replace(/\.(ts|js)$/, "")}"`);
+        deps.add(lib.name);
+        if (compiling.has(key)) return cache.get(key); // cycle: partial exports
+        compiling.add(key);
+        const moduleObj = { exports: {} as any };
+        cache.set(key, moduleObj.exports); // early, for cycles
+        const js = toRunnableJs(lib.code);
+        // eslint-disable-next-line no-new-func
+        new Function("res", "console", "require", "module", "exports", `"use strict";\n${js}`)(
+            makeCollectorShim(createCollector(), overridesFor(lib)),
+            makeForwardingConsole(overridesFor(lib).consoleSink),
+            resolve,
+            moduleObj,
+            moduleObj.exports
+        );
+        compiling.delete(key);
+        cache.set(key, moduleObj.exports);
+        return moduleObj.exports;
+    };
+    return { resolve, deps };
 }
 
 /** Rebuild handlers from serialized sources (hook / proxy path). */
@@ -236,10 +303,12 @@ function createDeclareShim(meta: ResMeta, storedValues?: Record<string, any>) {
     const state: { defs?: Record<string, import("./scriptDef").ParamDef> } = {};
     const run = (def: import("./scriptDef").ScriptDef): any => {
         if (!def || typeof def !== "object") return {};
+        meta.declared = true;
         if (def.name) meta.name = def.name;
         if (def.match?.length) meta.match = [...def.match];
         if (def.include?.length) meta.include = [...def.include];
         if (def.strategy?.length) meta.strategy = def.strategy.join(",");
+        if (def.phase?.length) meta.phase = [...def.phase];
         if (def.runAt) meta.runAt = def.runAt;
         if (def.params) {
             state.defs = def.params;

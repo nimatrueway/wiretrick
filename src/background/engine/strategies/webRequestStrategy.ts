@@ -7,7 +7,7 @@
  * chromeBodyStrategy takes over for bodies.
  */
 import { match, matchReplace, matchAny } from "../../../shared/matcher";
-import { compileScript, isThenable, type CompiledScript } from "../../../shared/compile";
+import { compileScript, isThenable, makeModuleResolver, type CompiledScript } from "../../../shared/compile";
 import type { BodyScriptInfo, HeaderChanges, HookDisposition, InterceptionStrategy, MaybePromise, WebRequestDetailsLike } from "./types";
 import type { Script } from "../scriptStore";
 import { log, scriptError } from "../logs";
@@ -23,21 +23,30 @@ export class WebRequestStrategy implements InterceptionStrategy {
     private compiled: { id: string; compiled: CompiledScript }[] = [];
 
     reload(scripts: Script[], paramValues?: { [scriptId: string]: Record<string, any> }): void {
+        let resolveSpec: (spec: string) => any = (spec) => {
+            throw new Error(`cannot import "${spec}" before the module registry is ready`);
+        };
+        const overridesFor = (s: Script) => ({
+            storage: {
+                get: (key: string) => scriptStorageGet(s.id, key),
+                set: (key: string, value: any) => scriptStorageSet(s.id, key, value),
+            },
+            log: (...args: any[]) => log(-1, `[${s.meta.name}] res.log: ${args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")}`, "info", s.id),
+            consoleSink: (level: "info" | "warn" | "error", msg: string) => log(-1, `[${s.meta.name}] console.log: ${msg}`, level, s.id),
+            paramValues: paramValues?.[s.id],
+            importModule: (spec: string) => resolveSpec(spec),
+        });
+        resolveSpec = makeModuleResolver(
+            scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code })),
+            (lib) => overridesFor(scripts.find((x) => x.id === lib.id) as Script)
+        ).resolve;
         this.compiled = scripts
             .filter((s) => s.enabled)
-            .map((s) => {
-                const compiled = compileScript(s.code, {
-                    storage: {
-                        get: (key: string) => scriptStorageGet(s.id, key),
-                        set: (key: string, value: any) => scriptStorageSet(s.id, key, value),
-                    },
-                    log: (...args: any[]) => log(-1, `[${s.meta.name}] res.log: ${args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")}`, "info", s.id),
-                    consoleSink: (level, msg) => log(-1, `[${s.meta.name}] console.log: ${msg}`, level, s.id),
-                    paramValues: paramValues?.[s.id],
-                });
-                compiled.meta = s.meta;
-                if (compiled.error) scriptError(s.id, compiled.error);
-                return { id: s.id, compiled };
+            .map((s) => ({ id: s.id, compiled: compileScript(s.code, overridesFor(s)), storedMeta: s.meta }))
+            .filter(({ compiled }) => compiled.meta.declared) // undeclared = library module
+            .map(({ id, compiled, storedMeta }) => {
+                if (compiled.error) scriptError(id, compiled.error);
+                return { id, compiled };
             });
     }
 
@@ -78,7 +87,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                         }
                         // Chrome: blocking webRequest cannot await — the
                         // result would be decided too late
-                        scriptError(entry.id, "async onRequest: Chrome's blocking webRequest cannot await. Return synchronously for redirect/cancel/headers, or add 'cdp' to @strategy to handle it in the debugger tier.");
+                        scriptError(entry.id, "async onRequest: Chrome's blocking webRequest cannot await. Return synchronously for redirect/cancel/headers, or add 'cdp' to the declareScript strategy list to handle it in the debugger tier.");
                         continue;
                     }
                     // cache header mods so onBeforeSendHeaders doesn't re-run the handler
@@ -242,7 +251,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                         // resolved below by the pipeline passthrough
                         return result.then((r: any) => (r && r.headers ? { ...r.headers } : null));
                     }
-                    scriptError(entry.id, "async onResponseHeaders: Chrome's blocking webRequest cannot await. Add 'cdp' to @strategy to apply async header changes in the debugger tier.");
+                    scriptError(entry.id, "async onResponseHeaders: Chrome's blocking webRequest cannot await. Add 'cdp' to the declareScript strategy list to apply async header changes in the debugger tier.");
                     continue;
                 }
                 const mods = (result as any)?.headers;

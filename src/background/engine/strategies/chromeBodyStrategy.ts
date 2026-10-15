@@ -12,11 +12,11 @@
  *                      the original, transforms it, and serves it with the
  *                      right Content-Type. Banner-free.
  *  Tier C (cdp):       chrome.debugger + Fetch domain, opt-in via
- *                      @strategy cdp or "strict interception". Handles
+ *                      strategy: ["cdp"] or "strict interception". Handles
  *                      main-frame HTML and anything A/B cannot see.
  */
 import { matchAny } from "../../../shared/matcher";
-import { compileScript, makeScriptOverrides } from "../../../shared/compile";
+import { compileScript, makeScriptOverrides, makeModuleResolver } from "../../../shared/compile";
 import type { BodyScriptInfo, HeaderChanges, HookDisposition, InterceptionStrategy, MaybePromise, WebRequestDetailsLike } from "./types";
 import type { Script } from "../scriptStore";
 import { log } from "../logs";
@@ -62,14 +62,21 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
     private hookBrokenTabs = new Set<number>();
 
     reload(scripts: Script[], paramValues?: { [scriptId: string]: Record<string, any> }): void {
+        let resolveSpec: (spec: string) => any = (spec) => {
+            throw new Error(`cannot import "${spec}" before the module registry is ready`);
+        };
+        const overridesFor = (s: { id: string; name: string; code: string }) =>
+            makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, msg) => log(-1, `[${s.name}] res.log: ${msg}`, "info", id), (id, level, msg) => log(-1, `[${s.name}] console.log: ${msg}`, level, id), paramValues?.[s.id], (spec) => resolveSpec(spec));
+        resolveSpec = makeModuleResolver(
+            scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code })),
+            overridesFor
+        ).resolve;
         this.bodyScripts = [];
         for (const s of scripts) {
             if (!s.enabled) continue;
             if (!/res\s*\.\s*(modifyResponse|replaceResponse|onRequest)/.test(s.code)) continue;
-            const compiled = compileScript(
-                s.code,
-                makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, msg) => log(-1, `[${s.meta.name}] res.log: ${msg}`, "info", id), (id, level, msg) => log(-1, `[${s.meta.name}] console.log: ${msg}`, level, id), paramValues?.[s.id])
-            );
+            const compiled = compileScript(s.code, overridesFor({ id: s.id, name: s.meta.name, code: s.code }));
+            if (!compiled.meta.declared) continue; // library module: inert, importable
             if (!compiled.handlers.modifyResponse && !compiled.handlers.onRequest && !compiled.handlers.replaceResponse) continue;
             this.bodyScripts.push({
                 scriptId: s.id,
@@ -242,6 +249,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
                 match: s.match,
                 include: [],
                 phase: ["request", "response"],
+                declared: true,
                 strategy: s.strategy as any,
                 runAt: "document_start",
             },

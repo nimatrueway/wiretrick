@@ -7,4 +7,4 @@
 import { transform } from "sucrase";
 import { setTranspiler } from "./compile";
 
-setTranspiler((code) => transform(code, { transforms: ["typescript"] }).code);
+setTranspiler((code) => transform(code, { transforms: ["typescript", "imports"] }).code);

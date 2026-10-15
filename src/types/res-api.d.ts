@@ -88,6 +88,16 @@ declare namespace ResOverride {
         default?: boolean;
         description?: string;
     }
+    interface ParamDefNumber {
+        type: "number";
+        default?: number;
+        description?: string;
+        /** optional bounds — the UI clamps typed values */
+        min?: number;
+        max?: number;
+        /** step for the number input (default 1; use e.g. 0.1 for decimals) */
+        step?: number;
+    }
     interface ParamDefString {
         type: "string";
         default?: string;
@@ -104,17 +114,19 @@ declare namespace ResOverride {
         default?: string[];
         description?: string;
     }
-    type ParamDef = ParamDefBoolean | ParamDefString | ParamDefEnum | ParamDefStringList;
+    type ParamDef = ParamDefBoolean | ParamDefNumber | ParamDefString | ParamDefEnum | ParamDefStringList;
 
     type ParamValue<D extends ParamDef> = D extends ParamDefBoolean
         ? boolean
-        : D extends ParamDefString
-          ? string
-          : D extends ParamDefEnum
-            ? D["choices"][number]
-            : D extends ParamDefStringList
-              ? string[]
-              : never;
+        : D extends ParamDefNumber
+          ? number
+          : D extends ParamDefString
+            ? string
+            : D extends ParamDefEnum
+              ? D["choices"][number]
+              : D extends ParamDefStringList
+                ? string[]
+                : never;
 
     /** Resolved parameter values, typed from the defs you passed. */
     type ParamsOf<T extends Record<string, ParamDef>> = {
@@ -129,6 +141,8 @@ declare namespace ResOverride {
         include?: string[];
         /** Interception tier priority list (overrides @strategy). */
         strategy?: ("auto" | "hook" | "proxy" | "cdp" | "webrequest")[];
+        /** Which interception events run (default: both). */
+        phase?: ("request" | "response")[];
         /** Default onDom timing (overrides @run-at). */
         runAt?: "document_start" | "document_end" | "document_idle" | "DOMContentLoaded";
         /**

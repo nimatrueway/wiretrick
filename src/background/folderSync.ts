@@ -8,25 +8,17 @@ import { computeEvents, loadSavedHandle, clearSavedHandle, saveHandle, type File
 import { saveScript, deleteScript, newId, listScripts } from "./engine/scriptStore";
 import { broadcastToUi } from "./engine/logs";
 import { dlogLevel } from "../shared/debugLog";
-function injectName(code: string, name: string): string {
-    if (!name) return code;
-    if (/^\s*\/\/\s*@name\s+.*$/m.test(code)) {
-        return code.replace(/^(\s*\/\/\s*@name\s+).*$/m, `$1${name}`);
-    }
-    return `// @name ${name}\n${code}`;
-}
-
 const POLL_MS = 1000;
-const SCRIPT_EXT = ".script.ts";
+const SCRIPT_EXT = ".ts";
 
 /** canonical script file name for a display name */
 function canonicalFileName(name: string): string {
     return safeName(name) + SCRIPT_EXT;
 }
 
-/** legacy bare-<name>.ts → canonical <name>.script.ts */
+/** legacy <name>.script.ts → canonical <name>.ts */
 function canonicalizeFileName(fileName: string): string {
-    return fileName.endsWith(SCRIPT_EXT) ? fileName : fileName.replace(/\.ts$/, SCRIPT_EXT);
+    return fileName.endsWith(".script.ts") ? fileName.replace(/\.script\.ts$/, SCRIPT_EXT) : fileName;
 }
 
 let dirHandle: any = null;
@@ -60,10 +52,9 @@ async function refreshKnown(): Promise<void> {
 }
 
 /**
- * List script files as canonical names. Only *.script.ts files (plus legacy
- * bare .ts, pending migration) are scripts — other .ts files and .d.ts are
- * ignored. Legacy files stand in for their canonical name (canonical wins
- * when both exist).
+ * List script files as canonical names. Every .ts file is a script file;
+ * .d.ts files are ignored. Legacy .script.ts files stand in for their
+ * canonical .ts name (canonical wins when both exist) and migrate back.
  */
 async function scanFolder(): Promise<{ seen: Map<string, FileSig>; aliases: Map<string, string> }> {
     const seen = new Map<string, FileSig>();
@@ -73,8 +64,8 @@ async function scanFolder(): Promise<{ seen: Map<string, FileSig>; aliases: Map<
         if (entry.kind !== "file" || !entry.name.endsWith(".ts") || entry.name.endsWith(".d.ts")) continue;
         const f = await entry.getFile();
         const sig = { lastModified: f.lastModified, size: f.size };
-        if (entry.name.endsWith(SCRIPT_EXT)) seen.set(entry.name, sig);
-        else legacy.push({ name: entry.name, sig });
+        if (entry.name.endsWith(".script.ts")) legacy.push({ name: entry.name, sig });
+        else seen.set(entry.name, sig);
     }
     for (const { name, sig } of legacy) {
         const canonical = canonicalizeFileName(name);
@@ -91,7 +82,7 @@ async function readText(fileName: string): Promise<string> {
     return await (await fh.getFile()).text();
 }
 
-/** Legacy <name>.ts standing in for <name>.script.ts → write canonical, drop legacy. */
+/** Legacy <name>.script.ts standing in for <name>.ts → write canonical, drop legacy. */
 async function migrateLegacy(fileName: string, content: string): Promise<void> {
     const real = realNameOf.get(fileName);
     if (!real) return;
@@ -105,7 +96,7 @@ async function migrateLegacy(fileName: string, content: string): Promise<void> {
 
 /** Script-id lookup: filename → enabled script (fileNameFor is name-based). */
 async function findScriptByFile(fileName: string) {
-    const nameNoExt = fileName.replace(new RegExp(`${SCRIPT_EXT.replace(".", "\\.")}$`), "").replace(/\.ts$/, "");
+    const nameNoExt = fileName.replace(/\.ts$/, "");
     const scripts = await listScripts();
     return scripts.find((s) => sanitize(s.meta.name) === nameNoExt) || null;
 }
@@ -119,8 +110,7 @@ function sanitize(displayName: string): string {
 }
 
 function displayNameFromFile(fileName: string): string {
-    const base = fileName.endsWith(SCRIPT_EXT) ? fileName.slice(0, -SCRIPT_EXT.length) : fileName.replace(/\.ts$/, "");
-    return base.replace(/_/g, " ").slice(0, 60) || "Imported script";
+    return fileName.replace(/\.ts$/, "").replace(/_/g, " ").slice(0, 60) || "Imported script";
 }
 
 async function applyEvents(events: ReturnType<typeof computeEvents>): Promise<void> {
@@ -135,8 +125,8 @@ async function applyEvents(events: ReturnType<typeof computeEvents>): Promise<vo
         }
         const target = await findScriptByFile(fileName);
         if (!target) continue;
-        await saveScript({ id: target.id, code: injectName(text, target.meta.name) });
-        await migrateLegacy(fileName, injectName(text, target.meta.name));
+        await saveScript({ id: target.id, code: text, name: target.meta.name });
+        await migrateLegacy(fileName, text);
         dlogLevel("sync", "info", "external change applied", { file: fileName, script: target.meta.name });
         broadcastToUi({ type: "scriptsChanged", source: "folder", file: fileName } as any);
     }
@@ -149,14 +139,14 @@ async function applyEvents(events: ReturnType<typeof computeEvents>): Promise<vo
             continue;
         }
         const existing = await findScriptByFile(fileName);
-        const code = injectName(text, displayNameFromFile(fileName));
+        const code = text;
         if (existing) {
             // canonical appeared for a known script (e.g. manager wrote the
             // new .script.ts name) — content already matches; just migrate
             await migrateLegacy(fileName, code);
             continue;
         }
-        await saveScript({ id: newId(), code });
+        await saveScript({ id: newId(), code, name: displayNameFromFile(fileName) });
         await migrateLegacy(fileName, code);
         dlogLevel("sync", "info", "external file added → script created", { file: fileName });
         broadcastToUi({ type: "scriptsChanged", source: "folder", file: fileName } as any);
@@ -179,7 +169,7 @@ async function applyEvents(events: ReturnType<typeof computeEvents>): Promise<vo
         } else {
             const target = await findScriptByFile(rename.oldName);
             if (target) {
-                await saveScript({ id: target.id, code: injectName(text, displayNameFromFile(rename.newName)) });
+                await saveScript({ id: target.id, code: text, name: displayNameFromFile(rename.newName) });
                 dlogLevel("sync", "info", "external rename applied", { from: rename.oldName, to: rename.newName });
                 broadcastToUi({ type: "scriptsChanged", source: "folder", file: rename.newName } as any);
             }
@@ -240,7 +230,7 @@ export async function deleteFile(fileName: string): Promise<void> {
     try {
         await dirHandle.removeEntry(fileName);
     } catch {}
-    const legacy = realNameOf.get(fileName) || fileName.replace(/\.script\.ts$/, ".ts");
+    const legacy = realNameOf.get(fileName) || fileName.replace(/\.ts$/, ".script.ts");
     if (legacy !== fileName) {
         try {
             await dirHandle.removeEntry(legacy);

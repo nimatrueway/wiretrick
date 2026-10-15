@@ -2,6 +2,7 @@
  * res.declareScript: meta override + typed parameters.
  */
 import { describe, expect, it } from "vitest";
+import "../src/shared/transpile"; // register the sucrase TS/imports transpiler
 import { compileScript } from "../src/shared/compile";
 import { paramDefault, resolveParamValues, isValidParamValue } from "../src/shared/scriptDef";
 
@@ -23,12 +24,13 @@ res.onRequest(() => (cfg.flag ? { cancel: true } : undefined));
 `;
 
 describe("declareScript", () => {
-    it("overrides meta fields from the comment block", () => {
-        const c = compileScript(`// @name Comment name\n${CODE}`);
+    it("sets meta fields", () => {
+        const c = compileScript(CODE);
         expect(c.meta.name).toBe("Declared name");
         expect(c.meta.match).toEqual(["*://a.com/*", "*://b.com/*"]);
         expect(c.meta.strategy).toBe("hook,cdp");
         expect(c.meta.runAt).toBe("document_idle");
+        expect(c.meta.declared).toBe(true);
         expect(c.error).toBeNull();
         expect(c.handlers.onRequest).toHaveLength(1);
     });
@@ -57,16 +59,42 @@ describe("declareScript", () => {
         expect(values).toEqual({ flag: false, note: "hi", mode: "a", hosts: ["x"] });
     });
 
-    it("scripts without declareScript still work", () => {
-        const c = compileScript(`// @name Plain\nres.onRequest(() => {});`);
-        expect(c.meta.name).toBe("Plain");
-        expect(c.paramDefs).toBeUndefined();
+    it("scripts without declareScript are inert libraries", () => {
+        const c = compileScript(`export const helper = () => 42;`);
+        expect(c.meta.declared).toBe(false);
+        expect(c.error).toBeNull();
+        expect(c.handlers.onRequest).toHaveLength(0);
+    });
+
+    it("exports are importable via the module resolver", async () => {
+        const { makeModuleResolver } = await import("../src/shared/compile");
+        const lib = { id: "l1", name: "utils", code: `export function double(n) { return n * 2; }` };
+        const user = {
+            id: "s1",
+            name: "user",
+            code: `import { double } from "./utils";\nres.declareScript({ name: "user", match: ["*"] });\nres.onRequest(() => double(21) === 42 ? { cancel: true } : undefined);`,
+        };
+        const resolver = makeModuleResolver([lib, user], () => ({}));
+        const c = compileScript(user.code, { importModule: resolver.resolve });
+        expect(c.error).toBeNull();
+        expect(c.meta.declared).toBe(true);
+        expect(c.handlers.onRequest[0]({})).toEqual({ cancel: true });
+        expect([...resolver.deps]).toEqual(["utils"]);
+    });
+
+    it("missing imports surface as compile errors", async () => {
+        const { makeModuleResolver } = await import("../src/shared/compile");
+        const resolver = makeModuleResolver([], () => ({}));
+        const c = compileScript(`import { x } from "./nope";\nres.log(x);`, { importModule: resolver.resolve });
+        expect(c.error).toContain("unknown module");
     });
 });
 
 describe("param helpers", () => {
     it("defaults per type", () => {
         expect(paramDefault({ type: "boolean" })).toBe(false);
+        expect(paramDefault({ type: "number" })).toBe(0);
+        expect(paramDefault({ type: "number", default: 5 })).toBe(5);
         expect(paramDefault({ type: "string" })).toBe("");
         expect(paramDefault({ type: "enum", choices: ["a", "b"] })).toBe("a");
         expect(paramDefault({ type: "stringList" })).toEqual([]);
@@ -74,6 +102,9 @@ describe("param helpers", () => {
     it("validates values", () => {
         expect(isValidParamValue({ type: "boolean" }, true)).toBe(true);
         expect(isValidParamValue({ type: "boolean" }, "yes")).toBe(false);
+        expect(isValidParamValue({ type: "number" }, 42)).toBe(true);
+        expect(isValidParamValue({ type: "number" }, "42")).toBe(false);
+        expect(isValidParamValue({ type: "number" }, NaN)).toBe(false);
         expect(isValidParamValue({ type: "enum", choices: ["a"] }, "b")).toBe(false);
         expect(isValidParamValue({ type: "stringList" }, ["a", "b"])).toBe(true);
         expect(isValidParamValue({ type: "stringList" }, ["a", 1])).toBe(false);

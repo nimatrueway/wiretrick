@@ -35,7 +35,7 @@
             chrome.runtime.sendMessage({ type: "getHookBundle", url: location.href }, (resp: any) => {
                 const active = !!(resp && (resp.count > 0 || (resp.domHandlers || []).length));
                 window.postMessage(
-                    { source: MAIN_SOURCE, kind: "status", active, domHandlers: (resp && resp.domHandlers) || [] },
+                    { source: MAIN_SOURCE, kind: "status", active, domHandlers: (resp && resp.domHandlers) || [], libs: (resp && resp.libs) || [] },
                     window.location.origin
                 );
             });
@@ -92,6 +92,7 @@
             chrome.runtime.sendMessage({ type: "getHookBundle", url: location.href }, (r: any) => resolve(r || { domHandlers: [] }));
         });
         const handlers: DomHandler[] = bundle.domHandlers || [];
+        const libSources: { name: string; src: string }[] = bundle.libs || [];
         dlog(`onDom (isolated fallback): ${handlers.length} script(s)${hot ? " (hot refire)" : ""}`);
         for (const h of handlers) {
             const store: any = { onDom: null, onDomOptions: {} };
@@ -138,7 +139,31 @@
                         } catch {}
                     };
                 }
-                new Function("res", "console", `"use strict";\n${h.src}`)(shim, new Proxy(sc, { get: (t, k) => (k in t ? t[k as any] : (console as any)[k]) }));
+                const consoleProxy = new Proxy(sc, { get: (t, k) => (k in t ? t[k as any] : (console as any)[k]) });
+                // page-side require over the shipped library sources
+                const libModules = new Map<string, any>();
+                const normSpec = (spec: string) =>
+                    spec.replace(/^\.\//, "").replace(/\.(ts|js)$/, "").replace(/[^a-zA-Z0-9_-]+/g, "_").toLowerCase();
+                const requireLib = (spec: string): any => {
+                    const key = normSpec(spec);
+                    if (libModules.has(key)) return libModules.get(key);
+                    const lib = libSources.find((l) => normSpec(l.name) === key);
+                    if (!lib) throw new Error(`cannot import "${spec}" — is the library script saved?`);
+                    const moduleObj = { exports: {} as any };
+                    libModules.set(key, moduleObj.exports);
+                    const libStore: any = { onDom: null, onDomOptions: {} };
+                    new Function("res", "console", "require", "module", "exports", `"use strict";\n${lib.src}`)(
+                        { ...shim, onDom: (fn: any, opts: any) => { libStore.onDom = fn; libStore.onDomOptions = opts || {}; } },
+                        consoleProxy,
+                        requireLib,
+                        moduleObj,
+                        moduleObj.exports
+                    );
+                    libModules.set(key, moduleObj.exports);
+                    return moduleObj.exports;
+                };
+                const moduleObj = { exports: {} as any };
+                new Function("res", "console", "require", "module", "exports", `"use strict";\n${h.src}`)(shim, consoleProxy, requireLib, moduleObj, moduleObj.exports);
             } catch (e: any) {
                 dlog(`onDom ${h.name} compile failed (isolated):`, e.message || e);
                 continue;
@@ -176,7 +201,7 @@
             chrome.runtime.sendMessage({ type: "getHookBundle", url: location.href }, (resp: any) => {
                 const active = !!(resp && (resp.count > 0 || (resp.domHandlers || []).length));
                 window.postMessage(
-                    { source: MAIN_SOURCE, kind: "status", active, domHandlers: (resp && resp.domHandlers) || [], hot: true },
+                    { source: MAIN_SOURCE, kind: "status", active, domHandlers: (resp && resp.domHandlers) || [], libs: (resp && resp.libs) || [], hot: true },
                     window.location.origin
                 );
             });

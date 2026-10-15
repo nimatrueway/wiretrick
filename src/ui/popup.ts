@@ -7,15 +7,18 @@ interface ScriptInfo {
     id: string;
     enabled: boolean;
     error: string | null;
-    meta: { name: string };
+    meta: { name: string; declared?: boolean };
     paramDefs?: Record<string, any>;
 }
 
 interface ParamDef {
-    type: "boolean" | "string" | "enum" | "stringList";
+    type: "boolean" | "number" | "string" | "enum" | "stringList";
     default?: any;
     choices?: string[];
     description?: string;
+    min?: number;
+    max?: number;
+    step?: number;
 }
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => document.querySelector(sel) as T;
@@ -48,6 +51,9 @@ function render(scripts: ScriptInfo[]): void {
     $("#empty").classList.toggle("hidden", scripts.length > 0);
 
     for (const script of scripts) {
+        // libraries (no res.declareScript) never appear in the popup —
+        // they're inert on their own and only imported by other scripts
+        if (script.meta.declared === false) continue;
         const li = document.createElement("li");
         li.className = "script-item";
 
@@ -145,6 +151,22 @@ function renderParam(scriptId: string, key: string, def: ParamDef, value: any): 
         input.type = "text";
         input.value = value ?? "";
         input.addEventListener("change", () => void setParam(scriptId, key, input.value));
+        row.appendChild(input);
+    } else if (def.type === "number") {
+        const input = document.createElement("input");
+        input.type = "number";
+        input.value = String(value ?? 0);
+        if (def.min !== undefined) input.min = String(def.min);
+        if (def.max !== undefined) input.max = String(def.max);
+        if (def.step !== undefined) input.step = String(def.step);
+        input.addEventListener("change", () => {
+            let n = Number(input.value);
+            if (!isFinite(n)) n = 0;
+            if (def.min !== undefined) n = Math.max(def.min, n);
+            if (def.max !== undefined) n = Math.min(def.max, n);
+            input.value = String(n);
+            void setParam(scriptId, key, n);
+        });
         row.appendChild(input);
     } else if (def.type === "enum") {
         const sel = document.createElement("select");

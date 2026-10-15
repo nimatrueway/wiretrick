@@ -201,3 +201,13 @@ body {
     font-size: 11px;
     cursor: pointer;
 }
+.param-row input[type="number"] {
+    width: 100%;
+    box-sizing: border-box;
+    background: #1e1e1e;
+    border: 1px solid #3c3c3c;
+    color: #ccc;
+    border-radius: 3px;
+    padding: 3px 6px;
+    font-size: 12px;
+}

@@ -9,7 +9,7 @@ import type { CdpStrategy } from "./strategies/cdpStrategy";
 import type { HeaderChanges } from "./strategies/types";
 import type { Script } from "./scriptStore";
 import { listScripts, onScriptsChanged, saveScript, deleteScript, setEnabled, newId, scriptStorageGet, scriptStorageSet, loadAllParamValues, getParamValues, setParamValue } from "./scriptStore";
-import { compileScript } from "../../shared/compile";
+import { compileScript, makeModuleResolver } from "../../shared/compile";
 import { matchAny } from "../../shared/matcher";
 import { serveStore } from "./strategies/webRequestStrategy";
 import { dlogLevel } from "../../shared/debugLog";
@@ -220,15 +220,6 @@ export function createPipeline(
     chrome.webRequest.onErrorOccurred.addListener(onDone, FILTER);
 
     // ---- manager protocol ----
-    function injectName(code: string, name: string): string {
-        if (!name) return code;
-        if (/^\s*\/\/\s*@name\s+.*$/m.test(code)) {
-            return code.replace(/^(\s*\/\/\s*@name\s+).*$/m, `$1${name}`);
-        }
-        // no @name line: inject one so the manager's name sticks
-        return `// @name ${name}\n${code}`;
-    }
-
     chrome.runtime.onMessage.addListener((msg: any, _sender, sendResponse) => {
         if (msg && msg.type === "listScripts") {
             listScripts().then((scripts) => {
@@ -245,7 +236,8 @@ export function createPipeline(
         if (msg && msg.type === "saveScript") {
             saveScript({
                 id: msg.id || newId(),
-                code: injectName(msg.code, msg.name),
+                code: msg.code,
+                name: msg.name,
                 enabled: msg.enabled,
             })
                 .then((s) => sendResponse(s))
@@ -295,11 +287,22 @@ export function createPipeline(
             // onDom needs the page's window, so it runs in the MAIN world
             // when the page CSP allows, with the bridge as the fallback.
             const domHandlers: { scriptId: string; name: string; when: string; src: string; params: Record<string, any> }[] = [];
+            const libs = new Map<string, string>(); // name → transpiled lib source
             {
                 const pageScripts = await listScripts();
+                // module registry so scripts' `import "./lib"` resolves here;
+                // resolved libs ship with the bundle for the page-side require
+                const overridesFor = (s: { id: string; name: string; code: string }) => ({
+                    importModule: (spec: string) => resolver.resolve(spec),
+                });
+                const resolver = makeModuleResolver(
+                    pageScripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code })),
+                    overridesFor
+                );
                 for (const s of pageScripts) {
                     if (!s.enabled || !matchAny(s.meta.match, msg.url || "")) continue;
-                    const compiled = compileScript(s.code, { paramValues: await getParamValues(s.id) });
+                    const compiled = compileScript(s.code, { paramValues: await getParamValues(s.id), importModule: (spec) => resolver.resolve(spec) });
+                    if (!compiled.meta.declared) continue; // library: inert on its own
                     if (compiled.handlers.onDom) {
                         // FULL transpiled source: the runner compiles it with
                         // a shim so top-level helpers/closures survive
@@ -312,13 +315,18 @@ export function createPipeline(
                         });
                     }
                 }
+                // ship the transitively imported library sources once
+                for (const depName of resolver.deps) {
+                    const lib = pageScripts.find((x) => x.meta.name === depName);
+                    if (lib && !libs.has(lib.meta.name)) libs.set(lib.meta.name, toRunnableJs(lib.code));
+                }
             }
             dlogLevel("pipeline", "debug", "getHookBundle responding", {
                 count: chromeBody.allBodyScripts().length,
                 dom: domHandlers.length,
                 url: msg.url,
             });
-                sendResponse({ count: chromeBody.allBodyScripts().length, domHandlers });
+                sendResponse({ count: chromeBody.allBodyScripts().length, domHandlers, libs: [...libs.entries()].map(([name, src]) => ({ name, src })) });
             })();
             return true; // async sendResponse above
         }

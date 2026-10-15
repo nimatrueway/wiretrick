@@ -17,6 +17,7 @@
     let active = false; // any body scripts exist (bundle metadata says so)
     let patched = false;
     let domHandlers: { scriptId: string; name: string; when: string; src: string; params?: Record<string, any> }[] = [];
+    let libSources: { name: string; src: string }[] = [];
     let domFired = false;
     let reqSeq = 0;
     const pending = new Map<number, (v: any) => void>();
@@ -62,6 +63,7 @@
             const wasActive = active;
             active = !!data.active;
             domHandlers = data.domHandlers || [];
+            libSources = data.libs || [];
             logUp(`status: ${active ? "active" : "inactive"}, dom=${domHandlers.length}${data.hot ? " (hot)" : ""}`);
             if (active) install();
             else if (wasActive) {
@@ -84,15 +86,35 @@
      */
     function compileAndScheduleDom(hot: boolean): void {
         if (domHandlers.length === 0) return;
+        // module registry over the shipped library sources: the page-side
+        // `require` backing ES imports ("./utils" → the script named utils)
+        const libModules = new Map<string, any>();
+        const normSpec = (spec: string) =>
+            spec.replace(/^\.\//, "").replace(/\.(ts|js)$/, "").replace(/[^a-zA-Z0-9_-]+/g, "_").toLowerCase();
+        const requireLib = (spec: string): any => {
+            const key = normSpec(spec);
+            if (libModules.has(key)) return libModules.get(key);
+            const lib = libSources.find((l) => normSpec(l.name) === key);
+            if (!lib) throw new Error(`cannot import "${spec}" — is the library script saved?`);
+            const moduleObj = { exports: {} as any };
+            libModules.set(key, moduleObj.exports); // early: cycle protection
+            const store: any = { onDom: null, onDomOptions: {} };
+            const fn = new Function("res", "console", "require", "module", "exports", `"use strict";\n${lib.src}`);
+            fn(makeDomShim(key, lib.name, store, {}), makeScriptConsole(lib.name), requireLib, moduleObj, moduleObj.exports);
+            libModules.set(key, moduleObj.exports);
+            return moduleObj.exports;
+        };
         const compiledDom: { name: string; when: string; fn: (ctx: any) => any }[] = [];
         let cspBlocked = false;
         for (const d of domHandlers) {
             const store: any = { onDom: null, onDomOptions: {} };
             try {
                 // shadow `console` inside the script so its console.* calls
-                // are attributed to the script (and still reach the page)
-                const fn = new Function("res", "console", `"use strict";\n${d.src}`);
-                fn(makeDomShim(d.scriptId, d.name, store, d.params || {}), makeScriptConsole(d.name));
+                // are attributed to the script (and still reach the page);
+                // require resolves the shipped libs
+                const fn = new Function("res", "console", "require", "module", "exports", `"use strict";\n${d.src}`);
+                const moduleObj = { exports: {} as any };
+                fn(makeDomShim(d.scriptId, d.name, store, d.params || {}), makeScriptConsole(d.name), requireLib, moduleObj, moduleObj.exports);
                 if (store.onDom) {
                     compiledDom.push({ name: d.name, when: store.onDomOptions.when || "DOMContentLoaded", fn: store.onDom });
                 }

@@ -9,6 +9,16 @@ export interface ParamDefBoolean {
     default?: boolean;
     description?: string;
 }
+export interface ParamDefNumber {
+    type: "number";
+    default?: number;
+    description?: string;
+    /** optional bounds — the UI clamps typed values */
+    min?: number;
+    max?: number;
+    /** step for the number input (default 1; use e.g. 0.1 for decimals) */
+    step?: number;
+}
 export interface ParamDefString {
     type: "string";
     default?: string;
@@ -25,17 +35,19 @@ export interface ParamDefStringList {
     default?: string[];
     description?: string;
 }
-export type ParamDef = ParamDefBoolean | ParamDefString | ParamDefEnum | ParamDefStringList;
+export type ParamDef = ParamDefBoolean | ParamDefNumber | ParamDefString | ParamDefEnum | ParamDefStringList;
 
 export type ParamValue<D extends ParamDef> = D extends ParamDefBoolean
     ? boolean
-    : D extends ParamDefString
-      ? string
-      : D extends ParamDefEnum
-        ? D["choices"][number]
-        : D extends ParamDefStringList
-          ? string[]
-          : never;
+    : D extends ParamDefNumber
+      ? number
+      : D extends ParamDefString
+        ? string
+        : D extends ParamDefEnum
+          ? D["choices"][number]
+          : D extends ParamDefStringList
+            ? string[]
+            : never;
 
 export type ParamsOf<T extends Record<string, ParamDef>> = {
     readonly [K in keyof T]: ParamValue<T[K]>;
@@ -46,6 +58,8 @@ export interface ScriptDef<T extends Record<string, ParamDef> = Record<string, P
     /** URL patterns the script activates on (same syntax as @match) */
     match?: string[];
     include?: string[];
+    /** which interception events run (default: both) */
+    phase?: ("request" | "response")[];
     /** interception tier priority list, e.g. ["hook", "cdp"] */
     strategy?: ("auto" | "hook" | "proxy" | "cdp" | "webrequest")[];
     runAt?: "document_start" | "document_end" | "document_idle" | "DOMContentLoaded";
@@ -57,6 +71,8 @@ export function paramDefault(def: ParamDef): any {
     switch (def.type) {
         case "boolean":
             return false;
+        case "number":
+            return 0;
         case "string":
             return "";
         case "enum":
@@ -81,6 +97,8 @@ export function isValidParamValue(def: ParamDef, v: any): boolean {
     switch (def.type) {
         case "boolean":
             return typeof v === "boolean";
+        case "number":
+            return typeof v === "number" && isFinite(v);
         case "string":
             return typeof v === "string";
         case "enum":

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { ChromeBodyStrategy } from "../src/background/engine/strategies/chromeBodyStrategy";
-import { parseMeta } from "../src/shared/metaParser";
+import { compileScript } from "../src/shared/compile";
 import type { Script } from "../src/background/engine/scriptStore";
 
 beforeEach(() => {
@@ -10,7 +10,7 @@ beforeEach(() => {
 });
 
 function makeScript(id: string, code: string): Script {
-    return { id, code, enabled: true, createdAt: 0, updatedAt: 0, error: null, meta: parseMeta(code) };
+    return { id, code, enabled: true, createdAt: 0, updatedAt: 0, error: null, meta: compileScript(code).meta };
 }
 
 const xhr = () => ({ url: "https://x.com/api", method: "GET", tabId: 7, type: "xmlhttprequest", requestId: "r" } as any);
@@ -18,7 +18,7 @@ const xhr = () => ({ url: "https://x.com/api", method: "GET", tabId: 7, type: "x
 describe("hook CSP-blocked fallback", () => {
     it("hookReady tab → allow; after markHookBroken → needsCdp", () => {
         const s = new ChromeBodyStrategy();
-        s.reload([makeScript("a", `// @match *\nres.modifyResponse((c, b) => b);`)]);
+        s.reload([makeScript("a", `res.declareScript({ match: ["*"] });\nres.modifyResponse((c, b) => b);`)]);
         s.markHookReady(7);
         expect((s.handleBeforeRequest(xhr(), null) as any).kind).toBe("allow");
         s.markHookBroken(7);
@@ -27,7 +27,7 @@ describe("hook CSP-blocked fallback", () => {
 
     it("forgetTab clears the broken state (fresh navigation can retry the hook)", () => {
         const s = new ChromeBodyStrategy();
-        s.reload([makeScript("a", `// @match *\nres.modifyResponse((c, b) => b);`)]);
+        s.reload([makeScript("a", `res.declareScript({ match: ["*"] });\nres.modifyResponse((c, b) => b);`)]);
         s.markHookReady(7);
         s.markHookBroken(7);
         s.forgetTab(7);

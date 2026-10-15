@@ -1,12 +1,12 @@
 /**
  * Tier C: chrome.debugger + CDP Fetch domain. Opt-in per script
- * (@strategy cdp) — used for main-frame HTML transforms and anything the
+ * (declareScript strategy: ["cdp"]) — used for main-frame HTML transforms and anything the
  * hook/proxy tiers cannot see. Attaches lazily, only while body-modifying
  * requests are in flight for a matching script.
  */
 import { matchAny } from "../../../shared/matcher";
 import { parseStrategyList } from "../../../shared/metaParser";
-import { compileScript, makeScriptOverrides, isThenable, isAsyncFn, type HandlerFn } from "../../../shared/compile";
+import { compileScript, makeScriptOverrides, makeModuleResolver, isThenable, isAsyncFn, type HandlerFn } from "../../../shared/compile";
 import { storageGet, storageSet } from "../../../shared/chromeApi";
 import type { Script } from "../scriptStore";
 import { log } from "../logs";
@@ -18,7 +18,7 @@ interface CdpScript {
     scriptId: string;
     name: string;
     match: string[];
-    /** the script's raw @strategy list (comma-separated) */
+    /** the script's raw strategy list (comma-separated) */
     strategyRaw: string;
     /** async modifyResponse transforms (compose in order) */
     transform: HandlerFn[];
@@ -61,10 +61,21 @@ export class CdpStrategy {
     private pendingAsyncHeaders = new Map<string, Promise<any[]>>();
 
     reload(scripts: Script[], paramValues?: { [scriptId: string]: Record<string, any> }): void {
+        // module registry: scripts import each other by name ("./utils")
+        let resolveSpec: (spec: string) => any = (spec) => {
+            throw new Error(`cannot import "${spec}" before the module registry is ready`);
+        };
+        const overridesFor = (s: { id: string; name: string; code: string }) =>
+            makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, msg) => log(-1, `[${s.name}] res.log: ${msg}`, "info", id), (id, level, msg) => log(-1, `[${s.name}] console.log: ${msg}`, level, id), paramValues?.[s.id], (spec) => resolveSpec(spec));
+        resolveSpec = makeModuleResolver(
+            scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code })),
+            overridesFor
+        ).resolve;
         this.scripts = [];
         for (const s of scripts) {
             if (!s.enabled) continue;
-            const c = compileScript(s.code, makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, msg) => log(-1, `[${s.meta.name}] res.log: ${msg}`, "info", id), (id, level, msg) => log(-1, `[${s.meta.name}] console.log: ${msg}`, level, id), paramValues?.[s.id]));
+            const c = compileScript(s.code, overridesFor({ id: s.id, name: s.meta.name, code: s.code }));
+            if (!c.meta.declared) continue; // library module: inert, importable
             // CDP is the fallback tier for everything the hook cannot do
             // (main frames, script tags, worker fetches, cold starts) — any
             // handler loads here, sync or async. Sync onRequest handlers

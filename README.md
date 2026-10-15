@@ -46,11 +46,10 @@ the tagged `manifest.json` version.
 ## Writing scripts
 
 ```ts
-// ==ResScript==
-// @name       Mock /api/user
-// @match      *://app.example.com/api/user*
-// @phase      request,response
-// ==/ResScript==
+res.declareScript({
+    name: "Mock /api/user",
+    match: ["*://app.example.com/api/user*"],
+});
 
 // Redirect / cancel / request headers (synchronous):
 res.onRequest((ctx) => {
@@ -71,14 +70,23 @@ res.onResponseHeaders((ctx) => {
 res.modifyResponse((ctx, body) => body.replace('"role":"user"', '"role":"admin"'));
 ```
 
-Supported metadata: `@name`, `@match` (repeatable), `@include`, `@phase`
-(`request`, `response`), `@strategy` (`auto` | `hook` | `proxy` | `cdp` | `webrequest`).
+`res.declareScript` is the only way to activate a script — there is no
+comment-block metadata. A source file without it is a **library**: inert on
+its own (never matches, hidden from the popup) but importable by other
+scripts:
 
-### res.declareScript — type-safe meta + adjustable parameters
+```ts
+// saved script named "utils" (utils.ts in the synced folder):
+export function forceFail(url: string) { /* ... */ }
 
-The programmatic alternative to the comment block (anything you pass
-overrides the directives). `params` are typed knobs the user changes from
-the popup's ⚙ dialog without touching the script:
+// in your script:
+import { forceFail } from "./utils";   // "./utils", "utils", "utils.ts" all resolve
+```
+
+### Parameters — adjustable knobs
+
+`params` are typed knobs the user changes from the popup's ⚙ dialog without
+touching the script:
 
 ```ts
 const cfg = res.declareScript({
@@ -103,12 +111,6 @@ res.onRequest((ctx) => {
 Param values persist per script and apply on save — the change hot-reloads
 like a code edit. Parameter types: `boolean` (switch), `string` (text),
 `enum` (dropdown of `choices`), `stringList` (add/remove list).
-
-### Scripts folder files
-
-Synced scripts are written as **`<name>.script.ts`** so VS Code (and the
-watcher) can tell them apart from ordinary TypeScript files in the folder.
-Legacy `<name>.ts` files are migrated automatically on the next sync tick.
 
 ## Editor
 
@@ -137,11 +139,11 @@ has **interception strategies** — pickable per script, individually or as a
 **comma-separated priority list**:
 
 ```ts
-// ==ResScript==
-// @name       My script
-// @match      *://api.example.com/*
-// @strategy   hook,cdp        ← try these in order
-// ==/ResScript==
+res.declareScript({
+    name: "My script",
+    match: ["*://api.example.com/*"],
+    strategy: ["hook", "cdp"],   // ← try these in order
+});
 ```
 
 | strategy | how it works | can see | banner? | notes |
@@ -157,22 +159,22 @@ has **interception strategies** — pickable per script, individually or as a
 Strategies are tried **in listed order** — the first viable one for a given
 request wins:
 
-- `@strategy hook,cdp` — banner-free for page fetch/XHR; the debugger only as
+- `strategy: ["hook", "cdp"]` — banner-free for page fetch/XHR; the debugger only as
   a cold-start fallback (e.g. the very first navigation before the hook loads).
-- `@strategy cdp` — debugger only. Main-frame HTML and script-tag rewrites
+- `strategy: ["cdp"]` — debugger only. Main-frame HTML and script-tag rewrites
   always work, at the cost of the banner while requests are in flight.
-- `@strategy cdp,hook` — debugger first even for XHR (rare; useful when the
+- `strategy: ["cdp", "hook"]` — debugger first even for XHR (rare; useful when the
   page's fetch wrapper is hostile to monkey-patching).
-- `@strategy hook` — strictly banner-free; requests the hook can't see pass
+- `strategy: ["hook"]` — strictly banner-free; requests the hook can't see pass
   through untouched.
-- `@strategy webrequest,hook` — Firefox-first: network-level streaming when
+- `strategy: ["webrequest", "hook"]` — Firefox-first: network-level streaming when
   available, page hook otherwise.
 
 Invalid names are dropped; a list that ends up empty falls back to `auto`.
 
 **Tier C participation is strict**: the debugger is only ever used when the
 script's list explicitly contains `cdp` (or is the single default `auto`).
-A script with `@strategy hook` / `hook,proxy` / `webrequest` will never
+A script with `strategy: ["hook"]` / `["hook", "proxy"]` / `["webrequest"]` will never
 attach the debugger for any request.
 
 ### Banner minimization (what the engine does on its own)
@@ -184,7 +186,7 @@ attach the debugger for any request.
   matches an in-flight request, and detaches ~8s after the page settles —
   the banner clears while you keep browsing.
 - **Strict tier gating**: a script whose list has no `cdp` (e.g.
-  `@strategy hook`) never attaches the debugger for anything — main frames
+  `strategy: ["hook"]`) never attaches the debugger for anything — main frames
   included; use `res.onDom` for page changes instead.
 - **Claim dedup**: when the hook transforms a request, the CDP tier skips it
   (no double transforms).
@@ -250,7 +252,7 @@ title/DOM changes on SPAs.
 - Change **title/DOM after render** → `res.onDom` — no network interception
   at all, works even when the HTML is service-worker served or hydration
   re-renders it (the resilient choice for SPA title/DOM tweaks).
-- **Never see the banner at all** → `@strategy hook` and combine with
+- **Never see the banner at all** → `strategy: ["hook"]` and combine with
   `res.onDom` for anything the hook can't reach.
 - **Firefox users** → everything is network-level via `webrequest`, no
   banners, ever.
@@ -290,7 +292,7 @@ res.onRequest((ctx) => ({
 It stacks like every terminal result: first script to `respond` wins. On the
 hook tier (fetch/XHR) the response is fully synthesized (status/headers
 included); on the webRequest tier it materializes as a data-URL redirect
-(status becomes 200 there); with `cdp` in `@strategy` the request-stage
+(status becomes 200 there); with `"cdp"` in `strategy` the request-stage
 fulfill honors status and headers.
 
 **`res.onResponseHeaders`** — all matching scripts run and their changes
@@ -307,7 +309,7 @@ body → [script 1 transform] → [script 2 transform] → … → page
 **`res.replaceResponse`** — the first script that returns a body wins;
 later ones are skipped.
 
-**Across strategies**: a script's `@strategy` list only decides *which tier*
+**Across strategies**: a script's `strategy` list only decides *which tier*
 runs its handler — stacking order between scripts is unchanged regardless of
 which tier each one uses.
 
@@ -316,9 +318,9 @@ which tier each one uses.
 All `res.*` hooks accept `async` handlers (returning a Promise). What happens
 with the result depends on the tier:
 
-| hook | hook tier (page fetch/XHR) | webRequest tier (Chrome) | webRequest tier (Firefox) | cdp tier (Chrome, `@strategy cdp`) |
+| hook | hook tier (page fetch/XHR) | webRequest tier (Chrome) | webRequest tier (Firefox) | cdp tier (Chrome, `strategy: ["cdp"]`) |
 |---|---|---|---|---|
-| `onRequest` redirect/cancel | n/a (hook doesn't redirect) | ⚠ result ignored, warning logged — blocking webRequest can't await; use `@strategy cdp` | ✅ awaited natively | ✅ awaited at the Request stage (redirect/cancel honored) |
+| `onRequest` redirect/cancel | n/a (hook doesn't redirect) | ⚠ result ignored, warning logged — blocking webRequest can't await; use `strategy: ["cdp"]` | ✅ awaited natively | ✅ awaited at the Request stage (redirect/cancel honored) |
 | `onRequest` headers | n/a | ⚠ ignored + warning | ✅ awaited | ✅ awaited, applied at the Response stage |
 | `onResponseHeaders` | n/a | ⚠ ignored + warning | ✅ awaited | ✅ awaited, merged into the fulfilled headers |
 | `replaceResponse` | ✅ awaited — the page's `fetch`/XHR promise simply takes as long as the handler needs | ⚠ result ignored (a sync data-URL can't be built late) → the request is re-routed to the cdp tier | ✅ awaited, then redirect | ✅ awaited, fulfills the body |
@@ -330,11 +332,11 @@ Practical rules of thumb:
 - **Mocking/transforming APIs (fetch/XHR)?** Async just works — write
   `res.modifyResponse(async (ctx, body) => { const j = await translate(body); return …; })`.
 - **Redirect/cancel decided asynchronously** (e.g. after an API lookup)?
-  Add `cdp` to `@strategy` (`@strategy hook,cdp`) so the CDP tier can await
+  Add `"cdp"` to `strategy` (`strategy: ["hook", "cdp"]`) so the CDP tier can await
   your handler; note the debugger banner appears while such requests are
   intercepted. Without `cdp`, an async `onRequest` on Chrome logs a warning
   and the request proceeds unmodified.
-- **Async header changes** on Chrome likewise need `@strategy cdp`.
+- **Async header changes** on Chrome likewise need `strategy: ["cdp"]`.
 - **Static replacement from an async source** (file read, fetch): async
   `replaceResponse` + default strategy is all you need.
 

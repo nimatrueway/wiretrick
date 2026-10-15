@@ -61,13 +61,15 @@ export async function getScript(id: string): Promise<Script | undefined> {
     return (obj[STORE_KEY] || {})[id];
 }
 
-export async function saveScript(partial: Pick<Script, "id" | "code"> & Partial<Script>): Promise<Script> {
+export async function saveScript(partial: Pick<Script, "id" | "code"> & Partial<Script> & { name?: string }): Promise<Script> {
     const obj = await storageGet([STORE_KEY, ORDER_KEY]);
     const byId: { [id: string]: Script } = obj[STORE_KEY] || {};
     const order: string[] = obj[ORDER_KEY] || Object.keys(byId);
     const prev = byId[partial.id];
     // compile (not just parse) so res.declareScript values land in meta
     const compiled = compileScript(partial.code);
+    // libraries (no declareScript) still need a display name — the file/UI name
+    if (!compiled.meta.declared && partial.name) compiled.meta.name = partial.name;
     const script: Script = {
         id: partial.id,
         code: partial.code,
