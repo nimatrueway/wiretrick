@@ -109,3 +109,24 @@ describe("param helpers", () => {
         expect(isValidParamValue({ type: "stringList" }, ["a", 1])).toBe(false);
     });
 });
+
+describe("saveScript name handling", () => {
+    it("keeps the previous name when re-saved without one (setEnabled path)", async () => {
+        const store = new Map<string, any>();
+        (globalThis as any).chrome = {
+            runtime: { lastError: undefined },
+            storage: {
+                local: {
+                    get: (keys: any, cb: (o: any) => void) => cb(Object.fromEntries(store)),
+                    set: (items: any, cb?: () => void) => { for (const [k, v] of Object.entries(items)) store.set(k, v); cb?.(); },
+                },
+            },
+        };
+        const { saveScript, setEnabled, getScript } = await import("../src/background/engine/scriptStore");
+        await saveScript({ id: "s1", code: `res.declareScript({ match: ["*"] });\nres.onRequest(() => {});`, name: "redwood" });
+        expect((await getScript("s1"))!.meta.name).toBe("redwood");
+        await setEnabled("s1", false);
+        expect((await getScript("s1"))!.meta.name).toBe("redwood");
+        expect((await getScript("s1"))!.enabled).toBe(false);
+    });
+});

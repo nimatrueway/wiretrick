@@ -71,8 +71,10 @@ export async function saveScript(partial: Pick<Script, "id" | "code"> & Partial<
     // on other scripts loading cleanly
     const compiled = compileScript(partial.code, { importModule: () => makeStubModule() });
     // the script's name is the manager/file name — declareScript has no
-    // name field anymore
-    if (partial.name) compiled.meta.name = partial.name;
+    // name field; keep the previous name when the caller didn't pass one
+    // (e.g. setEnabled re-saves the stored script)
+    const name = partial.name ?? prev?.meta.name;
+    if (name) compiled.meta.name = name;
     const script: Script = {
         id: partial.id,
         code: partial.code,
