@@ -59,6 +59,7 @@ function status(text: string, cls = ""): void {
 async function refresh(): Promise<void> {
     scripts = await send({ type: "listScripts" });
     renderList();
+    syncModels();
     if (selectedId && !scripts.some((s) => s.id === selectedId)) {
         selectedId = null;
     }
@@ -112,19 +113,60 @@ function renderList(): void {
 }
 
 // ---- editor ----
+/** One Monaco model per script so `import "./utilities"` resolves across
+ * the editor's virtual workspace (file:///<name>.ts per script). */
+const models = new Map<string, any>();
+
+function safeFileName(name: string): string {
+    return (name || "script").replace(/[^a-zA-Z0-9_-]+/g, "_").slice(0, 60) || "script";
+}
+
+function syncModels(): void {
+    if (!editor) return;
+    const monaco = (window as any).monaco;
+    const seen = new Set<string>();
+    for (const s of scripts) {
+        seen.add(s.id);
+        const uri = monaco.Uri.parse(`file:///${safeFileName(s.meta.name)}.ts`);
+        let m = models.get(s.id);
+        if (m && m.uri.toString() !== uri.toString()) {
+            // renamed: fresh model at the new path, drop the old one
+            m.dispose();
+            m = null;
+            models.delete(s.id);
+        }
+        if (!m) {
+            m = monaco.editor.getModel(uri) || monaco.editor.createModel(s.code, "typescript", uri);
+            models.set(s.id, m);
+        } else if (m.getValue() !== s.code && !(s.id === selectedId && dirty)) {
+            applyingExternal = true;
+            m.setValue(s.code);
+            applyingExternal = false;
+        }
+    }
+    for (const [id, m] of models) {
+        if (!seen.has(id)) {
+            m.dispose();
+            models.delete(id);
+        }
+    }
+}
+
 async function renderEditorEmpty(): Promise<void> {
     $("#script-name").setAttribute("disabled", "");
     $("#btn-save").setAttribute("disabled", "");
     if (editor) {
-        editor.setValue("// Select or create a script to start editing.");
+        editor.setModel(null);
     }
 }
 
 /** Programmatic editor update (select / external hot-reload). */
 function setEditorValue(code: string): void {
     if (!editor) return;
+    const m = selectedId ? models.get(selectedId) : null;
     applyingExternal = true;
-    editor.setValue(code);
+    if (m) m.setValue(code);
+    else editor.setValue(code);
     editor.clearHistory?.();
     applyingExternal = false;
     dirty = false;
@@ -154,7 +196,15 @@ function selectReal(id: string): void {
     $input("#script-name").value = script.meta.name;
     $("#script-name").removeAttribute("disabled");
     $("#btn-save").removeAttribute("disabled");
-    setEditorValue(script.code);
+    syncModels();
+    const m = models.get(id);
+    if (m && editor.getModel() !== m) {
+        editor.setModel(m);
+        dirty = false;
+        status("saved ✓");
+    } else {
+        setEditorValue(script.code);
+    }
     setDirty(false);
     updateOpenVscode();
 }

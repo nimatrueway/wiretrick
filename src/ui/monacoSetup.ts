@@ -30,10 +30,16 @@ export async function loadMonaco(): Promise<any> {
             filePath: "file:///res-api.d.ts",
         },
     ]);
+    const ts = monacoApi.languages.typescript;
     monacoApi.languages.typescript.typescriptDefaults.setCompilerOptions({
-        target: monacoApi.languages.typescript.ScriptTarget.ES2020,
+        target: ts.ScriptTarget.ES2020,
         lib: ["es2020", "dom"],
         allowNonTsExtensions: true,
+        // scripts import each other by relative path ("./utilities")
+        module: ts.ModuleKind.ESNext,
+        moduleResolution: ts.ModuleResolutionKind.Bundler ?? 100,
+        allowImportingTsExtensions: true,
+        noEmit: true,
     });
 
     return monacoApi;

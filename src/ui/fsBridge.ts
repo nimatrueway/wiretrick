@@ -74,7 +74,7 @@ export async function openFolder(
     await writeHandleText(dirHandle, "res-api.d.ts", apiDts);
     await writeHandleText(
         dirHandle,
-        "jsconfig.json",
+        "tsconfig.json",
         JSON.stringify(
             {
                 compilerOptions: {
@@ -82,9 +82,11 @@ export async function openFolder(
                     lib: ["es2020", "dom"],
                     module: "esnext",
                     moduleResolution: "bundler",
+                    allowImportingTsExtensions: true,
                     allowNonTsExtensions: true,
                     noEmit: true,
                 },
+                include: ["**/*.ts"],
             },
             null,
             2
