@@ -6,6 +6,7 @@ import { loadMonaco, STARTER_TEMPLATE } from "./monacoSetup";
 import { API_REFERENCE } from "./apiReference";
 import { SAMPLES } from "./samples";
 import * as fsBridge from "./fsBridge";
+import type { Uri, IPosition, IRange, IKeyboardEvent, editor as MonacoEditor } from "monaco-editor";
 import type { Script } from "../background/engine/scriptStore";
 
 // ---- state ----
@@ -474,6 +475,19 @@ function setupDialogs(): void {
         applyLogLevel(sel.value);
     });
 
+    // verbose Monaco/navigation diagnostics
+    const verboseBox = $("#settings-monaco-verbose") as HTMLInputElement;
+    chrome.storage.local.get("resMonacoVerbose", (d) => {
+        monacoVerbose = !!(d && d.resMonacoVerbose);
+        verboseBox.checked = monacoVerbose;
+        navLog(`verbose logging ${monacoVerbose ? "on" : "off"}`);
+    });
+    verboseBox.addEventListener("change", () => {
+        monacoVerbose = verboseBox.checked;
+        chrome.storage.local.set({ resMonacoVerbose: monacoVerbose });
+        navLog(`verbose logging ${monacoVerbose ? "on" : "off"}`, "warn");
+    });
+
     // panel history size
     const capInput = $("#settings-log-cap") as HTMLInputElement;
     chrome.storage.local.get("resLogCap", (d) => {
@@ -771,6 +785,12 @@ async function main(): Promise<void> {
         fontSize: 13,
     });
     editor.addCommand((window as any).monaco.KeyMod.CtrlCmd | (window as any).monaco.KeyCode.KeyS, () => void saveCurrent());
+    const opener: MonacoEditor.ICodeEditorOpener = {
+        openCodeEditor: (_source, resource, selection) => openScriptAt(resource, selection),
+    };
+    (window as any).monaco.editor.registerEditorOpener(opener);
+    navLog("editor opener registered");
+    installMonacoTrace();
 
     editor.onDidChangeModelContent(() => {
         if (applyingExternal) return;
@@ -964,6 +984,93 @@ function select(id: string): void {
         }
     }
     selectReal(id);
+}
+
+let monacoVerbose = false;
+
+/** Navigation diagnostics. Warnings/errors always log; the rest only with the
+ * "Verbose Monaco logging" setting. Verbose lines use "warn" so the panel's
+ * level filter never hides them. */
+function navLog(msg: string, level = "info"): void {
+    if (level === "info") {
+        if (!monacoVerbose) return;
+        level = "warn";
+    }
+    const text = `[manager] nav: ${msg}`;
+    console.debug(text);
+    appendLog({ at: Date.now(), message: text, level });
+    chrome.runtime.sendMessage({ type: "debugLog", entry: { at: Date.now(), src: "manager", msg: `nav: ${msg}`, level } }, () => void chrome.runtime.lastError);
+}
+
+/** Verbose-only tracing of the triggers and the TS worker's answer. */
+function installMonacoTrace(): void {
+    const m = (window as any).monaco;
+    window.addEventListener("error", (e) => navLog(`window error: ${e.message}`, "error"));
+    window.addEventListener("unhandledrejection", (e) => navLog(`unhandled rejection: ${String((e.reason && e.reason.stack) || e.reason)}`, "error"));
+    editor.onDidChangeModel((e: MonacoEditor.IModelChangedEvent) => navLog(`model changed: ${e.oldModelUrl?.toString()} -> ${e.newModelUrl?.toString()}`));
+    editor.onKeyDown((e: IKeyboardEvent) => {
+        if (e.keyCode === m.KeyCode.F12) void traceDefinition("F12");
+    });
+    editor.onMouseDown((e: MonacoEditor.IEditorMouseEvent) => {
+        if (e.event.leftButton && (e.event.ctrlKey || e.event.metaKey) && e.target.position) {
+            navLog(`ctrl/cmd-click at ${e.target.position.lineNumber}:${e.target.position.column}`);
+            void traceDefinition("click", e.target.position);
+        }
+    });
+    navLog(`monaco trace installed; models=${[...models].map(([id, mo]) => `${id}=${mo.uri.toString()}`).join(", ")}`);
+}
+
+async function traceDefinition(trigger: string, pos?: IPosition): Promise<void> {
+    if (!monacoVerbose) return;
+    try {
+        const m = (window as any).monaco;
+        const model = editor.getModel();
+        const p = pos ?? editor.getPosition();
+        if (!model || !p) return navLog(`${trigger}: no model/position`, "warn");
+        const getWorker = await m.languages.typescript.getTypeScriptWorker();
+        const worker = await getWorker(model.uri);
+        const defs = await worker.getDefinitionAtPosition(model.uri.toString(), model.getOffsetAt(p));
+        navLog(`${trigger}: worker definitions at ${model.uri.toString()}:${p.lineNumber}:${p.column} = ${JSON.stringify(defs)}`);
+    } catch (e) {
+        navLog(`${trigger}: worker lookup failed: ${e instanceof Error ? e.stack || e.message : String(e)}`, "error");
+    }
+}
+
+/** Go to Definition / peek targets: switch to the script owning `resource`
+ * (honouring the unsaved-changes prompt) and reveal the target range. */
+function openScriptAt(resource: Uri, selection?: IRange | IPosition): boolean {
+    try {
+        const known = [...models].map(([id, m]) => `${id}=${m.uri.toString()}`);
+        navLog(`open ${resource.toString()} sel=${JSON.stringify(selection)} from=${selectedId} dirty=${dirty}`);
+        const target = [...models].find(([, m]) => m.uri.toString() === resource.toString());
+        if (!target) {
+            navLog(`no script owns ${resource.toString()}; known models: ${known.join(", ")}`, "warn");
+            return false;
+        }
+        const [id] = target;
+        if (id !== selectedId) {
+            if (dirty && selectedId && !confirm("Discard unsaved changes?")) {
+                navLog("canceled by user (unsaved changes kept)");
+                return true;
+            }
+            selectReal(id);
+        }
+        if (selection) {
+            if ("startLineNumber" in selection) {
+                editor.setSelection(selection);
+                editor.revealRangeInCenter(selection);
+            } else {
+                editor.setPosition(selection);
+                editor.revealPositionInCenter(selection);
+            }
+        }
+        editor.focus();
+        navLog(`opened ${id}`);
+        return true;
+    } catch (e) {
+        navLog(`failed: ${e instanceof Error ? e.stack || e.message : String(e)}`, "error");
+        return false;
+    }
 }
 
 main();
