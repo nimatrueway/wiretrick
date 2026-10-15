@@ -42,8 +42,6 @@ function openManager(scriptId?: string): void {
 
 const ICON_PEN =
     '<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168l10-10zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207 11.207 2.5zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293l6.5-6.5zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/></svg>';
-const ICON_GEAR =
-    '<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true"><path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492zM5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0z"/><path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.893 3.434-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.893-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52l-.094-.319z"/></svg>';
 
 function render(scripts: ScriptInfo[]): void {
     const list = $("#script-list");
@@ -81,37 +79,46 @@ function render(scripts: ScriptInfo[]): void {
 
         if (script.paramDefs && Object.keys(script.paramDefs).length) {
             const conf = document.createElement("button");
-            conf.className = "btn-icon";
-            conf.innerHTML = ICON_GEAR;
-            conf.title = "Configure parameters";
-            conf.setAttribute("aria-label", "Configure");
-            conf.addEventListener("click", () => void openConfig(script));
+            conf.className = "btn-fold";
+            conf.textContent = "▸";
+            conf.title = "Show parameters";
+            conf.setAttribute("aria-label", "Toggle parameters");
+            conf.addEventListener("click", () => void toggleFold(script, li, conf));
             li.appendChild(conf);
         }
         list.appendChild(li);
     }
 }
 
-// ---- parameter config panel ----
-let configScriptId: string | null = null;
+// ---- inline parameter folds ----
+const openFolds = new Set<string>();
 
-async function openConfig(script: ScriptInfo): Promise<void> {
-    configScriptId = script.id;
-    $("#config-title").textContent = script.meta.name;
-    const panel = $("#config-panel");
-    panel.classList.remove("hidden");
-    const body = $("#config-body");
-    body.textContent = "Loading…";
+async function toggleFold(script: ScriptInfo, li: HTMLElement, btn: HTMLButtonElement): Promise<void> {
+    const existing = li.nextElementSibling;
+    if (openFolds.has(script.id) && existing && existing.classList.contains("param-fold")) {
+        existing.remove();
+        openFolds.delete(script.id);
+        btn.textContent = "▸";
+        btn.title = "Show parameters";
+        return;
+    }
+    openFolds.add(script.id);
+    btn.textContent = "▾";
+    btn.title = "Hide parameters";
+    const fold = document.createElement("li");
+    fold.className = "param-fold";
+    fold.textContent = "Loading…";
+    li.after(fold);
     const { defs, values } = await send<{ defs: Record<string, ParamDef>; values: Record<string, any> }>({
         type: "getScriptParams",
         scriptId: script.id,
     });
-    if (configScriptId !== script.id) return; // closed meanwhile
-    body.innerHTML = "";
+    if (!openFolds.has(script.id) || !fold.isConnected) return; // closed meanwhile
+    fold.innerHTML = "";
     for (const [key, def] of Object.entries(defs)) {
-        body.appendChild(renderParam(script.id, key, def, values[key]));
+        fold.appendChild(renderParam(script.id, key, def, values[key]));
     }
-    if (!Object.keys(defs).length) body.textContent = "This script declares no parameters.";
+    if (!Object.keys(defs).length) fold.textContent = "This script declares no parameters.";
 }
 
 async function setParam(scriptId: string, key: string, value: any): Promise<void> {
@@ -180,60 +187,21 @@ function renderParam(scriptId: string, key: string, def: ParamDef, value: any): 
         sel.addEventListener("change", () => void setParam(scriptId, key, sel.value));
         row.appendChild(sel);
     } else if (def.type === "stringList") {
-        const list: string[] = Array.isArray(value) ? [...value] : [];
-        const tags = document.createElement("div");
-        tags.className = "param-tags";
-        const addRow = document.createElement("div");
-        addRow.className = "param-add";
-        const input = document.createElement("input");
-        input.type = "text";
-        input.placeholder = "add…";
-        const addBtn = document.createElement("button");
-        addBtn.textContent = "+";
-
-        const renderTags = () => {
-            tags.innerHTML = "";
-            for (const item of list) {
-                const tag = document.createElement("span");
-                tag.className = "param-tag";
-                tag.textContent = item;
-                const x = document.createElement("button");
-                x.textContent = "✕";
-                x.title = "Remove";
-                x.addEventListener("click", async () => {
-                    list.splice(list.indexOf(item), 1);
-                    renderTags();
-                    await setParam(scriptId, key, [...list]);
-                });
-                tag.appendChild(x);
-                tags.appendChild(tag);
-            }
-        };
-        const add = async () => {
-            const v = input.value.trim();
-            if (!v || list.includes(v)) return;
-            list.push(v);
-            input.value = "";
-            renderTags();
-            await setParam(scriptId, key, [...list]);
-        };
-        addBtn.addEventListener("click", () => void add());
-        input.addEventListener("keydown", (e) => {
-            if (e.key === "Enter") void add();
+        const ta = document.createElement("textarea");
+        ta.value = (Array.isArray(value) ? value : []).join("\n");
+        ta.spellcheck = false;
+        ta.placeholder = "one value per line";
+        ta.addEventListener("change", () => {
+            const list = ta.value.split("\n").map((x) => x.trim()).filter(Boolean);
+            void setParam(scriptId, key, list);
         });
-        addRow.append(input, addBtn);
-        renderTags();
-        row.append(tags, addRow);
+        row.appendChild(ta);
     }
     return row;
 }
 
 async function main(): Promise<void> {
     $("#btn-manager").addEventListener("click", () => openManager());
-    $("#config-close").addEventListener("click", () => {
-        configScriptId = null;
-        $("#config-panel").classList.add("hidden");
-    });
     render(await send({ type: "listScripts" }));
     // ensure the Tier-B proxy service worker is active (persists after close)
     try {

@@ -308,9 +308,9 @@ function makeCollectorShim(store: any, overrides?: ResApiOverrides): any {
 }
 
 /**
- * Builds res.declareScript: applies name/match/strategy/runAt onto the
- * parsed meta (comment block stays as the fallback), collects param defs,
- * and returns the resolved param values for the script to use.
+ * Builds res.declareScript: applies match/strategy/phase/runAt onto the
+ * script's meta and marks it declared, collects param defs, and returns
+ * the resolved param values for the script to use.
  */
 function createDeclareShim(meta: ResMeta, storedValues?: Record<string, any>) {
     const state: { defs?: Record<string, import("./scriptDef").ParamDef> } = {};

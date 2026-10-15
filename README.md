@@ -69,8 +69,8 @@ res.onResponseHeaders((ctx) => {
 res.modifyResponse((ctx, body) => body.replace('"role":"user"', '"role":"admin"'));
 ```
 
-`res.declareScript` is the only way to activate a script — there is no
-comment-block metadata. A source file without it is a **library**: inert on
+`res.declareScript` is the only way to activate a script.
+A source file without it is a **library**: inert on
 its own (never matches, hidden from the popup) but importable by other
 scripts:
 

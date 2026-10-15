@@ -137,11 +137,11 @@ declare namespace ResOverride {
         /** URL patterns the script activates on. */
         match?: string[];
         include?: string[];
-        /** Interception tier priority list (overrides @strategy). */
+        /** Interception tier priority list. */
         strategy?: ("auto" | "hook" | "proxy" | "cdp" | "webrequest")[];
         /** Which interception events run (default: both). */
         phase?: ("request" | "response")[];
-        /** Default onDom timing (overrides @run-at). */
+        /** Default onDom timing. */
         runAt?: "document_start" | "document_end" | "document_idle" | "DOMContentLoaded";
         /**
          * Adjustable parameters — editable from the popup's ⚙ dialog and
@@ -169,7 +169,7 @@ declare namespace ResOverride {
  * Result handling differs per tier — see the README's "Async handlers"
  * section. Short version: async replaceResponse/modifyResponse/onDom work
  * everywhere; async onRequest/onResponseHeaders are honored natively on
- * Firefox, and on Chrome require 'cdp' in @strategy (a warning is logged
+ * Firefox, and on Chrome require "cdp" in the strategy list (a warning is logged
  * otherwise and the result is ignored).
  */
 declare const res: {
@@ -177,7 +177,7 @@ declare const res: {
      * Intercept a request before it is sent. Return { respond }, { redirect },
      * { cancel }, { headers } or a combination. May be async — see the
      * stacking/async notes above (on Chrome the async result is honored in
-     * the cdp tier, @strategy hook,cdp).
+     * the cdp tier, strategy: ["hook", "cdp"]).
      *
      * TERMINAL results (first one wins, stops the script chain):
      *   respond  — synthesize the response immediately; the network is never
@@ -223,7 +223,7 @@ declare const res: {
      * body (string or bytes) and returns the new body.
      * On Firefox this is network-level (filterResponseData). On Chrome it runs
      * via the JS network hook (page-initiated requests), the extension proxy
-     * (other resources), or CDP when @strategy cdp is set.
+     * (other resources), or CDP when strategy: ["cdp"] is set.
      */
     modifyResponse(
         transform: (
@@ -333,9 +333,9 @@ declare const res: {
     ): void;
 
     /**
-     * Declarative script definition — the type-safe way to set the meta
-     * (name/match/strategy/runAt) and declare adjustable parameters.
-     * Anything you pass here overrides the ==ResScript== comment block.
+     * Declarative script definition — the ONLY way to activate a script:
+     * sets the meta (match/strategy/phase/runAt) and declares adjustable
+     * parameters. Sources without it are importable library modules.
      *
      * Returns the resolved parameter values (stored UI values merged over
      * your defaults), typed from your `params` defs — so the script never

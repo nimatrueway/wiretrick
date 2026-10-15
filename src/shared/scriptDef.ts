@@ -1,7 +1,6 @@
 /**
  * Declarative script definition: res.declareScript({...}).
- * Type-safe alternative/complement to the ==ResScript== comment block —
- * values provided here override the comment directives.
+ * The only way to activate a script — sources without it are libraries.
  */
 
 export interface ParamDefBoolean {
@@ -54,7 +53,7 @@ export type ParamsOf<T extends Record<string, ParamDef>> = {
 };
 
 export interface ScriptDef<T extends Record<string, ParamDef> = Record<string, ParamDef>> {
-    /** URL patterns the script activates on (same syntax as @match) */
+    /** URL patterns the script activates on */
     match?: string[];
     include?: string[];
     /** which interception events run (default: both) */
