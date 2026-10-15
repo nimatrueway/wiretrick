@@ -1,6 +1,12 @@
 body {
     margin: 0;
     width: 400px;
+    min-width: 320px;
+    max-width: 780px;
+    min-height: 200px;
+    max-height: 580px;
+    resize: both;
+    overflow: auto;
     background: #1e1e1e;
     color: #ccc;
     font: 13px/1.4 -apple-system, "Segoe UI", sans-serif;
@@ -119,12 +125,21 @@ body {
 
 .param-fold {
     border-top: 1px solid #3c3c3c;
-    margin-top: 6px;
-    padding: 8px 0 4px;
-    width: 100%;
+    border-left: 2px solid #007acc;
+    margin: 4px 8px 8px 12px;
+    padding: 10px 14px 6px 12px;
+    width: auto;
+    background: #232324;
+    border-radius: 0 4px 4px 0;
+    list-style: none;
 }
 .param-fold:empty { display: none; }
-.param-row { margin-bottom: 10px; }
+.param-row { margin-bottom: 12px; }
+.param-row:last-child { margin-bottom: 4px; }
+.param-row input[type="text"]:focus,
+.param-row input[type="number"]:focus,
+.param-row select:focus,
+.param-row textarea:focus { border-color: #007acc; outline: none; }
 .param-label {
     display: flex;
     justify-content: space-between;
@@ -133,7 +148,7 @@ body {
     font-size: 12px;
     margin-bottom: 2px;
 }
-.param-desc { color: #858585; font-size: 11px; margin-bottom: 4px; }
+.param-desc { color: #858585; font-size: 11px; margin-bottom: 5px; line-height: 1.35; }
 .param-row input[type="text"], .param-row input[type="number"] {
     width: 100%;
     box-sizing: border-box;
@@ -156,8 +171,12 @@ body {
 .param-row textarea {
     width: 100%;
     box-sizing: border-box;
-    min-height: 64px;
+    min-height: 72px;
     resize: vertical;
+    white-space: pre;
+    overflow: auto;
+    overflow-wrap: normal;
+    word-wrap: normal;
     background: #1e1e1e;
     border: 1px solid #3c3c3c;
     color: #ccc;
@@ -176,3 +195,10 @@ body {
     line-height: 1;
 }
 .btn-fold:hover { color: #ccc; border-color: #007acc; }
+
+.param-row textarea::-webkit-scrollbar,
+body::-webkit-scrollbar { width: 8px; height: 8px; }
+.param-row textarea::-webkit-scrollbar-thumb,
+body::-webkit-scrollbar-thumb { background: #3c3c3c; border-radius: 4px; }
+.param-row textarea::-webkit-scrollbar-thumb:hover,
+body::-webkit-scrollbar-thumb:hover { background: #4a4a4a; }
