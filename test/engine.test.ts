@@ -77,7 +77,6 @@ describe("WebRequestStrategy", () => {
         const s = new WebRequestStrategy();
         s.reload([
             makeScript("a", `res.declareScript({
-    name: "redirector",
     match: ["*://api.example.com/*"],
 });
 res.onRequest((ctx) => ({ redirect: "https://mocked.example.com/data" }));`),
@@ -106,7 +105,6 @@ res.onRequest((ctx) => ({ redirect: "https://mocked.example.com/data" }));`),
         const s = new WebRequestStrategy();
         s.reload([
             makeScript("a", `res.declareScript({
-    name: "mock",
     match: ["*://api.example.com/v1/data"],
 });
 res.replaceResponse(() => JSON.stringify({ mocked: true }));`),
@@ -123,7 +121,6 @@ res.replaceResponse(() => JSON.stringify({ mocked: true }));`),
         const s = new WebRequestStrategy();
         s.reload([
             makeScript("a", `res.declareScript({
-    name: "cors",
     match: ["*://api.example.com/*"],
     phase: ["response"],
 });
@@ -161,7 +158,6 @@ describe("ChromeBodyStrategy", () => {
         const s = new ChromeBodyStrategy();
         s.reload([
             makeScript("a", `res.declareScript({
-    name: "rewriter",
     match: ["*://cdn.example.com/lib.js"],
 });
 res.modifyResponse((ctx, body) => body.replace("foo", "bar"));`),
@@ -191,7 +187,6 @@ res.modifyResponse((ctx, body) => body.replace("foo", "bar"));`),
         const s = new ChromeBodyStrategy();
         s.reload([
             makeScript("a", `res.declareScript({
-    name: "cdpone",
     match: ["*"],
     strategy: ["cdp"],
 });

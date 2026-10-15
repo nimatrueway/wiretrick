@@ -47,7 +47,6 @@ the tagged `manifest.json` version.
 
 ```ts
 res.declareScript({
-    name: "Mock /api/user",
     match: ["*://app.example.com/api/user*"],
 });
 
@@ -90,7 +89,6 @@ touching the script:
 
 ```ts
 const cfg = res.declareScript({
-    name: "Mock /api/user",
     match: ["*://app.example.com/*"],
     strategy: ["hook", "cdp"],
     params: {
@@ -140,7 +138,6 @@ has **interception strategies** — pickable per script, individually or as a
 
 ```ts
 res.declareScript({
-    name: "My script",
     match: ["*://api.example.com/*"],
     strategy: ["hook", "cdp"],   // ← try these in order
 });

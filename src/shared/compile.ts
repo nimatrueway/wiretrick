@@ -154,6 +154,19 @@ export function compileScript(code: string, overrides?: ResApiOverrides): Compil
 }
 
 /**
+ * Module stub for meta-only compiles (scriptStore.saveScript): imports
+ * resolve to a callable/gettable proxy so top-level code that references
+ * library exports doesn't throw before declareScript runs.
+ */
+export function makeStubModule(): any {
+    const stub: any = new Proxy(function () {}, {
+        get: (_t, k) => (k === Symbol.toPrimitive ? () => "" : stub),
+        apply: () => stub,
+    });
+    return stub;
+}
+
+/**
  * Module registry over the stored scripts: ES `import ... from "./utils"`
  * resolves against script names (case-insensitive, "./x", "x.ts" all match
  * the script named "x"). Libs compile lazily and memoize; circular imports
@@ -304,7 +317,6 @@ function createDeclareShim(meta: ResMeta, storedValues?: Record<string, any>) {
     const run = (def: import("./scriptDef").ScriptDef): any => {
         if (!def || typeof def !== "object") return {};
         meta.declared = true;
-        if (def.name) meta.name = def.name;
         if (def.match?.length) meta.match = [...def.match];
         if (def.include?.length) meta.include = [...def.include];
         if (def.strategy?.length) meta.strategy = def.strategy.join(",");

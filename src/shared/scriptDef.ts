@@ -54,7 +54,6 @@ export type ParamsOf<T extends Record<string, ParamDef>> = {
 };
 
 export interface ScriptDef<T extends Record<string, ParamDef> = Record<string, ParamDef>> {
-    name?: string;
     /** URL patterns the script activates on (same syntax as @match) */
     match?: string[];
     include?: string[];

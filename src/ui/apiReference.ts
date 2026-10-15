@@ -11,7 +11,6 @@ export const API_REFERENCE: ApiSection[] = [
         body: `Every active script declares itself with res.declareScript. A source file WITHOUT it is a library: inert on its own (never matches, hidden from the popup) but importable by other scripts.
 
 const cfg = res.declareScript({
-    name: "My script",
     match: ["*://example.com/*", "*://api.example.com/v1/*"],
     include: [],                        // extra URL patterns
     phase: ["request", "response"],     // which events run (default: both)
@@ -30,7 +29,7 @@ export function double(n: number) { return n * 2; }
 
 // in your script:
 import { double } from "./utils";
-res.declareScript({ name: "uses utils", match: ["*://example.com/*"] });
+res.declareScript({ match: ["*://example.com/*"] });
 res.log(double(21)); // 42
 
 Imports work in every tier (background compiles + the page-side onDom hook); libraries ship with the page bundle automatically. "./utils", "utils", "utils.ts" all resolve.`,
@@ -40,7 +39,6 @@ Imports work in every tier (background compiles + the page-side onDom hook); lib
         body: `Meta + parameters in one type-safe call. Params are adjustable from the popup's ⚙ dialog without editing the script, and come back typed:
 
 const cfg = res.declareScript({
-    name: "My script",
     match: ["*://example.com/*"],
     strategy: ["hook", "cdp"],
     runAt: "document_idle",
@@ -157,7 +155,7 @@ res.replaceResponse(async () => {
 });
 
 // async redirect via cdp tier:
-res.declareScript({ name: "async redirect", match: ["*://example.com/*"], strategy: ["hook", "cdp"] });
+res.declareScript({ match: ["*://example.com/*"], strategy: ["hook", "cdp"] });
 res.onRequest(async (ctx) => {
     const target = await decideUpstream(ctx.url);
     return { redirect: target };

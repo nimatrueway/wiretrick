@@ -134,9 +134,7 @@ declare namespace ResOverride {
     };
 
     interface ScriptDef<T extends Record<string, ParamDef> = Record<string, ParamDef>> {
-        /** Display name (overrides @name). */
-        name?: string;
-        /** URL patterns the script activates on (same syntax as @match). */
+        /** URL patterns the script activates on. */
         match?: string[];
         include?: string[];
         /** Interception tier priority list (overrides @strategy). */

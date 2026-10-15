@@ -2,7 +2,7 @@
  * chrome.storage.local backed script store.
  */
 import type { ResMeta } from "../../shared/metaParser";
-import { compileScript } from "../../shared/compile";
+import { compileScript, makeStubModule } from "../../shared/compile";
 
 export interface Script {
     id: string;
@@ -66,10 +66,13 @@ export async function saveScript(partial: Pick<Script, "id" | "code"> & Partial<
     const byId: { [id: string]: Script } = obj[STORE_KEY] || {};
     const order: string[] = obj[ORDER_KEY] || Object.keys(byId);
     const prev = byId[partial.id];
-    // compile (not just parse) so res.declareScript values land in meta
-    const compiled = compileScript(partial.code);
-    // libraries (no declareScript) still need a display name — the file/UI name
-    if (!compiled.meta.declared && partial.name) compiled.meta.name = partial.name;
+    // compile (not just parse) so res.declareScript values land in meta;
+    // imports resolve to stubs here — declaration capture must not depend
+    // on other scripts loading cleanly
+    const compiled = compileScript(partial.code, { importModule: () => makeStubModule() });
+    // the script's name is the manager/file name — declareScript has no
+    // name field anymore
+    if (partial.name) compiled.meta.name = partial.name;
     const script: Script = {
         id: partial.id,
         code: partial.code,

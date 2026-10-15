@@ -9,7 +9,7 @@ import type { CdpStrategy } from "./strategies/cdpStrategy";
 import type { HeaderChanges } from "./strategies/types";
 import type { Script } from "./scriptStore";
 import { listScripts, onScriptsChanged, saveScript, deleteScript, setEnabled, newId, scriptStorageGet, scriptStorageSet, loadAllParamValues, getParamValues, setParamValue } from "./scriptStore";
-import { compileScript, makeModuleResolver } from "../../shared/compile";
+import { compileScript, makeModuleResolver, makeStubModule } from "../../shared/compile";
 import { matchAny } from "../../shared/matcher";
 import { serveStore } from "./strategies/webRequestStrategy";
 import { dlogLevel } from "../../shared/debugLog";
@@ -224,10 +224,11 @@ export function createPipeline(
         if (msg && msg.type === "listScripts") {
             listScripts().then((scripts) => {
                 // scripts saved before declareScript existed have no stored
-                // paramDefs — compile them on the fly so the UI can offer ⚙
+                // paramDefs — compile them on the fly (imports stubbed: we
+                // only need declarations here) so the UI can offer ⚙
                 sendResponse(
                     scripts.map((s) =>
-                        s.paramDefs === undefined ? { ...s, paramDefs: compileScript(s.code).paramDefs || {} } : s
+                        s.paramDefs === undefined ? { ...s, paramDefs: compileScript(s.code, { importModule: () => makeStubModule() }).paramDefs || {} } : s
                     )
                 );
             });
@@ -342,7 +343,7 @@ export function createPipeline(
                     sendResponse({ defs: {}, values: {} });
                     return;
                 }
-                const compiled = compileScript(s.code, { paramValues: await getParamValues(s.id) });
+                const compiled = compileScript(s.code, { paramValues: await getParamValues(s.id), importModule: () => makeStubModule() });
                 sendResponse({
                     defs: compiled.paramDefs || {},
                     values: resolveParamValues(compiled.paramDefs || {}, await getParamValues(s.id)),

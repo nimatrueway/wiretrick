@@ -11,7 +11,6 @@ export const SAMPLES: SampleScript[] = [
         name: "Redirect a URL",
         blurb: "Send any request to a different URL (main frames navigate, subresources re-fetch).",
         code: `res.declareScript({
-    name: "Redirect example",
     match: ["*://example.com/old-endpoint*"],
     phase: ["request"],
 });
@@ -23,7 +22,6 @@ res.onRequest((ctx) => {
         name: "Block requests",
         blurb: "Cancel matching requests — analytics, trackers, anything.",
         code: `res.declareScript({
-    name: "Block example",
     match: ["*://example.com/analytics.js"],
 });
 res.onRequest(() => ({ cancel: true }));`,
@@ -32,7 +30,6 @@ res.onRequest(() => ({ cancel: true }));`,
         name: "Modify request headers",
         blurb: "Set or remove request headers before they leave the browser.",
         code: `res.declareScript({
-    name: "Request headers example",
     match: ["*://api.example.com/*"],
 });
 res.onRequest(() => ({
@@ -46,7 +43,6 @@ res.onRequest(() => ({
         name: "CORS unlock",
         blurb: "Add permissive response headers so other pages can consume the API.",
         code: `res.declareScript({
-    name: "CORS unlock example",
     match: ["*://api.example.com/*"],
     phase: ["response"],
 });
@@ -64,7 +60,6 @@ res.onResponseHeaders(() => ({
         name: "Mock a fetch/XHR API",
         blurb: "Replace a JSON API response. Banner-free (page hook tier).",
         code: `res.declareScript({
-    name: "Mock API example",
     match: ["*://api.example.com/v1/user*"],
 });
 res.replaceResponse(() => JSON.stringify({
@@ -77,7 +72,6 @@ res.replaceResponse(() => JSON.stringify({
         name: "Transform an API response",
         blurb: "Stream-modify a JSON body — flip fields, inject values.",
         code: `res.declareScript({
-    name: "Transform JSON example",
     match: ["*://api.example.com/v1/config*"],
 });
 res.modifyResponse((ctx, body) => {
@@ -91,7 +85,6 @@ res.modifyResponse((ctx, body) => {
         name: "Rewrite page HTML",
         blurb: "Transform the document itself on Chrome (uses the debugger briefly).",
         code: `res.declareScript({
-    name: "Rewrite HTML example",
     match: ["*://example.com/*"],
 });
 res.modifyResponse((ctx, body) => {
@@ -103,7 +96,6 @@ res.modifyResponse((ctx, body) => {
         name: "DOM / title changes",
         blurb: "Runs at DOM-ready in the page. Best for titles and DOM text — works even when the HTML is service-worker served or hydration re-renders it.",
         code: `res.declareScript({
-    name: "DOM changes example",
     match: ["*://example.com/*"],
 });
 res.onDom(() => {
@@ -116,7 +108,6 @@ res.onDom(() => {
         name: "Serve a local file",
         blurb: "Replace a response with file content (path or data: URL).",
         code: `res.declareScript({
-    name: "Serve file example",
     match: ["*://cdn.example.com/lib.js"],
 });
 res.replaceResponse(() => ({
@@ -127,7 +118,6 @@ res.replaceResponse(() => ({
         name: "Per-script storage",
         blurb: "Keep state between requests with res.storage.",
         code: `res.declareScript({
-    name: "Storage example",
     match: ["*://api.example.com/*"],
 });
 res.onRequest(async (ctx) => {
@@ -140,7 +130,6 @@ res.onRequest(async (ctx) => {
         name: "Parameters (declareScript)",
         blurb: "Adjustable knobs the user changes from the popup's ⚙ dialog — no code edits.",
         code: `const cfg = res.declareScript({
-    name: "Params example",
     match: ["*://api.example.com/*"],
     strategy: ["hook", "cdp"],
     params: {

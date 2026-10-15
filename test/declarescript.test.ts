@@ -8,7 +8,6 @@ import { paramDefault, resolveParamValues, isValidParamValue } from "../src/shar
 
 const CODE = `
 const cfg = res.declareScript({
-    name: "Declared name",
     match: ["*://a.com/*", "*://b.com/*"],
     strategy: ["hook", "cdp"],
     runAt: "document_idle",
@@ -26,7 +25,7 @@ res.onRequest(() => (cfg.flag ? { cancel: true } : undefined));
 describe("declareScript", () => {
     it("sets meta fields", () => {
         const c = compileScript(CODE);
-        expect(c.meta.name).toBe("Declared name");
+        expect(c.meta.name).toBe("Untitled script"); // declareScript has no name field — the script/file name is authoritative
         expect(c.meta.match).toEqual(["*://a.com/*", "*://b.com/*"]);
         expect(c.meta.strategy).toBe("hook,cdp");
         expect(c.meta.runAt).toBe("document_idle");
@@ -72,7 +71,7 @@ describe("declareScript", () => {
         const user = {
             id: "s1",
             name: "user",
-            code: `import { double } from "./utils";\nres.declareScript({ name: "user", match: ["*"] });\nres.onRequest(() => double(21) === 42 ? { cancel: true } : undefined);`,
+            code: `import { double } from "./utils";\nres.declareScript({ match: ["*"] });\nres.onRequest(() => double(21) === 42 ? { cancel: true } : undefined);`,
         };
         const resolver = makeModuleResolver([lib, user], () => ({}));
         const c = compileScript(user.code, { importModule: resolver.resolve });

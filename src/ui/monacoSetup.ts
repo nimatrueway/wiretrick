@@ -46,7 +46,6 @@ export async function loadMonaco(): Promise<any> {
 }
 
 export const STARTER_TEMPLATE = `res.declareScript({
-    name: "My first script",
     match: ["*://*.example.com/*"],
 });
 // Declarative meta + adjustable parameters (type-safe; editable from

@@ -74,18 +74,29 @@ function renderList(): void {
     const list = $("#script-list");
     list.innerHTML = "";
     for (const script of scripts) {
+        const isLib = script.meta.declared === false;
         const li = document.createElement("li");
-        li.className = "script-item" + (script.id === selectedId ? " selected" : "");
+        li.className = "script-item" + (script.id === selectedId ? " selected" : "") + (isLib ? " utility" : "");
         li.dataset.id = script.id;
 
-        const toggle = document.createElement("div");
-        toggle.className = "switch" + (script.enabled ? " on" : "");
-        toggle.title = script.enabled ? "Disable" : "Enable";
-        toggle.addEventListener("click", async (e) => {
-            e.stopPropagation();
-            await send({ type: "setEnabled", id: script.id, enabled: !script.enabled });
-            await refresh();
-        });
+        let toggle: HTMLElement;
+        if (isLib) {
+            // utility module: no toggle — it's inert on its own, importable
+            toggle = document.createElement("span");
+            toggle.className = "util-icon";
+            toggle.textContent = "𝑓";
+            toggle.title = "Utility module — importable by other scripts, never runs on its own";
+        } else {
+            const sw = document.createElement("div");
+            sw.className = "switch" + (script.enabled ? " on" : "");
+            sw.title = script.enabled ? "Disable" : "Enable";
+            sw.addEventListener("click", async (e) => {
+                e.stopPropagation();
+                await send({ type: "setEnabled", id: script.id, enabled: !script.enabled });
+                await refresh();
+            });
+            toggle = sw;
+        }
 
         const name = document.createElement("span");
         name.className = "script-name";

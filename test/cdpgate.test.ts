@@ -22,30 +22,30 @@ function makeScript(id: string, code: string): Script {
 describe("tier C participation gate", () => {
     it("script with @strategy hook only is NOT loaded into CdpStrategy", () => {
         const c = new CdpStrategy();
-        c.reload([makeScript("a", `res.declareScript({ name: "hooky", match: ["*"], strategy: ["hook"] });\nres.modifyResponse((c, b) => b);`)]);
+        c.reload([makeScript("a", `res.declareScript({ match: ["*"], strategy: ["hook"] });\nres.modifyResponse((c, b) => b);`)]);
         expect(c.cdpRelevantScripts("https://x.com/anything")).toEqual([]);
     });
 
     it("script with @strategy cdp IS loaded", () => {
         const c = new CdpStrategy();
-        c.reload([makeScript("a", `res.declareScript({ name: "cdponly", match: ["*"], strategy: ["cdp"] });\nres.modifyResponse((c, b) => b);`)]);
+        c.reload([makeScript("a", `res.declareScript({ match: ["*"], strategy: ["cdp"] });\nres.modifyResponse((c, b) => b);`)]);
         expect(c.cdpRelevantScripts("https://x.com/").length).toBe(1);
     });
 
     it("auto strategy participates (default hook→cdp)", () => {
         const c = new CdpStrategy();
-        c.reload([makeScript("a", `res.declareScript({ name: "autob", match: ["*"] });\nres.modifyResponse((c, b) => b);`)]);
+        c.reload([makeScript("a", `res.declareScript({ match: ["*"] });\nres.modifyResponse((c, b) => b);`)]);
         expect(c.cdpRelevantScripts("https://x.com/").length).toBe(1);
     });
 
     it("hook,proxy list without cdp → excluded", () => {
         const c = new CdpStrategy();
-        c.reload([makeScript("a", `res.declareScript({ name: "nope", match: ["*"], strategy: ["hook", "proxy"] });\nres.modifyResponse((c, b) => b);`)]);
+        c.reload([makeScript("a", `res.declareScript({ match: ["*"], strategy: ["hook", "proxy"] });\nres.modifyResponse((c, b) => b);`)]);
         expect(c.cdpRelevantScripts("https://x.com/")).toEqual([]);
     });
 
     it("disabled scripts never load", () => {
-        const s = makeScript("a", `res.declareScript({ name: "x", match: ["*"], strategy: ["cdp"] });\nres.modifyResponse((c, b) => b);`);
+        const s = makeScript("a", `res.declareScript({ match: ["*"], strategy: ["cdp"] });\nres.modifyResponse((c, b) => b);`);
         s.enabled = false;
         const c = new CdpStrategy();
         c.reload([s]);
