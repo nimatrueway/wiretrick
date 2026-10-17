@@ -99,6 +99,7 @@ describe("param helpers", () => {
         expect(paramDefault({ type: "stringList" })).toEqual([]);
     });
     it("validates values", () => {
+        expect(isValidParamValue({ type: "string", multiline: true }, "a\nb")).toBe(true);
         expect(isValidParamValue({ type: "boolean" }, true)).toBe(true);
         expect(isValidParamValue({ type: "boolean" }, "yes")).toBe(false);
         expect(isValidParamValue({ type: "number" }, 42)).toBe(true);

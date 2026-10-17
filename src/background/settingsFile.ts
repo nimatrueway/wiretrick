@@ -1,0 +1,86 @@
+/**
+ * settings.yaml ⇄ storage. Text is always generated from storage, so the
+ * manager's virtual file, the popup and the synced folder converge on one
+ * source of truth.
+ */
+import { listScripts, loadAllParamValues, setParamValue, setEnabled } from "./engine/scriptStore";
+import { patchSettings } from "../shared/settingsYamlPatch";
+import {
+    renderSettings, parseSettings, planSettings,
+    DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL,
+    type GlobalSettings, type ScriptSettingsState, type SettingsDoc, type SettingsPlan,
+} from "../shared/settingsYaml";
+
+function storageGet(keys: string[]): Promise<Record<string, any>> {
+    return new Promise((r) => chrome.storage.local.get(keys, (d) => r(d || {})));
+}
+
+function storageSet(items: Record<string, any>): Promise<void> {
+    return new Promise((r) => chrome.storage.local.set(items, () => r()));
+}
+
+async function currentState(): Promise<{ globals: GlobalSettings; scripts: ScriptSettingsState[] }> {
+    const g = await storageGet(["resLogLevel", "resLogCap"]);
+    const stored = await loadAllParamValues();
+    const scripts = (await listScripts()).map((s) => ({
+        name: s.meta.name,
+        declared: s.meta.declared !== false,
+        enabled: s.enabled,
+        defs: s.paramDefs ?? {},
+        values: stored[s.id] ?? {},
+    }));
+    return { globals: { logLevel: g.resLogLevel ?? DEFAULT_LOG_LEVEL, logCap: g.resLogCap ?? DEFAULT_LOG_CAP }, scripts };
+}
+
+const TEXT_KEY = "resSettingsText";
+
+/**
+ * Current settings.yaml. Patches `existing` (the synced file / editor text;
+ * default: the last applied text) in place so user formatting survives;
+ * regenerates canonically only when there is no parsable base.
+ */
+export async function getSettingsText(existing?: string): Promise<string> {
+    const { globals, scripts } = await currentState();
+    const base = existing ?? (await storageGet([TEXT_KEY]))[TEXT_KEY];
+    return (typeof base === "string" ? patchSettings(base, globals, scripts) : null) ?? renderSettings(globals, scripts);
+}
+
+async function applyPlan(plan: SettingsPlan): Promise<void> {
+    const ids = new Map((await listScripts()).map((s) => [s.meta.name, s.id]));
+    for (const p of plan.scripts) {
+        const id = ids.get(p.name)!;
+        for (const [k, v] of Object.entries(p.params)) await setParamValue(id, k, v);
+        if (p.enabled !== undefined) await setEnabled(id, p.enabled);
+    }
+    const patch: Record<string, any> = {};
+    if (plan.globals.logLevel) patch.resLogLevel = plan.globals.logLevel;
+    if (plan.globals.logCap) patch.resLogCap = plan.globals.logCap;
+    if (Object.keys(patch).length) await storageSet(patch);
+}
+
+/** Apply text to storage (a full-file edit: everything in it applies). Syntax errors leave all state untouched. */
+export async function applySettingsText(text: string): Promise<{ error?: string }> {
+    let doc;
+    try {
+        doc = parseSettings(text);
+    } catch (e: any) {
+        return { error: String(e?.message || e).split("\n")[0] };
+    }
+    const { globals, scripts } = await currentState();
+    await applyPlan(planSettings(doc, globals, scripts));
+    await storageSet({ [TEXT_KEY]: text });
+    return {};
+}
+
+/**
+ * Apply a structured settings document (import bundle path). Unlike
+ * applySettingsText, the stored base text is then re-canonicalized —
+ * patching the previous base when parsable — so a bundle's minimal
+ * settings shape doesn't freeze the file into that shape.
+ */
+export async function applySettingsDoc(doc: SettingsDoc): Promise<{ error?: string }> {
+    const { globals, scripts } = await currentState();
+    await applyPlan(planSettings(doc, globals, scripts));
+    await storageSet({ [TEXT_KEY]: await getSettingsText() });
+    return {};
+}

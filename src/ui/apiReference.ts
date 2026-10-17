@@ -46,6 +46,7 @@ const cfg = res.declareScript({
         enabled: { type: "boolean", default: true, description: "Master switch" },
         status: { type: "enum", choices: ["500", "503"], default: "500" },
         note: { type: "string", default: "forced" },
+        body: { type: "string", multiline: true, default: "" }, // textarea; YAML block scalar in settings.yaml
         hosts: { type: "stringList", default: [] },
     },
 });
@@ -174,7 +175,7 @@ res.onRequest(async (ctx) => {
     {
         title: "Tiers & the debugger banner",
         body: `hook — page-level fetch/XHR override. Banner-free. Misses <script src>, <img>, documents.
-proxy — extension service worker (reserved for the MV3 path).
+proxy — MV3: routes to the debugger tier (script tags, images, CSS…); unused on MV2.
 cdp — chrome.debugger + Fetch domain. Sees everything, but Chrome shows a "debugging" banner while attached; the engine attaches only while needed and detaches when idle.
 Scripts that only ever match fetch/XHR are learned to be hook-only and never trigger the banner.`,
     },

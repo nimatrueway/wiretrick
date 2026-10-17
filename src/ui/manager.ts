@@ -6,6 +6,11 @@ import { loadMonaco, STARTER_TEMPLATE } from "./monacoSetup";
 import { API_REFERENCE } from "./apiReference";
 import { SAMPLES } from "./samples";
 import * as fsBridge from "./fsBridge";
+import { buildBundle, parseBundleText, bundleSettingsDoc, vscodeTargetPath } from "./bundle";
+import { createQuickOpenPalette } from "./quickOpen";
+import { computeDirty } from "./dirtyState";
+import { parseSettings, SETTINGS_FILE, type SettingsDoc } from "../shared/settingsYaml";
+import { dlogLevel } from "../shared/debugLog";
 import type { Uri, IPosition, IRange, IKeyboardEvent, editor as MonacoEditor } from "monaco-editor";
 import type { Script } from "../background/engine/scriptStore";
 
@@ -30,6 +35,28 @@ function setDirty(v: boolean): void {
     }
 }
 let applyingExternal = false;
+
+/** last-saved content per open file (model uri → text): reverting to it clears dirty */
+const baselines = new Map<string, string>();
+const setBaseline = (m: any, text: string): void => {
+    baselines.set(m.uri.toString(), text);
+};
+
+/** dirty = content differs from the file's baseline OR the name differs from the stored one */
+function updateDirty(): void {
+    if (!editor) return;
+    const m = editor.getModel();
+    const isScript = !!selectedId && selectedId !== SETTINGS_ID;
+    const script = isScript ? scripts.find((s) => s.id === selectedId) : null;
+    const dirtyNow = computeDirty(
+        m ? m.getValue() : "",
+        m ? (baselines.get(m.uri.toString()) ?? null) : null,
+        isScript ? $input("#script-name").value : undefined,
+        script ? script.meta.name : undefined
+    );
+    setDirty(dirtyNow);
+    status(dirtyNow ? "unsaved…" : "saved ✓", dirtyNow ? "dirty" : "");
+}
 
 // ---- elements ----
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => document.querySelector(sel) as T;
@@ -57,13 +84,62 @@ function status(text: string, cls = ""): void {
 }
 
 // ---- script list ----
+const SETTINGS_ID = "__settings__";
+let settingsModel: any = null;
+
+async function loadSettingsModel(force = false): Promise<void> {
+    if (!editor) return;
+    const monaco = (window as any).monaco;
+    // Monaco's built-in yaml basic language provides colorization
+    const { text } = await send({ type: "getSettingsYaml", text: settingsModel?.getValue() });
+    if (!settingsModel) {
+        settingsModel = monaco.editor.createModel(text, "yaml", monaco.Uri.parse("file:///settings.yaml"));
+        setBaseline(settingsModel, text);
+    } else if (settingsModel.getValue() !== text && (force || !dirty)) {
+        applyingExternal = true;
+        settingsModel.setValue(text);
+        applyingExternal = false;
+        setBaseline(settingsModel, text);
+    }
+}
+
+async function selectSettings(): Promise<void> {
+    selectedId = SETTINGS_ID;
+    renderList();
+    $input("#script-name").value = "settings.yaml";
+    $("#script-name").setAttribute("disabled", "");
+    $("#btn-save").removeAttribute("disabled");
+    await loadSettingsModel(true);
+    if (editor.getModel() !== settingsModel) {
+        captureViewState();
+        editor.setModel(settingsModel);
+        restoreViewState(settingsModel);
+    }
+    setDirty(false);
+    status("saved ✓");
+    updateOpenVscode();
+}
+
+async function saveSettings(): Promise<void> {
+    const res = await send({ type: "applySettingsYaml", text: editor.getValue() });
+    if (res && res.error) {
+        status(`settings.yaml: ${res.error}`, "error");
+        return;
+    }
+    await loadSettingsModel(true); // re-canonicalize (restores commented defaults)
+    setDirty(false);
+    status("saved ✓");
+    await refresh();
+}
+
 async function refresh(): Promise<void> {
     scripts = await send({ type: "listScripts" });
     renderList();
     syncModels();
-    if (selectedId && !scripts.some((s) => s.id === selectedId)) {
+    if (selectedId && selectedId !== SETTINGS_ID && !scripts.some((s) => s.id === selectedId)) {
         selectedId = null;
     }
+    if (selectedId === SETTINGS_ID) return;
     if (!selectedId && scripts.length > 0) {
         select(scripts[0].id);
     } else if (!selectedId) {
@@ -74,6 +150,19 @@ async function refresh(): Promise<void> {
 function renderList(): void {
     const list = $("#script-list");
     list.innerHTML = "";
+    const sli = document.createElement("li");
+    sli.className = "script-item utility" + (selectedId === SETTINGS_ID ? " selected" : "");
+    sli.dataset.id = SETTINGS_ID;
+    const gear = document.createElement("span");
+    gear.className = "util-icon";
+    gear.textContent = "⚙";
+    gear.title = "Settings file — global settings and per-script params & enabled state";
+    const sname = document.createElement("span");
+    sname.className = "script-name";
+    sname.textContent = "settings.yaml";
+    sli.append(gear, sname);
+    sli.addEventListener("click", () => select(SETTINGS_ID));
+    list.appendChild(sli);
     for (const script of scripts) {
         const isLib = script.meta.declared === false;
         const li = document.createElement("li");
@@ -129,6 +218,22 @@ function renderList(): void {
  * the editor's virtual workspace (file:///<name>.ts per script). */
 const models = new Map<string, any>();
 
+/** Per-file cursor/scroll memory: view state is captured when a model is
+ * switched away from and restored when the user comes back (VS Code-style,
+ * in-memory for the session). */
+const viewStates = new Map<string, any>();
+
+function captureViewState(): void {
+    if (!editor) return;
+    const m = editor.getModel();
+    if (m) viewStates.set(m.uri.toString(), editor.saveViewState());
+}
+
+function restoreViewState(m: any): void {
+    const vs = viewStates.get(m.uri.toString());
+    if (vs) editor.restoreViewState(vs);
+}
+
 function safeFileName(name: string): string {
     return (name || "script").replace(/[^a-zA-Z0-9_-]+/g, "_").slice(0, 60) || "script";
 }
@@ -150,14 +255,18 @@ function syncModels(): void {
         if (!m) {
             m = monaco.editor.getModel(uri) || monaco.editor.createModel(s.code, "typescript", uri);
             models.set(s.id, m);
+            setBaseline(m, s.code);
         } else if (m.getValue() !== s.code && !(s.id === selectedId && dirty)) {
             applyingExternal = true;
             m.setValue(s.code);
             applyingExternal = false;
+            setBaseline(m, s.code);
         }
     }
     for (const [id, m] of models) {
         if (!seen.has(id)) {
+            viewStates.delete(m.uri.toString());
+            baselines.delete(m.uri.toString());
             m.dispose();
             models.delete(id);
         }
@@ -177,8 +286,10 @@ function setEditorValue(code: string): void {
     if (!editor) return;
     const m = selectedId ? models.get(selectedId) : null;
     applyingExternal = true;
-    if (m) m.setValue(code);
-    else editor.setValue(code);
+    if (m) {
+        m.setValue(code);
+        setBaseline(m, code);
+    } else editor.setValue(code);
     editor.clearHistory?.();
     applyingExternal = false;
     dirty = false;
@@ -211,9 +322,11 @@ function selectReal(id: string): void {
     syncModels();
     const m = models.get(id);
     if (m && editor.getModel() !== m) {
+        captureViewState();
         editor.setModel(m);
         dirty = false;
         status("saved ✓");
+        restoreViewState(m);
     } else {
         setEditorValue(script.code);
     }
@@ -222,6 +335,7 @@ function selectReal(id: string): void {
 }
 
 async function saveCurrent(): Promise<void> {
+    if (selectedId === SETTINGS_ID) return saveSettings();
     if (!selectedId || !editor) return;
     const code = editor.getValue();
     const name = $input("#script-name").value.trim() || "Untitled script";
@@ -231,6 +345,8 @@ async function saveCurrent(): Promise<void> {
         void result;
     } else {
         status("saved ✓");
+        const m = models.get(selectedId);
+        if (m) setBaseline(m, code); // the stored text is now the baseline
     }
     setDirty(false);
     // two-way sync: push the saved source into the VS Code folder
@@ -502,6 +618,25 @@ function setupDialogs(): void {
         logCap = n;
         chrome.storage.local.set({ resLogCap: n });
         refilterLog();
+    });
+
+    // settings.yaml edits land in storage — reflect them live
+    chrome.storage.onChanged.addListener((c) => {
+        if (c.resLogLevel?.newValue) {
+            sel.value = c.resLogLevel.newValue;
+            applyLogLevel(c.resLogLevel.newValue);
+        }
+        if (c.resLogCap?.newValue) {
+            logCap = c.resLogCap.newValue;
+            capInput.value = String(logCap);
+            refilterLog();
+        }
+        if (c.resScripts || c.resParams || c.resLogLevel || c.resLogCap) {
+            void (async () => {
+                if (selectedId === SETTINGS_ID) await loadSettingsModel();
+                if (c.resScripts) await refresh();
+            })();
+        }
     });
 
     // absolute folder path for the ↗ VS Code button
@@ -776,6 +911,8 @@ function makeLogMovable(): void {
 // ---- wiring ----
 async function main(): Promise<void> {
     await loadMonaco();
+    // test/e2e seam: adopt an arbitrary directory handle (e.g. OPFS) for watching
+    (window as any).__resAdoptFolder = (h: any) => fsBridge.adoptForWatch(h);
     editor = (window as any).monaco.editor.create($("#monaco-host"), {
         value: "",
         language: "typescript",
@@ -785,6 +922,28 @@ async function main(): Promise<void> {
         fontSize: 13,
     });
     editor.addCommand((window as any).monaco.KeyMod.CtrlCmd | (window as any).monaco.KeyCode.KeyS, () => void saveCurrent());
+    // VS Code shortcuts: ⌘P quick-open (scripts + settings.yaml), ⌘, opens
+    // the Settings dialog. ⌘/ (comment), ⌘F (find), ⌘D (next occurrence)
+    // and Shift+Alt+A (block comment) are Monaco built-ins.
+    const palette = createQuickOpenPalette(
+        $("#quick-open"),
+        $input("#qo-input"),
+        $("#qo-list"),
+        () => [{ id: SETTINGS_ID, name: "settings.yaml" }, ...scripts.map((s) => ({ id: s.id, name: s.meta.name }))],
+        (id) => {
+            select(id);
+            editor.focus(); // VS Code behavior: a ⌘P jump focuses the editor
+        }
+    );
+    document.addEventListener("keydown", (e) => {
+        if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "p") {
+            e.preventDefault();
+            palette.toggle();
+        } else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === ",") {
+            e.preventDefault();
+            openDialog("settings-panel");
+        }
+    });
     const opener: MonacoEditor.ICodeEditorOpener = {
         openCodeEditor: (_source, resource, selection) => openScriptAt(resource, selection),
     };
@@ -794,16 +953,26 @@ async function main(): Promise<void> {
 
     editor.onDidChangeModelContent(() => {
         if (applyingExternal) return;
-        setDirty(true);
-        status("unsaved…", "dirty");
+        updateDirty();
     });
 
     $("#btn-save").addEventListener("click", () => void saveCurrent());
+    $("#btn-debug-bg").addEventListener("click", () => {
+        // MV2 has no API that opens DevTools for the live background event
+        // page (chrome.debugger is CDP sessions for OTHER targets; opening
+        // background.html in a tab spawns a second instance, not the live
+        // one). chrome://extensions' "Inspect views" is the only way in —
+        // and chrome.tabs.create may navigate to chrome:// URLs (links and
+        // window.open may not).
+        chrome.tabs.create({ url: `chrome://extensions/?id=${chrome.runtime.id}` }, () => void chrome.runtime.lastError);
+        status('inspect background: click "background page" under Inspect views');
+    });
     $("#btn-open-vscode").addEventListener("click", () => {
-        const script = scripts.find((s) => s.id === selectedId);
         const folder = (window as any).__resSyncPath as string;
-        if (!script || !folder) return;
-        const file = folder.replace(/\/+$/, "") + "/" + fsBridge.fileNameFor(script.id, script.meta.name);
+        if (!folder || !selectedId) return;
+        // the ⚙ settings.yaml entry is virtual (not in `scripts`) — its
+        // target is <folder>/settings.yaml, written by folderSync
+        const file = vscodeTargetPath(folder, selectedId, scripts.find((s) => s.id === selectedId)?.meta.name, SETTINGS_ID, SETTINGS_FILE);
         const url = vscodeScheme() + file.split("/").map(encodeURIComponent).join("/");        // launch from THIS page (user gesture): external-protocol requests
         // from the background page are dropped by Chromium
         const a = document.createElement("a");
@@ -845,8 +1014,8 @@ async function main(): Promise<void> {
         status("debug log downloaded");
     });
     $("#script-name").addEventListener("input", () => {
-        setDirty(true);
-        status("unsaved (name) — save to apply", "dirty");
+        updateDirty();
+        if (dirty) status("unsaved (name) — save to apply", "dirty");
     });
 
     // VS Code folder sync
@@ -873,59 +1042,68 @@ async function main(): Promise<void> {
 
     // import / export
     $("#btn-export").addEventListener("click", async () => {
-        // scripts + settings travel together
-        const settings: Record<string, any> = await new Promise((r) =>
-            chrome.storage.local.get(["resLogLevel", "resLogCap"], (d) => r(d || {}))
+        // scripts + settings travel together in one YAML document; the
+        // parsed settings.yaml carries globals AND per-script param values
+        const { text } = await send({ type: "getSettingsYaml", text: settingsModel?.getValue() });
+        let doc: SettingsDoc = { settings: null, params: {} };
+        try {
+            doc = parseSettings(text);
+        } catch {
+            /* unreachable: getSettingsYaml always returns parsable text */
+        }
+        const payload = buildBundle(
+            doc,
+            scripts.map((s) => ({ name: s.meta.name, code: s.code, enabled: s.enabled }))
         );
-        const payload = {
-            format: "rescript-bundle",
-            version: 1,
-            exportedAt: new Date().toISOString(),
-            settings: {
-                logLevel: settings.resLogLevel,
-                logCap: settings.resLogCap,
-            },
-            scripts: scripts.map((s) => ({ name: s.meta.name, code: s.code, enabled: s.enabled })),
-        };
-        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+        const blob = new Blob([payload], { type: "text/yaml" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = "rescripts-export.json";
+        a.download = "rescripts-export.yaml";
         a.click();
         URL.revokeObjectURL(url);
     });
     $("#btn-import").addEventListener("click", () => {
         const input = document.createElement("input");
         input.type = "file";
-        input.accept = ".json,.ts,.js";
+        input.accept = ".yaml,.yml,.json,.ts,.js";
         input.onchange = async () => {
             const file = input.files?.[0];
             if (!file) return;
             const text = await file.text();
-            if (file.name.endsWith(".json")) {
-                const parsed = JSON.parse(text);
-                const isBundle = parsed && parsed.format === "rescript-bundle";
-                const items = isBundle ? parsed.scripts : parsed;
-                for (const item of Array.isArray(items) ? items : [items]) {
-                    await send({ type: "saveScript", id: uuid(), code: item.code, name: item.name, enabled: item.enabled });
-                }
-                // bundle: restore settings too
-                if (isBundle && parsed.settings) {
-                    const restore: Record<string, any> = {};
-                    if (parsed.settings.logLevel) restore.resLogLevel = parsed.settings.logLevel;
-                    if (parsed.settings.logCap) restore.resLogCap = parsed.settings.logCap;
-                    if (Object.keys(restore).length) {
-                        await new Promise((r) => chrome.storage.local.set(restore, () => r(null)));
-                        if (restore.resLogLevel) applyLogLevel(restore.resLogLevel);
-                        if (restore.resLogCap) {
-                            logCap = restore.resLogCap;
-                            (document.querySelector("#settings-log-cap") as HTMLInputElement).value = String(logCap);
-                            refilterLog();
-                        }
+            const isYaml = /\.ya?ml$/i.test(file.name);
+            if (isYaml || file.name.endsWith(".json")) {
+                // bundle formats: yaml (new) or json (legacy, incl. its
+                // settings object)
+                const bundle = parseBundleText(text);
+                if (bundle) {
+                    for (const item of bundle.scripts) {
+                        await send({ type: "saveScript", id: uuid(), code: item.code, name: item.name, enabled: item.enabled });
                     }
-                    status(`imported ${items.length} script(s) + settings ✓`);
+                    // settings apply through the real path (params +
+                    // globals); storage.onChanged refreshes the settings UI
+                    const doc = bundleSettingsDoc(bundle);
+                    if (doc) {
+                        const res = await send({ type: "applySettingsDoc", doc });
+                        if (res && res.error) {
+                            status(`imported ${bundle.scripts.length} script(s); settings: ${res.error}`, "error");
+                            return;
+                        }
+                        status(`imported ${bundle.scripts.length} script(s) + settings ✓`);
+                        return;
+                    }
+                    status(`imported ${bundle.scripts.length} script(s) ✓`);
                     return;
+                }
+                if (isYaml) {
+                    status('not a ResScript export (missing "format: rescript-bundle")', "error");
+                    return;
+                }
+                // legacy: a plain json array / single script object
+                const parsed = JSON.parse(text);
+                const items = Array.isArray(parsed) ? parsed : [parsed];
+                for (const item of items) {
+                    await send({ type: "saveScript", id: uuid(), code: item.code, name: item.name, enabled: item.enabled });
                 }
                 status(`imported ${items.length} script(s) ✓`);
             } else {
@@ -958,11 +1136,16 @@ async function main(): Promise<void> {
         chrome.storage.local.set({ resManagerOpen: false });
     });
 
-    // ensure the Tier-B proxy service worker is active
-    try {
-        await navigator.serviceWorker.register("/sw.js", { scope: "/" });
-    } catch (e) {
-        console.warn("[ResOverride] proxy SW registration failed", e);
+    // ensure the Tier-B proxy service worker is active — MV2 only (MV3 has
+    // no proxy tier: DNR redirects cannot serve dynamic bodies —
+    // proxyRules.ts logs the limitation)
+    if (!__MV3__) {
+        try {
+            await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+        } catch (e) {
+            console.warn("[ResOverride] proxy SW registration failed", e);
+            dlogLevel("proxy", "warn", `proxy SW registration failed — the proxy tier cannot intercept until it succeeds: ${e}`);
+        }
     }
 
     connectLogs();
@@ -983,7 +1166,8 @@ function select(id: string): void {
             return;
         }
     }
-    selectReal(id);
+    if (id === SETTINGS_ID) void selectSettings();
+    else selectReal(id);
 }
 
 let monacoVerbose = false;
@@ -1006,7 +1190,14 @@ function navLog(msg: string, level = "info"): void {
 function installMonacoTrace(): void {
     const m = (window as any).monaco;
     window.addEventListener("error", (e) => navLog(`window error: ${e.message}`, "error"));
-    window.addEventListener("unhandledrejection", (e) => navLog(`unhandled rejection: ${String((e.reason && e.reason.stack) || e.reason)}`, "error"));
+    window.addEventListener("unhandledrejection", (e) => {
+        const reason: any = (e as PromiseRejectionEvent).reason;
+        // Monaco's internal async work (e.g. view-state restore scheduling)
+        // rejects with its cancellation error when a rapid model switch
+        // invalidates it — benign, don't litter the log
+        if (reason && (reason.name === "Canceled" || reason.message === "Canceled")) return;
+        navLog(`unhandled rejection: ${String((reason && reason.stack) || reason)}`, "error");
+    });
     editor.onDidChangeModel((e: MonacoEditor.IModelChangedEvent) => navLog(`model changed: ${e.oldModelUrl?.toString()} -> ${e.newModelUrl?.toString()}`));
     editor.onKeyDown((e: IKeyboardEvent) => {
         if (e.keyCode === m.KeyCode.F12) void traceDefinition("F12");

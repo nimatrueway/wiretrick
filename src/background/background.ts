@@ -9,6 +9,7 @@ import { addUiPort, clearTab, broadcastEntry } from "./engine/logs";
 import { onScriptsChanged, listScripts } from "./engine/scriptStore";
 import { dlog, getDebugBuffer, pushEntry, clearDebugBuffer, setSink } from "../shared/debugLog";
 import * as folderSync from "./folderSync";
+import { getSettingsText, applySettingsText, applySettingsDoc } from "./settingsFile";
 import { badgeSetText, badgeSetColor, tabsQueryAll, tabsGet } from "../shared/chromeApi";
 import { matchAny } from "../shared/matcher";
 
@@ -30,6 +31,9 @@ cdp.isClaimed = (url: string) => chromeBody.isClaimed(url);
 
 createPipeline(webRequestStrategy, chromeBody, cdp, updateTabBadge, noteRequestForBadge);
 
+// ---- MV3 proxy tier: NOT implementable (see proxyRules.ts) — syncProxyRules
+// clears stale rules and logs the limitation loudly on every reload ----
+
 // ---- scripts folder sync (watching runs here: persistent page, never throttled) ----
 void folderSync.initFromStorage();
 chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
@@ -39,14 +43,26 @@ chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
         sendResponse({});
         return false;
     }
+    if (msg && msg.type === "getSettingsYaml") {
+        getSettingsText(msg.text).then((text) => sendResponse({ text }));
+        return true;
+    }
+    if (msg && msg.type === "applySettingsYaml") {
+        applySettingsText(msg.text).then(sendResponse);
+        return true;
+    }
+    if (msg && msg.type === "applySettingsDoc") {
+        applySettingsDoc(msg.doc).then(sendResponse);
+        return true;
+    }
     if (msg && msg.type === "folderSyncAdopt") {
         // handle was stored to IndexedDB by the sender (handles can't cross
         // runtime messaging — JSON only)
-        folderSync.startFromStoredHandle().then((ok) => sendResponse({ ok }));
+        folderSync.startFromStoredHandle().then((ok) => sendResponse({ ok })).catch((e) => sendResponse({ ok: false, error: String(e) }));
         return true;
     }
     if (msg && msg.type === "folderSyncStart") {
-        folderSync.startFromStoredHandle().then((ok) => sendResponse({ ok }));
+        folderSync.startFromStoredHandle().then((ok) => sendResponse({ ok })).catch((e) => sendResponse({ ok: false, error: String(e) }));
         return true;
     }
     if (msg && msg.type === "folderSyncStop") {
@@ -205,4 +221,19 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
 onScriptsChanged(() => void updateAllTabs());
 void updateAllTabs();
 
-console.log(`[ResOverride] background ready (${IS_FIREFOX ? "firefox/webRequest+filterResponseData" : "chrome/tiered"})`);
+// ---- MV3: warm the analyze cache at SW start so the first page's
+// getHookBundle is served from storage, not a cold sandbox round-trip ----
+if (__MV3__) {
+    void (async () => {
+        try {
+            const { listScripts } = await import("./engine/scriptStore");
+            const { analyzeScripts } = await import("./compileHost");
+            await analyzeScripts((await listScripts()).map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt })));
+            dlog("bg", "analyze cache warmed", {});
+        } catch (e: any) {
+            dlog("bg", `analyze cache warm failed: ${e?.message || e}`);
+        }
+    })();
+}
+
+console.log(`[ResOverride] background ready (${__MV3__ ? "mv3/sandbox" : IS_FIREFOX ? "firefox/webRequest+filterResponseData" : "chrome/tiered"})`);

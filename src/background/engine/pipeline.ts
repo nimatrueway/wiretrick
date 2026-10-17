@@ -9,17 +9,17 @@ import type { CdpStrategy } from "./strategies/cdpStrategy";
 import type { HeaderChanges } from "./strategies/types";
 import type { Script } from "./scriptStore";
 import { listScripts, onScriptsChanged, saveScript, deleteScript, setEnabled, newId, scriptStorageGet, scriptStorageSet, loadAllParamValues, getParamValues, setParamValue } from "./scriptStore";
-import { compileScript, makeModuleResolver, makeStubModule } from "../../shared/compile";
 import { matchAny } from "../../shared/matcher";
 import { serveStore } from "./strategies/webRequestStrategy";
 import { dlogLevel } from "../../shared/debugLog";
-import { isThenable } from "../../shared/compile";
-import { toRunnableJs } from "../../shared/compile";
+import { isThenable, toRunnableJs } from "../../shared/compile";
 import "../../shared/transpile";
 void toRunnableJs;
 import { log } from "./logs";
 import { serializeHandlers, type HandlerSources } from "../../shared/compile";
 import { resolveParamValues } from "../../shared/scriptDef";
+import { analyzeScripts, runBodyOp } from "../compileHost";
+import { syncProxyRules } from "../proxyRules";
 
 const FILTER: chrome.webRequest.RequestFilter = { urls: ["<all_urls>"] };
 
@@ -44,7 +44,40 @@ export function createPipeline(
     const tabUrls = new Map<number, string>();
 
     // ---- tab URL tracking ----
+    if (__MV3__ && (chrome as any).webNavigation) {
+        // MV3 debugger tier: attach BEFORE the navigation's subresources
+        // load (webNavigation also wakes an idle service worker)
+        chrome.webNavigation.onBeforeNavigate.addListener((d) => {
+            if (d.frameId === 0) void cdp.syncTab(d.tabId, d.url);
+        });
+    }
+    if (__MV3__ && chrome.webRequest) {
+        // observe-only (MV3-legal): a debugger-tier load that left before
+        // the tab's debugger attached (fast first navigation / cold SW) is
+        // NOT intercepted — say so instead of failing silently
+        const neverPaused = new Set(["xmlhttprequest", "websocket", "ping", "csp_report", "webbundle", "webtransport"]);
+        chrome.webRequest.onCompleted.addListener(
+            (d) => {
+                if (d.tabId < 0 || neverPaused.has(d.type)) return;
+                const names = cdp.debuggerScriptsFor(d.url);
+                if (!names.length) return;
+                // any pause (request or response stage) precedes completion
+                setTimeout(() => {
+                    if (cdp.wasPaused(d.tabId, d.url)) return;
+                    log(d.tabId, `[Tier C] ${d.type} ${d.url}${d.fromCache ? " (from cache)" : ""} loaded BEFORE the debugger attached to this tab (or before interception was enabled) — NOT intercepted by ${names.map((n) => `"${n}"`).join(", ")}. Reload the tab (it stays attached from now on).`, "warn");
+                }, 300);
+            },
+            { urls: ["<all_urls>"] }
+        );
+    }
     chrome.tabs.onUpdated.addListener((tabId, info) => {
+        if (__MV3__) {
+            if (info.url) {
+                tabUrls.set(tabId, info.url);
+                void cdp.syncTab(tabId, info.url);
+            }
+            return;
+        }
         if (info.url) {
             tabUrls.set(tabId, info.url);
             // pre-attach only when a CDP-relevant (non hook-only) body
@@ -207,28 +240,36 @@ export function createPipeline(
         return { responseHeaders: applyHeaderChanges(details.responseHeaders || [], changes) };
     };
 
-    chrome.webRequest.onBeforeRequest.addListener(onBeforeRequest as any, FILTER, ["blocking"] as any);
-    chrome.webRequest.onBeforeSendHeaders.addListener(onBeforeSendHeaders as any, FILTER, ["requestHeaders", "blocking"] as any);
-    chrome.webRequest.onHeadersReceived.addListener(onHeadersReceived as any, FILTER, ["responseHeaders", "blocking"] as any);
+    if (!__MV3__) {
+        // MV2-only: blocking webRequest is the Tier-A2 dispatch path. MV3
+        // forbids "blocking" — the hook tier (below) carries interception.
+        chrome.webRequest.onBeforeRequest.addListener(onBeforeRequest as any, FILTER, ["blocking"] as any);
+        chrome.webRequest.onBeforeSendHeaders.addListener(onBeforeSendHeaders as any, FILTER, ["requestHeaders", "blocking"] as any);
+        chrome.webRequest.onHeadersReceived.addListener(onHeadersReceived as any, FILTER, ["responseHeaders", "blocking"] as any);
 
-    // per-request caches must not leak for requests that never reach the
-    // response-header phase
-    const onDone = (details: any) => {
-        webRequestStrategy.pruneRequest?.(details.requestId);
-    };
-    chrome.webRequest.onCompleted.addListener(onDone, FILTER);
-    chrome.webRequest.onErrorOccurred.addListener(onDone, FILTER);
+        // per-request caches must not leak for requests that never reach the
+        // response-header phase
+        const onDone = (details: any) => {
+            webRequestStrategy.pruneRequest?.(details.requestId);
+        };
+        chrome.webRequest.onCompleted.addListener(onDone, FILTER);
+        chrome.webRequest.onErrorOccurred.addListener(onDone, FILTER);
+    } else {
+        dlogLevel("pipeline", "info", "MV3: no blocking webRequest — hook tier carries page fetch/XHR; the debugger tier (strategy cdp/proxy) carries browser-initiated loads");
+    }
 
     // ---- manager protocol ----
     chrome.runtime.onMessage.addListener((msg: any, _sender, sendResponse) => {
         if (msg && msg.type === "listScripts") {
-            listScripts().then((scripts) => {
+            listScripts().then(async (scripts) => {
                 // scripts saved before declareScript existed have no stored
                 // paramDefs — compile them on the fly (imports stubbed: we
                 // only need declarations here) so the UI can offer ⚙
+                const missing = scripts.filter((s) => s.paramDefs === undefined);
+                const analyzed = await analyzeScripts(missing.map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt })));
                 sendResponse(
                     scripts.map((s) =>
-                        s.paramDefs === undefined ? { ...s, paramDefs: compileScript(s.code, { importModule: () => makeStubModule() }).paramDefs || {} } : s
+                        s.paramDefs === undefined ? { ...s, paramDefs: analyzed.get(s.id)?.paramDefs || {} } : s
                     )
                 );
             });
@@ -291,33 +332,30 @@ export function createPipeline(
             const libs = new Map<string, string>(); // name → transpiled lib source
             {
                 const pageScripts = await listScripts();
-                // module registry so scripts' `import "./lib"` resolves here;
-                // resolved libs ship with the bundle for the page-side require
-                const overridesFor = (s: { id: string; name: string; code: string }) => ({
-                    importModule: (spec: string) => resolver.resolve(spec),
-                });
-                const resolver = makeModuleResolver(
-                    pageScripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code })),
-                    overridesFor
-                );
+                // MV3: scripts are analyzed in the sandbox page (the SW can't
+                // eval); MV2 compiles right here. Both paths return plain
+                // metadata; the shipped handler SOURCES are transpiled locally.
+                const analyzed = await analyzeScripts(pageScripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt })));
+                const depNames = new Set<string>();
                 for (const s of pageScripts) {
                     if (!s.enabled || !matchAny(s.meta.match, msg.url || "")) continue;
-                    const compiled = compileScript(s.code, { paramValues: await getParamValues(s.id), importModule: (spec) => resolver.resolve(spec) });
-                    if (!compiled.meta.declared) continue; // library: inert on its own
-                    if (compiled.handlers.onDom) {
+                    const a = analyzed.get(s.id);
+                    if (!a?.declared) continue; // library: inert on its own
+                    for (const d of a.deps) depNames.add(d);
+                    if (a.onDom) {
                         // FULL transpiled source: the runner compiles it with
                         // a shim so top-level helpers/closures survive
                         domHandlers.push({
                             scriptId: s.id,
                             name: s.meta.name,
-                            when: (compiled.handlers as any).onDomOptions?.when || "DOMContentLoaded",
+                            when: a.onDomWhen || "DOMContentLoaded",
                             src: toRunnableJs(s.code),
-                            params: resolveParamValues(compiled.paramDefs || {}, await getParamValues(s.id)),
+                            params: resolveParamValues(a.paramDefs || {}, await getParamValues(s.id)),
                         });
                     }
                 }
                 // ship the transitively imported library sources once
-                for (const depName of resolver.deps) {
+                for (const depName of depNames) {
                     const lib = pageScripts.find((x) => x.meta.name === depName);
                     if (lib && !libs.has(lib.meta.name)) libs.set(lib.meta.name, toRunnableJs(lib.code));
                 }
@@ -343,10 +381,11 @@ export function createPipeline(
                     sendResponse({ defs: {}, values: {} });
                     return;
                 }
-                const compiled = compileScript(s.code, { paramValues: await getParamValues(s.id), importModule: () => makeStubModule() });
+                const analyzed = await analyzeScripts([{ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt }]);
+                const defs = analyzed.get(s.id)?.paramDefs || {};
                 sendResponse({
-                    defs: compiled.paramDefs || {},
-                    values: resolveParamValues(compiled.paramDefs || {}, await getParamValues(s.id)),
+                    defs,
+                    values: resolveParamValues(defs, await getParamValues(s.id)),
                     name: s.meta.name,
                 });
             })();
@@ -369,6 +408,7 @@ export function createPipeline(
             return true;
         }
         if (msg && msg.type === "runRequestDecision") {
+            dlogLevel("pipeline", "debug", `runRequestDecision ${msg.url}`);
             chromeBody.runRequestDecision(msg.url, msg.method || "GET").then((r) => sendResponse(r || null));
             return true;
         }
@@ -406,6 +446,14 @@ export function createPipeline(
         webRequestStrategy.reload(scripts, paramValues);
         chromeBody.reload(scripts, paramValues);
         void cdp.reload(scripts, paramValues);
+        if (__MV3__) {
+            // refresh the analyze cache NOW so the next page's getHookBundle
+            // is served from it without waking the sandbox (keeps onDom
+            // document_start as early as MV3 allows) + sync the proxy
+            // tier's DNR redirect rules with the current script set
+            void analyzeScripts(scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt })));
+            void syncProxyRules(scripts);
+        }
 
         // HOT RELOAD: push the new bundle to every open tab's hook so
         // changes apply without reloading the target tab
@@ -428,11 +476,16 @@ export function createPipeline(
         cdp,
         dispose() {
             off();
-            chrome.webRequest.onBeforeRequest.removeListener(onBeforeRequest);
-            chrome.webRequest.onBeforeSendHeaders.removeListener(onBeforeSendHeaders as any);
-            chrome.webRequest.onHeadersReceived.removeListener(onHeadersReceived as any);
-            chrome.webRequest.onCompleted.removeListener(onDone);
-            chrome.webRequest.onErrorOccurred.removeListener(onDone);
+            if (!__MV3__) {
+                const onDone = (details: any) => {
+                    webRequestStrategy.pruneRequest?.(details.requestId);
+                };
+                chrome.webRequest.onBeforeRequest.removeListener(onBeforeRequest);
+                chrome.webRequest.onBeforeSendHeaders.removeListener(onBeforeSendHeaders as any);
+                chrome.webRequest.onHeadersReceived.removeListener(onHeadersReceived as any);
+                chrome.webRequest.onCompleted.removeListener(onDone);
+                chrome.webRequest.onErrorOccurred.removeListener(onDone);
+            }
             webRequestStrategy.dispose();
             chromeBody.dispose();
         },

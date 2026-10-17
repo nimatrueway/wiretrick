@@ -101,6 +101,18 @@ check("cold: Go to Definition switches to utilities model", !!st.uri?.endsWith("
 check("cold: cursor at definition name (helper)", JSON.stringify(st.sel) === "[1,17,1,17]", JSON.stringify(st.sel));
 check("cold: sidebar selects utilities", st.selected.includes("utilities"), st.selected);
 
+// view-state memory: park the cursor in main, switch away and back → restored
+await clickScript("main script");
+await setCursor(5, 2);
+await clickScript("utilities");
+await setCursor(2, 1);
+await clickScript("main script");
+const vsRestored = await state();
+check("view state: cursor restored after switching back", vsRestored.uri === "file:///main_script.ts" && JSON.stringify(vsRestored.sel) === "[5,2,5,2]", JSON.stringify(vsRestored));
+await clickScript("utilities");
+const vsUtil = await state();
+check("view state: utilities cursor restored too", vsUtil.uri === "file:///utilities.ts" && JSON.stringify(vsUtil.sel) === "[2,1,2,1]", JSON.stringify(vsUtil));
+
 // unsaved edit in utilities, then navigate to main: canceled confirm keeps everything
 await clickScript("main script");
 await setCursor(1, 1);
@@ -135,6 +147,46 @@ await mgr.waitForTimeout(1000);
 const same = await state();
 const sameText = await mgr.evaluate(() => (window as any).monaco.editor.getEditors()[0].getValue());
 check("same-file: stays, selects local, no dialog, edit kept", dialogs === 0 && !!same.uri?.endsWith("/main_script.ts") && JSON.stringify(same.sel) === "[4,10,4,10]" && sameText.includes("// dirty"), JSON.stringify(same) + ` dialogs=${dialogs}`);
+
+// view-state restore must not litter the log with Monaco's benign Canceled
+// rejections — filter proof first (a real rejection must still be logged)
+const logHas = (needle: string) => mgr.evaluate((n: string) => [...document.querySelectorAll("#log-entries .log-line")].some((l) => (l.textContent || "").includes(n)), needle);
+await mgr.evaluate(() => { void Promise.reject(Object.assign(new Error("Canceled"), { name: "Canceled" })); });
+await mgr.waitForTimeout(400);
+check("Canceled rejection is filtered from the log", !(await logHas("unhandled rejection: Canceled")));
+await mgr.evaluate(() => { void Promise.reject(new Error("real boom")); });
+await mgr.waitForTimeout(400);
+check("real rejections still log", (await logHas("real boom")) === true);
+
+// rapid switching (as with quick Cmd+P jumps): no Canceled litter surfaces
+await mgr.evaluate(() => {
+    const items = [...document.querySelectorAll(".script-item")];
+    for (let i = 0; i < 12; i++) items[i % items.length].dispatchEvent(new MouseEvent("click"));
+});
+await mgr.waitForTimeout(1500);
+check("rapid switching: no Canceled litter", !(await logHas("Canceled")));
+
+// dirty-state: reverting to the exact original clears the prompt
+await clickScript("main script"); // re-select resets the editor to stored code
+const orig = await mgr.evaluate(() => (window as any).monaco.editor.getEditors()[0].getValue());
+await mgr.evaluate(() => (window as any).monaco.editor.getEditors()[0].trigger("t", "type", { text: "// dirty\n" }));
+answer = false; dialogs = 0;
+await mgr.evaluate((o: string) => (window as any).monaco.editor.getEditors()[0].setValue(o), orig);
+await clickScript("utilities");
+check("revert to original: no discard prompt", dialogs === 0, `dialogs=${dialogs}`);
+// truly dirty → prompt still appears
+await mgr.evaluate(() => (window as any).monaco.editor.getEditors()[0].trigger("t", "type", { text: "// dirty\n" }));
+dialogs = 0;
+await clickScript("main script");
+check("truly dirty: prompt appears", dialogs === 1, `dialogs=${dialogs}`);
+// name reverted to the stored one clears dirty too
+answer = true;
+await clickScript("main script");
+await mgr.locator("#script-name").fill("renamed!");
+dialogs = 0; answer = false;
+await mgr.locator("#script-name").fill("main script");
+await clickScript("utilities");
+check("name reverted: no discard prompt", dialogs === 0, `dialogs=${dialogs}`);
 
 } catch (e) {
     failed++;

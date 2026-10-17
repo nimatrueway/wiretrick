@@ -1,0 +1,230 @@
+/**
+ * settings.yaml — extension settings + per-script param values + enabled
+ * state, as one canonical YAML document generated from storage state.
+ *
+ * Every option is listed with its description; options still at their
+ * default are COMMENTED OUT, only user-set values are live entries:
+ *
+ *   # yaml-language-server: $schema=./settings.schema.json
+ *   settings:
+ *     # Minimum log level shown in the panel: debug | info | warn | error
+ *     # logLevel: info
+ *
+ *   params:
+ *     My Script:
+ *       # Run this script
+ *       enabled: false
+ *       # Value of the x-debug header
+ *       # level: warn
+ *
+ * The modeline lets VS Code's YAML extension validate the file against
+ * settings.schema.json (written next to it by folder sync); the same rules
+ * are enforced in code here (parseSettings shape checks + planSettings
+ * value validation) for the browser manager.
+ *
+ * Semantics when applying text: a missing/commented option means "default"
+ * inside maps that are present — a map whose entries are all commented out
+ * (`My Script:` with no children) parses as null and still counts as
+ * present, so commenting out every entry resets that section to defaults.
+ * A missing file is generated from scratch (renderSettings); an existing
+ * parsable file is only patched (settingsYamlPatch.ts) so user formatting
+ * survives. `enabled` is reserved in a script's map (shadows a param of
+ * that name).
+ */
+import { parse, stringify, Document, isScalar, Scalar } from "yaml";
+import { resolveParamValues, isValidParamValue, paramDefault, type ParamDef } from "./scriptDef";
+
+export const SETTINGS_FILE = "settings.yaml";
+export const SCHEMA_FILE = "settings.schema.json";
+/** modeline for the VS Code YAML extension — the schema sits next to the settings file */
+export const SCHEMA_MODELINE = `# yaml-language-server: $schema=./${SCHEMA_FILE}`;
+export const LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
+export const DEFAULT_LOG_LEVEL = "info";
+export const DEFAULT_LOG_CAP = 500;
+
+export interface GlobalSettings {
+    logLevel: string;
+    logCap: number;
+}
+
+export interface ScriptSettingsState {
+    name: string;
+    /** has res.declareScript (libraries have no enabled switch) */
+    declared: boolean;
+    enabled: boolean;
+    defs: Record<string, ParamDef>;
+    /** raw stored values (unresolved) */
+    values: Record<string, any>;
+}
+
+export const isObj = (v: any): v is Record<string, any> => !!v && typeof v === "object" && !Array.isArray(v);
+
+/** canonical rendering never folds long lines */
+const STRINGIFY_OPTS = { lineWidth: 0 };
+
+/**
+ * Render one `key: value` entry (unindented, possibly multi-line for block
+ * scalars / sequences) with the yaml library's own escaping and style
+ * choices (multi-line strings become `|` block scalars, string lists block
+ * sequences). With `block`, a multi-line string is FORCED to a block scalar
+ * (the library still falls back to a quoted string when the value can't
+ * round-trip as a block scalar — control chars, trailing-whitespace tails).
+ */
+export function entryLines(key: string, value: any, opts?: { block?: boolean }): string[] {
+    if (opts?.block && typeof value === "string" && value.includes("\n")) {
+        const doc = new Document({ [key]: value });
+        const node = doc.getIn([key], true);
+        if (isScalar(node)) (node as any).type = Scalar.BLOCK_LITERAL;
+        return doc.toString({ lineWidth: 0 }).trimEnd().split("\n");
+    }
+    return stringify({ [key]: value }, STRINGIFY_OPTS).trimEnd().split("\n");
+}
+
+/** the key as entryLines renders it (for matching commented entries in existing text) */
+export function renderedKeyText(k: string): string {
+    const line = stringify({ [k]: null }, STRINGIFY_OPTS).trimEnd();
+    return line.endsWith(": null") ? line.slice(0, -": null".length) : line;
+}
+
+const PLAIN_KEY = /^[A-Za-z0-9_][A-Za-z0-9_ .-]*$/;
+/** plain-looking keys that would parse back as non-strings must be quoted */
+const SCALARISH_KEY = /^(null|~|true|false|yes|no|on|off|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?|0x[0-9a-fA-F]+|0o[0-7]+|\.inf|\.nan)$/i;
+
+/** Map key as emitted in generated files (double-quoted unless safely plain). */
+export function yamlKey(k: string): string {
+    return PLAIN_KEY.test(k) && k.trim() === k && !SCALARISH_KEY.test(k) ? k : JSON.stringify(k);
+}
+
+const clean = (s: string): string => s.replace(/\s*\n\s*/g, " ");
+const same = (a: any, b: any): boolean => JSON.stringify(a) === JSON.stringify(b);
+
+/** One option at `indent`: description comment + live entry (or commented default). */
+export function option(out: string[], indent: number, key: string, desc: string, value: any, def: any, block = false): void {
+    const pad = " ".repeat(indent);
+    out.push(`${pad}# ${clean(desc)}`);
+    if (same(value, def)) {
+        for (const l of entryLines(key, def, { block })) out.push(`${pad}# ${l}`);
+    } else {
+        for (const l of entryLines("default", def, { block })) out.push(`${pad}# ${l}`);
+        for (const l of entryLines(key, value, { block })) out.push(pad + l);
+    }
+}
+
+/**
+ * The commented documentation lines for one option at its default
+ * (description + commented entry) — used when inserting a newly declared
+ * param into an existing file section.
+ */
+export function commentedDefaultLines(key: string, d: ParamDef | undefined): string[] {
+    const out: string[] = [];
+    if (key === "enabled" || !d) {
+        option(out, 0, "enabled", "Run this script", true, true);
+        return out;
+    }
+    const note = d.type === "enum" ? `${d.description ?? key} (${d.choices.join(" | ")})` : (d.description ?? key);
+    option(out, 0, key, note, paramDefault(d), paramDefault(d), d.type === "string" && !!d.multiline);
+    return out;
+}
+
+/** Canonical, deterministic text for the given state. */
+export function renderSettings(g: GlobalSettings, scripts: ScriptSettingsState[]): string {
+    const out: string[] = [
+        SCHEMA_MODELINE,
+        "# ResScript settings — edit and save; options left commented use their default.",
+        "",
+        "settings:",
+    ];
+    option(out, 2, "logLevel", `Minimum log level shown in the panel: ${LOG_LEVELS.join(" | ")}`, g.logLevel, DEFAULT_LOG_LEVEL);
+    option(out, 2, "logCap", "Log lines kept in the panel (100..10000)", g.logCap, DEFAULT_LOG_CAP);
+    const blocks = scripts.map((s) => scriptBlock(s)).filter((b): b is string[] => !!b);
+    if (blocks.length) {
+        out.push("", "params:");
+        for (let i = 0; i < blocks.length; i++) {
+            if (i > 0) out.push(""); // blank line between script sections
+            out.push(...blocks[i]);
+        }
+    }
+    return out.join("\n") + "\n";
+}
+
+export const scriptKeys = (s: ScriptSettingsState): string[] => Object.keys(s.defs).filter((k) => k !== "enabled");
+
+/** canonical lines of one script's map (null: nothing to list); `indent` = the name line's indent */
+export function scriptBlock(s: ScriptSettingsState, indent = 2): string[] | null {
+    const keys = scriptKeys(s);
+    if (!s.declared && !keys.length) return null;
+    const out = [`${" ".repeat(indent)}${yamlKey(s.name)}:`];
+    if (s.declared) option(out, indent + 2, "enabled", "Run this script", s.enabled, true);
+    const vals = resolveParamValues(s.defs, s.values);
+    for (const k of keys) {
+        const d = s.defs[k];
+        const note = d.type === "enum" ? `${d.description ?? k} (${d.choices.join(" | ")})` : (d.description ?? k);
+        option(out, indent + 2, k, note, vals[k], paramDefault(d), d.type === "string" && !!d.multiline);
+    }
+    return out;
+}
+
+export interface SettingsDoc {
+    settings: Partial<GlobalSettings> | null; // null: no settings map
+    params: Record<string, Record<string, any>>;
+}
+
+/**
+ * Parse; throws on YAML syntax errors. Structural rules mirror
+ * settings.schema.json: `settings` must be a map, `params` a map of maps.
+ * A present-but-empty section (`settings:` / `My Script:` with everything
+ * commented out) parses as null and counts as an EMPTY map — present — so
+ * commenting out every entry resets that section to defaults. Sections of
+ * the wrong type (scalar/list) are treated as absent; invalid values are
+ * skipped later, in planSettings.
+ */
+export function parseSettings(text: string): SettingsDoc {
+    const raw: any = parse(text);
+    const params: SettingsDoc["params"] = {};
+    if (isObj(raw) && isObj(raw.params)) {
+        for (const [n, v] of Object.entries(raw.params)) {
+            if (isObj(v)) params[n] = v;
+            else if (v === null) params[n] = {};
+        }
+    }
+    let settings: SettingsDoc["settings"] = null;
+    if (isObj(raw) && Object.prototype.hasOwnProperty.call(raw, "settings")) {
+        if (isObj(raw.settings)) settings = raw.settings;
+        else if (raw.settings === null) settings = {};
+    }
+    return { settings, params };
+}
+
+export interface SettingsPlan {
+    globals: Partial<GlobalSettings>;
+    scripts: { name: string; enabled?: boolean; params: Record<string, any> }[];
+}
+
+/** What must change in `current` for it to match the document (invalid values are skipped). */
+export function planSettings(doc: SettingsDoc, current: GlobalSettings, scripts: ScriptSettingsState[]): SettingsPlan {
+    const globals: Partial<GlobalSettings> = {};
+    if (doc.settings) {
+        const lv = doc.settings.logLevel === undefined ? DEFAULT_LOG_LEVEL : doc.settings.logLevel;
+        if (typeof lv === "string" && (LOG_LEVELS as readonly string[]).includes(lv) && lv !== current.logLevel) globals.logLevel = lv;
+        const cap = doc.settings.logCap === undefined ? DEFAULT_LOG_CAP : doc.settings.logCap;
+        if (typeof cap === "number" && Number.isInteger(cap) && cap >= 100 && cap <= 10000 && cap !== current.logCap) globals.logCap = cap;
+    }
+    const plans: SettingsPlan["scripts"] = [];
+    for (const s of scripts) {
+        const t = doc.params[s.name];
+        if (!t) continue;
+        const plan: SettingsPlan["scripts"][number] = { name: s.name, params: {} };
+        if (s.declared) {
+            const e = t.enabled === undefined ? true : t.enabled;
+            if (typeof e === "boolean" && e !== s.enabled) plan.enabled = e;
+        }
+        const cur = resolveParamValues(s.defs, s.values);
+        for (const [k, d] of Object.entries(s.defs)) {
+            if (k === "enabled") continue;
+            const v = t[k] === undefined ? paramDefault(d) : t[k];
+            if (isValidParamValue(d, v) && JSON.stringify(v) !== JSON.stringify(cur[k])) plan.params[k] = v;
+        }
+        if (plan.enabled !== undefined || Object.keys(plan.params).length) plans.push(plan);
+    }
+    return { globals, scripts: plans };
+}

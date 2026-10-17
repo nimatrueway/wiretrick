@@ -2,7 +2,8 @@
  * chrome.storage.local backed script store.
  */
 import type { ResMeta } from "../../shared/metaParser";
-import { compileScript, makeStubModule } from "../../shared/compile";
+import { compileForStorage } from "../compileHost";
+import { dlogLevel } from "../../shared/debugLog";
 
 export interface Script {
     id: string;
@@ -66,24 +67,34 @@ export async function saveScript(partial: Pick<Script, "id" | "code"> & Partial<
     const byId: { [id: string]: Script } = obj[STORE_KEY] || {};
     const order: string[] = obj[ORDER_KEY] || Object.keys(byId);
     const prev = byId[partial.id];
-    // compile (not just parse) so res.declareScript values land in meta;
-    // imports resolve to stubs here — declaration capture must not depend
-    // on other scripts loading cleanly
-    const compiled = compileScript(partial.code, { importModule: () => makeStubModule() });
     // the script's name is the manager/file name — declareScript has no
     // name field; keep the previous name when the caller didn't pass one
-    // (e.g. setEnabled re-saves the stored script)
+    // (e.g. setEnabled re-saves the stored script). Resolved BEFORE
+    // compiling so sandbox analyze logs identify the script.
     const name = partial.name ?? prev?.meta.name;
-    if (name) compiled.meta.name = name;
+    // compile (not just parse) so res.declareScript values land in meta;
+    // imports resolve to stubs here — declaration capture must not depend
+    // on other scripts loading cleanly. MV3: compiles in the sandbox page
+    // (the SW cannot eval) — see compileHost.
+    const compiled = await compileForStorage(partial.code, name);
+    // MV3 sandbox RPC failure (host unavailable): keep the previous
+    // meta/paramDefs rather than corrupting a declared script into a
+    // library — the next save recomputes. (The sentinel error string comes
+    // from compileHost; MV2 compile errors are user-code errors and never
+    // match it.)
+    const rpcFailed = !!compiled.error && /sandbox/.test(compiled.error);
+    if (rpcFailed) dlogLevel("compile", "warn", `saveScript "${name ?? prev?.meta.name}": sandbox compile failed — keeping previous meta/paramDefs (declaration state preserved)`);
+    const meta = rpcFailed ? prev?.meta ?? compiled.meta : compiled.meta;
+    if (name) meta.name = name;
     const script: Script = {
         id: partial.id,
         code: partial.code,
         enabled: partial.enabled ?? prev?.enabled ?? true,
         createdAt: prev?.createdAt ?? Date.now(),
         updatedAt: Date.now(),
-        error: null,
-        meta: compiled.meta,
-        paramDefs: compiled.paramDefs ?? prev?.paramDefs,
+        error: rpcFailed ? prev?.error ?? null : compiled.error,
+        meta,
+        paramDefs: rpcFailed ? prev?.paramDefs ?? compiled.paramDefs : compiled.paramDefs ?? prev?.paramDefs,
     };
     byId[partial.id] = script;
     if (!order.includes(partial.id)) {

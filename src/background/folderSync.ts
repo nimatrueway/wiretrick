@@ -5,7 +5,10 @@
  * tab is focused (or whether the manager is open).
  */
 import { computeEvents, loadSavedHandle, clearSavedHandle, saveHandle, type FileSig } from "../shared/folderSync";
-import { saveScript, deleteScript, newId, listScripts } from "./engine/scriptStore";
+import { saveScript, deleteScript, newId, listScripts, onScriptsChanged } from "./engine/scriptStore";
+import { getSettingsText, applySettingsText } from "./settingsFile";
+import { SETTINGS_FILE, SCHEMA_FILE } from "../shared/settingsYaml";
+import { SETTINGS_SCHEMA_JSON } from "../shared/settingsSchema";
 import { broadcastToUi } from "./engine/logs";
 import { dlogLevel } from "../shared/debugLog";
 const POLL_MS = 1000;
@@ -27,6 +30,7 @@ let known = new Map<string, FileSig>();
 let realNameOf = new Map<string, string>();
 let timer: ReturnType<typeof setInterval> | null = null;
 let displayPath = "";
+let settingsHooked = false;
 /** contents we wrote ourselves — the poller skips its own echo */
 const lastWritten = new Map<string, string>();
 
@@ -177,9 +181,74 @@ async function applyEvents(events: ReturnType<typeof computeEvents>): Promise<vo
     }
 }
 
+// ---- settings.yaml: canonical text generated from storage ----
+
+let settingsSig: FileSig | null = null;
+let exportTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function readSettingsFile(): Promise<{ text: string; sig: FileSig } | null> {
+    try {
+        const f = await (await dirHandle.getFileHandle(SETTINGS_FILE)).getFile();
+        return { text: await f.text(), sig: { lastModified: f.lastModified, size: f.size } };
+    } catch {
+        return null;
+    }
+}
+
+/** storage → file; patched in place, so an up-to-date file is never rewritten */
+async function exportSettings(): Promise<void> {
+    if (!dirHandle) return;
+    try {
+        const existing = await readSettingsFile();
+        const text = await getSettingsText(existing?.text);
+        if (existing?.text !== text) {
+            await writeBack(SETTINGS_FILE, text);
+            settingsSig = (await readSettingsFile())?.sig ?? null;
+            lastWritten.delete(SETTINGS_FILE);
+        }
+        await ensureSchemaFile();
+    } catch (e: any) {
+        dlogLevel("sync", "warn", "settings export failed", { error: e.message || e });
+    }
+}
+
+/** the JSON schema the settings.yaml modeline points at (VS Code YAML extension) */
+async function ensureSchemaFile(): Promise<void> {
+    if (!dirHandle) return;
+    try {
+        const f = await (await dirHandle.getFileHandle(SCHEMA_FILE)).getFile();
+        if ((await f.text()) === SETTINGS_SCHEMA_JSON) return;
+    } catch {
+        // missing → write below
+    }
+    await writeBack(SCHEMA_FILE, SETTINGS_SCHEMA_JSON);
+}
+
+function scheduleExport(): void {
+    if (!dirHandle) return;
+    if (exportTimer) clearTimeout(exportTimer);
+    exportTimer = setTimeout(() => void exportSettings(), 300);
+}
+
+/** file → storage, when settings.yaml changed on disk; then re-canonicalize */
+async function pollSettings(): Promise<void> {
+    const f = await readSettingsFile();
+    if (!f) return;
+    if (settingsSig && settingsSig.lastModified === f.sig.lastModified && settingsSig.size === f.sig.size) return;
+    settingsSig = f.sig;
+    const { error } = await applySettingsText(f.text);
+    if (error) {
+        dlogLevel("sync", "warn", "settings.yaml parse error — ignored", { error });
+        return;
+    }
+    dlogLevel("sync", "info", "settings.yaml applied");
+    await exportSettings();
+}
+
 async function pollOnce(): Promise<void> {
     if (!dirHandle) return;
     try {
+        await pollSettings();
         const { seen, aliases } = await scanFolder();
         const events = computeEvents(known, seen);
         known = seen;
@@ -195,6 +264,49 @@ function startPolling(): void {
     timer = setInterval(() => void pollOnce(), POLL_MS);
 }
 
+// ---- MV3 SW liveness ----
+// The MV3 service worker idles out after ~30s, which would kill the poller.
+// Any extension API call resets that idle timer, so a 25s keep-alive ping
+// holds the SW open while folder sync is active; a 30s alarm is the fallback
+// that wakes the SW for a catch-up poll if it is reaped anyway.
+const SYNC_ALARM = "folderSyncPoll";
+let keepAliveTimer: ReturnType<typeof setInterval> | null = null;
+
+function alarmsApi(): typeof chrome.alarms | null {
+    return typeof chrome !== "undefined" && (chrome as any).alarms ? chrome.alarms : null;
+}
+
+function startKeepAlive(): void {
+    if (!__MV3__ || keepAliveTimer) return;
+    keepAliveTimer = setInterval(() => {
+        chrome.runtime.getPlatformInfo(() => void chrome.runtime.lastError);
+    }, 25_000);
+}
+
+function stopKeepAlive(): void {
+    if (keepAliveTimer) {
+        clearInterval(keepAliveTimer);
+        keepAliveTimer = null;
+    }
+}
+
+if (__MV3__) {
+    // registered at module scope so the alarm wakes/dispatches even into a
+    // freshly started SW (vitest defines __MV3__ as false and skips this)
+    const alarms = alarmsApi();
+    if (alarms) {
+        alarms.onAlarm.addListener((a) => {
+            if (a.name === SYNC_ALARM && dirHandle) void pollOnce();
+        });
+    }
+}
+
+async function ensureSyncAlarm(): Promise<void> {
+    const alarms = alarmsApi();
+    if (!__MV3__ || !alarms) return;
+    alarms.create(SYNC_ALARM, { periodInMinutes: 0.5 });
+}
+
 /** Manager picked a folder (handle already stored to IDB by the manager). */
 export async function startFromStoredHandle(): Promise<boolean> {
     const handle = await loadSavedHandle();
@@ -203,6 +315,17 @@ export async function startFromStoredHandle(): Promise<boolean> {
     displayPath = await describeHandle(handle);
     await refreshKnown();
     startPolling();
+    startKeepAlive();
+    void ensureSyncAlarm();
+    if (!settingsHooked) {
+        settingsHooked = true;
+        onScriptsChanged(scheduleExport);
+        chrome.storage.onChanged.addListener((c) => {
+            if (c.resLogLevel || c.resLogCap) scheduleExport();
+        });
+    }
+    settingsSig = null;
+    void ((await readSettingsFile()) ? pollSettings() : exportSettings());
     broadcastStatus();
     dlogLevel("sync", "info", "watching scripts folder", { path: displayPath });
     return true;
@@ -243,7 +366,11 @@ export async function stop(): Promise<void> {
     timer = null;
     dirHandle = null;
     displayPath = "";
+    settingsSig = null;
     lastWritten.clear();
+    stopKeepAlive();
+    const alarms = alarmsApi();
+    if (__MV3__ && alarms) alarms.clear(SYNC_ALARM);
     await clearSavedHandle();
     broadcastStatus();
 }

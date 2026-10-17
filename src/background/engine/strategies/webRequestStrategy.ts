@@ -8,6 +8,7 @@
  */
 import { match, matchReplace, matchAny } from "../../../shared/matcher";
 import { compileScript, isThenable, makeModuleResolver, type CompiledScript } from "../../../shared/compile";
+import { formatScriptError } from "../../../shared/scriptError";
 import type { BodyScriptInfo, HeaderChanges, HookDisposition, InterceptionStrategy, MaybePromise, WebRequestDetailsLike } from "./types";
 import type { Script } from "../scriptStore";
 import { log, scriptError } from "../logs";
@@ -20,9 +21,13 @@ const IS_FIREFOX = typeof (globalThis as any).browser !== "undefined" &&
 export class WebRequestStrategy implements InterceptionStrategy {
     readonly name = "webrequest";
 
-    private compiled: { id: string; compiled: CompiledScript }[] = [];
+    private compiled: { id: string; name: string; compiled: CompiledScript }[] = [];
 
     reload(scripts: Script[], paramValues?: { [scriptId: string]: Record<string, any> }): void {
+        if (__MV3__) {
+            dlogLevel("webrequest", "warn", `webRequest tier disabled in MV3 (no blocking webRequest) — ${scripts.filter((s) => s.enabled && s.meta.declared).length} enabled script(s) will not intercept via this tier; browser-initiated loads need strategy ["proxy"], page fetch/XHR uses the hook tier`);
+            return;
+        }
         let resolveSpec: (spec: string) => any = (spec) => {
             throw new Error(`cannot import "${spec}" before the module registry is ready`);
         };
@@ -40,13 +45,16 @@ export class WebRequestStrategy implements InterceptionStrategy {
             scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code })),
             (lib) => overridesFor(scripts.find((x) => x.id === lib.id) as Script)
         ).resolve;
+        // `name` is the STORED script name — compiled meta.name is always
+        // "Untitled script" (declareScript carries no name), so log
+        // attribution must never read it from the compiled meta.
         this.compiled = scripts
             .filter((s) => s.enabled)
-            .map((s) => ({ id: s.id, compiled: compileScript(s.code, overridesFor(s)), storedMeta: s.meta }))
+            .map((s) => ({ id: s.id, name: s.meta.name, compiled: compileScript(s.code, overridesFor(s)) }))
             .filter(({ compiled }) => compiled.meta.declared) // undeclared = library module
-            .map(({ id, compiled, storedMeta }) => {
-                if (compiled.error) scriptError(id, compiled.error);
-                return { id, compiled };
+            .map(({ id, name, compiled }) => {
+                if (compiled.error) scriptError(id, formatScriptError(name, compiled.error));
+                return { id, name, compiled };
             });
     }
 
@@ -60,7 +68,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
         return IS_FIREFOX;
     }
 
-    private scriptsFor(url: string, phase: "request" | "response"): { id: string; compiled: CompiledScript }[] {
+    private scriptsFor(url: string, phase: "request" | "response"): { id: string; name: string; compiled: CompiledScript }[] {
         return this.compiled.filter(
             (c) => matchAny(c.compiled.meta.match, url) && c.compiled.meta.phase.includes(phase)
         );
@@ -109,14 +117,14 @@ export class WebRequestStrategy implements InterceptionStrategy {
                         // honors status); the hook tier short-circuits first
                         // for page-initiated requests
                         if (result.respond.status && result.respond.status !== 200) {
-                            log(details.tabId, `[${script.meta.name}] onRequest → respond ${result.respond.status} (via debugger tier) ${details.url}`, "info", entry.id);
+                            log(details.tabId, `[${entry.name}] onRequest → respond ${result.respond.status} (via debugger tier) ${details.url}`, "info", entry.id);
                             return { kind: "needsCdp" };
                         }
                         // status 200 (or none): data-URL is exact
-                        return this.staticServe(details, script, body, mime, entry.id);
+                        return this.staticServe(details, body, mime, entry.id, entry.name);
                     }
                     if (result && (result.redirect || result.cancel)) {
-                        log(details.tabId, `[${script.meta.name}] onRequest → ${JSON.stringify(result).slice(0, 200)}`, "info", entry.id);
+                        log(details.tabId, `[${entry.name}] onRequest → ${JSON.stringify(result).slice(0, 200)}`, "info", entry.id);
                         return normalize(result);
                     }
                 }
@@ -130,7 +138,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                         if (IS_FIREFOX) {
                             return replacement.then((r: any) => {
                                 if (r === undefined || r === null) return { kind: "allow" } as HookDisposition;
-                                return this.staticReplace(details, script, r, entry.id);
+                                return this.staticReplace(details, r, entry.id, entry.name);
                             });
                         }
                         // Chrome: let the request continue; the CDP tier awaits
@@ -138,7 +146,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                         return { kind: "needsCdp" };
                     }
                     if (replacement !== undefined && replacement !== null) {
-                        return this.staticReplace(details, script, replacement, entry.id);
+                        return this.staticReplace(details, replacement, entry.id, entry.name);
                     }
                 }
                 if (script.handlers.modifyResponse.length && IS_FIREFOX) {
@@ -147,7 +155,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                     pendingFirefoxStreams.set(details.requestId, { entry, tabUrl });
                 }
             } catch (e: any) {
-                scriptError(entry.id, `onRequest threw: ${e.message || e}`);
+                scriptError(entry.id, formatScriptError(entry.name, e, "onRequest"));
             }
         }
         return { kind: "allow" };
@@ -162,7 +170,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
         const pending = pendingFirefoxStreams.get(details.requestId);
         if (pending && IS_FIREFOX) {
             pendingFirefoxStreams.delete(details.requestId);
-            this.wireFirefoxStream(details, pending.entry.compiled, pending.tabUrl ?? tabUrl, pending.entry.id);
+            this.wireFirefoxStream(details, pending.entry.compiled, pending.tabUrl ?? tabUrl, pending.entry.id, pending.entry.name);
         }
         return this.collectHeaderChanges(details, tabUrl, "response", "headers");
     }
@@ -173,7 +181,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
             .map((e) => ({
                 scriptId: e.id,
                 code: e.compiled.code,
-                meta: e.compiled.meta,
+                meta: { ...e.compiled.meta, name: e.name },
             }));
     }
 
@@ -181,8 +189,8 @@ export class WebRequestStrategy implements InterceptionStrategy {
         this.compiled = [];
     }
 
-    private staticServe(details: WebRequestDetailsLike, script: CompiledScript, content: string | Uint8Array, mime: string, scriptId: string): HookDisposition {
-        log(details.tabId, `[${script.meta.name}] serve ${mime} (${content.length}b)`, "info", scriptId);
+    private staticServe(details: WebRequestDetailsLike, content: string | Uint8Array, mime: string, scriptId: string, scriptName: string): HookDisposition {
+        log(details.tabId, `[${scriptName}] serve ${mime} (${content.length}b)`, "info", scriptId);
         if (details.type === "main_frame") {
             const rid = "serve_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
             serveStore.set(rid, { content: typeof content === "string" ? content : new TextDecoder().decode(content), mime });
@@ -191,14 +199,14 @@ export class WebRequestStrategy implements InterceptionStrategy {
         return { kind: "redirect", url: toDataUrl(mime, content) };
     }
 
-    private staticReplace(details: WebRequestDetailsLike, script: CompiledScript, replacement: any, scriptId: string): HookDisposition {
+    private staticReplace(details: WebRequestDetailsLike, replacement: any, scriptId: string, scriptName: string): HookDisposition {
         const mimeFor = (fileRef: string | null) =>
             fileRef
                 ? guessMime(fileRef, details.url)
                 : guessMime(null, details.url, details.type === "xmlhttprequest" ? "application/json" : undefined);
 
         const serve = (mime: string, content: string | Uint8Array): HookDisposition => {
-            log(details.tabId, `[${script.meta.name}] replaceResponse → ${mime} (${content.length} bytes)`, "info", scriptId);
+            log(details.tabId, `[${scriptName}] replaceResponse → ${mime} (${content.length} bytes)`, "info", scriptId);
             // Chrome blocks top-level data: navigations — serve main frames
             // from an extension page instead
             if (details.type === "main_frame") {
@@ -261,14 +269,14 @@ export class WebRequestStrategy implements InterceptionStrategy {
                     changes.remove = [...(changes.remove || []), ...(mods.remove || [])];
                 }
             } catch (e: any) {
-                scriptError(entry.id, `header handler threw: ${e.message || e}`);
+                scriptError(entry.id, formatScriptError(entry.name, e, "onResponseHeaders"));
             }
             }
         }
         return changes;
     }
 
-    private wireFirefoxStream(details: WebRequestDetailsLike, script: CompiledScript, tabUrl: string | null, scriptId: string): void {
+    private wireFirefoxStream(details: WebRequestDetailsLike, script: CompiledScript, tabUrl: string | null, scriptId: string, scriptName: string): void {
         try {
             const filter = ((globalThis as any).browser?.webRequest ?? chrome.webRequest).filterResponseData(details.requestId);
             const decoder = new TextDecoder("utf-8");
@@ -292,7 +300,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                         const out = await transform(ctx, body);
                         if (out !== undefined && out !== null) body = out;
                     } catch (e: any) {
-                        scriptError(scriptId, `modifyResponse threw: ${e.message || e}`);
+                        scriptError(scriptId, formatScriptError(scriptName, e, "modifyResponse"));
                     }
                 }
                 const outBytes = typeof body === "string" ? encoder.encode(body) : body;
@@ -300,7 +308,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                 filter.close();
             };
         } catch (e: any) {
-            scriptError(scriptId, `filterResponseData failed: ${e.message || e}`);
+            scriptError(scriptId, formatScriptError(scriptName, e, "filterResponseData"));
         }
     }
 }
@@ -396,7 +404,7 @@ export function mergeHeaderMods(base: HeaderChanges | undefined, add: HeaderChan
 }
 
 /** requestId → script awaiting a Firefox stream filter */
-const pendingFirefoxStreams = new Map<string, { entry: { id: string; compiled: CompiledScript }; tabUrl: string | null }>();
+const pendingFirefoxStreams = new Map<string, { entry: { id: string; name: string; compiled: CompiledScript }; tabUrl: string | null }>();
 
 /** requestId → request header mods already computed by onRequest (issue: run once) */
 const pendingRequestHeaderMods = new Map<string, HeaderChanges>();

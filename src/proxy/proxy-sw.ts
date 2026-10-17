@@ -5,11 +5,19 @@
  * intercepts, fetches the original (with credentials, so authenticated
  * subresources still work), applies the user's transform, and serves the
  * result with the original Content-Type.
+ *
+ * MV2: transforms compile right here (plain-JS — this SW has no TS
+ * stripper). MV3: this worker CANNOT eval — it delegates the whole load to
+ * the background service worker (→ sandbox page) and serves the returned
+ * body. Register with scope "/__resproxy" (MV3) so it only intercepts
+ * proxy loads, never extension pages.
  */
 import { compileScript } from "../shared/compile";
 import { dlog } from "../shared/debugLog";
 
 const PROXY_MARKER = "/__resproxy?p=";
+
+declare const __MV3__: boolean;
 
 interface ProxyTransform {
     scriptId: string;
@@ -35,8 +43,43 @@ function getTransforms(originalUrl: string): Promise<ProxyTransform[]> {
     });
 }
 
+/** MV3: the background runs the whole decision+transform flow (sandbox) */
+function serveViaBackground(originalUrl: string, method: string): Promise<Response> {
+    return new Promise((resolve) => {
+        try {
+            chrome.runtime.sendMessage({ type: "__resProxyServe", url: originalUrl, method }, (resp: any) => {
+                if (chrome.runtime.lastError) {
+                    dlog("sw", "proxyServe lastError:", chrome.runtime.lastError.message);
+                    resolve(new Response("", { status: 502 }));
+                    return;
+                }
+                if (!resp || resp.error) {
+                    dlog("sw", "proxyServe failed:", resp?.error || "no response");
+                    resolve(new Response("", { status: 502 }));
+                    return;
+                }
+                if (resp.location) {
+                    resolve(Response.redirect(resp.location, 302));
+                    return;
+                }
+                resolve(
+                    new Response(resp.body ?? "", {
+                        status: resp.status ?? 200,
+                        statusText: resp.statusText,
+                        headers: { "content-type": resp.contentType || "application/octet-stream" },
+                    })
+                );
+            });
+        } catch (e: any) {
+            dlog("sw", "proxyServe threw:", e.message || e);
+            resolve(new Response("", { status: 502 }));
+        }
+    });
+}
+
 async function handleProxy(request: Request, originalUrl: string, method: string): Promise<Response> {
-    dlog("sw", "proxy fetch", { originalUrl, method });
+    dlog("sw", "proxy fetch", { originalUrl, method, mv3: __MV3__ });
+    if (__MV3__) return serveViaBackground(originalUrl, method);
     const transforms = await getTransforms(originalUrl);
     dlog("sw", "transforms", { count: transforms.length, names: transforms.map((t) => t.name) });
     const origResp = await fetch(originalUrl, { method, credentials: "include" });

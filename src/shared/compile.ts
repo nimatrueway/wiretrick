@@ -217,6 +217,23 @@ export function makeModuleResolver(
     return { resolve, deps };
 }
 
+/**
+ * Wrap a module resolver so unknown/missing imports resolve to a silent
+ * stub instead of throwing. Used by the MV3 sandbox analyze path (and
+ * anywhere meta capture must not depend on the import graph): a script
+ * whose `import` fails must still run its body so res.declareScript
+ * captures match/params — otherwise it silently stores as a library.
+ */
+export function resolveWithStubFallback(resolve: (spec: string) => any): (spec: string) => any {
+    return (spec) => {
+        try {
+            return resolve(spec);
+        } catch {
+            return makeStubModule();
+        }
+    };
+}
+
 /** Rebuild handlers from serialized sources (hook / proxy path). */
 export function compileFromSources(meta: ResMeta, sources: HandlerSources): CompiledScript {
     const store = createCollector();

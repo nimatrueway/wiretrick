@@ -19,6 +19,7 @@ interface ParamDef {
     min?: number;
     max?: number;
     step?: number;
+    multiline?: boolean;
 }
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => document.querySelector(sel) as T;
@@ -31,6 +32,22 @@ function send<T = any>(msg: any): Promise<T> {
             else resolve(resp);
         });
     });
+}
+
+/** MV3: the SW idles out after ~30s — the popup's first messages race its
+ * wake-up ("Receiving end does not exist"). Retry until it answers. */
+async function sendWake<T = any>(msg: any, attempts = 6): Promise<T> {
+    let last: any;
+    for (let i = 0; i < attempts; i++) {
+        try {
+            return await send<T>(msg);
+        } catch (e: any) {
+            if (!/receiving end|context invalidated|message port/i.test(e?.message || "")) throw e;
+            last = e;
+            await new Promise((r) => setTimeout(r, 350));
+        }
+    }
+    throw last;
 }
 
 function openManager(scriptId?: string): void {
@@ -192,8 +209,9 @@ function renderParam(scriptId: string, key: string, def: ParamDef, value: any): 
         });
         label.appendChild(sw);
     } else if (def.type === "string") {
-        const input = document.createElement("input");
-        input.type = "text";
+        const input = def.multiline ? document.createElement("textarea") : document.createElement("input");
+        if (input instanceof HTMLInputElement) input.type = "text";
+        else input.spellcheck = false;
         input.value = value ?? "";
         input.addEventListener("change", () => void setParam(scriptId, key, input.value));
         row.appendChild(input);
@@ -241,13 +259,29 @@ function renderParam(scriptId: string, key: string, def: ParamDef, value: any): 
 async function main(): Promise<void> {
     $("#btn-manager").addEventListener("click", () => openManager());
     makeResizable();
-    render(await send({ type: "listScripts" }));
-    // ensure the Tier-B proxy service worker is active (persists after close)
     try {
-        await navigator.serviceWorker.register("/sw.js", { scope: "/" });
-        console.log("[res:popup] proxy SW registered");
-    } catch (e) {
-        console.warn("[res:popup] proxy SW registration failed", e);
+        // sendWake: the first message may race the SW's wake-up (MV3)
+        render((await sendWake<ScriptInfo[]>({ type: "listScripts" })) || []);
+    } catch (e: any) {
+        console.warn("[res:popup] listing scripts failed", e);
+        render([]);
+        const status = $("#empty");
+        if (status) status.textContent = "Could not reach the extension — close and reopen the popup.";
+        return;
+    }
+    // ensure the Tier-B proxy service worker is active (persists after
+    // close) — MV2 only: sw.js with scope "/". MV3 has no proxy tier at
+    // all (DNR redirects cannot serve dynamic bodies — proxyRules.ts
+    // logs the limitation); browser-initiated loads pass through.
+    if (!__MV3__) {
+        try {
+            await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+        } catch (e) {
+            console.warn("[res:popup] proxy SW registration failed", e);
+            try {
+                chrome.runtime.sendMessage({ type: "debugLog", entry: { at: Date.now(), src: "popup", msg: `proxy SW registration failed: ${e} (the proxy tier cannot intercept until it succeeds)`, level: "warn" } }, () => void chrome.runtime.lastError);
+            } catch {}
+        }
     }
 }
 

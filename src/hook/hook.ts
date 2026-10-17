@@ -6,6 +6,8 @@
  * isolated-world bridge to the background, where user transforms run.
  * The background replies with the new body; the hook rebuilds the Response.
  */
+import { formatScriptError } from "../shared/scriptError";
+
 (() => {
     const w = window as any;
     if (w.__resOverrideHooked) return;
@@ -16,6 +18,8 @@
 
     let active = false; // any body scripts exist (bundle metadata says so)
     let patched = false;
+    /** the bridge reported the extension context dead (extension reload) */
+    let dead = false;
     let domHandlers: { scriptId: string; name: string; when: string; src: string; params?: Record<string, any> }[] = [];
     let libSources: { name: string; src: string }[] = [];
     let domFired = false;
@@ -32,6 +36,7 @@
     /** Round-trip through the bridge (→ background). */
     function viaBridge(msg: any): Promise<any> {
         return new Promise((resolve) => {
+            if (dead) return resolve(null); // extension reloaded — pass through, no watchdog stall
             const reqId = ++reqSeq;
             pending.set(reqId, resolve);
             try {
@@ -53,6 +58,12 @@
     window.addEventListener("message", (event: MessageEvent) => {
         const data = event.data;
         if (!data || data.source !== BRIDGE_SOURCE) return;
+        if (data.kind === "extensionDead") {
+            // the extension was reloaded — restore the page's own fetch/XHR
+            // and stop intercepting (the stale content script can't relay)
+            goDormant();
+            return;
+        }
         if (data.kind === "callResult" && pending.has(data.reqId)) {
             const resolve = pending.get(data.reqId)!;
             pending.delete(data.reqId);
@@ -66,16 +77,29 @@
             libSources = data.libs || [];
             logUp(`status: ${active ? "active" : "inactive"}, dom=${domHandlers.length}${data.hot ? " (hot)" : ""}`);
             if (active) install();
-            else if (wasActive) {
-                // all scripts went away — stop intercepting
-                w.fetch = w.__resOrigFetch;
-                w.XMLHttpRequest.prototype.open = w.__resOrigOpen;
-                w.XMLHttpRequest.prototype.send = w.__resOrigSend;
-                patched = false;
-            }
+            else if (wasActive) goDormant();
             compileAndScheduleDom(!!data.hot);
         }
     });
+
+    /** Stop intercepting: restore the page's own fetch/XHR, drop state. */
+    function goDormant(): void {
+        dead = true;
+        // in-flight relays resolve immediately — no 15s watchdog stalls
+        for (const [, resolve] of pending) resolve(null);
+        pending.clear();
+        if (!active && !patched) return;
+        active = false;
+        domHandlers = [];
+        libSources = [];
+        if (patched) {
+            w.fetch = w.__resOrigFetch;
+            w.XMLHttpRequest.prototype.open = w.__resOrigOpen;
+            w.XMLHttpRequest.prototype.send = w.__resOrigSend;
+            patched = false;
+        }
+        logUp("extension reloaded — hook dormant until the next page load");
+    }
 
     /**
      * onDom handlers compile in THIS world (MAIN) so the handler sees the
@@ -122,7 +146,7 @@
                 if (/Evaluating a string as JavaScript|unsafe-eval/i.test(e.message || "")) {
                     cspBlocked = true;
                 } else {
-                    logUp(`onDom compile failed: ${e.message || e}`, "error", d.name);
+                    logUp(formatScriptError(d.name, e, "onDom compile"), "error", d.name);
                 }
             }
         }
@@ -143,7 +167,7 @@
                     logUp(`onDom → running (${when}) on ${location.href} [${document.readyState}] — hook injected via ${injected}`, "info", name);
                     fn(makeCtx(location.href, "GET"));
                 } catch (e: any) {
-                    logUp(`onDom threw: ${e.message || e}`, "error", name);
+                    logUp(formatScriptError(name, e, "onDom"), "error", name);
                 }
             }
         };
@@ -263,6 +287,11 @@
     }
 
     // ---- fetch patch ----
+    /** Wraps a passthrough fetch failure so it propagates natively (no log). */
+    class PassthroughError {
+        constructor(public cause: any) {}
+    }
+
     function patchFetch(): void {
         w.__resOrigFetch = w.fetch;
         const origFetch = w.fetch.bind(window);
@@ -307,8 +336,17 @@
                     return new Response(repl.content, { status: 200, headers: { "content-type": repl.mime || "text/plain" } });
                 }
 
-                // 2. real request (abort propagates natively)
-                const response = await origFetch(input, init);
+                // 2. real request (abort propagates natively). A failure here
+                // is the PAGE's own request failing (network, or an invalid
+                // call the unpatched fetch would reject identically) —
+                // propagate natively, don't log as our pipeline error
+                let response: Response;
+                try {
+                    response = await origFetch(input, init);
+                } catch (e: any) {
+                    if (isAbort(e)) throw e;
+                    throw new PassthroughError(e);
+                }
 
                 // 3. transform? only for readable, non-null-body responses
                 if (response.status === 204 || response.status === 304) return response;
@@ -335,6 +373,7 @@
                 });
             } catch (e: any) {
                 if (isAbort(e)) throw e; // normal — page owns the abort
+                if (e instanceof PassthroughError) throw e.cause; // page's own failure — native behavior, no log
                 logUp(`fetch pipeline error: ${e.message || e}`, "error");
                 // last resort: original unpatched fetch
                 return origFetch(input, init);
@@ -398,11 +437,15 @@
                 xhr.dispatchEvent(new ProgressEvent("loadend"));
             };
             void (async () => {
+                let wentOut = false; // the shim's fetch reached the network?
                 try {
                     const headers: Record<string, string> = {};
                     for (const [k, v] of Object.entries(xhr.__resHeaders || {})) headers[k] = String(v);
                     const method = (xhr.__resMethod || "GET").toUpperCase();
                     const body = args[0] ?? null;
+                    // Chrome's fetch rejects GET/HEAD with a body (the page's
+                    // send(body) on a GET would throw natively too) — drop it
+                    const safeBody = method === "GET" || method === "HEAD" ? null : body;
 
                     // 1. replace short-circuit
                     const repl = await viaBridge({ op: "replace", url: absUrl, method });
@@ -415,7 +458,8 @@
                         text = String(repl.content);
                     } else {
                         // 2. real request via patched fetch (transform applies; abort wired)
-                        const resp = await w.fetch(absUrl, { method, headers, body, signal: abortCtl.signal });
+                        const resp = await w.fetch(absUrl, { method, headers, body: safeBody, signal: abortCtl.signal });
+                        wentOut = true;
                         status = resp.status;
                         statusText = resp.statusText;
                         respHeaders = resp.headers;
@@ -446,7 +490,22 @@
                 } catch (e: any) {
                     if (isAbort(e)) return; // abort events already dispatched
                     logUp(`xhr shim failed: ${e.message || e}`, "error");
-                    // fall back to the native path
+                    if (wentOut) {
+                        // the request already went out — surfacing as a native
+                        // XHR error (status 0); a fallback OrigSend would
+                        // RESUBMIT it (double side effects on POSTs)
+                        Object.defineProperty(xhr, "readyState", { get: () => 4, configurable: true });
+                        Object.defineProperty(xhr, "status", { get: () => 0, configurable: true });
+                        Object.defineProperty(xhr, "statusText", { get: () => "", configurable: true });
+                        redefineBody(xhr, "");
+                        Object.defineProperty(xhr, "getAllResponseHeaders", { value: () => "", configurable: true });
+                        if (typeof xhr.onerror === "function") xhr.onerror({ target: xhr } as any);
+                        xhr.dispatchEvent(new ProgressEvent("error"));
+                        xhr.dispatchEvent(new ProgressEvent("loadend"));
+                        return;
+                    }
+                    // failed BEFORE the network (replace round-trip) — the
+                    // native path never ran; use it
                     OrigSend.apply(xhr, args as any);
                 }
             })();

@@ -107,14 +107,22 @@ res.onRequest((ctx) => {
 ```
 
 Param values persist per script and apply on save — the change hot-reloads
-like a code edit. Parameter types: `boolean` (switch), `string` (text),
+like a code edit. Parameter types: `boolean` (switch), `string` (text; add `multiline: true` for a textarea, written to
+`settings.yaml` as a `|` block scalar when it contains newlines),
 `enum` (dropdown of `choices`), `stringList` (add/remove list).
 
 ## Editor
 
 The manager page embeds **Monaco** (the VS Code editor) with full TypeScript
 IntelliSense for the `res` API — completions, hover docs, and diagnostics work
-out of the box. Cmd/Ctrl+S saves and hot-applies the script.
+out of the box. Cmd/Ctrl+S saves and hot-applies the script; ⌘P quick-opens
+scripts/settings.yaml (cursor position is remembered per file and restored
+when you switch back), ⌘, opens Settings, ⌘/ comments, ⌘F finds, ⌘D selects
+the next occurrence. The 🐞 button in the toolbar opens `chrome://extensions`
+— click **background page** under *Inspect views* to debug the engine (MV2
+has no API to open DevTools for the live background page programmatically).
+Reverting an edit back to the saved text (or the name to the stored one)
+clears the unsaved-changes state — no discard prompt on a no-op edit.
 
 ### Dedicated scripts folder
 
@@ -128,6 +136,44 @@ deletes** too: a new `.ts` file becomes a script, deleting a file removes its
 script, renaming a file renames the script. The folder choice is remembered —
 the manager reconnects automatically on open (one click to re-grant after a
 browser restart, per Chrome's File System Access rules).
+
+### `settings.yaml`
+
+The script list always has a ⚙ **settings.yaml** entry (no folder needed; no
+toggle, not deletable). It is generated from storage: global settings plus
+every script's params and `enabled` state. Saving it in the editor applies it
+(syntax errors show in the editor status and change nothing). Popup/list
+changes patch the matching entries. With a scripts folder connected the same
+file is mirrored to `settings.yaml` there and edits sync both ways.
+
+The file starts with a `# yaml-language-server: $schema=./settings.schema.json`
+modeline and the folder sync writes that schema next to it, so VS Code's YAML
+extension validates the file as you edit it.
+
+Formatting is preserved: an existing, parsable file is patched in place (only
+the changed value is rewritten; comments, blank lines, spacing and section
+order stay). A value returned to its default is rewritten as a live entry; new
+scripts/keys are inserted into the existing file. The file is generated from
+scratch only when missing or unparsable.
+
+Every option has its description above it; options at their default are
+commented out, only non-default values are live entries. `enabled` is live only
+when `false`. Params are keyed by script name; libraries are omitted.
+
+```yaml
+# yaml-language-server: $schema=./settings.schema.json
+settings:
+  # Minimum log level shown in the panel: debug | info | warn | error
+  # logLevel: info
+
+params:
+  Debug header:
+    # Run this script
+    enabled: false
+    # Value of the x-debug header
+    # default: warn
+    level: trace
+```
 
 ## Interception strategies — how bodies get modified
 
@@ -147,7 +193,7 @@ res.declareScript({
 |---|---|---|---|---|
 | `hook` | MAIN-world content script overrides `fetch`, `XMLHttpRequest`, `Response` consumers | any request the page's own JS makes (fetch/XHR — the majority of API traffic) | **never** | misses `<script src>`, `<img>`, documents; requires the page context |
 | `cdp` | `chrome.debugger` + CDP Fetch domain: pause response → read body → transform → fulfill | **everything**: documents, script tags, images, fonts, XHR — even requests the page didn't initiate | **yes** — Chrome shows a yellow "being debugged" bar while attached | the only network-level path for main-frame HTML and non-JS resources on Chrome; attach/detach is lazy and automatic |
-| `proxy` | extension service worker fetches the original and serves it transformed | resources that follow redirects | never | reserved for the MV3 path (DNR-redirect); on MV2 extension SWs can't intercept page loads, so it's only used where wired up |
+| `proxy` | extension service worker fetches the original and serves it transformed | resources that follow redirects | never | in MV3 it routes to the debugger tier (browser-initiated loads like `<script src>`); unused on MV2 |
 | `webrequest` | blocking `webRequest` + `filterResponseData` | everything | never | **Firefox-only** (Firefox keeps MV2 network APIs); on Chrome this tier is a no-op |
 | `auto` (default) | engine picks per request | — | minimized | resolves to `hook` when the page hook is ready, else `cdp` |
 
@@ -367,3 +413,63 @@ E2E_CHROMIUM="/path/to/Google Chrome for Testing" npm run test:e2e
 
 Load the extension from `dist/` ("Load unpacked", MV2), or any recent Firefox
 (callback-based APIs work everywhere).
+
+## MV3 build
+
+`npm run build` produces both bundles:
+
+- **`dist/` (= `dist-mv2/`)** — the MV2 build (primary; everything above).
+- **`dist-mv3/`** — a best-effort Manifest V3 build (`manifest_version: 3`,
+  background service worker, `action`, `host_permissions`).
+
+How MV3 differs (Chrome forbids `eval` in service workers and extension
+pages, and drops blocking `webRequest`):
+
+- **User scripts compile and run in a sandbox page.** The manifest's
+  `sandbox` key exempts `sandbox.html` from the extension CSP — it's the
+  only MV3 context where `new Function` is allowed. The service worker
+  routes compiles/ executions there through an offscreen document
+  (`offscreen.html` bridges chrome.runtime ⇄ iframe postMessage). Handler
+  results, script logs and `res.storage` round-trip back over the same
+  channel.
+- **The hook tier carries page fetch/XHR interception** (patching in the
+  page's MAIN world — same behavior, transforms execute in the sandbox).
+  The `webrequest` tier is gone (no blocking webRequest in MV3).
+- **Browser-initiated loads (`<script src>`, `<img>`, stylesheets, fonts,
+  main-frame HTML) go through the debugger tier** for scripts whose
+  `strategy` lists `cdp` or `proxy` (in MV3 `proxy` maps to the debugger
+  tier — DNR redirects can't serve dynamic bodies). The service worker
+  drives `chrome.debugger` / CDP `Fetch` (pausing only URLs matching those
+  scripts' `match` patterns, XHR/fetch excluded — the hook handles them);
+  handler decisions (`onRequest`, `replaceResponse`, `modifyResponse`) are
+  computed in the sandbox, so only the participating scripts apply.
+  `auto`/`hook` scripts stay hook-only (a warning hints to add `"cdp"`).
+  Caveats:
+  - Chrome shows its "started debugging this browser" banner, and every
+    http(s) tab is attached while such scripts exist (the resource's CDN
+    host rarely equals the tab's host).
+  - A very fast first navigation can load a resource before the debugger
+    attaches; that is logged as a **warning** naming the URL and scripts
+    ("loaded BEFORE the debugger attached … Reload the tab") — a reload is
+    intercepted (tabs stay attached).
+  - `onResponseHeaders` isn't supported in the MV3 debugger tier (logged as
+    an error); redirects/error statuses pass through untransformed.
+  - Extra permissions: `debugger`, `webNavigation` (attach as early as
+    `onBeforeNavigate`), `webRequest` (observe-only, for the miss warning).
+- **Folder sync works** — the poller runs in the service worker: a 25s
+  keep-alive ping (any extension API call resets the SW's ~30s idle
+  timer) holds the worker open while a folder is connected, with a 30s
+  `chrome.alarms` poll as the fallback if the worker is reaped anyway.
+- onDom runs in the page (MAIN world when the page CSP allows, isolated
+  fallback otherwise). **`document_start` timing caveat:** in MV2 the
+  always-alive background answers the bundle in ~1ms, so onDom handlers
+  reliably beat the page's own scripts. In MV3 the service worker must
+  wake first — analyses are cached in `chrome.storage.session` (and
+  refreshed on every script change), so the bundle is served from storage
+  without waking the sandbox, but a cold SW still costs ~50-100ms; inline
+  page scripts may run before an onDom handler does. Fetch/XHR
+  interception is unaffected.
+
+Verify the MV3 bundle: `npx tsx test/mv3.e2e.ts` (SW registration, manager,
+script save/list through the sandbox, settings.yaml, hook-tier interception,
+debugger-tier `<script src>` interception incl. gzip, lazy chunks and reloads).

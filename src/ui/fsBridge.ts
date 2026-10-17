@@ -43,7 +43,10 @@ export async function queryStatus(): Promise<{ active: boolean; path: string }> 
 
 export function sendRaw(msg: any): Promise<any> {
     return new Promise((resolve) => {
-        chrome.runtime.sendMessage(msg, () => resolve(null));
+        chrome.runtime.sendMessage(msg, (r: any) => {
+            void chrome.runtime.lastError;
+            resolve(r);
+        });
     });
 }
 
@@ -66,7 +69,11 @@ export async function openFolder(
     void handlers;
     const dirHandle = await (window as any).showDirectoryPicker({ mode: "readwrite" } as any);
     await saveHandle(dirHandle);
-    await sendRaw({ type: "folderSyncStart" });
+    const started = await sendRaw({ type: "folderSyncStart" });
+    if (!started || !started.ok) {
+        await clearSavedHandle();
+        throw new Error("folder sync could not start in the background (see the extension logs)");
+    }
 
     // write the current scripts + typings into the folder
     const scripts = await getScripts();
@@ -135,8 +142,8 @@ export async function autoReconnect(): Promise<"synced" | "prompt" | "none"> {
     try {
         const perm = await handle.queryPermission({ mode: "readwrite" });
         if (perm !== "granted") return "prompt";
-        await sendRaw({ type: "folderSyncStart" });
-        return "synced";
+        const r = await sendRaw({ type: "folderSyncStart" });
+        return !!(r && r.ok) ? "synced" : "none";
     } catch {
         return "prompt";
     }
@@ -148,8 +155,8 @@ export async function reconnectClicked(): Promise<boolean> {
     if (!handle) return false;
     try {
         if ((await handle.requestPermission({ mode: "readwrite" })) !== "granted") return false;
-        await sendRaw({ type: "folderSyncStart" });
-        return true;
+        const r = await sendRaw({ type: "folderSyncStart" });
+        return !!(r && r.ok);
     } catch {
         return false;
     }

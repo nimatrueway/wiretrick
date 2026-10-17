@@ -3,7 +3,8 @@ body {
     width: 400px;
     min-width: 320px;
     min-height: 160px;
-    overflow: auto;
+    overflow-x: auto;
+    overflow-y: scroll;
     background: #1e1e1e;
     color: #ccc;
     font: 13px/1.4 -apple-system, "Segoe UI", sans-serif;

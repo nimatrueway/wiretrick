@@ -311,6 +311,27 @@ check("disable: modifyResponse no longer applies", r10.includes("original-value"
 await setEnabled("s_modifya", true);
 await p10.close();
 
+// ---------- 10b. respond with non-200 status (debugger tier) + log attribution ----------
+// A SYNC onRequest returning respond {status: 500}: the blocking webRequest
+// tier cannot carry a status (data-URLs), so it defers to the CDP tier,
+// which must fulfill it — and every log line must name the stored script.
+await saveScript(
+    "s_respond500",
+    `res.declareScript({ match: ["${ORIGIN}/nav-500"] });\nres.onRequest(() => ({ respond: { status: 500, body: { error: "e2e-500" }, mime: "application/json" } }));`,
+    "e2e respond 500"
+);
+const p10b = await ctx.newPage();
+await p10b.goto(`${ORIGIN}/nav-500`, { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {}); // warm-up: attaches the debugger
+await p10b.waitForTimeout(1200);
+const navResp = await p10b.goto(`${ORIGIN}/nav-500`, { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => null);
+const navBody = await p10b.evaluate(() => document.body.innerText).catch(() => "");
+check("respond 500: main frame fulfilled via debugger tier", navResp?.status() === 500 && navBody.includes("e2e-500"), `status=${navResp?.status()} body=${navBody.slice(0, 60)}`);
+await p10b.waitForTimeout(800);
+const logText10b: string = await mgr.evaluate(() => document.getElementById("log-entries")!.textContent || "");
+check("logs: respond 500 attributed to the stored script name", logText10b.includes("[e2e respond 500] onRequest → respond 500"));
+check("logs: no [Untitled script] anywhere", !logText10b.includes("[Untitled script]"));
+await p10b.close();
+
 // ---------- 11. debug logs: page console captured + downloadable ----------
 // /page-fetch logs nothing itself; use a page that console.logs
 const p11 = await ctx.newPage();

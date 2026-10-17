@@ -10,6 +10,8 @@
  * them at the requested DOM moment — the isolated world shares the page's
  * DOM, so title/text changes work without touching the page's JS world.
  */
+import { formatScriptError } from "../shared/scriptError";
+
 (() => {
     const MAIN_SOURCE = "res-override-bridge";
     const HOOK_SOURCE = "res-override-hook";
@@ -17,22 +19,66 @@
     function dlog(...args: any[]): void {
         const msg = args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
         console.log(`[res:bridge] ${msg}`);
-        try {
-            chrome.runtime.sendMessage(
-                { type: "debugLog", entry: { at: Date.now(), src: "bridge", msg } },
-                () => void chrome.runtime.lastError
-            );
-        } catch {}
+        safeSend({ type: "debugLog", entry: { at: Date.now(), src: "bridge", msg } });
     }
 
     // ---- MAIN-world hook relaying ----
+
+    /**
+     * Extension reloads invalidate this content script's context:
+     * chrome.runtime.sendMessage then THROWS synchronously. Every relay
+     * must survive that — the first detection marks the bridge dead and
+     * tells the hook to go dormant (restoring the page's own fetch/XHR)
+     * instead of stalling every request on the 15s watchdog.
+     */
+    let dead = false;
+    const CONTEXT_DEAD = /context invalidated/i;
+    function markDead(): void {
+        if (dead) return;
+        dead = true;
+        try {
+            window.postMessage({ source: MAIN_SOURCE, kind: "extensionDead" }, window.location.origin);
+        } catch {}
+        console.log("[res:bridge] extension reloaded — hook dormant in this tab until the next page load");
+    }
+    function safeSend(msg: any, onResp?: (resp: any) => void): void {
+        if (dead) return;
+        try {
+            chrome.runtime.sendMessage(msg, (resp: any) => {
+                // the context can die between send and callback — nothing in
+                // here may throw uncaught
+                try {
+                    const err = (chrome.runtime as any).lastError;
+                    if (err && CONTEXT_DEAD.test(err.message || "")) return markDead();
+                    onResp?.(resp);
+                } catch (e: any) {
+                    if (CONTEXT_DEAD.test(e?.message || "")) markDead();
+                }
+            });
+        } catch (e: any) {
+            if (CONTEXT_DEAD.test(e?.message || "")) markDead();
+            else onResp?.(undefined);
+        }
+    }
+
+    /** final net: a content-script event handler may never throw uncaught */
+    function guard(fn: () => void): void {
+        try {
+            fn();
+        } catch (e: any) {
+            if (CONTEXT_DEAD.test(e?.message || "")) markDead();
+            else dlog("handler error:", String(e?.message || e));
+        }
+    }
+
     window.addEventListener("message", (event: MessageEvent) => {
         if (event.source !== window) return;
         const data = event.data;
         if (!data || data.source !== HOOK_SOURCE) return;
+        void guard(() => {
 
         if (data.kind === "status?") {
-            chrome.runtime.sendMessage({ type: "getHookBundle", url: location.href }, (resp: any) => {
+            safeSend({ type: "getHookBundle", url: location.href }, (resp: any) => {
                 const active = !!(resp && (resp.count > 0 || (resp.domHandlers || []).length));
                 window.postMessage(
                     { source: MAIN_SOURCE, kind: "status", active, domHandlers: (resp && resp.domHandlers) || [], libs: (resp && resp.libs) || [] },
@@ -42,12 +88,12 @@
             return;
         }
         if (data.kind === "claim") {
-            chrome.runtime.sendMessage({ type: "claimRequest", url: data.url }, () => void chrome.runtime.lastError);
+            safeSend({ type: "claimRequest", url: data.url });
             return;
         }
         if (data.kind === "call" && (data.op === "storageGet" || data.op === "storageSet")) {
             const storageType = data.op === "storageGet" ? "scriptStorageGet" : "scriptStorageSet";
-            chrome.runtime.sendMessage(
+            safeSend(
                 { type: storageType, scriptId: data.scriptId, key: data.key, value: data.value },
                 (resp: any) => {
                     window.postMessage(
@@ -60,7 +106,7 @@
         }
         if (data.kind === "call") {
             const bgType = data.op === "replace" ? "runReplace" : data.op === "respond" ? "runRequestDecision" : "runTransform";
-            chrome.runtime.sendMessage(
+            safeSend(
                 { type: bgType, url: data.url, method: data.method, body: data.body, status: data.status, contentType: data.contentType },
                 (resp: any) => {
                     window.postMessage(
@@ -72,13 +118,11 @@
             return;
         }
         if (data.kind === "log") {
-            try {
-                chrome.runtime.sendMessage(
-                    { type: "debugLog", entry: { at: Date.now(), src: data.src || "hook", msg: data.msg, level: data.level || "info" } },
-                    () => void chrome.runtime.lastError
-                );
-            } catch {}
+            safeSend(
+                { type: "debugLog", entry: { at: Date.now(), src: data.src || "hook", msg: data.msg, level: data.level || "info" } }
+            );
         }
+        });
     });
 
     // ---- res.onDom fallback (isolated world): compiles the FULL script
@@ -86,10 +130,12 @@
     // shared with the page, window (page JS globals) is not ----
     interface DomHandler { scriptId: string; name: string; when: string; src: string; params?: Record<string, any> }
 
-    async function runDomHandlers(hot: boolean): Promise<void> {
+    async function runDomHandlers(hot: boolean): Promise<void> {        if (dead) return;
         // handlers come embedded in the hook bundle (getHookBundle)
         const bundle = await new Promise<any>((resolve) => {
-            chrome.runtime.sendMessage({ type: "getHookBundle", url: location.href }, (r: any) => resolve(r || { domHandlers: [] }));
+            safeSend({ type: "getHookBundle", url: location.href }, (r: any) => resolve(r || { domHandlers: [] }));
+            // dead bridge: safeSend never answers — resolve empty after a beat
+            setTimeout(() => resolve({ domHandlers: [] }), 1000);
         });
         const handlers: DomHandler[] = bundle.domHandlers || [];
         const libSources: { name: string; src: string }[] = bundle.libs || [];
@@ -109,18 +155,13 @@
                 declareScript: () => h.params || {},
                 log: (...args: any[]) => {
                     const msg = `res.log: ${args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")}`;
-                    try {
-                        chrome.runtime.sendMessage(
-                            { type: "debugLog", entry: { at: Date.now(), src: h.name, msg } },
-                            () => void chrome.runtime.lastError
-                        );
-                    } catch {}
+                    safeSend({ type: "debugLog", entry: { at: Date.now(), src: h.name, msg } });
                 },
                 storage: {
                     get: (key: string) =>
-                        new Promise((r) => chrome.runtime.sendMessage({ type: "scriptStorageGet", scriptId: h.scriptId, key }, (x: any) => r(x && x.value))),
+                        new Promise((r) => safeSend({ type: "scriptStorageGet", scriptId: h.scriptId, key }, (x: any) => r(x && x.value))),
                     set: (key: string, value: any) =>
-                        new Promise((r) => chrome.runtime.sendMessage({ type: "scriptStorageSet", scriptId: h.scriptId, key, value }, () => r(null))),
+                        new Promise((r) => safeSend({ type: "scriptStorageSet", scriptId: h.scriptId, key, value }, () => r(null))),
                 },
             };
             try {
@@ -165,7 +206,7 @@
                 const moduleObj = { exports: {} as any };
                 new Function("res", "console", "require", "module", "exports", `"use strict";\n${h.src}`)(shim, consoleProxy, requireLib, moduleObj, moduleObj.exports);
             } catch (e: any) {
-                dlog(`onDom ${h.name} compile failed (isolated):`, e.message || e);
+                dlog(formatScriptError(h.name, e, "onDom compile (isolated)"));
                 continue;
             }
             if (!store.onDom) continue;
@@ -173,7 +214,7 @@
                 try {
                     store.onDom({ url: location.href, method: "GET", tabUrl: location.href });
                 } catch (e: any) {
-                    dlog(`onDom ${h.name} threw: ${e.message || e}`);
+                    dlog(formatScriptError(h.name, e, "onDom"));
                 }
             };
             if (hot || h.when === "document_start") {
@@ -191,21 +232,23 @@
     let hookBroken = false;
 
     chrome.runtime.onMessage.addListener((msg: any) => {
-        if (msg && msg.type === "hookCspBlocked") {
-            hookBroken = true;
-        }
-        if (msg && msg.type === "bundleUpdate") {
-            // scripts changed: refresh hook status; onDom refires in the
-            // MAIN world (hook) when healthy, else here (isolated)
-            if (hookBroken) void runDomHandlers(true);
-            chrome.runtime.sendMessage({ type: "getHookBundle", url: location.href }, (resp: any) => {
-                const active = !!(resp && (resp.count > 0 || (resp.domHandlers || []).length));
-                window.postMessage(
-                    { source: MAIN_SOURCE, kind: "status", active, domHandlers: (resp && resp.domHandlers) || [], libs: (resp && resp.libs) || [], hot: true },
-                    window.location.origin
-                );
-            });
-        }
+        guard(() => {
+            if (msg && msg.type === "hookCspBlocked") {
+                hookBroken = true;
+            }
+            if (msg && msg.type === "bundleUpdate") {
+                // scripts changed: refresh hook status; onDom refires in the
+                // MAIN world (hook) when healthy, else here (isolated)
+                if (hookBroken) void runDomHandlers(true);
+                safeSend({ type: "getHookBundle", url: location.href }, (resp: any) => {
+                    const active = !!(resp && (resp.count > 0 || (resp.domHandlers || []).length));
+                    window.postMessage(
+                        { source: MAIN_SOURCE, kind: "status", active, domHandlers: (resp && resp.domHandlers) || [], libs: (resp && resp.libs) || [], hot: true },
+                        window.location.origin
+                    );
+                });
+            }
+        });
         return false;
     });
 

@@ -100,6 +100,8 @@ declare namespace ResOverride {
     }
     interface ParamDefString {
         type: "string";
+        /** edit in a textarea; values with newlines are written as YAML block scalars in settings.yaml */
+        multiline?: boolean;
         default?: string;
         description?: string;
     }

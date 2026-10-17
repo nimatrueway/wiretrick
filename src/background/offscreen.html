@@ -1,0 +1,10 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body>
+    // hidden iframe: the MV3 sandbox page (eval allowed) doing the compiling;
+    // the SW rewrites the placeholder with the real extension id at runtime
+    <iframe src="sandbox.html?extId=__EXT_ID__" id="sb" style="display:none"></iframe>
+    <script src="offscreen.js"></script>
+</body>
+</html>
