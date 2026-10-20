@@ -241,6 +241,10 @@ try {
         type: "saveScript", id: "s_auto", name: "Auto script",
         code: `wt.declareScript({ match: ["${cdn}/auto.js"] });\nwt.modifyResponse((ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
     }, r)), CDN);
+    await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
+        type: "saveScript", id: "s_procx", name: "Process listed",
+        code: `wt.declareScript({ match: ["*://process-listed.invalid/*"], strategy: ["process"] });\nwt.modifyResponse((ctx, body) => body);`,
+    }, r)));
     await mgr.waitForTimeout(1500); // pipeline reload → debugger tier armed
     // Network tab records from now on (listeners attach when it opens)
     await mgr.click("#network-tab");
@@ -376,8 +380,9 @@ try {
     if (process.env.DBG) console.log(logText.split("\n").filter((l: string) => /Tier C|cdp|debugger|attach|requestPaused/i.test(l)).slice(-40).join("\n"));
     check("removed \"proxy\" strategy is warned about", logText.includes(`"proxy" strategy was removed`));
     check("auto-strategy hint to add \"cdp\" is logged", logText.includes(`"Auto script" intercept page fetch/XHR only`));
+    check("process-listed scripts get no add-\"cdp\" hint", !logText.includes(`"Process listed"`) || !/"Process listed"[^\n]*intercept page fetch\/XHR only/.test(logText));
     check("debugger tier activation is logged", logText.includes("MV3 debugger tier active"));
-    for (const id of ["s_respond", "s_cdpx", "s_auto", "s_proxy2", "s_race"]) {
+    for (const id of ["s_respond", "s_cdpx", "s_auto", "s_procx", "s_proxy2", "s_race"]) {
         await mgr.evaluate((id: string) => new Promise((r) => chrome.runtime.sendMessage({ type: "deleteScript", id }, r)), id);
     }
     await xoPage.close();

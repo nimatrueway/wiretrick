@@ -17,7 +17,7 @@ import { dlogLevel } from "../../../shared/debugLog";
 import { debuggerAttach, debuggerSend, debuggerDetach, debuggerGetTargets, type Debuggee } from "../../../shared/chromeApi";
 import { analyzeScripts, runBodyOp } from "../../compileHost";
 import { recordNetBody } from "../../network";
-import { isProcessOwned } from "./processState";
+import { isProcessOwned, listsProcess } from "./processState";
 
 interface CdpScript {
     scriptId: string;
@@ -181,7 +181,9 @@ export class CdpStrategy {
             if (!wantsRequest && !wantsResponse) continue;
             if (isProcessOwned(s.meta.strategy)) continue; // the helper tier owns it
             if (!usesDebuggerMv3(s.meta.strategy)) {
-                autoBody.push(s.meta.name);
+                // process-listed scripts: the helper tier reports its own state
+                // (and isn't connected yet during startup reloads)
+                if (!listsProcess(s.meta.strategy)) autoBody.push(s.meta.name);
                 continue;
             }
             next.push({
