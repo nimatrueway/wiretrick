@@ -17,7 +17,7 @@ import { mountNetworkPanel } from "./network/mount";
 import { scriptHealth, type ScriptHealthInput } from "../shared/scriptHealth";
 import type { Uri, IPosition, IRange, IKeyboardEvent, editor as MonacoEditor } from "monaco-editor";
 import type { Script } from "../background/engine/scriptStore";
-import { setupPanelDock } from "./panelDock";
+import { setupPanelDock, currentSide } from "./panelDock";
 
 // ---- state ----
 let scripts: (Script & { runtimeError?: ScriptHealthInput["runtimeError"]; typeErrors?: string[] })[] = [];
@@ -1013,7 +1013,8 @@ function makeSplitV(): void {
         e.preventDefault();
         handle.classList.add("dragging");
         const move = (ev: MouseEvent) => {
-            const w = Math.min(620, Math.max(200, ev.clientX));
+            const x = currentSide() === "right" ? window.innerWidth - ev.clientX : ev.clientX;
+            const w = Math.min(620, Math.max(200, x));
             $("#sidebar").style.width = `${w}px`;
         };
         const up = () => {

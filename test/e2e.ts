@@ -404,6 +404,43 @@ check("panels: log docks right by header drag", dockedRight === "right", `dock=$
 check("panels: log docks under the script list", dockedLeft === "left" && leftParent === "sidebar", `dock=${dockedLeft} parent=${leftParent}`);
 check("panels: log returns to bottom", dockedBack === "bottom", `dock=${dockedBack}`);
 
+// script list header drag → left/right edge
+const dragBrandTo = async (tx: number) => {
+    const bb = (await mgr.locator("#brand h1").boundingBox())!;
+    await mgr.mouse.move(bb.x + 5, bb.y + 5);
+    await mgr.mouse.down();
+    await mgr.mouse.move(tx, vp.h / 2, { steps: 8 });
+    await mgr.mouse.up();
+    await new Promise((r) => setTimeout(r, 300));
+};
+const geom = () =>
+    mgr.evaluate(() => ({
+        side: document.getElementById("app")!.dataset.side,
+        sideLeft: document.getElementById("sidebar")!.getBoundingClientRect().left,
+        sideW: document.getElementById("sidebar")!.offsetWidth,
+        editorLeft: document.getElementById("editor-pane")!.getBoundingClientRect().left,
+    }));
+await dragBrandTo(vp.w - 30);
+const onRight = await geom();
+check("panels: script list docks right", onRight.side === "right" && onRight.sideLeft > onRight.editorLeft && onRight.editorLeft < 5, JSON.stringify(onRight));
+// resize from its (now left-hand) splitter
+const sv = (await mgr.locator("#split-v").boundingBox())!;
+await mgr.mouse.move(sv.x + 2, sv.y + 100);
+await mgr.mouse.down();
+await mgr.mouse.move(sv.x - 100, sv.y + 100, { steps: 5 });
+await mgr.mouse.up();
+const widened = await geom();
+check("panels: right script list resizes from its splitter", widened.sideW - onRight.sideW > 60, `${onRight.sideW} → ${widened.sideW}`);
+// the log panel still docks under the list on the right
+await dragHeaderTo(vp.w - 60, vp.h - 60);
+const underRight = await mgr.evaluate(() => [document.getElementById("app")!.dataset.dock, document.getElementById("log-panel")!.parentElement!.id]);
+check("panels: log docks under a right-side script list", underRight[0] === "left" && underRight[1] === "sidebar", JSON.stringify(underRight));
+await dragHeaderTo(vp.w / 3, vp.h - 40);
+await dragBrandTo(30);
+const backLeft = await geom();
+const persisted = await mgr.evaluate(() => JSON.parse(localStorage.getItem("resPanelDock") || "{}").side);
+check("panels: script list back to the left (persisted)", backLeft.side === "left" && backLeft.sideLeft < 5 && persisted === "left", JSON.stringify({ ...backLeft, persisted }));
+
 // find box filters log lines (E2E-CONSOLE-MARKER arrived via the port
 // from test 11's script console)
 await mgr.locator("#log-find").fill("E2E-CONSOLE");

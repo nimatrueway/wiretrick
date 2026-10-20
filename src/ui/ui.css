@@ -78,6 +78,21 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
     font-size: 12px;
 }
 #log-header, #log-header .panel-tab { cursor: grab; }
+
+/* script list on either edge: order #app's children (sidebar, split-v,
+   editor, and the panel + its splitter when docked "right") */
+#app > #sidebar { order: 0; }
+#app > #split-v { order: 1; }
+#app > #editor-pane { order: 2; }
+#app > #split-h { order: 3; }
+#app > #log-panel { order: 4; }
+#app[data-side="right"] > #editor-pane { order: 0; }
+#app[data-side="right"] > #split-h { order: 1; }
+#app[data-side="right"] > #log-panel { order: 2; }
+#app[data-side="right"] > #split-v { order: 3; }
+#app[data-side="right"] > #sidebar { order: 4; border-right: none; border-left: 1px solid var(--border); }
+#brand { cursor: grab; }
+#brand button { cursor: auto; }
 #log-header select, #log-header input, #log-header button { cursor: auto; }
 
 /* ---- sidebar ---- */

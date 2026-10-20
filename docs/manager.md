@@ -21,8 +21,11 @@ no discard prompt on a no-op edit.
 
 The panel has two tabs. Drag its header (or a tab title) to dock it — a
 highlighted preview shows where it lands: **below the editor**, **full height
-on the right**, or **under the script list**. Drag its edge to resize; each
+beside the editor**, or **under the script list**. Drag its edge to resize; each
 dock remembers its own size, and Esc cancels a drag.
+
+The script list moves too: drag its header (the **Wiretrick** title) to the
+left or right edge of the window.
 
 - **Log** — engine and script log lines with level and source filters. Script
   errors (exceptions in handlers, failed compiles) are logged at ERROR, and
