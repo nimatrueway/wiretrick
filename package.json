@@ -12,7 +12,8 @@
     "build:helper": "cargo build --release --manifest-path helper/Cargo.toml",
     "test:helper": "cargo test --manifest-path helper/Cargo.toml",
     "test:e2e": "tsx test/e2e.ts",
-    "test:e2e:samples": "tsx test/samples.e2e.ts"
+    "test:e2e:samples": "tsx test/samples.e2e.ts",
+    "screenshots": "tsx scripts/screenshots.ts"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.280",

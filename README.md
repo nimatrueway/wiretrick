@@ -1,4 +1,4 @@
-# Wiretrick (v2 — TypeScript rewrite)
+# Wiretrick
 
 A ground-up TypeScript rewrite of [Resource Override](https://github.com/kylepaulsen/ResourceOverride).
 Instead of rule lists, the entire interface is a **script editor**: you write small
@@ -14,7 +14,7 @@ response bodies, or replace them entirely. Each script has an enable/disable tog
 
 ![Wiretrick popup — scripts active on the current tab](docs/shots/popup.png)
 
-**Sample scripts** (? → Samples — ten one-click starters):
+**Sample scripts** (Samples — one-click starters, each against a real public site):
 
 ![Wiretrick samples dialog](docs/shots/samples.png)
 
