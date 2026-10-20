@@ -16,6 +16,7 @@ import { mountNetworkPanel } from "./network/mount";
 import { scriptHealth, type ScriptHealthInput } from "../shared/scriptHealth";
 import type { Uri, IPosition, IRange, IKeyboardEvent, editor as MonacoEditor } from "monaco-editor";
 import type { Script } from "../background/engine/scriptStore";
+import { setupPanelDock } from "./panelDock";
 
 // ---- state ----
 let scripts: (Script & { runtimeError?: ScriptHealthInput["runtimeError"]; typeErrors?: string[] })[] = [];
@@ -49,13 +50,11 @@ const setBaseline = (m: any, text: string): void => {
 function updateDirty(): void {
     if (!editor) return;
     const m = editor.getModel();
-    const isScript = !!selectedId && selectedId !== SETTINGS_ID;
-    const script = isScript ? scripts.find((s) => s.id === selectedId) : null;
     const dirtyNow = computeDirty(
         m ? m.getValue() : "",
         m ? (baselines.get(m.uri.toString()) ?? null) : null,
-        isScript ? $input("#script-name").value : undefined,
-        script ? script.meta.name : undefined
+        undefined,
+        undefined
     );
     setDirty(dirtyNow);
     status(dirtyNow ? "unsaved…" : "saved ✓", dirtyNow ? "dirty" : "");
@@ -80,10 +79,14 @@ function uuid(): string {
     return "s_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
 }
 
-function status(text: string, cls = ""): void {
+let statusClick: (() => void) | null = null;
+
+/** Toolbar status line; with onClick it renders as a link-like action. */
+function status(text: string, cls = "", onClick?: () => void): void {
     const el = $("#editor-status");
     el.textContent = text;
-    el.className = cls;
+    el.className = cls + (onClick ? " clickable" : "");
+    statusClick = onClick ?? null;
 }
 
 // ---- script list ----
@@ -109,8 +112,6 @@ async function loadSettingsModel(force = false): Promise<void> {
 async function selectSettings(): Promise<void> {
     selectedId = SETTINGS_ID;
     renderList();
-    $input("#script-name").value = "settings.yaml";
-    $("#script-name").setAttribute("disabled", "");
     $("#btn-save").removeAttribute("disabled");
     await loadSettingsModel(true);
     if (editor.getModel() !== settingsModel) {
@@ -151,7 +152,10 @@ async function refresh(): Promise<void> {
     }
 }
 
+let renaming = false;
+
 function renderList(): void {
+    if (renaming) return; // a rebuild would drop the inline rename input
     const list = $("#script-list");
     list.innerHTML = "";
     const sli = document.createElement("li");
@@ -196,7 +200,8 @@ function renderList(): void {
         const name = document.createElement("span");
         name.className = "script-name" + (health ? " error" : "");
         name.textContent = script.meta.name;
-        name.title = script.meta.match.join(", ");
+        name.title = `${script.meta.match.join(", ")}\nDouble-click to rename`;
+
         if (health) li.classList.add("has-error");
 
         const del = document.createElement("button");
@@ -230,9 +235,52 @@ function renderList(): void {
             li.append(ind);
         }
         li.append(del);
-        li.addEventListener("click", () => select(script.id));
+        // re-selecting would rebuild the list and swallow a double-click
+        li.addEventListener("click", () => script.id !== selectedId && select(script.id));
         list.appendChild(li);
     }
+}
+
+/** Inline rename in the script list (double-click a name). */
+function startRename(label: HTMLElement, script: Script): void {
+    const input = document.createElement("input");
+    input.className = "script-rename";
+    input.value = script.meta.name;
+    label.replaceWith(input);
+    renaming = true;
+    input.focus();
+    input.select();
+    let done = false;
+    const finish = async (commit: boolean): Promise<void> => {
+        if (done) return;
+        done = true;
+        renaming = false;
+        const next = input.value.trim();
+        if (!commit || !next || next === script.meta.name) {
+            input.replaceWith(label);
+            renderList(); // catch up on updates skipped while renaming
+            return;
+        }
+        const oldFile = fsBridge.fileNameFor(script.id, script.meta.name);
+        const result = await send({ type: "saveScript", id: script.id, code: script.code, name: next });
+        if (result?.error) status("script error — see log", "error");
+        if (fsBridge.isSyncing()) {
+            const newFile = fsBridge.fileNameFor(script.id, next);
+            if (newFile !== oldFile) {
+                await send({ type: "folderWriteBack", fileName: newFile, content: script.code });
+                await send({ type: "folderDelete", fileName: oldFile });
+            }
+        }
+        await refresh();
+        renderList();
+    };
+    input.addEventListener("click", (e) => e.stopPropagation());
+    input.addEventListener("dblclick", (e) => e.stopPropagation());
+    input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") void finish(true);
+        else if (e.key === "Escape") void finish(false);
+    });
+    input.addEventListener("blur", () => void finish(true));
 }
 
 // ---- TypeScript diagnostics → script error state ----
@@ -329,7 +377,6 @@ function syncModels(): void {
 }
 
 async function renderEditorEmpty(): Promise<void> {
-    $("#script-name").setAttribute("disabled", "");
     $("#btn-save").setAttribute("disabled", "");
     if (editor) {
         editor.setModel(null);
@@ -371,8 +418,6 @@ function selectReal(id: string): void {
     renderList();
     const script = scripts.find((s) => s.id === id);
     if (!script) return;
-    $input("#script-name").value = script.meta.name;
-    $("#script-name").removeAttribute("disabled");
     $("#btn-save").removeAttribute("disabled");
     syncModels();
     const m = models.get(id);
@@ -393,7 +438,7 @@ async function saveCurrent(): Promise<void> {
     if (selectedId === SETTINGS_ID) return saveSettings();
     if (!selectedId || !editor) return;
     const code = editor.getValue();
-    const name = $input("#script-name").value.trim() || "Untitled script";
+    const name = scripts.find((s) => s.id === selectedId)?.meta.name || "Untitled script";
     const result = await send({ type: "saveScript", id: selectedId, code, name });
     if (result && result.error) {
         status("script error — see log", "error");
@@ -683,10 +728,9 @@ function setupDialogs(): void {
     });
     $("#btn-process-trust").addEventListener("click", () => chrome.runtime.sendMessage({ type: "processTrustCa" }, () => void chrome.runtime.lastError));
     $("#btn-help").addEventListener("click", () => openDialog("help-panel"));
-    $("#btn-samples").addEventListener("click", () => {
-        renderSamples();
-        openDialog("samples-panel");
-    });
+    for (const tab of document.querySelectorAll<HTMLElement>("[data-help-tab]")) {
+        tab.addEventListener("click", () => showHelpTab(tab.dataset.helpTab!));
+    }
     for (const overlay of document.querySelectorAll(".overlay")) {
         overlay.addEventListener("mousedown", (e) => {
             if (e.target === overlay) closeDialog(overlay);
@@ -792,6 +836,15 @@ function applyLogLevel(level: string): void {
     sel.dispatchEvent(new Event("change"));
 }
 
+function showHelpTab(name: string): void {
+    if (name === "samples" && !$("#samples-body").childElementCount) renderSamples();
+    for (const tab of document.querySelectorAll<HTMLElement>("[data-help-tab]")) {
+        tab.classList.toggle("active", tab.dataset.helpTab === name);
+        tab.setAttribute("aria-selected", String(tab.dataset.helpTab === name));
+    }
+    for (const pane of document.querySelectorAll<HTMLElement>("#help-panel [data-pane]")) pane.hidden = pane.dataset.pane !== name;
+}
+
 function renderHelp(): void {
     const body = $("#help-body");
     body.innerHTML = "";
@@ -827,7 +880,7 @@ function renderSamples(): void {
             await send({ type: "saveScript", id, code: sample.code, name: sample.name });
             await refresh();
             selectReal(id);
-            document.getElementById("samples-panel")?.classList.add("hidden");
+            document.getElementById("help-panel")?.classList.add("hidden");
             status(`sample "${sample.name}" added ✓`);
         });
         head.append(name, use);
@@ -884,25 +937,25 @@ async function autoReconnectFolder(): Promise<void> {
         await markFolderSynced();
     } else if (st === "prompt") {
         // one click re-grants (Chrome drops FS grants between restarts)
-        status("scripts folder needs reconnect — click 'Scripts Folder…'");
         btn.textContent = "Scripts Folder… (reconnect)";
         $("#folder-state").textContent = "reconnect needed";
-        btn.addEventListener("click", async () => {
+        const reconnect = async (): Promise<void> => {
+            btn.removeEventListener("click", reconnect);
             if (fsBridge.isSyncing()) return;
             const ok = await fsBridge.reconnectClicked();
             if (ok) {
                 await markFolderSynced();
                 status("scripts folder reconnected ✓");
             }
-        }, { once: true });
+        };
+        btn.addEventListener("click", reconnect);
+        status("scripts folder needs reconnect — click to reconnect", "dirty", () => void reconnect());
     }
 }
 
 // ---- movable panels ----
 interface PanelLayout {
     sidebarW?: number;
-    logH?: number;
-    logDock?: "bottom" | "right";
     panelTab?: "log" | "network";
 }
 const LAYOUT_KEY = "resPanelLayout";
@@ -922,11 +975,6 @@ function saveLayout(l: PanelLayout): void {
 function applyLayout(): void {
     const l = loadLayout();
     if (l.sidebarW) $("#sidebar").style.width = `${l.sidebarW}px`;
-    if (l.logH) $("#log-panel").style.height = `${l.logH}px`;
-    if (l.logDock === "right") {
-        document.getElementById("app")?.classList.add("log-right");
-        $("#editor-area")?.appendChild($("#log-panel").parentElement === $("#editor-area") ? $("#log-panel") : $("#log-panel"));
-    }
 }
 
 function makeSplitV(): void {
@@ -945,85 +993,6 @@ function makeSplitV(): void {
             const l = loadLayout();
             l.sidebarW = $("#sidebar").offsetWidth;
             saveLayout(l);
-        };
-        document.addEventListener("mousemove", move);
-        document.addEventListener("mouseup", up);
-    });
-}
-
-function makeSplitH(): void {
-    const handle = $("#split-h");
-    handle.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        if (document.getElementById("app")?.classList.contains("log-right")) {
-            // right-dock mode: adjust log width instead
-            handle.classList.add("dragging");
-            const move = (ev: MouseEvent) => {
-                const w = Math.min(620, Math.max(200, window.innerWidth - ev.clientX));
-                $("#log-panel").style.width = `${w}px`;
-            };
-            const up = () => {
-                handle.classList.remove("dragging");
-                document.removeEventListener("mousemove", move);
-                document.removeEventListener("mouseup", up);
-                const l = loadLayout();
-                l.logH = $("#log-panel").offsetHeight;
-                saveLayout(l);
-            };
-            document.addEventListener("mousemove", move);
-            document.addEventListener("mouseup", up);
-            return;
-        }
-        handle.classList.add("dragging");
-        const startY = e.clientY;
-        const startH = $("#log-panel").offsetHeight;
-        const move = (ev: MouseEvent) => {
-            const h = Math.min(window.innerHeight - 220, Math.max(80, startH + (startY - ev.clientY)));
-            $("#log-panel").style.height = `${h}px`;
-        };
-        const up = () => {
-            handle.classList.remove("dragging");
-            document.removeEventListener("mousemove", move);
-            document.removeEventListener("mouseup", up);
-            const l = loadLayout();
-            l.logH = $("#log-panel").offsetHeight;
-            saveLayout(l);
-        };
-        document.addEventListener("mousemove", move);
-        document.addEventListener("mouseup", up);
-    });
-}
-
-function makeLogMovable(): void {
-    const header = $("#log-header");
-    header.addEventListener("mousedown", (e) => {
-        // don't start a drag from the find input, level select, or the
-        // clear button — preventDefault would block focusing/opening them
-        const tag = (e.target as HTMLElement).tagName;
-        if (tag === "BUTTON" || tag === "INPUT" || tag === "SELECT" || tag === "OPTION") return;
-        e.preventDefault();
-        const startX = e.clientX;
-        const app = document.getElementById("app");
-        const wasRight = app?.classList.contains("log-right");
-        const move = (ev: MouseEvent) => {
-            const dx = ev.clientX - startX;
-            if (!wasRight && dx > 120) {
-                app?.classList.add("log-right");
-                app?.appendChild($("#log-panel")); // move into the app row (right of editor)
-                const l = loadLayout();
-                l.logDock = "right";
-                saveLayout(l);
-            } else if (wasRight && dx < -120) {
-                app?.classList.remove("log-right");
-                $("#editor-area")?.appendChild($("#log-panel")); // back under the editor
-                const l = loadLayout();
-                l.logDock = "bottom";
-                saveLayout(l);
-            }
-        };
-        const up = () => {
-            document.removeEventListener("mousemove", move);
-            document.removeEventListener("mouseup", up);
         };
         document.addEventListener("mousemove", move);
         document.addEventListener("mouseup", up);
@@ -1109,16 +1078,6 @@ async function main(): Promise<void> {
     });
 
     $("#btn-save").addEventListener("click", () => void saveCurrent());
-    $("#btn-debug-bg").addEventListener("click", () => {
-        // MV2 has no API that opens DevTools for the live background event
-        // page (chrome.debugger is CDP sessions for OTHER targets; opening
-        // background.html in a tab spawns a second instance, not the live
-        // one). chrome://extensions' "Inspect views" is the only way in —
-        // and chrome.tabs.create may navigate to chrome:// URLs (links and
-        // window.open may not).
-        chrome.tabs.create({ url: `chrome://extensions/?id=${chrome.runtime.id}` }, () => void chrome.runtime.lastError);
-        status('inspect background: click "background page" under Inspect views');
-    });
     $("#btn-open-vscode").addEventListener("click", () => {
         const folder = (window as any).__resSyncPath as string;
         if (!folder || !selectedId) return;
@@ -1165,9 +1124,13 @@ async function main(): Promise<void> {
         URL.revokeObjectURL(url);
         status("debug log downloaded");
     });
-    $("#script-name").addEventListener("input", () => {
-        updateDirty();
-        if (dirty) status("unsaved (name) — save to apply", "dirty");
+    $("#editor-status").addEventListener("click", () => statusClick?.());
+    // delegated: the first click of a double-click re-renders the list
+    $("#script-list").addEventListener("dblclick", (e) => {
+        const li = (e.target as HTMLElement).closest<HTMLElement>("li.script-item");
+        const script = li && scripts.find((s) => s.id === li.dataset.id);
+        const label = script && li!.querySelector<HTMLElement>(".script-name");
+        if (label) startRename(label, script!);
     });
 
     // VS Code folder sync
@@ -1184,7 +1147,15 @@ async function main(): Promise<void> {
                 updateOpenVscode();
                 return;
             }
-            await fsBridge.openFolder(async () => scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code })));
+            try {
+                await fsBridge.openFolder();
+            } catch (e: any) {
+                if (e?.name === "AbortError") {
+                    managerLog("scripts folder pick cancelled", "warn");
+                    return;
+                }
+                throw e;
+            }
             await markFolderSynced();
         });
     } else {
@@ -1269,8 +1240,7 @@ async function main(): Promise<void> {
 
     applyLayout();
     makeSplitV();
-    makeSplitH();
-    makeLogMovable();
+    setupPanelDock();
     makeLogFilters();
     setupPanelTabs();
     startKeepAlive();
@@ -1315,6 +1285,12 @@ let monacoVerbose = false;
 /** Navigation diagnostics. Warnings/errors always log; the rest only with the
  * "Verbose Monaco logging" setting. Verbose lines use "warn" so the panel's
  * level filter never hides them. */
+function managerLog(msg: string, level: string): void {
+    const text = `[manager] ${msg}`;
+    appendLog({ at: Date.now(), message: text, level });
+    chrome.runtime.sendMessage({ type: "debugLog", entry: { at: Date.now(), src: "manager", msg, level } }, () => void chrome.runtime.lastError);
+}
+
 function navLog(msg: string, level = "info"): void {
     if (level === "info") {
         if (!monacoVerbose) return;
@@ -1340,6 +1316,8 @@ function installMonacoTrace(): void {
         // rejects with its cancellation error when a rapid model switch
         // invalidates it — benign, don't litter the log
         if (reason && (reason.name === "Canceled" || reason.message === "Canceled")) return;
+        // a dismissed file/folder picker is a user choice, not a failure
+        if (reason && reason.name === "AbortError") return managerLog(`cancelled: ${reason.message}`, "warn");
         navLog(`unhandled rejection: ${String((reason && reason.stack) || reason)}`, "error");
     });
     editor.onDidChangeModel((e: MonacoEditor.IModelChangedEvent) => navLog(`model changed: ${e.oldModelUrl?.toString()} -> ${e.newModelUrl?.toString()}`));

@@ -130,16 +130,6 @@ try {
         })
     );
 
-    // background debugger button: sits left of Save, opens chrome://extensions
-    check("🐞 button sits left of Save", (await mgr.evaluate(() => (document.querySelector("#btn-save")?.previousElementSibling as HTMLElement | null)?.id)) === "btn-debug-bg");
-    await mgr.locator("#btn-debug-bg").click();
-    await mgr.waitForTimeout(1000);
-    check(
-        "🐞 button opens chrome://extensions",
-        (await mgr.evaluate(() => document.querySelector("#editor-status")?.textContent ?? "")).includes("Inspect views") &&
-            ctx.pages().some((p: any) => p.url().startsWith("chrome://extensions/"))
-    );
-
     const before = await params();
     await set('params:\n  "Debug header": [unclosed\n');
     await mgr.locator("#btn-save").click();

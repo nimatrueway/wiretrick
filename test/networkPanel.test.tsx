@@ -194,4 +194,33 @@ describe("NetworkPanel", () => {
         });
         expect(container.querySelector(".net-empty")!.textContent).toContain("Recording");
     });
+
+    it("lists tabs that closed but still have requests as closed, until cleared", async () => {
+        const store = createNetStore();
+        store.apply({
+            type: "netSnapshot",
+            entries: [entry("a", { tabId: 1 }), entry("doc", { tabId: 7, type: "main_frame", url: "https://gone.test/" }), entry("b", { tabId: 9 })],
+        });
+        let live = [
+            { id: 1, title: "Live tab" },
+            { id: 9, title: "Soon closed" },
+        ];
+        const { container } = render(<NetworkPanel store={store} listTabs={async () => live} />);
+        const sel = container.querySelector("select.net-tab") as HTMLSelectElement;
+        const closedLabels = () => [...sel.querySelectorAll("optgroup option")].map((o) => o.textContent);
+        await waitFor(() => expect(closedLabels()).toEqual(["✕ https://gone.test/"]));
+        expect([...sel.querySelectorAll(":scope > option")].map((o) => o.textContent)).toEqual(["All tabs", "Live tab", "Soon closed"]);
+
+        live = [{ id: 1, title: "Live tab" }];
+        fireEvent.focus(sel);
+        await waitFor(() => expect(closedLabels()).toEqual(["✕ https://gone.test/", "✕ Soon closed"]));
+        fireEvent.change(sel, { target: { value: "9" } });
+        await waitFor(() => expect(rowNames(container)).toEqual(["b.js"]));
+        expect(sel.classList.contains("closed")).toBe(true);
+
+        fireEvent.click(container.querySelector(".net-clear")!);
+        await waitFor(() => expect(closedLabels()).toEqual(["✕ Soon closed"])); // still selected
+        fireEvent.change(sel, { target: { value: "" } });
+        await waitFor(() => expect(sel.querySelector("optgroup")).toBeNull());
+    });
 });

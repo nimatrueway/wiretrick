@@ -179,14 +179,6 @@ await mgr.evaluate(() => (window as any).monaco.editor.getEditors()[0].trigger("
 dialogs = 0;
 await clickScript("main script");
 check("truly dirty: prompt appears", dialogs === 1, `dialogs=${dialogs}`);
-// name reverted to the stored one clears dirty too
-answer = true;
-await clickScript("main script");
-await mgr.locator("#script-name").fill("renamed!");
-dialogs = 0; answer = false;
-await mgr.locator("#script-name").fill("main script");
-await clickScript("utilities");
-check("name reverted: no discard prompt", dialogs === 0, `dialogs=${dialogs}`);
 
 } catch (e) {
     failed++;

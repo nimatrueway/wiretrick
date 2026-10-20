@@ -53,7 +53,7 @@ wt.modifyResponse((ctx, body) => {
 });
 ```
 
-Or click **Samples** for one-click starters against real public sites.
+Or click **?** → **Samples** for one-click starters against real public sites.
 
 ![Wiretrick samples dialog](docs/shots/samples.png)
 

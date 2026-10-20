@@ -42,16 +42,42 @@ html, body {
 }
 #split-h:hover, #split-h.dragging { background: var(--accent); }
 
-/* log docked to the right of the editor instead of below it */
-#app.log-right #editor-area { flex-direction: row; }
-#app.log-right #split-h { width: 5px; height: auto; cursor: col-resize; }
-#app.log-right #log-panel {
-    width: 340px;
+/* panel docks (src/ui/panelDock.ts) */
+#app[data-dock="right"] #split-h { width: 5px; height: auto; cursor: col-resize; }
+#app[data-dock="right"] #log-panel {
+    width: clamp(340px, 38vw, 640px);
     height: auto;
+    min-width: 0;
     border-top: none;
     border-left: 1px solid var(--border);
 }
-#log-header { cursor: move; }
+#app[data-dock="left"] #log-panel { height: 45%; }
+#app[data-dock="left"] #script-list { min-height: 60px; }
+body.resizing-x, body.resizing-x * { cursor: col-resize !important; user-select: none; }
+body.resizing-y, body.resizing-y * { cursor: row-resize !important; user-select: none; }
+body.dock-dragging, body.dock-dragging * { cursor: grabbing !important; user-select: none; }
+body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: none; }
+#dock-preview {
+    position: fixed;
+    z-index: 1000;
+    pointer-events: none;
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+    border: 2px solid var(--accent);
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: left 80ms, top 80ms, width 80ms, height 80ms;
+}
+#dock-preview[hidden] { display: none; }
+#dock-preview span {
+    background: var(--bg-panel);
+    color: var(--fg);
+    padding: 4px 10px;
+    border-radius: 3px;
+    font-size: 12px;
+}
+#log-header, #log-header .panel-tab { cursor: grab; }
 #log-header select, #log-header input, #log-header button { cursor: auto; }
 
 /* ---- sidebar ---- */
@@ -197,6 +223,7 @@ html, body {
     padding: 2px 8px;
     font-size: 11px;
 }
+#log-header button.icon-btn { padding: 2px 4px; line-height: 0; }
 #log-header button:hover { color: var(--fg); border-color: var(--border); background: var(--bg-hover); }
 
 #log-find {
@@ -288,14 +315,20 @@ html, body {
     border-bottom: 1px solid var(--border);
 }
 
-#script-name {
-    flex: 0 1 260px;
+.script-rename {
+    flex: 1;
+    min-width: 0;
     background: var(--bg);
-    border: 1px solid var(--border);
+    border: 1px solid var(--accent, #007acc);
     color: var(--fg);
     border-radius: 3px;
-    padding: 4px 8px;
-    font-size: 13px;
+    padding: 1px 4px;
+    font: inherit;
+}
+
+#editor-status.clickable {
+    cursor: pointer;
+    text-decoration: underline;
 }
 
 #editor-status { flex: 1; text-align: right; color: var(--fg-dim); }
@@ -366,6 +399,14 @@ html, body {
     border-bottom: 1px solid var(--border);
 }
 .dialog-head h2 { margin: 0; font-size: 14px; }
+.dialog-tabs { display: flex; gap: 4px; }
+.dialog-tabs button {
+    background: none; border: none; border-bottom: 2px solid transparent;
+    color: var(--fg-dim); cursor: pointer; font-size: 14px; font-weight: 600; padding: 2px 8px;
+}
+.dialog-tabs button:hover { color: var(--fg); }
+.dialog-tabs button.active { color: var(--fg); border-bottom-color: var(--accent); }
+.dialog-body[hidden] { display: none; }
 .btn-close {
     background: none;
     border: none;
@@ -464,8 +505,10 @@ html, body {
 .qo-item.active { background: var(--bg-hover); box-shadow: inset 2px 0 0 var(--accent); }
 
 /* ---- bottom panel tabs (VS Code style) ---- */
-#log-header { align-items: center; gap: 8px; }
-#panel-tabs { display: flex; gap: 14px; align-self: stretch; }
+#log-header { align-items: center; gap: 4px 8px; flex-wrap: wrap; }
+#panel-tabs { display: flex; gap: 14px; }
+#log-tools { min-width: 0; flex: 1 1 auto; }
+#app[data-dock="left"] #log-source, #app[data-dock="left"] #log-find { width: 84px; }
 .panel-tab {
     cursor: pointer;
     color: var(--fg-dim);
@@ -498,6 +541,8 @@ html, body {
 }
 .net-filter { width: 180px; }
 .net-tab { max-width: 180px; }
+.net-tab.closed, .net-tab option.closed { color: var(--fg-dim); font-style: italic; }
+.net-tab option:not(.closed) { color: var(--fg); font-style: normal; }
 .net-filter:focus, .net-tab:focus { border-color: var(--accent); outline: none; }
 .net-check { display: flex; align-items: center; gap: 3px; color: var(--fg-dim); cursor: pointer; }
 .net-chips { display: flex; gap: 2px; flex-wrap: wrap; }

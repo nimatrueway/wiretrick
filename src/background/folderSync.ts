@@ -250,6 +250,52 @@ async function adoptCanonicalName(fileName: string, scriptName: string, code: st
     dlogLevel("sync", "info", `Folder sync: renamed "${fileName}" → "${canonical}" to match its script name`);
 }
 
+/**
+ * Two-way sync when a folder is first picked: files with no script are
+ * imported, scripts with no file are written out, and when both exist but
+ * differ the newer one wins (file mtime vs. the script's last save).
+ */
+async function initialSync(): Promise<void> {
+    const { seen, aliases } = await scanFolder();
+    realNameOf = aliases;
+    const scripts = await listScripts();
+    const byFile = new Map(scripts.map((s) => [canonicalFileName(s.meta.name), s]));
+    let pulled = 0;
+    let pushed = 0;
+    let imported = 0;
+    for (const [fileName, sig] of seen) {
+        const text = await readText(fileName);
+        const s = byFile.get(fileName);
+        byFile.delete(fileName);
+        if (!s) {
+            const name = displayNameFromFile(fileName);
+            await saveScript({ id: newId(), code: text, name });
+            await migrateLegacy(fileName, text);
+            await adoptCanonicalName(fileName, name, text);
+            imported++;
+        } else if (s.code !== text) {
+            if (sig.lastModified > s.updatedAt) {
+                await saveScript({ id: s.id, code: text, name: s.meta.name });
+                await migrateLegacy(fileName, text);
+                pulled++;
+            } else {
+                await writeBack(fileName, s.code);
+                await migrateLegacy(fileName, s.code);
+                pushed++;
+            }
+        } else {
+            await migrateLegacy(fileName, text);
+        }
+    }
+    for (const [fileName, s] of byFile) {
+        await writeBack(fileName, s.code);
+        pushed++;
+    }
+    lastWritten.clear(); // the snapshot below absorbs our own writes
+    dlogLevel("sync", "info", `Folder sync: initial sync — ${imported} file(s) imported, ${pulled} script(s) updated from newer files, ${pushed} file(s) written from scripts`);
+    if (imported || pulled) broadcastToUi({ type: "scriptsChanged", source: "folder" } as any);
+}
+
 // ---- settings.yaml: canonical text generated from storage ----
 
 let settingsSig: FileSig | null = null;
@@ -405,7 +451,7 @@ async function ensureSyncAlarm(): Promise<void> {
 
 /**
  * Start watching the handle stored in IDB.
- * fresh: the user just picked this folder — snapshot it as-is. Otherwise
+ * fresh: the user just picked this folder — two-way initial sync. Otherwise
  * this is a resume (worker restart, permission re-grant): diff against the
  * persisted snapshot so changes made while not watching are applied.
  */
@@ -417,6 +463,7 @@ export async function startFromStoredHandle(opts: { fresh?: boolean } = {}): Pro
     displayPath = await describeHandle(handle);
     lastPollError = "";
     if (opts.fresh) {
+        await initialSync();
         await refreshKnown();
     } else if (!resumingSame) {
         const persisted = await loadPersistedKnown();
@@ -472,6 +519,13 @@ export async function deleteFile(fileName: string): Promise<void> {
             await dirHandle.removeEntry(legacy);
         } catch {}
     }
+}
+
+/** Stop timers only, keeping persisted state — as when the worker dies (test seam). */
+export function halt(): void {
+    if (timer) clearInterval(timer);
+    timer = null;
+    stopKeepAlive();
 }
 
 export async function stop(): Promise<void> {

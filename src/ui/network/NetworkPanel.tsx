@@ -190,10 +190,49 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
 
     // refresh on focus only: replacing <option>s while the native dropdown
     // is open (mousedown) closes it / drops the pick in Chromium
-    const refreshTabs = () => void listTabs?.().then((next) => setTabs((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next)));
-    useEffect(refreshTabs, []);
-    const tabOptions =
-        filter.tabId !== null && !tabs.some((t) => t.id === filter.tabId) ? [...tabs, { id: filter.tabId, title: `Tab ${filter.tabId} (closed)` }] : tabs;
+    // titles of every tab seen live, so a closed tab keeps its name
+    const tabTitles = useRef(new Map<number, string>());
+    const refreshTabs = () =>
+        void listTabs?.().then((next) => {
+            for (const t of next) tabTitles.current.set(t.id, t.title);
+            setTabs((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
+        });
+    useEffect(() => {
+        refreshTabs();
+        const api = (globalThis as any).chrome?.tabs;
+        if (!api?.onRemoved) return;
+        const onRemoved = () => refreshTabs();
+        const onUpdated = (_id: number, info: { title?: string; url?: string }) => {
+            if (info.title || info.url) refreshTabs();
+        };
+        api.onRemoved.addListener(onRemoved);
+        api.onCreated?.addListener(onRemoved);
+        api.onUpdated?.addListener(onUpdated);
+        return () => {
+            api.onRemoved.removeListener(onRemoved);
+            api.onCreated?.removeListener(onRemoved);
+            api.onUpdated?.removeListener(onUpdated);
+        };
+    }, []);
+    // tabs that still have logged requests but no longer exist — listed
+    // (as closed) until the log is cleared
+    const closedTabs = useMemo(() => {
+        const live = new Set(tabs.map((t) => t.id));
+        const out = new Map<number, string>();
+        for (const e of all) {
+            if (e.tabId < 0 || live.has(e.tabId)) continue;
+            const prev = out.get(e.tabId);
+            if (prev && !prev.startsWith("Tab ")) continue;
+            const title = tabTitles.current.get(e.tabId) ?? (e.type === "main_frame" ? e.url : undefined);
+            out.set(e.tabId, title ?? prev ?? `Tab ${e.tabId}`);
+        }
+        if (filter.tabId !== null && !live.has(filter.tabId) && !out.has(filter.tabId)) {
+            out.set(filter.tabId, tabTitles.current.get(filter.tabId) ?? `Tab ${filter.tabId}`);
+        }
+        return [...out].map(([id, title]) => ({ id, title }));
+    }, [all, tabs, filter.tabId]);
+    const selectedClosed = filter.tabId !== null && closedTabs.some((t) => t.id === filter.tabId);
+    const short = (s: string) => (s.length > 40 ? s.slice(0, 40) + "…" : s);
 
     const intercepted = rows.filter((e) => e.interventions.length).length;
     const bytes = rows.reduce((n, e) => n + (e.size ?? 0), 0);
@@ -221,18 +260,27 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
                 </label>
                 {listTabs && (
                     <select
-                        class="net-tab"
-                        title="Show requests from one tab"
+                        class={"net-tab" + (selectedClosed ? " closed" : "")}
+                        title={selectedClosed ? "This tab was closed — its requests stay until the log is cleared" : "Show requests from one tab"}
                         value={filter.tabId === null ? "" : String(filter.tabId)}
                         onFocus={refreshTabs}
                         onChange={(e) => setFilter({ ...filter, tabId: e.currentTarget.value === "" ? null : Number(e.currentTarget.value) })}
                     >
                         <option value="">All tabs</option>
-                        {tabOptions.map((t) => (
+                        {tabs.map((t) => (
                             <option key={t.id} value={String(t.id)}>
-                                {t.title.length > 40 ? t.title.slice(0, 40) + "…" : t.title}
+                                {short(t.title)}
                             </option>
                         ))}
+                        {closedTabs.length > 0 && (
+                            <optgroup label="Closed tabs">
+                                {closedTabs.map((t) => (
+                                    <option key={t.id} value={String(t.id)} class="closed" title={t.title}>
+                                        {"✕ " + short(t.title)}
+                                    </option>
+                                ))}
+                            </optgroup>
+                        )}
                     </select>
                 )}
                 <div class="net-chips" role="group" aria-label="Request types">

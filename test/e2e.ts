@@ -380,24 +380,29 @@ await mgr.mouse.up();
 const logAfter = await mgr.evaluate(() => document.getElementById("log-panel")!.offsetHeight);
 check("panels: log height resizable by splitter", Math.abs(logAfter - logBefore) > 50, `${logBefore}px → ${logAfter}px`);
 
-// log header drag → dock right, then back (re-locate the header each
+// log header drag → drop on a dock target (re-locate the header each
 // step: it moves when the panel docks)
-const dragHeader = async (dx: number) => {
+const dragHeaderTo = async (tx: number, ty: number) => {
     const hb = (await mgr.locator("#log-header-title").boundingBox()) || { x: 400, y: 500 };
     await mgr.mouse.move(hb.x + 5, hb.y + 8);
     await mgr.mouse.down();
-    const target = hb.x + dx;
-    for (let x = hb.x + 5; Math.abs(target - x) > 40; x += Math.sign(dx) * 40) await mgr.mouse.move(x, hb.y + 8);
-    await mgr.mouse.move(target, hb.y + 8);
+    await mgr.mouse.move(tx, ty, { steps: 8 });
     await mgr.mouse.up();
     await new Promise((r) => setTimeout(r, 300));
 };
-await dragHeader(300);
-const dockedRight = await mgr.evaluate(() => document.getElementById("app")!.classList.contains("log-right"));
-await dragHeader(-300);
-const dockedBack = await mgr.evaluate(() => !document.getElementById("app")!.classList.contains("log-right"));
-check("panels: log docks right by header drag", dockedRight, `dockedRight=${dockedRight}`);
-check("panels: log returns to bottom", dockedBack);
+const dockOf = () => mgr.evaluate(() => document.getElementById("app")!.dataset.dock);
+const vp = await mgr.evaluate(() => ({ w: innerWidth, h: innerHeight }));
+await dragHeaderTo(vp.w - 40, vp.h / 2);
+const dockedRight = await dockOf();
+await dragHeaderTo(60, vp.h - 60);
+const dockedLeft = await dockOf();
+const leftParent = await mgr.evaluate(() => document.getElementById("log-panel")!.parentElement!.id);
+const sideRight = await mgr.evaluate(() => document.getElementById("sidebar")!.getBoundingClientRect().right);
+await dragHeaderTo((sideRight + vp.w) / 2 - 40, vp.h - 40);
+const dockedBack = await dockOf();
+check("panels: log docks right by header drag", dockedRight === "right", `dock=${dockedRight}`);
+check("panels: log docks under the script list", dockedLeft === "left" && leftParent === "sidebar", `dock=${dockedLeft} parent=${leftParent}`);
+check("panels: log returns to bottom", dockedBack === "bottom", `dock=${dockedBack}`);
 
 // find box filters log lines (E2E-CONSOLE-MARKER arrived via the port
 // from test 11's script console)

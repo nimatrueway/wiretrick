@@ -50,10 +50,6 @@ export function sendRaw(msg: any): Promise<any> {
     });
 }
 
-/**
- * Pick a folder (user gesture required) and hand it to the background
- * watcher. Existing scripts are written out as .ts files + typings.
- */
 /** Test/e2e seam: watch an arbitrary handle (e.g. OPFS) — manager-side. */
 export async function adoptForWatch(handle: any): Promise<boolean> {
     await saveHandle(handle);
@@ -62,10 +58,11 @@ export async function adoptForWatch(handle: any): Promise<boolean> {
     });
 }
 
-export async function openFolder(
-    getScripts: () => Promise<{ id: string; name: string; code: string }[]>,
-    handlers?: FolderSyncHandlers
-): Promise<void> {
+/**
+ * Pick a folder (user gesture required) and hand it to the background
+ * watcher, which runs a two-way initial sync; typings are written here.
+ */
+export async function openFolder(handlers?: FolderSyncHandlers): Promise<void> {
     void handlers;
     const dirHandle = await (window as any).showDirectoryPicker({ mode: "readwrite" } as any);
     await saveHandle(dirHandle);
@@ -75,8 +72,6 @@ export async function openFolder(
         throw new Error("folder sync could not start in the background (see the extension logs)");
     }
 
-    // write the current scripts + typings into the folder
-    const scripts = await getScripts();
     const apiDts = await fetch(chrome.runtime.getURL(WT_API_DTS_URL)).then((r) => r.text());
     await writeHandleText(dirHandle, "wt-api.d.ts", apiDts);
     // pre-rename typings declared a global `res` — drop them so it can't clash
@@ -101,10 +96,7 @@ export async function openFolder(
             2
         )
     );
-    for (const s of scripts) {
-        await writeHandleText(dirHandle, fileNameFor(s.id, s.name), s.code);
-        await sendRaw({ type: "folderWriteBack", fileName: fileNameFor(s.id, s.name), content: s.code });
-    }
+    // scripts ⇄ files: the background's initial two-way sync handles them
 }
 
 async function writeHandleText(dirHandle: any, name: string, content: string): Promise<void> {

@@ -7,25 +7,28 @@ IntelliSense for the `wt` API — completions, hover docs, and diagnostics work
 out of the box. Cmd/Ctrl+S saves and hot-applies the script; ⌘P quick-opens
 scripts/settings.yaml (cursor position is remembered per file and restored
 when you switch back), ⌘, opens Settings, ⌘/ comments, ⌘F finds, ⌘D selects
-the next occurrence. The 🐞 button in the toolbar opens `chrome://extensions`
-— click **background page** under *Inspect views* to debug the engine (MV2
-has no API to open DevTools for the live background page programmatically).
-Reverting an edit back to the saved text (or the name to the stored one)
-clears the unsaved-changes state — no discard prompt on a no-op edit.
+the next occurrence. To debug the engine itself, open `chrome://extensions`
+and click the service worker / background page under *Inspect views*.
+Double-click a script in the list to rename it (Enter saves, Esc cancels).
+Reverting an edit back to the saved text clears the unsaved-changes state —
+no discard prompt on a no-op edit.
 
 ## Log and Network panels
 
-The bottom panel (drag its edge to resize; it can also dock to the right)
-has two tabs:
+The panel has two tabs. Drag its header (or a tab title) to dock it — a
+highlighted preview shows where it lands: **below the editor**, **full height
+on the right**, or **under the script list**. Drag its edge to resize; each
+dock remembers its own size, and Esc cancels a drag.
 
 - **Log** — engine and script log lines with level and source filters. Script
   errors (exceptions in handlers, failed compiles) are logged at ERROR, and
   the script gets a ⚠ indicator in the list and the popup. TypeScript errors
-  in a saved script also show up there. The **⬇ download** button saves the
+  in a saved script also show up there. The download button (↓) saves the
   full debug log — every engine decision with timestamps; attach it when
   reporting issues.
 - **Network** — a devtools-style request table: filter text, per-type
-  toggles, a tab picker, "Intercepted only", sortable/resizable columns
+  toggles, a tab picker (closed tabs stay listed, dimmed under *Closed tabs*,
+  until the log is cleared), "Intercepted only", sortable/resizable columns
   (right-click the header to pick columns) and a waterfall. Selecting a
   request shows its headers, request payload, the response body (modified
   and original, when Wiretrick handled it) and what each script did.
@@ -33,15 +36,18 @@ has two tabs:
 ## Dedicated scripts folder
 
 Click **Folder…** and pick a folder (e.g. `~/Wiretricks`) — that becomes your
-scripts home: every script is written there as a `.ts` file along with
-`wt-api.d.ts` and `jsconfig.json`. Edit in VS Code (or any editor) with full
+scripts home. Connecting runs a two-way initial sync: `.ts` files without a
+script are imported, scripts without a file are written out, and where both
+exist but differ the newer one wins (file modified time vs. the script's last
+save). `wt-api.d.ts` and `tsconfig.json` are written alongside. Edit in VS Code (or any editor) with full
 TypeScript completions; saves hot-reload into the engine instantly.
 
 Sync is two-way and watches the folder for **creates, renames/moves and
 deletes** too: a new `.ts` file becomes a script, deleting a file removes its
 script, renaming a file renames the script. The folder choice is remembered —
 the manager reconnects automatically on open (one click to re-grant after a
-browser restart, per Chrome's File System Access rules).
+browser restart, per Chrome's File System Access rules — click the toolbar
+notice or the button).
 
 ## `settings.yaml`
 

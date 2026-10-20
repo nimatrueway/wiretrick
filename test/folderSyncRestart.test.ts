@@ -57,13 +57,14 @@ describe("scripts folder sync", () => {
         let sync = await import("../src/background/folderSync");
         await sync.startFromStoredHandle({ fresh: true });
         await sleep(1200);
-        expect(await names()).toEqual([]); // a fresh pick snapshots existing files
+        expect(await names()).toEqual(["a"]); // a fresh pick imports existing files
 
+        sync.halt(); // the worker goes down
         put("b.ts", "// b"); // copied in while the worker is down
         vi.resetModules();
         sync = await import("../src/background/folderSync");
         await sync.startFromStoredHandle(); // resume (initFromStorage path)
-        expect(await names()).toEqual(["b"]);
+        expect(await names()).toEqual(["a", "b"]);
         await sync.stop();
     });
 
@@ -91,6 +92,39 @@ describe("scripts folder sync", () => {
         put("new.ts", "// new");
         await sleep(1500);
         expect(await names()).toEqual(["new"]);
+        await sync.stop();
+    });
+
+    it("fresh pick: two-way initial sync, newer side wins on conflicts", async () => {
+        const ss = await import("../src/background/engine/scriptStore");
+        await ss.saveScript({ id: "s1", code: "// only in ext", name: "ext only" });
+        await ss.saveScript({ id: "s2", code: "// ext newer", name: "ext newer" });
+        await ss.saveScript({ id: "s3", code: "// ext older", name: "file newer" });
+        await ss.saveScript({ id: "s4", code: "// same", name: "same" });
+        const saved = Object.fromEntries((await ss.listScripts()).map((s) => [s.meta.name, s.updatedAt]));
+        files.set("file_only.ts", { text: "// only in folder", t: 1 });
+        files.set("ext_newer.ts", { text: "// file older", t: saved["ext newer"] - 1000 });
+        files.set("file_newer.ts", { text: "// file newer", t: saved["file newer"] + 1000 });
+        files.set("same.ts", { text: "// same", t: 1 });
+
+        const sync = await import("../src/background/folderSync");
+        await sync.startFromStoredHandle({ fresh: true });
+
+        const byName = Object.fromEntries((await ss.listScripts()).map((s) => [s.meta.name, s.code]));
+        expect(byName).toEqual({
+            "ext only": "// only in ext",
+            "ext newer": "// ext newer",
+            "file newer": "// file newer",
+            same: "// same",
+            "file only": "// only in folder",
+        });
+        expect(files.get("ext_only.ts")?.text).toBe("// only in ext");
+        expect(files.get("ext_newer.ts")?.text).toBe("// ext newer");
+        expect(files.get("file_newer.ts")?.text).toBe("// file newer");
+
+        // nothing echoes back on the next polls
+        await sleep(1200);
+        expect((await ss.listScripts()).length).toBe(5);
         await sync.stop();
     });
 });
