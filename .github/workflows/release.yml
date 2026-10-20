@@ -108,6 +108,19 @@ jobs:
           (cd dist-mv3 && zip -qr "../wiretrick-mv3-v${VERSION}.zip" .)
           echo "ZIP_NAME=wiretrick-v${VERSION}.zip" >> "$GITHUB_ENV"
           echo "ZIP_MV3_NAME=wiretrick-mv3-v${VERSION}.zip" >> "$GITHUB_ENV"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+
+      - name: Package crx (signed with CRX_PRIVATE_KEY → stable extension id)
+        env:
+          CRX_PRIVATE_KEY: ${{ secrets.CRX_PRIVATE_KEY }}
+        run: |
+          if [ -z "$CRX_PRIVATE_KEY" ]; then echo "::warning::CRX_PRIVATE_KEY secret not set — skipping .crx"; exit 0; fi
+          KEY="$RUNNER_TEMP/crx-key.pem"
+          printf '%s\n' "$CRX_PRIVATE_KEY" > "$KEY"
+          npx -y crx3@2.0.0 -p "$KEY" -o "wiretrick-v${VERSION}.crx" -- dist
+          npx -y crx3@2.0.0 -p "$KEY" -o "wiretrick-mv3-v${VERSION}.crx" -- dist-mv3
+          rm -f "$KEY"
+          ls -la *.crx
 
       - name: Upload build artifact (every run)
         uses: actions/upload-artifact@v4
@@ -135,11 +148,13 @@ jobs:
           files: |
             ${{ env.ZIP_NAME }}
             ${{ env.ZIP_MV3_NAME }}
+            wiretrick-*.crx
             helper-dist/*
           generate_release_notes: true
           body: |
             Current Chrome / Edge / Brave: unzip `wiretrick-mv3-v*.zip`, then chrome://extensions → Developer mode → Load unpacked → the unzipped folder.
             Firefox or an MV2-capable Chromium: unzip `wiretrick-v*.zip` and load its `dist` folder.
+            Signed `.crx` packages (MV3 and MV2, extension id `jcoealmhehnajkglhfchcnjdpkhnkdei`) are for policy-managed installs or drag-and-drop on Linux; see the README.
 
             Optional local helper for `strategy: ["process"]` (Chrome). Settings → Local helper shows the command with your extension id filled in; it downloads the right `wiretrick-helper-*` binary below, checks it against `SHA256SUMS`, and installs it:
 

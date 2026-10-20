@@ -29,6 +29,13 @@ response bodies, or replace them entirely. Each script has an enable/disable tog
 3. Enable **Developer mode** (top-right), click **Load unpacked**, and select the unzipped folder.
 4. Pin the 🧩 icon — the badge shows how many scripts are active on the current tab.
 
+Each release also ships signed `wiretrick-mv3-vX.Y.Z.crx` / `wiretrick-vX.Y.Z.crx`
+packages with a fixed extension id (`jcoealmhehnajkglhfchcnjdpkhnkdei`). Chrome
+keeps a `.crx` from outside the Web Store enabled only when it's allowed by
+enterprise policy (`ExtensionInstallAllowlist` / `ExtensionInstallForcelist`,
+pointing at that id) or on Linux via drag-and-drop onto `chrome://extensions`
+in Developer mode; otherwise use the zip.
+
 **From source:**
 
 ```bash
@@ -43,7 +50,7 @@ npm install && npm run build
 > (see [Compatibility](#compatibility)).
 
 **Releases are automated** — pushing a `vX.Y.Z` tag runs the GitHub Action
-(typecheck → tests → build → zip → GitHub release), so the zip always matches
+(typecheck → tests → build → zip + signed crx → helper binaries → GitHub release), so the zip always matches
 the tagged `manifest.json` version.
 
 ## Compatibility
