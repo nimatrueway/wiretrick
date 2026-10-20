@@ -1,6 +1,6 @@
 /**
  * Script metadata types. The ONLY way to declare a script is
- * res.declareScript({...}) — a source file without it is a library module:
+ * wt.declareScript({...}) — a source file without it is a library module:
  * inert on its own (never matches, never listed in the popup) but
  * importable by other scripts.
  */
@@ -46,7 +46,7 @@ export interface ResMeta {
     /** raw strategy value (comma-separated list) */
     strategy: string;
     runAt: string;
-    /** true once res.declareScript ran — undeclared sources are libraries */
+    /** true once wt.declareScript ran — undeclared sources are libraries */
     declared: boolean;
 }
 

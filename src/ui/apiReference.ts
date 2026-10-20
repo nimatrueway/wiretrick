@@ -7,10 +7,10 @@ export interface ApiSection {
 
 export const API_REFERENCE: ApiSection[] = [
     {
-        title: "Script structure — res.declareScript",
-        body: `Every active script declares itself with res.declareScript. A source file WITHOUT it is a library: inert on its own (never matches, hidden from the popup) but importable by other scripts.
+        title: "Script structure — wt.declareScript",
+        body: `Every active script declares itself with wt.declareScript. A source file WITHOUT it is a library: inert on its own (never matches, hidden from the popup) but importable by other scripts.
 
-const cfg = res.declareScript({
+const cfg = wt.declareScript({
     match: ["*://example.com/*", "*://api.example.com/v1/*"],
     include: [],                        // extra URL patterns
     phase: ["request", "response"],     // which events run (default: both)
@@ -22,23 +22,23 @@ Patterns are star patterns: * matches anything, ** the same (groups are remember
     },
     {
         title: "Libraries — import other scripts",
-        body: `Any saved script that doesn't call res.declareScript is a library module. Import its exports from another script by name:
+        body: `Any saved script that doesn't call wt.declareScript is a library module. Import its exports from another script by name:
 
 // library script named "utils" (saved as utils.ts):
 export function double(n: number) { return n * 2; }
 
 // in your script:
 import { double } from "./utils";
-res.declareScript({ match: ["*://example.com/*"] });
-res.log(double(21)); // 42
+wt.declareScript({ match: ["*://example.com/*"] });
+wt.log(double(21)); // 42
 
 Imports work in every tier (background compiles + the page-side onDom hook); libraries ship with the page bundle automatically. "./utils", "utils", "utils.ts" all resolve.`,
     },
     {
-        title: "res.declareScript — meta + parameters, type-safe",
+        title: "wt.declareScript — meta + parameters, type-safe",
         body: `Meta + parameters in one type-safe call. Params are adjustable from the popup's ⚙ dialog without editing the script, and come back typed:
 
-const cfg = res.declareScript({
+const cfg = wt.declareScript({
     match: ["*://example.com/*"],
     strategy: ["hook", "cdp"],
     runAt: "document_idle",
@@ -55,10 +55,10 @@ const cfg = res.declareScript({
 Scripts sync to the folder as plain <name>.ts files.`,
     },
     {
-        title: "res.onRequest — redirect, cancel, request headers",
+        title: "wt.onRequest — redirect, cancel, request headers",
         body: `Runs before the request leaves the browser. Must be synchronous.
 
-res.onRequest((ctx) => {
+wt.onRequest((ctx) => {
     // ctx: { url, method, tabUrl, resourceType, requestHeaders }
     return { redirect: "https://other.com/x" };  // or…
     return { cancel: true };                     // or…
@@ -66,39 +66,39 @@ res.onRequest((ctx) => {
 });`,
     },
     {
-        title: "res.onResponseHeaders — modify response headers",
+        title: "wt.onResponseHeaders — modify response headers",
         body: `Runs when response headers arrive. Synchronous.
 
-res.onResponseHeaders((ctx) => {
+wt.onResponseHeaders((ctx) => {
     // ctx adds: statusLine, responseHeaders
     return { headers: { set: { "access-control-allow-origin": "*" } } };
 });`,
     },
     {
-        title: "res.replaceResponse — replace the body",
+        title: "wt.replaceResponse — replace the body",
         body: `Return a string, bytes, or { file }. The response is fully replaced.
 
-res.replaceResponse((ctx) => JSON.stringify({ mocked: true }));
+wt.replaceResponse((ctx) => JSON.stringify({ mocked: true }));
 
 // or serve file content:
-res.replaceResponse(() => ({ file: "data:text/html;base64,…" }));`,
+wt.replaceResponse(() => ({ file: "data:text/html;base64,…" }));`,
     },
     {
-        title: "res.modifyResponse — transform the body",
+        title: "wt.modifyResponse — transform the body",
         body: `Stream/transform the body. Return the new body (string or bytes); async is fine.
 
-res.modifyResponse((ctx, body) => {
+wt.modifyResponse((ctx, body) => {
     const text = typeof body === "string" ? body : new TextDecoder().decode(body);
     return text.replace("old", "new");
 });
 
-Tiers on Chrome: page fetch/XHR goes through a banner-free hook; documents, script tags and other "direct" resources go through the debugger (a yellow banner appears briefly while they load). On Firefox everything is network-level without a banner. Pin a tier with the strategy field in res.declareScript.`,
+Tiers on Chrome: page fetch/XHR goes through a banner-free hook; documents, script tags and other "direct" resources go through the debugger (a yellow banner appears briefly while they load). On Firefox everything is network-level without a banner. Pin a tier with the strategy field in wt.declareScript.`,
     },
     {
-        title: "res.onDom — DOM & title changes",
+        title: "wt.onDom — DOM & title changes",
         body: `Runs at DOM-ready in the page (MAIN world): the handler executes once when DOMContentLoaded fires (DOM parsed; hydration not finished). If the bundle arrives after that, it runs immediately. Works even when the HTML is service-worker served or hydration re-renders it.
 
-res.onDom(() => {
+wt.onDom(() => {
     document.title = "🎯 " + document.title;
     const h = document.querySelector("h1");
     if (h) h.textContent = "Hello!";
@@ -106,7 +106,7 @@ res.onDom(() => {
 
 Options (2nd argument): { when: ... } — choose the moment:
 
-res.onDom(() => {
+wt.onDom(() => {
     const el = document.querySelector("h1");
     if (el) el.textContent = "Intercepted";
 }, { when: "document_idle" });
@@ -121,7 +121,7 @@ Timing: { when: "DOMContentLoaded" (default) | "document_start" | "document_end"
         title: "onRequest.respond — mock without the network",
         body: `A terminal result that synthesizes the response immediately — the request never leaves the browser. First script to respond wins (stacking).
 
-res.onRequest((ctx) => ({
+wt.onRequest((ctx) => ({
     respond: {
         body: { id: 1, name: "Mocked User" },  // object → JSON
         status: 200,
@@ -141,7 +141,7 @@ onResponseHeaders — ALL matching scripts run; set applied in order (later over
 modifyResponse — transforms COMPOSE: each output feeds the next script.
 replaceResponse — first script returning a body wins.
 
-strategy lists (res.declareScript) decide the tier per script, not the stacking order.`,
+strategy lists (wt.declareScript) decide the tier per script, not the stacking order.`,
     },
     {
         title: "Async handlers",
@@ -150,26 +150,26 @@ strategy lists (res.declareScript) decide the tier per script, not the stacking 
 onRequest/onResponseHeaders async results: honored natively on Firefox; on Chromium they need "cdp" or "process" in the strategy list (the blocking webRequest can't await — a warning is logged and the result ignored otherwise).
 
 // async mock:
-res.replaceResponse(async () => {
+wt.replaceResponse(async () => {
     const data = await fetch("https://myserver/fixture").then(r => r.json());
     return JSON.stringify(data);
 });
 
 // async redirect via cdp tier:
-res.declareScript({ match: ["*://example.com/*"], strategy: ["hook", "cdp"] });
-res.onRequest(async (ctx) => {
+wt.declareScript({ match: ["*://example.com/*"], strategy: ["hook", "cdp"] });
+wt.onRequest(async (ctx) => {
     const target = await decideUpstream(ctx.url);
     return { redirect: target };
 });`,
     },
     {
-        title: "res.storage / res.log",
+        title: "wt.storage / wt.log",
         body: `Per-script key/value storage (async), and logging into the LOG panel.
 
-res.onRequest(async (ctx) => {
-    const hits = ((await res.storage.get("hits")) || 0) + 1;
-    await res.storage.set("hits", hits);
-    res.log("hit #" + hits, ctx.url);
+wt.onRequest(async (ctx) => {
+    const hits = ((await wt.storage.get("hits")) || 0) + 1;
+    await wt.storage.set("hits", hits);
+    wt.log("hit #" + hits, ctx.url);
 });`,
     },
     {
@@ -181,7 +181,7 @@ process — Chrome: a tiny local helper (wiretrick-helper) proxies ONLY matched 
 Scripts that only ever match fetch/XHR are learned to be hook-only and never trigger the banner.`,
     },
     {
-        title: "strategy — priority list (res.declareScript)",
+        title: "strategy — priority list (wt.declareScript)",
         body: `Pick strategies per script; the first viable one per request wins.
 
 strategy: ["hook", "cdp"]   // banner-free for XHR; debugger only as cold-start fallback

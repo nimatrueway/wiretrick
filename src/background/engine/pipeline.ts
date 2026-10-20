@@ -338,7 +338,7 @@ export function createPipeline(
         if (msg && msg.type === "getHookBundle") {
             void (async () => {
             // full script sources: the hook compiles them itself so handlers
-            // keep their `res` binding and top-level scope
+            // keep their `wt` binding and top-level scope
             // ship ALL enabled body scripts — body transforms match request
             // URLs, not the page URL, so the hook filters per-request itself
             // deliver runnable JS: the page hook has no TS compiler

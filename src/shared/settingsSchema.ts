@@ -45,7 +45,7 @@ export const SETTINGS_SCHEMA = {
                 "Per-script values keyed by script name: `enabled` toggles the script, other keys are its declared params",
             additionalProperties: {
                 type: "object",
-                description: "Values for one script (params declared by its res.declareScript call)",
+                description: "Values for one script (params declared by its wt.declareScript call)",
                 properties: {
                     enabled: { type: "boolean", default: true, description: "Run this script" },
                 },

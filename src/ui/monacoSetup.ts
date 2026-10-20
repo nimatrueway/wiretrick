@@ -1,6 +1,6 @@
 /**
  * Monaco loader + editor configuration. Uses the classic AMD build (copied
- * into dist/lib/monaco) and wires TS IntelliSense to the `res` API typings.
+ * into dist/lib/monaco) and wires TS IntelliSense to the `wt` API typings.
  */
 
 let monacoApi: any = null;
@@ -15,7 +15,7 @@ export async function loadMonaco(): Promise<any> {
             chrome.runtime.getURL("lib/monaco/vs/base/worker/workerMain.js"),
     };
 
-    const resApiDts = await fetch(chrome.runtime.getURL("lib/res-api.d.ts")).then((r) => r.text());
+    const wtApiDts = await fetch(chrome.runtime.getURL("lib/wt-api.d.ts")).then((r) => r.text());
 
     await new Promise<void>((resolve, reject) => {
         (window as any).require.config({ paths: { vs: "lib/monaco/vs" } });
@@ -26,8 +26,8 @@ export async function loadMonaco(): Promise<any> {
 
     monacoApi.languages.typescript.typescriptDefaults.setExtraLibs([
         {
-            content: resApiDts,
-            filePath: "file:///res-api.d.ts",
+            content: wtApiDts,
+            filePath: "file:///wt-api.d.ts",
         },
     ]);
     const ts = monacoApi.languages.typescript;
@@ -45,12 +45,12 @@ export async function loadMonaco(): Promise<any> {
     return monacoApi;
 }
 
-export const STARTER_TEMPLATE = `res.declareScript({
+export const STARTER_TEMPLATE = `wt.declareScript({
     match: ["*://*.example.com/*"],
 });
 // Declarative meta + adjustable parameters (type-safe; editable from
 // the popup's ⚙ dialog without touching this code):
-const cfg = res.declareScript({
+const cfg = wt.declareScript({
     match: ["*://*.example.com/*"],
     params: {
         debug: { type: "boolean", default: true, description: "Log every request" },
@@ -59,21 +59,21 @@ const cfg = res.declareScript({
 });
 
 // Modify request headers / redirect / cancel:
-res.onRequest((ctx) => {
-    if (cfg.debug) res.log("request to", ctx.url);
+wt.onRequest((ctx) => {
+    if (cfg.debug) wt.log("request to", ctx.url);
     // return { redirect: "https://example.com/other" };
     // return { cancel: true };
     // return { headers: { set: { "x-debug": cfg.headerValue } } };
 });
 
 // Modify response headers:
-res.onResponseHeaders((ctx) => {
+wt.onResponseHeaders((ctx) => {
     // return { headers: { set: { "access-control-allow-origin": "*" } } };
 });
 
 // Replace the whole response body:
-// res.replaceResponse((ctx) => JSON.stringify({ mocked: true }));
+// wt.replaceResponse((ctx) => JSON.stringify({ mocked: true }));
 
 // Stream-modify the response body:
-// res.modifyResponse((ctx, body) => body.replace("foo", "bar"));
+// wt.modifyResponse((ctx, body) => body.replace("foo", "bar"));
 `;

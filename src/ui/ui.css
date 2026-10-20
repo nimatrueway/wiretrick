@@ -462,3 +462,118 @@ html, body {
     font-size: 13px;
 }
 .qo-item.active { background: var(--bg-hover); box-shadow: inset 2px 0 0 var(--accent); }
+
+/* ---- bottom panel tabs (VS Code style) ---- */
+#log-header { align-items: center; gap: 8px; }
+#panel-tabs { display: flex; gap: 14px; align-self: stretch; }
+.panel-tab {
+    cursor: pointer;
+    color: var(--fg-dim);
+    padding: 2px 0;
+    border-bottom: 1px solid transparent;
+    user-select: none;
+}
+.panel-tab:hover { color: var(--fg); }
+.panel-tab.active { color: var(--fg); border-bottom-color: var(--fg); }
+#log-tools { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+#log-tools[hidden], #log-entries[hidden], #network-view[hidden] { display: none; }
+#log-entries { flex: 1; min-height: 0; }
+#network-view { flex: 1; min-height: 0; display: flex; container-type: inline-size; }
+
+/* ---- network tab (devtools-like) ---- */
+.net { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; font-size: 11px; }
+.net-toolbar {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    padding: 3px 8px; border-bottom: 1px solid var(--border);
+}
+.net-toolbar button, .net-details-tabs button {
+    background: none; border: 1px solid transparent; color: var(--fg-dim);
+    border-radius: 3px; cursor: pointer; font-size: 11px; padding: 1px 6px;
+}
+.net-toolbar button:hover, .net-details-tabs button:hover { color: var(--fg); background: var(--bg-hover); }
+.net-clear { font-size: 13px !important; }
+.net-filter, .net-tab {
+    background: var(--bg); border: 1px solid var(--border); color: var(--fg);
+    border-radius: 3px; padding: 2px 6px; font-size: 11px;
+}
+.net-filter { width: 180px; }
+.net-tab { max-width: 180px; }
+.net-filter:focus, .net-tab:focus { border-color: var(--accent); outline: none; }
+.net-check { display: flex; align-items: center; gap: 3px; color: var(--fg-dim); cursor: pointer; }
+.net-chips { display: flex; gap: 2px; flex-wrap: wrap; }
+.net-chip.active { background: #37373d !important; color: var(--fg) !important; }
+
+.net-body { display: flex; flex: 1; min-height: 0; }
+.net-table-wrap { flex: 1; overflow: auto; min-width: 0; }
+.net-body.with-details .net-table-wrap { flex: 0 0 38%; }
+.net-table { width: 100%; border-collapse: collapse; table-layout: fixed; font: 11px/1.5 "SF Mono", Menlo, Consolas, monospace; }
+.net-table th {
+    position: sticky; top: 0; z-index: 1; background: var(--bg-panel);
+    text-align: left; font-weight: normal; color: var(--fg-dim); cursor: pointer;
+    padding: 2px 6px; border-bottom: 1px solid var(--border); border-right: 1px solid var(--border);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: none;
+}
+.net-table th:hover { color: var(--fg); }
+.net-sort { margin-left: 4px; font-size: 8px; }
+.net-table td {
+    padding: 1px 6px; border-right: 1px solid rgba(255,255,255,0.05);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.net-row { cursor: default; }
+.net-row:nth-child(even) { background: rgba(255,255,255,0.02); }
+.net-row:hover { background: var(--bg-hover); }
+.net-row.selected { background: #04395e; }
+.net-row.err td { color: var(--err); }
+.net-row.pending td.c-status, .net-row.pending td.c-time { color: var(--fg-dim); }
+.net-row.intercepted td.c-name { box-shadow: inset 2px 0 0 var(--accent); }
+.c-name { width: auto; }
+.c-status { width: 70px; }
+.c-method { width: 60px; }
+.c-type { width: 80px; }
+.c-script { width: 130px; }
+.c-size { width: 70px; text-align: right; }
+.c-time { width: 70px; text-align: right; }
+.c-wf { width: 22%; }
+.net-host { color: var(--fg-dim); margin-left: 6px; }
+.net-badge {
+    display: inline-block; background: #0e3a5a; color: #9cdcfe; border-radius: 3px;
+    padding: 0 5px; margin-right: 3px; font-size: 10px; line-height: 15px;
+}
+.net-wf { position: relative; height: 10px; }
+.net-wf-bar { position: absolute; top: 2px; height: 6px; background: #3794ff; border-radius: 1px; min-width: 2px; }
+.net-wf-bar.pending { background: #5a5a5a; }
+.net-row.intercepted .net-wf-bar { background: #4ec9b0; }
+.net-row.err .net-wf-bar { background: var(--err); }
+.net-empty { color: var(--fg-dim); padding: 14px; text-align: center; }
+.net-empty.small { padding: 2px 14px; text-align: left; }
+.net-status {
+    border-top: 1px solid var(--border); padding: 2px 8px; color: var(--fg-dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.net-hl { color: var(--ok); }
+
+.net-details { flex: 1; min-width: 0; display: flex; flex-direction: column; border-left: 1px solid var(--border); }
+.net-details-tabs { display: flex; gap: 4px; align-items: center; padding: 2px 6px; border-bottom: 1px solid var(--border); }
+.net-details-tabs button.active { color: var(--fg); border-bottom: 1px solid var(--accent); border-radius: 0; }
+.net-details-body { overflow: auto; padding: 4px 10px; flex: 1; }
+.net-hsec h4 { margin: 6px 0 2px; font-size: 11px; font-weight: 600; cursor: pointer; user-select: none; }
+.net-count { color: var(--fg-dim); font-weight: normal; }
+.net-hsec dl { margin: 0 0 0 14px; font: 11px/1.6 "SF Mono", Menlo, Consolas, monospace; }
+.net-hrow { display: flex; gap: 8px; }
+.net-hrow dt { color: #9cdcfe; flex: 0 0 auto; max-width: 40%; }
+.net-hrow dt::after { content: ":"; }
+.net-hrow dd { margin: 0; word-break: break-all; }
+.net-actions { list-style: none; margin: 0; padding: 0; font: 11px/1.7 "SF Mono", Menlo, Consolas, monospace; }
+.net-action { display: flex; gap: 6px; align-items: baseline; border-bottom: 1px solid rgba(255,255,255,0.04); }
+.net-action time { color: var(--fg-dim); }
+.net-action.warn { color: var(--warn); }
+.net-action.error { color: var(--err); }
+
+/* narrow (docked right): drop secondary columns like devtools does */
+@container (max-width: 560px) {
+    .net-table .c-method, .net-table .c-type, .net-table .c-wf { display: none; }
+    .net-body.with-details .net-table-wrap { display: none; }
+}
+@container (max-width: 380px) {
+    .net-table .c-size, .net-table .c-script { display: none; }
+}

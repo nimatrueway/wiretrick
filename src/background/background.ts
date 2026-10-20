@@ -10,6 +10,7 @@ import { addUiPort, clearTab, log, broadcastEntry, broadcastToUi } from "./engin
 import { onScriptsChanged, listScripts } from "./engine/scriptStore";
 import { dlog, dlogLevel, getDebugBuffer, pushEntry, clearDebugBuffer, setSink } from "../shared/debugLog";
 import * as folderSync from "./folderSync";
+import { addNetworkPort } from "./network";
 import { getSettingsText, applySettingsText, applySettingsDoc } from "./settingsFile";
 import { badgeSetText, badgeSetColor, tabsQueryAll, tabsGet } from "../shared/chromeApi";
 import { matchAny } from "../shared/matcher";
@@ -108,6 +109,9 @@ chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
 chrome.runtime.onConnect.addListener((port) => {
     if (port.name === "logs") {
         addUiPort(port);
+    }
+    if (port.name === "network") {
+        addNetworkPort(port);
     }
 });
 

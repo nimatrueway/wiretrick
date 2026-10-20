@@ -12,7 +12,7 @@
 
 import { loadSavedHandle, clearSavedHandle, saveHandle } from "../shared/folderSync";
 
-const RES_API_DTS_URL = "lib/res-api.d.ts";
+const WT_API_DTS_URL = "lib/wt-api.d.ts";
 
 export interface FolderSyncHandlers {
     onFileChanged(fileName: string, js: string): void;
@@ -77,8 +77,10 @@ export async function openFolder(
 
     // write the current scripts + typings into the folder
     const scripts = await getScripts();
-    const apiDts = await fetch(chrome.runtime.getURL(RES_API_DTS_URL)).then((r) => r.text());
-    await writeHandleText(dirHandle, "res-api.d.ts", apiDts);
+    const apiDts = await fetch(chrome.runtime.getURL(WT_API_DTS_URL)).then((r) => r.text());
+    await writeHandleText(dirHandle, "wt-api.d.ts", apiDts);
+    // pre-rename typings declared a global `res` — drop them so it can't clash
+    await (dirHandle as any).removeEntry?.("res-api.d.ts").catch(() => {});
     await writeHandleText(
         dirHandle,
         "tsconfig.json",

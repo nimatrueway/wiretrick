@@ -1,5 +1,5 @@
 /**
- * Declarative script definition: res.declareScript({...}).
+ * Declarative script definition: wt.declareScript({...}).
  * The only way to activate a script — sources without it are libraries.
  */
 

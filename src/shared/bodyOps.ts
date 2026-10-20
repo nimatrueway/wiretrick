@@ -123,7 +123,7 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
                         return { kind: "respond", mime, content, status: r.status, headers: r.headers?.set };
                     }
                     if (result.redirect) {
-                        env.log(s.id, "info", `[${s.name}] onRequest → redirect → ${result.redirect}`);
+                        env.log(s.id, "info", `[${s.name}] onRequest → redirect → ${result.redirect} ${url}`);
                         return { kind: "redirect", url: result.redirect };
                     }
                     if (result.cancel) {

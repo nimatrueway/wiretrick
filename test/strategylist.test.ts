@@ -31,39 +31,39 @@ describe("parseStrategyList", () => {
 describe("@strategy priority lists", () => {
     it("hook,cdp: hook-ready tab → allow (no debugger)", () => {
         const s = new ChromeBodyStrategy();
-        s.reload([makeScript("a", `res.declareScript({ match: ["*"], strategy: ["hook", "cdp"] });\nres.modifyResponse((c, b) => b);`)]);
+        s.reload([makeScript("a", `wt.declareScript({ match: ["*"], strategy: ["hook", "cdp"] });\nres.modifyResponse((c, b) => b);`)]);
         s.markHookReady(1);
         expect((s.handleBeforeRequest(xhr(), null) as any).kind).toBe("allow");
     });
 
     it("hook,cdp: hook NOT ready → needsCdp (cold start fallback)", () => {
         const s = new ChromeBodyStrategy();
-        s.reload([makeScript("a", `res.declareScript({ match: ["*"], strategy: ["hook", "cdp"] });\nres.modifyResponse((c, b) => b);`)]);
+        s.reload([makeScript("a", `wt.declareScript({ match: ["*"], strategy: ["hook", "cdp"] });\nres.modifyResponse((c, b) => b);`)]);
         expect((s.handleBeforeRequest(xhr(), null) as any).kind).toBe("needsCdp");
     });
 
     it("cdp,hook: debugger first, even when hook is ready", () => {
         const s = new ChromeBodyStrategy();
-        s.reload([makeScript("a", `res.declareScript({ match: ["*"], strategy: ["cdp", "hook"] });\nres.modifyResponse((c, b) => b);`)]);
+        s.reload([makeScript("a", `wt.declareScript({ match: ["*"], strategy: ["cdp", "hook"] });\nres.modifyResponse((c, b) => b);`)]);
         s.markHookReady(1);
         expect((s.handleBeforeRequest(xhr(), null) as any).kind).toBe("needsCdp");
     });
 
     it("cdp-only: main frame → needsCdp; hook-only list never touches CDP", () => {
         const s = new ChromeBodyStrategy();
-        s.reload([makeScript("a", `res.declareScript({ match: ["*"], strategy: ["cdp"] });\nres.modifyResponse((c, b) => b);`)]);
+        s.reload([makeScript("a", `wt.declareScript({ match: ["*"], strategy: ["cdp"] });\nres.modifyResponse((c, b) => b);`)]);
         expect((s.handleBeforeRequest(mainFrame(), null) as any).kind).toBe("needsCdp");
 
         const s2 = new ChromeBodyStrategy();
-        s2.reload([makeScript("b", `res.declareScript({ match: ["*"], strategy: ["hook"] });\nres.modifyResponse((c, b) => b);`)]);
+        s2.reload([makeScript("b", `wt.declareScript({ match: ["*"], strategy: ["hook"] });\nres.modifyResponse((c, b) => b);`)]);
         expect((s2.handleBeforeRequest(mainFrame(), null) as any).kind).toBe("allow");
     });
 
     it("multiple scripts: first script's hook choice wins before second's cdp", () => {
         const s = new ChromeBodyStrategy();
         s.reload([
-            makeScript("a", `res.declareScript({ match: ["*"], strategy: ["hook"] });\nres.modifyResponse((c, b) => b);`),
-            makeScript("b", `res.declareScript({ match: ["*"], strategy: ["cdp"] });\nres.modifyResponse((c, b) => b);`),
+            makeScript("a", `wt.declareScript({ match: ["*"], strategy: ["hook"] });\nres.modifyResponse((c, b) => b);`),
+            makeScript("b", `wt.declareScript({ match: ["*"], strategy: ["cdp"] });\nres.modifyResponse((c, b) => b);`),
         ]);
         s.markHookReady(1);
         expect((s.handleBeforeRequest(xhr(), null) as any).kind).toBe("allow");

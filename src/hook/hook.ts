@@ -8,6 +8,7 @@
  */
 import { formatScriptError } from "../shared/scriptError";
 import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
+import { scriptFunction } from "../shared/scriptFn";
 
 (() => {
     const w = window as any;
@@ -34,7 +35,7 @@ import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } 
         } catch {}
     }
 
-    /** a user script's own output (res.log / console.* / errors) → extension LOG, attributed to the script */
+    /** a user script's own output (wt.log / console.* / errors) → extension LOG, attributed to the script */
     function scriptLogUp(scriptId: string | null, level: ScriptLogLevel, msg: string): void {
         try {
             window.postMessage({ source: HOOK_SOURCE, kind: "scriptLog", scriptId, level, msg }, window.location.origin);
@@ -131,7 +132,7 @@ import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } 
             const moduleObj = { exports: {} as any };
             libModules.set(key, moduleObj.exports); // early: cycle protection
             const store: any = { onDom: null, onDomOptions: {} };
-            const fn = new Function("res", "console", "require", "module", "exports", `"use strict";\n${lib.src}`);
+            const fn = scriptFunction(lib.src);
             fn(makeDomShim(null, lib.name, store, {}), scriptConsole(null, lib.name), requireLib, moduleObj, moduleObj.exports);
             libModules.set(key, moduleObj.exports);
             return moduleObj.exports;
@@ -144,7 +145,7 @@ import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } 
                 // shadow `console` inside the script so its console.* calls
                 // land in the extension LOG (not the page console);
                 // require resolves the shipped libs
-                const fn = new Function("res", "console", "require", "module", "exports", `"use strict";\n${d.src}`);
+                const fn = scriptFunction(d.src);
                 const moduleObj = { exports: {} as any };
                 fn(makeDomShim(d.scriptId, d.name, store, d.params || {}), scriptConsole(d.scriptId, d.name), requireLib, moduleObj, moduleObj.exports);
                 if (store.onDom) {
@@ -222,7 +223,7 @@ import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } 
             // meta is already applied upstream; the script receives its
             // resolved param values here
             declareScript: () => params,
-            log: (...args: any[]) => scriptLogUp(scriptId, "info", scriptLogLine(name, "res.log", formatLogArgs(args))),
+            log: (...args: any[]) => scriptLogUp(scriptId, "info", scriptLogLine(name, "wt.log", formatLogArgs(args))),
             storage: {
                 get: (key: string) => viaBridge({ op: "storageGet", scriptId, key }),
                 set: (key: string, value: any) => viaBridge({ op: "storageSet", scriptId, key, value }),

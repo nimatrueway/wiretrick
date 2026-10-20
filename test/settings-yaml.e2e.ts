@@ -35,11 +35,11 @@ try {
     await seed.goto(`chrome-extension://${extId}/manager.html`);
     await seed.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_dbg", name: "Debug header",
-        code: 'res.declareScript({ match: ["*://example.invalid/*"], params: { level: { type: "string", default: "warn", description: "Value of the x-debug header" } } });\n',
+        code: 'wt.declareScript({ match: ["*://example.invalid/*"], params: { level: { type: "string", default: "warn", description: "Value of the x-debug header" } } });\n',
     }, r)));
     await seed.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_note", name: "Notes",
-        code: 'res.declareScript({ match: ["*://example.invalid/*"], params: { body: { type: "string", multiline: true, default: "", description: "Free text" } } });\n',
+        code: 'wt.declareScript({ match: ["*://example.invalid/*"], params: { body: { type: "string", multiline: true, default: "", description: "Free text" } } });\n',
     }, r)));
     await seed.close();
 

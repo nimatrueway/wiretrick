@@ -13,16 +13,16 @@ function makeHookScaffold() {
     return { logUp, get domHandler() { return domHandler; }, get domOpts() { return domOpts; }, shim };
 }
 
-describe("res.onDom options", () => {
+describe("wt.onDom options", () => {
     it("captures handler + options", () => {
-        const c = compileScript(`res.declareScript({ match: ["*"] });\nres.onDom(() => {}, { when: "document_idle" });`);
+        const c = compileScript(`wt.declareScript({ match: ["*"] });\nres.onDom(() => {}, { when: "document_idle" });`);
         expect(c.error).toBeNull();
         expect(c.handlers.onDom.length).toBe(1);
         expect(c.handlers.onDom[0].when).toBe("document_idle");
     });
 
     it("defaults: no options → {}", () => {
-        const c = compileScript(`res.declareScript({ match: ["*"] });\nres.onDom(() => {});`);
+        const c = compileScript(`wt.declareScript({ match: ["*"] });\nres.onDom(() => {});`);
         expect(c.handlers.onDom[0]?.when).toBe("DOMContentLoaded");
     });
 });

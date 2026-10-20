@@ -13,7 +13,7 @@ export interface Script {
     updatedAt: number;
     error: string | null;
     meta: ResMeta;
-    /** param definitions from res.declareScript (captured at save time) */
+    /** param definitions from wt.declareScript (captured at save time) */
     paramDefs?: Record<string, import("../../shared/scriptDef").ParamDef>;
 }
 
@@ -72,7 +72,7 @@ export async function saveScript(partial: Pick<Script, "id" | "code"> & Partial<
     // (e.g. setEnabled re-saves the stored script). Resolved BEFORE
     // compiling so sandbox analyze logs identify the script.
     const name = partial.name ?? prev?.meta.name;
-    // compile (not just parse) so res.declareScript values land in meta;
+    // compile (not just parse) so wt.declareScript values land in meta;
     // imports resolve to stubs here — declaration capture must not depend
     // on other scripts loading cleanly. MV3: compiles in the sandbox page
     // (the SW cannot eval) — see compileHost.
@@ -144,7 +144,7 @@ export async function scriptStorageSet(scriptId: string, key: string, value: any
     await storageSet({ [storeKey]: data });
 }
 
-// ---- per-script parameter values (res.declareScript params) ----
+// ---- per-script parameter values (wt.declareScript params) ----
 const PARAMS_KEY = "resParams";
 
 /** Load all stored param values: { scriptId: { key: value } }. */

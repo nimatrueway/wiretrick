@@ -19,7 +19,7 @@
  *             responseHeaders) with the same semantics as ChromeBodyStrategy's
  *             MV2 in-SW execution, mirroring its log lines
  *
- * Reverse calls (res.storage.* and script logging) travel the other way
+ * Reverse calls (wt.storage.* and script logging) travel the other way
  * with the same reqId pattern.
  */
 import { compileScript, makeModuleResolver, makeStubModule, type CompiledScript } from "../shared/compile";
@@ -31,11 +31,11 @@ import { scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
 /**
  * Environment parity with the MV2 background page: sandboxed pages get NO
  * chrome.* APIs, but MV2 scripts compile in a page where chrome exists.
- * A script touching chrome before res.declareScript would die inside its
+ * A script touching chrome before wt.declareScript would die inside its
  * own try/catch and silently skip the declaration (𝑓 library icon) — so
  * the sandbox provides a minimal chrome/browser shim (metadata + in-memory
- * storage; reverse-channel ops like res.storage still go over postMessage
- * via the res shim, NOT this one).
+ * storage; reverse-channel ops like wt.storage still go over postMessage
+ * via the wt shim, NOT this one).
  */
 const EXT_ID = new URLSearchParams(location.search).get("extId") || "sandboxed-extension";
 const chromeShim: any = {
@@ -138,7 +138,7 @@ function compileSignature(scripts: PlainScript[], paramValues: Record<string, an
 
 /**
  * Compile every script with the overrides MV2 compiles with: REAL stored
- * param values (the res shim resolves declareScript's params over them —
+ * param values (the wt shim resolves declareScript's params over them —
  * handlers that decide via params get the user's values, not defaults) and
  * a reverse-channel storage/log. Recompiles only when the script set or
  * the param values change (runs are per-request — reuse the handlers).
@@ -233,7 +233,7 @@ function analyze(scripts: PlainScript[]): { results: Record<string, AnalyzeResul
             // source line (guarded/conditional calls are the usual cause)
             const line = c.s.code.split("\n").find((l) => l.includes("declareScript"));
             if (line) sandboxLog(`"${c.s.name}" declares via: ${line.trim().slice(0, 160)}`, "warn");
-            else sandboxLog(`"${c.s.name}" contains no res.declareScript call at all — it IS a library (𝑓)`, "warn");
+            else sandboxLog(`"${c.s.name}" contains no wt.declareScript call at all — it IS a library (𝑓)`, "warn");
             if (/\bchrome\b/.test(c.s.code) && !line) sandboxLog(`"${c.s.name}" references chrome.* — the sandbox shims a minimal chrome (metadata + storage); full extension APIs are unavailable here`, "warn");
         }
     }

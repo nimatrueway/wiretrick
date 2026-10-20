@@ -29,8 +29,8 @@ const store: Record<string, any> = {};
 };
 
 const SCRIPTS = [
-    { name: "Debug header", code: `res.declareScript({ params: { level: { type: "string", default: "warn" } } });\n`, enabled: false },
-    { name: "Mock api", code: `res.declareScript({ match: ["*://api/*"] });`, enabled: true },
+    { name: "Debug header", code: `wt.declareScript({ params: { level: { type: "string", default: "warn" } } });\n`, enabled: false },
+    { name: "Mock api", code: `wt.declareScript({ match: ["*://api/*"] });`, enabled: true },
 ];
 
 const DOC: SettingsDoc = {
@@ -76,7 +76,7 @@ describe("parseBundleText", () => {
             format: "wiretrick-bundle",
             version: 1,
             settings: { logLevel: "debug", logCap: 1234 },
-            scripts: [{ name: "Old", code: "res.declareScript({});", enabled: true }],
+            scripts: [{ name: "Old", code: "wt.declareScript({});", enabled: true }],
         };
         const b = parseBundleText(JSON.stringify(old));
         expect(b).not.toBeNull();
@@ -93,7 +93,7 @@ describe("parseBundleText", () => {
     });
 
     it("exports from before the rename (format: rescript-bundle) still import", () => {
-        const old = parseBundleText("format: rescript-bundle\nversion: 1\nscripts:\n  - name: Old\n    code: res.onDom(() => {})\n");
+        const old = parseBundleText("format: rescript-bundle\nversion: 1\nscripts:\n  - name: Old\n    code: wt.onDom(() => {})\n");
         expect(old?.scripts.length).toBe(1);
     });
 

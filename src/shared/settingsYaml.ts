@@ -49,7 +49,7 @@ export interface GlobalSettings {
 
 export interface ScriptSettingsState {
     name: string;
-    /** has res.declareScript (libraries have no enabled switch) */
+    /** has wt.declareScript (libraries have no enabled switch) */
     declared: boolean;
     enabled: boolean;
     defs: Record<string, ParamDef>;

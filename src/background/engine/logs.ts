@@ -1,6 +1,7 @@
 /**
  * Rolling per-tab request log, pushed to the manager UI over a port.
  */
+import { annotateFromLog } from "../network";
 
 export interface LogEntry {
     tabId: number;
@@ -38,6 +39,7 @@ export function log(tabId: number, message: string, level: LogEntry["level"] = "
     for (const port of uiPorts) {
         port.postMessage({ type: "log", entry });
     }
+    if (scriptId) annotateFromLog(tabId, scriptId, message, level);
     if (level === "error") {
         console.error("[Wiretrick]", message);
     }

@@ -33,7 +33,11 @@
                 <div id="split-h" title="Drag to resize"></div>
                 <div id="log-panel">
                     <div id="log-header" title="Drag right to dock beside the editor, drag left for bottom">
-                        <span id="log-header-title">Log</span>
+                        <span id="panel-tabs" role="tablist">
+                            <span id="log-header-title" class="panel-tab active" role="tab" data-panel="log" title="Extension and script log">Log</span>
+                            <span id="network-tab" class="panel-tab" role="tab" data-panel="network" title="Network activity, with what Wiretrick scripts did to each request">Network</span>
+                        </span>
+                        <span id="log-tools">
                         <input id="log-source" type="text" list="log-source-options" placeholder="source…" title="Filter by source — script name or engine component (e.g. pipeline, hook). Substring match; empty = all">
                         <datalist id="log-source-options"></datalist>
                         <select id="log-level" title="Minimum log level">
@@ -45,8 +49,10 @@
                         <input id="log-find" type="text" placeholder="find…" title="Filter log lines (regex ok)">
                         <button id="btn-clear-log" title="Clear the log panel">clear</button>
                         <button id="btn-logs" title="Download the full debug log (engine + hook + page console)">⬇ download</button>
+                        </span>
                     </div>
                     <div id="log-entries"></div>
+                    <div id="network-view" hidden></div>
                 </div>
             </div>
         </main>

@@ -84,7 +84,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
         this.bodyScripts = [];
         for (const s of scripts) {
             if (!s.enabled) continue;
-            if (!/res\s*\.\s*(modifyResponse|replaceResponse|onRequest)/.test(s.code)) continue;
+            if (!/\b(?:wt|res)\s*\.\s*(modifyResponse|replaceResponse|onRequest)/.test(s.code)) continue;
             const compiled = compileScript(s.code, overridesFor({ id: s.id, name: s.meta.name, code: s.code }));
             if (!compiled.meta.declared) continue; // library module: inert, importable
             if (!compiled.handlers.modifyResponse && !compiled.handlers.onRequest && !compiled.handlers.replaceResponse) continue;
@@ -132,7 +132,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
                     };
                 }
                 if (result.redirect) {
-                    log(-1, `[${s.name}] onRequest → redirect → ${result.redirect}`, "info", s.scriptId);
+                    log(-1, `[${s.name}] onRequest → redirect → ${result.redirect} ${url}`, "info", s.scriptId);
                     return { kind: "redirect", url: result.redirect };
                 }
                 if (result.cancel) {

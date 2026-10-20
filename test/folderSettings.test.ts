@@ -53,7 +53,7 @@ describe("settings.yaml folder sync", () => {
         await ss.saveScript({
             id,
             name: "S",
-            code: `res.declareScript({ params: { n: { type: "number", default: 1 } } });`,
+            code: `wt.declareScript({ params: { n: { type: "number", default: 1 } } });`,
         });
         await sync.startFromStoredHandle();
         await sleep(600);
@@ -91,7 +91,7 @@ describe("settings.yaml folder sync", () => {
         await ss.saveScript({
             id: ss.newId(),
             name: "New",
-            code: `res.declareScript({ params: { x: { type: "string", default: "a" } } });`,
+            code: `wt.declareScript({ params: { x: { type: "string", default: "a" } } });`,
         });
         await sleep(800);
         const withNew = files.get("settings.yaml")!.text;
@@ -116,7 +116,7 @@ describe("settings.yaml folder sync", () => {
         await ss.saveScript({
             id,
             name: "S",
-            code: `res.declareScript({ params: { n: { type: "number", default: 1 } } });`,
+            code: `wt.declareScript({ params: { n: { type: "number", default: 1 } } });`,
         });
         await sync.startFromStoredHandle();
         await sleep(600);
@@ -126,7 +126,7 @@ describe("settings.yaml folder sync", () => {
         await ss.saveScript({
             id,
             name: "S",
-            code: `res.declareScript({ params: { n: { type: "number", default: 1 }, extra: { type: "string", default: "x", description: "Extra knob" } } });`,
+            code: `wt.declareScript({ params: { n: { type: "number", default: 1 }, extra: { type: "string", default: "x", description: "Extra knob" } } });`,
         });
         await sleep(800);
         let text = files.get("settings.yaml")!.text;
@@ -140,7 +140,7 @@ describe("settings.yaml folder sync", () => {
         await ss.saveScript({
             id,
             name: "S",
-            code: `res.declareScript({ params: { extra: { type: "string", default: "x", description: "Extra knob" } } });`,
+            code: `wt.declareScript({ params: { extra: { type: "string", default: "x", description: "Extra knob" } } });`,
         });
         await sleep(800);
         text = files.get("settings.yaml")!.text;

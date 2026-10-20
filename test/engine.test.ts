@@ -76,10 +76,10 @@ describe("WebRequestStrategy", () => {
     it("onRequest redirect", () => {
         const s = new WebRequestStrategy();
         s.reload([
-            makeScript("a", `res.declareScript({
+            makeScript("a", `wt.declareScript({
     match: ["*://api.example.com/*"],
 });
-res.onRequest((ctx) => ({ redirect: "https://mocked.example.com/data" }));`),
+wt.onRequest((ctx) => ({ redirect: "https://mocked.example.com/data" }));`),
         ]);
         const d = s.handleBeforeRequest(details(), "https://app.example.com/") as any;
         expect(d).toEqual({ kind: "redirect", url: "https://mocked.example.com/data" });
@@ -88,7 +88,7 @@ res.onRequest((ctx) => ({ redirect: "https://mocked.example.com/data" }));`),
     it("non-matching url → allow", () => {
         const s = new WebRequestStrategy();
         s.reload([
-            makeScript("a", `res.declareScript({ match: ["*://other.com/*"] });\nres.onRequest(() => ({ redirect: "https://x.com" }));`),
+            makeScript("a", `wt.declareScript({ match: ["*://other.com/*"] });\nres.onRequest(() => ({ redirect: "https://x.com" }));`),
         ]);
         expect((s.handleBeforeRequest(details(), null) as any).kind).toBe("allow");
     });
@@ -96,7 +96,7 @@ res.onRequest((ctx) => ({ redirect: "https://mocked.example.com/data" }));`),
     it("disabled script does nothing", () => {
         const s = new WebRequestStrategy();
         s.reload([
-            makeScript("a", `res.declareScript({ match: ["*"] });\nres.onRequest(() => ({ cancel: true }));`, false),
+            makeScript("a", `wt.declareScript({ match: ["*"] });\nres.onRequest(() => ({ cancel: true }));`, false),
         ]);
         expect((s.handleBeforeRequest(details(), null) as any).kind).toBe("allow");
     });
@@ -104,10 +104,10 @@ res.onRequest((ctx) => ({ redirect: "https://mocked.example.com/data" }));`),
     it("static replaceResponse → data url redirect", () => {
         const s = new WebRequestStrategy();
         s.reload([
-            makeScript("a", `res.declareScript({
+            makeScript("a", `wt.declareScript({
     match: ["*://api.example.com/v1/data"],
 });
-res.replaceResponse(() => JSON.stringify({ mocked: true }));`),
+wt.replaceResponse(() => JSON.stringify({ mocked: true }));`),
         ]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("redirect");
@@ -120,11 +120,11 @@ res.replaceResponse(() => JSON.stringify({ mocked: true }));`),
     it("onResponseHeaders modifies headers", () => {
         const s = new WebRequestStrategy();
         s.reload([
-            makeScript("a", `res.declareScript({
+            makeScript("a", `wt.declareScript({
     match: ["*://api.example.com/*"],
     phase: ["response"],
 });
-res.onResponseHeaders(() => ({ headers: { set: { "access-control-allow-origin": "*" }, remove: ["x-frame-options"] } }));`),
+wt.onResponseHeaders(() => ({ headers: { set: { "access-control-allow-origin": "*" }, remove: ["x-frame-options"] } }));`),
         ]);
         const changes = s.handleHeadersReceived(details(), null) as any;
         expect(changes).not.toBeNull();
@@ -134,7 +134,7 @@ res.onResponseHeaders(() => ({ headers: { set: { "access-control-allow-origin": 
 
     it("request header modification via onRequest (run once, cached for header phase)", () => {
         const s = new WebRequestStrategy();
-        const code = `res.declareScript({ match: ["*://api.example.com/*"] });\nres.onRequest(() => ({ headers: { set: { authorization: "Bearer x" } } }));`;
+        const code = `wt.declareScript({ match: ["*://api.example.com/*"] });\nres.onRequest(() => ({ headers: { set: { authorization: "Bearer x" } } }));`;
         s.reload([makeScript("a", code)]);
         // header phase alone does nothing (cache empty — onRequest hasn't run)
         expect(s.handleBeforeSendHeaders(details(), null)).toBeNull();
@@ -147,7 +147,7 @@ res.onResponseHeaders(() => ({ headers: { set: { "access-control-allow-origin": 
     it("script throwing does not break the pipeline", () => {
         const s = new WebRequestStrategy();
         s.reload([
-            makeScript("a", `res.declareScript({ match: ["*"] });\nres.onRequest(() => { throw new Error("boom"); });`),
+            makeScript("a", `wt.declareScript({ match: ["*"] });\nres.onRequest(() => { throw new Error("boom"); });`),
         ]);
         expect((s.handleBeforeRequest(details(), null) as any).kind).toBe("allow");
     });
@@ -157,10 +157,10 @@ describe("ChromeBodyStrategy", () => {
     it("non-JS resources → needsCdp (CDP intercepts the response)", () => {
         const s = new ChromeBodyStrategy();
         s.reload([
-            makeScript("a", `res.declareScript({
+            makeScript("a", `wt.declareScript({
     match: ["*://cdn.example.com/lib.js"],
 });
-res.modifyResponse((ctx, body) => body.replace("foo", "bar"));`),
+wt.modifyResponse((ctx, body) => body.replace("foo", "bar"));`),
         ]);
         const d = s.handleBeforeRequest(details({ type: "script", url: "https://cdn.example.com/lib.js" }), null) as any;
         expect(d.kind).toBe("needsCdp");
@@ -169,7 +169,7 @@ res.modifyResponse((ctx, body) => body.replace("foo", "bar"));`),
     it("claimed urls (tier A) are left alone", () => {
         const s = new ChromeBodyStrategy();
         s.reload([
-            makeScript("a", `res.declareScript({ match: ["*"] });\nres.modifyResponse((ctx, body) => body);`),
+            makeScript("a", `wt.declareScript({ match: ["*"] });\nres.modifyResponse((ctx, body) => body);`),
         ]);
         s.claimRequest("https://cdn.example.com/lib.js");
         expect((s.handleBeforeRequest(details({ type: "script", url: "https://cdn.example.com/lib.js" }), null) as any).kind).toBe("allow");
@@ -178,7 +178,7 @@ res.modifyResponse((ctx, body) => body.replace("foo", "bar"));`),
     it("main_frame goes through the CDP tier", () => {
         const s = new ChromeBodyStrategy();
         s.reload([
-            makeScript("a", `res.declareScript({ match: ["*"] });\nres.modifyResponse((ctx, body) => body);`),
+            makeScript("a", `wt.declareScript({ match: ["*"] });\nres.modifyResponse((ctx, body) => body);`),
         ]);
         expect((s.handleBeforeRequest(details({ type: "main_frame" }), null) as any).kind).toBe("needsCdp");
     });
@@ -186,11 +186,11 @@ res.modifyResponse((ctx, body) => body.replace("foo", "bar"));`),
     it("@strategy cdp dispatches needsCdp (cdpStrategy owns the response)", () => {
         const s = new ChromeBodyStrategy();
         s.reload([
-            makeScript("a", `res.declareScript({
+            makeScript("a", `wt.declareScript({
     match: ["*"],
     strategy: ["cdp"],
 });
-res.modifyResponse((ctx, body) => body);`),
+wt.modifyResponse((ctx, body) => body);`),
         ]);
         expect((s.handleBeforeRequest(details({ type: "script" }), null) as any).kind).toBe("needsCdp");
     });

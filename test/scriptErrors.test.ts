@@ -69,14 +69,14 @@ const details = (over: Record<string, any> = {}) => ({
 });
 
 // line 4 throws (x is undefined):
-const THROWS = `res.declareScript({ match: ["*"] });
-res.onRequest((ctx) => {
+const THROWS = `wt.declareScript({ match: ["*"] });
+wt.onRequest((ctx) => {
     const x = undefined;
     return x.split(".");
 });`;
 
 // line 4 throws at module top level (compile-time):
-const TOPLEVEL = `res.declareScript({ match: ["*"] });
+const TOPLEVEL = `wt.declareScript({ match: ["*"] });
 
 const x = undefined;
 x.split(".");
@@ -112,7 +112,7 @@ describe("formatScriptError / rewriteFrame", () => {
         // empirical: a throw at user line 1 reports <anonymous>:(1+OFFSET)
         let line = 0;
         try {
-            new Function("res", `"use strict";\nthrow new Error("x");`)({});
+            new Function("wt", `"use strict";\nthrow new Error("x");`)({});
         } catch (e: any) {
             line = Number(e.stack.match(/<anonymous>:(\d+):\d+/)?.[1]);
         }
@@ -157,5 +157,19 @@ describe("CDP tier: error logs carry name + user line:col", () => {
         expect(line, "an error log line must exist").toBeTruthy();
         expect(line!.message).toContain("[Thrower]");
         expect(line!.message).toMatch(/Thrower:4:\d+/);
+    });
+});
+
+describe("legacy `res` alias", () => {
+    it("binds res only for scripts that call res.<api>", async () => {
+        const { scriptFunction, usesLegacyApi } = await import("../src/shared/scriptFn");
+        expect(usesLegacyApi(`res.declareScript({ match: ["*"] })`)).toBe(true);
+        expect(usesLegacyApi(`const res = await fetch(u); wt.log(res.status)`)).toBe(false);
+        const seen: any[] = [];
+        const api = { log: (v: any) => seen.push(v) };
+        scriptFunction(`res.log(1); wt.log(2);`)(api, console, null, {}, {});
+        // a script may own a variable named res
+        scriptFunction(`const res = 3; wt.log(res);`)(api, console, null, {}, {});
+        expect(seen).toEqual([1, 2, 3]);
     });
 });

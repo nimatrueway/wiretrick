@@ -308,7 +308,7 @@ export class ProcessStrategy {
                 // not installed / not allowed for this extension id: wait for the user
                 this.state = "missing";
                 this.error = err;
-                dlogLevel("process", "warn", `process helper unavailable (${err}) — process-listed scripts fall through their strategy lists. Install it by pasting this into ${helperInstallShell()}: ${helperInstallCommand(chrome.runtime.id)}`);
+                dlogLevel("process", "error", `process helper unavailable (${err}) — process-listed scripts fall through their strategy lists. Install it by pasting this into ${helperInstallShell()}: ${helperInstallCommand(chrome.runtime.id)}`);
             } else {
                 this.state = "error";
                 this.error = err;

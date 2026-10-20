@@ -86,8 +86,8 @@ const details = (over: Record<string, any> = {}) => ({
     ...over,
 });
 
-const RESPOND_500 = `res.declareScript({ match: ["*://api.example.com/*"] });
-res.onRequest((ctx) => {
+const RESPOND_500 = `wt.declareScript({ match: ["*://api.example.com/*"] });
+wt.onRequest((ctx) => {
     if (ctx.url.includes("/v1/")) return { respond: { status: 500, body: { error: "boom" }, mime: "application/json" } };
 });`;
 
@@ -105,8 +105,8 @@ describe("webRequest tier: log lines use the stored script name", () => {
 
     it("sync respond 200 → served + named serve log", () => {
         const s = new WebRequestStrategy();
-        s.reload([storedScript("a", "API mocker", `res.declareScript({ match: ["*"] });
-res.onRequest(() => ({ respond: { body: "ok", mime: "text/plain" } }));`)]);
+        s.reload([storedScript("a", "API mocker", `wt.declareScript({ match: ["*"] });
+wt.onRequest(() => ({ respond: { body: "ok", mime: "text/plain" } }));`)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("redirect");
         const line = entries.find((e) => e.message.includes("serve"));
@@ -116,8 +116,8 @@ res.onRequest(() => ({ respond: { body: "ok", mime: "text/plain" } }));`)]);
 
     it("redirect/cancel log uses the stored name", () => {
         const s = new WebRequestStrategy();
-        s.reload([storedScript("a", "API mocker", `res.declareScript({ match: ["*"] });
-res.onRequest(() => ({ redirect: "https://mocked.example.com/x" }));`)]);
+        s.reload([storedScript("a", "API mocker", `wt.declareScript({ match: ["*"] });
+wt.onRequest(() => ({ redirect: "https://mocked.example.com/x" }));`)]);
         s.handleBeforeRequest(details(), null);
         const line = entries.find((e) => e.message.includes("onRequest →"));
         expect(line, "a redirect log line must exist").toBeTruthy();
@@ -126,8 +126,8 @@ res.onRequest(() => ({ redirect: "https://mocked.example.com/x" }));`)]);
 
     it("replaceResponse log uses the stored name", () => {
         const s = new WebRequestStrategy();
-        s.reload([storedScript("a", "API mocker", `res.declareScript({ match: ["*"] });
-res.replaceResponse(() => '{"mocked":true}');`)]);
+        s.reload([storedScript("a", "API mocker", `wt.declareScript({ match: ["*"] });
+wt.replaceResponse(() => '{"mocked":true}');`)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("redirect");
         const line = entries.find((e) => e.message.includes("replaceResponse →"));
@@ -138,8 +138,8 @@ res.replaceResponse(() => '{"mocked":true}');`)]);
 
     it("no-match (handler returns undefined) stays silent", () => {
         const s = new WebRequestStrategy();
-        s.reload([storedScript("a", "API mocker", `res.declareScript({ match: ["*"] });
-res.onRequest(() => undefined);`)]);
+        s.reload([storedScript("a", "API mocker", `wt.declareScript({ match: ["*"] });
+wt.onRequest(() => undefined);`)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("allow");
         expect(entries.filter((e) => e.message.includes("onRequest →"))).toEqual([]);
@@ -169,8 +169,8 @@ describe("CDP tier: request-stage respond fulfillment", () => {
 
     it("sync redirect/cancel/headers are NOT double-applied (webRequest tier already handled them)", async () => {
         const c = new CdpStrategy();
-        c.reload([storedScript("a", "API mocker", `res.declareScript({ match: ["*"] });
-res.onRequest(() => ({ redirect: "https://mocked.example.com/x" }));`)]);
+        c.reload([storedScript("a", "API mocker", `wt.declareScript({ match: ["*"] });
+wt.onRequest(() => ({ redirect: "https://mocked.example.com/x" }));`)]);
         await c.handlePaused("tab:1", paused());
         expect(debuggerCalls.filter((x) => x.command === "Fetch.fulfillRequest")).toEqual([]);
         expect(debuggerCalls.filter((x) => x.command === "Fetch.failRequest")).toEqual([]);
@@ -181,8 +181,8 @@ res.onRequest(() => ({ redirect: "https://mocked.example.com/x" }));`)]);
 
     it("sync respond 200 is NOT double-applied (webRequest served it)", async () => {
         const c = new CdpStrategy();
-        c.reload([storedScript("a", "API mocker", `res.declareScript({ match: ["*"] });
-res.onRequest(() => ({ respond: { body: "ok" } }));`)]);
+        c.reload([storedScript("a", "API mocker", `wt.declareScript({ match: ["*"] });
+wt.onRequest(() => ({ respond: { body: "ok" } }));`)]);
         await c.handlePaused("tab:1", paused());
         expect(debuggerCalls.filter((x) => x.command === "Fetch.fulfillRequest")).toEqual([]);
         expect(debuggerCalls.some((x) => x.command === "Fetch.continueRequest")).toBe(true);
@@ -190,8 +190,8 @@ res.onRequest(() => ({ respond: { body: "ok" } }));`)]);
 
     it("async onRequest respond is still fulfilled (webRequest cannot await it)", async () => {
         const c = new CdpStrategy();
-        c.reload([storedScript("a", "API mocker", `res.declareScript({ match: ["*"] });
-res.onRequest(async () => ({ respond: { status: 503, body: "later" } }));`)]);
+        c.reload([storedScript("a", "API mocker", `wt.declareScript({ match: ["*"] });
+wt.onRequest(async () => ({ respond: { status: 503, body: "later" } }));`)]);
         await c.handlePaused("tab:1", paused());
         const fulfill = debuggerCalls.find((x) => x.command === "Fetch.fulfillRequest");
         expect(fulfill).toBeTruthy();

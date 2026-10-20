@@ -5,13 +5,14 @@
  *
  *   hook (MAIN, no eval) ← postMessage → bridge (isolated) ⇄ background
  *
- * Also owns res.onDom: the background sends compiled handler SOURCES, the
+ * Also owns wt.onDom: the background sends compiled handler SOURCES, the
  * bridge re-compiles them (isolated world allows eval in MV2) and runs
  * them at the requested DOM moment — the isolated world shares the page's
  * DOM, so title/text changes work without touching the page's JS world.
  */
 import { formatScriptError } from "../shared/scriptError";
 import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
+import { scriptFunction } from "../shared/scriptFn";
 
 (() => {
     const MAIN_SOURCE = "res-override-bridge";
@@ -132,7 +133,7 @@ import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } 
         });
     });
 
-    // ---- res.onDom fallback (isolated world): compiles the FULL script
+    // ---- wt.onDom fallback (isolated world): compiles the FULL script
     // source with a shim so top-level helpers/closures survive; the DOM is
     // shared with the page, window (page JS globals) is not ----
     interface DomHandler { scriptId: string; name: string; when: string; src: string; params?: Record<string, any> }
@@ -160,7 +161,7 @@ import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } 
                 },
                 // meta applied upstream; script gets its resolved params
                 declareScript: () => h.params || {},
-                log: (...args: any[]) => scriptLog(h.scriptId, "info", scriptLogLine(h.name, "res.log", formatLogArgs(args))),
+                log: (...args: any[]) => scriptLog(h.scriptId, "info", scriptLogLine(h.name, "wt.log", formatLogArgs(args))),
                 storage: {
                     get: (key: string) =>
                         new Promise((r) => safeSend({ type: "scriptStorageGet", scriptId: h.scriptId, key }, (x: any) => r(x && x.value))),
@@ -184,7 +185,7 @@ import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } 
                     const moduleObj = { exports: {} as any };
                     libModules.set(key, moduleObj.exports);
                     const libStore: any = { onDom: null, onDomOptions: {} };
-                    new Function("res", "console", "require", "module", "exports", `"use strict";\n${lib.src}`)(
+                    scriptFunction(lib.src)(
                         { ...shim, onDom: (fn: any, opts: any) => { libStore.onDom = fn; libStore.onDomOptions = opts || {}; } },
                         consoleProxy,
                         requireLib,
@@ -195,7 +196,7 @@ import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } 
                     return moduleObj.exports;
                 };
                 const moduleObj = { exports: {} as any };
-                new Function("res", "console", "require", "module", "exports", `"use strict";\n${h.src}`)(shim, consoleProxy, requireLib, moduleObj, moduleObj.exports);
+                scriptFunction(h.src)(shim, consoleProxy, requireLib, moduleObj, moduleObj.exports);
             } catch (e: any) {
                 scriptLog(h.scriptId, "error", formatScriptError(h.name, e, "onDom compile (isolated world)"));
                 continue;

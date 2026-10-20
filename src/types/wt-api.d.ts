@@ -1,9 +1,9 @@
 /**
- * Public `res` API typings — shipped into the editor as an extra lib and
+ * Public `wt` API typings — shipped into the editor as an extra lib and
  * written into the VS Code folder so scripts get full IntelliSense.
  */
 
-declare namespace ResOverride {
+declare namespace Wiretrick {
     interface HeaderPair {
         name: string;
         value?: string;
@@ -76,7 +76,7 @@ declare namespace ResOverride {
         set(key: string, value: any): Promise<void>;
     }
 
-    /** Options for the res.onDom hook (see res.onDom docs). */
+    /** Options for the wt.onDom hook (see wt.onDom docs). */
     interface DomOptions {
         when?: "DOMContentLoaded" | "document_start" | "document_end" | "document_idle";
     }
@@ -174,7 +174,7 @@ declare namespace ResOverride {
  * Firefox, and on Chromium require "cdp" or "process" in the strategy list (a warning is logged
  * otherwise and the result is ignored).
  */
-declare const res: {
+declare const wt: {
     /**
      * Intercept a request before it is sent. Return { respond }, { redirect },
      * { cancel }, { headers } or a combination. May be async — see the
@@ -191,14 +191,14 @@ declare const res: {
      * NON-terminal: { headers } — applies and lets later scripts run.
      *
      * @example
-     * res.onRequest((ctx) => {
+     * wt.onRequest((ctx) => {
      *     if (ctx.url.includes("/user")) return {
      *         respond: { body: { id: 1, name: "Mock" }, mime: "application/json" },
      *     };
      * });
      */
     onRequest(
-        handler: (ctx: ResOverride.RequestCtx) => ResOverride.RequestResult | void | Promise<ResOverride.RequestResult | void>
+        handler: (ctx: Wiretrick.RequestCtx) => Wiretrick.RequestResult | void | Promise<Wiretrick.RequestResult | void>
     ): void;
 
     /**
@@ -206,7 +206,7 @@ declare const res: {
      * async notes above.
      */
     onResponseHeaders(
-        handler: (ctx: ResOverride.ResponseHeaderCtx) => ResOverride.ResponseHeaderResult | void | Promise<ResOverride.ResponseHeaderResult | void>
+        handler: (ctx: Wiretrick.ResponseHeaderCtx) => Wiretrick.ResponseHeaderResult | void | Promise<Wiretrick.ResponseHeaderResult | void>
     ): void;
 
     /**
@@ -217,7 +217,7 @@ declare const res: {
      * response).
      */
     replaceResponse(
-        handler: (ctx: ResOverride.ReplaceCtx) => string | Uint8Array | { file: string } | null | void | Promise<string | Uint8Array | { file: string } | null | void>
+        handler: (ctx: Wiretrick.ReplaceCtx) => string | Uint8Array | { file: string } | null | void | Promise<string | Uint8Array | { file: string } | null | void>
     ): void;
 
     /**
@@ -229,13 +229,13 @@ declare const res: {
      */
     modifyResponse(
         transform: (
-            ctx: ResOverride.BodyCtx,
+            ctx: Wiretrick.BodyCtx,
             body: string | Uint8Array
         ) => string | Uint8Array | Promise<string | Uint8Array>
     ): void;
 
     /** Per-script key/value storage. */
-    storage: ResOverride.Storage;
+    storage: Wiretrick.Storage;
 
     /** Log to the manager's log panel for the current tab. */
     log(...args: unknown[]): void;
@@ -274,16 +274,16 @@ declare const res: {
      *       If load already happened, runs immediately.
      *
      * @example
-     * res.onDom(() => { document.title = "🎯 " + document.title; });
+     * wt.onDom(() => { document.title = "🎯 " + document.title; });
      *
      * @example
-     * res.onDom(() => {
+     * wt.onDom(() => {
      *     const el = document.querySelector("h1");
      *     if (el) el.textContent = "Intercepted";
      * }, { when: "document_idle" }); // after everything settled
      */
     onDom(
-        handler: (ctx: ResOverride.RequestCtx) => void | Promise<void>,
+        handler: (ctx: Wiretrick.RequestCtx) => void | Promise<void>,
         opts?: { when?: "DOMContentLoaded" | "document_start" | "document_end" | "document_idle" }
     ): void;
 
@@ -320,18 +320,18 @@ declare const res: {
      *                   Default: 1 without watch, unlimited with watch.
      *
      * @example
-     * res.onDom(() => { document.title = "🎯 " + document.title; });
+     * wt.onDom(() => { document.title = "🎯 " + document.title; });
      *
      * @example
      * // SPA: keep re-applying as React re-renders
-     * res.onDom(() => {
+     * wt.onDom(() => {
      *     const el = document.querySelector("h1");
      *     if (el) el.textContent = "Intercepted";
      * }, { watch: true, watchInterval: 500, maxRuns: 100 });
      */
     onDom(
-        handler: (ctx: ResOverride.RequestCtx) => void | Promise<void>,
-        opts?: ResOverride.DomOptions
+        handler: (ctx: Wiretrick.RequestCtx) => void | Promise<void>,
+        opts?: Wiretrick.DomOptions
     ): void;
 
     /**
@@ -345,7 +345,7 @@ declare const res: {
      * or the manager.
      *
      * @example
-     * const cfg = res.declareScript({
+     * const cfg = wt.declareScript({
      *     name: "Force-fail inference",
      *     match: ["*://cloud*.mongodb.com/*"],
      *     strategy: ["hook", "cdp"],
@@ -356,9 +356,9 @@ declare const res: {
      *         extra:   { type: "stringList", default: [] },
      *     },
      * });
-     * res.onRequest((ctx) => cfg.enabled ? { respond: { status: Number(cfg.status), body: { error: cfg.note } } } : undefined);
+     * wt.onRequest((ctx) => cfg.enabled ? { respond: { status: Number(cfg.status), body: { error: cfg.note } } } : undefined);
      */
-    declareScript<T extends Record<string, ResOverride.ParamDef>>(
-        def: ResOverride.ScriptDef<T>
-    ): ResOverride.ParamsOf<T>;
+    declareScript<T extends Record<string, Wiretrick.ParamDef>>(
+        def: Wiretrick.ScriptDef<T>
+    ): Wiretrick.ParamsOf<T>;
 };

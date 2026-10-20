@@ -39,7 +39,7 @@ function entriesFor(dist, mv3) {
             external: [/^lib\//],
         },
         {
-            input: path.join(root, "src/ui/popup.ts"),
+            input: path.join(root, "src/ui/popup.tsx"),
             output: { file: path.join(dist, "popup.js"), format: "iife" },
         },
     ];
@@ -65,7 +65,10 @@ function entriesFor(dist, mv3) {
         );
     }
     for (const e of list) {
-        e.transform = { define: { __MV3__: mv3 ? "true" : "false" } };
+        e.transform = {
+            define: { __MV3__: mv3 ? "true" : "false" },
+            jsx: { runtime: "automatic", importSource: "preact" },
+        };
     }
     return list;
 }
@@ -145,10 +148,10 @@ async function copyStatic(dist, mv3) {
         await copyFile(loaderSrc, path.join(dist, "lib/monaco-loader.js"));
     }
 
-    // res-api typings for the editor + VS Code export
+    // wt-api typings for the editor + VS Code export
     await copyFile(
-        path.join(root, "src/types/res-api.d.ts"),
-        path.join(dist, "lib/res-api.d.ts")
+        path.join(root, "src/types/wt-api.d.ts"),
+        path.join(dist, "lib/wt-api.d.ts")
     );
 
     console.log("static assets copied →", path.relative(root, dist));

@@ -63,7 +63,7 @@ try {
     await seed.goto(`chrome-extension://${extId}/manager.html`);
     await seed.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_shim", name: "Shim probe",
-        code: `res.declareScript({ match: ["*://*/*"] });\nres.modifyResponse((ctx, body) => body);`, // pass-through shim
+        code: `wt.declareScript({ match: ["*://*/*"] });\nres.modifyResponse((ctx, body) => body);`, // pass-through shim
     }, r)));
     await seed.close();
 

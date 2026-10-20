@@ -3,7 +3,7 @@
  * with stack frames rewritten from the eval wrapper's `<anonymous>:LINE:COL`
  * back to the user's source.
  *
- * Scripts compile via `new Function("res", …, "\"use strict\";\n" + js)`,
+ * Scripts compile via `new Function("wt", …, "\"use strict\";\n" + js)`,
  * whose synthetic source adds exactly EVAL_WRAPPER_LINES lines before the
  * user's line 1 (verified empirically: `function anonymous(…`, `) {`, the
  * "use strict" line). Sucrase preserves line numbers, so user line =

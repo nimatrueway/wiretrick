@@ -1,5 +1,5 @@
 /**
- * Formatting for user-script log output (res.log and console.*), shared by
+ * Formatting for user-script log output (wt.log and console.*), shared by
  * every context a script runs in: background/sandbox, the MAIN-world hook
  * and the isolated bridge. Every line reaches the extension's LOG panel as
  * `[<script name>] <source>: <text>`, attributed to the script id.

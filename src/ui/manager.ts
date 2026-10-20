@@ -12,6 +12,7 @@ import { computeDirty } from "./dirtyState";
 import { parseSettings, SETTINGS_FILE, type SettingsDoc } from "../shared/settingsYaml";
 import { dlogLevel } from "../shared/debugLog";
 import { helperInstallCommand, helperInstallShell } from "../shared/helperInstall";
+import { mountNetworkPanel } from "./network/mount";
 import type { Uri, IPosition, IRange, IKeyboardEvent, editor as MonacoEditor } from "monaco-editor";
 import type { Script } from "../background/engine/scriptStore";
 
@@ -176,7 +177,7 @@ function renderList(): void {
             toggle = document.createElement("span");
             toggle.className = "util-icon";
             toggle.textContent = "𝑓";
-            toggle.title = "Utility module — importable by other scripts, never runs on its own";
+            toggle.title = "Utility module — importable by other scripts, never runs on its own. Use wt.declareScript to turn it into a script";
         } else {
             const sw = document.createElement("div");
             sw.className = "switch" + (script.enabled ? " on" : "");
@@ -837,6 +838,7 @@ interface PanelLayout {
     sidebarW?: number;
     logH?: number;
     logDock?: "bottom" | "right";
+    panelTab?: "log" | "network";
 }
 const LAYOUT_KEY = "resPanelLayout";
 
@@ -961,6 +963,35 @@ function makeLogMovable(): void {
         document.addEventListener("mousemove", move);
         document.addEventListener("mouseup", up);
     });
+}
+
+let networkMounted = false;
+
+/** VS Code–style bottom panel tabs: LOG | NETWORK */
+function setupPanelTabs(): void {
+    const show = (which: "log" | "network") => {
+        for (const t of document.querySelectorAll<HTMLElement>(".panel-tab")) {
+            const on = t.dataset.panel === which;
+            t.classList.toggle("active", on);
+            t.setAttribute("aria-selected", String(on));
+        }
+        $("#log-entries").hidden = which !== "log";
+        $("#log-tools").hidden = which !== "log";
+        $("#network-view").hidden = which !== "network";
+        $("#log-panel").dataset.tab = which;
+        // recording starts the first time the tab is shown (zero cost before)
+        if (which === "network" && !networkMounted) {
+            networkMounted = true;
+            mountNetworkPanel($("#network-view"));
+        }
+        const l = loadLayout();
+        l.panelTab = which;
+        saveLayout(l);
+    };
+    for (const t of document.querySelectorAll<HTMLElement>(".panel-tab")) {
+        t.addEventListener("click", () => show(t.dataset.panel as "log" | "network"));
+    }
+    show(loadLayout().panelTab === "network" ? "network" : "log");
 }
 
 // ---- wiring ----
@@ -1175,6 +1206,7 @@ async function main(): Promise<void> {
     makeSplitH();
     makeLogMovable();
     makeLogFilters();
+    setupPanelTabs();
     startKeepAlive();
     setupDialogs();
     
@@ -1231,7 +1263,11 @@ function navLog(msg: string, level = "info"): void {
 /** Verbose-only tracing of the triggers and the TS worker's answer. */
 function installMonacoTrace(): void {
     const m = (window as any).monaco;
-    window.addEventListener("error", (e) => navLog(`window error: ${e.message}`, "error"));
+    window.addEventListener("error", (e) => {
+        // benign: a resize callback changed layout, notifications deferred a frame
+        if (/^ResizeObserver loop/.test(e.message)) return;
+        navLog(`window error: ${e.message}`, "error");
+    });
     window.addEventListener("unhandledrejection", (e) => {
         const reason: any = (e as PromiseRejectionEvent).reason;
         // Monaco's internal async work (e.g. view-state restore scheduling)

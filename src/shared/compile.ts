@@ -1,19 +1,20 @@
 /**
  * Compiles a Wiretrick source into { meta, handlers }.
  * Runs identically in the background (MV3: the sandbox page) and the page
- * hook — each provides its own minimal `res` API shim and re-evaluates
+ * hook — each provides its own minimal `wt` API shim and re-evaluates
  * handler sources with `new Function`.
  */
 import { defaultMeta, type ResMeta } from "./metaParser";
 import { resolveParamValues } from "./scriptDef";
 import { formatLogArgs, makeScriptConsole, type ScriptLogLevel } from "./scriptLog";
+import { scriptFunction } from "./scriptFn";
 
 export type HandlerFn = (...args: any[]) => any;
 
-/** When an onDom handler should fire (2nd argument of res.onDom). */
+/** When an onDom handler should fire (2nd argument of wt.onDom). */
 export type DomWhen = "document_start" | "document_end" | "document_idle" | "DOMContentLoaded";
 
-/** Options for the onDom hook (2nd argument of res.onDom). */
+/** Options for the onDom hook (2nd argument of wt.onDom). */
 export interface DomOptions {
     /**
      * When to run the handler:
@@ -28,7 +29,7 @@ export interface DomOptions {
 }
 
 /**
- * Registrations STACK within a script: multiple res.onRequest(...) calls
+ * Registrations STACK within a script: multiple wt.onRequest(...) calls
  * all run, in registration order (same semantics as across scripts).
  */
 export interface ScriptHandlers {
@@ -46,7 +47,7 @@ export interface CompiledScript {
     error: string | null;
     /** original full source */
     code: string;
-    /** parameter definitions collected from res.declareScript (if any) */
+    /** parameter definitions collected from wt.declareScript (if any) */
     paramDefs?: Record<string, import("./scriptDef").ParamDef>;
     /** the module's exports (library scripts: importable by others) */
     exports?: any;
@@ -73,7 +74,7 @@ export function isAsyncFn(fn: any): boolean {
 
 export interface ResApiOverrides {
     storage?: { get(key: string): Promise<any>; set(key: string, value: any): Promise<void> };
-    /** receives the script's res.log and console.* output (source: "res.log", "console.warn", …) */
+    /** receives the script's wt.log and console.* output (source: "wt.log", "console.warn", …) */
     logSink?: (level: ScriptLogLevel, source: string, text: string) => void;
     /** stored parameter values, merged over declareScript defaults */
     paramValues?: Record<string, any>;
@@ -124,7 +125,7 @@ export function toRunnableJs(code: string): string {
 
 /**
  * Compile from full source (background storage path). The ONLY way to
- * activate a script is res.declareScript — a source without it compiles
+ * activate a script is wt.declareScript — a source without it compiles
  * as a library module (handlers inert, exports importable).
  */
 export function compileScript(code: string, overrides?: ResApiOverrides): CompiledScript {
@@ -133,7 +134,7 @@ export function compileScript(code: string, overrides?: ResApiOverrides): Compil
         const js = toRunnableJs(code);
         const moduleObj = { exports: {} as any };
         // eslint-disable-next-line no-new-func
-        const fn = new Function("res", "console", "require", "module", "exports", `"use strict";\n${js}`);
+        const fn = scriptFunction(js);
         const store = createCollector();
         const declare = createDeclareShim(meta, overrides?.paramValues);
         const shim = makeCollectorShim(store, overrides);
@@ -200,7 +201,7 @@ export function makeModuleResolver(
         cache.set(key, moduleObj.exports); // early, for cycles
         const js = toRunnableJs(lib.code);
         // eslint-disable-next-line no-new-func
-        new Function("res", "console", "require", "module", "exports", `"use strict";\n${js}`)(
+        scriptFunction(js)(
             makeCollectorShim(createCollector(), overridesFor(lib)),
             makeForwardingConsole(overridesFor(lib).logSink),
             resolve,
@@ -218,7 +219,7 @@ export function makeModuleResolver(
  * Wrap a module resolver so unknown/missing imports resolve to a silent
  * stub instead of throwing. Used by the MV3 sandbox analyze path (and
  * anywhere meta capture must not depend on the import graph): a script
- * whose `import` fails must still run its body so res.declareScript
+ * whose `import` fails must still run its body so wt.declareScript
  * captures match/params — otherwise it silently stores as a library.
  */
 export function resolveWithStubFallback(resolve: (spec: string) => any): (spec: string) => any {
@@ -303,12 +304,12 @@ function makeCollectorShim(store: any, overrides?: ResApiOverrides): any {
             get: () => undefined,
             set: () => undefined,
         },
-        log: (...args: any[]) => (overrides?.logSink ? overrides.logSink("info", "res.log", formatLogArgs(args)) : console.log("[Wiretrick] res.log:", ...args)),
+        log: (...args: any[]) => (overrides?.logSink ? overrides.logSink("info", "wt.log", formatLogArgs(args)) : console.log("[Wiretrick] wt.log:", ...args)),
     };
 }
 
 /**
- * Builds res.declareScript: applies match/strategy/phase/runAt onto the
+ * Builds wt.declareScript: applies match/strategy/phase/runAt onto the
  * script's meta and marks it declared, collects param defs, and returns
  * the resolved param values for the script to use.
  */

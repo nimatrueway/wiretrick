@@ -58,7 +58,7 @@ the tagged `manifest.json` version.
 Which interception paths each browser and build gives you
 ([strategies](#interception-strategies--how-bodies-get-modified) explained below):
 
-| | `hook` (page fetch/XHR) | `res.onDom` | `cdp` (debugger) | `webrequest` | `process` (local helper) |
+| | `hook` (page fetch/XHR) | `wt.onDom` | `cdp` (debugger) | `webrequest` | `process` (local helper) |
 |---|---|---|---|---|---|
 | **Chrome / Edge / Brave / Vivaldi, current** — `dist-mv3/` | ✅ | ✅ | ✅ banner shown | ❌ | ✅ no banner |
 | **Chromium with MV2** (ungoogled-chromium, Brave, Arc… — any Chromium that still loads MV2 extensions) — `dist/` | ✅ | ✅ | ✅ banner shown | ✅ no banner — redirect, cancel, headers, sync respond/replace; no body streaming or async (see [async](#async-handlers)) | ✅ no banner |
@@ -91,30 +91,30 @@ Brave, Edge and Vivaldi.
 ## Writing scripts
 
 ```ts
-res.declareScript({
+wt.declareScript({
     match: ["*://app.example.com/api/user*"],
 });
 
 // Redirect / cancel / request headers (synchronous):
-res.onRequest((ctx) => {
+wt.onRequest((ctx) => {
     // return { redirect: "https://myserver/user.json" };
     // return { cancel: true };
     return { headers: { set: { "x-debug": "1" } } };
 });
 
 // Response headers:
-res.onResponseHeaders((ctx) => {
+wt.onResponseHeaders((ctx) => {
     return { headers: { set: { "access-control-allow-origin": "*" } } };
 });
 
 // Replace the whole body:
-// res.replaceResponse(() => JSON.stringify({ mocked: true }));
+// wt.replaceResponse(() => JSON.stringify({ mocked: true }));
 
 // Stream-modify the body:
-res.modifyResponse((ctx, body) => body.replace('"role":"user"', '"role":"admin"'));
+wt.modifyResponse((ctx, body) => body.replace('"role":"user"', '"role":"admin"'));
 ```
 
-`res.declareScript` is the only way to activate a script.
+`wt.declareScript` is the only way to activate a script.
 A source file without it is a **library**: inert on
 its own (never matches, hidden from the popup) but importable by other
 scripts:
@@ -133,7 +133,7 @@ import { forceFail } from "./utils";   // "./utils", "utils", "utils.ts" all res
 touching the script:
 
 ```ts
-const cfg = res.declareScript({
+const cfg = wt.declareScript({
     match: ["*://app.example.com/*"],
     strategy: ["hook", "cdp"],
     params: {
@@ -145,7 +145,7 @@ const cfg = res.declareScript({
 });
 // cfg.enabled: boolean · cfg.status: "500" | "503" · cfg.note: string · cfg.tags: string[]
 
-res.onRequest((ctx) => {
+wt.onRequest((ctx) => {
     if (!cfg.enabled) return;
     return { respond: { status: Number(cfg.status), body: { error: cfg.note, tags: cfg.tags } } };
 });
@@ -159,7 +159,7 @@ like a code edit. Parameter types: `boolean` (switch), `string` (text; add `mult
 ## Editor
 
 The manager page embeds **Monaco** (the VS Code editor) with full TypeScript
-IntelliSense for the `res` API — completions, hover docs, and diagnostics work
+IntelliSense for the `wt` API — completions, hover docs, and diagnostics work
 out of the box. Cmd/Ctrl+S saves and hot-applies the script; ⌘P quick-opens
 scripts/settings.yaml (cursor position is remembered per file and restored
 when you switch back), ⌘, opens Settings, ⌘/ comments, ⌘F finds, ⌘D selects
@@ -173,7 +173,7 @@ clears the unsaved-changes state — no discard prompt on a no-op edit.
 
 Click **Folder…** and pick a folder (e.g. `~/Wiretricks`) — that becomes your
 scripts home: every script is written there as a `.ts` file along with
-`res-api.d.ts` and `jsconfig.json`. Edit in VS Code (or any editor) with full
+`wt-api.d.ts` and `jsconfig.json`. Edit in VS Code (or any editor) with full
 TypeScript completions; saves hot-reload into the engine instantly.
 
 Sync is two-way and watches the folder for **creates, renames/moves and
@@ -228,7 +228,7 @@ has **interception strategies** — pickable per script, individually or as a
 **comma-separated priority list**:
 
 ```ts
-res.declareScript({
+wt.declareScript({
     match: ["*://api.example.com/*"],
     strategy: ["hook", "cdp"],   // ← try these in order
 });
@@ -279,7 +279,7 @@ attach the debugger for any request.
   the banner clears while you keep browsing.
 - **Strict tier gating**: a script whose list has no `cdp` (e.g.
   `strategy: ["hook"]`) never attaches the debugger for anything — main frames
-  included; use `res.onDom` for page changes instead.
+  included; use `wt.onDom` for page changes instead.
 - **Claim dedup**: when the hook transforms a request, the CDP tier skips it
   (no double transforms).
 - **Strict page CSP fallback**: if a page's own CSP forbids `eval` (so the
@@ -287,9 +287,9 @@ attach the debugger for any request.
   the tab automatically falls back to the CDP tier for body transforms —
   features keep working, the banner shows while it does.
 
-### `res.onDom` — exact execution semantics
+### `wt.onDom` — exact execution semantics
 
-`res.onDom` is not a network strategy — it registers a **DOM-ready callback
+`wt.onDom` is not a network strategy — it registers a **DOM-ready callback
 that runs inside the page's MAIN world** (the same world as the page's own
 JS). Exact timing:
 
@@ -297,7 +297,7 @@ JS). Exact timing:
    world) injects `hook.js` into the page via a script tag before any page
    script runs. The hook loads, fetches the scripts matching this page from
    the background, compiles them, and patches `fetch`/`XMLHttpRequest`.
-2. **Registration**: while compiling, any `res.onDom(handler)` calls are
+2. **Registration**: while compiling, any `wt.onDom(handler)` calls are
    captured (the handler is stored, not yet run).
 3. **Execution**: the captured handlers run exactly once, when the
    `DOMContentLoaded` event fires — i.e. the full DOM is parsed and queryable,
@@ -314,10 +314,10 @@ JS). Exact timing:
    moment (mirrors content-script `run_at`):
 
    ```ts
-   res.onDom(() => { ... });                             // default: DOMContentLoaded
-   res.onDom(() => { ... }, { when: "document_start" }); // at hook install, pre-DOM
-   res.onDom(() => { ... }, { when: "document_end" });   // DOM parsed
-   res.onDom(() => { ... }, { when: "document_idle" });  // after window load
+   wt.onDom(() => { ... });                             // default: DOMContentLoaded
+   wt.onDom(() => { ... }, { when: "document_start" }); // at hook install, pre-DOM
+   wt.onDom(() => { ... }, { when: "document_end" });   // DOM parsed
+   wt.onDom(() => { ... }, { when: "document_idle" });  // after window load
    ```
 
    - `DOMContentLoaded` (default) — DOM parsed; hydration not guaranteed.
@@ -331,7 +331,7 @@ JS). Exact timing:
    On SPA soft navigations (pushState) no hook re-fires — register your own
    MutationObserver inside the handler.
 
-Because it runs as page JS, `res.onDom` works regardless of how the response
+Because it runs as page JS, `wt.onDom` works regardless of how the response
 arrived — service-worker-served HTML, cached pages, or hydration overwriting
 a CDP transform — which is exactly why it's the resilient choice for
 title/DOM changes on SPAs.
@@ -341,11 +341,11 @@ title/DOM changes on SPAs.
 - Mock/transform **JSON APIs** → default `auto` (hook covers it; no banner).
 - Rewrite **page HTML / titles in the raw response** → `cdp` (or default
   auto; the main frame always goes through CDP on Chrome).
-- Change **title/DOM after render** → `res.onDom` — no network interception
+- Change **title/DOM after render** → `wt.onDom` — no network interception
   at all, works even when the HTML is service-worker served or hydration
   re-renders it (the resilient choice for SPA title/DOM tweaks).
 - **Never see the banner at all** → `strategy: ["hook"]` and combine with
-  `res.onDom` for anything the hook can't reach.
+  `wt.onDom` for anything the hook can't reach.
 - **Firefox users** → everything is network-level via `webrequest`, no
   banners, ever.
 - **Chrome, network-level, no banner** (documents, `<script src>`, images,
@@ -426,7 +426,7 @@ are attached to each GitHub release. To build from source, run
 When several enabled scripts match the same request, they run in **list
 order** (top to bottom in the manager) with per-hook rules:
 
-**`res.onRequest`** — the first script that returns a *terminal* result
+**`wt.onRequest`** — the first script that returns a *terminal* result
 (`respond`, `redirect`, or `cancel`) wins and stops the chain; later scripts
 don't run for that request. Scripts that return nothing (or only `headers`)
 don't stop the chain — their header changes merge (later `set` wins per key,
@@ -436,7 +436,7 @@ don't stop the chain — their header changes merge (later `set` wins per key,
 **without the network request ever happening**:
 
 ```ts
-res.onRequest((ctx) => ({
+wt.onRequest((ctx) => ({
     respond: {
         body: { id: 1, name: "Mocked User" },  // object → JSON; strings/bytes pass through
         status: 200,                            // default 200
@@ -452,18 +452,18 @@ included); on the webRequest tier it materializes as a data-URL redirect
 (status becomes 200 there); with `"cdp"` in `strategy` the request-stage
 fulfill honors status and headers.
 
-**`res.onResponseHeaders`** — all matching scripts run and their changes
+**`wt.onResponseHeaders`** — all matching scripts run and their changes
 **merge**: `set` keys are applied in order (a later script's `set` of the
 same header overwrites earlier ones), `remove` lists accumulate.
 
-**`res.modifyResponse`** — transforms **compose** like a pipeline: script A's
+**`wt.modifyResponse`** — transforms **compose** like a pipeline: script A's
 output becomes script B's input, in list order.
 
 ```text
 body → [script 1 transform] → [script 2 transform] → … → page
 ```
 
-**`res.replaceResponse`** — the first script that returns a body wins;
+**`wt.replaceResponse`** — the first script that returns a body wins;
 later ones are skipped.
 
 **Across strategies**: a script's `strategy` list only decides *which tier*
@@ -472,7 +472,7 @@ which tier each one uses.
 
 ## Async handlers
 
-All `res.*` hooks accept `async` handlers (returning a Promise). What happens
+All `wt.*` hooks accept `async` handlers (returning a Promise). What happens
 with the result depends on the tier:
 
 | hook | hook tier (page fetch/XHR) | webRequest tier (Chromium MV2) | webRequest tier (Firefox) | cdp tier (Chrome, `strategy: ["cdp"]`) | process tier (Chrome, `strategy: ["process"]`) |
@@ -487,7 +487,7 @@ with the result depends on the tier:
 Practical rules of thumb:
 
 - **Mocking/transforming APIs (fetch/XHR)?** Async just works — write
-  `res.modifyResponse(async (ctx, body) => { const j = await translate(body); return …; })`.
+  `wt.modifyResponse(async (ctx, body) => { const j = await translate(body); return …; })`.
 - **Redirect/cancel decided asynchronously** (e.g. after an API lookup)?
   Add `"cdp"` to `strategy` (`strategy: ["hook", "cdp"]`) so the CDP tier can await
   your handler; note the debugger banner appears while such requests are
@@ -547,7 +547,7 @@ pages, and drops blocking `webRequest`):
   only MV3 context where `new Function` is allowed. The service worker
   routes compiles/ executions there through an offscreen document
   (`offscreen.html` bridges chrome.runtime ⇄ iframe postMessage). Handler
-  results, script logs and `res.storage` round-trip back over the same
+  results, script logs and `wt.storage` round-trip back over the same
   channel.
 - **The hook tier carries page fetch/XHR interception** (patching in the
   page's MAIN world — same behavior, transforms execute in the sandbox).

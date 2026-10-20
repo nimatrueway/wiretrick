@@ -8,8 +8,10 @@
         "esModuleInterop": true,
         "resolveJsonModule": true,
         "skipLibCheck": true,
+        "jsx": "react-jsx",
+        "jsxImportSource": "preact",
         "lib": ["ES2020", "DOM", "DOM.Iterable", "WebWorker"],
         "types": ["chrome"]
     },
-    "include": ["src/**/*.ts", "test/**/*.ts"]
+    "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx"]
 }

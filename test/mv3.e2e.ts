@@ -126,7 +126,7 @@ try {
         type: "saveScript",
         id: "s_mv3",
         name: "MV3 hook",
-        code: `res.declareScript({ match: ["*://*/*"] });\nres.modifyResponse((ctx, body) => body.replace("ORIGINAL", "MV3"));`,
+        code: `wt.declareScript({ match: ["*://*/*"] });\nres.modifyResponse((ctx, body) => body.replace("ORIGINAL", "MV3"));`,
     }, r)));
     check("saveScript round-trips through the sandbox (meta extracted)", saveResult?.meta?.declared === true, JSON.stringify(saveResult?.meta));
     const listResult = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "listScripts" }, r)));
@@ -214,7 +214,7 @@ try {
     // its decision must be honored by the hook tier ----
     await mgr.evaluate((origin: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_pg", name: "Param gated",
-        code: `const cfg = res.declareScript({ match: ["${origin}/*"], params: { intercept: { type: "boolean", default: false, description: "Intercept" } } });\nres.onRequest((ctx) => { if (cfg.intercept) return { respond: { status: 200, body: { value: "PARAM-GATED" } } }; });`,
+        code: `const cfg = wt.declareScript({ match: ["${origin}/*"], params: { intercept: { type: "boolean", default: false, description: "Intercept" } } });\nres.onRequest((ctx) => { if (cfg.intercept) return { respond: { status: 200, body: { value: "PARAM-GATED" } } }; });`,
     }, r)), ORIGIN);
     await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "setScriptParam", scriptId: "s_pg", key: "intercept", value: true }, r)));
     await mgr.waitForTimeout(1500); // pipeline reload + analyze-cache warm with the new params
@@ -231,17 +231,20 @@ try {
     if (process.env.DBG) await mgr.evaluate(() => { const sel = document.querySelector("#log-level") as HTMLSelectElement; sel.value = "debug"; sel.dispatchEvent(new Event("change")); });
     await mgr.evaluate((cdn: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_respond", name: "Respond script",
-        code: `res.declareScript({ match: ["${cdn}/app.js*"], strategy: ["hook", "cdp"] });\nres.onRequest((ctx) => ({ respond: { status: 200, mime: "text/javascript", body: 'window.__marker = "RESPONDED:' + ctx.resourceType + '";' } }));`,
+        code: `wt.declareScript({ match: ["${cdn}/app.js*"], strategy: ["hook", "cdp"] });\nres.onRequest((ctx) => ({ respond: { status: 200, mime: "text/javascript", body: 'window.__marker = "RESPONDED:' + ctx.resourceType + '";' } }));`,
     }, r)), CDN);
     await mgr.evaluate((cdn: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_cdpx", name: "Cdp transform",
-        code: `res.declareScript({ match: ["${cdn}/gz.js", "${cdn}/lazy.js"], strategy: ["hook", "cdp"] });\nres.modifyResponse((ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
+        code: `wt.declareScript({ match: ["${cdn}/gz.js", "${cdn}/lazy.js"], strategy: ["hook", "cdp"] });\nres.modifyResponse((ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
     }, r)), CDN);
     await mgr.evaluate((cdn: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_auto", name: "Auto script",
-        code: `res.declareScript({ match: ["${cdn}/auto.js"] });\nres.modifyResponse((ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
+        code: `wt.declareScript({ match: ["${cdn}/auto.js"] });\nres.modifyResponse((ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
     }, r)), CDN);
     await mgr.waitForTimeout(1500); // pipeline reload → debugger tier armed
+    // Network tab records from now on (listeners attach when it opens)
+    await mgr.click("#network-tab");
+    await mgr.waitForSelector("#network-view .net-toolbar", { timeout: 5000 });
     const xoPage = await ctx.newPage();
     await xoPage.goto(`${ORIGIN}/page-xo`);
     await xoPage.waitForFunction(() => (window as any).__lazy !== undefined, null, { timeout: 15000 }).catch(() => {});
@@ -250,6 +253,17 @@ try {
     check("modifyResponse on a gzip-encoded script tag (encoding stripped)", xo.gz === "MODIFIED-GZ", JSON.stringify(xo));
     check("lazily inserted chunk (2.5s after load) still intercepted", xo.lazy === "MODIFIED-LAZY", JSON.stringify(xo));
     check("auto-strategy script leaves script tags alone (hook tier only)", xo.auto === "ORIGINAL-AUTO", JSON.stringify(xo));
+    await mgr.waitForTimeout(800);
+    const net: { name: string; status: string; scripts: (string | null)[] }[] = await mgr.evaluate(() =>
+        [...document.querySelectorAll("#network-view tbody tr")].map((tr) => ({
+            name: tr.querySelector(".net-name")?.textContent || "",
+            status: tr.querySelector(".c-status")?.textContent || "",
+            scripts: [...tr.querySelectorAll(".net-badge")].map((b) => b.textContent),
+        })),
+    );
+    check("Network tab lists the page's requests", net.some((r) => r.name.startsWith("page-xo") && r.status === "200") && net.some((r) => r.name.startsWith("auto.js")), JSON.stringify(net.map((r) => r.name)));
+    check("Network tab shows which script intercepted a request", net.some((r) => r.name.startsWith("gz.js") && r.scripts.includes("Cdp transform")), JSON.stringify(net.filter((r) => r.scripts.length)));
+    await mgr.click("#log-header-title");
     // a reload in the already-attached tab (no first-navigation race)
     await xoPage.reload();
     await xoPage.waitForFunction(() => (window as any).__gz !== undefined, null, { timeout: 15000 }).catch(() => {});
@@ -257,7 +271,7 @@ try {
     // same-origin script; "proxy" (removed strategy) is ignored with a warning
     await mgr.evaluate((origin: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_proxy2", name: "Proxy same-origin",
-        code: `res.declareScript({ match: ["${origin}/app.js"], strategy: ["proxy", "cdp"], phase: ["response"] });\nres.modifyResponse((ctx, body) => body.replace("ORIGINAL-MARKER", "PROXY-MARKER"));`,
+        code: `wt.declareScript({ match: ["${origin}/app.js"], strategy: ["proxy", "cdp"], phase: ["response"] });\nres.modifyResponse((ctx, body) => body.replace("ORIGINAL-MARKER", "PROXY-MARKER"));`,
     }, r)), ORIGIN);
     await mgr.waitForTimeout(1500);
     const scriptPage = await ctx.newPage();
@@ -268,7 +282,7 @@ try {
     // WARNED (never silent), and a reload must intercept
     await mgr.evaluate((origin: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_race", name: "Race script",
-        code: `res.declareScript({ match: ["${origin}/race.js"], strategy: ["cdp"] });\nres.modifyResponse((ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
+        code: `wt.declareScript({ match: ["${origin}/race.js"], strategy: ["cdp"] });\nres.modifyResponse((ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
     }, r)), ORIGIN);
     await mgr.waitForTimeout(1500);
     const racePage = await ctx.newPage();
@@ -375,7 +389,7 @@ try {
     });
     await warm.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_dom", name: "Early dom",
-        code: `res.declareScript({ match: ["*://*/*"] });\nres.onDom((ctx) => { document.title = "DOM-RAN:" + document.readyState; }, { when: "document_start" });`,
+        code: `wt.declareScript({ match: ["*://*/*"] });\nres.onDom((ctx) => { document.title = "DOM-RAN:" + document.readyState; }, { when: "document_start" });`,
     }, r)));
     await warm.waitForTimeout(1500); // cache refresh (pipeline reload warm)
     const domPage = await ctx.newPage();
@@ -421,7 +435,7 @@ try {
     // GUI change → settings.yaml must appear in the folder (commented default)
     await fPage.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_sync", name: "Sync guinea",
-        code: 'res.declareScript({ match: ["*://sync.invalid/*"], params: { token: { type: "string", default: "abc", description: "Sync token" } } });\n',
+        code: 'wt.declareScript({ match: ["*://sync.invalid/*"], params: { token: { type: "string", default: "abc", description: "Sync token" } } });\n',
     }, r)));
     await fPage.waitForTimeout(2500); // export debounce + SW poller cadence
     const yaml1 = await opfsText("settings.yaml");
@@ -434,7 +448,7 @@ try {
     check("MV3 folder sync: external settings.yaml edit applied", (p1 as any)?.values?.token === "xyz", JSON.stringify(p1));
 
     // a new .ts file in the folder inserts a script
-    await opfsWrite("imported-sync.ts", 'res.declareScript({ match: ["*://imported.invalid/*"] });\n');
+    await opfsWrite("imported-sync.ts", 'wt.declareScript({ match: ["*://imported.invalid/*"] });\n');
     await fPage.waitForTimeout(2500);
     const flist = await fPage.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "listScripts" }, r)));
     check("MV3 folder sync: external .ts file became a script", (flist as any[]).some((s) => s.meta?.name === "imported-sync"), JSON.stringify((flist as any[]).map((s) => s.meta?.name)));
@@ -445,7 +459,7 @@ try {
     await swCdp.send("ServiceWorker.enable");
     await swCdp.send("ServiceWorker.stopAllWorkers");
     await fPage.waitForTimeout(500);
-    await opfsWrite("while-asleep.ts", 'res.declareScript({ match: ["*://asleep.invalid/*"] });\n');
+    await opfsWrite("while-asleep.ts", 'wt.declareScript({ match: ["*://asleep.invalid/*"] });\n');
     await fPage.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "folderSyncStatus" }, r))); // wakes the SW
     await fPage.waitForTimeout(2500);
     const flist2 = await fPage.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "listScripts" }, r)));

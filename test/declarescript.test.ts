@@ -1,5 +1,5 @@
 /**
- * res.declareScript: meta override + typed parameters.
+ * wt.declareScript: meta override + typed parameters.
  */
 import { describe, expect, it } from "vitest";
 import "../src/shared/transpile"; // register the sucrase TS/imports transpiler
@@ -7,7 +7,7 @@ import { compileScript } from "../src/shared/compile";
 import { paramDefault, resolveParamValues, isValidParamValue } from "../src/shared/scriptDef";
 
 const CODE = `
-const cfg = res.declareScript({
+const cfg = wt.declareScript({
     match: ["*://a.com/*", "*://b.com/*"],
     strategy: ["hook", "cdp"],
     runAt: "document_idle",
@@ -18,8 +18,8 @@ const cfg = res.declareScript({
         hosts: { type: "stringList", default: ["x"] },
     },
 });
-res.log("flag", cfg.flag);
-res.onRequest(() => (cfg.flag ? { cancel: true } : undefined));
+wt.log("flag", cfg.flag);
+wt.onRequest(() => (cfg.flag ? { cancel: true } : undefined));
 `;
 
 describe("declareScript", () => {
@@ -124,7 +124,7 @@ describe("saveScript name handling", () => {
             },
         };
         const { saveScript, setEnabled, getScript } = await import("../src/background/engine/scriptStore");
-        await saveScript({ id: "s1", code: `res.declareScript({ match: ["*"] });\nres.onRequest(() => {});`, name: "redwood" });
+        await saveScript({ id: "s1", code: `wt.declareScript({ match: ["*"] });\nres.onRequest(() => {});`, name: "redwood" });
         expect((await getScript("s1"))!.meta.name).toBe("redwood");
         await setEnabled("s1", false);
         expect((await getScript("s1"))!.meta.name).toBe("redwood");
