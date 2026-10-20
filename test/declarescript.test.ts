@@ -41,19 +41,19 @@ describe("declareScript", () => {
 
     it("returns defaults when nothing stored", () => {
         const seen: any[] = [];
-        const c = compileScript(CODE, { log: (...a: any[]) => seen.push(a) });
+        const c = compileScript(CODE, { logSink: (_l, _s, text) => seen.push(text) });
         expect(c.error).toBeNull();
-        expect(seen[0]).toEqual(["flag", true]);
+        expect(seen[0]).toBe("flag true");
     });
 
     it("stored values override defaults; invalid fall back", () => {
         const seen: any[] = [];
         const c = compileScript(CODE, {
             paramValues: { flag: false, mode: "a", note: 42, hosts: "nope" },
-            log: (...a: any[]) => seen.push(a),
+            logSink: (_l, _s, text) => seen.push(text),
         });
         expect(c.error).toBeNull();
-        expect(seen[0]).toEqual(["flag", false]);
+        expect(seen[0]).toBe("flag false");
         const values = resolveParamValues(c.paramDefs!, { flag: false, mode: "a", note: 42, hosts: "nope" });
         expect(values).toEqual({ flag: false, note: "hi", mode: "a", hosts: ["x"] });
     });

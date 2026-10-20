@@ -20,10 +20,24 @@ void toRunnableJs;
 import { log } from "./logs";
 import { serializeHandlers, type HandlerSources } from "../../shared/compile";
 import { resolveParamValues } from "../../shared/scriptDef";
+import { unknownStrategies } from "../../shared/metaParser";
 import { analyzeScripts, runBodyOp } from "../compileHost";
-import { syncProxyRules } from "../proxyRules";
 
 const FILTER: chrome.webRequest.RequestFilter = { urls: ["<all_urls>"] };
+
+/** "proxy" (removed) or a typo is silently ignored by parseStrategyList — say so once per script+value */
+const warnedStrategies = new Set<string>();
+function warnUnknownStrategies(scripts: { id: string; enabled: boolean; meta: { name: string; strategy: string; declared?: boolean } }[]): void {
+    for (const s of scripts) {
+        if (!s.enabled || !s.meta.declared) continue;
+        const bad = unknownStrategies(s.meta.strategy);
+        const key = `${s.id}:${bad.join(",")}`;
+        if (!bad.length || warnedStrategies.has(key)) continue;
+        warnedStrategies.add(key);
+        const hint = bad.includes("proxy") ? ' — the "proxy" strategy was removed; use "cdp" or "process" for browser-initiated loads' : "";
+        dlogLevel("pipeline", "warn", `Script "${s.meta.name}": unknown strategy ${bad.map((b) => `"${b}"`).join(", ")} ignored${hint}`);
+    }
+}
 
 export interface Pipeline {
     reload(): Promise<void>;
@@ -67,7 +81,7 @@ export function createPipeline(
                 // any pause (request or response stage) precedes completion
                 setTimeout(() => {
                     if (cdp.wasPaused(d.tabId, d.url)) return;
-                    log(d.tabId, `[Tier C] ${d.type} ${d.url}${d.fromCache ? " (from cache)" : ""} loaded BEFORE the debugger attached to this tab (or before interception was enabled) — NOT intercepted by ${names.map((n) => `"${n}"`).join(", ")}. Reload the tab (it stays attached from now on).`, "warn");
+                    log(d.tabId, `[cdp] ${d.type} ${d.url}${d.fromCache ? " (from cache)" : ""} loaded BEFORE the debugger attached to this tab (or before interception was enabled) — NOT intercepted by ${names.map((n) => `"${n}"`).join(", ")}. Reload the tab (it stays attached from now on).`, "warn");
                 }, 300);
             },
             { urls: ["<all_urls>"] }
@@ -187,11 +201,11 @@ export function createPipeline(
     function applyDisposition(disposition: any, details: any): any {
         switch (disposition.kind) {
             case "redirect": {
-                log(details.tabId, `${details.url} → ${disposition.url}`, "info");
+                log(details.tabId, `redirected ${details.url} → ${disposition.url}`, "info");
                 return { redirectUrl: disposition.url };
             }
             case "cancel": {
-                log(details.tabId, `cancelled ${details.url}`, "warn");
+                log(details.tabId, `cancelled ${details.url}`, "info");
                 return { cancel: true };
             }
             case "needsCdp": {
@@ -259,7 +273,7 @@ export function createPipeline(
         chrome.webRequest.onCompleted.addListener(onDone, FILTER);
         chrome.webRequest.onErrorOccurred.addListener(onDone, FILTER);
     } else {
-        dlogLevel("pipeline", "info", "MV3: no blocking webRequest — hook tier carries page fetch/XHR; the debugger tier (strategy cdp/proxy) carries browser-initiated loads");
+        dlogLevel("pipeline", "info", "MV3: no blocking webRequest — hook tier carries page fetch/XHR; strategy cdp (debugger) or process (local helper) carries browser-initiated loads");
     }
 
     // ---- manager protocol ----
@@ -426,19 +440,6 @@ export function createPipeline(
             chromeBody.runReplace(msg.url, msg.method || "GET").then((r) => sendResponse(r || { content: null }));
             return true;
         }
-        if (msg && msg.type === "getProxyTransform") {
-            const scripts = chromeBody.getTransformsForUrl(msg.url, null);
-            // proxy tier is MV3-reserved; code omitted on MV2 (the MV2
-            // service worker cannot intercept page-initiated loads)
-            sendResponse({
-                transforms: scripts.map((s) => ({
-                    scriptId: s.scriptId,
-                    name: s.meta.name,
-                    code: "",
-                })),
-            });
-            return false;
-        }
         return false;
     });
 
@@ -454,11 +455,10 @@ export function createPipeline(
         if (__MV3__) {
             // refresh the analyze cache NOW so the next page's getHookBundle
             // is served from it without waking the sandbox (keeps onDom
-            // document_start as early as MV3 allows) + sync the proxy
-            // tier's DNR redirect rules with the current script set
+            // document_start as early as MV3 allows)
             void analyzeScripts(scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt })));
-            void syncProxyRules(scripts);
         }
+        warnUnknownStrategies(scripts);
 
         // HOT RELOAD: push the new bundle to every open tab's hook so
         // changes apply without reloading the target tab

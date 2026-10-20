@@ -6,13 +6,13 @@
  */
 
 export type Phase = "request" | "response";
-export type Strategy = "auto" | "hook" | "proxy" | "cdp" | "webrequest" | "process";
+export type Strategy = "auto" | "hook" | "cdp" | "webrequest" | "process";
 
 /**
  * strategy accepts a priority list, e.g.
  *   ["hook", "cdp"]   (try the page hook first, then the debugger)
  *   ["cdp"]           (debugger only)
- *   ["auto"]          (engine default: hook → proxy → cdp)
+ *   ["auto"]          (engine default: hook, then cdp)
  *   ["process"]       (local helper proxy — Chrome, opt-in, no banner)
  */
 export type StrategyList = Strategy[];
@@ -20,12 +20,22 @@ export type StrategyList = Strategy[];
 export function parseStrategyList(raw: string | StrategyList | undefined): StrategyList {
     if (!raw) return ["auto"];
     if (Array.isArray(raw)) return raw;
-    const valid: Strategy[] = ["auto", "hook", "proxy", "cdp", "webrequest", "process"];
     const out = raw
         .split(",")
         .map((x) => x.trim().toLowerCase())
-        .filter((x): x is Strategy => valid.includes(x as Strategy));
+        .filter((x): x is Strategy => VALID_STRATEGIES.includes(x as Strategy));
     return out.length ? out : ["auto"];
+}
+
+const VALID_STRATEGIES: Strategy[] = ["auto", "hook", "cdp", "webrequest", "process"];
+
+/** strategy names a script lists that the engine doesn't know (ignored) */
+export function unknownStrategies(raw: string | undefined): string[] {
+    if (!raw) return [];
+    return raw
+        .split(",")
+        .map((x) => x.trim().toLowerCase())
+        .filter((x) => x && !VALID_STRATEGIES.includes(x as Strategy));
 }
 
 export interface ResMeta {

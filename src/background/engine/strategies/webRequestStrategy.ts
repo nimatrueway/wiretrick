@@ -1,13 +1,16 @@
 /**
- * Firefox-class strategy: blocking webRequest + filterResponseData.
- * Also the header/redirect engine used by both browsers — redirect/cancel and
- * static replaceResponse work here with no debugger involvement.
+ * Blocking-webRequest strategy: Firefox and MV2-capable Chromium browsers
+ * (ungoogled-chromium, Brave, Opera…). Redirect/cancel, request/response
+ * headers and synchronous respond/replaceResponse work everywhere with no
+ * debugger involvement.
  *
- * Chrome body streaming (modifyResponse) is NOT implemented here; on Chrome
- * chromeBodyStrategy takes over for bodies.
+ * Response-body streaming (modifyResponse via filterResponseData) and
+ * awaiting async handlers are Firefox-only; on Chromium chromeBodyStrategy
+ * takes over for bodies. MV3 has no blocking webRequest at all.
  */
 import { match, matchReplace, matchAny } from "../../../shared/matcher";
 import { compileScript, isThenable, makeModuleResolver, type CompiledScript } from "../../../shared/compile";
+import { scriptLogLine, type ScriptLogLevel } from "../../../shared/scriptLog";
 import { formatScriptError } from "../../../shared/scriptError";
 import type { BodyScriptInfo, HeaderChanges, HookDisposition, InterceptionStrategy, MaybePromise, WebRequestDetailsLike } from "./types";
 import type { Script } from "../scriptStore";
@@ -26,7 +29,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
 
     reload(scripts: Script[], paramValues?: { [scriptId: string]: Record<string, any> }): void {
         if (__MV3__) {
-            dlogLevel("webrequest", "warn", `webRequest tier disabled in MV3 (no blocking webRequest) — ${scripts.filter((s) => s.enabled && s.meta.declared).length} enabled script(s) will not intercept via this tier; browser-initiated loads need strategy ["proxy"], page fetch/XHR uses the hook tier`);
+            dlogLevel("webrequest", "warn", `webRequest tier disabled in MV3 (no blocking webRequest) — ${scripts.filter((s) => s.enabled && s.meta.declared).length} enabled script(s) will not intercept via this tier; browser-initiated loads need strategy ["cdp"] or ["process"], page fetch/XHR uses the hook tier`);
             return;
         }
         let resolveSpec: (spec: string) => any = (spec) => {
@@ -37,8 +40,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                 get: (key: string) => scriptStorageGet(s.id, key),
                 set: (key: string, value: any) => scriptStorageSet(s.id, key, value),
             },
-            log: (...args: any[]) => log(-1, `[${s.meta.name}] res.log: ${args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")}`, "info", s.id),
-            consoleSink: (level: "info" | "warn" | "error", msg: string) => log(-1, `[${s.meta.name}] console.log: ${msg}`, level, s.id),
+            logSink: (level: ScriptLogLevel, source: string, text: string) => log(-1, scriptLogLine(s.meta.name, source, text), level, s.id),
             paramValues: paramValues?.[s.id],
             importModule: (spec: string) => resolveSpec(spec),
         });
@@ -177,15 +179,6 @@ export class WebRequestStrategy implements InterceptionStrategy {
         return this.collectHeaderChanges(details, tabUrl, "response", "headers");
     }
 
-    getTransformsForUrl(url: string, _tabUrl: string | null): BodyScriptInfo[] {
-        return this.scriptsFor(url, "request")
-            .filter((e) => e.compiled.handlers.modifyResponse)
-            .map((e) => ({
-                scriptId: e.id,
-                code: e.compiled.code,
-                meta: { ...e.compiled.meta, name: e.name },
-            }));
-    }
 
     dispose(): void {
         this.compiled = [];

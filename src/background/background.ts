@@ -6,9 +6,9 @@ import { ChromeBodyStrategy } from "./engine/strategies/chromeBodyStrategy";
 import { CdpStrategy } from "./engine/strategies/cdpStrategy";
 import { ProcessStrategy } from "./engine/strategies/processStrategy";
 import { createPipeline } from "./engine/pipeline";
-import { addUiPort, clearTab, broadcastEntry, broadcastToUi } from "./engine/logs";
+import { addUiPort, clearTab, log, broadcastEntry, broadcastToUi } from "./engine/logs";
 import { onScriptsChanged, listScripts } from "./engine/scriptStore";
-import { dlog, getDebugBuffer, pushEntry, clearDebugBuffer, setSink } from "../shared/debugLog";
+import { dlog, dlogLevel, getDebugBuffer, pushEntry, clearDebugBuffer, setSink } from "../shared/debugLog";
 import * as folderSync from "./folderSync";
 import { getSettingsText, applySettingsText, applySettingsDoc } from "./settingsFile";
 import { badgeSetText, badgeSetColor, tabsQueryAll, tabsGet } from "../shared/chromeApi";
@@ -54,15 +54,12 @@ chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
     return false;
 });
 
-// ---- MV3 proxy tier: NOT implementable (see proxyRules.ts) — syncProxyRules
-// clears stale rules and logs the limitation loudly on every reload ----
-
 // ---- scripts folder sync (watching runs here: persistent page, never throttled) ----
 void folderSync.initFromStorage();
 chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
     if (msg && msg.type === "hookCspBlocked" && _s && _s.tab && _s.tab.id !== undefined) {
         chromeBody.markHookBroken(_s.tab.id);
-        dlog("bg", "hook CSP-blocked → CDP fallback", { tabId: _s.tab.id });
+        dlogLevel("bg", "info", "page CSP blocks the fetch/XHR hook in this tab — falling back to debugger (cdp) body interception", { tabId: _s.tab.id });
         sendResponse({});
         return false;
     }
@@ -115,7 +112,14 @@ chrome.runtime.onConnect.addListener((port) => {
 });
 
 // ---- debug log relay: hook/sw/push entries + download support ----
-chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
+    if (msg && msg.type === "scriptLog" && typeof msg.msg === "string") {
+        // script output relayed from a page (hook/bridge): into the tab's LOG
+        const level = ["debug", "info", "warn", "error"].includes(msg.level) ? msg.level : "info";
+        log(sender.tab?.id ?? -1, msg.msg.slice(0, 8000), level, typeof msg.scriptId === "string" ? msg.scriptId : null);
+        sendResponse({});
+        return false;
+    }
     if (msg && msg.type === "debugLog" && msg.entry) {
         pushEntry(msg.entry); // also mirrors to the UI via the sink
         sendResponse({});
@@ -171,7 +175,7 @@ chrome.runtime.onInstalled.addListener(() => {
         if (!d || !d.resManagerOpen) return;
         chrome.tabs.query({}, (tabs) => {
             if (tabs.some((t) => t.url && t.url.includes("manager.html"))) return;
-            dlog("bg", "extension reloaded with manager open → reopening as a tab");
+            dlogLevel("bg", "info", "extension reloaded with the manager open — reopening it as a tab");
             // reopen in a tab of the last focused window — not a new window
             chrome.windows.getLastFocused((win) => {
                 if (win && win.id !== undefined) {
@@ -252,11 +256,11 @@ if (__MV3__) {
             const { listScripts } = await import("./engine/scriptStore");
             const { analyzeScripts } = await import("./compileHost");
             await analyzeScripts((await listScripts()).map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt })));
-            dlog("bg", "analyze cache warmed", {});
+            dlog("bg", "analyze cache warmed");
         } catch (e: any) {
-            dlog("bg", `analyze cache warm failed: ${e?.message || e}`);
+            dlogLevel("bg", "warn", `warming the script analyze cache failed (scripts are analyzed on first use instead): ${e?.message || e}`);
         }
     })();
 }
 
-console.log(`[ResOverride] background ready (${__MV3__ ? "mv3/sandbox" : IS_FIREFOX ? "firefox/webRequest+filterResponseData" : "chrome/tiered"})`);
+console.log(`[Wiretrick] background ready (${__MV3__ ? "mv3/sandbox" : IS_FIREFOX ? "firefox/webRequest+filterResponseData" : "chrome/tiered"})`);

@@ -10,7 +10,7 @@
  *
  * Known MV3 limitations (by design, see README): no blocking webRequest →
  * the webrequest tier is gone; the hook tier carries page fetch/XHR and
- * the debugger tier (strategy cdp/proxy; CDP pauses in the SW, handlers in
+ * the debugger tier (strategy cdp; CDP pauses in the SW, handlers in
  * the sandbox) carries browser-initiated loads; folder sync polling is
  * unavailable in a service worker.
  *
@@ -172,14 +172,14 @@ try {
     void swHasOffscreen;
     check("no page errors in the manager", (await mgr.evaluate(() => (window as any).__resErrors ?? 0)) === 0);
 
-    // popup opens cleanly — no proxy-SW registration attempt (MV3 has no sw.js)
+    // popup opens cleanly — no warnings/errors
     const popup = await ctx.newPage();
     const popupWarnings: string[] = [];
     popup.on("console", (m: any) => { if (m.type() === "warning" || m.type() === "error") popupWarnings.push(m.text()); });
     popup.on("pageerror", (e: Error) => popupWarnings.push(String(e?.message || e)));
     await popup.goto(`chrome-extension://${extId}/popup.html`);
     await popup.waitForTimeout(1200);
-    check("popup opens without proxy-SW registration failure", !popupWarnings.some((t) => /proxy SW registration failed/.test(t)), JSON.stringify(popupWarnings.slice(0, 3)));
+    check("popup opens without warnings", popupWarnings.length === 0, JSON.stringify(popupWarnings.slice(0, 3)));
 
     // popup lists the declared scripts (libraries filtered)
     const popupItems = await popup.evaluate(() => [...document.querySelectorAll("#script-list .script-name")].map((e) => e.textContent));
@@ -224,14 +224,14 @@ try {
     check("param-gated onRequest honored (real stored params, not defaults)", gated.value === "PARAM-GATED", JSON.stringify(gated));
 
     // ---- MV3 debugger tier: browser-initiated loads (<script src>) ARE
-    // intercepted for strategy cdp/proxy scripts — CDP Fetch pauses in the
+    // intercepted for strategy cdp scripts — CDP Fetch pauses in the
     // SW, decisions computed in the sandbox. The user's scenario: page on
-    // one origin, CDN script on another, strategy ["hook", "proxy"] ----
+    // one origin, CDN script on another, strategy ["hook", "cdp"] ----
     const CDN = `http://localhost:${PORT}`;
     if (process.env.DBG) await mgr.evaluate(() => { const sel = document.querySelector("#log-level") as HTMLSelectElement; sel.value = "debug"; sel.dispatchEvent(new Event("change")); });
     await mgr.evaluate((cdn: string) => new Promise((r) => chrome.runtime.sendMessage({
-        type: "saveScript", id: "s_proxy", name: "Proxy script",
-        code: `res.declareScript({ match: ["${cdn}/app.js*"], strategy: ["hook", "proxy"] });\nres.onRequest((ctx) => ({ respond: { status: 200, mime: "text/javascript", body: 'window.__marker = "RESPONDED:' + ctx.resourceType + '";' } }));`,
+        type: "saveScript", id: "s_respond", name: "Respond script",
+        code: `res.declareScript({ match: ["${cdn}/app.js*"], strategy: ["hook", "cdp"] });\nres.onRequest((ctx) => ({ respond: { status: 200, mime: "text/javascript", body: 'window.__marker = "RESPONDED:' + ctx.resourceType + '";' } }));`,
     }, r)), CDN);
     await mgr.evaluate((cdn: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_cdpx", name: "Cdp transform",
@@ -246,7 +246,7 @@ try {
     await xoPage.goto(`${ORIGIN}/page-xo`);
     await xoPage.waitForFunction(() => (window as any).__lazy !== undefined, null, { timeout: 15000 }).catch(() => {});
     const xo = await xoPage.evaluate(() => ({ marker: (window as any).__marker, gz: (window as any).__gz, lazy: (window as any).__lazy, auto: (window as any).__auto }));
-    check("cross-origin <script src> onRequest respond (strategy hook+proxy → debugger tier)", xo.marker === "RESPONDED:script", JSON.stringify(xo));
+    check("cross-origin <script src> onRequest respond (strategy hook+cdp → debugger tier)", xo.marker === "RESPONDED:script", JSON.stringify(xo));
     check("modifyResponse on a gzip-encoded script tag (encoding stripped)", xo.gz === "MODIFIED-GZ", JSON.stringify(xo));
     check("lazily inserted chunk (2.5s after load) still intercepted", xo.lazy === "MODIFIED-LAZY", JSON.stringify(xo));
     check("auto-strategy script leaves script tags alone (hook tier only)", xo.auto === "ORIGINAL-AUTO", JSON.stringify(xo));
@@ -254,16 +254,16 @@ try {
     await xoPage.reload();
     await xoPage.waitForFunction(() => (window as any).__gz !== undefined, null, { timeout: 15000 }).catch(() => {});
     check("reload in an attached tab intercepted too", (await xoPage.evaluate(() => (window as any).__marker)) === "RESPONDED:script");
-    // the old static-page shape: same-origin script, strategy ["proxy"]
+    // same-origin script; "proxy" (removed strategy) is ignored with a warning
     await mgr.evaluate((origin: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_proxy2", name: "Proxy same-origin",
-        code: `res.declareScript({ match: ["${origin}/app.js"], strategy: ["proxy"], phase: ["response"] });\nres.modifyResponse((ctx, body) => body.replace("ORIGINAL-MARKER", "PROXY-MARKER"));`,
+        code: `res.declareScript({ match: ["${origin}/app.js"], strategy: ["proxy", "cdp"], phase: ["response"] });\nres.modifyResponse((ctx, body) => body.replace("ORIGINAL-MARKER", "PROXY-MARKER"));`,
     }, r)), ORIGIN);
     await mgr.waitForTimeout(1500);
     const scriptPage = await ctx.newPage();
     await scriptPage.goto(`${ORIGIN}/page-script`);
     await scriptPage.waitForFunction(() => (window as any).__marker !== undefined, null, { timeout: 15000 });
-    check("same-origin <script src> modifyResponse (strategy proxy)", (await scriptPage.evaluate(() => (window as any).__marker)) === "PROXY-MARKER", JSON.stringify(await scriptPage.evaluate(() => (window as any).__marker)));
+    check("same-origin <script src> modifyResponse (strategy cdp)", (await scriptPage.evaluate(() => (window as any).__marker)) === "PROXY-MARKER", JSON.stringify(await scriptPage.evaluate(() => (window as any).__marker)));
     // zero-latency first navigation: may beat the attach — must then be
     // WARNED (never silent), and a reload must intercept
     await mgr.evaluate((origin: string) => new Promise((r) => chrome.runtime.sendMessage({
@@ -285,10 +285,10 @@ try {
     await racePage.close();
     const logText = await mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line")].map((l) => l.textContent || "").join("\n"));
     if (process.env.DBG) console.log(logText.split("\n").filter((l: string) => /Tier C|cdp|debugger|attach|requestPaused/i.test(l)).slice(-40).join("\n"));
-    check("proxy → debugger-tier routing is logged", logText.includes("use the DEBUGGER tier instead"));
+    check("removed \"proxy\" strategy is warned about", logText.includes(`"proxy" strategy was removed`));
     check("auto-strategy hint to add \"cdp\" is logged", logText.includes(`"Auto script" intercept page fetch/XHR only`));
     check("debugger tier activation is logged", logText.includes("MV3 debugger tier active"));
-    for (const id of ["s_proxy", "s_cdpx", "s_auto", "s_proxy2", "s_race"]) {
+    for (const id of ["s_respond", "s_cdpx", "s_auto", "s_proxy2", "s_race"]) {
         await mgr.evaluate((id: string) => new Promise((r) => chrome.runtime.sendMessage({ type: "deleteScript", id }, r)), id);
     }
     await xoPage.close();

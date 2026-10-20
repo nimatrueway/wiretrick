@@ -39,7 +39,7 @@ export function log(tabId: number, message: string, level: LogEntry["level"] = "
         port.postMessage({ type: "log", entry });
     }
     if (level === "error") {
-        console.error("[engine]", message);
+        console.error("[Wiretrick]", message);
     }
 }
 

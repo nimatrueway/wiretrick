@@ -140,7 +140,7 @@ declare namespace ResOverride {
         match?: string[];
         include?: string[];
         /** Interception tier priority list. */
-        strategy?: ("auto" | "hook" | "proxy" | "cdp" | "webrequest" | "process")[];
+        strategy?: ("auto" | "hook" | "cdp" | "webrequest" | "process")[];
         /** Which interception events run (default: both). */
         phase?: ("request" | "response")[];
         /** Default onDom timing. */
@@ -171,7 +171,7 @@ declare namespace ResOverride {
  * Result handling differs per tier — see the README's "Async handlers"
  * section. Short version: async replaceResponse/modifyResponse/onDom work
  * everywhere; async onRequest/onResponseHeaders are honored natively on
- * Firefox, and on Chrome require "cdp" in the strategy list (a warning is logged
+ * Firefox, and on Chromium require "cdp" or "process" in the strategy list (a warning is logged
  * otherwise and the result is ignored).
  */
 declare const res: {
@@ -223,9 +223,9 @@ declare const res: {
     /**
      * Stream-transform the response body. The transform receives the original
      * body (string or bytes) and returns the new body.
-     * On Firefox this is network-level (filterResponseData). On Chrome it runs
-     * via the JS network hook (page-initiated requests), the extension proxy
-     * (other resources), or CDP when strategy: ["cdp"] is set.
+     * On Firefox this is network-level (filterResponseData). On Chromium it runs
+     * via the JS network hook (page-initiated requests), CDP when
+     * strategy: ["cdp"] is set, or the local helper with strategy: ["process"].
      */
     modifyResponse(
         transform: (

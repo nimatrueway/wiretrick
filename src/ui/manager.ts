@@ -1179,7 +1179,6 @@ async function main(): Promise<void> {
     setupDialogs();
     
 
-    // ensure the Tier-B proxy service worker is active
     void autoReconnectFolder();
 
     // remember the manager is open → the background reopens it after an
@@ -1190,18 +1189,6 @@ async function main(): Promise<void> {
         // renderer (extension reload) skips beforeunload entirely
         chrome.storage.local.set({ resManagerOpen: false });
     });
-
-    // ensure the Tier-B proxy service worker is active — MV2 only (MV3 has
-    // no proxy tier: DNR redirects cannot serve dynamic bodies —
-    // proxyRules.ts logs the limitation)
-    if (!__MV3__) {
-        try {
-            await navigator.serviceWorker.register("/sw.js", { scope: "/" });
-        } catch (e) {
-            console.warn("[ResOverride] proxy SW registration failed", e);
-            dlogLevel("proxy", "warn", `proxy SW registration failed — the proxy tier cannot intercept until it succeeds: ${e}`);
-        }
-    }
 
     connectLogs();
     await refresh();

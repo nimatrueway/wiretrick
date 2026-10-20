@@ -31,7 +31,7 @@ export type HookDisposition =
 
 export interface BodyScriptInfo {
     scriptId: string;
-    /** full script source — hook/proxy compile it locally so closures survive */
+    /** full script source — the hook compiles it locally so closures survive */
     code: string;
     meta: import("../../../shared/metaParser").ResMeta;
 }
@@ -55,12 +55,6 @@ export interface InterceptionStrategy {
 
     /** Apply request header changes, if any (promise on Firefox). */
     handleBeforeSendHeaders(details: WebRequestDetailsLike, tabUrl: string | null): MaybePromise<HeaderChanges | null>;
-
-    /**
-     * Fetch + transform a body server-side (used by the Tier-B proxy worker
-     * to obtain the transform for an original URL).
-     */
-    getTransformsForUrl(url: string, tabUrl: string | null): BodyScriptInfo[];
 
     /** free per-request caches for a request that will never complete normally */
     pruneRequest?(requestId: string): void;

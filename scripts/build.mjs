@@ -46,10 +46,6 @@ function entriesFor(dist, mv3) {
     if (!mv3) {
         list.push(
             {
-                input: path.join(root, "src/proxy/proxy-sw.ts"),
-                output: { file: path.join(dist, "sw.js"), format: "iife" },
-            },
-            {
                 input: path.join(root, "src/ui/serve.ts"),
                 output: { file: path.join(dist, "serve.js"), format: "iife" },
             }

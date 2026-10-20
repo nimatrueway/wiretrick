@@ -38,9 +38,9 @@ describe("tier C participation gate", () => {
         expect(c.cdpRelevantScripts("https://x.com/").length).toBe(1);
     });
 
-    it("hook,proxy list without cdp → excluded", () => {
+    it("hook-only list without cdp → excluded", () => {
         const c = new CdpStrategy();
-        c.reload([makeScript("a", `res.declareScript({ match: ["*"], strategy: ["hook", "proxy"] });\nres.modifyResponse((c, b) => b);`)]);
+        c.reload([makeScript("a", `res.declareScript({ match: ["*"], strategy: ["hook"] });\nres.modifyResponse((c, b) => b);`)]);
         expect(c.cdpRelevantScripts("https://x.com/")).toEqual([]);
     });
 

@@ -7,6 +7,7 @@
  * The background replies with the new body; the hook rebuilds the Response.
  */
 import { formatScriptError } from "../shared/scriptError";
+import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
 
 (() => {
     const w = window as any;
@@ -26,10 +27,17 @@ import { formatScriptError } from "../shared/scriptError";
     let reqSeq = 0;
     const pending = new Map<number, (v: any) => void>();
 
-    function logUp(msg: string, level: "info" | "warn" | "error" = "info", src = "hook"): void {
-        console.log(`[res:hook] ${msg}`);
+    /** hook diagnostics → extension debug log (never the page console) */
+    function logUp(msg: string, level: ScriptLogLevel = "info"): void {
         try {
-            window.postMessage({ source: HOOK_SOURCE, kind: "log", msg, level, src }, window.location.origin);
+            window.postMessage({ source: HOOK_SOURCE, kind: "log", msg, level, src: "hook" }, window.location.origin);
+        } catch {}
+    }
+
+    /** a user script's own output (res.log / console.* / errors) → extension LOG, attributed to the script */
+    function scriptLogUp(scriptId: string | null, level: ScriptLogLevel, msg: string): void {
+        try {
+            window.postMessage({ source: HOOK_SOURCE, kind: "scriptLog", scriptId, level, msg }, window.location.origin);
         } catch {}
     }
 
@@ -75,7 +83,7 @@ import { formatScriptError } from "../shared/scriptError";
             active = !!data.active;
             domHandlers = data.domHandlers || [];
             libSources = data.libs || [];
-            logUp(`status: ${active ? "active" : "inactive"}, dom=${domHandlers.length}${data.hot ? " (hot)" : ""}`);
+            logUp(`status: ${active ? "active" : "inactive"}, dom=${domHandlers.length}${data.hot ? " (hot)" : ""}`, "debug");
             if (active) install();
             else if (wasActive) goDormant();
             compileAndScheduleDom(!!data.hot);
@@ -124,34 +132,34 @@ import { formatScriptError } from "../shared/scriptError";
             libModules.set(key, moduleObj.exports); // early: cycle protection
             const store: any = { onDom: null, onDomOptions: {} };
             const fn = new Function("res", "console", "require", "module", "exports", `"use strict";\n${lib.src}`);
-            fn(makeDomShim(key, lib.name, store, {}), makeScriptConsole(lib.name), requireLib, moduleObj, moduleObj.exports);
+            fn(makeDomShim(null, lib.name, store, {}), scriptConsole(null, lib.name), requireLib, moduleObj, moduleObj.exports);
             libModules.set(key, moduleObj.exports);
             return moduleObj.exports;
         };
-        const compiledDom: { name: string; when: string; fn: (ctx: any) => any }[] = [];
+        const compiledDom: { scriptId: string; name: string; when: string; fn: (ctx: any) => any }[] = [];
         let cspBlocked = false;
         for (const d of domHandlers) {
             const store: any = { onDom: null, onDomOptions: {} };
             try {
                 // shadow `console` inside the script so its console.* calls
-                // are attributed to the script (and still reach the page);
+                // land in the extension LOG (not the page console);
                 // require resolves the shipped libs
                 const fn = new Function("res", "console", "require", "module", "exports", `"use strict";\n${d.src}`);
                 const moduleObj = { exports: {} as any };
-                fn(makeDomShim(d.scriptId, d.name, store, d.params || {}), makeScriptConsole(d.name), requireLib, moduleObj, moduleObj.exports);
+                fn(makeDomShim(d.scriptId, d.name, store, d.params || {}), scriptConsole(d.scriptId, d.name), requireLib, moduleObj, moduleObj.exports);
                 if (store.onDom) {
-                    compiledDom.push({ name: d.name, when: store.onDomOptions.when || "DOMContentLoaded", fn: store.onDom });
+                    compiledDom.push({ scriptId: d.scriptId, name: d.name, when: store.onDomOptions.when || "DOMContentLoaded", fn: store.onDom });
                 }
             } catch (e: any) {
                 if (/Evaluating a string as JavaScript|unsafe-eval/i.test(e.message || "")) {
                     cspBlocked = true;
                 } else {
-                    logUp(formatScriptError(d.name, e, "onDom compile"), "error", d.name);
+                    scriptLogUp(d.scriptId, "error", formatScriptError(d.name, e, "onDom compile"));
                 }
             }
         }
         if (cspBlocked) {
-            logUp("page CSP blocks MAIN-world compilation — onDom falls back to the isolated world", "warn");
+            logUp("page CSP blocks eval in the page world — running onDom handlers in the isolated world instead", "info");
             try {
                 window.postMessage({ source: HOOK_SOURCE, kind: "cspBlocked" }, window.location.origin);
             } catch {}
@@ -162,12 +170,12 @@ import { formatScriptError } from "../shared/scriptError";
             const injected = (document.currentScript as HTMLScriptElement | null)
                 ? "document.currentScript"
                 : (document.querySelector("script[data-res-override-hook]") ? "script tag (already in DOM)" : "bundle message");
-            for (const { name, when, fn } of compiledDom) {
+            for (const { scriptId, name, when, fn } of compiledDom) {
                 try {
-                    logUp(`onDom → running (${when}) on ${location.href} [${document.readyState}] — hook injected via ${injected}`, "info", name);
+                    scriptLogUp(scriptId, "debug", scriptLogLine(name, "onDom", `running (${when}) on ${location.href} [${document.readyState}], hook injected via ${injected}`));
                     fn(makeCtx(location.href, "GET"));
                 } catch (e: any) {
-                    logUp(formatScriptError(name, e, "onDom"), "error", name);
+                    scriptLogUp(scriptId, "error", formatScriptError(name, e, "onDom"));
                 }
             }
         };
@@ -195,39 +203,13 @@ import { formatScriptError } from "../shared/scriptError";
         } catch {}
     }
 
-    /** shim for compiled dom scripts: log → logUp (script-tagged), storage → bridge relay */
-    function fmtArgs(args: any[]): string {
-        return args.map((a) => {
-            if (typeof a === "string") return a;
-            try {
-                return JSON.stringify(a);
-            } catch {
-                return String(a);
-            }
-        }).join(" ");
+    /** console shadow for a dom script: routed to the extension LOG, silent on the page */
+    function scriptConsole(scriptId: string | null, name: string): Console {
+        return makeScriptConsole((level, source, text) => scriptLogUp(scriptId, level, scriptLogLine(name, source, text)));
     }
 
-    /** console shadow for a dom script: forwards to the real page console
-     * and mirrors each call into the script-attributed log stream. */
-    function makeScriptConsole(name: string): any {
-        const real = console;
-        const shim: any = {};
-        for (const method of ["log", "info", "warn", "error", "debug"]) {
-            const level = method === "error" ? "error" : method === "warn" ? "warn" : "info";
-            shim[method] = (...args: any[]) => {
-                try {
-                    (real as any)[method](...args);
-                } catch {}
-                logUp(`console.log: ${fmtArgs(args)}`, level, name);
-            };
-        }
-        // uncommon methods pass straight through
-        return new Proxy(shim, {
-            get: (t, k) => (k in t ? t[k as any] : (real as any)[k]),
-        });
-    }
-
-    function makeDomShim(scriptId: string, name: string, store: any, params: Record<string, any> = {}): any {
+    /** shim for compiled dom scripts: log → extension LOG (script-tagged), storage → bridge relay */
+    function makeDomShim(scriptId: string | null, name: string, store: any, params: Record<string, any> = {}): any {
         return {
             onRequest: (f: any) => {},
             onResponseHeaders: (f: any) => {},
@@ -240,7 +222,7 @@ import { formatScriptError } from "../shared/scriptError";
             // meta is already applied upstream; the script receives its
             // resolved param values here
             declareScript: () => params,
-            log: (...args: any[]) => logUp(`res.log: ${fmtArgs(args)}`, "info", name),
+            log: (...args: any[]) => scriptLogUp(scriptId, "info", scriptLogLine(name, "res.log", formatLogArgs(args))),
             storage: {
                 get: (key: string) => viaBridge({ op: "storageGet", scriptId, key }),
                 set: (key: string, value: any) => viaBridge({ op: "storageSet", scriptId, key, value }),
@@ -259,7 +241,7 @@ import { formatScriptError } from "../shared/scriptError";
         patched = true;
         patchFetch();
         patchXHR();
-        logUp("patches installed");
+        logUp("fetch/XHR patches installed", "debug");
     }
 
     function makeCtx(url: string, method: string, extra?: any): any {
@@ -519,33 +501,6 @@ import { formatScriptError } from "../shared/scriptError";
                 Object.defineProperty(xhr, "response", { get: () => newText, configurable: true });
             }
         } catch {}
-    }
-
-    // ---- page console capture (static — no eval) ----
-    {
-        const CAP = 2000;
-        let captured = 0;
-        const wrap = (method: string, level: "info" | "warn" | "error") => {
-            const orig = (console as any)[method];
-            (console as any)[method] = function (...args: any[]) {
-                orig.apply(console, args);
-                if (captured >= CAP) return;
-                const first = String(args[0] ?? "");
-                if (first.startsWith("[res:")) return; // our own chatter
-                captured++;
-                try {
-                    const msg = args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
-                    window.postMessage(
-                        { source: HOOK_SOURCE, kind: "log", msg: `page.console: ${msg.slice(0, 300)}`, level },
-                        window.location.origin
-                    );
-                } catch {}
-            };
-        };
-        wrap("log", "info");
-        wrap("info", "info");
-        wrap("warn", "warn");
-        wrap("error", "error");
     }
 
     // debug seam: live hook state for e2e/diagnostics

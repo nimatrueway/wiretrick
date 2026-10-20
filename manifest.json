@@ -49,7 +49,7 @@
         "browsingData",
         "<all_urls>"
     ],
-    "web_accessible_resources": ["hook.js", "__resproxy*"],
+    "web_accessible_resources": ["hook.js"],
     "content_security_policy": "script-src 'self' 'unsafe-eval' blob:; worker-src 'self' blob:; object-src 'self'",
     "manifest_version": 2,
     "browser_specific_settings": {

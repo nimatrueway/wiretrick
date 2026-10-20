@@ -11,6 +11,7 @@
  * tiers: MV2 compiles in the background page, MV3 runs in the sandbox.
  */
 import { compileScript, makeModuleResolver, makeScriptOverrides } from "../../../shared/compile";
+import { scriptLogLine } from "../../../shared/scriptLog";
 import { runOp, type BodyOp, type OpScript } from "../../../shared/bodyOps";
 import { hostPatternOf, type SystemProxyInfo } from "../../../shared/pac";
 import { matchAny } from "../../../shared/matcher";
@@ -234,7 +235,7 @@ export class ProcessStrategy {
                 throw new Error(`cannot import "${spec}" before the module registry is ready`);
             };
             const overridesFor = (s: { id: string; name: string; code: string }) =>
-                makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, msg) => log(-1, `[${s.name}] res.log: ${msg}`, "info", id), (id, level, msg) => log(-1, `[${s.name}] console.log: ${msg}`, level, id), paramValues[s.id], (spec) => resolveSpec(spec));
+                makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, level, source, text) => log(-1, scriptLogLine(s.name, source, text), level, id), paramValues[s.id], (spec) => resolveSpec(spec));
             resolveSpec = makeModuleResolver(
                 scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code })),
                 overridesFor

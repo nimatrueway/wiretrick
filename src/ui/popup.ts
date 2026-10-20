@@ -269,20 +269,6 @@ async function main(): Promise<void> {
         if (status) status.textContent = "Could not reach the extension — close and reopen the popup.";
         return;
     }
-    // ensure the Tier-B proxy service worker is active (persists after
-    // close) — MV2 only: sw.js with scope "/". MV3 has no proxy tier at
-    // all (DNR redirects cannot serve dynamic bodies — proxyRules.ts
-    // logs the limitation); browser-initiated loads pass through.
-    if (!__MV3__) {
-        try {
-            await navigator.serviceWorker.register("/sw.js", { scope: "/" });
-        } catch (e) {
-            console.warn("[res:popup] proxy SW registration failed", e);
-            try {
-                chrome.runtime.sendMessage({ type: "debugLog", entry: { at: Date.now(), src: "popup", msg: `proxy SW registration failed: ${e} (the proxy tier cannot intercept until it succeeds)`, level: "warn" } }, () => void chrome.runtime.lastError);
-            } catch {}
-        }
-    }
 }
 
 main();

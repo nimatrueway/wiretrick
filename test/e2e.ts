@@ -332,20 +332,33 @@ check("logs: respond 500 attributed to the stored script name", logText10b.inclu
 check("logs: no [Untitled script] anywhere", !logText10b.includes("[Untitled script]"));
 await p10b.close();
 
-// ---------- 11. debug logs: page console captured + downloadable ----------
-// /page-fetch logs nothing itself; use a page that console.logs
+// ---------- 11. logs: script output tunnelled to the LOG, page console not captured ----------
+await saveScript(
+    "s_logtunnel",
+    `res.declareScript({ match: ["${ORIGIN}/html"] });\nres.onDom(() => { console.warn("E2E-CONSOLE-MARKER", { a: 1 }); res.log("E2E-RESLOG-MARKER"); });`,
+    "log tunnel"
+);
+await new Promise((r) => setTimeout(r, 800));
 const p11 = await ctx.newPage();
+const pageConsole11: string[] = [];
+p11.on("console", (m) => pageConsole11.push(m.text()));
 await p11.goto(`${ORIGIN}/html`, { waitUntil: "domcontentloaded" });
-await p11.reload({ waitUntil: "domcontentloaded" });
 await p11.waitForTimeout(1200);
-await p11.evaluate(() => console.log("E2E-CONSOLE-MARKER", { a: 1 }));
+await p11.evaluate(() => console.log("E2E-PAGE-NOISE"));
 await p11.waitForTimeout(1500);
 await p11.close();
+await setEnabled("s_logtunnel", false);
+const logLines11: string[] = await mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line")].map((l) => (l as HTMLElement).dataset.text || ""));
+const warnLine = logLines11.find((l) => l.includes("E2E-CONSOLE-MARKER")) || "";
+check("logs: script console.warn reaches the LOG, attributed", warnLine.includes("[log tunnel] console.warn: E2E-CONSOLE-MARKER {\"a\":1}"), warnLine.slice(0, 160));
+check("logs: script res.log reaches the LOG", logLines11.some((l) => l.includes("[log tunnel] res.log: E2E-RESLOG-MARKER")));
+check("logs: script console output not echoed to the page console", !pageConsole11.some((t) => t.includes("E2E-CONSOLE-MARKER") || t.includes("E2E-RESLOG-MARKER")), pageConsole11.join(" | ").slice(0, 200));
+check("logs: extension adds nothing to the page console", !pageConsole11.some((t) => /\[res:|\[Wiretrick\]/.test(t)), pageConsole11.join(" | ").slice(0, 200));
 const dbgAll: any = await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "getDebugLogs" }, (x) => r(x))));
 const entries: any[] = dbgAll.entries || [];
 const logText = entries.map((e: any) => e.msg).join("\n");
 const srcs = new Set(entries.map((e: any) => e.src));
-check("debug logs: page console captured into buffer", logText.includes("E2E-CONSOLE-MARKER"));
+check("logs: page's own console is not captured", !logText.includes("E2E-PAGE-NOISE") && !logLines11.some((l) => l.includes("E2E-PAGE-NOISE")));
 check("debug logs: hook/bridge/cdp entries present", srcs.has("hook") && srcs.has("bridge") && srcs.has("cdp"), `sources: ${[...srcs].join(",")}`);
 
 // ---------- 12. movable panels ----------
@@ -387,7 +400,7 @@ check("panels: log docks right by header drag", dockedRight, `dockedRight=${dock
 check("panels: log returns to bottom", dockedBack);
 
 // find box filters log lines (E2E-CONSOLE-MARKER arrived via the port
-// from test 11's page console)
+// from test 11's script console)
 await mgr.locator("#log-find").fill("E2E-CONSOLE");
 await new Promise((r) => setTimeout(r, 300));
 const visible = await mgr.evaluate(() =>

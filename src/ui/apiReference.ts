@@ -14,7 +14,7 @@ const cfg = res.declareScript({
     match: ["*://example.com/*", "*://api.example.com/v1/*"],
     include: [],                        // extra URL patterns
     phase: ["request", "response"],     // which events run (default: both)
-    strategy: ["auto"],                 // or hook | proxy | cdp | webrequest priority list
+    strategy: ["auto"],                 // or hook | cdp | webrequest | process priority list
     runAt: "document_idle",             // default onDom timing
 });
 
@@ -147,7 +147,7 @@ strategy lists (res.declareScript) decide the tier per script, not the stacking 
         title: "Async handlers",
         body: `Every hook accepts async handlers. replaceResponse/modifyResponse/onDom async works everywhere.
 
-onRequest/onResponseHeaders async results: honored natively on Firefox; on Chrome they need "cdp" in the strategy list (the blocking webRequest can't await — a warning is logged and the result ignored otherwise).
+onRequest/onResponseHeaders async results: honored natively on Firefox; on Chromium they need "cdp" or "process" in the strategy list (the blocking webRequest can't await — a warning is logged and the result ignored otherwise).
 
 // async mock:
 res.replaceResponse(async () => {
@@ -175,8 +175,8 @@ res.onRequest(async (ctx) => {
     {
         title: "Tiers & the debugger banner",
         body: `hook — page-level fetch/XHR override. Banner-free. Misses <script src>, <img>, documents.
-proxy — MV3: routes to the debugger tier (script tags, images, CSS…); unused on MV2.
 cdp — chrome.debugger + Fetch domain. Sees everything, but Chrome shows a "debugging" banner while attached; the engine attaches only while needed and detaches when idle.
+webrequest — blocking webRequest: Firefox, and Chromium browsers that still run MV2 extensions (ungoogled-chromium, Brave, Opera…). Redirect, cancel, headers and synchronous respond/replaceResponse everywhere; response-body streaming (modifyResponse) and awaiting async handlers are Firefox-only. Not available in MV3.
 process — Chrome: a tiny local helper (wiretrick-helper) proxies ONLY matched hosts. Sees everything (documents, script tags, images, async handlers, body rewrites) with no banner and no flags. Opt-in: install the helper and trust its CA from the manager.
 Scripts that only ever match fetch/XHR are learned to be hook-only and never trigger the banner.`,
     },
@@ -188,7 +188,7 @@ strategy: ["hook", "cdp"]   // banner-free for XHR; debugger only as cold-start 
 strategy: ["cdp"]           // debugger only (main-frame HTML + script tags always work)
 strategy: ["cdp", "hook"]         // debugger first, even for XHR
 strategy: ["hook"]                // strictly banner-free; unhookable requests pass through
-strategy: ["webrequest", "hook"]  // Firefox network-level first
+strategy: ["webrequest", "hook"]  // network-level (blocking webRequest) first
 strategy: ["process", "hook"]     // Chrome: local helper first, hook if it isn't running
 
 Tier C (debugger) participates ONLY when the list contains "cdp" or is

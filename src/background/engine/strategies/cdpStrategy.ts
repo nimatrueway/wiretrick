@@ -1,12 +1,13 @@
 /**
  * Tier C: chrome.debugger + CDP Fetch domain. Opt-in per script
  * (declareScript strategy: ["cdp"]) — used for main-frame HTML transforms and anything the
- * hook/proxy tiers cannot see. Attaches lazily, only while body-modifying
+ * hook tier cannot see. Attaches lazily, only while body-modifying
  * requests are in flight for a matching script.
  */
 import { matchAny } from "../../../shared/matcher";
 import { parseStrategyList } from "../../../shared/metaParser";
 import { compileScript, makeScriptOverrides, makeModuleResolver, isThenable, isAsyncFn, type HandlerFn } from "../../../shared/compile";
+import { scriptLogLine } from "../../../shared/scriptLog";
 import { formatScriptError } from "../../../shared/scriptError";
 import { storageGet, storageSet } from "../../../shared/chromeApi";
 import type { Script } from "../scriptStore";
@@ -47,13 +48,12 @@ function usesCdp(strategyRaw: string): boolean {
 }
 
 /**
- * MV3 participation: explicit opt-in only — "cdp", or "proxy" (MV3 has no
- * working proxy tier; the debugger is its substitute for browser-initiated
- * loads). "auto"/"hook" scripts stay banner-free on the hook tier.
+ * MV3 participation: explicit opt-in only ("cdp"). "auto"/"hook" scripts
+ * stay banner-free on the hook tier.
  */
 function usesDebuggerMv3(strategyRaw: string): boolean {
     const list = parseStrategyList(strategyRaw);
-    return list.includes("cdp") || list.includes("proxy");
+    return list.includes("cdp");
 }
 
 /**
@@ -119,7 +119,7 @@ export class CdpStrategy {
             throw new Error(`cannot import "${spec}" before the module registry is ready`);
         };
         const overridesFor = (s: { id: string; name: string; code: string }) =>
-            makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, msg) => log(-1, `[${s.name}] res.log: ${msg}`, "info", id), (id, level, msg) => log(-1, `[${s.name}] console.log: ${msg}`, level, id), paramValues?.[s.id], (spec) => resolveSpec(spec));
+            makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, level, source, text) => log(-1, scriptLogLine(s.name, source, text), level, id), paramValues?.[s.id], (spec) => resolveSpec(spec));
         resolveSpec = makeModuleResolver(
             scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code })),
             overridesFor
@@ -216,7 +216,7 @@ export class CdpStrategy {
         const changed = summary !== this.mv3Summary;
         this.mv3Summary = summary;
         if (changed && next.length) {
-            log(-1, `[Tier C] MV3 debugger tier active for ${next.map((s) => `"${s.name}"`).join(", ")} — <script>/<img>/css/document loads are intercepted via chrome.debugger (Chrome shows a "started debugging this browser" banner while attached)`, "info");
+            log(-1, `[cdp] MV3 debugger tier active for ${next.map((s) => `"${s.name}"`).join(", ")} — <script>/<img>/css/document loads are intercepted via chrome.debugger (Chrome shows a "started debugging this browser" banner while attached)`, "info");
         }
         if (changed && autoBody.length) {
             log(-1, `MV3: ${autoBody.map((n) => `"${n}"`).join(", ")} intercept page fetch/XHR only (hook tier). To also intercept <script>/<img>/css/document loads, add "cdp" to the script's strategy list (e.g. strategy: ["hook", "cdp"])`, "warn");
@@ -475,13 +475,13 @@ export class CdpStrategy {
                 }
                 this.attached.add(key);
                 dlogLevel("cdp", "info", "attached + Fetch.enabled", { tabId, attempt });
-                log(tabId, "[Tier C] debugger attached (CDP body interception active)", "warn");
+                log(tabId, "[cdp] debugger attached — body interception active in this tab", "info");
                 return;
             } catch (e: any) {
                 dlogLevel("cdp", "warn", `attach attempt ${attempt} failed`, { tabId, error: e.message || e });
                 if (attempt === 1) {
-                    dlogLevel("cdp", "error", "ATTACH FAILED", { tabId, error: e.message || e });
-                    log(tabId, `[Tier C] debugger attach failed: ${e.message || e}`, "error");
+                    dlogLevel("cdp", "error", "debugger attach failed after all retries", { tabId, error: e.message || e });
+                    log(tabId, `[cdp] debugger attach failed: ${e.message || e}`, "error");
                     return;
                 }
                 await new Promise((r) => setTimeout(r, 150));
@@ -662,7 +662,7 @@ export class CdpStrategy {
                             break replaceOuter;
                         }
                     } catch (e: any) {
-                        dlogLevel("cdp", "error", `replaceResponse ${s.name} THREW: ${e.message || e}`);
+                        dlogLevel("cdp", "debug", `replaceResponse of "${s.name}" threw: ${e.message || e}`);
                         log(tabId, formatScriptError(s.name, e, "async replaceResponse"), "error", s.scriptId);
                     }
                 }
@@ -698,7 +698,7 @@ export class CdpStrategy {
                             }
                         }
                     } catch (e: any) {
-                        dlogLevel("cdp", "error", `transform ${s.name} THREW: ${e.message || e}`);
+                        dlogLevel("cdp", "debug", `modifyResponse of "${s.name}" threw: ${e.message || e}`);
                         log(tabId, formatScriptError(s.name, e, "modifyResponse (cdp)"), "error", s.scriptId);
                     }
                 }
@@ -713,7 +713,7 @@ export class CdpStrategy {
                 body: bytesToBase64(outBytes),
             });
         } catch (e: any) {
-            log(tabId, `[Tier C] body interception failed: ${e.message || e}`, "error");
+            log(tabId, `[cdp] body interception failed: ${e.message || e}`, "error");
             try {
                 await debuggerSend(this.debuggeeOf(key), "Fetch.continueRequest", { requestId });
             } catch {
@@ -853,7 +853,7 @@ export class CdpStrategy {
             });
             dlogLevel("cdp", "info", "MV3: served modified body", { url, resourceType, len: body.length });
         } catch (e: any) {
-            log(tabId, `[Tier C] debugger interception failed for ${url}: ${e?.message || e} — the load continues UNMODIFIED`, "error");
+            log(tabId, `[cdp] debugger interception failed for ${url}: ${e?.message || e} — the load continues UNMODIFIED`, "error");
             await cont();
         }
     }

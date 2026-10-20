@@ -61,7 +61,7 @@ Which interception paths each browser and build gives you
 | | `hook` (page fetch/XHR) | `res.onDom` | `cdp` (debugger) | `webrequest` | `process` (local helper) |
 |---|---|---|---|---|---|
 | **Chrome / Edge / Brave / Vivaldi, current** — `dist-mv3/` | ✅ | ✅ | ✅ banner shown | ❌ | ✅ no banner |
-| **Chromium with MV2** (≤ ~126, ungoogled-chromium) — `dist/` | ✅ | ✅ | ✅ banner shown | ❌ (sync-only, see [async](#async-handlers)) | ✅ no banner |
+| **Chromium with MV2** (ungoogled-chromium, Brave, Arc… — any Chromium that still loads MV2 extensions) — `dist/` | ✅ | ✅ | ✅ banner shown | ✅ no banner — redirect, cancel, headers, sync respond/replace; no body streaming or async (see [async](#async-handlers)) | ✅ no banner |
 | **Firefox** — `dist/` | ✅ | ✅ | ❌ | ✅ no banner | ❌ (not needed: `webrequest` reaches everything) |
 
 What reaches what on Chrome:
@@ -238,8 +238,7 @@ res.declareScript({
 |---|---|---|---|---|
 | `hook` | MAIN-world content script overrides `fetch`, `XMLHttpRequest`, `Response` consumers | any request the page's own JS makes (fetch/XHR — the majority of API traffic) | **never** | misses `<script src>`, `<img>`, documents; requires the page context |
 | `cdp` | `chrome.debugger` + CDP Fetch domain: pause response → read body → transform → fulfill | **everything**: documents, script tags, images, fonts, XHR — even requests the page didn't initiate | **yes** — Chrome shows a yellow "being debugged" bar while attached | the only network-level path for main-frame HTML and non-JS resources on Chrome; attach/detach is lazy and automatic |
-| `proxy` | extension service worker fetches the original and serves it transformed | resources that follow redirects | never | in MV3 it routes to the debugger tier (browser-initiated loads like `<script src>`); unused on MV2 |
-| `webrequest` | blocking `webRequest` + `filterResponseData` | everything | never | **Firefox-only** (Firefox keeps MV2 network APIs); on Chrome this tier is a no-op |
+| `webrequest` | blocking `webRequest` (+ `filterResponseData` on Firefox) | everything | never | **MV2 builds only** — Firefox and Chromium browsers that still run MV2 (ungoogled-chromium, Brave, Arc…). Redirect, cancel, request/response headers and synchronous `onRequest` respond / `replaceResponse` work on both; response-body streaming (`modifyResponse`) and awaiting async handlers are Firefox-only (Chromium has no `filterResponseData`, and its blocking webRequest can't await) |
 | `process` | a tiny local helper ([wiretrick-helper](#local-helper-strategy-process)) is a loopback HTTPS proxy; a PAC routes only the matched hosts to it and it pauses requests for your handlers | **everything**: documents, script tags, images, workers, XHR — MV2 and MV3 | **never** | **Chrome-only**, needs the helper installed + its CA trusted; your own proxy setting stays in effect; falls through the list when the helper is unavailable |
 | `auto` (default) | engine picks per request | — | minimized | resolves to `hook` when the page hook is ready, else `cdp` |
 
@@ -256,18 +255,18 @@ request wins:
   page's fetch wrapper is hostile to monkey-patching).
 - `strategy: ["hook"]` — strictly banner-free; requests the hook can't see pass
   through untouched.
-- `strategy: ["webrequest", "hook"]` — Firefox-first: network-level streaming when
-  available, page hook otherwise.
+- `strategy: ["webrequest", "hook"]` — network-level first (blocking webRequest on
+  Firefox / MV2 Chromium), page hook otherwise.
 - `strategy: ["process", "cdp"]` — network-level on Chrome without the banner via
   the local helper; the debugger only when the helper isn't installed/running.
   `["hook", "process"]` keeps page fetch/XHR in the hook and sends the rest
   (documents, script tags, images…) through the helper.
 
-Invalid names are dropped; a list that ends up empty falls back to `auto`.
+Unknown names are dropped with a warning in the log; a list that ends up empty falls back to `auto`.
 
 **Tier C participation is strict**: the debugger is only ever used when the
 script's list explicitly contains `cdp` (or is the single default `auto`).
-A script with `strategy: ["hook"]` / `["hook", "proxy"]` / `["webrequest"]` will never
+A script with `strategy: ["hook"]` / `["hook", "process"]` / `["webrequest"]` will never
 attach the debugger for any request.
 
 ### Banner minimization (what the engine does on its own)
@@ -422,13 +421,6 @@ are attached to each GitHub release. To build from source, run
   hosts add one loopback hop. With a `modifyResponse` handler, the e2e suite
   measures about 10 ms per navigation.
 
-## MV3 readiness
-
-All browser-specific behavior lives behind one `InterceptionStrategy` interface
-(`src/background/engine/strategies/`). Migrating to MV3 later means: Tier A is
-unchanged, Tier B swaps the webRequest redirect for `declarativeNetRequest`, Tier C
-is unchanged — the pipeline, runtime, and editor don't move.
-
 ## Multiple scripts — how handlers stack
 
 When several enabled scripts match the same request, they run in **list
@@ -483,7 +475,7 @@ which tier each one uses.
 All `res.*` hooks accept `async` handlers (returning a Promise). What happens
 with the result depends on the tier:
 
-| hook | hook tier (page fetch/XHR) | webRequest tier (Chrome) | webRequest tier (Firefox) | cdp tier (Chrome, `strategy: ["cdp"]`) | process tier (Chrome, `strategy: ["process"]`) |
+| hook | hook tier (page fetch/XHR) | webRequest tier (Chromium MV2) | webRequest tier (Firefox) | cdp tier (Chrome, `strategy: ["cdp"]`) | process tier (Chrome, `strategy: ["process"]`) |
 |---|---|---|---|---|---|
 | `onRequest` redirect/cancel | n/a (hook doesn't redirect) | ⚠ result ignored, warning logged — blocking webRequest can't await; use `strategy: ["cdp"]` | ✅ awaited natively | ✅ awaited at the Request stage (redirect/cancel honored) | ✅ awaited (redirect/cancel/respond honored) |
 | `onRequest` headers | n/a | ⚠ ignored + warning | ✅ awaited | ✅ awaited, applied at the Response stage | ✅ awaited, sent upstream |
@@ -562,8 +554,8 @@ pages, and drops blocking `webRequest`):
   The `webrequest` tier is gone (no blocking webRequest in MV3).
 - **Browser-initiated loads (`<script src>`, `<img>`, stylesheets, fonts,
   main-frame HTML) go through the debugger tier** for scripts whose
-  `strategy` lists `cdp` or `proxy` (in MV3 `proxy` maps to the debugger
-  tier — DNR redirects can't serve dynamic bodies). The service worker
+  `strategy` lists `cdp` (or through the local helper with `process`).
+  The service worker
   drives `chrome.debugger` / CDP `Fetch` (pausing only URLs matching those
   scripts' `match` patterns, XHR/fetch excluded — the hook handles them);
   handler decisions (`onRequest`, `replaceResponse`, `modifyResponse`) are

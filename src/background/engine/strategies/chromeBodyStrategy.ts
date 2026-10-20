@@ -6,17 +6,15 @@
  *                      streams page-initiated bodies through the user's
  *                      transform. Banner-free. Claims requests so the
  *                      background skips them.
- *  Tier B (proxy):     non-JS resources (script/img/css/font/media) are
- *                      redirected to chrome-extension://<id>/__resproxy,
- *                      where a service worker on the extension origin fetches
- *                      the original, transforms it, and serves it with the
- *                      right Content-Type. Banner-free.
+ *  Tier B (process):   the local helper (MITM proxy via PAC), opt-in via
+ *                      strategy: ["process"]. Banner-free.
  *  Tier C (cdp):       chrome.debugger + Fetch domain, opt-in via
- *                      strategy: ["cdp"] or "strict interception". Handles
- *                      main-frame HTML and anything A/B cannot see.
+ *                      strategy: ["cdp"]. Handles main-frame HTML and
+ *                      anything the hook cannot see.
  */
 import { matchAny } from "../../../shared/matcher";
 import { compileScript, makeScriptOverrides, makeModuleResolver } from "../../../shared/compile";
+import { scriptLogLine } from "../../../shared/scriptLog";
 import { formatScriptError } from "../../../shared/scriptError";
 import { resolveFileRef } from "../../../shared/bodyOps";
 import type { BodyScriptInfo, HeaderChanges, HookDisposition, InterceptionStrategy, MaybePromise, WebRequestDetailsLike } from "./types";
@@ -38,8 +36,6 @@ function serializeRespondBody(body: any): string {
     return JSON.stringify(body);
 }
 import { dlog } from "../../../shared/debugLog";
-
-const PROXY_PATH = "__resproxy?p=";
 
 interface BodyScriptEntry {
     scriptId: string;
@@ -80,7 +76,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
             throw new Error(`cannot import "${spec}" before the module registry is ready`);
         };
         const overridesFor = (s: { id: string; name: string; code: string }) =>
-            makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, msg) => log(-1, `[${s.name}] res.log: ${msg}`, "info", id), (id, level, msg) => log(-1, `[${s.name}] console.log: ${msg}`, level, id), paramValues?.[s.id], (spec) => resolveSpec(spec));
+            makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, level, source, text) => log(-1, scriptLogLine(s.name, source, text), level, id), paramValues?.[s.id], (spec) => resolveSpec(spec));
         resolveSpec = makeModuleResolver(
             scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code })),
             overridesFor
@@ -273,21 +269,6 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
         return this.bodyScripts;
     }
 
-    getTransformsForUrl(url: string, _tabUrl: string | null): BodyScriptInfo[] {
-        return this.matchingBodyScripts(url).map((s) => ({
-            scriptId: s.scriptId,
-            code: "",
-            meta: {
-                name: s.name,
-                match: s.match,
-                include: [],
-                phase: ["request", "response"],
-                declared: true,
-                strategy: s.strategy as any,
-                runAt: "document_start",
-            },
-        }));
-    }
 
     handleBeforeRequest(details: WebRequestDetailsLike, _tabUrl: string | null): MaybePromise<HookDisposition> {
         // Tier-A claims win: the page hook owns this request's body.
@@ -308,7 +289,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
             let chosen: string | null = null;
             for (const tier of list) {
                 if (tier === "auto") {
-                    // default priority: hook → (proxy later/mv3) → cdp
+                    // default priority: hook → cdp
                     if (details.type === "xmlhttprequest" || details.type === "websocket") {
                         chosen = this.hookReadyTabs.has(details.tabId) ? "hook" : "cdp";
                     } else {
@@ -341,11 +322,12 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
                     continue;
                 }
                 if (tier === "webrequest") {
-                    // Firefox-only network path; on Chrome = no body work
+                    // the webRequest strategy handles headers/redirects/
+                    // static responses itself; response bodies can't be
+                    // streamed on Chromium, so no body work here
                     chosen = "none";
                     break;
                 }
-                // proxy: reserved for the MV3 DNR path
             }
             if (chosen === "cdp") {
                 anyCdp = true;
@@ -358,7 +340,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
         }
 
         if (anyCdp) {
-            log(details.tabId, `[CDP] body transform via debugger for ${shortUrl(details.url)}`, "info");
+            log(details.tabId, `[cdp] body transformed via debugger: ${shortUrl(details.url)}`, "info");
             return { kind: "needsCdp" };
         }
         return { kind: "allow" };

@@ -61,7 +61,7 @@ export interface ScriptDef<T extends Record<string, ParamDef> = Record<string, P
     /** which interception events run (default: both) */
     phase?: ("request" | "response")[];
     /** interception tier priority list, e.g. ["hook", "cdp"] */
-    strategy?: ("auto" | "hook" | "proxy" | "cdp" | "webrequest" | "process")[];
+    strategy?: ("auto" | "hook" | "cdp" | "webrequest" | "process")[];
     runAt?: "document_start" | "document_end" | "document_idle" | "DOMContentLoaded";
     params?: T;
 }

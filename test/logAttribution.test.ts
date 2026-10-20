@@ -135,14 +135,6 @@ res.replaceResponse(() => '{"mocked":true}');`)]);
         expect(line!.message).toContain("[API mocker]");
     });
 
-    it("getTransformsForUrl carries the stored name (proxy/hook attribution)", () => {
-        const s = new WebRequestStrategy();
-        s.reload([storedScript("a", "API mocker", `res.declareScript({ match: ["*"] });
-res.modifyResponse((ctx, body) => body);`)]);
-        const infos = s.getTransformsForUrl("https://api.example.com/v1/data", null);
-        expect(infos.length).toBe(1);
-        expect(infos[0].meta.name).toBe("API mocker");
-    });
 
     it("no-match (handler returns undefined) stays silent", () => {
         const s = new WebRequestStrategy();

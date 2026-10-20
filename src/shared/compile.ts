@@ -1,11 +1,12 @@
 /**
  * Compiles a Wiretrick source into { meta, handlers }.
- * Runs identically in the background page, the Tier-A page hook, and the Tier-B
- * proxy service worker — each provides its own minimal `res` API shim and
- * re-evaluates handler sources with `new Function`.
+ * Runs identically in the background (MV3: the sandbox page) and the page
+ * hook — each provides its own minimal `res` API shim and re-evaluates
+ * handler sources with `new Function`.
  */
 import { defaultMeta, type ResMeta } from "./metaParser";
 import { resolveParamValues } from "./scriptDef";
+import { formatLogArgs, makeScriptConsole, type ScriptLogLevel } from "./scriptLog";
 
 export type HandlerFn = (...args: any[]) => any;
 
@@ -72,9 +73,8 @@ export function isAsyncFn(fn: any): boolean {
 
 export interface ResApiOverrides {
     storage?: { get(key: string): Promise<any>; set(key: string, value: any): Promise<void> };
-    log?: (...args: any[]) => void;
-    /** receives formatted console.log/warn/error from user scripts */
-    consoleSink?: (level: "info" | "warn" | "error", msg: string) => void;
+    /** receives the script's res.log and console.* output (source: "res.log", "console.warn", …) */
+    logSink?: (level: ScriptLogLevel, source: string, text: string) => void;
     /** stored parameter values, merged over declareScript defaults */
     paramValues?: Record<string, any>;
     /** resolves ES import specifiers ("./utils", "utils") to module exports */
@@ -85,8 +85,7 @@ export interface ResApiOverrides {
 export function makeScriptOverrides(
     scriptId: string,
     storage: { get(scriptId: string, key: string): Promise<any>; set(scriptId: string, key: string, v: any): Promise<void> },
-    logSink: (scriptId: string, msg: string) => void,
-    consoleSink?: (scriptId: string, level: "info" | "warn" | "error", msg: string) => void,
+    logSink: (scriptId: string, level: ScriptLogLevel, source: string, text: string) => void,
     paramValues?: Record<string, any>,
     importModule?: (spec: string) => any
 ): ResApiOverrides {
@@ -95,9 +94,7 @@ export function makeScriptOverrides(
             get: (key: string) => storage.get(scriptId, key),
             set: (key: string, value: any) => storage.set(scriptId, key, value),
         },
-        log: (...args: any[]) =>
-            logSink(scriptId, args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")),
-        consoleSink: consoleSink ? (level, msg) => consoleSink(scriptId, level, msg) : undefined,
+        logSink: (level, source, text) => logSink(scriptId, level, source, text),
         paramValues,
         importModule,
     };
@@ -131,7 +128,7 @@ export function toRunnableJs(code: string): string {
  * as a library module (handlers inert, exports importable).
  */
 export function compileScript(code: string, overrides?: ResApiOverrides): CompiledScript {
-    const meta = defaultMeta(overrides?.log ? undefined : undefined);
+    const meta = defaultMeta();
     try {
         const js = toRunnableJs(code);
         const moduleObj = { exports: {} as any };
@@ -146,7 +143,7 @@ export function compileScript(code: string, overrides?: ResApiOverrides): Compil
             : (spec: string) => {
                   throw new Error(`cannot import "${spec}" here — imports resolve in the background/hook contexts`);
               };
-        fn(shim, makeForwardingConsole(overrides?.consoleSink), requireShim, moduleObj, moduleObj.exports);
+        fn(shim, makeForwardingConsole(overrides?.logSink), requireShim, moduleObj, moduleObj.exports);
         return { meta, handlers: store, error: null, code, paramDefs: declare.defs, exports: moduleObj.exports };
     } catch (e: any) {
         return { meta, handlers: emptyHandlers(), error: e && e.stack ? e.stack : String(e), code };
@@ -205,7 +202,7 @@ export function makeModuleResolver(
         // eslint-disable-next-line no-new-func
         new Function("res", "console", "require", "module", "exports", `"use strict";\n${js}`)(
             makeCollectorShim(createCollector(), overridesFor(lib)),
-            makeForwardingConsole(overridesFor(lib).consoleSink),
+            makeForwardingConsole(overridesFor(lib).logSink),
             resolve,
             moduleObj,
             moduleObj.exports
@@ -234,7 +231,7 @@ export function resolveWithStubFallback(resolve: (spec: string) => any): (spec: 
     };
 }
 
-/** Rebuild handlers from serialized sources (hook / proxy path). */
+/** Rebuild handlers from serialized sources (hook path). */
 export function compileFromSources(meta: ResMeta, sources: HandlerSources): CompiledScript {
     const store = createCollector();
     const rebuild = (src: string): HandlerFn => {
@@ -258,7 +255,7 @@ export function compileFromSources(meta: ResMeta, sources: HandlerSources): Comp
     return { meta, handlers: store, error: null, code: "" };
 }
 
-/** Serialize compiled handlers so they can be shipped to hook/proxy contexts. */
+/** Serialize compiled handlers so they can be shipped to the hook context. */
 export function serializeHandlers(s: CompiledScript): HandlerSources {
     const arr = (fns: HandlerFn[]) => (fns.length ? fns.map((f) => f.toString()) : null);
     return {
@@ -286,23 +283,9 @@ function createCollector(): ScriptHandlers {
     };
 }
 
-/** Console shadow for compiled scripts: mirrors into the UI log sink. */
-function makeForwardingConsole(sink?: ResApiOverrides["consoleSink"]): Console {
-    if (!sink) return console;
-    const fmt = (args: any[]) =>
-        args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
-    const wrap = (level: "info" | "warn" | "error") => (...args: any[]) => {
-        // eslint-disable-next-line no-console
-        (level === "error" ? console.error : level === "warn" ? console.warn : console.log)(...args);
-        sink(level, fmt(args));
-    };
-    return {
-        log: wrap("info"),
-        info: wrap("info"),
-        debug: wrap("info"),
-        warn: wrap("warn"),
-        error: wrap("error"),
-    } as unknown as Console;
+/** Console shadow for compiled scripts: routed into the script's log sink. */
+function makeForwardingConsole(sink?: ResApiOverrides["logSink"]): Console {
+    return sink ? makeScriptConsole(sink) : console;
 }
 
 function makeCollectorShim(store: any, overrides?: ResApiOverrides): any {
@@ -320,7 +303,7 @@ function makeCollectorShim(store: any, overrides?: ResApiOverrides): any {
             get: () => undefined,
             set: () => undefined,
         },
-        log: overrides?.log || ((...args: any[]) => console.log("[Wiretrick]", ...args)),
+        log: (...args: any[]) => (overrides?.logSink ? overrides.logSink("info", "res.log", formatLogArgs(args)) : console.log("[Wiretrick] res.log:", ...args)),
     };
 }
 

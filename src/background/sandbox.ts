@@ -26,6 +26,7 @@ import { compileScript, makeModuleResolver, makeStubModule, type CompiledScript 
 import { runOp, type BodyOp, type OpScript } from "../shared/bodyOps";
 import { compileDecision } from "../shared/pac";
 import "../shared/transpile";
+import { scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
 
 /**
  * Environment parity with the MV2 background page: sandboxed pages get NO
@@ -111,7 +112,7 @@ function reverseCall(payload: any): Promise<any> {
 let reverseSeq = 0;
 const pendingReverse = new Map<string, (r: any) => void>();
 
-function scriptLog(scriptId: string, level: "info" | "warn" | "error", msg: string): void {
+function scriptLog(scriptId: string, level: ScriptLogLevel, msg: string): void {
     void reverseCall({ op: "log", scriptId, level, msg });
 }
 
@@ -187,8 +188,7 @@ function ensureCompiled(scripts: PlainScript[], paramValues: Record<string, any>
                 get: (key: string) => reverseCall({ op: "storageGet", scriptId: s.id, key }).then((r: any) => r?.value),
                 set: (key: string, value: any) => reverseCall({ op: "storageSet", scriptId: s.id, key, value }).then(() => undefined),
             },
-            log: (...args: any[]) => scriptLog(s.id, "info", `res.log: ${args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")}`),
-            consoleSink: (level, msg) => scriptLog(s.id, level, `console.log: ${msg}`),
+            logSink: (level, source, text) => scriptLog(s.id, level, scriptLogLine(s.name, source, text)),
         });
         currentDeps = null;
         const onDom = compiledScript.handlers.onDom[0] ?? null;

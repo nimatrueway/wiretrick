@@ -11,15 +11,20 @@
  * DOM, so title/text changes work without touching the page's JS world.
  */
 import { formatScriptError } from "../shared/scriptError";
+import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
 
 (() => {
     const MAIN_SOURCE = "res-override-bridge";
     const HOOK_SOURCE = "res-override-hook";
 
-    function dlog(...args: any[]): void {
-        const msg = args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
-        console.log(`[res:bridge] ${msg}`);
-        safeSend({ type: "debugLog", entry: { at: Date.now(), src: "bridge", msg } });
+    /** bridge diagnostics → extension debug log (never the page console) */
+    function dlog(level: ScriptLogLevel, ...args: any[]): void {
+        safeSend({ type: "debugLog", entry: { at: Date.now(), src: "bridge", msg: formatLogArgs(args), level } });
+    }
+
+    /** a user script's own output → extension LOG, attributed to the script */
+    function scriptLog(scriptId: string | null, level: ScriptLogLevel, msg: string): void {
+        safeSend({ type: "scriptLog", scriptId, level, msg });
     }
 
     // ---- MAIN-world hook relaying ----
@@ -39,7 +44,6 @@ import { formatScriptError } from "../shared/scriptError";
         try {
             window.postMessage({ source: MAIN_SOURCE, kind: "extensionDead" }, window.location.origin);
         } catch {}
-        console.log("[res:bridge] extension reloaded — hook dormant in this tab until the next page load");
     }
     function safeSend(msg: any, onResp?: (resp: any) => void): void {
         if (dead) return;
@@ -67,7 +71,7 @@ import { formatScriptError } from "../shared/scriptError";
             fn();
         } catch (e: any) {
             if (CONTEXT_DEAD.test(e?.message || "")) markDead();
-            else dlog("handler error:", String(e?.message || e));
+            else dlog("error", "bridge message handler failed:", String(e?.message || e));
         }
     }
 
@@ -122,6 +126,9 @@ import { formatScriptError } from "../shared/scriptError";
                 { type: "debugLog", entry: { at: Date.now(), src: data.src || "hook", msg: data.msg, level: data.level || "info" } }
             );
         }
+        if (data.kind === "scriptLog") {
+            safeSend({ type: "scriptLog", scriptId: data.scriptId ?? null, level: data.level, msg: data.msg });
+        }
         });
     });
 
@@ -139,7 +146,7 @@ import { formatScriptError } from "../shared/scriptError";
         });
         const handlers: DomHandler[] = bundle.domHandlers || [];
         const libSources: { name: string; src: string }[] = bundle.libs || [];
-        dlog(`onDom (isolated fallback): ${handlers.length} script(s)${hot ? " (hot refire)" : ""}`);
+        dlog("debug", `onDom (isolated world): running ${handlers.length} script(s)${hot ? " (hot refire)" : ""}`);
         for (const h of handlers) {
             const store: any = { onDom: null, onDomOptions: {} };
             const shim = {
@@ -153,10 +160,7 @@ import { formatScriptError } from "../shared/scriptError";
                 },
                 // meta applied upstream; script gets its resolved params
                 declareScript: () => h.params || {},
-                log: (...args: any[]) => {
-                    const msg = `res.log: ${args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")}`;
-                    safeSend({ type: "debugLog", entry: { at: Date.now(), src: h.name, msg } });
-                },
+                log: (...args: any[]) => scriptLog(h.scriptId, "info", scriptLogLine(h.name, "res.log", formatLogArgs(args))),
                 storage: {
                     get: (key: string) =>
                         new Promise((r) => safeSend({ type: "scriptStorageGet", scriptId: h.scriptId, key }, (x: any) => r(x && x.value))),
@@ -166,21 +170,8 @@ import { formatScriptError } from "../shared/scriptError";
             };
             try {
                 // shadow console like the MAIN-world path: script console.*
-                // calls are attributed to the script and still hit the page
-                const sc: any = {};
-                for (const method of ["log", "info", "warn", "error", "debug"]) {
-                    const level = method === "error" ? "error" : method === "warn" ? "warn" : "info";
-                    sc[method] = (...args: any[]) => {
-                        try {
-                            (console as any)[method](...args);
-                        } catch {}
-                        const m = `console.log: ${args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")}`;
-                        try {
-                            chrome.runtime.sendMessage({ type: "debugLog", entry: { at: Date.now(), src: h.name, msg: m, level } }, () => void chrome.runtime.lastError);
-                        } catch {}
-                    };
-                }
-                const consoleProxy = new Proxy(sc, { get: (t, k) => (k in t ? t[k as any] : (console as any)[k]) });
+                // calls go to the extension LOG, not the page console
+                const consoleProxy = makeScriptConsole((level, source, text) => scriptLog(h.scriptId, level, scriptLogLine(h.name, source, text)));
                 // page-side require over the shipped library sources
                 const libModules = new Map<string, any>();
                 const normSpec = (spec: string) =>
@@ -206,7 +197,7 @@ import { formatScriptError } from "../shared/scriptError";
                 const moduleObj = { exports: {} as any };
                 new Function("res", "console", "require", "module", "exports", `"use strict";\n${h.src}`)(shim, consoleProxy, requireLib, moduleObj, moduleObj.exports);
             } catch (e: any) {
-                dlog(formatScriptError(h.name, e, "onDom compile (isolated)"));
+                scriptLog(h.scriptId, "error", formatScriptError(h.name, e, "onDom compile (isolated world)"));
                 continue;
             }
             if (!store.onDom) continue;
@@ -214,7 +205,7 @@ import { formatScriptError } from "../shared/scriptError";
                 try {
                     store.onDom({ url: location.href, method: "GET", tabUrl: location.href });
                 } catch (e: any) {
-                    dlog(formatScriptError(h.name, e, "onDom"));
+                    scriptLog(h.scriptId, "error", formatScriptError(h.name, e, "onDom"));
                 }
             };
             if (hot || h.when === "document_start") {
@@ -263,7 +254,7 @@ import { formatScriptError } from "../shared/scriptError";
     }
 
     async function init(): Promise<void> {
-        dlog("init", { href: location.href, readyState: document.readyState });
+        dlog("debug", "bridge ready", { href: location.href, readyState: document.readyState });
         injectHook();
     }
 
