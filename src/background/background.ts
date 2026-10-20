@@ -81,11 +81,11 @@ chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
     if (msg && msg.type === "folderSyncAdopt") {
         // handle was stored to IndexedDB by the sender (handles can't cross
         // runtime messaging — JSON only)
-        folderSync.startFromStoredHandle().then((ok) => sendResponse({ ok })).catch((e) => sendResponse({ ok: false, error: String(e) }));
+        folderSync.startFromStoredHandle({ fresh: !!msg.fresh }).then((ok) => sendResponse({ ok })).catch((e) => sendResponse({ ok: false, error: String(e) }));
         return true;
     }
     if (msg && msg.type === "folderSyncStart") {
-        folderSync.startFromStoredHandle().then((ok) => sendResponse({ ok })).catch((e) => sendResponse({ ok: false, error: String(e) }));
+        folderSync.startFromStoredHandle({ fresh: !!msg.fresh }).then((ok) => sendResponse({ ok })).catch((e) => sendResponse({ ok: false, error: String(e) }));
         return true;
     }
     if (msg && msg.type === "folderSyncStop") {

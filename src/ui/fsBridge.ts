@@ -58,7 +58,7 @@ export function sendRaw(msg: any): Promise<any> {
 export async function adoptForWatch(handle: any): Promise<boolean> {
     await saveHandle(handle);
     return new Promise((resolve) => {
-        chrome.runtime.sendMessage({ type: "folderSyncAdopt" }, (r: any) => resolve(!!(r && r.ok)));
+        chrome.runtime.sendMessage({ type: "folderSyncAdopt", fresh: true }, (r: any) => resolve(!!(r && r.ok)));
     });
 }
 
@@ -69,7 +69,7 @@ export async function openFolder(
     void handlers;
     const dirHandle = await (window as any).showDirectoryPicker({ mode: "readwrite" } as any);
     await saveHandle(dirHandle);
-    const started = await sendRaw({ type: "folderSyncStart" });
+    const started = await sendRaw({ type: "folderSyncStart", fresh: true });
     if (!started || !started.ok) {
         await clearSavedHandle();
         throw new Error("folder sync could not start in the background (see the extension logs)");

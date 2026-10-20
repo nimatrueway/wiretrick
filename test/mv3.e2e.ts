@@ -438,6 +438,18 @@ try {
     await fPage.waitForTimeout(2500);
     const flist = await fPage.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "listScripts" }, r)));
     check("MV3 folder sync: external .ts file became a script", (flist as any[]).some((s) => s.meta?.name === "imported-sync"), JSON.stringify((flist as any[]).map((s) => s.meta?.name)));
+
+    // the SW gets reaped (idle, sleep, update): a file copied in while it is
+    // down must still be imported once it restarts (it used to be absorbed)
+    const swCdp = await ctx.newCDPSession(fPage);
+    await swCdp.send("ServiceWorker.enable");
+    await swCdp.send("ServiceWorker.stopAllWorkers");
+    await fPage.waitForTimeout(500);
+    await opfsWrite("while-asleep.ts", 'res.declareScript({ match: ["*://asleep.invalid/*"] });\n');
+    await fPage.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "folderSyncStatus" }, r))); // wakes the SW
+    await fPage.waitForTimeout(2500);
+    const flist2 = await fPage.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "listScripts" }, r)));
+    check("MV3 folder sync: file copied in while the SW was stopped is imported after restart", (flist2 as any[]).some((s) => s.meta?.name === "while-asleep"), JSON.stringify((flist2 as any[]).map((s) => s.meta?.name)));
     await fPage.close();
 } catch (e) {
     failed++;

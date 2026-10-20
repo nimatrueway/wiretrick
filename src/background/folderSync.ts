@@ -53,6 +53,39 @@ async function refreshKnown(): Promise<void> {
     const { seen, aliases } = await scanFolder();
     known = seen;
     realNameOf = aliases;
+    await persistKnown();
+}
+
+// ---- persisted folder snapshot ----
+// The MV3 service worker can be stopped at any time (idle reaping, browser
+// sleep, extension update). Without a persisted snapshot a restarted worker
+// would rebuild `known` from the CURRENT folder and silently absorb every
+// file added/changed/removed while it was down. Persisting it lets the
+// first poll after a restart diff against what was last applied.
+const KNOWN_KEY = "folderSyncKnown";
+
+function storageLocal(): chrome.storage.LocalStorageArea | null {
+    return typeof chrome !== "undefined" && chrome.storage?.local ? chrome.storage.local : null;
+}
+
+async function persistKnown(): Promise<void> {
+    const area = storageLocal();
+    if (!area) return;
+    await new Promise<void>((r) => area.set({ [KNOWN_KEY]: Object.fromEntries(known) }, () => r()));
+}
+
+async function loadPersistedKnown(): Promise<Map<string, FileSig> | null> {
+    const area = storageLocal();
+    if (!area) return null;
+    const obj: any = await new Promise((r) => area.get(KNOWN_KEY, r));
+    const files = obj?.[KNOWN_KEY];
+    return files && typeof files === "object" ? new Map(Object.entries(files) as [string, FileSig][]) : null;
+}
+
+async function clearPersistedKnown(): Promise<void> {
+    const area = storageLocal();
+    if (!area?.remove) return;
+    await new Promise<void>((r) => area.remove(KNOWN_KEY, () => r()));
 }
 
 /**
@@ -93,7 +126,7 @@ async function migrateLegacy(fileName: string, content: string): Promise<void> {
     await writeBack(fileName, content);
     try {
         await dirHandle.removeEntry(real);
-        dlogLevel("sync", "info", "legacy file migrated", { from: real, to: fileName });
+        dlogLevel("sync", "info", `Folder sync: migrated legacy "${real}" → "${fileName}"`);
     } catch {}
     realNameOf.delete(fileName);
 }
@@ -118,7 +151,11 @@ function displayNameFromFile(fileName: string): string {
 }
 
 async function applyEvents(events: ReturnType<typeof computeEvents>): Promise<void> {
-    const { changed, added, removed, rename } = events;
+    const { changed, added, removed } = events;
+    let rename = events.rename;
+    // the add+remove pair is only a rename when the vanished file belonged
+    // to a script; otherwise it's an unrelated delete plus a new file
+    if (rename && !(await findScriptByFile(rename.oldName))) rename = null;
 
     for (const fileName of changed) {
         if (rename && fileName === rename.oldName) continue;
@@ -131,7 +168,7 @@ async function applyEvents(events: ReturnType<typeof computeEvents>): Promise<vo
         if (!target) continue;
         await saveScript({ id: target.id, code: text, name: target.meta.name });
         await migrateLegacy(fileName, text);
-        dlogLevel("sync", "info", "external change applied", { file: fileName, script: target.meta.name });
+        dlogLevel("sync", "info", `Folder sync: "${fileName}" changed on disk — script "${target.meta.name}" updated`);
         broadcastToUi({ type: "scriptsChanged", source: "folder", file: fileName } as any);
     }
 
@@ -145,14 +182,22 @@ async function applyEvents(events: ReturnType<typeof computeEvents>): Promise<vo
         const existing = await findScriptByFile(fileName);
         const code = text;
         if (existing) {
-            // canonical appeared for a known script (e.g. manager wrote the
-            // new .script.ts name) — content already matches; just migrate
+            // a file for an existing script appeared (manager wrote the
+            // canonical name, or the user copied a file over it) — apply
+            // its content if it differs, then migrate any legacy alias
+            if (existing.code !== code) {
+                await saveScript({ id: existing.id, code, name: existing.meta.name });
+                dlogLevel("sync", "info", `Folder sync: "${fileName}" replaced script "${existing.meta.name}"`);
+                broadcastToUi({ type: "scriptsChanged", source: "folder", file: fileName } as any);
+            }
             await migrateLegacy(fileName, code);
             continue;
         }
-        await saveScript({ id: newId(), code, name: displayNameFromFile(fileName) });
+        const name = displayNameFromFile(fileName);
+        await saveScript({ id: newId(), code, name });
         await migrateLegacy(fileName, code);
-        dlogLevel("sync", "info", "external file added → script created", { file: fileName });
+        await adoptCanonicalName(fileName, name, code);
+        dlogLevel("sync", "info", `Folder sync: new file "${fileName}" imported as script "${name}"`);
         broadcastToUi({ type: "scriptsChanged", source: "folder", file: fileName } as any);
     }
 
@@ -162,7 +207,7 @@ async function applyEvents(events: ReturnType<typeof computeEvents>): Promise<vo
         const target = await findScriptByFile(fileName);
         if (!target) continue;
         await deleteScript(target.id);
-        dlogLevel("sync", "info", "external delete → script removed", { file: fileName });
+        dlogLevel("sync", "info", `Folder sync: "${fileName}" deleted on disk — script "${target.meta.name}" removed`);
         broadcastToUi({ type: "scriptsChanged", source: "folder", file: fileName } as any);
     }
 
@@ -173,12 +218,36 @@ async function applyEvents(events: ReturnType<typeof computeEvents>): Promise<vo
         } else {
             const target = await findScriptByFile(rename.oldName);
             if (target) {
-                await saveScript({ id: target.id, code: text, name: displayNameFromFile(rename.newName) });
-                dlogLevel("sync", "info", "external rename applied", { from: rename.oldName, to: rename.newName });
+                const name = displayNameFromFile(rename.newName);
+                await saveScript({ id: target.id, code: text, name });
+                await adoptCanonicalName(rename.newName, name, text);
+                dlogLevel("sync", "info", `Folder sync: "${rename.oldName}" renamed to "${rename.newName}" — script renamed to "${name}"`);
                 broadcastToUi({ type: "scriptsChanged", source: "folder", file: rename.newName } as any);
             }
         }
     }
+}
+
+/**
+ * A file whose name doesn't round-trip through the script name (e.g.
+ * "my script (copy).ts" → script "my script (copy)" → "my_script_copy_.ts")
+ * would never match its script again, so later edits/deletes of it would be
+ * ignored. Rename it on disk to the canonical name the manager also uses.
+ */
+async function adoptCanonicalName(fileName: string, scriptName: string, code: string): Promise<void> {
+    const canonical = canonicalFileName(scriptName);
+    if (canonical === fileName || realNameOf.has(fileName)) return;
+    await writeBack(canonical, code);
+    try {
+        await dirHandle.removeEntry(fileName);
+    } catch {}
+    try {
+        const f = await (await dirHandle.getFileHandle(canonical)).getFile();
+        known.delete(fileName);
+        known.set(canonical, { lastModified: f.lastModified, size: f.size });
+        lastWritten.delete(canonical);
+    } catch {}
+    dlogLevel("sync", "info", `Folder sync: renamed "${fileName}" → "${canonical}" to match its script name`);
 }
 
 // ---- settings.yaml: canonical text generated from storage ----
@@ -208,7 +277,7 @@ async function exportSettings(): Promise<void> {
         }
         await ensureSchemaFile();
     } catch (e: any) {
-        dlogLevel("sync", "warn", "settings export failed", { error: e.message || e });
+        dlogLevel("sync", "warn", `Folder sync: writing ${SETTINGS_FILE} failed: ${e?.message || e}`);
     }
 }
 
@@ -238,15 +307,19 @@ async function pollSettings(): Promise<void> {
     settingsSig = f.sig;
     const { error } = await applySettingsText(f.text);
     if (error) {
-        dlogLevel("sync", "warn", "settings.yaml parse error — ignored", { error });
+        dlogLevel("sync", "warn", `Folder sync: ${SETTINGS_FILE} has an error and was not applied: ${error}`);
         return;
     }
-    dlogLevel("sync", "info", "settings.yaml applied");
+    dlogLevel("sync", "info", `Folder sync: ${SETTINGS_FILE} changed on disk — settings applied`);
     await exportSettings();
 }
 
+let polling = false;
+let lastPollError = "";
+
 async function pollOnce(): Promise<void> {
-    if (!dirHandle) return;
+    if (!dirHandle || polling) return;
+    polling = true;
     try {
         await pollSettings();
         const { seen, aliases } = await scanFolder();
@@ -254,9 +327,32 @@ async function pollOnce(): Promise<void> {
         known = seen;
         realNameOf = aliases;
         await applyEvents(events);
+        if (events.changed.length || events.added.length || events.removed.length) await persistKnown();
+        lastPollError = "";
     } catch (e: any) {
-        dlogLevel("sync", "warn", "poll failed", { error: e.message || e });
+        if (e?.name === "NotAllowedError" || e?.name === "SecurityError") {
+            pause(`Folder sync paused: lost access to "${displayPath}" — open the manager and click the folder button to re-grant`);
+        } else {
+            const msg = String(e?.message || e);
+            // the same failure repeats every second; report it once
+            if (msg !== lastPollError) dlogLevel("sync", "warn", `Folder sync: scanning "${displayPath}" failed: ${msg}`);
+            lastPollError = msg;
+        }
+    } finally {
+        polling = false;
     }
+}
+
+/** stop watching but keep the saved handle so the manager can re-grant */
+function pause(reason: string): void {
+    if (timer) clearInterval(timer);
+    timer = null;
+    dirHandle = null;
+    stopKeepAlive();
+    const alarms = alarmsApi();
+    if (__MV3__ && alarms) alarms.clear(SYNC_ALARM);
+    broadcastStatus();
+    dlogLevel("sync", "warn", reason);
 }
 
 function startPolling(): void {
@@ -307,13 +403,30 @@ async function ensureSyncAlarm(): Promise<void> {
     alarms.create(SYNC_ALARM, { periodInMinutes: 0.5 });
 }
 
-/** Manager picked a folder (handle already stored to IDB by the manager). */
-export async function startFromStoredHandle(): Promise<boolean> {
+/**
+ * Start watching the handle stored in IDB.
+ * fresh: the user just picked this folder — snapshot it as-is. Otherwise
+ * this is a resume (worker restart, permission re-grant): diff against the
+ * persisted snapshot so changes made while not watching are applied.
+ */
+export async function startFromStoredHandle(opts: { fresh?: boolean } = {}): Promise<boolean> {
     const handle = await loadSavedHandle();
     if (!handle) return false;
+    const resumingSame = !opts.fresh && dirHandle !== null && timer !== null;
     dirHandle = handle;
     displayPath = await describeHandle(handle);
-    await refreshKnown();
+    lastPollError = "";
+    if (opts.fresh) {
+        await refreshKnown();
+    } else if (!resumingSame) {
+        const persisted = await loadPersistedKnown();
+        if (persisted) {
+            known = persisted;
+            await pollOnce(); // catch up on changes made while not watching
+        } else {
+            await refreshKnown();
+        }
+    }
     startPolling();
     startKeepAlive();
     void ensureSyncAlarm();
@@ -327,7 +440,7 @@ export async function startFromStoredHandle(): Promise<boolean> {
     settingsSig = null;
     void ((await readSettingsFile()) ? pollSettings() : exportSettings());
     broadcastStatus();
-    dlogLevel("sync", "info", "watching scripts folder", { path: displayPath });
+    dlogLevel("sync", "info", `Folder sync: watching "${displayPath}"`);
     return true;
 }
 
@@ -342,7 +455,7 @@ export async function writeBack(fileName: string, content: string): Promise<void
         await w.close();
     } catch (e: any) {
         lastWritten.delete(fileName);
-        dlogLevel("sync", "warn", "writeBack failed", { file: fileName, error: e.message || e });
+        dlogLevel("sync", "warn", `Folder sync: writing "${fileName}" failed: ${e?.message || e}`);
     }
 }
 
@@ -368,6 +481,8 @@ export async function stop(): Promise<void> {
     displayPath = "";
     settingsSig = null;
     lastWritten.clear();
+    known = new Map();
+    await clearPersistedKnown();
     stopKeepAlive();
     const alarms = alarmsApi();
     if (__MV3__ && alarms) alarms.clear(SYNC_ALARM);
@@ -386,17 +501,18 @@ export async function initFromStorage(): Promise<void> {
     try {
         const perm = await handle.queryPermission({ mode: "readwrite" });
         if (perm !== "granted") {
-            dlogLevel("sync", "info", "saved folder needs re-grant (browser restart)");
+            dlogLevel("sync", "warn", `Folder sync paused: the browser needs permission for "${handle.name}" again — open the manager and click the folder button to re-grant`);
+            broadcastStatus();
             return;
         }
         await startFromStoredHandle();
     } catch (e: any) {
-        dlogLevel("sync", "warn", "init failed", { error: e.message || e });
+        dlogLevel("sync", "warn", `Folder sync could not resume: ${e?.message || e}`);
     }
 }
 
 /** Test/e2e seam: adopt an arbitrary directory handle (e.g. OPFS). */
 export async function adoptHandle(handle: any): Promise<void> {
     await saveHandle(handle);
-    await startFromStoredHandle();
+    await startFromStoredHandle({ fresh: true });
 }
