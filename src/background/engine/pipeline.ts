@@ -17,11 +17,12 @@ import { dlogLevel } from "../../shared/debugLog";
 import { isThenable, toRunnableJs } from "../../shared/compile";
 import "../../shared/transpile";
 void toRunnableJs;
-import { log } from "./logs";
+import { log, getScriptErrors } from "./logs";
 import { serializeHandlers, type HandlerSources } from "../../shared/compile";
 import { resolveParamValues } from "../../shared/scriptDef";
 import { unknownStrategies } from "../../shared/metaParser";
 import { analyzeScripts, runBodyOp } from "../compileHost";
+import { recordNetBody } from "../network";
 
 const FILTER: chrome.webRequest.RequestFilter = { urls: ["<all_urls>"] };
 
@@ -277,7 +278,7 @@ export function createPipeline(
     }
 
     // ---- manager protocol ----
-    chrome.runtime.onMessage.addListener((msg: any, _sender, sendResponse) => {
+    chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
         if (msg && msg.type === "listScripts") {
             listScripts().then(async (scripts) => {
                 // scripts saved before declareScript existed have no stored
@@ -285,10 +286,13 @@ export function createPipeline(
                 // only need declarations here) so the UI can offer ⚙
                 const missing = scripts.filter((s) => s.paramDefs === undefined);
                 const analyzed = await analyzeScripts(missing.map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt })));
+                const errors = await getScriptErrors();
                 sendResponse(
-                    scripts.map((s) =>
-                        s.paramDefs === undefined ? { ...s, paramDefs: analyzed.get(s.id)?.paramDefs || {} } : s
-                    )
+                    scripts.map((s) => ({
+                        ...s,
+                        paramDefs: s.paramDefs === undefined ? analyzed.get(s.id)?.paramDefs || {} : s.paramDefs,
+                        runtimeError: errors.get(s.id) ?? null,
+                    }))
                 );
             });
             return true;
@@ -425,19 +429,33 @@ export function createPipeline(
             scriptStorageSet(msg.scriptId, msg.key, msg.value).then(() => sendResponse({}));
             return true;
         }
+        // hook tier (page fetch/XHR) — bodies recorded for the Network tab
         if (msg && msg.type === "runRequestDecision") {
             dlogLevel("pipeline", "debug", `runRequestDecision ${msg.url}`);
-            chromeBody.runRequestDecision(msg.url, msg.method || "GET").then((r) => sendResponse(r || null));
+            const tabId = sender?.tab?.id ?? -1;
+            const method = msg.method || "GET";
+            chromeBody.runRequestDecision(msg.url, method, tabId).then((r) => {
+                if (r?.kind === "respond") recordNetBody({ tabId, url: msg.url, method, modified: r.content, mime: r.mime, status: r.status || 200 });
+                sendResponse(r || null);
+            });
             return true;
         }
         if (msg && msg.type === "runTransform") {
-            chromeBody
-                .runTransform(msg.url, msg.method || "GET", msg.body || "", { status: msg.status, contentType: msg.contentType })
-                .then((body) => sendResponse({ body }));
+            const tabId = sender?.tab?.id ?? -1;
+            const method = msg.method || "GET";
+            chromeBody.runTransform(msg.url, method, msg.body || "", { status: msg.status, contentType: msg.contentType }, tabId).then((body) => {
+                recordNetBody({ tabId, url: msg.url, method, original: msg.body ?? "", modified: body });
+                sendResponse({ body });
+            });
             return true;
         }
         if (msg && msg.type === "runReplace") {
-            chromeBody.runReplace(msg.url, msg.method || "GET").then((r) => sendResponse(r || { content: null }));
+            const tabId = sender?.tab?.id ?? -1;
+            const method = msg.method || "GET";
+            chromeBody.runReplace(msg.url, method, tabId).then((r) => {
+                if (r) recordNetBody({ tabId, url: msg.url, method, modified: r.content, mime: r.mime, status: 200 });
+                sendResponse(r || { content: null });
+            });
             return true;
         }
         return false;

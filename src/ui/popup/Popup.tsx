@@ -2,6 +2,7 @@
  * Browser-action popup: list scripts, toggle them, edit their parameters
  * inline, open the full manager on a specific script.
  */
+import { scriptHealth } from "../../shared/scriptHealth";
 import { useEffect, useState } from "preact/hooks";
 import { Switch } from "../components/Switch";
 import { ParamField } from "../components/ParamField";
@@ -22,7 +23,7 @@ export function Popup({ api }: { api: PopupApi }) {
     };
     useEffect(() => void refresh(), []);
 
-    // libraries (no res.declareScript) never appear in the popup — they're
+    // libraries (no wt.declareScript) never appear in the popup — they're
     // inert on their own and only imported by other scripts
     const visible = load.state === "ready" ? load.scripts.filter((s) => s.meta.declared !== false) : [];
 
@@ -51,6 +52,7 @@ export function Popup({ api }: { api: PopupApi }) {
 function ScriptRow({ script, api, onChanged }: { script: ScriptInfo; api: PopupApi; onChanged: () => void }) {
     const [open, setOpen] = useState(false);
     const hasParams = !!script.paramDefs && Object.keys(script.paramDefs).length > 0;
+    const health = scriptHealth(script);
     return (
         <>
             <li class="script-item">
@@ -62,9 +64,25 @@ function ScriptRow({ script, api, onChanged }: { script: ScriptInfo; api: PopupA
                         onChanged();
                     }}
                 />
-                <span class={script.error ? "script-name error" : "script-name"} title={script.error || ""}>
-                    {script.meta.name}
-                </span>
+                <span class={health ? "script-name error" : "script-name"}>{script.meta.name}</span>
+                {health && (
+                    <span
+                        class={`err-ind ${health.kind}`}
+                        role="img"
+                        aria-label={health.kind === "compile" ? "compile error" : "runtime error"}
+                        title={health.tooltip}
+                        onClick={
+                            health.kind === "runtime"
+                                ? async () => {
+                                      await api.clearError(script.id);
+                                      onChanged();
+                                  }
+                                : undefined
+                        }
+                    >
+                        ⚠
+                    </span>
+                )}
                 <button class="btn-icon" title="Open in full manager" aria-label="Edit" onClick={() => api.openManager(script.id)}>
                     <IconPen />
                 </button>

@@ -16,6 +16,7 @@ import { scriptStorageGet, scriptStorageSet } from "../scriptStore";
 import { dlogLevel } from "../../../shared/debugLog";
 import { debuggerAttach, debuggerSend, debuggerDetach, debuggerGetTargets, type Debuggee } from "../../../shared/chromeApi";
 import { analyzeScripts, runBodyOp } from "../../compileHost";
+import { recordNetBody } from "../../network";
 import { isProcessOwned } from "./processState";
 
 interface CdpScript {
@@ -556,6 +557,7 @@ export class CdpStrategy {
                                 body,
                             });
                             log(tabId, `[${s.name}] onRequest → respond ${r.status || 200} ${r.mime || "application/json"} (debugger tier) ${url}`, "info", s.scriptId);
+                            recordNetBody({ tabId, url, method: request.method, modified: base64ToBytes(body), mime: r.mime || "application/json", status: r.status || 200 });
                         } catch (e: any) {
                             log(tabId, `[${s.name}] onRequest → respond ${r.status || 200} FAILED: ${e.message || e} — request continues unmodified`, "error", s.scriptId);
                             try {
@@ -647,6 +649,7 @@ export class CdpStrategy {
             // textual bodies are handed to transforms as strings — most
             // transforms are string-oriented; binary stays bytes
             let body: string | Uint8Array = looksTextual(bytes) ? new TextDecoder().decode(bytes) : bytes;
+            const originalBody = body;
 
             // async replaceResponse: first non-null result fulfills the body
             replaceOuter: for (const s of cdpScripts) {
@@ -706,6 +709,7 @@ export class CdpStrategy {
 
             const outBytes = typeof body === "string" ? new TextEncoder().encode(body) : body;
             dlogLevel("cdp", "debug", "fulfilling", { url, outLen: outBytes.length });
+            recordNetBody({ tabId, url, method: request.method, original: originalBody, modified: body === originalBody ? null : body });
             await debuggerSend(this.debuggeeOf(key), "Fetch.fulfillRequest", {
                 requestId,
                 responseCode: params.responseStatusCode,
@@ -747,10 +751,11 @@ export class CdpStrategy {
                 const scripts = this.matchingScripts(url).filter((s) => s.onRequest);
                 if (!scripts.length) return void (await cont());
                 const onlyIds = scripts.map((s) => s.scriptId);
-                const decision = await runBodyOp(this.mv3Plain as any, this.mv3Params, "requestDecision", { url, method, resourceType, requestHeaders, onlyIds });
+                const decision = await runBodyOp(this.mv3Plain as any, this.mv3Params, "requestDecision", { url, method, resourceType, requestHeaders, onlyIds, tabId });
                 dlogLevel("cdp", "debug", "MV3 request decision", { url, resourceType, kind: decision?.kind ?? "none" });
                 if (!decision) return void (await cont());
                 if (decision.kind === "respond") {
+                    recordNetBody({ tabId, url, method, modified: decision.content ?? "", mime: decision.mime, status: decision.status || 200 });
                     const headers = [
                         { name: "content-type", value: decision.mime || "application/octet-stream" },
                         ...Object.entries(decision.headers || {}).map(([name, value]) => ({ name, value: String(value) })),
@@ -803,6 +808,7 @@ export class CdpStrategy {
                       status,
                       responseHeaders: originalHeaders,
                       onlyIds: headerScripts.map((s) => s.scriptId),
+                      tabId,
                   })
                 : null;
             const baseHeaders = headerMods
@@ -820,7 +826,7 @@ export class CdpStrategy {
             const contentType = headerContentType(baseHeaders);
             let body: string | null = null;
             let mime: string | undefined;
-            const replaced = await runBodyOp(this.mv3Plain as any, this.mv3Params, "replace", { url, method, resourceType, requestHeaders, onlyIds });
+            const replaced = await runBodyOp(this.mv3Plain as any, this.mv3Params, "replace", { url, method, resourceType, requestHeaders, onlyIds, tabId });
             if (replaced) {
                 body = replaced.content;
                 mime = replaced.mime;
@@ -833,9 +839,10 @@ export class CdpStrategy {
                 else dlogLevel("cdp", "debug", "MV3: binary body — modifyResponse skipped", { url, len: bytes.length });
             }
             if (input !== null) {
-                const out = await runBodyOp(this.mv3Plain as any, this.mv3Params, "transform", { url, method, resourceType, requestHeaders, body: input, contentType, status, onlyIds });
+                const out = await runBodyOp(this.mv3Plain as any, this.mv3Params, "transform", { url, method, resourceType, requestHeaders, body: input, contentType, status, onlyIds, tabId });
                 if (out !== null && out !== undefined) body = out;
             }
+            recordNetBody({ tabId, url, method, original: replaced ? null : input, modified: body === input && !replaced ? null : body, mime });
             if (body === null || (body === input && !replaced)) {
                 dlogLevel("cdp", "debug", "MV3: no handler changed the body → continue", { url });
                 return void (await continueWithHeaders());

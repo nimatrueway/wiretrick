@@ -21,6 +21,7 @@ import type { Script } from "../scriptStore";
 import { scriptStorageGet, scriptStorageSet } from "../scriptStore";
 import { log } from "../logs";
 import { analyzeScripts, evalProxyDecision, runBodyOp } from "../../compileHost";
+import { recordNetBody } from "../../network";
 import { ProcessRouting } from "../../processRouting";
 import { listsProcess, setProcessActive } from "./processState";
 
@@ -495,6 +496,7 @@ export class ProcessStrategy {
         const args = { url: m.url, method: m.method, tabId: c.tabId, resourceType: c.type, tabUrl: c.tabUrl, requestHeaders: pairsToObject(m.headers) };
         const dec = await this.run("requestDecision", args);
         if (dec?.kind === "respond") {
+            recordNetBody({ tabId: c.tabId, url: m.url, method: m.method, modified: dec.content, mime: dec.mime, status: dec.status || 200 });
             const headers: Pairs = [["content-type", dec.mime]];
             for (const [k, v] of Object.entries(dec.headers || {})) headers.push([k, String(v)]);
             this.send({ t: "fulfill", id: m.id, status: dec.status || 200, headers: withNoStore(headers), body: bytesToBase64(new TextEncoder().encode(dec.content)) });
@@ -511,6 +513,7 @@ export class ProcessStrategy {
         // replaceResponse runs here: no upstream round-trip for a replaced body
         const rep = await this.run("replace", { ...args });
         if (rep) {
+            recordNetBody({ tabId: c.tabId, url: m.url, method: m.method, modified: rep.content, mime: rep.mime, status: 200 });
             this.send({ t: "fulfill", id: m.id, status: 200, headers: withNoStore([["content-type", rep.mime]]), body: bytesToBase64(new TextEncoder().encode(rep.content)) });
             return;
         }
@@ -551,6 +554,7 @@ export class ProcessStrategy {
             } else {
                 dlogLevel("process", "debug", `binary body skipped for modifyResponse (MV3 passes text only): ${m.url}`);
             }
+            recordNetBody({ tabId: c.tabId, url: m.url, method: m.method, original: bytes, modified: out });
             if (out !== null && out !== undefined) {
                 this.send({ t: "fulfill", id: m.id, status: m.status, headers: withNoStore(headers), body: bytesToBase64(new TextEncoder().encode(out)) });
                 return;

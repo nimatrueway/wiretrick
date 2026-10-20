@@ -68,7 +68,10 @@ body.resizing * { pointer-events: none; }
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-.script-name.error::after { content: " ⚠"; }
+.script-name.error { color: #f48771; }
+.err-ind { color: #f48771; font-size: 12px; padding: 0 2px; cursor: help; flex-shrink: 0; }
+.err-ind.runtime { color: #dcdcaa; cursor: pointer; }
+.err-ind.runtime:hover { color: #f48771; }
 
 .btn-edit {
     background: none;

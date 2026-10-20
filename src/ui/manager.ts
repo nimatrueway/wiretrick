@@ -13,11 +13,12 @@ import { parseSettings, SETTINGS_FILE, type SettingsDoc } from "../shared/settin
 import { dlogLevel } from "../shared/debugLog";
 import { helperInstallCommand, helperInstallShell } from "../shared/helperInstall";
 import { mountNetworkPanel } from "./network/mount";
+import { scriptHealth, type ScriptHealthInput } from "../shared/scriptHealth";
 import type { Uri, IPosition, IRange, IKeyboardEvent, editor as MonacoEditor } from "monaco-editor";
 import type { Script } from "../background/engine/scriptStore";
 
 // ---- state ----
-let scripts: Script[] = [];
+let scripts: (Script & { runtimeError?: ScriptHealthInput["runtimeError"] })[] = [];
 let selectedId: string | null = null;
 let editor: any = null;
 let dirty = false;
@@ -190,10 +191,12 @@ function renderList(): void {
             toggle = sw;
         }
 
+        const health = scriptHealth(script);
         const name = document.createElement("span");
-        name.className = "script-name";
-        name.textContent = script.meta.name + (script.error ? " ⚠" : "");
-        name.title = script.error || script.meta.match.join(", ");
+        name.className = "script-name" + (health ? " error" : "");
+        name.textContent = script.meta.name;
+        name.title = script.meta.match.join(", ");
+        if (health) li.classList.add("has-error");
 
         const del = document.createElement("button");
         del.className = "btn-del";
@@ -209,7 +212,23 @@ function renderList(): void {
             await refresh();
         });
 
-        li.append(toggle, name, del);
+        li.append(toggle, name);
+        if (health) {
+            const ind = document.createElement("span");
+            ind.className = `err-ind ${health.kind}`;
+            ind.textContent = "⚠";
+            ind.title = health.tooltip;
+            ind.setAttribute("role", "img");
+            ind.setAttribute("aria-label", health.kind === "compile" ? "compile error" : "runtime error");
+            if (health.kind === "runtime") {
+                ind.addEventListener("click", async (e) => {
+                    e.stopPropagation();
+                    await send({ type: "clearScriptError", scriptId: script.id });
+                });
+            }
+            li.append(ind);
+        }
+        li.append(del);
         li.addEventListener("click", () => select(script.id));
         list.appendChild(li);
     }
@@ -399,6 +418,10 @@ function connectLogs(): void {
     port.onMessage.addListener((msg: any) => {
         if (msg.type === "log") appendLog(msg.entry);
         if (msg.type === "processStatus") renderProcessStatus(msg.status);
+        if (msg.type === "scriptErrors") {
+            for (const s of scripts) s.runtimeError = msg.errors[s.id] ?? null;
+            renderList();
+        }
         // background applied an external folder change (or any script
         // change) — refresh list + editor if untouched
         if (msg.type === "scriptsChanged") {

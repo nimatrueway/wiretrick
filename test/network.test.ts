@@ -18,7 +18,7 @@ const ev = (name: string) => ({
     },
 };
 
-const { addNetworkPort, annotateFromLog, __test } = await import("../src/background/network");
+const { addNetworkPort, annotateFromLog, recordNetBody, toNetBody, MAX_BODY, __test } = await import("../src/background/network");
 const { L, entries } = __test;
 
 function fakePort() {
@@ -154,5 +154,54 @@ describe("network recorder", () => {
         expect(entries.size).toBe(0);
         expect(p.sent[p.sent.length - 1]).toEqual({ type: "netCleared" });
         p.disconnect();
+    });
+
+    it("captures request payloads (raw bytes and form data)", () => {
+        const p = fakePort();
+        addNetworkPort(p.port);
+        req("1", "https://a.test/post", { method: "POST", requestBody: { raw: [{ bytes: new TextEncoder().encode('{"a":1}').buffer }] } });
+        req("2", "https://a.test/form", { method: "POST", requestBody: { formData: { q: ["x y"], n: ["1"] } } });
+        expect(entries.get("1")!.requestBody).toMatchObject({ text: '{"a":1}', size: 7, binary: false });
+        expect(entries.get("2")!.requestBody!.text).toBe("q=x%20y&n=1");
+        p.disconnect();
+    });
+
+    it("records original + modified bodies on the matching request", () => {
+        const p = fakePort();
+        addNetworkPort(p.port);
+        req("1", "https://a.test/todos/1");
+        recordNetBody({ tabId: -1, url: "https://a.test/todos/1", method: "GET", original: new TextEncoder().encode('{"x":1}'), modified: '{"x":2}' });
+        const e = entries.get("1")!;
+        expect(e.responseBody!.text).toBe('{"x":2}');
+        expect(e.originalResponseBody!.text).toBe('{"x":1}');
+        // unmodified: the body alone
+        req("2", "https://a.test/plain");
+        recordNetBody({ tabId: 7, url: "https://a.test/plain", original: "hello", modified: null });
+        expect(entries.get("2")!.responseBody!.text).toBe("hello");
+        expect(entries.get("2")!.originalResponseBody).toBeUndefined();
+        p.disconnect();
+    });
+
+    it("a script-served response becomes a synthetic row in the right tab", () => {
+        const p = fakePort();
+        addNetworkPort(p.port);
+        annotateFromLog(-1, "s1", "[Mock] onRequest → respond 200 https://a.test/mocked", "info");
+        recordNetBody({ tabId: 9, url: "https://a.test/mocked", method: "POST", modified: "{}", mime: "application/json", status: 201 });
+        expect(entries.size).toBe(1);
+        const [e] = [...entries.values()];
+        // the unknown-tab annotation and the tab-aware body land on one row
+        expect(e).toMatchObject({ synthetic: true, tabId: 9, method: "POST", mime: "application/json", status: 201 });
+        expect(e.interventions).toHaveLength(1);
+        expect(e.responseBody!.text).toBe("{}");
+        p.disconnect();
+    });
+
+    it("caps big bodies and marks binary ones", () => {
+        const big = toNetBody("x".repeat(MAX_BODY + 10))!;
+        expect(big.truncated).toBe(true);
+        expect(big.text.length).toBe(MAX_BODY);
+        expect(big.size).toBe(MAX_BODY + 10);
+        expect(toNetBody(new Uint8Array([1, 0, 2]))).toMatchObject({ binary: true, size: 3 });
+        expect(toNetBody(null)).toBeUndefined();
     });
 });

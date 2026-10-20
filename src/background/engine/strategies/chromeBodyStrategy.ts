@@ -107,10 +107,11 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
      */
     async runRequestDecision(
         url: string,
-        method: string
+        method: string,
+        tabId = -1
     ): Promise<{ kind: "respond"; mime: string; content: string; status?: number; headers?: any } | { kind: "redirect"; url: string } | { kind: "cancel" } | { kind: "headers"; changes: any } | null> {
         if (__MV3__) {
-            return runBodyOp(this.mv3Scripts, this.mv3Params, "requestDecision", { url, method });
+            return runBodyOp(this.mv3Scripts, this.mv3Params, "requestDecision", { url, method, tabId });
         }
         let headerMods: any = null;
         for (const s of this.matchingBodyScripts(url)) {
@@ -122,7 +123,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
                     const r = (result as any).respond;
                     const mime = r.mime || guessMimeFromUrl(url);
                     const content = serializeRespondBody(r.body);
-                    log(-1, `[${s.name}] onRequest → respond ${r.status || 200} ${mime} (${content.length}b) ${url}`, "info", s.scriptId);
+                    log(tabId, `[${s.name}] onRequest → respond ${r.status || 200} ${mime} (${content.length}b) ${url}`, "info", s.scriptId);
                     return {
                         kind: "respond",
                         mime,
@@ -132,22 +133,22 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
                     };
                 }
                 if (result.redirect) {
-                    log(-1, `[${s.name}] onRequest → redirect → ${result.redirect} ${url}`, "info", s.scriptId);
+                    log(tabId, `[${s.name}] onRequest → redirect → ${result.redirect} ${url}`, "info", s.scriptId);
                     return { kind: "redirect", url: result.redirect };
                 }
                 if (result.cancel) {
-                    log(-1, `[${s.name}] onRequest → cancel ${url}`, "info", s.scriptId);
+                    log(tabId, `[${s.name}] onRequest → cancel ${url}`, "info", s.scriptId);
                     return { kind: "cancel" };
                 }
                 if (result.headers && ((result.headers.set && Object.keys(result.headers.set).length) || (result.headers.remove && result.headers.remove.length))) {
                     const parts: string[] = [];
                     if (result.headers.set && Object.keys(result.headers.set).length) parts.push(`set ${Object.keys(result.headers.set).join(", ")}`);
                     if (result.headers.remove && result.headers.remove.length) parts.push(`remove ${result.headers.remove.join(", ")}`);
-                    log(-1, `[${s.name}] onRequest → request headers (${parts.join("; ")}) ${url}`, "info", s.scriptId);
+                    log(tabId, `[${s.name}] onRequest → request headers (${parts.join("; ")}) ${url}`, "info", s.scriptId);
                     headerMods = { set: { ...(headerMods?.set || {}), ...(result.headers.set || {}) }, remove: [...(headerMods?.remove || []), ...(result.headers.remove || [])] };
                 }
             } catch (e: any) {
-                log(-1, formatScriptError(s.name, e, "onRequest"), "error", s.scriptId);
+                log(tabId, formatScriptError(s.name, e, "onRequest"), "error", s.scriptId);
             }
             }
         }
@@ -155,9 +156,9 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
     }
 
     /** Hook tier: chained modifyResponse over the body (async handlers awaited). */
-    async runTransform(url: string, method: string, body: string, extra?: { status?: number; contentType?: string }): Promise<string | null> {
+    async runTransform(url: string, method: string, body: string, extra?: { status?: number; contentType?: string }, tabId = -1): Promise<string | null> {
         if (__MV3__) {
-            return runBodyOp(this.mv3Scripts, this.mv3Params, "transform", { url, method, body, status: extra?.status, contentType: extra?.contentType });
+            return runBodyOp(this.mv3Scripts, this.mv3Params, "transform", { url, method, body, status: extra?.status, contentType: extra?.contentType, tabId });
         }
         let out: string | Uint8Array = body;
         let touched = false;
@@ -176,12 +177,12 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
                     out = next;
                     // unchanged output = do-nothing, don't log it
                     if (next !== prevOut) {
-                        log(-1, `[${s.name}] modifyResponse applied (${before}b → ${after}b) ${url}`, "info", s.scriptId);
+                        log(tabId, `[${s.name}] modifyResponse applied (${before}b → ${after}b) ${url}`, "info", s.scriptId);
                     }
                     touched = true;
                 }
             } catch (e: any) {
-                log(-1, formatScriptError(s.name, e, "modifyResponse"), "error", s.scriptId);
+                log(tabId, formatScriptError(s.name, e, "modifyResponse"), "error", s.scriptId);
             }
             }
         }
@@ -189,9 +190,9 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
     }
 
     /** Hook tier: first replaceResponse handler's result, or null. */
-    async runReplace(url: string, method: string): Promise<{ mime: string; content: string } | null> {
+    async runReplace(url: string, method: string, tabId = -1): Promise<{ mime: string; content: string } | null> {
         if (__MV3__) {
-            return runBodyOp(this.mv3Scripts, this.mv3Params, "replace", { url, method });
+            return runBodyOp(this.mv3Scripts, this.mv3Params, "replace", { url, method, tabId });
         }
         for (const s of this.matchingBodyScripts(url)) {
             for (const replace of s.replace) {
@@ -200,11 +201,11 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
                     if (out !== undefined && out !== null) {
                         const file = out && typeof out === "object" ? (out as any).file : undefined;
                         const { mime, content: body } = typeof file === "string" ? resolveFileRef(file, url) : { mime: guessMimeFromUrl(url), content: typeof out === "string" ? out : String(out) };
-                        log(-1, `[${s.name}] replaceResponse → ${mime} (${body.length}b) ${url}`, "info", s.scriptId);
+                        log(tabId, `[${s.name}] replaceResponse → ${mime} (${body.length}b) ${url}`, "info", s.scriptId);
                         return { mime, content: body };
                     }
                 } catch (e: any) {
-                    log(-1, formatScriptError(s.name, e, "replaceResponse"), "error", s.scriptId);
+                    log(tabId, formatScriptError(s.name, e, "replaceResponse"), "error", s.scriptId);
                 }
             }
         }

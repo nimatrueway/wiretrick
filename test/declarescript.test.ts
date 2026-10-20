@@ -71,7 +71,7 @@ describe("declareScript", () => {
         const user = {
             id: "s1",
             name: "user",
-            code: `import { double } from "./utils";\nres.declareScript({ match: ["*"] });\nres.onRequest(() => double(21) === 42 ? { cancel: true } : undefined);`,
+            code: `import { double } from "./utils";\nwt.declareScript({ match: ["*"] });\nwt.onRequest(() => double(21) === 42 ? { cancel: true } : undefined);`,
         };
         const resolver = makeModuleResolver([lib, user], () => ({}));
         const c = compileScript(user.code, { importModule: resolver.resolve });
@@ -84,7 +84,7 @@ describe("declareScript", () => {
     it("missing imports surface as compile errors", async () => {
         const { makeModuleResolver } = await import("../src/shared/compile");
         const resolver = makeModuleResolver([], () => ({}));
-        const c = compileScript(`import { x } from "./nope";\nres.log(x);`, { importModule: resolver.resolve });
+        const c = compileScript(`import { x } from "./nope";\nwt.log(x);`, { importModule: resolver.resolve });
         expect(c.error).toContain("unknown module");
     });
 });
@@ -124,7 +124,7 @@ describe("saveScript name handling", () => {
             },
         };
         const { saveScript, setEnabled, getScript } = await import("../src/background/engine/scriptStore");
-        await saveScript({ id: "s1", code: `wt.declareScript({ match: ["*"] });\nres.onRequest(() => {});`, name: "redwood" });
+        await saveScript({ id: "s1", code: `wt.declareScript({ match: ["*"] });\nwt.onRequest(() => {});`, name: "redwood" });
         expect((await getScript("s1"))!.meta.name).toBe("redwood");
         await setEnabled("s1", false);
         expect((await getScript("s1"))!.meta.name).toBe("redwood");

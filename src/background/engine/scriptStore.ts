@@ -2,8 +2,9 @@
  * chrome.storage.local backed script store.
  */
 import type { ResMeta } from "../../shared/metaParser";
-import { compileForStorage } from "../compileHost";
+import { compileForStorage, SANDBOX_COMPILE_FAILED } from "../compileHost";
 import { dlogLevel } from "../../shared/debugLog";
+import { clearScriptErrors } from "./logs";
 
 export interface Script {
     id: string;
@@ -80,9 +81,9 @@ export async function saveScript(partial: Pick<Script, "id" | "code"> & Partial<
     // MV3 sandbox RPC failure (host unavailable): keep the previous
     // meta/paramDefs rather than corrupting a declared script into a
     // library — the next save recomputes. (The sentinel error string comes
-    // from compileHost; MV2 compile errors are user-code errors and never
-    // match it.)
-    const rpcFailed = !!compiled.error && /sandbox/.test(compiled.error);
+    // from compileHost — matched exactly: user compile errors carry stacks
+    // that mention sandbox.js.)
+    const rpcFailed = compiled.error === SANDBOX_COMPILE_FAILED;
     if (rpcFailed) dlogLevel("compile", "warn", `saveScript "${name ?? prev?.meta.name}": sandbox compile failed — keeping previous meta/paramDefs (declaration state preserved)`);
     const meta = rpcFailed ? prev?.meta ?? compiled.meta : compiled.meta;
     if (name) meta.name = name;
@@ -101,11 +102,14 @@ export async function saveScript(partial: Pick<Script, "id" | "code"> & Partial<
         order.push(partial.id);
     }
     await storageSet({ [STORE_KEY]: byId, [ORDER_KEY]: order });
+    // new code → stale runtime errors no longer apply
+    if (prev && prev.code !== script.code) void clearScriptErrors(script.id);
     notify();
     return script;
 }
 
 export async function deleteScript(id: string): Promise<void> {
+    void clearScriptErrors(id);
     const obj = await storageGet([STORE_KEY, ORDER_KEY]);
     const byId: { [id: string]: Script } = obj[STORE_KEY] || {};
     const order: string[] = obj[ORDER_KEY] || [];

@@ -4,7 +4,7 @@
  * pane showing headers and what Wiretrick scripts did to the request.
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
-import type { NetEntry } from "../../shared/netTypes";
+import type { NetBody, NetEntry } from "../../shared/netTypes";
 import type { NetStore } from "./netStore";
 import {
     TYPE_FILTERS,
@@ -75,8 +75,13 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
         return () => document.removeEventListener("keydown", onKey);
     }, [selectedId]);
 
-    const refreshTabs = () => void listTabs?.().then(setTabs);
+    // refresh on focus only: replacing <option>s while the native dropdown
+    // is open (mousedown) closes it / drops the pick in Chromium
+    const refreshTabs = () =>
+        void listTabs?.().then((next) => setTabs((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next)));
     useEffect(refreshTabs, []);
+    const tabOptions =
+        filter.tabId !== null && !tabs.some((t) => t.id === filter.tabId) ? [...tabs, { id: filter.tabId, title: `Tab ${filter.tabId} (closed)` }] : tabs;
 
     const intercepted = rows.filter((e) => e.interventions.length).length;
     const bytes = rows.reduce((n, e) => n + (e.size ?? 0), 0);
@@ -107,12 +112,11 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
                         class="net-tab"
                         title="Show requests from one tab"
                         value={filter.tabId === null ? "" : String(filter.tabId)}
-                        onMouseDown={refreshTabs}
                         onFocus={refreshTabs}
                         onChange={(e) => setFilter({ ...filter, tabId: e.currentTarget.value === "" ? null : Number(e.currentTarget.value) })}
                     >
                         <option value="">All tabs</option>
-                        {tabs.map((t) => (
+                        {tabOptions.map((t) => (
                             <option key={t.id} value={String(t.id)}>
                                 {t.title.length > 40 ? t.title.slice(0, 40) + "…" : t.title}
                             </option>
@@ -228,7 +232,7 @@ function Row({ e, span, selected, onSelect }: { e: NetEntry; span: { t0: number;
     );
 }
 
-type DetailTab = "headers" | "wiretrick";
+type DetailTab = "headers" | "payload" | "response" | "wiretrick";
 
 function Details({ e, onClose }: { e: NetEntry; onClose: () => void }) {
     const [tab, setTab] = useState<DetailTab>(e.interventions.length ? "wiretrick" : "headers");
@@ -253,6 +257,14 @@ function Details({ e, onClose }: { e: NetEntry; onClose: () => void }) {
                 <button class={tab === "headers" ? "active" : ""} onClick={() => setTab("headers")}>
                     Headers
                 </button>
+                {e.requestBody && (
+                    <button class={tab === "payload" ? "active" : ""} onClick={() => setTab("payload")}>
+                        Payload
+                    </button>
+                )}
+                <button class={tab === "response" ? "active" : ""} onClick={() => setTab("response")}>
+                    Response
+                </button>
                 <button class={tab === "wiretrick" ? "active" : ""} onClick={() => setTab("wiretrick")}>
                     Wiretrick{e.interventions.length ? ` (${e.interventions.length})` : ""}
                 </button>
@@ -264,6 +276,10 @@ function Details({ e, onClose }: { e: NetEntry; onClose: () => void }) {
                         <HeaderSection title="Response Headers" rows={e.responseHeaders} />
                         <HeaderSection title="Request Headers" rows={e.requestHeaders} />
                     </>
+                ) : tab === "payload" ? (
+                    <BodyView body={e.requestBody} mime={headerOf(e.requestHeaders, "content-type")} />
+                ) : tab === "response" ? (
+                    <ResponseView e={e} />
                 ) : e.interventions.length ? (
                     <ul class="net-actions">
                         {e.interventions.map((i, n) => (
@@ -279,6 +295,58 @@ function Details({ e, onClose }: { e: NetEntry; onClose: () => void }) {
                 )}
             </div>
         </div>
+    );
+}
+
+function headerOf(rows: [string, string][] | undefined, name: string): string {
+    return rows?.find(([k]) => k.toLowerCase() === name)?.[1] || "";
+}
+
+/** JSON → pretty-printed; anything else verbatim */
+export function prettyBody(text: string, mime: string): string {
+    const t = text.trim();
+    if (/json/i.test(mime) || /^[[{]/.test(t)) {
+        try {
+            return JSON.stringify(JSON.parse(t), null, 2);
+        } catch {}
+    }
+    return text;
+}
+
+function BodyView({ body, mime }: { body?: NetBody; mime: string }) {
+    if (!body) return <div class="net-empty">No body captured.</div>;
+    if (body.binary) return <div class="net-empty">{body.text || `(binary, ${formatBytes(body.size)})`}</div>;
+    return (
+        <>
+            {body.truncated && <div class="net-note">Showing the first {formatBytes(body.text.length)} of {formatBytes(body.size)}.</div>}
+            <pre class="net-payload">{prettyBody(body.text, mime)}</pre>
+        </>
+    );
+}
+
+function ResponseView({ e }: { e: NetEntry }) {
+    const [which, setWhich] = useState<"modified" | "original">("modified");
+    if (!e.responseBody)
+        return (
+            <div class="net-empty">
+                Response body not available — browsers don't expose response bodies to extensions, so it is captured only for responses a Wiretrick
+                script handled.
+            </div>
+        );
+    const mime = e.mime || headerOf(e.responseHeaders, "content-type");
+    if (!e.originalResponseBody) return <BodyView body={e.responseBody} mime={mime} />;
+    return (
+        <>
+            <div class="net-body-switch" role="tablist">
+                <button class={which === "modified" ? "net-chip active" : "net-chip"} onClick={() => setWhich("modified")}>
+                    Modified (served)
+                </button>
+                <button class={which === "original" ? "net-chip active" : "net-chip"} onClick={() => setWhich("original")}>
+                    Original
+                </button>
+            </div>
+            <BodyView body={which === "modified" ? e.responseBody : e.originalResponseBody} mime={mime} />
+        </>
     );
 }
 

@@ -26,6 +26,7 @@ const store: Record<string, any> = {};
 const compileResult: any = { meta: { declared: true, name: "x", match: ["*://*/*"], include: [], phase: ["request", "response"], strategy: "auto", runAt: "document_start" }, paramDefs: { p: { type: "number", default: 1 } }, error: null };
 vi.mock("../src/background/compileHost", () => ({
     compileForStorage: () => Promise.resolve(structuredClone(compileResult)),
+    SANDBOX_COMPILE_FAILED: "sandbox compile failed",
 }));
 
 import { saveScript, newId } from "../src/background/engine/scriptStore";

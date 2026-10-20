@@ -210,3 +210,21 @@ wt.onRequest(async () => ({ respond: { status: 503, body: "later" } }));`)]);
         expect(debuggerCalls.some((x) => x.command === "Fetch.continueRequest")).toBe(true);
     });
 });
+
+describe("per-script runtime error tracking", () => {
+    it("records script errors (not console.error), clears on demand", async () => {
+        const { log, getScriptErrors, clearScriptErrors } = await import("../src/background/engine/logs");
+        await clearScriptErrors();
+        log(1, "[S] onRequest threw: boom", "error", "sx");
+        log(1, "[S] onRequest threw: boom2", "error", "sx");
+        log(1, "[S] console.error: user said so", "error", "sy");
+        log(1, "[S] warned", "warn", "sz");
+        log(1, "[engine] not a script", "error", null);
+        await new Promise((r) => setTimeout(r, 10));
+        const errs = await getScriptErrors();
+        expect([...errs.keys()]).toEqual(["sx"]);
+        expect(errs.get("sx")).toMatchObject({ message: "[S] onRequest threw: boom2", count: 2 });
+        await clearScriptErrors("sx");
+        expect((await getScriptErrors()).size).toBe(0);
+    });
+});

@@ -99,6 +99,29 @@ describe("NetworkPanel", () => {
         expect(container.querySelector(".net-details")).toBeNull();
     });
 
+    it("shows payload and response bodies, with original vs modified", () => {
+        const hit = entry("todo", {
+            method: "POST",
+            mime: "application/json",
+            requestBody: { text: '{"q":1}', size: 7, truncated: false, binary: false },
+            responseBody: { text: '{"completed":true}', size: 18, truncated: false, binary: false },
+            originalResponseBody: { text: '{"completed":false}', size: 19, truncated: false, binary: false },
+        });
+        const { container, getByText } = setup([hit, entry("plain", { startedAt: base + 1 })]);
+        fireEvent.click(container.querySelector("tbody tr")!);
+        fireEvent.click(getByText("Payload"));
+        expect(container.querySelector(".net-payload")!.textContent).toBe('{\n  "q": 1\n}');
+        fireEvent.click(getByText("Response"));
+        expect(container.querySelector(".net-payload")!.textContent).toContain('"completed": true');
+        fireEvent.click(getByText("Original"));
+        expect(container.querySelector(".net-payload")!.textContent).toContain('"completed": false');
+        // a request nobody handled: no body, and says why
+        fireEvent.click(container.querySelectorAll("tbody tr")[1]);
+        expect(container.querySelector(".net-details-tabs")!.textContent).not.toContain("Payload");
+        fireEvent.click(getByText("Response"));
+        expect(container.querySelector(".net-details-body")!.textContent).toContain("not available");
+    });
+
     it("clear empties the table", async () => {
         const { container } = setup([entry("a")]);
         fireEvent.click(container.querySelector(".net-clear")!);

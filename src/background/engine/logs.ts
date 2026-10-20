@@ -40,6 +40,7 @@ export function log(tabId: number, message: string, level: LogEntry["level"] = "
         port.postMessage({ type: "log", entry });
     }
     if (scriptId) annotateFromLog(tabId, scriptId, message, level);
+    if (scriptId && level === "error" && !/^\[[^\]]*\] console\.error: /.test(message)) recordScriptError(scriptId, message);
     if (level === "error") {
         console.error("[Wiretrick]", message);
     }
@@ -65,4 +66,75 @@ export function clearTab(tabId: number): void {
 
 export function scriptError(scriptId: string, message: string): void {
     log(-1, message, "error", scriptId);
+}
+
+// ---- per-script runtime errors (indicator in the manager list + popup) ----
+
+export interface ScriptRuntimeError {
+    message: string;
+    at: number;
+    count: number;
+}
+
+const ERR_KEY = "wtScriptErrors";
+const runtimeErrors = new Map<string, ScriptRuntimeError>();
+let errorsLoaded: Promise<void> | null = null;
+let errorsTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** MV3: survive service-worker restarts via session storage (cleared with the browser session). */
+function sessionArea(): chrome.storage.StorageArea | null {
+    try {
+        return (globalThis as any).chrome?.storage?.session ?? null;
+    } catch {
+        return null;
+    }
+}
+
+function loadErrors(): Promise<void> {
+    if (!errorsLoaded) {
+        const area = sessionArea();
+        errorsLoaded = area
+            ? area.get(ERR_KEY).then(
+                  (d) => {
+                      for (const [k, v] of Object.entries((d?.[ERR_KEY] || {}) as Record<string, ScriptRuntimeError>)) {
+                          if (!runtimeErrors.has(k)) runtimeErrors.set(k, v);
+                      }
+                  },
+                  () => {}
+              )
+            : Promise.resolve();
+    }
+    return errorsLoaded;
+}
+
+function errorsChanged(): void {
+    if (errorsTimer) return;
+    errorsTimer = setTimeout(() => {
+        errorsTimer = null;
+        void sessionArea()?.set({ [ERR_KEY]: Object.fromEntries(runtimeErrors) }).catch(() => {});
+        broadcastToUi({ type: "scriptErrors", errors: Object.fromEntries(runtimeErrors) });
+    }, 150);
+}
+
+export function recordScriptError(scriptId: string, message: string): void {
+    void loadErrors().then(() => {
+        const prev = runtimeErrors.get(scriptId);
+        runtimeErrors.set(scriptId, { message: message.slice(0, 2000), at: Date.now(), count: (prev?.count ?? 0) + 1 });
+        errorsChanged();
+    });
+}
+
+/** Dismiss one script's runtime error, or all of them. */
+export async function clearScriptErrors(scriptId?: string): Promise<void> {
+    await loadErrors();
+    if (scriptId === undefined) {
+        if (!runtimeErrors.size) return;
+        runtimeErrors.clear();
+    } else if (!runtimeErrors.delete(scriptId)) return;
+    errorsChanged();
+}
+
+export async function getScriptErrors(): Promise<Map<string, ScriptRuntimeError>> {
+    await loadErrors();
+    return runtimeErrors;
 }

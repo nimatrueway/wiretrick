@@ -8,6 +8,7 @@
  * awaiting async handlers are Firefox-only; on Chromium chromeBodyStrategy
  * takes over for bodies. MV3 has no blocking webRequest at all.
  */
+import { recordNetBody } from "../../network";
 import { match, matchReplace, matchAny } from "../../../shared/matcher";
 import { compileScript, isThenable, makeModuleResolver, type CompiledScript } from "../../../shared/compile";
 import { scriptLogLine, type ScriptLogLevel } from "../../../shared/scriptLog";
@@ -186,6 +187,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
 
     private staticServe(details: WebRequestDetailsLike, content: string | Uint8Array, mime: string, scriptId: string, scriptName: string): HookDisposition {
         log(details.tabId, `[${scriptName}] serve ${mime} (${content.length}b)`, "info", scriptId);
+        recordNetBody({ tabId: details.tabId, url: details.url, method: details.method, modified: content, mime, status: 200 });
         if (details.type === "main_frame") {
             const rid = "serve_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
             serveStore.set(rid, { content: typeof content === "string" ? content : new TextDecoder().decode(content), mime });
@@ -202,6 +204,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
 
         const serve = (mime: string, content: string | Uint8Array): HookDisposition => {
             log(details.tabId, `[${scriptName}] replaceResponse → ${mime} (${content.length} bytes)`, "info", scriptId);
+            recordNetBody({ tabId: details.tabId, url: details.url, method: details.method, modified: content, mime, status: 200 });
             // Chrome blocks top-level data: navigations — serve main frames
             // from an extension page instead
             if (details.type === "main_frame") {
@@ -289,6 +292,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                     off += c.length;
                 }
                 let body: string | Uint8Array = looksBinary(bytes) ? bytes : decoder.decode(bytes);
+                const original = body;
                 const ctx = { ...makeCtx(details, tabUrl), contentType: contentTypeOf(details.responseHeaders) };
                 for (const transform of script.handlers.modifyResponse) {
                     try {
@@ -299,6 +303,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                     }
                 }
                 const outBytes = typeof body === "string" ? encoder.encode(body) : body;
+                recordNetBody({ tabId: details.tabId, url: details.url, method: details.method, original, modified: body === original ? null : body });
                 filter.write(outBytes);
                 filter.close();
             };

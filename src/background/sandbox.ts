@@ -117,7 +117,7 @@ function scriptLog(scriptId: string, level: ScriptLogLevel, msg: string): void {
 }
 
 /** sandbox diagnostics → the SW's debug-log sink (src "[sandbox]") */
-function sandboxLog(msg: string, level: "debug" | "info" | "warn" = "debug"): void {
+function sandboxLog(msg: string, level: "debug" | "info" | "warn" | "error" = "debug"): void {
     void reverseCall({ op: "log", scriptId: null, level, msg: `[sandbox] ${msg}` });
 }
 
@@ -227,7 +227,7 @@ function analyze(scripts: PlainScript[]): { results: Record<string, AnalyzeResul
         const a = c.result;
         // identify by the CALLER's name (meta.name is declareScript's default)
         const summary = `analyze "${c.s.name}" (${c.s.code.length}b) → declared=${a.declared} match=${JSON.stringify(a.meta.match)} params=[${Object.keys(a.paramDefs).join(", ")}] deps=[${a.deps.join(", ")}]`;
-        sandboxLog(a.error ? `${summary} ERROR ${a.error.split("\n")[0]}` : summary, a.error || !a.declared ? "warn" : "debug");
+        sandboxLog(a.error ? `${summary} ERROR ${a.error.split("\n")[0]}` : summary, a.error ? "error" : !a.declared ? "warn" : "debug");
         if (!a.error && !a.declared) {
             // the body ran clean but never declared — show the declareScript
             // source line (guarded/conditional calls are the usual cause)
@@ -254,7 +254,10 @@ function run(scripts: PlainScript[], paramValues: Record<string, any>, op: BodyO
         if (!s || !s.enabled || !c.result.declared) continue;
         list.push({ id, name: s.name, match: c.result.meta.match, phase: c.result.meta.phase, handlers: c.compiled.handlers });
     }
-    return runOp(list, op, args, { log: scriptLog, debug: (m) => sandboxLog(m, "debug") });
+    // tabId rides along so the SW attributes the line to the right tab
+    const tabId = typeof args?.tabId === "number" ? args.tabId : -1;
+    const log = (scriptId: string, level: ScriptLogLevel, msg: string) => void reverseCall({ op: "log", scriptId, level, msg, tabId });
+    return runOp(list, op, args, { log, debug: (m) => sandboxLog(m, "debug") });
 }
 
 // ---- proxy decisions (process tier: evaluate the user's PAC/rules) ----

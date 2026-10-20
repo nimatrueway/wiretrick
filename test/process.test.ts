@@ -124,7 +124,7 @@ describe("listsProcess / ownership", () => {
         expect(isProcessOwned("cdp")).toBe(false);
     });
     it("cdp tier yields process-owned scripts only while active (fallback otherwise)", () => {
-        const s = makeScript("a", `wt.declareScript({ match: ["*"], strategy: ["process", "cdp"] });\nres.modifyResponse((c, b) => b);`);
+        const s = makeScript("a", `wt.declareScript({ match: ["*"], strategy: ["process", "cdp"] });\nwt.modifyResponse((c, b) => b);`);
         const c = new CdpStrategy();
         c.reload([s]);
         expect(c.cdpRelevantScripts("https://x.com/").length).toBe(1);
@@ -172,7 +172,7 @@ describe("helpers", () => {
 describe("ProcessStrategy ⇄ helper protocol", () => {
     it("no process scripts → never connects", async () => {
         const p = new ProcessStrategy();
-        p.reload([makeScript("a", `wt.declareScript({ match: ["*"], strategy: ["cdp"] });\nres.modifyResponse((c, b) => b);`)]);
+        p.reload([makeScript("a", `wt.declareScript({ match: ["*"], strategy: ["cdp"] });\nwt.modifyResponse((c, b) => b);`)]);
         await settle();
         expect(fake.connects).toBe(0);
         expect(p.status().state).toBe("idle");
@@ -181,7 +181,7 @@ describe("ProcessStrategy ⇄ helper protocol", () => {
     it("ready → config, PAC install, active; user proxy captured & respected", async () => {
         fake.proxyValue = { mode: "fixed_servers", rules: { singleProxy: { scheme: "http", host: "corp", port: 3128 } } };
         const p = new ProcessStrategy();
-        await ready(p, [makeScript("a", `wt.declareScript({ match: ["https://api.x.com/*"], strategy: ["process"] });\nres.modifyResponse((c, b) => b + "!");`)]);
+        await ready(p, [makeScript("a", `wt.declareScript({ match: ["https://api.x.com/*"], strategy: ["process"] });\nwt.modifyResponse((c, b) => b + "!");`)]);
         const cfg = fake.sent.find((m) => m.t === "config");
         expect(cfg.routes).toEqual([{ match: ["https://api.x.com/*"], req: false, resHeaders: false, body: true }]);
         expect(cfg.upstream).toBe("ask");
@@ -201,7 +201,7 @@ describe("ProcessStrategy ⇄ helper protocol", () => {
     it("blocked proxy control → inactive, fall through", async () => {
         fake.levelOfControl = "controlled_by_other_extensions";
         const p = new ProcessStrategy();
-        await ready(p, [makeScript("a", `wt.declareScript({ match: ["*"], strategy: ["process", "cdp"] });\nres.onRequest(() => {});`)]);
+        await ready(p, [makeScript("a", `wt.declareScript({ match: ["*"], strategy: ["process", "cdp"] });\nwt.onRequest(() => {});`)]);
         expect(processActive()).toBe(false);
         expect(p.status().routing?.active).toBe(false);
         expect(fake.sent.find((m) => m.t === "config").routes).toEqual([]);
@@ -280,7 +280,7 @@ wt.modifyResponse((c, body) => (c.url.endsWith("/t") ? body.toUpperCase() : unde
 
     it("binary bodies reach modifyResponse as bytes (MV2)", async () => {
         const p = new ProcessStrategy();
-        await ready(p, [makeScript("a", `wt.declareScript({ match: ["https://x.com/*"], strategy: ["process"] });\nres.modifyResponse((c, body) => typeof body === "string" ? "text" : "bytes:" + body.length);`)]);
+        await ready(p, [makeScript("a", `wt.declareScript({ match: ["https://x.com/*"], strategy: ["process"] });\nwt.modifyResponse((c, body) => typeof body === "string" ? "text" : "bytes:" + body.length);`)]);
         fake.deliver({ t: "chunk", id: 1, data: bytesToBase64(new Uint8Array([0, 1, 2, 3])) });
         fake.deliver({ t: "res", id: 1, url: "https://x.com/b.png", method: "GET", status: 200, headers: [["content-type", "image/png"]], body: "chunks" });
         await settle(40);
@@ -289,7 +289,7 @@ wt.modifyResponse((c, body) => (c.url.endsWith("/t") ? body.toUpperCase() : unde
 
     it("helper missing → state missing, no retry loop; Retry reconnects", async () => {
         const p = new ProcessStrategy();
-        p.reload([makeScript("a", `wt.declareScript({ match: ["*"], strategy: ["process", "cdp"] });\nres.onRequest(() => {});`)]);
+        p.reload([makeScript("a", `wt.declareScript({ match: ["*"], strategy: ["process", "cdp"] });\nwt.onRequest(() => {});`)]);
         await settle();
         fake.disconnect("Specified native messaging host not found.");
         expect(p.status().state).toBe("missing");
@@ -302,7 +302,7 @@ wt.modifyResponse((c, body) => (c.url.endsWith("/t") ? body.toUpperCase() : unde
     it("helper crash → inactive and PAC removed (browser proxy restored)", async () => {
         fake.proxyValue = { mode: "direct" };
         const p = new ProcessStrategy();
-        await ready(p, [makeScript("a", `wt.declareScript({ match: ["*"], strategy: ["process"] });\nres.onRequest(() => {});`)]);
+        await ready(p, [makeScript("a", `wt.declareScript({ match: ["*"], strategy: ["process"] });\nwt.onRequest(() => {});`)]);
         expect(processActive()).toBe(true);
         fake.disconnect("Native host has exited.");
         await settle();

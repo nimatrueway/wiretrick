@@ -138,7 +138,7 @@ if (__MV3__) {
         if (!msg || msg.type !== "__resReverse") return false;
         const payload = msg.payload || {};
         if (payload.op === "log") {
-            import("./engine/logs").then(({ log }) => log(-1, payload.msg, payload.level || "info", payload.scriptId));
+            import("./engine/logs").then(({ log }) => log(typeof payload.tabId === "number" ? payload.tabId : -1, payload.msg, payload.level || "info", payload.scriptId));
             sendResponse({});
             return false;
         }
@@ -161,13 +161,16 @@ if (__MV3__) {
 
 // ---- public API ----
 
+/** compileForStorage error when the sandbox host itself failed (not user code). */
+export const SANDBOX_COMPILE_FAILED = "sandbox compile failed";
+
 /** Compile a saved script for storage: meta + paramDefs (saveScript path). */
 export async function compileForStorage(code: string, name?: string): Promise<{ meta: ResMeta; paramDefs: Record<string, ParamDef>; error: string | null }> {
     const label = name || "x";
     if (!__MV3__) {
         const c = compileScript(code, { importModule: () => makeStubModule() });
         dlogLevel(
-            "compile", c.meta.declared && !c.error ? "debug" : "warn",
+            "compile", c.error ? "error" : c.meta.declared ? "debug" : "warn",
             `compiled "${label}" → declared=${c.meta.declared} match=${JSON.stringify(c.meta.match)} params=[${Object.keys(c.paramDefs || {}).join(", ")}]${c.error ? " ERROR " + c.error.split("\n")[0] : ""}`
         );
         return { meta: c.meta, paramDefs: c.paramDefs || {}, error: c.error };
@@ -177,10 +180,10 @@ export async function compileForStorage(code: string, name?: string): Promise<{ 
     const r = resp?.results?.x;
     if (!r) {
         dlogLevel("compile", "warn", `compileForStorage "${label}": sandbox analyze returned nothing — script meta NOT updated`);
-        return { meta: defaultMeta(), paramDefs: {}, error: "sandbox compile failed" };
+        return { meta: defaultMeta(), paramDefs: {}, error: SANDBOX_COMPILE_FAILED };
     }
     dlogLevel(
-        "compile", r.declared && !r.error ? "debug" : "warn",
+        "compile", r.error ? "error" : r.declared ? "debug" : "warn",
         `compiled "${label}" → declared=${r.declared} match=${JSON.stringify(r.meta.match)} params=[${Object.keys(r.paramDefs || {}).join(", ")}]${r.error ? " ERROR " + r.error.split("\n")[0] : ""}`
     );
     return { meta: r.meta, paramDefs: r.paramDefs, error: r.error };

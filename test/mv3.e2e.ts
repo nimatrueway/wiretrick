@@ -126,7 +126,7 @@ try {
         type: "saveScript",
         id: "s_mv3",
         name: "MV3 hook",
-        code: `wt.declareScript({ match: ["*://*/*"] });\nres.modifyResponse((ctx, body) => body.replace("ORIGINAL", "MV3"));`,
+        code: `wt.declareScript({ match: ["*://*/*"] });\nwt.modifyResponse((ctx, body) => body.replace("ORIGINAL", "MV3"));`,
     }, r)));
     check("saveScript round-trips through the sandbox (meta extracted)", saveResult?.meta?.declared === true, JSON.stringify(saveResult?.meta));
     const listResult = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "listScripts" }, r)));
@@ -145,7 +145,7 @@ try {
         type: "saveScript",
         id: "s_importer",
         name: "api-interceptor",
-        code: `import { tag } from "./api-lib";\nres.declareScript({ match: ["*://*/*"], params: { label: { type: "string", default: "x" } } });\nres.modifyResponse((ctx, body) => tag(body));`,
+        code: `import { tag } from "./api-lib";\nwt.declareScript({ match: ["*://*/*"], params: { label: { type: "string", default: "x" } } });\nwt.modifyResponse((ctx, body) => tag(body));`,
     }, r)));
     check("importing script captures declareScript (not a library)",
         importSave?.meta?.declared === true && importSave?.meta?.match?.includes("*://*/*") && !importSave.error,
@@ -214,7 +214,7 @@ try {
     // its decision must be honored by the hook tier ----
     await mgr.evaluate((origin: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_pg", name: "Param gated",
-        code: `const cfg = wt.declareScript({ match: ["${origin}/*"], params: { intercept: { type: "boolean", default: false, description: "Intercept" } } });\nres.onRequest((ctx) => { if (cfg.intercept) return { respond: { status: 200, body: { value: "PARAM-GATED" } } }; });`,
+        code: `const cfg = wt.declareScript({ match: ["${origin}/*"], params: { intercept: { type: "boolean", default: false, description: "Intercept" } } });\nwt.onRequest((ctx) => { if (cfg.intercept) return { respond: { status: 200, body: { value: "PARAM-GATED" } } }; });`,
     }, r)), ORIGIN);
     await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "setScriptParam", scriptId: "s_pg", key: "intercept", value: true }, r)));
     await mgr.waitForTimeout(1500); // pipeline reload + analyze-cache warm with the new params
@@ -231,15 +231,15 @@ try {
     if (process.env.DBG) await mgr.evaluate(() => { const sel = document.querySelector("#log-level") as HTMLSelectElement; sel.value = "debug"; sel.dispatchEvent(new Event("change")); });
     await mgr.evaluate((cdn: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_respond", name: "Respond script",
-        code: `wt.declareScript({ match: ["${cdn}/app.js*"], strategy: ["hook", "cdp"] });\nres.onRequest((ctx) => ({ respond: { status: 200, mime: "text/javascript", body: 'window.__marker = "RESPONDED:' + ctx.resourceType + '";' } }));`,
+        code: `wt.declareScript({ match: ["${cdn}/app.js*"], strategy: ["hook", "cdp"] });\nwt.onRequest((ctx) => ({ respond: { status: 200, mime: "text/javascript", body: 'window.__marker = "RESPONDED:' + ctx.resourceType + '";' } }));`,
     }, r)), CDN);
     await mgr.evaluate((cdn: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_cdpx", name: "Cdp transform",
-        code: `wt.declareScript({ match: ["${cdn}/gz.js", "${cdn}/lazy.js"], strategy: ["hook", "cdp"] });\nres.modifyResponse((ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
+        code: `wt.declareScript({ match: ["${cdn}/gz.js", "${cdn}/lazy.js"], strategy: ["hook", "cdp"] });\nwt.modifyResponse((ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
     }, r)), CDN);
     await mgr.evaluate((cdn: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_auto", name: "Auto script",
-        code: `wt.declareScript({ match: ["${cdn}/auto.js"] });\nres.modifyResponse((ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
+        code: `wt.declareScript({ match: ["${cdn}/auto.js"] });\nwt.modifyResponse((ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
     }, r)), CDN);
     await mgr.waitForTimeout(1500); // pipeline reload → debugger tier armed
     // Network tab records from now on (listeners attach when it opens)
@@ -263,7 +263,61 @@ try {
     );
     check("Network tab lists the page's requests", net.some((r) => r.name.startsWith("page-xo") && r.status === "200") && net.some((r) => r.name.startsWith("auto.js")), JSON.stringify(net.map((r) => r.name)));
     check("Network tab shows which script intercepted a request", net.some((r) => r.name.startsWith("gz.js") && r.scripts.includes("Cdp transform")), JSON.stringify(net.filter((r) => r.scripts.length)));
+    // response body of an intercepted request: served (modified) + original
+    await mgr.evaluate(() => {
+        const tr = [...document.querySelectorAll("#network-view tbody tr")].find((t) => t.querySelector(".net-name")?.textContent?.startsWith("gz.js"));
+        (tr as HTMLElement | undefined)?.click();
+    });
+    await mgr.evaluate(() => [...document.querySelectorAll("#network-view .net-details-tabs button")].find((b) => b.textContent === "Response")?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    const served = await mgr.evaluate(() => document.querySelector("#network-view .net-payload")?.textContent || "");
+    await mgr.evaluate(() => [...document.querySelectorAll("#network-view .net-body-switch button")].find((b) => b.textContent === "Original")?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    const original = await mgr.evaluate(() => document.querySelector("#network-view .net-payload")?.textContent || "");
+    check("Network details show the modified + original response body", served.includes("MODIFIED-GZ") && original.includes("ORIGINAL-GZ"), JSON.stringify({ served, original }));
+    await mgr.evaluate(() => (document.querySelector("#network-view .net-details-close") as HTMLElement | null)?.click());
+    // tab filter: the page's tab keeps its (intercepted) requests
+    const xoTabId = await mgr.evaluate((u: string) => new Promise<number>((r) => chrome.tabs.query({}, (ts) => r(ts.find((t) => t.url === u)?.id ?? -1))), `${ORIGIN}/page-xo`);
+    await mgr.focus("#network-view .net-tab");
+    await mgr.waitForTimeout(300);
+    await mgr.selectOption("#network-view .net-tab", String(xoTabId));
+    await mgr.waitForTimeout(300);
+    const inTab: string[] = await mgr.evaluate(() => [...document.querySelectorAll("#network-view tbody .net-name")].map((n) => n.textContent || ""));
+    check("Network tab filter keeps the tab's intercepted requests", inTab.some((n) => n.startsWith("gz.js")) && inTab.some((n) => n.startsWith("page-xo")), JSON.stringify(inTab));
+    await mgr.selectOption("#network-view .net-tab", "");
     await mgr.click("#log-header-title");
+
+    // ---- script error indicators: compile error + runtime error ----
+    await mgr.evaluate((origin: string) => new Promise((r) => chrome.runtime.sendMessage({
+        type: "saveScript", id: "s_throws", name: "Thrower",
+        code: `wt.declareScript({ match: ["${origin}/kaboom*"] });\nwt.onRequest(() => { throw new Error("kaboom"); });`,
+    }, r)), "http://localhost:8909");
+    await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "saveScript", id: "s_broken", name: "Broken", code: "wt.declareScript({ match: [ ;" }, r)));
+    await mgr.waitForTimeout(1200);
+    const errPage = await ctx.newPage();
+    await errPage.goto(`${ORIGIN}/page`);
+    await errPage.waitForFunction(() => document.title.startsWith("DONE:"), null, { timeout: 15000 }).catch(() => {});
+    // localhost: no other test script matches it (Param gated responds on 127.0.0.1)
+    await errPage.evaluate(() => fetch("http://localhost:8909/kaboom").catch(() => {}));
+    await errPage.waitForTimeout(500);
+    await errPage.close();
+    await mgr.waitForSelector('#script-list li[data-id="s_throws"] .err-ind.runtime', { timeout: 8000 }).catch(() => {});
+    const ind = await mgr.evaluate(() => ({
+        runtime: document.querySelector('#script-list li[data-id="s_throws"] .err-ind.runtime')?.getAttribute("title") || "",
+        compile: document.querySelector('#script-list li[data-id="s_broken"] .err-ind.compile')?.getAttribute("title") || "",
+        logged: [...document.querySelectorAll("#log-entries .log-line.error")].some((l) => ((l as HTMLElement).dataset.text || l.textContent || "").includes("kaboom")),
+    }));
+    check("runtime script error → indicator in the manager list", ind.runtime.includes("kaboom"), JSON.stringify(ind));
+    check("compile error → indicator in the manager list", ind.compile.includes("Compile error"), JSON.stringify(ind));
+    check("runtime script error logged at ERROR level", ind.logged);
+    const errPopup = await ctx.newPage();
+    await errPopup.goto(`chrome-extension://${extId}/popup.html`);
+    await errPopup.waitForSelector("#script-list li.script-item", { timeout: 8000 });
+    const popupInd = await errPopup.evaluate(() => [...document.querySelectorAll("li.script-item")].filter((li) => li.querySelector(".err-ind")).map((li) => li.querySelector(".script-name")?.textContent));
+    check("popup shows error indicators", popupInd.includes("Thrower"), JSON.stringify(popupInd));
+    await mgr.click('#script-list li[data-id="s_throws"] .err-ind.runtime');
+    await mgr.waitForTimeout(500);
+    check("clicking the runtime indicator dismisses it", !(await mgr.$('#script-list li[data-id="s_throws"] .err-ind')));
+    await errPopup.close();
+    for (const id of ["s_throws", "s_broken"]) await mgr.evaluate((id: string) => new Promise((r) => chrome.runtime.sendMessage({ type: "deleteScript", id }, r)), id);
     // a reload in the already-attached tab (no first-navigation race)
     await xoPage.reload();
     await xoPage.waitForFunction(() => (window as any).__gz !== undefined, null, { timeout: 15000 }).catch(() => {});
@@ -271,7 +325,7 @@ try {
     // same-origin script; "proxy" (removed strategy) is ignored with a warning
     await mgr.evaluate((origin: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_proxy2", name: "Proxy same-origin",
-        code: `wt.declareScript({ match: ["${origin}/app.js"], strategy: ["proxy", "cdp"], phase: ["response"] });\nres.modifyResponse((ctx, body) => body.replace("ORIGINAL-MARKER", "PROXY-MARKER"));`,
+        code: `wt.declareScript({ match: ["${origin}/app.js"], strategy: ["proxy", "cdp"], phase: ["response"] });\nwt.modifyResponse((ctx, body) => body.replace("ORIGINAL-MARKER", "PROXY-MARKER"));`,
     }, r)), ORIGIN);
     await mgr.waitForTimeout(1500);
     const scriptPage = await ctx.newPage();
@@ -282,7 +336,7 @@ try {
     // WARNED (never silent), and a reload must intercept
     await mgr.evaluate((origin: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_race", name: "Race script",
-        code: `wt.declareScript({ match: ["${origin}/race.js"], strategy: ["cdp"] });\nres.modifyResponse((ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
+        code: `wt.declareScript({ match: ["${origin}/race.js"], strategy: ["cdp"] });\nwt.modifyResponse((ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
     }, r)), ORIGIN);
     await mgr.waitForTimeout(1500);
     const racePage = await ctx.newPage();
@@ -389,7 +443,7 @@ try {
     });
     await warm.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_dom", name: "Early dom",
-        code: `wt.declareScript({ match: ["*://*/*"] });\nres.onDom((ctx) => { document.title = "DOM-RAN:" + document.readyState; }, { when: "document_start" });`,
+        code: `wt.declareScript({ match: ["*://*/*"] });\nwt.onDom((ctx) => { document.title = "DOM-RAN:" + document.readyState; }, { when: "document_start" });`,
     }, r)));
     await warm.waitForTimeout(1500); // cache refresh (pipeline reload warm)
     const domPage = await ctx.newPage();

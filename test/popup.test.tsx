@@ -15,6 +15,10 @@ function fakeApi(scripts: ScriptInfo[], params: Record<string, ScriptParams> = {
             calls.push(["setEnabled", id, enabled]);
             list = list.map((s) => (s.id === id ? { ...s, enabled } : s));
         }),
+        clearError: vi.fn(async (id: string) => {
+            calls.push(["clearError", id]);
+            list = list.map((s) => (s.id === id ? { ...s, runtimeError: null } : s));
+        }),
         getParams: vi.fn(async (id: string) => params[id]),
         setParam: vi.fn(async (...a: any[]) => void calls.push(["setParam", ...a])),
         openManager: vi.fn((id?: string) => void calls.push(["openManager", id])),
@@ -63,9 +67,21 @@ describe("Popup", () => {
         expect(api.calls).toContainEqual(["setEnabled", "a", false]);
     });
 
-    it("marks scripts with errors", async () => {
+    it("marks scripts with compile errors", async () => {
         const { container } = render(<Popup api={fakeApi([script("a", "Alpha", { error: "boom" })])} />);
-        await waitFor(() => expect(container.querySelector(".script-name.error")?.getAttribute("title")).toBe("boom"));
+        await waitFor(() => expect(container.querySelector(".err-ind.compile")?.getAttribute("title")).toContain("boom"));
+        expect(container.querySelector(".script-name.error")).not.toBeNull();
+    });
+
+    it("marks scripts with runtime errors; clicking dismisses", async () => {
+        const api = fakeApi([script("a", "Alpha", { runtimeError: { message: "[Alpha] onRequest threw: x", at: Date.now(), count: 3 } }), script("b", "Beta")]);
+        const { container } = render(<Popup api={api} />);
+        await waitFor(() => expect(container.querySelector(".err-ind.runtime")?.getAttribute("title")).toContain("onRequest threw"));
+        expect(container.querySelector(".err-ind")!.getAttribute("title")).toContain("3×");
+        expect(container.querySelectorAll(".err-ind").length).toBe(1);
+        fireEvent.click(container.querySelector(".err-ind")!);
+        await waitFor(() => expect(container.querySelector(".err-ind")).toBeNull());
+        expect(api.calls).toContainEqual(["clearError", "a"]);
     });
 
     it("opens the manager (all, and on a script)", async () => {
