@@ -17,6 +17,7 @@ import type { BodyScriptInfo, HeaderChanges, HookDisposition, InterceptionStrate
 import type { Script } from "../scriptStore";
 import { log, scriptError } from "../logs";
 import { dlogLevel } from "../../../shared/debugLog";
+import { parseStrategyList } from "../../../shared/metaParser";
 import { scriptStorageGet, scriptStorageSet } from "../scriptStore";
 import { isProcessOwned } from "./processState";
 
@@ -27,10 +28,19 @@ export class WebRequestStrategy implements InterceptionStrategy {
     readonly name = "webrequest";
 
     private compiled: { id: string; name: string; compiled: CompiledScript }[] = [];
+    private mv3Warned = "";
 
     reload(scripts: Script[], paramValues?: { [scriptId: string]: Record<string, any> }): void {
         if (__MV3__) {
-            dlogLevel("webrequest", "warn", `webRequest tier disabled in MV3 (no blocking webRequest) — ${scripts.filter((s) => s.enabled && s.meta.declared).length} enabled script(s) will not intercept via this tier; browser-initiated loads need strategy ["cdp"] or ["process"], page fetch/XHR uses the hook tier`);
+            // only scripts that explicitly ask for this tier lose something
+            const names = scripts
+                .filter((s) => s.enabled && s.meta.declared && parseStrategyList(s.meta.strategy).includes("webrequest"))
+                .map((s) => s.meta.name);
+            const key = names.join("\n");
+            if (names.length && key !== this.mv3Warned) {
+                dlogLevel("webrequest", "warn", `strategy "webrequest" is unavailable in MV3 (no blocking webRequest) — ignored for ${names.map((n) => `"${n}"`).join(", ")}; their other listed strategies still apply (use "cdp" or "process" for browser-initiated loads)`);
+            }
+            this.mv3Warned = key;
             return;
         }
         let resolveSpec: (spec: string) => any = (spec) => {

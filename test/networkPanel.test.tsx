@@ -4,6 +4,16 @@ import { NetworkPanel } from "../src/ui/network/NetworkPanel";
 import { createNetStore } from "../src/ui/network/netStore";
 import type { NetEntry } from "../src/shared/netTypes";
 
+if (typeof (globalThis as any).localStorage === "undefined") {
+    const m = new Map<string, string>();
+    (globalThis as any).localStorage = {
+        getItem: (k: string) => m.get(k) ?? null,
+        setItem: (k: string, v: string) => void m.set(k, String(v)),
+        removeItem: (k: string) => void m.delete(k),
+        clear: () => m.clear(),
+    };
+}
+
 const base = Date.now();
 function entry(id: string, over: Partial<NetEntry> = {}): NetEntry {
     return {
@@ -45,6 +55,45 @@ describe("NetworkPanel", () => {
         expect(rows[0].querySelector(".c-time")!.textContent).toBe("30 ms");
         expect(rows[1].classList.contains("err")).toBe(true);
         expect(container.querySelector(".net-status")!.textContent).toContain("2 requests");
+    });
+
+    it("right-click on the header hides/shows columns (persisted); columns resize by drag", async () => {
+        localStorage.clear();
+        const { container } = setup([entry("a")]);
+        fireEvent.contextMenu(container.querySelector("thead th")!);
+        const item = [...container.querySelectorAll(".net-colmenu li")].find((li) => li.textContent?.includes("Method"))!;
+        expect(item.getAttribute("aria-checked")).toBe("true");
+        fireEvent.click(item);
+        await waitFor(() => expect(container.querySelector("thead .c-method")).toBeNull());
+        expect(container.querySelector("tbody .c-method")).toBeNull();
+        expect(JSON.parse(localStorage.getItem("wt.network.layout")!).hidden).toEqual(["method"]);
+        fireEvent.keyDown(document, { key: "Escape" });
+        await waitFor(() => expect(container.querySelector(".net-colmenu")).toBeNull());
+        // drag the Status column's right edge
+        const handle = container.querySelector("thead .c-status .net-col-resize")!;
+        fireEvent.mouseDown(handle, { clientX: 100 });
+        fireEvent.mouseMove(document, { clientX: 180 });
+        fireEvent.mouseUp(document);
+        await waitFor(() => expect((container.querySelector("thead .c-status") as HTMLElement).style.width).toBe("80px"));
+        // the last visible column (Waterfall) flexes and has no handle
+        expect(container.querySelector("thead .c-wf .net-col-resize")).toBeNull();
+        cleanup();
+        // a fresh panel restores the layout
+        const again = setup([entry("a")]).container;
+        expect(again.querySelector("thead .c-method")).toBeNull();
+        localStorage.clear();
+    });
+
+    it("the details pane resizes with a splitter", async () => {
+        localStorage.clear();
+        const { container } = setup([entry("a")]);
+        fireEvent.click(container.querySelector("tbody tr")!);
+        const splitter = await waitFor(() => container.querySelector(".net-splitter")!);
+        fireEvent.mouseDown(splitter, { clientX: 500 });
+        fireEvent.mouseMove(document, { clientX: 300 });
+        fireEvent.mouseUp(document);
+        await waitFor(() => expect((container.querySelector(".net-details") as HTMLElement).style.flex).toContain("px"));
+        localStorage.clear();
     });
 
     it("streams updates from the store", async () => {

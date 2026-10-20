@@ -37,12 +37,125 @@ const COLUMNS: { key: SortKey; label: string; cls: string }[] = [
     { key: "start", label: "Waterfall", cls: "c-wf" },
 ];
 
+/** Column visibility / widths and the details pane width, kept across sessions */
+interface Layout {
+    hidden: SortKey[];
+    widths: Partial<Record<SortKey, number>>;
+    detailsWidth: number | null;
+}
+const LAYOUT_KEY = "wt.network.layout";
+const DEFAULT_LAYOUT: Layout = { hidden: [], widths: {}, detailsWidth: null };
+const MIN_COL = 36;
+
+function loadLayout(): Layout {
+    try {
+        const v = JSON.parse(localStorage.getItem(LAYOUT_KEY) || "null");
+        if (v && Array.isArray(v.hidden) && v.widths && typeof v.widths === "object") return { ...DEFAULT_LAYOUT, ...v };
+    } catch {}
+    return DEFAULT_LAYOUT;
+}
+
+/** Track a pointer drag from `down`, reporting the x delta; cleans itself up. */
+function dragX(down: MouseEvent, onMove: (dx: number) => void, cursor: string): void {
+    down.preventDefault();
+    down.stopPropagation();
+    const x0 = down.clientX;
+    const prev = document.body.style.cursor;
+    document.body.style.cursor = cursor;
+    document.body.classList.add("net-dragging");
+    const move = (ev: MouseEvent) => onMove(ev.clientX - x0);
+    const up = () => {
+        document.removeEventListener("mousemove", move);
+        document.removeEventListener("mouseup", up);
+        document.body.style.cursor = prev;
+        document.body.classList.remove("net-dragging");
+    };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+}
+
 export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: () => Promise<TabInfo[]> }) {
     const [filter, setFilter] = useState<NetFilter>({ text: "", type: "all", interceptedOnly: false, tabId: null });
     const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "start", dir: 1 });
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [tabs, setTabs] = useState<TabInfo[]>([]);
+    const [layout, setLayoutState] = useState<Layout>(loadLayout);
+    const [colMenu, setColMenu] = useState<{ x: number; y: number } | null>(null);
+    const colMenuRef = useRef<HTMLUListElement>(null);
+    // keep the context menu on-screen (flip up/left near the edges)
+    useLayoutEffect(() => {
+        const el = colMenuRef.current;
+        if (!el || !colMenu) return;
+        const r = el.getBoundingClientRect();
+        const x = r.right > innerWidth ? Math.max(0, colMenu.x - r.width) : colMenu.x;
+        const y = r.bottom > innerHeight ? Math.max(0, colMenu.y - r.height) : colMenu.y;
+        el.style.left = `${x}px`;
+        el.style.top = `${y}px`;
+    }, [colMenu]);
+    const bodyRef = useRef<HTMLDivElement>(null);
+    const setLayout = (next: Layout) => {
+        setLayoutState(next);
+        try {
+            localStorage.setItem(LAYOUT_KEY, JSON.stringify(next));
+        } catch {}
+    };
     const all = store.entries.value;
+    const selected = selectedId ? all.find((e) => e.id === selectedId) || null : null;
+    // Name is always shown; with the details pane open only Name is (like
+    // devtools) so the narrow table never squeezes it out
+    const visible = selected ? COLUMNS.slice(0, 1) : COLUMNS.filter((c) => c.key === "name" || !layout.hidden.includes(c.key));
+    // the last visible column absorbs leftover width
+    const flexKey = visible[visible.length - 1].key;
+    const colWidth = (k: SortKey) => (k === flexKey ? undefined : layout.widths[k]);
+    const minTable = visible.reduce((n, c) => n + (colWidth(c.key) ?? 60), 0);
+
+    useEffect(() => {
+        if (!colMenu) return;
+        const close = (ev: Event) => {
+            if (ev instanceof KeyboardEvent && ev.key !== "Escape") return;
+            if (ev.type === "mousedown" && (ev.target as Element)?.closest?.(".net-colmenu")) return;
+            setColMenu(null);
+        };
+        document.addEventListener("mousedown", close);
+        document.addEventListener("keydown", close);
+        window.addEventListener("blur", close);
+        return () => {
+            document.removeEventListener("mousedown", close);
+            document.removeEventListener("keydown", close);
+            window.removeEventListener("blur", close);
+        };
+    }, [colMenu]);
+
+    const startColResize = (ev: MouseEvent, key: SortKey) => {
+        const th = (ev.currentTarget as HTMLElement).parentElement!;
+        const w0 = th.getBoundingClientRect().width;
+        let cur = layout;
+        dragX(
+            ev,
+            (dx) => {
+                cur = { ...cur, widths: { ...cur.widths, [key]: Math.max(MIN_COL, Math.round(w0 + dx)) } };
+                setLayoutState(cur);
+            },
+            "col-resize",
+        );
+        document.addEventListener("mouseup", () => setLayout(cur), { once: true });
+    };
+    const startDetailsResize = (ev: MouseEvent) => {
+        const body = bodyRef.current!;
+        const details = body.querySelector(".net-details") as HTMLElement;
+        const w0 = details.getBoundingClientRect().width;
+        const max = body.getBoundingClientRect().width - 120;
+        let cur = layout;
+        dragX(
+            ev,
+            (dx) => {
+                cur = { ...cur, detailsWidth: Math.round(Math.min(max, Math.max(200, w0 - dx))) };
+                setLayoutState(cur);
+            },
+            "col-resize",
+        );
+        document.addEventListener("mouseup", () => setLayout(cur), { once: true });
+    };
 
     const rows = useMemo(() => {
         const out = all.filter((e) => matches(e, filter));
@@ -66,7 +179,6 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
         if (el && atBottom.current && sort.key === "start" && sort.dir === 1) el.scrollTop = el.scrollHeight;
     }, [rows]);
 
-    const selected = selectedId ? all.find((e) => e.id === selectedId) || null : null;
     useEffect(() => {
         const onKey = (ev: KeyboardEvent) => {
             if (ev.key === "Escape" && selectedId) setSelectedId(null);
@@ -77,8 +189,7 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
 
     // refresh on focus only: replacing <option>s while the native dropdown
     // is open (mousedown) closes it / drops the pick in Chromium
-    const refreshTabs = () =>
-        void listTabs?.().then((next) => setTabs((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next)));
+    const refreshTabs = () => void listTabs?.().then((next) => setTabs((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next)));
     useEffect(refreshTabs, []);
     const tabOptions =
         filter.tabId !== null && !tabs.some((t) => t.id === filter.tabId) ? [...tabs, { id: filter.tabId, title: `Tab ${filter.tabId} (closed)` }] : tabs;
@@ -137,7 +248,7 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
                     ))}
                 </div>
             </div>
-            <div class={selected ? "net-body with-details" : "net-body"}>
+            <div class={selected ? "net-body with-details" : "net-body"} ref={bodyRef}>
                 <div
                     class="net-table-wrap"
                     ref={scroller}
@@ -146,25 +257,56 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
                         atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
                     }}
                 >
-                    <table class="net-table">
-                        <thead>
+                    <table class="net-table" style={{ minWidth: `${minTable}px` }}>
+                        <thead
+                            onContextMenu={(ev) => {
+                                ev.preventDefault();
+                                setColMenu({ x: ev.clientX, y: ev.clientY });
+                            }}
+                        >
                             <tr>
-                                {COLUMNS.map((c) => (
-                                    <th
-                                        key={c.key}
-                                        class={c.cls}
-                                        aria-sort={sort.key === c.key ? (sort.dir === 1 ? "ascending" : "descending") : undefined}
-                                        onClick={() => setSort(sort.key === c.key ? { key: c.key, dir: sort.dir === 1 ? -1 : 1 } : { key: c.key, dir: 1 })}
-                                    >
-                                        {c.label}
-                                        {sort.key === c.key && <span class="net-sort">{sort.dir === 1 ? "▲" : "▼"}</span>}
-                                    </th>
-                                ))}
+                                {visible.map((c) => {
+                                    const w = colWidth(c.key);
+                                    return (
+                                        <th
+                                            key={c.key}
+                                            class={c.cls}
+                                            style={w !== undefined ? { width: `${w}px` } : c.key === flexKey ? { width: "auto" } : undefined}
+                                            aria-sort={sort.key === c.key ? (sort.dir === 1 ? "ascending" : "descending") : undefined}
+                                            title="Click to sort · right-click to choose columns"
+                                            onClick={() => setSort(sort.key === c.key ? { key: c.key, dir: sort.dir === 1 ? -1 : 1 } : { key: c.key, dir: 1 })}
+                                        >
+                                            {c.label}
+                                            {sort.key === c.key && <span class="net-sort">{sort.dir === 1 ? "▲" : "▼"}</span>}
+                                            {c.key !== flexKey && (
+                                                <span
+                                                    class="net-col-resize"
+                                                    aria-hidden="true"
+                                                    onMouseDown={(ev) => startColResize(ev, c.key)}
+                                                    onClick={(ev) => ev.stopPropagation()}
+                                                    onDblClick={(ev) => {
+                                                        ev.stopPropagation();
+                                                        const widths = { ...layout.widths };
+                                                        delete widths[c.key];
+                                                        setLayout({ ...layout, widths });
+                                                    }}
+                                                />
+                                            )}
+                                        </th>
+                                    );
+                                })}
                             </tr>
                         </thead>
                         <tbody>
                             {rows.map((e) => (
-                                <Row key={e.id} e={e} span={span} selected={e.id === selectedId} onSelect={() => setSelectedId(e.id === selectedId ? null : e.id)} />
+                                <Row
+                                    key={e.id}
+                                    e={e}
+                                    span={span}
+                                    cols={visible.map((c) => c.key)}
+                                    selected={e.id === selectedId}
+                                    onSelect={() => setSelectedId(e.id === selectedId ? null : e.id)}
+                                />
                             ))}
                         </tbody>
                     </table>
@@ -174,8 +316,38 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
                         </div>
                     )}
                 </div>
-                {selected && <Details e={selected} onClose={() => setSelectedId(null)} />}
+                {selected && <div class="net-splitter" role="separator" aria-orientation="vertical" title="Drag to resize" onMouseDown={startDetailsResize} />}
+                {selected && <Details e={selected} width={layout.detailsWidth} onClose={() => setSelectedId(null)} />}
             </div>
+            {colMenu && (
+                <ul class="net-colmenu" role="menu" ref={colMenuRef} style={{ left: `${colMenu.x}px`, top: `${colMenu.y}px` }}>
+                    {COLUMNS.filter((c) => c.key !== "name").map((c) => {
+                        const on = !layout.hidden.includes(c.key);
+                        return (
+                            <li
+                                key={c.key}
+                                role="menuitemcheckbox"
+                                aria-checked={on}
+                                onClick={() => setLayout({ ...layout, hidden: on ? [...layout.hidden, c.key] : layout.hidden.filter((k) => k !== c.key) })}
+                            >
+                                <span class="net-colmenu-check">{on ? "✓" : ""}</span>
+                                {c.label}
+                            </li>
+                        );
+                    })}
+                    <li class="sep" role="separator" />
+                    <li
+                        role="menuitem"
+                        onClick={() => {
+                            setLayout(DEFAULT_LAYOUT);
+                            setColMenu(null);
+                        }}
+                    >
+                        <span class="net-colmenu-check" />
+                        Reset columns
+                    </li>
+                </ul>
+            )}
             <div class="net-status">
                 {rows.length === all.length ? `${all.length} requests` : `${rows.length} / ${all.length} requests`}
                 {" · "}
@@ -200,46 +372,110 @@ function scriptNames(e: NetEntry): string[] {
     return [...new Set(e.interventions.map((i) => i.scriptName))];
 }
 
-function Row({ e, span, selected, onSelect }: { e: NetEntry; span: { t0: number; total: number }; selected: boolean; onSelect: () => void }) {
+function Row({
+    e,
+    span,
+    cols,
+    selected,
+    onSelect,
+}: {
+    e: NetEntry;
+    span: { t0: number; total: number };
+    cols: SortKey[];
+    selected: boolean;
+    onSelect: () => void;
+}) {
     const { name, host } = displayName(e.url);
     const ms = duration(e);
     const left = ((e.startedAt - span.t0) / span.total) * 100;
     const width = Math.max(0.5, (((e.endedAt ?? span.t0 + span.total) - e.startedAt) / span.total) * 100);
     return (
         <tr class={rowClass(e, selected)} onClick={onSelect} title={e.url}>
-            <td class="c-name">
-                <span class="net-name">{name}</span>
-                <span class="net-host">{host}</span>
-            </td>
-            <td class="c-status">{statusText(e)}</td>
-            <td class="c-method">{e.method}</td>
-            <td class="c-type">{typeLabel(e)}</td>
-            <td class="c-script">
-                {scriptNames(e).map((n) => (
-                    <span key={n} class="net-badge" title={e.interventions.filter((i) => i.scriptName === n).map((i) => i.action).join("\n")}>
-                        {n}
-                    </span>
-                ))}
-            </td>
-            <td class="c-size">{e.fromCache ? "(cache)" : formatBytes(e.size)}</td>
-            <td class="c-time">{e.synthetic ? "—" : formatMs(ms)}</td>
-            <td class="c-wf">
-                <div class="net-wf">
-                    <div class={e.state === "pending" ? "net-wf-bar pending" : "net-wf-bar"} style={{ left: `${left}%`, width: `${Math.min(width, 100 - left)}%` }} />
-                </div>
-            </td>
+            {cols.map((k) => cell(k))}
         </tr>
     );
+    function cell(k: SortKey) {
+        switch (k) {
+            case "name":
+                return (
+                    <td key={k} class="c-name">
+                        <span class="net-name">{name}</span>
+                        <span class="net-host">{host}</span>
+                    </td>
+                );
+            case "status":
+                return (
+                    <td key={k} class="c-status">
+                        {statusText(e)}
+                    </td>
+                );
+            case "method":
+                return (
+                    <td key={k} class="c-method">
+                        {e.method}
+                    </td>
+                );
+            case "type":
+                return (
+                    <td key={k} class="c-type">
+                        {typeLabel(e)}
+                    </td>
+                );
+            case "script":
+                return (
+                    <td key={k} class="c-script">
+                        {scriptNames(e).map((n) => (
+                            <span
+                                key={n}
+                                class="net-badge"
+                                title={e.interventions
+                                    .filter((i) => i.scriptName === n)
+                                    .map((i) => i.action)
+                                    .join("\n")}
+                            >
+                                {n}
+                            </span>
+                        ))}
+                    </td>
+                );
+            case "size":
+                return (
+                    <td key={k} class="c-size">
+                        {e.fromCache ? "(cache)" : formatBytes(e.size)}
+                    </td>
+                );
+            case "time":
+                return (
+                    <td key={k} class="c-time">
+                        {e.synthetic ? "—" : formatMs(ms)}
+                    </td>
+                );
+            default:
+                return (
+                    <td key={k} class="c-wf">
+                        <div class="net-wf">
+                            <div
+                                class={e.state === "pending" ? "net-wf-bar pending" : "net-wf-bar"}
+                                style={{ left: `${left}%`, width: `${Math.min(width, 100 - left)}%` }}
+                            />
+                        </div>
+                    </td>
+                );
+        }
+    }
 }
 
 type DetailTab = "headers" | "payload" | "response" | "wiretrick";
 
-function Details({ e, onClose }: { e: NetEntry; onClose: () => void }) {
+function Details({ e, width, onClose }: { e: NetEntry; width: number | null; onClose: () => void }) {
     const [tab, setTab] = useState<DetailTab>(e.interventions.length ? "wiretrick" : "headers");
     const general: [string, string | undefined][] = [
         ["Request URL", e.url],
         ["Request Method", e.method],
-        ["Status Code", e.state === "failed" ? e.error : e.status === null ? (e.synthetic ? "served by a script" : "pending") : `${e.status} ${e.statusText}`.trim()],
+        [
+            "Status Code",
+            e.state === "failed" ? e.error : e.status === null ? (e.synthetic ? "served by a script" : "pending") : `${e.status} ${e.statusText}`.trim(),
+        ],
         ["Redirected To", e.redirectTo],
         ["Remote Address", e.ip],
         ["Type", typeLabel(e)],
@@ -249,7 +485,7 @@ function Details({ e, onClose }: { e: NetEntry; onClose: () => void }) {
         ["Duration", e.synthetic ? undefined : formatMs(duration(e))],
     ];
     return (
-        <div class="net-details">
+        <div class="net-details" style={width ? { flex: `0 0 ${width}px` } : undefined}>
             <div class="net-details-tabs">
                 <button class="net-details-close" title="Close (Esc)" aria-label="Close details" onClick={onClose}>
                     ✕
@@ -266,7 +502,8 @@ function Details({ e, onClose }: { e: NetEntry; onClose: () => void }) {
                     Response
                 </button>
                 <button class={tab === "wiretrick" ? "active" : ""} onClick={() => setTab("wiretrick")}>
-                    Wiretrick{e.interventions.length ? ` (${e.interventions.length})` : ""}
+                    Wiretrick
+                    {e.interventions.length ? ` (${e.interventions.length})` : ""}
                 </button>
             </div>
             <div class="net-details-body">
@@ -318,7 +555,11 @@ function BodyView({ body, mime }: { body?: NetBody; mime: string }) {
     if (body.binary) return <div class="net-empty">{body.text || `(binary, ${formatBytes(body.size)})`}</div>;
     return (
         <>
-            {body.truncated && <div class="net-note">Showing the first {formatBytes(body.text.length)} of {formatBytes(body.size)}.</div>}
+            {body.truncated && (
+                <div class="net-note">
+                    Showing the first {formatBytes(body.text.length)} of {formatBytes(body.size)}.
+                </div>
+            )}
             <pre class="net-payload">{prettyBody(body.text, mime)}</pre>
         </>
     );
@@ -329,8 +570,8 @@ function ResponseView({ e }: { e: NetEntry }) {
     if (!e.responseBody)
         return (
             <div class="net-empty">
-                Response body not available — browsers don't expose response bodies to extensions, so it is captured only for responses a Wiretrick
-                script handled.
+                Response body not available — browsers don't expose response bodies to extensions, so it is captured only for responses a Wiretrick script
+                handled.
             </div>
         );
     const mime = e.mime || headerOf(e.responseHeaders, "content-type");

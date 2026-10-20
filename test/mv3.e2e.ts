@@ -321,7 +321,7 @@ try {
     // scripts declaring the same top-level name must not collide
     for (const [id, name, code] of [
         ["s_typed", "Typed", `wt.declareScript({ match: ["*://typed.invalid/*"] });\nconst cfg = 1;\nconst n: number = "not a number";`],
-        ["s_typed2", "Typed2", `wt.declareScript({ match: ["*://typed2.invalid/*"] });\nconst cfg = 2;`],
+        ["s_typed2", "Typed2", `wt.declareScript({ match: ["*://typed2.invalid/*"] });\nconst cfg = 2;\nexport function never() { console.log(new TextDecoder().decode(new Uint8Array()), new URL("x"), fetch, cfg); }`],
     ]) await mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage({ type: "saveScript", ...m }, r)), { id, name, code });
     await mgr.waitForSelector('#script-list li[data-id="s_typed"] .err-ind.types', { timeout: 15000 }).catch(() => {});
     const typed = await mgr.evaluate(() => ({
@@ -330,7 +330,7 @@ try {
         logged: [...document.querySelectorAll("#log-entries .log-line.error")].map((l) => (l as HTMLElement).dataset.text || l.textContent || "").filter((t) => t.includes("type error")),
     }));
     check("TypeScript error → types indicator in the manager list", typed.badge.includes("line 3:") && !typed.badge.includes("cfg"), JSON.stringify(typed));
-    check("scripts don't share a global scope (no redeclare errors)", typed.clean, JSON.stringify(typed));
+    check("scripts don't share a global scope; DOM globals (TextDecoder…) are typed", typed.clean, JSON.stringify(typed));
     check("TypeScript error logged at ERROR level", typed.logged.some((t: string) => t.includes("[Typed] type error: line 3")), JSON.stringify(typed.logged));
     const typedPopup = await ctx.newPage();
     await typedPopup.goto(`chrome-extension://${extId}/popup.html`);

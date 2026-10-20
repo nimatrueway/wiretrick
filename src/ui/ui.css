@@ -171,7 +171,7 @@ html, body {
 
 #log-panel {
     border-top: 1px solid var(--border);
-    height: 180px;
+    height: clamp(260px, 38vh, 460px);
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
@@ -505,7 +505,22 @@ html, body {
 
 .net-body { display: flex; flex: 1; min-height: 0; }
 .net-table-wrap { flex: 1; overflow: auto; min-width: 0; }
-.net-body.with-details .net-table-wrap { flex: 0 0 38%; }
+.net-details { flex: 0 0 62%; }
+.net-splitter { flex: 0 0 4px; margin: 0 -2px; cursor: col-resize; z-index: 2; position: relative; }
+.net-splitter:hover, body.net-dragging .net-splitter { background: var(--accent); }
+body.net-dragging { user-select: none; }
+.net-table th { position: sticky; }
+.net-col-resize { position: absolute; top: 0; right: -3px; width: 6px; height: 100%; cursor: col-resize; z-index: 2; }
+.net-col-resize:hover { background: var(--accent); opacity: 0.6; }
+.net-colmenu {
+    position: fixed; z-index: 1000; list-style: none; margin: 0; padding: 4px 0; min-width: 150px;
+    background: var(--bg-panel); border: 1px solid var(--border); border-radius: 4px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.5); font-size: 12px;
+}
+.net-colmenu li { padding: 3px 12px 3px 6px; cursor: pointer; display: flex; gap: 6px; }
+.net-colmenu li:hover { background: var(--accent); color: #fff; }
+.net-colmenu li.sep { height: 1px; padding: 0; margin: 4px 0; background: var(--border); cursor: default; }
+.net-colmenu-check { width: 12px; text-align: center; }
 .net-table { width: 100%; border-collapse: collapse; table-layout: fixed; font: 11px/1.5 "SF Mono", Menlo, Consolas, monospace; }
 .net-table th {
     position: sticky; top: 0; z-index: 1; background: var(--bg-panel);
@@ -552,7 +567,7 @@ html, body {
 }
 .net-hl { color: var(--ok); }
 
-.net-details { flex: 1; min-width: 0; display: flex; flex-direction: column; border-left: 1px solid var(--border); }
+.net-details { min-width: 0; display: flex; flex-direction: column; border-left: 1px solid var(--border); }
 .net-details-tabs { display: flex; gap: 4px; align-items: center; padding: 2px 6px; border-bottom: 1px solid var(--border); }
 .net-details-tabs button.active { color: var(--fg); border-bottom: 1px solid var(--accent); border-radius: 0; }
 .net-details-body { overflow: auto; padding: 4px 10px; flex: 1; }
@@ -575,7 +590,8 @@ html, body {
 /* narrow (docked right): drop secondary columns like devtools does */
 @container (max-width: 560px) {
     .net-table .c-method, .net-table .c-type, .net-table .c-wf { display: none; }
-    .net-body.with-details .net-table-wrap { display: none; }
+    .net-body.with-details .net-table-wrap, .net-body.with-details .net-splitter { display: none; }
+    .net-body.with-details .net-details { flex: 1 1 auto !important; }
 }
 @container (max-width: 380px) {
     .net-table .c-size, .net-table .c-script { display: none; }
