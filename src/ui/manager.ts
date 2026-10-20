@@ -6,6 +6,7 @@ import { loadMonaco, STARTER_TEMPLATE } from "./monacoSetup";
 import { API_REFERENCE } from "./apiReference";
 import { SAMPLES } from "./samples";
 import * as fsBridge from "./fsBridge";
+import { cleanScriptName, scriptNameProblem, scriptFileName, MAX_NAME } from "../shared/scriptName";
 import { buildBundle, parseBundleText, bundleSettingsDoc, vscodeTargetPath } from "./bundle";
 import { createQuickOpenPalette } from "./quickOpen";
 import { computeDirty } from "./dirtyState";
@@ -241,21 +242,13 @@ function renderList(): void {
     }
 }
 
-/**
- * Script names double as file names (spaces ↔ "_"), so only characters that
- * survive that round-trip are allowed: letters, digits, "-" and single spaces.
- */
-function cleanScriptName(raw: string): string {
-    return raw.replace(/[^A-Za-z0-9 -]+/g, "").replace(/ {2,}/g, " ").slice(0, 60);
-}
-
 /** Inline rename in the script list (double-click a name). */
 function startRename(label: HTMLElement, script: Script): void {
     const input = document.createElement("input");
     input.className = "script-rename";
     input.value = cleanScriptName(script.meta.name);
-    input.maxLength = 60;
-    input.title = "Letters, digits, '-' and spaces (the name is also the file name)";
+    input.maxLength = MAX_NAME;
+    input.title = 'The name is also the file name: any characters except < > : " / \\ | ? *';
     input.addEventListener("input", () => {
         const clean = cleanScriptName(input.value);
         if (clean === input.value) return;
@@ -275,12 +268,14 @@ function startRename(label: HTMLElement, script: Script): void {
         done = true;
         renaming = false;
         const next = cleanScriptName(input.value).trim();
+        let problem = commit && next && next !== script.meta.name ? scriptNameProblem(next) : "";
         const clash =
-            commit && next
+            commit && next && !problem
                 ? scripts.find((s) => s.id !== script.id && fsBridge.fileNameFor(s.id, s.meta.name).toLowerCase() === fsBridge.fileNameFor(script.id, next).toLowerCase())
                 : undefined;
-        if (clash) status(`a script named "${clash.meta.name}" already exists`, "error");
-        if (!commit || !next || next === script.meta.name || clash) {
+        if (clash) problem = `a script named "${clash.meta.name}" already exists`;
+        if (problem) status(`can't rename: ${problem}`, "error");
+        if (!commit || !next || next === script.meta.name || problem) {
             input.replaceWith(label);
             renderList(); // catch up on updates skipped while renaming
             return;
@@ -361,8 +356,8 @@ function restoreViewState(m: any): void {
     if (vs) editor.restoreViewState(vs);
 }
 
-function safeFileName(name: string): string {
-    return (name || "script").replace(/[^a-zA-Z0-9_-]+/g, "_").slice(0, 60) || "script";
+function scriptUri(name: string): any {
+    return (window as any).monaco.Uri.file("/" + scriptFileName(name));
 }
 
 function syncModels(): void {
@@ -371,7 +366,7 @@ function syncModels(): void {
     const seen = new Set<string>();
     for (const s of scripts) {
         seen.add(s.id);
-        const uri = monaco.Uri.parse(`file:///${safeFileName(s.meta.name)}.ts`);
+        const uri = scriptUri(s.meta.name);
         let m = models.get(s.id);
         if (m && m.uri.toString() !== uri.toString()) {
             // renamed: move to a model at the new path, keeping any unsaved
@@ -958,10 +953,6 @@ async function refreshSyncPath(): Promise<void> {
     chrome.storage.local.get("resVscodePath", (d) => {
         (window as any).__resSyncPath = (d && d.resVscodePath) || "";
     });
-}
-
-function displayNameFromFile(fileName: string): string {
-    return fileName.replace(/\.ts$/, "").replace(/_/g, " ").slice(0, 60) || "Imported script";
 }
 
 function newId(): string {

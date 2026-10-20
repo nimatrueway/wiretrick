@@ -11,6 +11,7 @@
  */
 
 import { loadSavedHandle, clearSavedHandle, saveHandle } from "../shared/folderSync";
+import { scriptFileName } from "../shared/scriptName";
 
 const WT_API_DTS_URL = "lib/wt-api.d.ts";
 
@@ -114,7 +115,7 @@ export function stopSync(): Promise<void> {
 
 /** Injective file name: sanitized display name + .ts */
 export function fileNameFor(_id: string, name: string): string {
-    return safeName(name) + ".ts";
+    return scriptFileName(name);
 }
 
 /** Does this script's display name correspond to this file? */
@@ -122,9 +123,6 @@ export function matchesFile(scriptName: string, fileName: string): boolean {
     return fileNameFor("", scriptName) === fileName;
 }
 
-function safeName(name: string): string {
-    return (name || "script").replace(/[^a-zA-Z0-9_-]+/g, "_").slice(0, 60) || "script";
-}
 
 /**
  * Try to reconnect the saved dedicated folder silently (background).

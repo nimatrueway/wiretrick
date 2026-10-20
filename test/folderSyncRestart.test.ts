@@ -68,19 +68,21 @@ describe("scripts folder sync", () => {
         await sync.stop();
     });
 
-    it("renames a non-canonical copied file so later edits still apply", async () => {
+    it("keeps any valid file name as-is; renames only names a script can't round-trip", async () => {
         const sync = await import("../src/background/folderSync");
         await sync.startFromStoredHandle({ fresh: true });
-        put("my script (copy).ts", "// v1");
+        put("my script (copy).ts", "// kept");
+        put("a:b.ts", "// v1"); // legal on Linux, not on Windows
         await sleep(1500);
-        expect(await names()).toEqual(["my script (copy)"]);
-        expect(files.has("my script (copy).ts")).toBe(false);
-        expect(files.get("my_script_copy_.ts")?.text).toBe("// v1");
+        expect(await names()).toEqual(["a:b", "my script (copy)"]);
+        expect(files.get("my script (copy).ts")?.text).toBe("// kept");
+        expect(files.has("a:b.ts")).toBe(false);
+        expect(files.get("a_b.ts")?.text).toBe("// v1");
 
-        put("my_script_copy_.ts", "// v2");
+        put("a_b.ts", "// v2");
         await sleep(1500);
         const ss = await import("../src/background/engine/scriptStore");
-        expect((await ss.listScripts())[0].code).toBe("// v2");
+        expect((await ss.listScripts()).find((s) => s.meta.name === "a:b")?.code).toBe("// v2");
         await sync.stop();
     });
 
@@ -102,9 +104,9 @@ describe("scripts folder sync", () => {
         await ss.saveScript({ id: "s3", code: "// ext older", name: "file newer" });
         await ss.saveScript({ id: "s4", code: "// same", name: "same" });
         const saved = Object.fromEntries((await ss.listScripts()).map((s) => [s.meta.name, s.updatedAt]));
-        files.set("file_only.ts", { text: "// only in folder", t: 1 });
-        files.set("ext_newer.ts", { text: "// file older", t: saved["ext newer"] - 1000 });
-        files.set("file_newer.ts", { text: "// file newer", t: saved["file newer"] + 1000 });
+        files.set("file only.ts", { text: "// only in folder", t: 1 });
+        files.set("ext newer.ts", { text: "// file older", t: saved["ext newer"] - 1000 });
+        files.set("file newer.ts", { text: "// file newer", t: saved["file newer"] + 1000 });
         files.set("same.ts", { text: "// same", t: 1 });
 
         const sync = await import("../src/background/folderSync");
@@ -118,9 +120,9 @@ describe("scripts folder sync", () => {
             same: "// same",
             "file only": "// only in folder",
         });
-        expect(files.get("ext_only.ts")?.text).toBe("// only in ext");
-        expect(files.get("ext_newer.ts")?.text).toBe("// ext newer");
-        expect(files.get("file_newer.ts")?.text).toBe("// file newer");
+        expect(files.get("ext only.ts")?.text).toBe("// only in ext");
+        expect(files.get("ext newer.ts")?.text).toBe("// ext newer");
+        expect(files.get("file newer.ts")?.text).toBe("// file newer");
 
         // nothing echoes back on the next polls
         await sleep(1200);
@@ -140,6 +142,18 @@ describe("scripts folder sync", () => {
         sync = await import("../src/background/folderSync");
         await sync.startFromStoredHandle(); // reconnect
         expect(await names()).toEqual(["kept"]);
+        await sync.stop();
+    });
+
+    it("migrates old underscore file names to the exact script name", async () => {
+        const ss = await import("../src/background/engine/scriptStore");
+        await ss.saveScript({ id: "m1", code: "// same", name: "Redirect a URL" });
+        put("Redirect_a_URL.ts", "// same");
+        put("my notes (v2).ts", "// imported");
+        const sync = await import("../src/background/folderSync");
+        await sync.startFromStoredHandle({ fresh: true });
+        expect([...files.keys()].filter((f) => f.endsWith(".ts") && !f.endsWith(".d.ts")).sort()).toEqual(["Redirect a URL.ts", "my notes (v2).ts"]);
+        expect(await names()).toEqual(["Redirect a URL", "my notes (v2)"]);
         await sync.stop();
     });
 });

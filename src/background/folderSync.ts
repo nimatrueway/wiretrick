@@ -11,12 +11,13 @@ import { SETTINGS_FILE, SCHEMA_FILE } from "../shared/settingsYaml";
 import { SETTINGS_SCHEMA_JSON } from "../shared/settingsSchema";
 import { broadcastToUi } from "./engine/logs";
 import { dlogLevel } from "../shared/debugLog";
+import { scriptFileName, scriptNameFromFile, legacyScriptFileName } from "../shared/scriptName";
 const POLL_MS = 1000;
 const SCRIPT_EXT = ".ts";
 
 /** canonical script file name for a display name */
 function canonicalFileName(name: string): string {
-    return safeName(name) + SCRIPT_EXT;
+    return scriptFileName(name);
 }
 
 /** legacy <name>.script.ts → canonical <name>.ts */
@@ -133,21 +134,12 @@ async function migrateLegacy(fileName: string, content: string): Promise<void> {
 
 /** Script-id lookup: filename → enabled script (fileNameFor is name-based). */
 async function findScriptByFile(fileName: string) {
-    const nameNoExt = fileName.replace(/\.ts$/, "");
     const scripts = await listScripts();
-    return scripts.find((s) => sanitize(s.meta.name) === nameNoExt) || null;
-}
-
-function safeName(name: string): string {
-    return (name || "script").replace(/[^a-zA-Z0-9_-]+/g, "_").slice(0, 60) || "script";
-}
-
-function sanitize(displayName: string): string {
-    return safeName(displayName);
+    return scripts.find((s) => canonicalFileName(s.meta.name) === fileName) || null;
 }
 
 function displayNameFromFile(fileName: string): string {
-    return fileName.replace(/\.ts$/, "").replace(/_/g, " ").slice(0, 60) || "Imported script";
+    return scriptNameFromFile(fileName);
 }
 
 async function applyEvents(events: ReturnType<typeof computeEvents>): Promise<void> {
@@ -251,6 +243,30 @@ async function adoptCanonicalName(fileName: string, scriptName: string, code: st
 }
 
 /**
+ * Files used to be named by a lossy mapping ("Redirect a URL" →
+ * "Redirect_a_URL.ts"); now the file name is the script name. Rename old
+ * files whose script has no file under its exact name yet.
+ */
+async function migrateLegacyNames(seen: Map<string, FileSig>, byFile: Map<string, any>): Promise<void> {
+    for (const [canonical, s] of byFile) {
+        const legacy = legacyScriptFileName(s.meta.name);
+        if (legacy === canonical || seen.has(canonical) || !seen.has(legacy) || byFile.has(legacy)) continue;
+        try {
+            const text = await readText(legacy);
+            await writeBack(canonical, text);
+            await dirHandle.removeEntry(realNameOf.get(legacy) || legacy);
+            const f = await (await dirHandle.getFileHandle(canonical)).getFile();
+            seen.delete(legacy);
+            realNameOf.delete(legacy);
+            seen.set(canonical, { lastModified: f.lastModified, size: f.size });
+            dlogLevel("sync", "info", `Folder sync: renamed "${legacy}" → "${canonical}" (file names now match script names exactly)`);
+        } catch (e: any) {
+            dlogLevel("sync", "warn", `Folder sync: renaming "${legacy}" → "${canonical}" failed: ${e?.message || e}`);
+        }
+    }
+}
+
+/**
  * Two-way sync when a folder is picked or (re)connected: files with no script are
  * imported, scripts with no file are written out, and when both exist but
  * differ the newer one wins (file mtime vs. the script's last save).
@@ -260,6 +276,7 @@ async function initialSync(): Promise<void> {
     realNameOf = aliases;
     const scripts = await listScripts();
     const byFile = new Map(scripts.map((s) => [canonicalFileName(s.meta.name), s]));
+    await migrateLegacyNames(seen, byFile);
     let pulled = 0;
     let pushed = 0;
     let imported = 0;

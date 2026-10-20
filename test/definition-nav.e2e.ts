@@ -87,7 +87,7 @@ const goToDefinition = () => mgr.keyboard.press("F12");
 
 // cold: main is the initially auto-selected script; utilities was never displayed
 const initial = await state();
-check("cold: initial model is main (utilities never opened)", initial.uri === "file:///main_script.ts" && initial.selected.includes("main script"), JSON.stringify(initial));
+check("cold: initial model is main (utilities never opened)", initial.uri === "file:///main%20script.ts" && initial.selected.includes("main script"), JSON.stringify(initial));
 await setCursor(4, 2);
 // on `helper(1)`
 const deadline = Date.now() + 15000;
@@ -108,7 +108,7 @@ await clickScript("utilities");
 await setCursor(2, 1);
 await clickScript("main script");
 const vsRestored = await state();
-check("view state: cursor restored after switching back", vsRestored.uri === "file:///main_script.ts" && JSON.stringify(vsRestored.sel) === "[5,2,5,2]", JSON.stringify(vsRestored));
+check("view state: cursor restored after switching back", vsRestored.uri === "file:///main%20script.ts" && JSON.stringify(vsRestored.sel) === "[5,2,5,2]", JSON.stringify(vsRestored));
 await clickScript("utilities");
 const vsUtil = await state();
 check("view state: utilities cursor restored too", vsUtil.uri === "file:///utilities.ts" && JSON.stringify(vsUtil.sel) === "[2,1,2,1]", JSON.stringify(vsUtil));
@@ -146,7 +146,7 @@ await goToDefinition();
 await mgr.waitForTimeout(1000);
 const same = await state();
 const sameText = await mgr.evaluate(() => (window as any).monaco.editor.getEditors()[0].getValue());
-check("same-file: stays, selects local, no dialog, edit kept", dialogs === 0 && !!same.uri?.endsWith("/main_script.ts") && JSON.stringify(same.sel) === "[4,10,4,10]" && sameText.includes("// dirty"), JSON.stringify(same) + ` dialogs=${dialogs}`);
+check("same-file: stays, selects local, no dialog, edit kept", dialogs === 0 && !!same.uri?.endsWith("/main%20script.ts") && JSON.stringify(same.sel) === "[4,10,4,10]" && sameText.includes("// dirty"), JSON.stringify(same) + ` dialogs=${dialogs}`);
 
 // view-state restore must not litter the log with Monaco's benign Canceled
 // rejections — filter proof first (a real rejection must still be logged)
@@ -216,10 +216,26 @@ const renameTo = async (from: string, typed: string): Promise<void> => {
     await mgr.press(".script-rename", "Enter");
     await mgr.waitForTimeout(1200);
 };
-await renameTo("utils renamed", "my/util: v2.x  (beta)");
-check("rename: unsafe characters dropped", (await listScripts()).find((s: any) => s.id === "u_util")?.meta.name === "myutil v2x beta", (await listScripts()).find((s: any) => s.id === "u_util")?.meta.name);
-await renameTo("myutil v2x beta", "Main Script");
-check("rename: clashing name refused", (await listScripts()).find((s: any) => s.id === "u_util")?.meta.name === "myutil v2x beta");
+await renameTo("utils renamed", "my/util: v2.x (beta) é_1");
+check("rename: only forbidden characters dropped", (await listScripts()).find((s: any) => s.id === "u_util")?.meta.name === "myutil v2.x (beta) é_1", (await listScripts()).find((s: any) => s.id === "u_util")?.meta.name);
+await renameTo("myutil v2.x", "Main Script");
+check("rename: clashing name refused", (await listScripts()).find((s: any) => s.id === "u_util")?.meta.name === "myutil v2.x (beta) é_1");
+await renameTo("myutil v2.x", "con");
+check("rename: reserved name refused", (await listScripts()).find((s: any) => s.id === "u_util")?.meta.name === "myutil v2.x (beta) é_1");
+
+// an import by the exact (spaced) name resolves in the editor
+await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "saveScript", id: "u_sp", name: "my lib (v2)", code: "export const answer = 42;\n" }, r)));
+await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "saveScript", id: "s_sp", name: "uses lib", code: 'import { answer } from "./my lib (v2)";\nexport const n: number = answer;\n' }, r)));
+answer = true;
+await mgr.reload();
+await mgr.waitForFunction(() => (window as any).monaco?.editor?.getEditors?.().length);
+await clickScript("uses lib");
+await mgr.waitForTimeout(3000);
+const markers = await mgr.evaluate(() => {
+    const m = (window as any).monaco;
+    return m.editor.getModelMarkers({ resource: m.editor.getEditors()[0].getModel().uri }).map((x: any) => x.message);
+});
+check("spaced import resolves (no diagnostics)", markers.length === 0, JSON.stringify(markers));
 
 } catch (e) {
     failed++;

@@ -102,7 +102,7 @@ try {
 
     // ---- VS Code shortcuts: Cmd+/ toggles a comment, Cmd+P quick-opens settings.yaml ----
     await mgr.locator(".script-item", { hasText: "Debug header" }).click();
-    await mgr.waitForFunction(() => (window as any).monaco.editor.getEditors()[0].getModel()?.uri.toString() === "file:///Debug_header.ts");
+    await mgr.waitForFunction(() => (window as any).monaco.editor.getEditors()[0].getModel()?.uri.toString() === "file:///Debug%20header.ts");
     await mgr.locator("#monaco-host").click();
     await mgr.evaluate(() => (window as any).monaco.editor.getEditors()[0].setPosition({ lineNumber: 1, column: 1 }));
     const line1Before = await mgr.evaluate(() => (window as any).monaco.editor.getEditors()[0].getModel().getLineContent(1));

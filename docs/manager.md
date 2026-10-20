@@ -10,8 +10,10 @@ when you switch back), ⌘, opens Settings, ⌘/ comments, ⌘F finds, ⌘D sele
 the next occurrence. To debug the engine itself, open `chrome://extensions`
 and click the service worker / background page under *Inspect views*.
 Double-click a script in the list to rename it (Enter saves, Esc cancels).
-Names are also file names, so only letters, digits, `-` and spaces are
-accepted, and a name that clashes with another script is refused.
+The name is the file name in the scripts folder (`My script.ts`), so anything
+works except `< > : " / \ | ? *`, a trailing dot or space, and Windows device
+names like `CON`; a name that clashes with another script is refused. Older
+underscore files (`My_script.ts`) are renamed to the exact name on connect.
 Reverting an edit back to the saved text clears the unsaved-changes state —
 no discard prompt on a no-op edit.
 

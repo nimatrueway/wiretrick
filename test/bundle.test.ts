@@ -112,7 +112,7 @@ describe("open-in-vscode target path", () => {
     });
 
     it("real script → <folder>/<sanitized name>.ts", () => {
-        expect(vscodeTargetPath("/Users/x/scripts", "s_abc", "Debug header", SETTINGS_ID, SETTINGS_FILE)).toBe("/Users/x/scripts/Debug_header.ts");
+        expect(vscodeTargetPath("/Users/x/scripts", "s_abc", "Debug header", SETTINGS_ID, SETTINGS_FILE)).toBe("/Users/x/scripts/Debug header.ts");
     });
 
     it("trailing slashes on the folder are stripped", () => {
