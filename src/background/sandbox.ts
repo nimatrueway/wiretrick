@@ -271,7 +271,13 @@ function pacDecision(source: string): (url: string, host: string) => string {
 window.addEventListener("message", async (event) => {
     const data = event.data;
     // only the host page (the offscreen document embedding this iframe) talks to us
-    if (!data || data.kind !== "sandboxCall" || event.source !== window.parent) return;
+    if (!data || event.source !== window.parent) return;
+    if (data.kind === "reverseResult") {
+        pendingReverse.get(data.reqId)?.(data.result);
+        pendingReverse.delete(data.reqId);
+        return;
+    }
+    if (data.kind !== "sandboxCall") return;
 
     try {
         const { op, scripts, paramValues, runOp: bodyOp, args } = data.payload;

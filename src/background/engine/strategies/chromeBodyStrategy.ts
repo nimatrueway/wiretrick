@@ -18,6 +18,7 @@
 import { matchAny } from "../../../shared/matcher";
 import { compileScript, makeScriptOverrides, makeModuleResolver } from "../../../shared/compile";
 import { formatScriptError } from "../../../shared/scriptError";
+import { resolveFileRef } from "../../../shared/bodyOps";
 import type { BodyScriptInfo, HeaderChanges, HookDisposition, InterceptionStrategy, MaybePromise, WebRequestDetailsLike } from "./types";
 import type { Script } from "../scriptStore";
 import { log } from "../logs";
@@ -201,11 +202,8 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
                 try {
                     const out = await replace({ url, method, tabUrl: url, resourceType: "xmlhttprequest", requestHeaders: {} });
                     if (out !== undefined && out !== null) {
-                        const content = out && typeof out === "object" && (out as any).file ? (out as any).file : out;
-                        const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "";
-                        const mimes: Record<string, string> = { js: "application/javascript", json: "application/json", css: "text/css", html: "text/html", xml: "application/xml" };
-                        const mime = mimes[ext] || "application/json";
-                        const body = typeof content === "string" ? content : String(content);
+                        const file = out && typeof out === "object" ? (out as any).file : undefined;
+                        const { mime, content: body } = typeof file === "string" ? resolveFileRef(file, url) : { mime: guessMimeFromUrl(url), content: typeof out === "string" ? out : String(out) };
                         log(-1, `[${s.name}] replaceResponse → ${mime} (${body.length}b) ${url}`, "info", s.scriptId);
                         return { mime, content: body };
                     }

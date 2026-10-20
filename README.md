@@ -518,8 +518,9 @@ pages, and drops blocking `webRequest`):
     attaches; that is logged as a **warning** naming the URL and scripts
     ("loaded BEFORE the debugger attached … Reload the tab") — a reload is
     intercepted (tabs stay attached).
-  - `onResponseHeaders` isn't supported in the MV3 debugger tier (logged as
-    an error); redirects/error statuses pass through untransformed.
+  - `onResponseHeaders` is applied at the Response stage
+    (`Fetch.continueResponse` keeps the body streaming when no body handler
+    changes it); redirects/error statuses pass through untransformed.
   - Extra permissions: `debugger`, `webNavigation` (attach as early as
     `onBeforeNavigate`), `webRequest` (observe-only, for the miss warning).
 - **Folder sync works** — the poller runs in the service worker: a 25s

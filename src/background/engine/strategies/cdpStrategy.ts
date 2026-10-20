@@ -61,6 +61,7 @@ function usesDebuggerMv3(strategyRaw: string): boolean {
  * the hook (pausing them too would run transforms twice).
  */
 const MV3_CDP_TYPES = ["Document", "Script", "Stylesheet", "Image", "Media", "Font", "Other"];
+const MV3_PAGE_FETCH_TYPES = ["XHR", "Fetch"];
 
 /** CDP resource type → webRequest-style name handlers see as ctx.resourceType */
 function webRequestTypeOf(cdpType: string | undefined): string {
@@ -173,15 +174,14 @@ export class CdpStrategy {
             const h = a?.handlers ?? { onRequest: 1, modifyResponse: 1, replaceResponse: 1, onResponseHeaders: 1 };
             const phases: string[] = a?.meta?.phase || ["request", "response"];
             const wantsRequest = h.onRequest > 0 && phases.includes("request");
-            const wantsResponse = (h.modifyResponse > 0 || h.replaceResponse > 0) && phases.includes("response");
+            const wantsBody = (h.modifyResponse > 0 || h.replaceResponse > 0) && phases.includes("response");
+            const wantsHeaders = h.onResponseHeaders > 0 && phases.includes("response");
+            const wantsResponse = wantsBody || wantsHeaders;
             if (!wantsRequest && !wantsResponse) continue;
             if (isProcessOwned(s.meta.strategy)) continue; // the helper tier owns it
             if (!usesDebuggerMv3(s.meta.strategy)) {
                 autoBody.push(s.meta.name);
                 continue;
-            }
-            if (h.onResponseHeaders > 0) {
-                log(-1, `[${s.meta.name}] onResponseHeaders is not supported by the MV3 debugger tier (only onRequest / modifyResponse / replaceResponse) — its header changes are NOT applied to browser-initiated loads`, "error", s.id);
             }
             next.push({
                 scriptId: s.id,
@@ -190,7 +190,8 @@ export class CdpStrategy {
                 strategyRaw: s.meta.strategy,
                 transform: [],
                 onRequest: wantsRequest ? [] : undefined,
-                replaceResponse: wantsResponse ? [] : undefined,
+                replaceResponse: wantsBody ? [] : undefined,
+                onResponseHeaders: wantsHeaders ? [] : undefined,
             });
             for (const m of s.meta.match) {
                 // match patterns are valid CDP globs ('*' wildcard); the handler re-filters exactly
@@ -198,6 +199,13 @@ export class CdpStrategy {
                 for (const resourceType of MV3_CDP_TYPES) {
                     if (wantsRequest) patterns.set(`${urlPattern}|${resourceType}|Request`, { urlPattern, resourceType, requestStage: "Request" });
                     if (wantsResponse) patterns.set(`${urlPattern}|${resourceType}|Response`, { urlPattern, resourceType, requestStage: "Response" });
+                }
+                // page fetch/XHR bodies belong to the hook, but response headers
+                // (CORS, CSP…) are enforced before the page sees them
+                if (wantsHeaders) {
+                    for (const resourceType of MV3_PAGE_FETCH_TYPES) {
+                        patterns.set(`${urlPattern}|${resourceType}|Response`, { urlPattern, resourceType, requestStage: "Response" });
+                    }
                 }
             }
         }
@@ -779,11 +787,37 @@ export class CdpStrategy {
             // ---- Response stage ----
             const status: number = params.responseStatusCode ?? 0;
             if (params.responseErrorReason || (status >= 300 && status < 400)) return void (await cont());
-            const scripts = this.matchingScripts(url).filter((s) => s.replaceResponse);
-            if (!scripts.length) return void (await cont());
+            const matched = this.matchingScripts(url);
+            // page fetch/XHR are paused only for headers — their bodies are the hook's
+            const pageFetch = MV3_PAGE_FETCH_TYPES.includes(params.resourceType);
+            const scripts = pageFetch ? [] : matched.filter((s) => s.replaceResponse);
+            const headerScripts = matched.filter((s) => s.onResponseHeaders);
+            if (!scripts.length && !headerScripts.length) return void (await cont());
+            const originalHeaders: { name: string; value: string }[] = params.responseHeaders || [];
+            const headerMods = headerScripts.length
+                ? await runBodyOp(this.mv3Plain as any, this.mv3Params, "responseHeaders", {
+                      url,
+                      method,
+                      resourceType,
+                      requestHeaders,
+                      status,
+                      responseHeaders: originalHeaders,
+                      onlyIds: headerScripts.map((s) => s.scriptId),
+                  })
+                : null;
+            const baseHeaders = headerMods
+                ? mergeHeaderChanges(originalHeaders, [headerMods]).filter((h): h is { name: string; value: string } => typeof h.value === "string")
+                : originalHeaders;
+            // headers only: keep streaming the original body
+            const continueWithHeaders = async () => {
+                if (!headerMods) return void (await cont());
+                await debuggerSend(d, "Fetch.continueResponse", { requestId, responseCode: status || 200, responseHeaders: baseHeaders });
+                dlogLevel("cdp", "info", "MV3: response headers modified", { url, resourceType });
+            };
+            if (!scripts.length) return void (await continueWithHeaders());
             // only debugger-tier scripts: hook-only ones must not touch <script> loads
             const onlyIds = scripts.map((s) => s.scriptId);
-            const contentType = headerContentType(params.responseHeaders || []);
+            const contentType = headerContentType(baseHeaders);
             let body: string | null = null;
             let mime: string | undefined;
             const replaced = await runBodyOp(this.mv3Plain as any, this.mv3Params, "replace", { url, method, resourceType, requestHeaders, onlyIds });
@@ -804,10 +838,10 @@ export class CdpStrategy {
             }
             if (body === null || (body === input && !replaced)) {
                 dlogLevel("cdp", "debug", "MV3: no handler changed the body → continue", { url });
-                return void (await cont());
+                return void (await continueWithHeaders());
             }
             // the body handed back is decoded — drop the original encoding/length
-            const responseHeaders = (params.responseHeaders || []).filter(
+            const responseHeaders = baseHeaders.filter(
                 (h: any) => !/^(content-encoding|content-length)$/i.test(h.name) && !(mime && /^content-type$/i.test(h.name))
             );
             if (mime) responseHeaders.push({ name: "content-type", value: mime });

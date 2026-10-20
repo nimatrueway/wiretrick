@@ -6,44 +6,55 @@ export interface SampleScript {
     code: string;
 }
 
+// Every sample targets a long-lived public site and names a URL to open so
+// the effect is visible right away.
 export const SAMPLES: SampleScript[] = [
     {
         name: "Redirect a URL",
-        blurb: "Send any request to a different URL (main frames navigate, subresources re-fetch).",
-        code: `res.declareScript({
-    match: ["*://example.com/old-endpoint*"],
+        blurb: "Send any request to a different URL. Try it: open en.wikipedia.org/wiki/Cat — you land on Dog.",
+        code: `// Try it: open https://en.wikipedia.org/wiki/Cat
+res.declareScript({
+    match: ["*://en.wikipedia.org/wiki/Cat"],
+    strategy: ["hook", "webrequest", "cdp"],
     phase: ["request"],
 });
-res.onRequest((ctx) => {
-    return { redirect: "https://example.com/new-endpoint" };
+res.onRequest(() => {
+    return { redirect: "https://en.wikipedia.org/wiki/Dog" };
 });`,
     },
     {
         name: "Block requests",
-        blurb: "Cancel matching requests — analytics, trackers, anything.",
-        code: `res.declareScript({
-    match: ["*://example.com/analytics.js"],
+        blurb: "Cancel matching requests. Try it: open any Wikipedia article — every image is gone.",
+        code: `// Try it: open https://en.wikipedia.org/wiki/Cat
+res.declareScript({
+    match: ["*://upload.wikimedia.org/*"],
 });
 res.onRequest(() => ({ cancel: true }));`,
     },
     {
         name: "Modify request headers",
-        blurb: "Set or remove request headers before they leave the browser.",
-        code: `res.declareScript({
-    match: ["*://api.example.com/*"],
+        blurb: "Set or remove request headers before they leave the browser. Try it: httpbin.org/headers echoes them back.",
+        code: `// Try it: open https://httpbin.org/headers
+res.declareScript({
+    match: ["*://httpbin.org/*"],
+    strategy: ["hook", "webrequest", "cdp"],
 });
 res.onRequest(() => ({
     headers: {
-        set: { "x-debug": "1", authorization: "Bearer my-token" },
-        remove: ["x-unwanted"],
+        set: { "x-debug": "1", "x-greeting": "hello from ResScript" },
+        remove: ["accept-language"],
     },
 }));`,
     },
     {
         name: "CORS unlock",
-        blurb: "Add permissive response headers so other pages can consume the API.",
-        code: `res.declareScript({
-    match: ["*://api.example.com/*"],
+        blurb: "Add permissive response headers so other pages can consume a resource. Try it: run the fetch from the comment in jsonplaceholder.typicode.com's console.",
+        code: `// Try it: open https://jsonplaceholder.typicode.com/, then in DevTools → Console run
+//   fetch("https://example.com/").then(r => r.text()).then(console.log)
+// Without this script it fails with a CORS error; with it the HTML prints.
+res.declareScript({
+    match: ["*://example.com/*"],
+    strategy: ["hook", "webrequest", "cdp"],
     phase: ["response"],
 });
 res.onResponseHeaders(() => ({
@@ -58,9 +69,11 @@ res.onResponseHeaders(() => ({
     },
     {
         name: "Mock a fetch/XHR API",
-        blurb: "Replace a JSON API response. Banner-free (page hook tier).",
-        code: `res.declareScript({
-    match: ["*://api.example.com/v1/user*"],
+        blurb: "Replace a JSON API response. Page fetch/XHR use the banner-free hook. Try it: open jsonplaceholder.typicode.com/users/1.",
+        code: `// Try it: open https://jsonplaceholder.typicode.com/users/1
+res.declareScript({
+    match: ["*://jsonplaceholder.typicode.com/users/1"],
+    strategy: ["hook", "webrequest", "cdp"],
 });
 res.replaceResponse(() => JSON.stringify({
     id: 1,
@@ -70,33 +83,40 @@ res.replaceResponse(() => JSON.stringify({
     },
     {
         name: "Transform an API response",
-        blurb: "Stream-modify a JSON body — flip fields, inject values.",
-        code: `res.declareScript({
-    match: ["*://api.example.com/v1/config*"],
+        blurb: "Modify a JSON body — flip fields, inject values. Try it: open jsonplaceholder.typicode.com/todos/1.",
+        code: `// Try it: open https://jsonplaceholder.typicode.com/todos/1
+res.declareScript({
+    match: ["*://jsonplaceholder.typicode.com/todos/*"],
+    strategy: ["hook", "webrequest", "cdp"],
 });
 res.modifyResponse((ctx, body) => {
     const json = JSON.parse(typeof body === "string" ? body : new TextDecoder().decode(body));
-    json.debugMode = true;
-    json.featureFlags = { ...(json.featureFlags || {}), newCheckout: true };
-    return JSON.stringify(json);
+    json.completed = true;
+    json.title = "Transformed by ResScript";
+    return JSON.stringify(json, null, 2);
 });`,
     },
     {
         name: "Rewrite page HTML",
-        blurb: "Transform the document itself on Chrome (uses the debugger briefly).",
-        code: `res.declareScript({
+        blurb: "Transform the document itself on Chrome (uses the debugger briefly). Try it: open example.com — a red banner appears.",
+        code: `// Try it: open https://example.com/
+res.declareScript({
     match: ["*://example.com/*"],
+    strategy: ["hook", "webrequest", "cdp"],
 });
 res.modifyResponse((ctx, body) => {
     const html = typeof body === "string" ? body : new TextDecoder().decode(body);
-    return html.replace("old-branding", "new-branding");
+    return html
+        .replace("<title>Example Domain", "<title>Rewritten Domain")
+        .replace(/<body[^>]*>/i, (tag) => tag + '<h1 style="color:#c00">Rewritten by ResScript</h1>');
 });`,
     },
     {
         name: "DOM / title changes",
-        blurb: "Runs at DOM-ready in the page. Best for titles and DOM text — works even when the HTML is service-worker served or hydration re-renders it.",
-        code: `res.declareScript({
-    match: ["*://example.com/*"],
+        blurb: "Runs at DOM-ready in the page. Best for titles and DOM text — works even when the HTML is service-worker served or hydration re-renders it. Try it: open any Wikipedia article.",
+        code: `// Try it: open https://en.wikipedia.org/wiki/Cat
+res.declareScript({
+    match: ["*://en.wikipedia.org/wiki/*"],
 });
 res.onDom(() => {
     document.title = "🎯 " + document.title;
@@ -106,32 +126,39 @@ res.onDom(() => {
     },
     {
         name: "Serve a local file",
-        blurb: "Replace a response with file content (path or data: URL).",
-        code: `res.declareScript({
-    match: ["*://cdn.example.com/lib.js"],
+        blurb: "Replace a response with file content (path or data: URL). Try it: open en.wikipedia.org/robots.txt.",
+        code: `// Try it: open https://en.wikipedia.org/robots.txt
+res.declareScript({
+    match: ["*://en.wikipedia.org/robots.txt"],
+    strategy: ["hook", "webrequest", "cdp"],
 });
 res.replaceResponse(() => ({
-    file: "data:application/javascript;base64," + btoa("console.log('served by ResScript');"),
+    file: "data:text/plain;base64," + btoa("Served by ResScript instead of the real robots.txt"),
 }));`,
     },
     {
         name: "Per-script storage",
-        blurb: "Keep state between requests with res.storage.",
-        code: `res.declareScript({
-    match: ["*://api.example.com/*"],
+        blurb: "Keep state between requests with res.storage. Try it: open httpbin.org/headers and reload — X-Hits counts up.",
+        code: `// Try it: open https://httpbin.org/headers and reload a few times
+res.declareScript({
+    match: ["*://httpbin.org/headers"],
+    strategy: ["hook", "webrequest", "cdp"],
 });
 res.onRequest(async (ctx) => {
     const hits = ((await res.storage.get("hits")) || 0) + 1;
     await res.storage.set("hits", hits);
     res.log("request #" + hits, ctx.url);
+    return { headers: { set: { "x-hits": String(hits) } } };
 });`,
     },
     {
         name: "Parameters (declareScript)",
-        blurb: "Adjustable knobs the user changes from the popup's ⚙ dialog — no code edits.",
-        code: `const cfg = res.declareScript({
-    match: ["*://api.example.com/*"],
-    strategy: ["hook", "cdp"],
+        blurb: "Adjustable knobs the user changes from the popup's ⚙ dialog — no code edits. Try it: open jsonplaceholder.typicode.com/posts/1.",
+        code: `// Try it: open https://jsonplaceholder.typicode.com/posts/1, then change
+// the knobs from the popup's ⚙ dialog and reload
+const cfg = res.declareScript({
+    match: ["*://jsonplaceholder.typicode.com/*"],
+    strategy: ["hook", "webrequest", "cdp"],
     params: {
         enabled: { type: "boolean", default: true, description: "Master switch" },
         status: { type: "enum", choices: ["500", "502", "503"], default: "500", description: "Status to return" },
@@ -142,7 +169,7 @@ res.onRequest(async (ctx) => {
 });
 
 res.onRequest((ctx) => {
-    if (!cfg.enabled || !ctx.url.includes("/api/")) return;
+    if (!cfg.enabled || !ctx.url.includes("/posts/")) return;
     return {
         respond: {
             status: Number(cfg.status),

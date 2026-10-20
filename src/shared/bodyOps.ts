@@ -35,6 +35,26 @@ export function guessMimeFromUrl(url: string): string {
     return m[ext] || "application/json";
 }
 
+/**
+ * replaceResponse `{ file }` → body + mime. `data:` URLs are decoded (their
+ * media type wins over the request URL's extension); other refs are served
+ * as-is, as before.
+ */
+export function resolveFileRef(ref: string, url: string): { mime: string; content: string } {
+    const m = /^data:([^,]*?),(.*)$/s.exec(ref);
+    if (!m) return { mime: guessMimeFromUrl(url), content: ref };
+    const params = m[1].split(";");
+    const base64 = params.includes("base64");
+    const mime = params[0] || "text/plain";
+    let content: string;
+    try {
+        content = base64 ? new TextDecoder().decode(Uint8Array.from(atob(m[2]), (c) => c.charCodeAt(0))) : decodeURIComponent(m[2]);
+    } catch {
+        content = m[2];
+    }
+    return { mime, content };
+}
+
 export function serializeRespondBody(body: any): string {
     if (typeof body === "string") return body;
     if (body instanceof Uint8Array) return new TextDecoder().decode(body);
@@ -173,9 +193,8 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
                 try {
                     const out = await replace(base());
                     if (out !== undefined && out !== null) {
-                        const content = out && typeof out === "object" && out.file ? out.file : out;
-                        const mime = guessMimeFromUrl(url);
-                        const body = typeof content === "string" ? content : String(content);
+                        const isFile = out && typeof out === "object" && typeof out.file === "string";
+                        const { mime, content: body } = isFile ? resolveFileRef(out.file, url) : { mime: guessMimeFromUrl(url), content: typeof out === "string" ? out : String(out) };
                         env.log(s.id, "info", `[${s.name}] replaceResponse → ${mime} (${body.length}b) ${url}`);
                         return { mime, content: body };
                     }
