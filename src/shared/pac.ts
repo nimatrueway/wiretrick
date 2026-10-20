@@ -14,7 +14,7 @@
  * intercepted traffic leaves through exactly the proxy Chrome would use.
  */
 
-export const PROBE_HOST = "rescript-helper.probe";
+export const PROBE_HOST = "wiretrick-helper.probe";
 
 /** ES5 port of the helper's `matcher::matches` (first-occurrence splits) */
 const MATCH_SRC = `function __resM(p, s) {
@@ -219,7 +219,7 @@ export function buildPac(port: number, matchPatterns: string[], user: UserDecisi
     const hosts = [...new Set(matchPatterns.map(hostPatternOf))];
     const any = hosts.includes(null);
     const list = hosts.filter((h): h is string => h !== null);
-    return asciiOnly(`// ResScript Override — process tier routing (generated)
+    return asciiOnly(`// Wiretrick — process tier routing (generated)
 ${MATCH_SRC}
 ${BYPASS_SRC}
 ${user.source}

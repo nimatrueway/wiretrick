@@ -1,5 +1,5 @@
 {
-    "name": "ResScript Override",
+    "name": "Wiretrick",
     "version": "2.0.0",
     "description": "Script-based request and response override: write TypeScript-style scripts that redirect, modify headers, or transform response bodies.",
     "icons": {
@@ -8,7 +8,7 @@
         "128": "icons/icon-128x128.png"
     },
     "browser_action": {
-        "default_title": "ResScript Manager",
+        "default_title": "Wiretrick Manager",
         "default_popup": "popup.html",
         "default_icon": {
             "16": "icons/icon-16x16.png"

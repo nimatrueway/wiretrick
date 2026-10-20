@@ -107,7 +107,7 @@ pub fn error(msg: &str) {
     eprintln!("{} {msg}", paint(err_on(), "1;31", "error:"));
 }
 
-/// Help text: section headings bold, `rescript-helper …` lines with the
+/// Help text: section headings bold, `wiretrick-helper …` lines with the
 /// command cyan and options dim.
 pub fn usage(text: &str) -> String {
     let mut out = String::new();
@@ -119,7 +119,7 @@ pub fn usage(text: &str) -> String {
             }
         } else if line.ends_with(':') && !line.starts_with(' ') {
             bold(line)
-        } else if let Some(rest) = line.trim_start().strip_prefix("rescript-helper ") {
+        } else if let Some(rest) = line.trim_start().strip_prefix("wiretrick-helper ") {
             let indent = &line[..line.len() - line.trim_start().len()];
             let (cmd, opts) = rest.split_once(' ').unwrap_or((rest, ""));
             let opts = if opts.is_empty() {
@@ -127,7 +127,7 @@ pub fn usage(text: &str) -> String {
             } else {
                 format!(" {}", dim(opts))
             };
-            format!("{indent}rescript-helper {}{opts}", cyan(cmd))
+            format!("{indent}wiretrick-helper {}{opts}", cyan(cmd))
         } else if line.starts_with("    ") && line.trim_start().starts_with('[') {
             dim(line)
         } else {

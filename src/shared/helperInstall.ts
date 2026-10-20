@@ -1,4 +1,4 @@
-/** One-line terminal commands that download the right rescript-helper
+/** One-line terminal commands that download the right wiretrick-helper
  * release binary (checksum-verified) and register it for this extension. */
 
 const RAW = "https://raw.githubusercontent.com/nimatrueway/wiretrick/master/helper";

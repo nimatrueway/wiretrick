@@ -41,7 +41,7 @@ res.declareScript({
 });
 res.onRequest(() => ({
     headers: {
-        set: { "x-debug": "1", "x-greeting": "hello from ResScript" },
+        set: { "x-debug": "1", "x-greeting": "hello from Wiretrick" },
         remove: ["accept-language"],
     },
 }));`,
@@ -92,7 +92,7 @@ res.declareScript({
 res.modifyResponse((ctx, body) => {
     const json = JSON.parse(typeof body === "string" ? body : new TextDecoder().decode(body));
     json.completed = true;
-    json.title = "Transformed by ResScript";
+    json.title = "Transformed by Wiretrick";
     return JSON.stringify(json, null, 2);
 });`,
     },
@@ -108,7 +108,7 @@ res.modifyResponse((ctx, body) => {
     const html = typeof body === "string" ? body : new TextDecoder().decode(body);
     return html
         .replace("<title>Example Domain", "<title>Rewritten Domain")
-        .replace(/<body[^>]*>/i, (tag) => tag + '<h1 style="color:#c00">Rewritten by ResScript</h1>');
+        .replace(/<body[^>]*>/i, (tag) => tag + '<h1 style="color:#c00">Rewritten by Wiretrick</h1>');
 });`,
     },
     {
@@ -121,7 +121,7 @@ res.declareScript({
 res.onDom(() => {
     document.title = "🎯 " + document.title;
     const el = document.querySelector("h1");
-    if (el) el.textContent = "Hello from ResScript";
+    if (el) el.textContent = "Hello from Wiretrick";
 });`,
     },
     {
@@ -133,7 +133,7 @@ res.declareScript({
     strategy: ["hook", "webrequest", "cdp"],
 });
 res.replaceResponse(() => ({
-    file: "data:text/plain;base64," + btoa("Served by ResScript instead of the real robots.txt"),
+    file: "data:text/plain;base64," + btoa("Served by Wiretrick instead of the real robots.txt"),
 }));`,
     },
     {

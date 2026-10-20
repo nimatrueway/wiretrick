@@ -379,7 +379,7 @@ function renderProcessStatus(st: any): void {
         if (st.routing && !st.routing.active && st.routing.reason) lines.push(`Routing inactive: ${st.routing.reason}`);
         if (st.routing?.active) lines.push(`Other traffic: your proxy setting (${st.routing.mode})`);
         if (st.routing?.note) lines.push(st.routing.note);
-        if (st.caTrusted === false) lines.push("Chrome does not trust the helper's CA yet — click Trust CA (or run: rescript-helper trust-ca).");
+        if (st.caTrusted === false) lines.push("Chrome does not trust the helper's CA yet — click Trust CA (or run: wiretrick-helper trust-ca).");
         if (st.caTrusted === true) lines.push("CA trusted ✓");
         if (st.caFingerprint) lines.push(`CA: ${st.caPath} (SHA-256 ${st.caFingerprint})`);
     }
@@ -1053,7 +1053,7 @@ async function main(): Promise<void> {
     $("#btn-logs").addEventListener("click", async () => {
         const bg = await send({ type: "getDebugLogs" });
         const lines: string[] = [
-            `ResScript debug log — ${new Date().toISOString()}`,
+            `Wiretrick debug log — ${new Date().toISOString()}`,
             `UA: ${bg.ua} | extension v${bg.ver}`,
             `entries: ${bg.entries ? bg.entries.length : 0}`,
             "",
@@ -1063,7 +1063,7 @@ async function main(): Promise<void> {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `rescript-debug-${Date.now()}.log`;
+        a.download = `wiretrick-debug-${Date.now()}.log`;
         a.click();
         URL.revokeObjectURL(url);
         status("debug log downloaded");
@@ -1114,7 +1114,7 @@ async function main(): Promise<void> {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = "rescripts-export.yaml";
+        a.download = "wiretrick-export.yaml";
         a.click();
         URL.revokeObjectURL(url);
     });
@@ -1151,7 +1151,7 @@ async function main(): Promise<void> {
                     return;
                 }
                 if (isYaml) {
-                    status('not a ResScript export (missing "format: rescript-bundle")', "error");
+                    status('not a Wiretrick export (missing "format: wiretrick-bundle")', "error");
                     return;
                 }
                 // legacy: a plain json array / single script object

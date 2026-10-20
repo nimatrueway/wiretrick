@@ -177,7 +177,7 @@ res.onRequest(async (ctx) => {
         body: `hook — page-level fetch/XHR override. Banner-free. Misses <script src>, <img>, documents.
 proxy — MV3: routes to the debugger tier (script tags, images, CSS…); unused on MV2.
 cdp — chrome.debugger + Fetch domain. Sees everything, but Chrome shows a "debugging" banner while attached; the engine attaches only while needed and detaches when idle.
-process — Chrome: a tiny local helper (rescript-helper) proxies ONLY matched hosts. Sees everything (documents, script tags, images, async handlers, body rewrites) with no banner and no flags. Opt-in: install the helper and trust its CA from the manager.
+process — Chrome: a tiny local helper (wiretrick-helper) proxies ONLY matched hosts. Sees everything (documents, script tags, images, async handlers, body rewrites) with no banner and no flags. Opt-in: install the helper and trust its CA from the manager.
 Scripts that only ever match fetch/XHR are learned to be hook-only and never trigger the banner.`,
     },
     {

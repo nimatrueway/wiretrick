@@ -310,7 +310,7 @@ try {
     await mgr.evaluate(() => { (document.querySelector("#btn-export") as HTMLElement).click(); });
     await mgr.waitForTimeout(800); // the blob promise resolves async
     const bundleText = await mgr.evaluate(() => (window as any).__captured);
-    check("export produces a bundle (settings + scripts)", typeof bundleText === "string" && bundleText.includes("rescript-bundle") && bundleText.includes("api-interceptor"));
+    check("export produces a bundle (settings + scripts)", typeof bundleText === "string" && bundleText.includes("wiretrick-bundle") && bundleText.includes("api-interceptor"));
     await mgr.evaluate(() => new Promise((r) => chrome.storage.local.clear(() => r(null))));
     await mgr.reload();
     await mgr.waitForFunction(() => (window as any).monaco?.editor.getEditors().length === 1, null, { timeout: 20000 });
@@ -328,7 +328,7 @@ try {
         const input = (window as any).__importInput;
         if (!input) return "no input";
         const dt = new DataTransfer();
-        dt.items.add(new File([text], "rescripts-export.yaml", { type: "text/yaml" }));
+        dt.items.add(new File([text], "wiretrick-export.yaml", { type: "text/yaml" }));
         input.files = dt.files;
         input.dispatchEvent(new Event("change"));
         return "importing";

@@ -1,10 +1,10 @@
-# Downloads the rescript-helper binary from GitHub releases, verifies its
-# SHA-256, and runs `rescript-helper install` (which copies itself to
-# %APPDATA%\rescript-helper and registers the native host).
+# Downloads the wiretrick-helper binary from GitHub releases, verifies its
+# SHA-256, and runs `wiretrick-helper install` (which copies itself to
+# %APPDATA%\wiretrick-helper and registers the native host).
 #
 #   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/nimatrueway/wiretrick/master/helper/install.ps1))) -ExtensionId <id> -TrustCa
 #
-# $env:RESCRIPT_HELPER_VERSION = "v1.2.3" pins a release (default: latest).
+# $env:WIRETRICK_HELPER_VERSION = "v1.2.3" pins a release (default: latest).
 param(
     [string[]]$ExtensionId,
     [switch]$TrustCa,
@@ -14,19 +14,19 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
 $repo = "nimatrueway/wiretrick"
-$version = if ($env:RESCRIPT_HELPER_VERSION) { $env:RESCRIPT_HELPER_VERSION } else { "latest" }
-$base = if ($env:RESCRIPT_HELPER_BASE_URL) { $env:RESCRIPT_HELPER_BASE_URL } elseif ($version -eq "latest") { "https://github.com/$repo/releases/latest/download" } else { "https://github.com/$repo/releases/download/$version" }
+$version = if ($env:WIRETRICK_HELPER_VERSION) { $env:WIRETRICK_HELPER_VERSION } else { "latest" }
+$base = if ($env:WIRETRICK_HELPER_BASE_URL) { $env:WIRETRICK_HELPER_BASE_URL } elseif ($version -eq "latest") { "https://github.com/$repo/releases/latest/download" } else { "https://github.com/$repo/releases/download/$version" }
 # x64 build; Windows on Arm runs it under emulation
-$asset = "rescript-helper-x86_64-pc-windows-msvc.exe"
+$asset = "wiretrick-helper-x86_64-pc-windows-msvc.exe"
 
 if (-not $ExtensionId) {
     throw "pass -ExtensionId <id> (shown in the extension's Settings > Local helper)"
 }
 
-$tmp = Join-Path ([IO.Path]::GetTempPath()) ("rescript-helper-" + [guid]::NewGuid())
+$tmp = Join-Path ([IO.Path]::GetTempPath()) ("wiretrick-helper-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $tmp | Out-Null
 try {
-    $exe = Join-Path $tmp "rescript-helper.exe"
+    $exe = Join-Path $tmp "wiretrick-helper.exe"
     Write-Host "downloading $asset ($version)..." -ForegroundColor DarkGray
     Invoke-WebRequest -UseBasicParsing -Uri "$base/$asset" -OutFile $exe
 
@@ -49,7 +49,7 @@ try {
     foreach ($b in $Browser) { $helperArgs += @("--browser", $b) }
     if ($TrustCa) { $helperArgs += "--trust-ca" }
     & $exe @helperArgs
-    if ($LASTEXITCODE -ne 0) { throw "rescript-helper install failed (exit $LASTEXITCODE)" }
+    if ($LASTEXITCODE -ne 0) { throw "wiretrick-helper install failed (exit $LASTEXITCODE)" }
 } finally {
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 }

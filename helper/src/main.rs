@@ -1,6 +1,6 @@
-//! rescript-helper — local interception helper for ResScript Override's
+//! wiretrick-helper — local interception helper for Wiretrick's
 //! `process` strategy. Started by the browser over native messaging; also a
-//! small CLI for installing itself (`rescript-helper install …`).
+//! small CLI for installing itself (`wiretrick-helper install …`).
 
 mod ca;
 mod install;
@@ -20,21 +20,21 @@ use crate::nm::{In, Nm, Out};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-const USAGE: &str = "rescript-helper — local interception helper for ResScript Override
+const USAGE: &str = "wiretrick-helper — local interception helper for Wiretrick
 
 USAGE:
-  rescript-helper install --extension-id ID [--extension-id ID]... [--browser NAME]...
+  wiretrick-helper install --extension-id ID [--extension-id ID]... [--browser NAME]...
                           [--user-data-dir DIR]... [--trust-ca] [--nssdb DIR]
-  rescript-helper uninstall [--user-data-dir DIR]... [--nssdb DIR]
-  rescript-helper trust-ca [--nssdb DIR]
-  rescript-helper untrust-ca [--nssdb DIR]
-  rescript-helper ca-path
-  rescript-helper version
+  wiretrick-helper uninstall [--user-data-dir DIR]... [--nssdb DIR]
+  wiretrick-helper trust-ca [--nssdb DIR]
+  wiretrick-helper untrust-ca [--nssdb DIR]
+  wiretrick-helper ca-path
+  wiretrick-helper version
 
 Browsers: chrome, chrome-beta, chrome-dev, chrome-canary, chromium, brave, edge, vivaldi
 (default: every installed one). Started without a command (or with a
 chrome-extension:// origin, as the browser does) it speaks native messaging.
-State lives in $RESCRIPT_HELPER_HOME or the per-user config dir.";
+State lives in $WIRETRICK_HELPER_HOME or the per-user config dir.";
 
 pub fn client_tls_config() -> rustls::ClientConfig {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
@@ -76,7 +76,7 @@ fn main() {
             })
             .map_err(|e| e.to_string()),
         "version" | "--version" | "-V" => {
-            println!("{} {VERSION}", ui::bold("rescript-helper"));
+            println!("{} {VERSION}", ui::bold("wiretrick-helper"));
             Ok(())
         }
         "help" | "--help" | "-h" => {
@@ -85,7 +85,7 @@ fn main() {
         }
         other => Err(format!(
             "unknown command {other:?} — see {}",
-            ui::cyan("rescript-helper --help")
+            ui::cyan("wiretrick-helper --help")
         )),
     };
     if let Err(e) = r {

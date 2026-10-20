@@ -1,5 +1,5 @@
 /**
- * Compiles a ResScript source into { meta, handlers }.
+ * Compiles a Wiretrick source into { meta, handlers }.
  * Runs identically in the background page, the Tier-A page hook, and the Tier-B
  * proxy service worker — each provides its own minimal `res` API shim and
  * re-evaluates handler sources with `new Function`.
@@ -320,7 +320,7 @@ function makeCollectorShim(store: any, overrides?: ResApiOverrides): any {
             get: () => undefined,
             set: () => undefined,
         },
-        log: overrides?.log || ((...args: any[]) => console.log("[ResScript]", ...args)),
+        log: overrides?.log || ((...args: any[]) => console.log("[Wiretrick]", ...args)),
     };
 }
 

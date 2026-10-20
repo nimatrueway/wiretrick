@@ -39,7 +39,7 @@ pub type Body = BoxBody<Bytes, BoxErr>;
 
 /// Requests to this host never leave the helper: the extension fetches it
 /// through the PAC to learn whether Chrome trusts our CA.
-pub const PROBE_HOST: &str = "rescript-helper.probe";
+pub const PROBE_HOST: &str = "wiretrick-helper.probe";
 /// largest (encoded or decoded) body handed to body transforms
 const MAX_BODY: usize = 64 * 1024 * 1024;
 const REQ_TIMEOUT: Duration = Duration::from_secs(30);
@@ -519,7 +519,7 @@ async fn handle(
         Some((scheme, authority)) => format!("{scheme}://{authority}{pq}"),
         None => {
             if req.uri().scheme_str() != Some("http") || req.uri().authority().is_none() {
-                return Ok(text_response(400, "rescript-helper is a proxy"));
+                return Ok(text_response(400, "wiretrick-helper is a proxy"));
             }
             req.uri().to_string()
         }
@@ -531,7 +531,7 @@ async fn handle(
         .trim_matches(|c| c == '[' || c == ']')
         .to_string();
     if host.eq_ignore_ascii_case(PROBE_HOST) {
-        let mut r = text_response(200, "rescript-helper ok");
+        let mut r = text_response(200, "wiretrick-helper ok");
         r.headers_mut()
             .insert("access-control-allow-origin", HeaderValue::from_static("*"));
         r.headers_mut()

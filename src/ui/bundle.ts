@@ -1,9 +1,9 @@
 /**
  * Import/export bundle shape. New bundles are a single YAML document
- * (rescripts-export.yaml):
+ * (wiretrick-export.yaml):
  *
- *   # ResScript export — scripts + settings
- *   format: rescript-bundle
+ *   # Wiretrick export — scripts + settings
+ *   format: wiretrick-bundle
  *   version: 2
  *   exportedAt: 2026-…
  *   settings:            # only non-default globals
@@ -38,7 +38,9 @@ export interface ParsedBundle {
     settings?: { logLevel?: string; logCap?: number };
 }
 
-export const BUNDLE_FORMAT = "rescript-bundle";
+export const BUNDLE_FORMAT = "wiretrick-bundle";
+/** formats accepted on import (exports from before the rename) */
+const LEGACY_BUNDLE_FORMATS = ["rescript-bundle"];
 
 /** File name within the synced folder for a script — or settings.yaml for the virtual settings entry. */
 export function syncFileNameFor(selectedId: string, scriptName: string | undefined, settingsId: string, settingsFile: string): string {
@@ -76,10 +78,10 @@ export function buildBundle(doc: SettingsDoc, scripts: BundleScript[]): string {
     };
     if (doc.settings && Object.keys(doc.settings).length) out.settings = doc.settings;
     out.scripts = entries;
-    return "# ResScript export — scripts + settings\n" + stringify(out, { lineWidth: 0 });
+    return "# Wiretrick export — scripts + settings\n" + stringify(out, { lineWidth: 0 });
 }
 
-/** Parse bundle text: YAML (new) or JSON (legacy). null when it isn't a rescript-bundle. */
+/** Parse bundle text: YAML (new) or JSON (legacy). null when it isn't a wiretrick-bundle. */
 export function parseBundleText(text: string): ParsedBundle | null {
     const t = text.trimStart();
     let parsed: any;
@@ -96,7 +98,7 @@ export function parseBundleText(text: string): ParsedBundle | null {
             return null;
         }
     }
-    if (!parsed || parsed.format !== BUNDLE_FORMAT) return null;
+    if (!parsed || (parsed.format !== BUNDLE_FORMAT && !LEGACY_BUNDLE_FORMATS.includes(parsed.format))) return null;
     const out: ParsedBundle = { scripts: [] };
     if (Array.isArray(parsed.scripts)) {
         out.scripts = parsed.scripts

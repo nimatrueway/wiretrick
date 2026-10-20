@@ -1,13 +1,13 @@
 [package]
-name = "rescript-helper"
+name = "wiretrick-helper"
 version = "0.1.0"
 edition = "2024"
-description = "Local interception helper for the ResScript Override extension (process strategy)"
+description = "Local interception helper for the Wiretrick extension (process strategy)"
 license = "MIT"
 publish = false
 
 [[bin]]
-name = "rescript-helper"
+name = "wiretrick-helper"
 path = "src/main.rs"
 
 [dependencies]

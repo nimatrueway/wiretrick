@@ -8,7 +8,7 @@ const rid = new URLSearchParams(location.search).get("rid") || location.hash.rep
 
 chrome.runtime.sendMessage({ type: "getServe", rid }, (resp: any) => {
     if (!resp || typeof resp.content !== "string") {
-        document.body.textContent = "[ResScript] response content expired — retry the request.";
+        document.body.textContent = "[Wiretrick] response content expired — retry the request.";
         return;
     }
     document.open();

@@ -1,4 +1,4 @@
-# ResScript Override (v2 — TypeScript rewrite)
+# Wiretrick (v2 — TypeScript rewrite)
 
 A ground-up TypeScript rewrite of [Resource Override](https://github.com/kylepaulsen/ResourceOverride).
 Instead of rule lists, the entire interface is a **script editor**: you write small
@@ -8,40 +8,78 @@ response bodies, or replace them entirely. Each script has an enable/disable tog
 
 **The manager** (script list, Monaco editor with IntelliSense, live LOG panel):
 
-![ResScript manager — script list, Monaco editor, LOG panel](docs/shots/manager.png)
+![Wiretrick manager — script list, Monaco editor, LOG panel](docs/shots/manager.png)
 
 **The popup** (toolbar quick-toggle for the active tab's scripts):
 
-![ResScript popup — scripts active on the current tab](docs/shots/popup.png)
+![Wiretrick popup — scripts active on the current tab](docs/shots/popup.png)
 
 **Sample scripts** (? → Samples — ten one-click starters):
 
-![ResScript samples dialog](docs/shots/samples.png)
+![Wiretrick samples dialog](docs/shots/samples.png)
 
 ## Install
 
 **From a release (recommended):**
 
-1. Grab `rescript-override-vX.Y.Z.zip` from [Releases](https://github.com/nimatrueway/wiretrick/releases) and unzip it.
+1. Grab a zip from [Releases](https://github.com/nimatrueway/wiretrick/releases) and unzip it:
+   `wiretrick-mv3-vX.Y.Z.zip` for current Chrome / Edge / Brave, or
+   `wiretrick-vX.Y.Z.zip` (its `dist` folder) for Firefox and MV2-capable Chromium.
 2. Open `chrome://extensions` (or `about:debugging#/runtime/this-firefox` on Firefox).
-3. Enable **Developer mode** (top-right), click **Load unpacked**, and select the unzipped `dist` folder.
+3. Enable **Developer mode** (top-right), click **Load unpacked**, and select the unzipped folder.
 4. Pin the 🧩 icon — the badge shows how many scripts are active on the current tab.
 
 **From source:**
 
 ```bash
 git clone https://github.com/nimatrueway/wiretrick.git
-cd rescript-override
+cd wiretrick
 npm install && npm run build
 # then: chrome://extensions → Developer mode → Load unpacked → dist/
 ```
 
-> Requires an MV2-capable Chromium (ungoogled-chromium or any Chromium ≤ ~126) or
-> Firefox. Modern stable Chrome (155+) removed MV2 and will refuse to load it.
+> `dist/` needs an MV2-capable Chromium (ungoogled-chromium or any Chromium ≤ ~126) or
+> Firefox. Modern stable Chrome removed MV2 — load `dist-mv3/` there instead
+> (see [Compatibility](#compatibility)).
 
 **Releases are automated** — pushing a `vX.Y.Z` tag runs the GitHub Action
 (typecheck → tests → build → zip → GitHub release), so the zip always matches
 the tagged `manifest.json` version.
+
+## Compatibility
+
+Which interception paths each browser and build gives you
+([strategies](#interception-strategies--how-bodies-get-modified) explained below):
+
+| | `hook` (page fetch/XHR) | `res.onDom` | `cdp` (debugger) | `webrequest` | `process` (local helper) |
+|---|---|---|---|---|---|
+| **Chrome / Edge / Brave / Vivaldi, current** — `dist-mv3/` | ✅ | ✅ | ✅ banner shown | ❌ | ✅ no banner |
+| **Chromium with MV2** (≤ ~126, ungoogled-chromium) — `dist/` | ✅ | ✅ | ✅ banner shown | ❌ (sync-only, see [async](#async-handlers)) | ✅ no banner |
+| **Firefox** — `dist/` | ✅ | ✅ | ❌ | ✅ no banner | ❌ (not needed: `webrequest` reaches everything) |
+
+What reaches what on Chrome:
+
+| resource | `hook` | `cdp` | `process` |
+|---|---|---|---|
+| page `fetch` / XHR | ✅ | MV2 ✅ · MV3 left to the hook | ✅ |
+| main-frame HTML, iframes | ❌ | ✅ | ✅ |
+| `<script src>`, CSS, images, fonts | ❌ | ✅ | ✅ |
+| service/web workers' requests | ❌ | ⚠ partly | ✅ |
+| first navigation in a fresh tab | ❌ | ⚠ MV3 may miss it ([details](#mv3-build)) | ✅ |
+| sites pinning certs / mTLS | ✅ | ✅ | ❌ leave them out of `match` |
+
+The `process` helper ships for these platforms (each release attaches the
+binaries and a `SHA256SUMS`; the [installer](#local-helper-strategy-process)
+picks the right one):
+
+| OS | x86-64 | ARM64 |
+|---|---|---|
+| Linux (glibc) | ✅ | ✅ |
+| macOS | ✅ | ✅ |
+| Windows 10+ | ✅ | ✅ via x64 emulation |
+
+The helper registers itself for Chrome (stable/beta/dev/canary), Chromium,
+Brave, Edge and Vivaldi.
 
 ## Writing scripts
 
@@ -126,7 +164,7 @@ clears the unsaved-changes state — no discard prompt on a no-op edit.
 
 ### Dedicated scripts folder
 
-Click **Folder…** and pick a folder (e.g. `~/ResScripts`) — that becomes your
+Click **Folder…** and pick a folder (e.g. `~/Wiretricks`) — that becomes your
 scripts home: every script is written there as a `.ts` file along with
 `res-api.d.ts` and `jsconfig.json`. Edit in VS Code (or any editor) with full
 TypeScript completions; saves hot-reload into the engine instantly.
@@ -178,7 +216,7 @@ params:
 ## Interception strategies — how bodies get modified
 
 Chrome and Firefox have fundamentally different extension APIs, and Chrome
-itself can only reach some resources through some paths. ResScript therefore
+itself can only reach some resources through some paths. Wiretrick therefore
 has **interception strategies** — pickable per script, individually or as a
 **comma-separated priority list**:
 
@@ -195,7 +233,7 @@ res.declareScript({
 | `cdp` | `chrome.debugger` + CDP Fetch domain: pause response → read body → transform → fulfill | **everything**: documents, script tags, images, fonts, XHR — even requests the page didn't initiate | **yes** — Chrome shows a yellow "being debugged" bar while attached | the only network-level path for main-frame HTML and non-JS resources on Chrome; attach/detach is lazy and automatic |
 | `proxy` | extension service worker fetches the original and serves it transformed | resources that follow redirects | never | in MV3 it routes to the debugger tier (browser-initiated loads like `<script src>`); unused on MV2 |
 | `webrequest` | blocking `webRequest` + `filterResponseData` | everything | never | **Firefox-only** (Firefox keeps MV2 network APIs); on Chrome this tier is a no-op |
-| `process` | a tiny local helper ([rescript-helper](#local-helper-strategy-process)) is a loopback HTTPS proxy; a PAC routes only the matched hosts to it and it pauses requests for your handlers | **everything**: documents, script tags, images, workers, XHR — MV2 and MV3 | **never** | **Chrome-only**, needs the helper installed + its CA trusted; your own proxy setting stays in effect; falls through the list when the helper is unavailable |
+| `process` | a tiny local helper ([wiretrick-helper](#local-helper-strategy-process)) is a loopback HTTPS proxy; a PAC routes only the matched hosts to it and it pauses requests for your handlers | **everything**: documents, script tags, images, workers, XHR — MV2 and MV3 | **never** | **Chrome-only**, needs the helper installed + its CA trusted; your own proxy setting stays in effect; falls through the list when the helper is unavailable |
 | `auto` (default) | engine picks per request | — | minimized | resolves to `hook` when the page hook is ready, else `cdp` |
 
 ### Priority lists
@@ -310,7 +348,7 @@ title/DOM changes on SPAs.
 
 ## Local helper (strategy `"process"`)
 
-`rescript-helper` is a small (~3 MB) Rust program for Linux, macOS and
+`wiretrick-helper` is a small (~3 MB) Rust program for Linux, macOS and
 Windows. Chrome starts it through **native messaging** when an enabled script
 lists `process`, and it exits when that script is gone (or Chrome closes):
 
@@ -333,7 +371,7 @@ lists `process`, and it exits when that script is gone (or Chrome closes):
 **Install** (once per machine). Settings → Local helper shows this command
 with your extension id filled in, plus a **Copy install command** button. It
 downloads the right binary from the latest GitHub release, checks it against
-the release's `SHA256SUMS`, and runs `rescript-helper install`:
+the release's `SHA256SUMS`, and runs `wiretrick-helper install`:
 
 ```sh
 # macOS / Linux
@@ -346,8 +384,8 @@ curl -fsSL https://raw.githubusercontent.com/nimatrueway/wiretrick/master/helper
 ```
 
 Then click Retry in Settings → Local helper (or reload the extension).
-`RESCRIPT_HELPER_VERSION=v1.2.3` pins a release. With a binary you already
-have, run `rescript-helper install --extension-id <extension id> --trust-ca`.
+`WIRETRICK_HELPER_VERSION=v1.2.3` pins a release. With a binary you already
+have, run `wiretrick-helper install --extension-id <extension id> --trust-ca`.
 The installer copies the helper to `<config dir>/bin` and registers it there.
 
 `--trust-ca` adds the helper's CA to the user's trust store: the login
@@ -360,8 +398,8 @@ are attached to each GitHub release. To build from source, run
 **Things to know**
 
 - The CA's private key stays in the helper's config dir
-  (`$XDG_CONFIG_HOME/rescript-helper`, `~/Library/Application Support/rescript-helper`,
-  or `%APPDATA%\rescript-helper`). It is generated on your machine and never
+  (`$XDG_CONFIG_HOME/wiretrick-helper`, `~/Library/Application Support/wiretrick-helper`,
+  or `%APPDATA%\wiretrick-helper`). It is generated on your machine and never
   leaves it. Anyone who can read it can impersonate sites to this browser
   profile, so treat it like a password. `untrust-ca` removes trust.
 - Sites that pin certificates or require client certificates (mTLS) fail
@@ -438,14 +476,14 @@ which tier each one uses.
 All `res.*` hooks accept `async` handlers (returning a Promise). What happens
 with the result depends on the tier:
 
-| hook | hook tier (page fetch/XHR) | webRequest tier (Chrome) | webRequest tier (Firefox) | cdp tier (Chrome, `strategy: ["cdp"]`) |
-|---|---|---|---|---|
-| `onRequest` redirect/cancel | n/a (hook doesn't redirect) | ⚠ result ignored, warning logged — blocking webRequest can't await; use `strategy: ["cdp"]` | ✅ awaited natively | ✅ awaited at the Request stage (redirect/cancel honored) |
-| `onRequest` headers | n/a | ⚠ ignored + warning | ✅ awaited | ✅ awaited, applied at the Response stage |
-| `onResponseHeaders` | n/a | ⚠ ignored + warning | ✅ awaited | ✅ awaited, merged into the fulfilled headers |
-| `replaceResponse` | ✅ awaited — the page's `fetch`/XHR promise simply takes as long as the handler needs | ⚠ result ignored (a sync data-URL can't be built late) → the request is re-routed to the cdp tier | ✅ awaited, then redirect | ✅ awaited, fulfills the body |
-| `modifyResponse` | ✅ awaited (chained between scripts) | — (re-routed to cdp) | ✅ awaited per chunk | ✅ awaited |
-| `onDom` | ✅ awaited (fire-and-forget) | — | — | — |
+| hook | hook tier (page fetch/XHR) | webRequest tier (Chrome) | webRequest tier (Firefox) | cdp tier (Chrome, `strategy: ["cdp"]`) | process tier (Chrome, `strategy: ["process"]`) |
+|---|---|---|---|---|---|
+| `onRequest` redirect/cancel | n/a (hook doesn't redirect) | ⚠ result ignored, warning logged — blocking webRequest can't await; use `strategy: ["cdp"]` | ✅ awaited natively | ✅ awaited at the Request stage (redirect/cancel honored) | ✅ awaited (redirect/cancel/respond honored) |
+| `onRequest` headers | n/a | ⚠ ignored + warning | ✅ awaited | ✅ awaited, applied at the Response stage | ✅ awaited, sent upstream |
+| `onResponseHeaders` | n/a | ⚠ ignored + warning | ✅ awaited | ✅ awaited, merged into the fulfilled headers | ✅ awaited |
+| `replaceResponse` | ✅ awaited — the page's `fetch`/XHR promise simply takes as long as the handler needs | ⚠ result ignored (a sync data-URL can't be built late) → the request is re-routed to the cdp tier | ✅ awaited, then redirect | ✅ awaited, fulfills the body | ✅ awaited, upstream never contacted |
+| `modifyResponse` | ✅ awaited (chained between scripts) | — (re-routed to cdp) | ✅ awaited per chunk | ✅ awaited | ✅ awaited (served `no-store`) |
+| `onDom` | ✅ awaited (fire-and-forget) | — | — | — | — |
 
 Practical rules of thumb:
 
@@ -457,8 +495,9 @@ Practical rules of thumb:
   intercepted. Without `cdp`, an async `onRequest` on Chrome logs a warning
   and the request proceeds unmodified.
 - **Async header changes** on Chrome likewise need `strategy: ["cdp"]`.
-- The `process` tier awaits every handler kind natively (it behaves like the
-  cdp column, without the banner).
+- The `process` tier awaits every handler kind (same as the cdp column,
+  without the banner) — the simplest way to get async redirects/headers on
+  Chrome.
 - **Static replacement from an async source** (file read, fetch): async
   `replaceResponse` + default strategy is all you need.
 

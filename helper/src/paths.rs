@@ -8,9 +8,9 @@ pub fn home() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
-/// `$XDG_CONFIG_HOME/rescript-helper`, `~/Library/Application Support/rescript-helper`, `%APPDATA%\rescript-helper`
+/// `$XDG_CONFIG_HOME/wiretrick-helper`, `~/Library/Application Support/wiretrick-helper`, `%APPDATA%\wiretrick-helper`
 pub fn config_dir() -> PathBuf {
-    if let Some(d) = std::env::var_os("RESCRIPT_HELPER_HOME") {
+    if let Some(d) = std::env::var_os("WIRETRICK_HELPER_HOME") {
         return PathBuf::from(d);
     }
     let base = if cfg!(windows) {
@@ -25,5 +25,5 @@ pub fn config_dir() -> PathBuf {
             .filter(|p| p.is_absolute())
             .unwrap_or_else(|| home().join(".config"))
     };
-    base.join("rescript-helper")
+    base.join("wiretrick-helper")
 }

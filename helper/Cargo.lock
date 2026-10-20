@@ -626,28 +626,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rescript-helper"
-version = "0.1.0"
-dependencies = [
- "base64",
- "brotli-decompressor",
- "bytes",
- "flate2",
- "http-body-util",
- "hyper",
- "hyper-util",
- "rcgen",
- "ring",
- "rustls",
- "rustls-platform-verifier",
- "serde",
- "serde_json",
- "tokio",
- "tokio-rustls",
- "tower-service",
-]
-
-[[package]]
 name = "ring"
 version = "0.17.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1205,6 +1183,28 @@ name = "windows_x86_64_msvc"
 version = "0.52.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
+
+[[package]]
+name = "wiretrick-helper"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "brotli-decompressor",
+ "bytes",
+ "flate2",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "rcgen",
+ "ring",
+ "rustls",
+ "rustls-platform-verifier",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-rustls",
+ "tower-service",
+]
 
 [[package]]
 name = "x509-parser"

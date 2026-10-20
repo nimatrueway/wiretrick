@@ -61,7 +61,7 @@ async function fetchText(url: string, ms = 5000): Promise<string | null> {
 }
 
 function isOurs(value: any): boolean {
-    return value?.mode === "pac_script" && typeof value?.pacScript?.data === "string" && value.pacScript.data.startsWith("// ResScript Override");
+    return value?.mode === "pac_script" && typeof value?.pacScript?.data === "string" && value.pacScript.data.startsWith("// Wiretrick");
 }
 
 export class ProcessRouting {

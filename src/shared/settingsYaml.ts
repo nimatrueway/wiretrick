@@ -130,7 +130,7 @@ export function commentedDefaultLines(key: string, d: ParamDef | undefined): str
 export function renderSettings(g: GlobalSettings, scripts: ScriptSettingsState[]): string {
     const out: string[] = [
         SCHEMA_MODELINE,
-        "# ResScript settings — edit and save; options left commented use their default.",
+        "# Wiretrick settings — edit and save; options left commented use their default.",
         "",
         "settings:",
     ];

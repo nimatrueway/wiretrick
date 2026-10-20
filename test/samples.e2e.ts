@@ -43,7 +43,7 @@ const VERIFY: Record<string, (p: Page) => Promise<[boolean, string]>> = {
     "Modify request headers": async (p) => {
         await open(p, "https://httpbin.org/headers");
         const t = await text(p);
-        return [t.includes("hello from ResScript"), t.slice(0, 120)];
+        return [t.includes("hello from Wiretrick"), t.slice(0, 120)];
     },
     "CORS unlock": async (p) => {
         await open(p, "https://jsonplaceholder.typicode.com/");
@@ -58,23 +58,23 @@ const VERIFY: Record<string, (p: Page) => Promise<[boolean, string]>> = {
     "Transform an API response": async (p) => {
         await open(p, "https://jsonplaceholder.typicode.com/todos/1");
         const t = await text(p);
-        return [t.includes("Transformed by ResScript") && t.includes("true"), t.slice(0, 120)];
+        return [t.includes("Transformed by Wiretrick") && t.includes("true"), t.slice(0, 120)];
     },
     "Rewrite page HTML": async (p) => {
         await open(p, "https://example.com/");
         const t = await text(p);
-        return [t.includes("Rewritten by ResScript") && (await p.title()) === "Rewritten Domain", await p.title()];
+        return [t.includes("Rewritten by Wiretrick") && (await p.title()) === "Rewritten Domain", await p.title()];
     },
     "DOM / title changes": async (p) => {
         await open(p, "https://en.wikipedia.org/wiki/Cat");
         await p.waitForTimeout(1000);
         const h1 = await p.evaluate(() => document.querySelector("h1")?.textContent || "");
-        return [h1 === "Hello from ResScript" && (await p.title()).startsWith("🎯"), h1];
+        return [h1 === "Hello from Wiretrick" && (await p.title()).startsWith("🎯"), h1];
     },
     "Serve a local file": async (p) => {
         await open(p, "https://en.wikipedia.org/robots.txt");
         const t = await text(p);
-        return [t.includes("Served by ResScript"), t.slice(0, 80)];
+        return [t.includes("Served by Wiretrick"), t.slice(0, 80)];
     },
     "Per-script storage": async (p) => {
         const hits = async () => Number((await text(p)).match(/"X-Hits":\s*"(\d+)"/)?.[1] || 0);

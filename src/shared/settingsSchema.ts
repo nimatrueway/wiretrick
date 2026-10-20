@@ -14,7 +14,7 @@ import { LOG_LEVELS, DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL } from "./settingsYaml";
 
 export const SETTINGS_SCHEMA = {
     $schema: "http://json-schema.org/draft-07/schema#",
-    title: "ResScript settings",
+    title: "Wiretrick settings",
     description: "Extension settings + per-script params & enabled state (settings.yaml)",
     type: "object",
     additionalProperties: false,

@@ -1,16 +1,16 @@
 #!/bin/sh
-# Downloads the rescript-helper binary for this machine from GitHub releases,
-# verifies its SHA-256, and runs `rescript-helper install <args>` (which
+# Downloads the wiretrick-helper binary for this machine from GitHub releases,
+# verifies its SHA-256, and runs `wiretrick-helper install <args>` (which
 # copies itself to a per-user location and registers the native host).
 #
 #   curl -fsSL https://raw.githubusercontent.com/nimatrueway/wiretrick/master/helper/install.sh | sh -s -- --extension-id <id> --trust-ca
 #
-# RESCRIPT_HELPER_VERSION=v1.2.3 pins a release (default: latest);
-# RESCRIPT_HELPER_BASE_URL overrides the download location (testing).
+# WIRETRICK_HELPER_VERSION=v1.2.3 pins a release (default: latest);
+# WIRETRICK_HELPER_BASE_URL overrides the download location (testing).
 set -eu
 
 REPO="nimatrueway/wiretrick"
-VERSION="${RESCRIPT_HELPER_VERSION:-latest}"
+VERSION="${WIRETRICK_HELPER_VERSION:-latest}"
 
 if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then
     red=$(printf '\033[1;31m') dim=$(printf '\033[2m') off=$(printf '\033[0m')
@@ -36,14 +36,14 @@ if [ "$os" = "apple-darwin" ] && [ "$arch" = "x86_64" ] && [ "$(sysctl -n hw.opt
     arch="aarch64"
 fi
 
-if [ -n "${RESCRIPT_HELPER_BASE_URL:-}" ]; then
-    base="$RESCRIPT_HELPER_BASE_URL"
+if [ -n "${WIRETRICK_HELPER_BASE_URL:-}" ]; then
+    base="$WIRETRICK_HELPER_BASE_URL"
 elif [ "$VERSION" = "latest" ]; then
     base="https://github.com/$REPO/releases/latest/download"
 else
     base="https://github.com/$REPO/releases/download/$VERSION"
 fi
-asset="rescript-helper-$arch-$os.tar.gz"
+asset="wiretrick-helper-$arch-$os.tar.gz"
 
 fetch() {
     if command -v curl >/dev/null 2>&1; then
@@ -55,7 +55,7 @@ fetch() {
     fi
 }
 
-tmp=$(mktemp -d 2>/dev/null || mktemp -d -t rescript-helper)
+tmp=$(mktemp -d 2>/dev/null || mktemp -d -t wiretrick-helper)
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
 say "downloading $asset ($VERSION)…"
@@ -76,10 +76,10 @@ else
 fi
 
 tar -xzf "$tmp/$asset" -C "$tmp"
-chmod +x "$tmp/rescript-helper"
+chmod +x "$tmp/wiretrick-helper"
 # stdin is this script when piped (`curl | sh`): give the helper the terminal
 if [ ! -t 0 ] && (: </dev/tty) 2>/dev/null; then
-    "$tmp/rescript-helper" install "$@" </dev/tty
+    "$tmp/wiretrick-helper" install "$@" </dev/tty
 else
-    "$tmp/rescript-helper" install "$@"
+    "$tmp/wiretrick-helper" install "$@"
 fi

@@ -145,7 +145,7 @@ async fn setup(routes: Vec<Route>) -> Env {
     let (up_port, up_plain_port, up_cert) = start_upstream(hits.clone()).await;
 
     let dir = std::env::temp_dir().join(format!(
-        "rescript-helper-test-{}-{}",
+        "wiretrick-helper-test-{}-{}",
         std::process::id(),
         NEXT.fetch_add(1, Ordering::SeqCst)
     ));

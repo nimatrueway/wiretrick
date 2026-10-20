@@ -1,5 +1,5 @@
 /**
- * Tier P: the "process" strategy — a local helper (rescript-helper, Rust)
+ * Tier P: the "process" strategy — a local helper (wiretrick-helper, Rust)
  * is a loopback MITM proxy that Chrome reaches through a PAC
  * (processRouting.ts) for the hosts of process-owned scripts only. It
  * pauses matching requests CDP-Fetch style over native messaging; this
@@ -23,7 +23,7 @@ import { analyzeScripts, evalProxyDecision, runBodyOp } from "../../compileHost"
 import { ProcessRouting } from "../../processRouting";
 import { listsProcess, setProcessActive } from "./processState";
 
-export const NM_HOST = "com.rescript_override.helper";
+export const NM_HOST = "com.wiretrick.helper";
 
 type Pairs = [string, string][];
 
@@ -373,7 +373,7 @@ export class ProcessStrategy {
         const ok = await this.routing.probe();
         if (ok !== this.caTrusted) {
             this.caTrusted = ok;
-            if (!ok) dlogLevel("process", "warn", `Chrome does not trust the helper's CA yet — intercepted HTTPS sites will show certificate errors. Run: rescript-helper trust-ca (or use "Trust CA" in the manager)`);
+            if (!ok) dlogLevel("process", "warn", `Chrome does not trust the helper's CA yet — intercepted HTTPS sites will show certificate errors. Run: wiretrick-helper trust-ca (or use "Trust CA" in the manager)`);
             this.emit();
         }
     }

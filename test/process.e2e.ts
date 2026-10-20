@@ -1,5 +1,5 @@
 /**
- * Process-strategy e2e (MV3 bundle + the real rescript-helper):
+ * Process-strategy e2e (MV3 bundle + the real wiretrick-helper):
  *   - the helper is installed for a throwaway profile (NativeMessagingHosts
  *     under the user-data-dir) with an isolated HOME (CA + NSS db)
  *   - the user's own proxy (system mode → http_proxy/https_proxy env) is a
@@ -24,7 +24,7 @@ import { resolveBrowser } from "./browserSetup";
 
 const ROOT = path.join(new URL("..", import.meta.url).pathname);
 const EXT_ROOT = path.join(ROOT, "dist-mv3");
-const HELPER = path.join(ROOT, "helper/target/release", process.platform === "win32" ? "rescript-helper.exe" : "rescript-helper");
+const HELPER = path.join(ROOT, "helper/target/release", process.platform === "win32" ? "wiretrick-helper.exe" : "wiretrick-helper");
 const EXT_ID = crypto.createHash("sha256").update(EXT_ROOT, "utf8").digest("hex").split("").map((c) => String.fromCharCode(parseInt(c, 16) + 97)).join("").slice(0, 32);
 
 if (!existsSync(HELPER)) {

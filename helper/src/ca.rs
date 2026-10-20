@@ -17,7 +17,7 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use rustls::server::{ClientHello, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
 
-pub const CA_NAME: &str = "ResScript Override Local CA";
+pub const CA_NAME: &str = "Wiretrick Local CA";
 const LEAF_CACHE_MAX: usize = 1024;
 
 pub struct Ca {
@@ -36,7 +36,7 @@ fn ca_params() -> CertificateParams {
     p.distinguished_name.push(DnType::CommonName, CA_NAME);
     p.distinguished_name.push(
         DnType::OrganizationName,
-        "ResScript Override (local, this machine only)",
+        "Wiretrick (local, this machine only)",
     );
     p.is_ca = IsCa::Ca(BasicConstraints::Constrained(0));
     p.key_usages = vec![
@@ -180,8 +180,10 @@ mod tests {
     use rustls::pki_types::{ServerName, UnixTime};
 
     fn tmpdir(tag: &str) -> PathBuf {
-        let d =
-            std::env::temp_dir().join(format!("rescript-helper-test-{tag}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!(
+            "wiretrick-helper-test-{tag}-{}",
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&d);
         d
     }

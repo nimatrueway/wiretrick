@@ -41,9 +41,9 @@ const DOC: SettingsDoc = {
 describe("export bundle shape (yaml)", () => {
     it("is one YAML document with settings + scripts", () => {
         const text = buildBundle(DOC, SCRIPTS);
-        expect(text.startsWith("# ResScript export")).toBe(true);
+        expect(text.startsWith("# Wiretrick export")).toBe(true);
         const parsed: any = parseYaml(text);
-        expect(parsed.format).toBe("rescript-bundle");
+        expect(parsed.format).toBe("wiretrick-bundle");
         expect(parsed.version).toBe(2);
         expect(parsed.settings).toEqual({ logLevel: "warn" });
         expect(parsed.scripts).toEqual([
@@ -73,7 +73,7 @@ describe("export bundle shape (yaml)", () => {
 describe("parseBundleText", () => {
     it("legacy json bundle (settings object) → settings, still imports", () => {
         const old = {
-            format: "rescript-bundle",
+            format: "wiretrick-bundle",
             version: 1,
             settings: { logLevel: "debug", logCap: 1234 },
             scripts: [{ name: "Old", code: "res.declareScript({});", enabled: true }],
@@ -90,6 +90,11 @@ describe("parseBundleText", () => {
         );
         expect(legacy).not.toBeNull();
         expect(bundleSettingsDoc(legacy!)).toBeNull(); // no settings carried
+    });
+
+    it("exports from before the rename (format: rescript-bundle) still import", () => {
+        const old = parseBundleText("format: rescript-bundle\nversion: 1\nscripts:\n  - name: Old\n    code: res.onDom(() => {})\n");
+        expect(old?.scripts.length).toBe(1);
     });
 
     it("non-bundle payloads → null (plain array / single script / yaml / garbage)", () => {

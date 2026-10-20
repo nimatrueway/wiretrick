@@ -15,11 +15,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, exe: rescript-helper }
-          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, exe: rescript-helper }
-          - { os: macos-latest, target: aarch64-apple-darwin, exe: rescript-helper }
-          - { os: macos-13, target: x86_64-apple-darwin, exe: rescript-helper }
-          - { os: windows-latest, target: x86_64-pc-windows-msvc, exe: rescript-helper.exe }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, exe: wiretrick-helper }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, exe: wiretrick-helper }
+          - { os: macos-latest, target: aarch64-apple-darwin, exe: wiretrick-helper }
+          - { os: macos-13, target: x86_64-apple-darwin, exe: wiretrick-helper }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, exe: wiretrick-helper.exe }
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -56,7 +56,7 @@ jobs:
       - name: Package
         run: |
           mkdir -p ../helper-dist
-          NAME="rescript-helper-${{ matrix.target }}"
+          NAME="wiretrick-helper-${{ matrix.target }}"
           if [ "${{ runner.os }}" = "Windows" ]; then
             cp "target/${{ matrix.target }}/release/${{ matrix.exe }}" "../helper-dist/$NAME.exe"
           else
@@ -104,13 +104,15 @@ jobs:
       - name: Package zip
         run: |
           VERSION=$(node -p "require('./dist/manifest.json').version")
-          zip -qr "rescript-override-v${VERSION}.zip" dist
-          echo "ZIP_NAME=rescript-override-v${VERSION}.zip" >> "$GITHUB_ENV"
+          zip -qr "wiretrick-v${VERSION}.zip" dist
+          (cd dist-mv3 && zip -qr "../wiretrick-mv3-v${VERSION}.zip" .)
+          echo "ZIP_NAME=wiretrick-v${VERSION}.zip" >> "$GITHUB_ENV"
+          echo "ZIP_MV3_NAME=wiretrick-mv3-v${VERSION}.zip" >> "$GITHUB_ENV"
 
       - name: Upload build artifact (every run)
         uses: actions/upload-artifact@v4
         with:
-          name: rescript-override
+          name: wiretrick
           path: dist/**
 
       - name: Download helper binaries
@@ -123,7 +125,7 @@ jobs:
       - name: Checksums
         run: |
           cd helper-dist
-          sha256sum rescript-helper-* > SHA256SUMS
+          sha256sum wiretrick-helper-* > SHA256SUMS
           cat SHA256SUMS
 
       - name: Create GitHub release
@@ -132,12 +134,14 @@ jobs:
         with:
           files: |
             ${{ env.ZIP_NAME }}
+            ${{ env.ZIP_MV3_NAME }}
             helper-dist/*
           generate_release_notes: true
           body: |
-            Load from source: unzip, then chrome://extensions → Load unpacked → the unzipped `dist` folder.
+            Current Chrome / Edge / Brave: unzip `wiretrick-mv3-v*.zip`, then chrome://extensions → Developer mode → Load unpacked → the unzipped folder.
+            Firefox or an MV2-capable Chromium: unzip `wiretrick-v*.zip` and load its `dist` folder.
 
-            Optional local helper for `strategy: ["process"]` (Chrome). Settings → Local helper shows the command with your extension id filled in; it downloads the right `rescript-helper-*` binary below, checks it against `SHA256SUMS`, and installs it:
+            Optional local helper for `strategy: ["process"]` (Chrome). Settings → Local helper shows the command with your extension id filled in; it downloads the right `wiretrick-helper-*` binary below, checks it against `SHA256SUMS`, and installs it:
 
             ```sh
             # macOS / Linux
