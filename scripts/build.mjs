@@ -89,7 +89,7 @@ function mv3Manifest(mv2) {
         options_ui: mv2.options_ui,
         background: { service_worker: "background.js" },
         content_scripts: mv2.content_scripts,
-        permissions: ["storage", "unlimitedStorage", "tabs", "debugger", "offscreen", "webNavigation", "webRequest", "alarms"],
+        permissions: ["storage", "unlimitedStorage", "tabs", "debugger", "offscreen", "webNavigation", "webRequest", "alarms", "proxy", "nativeMessaging", "browsingData"],
         host_permissions: ["<all_urls>"],
         web_accessible_resources: [{ resources: ["hook.js"], matches: ["<all_urls>"] }],
         // the sandbox page is exempt from the extension CSP — it hosts the

@@ -14,6 +14,7 @@ import type { Script } from "../scriptStore";
 import { log, scriptError } from "../logs";
 import { dlogLevel } from "../../../shared/debugLog";
 import { scriptStorageGet, scriptStorageSet } from "../scriptStore";
+import { isProcessOwned } from "./processState";
 
 const IS_FIREFOX = typeof (globalThis as any).browser !== "undefined" &&
     typeof (globalThis as any).browser.webRequest?.filterResponseData === "function";
@@ -69,8 +70,9 @@ export class WebRequestStrategy implements InterceptionStrategy {
     }
 
     private scriptsFor(url: string, phase: "request" | "response"): { id: string; name: string; compiled: CompiledScript }[] {
+        // process-owned scripts run in the helper tier (never twice)
         return this.compiled.filter(
-            (c) => matchAny(c.compiled.meta.match, url) && c.compiled.meta.phase.includes(phase)
+            (c) => matchAny(c.compiled.meta.match, url) && c.compiled.meta.phase.includes(phase) && !isProcessOwned(c.compiled.meta.strategy)
         );
     }
 

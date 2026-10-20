@@ -71,7 +71,13 @@ mod tests {
         let cases: Vec<Case> = serde_json::from_str(raw).unwrap();
         assert!(cases.len() > 40);
         for c in cases {
-            assert_eq!(matches(&c.pattern, &c.input), c.matched, "{} ~ {}", c.pattern, c.input);
+            assert_eq!(
+                matches(&c.pattern, &c.input),
+                c.matched,
+                "{} ~ {}",
+                c.pattern,
+                c.input
+            );
         }
     }
 

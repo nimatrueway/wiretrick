@@ -14,16 +14,17 @@
  * Ops:
  *   analyze — compile scripts, return serializable meta/paramDefs/deps
  *             (saveScript metadata, popup ⚙ dialog, hook bundle assembly)
- *   run     — execute the hook-tier body ops (requestDecision / transform /
- *             replace) with the same semantics as ChromeBodyStrategy's
+ *   pac     — evaluate the user's proxy decision (process tier upstream)
+ *   run     — execute the body ops (requestDecision / transform / replace /
+ *             responseHeaders) with the same semantics as ChromeBodyStrategy's
  *             MV2 in-SW execution, mirroring its log lines
  *
  * Reverse calls (res.storage.* and script logging) travel the other way
  * with the same reqId pattern.
  */
 import { compileScript, makeModuleResolver, makeStubModule, type CompiledScript } from "../shared/compile";
-import { formatScriptError } from "../shared/scriptError";
-import { matchAny } from "../shared/matcher";
+import { runOp, type BodyOp, type OpScript } from "../shared/bodyOps";
+import { compileDecision } from "../shared/pac";
 import "../shared/transpile";
 
 /**
@@ -239,158 +240,30 @@ function analyze(scripts: PlainScript[]): { results: Record<string, AnalyzeResul
     return { results };
 }
 
-// ---- body ops: mirror ChromeBodyStrategy's MV2 semantics ----
+// ---- body ops: shared chain semantics (src/shared/bodyOps.ts) ----
 
-function guessMimeFromUrl(url: string): string {
-    const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "";
-    const m: Record<string, string> = { js: "application/javascript", json: "application/json", css: "text/css", html: "text/html", xml: "application/xml" };
-    return m[ext] || "application/json";
-}
-
-function serializeRespondBody(body: any): string {
-    if (typeof body === "string") return body;
-    if (body instanceof Uint8Array) return new TextDecoder().decode(body);
-    return JSON.stringify(body);
-}
-
-/** matching enabled declared scripts with `handler` handlers, in list order (phase-aware) */
-function matchingWith(scripts: PlainScript[], url: string, handler: "onRequest" | "modifyResponse" | "replaceResponse", onlyIds?: string[]): { s: PlainScript; handlers: any[] }[] {
-    // handler → the declareScript phase it runs in
-    const phase = handler === "onRequest" ? "request" : "response";
-    const out: { s: PlainScript; handlers: any[] }[] = [];
-    for (const [id, c] of cache) {
-        const s = scripts.find((x) => x.id === id);
-        if (!s || !s.enabled || !c.result.declared || !matchAny(c.result.meta.match, url)) continue;
-        if (onlyIds && !onlyIds.includes(id)) continue;
-        if (c.result.meta.phase && !c.result.meta.phase.includes(phase)) continue;
-        const handlers = (c.compiled.handlers as any)[handler] || [];
-        if (handlers.length) out.push({ s, handlers });
-    }
-    return out;
-}
-
-function run(scripts: PlainScript[], paramValues: Record<string, any>, runOp: string, args: any): Promise<any> {
+function run(scripts: PlainScript[], paramValues: Record<string, any>, op: BodyOp, args: any): Promise<any> {
     // handlers MUST compile with the real stored param values — the MV2
     // parity bug: without them every handler saw defaults and (correctly,
     // per its config) did nothing. Compiled once per (script-set, params)
     // here; matching scripts' cached handlers then run per request.
     ensureCompiled(scripts, paramValues ?? {});
-    const url: string = args.url;
-    const method: string = args.method;
-    const phase = runOp === "requestDecision" ? "request" : "response";
-    const handler = runOp === "requestDecision" ? "onRequest" : runOp === "transform" ? "modifyResponse" : "replaceResponse";
-    // matched + phase-skipped in one pass (a URL-matching script skipped by
-    // its phase restriction is otherwise invisible)
-    let phaseSkipped = 0;
-    const matching: { s: PlainScript; handlers: any[] }[] = [];
+    const list: OpScript[] = [];
     for (const [id, c] of cache) {
         const s = scripts.find((x) => x.id === id);
-        if (!s || !s.enabled || !c.result.declared || !matchAny(c.result.meta.match, url)) continue;
-        if (args.onlyIds && !args.onlyIds.includes(id)) continue;
-        if (c.result.meta.phase && !c.result.meta.phase.includes(phase)) {
-            phaseSkipped++;
-            continue;
-        }
-        const handlers = (c.compiled.handlers as any)[handler] || [];
-        if (handlers.length) matching.push({ s, handlers });
+        if (!s || !s.enabled || !c.result.declared) continue;
+        list.push({ id, name: s.name, match: c.result.meta.match, phase: c.result.meta.phase, handlers: c.compiled.handlers });
     }
-    sandboxLog(`run ${runOp} ${method} ${url} → ${matching.length} matching script(s) [${matching.map((m) => m.s.name).join(", ")}]${phaseSkipped ? ` (${phaseSkipped} skipped: phase restriction)` : ""}`, "debug");
+    return runOp(list, op, args, { log: scriptLog, debug: (m) => sandboxLog(m, "debug") });
+}
 
-    if (runOp === "requestDecision") {
-        return (async () => {
-            let headerMods: any = null;
-            for (const { s, handlers } of matchingWith(scripts, url, "onRequest", args.onlyIds)) {
-                for (const onRequest of handlers) {
-                    try {
-                        const result = await onRequest({ url, method, tabUrl: url, resourceType: args.resourceType || "xmlhttprequest", requestHeaders: args.requestHeaders || {} });
-                        if (!result) continue;
-                        if (result.respond) {
-                            const r = result.respond;
-                            const mime = r.mime || guessMimeFromUrl(url);
-                            const content = serializeRespondBody(r.body);
-                            scriptLog(s.id, "info", `[${s.name}] onRequest → respond ${r.status || 200} ${mime} (${content.length}b) ${url}`);
-                            return { kind: "respond", mime, content, status: r.status, headers: r.headers?.set };
-                        }
-                        if (result.redirect) {
-                            scriptLog(s.id, "info", `[${s.name}] onRequest → redirect → ${result.redirect}`);
-                            return { kind: "redirect", url: result.redirect };
-                        }
-                        if (result.cancel) {
-                            scriptLog(s.id, "info", `[${s.name}] onRequest → cancel ${url}`);
-                            return { kind: "cancel" };
-                        }
-                        if (result.headers && ((result.headers.set && Object.keys(result.headers.set).length) || (result.headers.remove && result.headers.remove.length))) {
-                            const parts: string[] = [];
-                            if (result.headers.set && Object.keys(result.headers.set).length) parts.push(`set ${Object.keys(result.headers.set).join(", ")}`);
-                            if (result.headers.remove && result.headers.remove.length) parts.push(`remove ${result.headers.remove.join(", ")}`);
-                            scriptLog(s.id, "info", `[${s.name}] onRequest → request headers (${parts.join("; ")}) ${url}`);
-                            headerMods = { set: { ...(headerMods?.set || {}), ...(result.headers.set || {}) }, remove: [...(headerMods?.remove || []), ...(result.headers.remove || [])] };
-                        }
-                    } catch (e: any) {
-                        scriptLog(s.id, "error", formatScriptError(s.name, e, "onRequest"));
-                    }
-                }
-            }
-            return headerMods ? { kind: "headers", changes: headerMods } : null;
-        })();
-    }
+// ---- proxy decisions (process tier: evaluate the user's PAC/rules) ----
 
-    if (runOp === "transform") {
-        return (async () => {
-            let out: string | Uint8Array = args.body || "";
-            let touched = false;
-            for (const { s, handlers } of matchingWith(scripts, url, "modifyResponse", args.onlyIds)) {
-                for (const transform of handlers) {
-                    try {
-                        const result: any = await transform(
-                            { url, method, tabUrl: url, resourceType: args.resourceType || "xmlhttprequest", requestHeaders: args.requestHeaders || {}, contentType: args.contentType, status: args.status },
-                            out
-                        );
-                        if (result !== undefined && result !== null) {
-                            const before = typeof out === "string" ? out.length : out.byteLength;
-                            const prevOut = out;
-                            const next = typeof result === "string" ? result : result instanceof Uint8Array ? result : JSON.stringify(result);
-                            const after = typeof next === "string" ? next.length : next.byteLength;
-                            out = next;
-                            if (next !== prevOut) {
-                                scriptLog(s.id, "info", `[${s.name}] modifyResponse applied (${before}b → ${after}b) ${url}`);
-                            }
-                            touched = true;
-                        }
-                    } catch (e: any) {
-                        scriptLog(s.id, "error", formatScriptError(s.name, e, "modifyResponse"));
-                    }
-                }
-            }
-            return touched ? (typeof out === "string" ? out : new TextDecoder().decode(out)) : null;
-        })();
-    }
+let pacCache: { source: string; fn: (url: string, host: string) => string } | null = null;
 
-    if (runOp === "replace") {
-        return (async () => {
-            for (const { s, handlers } of matchingWith(scripts, url, "replaceResponse", args.onlyIds)) {
-                for (const replace of handlers) {
-                    try {
-                        const out = await replace({ url, method, tabUrl: url, resourceType: args.resourceType || "xmlhttprequest", requestHeaders: args.requestHeaders || {} });
-                        if (out !== undefined && out !== null) {
-                            const content = out && typeof out === "object" && out.file ? out.file : out;
-                            const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "";
-                            const mimes: Record<string, string> = { js: "application/javascript", json: "application/json", css: "text/css", html: "text/html", xml: "application/xml" };
-                            const mime = mimes[ext] || "application/json";
-                            const body = typeof content === "string" ? content : String(content);
-                            scriptLog(s.id, "info", `[${s.name}] replaceResponse → ${mime} (${body.length}b) ${url}`);
-                            return { mime, content: body };
-                        }
-                    } catch (e: any) {
-                        scriptLog(s.id, "error", formatScriptError(s.name, e, "replaceResponse"));
-                    }
-                }
-            }
-            return null;
-        })();
-    }
-
-    return Promise.resolve(null);
+function pacDecision(source: string): (url: string, host: string) => string {
+    if (pacCache?.source !== source) pacCache = { source, fn: compileDecision(source) };
+    return pacCache.fn;
 }
 
 // ---- message pump ----
@@ -401,11 +274,12 @@ window.addEventListener("message", async (event) => {
     if (!data || data.kind !== "sandboxCall" || event.source !== window.parent) return;
 
     try {
-        const { op, scripts, paramValues, runOp, args } = data.payload;
+        const { op, scripts, paramValues, runOp: bodyOp, args } = data.payload;
         let result: any;
         if (op === "ping") result = { pong: true };
         else if (op === "analyze") result = analyze(scripts);
-        else if (op === "run") result = await run(scripts, paramValues, runOp, args);
+        else if (op === "run") result = await run(scripts, paramValues, bodyOp, args);
+        else if (op === "pac") result = { result: pacDecision(data.payload.source)(args.url, args.host) };
         else result = { error: `unknown op ${op}` };
         post({ kind: "sandboxResult", reqId: data.reqId, result });
     } catch (e: any) {

@@ -37,7 +37,8 @@ State lives in $RESCRIPT_HELPER_HOME or the per-user config dir.";
 
 pub fn client_tls_config() -> rustls::ClientConfig {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let verifier = rustls_platform_verifier::Verifier::new(provider.clone()).expect("platform verifier");
+    let verifier =
+        rustls_platform_verifier::Verifier::new(provider.clone()).expect("platform verifier");
     rustls::ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
         .expect("tls versions")
@@ -50,7 +51,10 @@ fn main() {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let cmd = args.first().map(String::as_str).unwrap_or("");
-    if cmd.is_empty() || cmd.starts_with("chrome-extension://") || cmd.starts_with("--parent-window") {
+    if cmd.is_empty()
+        || cmd.starts_with("chrome-extension://")
+        || cmd.starts_with("--parent-window")
+    {
         native();
         return;
     }
@@ -84,7 +88,13 @@ fn main() {
 }
 
 fn parse_opts(a: &[String]) -> Result<install::InstallOpts, String> {
-    let mut o = install::InstallOpts { extension_ids: vec![], browsers: vec![], user_data_dirs: vec![], trust: false, nssdb: None };
+    let mut o = install::InstallOpts {
+        extension_ids: vec![],
+        browsers: vec![],
+        user_data_dirs: vec![],
+        trust: false,
+        nssdb: None,
+    };
     let mut i = 0;
     while i < a.len() {
         let (flag, inline) = match a[i].split_once('=') {
@@ -96,11 +106,15 @@ fn parse_opts(a: &[String]) -> Result<install::InstallOpts, String> {
                 return Ok(v);
             }
             i += 1;
-            a.get(i).cloned().ok_or_else(|| format!("{flag} needs a value"))
+            a.get(i)
+                .cloned()
+                .ok_or_else(|| format!("{flag} needs a value"))
         };
         match flag.as_str() {
             "--extension-id" => o.extension_ids.push(value()?),
-            "--browser" | "--browsers" => o.browsers.extend(value()?.split(',').map(|s| s.trim().to_string())),
+            "--browser" | "--browsers" => o
+                .browsers
+                .extend(value()?.split(',').map(|s| s.trim().to_string())),
             "--user-data-dir" => o.user_data_dirs.push(PathBuf::from(value()?)),
             "--nssdb" => o.nssdb = Some(PathBuf::from(value()?)),
             "--trust-ca" => o.trust = true,
@@ -112,20 +126,32 @@ fn parse_opts(a: &[String]) -> Result<install::InstallOpts, String> {
 }
 
 fn native() {
-    let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().expect("runtime");
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .expect("runtime");
     rt.block_on(async {
         let nm = Nm::new(tokio::io::stdout());
         let ca = match ca::Ca::load_or_create(&paths::config_dir()) {
             Ok(c) => Arc::new(c),
             Err(e) => {
-                nm.log("error", format!("cannot create the CA in {}: {e}", paths::config_dir().display()));
+                nm.log(
+                    "error",
+                    format!(
+                        "cannot create the CA in {}: {e}",
+                        paths::config_dir().display()
+                    ),
+                );
                 tokio::time::sleep(std::time::Duration::from_millis(200)).await;
                 std::process::exit(2);
             }
         };
         let up = Arc::new(upstream::Upstream::new(nm.clone(), client_tls_config()));
         let st = proxy::State::new(nm.clone(), ca.clone(), up.clone());
-        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind loopback");
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind loopback");
         let port = listener.local_addr().unwrap().port();
         nm.send(&Out::Ready {
             port,
@@ -135,6 +161,21 @@ fn native() {
             ca_path: ca.path.display().to_string(),
         });
         tokio::spawn(proxy::serve(listener, st.clone()));
+        {
+            let nm = nm.clone();
+            tokio::spawn(async move {
+                let sp = tokio::task::spawn_blocking(upstream::read_system_proxy)
+                    .await
+                    .unwrap_or_default();
+                nm.send(&Out::System {
+                    http: sp.http.as_ref().map(|h| h.to_pac()),
+                    https: sp.https.as_ref().map(|h| h.to_pac()),
+                    socks: sp.socks.as_ref().map(|h| h.to_pac()),
+                    bypass: sp.bypass,
+                    pac_url: sp.pac_url,
+                });
+            });
+        }
 
         let mut stdin = tokio::io::stdin();
         loop {
@@ -159,7 +200,10 @@ fn native() {
                     let nm = nm.clone();
                     tokio::task::spawn_blocking(move || {
                         let r = install::trust_ca(None);
-                        let (ok, msg) = match r { Ok(m) => (true, m), Err(m) => (false, m) };
+                        let (ok, msg) = match r {
+                            Ok(m) => (true, m),
+                            Err(m) => (false, m),
+                        };
                         nm.send(&Out::TrustResult { ok, msg });
                     });
                 }

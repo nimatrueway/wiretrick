@@ -44,6 +44,9 @@
         "unlimitedStorage",
         "tabs",
         "debugger",
+        "proxy",
+        "nativeMessaging",
+        "browsingData",
         "<all_urls>"
     ],
     "web_accessible_resources": ["hook.js", "__resproxy*"],

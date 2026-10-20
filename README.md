@@ -195,6 +195,7 @@ res.declareScript({
 | `cdp` | `chrome.debugger` + CDP Fetch domain: pause response → read body → transform → fulfill | **everything**: documents, script tags, images, fonts, XHR — even requests the page didn't initiate | **yes** — Chrome shows a yellow "being debugged" bar while attached | the only network-level path for main-frame HTML and non-JS resources on Chrome; attach/detach is lazy and automatic |
 | `proxy` | extension service worker fetches the original and serves it transformed | resources that follow redirects | never | in MV3 it routes to the debugger tier (browser-initiated loads like `<script src>`); unused on MV2 |
 | `webrequest` | blocking `webRequest` + `filterResponseData` | everything | never | **Firefox-only** (Firefox keeps MV2 network APIs); on Chrome this tier is a no-op |
+| `process` | a tiny local helper ([rescript-helper](#local-helper-strategy-process)) is a loopback HTTPS proxy; a PAC routes only the matched hosts to it and it pauses requests for your handlers | **everything**: documents, script tags, images, workers, XHR — MV2 and MV3 | **never** | **Chrome-only**, needs the helper installed + its CA trusted; your own proxy setting stays in effect; falls through the list when the helper is unavailable |
 | `auto` (default) | engine picks per request | — | minimized | resolves to `hook` when the page hook is ready, else `cdp` |
 
 ### Priority lists
@@ -212,6 +213,10 @@ request wins:
   through untouched.
 - `strategy: ["webrequest", "hook"]` — Firefox-first: network-level streaming when
   available, page hook otherwise.
+- `strategy: ["process", "cdp"]` — network-level on Chrome without the banner via
+  the local helper; the debugger only when the helper isn't installed/running.
+  `["hook", "process"]` keeps page fetch/XHR in the hook and sends the rest
+  (documents, script tags, images…) through the helper.
 
 Invalid names are dropped; a list that ends up empty falls back to `auto`.
 
@@ -299,6 +304,65 @@ title/DOM changes on SPAs.
   `res.onDom` for anything the hook can't reach.
 - **Firefox users** → everything is network-level via `webrequest`, no
   banners, ever.
+- **Chrome, network-level, no banner** (documents, `<script src>`, images,
+  async redirects/headers) → `strategy: ["process", "cdp"]` with the
+  [local helper](#local-helper-strategy-process) installed.
+
+## Local helper (strategy `"process"`)
+
+`rescript-helper` is a small (~3 MB) Rust program for Linux, macOS and
+Windows. Chrome starts it through **native messaging** when an enabled script
+lists `process`, and it exits when that script is gone (or Chrome closes):
+
+1. It listens on `127.0.0.1:<random port>` as an HTTP/HTTPS proxy. HTTPS is
+   terminated with per-host certificates from its own local CA, minted once
+   and cached.
+2. The extension installs a `chrome.proxy` PAC script that sends **only the
+   hosts in process-owned scripts' `match`** to the helper. Everything else
+   goes exactly where your proxy setting sent it before (direct, fixed
+   servers, your PAC, auto-detect, or the system proxy).
+3. The helper pauses matching requests and responses and asks the extension.
+   Your handlers run in the background page (MV2) or the sandbox (MV3), the
+   same code paths as the other tiers. The extension answers continue,
+   fulfill, redirect or fail. Requests nobody listens to are not paused, and
+   bodies are buffered only when a script has `modifyResponse`.
+4. The helper's own upstream connection follows your proxy setting too. It
+   asks the extension per host, so your PAC/fixed proxies are honored even
+   for intercepted traffic.
+
+**Install** (once per machine; the id is shown in Settings → Local helper):
+
+```sh
+rescript-helper install --extension-id <extension id> --trust-ca
+# then click Retry in Settings → Local helper (or reload the extension)
+```
+
+`--trust-ca` adds the helper's CA to the user's trust store: the login
+keychain on macOS, CurrentUser\Root on Windows, and the NSS db
+(`~/.pki/nssdb`, needs `certutil`) on Linux. Restart Chrome afterwards. Other
+commands: `trust-ca`, `untrust-ca`, `uninstall`, and `--help`. Release builds
+are attached to each GitHub release. To build from source, run
+`npm run build:helper` (Rust ≥ 1.85).
+
+**Things to know**
+
+- The CA's private key stays in the helper's config dir
+  (`$XDG_CONFIG_HOME/rescript-helper`, `~/Library/Application Support/rescript-helper`,
+  or `%APPDATA%\rescript-helper`). It is generated on your machine and never
+  leaves it. Anyone who can read it can impersonate sites to this browser
+  profile, so treat it like a password. `untrust-ca` removes trust.
+- Sites that pin certificates or require client certificates (mTLS) fail
+  through the helper. Leave them out of process scripts' `match`.
+- When another extension or an enterprise policy controls the proxy setting,
+  the tier stays off (shown in Settings). Scripts then fall through their
+  strategy list (`["process", "cdp"]` → cdp).
+- Firefox doesn't need it: `webrequest` already gives the same reach there.
+- Responses rewritten by the helper are served `no-store`. The browser cache
+  for literal hosts in `match` is cleared when the routed set changes, so
+  stale cached copies don't skip your handlers.
+- Overhead: requests to unmatched hosts don't touch the helper at all. Matched
+  hosts add one loopback hop. With a `modifyResponse` handler, the e2e suite
+  measures about 10 ms per navigation.
 
 ## MV3 readiness
 
@@ -380,6 +444,8 @@ Practical rules of thumb:
   intercepted. Without `cdp`, an async `onRequest` on Chrome logs a warning
   and the request proceeds unmodified.
 - **Async header changes** on Chrome likewise need `strategy: ["cdp"]`.
+- The `process` tier awaits every handler kind natively (it behaves like the
+  cdp column, without the banner).
 - **Static replacement from an async source** (file read, fetch): async
   `replaceResponse` + default strategy is all you need.
 

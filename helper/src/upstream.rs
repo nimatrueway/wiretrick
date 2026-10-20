@@ -35,6 +35,19 @@ pub enum Hop {
     Socks4(String),
 }
 
+impl Hop {
+    /// the PAC result entry for this hop
+    pub fn to_pac(&self) -> String {
+        match self {
+            Hop::Direct => "DIRECT".into(),
+            Hop::Http(a) => format!("PROXY {a}"),
+            Hop::Https(a) => format!("HTTPS {a}"),
+            Hop::Socks5(a) => format!("SOCKS5 {a}"),
+            Hop::Socks4(a) => format!("SOCKS4 {a}"),
+        }
+    }
+}
+
 /// Parse a PAC `FindProxyForURL` result.
 pub fn parse_pac_result(s: &str) -> Vec<Hop> {
     let mut out = Vec::new();
@@ -80,7 +93,12 @@ fn split_addr(addr: &str, default_port: u16) -> (String, u16) {
 async fn tcp(host: &str, port: u16) -> std::io::Result<TcpStream> {
     let s = tokio::time::timeout(Duration::from_secs(20), TcpStream::connect((host, port)))
         .await
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, format!("connect {host}:{port} timed out")))??;
+        .map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!("connect {host}:{port} timed out"),
+            )
+        })??;
     let _ = s.set_nodelay(true);
     Ok(s)
 }
@@ -91,7 +109,10 @@ async fn read_head<R: AsyncRead + Unpin>(r: &mut R) -> std::io::Result<Vec<u8>> 
     let mut b = [0u8; 1];
     while !head.ends_with(b"\r\n\r\n") {
         if r.read(&mut b).await? == 0 {
-            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "proxy closed"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "proxy closed",
+            ));
         }
         head.push(b[0]);
         if head.len() > 64 * 1024 {
@@ -102,11 +123,24 @@ async fn read_head<R: AsyncRead + Unpin>(r: &mut R) -> std::io::Result<Vec<u8>> 
 }
 
 fn head_status(head: &[u8]) -> u16 {
-    std::str::from_utf8(head).ok().and_then(|s| s.split_whitespace().nth(1)).and_then(|s| s.parse().ok()).unwrap_or(0)
+    std::str::from_utf8(head)
+        .ok()
+        .and_then(|s| s.split_whitespace().nth(1))
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0)
 }
 
-async fn http_connect(mut io: BoxIo, host: &str, port: u16, auth: Option<&str>) -> std::io::Result<Tunnel> {
-    let target = if host.contains(':') { format!("[{host}]:{port}") } else { format!("{host}:{port}") };
+async fn http_connect(
+    mut io: BoxIo,
+    host: &str,
+    port: u16,
+    auth: Option<&str>,
+) -> std::io::Result<Tunnel> {
+    let target = if host.contains(':') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    };
     let mut req = format!("CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n");
     if let Some(a) = auth {
         req.push_str(&format!("Proxy-Authorization: {a}\r\n"));
@@ -117,7 +151,9 @@ async fn http_connect(mut io: BoxIo, host: &str, port: u16, auth: Option<&str>) 
     match head_status(&head) {
         200..=299 => Ok(Tunnel::Ok(io)),
         407 => Ok(Tunnel::Auth(head)),
-        s => Err(std::io::Error::other(format!("upstream proxy CONNECT {target} → {s}"))),
+        s => Err(std::io::Error::other(format!(
+            "upstream proxy CONNECT {target} → {s}"
+        ))),
     }
 }
 
@@ -126,7 +162,9 @@ async fn socks5(mut io: BoxIo, host: &str, port: u16) -> std::io::Result<BoxIo> 
     let mut r = [0u8; 2];
     io.read_exact(&mut r).await?;
     if r != [5, 0] {
-        return Err(std::io::Error::other("SOCKS5: no acceptable auth method (only no-auth is supported, like Chrome)"));
+        return Err(std::io::Error::other(
+            "SOCKS5: no acceptable auth method (only no-auth is supported, like Chrome)",
+        ));
     }
     let h = host.as_bytes();
     if h.len() > 255 {
@@ -139,7 +177,10 @@ async fn socks5(mut io: BoxIo, host: &str, port: u16) -> std::io::Result<BoxIo> 
     let mut rep = [0u8; 4];
     io.read_exact(&mut rep).await?;
     if rep[1] != 0 {
-        return Err(std::io::Error::other(format!("SOCKS5 connect {host}:{port} failed (code {})", rep[1])));
+        return Err(std::io::Error::other(format!(
+            "SOCKS5 connect {host}:{port} failed (code {})",
+            rep[1]
+        )));
     }
     let skip = match rep[3] {
         1 => 4,
@@ -166,7 +207,9 @@ async fn socks4a(mut io: BoxIo, host: &str, port: u16) -> std::io::Result<BoxIo>
     let mut rep = [0u8; 8];
     io.read_exact(&mut rep).await?;
     if rep[1] != 0x5a {
-        return Err(std::io::Error::other(format!("SOCKS4 connect {host}:{port} rejected")));
+        return Err(std::io::Error::other(format!(
+            "SOCKS4 connect {host}:{port} rejected"
+        )));
     }
     Ok(io)
 }
@@ -186,7 +229,11 @@ impl SystemProxy {
         if self.bypassed(host) {
             return Some(vec![Hop::Direct]);
         }
-        let primary = if https { self.https.clone() } else { self.http.clone() };
+        let primary = if https {
+            self.https.clone()
+        } else {
+            self.http.clone()
+        };
         let hop = primary.or_else(|| self.socks.clone())?;
         Some(vec![hop])
     }
@@ -215,13 +262,20 @@ impl SystemProxy {
 
 fn env_hop(names: &[&str]) -> Option<Hop> {
     for n in names {
-        for v in [std::env::var(n), std::env::var(n.to_ascii_lowercase())].into_iter().flatten() {
+        for v in [std::env::var(n), std::env::var(n.to_ascii_lowercase())]
+            .into_iter()
+            .flatten()
+        {
             let v = v.trim();
             if v.is_empty() {
                 continue;
             }
             let (scheme, rest) = v.split_once("://").unwrap_or(("http", v));
-            let rest = rest.rsplit('@').next().unwrap_or(rest).trim_end_matches('/');
+            let rest = rest
+                .rsplit('@')
+                .next()
+                .unwrap_or(rest)
+                .trim_end_matches('/');
             return Some(match scheme {
                 "https" => Hop::Https(rest.to_string()),
                 "socks5" | "socks5h" | "socks" => Hop::Socks5(rest.to_string()),
@@ -235,7 +289,9 @@ fn env_hop(names: &[&str]) -> Option<Hop> {
 
 fn run(cmd: &str, args: &[&str]) -> Option<String> {
     let out = std::process::Command::new(cmd).args(args).output().ok()?;
-    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 pub fn read_system_proxy() -> SystemProxy {
@@ -243,7 +299,12 @@ pub fn read_system_proxy() -> SystemProxy {
         http: env_hop(&["HTTP_PROXY", "ALL_PROXY"]),
         https: env_hop(&["HTTPS_PROXY", "ALL_PROXY"]),
         socks: None,
-        bypass: std::env::var("NO_PROXY").or_else(|_| std::env::var("no_proxy")).unwrap_or_default().split(',').map(|s| s.trim().to_string()).collect(),
+        bypass: std::env::var("NO_PROXY")
+            .or_else(|_| std::env::var("no_proxy"))
+            .unwrap_or_default()
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .collect(),
         pac_url: None,
     };
     if sp.http.is_some() || sp.https.is_some() {
@@ -253,10 +314,16 @@ pub fn read_system_proxy() -> SystemProxy {
         if let Some(out) = run("scutil", &["--proxy"]) {
             let kv: HashMap<String, String> = out
                 .lines()
-                .filter_map(|l| l.split_once(" : ").map(|(k, v)| (k.trim().to_string(), v.trim().to_string())))
+                .filter_map(|l| {
+                    l.split_once(" : ")
+                        .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+                })
                 .collect();
             let on = |k: &str| kv.get(k).map(|v| v == "1").unwrap_or(false);
-            let addr = |h: &str, p: &str| kv.get(h).map(|h| format!("{h}:{}", kv.get(p).cloned().unwrap_or_default()));
+            let addr = |h: &str, p: &str| {
+                kv.get(h)
+                    .map(|h| format!("{h}:{}", kv.get(p).cloned().unwrap_or_default()))
+            };
             if on("HTTPEnable") {
                 sp.http = addr("HTTPProxy", "HTTPPort").map(Hop::Http);
             }
@@ -276,14 +343,19 @@ pub fn read_system_proxy() -> SystemProxy {
                     in_list = true;
                 } else if in_list && t == "}" {
                     in_list = false;
-                } else if in_list
-                    && let Some((_, v)) = t.split_once(" : ") {
-                        sp.bypass.push(v.to_string());
-                    }
+                } else if in_list && let Some((_, v)) = t.split_once(" : ") {
+                    sp.bypass.push(v.to_string());
+                }
             }
         }
     } else if cfg!(windows) {
-        if let Some(out) = run("reg", &["query", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings"]) {
+        if let Some(out) = run(
+            "reg",
+            &[
+                "query",
+                r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings",
+            ],
+        ) {
             let val = |name: &str| {
                 out.lines().find_map(|l| {
                     let mut it = l.split_whitespace();
@@ -307,12 +379,19 @@ pub fn read_system_proxy() -> SystemProxy {
                     sp.http = Some(Hop::Http(server.trim().to_string()));
                     sp.https = sp.http.clone();
                 }
-                sp.bypass.extend(val("ProxyOverride").unwrap_or_default().split(';').map(|s| s.to_string()));
+                sp.bypass.extend(
+                    val("ProxyOverride")
+                        .unwrap_or_default()
+                        .split(';')
+                        .map(|s| s.to_string()),
+                );
             }
             sp.pac_url = val("AutoConfigURL");
         }
     } else {
-        let g = |k: &str, key: &str| run("gsettings", &["get", k, key]).map(|s| s.trim().trim_matches('\'').to_string());
+        let g = |k: &str, key: &str| {
+            run("gsettings", &["get", k, key]).map(|s| s.trim().trim_matches('\'').to_string())
+        };
         match g("org.gnome.system.proxy", "mode").as_deref() {
             Some("manual") => {
                 let addr = |schema: &str| {
@@ -324,10 +403,16 @@ pub fn read_system_proxy() -> SystemProxy {
                 sp.https = addr("org.gnome.system.proxy.https").map(Hop::Http);
                 sp.socks = addr("org.gnome.system.proxy.socks").map(Hop::Socks5);
                 if let Some(list) = g("org.gnome.system.proxy", "ignore-hosts") {
-                    sp.bypass.extend(list.trim_matches(|c| c == '[' || c == ']').split(',').map(|s| s.trim().trim_matches('\'').to_string()));
+                    sp.bypass.extend(
+                        list.trim_matches(|c| c == '[' || c == ']')
+                            .split(',')
+                            .map(|s| s.trim().trim_matches('\'').to_string()),
+                    );
                 }
             }
-            Some("auto") => sp.pac_url = g("org.gnome.system.proxy", "autoconfig-url").filter(|u| !u.is_empty()),
+            Some("auto") => {
+                sp.pac_url = g("org.gnome.system.proxy", "autoconfig-url").filter(|u| !u.is_empty())
+            }
             _ => {}
         }
     }
@@ -379,7 +464,11 @@ impl Upstream {
     }
 
     /// Hops for `host` (cached per host and scheme).
-    pub fn hops_for<'a>(&'a self, host: &'a str, https: bool) -> Pin<Box<dyn Future<Output = Vec<Hop>> + Send + 'a>> {
+    pub fn hops_for<'a>(
+        &'a self,
+        host: &'a str,
+        https: bool,
+    ) -> Pin<Box<dyn Future<Output = Vec<Hop>> + Send + 'a>> {
         Box::pin(async move {
             let key = format!("{}://{host}", if https { "https" } else { "http" });
             if let Some(h) = self.hops.lock().unwrap().get(&key) {
@@ -391,18 +480,28 @@ impl Upstream {
                 UpstreamMode::Direct => vec![Hop::Direct],
                 UpstreamMode::Ask => self.ask(url.clone(), host.to_string(), None).await,
                 UpstreamMode::System => {
-                    let cached = self.system.lock().unwrap().as_ref().filter(|(at, _)| at.elapsed() < Duration::from_secs(60)).map(|(_, s)| s.clone());
+                    let cached = self
+                        .system
+                        .lock()
+                        .unwrap()
+                        .as_ref()
+                        .filter(|(at, _)| at.elapsed() < Duration::from_secs(60))
+                        .map(|(_, s)| s.clone());
                     let sp = match cached {
                         Some(s) => s,
                         None => {
-                            let fresh = tokio::task::spawn_blocking(read_system_proxy).await.unwrap_or_default();
+                            let fresh = tokio::task::spawn_blocking(read_system_proxy)
+                                .await
+                                .unwrap_or_default();
                             *self.system.lock().unwrap() = Some((Instant::now(), fresh.clone()));
                             fresh
                         }
                     };
                     match (sp.hops(host, https), sp.pac_url.clone()) {
                         (Some(h), _) => h,
-                        (None, Some(pac)) => self.ask(url.clone(), host.to_string(), Some(pac)).await,
+                        (None, Some(pac)) => {
+                            self.ask(url.clone(), host.to_string(), Some(pac)).await
+                        }
                         (None, None) => vec![Hop::Direct],
                     }
                 }
@@ -414,11 +513,19 @@ impl Upstream {
 
     async fn ask(&self, url: String, host: String, pac_url: Option<String>) -> Vec<Hop> {
         let id = self.nm.next_id();
-        let msg = Out::NeedUpstream { id, url, host: host.clone(), pac_url };
+        let msg = Out::NeedUpstream {
+            id,
+            url,
+            host: host.clone(),
+            pac_url,
+        };
         match self.nm.ask(id, msg, Duration::from_secs(10)).await {
             Some(In::Upstream { proxy, .. }) => parse_pac_result(&proxy),
             _ => {
-                self.nm.log("warn", format!("no upstream proxy decision for {host} — connecting DIRECT"));
+                self.nm.log(
+                    "warn",
+                    format!("no upstream proxy decision for {host} — connecting DIRECT"),
+                );
                 vec![Hop::Direct]
             }
         }
@@ -430,7 +537,12 @@ impl Upstream {
             v.retain(|p| p.at.elapsed() < Duration::from_secs(10));
             !v.is_empty()
         });
-        g.entry(format!("{host}:{port}")).or_default().push(Preconnected { at: Instant::now(), io });
+        g.entry(format!("{host}:{port}"))
+            .or_default()
+            .push(Preconnected {
+                at: Instant::now(),
+                io,
+            });
     }
 
     fn take_stashed(&self, host: &str, port: u16) -> Option<BoxIo> {
@@ -444,11 +556,24 @@ impl Upstream {
         None
     }
 
-    async fn via(&self, hop: &Hop, host: &str, port: u16, browser_auth: Option<String>) -> std::io::Result<Tunnel> {
+    async fn via(
+        &self,
+        hop: &Hop,
+        host: &str,
+        port: u16,
+        browser_auth: Option<String>,
+    ) -> std::io::Result<Tunnel> {
         match hop {
             Hop::Direct => Ok(Tunnel::Ok(Box::new(tcp(host, port).await?))),
             Hop::Http(addr) | Hop::Https(addr) => {
-                let (ph, pp) = split_addr(addr, if matches!(hop, Hop::Https(_)) { 443 } else { 80 });
+                let (ph, pp) = split_addr(
+                    addr,
+                    if matches!(hop, Hop::Https(_)) {
+                        443
+                    } else {
+                        80
+                    },
+                );
                 let sock = tcp(&ph, pp).await?;
                 let io: BoxIo = if matches!(hop, Hop::Https(_)) {
                     let name = ServerName::try_from(ph.clone()).map_err(std::io::Error::other)?;
@@ -466,11 +591,15 @@ impl Upstream {
             }
             Hop::Socks5(addr) => {
                 let (ph, pp) = split_addr(addr, 1080);
-                Ok(Tunnel::Ok(socks5(Box::new(tcp(&ph, pp).await?), host, port).await?))
+                Ok(Tunnel::Ok(
+                    socks5(Box::new(tcp(&ph, pp).await?), host, port).await?,
+                ))
             }
             Hop::Socks4(addr) => {
                 let (ph, pp) = split_addr(addr, 1080);
-                Ok(Tunnel::Ok(socks4a(Box::new(tcp(&ph, pp).await?), host, port).await?))
+                Ok(Tunnel::Ok(
+                    socks4a(Box::new(tcp(&ph, pp).await?), host, port).await?,
+                ))
             }
         }
     }
@@ -478,7 +607,13 @@ impl Upstream {
     /// A byte tunnel to host:port through the configured hops.
     // boxed with an explicit `Send` bound: works around rustc's
     // "implementation of Send is not general enough" for borrowed args
-    pub fn tunnel<'a>(&'a self, host: &'a str, port: u16, https: bool, browser_auth: Option<String>) -> Pin<Box<dyn Future<Output = std::io::Result<Tunnel>> + Send + 'a>> {
+    pub fn tunnel<'a>(
+        &'a self,
+        host: &'a str,
+        port: u16,
+        https: bool,
+        browser_auth: Option<String>,
+    ) -> Pin<Box<dyn Future<Output = std::io::Result<Tunnel>> + Send + 'a>> {
         Box::pin(async move {
             let hops = self.hops_for(host, https).await;
             let mut last = std::io::Error::other("no upstream route");
@@ -506,7 +641,11 @@ impl Upstream {
                 Hop::Https(addr) => {
                     let (ph, pp) = split_addr(addr, 443);
                     match (tcp(&ph, pp).await, ServerName::try_from(ph.clone())) {
-                        (Ok(s), Ok(name)) => self.proxy_tls.connect(name, s).await.map(|t| (Box::new(t) as BoxIo, true)),
+                        (Ok(s), Ok(name)) => self
+                            .proxy_tls
+                            .connect(name, s)
+                            .await
+                            .map(|t| (Box::new(t) as BoxIo, true)),
                         (Err(e), _) => Err(e),
                         (_, Err(e)) => Err(std::io::Error::other(e)),
                     }
@@ -528,15 +667,27 @@ impl Upstream {
     /// True when plain-http requests to `host` go through an HTTP proxy
     /// (the browser's Proxy-Authorization must then be forwarded).
     pub async fn http_via_proxy(&self, host: &str) -> bool {
-        matches!(self.hops_for(host, false).await.first(), Some(Hop::Http(_) | Hop::Https(_)))
+        matches!(
+            self.hops_for(host, false).await.first(),
+            Some(Hop::Http(_) | Hop::Https(_))
+        )
     }
 
-    pub async fn connect_tls(&self, host: &str, port: u16, h1_only: bool) -> std::io::Result<(BoxIo, bool)> {
+    pub async fn connect_tls(
+        &self,
+        host: &str,
+        port: u16,
+        h1_only: bool,
+    ) -> std::io::Result<(BoxIo, bool)> {
         let io = match self.take_stashed(host, port) {
             Some(io) => io,
             None => match self.tunnel(host, port, true, None).await? {
                 Tunnel::Ok(io) => io,
-                Tunnel::Auth(_) => return Err(std::io::Error::other("upstream proxy requires authentication")),
+                Tunnel::Auth(_) => {
+                    return Err(std::io::Error::other(
+                        "upstream proxy requires authentication",
+                    ));
+                }
             },
         };
         let name = ServerName::try_from(host.to_string()).map_err(std::io::Error::other)?;
@@ -565,13 +716,21 @@ impl Connection for Stream {
 }
 
 impl hyper::rt::Read for Stream {
-    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: hyper::rt::ReadBufCursor<'_>) -> Poll<std::io::Result<()>> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: hyper::rt::ReadBufCursor<'_>,
+    ) -> Poll<std::io::Result<()>> {
         Pin::new(&mut self.io).poll_read(cx, buf)
     }
 }
 
 impl hyper::rt::Write for Stream {
-    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, b: &[u8]) -> Poll<std::io::Result<usize>> {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        b: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
         Pin::new(&mut self.io).poll_write(cx, b)
     }
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
@@ -594,15 +753,27 @@ impl tower_service::Service<Uri> for Connector {
     fn call(&mut self, uri: Uri) -> Self::Future {
         let up = self.0.clone();
         Box::pin(async move {
-            let host = uri.host().unwrap_or_default().trim_matches(|c| c == '[' || c == ']').to_string();
+            let host = uri
+                .host()
+                .unwrap_or_default()
+                .trim_matches(|c| c == '[' || c == ']')
+                .to_string();
             if uri.scheme_str() == Some("https") {
                 let port = uri.port_u16().unwrap_or(443);
                 let (io, h2) = up.connect_tls(&host, port, false).await?;
-                Ok(Stream { io: TokioIo::new(io), h2, proxied: false })
+                Ok(Stream {
+                    io: TokioIo::new(io),
+                    h2,
+                    proxied: false,
+                })
             } else {
                 let port = uri.port_u16().unwrap_or(80);
                 let (io, proxied) = up.connect_http(&host, port).await?;
-                Ok(Stream { io: TokioIo::new(io), h2: false, proxied })
+                Ok(Stream {
+                    io: TokioIo::new(io),
+                    h2: false,
+                    proxied,
+                })
             }
         })
     }
@@ -617,7 +788,13 @@ mod tests {
         assert_eq!(parse_pac_result("DIRECT"), vec![Hop::Direct]);
         assert_eq!(
             parse_pac_result("PROXY p:3128; SOCKS5 s:1080;HTTPS h:443; SOCKS4 f:1; DIRECT"),
-            vec![Hop::Http("p:3128".into()), Hop::Socks5("s:1080".into()), Hop::Https("h:443".into()), Hop::Socks4("f:1".into()), Hop::Direct]
+            vec![
+                Hop::Http("p:3128".into()),
+                Hop::Socks5("s:1080".into()),
+                Hop::Https("h:443".into()),
+                Hop::Socks4("f:1".into()),
+                Hop::Direct
+            ]
         );
         assert_eq!(parse_pac_result("garbage"), vec![Hop::Direct]);
     }
@@ -633,13 +810,21 @@ mod tests {
     fn bypass_rules() {
         let sp = SystemProxy {
             https: Some(Hop::Http("p:1".into())),
-            bypass: vec!["localhost".into(), ".corp.test".into(), "*.internal".into(), "<local>".into()],
+            bypass: vec![
+                "localhost".into(),
+                ".corp.test".into(),
+                "*.internal".into(),
+                "<local>".into(),
+            ],
             ..Default::default()
         };
         assert_eq!(sp.hops("a.corp.test", true), Some(vec![Hop::Direct]));
         assert_eq!(sp.hops("x.internal", true), Some(vec![Hop::Direct]));
         assert_eq!(sp.hops("intranet", true), Some(vec![Hop::Direct]));
-        assert_eq!(sp.hops("example.com", true), Some(vec![Hop::Http("p:1".into())]));
+        assert_eq!(
+            sp.hops("example.com", true),
+            Some(vec![Hop::Http("p:1".into())])
+        );
         assert_eq!(sp.hops("example.com", false), None);
     }
 
@@ -659,20 +844,44 @@ mod tests {
     #[tokio::test]
     async fn http_connect_ok_and_auth() {
         let (addr, h) = fake_proxy(b"HTTP/1.1 200 OK\r\n\r\n").await;
-        let io: BoxIo = Box::new(tcp("127.0.0.1", addr.rsplit_once(':').unwrap().1.parse().unwrap()).await.unwrap());
-        let t = http_connect(io, "example.com", 443, Some("Basic eHg=")).await.unwrap();
-        let Tunnel::Ok(mut io) = t else { panic!("expected tunnel") };
+        let io: BoxIo = Box::new(
+            tcp(
+                "127.0.0.1",
+                addr.rsplit_once(':').unwrap().1.parse().unwrap(),
+            )
+            .await
+            .unwrap(),
+        );
+        let t = http_connect(io, "example.com", 443, Some("Basic eHg="))
+            .await
+            .unwrap();
+        let Tunnel::Ok(mut io) = t else {
+            panic!("expected tunnel")
+        };
         let mut buf = [0u8; 12];
         io.read_exact(&mut buf).await.unwrap();
-        assert_eq!(&buf, b"tunnel-bytes", "head reader must not swallow tunnel data");
+        assert_eq!(
+            &buf, b"tunnel-bytes",
+            "head reader must not swallow tunnel data"
+        );
         let head = String::from_utf8(h.await.unwrap()).unwrap();
         assert!(head.starts_with("CONNECT example.com:443 HTTP/1.1\r\n"));
         assert!(head.contains("Proxy-Authorization: Basic eHg=\r\n"));
 
-        let (addr, _h) = fake_proxy(b"HTTP/1.1 407 Auth\r\nProxy-Authenticate: Basic realm=\"x\"\r\n\r\n").await;
-        let io: BoxIo = Box::new(tcp("127.0.0.1", addr.rsplit_once(':').unwrap().1.parse().unwrap()).await.unwrap());
+        let (addr, _h) =
+            fake_proxy(b"HTTP/1.1 407 Auth\r\nProxy-Authenticate: Basic realm=\"x\"\r\n\r\n").await;
+        let io: BoxIo = Box::new(
+            tcp(
+                "127.0.0.1",
+                addr.rsplit_once(':').unwrap().1.parse().unwrap(),
+            )
+            .await
+            .unwrap(),
+        );
         match http_connect(io, "example.com", 443, None).await.unwrap() {
-            Tunnel::Auth(head) => assert!(String::from_utf8_lossy(&head).contains("Proxy-Authenticate")),
+            Tunnel::Auth(head) => {
+                assert!(String::from_utf8_lossy(&head).contains("Proxy-Authenticate"))
+            }
             Tunnel::Ok(_) => panic!("expected 407"),
         }
     }
@@ -696,7 +905,13 @@ mod tests {
             s.write_all(&[5, 0, 0, 1, 0, 0, 0, 0, 0, 0]).await.unwrap();
             s.write_all(b"ok").await.unwrap();
         });
-        let mut io = socks5(Box::new(tcp("127.0.0.1", port).await.unwrap()), "example.com", 443).await.unwrap();
+        let mut io = socks5(
+            Box::new(tcp("127.0.0.1", port).await.unwrap()),
+            "example.com",
+            443,
+        )
+        .await
+        .unwrap();
         let mut b = [0u8; 2];
         io.read_exact(&mut b).await.unwrap();
         assert_eq!(&b, b"ok");

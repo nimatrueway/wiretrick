@@ -9,6 +9,8 @@
     "watch": "node scripts/build.mjs --watch",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
+    "build:helper": "cargo build --release --manifest-path helper/Cargo.toml",
+    "test:helper": "cargo test --manifest-path helper/Cargo.toml",
     "test:e2e": "tsx test/e2e.ts"
   },
   "devDependencies": {

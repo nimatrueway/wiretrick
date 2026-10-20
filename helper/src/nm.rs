@@ -92,7 +92,11 @@ fn default_upstream() -> UpstreamMode {
 impl In {
     pub fn pending_id(&self) -> Option<u64> {
         match self {
-            In::Continue { id, .. } | In::Redirect { id, .. } | In::Fulfill { id, .. } | In::Fail { id } | In::Upstream { id, .. } => Some(*id),
+            In::Continue { id, .. }
+            | In::Redirect { id, .. }
+            | In::Fulfill { id, .. }
+            | In::Fail { id }
+            | In::Upstream { id, .. } => Some(*id),
             _ => None,
         }
     }
@@ -111,6 +115,16 @@ pub enum Out {
         ca_fingerprint: String,
         #[serde(rename = "caPath")]
         ca_path: String,
+    },
+    /// OS proxy settings as PAC entries (sent once after `ready`; the
+    /// extension mirrors them in its PAC for hosts the helper doesn't route)
+    System {
+        http: Option<String>,
+        https: Option<String>,
+        socks: Option<String>,
+        bypass: Vec<String>,
+        #[serde(rename = "pacUrl")]
+        pac_url: Option<String>,
     },
     Req {
         id: u64,
@@ -164,12 +178,19 @@ impl Nm {
         tokio::spawn(async move {
             while let Some(frame) = rx.recv().await {
                 let len = (frame.len() as u32).to_le_bytes();
-                if out.write_all(&len).await.is_err() || out.write_all(&frame).await.is_err() || out.flush().await.is_err() {
+                if out.write_all(&len).await.is_err()
+                    || out.write_all(&frame).await.is_err()
+                    || out.flush().await.is_err()
+                {
                     break;
                 }
             }
         });
-        Nm { tx, next: Arc::new(AtomicU64::new(1)), pending: Arc::new(Mutex::new(HashMap::new())) }
+        Nm {
+            tx,
+            next: Arc::new(AtomicU64::new(1)),
+            pending: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 
     pub fn send(&self, msg: &Out) {
@@ -179,7 +200,10 @@ impl Nm {
     }
 
     pub fn log(&self, level: &'static str, msg: impl Into<String>) {
-        self.send(&Out::Log { level, msg: msg.into() });
+        self.send(&Out::Log {
+            level,
+            msg: msg.into(),
+        });
     }
 
     pub fn next_id(&self) -> u64 {
@@ -189,13 +213,21 @@ impl Nm {
     /// Send body bytes as base64 chunk frames ahead of the frame that uses them.
     pub fn send_chunks(&self, id: u64, body: &[u8]) {
         for part in body.chunks(CHUNK_RAW) {
-            self.send(&Out::Chunk { id, data: base64::engine::general_purpose::STANDARD.encode(part) });
+            self.send(&Out::Chunk {
+                id,
+                data: base64::engine::general_purpose::STANDARD.encode(part),
+            });
         }
     }
 
     /// Send `msg` (built with `id`) and wait for the extension's verdict.
     /// None = timed out / extension gone → callers continue unmodified.
-    pub fn ask(&self, id: u64, msg: Out, timeout: Duration) -> impl Future<Output = Option<In>> + Send + 'static {
+    pub fn ask(
+        &self,
+        id: u64,
+        msg: Out,
+        timeout: Duration,
+    ) -> impl Future<Output = Option<In>> + Send + 'static {
         // register + send synchronously: `Out` (which holds `&'static str`)
         // must not live inside the returned future (rustc HRTB Send bug)
         let (tx, rx) = oneshot::channel();
@@ -203,7 +235,10 @@ impl Nm {
         self.send(&msg);
         let pending = self.pending.clone();
         async move {
-            let r = tokio::time::timeout(timeout, rx).await.ok().and_then(|r| r.ok());
+            let r = tokio::time::timeout(timeout, rx)
+                .await
+                .ok()
+                .and_then(|r| r.ok());
             pending.lock().unwrap().remove(&id);
             r
         }
@@ -239,7 +274,9 @@ pub async fn read_frame<R: AsyncRead + Unpin>(r: &mut R) -> std::io::Result<Opti
 }
 
 pub fn b64decode(s: &str) -> Vec<u8> {
-    base64::engine::general_purpose::STANDARD.decode(s).unwrap_or_default()
+    base64::engine::general_purpose::STANDARD
+        .decode(s)
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -263,7 +300,10 @@ mod tests {
         }
         assert_eq!(got, body);
         let f = read_frame(&mut b).await.unwrap().unwrap();
-        assert_eq!(serde_json::from_slice::<serde_json::Value>(&f).unwrap()["t"], "pong");
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&f).unwrap()["t"],
+            "pong"
+        );
     }
 
     #[tokio::test]
@@ -272,7 +312,8 @@ mod tests {
         let nm = Nm::new(a);
         let id = nm.next_id();
         let nm2 = nm.clone();
-        let waiter = tokio::spawn(async move { nm2.ask(id, Out::Pong {}, Duration::from_secs(5)).await });
+        let waiter =
+            tokio::spawn(async move { nm2.ask(id, Out::Pong {}, Duration::from_secs(5)).await });
         tokio::time::sleep(Duration::from_millis(20)).await;
         let reply: In = serde_json::from_str(&format!(r#"{{"t":"fail","id":{id}}}"#)).unwrap();
         assert!(nm.dispatch(reply).is_none());

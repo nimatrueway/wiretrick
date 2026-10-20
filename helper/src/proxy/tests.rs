@@ -44,11 +44,18 @@ fn big_text() -> String {
     "0123456789abcdef".repeat(2 * 1024 * 1024 / 16 + 7)
 }
 
-async fn upstream_handler(req: Request<Incoming>, hits: Arc<AtomicUsize>) -> Result<Response<Full<Bytes>>, Infallible> {
+async fn upstream_handler(
+    req: Request<Incoming>,
+    hits: Arc<AtomicUsize>,
+) -> Result<Response<Full<Bytes>>, Infallible> {
     hits.fetch_add(1, Ordering::SeqCst);
     let path = req.uri().path().to_string();
     let version = format!("{:?}", req.version());
-    let headers: HashMap<String, String> = req.headers().iter().map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string())).collect();
+    let headers: HashMap<String, String> = req
+        .headers()
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+        .collect();
     let mut r = Response::builder().header("content-type", "text/plain");
     let b: Vec<u8> = match path.as_str() {
         "/text" => b"hello world".to_vec(),
@@ -78,7 +85,9 @@ async fn upstream_handler(req: Request<Incoming>, hits: Arc<AtomicUsize>) -> Res
             b"nope".to_vec()
         }
     };
-    Ok(r.header("x-upstream", "1").body(Full::new(Bytes::from(b))).unwrap())
+    Ok(r.header("x-upstream", "1")
+        .body(Full::new(Bytes::from(b)))
+        .unwrap())
 }
 
 async fn start_upstream(hits: Arc<AtomicUsize>) -> (u16, u16, CertificateDer<'static>) {
@@ -95,16 +104,23 @@ async fn start_upstream(hits: Arc<AtomicUsize>) -> (u16, u16, CertificateDer<'st
     let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(cfg));
     let tls_l = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let plain_l = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let (tp, pp) = (tls_l.local_addr().unwrap().port(), plain_l.local_addr().unwrap().port());
+    let (tp, pp) = (
+        tls_l.local_addr().unwrap().port(),
+        plain_l.local_addr().unwrap().port(),
+    );
     let h2 = hits.clone();
     tokio::spawn(async move {
         loop {
             let (s, _) = tls_l.accept().await.unwrap();
             let (acceptor, hits) = (acceptor.clone(), h2.clone());
             tokio::spawn(async move {
-                let Ok(t) = acceptor.accept(s).await else { return };
+                let Ok(t) = acceptor.accept(s).await else {
+                    return;
+                };
                 let svc = hyper::service::service_fn(move |r| upstream_handler(r, hits.clone()));
-                let _ = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new()).serve_connection(TokioIo::new(t), svc).await;
+                let _ = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                    .serve_connection(TokioIo::new(t), svc)
+                    .await;
             });
         }
     });
@@ -114,7 +130,9 @@ async fn start_upstream(hits: Arc<AtomicUsize>) -> (u16, u16, CertificateDer<'st
             let hits = hits.clone();
             tokio::spawn(async move {
                 let svc = hyper::service::service_fn(move |r| upstream_handler(r, hits.clone()));
-                let _ = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new()).serve_connection(TokioIo::new(s), svc).await;
+                let _ = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                    .serve_connection(TokioIo::new(s), svc)
+                    .await;
             });
         }
     });
@@ -126,7 +144,11 @@ async fn setup(routes: Vec<Route>) -> Env {
     let hits = Arc::new(AtomicUsize::new(0));
     let (up_port, up_plain_port, up_cert) = start_upstream(hits.clone()).await;
 
-    let dir = std::env::temp_dir().join(format!("rescript-helper-test-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::SeqCst)));
+    let dir = std::env::temp_dir().join(format!(
+        "rescript-helper-test-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::SeqCst)
+    ));
     let ca = Arc::new(Ca::load_or_create(&dir).unwrap());
 
     // the helper trusts the test upstream's self-signed cert
@@ -159,7 +181,9 @@ async fn setup(routes: Vec<Route>) -> Env {
                 let id = v["id"].as_u64().unwrap_or(0);
                 match v["t"].as_str().unwrap() {
                     "chunk" => {
-                        let part = base64::engine::general_purpose::STANDARD.decode(v["data"].as_str().unwrap()).unwrap();
+                        let part = base64::engine::general_purpose::STANDARD
+                            .decode(v["data"].as_str().unwrap())
+                            .unwrap();
                         chunks.entry(id).or_default().extend(part);
                         seen.lock().unwrap().push(json!({"t": "chunk", "id": id}));
                         continue;
@@ -169,7 +193,8 @@ async fn setup(routes: Vec<Route>) -> Env {
                 }
                 let body = chunks.remove(&id).unwrap_or_default();
                 seen.lock().unwrap().push(v.clone());
-                let out = (reply.lock().unwrap())(&v, &body).unwrap_or_else(|| json!({"t": "continue"}));
+                let out =
+                    (reply.lock().unwrap())(&v, &body).unwrap_or_else(|| json!({"t": "continue"}));
                 let mut out = out.as_object().unwrap().clone();
                 out.insert("id".into(), json!(id));
                 let msg: In = serde_json::from_value(Value::Object(out)).unwrap();
@@ -183,13 +208,29 @@ async fn setup(routes: Vec<Route>) -> Env {
     tokio::spawn(serve(l, st));
 
     let mut client_roots = rustls::RootCertStore::empty();
-    client_roots.add(CertificateDer::from(ca.der.clone())).unwrap();
+    client_roots
+        .add(CertificateDer::from(ca.der.clone()))
+        .unwrap();
     client_roots.add(up_cert.clone()).unwrap();
-    Env { proxy_port, up_port, up_plain_port, up_cert, hits, seen, reply, client_roots }
+    Env {
+        proxy_port,
+        up_port,
+        up_plain_port,
+        up_cert,
+        hits,
+        seen,
+        reply,
+        client_roots,
+    }
 }
 
 fn route(pattern: &str, req: bool, res_headers: bool, body: bool) -> Route {
-    Route { patterns: vec![pattern.into()], req, res_headers, body }
+    Route {
+        patterns: vec![pattern.into()],
+        req,
+        res_headers,
+        body,
+    }
 }
 
 struct Got {
@@ -206,13 +247,29 @@ impl Env {
     }
 
     fn seen(&self, t: &str) -> Vec<Value> {
-        self.seen.lock().unwrap().iter().filter(|v| v["t"] == t).cloned().collect()
+        self.seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|v| v["t"] == t)
+            .cloned()
+            .collect()
     }
 
     /// CONNECT localhost:<up_port>, TLS (h1 or h2 via ALPN), one request.
     async fn get(&self, path: &str, h2: bool, extra: &[(&str, &str)]) -> Result<Got, String> {
-        let mut s = TcpStream::connect(("127.0.0.1", self.proxy_port)).await.unwrap();
-        s.write_all(format!("CONNECT localhost:{0} HTTP/1.1\r\nHost: localhost:{0}\r\n\r\n", self.up_port).as_bytes()).await.unwrap();
+        let mut s = TcpStream::connect(("127.0.0.1", self.proxy_port))
+            .await
+            .unwrap();
+        s.write_all(
+            format!(
+                "CONNECT localhost:{0} HTTP/1.1\r\nHost: localhost:{0}\r\n\r\n",
+                self.up_port
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
         let mut head = Vec::new();
         while !head.ends_with(b"\r\n\r\n") {
             let mut b = [0u8; 1];
@@ -230,42 +287,86 @@ impl Env {
             .unwrap()
             .with_root_certificates(self.client_roots.clone())
             .with_no_client_auth();
-        cfg.alpn_protocols = if h2 { vec![b"h2".to_vec(), b"http/1.1".to_vec()] } else { vec![b"http/1.1".to_vec()] };
-        let tls = tokio_rustls::TlsConnector::from(Arc::new(cfg)).connect(ServerName::try_from("localhost").unwrap(), s).await.map_err(|e| e.to_string())?;
+        cfg.alpn_protocols = if h2 {
+            vec![b"h2".to_vec(), b"http/1.1".to_vec()]
+        } else {
+            vec![b"http/1.1".to_vec()]
+        };
+        let tls = tokio_rustls::TlsConnector::from(Arc::new(cfg))
+            .connect(ServerName::try_from("localhost").unwrap(), s)
+            .await
+            .map_err(|e| e.to_string())?;
         let peer_cert = tls.get_ref().1.peer_certificates().unwrap()[0].to_vec();
         let alpn_h2 = tls.get_ref().1.alpn_protocol() == Some(b"h2");
         let mut b = Request::builder().uri(format!("https://localhost:{}{path}", self.up_port));
         if !alpn_h2 {
-            b = Request::builder().uri(path).header("host", format!("localhost:{}", self.up_port));
+            b = Request::builder()
+                .uri(path)
+                .header("host", format!("localhost:{}", self.up_port));
         }
         for (k, v) in extra {
             b = b.header(*k, *v);
         }
         let req = b.body(Empty::<Bytes>::new()).unwrap();
         let resp = if alpn_h2 {
-            let (mut send, conn) = hyper::client::conn::http2::handshake(TokioExecutor::new(), TokioIo::new(tls)).await.map_err(|e| e.to_string())?;
+            let (mut send, conn) =
+                hyper::client::conn::http2::handshake(TokioExecutor::new(), TokioIo::new(tls))
+                    .await
+                    .map_err(|e| e.to_string())?;
             tokio::spawn(conn);
             send.send_request(req).await.map_err(|e| e.to_string())?
         } else {
-            let (mut send, conn) = hyper::client::conn::http1::handshake(TokioIo::new(tls)).await.map_err(|e| e.to_string())?;
+            let (mut send, conn) = hyper::client::conn::http1::handshake(TokioIo::new(tls))
+                .await
+                .map_err(|e| e.to_string())?;
             tokio::spawn(conn);
             send.send_request(req).await.map_err(|e| e.to_string())?
         };
         let (p, body) = resp.into_parts();
-        let body = body.collect().await.map_err(|e| e.to_string())?.to_bytes().to_vec();
-        Ok(Got { status: p.status.as_u16(), headers: p.headers, body, peer_cert, alpn_h2 })
+        let body = body
+            .collect()
+            .await
+            .map_err(|e| e.to_string())?
+            .to_bytes()
+            .to_vec();
+        Ok(Got {
+            status: p.status.as_u16(),
+            headers: p.headers,
+            body,
+            peer_cert,
+            alpn_h2,
+        })
     }
 
     /// plain http, absolute-form through the proxy
     async fn get_plain(&self, host: &str, path: &str) -> Result<Got, String> {
-        let s = TcpStream::connect(("127.0.0.1", self.proxy_port)).await.unwrap();
-        let (mut send, conn) = hyper::client::conn::http1::handshake(TokioIo::new(s)).await.map_err(|e| e.to_string())?;
+        let s = TcpStream::connect(("127.0.0.1", self.proxy_port))
+            .await
+            .unwrap();
+        let (mut send, conn) = hyper::client::conn::http1::handshake(TokioIo::new(s))
+            .await
+            .map_err(|e| e.to_string())?;
         tokio::spawn(conn);
-        let req = Request::builder().uri(format!("http://{host}{path}")).header("host", host).body(Empty::<Bytes>::new()).unwrap();
+        let req = Request::builder()
+            .uri(format!("http://{host}{path}"))
+            .header("host", host)
+            .body(Empty::<Bytes>::new())
+            .unwrap();
         let resp = send.send_request(req).await.map_err(|e| e.to_string())?;
         let (p, body) = resp.into_parts();
-        let body = body.collect().await.map_err(|e| e.to_string())?.to_bytes().to_vec();
-        Ok(Got { status: p.status.as_u16(), headers: p.headers, body, peer_cert: vec![], alpn_h2: false })
+        let body = body
+            .collect()
+            .await
+            .map_err(|e| e.to_string())?
+            .to_bytes()
+            .to_vec();
+        Ok(Got {
+            status: p.status.as_u16(),
+            headers: p.headers,
+            body,
+            peer_cert: vec![],
+            alpn_h2: false,
+        })
     }
 }
 
@@ -286,8 +387,14 @@ async fn routed_host_without_pauses_streams_through_h2_both_sides() {
     assert!(g.alpn_h2);
     assert_ne!(g.peer_cert, env.up_cert.to_vec(), "MITM leaf expected");
     let v: Value = serde_json::from_slice(&g.body).unwrap();
-    assert_eq!(v["version"], "HTTP/2.0", "helper should negotiate h2 upstream");
-    assert!(env.seen.lock().unwrap().is_empty(), "no pause for unmatched paths");
+    assert_eq!(
+        v["version"], "HTTP/2.0",
+        "helper should negotiate h2 upstream"
+    );
+    assert!(
+        env.seen.lock().unwrap().is_empty(),
+        "no pause for unmatched paths"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -305,19 +412,33 @@ async fn request_stage_fulfill_never_hits_upstream() {
         assert_eq!(g.headers["x-mock"], "yes");
     }
     assert_eq!(env.hits.load(Ordering::SeqCst), 0);
-    assert!(env.seen("req")[0]["url"].as_str().unwrap().ends_with("/text"));
+    assert!(
+        env.seen("req")[0]["url"]
+            .as_str()
+            .unwrap()
+            .ends_with("/text")
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn request_stage_header_rewrite() {
     let env = setup(vec![route("https://localhost*/echo", true, false, false)]).await;
     env.on(|v, _| {
-        let mut h: Vec<Value> = v["headers"].as_array().unwrap().iter().filter(|p| p[0] != "x-drop").cloned().collect();
+        let mut h: Vec<Value> = v["headers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|p| p[0] != "x-drop")
+            .cloned()
+            .collect();
         h.push(json!(["x-added", "1"]));
         Some(json!({"t": "continue", "headers": h}))
     });
     for h2 in [false, true] {
-        let g = env.get("/echo", h2, &[("x-drop", "bye"), ("x-keep", "k")]).await.unwrap();
+        let g = env
+            .get("/echo", h2, &[("x-drop", "bye"), ("x-keep", "k")])
+            .await
+            .unwrap();
         let v: Value = serde_json::from_slice(&g.body).unwrap();
         assert_eq!(v["headers"]["x-added"], "1", "h2={h2}");
         assert_eq!(v["headers"]["x-keep"], "k");
@@ -335,12 +456,24 @@ async fn request_stage_redirect_and_cancel() {
             Some(json!({"t": "fail"}))
         }
     });
-    let g = env.get("/text", false, &[("origin", "https://page.test")]).await.unwrap();
+    let g = env
+        .get("/text", false, &[("origin", "https://page.test")])
+        .await
+        .unwrap();
     assert_eq!(g.status, 307);
     assert_eq!(g.headers["location"], "https://elsewhere.test/x");
-    assert_eq!(g.headers["access-control-allow-origin"], "https://page.test");
-    assert!(env.get("/echo", false, &[]).await.is_err(), "fail = network error");
-    assert!(env.get("/echo", true, &[]).await.is_err(), "fail = stream reset on h2");
+    assert_eq!(
+        g.headers["access-control-allow-origin"],
+        "https://page.test"
+    );
+    assert!(
+        env.get("/echo", false, &[]).await.is_err(),
+        "fail = network error"
+    );
+    assert!(
+        env.get("/echo", true, &[]).await.is_err(),
+        "fail = stream reset on h2"
+    );
     assert_eq!(env.hits.load(Ordering::SeqCst), 0);
 }
 
@@ -351,13 +484,23 @@ async fn body_transform_sees_decoded_gzip_and_deflate() {
         assert_eq!(v["t"], "res");
         assert_eq!(v["body"], "chunks");
         let hs = v["headers"].as_array().unwrap();
-        assert!(!hs.iter().any(|p| p[0] == "content-encoding"), "encoding stripped for the transform");
+        assert!(
+            !hs.iter().any(|p| p[0] == "content-encoding"),
+            "encoding stripped for the transform"
+        );
         let up = String::from_utf8_lossy(body).to_uppercase();
         Some(json!({"t": "fulfill", "status": v["status"], "headers": hs, "body": b64(up)}))
     });
-    for (path, want) in [("/gzip", "COMPRESSED HELLO"), ("/deflate", "DEFLATED HELLO"), ("/text", "HELLO WORLD")] {
+    for (path, want) in [
+        ("/gzip", "COMPRESSED HELLO"),
+        ("/deflate", "DEFLATED HELLO"),
+        ("/text", "HELLO WORLD"),
+    ] {
         for h2 in [false, true] {
-            let g = env.get(path, h2, &[("accept-encoding", "zstd")]).await.unwrap();
+            let g = env
+                .get(path, h2, &[("accept-encoding", "zstd")])
+                .await
+                .unwrap();
             assert_eq!(String::from_utf8_lossy(&g.body), want, "{path} h2={h2}");
             assert!(g.headers.get("content-encoding").is_none());
             assert_eq!(g.headers["x-upstream"], "1");
@@ -378,7 +521,11 @@ async fn big_body_goes_out_in_chunks_and_continue_keeps_it() {
     let want = big_text();
     assert_eq!(len.load(Ordering::SeqCst), want.len());
     assert!(g.body == want.as_bytes());
-    assert!(env.seen("chunk").len() >= 4, "{} chunks", env.seen("chunk").len());
+    assert!(
+        env.seen("chunk").len() >= 4,
+        "{} chunks",
+        env.seen("chunk").len()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -407,7 +554,10 @@ async fn plain_http_absolute_form() {
             Some(json!({"t": "continue", "headers": h}))
         }
     });
-    let g = env.get_plain(&format!("localhost:{}", env.up_plain_port), "/text").await.unwrap();
+    let g = env
+        .get_plain(&format!("localhost:{}", env.up_plain_port), "/text")
+        .await
+        .unwrap();
     assert_eq!(g.body, b"hello world");
     assert_eq!(g.headers["x-res"], "plain");
     assert_eq!(env.seen("req").len(), 1);

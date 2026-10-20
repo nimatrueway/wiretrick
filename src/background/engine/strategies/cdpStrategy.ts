@@ -15,6 +15,7 @@ import { scriptStorageGet, scriptStorageSet } from "../scriptStore";
 import { dlogLevel } from "../../../shared/debugLog";
 import { debuggerAttach, debuggerSend, debuggerDetach, debuggerGetTargets, type Debuggee } from "../../../shared/chromeApi";
 import { analyzeScripts, runBodyOp } from "../../compileHost";
+import { isProcessOwned } from "./processState";
 
 interface CdpScript {
     scriptId: string;
@@ -127,6 +128,7 @@ export class CdpStrategy {
             if (!s.enabled) continue;
             const c = compileScript(s.code, overridesFor({ id: s.id, name: s.meta.name, code: s.code }));
             if (!c.meta.declared) continue; // library module: inert, importable
+            if (isProcessOwned(s.meta.strategy)) continue; // the helper tier owns it
             // CDP is the fallback tier for everything the hook cannot do
             // (main frames, script tags, worker fetches, cold starts) — any
             // handler loads here, sync or async. Sync onRequest handlers
@@ -173,6 +175,7 @@ export class CdpStrategy {
             const wantsRequest = h.onRequest > 0 && phases.includes("request");
             const wantsResponse = (h.modifyResponse > 0 || h.replaceResponse > 0) && phases.includes("response");
             if (!wantsRequest && !wantsResponse) continue;
+            if (isProcessOwned(s.meta.strategy)) continue; // the helper tier owns it
             if (!usesDebuggerMv3(s.meta.strategy)) {
                 autoBody.push(s.meta.name);
                 continue;

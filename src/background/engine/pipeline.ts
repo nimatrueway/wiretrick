@@ -6,6 +6,8 @@
 import type { InterceptionStrategy } from "./strategies/types";
 import type { ChromeBodyStrategy } from "./strategies/chromeBodyStrategy";
 import type { CdpStrategy } from "./strategies/cdpStrategy";
+import type { ProcessStrategy } from "./strategies/processStrategy";
+import { onProcessActiveChange } from "./strategies/processState";
 import type { HeaderChanges } from "./strategies/types";
 import type { Script } from "./scriptStore";
 import { listScripts, onScriptsChanged, saveScript, deleteScript, setEnabled, newId, scriptStorageGet, scriptStorageSet, loadAllParamValues, getParamValues, setParamValue } from "./scriptStore";
@@ -38,6 +40,7 @@ export function createPipeline(
     webRequestStrategy: InterceptionStrategy & { reload(s: Script[], paramValues?: { [scriptId: string]: Record<string, any> }): void },
     chromeBody: ChromeBodyStrategy,
     cdp: CdpStrategy,
+    processStrategy: ProcessStrategy,
     updateTabBadge?: (tabId: number, url: string | undefined) => Promise<void>,
     noteRequestForBadge?: (tabId: number, url: string) => number
 ): Pipeline {
@@ -96,6 +99,7 @@ export function createPipeline(
         tabUrls.delete(tabId);
         chromeBody.forgetTab(tabId);
         cdp.forgetTab(tabId);
+        processStrategy.forgetTab(tabId);
     });
 
     function tabUrlFor(tabId: number, requestUrl: string): string | null {
@@ -446,6 +450,7 @@ export function createPipeline(
         webRequestStrategy.reload(scripts, paramValues);
         chromeBody.reload(scripts, paramValues);
         void cdp.reload(scripts, paramValues);
+        processStrategy.reload(scripts, paramValues);
         if (__MV3__) {
             // refresh the analyze cache NOW so the next page's getHookBundle
             // is served from it without waking the sandbox (keeps onDom
@@ -468,6 +473,8 @@ export function createPipeline(
     }
 
     const off = onScriptsChanged(() => void reload());
+    // ownership moves between the process tier and the other tiers
+    const offProcess = onProcessActiveChange(() => void reload());
     void reload();
 
     return {
@@ -476,6 +483,7 @@ export function createPipeline(
         cdp,
         dispose() {
             off();
+            offProcess();
             if (!__MV3__) {
                 const onDone = (details: any) => {
                     webRequestStrategy.pruneRequest?.(details.requestId);

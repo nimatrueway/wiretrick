@@ -28,11 +28,16 @@ fn browser_targets() -> Vec<(&'static str, PathBuf)> {
         vec![
             ("chrome", PathBuf::from(r"Software\Google\Chrome")),
             ("chromium", PathBuf::from(r"Software\Chromium")),
-            ("brave", PathBuf::from(r"Software\BraveSoftware\Brave-Browser")),
+            (
+                "brave",
+                PathBuf::from(r"Software\BraveSoftware\Brave-Browser"),
+            ),
             ("edge", PathBuf::from(r"Software\Microsoft\Edge")),
         ]
     } else {
-        let c = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|| h.join(".config"));
+        let c = std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| h.join(".config"));
         vec![
             ("chrome", c.join("google-chrome")),
             ("chrome-beta", c.join("google-chrome-beta")),
@@ -55,7 +60,10 @@ pub struct InstallOpts {
 }
 
 fn manifest_json(exe: &Path, ids: &[String]) -> String {
-    let origins: Vec<String> = ids.iter().map(|id| format!("chrome-extension://{id}/")).collect();
+    let origins: Vec<String> = ids
+        .iter()
+        .map(|id| format!("chrome-extension://{id}/"))
+        .collect();
     serde_json::to_string_pretty(&serde_json::json!({
         "name": HOST_NAME,
         "description": "ResScript Override local interception helper (process strategy)",
@@ -71,7 +79,11 @@ fn stable_exe() -> std::io::Result<PathBuf> {
     let me = std::env::current_exe()?;
     let dir = config_dir().join("bin");
     std::fs::create_dir_all(&dir)?;
-    let dest = dir.join(if cfg!(windows) { "rescript-helper.exe" } else { "rescript-helper" });
+    let dest = dir.join(if cfg!(windows) {
+        "rescript-helper.exe"
+    } else {
+        "rescript-helper"
+    });
     let same = std::fs::canonicalize(&me).ok() == std::fs::canonicalize(&dest).ok();
     if !same {
         // replacing a running binary: unlink first (fine on unix; on
@@ -88,16 +100,24 @@ fn stable_exe() -> std::io::Result<PathBuf> {
 }
 
 fn reg(args: &[&str]) -> bool {
-    Command::new("reg").args(args).output().map(|o| o.status.success()).unwrap_or(false)
+    Command::new("reg")
+        .args(args)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 pub fn install(o: &InstallOpts) -> Result<(), String> {
     if o.extension_ids.is_empty() {
-        return Err("--extension-id is required (shown in the extension manager's Helper panel)".into());
+        return Err(
+            "--extension-id is required (shown in the extension manager's Helper panel)".into(),
+        );
     }
     for id in &o.extension_ids {
         if id.len() != 32 || !id.chars().all(|c| ('a'..='p').contains(&c)) {
-            return Err(format!("{id:?} is not a Chrome extension id (32 letters a-p)"));
+            return Err(format!(
+                "{id:?} is not a Chrome extension id (32 letters a-p)"
+            ));
         }
     }
     let exe = stable_exe().map_err(|e| format!("copying the helper: {e}"))?;
@@ -120,18 +140,34 @@ pub fn install(o: &InstallOpts) -> Result<(), String> {
                     continue;
                 }
                 let k = format!(r"HKCU\{}\NativeMessagingHosts\{HOST_NAME}", key.display());
-                if reg(&["add", &k, "/ve", "/t", "REG_SZ", "/d", &mpath.to_string_lossy(), "/f"]) {
+                if reg(&[
+                    "add",
+                    &k,
+                    "/ve",
+                    "/t",
+                    "REG_SZ",
+                    "/d",
+                    &mpath.to_string_lossy(),
+                    "/f",
+                ]) {
                     done.push(format!("{label} ({k})"));
                 }
             }
         } else {
             for (label, root) in browser_targets() {
-                let wanted = if o.browsers.is_empty() { root.exists() } else { o.browsers.iter().any(|b| b == label) };
+                let wanted = if o.browsers.is_empty() {
+                    root.exists()
+                } else {
+                    o.browsers.iter().any(|b| b == label)
+                };
                 if !wanted {
                     continue;
                 }
                 let d = root.join("NativeMessagingHosts");
-                if std::fs::create_dir_all(&d).and_then(|_| std::fs::write(d.join(&file), &manifest)).is_ok() {
+                if std::fs::create_dir_all(&d)
+                    .and_then(|_| std::fs::write(d.join(&file), &manifest))
+                    .is_ok()
+                {
                     done.push(format!("{label} ({})", d.display()));
                 }
             }
@@ -147,7 +183,9 @@ pub fn install(o: &InstallOpts) -> Result<(), String> {
     if o.trust {
         println!("{}", trust_ca(o.nssdb.as_deref())?);
     }
-    println!("done — reload the extension (or click \"Reconnect\" in its manager) to start the helper");
+    println!(
+        "done — reload the extension (or click \"Retry\" in its Settings → Local helper section) to start the helper"
+    );
     Ok(())
 }
 
@@ -158,7 +196,11 @@ pub fn uninstall(o: &InstallOpts) -> Result<(), String> {
     }
     if cfg!(windows) {
         for (_, key) in browser_targets() {
-            reg(&["delete", &format!(r"HKCU\{}\NativeMessagingHosts\{HOST_NAME}", key.display()), "/f"]);
+            reg(&[
+                "delete",
+                &format!(r"HKCU\{}\NativeMessagingHosts\{HOST_NAME}", key.display()),
+                "/f",
+            ]);
         }
         let _ = std::fs::remove_file(config_dir().join(&file));
     } else {
@@ -172,7 +214,8 @@ pub fn uninstall(o: &InstallOpts) -> Result<(), String> {
 }
 
 fn ca_pem_path() -> Result<PathBuf, String> {
-    let ca = crate::ca::Ca::load_or_create(&config_dir()).map_err(|e| format!("loading CA: {e}"))?;
+    let ca =
+        crate::ca::Ca::load_or_create(&config_dir()).map_err(|e| format!("loading CA: {e}"))?;
     Ok(ca.path.clone())
 }
 
@@ -187,12 +230,22 @@ fn run(cmd: &str, args: &[&str]) -> Result<String, String> {
             format!("{cmd}: {e}")
         }
     })?;
-    let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
-    if out.status.success() { Ok(text) } else { Err(format!("{cmd} {}: {}", args.join(" "), text.trim())) }
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    if out.status.success() {
+        Ok(text)
+    } else {
+        Err(format!("{cmd} {}: {}", args.join(" "), text.trim()))
+    }
 }
 
 fn nssdb_dir(custom: Option<&Path>) -> PathBuf {
-    custom.map(Path::to_path_buf).unwrap_or_else(|| home().join(".pki").join("nssdb"))
+    custom
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| home().join(".pki").join("nssdb"))
 }
 
 /// Trust the CA for the current user. Returns a human-readable summary.
@@ -201,20 +254,45 @@ pub fn trust_ca(nssdb: Option<&Path>) -> Result<String, String> {
     let pem_s = pem.to_string_lossy().to_string();
     if cfg!(target_os = "macos") {
         let kc = home().join("Library/Keychains/login.keychain-db");
-        run("security", &["add-trusted-cert", "-r", "trustRoot", "-p", "ssl", "-k", &kc.to_string_lossy(), &pem_s])?;
+        run(
+            "security",
+            &[
+                "add-trusted-cert",
+                "-r",
+                "trustRoot",
+                "-p",
+                "ssl",
+                "-k",
+                &kc.to_string_lossy(),
+                &pem_s,
+            ],
+        )?;
     } else if cfg!(windows) {
         run("certutil", &["-user", "-f", "-addstore", "Root", &pem_s])?;
     } else {
         let db = nssdb_dir(nssdb);
         if !db.join("cert9.db").exists() {
             std::fs::create_dir_all(&db).map_err(|e| e.to_string())?;
-            run("certutil", &["-d", &format!("sql:{}", db.display()), "-N", "--empty-password"])?;
+            run(
+                "certutil",
+                &[
+                    "-d",
+                    &format!("sql:{}", db.display()),
+                    "-N",
+                    "--empty-password",
+                ],
+            )?;
         }
         let dbs = format!("sql:{}", db.display());
         let _ = run("certutil", &["-d", &dbs, "-D", "-n", CA_NAME]);
-        run("certutil", &["-d", &dbs, "-A", "-t", "C,,", "-n", CA_NAME, "-i", &pem_s])?;
+        run(
+            "certutil",
+            &["-d", &dbs, "-A", "-t", "C,,", "-n", CA_NAME, "-i", &pem_s],
+        )?;
     }
-    Ok(format!("trusted \"{CA_NAME}\" ({pem_s}) for this user — restart the browser if it was running"))
+    Ok(format!(
+        "trusted \"{CA_NAME}\" ({pem_s}) for this user — restart the browser if it was running"
+    ))
 }
 
 pub fn untrust_ca(nssdb: Option<&Path>) -> Result<String, String> {
@@ -222,13 +300,19 @@ pub fn untrust_ca(nssdb: Option<&Path>) -> Result<String, String> {
     if cfg!(target_os = "macos") {
         let _ = run("security", &["remove-trusted-cert", &pem.to_string_lossy()]);
         let kc = home().join("Library/Keychains/login.keychain-db");
-        let _ = run("security", &["delete-certificate", "-c", CA_NAME, &kc.to_string_lossy()]);
+        let _ = run(
+            "security",
+            &["delete-certificate", "-c", CA_NAME, &kc.to_string_lossy()],
+        );
     } else if cfg!(windows) {
         let _ = run("certutil", &["-user", "-delstore", "Root", CA_NAME]);
     } else {
         let db = nssdb_dir(nssdb);
         if db.join("cert9.db").exists() {
-            let _ = run("certutil", &["-d", &format!("sql:{}", db.display()), "-D", "-n", CA_NAME]);
+            let _ = run(
+                "certutil",
+                &["-d", &format!("sql:{}", db.display()), "-D", "-n", CA_NAME],
+            );
         }
     }
     Ok(format!("removed trust for \"{CA_NAME}\""))
@@ -240,15 +324,28 @@ mod tests {
 
     #[test]
     fn manifest_shape() {
-        let m: serde_json::Value = serde_json::from_str(&manifest_json(Path::new("/x/rescript-helper"), &["abcdefghijklmnopabcdefghijklmnop".into()])).unwrap();
+        let m: serde_json::Value = serde_json::from_str(&manifest_json(
+            Path::new("/x/rescript-helper"),
+            &["abcdefghijklmnopabcdefghijklmnop".into()],
+        ))
+        .unwrap();
         assert_eq!(m["name"], HOST_NAME);
         assert_eq!(m["type"], "stdio");
-        assert_eq!(m["allowed_origins"][0], "chrome-extension://abcdefghijklmnopabcdefghijklmnop/");
+        assert_eq!(
+            m["allowed_origins"][0],
+            "chrome-extension://abcdefghijklmnopabcdefghijklmnop/"
+        );
     }
 
     #[test]
     fn rejects_bad_ids() {
-        let o = InstallOpts { extension_ids: vec!["nope".into()], browsers: vec![], user_data_dirs: vec![], trust: false, nssdb: None };
+        let o = InstallOpts {
+            extension_ids: vec!["nope".into()],
+            browsers: vec![],
+            user_data_dirs: vec![],
+            trust: false,
+            nssdb: None,
+        };
         assert!(install(&o).is_err());
     }
 }

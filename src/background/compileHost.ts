@@ -18,6 +18,7 @@ import { compileScript, makeModuleResolver, makeStubModule } from "../shared/com
 import { defaultMeta, type ResMeta } from "../shared/metaParser";
 import type { ParamDef } from "../shared/scriptDef";
 import { dlogLevel } from "../shared/debugLog";
+import { compileDecision } from "../shared/pac";
 
 interface PlainScript {
     id: string;
@@ -276,18 +277,35 @@ async function persistAnalyzeCache(entries: { id: string; updatedAt: number; ana
 }
 
 /**
- * Run a hook-tier body op (requestDecision / transform / replace) — MV3
- * only (MV2 executes handlers in-place in ChromeBodyStrategy). Returns
- * null on any failure (callers treat it as passthrough).
+ * Run a body op (requestDecision / transform / replace / responseHeaders)
+ * in the sandbox — MV3 only (MV2 executes handlers in-place). Returns null
+ * on any failure (callers treat it as passthrough).
  */
 export async function runBodyOp(
     scripts: PlainScript[],
     paramValues: Record<string, any>,
-    op: "requestDecision" | "transform" | "replace",
+    op: "requestDecision" | "transform" | "replace" | "responseHeaders",
     args: Record<string, any>
 ): Promise<any | null> {
     await ensureOffscreen();
     const out = await sandboxCallSafe({ op: "run", runOp: op, scripts, paramValues, args });
     dlogLevel("compile", "debug", `runBodyOp ${op} → ${JSON.stringify(out)?.slice(0, 120)}`);
     return out;
+}
+
+let pacCache: { source: string; fn: (url: string, host: string) => string } | null = null;
+
+/**
+ * Evaluate the user's proxy decision (`__resUser` source from shared/pac)
+ * for one URL — MV2 in-page, MV3 in the sandbox (needs eval). "DIRECT" on
+ * failure.
+ */
+export async function evalProxyDecision(source: string, url: string, host: string): Promise<string> {
+    if (!__MV3__) {
+        if (pacCache?.source !== source) pacCache = { source, fn: compileDecision(source) };
+        return pacCache.fn(url, host);
+    }
+    await ensureOffscreen();
+    const out = await sandboxCallSafe({ op: "pac", source, args: { url, host } });
+    return typeof out?.result === "string" ? out.result : "DIRECT";
 }

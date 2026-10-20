@@ -9,7 +9,67 @@ permissions:
   contents: write
 
 jobs:
+  helper:
+    name: helper (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, exe: rescript-helper }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, exe: rescript-helper }
+          - { os: macos-latest, target: aarch64-apple-darwin, exe: rescript-helper }
+          - { os: macos-13, target: x86_64-apple-darwin, exe: rescript-helper }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, exe: rescript-helper.exe }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: helper
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: helper
+
+      - name: fmt + clippy + tests
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets --target ${{ matrix.target }} -- -D warnings
+          cargo test --target ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Size guard (≤ 6 MB)
+        run: |
+          BIN="target/${{ matrix.target }}/release/${{ matrix.exe }}"
+          SIZE=$(wc -c < "$BIN")
+          echo "$BIN: $SIZE bytes"
+          if [ "$SIZE" -gt 6291456 ]; then echo "::error::helper binary grew past 6 MB ($SIZE bytes)"; exit 1; fi
+
+      - name: Package
+        run: |
+          mkdir -p ../helper-dist
+          NAME="rescript-helper-${{ matrix.target }}"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp "target/${{ matrix.target }}/release/${{ matrix.exe }}" "../helper-dist/$NAME.exe"
+          else
+            tar -C "target/${{ matrix.target }}/release" -czf "../helper-dist/$NAME.tar.gz" "${{ matrix.exe }}"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: helper-${{ matrix.target }}
+          path: helper-dist/*
+
   release:
+    needs: helper
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -53,11 +113,22 @@ jobs:
           name: rescript-override
           path: dist/**
 
+      - name: Download helper binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: helper-*
+          path: helper-dist
+          merge-multiple: true
+
       - name: Create GitHub release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ env.ZIP_NAME }}
+          files: |
+            ${{ env.ZIP_NAME }}
+            helper-dist/*
           generate_release_notes: true
           body: |
             Load from source: unzip, then chrome://extensions → Load unpacked → the unzipped `dist` folder.
+
+            Optional local helper for `strategy: ["process"]` (Chrome): download the `rescript-helper-*` archive for your platform, then run `rescript-helper install --extension-id <id> --trust-ca` (the id is shown in Settings → Local helper).

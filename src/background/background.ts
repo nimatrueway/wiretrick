@@ -4,8 +4,9 @@
 import { WebRequestStrategy } from "./engine/strategies/webRequestStrategy";
 import { ChromeBodyStrategy } from "./engine/strategies/chromeBodyStrategy";
 import { CdpStrategy } from "./engine/strategies/cdpStrategy";
+import { ProcessStrategy } from "./engine/strategies/processStrategy";
 import { createPipeline } from "./engine/pipeline";
-import { addUiPort, clearTab, broadcastEntry } from "./engine/logs";
+import { addUiPort, clearTab, broadcastEntry, broadcastToUi } from "./engine/logs";
 import { onScriptsChanged, listScripts } from "./engine/scriptStore";
 import { dlog, getDebugBuffer, pushEntry, clearDebugBuffer, setSink } from "../shared/debugLog";
 import * as folderSync from "./folderSync";
@@ -28,8 +29,30 @@ const webRequestStrategy = new WebRequestStrategy();
 const chromeBody = new ChromeBodyStrategy();
 const cdp = new CdpStrategy();
 cdp.isClaimed = (url: string) => chromeBody.isClaimed(url);
+const processStrategy = new ProcessStrategy();
+processStrategy.isClaimed = (url: string) => chromeBody.isClaimed(url);
+processStrategy.onStatus = (status) => broadcastToUi({ type: "processStatus", status });
 
-createPipeline(webRequestStrategy, chromeBody, cdp, updateTabBadge, noteRequestForBadge);
+createPipeline(webRequestStrategy, chromeBody, cdp, processStrategy, updateTabBadge, noteRequestForBadge);
+
+// ---- process tier (local helper) controls for the manager ----
+chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
+    if (msg?.type === "processStatus") {
+        sendResponse(processStrategy.status());
+        return false;
+    }
+    if (msg?.type === "processRetry") {
+        processStrategy.reconnect();
+        sendResponse(processStrategy.status());
+        return false;
+    }
+    if (msg?.type === "processTrustCa") {
+        processStrategy.trustCa();
+        sendResponse({});
+        return false;
+    }
+    return false;
+});
 
 // ---- MV3 proxy tier: NOT implementable (see proxyRules.ts) — syncProxyRules
 // clears stale rules and logs the limitation loudly on every reload ----

@@ -357,11 +357,43 @@ async function saveCurrent(): Promise<void> {
     renderList();
 }
 
+// ---- process tier (local helper) ----
+function renderProcessStatus(st: any): void {
+    const labels: Record<string, string> = {
+        idle: "not needed — no enabled script lists \"process\"",
+        unsupported: "unavailable in this browser (Chrome only) — scripts fall through their strategy lists",
+        connecting: "connecting…",
+        ready: `running${st.version ? ` (v${st.version})` : ""}${st.port ? ` on 127.0.0.1:${st.port}` : ""}`,
+        missing: "not installed",
+        error: `error: ${st.error || "unknown"}`,
+    };
+    $("#process-state").textContent = labels[st.state] || st.state;
+    const lines: string[] = [];
+    if (st.scripts?.length) lines.push(`Scripts: ${st.scripts.join(", ")}`);
+    if (st.state === "missing") {
+        lines.push("Install the helper (from the release assets), then click Retry:");
+        lines.push(`  rescript-helper install --extension-id ${st.extensionId} --trust-ca`);
+    }
+    if (st.state === "ready") {
+        if (st.routing && !st.routing.active && st.routing.reason) lines.push(`Routing inactive: ${st.routing.reason}`);
+        if (st.routing?.active) lines.push(`Other traffic: your proxy setting (${st.routing.mode})`);
+        if (st.routing?.note) lines.push(st.routing.note);
+        if (st.caTrusted === false) lines.push("Chrome does not trust the helper's CA yet — click Trust CA (or run: rescript-helper trust-ca).");
+        if (st.caTrusted === true) lines.push("CA trusted ✓");
+        if (st.caFingerprint) lines.push(`CA: ${st.caPath} (SHA-256 ${st.caFingerprint})`);
+    }
+    if (st.trust) lines.push(`Trust CA: ${st.trust.msg}`);
+    $("#process-detail").textContent = lines.join("\n");
+    ($("#btn-process-trust") as HTMLButtonElement).hidden = !(st.state === "ready" && st.caTrusted !== true);
+    ($("#btn-process-retry") as HTMLButtonElement).hidden = st.state === "ready" || st.state === "idle" || st.state === "unsupported";
+}
+
 // ---- logs ----
 function connectLogs(): void {
     const port = chrome.runtime.connect({ name: "logs" });
     port.onMessage.addListener((msg: any) => {
         if (msg.type === "log") appendLog(msg.entry);
+        if (msg.type === "processStatus") renderProcessStatus(msg.status);
         // background applied an external folder change (or any script
         // change) — refresh list + editor if untouched
         if (msg.type === "scriptsChanged") {
@@ -560,7 +592,20 @@ function closeDialog(el: Element): void {
 }
 
 function setupDialogs(): void {
-    $("#btn-settings").addEventListener("click", () => openDialog("settings-panel"));
+    $("#btn-settings").addEventListener("click", () => {
+        openDialog("settings-panel");
+        chrome.runtime.sendMessage({ type: "processStatus" }, (st) => {
+            void chrome.runtime.lastError;
+            if (st) renderProcessStatus(st);
+        });
+    });
+    $("#btn-process-retry").addEventListener("click", () =>
+        chrome.runtime.sendMessage({ type: "processRetry" }, (st) => {
+            void chrome.runtime.lastError;
+            if (st) renderProcessStatus(st);
+        })
+    );
+    $("#btn-process-trust").addEventListener("click", () => chrome.runtime.sendMessage({ type: "processTrustCa" }, () => void chrome.runtime.lastError));
     $("#btn-help").addEventListener("click", () => openDialog("help-panel"));
     $("#btn-samples").addEventListener("click", () => {
         renderSamples();

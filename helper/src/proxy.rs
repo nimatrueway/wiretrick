@@ -69,7 +69,13 @@ impl State {
         let client = Client::builder(TokioExecutor::new())
             .pool_idle_timeout(Duration::from_secs(90))
             .build(Connector(up.clone()));
-        Arc::new(State { nm, ca, up, client, routes: RwLock::new(Arc::new(Vec::new())) })
+        Arc::new(State {
+            nm,
+            ca,
+            up,
+            client,
+            routes: RwLock::new(Arc::new(Vec::new())),
+        })
     }
 
     pub fn set_routes(&self, routes: Vec<Route>) {
@@ -95,7 +101,9 @@ impl State {
 
     /// Could any route match some URL on this host? (decides MITM vs raw tunnel)
     pub fn host_routed(&self, host: &str, port: u16) -> bool {
-        self.routes().iter().any(|r| r.patterns.iter().any(|p| host_may_match(p, host, port)))
+        self.routes()
+            .iter()
+            .any(|r| r.patterns.iter().any(|p| host_may_match(p, host, port)))
     }
 }
 
@@ -107,12 +115,16 @@ pub fn host_may_match(pattern: &str, host: &str, port: u16) -> bool {
     let host_pat = rest.split('/').next().unwrap_or("");
     let host_pat = host_pat.to_ascii_lowercase();
     let host = host.to_ascii_lowercase();
-    matches(&host_pat, &host) || matches(&host_pat, &format!("{host}:{port}")) || matches(&host_pat, &format!("[{host}]:{port}"))
+    matches(&host_pat, &host)
+        || matches(&host_pat, &format!("{host}:{port}"))
+        || matches(&host_pat, &format!("[{host}]:{port}"))
 }
 
 pub async fn serve(listener: TcpListener, st: Arc<State>) {
     loop {
-        let Ok((sock, _)) = listener.accept().await else { continue };
+        let Ok((sock, _)) = listener.accept().await else {
+            continue;
+        };
         let _ = sock.set_nodelay(true);
         let st = st.clone();
         tokio::spawn(async move {
@@ -128,7 +140,11 @@ struct Rewind<T> {
 }
 
 impl<T: AsyncRead + Unpin> AsyncRead for Rewind<T> {
-    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
         if !self.pre.is_empty() {
             let n = self.pre.len().min(buf.remaining());
             let chunk = self.pre.split_to(n);
@@ -140,7 +156,11 @@ impl<T: AsyncRead + Unpin> AsyncRead for Rewind<T> {
 }
 
 impl<T: AsyncWrite + Unpin> AsyncWrite for Rewind<T> {
-    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, b: &[u8]) -> Poll<std::io::Result<usize>> {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        b: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
         Pin::new(&mut self.inner).poll_write(cx, b)
     }
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
@@ -163,9 +183,14 @@ async fn read_request_head(sock: &mut TcpStream) -> std::io::Result<(Vec<u8>, By
         if buf.len() > 64 * 1024 {
             return Err(std::io::Error::other("request head too large"));
         }
-        let n = tokio::time::timeout(Duration::from_secs(30), sock.read(&mut tmp)).await.map_err(|_| std::io::Error::other("head timeout"))??;
+        let n = tokio::time::timeout(Duration::from_secs(30), sock.read(&mut tmp))
+            .await
+            .map_err(|_| std::io::Error::other("head timeout"))??;
         if n == 0 {
-            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "closed"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "closed",
+            ));
         }
         buf.extend_from_slice(&tmp[..n]);
     }
@@ -174,7 +199,10 @@ async fn read_request_head(sock: &mut TcpStream) -> std::io::Result<(Vec<u8>, By
 fn split_host_port(target: &str, default: u16) -> (String, u16) {
     if let Some(rest) = target.strip_prefix('[') {
         let (h, p) = rest.split_once(']').unwrap_or((rest, ""));
-        return (h.to_string(), p.trim_start_matches(':').parse().unwrap_or(default));
+        return (
+            h.to_string(),
+            p.trim_start_matches(':').parse().unwrap_or(default),
+        );
     }
     match target.rsplit_once(':') {
         Some((h, p)) => (h.to_string(), p.parse().unwrap_or(default)),
@@ -183,8 +211,16 @@ fn split_host_port(target: &str, default: u16) -> (String, u16) {
 }
 
 fn authority_of(host: &str, port: u16, default: u16) -> String {
-    let h = if host.contains(':') { format!("[{host}]") } else { host.to_string() };
-    if port == default { h } else { format!("{h}:{port}") }
+    let h = if host.contains(':') {
+        format!("[{host}]")
+    } else {
+        host.to_string()
+    };
+    if port == default {
+        h
+    } else {
+        format!("{h}:{port}")
+    }
 }
 
 /// Upstream 407 → a minimal 407 for the browser (status + challenges only).
@@ -205,22 +241,32 @@ async fn conn(mut sock: TcpStream, st: Arc<State>) -> std::io::Result<()> {
     let (head, rest) = read_request_head(&mut sock).await?;
     if !head.starts_with(b"CONNECT ") {
         // absolute-form plain HTTP: hand the whole stream to hyper
-        let io = Rewind { pre: Bytes::from([head, rest.to_vec()].concat()), inner: sock };
+        let io = Rewind {
+            pre: Bytes::from([head, rest.to_vec()].concat()),
+            inner: sock,
+        };
         return serve_http(io, st, None).await;
     }
     let text = String::from_utf8_lossy(&head).into_owned();
     let target = text.split_whitespace().nth(1).unwrap_or("").to_string();
     let (host, port) = split_host_port(&target, 443);
-    let browser_auth = text
-        .lines()
-        .find_map(|l| l.split_once(':').filter(|(k, _)| k.trim().eq_ignore_ascii_case("proxy-authorization")).map(|(_, v)| v.trim().to_string()));
+    let browser_auth = text.lines().find_map(|l| {
+        l.split_once(':')
+            .filter(|(k, _)| k.trim().eq_ignore_ascii_case("proxy-authorization"))
+            .map(|(_, v)| v.trim().to_string())
+    });
     let probe = host.eq_ignore_ascii_case(PROBE_HOST);
     let mitm = probe || st.host_routed(&host, port);
 
     if !mitm {
-        match st.up.tunnel(&host, port, port != 80, browser_auth.clone()).await {
+        match st
+            .up
+            .tunnel(&host, port, port != 80, browser_auth.clone())
+            .await
+        {
             Ok(Tunnel::Ok(mut upstream)) => {
-                sock.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n").await?;
+                sock.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+                    .await?;
                 if !rest.is_empty() {
                     upstream.write_all(&rest).await?;
                 }
@@ -237,18 +283,25 @@ async fn conn(mut sock: TcpStream, st: Arc<State>) -> std::io::Result<()> {
 
     // MITM through an authenticating upstream proxy: check credentials NOW,
     // while the browser can still answer a 407 on its CONNECT
-    if !probe && matches!(st.up.hops_for(&host, true).await.first(), Some(Hop::Http(_) | Hop::Https(_))) {
+    if !probe
+        && matches!(
+            st.up.hops_for(&host, true).await.first(),
+            Some(Hop::Http(_) | Hop::Https(_))
+        )
+    {
         match st.up.tunnel(&host, port, true, browser_auth.clone()).await {
             Ok(Tunnel::Ok(io)) => st.up.stash(&host, port, io),
             Ok(Tunnel::Auth(h)) => return sock.write_all(&relay_407(&h)).await,
             Err(e) => {
-                st.nm.log("warn", format!("upstream proxy for {host}:{port}: {e}"));
+                st.nm
+                    .log("warn", format!("upstream proxy for {host}:{port}: {e}"));
                 return sock.write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
             }
         }
     }
 
-    sock.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n").await?;
+    sock.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+        .await?;
     let first = if !rest.is_empty() {
         rest[0]
     } else {
@@ -258,14 +311,24 @@ async fn conn(mut sock: TcpStream, st: Arc<State>) -> std::io::Result<()> {
             _ => return Ok(()),
         }
     };
-    let io = Rewind { pre: rest, inner: sock };
+    let io = Rewind {
+        pre: rest,
+        inner: sock,
+    };
     if first != 0x16 {
         // not TLS (ws:// or http:// over CONNECT)
         return serve_http(io, st, Some(("http", authority_of(&host, port, 80)))).await;
     }
-    let mut cfg = rustls::ServerConfig::builder().with_no_client_auth().with_cert_resolver(Arc::new(Resolver { ca: st.ca.clone(), fallback: host.clone() }));
+    let mut cfg = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_cert_resolver(Arc::new(Resolver {
+            ca: st.ca.clone(),
+            fallback: host.clone(),
+        }));
     cfg.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
-    let tls = tokio_rustls::TlsAcceptor::from(Arc::new(cfg)).accept(io).await?;
+    let tls = tokio_rustls::TlsAcceptor::from(Arc::new(cfg))
+        .accept(io)
+        .await?;
     serve_http(tls, st, Some(("https", authority_of(&host, port, 443)))).await
 }
 
@@ -299,11 +362,15 @@ fn serve_http<I: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
 }
 
 fn full(b: impl Into<Bytes>) -> Body {
-    Full::new(b.into()).map_err(|n: Infallible| match n {}).boxed()
+    Full::new(b.into())
+        .map_err(|n: Infallible| match n {})
+        .boxed()
 }
 
 fn empty() -> Body {
-    Empty::<Bytes>::new().map_err(|n: Infallible| match n {}).boxed()
+    Empty::<Bytes>::new()
+        .map_err(|n: Infallible| match n {})
+        .boxed()
 }
 
 fn incoming(b: Incoming) -> Body {
@@ -313,14 +380,32 @@ fn incoming(b: Incoming) -> Body {
 fn text_response(status: u16, msg: &str) -> Response<Body> {
     let mut r = Response::new(full(msg.to_string()));
     *r.status_mut() = StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY);
-    r.headers_mut().insert("content-type", HeaderValue::from_static("text/plain; charset=utf-8"));
+    r.headers_mut().insert(
+        "content-type",
+        HeaderValue::from_static("text/plain; charset=utf-8"),
+    );
     r
 }
 
-const HOP_BY_HOP: &[&str] = &["connection", "proxy-connection", "keep-alive", "te", "trailer", "transfer-encoding", "upgrade"];
+const HOP_BY_HOP: &[&str] = &[
+    "connection",
+    "proxy-connection",
+    "keep-alive",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+];
 
 fn headers_to_vec(h: &HeaderMap) -> Headers {
-    h.iter().map(|(k, v)| (k.as_str().to_string(), String::from_utf8_lossy(v.as_bytes()).into_owned())).collect()
+    h.iter()
+        .map(|(k, v)| {
+            (
+                k.as_str().to_string(),
+                String::from_utf8_lossy(v.as_bytes()).into_owned(),
+            )
+        })
+        .collect()
 }
 
 fn vec_to_headers(v: &Headers, skip: &[&str]) -> HeaderMap {
@@ -330,7 +415,10 @@ fn vec_to_headers(v: &Headers, skip: &[&str]) -> HeaderMap {
         if lk.starts_with(':') || HOP_BY_HOP.contains(&lk.as_str()) || skip.contains(&lk.as_str()) {
             continue;
         }
-        if let (Ok(n), Ok(vv)) = (HeaderName::from_bytes(lk.as_bytes()), HeaderValue::from_str(val)) {
+        if let (Ok(n), Ok(vv)) = (
+            HeaderName::from_bytes(lk.as_bytes()),
+            HeaderValue::from_str(val),
+        ) {
             h.append(n, vv);
         }
     }
@@ -340,7 +428,10 @@ fn vec_to_headers(v: &Headers, skip: &[&str]) -> HeaderMap {
 fn cors_echo(req_headers: &HeaderMap, h: &mut HeaderMap) {
     if let Some(origin) = req_headers.get("origin") {
         h.insert("access-control-allow-origin", origin.clone());
-        h.insert("access-control-allow-credentials", HeaderValue::from_static("true"));
+        h.insert(
+            "access-control-allow-credentials",
+            HeaderValue::from_static("true"),
+        );
     }
 }
 
@@ -358,7 +449,18 @@ fn skip_body_reason(ct: &str) -> Option<&'static str> {
     if ct.starts_with("text/event-stream") {
         return Some("stream");
     }
-    for p in ["image/", "video/", "audio/", "font/", "application/octet-stream", "application/zip", "application/pdf", "application/wasm", "application/vnd.", "multipart/x-mixed-replace"] {
+    for p in [
+        "image/",
+        "video/",
+        "audio/",
+        "font/",
+        "application/octet-stream",
+        "application/zip",
+        "application/pdf",
+        "application/wasm",
+        "application/vnd.",
+        "multipart/x-mixed-replace",
+    ] {
         if ct.starts_with(p) {
             return Some("binary");
         }
@@ -372,17 +474,25 @@ pub fn decode(encoding: &str, data: &[u8]) -> Option<Vec<u8>> {
     let limit = (MAX_BODY + 1) as u64;
     let r = match encoding.trim().to_ascii_lowercase().as_str() {
         "" | "identity" => return Some(data.to_vec()),
-        "gzip" | "x-gzip" => flate2::read::MultiGzDecoder::new(data).take(limit).read_to_end(&mut out),
+        "gzip" | "x-gzip" => flate2::read::MultiGzDecoder::new(data)
+            .take(limit)
+            .read_to_end(&mut out),
         "deflate" => {
-            let z = flate2::read::ZlibDecoder::new(data).take(limit).read_to_end(&mut out);
+            let z = flate2::read::ZlibDecoder::new(data)
+                .take(limit)
+                .read_to_end(&mut out);
             if z.is_err() {
                 out.clear();
-                flate2::read::DeflateDecoder::new(data).take(limit).read_to_end(&mut out)
+                flate2::read::DeflateDecoder::new(data)
+                    .take(limit)
+                    .read_to_end(&mut out)
             } else {
                 z
             }
         }
-        "br" => brotli_decompressor::Decompressor::new(data, 4096).take(limit).read_to_end(&mut out),
+        "br" => brotli_decompressor::Decompressor::new(data, 4096)
+            .take(limit)
+            .read_to_end(&mut out),
         _ => return None,
     };
     (r.is_ok() && out.len() <= MAX_BODY).then_some(out)
@@ -395,8 +505,16 @@ fn respond(status: u16, headers: &Headers, body: Vec<u8>) -> Response<Body> {
     r
 }
 
-async fn handle(mut req: Request<Incoming>, st: Arc<State>, base: Option<(&'static str, String)>) -> Result<Response<Body>, BoxErr> {
-    let pq = req.uri().path_and_query().map(|p| p.as_str().to_string()).unwrap_or_else(|| "/".into());
+async fn handle(
+    mut req: Request<Incoming>,
+    st: Arc<State>,
+    base: Option<(&'static str, String)>,
+) -> Result<Response<Body>, BoxErr> {
+    let pq = req
+        .uri()
+        .path_and_query()
+        .map(|p| p.as_str().to_string())
+        .unwrap_or_else(|| "/".into());
     let url = match &base {
         Some((scheme, authority)) => format!("{scheme}://{authority}{pq}"),
         None => {
@@ -407,11 +525,17 @@ async fn handle(mut req: Request<Incoming>, st: Arc<State>, base: Option<(&'stat
         }
     };
     let uri: hyper::Uri = url.parse()?;
-    let host = uri.host().unwrap_or_default().trim_matches(|c| c == '[' || c == ']').to_string();
+    let host = uri
+        .host()
+        .unwrap_or_default()
+        .trim_matches(|c| c == '[' || c == ']')
+        .to_string();
     if host.eq_ignore_ascii_case(PROBE_HOST) {
         let mut r = text_response(200, "rescript-helper ok");
-        r.headers_mut().insert("access-control-allow-origin", HeaderValue::from_static("*"));
-        r.headers_mut().insert("cache-control", HeaderValue::from_static("no-store"));
+        r.headers_mut()
+            .insert("access-control-allow-origin", HeaderValue::from_static("*"));
+        r.headers_mut()
+            .insert("cache-control", HeaderValue::from_static("no-store"));
         return Ok(r);
     }
     let method = req.method().to_string();
@@ -421,11 +545,25 @@ async fn handle(mut req: Request<Incoming>, st: Arc<State>, base: Option<(&'stat
     // ---- request stage ----
     if flags.req {
         let id = st.nm.next_id();
-        let msg = Out::Req { id, url: url.clone(), method: method.clone(), headers: headers_to_vec(req.headers()) };
+        let msg = Out::Req {
+            id,
+            url: url.clone(),
+            method: method.clone(),
+            headers: headers_to_vec(req.headers()),
+        };
         match st.nm.ask(id, msg, REQ_TIMEOUT).await {
-            Some(In::Continue { headers: Some(h), .. }) => {
+            Some(In::Continue {
+                headers: Some(h), ..
+            }) => {
                 let keep_upgrade: Vec<(HeaderName, HeaderValue)> = if is_upgrade {
-                    ["connection", "upgrade"].iter().filter_map(|k| req.headers().get(*k).map(|v| (HeaderName::from_static(k), v.clone()))).collect()
+                    ["connection", "upgrade"]
+                        .iter()
+                        .filter_map(|k| {
+                            req.headers()
+                                .get(*k)
+                                .map(|v| (HeaderName::from_static(k), v.clone()))
+                        })
+                        .collect()
                 } else {
                     vec![]
                 };
@@ -437,13 +575,20 @@ async fn handle(mut req: Request<Incoming>, st: Arc<State>, base: Option<(&'stat
             Some(In::Redirect { url: to, .. }) => {
                 let mut r = Response::new(empty());
                 *r.status_mut() = StatusCode::TEMPORARY_REDIRECT;
-                r.headers_mut().insert("location", HeaderValue::from_str(&to)?);
-                r.headers_mut().insert("cache-control", HeaderValue::from_static("no-store"));
+                r.headers_mut()
+                    .insert("location", HeaderValue::from_str(&to)?);
+                r.headers_mut()
+                    .insert("cache-control", HeaderValue::from_static("no-store"));
                 let rh = req.headers().clone();
                 cors_echo(&rh, r.headers_mut());
                 return Ok(r);
             }
-            Some(In::Fulfill { status, headers, body, .. }) => return Ok(respond(status, &headers, b64decode(&body))),
+            Some(In::Fulfill {
+                status,
+                headers,
+                body,
+                ..
+            }) => return Ok(respond(status, &headers, b64decode(&body))),
             Some(In::Fail { .. }) => return Err(CANCELLED.into()),
             _ => {}
         }
@@ -466,7 +611,10 @@ async fn handle(mut req: Request<Incoming>, st: Arc<State>, base: Option<(&'stat
     }
     if flags.body {
         // only encodings we can decode for the transform
-        parts.headers.insert("accept-encoding", HeaderValue::from_static("gzip, deflate, br"));
+        parts.headers.insert(
+            "accept-encoding",
+            HeaderValue::from_static("gzip, deflate, br"),
+        );
     }
     parts.uri = uri.clone();
     parts.version = hyper::Version::HTTP_11;
@@ -497,13 +645,14 @@ async fn handle(mut req: Request<Incoming>, st: Arc<State>, base: Option<(&'stat
     if flags.body {
         let ct = header_str(&rp.headers, "content-type").to_string();
         let len: Option<usize> = header_str(&rp.headers, "content-length").parse().ok();
-        let skip = if method == "HEAD" || status == 204 || status == 304 || (100..200).contains(&status) {
-            Some("empty")
-        } else if len.is_some_and(|l| l > MAX_BODY) {
-            Some("too-large")
-        } else {
-            skip_body_reason(&ct)
-        };
+        let skip =
+            if method == "HEAD" || status == 204 || status == 304 || (100..200).contains(&status) {
+                Some("empty")
+            } else if len.is_some_and(|l| l > MAX_BODY) {
+                Some("too-large")
+            } else {
+                skip_body_reason(&ct)
+            };
         match skip {
             Some(why) => body_state = format!("skipped:{why}"),
             None => {
@@ -519,8 +668,10 @@ async fn handle(mut req: Request<Incoming>, st: Arc<State>, base: Option<(&'stat
                     Some(dec) => {
                         rp.headers.remove("content-encoding");
                         rp.headers.remove("transfer-encoding");
-                        rp.headers.insert("content-length", HeaderValue::from(dec.len()));
-                        return finish_response(st, url, method, status, rp, dec, "chunks".into()).await;
+                        rp.headers
+                            .insert("content-length", HeaderValue::from(dec.len()));
+                        return finish_response(st, url, method, status, rp, dec, "chunks".into())
+                            .await;
                     }
                     None => {
                         // unknown encoding: pass the raw bytes through untouched
@@ -548,11 +699,25 @@ async fn finish_response(
 ) -> Result<Response<Body>, BoxErr> {
     let id = st.nm.next_id();
     st.nm.send_chunks(id, &body);
-    let msg = Out::Res { id, url, method, status, headers: headers_to_vec(&rp.headers), body: body_state };
+    let msg = Out::Res {
+        id,
+        url,
+        method,
+        status,
+        headers: headers_to_vec(&rp.headers),
+        body: body_state,
+    };
     match st.nm.ask(id, msg, RES_TIMEOUT).await {
-        Some(In::Fulfill { status, headers, body, .. }) => Ok(respond(status, &headers, b64decode(&body))),
+        Some(In::Fulfill {
+            status,
+            headers,
+            body,
+            ..
+        }) => Ok(respond(status, &headers, b64decode(&body))),
         Some(In::Fail { .. }) => Err(CANCELLED.into()),
-        Some(In::Continue { headers: Some(h), .. }) => {
+        Some(In::Continue {
+            headers: Some(h), ..
+        }) => {
             let mut r = respond(status, &h, body);
             *r.status_mut() = rp.status;
             Ok(r)
@@ -571,11 +736,25 @@ async fn finish_streaming(
     body_state: String,
 ) -> Result<Response<Body>, BoxErr> {
     let id = st.nm.next_id();
-    let msg = Out::Res { id, url, method, status, headers: headers_to_vec(&rp.headers), body: body_state };
+    let msg = Out::Res {
+        id,
+        url,
+        method,
+        status,
+        headers: headers_to_vec(&rp.headers),
+        body: body_state,
+    };
     match st.nm.ask(id, msg, RES_TIMEOUT).await {
-        Some(In::Fulfill { status, headers, body, .. }) => Ok(respond(status, &headers, b64decode(&body))),
+        Some(In::Fulfill {
+            status,
+            headers,
+            body,
+            ..
+        }) => Ok(respond(status, &headers, b64decode(&body))),
         Some(In::Fail { .. }) => Err(CANCELLED.into()),
-        Some(In::Continue { headers: Some(h), .. }) => {
+        Some(In::Continue {
+            headers: Some(h), ..
+        }) => {
             // header-only change: the original body still streams
             let keep_len = rp.headers.get("content-length").cloned();
             let keep_enc = rp.headers.get("content-encoding").cloned();
@@ -594,7 +773,12 @@ async fn finish_streaming(
 
 /// WebSocket (or any HTTP/1.1 Upgrade): relay the handshake on a dedicated
 /// upstream connection, then splice the two upgraded streams.
-async fn upgrade(mut req: Request<Incoming>, st: Arc<State>, uri: &hyper::Uri, host: &str) -> Result<Response<Body>, BoxErr> {
+async fn upgrade(
+    mut req: Request<Incoming>,
+    st: Arc<State>,
+    uri: &hyper::Uri,
+    host: &str,
+) -> Result<Response<Body>, BoxErr> {
     let https = uri.scheme_str() == Some("https");
     let port = uri.port_u16().unwrap_or(if https { 443 } else { 80 });
     let io: BoxIo = if https {
@@ -602,15 +786,20 @@ async fn upgrade(mut req: Request<Incoming>, st: Arc<State>, uri: &hyper::Uri, h
     } else {
         match st.up.tunnel(host, port, false, None).await? {
             Tunnel::Ok(io) => io,
-            Tunnel::Auth(_) => return Ok(text_response(502, "upstream proxy requires authentication")),
+            Tunnel::Auth(_) => {
+                return Ok(text_response(502, "upstream proxy requires authentication"));
+            }
         }
     };
-    let (mut sender, conn) = hyper::client::conn::http1::handshake::<_, Empty<Bytes>>(TokioIo::new(io)).await?;
+    let (mut sender, conn) =
+        hyper::client::conn::http1::handshake::<_, Empty<Bytes>>(TokioIo::new(io)).await?;
     tokio::spawn(async move {
         let _ = conn.with_upgrades().await;
     });
     let client_upgrade = hyper::upgrade::on(&mut req);
-    let mut up_req = Request::builder().method(req.method().clone()).uri(uri.path_and_query().map(|p| p.as_str()).unwrap_or("/"));
+    let mut up_req = Request::builder()
+        .method(req.method().clone())
+        .uri(uri.path_and_query().map(|p| p.as_str()).unwrap_or("/"));
     for (k, v) in req.headers() {
         if k.as_str() == "proxy-authorization" || k.as_str() == "proxy-connection" {
             continue;
@@ -625,7 +814,8 @@ async fn upgrade(mut req: Request<Incoming>, st: Arc<State>, uri: &hyper::Uri, h
         let upstream_upgrade = hyper::upgrade::on(&mut resp);
         tokio::spawn(async move {
             if let (Ok(a), Ok(b)) = (client_upgrade.await, upstream_upgrade.await) {
-                let _ = tokio::io::copy_bidirectional(&mut TokioIo::new(a), &mut TokioIo::new(b)).await;
+                let _ =
+                    tokio::io::copy_bidirectional(&mut TokioIo::new(a), &mut TokioIo::new(b)).await;
             }
         });
         let (p, _) = resp.into_parts();

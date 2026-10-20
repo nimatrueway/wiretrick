@@ -23,6 +23,7 @@ import type { Script } from "../scriptStore";
 import { log } from "../logs";
 import { scriptStorageGet, scriptStorageSet } from "../scriptStore";
 import { runBodyOp } from "../../compileHost";
+import { processActive } from "./processState";
 
 function guessMimeFromUrl(url: string): string {
     const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "";
@@ -332,6 +333,14 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
                 if (tier === "cdp") {
                     chosen = "cdp";
                     break;
+                }
+                if (tier === "process") {
+                    // the helper proxy owns it while connected; else fall through
+                    if (processActive()) {
+                        chosen = "process";
+                        break;
+                    }
+                    continue;
                 }
                 if (tier === "webrequest") {
                     // Firefox-only network path; on Chrome = no body work
