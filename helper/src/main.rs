@@ -8,6 +8,7 @@ mod matcher;
 mod nm;
 mod paths;
 mod proxy;
+mod ui;
 mod upstream;
 
 use std::path::PathBuf;
@@ -63,26 +64,32 @@ fn main() {
             Ok(o) => match cmd {
                 "install" => install::install(&o),
                 "uninstall" => install::uninstall(&o),
-                "trust-ca" => install::trust_ca(o.nssdb.as_deref()).map(|m| println!("{m}")),
-                _ => install::untrust_ca(o.nssdb.as_deref()).map(|m| println!("{m}")),
+                "trust-ca" => install::trust_ca_cli(o.nssdb.as_deref()),
+                _ => install::untrust_ca_cli(o.nssdb.as_deref()),
             },
             Err(e) => Err(e),
         },
         "ca-path" => ca::Ca::load_or_create(&paths::config_dir())
-            .map(|c| println!("{}\nSHA-256 {}", c.path.display(), c.fingerprint()))
+            .map(|c| {
+                println!("{}", ui::path(&c.path));
+                println!("{} {}", ui::dim("SHA-256"), c.fingerprint());
+            })
             .map_err(|e| e.to_string()),
         "version" | "--version" | "-V" => {
-            println!("rescript-helper {VERSION}");
+            println!("{} {VERSION}", ui::bold("rescript-helper"));
             Ok(())
         }
         "help" | "--help" | "-h" => {
-            println!("{USAGE}");
+            println!("{}", ui::usage(USAGE));
             Ok(())
         }
-        other => Err(format!("unknown command {other:?}\n\n{USAGE}")),
+        other => Err(format!(
+            "unknown command {other:?} — see {}",
+            ui::cyan("rescript-helper --help")
+        )),
     };
     if let Err(e) = r {
-        eprintln!("error: {e}");
+        ui::error(&e);
         std::process::exit(1);
     }
 }

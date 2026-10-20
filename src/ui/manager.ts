@@ -11,6 +11,7 @@ import { createQuickOpenPalette } from "./quickOpen";
 import { computeDirty } from "./dirtyState";
 import { parseSettings, SETTINGS_FILE, type SettingsDoc } from "../shared/settingsYaml";
 import { dlogLevel } from "../shared/debugLog";
+import { helperInstallCommand, helperInstallShell } from "../shared/helperInstall";
 import type { Uri, IPosition, IRange, IKeyboardEvent, editor as MonacoEditor } from "monaco-editor";
 import type { Script } from "../background/engine/scriptStore";
 
@@ -371,8 +372,8 @@ function renderProcessStatus(st: any): void {
     const lines: string[] = [];
     if (st.scripts?.length) lines.push(`Scripts: ${st.scripts.join(", ")}`);
     if (st.state === "missing") {
-        lines.push("Install the helper (from the release assets), then click Retry:");
-        lines.push(`  rescript-helper install --extension-id ${st.extensionId} --trust-ca`);
+        lines.push(`Install the helper: paste this into ${helperInstallShell()}, then click Retry:`);
+        lines.push(`  ${helperInstallCommand(st.extensionId)}`);
     }
     if (st.state === "ready") {
         if (st.routing && !st.routing.active && st.routing.reason) lines.push(`Routing inactive: ${st.routing.reason}`);
@@ -385,6 +386,9 @@ function renderProcessStatus(st: any): void {
     if (st.trust) lines.push(`Trust CA: ${st.trust.msg}`);
     $("#process-detail").textContent = lines.join("\n");
     ($("#btn-process-trust") as HTMLButtonElement).hidden = !(st.state === "ready" && st.caTrusted !== true);
+    const copy = $("#btn-process-copy") as HTMLButtonElement;
+    copy.hidden = st.state !== "missing";
+    copy.dataset.cmd = st.state === "missing" ? helperInstallCommand(st.extensionId) : "";
     ($("#btn-process-retry") as HTMLButtonElement).hidden = st.state === "ready" || st.state === "idle" || st.state === "unsupported";
 }
 
@@ -605,6 +609,12 @@ function setupDialogs(): void {
             if (st) renderProcessStatus(st);
         })
     );
+    $("#btn-process-copy").addEventListener("click", async (e) => {
+        const b = e.currentTarget as HTMLButtonElement;
+        await navigator.clipboard.writeText(b.dataset.cmd || "").catch(() => {});
+        b.textContent = "Copied ✓";
+        setTimeout(() => (b.textContent = "Copy install command"), 1500);
+    });
     $("#btn-process-trust").addEventListener("click", () => chrome.runtime.sendMessage({ type: "processTrustCa" }, () => void chrome.runtime.lastError));
     $("#btn-help").addEventListener("click", () => openDialog("help-panel"));
     $("#btn-samples").addEventListener("click", () => {

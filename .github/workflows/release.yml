@@ -120,6 +120,12 @@ jobs:
           path: helper-dist
           merge-multiple: true
 
+      - name: Checksums
+        run: |
+          cd helper-dist
+          sha256sum rescript-helper-* > SHA256SUMS
+          cat SHA256SUMS
+
       - name: Create GitHub release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
@@ -131,4 +137,13 @@ jobs:
           body: |
             Load from source: unzip, then chrome://extensions → Load unpacked → the unzipped `dist` folder.
 
-            Optional local helper for `strategy: ["process"]` (Chrome): download the `rescript-helper-*` archive for your platform, then run `rescript-helper install --extension-id <id> --trust-ca` (the id is shown in Settings → Local helper).
+            Optional local helper for `strategy: ["process"]` (Chrome). Settings → Local helper shows the command with your extension id filled in; it downloads the right `rescript-helper-*` binary below, checks it against `SHA256SUMS`, and installs it:
+
+            ```sh
+            # macOS / Linux
+            curl -fsSL https://raw.githubusercontent.com/nimatrueway/rescript-override/master/helper/install.sh | sh -s -- --extension-id <id> --trust-ca
+            ```
+            ```powershell
+            # Windows (PowerShell)
+            & ([scriptblock]::Create((irm https://raw.githubusercontent.com/nimatrueway/rescript-override/master/helper/install.ps1))) -ExtensionId <id> -TrustCa
+            ```

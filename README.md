@@ -330,12 +330,25 @@ lists `process`, and it exits when that script is gone (or Chrome closes):
    asks the extension per host, so your PAC/fixed proxies are honored even
    for intercepted traffic.
 
-**Install** (once per machine; the id is shown in Settings → Local helper):
+**Install** (once per machine). Settings → Local helper shows this command
+with your extension id filled in, plus a **Copy install command** button. It
+downloads the right binary from the latest GitHub release, checks it against
+the release's `SHA256SUMS`, and runs `rescript-helper install`:
 
 ```sh
-rescript-helper install --extension-id <extension id> --trust-ca
-# then click Retry in Settings → Local helper (or reload the extension)
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/nimatrueway/rescript-override/master/helper/install.sh | sh -s -- --extension-id <extension id> --trust-ca
 ```
+
+```powershell
+# Windows (PowerShell)
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/nimatrueway/rescript-override/master/helper/install.ps1))) -ExtensionId <extension id> -TrustCa
+```
+
+Then click Retry in Settings → Local helper (or reload the extension).
+`RESCRIPT_HELPER_VERSION=v1.2.3` pins a release. With a binary you already
+have, run `rescript-helper install --extension-id <extension id> --trust-ca`.
+The installer copies the helper to `<config dir>/bin` and registers it there.
 
 `--trust-ca` adds the helper's CA to the user's trust store: the login
 keychain on macOS, CurrentUser\Root on Windows, and the NSS db

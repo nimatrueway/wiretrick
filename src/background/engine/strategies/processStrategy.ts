@@ -15,6 +15,7 @@ import { runOp, type BodyOp, type OpScript } from "../../../shared/bodyOps";
 import { hostPatternOf, type SystemProxyInfo } from "../../../shared/pac";
 import { matchAny } from "../../../shared/matcher";
 import { dlogLevel } from "../../../shared/debugLog";
+import { helperInstallCommand, helperInstallShell } from "../../../shared/helperInstall";
 import type { Script } from "../scriptStore";
 import { scriptStorageGet, scriptStorageSet } from "../scriptStore";
 import { log } from "../logs";
@@ -306,7 +307,7 @@ export class ProcessStrategy {
                 // not installed / not allowed for this extension id: wait for the user
                 this.state = "missing";
                 this.error = err;
-                dlogLevel("process", "warn", `process helper unavailable (${err}) — process-listed scripts fall through their strategy lists. Install it: rescript-helper install --extension-id ${chrome.runtime.id} --trust-ca`);
+                dlogLevel("process", "warn", `process helper unavailable (${err}) — process-listed scripts fall through their strategy lists. Install it by pasting this into ${helperInstallShell()}: ${helperInstallCommand(chrome.runtime.id)}`);
             } else {
                 this.state = "error";
                 this.error = err;

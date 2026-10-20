@@ -6,6 +6,7 @@ use std::process::Command;
 
 use crate::ca::CA_NAME;
 use crate::paths::{config_dir, home};
+use crate::ui;
 
 pub const HOST_NAME: &str = "com.rescript_override.helper";
 
@@ -129,7 +130,7 @@ pub fn install(o: &InstallOpts) -> Result<(), String> {
         let d = dir.join("NativeMessagingHosts");
         std::fs::create_dir_all(&d).map_err(|e| format!("{}: {e}", d.display()))?;
         std::fs::write(d.join(&file), &manifest).map_err(|e| e.to_string())?;
-        done.push(d.display().to_string());
+        done.push(ui::path(&d));
     }
     if o.user_data_dirs.is_empty() {
         if cfg!(windows) {
@@ -150,7 +151,11 @@ pub fn install(o: &InstallOpts) -> Result<(), String> {
                     &mpath.to_string_lossy(),
                     "/f",
                 ]) {
-                    done.push(format!("{label} ({k})"));
+                    done.push(format!(
+                        "{} {}",
+                        ui::bold(label),
+                        ui::dim(&format!("({k})"))
+                    ));
                 }
             }
         } else {
@@ -168,7 +173,11 @@ pub fn install(o: &InstallOpts) -> Result<(), String> {
                     .and_then(|_| std::fs::write(d.join(&file), &manifest))
                     .is_ok()
                 {
-                    done.push(format!("{label} ({})", d.display()));
+                    done.push(format!(
+                        "{} {}",
+                        ui::bold(label),
+                        ui::dim(&format!("({})", ui::path(&d)))
+                    ));
                 }
             }
         }
@@ -176,16 +185,28 @@ pub fn install(o: &InstallOpts) -> Result<(), String> {
     if done.is_empty() {
         return Err("no Chromium-family browser profile found; pass --browser chrome (or --user-data-dir DIR)".into());
     }
-    println!("helper: {}", exe.display());
+    ui::ok(&format!("installed helper {}", ui::path(&exe)));
     for d in &done {
-        println!("registered native messaging host for {d}");
+        ui::ok(&format!("registered native messaging host for {d}"));
     }
     if o.trust {
-        println!("{}", trust_ca(o.nssdb.as_deref())?);
+        trust_ca_cli(o.nssdb.as_deref())?;
+    } else {
+        let exe_s = exe.display().to_string();
+        let exe_s = if exe_s.contains(' ') {
+            format!("\"{exe_s}\"")
+        } else {
+            exe_s
+        };
+        ui::next(&format!(
+            "CA not trusted yet — HTTPS interception needs {}",
+            ui::cyan(&format!("{exe_s} trust-ca"))
+        ));
     }
-    println!(
-        "done — reload the extension (or click \"Retry\" in its Settings → Local helper section) to start the helper"
-    );
+    ui::next(&format!(
+        "reload the extension (or click {} in Settings → Local helper) to start the helper",
+        ui::bold("Retry")
+    ));
     Ok(())
 }
 
@@ -208,8 +229,8 @@ pub fn uninstall(o: &InstallOpts) -> Result<(), String> {
             let _ = std::fs::remove_file(root.join("NativeMessagingHosts").join(&file));
         }
     }
-    println!("native messaging host removed");
-    println!("{}", untrust_ca(o.nssdb.as_deref())?);
+    ui::ok("removed the native messaging host");
+    untrust_ca_cli(o.nssdb.as_deref())?;
     Ok(())
 }
 
@@ -246,6 +267,23 @@ fn nssdb_dir(custom: Option<&Path>) -> PathBuf {
     custom
         .map(Path::to_path_buf)
         .unwrap_or_else(|| home().join(".pki").join("nssdb"))
+}
+
+pub fn trust_ca_cli(nssdb: Option<&Path>) -> Result<(), String> {
+    trust_ca(nssdb)?;
+    ui::ok(&format!(
+        "trusted {} for this user {}",
+        ui::bold(CA_NAME),
+        ui::dim(&format!("({})", ui::path(&ca_pem_path()?)))
+    ));
+    ui::next("restart the browser if it was running");
+    Ok(())
+}
+
+pub fn untrust_ca_cli(nssdb: Option<&Path>) -> Result<(), String> {
+    untrust_ca(nssdb)?;
+    ui::ok(&format!("removed trust for {}", ui::bold(CA_NAME)));
+    Ok(())
 }
 
 /// Trust the CA for the current user. Returns a human-readable summary.
