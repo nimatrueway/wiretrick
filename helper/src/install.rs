@@ -87,9 +87,14 @@ fn stable_exe() -> std::io::Result<PathBuf> {
     });
     let same = std::fs::canonicalize(&me).ok() == std::fs::canonicalize(&dest).ok();
     if !same {
-        // replacing a running binary: unlink first (fine on unix; on
-        // Windows a running copy cannot be replaced — tell the user)
-        let _ = std::fs::remove_file(&dest);
+        // replacing a running binary (upgrade while Chrome runs the old one):
+        // unlinking works on unix; Windows can't delete a running .exe but
+        // can rename it out of the way
+        if dest.exists() && std::fs::remove_file(&dest).is_err() {
+            let old = dest.with_extension("old.exe");
+            let _ = std::fs::remove_file(&old);
+            std::fs::rename(&dest, &old)?;
+        }
         std::fs::copy(&me, &dest)?;
         #[cfg(unix)]
         {

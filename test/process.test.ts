@@ -3,6 +3,8 @@ import { ProcessStrategy, applyHeaderMods, base64ToBytes, bytesToBase64, filterU
 import { isProcessOwned, listsProcess, processActive, setProcessActive } from "../src/background/engine/strategies/processState";
 import { CdpStrategy } from "../src/background/engine/strategies/cdpStrategy";
 import { compileScript } from "../src/shared/compile";
+import { isHelperOutdated } from "../src/shared/helperInstall";
+import { clearDebugBuffer, getDebugBuffer } from "../src/shared/debugLog";
 import type { Script } from "../src/background/engine/scriptStore";
 
 function makeScript(id: string, code: string): Script {
@@ -309,5 +311,47 @@ wt.modifyResponse((c, body) => (c.url.endsWith("/t") ? body.toUpperCase() : unde
         expect(processActive()).toBe(false);
         expect(fake.proxyValue.mode).toBe("system"); // cleared → browser default
         expect(p.status().state).toBe("error");
+    });
+});
+
+describe("helper version check", () => {
+    it("isHelperOutdated compares x.y.z numerically", () => {
+        expect(isHelperOutdated("0.0.1", "0.1.0")).toBe(true);
+        expect(isHelperOutdated("0.9.0", "0.10.0")).toBe(true);
+        expect(isHelperOutdated("0.1.0", "0.1.0")).toBe(false);
+        expect(isHelperOutdated("0.2.0", "0.1.0")).toBe(false);
+        expect(isHelperOutdated("v1.0.0", "1.0.1")).toBe(true);
+        expect(isHelperOutdated(undefined, "0.1.0")).toBe(false);
+        expect(isHelperOutdated("garbage", "0.1.0")).toBe(false);
+    });
+
+    it("older helper → one error with the upgrade command; Retry restarts it", async () => {
+        (globalThis as any).chrome.runtime.getManifest = () => ({ version: "0.2.0" });
+        clearDebugBuffer();
+        const p = new ProcessStrategy();
+        await ready(p, [makeScript("a", `wt.declareScript({ match: ["*://x.com/*"], strategy: ["process"] });\nwt.onRequest(() => {});`)]);
+        expect(p.status().outdated).toBe(true);
+        const errs = getDebugBuffer().filter((e) => e.level === "error" && /older than the extension/.test(e.msg));
+        expect(errs.length).toBe(1);
+        expect(errs[0].msg).toContain("v0.1.0");
+        expect(errs[0].msg).toContain("install.sh");
+        const before = fake.connects;
+        p.reconnect();
+        await settle();
+        expect(fake.connects).toBe(before + 1);
+        fake.deliver({ t: "ready", port: 41235, version: "0.2.0", caPem: "", caFingerprint: "AA", caPath: "/tmp/ca.pem" });
+        await settle();
+        expect(p.status().outdated).toBe(false);
+        p.reconnect(); // up to date → no restart
+        expect(fake.connects).toBe(before + 1);
+    });
+
+    it("up-to-date helper → no error", async () => {
+        (globalThis as any).chrome.runtime.getManifest = () => ({ version: "0.1.0" });
+        clearDebugBuffer();
+        const p = new ProcessStrategy();
+        await ready(p, [makeScript("a", `wt.declareScript({ match: ["*://x.com/*"], strategy: ["process"] });\nwt.onRequest(() => {});`)]);
+        expect(p.status().outdated).toBe(false);
+        expect(getDebugBuffer().some((e) => /older than the extension/.test(e.msg))).toBe(false);
     });
 });

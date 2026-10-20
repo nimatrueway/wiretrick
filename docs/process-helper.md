@@ -51,6 +51,14 @@ commands: `trust-ca`, `untrust-ca`, `uninstall`, and `--help`. Release builds
 are attached to each GitHub release. To build from source, run
 `npm run build:helper` (Rust ≥ 1.85).
 
+## Upgrading
+
+The browser updates the extension but not the helper. When the helper is
+older than the extension, Wiretrick logs an error with the install command
+and Settings → Local helper shows it with a **Copy install command** button.
+Re-run the command, then click **Retry** to restart the helper on the new
+binary.
+
 ## Things to know
 
 - The CA's private key stays in the helper's config dir

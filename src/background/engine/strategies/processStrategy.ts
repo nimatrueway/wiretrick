@@ -16,7 +16,7 @@ import { runOp, type BodyOp, type OpScript } from "../../../shared/bodyOps";
 import { hostPatternOf, type SystemProxyInfo } from "../../../shared/pac";
 import { matchAny } from "../../../shared/matcher";
 import { dlogLevel } from "../../../shared/debugLog";
-import { helperInstallCommand, helperInstallShell } from "../../../shared/helperInstall";
+import { helperInstallCommand, helperInstallShell, isHelperOutdated } from "../../../shared/helperInstall";
 import type { Script } from "../scriptStore";
 import { scriptStorageGet, scriptStorageSet } from "../scriptStore";
 import { log } from "../logs";
@@ -52,6 +52,8 @@ export interface ProcessStatus {
     /** process-listed scripts (names) */
     scripts: string[];
     version?: string;
+    /** the helper is older than the extension — reinstall it */
+    outdated?: boolean;
     port?: number;
     caPath?: string;
     caFingerprint?: string;
@@ -63,6 +65,14 @@ export interface ProcessStatus {
 }
 
 const IS_FIREFOX = typeof (globalThis as any).browser !== "undefined" && typeof (globalThis as any).browser.webRequest?.filterResponseData === "function";
+
+const extVersion = (): string | undefined => {
+    try {
+        return chrome.runtime.getManifest().version;
+    } catch {
+        return undefined;
+    }
+};
 
 // ---- small helpers (exported for tests) ----
 
@@ -192,6 +202,7 @@ export class ProcessStrategy {
     private state: ProcessStatus["state"] = "idle";
     private error: string | undefined;
     private caTrusted: boolean | null = null;
+    private warnedOutdated?: string;
     private trust: ProcessStatus["trust"];
     private backoff = 1000;
     private retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -273,7 +284,12 @@ export class ProcessStrategy {
         if (this.retryTimer) clearTimeout(this.retryTimer);
         this.retryTimer = null;
         if (!this.owned.length) return;
-        if (this.port) return;
+        if (this.port) {
+            // an outdated helper keeps running until we drop it; restart so a
+            // freshly reinstalled binary gets spawned
+            if (!this.helper || !isHelperOutdated(this.helper.version, extVersion())) return;
+            this.disconnect();
+        }
         this.connect();
     }
 
@@ -394,6 +410,7 @@ export class ProcessStrategy {
             extensionId: chrome.runtime.id,
             scripts: this.owned.map((o) => o.name),
             version: this.helper?.version,
+            outdated: this.helper ? isHelperOutdated(this.helper.version, extVersion()) : undefined,
             port: this.helper?.port,
             caPath: this.helper?.caPath,
             caFingerprint: this.helper?.caFingerprint,
@@ -431,6 +448,14 @@ export class ProcessStrategy {
                 this.backoff = 1000;
                 this.caTrusted = null;
                 dlogLevel("process", "info", `process helper ${m.version} ready on 127.0.0.1:${m.port}`);
+                if (isHelperOutdated(m.version, extVersion()) && this.warnedOutdated !== m.version) {
+                    this.warnedOutdated = m.version;
+                    dlogLevel(
+                        "process",
+                        "error",
+                        `process helper v${m.version} is older than the extension (v${extVersion()}) — upgrade it by re-running this in ${helperInstallShell()}: ${helperInstallCommand(chrome.runtime.id)}`,
+                    );
+                }
                 void this.loaded.then(() => this.pushConfig());
                 return;
             case "system":

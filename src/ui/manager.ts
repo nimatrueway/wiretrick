@@ -430,6 +430,10 @@ function renderProcessStatus(st: any): void {
         lines.push(`  ${helperInstallCommand(st.extensionId)}`);
     }
     if (st.state === "ready") {
+        if (st.outdated) {
+            lines.push(`⚠ The helper (v${st.version}) is older than the extension — upgrade it: paste this into ${helperInstallShell()}, then click Retry:`);
+            lines.push(`  ${helperInstallCommand(st.extensionId)}`);
+        }
         if (st.routing && !st.routing.active && st.routing.reason) lines.push(`Routing inactive: ${st.routing.reason}`);
         if (st.routing?.active) lines.push(`Other traffic: your proxy setting (${st.routing.mode})`);
         if (st.routing?.note) lines.push(st.routing.note);
@@ -441,9 +445,10 @@ function renderProcessStatus(st: any): void {
     $("#process-detail").textContent = lines.join("\n");
     ($("#btn-process-trust") as HTMLButtonElement).hidden = !(st.state === "ready" && st.caTrusted !== true);
     const copy = $("#btn-process-copy") as HTMLButtonElement;
-    copy.hidden = st.state !== "missing";
-    copy.dataset.cmd = st.state === "missing" ? helperInstallCommand(st.extensionId) : "";
-    ($("#btn-process-retry") as HTMLButtonElement).hidden = st.state === "ready" || st.state === "idle" || st.state === "unsupported";
+    const needsInstall = st.state === "missing" || !!st.outdated;
+    copy.hidden = !needsInstall;
+    copy.dataset.cmd = needsInstall ? helperInstallCommand(st.extensionId) : "";
+    ($("#btn-process-retry") as HTMLButtonElement).hidden = (st.state === "ready" && !st.outdated) || st.state === "idle" || st.state === "unsupported";
 }
 
 // ---- logs ----
