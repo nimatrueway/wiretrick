@@ -109,9 +109,24 @@ describe("NetworkPanel", () => {
     it("filters by text, type chip and intercepted-only", async () => {
         const hit = entry("api", { type: "xmlhttprequest", interventions: [{ scriptId: "s", scriptName: "Mocker", action: "respond 200", level: "info", at: base }] });
         const { container, getByText, getByPlaceholderText, getByLabelText } = setup([entry("a"), hit]);
-        fireEvent.click(getByText("Fetch/XHR"));
+        // independent toggles: switching off JS keeps Fetch/XHR on
+        fireEvent.click(getByText("JS"));
         expect(rowNames(container)).toEqual(["api.js"]);
+        expect(getByText("All").getAttribute("aria-pressed")).toBe("false");
+        expect(getByText("Fetch/XHR").getAttribute("aria-pressed")).toBe("true");
+        // All (not all on) → everything on
         fireEvent.click(getByText("All"));
+        expect(rowNames(container)).toEqual(["a.js", "api.js"]);
+        // All (all on) → everything off
+        fireEvent.click(getByText("All"));
+        expect(rowNames(container)).toEqual([]);
+        expect(container.querySelector(".net-empty")!.textContent).toContain("No request types selected");
+        fireEvent.click(getByText("Fetch/XHR"));
+        fireEvent.click(getByText("JS"));
+        expect(rowNames(container)).toEqual(["a.js", "api.js"]);
+        expect(getByText("All").getAttribute("aria-pressed")).toBe("false");
+        fireEvent.click(getByText("All"));
+        expect(getByText("All").getAttribute("aria-pressed")).toBe("true");
         fireEvent.input(getByPlaceholderText(/Filter/), { target: { value: "-api" } });
         expect(rowNames(container)).toEqual(["a.js"]);
         fireEvent.input(getByPlaceholderText(/Filter/), { target: { value: "" } });

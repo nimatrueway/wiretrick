@@ -18,7 +18,8 @@ import {
     typeLabel,
     type NetFilter,
     type SortKey,
-    type TypeFilter,
+    ALL_TYPES,
+    type TypeCategory,
 } from "./netFormat";
 
 export interface TabInfo {
@@ -75,7 +76,7 @@ function dragX(down: MouseEvent, onMove: (dx: number) => void, cursor: string): 
 }
 
 export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: () => Promise<TabInfo[]> }) {
-    const [filter, setFilter] = useState<NetFilter>({ text: "", type: "all", interceptedOnly: false, tabId: null });
+    const [filter, setFilter] = useState<NetFilter>({ text: "", types: ALL_TYPES, interceptedOnly: false, tabId: null });
     const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "start", dir: 1 });
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [tabs, setTabs] = useState<TabInfo[]>([]);
@@ -234,18 +235,27 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
                         ))}
                     </select>
                 )}
-                <div class="net-chips" role="tablist">
-                    {TYPE_FILTERS.map((t) => (
-                        <button
-                            key={t.id}
-                            role="tab"
-                            aria-selected={filter.type === t.id}
-                            class={filter.type === t.id ? "net-chip active" : "net-chip"}
-                            onClick={() => setFilter({ ...filter, type: t.id as TypeFilter })}
-                        >
-                            {t.label}
-                        </button>
-                    ))}
+                <div class="net-chips" role="group" aria-label="Request types">
+                    {TYPE_FILTERS.map((t) => {
+                        const allOn = filter.types.length === ALL_TYPES.length;
+                        const on = t.id === "all" ? allOn : filter.types.includes(t.id as TypeCategory);
+                        const toggle = () => {
+                            if (t.id === "all") return setFilter({ ...filter, types: allOn ? [] : ALL_TYPES });
+                            const id = t.id as TypeCategory;
+                            setFilter({ ...filter, types: on ? filter.types.filter((x) => x !== id) : ALL_TYPES.filter((x) => x === id || filter.types.includes(x)) });
+                        };
+                        return (
+                            <button
+                                key={t.id}
+                                aria-pressed={on}
+                                class={on ? "net-chip active" : "net-chip"}
+                                title={t.id === "all" ? (allOn ? "Hide all request types" : "Show all request types") : `Toggle ${t.label} requests`}
+                                onClick={toggle}
+                            >
+                                {t.label}
+                            </button>
+                        );
+                    })}
                 </div>
             </div>
             <div class={selected ? "net-body with-details" : "net-body"} ref={bodyRef}>
@@ -312,7 +322,11 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
                     </table>
                     {rows.length === 0 && (
                         <div class="net-empty">
-                            {all.length === 0 ? "Recording network activity… reload a page to see its requests." : "No requests match the filter."}
+                            {all.length === 0
+                                ? "Recording network activity… reload a page to see its requests."
+                                : filter.types.length === 0
+                                  ? "No request types selected — click All or a type above."
+                                  : "No requests match the filter."}
                         </div>
                     )}
                 </div>

@@ -15,8 +15,12 @@ export const TYPE_FILTERS: { id: TypeFilter; label: string }[] = [
     { id: "other", label: "Other" },
 ];
 
+export type TypeCategory = Exclude<TypeFilter, "all">;
+/** every category, i.e. the "All" state of the type toggles */
+export const ALL_TYPES: TypeCategory[] = TYPE_FILTERS.filter((t) => t.id !== "all").map((t) => t.id as TypeCategory);
+
 /** webRequest resource type → devtools-style category */
-export function category(e: NetEntry): Exclude<TypeFilter, "all"> {
+export function category(e: NetEntry): TypeCategory {
     switch (e.type) {
         case "xmlhttprequest":
         case "fetch":
@@ -99,13 +103,14 @@ export function statusText(e: NetEntry): string {
 
 export interface NetFilter {
     text: string;
-    type: TypeFilter;
+    /** categories toggled on (independent toggles; ALL_TYPES = everything) */
+    types: TypeCategory[];
     interceptedOnly: boolean;
     tabId: number | null;
 }
 
 export function matches(e: NetEntry, f: NetFilter): boolean {
-    if (f.type !== "all" && category(e) !== f.type) return false;
+    if (!f.types.includes(category(e))) return false;
     if (f.interceptedOnly && e.interventions.length === 0) return false;
     if (f.tabId !== null && e.tabId !== f.tabId) return false;
     const q = f.text.trim();
