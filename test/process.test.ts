@@ -93,10 +93,10 @@ function reply(id: number): any {
     return fake.sent.find((m) => m.id === id && m.t !== "upstream");
 }
 
-async function ready(p: ProcessStrategy, scripts: Script[]): Promise<void> {
+async function ready(p: ProcessStrategy, scripts: Script[], version = "0.1.0"): Promise<void> {
     p.reload(scripts);
     await settle();
-    fake.deliver({ t: "ready", port: 41234, version: "0.1.0", caPem: "", caFingerprint: "AA", caPath: "/tmp/ca.pem" });
+    fake.deliver({ t: "ready", port: 41234, version, caPem: "", caFingerprint: "AA", caPath: "/tmp/ca.pem" });
     await settle();
 }
 
@@ -322,36 +322,36 @@ describe("helper version check", () => {
         expect(isHelperOutdated("0.2.0", "0.1.0")).toBe(false);
         expect(isHelperOutdated("v1.0.0", "1.0.1")).toBe(true);
         expect(isHelperOutdated(undefined, "0.1.0")).toBe(false);
+        expect(isHelperOutdated("0.0.1")).toBe(false); // MIN_HELPER_VERSION
         expect(isHelperOutdated("garbage", "0.1.0")).toBe(false);
     });
 
-    it("older helper → one error with the upgrade command; Retry restarts it", async () => {
-        (globalThis as any).chrome.runtime.getManifest = () => ({ version: "0.2.0" });
+    it("helper below the minimum → one error with the upgrade command; Retry restarts it", async () => {
         clearDebugBuffer();
         const p = new ProcessStrategy();
-        await ready(p, [makeScript("a", `wt.declareScript({ match: ["*://x.com/*"], strategy: ["process"] });\nwt.onRequest(() => {});`)]);
+        await ready(p, [makeScript("a", `wt.declareScript({ match: ["*://x.com/*"], strategy: ["process"] });\nwt.onRequest(() => {});`)], "0.0.0");
         expect(p.status().outdated).toBe(true);
-        const errs = getDebugBuffer().filter((e) => e.level === "error" && /older than the extension/.test(e.msg));
+        const errs = getDebugBuffer().filter((e) => e.level === "error" && /older than this extension needs/.test(e.msg));
         expect(errs.length).toBe(1);
-        expect(errs[0].msg).toContain("v0.1.0");
+        expect(errs[0].msg).toContain("v0.0.0");
         expect(errs[0].msg).toContain("install.sh");
         const before = fake.connects;
         p.reconnect();
         await settle();
         expect(fake.connects).toBe(before + 1);
-        fake.deliver({ t: "ready", port: 41235, version: "0.2.0", caPem: "", caFingerprint: "AA", caPath: "/tmp/ca.pem" });
+        fake.deliver({ t: "ready", port: 41235, version: "0.0.1", caPem: "", caFingerprint: "AA", caPath: "/tmp/ca.pem" });
         await settle();
         expect(p.status().outdated).toBe(false);
         p.reconnect(); // up to date → no restart
         expect(fake.connects).toBe(before + 1);
     });
 
-    it("up-to-date helper → no error", async () => {
-        (globalThis as any).chrome.runtime.getManifest = () => ({ version: "0.1.0" });
+    it("helper older than the extension but ≥ minimum → no error", async () => {
+        (globalThis as any).chrome.runtime.getManifest = () => ({ version: "9.9.9" });
         clearDebugBuffer();
         const p = new ProcessStrategy();
-        await ready(p, [makeScript("a", `wt.declareScript({ match: ["*://x.com/*"], strategy: ["process"] });\nwt.onRequest(() => {});`)]);
+        await ready(p, [makeScript("a", `wt.declareScript({ match: ["*://x.com/*"], strategy: ["process"] });\nwt.onRequest(() => {});`)], "0.0.1");
         expect(p.status().outdated).toBe(false);
-        expect(getDebugBuffer().some((e) => /older than the extension/.test(e.msg))).toBe(false);
+        expect(getDebugBuffer().some((e) => /older than this extension needs/.test(e.msg))).toBe(false);
     });
 });

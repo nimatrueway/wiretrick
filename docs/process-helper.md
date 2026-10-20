@@ -53,8 +53,10 @@ are attached to each GitHub release. To build from source, run
 
 ## Upgrading
 
-The browser updates the extension but not the helper. When the helper is
-older than the extension, Wiretrick logs an error with the install command
+The browser updates the extension but not the helper. The helper is
+versioned on its own and the extension declares the oldest helper it works
+with, so most extension updates need no helper upgrade. When one is needed,
+Wiretrick logs an error with the install command
 and Settings → Local helper shows it with a **Copy install command** button.
 Re-run the command, then click **Retry** to restart the helper on the new
 binary.

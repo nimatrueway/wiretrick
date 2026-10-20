@@ -431,7 +431,7 @@ function renderProcessStatus(st: any): void {
     }
     if (st.state === "ready") {
         if (st.outdated) {
-            lines.push(`⚠ The helper (v${st.version}) is older than the extension — upgrade it: paste this into ${helperInstallShell()}, then click Retry:`);
+            lines.push(`⚠ The helper (v${st.version}) is older than this extension needs — upgrade it: paste this into ${helperInstallShell()}, then click Retry:`);
             lines.push(`  ${helperInstallCommand(st.extensionId)}`);
         }
         if (st.routing && !st.routing.active && st.routing.reason) lines.push(`Routing inactive: ${st.routing.reason}`);

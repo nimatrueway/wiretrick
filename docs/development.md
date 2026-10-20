@@ -31,6 +31,12 @@ Pushing a `vX.Y.Z` tag runs the GitHub Action (typecheck → tests → build →
 zips + signed `.crx` → helper binaries → GitHub release), so the artifacts
 always match the tagged `manifest.json` version.
 
+The helper is versioned separately in `helper/Cargo.toml`: bump it only when
+the helper changes. When the extension starts depending on new helper
+behavior, also raise `MIN_HELPER_VERSION` in `src/shared/helperInstall.ts` —
+older helpers then log an upgrade error. Every release still ships helper
+binaries, so the install command always fetches the newest one.
+
 ## How the MV3 build works
 
 `npm run build` produces both bundles:
