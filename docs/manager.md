@@ -10,6 +10,8 @@ when you switch back), ⌘, opens Settings, ⌘/ comments, ⌘F finds, ⌘D sele
 the next occurrence. To debug the engine itself, open `chrome://extensions`
 and click the service worker / background page under *Inspect views*.
 Double-click a script in the list to rename it (Enter saves, Esc cancels).
+Names are also file names, so only letters, digits, `-` and spaces are
+accepted, and a name that clashes with another script is refused.
 Reverting an edit back to the saved text clears the unsaved-changes state —
 no discard prompt on a no-op edit.
 

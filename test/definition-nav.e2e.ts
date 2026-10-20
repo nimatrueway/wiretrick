@@ -204,6 +204,23 @@ await mgr.keyboard.press("Control+s");
 await mgr.waitForTimeout(800);
 check("rename then save: editor content saved", (await listScripts()).find((s: any) => s.id === "u_util")?.code === utilText);
 
+// rename only accepts file-name-safe characters; clashing names are refused
+const renameTo = async (from: string, typed: string): Promise<void> => {
+    await mgr.evaluate((from: string) => {
+        const label = [...document.querySelectorAll<HTMLElement>(".script-item .script-name")].find((e) => e.textContent?.includes(from))!;
+        label.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    }, from);
+    await mgr.waitForSelector(".script-rename");
+    await mgr.fill(".script-rename", "");
+    await mgr.type(".script-rename", typed);
+    await mgr.press(".script-rename", "Enter");
+    await mgr.waitForTimeout(1200);
+};
+await renameTo("utils renamed", "my/util: v2.x  (beta)");
+check("rename: unsafe characters dropped", (await listScripts()).find((s: any) => s.id === "u_util")?.meta.name === "myutil v2x beta", (await listScripts()).find((s: any) => s.id === "u_util")?.meta.name);
+await renameTo("myutil v2x beta", "Main Script");
+check("rename: clashing name refused", (await listScripts()).find((s: any) => s.id === "u_util")?.meta.name === "myutil v2x beta");
+
 } catch (e) {
     failed++;
     console.error("FATAL", e);

@@ -315,6 +315,9 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
     border-bottom: 1px solid var(--border);
 }
 
+.script-rename.rejected {
+    border-color: var(--error, #f14c4c);
+}
 .script-rename {
     flex: 1;
     min-width: 0;

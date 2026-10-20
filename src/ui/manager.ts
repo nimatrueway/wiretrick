@@ -241,11 +241,30 @@ function renderList(): void {
     }
 }
 
+/**
+ * Script names double as file names (spaces ↔ "_"), so only characters that
+ * survive that round-trip are allowed: letters, digits, "-" and single spaces.
+ */
+function cleanScriptName(raw: string): string {
+    return raw.replace(/[^A-Za-z0-9 -]+/g, "").replace(/ {2,}/g, " ").slice(0, 60);
+}
+
 /** Inline rename in the script list (double-click a name). */
 function startRename(label: HTMLElement, script: Script): void {
     const input = document.createElement("input");
     input.className = "script-rename";
-    input.value = script.meta.name;
+    input.value = cleanScriptName(script.meta.name);
+    input.maxLength = 60;
+    input.title = "Letters, digits, '-' and spaces (the name is also the file name)";
+    input.addEventListener("input", () => {
+        const clean = cleanScriptName(input.value);
+        if (clean === input.value) return;
+        const pos = Math.max(0, (input.selectionStart ?? clean.length) - (input.value.length - clean.length));
+        input.value = clean;
+        input.setSelectionRange(pos, pos);
+        input.classList.add("rejected");
+        setTimeout(() => input.classList.remove("rejected"), 300);
+    });
     label.replaceWith(input);
     renaming = true;
     input.focus();
@@ -255,8 +274,13 @@ function startRename(label: HTMLElement, script: Script): void {
         if (done) return;
         done = true;
         renaming = false;
-        const next = input.value.trim();
-        if (!commit || !next || next === script.meta.name) {
+        const next = cleanScriptName(input.value).trim();
+        const clash =
+            commit && next
+                ? scripts.find((s) => s.id !== script.id && fsBridge.fileNameFor(s.id, s.meta.name).toLowerCase() === fsBridge.fileNameFor(script.id, next).toLowerCase())
+                : undefined;
+        if (clash) status(`a script named "${clash.meta.name}" already exists`, "error");
+        if (!commit || !next || next === script.meta.name || clash) {
             input.replaceWith(label);
             renderList(); // catch up on updates skipped while renaming
             return;
