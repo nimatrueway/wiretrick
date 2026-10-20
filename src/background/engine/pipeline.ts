@@ -7,7 +7,7 @@ import type { InterceptionStrategy } from "./strategies/types";
 import type { ChromeBodyStrategy } from "./strategies/chromeBodyStrategy";
 import type { CdpStrategy } from "./strategies/cdpStrategy";
 import type { ProcessStrategy } from "./strategies/processStrategy";
-import { onProcessActiveChange } from "./strategies/processState";
+import { hookEligible, onProcessActiveChange } from "./strategies/processState";
 import type { HeaderChanges } from "./strategies/types";
 import type { Script } from "./scriptStore";
 import { listScripts, onScriptsChanged, saveScript, deleteScript, setEnabled, newId, scriptStorageGet, scriptStorageSet, loadAllParamValues, getParamValues, setParamValue } from "./scriptStore";
@@ -354,6 +354,9 @@ export function createPipeline(
             // when the page CSP allows, with the bridge as the fallback.
             const domHandlers: { scriptId: string; name: string; when: string; src: string; params: Record<string, any> }[] = [];
             const libs = new Map<string, string>(); // name → transpiled lib source
+            // URL patterns of hook-eligible body scripts: the hook only
+            // touches fetch/XHR to these, everything else stays native
+            const patterns = new Set<string>();
             {
                 const pageScripts = await listScripts();
                 // MV3: scripts are analyzed in the sandbox page (the SW can't
@@ -361,6 +364,13 @@ export function createPipeline(
                 // metadata; the shipped handler SOURCES are transpiled locally.
                 const analyzed = await analyzeScripts(pageScripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt })));
                 const depNames = new Set<string>();
+                for (const s of pageScripts) {
+                    const a = analyzed.get(s.id);
+                    const h = a?.handlers;
+                    if (s.enabled && a?.declared && !a.error && hookEligible(s.meta.strategy) && (!h || h.onRequest || h.modifyResponse || h.replaceResponse)) {
+                        for (const m of s.meta.match) patterns.add(m);
+                    }
+                }
                 for (const s of pageScripts) {
                     if (!s.enabled || !matchAny(s.meta.match, msg.url || "")) continue;
                     const a = analyzed.get(s.id);
@@ -385,11 +395,11 @@ export function createPipeline(
                 }
             }
             dlogLevel("pipeline", "debug", "getHookBundle responding", {
-                count: chromeBody.allBodyScripts().length,
+                patterns: patterns.size,
                 dom: domHandlers.length,
                 url: msg.url,
             });
-                sendResponse({ count: chromeBody.allBodyScripts().length, domHandlers, libs: [...libs.entries()].map(([name, src]) => ({ name, src })) });
+                sendResponse({ count: patterns.size, patterns: [...patterns], domHandlers, libs: [...libs.entries()].map(([name, src]) => ({ name, src })) });
             })();
             return true; // async sendResponse above
         }

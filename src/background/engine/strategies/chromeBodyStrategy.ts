@@ -22,7 +22,7 @@ import type { Script } from "../scriptStore";
 import { log } from "../logs";
 import { scriptStorageGet, scriptStorageSet } from "../scriptStore";
 import { runBodyOp } from "../../compileHost";
-import { processActive } from "./processState";
+import { hookEligible, processActive } from "./processState";
 
 function guessMimeFromUrl(url: string): string {
     const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "";
@@ -56,7 +56,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
 
     private bodyScripts: BodyScriptEntry[] = [];
     /** MV3: plain script data for the sandbox RPCs (no local compilation) */
-    private mv3Scripts: { id: string; name: string; code: string; updatedAt: number; enabled: boolean }[] = [];
+    private mv3Scripts: { id: string; name: string; code: string; updatedAt: number; enabled: boolean; strategy: string }[] = [];
     private mv3Params: { [scriptId: string]: Record<string, any> } = {};
     private claimedUrls = new Map<string, number>();
     /** tabs where the page hook confirmed its bundle arrived */
@@ -68,7 +68,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
         if (__MV3__) {
             // the SW cannot compile — keep the plain data for the sandbox
             // RPCs (run* below); handlers execute in the sandbox page
-            this.mv3Scripts = scripts.filter((s) => s.enabled).map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt, enabled: true }));
+            this.mv3Scripts = scripts.filter((s) => s.enabled).map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt, enabled: true, strategy: s.meta.strategy }));
             this.mv3Params = paramValues || {};
             return;
         }
@@ -111,10 +111,10 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
         tabId = -1
     ): Promise<{ kind: "respond"; mime: string; content: string; status?: number; headers?: any } | { kind: "redirect"; url: string } | { kind: "cancel" } | { kind: "headers"; changes: any } | null> {
         if (__MV3__) {
-            return runBodyOp(this.mv3Scripts, this.mv3Params, "requestDecision", { url, method, tabId });
+            return runBodyOp(this.hookMv3Scripts(), this.mv3Params, "requestDecision", { url, method, tabId });
         }
         let headerMods: any = null;
-        for (const s of this.matchingBodyScripts(url)) {
+        for (const s of this.hookScripts(url)) {
             for (const onRequest of s.onRequest) {
             try {
                 const result = await onRequest({ url, method, tabUrl: url, resourceType: "xmlhttprequest", requestHeaders: {} });
@@ -158,11 +158,11 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
     /** Hook tier: chained modifyResponse over the body (async handlers awaited). */
     async runTransform(url: string, method: string, body: string, extra?: { status?: number; contentType?: string }, tabId = -1): Promise<string | null> {
         if (__MV3__) {
-            return runBodyOp(this.mv3Scripts, this.mv3Params, "transform", { url, method, body, status: extra?.status, contentType: extra?.contentType, tabId });
+            return runBodyOp(this.hookMv3Scripts(), this.mv3Params, "transform", { url, method, body, status: extra?.status, contentType: extra?.contentType, tabId });
         }
         let out: string | Uint8Array = body;
         let touched = false;
-        for (const s of this.matchingBodyScripts(url)) {
+        for (const s of this.hookScripts(url)) {
             for (const transform of s.transform) {
             try {
                 const result: any = await transform(
@@ -192,9 +192,9 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
     /** Hook tier: first replaceResponse handler's result, or null. */
     async runReplace(url: string, method: string, tabId = -1): Promise<{ mime: string; content: string } | null> {
         if (__MV3__) {
-            return runBodyOp(this.mv3Scripts, this.mv3Params, "replace", { url, method, tabId });
+            return runBodyOp(this.hookMv3Scripts(), this.mv3Params, "replace", { url, method, tabId });
         }
-        for (const s of this.matchingBodyScripts(url)) {
+        for (const s of this.hookScripts(url)) {
             for (const replace of s.replace) {
                 try {
                     const out = await replace({ url, method, tabUrl: url, resourceType: "xmlhttprequest", requestHeaders: {} });
@@ -250,6 +250,15 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
 
     matchingBodyScripts(url: string): BodyScriptEntry[] {
         return this.bodyScripts.filter((s) => matchAny(s.match, url));
+    }
+
+    /** scripts the page hook may run (see hookEligible) */
+    private hookScripts(url: string): BodyScriptEntry[] {
+        return this.matchingBodyScripts(url).filter((s) => hookEligible(s.strategy));
+    }
+
+    private hookMv3Scripts() {
+        return this.mv3Scripts.filter((s) => hookEligible(s.strategy));
     }
 
     /** All enabled body scripts — the hook filters per-request itself. */

@@ -86,7 +86,7 @@ import { scriptFunction } from "../shared/scriptFn";
             safeSend({ type: "getHookBundle", url: location.href }, (resp: any) => {
                 const active = !!(resp && (resp.count > 0 || (resp.domHandlers || []).length));
                 window.postMessage(
-                    { source: MAIN_SOURCE, kind: "status", active, domHandlers: (resp && resp.domHandlers) || [], libs: (resp && resp.libs) || [] },
+                    { source: MAIN_SOURCE, kind: "status", active, patterns: (resp && resp.patterns) || [], domHandlers: (resp && resp.domHandlers) || [], libs: (resp && resp.libs) || [] },
                     window.location.origin
                 );
             });
@@ -235,7 +235,7 @@ import { scriptFunction } from "../shared/scriptFn";
                 safeSend({ type: "getHookBundle", url: location.href }, (resp: any) => {
                     const active = !!(resp && (resp.count > 0 || (resp.domHandlers || []).length));
                     window.postMessage(
-                        { source: MAIN_SOURCE, kind: "status", active, domHandlers: (resp && resp.domHandlers) || [], libs: (resp && resp.libs) || [], hot: true },
+                        { source: MAIN_SOURCE, kind: "status", active, patterns: (resp && resp.patterns) || [], domHandlers: (resp && resp.domHandlers) || [], libs: (resp && resp.libs) || [], hot: true },
                         window.location.origin
                     );
                 });

@@ -40,3 +40,14 @@ export function listsProcess(strategyRaw: string | string[] | undefined): boolea
 export function isProcessOwned(strategyRaw: string | string[] | undefined): boolean {
     return active && listsProcess(strategyRaw);
 }
+
+/**
+ * May the page hook (fetch/XHR patch) run this script? Only when its list
+ * names "hook" or "auto" (MV3 also: "webrequest", which falls back to the
+ * hook there) and the helper doesn't own it. cdp/process-only scripts are
+ * left to their network-level tier, so handlers never run twice.
+ */
+export function hookEligible(strategyRaw: string | string[] | undefined): boolean {
+    if (isProcessOwned(strategyRaw)) return false;
+    return parseStrategyList(strategyRaw as any).some((t) => t === "hook" || t === "auto" || (__MV3__ && t === "webrequest"));
+}

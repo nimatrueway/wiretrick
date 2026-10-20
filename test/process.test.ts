@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { ProcessStrategy, applyHeaderMods, base64ToBytes, bytesToBase64, filterUrlsFor, ownedOf, pairsToObject } from "../src/background/engine/strategies/processStrategy";
-import { isProcessOwned, listsProcess, processActive, setProcessActive } from "../src/background/engine/strategies/processState";
+import { hookEligible, isProcessOwned, listsProcess, processActive, setProcessActive } from "../src/background/engine/strategies/processState";
 import { CdpStrategy } from "../src/background/engine/strategies/cdpStrategy";
 import { compileScript } from "../src/shared/compile";
 import { isHelperOutdated } from "../src/shared/helperInstall";
@@ -118,6 +118,16 @@ describe("listsProcess / ownership", () => {
         expect(listsProcess("webrequest,process")).toBe(false);
         expect(listsProcess("hook")).toBe(false);
         expect(listsProcess(undefined)).toBe(false);
+    });
+    it("hookEligible: hook/auto lists only, never process-owned", () => {
+        expect(hookEligible(undefined)).toBe(true);
+        expect(hookEligible("hook,cdp")).toBe(true);
+        expect(hookEligible(["cdp"])).toBe(false);
+        expect(hookEligible(["webrequest"])).toBe(false); // MV2: webRequest owns it
+        expect(hookEligible(["process"])).toBe(false);
+        expect(hookEligible(["hook", "process"])).toBe(true); // helper down → hook
+        setProcessActive(true);
+        expect(hookEligible(["hook", "process"])).toBe(false);
     });
     it("owned only while active", () => {
         expect(isProcessOwned("process")).toBe(false);

@@ -9,6 +9,7 @@
 import { formatScriptError } from "../shared/scriptError";
 import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
 import { scriptFunction } from "../shared/scriptFn";
+import { matchAny } from "../shared/matcher";
 
 (() => {
     const w = window as any;
@@ -19,6 +20,15 @@ import { scriptFunction } from "../shared/scriptFn";
     const HOOK_SOURCE = "res-override-hook";
 
     let active = false; // any body scripts exist (bundle metadata says so)
+    /** URL patterns of hook-eligible scripts — other requests stay native */
+    let patterns: string[] = [];
+    const wants = (url: string): boolean => {
+        try {
+            return patterns.length > 0 && matchAny(patterns, url);
+        } catch {
+            return false;
+        }
+    };
     let patched = false;
     /** the bridge reported the extension context dead (extension reload) */
     let dead = false;
@@ -82,6 +92,7 @@ import { scriptFunction } from "../shared/scriptFn";
         if (data.kind === "status") {
             const wasActive = active;
             active = !!data.active;
+            patterns = data.patterns || [];
             domHandlers = data.domHandlers || [];
             libSources = data.libs || [];
             logUp(`status: ${active ? "active" : "inactive"}, dom=${domHandlers.length}${data.hot ? " (hot)" : ""}`, "debug");
@@ -99,6 +110,7 @@ import { scriptFunction } from "../shared/scriptFn";
         pending.clear();
         if (!active && !patched) return;
         active = false;
+        patterns = [];
         domHandlers = [];
         libSources = [];
         if (patched) {
@@ -294,7 +306,7 @@ import { scriptFunction } from "../shared/scriptFn";
                 url = rawUrl;
             }
 
-            if (!active) return origFetch(input, init);
+            if (!active || !wants(url)) return origFetch(input, init);
 
             claim(url);
 
@@ -404,6 +416,7 @@ import { scriptFunction } from "../shared/scriptFn";
             } catch {
                 absUrl = xhr.__resUrl;
             }
+            if (!wants(absUrl)) return OrigSend.apply(this, args as any);
             claim(absUrl);
 
             // BECOME the transport: fetch (patched → replace/transform
@@ -421,6 +434,7 @@ import { scriptFunction } from "../shared/scriptFn";
             };
             void (async () => {
                 let wentOut = false; // the shim's fetch reached the network?
+                let netFailed = false; // the page's own request failed (offline, CORS, blocked)
                 try {
                     const headers: Record<string, string> = {};
                     for (const [k, v] of Object.entries(xhr.__resHeaders || {})) headers[k] = String(v);
@@ -441,7 +455,14 @@ import { scriptFunction } from "../shared/scriptFn";
                         text = String(repl.content);
                     } else {
                         // 2. real request via patched fetch (transform applies; abort wired)
-                        const resp = await w.fetch(absUrl, { method, headers, body: safeBody, signal: abortCtl.signal });
+                        let resp: Response;
+                        try {
+                            resp = await w.fetch(absUrl, { method, headers, body: safeBody, signal: abortCtl.signal, credentials: xhr.withCredentials ? "include" : "same-origin" });
+                        } catch (e) {
+                            wentOut = true;
+                            if (!isAbort(e)) netFailed = true;
+                            throw e;
+                        }
                         wentOut = true;
                         status = resp.status;
                         statusText = resp.statusText;
@@ -472,7 +493,9 @@ import { scriptFunction } from "../shared/scriptFn";
                     xhr.dispatchEvent(new ProgressEvent("loadend"));
                 } catch (e: any) {
                     if (isAbort(e)) return; // abort events already dispatched
-                    logUp(`xhr shim failed: ${e.message || e}`, "error");
+                    // a failed request is the page's business (a native XHR
+                    // would fail the same way) — only our own bugs are errors
+                    logUp(netFailed ? `xhr ${absUrl} failed: ${e.message || e}` : `xhr shim failed: ${e.message || e}`, netFailed ? "debug" : "error");
                     if (wentOut) {
                         // the request already went out — surfacing as a native
                         // XHR error (status 0); a fallback OrigSend would
