@@ -1,7 +1,7 @@
 /** One-line terminal commands that download the right rescript-helper
  * release binary (checksum-verified) and register it for this extension. */
 
-const RAW = "https://raw.githubusercontent.com/nimatrueway/rescript-override/master/helper";
+const RAW = "https://raw.githubusercontent.com/nimatrueway/wiretrick/master/helper";
 
 export const isWindows = (): boolean => /Windows/i.test(globalThis.navigator?.userAgent || "");
 

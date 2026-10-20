@@ -3,13 +3,13 @@
 # verifies its SHA-256, and runs `rescript-helper install <args>` (which
 # copies itself to a per-user location and registers the native host).
 #
-#   curl -fsSL https://raw.githubusercontent.com/nimatrueway/rescript-override/master/helper/install.sh | sh -s -- --extension-id <id> --trust-ca
+#   curl -fsSL https://raw.githubusercontent.com/nimatrueway/wiretrick/master/helper/install.sh | sh -s -- --extension-id <id> --trust-ca
 #
 # RESCRIPT_HELPER_VERSION=v1.2.3 pins a release (default: latest);
 # RESCRIPT_HELPER_BASE_URL overrides the download location (testing).
 set -eu
 
-REPO="nimatrueway/rescript-override"
+REPO="nimatrueway/wiretrick"
 VERSION="${RESCRIPT_HELPER_VERSION:-latest}"
 
 if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -23,7 +23,7 @@ die() { printf '%serror:%s %s\n' "$red" "$off" "$*" >&2; exit 1; }
 case "$(uname -s)" in
     Linux) os="unknown-linux-gnu" ;;
     Darwin) os="apple-darwin" ;;
-    MINGW* | MSYS* | CYGWIN*) die "on Windows use PowerShell: see https://raw.githubusercontent.com/nimatrueway/rescript-override/master/helper/install.ps1" ;;
+    MINGW* | MSYS* | CYGWIN*) die "on Windows use PowerShell: see https://raw.githubusercontent.com/nimatrueway/wiretrick/master/helper/install.ps1" ;;
     *) die "unsupported OS: $(uname -s)" ;;
 esac
 case "$(uname -m)" in

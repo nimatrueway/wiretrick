@@ -141,9 +141,9 @@ jobs:
 
             ```sh
             # macOS / Linux
-            curl -fsSL https://raw.githubusercontent.com/nimatrueway/rescript-override/master/helper/install.sh | sh -s -- --extension-id <id> --trust-ca
+            curl -fsSL https://raw.githubusercontent.com/nimatrueway/wiretrick/master/helper/install.sh | sh -s -- --extension-id <id> --trust-ca
             ```
             ```powershell
             # Windows (PowerShell)
-            & ([scriptblock]::Create((irm https://raw.githubusercontent.com/nimatrueway/rescript-override/master/helper/install.ps1))) -ExtensionId <id> -TrustCa
+            & ([scriptblock]::Create((irm https://raw.githubusercontent.com/nimatrueway/wiretrick/master/helper/install.ps1))) -ExtensionId <id> -TrustCa
             ```

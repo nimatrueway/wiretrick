@@ -2,7 +2,7 @@
 # SHA-256, and runs `rescript-helper install` (which copies itself to
 # %APPDATA%\rescript-helper and registers the native host).
 #
-#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/nimatrueway/rescript-override/master/helper/install.ps1))) -ExtensionId <id> -TrustCa
+#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/nimatrueway/wiretrick/master/helper/install.ps1))) -ExtensionId <id> -TrustCa
 #
 # $env:RESCRIPT_HELPER_VERSION = "v1.2.3" pins a release (default: latest).
 param(
@@ -13,7 +13,7 @@ param(
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
-$repo = "nimatrueway/rescript-override"
+$repo = "nimatrueway/wiretrick"
 $version = if ($env:RESCRIPT_HELPER_VERSION) { $env:RESCRIPT_HELPER_VERSION } else { "latest" }
 $base = if ($env:RESCRIPT_HELPER_BASE_URL) { $env:RESCRIPT_HELPER_BASE_URL } elseif ($version -eq "latest") { "https://github.com/$repo/releases/latest/download" } else { "https://github.com/$repo/releases/download/$version" }
 # x64 build; Windows on Arm runs it under emulation

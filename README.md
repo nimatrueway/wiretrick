@@ -22,7 +22,7 @@ response bodies, or replace them entirely. Each script has an enable/disable tog
 
 **From a release (recommended):**
 
-1. Grab `rescript-override-vX.Y.Z.zip` from [Releases](https://github.com/nimatrueway/rescript-override/releases) and unzip it.
+1. Grab `rescript-override-vX.Y.Z.zip` from [Releases](https://github.com/nimatrueway/wiretrick/releases) and unzip it.
 2. Open `chrome://extensions` (or `about:debugging#/runtime/this-firefox` on Firefox).
 3. Enable **Developer mode** (top-right), click **Load unpacked**, and select the unzipped `dist` folder.
 4. Pin the 🧩 icon — the badge shows how many scripts are active on the current tab.
@@ -30,7 +30,7 @@ response bodies, or replace them entirely. Each script has an enable/disable tog
 **From source:**
 
 ```bash
-git clone https://github.com/nimatrueway/rescript-override.git
+git clone https://github.com/nimatrueway/wiretrick.git
 cd rescript-override
 npm install && npm run build
 # then: chrome://extensions → Developer mode → Load unpacked → dist/
@@ -337,12 +337,12 @@ the release's `SHA256SUMS`, and runs `rescript-helper install`:
 
 ```sh
 # macOS / Linux
-curl -fsSL https://raw.githubusercontent.com/nimatrueway/rescript-override/master/helper/install.sh | sh -s -- --extension-id <extension id> --trust-ca
+curl -fsSL https://raw.githubusercontent.com/nimatrueway/wiretrick/master/helper/install.sh | sh -s -- --extension-id <extension id> --trust-ca
 ```
 
 ```powershell
 # Windows (PowerShell)
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/nimatrueway/rescript-override/master/helper/install.ps1))) -ExtensionId <extension id> -TrustCa
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/nimatrueway/wiretrick/master/helper/install.ps1))) -ExtensionId <extension id> -TrustCa
 ```
 
 Then click Retry in Settings → Local helper (or reload the extension).
