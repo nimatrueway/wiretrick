@@ -18,7 +18,7 @@ jobs:
           - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, exe: wiretrick-helper }
           - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, exe: wiretrick-helper }
           - { os: macos-latest, target: aarch64-apple-darwin, exe: wiretrick-helper }
-          - { os: macos-13, target: x86_64-apple-darwin, exe: wiretrick-helper }
+          - { os: macos-15-intel, target: x86_64-apple-darwin, exe: wiretrick-helper }
           - { os: windows-latest, target: x86_64-pc-windows-msvc, exe: wiretrick-helper.exe }
     runs-on: ${{ matrix.os }}
     defaults:
