@@ -18,7 +18,7 @@ import type { Uri, IPosition, IRange, IKeyboardEvent, editor as MonacoEditor } f
 import type { Script } from "../background/engine/scriptStore";
 
 // ---- state ----
-let scripts: (Script & { runtimeError?: ScriptHealthInput["runtimeError"] })[] = [];
+let scripts: (Script & { runtimeError?: ScriptHealthInput["runtimeError"]; typeErrors?: string[] })[] = [];
 let selectedId: string | null = null;
 let editor: any = null;
 let dirty = false;
@@ -139,6 +139,7 @@ async function refresh(): Promise<void> {
     scripts = await send({ type: "listScripts" });
     renderList();
     syncModels();
+    scheduleDiagnostics();
     if (selectedId && selectedId !== SETTINGS_ID && !scripts.some((s) => s.id === selectedId)) {
         selectedId = null;
     }
@@ -219,7 +220,7 @@ function renderList(): void {
             ind.textContent = "⚠";
             ind.title = health.tooltip;
             ind.setAttribute("role", "img");
-            ind.setAttribute("aria-label", health.kind === "compile" ? "compile error" : "runtime error");
+            ind.setAttribute("aria-label", `${health.kind === "types" ? "type" : health.kind} error`);
             if (health.kind === "runtime") {
                 ind.addEventListener("click", async (e) => {
                     e.stopPropagation();
@@ -232,6 +233,39 @@ function renderList(): void {
         li.addEventListener("click", () => select(script.id));
         list.appendChild(li);
     }
+}
+
+// ---- TypeScript diagnostics → script error state ----
+/** last report per script, so unchanged diagnostics aren't re-sent */
+const reportedDiag = new Map<string, string>();
+let diagTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Report each script's TypeScript errors (from the editor's TS worker) to
+ * the background — only while the model holds the SAVED code, so typing
+ * doesn't flood the log; the background logs new ones and badges the script.
+ */
+function scheduleDiagnostics(): void {
+    if (diagTimer) clearTimeout(diagTimer);
+    diagTimer = setTimeout(() => {
+        diagTimer = null;
+        const monaco = (window as any).monaco;
+        if (!monaco) return;
+        for (const s of scripts) {
+            const m = models.get(s.id);
+            if (!m || m.isDisposed?.() || m.getValue() !== s.code) continue;
+            // a compile failure is already badged + logged; don't echo its syntax errors
+            const errors = s.error ? [] : monaco.editor
+                .getModelMarkers({ resource: m.uri })
+                .filter((mk: any) => mk.severity === monaco.MarkerSeverity.Error)
+                .sort((a: any, b: any) => a.startLineNumber - b.startLineNumber || a.startColumn - b.startColumn)
+                .map((mk: any) => `line ${mk.startLineNumber}: ${String(mk.message).split("\n")[0]}`);
+            const key = JSON.stringify(errors);
+            if (reportedDiag.get(s.id) === key && JSON.stringify(s.typeErrors || []) === key) continue;
+            reportedDiag.set(s.id, key);
+            void send({ type: "scriptTypeErrors", scriptId: s.id, name: s.meta.name, errors });
+        }
+    }, 600);
 }
 
 // ---- editor ----
@@ -419,7 +453,10 @@ function connectLogs(): void {
         if (msg.type === "log") appendLog(msg.entry);
         if (msg.type === "processStatus") renderProcessStatus(msg.status);
         if (msg.type === "scriptErrors") {
-            for (const s of scripts) s.runtimeError = msg.errors[s.id] ?? null;
+            for (const s of scripts) {
+                s.runtimeError = msg.errors[s.id] ?? null;
+                s.typeErrors = msg.typeErrors?.[s.id] ?? [];
+            }
             renderList();
         }
         // background applied an external folder change (or any script
@@ -1031,6 +1068,7 @@ async function main(): Promise<void> {
         fontSize: 13,
     });
     editor.addCommand((window as any).monaco.KeyMod.CtrlCmd | (window as any).monaco.KeyCode.KeyS, () => void saveCurrent());
+    (window as any).monaco.editor.onDidChangeMarkers(() => scheduleDiagnostics());
     // VS Code shortcuts: ⌘P quick-open (scripts + settings.yaml), ⌘, opens
     // the Settings dialog. ⌘/ (comment), ⌘F (find), ⌘D (next occurrence)
     // and Shift+Alt+A (block comment) are Monaco built-ins.

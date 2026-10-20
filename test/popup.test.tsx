@@ -84,6 +84,13 @@ describe("Popup", () => {
         expect(api.calls).toContainEqual(["clearError", "a"]);
     });
 
+    it("marks scripts with TypeScript errors", async () => {
+        const api = fakeApi([script("a", "Alpha", { typeErrors: ["line 3: Type 'string' is not assignable to type 'number'."] })]);
+        const { container } = render(<Popup api={api} />);
+        await waitFor(() => expect(container.querySelector(".err-ind.types")?.getAttribute("title")).toContain("line 3: Type 'string'"));
+        expect(container.querySelector(".err-ind")!.getAttribute("aria-label")).toBe("type error");
+    });
+
     it("opens the manager (all, and on a script)", async () => {
         const api = fakeApi([script("a", "Alpha")]);
         render(<Popup api={api} />);

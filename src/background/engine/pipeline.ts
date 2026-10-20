@@ -17,7 +17,7 @@ import { dlogLevel } from "../../shared/debugLog";
 import { isThenable, toRunnableJs } from "../../shared/compile";
 import "../../shared/transpile";
 void toRunnableJs;
-import { log, getScriptErrors } from "./logs";
+import { log, getScriptErrors, getScriptTypeErrors } from "./logs";
 import { serializeHandlers, type HandlerSources } from "../../shared/compile";
 import { resolveParamValues } from "../../shared/scriptDef";
 import { unknownStrategies } from "../../shared/metaParser";
@@ -287,11 +287,13 @@ export function createPipeline(
                 const missing = scripts.filter((s) => s.paramDefs === undefined);
                 const analyzed = await analyzeScripts(missing.map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt })));
                 const errors = await getScriptErrors();
+                const typeErrors = await getScriptTypeErrors();
                 sendResponse(
                     scripts.map((s) => ({
                         ...s,
                         paramDefs: s.paramDefs === undefined ? analyzed.get(s.id)?.paramDefs || {} : s.paramDefs,
                         runtimeError: errors.get(s.id) ?? null,
+                        typeErrors: typeErrors.get(s.id) ?? [],
                     }))
                 );
             });

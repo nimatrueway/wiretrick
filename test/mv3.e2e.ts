@@ -317,7 +317,28 @@ try {
     await mgr.waitForTimeout(500);
     check("clicking the runtime indicator dismisses it", !(await mgr.$('#script-list li[data-id="s_throws"] .err-ind')));
     await errPopup.close();
-    for (const id of ["s_throws", "s_broken"]) await mgr.evaluate((id: string) => new Promise((r) => chrome.runtime.sendMessage({ type: "deleteScript", id }, r)), id);
+    // TypeScript errors (editor squiggles) → ERROR log + "types" badge; two
+    // scripts declaring the same top-level name must not collide
+    for (const [id, name, code] of [
+        ["s_typed", "Typed", `wt.declareScript({ match: ["*://typed.invalid/*"] });\nconst cfg = 1;\nconst n: number = "not a number";`],
+        ["s_typed2", "Typed2", `wt.declareScript({ match: ["*://typed2.invalid/*"] });\nconst cfg = 2;`],
+    ]) await mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage({ type: "saveScript", ...m }, r)), { id, name, code });
+    await mgr.waitForSelector('#script-list li[data-id="s_typed"] .err-ind.types', { timeout: 15000 }).catch(() => {});
+    const typed = await mgr.evaluate(() => ({
+        badge: document.querySelector('#script-list li[data-id="s_typed"] .err-ind.types')?.getAttribute("title") || "",
+        clean: !document.querySelector('#script-list li[data-id="s_typed2"] .err-ind'),
+        logged: [...document.querySelectorAll("#log-entries .log-line.error")].map((l) => (l as HTMLElement).dataset.text || l.textContent || "").filter((t) => t.includes("type error")),
+    }));
+    check("TypeScript error → types indicator in the manager list", typed.badge.includes("line 3:") && !typed.badge.includes("cfg"), JSON.stringify(typed));
+    check("scripts don't share a global scope (no redeclare errors)", typed.clean, JSON.stringify(typed));
+    check("TypeScript error logged at ERROR level", typed.logged.some((t: string) => t.includes("[Typed] type error: line 3")), JSON.stringify(typed.logged));
+    const typedPopup = await ctx.newPage();
+    await typedPopup.goto(`chrome-extension://${extId}/popup.html`);
+    await typedPopup.waitForSelector("#script-list li.script-item", { timeout: 8000 });
+    const typedInd = await typedPopup.evaluate(() => [...document.querySelectorAll("li.script-item")].filter((li) => li.querySelector(".err-ind.types")).map((li) => li.querySelector(".script-name")?.textContent));
+    check("popup shows the TypeScript error indicator", typedInd.includes("Typed"), JSON.stringify(typedInd));
+    await typedPopup.close();
+    for (const id of ["s_throws", "s_broken", "s_typed", "s_typed2"]) await mgr.evaluate((id: string) => new Promise((r) => chrome.runtime.sendMessage({ type: "deleteScript", id }, r)), id);
     // a reload in the already-attached tab (no first-navigation race)
     await xoPage.reload();
     await xoPage.waitForFunction(() => (window as any).__gz !== undefined, null, { timeout: 15000 }).catch(() => {});

@@ -69,7 +69,7 @@ function ScriptRow({ script, api, onChanged }: { script: ScriptInfo; api: PopupA
                     <span
                         class={`err-ind ${health.kind}`}
                         role="img"
-                        aria-label={health.kind === "compile" ? "compile error" : "runtime error"}
+                        aria-label={`${health.kind === "types" ? "type" : health.kind} error`}
                         title={health.tooltip}
                         onClick={
                             health.kind === "runtime"

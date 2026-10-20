@@ -4,7 +4,7 @@
 import type { ResMeta } from "../../shared/metaParser";
 import { compileForStorage, SANDBOX_COMPILE_FAILED } from "../compileHost";
 import { dlogLevel } from "../../shared/debugLog";
-import { clearScriptErrors } from "./logs";
+import { clearScriptErrors, clearScriptTypeErrors } from "./logs";
 
 export interface Script {
     id: string;
@@ -110,6 +110,7 @@ export async function saveScript(partial: Pick<Script, "id" | "code"> & Partial<
 
 export async function deleteScript(id: string): Promise<void> {
     void clearScriptErrors(id);
+    void clearScriptTypeErrors(id);
     const obj = await storageGet([STORE_KEY, ORDER_KEY]);
     const byId: { [id: string]: Script } = obj[STORE_KEY] || {};
     const order: string[] = obj[ORDER_KEY] || [];

@@ -39,6 +39,9 @@ export async function loadMonaco(): Promise<any> {
         module: ts.ModuleKind.ESNext,
         moduleResolution: ts.ModuleResolutionKind.Bundler ?? 100,
         allowImportingTsExtensions: true,
+        // each script is its own module: top-level names in different
+        // scripts (e.g. two \`const cfg\`) must not collide as globals
+        moduleDetection: 3, // ts.ModuleDetectionKind.Force
         noEmit: true,
     });
 

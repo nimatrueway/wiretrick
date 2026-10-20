@@ -7,6 +7,7 @@ export interface ScriptInfo {
     enabled: boolean;
     error: string | null;
     runtimeError?: ScriptHealthInput["runtimeError"];
+    typeErrors?: string[];
     meta: { name: string; declared?: boolean };
     paramDefs?: Record<string, any>;
 }
