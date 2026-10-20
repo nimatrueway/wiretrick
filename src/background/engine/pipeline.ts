@@ -62,17 +62,47 @@ export function createPipeline(
     const tabUrls = new Map<number, string>();
 
     // ---- tab URL tracking ----
+    /** `${tabId}|${url}` page loads re-issued through the debugger (MV3) */
+    const renavigated = new Set<string>();
     if (__MV3__ && (chrome as any).webNavigation) {
+        // the page request usually leaves while the debugger is still
+        // attaching; remember it so a missed GET can be re-issued
+        const mainFrameSeen = new Map<number, { url: string; method: string }>();
+        chrome.webRequest?.onBeforeRequest?.addListener(
+            (d) => {
+                if (d.type === "main_frame" && d.tabId >= 0) mainFrameSeen.set(d.tabId, { url: d.url, method: d.method });
+            },
+            { urls: ["<all_urls>"], types: ["main_frame"] }
+        );
         // MV3 debugger tier: attach BEFORE the navigation's subresources
         // load (webNavigation also wakes an idle service worker)
         chrome.webNavigation.onBeforeNavigate.addListener((d) => {
-            if (d.frameId === 0) void cdp.syncTab(d.tabId, d.url);
+            if (d.frameId !== 0) return;
+            const wasAttached = cdp.isTabAttached(d.tabId);
+            void cdp.syncTab(d.tabId, d.url).then(async () => {
+                if (wasAttached || !cdp.isTabAttached(d.tabId) || !cdp.debuggerScriptsFor(d.url).length) return;
+                // let in-flight requestPaused / onBeforeRequest events land
+                await new Promise((r) => setTimeout(r, 60));
+                const seen = mainFrameSeen.get(d.tabId);
+                if (!seen || seen.url !== d.url || cdp.wasPaused(d.tabId, d.url)) return;
+                const key = `${d.tabId}|${d.url}`;
+                // GET only: re-sending a form POST could repeat its side effect
+                if (seen.method !== "GET" || renavigated.has(key)) return;
+                renavigated.add(key);
+                setTimeout(() => renavigated.delete(key), 10000);
+                if (await cdp.renavigate(d.tabId, d.url)) {
+                    log(d.tabId, `[cdp] page load ${d.url} left before the debugger attached — re-loaded it through the debugger so it is intercepted`, "info");
+                }
+            });
         });
+        chrome.tabs.onRemoved.addListener((tabId) => mainFrameSeen.delete(tabId));
     }
-    if (__MV3__ && chrome.webRequest) {
+    if (chrome.webRequest?.onCompleted) {
         // observe-only (MV3-legal): a debugger-tier load that left before
-        // the tab's debugger attached (fast first navigation / cold SW) is
-        // NOT intercepted — say so instead of failing silently
+        // the tab's debugger attached is NOT intercepted — say so instead of
+        // failing silently. Typical: the page itself on a first visit (MV2
+        // attaches only once the navigation has started; MV3 after a cold
+        // service-worker start or a very fast navigation).
         const neverPaused = new Set(["xmlhttprequest", "websocket", "ping", "csp_report", "webbundle", "webtransport"]);
         chrome.webRequest.onCompleted.addListener(
             (d) => {
@@ -81,8 +111,10 @@ export function createPipeline(
                 if (!names.length) return;
                 // any pause (request or response stage) precedes completion
                 setTimeout(() => {
-                    if (cdp.wasPaused(d.tabId, d.url)) return;
-                    log(d.tabId, `[cdp] ${d.type} ${d.url}${d.fromCache ? " (from cache)" : ""} loaded BEFORE the debugger attached to this tab (or before interception was enabled) — NOT intercepted by ${names.map((n) => `"${n}"`).join(", ")}. Reload the tab (it stays attached from now on).`, "warn");
+                    if (cdp.wasPaused(d.tabId, d.url) || renavigated.has(`${d.tabId}|${d.url}`)) return;
+                    const what = d.type === "main_frame" ? "page load" : d.type;
+                    const hint = __MV3__ ? "Reload the tab (it stays attached from now on)." : "Reload the tab within a few seconds (the debugger detaches when the page goes idle).";
+                    log(d.tabId, `[cdp] ${what} ${d.url}${d.fromCache ? " (from cache)" : ""} was NOT intercepted by ${names.map((n) => `"${n}"`).join(", ")} — it loaded before the debugger attached to this tab. ${hint}`, "warn");
                 }, 300);
             },
             { urls: ["<all_urls>"] }

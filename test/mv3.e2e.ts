@@ -76,6 +76,11 @@ const server = http.createServer((req: http.IncomingMessage, res: http.ServerRes
         res.writeHead(200, { "content-type": "text/html" });
         return res.end('<html><body><script src="/race.js"></script></body></html>');
     }
+    if (req.url?.startsWith("/doc-cold")) {
+        // zero-latency page whose OWN html a script rewrites
+        res.writeHead(200, { "content-type": "text/html" });
+        return res.end('<html><head><title>DOC-ORIGINAL</title></head><body>DOC-ORIGINAL</body></html>');
+    }
     if (req.url?.startsWith("/race.js")) {
         res.writeHead(200, { "content-type": "text/javascript" });
         return res.end('window.__race = "ORIGINAL-RACE";');
@@ -369,13 +374,30 @@ try {
     await racePage.waitForFunction(() => (window as any).__race !== undefined, null, { timeout: 15000 });
     const raceFirst = await racePage.evaluate(() => (window as any).__race);
     await mgr.waitForTimeout(2500); // the warning is judged 1.5s after the load
-    const raceWarned = await mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line")].some((l) => (l.textContent || "").includes("loaded BEFORE the debugger attached")));
+    const raceWarned = await mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line")].some((l) => (l.textContent || "").includes("loaded before the debugger attached")));
     check("fast first navigation: intercepted or loudly warned (never silent)", raceFirst === "MODIFIED-RACE" || raceWarned, `first=${raceFirst} warned=${raceWarned}`);
     check("no false race warning when it WAS intercepted", !(raceFirst === "MODIFIED-RACE" && raceWarned));
     await racePage.reload();
     await racePage.waitForFunction(() => (window as any).__race !== undefined, null, { timeout: 15000 });
     check("after reload the attached tab intercepts", (await racePage.evaluate(() => (window as any).__race)) === "MODIFIED-RACE");
     await racePage.close();
+    // a page whose own html is rewritten: a cold first load that beats the
+    // attach is re-issued through the debugger, so it IS intercepted
+    await mgr.evaluate((origin: string) => new Promise((r) => chrome.runtime.sendMessage({
+        type: "saveScript", id: "s_doccold", name: "Doc cold",
+        code: `wt.declareScript({ match: ["${origin}/doc-cold*"], strategy: ["cdp"] });\nwt.modifyResponse((ctx, body) => body.replaceAll("DOC-ORIGINAL", "DOC-MODIFIED"));`,
+    }, r)), ORIGIN);
+    await mgr.waitForTimeout(1500);
+    const docPage = await ctx.newPage();
+    await docPage.goto(`${ORIGIN}/doc-cold`).catch(() => {});
+    await docPage.waitForFunction(() => document.title === "DOC-MODIFIED", null, { timeout: 8000 }).catch(() => {});
+    const docTitle = await docPage.title().catch(() => "");
+    await mgr.waitForTimeout(1000);
+    const docLog = await mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line")].map((l) => l.textContent || "").join("\n"));
+    check("cold first page load is intercepted (re-issued if it beat the attach)", docTitle === "DOC-MODIFIED", `title=${docTitle} renav=${docLog.includes("re-loaded it through the debugger")}`);
+    check("no miss warning for the re-issued page load", !/doc-cold was NOT intercepted/.test(docLog));
+    await docPage.close();
+    await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "deleteScript", id: "s_doccold" }, r)));
     const logText = await mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line")].map((l) => l.textContent || "").join("\n"));
     if (process.env.DBG) console.log(logText.split("\n").filter((l: string) => /Tier C|cdp|debugger|attach|requestPaused/i.test(l)).slice(-40).join("\n"));
     check("removed \"proxy\" strategy is warned about", logText.includes(`"proxy" strategy was removed`));

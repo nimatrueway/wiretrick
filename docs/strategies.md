@@ -83,6 +83,19 @@ attach the debugger for any request.
   async redirects/headers) → `strategy: ["process", "cdp"]` with the
   [local helper](process-helper.md) installed.
 
+## First page load with `cdp`
+
+The debugger can only attach once a navigation has begun, so the page
+request often leaves first:
+
+- **MV3**: a missed GET page load that a script matches is re-issued
+  through the debugger right away (one extra, early-aborted request), so
+  it is intercepted. Missed POSTs and very fast subresources are logged
+  as a warning; the tab stays attached, so a reload is intercepted.
+- **MV2**: the page itself is always missed on its first load and a
+  warning is logged; reload within a few seconds (the debugger detaches
+  once the page goes idle).
+
 ## Compatibility
 
 Which interception paths each browser and build gives you

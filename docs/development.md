@@ -71,10 +71,15 @@ pages, and drops blocking `webRequest`):
   - Chrome shows its "started debugging this browser" banner, and every
     http(s) tab is attached while such scripts exist (the resource's CDN
     host rarely equals the tab's host).
-  - A very fast first navigation can load a resource before the debugger
-    attaches; that is logged as a **warning** naming the URL and scripts
-    ("loaded BEFORE the debugger attached … Reload the tab") — a reload is
-    intercepted (tabs stay attached).
+  - The first navigation in a tab usually leaves before the debugger
+    attaches. If a script matches the page itself and the request was a
+    GET, it is re-issued through the debugger (`Page.navigate`) so it IS
+    intercepted ("re-loaded it through the debugger" in the log). Anything
+    else that slips through (POSTs, very fast subresources) is logged as a
+    **warning** ("… was NOT intercepted by "X" — it loaded before the
+    debugger attached … Reload the tab"); a reload is intercepted (tabs
+    stay attached). MV2 attaches only once the navigation has started, so
+    there the page itself is always missed on its first load (warned).
   - `onResponseHeaders` is applied at the Response stage
     (`Fetch.continueResponse` keeps the body streaming when no body handler
     changes it); redirects/error statuses pass through untransformed.

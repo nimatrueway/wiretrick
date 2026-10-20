@@ -279,14 +279,33 @@ export class CdpStrategy {
         return this.attached.has(`tab:${tabId}`);
     }
 
-    /** MV3: did a load of url on tabId reach the debugger recently? */
+    /** restart a navigation on an attached tab so it passes through Fetch */
+    async renavigate(tabId: number, url: string): Promise<boolean> {
+        if (!this.attached.has(`tab:${tabId}`)) return false;
+        try {
+            await debuggerSend({ tabId }, "Page.navigate", { url });
+            return true;
+        } catch (e: any) {
+            dlogLevel("cdp", "warn", "re-navigation failed", { tabId, url, error: e?.message || e });
+            return false;
+        }
+    }
+
+    /** did a load of url on tabId reach the debugger recently? */
     wasPaused(tabId: number, url: string): boolean {
         return this.recentlyPaused.has(`${tabId}|${url}`);
     }
 
-    /** MV3: names of debugger-tier scripts matching a resource url */
+    /**
+     * Names of scripts that needed the debugger for a resource url. MV2:
+     * only cdp-listed ones with async/body handlers — sync onRequest work is
+     * already done by blocking webRequest without the debugger.
+     */
     debuggerScriptsFor(url: string): string[] {
-        return this.matchingScripts(url).map((s) => s.name);
+        if (__MV3__) return this.matchingScripts(url).map((s) => s.name);
+        return this.cdpRelevantScripts(url)
+            .filter((s) => s.transform.length || s.replaceResponse?.length || s.onResponseHeaders?.length || s.onRequest?.length)
+            .map((s) => s.name);
     }
 
     private matchingScripts(url: string): CdpScript[] {
@@ -493,6 +512,9 @@ export class CdpStrategy {
     }
 
     async handlePaused(key: string, params: any): Promise<void> {
+        const pausedKey = `${key.startsWith("tab:") ? Number(key.slice(4)) : -1}|${params.request?.url}`;
+        this.recentlyPaused.add(pausedKey);
+        setTimeout(() => this.recentlyPaused.delete(pausedKey), 120000);
         if (__MV3__) return this.handlePausedMv3(key, params);
         const tabId: number = key.startsWith("tab:") ? Number(key.slice(4)) : -1;
         const { requestId, request } = params;
@@ -741,9 +763,6 @@ export class CdpStrategy {
         const url: string = request.url;
         const method: string = request.method;
         const resourceType = webRequestTypeOf(params.resourceType);
-        const pausedKey = `${tabId}|${url}`;
-        this.recentlyPaused.add(pausedKey);
-        setTimeout(() => this.recentlyPaused.delete(pausedKey), 120000);
         const requestHeaders: Record<string, string> = request.headers || {};
         const cont = () => debuggerSend(d, "Fetch.continueRequest", { requestId }).catch(() => {});
         await this.ready;

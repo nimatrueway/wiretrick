@@ -300,6 +300,10 @@ if (HEADLESS) {
     const domState = await p9d.evaluate(() => ({ title: document.title, h1: document.querySelector("h1")?.textContent }));
     check("onDom: document.title rewritten in page", domState.title === "DOM-HOOK-TITLE", JSON.stringify(domState));
     await p9d.close();
+    // that cold load reached the page before the debugger attached → warned
+    await new Promise((r) => setTimeout(r, 600));
+    const missLog: string = await mgr.evaluate(() => document.getElementById("log-entries")!.textContent || "");
+    check("cdp: missed first page load is logged as a warning", /page load \S*\/page-title was NOT intercepted by "modify main frame html"/.test(missLog), missLog.match(/.{0,40}NOT intercepted.{0,60}/)?.[0] || "(no warning)");
 }
 
 // ---------- 10. disable a script → behavior stops ----------
