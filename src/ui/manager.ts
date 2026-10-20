@@ -350,10 +350,25 @@ function syncModels(): void {
         const uri = monaco.Uri.parse(`file:///${safeFileName(s.meta.name)}.ts`);
         let m = models.get(s.id);
         if (m && m.uri.toString() !== uri.toString()) {
-            // renamed: fresh model at the new path, drop the old one
-            m.dispose();
-            m = null;
-            models.delete(s.id);
+            // renamed: move to a model at the new path, keeping any unsaved
+            // text and the view state; re-point the editor BEFORE disposing
+            // the old model, or it's left showing an empty disposed model
+            // (and the next save writes "")
+            const old = m;
+            const oldUri = old.uri.toString();
+            m = monaco.editor.getModel(uri) || monaco.editor.createModel(old.getValue(), "typescript", uri);
+            models.set(s.id, m);
+            setBaseline(m, s.code);
+            const vs = viewStates.get(oldUri);
+            if (vs) viewStates.set(uri.toString(), vs);
+            if (editor.getModel() === old) {
+                const cur = editor.saveViewState();
+                editor.setModel(m);
+                if (cur) editor.restoreViewState(cur);
+            }
+            viewStates.delete(oldUri);
+            baselines.delete(oldUri);
+            old.dispose();
         }
         if (!m) {
             m = monaco.editor.getModel(uri) || monaco.editor.createModel(s.code, "typescript", uri);

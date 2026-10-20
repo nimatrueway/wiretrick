@@ -180,6 +180,30 @@ dialogs = 0;
 await clickScript("main script");
 check("truly dirty: prompt appears", dialogs === 1, `dialogs=${dialogs}`);
 
+// inline rename of the open script keeps its content (editor + storage),
+// including unsaved edits
+const listScripts = () => mgr.evaluate(() => new Promise<any[]>((r) => chrome.runtime.sendMessage({ type: "listScripts" }, r)));
+await clickScript("utilities");
+await mgr.waitForTimeout(500);
+const savedCode = (await listScripts()).find((s: any) => s.id === "u_util")?.code;
+const utilText = await mgr.evaluate(() => (window as any).monaco.editor.getEditors()[0].getValue());
+await mgr.evaluate(() => {
+    const label = [...document.querySelectorAll<HTMLElement>(".script-item .script-name")].find((e) => e.textContent?.includes("utilities"))!;
+    label.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+});
+await mgr.waitForSelector(".script-rename");
+await mgr.fill(".script-rename", "utils renamed");
+await mgr.press(".script-rename", "Enter");
+await mgr.waitForTimeout(1500);
+const renamedText = await mgr.evaluate(() => (window as any).monaco.editor.getEditors()[0].getValue());
+const util = (await listScripts()).find((s: any) => s.id === "u_util");
+check("rename: editor keeps content", renamedText === utilText && utilText.length > 0, JSON.stringify(renamedText.slice(0, 40)));
+check("rename: stored name changed, code intact", util?.meta.name === "utils renamed" && util?.code === savedCode, `${util?.meta.name}`);
+await mgr.evaluate(() => (window as any).monaco.editor.getEditors()[0].focus());
+await mgr.keyboard.press("Control+s");
+await mgr.waitForTimeout(800);
+check("rename then save: editor content saved", (await listScripts()).find((s: any) => s.id === "u_util")?.code === utilText);
+
 } catch (e) {
     failed++;
     console.error("FATAL", e);

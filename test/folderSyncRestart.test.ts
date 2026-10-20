@@ -16,6 +16,7 @@ const store: Record<string, any> = {};
     },
     runtime: { lastError: undefined, sendMessage: () => {} },
 };
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const files = new Map<string, { text: string; t: number }>();
 let clock = 1;
 const dir = {
@@ -39,7 +40,6 @@ const dir = {
 };
 vi.mock("../src/shared/folderSync", async (orig) => ({ ...(await orig<any>()), loadSavedHandle: async () => dir, saveHandle: async () => {}, clearSavedHandle: async () => {} }));
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const put = (name: string, text: string) => files.set(name, { text, t: clock++ });
 const names = async () => (await (await import("../src/background/engine/scriptStore")).listScripts()).map((s) => s.meta.name).sort();
 
@@ -125,6 +125,21 @@ describe("scripts folder sync", () => {
         // nothing echoes back on the next polls
         await sleep(1200);
         expect((await ss.listScripts()).length).toBe(5);
+        await sync.stop();
+    });
+
+    it("reconnect imports a snapshotted file whose script is missing", async () => {
+        put("kept.ts", "// kept");
+        let sync = await import("../src/background/folderSync");
+        await sync.startFromStoredHandle({ fresh: true });
+        const ss = await import("../src/background/engine/scriptStore");
+        const s = (await ss.listScripts())[0];
+        sync.halt();
+        await ss.deleteScript(s.id); // removed while the folder wasn't connected
+        vi.resetModules();
+        sync = await import("../src/background/folderSync");
+        await sync.startFromStoredHandle(); // reconnect
+        expect(await names()).toEqual(["kept"]);
         await sync.stop();
     });
 });

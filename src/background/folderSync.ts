@@ -251,7 +251,7 @@ async function adoptCanonicalName(fileName: string, scriptName: string, code: st
 }
 
 /**
- * Two-way sync when a folder is first picked: files with no script are
+ * Two-way sync when a folder is picked or (re)connected: files with no script are
  * imported, scripts with no file are written out, and when both exist but
  * differ the newer one wins (file mtime vs. the script's last save).
  */
@@ -292,7 +292,7 @@ async function initialSync(): Promise<void> {
         pushed++;
     }
     lastWritten.clear(); // the snapshot below absorbs our own writes
-    dlogLevel("sync", "info", `Folder sync: initial sync — ${imported} file(s) imported, ${pulled} script(s) updated from newer files, ${pushed} file(s) written from scripts`);
+    dlogLevel("sync", "info", `Folder sync: reconciled — ${imported} file(s) imported, ${pulled} script(s) updated from newer files, ${pushed} file(s) written from scripts`);
     if (imported || pulled) broadcastToUi({ type: "scriptsChanged", source: "folder" } as any);
 }
 
@@ -470,9 +470,11 @@ export async function startFromStoredHandle(opts: { fresh?: boolean } = {}): Pro
         if (persisted) {
             known = persisted;
             await pollOnce(); // catch up on changes made while not watching
-        } else {
-            await refreshKnown();
         }
+        // reconcile what the snapshot can't see: files whose script is gone
+        // (or never existed in this profile) and scripts with no file
+        await initialSync();
+        await refreshKnown();
     }
     startPolling();
     startKeepAlive();

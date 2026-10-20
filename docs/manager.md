@@ -39,7 +39,8 @@ Click **Folder…** and pick a folder (e.g. `~/Wiretricks`) — that becomes you
 scripts home. Connecting runs a two-way initial sync: `.ts` files without a
 script are imported, scripts without a file are written out, and where both
 exist but differ the newer one wins (file modified time vs. the script's last
-save). `wt-api.d.ts` and `tsconfig.json` are written alongside. Edit in VS Code (or any editor) with full
+save). The same reconcile runs on every reconnect and browser restart.
+`wt-api.d.ts` and `tsconfig.json` are written alongside. Edit in VS Code (or any editor) with full
 TypeScript completions; saves hot-reload into the engine instantly.
 
 Sync is two-way and watches the folder for **creates, renames/moves and
