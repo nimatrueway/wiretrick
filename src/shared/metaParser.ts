@@ -6,20 +6,21 @@
  */
 
 export type Phase = "request" | "response";
-export type Strategy = "auto" | "hook" | "proxy" | "cdp" | "webrequest";
+export type Strategy = "auto" | "hook" | "proxy" | "cdp" | "webrequest" | "process";
 
 /**
  * strategy accepts a priority list, e.g.
  *   ["hook", "cdp"]   (try the page hook first, then the debugger)
  *   ["cdp"]           (debugger only)
  *   ["auto"]          (engine default: hook → proxy → cdp)
+ *   ["process"]       (local helper proxy — Chrome, opt-in, no banner)
  */
 export type StrategyList = Strategy[];
 
 export function parseStrategyList(raw: string | StrategyList | undefined): StrategyList {
     if (!raw) return ["auto"];
     if (Array.isArray(raw)) return raw;
-    const valid: Strategy[] = ["auto", "hook", "proxy", "cdp", "webrequest"];
+    const valid: Strategy[] = ["auto", "hook", "proxy", "cdp", "webrequest", "process"];
     const out = raw
         .split(",")
         .map((x) => x.trim().toLowerCase())

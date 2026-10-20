@@ -177,6 +177,7 @@ res.onRequest(async (ctx) => {
         body: `hook — page-level fetch/XHR override. Banner-free. Misses <script src>, <img>, documents.
 proxy — MV3: routes to the debugger tier (script tags, images, CSS…); unused on MV2.
 cdp — chrome.debugger + Fetch domain. Sees everything, but Chrome shows a "debugging" banner while attached; the engine attaches only while needed and detaches when idle.
+process — Chrome: a tiny local helper (rescript-helper) proxies ONLY matched hosts. Sees everything (documents, script tags, images, async handlers, body rewrites) with no banner and no flags. Opt-in: install the helper and trust its CA from the manager.
 Scripts that only ever match fetch/XHR are learned to be hook-only and never trigger the banner.`,
     },
     {
@@ -188,6 +189,7 @@ strategy: ["cdp"]           // debugger only (main-frame HTML + script tags alwa
 strategy: ["cdp", "hook"]         // debugger first, even for XHR
 strategy: ["hook"]                // strictly banner-free; unhookable requests pass through
 strategy: ["webrequest", "hook"]  // Firefox network-level first
+strategy: ["process", "hook"]     // Chrome: local helper first, hook if it isn't running
 
 Tier C (debugger) participates ONLY when the list contains "cdp" or is
 the single default "auto" — explicit hook/webrequest lists never show

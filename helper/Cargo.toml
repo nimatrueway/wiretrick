@@ -1,0 +1,36 @@
+[package]
+name = "rescript-helper"
+version = "0.1.0"
+edition = "2024"
+description = "Local interception helper for the ResScript Override extension (process strategy)"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "rescript-helper"
+path = "src/main.rs"
+
+[dependencies]
+base64 = "0.23.1"
+brotli-decompressor = "6.1.0"
+bytes = "1.12.1"
+flate2 = "1.1.10"
+http-body-util = "0.1.5"
+hyper = { version = "1.12.0", features = ["http1", "http2", "server", "client"] }
+hyper-util = { version = "0.1.21", features = ["tokio", "server-auto", "client-legacy", "http1", "http2"] }
+ring = "0.17"
+rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem", "crypto"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls-platform-verifier = "0.7.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tokio = { version = "1.54.0", default-features = false, features = ["rt", "rt-multi-thread", "net", "io-util", "macros", "io-std", "sync", "time"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
+tower-service = "0.3.3"
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true

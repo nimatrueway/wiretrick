@@ -140,7 +140,7 @@ declare namespace ResOverride {
         match?: string[];
         include?: string[];
         /** Interception tier priority list. */
-        strategy?: ("auto" | "hook" | "proxy" | "cdp" | "webrequest")[];
+        strategy?: ("auto" | "hook" | "proxy" | "cdp" | "webrequest" | "process")[];
         /** Which interception events run (default: both). */
         phase?: ("request" | "response")[];
         /** Default onDom timing. */

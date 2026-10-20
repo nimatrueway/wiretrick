@@ -1,0 +1,302 @@
+[
+ {
+  "pattern": "asd",
+  "input": "asd",
+  "matched": true
+ },
+ {
+  "pattern": "asd",
+  "input": "asd ",
+  "matched": false
+ },
+ {
+  "pattern": "asd*",
+  "input": "asd",
+  "matched": true
+ },
+ {
+  "pattern": "asd*",
+  "input": "asd ",
+  "matched": true
+ },
+ {
+  "pattern": "asd*",
+  "input": "asdzxc",
+  "matched": true
+ },
+ {
+  "pattern": "asd*",
+  "input": " asd",
+  "matched": false
+ },
+ {
+  "pattern": "*a",
+  "input": "asda",
+  "matched": false
+ },
+ {
+  "pattern": "*asd",
+  "input": "asd",
+  "matched": true
+ },
+ {
+  "pattern": "*asd",
+  "input": "asd ",
+  "matched": false
+ },
+ {
+  "pattern": "*asd",
+  "input": "zxcasd",
+  "matched": true
+ },
+ {
+  "pattern": "*asd*",
+  "input": "asd",
+  "matched": true
+ },
+ {
+  "pattern": "*asd*",
+  "input": "zxcasd",
+  "matched": true
+ },
+ {
+  "pattern": "*asd*",
+  "input": "asdzxc",
+  "matched": true
+ },
+ {
+  "pattern": "*asd*",
+  "input": "zxcasd123",
+  "matched": true
+ },
+ {
+  "pattern": "*asd*",
+  "input": "zxca5d123",
+  "matched": false
+ },
+ {
+  "pattern": "asd*",
+  "input": "asd",
+  "matched": true
+ },
+ {
+  "pattern": "asd*",
+  "input": "asdzxc",
+  "matched": true
+ },
+ {
+  "pattern": "asd*",
+  "input": "a2dzxc",
+  "matched": false
+ },
+ {
+  "pattern": "asd*",
+  "input": "asd",
+  "matched": true
+ },
+ {
+  "pattern": "asd*",
+  "input": "asdzxc",
+  "matched": true
+ },
+ {
+  "pattern": "asd*",
+  "input": "1asdzxc",
+  "matched": false
+ },
+ {
+  "pattern": "asd*",
+  "input": "a2dzxc",
+  "matched": false
+ },
+ {
+  "pattern": "*asd",
+  "input": "asd",
+  "matched": true
+ },
+ {
+  "pattern": "*asd",
+  "input": "zxcasd",
+  "matched": true
+ },
+ {
+  "pattern": "*asd",
+  "input": "asdz",
+  "matched": false
+ },
+ {
+  "pattern": "*asd",
+  "input": "a2d",
+  "matched": false
+ },
+ {
+  "pattern": "*asd*",
+  "input": "asd",
+  "matched": true
+ },
+ {
+  "pattern": "*asd*",
+  "input": "zxcasd123",
+  "matched": true
+ },
+ {
+  "pattern": "*asd*",
+  "input": "zxca2d123",
+  "matched": false
+ },
+ {
+  "pattern": "asd*qwe**",
+  "input": "asdqwe",
+  "matched": true
+ },
+ {
+  "pattern": "asd*qwe**",
+  "input": "asdfghqwe",
+  "matched": true
+ },
+ {
+  "pattern": "asd*qwe**",
+  "input": "asdqwefgh",
+  "matched": true
+ },
+ {
+  "pattern": "asd*qwe**",
+  "input": "asdfghqwerty",
+  "matched": true
+ },
+ {
+  "pattern": "asd*qwe**",
+  "input": "qasdqwe",
+  "matched": false
+ },
+ {
+  "pattern": "asd*qwe**",
+  "input": "qasdnnqwe",
+  "matched": false
+ },
+ {
+  "pattern": "asd**qwe*",
+  "input": "asdqwe",
+  "matched": true
+ },
+ {
+  "pattern": "asd**qwe*",
+  "input": "asdfghqwe",
+  "matched": true
+ },
+ {
+  "pattern": "asd**qwe*",
+  "input": "asdqwefgh",
+  "matched": true
+ },
+ {
+  "pattern": "asd**qwe*",
+  "input": "asdfghqwerty",
+  "matched": true
+ },
+ {
+  "pattern": "asd**qwe*",
+  "input": "qasdqwe",
+  "matched": false
+ },
+ {
+  "pattern": "asd**qwe*",
+  "input": "qasdnnqwe",
+  "matched": false
+ },
+ {
+  "pattern": "asd**qwe*zxc**Q",
+  "input": "asd$%$qwe^&zxc!@Q",
+  "matched": true
+ },
+ {
+  "pattern": "asd**qwe*zxc**Q",
+  "input": "asd$%$qwe^&zxcQ",
+  "matched": true
+ },
+ {
+  "pattern": "asd**qwe*zxc**Q",
+  "input": "asd$%$qWe^&zxc!@Q",
+  "matched": false
+ },
+ {
+  "pattern": "a*b**c***d",
+  "input": "a1b2c3d",
+  "matched": true
+ },
+ {
+  "pattern": "a*b**c***d",
+  "input": "a1bc3d",
+  "matched": true
+ },
+ {
+  "pattern": "a*b**c***d",
+  "input": "aaabbccccd",
+  "matched": true
+ },
+ {
+  "pattern": "a*b**c***d",
+  "input": "aaaccccd",
+  "matched": false
+ },
+ {
+  "pattern": "a*b**c***d",
+  "input": "a**b***c*d",
+  "matched": true
+ },
+ {
+  "pattern": "*://*.example.com/api/*",
+  "input": "https://app.example.com/api/users",
+  "matched": true
+ },
+ {
+  "pattern": "*://*.example.com/api/*",
+  "input": "https://other.com/api/users",
+  "matched": false
+ },
+ {
+  "pattern": "*://example.com/",
+  "input": "https://example.com/",
+  "matched": true
+ },
+ {
+  "pattern": "*://example.com/",
+  "input": "https://example.com/x",
+  "matched": false
+ },
+ {
+  "pattern": "https://x.com/*",
+  "input": "https://x.com/foo/bar",
+  "matched": true
+ },
+ {
+  "pattern": "*",
+  "input": "https://anything.test/",
+  "matched": true
+ },
+ {
+  "pattern": "",
+  "input": "",
+  "matched": true
+ },
+ {
+  "pattern": "",
+  "input": "x",
+  "matched": false
+ },
+ {
+  "pattern": "*://*/*.js",
+  "input": "https://cdn.test/a/b.js?v=1",
+  "matched": false
+ },
+ {
+  "pattern": "*://*/*.js",
+  "input": "https://cdn.test/a/b.css",
+  "matched": false
+ },
+ {
+  "pattern": "https://ünï.test/*",
+  "input": "https://ünï.test/ü",
+  "matched": true
+ }
+]

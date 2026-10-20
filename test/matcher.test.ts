@@ -80,3 +80,12 @@ describe("matchAny", () => {
         expect(matchAny(["*://a.com/*", "*://b.com/*"], "https://b.com/x")).toBe(true);
     });
 });
+
+// shared with the Rust helper (helper/src/matcher.rs runs the same file)
+import fixtures from "./fixtures/matcher.json";
+
+describe("shared matcher fixtures (TS ⇔ Rust helper)", () => {
+    it.each(fixtures as { pattern: string; input: string; matched: boolean }[])("$pattern ~ $input → $matched", ({ pattern, input, matched }) => {
+        expect(match(pattern, input).matched).toBe(matched);
+    });
+});
