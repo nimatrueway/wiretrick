@@ -10,16 +10,18 @@ permissions:
 
 jobs:
   helper:
-    name: helper (${{ matrix.target }})
+    # one runner per OS; `targets` lists what it builds (first = host,
+    # which is also where the tests run). Both macOS targets share the
+    # Intel runner: Apple Silicon runners often queue for a long time.
+    name: helper (${{ matrix.name }})
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, exe: wiretrick-helper }
-          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, exe: wiretrick-helper }
-          - { os: macos-latest, target: aarch64-apple-darwin, exe: wiretrick-helper }
-          - { os: macos-15-intel, target: x86_64-apple-darwin, exe: wiretrick-helper }
-          - { os: windows-latest, target: x86_64-pc-windows-msvc, exe: wiretrick-helper.exe }
+          - { name: linux-x64, os: ubuntu-latest, targets: x86_64-unknown-linux-gnu, exe: wiretrick-helper }
+          - { name: linux-arm64, os: ubuntu-24.04-arm, targets: aarch64-unknown-linux-gnu, exe: wiretrick-helper }
+          - { name: macos, os: macos-15-intel, targets: x86_64-apple-darwin aarch64-apple-darwin, exe: wiretrick-helper }
+          - { name: windows-x64, os: windows-latest, targets: x86_64-pc-windows-msvc, exe: wiretrick-helper.exe }
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -30,8 +32,10 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
           components: clippy, rustfmt
+
+      - name: Add targets
+        run: rustup target add ${{ matrix.targets }}
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -40,32 +44,34 @@ jobs:
       - name: fmt + clippy + tests
         run: |
           cargo fmt --check
-          cargo clippy --all-targets --target ${{ matrix.target }} -- -D warnings
-          cargo test --target ${{ matrix.target }}
+          HOST="${TARGETS%% *}"
+          for T in $TARGETS; do cargo clippy --all-targets --target "$T" -- -D warnings; done
+          cargo test --target "$HOST"
+        env:
+          TARGETS: ${{ matrix.targets }}
 
-      - name: Build
-        run: cargo build --release --target ${{ matrix.target }}
-
-      - name: Size guard (≤ 6 MB)
-        run: |
-          BIN="target/${{ matrix.target }}/release/${{ matrix.exe }}"
-          SIZE=$(wc -c < "$BIN")
-          echo "$BIN: $SIZE bytes"
-          if [ "$SIZE" -gt 6291456 ]; then echo "::error::helper binary grew past 6 MB ($SIZE bytes)"; exit 1; fi
-
-      - name: Package
+      - name: Build, size guard (≤ 6 MB), package
+        env:
+          TARGETS: ${{ matrix.targets }}
         run: |
           mkdir -p ../helper-dist
-          NAME="wiretrick-helper-${{ matrix.target }}"
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            cp "target/${{ matrix.target }}/release/${{ matrix.exe }}" "../helper-dist/$NAME.exe"
-          else
-            tar -C "target/${{ matrix.target }}/release" -czf "../helper-dist/$NAME.tar.gz" "${{ matrix.exe }}"
-          fi
+          for T in $TARGETS; do
+            cargo build --release --target "$T"
+            BIN="target/$T/release/${{ matrix.exe }}"
+            SIZE=$(wc -c < "$BIN")
+            echo "$BIN: $SIZE bytes"
+            if [ "$SIZE" -gt 6291456 ]; then echo "::error::helper binary grew past 6 MB ($SIZE bytes)"; exit 1; fi
+            NAME="wiretrick-helper-$T"
+            if [ "${{ runner.os }}" = "Windows" ]; then
+              cp "$BIN" "../helper-dist/$NAME.exe"
+            else
+              tar -C "target/$T/release" -czf "../helper-dist/$NAME.tar.gz" "${{ matrix.exe }}"
+            fi
+          done
 
       - uses: actions/upload-artifact@v4
         with:
-          name: helper-${{ matrix.target }}
+          name: helper-${{ matrix.name }}
           path: helper-dist/*
 
   release:
