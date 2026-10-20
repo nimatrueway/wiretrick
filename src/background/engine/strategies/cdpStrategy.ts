@@ -13,7 +13,7 @@ import { storageGet, storageSet } from "../../../shared/chromeApi";
 import type { Script } from "../scriptStore";
 import { log } from "../logs";
 import { scriptStorageGet, scriptStorageSet } from "../scriptStore";
-import { dlogLevel } from "../../../shared/debugLog";
+import { dlog, dlogLevel } from "../../../shared/debugLog";
 import { debuggerAttach, debuggerSend, debuggerDetach, debuggerGetTargets, type Debuggee } from "../../../shared/chromeApi";
 import { analyzeScripts, runBodyOp } from "../../compileHost";
 import { recordNetBody } from "../../network";
@@ -224,7 +224,7 @@ export class CdpStrategy {
         if (changed && autoBody.length) {
             log(-1, `MV3: ${autoBody.map((n) => `"${n}"`).join(", ")} intercept page fetch/XHR only (hook tier). To also intercept <script>/<img>/css/document loads, add "cdp" to the script's strategy list (e.g. strategy: ["hook", "cdp"])`, "warn");
         }
-        dlogLevel("cdp", "info", "MV3 debugger tier reloaded", { scripts: next.map((s) => s.name), patterns: this.mv3Patterns.length });
+        dlog("cdp", "MV3 debugger tier reloaded", { scripts: next.map((s) => s.name), patterns: this.mv3Patterns.length });
         await this.resyncAttachedMv3();
     }
 

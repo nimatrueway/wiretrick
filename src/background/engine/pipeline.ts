@@ -13,7 +13,7 @@ import type { Script } from "./scriptStore";
 import { listScripts, onScriptsChanged, saveScript, deleteScript, setEnabled, newId, scriptStorageGet, scriptStorageSet, loadAllParamValues, getParamValues, setParamValue } from "./scriptStore";
 import { matchAny } from "../../shared/matcher";
 import { serveStore } from "./strategies/webRequestStrategy";
-import { dlogLevel } from "../../shared/debugLog";
+import { dlog, dlogLevel } from "../../shared/debugLog";
 import { isThenable, toRunnableJs } from "../../shared/compile";
 import "../../shared/transpile";
 void toRunnableJs;
@@ -274,7 +274,7 @@ export function createPipeline(
         chrome.webRequest.onCompleted.addListener(onDone, FILTER);
         chrome.webRequest.onErrorOccurred.addListener(onDone, FILTER);
     } else {
-        dlogLevel("pipeline", "info", "MV3: no blocking webRequest — hook tier carries page fetch/XHR; strategy cdp (debugger) or process (local helper) carries browser-initiated loads");
+        dlog("pipeline", "MV3: no blocking webRequest — hook tier carries page fetch/XHR; strategy cdp (debugger) or process (local helper) carries browser-initiated loads");
     }
 
     // ---- manager protocol ----
@@ -467,7 +467,7 @@ export function createPipeline(
     async function reload(): Promise<void> {
         const scripts = (await listScripts()) as ScriptWithSources[];
         const paramValues = await loadAllParamValues();
-        dlogLevel("pipeline", "info", "reload", { total: scripts.length, enabled: scripts.filter((x) => x.enabled).map((x) => x.meta.name) });
+        dlog("pipeline", "reload", { total: scripts.length, enabled: scripts.filter((x) => x.enabled).map((x) => x.meta.name) });
         webRequestStrategy.reload(scripts, paramValues);
         chromeBody.reload(scripts, paramValues);
         void cdp.reload(scripts, paramValues);
