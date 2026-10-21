@@ -55,7 +55,11 @@ left or right edge of the window. ⌘J hides the panel wherever it is docked;
 ⌘B hides the explorer (and a panel docked under it). The two layout buttons
 at the right of the editor toolbar do the same.
 
-- **Log** — engine and script log lines with level and source filters. Script
+- **Log** — engine and script log lines with level and source filters. While
+  the Log tab is out of view (Network tab open, panel hidden, or the manager
+  in the background), new errors and warnings are counted in red/yellow
+  badges on its title; looking at it clears them. Turn this off in
+  **Settings → Logging → Tab badge**. Script
   errors (exceptions in handlers, failed compiles) are logged at ERROR, and
   the script gets a ⚠ indicator in the list and the popup. TypeScript errors
   in a saved script also show up there. The download button (↓) saves the
@@ -102,7 +106,9 @@ or *Light*. It applies to the manager, the editor and the popup.
 
 ## About and diagnostics
 
-**Settings → About** shows the installed version, commit and build time,
+**Settings → About** shows the installed version and the latest
+[release](https://github.com/nimatrueway/wiretrick/releases) (checked on
+GitHub when About opens, with a download link when there's an update), commit and build time,
 the build (MV2/MV3), browser, OS, extension ID and the local helper's state.
 **Copy** puts that on the clipboard as text — paste it into bug reports.
 

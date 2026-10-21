@@ -582,6 +582,7 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 }
 #about-info dt { color: var(--fg-dim); }
 #about-info dd { margin: 0; overflow-wrap: anywhere; user-select: text; }
+#about-info dd.about-update { color: var(--warn, #d7ba7d); font-weight: 600; }
 #about-info dd.mono { font: 12px "SF Mono", Menlo, Consolas, monospace; }
 
 #help-panel .dialog { height: min(720px, 86vh); }
@@ -675,6 +676,11 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 }
 .panel-tab:hover { color: var(--fg); }
 .panel-tab.active { color: var(--fg); border-bottom-color: var(--fg); }
+.tab-badges { display: inline-flex; gap: 3px; margin-left: 5px; vertical-align: 1px; }
+.tab-badges[hidden], .tab-badge[hidden] { display: none; }
+.tab-badge { min-width: 15px; padding: 0 4px; border-radius: 8px; font-size: 10px; font-weight: 600; line-height: 15px; text-align: center; color: #fff; box-sizing: border-box; }
+.tab-badge.error { background: var(--err); }
+.tab-badge.warn { background: var(--warn); color: #1e1e1e; }
 #log-tools { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 #log-tools[hidden], #log-entries[hidden], #network-view[hidden] { display: none; }
 #log-entries { flex: 1; min-height: 0; }

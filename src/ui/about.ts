@@ -75,6 +75,44 @@ async function firefoxInfo(): Promise<{ name: string; version: string } | null> 
     }
 }
 
+export const RELEASES_URL = "https://github.com/nimatrueway/wiretrick/releases";
+const LATEST_RELEASE_API = "https://api.github.com/repos/nimatrueway/wiretrick/releases/latest";
+
+export interface LatestRelease {
+    version: string;
+    url: string;
+}
+
+/** True when `latest` (x.y.z, optional leading v) is newer than `current`. */
+export function isNewerVersion(latest: string, current: string): boolean {
+    const parse = (v: string) => v.replace(/^v/, "").split(/[.+-]/).slice(0, 3).map((n) => parseInt(n, 10) || 0);
+    const [a, b] = [parse(latest), parse(current)];
+    for (let i = 0; i < 3; i++) if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) > (b[i] ?? 0);
+    return false;
+}
+
+/** The "Latest" About row: text, plus the release page when an update exists. */
+export function describeLatest(latest: LatestRelease, current: string): { text: string; url?: string; update?: boolean } {
+    if (isNewerVersion(latest.version, current)) return { text: `${latest.version} — update available`, url: latest.url, update: true };
+    return { text: `${latest.version} — up to date` };
+}
+
+let latestCheck: Promise<LatestRelease> | null = null;
+/** Latest published GitHub release; fetched once per page (a failure retries next time). */
+export function checkLatestRelease(fetchFn: typeof fetch = fetch): Promise<LatestRelease> {
+    latestCheck ??= (async () => {
+        const res = await fetchFn(LATEST_RELEASE_API, { headers: { accept: "application/vnd.github+json" }, signal: AbortSignal.timeout(10000) });
+        if (!res.ok) throw new Error(`GitHub answered ${res.status}`);
+        const j = await res.json();
+        if (typeof j?.tag_name !== "string") throw new Error("no release tag");
+        return { version: j.tag_name.replace(/^v/, ""), url: typeof j.html_url === "string" ? j.html_url : RELEASES_URL };
+    })().catch((e) => {
+        latestCheck = null;
+        throw e;
+    });
+    return latestCheck;
+}
+
 /** Label/value rows for the About section, in display order. */
 export async function aboutRows(helper: HelperStatus | null): Promise<[string, string][]> {
     const manifest = chrome.runtime.getManifest();

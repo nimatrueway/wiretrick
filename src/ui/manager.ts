@@ -24,7 +24,8 @@ import { scriptHealth, type ScriptHealthInput } from "../shared/scriptHealth";
 import type { Uri, IPosition, IRange, IKeyboardEvent, editor as MonacoEditor } from "monaco-editor";
 import type { Script } from "../background/engine/scriptStore";
 import { setupPanelDock, currentSide, currentDock } from "./panelDock";
-import { aboutRows, aboutText, collectDiagnostics, diagnosticsFileName, downloadText, type HelperStatus } from "./about";
+import { badgeCount, LogBadge } from "./logBadge";
+import { aboutRows, aboutText, checkLatestRelease, collectDiagnostics, describeLatest, diagnosticsFileName, downloadText, RELEASES_URL, type HelperStatus } from "./about";
 
 // ---- state ----
 let scripts: (Script & { runtimeError?: ScriptHealthInput["runtimeError"]; typeErrors?: string[] })[] = [];
@@ -976,6 +977,26 @@ function renderLogLine(line: HTMLElement, text: string, level: string, source: s
     line.appendChild(document.createTextNode(text));
 }
 
+// ---- Log tab badge: errors/warnings that arrived while the Log was out of view ----
+const logBadge = new LogBadge();
+let logBadgeEnabled = true;
+
+function logInView(): boolean {
+    return $("#log-panel").dataset.tab === "log" && !$("#app").classList.contains("panel-hidden") && document.visibilityState === "visible";
+}
+
+function renderLogBadge(): void {
+    if (!logBadgeEnabled || logInView()) logBadge.reset();
+    const el = $("#log-badge");
+    el.hidden = logBadge.empty;
+    el.title = logBadge.empty ? "" : logBadge.title;
+    for (const [cls, n] of [["error", logBadge.errors], ["warn", logBadge.warnings]] as const) {
+        const b = el.querySelector<HTMLElement>(`.tab-badge.${cls}`)!;
+        b.hidden = !n;
+        b.textContent = badgeCount(n);
+    }
+}
+
 /** All received entries — filtered ones stay here (re-renderable), just not in the DOM. */
 const logEntries: { text: string; level: string; source: string }[] = [];
 
@@ -989,6 +1010,10 @@ function appendLog(entry: any): void {
     const text = logEntries[logEntries.length - 1].text;
     const level = logEntries[logEntries.length - 1].level;
     if (!linePassesFilters(text, level, source)) return; // don't let hidden entries churn the DOM ring
+    if (level === "error" || level === "warn") {
+        logBadge.note(level);
+        renderLogBadge();
+    }
 
     const box = $("#log-entries");
     const line = document.createElement("div");
@@ -1119,18 +1144,40 @@ function trackSettingsScroll(): void {
 }
 
 let aboutInfo: [string, string][] = [];
+let aboutGen = 0;
 async function renderAbout(): Promise<void> {
-    aboutInfo = await aboutRows(helperStatus);
-    $("#about-info").replaceChildren(
-        ...aboutInfo.flatMap(([k, v]) => {
-            const dt = document.createElement("dt");
-            dt.textContent = k;
-            const dd = document.createElement("dd");
-            dd.textContent = v;
-            if (k === "Commit" || k === "Extension ID") dd.className = "mono";
-            return [dt, dd];
-        })
+    const gen = ++aboutGen;
+    const rows = await aboutRows(helperStatus);
+    if (gen !== aboutGen) return;
+    const current = chrome.runtime.getManifest().version;
+    const draw = (latest: { text: string; url?: string; update?: boolean }): void => {
+        aboutInfo = [rows[0], ["Latest", latest.text], ...rows.slice(1)];
+        $("#about-info").replaceChildren(
+            ...aboutInfo.flatMap(([k, v]) => {
+                const dt = document.createElement("dt");
+                dt.textContent = k;
+                const dd = document.createElement("dd");
+                dd.textContent = v;
+                if (k === "Commit" || k === "Extension ID") dd.className = "mono";
+                if (k === "Latest" && latest.url) {
+                    if (latest.update) dd.className = "about-update";
+                    const a = document.createElement("a");
+                    a.href = latest.url;
+                    a.target = "_blank";
+                    a.rel = "noopener";
+                    a.textContent = latest.update ? "download" : "releases";
+                    dd.append(" · ", a);
+                }
+                return [dt, dd];
+            })
+        );
+    };
+    draw({ text: "checking…" });
+    const latest = await checkLatestRelease().then(
+        (r) => describeLatest(r, current),
+        (e) => ({ text: `couldn't check (${e?.message || e})`, url: RELEASES_URL })
     );
+    if (gen === aboutGen) draw(latest);
 }
 
 function flash(b: HTMLElement, text: string): void {
@@ -1153,6 +1200,7 @@ function managerUiState(): Record<string, unknown> {
         logLevel: ($("#settings-log-level") as HTMLSelectElement).value,
         logCap,
         monacoVerbose,
+        logBadge: logBadgeEnabled,
         scriptsFolder: $("#folder-state").textContent || null,
     };
 }
@@ -1256,6 +1304,19 @@ function setupDialogs(): void {
         monacoVerbose = verboseBox.checked;
         chrome.storage.local.set({ resMonacoVerbose: monacoVerbose });
         navLog(`verbose logging ${monacoVerbose ? "on" : "off"}`, "warn");
+    });
+
+    // Log tab badge
+    const badgeBox = $("#settings-log-badge") as HTMLInputElement;
+    chrome.storage.local.get("resLogBadge", (d) => {
+        logBadgeEnabled = d?.resLogBadge !== false;
+        badgeBox.checked = logBadgeEnabled;
+        renderLogBadge();
+    });
+    badgeBox.addEventListener("change", () => {
+        logBadgeEnabled = badgeBox.checked;
+        chrome.storage.local.set({ resLogBadge: logBadgeEnabled });
+        renderLogBadge();
     });
 
     // panel history size
@@ -1521,6 +1582,7 @@ function setPanelHidden(hidden: boolean, persist = true): void {
     app.classList.toggle("panel-hidden", hidden);
     $("#btn-toggle-panel").setAttribute("aria-pressed", String(!hidden));
     if (persist) saveLayout({ ...loadLayout(), panelHidden: hidden });
+    renderLogBadge();
     window.dispatchEvent(new Event("resize"));
 }
 
@@ -1571,6 +1633,7 @@ function setupPanelTabs(): void {
         $("#log-tools").hidden = which !== "log";
         $("#network-view").hidden = which !== "network";
         $("#log-panel").dataset.tab = which;
+        renderLogBadge();
         // recording starts the first time the tab is shown (zero cost before)
         if (which === "network" && !networkMounted) {
             networkMounted = true;
@@ -1680,8 +1743,11 @@ async function main(): Promise<void> {
         await refresh();
         selectReal(id);
     });
+    document.addEventListener("visibilitychange", renderLogBadge);
     $("#btn-clear-log").addEventListener("click", () => {
         $("#log-entries").innerHTML = "";
+        logBadge.reset();
+        renderLogBadge();
         void send({ type: "clearDebugLogs" });
     });
     $("#btn-logs").addEventListener("click", async () => {

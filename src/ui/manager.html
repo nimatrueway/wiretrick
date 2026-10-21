@@ -41,7 +41,7 @@
                 <div id="log-panel">
                     <div id="log-header" title="Drag to dock: below the editor, beside it, or under the script list">
                         <span id="panel-tabs" role="tablist">
-                            <span id="log-header-title" class="panel-tab active" role="tab" data-panel="log" title="Extension and script log">Log</span>
+                            <span id="log-header-title" class="panel-tab active" role="tab" data-panel="log" title="Extension and script log">Log<span id="log-badge" class="tab-badges" hidden><span class="tab-badge error" hidden></span><span class="tab-badge warn" hidden></span></span></span>
                             <span id="network-tab" class="panel-tab" role="tab" data-panel="network" title="Network activity, with what Wiretrick scripts did to each request">Network</span>
                         </span>
                         <span id="log-tools">
@@ -186,6 +186,13 @@
                                     <span class="muted">entries</span>
                                 </div>
                                 <p class="setting-help">Log lines kept in the panel (100–10000).</p>
+                            </div>
+                        </div>
+                        <div class="setting">
+                            <span class="setting-label">Tab badge</span>
+                            <div class="setting-control">
+                                <label class="setting-check"><input id="settings-log-badge" type="checkbox" checked> Count new errors and warnings on the Log tab</label>
+                                <p class="setting-help">Shown while the Log tab is out of view; cleared when you look at it.</p>
                             </div>
                         </div>
                     </section>
