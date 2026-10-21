@@ -136,6 +136,7 @@ async function copyStatic(dist, mv3) {
     if (existsSync(monacoSrc)) {
         await rm(monacoDst, { recursive: true, force: true });
         await cp(monacoSrc, monacoDst, { recursive: true });
+        await pruneTsWorkerLibs(path.join(monacoDst, "language/typescript/tsWorker.js"));
     }
 
     // loader shim for manager.html
@@ -195,4 +196,38 @@ if (WATCH) {
     watch(path.join(root, "src"), { recursive: true }, rebuild);
     watch(path.join(root, "manifest.json"), rebuild);
     console.log("watching for changes…");
+}
+
+/**
+ * Drop the TS lib .d.ts files the editor never loads from Monaco's
+ * tsWorker.js (webworker, esnext, …). Keeps it under AMO's 5 MB
+ * per-file limit so the Firefox build can be signed. The kept set is the
+ * `lib:` list in monacoSetup.ts plus everything it `/// <reference lib>`s.
+ */
+async function pruneTsWorkerLibs(file) {
+    if (!existsSync(file)) return;
+    const setup = await readFile(path.join(root, "src/ui/monacoSetup.ts"), "utf8");
+    const roots = [...(setup.match(/lib:\s*\[([^\]]*)\]/)?.[1] ?? "").matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+    if (!roots.length) throw new Error("pruneTsWorkerLibs: no lib list in monacoSetup.ts");
+    const src = await readFile(file, "utf8");
+    const libs = new Map(); // name → [start, end) of `X["name"]=`…`;`
+    for (const m of src.matchAll(/\w+\["(lib\.[\w.]+\.d\.ts)"\]=`/g)) {
+        let i = m.index + m[0].length;
+        while (src[i] !== "`") i += src[i] === "\\" ? 2 : 1;
+        libs.set(m[1], [m.index, src[i + 1] === ";" ? i + 2 : i + 1, src.slice(m.index + m[0].length, i)]);
+    }
+    const keep = new Set();
+    const queue = [...roots];
+    while (queue.length) {
+        const n = queue.pop();
+        if (keep.has(n) || !libs.has(n)) continue;
+        keep.add(n);
+        for (const r of libs.get(n)[2].matchAll(/<reference lib=\\?"([\w.]+)\\?"/g)) queue.push(`lib.${r[1].toLowerCase()}.d.ts`);
+    }
+    if (roots.some((r) => !keep.has(r))) throw new Error(`pruneTsWorkerLibs: missing ${roots.filter((r) => !keep.has(r))}`);
+    let out = src;
+    const drop = [...libs].filter(([n]) => !keep.has(n)).sort((a, b) => b[1][0] - a[1][0]);
+    for (const [, [start, end]] of drop) out = out.slice(0, start) + out.slice(end);
+    await writeFile(file, out);
+    console.log(`tsWorker.js: kept ${keep.size} TS libs, dropped ${drop.length} (${(src.length / 1e6).toFixed(2)} → ${(out.length / 1e6).toFixed(2)} MB)`);
 }
