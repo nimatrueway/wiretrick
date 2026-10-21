@@ -4,79 +4,130 @@
  */
 
 declare namespace Wiretrick {
+    /** A value, or a Promise of it — every handler may be async. */
+    type Awaitable<T> = T | Promise<T>;
+
+    /** One response header as received from the network. */
     interface HeaderPair {
+        /** Header name, in the server's casing. */
         name: string;
+        /** Header value (absent for valueless headers). */
         value?: string;
     }
 
+    /** What every handler learns about the request. */
     interface RequestCtx {
-        /** Full request URL. */
+        /** Full request URL, e.g. `"https://api.example.com/v1/user?id=1"`. */
         url: string;
+        /** HTTP method in upper case: `"GET"`, `"POST"`, … */
         method: string;
         /** URL of the top-level document that initiated the request. */
         tabUrl: string;
-        /** webRequest resource type: main_frame, script, image, xmlhttprequest, ... */
+        /**
+         * webRequest resource type: `"main_frame"`, `"sub_frame"`,
+         * `"script"`, `"stylesheet"`, `"image"`, `"xmlhttprequest"`, …
+         */
         resourceType: string;
-        /** Request headers as a plain object. */
+        /** Request headers as a plain object (`name → value`). */
         requestHeaders: { [name: string]: string };
     }
 
+    /** Header edits. */
     interface HeaderMod {
-        /** Set (or overwrite) these headers. */
+        /**
+         * Set (or overwrite) these headers.
+         *
+         * @example
+         * { set: { "x-debug": "1", "cache-control": "no-store" } }
+         */
         set?: { [name: string]: string };
-        /** Remove these headers (case-insensitive). */
+        /**
+         * Remove these headers (case-insensitive names).
+         *
+         * @example
+         * { remove: ["cookie", "x-tracking-id"] }
+         */
         remove?: string[];
     }
 
+    /** A synthesized response (`onRequest` → `{ respond }`). */
     interface RespondOptions {
-        /** Response body: string, bytes, or any object (JSON-serialized). */
+        /**
+         * Response body. Strings and bytes are sent as-is; any other object
+         * is JSON-serialized.
+         */
         body: string | Uint8Array | object;
-        /** Response status. Default 200. */
+        /** HTTP status. Default `200`. */
         status?: number;
-        /** Content-Type. Default guessed from the request URL extension. */
+        /**
+         * Content-Type. Default: guessed from the request URL's extension
+         * (`application/json` for objects).
+         */
         mime?: string;
         /** Extra response headers. */
         headers?: { set?: { [name: string]: string } };
     }
 
+    /**
+     * What `onRequest` may return. `respond`, `redirect` and `cancel` are
+     * **terminal** (first script wins); `headers` is not.
+     */
     interface RequestResult {
         /** Respond immediately without contacting the network (terminal). */
         respond?: RespondOptions;
-        /** Redirect the request to another URL (terminal). */
+        /** Redirect the request to this URL (terminal). */
         redirect?: string;
         /** Block the request entirely (terminal). */
         cancel?: boolean;
-        /** Modify request headers (non-terminal; applied on the way out). */
+        /** Modify request headers on the way out (non-terminal). */
         headers?: HeaderMod;
     }
 
+    /** `onResponseHeaders` context: the request plus the response head. */
     interface ResponseHeaderCtx extends RequestCtx {
-        /** HTTP status line, e.g. "HTTP/1.1 200 OK". */
+        /** HTTP status line, e.g. `"HTTP/1.1 200 OK"`. */
         statusLine: string;
         /** Response headers as they came from the network. */
         responseHeaders: HeaderPair[];
     }
 
+    /** What `onResponseHeaders` may return. */
     interface ResponseHeaderResult {
+        /** Response header edits; applied in script order. */
         headers?: HeaderMod;
     }
 
+    /** `replaceResponse` context. */
     interface ReplaceCtx extends RequestCtx {
         /** Content-Type reported by the server, if known. */
         mime?: string;
     }
 
+    /** `modifyResponse` context. */
     interface BodyCtx extends ReplaceCtx {
         /** Response status code, when available. */
         status?: number;
     }
 
+    /** Per-script persistent key/value storage (JSON-serializable values). */
     interface Storage {
+        /**
+         * Read a value; resolves to `undefined` when the key was never set.
+         *
+         * @example
+         * const hits = (await wt.storage.get("hits")) ?? 0;
+         */
         get(key: string): Promise<any>;
+        /**
+         * Store a value (persists across reloads and browser restarts).
+         *
+         * @example
+         * await wt.storage.set("hits", hits + 1);
+         */
         set(key: string, value: any): Promise<void>;
     }
 
-    /** Options for wt.onDom (2nd argument). */
+    /** Options for `wt.onDom` (its 2nd argument). */
     interface DomOptions {
         /**
          * **When** the `onDom` handler runs, relative to the page's own loading.
@@ -140,20 +191,30 @@ declare namespace Wiretrick {
          *   (e.g. `window.myApp`) are not visible.
          *
          * @example
-         * wt.onDom(() => { document.title = "🎯 " + document.title; }); // DOMContentLoaded
+         * // default: DOMContentLoaded
+         * wt.onDom(() => {
+         *     document.title = "🎯 " + document.title;
+         * });
          *
          * @example
          * // before page scripts (best effort, see race caveat)
          * wt.onDom(() => {
-         *     Object.defineProperty(navigator, "webdriver", { get: () => false });
+         *     Object.defineProperty(navigator, "webdriver", {
+         *         get: () => false,
+         *     });
          * }, { when: "document_start" });
          *
          * @example
          * // after everything loaded, then keep it applied across re-renders
          * wt.onDom(() => {
-         *     const apply = () => document.querySelectorAll(".ad").forEach((e) => e.remove());
+         *     const apply = () => {
+         *         for (const ad of document.querySelectorAll(".ad")) ad.remove();
+         *     };
          *     apply();
-         *     new MutationObserver(apply).observe(document.body, { childList: true, subtree: true });
+         *     new MutationObserver(apply).observe(document.body, {
+         *         childList: true,
+         *         subtree: true,
+         *     });
          * }, { when: "document_idle" });
          */
         when?: "DOMContentLoaded" | "document_start" | "document_end" | "document_idle";
@@ -161,41 +222,63 @@ declare namespace Wiretrick {
 
     // ---- declareScript: declarative meta + typed parameters ----
 
+    /** An on/off switch — a checkbox in the ⚙ dialog. */
     interface ParamDefBoolean {
         type: "boolean";
+        /** Default `false`. */
         default?: boolean;
+        /** Shown next to the control and in settings.yaml. */
         description?: string;
     }
+    /** A number — a number input in the ⚙ dialog. */
     interface ParamDefNumber {
         type: "number";
+        /** Default `0`. */
         default?: number;
+        /** Shown next to the control and in settings.yaml. */
         description?: string;
-        /** optional bounds — the UI clamps typed values */
+        /** Lower bound; the UI clamps typed values. */
         min?: number;
+        /** Upper bound; the UI clamps typed values. */
         max?: number;
-        /** step for the number input (default 1; use e.g. 0.1 for decimals) */
+        /** Step for the number input. Default `1`; use e.g. `0.1` for decimals. */
         step?: number;
     }
+    /** Free text — a text input (or textarea) in the ⚙ dialog. */
     interface ParamDefString {
         type: "string";
-        /** edit in a textarea; values with newlines are written as YAML block scalars in settings.yaml */
+        /**
+         * Edit in a textarea. Values with newlines are written as YAML block
+         * scalars in settings.yaml.
+         */
         multiline?: boolean;
+        /** Default `""`. */
         default?: string;
+        /** Shown next to the control and in settings.yaml. */
         description?: string;
     }
+    /** One of fixed choices — a dropdown in the ⚙ dialog. */
     interface ParamDefEnum {
         type: "enum";
+        /** The allowed values; the param is typed as their union. */
         choices: string[];
+        /** Default: the first choice. */
         default?: string;
+        /** Shown next to the control and in settings.yaml. */
         description?: string;
     }
+    /** A list of strings — one entry per line in the ⚙ dialog. */
     interface ParamDefStringList {
         type: "stringList";
+        /** Default `[]`. */
         default?: string[];
+        /** Shown next to the control and in settings.yaml. */
         description?: string;
     }
+    /** One adjustable parameter, discriminated by `type`. */
     type ParamDef = ParamDefBoolean | ParamDefNumber | ParamDefString | ParamDefEnum | ParamDefStringList;
 
+    /** The value type a param def resolves to. */
     type ParamValue<D extends ParamDef> = D extends ParamDefBoolean
         ? boolean
         : D extends ParamDefNumber
@@ -213,15 +296,43 @@ declare namespace Wiretrick {
         readonly [K in keyof T]: ParamValue<T[K]>;
     };
 
+    /** The `wt.declareScript` argument. */
     interface ScriptDef<T extends Record<string, ParamDef> = Record<string, ParamDef>> {
-        /** URL patterns the script activates on. */
+        /**
+         * URL patterns the script activates on. `*` matches anything.
+         *
+         * @example
+         * match: ["*://example.com/*", "*://api.example.com/v1/*"]
+         */
         match?: string[];
+        /** Extra URL patterns, same syntax as `match`. */
         include?: string[];
-        /** Interception tier priority list. */
+        /**
+         * Interception tiers in priority order; the first viable one per
+         * request wins. Default `["auto"]`.
+         *
+         * - `"hook"` — page fetch/XHR override; no banner, misses documents,
+         *   `<script src>` and images.
+         * - `"cdp"` — Chrome debugger; sees everything, shows a banner while
+         *   attached.
+         * - `"webrequest"` — blocking webRequest (Firefox, MV2 Chromium).
+         * - `"process"` — the local wiretrick-helper; sees everything, no
+         *   banner.
+         *
+         * @example
+         * strategy: ["hook", "cdp"]
+         */
         strategy?: ("auto" | "hook" | "cdp" | "webrequest" | "process")[];
         /**
-         * Adjustable parameters — editable from the popup's ⚙ dialog and
-         * the manager without touching the script. Returned typed.
+         * Adjustable parameters, editable from the popup's ⚙ dialog, the
+         * manager and settings.yaml without touching the script. Returned
+         * typed from `wt.declareScript`.
+         *
+         * @example
+         * params: {
+         *     enabled: { type: "boolean", default: true },
+         *     status: { type: "enum", choices: ["500", "503"] },
+         * }
          */
         params?: T;
     }
@@ -265,23 +376,44 @@ declare const wt: {
      *
      * **Non-terminal:** `{ headers }` — applied, and later scripts still run.
      *
+     * @param handler Called once per matching request with its context.
+     *
      * @example
+     * // mock an endpoint
      * wt.onRequest((ctx) => {
-     *     if (ctx.url.includes("/user")) return {
-     *         respond: { body: { id: 1, name: "Mock" }, mime: "application/json" },
+     *     if (!ctx.url.includes("/user")) return;
+     *     return {
+     *         respond: {
+     *             body: { id: 1, name: "Mock" },
+     *             mime: "application/json",
+     *         },
      *     };
      * });
+     *
+     * @example
+     * // add a header to every request
+     * wt.onRequest(() => ({
+     *     headers: { set: { "x-debug": "1" } },
+     * }));
      */
-    onRequest(
-        handler: (ctx: Wiretrick.RequestCtx) => Wiretrick.RequestResult | void | Promise<Wiretrick.RequestResult | void>
-    ): void;
+    onRequest(handler: (ctx: Wiretrick.RequestCtx) => Wiretrick.Awaitable<Wiretrick.RequestResult | void>): void;
 
     /**
-     * Inspect / modify response headers. All matching scripts run. May be
-     * async (see the stacking/async notes on `wt`).
+     * Inspect / modify response headers. **All** matching scripts run. May
+     * be async (see the stacking/async notes on `wt`).
+     *
+     * @param handler Called when the response headers arrive.
+     *
+     * @example
+     * wt.onResponseHeaders(() => ({
+     *     headers: {
+     *         set: { "access-control-allow-origin": "*" },
+     *         remove: ["content-security-policy"],
+     *     },
+     * }));
      */
     onResponseHeaders(
-        handler: (ctx: Wiretrick.ResponseHeaderCtx) => Wiretrick.ResponseHeaderResult | void | Promise<Wiretrick.ResponseHeaderResult | void>
+        handler: (ctx: Wiretrick.ResponseHeaderCtx) => Wiretrick.Awaitable<Wiretrick.ResponseHeaderResult | void>
     ): void;
 
     /**
@@ -291,9 +423,21 @@ declare const wt: {
      * May be async — the awaited result fulfills the response (the hook tier
      * short-circuits the page's fetch/XHR; the cdp tier fulfills the network
      * response).
+     *
+     * @param handler Called per matching response; its result becomes the body.
+     *
+     * @example
+     * wt.replaceResponse(() => JSON.stringify({ mocked: true }));
+     *
+     * @example
+     * // serve a fixture fetched elsewhere
+     * wt.replaceResponse(async () => {
+     *     const res = await fetch("https://fixtures.local/user.json");
+     *     return await res.text();
+     * });
      */
     replaceResponse(
-        handler: (ctx: Wiretrick.ReplaceCtx) => string | Uint8Array | { file: string } | null | void | Promise<string | Uint8Array | { file: string } | null | void>
+        handler: (ctx: Wiretrick.ReplaceCtx) => Wiretrick.Awaitable<string | Uint8Array | { file: string } | null | void>
     ): void;
 
     /**
@@ -306,18 +450,39 @@ declare const wt: {
      * - **Chromium** — the JS network hook (page-initiated fetch/XHR), CDP
      *   with `strategy: ["cdp"]`, or the local helper with
      *   `strategy: ["process"]`.
+     *
+     * @param transform Receives the context and the original body; returns
+     * the new body.
+     *
+     * @example
+     * wt.modifyResponse((ctx, body) => {
+     *     const text = typeof body === "string"
+     *         ? body
+     *         : new TextDecoder().decode(body);
+     *     return text.replace("old", "new");
+     * });
      */
     modifyResponse(
-        transform: (
-            ctx: Wiretrick.BodyCtx,
-            body: string | Uint8Array
-        ) => string | Uint8Array | Promise<string | Uint8Array>
+        transform: (ctx: Wiretrick.BodyCtx, body: string | Uint8Array) => Wiretrick.Awaitable<string | Uint8Array>
     ): void;
 
-    /** Per-script key/value storage. */
+    /**
+     * Per-script key/value storage (async, persistent).
+     *
+     * @example
+     * wt.onRequest(async () => {
+     *     const hits = ((await wt.storage.get("hits")) ?? 0) + 1;
+     *     await wt.storage.set("hits", hits);
+     * });
+     */
     storage: Wiretrick.Storage;
 
-    /** Log to the manager's log panel for the current tab. */
+    /**
+     * Log to the manager's LOG panel for the current tab.
+     *
+     * @example
+     * wt.log("request to", ctx.url, { method: ctx.method });
+     */
     log(...args: unknown[]): void;
 
     /**
@@ -336,18 +501,18 @@ declare const wt: {
      * and live-update re-runs.
      *
      * @example
-     * wt.onDom(() => { document.title = "🎯 " + document.title; });
+     * wt.onDom(() => {
+     *     document.title = "🎯 " + document.title;
+     * });
      *
      * @example
+     * // after everything settled
      * wt.onDom(() => {
      *     const el = document.querySelector("h1");
      *     if (el) el.textContent = "Intercepted";
-     * }, { when: "document_idle" }); // after everything settled
+     * }, { when: "document_idle" });
      */
-    onDom(
-        handler: (ctx: Wiretrick.RequestCtx) => void | Promise<void>,
-        opts?: Wiretrick.DomOptions
-    ): void;
+    onDom(handler: (ctx: Wiretrick.RequestCtx) => Wiretrick.Awaitable<void>, opts?: Wiretrick.DomOptions): void;
 
     /**
      * Declarative script definition — the **only** way to activate a script:
@@ -359,20 +524,30 @@ declare const wt: {
      * hard-codes toggles; users change them from the ⚙ dialog in the popup
      * or the manager.
      *
+     * @param def URL patterns, tier priority and adjustable parameters.
+     * @returns The current parameter values, typed from `def.params`.
+     *
      * @example
      * const cfg = wt.declareScript({
      *     match: ["*://cloud*.mongodb.com/*"],
      *     strategy: ["hook", "cdp"],
      *     params: {
      *         enabled: { type: "boolean", default: true, description: "Return 500s" },
-     *         status:  { type: "enum", choices: ["500", "503"], default: "500" },
-     *         note:    { type: "string", default: "API force failed" },
-     *         extra:   { type: "stringList", default: [] },
+     *         status: { type: "enum", choices: ["500", "503"], default: "500" },
+     *         note: { type: "string", default: "API force failed" },
+     *         extra: { type: "stringList", default: [] },
      *     },
      * });
-     * wt.onRequest((ctx) => cfg.enabled ? { respond: { status: Number(cfg.status), body: { error: cfg.note } } } : undefined);
+     *
+     * wt.onRequest(() => {
+     *     if (!cfg.enabled) return;
+     *     return {
+     *         respond: {
+     *             status: Number(cfg.status),
+     *             body: { error: cfg.note },
+     *         },
+     *     };
+     * });
      */
-    declareScript<T extends Record<string, Wiretrick.ParamDef>>(
-        def: Wiretrick.ScriptDef<T>
-    ): Wiretrick.ParamsOf<T>;
+    declareScript<T extends Record<string, Wiretrick.ParamDef>>(def: Wiretrick.ScriptDef<T>): Wiretrick.ParamsOf<T>;
 };

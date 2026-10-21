@@ -236,6 +236,41 @@ try {
         hoverHtml.includes("<li") && hoverHtml.includes("<table") && /<code>[\s\S]*document_start/.test(hoverHtml) && (hoverHtml.match(/class="code"|<pre|monaco-tokenized-source/g) || []).length >= 2,
         hoverHtml.slice(0, 200));
 
+    const popupHtml = await mgr.evaluate(async () => {
+        const m = (window as any).monaco;
+        const ed = m.editor.getEditors()[0];
+        const prev = ed.getModel();
+        const model = m.editor.createModel("wt.declareScr", "typescript", m.Uri.parse("file:///suggest-probe.ts"));
+        ed.setModel(model);
+        ed.setPosition({ lineNumber: 1, column: 14 });
+        ed.focus();
+        let details = "";
+        for (let i = 0; i < 40 && !details.includes("<li") && !details.includes("@param"); i++) {
+            ed.trigger("t", "editor.action.triggerSuggest", {});
+            await new Promise((r) => setTimeout(r, 300));
+            if (!document.querySelector(".suggest-details-container .suggest-details")?.textContent?.trim()) ed.trigger("t", "toggleSuggestionDetails", {});
+            await new Promise((r) => setTimeout(r, 200));
+            details = document.querySelector(".suggest-details")?.innerHTML ?? "";
+        }
+        ed.trigger("t", "hideSuggestWidget", {});
+        model.setValue("wt.onDom(");
+        ed.setPosition({ lineNumber: 1, column: 10 });
+        let hints = "";
+        for (let i = 0; i < 40 && !hints.includes("Receives the same"); i++) {
+            ed.trigger("t", "editor.action.triggerParameterHints", {});
+            await new Promise((r) => setTimeout(r, 250));
+            hints = document.querySelector(".parameter-hints-widget")?.innerHTML ?? "";
+        }
+        ed.setModel(prev);
+        model.dispose();
+        return { details, hints };
+    });
+    const codeBlocks = (h: string) => (h.match(/monaco-tokenized-source|<pre/g) || []).length;
+    check("TS completion details: wrapped signature + @param + fenced example",
+        popupHtml.details.includes("@param") && popupHtml.details.includes("ParamsOf") && codeBlocks(popupHtml.details) >= 2, popupHtml.details.slice(0, 200));
+    check("TS parameter hints: per-param doc + fenced examples (no inline @param)",
+        popupHtml.hints.includes("Receives the same") && codeBlocks(popupHtml.hints) >= 1 && !popupHtml.hints.includes("@param"), popupHtml.hints.slice(0, 200));
+
     // ---- regression (the user's "onRequest doesn't work in MV3"): a
     // param-gated onRequest must see the REAL stored param values (the
     // sandbox used to compile with defaults → handlers did nothing) and

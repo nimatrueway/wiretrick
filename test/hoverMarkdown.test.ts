@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { quickInfoToMarkdown, partsToMarkdown } from "../src/ui/hoverMarkdown";
+import { quickInfoToMarkdown, partsToMarkdown, formatSignature, docsToMarkdown } from "../src/ui/hoverMarkdown";
 
 const t = (text: string, kind = "text") => ({ text, kind });
 
@@ -46,5 +46,21 @@ describe("hover markdown", () => {
             "See `A.b` for more"
         );
         expect(partsToMarkdown([t("{@link ", "link"), t("A", "linkName"), t("the A", "linkText"), t("}", "link"), t(".")])).toBe("the A.");
+    });
+
+    it("wraps long signatures: one parameter per line, long unions one member per line", () => {
+        expect(formatSignature("(method) onDom(): void")).toBe("(method) onDom(): void");
+        expect(formatSignature("(method) f<T extends Record<string, X>>(def: Wiretrick.ScriptDef<T>, opts?: { a: (x: number) => void; b: string }): R<T>", 40)).toBe(
+            "(method) f<T extends Record<string, X>>(\n    def: Wiretrick.ScriptDef<T>,\n    opts?: { a: (x: number) => void; b: string }\n): R<T>"
+        );
+        expect(formatSignature('(property) A.when?: "document_idle" | "DOMContentLoaded" | "a, b" | "document_end"', 40)).toBe(
+            '(property) A.when?:\n    | "document_idle"\n    | "DOMContentLoaded"\n    | "a, b"\n    | "document_end"'
+        );
+    });
+
+    it("docsToMarkdown can skip @param (signature help shows them per parameter)", () => {
+        expect(docsToMarkdown([t("Doc.")], [{ name: "param", text: [t("x", "parameterName")] }, { name: "example", text: "f()" }], (tag) => tag.name === "param")).toBe(
+            "Doc.\n\n*@example*  \n```typescript\nf()\n```"
+        );
     });
 });
