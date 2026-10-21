@@ -574,6 +574,10 @@ try {
     const yaml1 = await opfsText("settings.yaml");
     check("MV3 folder sync: settings.yaml exported to the folder", !!yaml1 && yaml1.includes("Sync guinea") && yaml1.includes("# token: abc"), (yaml1 || "MISSING").slice(0, 160));
 
+    const schema1 = JSON.parse((await opfsText("settings.schema.json")) || "{}");
+    check("MV3 folder sync: settings.schema.json types each script's params (VS Code completion)",
+        schema1?.properties?.params?.properties?.["Sync guinea"]?.properties?.token?.default === "abc", JSON.stringify(schema1?.properties?.params?.properties ?? {}).slice(0, 160));
+
     // external whole-file edit applies to storage
     await opfsWrite("settings.yaml", (yaml1 || "").replace("# token: abc", 'token: "xyz"'));
     await fPage.waitForTimeout(2500);

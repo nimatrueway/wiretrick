@@ -67,8 +67,13 @@ changes patch the matching entries. With a scripts folder connected the same
 file is mirrored to `settings.yaml` there and edits sync both ways.
 
 The file starts with a `# yaml-language-server: $schema=./settings.schema.json`
-modeline and the folder sync writes that schema next to it, so VS Code's YAML
-extension validates the file as you edit it.
+modeline and the folder sync writes that schema next to it. The schema is
+generated from your scripts (each script name, its declared params with their
+types, enum choices, bounds, defaults and descriptions) and rewritten whenever
+a script changes. Install the
+[YAML extension](https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml)
+(`redhat.vscode-yaml`) in VS Code to get the same completion, hover and
+validation as the manager.
 
 Formatting is preserved: an existing, parsable file is patched in place (only
 the changed value is rewritten; comments, blank lines, spacing and section

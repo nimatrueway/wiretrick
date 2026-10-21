@@ -6,9 +6,9 @@
  */
 import { computeEvents, loadSavedHandle, clearSavedHandle, saveHandle, type FileSig } from "../shared/folderSync";
 import { saveScript, deleteScript, newId, listScripts, onScriptsChanged } from "./engine/scriptStore";
-import { getSettingsText, applySettingsText, rememberSettingsText } from "./settingsFile";
+import { getSettingsText, applySettingsText, rememberSettingsText, currentSettingsState } from "./settingsFile";
 import { SETTINGS_FILE, SCHEMA_FILE } from "../shared/settingsYaml";
-import { SETTINGS_SCHEMA_JSON } from "../shared/settingsSchema";
+import { settingsSchemaJson } from "../shared/settingsSchema";
 import { broadcastToUi } from "./engine/logs";
 import { dlogLevel } from "../shared/debugLog";
 import { scriptFileName, scriptNameFromFile, legacyScriptFileName } from "../shared/scriptName";
@@ -353,13 +353,14 @@ async function exportSettings(base?: string): Promise<void> {
 /** the JSON schema the settings.yaml modeline points at (VS Code YAML extension) */
 async function ensureSchemaFile(): Promise<void> {
     if (!dirHandle) return;
+    const json = settingsSchemaJson((await currentSettingsState()).scripts);
     try {
         const f = await (await dirHandle.getFileHandle(SCHEMA_FILE)).getFile();
-        if ((await f.text()) === SETTINGS_SCHEMA_JSON) return;
+        if ((await f.text()) === json) return;
     } catch {
         // missing → write below
     }
-    await writeBack(SCHEMA_FILE, SETTINGS_SCHEMA_JSON);
+    await writeBack(SCHEMA_FILE, json);
 }
 
 /** settings.yaml was saved in the manager: write that text out as-is */

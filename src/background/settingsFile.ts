@@ -19,7 +19,7 @@ function storageSet(items: Record<string, any>): Promise<void> {
     return new Promise((r) => chrome.storage.local.set(items, () => r()));
 }
 
-async function currentState(): Promise<{ globals: GlobalSettings; scripts: ScriptSettingsState[] }> {
+export async function currentSettingsState(): Promise<{ globals: GlobalSettings; scripts: ScriptSettingsState[] }> {
     const g = await storageGet(["resLogLevel", "resLogCap"]);
     const stored = await loadAllParamValues();
     const scripts = (await listScripts()).map((s) => ({
@@ -40,7 +40,7 @@ const TEXT_KEY = "resSettingsText";
  * regenerates canonically only when there is no parsable base.
  */
 export async function getSettingsText(existing?: string): Promise<string> {
-    const { globals, scripts } = await currentState();
+    const { globals, scripts } = await currentSettingsState();
     const base = existing ?? (await storageGet([TEXT_KEY]))[TEXT_KEY];
     return (typeof base === "string" ? patchSettings(base, globals, scripts) : null) ?? renderSettings(globals, scripts);
 }
@@ -72,7 +72,7 @@ export async function applySettingsText(text: string): Promise<{ error?: string 
     } catch (e: any) {
         return { error: String(e?.message || e).split("\n")[0] };
     }
-    const { globals, scripts } = await currentState();
+    const { globals, scripts } = await currentSettingsState();
     await applyPlan(planSettings(doc, globals, scripts));
     await storageSet({ [TEXT_KEY]: text });
     return {};
@@ -85,7 +85,7 @@ export async function applySettingsText(text: string): Promise<{ error?: string 
  * settings shape doesn't freeze the file into that shape.
  */
 export async function applySettingsDoc(doc: SettingsDoc): Promise<{ error?: string }> {
-    const { globals, scripts } = await currentState();
+    const { globals, scripts } = await currentSettingsState();
     await applyPlan(planSettings(doc, globals, scripts));
     await storageSet({ [TEXT_KEY]: await getSettingsText() });
     return {};
