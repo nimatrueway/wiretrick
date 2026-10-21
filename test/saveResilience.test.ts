@@ -23,7 +23,7 @@ const store: Record<string, any> = {};
 };
 
 // compileForStorage is mocked per-test; saveScript imports it directly
-const compileResult: any = { meta: { declared: true, name: "x", match: ["*://*/*"], include: [], strategy: "auto" }, paramDefs: { p: { type: "number", default: 1 } }, error: null };
+const compileResult: any = { meta: { declared: true, name: "x", match: ["*://*/*"], strategy: "auto" }, paramDefs: { p: { type: "number", default: 1 } }, error: null };
 vi.mock("../src/background/compileHost", () => ({
     compileForStorage: () => Promise.resolve(structuredClone(compileResult)),
     SANDBOX_COMPILE_FAILED: "sandbox compile failed",
@@ -35,7 +35,7 @@ import { defaultMeta } from "../src/shared/metaParser";
 describe("saveScript sandbox-failure resilience", () => {
     beforeEach(() => {
         for (const k of Object.keys(store)) delete store[k];
-        compileResult.meta = { declared: true, name: "x", match: ["*://*/*"], include: [], strategy: "auto" };
+        compileResult.meta = { declared: true, name: "x", match: ["*://*/*"], strategy: "auto" };
         compileResult.paramDefs = { p: { type: "number", default: 1 } };
         compileResult.error = null;
     });

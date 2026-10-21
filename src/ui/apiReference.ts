@@ -12,7 +12,6 @@ export const API_REFERENCE: ApiSection[] = [
 
 const cfg = wt.declareScript({
     match: ["*://example.com/*", "*://api.example.com/v1/*"],
-    include: [],                        // extra URL patterns
     strategy: ["auto"],                 // or hook | cdp | webrequest | process priority list
 });
 

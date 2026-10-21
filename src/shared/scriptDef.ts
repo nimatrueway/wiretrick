@@ -57,7 +57,6 @@ export type ParamsOf<T extends Record<string, ParamDef>> = {
 export interface ScriptDef<T extends Record<string, ParamDef> = Record<string, ParamDef>> {
     /** URL patterns the script activates on */
     match?: string[];
-    include?: string[];
     /** interception tier priority list, e.g. ["hook", "cdp"] */
     strategy?: ("auto" | "hook" | "cdp" | "webrequest" | "process")[];
     params?: T;

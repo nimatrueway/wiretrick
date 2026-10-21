@@ -40,7 +40,6 @@ export function unknownStrategies(raw: string | undefined): string[] {
 export interface ResMeta {
     name: string;
     match: string[];
-    include: string[];
     /** raw strategy value (comma-separated list) */
     strategy: string;
     /** true once wt.declareScript ran — undeclared sources are libraries */
@@ -50,12 +49,11 @@ export interface ResMeta {
 export const DEFAULT_META: ResMeta = {
     name: "Untitled script",
     match: [],
-    include: [],
     strategy: "auto",
     declared: false,
 };
 
 /** Fresh default meta with a fallback display name (e.g. the file name). */
 export function defaultMeta(name?: string): ResMeta {
-    return { ...DEFAULT_META, match: [], include: [], name: name || DEFAULT_META.name };
+    return { ...DEFAULT_META, match: [], name: name || DEFAULT_META.name };
 }

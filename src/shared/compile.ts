@@ -301,7 +301,7 @@ function makeCollectorShim(store: any, overrides?: ResApiOverrides): any {
 }
 
 /**
- * Builds wt.declareScript: applies match/include/strategy onto the
+ * Builds wt.declareScript: applies match/strategy onto the
  * script's meta and marks it declared, collects param defs, and returns
  * the resolved param values for the script to use.
  */
@@ -311,7 +311,6 @@ function createDeclareShim(meta: ResMeta, storedValues?: Record<string, any>) {
         if (!def || typeof def !== "object") return {};
         meta.declared = true;
         if (def.match?.length) meta.match = [...def.match];
-        if (def.include?.length) meta.include = [...def.include];
         if (def.strategy?.length) meta.strategy = def.strategy.join(",");
         if (def.params) {
             state.defs = def.params;

@@ -305,8 +305,6 @@ declare namespace Wiretrick {
          * match: ["*://example.com/*", "*://api.example.com/v1/*"]
          */
         match?: string[];
-        /** Extra URL patterns, same syntax as `match`. */
-        include?: string[];
         /**
          * Interception tiers in priority order; the first viable one per
          * request wins. Default `["auto"]`.
