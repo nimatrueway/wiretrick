@@ -136,6 +136,18 @@ describe("network recorder", () => {
         p.disconnect();
     });
 
+    it("a webRequest-strategy annotation made before the recorder saw the request lands on the real row", () => {
+        const p = fakePort();
+        addNetworkPort(p.port);
+        // the pipeline's blocking onBeforeRequest runs before the recorder's
+        annotateFromLog(7, "s1", "[Hdr] onRequest → request headers (set x-a) https://a.test/api", "info");
+        req("1", "https://a.test/api");
+        expect([...entries.values()].filter((e) => e.synthetic)).toEqual([]);
+        expect(entries.get("1")!.interventions).toMatchObject([{ scriptName: "Hdr", action: "onRequest → request headers (set x-a)" }]);
+        expect(p.sent.some((m) => m.type === "netRemoved")).toBe(true);
+        p.disconnect();
+    });
+
     it("does nothing without a viewer, and ignores lines without a URL", () => {
         annotateFromLog(7, "s1", "[Mock] respond 200 https://a.test/x", "info");
         expect(entries.size).toBe(0);

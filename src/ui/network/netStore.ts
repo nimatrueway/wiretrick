@@ -13,6 +13,7 @@ export function createNetStore() {
 
     function apply(msg: NetPortMsg): void {
         if (msg.type === "netCleared") byId.clear();
+        else if (msg.type === "netRemoved") for (const id of msg.ids) byId.delete(id);
         else {
             if (msg.type === "netSnapshot") byId.clear();
             for (const e of msg.entries) byId.set(e.id, e);

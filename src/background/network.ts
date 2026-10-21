@@ -143,10 +143,32 @@ function archiveRedirect(e: NetEntry, d: chrome.webRequest.WebRedirectionRespons
     });
 }
 
+/**
+ * A blocking webRequest listener (registered before ours) may already have
+ * annotated this request: that created a synthetic row — fold it in.
+ */
+function adoptSynthetic(e: NetEntry): void {
+    const now = Date.now();
+    for (const s of [...entries.values()].reverse()) {
+        if (now - s.startedAt > 2000) break;
+        if (!s.synthetic || s.url !== e.url) continue;
+        if (s.tabId >= 0 && e.tabId >= 0 && s.tabId !== e.tabId) continue;
+        e.interventions.push(...s.interventions);
+        if (s.responseBody) {
+            e.responseBody = s.responseBody;
+            e.originalResponseBody = s.originalResponseBody;
+        }
+        entries.delete(s.id);
+        dirty.delete(s.id);
+        post({ type: "netRemoved", ids: [s.id] });
+        return;
+    }
+}
+
 const L = {
     before(d: chrome.webRequest.WebRequestBodyDetails): void {
         if (ignored(d as any)) return;
-        add({
+        const e: NetEntry = {
             id: d.requestId,
             tabId: d.tabId,
             url: d.url,
@@ -163,7 +185,9 @@ const L = {
             initiator: d.initiator || (d as any).originUrl,
             requestBody: requestBodyOf(d.requestBody),
             interventions: [],
-        });
+        };
+        adoptSynthetic(e);
+        add(e);
     },
     sendHeaders(d: chrome.webRequest.WebRequestHeadersDetails): void {
         const e = entries.get(d.requestId);

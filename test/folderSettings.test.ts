@@ -109,6 +109,25 @@ describe("settings.yaml folder sync", () => {
         await sync.stop();
     }, 20000);
 
+    it("a settings.yaml save in the manager is written to the folder as-is", async () => {
+        const sync = await import("../src/background/folderSync");
+        const ss = await import("../src/background/engine/scriptStore");
+        const { applySettingsText } = await import("../src/background/settingsFile");
+        const id = ss.newId();
+        await ss.saveScript({ id, name: "S", code: `wt.declareScript({ params: { n: { type: "number", default: 1 } } });` });
+        await sync.startFromStoredHandle();
+        await sleep(600);
+        // log level only (storage.onChanged is not wired here) + a new comment
+        const edited = "# from the manager\nsettings:\n  logLevel: error\nparams:\n  S:\n    n: 3\n";
+        expect((await applySettingsText(edited)).error).toBeUndefined();
+        await sync.exportSettingsFrom(edited);
+        expect(files.get("settings.yaml")!.text).toBe(edited);
+        await sleep(1500); // the poll must not bounce it back
+        expect(files.get("settings.yaml")!.text).toBe(edited);
+        expect((await ss.getParamValues(id)).n).toBe(3);
+        await sync.stop();
+    }, 20000);
+
     it("reflects declareScript param changes: added param documented, removed param commented out", async () => {
         const sync = await import("../src/background/folderSync");
         const ss = await import("../src/background/engine/scriptStore");

@@ -109,8 +109,8 @@ describe("webRequest tier: log lines use the stored script name", () => {
 wt.onRequest(() => ({ respond: { body: "ok", mime: "text/plain" } }));`)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("redirect");
-        const line = entries.find((e) => e.message.includes("serve"));
-        expect(line, "a serve log line must exist").toBeTruthy();
+        const line = entries.find((e) => e.message.includes("respond 200"));
+        expect(line, "a respond log line must exist").toBeTruthy();
         expect(line!.message).toContain("[API mocker]");
     });
 

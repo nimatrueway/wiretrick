@@ -115,6 +115,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                     }
                     // cache header mods so onBeforeSendHeaders doesn't re-run the handler
                     if (result && result.headers && (result.headers.set || result.headers.remove)) {
+                        log(details.tabId, `[${entry.name}] onRequest → request headers (${describeHeaderMods(result.headers)}) ${details.url}`, "info", entry.id);
                         // MERGE across stacked scripts (set: later wins per
                         // key; remove accumulates) — matches the
                         // onResponseHeaders semantics
@@ -139,7 +140,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                         return this.staticServe(details, body, mime, entry.id, entry.name);
                     }
                     if (result && (result.redirect || result.cancel)) {
-                        log(details.tabId, `[${entry.name}] onRequest → ${JSON.stringify(result).slice(0, 200)}`, "info", entry.id);
+                        log(details.tabId, `[${entry.name}] onRequest → ${result.cancel ? "cancel" : `redirect → ${result.redirect}`} ${details.url}`, "info", entry.id);
                         return normalize(result);
                     }
                 }
@@ -196,7 +197,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
     }
 
     private staticServe(details: WebRequestDetailsLike, content: string | Uint8Array, mime: string, scriptId: string, scriptName: string): HookDisposition {
-        log(details.tabId, `[${scriptName}] serve ${mime} (${content.length}b)`, "info", scriptId);
+        log(details.tabId, `[${scriptName}] onRequest → respond 200 ${mime} (${content.length}b) ${details.url}`, "info", scriptId);
         recordNetBody({ tabId: details.tabId, url: details.url, method: details.method, modified: content, mime, status: 200 });
         if (details.type === "main_frame") {
             const rid = "serve_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -213,7 +214,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                 : guessMime(null, details.url, details.type === "xmlhttprequest" ? "application/json" : undefined);
 
         const serve = (mime: string, content: string | Uint8Array): HookDisposition => {
-            log(details.tabId, `[${scriptName}] replaceResponse → ${mime} (${content.length} bytes)`, "info", scriptId);
+            log(details.tabId, `[${scriptName}] replaceResponse → ${mime} (${content.length} bytes) ${details.url}`, "info", scriptId);
             recordNetBody({ tabId: details.tabId, url: details.url, method: details.method, modified: content, mime, status: 200 });
             // Chrome blocks top-level data: navigations — serve main frames
             // from an extension page instead
@@ -272,6 +273,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                 }
                 const mods = (result as any)?.headers;
                 if (mods && (mods.set || mods.remove)) {
+                    log(details.tabId, `[${entry.name}] onResponseHeaders → ${describeHeaderMods(mods)} ${details.url}`, "info", entry.id);
                     changes = changes || {};
                     changes.set = { ...changes.set, ...mods.set };
                     changes.remove = [...(changes.remove || []), ...(mods.remove || [])];
@@ -324,6 +326,13 @@ export class WebRequestStrategy implements InterceptionStrategy {
 }
 
 // ---- shared helpers ----
+
+function describeHeaderMods(m: { set?: Record<string, string>; remove?: string[] }): string {
+    const parts: string[] = [];
+    if (m.set && Object.keys(m.set).length) parts.push(`set ${Object.keys(m.set).join(", ")}`);
+    if (m.remove?.length) parts.push(`remove ${m.remove.join(", ")}`);
+    return parts.join("; ");
+}
 
 export function makeCtx(details: WebRequestDetailsLike, tabUrl: string | null): any {
     const headers: { [n: string]: string } = {};

@@ -327,12 +327,16 @@ async function readSettingsFile(): Promise<{ text: string; sig: FileSig } | null
     }
 }
 
-/** storage → file; patched in place, so an up-to-date file is never rewritten */
-async function exportSettings(): Promise<void> {
+/**
+ * storage → file; patched in place, so an up-to-date file is never
+ * rewritten. `base`: text edited in the manager, which wins over the file's
+ * own formatting and comments.
+ */
+async function exportSettings(base?: string): Promise<void> {
     if (!dirHandle) return;
     try {
         const existing = await readSettingsFile();
-        const text = await getSettingsText(existing?.text);
+        const text = await getSettingsText(base ?? existing?.text);
         if (existing?.text !== text) {
             await writeBack(SETTINGS_FILE, text);
             settingsSig = (await readSettingsFile())?.sig ?? null;
@@ -354,6 +358,13 @@ async function ensureSchemaFile(): Promise<void> {
         // missing → write below
     }
     await writeBack(SCHEMA_FILE, SETTINGS_SCHEMA_JSON);
+}
+
+/** settings.yaml was saved in the manager: write that text out as-is */
+export async function exportSettingsFrom(text: string): Promise<void> {
+    if (exportTimer) clearTimeout(exportTimer);
+    exportTimer = null;
+    await exportSettings(text);
 }
 
 function scheduleExport(): void {

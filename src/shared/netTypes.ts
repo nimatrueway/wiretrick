@@ -52,4 +52,4 @@ export interface NetEntry {
 }
 
 /** background → UI port messages on the "network" port */
-export type NetPortMsg = { type: "netSnapshot"; entries: NetEntry[] } | { type: "netUpdate"; entries: NetEntry[] } | { type: "netCleared" };
+export type NetPortMsg = { type: "netSnapshot"; entries: NetEntry[] } | { type: "netUpdate"; entries: NetEntry[] } | { type: "netCleared" } | { type: "netRemoved"; ids: string[] };
