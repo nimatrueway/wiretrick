@@ -32,6 +32,24 @@ export function scriptFileName(name: string): string {
     return base + ".ts";
 }
 
+/**
+ * Identity of a script's file on any disk: macOS and Windows file systems
+ * ignore case, so "Foo" and "foo" would share (and overwrite) one file.
+ */
+export function scriptFileKey(name: string): string {
+    return scriptFileName(name).toLowerCase();
+}
+
+/** `base`, or `base (2)`, `base (3)`… — the first whose file doesn't clash with `taken` */
+export function uniqueScriptName(base: string, taken: string[]): string {
+    const keys = new Set(taken.map(scriptFileKey));
+    if (!keys.has(scriptFileKey(base))) return base;
+    for (let i = 2; ; i++) {
+        const next = `${base} (${i})`;
+        if (!keys.has(scriptFileKey(next))) return next;
+    }
+}
+
 /** file name → script name (exact) */
 export function scriptNameFromFile(fileName: string): string {
     return fileName.replace(/\.ts$/, "") || "Imported script";

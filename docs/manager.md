@@ -46,13 +46,19 @@ Click **Folder…** and pick a folder (e.g. `~/Wiretricks`) — that becomes you
 scripts home. Connecting runs a two-way initial sync: `.ts` files without a
 script are imported, scripts without a file are written out, and where both
 exist but differ the newer one wins (file modified time vs. the script's last
-save). The same reconcile runs on every reconnect and browser restart.
+save) and the other copy is kept in `.wiretrick-backup/` — the manager lists
+these before connecting so you can cancel. The same reconcile runs on every
+reconnect and browser restart; there, only the side that actually changed
+since the last sync wins, so a backup is made only when both changed.
 `wt-api.d.ts` and `tsconfig.json` are written alongside. Edit in VS Code (or any editor) with full
 TypeScript completions; saves hot-reload into the engine instantly.
 
 Sync is two-way and watches the folder for **creates, renames/moves and
 deletes** too: a new `.ts` file becomes a script, deleting a file removes its
-script, renaming a file renames the script. The folder choice is remembered —
+script, renaming a file renames the script (its `settings.yaml` section moves
+with it). If a file and its script both change before a sync, the file wins
+and the script's version goes to `.wiretrick-backup/`. Saving in the manager
+over a script that changed elsewhere shows a diff to overwrite or take theirs. The folder choice is remembered —
 the manager reconnects automatically on open (one click to re-grant after a
 browser restart, per Chrome's File System Access rules — click the toolbar
 notice or the button).

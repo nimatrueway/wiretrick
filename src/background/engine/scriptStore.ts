@@ -48,6 +48,15 @@ export function onScriptsChanged(fn: () => void): () => void {
     return () => listeners.delete(fn);
 }
 
+type RenameListener = (oldName: string, newName: string) => void | Promise<void>;
+const renameListeners = new Set<RenameListener>();
+
+/** a script's name changed — awaited before the change is announced */
+export function onScriptRenamed(fn: RenameListener): () => void {
+    renameListeners.add(fn);
+    return () => renameListeners.delete(fn);
+}
+
 function notify(): void {
     listeners.forEach((fn) => fn());
 }
@@ -103,6 +112,9 @@ export async function saveScript(partial: Pick<Script, "id" | "code"> & Partial<
         order.push(partial.id);
     }
     await storageSet({ [STORE_KEY]: byId, [ORDER_KEY]: order });
+    if (prev && prev.meta.name !== script.meta.name) {
+        for (const fn of renameListeners) await fn(prev.meta.name, script.meta.name);
+    }
     // new code → stale runtime errors no longer apply
     if (prev && prev.code !== script.code) {
         void clearScriptErrors(script.id);

@@ -672,3 +672,7 @@ body.net-dragging { user-select: none; }
 .picker-detail { font-size: 12px; }
 .picker-warn { margin-top: 10px; color: var(--warn); font-size: 12px; display: flex; gap: 8px; align-items: center; }
 .picker-warn[hidden] { display: none; }
+
+/* save conflict: stored vs unsaved diff */
+.dialog.conflict { width: min(1100px, 96vw); }
+.conflict-diff { height: 60vh; border: 1px solid var(--border); }

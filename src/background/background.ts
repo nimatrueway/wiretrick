@@ -97,12 +97,8 @@ chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
         sendResponse(folderSync.getStatus());
         return false;
     }
-    if (msg && msg.type === "folderWriteBack") {
-        folderSync.writeBack(msg.fileName, msg.content).then(() => sendResponse({}));
-        return true;
-    }
-    if (msg && msg.type === "folderDelete") {
-        folderSync.deleteFile(msg.fileName).then(() => sendResponse({}));
+    if (msg && msg.type === "folderSyncPreview") {
+        folderSync.previewStoredHandle().then((p) => sendResponse(p)).catch((e) => sendResponse({ error: String(e) }));
         return true;
     }
     return false;

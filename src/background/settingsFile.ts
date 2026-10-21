@@ -3,8 +3,8 @@
  * manager's virtual file, the popup and the synced folder converge on one
  * source of truth.
  */
-import { listScripts, loadAllParamValues, setParamValue, setEnabled } from "./engine/scriptStore";
-import { patchSettings } from "../shared/settingsYamlPatch";
+import { listScripts, loadAllParamValues, setParamValue, setEnabled, onScriptRenamed } from "./engine/scriptStore";
+import { patchSettings, renameSettingsSection } from "../shared/settingsYamlPatch";
 import {
     renderSettings, parseSettings, planSettings,
     DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL,
@@ -33,6 +33,24 @@ export async function currentSettingsState(): Promise<{ globals: GlobalSettings;
 }
 
 const TEXT_KEY = "resSettingsText";
+
+// a renamed script keeps its settings section (values, comments)
+onScriptRenamed(async (oldName, newName) => {
+    const text = (await storageGet([TEXT_KEY]))[TEXT_KEY];
+    if (typeof text !== "string") return;
+    const next = renameSettingsSection(text, oldName, newName);
+    if (next !== text) await storageSet({ [TEXT_KEY]: next });
+});
+
+/** does this settings.yaml text parse? */
+export function settingsTextParses(text: string): boolean {
+    try {
+        parseSettings(text);
+        return true;
+    } catch {
+        return false;
+    }
+}
 
 /**
  * Current settings.yaml. Patches `existing` (the synced file / editor text;

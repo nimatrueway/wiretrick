@@ -1,3 +1,5 @@
+import { renameSettingsSection } from "../src/shared/settingsYamlPatch";
+import { uniqueScriptName } from "../src/shared/scriptName";
 import { describe, it, expect } from "vitest";
 import {
     parseSettings, renderSettings, planSettings, yamlKey, SCHEMA_MODELINE, SETTINGS_FILE,
@@ -291,5 +293,28 @@ describe("multiline string params", () => {
         expect(patchSettings(block, G, [m("z\nw")])).toBe("params:\n  N:\n    body: |-\n      z\n      w\n");
         // block scalar → single line collapses it
         expect(patchSettings(block, G, [m("z")])).toBe("params:\n  N:\n    body: z\n");
+    });
+});
+
+describe("renameSettingsSection", () => {
+    const text = "# top\nparams:\n  old:\n    n: 9 # tuned\n  other:\n    x: 1\n";
+    it("moves the section, keeping values and comments", () => {
+        const out = renameSettingsSection(text, "old", "new");
+        expect(out).toBe("# top\nparams:\n  new:\n    n: 9 # tuned\n  other:\n    x: 1\n");
+    });
+    it("quotes names that need it", () => {
+        expect(renameSettingsSection(text, "old", "a: b")).toMatch(/\n  "a: b":\n    n: 9/);
+    });
+    it("is a no-op when the section is missing, the target exists, or the yaml is broken", () => {
+        expect(renameSettingsSection(text, "nope", "new")).toBe(text);
+        expect(renameSettingsSection(text, "old", "other")).toBe(text);
+        expect(renameSettingsSection("params: [oops", "old", "new")).toBe("params: [oops");
+    });
+});
+
+describe("script name helpers", () => {
+    it("uniqueScriptName ignores letter case", () => {
+        expect(uniqueScriptName("x", ["a"])).toBe("x");
+        expect(uniqueScriptName("X", ["x", "x (2)"])).toBe("X (3)");
     });
 });

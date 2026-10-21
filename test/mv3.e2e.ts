@@ -406,6 +406,23 @@ try {
     const typedInd = await typedPopup.evaluate(() => [...document.querySelectorAll("li.script-item")].filter((li) => li.querySelector(".err-ind.types")).map((li) => li.querySelector(".script-name")?.textContent));
     check("popup shows the TypeScript error indicator", typedInd.includes("Typed"), JSON.stringify(typedInd));
     await typedPopup.close();
+    // save conflict: the stored copy changes while the editor holds unsaved edits
+    await mgr.bringToFront();
+    await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "saveScript", id: "s_conf", name: "Conflicted", code: "// v1\n" }, r)));
+    await mgr.waitForSelector('#script-list li[data-id="s_conf"]', { timeout: 8000 });
+    mgr.once("dialog", (d: any) => void d.accept()); // earlier probes may leave the open buffer dirty
+    await mgr.evaluate(() => (document.querySelector('#script-list li[data-id="s_conf"]') as HTMLElement).click());
+    await mgr.waitForFunction(() => (window as any).monaco.editor.getEditors()[0].getValue() === "// v1\n", null, { timeout: 8000 }).catch(() => {});
+    await mgr.evaluate(() => (window as any).monaco.editor.getEditors()[0].trigger("t", "type", { text: "// mine\n" }));
+    await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "saveScript", id: "s_conf", name: "Conflicted", code: "// theirs\n" }, r)));
+    await mgr.waitForTimeout(500);
+    await mgr.locator("#btn-save").click();
+    const conflictShown = await mgr.waitForSelector("#conflict-dialog .conflict-diff", { timeout: 8000 }).then(() => true, () => false);
+    await mgr.locator('#conflict-dialog [data-act="theirs"]').click().catch(() => {});
+    await mgr.waitForTimeout(300);
+    const afterTheirs = await mgr.evaluate(() => (window as any).monaco.editor.getEditors()[0].getValue());
+    check("saving over an outside change opens the conflict diff; Take theirs loads it", conflictShown && afterTheirs === "// theirs\n", JSON.stringify({ conflictShown, afterTheirs }));
+    await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "deleteScript", id: "s_conf" }, r)));
     for (const id of ["s_throws", "s_broken", "s_typed", "s_typed2"]) await mgr.evaluate((id: string) => new Promise((r) => chrome.runtime.sendMessage({ type: "deleteScript", id }, r)), id);
     // a reload in the already-attached tab (no first-navigation race)
     await xoPage.reload();

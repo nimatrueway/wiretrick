@@ -66,6 +66,18 @@ export async function adoptForWatch(handle: any): Promise<boolean> {
 export async function openFolder(handlers?: FolderSyncHandlers): Promise<void> {
     void handlers;
     const dirHandle = await (window as any).showDirectoryPicker({ mode: "readwrite" } as any);
+    // dry run first: say which scripts/files will be overwritten before anything is
+    await saveHandle(dirHandle, "pendingFolder");
+    const preview = await sendRaw({ type: "folderSyncPreview" }).catch(() => null);
+    await clearSavedHandle("pendingFolder");
+    if (preview?.conflicts?.length) {
+        const lines = preview.conflicts.map((c: any) => `• ${c.name} — keeping the ${c.winner === "file" ? "file in the folder" : "script in the extension"}`);
+        const ok = confirm(
+            `${preview.conflicts.length} script(s) differ between the extension and "${dirHandle.name}":\n\n${lines.join("\n")}\n\n` +
+                `The newer copy wins; the other is saved to .wiretrick-backup/ in the folder. Continue?`
+        );
+        if (!ok) throw new DOMException("folder sync cancelled", "AbortError");
+    }
     await saveHandle(dirHandle);
     const started = await sendRaw({ type: "folderSyncStart", fresh: true });
     if (!started || !started.ok) {

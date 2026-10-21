@@ -8,9 +8,10 @@ import { SAMPLES } from "./samples";
 import { settingsDiagnostics, settingsCompletions, settingsHover, type AssistScript } from "../shared/settingsAssist";
 import { dependantsOf, missingImports } from "../shared/scriptImports";
 import { pickRows } from "./bundlePicker";
+import { resolveConflict } from "./conflictDialog";
 import { watchTheme, saveTheme, type Theme, type ThemePref } from "./theme";
 import * as fsBridge from "./fsBridge";
-import { cleanScriptName, scriptNameProblem, scriptFileName, MAX_NAME } from "../shared/scriptName";
+import { cleanScriptName, scriptNameProblem, scriptFileName, scriptFileKey, uniqueScriptName, MAX_NAME } from "../shared/scriptName";
 import { buildBundle, parseBundleText, bundleSettingsDoc, pickBundle, vscodeTargetPath } from "./bundle";
 import { createQuickOpenPalette } from "./quickOpen";
 import { computeDirty } from "./dirtyState";
@@ -218,7 +219,17 @@ async function saveSettings(): Promise<void> {
 }
 
 async function refresh(): Promise<void> {
+    const prev = scripts;
     scripts = await send({ type: "listScripts" });
+    if (dirty && selectedId && selectedId !== SETTINGS_ID && !scripts.some((s) => s.id === selectedId)) {
+        // deleted elsewhere while edited here: keep the buffer (and its
+        // model) so the unsaved text isn't lost; saving offers to recreate
+        const orphan = prev.find((s) => s.id === selectedId);
+        if (orphan) {
+            scripts = [...scripts, orphan];
+            status(`"${orphan.meta.name}" was deleted elsewhere — save to recreate it`, "error");
+        }
+    }
     renderList();
     syncModels();
     scheduleDiagnostics();
@@ -294,9 +305,6 @@ function renderList(): void {
             e.stopPropagation();
             if (!confirm(`Delete "${script.meta.name}"?`)) return;
             await send({ type: "deleteScript", id: script.id });
-            if (fsBridge.isSyncing()) {
-                await send({ type: "folderDelete", fileName: fsBridge.fileNameFor(script.id, script.meta.name) });
-            }
             await refresh();
         });
 
@@ -361,16 +369,8 @@ function startRename(label: HTMLElement, script: Script): void {
             renderList(); // catch up on updates skipped while renaming
             return;
         }
-        const oldFile = fsBridge.fileNameFor(script.id, script.meta.name);
         const result = await send({ type: "saveScript", id: script.id, code: script.code, name: next });
         if (result?.error) status("script error — see log", "error");
-        if (fsBridge.isSyncing()) {
-            const newFile = fsBridge.fileNameFor(script.id, next);
-            if (newFile !== oldFile) {
-                await send({ type: "folderWriteBack", fileName: newFile, content: script.code });
-                await send({ type: "folderDelete", fileName: oldFile });
-            }
-        }
         await refresh();
         renderList();
     };
@@ -617,20 +617,35 @@ async function saveCurrent(): Promise<void> {
     if (!selectedId || !editor) return;
     const code = editor.getValue();
     const name = scripts.find((s) => s.id === selectedId)?.meta.name || "Untitled script";
-    const result = await send({ type: "saveScript", id: selectedId, code, name });
+    const id = selectedId;
+    const m = models.get(id);
+    const base = m ? baselines.get(m.uri.toString()) : undefined;
+    let result = await send({ type: "saveScript", id, code, name, base });
+    if (result?.conflict) {
+        const deleted = result.conflict === "deleted";
+        const choice = await resolveConflict({ name, theirs: deleted ? null : result.code, mine: code });
+        if (choice === "cancel") return;
+        if (choice === "theirs") {
+            if (!deleted && m) {
+                applyingExternal = true;
+                m.setValue(result.code);
+                applyingExternal = false;
+                setBaseline(m, result.code);
+            }
+            setDirty(false);
+            await refresh();
+            renderList();
+            return;
+        }
+        result = await send({ type: "saveScript", id, code, name });
+    }
     if (result && result.error) {
         status("script error — see log", "error");
-        void result;
     } else {
         status("saved ✓");
-        const m = models.get(selectedId);
         if (m) setBaseline(m, code); // the stored text is now the baseline
     }
     setDirty(false);
-    // two-way sync: push the saved source into the VS Code folder
-    if (fsBridge.isSyncing()) {
-        await send({ type: "folderWriteBack", fileName: fsBridge.fileNameFor(selectedId, name), content: code });
-    }
     await refresh();
     renderList();
 }
@@ -1408,10 +1423,11 @@ async function main(): Promise<void> {
     });
     // an imported script replaces the existing script of the same name
     const saveImported = async (item: { code: string; name?: string; enabled?: boolean }) => {
-        const existing = item.name ? scripts.find((s) => s.meta.name === item.name) : undefined;
+        // file names are case-insensitive on Windows/macOS: "Foo" replaces "foo"
+        const existing = item.name ? scripts.find((s) => scriptFileKey(s.meta.name) === scriptFileKey(item.name!)) : undefined;
         await send({ type: "saveScript", id: existing?.id ?? uuid(), code: item.code, name: item.name, enabled: item.enabled });
     };
-    const existsBadge = (name?: string) => (name && scripts.some((s) => s.meta.name === name) ? "replaces existing" : "new");
+    const existsBadge = (name?: string) => (name && scripts.some((s) => scriptFileKey(s.meta.name) === scriptFileKey(name)) ? "replaces existing" : "new");
     $("#btn-import").addEventListener("click", () => {
         const input = document.createElement("input");
         input.type = "file";
@@ -1473,7 +1489,9 @@ async function main(): Promise<void> {
                 for (const item of items) await saveImported(item);
                 status(`imported ${items.length} script(s) ✓`);
             } else {
-                await send({ type: "saveScript", id: uuid(), code: text, name: "Imported script" });
+                const base = cleanScriptName(file.name.replace(/\.ts$/i, "").replace(/\.script$/i, "")) || "Imported script";
+                const name = uniqueScriptName(base, scripts.map((s) => s.meta.name));
+                await send({ type: "saveScript", id: uuid(), code: text, name });
                 status("imported script ✓");
             }
             await refresh();

@@ -18,8 +18,16 @@ export interface FolderEvents {
     changed: string[];
     added: string[];
     removed: string[];
-    /** one file vanished while one appeared in the same poll → rename/move */
-    rename: { oldName: string; newName: string } | null;
+}
+
+/** Cheap content fingerprint (FNV-1a + length) — identifies a file's text across renames. */
+export function contentHash(text: string): string {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < text.length; i++) {
+        h ^= text.charCodeAt(i);
+        h = Math.imul(h, 0x01000193);
+    }
+    return (h >>> 0).toString(16) + ":" + text.length;
 }
 
 /** Pure diff between the previously seen file set and the current one. */
@@ -35,8 +43,7 @@ export function computeEvents(prev: Map<string, FileSig>, seen: Map<string, File
     for (const name of prev.keys()) {
         if (!seen.has(name)) removed.push(name);
     }
-    const rename = added.length === 1 && removed.length === 1 ? { oldName: removed[0], newName: added[0] } : null;
-    return { changed, added, removed, rename };
+    return { changed, added, removed };
 }
 
 // ---- handle persistence (IndexedDB, shared across extension contexts) ----
@@ -50,22 +57,22 @@ export function handleDb(): Promise<IDBDatabase> {
     });
 }
 
-export async function saveHandle(handle: any): Promise<void> {
+export async function saveHandle(handle: any, key = "scriptFolder"): Promise<void> {
     const db = await handleDb();
     await new Promise((resolve, reject) => {
         const tx = db.transaction("handles", "readwrite");
-        tx.objectStore("handles").put(handle, "scriptFolder");
+        tx.objectStore("handles").put(handle, key);
         tx.oncomplete = () => resolve(null);
         tx.onerror = () => reject(tx.error);
     });
 }
 
-export async function loadSavedHandle(): Promise<any | null> {
+export async function loadSavedHandle(key = "scriptFolder"): Promise<any | null> {
     try {
         const db = await handleDb();
         return await new Promise((resolve, reject) => {
             const tx = db.transaction("handles", "readonly");
-            const req = tx.objectStore("handles").get("scriptFolder");
+            const req = tx.objectStore("handles").get(key);
             req.onsuccess = () => resolve(req.result || null);
             req.onerror = () => reject(req.error);
         });
@@ -74,12 +81,12 @@ export async function loadSavedHandle(): Promise<any | null> {
     }
 }
 
-export async function clearSavedHandle(): Promise<void> {
+export async function clearSavedHandle(key = "scriptFolder"): Promise<void> {
     try {
         const db = await handleDb();
         await new Promise((resolve) => {
             const tx = db.transaction("handles", "readwrite");
-            tx.objectStore("handles").delete("scriptFolder");
+            tx.objectStore("handles").delete(key);
             tx.oncomplete = () => resolve(null);
             tx.onerror = () => resolve(null);
         });

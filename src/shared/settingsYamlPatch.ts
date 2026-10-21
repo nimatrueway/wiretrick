@@ -460,3 +460,26 @@ export function patchSettings(existing: string, g: GlobalSettings, scripts: Scri
     }
     return out;
 }
+
+/**
+ * A script was renamed: rename its params section key in place, so its
+ * values and comments follow it (instead of the old section being
+ * commented out as deleted and a fresh default block appended). No-op when
+ * the text doesn't parse, has no such section, or already has one for the
+ * new name.
+ */
+export function renameSettingsSection(text: string, oldName: string, newName: string): string {
+    if (oldName === newName) return text;
+    let doc;
+    try {
+        doc = parseDocument(text);
+    } catch {
+        return text;
+    }
+    if (doc.errors.length || !isMap(doc.contents)) return text;
+    const params = findPair(doc.contents, "params")?.value;
+    if (!isMap(params) || findPair(params, newName)) return text;
+    const range = findPair(params, oldName)?.key?.range;
+    if (!range) return text;
+    return text.slice(0, range[0]) + stringify(newName).trimEnd() + text.slice(range[1]);
+}

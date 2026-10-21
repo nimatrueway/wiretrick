@@ -10,7 +10,7 @@ import type { ProcessStrategy } from "./strategies/processStrategy";
 import { hookEligible, onProcessActiveChange } from "./strategies/processState";
 import type { HeaderChanges } from "./strategies/types";
 import type { Script } from "./scriptStore";
-import { listScripts, onScriptsChanged, saveScript, deleteScript, setEnabled, newId, scriptStorageGet, scriptStorageSet, loadAllParamValues, getParamValues, setParamValue } from "./scriptStore";
+import { listScripts, getScript, onScriptsChanged, saveScript, deleteScript, setEnabled, newId, scriptStorageGet, scriptStorageSet, loadAllParamValues, getParamValues, setParamValue } from "./scriptStore";
 import { matchAny } from "../../shared/matcher";
 import { serveStore } from "./strategies/webRequestStrategy";
 import { dlog, dlogLevel } from "../../shared/debugLog";
@@ -332,12 +332,21 @@ export function createPipeline(
             return true;
         }
         if (msg && msg.type === "saveScript") {
-            saveScript({
+            void (async () => {
+                // optimistic concurrency: the editor sends the text it loaded;
+                // refuse when the stored copy has moved on since
+                if (typeof msg.base === "string" && msg.id) {
+                    const cur = await getScript(msg.id);
+                    if (!cur) return { conflict: "deleted" };
+                    if (cur.code !== msg.base && cur.code !== msg.code) return { conflict: "changed", code: cur.code };
+                }
+                return saveScript({
                 id: msg.id || newId(),
                 code: msg.code,
                 name: msg.name,
-                enabled: msg.enabled,
-            })
+                    enabled: msg.enabled,
+                });
+            })()
                 .then((s) => sendResponse(s))
                 .catch((e) => sendResponse({ error: String(e) }));
             return true;

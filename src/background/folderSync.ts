@@ -1,19 +1,37 @@
 /**
- * Background-side scripts-folder watcher. Owns the directory handle and
- * the polling loop — the persistent background page never gets timer-
- * throttled, so external file changes apply immediately no matter which
- * tab is focused (or whether the manager is open).
+ * Background-side scripts-folder sync — the ONLY code that touches the
+ * folder. Owns the directory handle and the polling loop (the background
+ * never gets timer-throttled, so external edits apply immediately).
+ *
+ * Model:
+ *  - storage is the source of truth for scripts; `owned` records, per
+ *    script id, the file it owns and the hash of the content both sides
+ *    last agreed on (the merge base).
+ *  - storage → disk: every store change (manager save/rename/delete,
+ *    import, popup, folder) schedules reconcileToDisk(), which writes,
+ *    renames and deletes files to match.
+ *  - disk → storage: the poller diffs file signatures against `known`;
+ *    every write of ours records the resulting signature in `known`, so
+ *    our own writes are never mistaken for external edits.
+ *  - a file that vanished is renamed (not deleted + created) only when a
+ *    new file carries its exact last-synced content.
+ *  - everything runs one-at-a-time through `serial()`: a poll never
+ *    interleaves with a write.
+ *  - when both sides changed, the newer one wins and the other copy is kept
+ *    in .wiretrick-backup/ (nothing is silently lost).
  */
-import { computeEvents, loadSavedHandle, clearSavedHandle, saveHandle, type FileSig } from "../shared/folderSync";
-import { saveScript, deleteScript, newId, listScripts, onScriptsChanged } from "./engine/scriptStore";
-import { getSettingsText, applySettingsText, rememberSettingsText, currentSettingsState } from "./settingsFile";
+import { computeEvents, contentHash, loadSavedHandle, clearSavedHandle, saveHandle, type FileSig } from "../shared/folderSync";
+import { saveScript, deleteScript, newId, listScripts, onScriptsChanged, onScriptRenamed, type Script } from "./engine/scriptStore";
+import { getSettingsText, applySettingsText, rememberSettingsText, currentSettingsState, settingsTextParses } from "./settingsFile";
 import { SETTINGS_FILE, SCHEMA_FILE } from "../shared/settingsYaml";
+import { renameSettingsSection } from "../shared/settingsYamlPatch";
 import { settingsSchemaJson } from "../shared/settingsSchema";
 import { broadcastToUi } from "./engine/logs";
 import { dlogLevel } from "../shared/debugLog";
 import { scriptFileName, scriptNameFromFile, legacyScriptFileName } from "../shared/scriptName";
 const POLL_MS = 1000;
 const SCRIPT_EXT = ".ts";
+export const BACKUP_DIR = ".wiretrick-backup";
 
 /** canonical script file name for a display name */
 function canonicalFileName(name: string): string {
@@ -25,15 +43,30 @@ function canonicalizeFileName(fileName: string): string {
     return fileName.endsWith(".script.ts") ? fileName.replace(/\.script\.ts$/, SCRIPT_EXT) : fileName;
 }
 
+const isScriptFile = (name: string) => name.endsWith(".ts") && !name.endsWith(".d.ts");
+
+/** a script's file and the content hash both sides last agreed on */
+type Owned = { file: string; hash: string };
+
 let dirHandle: any = null;
+/** script files as last seen on disk (or as we just wrote them) */
 let known = new Map<string, FileSig>();
+/** script id → the file it owns + merge base */
+let owned = new Map<string, Owned>();
 /** canonical name → actual on-disk name when a legacy file stands in for it */
 let realNameOf = new Map<string, string>();
 let timer: ReturnType<typeof setInterval> | null = null;
 let displayPath = "";
 let settingsHooked = false;
-/** contents we wrote ourselves — the poller skips its own echo */
-const lastWritten = new Map<string, string>();
+
+// ---- one operation at a time ----
+let chain: Promise<unknown> = Promise.resolve();
+/** run `fn` after every queued sync operation; never await serial() from inside one */
+function serial<T>(fn: () => Promise<T>): Promise<T> {
+    const p = chain.then(fn);
+    chain = p.catch(() => {});
+    return p;
+}
 
 function broadcastStatus(): void {
     broadcastToUi({ type: "sync", status: { active: !!dirHandle, path: displayPath } } as any);
@@ -54,36 +87,43 @@ async function refreshKnown(): Promise<void> {
     const { seen, aliases } = await scanFolder();
     known = seen;
     realNameOf = aliases;
-    await persistKnown();
+    await persistState();
 }
 
-// ---- persisted folder snapshot ----
+// ---- persisted sync state ----
 // The MV3 service worker can be stopped at any time (idle reaping, browser
 // sleep, extension update). Without a persisted snapshot a restarted worker
 // would rebuild `known` from the CURRENT folder and silently absorb every
-// file added/changed/removed while it was down. Persisting it lets the
-// first poll after a restart diff against what was last applied.
+// file added/changed/removed while it was down; without `owned` it would
+// lose the merge base and couldn't tell which side changed.
 const KNOWN_KEY = "folderSyncKnown";
 
 function storageLocal(): chrome.storage.LocalStorageArea | null {
     return typeof chrome !== "undefined" && chrome.storage?.local ? chrome.storage.local : null;
 }
 
-async function persistKnown(): Promise<void> {
+async function persistState(): Promise<void> {
     const area = storageLocal();
     if (!area) return;
-    await new Promise<void>((r) => area.set({ [KNOWN_KEY]: Object.fromEntries(known) }, () => r()));
+    const state = { files: Object.fromEntries(known), owned: Object.fromEntries(owned) };
+    await new Promise<void>((r) => area.set({ [KNOWN_KEY]: state }, () => r()));
 }
 
-async function loadPersistedKnown(): Promise<Map<string, FileSig> | null> {
+async function loadPersistedState(): Promise<{ files: Map<string, FileSig>; owned: Map<string, Owned> } | null> {
     const area = storageLocal();
     if (!area) return null;
     const obj: any = await new Promise((r) => area.get(KNOWN_KEY, r));
-    const files = obj?.[KNOWN_KEY];
-    return files && typeof files === "object" ? new Map(Object.entries(files) as [string, FileSig][]) : null;
+    const st = obj?.[KNOWN_KEY];
+    if (!st || typeof st !== "object") return null;
+    // pre-`owned` format: the bare file → sig map
+    const files = st.files && typeof st.files === "object" ? st.files : st.owned ? {} : st;
+    return {
+        files: new Map(Object.entries(files) as [string, FileSig][]),
+        owned: new Map(Object.entries(st.owned && typeof st.owned === "object" ? st.owned : {}) as [string, Owned][]),
+    };
 }
 
-async function clearPersistedKnown(): Promise<void> {
+async function clearPersistedState(): Promise<void> {
     const area = storageLocal();
     if (!area?.remove) return;
     await new Promise<void>((r) => area.remove(KNOWN_KEY, () => r()));
@@ -94,12 +134,12 @@ async function clearPersistedKnown(): Promise<void> {
  * .d.ts files are ignored. Legacy .script.ts files stand in for their
  * canonical .ts name (canonical wins when both exist) and migrate back.
  */
-async function scanFolder(): Promise<{ seen: Map<string, FileSig>; aliases: Map<string, string> }> {
+async function scanFolder(handle: any = dirHandle): Promise<{ seen: Map<string, FileSig>; aliases: Map<string, string> }> {
     const seen = new Map<string, FileSig>();
     const aliases = new Map<string, string>();
     const legacy: { name: string; sig: FileSig }[] = [];
-    for await (const entry of dirHandle.values()) {
-        if (entry.kind !== "file" || !entry.name.endsWith(".ts") || entry.name.endsWith(".d.ts")) continue;
+    for await (const entry of handle.values()) {
+        if (entry.kind !== "file" || !isScriptFile(entry.name)) continue;
         let f: File;
         try {
             f = await entry.getFile();
@@ -127,126 +167,334 @@ async function readText(fileName: string): Promise<string> {
     return await (await fh.getFile()).text();
 }
 
+/** the file's text, or null when it doesn't exist (any more) */
+async function readTextOrNull(fileName: string): Promise<string | null> {
+    try {
+        return await readText(fileName);
+    } catch {
+        return null;
+    }
+}
+
+async function statFile(fileName: string): Promise<FileSig | null> {
+    try {
+        const f = await (await dirHandle.getFileHandle(realNameOf.get(fileName) || fileName)).getFile();
+        return { lastModified: f.lastModified, size: f.size };
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Write a file. For script files the resulting signature goes into
+ * `known` right away, so the next poll doesn't see our own write as an
+ * external edit.
+ */
+async function writeFile(fileName: string, content: string): Promise<boolean> {
+    if (!dirHandle) return false;
+    try {
+        const fh = await dirHandle.getFileHandle(fileName, { create: true });
+        const w = await fh.createWritable();
+        await w.write(content);
+        await w.close();
+    } catch (e: any) {
+        dlogLevel("sync", "warn", `Folder sync: writing "${fileName}" failed: ${e?.message || e}`);
+        return false;
+    }
+    if (isScriptFile(fileName)) {
+        realNameOf.delete(fileName);
+        const sig = await statFile(fileName);
+        if (sig) known.set(fileName, sig);
+    }
+    return true;
+}
+
+/** remove a script file (and a legacy alias standing in for it) */
+async function removeFile(fileName: string): Promise<void> {
+    for (const n of new Set([fileName, realNameOf.get(fileName) || fileName])) {
+        try {
+            await dirHandle.removeEntry(n);
+        } catch {}
+    }
+    known.delete(fileName);
+    realNameOf.delete(fileName);
+}
+
+/** keep a copy of a version about to be overwritten (both sides had changed) */
+async function backup(fileName: string, content: string, why: string): Promise<void> {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const name = `${fileName.replace(/\.ts$/, "")} ${stamp}.ts.bak`;
+    try {
+        const d = await dirHandle.getDirectoryHandle(BACKUP_DIR, { create: true });
+        const w = await (await d.getFileHandle(name, { create: true })).createWritable();
+        await w.write(content);
+        await w.close();
+        dlogLevel("sync", "warn", `Folder sync: ${why} — the other version was saved to ${BACKUP_DIR}/${name}`);
+    } catch (e: any) {
+        dlogLevel("sync", "warn", `Folder sync: ${why} — keeping a backup failed: ${e?.message || e}`);
+    }
+}
+
 /** Legacy <name>.script.ts standing in for <name>.ts → write canonical, drop legacy. */
 async function migrateLegacy(fileName: string, content: string): Promise<void> {
     const real = realNameOf.get(fileName);
     if (!real) return;
-    await writeBack(fileName, content);
+    realNameOf.delete(fileName);
+    if (!(await writeFile(fileName, content))) {
+        realNameOf.set(fileName, real);
+        return;
+    }
     try {
         await dirHandle.removeEntry(real);
         dlogLevel("sync", "info", `Folder sync: migrated legacy "${real}" → "${fileName}"`);
     } catch {}
-    realNameOf.delete(fileName);
-}
-
-/** Script-id lookup: filename → enabled script (fileNameFor is name-based). */
-async function findScriptByFile(fileName: string) {
-    const scripts = await listScripts();
-    return scripts.find((s) => canonicalFileName(s.meta.name) === fileName) || null;
 }
 
 function displayNameFromFile(fileName: string): string {
     return scriptNameFromFile(fileName);
 }
 
+/** the script owning a file: by the recorded ownership, else by name */
+function ownerOf(file: string, scripts: Script[]): Script | undefined {
+    for (const [id, rec] of owned) {
+        if (rec.file !== file) continue;
+        const s = scripts.find((x) => x.id === id);
+        if (s) return s;
+    }
+    return scripts.find((s) => canonicalFileName(s.meta.name) === file && !owned.has(s.id)) ??
+        scripts.find((s) => canonicalFileName(s.meta.name) === file);
+}
+
+/** another script's file differs from `file` only by case (a clash on macOS/Windows) */
+function caseClash(file: string, scripts: Script[], except?: string): Script | undefined {
+    const key = file.toLowerCase();
+    return scripts.find((s) => s.id !== except && canonicalFileName(s.meta.name).toLowerCase() === key);
+}
+
+// ---- disk → storage ----
+
+/** a file's new text arrives for script `s` (edit on disk, or a re-added file) */
+async function pullChange(file: string, text: string, s: Script): Promise<boolean> {
+    const h = contentHash(text);
+    const rec = owned.get(s.id);
+    const storeHash = contentHash(s.code);
+    if (h === storeHash) {
+        owned.set(s.id, { file, hash: h }); // a touch, or both sides made the same edit
+        return false;
+    }
+    // disk still holds the last-synced text: storage moved on and its write
+    // is queued — don't revert storage to the old text
+    if (rec && rec.file === file && rec.hash === h) return false;
+    if (rec && rec.hash !== storeHash) {
+        await backup(file, s.code, `"${file}" changed on disk while script "${s.meta.name}" also changed in the extension; the file wins`);
+    }
+    owned.set(s.id, { file, hash: h });
+    await saveScript({ id: s.id, code: text, name: s.meta.name });
+    await migrateLegacy(file, text);
+    dlogLevel("sync", "info", `Folder sync: "${file}" changed on disk — script "${s.meta.name}" updated`);
+    return true;
+}
+
 async function applyEvents(events: ReturnType<typeof computeEvents>): Promise<void> {
     const { changed, added, removed } = events;
-    let rename = events.rename;
-    // the add+remove pair is only a rename when the vanished file belonged
-    // to a script; otherwise it's an unrelated delete plus a new file
-    if (rename && !(await findScriptByFile(rename.oldName))) rename = null;
+    if (!changed.length && !added.length && !removed.length) return;
+    let scripts = await listScripts();
+    const texts = new Map<string, string | null>();
+    const read = async (f: string) => {
+        if (!texts.has(f)) texts.set(f, await readTextOrNull(f));
+        return texts.get(f)!;
+    };
+    let touched = false;
+    const announce = (file?: string) => {
+        touched = true;
+        broadcastToUi({ type: "scriptsChanged", source: "folder", file } as any);
+    };
 
-    for (const fileName of changed) {
-        if (rename && fileName === rename.oldName) continue;
-        const text = await readText(fileName);
-        if (lastWritten.get(fileName) === text) {
-            lastWritten.delete(fileName); // our own write-back echo
-            continue;
-        }
-        const target = await findScriptByFile(fileName);
-        if (!target) continue;
-        await saveScript({ id: target.id, code: text, name: target.meta.name });
-        await migrateLegacy(fileName, text);
-        dlogLevel("sync", "info", `Folder sync: "${fileName}" changed on disk — script "${target.meta.name}" updated`);
-        broadcastToUi({ type: "scriptsChanged", source: "folder", file: fileName } as any);
-    }
-
-    for (const fileName of added) {
-        if (rename) continue;
-        const text = await readText(fileName);
-        if (lastWritten.get(fileName) === text) {
-            lastWritten.delete(fileName); // echo of a manager-created script
-            continue;
-        }
-        const existing = await findScriptByFile(fileName);
-        const code = text;
-        if (existing) {
-            // a file for an existing script appeared (manager wrote the
-            // canonical name, or the user copied a file over it) — apply
-            // its content if it differs, then migrate any legacy alias
-            if (existing.code !== code) {
-                await saveScript({ id: existing.id, code, name: existing.meta.name });
-                dlogLevel("sync", "info", `Folder sync: "${fileName}" replaced script "${existing.meta.name}"`);
-                broadcastToUi({ type: "scriptsChanged", source: "folder", file: fileName } as any);
+    // renames: a vanished file whose last-synced content reappears under a
+    // new name (several per poll are fine; content edits + rename are not
+    // a rename — they become delete + create)
+    const newFiles = [...added];
+    const gone = new Set(removed);
+    for (const old of removed) {
+        const s = ownerOf(old, scripts);
+        if (!s) continue;
+        const base = owned.get(s.id)?.hash ?? contentHash(s.code);
+        for (const f of newFiles) {
+            const t = await read(f);
+            if (t === null || contentHash(t) !== base || ownerOf(f, scripts)) continue;
+            newFiles.splice(newFiles.indexOf(f), 1);
+            gone.delete(old);
+            const name = displayNameFromFile(f);
+            const clash = caseClash(canonicalFileName(name), scripts, s.id);
+            if (clash) {
+                dlogLevel("sync", "warn", `Folder sync: "${old}" was renamed to "${f}", but script "${clash.meta.name}" already uses that name (letter case is ignored on macOS/Windows) — renaming its script skipped`);
+                owned.set(s.id, { file: f, hash: base });
+                break;
             }
-            await migrateLegacy(fileName, code);
+            owned.set(s.id, { file: canonicalFileName(name), hash: contentHash(t) });
+            await saveScript({ id: s.id, code: t, name });
+            await adoptCanonicalName(f, name, t);
+            dlogLevel("sync", "info", `Folder sync: "${old}" renamed to "${f}" — script renamed to "${name}"`);
+            announce(f);
+            break;
+        }
+    }
+    if (touched) scripts = await listScripts();
+
+    for (const file of changed) {
+        const s = ownerOf(file, scripts);
+        const text = s ? await read(file) : null;
+        if (s && text !== null && (await pullChange(file, text, s))) announce(file);
+    }
+
+    for (const file of newFiles) {
+        const text = await read(file);
+        if (text === null) continue;
+        const s = ownerOf(file, scripts);
+        if (s) {
+            // a file for an existing script appeared (re-created, or copied over it)
+            if (await pullChange(file, text, s)) announce(file);
             continue;
         }
-        const name = displayNameFromFile(fileName);
-        await saveScript({ id: newId(), code, name });
-        await migrateLegacy(fileName, code);
-        await adoptCanonicalName(fileName, name, code);
-        dlogLevel("sync", "info", `Folder sync: new file "${fileName}" imported as script "${name}"`);
-        broadcastToUi({ type: "scriptsChanged", source: "folder", file: fileName } as any);
-    }
-
-    for (const fileName of removed) {
-        if (rename) continue;
-        if (lastWritten.delete(fileName)) continue; // echo of a manager delete
-        const target = await findScriptByFile(fileName);
-        if (!target) continue;
-        await deleteScript(target.id);
-        dlogLevel("sync", "info", `Folder sync: "${fileName}" deleted on disk — script "${target.meta.name}" removed`);
-        broadcastToUi({ type: "scriptsChanged", source: "folder", file: fileName } as any);
-    }
-
-    if (rename) {
-        const text = await readText(rename.newName);
-        if (lastWritten.get(rename.newName) === text) {
-            lastWritten.delete(rename.newName);
-        } else {
-            const target = await findScriptByFile(rename.oldName);
-            if (target) {
-                const name = displayNameFromFile(rename.newName);
-                await saveScript({ id: target.id, code: text, name });
-                await adoptCanonicalName(rename.newName, name, text);
-                dlogLevel("sync", "info", `Folder sync: "${rename.oldName}" renamed to "${rename.newName}" — script renamed to "${name}"`);
-                broadcastToUi({ type: "scriptsChanged", source: "folder", file: rename.newName } as any);
-            }
+        const name = displayNameFromFile(file);
+        const clash = caseClash(canonicalFileName(name), scripts);
+        if (clash) {
+            dlogLevel("sync", "warn", `Folder sync: "${file}" not imported — script "${clash.meta.name}" already uses that name (letter case is ignored on macOS/Windows)`);
+            continue;
         }
+        const id = newId();
+        owned.set(id, { file: canonicalFileName(name), hash: contentHash(text) });
+        await saveScript({ id, code: text, name });
+        await migrateLegacy(file, text);
+        await adoptCanonicalName(file, name, text);
+        scripts = await listScripts();
+        dlogLevel("sync", "info", `Folder sync: new file "${file}" imported as script "${name}"`);
+        announce(file);
+    }
+
+    for (const file of gone) {
+        const s = ownerOf(file, scripts);
+        if (!s) continue;
+        const rec = owned.get(s.id);
+        if (rec && rec.hash !== contentHash(s.code)) {
+            // the script changed in the extension since the last sync: its
+            // edits would be lost — write the file back instead of deleting
+            await writeFile(file, s.code);
+            owned.set(s.id, { file, hash: contentHash(s.code) });
+            dlogLevel("sync", "warn", `Folder sync: "${file}" was deleted on disk, but script "${s.meta.name}" has newer changes in the extension — the file was written back`);
+            continue;
+        }
+        owned.delete(s.id);
+        await deleteScript(s.id);
+        dlogLevel("sync", "info", `Folder sync: "${file}" deleted on disk — script "${s.meta.name}" removed`);
+        announce(file);
     }
 }
 
 /**
  * A file whose name doesn't round-trip through the script name (e.g.
- * "my script (copy).ts" → script "my script (copy)" → "my_script_copy_.ts")
- * would never match its script again, so later edits/deletes of it would be
- * ignored. Rename it on disk to the canonical name the manager also uses.
+ * "a:b.ts" → script "a:b" → "a_b.ts") would never match its script again,
+ * so later edits/deletes of it would be ignored. Rename it on disk to the
+ * canonical name the manager also uses.
  */
 async function adoptCanonicalName(fileName: string, scriptName: string, code: string): Promise<void> {
     const canonical = canonicalFileName(scriptName);
     if (canonical === fileName || realNameOf.has(fileName)) return;
-    await writeBack(canonical, code);
+    if (!(await writeFile(canonical, code))) return;
     try {
         await dirHandle.removeEntry(fileName);
     } catch {}
-    try {
-        const f = await (await dirHandle.getFileHandle(canonical)).getFile();
-        known.delete(fileName);
-        known.set(canonical, { lastModified: f.lastModified, size: f.size });
-        lastWritten.delete(canonical);
-    } catch {}
+    known.delete(fileName);
     dlogLevel("sync", "info", `Folder sync: renamed "${fileName}" → "${canonical}" to match its script name`);
+}
+
+// ---- storage → disk ----
+
+/** delete a file we no longer own — unless it was edited since we last synced it */
+async function removeIfUnchanged(rec: Owned, why: string): Promise<void> {
+    const cur = await readTextOrNull(rec.file);
+    if (cur === null) {
+        known.delete(rec.file);
+        return;
+    }
+    if (contentHash(cur) !== rec.hash) {
+        dlogLevel("sync", "warn", `Folder sync: "${rec.file}" was left on disk (${why}) — it has edits that never reached the extension`);
+        return;
+    }
+    await removeFile(rec.file);
+}
+
+let clashWarned = new Set<string>();
+
+/**
+ * Make the folder match storage: write changed scripts, follow renames,
+ * delete files of deleted scripts. A file edited on disk since the last
+ * poll is left for the poller (which applies it first; the store change
+ * then comes back here).
+ */
+async function reconcileToDisk(): Promise<void> {
+    if (!dirHandle) return;
+    const scripts = await listScripts();
+    const ids = new Set(scripts.map((s) => s.id));
+    let wrote = false;
+    for (const [id, rec] of [...owned]) {
+        if (ids.has(id)) continue;
+        owned.delete(id);
+        await removeIfUnchanged(rec, "its script was deleted");
+        wrote = true;
+    }
+    const claimed = new Map<string, Script>();
+    for (const s of scripts) {
+        const file = canonicalFileName(s.meta.name);
+        const key = file.toLowerCase();
+        const other = claimed.get(key);
+        if (other) {
+            if (!clashWarned.has(key)) dlogLevel("sync", "warn", `Folder sync: scripts "${other.meta.name}" and "${s.meta.name}" would share one file on macOS/Windows — "${s.meta.name}" is not written to the folder; rename one of them`);
+            clashWarned.add(key);
+            continue;
+        }
+        claimed.set(key, s);
+        const h = contentHash(s.code);
+        const rec = owned.get(s.id);
+        if (rec && rec.file !== file) {
+            // renamed in the extension: move the file. A case-only rename
+            // is the SAME file on macOS/Windows — remove first, or the
+            // delete would take the freshly written file with it
+            const caseOnly = rec.file.toLowerCase() === key;
+            const old = rec;
+            if (caseOnly) await removeFile(old.file);
+            if (!(await writeFile(file, s.code))) continue;
+            if (!caseOnly) await removeIfUnchanged(old, `script renamed to "${s.meta.name}"`);
+            owned.set(s.id, { file, hash: h });
+            dlogLevel("sync", "info", `Folder sync: "${old.file}" → "${file}" (script renamed)`);
+            wrote = true;
+            continue;
+        }
+        if (rec && rec.hash === h) continue; // in sync
+        const sig = await statFile(file);
+        const seen = known.get(file);
+        if (sig && (!seen || seen.lastModified !== sig.lastModified || seen.size !== sig.size)) continue; // unseen external edit: poll first
+        const cur = sig ? await readTextOrNull(file) : null;
+        if (cur !== null && contentHash(cur) === h) {
+            owned.set(s.id, { file, hash: h });
+            continue;
+        }
+        if (cur !== null && !rec) await backup(file, cur, `"${file}" was replaced by script "${s.meta.name}"`);
+        if (!(await writeFile(file, s.code))) continue;
+        owned.set(s.id, { file, hash: h });
+        wrote = true;
+    }
+    if (wrote) await persistState();
+}
+
+/** the settings section follows a renamed script in the synced file too */
+async function renameSettingsOnDisk(oldName: string, newName: string): Promise<void> {
+    if (!dirHandle) return;
+    const f = await readSettingsFile();
+    if (!f) return;
+    const next = renameSettingsSection(f.text, oldName, newName);
+    if (next === f.text) return;
+    if (await writeFile(SETTINGS_FILE, next)) settingsSig = (await readSettingsFile())?.sig ?? null;
 }
 
 /**
@@ -260,7 +508,7 @@ async function migrateLegacyNames(seen: Map<string, FileSig>, byFile: Map<string
         if (legacy === canonical || seen.has(canonical) || !seen.has(legacy) || byFile.has(legacy)) continue;
         try {
             const text = await readText(legacy);
-            await writeBack(canonical, text);
+            await writeFile(canonical, text);
             await dirHandle.removeEntry(realNameOf.get(legacy) || legacy);
             const f = await (await dirHandle.getFileHandle(canonical)).getFile();
             seen.delete(legacy);
@@ -273,57 +521,115 @@ async function migrateLegacyNames(seen: Map<string, FileSig>, byFile: Map<string
     }
 }
 
+export interface FolderPreview {
+    /** files that become new scripts */
+    imported: string[];
+    /** scripts written out as new files */
+    written: string[];
+    /** both exist and differ: the newer side wins, the other is backed up */
+    conflicts: { name: string; winner: "file" | "script" }[];
+}
+
 /**
- * Two-way sync when a folder is picked or (re)connected: files with no script are
- * imported, scripts with no file are written out, and when both exist but
- * differ the newer one wins (file mtime vs. the script's last save).
+ * Two-way reconcile when a folder is picked or (re)connected. Files with no
+ * script are imported, scripts with no file are written out. When both
+ * exist but differ: with a merge base (resume) the side that changed wins;
+ * otherwise — or when both changed — the newer one wins and the other copy
+ * is kept in the backup folder. `dry`: only report what would happen.
  */
-async function initialSync(): Promise<void> {
-    const { seen, aliases } = await scanFolder();
-    realNameOf = aliases;
+async function initialSync(opts: { dry?: boolean; handle?: any; base?: Map<string, Owned> } = {}): Promise<FolderPreview> {
+    const dry = !!opts.dry;
+    const handle = opts.handle ?? dirHandle;
+    const { seen, aliases } = await scanFolder(handle);
     const scripts = await listScripts();
     const byFile = new Map(scripts.map((s) => [canonicalFileName(s.meta.name), s]));
-    await migrateLegacyNames(seen, byFile);
-    let pulled = 0;
-    let pushed = 0;
-    let imported = 0;
+    const out: FolderPreview = { imported: [], written: [], conflicts: [] };
+    const readFrom = async (name: string) => (await (await handle.getFileHandle(aliases.get(name) || name)).getFile()).text();
+    if (!dry) {
+        realNameOf = aliases;
+        await migrateLegacyNames(seen, byFile);
+    }
     for (const [fileName, sig] of seen) {
-        const text = await readText(fileName);
+        const text = await readFrom(fileName);
         const s = byFile.get(fileName);
         byFile.delete(fileName);
         if (!s) {
             const name = displayNameFromFile(fileName);
-            await saveScript({ id: newId(), code: text, name });
+            const clash = caseClash(canonicalFileName(name), scripts);
+            if (clash) {
+                if (!dry) dlogLevel("sync", "warn", `Folder sync: "${fileName}" not imported — script "${clash.meta.name}" already uses that name (letter case is ignored on macOS/Windows)`);
+                continue;
+            }
+            out.imported.push(fileName);
+            if (dry) continue;
+            const id = newId();
+            owned.set(id, { file: canonicalFileName(name), hash: contentHash(text) });
+            await saveScript({ id, code: text, name });
             await migrateLegacy(fileName, text);
             await adoptCanonicalName(fileName, name, text);
-            imported++;
-        } else if (s.code !== text) {
-            if (sig.lastModified > s.updatedAt) {
-                await saveScript({ id: s.id, code: text, name: s.meta.name });
+            continue;
+        }
+        const hd = contentHash(text);
+        const hs = contentHash(s.code);
+        if (hd === hs) {
+            if (!dry) {
+                owned.set(s.id, { file: fileName, hash: hd });
                 await migrateLegacy(fileName, text);
-                pulled++;
-            } else {
-                await writeBack(fileName, s.code);
-                await migrateLegacy(fileName, s.code);
-                pushed++;
             }
-        } else {
+            continue;
+        }
+        const rec = (opts.base ?? owned).get(s.id);
+        const base = rec && rec.file === fileName ? rec.hash : null;
+        let pull: boolean;
+        let conflict = false;
+        if (base === hs) pull = true; // only the file changed
+        else if (base === hd) pull = false; // only the script changed
+        else {
+            pull = sig.lastModified > s.updatedAt;
+            conflict = true;
+            out.conflicts.push({ name: s.meta.name, winner: pull ? "file" : "script" });
+        }
+        if (dry) continue;
+        if (pull) {
+            if (conflict) await backup(fileName, s.code, `script "${s.meta.name}" and "${fileName}" both changed; the newer file wins`);
+            owned.set(s.id, { file: fileName, hash: hd });
+            await saveScript({ id: s.id, code: text, name: s.meta.name });
             await migrateLegacy(fileName, text);
+        } else {
+            if (conflict) await backup(fileName, text, `script "${s.meta.name}" and "${fileName}" both changed; the newer script wins`);
+            await writeFile(fileName, s.code);
+            owned.set(s.id, { file: fileName, hash: hs });
+            await migrateLegacy(fileName, s.code);
         }
     }
     for (const [fileName, s] of byFile) {
-        await writeBack(fileName, s.code);
-        pushed++;
+        if (caseClash(fileName, scripts, s.id) && [...seen.keys()].some((f) => f.toLowerCase() === fileName.toLowerCase())) continue;
+        out.written.push(fileName);
+        if (dry) continue;
+        await writeFile(fileName, s.code);
+        owned.set(s.id, { file: fileName, hash: contentHash(s.code) });
     }
-    lastWritten.clear(); // the snapshot below absorbs our own writes
-    dlogLevel("sync", "info", `Folder sync: reconciled — ${imported} file(s) imported, ${pulled} script(s) updated from newer files, ${pushed} file(s) written from scripts`);
-    if (imported || pulled) broadcastToUi({ type: "scriptsChanged", source: "folder" } as any);
+    if (dry) return out;
+    const live = new Set((await listScripts()).map((s) => s.id));
+    for (const id of [...owned.keys()]) if (!live.has(id)) owned.delete(id);
+    dlogLevel("sync", "info", `Folder sync: reconciled — ${out.imported.length} file(s) imported, ${out.written.length} file(s) written from scripts, ${out.conflicts.length} conflict(s)`);
+    if (out.imported.length || out.conflicts.some((c) => c.winner === "file")) broadcastToUi({ type: "scriptsChanged", source: "folder" } as any);
+    return out;
+}
+
+/** What picking the saved folder would do (the manager confirms conflicts first). */
+export async function previewStoredHandle(): Promise<FolderPreview | null> {
+    const handle = await loadSavedHandle("pendingFolder");
+    if (!handle) return null;
+    // a newly picked folder has no merge base
+    return serial(() => initialSync({ dry: true, handle, base: new Map() }));
 }
 
 // ---- settings.yaml: canonical text generated from storage ----
 
 let settingsSig: FileSig | null = null;
-let exportTimer: ReturnType<typeof setTimeout> | null = null;
+let settingsBroken = false;
+let reconcileTimer: ReturnType<typeof setTimeout> | null = null;
 
 async function readSettingsFile(): Promise<{ text: string; sig: FileSig } | null> {
     try {
@@ -336,18 +642,24 @@ async function readSettingsFile(): Promise<{ text: string; sig: FileSig } | null
 
 /**
  * storage → file; patched in place, so an up-to-date file is never
- * rewritten. `base`: text edited in the manager, which wins over the file's
- * own formatting and comments.
+ * rewritten. `base`: text saved in the manager, which wins over the file.
+ * A file on disk that doesn't parse is never overwritten by a background
+ * change: it holds edits in progress (fixing it re-enables the export).
  */
 async function exportSettings(base?: string): Promise<void> {
     if (!dirHandle) return;
     try {
         const existing = await readSettingsFile();
+        if (base === undefined && existing && !settingsTextParses(existing.text)) {
+            if (!settingsBroken) dlogLevel("sync", "warn", `Folder sync: ${SETTINGS_FILE} on disk has a YAML error — it is not overwritten until it is fixed (changes made meanwhile are written then)`);
+            settingsBroken = true;
+            return;
+        }
+        settingsBroken = false;
         const text = await getSettingsText(base ?? existing?.text);
         if (existing?.text !== text) {
-            await writeBack(SETTINGS_FILE, text);
+            await writeFile(SETTINGS_FILE, text);
             settingsSig = (await readSettingsFile())?.sig ?? null;
-            lastWritten.delete(SETTINGS_FILE);
         }
         // the file and the manager's settings.yaml are one document
         await rememberSettingsText(text);
@@ -367,47 +679,37 @@ async function ensureSchemaFile(): Promise<void> {
     } catch {
         // missing → write below
     }
-    await writeBack(SCHEMA_FILE, json);
+    await writeFile(SCHEMA_FILE, json);
 }
 
 /** settings.yaml was saved in the manager: write that text out as-is */
-export async function exportSettingsFrom(text: string): Promise<void> {
-    if (exportTimer) clearTimeout(exportTimer);
-    exportTimer = null;
-    await exportSettings(text);
+export function exportSettingsFrom(text: string): Promise<void> {
+    return serial(() => exportSettings(text));
 }
 
-function scheduleExport(): void {
+function scheduleReconcile(): void {
     if (!dirHandle) return;
-    if (exportTimer) clearTimeout(exportTimer);
-    exportTimer = setTimeout(() => void pushScripts().then(() => exportSettings()), 300);
+    if (reconcileTimer) clearTimeout(reconcileTimer);
+    reconcileTimer = setTimeout(() => {
+        reconcileTimer = null;
+        void serial(async () => {
+            await reconcileToDisk();
+            await exportSettings();
+        });
+    }, 300);
 }
 
-/**
- * storage → disk for scripts changed outside the manager editor (import,
- * popup, messages): write each script whose file is missing or differs.
- * A file changed on disk since the last poll is left for the poller, so an
- * unseen external edit is never clobbered.
- */
-async function pushScripts(): Promise<void> {
-    if (!dirHandle) return;
-    for (const s of await listScripts()) {
-        const fileName = canonicalFileName(s.meta.name);
-        const sig = known.get(fileName);
-        let text: string | null = null;
-        let cur: FileSig | null = null;
-        try {
-            const f = await (await dirHandle.getFileHandle(realNameOf.get(fileName) || fileName)).getFile();
-            text = await f.text();
-            cur = { lastModified: f.lastModified, size: f.size };
-        } catch {
-            /* no file yet */
-        }
-        if (text === s.code) continue;
-        if (cur && (!sig || sig.lastModified !== cur.lastModified || sig.size !== cur.size)) continue;
-        await writeBack(fileName, s.code);
-        dlogLevel("sync", "info", `Folder sync: wrote "${fileName}" (script changed outside the editor)`);
+/** Test seam: run pending storage → disk work and one poll now. */
+export async function flush(): Promise<void> {
+    if (reconcileTimer) {
+        clearTimeout(reconcileTimer);
+        reconcileTimer = null;
+        await serial(async () => {
+            await reconcileToDisk();
+            await exportSettings();
+        });
     }
+    await pollOnce();
 }
 
 /** file → storage, when settings.yaml changed on disk; then re-canonicalize */
@@ -425,12 +727,21 @@ async function pollSettings(): Promise<void> {
     await exportSettings();
 }
 
-let polling = false;
+let pollQueued = false;
 let lastPollError = "";
 
-async function pollOnce(): Promise<void> {
-    if (!dirHandle || polling) return;
-    polling = true;
+/** one poll (skipped when one is already waiting in the queue) */
+function pollOnce(): Promise<void> {
+    if (!dirHandle || pollQueued) return Promise.resolve();
+    pollQueued = true;
+    return serial(async () => {
+        pollQueued = false;
+        await pollNow();
+    });
+}
+
+async function pollNow(): Promise<void> {
+    if (!dirHandle) return;
     try {
         await pollSettings();
         const { seen, aliases } = await scanFolder();
@@ -438,7 +749,7 @@ async function pollOnce(): Promise<void> {
         known = seen;
         realNameOf = aliases;
         await applyEvents(events);
-        if (events.changed.length || events.added.length || events.removed.length) await persistKnown();
+        if (events.changed.length || events.added.length || events.removed.length) await persistState();
         lastPollError = "";
     } catch (e: any) {
         if (e?.name === "NotAllowedError" || e?.name === "SecurityError") {
@@ -449,8 +760,6 @@ async function pollOnce(): Promise<void> {
             if (msg !== lastPollError) dlogLevel("sync", "warn", `Folder sync: scanning "${displayPath}" failed: ${msg}`);
             lastPollError = msg;
         }
-    } finally {
-        polling = false;
     }
 }
 
@@ -520,21 +829,28 @@ async function ensureSyncAlarm(): Promise<void> {
  * this is a resume (worker restart, permission re-grant): diff against the
  * persisted snapshot so changes made while not watching are applied.
  */
-export async function startFromStoredHandle(opts: { fresh?: boolean } = {}): Promise<boolean> {
+export function startFromStoredHandle(opts: { fresh?: boolean } = {}): Promise<boolean> {
+    return serial(() => start(opts));
+}
+
+async function start(opts: { fresh?: boolean }): Promise<boolean> {
     const handle = await loadSavedHandle();
     if (!handle) return false;
     const resumingSame = !opts.fresh && dirHandle !== null && timer !== null;
     dirHandle = handle;
     displayPath = await describeHandle(handle);
     lastPollError = "";
+    clashWarned = new Set();
     if (opts.fresh) {
+        owned = new Map(); // a different folder: no merge base
         await initialSync();
         await refreshKnown();
     } else if (!resumingSame) {
-        const persisted = await loadPersistedKnown();
+        const persisted = await loadPersistedState();
         if (persisted) {
-            known = persisted;
-            await pollOnce(); // catch up on changes made while not watching
+            known = persisted.files;
+            owned = persisted.owned;
+            await pollNow(); // catch up on changes made while not watching
         }
         // reconcile what the snapshot can't see: files whose script is gone
         // (or never existed in this profile) and scripts with no file
@@ -546,64 +862,47 @@ export async function startFromStoredHandle(opts: { fresh?: boolean } = {}): Pro
     void ensureSyncAlarm();
     if (!settingsHooked) {
         settingsHooked = true;
-        onScriptsChanged(scheduleExport);
+        onScriptsChanged(scheduleReconcile);
+        onScriptRenamed((oldName, newName) => {
+            if (dirHandle) void serial(() => renameSettingsOnDisk(oldName, newName));
+        });
         chrome.storage.onChanged.addListener((c) => {
-            if (c.resLogLevel || c.resLogCap) scheduleExport();
+            if (c.resLogLevel || c.resLogCap) scheduleReconcile();
         });
     }
     settingsSig = null;
-    void ((await readSettingsFile()) ? pollSettings() : exportSettings());
+    settingsBroken = false;
+    if (await readSettingsFile()) await pollSettings();
+    else await exportSettings();
     broadcastStatus();
     dlogLevel("sync", "info", `Folder sync: watching "${displayPath}"`);
     return true;
-}
-
-/** Write a manager-side save out to the folder (two-way sync). */
-export async function writeBack(fileName: string, content: string): Promise<void> {
-    if (!dirHandle) return;
-    lastWritten.set(fileName, content);
-    try {
-        const fh = await dirHandle.getFileHandle(fileName, { create: true });
-        const w = await fh.createWritable();
-        await w.write(content);
-        await w.close();
-    } catch (e: any) {
-        lastWritten.delete(fileName);
-        dlogLevel("sync", "warn", `Folder sync: writing "${fileName}" failed: ${e?.message || e}`);
-    }
-}
-
-/** Manager deleted a script → remove its file (canonical or legacy). */
-export async function deleteFile(fileName: string): Promise<void> {
-    if (!dirHandle) return;
-    lastWritten.delete(fileName);
-    try {
-        await dirHandle.removeEntry(fileName);
-    } catch {}
-    const legacy = realNameOf.get(fileName) || fileName.replace(/\.ts$/, ".script.ts");
-    if (legacy !== fileName) {
-        try {
-            await dirHandle.removeEntry(legacy);
-        } catch {}
-    }
 }
 
 /** Stop timers only, keeping persisted state — as when the worker dies (test seam). */
 export function halt(): void {
     if (timer) clearInterval(timer);
     timer = null;
+    if (reconcileTimer) clearTimeout(reconcileTimer);
+    reconcileTimer = null;
     stopKeepAlive();
 }
 
-export async function stop(): Promise<void> {
+export function stop(): Promise<void> {
+    return serial(stopNow);
+}
+
+async function stopNow(): Promise<void> {
     if (timer) clearInterval(timer);
     timer = null;
+    if (reconcileTimer) clearTimeout(reconcileTimer);
+    reconcileTimer = null;
     dirHandle = null;
     displayPath = "";
     settingsSig = null;
-    lastWritten.clear();
     known = new Map();
-    await clearPersistedKnown();
+    owned = new Map();
+    await clearPersistedState();
     stopKeepAlive();
     const alarms = alarmsApi();
     if (__MV3__ && alarms) alarms.clear(SYNC_ALARM);
