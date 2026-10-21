@@ -5,6 +5,7 @@
 import { loadMonaco, STARTER_TEMPLATE } from "./monacoSetup";
 import { API_REFERENCE } from "./apiReference";
 import { SAMPLES } from "./samples";
+import { settingsDiagnostics, settingsCompletions, settingsHover, type AssistScript } from "../shared/settingsAssist";
 import { dependantsOf } from "../shared/scriptImports";
 import * as fsBridge from "./fsBridge";
 import { cleanScriptName, scriptNameProblem, scriptFileName, MAX_NAME } from "../shared/scriptName";
@@ -103,12 +104,86 @@ async function loadSettingsModel(force = false): Promise<void> {
     if (!settingsModel) {
         settingsModel = monaco.editor.createModel(text, "yaml", monaco.Uri.parse("file:///settings.yaml"));
         setBaseline(settingsModel, text);
+        settingsModel.onDidChangeContent(() => scheduleSettingsMarkers());
+        scheduleSettingsMarkers();
     } else if (settingsModel.getValue() !== text && (force || !dirty)) {
         applyingExternal = true;
         settingsModel.setValue(text);
         applyingExternal = false;
         setBaseline(settingsModel, text);
     }
+}
+
+// ---- settings.yaml assistance: schema + each script's declared params ----
+const assistScripts = (): AssistScript[] =>
+    scripts.map((s: any) => ({ name: s.meta.name, declared: s.meta.declared !== false, defs: s.paramDefs ?? {} }));
+let settingsMarkerTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleSettingsMarkers(): void {
+    if (settingsMarkerTimer) clearTimeout(settingsMarkerTimer);
+    settingsMarkerTimer = setTimeout(() => {
+        settingsMarkerTimer = null;
+        const monaco = (window as any).monaco;
+        const m = settingsModel;
+        if (!m || m.isDisposed()) return;
+        const markers = settingsDiagnostics(m.getValue(), assistScripts()).map((d) => {
+            const a = m.getPositionAt(d.start);
+            const b = m.getPositionAt(d.end);
+            return {
+                severity: d.severity === "error" ? monaco.MarkerSeverity.Error : monaco.MarkerSeverity.Warning,
+                startLineNumber: a.lineNumber,
+                startColumn: a.column,
+                endLineNumber: b.lineNumber,
+                endColumn: b.column,
+                message: d.message,
+                source: "settings.yaml",
+            };
+        });
+        monaco.editor.setModelMarkers(m, "wt-settings", markers);
+    }, 250);
+}
+
+function registerSettingsAssist(): void {
+    const monaco = (window as any).monaco;
+    const mine = (model: any) => model === settingsModel;
+    const KIND: Record<string, any> = {
+        property: monaco.languages.CompletionItemKind.Property,
+        value: monaco.languages.CompletionItemKind.Value,
+        module: monaco.languages.CompletionItemKind.Module,
+    };
+    monaco.languages.registerCompletionItemProvider("yaml", {
+        triggerCharacters: [" ", ":"],
+        provideCompletionItems(model: any, position: any) {
+            if (!mine(model)) return { suggestions: [] };
+            const offset = model.getOffsetAt(position);
+            const { items, replaceFrom } = settingsCompletions(model.getValue(), offset, assistScripts());
+            const start = model.getPositionAt(replaceFrom);
+            const range = { startLineNumber: start.lineNumber, startColumn: start.column, endLineNumber: position.lineNumber, endColumn: position.column };
+            return {
+                suggestions: items.map((it, i) => ({
+                    label: it.label,
+                    kind: KIND[it.kind],
+                    insertText: it.insertText,
+                    detail: it.detail,
+                    documentation: it.documentation ? { value: it.documentation } : undefined,
+                    sortText: String(i).padStart(4, "0"),
+                    range,
+                    // a key completion that opens a nested map continues straight into it
+                    command: it.insertText.endsWith("\n") || /\n\s+$/.test(it.insertText) ? { id: "editor.action.triggerSuggest", title: "" } : undefined,
+                })),
+            };
+        },
+    });
+    monaco.languages.registerHoverProvider("yaml", {
+        provideHover(model: any, position: any) {
+            if (!mine(model)) return null;
+            const h = settingsHover(model.getValue(), model.getOffsetAt(position), assistScripts());
+            if (!h) return null;
+            const a = model.getPositionAt(h.start);
+            const b = model.getPositionAt(h.end);
+            return { contents: [{ value: h.markdown }], range: { startLineNumber: a.lineNumber, startColumn: a.column, endLineNumber: b.lineNumber, endColumn: b.column } };
+        },
+    });
 }
 
 async function selectSettings(): Promise<void> {
@@ -143,6 +218,7 @@ async function refresh(): Promise<void> {
     renderList();
     syncModels();
     scheduleDiagnostics();
+    scheduleSettingsMarkers();
     if (selectedId && selectedId !== SETTINGS_ID && !scripts.some((s) => s.id === selectedId)) {
         selectedId = null;
     }
@@ -1134,6 +1210,7 @@ async function main(): Promise<void> {
     });
     editor.addCommand((window as any).monaco.KeyMod.CtrlCmd | (window as any).monaco.KeyCode.KeyS, () => void saveCurrent());
     (window as any).monaco.editor.onDidChangeMarkers(() => scheduleDiagnostics());
+    registerSettingsAssist();
     // Monaco re-checks only the edited file; its importers keep stale errors
     (window as any).monaco.editor.onDidCreateModel((m: any) => {
         if (m.getLanguageId() === "typescript") m.onDidChangeContent(() => scheduleDependantRecheck(m));

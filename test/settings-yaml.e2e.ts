@@ -137,6 +137,38 @@ try {
     const status = await mgr.evaluate(() => ({ text: document.querySelector("#editor-status")?.textContent ?? "", cls: document.querySelector("#editor-status")?.className ?? "" }));
     check("malformed YAML → error status", /settings\.yaml/.test(status.text) && /error/.test(status.cls), JSON.stringify(status));
     check("malformed YAML leaves state untouched", JSON.stringify(await params()) === JSON.stringify(before));
+
+    // ---- schema assistance: markers, completion, hover ----
+    const markers = () => mgr.evaluate(() => {
+        const m = (window as any).monaco;
+        return m.editor.getModelMarkers({ owner: "wt-settings" }).map((x: any) => x.message);
+    });
+    await set('settings:\n  logLevel: loud\nparams:\n  Debug header:\n    level: 3\n    nope: 1\n  Ghost: {}\n');
+    await mgr.waitForTimeout(800);
+    const mk = await markers();
+    check("marker: bad enum value", mk.some((x: string) => x.startsWith("Expected one of debug")), JSON.stringify(mk));
+    check("marker: param type from declareScript", mk.some((x: string) => x.startsWith("Expected string")), JSON.stringify(mk));
+    check("marker: undeclared param", mk.some((x: string) => x.includes('declares no param "nope"')), JSON.stringify(mk));
+    check("marker: unknown script", mk.some((x: string) => x.includes('No script named "Ghost"')), JSON.stringify(mk));
+    await set("params:\n  Debug header:\n    \n");
+    await mgr.evaluate(() => {
+        const ed = (window as any).monaco.editor.getEditors()[0];
+        ed.setPosition({ lineNumber: 3, column: 5 });
+        ed.focus();
+        ed.trigger("t", "editor.action.triggerSuggest", {});
+    });
+    await mgr.waitForSelector(".suggest-widget.visible .monaco-list-row", { timeout: 5000 }).catch(() => null);
+    const sugg = await mgr.evaluate(() => [...document.querySelectorAll(".suggest-widget.visible .monaco-list-row .label-name")].map((e) => e.textContent));
+    check("completion: script params", sugg.includes("enabled") && sugg.includes("level"), JSON.stringify(sugg));
+    await mgr.keyboard.press("Escape");
+    await mgr.evaluate(() => {
+        const ed = (window as any).monaco.editor.getEditors()[0];
+        ed.setPosition({ lineNumber: 2, column: 5 });
+        ed.trigger("t", "editor.action.showHover", {});
+    });
+    await mgr.waitForSelector(".monaco-hover:not(.hidden) .hover-contents", { timeout: 5000 }).catch(() => null);
+    const hov = await mgr.evaluate(() => [...document.querySelectorAll(".monaco-hover .hover-contents")].map((e) => e.textContent).join(" | "));
+    check("hover: script's params with descriptions", hov.includes("Value of the x-debug header"), hov);
 } catch (e) {
     failed++;
     console.log("FAIL  exception —", e);
