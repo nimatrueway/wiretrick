@@ -122,10 +122,28 @@ async function buildOnce(dist, mv3) {
     await copyStatic(dist, mv3);
 }
 
+/**
+ * Monaco files the editor can load: models are only ever "typescript"
+ * (scripts, diff editor) and "yaml" (settings) — see monacoSetup.ts and
+ * manager.ts — so other languages' modes/workers are skipped. The
+ * nls.messages.<locale> files load only when a locale is configured
+ * (we don't), so the editor stays English.
+ */
+const MONACO_BASIC_LANGUAGES = new Set(["typescript", "javascript", "yaml"]);
+const MONACO_SKIPPED_LANGUAGES = new Set(["css", "html", "json"]);
+function keepMonacoFile(rel) {
+    const parts = rel.split(path.sep);
+    if (parts.length === 1 && /^nls\.messages\..+\.js$/.test(parts[0])) return false;
+    if (parts[0] === "basic-languages" && parts.length > 1 && !parts[1].startsWith("_") && !MONACO_BASIC_LANGUAGES.has(parts[1])) return false;
+    if (parts[0] === "language" && parts.length > 1 && MONACO_SKIPPED_LANGUAGES.has(parts[1])) return false;
+    return true;
+}
+
 async function copyStatic(dist, mv3) {
     await mkdir(path.join(dist, "lib", "monaco"), { recursive: true });
 
-    await cp(path.join(root, "icons"), path.join(dist, "icons"), { recursive: true });
+    // storeIcon.png is for the store listing only — no manifest references it
+    await cp(path.join(root, "icons"), path.join(dist, "icons"), { recursive: true, filter: (src) => path.basename(src) !== "storeIcon.png" });
     if (mv3) {
         const mv2 = JSON.parse(await readFile(path.join(root, "manifest.json"), "utf8"));
         await writeFile(path.join(dist, "manifest.json"), JSON.stringify(mv3Manifest(mv2), null, 4) + "\n");
@@ -148,20 +166,8 @@ async function copyStatic(dist, mv3) {
     const monacoDst = path.join(dist, "lib/monaco/vs");
     if (existsSync(monacoSrc)) {
         await rm(monacoDst, { recursive: true, force: true });
-        await cp(monacoSrc, monacoDst, { recursive: true });
+        await cp(monacoSrc, monacoDst, { recursive: true, filter: (src) => keepMonacoFile(path.relative(monacoSrc, src)) });
         await pruneTsWorkerLibs(path.join(monacoDst, "language/typescript/tsWorker.js"));
-    }
-
-    // loader shim for manager.html
-    await writeFile(
-        path.join(dist, "lib/monaco-loader.js"),
-        `// Monaco AMD loader entry\n`
-    );
-    // manager.html loads lib/monaco-loader.js before manager.js; the actual
-    // loader script is monaco's own loader.js. Point require at it:
-    const loaderSrc = path.join(monacoDst, "loader.js");
-    if (existsSync(loaderSrc)) {
-        await copyFile(loaderSrc, path.join(dist, "lib/monaco-loader.js"));
     }
 
     // wt-api typings for the editor + VS Code export
