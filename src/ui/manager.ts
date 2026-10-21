@@ -5,6 +5,7 @@
 import { loadMonaco, STARTER_TEMPLATE } from "./monacoSetup";
 import { API_REFERENCE } from "./apiReference";
 import { SAMPLES } from "./samples";
+import { dependantsOf } from "../shared/scriptImports";
 import * as fsBridge from "./fsBridge";
 import { cleanScriptName, scriptNameProblem, scriptFileName, MAX_NAME } from "../shared/scriptName";
 import { buildBundle, parseBundleText, bundleSettingsDoc, vscodeTargetPath } from "./bundle";
@@ -333,6 +334,65 @@ function scheduleDiagnostics(): void {
             void send({ type: "scriptTypeErrors", scriptId: s.id, name: s.meta.name, errors });
         }
     }, 600);
+}
+
+// ---- re-check importers when a utility changes ----
+const changedModels = new Set<any>();
+let recheckTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleDependantRecheck(m: any): void {
+    changedModels.add(m);
+    if (recheckTimer) clearTimeout(recheckTimer);
+    recheckTimer = setTimeout(() => {
+        recheckTimer = null;
+        const changed = [...changedModels];
+        changedModels.clear();
+        const live = [...models.entries()]
+            .filter(([, x]) => !x.isDisposed?.())
+            .map(([id, x]) => ({ id, model: x, name: scripts.find((s) => s.id === id)?.meta.name ?? "", code: x.getValue() }));
+        const targets = new Set<any>();
+        for (const c of changed) {
+            const src = live.find((x) => x.model === c);
+            if (!src) continue;
+            for (const id of dependantsOf(src.name, live)) {
+                const t = live.find((x) => x.id === id)!.model;
+                if (t !== c) targets.add(t);
+            }
+        }
+        for (const t of targets) void revalidateModel(t);
+    }, 500);
+}
+
+/** what Monaco's TS diagnostics adapter does on an edit, for a model that wasn't edited */
+async function revalidateModel(m: any): Promise<void> {
+    const monaco = (window as any).monaco;
+    try {
+        const worker = await (await monaco.languages.typescript.getTypeScriptWorker())(m.uri);
+        const uri = m.uri.toString();
+        const diags = [...(await worker.getSyntacticDiagnostics(uri)), ...(await worker.getSemanticDiagnostics(uri))];
+        if (m.isDisposed()) return;
+        const flatten = (t: any): string => (typeof t === "string" ? t : [t.messageText, ...(t.next || []).map(flatten)].join("\n  "));
+        const sev = (c: number) => (c === 1 ? monaco.MarkerSeverity.Error : c === 0 ? monaco.MarkerSeverity.Warning : c === 2 ? monaco.MarkerSeverity.Hint : monaco.MarkerSeverity.Info);
+        monaco.editor.setModelMarkers(
+            m,
+            "typescript",
+            diags.map((d: any) => {
+                const a = m.getPositionAt(d.start || 0);
+                const b = m.getPositionAt((d.start || 0) + (d.length || 1));
+                return {
+                    severity: sev(d.category),
+                    startLineNumber: a.lineNumber,
+                    startColumn: a.column,
+                    endLineNumber: b.lineNumber,
+                    endColumn: b.column,
+                    message: flatten(d.messageText),
+                    code: String(d.code),
+                };
+            })
+        );
+    } catch {
+        /* worker restarting / model gone — the next edit re-checks */
+    }
 }
 
 // ---- editor ----
@@ -1074,6 +1134,11 @@ async function main(): Promise<void> {
     });
     editor.addCommand((window as any).monaco.KeyMod.CtrlCmd | (window as any).monaco.KeyCode.KeyS, () => void saveCurrent());
     (window as any).monaco.editor.onDidChangeMarkers(() => scheduleDiagnostics());
+    // Monaco re-checks only the edited file; its importers keep stale errors
+    (window as any).monaco.editor.onDidCreateModel((m: any) => {
+        if (m.getLanguageId() === "typescript") m.onDidChangeContent(() => scheduleDependantRecheck(m));
+    });
+    for (const m of models.values()) m.onDidChangeContent(() => scheduleDependantRecheck(m));
     // VS Code shortcuts: ⌘P quick-open (scripts + settings.yaml), ⌘, opens
     // the Settings dialog. ⌘/ (comment), ⌘F (find), ⌘D (next occurrence)
     // and Shift+Alt+A (block comment) are Monaco built-ins.

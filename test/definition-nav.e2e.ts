@@ -237,6 +237,22 @@ const markers = await mgr.evaluate(() => {
 });
 check("spaced import resolves (no diagnostics)", markers.length === 0, JSON.stringify(markers));
 
+// breaking the utility flags its importer; fixing it clears the importer
+const usesLibMarkers = () => mgr.evaluate(() => {
+    const m = (window as any).monaco;
+    const u = m.editor.getModels().find((x: any) => x.uri.toString().includes("uses"));
+    return m.editor.getModelMarkers({ resource: u.uri }).length;
+});
+const setLib = async (code: string) => {
+    await clickScript("my lib (v2)");
+    await mgr.evaluate((c: string) => (window as any).monaco.editor.getEditors()[0].setValue(c), code);
+    await mgr.waitForTimeout(3000);
+};
+await setLib("export const answer = \"42\";\n");
+check("dependant: importer flagged when utility breaks it", (await usesLibMarkers()) > 0);
+await setLib("export const answer = 42;\n");
+check("dependant: importer cleared when utility is fixed", (await usesLibMarkers()) === 0);
+
 } catch (e) {
     failed++;
     console.error("FATAL", e);

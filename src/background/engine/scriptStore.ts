@@ -1,6 +1,7 @@
 /**
  * chrome.storage.local backed script store.
  */
+import { dependantsOf } from "../../shared/scriptImports";
 import type { ResMeta } from "../../shared/metaParser";
 import { compileForStorage, SANDBOX_COMPILE_FAILED } from "../compileHost";
 import { dlogLevel } from "../../shared/debugLog";
@@ -103,7 +104,12 @@ export async function saveScript(partial: Pick<Script, "id" | "code"> & Partial<
     }
     await storageSet({ [STORE_KEY]: byId, [ORDER_KEY]: order });
     // new code → stale runtime errors no longer apply
-    if (prev && prev.code !== script.code) void clearScriptErrors(script.id);
+    if (prev && prev.code !== script.code) {
+        void clearScriptErrors(script.id);
+        // …for the scripts importing it too: they run the new code from now on
+        const all = Object.values(byId).map((x) => ({ id: x.id, name: x.meta.name, code: x.code }));
+        for (const id of dependantsOf(script.meta.name, all)) if (id !== script.id) void clearScriptErrors(id);
+    }
     notify();
     return script;
 }
