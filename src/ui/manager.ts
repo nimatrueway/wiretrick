@@ -6,10 +6,11 @@ import { loadMonaco, STARTER_TEMPLATE } from "./monacoSetup";
 import { API_REFERENCE } from "./apiReference";
 import { SAMPLES } from "./samples";
 import { settingsDiagnostics, settingsCompletions, settingsHover, type AssistScript } from "../shared/settingsAssist";
-import { dependantsOf } from "../shared/scriptImports";
+import { dependantsOf, missingImports } from "../shared/scriptImports";
+import { pickRows } from "./bundlePicker";
 import * as fsBridge from "./fsBridge";
 import { cleanScriptName, scriptNameProblem, scriptFileName, MAX_NAME } from "../shared/scriptName";
-import { buildBundle, parseBundleText, bundleSettingsDoc, vscodeTargetPath } from "./bundle";
+import { buildBundle, parseBundleText, bundleSettingsDoc, pickBundle, vscodeTargetPath } from "./bundle";
 import { createQuickOpenPalette } from "./quickOpen";
 import { computeDirty } from "./dirtyState";
 import { parseSettings, SETTINGS_FILE, type SettingsDoc } from "../shared/settingsYaml";
@@ -1339,6 +1340,20 @@ async function main(): Promise<void> {
     }
 
     // import / export
+    // import / export — both open a checklist so any subset can travel
+    const settingsRow = (g: Record<string, any>) => ({
+        label: "Settings (globals)",
+        detail: Object.entries(g).map(([k, v]) => `${k}: ${v}`).join(", "),
+    });
+    const importsWarning = (names: { name: string; code: string }[], offset: number) => (checked: number[]) => {
+        const picked = checked.filter((i) => i >= offset).map((i) => i - offset);
+        const missing = missingImports(picked, names);
+        if (!missing.length) return null;
+        return {
+            text: `selected scripts import ${missing.map((i) => `"${names[i].name}"`).join(", ")}, which isn't selected`,
+            fix: missing.map((i) => i + offset),
+        };
+    };
     $("#btn-export").addEventListener("click", async () => {
         // scripts + settings travel together in one YAML document; the
         // parsed settings.yaml carries globals AND per-script param values
@@ -1349,18 +1364,37 @@ async function main(): Promise<void> {
         } catch {
             /* unreachable: getSettingsYaml always returns parsable text */
         }
-        const payload = buildBundle(
-            doc,
-            scripts.map((s) => ({ name: s.meta.name, code: s.code, enabled: s.enabled }))
-        );
+        const globals = doc.settings && Object.keys(doc.settings).length ? doc.settings : null;
+        const offset = globals ? 1 : 0;
+        const list = scripts.map((s) => ({ name: s.meta.name, code: s.code, enabled: s.enabled }));
+        const chosen = await pickRows({
+            title: "Export",
+            intro: "Pick what goes into the YAML bundle. Each script carries its code, enabled state and non-default params.",
+            rows: [
+                ...(globals ? [settingsRow(globals)] : []),
+                ...list.map((s) => ({ label: s.name, badge: s.enabled ? undefined : "disabled" })),
+            ],
+            confirm: "Export",
+            warn: importsWarning(list, offset),
+        });
+        if (!chosen) return;
+        const picked = chosen.filter((i) => i >= offset).map((i) => list[i - offset]);
+        const payload = buildBundle({ ...doc, settings: globals && chosen.includes(0) ? globals : null }, picked);
         const blob = new Blob([payload], { type: "text/yaml" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = "wiretrick-export.yaml";
+        a.download = picked.length === 1 && chosen.length === 1 ? `${picked[0].name}.wiretrick.yaml` : "wiretrick-export.yaml";
         a.click();
         URL.revokeObjectURL(url);
+        status(`exported ${picked.length} script(s)${offset && chosen.includes(0) ? " + settings" : ""} ✓`);
     });
+    // an imported script replaces the existing script of the same name
+    const saveImported = async (item: { code: string; name?: string; enabled?: boolean }) => {
+        const existing = item.name ? scripts.find((s) => s.meta.name === item.name) : undefined;
+        await send({ type: "saveScript", id: existing?.id ?? uuid(), code: item.code, name: item.name, enabled: item.enabled });
+    };
+    const existsBadge = (name?: string) => (name && scripts.some((s) => s.meta.name === name) ? "replaces existing" : "new");
     $("#btn-import").addEventListener("click", () => {
         const input = document.createElement("input");
         input.type = "file";
@@ -1373,11 +1407,32 @@ async function main(): Promise<void> {
             if (isYaml || file.name.endsWith(".json")) {
                 // bundle formats: yaml (new) or json (legacy, incl. its
                 // settings object)
-                const bundle = parseBundleText(text);
-                if (bundle) {
-                    for (const item of bundle.scripts) {
-                        await send({ type: "saveScript", id: uuid(), code: item.code, name: item.name, enabled: item.enabled });
-                    }
+                const full = parseBundleText(text);
+                if (full) {
+                    const offset = full.settings ? 1 : 0;
+                    const named = full.scripts.map((s, i) => ({ name: s.name ?? `script ${i + 1}`, code: s.code }));
+                    const chosen = await pickRows({
+                        title: `Import ${file.name}`,
+                        intro: "Pick what to import. A script replaces the existing script of the same name.",
+                        rows: [
+                            ...(full.settings ? [settingsRow(full.settings)] : []),
+                            ...named.map((s, i) => ({
+                                label: s.name,
+                                badge: existsBadge(full.scripts[i].name),
+                                detail: full.scripts[i].params ? `params: ${Object.keys(full.scripts[i].params!).join(", ")}` : undefined,
+                            })),
+                        ],
+                        confirm: "Import",
+                        warn: importsWarning(named, offset),
+                    });
+                    if (!chosen) return;
+                    const bundle = pickBundle(
+                        full,
+                        offset > 0 && chosen.includes(0),
+                        chosen.filter((i) => i >= offset).map((i) => i - offset)
+                    );
+                    for (const item of bundle.scripts) await saveImported(item);
+                    await refresh();
                     // settings apply through the real path (params +
                     // globals); storage.onChanged refreshes the settings UI
                     const doc = bundleSettingsDoc(bundle);
@@ -1387,10 +1442,8 @@ async function main(): Promise<void> {
                             status(`imported ${bundle.scripts.length} script(s); settings: ${res.error}`, "error");
                             return;
                         }
-                        status(`imported ${bundle.scripts.length} script(s) + settings ✓`);
-                        return;
                     }
-                    status(`imported ${bundle.scripts.length} script(s) ✓`);
+                    status(`imported ${bundle.scripts.length} script(s)${bundle.settings ? " + settings" : ""} ✓`);
                     return;
                 }
                 if (isYaml) {
@@ -1400,9 +1453,7 @@ async function main(): Promise<void> {
                 // legacy: a plain json array / single script object
                 const parsed = JSON.parse(text);
                 const items = Array.isArray(parsed) ? parsed : [parsed];
-                for (const item of items) {
-                    await send({ type: "saveScript", id: uuid(), code: item.code, name: item.name, enabled: item.enabled });
-                }
+                for (const item of items) await saveImported(item);
                 status(`imported ${items.length} script(s) ✓`);
             } else {
                 await send({ type: "saveScript", id: uuid(), code: text, name: "Imported script" });

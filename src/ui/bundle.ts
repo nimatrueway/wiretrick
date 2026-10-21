@@ -150,3 +150,10 @@ export function bundleSettingsDoc(bundle: ParsedBundle): SettingsDoc | null {
     if (!any) return null;
     return { settings: Object.keys(settings).length ? settings : null, params };
 }
+
+/** The part of a bundle the user picked: its settings (globals) and these scripts. */
+export function pickBundle(bundle: ParsedBundle, keepSettings: boolean, scriptIndices: number[]): ParsedBundle {
+    const out: ParsedBundle = { scripts: scriptIndices.map((i) => bundle.scripts[i]).filter(Boolean) };
+    if (keepSettings && bundle.settings) out.settings = bundle.settings;
+    return out;
+}

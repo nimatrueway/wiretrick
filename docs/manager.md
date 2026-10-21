@@ -57,6 +57,17 @@ the manager reconnects automatically on open (one click to re-grant after a
 browser restart, per Chrome's File System Access rules — click the toolbar
 notice or the button).
 
+## Import / export
+
+**Settings → Export…** and **Import…** open a checklist: tick the scripts
+(and *Settings (globals)*) to include. Export writes one YAML bundle — each
+script with its code, enabled state and non-default params. Import reads a
+bundle and lets you pick which of its items to take; each row says whether
+it's **new** or **replaces existing** (a script of the same name is
+overwritten rather than duplicated). If a picked script imports a library
+that isn't picked, the dialog warns and **Add them** ticks the missing ones.
+A plain `.ts`/`.js` file imports as a single script.
+
 ## `settings.yaml`
 
 The script list always has a ⚙ **settings.yaml** entry (no folder needed; no

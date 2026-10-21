@@ -7,7 +7,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { parse as parseYaml } from "yaml";
-import { buildBundle, parseBundleText, bundleSettingsDoc, syncFileNameFor, vscodeTargetPath } from "../src/ui/bundle";
+import { buildBundle, parseBundleText, bundleSettingsDoc, pickBundle, syncFileNameFor, vscodeTargetPath } from "../src/ui/bundle";
 import { SETTINGS_FILE, type SettingsDoc } from "../src/shared/settingsYaml";
 
 const SETTINGS_ID = "__settings__"; // mirrors manager.ts's virtual entry id
@@ -152,5 +152,21 @@ describe("imported bundle settings applied via the real apply path", () => {
         // reset every unmentioned param of that script to its default
         expect(bundleSettingsDoc(bundle)).toBeNull();
         expect(store).toEqual(before);
+    });
+});
+
+describe("pickBundle (partial import)", () => {
+    const full = { settings: { logLevel: "warn" }, scripts: [{ name: "a", code: "1" }, { name: "b", code: "2", params: { x: 1 } }, { name: "c", code: "3" }] };
+    it("keeps only the picked scripts, in bundle order given", () => {
+        expect(pickBundle(full, false, [2, 0])).toEqual({ scripts: [full.scripts[2], full.scripts[0]] });
+    });
+    it("keeps settings only when asked", () => {
+        expect(pickBundle(full, true, []).settings).toEqual({ logLevel: "warn" });
+        expect(bundleSettingsDoc(pickBundle(full, false, [0]))).toBeNull();
+        expect(bundleSettingsDoc(pickBundle(full, false, [1]))).toEqual({ settings: null, params: { b: { x: 1 } } });
+    });
+    it("an export without settings omits the section", () => {
+        const text = buildBundle({ settings: null, params: {} }, [{ name: "a", code: "1" }]);
+        expect(parseYaml(text).settings).toBeUndefined();
     });
 });

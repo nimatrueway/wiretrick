@@ -665,3 +665,21 @@ body.net-dragging { user-select: none; }
 .err-ind.runtime { color: var(--warn); cursor: pointer; }
 .err-ind.runtime:hover { color: var(--err); }
 .script-item.has-error .script-name.error { color: var(--err); }
+
+/* partial import/export checklist */
+.dialog-foot { display: flex; gap: 8px; align-items: center; justify-content: flex-end; padding: 10px 16px; border-top: 1px solid var(--border); }
+.dialog-foot .picker-count { margin-right: auto; font-size: 12px; }
+.dialog-foot button, .picker-warn button { background: var(--bg-panel); color: var(--fg); border: 1px solid var(--border); border-radius: 3px; padding: 4px 12px; cursor: pointer; }
+.dialog-foot button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.dialog-foot button:disabled { opacity: 0.5; cursor: default; }
+.picker-intro { margin: 0 0 8px; }
+.picker-all { font-size: 12px; margin-bottom: 6px; }
+.picker-all a { color: var(--accent); }
+.picker-rows { display: flex; flex-direction: column; gap: 2px; }
+.picker-row { display: flex; gap: 8px; align-items: flex-start; padding: 4px 6px; border-radius: 3px; cursor: pointer; }
+.picker-row:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.picker-row input { margin-top: 2px; }
+.picker-badge { margin-left: 8px; font-size: 11px; padding: 0 6px; border-radius: 8px; border: 1px solid var(--border); color: var(--fg-dim); }
+.picker-detail { font-size: 12px; }
+.picker-warn { margin-top: 10px; color: var(--warn); font-size: 12px; display: flex; gap: 8px; align-items: center; }
+.picker-warn[hidden] { display: none; }

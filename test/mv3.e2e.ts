@@ -481,10 +481,34 @@ try {
         (document.querySelector("#btn-settings") as HTMLElement).click();
     });
     await mgr.waitForTimeout(300);
+    // partial export: untick "MV3 hook" → it's left out; untick the
+    // library api-interceptor imports → the picker warns, "Add them" re-ticks
     await mgr.evaluate(() => { (document.querySelector("#btn-export") as HTMLElement).click(); });
+    await mgr.waitForSelector("#bundle-picker .picker-row", { timeout: 5000 });
+    const exportRows = await mgr.evaluate(() => [...document.querySelectorAll("#bundle-picker .picker-label")].map((e) => e.textContent));
+    check("export picker lists every script", exportRows.includes("MV3 hook") && exportRows.includes("api-interceptor") && exportRows.includes("api-lib"), JSON.stringify(exportRows));
+    const pickerWarn = await mgr.evaluate(() => {
+        const rows = [...document.querySelectorAll<HTMLElement>("#bundle-picker .picker-row")];
+        const boxes = new Map(rows.map((r) => [r.querySelector(".picker-label")?.textContent, r.querySelector("input")!]));
+        boxes.get("MV3 hook")!.click();
+        boxes.get("api-lib")!.click();
+        const warn = document.querySelector<HTMLElement>("#bundle-picker .picker-warn")!;
+        const shown = !warn.hidden && (warn.textContent || "").includes("api-lib");
+        (warn.querySelector("button") as HTMLElement).click();
+        return { shown, relinked: boxes.get("api-lib")!.checked && warn.hidden };
+    });
+    check("picker warns about an unticked imported library; Add them re-ticks it", pickerWarn.shown && pickerWarn.relinked, JSON.stringify(pickerWarn));
+    await mgr.evaluate(() => (document.querySelector('#bundle-picker [data-act="ok"]') as HTMLElement).click());
+    await mgr.waitForTimeout(800);
+    const partialText: string = await mgr.evaluate(() => (window as any).__captured);
+    check("partial export leaves out the unticked script", typeof partialText === "string" && partialText.includes("api-interceptor") && !partialText.includes("name: MV3 hook"));
+    await mgr.evaluate(() => { (window as any).__captured = null; (document.querySelector("#btn-export") as HTMLElement).click(); });
+    await mgr.waitForSelector("#bundle-picker .picker-row", { timeout: 5000 });
+    await mgr.evaluate(() => (document.querySelector('#bundle-picker [data-act="ok"]') as HTMLElement).click());
     await mgr.waitForTimeout(800); // the blob promise resolves async
     const bundleText = await mgr.evaluate(() => (window as any).__captured);
-    check("export produces a bundle (settings + scripts)", typeof bundleText === "string" && bundleText.includes("wiretrick-bundle") && bundleText.includes("api-interceptor"));
+    check("export produces a bundle (settings + scripts)", typeof bundleText === "string" && bundleText.includes("wiretrick-bundle") && bundleText.includes("api-interceptor") && bundleText.includes("name: MV3 hook"));
+    const skipName = exportRows.find((n: string | null) => n && !["MV3 hook", "api-interceptor", "api-lib", "Settings (globals)"].includes(n));
     await mgr.evaluate(() => new Promise((r) => chrome.storage.local.clear(() => r(null))));
     await mgr.reload();
     await mgr.waitForFunction(() => (window as any).monaco?.editor.getEditors().length === 1, null, { timeout: 20000 });
@@ -507,6 +531,16 @@ try {
         input.dispatchEvent(new Event("change"));
         return "importing";
     }, bundleText);
+    // partial import: untick one script → it isn't created
+    await mgr.waitForSelector("#bundle-picker .picker-row", { timeout: 5000 });
+    const importBadges = await mgr.evaluate((skip: string | undefined) => {
+        const rows = [...document.querySelectorAll<HTMLElement>("#bundle-picker .picker-row")];
+        if (skip) rows.find((r) => r.querySelector(".picker-label")?.textContent === skip)?.querySelector("input")?.click();
+        const badges = rows.map((r) => r.querySelector(".picker-badge")?.textContent);
+        (document.querySelector('#bundle-picker [data-act="ok"]') as HTMLElement).click();
+        return badges;
+    }, skipName);
+    check("import picker marks scripts as new", importBadges.filter((b: any) => b === "new").length >= 3, JSON.stringify(importBadges));
     await mgr.waitForFunction(() => (document.querySelector("#editor-status")?.textContent ?? "").includes("imported"), null, { timeout: 20000 }).catch(() => {});
     const imported = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "listScripts" }, r)));
     const byName = new Map<string, any>((imported || []).map((s: any) => [s.meta.name, s]));
@@ -514,6 +548,7 @@ try {
     check("import restores params (api-interceptor.label)", !!byName.get("api-interceptor")?.paramDefs?.label);
     check("import keeps libraries as libraries (api-lib)", byName.get("api-lib")?.meta?.declared === false);
     check("import restores enabled state", byName.get("MV3 hook")?.enabled === true && byName.get("api-interceptor")?.enabled === true);
+    check("partial import skips the unticked script", !!skipName && !byName.has(skipName), String(skipName));
     check("import status shows success", (await mgr.evaluate(() => document.querySelector("#editor-status")?.textContent ?? "")).includes("imported"));
 
     // the user's scenario: the popup is the FIRST thing opened after the SW

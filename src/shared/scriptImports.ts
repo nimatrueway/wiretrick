@@ -35,3 +35,23 @@ export function dependantsOf<T extends { id: string; name: string; code: string 
     }
     return [...found];
 }
+
+/**
+ * Indices of `scripts` that the `chosen` ones import (directly or through
+ * other scripts) but that aren't chosen — libraries a partial export or
+ * import would leave dangling.
+ */
+export function missingImports<T extends { name: string; code: string }>(chosen: number[], scripts: T[]): number[] {
+    const picked = new Set(chosen);
+    const missing = new Set<number>();
+    const queue = [...chosen];
+    while (queue.length) {
+        const keys = importKeys(scripts[queue.shift()!].code);
+        scripts.forEach((s, i) => {
+            if (picked.has(i) || missing.has(i) || !nameKeys(s.name).some((k) => keys.has(k))) return;
+            missing.add(i);
+            queue.push(i);
+        });
+    }
+    return [...missing].sort((a, b) => a - b);
+}
