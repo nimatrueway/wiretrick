@@ -110,9 +110,9 @@ jobs:
       - name: Package zip
         run: |
           VERSION=$(node -p "require('./dist/manifest.json').version")
-          zip -qr "wiretrick-v${VERSION}.zip" dist
+          zip -qr "wiretrick-mv2-v${VERSION}.zip" dist
           (cd dist-mv3 && zip -qr "../wiretrick-mv3-v${VERSION}.zip" .)
-          echo "ZIP_NAME=wiretrick-v${VERSION}.zip" >> "$GITHUB_ENV"
+          echo "ZIP_NAME=wiretrick-mv2-v${VERSION}.zip" >> "$GITHUB_ENV"
           echo "ZIP_MV3_NAME=wiretrick-mv3-v${VERSION}.zip" >> "$GITHUB_ENV"
           echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
 
@@ -123,10 +123,27 @@ jobs:
           if [ -z "$CRX_PRIVATE_KEY" ]; then echo "::warning::CRX_PRIVATE_KEY secret not set — skipping .crx"; exit 0; fi
           KEY="$RUNNER_TEMP/crx-key.pem"
           printf '%s\n' "$CRX_PRIVATE_KEY" > "$KEY"
-          npx -y crx3@2.0.0 -p "$KEY" -o "wiretrick-v${VERSION}.crx" -- dist
+          npx -y crx3@2.0.0 -p "$KEY" -o "wiretrick-mv2-v${VERSION}.crx" -- dist
           npx -y crx3@2.0.0 -p "$KEY" -o "wiretrick-mv3-v${VERSION}.crx" -- dist-mv3
           rm -f "$KEY"
           ls -la *.crx
+
+      - name: Package Firefox xpi (signed via AMO when AMO_JWT_* secrets are set)
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: |
+          XPI="wiretrick-firefox-v${VERSION}.xpi"
+          if [ -n "$AMO_JWT_ISSUER" ] && [ -n "$AMO_JWT_SECRET" ] && \
+             npx -y web-ext@8 sign -s dist -a amo-signed --channel unlisted \
+               --api-key "$AMO_JWT_ISSUER" --api-secret "$AMO_JWT_SECRET"; then
+            mv amo-signed/*.xpi "$XPI"
+            echo "signed $XPI"
+          else
+            echo "::warning::Firefox xpi is unsigned (AMO_JWT_ISSUER/AMO_JWT_SECRET missing or signing failed)"
+            (cd dist && zip -qr "../$XPI" .)
+          fi
+          echo "XPI_NAME=$XPI" >> "$GITHUB_ENV"
 
       - name: Upload build artifact (every run)
         uses: actions/upload-artifact@v4
@@ -154,12 +171,14 @@ jobs:
           files: |
             ${{ env.ZIP_NAME }}
             ${{ env.ZIP_MV3_NAME }}
+            ${{ env.XPI_NAME }}
             wiretrick-*.crx
             helper-dist/*
           generate_release_notes: true
           body: |
             Current Chrome / Edge / Brave: unzip `wiretrick-mv3-v*.zip`, then chrome://extensions → Developer mode → Load unpacked → the unzipped folder.
-            Firefox or an MV2-capable Chromium: unzip `wiretrick-v*.zip` and load its `dist` folder.
+            Firefox: install `wiretrick-firefox-v*.xpi` (drag it onto Firefox; an unsigned one needs about:debugging → Load Temporary Add-on, or Developer Edition/Nightly with `xpinstall.signatures.required=false`).
+            MV2-capable Chromium: unzip `wiretrick-mv2-v*.zip` and load its `dist` folder.
             Signed `.crx` packages (MV3 and MV2, extension id `jcoealmhehnajkglhfchcnjdpkhnkdei`) are for policy-managed installs or drag-and-drop on Linux; see the README.
 
             Optional local helper for `strategy: ["process"]` (Chrome). Settings → Local helper shows the command with your extension id filled in; it downloads the right `wiretrick-helper-*` binary below, checks it against `SHA256SUMS`, and installs it:

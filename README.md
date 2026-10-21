@@ -1,4 +1,6 @@
-# Wiretrick
+<p align="center"><img src="icons/icon.svg" width="96" alt="Wiretrick icon"></p>
+
+<h1 align="center">Wiretrick</h1>
 
 Rewrite any request or response in your browser with a few lines of
 TypeScript. Wiretrick is a ground-up rewrite of
@@ -25,11 +27,13 @@ bodies, or patch the DOM.
 
 ## Install
 
-1. Download a zip from [Releases](https://github.com/nimatrueway/wiretrick/releases):
-   `wiretrick-mv3-vX.Y.Z.zip` for current Chrome / Edge / Brave, or
-   `wiretrick-vX.Y.Z.zip` for Firefox and MV2-capable Chromium.
-2. Unzip, open `chrome://extensions` (Firefox: `about:debugging#/runtime/this-firefox`),
-   enable **Developer mode** and **Load unpacked** the folder.
+1. Download from [Releases](https://github.com/nimatrueway/wiretrick/releases):
+   `wiretrick-mv3-vX.Y.Z.zip` for current Chrome / Edge / Brave,
+   `wiretrick-firefox-vX.Y.Z.xpi` for Firefox, or
+   `wiretrick-mv2-vX.Y.Z.zip` for MV2-capable Chromium.
+2. Chromium: unzip, open `chrome://extensions`, enable **Developer mode** and
+   **Load unpacked** the folder. Firefox: drag the `.xpi` onto Firefox (see
+   [docs/install.md](docs/install.md#firefox) if it's unsigned).
 3. Pin the icon — its badge counts the scripts active on the current tab.
 
 Signed `.crx` packages, building from source and the optional helper:
