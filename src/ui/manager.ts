@@ -528,11 +528,15 @@ function syncModels(): void {
             viewStates.delete(oldUri);
             baselines.delete(oldUri);
             old.dispose();
+            scheduleDependantRecheck(m);
         }
         if (!m) {
             m = monaco.editor.getModel(uri) || monaco.editor.createModel(s.code, "typescript", uri);
             models.set(s.id, m);
             setBaseline(m, s.code);
+            // a script checked before this library existed (import, folder
+            // sync) still says "Cannot find module" — re-check its importers
+            scheduleDependantRecheck(m);
         } else if (m.getValue() !== s.code && !(s.id === selectedId && dirty)) {
             applyingExternal = true;
             m.setValue(s.code);

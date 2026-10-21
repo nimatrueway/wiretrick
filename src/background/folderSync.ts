@@ -100,7 +100,14 @@ async function scanFolder(): Promise<{ seen: Map<string, FileSig>; aliases: Map<
     const legacy: { name: string; sig: FileSig }[] = [];
     for await (const entry of dirHandle.values()) {
         if (entry.kind !== "file" || !entry.name.endsWith(".ts") || entry.name.endsWith(".d.ts")) continue;
-        const f = await entry.getFile();
+        let f: File;
+        try {
+            f = await entry.getFile();
+        } catch (e: any) {
+            // removed/renamed between listing and reading (editor atomic save)
+            if (e?.name === "NotFoundError") continue;
+            throw e;
+        }
         const sig = { lastModified: f.lastModified, size: f.size };
         if (entry.name.endsWith(".script.ts")) legacy.push({ name: entry.name, sig });
         else seen.set(entry.name, sig);
@@ -373,7 +380,34 @@ export async function exportSettingsFrom(text: string): Promise<void> {
 function scheduleExport(): void {
     if (!dirHandle) return;
     if (exportTimer) clearTimeout(exportTimer);
-    exportTimer = setTimeout(() => void exportSettings(), 300);
+    exportTimer = setTimeout(() => void pushScripts().then(() => exportSettings()), 300);
+}
+
+/**
+ * storage → disk for scripts changed outside the manager editor (import,
+ * popup, messages): write each script whose file is missing or differs.
+ * A file changed on disk since the last poll is left for the poller, so an
+ * unseen external edit is never clobbered.
+ */
+async function pushScripts(): Promise<void> {
+    if (!dirHandle) return;
+    for (const s of await listScripts()) {
+        const fileName = canonicalFileName(s.meta.name);
+        const sig = known.get(fileName);
+        let text: string | null = null;
+        let cur: FileSig | null = null;
+        try {
+            const f = await (await dirHandle.getFileHandle(realNameOf.get(fileName) || fileName)).getFile();
+            text = await f.text();
+            cur = { lastModified: f.lastModified, size: f.size };
+        } catch {
+            /* no file yet */
+        }
+        if (text === s.code) continue;
+        if (cur && (!sig || sig.lastModified !== cur.lastModified || sig.size !== cur.size)) continue;
+        await writeBack(fileName, s.code);
+        dlogLevel("sync", "info", `Folder sync: wrote "${fileName}" (script changed outside the editor)`);
+    }
 }
 
 /** file → storage, when settings.yaml changed on disk; then re-canonicalize */

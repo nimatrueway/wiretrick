@@ -712,6 +712,21 @@ try {
     await fPage.waitForTimeout(2500);
     const flist2 = await fPage.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "listScripts" }, r)));
     check("MV3 folder sync: file copied in while the SW was stopped is imported after restart", (flist2 as any[]).some((s) => s.meta?.name === "while-asleep"), JSON.stringify((flist2 as any[]).map((s) => s.meta?.name)));
+
+    // scripts saved outside the editor (Import…) land in the folder, and an
+    // importer saved before its library re-checks once the library appears
+    const saveMsg = (id: string, name: string, code: string) =>
+        fPage.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, r)), { type: "saveScript", id, name, code });
+    await saveMsg("s_late_user", "late-user", 'import { late } from "./late-lib";\nwt.declareScript({ match: ["*://late.invalid/*"] });\nlate();\n');
+    await fPage.waitForTimeout(2500);
+    await saveMsg("s_late_lib", "late-lib", "export function late(): void {}\n");
+    await fPage.waitForTimeout(3500);
+    check("MV3 folder sync: scripts saved outside the editor are written to the folder",
+        (await opfsText("late-user.ts"))?.includes("./late-lib") === true && (await opfsText("late-lib.ts"))?.includes("late()") === true);
+    const lateList = (await fPage.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "listScripts" }, r)))) as any[];
+    const lateUser = lateList.find((s) => s.meta?.name === "late-user");
+    check("importer saved before its library: 'Cannot find module' clears once the library exists",
+        !!lateUser && !(lateUser.typeErrors || []).length, JSON.stringify(lateUser?.typeErrors));
     await fPage.close();
 } catch (e) {
     failed++;
