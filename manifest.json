@@ -4,6 +4,7 @@
     "description": "Script-based request and response override: write TypeScript-style scripts that redirect, modify headers, or transform response bodies.",
     "icons": {
         "16": "icons/icon-16x16.png",
+        "32": "icons/icon-32x32.png",
         "48": "icons/icon-48x48.png",
         "128": "icons/icon-128x128.png"
     },
@@ -11,7 +12,8 @@
         "default_title": "Wiretrick Manager",
         "default_popup": "popup.html",
         "default_icon": {
-            "16": "icons/icon-16x16.png"
+            "16": "icons/icon-16x16.png",
+            "32": "icons/icon-32x32.png"
         }
     },
     "options_ui": {
