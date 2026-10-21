@@ -3,6 +3,8 @@
  * into dist/lib/monaco) and wires TS IntelliSense to the `wt` API typings.
  */
 
+import { quickInfoToMarkdown } from "./hoverMarkdown";
+
 let monacoApi: any = null;
 
 export async function loadMonaco(): Promise<any> {
@@ -46,8 +48,33 @@ export async function loadMonaco(): Promise<any> {
         moduleDetection: 3, // ts.ModuleDetectionKind.Force
         noEmit: true,
     });
+    registerTsHover(monacoApi);
 
     return monacoApi;
+}
+
+/**
+ * Replace Monaco's TS hover (flattens @example/@param into one paragraph)
+ * with VS Code-style rendering from the same TS worker QuickInfo.
+ */
+function registerTsHover(monaco: any): void {
+    const defaults = monaco.languages.typescript.typescriptDefaults;
+    defaults.setModeConfiguration({ ...defaults.modeConfiguration, hovers: false });
+    monaco.languages.registerHoverProvider("typescript", {
+        async provideHover(model: any, position: any) {
+            const uri = model.uri;
+            const worker = await (await monaco.languages.typescript.getTypeScriptWorker())(uri);
+            if (model.isDisposed()) return null;
+            const info = await worker.getQuickInfoAtPosition(uri.toString(), model.getOffsetAt(position));
+            if (!info || model.isDisposed()) return null;
+            const start = model.getPositionAt(info.textSpan.start);
+            const end = model.getPositionAt(info.textSpan.start + info.textSpan.length);
+            return {
+                range: new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column),
+                contents: quickInfoToMarkdown(info).map((value) => ({ value })),
+            };
+        },
+    });
 }
 
 export const STARTER_TEMPLATE = `wt.declareScript({

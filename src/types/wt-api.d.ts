@@ -79,69 +79,65 @@ declare namespace Wiretrick {
     /** Options for wt.onDom (2nd argument). */
     interface DomOptions {
         /**
-         * WHEN the onDom handler runs, relative to the page's own loading.
-         * Default: "DOMContentLoaded".
+         * **When** the `onDom` handler runs, relative to the page's own loading.
+         * Default: `"DOMContentLoaded"`.
          *
-         * HOW IT GETS THERE — in every frame (top page AND iframes) the
-         * extension injects a small hook at document_start. The hook asks
-         * the background for the scripts whose `match` covers THAT FRAME'S
-         * URL, compiles them, and then schedules each script's handler
-         * according to its own `when`:
+         * **How it gets there:** in every frame (top page *and* iframes) the
+         * extension injects a small hook at `document_start`. The hook asks
+         * the background for the scripts whose `match` covers *that frame's*
+         * URL, compiles them, and schedules each script's handler according
+         * to its own `when`.
          *
-         * "document_start"
-         *   Runs as soon as the script is compiled, while the HTML is still
-         *   being parsed. `document.documentElement` exists; `document.head`
-         *   and `document.body` are usually still null, so querySelector
-         *   finds (almost) nothing. Use it to get in AHEAD of page code:
-         *   stub or wrap globals (`window.fetch`, `navigator.*`), set up a
-         *   MutationObserver on `document`, add capture-phase listeners.
-         *   Race caveat: in the MV2 build the script arrives within ~1ms
-         *   and reliably beats the page's scripts. In the MV3 build a cold
-         *   service worker can take ~50-100ms to answer, so inline
-         *   `<script>`s early in the page MAY already have run. Don't rely
-         *   on winning that race for correctness — use a network handler
-         *   (modifyResponse) when you must change what page code sees.
+         * | `when` | Fires | DOM state |
+         * |---|---|---|
+         * | `"document_start"` | as soon as the script is compiled | only `<html>`; `head`/`body` usually `null` |
+         * | `"DOMContentLoaded"` *(default)* | HTML fully parsed | whole DOM queryable; images/iframes may still load |
+         * | `"document_end"` | same as `DOMContentLoaded` | alias matching the content-script `run_at` spelling |
+         * | `"document_idle"` | after window `load` | every subresource finished |
          *
-         * "DOMContentLoaded" (default)
-         *   The whole HTML is parsed and queryable, and `defer`/module
-         *   scripts have run. Images, stylesheets and iframes may still be
-         *   loading, and frameworks (React, Vue, ...) may not have hydrated
-         *   yet — a framework can re-render and overwrite your change. The
-         *   right choice for most title/text/attribute tweaks. If the page
-         *   is already past this point when the script arrives (slow
-         *   bundle, bfcache restore), the handler runs immediately.
+         * **`"document_start"`** — runs while the HTML is still being parsed,
+         * so `querySelector` finds (almost) nothing. Use it to get in *ahead*
+         * of page code: stub or wrap globals (`window.fetch`, `navigator.*`),
+         * observe `document` with a `MutationObserver`, add capture-phase
+         * listeners.
+         * - *Race caveat:* in the MV2 build the script arrives within ~1 ms and
+         *   reliably beats the page's scripts. In the MV3 build a cold service
+         *   worker can take ~50–100 ms to answer, so early inline `<script>`s
+         *   **may already have run**. Don't rely on winning the race for
+         *   correctness — use `modifyResponse` when you must change what page
+         *   code sees.
          *
-         * "document_end"
-         *   Exactly the same moment as "DOMContentLoaded" — an alias that
-         *   matches the content-script `run_at` spelling.
+         * **`"DOMContentLoaded"`** — `defer`/module scripts have run; images,
+         * stylesheets and iframes may still be loading, and frameworks (React,
+         * Vue, …) may not have hydrated yet, so a re-render can overwrite your
+         * change. The right choice for most title/text/attribute tweaks. If
+         * the page is already past this point when the script arrives (slow
+         * bundle, bfcache restore), the handler runs immediately.
          *
-         * "document_idle"
-         *   After the window `load` event: every subresource (images,
-         *   stylesheets, iframes, async scripts) has finished. Best for
-         *   reading final layout/sizes or tweaking content that a page
-         *   script builds during load. The slowest choice — one hanging
-         *   image or ad iframe delays it. If `load` already fired, runs
-         *   immediately. Note: unlike Chrome's content-script
-         *   "document_idle" (which can fire before `load`), this ALWAYS
-         *   waits for `load`.
+         * **`"document_idle"`** — best for reading final layout/sizes or
+         * tweaking content that page scripts build during load. The slowest
+         * choice: one hanging image or ad iframe delays it. Runs immediately
+         * if `load` already fired. Unlike Chrome's content-script
+         * `document_idle` (which can fire before `load`), this **always**
+         * waits for `load`.
          *
-         * APPLIES TO EVERY VALUE:
-         * - Runs ONCE per document load, per matching frame. SPA route
-         *   changes (pushState) and framework re-renders do NOT re-run it —
-         *   start a MutationObserver inside the handler to keep re-applying.
-         * - Editing and saving the script while the page is open re-runs
-         *   the handler IMMEDIATELY, regardless of `when` (live update) —
-         *   so make handlers idempotent (safe to run twice).
-         * - One onDom per script: a later wt.onDom call replaces the
+         * **Applies to every value:**
+         * - Runs **once** per document load, per matching frame. SPA route
+         *   changes (`pushState`) and framework re-renders do *not* re-run it —
+         *   start a `MutationObserver` inside the handler to keep re-applying.
+         * - Saving the script while the page is open re-runs the handler
+         *   **immediately**, regardless of `when` (live update) — make
+         *   handlers idempotent.
+         * - One `onDom` per script: a later `wt.onDom` call replaces the
          *   earlier one, including its `when`. Each script's `when` is
-         *   independent of other scripts'; handlers with the same `when`
-         *   run in script-list order.
+         *   independent; handlers with the same `when` run in script-list
+         *   order.
          * - Async handlers are not awaited; `when` controls only when they
-         *   START.
-         * - The handler runs in the page's MAIN world (sees page globals).
-         *   If the page's CSP forbids eval, it falls back to the
-         *   extension's isolated world: same DOM and same timing, but
-         *   page-defined globals (e.g. `window.myApp`) are not visible.
+         *   *start*.
+         * - The handler runs in the page's MAIN world (sees page globals). If
+         *   the page's CSP forbids `eval`, it falls back to the extension's
+         *   isolated world: same DOM and timing, but page-defined globals
+         *   (e.g. `window.myApp`) are not visible.
          *
          * @example
          * wt.onDom(() => { document.title = "🎯 " + document.title; }); // DOMContentLoaded
@@ -234,39 +230,40 @@ declare namespace Wiretrick {
 /**
  * The global script API.
  *
- * STACKING (multiple scripts matching one request) — scripts run in list
+ * **Stacking** — when several scripts match one request they run in list
  * order (top to bottom in the manager):
- *  - onRequest: first script returning a TERMINAL result (redirect/cancel)
- *    wins and stops the chain; non-terminal results (headers-only, void)
- *    don't stop it. Header changes from the winning script apply.
- *  - onResponseHeaders: ALL matching scripts run; `set` applied in order
- *    (later overwrites), `remove` accumulates.
- *  - modifyResponse: transforms COMPOSE — each script's output is the next
- *    script's input, in list order.
- *  - replaceResponse: first script returning a body wins; later ones skip.
+ * - `onRequest`: the first script returning a *terminal* result
+ *   (`respond`/`redirect`/`cancel`) wins and stops the chain; headers-only
+ *   or `void` results don't stop it.
+ * - `onResponseHeaders`: **all** matching scripts run; `set` is applied in
+ *   order (later overwrites), `remove` accumulates.
+ * - `modifyResponse`: transforms **compose** — each script's output is the
+ *   next script's input.
+ * - `replaceResponse`: the first script returning a body wins; later ones
+ *   are skipped.
  *
- * ASYNC: every hook accepts an async handler (a Promise-returning function).
- * Result handling differs per tier — see the README's "Async handlers"
- * section. Short version: async replaceResponse/modifyResponse/onDom work
- * everywhere; async onRequest/onResponseHeaders are honored natively on
- * Firefox, and on Chromium require "cdp" or "process" in the strategy list (a warning is logged
- * otherwise and the result is ignored).
+ * **Async** — every hook accepts a Promise-returning handler. Async
+ * `replaceResponse`/`modifyResponse`/`onDom` work everywhere; async
+ * `onRequest`/`onResponseHeaders` are honored natively on Firefox, and on
+ * Chromium require `"cdp"` or `"process"` in the strategy list (otherwise a
+ * warning is logged and the result is ignored). See the README's
+ * "Async handlers" section.
  */
 declare const wt: {
     /**
-     * Intercept a request before it is sent. Return { respond }, { redirect },
-     * { cancel }, { headers } or a combination. May be async — see the
-     * stacking/async notes above (on Chrome the async result is honored in
-     * the cdp tier, strategy: ["hook", "cdp"]).
+     * Intercept a request before it is sent. Return `{ respond }`,
+     * `{ redirect }`, `{ cancel }`, `{ headers }` or a combination. May be
+     * async (see the stacking/async notes on `wt`).
      *
-     * TERMINAL results (first one wins, stops the script chain):
-     *   respond  — synthesize the response immediately; the network is never
-     *              contacted. body/status/mime/headers all honored on the
-     *              hook and cdp tiers; the webRequest tier serves it as a
-     *              data-URL redirect (status becomes 200 there).
-     *   redirect — continue at another URL.
-     *   cancel   — fail the request.
-     * NON-terminal: { headers } — applies and lets later scripts run.
+     * **Terminal** results — the first one wins and stops the script chain:
+     * - `respond` — synthesize the response; the network is never contacted.
+     *   `body`/`status`/`mime`/`headers` are honored on the hook and cdp
+     *   tiers; the webRequest tier serves it as a data-URL redirect (status
+     *   becomes 200 there).
+     * - `redirect` — continue at another URL.
+     * - `cancel` — fail the request.
+     *
+     * **Non-terminal:** `{ headers }` — applied, and later scripts still run.
      *
      * @example
      * wt.onRequest((ctx) => {
@@ -280,18 +277,19 @@ declare const wt: {
     ): void;
 
     /**
-     * Inspect / modify response headers. May be async — see the stacking /
-     * async notes above.
+     * Inspect / modify response headers. All matching scripts run. May be
+     * async (see the stacking/async notes on `wt`).
      */
     onResponseHeaders(
         handler: (ctx: Wiretrick.ResponseHeaderCtx) => Wiretrick.ResponseHeaderResult | void | Promise<Wiretrick.ResponseHeaderResult | void>
     ): void;
 
     /**
-     * Replace the response body completely. Return a string, Uint8Array, or
-     * { file: "<path or data url>" }. Return nothing to leave the body alone.
-     * May be async — the awaited result fulfills the response (hook tier
-     * short-circuits the page's fetch/XHR; cdp tier fulfills the network
+     * Replace the response body completely. Return a string, `Uint8Array`, or
+     * `{ file: "<path or data url>" }`; return nothing to leave the body alone.
+     *
+     * May be async — the awaited result fulfills the response (the hook tier
+     * short-circuits the page's fetch/XHR; the cdp tier fulfills the network
      * response).
      */
     replaceResponse(
@@ -299,11 +297,15 @@ declare const wt: {
     ): void;
 
     /**
-     * Stream-transform the response body. The transform receives the original
-     * body (string or bytes) and returns the new body.
-     * On Firefox this is network-level (filterResponseData). On Chromium it runs
-     * via the JS network hook (page-initiated requests), CDP when
-     * strategy: ["cdp"] is set, or the local helper with strategy: ["process"].
+     * Transform the response body: receives the original body (string or
+     * bytes) and returns the new one. Transforms from multiple scripts
+     * compose in list order.
+     *
+     * Where it runs:
+     * - **Firefox** — network level (`filterResponseData`).
+     * - **Chromium** — the JS network hook (page-initiated fetch/XHR), CDP
+     *   with `strategy: ["cdp"]`, or the local helper with
+     *   `strategy: ["process"]`.
      */
     modifyResponse(
         transform: (
@@ -320,18 +322,18 @@ declare const wt: {
 
     /**
      * Run a handler in the page (MAIN world) — the resilient way to change
-     * titles, text, and DOM content. Works no matter how the response
-     * arrived (service-worker-served HTML, cached pages, hydration).
+     * titles, text and DOM content. Works no matter how the response arrived
+     * (service-worker-served HTML, cached pages, hydration).
      *
      * Runs once per document load in every frame whose URL matches the
-     * script's `match` — by default at DOMContentLoaded.
+     * script's `match` — by default at `DOMContentLoaded`.
      *
-     * @param handler  (ctx) => void — same ctx shape as onRequest (`url`
-     *                 is the frame's URL). May be async (not awaited).
-     * @param opts.when  When to run: "DOMContentLoaded" (default) |
-     *   "document_start" | "document_end" | "document_idle". See
-     *   {@link Wiretrick.DomOptions.when} for exact timing, the MV3
-     *   document_start race, SPA/re-render behavior and live-update re-runs.
+     * @param handler Receives the same `ctx` shape as `onRequest` (`url` is
+     * the frame's URL). May be async (not awaited).
+     * @param opts Set `when` to `"DOMContentLoaded"` (default), `"document_start"`,
+     * `"document_end"` or `"document_idle"`. See {@link Wiretrick.DomOptions.when}
+     * for exact timing, the MV3 `document_start` race, SPA/re-render behavior
+     * and live-update re-runs.
      *
      * @example
      * wt.onDom(() => { document.title = "🎯 " + document.title; });
@@ -348,8 +350,8 @@ declare const wt: {
     ): void;
 
     /**
-     * Declarative script definition — the ONLY way to activate a script:
-     * sets the meta (match/include/strategy) and declares adjustable
+     * Declarative script definition — the **only** way to activate a script:
+     * sets the meta (`match`/`include`/`strategy`) and declares adjustable
      * parameters. Sources without it are importable library modules.
      *
      * Returns the resolved parameter values (stored UI values merged over
@@ -359,7 +361,6 @@ declare const wt: {
      *
      * @example
      * const cfg = wt.declareScript({
-     *     name: "Force-fail inference",
      *     match: ["*://cloud*.mongodb.com/*"],
      *     strategy: ["hook", "cdp"],
      *     params: {
