@@ -169,6 +169,14 @@ try {
     await mgr.waitForSelector(".monaco-hover:not(.hidden) .hover-contents", { timeout: 5000 }).catch(() => null);
     const hov = await mgr.evaluate(() => [...document.querySelectorAll(".monaco-hover .hover-contents")].map((e) => e.textContent).join(" | "));
     check("hover: script's params with descriptions", hov.includes("Value of the x-debug header"), hov);
+    // popup's getScriptParams must resolve imports of other scripts (MV2 compiled the one script alone → no defs)
+    await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "saveScript", id: "s_lib", name: "lib", code: "export const x = 1;\n" }, r)));
+    await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
+        type: "saveScript", id: "s_imp", name: "Importer",
+        code: 'import { x } from "./lib";\nwt.declareScript({ match: ["*://example.invalid/*"], params: { p: { type: "string", default: String(x) } } });\n',
+    }, r)));
+    const gp: any = await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "getScriptParams", scriptId: "s_imp" }, r)));
+    check("getScriptParams resolves imported library", gp?.defs?.p?.default === "1", JSON.stringify(gp));
 } catch (e) {
     failed++;
     console.log("FAIL  exception —", e);

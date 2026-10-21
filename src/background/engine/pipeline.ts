@@ -456,7 +456,8 @@ export function createPipeline(
                     sendResponse({ defs: {}, values: {} });
                     return;
                 }
-                const analyzed = await analyzeScripts([{ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt }]);
+                // analyze with all scripts so the module resolver sees imported libraries
+                const analyzed = await analyzeScripts(scripts.map((x) => ({ id: x.id, name: x.meta.name, code: x.code, updatedAt: x.updatedAt })));
                 const defs = analyzed.get(s.id)?.paramDefs || {};
                 sendResponse({
                     defs,
