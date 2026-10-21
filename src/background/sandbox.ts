@@ -42,7 +42,7 @@ const chromeShim: any = {
     runtime: {
         id: EXT_ID,
         lastError: undefined,
-        getManifest: () => ({ version: "0.3.0", manifest_version: 3, name: "Wiretrick" }),
+        getManifest: () => ({ version: "0.3.1", manifest_version: 3, name: "Wiretrick" }),
         getURL: (p: string) => `chrome-extension://${EXT_ID}/${p}`,
         sendMessage: (...a: any[]) => {
             const cb = a[a.length - 1];
