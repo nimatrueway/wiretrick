@@ -10,7 +10,6 @@ const CODE = `
 const cfg = wt.declareScript({
     match: ["*://a.com/*", "*://b.com/*"],
     strategy: ["hook", "cdp"],
-    runAt: "document_idle",
     params: {
         flag: { type: "boolean", default: true },
         note: { type: "string", default: "hi" },
@@ -28,7 +27,6 @@ describe("declareScript", () => {
         expect(c.meta.name).toBe("Untitled script"); // declareScript has no name field — the script/file name is authoritative
         expect(c.meta.match).toEqual(["*://a.com/*", "*://b.com/*"]);
         expect(c.meta.strategy).toBe("hook,cdp");
-        expect(c.meta.runAt).toBe("document_idle");
         expect(c.meta.declared).toBe(true);
         expect(c.error).toBeNull();
         expect(c.handlers.onRequest).toHaveLength(1);
@@ -129,5 +127,15 @@ describe("saveScript name handling", () => {
         await setEnabled("s1", false);
         expect((await getScript("s1"))!.meta.name).toBe("redwood");
         expect((await getScript("s1"))!.enabled).toBe(false);
+    });
+});
+
+describe("removed declareScript options", () => {
+    it("phase and runAt are not part of ScriptDef", () => {
+        // @ts-expect-error phase was removed: handlers decide which events run
+        const a: import("../src/shared/scriptDef").ScriptDef = { match: [], phase: ["request"] };
+        // @ts-expect-error runAt was removed: use wt.onDom(fn, { when })
+        const b: import("../src/shared/scriptDef").ScriptDef = { match: [], runAt: "document_idle" };
+        expect([a, b]).toHaveLength(2);
     });
 });

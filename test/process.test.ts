@@ -147,12 +147,12 @@ describe("listsProcess / ownership", () => {
 });
 
 describe("helpers", () => {
-    it("ownedOf respects handlers and phase", () => {
+    it("ownedOf follows the defined handlers", () => {
         const h = { onRequest: 1, modifyResponse: 0, replaceResponse: 0, onResponseHeaders: 0 };
-        expect(ownedOf("a", "A", ["*"], undefined, h)).toMatchObject({ req: true, resHeaders: false, body: false });
-        expect(ownedOf("a", "A", ["*"], ["response"], h)).toBeNull();
-        expect(ownedOf("a", "A", ["*"], ["response"], { ...h, onRequest: 0, replaceResponse: 1 })).toMatchObject({ req: true });
-        expect(ownedOf("a", "A", ["*"], undefined, { ...h, onRequest: 0, modifyResponse: 1 })).toMatchObject({ req: false, body: true });
+        expect(ownedOf("a", "A", ["*"], h)).toMatchObject({ req: true, resHeaders: false, body: false });
+        expect(ownedOf("a", "A", ["*"], { ...h, onRequest: 0 })).toBeNull();
+        expect(ownedOf("a", "A", ["*"], { ...h, onRequest: 0, replaceResponse: 1 })).toMatchObject({ req: true });
+        expect(ownedOf("a", "A", ["*"], { ...h, onRequest: 0, modifyResponse: 1 })).toMatchObject({ req: false, body: true });
     });
     it("header mods are case-insensitive and support multi-values", () => {
         const out = applyHeaderMods(

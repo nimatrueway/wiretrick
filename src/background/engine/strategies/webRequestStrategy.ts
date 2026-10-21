@@ -82,15 +82,15 @@ export class WebRequestStrategy implements InterceptionStrategy {
         return IS_FIREFOX;
     }
 
-    private scriptsFor(url: string, phase: "request" | "response"): { id: string; name: string; compiled: CompiledScript }[] {
+    private scriptsFor(url: string): { id: string; name: string; compiled: CompiledScript }[] {
         // process-owned scripts run in the helper tier (never twice)
         return this.compiled.filter(
-            (c) => matchAny(c.compiled.meta.match, url) && c.compiled.meta.phase.includes(phase) && !isProcessOwned(c.compiled.meta.strategy)
+            (c) => matchAny(c.compiled.meta.match, url) && !isProcessOwned(c.compiled.meta.strategy)
         );
     }
 
     handleBeforeRequest(details: WebRequestDetailsLike, tabUrl: string | null): MaybePromise<HookDisposition> {
-        for (const entry of this.scriptsFor(details.url, "request")) {
+        for (const entry of this.scriptsFor(details.url)) {
             const script = entry.compiled;
             try {
                 for (const onRequestHandler of script.handlers.onRequest) {
@@ -254,7 +254,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
             return null;
         }
 
-        for (const entry of this.scriptsFor(details.url, ctxPhase)) {
+        for (const entry of this.scriptsFor(details.url)) {
             const handlers = entry.compiled.handlers.onResponseHeaders;
             if (!handlers.length) continue;
             for (const handler of handlers) {

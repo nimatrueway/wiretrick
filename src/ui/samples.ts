@@ -16,7 +16,6 @@ export const SAMPLES: SampleScript[] = [
 wt.declareScript({
     match: ["*://en.wikipedia.org/wiki/Cat"],
     strategy: ["hook", "webrequest", "cdp"],
-    phase: ["request"],
 });
 wt.onRequest(() => {
     return { redirect: "https://en.wikipedia.org/wiki/Dog" };
@@ -55,7 +54,6 @@ wt.onRequest(() => ({
 wt.declareScript({
     match: ["*://example.com/*"],
     strategy: ["hook", "webrequest", "cdp"],
-    phase: ["response"],
 });
 wt.onResponseHeaders(() => ({
     headers: {

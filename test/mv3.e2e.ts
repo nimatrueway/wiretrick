@@ -355,7 +355,7 @@ try {
     // same-origin script; "proxy" (removed strategy) is ignored with a warning
     await mgr.evaluate((origin: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_proxy2", name: "Proxy same-origin",
-        code: `wt.declareScript({ match: ["${origin}/app.js"], strategy: ["proxy", "cdp"], phase: ["response"] });\nwt.modifyResponse((ctx, body) => body.replace("ORIGINAL-MARKER", "PROXY-MARKER"));`,
+        code: `wt.declareScript({ match: ["${origin}/app.js"], strategy: ["proxy", "cdp"] });\nwt.modifyResponse((ctx, body) => body.replace("ORIGINAL-MARKER", "PROXY-MARKER"));`,
     }, r)), ORIGIN);
     await mgr.waitForTimeout(1500);
     const scriptPage = await ctx.newPage();

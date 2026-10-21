@@ -309,7 +309,7 @@ function makeCollectorShim(store: any, overrides?: ResApiOverrides): any {
 }
 
 /**
- * Builds wt.declareScript: applies match/strategy/phase/runAt onto the
+ * Builds wt.declareScript: applies match/include/strategy onto the
  * script's meta and marks it declared, collects param defs, and returns
  * the resolved param values for the script to use.
  */
@@ -321,8 +321,6 @@ function createDeclareShim(meta: ResMeta, storedValues?: Record<string, any>) {
         if (def.match?.length) meta.match = [...def.match];
         if (def.include?.length) meta.include = [...def.include];
         if (def.strategy?.length) meta.strategy = def.strategy.join(",");
-        if (def.phase?.length) meta.phase = [...def.phase];
-        if (def.runAt) meta.runAt = def.runAt;
         if (def.params) {
             state.defs = def.params;
             return resolveParamValues(def.params, storedValues);

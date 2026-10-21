@@ -141,10 +141,6 @@ declare namespace Wiretrick {
         include?: string[];
         /** Interception tier priority list. */
         strategy?: ("auto" | "hook" | "cdp" | "webrequest" | "process")[];
-        /** Which interception events run (default: both). */
-        phase?: ("request" | "response")[];
-        /** Default onDom timing. */
-        runAt?: "document_start" | "document_end" | "document_idle" | "DOMContentLoaded";
         /**
          * Adjustable parameters — editable from the popup's ⚙ dialog and
          * the manager without touching the script. Returned typed.
@@ -336,7 +332,7 @@ declare const wt: {
 
     /**
      * Declarative script definition — the ONLY way to activate a script:
-     * sets the meta (match/strategy/phase/runAt) and declares adjustable
+     * sets the meta (match/include/strategy) and declares adjustable
      * parameters. Sources without it are importable library modules.
      *
      * Returns the resolved parameter values (stored UI values merged over

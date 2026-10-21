@@ -19,8 +19,6 @@ export interface OpScript {
     id: string;
     name: string;
     match: string[];
-    /** declareScript phase restriction (undefined = both) */
-    phase?: string[];
     handlers: ScriptHandlers;
 }
 
@@ -68,23 +66,17 @@ const HANDLER_OF: Record<BodyOp, keyof ScriptHandlers> = {
     responseHeaders: "onResponseHeaders",
 };
 
-/** matching scripts with handlers for `op`, in list order (phase-aware) */
+/** matching scripts with handlers for `op`, in list order */
 function matching(scripts: OpScript[], op: BodyOp, url: string, onlyIds: string[] | undefined, env: OpEnv): { s: OpScript; handlers: any[] }[] {
-    const phase = op === "requestDecision" ? "request" : "response";
     const handler = HANDLER_OF[op];
-    let phaseSkipped = 0;
     const out: { s: OpScript; handlers: any[] }[] = [];
     for (const s of scripts) {
         if (!matchAny(s.match, url)) continue;
         if (onlyIds && !onlyIds.includes(s.id)) continue;
-        if (s.phase && !s.phase.includes(phase)) {
-            phaseSkipped++;
-            continue;
-        }
         const handlers = (s.handlers as any)[handler] || [];
         if (handlers.length) out.push({ s, handlers });
     }
-    env.debug?.(`run ${op} ${url} → ${out.length} matching script(s) [${out.map((m) => m.s.name).join(", ")}]${phaseSkipped ? ` (${phaseSkipped} skipped: phase restriction)` : ""}`);
+    env.debug?.(`run ${op} ${url} → ${out.length} matching script(s) [${out.map((m) => m.s.name).join(", ")}]`);
     return out;
 }
 

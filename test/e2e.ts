@@ -128,11 +128,11 @@ const setEnabled = (id: string, enabled: boolean): Promise<void> =>
 // ---------- the sample scripts ----------
 interface SampleScript { id: string; name: string; code: string }
 const SCRIPTS: Record<string, SampleScript> = {
-    matcherRedirect: { id: "s_matcher", name: "redirect main frame", code: `wt.declareScript({ match: ["${ORIGIN}/redirect-target"], phase: ["request"] });\nwt.onRequest((ctx) => ({ redirect: "${ORIGIN}/redirected" }));` },
+    matcherRedirect: { id: "s_matcher", name: "redirect main frame", code: `wt.declareScript({ match: ["${ORIGIN}/redirect-target"] });\nwt.onRequest((ctx) => ({ redirect: "${ORIGIN}/redirected" }));` },
     cancel: { id: "s_cancel", name: "cancel blocked.js", code: `wt.declareScript({ match: ["${ORIGIN}/blocked.js"] });\nwt.onRequest(() => ({ cancel: true }));` },
     reqHeaders: { id: "s_reqheaders", name: "request header", code: `wt.declareScript({ match: ["${ORIGIN}/echo-headers"] });\nwt.onRequest(() => ({ headers: { set: { "x-resso": "injected" } } }));` },
-    resHeaders: { id: "s_resheaders", name: "response header", code: `wt.declareScript({ match: ["${ORIGIN}/api"], phase: ["response"] });\nwt.onResponseHeaders(() => ({ headers: { set: { "x-mock-header": "hello" } } }));` },
-    replaceMain: { id: "s_replacemain", name: "replace main frame", code: `wt.declareScript({ match: ["${ORIGIN}/serve-me"], phase: ["request"] });\nwt.replaceResponse(() => "<html><body><h1>SERVE-PAGE-WORKS</h1></body></html>");` },
+    resHeaders: { id: "s_resheaders", name: "response header", code: `wt.declareScript({ match: ["${ORIGIN}/api"] });\nwt.onResponseHeaders(() => ({ headers: { set: { "x-mock-header": "hello" } } }));` },
+    replaceMain: { id: "s_replacemain", name: "replace main frame", code: `wt.declareScript({ match: ["${ORIGIN}/serve-me"] });\nwt.replaceResponse(() => "<html><body><h1>SERVE-PAGE-WORKS</h1></body></html>");` },
     replaceFetch: { id: "s_replacefetch", name: "replace fetch body", code: `wt.declareScript({ match: ["${ORIGIN}/api-replace"] });\nwt.replaceResponse(() => JSON.stringify({ value: "REPLACED-BY-HOOK" }));` },
     modifyTierA: { id: "s_modifya", name: "modify response (hook tier)", code: `wt.declareScript({ match: ["${ORIGIN}/api"] });\nwt.modifyResponse((ctx, body) => body.replace("original-value", "TIERA-VALUE"));` },
     modifyCdp: { id: "s_modifycdp", name: "modify response (cdp tier)", code: `wt.declareScript({ match: ["${ORIGIN}/app.js"] });\nwt.modifyResponse((ctx, body) => body.replace("ORIGINAL-MARKER", "CDP-MARKER"));` },

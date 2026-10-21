@@ -173,10 +173,9 @@ export class CdpStrategy {
         for (const s of enabled) {
             const a = analyzed.get(s.id);
             const h = a?.handlers ?? { onRequest: 1, modifyResponse: 1, replaceResponse: 1, onResponseHeaders: 1 };
-            const phases: string[] = a?.meta?.phase || ["request", "response"];
-            const wantsRequest = h.onRequest > 0 && phases.includes("request");
-            const wantsBody = (h.modifyResponse > 0 || h.replaceResponse > 0) && phases.includes("response");
-            const wantsHeaders = h.onResponseHeaders > 0 && phases.includes("response");
+            const wantsRequest = h.onRequest > 0;
+            const wantsBody = h.modifyResponse > 0 || h.replaceResponse > 0;
+            const wantsHeaders = h.onResponseHeaders > 0;
             const wantsResponse = wantsBody || wantsHeaders;
             if (!wantsRequest && !wantsResponse) continue;
             if (isProcessOwned(s.meta.strategy)) continue; // the helper tier owns it

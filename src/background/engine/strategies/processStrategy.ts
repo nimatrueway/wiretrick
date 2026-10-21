@@ -231,7 +231,7 @@ export class ProcessStrategy {
             for (const s of listed) {
                 const a = analyzed.get(s.id);
                 const h = a?.handlers ?? { onRequest: 1, modifyResponse: 1, replaceResponse: 1, onResponseHeaders: 1 };
-                const o = ownedOf(s.id, s.meta.name, s.meta.match, a?.meta?.phase || s.meta.phase, h);
+                const o = ownedOf(s.id, s.meta.name, s.meta.match, h);
                 if (o) owned.push(o);
             }
         } else {
@@ -248,7 +248,7 @@ export class ProcessStrategy {
             for (const s of listed) {
                 const c = compileScript(s.code, overridesFor({ id: s.id, name: s.meta.name, code: s.code }));
                 if (!c.meta.declared) continue;
-                const o = ownedOf(s.id, s.meta.name, s.meta.match, c.meta.phase, {
+                const o = ownedOf(s.id, s.meta.name, s.meta.match, {
                     onRequest: c.handlers.onRequest.length,
                     modifyResponse: c.handlers.modifyResponse.length,
                     replaceResponse: c.handlers.replaceResponse.length,
@@ -256,7 +256,7 @@ export class ProcessStrategy {
                 });
                 if (!o) continue;
                 owned.push(o);
-                ops.push({ id: s.id, name: s.meta.name, match: s.meta.match, phase: c.meta.phase, handlers: c.handlers });
+                ops.push({ id: s.id, name: s.meta.name, match: s.meta.match, handlers: c.handlers });
             }
             this.mv2Ops = ops;
         }
@@ -597,13 +597,11 @@ export function ownedOf(
     id: string,
     name: string,
     match: string[],
-    phase: string[] | undefined,
     h: { onRequest: number; modifyResponse: number; replaceResponse: number; onResponseHeaders: number }
 ): Owned | null {
-    const ph = phase && phase.length ? phase : ["request", "response"];
-    const req = (h.onRequest > 0 && ph.includes("request")) || (h.replaceResponse > 0 && ph.includes("response"));
-    const resHeaders = h.onResponseHeaders > 0 && ph.includes("response");
-    const body = h.modifyResponse > 0 && ph.includes("response");
+    const req = h.onRequest > 0 || h.replaceResponse > 0;
+    const resHeaders = h.onResponseHeaders > 0;
+    const body = h.modifyResponse > 0;
     if (!req && !resHeaders && !body) return null;
     return { id, name, match, req, resHeaders, body };
 }

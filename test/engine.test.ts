@@ -122,7 +122,6 @@ wt.replaceResponse(() => JSON.stringify({ mocked: true }));`),
         s.reload([
             makeScript("a", `wt.declareScript({
     match: ["*://api.example.com/*"],
-    phase: ["response"],
 });
 wt.onResponseHeaders(() => ({ headers: { set: { "access-control-allow-origin": "*" }, remove: ["x-frame-options"] } }));`),
         ]);

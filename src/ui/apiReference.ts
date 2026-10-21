@@ -13,9 +13,7 @@ export const API_REFERENCE: ApiSection[] = [
 const cfg = wt.declareScript({
     match: ["*://example.com/*", "*://api.example.com/v1/*"],
     include: [],                        // extra URL patterns
-    phase: ["request", "response"],     // which events run (default: both)
     strategy: ["auto"],                 // or hook | cdp | webrequest | process priority list
-    runAt: "document_idle",             // default onDom timing
 });
 
 Patterns are star patterns: * matches anything, ** the same (groups are remembered for replace patterns).`,
@@ -41,7 +39,6 @@ Imports work in every tier (background compiles + the page-side onDom hook); lib
 const cfg = wt.declareScript({
     match: ["*://example.com/*"],
     strategy: ["hook", "cdp"],
-    runAt: "document_idle",
     params: {
         enabled: { type: "boolean", default: true, description: "Master switch" },
         status: { type: "enum", choices: ["500", "503"], default: "500" },

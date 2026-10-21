@@ -252,7 +252,7 @@ function run(scripts: PlainScript[], paramValues: Record<string, any>, op: BodyO
     for (const [id, c] of cache) {
         const s = scripts.find((x) => x.id === id);
         if (!s || !s.enabled || !c.result.declared) continue;
-        list.push({ id, name: s.name, match: c.result.meta.match, phase: c.result.meta.phase, handlers: c.compiled.handlers });
+        list.push({ id, name: s.name, match: c.result.meta.match, handlers: c.compiled.handlers });
     }
     // tabId rides along so the SW attributes the line to the right tab
     const tabId = typeof args?.tabId === "number" ? args.tabId : -1;

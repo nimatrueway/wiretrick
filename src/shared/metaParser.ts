@@ -5,7 +5,6 @@
  * importable by other scripts.
  */
 
-export type Phase = "request" | "response";
 export type Strategy = "auto" | "hook" | "cdp" | "webrequest" | "process";
 
 /**
@@ -42,10 +41,8 @@ export interface ResMeta {
     name: string;
     match: string[];
     include: string[];
-    phase: Phase[];
     /** raw strategy value (comma-separated list) */
     strategy: string;
-    runAt: string;
     /** true once wt.declareScript ran — undeclared sources are libraries */
     declared: boolean;
 }
@@ -54,13 +51,11 @@ export const DEFAULT_META: ResMeta = {
     name: "Untitled script",
     match: [],
     include: [],
-    phase: ["request", "response"],
     strategy: "auto",
-    runAt: "document_start",
     declared: false,
 };
 
 /** Fresh default meta with a fallback display name (e.g. the file name). */
 export function defaultMeta(name?: string): ResMeta {
-    return { ...DEFAULT_META, match: [], include: [], phase: [...DEFAULT_META.phase], name: name || DEFAULT_META.name };
+    return { ...DEFAULT_META, match: [], include: [], name: name || DEFAULT_META.name };
 }
