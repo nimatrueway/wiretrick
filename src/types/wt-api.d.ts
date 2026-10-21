@@ -76,8 +76,90 @@ declare namespace Wiretrick {
         set(key: string, value: any): Promise<void>;
     }
 
-    /** Options for the wt.onDom hook (see wt.onDom docs). */
+    /** Options for wt.onDom (2nd argument). */
     interface DomOptions {
+        /**
+         * WHEN the onDom handler runs, relative to the page's own loading.
+         * Default: "DOMContentLoaded".
+         *
+         * HOW IT GETS THERE — in every frame (top page AND iframes) the
+         * extension injects a small hook at document_start. The hook asks
+         * the background for the scripts whose `match` covers THAT FRAME'S
+         * URL, compiles them, and then schedules each script's handler
+         * according to its own `when`:
+         *
+         * "document_start"
+         *   Runs as soon as the script is compiled, while the HTML is still
+         *   being parsed. `document.documentElement` exists; `document.head`
+         *   and `document.body` are usually still null, so querySelector
+         *   finds (almost) nothing. Use it to get in AHEAD of page code:
+         *   stub or wrap globals (`window.fetch`, `navigator.*`), set up a
+         *   MutationObserver on `document`, add capture-phase listeners.
+         *   Race caveat: in the MV2 build the script arrives within ~1ms
+         *   and reliably beats the page's scripts. In the MV3 build a cold
+         *   service worker can take ~50-100ms to answer, so inline
+         *   `<script>`s early in the page MAY already have run. Don't rely
+         *   on winning that race for correctness — use a network handler
+         *   (modifyResponse) when you must change what page code sees.
+         *
+         * "DOMContentLoaded" (default)
+         *   The whole HTML is parsed and queryable, and `defer`/module
+         *   scripts have run. Images, stylesheets and iframes may still be
+         *   loading, and frameworks (React, Vue, ...) may not have hydrated
+         *   yet — a framework can re-render and overwrite your change. The
+         *   right choice for most title/text/attribute tweaks. If the page
+         *   is already past this point when the script arrives (slow
+         *   bundle, bfcache restore), the handler runs immediately.
+         *
+         * "document_end"
+         *   Exactly the same moment as "DOMContentLoaded" — an alias that
+         *   matches the content-script `run_at` spelling.
+         *
+         * "document_idle"
+         *   After the window `load` event: every subresource (images,
+         *   stylesheets, iframes, async scripts) has finished. Best for
+         *   reading final layout/sizes or tweaking content that a page
+         *   script builds during load. The slowest choice — one hanging
+         *   image or ad iframe delays it. If `load` already fired, runs
+         *   immediately. Note: unlike Chrome's content-script
+         *   "document_idle" (which can fire before `load`), this ALWAYS
+         *   waits for `load`.
+         *
+         * APPLIES TO EVERY VALUE:
+         * - Runs ONCE per document load, per matching frame. SPA route
+         *   changes (pushState) and framework re-renders do NOT re-run it —
+         *   start a MutationObserver inside the handler to keep re-applying.
+         * - Editing and saving the script while the page is open re-runs
+         *   the handler IMMEDIATELY, regardless of `when` (live update) —
+         *   so make handlers idempotent (safe to run twice).
+         * - One onDom per script: a later wt.onDom call replaces the
+         *   earlier one, including its `when`. Each script's `when` is
+         *   independent of other scripts'; handlers with the same `when`
+         *   run in script-list order.
+         * - Async handlers are not awaited; `when` controls only when they
+         *   START.
+         * - The handler runs in the page's MAIN world (sees page globals).
+         *   If the page's CSP forbids eval, it falls back to the
+         *   extension's isolated world: same DOM and same timing, but
+         *   page-defined globals (e.g. `window.myApp`) are not visible.
+         *
+         * @example
+         * wt.onDom(() => { document.title = "🎯 " + document.title; }); // DOMContentLoaded
+         *
+         * @example
+         * // before page scripts (best effort, see race caveat)
+         * wt.onDom(() => {
+         *     Object.defineProperty(navigator, "webdriver", { get: () => false });
+         * }, { when: "document_start" });
+         *
+         * @example
+         * // after everything loaded, then keep it applied across re-renders
+         * wt.onDom(() => {
+         *     const apply = () => document.querySelectorAll(".ad").forEach((e) => e.remove());
+         *     apply();
+         *     new MutationObserver(apply).observe(document.body, { childList: true, subtree: true });
+         * }, { when: "document_idle" });
+         */
         when?: "DOMContentLoaded" | "document_start" | "document_end" | "document_idle";
     }
 
@@ -241,33 +323,15 @@ declare const wt: {
      * titles, text, and DOM content. Works no matter how the response
      * arrived (service-worker-served HTML, cached pages, hydration).
      *
-     * @param handler  (ctx) => void — same ctx shape as onRequest. May be
-     *                 async (fire-and-forget).
-     * @param opts.when  When to run the handler (mirrors content-script
-     *   run_at moments; defaults to "DOMContentLoaded"):
+     * Runs once per document load in every frame whose URL matches the
+     * script's `match` — by default at DOMContentLoaded.
      *
-     *   "DOMContentLoaded" (default)
-     *       Full DOM is parsed and queryable, but stylesheets/images may
-     *       still be loading and framework hydration (React/Vue) has NOT
-     *       necessarily finished. The usual choice for title/DOM tweaks.
-     *       If the script bundle arrives after DOMContentLoaded already
-     *       fired (late bundle, bfcache restore), the handler runs
-     *       immediately instead.
-     *
-     *   "document_start"
-     *       Runs immediately at hook install — before the page's scripts
-     *       execute and before the DOM body exists. Use to register
-     *       observers or stub page APIs ahead of page code. document.body
-     *       is NOT available yet.
-     *
-     *   "document_end"
-     *       DOM fully parsed (same moment as DOMContentLoaded in practice);
-     *       provided for symmetry with content-script run_at values.
-     *
-     *   "document_idle"
-     *       After the window `load` event — page fully settled, all
-     *       resources loaded. Safest moment to measure final state; slowest.
-     *       If load already happened, runs immediately.
+     * @param handler  (ctx) => void — same ctx shape as onRequest (`url`
+     *                 is the frame's URL). May be async (not awaited).
+     * @param opts.when  When to run: "DOMContentLoaded" (default) |
+     *   "document_start" | "document_end" | "document_idle". See
+     *   {@link Wiretrick.DomOptions.when} for exact timing, the MV3
+     *   document_start race, SPA/re-render behavior and live-update re-runs.
      *
      * @example
      * wt.onDom(() => { document.title = "🎯 " + document.title; });
@@ -277,53 +341,6 @@ declare const wt: {
      *     const el = document.querySelector("h1");
      *     if (el) el.textContent = "Intercepted";
      * }, { when: "document_idle" }); // after everything settled
-     */
-    onDom(
-        handler: (ctx: Wiretrick.RequestCtx) => void | Promise<void>,
-        opts?: { when?: "DOMContentLoaded" | "document_start" | "document_end" | "document_idle" }
-    ): void;
-
-    /** Log to the manager's log panel for the current tab. */
-    log(...args: unknown[]): void;
-
-    /**
-     * Run a handler in the page (MAIN world) when the DOM is ready — the
-     * resilient way to change titles, text, and DOM content.
-     *
-     * WHEN IT RUNS (default): the handler executes exactly once, when
-     * `DOMContentLoaded` fires — the full document is parsed and queryable,
-     * but stylesheets/images may still be loading and framework hydration
-     * (React/Vue) has NOT necessarily finished. If the script bundle arrives
-     * after DOMContentLoaded already fired (late bundle, bfcache restore),
-     * the handler runs immediately at registration instead.
-     *
-     * Because it runs as page JS it works no matter how the response
-     * arrived — service-worker-served HTML, cached pages, or hydration
-     * overwriting a network-tier transform.
-     *
-     * SPA CAVEAT: pushState soft-navigations do NOT refire
-     * DOMContentLoaded. Pass `{ watch: true }` to re-run on DOM mutations.
-     *
-     * @param handler  (ctx) => void — same ctx shape as onRequest (url,
-     *                 method, tabUrl, ...). May be async (fire-and-forget).
-     * @param opts     Optional behavior:
-     *   watch         — re-run the handler on DOM mutations (childList,
-     *                   subtree, characterData). Use for SPA soft navigations
-     *                   and hydration re-renders. Default: false.
-     *   watchInterval — debounce in ms between watch-triggered runs.
-     *                   Default: 250. Higher = less CPU on chatty pages.
-     *   maxRuns       — safety cap on total executions per page load.
-     *                   Default: 1 without watch, unlimited with watch.
-     *
-     * @example
-     * wt.onDom(() => { document.title = "🎯 " + document.title; });
-     *
-     * @example
-     * // SPA: keep re-applying as React re-renders
-     * wt.onDom(() => {
-     *     const el = document.querySelector("h1");
-     *     if (el) el.textContent = "Intercepted";
-     * }, { watch: true, watchInterval: 500, maxRuns: 100 });
      */
     onDom(
         handler: (ctx: Wiretrick.RequestCtx) => void | Promise<void>,

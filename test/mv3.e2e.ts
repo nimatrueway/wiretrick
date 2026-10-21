@@ -493,11 +493,19 @@ try {
         type: "saveScript", id: "s_dom", name: "Early dom",
         code: `wt.declareScript({ match: ["*://*/*"] });\nwt.onDom((ctx) => { document.title = "DOM-RAN:" + document.readyState; }, { when: "document_start" });`,
     }, r)));
+    // a second script with its own `when` must not inherit the first's
+    await warm.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
+        type: "saveScript", id: "s_idle", name: "Idle dom",
+        code: `wt.declareScript({ match: ["*://*/*"] });\nwt.onDom(() => { document.documentElement.dataset.idle = document.readyState; }, { when: "document_idle" });`,
+    }, r)));
     await warm.waitForTimeout(1500); // cache refresh (pipeline reload warm)
     const domPage = await ctx.newPage();
     await domPage.goto(`${ORIGIN}/page`);
     await domPage.waitForFunction(() => document.title.startsWith("DOM-RAN"), null, { timeout: 15000 });
     check("onDom document_start runs in MV3", true, await domPage.title());
+    await domPage.waitForFunction(() => !!document.documentElement.dataset.idle, null, { timeout: 15000 }).catch(() => null);
+    const idleState = await domPage.evaluate(() => document.documentElement.dataset.idle);
+    check("onDom: each script keeps its own when (document_idle runs after load)", idleState === "complete", String(idleState));
     const cacheHit = await warm.evaluate(() =>
         [...document.querySelectorAll("#log-entries .log-line")].some((l) => (l.textContent || "").includes("analyze cache hit"))
     );

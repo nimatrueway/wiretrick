@@ -108,11 +108,14 @@ wt.onDom(() => {
     if (el) el.textContent = "Intercepted";
 }, { when: "document_idle" });
 
-Timing: { when: "DOMContentLoaded" (default) | "document_start" | "document_end" | "document_idle" }
-- DOMContentLoaded — DOM parsed, hydration not guaranteed
-- document_start — at hook install, before page scripts; no document.body yet
-- document_end — same moment as DOMContentLoaded
-- document_idle — after window load (page fully settled); runs immediately if already loaded`,
+Timing: { when: "DOMContentLoaded" (default) | "document_start" | "document_end" | "document_idle" } — each script keeps its own
+- document_start — while the HTML is still parsing: <html> exists, head/body usually null. For stubbing globals / observers ahead of page code. MV3: a cold service worker (~50-100ms) can lose the race to early inline scripts
+- DOMContentLoaded — HTML parsed, defer scripts done; images may load and frameworks may not have hydrated yet
+- document_end — alias of DOMContentLoaded
+- document_idle — after window load (always waits for it; a slow image delays it)
+Already past the moment? Runs immediately.
+
+Runs once per document in every frame whose own URL matches. SPA navigations and re-renders don't re-run it (use a MutationObserver inside). Saving the script with the page open re-runs it immediately — keep it idempotent. One onDom per script (a later call replaces the earlier). Hover "when" in the editor for the full reference.`,
     },
     {
         title: "onRequest.respond — mock without the network",

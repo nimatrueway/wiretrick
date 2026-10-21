@@ -94,26 +94,45 @@ JS). Exact timing:
    writes, observers, etc. They can be `async` (the engine doesn't await
    them). `ctx` is the same request-context shape (`url`, `method`, …) with
    the page URL.
-5. **Timing options**: pass `{ when }` as the second argument to choose the
-   moment (mirrors content-script `run_at`):
+5. **Timing — `{ when }`**: the second argument picks the moment. Each
+   script keeps its own `when`; scripts with the same `when` run in list
+   order.
 
    ```ts
    wt.onDom(() => { ... });                             // default: DOMContentLoaded
-   wt.onDom(() => { ... }, { when: "document_start" }); // at hook install, pre-DOM
-   wt.onDom(() => { ... }, { when: "document_end" });   // DOM parsed
+   wt.onDom(() => { ... }, { when: "document_start" }); // while HTML is still parsing
+   wt.onDom(() => { ... }, { when: "document_end" });   // alias of DOMContentLoaded
    wt.onDom(() => { ... }, { when: "document_idle" });  // after window load
    ```
 
-   - `DOMContentLoaded` (default) — DOM parsed; hydration not guaranteed.
-   - `document_start` — runs immediately at hook install, before page
-     scripts and before `document.body` exists (register observers/stubs).
-   - `document_end` — same moment as DOMContentLoaded.
-   - `document_idle` — after `load`; the whole page settled. Runs
-     immediately if load already happened.
+   | `when` | Runs | DOM state | Use for |
+   |---|---|---|---|
+   | `document_start` | as soon as the script is compiled | `<html>` only; `head`/`body` usually `null` | stubbing globals, `MutationObserver` on `document`, capture listeners — getting in ahead of page code |
+   | `DOMContentLoaded` *(default)* | HTML fully parsed, `defer`/module scripts done | complete DOM; images/CSS/iframes may still load; framework hydration may not have happened | most title/text/attribute changes |
+   | `document_end` | same as `DOMContentLoaded` | same | alias matching content-script `run_at` |
+   | `document_idle` | after window `load` | everything loaded | final layout/sizes, content built during load |
 
-   On hard navigations the hook re-runs everything (new page, new bundle).
-   On SPA soft navigations (pushState) no hook re-fires — register your own
-   MutationObserver inside the handler.
+   - **Already past that moment?** (slow bundle, bfcache restore) The
+     handler runs immediately.
+   - **`document_start` race:** in the MV2 build the bundle arrives in ~1ms
+     and reliably beats page scripts. In the MV3 build a cold service
+     worker can take ~50-100ms, so early inline `<script>`s may already
+     have run. When page code *must* see your change, rewrite the response
+     with `modifyResponse` instead.
+   - **`document_idle` always waits for `load`**, unlike Chrome's
+     content-script `document_idle`; one slow image or ad iframe delays it.
+   - **Once per document, per matching frame.** Every frame (iframes too)
+     is matched against its *own* URL. SPA soft navigations (`pushState`)
+     and framework re-renders don't re-run it — start a `MutationObserver`
+     inside the handler to keep re-applying. Hard navigations start over.
+   - **Live edits re-run immediately**, regardless of `when`, when you save
+     the script with the page open — keep handlers idempotent.
+   - **One `onDom` per script:** a later call replaces the earlier one
+     (and its `when`).
+   - **Async handlers** aren't awaited; `when` only sets when they start.
+   - **CSP fallback:** if the page forbids `eval`, handlers run in the
+     extension's isolated world — same DOM and timing, but page globals
+     (`window.myApp`) aren't visible.
 
 Because it runs as page JS, `wt.onDom` works regardless of how the response
 arrived — service-worker-served HTML, cached pages, or hydration overwriting

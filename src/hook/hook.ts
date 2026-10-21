@@ -179,34 +179,32 @@ import { matchAny } from "../shared/matcher";
         }
         if (compiledDom.length === 0) return;
 
-        const fire = () => {
-            const injected = (document.currentScript as HTMLScriptElement | null)
-                ? "document.currentScript"
-                : (document.querySelector("script[data-res-override-hook]") ? "script tag (already in DOM)" : "bundle message");
-            for (const { scriptId, name, when, fn } of compiledDom) {
-                try {
-                    scriptLogUp(scriptId, "debug", scriptLogLine(name, "onDom", `running (${when}) on ${location.href} [${document.readyState}], hook injected via ${injected}`));
-                    fn(makeCtx(location.href, "GET"));
-                } catch (e: any) {
-                    scriptLogUp(scriptId, "error", formatScriptError(name, e, "onDom"));
-                }
+        const injected = (document.currentScript as HTMLScriptElement | null)
+            ? "document.currentScript"
+            : (document.querySelector("script[data-res-override-hook]") ? "script tag (already in DOM)" : "bundle message");
+        const fire = ({ scriptId, name, when, fn }: (typeof compiledDom)[number]) => {
+            try {
+                scriptLogUp(scriptId, "debug", scriptLogLine(name, "onDom", `running (${when}) on ${location.href} [${document.readyState}], hook injected via ${injected}`));
+                fn(makeCtx(location.href, "GET"));
+            } catch (e: any) {
+                scriptLogUp(scriptId, "error", formatScriptError(name, e, "onDom"));
             }
         };
         if (hot) {
-            fire(); // hot update: refire immediately so edits are visible live
+            compiledDom.forEach(fire); // hot update: refire immediately so edits are visible live
             return;
         }
         if (domFired) return; // initial + ready re-sends fire only once
         domFired = true;
-        const when = compiledDom[0].when;
-        if (when === "document_start") {
-            fire();
-        } else if (when === "document_idle") {
-            if (document.readyState === "complete") fire();
-            else window.addEventListener("load", fire, { once: true });
-        } else {
-            if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", fire, { once: true });
-            else fire();
+        // each script keeps its own { when } (same as the isolated-world fallback)
+        for (const h of compiledDom) {
+            const run = () => fire(h);
+            if (h.when === "document_start") run();
+            else if (h.when === "document_idle") {
+                if (document.readyState === "complete") run();
+                else window.addEventListener("load", run, { once: true });
+            } else if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", run, { once: true });
+            else run();
         }
     }
 

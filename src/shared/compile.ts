@@ -16,15 +16,7 @@ export type DomWhen = "document_start" | "document_end" | "document_idle" | "DOM
 
 /** Options for the onDom hook (2nd argument of wt.onDom). */
 export interface DomOptions {
-    /**
-     * When to run the handler:
-     *  - "DOMContentLoaded" (default) — full DOM parsed, before hydration
-     *  - "document_start" — immediately at hook install (DOM barely exists;
-     *    use for registering observers before page scripts run)
-     *  - "document_end" — DOM parsed (same as DOMContentLoaded in practice)
-     *  - "document_idle" — after `load` (page fully settled; safest for
-     *    measuring final state)
-     */
+    /** see Wiretrick.DomOptions.when in src/types/wt-api.d.ts (the user-facing docs) */
     when?: DomWhen;
 }
 
