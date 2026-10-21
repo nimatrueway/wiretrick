@@ -95,8 +95,10 @@ export async function openFolder(handlers?: FolderSyncHandlers): Promise<void> {
         JSON.stringify(
             {
                 compilerOptions: {
-                    target: "es2020",
-                    lib: ["es2020", "dom"],
+                    target: "esnext",
+                    lib: ["esnext", "dom", "dom.iterable"],
+                    // wt-api.d.ts declares web APIs (URLPattern…) that newer TS libs may also have
+                    skipLibCheck: true,
                     module: "esnext",
                     moduleResolution: "bundler",
                     allowImportingTsExtensions: true,

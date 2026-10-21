@@ -131,7 +131,7 @@ try {
         type: "saveScript",
         id: "s_mv3",
         name: "MV3 hook",
-        code: `wt.declareScript({ match: ["*://*/*"] });\nwt.modifyResponse((ctx, body) => body.replace("ORIGINAL", "MV3"));`,
+        code: `wt.declareScript({ match: ["*://*:*/*"] });\nwt.modifyResponse((ctx, body) => body.replace("ORIGINAL", "MV3"));`,
     }, r)));
     check("saveScript round-trips through the sandbox (meta extracted)", saveResult?.meta?.declared === true, JSON.stringify(saveResult?.meta));
     const listResult = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "listScripts" }, r)));
@@ -150,10 +150,10 @@ try {
         type: "saveScript",
         id: "s_importer",
         name: "api-interceptor",
-        code: `import { tag } from "./api-lib";\nwt.declareScript({ match: ["*://*/*"], params: { label: { type: "string", default: "x" } } });\nwt.modifyResponse((ctx, body) => tag(body));`,
+        code: `import { tag } from "./api-lib";\nwt.declareScript({ match: ["*://*:*/*"], params: { label: { type: "string", default: "x" } } });\nwt.modifyResponse((ctx, body) => tag(body));`,
     }, r)));
     check("importing script captures declareScript (not a library)",
-        importSave?.meta?.declared === true && importSave?.meta?.match?.includes("*://*/*") && !importSave.error,
+        importSave?.meta?.declared === true && importSave?.meta?.match?.includes("*://*:*/*") && !importSave.error,
         JSON.stringify(importSave?.meta));
     const list2 = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "listScripts" }, r)));
     const importer = list2.find((s: any) => s.meta.name === "api-interceptor");
@@ -628,12 +628,12 @@ try {
     });
     await warm.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_dom", name: "Early dom",
-        code: `wt.declareScript({ match: ["*://*/*"] });\nwt.onDom((ctx) => { document.title = "DOM-RAN:" + document.readyState; }, { when: "document_start" });`,
+        code: `wt.declareScript({ match: ["*://*:*/*"] });\nwt.onDom((ctx) => { document.title = "DOM-RAN:" + document.readyState; }, { when: "document_start" });`,
     }, r)));
     // a second script with its own `when` must not inherit the first's
     await warm.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_idle", name: "Idle dom",
-        code: `wt.declareScript({ match: ["*://*/*"] });\nwt.onDom(() => { document.documentElement.dataset.idle = document.readyState; }, { when: "document_idle" });`,
+        code: `wt.declareScript({ match: ["*://*:*/*"] });\nwt.onDom(() => { document.documentElement.dataset.idle = document.readyState; }, { when: "document_idle" });`,
     }, r)));
     await warm.waitForTimeout(1500); // cache refresh (pipeline reload warm)
     const domPage = await ctx.newPage();

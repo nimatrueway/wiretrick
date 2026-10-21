@@ -34,10 +34,12 @@ export async function loadMonaco(): Promise<any> {
     ]);
     const ts = monacoApi.languages.typescript;
     monacoApi.languages.typescript.typescriptDefaults.setCompilerOptions({
-        target: ts.ScriptTarget.ES2020,
+        // scripts run in current browsers: offer the newest JS/DOM APIs
+        // (wt-api.d.ts adds web APIs newer than the bundled TypeScript)
+        target: ts.ScriptTarget.ESNext,
         // Monaco passes options straight to the TS API (no tsconfig parsing),
         // so libs must be file names — "dom" alone silently loads nothing
-        lib: ["lib.es2020.d.ts", "lib.dom.d.ts", "lib.dom.iterable.d.ts"],
+        lib: ["lib.esnext.d.ts", "lib.dom.d.ts", "lib.dom.iterable.d.ts"],
         allowNonTsExtensions: true,
         // scripts import each other by relative path ("./utilities")
         module: ts.ModuleKind.ESNext,

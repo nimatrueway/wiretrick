@@ -22,6 +22,13 @@ wt.declareScript({
 | `process` | a tiny local helper ([wiretrick-helper](process-helper.md)) is a loopback HTTPS proxy; a PAC routes only the matched hosts to it and it pauses requests for your handlers | **everything**: documents, script tags, images, workers, XHR — MV2 and MV3 | **never** | **Chrome-only**, needs the helper installed + its CA trusted; your own proxy setting stays in effect; falls through the list when the helper is unavailable |
 | `auto` (default) | engine picks per request | — | minimized | resolves to `hook` when the page hook is ready, else `cdp` |
 
+> **Which one?** `hook` is the most lightweight (no banner, no helper, no
+> permissions prompt), but it only works on the page's own fetch/XHR
+> (REST/API) calls. Documents, `<script src>`, images, workers and requests
+> made before the hook loads go straight past it. For more robust
+> interception use `process` (Chrome), `webrequest` (Firefox / MV2
+> Chromium) or `cdp`, with `hook` as a fallback if you like.
+
 ## Priority lists
 
 Strategies are tried **in listed order** — the first viable one for a given
@@ -33,8 +40,8 @@ request wins:
   always work, at the cost of the banner while requests are in flight.
 - `strategy: ["cdp", "hook"]` — debugger first even for XHR (rare; useful when the
   page's fetch wrapper is hostile to monkey-patching).
-- `strategy: ["hook"]` — strictly banner-free; requests the hook can't see pass
-  through untouched.
+- `strategy: ["hook"]` — strictly banner-free and the lightest; but only
+  fetch/XHR, so requests the hook can't see pass through untouched.
 - `strategy: ["webrequest", "hook"]` — network-level first (blocking webRequest on
   Firefox / MV2 Chromium), page hook otherwise.
 - `strategy: ["process", "cdp"]` — network-level on Chrome without the banner via

@@ -218,6 +218,7 @@ if (WATCH) {
  * `lib:` list in monacoSetup.ts plus everything it `/// <reference lib>`s.
  */
 async function pruneTsWorkerLibs(file) {
+    const AMO_MAX_FILE = 5 * 1024 * 1024;
     if (!existsSync(file)) return;
     const setup = await readFile(path.join(root, "src/ui/monacoSetup.ts"), "utf8");
     const roots = [...(setup.match(/lib:\s*\[([^\]]*)\]/)?.[1] ?? "").matchAll(/"([^"]+)"/g)].map((m) => m[1]);
@@ -238,9 +239,18 @@ async function pruneTsWorkerLibs(file) {
         for (const r of libs.get(n)[2].matchAll(/<reference lib=\\?"([\w.]+)\\?"/g)) queue.push(`lib.${r[1].toLowerCase()}.d.ts`);
     }
     if (roots.some((r) => !keep.has(r))) throw new Error(`pruneTsWorkerLibs: missing ${roots.filter((r) => !keep.has(r))}`);
+    // back to front so earlier offsets stay valid: drop unused libs, and
+    // strip line indentation from kept ones (irrelevant to the type checker
+    // and to JSDoc hovers, and ~5% of the file)
     let out = src;
-    const drop = [...libs].filter(([n]) => !keep.has(n)).sort((a, b) => b[1][0] - a[1][0]);
-    for (const [, [start, end]] of drop) out = out.slice(0, start) + out.slice(end);
+    let dropped = 0;
+    for (const [n, [start, end]] of [...libs].sort((a, b) => b[1][0] - a[1][0])) {
+        const repl = keep.has(n) ? src.slice(start, end).replace(/\n[ \t]+/g, "\n") : "";
+        if (!keep.has(n)) dropped++;
+        out = out.slice(0, start) + repl + out.slice(end);
+    }
+    const bytes = Buffer.byteLength(out);
+    if (bytes > AMO_MAX_FILE) throw new Error(`pruneTsWorkerLibs: tsWorker.js is ${bytes} bytes, over AMO's ${AMO_MAX_FILE}-byte per-file limit — narrow the lib list in monacoSetup.ts`);
     await writeFile(file, out);
-    console.log(`tsWorker.js: kept ${keep.size} TS libs, dropped ${drop.length} (${(src.length / 1e6).toFixed(2)} → ${(out.length / 1e6).toFixed(2)} MB)`);
+    console.log(`tsWorker.js: kept ${keep.size} TS libs, dropped ${dropped} (${(src.length / 1e6).toFixed(2)} → ${(out.length / 1e6).toFixed(2)} MB)`);
 }

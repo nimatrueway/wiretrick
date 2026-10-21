@@ -299,18 +299,28 @@ declare namespace Wiretrick {
     /** The `wt.declareScript` argument. */
     interface ScriptDef<T extends Record<string, ParamDef> = Record<string, ParamDef>> {
         /**
-         * URL patterns the script activates on. `*` matches anything.
+         * URLs the script activates on, as
+         * [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API)
+         * strings: `*` is a wildcard within a URL part, `:name` a named
+         * segment, and an omitted query or hash matches any. An omitted port
+         * means the default port only (write `:*` for any). `"<all_urls>"`
+         * matches every URL. An invalid pattern makes `declareScript` throw.
+         *
+         * @see https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API
          *
          * @example
-         * match: ["*://example.com/*", "*://api.example.com/v1/*"]
+         * match: ["*://example.com/*", "https://*.example.com/api/v1/*", "https://cdn.example.com/static/*.js"]
          */
         match?: string[];
         /**
          * Interception tiers in priority order; the first viable one per
          * request wins. Default `["auto"]`.
          *
-         * - `"hook"` — page fetch/XHR override; no banner, misses documents,
-         *   `<script src>` and images.
+         * - `"hook"` — page fetch/XHR override; the most lightweight (no
+         *   banner, no helper), but it only sees the page's own fetch/XHR
+         *   (REST/API) calls — documents, `<script src>`, images and workers
+         *   pass through. For robust interception prefer `"process"`,
+         *   `"webrequest"` or `"cdp"`.
          * - `"cdp"` — Chrome debugger; sees everything, shows a banner while
          *   attached.
          * - `"webrequest"` — blocking webRequest (Firefox, MV2 Chromium).
@@ -548,4 +558,75 @@ declare const wt: {
      * });
      */
     declareScript<T extends Record<string, Wiretrick.ParamDef>>(def: Wiretrick.ScriptDef<T>): Wiretrick.ParamsOf<T>;
+};
+
+/*
+ * Newer web platform APIs that the editor's bundled TypeScript doesn't know
+ * yet. Wiretrick targets current browsers, so scripts may use them freely.
+ */
+
+/** Input accepted by `URLPattern` (each URL component as a pattern string). */
+interface URLPatternInit {
+    protocol?: string;
+    username?: string;
+    password?: string;
+    hostname?: string;
+    port?: string;
+    pathname?: string;
+    search?: string;
+    hash?: string;
+    baseURL?: string;
+}
+
+interface URLPatternOptions {
+    /** Match case-insensitively. */
+    ignoreCase?: boolean;
+}
+
+type URLPatternInput = string | URLPatternInit;
+
+interface URLPatternComponentResult {
+    input: string;
+    groups: Record<string, string | undefined>;
+}
+
+interface URLPatternResult {
+    inputs: [URLPatternInput] | [URLPatternInput, string];
+    protocol: URLPatternComponentResult;
+    username: URLPatternComponentResult;
+    password: URLPatternComponentResult;
+    hostname: URLPatternComponentResult;
+    port: URLPatternComponentResult;
+    pathname: URLPatternComponentResult;
+    search: URLPatternComponentResult;
+    hash: URLPatternComponentResult;
+}
+
+/**
+ * Matches URLs against a pattern, e.g. `new URLPattern("https://*.example.com/users/:id")`.
+ * The same syntax as `wt.declareScript({ match })`.
+ *
+ * @see https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API
+ */
+interface URLPattern {
+    /** Whether `input` matches the pattern. */
+    test(input?: URLPatternInput, baseURL?: string): boolean;
+    /** The matched components and their named groups (`:id`, `*` → `"0"`), or null. */
+    exec(input?: URLPatternInput, baseURL?: string): URLPatternResult | null;
+    readonly protocol: string;
+    readonly username: string;
+    readonly password: string;
+    readonly hostname: string;
+    readonly port: string;
+    readonly pathname: string;
+    readonly search: string;
+    readonly hash: string;
+    /** Whether any component uses a custom regular expression group. */
+    readonly hasRegExpGroups: boolean;
+}
+
+declare var URLPattern: {
+    prototype: URLPattern;
+    new (input: URLPatternInput, baseURL: string, options?: URLPatternOptions): URLPattern;
+    new (input?: URLPatternInput, options?: URLPatternOptions): URLPattern;
 };

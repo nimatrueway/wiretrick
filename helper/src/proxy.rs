@@ -30,7 +30,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::ca::{Ca, Resolver};
-use crate::matcher::{match_any, matches};
+use crate::matcher::UrlMatcher;
 use crate::nm::{Headers, In, Nm, Out, Route, b64decode};
 use crate::upstream::{BoxIo, Connector, Hop, Tunnel, Upstream};
 
@@ -61,7 +61,13 @@ pub struct State {
     pub ca: Arc<Ca>,
     pub up: Arc<Upstream>,
     client: Client<Connector, Body>,
-    routes: RwLock<Arc<Vec<Route>>>,
+    routes: RwLock<Arc<Vec<Compiled>>>,
+}
+
+/// A route with its `match` strings parsed once (invalid ones dropped).
+struct Compiled {
+    patterns: Vec<UrlMatcher>,
+    flags: Route,
 }
 
 impl State {
@@ -79,21 +85,38 @@ impl State {
     }
 
     pub fn set_routes(&self, routes: Vec<Route>) {
-        *self.routes.write().unwrap() = Arc::new(routes);
+        let compiled = routes
+            .into_iter()
+            .map(|r| Compiled {
+                patterns: r
+                    .patterns
+                    .iter()
+                    .filter_map(|p| UrlMatcher::parse(p))
+                    .collect(),
+                flags: Route {
+                    patterns: Vec::new(),
+                    ..r
+                },
+            })
+            .collect();
+        *self.routes.write().unwrap() = Arc::new(compiled);
     }
 
-    fn routes(&self) -> Arc<Vec<Route>> {
+    fn routes(&self) -> Arc<Vec<Compiled>> {
         self.routes.read().unwrap().clone()
     }
 
-    /// OR of every matching route's phases.
+    /// OR of every matching route's phases (`url` is absolute).
     fn flags(&self, url: &str) -> Route {
         let mut f = Route::default();
+        let Ok(url) = url::Url::parse(url) else {
+            return f;
+        };
         for r in self.routes().iter() {
-            if match_any(&r.patterns, url) {
-                f.req |= r.req;
-                f.res_headers |= r.res_headers;
-                f.body |= r.body;
+            if r.patterns.iter().any(|p| p.test(&url)) {
+                f.req |= r.flags.req;
+                f.res_headers |= r.flags.res_headers;
+                f.body |= r.flags.body;
             }
         }
         f
@@ -103,21 +126,8 @@ impl State {
     pub fn host_routed(&self, host: &str, port: u16) -> bool {
         self.routes()
             .iter()
-            .any(|r| r.patterns.iter().any(|p| host_may_match(p, host, port)))
+            .any(|r| r.patterns.iter().any(|p| p.host_may_match(host, port)))
     }
-}
-
-/// Host-part of a URL pattern vs a host (same rule the extension's PAC uses).
-pub fn host_may_match(pattern: &str, host: &str, port: u16) -> bool {
-    let Some((_, rest)) = pattern.split_once("://") else {
-        return true; // e.g. "*" — could be anything
-    };
-    let host_pat = rest.split('/').next().unwrap_or("");
-    let host_pat = host_pat.to_ascii_lowercase();
-    let host = host.to_ascii_lowercase();
-    matches(&host_pat, &host)
-        || matches(&host_pat, &format!("{host}:{port}"))
-        || matches(&host_pat, &format!("[{host}]:{port}"))
 }
 
 pub async fn serve(listener: TcpListener, st: Arc<State>) {

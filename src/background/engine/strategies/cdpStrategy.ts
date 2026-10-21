@@ -4,7 +4,7 @@
  * hook tier cannot see. Attaches lazily, only while body-modifying
  * requests are in flight for a matching script.
  */
-import { matchAny } from "../../../shared/matcher";
+import { matchAny, urlGlobOf } from "../../../shared/matcher";
 import { parseStrategyList } from "../../../shared/metaParser";
 import { compileScript, makeScriptOverrides, makeModuleResolver, isThenable, isAsyncFn, type HandlerFn } from "../../../shared/compile";
 import { scriptLogLine } from "../../../shared/scriptLog";
@@ -196,8 +196,8 @@ export class CdpStrategy {
                 onResponseHeaders: wantsHeaders ? [] : undefined,
             });
             for (const m of s.meta.match) {
-                // match patterns are valid CDP globs ('*' wildcard); the handler re-filters exactly
-                const urlPattern = m === "<all_urls>" ? "*" : m;
+                // a coarse CDP glob from the URLPattern; the handler re-filters exactly
+                const urlPattern = urlGlobOf(m);
                 for (const resourceType of MV3_CDP_TYPES) {
                     if (wantsRequest) patterns.set(`${urlPattern}|${resourceType}|Request`, { urlPattern, resourceType, requestStage: "Request" });
                     if (wantsResponse) patterns.set(`${urlPattern}|${resourceType}|Response`, { urlPattern, resourceType, requestStage: "Response" });
@@ -221,7 +221,7 @@ export class CdpStrategy {
             log(-1, `[cdp] MV3 debugger tier active for ${next.map((s) => `"${s.name}"`).join(", ")} — <script>/<img>/css/document loads are intercepted via chrome.debugger (Chrome shows a "started debugging this browser" banner while attached)`, "info");
         }
         if (changed && autoBody.length) {
-            log(-1, `MV3: ${autoBody.map((n) => `"${n}"`).join(", ")} intercept page fetch/XHR only (hook tier). To also intercept <script>/<img>/css/document loads, add "cdp" to the script's strategy list (e.g. strategy: ["hook", "cdp"])`, "warn");
+            log(-1, `MV3: ${autoBody.map((n) => `"${n}"`).join(", ")} intercept page fetch/XHR only (hook tier: lightest, but REST/API calls only). To also intercept <script>/<img>/css/document loads, add "process" (local helper, no banner) or "cdp" to the script's strategy list (e.g. strategy: ["process", "hook"] or ["hook", "cdp"])`, "warn");
         }
         dlog("cdp", "MV3 debugger tier reloaded", { scripts: next.map((s) => s.name), patterns: this.mv3Patterns.length });
         await this.resyncAttachedMv3();

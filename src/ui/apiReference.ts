@@ -5,6 +5,9 @@ export interface ApiSection {
     body: string;
 }
 
+const MDN = "https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API";
+const ADV_SHORT = `"hook" is the lightest tier, but it only sees the page's own fetch/XHR (REST/API) calls. For documents, <script src>, images, workers, or anything that must not slip through, use "process", "webrequest" or "cdp".`;
+
 export const API_REFERENCE: ApiSection[] = [
     {
         title: "Script structure — wt.declareScript",
@@ -15,7 +18,15 @@ const cfg = wt.declareScript({
     strategy: ["auto"],                 // or hook | cdp | webrequest | process priority list
 });
 
-Patterns are star patterns: * matches anything, ** the same (groups are remembered for replace patterns).`,
+match entries are URLPattern strings (${MDN}): * is a wildcard within a URL part, :name a named segment, an omitted query/hash matches any, and "<all_urls>" matches everything.
+    "*://example.com/*"                     any scheme, any path on example.com
+    "https://*.example.com/api/*"           every subdomain (not example.com itself)
+    "https://cdn.example.com/static/*.js"   only .js files under /static/
+    "https://example.com/users/:id"         /users/42, not /users/42/posts
+    "*://localhost:*/*"                     any port (no port in the pattern = 80/443 only)
+An invalid pattern makes wt.declareScript throw (shown as the script's error).
+
+Tip: ${ADV_SHORT}`,
     },
     {
         title: "Libraries — import other scripts",
@@ -177,7 +188,9 @@ wt.onRequest(async (ctx) => {
 cdp — chrome.debugger + Fetch domain. Sees everything, but Chrome shows a "debugging" banner while attached; the engine attaches only while needed and detaches when idle.
 webrequest — blocking webRequest: Firefox, and Chromium browsers that still run MV2 extensions (ungoogled-chromium, Brave, Opera…). Redirect, cancel, headers and synchronous respond/replaceResponse everywhere; response-body streaming (modifyResponse) and awaiting async handlers are Firefox-only. Not available in MV3.
 process — Chrome: a tiny local helper (wiretrick-helper) proxies ONLY matched hosts. Sees everything (documents, script tags, images, async handlers, body rewrites) with no banner and no flags. Opt-in: install the helper and trust its CA from the manager.
-Scripts that only ever match fetch/XHR are learned to be hook-only and never trigger the banner.`,
+Scripts that only ever match fetch/XHR are learned to be hook-only and never trigger the banner.
+
+Tip: ${ADV_SHORT}`,
     },
     {
         title: "strategy — priority list (wt.declareScript)",
@@ -186,7 +199,7 @@ Scripts that only ever match fetch/XHR are learned to be hook-only and never tri
 strategy: ["hook", "cdp"]   // banner-free for XHR; debugger only as cold-start fallback
 strategy: ["cdp"]           // debugger only (main-frame HTML + script tags always work)
 strategy: ["cdp", "hook"]         // debugger first, even for XHR
-strategy: ["hook"]                // strictly banner-free; unhookable requests pass through
+strategy: ["hook"]                // lightest, banner-free — but fetch/XHR only; everything else passes through
 strategy: ["webrequest", "hook"]  // network-level (blocking webRequest) first
 strategy: ["process", "hook"]     // Chrome: local helper first, hook if it isn't running
 

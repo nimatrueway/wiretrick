@@ -1,0 +1,22 @@
+[
+    { "pattern": "*://example.com/*", "input": "https://example.com/a?b=1#h", "matched": true },
+    { "pattern": "*://example.com/*", "input": "http://example.com/", "matched": true },
+    { "pattern": "*://example.com/*", "input": "https://example.com:8080/a", "matched": false },
+    { "pattern": "*://example.com/*", "input": "https://evil.com/?u=https://example.com/", "matched": false },
+    { "pattern": "https://*.example.com/*", "input": "https://a.b.example.com/x", "matched": true },
+    { "pattern": "https://*.example.com/*", "input": "https://example.com/", "matched": false },
+    { "pattern": "https://*.example.com/*", "input": "http://a.example.com/", "matched": false },
+    { "pattern": "*://app.example.com/api/user*", "input": "https://app.example.com/api/users?x=1", "matched": true },
+    { "pattern": "*://app.example.com/api/user*", "input": "https://app.example.com/v2/api/user", "matched": false },
+    { "pattern": "https://example.com/users/:id", "input": "https://example.com/users/42", "matched": true },
+    { "pattern": "https://example.com/users/:id", "input": "https://example.com/users/42/posts", "matched": false },
+    { "pattern": "https://example.com/static/*.js", "input": "https://example.com/static/dist/app.1a2b.js", "matched": true },
+    { "pattern": "https://example.com/static/*.js", "input": "https://example.com/static/app.css", "matched": false },
+    { "pattern": "https://cdn*.example.com/*", "input": "https://cdn-dev.example.com/x", "matched": true },
+    { "pattern": "https://example.com/api/v{1}?/*", "input": "https://example.com/api/v/x", "matched": true },
+    { "pattern": "http://localhost:8081/*", "input": "http://localhost:8081/static/a.js", "matched": true },
+    { "pattern": "http://localhost:8081/*", "input": "http://localhost:9000/static/a.js", "matched": false },
+    { "pattern": "<all_urls>", "input": "https://anything.test/x", "matched": true },
+    { "pattern": "*", "input": "http://localhost:1/", "matched": true },
+    { "pattern": "*example.com*", "input": "https://example.com/", "matched": false }
+]

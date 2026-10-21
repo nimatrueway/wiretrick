@@ -3,7 +3,7 @@ import { ProcessStrategy, applyHeaderMods, base64ToBytes, bytesToBase64, filterU
 import { hookEligible, isProcessOwned, listsProcess, processActive, setProcessActive } from "../src/background/engine/strategies/processState";
 import { CdpStrategy } from "../src/background/engine/strategies/cdpStrategy";
 import { compileScript } from "../src/shared/compile";
-import { isHelperOutdated } from "../src/shared/helperInstall";
+import { isHelperOutdated, MIN_HELPER_VERSION } from "../src/shared/helperInstall";
 import { clearDebugBuffer, getDebugBuffer } from "../src/shared/debugLog";
 import type { Script } from "../src/background/engine/scriptStore";
 
@@ -332,7 +332,8 @@ describe("helper version check", () => {
         expect(isHelperOutdated("0.2.0", "0.1.0")).toBe(false);
         expect(isHelperOutdated("v1.0.0", "1.0.1")).toBe(true);
         expect(isHelperOutdated(undefined, "0.1.0")).toBe(false);
-        expect(isHelperOutdated("0.0.1")).toBe(false); // MIN_HELPER_VERSION
+        expect(isHelperOutdated(MIN_HELPER_VERSION)).toBe(false);
+        expect(isHelperOutdated("0.2.0")).toBe(true); // pre-URLPattern helper
         expect(isHelperOutdated("garbage", "0.1.0")).toBe(false);
     });
 
@@ -349,7 +350,7 @@ describe("helper version check", () => {
         p.reconnect();
         await settle();
         expect(fake.connects).toBe(before + 1);
-        fake.deliver({ t: "ready", port: 41235, version: "0.0.1", caPem: "", caFingerprint: "AA", caPath: "/tmp/ca.pem" });
+        fake.deliver({ t: "ready", port: 41235, version: MIN_HELPER_VERSION, caPem: "", caFingerprint: "AA", caPath: "/tmp/ca.pem" });
         await settle();
         expect(p.status().outdated).toBe(false);
         p.reconnect(); // up to date → no restart
@@ -360,7 +361,7 @@ describe("helper version check", () => {
         (globalThis as any).chrome.runtime.getManifest = () => ({ version: "9.9.9" });
         clearDebugBuffer();
         const p = new ProcessStrategy();
-        await ready(p, [makeScript("a", `wt.declareScript({ match: ["*://x.com/*"], strategy: ["process"] });\nwt.onRequest(() => {});`)], "0.0.1");
+        await ready(p, [makeScript("a", `wt.declareScript({ match: ["*://x.com/*"], strategy: ["process"] });\nwt.onRequest(() => {});`)], MIN_HELPER_VERSION);
         expect(p.status().outdated).toBe(false);
         expect(getDebugBuffer().some((e) => /older than this extension needs/.test(e.msg))).toBe(false);
     });

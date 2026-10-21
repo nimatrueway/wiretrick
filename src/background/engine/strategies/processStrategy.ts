@@ -116,14 +116,14 @@ function withNoStore(pairs: Pairs): Pairs {
     return [...pairs.filter(([k]) => !/^(cache-control|expires|etag|last-modified)$/i.test(k)), ["cache-control", "no-store"]];
 }
 
-/** webRequest filter URLs for a set of star patterns (valid match patterns only) */
+/** webRequest filter URLs for a set of `match` URLPatterns (valid match patterns only) */
 export function filterUrlsFor(patterns: string[]): string[] {
     const out = new Set<string>();
     for (const p of patterns) {
         const host = hostPatternOf(p);
         // valid match-pattern hosts: "*", "*.x.y", or a plain host (no ports, no inner stars)
-        if (host === null || !/^(\*|(\*\.)?[a-z0-9.-]+|\[[0-9a-f:.]+\])(:\d+)?$/i.test(host)) return ["<all_urls>"];
-        out.add(`*://${host.replace(/:\d+$/, "")}/*`);
+        if (host === null || !/^(\*|(\*\.)?[a-z0-9.-]+|\[[0-9a-f:.]+\])(:\d+|:\*)?$/i.test(host)) return ["<all_urls>"];
+        out.add(`*://${host.replace(/:(\d+|\*)$/, "")}/*`);
     }
     return [...out];
 }

@@ -253,6 +253,28 @@ check("dependant: importer flagged when utility breaks it", (await usesLibMarker
 await setLib("export const answer = 42;\n");
 check("dependant: importer cleared when utility is fixed", (await usesLibMarkers()) === 0);
 
+// scripts run in current browsers: newer JS/web APIs type-check (URLPattern
+// is declared by wt-api.d.ts; esnext lib for the rest). The deliberate type
+// error proves diagnostics are live.
+await clickScript("main script");
+await mgr.evaluate((c: string) => (window as any).monaco.editor.getEditors()[0].setValue(c), [
+    'wt.declareScript({ match: ["*://example.invalid/*"] });',
+    'const p = new URLPattern("https://example.com/users/:id");',
+    'const id: string | undefined = p.exec("https://example.com/users/42")?.pathname.groups.id;',
+    "const last = [1, 2, 3].findLast((n) => n > 1);",
+    "const sorted = [3, 1].toSorted();",
+    "const deep = structuredClone({ id, last, sorted });",
+    'const wrong: number = "not a number";',
+    "",
+].join("\n"));
+await mgr.waitForTimeout(3000);
+const modern = await mgr.evaluate(() => {
+    const m = (window as any).monaco;
+    return m.editor.getModelMarkers({ resource: m.editor.getEditors()[0].getModel().uri })
+        .filter((x: any) => x.severity === m.MarkerSeverity.Error).map((x: any) => `${x.startLineNumber}: ${x.message}`);
+});
+check("newer browser APIs (URLPattern, findLast, toSorted) type-check", modern.length === 1 && modern[0].startsWith("7:"), JSON.stringify(modern));
+
 } catch (e) {
     failed++;
     console.error("FATAL", e);

@@ -14,6 +14,10 @@ lists `process`, and it exits when that script is gone (or Chrome closes):
    goes exactly where your proxy setting sent it before (direct, fixed
    servers, your PAC, auto-detect, or the system proxy).
 3. The helper pauses matching requests and responses and asks the extension.
+   It tests each URL against the same `match`
+   [URLPatterns](https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API)
+   as the extension (`<all_urls>` matches everything). TLS to a host no
+   pattern's hostname/port can match is tunneled untouched.
    Your handlers run in the background page (MV2) or the sandbox (MV3), the
    same code paths as the other tiers. The extension answers continue,
    fulfill, redirect or fail. Requests nobody listens to are not paused, and

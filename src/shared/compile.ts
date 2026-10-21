@@ -8,6 +8,7 @@ import { defaultMeta, type ResMeta } from "./metaParser";
 import { resolveParamValues } from "./scriptDef";
 import { formatLogArgs, makeScriptConsole, type ScriptLogLevel } from "./scriptLog";
 import { scriptFunction } from "./scriptFn";
+import { matchPatternError } from "./matcher";
 
 export type HandlerFn = (...args: any[]) => any;
 
@@ -310,7 +311,11 @@ function createDeclareShim(meta: ResMeta, storedValues?: Record<string, any>) {
     const run = (def: import("./scriptDef").ScriptDef): any => {
         if (!def || typeof def !== "object") return {};
         meta.declared = true;
-        if (def.match?.length) meta.match = [...def.match];
+        if (def.match?.length) {
+            const bad = def.match.map(matchPatternError).find((e) => e);
+            if (bad) throw new Error(`wt.declareScript: match ${bad}`);
+            meta.match = [...def.match];
+        }
         if (def.strategy?.length) meta.strategy = def.strategy.join(",");
         if (def.params) {
             state.defs = def.params;

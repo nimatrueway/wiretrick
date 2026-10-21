@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { match, matchReplace, matchAny } from "../src/shared/matcher";
+import { match, matchReplace, matchAny, matchPatternError, hostGlobOf, urlGlobOf } from "../src/shared/matcher";
 
 // Ported from test/matchTest.js — [pattern, replace, input, expected]
 const cases: [string, string, string, string][] = [
@@ -79,10 +79,41 @@ describe("matchAny", () => {
         expect(matchAny([], "https://x.com/a")).toBe(false);
         expect(matchAny(["*://a.com/*", "*://b.com/*"], "https://b.com/x")).toBe(true);
     });
+    it("uses URLPattern semantics (shared fixtures with the Rust helper)", () => {
+        for (const c of urlPatternFixtures as { pattern: string; input: string; matched: boolean }[]) {
+            expect(matchAny([c.pattern], c.input), `${c.pattern} ~ ${c.input}`).toBe(c.matched);
+        }
+    });
+});
+
+describe("matchPatternError", () => {
+    it("accepts URLPatterns and <all_urls>, rejects the rest", () => {
+        expect(matchPatternError("*://example.com/*")).toBeNull();
+        expect(matchPatternError("https://example.com/users/:id")).toBeNull();
+        expect(matchPatternError("<all_urls>")).toBeNull();
+        expect(matchPatternError("*example.com*")).toMatch(/not a valid URLPattern/);
+        expect(matchPatternError(42)).toMatch(/strings/);
+    });
+});
+
+describe("hostGlobOf / urlGlobOf", () => {
+    it("derives coarse host and URL globs", () => {
+        expect(hostGlobOf("https://*.Example.com/api/*")).toBe("*.example.com");
+        expect(hostGlobOf("*://cdn.x.io:8443/*")).toBe("cdn.x.io:8443");
+        expect(hostGlobOf("*://cdn.x.io:*/*")).toBe("cdn.x.io:*");
+        expect(hostGlobOf("https://:tenant.example.com/*")).toBeNull();
+        expect(hostGlobOf("<all_urls>")).toBeNull();
+        expect(hostGlobOf("bogus")).toBeNull();
+        expect(urlGlobOf("*://example.com/users/:id")).toBe("*://example.com/*");
+        expect(urlGlobOf("https://cdn.x.io:*/*")).toBe("https://cdn.x.io*/*");
+        expect(urlGlobOf("http{s}?://example.com/*")).toBe("*://example.com/*");
+        expect(urlGlobOf("<all_urls>")).toBe("*");
+    });
 });
 
 // shared with the Rust helper (helper/src/matcher.rs runs the same file)
 import fixtures from "./fixtures/matcher.json";
+import urlPatternFixtures from "./fixtures/urlpattern.json";
 
 describe("shared matcher fixtures (TS ⇔ Rust helper)", () => {
     it.each(fixtures as { pattern: string; input: string; matched: boolean }[])("$pattern ~ $input → $matched", ({ pattern, input, matched }) => {

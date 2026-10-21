@@ -17,7 +17,8 @@ bodies, or patch the DOM.
   per-script enable toggles and adjustable parameters.
 - **Every kind of interception** — page fetch/XHR, documents, `<script>`,
   images and workers, through four [strategies](docs/strategies.md) you can
-  rank per script.
+  rank per script. `hook` is the lightest but only sees fetch/XHR (REST)
+  calls; use `process`, `webrequest` or `cdp` for robust interception.
 - **No debugger banner needed** — the optional [local helper](docs/process-helper.md)
   intercepts at network level on Chrome without the "being debugged" bar.
 - **Built-in devtools** — Log and Network panels show what every script did,

@@ -14,6 +14,8 @@
  * intercepted traffic leaves through exactly the proxy Chrome would use.
  */
 
+import { hostGlobOf } from "./matcher";
+
 export const PROBE_HOST = "wiretrick-helper.probe";
 
 /** ES5 port of the helper's `matcher::matches` (first-occurrence splits) */
@@ -39,12 +41,8 @@ function __resPort(url) {
 }
 function __resScheme(url) { return url.substring(0, url.indexOf(":")).toLowerCase(); }`;
 
-/** The host part of a match pattern (lowercased), or null = "could be any host". */
-export function hostPatternOf(pattern: string): string | null {
-    const at = pattern.indexOf("://");
-    if (at < 0) return null;
-    return pattern.slice(at + 3).split("/")[0].toLowerCase();
-}
+/** The host gate of a `match` URLPattern as a star glob (lowercased), or null = "could be any host". */
+export const hostPatternOf = hostGlobOf;
 
 /** ---- the user's decision ---- */
 

@@ -382,7 +382,7 @@ async fn unrouted_host_is_a_raw_tunnel() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn routed_host_without_pauses_streams_through_h2_both_sides() {
-    let env = setup(vec![route("https://localhost*/never/*", true, true, true)]).await;
+    let env = setup(vec![route("https://localhost:*/never/*", true, true, true)]).await;
     let g = env.get("/echo", true, &[]).await.unwrap();
     assert!(g.alpn_h2);
     assert_ne!(g.peer_cert, env.up_cert.to_vec(), "MITM leaf expected");
@@ -399,7 +399,7 @@ async fn routed_host_without_pauses_streams_through_h2_both_sides() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn request_stage_fulfill_never_hits_upstream() {
-    let env = setup(vec![route("https://localhost*/text", true, false, false)]).await;
+    let env = setup(vec![route("https://localhost:*/text", true, false, false)]).await;
     env.on(|v, _| {
         assert_eq!(v["t"], "req");
         assert_eq!(v["method"], "GET");
@@ -422,7 +422,7 @@ async fn request_stage_fulfill_never_hits_upstream() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn request_stage_header_rewrite() {
-    let env = setup(vec![route("https://localhost*/echo", true, false, false)]).await;
+    let env = setup(vec![route("https://localhost:*/echo", true, false, false)]).await;
     env.on(|v, _| {
         let mut h: Vec<Value> = v["headers"]
             .as_array()
@@ -448,7 +448,7 @@ async fn request_stage_header_rewrite() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn request_stage_redirect_and_cancel() {
-    let env = setup(vec![route("https://localhost*/*", true, false, false)]).await;
+    let env = setup(vec![route("https://localhost:*/*", true, false, false)]).await;
     env.on(|v, _| {
         if v["url"].as_str().unwrap().ends_with("/text") {
             Some(json!({"t": "redirect", "url": "https://elsewhere.test/x"}))
@@ -479,7 +479,7 @@ async fn request_stage_redirect_and_cancel() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn body_transform_sees_decoded_gzip_and_deflate() {
-    let env = setup(vec![route("https://localhost*/*", false, false, true)]).await;
+    let env = setup(vec![route("https://localhost:*/*", false, false, true)]).await;
     env.on(|v, body| {
         assert_eq!(v["t"], "res");
         assert_eq!(v["body"], "chunks");
@@ -510,7 +510,7 @@ async fn body_transform_sees_decoded_gzip_and_deflate() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn big_body_goes_out_in_chunks_and_continue_keeps_it() {
-    let env = setup(vec![route("https://localhost*/big", false, false, true)]).await;
+    let env = setup(vec![route("https://localhost:*/big", false, false, true)]).await;
     let len = Arc::new(AtomicUsize::new(0));
     let l2 = len.clone();
     env.on(move |_, body| {
@@ -530,7 +530,7 @@ async fn big_body_goes_out_in_chunks_and_continue_keeps_it() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn binary_bodies_are_skipped_but_headers_still_editable() {
-    let env = setup(vec![route("https://localhost*/image", false, true, true)]).await;
+    let env = setup(vec![route("https://localhost:*/image", false, true, true)]).await;
     env.on(|v, body| {
         assert_eq!(v["body"], "skipped:binary");
         assert!(body.is_empty());
@@ -545,7 +545,7 @@ async fn binary_bodies_are_skipped_but_headers_still_editable() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn plain_http_absolute_form() {
-    let env = setup(vec![route("http://localhost*/*", true, true, false)]).await;
+    let env = setup(vec![route("http://localhost:*/*", true, true, false)]).await;
     env.on(|v, _| match v["t"].as_str().unwrap() {
         "req" => None,
         _ => {

@@ -27,6 +27,30 @@ wt.onResponseHeaders((ctx) => {
 wt.modifyResponse((ctx, body) => body.replace('"role":"user"', '"role":"admin"'));
 ```
 
+## `match` patterns
+
+`match` entries are [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API) strings, the web-standard syntax
+also available to scripts as `new URLPattern(...)`. `*` is a wildcard
+within a URL part, `:name` is a named segment, and a query or hash you
+leave out matches any. `"<all_urls>"` matches every URL.
+
+| pattern | matches |
+|---|---|
+| `*://example.com/*` | any scheme, any path on `example.com` (default port only) |
+| `https://*.example.com/api/*` | every subdomain's `/api/…` (not `example.com` itself) |
+| `https://cdn.example.com/static/*.js` | only `.js` files under `/static/` |
+| `https://example.com/users/:id` | `/users/42`, not `/users/42/posts` |
+| `http://localhost:8081/*` | that port only |
+| `*://localhost:*/*` | any port (a pattern without a port matches only 80/443) |
+
+An invalid pattern (e.g. the old `*example.com*` style, which has no
+scheme) makes `wt.declareScript` throw. The error shows on the script.
+
+> **Tip:** `hook` is the lightest strategy, but it only sees the page's own
+> fetch/XHR (REST/API) calls. For documents, `<script src>`, images,
+> workers, or anything that must not slip through, use `process`,
+> `webrequest` or `cdp`. See [strategies](strategies.md).
+
 ## Libraries
 
 `wt.declareScript` is the only way to activate a script.

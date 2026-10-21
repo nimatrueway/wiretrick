@@ -22,6 +22,8 @@ pub type Headers = Vec<(String, String)>;
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq)]
 pub struct Route {
+    /// URLPattern constructor strings (`<all_urls>`/`*` = every URL), parsed
+    /// by `proxy::State::set_routes`
     #[serde(rename = "match")]
     pub patterns: Vec<String>,
     /// onRequest / replaceResponse handlers → pause at the request stage

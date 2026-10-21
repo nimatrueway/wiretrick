@@ -159,7 +159,7 @@
                                     <button id="btn-process-trust" hidden>Trust CA</button>
                                 </div>
                                 <pre id="process-detail" class="setting-pre"></pre>
-                                <p class="setting-help">Scripts listing <code>process</code> in their strategy are intercepted by wiretrick-helper, a small local proxy — no debugger banner, every resource type, Chrome only. Your own proxy setting stays in effect for everything else.</p>
+                                <p class="setting-help">Scripts listing <code>process</code> in their strategy are intercepted by wiretrick-helper, a small local proxy — no debugger banner, every resource type, Chrome only. More robust than <code>hook</code>, which only sees the page's own fetch/XHR calls. Your own proxy setting stays in effect for everything else.</p>
                             </div>
                         </div>
                     </section>
