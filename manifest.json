@@ -51,6 +51,7 @@
         "browsingData",
         "<all_urls>"
     ],
+    "optional_permissions": ["management"],
     "web_accessible_resources": ["hook.js"],
     "content_security_policy": "script-src 'self' 'unsafe-eval' blob:; worker-src 'self' blob:; object-src 'self'",
     "manifest_version": 2,

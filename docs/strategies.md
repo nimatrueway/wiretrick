@@ -83,6 +83,19 @@ attach the debugger for any request.
   async redirects/headers) → `strategy: ["process", "cdp"]` with the
   [local helper](process-helper.md) installed.
 
+## Troubleshooting `webrequest`
+
+Set `logLevel: debug` in `settings.yaml` and reload the page: the LOG panel
+then traces every request a `webrequest`-tier script matches — which scripts
+ran, what each `onRequest` returned, whether the browser followed the
+redirect, and how the request ended. Failures (`request FAILED net::…`) and
+changes the browser **ignored** because another extension (e.g. a second
+Wiretrick install) modified the same request are logged as warnings even
+without debug. No `[webrequest]` line at all for a URL means the browser
+never showed that request to the extension (e.g. served by a service worker
+or the blocking listener could not be registered — that is logged as an
+error).
+
 ## First page load with `cdp`
 
 The debugger can only attach once a navigation has begun, so the page

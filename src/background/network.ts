@@ -267,6 +267,11 @@ function detach(): void {
     wr.onErrorOccurred.removeListener(L.error);
 }
 
+/** recorded requests, oldest first (diagnostic report) */
+export function networkSnapshot(): NetEntry[] {
+    return [...entries.values()];
+}
+
 export function isRecording(): boolean {
     return ports.size > 0;
 }

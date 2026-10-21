@@ -46,6 +46,11 @@ export function log(tabId: number, message: string, level: LogEntry["level"] = "
     }
 }
 
+/** every tab's retained LOG lines, oldest first (diagnostic report) */
+export function allLogs(): LogEntry[] {
+    return [...tabLogs.values()].flat().sort((a, b) => a.at - b.at);
+}
+
 /** Push an arbitrary message to all connected manager/popup pages. */
 export function broadcastToUi(msg: any): void {
     for (const port of uiPorts) {

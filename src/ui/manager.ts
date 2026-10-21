@@ -22,7 +22,8 @@ import { mountNetworkPanel } from "./network/mount";
 import { scriptHealth, type ScriptHealthInput } from "../shared/scriptHealth";
 import type { Uri, IPosition, IRange, IKeyboardEvent, editor as MonacoEditor } from "monaco-editor";
 import type { Script } from "../background/engine/scriptStore";
-import { setupPanelDock, currentSide } from "./panelDock";
+import { setupPanelDock, currentSide, currentDock } from "./panelDock";
+import { aboutRows, aboutText, collectDiagnostics, diagnosticsFileName, downloadText, type HelperStatus } from "./about";
 
 // ---- state ----
 let scripts: (Script & { runtimeError?: ScriptHealthInput["runtimeError"]; typeErrors?: string[] })[] = [];
@@ -33,6 +34,7 @@ let dirty = false;
 /** Central dirty-state toggle: dims/undims Save. */
 function setDirty(v: boolean): void {
     dirty = v;
+    document.querySelector("#script-list li.selected")?.classList.toggle("dirty", v);
     const btn = $("#btn-save");
     if (v) {
         btn.removeAttribute("disabled");
@@ -193,6 +195,7 @@ function registerSettingsAssist(): void {
 
 async function selectSettings(): Promise<void> {
     selectedId = SETTINGS_ID;
+    focusedId = null;
     renderList();
     $("#btn-save").removeAttribute("disabled");
     await loadSettingsModel(true);
@@ -246,69 +249,71 @@ async function refresh(): Promise<void> {
 }
 
 let renaming = false;
+/** keyboard cursor in the explorer (VS Code "focused" row); null = follow the open file */
+let focusedId: string | null = null;
 
 function renderList(): void {
+    updateEnabledToggle();
     if (renaming) return; // a rebuild would drop the inline rename input
     const list = $("#script-list");
     list.innerHTML = "";
-    const sli = document.createElement("li");
-    sli.className = "script-item utility" + (selectedId === SETTINGS_ID ? " selected" : "");
-    sli.dataset.id = SETTINGS_ID;
-    const gear = document.createElement("span");
-    gear.className = "util-icon";
-    gear.textContent = "⚙";
-    gear.title = "Settings file — global settings and per-script params & enabled state";
+    const cursor = focusedId ?? selectedId;
+    const row = (id: string, cls: string): HTMLLIElement => {
+        const li = document.createElement("li");
+        li.className = "script-item" + cls + (id === selectedId ? " selected" : "") + (id === cursor ? " focused" : "") + (id === selectedId && dirty ? " dirty" : "");
+        li.dataset.id = id;
+        li.id = `explorer-${id}`;
+        li.setAttribute("role", "treeitem");
+        li.setAttribute("aria-selected", String(id === selectedId));
+        if (id === cursor) list.setAttribute("aria-activedescendant", li.id);
+        return li;
+    };
+    const icon = (kind: "ts" | "yaml", text: string): HTMLElement => {
+        const el = document.createElement("span");
+        el.className = `file-icon ${kind}`;
+        el.textContent = text;
+        el.setAttribute("aria-hidden", "true");
+        return el;
+    };
+    const sli = row(SETTINGS_ID, " utility");
+    sli.title = "Settings file — global settings and per-script params & enabled state";
     const sname = document.createElement("span");
     sname.className = "script-name";
     sname.textContent = "settings.yaml";
-    sli.append(gear, sname);
-    sli.addEventListener("click", () => select(SETTINGS_ID));
+    sli.append(icon("yaml", "⚙"), sname);
+    sli.addEventListener("click", () => {
+        moveExplorerFocus(SETTINGS_ID);
+        select(SETTINGS_ID);
+    });
     list.appendChild(sli);
     for (const script of scripts) {
         const isLib = script.meta.declared === false;
-        const li = document.createElement("li");
-        li.className = "script-item" + (script.id === selectedId ? " selected" : "") + (isLib ? " utility" : "");
-        li.dataset.id = script.id;
-
-        let toggle: HTMLElement;
-        if (isLib) {
-            // utility module: no toggle — it's inert on its own, importable
-            toggle = document.createElement("span");
-            toggle.className = "util-icon";
-            toggle.textContent = "𝑓";
-            toggle.title = "Utility module — importable by other scripts, never runs on its own. Use wt.declareScript to turn it into a script";
-        } else {
-            const sw = document.createElement("div");
-            sw.className = "switch" + (script.enabled ? " on" : "");
-            sw.title = script.enabled ? "Disable" : "Enable";
-            sw.addEventListener("click", async (e) => {
-                e.stopPropagation();
-                await send({ type: "setEnabled", id: script.id, enabled: !script.enabled });
-                await refresh();
-            });
-            toggle = sw;
-        }
+        const off = !isLib && !script.enabled;
+        const li = row(script.id, (isLib ? " utility" : "") + (off ? " disabled" : ""));
 
         const health = scriptHealth(script);
         const name = document.createElement("span");
         name.className = "script-name" + (health ? " error" : "");
-        name.textContent = script.meta.name;
-        name.title = `${script.meta.match.join(", ")}\nDouble-click to rename`;
+        name.textContent = scriptFileName(script.meta.name);
+        name.title = [
+            isLib ? "Utility module — importable by other scripts, never runs on its own. Use wt.declareScript to turn it into a script" : script.meta.match.join(", "),
+            off ? "Disabled — enable it from the editor toolbar or the right-click menu" : "",
+            "Double-click or F2 to rename",
+        ].filter(Boolean).join("\n");
 
         if (health) li.classList.add("has-error");
 
         const del = document.createElement("button");
         del.className = "btn-del";
         del.textContent = "✕";
-        del.title = "Delete script";
-        del.addEventListener("click", async (e) => {
+        del.title = "Delete script (Delete)";
+        del.tabIndex = -1;
+        del.addEventListener("click", (e) => {
             e.stopPropagation();
-            if (!confirm(`Delete "${script.meta.name}"?`)) return;
-            await send({ type: "deleteScript", id: script.id });
-            await refresh();
+            void deleteScript(script);
         });
 
-        li.append(toggle, name);
+        li.append(icon("ts", "TS"), name);
         if (health) {
             const ind = document.createElement("span");
             ind.className = `err-ind ${health.kind}`;
@@ -326,13 +331,180 @@ function renderList(): void {
         }
         li.append(del);
         // re-selecting would rebuild the list and swallow a double-click
-        li.addEventListener("click", () => script.id !== selectedId && select(script.id));
+        li.addEventListener("click", () => {
+            moveExplorerFocus(script.id);
+            if (script.id !== selectedId) select(script.id);
+        });
         list.appendChild(li);
     }
 }
 
-/** Inline rename in the script list (double-click a name). */
-function startRename(label: HTMLElement, script: Script): void {
+async function setScriptEnabled(script: Script, enabled: boolean): Promise<void> {
+    await send({ type: "setEnabled", id: script.id, enabled });
+    await refresh();
+}
+
+/** Delete with confirmation; the explorer cursor moves to the next row. */
+async function deleteScript(script: Script): Promise<void> {
+    if (!confirm(`Delete "${script.meta.name}"?`)) return;
+    if ((focusedId ?? selectedId) === script.id) {
+        const ids = explorerIds();
+        const i = ids.indexOf(script.id);
+        focusedId = ids[i + 1] ?? ids[i - 1] ?? null;
+    }
+    await send({ type: "deleteScript", id: script.id });
+    await refresh();
+}
+
+/** Editor toolbar switch: enable/disable the open script (hidden for settings.yaml and libraries). */
+function updateEnabledToggle(): void {
+    const label = $("#script-enabled");
+    const script = scripts.find((s) => s.id === selectedId);
+    label.hidden = !script || script.meta.declared === false;
+    if (!script) return;
+    label.querySelector(".switch")!.classList.toggle("on", !!script.enabled);
+    label.setAttribute("aria-checked", String(!!script.enabled));
+}
+
+// ---- explorer: keyboard navigation + context menu (VS Code style) ----
+const explorerIds = (): string[] => [SETTINGS_ID, ...scripts.map((s) => s.id)];
+
+function focusExplorer(): void {
+    if ($("#app").classList.contains("sidebar-hidden")) setSidebarHidden(false);
+    const list = $("#script-list");
+    const section = $("#explorer-section");
+    if (section.getAttribute("aria-expanded") === "false") toggleExplorerSection();
+    list.focus();
+    moveExplorerFocus(focusedId ?? selectedId ?? SETTINGS_ID);
+}
+
+/** Move the keyboard cursor in place — a list rebuild would swallow a double-click. */
+function moveExplorerFocus(id: string): void {
+    focusedId = id;
+    const list = $("#script-list");
+    for (const li of list.querySelectorAll<HTMLElement>("li.script-item")) {
+        const on = li.dataset.id === id;
+        li.classList.toggle("focused", on);
+        if (on) {
+            list.setAttribute("aria-activedescendant", li.id);
+            li.scrollIntoView({ block: "nearest" });
+        }
+    }
+}
+
+function renameInExplorer(id: string): void {
+    const script = scripts.find((s) => s.id === id);
+    const label = script && $("#script-list").querySelector<HTMLElement>(`li[data-id="${CSS.escape(id)}"] .script-name`);
+    if (label) startRename(label, script!, true);
+}
+
+function setupExplorer(): void {
+    const list = $("#script-list");
+    list.addEventListener("keydown", (e) => {
+        if (e.target !== list) return; // the inline rename input handles its own keys
+        const ids = explorerIds();
+        const cur = focusedId ?? selectedId ?? ids[0];
+        const i = Math.max(0, ids.indexOf(cur));
+        const script = scripts.find((s) => s.id === cur);
+        const mod = e.metaKey || e.ctrlKey;
+        let handled = true;
+        if (e.key === "ArrowDown") moveExplorerFocus(ids[Math.min(i + 1, ids.length - 1)]);
+        else if (e.key === "ArrowUp") moveExplorerFocus(ids[Math.max(i - 1, 0)]);
+        else if (e.key === "Home" || e.key === "PageUp") moveExplorerFocus(ids[0]);
+        else if (e.key === "End" || e.key === "PageDown") moveExplorerFocus(ids[ids.length - 1]);
+        else if ((e.key === "Enter" || e.key === " ") && !mod) {
+            if (cur !== selectedId) select(cur);
+            if (e.key === "Enter") editor?.focus(); // Enter opens and focuses, Space just opens (preview)
+        } else if (e.key === "F2" && script) renameInExplorer(cur);
+        else if ((e.key === "Delete" || (e.key === "Backspace" && e.metaKey)) && script) void deleteScript(script);
+        else if (e.key === "Escape") editor?.focus();
+        else handled = false;
+        if (handled) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+    });
+    // explorer rows aren't focusable themselves: a click focuses the tree
+    list.addEventListener("mousedown", (e) => {
+        if (!(e.target as HTMLElement).closest("input")) setTimeout(() => list.focus());
+    });
+    list.addEventListener("contextmenu", (e) => {
+        const li = (e.target as HTMLElement).closest<HTMLElement>("li.script-item");
+        const script = li && scripts.find((s) => s.id === li.dataset.id);
+        if (!script) return;
+        e.preventDefault();
+        moveExplorerFocus(script.id);
+        const isLib = script.meta.declared === false;
+        showContextMenu(e.clientX, e.clientY, [
+            { label: "Open", key: "Enter", run: () => script.id !== selectedId && select(script.id) },
+            null,
+            ...(isLib ? [] : [{ label: script.enabled ? "Disable" : "Enable", run: () => void setScriptEnabled(script, !script.enabled) }]),
+            { label: "Rename…", key: "F2", run: () => renameInExplorer(script.id) },
+            { label: "Delete", key: "Delete", run: () => void deleteScript(script) },
+        ]);
+    });
+    $("#explorer-section").addEventListener("click", toggleExplorerSection);
+    $("#script-enabled").addEventListener("click", (e) => {
+        e.preventDefault();
+        const script = scripts.find((s) => s.id === selectedId);
+        if (script) void setScriptEnabled(script, !script.enabled);
+    });
+}
+
+function toggleExplorerSection(): void {
+    const section = $("#explorer-section");
+    section.setAttribute("aria-expanded", String(section.getAttribute("aria-expanded") === "false"));
+}
+
+type MenuItem = { label: string; key?: string; run: () => void } | null;
+
+function showContextMenu(x: number, y: number, items: MenuItem[]): void {
+    document.querySelector(".ctx-menu")?.remove();
+    const menu = document.createElement("ul");
+    menu.className = "ctx-menu";
+    menu.setAttribute("role", "menu");
+    const close = (): void => {
+        menu.remove();
+        document.removeEventListener("mousedown", outside, true);
+        document.removeEventListener("keydown", key, true);
+        window.removeEventListener("blur", close);
+    };
+    const outside = (e: MouseEvent): void => {
+        if (!menu.contains(e.target as Node)) close();
+    };
+    const key = (e: KeyboardEvent): void => {
+        if (e.key === "Escape") {
+            e.stopPropagation();
+            close();
+            $("#script-list").focus();
+        }
+    };
+    for (const item of items) {
+        const li = document.createElement("li");
+        if (!item) li.className = "sep";
+        else {
+            li.setAttribute("role", "menuitem");
+            const label = document.createElement("span");
+            label.textContent = item.label;
+            li.append(label);
+            if (item.key) li.append(Object.assign(document.createElement("span"), { className: "key", textContent: item.key }));
+            li.addEventListener("click", () => {
+                close();
+                item.run();
+            });
+        }
+        menu.appendChild(li);
+    }
+    document.body.appendChild(menu);
+    menu.style.left = `${Math.min(x, window.innerWidth - menu.offsetWidth - 4)}px`;
+    menu.style.top = `${Math.min(y, window.innerHeight - menu.offsetHeight - 4)}px`;
+    document.addEventListener("mousedown", outside, true);
+    document.addEventListener("keydown", key, true);
+    window.addEventListener("blur", close);
+}
+
+/** Inline rename in the script list (double-click a name, or F2). */
+function startRename(label: HTMLElement, script: Script, refocusList = false): void {
     const input = document.createElement("input");
     input.className = "script-rename";
     input.value = cleanScriptName(script.meta.name);
@@ -356,6 +528,7 @@ function startRename(label: HTMLElement, script: Script): void {
         if (done) return;
         done = true;
         renaming = false;
+        if (refocusList) $("#script-list").focus();
         const next = cleanScriptName(input.value).trim();
         let problem = commit && next && next !== script.meta.name ? scriptNameProblem(next) : "";
         const clash =
@@ -379,6 +552,9 @@ function startRename(label: HTMLElement, script: Script): void {
     input.addEventListener("keydown", (e) => {
         if (e.key === "Enter") void finish(true);
         else if (e.key === "Escape") void finish(false);
+        else return;
+        e.preventDefault();
+        e.stopPropagation();
     });
     input.addEventListener("blur", () => void finish(true));
 }
@@ -593,6 +769,7 @@ function vscodeScheme(): string {
 
 function selectReal(id: string): void {
     selectedId = id;
+    focusedId = null;
     renderList();
     const script = scripts.find((s) => s.id === id);
     if (!script) return;
@@ -651,7 +828,10 @@ async function saveCurrent(): Promise<void> {
 }
 
 // ---- process tier (local helper) ----
+let helperStatus: HelperStatus | null = null;
 function renderProcessStatus(st: any): void {
+    helperStatus = st;
+    if (!$("#settings-panel").classList.contains("hidden")) void renderAbout();
     const labels: Record<string, string> = {
         idle: "not needed — no enabled script lists \"process\"",
         unsupported: "unavailable in this browser (Chrome only) — scripts fall through their strategy lists",
@@ -902,13 +1082,115 @@ function closeDialog(el: Element): void {
     el.classList.add("hidden");
 }
 
+/** Settings dialog; `section` scrolls to e.g. "settings-sec-about". */
+function openSettings(section?: string): void {
+    openDialog("settings-panel");
+    if (section) showSettingsSection(section);
+    void renderAbout();
+    chrome.runtime.sendMessage({ type: "processStatus" }, (st) => {
+        void chrome.runtime.lastError;
+        if (st) renderProcessStatus(st);
+    });
+}
+
+function showSettingsSection(id: string): void {
+    document.getElementById(id)?.scrollIntoView({ block: "start" });
+    markSettingsNav(id);
+}
+
+function markSettingsNav(id: string): void {
+    for (const b of document.querySelectorAll<HTMLElement>("[data-settings-nav]")) b.classList.toggle("active", b.dataset.settingsNav === id);
+}
+
+/** Highlight the nav entry of the section at the top of the scrolled body. */
+function trackSettingsScroll(): void {
+    const body = $(".settings-body");
+    body.addEventListener("scroll", () => {
+        const sections = [...body.querySelectorAll<HTMLElement>(".settings-section")];
+        const atEnd = body.scrollTop + body.clientHeight >= body.scrollHeight - 2;
+        const top = body.getBoundingClientRect().top + 24;
+        const current = atEnd ? sections[sections.length - 1] : sections.filter((sec) => sec.getBoundingClientRect().top <= top).pop() ?? sections[0];
+        if (current) markSettingsNav(current.id);
+    });
+    for (const b of document.querySelectorAll<HTMLElement>("[data-settings-nav]")) {
+        b.addEventListener("click", () => showSettingsSection(b.dataset.settingsNav!));
+    }
+}
+
+let aboutInfo: [string, string][] = [];
+async function renderAbout(): Promise<void> {
+    aboutInfo = await aboutRows(helperStatus);
+    $("#about-info").replaceChildren(
+        ...aboutInfo.flatMap(([k, v]) => {
+            const dt = document.createElement("dt");
+            dt.textContent = k;
+            const dd = document.createElement("dd");
+            dd.textContent = v;
+            if (k === "Commit" || k === "Extension ID") dd.className = "mono";
+            return [dt, dd];
+        })
+    );
+}
+
+function flash(b: HTMLElement, text: string): void {
+    const was = b.textContent;
+    b.textContent = text;
+    setTimeout(() => (b.textContent = was), 1500);
+}
+
+/** Manager-side context for the diagnostics report. */
+function managerUiState(): Record<string, unknown> {
+    const l = loadLayout();
+    return {
+        theme: currentTheme,
+        themePref: ($("#settings-theme") as HTMLSelectElement).value,
+        wordWrap: !!l.wordWrap,
+        sidebarHidden: !!l.sidebarHidden,
+        panelHidden: !!l.panelHidden,
+        panelDock: currentDock(),
+        sidebarSide: currentSide(),
+        logLevel: ($("#settings-log-level") as HTMLSelectElement).value,
+        logCap,
+        monacoVerbose,
+        scriptsFolder: $("#folder-state").textContent || null,
+    };
+}
+
+let diagnosticsReport = "";
+/** Runs from a click or editor command: the permission prompt needs that gesture. */
+async function runDiagnostics(): Promise<void> {
+    const btn = $("#btn-diagnostics") as HTMLButtonElement;
+    const state = $("#diagnostics-state");
+    const copy = $("#btn-diagnostics-copy");
+    btn.disabled = true;
+    copy.hidden = true;
+    state.textContent = "collecting…";
+    try {
+        const name = diagnosticsFileName();
+        diagnosticsReport = await collectDiagnostics(managerUiState());
+        downloadText(name, diagnosticsReport, "text/markdown");
+        state.textContent = `downloaded (${Math.ceil(diagnosticsReport.length / 1024)} KB)`;
+        state.title = name;
+        copy.hidden = false;
+    } catch (e: any) {
+        state.textContent = `failed: ${e?.message || e}`;
+    } finally {
+        btn.disabled = false;
+    }
+}
+
 function setupDialogs(): void {
-    $("#btn-settings").addEventListener("click", () => {
-        openDialog("settings-panel");
-        chrome.runtime.sendMessage({ type: "processStatus" }, (st) => {
-            void chrome.runtime.lastError;
-            if (st) renderProcessStatus(st);
-        });
+    $("#btn-settings").addEventListener("click", () => openSettings());
+    trackSettingsScroll();
+    $("#btn-about-copy").addEventListener("click", async (e) => {
+        const b = e.currentTarget as HTMLElement;
+        if (!aboutInfo.length) await renderAbout();
+        await navigator.clipboard.writeText(aboutText(aboutInfo)).then(() => flash(b, "Copied ✓"), () => flash(b, "Copy failed"));
+    });
+    $("#btn-diagnostics").addEventListener("click", () => void runDiagnostics());
+    $("#btn-diagnostics-copy").addEventListener("click", (e) => {
+        const b = e.currentTarget as HTMLElement;
+        void navigator.clipboard.writeText(diagnosticsReport).then(() => flash(b, "Copied ✓"), () => flash(b, "Copy failed"));
     });
     $("#btn-process-retry").addEventListener("click", () =>
         chrome.runtime.sendMessage({ type: "processRetry" }, (st) => {
@@ -976,6 +1258,7 @@ function setupDialogs(): void {
 
     // panel history size
     const capInput = $("#settings-log-cap") as HTMLInputElement;
+    capInput.value = String(logCap);
     chrome.storage.local.get("resLogCap", (d) => {
         if (d && d.resLogCap) {
             logCap = d.resLogCap;
@@ -1158,6 +1441,9 @@ async function autoReconnectFolder(): Promise<void> {
 interface PanelLayout {
     sidebarW?: number;
     panelTab?: "log" | "network";
+    sidebarHidden?: boolean;
+    panelHidden?: boolean;
+    wordWrap?: boolean;
 }
 const LAYOUT_KEY = "resPanelLayout";
 
@@ -1176,6 +1462,38 @@ function saveLayout(l: PanelLayout): void {
 function applyLayout(): void {
     const l = loadLayout();
     if (l.sidebarW) $("#sidebar").style.width = `${l.sidebarW}px`;
+    setSidebarHidden(!!l.sidebarHidden, false);
+    setPanelHidden(!!l.panelHidden, false);
+}
+
+/** ⌘B: show/hide the explorer (VS Code's primary side bar). */
+function setSidebarHidden(hidden: boolean, persist = true): void {
+    const app = $("#app");
+    if (hidden && app.querySelector("#sidebar")!.contains(document.activeElement)) editor?.focus();
+    app.classList.toggle("sidebar-hidden", hidden);
+    $("#btn-toggle-sidebar").setAttribute("aria-pressed", String(!hidden));
+    if (persist) saveLayout({ ...loadLayout(), sidebarHidden: hidden });
+    window.dispatchEvent(new Event("resize"));
+}
+
+/** ⌘J: show/hide the Log/Network panel wherever it is docked. */
+function setPanelHidden(hidden: boolean, persist = true): void {
+    const app = $("#app");
+    if (hidden && $("#log-panel").contains(document.activeElement)) editor?.focus();
+    app.classList.toggle("panel-hidden", hidden);
+    $("#btn-toggle-panel").setAttribute("aria-pressed", String(!hidden));
+    if (persist) saveLayout({ ...loadLayout(), panelHidden: hidden });
+    window.dispatchEvent(new Event("resize"));
+}
+
+const toggleSidebar = (): void => setSidebarHidden(!$("#app").classList.contains("sidebar-hidden"));
+const togglePanel = (): void => setPanelHidden(!$("#app").classList.contains("panel-hidden"));
+
+/** ⌥Z: soft-wrap long lines (remembered across sessions). */
+function toggleWordWrap(): void {
+    const on = !loadLayout().wordWrap;
+    saveLayout({ ...loadLayout(), wordWrap: on });
+    editor?.updateOptions({ wordWrap: on ? "on" : "off" });
 }
 
 function makeSplitV(): void {
@@ -1242,8 +1560,10 @@ async function main(): Promise<void> {
         minimap: { enabled: false },
         automaticLayout: true,
         fontSize: 13,
+        wordWrap: loadLayout().wordWrap ? "on" : "off",
     });
     editor.addCommand((window as any).monaco.KeyMod.CtrlCmd | (window as any).monaco.KeyCode.KeyS, () => void saveCurrent());
+    registerLayoutActions();
     (window as any).monaco.editor.onDidChangeMarkers(() => scheduleDiagnostics());
     registerSettingsAssist();
     // Monaco re-checks only the edited file; its importers keep stale errors
@@ -1252,8 +1572,11 @@ async function main(): Promise<void> {
     });
     for (const m of models.values()) m.onDidChangeContent(() => scheduleDependantRecheck(m));
     // VS Code shortcuts: ⌘P quick-open (scripts + settings.yaml), ⌘, opens
-    // the Settings dialog. ⌘/ (comment), ⌘F (find), ⌘D (next occurrence)
-    // and Shift+Alt+A (block comment) are Monaco built-ins.
+    // the Settings dialog, ⌘⇧E focuses the explorer, ⌘B / ⌘J toggle the
+    // explorer / panel, ⌥Z toggles word wrap (the last four are also editor
+    // actions, so they work while Monaco has focus and show up in F1).
+    // ⌘/ (comment), ⌘F (find), ⌘D (next occurrence) and Shift+Alt+A (block
+    // comment) are Monaco built-ins.
     const palette = createQuickOpenPalette(
         $("#quick-open"),
         $input("#qo-input"),
@@ -1270,9 +1593,18 @@ async function main(): Promise<void> {
             palette.toggle();
         } else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === ",") {
             e.preventDefault();
-            openDialog("settings-panel");
+            openSettings();
+        } else if (!e.defaultPrevented) {
+            const run = layoutShortcut(e);
+            if (run) {
+                e.preventDefault();
+                run();
+            }
         }
     });
+    $("#btn-toggle-sidebar").addEventListener("click", toggleSidebar);
+    $("#btn-toggle-panel").addEventListener("click", togglePanel);
+    setupExplorer();
     const opener: MonacoEditor.ICodeEditorOpener = {
         openCodeEditor: (_source, resource, selection) => openScriptAt(resource, selection),
     };
@@ -1333,7 +1665,7 @@ async function main(): Promise<void> {
         status("debug log downloaded");
     });
     $("#editor-status").addEventListener("click", () => statusClick?.());
-    // delegated: the first click of a double-click re-renders the list
+    // delegated: a click on another script re-renders the list
     $("#script-list").addEventListener("dblclick", (e) => {
         const li = (e.target as HTMLElement).closest<HTMLElement>("li.script-item");
         const script = li && scripts.find((s) => s.id === li.dataset.id);
@@ -1530,6 +1862,40 @@ async function main(): Promise<void> {
 }
 
 void renderEditorEmpty;
+
+/** Layout shortcuts outside the editor (the editor's own copies are below). */
+function layoutShortcut(e: KeyboardEvent): (() => void) | null {
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && e.shiftKey && !e.altKey && e.code === "KeyE") return focusExplorer;
+    if (mod && !e.shiftKey && !e.altKey && e.code === "KeyB") return toggleSidebar;
+    if (mod && !e.shiftKey && !e.altKey && e.code === "KeyJ") return togglePanel;
+    // ⌥Z types a character (Ω on macOS) in the log/network filter boxes
+    const typing = (e.target as HTMLElement | null)?.matches?.("input, textarea, select");
+    if (e.altKey && !mod && !e.shiftKey && e.code === "KeyZ" && !typing) return toggleWordWrap;
+    return null;
+}
+
+/** The same shortcuts as editor actions: Monaco's keybinding service sees
+ * them first while the editor has focus, and F1 lists them. */
+function registerLayoutActions(): void {
+    const { KeyMod, KeyCode } = (window as any).monaco;
+    const actions: [string, string, number, () => void][] = [
+        ["wt.toggleWordWrap", "View: Toggle Word Wrap", KeyMod.Alt | KeyCode.KeyZ, toggleWordWrap],
+        ["wt.focusExplorer", "View: Focus on Explorer", KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyE, focusExplorer],
+        ["wt.toggleSidebar", "View: Toggle Explorer Visibility", KeyMod.CtrlCmd | KeyCode.KeyB, toggleSidebar],
+        ["wt.togglePanel", "View: Toggle Panel Visibility", KeyMod.CtrlCmd | KeyCode.KeyJ, togglePanel],
+    ];
+    for (const [id, label, key, run] of actions) editor.addAction({ id, label, keybindings: [key], run });
+    editor.addAction({ id: "wt.openSettings", label: "Preferences: Open Settings", run: () => openSettings() });
+    editor.addAction({
+        id: "wt.collectDiagnostics",
+        label: "Wiretrick: Collect Diagnostics…",
+        run: () => {
+            openSettings("settings-sec-about");
+            void runDiagnostics();
+        },
+    });
+}
 
 function select(id: string): void {
     if (dirty && selectedId) {

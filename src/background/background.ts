@@ -11,6 +11,7 @@ import { onScriptsChanged, listScripts } from "./engine/scriptStore";
 import { dlog, dlogLevel, getDebugBuffer, pushEntry, clearDebugBuffer, setSink } from "../shared/debugLog";
 import * as folderSync from "./folderSync";
 import { addNetworkPort } from "./network";
+import { collectDiagnostics } from "./diagnostics";
 import { getSettingsText, applySettingsText, applySettingsDoc } from "./settingsFile";
 import { badgeSetText, badgeSetColor, tabsQueryAll, tabsGet } from "../shared/chromeApi";
 import { matchAny } from "../shared/matcher";
@@ -138,6 +139,15 @@ chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
     }
     if (msg && msg.type === "clearScriptError") {
         void clearScriptErrors(typeof msg.scriptId === "string" ? msg.scriptId : undefined).then(() => sendResponse({}));
+        return true;
+    }
+    if (msg && msg.type === "collectDiagnostics") {
+        void collectDiagnostics({
+            ...(msg.extra || {}),
+            state: { process: processStrategy.status(), folderSync: folderSync.getStatus() },
+        })
+            .then((report) => sendResponse({ report }))
+            .catch((e) => sendResponse({ error: String(e?.message || e) }));
         return true;
     }
     if (msg && msg.type === "clearDebugLogs") {

@@ -4,12 +4,37 @@
 
 The manager page embeds **Monaco** (the VS Code editor) with full TypeScript
 IntelliSense for the `wt` API — completions, hover docs, and diagnostics work
-out of the box. Cmd/Ctrl+S saves and hot-applies the script; ⌘P quick-opens
-scripts/settings.yaml (cursor position is remembered per file and restored
-when you switch back), ⌘, opens Settings, ⌘/ comments, ⌘F finds, ⌘D selects
-the next occurrence. To debug the engine itself, open `chrome://extensions`
-and click the service worker / background page under *Inspect views*.
-Double-click a script in the list to rename it (Enter saves, Esc cancels).
+out of the box. Shortcuts follow VS Code (⌘ = Ctrl on Windows/Linux; F1
+lists the editor commands):
+
+| Shortcut | Action |
+| --- | --- |
+| ⌘S | Save and hot-apply the script |
+| ⌘P | Quick-open a script or settings.yaml (cursor position is remembered per file) |
+| ⌘⇧E | Focus the explorer (script list) |
+| ⌘B | Show/hide the explorer |
+| ⌘J | Show/hide the Log/Network panel |
+| ⌥Z | Toggle word wrap |
+| ⌘, | Open Settings |
+| ⌘/, ⌘F, ⌘D | Comment, find, select next occurrence (Monaco) |
+
+Explorer layout, panel visibility and word wrap are remembered. To debug the
+engine itself, open `chrome://extensions` and click the service worker /
+background page under *Inspect views*.
+
+## Explorer
+
+The script list on the left looks and works like VS Code's explorer: one
+`Name.ts` row per script (libraries in italics, disabled scripts dimmed and
+struck through, ● for unsaved changes, ⚠ for errors). Click the **Wiretrick**
+header to collapse it. With the list focused (⌘⇧E or a click): ↑/↓,
+Home/End move, Enter opens the script and focuses the editor, Space opens it
+and keeps focus in the list, F2 renames, Delete (⌘⌫ on macOS) deletes after a
+confirmation, Esc returns to the editor. Right-click a row for **Open**,
+**Enable/Disable**, **Rename…** and **Delete**. The **Enabled** switch in the
+editor toolbar turns the open script on or off.
+
+Double-click a script (or F2) to rename it (Enter saves, Esc cancels).
 The name is the file name in the scripts folder (`My script.ts`), so anything
 works except `< > : " / \ | ? *`, a trailing dot or space, and Windows device
 names like `CON`; a name that clashes with another script is refused. Older
@@ -24,8 +49,10 @@ highlighted preview shows where it lands: **below the editor**, **full height
 beside the editor**, or **under the script list**. Drag its edge to resize; each
 dock remembers its own size, and Esc cancels a drag.
 
-The script list moves too: drag its header (the **Wiretrick** title) to the
-left or right edge of the window.
+The script list moves too: drag its header (the **Explorer** title) to the
+left or right edge of the window. ⌘J hides the panel wherever it is docked;
+⌘B hides the explorer (and a panel docked under it). The two layout buttons
+at the right of the editor toolbar do the same.
 
 - **Log** — engine and script log lines with level and source filters. Script
   errors (exceptions in handlers, failed compiles) are logged at ERROR, and
@@ -65,8 +92,29 @@ notice or the button).
 
 ## Appearance
 
+Settings (⚙ in the explorer header, or ⌘,) is split into Appearance,
+Scripts folder, Import / Export, Local helper, Logging, Advanced and About —
+pick one on the left to jump to it.
+
 **Settings → Appearance → Theme** picks *System* (follows the OS), *Dark*
 or *Light*. It applies to the manager, the editor and the popup.
+
+## About and diagnostics
+
+**Settings → About** shows the installed version, commit and build time,
+the build (MV2/MV3), browser, OS, extension ID and the local helper's state.
+**Copy** puts that on the clipboard as text — paste it into bug reports.
+
+**Collect diagnostics…** (also *Wiretrick: Collect Diagnostics…* in the
+editor's F1 menu) downloads a Markdown report meant to be handed to a person
+or an LLM: environment, scripts, settings.yaml, recent log and network
+entries, and manager state (theme, layout). It first asks for the optional
+*management* permission to list your other extensions (they can interfere
+with request interception); declining just leaves them out. Set Log level to
+debug and open the Network tab, reproduce the problem, then collect. Review
+the file before sharing — scripts, settings and URLs are included;
+cookies/authorization headers are redacted. **Copy report** copies the same
+text.
 
 ## Import / export
 

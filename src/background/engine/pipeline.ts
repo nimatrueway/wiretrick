@@ -52,7 +52,7 @@ interface ScriptWithSources extends Script {
 }
 
 export function createPipeline(
-    webRequestStrategy: InterceptionStrategy & { reload(s: Script[], paramValues?: { [scriptId: string]: Record<string, any> }): void },
+    webRequestStrategy: InterceptionStrategy & { reload(s: Script[], paramValues?: { [scriptId: string]: Record<string, any> }): void; matchingNames?(url: string): string[] },
     chromeBody: ChromeBodyStrategy,
     cdp: CdpStrategy,
     processStrategy: ProcessStrategy,
@@ -185,6 +185,8 @@ export function createPipeline(
     }
 
     // ---- webRequest wiring ----
+    /** requestId → first URL of requests a webrequest-tier script matched (diagnostics) */
+    const traced = new Map<string, { url: string; tabId: number; at: number }>();
     const onBeforeRequest = (details: any) => {
         const tabUrl = tabUrlFor(details.tabId, details.url);
         dlogLevel("pipeline", "debug", "onBeforeRequest", { url: details.url, type: details.type, tabId: details.tabId });
@@ -212,6 +214,10 @@ export function createPipeline(
         void cdpDisposition;
 
         const disposition = webRequestStrategy.handleBeforeRequest(details, tabUrl);
+        if (!traced.has(details.requestId) && webRequestStrategy.matchingNames?.(details.url).length) {
+            traced.set(details.requestId, { url: details.url, tabId: details.tabId, at: Date.now() });
+            if (traced.size > 500) traced.delete(traced.keys().next().value as string);
+        }
 
         // Firefox: blocking listeners accept promises — pass straight through
         if (isThenable(disposition)) {
@@ -294,9 +300,18 @@ export function createPipeline(
     if (!__MV3__) {
         // MV2-only: blocking webRequest is the Tier-A2 dispatch path. MV3
         // forbids "blocking" — the hook tier (below) carries interception.
-        chrome.webRequest.onBeforeRequest.addListener(onBeforeRequest as any, FILTER, ["blocking"] as any);
-        chrome.webRequest.onBeforeSendHeaders.addListener(onBeforeSendHeaders as any, FILTER, ["requestHeaders", "blocking"] as any);
-        chrome.webRequest.onHeadersReceived.addListener(onHeadersReceived as any, FILTER, ["responseHeaders", "blocking"] as any);
+        const addBlocking = (event: string, fn: any, extra: string[]) => {
+            try {
+                (chrome.webRequest as any)[event].addListener(fn, FILTER, extra);
+                dlogLevel("webrequest", "debug", `${event} listener registered (${extra.join(", ")})`);
+            } catch (e: any) {
+                // e.g. a browser build that dropped MV2 blocking webRequest
+                log(-1, `[webrequest] cannot register blocking ${event} listener — the "webrequest" strategy is inactive in this browser: ${e?.message || e}`, "error");
+            }
+        };
+        addBlocking("onBeforeRequest", onBeforeRequest, ["blocking"]);
+        addBlocking("onBeforeSendHeaders", onBeforeSendHeaders, ["requestHeaders", "blocking"]);
+        addBlocking("onHeadersReceived", onHeadersReceived, ["responseHeaders", "blocking"]);
 
         // per-request caches must not leak for requests that never reach the
         // response-header phase
@@ -305,6 +320,36 @@ export function createPipeline(
         };
         chrome.webRequest.onCompleted.addListener(onDone, FILTER);
         chrome.webRequest.onErrorOccurred.addListener(onDone, FILTER);
+
+        // diagnostics: what the browser did with requests a webrequest-tier
+        // script matched (LOG panel at logLevel: debug; failures as warn)
+        const tr = (details: any, msg: string, level: "debug" | "warn" = "debug") => {
+            const t = traced.get(details.requestId);
+            if (!t) return;
+            log(details.tabId, `[webrequest] ${msg}${details.url !== t.url ? ` (originally ${t.url})` : ""}`, level);
+        };
+        chrome.webRequest.onBeforeRedirect.addListener(
+            (d: any) => tr(d, `browser followed redirect ${d.url} → ${d.redirectUrl} (status ${d.statusCode}${d.fromCache ? ", from cache" : ""})`),
+            FILTER
+        );
+        chrome.webRequest.onResponseStarted.addListener(
+            (d: any) => tr(d, `response started ${d.statusLine || d.statusCode} ${d.url}${d.fromCache ? " (from cache)" : ""}${d.ip ? ` ip=${d.ip}` : ""}`),
+            FILTER
+        );
+        chrome.webRequest.onCompleted.addListener((d: any) => {
+            tr(d, `completed ${d.statusCode} ${d.url}${d.fromCache ? " (from cache)" : ""}`);
+            traced.delete(d.requestId);
+        }, FILTER);
+        chrome.webRequest.onErrorOccurred.addListener((d: any) => {
+            tr(d, `request FAILED ${d.error} ${d.type} ${d.url}`, "warn");
+            traced.delete(d.requestId);
+        }, FILTER);
+        // another extension's conflicting change won (e.g. two copies of
+        // Wiretrick, or an ad blocker redirecting the same request)
+        (chrome.webRequest as any).onActionIgnored?.addListener((d: any) => {
+            const t = traced.get(d.requestId);
+            log(t?.tabId ?? -1, `[webrequest] the browser IGNORED this extension's "${d.action}"${t ? ` for ${t.url}` : ""} — another extension's change to the same request took precedence (disable other request-modifying extensions, e.g. a second Wiretrick install)`, "warn");
+        });
     } else {
         dlog("pipeline", "MV3: no blocking webRequest — hook tier carries page fetch/XHR; strategy cdp (debugger) or process (local helper) carries browser-initiated loads");
     }

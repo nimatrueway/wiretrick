@@ -48,7 +48,7 @@ try {
     await mgr.waitForFunction(() => (window as any).monaco?.editor.getEditors().length === 1 && document.querySelectorAll(".script-item").length >= 2, null, { timeout: 20000 });
 
     const gear = mgr.locator(".script-item", { hasText: "settings.yaml" });
-    check("⚙ row present", (await gear.locator(".util-icon").textContent()) === "⚙");
+    check("⚙ row present", (await gear.locator(".file-icon").textContent()) === "⚙");
     check("⚙ row has no toggle / delete", (await gear.locator(".switch, .btn-del").count()) === 0);
     await gear.click();
     const text = () => mgr.evaluate(() => (window as any).monaco.editor.getEditors()[0].getValue());
@@ -78,7 +78,7 @@ try {
     check("YAML edit toggled script off", st.resScripts?.s_dbg?.enabled === false, JSON.stringify(st.resScripts?.s_dbg && { enabled: st.resScripts.s_dbg.enabled }));
     const listOff = await mgr.waitForFunction(() => {
         const li = [...document.querySelectorAll(".script-item")].find((e) => e.textContent?.includes("Debug header"));
-        return !!li?.querySelector(".switch") && !li.querySelector(".switch.on");
+        return !!li?.classList.contains("disabled") && !li.querySelector(".switch");
     }, null, { timeout: 5000 }).then(() => true, () => false);
     check("list reflects disabled script", listOff);
 

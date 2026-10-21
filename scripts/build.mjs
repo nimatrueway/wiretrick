@@ -13,9 +13,21 @@
 import { rolldown } from "rolldown";
 import { cp, mkdir, rm, writeFile, copyFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { execSync } from "node:child_process";
 import path from "node:path";
 
 const root = path.resolve(new URL(".", import.meta.url).pathname, "..");
+
+/** short commit hash (+ "-dirty" with uncommitted changes) for the About section */
+function gitCommit() {
+    try {
+        const hash = execSync("git rev-parse --short HEAD", { cwd: root, stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+        const dirty = execSync("git status --porcelain --untracked-files=no", { cwd: root, stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+        return hash + (dirty ? "-dirty" : "");
+    } catch {
+        return "unknown";
+    }
+}
 const WATCH = process.argv.includes("--watch");
 
 /** @type {import('rolldown').InputOptions[]} */
@@ -66,7 +78,7 @@ function entriesFor(dist, mv3) {
     }
     for (const e of list) {
         e.transform = {
-            define: { __MV3__: mv3 ? "true" : "false" },
+            define: { __MV3__: mv3 ? "true" : "false", __COMMIT__: JSON.stringify(gitCommit()), __BUILD_TIME__: JSON.stringify(new Date().toISOString()) },
             jsx: { runtime: "automatic", importSource: "preact" },
         };
     }
@@ -90,6 +102,7 @@ function mv3Manifest(mv2) {
         content_scripts: mv2.content_scripts,
         permissions: ["storage", "unlimitedStorage", "tabs", "debugger", "offscreen", "webNavigation", "webRequest", "alarms", "proxy", "nativeMessaging", "browsingData"],
         host_permissions: ["<all_urls>"],
+        optional_permissions: mv2.optional_permissions,
         web_accessible_resources: [{ resources: ["hook.js"], matches: ["<all_urls>"] }],
         // the sandbox page is exempt from the extension CSP — it hosts the
         // script compiler/runner (see src/background/sandbox.ts)

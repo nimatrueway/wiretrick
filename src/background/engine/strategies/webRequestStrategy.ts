@@ -70,6 +70,15 @@ export class WebRequestStrategy implements InterceptionStrategy {
                 if (compiled.error) scriptError(id, formatScriptError(name, compiled.error));
                 return { id, name, compiled };
             });
+        for (const c of this.compiled) {
+            const h = c.compiled.handlers;
+            dlogLevel("webrequest", "debug", `loaded "${c.name}" strategy=${c.compiled.meta.strategy} match=${JSON.stringify(c.compiled.meta.match)} handlers: onRequest=${h.onRequest.length} replaceResponse=${h.replaceResponse.length} modifyResponse=${h.modifyResponse.length} onResponseHeaders=${h.onResponseHeaders.length}${c.compiled.error ? ` ERROR: ${c.compiled.error}` : ""}`);
+        }
+    }
+
+    /** names of the scripts this tier runs for `url` (diagnostics) */
+    matchingNames(url: string): string[] {
+        return this.scriptsFor(url).map((c) => c.name);
     }
 
     /** Free per-request caches (also called by the pipeline on error/complete). */
@@ -90,7 +99,14 @@ export class WebRequestStrategy implements InterceptionStrategy {
     }
 
     handleBeforeRequest(details: WebRequestDetailsLike, tabUrl: string | null): MaybePromise<HookDisposition> {
-        for (const entry of this.scriptsFor(details.url)) {
+        const matched = this.scriptsFor(details.url);
+        if (matched.length) {
+            trace(details, `onBeforeRequest ${details.type} ${details.method} ${details.url} (tab url: ${tabUrl ?? "unknown"}) → scripts: ${matched.map((m) => `"${m.name}"`).join(", ")}`);
+        } else {
+            const owned = this.compiled.filter((c) => matchAny(c.compiled.meta.match, details.url) && isProcessOwned(c.compiled.meta.strategy));
+            if (owned.length) trace(details, `onBeforeRequest ${details.url}: skipped ${owned.map((m) => `"${m.name}"`).join(", ")} — owned by the process tier`);
+        }
+        for (const entry of matched) {
             const script = entry.compiled;
             try {
                 for (const onRequestHandler of script.handlers.onRequest) {
@@ -143,6 +159,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                         log(details.tabId, `[${entry.name}] onRequest → ${result.cancel ? "cancel" : `redirect → ${result.redirect}`} ${details.url}`, "info", entry.id);
                         return normalize(result);
                     }
+                    trace(details, `[${entry.name}] onRequest returned ${describeResult(result)} (no redirect/cancel/respond) for ${details.url}`);
                 }
                 if (script.handlers.replaceResponse.length) {
                     let replacement: any = undefined;
@@ -174,6 +191,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                 scriptError(entry.id, formatScriptError(entry.name, e, "onRequest"));
             }
         }
+        if (matched.length) trace(details, `onBeforeRequest ${details.url} → allow (no terminal decision)`);
         return { kind: "allow" };
     }
 
@@ -326,6 +344,22 @@ export class WebRequestStrategy implements InterceptionStrategy {
 }
 
 // ---- shared helpers ----
+
+/** request-level diagnostics: visible in the LOG panel at logLevel: debug */
+function trace(details: WebRequestDetailsLike, msg: string): void {
+    log(details.tabId, `[webrequest] ${msg}`, "debug");
+}
+
+function describeResult(r: any): string {
+    if (r === undefined) return "undefined";
+    if (r === null) return "null";
+    try {
+        const json = JSON.stringify(r);
+        return json.length > 200 ? json.slice(0, 197) + "..." : json;
+    } catch {
+        return String(r);
+    }
+}
 
 function describeHeaderMods(m: { set?: Record<string, string>; remove?: string[] }): string {
     const parts: string[] = [];

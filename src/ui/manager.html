@@ -10,22 +10,30 @@
 <body>
     <div id="app">
         <aside id="sidebar">
-            <div id="brand" title="Drag to move the script list to the left or right edge">
-                <h1>Wiretrick</h1>
+            <div id="brand" title="Drag to move the explorer to the left or right edge">
+                <h1>Explorer</h1>
                 <div id="toolbar">
-                    <button id="btn-new" title="New script">+ New</button>
-                    <button id="btn-help" title="API reference and sample scripts">?</button>
-                    <button id="btn-settings" title="Settings">⚙</button>
+                    <button id="btn-new" title="New script" aria-label="New script"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.1" d="M9.5 1.5h-6v13h5M9.5 1.5l3 3v4M9.5 1.5v3h3M12.5 10.5v5M10 13h5"/></svg></button>
+                    <button id="btn-help" title="API reference and sample scripts" aria-label="Help">?</button>
+                    <button id="btn-settings" title="Settings (⌘,)" aria-label="Settings">⚙</button>
                 </div>
             </div>
-            <ul id="script-list"></ul>
+            <div id="explorer-section" role="button" tabindex="-1" aria-expanded="true" title="Wiretrick scripts">
+                <span class="chevron" aria-hidden="true"></span><span>Wiretrick</span>
+            </div>
+            <ul id="script-list" role="tree" tabindex="0" aria-label="Scripts"></ul>
         </aside>
         <div id="split-v" title="Drag to resize"></div>
         <main id="editor-pane">
             <div id="editor-toolbar">
+                <label id="script-enabled" hidden title="Run this script (also in the explorer's right-click menu)"><span class="switch"></span><span>Enabled</span></label>
                 <span id="editor-status"></span>
                 <button id="btn-save" disabled>Save (⌘S)</button>
                 <button id="btn-open-vscode" disabled title="Open this script's synced file in VS Code (requires Scripts Folder sync)" aria-label="Open in VS Code"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="#007ACC" d="M23.15 2.587 18.21.21a1.494 1.494 0 0 0-1.705.29l-9.46 8.63-4.12-3.128a.999.999 0 0 0-1.276.057L.327 7.261a1 1 0 0 0 .011 1.5L4.603 12 .338 15.24a1 1 0 0 0-.011 1.5l1.325 1.199a.999.999 0 0 0 1.276.057l4.129-3.129 9.45 8.628a1.492 1.492 0 0 0 1.704.29l4.942-2.377A1.5 1.5 0 0 0 24 20.06V3.939a1.5 1.5 0 0 0-.85-1.352zm-5.146 6.004L11.323 12l6.681 3.411z"/></svg></button>
+                <span id="layout-controls">
+                    <button id="btn-toggle-sidebar" class="layout-btn" title="Toggle Explorer (⌘B)" aria-label="Toggle Explorer" aria-pressed="true"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1" fill="none" stroke="currentColor"/><path class="fill" d="M2 3h4v10H2z"/><path d="M6.5 3v10" stroke="currentColor"/></svg></button>
+                    <button id="btn-toggle-panel" class="layout-btn" title="Toggle Panel (⌘J)" aria-label="Toggle Panel" aria-pressed="true"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1" fill="none" stroke="currentColor"/><path class="fill" d="M2 9h12v4H2z"/><path d="M2 8.5h12" stroke="currentColor"/></svg></button>
+                </span>
             </div>
             <div id="editor-area">
                 <div id="monaco-host"></div>
@@ -65,69 +73,145 @@
     </div>
 
     <div id="settings-panel" class="overlay hidden">
-        <div class="dialog">
+        <div class="dialog settings">
             <div class="dialog-head"><h2>Settings</h2><button class="btn-close" data-close>✕</button></div>
-            <div class="dialog-body">
-                <h3>Appearance</h3>
-                <div id="settings-theme-row">
-                    <label for="settings-theme">Theme</label>
-                    <select id="settings-theme">
-                        <option value="system">System</option>
-                        <option value="dark">Dark</option>
-                        <option value="light">Light</option>
-                    </select>
-                </div>
+            <div class="settings-layout">
+                <nav class="settings-nav" aria-label="Settings sections">
+                    <button data-settings-nav="settings-sec-appearance" class="active">Appearance</button>
+                    <button data-settings-nav="settings-sec-folder">Scripts folder</button>
+                    <button data-settings-nav="settings-sec-io">Import / Export</button>
+                    <button data-settings-nav="settings-sec-helper">Local helper</button>
+                    <button data-settings-nav="settings-sec-logging">Logging</button>
+                    <button data-settings-nav="settings-sec-advanced">Advanced</button>
+                    <button data-settings-nav="settings-sec-about">About</button>
+                </nav>
+                <div class="dialog-body settings-body">
+                    <section id="settings-sec-appearance" class="settings-section">
+                        <h3>Appearance</h3>
+                        <div class="setting" id="settings-theme-row">
+                            <label class="setting-label" for="settings-theme">Theme</label>
+                            <div class="setting-control">
+                                <select id="settings-theme">
+                                    <option value="system">System</option>
+                                    <option value="dark">Dark</option>
+                                    <option value="light">Light</option>
+                                </select>
+                                <p class="setting-help">System follows the OS. Applies to the manager, the editor and the popup.</p>
+                            </div>
+                        </div>
+                    </section>
 
-                <h3>Scripts folder</h3>
-                <p class="muted">Pick a dedicated folder — scripts are written there as .ts files and every edit (from either side) syncs instantly.</p>
-                <div id="settings-folder-row">
-                    <button id="btn-vscode">Scripts Folder…</button>
-                    <span id="folder-state" class="muted"></span>
-                </div>
-                <p class="muted">Absolute folder path — used by the ↗ VS Code button (the browser can't read the real path itself).</p>
-                <input id="settings-vscode-path" type="text" placeholder="/Users/you/Wiretrick" title="Absolute path of the synced scripts folder, for the Open in VS Code button" style="width:100%">
-                <div style="margin-top:6px">
-                    <label>Open button launches</label>
-                    <select id="settings-vscode-launch">
-                        <option value="vscode" selected>VS Code</option>
-                        <option value="vscode-insiders">VS Code Insiders</option>
-                        <option value="off">Nothing — hide the button</option>
-                    </select>
-                </div>
+                    <section id="settings-sec-folder" class="settings-section">
+                        <h3>Scripts folder</h3>
+                        <div class="setting">
+                            <span class="setting-label">Folder</span>
+                            <div class="setting-control">
+                                <div id="settings-folder-row" class="setting-inline">
+                                    <button id="btn-vscode">Scripts Folder…</button>
+                                    <span id="folder-state" class="muted"></span>
+                                </div>
+                                <p class="setting-help">Scripts are written there as .ts files; every edit, from either side, syncs instantly.</p>
+                            </div>
+                        </div>
+                        <div class="setting">
+                            <label class="setting-label" for="settings-vscode-path">Folder path</label>
+                            <div class="setting-control">
+                                <input id="settings-vscode-path" type="text" placeholder="/Users/you/Wiretrick" title="Absolute path of the synced scripts folder, for the Open in VS Code button">
+                                <p class="setting-help">Absolute path of that folder, used by the ↗ VS Code button (the browser can't read the real path itself).</p>
+                            </div>
+                        </div>
+                        <div class="setting">
+                            <label class="setting-label" for="settings-vscode-launch">Open button</label>
+                            <div class="setting-control">
+                                <select id="settings-vscode-launch">
+                                    <option value="vscode" selected>VS Code</option>
+                                    <option value="vscode-insiders">VS Code Insiders</option>
+                                    <option value="off">Nothing — hide the button</option>
+                                </select>
+                                <p class="setting-help">What the ↗ button in the editor toolbar launches.</p>
+                            </div>
+                        </div>
+                    </section>
 
-                <h3>Import / Export</h3>
-                <p class="muted">Export any subset of scripts (and the global settings) to a YAML bundle, or import a bundle (.yaml/.yml/.json) — picking which of its items to take — or a single .ts/.js file.</p>
-                <div id="settings-io-row">
-                    <button id="btn-export">Export…</button>
-                    <button id="btn-import">Import…</button>
-                </div>
+                    <section id="settings-sec-io" class="settings-section">
+                        <h3>Import / Export</h3>
+                        <div class="setting">
+                            <span class="setting-label">Bundle</span>
+                            <div class="setting-control">
+                                <div id="settings-io-row" class="setting-inline">
+                                    <button id="btn-export">Export…</button>
+                                    <button id="btn-import">Import…</button>
+                                </div>
+                                <p class="setting-help">Export any subset of scripts (and the global settings) to a YAML bundle. Import a bundle (.yaml/.yml/.json), picking which of its items to take, or a single .ts/.js file.</p>
+                            </div>
+                        </div>
+                    </section>
 
-                <h3>Local helper (strategy "process")</h3>
-                <p class="muted">Scripts listing <code>process</code> in their strategy are intercepted by wiretrick-helper, a small local proxy — no debugger banner, every resource type, Chrome only. Your own proxy setting stays in effect for everything else.</p>
-                <div id="process-row">
-                    <span id="process-state" class="muted">…</span>
-                    <button id="btn-process-copy" hidden>Copy install command</button>
-                    <button id="btn-process-retry">Retry</button>
-                    <button id="btn-process-trust" hidden>Trust CA</button>
-                </div>
-                <pre id="process-detail" class="muted" style="white-space:pre-wrap;margin:6px 0 0"></pre>
+                    <section id="settings-sec-helper" class="settings-section">
+                        <h3>Local helper</h3>
+                        <div class="setting">
+                            <span class="setting-label">Status</span>
+                            <div class="setting-control">
+                                <div id="process-row" class="setting-inline">
+                                    <span id="process-state">…</span>
+                                    <button id="btn-process-copy" hidden>Copy install command</button>
+                                    <button id="btn-process-retry">Retry</button>
+                                    <button id="btn-process-trust" hidden>Trust CA</button>
+                                </div>
+                                <pre id="process-detail" class="setting-pre"></pre>
+                                <p class="setting-help">Scripts listing <code>process</code> in their strategy are intercepted by wiretrick-helper, a small local proxy — no debugger banner, every resource type, Chrome only. Your own proxy setting stays in effect for everything else.</p>
+                            </div>
+                        </div>
+                    </section>
 
-                <h3>Logging</h3>
-                <p class="muted">Default minimum level shown in the LOG panel (the find box can narrow further).</p>
-                <div id="settings-log-row">
-                    <label>Default level</label>
-                    <select id="settings-log-level">
-                        <option value="debug">Debug+</option>
-                        <option value="info">Info+</option>
-                        <option value="warn">Warn+</option>
-                        <option value="error">Error only</option>
-                    </select>
-                    <label>Panel history</label>
-                    <input id="settings-log-cap" type="number" min="100" max="10000" step="100" title="Max log lines kept in the panel">
-                    <label>entries</label>
-                </div>
-                <div>
-                    <label><input id="settings-monaco-verbose" type="checkbox"> Verbose Monaco logging (navigation, definition lookups, key/mouse triggers)</label>
+                    <section id="settings-sec-logging" class="settings-section">
+                        <h3>Logging</h3>
+                        <div class="setting" id="settings-log-row">
+                            <label class="setting-label" for="settings-log-level">Default level</label>
+                            <div class="setting-control">
+                                <select id="settings-log-level">
+                                    <option value="debug">Debug+</option>
+                                    <option value="info">Info+</option>
+                                    <option value="warn">Warn+</option>
+                                    <option value="error">Error only</option>
+                                </select>
+                                <p class="setting-help">Minimum level shown in the Log panel (its filter box narrows further).</p>
+                            </div>
+                        </div>
+                        <div class="setting">
+                            <label class="setting-label" for="settings-log-cap">Panel history</label>
+                            <div class="setting-control">
+                                <div class="setting-inline">
+                                    <input id="settings-log-cap" type="number" min="100" max="10000" step="100" title="Max log lines kept in the panel">
+                                    <span class="muted">entries</span>
+                                </div>
+                                <p class="setting-help">Log lines kept in the panel (100–10000).</p>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section id="settings-sec-advanced" class="settings-section">
+                        <h3>Advanced</h3>
+                        <div class="setting">
+                            <span class="setting-label">Editor tracing</span>
+                            <div class="setting-control">
+                                <label class="setting-check"><input id="settings-monaco-verbose" type="checkbox"> Verbose Monaco logging</label>
+                                <p class="setting-help">Logs navigation, definition lookups and key/mouse triggers to the Log panel.</p>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section id="settings-sec-about" class="settings-section">
+                        <h3>About</h3>
+                        <dl id="about-info"></dl>
+                        <div class="setting-inline">
+                            <button id="btn-about-copy">Copy</button>
+                            <button id="btn-diagnostics">Collect diagnostics…</button>
+                            <span id="diagnostics-state" class="muted"></span>
+                            <button id="btn-diagnostics-copy" hidden>Copy report</button>
+                        </div>
+                        <p class="setting-help">Set Log level to debug and open the Network tab, reproduce the problem, then collect. Review before sharing — scripts, settings and URLs are included; cookies/authorization headers are redacted.</p>
+                    </section>
                 </div>
             </div>
         </div>
