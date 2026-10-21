@@ -100,7 +100,9 @@ async function loadSettingsModel(force = false): Promise<void> {
     if (!editor) return;
     const monaco = (window as any).monaco;
     // Monaco's built-in yaml basic language provides colorization
-    const { text } = await send({ type: "getSettingsYaml", text: settingsModel?.getValue() });
+    // the stored text is the whole synced document (comments, order,
+    // formatting) — never patch our own copy key by key
+    const { text } = await send({ type: "getSettingsYaml" });
     if (!settingsModel) {
         settingsModel = monaco.editor.createModel(text, "yaml", monaco.Uri.parse("file:///settings.yaml"));
         setBaseline(settingsModel, text);
@@ -966,7 +968,7 @@ function setupDialogs(): void {
             capInput.value = String(logCap);
             refilterLog();
         }
-        if (c.resScripts || c.resParams || c.resLogLevel || c.resLogCap) {
+        if (c.resScripts || c.resParams || c.resLogLevel || c.resLogCap || c.resSettingsText) {
             void (async () => {
                 if (selectedId === SETTINGS_ID) await loadSettingsModel();
                 if (c.resScripts) await refresh();

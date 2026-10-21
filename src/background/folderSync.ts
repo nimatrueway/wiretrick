@@ -6,7 +6,7 @@
  */
 import { computeEvents, loadSavedHandle, clearSavedHandle, saveHandle, type FileSig } from "../shared/folderSync";
 import { saveScript, deleteScript, newId, listScripts, onScriptsChanged } from "./engine/scriptStore";
-import { getSettingsText, applySettingsText } from "./settingsFile";
+import { getSettingsText, applySettingsText, rememberSettingsText } from "./settingsFile";
 import { SETTINGS_FILE, SCHEMA_FILE } from "../shared/settingsYaml";
 import { SETTINGS_SCHEMA_JSON } from "../shared/settingsSchema";
 import { broadcastToUi } from "./engine/logs";
@@ -342,6 +342,8 @@ async function exportSettings(base?: string): Promise<void> {
             settingsSig = (await readSettingsFile())?.sig ?? null;
             lastWritten.delete(SETTINGS_FILE);
         }
+        // the file and the manager's settings.yaml are one document
+        await rememberSettingsText(text);
         await ensureSchemaFile();
     } catch (e: any) {
         dlogLevel("sync", "warn", `Folder sync: writing ${SETTINGS_FILE} failed: ${e?.message || e}`);
@@ -384,7 +386,7 @@ async function pollSettings(): Promise<void> {
         dlogLevel("sync", "warn", `Folder sync: ${SETTINGS_FILE} has an error and was not applied: ${error}`);
         return;
     }
-    dlogLevel("sync", "info", `Folder sync: ${SETTINGS_FILE} changed on disk — settings applied`);
+    dlogLevel("sync", "info", `Folder sync: ${SETTINGS_FILE} changed on disk — reloaded the whole file`);
     await exportSettings();
 }
 

@@ -213,6 +213,29 @@ try {
     );
     check("compile-path diagnostics visible in the LOG panel", sawCompile);
 
+    // VS Code-style hover: lists/code blocks preserved, @example fenced
+    const hoverHtml = await mgr.evaluate(async () => {
+        const m = (window as any).monaco;
+        const ed = m.editor.getEditors()[0];
+        const prev = ed.getModel();
+        const model = m.editor.createModel('wt.onDom(() => {}, { when: "document_idle" });\n', "typescript", m.Uri.parse("file:///hover-probe.ts"));
+        ed.setModel(model);
+        ed.setPosition({ lineNumber: 1, column: 23 }); // on `when`
+        ed.focus();
+        let html = "";
+        for (let i = 0; i < 40 && !html.includes("<li"); i++) {
+            ed.trigger("t", "editor.action.showHover", {});
+            await new Promise((r) => setTimeout(r, 250));
+            html = document.querySelector(".monaco-hover-content")?.innerHTML ?? "";
+        }
+        ed.setModel(prev);
+        model.dispose();
+        return html;
+    });
+    check("TS hover renders markdown lists, tables and fenced @example code",
+        hoverHtml.includes("<li") && hoverHtml.includes("<table") && /<code>[\s\S]*document_start/.test(hoverHtml) && (hoverHtml.match(/class="code"|<pre|monaco-tokenized-source/g) || []).length >= 2,
+        hoverHtml.slice(0, 200));
+
     // ---- regression (the user's "onRequest doesn't work in MV3"): a
     // param-gated onRequest must see the REAL stored param values (the
     // sandbox used to compile with defaults → handlers did nothing) and
@@ -556,6 +579,21 @@ try {
     await fPage.waitForTimeout(2500);
     const p1 = await fPage.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "getScriptParams", scriptId: "s_sync" }, r)));
     check("MV3 folder sync: external settings.yaml edit applied", (p1 as any)?.values?.token === "xyz", JSON.stringify(p1));
+
+    // whole-file sync: a comment-only disk edit reaches the manager's open editor verbatim
+    await fPage.locator(".script-item", { hasText: "settings.yaml" }).click();
+    await fPage.waitForFunction(() => (window as any).monaco.editor.getEditors()[0].getModel()?.uri.toString() === "file:///settings.yaml");
+    const diskText = "# my own note\n" + ((await opfsText("settings.yaml")) || "");
+    await opfsWrite("settings.yaml", diskText);
+    await fPage.waitForTimeout(2500);
+    const mgrText = await fPage.evaluate(() => (window as any).monaco.editor.getEditors()[0].getValue());
+    check("MV3 folder sync: disk settings.yaml becomes the manager's text as a whole", mgrText === diskText, JSON.stringify(mgrText).slice(0, 200));
+
+    // …and the other way: a manager save lands in the file verbatim
+    const savedText = diskText.replace("# my own note\n", "# saved from the manager\n");
+    await fPage.evaluate((t: string) => new Promise((r) => chrome.runtime.sendMessage({ type: "applySettingsYaml", text: t }, r)), savedText);
+    await fPage.waitForTimeout(500);
+    check("MV3 folder sync: manager settings.yaml save written to disk as a whole", (await opfsText("settings.yaml")) === savedText);
 
     // a new .ts file in the folder inserts a script
     await opfsWrite("imported-sync.ts", 'wt.declareScript({ match: ["*://imported.invalid/*"] });\n');

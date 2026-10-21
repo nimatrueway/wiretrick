@@ -45,6 +45,12 @@ export async function getSettingsText(existing?: string): Promise<string> {
     return (typeof base === "string" ? patchSettings(base, globals, scripts) : null) ?? renderSettings(globals, scripts);
 }
 
+/** The synced file was (re)written with this exact text — it becomes the manager's text too. */
+export async function rememberSettingsText(text: string): Promise<void> {
+    const cur = (await storageGet([TEXT_KEY]))[TEXT_KEY];
+    if (cur !== text) await storageSet({ [TEXT_KEY]: text });
+}
+
 async function applyPlan(plan: SettingsPlan): Promise<void> {
     const ids = new Map((await listScripts()).map((s) => [s.meta.name, s.id]));
     for (const p of plan.scripts) {
