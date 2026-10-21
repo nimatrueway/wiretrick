@@ -32,7 +32,7 @@
                 <button id="btn-open-vscode" disabled title="Open this script's synced file in VS Code (requires Scripts Folder sync)" aria-label="Open in VS Code"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="#007ACC" d="M23.15 2.587 18.21.21a1.494 1.494 0 0 0-1.705.29l-9.46 8.63-4.12-3.128a.999.999 0 0 0-1.276.057L.327 7.261a1 1 0 0 0 .011 1.5L4.603 12 .338 15.24a1 1 0 0 0-.011 1.5l1.325 1.199a.999.999 0 0 0 1.276.057l4.129-3.129 9.45 8.628a1.492 1.492 0 0 0 1.704.29l4.942-2.377A1.5 1.5 0 0 0 24 20.06V3.939a1.5 1.5 0 0 0-.85-1.352zm-5.146 6.004L11.323 12l6.681 3.411z"/></svg></button>
                 <span id="layout-controls">
                     <button id="btn-toggle-sidebar" class="layout-btn" title="Toggle Explorer (⌘B)" aria-label="Toggle Explorer" aria-pressed="true"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1" fill="none" stroke="currentColor"/><path class="fill" d="M2 3h4v10H2z"/><path d="M6.5 3v10" stroke="currentColor"/></svg></button>
-                    <button id="btn-toggle-panel" class="layout-btn" title="Toggle Panel (⌘J)" aria-label="Toggle Panel" aria-pressed="true"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1" fill="none" stroke="currentColor"/><path class="fill" d="M2 9h12v4H2z"/><path d="M2 8.5h12" stroke="currentColor"/></svg></button>
+                    <button id="btn-toggle-panel" class="layout-btn" title="Toggle Panel (⌘J / ⌘`)" aria-label="Toggle Panel" aria-pressed="true"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1" fill="none" stroke="currentColor"/><path class="fill" d="M2 9h12v4H2z"/><path d="M2 8.5h12" stroke="currentColor"/></svg></button>
                 </span>
             </div>
             <div id="editor-area">
@@ -223,11 +223,17 @@
                 <div class="dialog-tabs" role="tablist">
                     <button role="tab" data-help-tab="reference" class="active">Reference</button>
                     <button role="tab" data-help-tab="samples">Samples</button>
+                    <button role="tab" data-help-tab="shortcuts">Shortcuts</button>
                 </div>
                 <button class="btn-close" data-close>✕</button>
             </div>
             <div class="dialog-body" id="help-body" data-pane="reference"></div>
             <div class="dialog-body" id="samples-body" data-pane="samples" hidden></div>
+            <div class="dialog-body" id="shortcuts-body" data-pane="shortcuts" hidden>
+                <input id="shortcuts-filter" type="search" placeholder="Type to search keybindings (e.g. panel, ctrl+j, explorer)" autocomplete="off" spellcheck="false">
+                <table id="shortcuts-table"><thead><tr><th>Command</th><th>Keybinding</th><th>When</th></tr></thead><tbody></tbody></table>
+                <p id="shortcuts-empty" class="muted" hidden>No matching shortcuts.</p>
+            </div>
         </div>
     </div>
 

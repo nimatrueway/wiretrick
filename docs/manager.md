@@ -5,7 +5,8 @@
 The manager page embeds **Monaco** (the VS Code editor) with full TypeScript
 IntelliSense for the `wt` API — completions, hover docs, and diagnostics work
 out of the box. Shortcuts follow VS Code (⌘ = Ctrl on Windows/Linux; F1
-lists the editor commands):
+lists the editor commands, and the **?** dialog's **Shortcuts** tab has a
+searchable list of all of them):
 
 | Shortcut | Action |
 | --- | --- |
@@ -13,7 +14,7 @@ lists the editor commands):
 | ⌘P | Quick-open a script or settings.yaml (cursor position is remembered per file) |
 | ⌘⇧E | Focus the explorer (script list) |
 | ⌘B | Show/hide the explorer |
-| ⌘J | Show/hide the Log/Network panel |
+| ⌘J or ⌘` | Show/hide the Log/Network panel |
 | ⌥Z | Toggle word wrap |
 | ⌘, | Open Settings |
 | ⌘/, ⌘F, ⌘D | Comment, find, select next occurrence (Monaco) |

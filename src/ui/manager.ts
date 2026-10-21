@@ -4,6 +4,7 @@
 
 import { loadMonaco, STARTER_TEMPLATE } from "./monacoSetup";
 import { API_REFERENCE } from "./apiReference";
+import { SHORTCUTS, filterShortcuts, formatKey } from "./shortcuts";
 import { SAMPLES } from "./samples";
 import { settingsDiagnostics, settingsCompletions, settingsHover, type AssistScript } from "../shared/settingsAssist";
 import { dependantsOf, missingImports } from "../shared/scriptImports";
@@ -1209,6 +1210,7 @@ function setupDialogs(): void {
     for (const tab of document.querySelectorAll<HTMLElement>("[data-help-tab]")) {
         tab.addEventListener("click", () => showHelpTab(tab.dataset.helpTab!));
     }
+    $input("#shortcuts-filter").addEventListener("input", renderShortcuts);
     for (const overlay of document.querySelectorAll(".overlay")) {
         overlay.addEventListener("mousedown", (e) => {
             if (e.target === overlay) closeDialog(overlay);
@@ -1326,11 +1328,47 @@ function applyLogLevel(level: string): void {
 
 function showHelpTab(name: string): void {
     if (name === "samples" && !$("#samples-body").childElementCount) renderSamples();
+    if (name === "shortcuts") {
+        renderShortcuts();
+        setTimeout(() => $input("#shortcuts-filter").focus());
+    }
     for (const tab of document.querySelectorAll<HTMLElement>("[data-help-tab]")) {
         tab.classList.toggle("active", tab.dataset.helpTab === name);
         tab.setAttribute("aria-selected", String(tab.dataset.helpTab === name));
     }
     for (const pane of document.querySelectorAll<HTMLElement>("#help-panel [data-pane]")) pane.hidden = pane.dataset.pane !== name;
+}
+
+const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+
+function showShortcutsHelp(): void {
+    openDialog("help-panel");
+    showHelpTab("shortcuts");
+}
+
+function renderShortcuts(): void {
+    const rows = filterShortcuts(SHORTCUTS, $input("#shortcuts-filter").value, isMac);
+    const tbody = $("#shortcuts-table tbody");
+    tbody.replaceChildren(
+        ...rows.map((s) => {
+            const tr = document.createElement("tr");
+            const action = document.createElement("td");
+            action.textContent = s.action;
+            const keys = document.createElement("td");
+            s.keys.forEach((k, i) => {
+                if (i) keys.append(" / ");
+                const kbd = document.createElement("kbd");
+                kbd.textContent = formatKey(k, isMac);
+                keys.append(kbd);
+            });
+            const where = document.createElement("td");
+            where.className = "muted";
+            where.textContent = s.where;
+            tr.append(action, keys, where);
+            return tr;
+        })
+    );
+    $("#shortcuts-empty").hidden = rows.length > 0;
 }
 
 function renderHelp(): void {
@@ -1868,7 +1906,7 @@ function layoutShortcut(e: KeyboardEvent): (() => void) | null {
     const mod = e.metaKey || e.ctrlKey;
     if (mod && e.shiftKey && !e.altKey && e.code === "KeyE") return focusExplorer;
     if (mod && !e.shiftKey && !e.altKey && e.code === "KeyB") return toggleSidebar;
-    if (mod && !e.shiftKey && !e.altKey && e.code === "KeyJ") return togglePanel;
+    if (mod && !e.shiftKey && !e.altKey && (e.code === "KeyJ" || e.code === "Backquote")) return togglePanel;
     // ⌥Z types a character (Ω on macOS) in the log/network filter boxes
     const typing = (e.target as HTMLElement | null)?.matches?.("input, textarea, select");
     if (e.altKey && !mod && !e.shiftKey && e.code === "KeyZ" && !typing) return toggleWordWrap;
@@ -1879,13 +1917,14 @@ function layoutShortcut(e: KeyboardEvent): (() => void) | null {
  * them first while the editor has focus, and F1 lists them. */
 function registerLayoutActions(): void {
     const { KeyMod, KeyCode } = (window as any).monaco;
-    const actions: [string, string, number, () => void][] = [
-        ["wt.toggleWordWrap", "View: Toggle Word Wrap", KeyMod.Alt | KeyCode.KeyZ, toggleWordWrap],
-        ["wt.focusExplorer", "View: Focus on Explorer", KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyE, focusExplorer],
-        ["wt.toggleSidebar", "View: Toggle Explorer Visibility", KeyMod.CtrlCmd | KeyCode.KeyB, toggleSidebar],
-        ["wt.togglePanel", "View: Toggle Panel Visibility", KeyMod.CtrlCmd | KeyCode.KeyJ, togglePanel],
+    const actions: [string, string, number[], () => void][] = [
+        ["wt.toggleWordWrap", "View: Toggle Word Wrap", [KeyMod.Alt | KeyCode.KeyZ], toggleWordWrap],
+        ["wt.focusExplorer", "View: Focus on Explorer", [KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyE], focusExplorer],
+        ["wt.toggleSidebar", "View: Toggle Explorer Visibility", [KeyMod.CtrlCmd | KeyCode.KeyB], toggleSidebar],
+        ["wt.togglePanel", "View: Toggle Panel Visibility", [KeyMod.CtrlCmd | KeyCode.KeyJ, KeyMod.CtrlCmd | KeyCode.Backquote], togglePanel],
+        ["wt.showShortcuts", "Help: Keyboard Shortcuts", [], showShortcutsHelp],
     ];
-    for (const [id, label, key, run] of actions) editor.addAction({ id, label, keybindings: [key], run });
+    for (const [id, label, keybindings, run] of actions) editor.addAction({ id, label, keybindings, run });
     editor.addAction({ id: "wt.openSettings", label: "Preferences: Open Settings", run: () => openSettings() });
     editor.addAction({
         id: "wt.collectDiagnostics",
