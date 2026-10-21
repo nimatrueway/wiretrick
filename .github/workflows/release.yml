@@ -134,6 +134,9 @@ jobs:
           AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
         run: |
           XPI="wiretrick-firefox-v${VERSION}.xpi"
+          # pasted secrets often carry a trailing newline/space
+          AMO_JWT_ISSUER=$(printf %s "$AMO_JWT_ISSUER" | tr -d '[:space:]')
+          AMO_JWT_SECRET=$(printf %s "$AMO_JWT_SECRET" | tr -d '[:space:]')
           if [ -n "$AMO_JWT_ISSUER" ] && [ -n "$AMO_JWT_SECRET" ] && \
              npx -y web-ext@8 sign -s dist -a amo-signed --channel unlisted \
                --api-key "$AMO_JWT_ISSUER" --api-secret "$AMO_JWT_SECRET"; then
