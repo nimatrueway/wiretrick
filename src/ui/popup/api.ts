@@ -27,6 +27,8 @@ export interface PopupApi {
     openManager(scriptId?: string): void;
     loadSize(): Promise<{ w: number; h: number } | null>;
     saveSize(size: { w: number; h: number }): void;
+    /** scripts or params changed elsewhere (manager, import, folder sync) — returns an unsubscribe */
+    onChange?(fn: () => void): () => void;
 }
 
 export const chromePopupApi: PopupApi = {
@@ -49,4 +51,11 @@ export const chromePopupApi: PopupApi = {
             })
         ),
     saveSize: (size) => void chrome.storage.local.set({ resPopupSize: size }),
+    onChange(fn) {
+        const l = (c: Record<string, chrome.storage.StorageChange>, area: string) => {
+            if (area === "local" && (c.resScripts || c.resScriptOrder || c.resParams)) fn();
+        };
+        chrome.storage.onChanged.addListener(l);
+        return () => chrome.storage.onChanged.removeListener(l);
+    },
 };

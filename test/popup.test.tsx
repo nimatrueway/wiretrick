@@ -67,6 +67,24 @@ describe("Popup", () => {
         expect(api.calls).toContainEqual(["setEnabled", "a", false]);
     });
 
+    it("refreshes the list and an open param fold when storage changes elsewhere", async () => {
+        const defs = { port: { type: "string", default: "1" } } as any;
+        let values: any = { port: "1" };
+        const api = fakeApi([script("a", "Alpha", { paramDefs: defs })]);
+        api.getParams = vi.fn(async () => ({ defs, values }));
+        let fire = () => {};
+        api.onChange = (fn) => ((fire = fn), () => {});
+        const { container } = render(<Popup api={api} />);
+        await waitFor(() => expect(names(container)).toEqual(["Alpha"]));
+        fireEvent.click(await screen.findByLabelText("Toggle parameters"));
+        await waitFor(() => expect((container.querySelector(".param-fold input") as HTMLInputElement)?.value).toBe("1"));
+        values = { port: "9" };
+        (api.listScripts as any).mockImplementation(async () => [script("a", "Alpha", { paramDefs: defs }), script("b", "Beta")]);
+        fire();
+        await waitFor(() => expect(names(container)).toEqual(["Alpha", "Beta"]));
+        await waitFor(() => expect((container.querySelector(".param-fold input") as HTMLInputElement).value).toBe("9"));
+    });
+
     it("marks scripts with compile errors", async () => {
         const { container } = render(<Popup api={fakeApi([script("a", "Alpha", { error: "boom" })])} />);
         await waitFor(() => expect(container.querySelector(".err-ind.compile")?.getAttribute("title")).toContain("boom"));

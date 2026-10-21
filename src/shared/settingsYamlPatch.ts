@@ -108,8 +108,8 @@ function commentedEntryEnd(src: string, sectionPair: any, key: string): number |
     return end;
 }
 
-/** comment out a stale live entry (its param is no longer declared) */
-function commentOutEdit(src: string, pair: any, eol: string): Edit | null {
+/** comment out a stale live entry (its param is no longer declared, or its script is gone) */
+function commentOutEdit(src: string, pair: any, eol: string, why = "no longer declared in the script"): Edit | null {
     const keyNode = pair.key;
     if (!keyNode?.range) return null;
     const v = pair.value;
@@ -126,7 +126,7 @@ function commentOutEdit(src: string, pair: any, eol: string): Edit | null {
         .split("\n")
         .map((l) => pad + "# " + l.slice(indent))
         .join(eol);
-    const note = `${pad}# no longer declared in the script — kept for reference:`;
+    const note = `${pad}# ${why} — kept for reference:`;
     return { start, end, text: note + eol + commented, replace: true };
 }
 
@@ -406,6 +406,18 @@ export function patchSettings(existing: string, g: GlobalSettings, scripts: Scri
             const stale = k === "enabled" ? !s.declared : !Object.prototype.hasOwnProperty.call(s.defs, k);
             if (!stale) continue;
             const edit = commentOutEdit(existing, pair, eol);
+            if (!edit) return null;
+            edits.push(edit);
+        }
+    }
+
+    // sections of scripts that no longer exist: comment them out whole
+    if (paramsTarget.kind === "map") {
+        const names = new Set(scripts.map((s) => s.name));
+        for (const pair of paramsTarget.node.items) {
+            const k = isScalar(pair.key) ? pair.key.value : undefined;
+            if (typeof k !== "string" || names.has(k)) continue;
+            const edit = commentOutEdit(existing, pair, eol, `script "${k}" no longer exists`);
             if (!edit) return null;
             edits.push(edit);
         }

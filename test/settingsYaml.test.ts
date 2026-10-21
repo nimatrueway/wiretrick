@@ -201,6 +201,19 @@ describe("settings.yaml patching", () => {
         expect(patchSettings(out, G, [s])).toBe(out);
     });
 
+    it("comments out the whole section of a deleted script", () => {
+        const doc = "params:\n  Gone:\n    # Run this script\n    # enabled: true\n    n: 4\n\n  My Script:\n    level: warn\n";
+        const s = script({ values: { level: "warn" } });
+        const out = patchSettings(doc, G, [s])!;
+        expect(out).toBe('params:\n  # script "Gone" no longer exists — kept for reference:\n  # Gone:\n  #   # Run this script\n  #   # enabled: true\n  #   n: 4\n\n  My Script:\n    level: warn\n');
+        expect(Object.keys(parseSettings(out).params)).toEqual(["My Script"]);
+        expect(patchSettings(out, G, [s])).toBe(out); // stable
+        // the last section deleted, a new script added in the same patch
+        const out2 = patchSettings("params:\n  Gone:\n    n: 4\n", G, [script({ name: "New", values: { n: 3 } })])!;
+        expect(out2).toContain('  # Gone:\n  #   n: 4\n');
+        expect(parseSettings(out2).params).toEqual({ New: { n: 3 } });
+    });
+
     it("appends a missing params section at the document end", () => {
         const doc = "# yaml-language-server: $schema=./settings.schema.json\nsettings:\n  logLevel: warn\n";
         const out = patchSettings(doc, { logLevel: "warn", logCap: 500 }, [script({ name: "New", values: { n: 3 } })])!;

@@ -21,7 +21,23 @@ export function Popup({ api }: { api: PopupApi }) {
             setLoad({ state: "error" });
         }
     };
-    useEffect(() => void refresh(), []);
+    // bumped on outside changes so open param folds re-fetch too
+    const [version, setVersion] = useState(0);
+    useEffect(() => {
+        void refresh();
+        let t: ReturnType<typeof setTimeout> | undefined;
+        const off = api.onChange?.(() => {
+            clearTimeout(t);
+            t = setTimeout(() => {
+                void refresh();
+                setVersion((v) => v + 1);
+            }, 150);
+        });
+        return () => {
+            clearTimeout(t);
+            off?.();
+        };
+    }, []);
 
     // libraries (no wt.declareScript) never appear in the popup — they're
     // inert on their own and only imported by other scripts
@@ -37,7 +53,7 @@ export function Popup({ api }: { api: PopupApi }) {
             </div>
             <ul id="script-list">
                 {visible.map((s) => (
-                    <ScriptRow key={s.id} script={s} api={api} onChanged={refresh} />
+                    <ScriptRow key={s.id} script={s} api={api} onChanged={refresh} version={version} />
                 ))}
             </ul>
             {load.state === "error" && <div id="empty">Could not reach the extension — close and reopen the popup.</div>}
@@ -49,7 +65,7 @@ export function Popup({ api }: { api: PopupApi }) {
     );
 }
 
-function ScriptRow({ script, api, onChanged }: { script: ScriptInfo; api: PopupApi; onChanged: () => void }) {
+function ScriptRow({ script, api, onChanged, version }: { script: ScriptInfo; api: PopupApi; onChanged: () => void; version: number }) {
     const [open, setOpen] = useState(false);
     const hasParams = !!script.paramDefs && Object.keys(script.paramDefs).length > 0;
     const health = scriptHealth(script);
@@ -98,18 +114,18 @@ function ScriptRow({ script, api, onChanged }: { script: ScriptInfo; api: PopupA
                     </button>
                 )}
             </li>
-            {open && <ParamFold scriptId={script.id} api={api} />}
+            {open && <ParamFold scriptId={script.id} api={api} version={version} />}
         </>
     );
 }
 
-function ParamFold({ scriptId, api }: { scriptId: string; api: PopupApi }) {
+function ParamFold({ scriptId, api, version }: { scriptId: string; api: PopupApi; version: number }) {
     const [params, setParams] = useState<ScriptParams | null>(null);
     useEffect(() => {
         let live = true;
         api.getParams(scriptId).then((p) => live && setParams(p));
         return () => void (live = false);
-    }, [scriptId]);
+    }, [scriptId, version]);
 
     if (!params) return <li class="param-fold">Loading…</li>;
     const entries = Object.entries(params.defs);

@@ -236,6 +236,7 @@ try {
         hoverHtml.includes("<li") && hoverHtml.includes("<table") && /<code>[\s\S]*document_start/.test(hoverHtml) && (hoverHtml.match(/class="code"|<pre|monaco-tokenized-source/g) || []).length >= 2,
         hoverHtml.slice(0, 200));
 
+    await mgr.bringToFront(); // a background tab throttles the suggest widget
     const popupHtml = await mgr.evaluate(async () => {
         const m = (window as any).monaco;
         const ed = m.editor.getEditors()[0];
@@ -727,6 +728,11 @@ try {
     const lateUser = lateList.find((s) => s.meta?.name === "late-user");
     check("importer saved before its library: 'Cannot find module' clears once the library exists",
         !!lateUser && !(lateUser.typeErrors || []).length, JSON.stringify(lateUser?.typeErrors));
+    await fPage.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "deleteScript", id: "s_sync" }, r)));
+    await fPage.waitForTimeout(2500);
+    const yamlDel = (await opfsText("settings.yaml")) || "";
+    check("MV3 folder sync: a deleted script's settings.yaml section is commented out",
+        /# script "Sync guinea" no longer exists/.test(yamlDel) && !/^  Sync guinea:/m.test(yamlDel), yamlDel.slice(0, 400));
     await fPage.close();
 } catch (e) {
     failed++;
