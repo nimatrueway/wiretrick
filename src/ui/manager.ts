@@ -8,6 +8,7 @@ import { SAMPLES } from "./samples";
 import { settingsDiagnostics, settingsCompletions, settingsHover, type AssistScript } from "../shared/settingsAssist";
 import { dependantsOf, missingImports } from "../shared/scriptImports";
 import { pickRows } from "./bundlePicker";
+import { watchTheme, saveTheme, type Theme, type ThemePref } from "./theme";
 import * as fsBridge from "./fsBridge";
 import { cleanScriptName, scriptNameProblem, scriptFileName, MAX_NAME } from "../shared/scriptName";
 import { buildBundle, parseBundleText, bundleSettingsDoc, pickBundle, vscodeTargetPath } from "./bundle";
@@ -872,6 +873,9 @@ function send<T = any>(msg: any): Promise<T> {
 }
 
 // ---- dialogs: settings / help / samples ----
+let currentTheme: Theme = document.documentElement.dataset.theme === "light" ? "light" : "dark";
+const monacoTheme = () => (currentTheme === "light" ? "vs" : "vs-dark");
+
 function openDialog(id: string): void {
     document.getElementById(id)?.classList.remove("hidden");
 }
@@ -914,6 +918,15 @@ function setupDialogs(): void {
     }
     document.addEventListener("keydown", (e) => {
         if (e.key === "Escape") document.querySelectorAll(".overlay:not(.hidden)").forEach(closeDialog);
+    });
+
+    // settings: theme
+    const themeSel = $("#settings-theme") as HTMLSelectElement;
+    themeSel.addEventListener("change", () => saveTheme(themeSel.value as ThemePref));
+    watchTheme((t, pref) => {
+        currentTheme = t;
+        themeSel.value = pref;
+        (window as any).monaco?.editor.setTheme(monacoTheme());
     });
 
     // settings: default log level
@@ -1206,7 +1219,7 @@ async function main(): Promise<void> {
     editor = (window as any).monaco.editor.create($("#monaco-host"), {
         value: "",
         language: "typescript",
-        theme: "vs-dark",
+        theme: monacoTheme(),
         minimap: { enabled: false },
         automaticLayout: true,
         fontSize: 13,

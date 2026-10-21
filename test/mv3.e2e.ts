@@ -468,6 +468,32 @@ try {
     await xoPage.close();
     await scriptPage.close();
 
+    // ---- Settings → Appearance: light theme recolors the UI and Monaco ----
+    await mgr.evaluate(() => {
+        const sel = document.querySelector("#settings-theme") as HTMLSelectElement;
+        sel.value = "light";
+        sel.dispatchEvent(new Event("change"));
+    });
+    await mgr.waitForFunction(() => document.documentElement.dataset.theme === "light", null, { timeout: 5000 }).catch(() => {});
+    const light = await mgr.evaluate(() => ({
+        attr: document.documentElement.dataset.theme,
+        bg: getComputedStyle(document.body).backgroundColor,
+        editor: getComputedStyle(document.querySelector(".monaco-editor .monaco-editor-background")!).backgroundColor,
+    }));
+    check("light theme applies to the manager and Monaco", light.attr === "light" && light.bg === "rgb(255, 255, 255)" && light.editor === "rgb(255, 255, 254)", JSON.stringify(light));
+    const popupTheme = await ctx.newPage();
+    await popupTheme.goto(`chrome-extension://${extId}/popup.html`);
+    await popupTheme.waitForTimeout(500);
+    check("popup follows the theme", (await popupTheme.evaluate(() => document.documentElement.dataset.theme)) === "light");
+    await popupTheme.close();
+    await mgr.evaluate(() => {
+        const sel = document.querySelector("#settings-theme") as HTMLSelectElement;
+        sel.value = "dark";
+        sel.dispatchEvent(new Event("change"));
+    });
+    await mgr.waitForFunction(() => document.documentElement.dataset.theme === "dark", null, { timeout: 5000 }).catch(() => {});
+    check("dark theme restores", (await mgr.evaluate(() => getComputedStyle(document.body).backgroundColor)) === "rgb(30, 30, 30)");
+
     // ---- export → wipe → import round trip through the REAL buttons ----
     // (regression: "after import it did not detect them" — the import path
     // must re-capture declareScript for every script)

@@ -57,6 +57,11 @@ the manager reconnects automatically on open (one click to re-grant after a
 browser restart, per Chrome's File System Access rules — click the toolbar
 notice or the button).
 
+## Appearance
+
+**Settings → Appearance → Theme** picks *System* (follows the OS), *Dark*
+or *Light*. It applies to the manager, the editor and the popup.
+
 ## Import / export
 
 **Settings → Export…** and **Import…** open a checklist: tick the scripts

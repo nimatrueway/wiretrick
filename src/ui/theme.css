@@ -1,0 +1,79 @@
+/* Palette for the manager and popup. theme-boot.js / theme.ts set
+   <html data-theme="dark|light"> from the Settings → Appearance choice. */
+:root {
+    color-scheme: dark;
+    --bg: #1e1e1e;
+    --bg-panel: #252526;
+    --bg-sunk: #232324;
+    --bg-hover: #2a2d2e;
+    --bg-active: #37373d;
+    --border: #3c3c3c;
+    --fg: #cccccc;
+    --fg-dim: #858585;
+    --fg-faint: #6a6a6a;
+    --fg-log: #b8b8b8;
+    --accent: #007acc;
+    --ok: #4ec9b0;
+    --warn: #dcdcaa;
+    --err: #f48771;
+    --key: #9cdcfe;
+    --switch-off: #4a4a4a;
+    --switch-knob: #ddd;
+    --lv-debug-bg: #3a3d41;
+    --lv-info-bg: #23405a;
+    --lv-info-fg: #6cb6ff;
+    --lv-warn-bg: #4a3a14;
+    --lv-error-bg: #5a2318;
+    --mark-bg: #613214;
+    --mark-fg: #ffd700;
+    --line-sep: rgba(255, 255, 255, 0.025);
+    --cell-sep: rgba(255, 255, 255, 0.05);
+    --row-alt: rgba(255, 255, 255, 0.02);
+    --warn-tint: rgba(220, 220, 170, 0.04);
+    --err-tint: rgba(244, 135, 113, 0.06);
+    --scroll: #3a3a3c;
+    --scroll-hover: #4a4a4d;
+    --sel: #04395e;
+    --tag-bg: #0e3a5a;
+    --pending: #5a5a5a;
+    --bar: #3794ff;
+}
+
+:root[data-theme="light"] {
+    color-scheme: light;
+    --bg: #ffffff;
+    --bg-panel: #f3f3f3;
+    --bg-sunk: #f8f8f8;
+    --bg-hover: #e8e8e8;
+    --bg-active: #e4e6f1;
+    --border: #d4d4d4;
+    --fg: #333333;
+    --fg-dim: #6e6e6e;
+    --fg-faint: #8a8a8a;
+    --fg-log: #3b3b3b;
+    --accent: #007acc;
+    --ok: #16825d;
+    --warn: #8a6d00;
+    --err: #c72e0f;
+    --key: #0451a5;
+    --switch-off: #c4c4c4;
+    --switch-knob: #fff;
+    --lv-debug-bg: #e4e6f1;
+    --lv-info-bg: #dcebfa;
+    --lv-info-fg: #005fb8;
+    --lv-warn-bg: #fbf0d0;
+    --lv-error-bg: #fde4de;
+    --mark-bg: #ffe58f;
+    --mark-fg: #3b2e00;
+    --line-sep: rgba(0, 0, 0, 0.05);
+    --cell-sep: rgba(0, 0, 0, 0.06);
+    --row-alt: rgba(0, 0, 0, 0.025);
+    --warn-tint: rgba(200, 160, 0, 0.08);
+    --err-tint: rgba(220, 60, 30, 0.07);
+    --scroll: #c1c1c1;
+    --scroll-hover: #a8a8a8;
+    --sel: #cce6ff;
+    --tag-bg: #dcebfa;
+    --pending: #bdbdbd;
+    --bar: #3794ff;
+}

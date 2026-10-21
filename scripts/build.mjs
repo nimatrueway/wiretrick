@@ -127,6 +127,8 @@ async function copyStatic(dist, mv3) {
     await copyFile(path.join(root, "src/ui/ui.css"), path.join(dist, "ui.css"));
     await copyFile(path.join(root, "src/ui/popup.html"), path.join(dist, "popup.html"));
     await copyFile(path.join(root, "src/ui/popup.css"), path.join(dist, "popup.css"));
+    await copyFile(path.join(root, "src/ui/theme.css"), path.join(dist, "theme.css"));
+    await copyFile(path.join(root, "src/ui/theme-boot.js"), path.join(dist, "theme-boot.js"));
 
     // Monaco classic AMD build
     const monacoSrc = path.join(root, "node_modules/monaco-editor/min/vs");
