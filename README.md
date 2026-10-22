@@ -46,11 +46,11 @@ see [docs/install.md](docs/install.md).
 Open the manager (popup → **Manage all**), click **+ New** and paste:
 
 ```ts
-// Try it: open https://jsonplaceholder.typicode.com/todos/1
-wt.modifyResponse("*://jsonplaceholder.typicode.com/todos/*", (ctx, body) => {
+// Try it: open https://dummyjson.com/todos/1
+wt.modifyResponse("*://dummyjson.com/todos/*", (ctx, body) => {
     const text = typeof body === "string" ? body : new TextDecoder().decode(body);
     const json = JSON.parse(text);
-    json.title = "Transformed by Wiretrick";
+    json.todo = "Transformed by Wiretrick";
     return JSON.stringify(json, null, 2);
 });
 ```

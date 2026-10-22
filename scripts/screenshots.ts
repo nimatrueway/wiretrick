@@ -40,8 +40,8 @@ try {
 
     // produce some live log lines
     const page = await ctx.newPage();
-    await page.goto("https://jsonplaceholder.typicode.com/users/1").catch(() => {});
-    await page.goto("https://jsonplaceholder.typicode.com/users/1").catch(() => {});
+    await page.goto("https://dummyjson.com/users/1").catch(() => {});
+    await page.goto("https://dummyjson.com/users/1").catch(() => {});
     await page.close();
 
     await mgr.goto(`chrome-extension://${EXT_ID}/manager.html?script=shot_Mock_a_fetch_XHR_API`);

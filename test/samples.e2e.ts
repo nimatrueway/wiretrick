@@ -41,22 +41,22 @@ const VERIFY: Record<string, (p: Page) => Promise<[boolean, string]>> = {
         return [loaded === 0, `${loaded} images loaded`];
     },
     "Modify request headers": async (p) => {
-        await open(p, "https://httpbin.org/headers");
+        await open(p, "https://postman-echo.com/headers");
         const t = await text(p);
         return [t.includes("hello from Wiretrick"), t.slice(0, 120)];
     },
     "CORS unlock": async (p) => {
-        await open(p, "https://jsonplaceholder.typicode.com/");
+        await open(p, "https://example.org/");
         const r = await p.evaluate(() => fetch("https://example.com/").then((r) => r.text()).catch((e) => "ERR " + e));
         return [r.includes("Example Domain"), r.slice(0, 80)];
     },
     "Mock a fetch/XHR API": async (p) => {
-        await open(p, "https://jsonplaceholder.typicode.com/users/1");
+        await open(p, "https://dummyjson.com/users/1");
         const t = await text(p);
         return [t.includes("Mocked User"), t.slice(0, 80)];
     },
     "Transform an API response": async (p) => {
-        await open(p, "https://jsonplaceholder.typicode.com/todos/1");
+        await open(p, "https://dummyjson.com/todos/1");
         const t = await text(p);
         return [t.includes("Transformed by Wiretrick") && t.includes("true"), t.slice(0, 120)];
     },
@@ -77,15 +77,15 @@ const VERIFY: Record<string, (p: Page) => Promise<[boolean, string]>> = {
         return [t.includes("Served by Wiretrick"), t.slice(0, 80)];
     },
     "Per-script storage": async (p) => {
-        const hits = async () => Number((await text(p)).match(/"X-Hits":\s*"(\d+)"/)?.[1] || 0);
-        await open(p, "https://httpbin.org/headers");
+        const hits = async () => Number((await text(p)).match(/"x-hits":\s*"(\d+)"/i)?.[1] || 0);
+        await open(p, "https://postman-echo.com/headers");
         const a = await hits();
         await p.reload();
         const b = await hits();
         return [a > 0 && b === a + 1, `${a} → ${b}`];
     },
     "Parameters (wt.params)": async (p) => {
-        await open(p, "https://jsonplaceholder.typicode.com/posts/1");
+        await open(p, "https://dummyjson.com/posts/1");
         const t = await text(p);
         return [t.includes("forced failure"), t.slice(0, 80)];
     },

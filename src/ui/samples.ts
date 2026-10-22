@@ -30,11 +30,11 @@ wt.onRequest({ url: "*://upload.wikimedia.org/*", types: ["image"] }, () => ({ c
     },
     {
         name: "Modify request headers",
-        blurb: "Set or remove request headers before they leave the browser. Try it: httpbin.org/headers echoes them back.",
-        code: `// Try it: open https://httpbin.org/headers
+        blurb: "Set or remove request headers before they leave the browser. Try it: postman-echo.com/headers echoes them back.",
+        code: `// Try it: open https://postman-echo.com/headers
 wt.describe("Add debug headers, drop Accept-Language");
 
-wt.onRequest("*://httpbin.org/*", () => ({
+wt.onRequest("*://postman-echo.com/*", () => ({
     headers: {
         set: { "x-debug": "1", "x-greeting": "hello from Wiretrick" },
         remove: ["accept-language"],
@@ -43,8 +43,8 @@ wt.onRequest("*://httpbin.org/*", () => ({
     },
     {
         name: "CORS unlock",
-        blurb: "Add permissive response headers so other pages can consume a resource. Try it: run the fetch from the comment in jsonplaceholder.typicode.com's console.",
-        code: `// Try it: open https://jsonplaceholder.typicode.com/, then in DevTools → Console run
+        blurb: "Add permissive response headers so other pages can consume a resource. Try it: run the fetch from the comment in example.org's console.",
+        code: `// Try it: open https://example.org/, then in DevTools → Console run
 //   fetch("https://example.com/").then(r => r.text()).then(console.log)
 // Without this script it fails with a CORS error; with it the HTML prints.
 wt.describe("Let any origin read example.com");
@@ -61,11 +61,11 @@ wt.onResponseHeaders("*://example.com/*", () => ({
     },
     {
         name: "Mock a fetch/XHR API",
-        blurb: "Replace a JSON API response; :id in the route is read back as ctx.groups.id. Try it: open jsonplaceholder.typicode.com/users/1.",
-        code: `// Try it: open https://jsonplaceholder.typicode.com/users/1
+        blurb: "Replace a JSON API response; :id in the route is read back as ctx.groups.id. Try it: open dummyjson.com/users/1.",
+        code: `// Try it: open https://dummyjson.com/users/1
 wt.describe("Mock the users API");
 
-wt.replaceResponse("*://jsonplaceholder.typicode.com/users/:id", (ctx) => ({
+wt.replaceResponse("*://dummyjson.com/users/:id", (ctx) => ({
     id: Number(ctx.groups.id),
     name: "Mocked User",
     role: "admin",
@@ -73,14 +73,14 @@ wt.replaceResponse("*://jsonplaceholder.typicode.com/users/:id", (ctx) => ({
     },
     {
         name: "Transform an API response",
-        blurb: "Modify a JSON body — flip fields, inject values. Try it: open jsonplaceholder.typicode.com/todos/1.",
-        code: `// Try it: open https://jsonplaceholder.typicode.com/todos/1
+        blurb: "Modify a JSON body — flip fields, inject values. Try it: open dummyjson.com/todos/1.",
+        code: `// Try it: open https://dummyjson.com/todos/1
 wt.describe("Mark every todo completed");
 
-wt.modifyResponse("*://jsonplaceholder.typicode.com/todos/*", (ctx, body) => {
+wt.modifyResponse("*://dummyjson.com/todos/*", (ctx, body) => {
     const json = JSON.parse(typeof body === "string" ? body : new TextDecoder().decode(body));
     json.completed = true;
-    json.title = "Transformed by Wiretrick";
+    json.todo = "Transformed by Wiretrick";
     return JSON.stringify(json, null, 2);
 });`,
     },
@@ -121,11 +121,11 @@ wt.replaceResponse("*://en.wikipedia.org/robots.txt", () => ({
     },
     {
         name: "Per-script storage",
-        blurb: "Keep state between requests with wt.storage. Try it: open httpbin.org/headers and reload — X-Hits counts up.",
-        code: `// Try it: open https://httpbin.org/headers and reload a few times
+        blurb: "Keep state between requests with wt.storage. Try it: open postman-echo.com/headers and reload — X-Hits counts up.",
+        code: `// Try it: open https://postman-echo.com/headers and reload a few times
 wt.describe("Count requests in X-Hits");
 
-wt.onRequest("*://httpbin.org/headers", async (ctx) => {
+wt.onRequest("*://postman-echo.com/headers", async (ctx) => {
     const hits = ((await wt.storage.get("hits")) || 0) + 1;
     await wt.storage.set("hits", hits);
     wt.log("request #" + hits, ctx.url);
@@ -134,8 +134,8 @@ wt.onRequest("*://httpbin.org/headers", async (ctx) => {
     },
     {
         name: "Parameters (wt.params)",
-        blurb: "Adjustable knobs (wt.params) the user changes from the popup's ⚙ dialog — no code edits. Try it: open jsonplaceholder.typicode.com/posts/1.",
-        code: `// Try it: open https://jsonplaceholder.typicode.com/posts/1, then change
+        blurb: "Adjustable knobs (wt.params) the user changes from the popup's ⚙ dialog — no code edits. Try it: open dummyjson.com/posts/1.",
+        code: `// Try it: open https://dummyjson.com/posts/1, then change
 // the knobs from the popup's ⚙ dialog and reload
 wt.describe("Force failures on the posts API");
 
@@ -147,7 +147,7 @@ const cfg = wt.params({
     extraHeaders: { type: "stringList", default: [], description: "Extra x-tag values" },
 });
 
-wt.onRequest("*://jsonplaceholder.typicode.com/posts/*", () => {
+wt.onRequest("*://dummyjson.com/posts/*", () => {
     if (!cfg.enabled) return;
     return {
         respond: {
