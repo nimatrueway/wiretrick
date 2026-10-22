@@ -15,7 +15,7 @@ export interface Script {
     updatedAt: number;
     error: string | null;
     meta: ResMeta;
-    /** param definitions from wt.declareScript (captured at save time) */
+    /** param definitions from wt.params / wt.defineParam (captured at save time) */
     paramDefs?: Record<string, import("../../shared/scriptDef").ParamDef>;
 }
 
@@ -78,23 +78,23 @@ export async function saveScript(partial: Pick<Script, "id" | "code"> & Partial<
     const byId: { [id: string]: Script } = obj[STORE_KEY] || {};
     const order: string[] = obj[ORDER_KEY] || Object.keys(byId);
     const prev = byId[partial.id];
-    // the script's name is the manager/file name — declareScript has no
-    // name field; keep the previous name when the caller didn't pass one
+    // the script's name is the manager/file name — keep the previous name when the caller didn't pass one
     // (e.g. setEnabled re-saves the stored script). Resolved BEFORE
     // compiling so sandbox analyze logs identify the script.
     const name = partial.name ?? prev?.meta.name;
-    // compile (not just parse) so wt.declareScript values land in meta;
-    // imports resolve to stubs here — declaration capture must not depend
-    // on other scripts loading cleanly. MV3: compiles in the sandbox page
-    // (the SW cannot eval) — see compileHost.
-    const compiled = await compileForStorage(partial.code, name);
+    // compile (not just parse) so handler routes and params land in meta;
+    // imports resolve to stubs here — capture must not depend on other
+    // scripts loading cleanly (routes built from imports are refined by the
+    // reload-time analyze). MV3: compiles in the sandbox page (the SW
+    // cannot eval) — see compileHost.
+    const compiled = await compileForStorage(partial.code, name, (await loadAllParamValues())[partial.id]);
     // MV3 sandbox RPC failure (host unavailable): keep the previous
-    // meta/paramDefs rather than corrupting a declared script into a
-    // library — the next save recomputes. (The sentinel error string comes
+    // meta/paramDefs rather than corrupting an active script into a
+    // utility — the next save recomputes. (The sentinel error string comes
     // from compileHost — matched exactly: user compile errors carry stacks
     // that mention sandbox.js.)
     const rpcFailed = compiled.error === SANDBOX_COMPILE_FAILED;
-    if (rpcFailed) dlogLevel("compile", "warn", `saveScript "${name ?? prev?.meta.name}": sandbox compile failed — keeping previous meta/paramDefs (declaration state preserved)`);
+    if (rpcFailed) dlogLevel("compile", "warn", `saveScript "${name ?? prev?.meta.name}": sandbox compile failed — keeping previous meta/paramDefs`);
     const meta = rpcFailed ? prev?.meta ?? compiled.meta : compiled.meta;
     if (name) meta.name = name;
     const script: Script = {
@@ -167,7 +167,7 @@ export async function scriptStorageSet(scriptId: string, key: string, value: any
     await storageSet({ [storeKey]: data });
 }
 
-// ---- per-script parameter values (wt.declareScript params) ----
+// ---- per-script parameter values (wt.params / wt.defineParam) ----
 const PARAMS_KEY = "resParams";
 
 /** Load all stored param values: { scriptId: { key: value } }. */

@@ -1,9 +1,14 @@
 /** Tapped vs modified: log-line classification, the separate "tapped" log ring, and the Network filter/counts. */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { setDefaultStrategy } from "../src/shared/route";
 import { interventionKind, tappedLine } from "../src/shared/netTypes";
 import { addUiPort, allLogs, clearTab, log, logTapped, type LogEntry } from "../src/background/engine/logs";
 import { matches, touchCounts, touchState, ALL_TYPES, type NetFilter } from "../src/ui/network/netFormat";
 import type { NetEntry, NetIntervention } from "../src/shared/netTypes";
+
+// these suites exercise the webRequest tier: make it the settings default
+beforeEach(() => setDefaultStrategy("webrequest"));
+afterEach(() => setDefaultStrategy(null));
 
 describe("interventionKind", () => {
     it("an explicit kind wins", () => {

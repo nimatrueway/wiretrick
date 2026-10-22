@@ -5,9 +5,9 @@
 Rewrite any request or response in your browser with a few lines of
 TypeScript. Wiretrick is a ground-up rewrite of
 [Resource Override](https://github.com/kylepaulsen/ResourceOverride) where the
-whole interface is a **script editor**: each script declares the URLs it
-matches and what to do — redirect, cancel, edit headers, transform or replace
-bodies, or patch the DOM.
+whole interface is a **script editor**: each handler in a script names the
+URLs it handles and what to do — redirect, cancel, edit headers, transform or
+replace bodies, or patch the DOM.
 
 ![Wiretrick manager](docs/shots/manager.png)
 
@@ -16,9 +16,10 @@ bodies, or patch the DOM.
 - **Scripts, not rule lists** — Monaco editor with IntelliSense, type checking,
   per-script enable toggles and adjustable parameters.
 - **Every kind of interception** — page fetch/XHR, documents, `<script>`,
-  images and workers, through four [strategies](docs/strategies.md) you can
-  rank per script. `hook` is the lightest but only sees fetch/XHR (REST)
-  calls; use `process`, `webrequest` or `cdp` for robust interception.
+  images and workers, through four [strategies](docs/strategies.md): one
+  default in Settings, overridable per handler. `hook` is the lightest but
+  only sees fetch/XHR (REST) calls; use `process`, `webrequest` or `cdp` for
+  robust interception.
 - **No debugger banner needed** — the optional [local helper](docs/process-helper.md)
   intercepts at network level on Chrome without the "being debugged" bar.
 - **Built-in devtools** — Log and Network panels show what every script did,
@@ -46,11 +47,7 @@ Open the manager (popup → **Manage all**), click **+ New** and paste:
 
 ```ts
 // Try it: open https://jsonplaceholder.typicode.com/todos/1
-wt.declareScript({
-    match: ["*://jsonplaceholder.typicode.com/todos/*"],
-});
-
-wt.modifyResponse((ctx, body) => {
+wt.modifyResponse("*://jsonplaceholder.typicode.com/todos/*", (ctx, body) => {
     const text = typeof body === "string" ? body : new TextDecoder().decode(body);
     const json = JSON.parse(text);
     json.title = "Transformed by Wiretrick";
@@ -67,8 +64,8 @@ Or click **?** → **Samples** for one-click starters against real public sites.
 | | |
 |---|---|
 | [Installing](docs/install.md) | release zips, signed crx, building from source |
-| [Writing scripts](docs/scripting.md) | the `wt` API, parameters, libraries, `onDom`, stacking, async handlers |
-| [Interception strategies](docs/strategies.md) | `hook` / `cdp` / `webrequest` / `process`, priority lists, [which tiers keep the URL when replacing a response](docs/strategies.md#how-each-tier-serves-a-replacement), the “never ran” warning, browser compatibility |
+| [Writing scripts](docs/scripting.md) | the `wt` API, routes, parameters, utilities, `onDom`, stacking, async handlers |
+| [Interception strategies](docs/strategies.md) | `hook` / `cdp` / `webrequest` / `process`, the default and per-handler choice, [which tiers keep the URL when replacing a response](docs/strategies.md#how-each-tier-serves-a-replacement), the “never ran” warning, browser compatibility |
 | [Local helper](docs/process-helper.md) | the `process` strategy: install, how it works, security notes |
 | [The manager](docs/manager.md) | editor, Log & Network panels, folder sync, `settings.yaml` |
 | [Development](docs/development.md) | build, tests, releases, how the MV3 build works |

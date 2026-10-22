@@ -53,7 +53,7 @@ describe("settings.yaml folder sync", () => {
         await ss.saveScript({
             id,
             name: "S",
-            code: `wt.declareScript({ params: { n: { type: "number", default: 1 } } });`,
+            code: `wt.params({ n: { type: "number", default: 1 } });`,
         });
         await sync.startFromStoredHandle();
         await sleep(600);
@@ -91,7 +91,7 @@ describe("settings.yaml folder sync", () => {
         await ss.saveScript({
             id: ss.newId(),
             name: "New",
-            code: `wt.declareScript({ params: { x: { type: "string", default: "a" } } });`,
+            code: `wt.params({ x: { type: "string", default: "a" } });`,
         });
         await sleep(800);
         const withNew = files.get("settings.yaml")!.text;
@@ -114,7 +114,7 @@ describe("settings.yaml folder sync", () => {
         const ss = await import("../src/background/engine/scriptStore");
         const { applySettingsText } = await import("../src/background/settingsFile");
         const id = ss.newId();
-        await ss.saveScript({ id, name: "S", code: `wt.declareScript({ params: { n: { type: "number", default: 1 } } });` });
+        await ss.saveScript({ id, name: "S", code: `wt.params({ n: { type: "number", default: 1 } });` });
         await sync.startFromStoredHandle();
         await sleep(600);
         // log level only (storage.onChanged is not wired here) + a new comment
@@ -128,38 +128,38 @@ describe("settings.yaml folder sync", () => {
         await sync.stop();
     }, 20000);
 
-    it("reflects declareScript param changes: added param documented, removed param commented out", async () => {
+    it("reflects wt.params changes: added param documented, removed param commented out", async () => {
         const sync = await import("../src/background/folderSync");
         const ss = await import("../src/background/engine/scriptStore");
         const id = ss.newId();
         await ss.saveScript({
             id,
             name: "S",
-            code: `wt.declareScript({ params: { n: { type: "number", default: 1 } } });`,
+            code: `wt.params({ n: { type: "number", default: 1 } });`,
         });
         await sync.startFromStoredHandle();
         await sleep(600);
         expect(files.get("settings.yaml")!.text).toContain("# n: 1");
 
-        // a param added to declareScript appears in the file even at its default
+        // a param added to wt.params appears in the file even at its default
         await ss.saveScript({
             id,
             name: "S",
-            code: `wt.declareScript({ params: { n: { type: "number", default: 1 }, extra: { type: "string", default: "x", description: "Extra knob" } } });`,
+            code: `wt.describe("Extra knob"); wt.params({ n: { type: "number", default: 1 }, extra: { type: "string", default: "x", description: "Extra knob" } });`,
         });
         await sleep(800);
         let text = files.get("settings.yaml")!.text;
         expect(text).toContain("# Extra knob");
         expect(text).toContain("# extra: x");
 
-        // a param removed from declareScript gets its live entry commented out + marked
+        // a param removed from wt.params gets its live entry commented out + marked
         await ss.setParamValue(id, "n", 7);
         await sleep(800);
         expect(files.get("settings.yaml")!.text).toContain("\n    n: 7\n");
         await ss.saveScript({
             id,
             name: "S",
-            code: `wt.declareScript({ params: { extra: { type: "string", default: "x", description: "Extra knob" } } });`,
+            code: `wt.describe("Extra knob"); wt.params({ extra: { type: "string", default: "x", description: "Extra knob" } });`,
         });
         await sleep(800);
         text = files.get("settings.yaml")!.text;

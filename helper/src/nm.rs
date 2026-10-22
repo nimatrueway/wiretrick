@@ -26,6 +26,12 @@ pub struct Route {
     /// by `proxy::State::set_routes`
     #[serde(rename = "match")]
     pub patterns: Vec<String>,
+    /// URLPatterns that veto `match` (same syntax)
+    #[serde(default)]
+    pub exclude: Vec<String>,
+    /// uppercase HTTP methods; empty = any
+    #[serde(default)]
+    pub methods: Vec<String>,
     /// onRequest / replaceResponse handlers → pause at the request stage
     #[serde(default)]
     pub req: bool,
@@ -323,12 +329,21 @@ mod tests {
     }
 
     #[test]
+    fn parses_route_exclude_and_methods() {
+        let m: In = serde_json::from_str(r#"{"t":"config","routes":[{"match":["*://a/*"],"exclude":["*://a/x"],"methods":["POST"],"req":true}]}"#).unwrap();
+        let In::Config { routes, .. } = m else { panic!() };
+        assert_eq!(routes[0].exclude, vec!["*://a/x".to_string()]);
+        assert_eq!(routes[0].methods, vec!["POST".to_string()]);
+    }
+
+    #[test]
     fn parses_config() {
         let m: In = serde_json::from_str(r#"{"t":"config","routes":[{"match":["*://a/*"],"req":true,"body":true}],"upstream":"ask"}"#).unwrap();
         match m {
             In::Config { routes, upstream } => {
                 assert_eq!(upstream, UpstreamMode::Ask);
                 assert!(routes[0].req && routes[0].body && !routes[0].res_headers);
+                assert!(routes[0].exclude.is_empty() && routes[0].methods.is_empty());
             }
             _ => panic!(),
         }

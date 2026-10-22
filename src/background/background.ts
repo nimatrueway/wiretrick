@@ -30,9 +30,7 @@ setSink((e) =>
 const webRequestStrategy = new WebRequestStrategy();
 const chromeBody = new ChromeBodyStrategy();
 const cdp = new CdpStrategy();
-cdp.isClaimed = (url: string) => chromeBody.isClaimed(url);
 const processStrategy = new ProcessStrategy();
-processStrategy.isClaimed = (url: string) => chromeBody.isClaimed(url);
 processStrategy.onStatus = (status) => broadcastToUi({ type: "processStatus", status });
 
 createPipeline(webRequestStrategy, chromeBody, cdp, processStrategy, updateTabBadge, noteRequestForBadge);
@@ -60,8 +58,7 @@ chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
 void folderSync.initFromStorage();
 chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
     if (msg && msg.type === "hookCspBlocked" && _s && _s.tab && _s.tab.id !== undefined) {
-        chromeBody.markHookBroken(_s.tab.id);
-        dlogLevel("bg", "info", "page CSP blocks the fetch/XHR hook in this tab — falling back to debugger (cdp) body interception", { tabId: _s.tab.id });
+        dlogLevel("bg", "info", "page CSP blocks compiling scripts in the page — onDom runs in the isolated world in this tab", { tabId: _s.tab.id });
         sendResponse({});
         return false;
     }

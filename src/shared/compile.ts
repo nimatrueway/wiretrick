@@ -4,21 +4,20 @@
  * hook — each provides its own minimal `wt` API shim and re-evaluates
  * handler sources with `new Function`.
  */
-import { defaultMeta, type ResMeta } from "./metaParser";
-import { resolveParamValues } from "./scriptDef";
+import { defaultMeta, finishMeta, type ResMeta } from "./metaParser";
+import { resolveParamValues, type ParamDef } from "./scriptDef";
 import { formatLogArgs, makeScriptConsole, type ScriptLogLevel } from "./scriptLog";
 import { scriptFunction } from "./scriptFn";
-import { matchPatternError } from "./matcher";
+import { normalizeRoute, type RouteKind, type RouteMeta } from "./route";
+
+export type { DomWhen } from "./route";
 
 export type HandlerFn = (...args: any[]) => any;
 
-/** When an onDom handler should fire (2nd argument of wt.onDom). */
-export type DomWhen = "document_start" | "document_end" | "document_idle" | "DOMContentLoaded";
-
-/** Options for the onDom hook (2nd argument of wt.onDom). */
-export interface DomOptions {
-    /** see Wiretrick.DomOptions.when in src/types/wt-api.d.ts (the user-facing docs) */
-    when?: DomWhen;
+/** a registered handler and the route it was registered with */
+export interface Routed {
+    fn: HandlerFn;
+    route: RouteMeta;
 }
 
 /**
@@ -26,12 +25,12 @@ export interface DomOptions {
  * all run, in registration order (same semantics as across scripts).
  */
 export interface ScriptHandlers {
-    onRequest: HandlerFn[];
-    onResponseHeaders: HandlerFn[];
-    replaceResponse: HandlerFn[];
-    modifyResponse: HandlerFn[];
-    /** run at DOM-ready in the page — DOM/title manipulation */
-    onDom: { fn: HandlerFn; when: DomWhen }[];
+    onRequest: Routed[];
+    onResponseHeaders: Routed[];
+    replaceResponse: Routed[];
+    modifyResponse: Routed[];
+    /** run in the page — DOM/title manipulation (route.when = timing) */
+    onDom: Routed[];
 }
 
 export interface CompiledScript {
@@ -40,20 +39,14 @@ export interface CompiledScript {
     error: string | null;
     /** original full source */
     code: string;
-    /** parameter definitions collected from wt.declareScript (if any) */
-    paramDefs?: Record<string, import("./scriptDef").ParamDef>;
-    /** the module's exports (library scripts: importable by others) */
+    /** parameter definitions collected from wt.params / wt.defineParam (if any) */
+    paramDefs?: Record<string, ParamDef>;
+    /** the module's exports (utility scripts: importable by others) */
     exports?: any;
 }
 
-export interface HandlerSources {
-    onRequest: string[] | null;
-    onResponseHeaders: string[] | null;
-    replaceResponse: string[] | null;
-    modifyResponse: string[] | null;
-    /** JSON: [{ when, src }] */
-    onDom: string | null;
-}
+import { DECLARE_REMOVED } from "./route";
+export { DECLARE_REMOVED };
 
 /** true if the value looks like a Promise (thenable). */
 export function isThenable(v: any): v is Promise<any> {
@@ -69,7 +62,7 @@ export interface ResApiOverrides {
     storage?: { get(key: string): Promise<any>; set(key: string, value: any): Promise<void> };
     /** receives the script's wt.log and console.* output (source: "wt.log", "console.warn", …) */
     logSink?: (level: ScriptLogLevel, source: string, text: string) => void;
-    /** stored parameter values, merged over declareScript defaults */
+    /** stored parameter values, merged over wt.params defaults */
     paramValues?: Record<string, any>;
     /** resolves ES import specifiers ("./utils", "utils") to module exports */
     importModule?: (spec: string) => any;
@@ -117,43 +110,57 @@ export function toRunnableJs(code: string): string {
 }
 
 /**
- * Compile from full source (background storage path). The ONLY way to
- * activate a script is wt.declareScript — a source without it compiles
- * as a library module (handlers inert, exports importable).
+ * Compile from full source. A script is ACTIVE when its top level
+ * registers at least one handler; one that registers nothing compiles as
+ * a utility module (exports importable, params allowed).
  */
 export function compileScript(code: string, overrides?: ResApiOverrides): CompiledScript {
     const meta = defaultMeta();
+    const owner = createOwner(meta, overrides?.paramValues);
+    const store = createCollector();
     try {
         const js = toRunnableJs(code);
         const moduleObj = { exports: {} as any };
         // eslint-disable-next-line no-new-func
         const fn = scriptFunction(js);
-        const store = createCollector();
-        const declare = createDeclareShim(meta, overrides?.paramValues);
-        const shim = makeCollectorShim(store, overrides);
-        shim.declareScript = declare.run;
+        const shim = makeShim(owner, overrides);
         const requireShim = overrides?.importModule
             ? overrides.importModule
             : (spec: string) => {
                   throw new Error(`cannot import "${spec}" here — imports resolve in the background/hook contexts`);
               };
-        fn(shim, makeForwardingConsole(overrides?.logSink), requireShim, moduleObj, moduleObj.exports);
-        return { meta, handlers: store, error: null, code, paramDefs: declare.defs, exports: moduleObj.exports };
+        withCollector(store, () => fn(shim, makeForwardingConsole(overrides?.logSink), requireShim, moduleObj, moduleObj.exports));
+        meta.routes = routesOf(store);
+        finishMeta(meta);
+        return { meta, handlers: store, error: null, code, paramDefs: owner.defs, exports: moduleObj.exports };
     } catch (e: any) {
-        return { meta, handlers: emptyHandlers(), error: e && e.stack ? e.stack : String(e), code };
+        meta.routes = [];
+        finishMeta(meta);
+        return { meta, handlers: emptyHandlers(), error: e && e.stack ? e.stack : String(e), code, paramDefs: owner.defs };
     }
+}
+
+const stubs = new WeakSet<object>();
+
+/** a route that mentions a stubbed import — its real value is only known once imports resolve */
+function mentionsStub(route: unknown): boolean {
+    const isStub = (x: unknown) => typeof x === "function" && stubs.has(x as object);
+    if (isStub(route)) return true;
+    const parts: unknown[] = Array.isArray(route) ? route : route && typeof route === "object" ? [(route as any).url, (route as any).exclude] : [];
+    return parts.some((p) => isStub(p) || (Array.isArray(p) && p.some(isStub)));
 }
 
 /**
  * Module stub for meta-only compiles (scriptStore.saveScript): imports
  * resolve to a callable/gettable proxy so top-level code that references
- * library exports doesn't throw before declareScript runs.
+ * library exports doesn't throw before its handlers register.
  */
 export function makeStubModule(): any {
     const stub: any = new Proxy(function () {}, {
         get: (_t, k) => (k === Symbol.toPrimitive ? () => "" : stub),
         apply: () => stub,
     });
+    stubs.add(stub);
     return stub;
 }
 
@@ -194,12 +201,18 @@ export function makeModuleResolver(
         cache.set(key, moduleObj.exports); // early, for cycles
         const js = toRunnableJs(lib.code);
         // eslint-disable-next-line no-new-func
-        scriptFunction(js)(
-            makeCollectorShim(createCollector(), overridesFor(lib)),
-            makeForwardingConsole(overridesFor(lib).logSink),
-            resolve,
-            moduleObj,
-            moduleObj.exports
+        const libOverrides = overridesFor(lib);
+        // the lib's own top-level registrations make IT active (it's compiled
+        // on its own as a script too); recipes it exports and the importer
+        // calls register into the importer's collector
+        withCollector(createCollector(), () =>
+            scriptFunction(js)(
+                makeShim(createOwner(defaultMeta(lib.name), libOverrides.paramValues), libOverrides),
+                makeForwardingConsole(libOverrides.logSink),
+                resolve,
+                moduleObj,
+                moduleObj.exports
+            )
         );
         compiling.delete(key);
         cache.set(key, moduleObj.exports);
@@ -212,8 +225,8 @@ export function makeModuleResolver(
  * Wrap a module resolver so unknown/missing imports resolve to a silent
  * stub instead of throwing. Used by the MV3 sandbox analyze path (and
  * anywhere meta capture must not depend on the import graph): a script
- * whose `import` fails must still run its body so wt.declareScript
- * captures match/params — otherwise it silently stores as a library.
+ * whose `import` fails must still run its body so its registrations
+ * and params are captured — otherwise it silently stores as a utility.
  */
 export function resolveWithStubFallback(resolve: (spec: string) => any): (spec: string) => any {
     return (spec) => {
@@ -222,44 +235,6 @@ export function resolveWithStubFallback(resolve: (spec: string) => any): (spec: 
         } catch {
             return makeStubModule();
         }
-    };
-}
-
-/** Rebuild handlers from serialized sources (hook path). */
-export function compileFromSources(meta: ResMeta, sources: HandlerSources): CompiledScript {
-    const store = createCollector();
-    const rebuild = (src: string): HandlerFn => {
-        // eslint-disable-next-line no-new-func
-        return new Function(`return (${src});`)();
-    };
-    for (const key of ["onRequest", "onResponseHeaders", "replaceResponse", "modifyResponse"] as const) {
-        const srcs = sources[key];
-        if (srcs) for (const src of srcs) {
-            try { store[key].push(rebuild(src)); } catch { /* absent */ }
-        }
-    }
-    if (sources.onDom) {
-        try {
-            const list = JSON.parse(sources.onDom) as { when: DomWhen; src: string }[];
-            for (const d of list) {
-                try { store.onDom.push({ fn: rebuild(d.src), when: d.when }); } catch {}
-            }
-        } catch {}
-    }
-    return { meta, handlers: store, error: null, code: "" };
-}
-
-/** Serialize compiled handlers so they can be shipped to the hook context. */
-export function serializeHandlers(s: CompiledScript): HandlerSources {
-    const arr = (fns: HandlerFn[]) => (fns.length ? fns.map((f) => f.toString()) : null);
-    return {
-        onRequest: arr(s.handlers.onRequest),
-        onResponseHeaders: arr(s.handlers.onResponseHeaders),
-        replaceResponse: arr(s.handlers.replaceResponse),
-        modifyResponse: arr(s.handlers.modifyResponse),
-        onDom: s.handlers.onDom.length
-            ? JSON.stringify(s.handlers.onDom.map((d) => ({ when: d.when, src: d.fn.toString() })))
-            : null,
     };
 }
 
@@ -282,46 +257,88 @@ function makeForwardingConsole(sink?: ResApiOverrides["logSink"]): Console {
     return sink ? makeScriptConsole(sink) : console;
 }
 
-function makeCollectorShim(store: any, overrides?: ResApiOverrides): any {
+/**
+ * The collector stack: registrations go to the script whose top level is
+ * running right now (recipes exported by a utility and called from an
+ * importer's top level belong to the importer). Empty = too late.
+ */
+const collectors: ScriptHandlers[] = [];
+
+function withCollector<T>(c: ScriptHandlers, run: () => T): T {
+    collectors.push(c);
+    try {
+        return run();
+    } finally {
+        collectors.pop();
+    }
+}
+
+function routesOf(h: ScriptHandlers): RouteMeta[] {
+    return [...h.onRequest, ...h.onResponseHeaders, ...h.replaceResponse, ...h.modifyResponse, ...h.onDom].map((x) => x.route);
+}
+
+const PARAM_TYPES = ["boolean", "number", "string", "enum", "stringList"];
+
+/** per-script state behind wt.describe / wt.params / wt.defineParam */
+function createOwner(meta: ResMeta, storedValues?: Record<string, any>) {
+    let defs: Record<string, ParamDef> | undefined;
     return {
-        onRequest: (fn: HandlerFn) => { store.onRequest.push(fn); },
-        onResponseHeaders: (fn: HandlerFn) => { store.onResponseHeaders.push(fn); },
-        replaceResponse: (fn: HandlerFn) => { store.replaceResponse.push(fn); },
-        modifyResponse: (fn: HandlerFn) => { store.modifyResponse.push(fn); },
-        onDom: (fn: HandlerFn, opts?: DomOptions) => {
-            store.onDom.push({ fn, when: opts?.when || "DOMContentLoaded" });
+        describe(text: unknown) {
+            meta.description = String(text ?? "");
         },
-        // replaced per-compile by the meta-applying variant
-        declareScript: (def: any) => def?.params || {},
+        add(next: Record<string, ParamDef>, where: string): Record<string, any> {
+            if (!next || typeof next !== "object") throw new Error(`${where}: expected an object of parameter definitions`);
+            for (const [k, d] of Object.entries(next)) {
+                if (defs && k in defs) throw new Error(`${where}: parameter "${k}" is already defined`);
+                if (!d || typeof d !== "object" || !PARAM_TYPES.includes((d as any).type)) {
+                    throw new Error(`${where}: parameter "${k}" needs a type (${PARAM_TYPES.join(", ")})`);
+                }
+                if ((d as any).type === "enum" && !Array.isArray((d as any).choices)) throw new Error(`${where}: enum parameter "${k}" needs choices`);
+            }
+            defs = { ...(defs || {}), ...next };
+            return resolveParamValues(next, storedValues);
+        },
+        get defs() {
+            return defs;
+        },
+    };
+}
+
+function makeShim(owner: ReturnType<typeof createOwner>, overrides?: ResApiOverrides): any {
+    const register = (kind: RouteKind) => (route: unknown, fn: unknown) => {
+        const top = collectors[collectors.length - 1];
+        if (!top) {
+            const msg = `wt.${kind} called after the script's top level finished — handlers must be registered synchronously at top level (not after await / in callbacks); ignored`;
+            if (overrides?.logSink) overrides.logSink("error", "wt", msg);
+            else console.error("[Wiretrick]", msg);
+            return;
+        }
+        if (typeof route === "function" && fn === undefined && !mentionsStub(route)) normalizeRoute(kind, route, 0); // throws the "first argument" error
+        if (typeof fn !== "function") throw new Error(`wt.${kind}: second argument must be the handler function`);
+        const list = top[kind];
+        // save-time compile with stubbed imports: route unknown until analyzed
+        const r = mentionsStub(route) ? { kind, index: list.length, url: [], exclude: [] } : normalizeRoute(kind, route, list.length);
+        list.push({ fn: fn as HandlerFn, route: r });
+    };
+    return {
+        onRequest: register("onRequest"),
+        onResponseHeaders: register("onResponseHeaders"),
+        replaceResponse: register("replaceResponse"),
+        modifyResponse: register("modifyResponse"),
+        onDom: register("onDom"),
+        describe: (text: unknown) => owner.describe(text),
+        params: (defs: Record<string, ParamDef>) => Object.freeze(owner.add(defs, "wt.params")),
+        defineParam: (name: string, def: ParamDef) => {
+            if (typeof name !== "string" || !name) throw new Error("wt.defineParam: first argument must be the parameter name");
+            return owner.add({ [name]: def }, "wt.defineParam")[name];
+        },
+        declareScript: () => {
+            throw new Error(DECLARE_REMOVED);
+        },
         storage: overrides?.storage || {
             get: () => undefined,
             set: () => undefined,
         },
         log: (...args: any[]) => (overrides?.logSink ? overrides.logSink("info", "wt.log", formatLogArgs(args)) : console.log("[Wiretrick] wt.log:", ...args)),
     };
-}
-
-/**
- * Builds wt.declareScript: applies match/strategy onto the
- * script's meta and marks it declared, collects param defs, and returns
- * the resolved param values for the script to use.
- */
-function createDeclareShim(meta: ResMeta, storedValues?: Record<string, any>) {
-    const state: { defs?: Record<string, import("./scriptDef").ParamDef> } = {};
-    const run = (def: import("./scriptDef").ScriptDef): any => {
-        if (!def || typeof def !== "object") return {};
-        meta.declared = true;
-        if (def.match?.length) {
-            const bad = def.match.map(matchPatternError).find((e) => e);
-            if (bad) throw new Error(`wt.declareScript: match ${bad}`);
-            meta.match = [...def.match];
-        }
-        if (def.strategy?.length) meta.strategy = def.strategy.join(",");
-        if (def.params) {
-            state.defs = def.params;
-            return resolveParamValues(def.params, storedValues);
-        }
-        return {};
-    };
-    return { run, get defs() { return state.defs; } };
 }

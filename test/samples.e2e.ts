@@ -29,8 +29,8 @@ const open = async (p: Page, url: string) => {
 // sample name → how to see its effect (opens the page itself)
 const VERIFY: Record<string, (p: Page) => Promise<[boolean, string]>> = {
     "Redirect a URL": async (p) => {
-        // the debugger tier rewrites the request in place: the Dog article
-        // is served while the address bar keeps /wiki/Cat
+        // settings.strategy = cdp: the request is rewritten in place — the
+        // Dog article is served while the address bar keeps /wiki/Cat
         await open(p, "https://en.wikipedia.org/wiki/Cat");
         const h1 = await p.evaluate(() => document.querySelector("h1")?.textContent || "");
         return [h1 === "Dog", h1];
@@ -84,7 +84,7 @@ const VERIFY: Record<string, (p: Page) => Promise<[boolean, string]>> = {
         const b = await hits();
         return [a > 0 && b === a + 1, `${a} → ${b}`];
     },
-    "Parameters (declareScript)": async (p) => {
+    "Parameters (wt.params)": async (p) => {
         await open(p, "https://jsonplaceholder.typicode.com/posts/1");
         const t = await text(p);
         return [t.includes("forced failure"), t.slice(0, 80)];
@@ -113,6 +113,8 @@ try {
     const mgr = await ctx.newPage();
     await mgr.goto(`chrome-extension://${EXT_ID}/manager.html`);
     const send = (msg: any) => mgr.evaluate((m: any) => new Promise<any>((r) => chrome.runtime.sendMessage(m, r)), msg);
+    // no local helper here: run the samples on the debugger tier (settings.strategy)
+    await mgr.evaluate(() => new Promise<void>((r) => chrome.storage.local.set({ resStrategy: "cdp" }, () => r())));
 
     for (const n of SAMPLES.map((s) => s.name)) check(`"${n}" has a verifier`, n in VERIFY);
     for (const s of SAMPLES) check(`"${s.name}" names a URL to try`, /Try it: .*https:\/\//.test(s.code));

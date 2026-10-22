@@ -59,14 +59,14 @@ pages, and drops blocking `webRequest`):
   page's MAIN world — same behavior, transforms execute in the sandbox).
   The `webrequest` tier is gone (no blocking webRequest in MV3).
 - **Browser-initiated loads (`<script src>`, `<img>`, stylesheets, fonts,
-  main-frame HTML) go through the debugger tier** for scripts whose
-  `strategy` lists `cdp` (or through the local helper with `process`).
+  main-frame HTML) go through the debugger tier** for handlers whose
+  strategy is `cdp` (or through the local helper with `process`).
   The service worker
   drives `chrome.debugger` / CDP `Fetch` (pausing only URLs matching those
-  scripts' `match` patterns, XHR/fetch excluded — the hook handles them);
+  handlers' routes, fetch/XHR included);
   handler decisions (`onRequest`, `replaceResponse`, `modifyResponse`) are
-  computed in the sandbox, so only the participating scripts apply.
-  `auto`/`hook` scripts stay hook-only (a warning hints to add `"cdp"`).
+  computed in the sandbox, so only the owning handlers apply.
+  `hook` handlers stay fetch/XHR-only (a page load they match is warned about).
   Caveats:
   - Chrome shows its "started debugging this browser" banner, and every
     http(s) tab is attached while such scripts exist (the resource's CDN

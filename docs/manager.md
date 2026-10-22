@@ -26,7 +26,7 @@ background page under *Inspect views*.
 ## Explorer
 
 The script list on the left looks and works like VS Code's explorer: one
-`Name.ts` row per script (libraries in italics, disabled scripts dimmed and
+`Name.ts` row per script ([utilities](scripting.md#utilities-and-recipes) in italics, disabled scripts dimmed and
 struck through, ● for unsaved changes, ⚠ for errors). Click the **Wiretrick**
 header to collapse it. With the list focused (⌘⇧E or a click): ↑/↓,
 Home/End move, Enter opens the script and focuses the editor, Space opens it
@@ -98,8 +98,8 @@ at the right of the editor toolbar do the same.
   no extra browser listeners, just the engine's own log lines — up to the
   newest 500, without bodies, headers or timing (status shows as unknown).
   Opening the tab shows them; closing the manager keeps only such rows.
-  - **Missed** — a script with `modifyResponse` / `replaceResponse` matched
-    a request but no tier ever ran the handler (see
+  - **Missed** — a script's `modifyResponse` / `replaceResponse` route
+    matched a request but the handler never ran on it (see
     [“never ran” warning](strategies.md#never-ran-warning)). It is logged as
     a WARN line and shown as a yellow *missed* entry in the request's
     details; it does not mark the row tapped or modified.
@@ -130,11 +130,22 @@ notice or the button).
 ## Appearance
 
 Settings (⚙ in the explorer header, or ⌘,) is split into Appearance,
-Scripts folder, Import / Export, Local helper, Logging, Advanced and About —
-pick one on the left to jump to it.
+Scripts folder, Import / Export, Interception, Local helper, Logging,
+Advanced and About — pick one on the left to jump to it.
 
 **Settings → Appearance → Theme** picks *System* (follows the OS), *Dark*
 or *Light*. It applies to the manager, the editor and the popup.
+
+## Interception
+
+**Settings → Interception → Default strategy** picks the
+[strategy](strategies.md) every handler uses unless its route sets
+`strategy` — `process` on Chromium and `webrequest` on Firefox out of the
+box. Strategies the current browser can't use are disabled in the picker,
+and a table lists each one's pros and cons; **Compatibility** links to
+[the full table](strategies.md#compatibility). It is the `strategy:` entry
+in `settings.yaml`. There is no fallback: a handler whose strategy isn't
+available doesn't run — the script gets a ⚠ and the Log a warning.
 
 ## About and diagnostics
 
@@ -162,7 +173,7 @@ text.
 script with its code, enabled state and non-default params. Import reads a
 bundle and lets you pick which of its items to take; each row says whether
 it's **new** or **replaces existing** (a script of the same name is
-overwritten rather than duplicated). If a picked script imports a library
+overwritten rather than duplicated). If a picked script imports a utility
 that isn't picked, the dialog warns and **Add them** ticks the missing ones.
 A plain `.ts`/`.js` file imports as a single script.
 
@@ -192,13 +203,19 @@ scratch only when missing or unparsable.
 
 Every option has its description above it; options at their default are
 commented out, only non-default values are live entries. `enabled` is live only
-when `false`. Params are keyed by script name; libraries are omitted.
+when `false`. Params are keyed by script name; a utility is listed only
+when it declares params (without `enabled` — it never runs on its own).
 
 ```yaml
 # yaml-language-server: $schema=./settings.schema.json
 settings:
   # Minimum log level shown in the panel: debug | info | warn | error
   # logLevel: info
+  # …
+  # Interception strategy for every handler whose route doesn't set `strategy`.
+  # …one pros/cons line per strategy…
+  # process | hook | webrequest | cdp
+  # strategy: process
 
 params:
   Debug header:

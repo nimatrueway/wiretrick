@@ -31,15 +31,15 @@ const script = (id: string, name: string, extra: Partial<ScriptInfo> = {}): Scri
     id,
     enabled: true,
     error: null,
-    meta: { name, declared: true },
+    meta: { name, active: true },
     ...extra,
 });
 
 const names = (c: Element) => [...c.querySelectorAll("#script-list .script-name")].map((n) => n.textContent);
 
 describe("Popup", () => {
-    it("lists declared scripts and hides libraries", async () => {
-        const { container } = render(<Popup api={fakeApi([script("a", "Alpha"), script("l", "lib", { meta: { name: "lib", declared: false } })])} />);
+    it("lists active scripts and hides utilities", async () => {
+        const { container } = render(<Popup api={fakeApi([script("a", "Alpha"), script("l", "lib", { meta: { name: "lib", active: false } })])} />);
         await waitFor(() => expect(names(container)).toEqual(["Alpha"]));
         expect(container.querySelector("#empty")).toBeNull();
     });

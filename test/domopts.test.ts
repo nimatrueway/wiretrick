@@ -15,14 +15,14 @@ function makeHookScaffold() {
 
 describe("wt.onDom options", () => {
     it("captures handler + options", () => {
-        const c = compileScript(`wt.declareScript({ match: ["*"] });\nwt.onDom(() => {}, { when: "document_idle" });`);
+        const c = compileScript(`wt.onDom({ url: "*", when: "document_idle" }, () => {});\nwt.onDom("*://x.com/*", () => {});`);
         expect(c.error).toBeNull();
-        expect(c.handlers.onDom.length).toBe(1);
-        expect(c.handlers.onDom[0].when).toBe("document_idle");
+        expect(c.handlers.onDom.length).toBe(2);
+        expect(c.handlers.onDom[0].route.when).toBe("document_idle");
     });
 
-    it("defaults: no options → {}", () => {
-        const c = compileScript(`wt.declareScript({ match: ["*"] });\nwt.onDom(() => {});`);
-        expect(c.handlers.onDom[0]?.when).toBe("DOMContentLoaded");
+    it("defaults: when = DOMContentLoaded", () => {
+        const c = compileScript(`wt.onDom("*", () => {});`);
+        expect(c.handlers.onDom[0]?.route.when).toBe("DOMContentLoaded");
     });
 });

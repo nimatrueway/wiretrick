@@ -29,8 +29,8 @@ const store: Record<string, any> = {};
 };
 
 const SCRIPTS = [
-    { name: "Debug header", code: `wt.declareScript({ params: { level: { type: "string", default: "warn" } } });\n`, enabled: false },
-    { name: "Mock api", code: `wt.declareScript({ match: ["*://api/*"] });`, enabled: true },
+    { name: "Debug header", code: `wt.params({ level: { type: "string", default: "warn" } });\n`, enabled: false },
+    { name: "Mock api", code: ``, enabled: true },
 ];
 
 const DOC: SettingsDoc = {
@@ -76,7 +76,7 @@ describe("parseBundleText", () => {
             format: "wiretrick-bundle",
             version: 1,
             settings: { logLevel: "debug", logCap: 1234 },
-            scripts: [{ name: "Old", code: "wt.declareScript({});", enabled: true }],
+            scripts: [{ name: "Old", code: "", enabled: true }],
         };
         const b = parseBundleText(JSON.stringify(old));
         expect(b).not.toBeNull();

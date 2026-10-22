@@ -7,53 +7,57 @@ import type { InterceptionStrategy } from "./strategies/types";
 import type { ChromeBodyStrategy } from "./strategies/chromeBodyStrategy";
 import type { CdpStrategy } from "./strategies/cdpStrategy";
 import type { ProcessStrategy } from "./strategies/processStrategy";
-import { hookEligible, onProcessActiveChange, processActive } from "./strategies/processState";
+import { IS_FIREFOX, onProcessActiveChange, processActive, tierUnavailable } from "./strategies/processState";
 import type { HeaderChanges } from "./strategies/types";
 import type { Script } from "./scriptStore";
 import { listScripts, getScript, onScriptsChanged, saveScript, deleteScript, setEnabled, newId, scriptStorageGet, scriptStorageSet, loadAllParamValues, getParamValues, setParamValue } from "./scriptStore";
-import { matchAny } from "../../shared/matcher";
 import { serveStore } from "./strategies/webRequestStrategy";
 import { dlog, dlogLevel } from "../../shared/debugLog";
 import { isThenable, toRunnableJs } from "../../shared/compile";
 import "../../shared/transpile";
-void toRunnableJs;
 import { log, getScriptErrors, getScriptTypeErrors, bodyTappedSince } from "./logs";
-import { parseStrategyList } from "../../shared/metaParser";
 import { missedLine } from "../../shared/netTypes";
-import { bodyTierGap, makeMissedThrottle, missedReason, missedWhat, MISSED_SKIP_TYPES } from "../../shared/missedTap";
-import { serializeHandlers, type HandlerSources } from "../../shared/compile";
+import { makeMissedThrottle, missedReason, missedWhat, routeProblem, MISSED_SKIP_TYPES } from "../../shared/missedTap";
 import { resolveParamValues } from "../../shared/scriptDef";
-import { unknownStrategies } from "../../shared/metaParser";
-import { analyzeScripts, runBodyOp } from "../compileHost";
+import { effectiveStrategy, hookCanSee, routeLabel, routeMatches, setDefaultStrategy, type RouteMeta, type Strategy } from "../../shared/route";
+import { analyzeScripts, runBodyOp, type Analyzed } from "../compileHost";
 import { recordNetBody } from "../network";
+import { STRATEGY_KEY } from "../settingsFile";
 
 const FILTER: chrome.webRequest.RequestFilter = { urls: ["<all_urls>"] };
 
-const IS_FIREFOX = typeof (globalThis as any).browser !== "undefined" && typeof (globalThis as any).browser.webRequest?.filterResponseData === "function";
-
-/** an enabled, declared script with body handlers — checked by the "never ran" warning */
+/** an enabled script's body-handler route — checked by the "never ran" warning */
 interface BodyWatch {
     id: string;
     name: string;
-    match: string[];
-    tiers: string[];
-    modify: boolean;
-    replace: boolean;
+    route: RouteMeta;
+    strategy: Strategy;
 }
 const MISSED_DELAY_MS = 1500;
+/** the helper usually connects within this after a (service-worker) start */
+const HELPER_GRACE_MS = 5000;
 
-/** "proxy" (removed) or a typo is silently ignored by parseStrategyList — say so once per script+value */
-const warnedStrategies = new Set<string>();
-function warnUnknownStrategies(scripts: { id: string; enabled: boolean; meta: { name: string; strategy: string; declared?: boolean } }[]): void {
-    for (const s of scripts) {
-        if (!s.enabled || !s.meta.declared) continue;
-        const bad = unknownStrategies(s.meta.strategy);
-        const key = `${s.id}:${bad.join(",")}`;
-        if (!bad.length || warnedStrategies.has(key)) continue;
-        warnedStrategies.add(key);
-        const hint = bad.includes("proxy") ? ' — the "proxy" strategy was removed; use "cdp" or "process" for browser-initiated loads' : "";
-        dlogLevel("pipeline", "warn", `Script "${s.meta.name}": unknown strategy ${bad.map((b) => `"${b}"`).join(", ")} ignored${hint}`);
-    }
+/** settings.strategy → route.ts default (every reload and hook bundle) */
+function loadDefaultStrategy(): Promise<void> {
+    return new Promise((resolve) => {
+        try {
+            chrome.storage.local.get([STRATEGY_KEY], (g: any) => {
+                void (chrome.runtime as any).lastError;
+                setDefaultStrategy(g?.[STRATEGY_KEY]);
+                resolve();
+            });
+        } catch {
+            resolve();
+        }
+    });
+}
+
+/** stored scripts with their meta replaced by the analyzed one (real params + imports) */
+function withAnalyzedMeta(scripts: Script[], analyzed: Map<string, Analyzed>): Script[] {
+    return scripts.map((s) => {
+        const a = analyzed.get(s.id);
+        return a ? { ...s, meta: { ...a.meta, name: s.meta.name } } : s;
+    });
 }
 
 export interface Pipeline {
@@ -61,10 +65,6 @@ export interface Pipeline {
     chromeBody: ChromeBodyStrategy;
     cdp: CdpStrategy;
     dispose(): void;
-}
-
-interface ScriptWithSources extends Script {
-    _sources?: HandlerSources;
 }
 
 export function createPipeline(
@@ -124,15 +124,13 @@ export function createPipeline(
     /** `${tabId}|${url}` loads the debugger-tier warning below already reported */
     const cdpWarned = new Set<string>();
     const missedThrottle = makeMissedThrottle();
-    /** scriptId → last up-front tier-gap state reported (see bodyTierGap) */
-    const gapWarned = new Map<string, string>();
     const extOrigin = chrome.runtime.getURL("");
-    const watchedFor = (url: string) => bodyWatch.filter((w) => matchAny(w.match, url));
+    const watchedFor = (url: string, method?: string, type?: string) => bodyWatch.filter((w) => routeMatches(w.route, url, method, type));
     const ownRequest = (d: any) => d.url.startsWith(extOrigin) || (d.initiator || d.originUrl || "").startsWith(extOrigin.replace(/\/$/, ""));
     if (chrome.webRequest?.onBeforeRequest) {
         chrome.webRequest.onBeforeRequest.addListener(
             (d) => {
-                if (d.tabId < 0 || MISSED_SKIP_TYPES.has(d.type) || !bodyWatch.length || !watchedFor(d.url).length) return;
+                if (d.tabId < 0 || MISSED_SKIP_TYPES.has(d.type) || !bodyWatch.length || !watchedFor(d.url, d.method, d.type).length) return;
                 watchedStarts.set(d.requestId, d.timeStamp);
                 if (watchedStarts.size > 500) watchedStarts.delete(watchedStarts.keys().next().value!);
             },
@@ -145,58 +143,89 @@ export function createPipeline(
         if (start === undefined) return;
         watchedStarts.delete(d.requestId);
         if (ownRequest(d)) return;
-        const scripts = watchedFor(d.url);
-        if (!scripts.length) return;
+        const routes = watchedFor(d.url, (d as any).method, d.type);
+        if (!routes.length) return;
         setTimeout(() => {
             // the hook took it: the page may simply never read the body
             if (chromeBody.isClaimed(d.url)) return;
-            for (const w of scripts) {
+            const done = new Set<string>();
+            for (const w of routes) {
+                if (done.has(w.id)) continue;
+                done.add(w.id);
                 if (bodyTappedSince(w.id, d.url, start - 250)) continue;
                 const reason = missedReason({
-                    tiers: w.tiers,
+                    strategy: w.strategy,
                     type: d.type,
                     firefox: IS_FIREFOX,
                     mv3: __MV3__,
                     fromCache: !!d.fromCache,
                     helperActive: processActive(),
-                    replaceOnly: w.replace && !w.modify,
                     cdpWarned: cdpWarned.has(`${d.tabId}|${d.url}`),
                 });
                 if (!reason || !missedThrottle(`${w.id}|${d.url}`)) continue;
-                const handler = w.modify ? "modifyResponse" : "replaceResponse";
-                log(d.tabId, missedLine(w.name, handler, d.url, missedWhat(d.type), reason), "warn", w.id, "missed", d.url);
+                log(d.tabId, missedLine(w.name, routeLabel(w.route), d.url, missedWhat(d.type), reason), "warn", w.id, "missed", d.url);
             }
         }, MISSED_DELAY_MS);
     }
-    async function refreshBodyWatch(scripts: Script[]): Promise<void> {
-        try {
-            const analyzed = await analyzeScripts(scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt })));
-            const next: BodyWatch[] = [];
-            for (const s of scripts) {
-                const a = analyzed.get(s.id);
-                if (!s.enabled || !a || a.error || !a.declared || !a.handlers) continue;
-                if (!a.handlers.modifyResponse && !a.handlers.replaceResponse) continue;
-                next.push({
-                    id: s.id,
-                    name: s.meta.name,
-                    match: s.meta.match,
-                    tiers: parseStrategyList(s.meta.strategy as any),
-                    modify: a.handlers.modifyResponse > 0,
-                    replace: a.handlers.replaceResponse > 0,
-                });
+
+    // ---- up-front: handlers that can't run where they are ----
+    /** `${scriptId}|${message}` → handler labels last reported */
+    let routeWarned = new Map<string, string>();
+    let helperTimer: ReturnType<typeof setTimeout> | undefined;
+    const startedAt = Date.now();
+    function warnRoutes(scripts: Script[]): void {
+        const next = new Map<string, string>();
+        const problems: { id: string; name: string; msg: string; labels: string[] }[] = [];
+        const helperDown: { id: string; name: string; labels: string[] }[] = [];
+        for (const s of scripts) {
+            if (!s.enabled || !s.meta.active) continue;
+            const byMsg = new Map<string, string[]>();
+            const down: string[] = [];
+            for (const r of s.meta.routes || []) {
+                if (r.kind === "onDom") continue;
+                const strategy = effectiveStrategy(r);
+                const msg = routeProblem({ kind: r.kind, strategy, types: r.types }, { firefox: IS_FIREFOX, mv3: __MV3__ });
+                if (msg) byMsg.set(msg, [...(byMsg.get(msg) || []), routeLabel(r)]);
+                else if (strategy === "process" && tierUnavailable("process")) down.push(routeLabel(r));
             }
-            bodyWatch = next;
-            // say it once per script + strategy, not on every request
-            for (const w of next) {
-                const gap = bodyTierGap(w.tiers, IS_FIREFOX, __MV3__, w.modify);
-                const key = `${w.tiers.join(",")}|${gap}`;
-                if (gapWarned.get(w.id) === key) continue;
-                gapWarned.set(w.id, key);
-                if (gap) log(-1, `[${w.name}] ${gap}`, "warn", w.id);
-            }
-        } catch (e: any) {
-            dlogLevel("pipeline", "debug", `body-handler watch refresh failed: ${e?.message || e}`);
+            for (const [msg, labels] of byMsg) problems.push({ id: s.id, name: s.meta.name, msg, labels });
+            if (down.length) helperDown.push({ id: s.id, name: s.meta.name, labels: down });
         }
+        for (const p of problems) {
+            const key = `${p.id}|${p.msg}`;
+            const labels = p.labels.join(", ");
+            next.set(key, labels);
+            if (routeWarned.get(key) !== labels) log(-1, `[${p.name}] ${labels}: ${p.msg}`, "warn", p.id);
+        }
+        // keep helper-down keys so a reload while it stays down doesn't repeat it
+        for (const [k, v] of routeWarned) if (k.endsWith("|helper")) next.set(k, v);
+        routeWarned = next;
+        if (helperTimer) clearTimeout(helperTimer);
+        if (!helperDown.length) {
+            for (const k of [...routeWarned.keys()]) if (k.endsWith("|helper")) routeWarned.delete(k);
+            return;
+        }
+        helperTimer = setTimeout(() => {
+            if (processActive()) return;
+            for (const h of helperDown) {
+                const key = `${h.id}|helper`;
+                const labels = h.labels.join(", ");
+                if (routeWarned.get(key) === labels) continue;
+                routeWarned.set(key, labels);
+                log(-1, `[${h.name}] ${labels}: strategy "process" — ${tierUnavailable("process")}; these handlers don't run until it is`, "warn", h.id);
+            }
+        }, Math.max(0, HELPER_GRACE_MS - (Date.now() - startedAt)));
+    }
+
+    function refreshBodyWatch(scripts: Script[]): void {
+        const next: BodyWatch[] = [];
+        for (const s of scripts) {
+            if (!s.enabled || !s.meta.active) continue;
+            for (const r of s.meta.routes || []) {
+                if (r.kind === "modifyResponse" || r.kind === "replaceResponse") next.push({ id: s.id, name: s.meta.name, route: r, strategy: effectiveStrategy(r) });
+            }
+        }
+        bodyWatch = next;
     }
 
     if (chrome.webRequest?.onCompleted) {
@@ -238,7 +267,7 @@ export function createPipeline(
             // pre-attach only when a CDP-relevant (non hook-only) body
             // script matches the page URL, and schedule an idle detach so
             // the banner disappears once the page settles
-            if (cdp.hasCdpListedScripts(info.url) && cdp.cdpRelevantScripts(info.url).length > 0) {
+            if (cdp.shouldAttach(info.url)) {
                 void cdp.ensureAttached(tabId, info.url);
                 cdp.scheduleIdleDetach(`tab:${tabId}`);
             }
@@ -307,16 +336,13 @@ export function createPipeline(
             void updateTabBadge?.(details.tabId, details.url);
             // workers/service-workers can't host the hook — sweep their
             // targets so respond-with-status works for worker fetches too
-            if (chromeBody.allBodyScripts().length > 0) {
+            if (cdp.hasOwners()) {
                 void cdp.ensureWorkerAttached(details.url);
             }
         } else {
             const n = noteRequestForBadge?.(details.tabId, details.url);
             if (n !== undefined && n > 0) void updateTabBadge?.(details.tabId, details.url);
         }
-
-        const cdpDisposition = { kind: "allow" as const };
-        void cdpDisposition;
 
         const disposition = webRequestStrategy.handleBeforeRequest(details, tabUrl);
         if (!traced.has(details.requestId) && webRequestStrategy.matchingNames?.(details.url).length) {
@@ -329,15 +355,10 @@ export function createPipeline(
             return disposition.then((d: any) => this2.applyDisposition(d, details));
         }
 
-        return this2.applyDisposition(
-            disposition.kind === "allow" ? (chromeBody.handleBeforeRequest(details, tabUrl) as any) : disposition,
-            details
-        );
+        // MV2: a cdp-owned route matches — make sure the debugger is on this tab
+        return this2.applyDisposition(disposition.kind === "allow" && cdp.needs(details) ? { kind: "needsCdp" } : disposition, details);
     };
 
-    const self = {
-        applyDisposition,
-    };
     const this2 = {
         applyDisposition,
     };
@@ -356,10 +377,6 @@ export function createPipeline(
                 dlogLevel("pipeline", "debug", "needsCdp → attach", { url: details.url, tabId: details.tabId });
                 // banner minimization: this tab is actively using the debugger
                 cdp.cancelIdleDetach(`tab:${details.tabId}`);
-                // learn which resource types each matching script hits, so
-                // hook-covered (xhr-only) scripts stop triggering attaches
-                const matchedScripts = chromeBody.matchingBodyScripts(details.url).map((x) => x.scriptId);
-                if (matchedScripts.length) cdp.noteResourceType(matchedScripts, details.type);
                 if (details.tabId === -1) {
                     // worker/service-worker initiated (no content scripts
                     // there) — attach to the worker targets directly
@@ -471,7 +488,7 @@ export function createPipeline(
     chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
         if (msg && msg.type === "listScripts") {
             listScripts().then(async (scripts) => {
-                // scripts saved before declareScript existed have no stored
+                // scripts saved before params existed have no stored
                 // paramDefs — compile them on the fly (imports stubbed: we
                 // only need declarations here) so the UI can offer ⚙
                 const missing = scripts.filter((s) => s.paramDefs === undefined);
@@ -542,63 +559,45 @@ export function createPipeline(
         }
         if (msg && msg.type === "getHookBundle") {
             void (async () => {
-            // full script sources: the hook compiles them itself so handlers
-            // keep their `wt` binding and top-level scope
-            // ship ALL enabled body scripts — body transforms match request
-            // URLs, not the page URL, so the hook filters per-request itself
-            // deliver runnable JS: the page hook has no TS compiler
-            // Transforms run in the background (the hook is eval-free and
-            // immune to page CSP). onDom handler SOURCES ship to the page:
-            // onDom needs the page's window, so it runs in the MAIN world
-            // when the page CSP allows, with the bridge as the fallback.
-            const domHandlers: { scriptId: string; name: string; when: string; src: string; params: Record<string, any> }[] = [];
-            const libs = new Map<string, string>(); // name → transpiled lib source
-            // URL patterns of hook-eligible body scripts: the hook only
-            // touches fetch/XHR to these, everything else stays native
-            const patterns = new Set<string>();
-            {
+                // Network handlers run in the background (the hook is
+                // eval-free and immune to page CSP): the page gets only the
+                // ROUTES of hook-owned handlers, so it touches fetch/XHR to
+                // those and leaves everything else native. onDom handlers
+                // need the page's window: their scripts' FULL sources ship
+                // (top-level helpers/closures survive), compiled in the MAIN
+                // world when the page CSP allows, else in the bridge.
+                const url = msg.url || "";
+                const domHandlers: { scriptId: string; name: string; src: string; params: Record<string, any> }[] = [];
+                const libs = new Map<string, { name: string; src: string; params: Record<string, any> }>();
+                const routes: RouteMeta[] = [];
+                await loadDefaultStrategy();
                 const pageScripts = await listScripts();
-                // MV3: scripts are analyzed in the sandbox page (the SW can't
-                // eval); MV2 compiles right here. Both paths return plain
-                // metadata; the shipped handler SOURCES are transpiled locally.
-                const analyzed = await analyzeScripts(pageScripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt })));
+                const paramValues = await loadAllParamValues();
+                // MV3: analyzed in the sandbox page (the SW can't eval),
+                // cached; MV2 compiles right here
+                const analyzed = await analyzeScripts(pageScripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt })), paramValues);
                 const depNames = new Set<string>();
                 for (const s of pageScripts) {
                     const a = analyzed.get(s.id);
-                    const h = a?.handlers;
-                    if (s.enabled && a?.declared && !a.error && hookEligible(s.meta.strategy) && (!h || h.onRequest || h.modifyResponse || h.replaceResponse)) {
-                        for (const m of s.meta.match) patterns.add(m);
+                    if (!s.enabled || !a || a.error || !a.meta.active) continue;
+                    let dom = false;
+                    for (const r of a.meta.routes) {
+                        if (r.kind === "onDom") dom ||= routeMatches(r, url);
+                        else if (r.kind !== "onResponseHeaders" && effectiveStrategy(r) === "hook" && hookCanSee(r)) routes.push(r);
                     }
-                }
-                for (const s of pageScripts) {
-                    if (!s.enabled || !matchAny(s.meta.match, msg.url || "")) continue;
-                    const a = analyzed.get(s.id);
-                    if (!a?.declared) continue; // library: inert on its own
+                    if (!dom) continue;
                     for (const d of a.deps) depNames.add(d);
-                    if (a.onDom) {
-                        // FULL transpiled source: the runner compiles it with
-                        // a shim so top-level helpers/closures survive
-                        domHandlers.push({
-                            scriptId: s.id,
-                            name: s.meta.name,
-                            when: a.onDomWhen || "DOMContentLoaded",
-                            src: toRunnableJs(s.code),
-                            params: resolveParamValues(a.paramDefs || {}, await getParamValues(s.id)),
-                        });
-                    }
+                    domHandlers.push({ scriptId: s.id, name: s.meta.name, src: toRunnableJs(s.code), params: resolveParamValues(a.paramDefs || {}, paramValues[s.id]) });
                 }
                 // ship the transitively imported library sources once
                 for (const depName of depNames) {
                     const lib = pageScripts.find((x) => x.meta.name === depName);
-                    if (lib && !libs.has(lib.meta.name)) libs.set(lib.meta.name, toRunnableJs(lib.code));
+                    if (!lib || libs.has(lib.meta.name)) continue;
+                    const defs = analyzed.get(lib.id)?.paramDefs || {};
+                    libs.set(lib.meta.name, { name: lib.meta.name, src: toRunnableJs(lib.code), params: resolveParamValues(defs, paramValues[lib.id]) });
                 }
-            }
-            dlogLevel("pipeline", "debug", "getHookBundle responding", {
-                patterns: patterns.size,
-                dom: domHandlers.length,
-                url: msg.url,
-            });
-                sendResponse({ count: patterns.size, patterns: [...patterns], domHandlers, libs: [...libs.entries()].map(([name, src]) => ({ name, src })) });
+                dlogLevel("pipeline", "debug", "getHookBundle responding", { routes: routes.length, dom: domHandlers.length, url });
+                sendResponse({ count: routes.length, routes, domHandlers, libs: [...libs.values()] });
             })();
             return true; // async sendResponse above
         }
@@ -674,19 +673,30 @@ export function createPipeline(
     });
 
     // ---- reload plumbing ----
+    let reloadSeq = 0;
     async function reload(): Promise<void> {
-        const scripts = (await listScripts()) as ScriptWithSources[];
+        const seq = ++reloadSeq;
+        await loadDefaultStrategy();
+        const stored = await listScripts();
         const paramValues = await loadAllParamValues();
+        // routes come from running each script's top level with its real
+        // params and imports (stored meta had imports stubbed). MV3: this
+        // also warms the analyze cache so the next getHookBundle is served
+        // without waking the sandbox (keeps onDom document_start early).
+        let scripts = stored;
+        try {
+            scripts = withAnalyzedMeta(stored, await analyzeScripts(stored.map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt })), paramValues));
+        } catch (e: any) {
+            dlogLevel("pipeline", "warn", `script analysis failed, using saved routes: ${e?.message || e}`);
+        }
+        if (seq !== reloadSeq) return; // superseded by a newer reload
         dlog("pipeline", "reload", { total: scripts.length, enabled: scripts.filter((x) => x.enabled).map((x) => x.meta.name) });
         webRequestStrategy.reload(scripts, paramValues);
         chromeBody.reload(scripts, paramValues);
-        void cdp.reload(scripts, paramValues);
+        cdp.reload(scripts, paramValues);
         processStrategy.reload(scripts, paramValues);
-        // MV3: also refreshes the analyze cache NOW so the next page's
-        // getHookBundle is served from it without waking the sandbox (keeps
-        // onDom document_start as early as MV3 allows)
-        void refreshBodyWatch(scripts);
-        warnUnknownStrategies(scripts);
+        refreshBodyWatch(scripts);
+        warnRoutes(scripts);
 
         // HOT RELOAD: push the new bundle to every open tab's hook so
         // changes apply without reloading the target tab
@@ -703,6 +713,11 @@ export function createPipeline(
     const off = onScriptsChanged(() => void reload());
     // ownership moves between the process tier and the other tiers
     const offProcess = onProcessActiveChange(() => void reload());
+    // settings.strategy moves ownership between tiers
+    const onStorage = (changes: Record<string, unknown>, area: string) => {
+        if (area === "local" && changes[STRATEGY_KEY]) void reload();
+    };
+    chrome.storage.onChanged.addListener(onStorage);
     void reload();
 
     return {
@@ -712,6 +727,7 @@ export function createPipeline(
         dispose() {
             off();
             offProcess();
+            chrome.storage.onChanged.removeListener(onStorage);
             if (!__MV3__) {
                 const onDone = (details: any) => {
                     webRequestStrategy.pruneRequest?.(details.requestId);

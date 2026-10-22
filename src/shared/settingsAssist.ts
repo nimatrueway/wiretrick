@@ -1,18 +1,20 @@
 /**
  * Editor assistance for settings.yaml in the manager (diagnostics,
  * completion, hover). Mirrors settings.schema.json, plus what the schema
- * can't know: the per-script params declared by each wt.declareScript call.
+ * can't know: the per-script params each script defines (wt.params / wt.defineParam).
  * Pure (offsets in, offsets out) so Monaco wiring stays thin and testable.
  */
 import { parseDocument, parse, isMap, isPair, isScalar, type Node } from "yaml";
 import type { ParamDef } from "./scriptDef";
 import { isValidParamValue, paramDefault } from "./scriptDef";
-import { LOG_LEVELS, DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL, yamlKey } from "./settingsYaml";
+import { LOG_LEVELS, DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL, yamlKey, isStrategy, defaultStrategySetting } from "./settingsYaml";
+import { STRATEGIES } from "./route";
+import { strategyMarkdown } from "./strategyInfo";
 import { SETTINGS_SCHEMA } from "./settingsSchema";
 
 export interface AssistScript {
     name: string;
-    /** has wt.declareScript (libraries have no enabled switch) */
+    /** registers handlers (utilities have no enabled switch) */
     declared: boolean;
     defs: Record<string, ParamDef>;
 }
@@ -43,6 +45,7 @@ function typeLabel(d: ParamDef): string {
 function globalValueError(key: string, v: any): string | null {
     if (key === "logLevel") return typeof v === "string" && (LOG_LEVELS as readonly string[]).includes(v) ? null : `Expected one of ${LOG_LEVELS.join(" | ")}`;
     if (key === "logCap") return typeof v === "number" && Number.isInteger(v) && v >= 100 && v <= 10000 ? null : "Expected an integer between 100 and 10000";
+    if (key === "strategy") return isStrategy(v) ? null : `Expected one of ${STRATEGIES.join(" | ")}`;
     return null;
 }
 
@@ -108,7 +111,7 @@ export function settingsDiagnostics(text: string, scripts: AssistScript[]): Assi
                     const pk = isScalar(p.key) ? String(p.key.value) : "";
                     const v = (p.value as any)?.toJSON?.() ?? null;
                     if (pk === "enabled") {
-                        if (!s.declared) at(p.key as Node, "warning", `"${name}" is a library (no wt.declareScript) — it has no enabled switch`);
+                        if (!s.declared) at(p.key as Node, "warning", `"${name}" is a utility (registers no handlers) — it has no enabled switch`);
                         else if (v !== null && typeof v !== "boolean") at(p.value as Node, "error", "Expected true or false");
                         continue;
                     }
@@ -235,7 +238,7 @@ export function settingsCompletions(text: string, offset: number, scripts: Assis
     } else if (c.path.length === 1 && a === "settings") {
         for (const [k, d] of Object.entries(GLOBAL_PROPS)) key(k, `${d.type}, default ${JSON.stringify(d.default)}`, d.description);
     } else if (c.path.length === 1 && a === "params") {
-        for (const x of scripts) key(x.name, x.declared ? "script" : "library", paramSummary(x), "module", true);
+        for (const x of scripts) key(x.name, x.declared ? "script" : "utility", paramSummary(x), "module", true);
     } else if (c.path.length === 2 && a === "params" && s) {
         if (s.declared) key("enabled", "boolean, default true", "Run this script");
         for (const [k, d] of Object.entries(s.defs)) if (k !== "enabled") key(k, `${typeLabel(d)}, default ${JSON.stringify(paramDefault(d))}`, d.description);
@@ -245,8 +248,8 @@ export function settingsCompletions(text: string, offset: number, scripts: Assis
 
 function paramSummary(s: AssistScript): string {
     const ks = Object.entries(s.defs).filter(([k]) => k !== "enabled");
-    const head = s.declared ? "" : "Library (no wt.declareScript): no enabled switch.\n\n";
-    return head + (ks.length ? ks.map(([k, d]) => `- \`${k}\`: ${typeLabel(d)}${d.description ? " — " + d.description : ""}`).join("\n") : "No declared params.");
+    const head = s.declared ? "" : "Utility (registers no handlers): no enabled switch.\n\n";
+    return head + (ks.length ? ks.map(([k, d]) => `- \`${k}\`: ${typeLabel(d)}${d.description ? " — " + d.description : ""}`).join("\n") : "No params.");
 }
 
 /** Markdown hover for the key (or value) under the cursor. */
@@ -270,13 +273,14 @@ export function settingsHover(text: string, offset: number, scripts: AssistScrip
     } else if (c.path.length === 1 && a === "settings" && GLOBAL_PROPS[k]) {
         const d = GLOBAL_PROPS[k];
         const range = d.enum ? d.enum.join(" | ") : d.minimum !== undefined ? `${d.type} ${d.minimum}…${d.maximum}` : d.type;
-        md = `**${k}** — ${d.description}\n\n\`${range}\` · default \`${JSON.stringify(k === "logLevel" ? DEFAULT_LOG_LEVEL : DEFAULT_LOG_CAP)}\``;
+        const def = k === "logLevel" ? DEFAULT_LOG_LEVEL : k === "strategy" ? defaultStrategySetting() : DEFAULT_LOG_CAP;
+        md = k === "strategy" ? `**strategy** — ${strategyMarkdown()}` : `**${k}** — ${d.description}\n\n\`${range}\` · default \`${JSON.stringify(def)}\``;
     } else if (c.path.length === 1 && a === "params") {
         const s = scripts.find((x) => x.name === k);
         md = s ? `**${k}**\n\n${paramSummary(s)}` : `No script named **${k}** — ignored`;
     } else if (c.path.length === 2 && a === "params") {
         const s = scripts.find((x) => x.name === b);
-        if (s && k === "enabled") md = s.declared ? "**enabled** — Run this script\n\n`boolean` · default `true`" : `"${b}" is a library — it has no enabled switch`;
+        if (s && k === "enabled") md = s.declared ? "**enabled** — Run this script\n\n`boolean` · default `true`" : `"${b}" is a utility — it has no enabled switch`;
         else if (s?.defs[k]) {
             const d = s.defs[k];
             md = `**${k}**${d.description ? " — " + d.description : ""}\n\n\`${typeLabel(d)}\` · default \`${JSON.stringify(paramDefault(d))}\``;

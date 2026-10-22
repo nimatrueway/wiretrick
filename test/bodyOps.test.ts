@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { resolveFileRef, runOp } from "../src/shared/bodyOps";
+import { normalizeRoute, NET_KINDS } from "../src/shared/route";
+
+/** bare fns → routed handlers on "*://x.test/*" (every kind present) */
+const routed = (h: Record<string, Function[]>): any =>
+    Object.fromEntries([...NET_KINDS, "onDom"].map((k) => [k, (h[k] ?? []).map((fn, i) => ({ fn, route: normalizeRoute(k as any, "*://x.test/*", i) }))]));
 
 describe("replaceResponse { file }", () => {
     it("decodes base64 data: URLs and uses their media type", () => {
@@ -22,7 +27,7 @@ describe("replaceResponse { file }", () => {
     });
 
     it("the replace op serves the decoded file", async () => {
-        const scripts = [{ id: "s", name: "S", match: ["*://x.test/*"], handlers: { replaceResponse: [() => ({ file: "data:text/plain;base64," + btoa("from file") })] } }];
+        const scripts = [{ id: "s", name: "S", handlers: routed({ replaceResponse: [() => ({ file: "data:text/plain;base64," + btoa("from file") })] }) }];
         const out = await runOp(scripts as any, "replace", { url: "https://x.test/robots.txt", method: "GET" }, { log: () => {} } as any);
         expect(out).toEqual({ mime: "text/plain", content: "from file" });
     });
@@ -32,7 +37,7 @@ describe("tapped vs modified logging", () => {
     const url = "https://x.test/api";
     function run(op: any, handlers: any, args: any = {}) {
         const lines: { level: string; msg: string; kind?: string }[] = [];
-        const scripts = [{ id: "s", name: "S", match: ["*://x.test/*"], handlers }];
+        const scripts = [{ id: "s", name: "S", handlers: routed(handlers) }];
         return runOp(scripts as any, op, { url, method: "GET", ...args }, { log: (_id: string, level: string, msg: string, kind?: string) => lines.push({ level, msg, kind }) } as any).then((out) => ({ out, lines }));
     }
 

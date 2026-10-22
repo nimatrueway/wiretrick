@@ -9,6 +9,8 @@
  *   settings:
  *     # Minimum log level shown in the panel: debug | info | warn | error
  *     # logLevel: info
+ *     # …strategy help (link + pros/cons)…
+ *     # strategy: process
  *
  *   params:
  *     My Script:
@@ -33,6 +35,8 @@
  */
 import { parse, stringify, Document, isScalar, Scalar } from "yaml";
 import { resolveParamValues, isValidParamValue, paramDefault, type ParamDef } from "./scriptDef";
+import { builtinStrategy, STRATEGIES } from "./route";
+import { STRATEGY_DOC_URL, STRATEGY_INFO } from "./strategyInfo";
 
 export const SETTINGS_FILE = "settings.yaml";
 export const SCHEMA_FILE = "settings.schema.json";
@@ -45,11 +49,18 @@ export const DEFAULT_LOG_CAP = 500;
 export interface GlobalSettings {
     logLevel: string;
     logCap: number;
+    /** default interception strategy (route.strategy overrides per handler) */
+    strategy: string;
 }
+
+/** the strategy settings.yaml falls back to when `strategy` is absent */
+export const defaultStrategySetting = (): string => builtinStrategy();
+
+export const isStrategy = (v: unknown): boolean => typeof v === "string" && (STRATEGIES as string[]).includes(v);
 
 export interface ScriptSettingsState {
     name: string;
-    /** has wt.declareScript (libraries have no enabled switch) */
+    /** registers handlers (utilities have no enabled switch) */
     declared: boolean;
     enabled: boolean;
     defs: Record<string, ParamDef>;
@@ -136,6 +147,11 @@ export function renderSettings(g: GlobalSettings, scripts: ScriptSettingsState[]
     ];
     option(out, 2, "logLevel", `Minimum log level shown in the panel: ${LOG_LEVELS.join(" | ")}`, g.logLevel, DEFAULT_LOG_LEVEL);
     option(out, 2, "logCap", "Log lines kept in the panel (100..10000)", g.logCap, DEFAULT_LOG_CAP);
+    out.push("  # Interception strategy for every handler whose route doesn't set `strategy`.");
+    out.push("  # An unavailable strategy means the handler doesn't run (warned) — no fallback.");
+    out.push(`  # Compatibility: ${STRATEGY_DOC_URL}`);
+    for (const s of STRATEGIES) out.push(`  #   ${s}: + ${clean(STRATEGY_INFO[s].pros)} − ${clean(STRATEGY_INFO[s].cons)}`);
+    option(out, 2, "strategy", `${STRATEGIES.join(" | ")}`, g.strategy, defaultStrategySetting());
     const blocks = scripts.map((s) => scriptBlock(s)).filter((b): b is string[] => !!b);
     if (blocks.length) {
         out.push("", "params:");
@@ -208,6 +224,8 @@ export function planSettings(doc: SettingsDoc, current: GlobalSettings, scripts:
         if (typeof lv === "string" && (LOG_LEVELS as readonly string[]).includes(lv) && lv !== current.logLevel) globals.logLevel = lv;
         const cap = doc.settings.logCap === undefined ? DEFAULT_LOG_CAP : doc.settings.logCap;
         if (typeof cap === "number" && Number.isInteger(cap) && cap >= 100 && cap <= 10000 && cap !== current.logCap) globals.logCap = cap;
+        const st = doc.settings.strategy === undefined ? defaultStrategySetting() : doc.settings.strategy;
+        if (isStrategy(st) && st !== current.strategy) globals.strategy = st as string;
     }
     const plans: SettingsPlan["scripts"] = [];
     for (const s of scripts) {

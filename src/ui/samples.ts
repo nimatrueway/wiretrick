@@ -7,38 +7,34 @@ export interface SampleScript {
 }
 
 // Every sample targets a long-lived public site and names a URL to open so
-// the effect is visible right away.
+// the effect is visible right away. None pins a strategy: they run on the
+// default from Settings → Interception.
 export const SAMPLES: SampleScript[] = [
     {
         name: "Redirect a URL",
         blurb: "Send any request to a different URL. Try it: open en.wikipedia.org/wiki/Cat — you land on Dog.",
         code: `// Try it: open https://en.wikipedia.org/wiki/Cat
-wt.declareScript({
-    match: ["*://en.wikipedia.org/wiki/Cat"],
-    strategy: ["hook", "webrequest", "cdp"],
-});
-wt.onRequest(() => {
-    return { redirect: "https://en.wikipedia.org/wiki/Dog" };
-});`,
+wt.describe("Cat → Dog on Wikipedia");
+
+wt.onRequest("*://en.wikipedia.org/wiki/Cat", () => ({
+    redirect: "https://en.wikipedia.org/wiki/Dog",
+}));`,
     },
     {
         name: "Block requests",
-        blurb: "Cancel matching requests. Try it: open any Wikipedia article — every image is gone.",
+        blurb: "Cancel matching requests — here only images, via the route's types filter. Try it: open any Wikipedia article — every image is gone.",
         code: `// Try it: open https://en.wikipedia.org/wiki/Cat
-wt.declareScript({
-    match: ["*://upload.wikimedia.org/*"],
-});
-wt.onRequest(() => ({ cancel: true }));`,
+wt.describe("Block Wikipedia images");
+
+wt.onRequest({ url: "*://upload.wikimedia.org/*", types: ["image"] }, () => ({ cancel: true }));`,
     },
     {
         name: "Modify request headers",
         blurb: "Set or remove request headers before they leave the browser. Try it: httpbin.org/headers echoes them back.",
         code: `// Try it: open https://httpbin.org/headers
-wt.declareScript({
-    match: ["*://httpbin.org/*"],
-    strategy: ["hook", "webrequest", "cdp"],
-});
-wt.onRequest(() => ({
+wt.describe("Add debug headers, drop Accept-Language");
+
+wt.onRequest("*://httpbin.org/*", () => ({
     headers: {
         set: { "x-debug": "1", "x-greeting": "hello from Wiretrick" },
         remove: ["accept-language"],
@@ -51,11 +47,9 @@ wt.onRequest(() => ({
         code: `// Try it: open https://jsonplaceholder.typicode.com/, then in DevTools → Console run
 //   fetch("https://example.com/").then(r => r.text()).then(console.log)
 // Without this script it fails with a CORS error; with it the HTML prints.
-wt.declareScript({
-    match: ["*://example.com/*"],
-    strategy: ["hook", "webrequest", "cdp"],
-});
-wt.onResponseHeaders(() => ({
+wt.describe("Let any origin read example.com");
+
+wt.onResponseHeaders("*://example.com/*", () => ({
     headers: {
         set: {
             "access-control-allow-origin": "*",
@@ -67,14 +61,12 @@ wt.onResponseHeaders(() => ({
     },
     {
         name: "Mock a fetch/XHR API",
-        blurb: "Replace a JSON API response. Page fetch/XHR use the banner-free hook. Try it: open jsonplaceholder.typicode.com/users/1.",
+        blurb: "Replace a JSON API response; :id in the route is read back as ctx.groups.id. Try it: open jsonplaceholder.typicode.com/users/1.",
         code: `// Try it: open https://jsonplaceholder.typicode.com/users/1
-wt.declareScript({
-    match: ["*://jsonplaceholder.typicode.com/users/1"],
-    strategy: ["hook", "webrequest", "cdp"],
-});
-wt.replaceResponse(() => JSON.stringify({
-    id: 1,
+wt.describe("Mock the users API");
+
+wt.replaceResponse("*://jsonplaceholder.typicode.com/users/:id", (ctx) => ({
+    id: Number(ctx.groups.id),
     name: "Mocked User",
     role: "admin",
 }));`,
@@ -83,11 +75,9 @@ wt.replaceResponse(() => JSON.stringify({
         name: "Transform an API response",
         blurb: "Modify a JSON body — flip fields, inject values. Try it: open jsonplaceholder.typicode.com/todos/1.",
         code: `// Try it: open https://jsonplaceholder.typicode.com/todos/1
-wt.declareScript({
-    match: ["*://jsonplaceholder.typicode.com/todos/*"],
-    strategy: ["hook", "webrequest", "cdp"],
-});
-wt.modifyResponse((ctx, body) => {
+wt.describe("Mark every todo completed");
+
+wt.modifyResponse("*://jsonplaceholder.typicode.com/todos/*", (ctx, body) => {
     const json = JSON.parse(typeof body === "string" ? body : new TextDecoder().decode(body));
     json.completed = true;
     json.title = "Transformed by Wiretrick";
@@ -96,13 +86,11 @@ wt.modifyResponse((ctx, body) => {
     },
     {
         name: "Rewrite page HTML",
-        blurb: "Transform the document itself on Chrome (uses the debugger briefly). Try it: open example.com — a red banner appears.",
+        blurb: "Transform the document itself. Needs a strategy that reads page bodies: process or cdp on Chrome, webrequest on Firefox (not hook). Try it: open example.com — a red banner appears.",
         code: `// Try it: open https://example.com/
-wt.declareScript({
-    match: ["*://example.com/*"],
-    strategy: ["hook", "webrequest", "cdp"],
-});
-wt.modifyResponse((ctx, body) => {
+wt.describe("Rewrite example.com's HTML");
+
+wt.modifyResponse({ url: "*://example.com/*", types: ["main_frame"] }, (ctx, body) => {
     const html = typeof body === "string" ? body : new TextDecoder().decode(body);
     return html
         .replace("<title>Example Domain", "<title>Rewritten Domain")
@@ -113,10 +101,9 @@ wt.modifyResponse((ctx, body) => {
         name: "DOM / title changes",
         blurb: "Runs at DOM-ready in the page. Best for titles and DOM text — works even when the HTML is service-worker served or hydration re-renders it. Try it: open any Wikipedia article.",
         code: `// Try it: open https://en.wikipedia.org/wiki/Cat
-wt.declareScript({
-    match: ["*://en.wikipedia.org/wiki/*"],
-});
-wt.onDom(() => {
+wt.describe("Retitle Wikipedia articles");
+
+wt.onDom("*://en.wikipedia.org/wiki/*", () => {
     document.title = "🎯 " + document.title;
     const el = document.querySelector("h1");
     if (el) el.textContent = "Hello from Wiretrick";
@@ -126,11 +113,9 @@ wt.onDom(() => {
         name: "Serve a local file",
         blurb: "Replace a response with file content (path or data: URL). Try it: open en.wikipedia.org/robots.txt.",
         code: `// Try it: open https://en.wikipedia.org/robots.txt
-wt.declareScript({
-    match: ["*://en.wikipedia.org/robots.txt"],
-    strategy: ["hook", "webrequest", "cdp"],
-});
-wt.replaceResponse(() => ({
+wt.describe("Serve our own robots.txt");
+
+wt.replaceResponse("*://en.wikipedia.org/robots.txt", () => ({
     file: "data:text/plain;base64," + btoa("Served by Wiretrick instead of the real robots.txt"),
 }));`,
     },
@@ -138,11 +123,9 @@ wt.replaceResponse(() => ({
         name: "Per-script storage",
         blurb: "Keep state between requests with wt.storage. Try it: open httpbin.org/headers and reload — X-Hits counts up.",
         code: `// Try it: open https://httpbin.org/headers and reload a few times
-wt.declareScript({
-    match: ["*://httpbin.org/headers"],
-    strategy: ["hook", "webrequest", "cdp"],
-});
-wt.onRequest(async (ctx) => {
+wt.describe("Count requests in X-Hits");
+
+wt.onRequest("*://httpbin.org/headers", async (ctx) => {
     const hits = ((await wt.storage.get("hits")) || 0) + 1;
     await wt.storage.set("hits", hits);
     wt.log("request #" + hits, ctx.url);
@@ -150,24 +133,22 @@ wt.onRequest(async (ctx) => {
 });`,
     },
     {
-        name: "Parameters (declareScript)",
-        blurb: "Adjustable knobs the user changes from the popup's ⚙ dialog — no code edits. Try it: open jsonplaceholder.typicode.com/posts/1.",
+        name: "Parameters (wt.params)",
+        blurb: "Adjustable knobs (wt.params) the user changes from the popup's ⚙ dialog — no code edits. Try it: open jsonplaceholder.typicode.com/posts/1.",
         code: `// Try it: open https://jsonplaceholder.typicode.com/posts/1, then change
 // the knobs from the popup's ⚙ dialog and reload
-const cfg = wt.declareScript({
-    match: ["*://jsonplaceholder.typicode.com/*"],
-    strategy: ["hook", "webrequest", "cdp"],
-    params: {
-        enabled: { type: "boolean", default: true, description: "Master switch" },
-        status: { type: "enum", choices: ["500", "502", "503"], default: "500", description: "Status to return" },
-        message: { type: "string", default: "forced failure" },
-        retries: { type: "number", default: 3, min: 0, max: 10, description: "Retries the page should see" },
-        extraHeaders: { type: "stringList", default: [], description: "Extra x-tag values" },
-    },
+wt.describe("Force failures on the posts API");
+
+const cfg = wt.params({
+    enabled: { type: "boolean", default: true, description: "Master switch" },
+    status: { type: "enum", choices: ["500", "502", "503"], default: "500", description: "Status to return" },
+    message: { type: "string", default: "forced failure" },
+    retries: { type: "number", default: 3, min: 0, max: 10, description: "Retries the page should see" },
+    extraHeaders: { type: "stringList", default: [], description: "Extra x-tag values" },
 });
 
-wt.onRequest((ctx) => {
-    if (!cfg.enabled || !ctx.url.includes("/posts/")) return;
+wt.onRequest("*://jsonplaceholder.typicode.com/posts/*", () => {
+    if (!cfg.enabled) return;
     return {
         respond: {
             status: Number(cfg.status),

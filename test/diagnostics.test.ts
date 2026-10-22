@@ -30,7 +30,7 @@ describe("diagnostic report", () => {
         vi.resetModules();
         const scriptStore = await import("../src/background/engine/scriptStore");
         vi.spyOn(scriptStore, "listScripts").mockResolvedValue([
-            { id: "s1", code: "wt.declareScript({ match: ['*://a/*'] });", enabled: true, createdAt: 0, updatedAt: 0, error: null, meta: { name: "redwood", match: ["*://a/*"], strategy: "webrequest,hook", declared: true } } as any,
+            { id: "s1", code: "", enabled: true, createdAt: 0, updatedAt: 0, error: null, meta: { name: "redwood", match: ["*://a/*"], strategy: "webrequest,hook", declared: true } } as any,
         ]);
         vi.spyOn(scriptStore, "loadAllParamValues").mockResolvedValue({ s1: { port: "8081" } });
         const settings = await import("../src/background/settingsFile");

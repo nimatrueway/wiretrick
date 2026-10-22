@@ -39,9 +39,9 @@ export function Popup({ api }: { api: PopupApi }) {
         };
     }, []);
 
-    // libraries (no wt.declareScript) never appear in the popup — they're
+    // utilities (no handlers) never appear in the popup — they're
     // inert on their own and only imported by other scripts
-    const visible = load.state === "ready" ? load.scripts.filter((s) => s.meta.declared !== false) : [];
+    const visible = load.state === "ready" ? load.scripts.filter((s) => s.meta.active !== false) : [];
 
     return (
         <>
@@ -80,7 +80,9 @@ function ScriptRow({ script, api, onChanged, version }: { script: ScriptInfo; ap
                         onChanged();
                     }}
                 />
-                <span class={health ? "script-name error" : "script-name"}>{script.meta.name}</span>
+                <span class={health ? "script-name error" : "script-name"} title={script.meta.description}>
+                    {script.meta.name}
+                </span>
                 {health && (
                     <span
                         class={`err-ind ${health.kind}`}

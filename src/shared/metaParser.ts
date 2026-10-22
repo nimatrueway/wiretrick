@@ -1,59 +1,38 @@
 /**
- * Script metadata types. The ONLY way to declare a script is
- * wt.declareScript({...}) — a source file without it is a library module:
- * inert on its own (never matches, never listed in the popup) but
- * importable by other scripts.
+ * Script metadata. A script is ACTIVE when its top-level code registers at
+ * least one handler (wt.onRequest(route, fn), …); a source that registers
+ * nothing is a utility module — inert on its own, importable by others.
  */
+import { scriptUrls, type RouteMeta } from "./route";
 
-export type Strategy = "auto" | "hook" | "cdp" | "webrequest" | "process";
-
-/**
- * strategy accepts a priority list, e.g.
- *   ["hook", "cdp"]   (try the page hook first, then the debugger)
- *   ["cdp"]           (debugger only)
- *   ["auto"]          (engine default: hook, then cdp)
- *   ["process"]       (local helper proxy — Chrome, opt-in, no banner)
- */
-export type StrategyList = Strategy[];
-
-export function parseStrategyList(raw: string | StrategyList | undefined): StrategyList {
-    if (!raw) return ["auto"];
-    if (Array.isArray(raw)) return raw;
-    const out = raw
-        .split(",")
-        .map((x) => x.trim().toLowerCase())
-        .filter((x): x is Strategy => VALID_STRATEGIES.includes(x as Strategy));
-    return out.length ? out : ["auto"];
-}
-
-const VALID_STRATEGIES: Strategy[] = ["auto", "hook", "cdp", "webrequest", "process"];
-
-/** strategy names a script lists that the engine doesn't know (ignored) */
-export function unknownStrategies(raw: string | undefined): string[] {
-    if (!raw) return [];
-    return raw
-        .split(",")
-        .map((x) => x.trim().toLowerCase())
-        .filter((x) => x && !VALID_STRATEGIES.includes(x as Strategy));
-}
+export type { Strategy } from "./route";
 
 export interface ResMeta {
     name: string;
+    /** wt.describe(text) */
+    description?: string;
+    /** registered at least one handler at top level (else: utility) */
+    active: boolean;
+    routes: RouteMeta[];
+    /** union of route urls — badge / "active on this tab" only, never dispatch */
     match: string[];
-    /** raw strategy value (comma-separated list) */
-    strategy: string;
-    /** true once wt.declareScript ran — undeclared sources are libraries */
-    declared: boolean;
 }
 
 export const DEFAULT_META: ResMeta = {
     name: "Untitled script",
+    active: false,
+    routes: [],
     match: [],
-    strategy: "auto",
-    declared: false,
 };
 
 /** Fresh default meta with a fallback display name (e.g. the file name). */
 export function defaultMeta(name?: string): ResMeta {
-    return { ...DEFAULT_META, match: [], name: name || DEFAULT_META.name };
+    return { ...DEFAULT_META, routes: [], match: [], name: name || DEFAULT_META.name };
+}
+
+/** fill the derived fields from routes */
+export function finishMeta(meta: ResMeta): ResMeta {
+    meta.active = meta.routes.length > 0;
+    meta.match = scriptUrls(meta.routes);
+    return meta;
 }

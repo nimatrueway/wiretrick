@@ -146,6 +146,28 @@ export function matchAny(patterns: string[], url: string): boolean {
     });
 }
 
+/**
+ * Named (and numbered "0", "1"… wildcard) groups of the first pattern that
+ * matches url, merged across URL components — null when none matches.
+ */
+export function matchGroups(patterns: string[], url: string): Record<string, string> | null {
+    for (const p of patterns) {
+        let r: URLPatternResult | null = null;
+        try {
+            r = cached(p)?.exec(url) ?? null;
+        } catch {
+            r = null;
+        }
+        if (!r) continue;
+        const out: Record<string, string> = {};
+        for (const part of ["protocol", "username", "password", "hostname", "port", "pathname", "search", "hash"] as const) {
+            for (const [k, v] of Object.entries(r[part]?.groups || {})) if (v !== undefined) out[k] = v as string;
+        }
+        return out;
+    }
+    return null;
+}
+
 /** literal text and "*" wildcards only (no groups, regexps, or escapes) */
 const PLAIN = /^[^:(){}?+\\]*$/;
 

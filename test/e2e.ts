@@ -9,7 +9,8 @@
  *   - onResponseHeaders: set/remove
  *   - replaceResponse: main frame (in place via the debugger tier, or the
  *     serve page for webrequest-first scripts) and fetch (hook short-circuit)
- *   - "modifyResponse never ran" warning for a body the tiers can't reach
+ *   - "modifyResponse never ran" warnings: per request (hook route hit by a
+ *     page load) and up front (webrequest modifyResponse on Chromium)
  *   - modifyResponse: fetch/XHR via the Tier-A page hook
  *   - modifyResponse: non-JS <script src> via the CDP tier
  *   - per-tab badge counting
@@ -135,16 +136,16 @@ const setEnabled = (id: string, enabled: boolean): Promise<void> =>
 // ---------- the sample scripts ----------
 interface SampleScript { id: string; name: string; code: string }
 const SCRIPTS: Record<string, SampleScript> = {
-    matcherRedirect: { id: "s_matcher", name: "redirect main frame", code: `wt.declareScript({ match: ["${ORIGIN}/redirect-target"] });\nwt.onRequest((ctx) => ({ redirect: "${ORIGIN}/redirected" }));` },
-    cancel: { id: "s_cancel", name: "cancel blocked.js", code: `wt.declareScript({ match: ["${ORIGIN}/blocked.js"] });\nwt.onRequest(() => ({ cancel: true }));` },
-    reqHeaders: { id: "s_reqheaders", name: "request header", code: `wt.declareScript({ match: ["${ORIGIN}/echo-headers"] });\nwt.onRequest(() => ({ headers: { set: { "x-resso": "injected" } } }));` },
-    resHeaders: { id: "s_resheaders", name: "response header", code: `wt.declareScript({ match: ["${ORIGIN}/api"] });\nwt.onResponseHeaders(() => ({ headers: { set: { "x-mock-header": "hello" } } }));` },
-    replaceMain: { id: "s_replacemain", name: "replace main frame", code: `wt.declareScript({ match: ["${ORIGIN}/serve-me"] });\nwt.replaceResponse(() => "<html><body><h1>SERVE-PAGE-WORKS</h1></body></html>");` },
-    replaceFetch: { id: "s_replacefetch", name: "replace fetch body", code: `wt.declareScript({ match: ["${ORIGIN}/api-replace"] });\nwt.replaceResponse(() => JSON.stringify({ value: "REPLACED-BY-HOOK" }));` },
-    modifyTierA: { id: "s_modifya", name: "modify response (hook tier)", code: `wt.declareScript({ match: ["${ORIGIN}/api"] });\nwt.modifyResponse((ctx, body) => body.replace("original-value", "TIERA-VALUE"));` },
-    modifyCdp: { id: "s_modifycdp", name: "modify response (cdp tier)", code: `wt.declareScript({ match: ["${ORIGIN}/app.js"] });\nwt.modifyResponse((ctx, body) => body.replace("ORIGINAL-MARKER", "CDP-MARKER"));` },
-    badgeProbe: { id: "s_badge", name: "badge probe", code: `wt.declareScript({ match: ["${ORIGIN}/page-fetch*"] });\nwt.onRequest(() => {});` },
-    modifyMain: { id: "s_modifymain", name: "modify main frame html", code: `wt.declareScript({ match: ["${ORIGIN}/page-title"] });\nwt.modifyResponse((ctx, body) => (typeof body === "string" ? body : new TextDecoder().decode(body)).replace("SITE-TITLE-PLACEHOLDER", "CDP-HTML-MARKER"));\nwt.onDom(() => { document.title = "DOM-HOOK-TITLE"; });` },
+    matcherRedirect: { id: "s_matcher", name: "redirect main frame", code: `wt.onRequest({ url: "${ORIGIN}/redirect-target", strategy: "webrequest" }, (ctx) => ({ redirect: "${ORIGIN}/redirected" }));` },
+    cancel: { id: "s_cancel", name: "cancel blocked.js", code: `wt.onRequest({ url: "${ORIGIN}/blocked.js", strategy: "webrequest" }, () => ({ cancel: true }));` },
+    reqHeaders: { id: "s_reqheaders", name: "request header", code: `wt.onRequest({ url: "${ORIGIN}/echo-headers", strategy: "webrequest" }, () => ({ headers: { set: { "x-resso": "injected" } } }));` },
+    resHeaders: { id: "s_resheaders", name: "response header", code: `wt.onResponseHeaders({ url: "${ORIGIN}/api", strategy: "webrequest" }, () => ({ headers: { set: { "x-mock-header": "hello" } } }));` },
+    replaceMain: { id: "s_replacemain", name: "replace main frame", code: `wt.replaceResponse({ url: "${ORIGIN}/serve-me", strategy: "cdp" }, () => "<html><body><h1>SERVE-PAGE-WORKS</h1></body></html>");` },
+    replaceFetch: { id: "s_replacefetch", name: "replace fetch body", code: `wt.replaceResponse({ url: "${ORIGIN}/api-replace", strategy: "hook" }, () => JSON.stringify({ value: "REPLACED-BY-HOOK" }));` },
+    modifyTierA: { id: "s_modifya", name: "modify response (hook tier)", code: `wt.modifyResponse({ url: "${ORIGIN}/api", strategy: "hook" }, (ctx, body) => body.replace("original-value", "TIERA-VALUE"));` },
+    modifyCdp: { id: "s_modifycdp", name: "modify response (cdp tier)", code: `wt.modifyResponse({ url: "${ORIGIN}/app.js", strategy: "cdp" }, (ctx, body) => body.replace("ORIGINAL-MARKER", "CDP-MARKER"));` },
+    badgeProbe: { id: "s_badge", name: "badge probe", code: `wt.onRequest({ url: "${ORIGIN}/page-fetch*", strategy: "hook" }, () => {});` },
+    modifyMain: { id: "s_modifymain", name: "modify main frame html", code: `wt.modifyResponse({ url: "${ORIGIN}/page-title", strategy: "cdp" }, (ctx, body) => (typeof body === "string" ? body : new TextDecoder().decode(body)).replace("SITE-TITLE-PLACEHOLDER", "CDP-HTML-MARKER"));\nwt.onDom("${ORIGIN}/page-title", () => { document.title = "DOM-HOOK-TITLE"; });` },
 };
 for (const s of Object.values(SCRIPTS)) await saveScript(s.id, s.code, s.name);
 
@@ -164,17 +165,17 @@ check("matcher: negative (no redirect on /html)", (await p1b.content()).includes
 await p1b.close();
 
 // ---------- 2. replaceResponse on main frame ----------
-// default ("auto") strategy: the debugger tier fulfills it in place — no
+// strategy "cdp": the debugger tier fulfills it in place — no
 // redirect, the address bar keeps the page URL
 const p2 = await ctx.newPage();
 await p2.goto(`${ORIGIN}/serve-me`, { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {}); // warm-up: attaches the debugger
 await p2.waitForTimeout(1200);
 await p2.goto(`${ORIGIN}/serve-me`, { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
 await p2.waitForTimeout(300);
-check("replaceResponse: main frame in place (auto → debugger tier, URL kept)", (await p2.content()).includes("SERVE-PAGE-WORKS") && p2.url() === `${ORIGIN}/serve-me`, `url=${p2.url()}`);
+check("replaceResponse: main frame in place (cdp → debugger tier, URL kept)", (await p2.content()).includes("SERVE-PAGE-WORKS") && p2.url() === `${ORIGIN}/serve-me`, `url=${p2.url()}`);
 await p2.close();
 // "webrequest" listed first: Chromium's webRequest can only redirect — page loads go to serve.html
-await saveScript("s_replaceserve", `wt.declareScript({ match: ["${ORIGIN}/serve-wr"], strategy: ["webrequest"] });\nwt.replaceResponse(() => "<html><body><h1>SERVE-PAGE-WORKS</h1></body></html>");`, "replace via serve page");
+await saveScript("s_replaceserve", `wt.replaceResponse({ url: "${ORIGIN}/serve-wr", strategy: "webrequest" }, () => "<html><body><h1>SERVE-PAGE-WORKS</h1></body></html>");`, "replace via serve page");
 await new Promise((r) => setTimeout(r, 600));
 const p2b = await newPage("/serve-wr");
 check("replaceResponse: webrequest-first main frame via serve page (redirect)", (await p2b.content()).includes("SERVE-PAGE-WORKS") && p2b.url().includes("/serve.html"), `url=${p2b.url()}`);
@@ -210,6 +211,8 @@ await p4.close();
 // ---------- 5. replaceResponse via hook short-circuit (fetch) ----------
 const p5 = await ctx.newPage();
 await p5.goto(`${ORIGIN}/html`, { waitUntil: "domcontentloaded" });
+await p5.reload({ waitUntil: "domcontentloaded" }); // warm → hook patched before fetching
+await p5.waitForTimeout(1500);
 const r5 = await p5.evaluate(async () => (await (await fetch("/api-replace")).json()).value);
 check("replaceResponse: fetch short-circuit (hook)", r5 === "REPLACED-BY-HOOK", r5);
 await p5.close();
@@ -335,12 +338,11 @@ await setEnabled("s_modifya", true);
 await p10.close();
 
 // ---------- 10b. respond with non-200 status (debugger tier) + log attribution ----------
-// A SYNC onRequest returning respond {status: 500}: the blocking webRequest
-// tier cannot carry a status (data-URLs), so it defers to the CDP tier,
-// which must fulfill it — and every log line must name the stored script.
+// A SYNC onRequest on strategy "cdp" returning respond {status: 500}: the
+// debugger tier must fulfill it — and every log line must name the stored script.
 await saveScript(
     "s_respond500",
-    `wt.declareScript({ match: ["${ORIGIN}/nav-500"] });\nwt.onRequest(() => ({ respond: { status: 500, body: { error: "e2e-500" }, mime: "application/json" } }));`,
+    `wt.onRequest({ url: "${ORIGIN}/nav-500", strategy: "cdp" }, () => ({ respond: { status: 500, body: { error: "e2e-500" }, mime: "application/json" } }));`,
     "e2e respond 500"
 );
 const p10b = await ctx.newPage();
@@ -356,7 +358,7 @@ check("logs: no [Untitled script] anywhere", !logText10b.includes("[Untitled scr
 await p10b.close();
 
 // ---------- 10c. strategy ["cdp"] replaceResponse on a page load: in place, URL kept ----------
-await saveScript("s_cdpreplace", `wt.declareScript({ match: ["${ORIGIN}/cdp-replace"], strategy: ["cdp"] });\nwt.replaceResponse(() => "<html><body><h1>CDP-REPLACED</h1></body></html>");`, "cdp replace page");
+await saveScript("s_cdpreplace", `wt.replaceResponse({ url: "${ORIGIN}/cdp-replace", strategy: "cdp" }, () => "<html><body><h1>CDP-REPLACED</h1></body></html>");`, "cdp replace page");
 await new Promise((r) => setTimeout(r, 600));
 const p10c = await ctx.newPage();
 await p10c.goto(`${ORIGIN}/cdp-replace`, { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {}); // warm-up: attaches the debugger
@@ -372,7 +374,7 @@ const log10c: string[] = await mgr.evaluate(() => [...document.querySelectorAll(
 const replLines10c = log10c.filter((l) => l.includes("[cdp replace page] replaceResponse →") && l.includes("/cdp-replace"));
 check("replaceResponse [\"cdp\"]: handler ran once per load (one log line per load, no serve.html)", replLines10c.length >= 1 && replLines10c.length <= 2 && !log10c.some((l) => l.includes("/cdp-replace") && l.includes("serve.html")), JSON.stringify(replLines10c));
 
-// ---------- 10d. "never ran" warning: ["webrequest"] modifyResponse on a page load (Chromium can't read bodies) ----------
+// ---------- 10d. "never ran" warnings: a hook route hit by a page load (per request), and a webrequest modifyResponse on Chromium (up front) ----------
 await mgr.click("#network-tab"); // the Network tab records from now on
 await mgr.waitForSelector("#network-view .net-toolbar", { timeout: 5000 });
 await mgr.waitForTimeout(300);
@@ -380,12 +382,14 @@ const early10d: { n: number }[] = await mgr.evaluate(() =>
     [...document.querySelectorAll("#network-view tbody tr.net-row")].map((tr) => ({ n: tr.querySelectorAll(".net-badge").length }))
 );
 check("network: script activity from before the tab was opened is listed", early10d.length > 0 && early10d.every((r) => r.n > 0), `rows=${early10d.length}`);
-await saveScript("s_missed", `wt.declareScript({ match: ["${ORIGIN}/html-missed"], strategy: ["webrequest"] });\nwt.modifyResponse((ctx, body) => body.replace("MISSED-ORIGINAL", "NEVER"));`, "missed probe");
+await saveScript("s_missed", `wt.modifyResponse({ url: "${ORIGIN}/html-missed", strategy: "hook" }, (ctx, body) => body.replace("MISSED-ORIGINAL", "NEVER"));`, "missed probe");
+await saveScript("s_missed_wr", `wt.modifyResponse({ url: "${ORIGIN}/html-missed-wr", strategy: "webrequest" }, (ctx, body) => body);`, "webrequest body probe");
 await new Promise((r) => setTimeout(r, 600));
 const p10d = await newPage("/html-missed");
 await p10d.waitForTimeout(2500); // the check runs 1.5 s after the load completes
 const log10d: string = await mgr.evaluate(() => document.getElementById("log-entries")!.textContent || "");
-check("missed: WARN 'modifyResponse never ran' for a webrequest-only page body", log10d.includes(`[missed probe] modifyResponse never ran for ${ORIGIN}/html-missed (document) — Chromium's webRequest can't read response bodies`), log10d.match(/.{0,20}never ran.{0,120}/)?.[0] || "(no warning)");
+check("missed: WARN 'modifyResponse never ran' for a hook route hit by a page load", log10d.includes(`[missed probe] modifyResponse #1 never ran for ${ORIGIN}/html-missed (document) — the "hook" strategy only sees`), log10d.match(/.{0,20}never ran.{0,120}/)?.[0] || "(no warning)");
+check("up-front WARN: webrequest modifyResponse can't run on Chromium", log10d.includes(`[webrequest body probe] modifyResponse #1: modifyResponse never runs with strategy "webrequest" on Chromium`), log10d.match(/.{0,40}never runs with.{0,80}/)?.[0] || "(no warning)");
 const row10d: { cls: string; badges: string[] } | null = await mgr.evaluate(() => {
     const tr = [...document.querySelectorAll("#network-view tbody tr")].find((t) => (t.querySelector(".net-name")?.textContent || "").includes("html-missed"));
     return tr ? { cls: tr.className, badges: [...tr.querySelectorAll(".net-badge")].map((b) => b.className) } : null;
@@ -393,10 +397,11 @@ const row10d: { cls: string; badges: string[] } | null = await mgr.evaluate(() =
 check("missed: the Network row is not marked tapped or modified", !!row10d && !/\b(tapped|modified)\b/.test(row10d.cls) && row10d.badges.some((c) => c.includes("missed")), JSON.stringify(row10d));
 await p10d.close();
 await setEnabled("s_missed", false);
+await setEnabled("s_missed_wr", false);
 
 // ---------- 10e. row markers: every tapped-only row carries the dashed marker (incl. consecutive ones) ----------
-await saveScript("s_tapper", `wt.declareScript({ match: ["${ORIGIN}/tap-api/*"], strategy: ["hook"] });\nwt.modifyResponse(() => undefined);`, "marker tapper");
-await saveScript("s_marker_mod", `wt.declareScript({ match: ["${ORIGIN}/tap-api/m*"], strategy: ["hook"] });\nwt.modifyResponse((ctx, body) => String(body).replace("tap-api", "TAP-API"));`, "marker modifier");
+await saveScript("s_tapper", `wt.modifyResponse({ url: "${ORIGIN}/tap-api/*", strategy: "hook" }, () => undefined);`, "marker tapper");
+await saveScript("s_marker_mod", `wt.modifyResponse({ url: "${ORIGIN}/tap-api/m*", strategy: "hook" }, (ctx, body) => String(body).replace("tap-api", "TAP-API"));`, "marker modifier");
 await new Promise((r) => setTimeout(r, 600));
 const p10e = await newPage("/page-taps");
 await p10e.waitForSelector("body[data-done]", { timeout: 10000 }).catch(() => {});
@@ -434,7 +439,7 @@ await setEnabled("s_marker_mod", false);
 // ---------- 10f. webrequest header changes on a page opened from the manager ----------
 await saveScript(
     "s_hdr_wr",
-    `wt.declareScript({ match: ["${ORIGIN}/echo-headers"], strategy: ["webrequest"] });\nwt.onRequest(() => ({ headers: { set: { "x-wt-req": "1" }, remove: ["accept-language"] } }));\nwt.onResponseHeaders(() => ({ headers: { set: { "x-wt-res": "1" } } }));`,
+    `wt.onRequest({ url: "${ORIGIN}/echo-headers", strategy: "webrequest" }, () => ({ headers: { set: { "x-wt-req": "1" }, remove: ["accept-language"] } }));\nwt.onResponseHeaders({ url: "${ORIGIN}/echo-headers", strategy: "webrequest" }, () => ({ headers: { set: { "x-wt-res": "1" } } }));`,
     "header probe"
 );
 await new Promise((r) => setTimeout(r, 600));
@@ -464,7 +469,7 @@ await mgr.click("#log-header-title");
 // ---------- 11. logs: script output tunnelled to the LOG, page console not captured ----------
 await saveScript(
     "s_logtunnel",
-    `wt.declareScript({ match: ["${ORIGIN}/html"] });\nwt.onDom(() => { console.warn("E2E-CONSOLE-MARKER", { a: 1 }); wt.log("E2E-RESLOG-MARKER"); });`,
+    `wt.onDom("${ORIGIN}/html", () => { console.warn("E2E-CONSOLE-MARKER", { a: 1 }); wt.log("E2E-RESLOG-MARKER"); });`,
     "log tunnel"
 );
 await new Promise((r) => setTimeout(r, 800));

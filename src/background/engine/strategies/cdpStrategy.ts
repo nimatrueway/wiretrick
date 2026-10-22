@@ -1,78 +1,61 @@
 /**
- * Tier C: chrome.debugger + CDP Fetch domain. Opt-in per script
- * (declareScript strategy: ["cdp"]) — used for main-frame HTML transforms and anything the
- * hook tier cannot see. Attaches lazily, only while body-modifying
- * requests are in flight for a matching script.
+ * cdp tier (strategy "cdp"): chrome.debugger + the CDP Fetch domain. Runs
+ * the handler routes whose strategy is "cdp" — any request the tab (or its
+ * workers) makes, in place, with real status codes. Chrome shows a
+ * "started debugging this browser" banner while attached.
+ *
+ * MV2 attaches when a cdp route matches the page or a request (and
+ * detaches when the page settles); MV3 keeps matching tabs attached.
+ * Handlers run through the shared body ops (bodyOps.runOp) — locally on
+ * MV2, in the sandbox page on MV3 — so chain semantics match every tier.
  */
-import { matchAny, urlGlobOf } from "../../../shared/matcher";
-import { parseStrategyList } from "../../../shared/metaParser";
-import { compileScript, makeScriptOverrides, makeModuleResolver, isThenable, isAsyncFn, type HandlerFn } from "../../../shared/compile";
-import { scriptLogLine } from "../../../shared/scriptLog";
-import { formatScriptError } from "../../../shared/scriptError";
-import { storageGet, storageSet } from "../../../shared/chromeApi";
+import { urlGlobOf } from "../../../shared/matcher";
+import { runOp, type BodyOp, type OpScript } from "../../../shared/bodyOps";
+import { routeMatches, type RouteKind } from "../../../shared/route";
 import type { Script } from "../scriptStore";
-import { log, logTapped } from "../logs";
-import { scriptStorageGet, scriptStorageSet } from "../scriptStore";
+import { log } from "../logs";
 import { dlog, dlogLevel } from "../../../shared/debugLog";
 import { debuggerAttach, debuggerSend, debuggerDetach, debuggerGetTargets, type Debuggee } from "../../../shared/chromeApi";
-import { analyzeScripts, runBodyOp } from "../../compileHost";
+import { runBodyOp } from "../../compileHost";
 import { recordNetBody } from "../../network";
-import { isProcessOwned, listsProcess, webRequestServesBody } from "./processState";
-import { takeDeferredRespond } from "./deferredRespond";
-import { replacementContent } from "./webRequestStrategy";
+import { compileMv2, ownedRoutes, ownsAny, type OwnedRoute } from "./tiers";
 
-interface CdpScript {
-    scriptId: string;
-    name: string;
-    match: string[];
-    /** the script's raw strategy list (comma-separated) */
-    strategyRaw: string;
-    /** async modifyResponse transforms (compose in order) */
-    transform: HandlerFn[];
-    /** async onRequest handlers (first terminal result wins at Request stage) */
-    onRequest?: HandlerFn[];
-    /** async onResponseHeaders handlers (merged at Response stage) */
-    onResponseHeaders?: HandlerFn[];
-    /** async replaceResponse handlers (first non-null fulfills the body) */
-    replaceResponse?: HandlerFn[];
-}
-
-/**
- * Tier C participation rule: the debugger PRE-ATTACHES only for scripts
- * whose strategy list explicitly contains "cdp" (or the single default
- * "auto"). ALL body scripts are still LOADED into this strategy — when the
- * hook tier is unavailable (page CSP blocked it, cold start), an explicit
- * needsCdp dispatch from the pipeline may route their transforms here.
- */
-function usesCdp(strategyRaw: string): boolean {
-    const list = parseStrategyList(strategyRaw);
-    if (list.includes("cdp")) return true;
-    return list.length === 1 && list[0] === "auto";
-}
-
-/**
- * MV3 participation: explicit opt-in only ("cdp"). "auto"/"hook" scripts
- * stay banner-free on the hook tier.
- */
-function usesDebuggerMv3(strategyRaw: string): boolean {
-    const list = parseStrategyList(strategyRaw);
-    return list.includes("cdp");
-}
-
-/**
- * MV3 pauses only what the hook tier cannot see: page fetch/XHR stay on
- * the hook (pausing them too would run transforms twice).
- */
-const MV3_CDP_TYPES = ["Document", "Script", "Stylesheet", "Image", "Media", "Font", "Other"];
-const MV3_PAGE_FETCH_TYPES = ["XHR", "Fetch"];
+/** webRequest resource type → CDP Fetch resource types */
+const CDP_TYPES: Record<string, string[]> = {
+    main_frame: ["Document"], sub_frame: ["Document"], stylesheet: ["Stylesheet"], script: ["Script"], image: ["Image"],
+    font: ["Font"], object: ["Other"], xmlhttprequest: ["XHR", "Fetch", "EventSource"], ping: ["Ping"],
+    csp_report: ["CSPViolationReport"], media: ["Media", "TextTrack"], websocket: ["WebSocket"], other: ["Other", "Manifest", "Prefetch", "SignedExchange"],
+};
 
 /** CDP resource type → webRequest-style name handlers see as ctx.resourceType */
-function webRequestTypeOf(cdpType: string | undefined): string {
+export function webRequestTypeOf(cdpType: string | undefined): string {
     const m: Record<string, string> = {
-        Document: "main_frame", Script: "script", Stylesheet: "stylesheet", Image: "image", Media: "media",
-        Font: "font", XHR: "xmlhttprequest", Fetch: "xmlhttprequest", WebSocket: "websocket", Ping: "ping",
+        Document: "main_frame", Script: "script", Stylesheet: "stylesheet", Image: "image", Media: "media", TextTrack: "media",
+        Font: "font", XHR: "xmlhttprequest", Fetch: "xmlhttprequest", EventSource: "xmlhttprequest", WebSocket: "websocket", Ping: "ping",
+        CSPViolationReport: "csp_report",
     };
     return (cdpType && m[cdpType]) || "other";
+}
+
+type FetchPattern = { urlPattern: string; resourceType?: string; requestStage: "Request" | "Response" };
+
+const REQUEST_KINDS: RouteKind[] = ["onRequest"];
+const RESPONSE_KINDS: RouteKind[] = ["onResponseHeaders", "replaceResponse", "modifyResponse"];
+
+/** Fetch.enable patterns for the owned routes (a coarse glob; handlers re-filter exactly) */
+export function fetchPatternsOf(owned: OwnedRoute[]): FetchPattern[] {
+    const out = new Map<string, FetchPattern>();
+    for (const { route } of owned) {
+        const requestStage = REQUEST_KINDS.includes(route.kind) ? "Request" : "Response";
+        const types = route.types ? [...new Set(route.types.flatMap((t) => CDP_TYPES[t] || ["Other"]))] : [undefined];
+        for (const m of route.url) {
+            const urlPattern = urlGlobOf(m);
+            for (const resourceType of types) {
+                out.set(`${urlPattern}|${resourceType ?? "*"}|${requestStage}`, resourceType ? { urlPattern, resourceType, requestStage } : { urlPattern, requestStage });
+            }
+        }
+    }
+    return [...out.values()];
 }
 
 interface Mv3Plain {
@@ -83,152 +66,58 @@ interface Mv3Plain {
     enabled: boolean;
 }
 
-const LEARN_KEY = "resCdpLearn";
-const XHR_TYPES = new Set(["xmlhttprequest", "websocket"]);
-const MIN_OBSERVATIONS = 3;
-
 export class CdpStrategy {
     /** attached sessions, keyed "tab:<id>" or "tgt:<targetId>" */
     private attached = new Set<string>();
-    private scripts: CdpScript[] = [];
-    /** scriptId → resource types it has matched (banner-minimization learning) */
-    private learn: { [scriptId: string]: { [type: string]: number } } = {};
+    /** cdp-owned handler routes */
+    private owned: OwnedRoute[] = [];
+    /** MV2: compiled scripts owning cdp routes */
+    private ops: OpScript[] = [];
     /** tabId → timer for idle auto-detach */
-    private idleTimers = new Map<number, ReturnType<typeof setTimeout>>();
-    /** tabId → in-flight ensureAttached promise (dedup concurrent calls) */
-    private attachInFlight = new Map<number, Promise<void>>();
-    /** requestId → stashed async request-header changes from onRequest */
-    private pendingAsyncHeaders = new Map<string, Promise<any[]>>();
-    /** MV3: every script (libraries included — imports resolve in the sandbox) */
+    private idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    /** tab key → in-flight ensureAttached promise (dedup concurrent calls) */
+    private attachInFlight = new Map<string, Promise<void>>();
+    /** MV3: every enabled script (utilities included — imports resolve in the sandbox) */
     private mv3Plain: Mv3Plain[] = [];
     private mv3Params: { [scriptId: string]: Record<string, any> } = {};
-    /** MV3: Fetch.enable patterns derived from the participating scripts */
-    private mv3Patterns: { urlPattern: string; resourceType: string; requestStage: "Request" | "Response" }[] = [];
-    /** MV3: resolves once the current script set is analyzed (a cold SW must not miss a navigation) */
+    /** Fetch.enable patterns derived from the owned routes */
+    private patterns: FetchPattern[] = [];
+    /** resolves once attached tabs were resynced to the current routes */
     private ready: Promise<void> = Promise.resolve();
-    private mv3Summary = "";
-    /** MV3: "<tabId>|<url>" of recently paused loads (race-warning bookkeeping) */
+    private summary = "";
+    /** "<tabId>|<url>" of recently paused loads (race-warning bookkeeping) */
     private recentlyPaused = new Set<string>();
 
     reload(scripts: Script[], paramValues?: { [scriptId: string]: Record<string, any> }): void {
+        const owned = ownedRoutes(scripts, "cdp");
+        this.owned = owned;
+        this.patterns = fetchPatternsOf(owned);
         if (__MV3__) {
-            this.ready = this.reloadMv3(scripts, paramValues || {}).catch((e: any) => {
-                dlogLevel("cdp", "error", `MV3 debugger tier reload failed: ${e?.message || e}`);
-            });
-            return;
+            this.mv3Plain = scripts.filter((s) => s.enabled).map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt, enabled: true }));
+            this.mv3Params = paramValues || {};
+        } else {
+            this.ops = compileMv2(scripts, paramValues, (s) => ownsAny(s, "cdp")).map((c) => ({ id: c.id, name: c.name, handlers: c.compiled.handlers }));
         }
-        // module registry: scripts import each other by name ("./utils")
-        let resolveSpec: (spec: string) => any = (spec) => {
-            throw new Error(`cannot import "${spec}" before the module registry is ready`);
-        };
-        const overridesFor = (s: { id: string; name: string; code: string }) =>
-            makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, level, source, text) => log(-1, scriptLogLine(s.name, source, text), level, id), paramValues?.[s.id], (spec) => resolveSpec(spec));
-        resolveSpec = makeModuleResolver(
-            scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code })),
-            overridesFor
-        ).resolve;
-        this.scripts = [];
-        for (const s of scripts) {
-            if (!s.enabled) continue;
-            const c = compileScript(s.code, overridesFor({ id: s.id, name: s.meta.name, code: s.code }));
-            if (!c.meta.declared) continue; // library module: inert, importable
-            if (isProcessOwned(s.meta.strategy)) continue; // the helper tier owns it
-            // CDP is the fallback tier for everything the hook cannot do
-            // (main frames, script tags, worker fetches, cold starts). Sync
-            // onRequest handlers run in the blocking webRequest tier, which
-            // applies their results itself and stashes a respond it can't
-            // serve in place (non-200, or a script preferring this tier —
-            // see deferredRespond) for the Request stage here. Sync
-            // replaceResponse handlers run here only when webRequest leaves
-            // them to this tier (webRequestServesBody: page loads for
-            // "auto", everything for "cdp") — never twice.
-            const wantsCdp =
-                c.handlers.modifyResponse.length > 0 ||
-                c.handlers.replaceResponse.length > 0 ||
-                c.handlers.onRequest.length > 0 ||
-                c.handlers.onResponseHeaders.length > 0;
-            if (!wantsCdp) continue;
-            this.scripts.push({
-                scriptId: s.id,
-                name: s.meta.name,
-                match: s.meta.match,
-                strategyRaw: s.meta.strategy,
-                transform: c.handlers.modifyResponse,
-                onRequest: c.handlers.onRequest.length ? c.handlers.onRequest : undefined,
-                onResponseHeaders: c.handlers.onResponseHeaders.some(isAsyncFn) ? c.handlers.onResponseHeaders : undefined,
-                replaceResponse: c.handlers.replaceResponse.some(isAsyncFn) || !webRequestServesBody(s.meta.strategy) ? c.handlers.replaceResponse : undefined,
+        // announce only when the owning set changes (reloads are frequent)
+        const names = [...new Set(owned.map((o) => o.name))];
+        const summary = JSON.stringify(names);
+        if (summary !== this.summary && names.length) {
+            log(-1, `[cdp] debugger tier active for ${names.map((n) => `"${n}"`).join(", ")} — Chrome shows a "started debugging this browser" banner while attached`, "info");
+        }
+        this.summary = summary;
+        dlog("cdp", "debugger tier reloaded", { scripts: names, patterns: this.patterns.length });
+        if (__MV3__) {
+            this.ready = this.resyncAttachedMv3().catch((e: any) => {
+                dlogLevel("cdp", "error", `debugger tier resync failed: ${e?.message || e}`);
             });
+        } else {
+            for (const key of [...this.attached]) if (!this.owned.length) void this.detachByKey(key);
         }
     }
 
-    /**
-     * MV3: handlers execute in the sandbox (runBodyOp — the only
-     * eval-permitted context); this tier only pauses requests via CDP and
-     * relays decisions. CdpScript entries carry empty marker handler lists.
-     */
-    private async reloadMv3(scripts: Script[], paramValues: { [scriptId: string]: Record<string, any> }): Promise<void> {
-        this.mv3Plain = scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt, enabled: s.enabled }));
-        this.mv3Params = paramValues;
-        const enabled = scripts.filter((s) => s.enabled && s.meta.declared);
-        const analyzed = enabled.length ? await analyzeScripts(scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt }))) : new Map();
-        const next: CdpScript[] = [];
-        const patterns = new Map<string, { urlPattern: string; resourceType: string; requestStage: "Request" | "Response" }>();
-        const autoBody: string[] = [];
-        for (const s of enabled) {
-            const a = analyzed.get(s.id);
-            const h = a?.handlers ?? { onRequest: 1, modifyResponse: 1, replaceResponse: 1, onResponseHeaders: 1 };
-            const wantsRequest = h.onRequest > 0;
-            const wantsBody = h.modifyResponse > 0 || h.replaceResponse > 0;
-            const wantsHeaders = h.onResponseHeaders > 0;
-            const wantsResponse = wantsBody || wantsHeaders;
-            if (!wantsRequest && !wantsResponse) continue;
-            if (isProcessOwned(s.meta.strategy)) continue; // the helper tier owns it
-            if (!usesDebuggerMv3(s.meta.strategy)) {
-                // process-listed scripts: the helper tier reports its own state
-                // (and isn't connected yet during startup reloads)
-                if (!listsProcess(s.meta.strategy)) autoBody.push(s.meta.name);
-                continue;
-            }
-            next.push({
-                scriptId: s.id,
-                name: s.meta.name,
-                match: s.meta.match,
-                strategyRaw: s.meta.strategy,
-                transform: [],
-                onRequest: wantsRequest ? [] : undefined,
-                replaceResponse: wantsBody ? [] : undefined,
-                onResponseHeaders: wantsHeaders ? [] : undefined,
-            });
-            for (const m of s.meta.match) {
-                // a coarse CDP glob from the URLPattern; the handler re-filters exactly
-                const urlPattern = urlGlobOf(m);
-                for (const resourceType of MV3_CDP_TYPES) {
-                    if (wantsRequest) patterns.set(`${urlPattern}|${resourceType}|Request`, { urlPattern, resourceType, requestStage: "Request" });
-                    if (wantsResponse) patterns.set(`${urlPattern}|${resourceType}|Response`, { urlPattern, resourceType, requestStage: "Response" });
-                }
-                // page fetch/XHR bodies belong to the hook, but response headers
-                // (CORS, CSP…) are enforced before the page sees them
-                if (wantsHeaders) {
-                    for (const resourceType of MV3_PAGE_FETCH_TYPES) {
-                        patterns.set(`${urlPattern}|${resourceType}|Response`, { urlPattern, resourceType, requestStage: "Response" });
-                    }
-                }
-            }
-        }
-        this.scripts = next;
-        this.mv3Patterns = [...patterns.values()];
-        // announce only when the participating set changes (reloads are frequent)
-        const summary = JSON.stringify([next.map((s) => s.name), autoBody]);
-        const changed = summary !== this.mv3Summary;
-        this.mv3Summary = summary;
-        if (changed && next.length) {
-            log(-1, `[cdp] MV3 debugger tier active for ${next.map((s) => `"${s.name}"`).join(", ")} — <script>/<img>/css/document loads are intercepted via chrome.debugger (Chrome shows a "started debugging this browser" banner while attached)`, "info");
-        }
-        if (changed && autoBody.length) {
-            log(-1, `MV3: ${autoBody.map((n) => `"${n}"`).join(", ")} intercept page fetch/XHR only (hook tier: lightest, but REST/API calls only). To also intercept <script>/<img>/css/document loads, add "process" (local helper, no banner) or "cdp" to the script's strategy list (e.g. strategy: ["process", "hook"] or ["hook", "cdp"])`, "warn");
-        }
-        dlog("cdp", "MV3 debugger tier reloaded", { scripts: next.map((s) => s.name), patterns: this.mv3Patterns.length });
-        await this.resyncAttachedMv3();
+    /** does any enabled script own a cdp route? */
+    hasOwners(): boolean {
+        return this.owned.length > 0;
     }
 
     /** MV3: re-apply patterns to attached tabs and attach to already-open matching tabs. */
@@ -238,17 +127,17 @@ export class CdpStrategy {
             const tabId = Number(key.slice(4));
             let url: string | undefined;
             try { url = (await chrome.tabs.get(tabId))?.url; } catch { /* tab gone */ }
-            if (!url || !this.shouldAttach(url) || !this.mv3Patterns.length) {
+            if (!url || !this.shouldAttach(url)) {
                 await this.detachByKey(key);
                 continue;
             }
             try {
-                await debuggerSend({ tabId }, "Fetch.enable", { patterns: this.mv3Patterns });
+                await debuggerSend({ tabId }, "Fetch.enable", { patterns: this.patterns });
             } catch (e: any) {
                 dlogLevel("cdp", "warn", "Fetch.enable refresh failed", { tabId, error: e?.message || e });
             }
         }
-        if (!this.scripts.length) return;
+        if (!this.owned.length) return;
         try {
             for (const t of await chrome.tabs.query({})) {
                 if (t.id !== undefined && t.url) await this.syncTabNow(t.id, t.url);
@@ -257,16 +146,16 @@ export class CdpStrategy {
     }
 
     /**
-     * MV3 tab lifecycle: attach while the tab's page matches a participating
-     * script (kept attached — lazily loaded chunks arrive long after load,
-     * so the MV2 idle-detach would miss them); detach once it navigates away.
+     * MV3 tab lifecycle: attach while cdp routes exist and the tab is a web
+     * page (kept attached — lazily loaded chunks arrive long after load);
+     * detach once it navigates away.
      */
     async syncTab(tabId: number, url: string): Promise<void> {
         await this.ready;
         await this.syncTabNow(tabId, url);
     }
 
-    /** syncTab without the ready gate (called from inside reloadMv3 itself) */
+    /** syncTab without the ready gate (called from inside the resync itself) */
     private async syncTabNow(tabId: number, url: string): Promise<void> {
         const key = `tab:${tabId}`;
         if (this.shouldAttach(url)) {
@@ -277,7 +166,7 @@ export class CdpStrategy {
         }
     }
 
-    /** MV3: is this tab's debugger session live (Fetch enabled)? */
+    /** is this tab's debugger session live (Fetch enabled)? */
     isTabAttached(tabId: number): boolean {
         return this.attached.has(`tab:${tabId}`);
     }
@@ -299,72 +188,27 @@ export class CdpStrategy {
         return this.recentlyPaused.has(`${tabId}|${url}`);
     }
 
-    /**
-     * Names of scripts that needed the debugger for a resource url. MV2:
-     * only cdp-listed ones with async/body handlers — sync onRequest work is
-     * already done by blocking webRequest without the debugger.
-     */
-    debuggerScriptsFor(url: string): string[] {
-        if (__MV3__) return this.matchingScripts(url).map((s) => s.name);
-        return this.cdpRelevantScripts(url)
-            .filter((s) => s.transform.length || s.replaceResponse?.length || s.onResponseHeaders?.length || s.onRequest?.length)
-            .map((s) => s.name);
+    /** names of scripts with a cdp route matching `url` (optionally a request's method/type) */
+    debuggerScriptsFor(url: string, method?: string, type?: string): string[] {
+        return [...new Set(this.owned.filter((o) => routeMatches(o.route, url, method, type)).map((o) => o.name))];
     }
 
-    private matchingScripts(url: string): CdpScript[] {
-        return this.scripts.filter((s) => matchAny(s.match, url));
+    /** MV2: does this request need the debugger (a cdp route matches it)? */
+    needs(details: { url: string; method: string; type: string }): boolean {
+        return this.owned.some((o) => routeMatches(o.route, details.url, details.method, details.type));
     }
 
-    /** Injected by background: are hook-claimed URLs skipped? */
-    isClaimed: (url: string) => boolean = () => false;
-
-    /** Learn what resource types each script actually matches. */
-    noteResourceType(scriptIds: string[], type: string): void {
-        let changed = false;
-        for (const id of scriptIds) {
-            const entry = this.learn[id] || (this.learn[id] = {});
-            entry[type] = (entry[type] || 0) + 1;
-            changed = true;
-        }
-        if (changed) void storageSet({ [LEARN_KEY]: this.learn });
-    }
-
-    /**
-     * A script that has only ever matched fetch/XHR resources is handled
-     * banner-free by the page hook — don't let it trigger the debugger.
-     */
-    private isXhrOnly(scriptId: string): boolean {
-        const entry = this.learn[scriptId];
-        if (!entry) return false;
-        const total = Object.values(entry).reduce((a, b) => a + b, 0);
-        if (total < MIN_OBSERVATIONS) return false;
-        return Object.keys(entry).every((t) => XHR_TYPES.has(t));
-    }
-
-    /** Scripts matching url that still legitimately need the debugger. */
-    /** Scripts that justify a PRE-ATTACH: cdp-listed and not hook-learned. */
-    cdpRelevantScripts(url: string): CdpScript[] {
-        if (__MV3__) return this.matchingScripts(url);
-        return this.matchingScripts(url).filter((s) => usesCdp(s.strategyRaw) && !this.isXhrOnly(s.scriptId));
-    }
-
-    /** True when any script matching the url has cdp in its strategy list. */
-    hasCdpListedScripts(url: string): boolean {
-        if (__MV3__) return this.matchingScripts(url).length > 0;
-        return this.matchingScripts(url).some((s) => usesCdp(s.strategyRaw));
+    private wants(url: string, method: string, type: string, kinds: RouteKind[]): boolean {
+        return this.owned.some((o) => kinds.includes(o.route.kind) && routeMatches(o.route, url, method, type));
     }
 
     /** Forget per-tab state on tab close. */
     forgetTab(tabId: number): void {
         const key = `tab:${tabId}`;
-        const t = this.idleTimers.get(key as any);
+        const t = this.idleTimers.get(key);
         if (t) clearTimeout(t);
-        this.idleTimers.delete(key as any);
+        this.idleTimers.delete(key);
         this.attached.delete(key);
-    }
-
-    private keyOf(d: Debuggee): string {
-        return "tabId" in d ? `tab:${d.tabId}` : `tgt:${d.targetId}`;
     }
 
     private debuggeeOf(key: string): Debuggee {
@@ -380,11 +224,11 @@ export class CdpStrategy {
     }
 
     /**
-     * Worker/service-worker initiated requests (tabId −1): the hook can
-     * never see them, so CDP attaches to the WORKER targets whose origin
-     * matches — the only status-honoring respond path for those.
+     * Worker/service-worker initiated requests (tabId −1): attach to the
+     * WORKER targets whose origin matches.
      */
     async ensureWorkerAttached(url: string): Promise<void> {
+        if (!this.owned.length) return;
         let origin = "";
         try { origin = new URL(url).origin; } catch { return; }
         // workers spawn during page load — sweep a few times so they get
@@ -399,9 +243,7 @@ export class CdpStrategy {
                 pending++;
                 try {
                     await debuggerAttach({ targetId: t.targetId });
-                    await debuggerSend({ targetId: t.targetId }, "Fetch.enable", {
-                        patterns: [{ requestStage: "Request" }, { requestStage: "Response" }],
-                    });
+                    await debuggerSend({ targetId: t.targetId }, "Fetch.enable", { patterns: this.patterns });
                     this.attached.add(key);
                     dlogLevel("cdp", "info", "worker target attached", { url: t.url.slice(0, 80) });
                 } catch (e: any) {
@@ -417,69 +259,58 @@ export class CdpStrategy {
     scheduleIdleDetach(key: string, graceMs = 8000): void {
         // MV3 keeps the tab attached while it matches (see syncTab)
         if (__MV3__) return;
-        const prev = this.idleTimers.get(key as any);
+        const prev = this.idleTimers.get(key);
         if (prev) clearTimeout(prev);
         const t = setTimeout(() => {
-            this.idleTimers.delete(key as any);
+            this.idleTimers.delete(key);
             if (this.attached.has(key)) {
                 void this.detachByKey(key);
                 dlogLevel("cdp", "debug", "idle detach (banner cleared)", { key });
             }
         }, graceMs);
-        this.idleTimers.set(key as any, t);
+        this.idleTimers.set(key, t);
     }
 
-    /** Cancel a scheduled idle detach (a new body transform came in). */
+    /** Cancel a scheduled idle detach (a new request needs the debugger). */
     cancelIdleDetach(key: string): void {
-        const t = this.idleTimers.get(key as any);
+        const t = this.idleTimers.get(key);
         if (t) {
             clearTimeout(t);
-            this.idleTimers.delete(key as any);
+            this.idleTimers.delete(key);
         }
     }
 
     /**
-     * Pre-attach only when a script that plausibly needs the debugger
-     * matches this url (not ones learned to be hook-only).
+     * Pre-attach for a page url. MV3: any web tab while cdp routes exist —
+     * resources (CDN scripts…) rarely match the PAGE url; the Fetch patterns
+     * keep non-matching loads un-paused. MV2: a cdp route matches the page.
      */
-    private shouldAttach(url: string): boolean {
-        // MV3: the RESOURCE (e.g. a CDN script) rarely matches the PAGE url —
-        // attach to any web tab while debugger-tier scripts exist; the
-        // Fetch.enable url patterns keep non-matching loads un-paused
-        if (__MV3__) return this.scripts.length > 0 && this.mv3Patterns.length > 0 && /^(https?|file):/i.test(url);
-        return this.cdpRelevantScripts(url).length > 0;
+    shouldAttach(url: string): boolean {
+        if (!this.owned.length || !this.patterns.length) return false;
+        if (__MV3__) return /^(https?|file):/i.test(url);
+        return this.owned.some((o) => routeMatches(o.route, url));
     }
 
-    /**
-     * FORCED attach: the pipeline explicitly routed a request here
-     * (needsCdp — e.g. a respond-with-status the hook cannot serve), so
-     * the strategy-list gate does not apply.
-     */
+    /** FORCED attach: a request explicitly needs the debugger (MV2 needsCdp). */
     async ensureAttachedForced(tabId: number, mainFrameUrl: string | null): Promise<void> {
         const key = `tab:${tabId}`;
         if (!mainFrameUrl || this.attached.has(key)) return;
-        const inFlight = this.attachInFlight.get(key as any);
+        const inFlight = this.attachInFlight.get(key);
         if (inFlight) return inFlight;
-        const p = this.doEnsureAttached(tabId, mainFrameUrl).finally(() => this.attachInFlight.delete(key as any));
-        this.attachInFlight.set(key as any, p);
+        const p = this.doEnsureAttached(tabId, mainFrameUrl).finally(() => this.attachInFlight.delete(key));
+        this.attachInFlight.set(key, p);
         return p;
     }
 
-    /** Wire up a tab when a CDP-strategy script matches it. Concurrent calls dedup. */
+    /** Wire up a tab when a cdp route matches it. Concurrent calls dedup. */
     async ensureAttached(tabId: number, mainFrameUrl: string | null): Promise<void> {
-        const key = `tab:${tabId}`;
-        if (!mainFrameUrl || this.attached.has(key)) return;
-        if (!this.shouldAttach(mainFrameUrl)) return;
-        const inFlight = this.attachInFlight.get(key as any);
-        if (inFlight) return inFlight;
-        const p = this.doEnsureAttached(tabId, mainFrameUrl).finally(() => this.attachInFlight.delete(key as any));
-        this.attachInFlight.set(tabId, p);
-        return p;
+        if (!mainFrameUrl || !this.shouldAttach(mainFrameUrl)) return;
+        return this.ensureAttachedForced(tabId, mainFrameUrl);
     }
 
     private async doEnsureAttached(tabId: number, mainFrameUrl: string): Promise<void> {
         const key = `tab:${tabId}`;
-        dlogLevel("cdp", "debug", "ensureAttached", { tabId, mainFrameUrl, scripts: this.scripts.map((s) => s.name) });
+        dlogLevel("cdp", "debug", "ensureAttached", { tabId, mainFrameUrl, scripts: this.debuggerScriptsFor(mainFrameUrl) });
         for (let attempt = 0; attempt < 2; attempt++) {
             try {
                 try {
@@ -489,9 +320,7 @@ export class CdpStrategy {
                     throw e;
                 }
                 try {
-                    await debuggerSend(this.debuggeeOf(key), "Fetch.enable", {
-                        patterns: __MV3__ ? this.mv3Patterns : [{ requestStage: "Request" }, { requestStage: "Response" }],
-                    });
+                    await debuggerSend(this.debuggeeOf(key), "Fetch.enable", { patterns: this.patterns });
                 } catch (e: any) {
                     // enable failed while attached (evicted mid-flight) —
                     // detach so we never leave an orphan debugger attached
@@ -500,7 +329,7 @@ export class CdpStrategy {
                 }
                 this.attached.add(key);
                 dlogLevel("cdp", "info", "attached + Fetch.enabled", { tabId, attempt });
-                log(tabId, "[cdp] debugger attached — body interception active in this tab", "info");
+                log(tabId, "[cdp] debugger attached — cdp routes active in this tab", "info");
                 return;
             } catch (e: any) {
                 dlogLevel("cdp", "warn", `attach attempt ${attempt} failed`, { tabId, error: e.message || e });
@@ -514,287 +343,40 @@ export class CdpStrategy {
         }
     }
 
-    /** synthesize an onRequest respond at the Request stage — the network is never contacted */
-    private async fulfillRespond(key: string, tabId: number, requestId: string, method: string, url: string, scriptName: string, scriptId: string, r: { status?: number; mime?: string; body?: any; headers?: { set?: Record<string, string> } }): Promise<void> {
-        const body = typeof r.body === "string"
-            ? bytesToBase64(new TextEncoder().encode(r.body))
-            : r.body instanceof Uint8Array
-                ? bytesToBase64(r.body)
-                : bytesToBase64(new TextEncoder().encode(JSON.stringify(r.body)));
-        const mime = r.mime || "application/json";
-        const headers = [
-            { name: "content-type", value: mime },
-            ...Object.entries(r.headers?.set || {}).map(([name, value]) => ({ name, value: String(value) })),
-        ];
-        dlogLevel("cdp", "info", "onRequest → respond", { url, script: scriptName });
-        try {
-            await debuggerSend(this.debuggeeOf(key), "Fetch.fulfillRequest", { requestId, responseCode: r.status || 200, responseHeaders: headers, body });
-            log(tabId, `[${scriptName}] onRequest → respond ${r.status || 200} ${mime} (debugger tier) ${url}`, "info", scriptId);
-            recordNetBody({ tabId, url, method, modified: base64ToBytes(body), mime, status: r.status || 200 });
-        } catch (e: any) {
-            log(tabId, `[${scriptName}] onRequest → respond ${r.status || 200} FAILED: ${e.message || e} — request continues unmodified`, "error", scriptId);
-            try {
-                await debuggerSend(this.debuggeeOf(key), "Fetch.continueRequest", { requestId });
-            } catch {
-                /* detach race */
-            }
-        }
-    }
-
-    async handlePaused(key: string, params: any): Promise<void> {
-        const pausedKey = `${key.startsWith("tab:") ? Number(key.slice(4)) : -1}|${params.request?.url}`;
-        this.recentlyPaused.add(pausedKey);
-        setTimeout(() => this.recentlyPaused.delete(pausedKey), 120000);
-        if (__MV3__) return this.handlePausedMv3(key, params);
-        const tabId: number = key.startsWith("tab:") ? Number(key.slice(4)) : -1;
-        const { requestId, request } = params;
-        const url: string = request.url;
-
-        // ---- Request stage: async onRequest (redirect / cancel) ----
-        if (!params.responseStatusCode) {
-            if (this.isClaimed(url)) {
-                await debuggerSend(this.debuggeeOf(key), "Fetch.continueRequest", { requestId });
-                return;
-            }
-            // a sync respond the webRequest tier decided and left to this tier
-            const deferred = takeDeferredRespond(tabId, request.method, url);
-            if (deferred) {
-                await this.fulfillRespond(key, tabId, requestId, request.method, url, deferred.scriptName, deferred.scriptId, deferred.respond);
-                return;
-            }
-            const requestScripts = this.matchingScripts(url).filter((s) => s.onRequest);
-            if (requestScripts.length === 0) {
-                await debuggerSend(this.debuggeeOf(key), "Fetch.continueRequest", { requestId });
-                return;
-            }
-            // run every matching script's onRequest handlers in order;
-            // the first TERMINAL result (respond/cancel/redirect) wins and
-            // stops the chain — non-terminal headers accumulate
-            const headerPromises: Promise<any>[] = [];
-            let terminal = false;
-            for (const s of requestScripts) {
-                for (const handler of s.onRequest!) {
-                    // sync handlers already ran (and were reported, and
-                    // applied) in the blocking webRequest tier
-                    if (!isAsyncFn(handler)) continue;
-                    let resolved: any;
-                    try {
-                        const result = handler({ url, method: request.method, tabUrl: url, resourceType: params.resourceType || "other", requestHeaders: {} });
-                        resolved = isThenable(result) ? await result : result;
-                    } catch (e: any) {
-                        log(tabId, formatScriptError(s.name, e, "onRequest"), "error", s.scriptId);
-                        continue;
-                    }
-                    if (!resolved) {
-                        logTapped(tabId, s.name, "onRequest", url, s.scriptId);
-                        continue;
-                    }
-
-                    if (resolved.respond) {
-                        await this.fulfillRespond(key, tabId, requestId, request.method, url, s.name, s.scriptId, resolved.respond);
-                        return;
-                    }
-                    if (resolved.cancel) {
-                        dlogLevel("cdp", "info", "onRequest → cancel", { url, script: s.name });
-                        try {
-                            await debuggerSend(this.debuggeeOf(key), "Fetch.failRequest", { requestId, errorReason: "BlockedByClient" });
-                            log(tabId, `[${s.name}] onRequest → cancel ${url}`, "info", s.scriptId);
-                        } catch (e: any) {
-                            log(tabId, `[${s.name}] onRequest → cancel FAILED: ${e.message || e}`, "error", s.scriptId);
-                            try {
-                                await debuggerSend(this.debuggeeOf(key), "Fetch.continueRequest", { requestId });
-                            } catch {
-                                /* detach race */
-                            }
-                        }
-                        return;
-                    }
-                    if (resolved.redirect) {
-                        dlogLevel("cdp", "info", "onRequest → redirect", { url, to: resolved.redirect, script: s.name });
-                        try {
-                            await debuggerSend(this.debuggeeOf(key), "Fetch.continueRequest", { requestId, url: resolved.redirect });
-                            log(tabId, `[${s.name}] onRequest → redirect → ${resolved.redirect} ${url}`, "info", s.scriptId);
-                        } catch (e: any) {
-                            log(tabId, `[${s.name}] onRequest → redirect FAILED: ${e.message || e}`, "error", s.scriptId);
-                            try {
-                                await debuggerSend(this.debuggeeOf(key), "Fetch.continueRequest", { requestId });
-                            } catch {
-                                /* detach race */
-                            }
-                        }
-                        return;
-                    }
-                    if (resolved.headers && (resolved.headers.set || resolved.headers.remove)) {
-                        log(tabId, `[${s.name}] onRequest → request headers (${describeHeaderMods(resolved.headers)}) ${url}`, "info", s.scriptId);
-                        headerPromises.push(Promise.resolve(resolved.headers));
-                    } else logTapped(tabId, s.name, "onRequest", url, s.scriptId);
-                }
-                void terminal;
-            }
-            if (headerPromises.length) this.pendingAsyncHeaders.set(requestId, Promise.all(headerPromises));
-            await debuggerSend(this.debuggeeOf(key), "Fetch.continueRequest", { requestId });
-            return;
-        }
-
-        // ---- Response stage ----
-        const cdpScripts = this.matchingScripts(url);
-        dlogLevel("cdp", "debug", "handlePaused decision", { url, matching: cdpScripts.length, claimed: this.isClaimed(url), scripts: this.scripts.map((x) => `${x.name}=${x.match.join(",")}`) });
-        const hasReplace = cdpScripts.some((s) => s.replaceResponse);
-        if ((cdpScripts.length === 0 || this.isClaimed(url)) && !cdpScripts.some((s) => s.onResponseHeaders)) {
-            // not ours, or the page hook already transformed it
-            await debuggerSend(this.debuggeeOf(key), "Fetch.continueRequest", { requestId });
-            return;
-        }
-
-        try {
-            // async response-header handlers + stashed request-stage headers
-            let headerChanges: any[] = [];
-            const pending = this.pendingAsyncHeaders.get(requestId);
-            if (pending) {
-                this.pendingAsyncHeaders.delete(requestId);
-                headerChanges.push(...(await pending));
-            }
-            for (const s of cdpScripts) {
-                if (!s.onResponseHeaders) continue;
-                for (const handler of s.onResponseHeaders) {
-                    try {
-                        const r = await handler({ url, method: request.method, tabUrl: url, resourceType: params.resourceType || "other", requestHeaders: {}, statusLine: "", responseHeaders: params.responseHeaders || [] });
-                        if (r && r.headers) headerChanges.push(r.headers);
-                        // sync handlers were reported by the webRequest tier
-                        if (isAsyncFn(handler)) {
-                            if (r && r.headers && (r.headers.set || r.headers.remove)) log(tabId, `[${s.name}] onResponseHeaders → ${describeHeaderMods(r.headers)} ${url}`, "info", s.scriptId);
-                            else logTapped(tabId, s.name, "onResponseHeaders", url, s.scriptId);
-                        }
-                    } catch (e: any) {
-                        log(tabId, formatScriptError(s.name, e, "async onResponseHeaders"), "error", s.scriptId);
-                    }
-                }
-            }
-            let responseHeaders = params.responseHeaders;
-            if (headerChanges.length) {
-                responseHeaders = mergeHeaderChanges(params.responseHeaders || [], headerChanges);
-            }
-
-            const bodyResp: any = await debuggerSend(this.debuggeeOf(key), "Fetch.getResponseBody", { requestId });
-            dlogLevel("cdp", "debug", "got body", { url, base64: bodyResp.base64Encoded, len: bodyResp.body ? bodyResp.body.length : 0 });
-            let bytes = bodyResp.base64Encoded ? base64ToBytes(bodyResp.body) : new TextEncoder().encode(bodyResp.body);
-            // textual bodies are handed to transforms as strings — most
-            // transforms are string-oriented; binary stays bytes
-            let body: string | Uint8Array = looksTextual(bytes) ? new TextDecoder().decode(bytes) : bytes;
-            const originalBody = body;
-            let replacedMime: string | null = null;
-
-            // replaceResponse (async, or any the webRequest tier left to this
-            // tier): first non-null result fulfills the body
-            replaceOuter: for (const s of cdpScripts) {
-                if (!s.replaceResponse) continue;
-                const syncHere = !webRequestServesBody(s.strategyRaw, webRequestTypeOf(params.resourceType));
-                for (const handler of s.replaceResponse) {
-                    // sync ones the webRequest tier served (or tapped) itself
-                    if (!syncHere && !isAsyncFn(handler)) continue;
-                    try {
-                        const out = await handler({ url, method: request.method, tabUrl: url, resourceType: params.resourceType || "other", requestHeaders: {}, status: params.responseStatusCode, contentType: headerContentType(responseHeaders) });
-                        if (out !== undefined && out !== null) {
-                            const r = replacementContent({ url, type: webRequestTypeOf(params.resourceType) }, out);
-                            body = r ? r.content : JSON.stringify(out);
-                            replacedMime = r ? r.mime : "application/json";
-                            const outLen = typeof body === "string" ? body.length : body.byteLength;
-                            dlogLevel("cdp", "info", `replaceResponse ${s.name} applied`, { outLen });
-                            log(tabId, `[${s.name}] replaceResponse → ${replacedMime} (${outLen}b) ${url}`, "info", s.scriptId);
-                            break replaceOuter;
-                        }
-                        logTapped(tabId, s.name, "replaceResponse", url, s.scriptId);
-                    } catch (e: any) {
-                        dlogLevel("cdp", "debug", `replaceResponse of "${s.name}" threw: ${e.message || e}`);
-                        log(tabId, formatScriptError(s.name, e, isAsyncFn(handler) ? "async replaceResponse" : "replaceResponse"), "error", s.scriptId);
-                    }
-                }
-            }
-            const headers: { [n: string]: string } = {};
-            for (const h of params.responseHeaders || []) {
-                headers[h.name.toLowerCase()] = h.value || "";
-            }
-
-            for (const s of cdpScripts) {
-                if (!s.transform) continue;
-                const ctx = {
-                    url,
-                    method: request.method,
-                    tabUrl: url,
-                    resourceType: params.resourceType || "main_frame",
-                    requestHeaders: {},
-                    status: params.responseStatusCode,
-                    contentType: headers["content-type"],
-                };
-                for (const handler of s.transform) {
-                    try {
-                        const before = typeof body === "string" ? body.length : body.byteLength;
-                        const prevBody = body;
-                        const out = await handler(ctx, body);
-                        if (out !== undefined && out !== null) {
-                            body = out;
-                            const len = typeof body === "string" ? body.length : body.byteLength;
-                            dlogLevel("cdp", "info", `transform ${s.name} applied`, { outLen: len });
-                            // unchanged output = do-nothing: "tapped", not "applied"
-                            if (out !== prevBody) {
-                                log(tabId, `[${s.name}] modifyResponse applied (${before}b → ${len}b) ${url}`, "info", s.scriptId);
-                            } else logTapped(tabId, s.name, "modifyResponse", url, s.scriptId);
-                        } else logTapped(tabId, s.name, "modifyResponse", url, s.scriptId);
-                    } catch (e: any) {
-                        dlogLevel("cdp", "debug", `modifyResponse of "${s.name}" threw: ${e.message || e}`);
-                        log(tabId, formatScriptError(s.name, e, "modifyResponse (cdp)"), "error", s.scriptId);
-                    }
-                }
-            }
-
-            const outBytes = typeof body === "string" ? new TextEncoder().encode(body) : body;
-            dlogLevel("cdp", "debug", "fulfilling", { url, outLen: outBytes.length });
-            if (replacedMime) {
-                // a new body: its own type, nothing describing the upstream bytes
-                responseHeaders = (responseHeaders || []).filter((h: any) => !/^(content-type|content-encoding|content-length)$/i.test(h.name));
-                responseHeaders.push({ name: "content-type", value: replacedMime });
-            }
-            recordNetBody({ tabId, url, method: request.method, original: originalBody, modified: body === originalBody ? null : body });
-            await debuggerSend(this.debuggeeOf(key), "Fetch.fulfillRequest", {
-                requestId,
-                responseCode: params.responseStatusCode,
-                responseHeaders,
-                body: bytesToBase64(outBytes),
-            });
-        } catch (e: any) {
-            log(tabId, `[cdp] body interception failed: ${e.message || e}`, "error");
-            try {
-                await debuggerSend(this.debuggeeOf(key), "Fetch.continueRequest", { requestId });
-            } catch {
-                /* detach race */
-            }
-        }
+    /** run a body op over the cdp-owned handlers (locally on MV2, in the sandbox on MV3) */
+    private run(op: BodyOp, args: Record<string, any>, tabId: number): Promise<any> {
+        const a = { ...args, tabId, tier: "cdp" };
+        if (__MV3__) return runBodyOp(this.mv3Plain as any, this.mv3Params, op, a);
+        return runOp(this.ops, op, a, {
+            log: (scriptId, level, msg, kind) => log(tabId, msg, level, scriptId, kind),
+            debug: (msg) => dlogLevel("cdp", "debug", msg),
+        });
     }
 
     /**
-     * MV3 pause handler: decisions come from the sandbox via the same body
-     * ops the hook tier uses (requestDecision / replace / transform), so
-     * chain semantics match exactly. Any failure continues the request
-     * unmodified — and says so in the log.
+     * A paused request: run the cdp-owned handlers for its stage. Any
+     * failure continues the request unmodified — and says so in the log.
      */
-    private async handlePausedMv3(key: string, params: any): Promise<void> {
+    async handlePaused(key: string, params: any): Promise<void> {
         const tabId: number = key.startsWith("tab:") ? Number(key.slice(4)) : -1;
-        const d = this.debuggeeOf(key);
         const { requestId, request } = params;
         const url: string = request.url;
+        const pausedKey = `${tabId}|${url}`;
+        this.recentlyPaused.add(pausedKey);
+        setTimeout(() => this.recentlyPaused.delete(pausedKey), 120000);
+        const d = this.debuggeeOf(key);
         const method: string = request.method;
         const resourceType = webRequestTypeOf(params.resourceType);
         const requestHeaders: Record<string, string> = request.headers || {};
         const cont = () => debuggerSend(d, "Fetch.continueRequest", { requestId }).catch(() => {});
         await this.ready;
         const isRequestStage = params.responseStatusCode === undefined && params.responseErrorReason === undefined;
+        const base = { url, method, resourceType, requestHeaders };
         try {
             if (isRequestStage) {
-                const scripts = this.matchingScripts(url).filter((s) => s.onRequest);
-                if (!scripts.length) return void (await cont());
-                const onlyIds = scripts.map((s) => s.scriptId);
-                const decision = await runBodyOp(this.mv3Plain as any, this.mv3Params, "requestDecision", { url, method, resourceType, requestHeaders, onlyIds, tabId });
-                dlogLevel("cdp", "debug", "MV3 request decision", { url, resourceType, kind: decision?.kind ?? "none" });
+                if (!this.wants(url, method, resourceType, REQUEST_KINDS)) return void (await cont());
+                const decision = await this.run("requestDecision", base, tabId);
+                dlogLevel("cdp", "debug", "request decision", { url, resourceType, kind: decision?.kind ?? "none" });
                 if (!decision) return void (await cont());
                 if (decision.kind === "respond") {
                     recordNetBody({ tabId, url, method, modified: decision.content ?? "", mime: decision.mime, status: decision.status || 200 });
@@ -802,12 +384,17 @@ export class CdpStrategy {
                         { name: "content-type", value: decision.mime || "application/octet-stream" },
                         ...Object.entries(decision.headers || {}).map(([name, value]) => ({ name, value: String(value) })),
                     ];
-                    await debuggerSend(d, "Fetch.fulfillRequest", {
-                        requestId,
-                        responseCode: decision.status || 200,
-                        responseHeaders: headers,
-                        body: bytesToBase64(new TextEncoder().encode(decision.content ?? "")),
-                    });
+                    try {
+                        await debuggerSend(d, "Fetch.fulfillRequest", {
+                            requestId,
+                            responseCode: decision.status || 200,
+                            responseHeaders: headers,
+                            body: bytesToBase64(new TextEncoder().encode(decision.content ?? "")),
+                        });
+                    } catch (e: any) {
+                        log(tabId, `[${decision.scriptName}] onRequest → respond ${decision.status || 200} failed: ${e?.message || e} — the request continues UNMODIFIED ${url}`, "error", decision.scriptId);
+                        await cont();
+                    }
                     return;
                 }
                 if (decision.kind === "cancel") {
@@ -834,24 +421,12 @@ export class CdpStrategy {
             // ---- Response stage ----
             const status: number = params.responseStatusCode ?? 0;
             if (params.responseErrorReason || (status >= 300 && status < 400)) return void (await cont());
-            const matched = this.matchingScripts(url);
-            // page fetch/XHR are paused only for headers — their bodies are the hook's
-            const pageFetch = MV3_PAGE_FETCH_TYPES.includes(params.resourceType);
-            const scripts = pageFetch ? [] : matched.filter((s) => s.replaceResponse);
-            const headerScripts = matched.filter((s) => s.onResponseHeaders);
-            if (!scripts.length && !headerScripts.length) return void (await cont());
+            const wantsHeaders = this.wants(url, method, resourceType, ["onResponseHeaders"]);
+            const wantsBody = this.wants(url, method, resourceType, ["replaceResponse", "modifyResponse"]);
+            if (!wantsHeaders && !wantsBody) return void (await cont());
             const originalHeaders: { name: string; value: string }[] = params.responseHeaders || [];
-            const headerMods = headerScripts.length
-                ? await runBodyOp(this.mv3Plain as any, this.mv3Params, "responseHeaders", {
-                      url,
-                      method,
-                      resourceType,
-                      requestHeaders,
-                      status,
-                      responseHeaders: originalHeaders,
-                      onlyIds: headerScripts.map((s) => s.scriptId),
-                      tabId,
-                  })
+            const headerMods = wantsHeaders
+                ? await this.run("responseHeaders", { ...base, status, responseHeaders: originalHeaders }, tabId)
                 : null;
             const baseHeaders = headerMods
                 ? mergeHeaderChanges(originalHeaders, [headerMods]).filter((h): h is { name: string; value: string } => typeof h.value === "string")
@@ -860,33 +435,34 @@ export class CdpStrategy {
             const continueWithHeaders = async () => {
                 if (!headerMods) return void (await cont());
                 await debuggerSend(d, "Fetch.continueResponse", { requestId, responseCode: status || 200, responseHeaders: baseHeaders });
-                dlogLevel("cdp", "info", "MV3: response headers modified", { url, resourceType });
+                dlogLevel("cdp", "info", "response headers modified", { url, resourceType });
             };
-            if (!scripts.length) return void (await continueWithHeaders());
-            // only debugger-tier scripts: hook-only ones must not touch <script> loads
-            const onlyIds = scripts.map((s) => s.scriptId);
+            if (!wantsBody) return void (await continueWithHeaders());
             const contentType = headerContentType(baseHeaders);
-            let body: string | null = null;
+            let body: string | Uint8Array | null = null;
             let mime: string | undefined;
-            const replaced = await runBodyOp(this.mv3Plain as any, this.mv3Params, "replace", { url, method, resourceType, requestHeaders, onlyIds, tabId });
+            const replaced = this.wants(url, method, resourceType, ["replaceResponse"]) ? await this.run("replace", base, tabId) : null;
             if (replaced) {
                 body = replaced.content;
                 mime = replaced.mime;
             }
-            let input = body;
+            let input: string | Uint8Array | null = body;
             if (input === null) {
                 const got: any = await debuggerSend(d, "Fetch.getResponseBody", { requestId });
                 const bytes = got.base64Encoded ? base64ToBytes(got.body) : new TextEncoder().encode(got.body);
+                // textual bodies are handed to transforms as strings; binary
+                // stays bytes on MV2 (the MV3 sandbox gets text only)
                 if (looksTextual(bytes)) input = new TextDecoder().decode(bytes);
-                else dlogLevel("cdp", "debug", "MV3: binary body — modifyResponse skipped", { url, len: bytes.length });
+                else if (!__MV3__) input = bytes;
+                else dlogLevel("cdp", "debug", "binary body — modifyResponse skipped", { url, len: bytes.length });
             }
-            if (input !== null) {
-                const out = await runBodyOp(this.mv3Plain as any, this.mv3Params, "transform", { url, method, resourceType, requestHeaders, body: input, contentType, status, onlyIds, tabId });
+            if (input !== null && this.wants(url, method, resourceType, ["modifyResponse"])) {
+                const out = await this.run("transform", { ...base, body: input, contentType, status, raw: typeof input !== "string" }, tabId);
                 if (out !== null && out !== undefined) body = out;
             }
             recordNetBody({ tabId, url, method, original: replaced ? null : input, modified: body === input && !replaced ? null : body, mime });
             if (body === null || (body === input && !replaced)) {
-                dlogLevel("cdp", "debug", "MV3: no handler changed the body → continue", { url });
+                dlogLevel("cdp", "debug", "no handler changed the body → continue", { url });
                 return void (await continueWithHeaders());
             }
             // the body handed back is decoded — drop the original encoding/length
@@ -894,13 +470,14 @@ export class CdpStrategy {
                 (h: any) => !/^(content-encoding|content-length)$/i.test(h.name) && !(mime && /^content-type$/i.test(h.name))
             );
             if (mime) responseHeaders.push({ name: "content-type", value: mime });
+            const outBytes = typeof body === "string" ? new TextEncoder().encode(body) : body;
             await debuggerSend(d, "Fetch.fulfillRequest", {
                 requestId,
                 responseCode: status || 200,
                 responseHeaders,
-                body: bytesToBase64(new TextEncoder().encode(body)),
+                body: bytesToBase64(outBytes),
             });
-            dlogLevel("cdp", "info", "MV3: served modified body", { url, resourceType, len: body.length });
+            dlogLevel("cdp", "info", "served modified body", { url, resourceType, len: outBytes.length });
         } catch (e: any) {
             log(tabId, `[cdp] debugger interception failed for ${url}: ${e?.message || e} — the load continues UNMODIFIED`, "error");
             await cont();
@@ -973,11 +550,4 @@ function bytesToBase64(bytes: Uint8Array): string {
     let bin = "";
     for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000) as any);
     return btoa(bin);
-}
-
-function describeHeaderMods(m: { set?: Record<string, string>; remove?: string[] }): string {
-    const parts: string[] = [];
-    if (m.set && Object.keys(m.set).length) parts.push(`set ${Object.keys(m.set).join(", ")}`);
-    if (m.remove?.length) parts.push(`remove ${m.remove.join(", ")}`);
-    return parts.join("; ");
 }

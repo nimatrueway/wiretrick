@@ -1,12 +1,15 @@
 /**
- * "modifyResponse never ran" — why a body handler a script declared for a
- * URL didn't run on a completed request. Pure, so it is unit-tested; the
- * pipeline gathers the inputs (see pipeline.ts, onCompleted).
+ * "modifyResponse never ran" — why a body handler whose route matched a
+ * URL didn't run on a completed request, and the up-front warning for a
+ * handler route that can never run where it is. Pure, so it is
+ * unit-tested; the pipeline gathers the inputs (see pipeline.ts).
  */
+import type { RouteKind, Strategy } from "./route";
+import { strategyUnsupported } from "./strategyInfo";
 
 export interface MissedCase {
-    /** the script's parsed strategy list */
-    tiers: string[];
+    /** the handler route's effective strategy */
+    strategy: Strategy;
     /** webRequest resource type (main_frame, script, stylesheet…) */
     type: string;
     firefox: boolean;
@@ -14,15 +17,12 @@ export interface MissedCase {
     fromCache: boolean;
     /** the local helper (process tier) is connected and routing */
     helperActive: boolean;
-    /** the script has replaceResponse but no modifyResponse */
-    replaceOnly: boolean;
     /** the debugger tier's own "was NOT intercepted" warning already covers this load */
     cdpWarned: boolean;
 }
 
 export const MISSED_REASONS = {
-    chromiumNoBody: `Chromium's webRequest can't read response bodies and the hook only sees fetch/XHR — add "cdp" or "process" to the script's strategy`,
-    chromiumNoBodyXhr: `Chromium's webRequest can't read response bodies — add "hook" (page fetch/XHR, no banner), "cdp" or "process" to the script's strategy`,
+    hookNotFetch: `the "hook" strategy only sees the page's own fetch/XHR — set strategy: "cdp" or "process" on the route for other loads`,
     cache: "served from the browser cache — reload with cache disabled / hard reload",
     helperDown: "the local helper isn't running",
     fallback: "no tier tapped it — check the Log at debug level",
@@ -31,45 +31,40 @@ export const MISSED_REASONS = {
 /** Types never checked: sockets and fire-and-forget pings. */
 export const MISSED_SKIP_TYPES = new Set(["websocket", "ping", "beacon", "csp_report", "webbundle", "webtransport"]);
 
-/** May the page hook run this script (MV3 runs "webrequest" there too)? */
-function hookCapable(tiers: string[], mv3: boolean): boolean {
-    return tiers.some((t) => t === "hook" || t === "auto" || (mv3 && t === "webrequest"));
-}
-
 /** The reason to warn with, or null when no warning is due. */
 export function missedReason(c: MissedCase): string | null {
     if (MISSED_SKIP_TYPES.has(c.type)) return null;
-    if (c.type === "xmlhttprequest") {
+    // can never run here: routeProblem already warned once at load
+    if (strategyUnsupported(c.strategy, c)) return null;
+    if (c.strategy === "webrequest" && !c.firefox) return null;
+    if (c.strategy === "hook") {
         // the hook reads fetch/XHR bodies lazily — the page may simply never read it
-        if (hookCapable(c.tiers, c.mv3)) return null;
-        if (!c.firefox && !c.tiers.includes("cdp") && !(c.tiers.includes("process") && c.helperActive) && !(!c.mv3 && c.replaceOnly && c.tiers.includes("webrequest"))) {
-            return c.tiers.includes("process") ? MISSED_REASONS.helperDown : MISSED_REASONS.chromiumNoBodyXhr;
-        }
+        return c.type === "xmlhttprequest" ? null : MISSED_REASONS.hookNotFetch;
     }
-    // Firefox: the webrequest tier streams every body (filterResponseData)
-    if (c.firefox) return c.fromCache ? MISSED_REASONS.cache : MISSED_REASONS.fallback;
-    // MV2 runs "auto" on the debugger for non-fetch loads; MV3 only an explicit "cdp"
-    const cdp = c.tiers.includes("cdp") || (!c.mv3 && c.tiers.includes("auto"));
-    const process = c.tiers.includes("process");
-    // MV2 webrequest can still answer a sync replaceResponse (by redirect)
-    const webReplace = !c.mv3 && c.replaceOnly && c.tiers.includes("webrequest");
-    if (!cdp && !(process && c.helperActive) && !webReplace) {
-        return process ? MISSED_REASONS.helperDown : MISSED_REASONS.chromiumNoBody;
-    }
+    if (c.strategy === "process" && !c.helperActive) return MISSED_REASONS.helperDown;
     if (c.fromCache) return MISSED_REASONS.cache;
-    if (cdp && c.cdpWarned) return null;
+    if (c.strategy === "cdp" && c.cdpWarned) return null;
     return MISSED_REASONS.fallback;
 }
 
 /**
- * Up-front warning when a script is loaded: on Chromium MV2 a modifyResponse
- * whose strategy list names no body-capable tier ("hook", "auto", "cdp",
- * "process") can never run anywhere. null when nothing to say.
+ * Up-front warning when scripts load: a handler route that can never run
+ * with its strategy in this browser (there is no fallback). null when fine.
+ * The helper being down is reported by the process tier itself.
  */
-export function bodyTierGap(tiers: string[], firefox: boolean, mv3: boolean, modify: boolean): string | null {
-    if (!modify || firefox || mv3) return null;
-    if (tiers.some((t) => t === "hook" || t === "auto" || t === "cdp" || t === "process")) return null;
-    return `modifyResponse will never run with strategy [${tiers.map((t) => `"${t}"`).join(", ")}] on Chromium — its webRequest API can't read response bodies. Add "hook" (page fetch/XHR, no banner), "cdp" (any resource, debugger banner) or "process" (local helper)`;
+export function routeProblem(r: { kind: RouteKind; strategy: Strategy; types?: string[] }, env: { firefox: boolean; mv3: boolean }): string | null {
+    const why = strategyUnsupported(r.strategy, env);
+    if (why) return `strategy "${r.strategy}" is ${why} — this handler doesn't run. Set another strategy in Settings → Interception or on the route`;
+    if (r.strategy === "webrequest" && r.kind === "modifyResponse" && !env.firefox) {
+        return `modifyResponse never runs with strategy "webrequest" on Chromium — its webRequest API can't read response bodies. Use "hook" (page fetch/XHR, no banner), "cdp" (any resource, debugger banner) or "process" (local helper)`;
+    }
+    if (r.strategy === "hook" && r.kind === "onResponseHeaders") {
+        return `onResponseHeaders never runs with strategy "hook" — the page can't change response headers before the browser enforces them. Use "cdp", "process" or "webrequest"`;
+    }
+    if (r.strategy === "hook" && r.types && !r.types.includes("xmlhttprequest")) {
+        return `strategy "hook" only sees the page's fetch/XHR, but types [${r.types.join(", ")}] excludes "xmlhttprequest" — this handler never runs`;
+    }
+    return null;
 }
 
 /** Display name of a request type in the warning: "(document)", "(script)"… */

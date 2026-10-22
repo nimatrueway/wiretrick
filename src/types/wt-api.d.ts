@@ -30,7 +30,131 @@ declare namespace Wiretrick {
         resourceType: string;
         /** Request headers as a plain object (`name → value`). */
         requestHeaders: { [name: string]: string };
+        /**
+         * Named groups the handler's route captured from `url` (`:id`, and
+         * `"0"`, `"1"`… for `*` wildcards). `{}` when nothing was captured.
+         *
+         * @example
+         * wt.onRequest("https://api.example.com/users/:id", (ctx) => {
+         *     if (ctx.groups.id === "42") return { respond: { body: { id: 42 } } };
+         * });
+         */
+        groups: { [name: string]: string };
     }
+
+    /**
+     * Interception strategy (tier) that runs a handler. Every handler runs
+     * on exactly **one** strategy: its route's `strategy`, else
+     * `settings.strategy` (Settings → Interception; default `"process"` on
+     * Chromium, `"webrequest"` on Firefox). There is no fallback: when the
+     * strategy isn't available, the handler doesn't run and the LOG says why.
+     *
+     * - `"process"` — the local wiretrick-helper (a proxy). Sees every
+     *   request incl. documents, scripts and service workers; no banner.
+     *   Needs the helper installed. Chromium only.
+     * - `"hook"` — patches the page's own `fetch`/XHR. Lightest (no banner,
+     *   no helper) but sees **only** page fetch/XHR (`"xmlhttprequest"`) —
+     *   no documents, `<script src>`, images or worker requests, and no
+     *   `onResponseHeaders`.
+     * - `"webrequest"` — blocking webRequest. Firefox (reads bodies) and MV2
+     *   Chromium (no `modifyResponse`, sync handlers only).
+     * - `"cdp"` — the Chrome debugger. Sees everything; Chrome shows a
+     *   "started debugging this browser" banner while attached. Chromium only.
+     *
+     * @see https://github.com/nimatrueway/wiretrick/blob/main/docs/strategies.md#compatibility
+     */
+    type Strategy = "process" | "hook" | "webrequest" | "cdp";
+
+    /** webRequest resource type names (also `ctx.resourceType`). */
+    type ResourceType =
+        | "main_frame"
+        | "sub_frame"
+        | "stylesheet"
+        | "script"
+        | "image"
+        | "font"
+        | "object"
+        | "xmlhttprequest"
+        | "ping"
+        | "csp_report"
+        | "media"
+        | "websocket"
+        | "other";
+
+    /**
+     * One or more [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API)
+     * strings: `*` is a wildcard within a URL part, `:name` a named segment
+     * (→ `ctx.groups.name`), and an omitted query or hash matches any. An
+     * omitted port means the default port only (write `:*` for any).
+     * `"<all_urls>"` matches every URL. An empty list matches **nothing**.
+     * An invalid pattern makes the registration throw.
+     *
+     * @example "*://example.com/*"
+     * @example ["https://*.example.com/api/v1/*", "https://cdn.example.com/static/*.js"]
+     */
+    type UrlPatterns = string | string[];
+
+    /** Full route form for network handlers (`onRequest`, `onResponseHeaders`, `replaceResponse`, `modifyResponse`). */
+    interface RouteOptions {
+        /** URLs this handler applies to. See {@link UrlPatterns}. */
+        url: UrlPatterns;
+        /**
+         * URLs to skip even when `url` matches (same syntax).
+         *
+         * Cheap: one extra pattern test, only on URLs that already matched
+         * `url`. It filters correctly on every strategy but can't narrow
+         * what `cdp`/`process` pause, so an excluded URL may still be paused
+         * there and then continued unchanged.
+         *
+         * @example { url: "*://example.com/*", exclude: ["*://example.com/*.png", "*://example.com/health"] }
+         */
+        exclude?: UrlPatterns;
+        /**
+         * Only these HTTP methods (case-insensitive). Omit for any.
+         *
+         * @example { url: "*://api.example.com/*", methods: ["POST", "PUT"] }
+         */
+        methods?: string[];
+        /**
+         * Only handle these resource types (webRequest names, also seen as
+         * `ctx.resourceType`). Omit to handle every type.
+         *
+         * How much this saves depends on the strategy:
+         * - `cdp`: the debugger only pauses these types (`Fetch.enable`
+         *   patterns), so other requests are never stopped — the cheapest
+         *   way to keep a route off images, fonts and other assets.
+         * - `webrequest`: checked in the listener before any script runs.
+         * - `process`: checked after the helper pauses the request, so it
+         *   filters correctly but saves no work.
+         * - `hook`: the hook only sees page fetch/XHR (`"xmlhttprequest"`);
+         *   any list without it means the handler never runs (the LOG warns).
+         *
+         * @example { url: "https://app.example.com/*", types: ["main_frame"] } // navigations only
+         * @see https://github.com/nimatrueway/wiretrick/blob/main/docs/strategies.md#compatibility
+         */
+        types?: ResourceType[];
+        /**
+         * Run this handler on this strategy instead of `settings.strategy`.
+         * A single value — there is no fallback. See {@link Strategy}.
+         *
+         * @example { url: "*://example.com/app/*.js", types: ["script"], strategy: "cdp" }
+         */
+        strategy?: Strategy;
+    }
+
+    /** Where a network handler applies: URL pattern(s) or the full {@link RouteOptions} form. */
+    type Route = UrlPatterns | RouteOptions;
+
+    /** Full route form for `wt.onDom`. */
+    interface DomRouteOptions extends DomOptions {
+        /** Frame URLs (top page and iframes) to run in. See {@link UrlPatterns}. */
+        url: UrlPatterns;
+        /** Frame URLs to skip even when `url` matches. */
+        exclude?: UrlPatterns;
+    }
+
+    /** Where an `onDom` handler runs: URL pattern(s) or the full {@link DomRouteOptions} form. */
+    type DomRoute = UrlPatterns | DomRouteOptions;
 
     /** Header edits. */
     interface HeaderMod {
@@ -127,7 +251,7 @@ declare namespace Wiretrick {
         set(key: string, value: any): Promise<void>;
     }
 
-    /** Options for `wt.onDom` (its 2nd argument). */
+    /** Timing for `wt.onDom` (part of its route object). */
     interface DomOptions {
         /**
          * **When** the `onDom` handler runs, relative to the page's own loading.
@@ -135,9 +259,9 @@ declare namespace Wiretrick {
          *
          * **How it gets there:** in every frame (top page *and* iframes) the
          * extension injects a small hook at `document_start`. The hook asks
-         * the background for the scripts whose `match` covers *that frame's*
-         * URL, compiles them, and schedules each script's handler according
-         * to its own `when`.
+         * the background for the scripts with an `onDom` route covering *that
+         * frame's* URL, compiles them, and schedules each matching handler
+         * according to its own `when`.
          *
          * | `when` | Fires | DOM state |
          * |---|---|---|
@@ -179,10 +303,9 @@ declare namespace Wiretrick {
          * - Saving the script while the page is open re-runs the handler
          *   **immediately**, regardless of `when` (live update) — make
          *   handlers idempotent.
-         * - One `onDom` per script: a later `wt.onDom` call replaces the
-         *   earlier one, including its `when`. Each script's `when` is
-         *   independent; handlers with the same `when` run in script-list
-         *   order.
+         * - A script may register several `onDom` handlers, each with its
+         *   own route and `when`. Handlers with the same `when` run in
+         *   script-list order, then registration order.
          * - Async handlers are not awaited; `when` controls only when they
          *   *start*.
          * - The handler runs in the page's MAIN world (sees page globals). If
@@ -192,21 +315,21 @@ declare namespace Wiretrick {
          *
          * @example
          * // default: DOMContentLoaded
-         * wt.onDom(() => {
+         * wt.onDom("*://example.com/*", () => {
          *     document.title = "🎯 " + document.title;
          * });
          *
          * @example
          * // before page scripts (best effort, see race caveat)
-         * wt.onDom(() => {
+         * wt.onDom({ url: "*://example.com/*", when: "document_start" }, () => {
          *     Object.defineProperty(navigator, "webdriver", {
          *         get: () => false,
          *     });
-         * }, { when: "document_start" });
+         * });
          *
          * @example
          * // after everything loaded, then keep it applied across re-renders
-         * wt.onDom(() => {
+         * wt.onDom({ url: "*://example.com/*", when: "document_idle" }, () => {
          *     const apply = () => {
          *         for (const ad of document.querySelectorAll(".ad")) ad.remove();
          *     };
@@ -215,12 +338,12 @@ declare namespace Wiretrick {
          *         childList: true,
          *         subtree: true,
          *     });
-         * }, { when: "document_idle" });
+         * });
          */
         when?: "DOMContentLoaded" | "document_start" | "document_end" | "document_idle";
     }
 
-    // ---- declareScript: declarative meta + typed parameters ----
+    // ---- wt.params / wt.defineParam: typed, user-adjustable parameters ----
 
     /** An on/off switch — a checkbox in the ⚙ dialog. */
     interface ParamDefBoolean {
@@ -296,124 +419,81 @@ declare namespace Wiretrick {
         readonly [K in keyof T]: ParamValue<T[K]>;
     };
 
-    /** The `wt.declareScript` argument. */
-    interface ScriptDef<T extends Record<string, ParamDef> = Record<string, ParamDef>> {
-        /**
-         * URLs the script activates on, as
-         * [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API)
-         * strings: `*` is a wildcard within a URL part, `:name` a named
-         * segment, and an omitted query or hash matches any. An omitted port
-         * means the default port only (write `:*` for any). `"<all_urls>"`
-         * matches every URL. An invalid pattern makes `declareScript` throw.
-         *
-         * @see https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API
-         *
-         * @example
-         * match: ["*://example.com/*", "https://*.example.com/api/v1/*", "https://cdn.example.com/static/*.js"]
-         */
-        match?: string[];
-        /**
-         * Interception tiers in priority order; the first viable one per
-         * request wins. Default `["auto"]`.
-         *
-         * - `"hook"` — page fetch/XHR override; the most lightweight (no
-         *   banner, no helper), but it only sees the page's own fetch/XHR
-         *   (REST/API) calls — documents, `<script src>`, images and workers
-         *   pass through. For robust interception prefer `"process"`,
-         *   `"webrequest"` or `"cdp"`.
-         * - `"cdp"` — Chrome debugger; sees everything, shows a banner while
-         *   attached.
-         * - `"webrequest"` — blocking webRequest (Firefox, MV2 Chromium).
-         * - `"process"` — the local wiretrick-helper; sees everything, no
-         *   banner.
-         *
-         * @example
-         * strategy: ["hook", "cdp"]
-         */
-        strategy?: ("auto" | "hook" | "cdp" | "webrequest" | "process")[];
-        /**
-         * Adjustable parameters, editable from the popup's ⚙ dialog, the
-         * manager and settings.yaml without touching the script. Returned
-         * typed from `wt.declareScript`.
-         *
-         * @example
-         * params: {
-         *     enabled: { type: "boolean", default: true },
-         *     status: { type: "enum", choices: ["500", "503"] },
-         * }
-         */
-        params?: T;
-    }
 }
 
 /**
  * The global script API.
  *
- * **Stacking** — when several scripts match one request they run in list
- * order (top to bottom in the manager):
- * - `onRequest`: the first script returning a *terminal* result
- *   (`respond`/`redirect`/`cancel`) wins and stops the chain; headers-only
- *   or `void` results don't stop it.
- * - `onResponseHeaders`: **all** matching scripts run; `set` is applied in
- *   order (later overwrites), `remove` accumulates.
- * - `modifyResponse`: transforms **compose** — each script's output is the
- *   next script's input.
- * - `replaceResponse`: the first script returning a body wins; later ones
- *   are skipped.
+ * A script is a file that registers handlers at top level. Each handler
+ * takes its own **route** first — a URL pattern, a list, or a route object
+ * (`url`, `exclude`, `methods`, `types`, `strategy`) — then the handler:
  *
- * **Async** — every hook accepts a Promise-returning handler. Async
- * `replaceResponse`/`modifyResponse`/`onDom` work everywhere; async
- * `onRequest`/`onResponseHeaders` are honored natively on Firefox, and on
- * Chromium require `"cdp"` or `"process"` in the strategy list (otherwise a
- * warning is logged and the result is ignored). See the README's
- * "Async handlers" section.
+ * ```ts
+ * wt.onRequest("*://api.example.com/*", (ctx) => ({ headers: { set: { "x-debug": "1" } } }));
+ * ```
+ *
+ * A file that registers **no** handlers is a *utility*: other scripts
+ * import it, and it never runs on its own.
+ *
+ * **Stacking** — when several handlers match one request they run in list
+ * order (scripts top to bottom in the manager, then registration order):
+ * - `onRequest`: the first *terminal* result (`respond`/`redirect`/
+ *   `cancel`) wins and stops the chain; headers-only or `void` results
+ *   don't stop it.
+ * - `onResponseHeaders`: **all** matching handlers run; `set` is applied in
+ *   order (later overwrites), `remove` accumulates.
+ * - `modifyResponse`: transforms **compose** — each output is the next input.
+ * - `replaceResponse`: the first handler returning a body wins.
+ *
+ * Handlers on different strategies run independently, each on its own
+ * strategy (see {@link Wiretrick.Strategy}).
+ *
+ * **Async** — every handler may return a Promise. On Chromium's
+ * `"webrequest"` strategy `onRequest`/`onResponseHeaders` must be
+ * synchronous (an async result is ignored with a warning); every other
+ * strategy awaits it.
  */
 declare const wt: {
     /**
      * Intercept a request before it is sent. Return `{ respond }`,
-     * `{ redirect }`, `{ cancel }`, `{ headers }` or a combination. May be
-     * async (see the stacking/async notes on `wt`).
+     * `{ redirect }`, `{ cancel }`, `{ headers }` or a combination.
      *
-     * **Terminal** results — the first one wins and stops the script chain:
+     * **Terminal** results — the first one wins and stops the chain:
      * - `respond` — synthesize the response; the network is never contacted.
-     *   `body`/`status`/`mime`/`headers` are honored on the hook and cdp
-     *   tiers; the webRequest tier serves it as a data-URL redirect (status
-     *   becomes 200 there).
+     *   On Chromium's `"webrequest"` strategy it is served as a data-URL
+     *   redirect, so only status 200 is possible there.
      * - `redirect` — continue at another URL.
      * - `cancel` — fail the request.
      *
-     * **Non-terminal:** `{ headers }` — applied, and later scripts still run.
+     * **Non-terminal:** `{ headers }` — applied, and later handlers still run.
      *
+     * @param route Where it applies — see {@link Wiretrick.Route}.
      * @param handler Called once per matching request with its context.
      *
      * @example
      * // mock an endpoint
-     * wt.onRequest((ctx) => {
-     *     if (!ctx.url.includes("/user")) return;
-     *     return {
-     *         respond: {
-     *             body: { id: 1, name: "Mock" },
-     *             mime: "application/json",
-     *         },
-     *     };
-     * });
+     * wt.onRequest("https://api.example.com/users/:id", (ctx) => ({
+     *     respond: { body: { id: Number(ctx.groups.id), name: "Mock" } },
+     * }));
      *
      * @example
-     * // add a header to every request
-     * wt.onRequest(() => ({
+     * // add a header to every POST, on the debugger
+     * wt.onRequest({ url: "*://example.com/*", methods: ["POST"], strategy: "cdp" }, () => ({
      *     headers: { set: { "x-debug": "1" } },
      * }));
      */
-    onRequest(handler: (ctx: Wiretrick.RequestCtx) => Wiretrick.Awaitable<Wiretrick.RequestResult | void>): void;
+    onRequest(route: Wiretrick.Route, handler: (ctx: Wiretrick.RequestCtx) => Wiretrick.Awaitable<Wiretrick.RequestResult | void>): void;
 
     /**
-     * Inspect / modify response headers. **All** matching scripts run. May
-     * be async (see the stacking/async notes on `wt`).
+     * Inspect / modify response headers. **All** matching handlers run.
+     * Not available on the `"hook"` strategy (the page can't change headers
+     * before the browser enforces them).
      *
+     * @param route Where it applies — see {@link Wiretrick.Route}.
      * @param handler Called when the response headers arrive.
      *
      * @example
-     * wt.onResponseHeaders(() => ({
+     * wt.onResponseHeaders("*://api.example.com/*", () => ({
      *     headers: {
      *         set: { "access-control-allow-origin": "*" },
      *         remove: ["content-security-policy"],
@@ -421,64 +501,135 @@ declare const wt: {
      * }));
      */
     onResponseHeaders(
+        route: Wiretrick.Route,
         handler: (ctx: Wiretrick.ResponseHeaderCtx) => Wiretrick.Awaitable<Wiretrick.ResponseHeaderResult | void>
     ): void;
 
     /**
-     * Replace the response body completely. Return a string, `Uint8Array`, or
-     * `{ file: "<path or data url>" }`; return nothing to leave the body alone.
+     * Replace the response body completely. Return a string, `Uint8Array`,
+     * an object (sent as JSON), or `{ file: "<path or data url>" }`; return
+     * nothing to leave the response alone.
      *
-     * May be async — the awaited result fulfills the response (the hook tier
-     * short-circuits the page's fetch/XHR; the cdp tier fulfills the network
-     * response).
-     *
+     * @param route Where it applies — see {@link Wiretrick.Route}.
      * @param handler Called per matching response; its result becomes the body.
      *
      * @example
-     * wt.replaceResponse(() => JSON.stringify({ mocked: true }));
+     * wt.replaceResponse("*://api.example.com/flags", () => ({ beta: true }));
      *
      * @example
      * // serve a fixture fetched elsewhere
-     * wt.replaceResponse(async () => {
+     * wt.replaceResponse("*://api.example.com/user", async () => {
      *     const res = await fetch("https://fixtures.local/user.json");
      *     return await res.text();
      * });
      */
     replaceResponse(
-        handler: (ctx: Wiretrick.ReplaceCtx) => Wiretrick.Awaitable<string | Uint8Array | { file: string } | null | void>
+        route: Wiretrick.Route,
+        handler: (ctx: Wiretrick.ReplaceCtx) => Wiretrick.Awaitable<string | Uint8Array | object | { file: string } | null | void>
     ): void;
 
     /**
      * Transform the response body: receives the original body (string or
-     * bytes) and returns the new one. Transforms from multiple scripts
-     * compose in list order.
+     * bytes) and returns the new one. Matching transforms compose in order.
      *
-     * Where it runs:
-     * - **Firefox** — network level (`filterResponseData`).
-     * - **Chromium** — the JS network hook (page-initiated fetch/XHR), CDP
-     *   with `strategy: ["cdp"]`, or the local helper with
-     *   `strategy: ["process"]`.
+     * Needs a strategy that reads bodies: `"process"`, `"cdp"`, `"hook"`
+     * (page fetch/XHR only) or `"webrequest"` on Firefox. Chromium's
+     * `"webrequest"` can't read bodies — the handler doesn't run there and
+     * the LOG says so.
      *
+     * @param route Where it applies — see {@link Wiretrick.Route}.
      * @param transform Receives the context and the original body; returns
      * the new body.
      *
      * @example
-     * wt.modifyResponse((ctx, body) => {
-     *     const text = typeof body === "string"
-     *         ? body
-     *         : new TextDecoder().decode(body);
-     *     return text.replace("old", "new");
+     * wt.modifyResponse({ url: "*://example.com/app/*.js", types: ["script"] }, (ctx, body) => {
+     *     const text = typeof body === "string" ? body : new TextDecoder().decode(body);
+     *     return text.replace("DEBUG=false", "DEBUG=true");
      * });
      */
     modifyResponse(
+        route: Wiretrick.Route,
         transform: (ctx: Wiretrick.BodyCtx, body: string | Uint8Array) => Wiretrick.Awaitable<string | Uint8Array>
     ): void;
+
+    /**
+     * Run a handler in the page (MAIN world) — the resilient way to change
+     * titles, text and DOM content. Works no matter how the response arrived
+     * (service-worker-served HTML, cached pages, hydration). Strategies
+     * don't apply.
+     *
+     * Runs once per document load in every frame whose URL matches the
+     * route — by default at `DOMContentLoaded`. A script may register
+     * several, each with its own route and `when`.
+     *
+     * @param route Frame URL pattern(s), or `{ url, exclude, when }`. See
+     * {@link Wiretrick.DomOptions.when} for exact timing, the MV3
+     * `document_start` race, SPA/re-render behavior and live-update re-runs.
+     * @param handler Receives the same `ctx` shape as `onRequest` (`url` is
+     * the frame's URL). May be async (not awaited).
+     *
+     * @example
+     * wt.onDom("*://example.com/*", () => {
+     *     document.title = "🎯 " + document.title;
+     * });
+     *
+     * @example
+     * // after everything settled
+     * wt.onDom({ url: "*://example.com/*", when: "document_idle" }, () => {
+     *     const el = document.querySelector("h1");
+     *     if (el) el.textContent = "Intercepted";
+     * });
+     */
+    onDom(route: Wiretrick.DomRoute, handler: (ctx: Wiretrick.RequestCtx) => Wiretrick.Awaitable<void>): void;
+
+    /**
+     * One-line description: shown as a tooltip in the manager and the
+     * popup, and in diagnostics.
+     *
+     * @example
+     * wt.describe("Force failures on the posts API");
+     */
+    describe(text: string): void;
+
+    /**
+     * Declare adjustable parameters, editable from the popup's ⚙ dialog,
+     * the manager and settings.yaml without touching the script. Returns
+     * the current values (stored values over your defaults), typed from
+     * your defs. Routes may be built from them — a change re-runs the
+     * script. Utilities may declare params too.
+     *
+     * @param defs Parameter name → definition (`type`, `default`, optional
+     *   `description`); see {@link Wiretrick.ParamDef}.
+     * @returns The current values, typed from `defs`.
+     *
+     * @example
+     * const cfg = wt.params({
+     *     enabled: { type: "boolean", default: true, description: "Return errors" },
+     *     status: { type: "enum", choices: ["500", "503"], default: "500" },
+     *     hosts: { type: "stringList", default: ["staging.example.com"] },
+     * });
+     *
+     * wt.onRequest(cfg.hosts.map((h) => `*://${h}/api/*`), () => {
+     *     if (cfg.enabled) return { respond: { status: Number(cfg.status), body: { error: "forced" } } };
+     * });
+     */
+    params<const T extends Record<string, Wiretrick.ParamDef>>(defs: T): Wiretrick.ParamsOf<T>;
+
+    /**
+     * Declare a single parameter and get its current value (same store as
+     * {@link wt.params}).
+     *
+     * @example
+     * const host = wt.defineParam("host", { type: "string", default: "api.example.com" });
+     * wt.onRequest(`*://${host}/*`, () => ({ headers: { set: { "x-debug": "1" } } }));
+     */
+    defineParam<const D extends Wiretrick.ParamDef>(name: string, def: D): Wiretrick.ParamValue<D>;
 
     /**
      * Per-script key/value storage (async, persistent).
      *
      * @example
-     * wt.onRequest(async () => {
+     * wt.onRequest("*://example.com/*", async () => {
      *     const hits = ((await wt.storage.get("hits")) ?? 0) + 1;
      *     await wt.storage.set("hits", hits);
      * });
@@ -493,71 +644,8 @@ declare const wt: {
      */
     log(...args: unknown[]): void;
 
-    /**
-     * Run a handler in the page (MAIN world) — the resilient way to change
-     * titles, text and DOM content. Works no matter how the response arrived
-     * (service-worker-served HTML, cached pages, hydration).
-     *
-     * Runs once per document load in every frame whose URL matches the
-     * script's `match` — by default at `DOMContentLoaded`.
-     *
-     * @param handler Receives the same `ctx` shape as `onRequest` (`url` is
-     * the frame's URL). May be async (not awaited).
-     * @param opts Set `when` to `"DOMContentLoaded"` (default), `"document_start"`,
-     * `"document_end"` or `"document_idle"`. See {@link Wiretrick.DomOptions.when}
-     * for exact timing, the MV3 `document_start` race, SPA/re-render behavior
-     * and live-update re-runs.
-     *
-     * @example
-     * wt.onDom(() => {
-     *     document.title = "🎯 " + document.title;
-     * });
-     *
-     * @example
-     * // after everything settled
-     * wt.onDom(() => {
-     *     const el = document.querySelector("h1");
-     *     if (el) el.textContent = "Intercepted";
-     * }, { when: "document_idle" });
-     */
-    onDom(handler: (ctx: Wiretrick.RequestCtx) => Wiretrick.Awaitable<void>, opts?: Wiretrick.DomOptions): void;
-
-    /**
-     * Declarative script definition — the **only** way to activate a script:
-     * sets the meta (`match`/`include`/`strategy`) and declares adjustable
-     * parameters. Sources without it are importable library modules.
-     *
-     * Returns the resolved parameter values (stored UI values merged over
-     * your defaults), typed from your `params` defs — so the script never
-     * hard-codes toggles; users change them from the ⚙ dialog in the popup
-     * or the manager.
-     *
-     * @param def URL patterns, tier priority and adjustable parameters.
-     * @returns The current parameter values, typed from `def.params`.
-     *
-     * @example
-     * const cfg = wt.declareScript({
-     *     match: ["*://cloud*.mongodb.com/*"],
-     *     strategy: ["hook", "cdp"],
-     *     params: {
-     *         enabled: { type: "boolean", default: true, description: "Return 500s" },
-     *         status: { type: "enum", choices: ["500", "503"], default: "500" },
-     *         note: { type: "string", default: "API force failed" },
-     *         extra: { type: "stringList", default: [] },
-     *     },
-     * });
-     *
-     * wt.onRequest(() => {
-     *     if (!cfg.enabled) return;
-     *     return {
-     *         respond: {
-     *             status: Number(cfg.status),
-     *             body: { error: cfg.note },
-     *         },
-     *     };
-     * });
-     */
-    declareScript<T extends Record<string, Wiretrick.ParamDef>>(def: Wiretrick.ScriptDef<T>): Wiretrick.ParamsOf<T>;
+    /** @deprecated Removed — pass the URL pattern to each handler, `wt.params({…})` for parameters, `wt.describe("…")` for the description. Calling it throws. */
+    declareScript(def: unknown): never;
 };
 
 /*
@@ -604,7 +692,7 @@ interface URLPatternResult {
 
 /**
  * Matches URLs against a pattern, e.g. `new URLPattern("https://*.example.com/users/:id")`.
- * The same syntax as `wt.declareScript({ match })`.
+ * The same syntax as handler routes (`wt.onRequest(pattern, fn)`).
  *
  * @see https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API
  */

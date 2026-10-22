@@ -12,6 +12,8 @@
  */
 import { LOG_LEVELS, DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL, type ScriptSettingsState } from "./settingsYaml";
 import { paramDefault, type ParamDef } from "./scriptDef";
+import { builtinStrategy, STRATEGIES } from "./route";
+import { strategyMarkdown, strategyEnumMarkdown } from "./strategyInfo";
 
 export const SETTINGS_SCHEMA = {
     $schema: "http://json-schema.org/draft-07/schema#",
@@ -38,6 +40,14 @@ export const SETTINGS_SCHEMA = {
                     default: DEFAULT_LOG_CAP,
                     description: "Log lines kept in the panel",
                 },
+                strategy: {
+                    type: "string",
+                    enum: [...STRATEGIES],
+                    default: builtinStrategy(),
+                    description: "Default interception strategy for handlers whose route doesn't set `strategy` (see docs/strategies.md#compatibility)",
+                    markdownDescription: strategyMarkdown(),
+                    markdownEnumDescriptions: strategyEnumMarkdown(),
+                },
             },
         },
         params: {
@@ -46,7 +56,7 @@ export const SETTINGS_SCHEMA = {
                 "Per-script values keyed by script name: `enabled` toggles the script, other keys are its declared params",
             additionalProperties: {
                 type: "object",
-                description: "Values for one script (params declared by its wt.declareScript call)",
+                description: "Values for one script (params from its wt.params / wt.defineParam)",
                 properties: {
                     enabled: { type: "boolean", default: true, description: "Run this script" },
                 },

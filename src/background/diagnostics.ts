@@ -10,6 +10,7 @@ import { getDebugBuffer } from "../shared/debugLog";
 import { isRecording, networkSnapshot } from "./network";
 import { getSettingsText } from "./settingsFile";
 import type { NetBody, NetEntry } from "../shared/netTypes";
+import { getDefaultStrategy, routeLabel } from "../shared/route";
 
 const SECRET_HEADERS = /^(cookie|set-cookie|authorization|proxy-authorization|x-api-key|x-auth-token|x-csrf-token|x-xsrf-token)$/i;
 const BODY_CAP = 4000;
@@ -119,7 +120,7 @@ export async function collectDiagnostics(extra: DiagnosticsExtra = {}): Promise<
     out.push("");
     out.push(
         [
-            "Wiretrick is a browser extension that runs user TypeScript scripts (`wt.declareScript`, `wt.onRequest`, `wt.modifyResponse`, …) to intercept requests.",
+            "Wiretrick is a browser extension that runs user TypeScript scripts (`wt.onRequest(url, fn)`, `wt.modifyResponse(url, fn)`, …) to intercept requests.",
             "Interception strategies: `hook` (page fetch/XHR patch), `cdp` (chrome.debugger), `webrequest` (MV2 blocking webRequest), `process` (local helper proxy).",
             "LOG lines are per-tab (`tab=-1` = background/global); `[webrequest]` lines trace the blocking-webRequest tier (onBeforeRequest → script decision → redirect/complete/FAILED/IGNORED).",
             "If a URL never appears in the LOG/debug log, the extension never saw that request. Debug-level lines are only produced when `logLevel: debug`.",
@@ -154,7 +155,7 @@ export async function collectDiagnostics(extra: DiagnosticsExtra = {}): Promise<
         out.push(
             fence(
                 "json",
-                JSON.stringify({ id: s.id, declared: s.meta.declared, strategy: s.meta.strategy, match: s.meta.match, error: s.error, params: params[s.id] || {}, updatedAt: iso(s.updatedAt) }, null, 2)
+                JSON.stringify({ id: s.id, active: s.meta.active, description: s.meta.description, routes: (s.meta.routes || []).map((r) => ({ handler: routeLabel(r), ...r, kind: undefined, index: undefined, strategy: r.strategy ?? `(default: ${getDefaultStrategy()})` })), error: s.error, params: params[s.id] || {}, updatedAt: iso(s.updatedAt) }, null, 2)
             )
         );
         out.push("");

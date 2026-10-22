@@ -69,15 +69,17 @@ const details = (over: Record<string, any> = {}) => ({
 });
 
 // line 4 throws (x is undefined):
-const THROWS = `wt.declareScript({ match: ["*"] });
-wt.onRequest((ctx) => {
+// line 4 throws inside the handler
+const throws = (strategy: string, async = "") => `// a handler that throws
+wt.onRequest({ url: "*", strategy: "${strategy}" }, ${async}(ctx) => {
     const x = undefined;
     return x.split(".");
 });`;
+const THROWS = throws("webrequest");
 
 // line 4 throws at module top level (compile-time):
-const TOPLEVEL = `wt.declareScript({ match: ["*"] });
-
+const TOPLEVEL = `
+wt.onRequest({ url: "*", strategy: "webrequest" }, () => {});
 const x = undefined;
 x.split(".");
 `;
@@ -136,7 +138,9 @@ describe("webRequest tier: error logs carry name + user line:col", () => {
 
     it("compile-time (top-level) throw → [name] + mapped line", () => {
         const s = new WebRequestStrategy();
-        s.reload([storedScript("a", "Thrower", TOPLEVEL)]);
+        // stored meta is from the last good save (saveScript keeps it on a failed compile)
+        const good = storedScript("a", "Thrower", TOPLEVEL.replace(`x.split(".");`, ""));
+        s.reload([{ ...good, code: TOPLEVEL }]);
         const line = entries.find((e) => e.level === "error");
         expect(line, "a compile error log line must exist").toBeTruthy();
         expect(line!.message).toContain("[Thrower]");
@@ -148,7 +152,7 @@ describe("CDP tier: error logs carry name + user line:col", () => {
     it("onRequest throws at the Request stage → [name] + mapped line", async () => {
         const c = new CdpStrategy();
         // sync onRequest runs in the webRequest tier only; the Request stage runs async ones
-        c.reload([storedScript("a", "Thrower", THROWS.replace("wt.onRequest((ctx)", "wt.onRequest(async (ctx)"))]);
+        c.reload([storedScript("a", "Thrower", throws("cdp", "async "))]);
         await c.handlePaused("tab:1", {
             requestId: "r1",
             request: { url: "https://api.example.com/v1/data", method: "GET" },

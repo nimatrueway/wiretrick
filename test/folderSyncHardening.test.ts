@@ -107,7 +107,7 @@ describe("folder sync: the background is the only writer", () => {
     it("renaming in the store renames the script's settings.yaml section", async () => {
         const sync = await started();
         const { saveScript } = await ss();
-        const code = `wt.declareScript({ params: { n: { type: "number", default: 1 } } });`;
+        const code = `wt.params({ n: { type: "number", default: 1 } });`;
         await saveScript({ id: "p", code, name: "old" });
         await sync.flush();
         put("settings.yaml", files.get("settings.yaml")!.text.replace(/# n: 1|n: 1/, "n: 9 # tuned"));

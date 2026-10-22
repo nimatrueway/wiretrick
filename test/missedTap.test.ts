@@ -1,62 +1,46 @@
 /** "modifyResponse never ran": reason selection, throttle, and the tap registry. */
 import { describe, it, expect, beforeEach } from "vitest";
-import { bodyTierGap, makeMissedThrottle, missedReason, missedWhat, MISSED_REASONS, type MissedCase } from "../src/shared/missedTap";
+import { makeMissedThrottle, missedReason, missedWhat, routeProblem, MISSED_REASONS, type MissedCase } from "../src/shared/missedTap";
 import { interventionKind, missedLine } from "../src/shared/netTypes";
 import { __resetTaps, bodyTappedSince, log, logTapped } from "../src/background/engine/logs";
 
-const base: MissedCase = { tiers: ["auto"], type: "main_frame", firefox: false, mv3: false, fromCache: false, helperActive: false, replaceOnly: false, cdpWarned: false };
+const base: MissedCase = { strategy: "cdp", type: "main_frame", firefox: false, mv3: false, fromCache: false, helperActive: false, cdpWarned: false };
 const reason = (over: Partial<MissedCase>) => missedReason({ ...base, ...over });
 
 describe("missedReason", () => {
-    it("Chromium: webrequest/hook-only tiers can't touch a document/script body", () => {
-        expect(reason({ tiers: ["webrequest"] })).toBe(MISSED_REASONS.chromiumNoBody);
-        expect(reason({ tiers: ["hook"], type: "script" })).toBe(MISSED_REASONS.chromiumNoBody);
-        expect(reason({ tiers: ["webrequest"], mv3: true, type: "stylesheet" })).toBe(MISSED_REASONS.chromiumNoBody);
-        // MV3 "auto" stays on the hook — no debugger
-        expect(reason({ tiers: ["auto"], mv3: true })).toBe(MISSED_REASONS.chromiumNoBody);
-        // even a cached load: the tiers are the real problem
-        expect(reason({ tiers: ["webrequest"], fromCache: true })).toBe(MISSED_REASONS.chromiumNoBody);
+    it("routes whose strategy can't run here were already warned at load", () => {
+        expect(reason({ strategy: "process", firefox: true })).toBeNull();
+        expect(reason({ strategy: "cdp", firefox: true })).toBeNull();
+        expect(reason({ strategy: "webrequest", mv3: true })).toBeNull();
+        // Chromium webrequest can't read bodies: routeProblem covers it
+        expect(reason({ strategy: "webrequest" })).toBeNull();
     });
 
-    it("MV2 webrequest can still serve a replaceResponse-only script (redirect)", () => {
-        expect(reason({ tiers: ["webrequest"], replaceOnly: true })).toBe(MISSED_REASONS.fallback);
-        expect(reason({ tiers: ["webrequest"], replaceOnly: true, mv3: true })).toBe(MISSED_REASONS.chromiumNoBody);
+    it("hook: silent for fetch/XHR (the page may never read it), explains other loads", () => {
+        expect(reason({ strategy: "hook", type: "xmlhttprequest" })).toBeNull();
+        expect(reason({ strategy: "hook", type: "script" })).toBe(MISSED_REASONS.hookNotFetch);
+        expect(reason({ strategy: "hook" })).toBe(MISSED_REASONS.hookNotFetch);
     });
 
-    it("process listed but the helper is down", () => {
-        expect(reason({ tiers: ["process"] })).toBe(MISSED_REASONS.helperDown);
-        expect(reason({ tiers: ["hook", "process"] })).toBe(MISSED_REASONS.helperDown);
-        expect(reason({ tiers: ["process"], helperActive: true })).toBe(MISSED_REASONS.fallback);
-        // falls through to cdp
-        expect(reason({ tiers: ["process", "cdp"] })).toBe(MISSED_REASONS.fallback);
+    it("process with the helper down", () => {
+        expect(reason({ strategy: "process" })).toBe(MISSED_REASONS.helperDown);
+        expect(reason({ strategy: "process", helperActive: true })).toBe(MISSED_REASONS.fallback);
     });
 
     it("cache, the existing debugger warning, and the fallback", () => {
-        expect(reason({ tiers: ["cdp"], fromCache: true })).toBe(MISSED_REASONS.cache);
-        expect(reason({ tiers: ["cdp"], cdpWarned: true })).toBeNull();
-        expect(reason({ tiers: ["auto"], cdpWarned: true })).toBeNull();
-        expect(reason({ tiers: ["cdp"] })).toBe(MISSED_REASONS.fallback);
-        expect(reason({ tiers: ["cdp"], mv3: true })).toBe(MISSED_REASONS.fallback);
+        expect(reason({ fromCache: true })).toBe(MISSED_REASONS.cache);
+        expect(reason({ cdpWarned: true })).toBeNull();
+        expect(reason({})).toBe(MISSED_REASONS.fallback);
+        expect(reason({ mv3: true })).toBe(MISSED_REASONS.fallback);
     });
 
     it("Firefox: the webrequest tier streams every body", () => {
-        expect(reason({ tiers: ["webrequest"], firefox: true })).toBe(MISSED_REASONS.fallback);
-        expect(reason({ tiers: ["webrequest"], firefox: true, fromCache: true })).toBe(MISSED_REASONS.cache);
+        expect(reason({ strategy: "webrequest", firefox: true })).toBe(MISSED_REASONS.fallback);
+        expect(reason({ strategy: "webrequest", firefox: true, fromCache: true })).toBe(MISSED_REASONS.cache);
     });
 
     it("skips sockets and pings", () => {
-        for (const type of ["websocket", "ping", "csp_report"]) expect(reason({ tiers: ["webrequest"], type })).toBeNull();
-    });
-
-    it("fetch/XHR: silent when the hook may run it, warns when nothing can", () => {
-        const xhr = { type: "xmlhttprequest" };
-        for (const tiers of [["hook"], ["auto"], ["webrequest", "hook"]]) expect(reason({ ...xhr, tiers })).toBeNull();
-        expect(reason({ ...xhr, tiers: ["webrequest"], mv3: true })).toBeNull(); // MV3: webrequest → hook
-        expect(reason({ ...xhr, tiers: ["webrequest"] })).toBe(MISSED_REASONS.chromiumNoBodyXhr);
-        expect(reason({ ...xhr, tiers: ["process"] })).toBe(MISSED_REASONS.helperDown);
-        expect(reason({ ...xhr, tiers: ["webrequest"], replaceOnly: true })).toBe(MISSED_REASONS.fallback);
-        expect(reason({ ...xhr, tiers: ["cdp"] })).toBe(MISSED_REASONS.fallback);
-        expect(reason({ ...xhr, tiers: ["webrequest"], firefox: true })).toBe(MISSED_REASONS.fallback);
+        for (const type of ["websocket", "ping", "csp_report"]) expect(reason({ type })).toBeNull();
     });
 
     it("names the request type", () => {
@@ -65,20 +49,36 @@ describe("missedReason", () => {
     });
 });
 
-describe("bodyTierGap (up-front warning)", () => {
-    it("only Chromium MV2 modifyResponse with no body-capable tier", () => {
-        expect(bodyTierGap(["webrequest"], false, false, true)).toMatch(/never run with strategy \["webrequest"\]/);
-        for (const t of ["hook", "auto", "cdp", "process"]) expect(bodyTierGap(["webrequest", t], false, false, true)).toBeNull();
-        expect(bodyTierGap(["webrequest"], true, false, true)).toBeNull(); // Firefox streams bodies
-        expect(bodyTierGap(["webrequest"], false, true, true)).toBeNull(); // MV3: falls back to the hook
-        expect(bodyTierGap(["webrequest"], false, false, false)).toBeNull(); // replaceResponse only: redirect works
+describe("routeProblem (up-front warning, no fallback)", () => {
+    const chrome = { firefox: false, mv3: false };
+    const p = (kind: any, strategy: any, env = chrome, types?: string[]) => routeProblem({ kind, strategy, types }, env);
+
+    it("unavailable strategies", () => {
+        expect(p("onRequest", "process", { firefox: true, mv3: false })).toMatch(/not available in Firefox/);
+        expect(p("onRequest", "cdp", { firefox: true, mv3: false })).toMatch(/not available in Firefox/);
+        expect(p("onRequest", "webrequest", { firefox: false, mv3: true })).toMatch(/MV3/);
+        expect(p("onRequest", "webrequest", chrome)).toBeNull();
+        expect(p("onRequest", "process", chrome)).toBeNull(); // helper down is reported by the tier
+    });
+
+    it("Chromium webrequest can't read bodies; Firefox can", () => {
+        expect(p("modifyResponse", "webrequest")).toMatch(/can't read response bodies/);
+        expect(p("replaceResponse", "webrequest")).toBeNull();
+        expect(p("modifyResponse", "webrequest", { firefox: true, mv3: false })).toBeNull();
+    });
+
+    it("hook: no response headers, and types must include xmlhttprequest", () => {
+        expect(p("onResponseHeaders", "hook")).toMatch(/onResponseHeaders never runs/);
+        expect(p("modifyResponse", "hook", chrome, ["script"])).toMatch(/excludes "xmlhttprequest"/);
+        expect(p("modifyResponse", "hook", chrome, ["xmlhttprequest", "script"])).toBeNull();
+        expect(p("modifyResponse", "hook")).toBeNull();
     });
 });
 
 describe("missed warning line", () => {
     it("is classified missed — never tapped — with or without an explicit kind", () => {
-        const line = missedLine("Mod", "modifyResponse", "https://a.test/", "document", MISSED_REASONS.chromiumNoBody);
-        expect(line).toBe(`[Mod] modifyResponse never ran for https://a.test/ (document) — ${MISSED_REASONS.chromiumNoBody}`);
+        const line = missedLine("Mod", "modifyResponse", "https://a.test/", "document", MISSED_REASONS.helperDown);
+        expect(line).toBe(`[Mod] modifyResponse never ran for https://a.test/ (document) — ${MISSED_REASONS.helperDown}`);
         expect(interventionKind("warn", line)).toBe("missed");
         expect(interventionKind("warn", line, "missed")).toBe("missed");
     });

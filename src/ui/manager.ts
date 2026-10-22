@@ -16,7 +16,9 @@ import { cleanScriptName, scriptNameProblem, scriptFileName, scriptFileKey, uniq
 import { buildBundle, parseBundleText, bundleSettingsDoc, pickBundle, vscodeTargetPath } from "./bundle";
 import { createQuickOpenPalette } from "./quickOpen";
 import { computeDirty } from "./dirtyState";
-import { parseSettings, SETTINGS_FILE, type SettingsDoc } from "../shared/settingsYaml";
+import { parseSettings, SETTINGS_FILE, defaultStrategySetting, isStrategy, type SettingsDoc } from "../shared/settingsYaml";
+import { STRATEGIES, type Strategy } from "../shared/route";
+import { STRATEGY_DOC_URL, STRATEGY_INFO, strategyUnsupported } from "../shared/strategyInfo";
 import { dlogLevel } from "../shared/debugLog";
 import { helperInstallCommand, helperInstallShell } from "../shared/helperInstall";
 import { mountNetworkPanel } from "./network/mount";
@@ -127,7 +129,7 @@ async function loadSettingsModel(force = false): Promise<void> {
 
 // ---- settings.yaml assistance: schema + each script's declared params ----
 const assistScripts = (): AssistScript[] =>
-    scripts.map((s: any) => ({ name: s.meta.name, declared: s.meta.declared !== false, defs: s.paramDefs ?? {} }));
+    scripts.map((s: any) => ({ name: s.meta.name, declared: s.meta.active !== false, defs: s.paramDefs ?? {} }));
 let settingsMarkerTimer: ReturnType<typeof setTimeout> | null = null;
 
 function scheduleSettingsMarkers(): void {
@@ -291,7 +293,7 @@ function renderList(): void {
     });
     list.appendChild(sli);
     for (const script of scripts) {
-        const isLib = script.meta.declared === false;
+        const isLib = script.meta.active === false;
         const off = !isLib && !script.enabled;
         const li = row(script.id, (isLib ? " utility" : "") + (off ? " disabled" : ""));
 
@@ -300,7 +302,8 @@ function renderList(): void {
         name.className = "script-name" + (health ? " error" : "");
         name.textContent = scriptFileName(script.meta.name);
         name.title = [
-            isLib ? "Utility module — importable by other scripts, never runs on its own. Use wt.declareScript to turn it into a script" : script.meta.match.join(", "),
+            script.meta.description ?? "",
+            isLib ? "Utility module — registers no handlers, importable by other scripts. Register a handler (e.g. wt.onRequest(url, fn)) to make it a script" : script.meta.match.join(", "),
             off ? "Disabled — enable it from the editor toolbar or the right-click menu" : "",
             "Double-click or F2 to rename",
         ].filter(Boolean).join("\n");
@@ -364,7 +367,7 @@ async function deleteScript(script: Script): Promise<void> {
 function updateEnabledToggle(): void {
     const label = $("#script-enabled");
     const script = scripts.find((s) => s.id === selectedId);
-    label.hidden = !script || script.meta.declared === false;
+    label.hidden = !script || script.meta.active === false;
     if (!script) return;
     label.querySelector(".switch")!.classList.toggle("on", !!script.enabled);
     label.setAttribute("aria-checked", String(!!script.enabled));
@@ -438,7 +441,7 @@ function setupExplorer(): void {
         if (!script) return;
         e.preventDefault();
         moveExplorerFocus(script.id);
-        const isLib = script.meta.declared === false;
+        const isLib = script.meta.active === false;
         showContextMenu(e.clientX, e.clientY, [
             { label: "Open", key: "Enter", run: () => script.id !== selectedId && select(script.id) },
             null,
@@ -837,8 +840,8 @@ function renderProcessStatus(st: any): void {
     helperStatus = st;
     if (!$("#settings-panel").classList.contains("hidden")) void renderAbout();
     const labels: Record<string, string> = {
-        idle: "not needed — no enabled script lists \"process\"",
-        unsupported: "unavailable in this browser (Chrome only) — scripts fall through their strategy lists",
+        idle: "not needed — no enabled handler uses the \"process\" strategy",
+        unsupported: "unavailable in this browser (Chrome only) — handlers using \"process\" don't run",
         connecting: "connecting…",
         ready: `running${st.version ? ` (v${st.version})` : ""}${st.port ? ` on 127.0.0.1:${st.port}` : ""}`,
         missing: "not installed",
@@ -1335,6 +1338,39 @@ function setupDialogs(): void {
         applyLogLevel(sel.value);
     });
 
+    // settings: default interception strategy
+    const strategySel = $("#settings-strategy") as HTMLSelectElement;
+    const strategyTable = $("#settings-strategy-table") as HTMLTableElement;
+    ($("#settings-strategy-doc") as HTMLAnchorElement).href = STRATEGY_DOC_URL;
+    const strategyEnv = { firefox: typeof (globalThis as any).browser?.webRequest?.filterResponseData === "function", mv3: __MV3__ };
+    const renderStrategy = (cur: string): void => {
+        strategySel.value = cur;
+        strategyTable.replaceChildren();
+        const head = strategyTable.insertRow();
+        for (const t of ["Strategy", "Pros", "Cons"]) head.appendChild(Object.assign(document.createElement("th"), { textContent: t }));
+        for (const s of STRATEGIES) {
+            const row = strategyTable.insertRow();
+            const why = strategyUnsupported(s, strategyEnv);
+            row.classList.toggle("current", s === cur);
+            row.classList.toggle("unavailable", !!why);
+            row.insertCell().textContent = s + (why ? ` (${why})` : "");
+            row.insertCell().textContent = STRATEGY_INFO[s].pros;
+            row.insertCell().textContent = STRATEGY_INFO[s].cons;
+        }
+    };
+    for (const s of STRATEGIES) {
+        const why = strategyUnsupported(s as Strategy, strategyEnv);
+        const opt = new Option(STRATEGY_INFO[s].label + (s === defaultStrategySetting() ? " (default)" : "") + (why ? ` — ${why}` : ""), s);
+        opt.disabled = !!why;
+        strategySel.add(opt);
+    }
+    renderStrategy(defaultStrategySetting());
+    chrome.storage.local.get("resStrategy", (d) => renderStrategy(isStrategy(d?.resStrategy) ? d.resStrategy : defaultStrategySetting()));
+    strategySel.addEventListener("change", () => {
+        chrome.storage.local.set({ resStrategy: strategySel.value });
+        renderStrategy(strategySel.value);
+    });
+
     // verbose Monaco/navigation diagnostics
     const verboseBox = $("#settings-monaco-verbose") as HTMLInputElement;
     chrome.storage.local.get("resMonacoVerbose", (d) => {
@@ -1384,12 +1420,13 @@ function setupDialogs(): void {
             sel.value = c.resLogLevel.newValue;
             applyLogLevel(c.resLogLevel.newValue);
         }
+        if (c.resStrategy) renderStrategy(isStrategy(c.resStrategy.newValue) ? c.resStrategy.newValue : defaultStrategySetting());
         if (c.resLogCap?.newValue) {
             logCap = c.resLogCap.newValue;
             capInput.value = String(logCap);
             refilterLog();
         }
-        if (c.resScripts || c.resParams || c.resLogLevel || c.resLogCap || c.resSettingsText) {
+        if (c.resScripts || c.resParams || c.resLogLevel || c.resLogCap || c.resStrategy || c.resSettingsText) {
             void (async () => {
                 if (selectedId === SETTINGS_ID) await loadSettingsModel();
                 if (c.resScripts) await refresh();

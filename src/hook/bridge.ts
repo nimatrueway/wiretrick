@@ -13,6 +13,7 @@
 import { formatScriptError } from "../shared/scriptError";
 import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
 import { scriptFunction } from "../shared/scriptFn";
+import { makePageShim, domHandlersFor, scheduleDom, type PageDomHandler } from "../shared/pageShim";
 
 (() => {
     const MAIN_SOURCE = "res-override-bridge";
@@ -86,7 +87,7 @@ import { scriptFunction } from "../shared/scriptFn";
             safeSend({ type: "getHookBundle", url: location.href }, (resp: any) => {
                 const active = !!(resp && (resp.count > 0 || (resp.domHandlers || []).length));
                 window.postMessage(
-                    { source: MAIN_SOURCE, kind: "status", active, patterns: (resp && resp.patterns) || [], domHandlers: (resp && resp.domHandlers) || [], libs: (resp && resp.libs) || [] },
+                    { source: MAIN_SOURCE, kind: "status", active, routes: (resp && resp.routes) || [], domHandlers: (resp && resp.domHandlers) || [], libs: (resp && resp.libs) || [] },
                     window.location.origin
                 );
             });
@@ -136,9 +137,10 @@ import { scriptFunction } from "../shared/scriptFn";
     // ---- wt.onDom fallback (isolated world): compiles the FULL script
     // source with a shim so top-level helpers/closures survive; the DOM is
     // shared with the page, window (page JS globals) is not ----
-    interface DomHandler { scriptId: string; name: string; when: string; src: string; params?: Record<string, any> }
+    interface DomHandler { scriptId: string; name: string; src: string; params?: Record<string, any> }
 
-    async function runDomHandlers(hot: boolean): Promise<void> {        if (dead) return;
+    async function runDomHandlers(hot: boolean): Promise<void> {
+        if (dead) return;
         // handlers come embedded in the hook bundle (getHookBundle)
         const bundle = await new Promise<any>((resolve) => {
             safeSend({ type: "getHookBundle", url: location.href }, (r: any) => resolve(r || { domHandlers: [] }));
@@ -146,33 +148,23 @@ import { scriptFunction } from "../shared/scriptFn";
             setTimeout(() => resolve({ domHandlers: [] }), 1000);
         });
         const handlers: DomHandler[] = bundle.domHandlers || [];
-        const libSources: { name: string; src: string }[] = bundle.libs || [];
+        const libSources: { name: string; src: string; params?: Record<string, any> }[] = bundle.libs || [];
         dlog("debug", `onDom (isolated world): running ${handlers.length} script(s)${hot ? " (hot refire)" : ""}`);
-        for (const h of handlers) {
-            const store: any = { onDom: null, onDomOptions: {} };
-            const shim = {
-                onRequest: () => {},
-                onResponseHeaders: () => {},
-                replaceResponse: () => {},
-                modifyResponse: () => {},
-                onDom: (fn: any, opts?: any) => {
-                    store.onDom = fn;
-                    store.onDomOptions = opts || {};
-                },
-                // meta applied upstream; script gets its resolved params
-                declareScript: () => h.params || {},
-                log: (...args: any[]) => scriptLog(h.scriptId, "info", scriptLogLine(h.name, "wt.log", formatLogArgs(args))),
+        const shimFor = (scriptId: string | null, name: string, params: Record<string, any>) =>
+            makePageShim({
+                params,
+                log: (...args: any[]) => scriptLog(scriptId, "info", scriptLogLine(name, "wt.log", formatLogArgs(args))),
                 storage: {
-                    get: (key: string) =>
-                        new Promise((r) => safeSend({ type: "scriptStorageGet", scriptId: h.scriptId, key }, (x: any) => r(x && x.value))),
-                    set: (key: string, value: any) =>
-                        new Promise((r) => safeSend({ type: "scriptStorageSet", scriptId: h.scriptId, key, value }, () => r(null))),
+                    get: (key: string) => new Promise((r) => safeSend({ type: "scriptStorageGet", scriptId, key }, (x: any) => r(x && x.value))),
+                    set: (key: string, value: any) => new Promise((r) => safeSend({ type: "scriptStorageSet", scriptId, key, value }, () => r(null))),
                 },
-            };
+            });
+        for (const h of handlers) {
+            // shadow console like the MAIN-world path: script console.*
+            // calls go to the extension LOG, not the page console
+            const consoleProxy = makeScriptConsole((level, source, text) => scriptLog(h.scriptId, level, scriptLogLine(h.name, source, text)));
+            let dom: PageDomHandler[];
             try {
-                // shadow console like the MAIN-world path: script console.*
-                // calls go to the extension LOG, not the page console
-                const consoleProxy = makeScriptConsole((level, source, text) => scriptLog(h.scriptId, level, scriptLogLine(h.name, source, text)));
                 // page-side require over the shipped library sources
                 const libModules = new Map<string, any>();
                 const normSpec = (spec: string) =>
@@ -184,39 +176,27 @@ import { scriptFunction } from "../shared/scriptFn";
                     if (!lib) throw new Error(`cannot import "${spec}" — is the library script saved?`);
                     const moduleObj = { exports: {} as any };
                     libModules.set(key, moduleObj.exports);
-                    const libStore: any = { onDom: null, onDomOptions: {} };
-                    scriptFunction(lib.src)(
-                        { ...shim, onDom: (fn: any, opts: any) => { libStore.onDom = fn; libStore.onDomOptions = opts || {}; } },
-                        consoleProxy,
-                        requireLib,
-                        moduleObj,
-                        moduleObj.exports
-                    );
+                    scriptFunction(lib.src)(shimFor(null, lib.name, lib.params || {}).wt, consoleProxy, requireLib, moduleObj, moduleObj.exports);
                     libModules.set(key, moduleObj.exports);
                     return moduleObj.exports;
                 };
                 const moduleObj = { exports: {} as any };
-                scriptFunction(h.src)(shim, consoleProxy, requireLib, moduleObj, moduleObj.exports);
+                const shim = shimFor(h.scriptId, h.name, h.params || {});
+                scriptFunction(h.src)(shim.wt, consoleProxy, requireLib, moduleObj, moduleObj.exports);
+                dom = shim.dom;
             } catch (e: any) {
                 scriptLog(h.scriptId, "error", formatScriptError(h.name, e, "onDom compile (isolated world)"));
                 continue;
             }
-            if (!store.onDom) continue;
-            const run = () => {
-                try {
-                    store.onDom({ url: location.href, method: "GET", tabUrl: location.href });
-                } catch (e: any) {
-                    scriptLog(h.scriptId, "error", formatScriptError(h.name, e, "onDom"));
-                }
-            };
-            if (hot || h.when === "document_start") {
-                run();
-            } else if (h.when === "document_idle") {
-                if (document.readyState === "complete") run();
-                else window.addEventListener("load", run, { once: true });
-            } else {
-                if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", run, { once: true });
-                else run();
+            for (const d of domHandlersFor(dom, location.href)) {
+                const run = () => {
+                    try {
+                        d.fn({ url: location.href, method: "GET", tabUrl: location.href });
+                    } catch (e: any) {
+                        scriptLog(h.scriptId, "error", formatScriptError(h.name, e, "onDom"));
+                    }
+                };
+                scheduleDom(d.when, run, hot);
             }
         }
     }
@@ -235,7 +215,7 @@ import { scriptFunction } from "../shared/scriptFn";
                 safeSend({ type: "getHookBundle", url: location.href }, (resp: any) => {
                     const active = !!(resp && (resp.count > 0 || (resp.domHandlers || []).length));
                     window.postMessage(
-                        { source: MAIN_SOURCE, kind: "status", active, patterns: (resp && resp.patterns) || [], domHandlers: (resp && resp.domHandlers) || [], libs: (resp && resp.libs) || [], hot: true },
+                        { source: MAIN_SOURCE, kind: "status", active, routes: (resp && resp.routes) || [], domHandlers: (resp && resp.domHandlers) || [], libs: (resp && resp.libs) || [], hot: true },
                         window.location.origin
                     );
                 });

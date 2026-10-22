@@ -1,6 +1,6 @@
 /**
- * Declarative script definition: wt.declareScript({...}).
- * The only way to activate a script — sources without it are libraries.
+ * Script parameters: wt.params({...}) / wt.defineParam(name, def).
+ * Values are edited in the manager / popup / settings.yaml.
  */
 
 export interface ParamDefBoolean {
@@ -53,14 +53,6 @@ export type ParamValue<D extends ParamDef> = D extends ParamDefBoolean
 export type ParamsOf<T extends Record<string, ParamDef>> = {
     readonly [K in keyof T]: ParamValue<T[K]>;
 };
-
-export interface ScriptDef<T extends Record<string, ParamDef> = Record<string, ParamDef>> {
-    /** URL patterns the script activates on */
-    match?: string[];
-    /** interception tier priority list, e.g. ["hook", "cdp"] */
-    strategy?: ("auto" | "hook" | "cdp" | "webrequest" | "process")[];
-    params?: T;
-}
 
 export function paramDefault(def: ParamDef): any {
     if (def.default !== undefined) return def.default;

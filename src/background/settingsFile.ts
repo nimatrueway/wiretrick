@@ -7,7 +7,7 @@ import { listScripts, loadAllParamValues, setParamValue, setEnabled, onScriptRen
 import { patchSettings, renameSettingsSection } from "../shared/settingsYamlPatch";
 import {
     renderSettings, parseSettings, planSettings,
-    DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL,
+    DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL, defaultStrategySetting, isStrategy,
     type GlobalSettings, type ScriptSettingsState, type SettingsDoc, type SettingsPlan,
 } from "../shared/settingsYaml";
 
@@ -20,17 +20,21 @@ function storageSet(items: Record<string, any>): Promise<void> {
 }
 
 export async function currentSettingsState(): Promise<{ globals: GlobalSettings; scripts: ScriptSettingsState[] }> {
-    const g = await storageGet(["resLogLevel", "resLogCap"]);
+    const g = await storageGet(["resLogLevel", "resLogCap", STRATEGY_KEY]);
     const stored = await loadAllParamValues();
     const scripts = (await listScripts()).map((s) => ({
         name: s.meta.name,
-        declared: s.meta.declared !== false,
+        declared: s.meta.active !== false,
         enabled: s.enabled,
         defs: s.paramDefs ?? {},
         values: stored[s.id] ?? {},
     }));
-    return { globals: { logLevel: g.resLogLevel ?? DEFAULT_LOG_LEVEL, logCap: g.resLogCap ?? DEFAULT_LOG_CAP }, scripts };
+    const strategy = isStrategy(g[STRATEGY_KEY]) ? g[STRATEGY_KEY] : defaultStrategySetting();
+    return { globals: { logLevel: g.resLogLevel ?? DEFAULT_LOG_LEVEL, logCap: g.resLogCap ?? DEFAULT_LOG_CAP, strategy }, scripts };
 }
+
+/** chrome.storage key of settings.strategy (absent: per-browser default) */
+export const STRATEGY_KEY = "resStrategy";
 
 const TEXT_KEY = "resSettingsText";
 
@@ -79,6 +83,7 @@ async function applyPlan(plan: SettingsPlan): Promise<void> {
     const patch: Record<string, any> = {};
     if (plan.globals.logLevel) patch.resLogLevel = plan.globals.logLevel;
     if (plan.globals.logCap) patch.resLogCap = plan.globals.logCap;
+    if (plan.globals.strategy) patch[STRATEGY_KEY] = plan.globals.strategy;
     if (Object.keys(patch).length) await storageSet(patch);
 }
 

@@ -19,6 +19,7 @@ import { defaultMeta, type ResMeta } from "../shared/metaParser";
 import type { ParamDef } from "../shared/scriptDef";
 import { dlogLevel } from "../shared/debugLog";
 import { compileDecision } from "../shared/pac";
+import { getDefaultStrategy } from "../shared/route";
 
 interface PlainScript {
     id: string;
@@ -32,12 +33,17 @@ export interface Analyzed {
     meta: ResMeta;
     paramDefs: Record<string, ParamDef>;
     error: string | null;
-    declared: boolean;
-    onDom: boolean;
-    onDomWhen: string;
     deps: string[];
-    /** handler counts (absent in analyze-cache entries from older builds) */
-    handlers?: { onRequest: number; modifyResponse: number; replaceResponse: number; onResponseHeaders: number };
+}
+
+type ParamValues = { [scriptId: string]: Record<string, any> };
+
+/** stable signature of every stored param value (routes may be built from any of them) */
+function paramSig(v: ParamValues | undefined): string {
+    const s = JSON.stringify(Object.keys(v || {}).sort().map((k) => [k, v![k]]));
+    let h = 5381;
+    for (let i = 0; i < s.length; i++) h = (((h << 5) + h + s.charCodeAt(i)) | 0) >>> 0;
+    return h.toString(36);
 }
 
 // ---- low-level RPC (MV3) ----
@@ -164,35 +170,43 @@ if (__MV3__) {
 /** compileForStorage error when the sandbox host itself failed (not user code). */
 export const SANDBOX_COMPILE_FAILED = "sandbox compile failed";
 
-/** Compile a saved script for storage: meta + paramDefs (saveScript path). */
-export async function compileForStorage(code: string, name?: string): Promise<{ meta: ResMeta; paramDefs: Record<string, ParamDef>; error: string | null }> {
+/**
+ * Compile a saved script for storage: meta + paramDefs (saveScript path).
+ * Imports are stubbed here, so routes built from imported values come
+ * out empty — the reload-time analyze (real imports) fills them in.
+ */
+export async function compileForStorage(code: string, name?: string, paramValues?: Record<string, any>): Promise<{ meta: ResMeta; paramDefs: Record<string, ParamDef>; error: string | null }> {
     const label = name || "x";
     if (!__MV3__) {
-        const c = compileScript(code, { importModule: () => makeStubModule() });
+        const c = compileScript(code, { importModule: () => makeStubModule(), paramValues });
         dlogLevel(
-            "compile", c.error ? "error" : c.meta.declared ? "debug" : "warn",
-            `compiled "${label}" → declared=${c.meta.declared} match=${JSON.stringify(c.meta.match)} params=[${Object.keys(c.paramDefs || {}).join(", ")}]${c.error ? " ERROR " + c.error.split("\n")[0] : ""}`
+            "compile", c.error ? "error" : "debug",
+            `compiled "${label}" → active=${c.meta.active} match=${JSON.stringify(c.meta.match)} params=[${Object.keys(c.paramDefs || {}).join(", ")}]${c.error ? " ERROR " + c.error.split("\n")[0] : ""}`
         );
         return { meta: c.meta, paramDefs: c.paramDefs || {}, error: c.error };
     }
     await ensureOffscreen();
-    const resp = await sandboxCallSafe({ op: "analyze", scripts: [{ id: "x", name: label, code, updatedAt: 0, enabled: true }] });
+    const resp = await sandboxCallSafe({ op: "analyze", scripts: [{ id: "x", name: label, code, updatedAt: 0, enabled: true }], paramValues: paramValues ? { x: paramValues } : {} });
     const r = resp?.results?.x;
     if (!r) {
         dlogLevel("compile", "warn", `compileForStorage "${label}": sandbox analyze returned nothing — script meta NOT updated`);
         return { meta: defaultMeta(), paramDefs: {}, error: SANDBOX_COMPILE_FAILED };
     }
     dlogLevel(
-        "compile", r.error ? "error" : r.declared ? "debug" : "warn",
-        `compiled "${label}" → declared=${r.declared} match=${JSON.stringify(r.meta.match)} params=[${Object.keys(r.paramDefs || {}).join(", ")}]${r.error ? " ERROR " + r.error.split("\n")[0] : ""}`
+        "compile", r.error ? "error" : "debug",
+        `compiled "${label}" → active=${r.meta.active} match=${JSON.stringify(r.meta.match)} params=[${Object.keys(r.paramDefs || {}).join(", ")}]${r.error ? " ERROR " + r.error.split("\n")[0] : ""}`
     );
     return { meta: r.meta, paramDefs: r.paramDefs, error: r.error };
 }
 
-/** Analyze ALL scripts (meta/paramDefs/declared/onDom/deps) — getHookBundle path. */
-export async function analyzeScripts(scripts: { id: string; name: string; code: string; updatedAt: number }[]): Promise<Map<string, Analyzed>> {
+/**
+ * Analyze ALL scripts (meta.routes/paramDefs/deps) with the stored param
+ * values — routes may be built from params. Reload + getHookBundle path.
+ */
+export async function analyzeScripts(scripts: { id: string; name: string; code: string; updatedAt: number }[], paramValues?: ParamValues): Promise<Map<string, Analyzed>> {
     const out = new Map<string, Analyzed>();
     if (!scripts.length) return out;
+    const sig = paramSig(paramValues);
     if (__MV3__) {
         // FAST PATH: chrome.storage.session-cached analyses, valid while no
         // script's updatedAt changed. A freshly-woken SW serves a page's
@@ -200,7 +214,7 @@ export async function analyzeScripts(scripts: { id: string; name: string; code: 
         // offscreen doc + sandbox — the difference between onDom running at
         // document_start and after the page already initialized.
         const cached = await readAnalyzeCache();
-        if (cached && scripts.every((s) => cached[s.id]?.updatedAt === s.updatedAt)) {
+        if (cached && scripts.every((s) => cached[s.id]?.updatedAt === s.updatedAt && cached[s.id]?.paramSig === sig)) {
             for (const s of scripts) out.set(s.id, cached[s.id].analyzed);
             dlogLevel("compile", "debug", `analyze cache hit — ${scripts.length} script(s) served from session storage (no sandbox round-trip)`);
             return out;
@@ -210,31 +224,21 @@ export async function analyzeScripts(scripts: { id: string; name: string; code: 
         // MV2: in-page compile, same as before
         const resolver = makeModuleResolver(
             scripts.map((s) => ({ id: s.id, name: s.name, code: s.code })),
-            () => ({})
+            (lib) => ({ paramValues: paramValues?.[lib.id] })
         );
         for (const s of scripts) {
-            const c = compileScript(s.code, { importModule: (spec) => resolver.resolve(spec) });
-            const onDom = c.handlers.onDom[0] ?? null;
+            const c = compileScript(s.code, { importModule: (spec) => resolver.resolve(spec), paramValues: paramValues?.[s.id] });
             out.set(s.id, {
                 meta: c.meta,
                 paramDefs: c.paramDefs || {},
                 error: c.error,
-                declared: c.meta.declared,
-                onDom: !!onDom,
-                onDomWhen: onDom ? onDom.when : "DOMContentLoaded",
                 deps: [...resolver.deps],
-                handlers: {
-                    onRequest: c.handlers.onRequest.length,
-                    modifyResponse: c.handlers.modifyResponse.length,
-                    replaceResponse: c.handlers.replaceResponse.length,
-                    onResponseHeaders: c.handlers.onResponseHeaders.length,
-                },
             });
         }
         return out;
     }
     await ensureOffscreen();
-    const resp = await sandboxCallSafe({ op: "analyze", scripts: scripts.map((s) => ({ ...s, enabled: true })) });
+    const resp = await sandboxCallSafe({ op: "analyze", scripts: scripts.map((s) => ({ ...s, enabled: true })), paramValues: paramValues || {} });
     if (!resp) {
         dlogLevel("compile", "error", `sandbox analyze FAILED for ${scripts.length} script(s) — the hook bundle serves WITHOUT them (no interception/onDom until the next successful analyze)`);
         return out;
@@ -245,7 +249,7 @@ export async function analyzeScripts(scripts: { id: string; name: string; code: 
         else dlogLevel("compile", "warn", `sandbox analyze returned no result for "${s.name}" — it will not intercept in this bundle`);
     }
     await persistAnalyzeCache(
-        scripts.filter((s) => out.has(s.id)).map((s) => ({ id: s.id, updatedAt: s.updatedAt, analyzed: out.get(s.id)! }))
+        scripts.filter((s) => out.has(s.id)).map((s) => ({ id: s.id, updatedAt: s.updatedAt, paramSig: sig, analyzed: out.get(s.id)! }))
     );
     return out;
 }
@@ -254,7 +258,7 @@ export async function analyzeScripts(scripts: { id: string; name: string; code: 
 
 const ANALYZE_CACHE_KEY = "resAnalyzeCache";
 
-type AnalyzeCache = Record<string, { updatedAt: number; analyzed: Analyzed }>;
+type AnalyzeCache = Record<string, { updatedAt: number; paramSig?: string; analyzed: Analyzed }>;
 
 async function readAnalyzeCache(): Promise<AnalyzeCache | null> {
     try {
@@ -265,11 +269,11 @@ async function readAnalyzeCache(): Promise<AnalyzeCache | null> {
     }
 }
 
-async function persistAnalyzeCache(entries: { id: string; updatedAt: number; analyzed: Analyzed }[]): Promise<void> {
+async function persistAnalyzeCache(entries: { id: string; updatedAt: number; paramSig: string; analyzed: Analyzed }[]): Promise<void> {
     try {
         // keyed by script id; each write overwrites that id's older entry
         const cached = (await readAnalyzeCache()) ?? {};
-        for (const e of entries) cached[e.id] = { updatedAt: e.updatedAt, analyzed: e.analyzed };
+        for (const e of entries) cached[e.id] = { updatedAt: e.updatedAt, paramSig: e.paramSig, analyzed: e.analyzed };
         // bound growth: drop ids not seen in a while (keep ≤ 200)
         const ids = Object.keys(cached);
         if (ids.length > 200) for (const id of ids.slice(0, ids.length - 200)) delete cached[id];
@@ -291,7 +295,8 @@ export async function runBodyOp(
     args: Record<string, any>
 ): Promise<any | null> {
     await ensureOffscreen();
-    const out = await sandboxCallSafe({ op: "run", runOp: op, scripts, paramValues, args });
+    // the sandbox has no settings: the default strategy rides along
+    const out = await sandboxCallSafe({ op: "run", runOp: op, scripts, paramValues, args: { defaultStrategy: getDefaultStrategy(), ...args } });
     dlogLevel("compile", "debug", `runBodyOp ${op} → ${JSON.stringify(out)?.slice(0, 120)}`);
     return out;
 }

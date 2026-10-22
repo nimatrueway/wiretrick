@@ -122,6 +122,8 @@ try {
     await mgr.goto(`chrome-extension://${extId}/manager.html`);
     await mgr.waitForFunction(() => (window as any).monaco?.editor.getEditors().length === 1, null, { timeout: 20000 }).catch((e: any) => console.log("waitForFunction editor failed:", e.message.slice(0, 100)));
     check("manager opens", true);
+    // no local helper in this run: routes without their own strategy use the hook
+    await mgr.evaluate(() => new Promise<void>((r) => chrome.storage.local.set({ resStrategy: "hook" }, () => r())));
     const contexts = await mgr.evaluate(() => new Promise<any>((r) => (chrome.runtime as any).getContexts({}, (cs: any[]) => r(cs?.map((c: any) => c.contextType) ?? []))));
     // this chromium reports the MV3 background SW as "BACKGROUND"
     check("extension service worker registered", contexts.includes("BACKGROUND") || contexts.includes("SERVICE_WORKER"), JSON.stringify(contexts));
@@ -131,15 +133,15 @@ try {
         type: "saveScript",
         id: "s_mv3",
         name: "MV3 hook",
-        code: `wt.declareScript({ match: ["*://*:*/*"] });\nwt.modifyResponse((ctx, body) => body.replace("ORIGINAL", "MV3"));`,
+        code: `wt.modifyResponse("*://*:*/*", (ctx, body) => body.replace("ORIGINAL", "MV3"));`,
     }, r)));
-    check("saveScript round-trips through the sandbox (meta extracted)", saveResult?.meta?.declared === true, JSON.stringify(saveResult?.meta));
+    check("saveScript round-trips through the sandbox (meta extracted)", saveResult?.meta?.active === true, JSON.stringify(saveResult?.meta));
     const listResult = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "listScripts" }, r)));
     check("script listed with stored name + paramDefs", listResult?.length === 1 && listResult[0].meta.name === "MV3 hook" && !!listResult[0].paramDefs, JSON.stringify(listResult?.map((s: any) => s.meta.name)));
 
     // regression (𝑓-icon bug): a script that IMPORTS another script must
-    // still capture its declaration at save time — a failed import resolves
-    // to a silent stub, never aborting the body before declareScript runs
+    // still capture its routes at save time — a failed import resolves
+    // to a silent stub, never aborting the body before its handlers register
     await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({
         type: "saveScript",
         id: "s_lib",
@@ -150,19 +152,19 @@ try {
         type: "saveScript",
         id: "s_importer",
         name: "api-interceptor",
-        code: `import { tag } from "./api-lib";\nwt.declareScript({ match: ["*://*:*/*"], params: { label: { type: "string", default: "x" } } });\nwt.modifyResponse((ctx, body) => tag(body));`,
+        code: `import { tag } from "./api-lib";\nwt.params({ label: { type: "string", default: "x" } });\nwt.modifyResponse("*://*:*/*", (ctx, body) => tag(body));`,
     }, r)));
-    check("importing script captures declareScript (not a library)",
-        importSave?.meta?.declared === true && importSave?.meta?.match?.includes("*://*:*/*") && !importSave.error,
+    check("importing script captures its routes (not a utility)",
+        importSave?.meta?.active === true && importSave?.meta?.match?.includes("*://*:*/*") && !importSave.error,
         JSON.stringify(importSave?.meta));
     const list2 = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "listScripts" }, r)));
     const importer = list2.find((s: any) => s.meta.name === "api-interceptor");
-    check("importing script listed as declared with params", importer?.meta?.declared === true && !!importer?.paramDefs?.label, JSON.stringify(list2?.map((s: any) => [s.meta.name, s.meta.declared])));
+    check("importing script listed as active with params", importer?.meta?.active === true && !!importer?.paramDefs?.label, JSON.stringify(list2?.map((s: any) => [s.meta.name, s.meta.active])));
 
     // 3. settings.yaml round-trip
     const settings = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "getSettingsYaml" }, r)));
     check("settings.yaml generated (SW storage path)", typeof settings?.text === "string" && settings.text.includes("MV3 hook"));
-    const applyResult = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "applySettingsYaml", text: "settings:\n  logLevel: warn\n" }, r)));
+    const applyResult = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "applySettingsYaml", text: "settings:\n  logLevel: warn\n  strategy: hook\n" }, r)));
     check("applySettingsYaml applies", !applyResult?.error, JSON.stringify(applyResult));
 
     // 4. hook tier intercepts a page fetch (transform runs in the sandbox)
@@ -218,7 +220,7 @@ try {
         const m = (window as any).monaco;
         const ed = m.editor.getEditors()[0];
         const prev = ed.getModel();
-        const model = m.editor.createModel('wt.onDom(() => {}, { when: "document_idle" });\n', "typescript", m.Uri.parse("file:///hover-probe.ts"));
+        const model = m.editor.createModel('wt.onDom({ url: "*", when: "document_idle" }, () => {});\n', "typescript", m.Uri.parse("file:///hover-probe.ts"));
         ed.setModel(model);
         ed.setPosition({ lineNumber: 1, column: 23 }); // on `when`
         ed.focus();
@@ -241,9 +243,9 @@ try {
         const m = (window as any).monaco;
         const ed = m.editor.getEditors()[0];
         const prev = ed.getModel();
-        const model = m.editor.createModel("wt.declareScr", "typescript", m.Uri.parse("file:///suggest-probe.ts"));
+        const model = m.editor.createModel("wt.params", "typescript", m.Uri.parse("file:///suggest-probe.ts"));
         ed.setModel(model);
-        ed.setPosition({ lineNumber: 1, column: 14 });
+        ed.setPosition({ lineNumber: 1, column: 10 });
         ed.focus();
         let details = "";
         for (let i = 0; i < 40 && !details.includes("<li") && !details.includes("@param"); i++) {
@@ -254,8 +256,8 @@ try {
             details = document.querySelector(".suggest-details")?.innerHTML ?? "";
         }
         ed.trigger("t", "hideSuggestWidget", {});
-        model.setValue("wt.onDom(");
-        ed.setPosition({ lineNumber: 1, column: 10 });
+        model.setValue('wt.onDom("*", ');
+        ed.setPosition({ lineNumber: 1, column: 15 }); // on the handler argument
         let hints = "";
         for (let i = 0; i < 40 && !hints.includes("Receives the same"); i++) {
             ed.trigger("t", "editor.action.triggerParameterHints", {});
@@ -278,7 +280,7 @@ try {
     // its decision must be honored by the hook tier ----
     await mgr.evaluate((origin: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_pg", name: "Param gated",
-        code: `const cfg = wt.declareScript({ match: ["${origin}/*"], params: { intercept: { type: "boolean", default: false, description: "Intercept" } } });\nwt.onRequest((ctx) => { if (cfg.intercept) return { respond: { status: 200, body: { value: "PARAM-GATED" } } }; });`,
+        code: `const cfg = wt.params({ intercept: { type: "boolean", default: false, description: "Intercept" } });\nwt.onRequest("${origin}/*", (ctx) => { if (cfg.intercept) return { respond: { status: 200, body: { value: "PARAM-GATED" } } }; });`,
     }, r)), ORIGIN);
     await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "setScriptParam", scriptId: "s_pg", key: "intercept", value: true }, r)));
     await mgr.waitForTimeout(1500); // pipeline reload + analyze-cache warm with the new params
@@ -288,33 +290,35 @@ try {
     check("param-gated onRequest honored (real stored params, not defaults)", gated.value === "PARAM-GATED", JSON.stringify(gated));
 
     // ---- MV3 debugger tier: browser-initiated loads (<script src>) ARE
-    // intercepted for strategy cdp scripts — CDP Fetch pauses in the
+    // intercepted for strategy cdp routes — CDP Fetch pauses in the
     // SW, decisions computed in the sandbox. The user's scenario: page on
-    // one origin, CDN script on another, strategy ["hook", "cdp"] ----
+    // one origin, CDN script on another, strategy "cdp" ----
     const CDN = `http://localhost:${PORT}`;
     if (process.env.DBG) await mgr.evaluate(() => { const sel = document.querySelector("#log-level") as HTMLSelectElement; sel.value = "debug"; sel.dispatchEvent(new Event("change")); });
     await mgr.evaluate((cdn: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_respond", name: "Respond script",
-        code: `wt.declareScript({ match: ["${cdn}/app.js*"], strategy: ["hook", "cdp"] });\nwt.onRequest((ctx) => ({ respond: { status: 200, mime: "text/javascript", body: 'window.__marker = "RESPONDED:' + ctx.resourceType + '";' } }));`,
+        code: `wt.onRequest({ url: "${cdn}/app.js*", strategy: "cdp" }, (ctx) => ({ respond: { status: 200, mime: "text/javascript", body: 'window.__marker = "RESPONDED:' + ctx.resourceType + '";' } }));`,
     }, r)), CDN);
     await mgr.evaluate((cdn: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_cdpx", name: "Cdp transform",
-        code: `wt.declareScript({ match: ["${cdn}/gz.js", "${cdn}/lazy.js"], strategy: ["hook", "cdp"] });\nwt.modifyResponse((ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
+        code: `wt.modifyResponse({ url: ["${cdn}/gz.js", "${cdn}/lazy.js"], strategy: "cdp" }, (ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
     }, r)), CDN);
     await mgr.evaluate((cdn: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_auto", name: "Auto script",
-        code: `wt.declareScript({ match: ["${cdn}/auto.js"] });\nwt.modifyResponse((ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
+        code: `wt.modifyResponse("${cdn}/auto.js", (ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
     }, r)), CDN);
     // a handler that runs but changes nothing: the request is "tapped", not "modified"
     await mgr.evaluate((cdn: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_watch", name: "Watcher",
-        code: `wt.declareScript({ match: ["${cdn}/auto.js"], strategy: ["cdp"] });\nwt.onRequest(() => undefined);`,
+        code: `wt.onRequest({ url: "${cdn}/auto.js", strategy: "cdp" }, () => undefined);`,
     }, r)), CDN);
     await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_procx", name: "Process listed",
-        code: `wt.declareScript({ match: ["*://process-listed.invalid/*"], strategy: ["process"] });\nwt.modifyResponse((ctx, body) => body);`,
+        code: `wt.modifyResponse({ url: "*://process-listed.invalid/*", strategy: "process" }, (ctx, body) => body);`,
     }, r)));
     await mgr.waitForTimeout(1500); // pipeline reload → debugger tier armed
+    const helperWarned = await mgr.waitForFunction(() => [...document.querySelectorAll("#log-entries .log-line")].some((l) => /\[Process listed\] modifyResponse #1: strategy "process"/.test(l.textContent || "")), null, { timeout: 8000 }).then(() => true, () => false);
+    check("process routes warn while the helper is down (no fallback)", helperWarned);
     // Network tab records from now on (listeners attach when it opens)
     await mgr.click("#network-tab");
     await mgr.waitForSelector("#network-view .net-toolbar", { timeout: 5000 });
@@ -322,10 +326,10 @@ try {
     await xoPage.goto(`${ORIGIN}/page-xo`);
     await xoPage.waitForFunction(() => (window as any).__lazy !== undefined, null, { timeout: 15000 }).catch(() => {});
     const xo = await xoPage.evaluate(() => ({ marker: (window as any).__marker, gz: (window as any).__gz, lazy: (window as any).__lazy, auto: (window as any).__auto }));
-    check("cross-origin <script src> onRequest respond (strategy hook+cdp → debugger tier)", xo.marker === "RESPONDED:script", JSON.stringify(xo));
+    check("cross-origin <script src> onRequest respond (strategy cdp → debugger tier)", xo.marker === "RESPONDED:script", JSON.stringify(xo));
     check("modifyResponse on a gzip-encoded script tag (encoding stripped)", xo.gz === "MODIFIED-GZ", JSON.stringify(xo));
     check("lazily inserted chunk (2.5s after load) still intercepted", xo.lazy === "MODIFIED-LAZY", JSON.stringify(xo));
-    check("auto-strategy script leaves script tags alone (hook tier only)", xo.auto === "ORIGINAL-AUTO", JSON.stringify(xo));
+    check("default (hook) strategy leaves script tags alone", xo.auto === "ORIGINAL-AUTO", JSON.stringify(xo));
     await mgr.waitForTimeout(800);
     const net: { name: string; status: string; scripts: (string | null)[] }[] = await mgr.evaluate(() =>
         [...document.querySelectorAll("#network-view tbody tr")].map((tr) => ({
@@ -427,9 +431,9 @@ try {
     // ---- script error indicators: compile error + runtime error ----
     await mgr.evaluate((origin: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_throws", name: "Thrower",
-        code: `wt.declareScript({ match: ["${origin}/kaboom*"] });\nwt.onRequest(() => { throw new Error("kaboom"); });`,
+        code: `wt.onRequest("${origin}/kaboom*", () => { throw new Error("kaboom"); });`,
     }, r)), "http://localhost:8909");
-    await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "saveScript", id: "s_broken", name: "Broken", code: "wt.declareScript({ match: [ ;" }, r)));
+    await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "saveScript", id: "s_broken", name: "Broken", code: "wt.onRequest([ ;" }, r)));
     await mgr.waitForTimeout(1200);
     const errPage = await ctx.newPage();
     await errPage.goto(`${ORIGIN}/page`);
@@ -459,8 +463,8 @@ try {
     // TypeScript errors (editor squiggles) → ERROR log + "types" badge; two
     // scripts declaring the same top-level name must not collide
     for (const [id, name, code] of [
-        ["s_typed", "Typed", `wt.declareScript({ match: ["*://typed.invalid/*"] });\nconst cfg = 1;\nconst n: number = "not a number";`],
-        ["s_typed2", "Typed2", `wt.declareScript({ match: ["*://typed2.invalid/*"] });\nconst cfg = 2;\nexport function never() { console.log(new TextDecoder().decode(new Uint8Array()), new URL("x"), fetch, cfg); }`],
+        ["s_typed", "Typed", `wt.onRequest("*://typed.invalid/*", () => {});\nconst cfg = 1;\nconst n: number = "not a number";`],
+        ["s_typed2", "Typed2", `wt.onRequest("*://typed2.invalid/*", () => {});\nconst cfg = 2;\nexport function never() { console.log(new TextDecoder().decode(new Uint8Array()), new URL("x"), fetch, cfg); }`],
     ]) await mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage({ type: "saveScript", ...m }, r)), { id, name, code });
     await mgr.waitForSelector('#script-list li[data-id="s_typed"] .err-ind.types', { timeout: 15000 }).catch(() => {});
     const typed = await mgr.evaluate(() => ({
@@ -499,10 +503,10 @@ try {
     await xoPage.reload();
     await xoPage.waitForFunction(() => (window as any).__gz !== undefined, null, { timeout: 15000 }).catch(() => {});
     check("reload in an attached tab intercepted too", (await xoPage.evaluate(() => (window as any).__marker)) === "RESPONDED:script");
-    // same-origin script; "proxy" (removed strategy) is ignored with a warning
+    // same-origin script on the debugger tier
     await mgr.evaluate((origin: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_proxy2", name: "Proxy same-origin",
-        code: `wt.declareScript({ match: ["${origin}/app.js"], strategy: ["proxy", "cdp"] });\nwt.modifyResponse((ctx, body) => body.replace("ORIGINAL-MARKER", "PROXY-MARKER"));`,
+        code: `wt.modifyResponse({ url: "${origin}/app.js", strategy: "cdp" }, (ctx, body) => body.replace("ORIGINAL-MARKER", "PROXY-MARKER"));`,
     }, r)), ORIGIN);
     await mgr.waitForTimeout(1500);
     const scriptPage = await ctx.newPage();
@@ -513,7 +517,7 @@ try {
     // WARNED (never silent), and a reload must intercept
     await mgr.evaluate((origin: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_race", name: "Race script",
-        code: `wt.declareScript({ match: ["${origin}/race.js"], strategy: ["cdp"] });\nwt.modifyResponse((ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
+        code: `wt.modifyResponse({ url: "${origin}/race.js", strategy: "cdp" }, (ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
     }, r)), ORIGIN);
     await mgr.waitForTimeout(1500);
     const racePage = await ctx.newPage();
@@ -532,7 +536,7 @@ try {
     // attach is re-issued through the debugger, so it IS intercepted
     await mgr.evaluate((origin: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_doccold", name: "Doc cold",
-        code: `wt.declareScript({ match: ["${origin}/doc-cold*"], strategy: ["cdp"] });\nwt.modifyResponse((ctx, body) => body.replaceAll("DOC-ORIGINAL", "DOC-MODIFIED"));`,
+        code: `wt.modifyResponse({ url: "${origin}/doc-cold*", strategy: "cdp" }, (ctx, body) => body.replaceAll("DOC-ORIGINAL", "DOC-MODIFIED"));`,
     }, r)), ORIGIN);
     await mgr.waitForTimeout(1500);
     const docPage = await ctx.newPage();
@@ -547,10 +551,7 @@ try {
     await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "deleteScript", id: "s_doccold" }, r)));
     const logText = await mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line")].map((l) => l.textContent || "").join("\n"));
     if (process.env.DBG) console.log(logText.split("\n").filter((l: string) => /Tier C|cdp|debugger|attach|requestPaused/i.test(l)).slice(-40).join("\n"));
-    check("removed \"proxy\" strategy is warned about", logText.includes(`"proxy" strategy was removed`));
-    check("auto-strategy hint to add \"cdp\" is logged", logText.includes(`"Auto script" intercept page fetch/XHR only`));
-    check("process-listed scripts get no add-\"cdp\" hint", !logText.includes(`"Process listed"`) || !/"Process listed"[^\n]*intercept page fetch\/XHR only/.test(logText));
-    check("debugger tier activation is logged", logText.includes("MV3 debugger tier active"));
+    check("debugger tier activation is logged", logText.includes("debugger tier active"));
     for (const id of ["s_respond", "s_cdpx", "s_auto", "s_procx", "s_proxy2", "s_race"]) {
         await mgr.evaluate((id: string) => new Promise((r) => chrome.runtime.sendMessage({ type: "deleteScript", id }, r)), id);
     }
@@ -585,7 +586,7 @@ try {
 
     // ---- export → wipe → import round trip through the REAL buttons ----
     // (regression: "after import it did not detect them" — the import path
-    // must re-capture declareScript for every script)
+    // must re-capture the routes of every script)
     await mgr.evaluate(() => {
         (window as any).__captured = null;
         const orig = URL.createObjectURL;
@@ -659,9 +660,9 @@ try {
     await mgr.waitForFunction(() => (document.querySelector("#editor-status")?.textContent ?? "").includes("imported"), null, { timeout: 20000 }).catch(() => {});
     const imported = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "listScripts" }, r)));
     const byName = new Map<string, any>((imported || []).map((s: any) => [s.meta.name, s]));
-    check("import re-detects declareScript (MV3 hook + api-interceptor declared)", byName.get("MV3 hook")?.meta?.declared === true && byName.get("api-interceptor")?.meta?.declared === true, JSON.stringify((imported || []).map((s: any) => [s.meta.name, s.meta.declared])));
+    check("import re-detects routes (MV3 hook + api-interceptor active)", byName.get("MV3 hook")?.meta?.active === true && byName.get("api-interceptor")?.meta?.active === true, JSON.stringify((imported || []).map((s: any) => [s.meta.name, s.meta.active])));
     check("import restores params (api-interceptor.label)", !!byName.get("api-interceptor")?.paramDefs?.label);
-    check("import keeps libraries as libraries (api-lib)", byName.get("api-lib")?.meta?.declared === false);
+    check("import keeps utilities as utilities (api-lib)", byName.get("api-lib")?.meta?.active === false);
     check("import restores enabled state", byName.get("MV3 hook")?.enabled === true && byName.get("api-interceptor")?.enabled === true);
     check("partial import skips the unticked script", !!skipName && !byName.has(skipName), String(skipName));
     check("import status shows success", (await mgr.evaluate(() => document.querySelector("#editor-status")?.textContent ?? "")).includes("imported"));
@@ -699,12 +700,12 @@ try {
     });
     await warm.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_dom", name: "Early dom",
-        code: `wt.declareScript({ match: ["*://*:*/*"] });\nwt.onDom((ctx) => { document.title = "DOM-RAN:" + document.readyState; }, { when: "document_start" });`,
+        code: `wt.onDom({ url: "*://*:*/*", when: "document_start" }, (ctx) => { document.title = "DOM-RAN:" + document.readyState; });`,
     }, r)));
     // a second script with its own `when` must not inherit the first's
     await warm.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_idle", name: "Idle dom",
-        code: `wt.declareScript({ match: ["*://*:*/*"] });\nwt.onDom(() => { document.documentElement.dataset.idle = document.readyState; }, { when: "document_idle" });`,
+        code: `wt.onDom({ url: "*://*:*/*", when: "document_idle" }, () => { document.documentElement.dataset.idle = document.readyState; });`,
     }, r)));
     await warm.waitForTimeout(1500); // cache refresh (pipeline reload warm)
     const domPage = await ctx.newPage();
@@ -753,7 +754,7 @@ try {
     // GUI change → settings.yaml must appear in the folder (commented default)
     await fPage.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_sync", name: "Sync guinea",
-        code: 'wt.declareScript({ match: ["*://sync.invalid/*"], params: { token: { type: "string", default: "abc", description: "Sync token" } } });\n',
+        code: 'wt.params({ token: { type: "string", default: "abc", description: "Sync token" } });\nwt.onRequest("*://sync.invalid/*", () => {});\n',
     }, r)));
     await fPage.waitForTimeout(2500); // export debounce + SW poller cadence
     const yaml1 = await opfsText("settings.yaml");
@@ -785,7 +786,7 @@ try {
     check("MV3 folder sync: manager settings.yaml save written to disk as a whole", (await opfsText("settings.yaml")) === savedText);
 
     // a new .ts file in the folder inserts a script
-    await opfsWrite("imported-sync.ts", 'wt.declareScript({ match: ["*://imported.invalid/*"] });\n');
+    await opfsWrite("imported-sync.ts", 'wt.onRequest("*://imported.invalid/*", () => {});\n');
     await fPage.waitForTimeout(2500);
     const flist = await fPage.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "listScripts" }, r)));
     check("MV3 folder sync: external .ts file became a script", (flist as any[]).some((s) => s.meta?.name === "imported-sync"), JSON.stringify((flist as any[]).map((s) => s.meta?.name)));
@@ -796,7 +797,7 @@ try {
     await swCdp.send("ServiceWorker.enable");
     await swCdp.send("ServiceWorker.stopAllWorkers");
     await fPage.waitForTimeout(500);
-    await opfsWrite("while-asleep.ts", 'wt.declareScript({ match: ["*://asleep.invalid/*"] });\n');
+    await opfsWrite("while-asleep.ts", 'wt.onRequest("*://asleep.invalid/*", () => {});\n');
     await fPage.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "folderSyncStatus" }, r))); // wakes the SW
     await fPage.waitForTimeout(2500);
     const flist2 = await fPage.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "listScripts" }, r)));
@@ -806,7 +807,7 @@ try {
     // importer saved before its library re-checks once the library appears
     const saveMsg = (id: string, name: string, code: string) =>
         fPage.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, r)), { type: "saveScript", id, name, code });
-    await saveMsg("s_late_user", "late-user", 'import { late } from "./late-lib";\nwt.declareScript({ match: ["*://late.invalid/*"] });\nlate();\n');
+    await saveMsg("s_late_user", "late-user", 'import { late } from "./late-lib";\nwt.onRequest("*://late.invalid/*", () => {});\nlate();\n');
     await fPage.waitForTimeout(2500);
     await saveMsg("s_late_lib", "late-lib", "export function late(): void {}\n");
     await fPage.waitForTimeout(3500);

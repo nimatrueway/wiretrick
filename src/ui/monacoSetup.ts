@@ -175,35 +175,29 @@ function registerTsHover(monaco: any): void {
     });
 }
 
-export const STARTER_TEMPLATE = `wt.declareScript({
-    match: ["*://*.example.com/*"],
-});
-// Declarative meta + adjustable parameters (type-safe; editable from
-// the popup's ⚙ dialog without touching this code):
-const cfg = wt.declareScript({
-    match: ["*://*.example.com/*"],
-    params: {
-        debug: { type: "boolean", default: true, description: "Log every request" },
-        headerValue: { type: "string", default: "1", description: "Value of the x-debug header" },
-    },
+export const STARTER_TEMPLATE = `wt.describe("What this script does");
+
+// Adjustable parameters (editable in settings.yaml / the popup ⚙ dialog):
+const cfg = wt.params({
+    host: { type: "string", default: "*.example.com", description: "Host pattern to intercept" },
+    debug: { type: "boolean", default: true, description: "Log every request" },
 });
 
+// Each handler takes its own URL pattern (string, string[] or a route object).
 // Modify request headers / redirect / cancel:
-wt.onRequest((ctx) => {
+wt.onRequest(\`*://\${cfg.host}/*\`, (ctx) => {
     if (cfg.debug) wt.log("request to", ctx.url);
     // return { redirect: "https://example.com/other" };
     // return { cancel: true };
-    // return { headers: { set: { "x-debug": cfg.headerValue } } };
+    // return { headers: { set: { "x-debug": "1" } } };
 });
 
 // Modify response headers:
-wt.onResponseHeaders((ctx) => {
-    // return { headers: { set: { "access-control-allow-origin": "*" } } };
-});
+// wt.onResponseHeaders(\`*://\${cfg.host}/*\`, (ctx) => ({ headers: { set: { "access-control-allow-origin": "*" } } }));
 
 // Replace the whole response body:
-// wt.replaceResponse((ctx) => JSON.stringify({ mocked: true }));
+// wt.replaceResponse(\`*://\${cfg.host}/api/*\`, (ctx) => ({ mocked: true }));
 
-// Stream-modify the response body:
-// wt.modifyResponse((ctx, body) => body.replace("foo", "bar"));
+// Modify the response body (route object: exclude / methods / types / strategy):
+// wt.modifyResponse({ url: \`*://\${cfg.host}/*\`, exclude: "*://*/*.png", strategy: "hook" }, (ctx, body) => body.replace("foo", "bar"));
 `;

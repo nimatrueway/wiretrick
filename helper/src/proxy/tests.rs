@@ -230,6 +230,7 @@ fn route(pattern: &str, req: bool, res_headers: bool, body: bool) -> Route {
         req,
         res_headers,
         body,
+        ..Default::default()
     }
 }
 
@@ -418,6 +419,22 @@ async fn request_stage_fulfill_never_hits_upstream() {
             .unwrap()
             .ends_with("/text")
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn exclude_and_methods_skip_the_pause() {
+    let env = setup(vec![Route {
+        exclude: vec!["https://localhost:*/echo".into()],
+        methods: vec!["GET".into()],
+        ..route("https://localhost:*/*", true, false, false)
+    }])
+    .await;
+    env.on(|_, _| Some(json!({"t": "fulfill", "status": 200, "headers": [], "body": b64("mocked")})));
+    let g = env.get("/echo", false, &[]).await.unwrap();
+    assert_ne!(g.body, b"mocked", "excluded path is not paused");
+    let g = env.get("/text", false, &[]).await.unwrap();
+    assert_eq!(g.body, b"mocked", "matched GET is paused");
+    assert_eq!(env.seen("req").len(), 1);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

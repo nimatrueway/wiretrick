@@ -2,9 +2,14 @@
  * Firefox: the webRequest tier serves replaceResponse / respond 200 in place
  * (filterResponseData) instead of redirecting, so the URL is kept.
  */
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import { setDefaultStrategy } from "../src/shared/route";
 import { compileScript } from "../src/shared/compile";
 import type { Script } from "../src/background/engine/scriptStore";
+
+// these suites exercise the webRequest tier: make it the settings default
+beforeEach(() => setDefaultStrategy("webrequest"));
+afterEach(() => setDefaultStrategy(null));
 
 interface FakeFilter {
     ondata?: (e: any) => void;
@@ -79,7 +84,7 @@ beforeEach(() => {
 describe("Firefox webRequest tier: in-place replacement", () => {
     it("sync replaceResponse on a page load: no redirect, body swapped, headers fixed", async () => {
         const s = await load();
-        s.reload([makeScript("a", "Page swap", `wt.declareScript({ match: ["*"] });\nwt.replaceResponse(() => "<h1>NEW</h1>");`)]);
+        s.reload([makeScript("a", "Page swap", `wt.replaceResponse("*", () => "<h1>NEW</h1>");`)]);
         expect((s.handleBeforeRequest(page(), null) as any).kind).toBe("allow");
         expect(filters.size).toBe(0); // wired when the response headers arrive
         const h = (await s.handleHeadersReceived(page(), null)) as any;
@@ -96,7 +101,7 @@ describe("Firefox webRequest tier: in-place replacement", () => {
 
     it("async replaceResponse is also served in place", async () => {
         const s = await load();
-        s.reload([makeScript("a", "Async swap", `wt.declareScript({ match: ["*"] });\nwt.replaceResponse(async () => JSON.stringify({ ok: 1 }));`)]);
+        s.reload([makeScript("a", "Async swap", `wt.replaceResponse("*", async () => JSON.stringify({ ok: 1 }));`)]);
         const d = await s.handleBeforeRequest(page({ type: "xmlhttprequest", url: "https://site.example/api" }), null);
         expect((d as any).kind).toBe("allow");
         await s.handleHeadersReceived(page({ type: "xmlhttprequest", url: "https://site.example/api" }), null);
@@ -107,7 +112,7 @@ describe("Firefox webRequest tier: in-place replacement", () => {
 
     it("respond 200 in place; a redirect hop keeps the replacement for the final response", async () => {
         const s = await load();
-        s.reload([makeScript("a", "Mock", `wt.declareScript({ match: ["*"] });\nwt.onRequest(() => ({ respond: { body: { m: true } } }));`)]);
+        s.reload([makeScript("a", "Mock", `wt.onRequest("*", () => ({ respond: { body: { m: true } } }));`)]);
         expect((s.handleBeforeRequest(page(), null) as any).kind).toBe("allow");
         await s.handleHeadersReceived(page({ statusCode: 302, responseHeaders: [{ name: "Location", value: "/other" }] }), null);
         expect(filters.size).toBe(0);
@@ -121,7 +126,7 @@ describe("Firefox webRequest tier: in-place replacement", () => {
 
     it("respond with a non-200 status isn't served (no status control) and says so", async () => {
         const s = await load();
-        s.reload([makeScript("a", "Mock", `wt.declareScript({ match: ["*"] });\nwt.onRequest(() => ({ respond: { status: 404, body: "no" } }));`)]);
+        s.reload([makeScript("a", "Mock", `wt.onRequest("*", () => ({ respond: { status: 404, body: "no" } }));`)]);
         expect((s.handleBeforeRequest(page(), null) as any).kind).toBe("allow");
         await s.handleHeadersReceived(page(), null);
         expect(filters.size).toBe(0);
@@ -130,7 +135,7 @@ describe("Firefox webRequest tier: in-place replacement", () => {
 
     it("a pruned request leaves nothing behind", async () => {
         const s = await load();
-        s.reload([makeScript("a", "Page swap", `wt.declareScript({ match: ["*"] });\nwt.replaceResponse(() => "x");`)]);
+        s.reload([makeScript("a", "Page swap", `wt.replaceResponse("*", () => "x");`)]);
         s.handleBeforeRequest(page(), null);
         s.pruneRequest("f1");
         await s.handleHeadersReceived(page(), null);

@@ -84,6 +84,7 @@
                     <button data-settings-nav="settings-sec-appearance" class="active">Appearance</button>
                     <button data-settings-nav="settings-sec-folder">Scripts folder</button>
                     <button data-settings-nav="settings-sec-io">Import / Export</button>
+                    <button data-settings-nav="settings-sec-strategy">Interception</button>
                     <button data-settings-nav="settings-sec-helper">Local helper</button>
                     <button data-settings-nav="settings-sec-logging">Logging</button>
                     <button data-settings-nav="settings-sec-advanced">Advanced</button>
@@ -151,6 +152,18 @@
                         </div>
                     </section>
 
+                    <section id="settings-sec-strategy" class="settings-section">
+                        <h3>Interception</h3>
+                        <div class="setting">
+                            <label class="setting-label" for="settings-strategy">Default strategy</label>
+                            <div class="setting-control">
+                                <select id="settings-strategy"></select>
+                                <p class="setting-help">How handlers intercept traffic unless their route sets <code>strategy</code>. A handler whose strategy isn't available doesn't run — it gets a ⚠ and a LOG warning; there is no fallback. <a id="settings-strategy-doc" target="_blank" rel="noopener">Compatibility</a></p>
+                                <table id="settings-strategy-table" class="strategy-table"></table>
+                            </div>
+                        </div>
+                    </section>
+
                     <section id="settings-sec-helper" class="settings-section">
                         <h3>Local helper</h3>
                         <div class="setting">
@@ -163,7 +176,7 @@
                                     <button id="btn-process-trust" hidden>Trust CA</button>
                                 </div>
                                 <pre id="process-detail" class="setting-pre"></pre>
-                                <p class="setting-help">Scripts listing <code>process</code> in their strategy are intercepted by wiretrick-helper, a small local proxy — no debugger banner, every resource type, Chrome only. More robust than <code>hook</code>, which only sees the page's own fetch/XHR calls. Your own proxy setting stays in effect for everything else.</p>
+                                <p class="setting-help">Handlers using the <code>process</code> strategy are intercepted by wiretrick-helper, a small local proxy — no debugger banner, every resource type, Chrome only. More robust than <code>hook</code>, which only sees the page's own fetch/XHR calls. Your own proxy setting stays in effect for everything else.</p>
                             </div>
                         </div>
                     </section>

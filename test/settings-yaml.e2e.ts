@@ -35,11 +35,11 @@ try {
     await seed.goto(`chrome-extension://${extId}/manager.html`);
     await seed.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_dbg", name: "Debug header",
-        code: 'wt.declareScript({ match: ["*://example.invalid/*"], params: { level: { type: "string", default: "warn", description: "Value of the x-debug header" } } });\n',
+        code: 'wt.params({ level: { type: "string", default: "warn", description: "Value of the x-debug header" } });\nwt.onRequest("*://example.invalid/*", () => {});\n',
     }, r)));
     await seed.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_note", name: "Notes",
-        code: 'wt.declareScript({ match: ["*://example.invalid/*"], params: { body: { type: "string", multiline: true, default: "", description: "Free text" } } });\n',
+        code: 'wt.params({ body: { type: "string", multiline: true, default: "", description: "Free text" } });\nwt.onRequest("*://example.invalid/*", () => {});\n',
     }, r)));
     await seed.close();
 
@@ -147,7 +147,7 @@ try {
     await mgr.waitForTimeout(800);
     const mk = await markers();
     check("marker: bad enum value", mk.some((x: string) => x.startsWith("Expected one of debug")), JSON.stringify(mk));
-    check("marker: param type from declareScript", mk.some((x: string) => x.startsWith("Expected string")), JSON.stringify(mk));
+    check("marker: param type from wt.params", mk.some((x: string) => x.startsWith("Expected string")), JSON.stringify(mk));
     check("marker: undeclared param", mk.some((x: string) => x.includes('declares no param "nope"')), JSON.stringify(mk));
     check("marker: unknown script", mk.some((x: string) => x.includes('No script named "Ghost"')), JSON.stringify(mk));
     await set("params:\n  Debug header:\n    \n");
@@ -173,7 +173,7 @@ try {
     await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "saveScript", id: "s_lib", name: "lib", code: "export const x = 1;\n" }, r)));
     await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_imp", name: "Importer",
-        code: 'import { x } from "./lib";\nwt.declareScript({ match: ["*://example.invalid/*"], params: { p: { type: "string", default: String(x) } } });\n',
+        code: 'import { x } from "./lib";\nwt.params({ p: { type: "string", default: String(x) } });\nwt.onRequest("*://example.invalid/*", () => {});\n',
     }, r)));
     const gp: any = await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "getScriptParams", scriptId: "s_imp" }, r)));
     check("getScriptParams resolves imported library", gp?.defs?.p?.default === "1", JSON.stringify(gp));

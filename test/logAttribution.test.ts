@@ -1,19 +1,24 @@
 /**
  * Log attribution: every script-identifying log line must use the STORED
- * script name (scriptStore meta.name), never the compiled declare metadata
- * (declareScript has no name — compiled meta is always "Untitled script").
+ * script name (scriptStore meta.name), never the compiled metadata
+ * (scripts have no name of their own — compiled meta is "Untitled script").
  *
- * Also covers the respond-result emit paths: a sync onRequest returning
- * respond with a non-200 status defers to the CDP tier (blocking webRequest
- * data-URLs can't carry a status); the CDP tier must fulfill it and log the
- * success, or log a script-attributed error when fulfillment fails.
+ * Also covers the respond-result emit paths: Chromium's webRequest tier
+ * can't serve a non-200 respond (data-URLs carry no status) and says so;
+ * the CDP tier fulfills a respond itself and logs the success, or logs a
+ * script-attributed error when fulfillment fails.
  */
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import { setDefaultStrategy } from "../src/shared/route";
 import { WebRequestStrategy } from "../src/background/engine/strategies/webRequestStrategy";
 import { CdpStrategy } from "../src/background/engine/strategies/cdpStrategy";
 import { addUiPort, type LogEntry } from "../src/background/engine/logs";
 import { compileScript } from "../src/shared/compile";
 import type { Script } from "../src/background/engine/scriptStore";
+
+// these suites exercise the webRequest tier: make it the settings default
+beforeEach(() => setDefaultStrategy("webrequest"));
+afterEach(() => setDefaultStrategy(null));
 
 // ---- log capture via a fake UI port ----
 const entries: LogEntry[] = [];
@@ -86,17 +91,16 @@ const details = (over: Record<string, any> = {}) => ({
     ...over,
 });
 
-const RESPOND_500 = `wt.declareScript({ match: ["*://api.example.com/*"] });
-wt.onRequest((ctx) => {
+const RESPOND_500 = `wt.onRequest("*://api.example.com/*", (ctx) => {
     if (ctx.url.includes("/v1/")) return { respond: { status: 500, body: { error: "boom" }, mime: "application/json" } };
 });`;
 
 describe("webRequest tier: log lines use the stored script name", () => {
-    it("sync respond with non-200 status → needsCdp + named deferral log", () => {
+    it("sync respond with non-200 status → not served + named warning", () => {
         const s = new WebRequestStrategy();
         s.reload([storedScript("a", "API mocker", RESPOND_500)]);
         const d = s.handleBeforeRequest(details(), null) as any;
-        expect(d.kind).toBe("needsCdp");
+        expect(d.kind).toBe("allow");
         const line = entries.find((e) => e.message.includes("respond 500"));
         expect(line, "a respond-500 log line must exist").toBeTruthy();
         expect(line!.message).toContain("[API mocker]");
@@ -105,8 +109,7 @@ describe("webRequest tier: log lines use the stored script name", () => {
 
     it("sync respond 200 → served + named serve log", () => {
         const s = new WebRequestStrategy();
-        s.reload([storedScript("a", "API mocker", `wt.declareScript({ match: ["*"] });
-wt.onRequest(() => ({ respond: { body: "ok", mime: "text/plain" } }));`)]);
+        s.reload([storedScript("a", "API mocker", `wt.onRequest("*", () => ({ respond: { body: "ok", mime: "text/plain" } }));`)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("redirect");
         const line = entries.find((e) => e.message.includes("respond 200"));
@@ -116,8 +119,7 @@ wt.onRequest(() => ({ respond: { body: "ok", mime: "text/plain" } }));`)]);
 
     it("redirect/cancel log uses the stored name", () => {
         const s = new WebRequestStrategy();
-        s.reload([storedScript("a", "API mocker", `wt.declareScript({ match: ["*"] });
-wt.onRequest(() => ({ redirect: "https://mocked.example.com/x" }));`)]);
+        s.reload([storedScript("a", "API mocker", `wt.onRequest("*", () => ({ redirect: "https://mocked.example.com/x" }));`)]);
         s.handleBeforeRequest(details(), null);
         const line = entries.find((e) => e.message.includes("onRequest →"));
         expect(line, "a redirect log line must exist").toBeTruthy();
@@ -126,8 +128,7 @@ wt.onRequest(() => ({ redirect: "https://mocked.example.com/x" }));`)]);
 
     it("replaceResponse log uses the stored name", () => {
         const s = new WebRequestStrategy();
-        s.reload([storedScript("a", "API mocker", `wt.declareScript({ match: ["*"] });
-wt.replaceResponse(() => '{"mocked":true}');`)]);
+        s.reload([storedScript("a", "API mocker", `wt.replaceResponse("*", () => '{"mocked":true}');`)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("redirect");
         const line = entries.find((e) => e.message.includes("replaceResponse →"));
@@ -138,8 +139,7 @@ wt.replaceResponse(() => '{"mocked":true}');`)]);
 
     it("no-match (handler returns undefined) logs only a DEBUG 'tapped (no change)' line", () => {
         const s = new WebRequestStrategy();
-        s.reload([storedScript("a", "API mocker", `wt.declareScript({ match: ["*"] });
-wt.onRequest(() => undefined);`)]);
+        s.reload([storedScript("a", "API mocker", `wt.onRequest("*", () => undefined);`)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("allow");
         const lines = entries.filter((e) => e.message.includes("onRequest →"));
@@ -150,11 +150,9 @@ wt.onRequest(() => undefined);`)]);
     it("replaceResponse → null and no-op onResponseHeaders are tapped; header changes stay INFO", () => {
         const s = new WebRequestStrategy();
         s.reload([
-            storedScript("a", "Looker", `wt.declareScript({ match: ["*"] });
-wt.replaceResponse(() => null);
-wt.onResponseHeaders(() => undefined);`),
-            storedScript("b", "Hdr", `wt.declareScript({ match: ["*"] });
-wt.onResponseHeaders(() => ({ headers: { set: { "x-a": "1" } } }));`),
+            storedScript("a", "Looker", `wt.replaceResponse("*", () => null);
+wt.onResponseHeaders("*", () => undefined);`),
+            storedScript("b", "Hdr", `wt.onResponseHeaders("*", () => ({ headers: { set: { "x-a": "1" } } }));`),
         ]);
         s.handleBeforeRequest(details(), null);
         s.handleHeadersReceived(details(), null);
@@ -173,59 +171,45 @@ describe("CDP tier: request-stage respond fulfillment", () => {
         resourceType: "xmlhttprequest",
         ...over,
     });
+    const CDP_500 = RESPOND_500.replace(`"*://api.example.com/*"`, `{ url: "*://api.example.com/*", strategy: "cdp" }`);
 
-    it("SYNC onRequest respond-500 is fulfilled (not silently dropped) + named success log", async () => {
-        const w = new WebRequestStrategy();
+    it("SYNC onRequest respond-500 is fulfilled + named success log", async () => {
         const c = new CdpStrategy();
-        w.reload([storedScript("a", "API mocker", RESPOND_500)]);
-        c.reload([storedScript("a", "API mocker", RESPOND_500)]);
-        expect((w.handleBeforeRequest(details(), null) as any).kind).toBe("needsCdp");
-        entries.length = 0;
+        c.reload([storedScript("a", "API mocker", CDP_500)]);
         await c.handlePaused("tab:1", paused());
         const fulfill = debuggerCalls.find((x) => x.command === "Fetch.fulfillRequest");
-        expect(fulfill, "the deferred respond must be fulfilled at the Request stage").toBeTruthy();
+        expect(fulfill, "the respond must be fulfilled at the Request stage").toBeTruthy();
         expect(fulfill!.params.responseCode).toBe(500);
         const line = entries.find((e) => e.message.includes("respond 500"));
         expect(line, "a respond-500 success log must exist").toBeTruthy();
         expect(line!.message).toContain("[API mocker]");
         expect(line!.level).toBe("info");
         expect(line!.scriptId).toBe("a");
-        // the handler ran once (webRequest), the debugger tier served its result
         expect(entries.filter((e) => e.scriptId === "a")).toHaveLength(1);
     });
 
-    it("a sync respond is fulfilled once: a second pause of the same request just continues", async () => {
+    it("a cdp route is never run by the webRequest tier", () => {
         const w = new WebRequestStrategy();
-        const c = new CdpStrategy();
-        w.reload([storedScript("a", "API mocker", RESPOND_500)]);
-        c.reload([storedScript("a", "API mocker", RESPOND_500)]);
-        w.handleBeforeRequest(details(), null);
-        await c.handlePaused("tab:1", paused());
-        await c.handlePaused("tab:1", paused({ requestId: "r2" }));
-        expect(debuggerCalls.filter((x) => x.command === "Fetch.fulfillRequest")).toHaveLength(1);
-        expect(debuggerCalls.some((x) => x.command === "Fetch.continueRequest" && x.params.requestId === "r2")).toBe(true);
+        w.reload([storedScript("a", "API mocker", CDP_500)]);
+        expect((w.handleBeforeRequest(details(), null) as any).kind).toBe("allow");
+        expect(entries.filter((e) => e.scriptId === "a")).toEqual([]);
     });
 
-    it("cdp-preferring script: sync respond 200 is fulfilled in place by the debugger tier (no redirect)", async () => {
-        const code = `wt.declareScript({ match: ["*"], strategy: ["cdp"] });
-wt.onRequest(() => ({ respond: { body: "<h1>mock</h1>", mime: "text/html" } }));`;
-        const w = new WebRequestStrategy();
+    it("sync respond 200 is fulfilled in place by the debugger tier (no redirect)", async () => {
+        const code = `wt.onRequest({ url: "*", strategy: "cdp" }, () => ({ respond: { body: "<h1>mock</h1>", mime: "text/html" } }));`;
         const c = new CdpStrategy();
-        w.reload([storedScript("a", "Page mock", code)]);
         c.reload([storedScript("a", "Page mock", code)]);
-        expect((w.handleBeforeRequest(details({ type: "main_frame" }), null) as any).kind).toBe("needsCdp");
         await c.handlePaused("tab:1", paused({ resourceType: "Document" }));
         const fulfill = debuggerCalls.find((x) => x.command === "Fetch.fulfillRequest");
         expect(fulfill!.params.responseCode).toBe(200);
         expect(atob(fulfill!.params.body)).toBe("<h1>mock</h1>");
         expect(entries.filter((e) => e.scriptId === "a").map((e) => e.message.replace(/ https:.*/, ""))).toEqual([
-            "[Page mock] onRequest → respond 200 text/html (debugger tier)",
+            "[Page mock] onRequest → respond 200 text/html (13b)",
         ]);
     });
 
-    it("cdp-preferring script: sync replaceResponse runs once, in the debugger tier", async () => {
-        const code = `wt.declareScript({ match: ["*"], strategy: ["cdp"] });
-wt.replaceResponse(() => "<h1>replaced</h1>");`;
+    it("sync replaceResponse runs once, in the debugger tier", async () => {
+        const code = `wt.replaceResponse({ url: "*", strategy: "cdp" }, () => "<h1>replaced</h1>");`;
         const w = new WebRequestStrategy();
         const c = new CdpStrategy();
         w.reload([storedScript("a", "Page mock", code)]);
@@ -239,10 +223,12 @@ wt.replaceResponse(() => "<h1>replaced</h1>");`;
         expect(entries.filter((e) => e.scriptId === "a" && e.message.includes("replaceResponse"))).toHaveLength(1);
     });
 
-    it("sync redirect/cancel/headers are NOT double-applied (webRequest tier already handled them)", async () => {
+    it("routes on another strategy are not run by the debugger tier", async () => {
         const c = new CdpStrategy();
-        c.reload([storedScript("a", "API mocker", `wt.declareScript({ match: ["*"] });
-wt.onRequest(() => ({ redirect: "https://mocked.example.com/x" }));`)]);
+        c.reload([
+            storedScript("a", "API mocker", `wt.onRequest("*", () => ({ redirect: "https://mocked.example.com/x" }));`),
+            storedScript("b", "Responder", `wt.onRequest("*", () => ({ respond: { body: "ok" } }));`),
+        ]);
         await c.handlePaused("tab:1", paused());
         expect(debuggerCalls.filter((x) => x.command === "Fetch.fulfillRequest")).toEqual([]);
         expect(debuggerCalls.filter((x) => x.command === "Fetch.failRequest")).toEqual([]);
@@ -251,19 +237,9 @@ wt.onRequest(() => ({ redirect: "https://mocked.example.com/x" }));`)]);
         expect(cont!.params.url).toBeUndefined();
     });
 
-    it("sync respond 200 is NOT double-applied (webRequest served it)", async () => {
+    it("async onRequest respond is fulfilled", async () => {
         const c = new CdpStrategy();
-        c.reload([storedScript("a", "API mocker", `wt.declareScript({ match: ["*"] });
-wt.onRequest(() => ({ respond: { body: "ok" } }));`)]);
-        await c.handlePaused("tab:1", paused());
-        expect(debuggerCalls.filter((x) => x.command === "Fetch.fulfillRequest")).toEqual([]);
-        expect(debuggerCalls.some((x) => x.command === "Fetch.continueRequest")).toBe(true);
-    });
-
-    it("async onRequest respond is still fulfilled (webRequest cannot await it)", async () => {
-        const c = new CdpStrategy();
-        c.reload([storedScript("a", "API mocker", `wt.declareScript({ match: ["*"] });
-wt.onRequest(async () => ({ respond: { status: 503, body: "later" } }));`)]);
+        c.reload([storedScript("a", "API mocker", `wt.onRequest({ url: "*", strategy: "cdp" }, async () => ({ respond: { status: 503, body: "later" } }));`)]);
         await c.handlePaused("tab:1", paused());
         const fulfill = debuggerCalls.find((x) => x.command === "Fetch.fulfillRequest");
         expect(fulfill).toBeTruthy();
@@ -273,11 +249,8 @@ wt.onRequest(async () => ({ respond: { status: 503, body: "later" } }));`)]);
 
     it("fulfill failure → script-attributed error log + request continued", async () => {
         failCommands.add("Fetch.fulfillRequest");
-        const w = new WebRequestStrategy();
         const c = new CdpStrategy();
-        w.reload([storedScript("a", "API mocker", RESPOND_500)]);
-        c.reload([storedScript("a", "API mocker", RESPOND_500)]);
-        w.handleBeforeRequest(details(), null);
+        c.reload([storedScript("a", "API mocker", CDP_500)]);
         await c.handlePaused("tab:1", paused());
         const line = entries.find((e) => e.level === "error" && e.message.includes("respond 500"));
         expect(line, "a script-attributed failure log must exist").toBeTruthy();
@@ -325,31 +298,26 @@ describe("per-script TypeScript error tracking", () => {
     });
 });
 
-describe("Chromium webRequest tier: which replacements it serves (redirect) vs leaves to the debugger tier", () => {
-    const REPLACE = (strategy: string) => `wt.declareScript({ match: ["*"]${strategy} });\nwt.replaceResponse(() => "<h1>x</h1>");`;
-    it("auto: a page load is left to the debugger tier — handler not run here", () => {
+describe("Chromium webRequest tier: how it serves replacements (redirect)", () => {
+    const REPLACE = `wt.replaceResponse("*", () => "<h1>x</h1>");`;
+    it("a page load is served via serve.html", () => {
         const s = new WebRequestStrategy();
-        s.reload([storedScript("a", "Auto page", REPLACE(""))]);
-        expect((s.handleBeforeRequest(details({ type: "main_frame" }), null) as any).kind).toBe("allow");
-        expect(entries.filter((e) => e.scriptId === "a")).toEqual([]);
+        s.reload([storedScript("a", "Wr page", REPLACE)]);
+        const d = s.handleBeforeRequest(details({ type: "main_frame" }), null) as any;
+        expect(d.kind).toBe("redirect");
+        expect(d.url).toContain("serve.html");
     });
-    it("auto: a fetch/XHR keeps the data: URL (no debugger needed)", () => {
+    it("a fetch/XHR gets a data: URL", () => {
         const s = new WebRequestStrategy();
-        s.reload([storedScript("a", "Auto api", REPLACE(""))]);
+        s.reload([storedScript("a", "Wr api", REPLACE)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("redirect");
         expect(d.url).toMatch(/^data:/);
     });
-    it("[\"cdp\"]: every request is left to the debugger tier", () => {
+    it("a route on another strategy is left alone", () => {
         const s = new WebRequestStrategy();
-        s.reload([storedScript("a", "Cdp api", REPLACE(`, strategy: ["cdp"]`))]);
+        s.reload([storedScript("a", "Cdp api", `wt.replaceResponse({ url: "*", strategy: "cdp" }, () => "<h1>x</h1>");`)]);
         expect((s.handleBeforeRequest(details(), null) as any).kind).toBe("allow");
-    });
-    it("[\"webrequest\", \"cdp\"]: a page load is served via serve.html", () => {
-        const s = new WebRequestStrategy();
-        s.reload([storedScript("a", "Wr page", REPLACE(`, strategy: ["webrequest", "cdp"]`))]);
-        const d = s.handleBeforeRequest(details({ type: "main_frame" }), null) as any;
-        expect(d.kind).toBe("redirect");
-        expect(d.url).toContain("serve.html");
+        expect(entries.filter((e) => e.scriptId === "a")).toEqual([]);
     });
 });

@@ -31,8 +31,8 @@ import { scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
 /**
  * Environment parity with the MV2 background page: sandboxed pages get NO
  * chrome.* APIs, but MV2 scripts compile in a page where chrome exists.
- * A script touching chrome before wt.declareScript would die inside its
- * own try/catch and silently skip the declaration (𝑓 library icon) — so
+ * A script touching chrome before registering its handlers would die
+ * inside its own try/catch and silently compile as a utility (𝑓) — so
  * the sandbox provides a minimal chrome/browser shim (metadata + in-memory
  * storage; reverse-channel ops like wt.storage still go over postMessage
  * via the wt shim, NOT this one).
@@ -79,15 +79,11 @@ interface PlainScript {
 }
 
 interface AnalyzeResult {
+    /** routes, description, active — routes may depend on param values */
     meta: any;
     paramDefs: Record<string, any>;
     error: string | null;
-    declared: boolean;
-    onDom: boolean;
-    onDomWhen: string;
     deps: string[];
-    /** handler counts — lets the SW's debugger tier pick what to pause */
-    handlers: { onRequest: number; modifyResponse: number; replaceResponse: number; onResponseHeaders: number };
 }
 
 function post(msg: any): void {
@@ -138,7 +134,7 @@ function compileSignature(scripts: PlainScript[], paramValues: Record<string, an
 
 /**
  * Compile every script with the overrides MV2 compiles with: REAL stored
- * param values (the wt shim resolves declareScript's params over them —
+ * param values (the wt shim resolves wt.params over them —
  * handlers that decide via params get the user's values, not defaults) and
  * a reverse-channel storage/log. Recompiles only when the script set or
  * the param values change (runs are per-request — reuse the handlers).
@@ -162,8 +158,8 @@ function ensureCompiled(scripts: PlainScript[], paramValues: Record<string, any>
         (lib) => overridesForScript(lib.id)
     );
     // unknown/missing imports resolve to silent stubs — a script whose
-    // import fails must still run its body so declareScript captures
-    // (otherwise it silently stores as a library: 𝑓 icon, never matches)
+    // import fails must still run its body so its handlers register
+    // (otherwise it silently stores as a utility: 𝑓 icon, never matches)
     let currentDeps: Set<string> | null = null;
     const resolveImport = (spec: string): any => {
         const before = new Set(resolver.deps);
@@ -191,7 +187,6 @@ function ensureCompiled(scripts: PlainScript[], paramValues: Record<string, any>
             logSink: (level, source, text) => scriptLog(s.id, level, scriptLogLine(s.name, source, text)),
         });
         currentDeps = null;
-        const onDom = compiledScript.handlers.onDom[0] ?? null;
         cache.set(s.id, {
             s,
             compiled: compiledScript,
@@ -199,42 +194,25 @@ function ensureCompiled(scripts: PlainScript[], paramValues: Record<string, any>
                 meta: compiledScript.meta,
                 paramDefs: compiledScript.paramDefs || {},
                 error: compiledScript.error,
-                declared: compiledScript.meta.declared,
-                onDom: !!onDom,
-                onDomWhen: onDom ? onDom.when : "DOMContentLoaded",
                 deps: [...deps],
-                handlers: handlerCounts(compiledScript.handlers),
             },
         });
     }
 }
 
-function handlerCounts(h: any): AnalyzeResult["handlers"] {
-    return {
-        onRequest: h.onRequest?.length || 0,
-        modifyResponse: h.modifyResponse?.length || 0,
-        replaceResponse: h.replaceResponse?.length || 0,
-        onResponseHeaders: h.onResponseHeaders?.length || 0,
-    };
-}
-
-function analyze(scripts: PlainScript[]): { results: Record<string, AnalyzeResult> } {
-    // metadata only: declared/match/paramDefs don't depend on stored values
-    ensureCompiled(scripts, {});
+function analyze(scripts: PlainScript[], paramValues: Record<string, any>): { results: Record<string, AnalyzeResult> } {
+    // routes may be built from params (wt.onRequest(cfg.hosts.map(...)))
+    ensureCompiled(scripts, paramValues ?? {});
     const results: Record<string, AnalyzeResult> = {};
     for (const [, c] of cache) {
         results[c.s.id] = c.result;
         const a = c.result;
-        // identify by the CALLER's name (meta.name is declareScript's default)
-        const summary = `analyze "${c.s.name}" (${c.s.code.length}b) → declared=${a.declared} match=${JSON.stringify(a.meta.match)} params=[${Object.keys(a.paramDefs).join(", ")}] deps=[${a.deps.join(", ")}]`;
-        sandboxLog(a.error ? `${summary} ERROR ${a.error.split("\n")[0]}` : summary, a.error ? "error" : !a.declared ? "warn" : "debug");
-        if (!a.error && !a.declared) {
-            // the body ran clean but never declared — show the declareScript
-            // source line (guarded/conditional calls are the usual cause)
-            const line = c.s.code.split("\n").find((l) => l.includes("declareScript"));
-            if (line) sandboxLog(`"${c.s.name}" declares via: ${line.trim().slice(0, 160)}`, "warn");
-            else sandboxLog(`"${c.s.name}" contains no wt.declareScript call at all — it IS a library (𝑓)`, "warn");
-            if (/\bchrome\b/.test(c.s.code) && !line) sandboxLog(`"${c.s.name}" references chrome.* — the sandbox shims a minimal chrome (metadata + storage); full extension APIs are unavailable here`, "warn");
+        // identify by the CALLER's name (meta.name is a default here)
+        const summary = `analyze "${c.s.name}" (${c.s.code.length}b) → active=${a.meta.active} routes=${a.meta.routes.length} match=${JSON.stringify(a.meta.match)} params=[${Object.keys(a.paramDefs).join(", ")}] deps=[${a.deps.join(", ")}]`;
+        sandboxLog(a.error ? `${summary} ERROR ${a.error.split("\n")[0]}` : summary, a.error ? "error" : "debug");
+        if (!a.error && !a.meta.active && /\bwt\.(onRequest|onResponseHeaders|replaceResponse|modifyResponse|onDom)\b/.test(c.s.code)) {
+            // mentions handlers but none registered at top level (guarded/late calls)
+            sandboxLog(`"${c.s.name}" mentions wt.on…/modify…/replace… but registered no handler at top level — it compiles as a utility (𝑓)`, "warn");
         }
     }
     return { results };
@@ -251,8 +229,8 @@ function run(scripts: PlainScript[], paramValues: Record<string, any>, op: BodyO
     const list: OpScript[] = [];
     for (const [id, c] of cache) {
         const s = scripts.find((x) => x.id === id);
-        if (!s || !s.enabled || !c.result.declared) continue;
-        list.push({ id, name: s.name, match: c.result.meta.match, handlers: c.compiled.handlers });
+        if (!s || !s.enabled || !c.result.meta.active) continue;
+        list.push({ id, name: s.name, handlers: c.compiled.handlers });
     }
     // tabId rides along so the SW attributes the line to the right tab
     const tabId = typeof args?.tabId === "number" ? args.tabId : -1;
@@ -286,7 +264,7 @@ window.addEventListener("message", async (event) => {
         const { op, scripts, paramValues, runOp: bodyOp, args } = data.payload;
         let result: any;
         if (op === "ping") result = { pong: true };
-        else if (op === "analyze") result = analyze(scripts);
+        else if (op === "analyze") result = analyze(scripts, paramValues);
         else if (op === "run") result = await run(scripts, paramValues, bodyOp, args);
         else if (op === "pac") result = { result: pacDecision(data.payload.source)(args.url, args.host) };
         else result = { error: `unknown op ${op}` };

@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { ProcessStrategy, applyHeaderMods, base64ToBytes, bytesToBase64, filterUrlsFor, ownedOf, pairsToObject } from "../src/background/engine/strategies/processStrategy";
-import { hookEligible, isProcessOwned, listsProcess, processActive, setProcessActive } from "../src/background/engine/strategies/processState";
+import { ProcessStrategy, applyHeaderMods, base64ToBytes, bytesToBase64, filterUrlsFor, helperRouteOf, pairsToObject } from "../src/background/engine/strategies/processStrategy";
+import { processActive, setProcessActive, tierUnavailable } from "../src/background/engine/strategies/processState";
+import { ownedRoutes } from "../src/background/engine/strategies/tiers";
+import { normalizeRoute, setDefaultStrategy } from "../src/shared/route";
 import { CdpStrategy } from "../src/background/engine/strategies/cdpStrategy";
 import { compileScript } from "../src/shared/compile";
 import { isHelperOutdated, MIN_HELPER_VERSION } from "../src/shared/helperInstall";
@@ -109,50 +111,52 @@ beforeEach(() => {
 });
 afterEach(() => setProcessActive(false));
 
-describe("listsProcess / ownership", () => {
-    it("process first, or after hook only", () => {
-        expect(listsProcess("process")).toBe(true);
-        expect(listsProcess("hook,process,cdp")).toBe(true);
-        expect(listsProcess(["process", "cdp"])).toBe(true);
-        expect(listsProcess("cdp,process")).toBe(false);
-        expect(listsProcess("webrequest,process")).toBe(false);
-        expect(listsProcess("hook")).toBe(false);
-        expect(listsProcess(undefined)).toBe(false);
-    });
-    it("hookEligible: hook/auto lists only, never process-owned", () => {
-        expect(hookEligible(undefined)).toBe(true);
-        expect(hookEligible("hook,cdp")).toBe(true);
-        expect(hookEligible(["cdp"])).toBe(false);
-        expect(hookEligible(["webrequest"])).toBe(false); // MV2: webRequest owns it
-        expect(hookEligible(["process"])).toBe(false);
-        expect(hookEligible(["hook", "process"])).toBe(true); // helper down → hook
+describe("process ownership (single strategy, no fallback)", () => {
+    it("a process route belongs to the process tier only — helper up or down", () => {
+        const scripts = [makeScript("a", `wt.modifyResponse({ url: "*", strategy: "process" }, (c, b) => b);`)];
+        expect(ownedRoutes(scripts, "process")).toHaveLength(1);
+        expect(ownedRoutes(scripts, "cdp")).toEqual([]);
+        expect(ownedRoutes(scripts, "hook")).toEqual([]);
         setProcessActive(true);
-        expect(hookEligible(["hook", "process"])).toBe(false);
-    });
-    it("owned only while active", () => {
-        expect(isProcessOwned("process")).toBe(false);
-        setProcessActive(true);
-        expect(isProcessOwned("process")).toBe(true);
-        expect(isProcessOwned("cdp")).toBe(false);
-    });
-    it("cdp tier yields process-owned scripts only while active (fallback otherwise)", () => {
-        const s = makeScript("a", `wt.declareScript({ match: ["*"], strategy: ["process", "cdp"] });\nwt.modifyResponse((c, b) => b);`);
+        expect(ownedRoutes(scripts, "process")).toHaveLength(1);
         const c = new CdpStrategy();
-        c.reload([s]);
-        expect(c.cdpRelevantScripts("https://x.com/").length).toBe(1);
+        c.reload(scripts);
+        expect(c.hasOwners()).toBe(false);
+    });
+    it("routes without a strategy follow settings.strategy", () => {
+        const scripts = [makeScript("a", `wt.onRequest("*", () => {});`)];
+        try {
+            setDefaultStrategy("process");
+            expect(ownedRoutes(scripts, "process")).toHaveLength(1);
+            setDefaultStrategy("hook");
+            expect(ownedRoutes(scripts, "process")).toEqual([]);
+            expect(ownedRoutes(scripts, "hook")).toHaveLength(1);
+        } finally {
+            setDefaultStrategy(null);
+        }
+    });
+    it("tierUnavailable: process needs a connected helper", () => {
+        expect(tierUnavailable("process")).toMatch(/helper/);
         setProcessActive(true);
-        c.reload([s]);
-        expect(c.cdpRelevantScripts("https://x.com/")).toEqual([]);
+        expect(tierUnavailable("process")).toBeNull();
     });
 });
 
 describe("helpers", () => {
-    it("ownedOf follows the defined handlers", () => {
-        const h = { onRequest: 1, modifyResponse: 0, replaceResponse: 0, onResponseHeaders: 0 };
-        expect(ownedOf("a", "A", ["*"], h)).toMatchObject({ req: true, resHeaders: false, body: false });
-        expect(ownedOf("a", "A", ["*"], { ...h, onRequest: 0 })).toBeNull();
-        expect(ownedOf("a", "A", ["*"], { ...h, onRequest: 0, replaceResponse: 1 })).toMatchObject({ req: true });
-        expect(ownedOf("a", "A", ["*"], { ...h, onRequest: 0, modifyResponse: 1 })).toMatchObject({ req: false, body: true });
+    it("helperRouteOf: pause flags follow the handler kind; exclude/methods go to the helper", () => {
+        const r = (kind: any, raw: unknown) => helperRouteOf(normalizeRoute(kind, raw, 0));
+        expect(r("onRequest", "*")).toMatchObject({ match: ["*"], req: true, resHeaders: false, body: false });
+        expect(r("replaceResponse", "*")).toMatchObject({ req: true, body: false });
+        expect(r("onResponseHeaders", "*")).toMatchObject({ req: false, resHeaders: true });
+        expect(r("modifyResponse", "*")).toMatchObject({ req: false, body: true });
+        expect(r("onRequest", { url: "https://x.com/*", exclude: "https://x.com/a", methods: ["post"] })).toEqual({
+            match: ["https://x.com/*"],
+            exclude: ["https://x.com/a"],
+            methods: ["POST"],
+            req: true,
+            resHeaders: false,
+            body: false,
+        });
     });
     it("header mods are case-insensitive and support multi-values", () => {
         const out = applyHeaderMods(
@@ -184,7 +188,7 @@ describe("helpers", () => {
 describe("ProcessStrategy ⇄ helper protocol", () => {
     it("no process scripts → never connects", async () => {
         const p = new ProcessStrategy();
-        p.reload([makeScript("a", `wt.declareScript({ match: ["*"], strategy: ["cdp"] });\nwt.modifyResponse((c, b) => b);`)]);
+        p.reload([makeScript("a", `wt.modifyResponse({ url: "*", strategy: "cdp" }, (c, b) => b);`)]);
         await settle();
         expect(fake.connects).toBe(0);
         expect(p.status().state).toBe("idle");
@@ -193,9 +197,9 @@ describe("ProcessStrategy ⇄ helper protocol", () => {
     it("ready → config, PAC install, active; user proxy captured & respected", async () => {
         fake.proxyValue = { mode: "fixed_servers", rules: { singleProxy: { scheme: "http", host: "corp", port: 3128 } } };
         const p = new ProcessStrategy();
-        await ready(p, [makeScript("a", `wt.declareScript({ match: ["https://api.x.com/*"], strategy: ["process"] });\nwt.modifyResponse((c, b) => b + "!");`)]);
+        await ready(p, [makeScript("a", `wt.modifyResponse({ url: "https://api.x.com/*", strategy: "process" }, (c, b) => b + "!");`)]);
         const cfg = fake.sent.find((m) => m.t === "config");
-        expect(cfg.routes).toEqual([{ match: ["https://api.x.com/*"], req: false, resHeaders: false, body: true }]);
+        expect(cfg.routes).toEqual([{ match: ["https://api.x.com/*"], exclude: [], methods: [], req: false, resHeaders: false, body: true }]);
         expect(cfg.upstream).toBe("ask");
         expect(fake.proxyValue.mode).toBe("pac_script");
         expect(fake.proxyValue.pacScript.data).toContain("127.0.0.1:41234");
@@ -213,34 +217,32 @@ describe("ProcessStrategy ⇄ helper protocol", () => {
     it("blocked proxy control → inactive, fall through", async () => {
         fake.levelOfControl = "controlled_by_other_extensions";
         const p = new ProcessStrategy();
-        await ready(p, [makeScript("a", `wt.declareScript({ match: ["*"], strategy: ["process", "cdp"] });\nwt.onRequest(() => {});`)]);
+        await ready(p, [makeScript("a", `wt.onRequest({ url: "*", strategy: "process" }, () => {});`)]);
         expect(processActive()).toBe(false);
         expect(p.status().routing?.active).toBe(false);
         expect(fake.sent.find((m) => m.t === "config").routes).toEqual([]);
     });
 
-    it("request stage: redirect / respond / cancel / headers / replaceResponse / claimed", async () => {
+    it("request stage: redirect / respond / cancel / headers / replaceResponse", async () => {
         const p = new ProcessStrategy();
         await ready(p, [
             makeScript(
                 "a",
-                `wt.declareScript({ match: ["https://x.com/*"], strategy: ["process"] });
-wt.onRequest((c) => {
+                `wt.onRequest({ url: "https://x.com/*", strategy: "process" }, (c) => {
     if (c.url.endsWith("/r")) return { redirect: "https://x.com/target" };
     if (c.url.endsWith("/j")) return { respond: { status: 201, body: { ok: 1 }, mime: "application/json" } };
     if (c.url.endsWith("/c")) return { cancel: true };
     if (c.url.endsWith("/h")) return { headers: { set: { "X-Added": "1" }, remove: ["cookie"] } };
 });
-wt.replaceResponse((c) => (c.url.endsWith("/rep") ? "replaced" : undefined));`
+wt.replaceResponse({ url: "https://x.com/*", strategy: "process" }, (c) => (c.url.endsWith("/rep") ? "replaced" : undefined));`
             ),
         ]);
         const H: [string, string][] = [
             ["Host", "x.com"],
             ["Cookie", "s=1"],
         ];
-        const ids = { r: 1, j: 2, c: 3, h: 4, rep: 5, none: 6, claimed: 7 };
+        const ids = { r: 1, j: 2, c: 3, h: 4, rep: 5, none: 6 };
         for (const [k, id] of Object.entries(ids)) fake.deliver({ t: "req", id, url: `https://x.com/${k}`, method: "GET", headers: H });
-        p.isClaimed = (u) => u.endsWith("/claimed");
         await settle(60);
         expect(reply(1)).toEqual({ t: "redirect", id: 1, url: "https://x.com/target" });
         expect(reply(2).t).toBe("fulfill");
@@ -256,7 +258,6 @@ wt.replaceResponse((c) => (c.url.endsWith("/rep") ? "replaced" : undefined));`
         expect(reply(5).t).toBe("fulfill");
         expect(dec(reply(5).body)).toBe("replaced");
         expect(reply(6)).toEqual({ t: "continue", id: 6 });
-        expect(reply(7)).toEqual({ t: "continue", id: 7 });
     });
 
     it("response stage: chunks reassembled, transform → fulfill; headers-only → continue{headers}", async () => {
@@ -264,9 +265,8 @@ wt.replaceResponse((c) => (c.url.endsWith("/rep") ? "replaced" : undefined));`
         await ready(p, [
             makeScript(
                 "a",
-                `wt.declareScript({ match: ["https://x.com/*"], strategy: ["process"] });
-wt.onResponseHeaders((c) => ({ headers: { set: { "x-seen": c.statusLine.split(" ")[1] } } }));
-wt.modifyResponse((c, body) => (c.url.endsWith("/t") ? body.toUpperCase() : undefined));`
+                `wt.onResponseHeaders({ url: "https://x.com/*", strategy: "process" }, (c) => ({ headers: { set: { "x-seen": c.statusLine.split(" ")[1] } } }));
+wt.modifyResponse({ url: "https://x.com/*", strategy: "process" }, (c, body) => (c.url.endsWith("/t") ? body.toUpperCase() : undefined));`
             ),
         ]);
         const headers: [string, string][] = [
@@ -292,7 +292,7 @@ wt.modifyResponse((c, body) => (c.url.endsWith("/t") ? body.toUpperCase() : unde
 
     it("binary bodies reach modifyResponse as bytes (MV2)", async () => {
         const p = new ProcessStrategy();
-        await ready(p, [makeScript("a", `wt.declareScript({ match: ["https://x.com/*"], strategy: ["process"] });\nwt.modifyResponse((c, body) => typeof body === "string" ? "text" : "bytes:" + body.length);`)]);
+        await ready(p, [makeScript("a", `wt.modifyResponse({ url: "https://x.com/*", strategy: "process" }, (c, body) => typeof body === "string" ? "text" : "bytes:" + body.length);`)]);
         fake.deliver({ t: "chunk", id: 1, data: bytesToBase64(new Uint8Array([0, 1, 2, 3])) });
         fake.deliver({ t: "res", id: 1, url: "https://x.com/b.png", method: "GET", status: 200, headers: [["content-type", "image/png"]], body: "chunks" });
         await settle(40);
@@ -301,7 +301,7 @@ wt.modifyResponse((c, body) => (c.url.endsWith("/t") ? body.toUpperCase() : unde
 
     it("helper missing → state missing, no retry loop; Retry reconnects", async () => {
         const p = new ProcessStrategy();
-        p.reload([makeScript("a", `wt.declareScript({ match: ["*"], strategy: ["process", "cdp"] });\nwt.onRequest(() => {});`)]);
+        p.reload([makeScript("a", `wt.onRequest({ url: "*", strategy: "process" }, () => {});`)]);
         await settle();
         fake.disconnect("Specified native messaging host not found.");
         expect(p.status().state).toBe("missing");
@@ -314,7 +314,7 @@ wt.modifyResponse((c, body) => (c.url.endsWith("/t") ? body.toUpperCase() : unde
     it("helper crash → inactive and PAC removed (browser proxy restored)", async () => {
         fake.proxyValue = { mode: "direct" };
         const p = new ProcessStrategy();
-        await ready(p, [makeScript("a", `wt.declareScript({ match: ["*"], strategy: ["process"] });\nwt.onRequest(() => {});`)]);
+        await ready(p, [makeScript("a", `wt.onRequest({ url: "*", strategy: "process" }, () => {});`)]);
         expect(processActive()).toBe(true);
         fake.disconnect("Native host has exited.");
         await settle();
@@ -340,7 +340,7 @@ describe("helper version check", () => {
     it("helper below the minimum → one error with the upgrade command; Retry restarts it", async () => {
         clearDebugBuffer();
         const p = new ProcessStrategy();
-        await ready(p, [makeScript("a", `wt.declareScript({ match: ["*://x.com/*"], strategy: ["process"] });\nwt.onRequest(() => {});`)], "0.0.0");
+        await ready(p, [makeScript("a", `wt.onRequest({ url: "*://x.com/*", strategy: "process" }, () => {});`)], "0.0.0");
         expect(p.status().outdated).toBe(true);
         const errs = getDebugBuffer().filter((e) => e.level === "error" && /older than this extension needs/.test(e.msg));
         expect(errs.length).toBe(1);
@@ -361,7 +361,7 @@ describe("helper version check", () => {
         (globalThis as any).chrome.runtime.getManifest = () => ({ version: "9.9.9" });
         clearDebugBuffer();
         const p = new ProcessStrategy();
-        await ready(p, [makeScript("a", `wt.declareScript({ match: ["*://x.com/*"], strategy: ["process"] });\nwt.onRequest(() => {});`)], MIN_HELPER_VERSION);
+        await ready(p, [makeScript("a", `wt.onRequest({ url: "*://x.com/*", strategy: "process" }, () => {});`)], MIN_HELPER_VERSION);
         expect(p.status().outdated).toBe(false);
         expect(getDebugBuffer().some((e) => /older than this extension needs/.test(e.msg))).toBe(false);
     });

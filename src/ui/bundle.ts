@@ -14,7 +14,7 @@
  *       params:          # only non-default param values
  *         level: trace
  *       code: |-
- *         wt.declareScript(…
+ *         wt.onRequest("*://example.com/*", …
  *
  * Import accepts that YAML shape (.yaml/.yml) AND legacy JSON bundles
  * (.json, format version 1): a `settings` object ({ logLevel, logCap }) is

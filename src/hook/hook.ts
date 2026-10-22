@@ -9,7 +9,8 @@
 import { formatScriptError } from "../shared/scriptError";
 import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
 import { scriptFunction } from "../shared/scriptFn";
-import { matchAny } from "../shared/matcher";
+import { routeMatches, type DomWhen, type RouteMeta } from "../shared/route";
+import { makePageShim, domHandlersFor, scheduleDom } from "../shared/pageShim";
 
 (() => {
     const w = window as any;
@@ -20,11 +21,11 @@ import { matchAny } from "../shared/matcher";
     const HOOK_SOURCE = "res-override-hook";
 
     let active = false; // any body scripts exist (bundle metadata says so)
-    /** URL patterns of hook-eligible scripts — other requests stay native */
-    let patterns: string[] = [];
-    const wants = (url: string): boolean => {
+    /** routes of hook-owned handlers — other requests stay native */
+    let routes: RouteMeta[] = [];
+    const wants = (url: string, method: string): boolean => {
         try {
-            return patterns.length > 0 && matchAny(patterns, url);
+            return routes.some((r) => routeMatches(r, url, method));
         } catch {
             return false;
         }
@@ -32,8 +33,8 @@ import { matchAny } from "../shared/matcher";
     let patched = false;
     /** the bridge reported the extension context dead (extension reload) */
     let dead = false;
-    let domHandlers: { scriptId: string; name: string; when: string; src: string; params?: Record<string, any> }[] = [];
-    let libSources: { name: string; src: string }[] = [];
+    let domHandlers: { scriptId: string; name: string; src: string; params?: Record<string, any> }[] = [];
+    let libSources: { name: string; src: string; params?: Record<string, any> }[] = [];
     let domFired = false;
     let reqSeq = 0;
     const pending = new Map<number, (v: any) => void>();
@@ -92,7 +93,7 @@ import { matchAny } from "../shared/matcher";
         if (data.kind === "status") {
             const wasActive = active;
             active = !!data.active;
-            patterns = data.patterns || [];
+            routes = data.routes || [];
             domHandlers = data.domHandlers || [];
             libSources = data.libs || [];
             logUp(`status: ${active ? "active" : "inactive"}, dom=${domHandlers.length}${data.hot ? " (hot)" : ""}`, "debug");
@@ -110,7 +111,7 @@ import { matchAny } from "../shared/matcher";
         pending.clear();
         if (!active && !patched) return;
         active = false;
-        patterns = [];
+        routes = [];
         domHandlers = [];
         libSources = [];
         if (patched) {
@@ -143,26 +144,23 @@ import { matchAny } from "../shared/matcher";
             if (!lib) throw new Error(`cannot import "${spec}" — is the library script saved?`);
             const moduleObj = { exports: {} as any };
             libModules.set(key, moduleObj.exports); // early: cycle protection
-            const store: any = { onDom: null, onDomOptions: {} };
             const fn = scriptFunction(lib.src);
-            fn(makeDomShim(null, lib.name, store, {}), scriptConsole(null, lib.name), requireLib, moduleObj, moduleObj.exports);
+            fn(makeDomShim(null, lib.name, lib.params || {}).wt, scriptConsole(null, lib.name), requireLib, moduleObj, moduleObj.exports);
             libModules.set(key, moduleObj.exports);
             return moduleObj.exports;
         };
-        const compiledDom: { scriptId: string; name: string; when: string; fn: (ctx: any) => any }[] = [];
+        const compiledDom: { scriptId: string; name: string; when: DomWhen; fn: (ctx: any) => any }[] = [];
         let cspBlocked = false;
         for (const d of domHandlers) {
-            const store: any = { onDom: null, onDomOptions: {} };
             try {
                 // shadow `console` inside the script so its console.* calls
                 // land in the extension LOG (not the page console);
                 // require resolves the shipped libs
                 const fn = scriptFunction(d.src);
                 const moduleObj = { exports: {} as any };
-                fn(makeDomShim(d.scriptId, d.name, store, d.params || {}), scriptConsole(d.scriptId, d.name), requireLib, moduleObj, moduleObj.exports);
-                if (store.onDom) {
-                    compiledDom.push({ scriptId: d.scriptId, name: d.name, when: store.onDomOptions.when || "DOMContentLoaded", fn: store.onDom });
-                }
+                const { wt, dom } = makeDomShim(d.scriptId, d.name, d.params || {});
+                fn(wt, scriptConsole(d.scriptId, d.name), requireLib, moduleObj, moduleObj.exports);
+                for (const h of domHandlersFor(dom, location.href)) compiledDom.push({ scriptId: d.scriptId, name: d.name, when: h.when, fn: h.fn });
             } catch (e: any) {
                 if (/Evaluating a string as JavaScript|unsafe-eval/i.test(e.message || "")) {
                     cspBlocked = true;
@@ -196,16 +194,8 @@ import { matchAny } from "../shared/matcher";
         }
         if (domFired) return; // initial + ready re-sends fire only once
         domFired = true;
-        // each script keeps its own { when } (same as the isolated-world fallback)
-        for (const h of compiledDom) {
-            const run = () => fire(h);
-            if (h.when === "document_start") run();
-            else if (h.when === "document_idle") {
-                if (document.readyState === "complete") run();
-                else window.addEventListener("load", run, { once: true });
-            } else if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", run, { once: true });
-            else run();
-        }
+        // each handler keeps its own { when } (same as the isolated-world fallback)
+        for (const h of compiledDom) scheduleDom(h.when, () => fire(h));
     }
 
     function requestStatus(): void {
@@ -220,25 +210,15 @@ import { matchAny } from "../shared/matcher";
     }
 
     /** shim for compiled dom scripts: log → extension LOG (script-tagged), storage → bridge relay */
-    function makeDomShim(scriptId: string | null, name: string, store: any, params: Record<string, any> = {}): any {
-        return {
-            onRequest: (f: any) => {},
-            onResponseHeaders: (f: any) => {},
-            replaceResponse: (f: any) => {},
-            modifyResponse: (f: any) => {},
-            onDom: (f: any, opts?: any) => {
-                store.onDom = f;
-                store.onDomOptions = opts || {};
-            },
-            // meta is already applied upstream; the script receives its
-            // resolved param values here
-            declareScript: () => params,
+    function makeDomShim(scriptId: string | null, name: string, params: Record<string, any>) {
+        return makePageShim({
+            params,
             log: (...args: any[]) => scriptLogUp(scriptId, "info", scriptLogLine(name, "wt.log", formatLogArgs(args))),
             storage: {
                 get: (key: string) => viaBridge({ op: "storageGet", scriptId, key }),
                 set: (key: string, value: any) => viaBridge({ op: "storageSet", scriptId, key, value }),
             },
-        };
+        });
     }
 
     function claim(url: string): void {
@@ -314,7 +294,7 @@ import { matchAny } from "../shared/matcher";
                 url = rawUrl;
             }
 
-            if (!active || !wants(url)) return origFetch(input, init);
+            if (!active || !wants(url, method)) return origFetch(input, init);
 
             claim(url);
 
@@ -424,7 +404,7 @@ import { matchAny } from "../shared/matcher";
             } catch {
                 absUrl = xhr.__resUrl;
             }
-            if (!wants(absUrl)) return OrigSend.apply(this, args as any);
+            if (!wants(absUrl, xhr.__resMethod || "GET")) return OrigSend.apply(this, args as any);
             claim(absUrl);
 
             // BECOME the transport: fetch (patched → replace/transform

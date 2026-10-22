@@ -3,25 +3,29 @@
 [← README](../README.md)
 
 `wiretrick-helper` is a small (~3 MB) Rust program for Linux, macOS and
-Windows. Chrome starts it through **native messaging** when an enabled script
-lists `process`, and it exits when that script is gone (or Chrome closes):
+Windows. Chrome starts it through **native messaging** when an enabled
+script has a handler on the `process` strategy (the Chromium default — see
+[strategies](strategies.md)), and it exits when no such handler is left (or
+Chrome closes):
 
 1. It listens on `127.0.0.1:<random port>` as an HTTP/HTTPS proxy. HTTPS is
    terminated with per-host certificates from its own local CA, minted once
    and cached.
 2. The extension installs a `chrome.proxy` PAC script that sends **only the
-   hosts in process-owned scripts' `match`** to the helper. Everything else
+   hosts in the routes of `process` handlers** to the helper. Everything else
    goes exactly where your proxy setting sent it before (direct, fixed
    servers, your PAC, auto-detect, or the system proxy).
 3. The helper pauses matching requests and responses and asks the extension.
-   It tests each URL against the same `match`
+   It tests each URL against the same route
    [URLPatterns](https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API)
-   as the extension (`<all_urls>` matches everything). TLS to a host no
-   pattern's hostname/port can match is tunneled untouched.
+   as the extension (`<all_urls>` matches everything), and checks the
+   routes' `exclude` and `methods` itself, so those requests never reach
+   the extension. `types` is checked extension-side, after the pause. TLS
+   to a host no pattern's hostname/port can match is tunneled untouched.
    Your handlers run in the background page (MV2) or the sandbox (MV3), the
    same code paths as the other tiers. The extension answers continue,
    fulfill, redirect or fail. Requests nobody listens to are not paused, and
-   bodies are buffered only when a script has `modifyResponse`.
+   bodies are buffered only for `modifyResponse` handlers.
 4. The helper's own upstream connection follows your proxy setting too. It
    asks the extension per host, so your PAC/fixed proxies are honored even
    for intercepted traffic.
@@ -73,13 +77,16 @@ binary.
   leaves it. Anyone who can read it can impersonate sites to this browser
   profile, so treat it like a password. `untrust-ca` removes trust.
 - Sites that pin certificates or require client certificates (mTLS) fail
-  through the helper. Leave them out of process scripts' `match`.
+  through the helper. Leave them out of `process` routes (use another
+  `strategy` on that handler).
 - When another extension or an enterprise policy controls the proxy setting,
-  the tier stays off (shown in Settings). Scripts then fall through their
-  strategy list (`["process", "cdp"]` → cdp).
+  the tier stays off (shown in Settings). Handlers on `process` then don't
+  run — there is no fallback; the Log warns and the script gets a ⚠. Pick
+  another default strategy in Settings → Interception, or set `strategy`
+  on the route.
 - Firefox doesn't need it: `webrequest` already gives the same reach there.
 - Responses rewritten by the helper are served `no-store`. The browser cache
-  for literal hosts in `match` is cleared when the routed set changes, so
+  for literal hosts in `process` routes is cleared when the routed set changes, so
   stale cached copies don't skip your handlers.
 - Overhead: requests to unmatched hosts don't touch the helper at all. Matched
   hosts add one loopback hop. With a `modifyResponse` handler, the e2e suite

@@ -22,7 +22,7 @@ import { parseDocument, isMap, isScalar, Scalar, stringify, type YAMLMap } from 
 import { resolveParamValues, paramDefault } from "./scriptDef";
 import {
     parseSettings, planSettings, scriptKeys, scriptBlock, entryLines, commentedDefaultLines, renderedKeyText,
-    DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL,
+    DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL, defaultStrategySetting,
     type GlobalSettings, type ScriptSettingsState,
 } from "./settingsYaml";
 
@@ -316,6 +316,7 @@ export function patchSettings(existing: string, g: GlobalSettings, scripts: Scri
     const globals: [string, any, any][] = [
         ["logLevel", g.logLevel, DEFAULT_LOG_LEVEL],
         ["logCap", g.logCap, DEFAULT_LOG_CAP],
+        ["strategy", g.strategy, defaultStrategySetting()],
     ];
     const settingsTarget = classify(root, "settings");
     if (settingsTarget === null) return null;
@@ -398,7 +399,7 @@ export function patchSettings(existing: string, g: GlobalSettings, scripts: Scri
                 if (!insertInto({ kind: "map", node: scriptNode }, commentedDefaultLines(k, s.defs[k]))) return null;
             }
         }
-        // params removed from declareScript: comment out their stale live
+        // params removed from the script: comment out their stale live
         // entries (a live value would otherwise silently map to nothing)
         for (const pair of scriptNode.items) {
             const k = isScalar(pair.key) ? pair.key.value : undefined;
@@ -454,7 +455,7 @@ export function patchSettings(existing: string, g: GlobalSettings, scripts: Scri
     // safety net: the result must parse and express exactly the target state
     try {
         const plan = planSettings(parseSettings(out), g, scripts);
-        if (plan.globals.logLevel !== undefined || plan.globals.logCap !== undefined || plan.scripts.length) return null;
+        if (plan.globals.logLevel !== undefined || plan.globals.logCap !== undefined || plan.globals.strategy !== undefined || plan.scripts.length) return null;
     } catch {
         return null;
     }

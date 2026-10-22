@@ -64,9 +64,10 @@ pub struct State {
     routes: RwLock<Arc<Vec<Compiled>>>,
 }
 
-/// A route with its `match` strings parsed once (invalid ones dropped).
+/// A route with its `match`/`exclude` strings parsed once (invalid ones dropped).
 struct Compiled {
     patterns: Vec<UrlMatcher>,
+    exclude: Vec<UrlMatcher>,
     flags: Route,
 }
 
@@ -93,8 +94,14 @@ impl State {
                     .iter()
                     .filter_map(|p| UrlMatcher::parse(p))
                     .collect(),
+                exclude: r
+                    .exclude
+                    .iter()
+                    .filter_map(|p| UrlMatcher::parse(p))
+                    .collect(),
                 flags: Route {
                     patterns: Vec::new(),
+                    exclude: Vec::new(),
                     ..r
                 },
             })
@@ -106,14 +113,19 @@ impl State {
         self.routes.read().unwrap().clone()
     }
 
-    /// OR of every matching route's phases (`url` is absolute).
-    fn flags(&self, url: &str) -> Route {
+    /// OR of every matching route's phases (`url` is absolute): url
+    /// matches, no `exclude` does, and the method is listed (or any).
+    fn flags(&self, url: &str, method: &str) -> Route {
         let mut f = Route::default();
         let Ok(url) = url::Url::parse(url) else {
             return f;
         };
         for r in self.routes().iter() {
-            if r.patterns.iter().any(|p| p.test(&url)) {
+            if r.patterns.iter().any(|p| p.test(&url))
+                && !r.exclude.iter().any(|p| p.test(&url))
+                && (r.flags.methods.is_empty()
+                    || r.flags.methods.iter().any(|m| m.eq_ignore_ascii_case(method)))
+            {
                 f.req |= r.flags.req;
                 f.res_headers |= r.flags.res_headers;
                 f.body |= r.flags.body;
@@ -549,7 +561,7 @@ async fn handle(
         return Ok(r);
     }
     let method = req.method().to_string();
-    let flags = st.flags(&url);
+    let flags = st.flags(&url, &method);
     let is_upgrade = req.headers().contains_key("upgrade");
 
     // ---- request stage ----

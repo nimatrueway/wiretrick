@@ -1,7 +1,7 @@
 /**
  * Tier P: the "process" strategy — a local helper (wiretrick-helper, Rust)
  * is a loopback MITM proxy that Chrome reaches through a PAC
- * (processRouting.ts) for the hosts of process-owned scripts only. It
+ * (processRouting.ts) for the hosts of process-owned routes only. It
  * pauses matching requests CDP-Fetch style over native messaging; this
  * class runs the scripts' handlers and answers continue / fulfill /
  * redirect / fail. No debugger, no banner, every handler kind (sync and
@@ -10,32 +10,46 @@
  * Handler chains share src/shared/bodyOps.ts with the hook and debugger
  * tiers: MV2 compiles in the background page, MV3 runs in the sandbox.
  */
-import { compileScript, makeModuleResolver, makeScriptOverrides } from "../../../shared/compile";
-import { scriptLogLine } from "../../../shared/scriptLog";
 import { runOp, type BodyOp, type OpScript } from "../../../shared/bodyOps";
 import { hostPatternOf, type SystemProxyInfo } from "../../../shared/pac";
-import { matchAny } from "../../../shared/matcher";
+import { routeMatches, type RouteMeta } from "../../../shared/route";
 import { dlogLevel } from "../../../shared/debugLog";
 import { helperInstallCommand, helperInstallShell, isHelperOutdated, MIN_HELPER_VERSION } from "../../../shared/helperInstall";
 import type { Script } from "../scriptStore";
-import { scriptStorageGet, scriptStorageSet } from "../scriptStore";
 import { log } from "../logs";
-import { analyzeScripts, evalProxyDecision, runBodyOp } from "../../compileHost";
+import { evalProxyDecision, runBodyOp } from "../../compileHost";
 import { recordNetBody } from "../../network";
 import { ProcessRouting } from "../../processRouting";
-import { listsProcess, setProcessActive } from "./processState";
+import { IS_FIREFOX, setProcessActive } from "./processState";
+import { compileMv2, ownedRoutes, ownsAny, type OwnedRoute } from "./tiers";
 
 export const NM_HOST = "com.wiretrick.helper";
 
 type Pairs = [string, string][];
 
-interface Owned {
-    id: string;
-    name: string;
+/** helper route JSON (helper/src/nm.rs Route): one per process-owned handler route */
+export interface HelperRoute {
     match: string[];
+    exclude: string[];
+    /** uppercase; [] = any */
+    methods: string[];
     req: boolean;
     resHeaders: boolean;
     body: boolean;
+}
+
+type Flag = "req" | "resHeaders" | "body";
+
+/** what a route needs the helper to pause */
+export function helperRouteOf(route: RouteMeta): HelperRoute {
+    return {
+        match: route.url,
+        exclude: route.exclude,
+        methods: route.methods ?? [],
+        req: route.kind === "onRequest" || route.kind === "replaceResponse",
+        resHeaders: route.kind === "onResponseHeaders",
+        body: route.kind === "modifyResponse",
+    };
 }
 
 interface HelperReady {
@@ -49,7 +63,7 @@ interface HelperReady {
 export interface ProcessStatus {
     state: "idle" | "unsupported" | "connecting" | "ready" | "missing" | "error";
     extensionId: string;
-    /** process-listed scripts (names) */
+    /** scripts with process-owned handlers (names) */
     scripts: string[];
     version?: string;
     /** the helper is older than MIN_HELPER_VERSION — reinstall it */
@@ -63,8 +77,6 @@ export interface ProcessStatus {
     error?: string;
     trust?: { ok: boolean; msg: string };
 }
-
-const IS_FIREFOX = typeof (globalThis as any).browser !== "undefined" && typeof (globalThis as any).browser.webRequest?.filterResponseData === "function";
 
 // ---- small helpers (exported for tests) ----
 
@@ -165,7 +177,8 @@ class RequestContext {
 
     lookup(method: string, url: string): { tabId: number; type: string; tabUrl: string } {
         const hit = this.recent.get(`${method} ${url}`);
-        return hit ? { tabId: hit.tabId, type: hit.type, tabUrl: hit.tabUrl } : { tabId: -1, type: "other", tabUrl: "" };
+        // type "" = unknown: route `types` aren't checked (bodyOps)
+        return hit ? { tabId: hit.tabId, type: hit.type, tabUrl: hit.tabUrl } : { tabId: -1, type: "", tabUrl: "" };
     }
 
     forgetTab(tabId: number): void {
@@ -174,8 +187,6 @@ class RequestContext {
 }
 
 export class ProcessStrategy {
-    /** hook-tier claims (page fetch/XHR it already handled) — wired by background.ts */
-    isClaimed: (url: string) => boolean = () => false;
     /** status changes (manager UI) */
     onStatus: (s: ProcessStatus) => void = () => {};
 
@@ -184,7 +195,7 @@ export class ProcessStrategy {
     private port: chrome.runtime.Port | null = null;
     private helper: HelperReady | null = null;
     private system: SystemProxyInfo | null = null;
-    private owned: Owned[] = [];
+    private owned: OwnedRoute[] = [];
     private mv2Ops: OpScript[] = [];
     private mv3Plain: { id: string; name: string; code: string; updatedAt: number; enabled: boolean }[] = [];
     private mv3Params: { [scriptId: string]: Record<string, any> } = {};
@@ -216,52 +227,21 @@ export class ProcessStrategy {
     }
 
     private async load(scripts: Script[], paramValues: { [scriptId: string]: Record<string, any> }): Promise<void> {
-        const listed = scripts.filter((s) => s.enabled && s.meta.declared && listsProcess(s.meta.strategy));
+        // routes come from the pipeline's analyzed meta (with real params)
+        const owned = ownedRoutes(scripts, "process");
         if (IS_FIREFOX || typeof (chrome.runtime as any).connectNative !== "function") {
             this.owned = [];
-            this.state = listed.length ? "unsupported" : "idle";
-            if (listed.length) dlogLevel("process", "info", `process tier is Chrome-only — ${listed.map((s) => `"${s.meta.name}"`).join(", ")} fall through their strategy lists`);
+            this.state = owned.length ? "unsupported" : "idle";
             return;
         }
-        const owned: Owned[] = [];
         if (__MV3__) {
             this.mv3Plain = scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt, enabled: s.enabled }));
             this.mv3Params = paramValues;
-            const analyzed = listed.length ? await analyzeScripts(scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt }))) : new Map();
-            for (const s of listed) {
-                const a = analyzed.get(s.id);
-                const h = a?.handlers ?? { onRequest: 1, modifyResponse: 1, replaceResponse: 1, onResponseHeaders: 1 };
-                const o = ownedOf(s.id, s.meta.name, s.meta.match, h);
-                if (o) owned.push(o);
-            }
         } else {
-            let resolveSpec: (spec: string) => any = (spec) => {
-                throw new Error(`cannot import "${spec}" before the module registry is ready`);
-            };
-            const overridesFor = (s: { id: string; name: string; code: string }) =>
-                makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, level, source, text) => log(-1, scriptLogLine(s.name, source, text), level, id), paramValues[s.id], (spec) => resolveSpec(spec));
-            resolveSpec = makeModuleResolver(
-                scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code })),
-                overridesFor
-            ).resolve;
-            const ops: OpScript[] = [];
-            for (const s of listed) {
-                const c = compileScript(s.code, overridesFor({ id: s.id, name: s.meta.name, code: s.code }));
-                if (!c.meta.declared) continue;
-                const o = ownedOf(s.id, s.meta.name, s.meta.match, {
-                    onRequest: c.handlers.onRequest.length,
-                    modifyResponse: c.handlers.modifyResponse.length,
-                    replaceResponse: c.handlers.replaceResponse.length,
-                    onResponseHeaders: c.handlers.onResponseHeaders.length,
-                });
-                if (!o) continue;
-                owned.push(o);
-                ops.push({ id: s.id, name: s.meta.name, match: s.meta.match, handlers: c.handlers });
-            }
-            this.mv2Ops = ops;
+            this.mv2Ops = compileMv2(scripts, paramValues, (s) => ownsAny(s, "process")).map((c) => ({ id: c.id, name: c.name, handlers: c.compiled.handlers }));
         }
         this.owned = owned;
-        this.ctx.watch(owned.flatMap((o) => o.match));
+        this.ctx.watch(owned.flatMap((o) => o.route.url));
         if (!owned.length) {
             this.disconnect();
             return;
@@ -317,7 +297,7 @@ export class ProcessStrategy {
                 // not installed / not allowed for this extension id: wait for the user
                 this.state = "missing";
                 this.error = err;
-                dlogLevel("process", "error", `process helper unavailable (${err}) — process-listed scripts fall through their strategy lists. Install it by pasting this into ${helperInstallShell()}: ${helperInstallCommand(chrome.runtime.id)}`);
+                dlogLevel("process", "error", `process helper unavailable (${err}) — handlers using the "process" strategy don't run until it is installed. Install it by pasting this into ${helperInstallShell()}: ${helperInstallCommand(chrome.runtime.id)}`);
             } else {
                 this.state = "error";
                 this.error = err;
@@ -356,7 +336,7 @@ export class ProcessStrategy {
         this.pushing = this.pushing.then(async () => {
             const helper = this.helper;
             if (!helper || !this.port) return;
-            const routes = this.owned.map((o) => ({ match: o.match, req: o.req, resHeaders: o.resHeaders, body: o.body }));
+            const routes = this.owned.map((o) => helperRouteOf(o.route));
             const d = await this.routing.decision(this.system);
             if (!d.ok) {
                 this.send({ t: "config", routes: [], upstream: "direct" });
@@ -370,7 +350,7 @@ export class ProcessStrategy {
             this.decisionSource = d.decision.source;
             // routes first: the helper must know them before traffic arrives
             this.send({ t: "config", routes, upstream: d.decision.upstream });
-            const applied = await this.routing.apply(helper.port, this.owned.flatMap((o) => o.match), this.system);
+            const applied = await this.routing.apply(helper.port, this.owned.flatMap((o) => o.route.url), this.system);
             setProcessActive(applied.ok);
             if (applied.ok && applied.decision.note) dlogLevel("process", "warn", applied.decision.note);
             this.emit();
@@ -400,7 +380,7 @@ export class ProcessStrategy {
         return {
             state: this.state,
             extensionId: chrome.runtime.id,
-            scripts: this.owned.map((o) => o.name),
+            scripts: [...new Set(this.owned.map((o) => o.name))],
             version: this.helper?.version,
             outdated: this.helper ? isHelperOutdated(this.helper.version) : undefined,
             port: this.helper?.port,
@@ -491,7 +471,7 @@ export class ProcessStrategy {
     }
 
     private run(op: BodyOp, args: any): Promise<any> {
-        args.onlyIds = this.owned.map((o) => o.id);
+        args.tier = "process";
         if (__MV3__) return runBodyOp(this.mv3Plain, this.mv3Params, op, args);
         return runOp(this.mv2Ops, op, args, {
             log: (scriptId, level, msg, kind) => log(args.tabId ?? -1, `[process] ${msg}`, level, scriptId, kind),
@@ -499,17 +479,18 @@ export class ProcessStrategy {
         });
     }
 
-    private matching(url: string, flag: "req" | "resHeaders" | "body"): boolean {
-        return this.owned.some((o) => o[flag] && matchAny(o.match, url));
+    /** a process route wanting `flag` matches (types: extension-side only — the helper can't see them) */
+    private matching(url: string, method: string, type: string, flag: Flag): boolean {
+        return this.owned.some((o) => helperRouteOf(o.route)[flag] && routeMatches(o.route, url, method, type || undefined));
     }
 
     private async onReq(m: { id: number; url: string; method: string; headers: Pairs }): Promise<void> {
         await this.loaded;
-        if (this.isClaimed(m.url) || !this.matching(m.url, "req")) {
+        const c = this.ctx.lookup(m.method, m.url);
+        if (!this.matching(m.url, m.method, c.type, "req")) {
             this.send({ t: "continue", id: m.id });
             return;
         }
-        const c = this.ctx.lookup(m.method, m.url);
         const args = { url: m.url, method: m.method, tabId: c.tabId, resourceType: c.type, tabUrl: c.tabUrl, requestHeaders: pairsToObject(m.headers) };
         const dec = await this.run("requestDecision", args);
         if (dec?.kind === "respond") {
@@ -545,23 +526,19 @@ export class ProcessStrategy {
         const parts = this.chunks.get(m.id) || [];
         this.chunks.delete(m.id);
         await this.loaded;
-        if (this.isClaimed(m.url)) {
-            this.send({ t: "continue", id: m.id });
-            return;
-        }
         const c = this.ctx.lookup(m.method, m.url);
         const reqHeaders = {};
         const base = { url: m.url, method: m.method, tabId: c.tabId, resourceType: c.type, tabUrl: c.tabUrl, requestHeaders: reqHeaders, status: m.status };
         let headers = m.headers;
         let headersChanged = false;
-        if (this.matching(m.url, "resHeaders")) {
+        if (this.matching(m.url, m.method, c.type, "resHeaders")) {
             const mods = await this.run("responseHeaders", { ...base, statusLine: `HTTP/1.1 ${m.status}`, responseHeaders: m.headers.map(([name, value]) => ({ name, value })) });
             if (mods) {
                 headers = applyHeaderMods(headers, mods);
                 headersChanged = true;
             }
         }
-        if (m.body === "chunks" && this.matching(m.url, "body")) {
+        if (m.body === "chunks" && this.matching(m.url, m.method, c.type, "body")) {
             const bytes = parts.length === 1 ? base64ToBytes(parts[0]) : concat(parts.map(base64ToBytes));
             const textual = looksTextual(bytes);
             let out: string | null = null;
@@ -576,7 +553,7 @@ export class ProcessStrategy {
                 this.send({ t: "fulfill", id: m.id, status: m.status, headers: withNoStore(headers), body: bytesToBase64(new TextEncoder().encode(out)) });
                 return;
             }
-        } else if (m.body.startsWith("skipped:") && this.matching(m.url, "body")) {
+        } else if (m.body.startsWith("skipped:") && this.matching(m.url, m.method, c.type, "body")) {
             dlogLevel("process", "debug", `modifyResponse not run (${m.body.slice(8)}): ${m.url}`);
         }
         this.send(headersChanged ? { t: "continue", id: m.id, headers } : { t: "continue", id: m.id });
@@ -591,17 +568,4 @@ function concat(list: Uint8Array[]): Uint8Array {
         at += b.length;
     }
     return out;
-}
-
-export function ownedOf(
-    id: string,
-    name: string,
-    match: string[],
-    h: { onRequest: number; modifyResponse: number; replaceResponse: number; onResponseHeaders: number }
-): Owned | null {
-    const req = h.onRequest > 0 || h.replaceResponse > 0;
-    const resHeaders = h.onResponseHeaders > 0;
-    const body = h.modifyResponse > 0;
-    if (!req && !resHeaders && !body) return null;
-    return { id, name, match, req, resHeaders, body };
 }

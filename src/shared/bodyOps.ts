@@ -10,8 +10,8 @@
  *   responseHeaders — onResponseHeaders handlers; header edits merge
  */
 import { formatScriptError } from "./scriptError";
-import { matchAny } from "./matcher";
-import type { ScriptHandlers } from "./compile";
+import { effectiveStrategy, routeGroups, routeMatches, type Strategy } from "./route";
+import type { Routed, ScriptHandlers } from "./compile";
 import { tappedLine, type NetKind } from "./netTypes";
 
 export type BodyOp = "requestDecision" | "transform" | "replace" | "responseHeaders";
@@ -19,8 +19,28 @@ export type BodyOp = "requestDecision" | "transform" | "replace" | "responseHead
 export interface OpScript {
     id: string;
     name: string;
-    match: string[];
     handlers: ScriptHandlers;
+}
+
+/**
+ * Which handlers an op runs: routes matching (url, method, type) and —
+ * when `tier` is given — owned by that tier (route.strategy, else
+ * `defaultStrategy`). Each route has exactly one owner, so no handler runs
+ * on two tiers.
+ */
+export interface OpFilter {
+    url: string;
+    method?: string;
+    resourceType?: string;
+    tier?: Strategy;
+    defaultStrategy?: Strategy;
+    /** restrict to these script ids */
+    onlyIds?: string[];
+}
+
+export function handlerRuns(h: Routed, f: OpFilter): boolean {
+    if (f.tier && effectiveStrategy(h.route, f.defaultStrategy) !== f.tier) return false;
+    return routeMatches(h.route, f.url, f.method, f.resourceType);
 }
 
 export interface OpEnv {
@@ -29,10 +49,13 @@ export interface OpEnv {
     debug?(msg: string): void;
 }
 
-export function guessMimeFromUrl(url: string): string {
+/** a replacement's mime when the URL has no telling extension */
+const TYPE_MIME: Record<string, string> = { main_frame: "text/html", sub_frame: "text/html", stylesheet: "text/css", script: "application/javascript" };
+
+export function guessMimeFromUrl(url: string, fallback = "application/json"): string {
     const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "";
     const m: Record<string, string> = { js: "application/javascript", json: "application/json", css: "text/css", html: "text/html", xml: "application/xml" };
-    return m[ext] || "application/json";
+    return m[ext] || fallback;
 }
 
 /**
@@ -68,17 +91,16 @@ const HANDLER_OF: Record<BodyOp, keyof ScriptHandlers> = {
     responseHeaders: "onResponseHeaders",
 };
 
-/** matching scripts with handlers for `op`, in list order */
-function matching(scripts: OpScript[], op: BodyOp, url: string, onlyIds: string[] | undefined, env: OpEnv): { s: OpScript; handlers: any[] }[] {
-    const handler = HANDLER_OF[op];
-    const out: { s: OpScript; handlers: any[] }[] = [];
+/** matching handlers for `op`, grouped per script, in list then registration order */
+function matching(scripts: OpScript[], op: BodyOp, f: OpFilter, env: OpEnv): { s: OpScript; handlers: Routed[] }[] {
+    const kind = HANDLER_OF[op];
+    const out: { s: OpScript; handlers: Routed[] }[] = [];
     for (const s of scripts) {
-        if (!matchAny(s.match, url)) continue;
-        if (onlyIds && !onlyIds.includes(s.id)) continue;
-        const handlers = (s.handlers as any)[handler] || [];
+        if (f.onlyIds && !f.onlyIds.includes(s.id)) continue;
+        const handlers = ((s.handlers as any)[kind] as Routed[] || []).filter((h) => handlerRuns(h, f));
         if (handlers.length) out.push({ s, handlers });
     }
-    env.debug?.(`run ${op} ${url} → ${out.length} matching script(s) [${out.map((m) => m.s.name).join(", ")}]`);
+    env.debug?.(`run ${op} ${f.url}${f.tier ? ` [${f.tier}]` : ""} → ${out.length} matching script(s) [${out.map((m) => m.s.name).join(", ")}]`);
     return out;
 }
 
@@ -93,22 +115,26 @@ function hasHeaderMods(h: any): boolean {
 export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpEnv): Promise<any> {
     const url: string = args.url;
     const method: string = args.method;
-    const base = () => ({
+    // "" = unknown (process tier, uncorrelated request): ctx says "other", route `types` aren't checked
+    const known: string | undefined = args.resourceType === undefined ? "xmlhttprequest" : args.resourceType || undefined;
+    const resourceType: string = known ?? "other";
+    const base = (h: Routed) => ({
         url,
         method,
         tabUrl: args.tabUrl || url,
-        resourceType: args.resourceType || "xmlhttprequest",
+        resourceType,
         requestHeaders: args.requestHeaders || {},
+        groups: routeGroups(h.route, url),
     });
-    const list = matching(scripts, op, url, args.onlyIds, env);
+    const list = matching(scripts, op, { url, method, resourceType: known, tier: args.tier, defaultStrategy: args.defaultStrategy, onlyIds: args.onlyIds }, env);
     const tapped = (s: OpScript, handler: string) => env.log(s.id, "debug", tappedLine(s.name, handler, url), "tapped");
 
     if (op === "requestDecision") {
         let headerMods: any = null;
         for (const { s, handlers } of list) {
-            for (const onRequest of handlers) {
+            for (const h of handlers) {
                 try {
-                    const result = await onRequest(base());
+                    const result = await h.fn(base(h));
                     if (!result) {
                         tapped(s, "onRequest");
                         continue;
@@ -118,7 +144,7 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
                         const mime = r.mime || guessMimeFromUrl(url);
                         const content = serializeRespondBody(r.body);
                         env.log(s.id, "info", `[${s.name}] onRequest → respond ${r.status || 200} ${mime} (${content.length}b) ${url}`);
-                        return { kind: "respond", mime, content, status: r.status, headers: r.headers?.set };
+                        return { kind: "respond", mime, content, status: r.status, headers: r.headers?.set, scriptId: s.id, scriptName: s.name };
                     }
                     if (result.redirect) {
                         env.log(s.id, "info", `[${s.name}] onRequest → redirect → ${result.redirect} ${url}`);
@@ -148,7 +174,7 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
         for (const { s, handlers } of list) {
             for (const h of handlers) {
                 try {
-                    const result = await h({ ...base(), status: args.status, statusLine: args.statusLine || "", responseHeaders: args.responseHeaders || [] });
+                    const result = await h.fn({ ...base(h), status: args.status, statusLine: args.statusLine || "", responseHeaders: args.responseHeaders || [] });
                     if (hasHeaderMods(result?.headers)) {
                         env.log(s.id, "info", `[${s.name}] onResponseHeaders → ${Object.keys(result.headers.set || {}).length} set, ${(result.headers.remove || []).length} removed ${url}`);
                         mods = mergeHeaderMods(mods, result.headers);
@@ -165,9 +191,9 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
         let out: string | Uint8Array = args.body || "";
         let touched = false;
         for (const { s, handlers } of list) {
-            for (const transform of handlers) {
+            for (const h of handlers) {
                 try {
-                    const result: any = await transform({ ...base(), contentType: args.contentType, status: args.status }, out);
+                    const result: any = await h.fn({ ...base(h), contentType: args.contentType, status: args.status }, out);
                     if (result !== undefined && result !== null) {
                         const before = typeof out === "string" ? out.length : out.byteLength;
                         const prevOut = out;
@@ -183,17 +209,18 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
                 }
             }
         }
-        return touched ? (typeof out === "string" ? out : new TextDecoder().decode(out)) : null;
+        // raw: binary in, binary out (cdp on MV2)
+        return touched ? (typeof out === "string" || args.raw ? out : new TextDecoder().decode(out)) : null;
     }
 
     if (op === "replace") {
         for (const { s, handlers } of list) {
-            for (const replace of handlers) {
+            for (const h of handlers) {
                 try {
-                    const out = await replace(base());
+                    const out = await h.fn(base(h));
                     if (out !== undefined && out !== null) {
                         const isFile = out && typeof out === "object" && typeof out.file === "string";
-                        const { mime, content: body } = isFile ? resolveFileRef(out.file, url) : { mime: guessMimeFromUrl(url), content: typeof out === "string" ? out : String(out) };
+                        const { mime, content: body } = isFile ? resolveFileRef(out.file, url) : { mime: guessMimeFromUrl(url, TYPE_MIME[resourceType]), content: typeof out === "string" ? out : typeof out === "object" ? JSON.stringify(out) : String(out) };
                         env.log(s.id, "info", `[${s.name}] replaceResponse → ${mime} (${body.length}b) ${url}`);
                         return { mime, content: body };
                     }
