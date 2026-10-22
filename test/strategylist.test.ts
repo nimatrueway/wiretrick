@@ -69,3 +69,26 @@ describe("@strategy priority lists", () => {
         expect((s.handleBeforeRequest(xhr(), null) as any).kind).toBe("allow");
     });
 });
+
+describe("webRequestServesBody (Chromium MV2 replace/respond: redirect vs debugger tier)", () => {
+    it("redirects only when webrequest comes before cdp/auto", async () => {
+        const { webRequestServesBody } = await import("../src/background/engine/strategies/processState");
+        expect(webRequestServesBody("webrequest")).toBe(true);
+        expect(webRequestServesBody("webrequest,cdp")).toBe(true);
+        expect(webRequestServesBody("hook,webrequest,cdp")).toBe(true);
+        expect(webRequestServesBody("cdp")).toBe(false);
+        expect(webRequestServesBody("cdp,webrequest")).toBe(false);
+        expect(webRequestServesBody("cdp", "xmlhttprequest")).toBe(false);
+        // auto: page/frame loads go to the debugger tier, subresources keep the data: URL
+        expect(webRequestServesBody("auto")).toBe(false);
+        expect(webRequestServesBody("auto", "sub_frame")).toBe(false);
+        expect(webRequestServesBody("", "main_frame")).toBe(false); // default = auto
+        expect(webRequestServesBody("auto", "xmlhttprequest")).toBe(true);
+        expect(webRequestServesBody("auto", "script")).toBe(true);
+        expect(webRequestServesBody("webrequest,auto", "main_frame")).toBe(true);
+        expect(webRequestServesBody("process,cdp")).toBe(false);
+        // no tier able to keep the URL: the redirect stays the fallback
+        expect(webRequestServesBody("hook")).toBe(true);
+        expect(webRequestServesBody("process")).toBe(true);
+    });
+});

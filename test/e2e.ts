@@ -7,7 +7,9 @@
  *   - URL matcher (positive + negative)
  *   - onRequest: redirect, cancel, request headers
  *   - onResponseHeaders: set/remove
- *   - replaceResponse: main frame (serve page) and fetch (hook short-circuit)
+ *   - replaceResponse: main frame (in place via the debugger tier, or the
+ *     serve page for webrequest-first scripts) and fetch (hook short-circuit)
+ *   - "modifyResponse never ran" warning for a body the tiers can't reach
  *   - modifyResponse: fetch/XHR via the Tier-A page hook
  *   - modifyResponse: non-JS <script src> via the CDP tier
  *   - per-tab badge counting
@@ -64,6 +66,8 @@ const server = http.createServer((req: http.IncomingMessage, res: http.ServerRes
     if (url.pathname === "/img") { res.writeHead(200, { "content-type": "image/png" }); return res.end(PNG); }
     if (url.pathname === "/redirect-target") return send("text/html", "<html><body>REDIRECT-LANDING</body></html>");
     if (url.pathname === "/redirected") return send("text/html", "<html><body>REDIRECTED-OK</body></html>");
+    if (url.pathname === "/html-missed") return send("text/html", "<html><body><h1>MISSED-ORIGINAL</h1></body></html>");
+    if (url.pathname === "/cdp-replace") return send("text/html", "<html><body><h1>CDP-ORIGINAL</h1></body></html>");
     if (url.pathname === "/page-fetch")
         return send("text/html", `<html><body><script>setTimeout(()=>{fetch('/api').then(r=>r.json()).then(j=>{document.body.innerHTML='RESULT:'+j.value;});},400)</script></body></html>`);
     if (url.pathname === "/page-xhr")
@@ -156,10 +160,22 @@ const p1b = await newPage("/html");
 check("matcher: negative (no redirect on /html)", (await p1b.content()).includes("ORIGINAL TITLE"));
 await p1b.close();
 
-// ---------- 2. replaceResponse on main frame (serve page) ----------
-const p2 = await newPage("/serve-me");
-check("replaceResponse: main frame via serve page", (await p2.content()).includes("SERVE-PAGE-WORKS"), `url=${p2.url()}`);
+// ---------- 2. replaceResponse on main frame ----------
+// default ("auto") strategy: the debugger tier fulfills it in place — no
+// redirect, the address bar keeps the page URL
+const p2 = await ctx.newPage();
+await p2.goto(`${ORIGIN}/serve-me`, { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {}); // warm-up: attaches the debugger
+await p2.waitForTimeout(1200);
+await p2.goto(`${ORIGIN}/serve-me`, { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+await p2.waitForTimeout(300);
+check("replaceResponse: main frame in place (auto → debugger tier, URL kept)", (await p2.content()).includes("SERVE-PAGE-WORKS") && p2.url() === `${ORIGIN}/serve-me`, `url=${p2.url()}`);
 await p2.close();
+// "webrequest" listed first: Chromium's webRequest can only redirect — page loads go to serve.html
+await saveScript("s_replaceserve", `wt.declareScript({ match: ["${ORIGIN}/serve-wr"], strategy: ["webrequest"] });\nwt.replaceResponse(() => "<html><body><h1>SERVE-PAGE-WORKS</h1></body></html>");`, "replace via serve page");
+await new Promise((r) => setTimeout(r, 600));
+const p2b = await newPage("/serve-wr");
+check("replaceResponse: webrequest-first main frame via serve page (redirect)", (await p2b.content()).includes("SERVE-PAGE-WORKS") && p2b.url().includes("/serve.html"), `url=${p2b.url()}`);
+await p2b.close();
 
 // ---------- 3. modifyResponse via Tier-A hook (fetch) ----------
 const p3 = await newPage("/page-fetch");
@@ -335,6 +351,41 @@ const logText10b: string = await mgr.evaluate(() => document.getElementById("log
 check("logs: respond 500 attributed to the stored script name", logText10b.includes("[e2e respond 500] onRequest → respond 500"));
 check("logs: no [Untitled script] anywhere", !logText10b.includes("[Untitled script]"));
 await p10b.close();
+
+// ---------- 10c. strategy ["cdp"] replaceResponse on a page load: in place, URL kept ----------
+await saveScript("s_cdpreplace", `wt.declareScript({ match: ["${ORIGIN}/cdp-replace"], strategy: ["cdp"] });\nwt.replaceResponse(() => "<html><body><h1>CDP-REPLACED</h1></body></html>");`, "cdp replace page");
+await new Promise((r) => setTimeout(r, 600));
+const p10c = await ctx.newPage();
+await p10c.goto(`${ORIGIN}/cdp-replace`, { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {}); // warm-up: attaches the debugger
+await p10c.waitForTimeout(1200);
+await p10c.goto(`${ORIGIN}/cdp-replace`, { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+await p10c.waitForTimeout(300);
+const body10c = await p10c.evaluate(() => document.body.innerText).catch(() => "");
+check("replaceResponse [\"cdp\"]: page load keeps its URL (no redirect to the extension)", p10c.url() === `${ORIGIN}/cdp-replace`, `url=${p10c.url()}`);
+check("replaceResponse [\"cdp\"]: page body replaced in place", body10c.includes("CDP-REPLACED"), body10c.slice(0, 60));
+await p10c.close();
+await new Promise((r) => setTimeout(r, 400));
+const log10c: string[] = await mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line")].map((l) => (l as HTMLElement).dataset.text || l.textContent || ""));
+const replLines10c = log10c.filter((l) => l.includes("[cdp replace page] replaceResponse →") && l.includes("/cdp-replace"));
+check("replaceResponse [\"cdp\"]: handler ran once per load (one log line per load, no serve.html)", replLines10c.length >= 1 && replLines10c.length <= 2 && !log10c.some((l) => l.includes("/cdp-replace") && l.includes("serve.html")), JSON.stringify(replLines10c));
+
+// ---------- 10d. "never ran" warning: ["webrequest"] modifyResponse on a page load (Chromium can't read bodies) ----------
+await mgr.click("#network-tab"); // the Network tab records from now on
+await mgr.waitForSelector("#network-view .net-toolbar", { timeout: 5000 });
+await saveScript("s_missed", `wt.declareScript({ match: ["${ORIGIN}/html-missed"], strategy: ["webrequest"] });\nwt.modifyResponse((ctx, body) => body.replace("MISSED-ORIGINAL", "NEVER"));`, "missed probe");
+await new Promise((r) => setTimeout(r, 600));
+const p10d = await newPage("/html-missed");
+await p10d.waitForTimeout(2500); // the check runs 1.5 s after the load completes
+const log10d: string = await mgr.evaluate(() => document.getElementById("log-entries")!.textContent || "");
+check("missed: WARN 'modifyResponse never ran' for a webrequest-only page body", log10d.includes(`[missed probe] modifyResponse never ran for ${ORIGIN}/html-missed (document) — Chromium's webRequest can't read response bodies`), log10d.match(/.{0,20}never ran.{0,120}/)?.[0] || "(no warning)");
+const row10d: { cls: string; badges: string[] } | null = await mgr.evaluate(() => {
+    const tr = [...document.querySelectorAll("#network-view tbody tr")].find((t) => (t.querySelector(".net-name")?.textContent || "").includes("html-missed"));
+    return tr ? { cls: tr.className, badges: [...tr.querySelectorAll(".net-badge")].map((b) => b.className) } : null;
+});
+check("missed: the Network row is not marked tapped or modified", !!row10d && !/\b(tapped|modified)\b/.test(row10d.cls) && row10d.badges.some((c) => c.includes("missed")), JSON.stringify(row10d));
+await p10d.close();
+await setEnabled("s_missed", false);
+await mgr.click("#log-header-title");
 
 // ---------- 11. logs: script output tunnelled to the LOG, page console not captured ----------
 await saveScript(

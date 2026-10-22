@@ -7,7 +7,7 @@ import type { InterceptionStrategy } from "./strategies/types";
 import type { ChromeBodyStrategy } from "./strategies/chromeBodyStrategy";
 import type { CdpStrategy } from "./strategies/cdpStrategy";
 import type { ProcessStrategy } from "./strategies/processStrategy";
-import { hookEligible, onProcessActiveChange } from "./strategies/processState";
+import { hookEligible, onProcessActiveChange, processActive } from "./strategies/processState";
 import type { HeaderChanges } from "./strategies/types";
 import type { Script } from "./scriptStore";
 import { listScripts, getScript, onScriptsChanged, saveScript, deleteScript, setEnabled, newId, scriptStorageGet, scriptStorageSet, loadAllParamValues, getParamValues, setParamValue } from "./scriptStore";
@@ -17,7 +17,10 @@ import { dlog, dlogLevel } from "../../shared/debugLog";
 import { isThenable, toRunnableJs } from "../../shared/compile";
 import "../../shared/transpile";
 void toRunnableJs;
-import { log, getScriptErrors, getScriptTypeErrors } from "./logs";
+import { log, getScriptErrors, getScriptTypeErrors, bodyTappedSince } from "./logs";
+import { parseStrategyList } from "../../shared/metaParser";
+import { missedLine } from "../../shared/netTypes";
+import { makeMissedThrottle, missedReason, missedWhat, MISSED_SKIP_TYPES } from "../../shared/missedTap";
 import { serializeHandlers, type HandlerSources } from "../../shared/compile";
 import { resolveParamValues } from "../../shared/scriptDef";
 import { unknownStrategies } from "../../shared/metaParser";
@@ -25,6 +28,19 @@ import { analyzeScripts, runBodyOp } from "../compileHost";
 import { recordNetBody } from "../network";
 
 const FILTER: chrome.webRequest.RequestFilter = { urls: ["<all_urls>"] };
+
+const IS_FIREFOX = typeof (globalThis as any).browser !== "undefined" && typeof (globalThis as any).browser.webRequest?.filterResponseData === "function";
+
+/** an enabled, declared script with body handlers — checked by the "never ran" warning */
+interface BodyWatch {
+    id: string;
+    name: string;
+    match: string[];
+    tiers: string[];
+    modify: boolean;
+    replace: boolean;
+}
+const MISSED_DELAY_MS = 1500;
 
 /** "proxy" (removed) or a typo is silently ignored by parseStrategyList — say so once per script+value */
 const warnedStrategies = new Set<string>();
@@ -97,7 +113,84 @@ export function createPipeline(
         });
         chrome.tabs.onRemoved.addListener((tabId) => mainFrameSeen.delete(tabId));
     }
+    // ---- "modifyResponse never ran" ----
+    // A body handler can silently not run: Chromium's webRequest can't read
+    // bodies and the hook only sees page fetch/XHR, a cached load skips the
+    // debugger, the helper is down… Once a matching request completes, warn
+    // (attributed to the script) when none of its body handlers ran for it.
+    let bodyWatch: BodyWatch[] = [];
+    /** requestId → start time, only for requests a watched script matches */
+    const watchedStarts = new Map<string, number>();
+    /** `${tabId}|${url}` loads the debugger-tier warning below already reported */
+    const cdpWarned = new Set<string>();
+    const missedThrottle = makeMissedThrottle();
+    const extOrigin = chrome.runtime.getURL("");
+    const watchedFor = (url: string) => bodyWatch.filter((w) => matchAny(w.match, url));
+    const ownRequest = (d: any) => d.url.startsWith(extOrigin) || (d.initiator || d.originUrl || "").startsWith(extOrigin.replace(/\/$/, ""));
+    if (chrome.webRequest?.onBeforeRequest) {
+        chrome.webRequest.onBeforeRequest.addListener(
+            (d) => {
+                if (d.tabId < 0 || MISSED_SKIP_TYPES.has(d.type) || !bodyWatch.length || !watchedFor(d.url).length) return;
+                watchedStarts.set(d.requestId, d.timeStamp);
+                if (watchedStarts.size > 500) watchedStarts.delete(watchedStarts.keys().next().value!);
+            },
+            { urls: ["<all_urls>"] }
+        );
+        chrome.webRequest.onErrorOccurred?.addListener((d) => void watchedStarts.delete(d.requestId), { urls: ["<all_urls>"] });
+    }
+    function checkMissed(d: chrome.webRequest.WebResponseCacheDetails): void {
+        const start = watchedStarts.get(d.requestId);
+        if (start === undefined) return;
+        watchedStarts.delete(d.requestId);
+        if (ownRequest(d)) return;
+        const scripts = watchedFor(d.url);
+        if (!scripts.length) return;
+        setTimeout(() => {
+            // the hook took it: the page may simply never read the body
+            if (chromeBody.isClaimed(d.url)) return;
+            for (const w of scripts) {
+                if (bodyTappedSince(w.id, d.url, start - 250)) continue;
+                const reason = missedReason({
+                    tiers: w.tiers,
+                    type: d.type,
+                    firefox: IS_FIREFOX,
+                    mv3: __MV3__,
+                    fromCache: !!d.fromCache,
+                    helperActive: processActive(),
+                    replaceOnly: w.replace && !w.modify,
+                    cdpWarned: cdpWarned.has(`${d.tabId}|${d.url}`),
+                });
+                if (!reason || !missedThrottle(`${w.id}|${d.url}`)) continue;
+                const handler = w.modify ? "modifyResponse" : "replaceResponse";
+                log(d.tabId, missedLine(w.name, handler, d.url, missedWhat(d.type), reason), "warn", w.id, "missed", d.url);
+            }
+        }, MISSED_DELAY_MS);
+    }
+    async function refreshBodyWatch(scripts: Script[]): Promise<void> {
+        try {
+            const analyzed = await analyzeScripts(scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt })));
+            const next: BodyWatch[] = [];
+            for (const s of scripts) {
+                const a = analyzed.get(s.id);
+                if (!s.enabled || !a || a.error || !a.declared || !a.handlers) continue;
+                if (!a.handlers.modifyResponse && !a.handlers.replaceResponse) continue;
+                next.push({
+                    id: s.id,
+                    name: s.meta.name,
+                    match: s.meta.match,
+                    tiers: parseStrategyList(s.meta.strategy as any),
+                    modify: a.handlers.modifyResponse > 0,
+                    replace: a.handlers.replaceResponse > 0,
+                });
+            }
+            bodyWatch = next;
+        } catch (e: any) {
+            dlogLevel("pipeline", "debug", `body-handler watch refresh failed: ${e?.message || e}`);
+        }
+    }
+
     if (chrome.webRequest?.onCompleted) {
+        chrome.webRequest.onCompleted.addListener((d) => checkMissed(d), { urls: ["<all_urls>"] });
         // observe-only (MV3-legal): a debugger-tier load that left before
         // the tab's debugger attached is NOT intercepted — say so instead of
         // failing silently. Typical: the page itself on a first visit (MV2
@@ -114,6 +207,8 @@ export function createPipeline(
                     if (cdp.wasPaused(d.tabId, d.url) || renavigated.has(`${d.tabId}|${d.url}`)) return;
                     const what = d.type === "main_frame" ? "page load" : d.type;
                     const hint = __MV3__ ? "Reload the tab (it stays attached from now on)." : "Reload the tab within a few seconds (the debugger detaches when the page goes idle).";
+                    cdpWarned.add(`${d.tabId}|${d.url}`);
+                    setTimeout(() => cdpWarned.delete(`${d.tabId}|${d.url}`), 10000);
                     log(d.tabId, `[cdp] ${what} ${d.url}${d.fromCache ? " (from cache)" : ""} was NOT intercepted by ${names.map((n) => `"${n}"`).join(", ")} — it loaded before the debugger attached to this tab. ${hint}`, "warn");
                 }, 300);
             },
@@ -569,12 +664,10 @@ export function createPipeline(
         chromeBody.reload(scripts, paramValues);
         void cdp.reload(scripts, paramValues);
         processStrategy.reload(scripts, paramValues);
-        if (__MV3__) {
-            // refresh the analyze cache NOW so the next page's getHookBundle
-            // is served from it without waking the sandbox (keeps onDom
-            // document_start as early as MV3 allows)
-            void analyzeScripts(scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt })));
-        }
+        // MV3: also refreshes the analyze cache NOW so the next page's
+        // getHookBundle is served from it without waking the sandbox (keeps
+        // onDom document_start as early as MV3 allows)
+        void refreshBodyWatch(scripts);
         warnUnknownStrategies(scripts);
 
         // HOT RELOAD: push the new bundle to every open tab's hook so

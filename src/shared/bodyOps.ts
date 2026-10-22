@@ -12,7 +12,7 @@
 import { formatScriptError } from "./scriptError";
 import { matchAny } from "./matcher";
 import type { ScriptHandlers } from "./compile";
-import { seenLine, type NetKind } from "./netTypes";
+import { tappedLine, type NetKind } from "./netTypes";
 
 export type BodyOp = "requestDecision" | "transform" | "replace" | "responseHeaders";
 
@@ -24,7 +24,7 @@ export interface OpScript {
 }
 
 export interface OpEnv {
-    /** kind "seen": the handler ran but changed nothing (DEBUG line) */
+    /** kind "tapped": the handler ran but changed nothing (DEBUG line) */
     log(scriptId: string, level: "debug" | "info" | "warn" | "error", msg: string, kind?: NetKind): void;
     debug?(msg: string): void;
 }
@@ -101,7 +101,7 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
         requestHeaders: args.requestHeaders || {},
     });
     const list = matching(scripts, op, url, args.onlyIds, env);
-    const seen = (s: OpScript, handler: string) => env.log(s.id, "debug", seenLine(s.name, handler, url), "seen");
+    const tapped = (s: OpScript, handler: string) => env.log(s.id, "debug", tappedLine(s.name, handler, url), "tapped");
 
     if (op === "requestDecision") {
         let headerMods: any = null;
@@ -110,7 +110,7 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
                 try {
                     const result = await onRequest(base());
                     if (!result) {
-                        seen(s, "onRequest");
+                        tapped(s, "onRequest");
                         continue;
                     }
                     if (result.respond) {
@@ -134,7 +134,7 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
                         if (result.headers.remove && result.headers.remove.length) parts.push(`remove ${result.headers.remove.join(", ")}`);
                         env.log(s.id, "info", `[${s.name}] onRequest → request headers (${parts.join("; ")}) ${url}`);
                         headerMods = mergeHeaderMods(headerMods, result.headers);
-                    } else seen(s, "onRequest");
+                    } else tapped(s, "onRequest");
                 } catch (e: any) {
                     env.log(s.id, "error", formatScriptError(s.name, e, "onRequest"));
                 }
@@ -152,7 +152,7 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
                     if (hasHeaderMods(result?.headers)) {
                         env.log(s.id, "info", `[${s.name}] onResponseHeaders → ${Object.keys(result.headers.set || {}).length} set, ${(result.headers.remove || []).length} removed ${url}`);
                         mods = mergeHeaderMods(mods, result.headers);
-                    } else seen(s, "onResponseHeaders");
+                    } else tapped(s, "onResponseHeaders");
                 } catch (e: any) {
                     env.log(s.id, "error", formatScriptError(s.name, e, "onResponseHeaders"));
                 }
@@ -175,9 +175,9 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
                         const after = typeof next === "string" ? next.length : next.byteLength;
                         out = next;
                         if (next !== prevOut) env.log(s.id, "info", `[${s.name}] modifyResponse applied (${before}b → ${after}b) ${url}`);
-                        else seen(s, "modifyResponse");
+                        else tapped(s, "modifyResponse");
                         touched = true;
-                    } else seen(s, "modifyResponse");
+                    } else tapped(s, "modifyResponse");
                 } catch (e: any) {
                     env.log(s.id, "error", formatScriptError(s.name, e, "modifyResponse"));
                 }
@@ -197,7 +197,7 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
                         env.log(s.id, "info", `[${s.name}] replaceResponse → ${mime} (${body.length}b) ${url}`);
                         return { mime, content: body };
                     }
-                    seen(s, "replaceResponse");
+                    tapped(s, "replaceResponse");
                 } catch (e: any) {
                     env.log(s.id, "error", formatScriptError(s.name, e, "replaceResponse"));
                 }

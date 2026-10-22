@@ -67,25 +67,32 @@ at the right of the editor toolbar do the same.
   reporting issues.
 - **Network** — a devtools-style request table: filter text, per-type
   toggles, a tab picker (closed tabs stay listed, dimmed under *Closed tabs*,
-  until the log is cleared), an All / Seen / Altered filter,
+  until the log is cleared), a script-activity filter,
   sortable/resizable columns (right-click the header to pick columns) and a
   waterfall. Requests a script handled are flagged in two ways:
-  - **Seen** — a handler (`onRequest`, `onResponseHeaders`, `modifyResponse`,
+  - **Tapped** — a handler (`onRequest`, `onResponseHeaders`, `modifyResponse`,
     `replaceResponse`, …) ran on the request but changed nothing (returned
     `undefined`, or the same body). Dashed, muted marker; each such run also
-    logs a DEBUG line like `[Foo] onRequest → seen (no change) https://…`.
-  - **Altered** — a handler changed it: body, headers, status, a
+    logs a DEBUG line like `[Foo] onRequest → tapped (no change) https://…`.
+  - **Modified** — a handler changed it: body, headers, status, a
     redirect/cancel or a synthetic response. Solid accent marker and a
     green waterfall bar; the action is logged at INFO as before.
 
-  The *Seen* filter shows everything a script ran on (altered included),
-  *Altered* only what was changed; the footer counts both ("N seen · M
-  altered"). While the Network tab is out of view, requests that become
-  altered / seen are counted in a solid / outlined badge on its title (a
-  request that goes from seen to altered moves to the altered count);
-  looking at it clears them. Selecting a request shows its headers, request
-  payload, the response body (modified and original, when Wiretrick handled
-  it) and what each script did (seen entries muted).
+  The filter menu shows each choice with the row marker it selects:
+  **All**, **Tapped** (ran but changed nothing — tapped only), **Modified**,
+  and **Tapped / Modified** (anything a script touched). The footer counts
+  the same two groups ("N tapped · M modified", tapped = tapped only). While
+  the Network tab is out of view, requests that become modified / tapped are
+  counted in a solid / outlined badge on its title (a request that goes from
+  tapped to modified moves to the modified count); looking at it clears
+  them. Selecting a request shows its headers, request payload, the response
+  body (modified and original, when Wiretrick handled it) and what each
+  script did (tapped entries muted).
+  - **Missed** — a script with `modifyResponse` / `replaceResponse` matched
+    a request but no tier ever ran the handler (see
+    [“never ran” warning](strategies.md#never-ran-warning)). It is logged as
+    a WARN line and shown as a yellow *missed* entry in the request's
+    details; it does not mark the row tapped or modified.
 
 ## Dedicated scripts folder
 

@@ -190,9 +190,13 @@ wt.onRequest((ctx) => ({
 
 It stacks like every terminal result: first script to `respond` wins. On the
 hook tier (fetch/XHR) the response is fully synthesized (status/headers
-included); on the webRequest tier it materializes as a data-URL redirect
-(status becomes 200 there); with `"cdp"` in `strategy` the request-stage
-fulfill honors status and headers.
+included); on Firefox's webRequest tier a 200 is written in place (other
+statuses go to the debugger tier on Chrome); on Chromium MV2's webRequest
+tier it becomes a redirect (data: URL, or the extension's `serve.html` for
+page loads) — only when `"webrequest"` is listed first; with `"cdp"` or
+`"process"` the response is fulfilled in place with any status and
+headers, URL kept. See
+[how each tier serves a replacement](strategies.md#how-each-tier-serves-a-replacement).
 
 **`wt.onResponseHeaders`** — all matching scripts run and their changes
 **merge**: `set` keys are applied in order (a later script's `set` of the
@@ -222,7 +226,7 @@ with the result depends on the tier:
 | `onRequest` redirect/cancel | n/a (hook doesn't redirect) | ⚠ result ignored, warning logged — blocking webRequest can't await; use `strategy: ["cdp"]` | ✅ awaited natively | ✅ awaited at the Request stage (redirect/cancel honored) | ✅ awaited (redirect/cancel/respond honored) |
 | `onRequest` headers | n/a | ⚠ ignored + warning | ✅ awaited | ✅ awaited, applied at the Response stage | ✅ awaited, sent upstream |
 | `onResponseHeaders` | n/a | ⚠ ignored + warning | ✅ awaited | ✅ awaited, merged into the fulfilled headers | ✅ awaited |
-| `replaceResponse` | ✅ awaited — the page's `fetch`/XHR promise simply takes as long as the handler needs | ⚠ result ignored (a sync data-URL can't be built late) → the request is re-routed to the cdp tier | ✅ awaited, then redirect | ✅ awaited, fulfills the body | ✅ awaited, upstream never contacted |
+| `replaceResponse` | ✅ awaited — the page's `fetch`/XHR promise simply takes as long as the handler needs | ⚠ result ignored (a sync data-URL can't be built late) → the request is re-routed to the cdp tier | ✅ awaited, written in place (URL kept) | ✅ awaited, fulfills the body | ✅ awaited, upstream never contacted |
 | `modifyResponse` | ✅ awaited (chained between scripts) | — (re-routed to cdp) | ✅ awaited per chunk | ✅ awaited | ✅ awaited (served `no-store`) |
 | `onDom` | ✅ awaited (fire-and-forget) | — | — | — | — |
 

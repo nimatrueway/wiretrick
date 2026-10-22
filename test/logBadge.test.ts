@@ -26,45 +26,45 @@ describe("Log tab badge", () => {
 });
 
 describe("Network tab badge", () => {
-    it("counts requests that became seen / altered while out of view, each once", () => {
+    it("counts requests that became tapped / modified while out of view, each once", () => {
         const b = new NetBadge();
-        b.note("1", "seen", true);
-        b.note("1", "seen", true); // later update, same state: not recounted
-        b.note("2", "altered", true);
+        b.note("1", "tapped", true);
+        b.note("1", "tapped", true); // later update, same state: not recounted
+        b.note("2", "modified", true);
         b.note("3", "none", true);
-        expect([b.altered, b.seen]).toEqual([1, 1]);
-        expect(b.counts).toEqual([["altered", 1], ["seen", 1]]);
-        expect(b.title).toBe("1 altered, 1 seen since you last looked at Network");
-        // seen → altered moves the request to the altered pill
-        b.note("1", "altered", true);
-        expect([b.altered, b.seen]).toEqual([2, 0]);
-        expect(b.title).toBe("2 altered since you last looked at Network");
+        expect([b.modified, b.tapped]).toEqual([1, 1]);
+        expect(b.counts).toEqual([["modified", 1], ["tapped", 1]]);
+        expect(b.title).toBe("1 modified, 1 tapped since you last looked at Network");
+        // tapped → modified moves the request to the modified pill
+        b.note("1", "modified", true);
+        expect([b.modified, b.tapped]).toEqual([2, 0]);
+        expect(b.title).toBe("2 modified since you last looked at Network");
     });
 
     it("ignores what happened in view, but counts a later upgrade", () => {
         const b = new NetBadge();
-        b.note("1", "seen", false);
-        b.note("2", "seen", true);
+        b.note("1", "tapped", false);
+        b.note("2", "tapped", true);
         b.reset();
         expect(b.empty).toBe(true);
-        b.note("2", "seen", true); // already known: no recount after looking
+        b.note("2", "tapped", true); // already known: no recount after looking
         expect(b.empty).toBe(true);
-        b.note("1", "altered", true);
-        expect([b.altered, b.seen]).toEqual([1, 0]);
+        b.note("1", "modified", true);
+        expect([b.modified, b.tapped]).toEqual([1, 0]);
     });
 
     it("treats redirect hops as the same request; forgets removed rows; clearAll", () => {
         const b = new NetBadge();
-        b.note("7", "seen", true);
-        b.note("7:r1", "seen", true);
-        expect(b.seen).toBe(1);
-        b.note("syn:1", "altered", true);
+        b.note("7", "tapped", true);
+        b.note("7:r1", "tapped", true);
+        expect(b.tapped).toBe(1);
+        b.note("syn:1", "modified", true);
         b.forget(["syn:1"]); // folded into the real row, which reports it again
-        b.note("8", "altered", true);
-        expect([b.altered, b.seen]).toEqual([1, 1]);
+        b.note("8", "modified", true);
+        expect([b.modified, b.tapped]).toEqual([1, 1]);
         b.clearAll();
         expect(b.empty).toBe(true);
-        b.note("7", "seen", true);
-        expect(b.seen).toBe(1);
+        b.note("7", "tapped", true);
+        expect(b.tapped).toBe(1);
     });
 });

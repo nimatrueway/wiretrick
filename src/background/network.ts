@@ -9,7 +9,7 @@
  * the request URL); bodies via recordNetBody from the strategies that
  * handle them (the browser exposes no response bodies to webRequest).
  */
-import { interventionKind, type NetBody, type NetEntry, type NetKind, type NetPortMsg } from "../shared/netTypes";
+import { interventionKind, type InterventionKind, type NetBody, type NetEntry, type NetPortMsg } from "../shared/netTypes";
 
 const MAX_ENTRIES = 1000;
 /** per-body capture cap (chars of text) */
@@ -298,7 +298,7 @@ export function addNetworkPort(port: chrome.runtime.Port): void {
     });
 }
 
-const URL_AT_END = /\s((?:https?|wss?):\/\/\S+)\s*$/;
+export const URL_AT_END = /\s((?:https?|wss?):\/\/\S+)\s*$/;
 const NAME_PREFIX = /^\[([^\]]+)\]\s*/;
 
 /**
@@ -382,18 +382,18 @@ export function recordNetBody(r: NetBodyRecord): void {
 
 /**
  * Attach a script-attributed log line ("[name] modifyResponse applied
- * (…) https://…") to the request it describes, as "seen" or "altered"
+ * (…) https://…") to the request it describes, as "tapped" or "modified"
  * (inferred from the line when not given). A line with no matching
  * recorded request becomes a synthetic entry (see entryFor).
  */
-export function annotateFromLog(tabId: number, scriptId: string, message: string, level: NetEntry["interventions"][number]["level"], kind?: NetKind): void {
+export function annotateFromLog(tabId: number, scriptId: string, message: string, level: NetEntry["interventions"][number]["level"], kind?: InterventionKind, explicitUrl?: string): void {
     if (!ports.size) return;
-    const m = URL_AT_END.exec(message);
-    if (!m) return;
-    const url = m[1];
+    const m = explicitUrl ? null : URL_AT_END.exec(message);
+    if (!explicitUrl && !m) return;
+    const url = explicitUrl || m![1];
     const nameMatch = NAME_PREFIX.exec(message);
     const scriptName = nameMatch ? nameMatch[1] : scriptId;
-    const action = message.slice(nameMatch ? nameMatch[0].length : 0, m.index).trim();
+    const action = message.slice(nameMatch ? nameMatch[0].length : 0, m ? m.index : message.length).trim();
     const now = Date.now();
     const target = entryFor(tabId, url);
     target.interventions.push({ scriptId, scriptName, action, level, kind: interventionKind(level, message, kind), at: now });

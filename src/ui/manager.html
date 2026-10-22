@@ -42,7 +42,7 @@
                     <div id="log-header" title="Drag to dock: below the editor, beside it, or under the script list">
                         <span id="panel-tabs" role="tablist">
                             <span id="log-header-title" class="panel-tab active" role="tab" data-panel="log" title="Extension and script log">Log<span id="log-badge" class="tab-badges" hidden><span class="tab-badge error" hidden></span><span class="tab-badge warn" hidden></span></span></span>
-                            <span id="network-tab" class="panel-tab" role="tab" data-panel="network" title="Network activity, with what Wiretrick scripts did to each request">Network<span id="net-badge" class="tab-badges" hidden><span class="tab-badge altered" hidden></span><span class="tab-badge seen" hidden></span></span></span>
+                            <span id="network-tab" class="panel-tab" role="tab" data-panel="network" title="Network activity, with what Wiretrick scripts did to each request">Network<span id="net-badge" class="tab-badges" hidden><span class="tab-badge modified" hidden></span><span class="tab-badge tapped" hidden></span></span></span>
                         </span>
                         <span id="log-tools">
                         <input id="log-source" type="text" list="log-source-options" placeholder="source…" title="Filter by source — script name or engine component (e.g. pipeline, hook). Substring match; empty = all">
@@ -191,8 +191,8 @@
                         <div class="setting">
                             <span class="setting-label">Tab badges</span>
                             <div class="setting-control">
-                                <label class="setting-check"><input id="settings-log-badge" type="checkbox" checked> Count new errors/warnings on the Log tab and seen/altered requests on the Network tab</label>
-                                <p class="setting-help">Shown while a tab is out of view; cleared when you look at it. Network counts start once the Network tab has been opened (that starts recording). Seen: a script handler ran on the request without changing it; altered: a handler changed it.</p>
+                                <label class="setting-check"><input id="settings-log-badge" type="checkbox" checked> Count new errors/warnings on the Log tab and tapped/modified requests on the Network tab</label>
+                                <p class="setting-help">Shown while a tab is out of view; cleared when you look at it. Network counts start once the Network tab has been opened (that starts recording). Tapped: a script handler ran on the request without changing it; modified: a handler changed it.</p>
                             </div>
                         </div>
                     </section>

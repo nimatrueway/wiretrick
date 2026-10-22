@@ -28,7 +28,7 @@ describe("replaceResponse { file }", () => {
     });
 });
 
-describe("seen vs altered logging", () => {
+describe("tapped vs modified logging", () => {
     const url = "https://x.test/api";
     function run(op: any, handlers: any, args: any = {}) {
         const lines: { level: string; msg: string; kind?: string }[] = [];
@@ -36,17 +36,17 @@ describe("seen vs altered logging", () => {
         return runOp(scripts as any, op, { url, method: "GET", ...args }, { log: (_id: string, level: string, msg: string, kind?: string) => lines.push({ level, msg, kind }) } as any).then((out) => ({ out, lines }));
     }
 
-    it("handlers that change nothing log one DEBUG 'seen (no change)' line each", async () => {
-        const seen = (handler: string) => ({ level: "debug", msg: `[S] ${handler} → seen (no change) ${url}`, kind: "seen" });
-        expect((await run("requestDecision", { onRequest: [() => undefined, () => ({})] })).lines).toEqual([seen("onRequest"), seen("onRequest")]);
-        expect((await run("responseHeaders", { onResponseHeaders: [() => ({ headers: { set: {} } })] })).lines).toEqual([seen("onResponseHeaders")]);
-        expect((await run("replace", { replaceResponse: [() => null] })).lines).toEqual([seen("replaceResponse")]);
+    it("handlers that change nothing log one DEBUG 'tapped (no change)' line each", async () => {
+        const tapped = (handler: string) => ({ level: "debug", msg: `[S] ${handler} → tapped (no change) ${url}`, kind: "tapped" });
+        expect((await run("requestDecision", { onRequest: [() => undefined, () => ({})] })).lines).toEqual([tapped("onRequest"), tapped("onRequest")]);
+        expect((await run("responseHeaders", { onResponseHeaders: [() => ({ headers: { set: {} } })] })).lines).toEqual([tapped("onResponseHeaders")]);
+        expect((await run("replace", { replaceResponse: [() => null] })).lines).toEqual([tapped("replaceResponse")]);
         // returning the identical body is no change
         const same = await run("transform", { modifyResponse: [(_c: any, b: string) => b, () => undefined] }, { body: "abc" });
-        expect(same.lines).toEqual([seen("modifyResponse"), seen("modifyResponse")]);
+        expect(same.lines).toEqual([tapped("modifyResponse"), tapped("modifyResponse")]);
     });
 
-    it("changes keep their INFO lines (no seen line)", async () => {
+    it("changes keep their INFO lines (no tapped line)", async () => {
         const { out, lines } = await run("transform", { modifyResponse: [(_c: any, b: string) => b + "!"] }, { body: "abc" });
         expect(out).toBe("abc!");
         expect(lines).toEqual([{ level: "info", msg: `[S] modifyResponse applied (3b → 4b) ${url}`, kind: undefined }]);

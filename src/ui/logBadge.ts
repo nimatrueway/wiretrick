@@ -40,14 +40,14 @@ export class LogBadge implements TabBadge {
     }
 }
 
-type Touch = "seen" | "altered";
-const RANK = { none: 0, seen: 1, altered: 2 } as const;
+type Touch = "tapped" | "modified";
+const RANK = { none: 0, tapped: 1, modified: 2 } as const;
 const MAX_KNOWN = 5000;
 
 /**
- * Network tab: requests a script newly saw / altered while the tab was out
+ * Network tab: requests a script newly tapped / modified while the tab was out
  * of view. Each request counts once, in its latest category — one that
- * goes seen → altered moves from the seen pill to the altered pill.
+ * goes tapped → modified moves from the tapped pill to the modified pill.
  */
 export class NetBadge implements TabBadge {
     /** last state per request, kept across resets so updates don't recount */
@@ -89,18 +89,18 @@ export class NetBadge implements TabBadge {
         this.pending.clear();
     }
 
-    get altered(): number {
+    get modified(): number {
         let n = 0;
-        for (const s of this.pending.values()) if (s === "altered") n++;
+        for (const s of this.pending.values()) if (s === "modified") n++;
         return n;
     }
 
-    get seen(): number {
-        return this.pending.size - this.altered;
+    get tapped(): number {
+        return this.pending.size - this.modified;
     }
 
     get counts() {
-        return [["altered", this.altered], ["seen", this.seen]] as const;
+        return [["modified", this.modified], ["tapped", this.tapped]] as const;
     }
 
     get empty(): boolean {
@@ -108,7 +108,7 @@ export class NetBadge implements TabBadge {
     }
 
     get title(): string {
-        const parts = [this.altered && `${this.altered} altered`, this.seen && `${this.seen} seen`].filter(Boolean);
+        const parts = [this.modified && `${this.modified} modified`, this.tapped && `${this.tapped} tapped`].filter(Boolean);
         return `${parts.join(", ")} since you last looked at Network`;
     }
 }

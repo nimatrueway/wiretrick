@@ -4,7 +4,7 @@
  * pane showing headers and what Wiretrick scripts did to the request.
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
-import type { NetBody, NetEntry } from "../../shared/netTypes";
+import type { NetBody, NetEntry, NetIntervention } from "../../shared/netTypes";
 import type { NetStore } from "./netStore";
 import {
     TYPE_FILTERS,
@@ -20,6 +20,7 @@ import {
     typeLabel,
     type NetFilter,
     type SortKey,
+    type TouchFilter,
     ALL_TYPES,
     type TypeCategory,
 } from "./netFormat";
@@ -252,17 +253,7 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
                     value={filter.text}
                     onInput={(e) => setFilter({ ...filter, text: e.currentTarget.value })}
                 />
-                <select
-                    class="net-touched"
-                    aria-label="Script activity"
-                    title={"Seen: a script handler ran on the request (changed or not)\nAltered: a handler changed it"}
-                    value={filter.touched}
-                    onChange={(e) => setFilter({ ...filter, touched: e.currentTarget.value as NetFilter["touched"] })}
-                >
-                    <option value="all">All</option>
-                    <option value="seen">Seen</option>
-                    <option value="altered">Altered</option>
-                </select>
+                <TouchMenu value={filter.touched} onChange={(touched) => setFilter({ ...filter, touched })} />
                 {listTabs && (
                     <select
                         class={"net-tab" + (selectedClosed ? " closed" : "")}
@@ -420,13 +411,140 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
                 {" · "}
                 {formatBytes(bytes)} transferred
                 {" · "}
-                <span class="net-touch-count" title="Seen: a script handler ran on the request · Altered: a handler changed it">
-                    {touched.seen} seen · <span class={touched.altered ? "net-hl" : ""}>{touched.altered} altered</span>
+                <span class="net-touch-count" title="Tapped: a script handler ran on the request without changing it · Modified: a handler changed it">
+                    {touched.tapped} tapped · <span class={touched.modified ? "net-hl" : ""}>{touched.modified} modified</span>
                 </span>
             </div>
         </div>
     );
 }
+
+const TOUCH_OPTIONS: { value: TouchFilter; label: string; marks: ("tapped" | "modified")[]; title: string }[] = [
+    { value: "all", label: "All", marks: [], title: "All requests" },
+    { value: "tapped", label: "Tapped", marks: ["tapped"], title: "A script handler ran on the request without changing it" },
+    { value: "modified", label: "Modified", marks: ["modified"], title: "A script handler changed the request" },
+    { value: "any", label: "Tapped / Modified", marks: ["tapped", "modified"], title: "Any request a script handler ran on" },
+];
+
+/** the row markers (dashed = tapped, solid = modified) as swatches */
+function Marks({ marks }: { marks: ("tapped" | "modified")[] }) {
+    return (
+        <span class="net-marks" aria-hidden="true">
+            {marks.map((m) => (
+                <span key={m} class={`net-mark ${m}`} />
+            ))}
+        </span>
+    );
+}
+
+/**
+ * Script-activity filter. A custom listbox rather than a <select>: native
+ * options can't show the row markers.
+ */
+function TouchMenu({ value, onChange }: { value: TouchFilter; onChange: (v: TouchFilter) => void }) {
+    const [open, setOpen] = useState(false);
+    const [active, setActive] = useState(0);
+    const rootRef = useRef<HTMLSpanElement>(null);
+    const buttonRef = useRef<HTMLButtonElement>(null);
+    const listRef = useRef<HTMLUListElement>(null);
+    const index = Math.max(0, TOUCH_OPTIONS.findIndex((o) => o.value === value));
+    const current = TOUCH_OPTIONS[index];
+
+    useEffect(() => {
+        if (!open) return;
+        listRef.current?.focus();
+        const down = (ev: MouseEvent) => {
+            if (!rootRef.current?.contains(ev.target as Node)) setOpen(false);
+        };
+        document.addEventListener("mousedown", down);
+        return () => document.removeEventListener("mousedown", down);
+    }, [open]);
+
+    const show = (at = index) => {
+        setActive(at);
+        setOpen(true);
+    };
+    const close = (focusButton = true) => {
+        setOpen(false);
+        if (focusButton) buttonRef.current?.focus();
+    };
+    const choose = (i: number) => {
+        onChange(TOUCH_OPTIONS[i].value);
+        close();
+    };
+    const n = TOUCH_OPTIONS.length;
+
+    return (
+        <span class="net-touch" ref={rootRef}>
+            <button
+                ref={buttonRef}
+                type="button"
+                class={"net-touch-button" + (value !== "all" ? " active" : "")}
+                aria-haspopup="listbox"
+                aria-expanded={open}
+                aria-label={`Script activity: ${current.label}`}
+                title={"Filter by script activity\nTapped: a handler ran without changing the request\nModified: a handler changed it"}
+                onClick={() => (open ? close() : show())}
+                onKeyDown={(ev) => {
+                    if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+                        ev.preventDefault();
+                        show(ev.key === "ArrowDown" ? (index + 1) % n : (index + n - 1) % n);
+                    }
+                }}
+            >
+                <Marks marks={current.marks} />
+                <span class="net-touch-label">{current.label}</span>
+                <span class="net-touch-caret" aria-hidden="true">
+                    ▾
+                </span>
+            </button>
+            {open && (
+                <ul
+                    ref={listRef}
+                    class="net-touch-menu"
+                    role="listbox"
+                    aria-label="Script activity"
+                    tabIndex={-1}
+                    aria-activedescendant={`net-touch-opt-${TOUCH_OPTIONS[active].value}`}
+                    onKeyDown={(ev) => {
+                        const k = ev.key;
+                        if (k === "ArrowDown") setActive((active + 1) % n);
+                        else if (k === "ArrowUp") setActive((active + n - 1) % n);
+                        else if (k === "Home") setActive(0);
+                        else if (k === "End") setActive(n - 1);
+                        else if (k === "Enter" || k === " ") choose(active);
+                        else if (k === "Escape") close();
+                        else if (k === "Tab") close(false);
+                        else return;
+                        if (k !== "Tab") ev.preventDefault();
+                    }}
+                >
+                    {TOUCH_OPTIONS.map((o, i) => (
+                        <li
+                            key={o.value}
+                            id={`net-touch-opt-${o.value}`}
+                            role="option"
+                            aria-selected={o.value === value}
+                            class={"net-touch-option" + (i === active ? " active" : "") + (o.value === value ? " selected" : "")}
+                            title={o.title}
+                            onMouseEnter={() => setActive(i)}
+                            onClick={() => choose(i)}
+                        >
+                            <Marks marks={o.marks} />
+                            {o.label}
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </span>
+    );
+}
+
+const KIND_TITLE: Record<NetIntervention["kind"], string> = {
+    modified: "Modified: the handler changed the request",
+    tapped: "Tapped: the handler ran without changing it",
+    missed: "Missed: a body handler should have run here but no tier ran it",
+};
 
 function rowClass(e: NetEntry, selected: boolean): string {
     const c = ["net-row"];
@@ -499,7 +617,7 @@ function Row({
                             return (
                                 <span
                                     key={n}
-                                    class={mine.some((i) => i.kind === "altered") ? "net-badge altered" : "net-badge seen"}
+                                    class={`net-badge ${mine.some((i) => i.kind === "modified") ? "modified" : mine.some((i) => i.kind === "tapped") ? "tapped" : "missed"}`}
                                     title={mine.map((i) => i.action).join("\n")}
                                 >
                                     {n}
@@ -590,7 +708,7 @@ function Details({ e, width, onClose }: { e: NetEntry; width: number | null; onC
                 ) : e.interventions.length ? (
                     <ul class="net-actions">
                         {e.interventions.map((i, n) => (
-                            <li key={n} class={`net-action ${i.level} ${i.kind}`} title={i.kind === "altered" ? "Altered: the handler changed the request" : "Seen: the handler ran without changing it"}>
+                            <li key={n} class={`net-action ${i.level} ${i.kind}`} title={KIND_TITLE[i.kind]}>
                                 <time>{new Date(i.at).toLocaleTimeString()}</time>
                                 <span class={`net-badge ${i.kind}`}>{i.scriptName}</span>
                                 <span>{i.action}</span>

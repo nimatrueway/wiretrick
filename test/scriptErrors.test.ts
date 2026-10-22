@@ -147,7 +147,8 @@ describe("webRequest tier: error logs carry name + user line:col", () => {
 describe("CDP tier: error logs carry name + user line:col", () => {
     it("onRequest throws at the Request stage → [name] + mapped line", async () => {
         const c = new CdpStrategy();
-        c.reload([storedScript("a", "Thrower", THROWS)]);
+        // sync onRequest runs in the webRequest tier only; the Request stage runs async ones
+        c.reload([storedScript("a", "Thrower", THROWS.replace("wt.onRequest((ctx)", "wt.onRequest(async (ctx)"))]);
         await c.handlePaused("tab:1", {
             requestId: "r1",
             request: { url: "https://api.example.com/v1/data", method: "GET" },

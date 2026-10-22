@@ -126,17 +126,17 @@ describe("network recorder", () => {
         p.disconnect();
     });
 
-    it("records each annotation as seen or altered", () => {
+    it("records each annotation as tapped or modified", () => {
         const p = fakePort();
         addNetworkPort(p.port);
         req("1", "https://a.test/api");
-        annotateFromLog(7, "s1", "[W] onRequest → seen (no change) https://a.test/api", "debug", "seen");
+        annotateFromLog(7, "s1", "[W] onRequest → tapped (no change) https://a.test/api", "debug", "tapped");
         annotateFromLog(7, "s1", "[W] modifyResponse applied (1b → 2b) https://a.test/api", "info");
         annotateFromLog(7, "s1", "[W] modifyResponse threw: boom https://a.test/api", "error");
         expect(entries.get("1")!.interventions.map((i) => [i.action, i.kind])).toEqual([
-            ["onRequest → seen (no change)", "seen"],
-            ["modifyResponse applied (1b → 2b)", "altered"],
-            ["modifyResponse threw: boom", "seen"],
+            ["onRequest → tapped (no change)", "tapped"],
+            ["modifyResponse applied (1b → 2b)", "modified"],
+            ["modifyResponse threw: boom", "tapped"],
         ]);
         p.disconnect();
     });
@@ -160,6 +160,15 @@ describe("network recorder", () => {
         expect([...entries.values()].filter((e) => e.synthetic)).toEqual([]);
         expect(entries.get("1")!.interventions).toMatchObject([{ scriptName: "Hdr", action: "onRequest → request headers (set x-a)" }]);
         expect(p.sent.some((m) => m.type === "netRemoved")).toBe(true);
+        p.disconnect();
+    });
+
+    it("a missed warning annotates its request by explicit URL, as kind missed", () => {
+        const p = fakePort();
+        addNetworkPort(p.port);
+        req("1", "https://a.test/page", { type: "main_frame" });
+        annotateFromLog(7, "s1", "[Mod] modifyResponse never ran for https://a.test/page (document) — the local helper isn't running", "warn", "missed", "https://a.test/page");
+        expect(entries.get("1")!.interventions).toMatchObject([{ scriptName: "Mod", kind: "missed", action: "modifyResponse never ran for https://a.test/page (document) — the local helper isn't running" }]);
         p.disconnect();
     });
 

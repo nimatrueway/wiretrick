@@ -101,32 +101,38 @@ export function statusText(e: NetEntry): string {
     return String(e.status);
 }
 
-/** "altered" if any script changed the request, "seen" if one only ran on it */
-export type TouchState = "none" | "seen" | "altered";
+/** "modified" if any script changed the request, "tapped" if one only ran on it ("missed" warnings don't count) */
+export type TouchState = "none" | "tapped" | "modified";
 
 export function touchState(e: NetEntry): TouchState {
-    if (!e.interventions.length) return "none";
-    return e.interventions.some((i) => i.kind === "altered") ? "altered" : "seen";
+    let tapped = false;
+    for (const i of e.interventions) {
+        if (i.kind === "modified") return "modified";
+        if (i.kind === "tapped") tapped = true;
+    }
+    return tapped ? "tapped" : "none";
 }
 
-/** seen = rows any script ran on (altered included); altered = rows a script changed */
-export function touchCounts(rows: NetEntry[]): { seen: number; altered: number } {
-    let seen = 0;
-    let altered = 0;
+/** tapped = rows a script ran on without changing them; modified = rows a script changed */
+export function touchCounts(rows: NetEntry[]): { tapped: number; modified: number } {
+    let tapped = 0;
+    let modified = 0;
     for (const e of rows) {
         const t = touchState(e);
-        if (t !== "none") seen++;
-        if (t === "altered") altered++;
+        if (t === "tapped") tapped++;
+        else if (t === "modified") modified++;
     }
-    return { seen, altered };
+    return { tapped, modified };
 }
+
+/** Script-activity filter: tapped-only, modified, or any row a script touched (either) */
+export type TouchFilter = "all" | "tapped" | "modified" | "any";
 
 export interface NetFilter {
     text: string;
     /** categories toggled on (independent toggles; ALL_TYPES = everything) */
     types: TypeCategory[];
-    /** "seen" = anything a script ran on (altered included); "altered" = changed only */
-    touched: "all" | "seen" | "altered";
+    touched: TouchFilter;
     tabId: number | null;
 }
 
@@ -134,7 +140,7 @@ export function matches(e: NetEntry, f: NetFilter): boolean {
     if (!f.types.includes(category(e))) return false;
     if (f.touched !== "all") {
         const t = touchState(e);
-        if (t === "none" || (f.touched === "altered" && t !== "altered")) return false;
+        if (t === "none" || (f.touched !== "any" && t !== f.touched)) return false;
     }
     if (f.tabId !== null && e.tabId !== f.tabId) return false;
     const q = f.text.trim();

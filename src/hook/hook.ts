@@ -285,6 +285,16 @@ import { matchAny } from "../shared/matcher";
         constructor(public cause: any) {}
     }
 
+    /** a constructed Response has url "" — report the request's, like a real one */
+    function withUrl(resp: Response, url: string): Response {
+        try {
+            Object.defineProperty(resp, "url", { value: url, configurable: true });
+        } catch {
+            /* non-configurable: keep "" */
+        }
+        return resp;
+    }
+
     function patchFetch(): void {
         w.__resOrigFetch = w.fetch;
         const origFetch = w.fetch.bind(window);
@@ -320,13 +330,13 @@ import { matchAny } from "../shared/matcher";
                 if (resp0 && resp0.content !== null && resp0.content !== undefined) {
                     const hdrs = new Headers({ "content-type": resp0.mime || "text/plain" });
                     for (const [k, v] of Object.entries(resp0.headers || {})) hdrs.set(k, String(v));
-                    return new Response(resp0.content, { status: resp0.status || 200, headers: hdrs });
+                    return withUrl(new Response(resp0.content, { status: resp0.status || 200, headers: hdrs }), url);
                 }
 
                 // 2. replaceResponse? (background runs the handler)
                 const repl = abortP ? await Promise.race([viaBridge({ op: "replace", url, method }), abortP]) : await viaBridge({ op: "replace", url, method });
                 if (repl && repl.content !== null && repl.content !== undefined) {
-                    return new Response(repl.content, { status: 200, headers: { "content-type": repl.mime || "text/plain" } });
+                    return withUrl(new Response(repl.content, { status: 200, headers: { "content-type": repl.mime || "text/plain" } }), url);
                 }
 
                 // 2. real request (abort propagates natively). A failure here
@@ -359,11 +369,11 @@ import { matchAny } from "../shared/matcher";
                     : await viaBridge({ op: "transform", url, method, body: text, status: response.status, contentType });
                 if (!out || typeof out.body !== "string" || out.body === text) return response;
 
-                return new Response(out.body, {
+                return withUrl(new Response(out.body, {
                     status: response.status,
                     statusText: response.statusText,
                     headers: response.headers,
-                });
+                }), response.url || url);
             } catch (e: any) {
                 if (isAbort(e)) throw e; // normal — page owns the abort
                 if (e instanceof PassthroughError) throw e.cause; // page's own failure — native behavior, no log
@@ -477,6 +487,7 @@ import { matchAny } from "../shared/matcher";
                     Object.defineProperty(xhr, "readyState", { get: () => 4, configurable: true });
                     Object.defineProperty(xhr, "status", { get: () => status, configurable: true });
                     Object.defineProperty(xhr, "statusText", { get: () => statusText, configurable: true });
+                    Object.defineProperty(xhr, "responseURL", { get: () => absUrl, configurable: true });
                     redefineBody(xhr, text);
                     const headerLines = [...respHeaders.entries()].map(([k, v]) => `${k}: ${v}`).join("\r\n");
                     Object.defineProperty(xhr, "getAllResponseHeaders", {

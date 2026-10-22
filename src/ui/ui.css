@@ -681,9 +681,9 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 .tab-badge { min-width: 15px; padding: 0 4px; border-radius: 8px; font-size: 10px; font-weight: 600; line-height: 15px; text-align: center; color: #fff; box-sizing: border-box; }
 .tab-badge.error { background: var(--err); }
 .tab-badge.warn { background: var(--warn); color: #1e1e1e; }
-/* Network tab: altered = solid, seen = hollow */
-.tab-badge.altered { background: var(--ok); color: #1e1e1e; }
-.tab-badge.seen { background: transparent; color: var(--fg-dim); box-shadow: inset 0 0 0 1px var(--fg-dim); }
+/* Network tab: modified = solid, tapped = hollow */
+.tab-badge.modified { background: var(--ok); color: #1e1e1e; }
+.tab-badge.tapped { background: transparent; color: var(--fg-dim); box-shadow: inset 0 0 0 1px var(--fg-dim); }
 #log-tools { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 #log-tools[hidden], #log-entries[hidden], #network-view[hidden] { display: none; }
 #log-entries { flex: 1; min-height: 0; }
@@ -701,7 +701,7 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 }
 .net-toolbar button:hover, .net-details-tabs button:hover { color: var(--fg); background: var(--bg-hover); }
 .net-clear { font-size: 13px !important; }
-.net-filter, .net-tab, .net-touched {
+.net-filter, .net-tab, .net-toolbar .net-touch-button {
     background: var(--bg); border: 1px solid var(--border); color: var(--fg);
     border-radius: 3px; padding: 2px 6px; font-size: 11px;
 }
@@ -709,7 +709,24 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 .net-tab { max-width: 180px; }
 .net-tab.closed, .net-tab option.closed { color: var(--fg-dim); font-style: italic; }
 .net-tab option:not(.closed) { color: var(--fg); font-style: normal; }
-.net-filter:focus, .net-tab:focus, .net-touched:focus { border-color: var(--accent); outline: none; }
+.net-filter:focus, .net-tab:focus, .net-toolbar .net-touch-button:focus-visible { border-color: var(--accent); outline: none; }
+/* script-activity filter: a listbox whose items carry the row markers */
+.net-touch { position: relative; display: inline-flex; }
+.net-toolbar .net-touch-button { display: inline-flex; align-items: center; gap: 5px; padding: 2px 6px; }
+.net-toolbar .net-touch-button:hover { background: var(--bg-hover); }
+.net-toolbar .net-touch-button.active { border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); }
+.net-touch-caret { color: var(--fg-dim); font-size: 9px; }
+.net-touch-menu {
+    position: absolute; top: calc(100% + 2px); left: 0; z-index: 1000; list-style: none; margin: 0; padding: 4px 0;
+    min-width: 100%; white-space: nowrap; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 4px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.5); font-size: 11px; outline: none;
+}
+.net-touch-option { display: flex; align-items: center; gap: 6px; padding: 3px 12px 3px 6px; cursor: pointer; color: var(--fg); }
+.net-touch-option.active { background: var(--bg-hover); }
+.net-touch-option.selected { font-weight: 600; }
+.net-touch-menu:focus-visible .net-touch-option.active { box-shadow: inset 0 0 0 1px var(--accent); }
+.net-marks { display: inline-flex; gap: 2px; width: 8px; height: 13px; flex: none; }
+.net-mark { width: 2px; height: 100%; }
 .net-chips { display: flex; gap: 2px; flex-wrap: wrap; }
 .net-chip.active { background: var(--bg-active) !important; color: var(--fg) !important; }
 
@@ -750,9 +767,10 @@ body.net-dragging { user-select: none; }
 .net-row.selected { background: var(--sel); }
 .net-row.err td { color: var(--err); }
 .net-row.pending td.c-status, .net-row.pending td.c-time { color: var(--fg-dim); }
-/* row marker: altered = solid accent bar, seen = dashed, muted bar */
-.net-row.altered td.c-name { box-shadow: inset 2px 0 0 var(--accent); }
-.net-row.seen td.c-name {
+/* row marker: modified = solid accent bar, tapped = dashed, muted bar */
+.net-row.modified td.c-name { box-shadow: inset 2px 0 0 var(--accent); }
+.net-mark.modified { background: var(--accent); }
+.net-row.tapped td.c-name, .net-mark.tapped {
     background-image: linear-gradient(color-mix(in srgb, var(--accent) 70%, transparent) 60%, transparent 0);
     background-size: 2px 5px; background-repeat: repeat-y; background-position: left top;
 }
@@ -769,11 +787,12 @@ body.net-dragging { user-select: none; }
     display: inline-block; background: var(--tag-bg); color: var(--key); border-radius: 3px;
     padding: 0 5px; margin-right: 3px; font-size: 10px; line-height: 15px;
 }
-.net-badge.seen { background: transparent; color: var(--fg-dim); box-shadow: inset 0 0 0 1px var(--border); }
+.net-badge.tapped { background: transparent; color: var(--fg-dim); box-shadow: inset 0 0 0 1px var(--border); }
+.net-badge.missed { background: transparent; color: var(--warn); box-shadow: inset 0 0 0 1px var(--warn); opacity: 0.8; }
 .net-wf { position: relative; height: 10px; }
 .net-wf-bar { position: absolute; top: 2px; height: 6px; background: var(--bar); border-radius: 1px; min-width: 2px; }
 .net-wf-bar.pending { background: var(--pending); }
-.net-row.altered .net-wf-bar { background: var(--ok); }
+.net-row.modified .net-wf-bar { background: var(--ok); }
 .net-row.err .net-wf-bar { background: var(--err); }
 .net-empty { color: var(--fg-dim); padding: 14px; text-align: center; }
 .net-empty.small { padding: 2px 14px; text-align: left; }
@@ -800,8 +819,9 @@ body.net-dragging { user-select: none; }
 .net-actions { list-style: none; margin: 0; padding: 0; font: 11px/1.7 "SF Mono", Menlo, Consolas, monospace; }
 .net-action { display: flex; gap: 6px; align-items: baseline; border-bottom: 1px solid var(--line-sep); }
 .net-action time { color: var(--fg-dim); }
-.net-action.seen { color: var(--fg-dim); }
+.net-action.tapped { color: var(--fg-dim); }
 .net-action.warn { color: var(--warn); }
+.net-action.missed { color: var(--warn); opacity: 0.85; }
 .net-action.error { color: var(--err); }
 
 /* narrow (docked right): drop secondary columns like devtools does */

@@ -1,11 +1,13 @@
 /** Network-tab records shared by the background recorder and the manager UI. */
 
 /**
- * What a script did to a request: "seen" — a handler ran but changed
- * nothing (returned undefined, the same body, or threw); "altered" — it
+ * What a script did to a request: "tapped" — a handler ran but changed
+ * nothing (returned undefined, the same body, or threw); "modified" — it
  * changed the body, headers, status, or cancelled/redirected/answered it.
  */
-export type NetKind = "seen" | "altered";
+export type NetKind = "tapped" | "modified";
+/** "missed": a body handler should have run for this request but no tier ran it (a warning — neither tapped nor modified). */
+export type InterventionKind = NetKind | "missed";
 
 export interface NetIntervention {
     scriptId: string;
@@ -13,28 +15,36 @@ export interface NetIntervention {
     /** e.g. "modifyResponse applied (120b → 140b)" */
     action: string;
     level: "debug" | "info" | "warn" | "error";
-    kind: NetKind;
+    kind: InterventionKind;
     at: number;
 }
 
-const SEEN_MARK = "→ seen (no change)";
+const TAPPED_MARK = "→ tapped (no change)";
+const MISSED_MARK = " never ran for ";
+
+/** WARN line for a body handler no tier ran: `[Name] modifyResponse never ran for <url> (document) — reason`. */
+export function missedLine(scriptName: string, handler: string, url: string, what: string, reason: string): string {
+    return `[${scriptName}] ${handler}${MISSED_MARK}${url} (${what}) — ${reason}`;
+}
 
 /** DEBUG log line for a handler that ran without changing anything (ends with the URL, so it annotates the request). */
-export function seenLine(scriptName: string, handler: string, url: string): string {
-    return `[${scriptName}] ${handler} ${SEEN_MARK} ${url}`;
+export function tappedLine(scriptName: string, handler: string, url: string): string {
+    return `[${scriptName}] ${handler} ${TAPPED_MARK} ${url}`;
 }
 
 /**
- * Seen vs altered for a script-attributed log line. Engine code passes the
+ * Tapped vs modified for a script-attributed log line. Engine code passes the
  * kind explicitly; relayed lines without one fall back to: errors, debug
- * lines, "seen (no change)" lines and the script's own console/wt.log
- * output → seen; anything else (the engine's INFO action lines) → altered.
+ * lines, "tapped (no change)" lines and the script's own console/wt.log
+ * output → tapped; "… never ran for …" warnings → missed; anything else (the
+ * engine's INFO action lines) → modified.
  */
-export function interventionKind(level: string, message: string, explicit?: NetKind): NetKind {
-    if (explicit === "seen" || explicit === "altered") return explicit;
-    if (level === "debug" || level === "error" || message.includes(SEEN_MARK)) return "seen";
-    if (/^\[[^\]]*\] (wt\.log|console\.\w+):/.test(message)) return "seen";
-    return "altered";
+export function interventionKind(level: string, message: string, explicit?: InterventionKind): InterventionKind {
+    if (explicit === "tapped" || explicit === "modified" || explicit === "missed") return explicit;
+    if (level === "warn" && message.includes(MISSED_MARK)) return "missed";
+    if (level === "debug" || level === "error" || message.includes(TAPPED_MARK)) return "tapped";
+    if (/^\[[^\]]*\] (wt\.log|console\.\w+):/.test(message)) return "tapped";
+    return "modified";
 }
 
 /** A captured request/response body (text, capped; binary as a placeholder). */

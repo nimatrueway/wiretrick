@@ -19,7 +19,7 @@ import { formatScriptError } from "../../../shared/scriptError";
 import { resolveFileRef } from "../../../shared/bodyOps";
 import type { BodyScriptInfo, HeaderChanges, HookDisposition, InterceptionStrategy, MaybePromise, WebRequestDetailsLike } from "./types";
 import type { Script } from "../scriptStore";
-import { log, logSeen } from "../logs";
+import { log, logTapped } from "../logs";
 import { scriptStorageGet, scriptStorageSet } from "../scriptStore";
 import { runBodyOp } from "../../compileHost";
 import { hookEligible, processActive } from "./processState";
@@ -119,7 +119,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
             try {
                 const result = await onRequest({ url, method, tabUrl: url, resourceType: "xmlhttprequest", requestHeaders: {} });
                 if (!result) {
-                    logSeen(tabId, s.name, "onRequest", url, s.scriptId);
+                    logTapped(tabId, s.name, "onRequest", url, s.scriptId);
                     continue;
                 }
                 if ((result as any).respond) {
@@ -149,7 +149,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
                     if (result.headers.remove && result.headers.remove.length) parts.push(`remove ${result.headers.remove.join(", ")}`);
                     log(tabId, `[${s.name}] onRequest → request headers (${parts.join("; ")}) ${url}`, "info", s.scriptId);
                     headerMods = { set: { ...(headerMods?.set || {}), ...(result.headers.set || {}) }, remove: [...(headerMods?.remove || []), ...(result.headers.remove || [])] };
-                } else logSeen(tabId, s.name, "onRequest", url, s.scriptId);
+                } else logTapped(tabId, s.name, "onRequest", url, s.scriptId);
             } catch (e: any) {
                 log(tabId, formatScriptError(s.name, e, "onRequest"), "error", s.scriptId);
             }
@@ -178,12 +178,12 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
                     const next = typeof result === "string" ? result : result instanceof Uint8Array ? result : JSON.stringify(result);
                     const after = typeof next === "string" ? next.length : next.byteLength;
                     out = next;
-                    // unchanged output = do-nothing: "seen", not "applied"
+                    // unchanged output = do-nothing: "tapped", not "applied"
                     if (next !== prevOut) {
                         log(tabId, `[${s.name}] modifyResponse applied (${before}b → ${after}b) ${url}`, "info", s.scriptId);
-                    } else logSeen(tabId, s.name, "modifyResponse", url, s.scriptId);
+                    } else logTapped(tabId, s.name, "modifyResponse", url, s.scriptId);
                     touched = true;
-                } else logSeen(tabId, s.name, "modifyResponse", url, s.scriptId);
+                } else logTapped(tabId, s.name, "modifyResponse", url, s.scriptId);
             } catch (e: any) {
                 log(tabId, formatScriptError(s.name, e, "modifyResponse"), "error", s.scriptId);
             }
@@ -207,7 +207,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
                         log(tabId, `[${s.name}] replaceResponse → ${mime} (${body.length}b) ${url}`, "info", s.scriptId);
                         return { mime, content: body };
                     }
-                    logSeen(tabId, s.name, "replaceResponse", url, s.scriptId);
+                    logTapped(tabId, s.name, "replaceResponse", url, s.scriptId);
                 } catch (e: any) {
                     log(tabId, formatScriptError(s.name, e, "replaceResponse"), "error", s.scriptId);
                 }

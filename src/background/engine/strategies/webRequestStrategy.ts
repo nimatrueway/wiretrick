@@ -4,6 +4,16 @@
  * headers and synchronous respond/replaceResponse work everywhere with no
  * debugger involvement.
  *
+ * How a replacement (replaceResponse, or onRequest `respond`) is served:
+ * - Firefox: in place — the request proceeds and filterResponseData swaps
+ *   the body, so the URL is kept (the upstream status code is, too).
+ * - Chromium: webRequest can't touch bodies, so the only way is a redirect —
+ *   to a data: URL, or for page loads to the extension's serve.html (the
+ *   address bar shows the extension URL and the page loses its origin).
+ *   Not done for scripts preferring the debugger tier (webRequestServesBody:
+ *   "cdp" listed first, or "auto" for page/frame loads) — it fulfills those
+ *   in place.
+ *
  * Response-body streaming (modifyResponse via filterResponseData) and
  * awaiting async handlers are Firefox-only; on Chromium chromeBodyStrategy
  * takes over for bodies. MV3 has no blocking webRequest at all.
@@ -15,11 +25,12 @@ import { scriptLogLine, type ScriptLogLevel } from "../../../shared/scriptLog";
 import { formatScriptError } from "../../../shared/scriptError";
 import type { BodyScriptInfo, HeaderChanges, HookDisposition, InterceptionStrategy, MaybePromise, WebRequestDetailsLike } from "./types";
 import type { Script } from "../scriptStore";
-import { log, logSeen, scriptError } from "../logs";
+import { log, logTapped, scriptError } from "../logs";
 import { dlogLevel } from "../../../shared/debugLog";
 import { parseStrategyList } from "../../../shared/metaParser";
 import { scriptStorageGet, scriptStorageSet } from "../scriptStore";
-import { isProcessOwned } from "./processState";
+import { isProcessOwned, webRequestServesBody } from "./processState";
+import { deferRespond } from "./deferredRespond";
 
 const IS_FIREFOX = typeof (globalThis as any).browser !== "undefined" &&
     typeof (globalThis as any).browser.webRequest?.filterResponseData === "function";
@@ -84,6 +95,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
     /** Free per-request caches (also called by the pipeline on error/complete). */
     pruneRequest(requestId: string): void {
         pendingFirefoxStreams.delete(requestId);
+        pendingFirefoxReplace.delete(requestId);
         pendingRequestHeaderMods.delete(requestId);
     }
 
@@ -108,6 +120,8 @@ export class WebRequestStrategy implements InterceptionStrategy {
         }
         for (const entry of matched) {
             const script = entry.compiled;
+            // Chromium: serve replacements here (by redirect) or leave them to the debugger tier (in place)
+            const servesBody = IS_FIREFOX || webRequestServesBody(script.meta.strategy, details.type);
             try {
                 for (const onRequestHandler of script.handlers.onRequest) {
                     const result = onRequestHandler(makeCtx(details, tabUrl));
@@ -127,7 +141,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                                     log(details.tabId, `[${entry.name}] onRequest → ${r.cancel ? "cancel" : `redirect → ${r.redirect}`} ${details.url}`, "info", entry.id);
                                     return normalize(r);
                                 }
-                                if (!hasHeaders) logSeen(details.tabId, entry.name, "onRequest", details.url, entry.id);
+                                if (!hasHeaders) logTapped(details.tabId, entry.name, "onRequest", details.url, entry.id);
                                 return { kind: "allow" };
                             });
                         }
@@ -152,15 +166,24 @@ export class WebRequestStrategy implements InterceptionStrategy {
                     if (result && result.respond) {
                         const body = serializeRespondBody(result.respond.body);
                         const mime = result.respond.mime || guessMime(null, details.url, "application/json");
-                        // data-URL redirects cannot carry a status — non-200
-                        // responds need the CDP tier (request-stage fulfill
-                        // honors status); the hook tier short-circuits first
-                        // for page-initiated requests
-                        if (result.respond.status && result.respond.status !== 200) {
-                            log(details.tabId, `[${entry.name}] onRequest → respond ${result.respond.status} (via debugger tier) ${details.url}`, "info", entry.id);
+                        const status = result.respond.status ?? 200;
+                        // Neither a redirect nor Firefox's stream filter can
+                        // carry a status — non-200 responds need the CDP tier
+                        // (request-stage fulfill honors status), and so does
+                        // a script preferring it (the URL is kept). The
+                        // debugger tier serves the result stashed here rather
+                        // than running the handler again. The hook tier
+                        // short-circuits first for page-initiated requests.
+                        if (IS_FIREFOX && status !== 200) {
+                            log(details.tabId, `[${entry.name}] onRequest → respond ${status} not served: Firefox's webRequest can't set a response status (only 200 can be served in place) ${details.url}`, "warn", entry.id);
+                            return { kind: "allow" };
+                        }
+                        if (status !== 200 || !servesBody) {
+                            trace(details, `[${entry.name}] onRequest → respond ${status}: deferred to the debugger tier ${details.url}`);
+                            deferRespond(details.tabId, details.method, details.url, { scriptId: entry.id, scriptName: entry.name, respond: result.respond });
                             return { kind: "needsCdp" };
                         }
-                        // status 200 (or none): data-URL is exact
+                        if (IS_FIREFOX) return this.firefoxReplaceLater(details, body, mime, entry.id, entry.name, "respond");
                         return this.staticServe(details, body, mime, entry.id, entry.name);
                     }
                     if (result && (result.redirect || result.cancel)) {
@@ -168,23 +191,25 @@ export class WebRequestStrategy implements InterceptionStrategy {
                         return normalize(result);
                     }
                     trace(details, `[${entry.name}] onRequest returned ${describeResult(result)} (no redirect/cancel/respond) for ${details.url}`);
-                    if (!hasHeaders) logSeen(details.tabId, entry.name, "onRequest", details.url, entry.id);
+                    if (!hasHeaders) logTapped(details.tabId, entry.name, "onRequest", details.url, entry.id);
                 }
-                if (script.handlers.replaceResponse.length) {
+                // not served here: the debugger tier runs replaceResponse itself
+                // (chromeBodyStrategy routes the request there) — never twice
+                if (script.handlers.replaceResponse.length && servesBody) {
                     let replacement: any = undefined;
                     for (const replaceHandler of script.handlers.replaceResponse) {
                         replacement = replaceHandler(makeCtx(details, tabUrl));
                         if (replacement !== undefined && replacement !== null) break;
-                        logSeen(details.tabId, entry.name, "replaceResponse", details.url, entry.id);
+                        logTapped(details.tabId, entry.name, "replaceResponse", details.url, entry.id);
                     }
                     if (isThenable(replacement)) {
                         if (IS_FIREFOX) {
                             return replacement.then((r: any) => {
                                 if (r === undefined || r === null) {
-                                    logSeen(details.tabId, entry.name, "replaceResponse", details.url, entry.id);
+                                    logTapped(details.tabId, entry.name, "replaceResponse", details.url, entry.id);
                                     return { kind: "allow" } as HookDisposition;
                                 }
-                                return this.staticReplace(details, r, entry.id, entry.name);
+                                return this.replace(details, r, entry.id, entry.name);
                             });
                         }
                         // Chrome: let the request continue; the CDP tier awaits
@@ -192,7 +217,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                         return { kind: "needsCdp" };
                     }
                     if (replacement !== undefined && replacement !== null) {
-                        return this.staticReplace(details, replacement, entry.id, entry.name);
+                        return this.replace(details, replacement, entry.id, entry.name);
                     }
                 }
                 if (script.handlers.modifyResponse.length && IS_FIREFOX) {
@@ -213,13 +238,25 @@ export class WebRequestStrategy implements InterceptionStrategy {
     }
 
     handleHeadersReceived(details: WebRequestDetailsLike, tabUrl: string | null): MaybePromise<HeaderChanges | null> {
+        const changes = this.collectHeaderChanges(details, tabUrl, "response", "headers");
+        // Firefox in-place replacement: swap the body, fix the headers to match
+        const rep = pendingFirefoxReplace.get(details.requestId);
+        if (rep && IS_FIREFOX) {
+            // a redirect hop: the replacement belongs to the final response
+            if (isRedirectStatus(details.statusCode)) return changes;
+            pendingFirefoxReplace.delete(details.requestId);
+            pendingFirefoxStreams.delete(details.requestId);
+            this.wireFirefoxReplace(details, rep);
+            const fix = replacementHeaders(rep.mime, rep.content);
+            return isThenable(changes) ? changes.then((c) => mergeReplacementHeaders(c, fix)) : mergeReplacementHeaders(changes, fix);
+        }
         // Firefox streaming: wire the filter when response headers arrive.
         const pending = pendingFirefoxStreams.get(details.requestId);
         if (pending && IS_FIREFOX) {
             pendingFirefoxStreams.delete(details.requestId);
             this.wireFirefoxStream(details, pending.entry.compiled, pending.tabUrl ?? tabUrl, pending.entry.id, pending.entry.name);
         }
-        return this.collectHeaderChanges(details, tabUrl, "response", "headers");
+        return changes;
     }
 
 
@@ -227,6 +264,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
         this.compiled = [];
     }
 
+    /** Chromium only (see staticReplace): an onRequest status-200 respond, by redirect. */
     private staticServe(details: WebRequestDetailsLike, content: string | Uint8Array, mime: string, scriptId: string, scriptName: string): HookDisposition {
         log(details.tabId, `[${scriptName}] onRequest → respond 200 ${mime} (${content.length}b) ${details.url}`, "info", scriptId);
         recordNetBody({ tabId: details.tabId, url: details.url, method: details.method, modified: content, mime, status: 200 });
@@ -238,35 +276,56 @@ export class WebRequestStrategy implements InterceptionStrategy {
         return { kind: "redirect", url: toDataUrl(mime, content) };
     }
 
-    private staticReplace(details: WebRequestDetailsLike, replacement: any, scriptId: string, scriptName: string): HookDisposition {
-        const mimeFor = (fileRef: string | null) =>
-            fileRef
-                ? guessMime(fileRef, details.url)
-                : guessMime(null, details.url, details.type === "xmlhttprequest" ? "application/json" : undefined);
+    /** A replaceResponse result: in place on Firefox, by redirect on Chromium. */
+    private replace(details: WebRequestDetailsLike, replacement: any, scriptId: string, scriptName: string): HookDisposition {
+        const r = replacementContent(details, replacement);
+        if (!r) return { kind: "allow" };
+        if (IS_FIREFOX) return this.firefoxReplaceLater(details, r.content, r.mime, scriptId, scriptName, "replaceResponse");
+        return this.staticReplace(details, r.content, r.mime, scriptId, scriptName);
+    }
 
-        const serve = (mime: string, content: string | Uint8Array): HookDisposition => {
-            log(details.tabId, `[${scriptName}] replaceResponse → ${mime} (${content.length} bytes) ${details.url}`, "info", scriptId);
-            recordNetBody({ tabId: details.tabId, url: details.url, method: details.method, modified: content, mime, status: 200 });
-            // Chrome blocks top-level data: navigations — serve main frames
-            // from an extension page instead
-            if (details.type === "main_frame") {
-                const rid = "serve_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-                serveStore.set(rid, { content: typeof content === "string" ? content : new TextDecoder().decode(content), mime });
-                return { kind: "redirect", url: chrome.runtime.getURL("serve.html?rid=" + rid) };
-            }
-            return { kind: "redirect", url: toDataUrl(mime, content) };
-        };
+    /**
+     * Chromium only: webRequest can't write a body, so the replacement is
+     * served by redirecting — the URL changes (see the header comment).
+     */
+    private staticReplace(details: WebRequestDetailsLike, content: string | Uint8Array, mime: string, scriptId: string, scriptName: string): HookDisposition {
+        log(details.tabId, `[${scriptName}] replaceResponse → ${mime} (${content.length} bytes) ${details.url}`, "info", scriptId);
+        recordNetBody({ tabId: details.tabId, url: details.url, method: details.method, modified: content, mime, status: 200 });
+        // Chrome blocks top-level data: navigations — serve main frames
+        // from an extension page instead
+        if (details.type === "main_frame") {
+            const rid = "serve_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+            serveStore.set(rid, { content: typeof content === "string" ? content : new TextDecoder().decode(content), mime });
+            return { kind: "redirect", url: chrome.runtime.getURL("serve.html?rid=" + rid) };
+        }
+        return { kind: "redirect", url: toDataUrl(mime, content) };
+    }
 
-        if (replacement && typeof replacement === "object" && !ArrayBuffer.isView(replacement) && replacement.file) {
-            return serve(mimeFor(replacement.file), readFileSyncValue(replacement.file));
-        }
-        if (typeof replacement === "string") {
-            return serve(mimeFor(null), replacement);
-        }
-        if (replacement instanceof Uint8Array) {
-            return serve(mimeFor(null), replacement);
-        }
+    /**
+     * Firefox: no redirect — let the request proceed and swap its body at
+     * onHeadersReceived (wireFirefoxReplace), so the URL and origin stay.
+     */
+    private firefoxReplaceLater(details: WebRequestDetailsLike, content: string | Uint8Array, mime: string, scriptId: string, scriptName: string, via: "replaceResponse" | "respond"): HookDisposition {
+        pendingFirefoxReplace.set(details.requestId, { content, mime, scriptId, scriptName, via });
         return { kind: "allow" };
+    }
+
+    private wireFirefoxReplace(details: WebRequestDetailsLike, rep: FirefoxReplacement): void {
+        const what = rep.via === "respond" ? `onRequest → respond 200 ${rep.mime} (${rep.content.length}b)` : `replaceResponse → ${rep.mime} (${rep.content.length} bytes)`;
+        try {
+            const filter = ((globalThis as any).browser?.webRequest ?? chrome.webRequest).filterResponseData(details.requestId);
+            const bytes = typeof rep.content === "string" ? new TextEncoder().encode(rep.content) : rep.content;
+            // the upstream body is never read: write the replacement once and close
+            filter.ondata = () => {};
+            filter.onstart = () => {
+                filter.write(bytes);
+                filter.close();
+            };
+            log(details.tabId, `[${rep.scriptName}] ${what} ${details.url}`, "info", rep.scriptId);
+            recordNetBody({ tabId: details.tabId, url: details.url, method: details.method, modified: rep.content, mime: rep.mime, status: 200 });
+        } catch (e: any) {
+            scriptError(rep.scriptId, formatScriptError(rep.scriptName, e, "filterResponseData"));
+        }
     }
 
     private collectHeaderChanges(
@@ -303,7 +362,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                                 log(details.tabId, `[${entry.name}] onResponseHeaders → ${describeHeaderMods(m)} ${details.url}`, "info", entry.id);
                                 return { ...m };
                             }
-                            logSeen(details.tabId, entry.name, "onResponseHeaders", details.url, entry.id);
+                            logTapped(details.tabId, entry.name, "onResponseHeaders", details.url, entry.id);
                             return null;
                         });
                     }
@@ -316,7 +375,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                     changes = changes || {};
                     changes.set = { ...changes.set, ...mods.set };
                     changes.remove = [...(changes.remove || []), ...(mods.remove || [])];
-                } else logSeen(details.tabId, entry.name, "onResponseHeaders", details.url, entry.id);
+                } else logTapped(details.tabId, entry.name, "onResponseHeaders", details.url, entry.id);
             } catch (e: any) {
                 scriptError(entry.id, formatScriptError(entry.name, e, "onResponseHeaders"));
             }
@@ -352,7 +411,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                             const size = (b: any) => (typeof b === "string" ? b.length : (b?.byteLength ?? 0));
                             log(details.tabId, `[${scriptName}] modifyResponse applied (${size(body)}b → ${size(out)}b) ${details.url}`, "info", scriptId);
                             body = out;
-                        } else logSeen(details.tabId, scriptName, "modifyResponse", details.url, scriptId);
+                        } else logTapped(details.tabId, scriptName, "modifyResponse", details.url, scriptId);
                     } catch (e: any) {
                         scriptError(scriptId, formatScriptError(scriptName, e, "modifyResponse"));
                     }
@@ -479,6 +538,58 @@ export function mergeHeaderMods(base: HeaderChanges | undefined, add: HeaderChan
         set: { ...(base?.set || {}), ...(add.set || {}) },
         remove: [...(base?.remove || []), ...(add.remove || [])],
     };
+}
+
+interface FirefoxReplacement {
+    content: string | Uint8Array;
+    mime: string;
+    scriptId: string;
+    scriptName: string;
+    via: "replaceResponse" | "respond";
+}
+
+/** requestId → a replacement body Firefox writes in place at onHeadersReceived */
+const pendingFirefoxReplace = new Map<string, FirefoxReplacement>();
+
+/** a replacement's mime when the URL has no telling extension */
+const TYPE_MIME: Record<string, string> = { xmlhttprequest: "application/json", main_frame: "text/html", sub_frame: "text/html", stylesheet: "text/css", script: "application/javascript" };
+
+/** the mime + bytes a replaceResponse result stands for (null: not a body) */
+export function replacementContent(details: { url: string; type?: string }, replacement: any): { mime: string; content: string | Uint8Array } | null {
+    const mimeFor = (fileRef: string | null) =>
+        fileRef
+            ? guessMime(fileRef, details.url)
+            : guessMime(null, details.url, TYPE_MIME[details.type || ""]);
+    if (replacement && typeof replacement === "object" && !ArrayBuffer.isView(replacement) && replacement.file) {
+        return { mime: mimeFor(replacement.file), content: readFileSyncValue(replacement.file) };
+    }
+    if (typeof replacement === "string" || replacement instanceof Uint8Array) {
+        return { mime: mimeFor(null), content: replacement };
+    }
+    return null;
+}
+
+function isRedirectStatus(status: number | undefined): boolean {
+    return status !== undefined && status >= 300 && status < 400 && status !== 304;
+}
+
+/**
+ * Response headers for an in-place replacement: the new type, and none that
+ * describe the upstream bytes (length, encoding, digests, ranges).
+ */
+export function replacementHeaders(mime: string, content: string | Uint8Array): HeaderChanges {
+    const type = typeof content === "string" && !/charset=/i.test(mime) && /^(text\/|application\/(json|javascript|xml)|image\/svg)/i.test(mime) ? `${mime}; charset=utf-8` : mime;
+    return {
+        set: { "Content-Type": type },
+        remove: ["Content-Length", "Content-Encoding", "Content-MD5", "Content-Range", "Digest", "Repr-Digest", "Content-Digest", "ETag"],
+    };
+}
+
+/** script header changes first, the replacement's own headers win */
+function mergeReplacementHeaders(changes: HeaderChanges | null, fix: HeaderChanges): HeaderChanges {
+    const removeFix = new Set((fix.remove || []).map((n) => n.toLowerCase()));
+    const set = Object.fromEntries(Object.entries(changes?.set || {}).filter(([n]) => !removeFix.has(n.toLowerCase()) && n.toLowerCase() !== "content-type"));
+    return { set: { ...set, ...fix.set }, remove: [...(changes?.remove || []), ...(fix.remove || [])] };
 }
 
 /** requestId → script awaiting a Firefox stream filter */

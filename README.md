@@ -68,7 +68,7 @@ Or click **?** → **Samples** for one-click starters against real public sites.
 |---|---|
 | [Installing](docs/install.md) | release zips, signed crx, building from source |
 | [Writing scripts](docs/scripting.md) | the `wt` API, parameters, libraries, `onDom`, stacking, async handlers |
-| [Interception strategies](docs/strategies.md) | `hook` / `cdp` / `webrequest` / `process`, priority lists, browser compatibility |
+| [Interception strategies](docs/strategies.md) | `hook` / `cdp` / `webrequest` / `process`, priority lists, [which tiers keep the URL when replacing a response](docs/strategies.md#how-each-tier-serves-a-replacement), the “never ran” warning, browser compatibility |
 | [Local helper](docs/process-helper.md) | the `process` strategy: install, how it works, security notes |
 | [The manager](docs/manager.md) | editor, Log & Network panels, folder sync, `settings.yaml` |
 | [Development](docs/development.md) | build, tests, releases, how the MV3 build works |

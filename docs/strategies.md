@@ -18,7 +18,7 @@ wt.declareScript({
 |---|---|---|---|---|
 | `hook` | MAIN-world content script overrides `fetch`, `XMLHttpRequest`, `Response` consumers | any request the page's own JS makes (fetch/XHR — the majority of API traffic) | **never** | misses `<script src>`, `<img>`, documents; requires the page context |
 | `cdp` | `chrome.debugger` + CDP Fetch domain: pause response → read body → transform → fulfill | **everything**: documents, script tags, images, fonts, XHR — even requests the page didn't initiate | **yes** — Chrome shows a yellow "being debugged" bar while attached | the only network-level path for main-frame HTML and non-JS resources on Chrome; attach/detach is lazy and automatic |
-| `webrequest` | blocking `webRequest` (+ `filterResponseData` on Firefox) | everything | never | **MV2 builds only** — Firefox and Chromium browsers that still run MV2 (ungoogled-chromium, Brave, Arc…). Redirect, cancel, request/response headers and synchronous `onRequest` respond / `replaceResponse` work on both; response-body streaming (`modifyResponse`) and awaiting async handlers are Firefox-only (Chromium has no `filterResponseData`, and its blocking webRequest can't await) |
+| `webrequest` | blocking `webRequest` (+ `filterResponseData` on Firefox) | everything | never | **MV2 builds only** — Firefox and Chromium browsers that still run MV2 (ungoogled-chromium, Brave, Arc…). Redirect, cancel, request/response headers and synchronous `onRequest` respond / `replaceResponse` work on both (Chromium serves replacements by redirecting, Firefox in place — see [below](#how-each-tier-serves-a-replacement)); response-body streaming (`modifyResponse`) and awaiting async handlers are Firefox-only (Chromium has no `filterResponseData`, and its blocking webRequest can't await) |
 | `process` | a tiny local helper ([wiretrick-helper](process-helper.md)) is a loopback HTTPS proxy; a PAC routes only the matched hosts to it and it pauses requests for your handlers | **everything**: documents, script tags, images, workers, XHR — MV2 and MV3 | **never** | **Chrome-only**, needs the helper installed + its CA trusted; your own proxy setting stays in effect; falls through the list when the helper is unavailable |
 | `auto` (default) | engine picks per request | — | minimized | resolves to `hook` when the page hook is ready, else `cdp` |
 
@@ -102,6 +102,67 @@ without debug. No `[webrequest]` line at all for a URL means the browser
 never showed that request to the extension (e.g. served by a service worker
 or the blocking listener could not be registered — that is logged as an
 error).
+
+## How each tier serves a replacement
+
+`replaceResponse` and `onRequest` → `respond` produce a whole new response.
+Whether the page keeps its URL depends on the tier that serves it:
+
+| tier | how | URL | status | reaches |
+|---|---|---|---|---|
+| `hook` | a `Response` / XHR result is synthesized in the page; the network is never contacted | unchanged (`response.url` / `responseURL` is the request URL) | any | page `fetch` / XHR only |
+| `webrequest`, **Chromium MV2** | **redirect**: page loads (main frame / iframes) go to the extension's `serve.html`, so the address bar shows a `chrome-extension://…` URL and the page loses its origin (cookies, relative URLs, same-origin calls); subresources get a `data:` URL | **changes** | always 200 | everything — but response bodies can't be read, so no `modifyResponse` |
+| `webrequest`, **Firefox** | in place: the request goes out, then `filterResponseData` discards the real body and writes the replacement (Content-Type set, Content-Length/Encoding dropped) | unchanged | the server's (Firefox can't change it; a non-200 `respond` is ignored with a warning) | everything; the request still reaches the server, and a network failure means no replacement |
+| `cdp` | the debugger fulfills the paused request | unchanged | any | everything (banner shown) |
+| `process` | the local helper answers the proxied request | unchanged | any | everything, no banner |
+
+On Chromium MV2 the redirect is used **only when `"webrequest"` comes
+before `"cdp"` / `"auto"` in the script's `strategy`**. Otherwise:
+
+- `strategy: ["cdp", …]` — every replacement is left to the debugger and
+  fulfilled in place;
+- `auto` (default) — page and frame loads go to the debugger (URL kept);
+  fetch/XHR and other subresources still use the `data:` URL (invisible to
+  the user, and served even before the hook or debugger is ready, without
+  the banner);
+- `"process"` listed and the helper running — the helper serves it.
+
+The debugger attaches only once a navigation has begun, so on MV2 the very
+first load of a page may be missed (a warning is logged; reload — see
+below). To keep the URL on Chromium, add `"cdp"` or `"process"` to the
+script's `strategy`.
+
+### “never ran” warning
+
+A body handler that silently does nothing is hard to spot, so after a
+request completes (~1.5 s later) Wiretrick checks every enabled script with
+`modifyResponse` or `replaceResponse` whose `match` covers the URL. If no
+tier ran its handler for that request, a WARN line attributed to the
+script is logged, e.g.
+
+```text
+[My script] modifyResponse never ran for https://example.com/ (document) — Chromium's webRequest can't read response bodies and the hook only sees fetch/XHR — add "cdp" or "process" to the script's strategy
+```
+
+The reason is picked from the situation:
+
+- the script's tiers can't touch this body on Chromium (e.g. only
+  `"webrequest"` / `"hook"` for a page, script or stylesheet) → add `"cdp"`
+  or `"process"`;
+- served from the browser cache → reload with the cache disabled (hard
+  reload);
+- `"cdp"` listed but the debugger wasn't attached in time → the existing
+  “was NOT intercepted” warning (logged once, not twice);
+- `"process"` listed but the helper isn't running → start/install the
+  helper;
+- otherwise → “no tier tapped it — check the Log at debug level”.
+
+Skipped: requests the page hook claimed (the page may simply never read the
+body), fetch/XHR, websocket, ping/beacon, CSP reports, the extension's own
+requests, library scripts, and requests a script already ended in
+`onRequest` (cancel/redirect/respond). Each script + URL warns at most once
+a minute, and at most 20 warnings a minute overall. In the Network panel
+it shows as a yellow *missed* entry; the row is not marked tapped.
 
 ## First page load with `cdp`
 

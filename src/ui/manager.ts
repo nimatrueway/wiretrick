@@ -979,7 +979,7 @@ function renderLogLine(line: HTMLElement, text: string, level: string, source: s
     line.appendChild(document.createTextNode(text));
 }
 
-// ---- Tab badges: Log errors/warnings and Network seen/altered requests
+// ---- Tab badges: Log errors/warnings and Network tapped/modified requests
 // that arrived while that tab was out of view ----
 const logBadge = new LogBadge();
 const netBadge = new NetBadge();
@@ -1017,23 +1017,23 @@ function noteNetMessage(msg: NetPortMsg): void {
 }
 
 /** All received entries — filtered ones stay here (re-renderable), just not in the DOM. */
-const logEntries: { text: string; level: string; source: string; seen?: boolean }[] = [];
-/** "seen (no change)" DEBUG lines (one per handler run) may fill at most this much of the buffer */
-const MAX_SEEN_ENTRIES = 300;
-let seenEntries = 0;
+const logEntries: { text: string; level: string; source: string; tapped?: boolean }[] = [];
+/** "tapped (no change)" DEBUG lines (one per handler run) may fill at most this much of the buffer */
+const MAX_TAPPED_ENTRIES = 300;
+let tappedEntries = 0;
 
 function appendLog(entry: any): void {
     const time = new Date(entry.at).toLocaleTimeString();
     const source = sourceOf(entry.message || "");
-    const seen = entry.kind === "seen";
-    logEntries.push({ text: `[${time}] ${entry.message}`, level: entry.level || "info", source, ...(seen ? { seen } : {}) });
-    if (seen && ++seenEntries > MAX_SEEN_ENTRIES) {
-        logEntries.splice(logEntries.findIndex((e) => e.seen), 1);
-        seenEntries--;
+    const tapped = entry.kind === "tapped";
+    logEntries.push({ text: `[${time}] ${entry.message}`, level: entry.level || "info", source, ...(tapped ? { tapped } : {}) });
+    if (tapped && ++tappedEntries > MAX_TAPPED_ENTRIES) {
+        logEntries.splice(logEntries.findIndex((e) => e.tapped), 1);
+        tappedEntries--;
     }
     if (logEntries.length > 2000) {
         // absolute buffer cap
-        for (const e of logEntries.splice(0, logEntries.length - 2000)) if (e.seen) seenEntries--;
+        for (const e of logEntries.splice(0, logEntries.length - 2000)) if (e.tapped) tappedEntries--;
     }
     rememberSource(source);
 

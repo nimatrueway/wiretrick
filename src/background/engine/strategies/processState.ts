@@ -51,3 +51,27 @@ export function hookEligible(strategyRaw: string | string[] | undefined): boolea
     if (isProcessOwned(strategyRaw)) return false;
     return parseStrategyList(strategyRaw as any).some((t) => t === "hook" || t === "auto" || (__MV3__ && t === "webrequest"));
 }
+
+/**
+ * Chromium MV2: does the blocking webRequest tier serve this script's
+ * replaceResponse / status-200 respond itself? It can only do so by
+ * redirecting — to a data: URL, or for page loads to the extension's
+ * serve.html (the address bar then shows the extension URL and the page
+ * loses its origin). Otherwise the debugger tier fulfills it in place.
+ * - "webrequest" listed before "cdp"/"auto": redirect.
+ * - "cdp" first: the debugger tier, for every request.
+ * - "auto" first: the debugger tier for page and frame loads (where a
+ *   redirect shows); subresources keep the data: URL — invisible to the
+ *   user, served from the first request on, and no debugger needed.
+ * - neither listed (["hook"], or ["process"] with the helper down): the
+ *   redirect stays the fallback.
+ * `type` is the webRequest resource type; omitted = a page load.
+ */
+export function webRequestServesBody(strategyRaw: string | string[] | undefined, type = "main_frame"): boolean {
+    for (const t of parseStrategyList(strategyRaw as any)) {
+        if (t === "webrequest") return true;
+        if (t === "cdp") return false;
+        if (t === "auto") return type !== "main_frame" && type !== "sub_frame";
+    }
+    return true;
+}

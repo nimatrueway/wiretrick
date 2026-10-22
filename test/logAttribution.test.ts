@@ -136,18 +136,18 @@ wt.replaceResponse(() => '{"mocked":true}');`)]);
     });
 
 
-    it("no-match (handler returns undefined) logs only a DEBUG 'seen (no change)' line", () => {
+    it("no-match (handler returns undefined) logs only a DEBUG 'tapped (no change)' line", () => {
         const s = new WebRequestStrategy();
         s.reload([storedScript("a", "API mocker", `wt.declareScript({ match: ["*"] });
 wt.onRequest(() => undefined);`)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("allow");
         const lines = entries.filter((e) => e.message.includes("onRequest →"));
-        expect(lines.map((e) => [e.level, e.kind, e.scriptId])).toEqual([["debug", "seen", "a"]]);
-        expect(lines[0].message).toMatch(/^\[API mocker\] onRequest → seen \(no change\) https:\/\//);
+        expect(lines.map((e) => [e.level, e.kind, e.scriptId])).toEqual([["debug", "tapped", "a"]]);
+        expect(lines[0].message).toMatch(/^\[API mocker\] onRequest → tapped \(no change\) https:\/\//);
     });
 
-    it("replaceResponse → null and no-op onResponseHeaders are seen; header changes stay INFO", () => {
+    it("replaceResponse → null and no-op onResponseHeaders are tapped; header changes stay INFO", () => {
         const s = new WebRequestStrategy();
         s.reload([
             storedScript("a", "Looker", `wt.declareScript({ match: ["*"] });
@@ -159,8 +159,8 @@ wt.onResponseHeaders(() => ({ headers: { set: { "x-a": "1" } } }));`),
         s.handleBeforeRequest(details(), null);
         s.handleHeadersReceived(details(), null);
         expect(entries.filter((e) => e.scriptId).map((e) => [e.level, e.message.replace(/ https:.*/, "")])).toEqual([
-            ["debug", "[Looker] replaceResponse → seen (no change)"],
-            ["debug", "[Looker] onResponseHeaders → seen (no change)"],
+            ["debug", "[Looker] replaceResponse → tapped (no change)"],
+            ["debug", "[Looker] onResponseHeaders → tapped (no change)"],
             ["info", "[Hdr] onResponseHeaders → set x-a"],
         ]);
     });
@@ -175,8 +175,12 @@ describe("CDP tier: request-stage respond fulfillment", () => {
     });
 
     it("SYNC onRequest respond-500 is fulfilled (not silently dropped) + named success log", async () => {
+        const w = new WebRequestStrategy();
         const c = new CdpStrategy();
+        w.reload([storedScript("a", "API mocker", RESPOND_500)]);
         c.reload([storedScript("a", "API mocker", RESPOND_500)]);
+        expect((w.handleBeforeRequest(details(), null) as any).kind).toBe("needsCdp");
+        entries.length = 0;
         await c.handlePaused("tab:1", paused());
         const fulfill = debuggerCalls.find((x) => x.command === "Fetch.fulfillRequest");
         expect(fulfill, "the deferred respond must be fulfilled at the Request stage").toBeTruthy();
@@ -185,6 +189,54 @@ describe("CDP tier: request-stage respond fulfillment", () => {
         expect(line, "a respond-500 success log must exist").toBeTruthy();
         expect(line!.message).toContain("[API mocker]");
         expect(line!.level).toBe("info");
+        expect(line!.scriptId).toBe("a");
+        // the handler ran once (webRequest), the debugger tier served its result
+        expect(entries.filter((e) => e.scriptId === "a")).toHaveLength(1);
+    });
+
+    it("a sync respond is fulfilled once: a second pause of the same request just continues", async () => {
+        const w = new WebRequestStrategy();
+        const c = new CdpStrategy();
+        w.reload([storedScript("a", "API mocker", RESPOND_500)]);
+        c.reload([storedScript("a", "API mocker", RESPOND_500)]);
+        w.handleBeforeRequest(details(), null);
+        await c.handlePaused("tab:1", paused());
+        await c.handlePaused("tab:1", paused({ requestId: "r2" }));
+        expect(debuggerCalls.filter((x) => x.command === "Fetch.fulfillRequest")).toHaveLength(1);
+        expect(debuggerCalls.some((x) => x.command === "Fetch.continueRequest" && x.params.requestId === "r2")).toBe(true);
+    });
+
+    it("cdp-preferring script: sync respond 200 is fulfilled in place by the debugger tier (no redirect)", async () => {
+        const code = `wt.declareScript({ match: ["*"], strategy: ["cdp"] });
+wt.onRequest(() => ({ respond: { body: "<h1>mock</h1>", mime: "text/html" } }));`;
+        const w = new WebRequestStrategy();
+        const c = new CdpStrategy();
+        w.reload([storedScript("a", "Page mock", code)]);
+        c.reload([storedScript("a", "Page mock", code)]);
+        expect((w.handleBeforeRequest(details({ type: "main_frame" }), null) as any).kind).toBe("needsCdp");
+        await c.handlePaused("tab:1", paused({ resourceType: "Document" }));
+        const fulfill = debuggerCalls.find((x) => x.command === "Fetch.fulfillRequest");
+        expect(fulfill!.params.responseCode).toBe(200);
+        expect(atob(fulfill!.params.body)).toBe("<h1>mock</h1>");
+        expect(entries.filter((e) => e.scriptId === "a").map((e) => e.message.replace(/ https:.*/, ""))).toEqual([
+            "[Page mock] onRequest → respond 200 text/html (debugger tier)",
+        ]);
+    });
+
+    it("cdp-preferring script: sync replaceResponse runs once, in the debugger tier", async () => {
+        const code = `wt.declareScript({ match: ["*"], strategy: ["cdp"] });
+wt.replaceResponse(() => "<h1>replaced</h1>");`;
+        const w = new WebRequestStrategy();
+        const c = new CdpStrategy();
+        w.reload([storedScript("a", "Page mock", code)]);
+        c.reload([storedScript("a", "Page mock", code)]);
+        expect((w.handleBeforeRequest(details({ type: "main_frame" }), null) as any).kind).toBe("allow");
+        expect(entries.filter((e) => e.scriptId === "a")).toEqual([]);
+        await c.handlePaused("tab:1", paused({ resourceType: "Document", responseStatusCode: 200, responseHeaders: [{ name: "content-type", value: "text/html" }] }));
+        const fulfill = debuggerCalls.find((x) => x.command === "Fetch.fulfillRequest");
+        expect(fulfill, "the debugger tier fulfills the replacement in place").toBeTruthy();
+        expect(atob(fulfill!.params.body)).toBe("<h1>replaced</h1>");
+        expect(entries.filter((e) => e.scriptId === "a" && e.message.includes("replaceResponse"))).toHaveLength(1);
     });
 
     it("sync redirect/cancel/headers are NOT double-applied (webRequest tier already handled them)", async () => {
@@ -221,8 +273,11 @@ wt.onRequest(async () => ({ respond: { status: 503, body: "later" } }));`)]);
 
     it("fulfill failure → script-attributed error log + request continued", async () => {
         failCommands.add("Fetch.fulfillRequest");
+        const w = new WebRequestStrategy();
         const c = new CdpStrategy();
+        w.reload([storedScript("a", "API mocker", RESPOND_500)]);
         c.reload([storedScript("a", "API mocker", RESPOND_500)]);
+        w.handleBeforeRequest(details(), null);
         await c.handlePaused("tab:1", paused());
         const line = entries.find((e) => e.level === "error" && e.message.includes("respond 500"));
         expect(line, "a script-attributed failure log must exist").toBeTruthy();
@@ -267,5 +322,34 @@ describe("per-script TypeScript error tracking", () => {
         expect((await logs.getScriptTypeErrors()).get("tx")).toEqual(["line 1: bad", "line 2: worse"]);
         await logs.setScriptTypeErrors("tx", "Typed", []);
         expect((await logs.getScriptTypeErrors()).has("tx")).toBe(false);
+    });
+});
+
+describe("Chromium webRequest tier: which replacements it serves (redirect) vs leaves to the debugger tier", () => {
+    const REPLACE = (strategy: string) => `wt.declareScript({ match: ["*"]${strategy} });\nwt.replaceResponse(() => "<h1>x</h1>");`;
+    it("auto: a page load is left to the debugger tier — handler not run here", () => {
+        const s = new WebRequestStrategy();
+        s.reload([storedScript("a", "Auto page", REPLACE(""))]);
+        expect((s.handleBeforeRequest(details({ type: "main_frame" }), null) as any).kind).toBe("allow");
+        expect(entries.filter((e) => e.scriptId === "a")).toEqual([]);
+    });
+    it("auto: a fetch/XHR keeps the data: URL (no debugger needed)", () => {
+        const s = new WebRequestStrategy();
+        s.reload([storedScript("a", "Auto api", REPLACE(""))]);
+        const d = s.handleBeforeRequest(details(), null) as any;
+        expect(d.kind).toBe("redirect");
+        expect(d.url).toMatch(/^data:/);
+    });
+    it("[\"cdp\"]: every request is left to the debugger tier", () => {
+        const s = new WebRequestStrategy();
+        s.reload([storedScript("a", "Cdp api", REPLACE(`, strategy: ["cdp"]`))]);
+        expect((s.handleBeforeRequest(details(), null) as any).kind).toBe("allow");
+    });
+    it("[\"webrequest\", \"cdp\"]: a page load is served via serve.html", () => {
+        const s = new WebRequestStrategy();
+        s.reload([storedScript("a", "Wr page", REPLACE(`, strategy: ["webrequest", "cdp"]`))]);
+        const d = s.handleBeforeRequest(details({ type: "main_frame" }), null) as any;
+        expect(d.kind).toBe("redirect");
+        expect(d.url).toContain("serve.html");
     });
 });

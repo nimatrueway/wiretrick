@@ -1,8 +1,8 @@
 /**
  * Rolling per-tab request log, pushed to the manager UI over a port.
  */
-import { annotateFromLog } from "../network";
-import { interventionKind, seenLine, type NetKind } from "../../shared/netTypes";
+import { annotateFromLog, URL_AT_END } from "../network";
+import { interventionKind, tappedLine, type InterventionKind, type NetKind } from "../../shared/netTypes";
 
 export interface LogEntry {
     tabId: number;
@@ -10,19 +10,19 @@ export interface LogEntry {
     level: "debug" | "info" | "warn" | "error";
     message: string;
     at: number;
-    /** set on "seen (no change)" lines — the UI caps how many it keeps */
+    /** set on "tapped (no change)" lines — the UI caps how many it keeps */
     kind?: NetKind;
 }
 
 const MAX_PER_TAB = 200;
 const tabLogs = new Map<number, LogEntry[]>();
 /**
- * "seen (no change)" DEBUG lines (one per handler run) get their own small
+ * "tapped (no change)" DEBUG lines (one per handler run) get their own small
  * per-tab ring, so a busy page can't evict the useful lines from the
  * replay ring above.
  */
-const MAX_SEEN_PER_TAB = 50;
-const seenLogs = new Map<number, LogEntry[]>();
+const MAX_TAPPED_PER_TAB = 50;
+const tappedLogs = new Map<number, LogEntry[]>();
 
 function pushCapped(rings: Map<number, LogEntry[]>, entry: LogEntry, cap: number): void {
     const list = rings.get(entry.tabId) || [];
@@ -42,8 +42,8 @@ export function addUiPort(port: chrome.runtime.Port): void {
         all.push(...entries);
     }
     all.sort((a, b) => a.at - b.at);
-    const seen = [...seenLogs.values()].flat();
-    const replay = seen.length ? [...all.slice(-MAX_PER_TAB), ...seen].sort((a, b) => a.at - b.at) : all.slice(-MAX_PER_TAB);
+    const tapped = [...tappedLogs.values()].flat();
+    const replay = tapped.length ? [...all.slice(-MAX_PER_TAB), ...tapped].sort((a, b) => a.at - b.at) : all.slice(-MAX_PER_TAB);
     for (const entry of replay) {
         port.postMessage({ type: "log", entry });
     }
@@ -51,33 +51,72 @@ export function addUiPort(port: chrome.runtime.Port): void {
 
 /**
  * `kind` marks a script-attributed line that names a request (ends with its
- * URL) as "seen" (handler ran, no change) or "altered"; omitted, it is
+ * URL) as "tapped" (handler ran, no change) or "modified"; omitted, it is
  * inferred (see interventionKind).
  */
-export function log(tabId: number, message: string, level: LogEntry["level"] = "info", scriptId: string | null = null, kind?: NetKind): void {
+export function log(tabId: number, message: string, level: LogEntry["level"] = "info", scriptId: string | null = null, kind?: InterventionKind, url?: string): void {
     const netKind = scriptId ? interventionKind(level, message, kind) : undefined;
-    const seenOnly = kind === "seen" && level === "debug";
-    const entry: LogEntry = { tabId, scriptId, level, message, at: Date.now(), ...(seenOnly ? { kind: "seen" as const } : {}) };
-    if (seenOnly) pushCapped(seenLogs, entry, MAX_SEEN_PER_TAB);
+    if (scriptId && netKind !== "missed") noteTap(scriptId, level, message);
+    const tappedOnly = kind === "tapped" && level === "debug";
+    const entry: LogEntry = { tabId, scriptId, level, message, at: Date.now(), ...(tappedOnly ? { kind: "tapped" as const } : {}) };
+    if (tappedOnly) pushCapped(tappedLogs, entry, MAX_TAPPED_PER_TAB);
     else pushCapped(tabLogs, entry, MAX_PER_TAB);
     for (const port of uiPorts) {
         port.postMessage({ type: "log", entry });
     }
-    if (scriptId) annotateFromLog(tabId, scriptId, message, level, netKind);
+    if (scriptId) annotateFromLog(tabId, scriptId, message, level, netKind, url);
     if (scriptId && level === "error" && !/^\[[^\]]*\] (console\.error|type error)/.test(message)) recordScriptError(scriptId, message);
     if (level === "error") {
         console.error("[Wiretrick]", message);
     }
 }
 
-/** A handler ran for `url` but changed nothing: a DEBUG line that marks the request "seen". */
-export function logSeen(tabId: number, scriptName: string, handler: string, url: string, scriptId: string): void {
-    log(tabId, seenLine(scriptName, handler, url), "debug", scriptId, "seen");
+// ---- tap registry: did a script's handler run for a URL? ----
+// Recorded whether or not a manager is open (annotateFromLog needs a port),
+// keyed without the tab — the process tier logs with tabId -1. Feeds the
+// "modifyResponse never ran" warning (pipeline.ts).
+
+const MAX_TAPS = 2000;
+/** `${scriptId}|${url}` → when a body handler last ran (or onRequest ended the request) */
+const bodyTaps = new Map<string, number>();
+const lastScriptError = new Map<string, number>();
+/** lines that mean the body handlers ran — or legitimately never will */
+const BODY_TAP = /\b(modifyResponse|replaceResponse)\b|onRequest → (respond|cancel|redirect)\b/;
+
+function noteTap(scriptId: string, level: LogEntry["level"], message: string): void {
+    const now = Date.now();
+    if (level === "error" && !/^\[[^\]]*\] (console\.error|type error)/.test(message)) lastScriptError.set(scriptId, now);
+    if (!BODY_TAP.test(message)) return;
+    const m = URL_AT_END.exec(message);
+    if (!m) return;
+    const key = `${scriptId}|${m[1]}`;
+    bodyTaps.delete(key);
+    bodyTaps.set(key, now);
+    if (bodyTaps.size > MAX_TAPS) bodyTaps.delete(bodyTaps.keys().next().value!);
+}
+
+/** Did a body handler of scriptId run for url (or the script throw anywhere) at or after `since` (ms epoch)? */
+export function bodyTappedSince(scriptId: string, url: string, since: number): boolean {
+    const t = bodyTaps.get(`${scriptId}|${url}`);
+    if (t !== undefined && t >= since) return true;
+    const e = lastScriptError.get(scriptId);
+    return e !== undefined && e >= since;
+}
+
+/** test seam */
+export function __resetTaps(): void {
+    bodyTaps.clear();
+    lastScriptError.clear();
+}
+
+/** A handler ran for `url` but changed nothing: a DEBUG line that marks the request "tapped". */
+export function logTapped(tabId: number, scriptName: string, handler: string, url: string, scriptId: string): void {
+    log(tabId, tappedLine(scriptName, handler, url), "debug", scriptId, "tapped");
 }
 
 /** every tab's retained LOG lines, oldest first (diagnostic report) */
 export function allLogs(): LogEntry[] {
-    return [...tabLogs.values(), ...seenLogs.values()].flat().sort((a, b) => a.at - b.at);
+    return [...tabLogs.values(), ...tappedLogs.values()].flat().sort((a, b) => a.at - b.at);
 }
 
 /** Push an arbitrary message to all connected manager/popup pages. */
@@ -96,7 +135,7 @@ export function broadcastEntry(entry: LogEntry): void {
 
 export function clearTab(tabId: number): void {
     tabLogs.delete(tabId);
-    seenLogs.delete(tabId);
+    tappedLogs.delete(tabId);
 }
 
 export function scriptError(scriptId: string, message: string): void {

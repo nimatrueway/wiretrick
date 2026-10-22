@@ -11,13 +11,15 @@ import { scriptLogLine } from "../../../shared/scriptLog";
 import { formatScriptError } from "../../../shared/scriptError";
 import { storageGet, storageSet } from "../../../shared/chromeApi";
 import type { Script } from "../scriptStore";
-import { log, logSeen } from "../logs";
+import { log, logTapped } from "../logs";
 import { scriptStorageGet, scriptStorageSet } from "../scriptStore";
 import { dlog, dlogLevel } from "../../../shared/debugLog";
 import { debuggerAttach, debuggerSend, debuggerDetach, debuggerGetTargets, type Debuggee } from "../../../shared/chromeApi";
 import { analyzeScripts, runBodyOp } from "../../compileHost";
 import { recordNetBody } from "../../network";
-import { isProcessOwned, listsProcess } from "./processState";
+import { isProcessOwned, listsProcess, webRequestServesBody } from "./processState";
+import { takeDeferredRespond } from "./deferredRespond";
+import { replacementContent } from "./webRequestStrategy";
 
 interface CdpScript {
     scriptId: string;
@@ -132,12 +134,14 @@ export class CdpStrategy {
             if (!c.meta.declared) continue; // library module: inert, importable
             if (isProcessOwned(s.meta.strategy)) continue; // the helper tier owns it
             // CDP is the fallback tier for everything the hook cannot do
-            // (main frames, script tags, worker fetches, cold starts) — any
-            // handler loads here, sync or async. Sync onRequest handlers
-            // matter for respond-with-status at the Request stage: the
-            // blocking webRequest tier applies their other results itself
-            // and defers ONLY non-200 responds here (handlePaused skips
-            // re-applying anything else a sync handler produced).
+            // (main frames, script tags, worker fetches, cold starts). Sync
+            // onRequest handlers run in the blocking webRequest tier, which
+            // applies their results itself and stashes a respond it can't
+            // serve in place (non-200, or a script preferring this tier —
+            // see deferredRespond) for the Request stage here. Sync
+            // replaceResponse handlers run here only when webRequest leaves
+            // them to this tier (webRequestServesBody: page loads for
+            // "auto", everything for "cdp") — never twice.
             const wantsCdp =
                 c.handlers.modifyResponse.length > 0 ||
                 c.handlers.replaceResponse.length > 0 ||
@@ -152,7 +156,7 @@ export class CdpStrategy {
                 transform: c.handlers.modifyResponse,
                 onRequest: c.handlers.onRequest.length ? c.handlers.onRequest : undefined,
                 onResponseHeaders: c.handlers.onResponseHeaders.some(isAsyncFn) ? c.handlers.onResponseHeaders : undefined,
-                replaceResponse: c.handlers.replaceResponse.some(isAsyncFn) ? c.handlers.replaceResponse : undefined,
+                replaceResponse: c.handlers.replaceResponse.some(isAsyncFn) || !webRequestServesBody(s.meta.strategy) ? c.handlers.replaceResponse : undefined,
             });
         }
     }
@@ -510,6 +514,33 @@ export class CdpStrategy {
         }
     }
 
+    /** synthesize an onRequest respond at the Request stage — the network is never contacted */
+    private async fulfillRespond(key: string, tabId: number, requestId: string, method: string, url: string, scriptName: string, scriptId: string, r: { status?: number; mime?: string; body?: any; headers?: { set?: Record<string, string> } }): Promise<void> {
+        const body = typeof r.body === "string"
+            ? bytesToBase64(new TextEncoder().encode(r.body))
+            : r.body instanceof Uint8Array
+                ? bytesToBase64(r.body)
+                : bytesToBase64(new TextEncoder().encode(JSON.stringify(r.body)));
+        const mime = r.mime || "application/json";
+        const headers = [
+            { name: "content-type", value: mime },
+            ...Object.entries(r.headers?.set || {}).map(([name, value]) => ({ name, value: String(value) })),
+        ];
+        dlogLevel("cdp", "info", "onRequest → respond", { url, script: scriptName });
+        try {
+            await debuggerSend(this.debuggeeOf(key), "Fetch.fulfillRequest", { requestId, responseCode: r.status || 200, responseHeaders: headers, body });
+            log(tabId, `[${scriptName}] onRequest → respond ${r.status || 200} ${mime} (debugger tier) ${url}`, "info", scriptId);
+            recordNetBody({ tabId, url, method, modified: base64ToBytes(body), mime, status: r.status || 200 });
+        } catch (e: any) {
+            log(tabId, `[${scriptName}] onRequest → respond ${r.status || 200} FAILED: ${e.message || e} — request continues unmodified`, "error", scriptId);
+            try {
+                await debuggerSend(this.debuggeeOf(key), "Fetch.continueRequest", { requestId });
+            } catch {
+                /* detach race */
+            }
+        }
+    }
+
     async handlePaused(key: string, params: any): Promise<void> {
         const pausedKey = `${key.startsWith("tab:") ? Number(key.slice(4)) : -1}|${params.request?.url}`;
         this.recentlyPaused.add(pausedKey);
@@ -525,6 +556,12 @@ export class CdpStrategy {
                 await debuggerSend(this.debuggeeOf(key), "Fetch.continueRequest", { requestId });
                 return;
             }
+            // a sync respond the webRequest tier decided and left to this tier
+            const deferred = takeDeferredRespond(tabId, request.method, url);
+            if (deferred) {
+                await this.fulfillRespond(key, tabId, requestId, request.method, url, deferred.scriptName, deferred.scriptId, deferred.respond);
+                return;
+            }
             const requestScripts = this.matchingScripts(url).filter((s) => s.onRequest);
             if (requestScripts.length === 0) {
                 await debuggerSend(this.debuggeeOf(key), "Fetch.continueRequest", { requestId });
@@ -537,6 +574,9 @@ export class CdpStrategy {
             let terminal = false;
             for (const s of requestScripts) {
                 for (const handler of s.onRequest!) {
+                    // sync handlers already ran (and were reported, and
+                    // applied) in the blocking webRequest tier
+                    if (!isAsyncFn(handler)) continue;
                     let resolved: any;
                     try {
                         const result = handler({ url, method: request.method, tabUrl: url, resourceType: params.resourceType || "other", requestHeaders: {} });
@@ -545,55 +585,13 @@ export class CdpStrategy {
                         log(tabId, formatScriptError(s.name, e, "onRequest"), "error", s.scriptId);
                         continue;
                     }
-                    // sync handlers already ran (and were reported) in the
-                    // blocking webRequest tier — see below
                     if (!resolved) {
-                        if (isAsyncFn(handler)) logSeen(tabId, s.name, "onRequest", url, s.scriptId);
+                        logTapped(tabId, s.name, "onRequest", url, s.scriptId);
                         continue;
                     }
 
-                    // Sync handlers already ran in the blocking webRequest
-                    // tier, which applies everything they return EXCEPT a
-                    // non-200 respond (data-URL redirects can't carry a
-                    // status — that one case was deferred here). Skip
-                    // anything else a sync handler produced so redirect /
-                    // cancel / headers / 200-respond are never applied twice.
-                    if (!isAsyncFn(handler)) {
-                        const r = resolved.respond;
-                        if (!r || r.status === undefined || r.status === 200) continue;
-                    }
-
                     if (resolved.respond) {
-                        // synthesize the response at the Request stage —
-                        // the network is never contacted
-                        const r = resolved.respond;
-                        const body = typeof r.body === "string"
-                            ? bytesToBase64(new TextEncoder().encode(r.body))
-                            : r.body instanceof Uint8Array
-                                ? bytesToBase64(r.body)
-                                : bytesToBase64(new TextEncoder().encode(JSON.stringify(r.body)));
-                        const headers = [
-                            { name: "content-type", value: r.mime || "application/json" },
-                            ...Object.entries(r.headers?.set || {}).map(([name, value]) => ({ name, value: String(value) })),
-                        ];
-                        dlogLevel("cdp", "info", "onRequest → respond", { url, script: s.name });
-                        try {
-                            await debuggerSend(this.debuggeeOf(key), "Fetch.fulfillRequest", {
-                                requestId,
-                                responseCode: r.status || 200,
-                                responseHeaders: headers,
-                                body,
-                            });
-                            log(tabId, `[${s.name}] onRequest → respond ${r.status || 200} ${r.mime || "application/json"} (debugger tier) ${url}`, "info", s.scriptId);
-                            recordNetBody({ tabId, url, method: request.method, modified: base64ToBytes(body), mime: r.mime || "application/json", status: r.status || 200 });
-                        } catch (e: any) {
-                            log(tabId, `[${s.name}] onRequest → respond ${r.status || 200} FAILED: ${e.message || e} — request continues unmodified`, "error", s.scriptId);
-                            try {
-                                await debuggerSend(this.debuggeeOf(key), "Fetch.continueRequest", { requestId });
-                            } catch {
-                                /* detach race */
-                            }
-                        }
+                        await this.fulfillRespond(key, tabId, requestId, request.method, url, s.name, s.scriptId, resolved.respond);
                         return;
                     }
                     if (resolved.cancel) {
@@ -629,7 +627,7 @@ export class CdpStrategy {
                     if (resolved.headers && (resolved.headers.set || resolved.headers.remove)) {
                         log(tabId, `[${s.name}] onRequest → request headers (${describeHeaderMods(resolved.headers)}) ${url}`, "info", s.scriptId);
                         headerPromises.push(Promise.resolve(resolved.headers));
-                    } else logSeen(tabId, s.name, "onRequest", url, s.scriptId);
+                    } else logTapped(tabId, s.name, "onRequest", url, s.scriptId);
                 }
                 void terminal;
             }
@@ -665,7 +663,7 @@ export class CdpStrategy {
                         // sync handlers were reported by the webRequest tier
                         if (isAsyncFn(handler)) {
                             if (r && r.headers && (r.headers.set || r.headers.remove)) log(tabId, `[${s.name}] onResponseHeaders → ${describeHeaderMods(r.headers)} ${url}`, "info", s.scriptId);
-                            else logSeen(tabId, s.name, "onResponseHeaders", url, s.scriptId);
+                            else logTapped(tabId, s.name, "onResponseHeaders", url, s.scriptId);
                         }
                     } catch (e: any) {
                         log(tabId, formatScriptError(s.name, e, "async onResponseHeaders"), "error", s.scriptId);
@@ -684,24 +682,31 @@ export class CdpStrategy {
             // transforms are string-oriented; binary stays bytes
             let body: string | Uint8Array = looksTextual(bytes) ? new TextDecoder().decode(bytes) : bytes;
             const originalBody = body;
+            let replacedMime: string | null = null;
 
-            // async replaceResponse: first non-null result fulfills the body
+            // replaceResponse (async, or any the webRequest tier left to this
+            // tier): first non-null result fulfills the body
             replaceOuter: for (const s of cdpScripts) {
                 if (!s.replaceResponse) continue;
+                const syncHere = !webRequestServesBody(s.strategyRaw, webRequestTypeOf(params.resourceType));
                 for (const handler of s.replaceResponse) {
+                    // sync ones the webRequest tier served (or tapped) itself
+                    if (!syncHere && !isAsyncFn(handler)) continue;
                     try {
                         const out = await handler({ url, method: request.method, tabUrl: url, resourceType: params.resourceType || "other", requestHeaders: {}, status: params.responseStatusCode, contentType: headerContentType(responseHeaders) });
                         if (out !== undefined && out !== null) {
-                            body = typeof out === "string" || out instanceof Uint8Array ? out : JSON.stringify(out);
+                            const r = replacementContent({ url, type: webRequestTypeOf(params.resourceType) }, out);
+                            body = r ? r.content : JSON.stringify(out);
+                            replacedMime = r ? r.mime : "application/json";
                             const outLen = typeof body === "string" ? body.length : body.byteLength;
                             dlogLevel("cdp", "info", `replaceResponse ${s.name} applied`, { outLen });
-                            log(tabId, `[${s.name}] replaceResponse → (${outLen}b) ${url}`, "info", s.scriptId);
+                            log(tabId, `[${s.name}] replaceResponse → ${replacedMime} (${outLen}b) ${url}`, "info", s.scriptId);
                             break replaceOuter;
                         }
-                        if (isAsyncFn(handler)) logSeen(tabId, s.name, "replaceResponse", url, s.scriptId);
+                        logTapped(tabId, s.name, "replaceResponse", url, s.scriptId);
                     } catch (e: any) {
                         dlogLevel("cdp", "debug", `replaceResponse of "${s.name}" threw: ${e.message || e}`);
-                        log(tabId, formatScriptError(s.name, e, "async replaceResponse"), "error", s.scriptId);
+                        log(tabId, formatScriptError(s.name, e, isAsyncFn(handler) ? "async replaceResponse" : "replaceResponse"), "error", s.scriptId);
                     }
                 }
             }
@@ -730,11 +735,11 @@ export class CdpStrategy {
                             body = out;
                             const len = typeof body === "string" ? body.length : body.byteLength;
                             dlogLevel("cdp", "info", `transform ${s.name} applied`, { outLen: len });
-                            // unchanged output = do-nothing: "seen", not "applied"
+                            // unchanged output = do-nothing: "tapped", not "applied"
                             if (out !== prevBody) {
                                 log(tabId, `[${s.name}] modifyResponse applied (${before}b → ${len}b) ${url}`, "info", s.scriptId);
-                            } else logSeen(tabId, s.name, "modifyResponse", url, s.scriptId);
-                        } else logSeen(tabId, s.name, "modifyResponse", url, s.scriptId);
+                            } else logTapped(tabId, s.name, "modifyResponse", url, s.scriptId);
+                        } else logTapped(tabId, s.name, "modifyResponse", url, s.scriptId);
                     } catch (e: any) {
                         dlogLevel("cdp", "debug", `modifyResponse of "${s.name}" threw: ${e.message || e}`);
                         log(tabId, formatScriptError(s.name, e, "modifyResponse (cdp)"), "error", s.scriptId);
@@ -744,6 +749,11 @@ export class CdpStrategy {
 
             const outBytes = typeof body === "string" ? new TextEncoder().encode(body) : body;
             dlogLevel("cdp", "debug", "fulfilling", { url, outLen: outBytes.length });
+            if (replacedMime) {
+                // a new body: its own type, nothing describing the upstream bytes
+                responseHeaders = (responseHeaders || []).filter((h: any) => !/^(content-type|content-encoding|content-length)$/i.test(h.name));
+                responseHeaders.push({ name: "content-type", value: replacedMime });
+            }
             recordNetBody({ tabId, url, method: request.method, original: originalBody, modified: body === originalBody ? null : body });
             await debuggerSend(this.debuggeeOf(key), "Fetch.fulfillRequest", {
                 requestId,
