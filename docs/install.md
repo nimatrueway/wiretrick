@@ -1,6 +1,6 @@
 # Installing
 
-[← README](../README.md)
+[← README](../README.md) · [Glossary](../GLOSSARY.md)
 
 ## From a release (recommended)
 
@@ -10,7 +10,7 @@
    Firefox uses the `.xpi` instead — see [Firefox](#firefox).
 2. Open `chrome://extensions`.
 3. Enable **Developer mode** (top-right), click **Load unpacked**, and select the unzipped folder.
-4. Pin the 🧩 icon — the badge shows how many scripts are active on the current tab.
+4. Pin the 🧩 icon — the badge shows how many enabled scripts match the current tab.
 
 ## Firefox
 

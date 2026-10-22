@@ -1,6 +1,6 @@
 # Local helper (strategy `"process"`)
 
-[← README](../README.md)
+[← README](../README.md) · [Glossary](../GLOSSARY.md)
 
 `wiretrick-helper` is a small (~3 MB) Rust program for Linux, macOS and
 Windows. Chrome starts it through **native messaging** when an enabled
@@ -23,7 +23,7 @@ Chrome closes):
    the extension. `types` is checked extension-side, after the pause. TLS
    to a host no pattern's hostname/port can match is tunneled untouched.
    Your handlers run in the background page (MV2) or the sandbox (MV3), the
-   same code paths as the other tiers. The extension answers continue,
+   same code paths as the other strategies. The extension answers continue,
    fulfill, redirect or fail. Requests nobody listens to are not paused, and
    bodies are buffered only for `modifyResponse` handlers.
 4. The helper's own upstream connection follows your proxy setting too. It
@@ -80,7 +80,7 @@ binary.
   through the helper. Leave them out of `process` routes (use another
   `strategy` on that handler).
 - When another extension or an enterprise policy controls the proxy setting,
-  the tier stays off (shown in Settings). Handlers on `process` then don't
+  the strategy stays unavailable (shown in Settings). Handlers on `process` then don't
   run — there is no fallback; the Log warns and the script gets a ⚠. Pick
   another default strategy in Settings → Interception, or set `strategy`
   on the route.

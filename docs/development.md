@@ -1,6 +1,6 @@
 # Development
 
-[← README](../README.md)
+[← README](../README.md) · [Glossary](../GLOSSARY.md)
 
 ```bash
 npm install

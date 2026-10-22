@@ -1,6 +1,6 @@
 # The manager
 
-[← README](../README.md)
+[← README](../README.md) · [Glossary](../GLOSSARY.md)
 
 The manager page embeds **Monaco** (the VS Code editor) with full TypeScript
 IntelliSense for the `wt` API — completions, hover docs, and diagnostics work
@@ -12,7 +12,7 @@ searchable list of all of them):
 | --- | --- |
 | ⌘S | Save and hot-apply the script |
 | ⌘P | Quick-open a script or settings.yaml (cursor position is remembered per file) |
-| ⌘⇧E | Focus the explorer (script list) |
+| ⌘⇧E | Focus the explorer |
 | ⌘B | Show/hide the explorer |
 | ⌘J or ⌘` | Show/hide the Log/Network panel |
 | ⌥Z | Toggle word wrap |
@@ -25,7 +25,7 @@ background page under *Inspect views*.
 
 ## Explorer
 
-The script list on the left looks and works like VS Code's explorer: one
+The explorer on the left looks and works like VS Code's explorer: one
 `Name.ts` row per script ([utilities](scripting.md#utilities-and-recipes) in italics, disabled scripts dimmed and
 struck through, ● for unsaved changes, ⚠ for errors). Click the **Wiretrick**
 header to collapse it. With the list focused (⌘⇧E or a click): ↑/↓,
@@ -46,10 +46,10 @@ no discard prompt on a no-op edit.
 
 The panel has two tabs. Drag its header (or a tab title) to dock it — a
 highlighted preview shows where it lands: **below the editor**, **full height
-beside the editor**, or **under the script list**. Drag its edge to resize; each
+beside the editor**, or **under the explorer**. Drag its edge to resize; each
 dock remembers its own size, and Esc cancels a drag.
 
-The script list moves too: drag its header (the **Explorer** title) to the
+The explorer moves too: drag its header (the **Explorer** title) to the
 left or right edge of the window. ⌘J hides the panel wherever it is docked;
 ⌘B hides the explorer (and a panel docked under it). The two layout buttons
 at the right of the editor toolbar do the same.
@@ -183,7 +183,7 @@ A plain `.ts`/`.js` file imports as a single script.
 
 ## `settings.yaml`
 
-The script list always has a ⚙ **settings.yaml** entry (no folder needed; no
+The explorer always has a ⚙ **settings.yaml** entry (no folder needed; no
 toggle, not deletable). It is generated from storage: global settings plus
 every script's params and `enabled` state. Saving it in the editor applies it
 (syntax errors show in the editor status and change nothing). Popup/list

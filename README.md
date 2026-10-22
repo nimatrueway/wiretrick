@@ -36,7 +36,7 @@ replace bodies, or patch the DOM.
 2. Chromium: unzip, open `chrome://extensions`, enable **Developer mode** and
    **Load unpacked** the folder. Firefox: drag the `.xpi` onto Firefox (see
    [docs/install.md](docs/install.md#firefox) if it's unsigned).
-3. Pin the icon — its badge counts the scripts active on the current tab.
+3. Pin the icon — its badge counts the enabled scripts matching the current tab.
 
 Signed `.crx` packages, building from source and the optional helper:
 see [docs/install.md](docs/install.md).
@@ -65,9 +65,10 @@ Or click **?** → **Samples** for one-click starters against real public sites.
 |---|---|
 | [Installing](docs/install.md) | release zips, signed crx, building from source |
 | [Writing scripts](docs/scripting.md) | the `wt` API, routes, parameters, utilities, `onDom`, stacking, async handlers |
-| [Interception strategies](docs/strategies.md) | `hook` / `cdp` / `webrequest` / `process`, the default and per-handler choice, [which tiers keep the URL when replacing a response](docs/strategies.md#how-each-tier-serves-a-replacement), the “never ran” warning, browser compatibility |
+| [Interception strategies](docs/strategies.md) | `hook` / `cdp` / `webrequest` / `process`, the default and per-handler choice, [which strategies keep the URL when replacing a response](docs/strategies.md#how-each-strategy-serves-a-replacement), the “never ran” warning, browser compatibility |
 | [Local helper](docs/process-helper.md) | the `process` strategy: install, how it works, security notes |
 | [The manager](docs/manager.md) | editor, Log & Network panels, folder sync, `settings.yaml` |
+| [Glossary](GLOSSARY.md) | the words we use for Wiretrick's concepts |
 | [Development](docs/development.md) | build, tests, releases, how the MV3 build works |
 
 ## License

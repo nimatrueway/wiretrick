@@ -1,6 +1,6 @@
 # Writing scripts
 
-[← README](../README.md)
+[← README](../README.md) · [Glossary](../GLOSSARY.md)
 
 A script registers **handlers** at top level. Each handler takes its own
 [route](#routes) first, then the function:
@@ -338,7 +338,7 @@ status and headers, URL kept. `webrequest` serves status 200 only (another
 status is skipped with a warning): in place on Firefox, and on Chromium MV2
 by redirect (a `data:` URL, or the extension's `serve.html` for page loads),
 so the URL changes. See
-[how each tier serves a replacement](strategies.md#how-each-tier-serves-a-replacement).
+[how each strategy serves a replacement](strategies.md#how-each-strategy-serves-a-replacement).
 
 **`wt.onResponseHeaders`** — all matching handlers run and their changes
 **merge**: `set` keys are applied in order (a later handler's `set` of the
@@ -354,8 +354,8 @@ body → [transform 1] → [transform 2] → … → page
 **`wt.replaceResponse`** — the first handler that returns a body wins;
 later ones are skipped.
 
-**Across strategies**: a handler's `strategy` only decides *which tier* runs
-it — stacking order is unchanged regardless of which tier each handler
+**Across strategies**: a handler's `strategy` only decides *which mechanism* runs
+it — stacking order is unchanged regardless of which strategy each handler
 uses.
 
 ## Async handlers

@@ -1,10 +1,10 @@
 # Interception strategies
 
-[← README](../README.md)
+[← README](../README.md) · [Glossary](../GLOSSARY.md)
 
 Chrome and Firefox have fundamentally different extension APIs, and Chrome
 itself can only reach some resources through some paths. Wiretrick therefore
-has four **interception strategies** (tiers). Every handler runs on exactly
+has four **interception strategies**. Every handler runs on exactly
 **one** of them:
 
 1. its route's `strategy`, if set;
@@ -34,7 +34,7 @@ most once.
 |---|---|---|---|---|
 | `process` | a tiny local helper ([wiretrick-helper](process-helper.md)) is a loopback HTTPS proxy; a PAC routes only the hosts of `process` handlers to it and it pauses requests for your handlers | **everything**: documents, script tags, images, workers, XHR — MV2 and MV3 | **never** | **Chromium-only**, needs the helper installed + its CA trusted; your own proxy setting stays in effect |
 | `hook` | MAIN-world content script overrides `fetch` and `XMLHttpRequest` | requests the page's own JS makes (fetch/XHR — the majority of API traffic) | **never** | misses `<script src>`, `<img>`, documents, workers and requests made before the hook loads; no `onResponseHeaders` |
-| `webrequest` | blocking `webRequest` (+ `filterResponseData` on Firefox) | everything | never | **MV2 builds only** — Firefox and Chromium browsers that still run MV2 (ungoogled-chromium, Brave, Arc…). Redirect, cancel, request/response headers and synchronous `onRequest` respond / `replaceResponse` work on both (Chromium serves replacements by redirecting, Firefox in place — see [below](#how-each-tier-serves-a-replacement)); `modifyResponse` and awaiting async handlers are Firefox-only (Chromium has no `filterResponseData`, and its blocking webRequest can't await) |
+| `webrequest` | blocking `webRequest` (+ `filterResponseData` on Firefox) | everything | never | **MV2 builds only** — Firefox and Chromium browsers that still run MV2 (ungoogled-chromium, Brave, Arc…). Redirect, cancel, request/response headers and synchronous `onRequest` respond / `replaceResponse` work on both (Chromium serves replacements by redirecting, Firefox in place — see [below](#how-each-strategy-serves-a-replacement)); `modifyResponse` and awaiting async handlers are Firefox-only (Chromium has no `filterResponseData`, and its blocking webRequest can't await) |
 | `cdp` | `chrome.debugger` + CDP Fetch domain: pause → run handlers → continue or fulfill | **everything**: documents, script tags, images, fonts, XHR — even requests the page didn't initiate | **yes** — Chrome shows a yellow "being debugged" bar while attached | Chromium-only; attach/detach is lazy and automatic |
 
 `wt.onDom` isn't a network strategy: it runs in the page whatever the
@@ -136,12 +136,12 @@ never showed that request to the extension (e.g. served by a service worker
 or the blocking listener could not be registered — that is logged as an
 error).
 
-## How each tier serves a replacement
+## How each strategy serves a replacement
 
 `replaceResponse` and `onRequest` → `respond` produce a whole new response.
-Whether the page keeps its URL depends on the tier that serves it:
+Whether the page keeps its URL depends on the strategy that serves it:
 
-| tier | how | URL | status | reaches |
+| strategy | how | URL | status | reaches |
 |---|---|---|---|---|
 | `hook` | a `Response` / XHR result is synthesized in the page; the network is never contacted | unchanged (`response.url` / `responseURL` is the request URL) | any | page `fetch` / XHR only |
 | `webrequest`, **Chromium MV2** | **redirect**: page loads (main frame) go to the extension's `serve.html`, so the address bar shows a `chrome-extension://…` URL and the page loses its origin (cookies, relative URLs, same-origin calls); other requests get a `data:` URL | **changes** | 200 only | everything — but response bodies can't be read, so no `modifyResponse` |
@@ -172,7 +172,7 @@ The reason is picked from the situation:
   reload);
 - on `cdp` but the debugger wasn't attached in time → the existing
   “was NOT intercepted” warning (logged once, not twice);
-- otherwise → “no tier tapped it — check the Log at debug level”.
+- otherwise → “no strategy tapped it — check the Log at debug level”.
 
 Skipped: handlers that can never run where they are (already warned at
 load, see [above](#when-a-strategy-isnt-available)), page fetch/XHR on
