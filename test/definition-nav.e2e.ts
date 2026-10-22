@@ -1,7 +1,7 @@
 /**
  * E2E regression: the real "Go to Definition" editor action on an imported
- * utility function must switch the manager editor to the utility script.
- * Cold manager load (the utility is never opened before navigation).
+ * library function must switch the Code view to the library script.
+ * Cold Editor load (the library is never opened before navigation).
  *
  * Usage: npm run build && npx tsx test/definition-nav.e2e.ts
  */
@@ -237,7 +237,7 @@ const markers = await mgr.evaluate(() => {
 });
 check("spaced import resolves (no diagnostics)", markers.length === 0, JSON.stringify(markers));
 
-// breaking the utility flags its importer; fixing it clears the importer
+// breaking the library flags its importer; fixing it clears the importer
 const usesLibMarkers = () => mgr.evaluate(() => {
     const m = (window as any).monaco;
     const u = m.editor.getModels().find((x: any) => x.uri.toString().includes("uses"));
@@ -249,9 +249,9 @@ const setLib = async (code: string) => {
     await mgr.waitForTimeout(3000);
 };
 await setLib("export const answer = \"42\";\n");
-check("dependant: importer flagged when utility breaks it", (await usesLibMarkers()) > 0);
+check("dependant: importer flagged when the library breaks it", (await usesLibMarkers()) > 0);
 await setLib("export const answer = 42;\n");
-check("dependant: importer cleared when utility is fixed", (await usesLibMarkers()) === 0);
+check("dependant: importer cleared when the library is fixed", (await usesLibMarkers()) === 0);
 
 // scripts run in current browsers: newer JS/web APIs type-check (URLPattern
 // is declared by wt-api.d.ts; esnext lib for the rest). The deliberate type

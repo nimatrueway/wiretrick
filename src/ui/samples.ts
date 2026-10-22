@@ -88,7 +88,7 @@ wt.onDom("*://example.org/*", () => {
 });`,
     },
     {
-        name: "Mock a fetch/XHR API",
+        name: "Replace a fetch/XHR response",
         blurb: "Replace a JSON API response; :id in the route is read back as ctx.groups.id. Try it: open dummyjson.com/users/1.",
         code: `// Try it: open https://dummyjson.com/users/1
 wt.about("Mock the users API");

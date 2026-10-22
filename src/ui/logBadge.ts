@@ -108,7 +108,7 @@ export class NetBadge implements TabBadge {
     }
 
     get title(): string {
-        const parts = [this.modified && `${this.modified} modified`, this.tapped && `${this.tapped} tapped`].filter(Boolean);
+        const parts = [this.modified && `${this.modified} modified`, this.tapped && `${this.tapped} observed`].filter(Boolean);
         return `${parts.join(", ")} since you last looked at Network`;
     }
 }

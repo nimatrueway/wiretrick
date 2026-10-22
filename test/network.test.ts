@@ -94,7 +94,7 @@ describe("network recorder", () => {
     });
 
     it("keeps script-touched rows while no Network tab is open, without listeners or bodies", () => {
-        annotateFromLog(7, "s1", "[S] onRequest → tapped (no change) https://a.test/x", "debug", "tapped");
+        annotateFromLog(7, "s1", "[S] onRequest → observed (no change) https://a.test/x", "debug", "tapped");
         annotateFromLog(7, "s1", "[S] onResponseBody applied https://a.test/x", "info");
         recordNetBody({ tabId: 7, url: "https://a.test/x", modified: "big" });
         expect(listeners.before?.length ?? 0).toBe(0);
@@ -175,11 +175,11 @@ describe("network recorder", () => {
         const p = fakePort();
         addNetworkPort(p.port);
         req("1", "https://a.test/api");
-        annotateFromLog(7, "s1", "[W] onRequest → tapped (no change) https://a.test/api", "debug", "tapped");
+        annotateFromLog(7, "s1", "[W] onRequest → observed (no change) https://a.test/api", "debug", "tapped");
         annotateFromLog(7, "s1", "[W] onResponseBody applied (1b → 2b) https://a.test/api", "info");
         annotateFromLog(7, "s1", "[W] onResponseBody threw: boom https://a.test/api", "error");
         expect(entries.get("1")!.interventions.map((i) => [i.action, i.kind])).toEqual([
-            ["onRequest → tapped (no change)", "tapped"],
+            ["onRequest → observed (no change)", "tapped"],
             ["onResponseBody applied (1b → 2b)", "modified"],
             ["onResponseBody threw: boom", "tapped"],
         ]);

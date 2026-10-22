@@ -27,7 +27,7 @@ describe("interventionKind", () => {
     });
 
     it("formats the tapped line with the handler and the URL last", () => {
-        expect(tappedLine("Foo", "onRequest", "https://a.test/x")).toBe("[Foo] onRequest → tapped (no change) https://a.test/x");
+        expect(tappedLine("Foo", "onRequest", "https://a.test/x")).toBe("[Foo] onRequest → observed (no change) https://a.test/x");
     });
 });
 
@@ -40,7 +40,7 @@ describe("tapped log lines don't flood the log ring", () => {
         const mine = allLogs().filter((e) => e.tabId === tab);
         expect(mine.filter((e) => e.kind === "tapped")).toHaveLength(50);
         expect(mine.filter((e) => e.level === "info")).toHaveLength(1);
-        expect(mine[mine.length - 1].message).toBe("[S] onRequest → tapped (no change) https://a/299");
+        expect(mine[mine.length - 1].message).toBe("[S] onRequest → observed (no change) https://a/299");
         const replay: LogEntry[] = [];
         addUiPort({ postMessage: (m: any) => replay.push(m.entry), onDisconnect: { addListener: () => {} } } as any);
         expect(replay.filter((e) => e.tabId === tab)).toHaveLength(51);

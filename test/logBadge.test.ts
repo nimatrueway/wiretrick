@@ -34,7 +34,7 @@ describe("Network tab badge", () => {
         b.note("3", "none", true);
         expect([b.modified, b.tapped]).toEqual([1, 1]);
         expect(b.counts).toEqual([["modified", 1], ["tapped", 1]]);
-        expect(b.title).toBe("1 modified, 1 tapped since you last looked at Network");
+        expect(b.title).toBe("1 modified, 1 observed since you last looked at Network");
         // tapped → modified moves the request to the modified pill
         b.note("1", "modified", true);
         expect([b.modified, b.tapped]).toEqual([2, 0]);

@@ -9,7 +9,7 @@
         "128": "icons/icon-128x128.png"
     },
     "browser_action": {
-        "default_title": "Wiretrick Manager",
+        "default_title": "Wiretrick",
         "default_popup": "popup.html",
         "default_icon": {
             "16": "icons/icon-16x16.png",

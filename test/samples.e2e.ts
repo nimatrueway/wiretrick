@@ -50,7 +50,7 @@ const VERIFY: Record<string, (p: Page) => Promise<[boolean, string]>> = {
         const r = await p.evaluate(() => fetch("https://example.com/").then((r) => r.text()).catch((e) => "ERR " + e));
         return [r.includes("Example Domain"), r.slice(0, 80)];
     },
-    "Mock a fetch/XHR API": async (p) => {
+    "Replace a fetch/XHR response": async (p) => {
         await open(p, "https://dummyjson.com/users/1");
         const t = await text(p);
         return [t.includes("Mocked User"), t.slice(0, 80)];

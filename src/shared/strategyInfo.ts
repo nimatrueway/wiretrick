@@ -1,6 +1,6 @@
 /**
  * User-facing facts about each strategy — one source for the settings
- * schema (VS Code hovers), settings.yaml comments, the manager's strategy
+ * schema (VS Code hovers), settings.yaml comments, the Editor's strategy
  * picker and the hover help. Keep in sync with docs/strategies.md.
  */
 import { builtinStrategy, STRATEGIES, type Strategy } from "./route";
@@ -17,7 +17,7 @@ export const STRATEGY_INFO: Record<Strategy, StrategyInfo> = {
     helper: {
         label: "helper — local helper proxy",
         pros: "Sees everything: documents, <script src>, CSS, images, workers, the first navigation. No banner. Async handlers, any status code, URL unchanged.",
-        cons: "Chromium only. One-time install of the local helper and trust in its helper certificate. Matched hosts go through a local proxy (PAC); cert-pinned / mTLS sites break. Small per-request latency; bodies are buffered for onResponseBody.",
+        cons: "Chromium only. One-time install of the local helper and trust in the helper certificate. Matched hosts go through a local proxy (PAC); cert-pinned / mTLS sites break. Small per-request latency; bodies are buffered for onResponseBody.",
     },
     page: {
         label: "page — in-page fetch/XHR patch",
@@ -48,7 +48,7 @@ export function strategyMarkdown(): string {
     const rows = STRATEGIES.map((s) => `| \`${s}\` | ${STRATEGY_INFO[s].pros} | ${STRATEGY_INFO[s].cons} |`);
     return [
         "Interception strategy for every handler whose route doesn't set its own `strategy`.",
-        `Default: \`${builtinStrategy(false)}\` on Chromium, \`${builtinStrategy(true)}\` on Firefox. A handler whose strategy isn't available doesn't run (⚠ in the popup/manager, warning in the LOG) — there is no fallback.`,
+        `Default: \`${builtinStrategy(false)}\` on Chromium, \`${builtinStrategy(true)}\` on Firefox. A handler whose strategy isn't available doesn't run (⚠ in the popup/Editor, warning in the Log view) — there is no fallback.`,
         "",
         `[Compatibility](${STRATEGY_DOC_URL})`,
         "",

@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Wiretrick Manager</title>
+    <title>Wiretrick Editor</title>
     <link rel="stylesheet" href="theme.css">
     <script src="theme-boot.js"></script>
     <link rel="stylesheet" href="ui.css">
@@ -39,7 +39,7 @@
                 <div id="monaco-host"></div>
                 <div id="split-h" title="Drag to resize"></div>
                 <div id="log-panel">
-                    <div id="log-header" title="Drag to dock: below the editor, beside it, or under the script list">
+                    <div id="log-header" title="Drag to dock: below the Code view, beside it, or under the script list">
                         <span id="panel-tabs" role="tablist">
                             <span id="log-header-title" class="panel-tab active" role="tab" data-panel="log" title="Extension and script log">Log<span id="log-badge" class="tab-badges" hidden><span class="tab-badge error" hidden></span><span class="tab-badge warn" hidden></span></span></span>
                             <span id="network-tab" class="panel-tab" role="tab" data-panel="network" title="Network activity, with what Wiretrick scripts did to each request">Network<span id="net-badge" class="tab-badges" hidden><span class="tab-badge modified" hidden></span><span class="tab-badge tapped" hidden></span></span></span>
@@ -66,7 +66,7 @@
     </div>
     <footer id="status-bar" aria-label="Status bar">
         <button id="sb-log" class="sb-item" title="Log (⌘J)" aria-label="Show the Log"><svg class="sb-ico error" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.8 5.8l4.4 4.4M10.2 5.8l-4.4 4.4" stroke="currentColor" stroke-width="1.3"/></svg><span class="sb-n" data-k="error">0</span><svg class="sb-ico warn" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 2 14.5 13.5h-13z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 6.5v3.5M8 11.5v.6" stroke="currentColor" stroke-width="1.3"/></svg><span class="sb-n" data-k="warn">0</span></button>
-        <button id="sb-net" class="sb-item" title="Network" aria-label="Show the Network tab"><svg class="sb-ico modified" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="4.5" fill="currentColor"/></svg><span class="sb-n" data-k="modified">0</span><svg class="sb-ico tapped" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="4.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 1.6"/></svg><span class="sb-n" data-k="tapped">0</span></button>
+        <button id="sb-net" class="sb-item" title="Network" aria-label="Show the Network view"><svg class="sb-ico modified" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="4.5" fill="currentColor"/></svg><span class="sb-n" data-k="modified">0</span><svg class="sb-ico tapped" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="4.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 1.6"/></svg><span class="sb-n" data-k="tapped">0</span></button>
     </footer>
 
     <div id="quick-open" class="overlay hidden">
@@ -82,9 +82,9 @@
             <div class="settings-layout">
                 <nav class="settings-nav" aria-label="Settings sections">
                     <button data-settings-nav="settings-sec-appearance" class="active">Appearance</button>
-                    <button data-settings-nav="settings-sec-folder">Scripts folder</button>
+                    <button data-settings-nav="settings-sec-folder">Synced folder</button>
                     <button data-settings-nav="settings-sec-io">Import / Export</button>
-                    <button data-settings-nav="settings-sec-strategy">Interception</button>
+                    <button data-settings-nav="settings-sec-strategy">Strategy</button>
                     <button data-settings-nav="settings-sec-helper">Local helper</button>
                     <button data-settings-nav="settings-sec-logging">Logging</button>
                     <button data-settings-nav="settings-sec-advanced">Advanced</button>
@@ -101,13 +101,13 @@
                                     <option value="dark">Dark</option>
                                     <option value="light">Light</option>
                                 </select>
-                                <p class="setting-help">System follows the OS. Applies to the manager, the editor and the popup.</p>
+                                <p class="setting-help">System follows the OS. Applies to the Editor (Code view included) and the popup.</p>
                             </div>
                         </div>
                     </section>
 
                     <section id="settings-sec-folder" class="settings-section">
-                        <h3>Scripts folder</h3>
+                        <h3>Synced folder</h3>
                         <div class="setting">
                             <span class="setting-label">Folder</span>
                             <div class="setting-control">
@@ -121,7 +121,7 @@
                         <div class="setting">
                             <label class="setting-label" for="settings-vscode-path">Folder path</label>
                             <div class="setting-control">
-                                <input id="settings-vscode-path" type="text" placeholder="/Users/you/Wiretrick" title="Absolute path of the synced scripts folder, for the Open in VS Code button">
+                                <input id="settings-vscode-path" type="text" placeholder="/Users/you/Wiretrick" title="Absolute path of the synced folder, for the Open in VS Code button">
                                 <p class="setting-help">Absolute path of that folder, used by the ↗ VS Code button (the browser can't read the real path itself).</p>
                             </div>
                         </div>
@@ -153,12 +153,12 @@
                     </section>
 
                     <section id="settings-sec-strategy" class="settings-section">
-                        <h3>Interception</h3>
+                        <h3>Strategy</h3>
                         <div class="setting">
                             <label class="setting-label" for="settings-strategy">Default strategy</label>
                             <div class="setting-control">
                                 <select id="settings-strategy"></select>
-                                <p class="setting-help">How handlers intercept traffic unless their route sets <code>strategy</code>. A handler whose strategy isn't available doesn't run — it gets a ⚠ and a LOG warning; there is no fallback. <a id="settings-strategy-doc" target="_blank" rel="noopener">Compatibility</a></p>
+                                <p class="setting-help">How handlers intercept traffic unless their route sets <code>strategy</code>. A handler whose strategy isn't available doesn't run — it gets a ⚠ and a Log view warning; there is no fallback. <a id="settings-strategy-doc" target="_blank" rel="noopener">Compatibility</a></p>
                                 <table id="settings-strategy-table" class="strategy-table"></table>
                             </div>
                         </div>
@@ -206,10 +206,10 @@
                             </div>
                         </div>
                         <div class="setting">
-                            <span class="setting-label">Tab badges</span>
+                            <span class="setting-label">Unread counts</span>
                             <div class="setting-control">
-                                <label class="setting-check"><input id="settings-log-badge" type="checkbox" checked> Count new errors/warnings on the Log tab and tapped/modified requests on the Network tab, and show them in the status bar</label>
-                                <p class="setting-help">Shown while a tab is out of view; cleared when you look at it. Network counts start once the Network tab has been opened (that starts recording). Tapped: a script handler ran on the request without changing it; modified: a handler changed it.</p>
+                                <label class="setting-check"><input id="settings-log-badge" type="checkbox" checked> Count new errors/warnings in the Log view and observed/modified requests in the Network view, and show them in the status bar</label>
+                                <p class="setting-help">Shown while a view is hidden; cleared when you look at it. Network counts start once the Network view has been opened (that starts recording). Observed: a script handler ran on the request without changing it; modified: a handler changed it.</p>
                             </div>
                         </div>
                     </section>

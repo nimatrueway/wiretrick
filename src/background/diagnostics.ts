@@ -162,7 +162,7 @@ export async function collectDiagnostics(extra: DiagnosticsExtra = {}): Promise<
         out.push(fence("ts", s.code));
     }
     out.push("");
-    out.push(`## LOG (${logs.length} lines)`);
+    out.push(`## Log (${logs.length} lines)`);
     out.push("");
     out.push(fence("text", logs.map((l) => `${iso(l.at)} ${l.level.toUpperCase().padEnd(5)} tab=${l.tabId}${l.scriptId ? ` script=${l.scriptId}` : ""} ${l.message}`).join("\n") || "(empty)"));
     out.push("");
@@ -170,7 +170,7 @@ export async function collectDiagnostics(extra: DiagnosticsExtra = {}): Promise<
     out.push("");
     out.push(fence("text", debug.map((d) => `${iso(d.at)} ${(d.level || "debug").toUpperCase().padEnd(5)} [${d.src}] ${d.msg}`).join("\n") || "(empty)"));
     out.push("");
-    out.push(`## Network (${net.length} requests${isRecording() ? "" : " — recording is OFF, only script-touched requests are kept: open the manager's Network tab, reproduce, then collect again for full detail"})`);
+    out.push(`## Network (${net.length} requests${isRecording() ? "" : " — recording is OFF, only script-touched requests are kept: open the Editor's Network view, reproduce, then collect again for full detail"})`);
     out.push("");
     out.push(fence("json", net.length ? net.map((e) => JSON.stringify(e)).join("\n") : "(empty)"));
     out.push("");

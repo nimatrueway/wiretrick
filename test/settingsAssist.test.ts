@@ -31,7 +31,7 @@ describe("settings.yaml diagnostics", () => {
         expect(m.some((x) => x.startsWith("warning:Outside number (0…10)"))).toBe(true);
         expect(m.some((x) => x.startsWith('warning:"API mocker" declares no param "nope"'))).toBe(true);
         expect(m).toContain('warning:No script named "Ghost" — ignored');
-        expect(m.some((x) => x.includes("is a utility"))).toBe(true);
+        expect(m.some((x) => x.includes("is a library"))).toBe(true);
         expect(m.some((x) => x.startsWith('warning:Unknown top-level key "extra"'))).toBe(true);
     });
     it("ranges point at the offending node", () => {

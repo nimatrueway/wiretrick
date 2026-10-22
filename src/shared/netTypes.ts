@@ -19,7 +19,7 @@ export interface NetIntervention {
     at: number;
 }
 
-const TAPPED_MARK = "→ tapped (no change)";
+const TAPPED_MARK = "→ observed (no change)";
 const MISSED_MARK = " never ran for ";
 
 /** WARN line for a body handler no tier ran: `[Name] onResponseBody never ran for <url> (document) — reason`. */

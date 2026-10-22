@@ -137,14 +137,14 @@ describe("webRequest tier: log lines use the stored script name", () => {
     });
 
 
-    it("no-match (handler returns undefined) logs only a DEBUG 'tapped (no change)' line", () => {
+    it("no-match (handler returns undefined) logs only a DEBUG 'observed (no change)' line", () => {
         const s = new WebRequestStrategy();
         s.reload([storedScript("a", "API mocker", `wt.onRequest("*", () => undefined);`)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("allow");
         const lines = entries.filter((e) => e.message.includes("onRequest →"));
         expect(lines.map((e) => [e.level, e.kind, e.scriptId])).toEqual([["debug", "tapped", "a"]]);
-        expect(lines[0].message).toMatch(/^\[API mocker\] onRequest → tapped \(no change\) https:\/\//);
+        expect(lines[0].message).toMatch(/^\[API mocker\] onRequest → observed \(no change\) https:\/\//);
     });
 
     it("replaceResponse → null and no-op onResponseHeaders are tapped; header changes stay INFO", () => {
@@ -157,8 +157,8 @@ wt.onResponseHeaders("*", () => undefined);`),
         s.handleBeforeRequest(details(), null);
         s.handleHeadersReceived(details(), null);
         expect(entries.filter((e) => e.scriptId).map((e) => [e.level, e.message.replace(/ https:.*/, "")])).toEqual([
-            ["debug", "[Looker] replaceResponse → tapped (no change)"],
-            ["debug", "[Looker] onResponseHeaders → tapped (no change)"],
+            ["debug", "[Looker] replaceResponse → observed (no change)"],
+            ["debug", "[Looker] onResponseHeaders → observed (no change)"],
             ["info", "[Hdr] onResponseHeaders → set x-a"],
         ]);
     });

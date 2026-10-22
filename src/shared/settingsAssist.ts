@@ -111,7 +111,7 @@ export function settingsDiagnostics(text: string, scripts: AssistScript[]): Assi
                     const pk = isScalar(p.key) ? String(p.key.value) : "";
                     const v = (p.value as any)?.toJSON?.() ?? null;
                     if (pk === "enabled") {
-                        if (!s.declared) at(p.key as Node, "warning", `"${name}" is a utility (registers no handlers) — it has no enabled switch`);
+                        if (!s.declared) at(p.key as Node, "warning", `"${name}" is a library (registers no handlers) — it has no enabled switch`);
                         else if (v !== null && typeof v !== "boolean") at(p.value as Node, "error", "Expected true or false");
                         continue;
                     }
@@ -238,7 +238,7 @@ export function settingsCompletions(text: string, offset: number, scripts: Assis
     } else if (c.path.length === 1 && a === "settings") {
         for (const [k, d] of Object.entries(GLOBAL_PROPS)) key(k, `${d.type}, default ${JSON.stringify(d.default)}`, d.description);
     } else if (c.path.length === 1 && a === "params") {
-        for (const x of scripts) key(x.name, x.declared ? "script" : "utility", paramSummary(x), "module", true);
+        for (const x of scripts) key(x.name, x.declared ? "script" : "library", paramSummary(x), "module", true);
     } else if (c.path.length === 2 && a === "params" && s) {
         if (s.declared) key("enabled", "boolean, default true", "Run this script");
         for (const [k, d] of Object.entries(s.defs)) if (k !== "enabled") key(k, `${typeLabel(d)}, default ${JSON.stringify(paramDefault(d))}`, d.description);
@@ -248,7 +248,7 @@ export function settingsCompletions(text: string, offset: number, scripts: Assis
 
 function paramSummary(s: AssistScript): string {
     const ks = Object.entries(s.defs).filter(([k]) => k !== "enabled");
-    const head = s.declared ? "" : "Utility (registers no handlers): no enabled switch.\n\n";
+    const head = s.declared ? "" : "Library (registers no handlers): no enabled switch.\n\n";
     return head + (ks.length ? ks.map(([k, d]) => `- \`${k}\`: ${typeLabel(d)}${d.description ? " — " + d.description : ""}`).join("\n") : "No params.");
 }
 
@@ -280,7 +280,7 @@ export function settingsHover(text: string, offset: number, scripts: AssistScrip
         md = s ? `**${k}**\n\n${paramSummary(s)}` : `No script named **${k}** — ignored`;
     } else if (c.path.length === 2 && a === "params") {
         const s = scripts.find((x) => x.name === b);
-        if (s && k === "enabled") md = s.declared ? "**enabled** — Run this script\n\n`boolean` · default `true`" : `"${b}" is a utility — it has no enabled switch`;
+        if (s && k === "enabled") md = s.declared ? "**enabled** — Run this script\n\n`boolean` · default `true`" : `"${b}" is a library — it has no enabled switch`;
         else if (s?.defs[k]) {
             const d = s.defs[k];
             md = `**${k}**${d.description ? " — " + d.description : ""}\n\n\`${typeLabel(d)}\` · default \`${JSON.stringify(paramDefault(d))}\``;

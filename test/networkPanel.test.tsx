@@ -143,8 +143,8 @@ describe("NetworkPanel", () => {
         expect(container.querySelector("tbody tr")!.classList.contains("modified")).toBe(true);
     });
 
-    it("marks tapped vs modified rows; Tapped = tapped-only, Modified, Tapped / Modified = either; footer counts", () => {
-        const tapped = { scriptId: "s", scriptName: "Watcher", action: "onRequest → tapped (no change)", level: "debug" as const, kind: "tapped" as const, at: base };
+    it("marks observed vs modified rows; Observed = observed-only, Modified, Touched = either; footer counts", () => {
+        const tapped = { scriptId: "s", scriptName: "Watcher", action: "onRequest → observed (no change)", level: "debug" as const, kind: "tapped" as const, at: base };
         const modified = { scriptId: "m", scriptName: "Mocker", action: "onResponseBody applied (1b → 2b)", level: "info" as const, kind: "modified" as const, at: base };
         const { container } = setup([
             entry("plain"),
@@ -153,13 +153,13 @@ describe("NetworkPanel", () => {
         ]);
         const rows = [...container.querySelectorAll("tbody tr")];
         expect(rows.map((r) => (r.classList.contains("modified") ? "modified" : r.classList.contains("tapped") ? "tapped" : "none"))).toEqual(["none", "tapped", "modified"]);
-        expect(container.querySelector(".net-status")!.textContent).toContain("1 tapped · 1 modified");
+        expect(container.querySelector(".net-status")!.textContent).toContain("1 observed · 1 modified");
         expect(container.querySelector(".net-status .net-hl")!.textContent).toBe("1 modified");
         // per-script badges: hollow for a script that only looked
         expect([...rows[2].querySelectorAll(".net-badge")].map((b) => b.className)).toEqual(["net-badge tapped", "net-badge modified"]);
-        pickActivity(container, "Tapped");
+        pickActivity(container, "Observed");
         expect(rowNames(container)).toEqual(["watched.js"]);
-        pickActivity(container, "Tapped / Modified");
+        pickActivity(container, "Touched");
         expect(rowNames(container)).toEqual(["watched.js", "changed.js"]);
         pickActivity(container, "Modified");
         expect(rowNames(container)).toEqual(["changed.js"]);
@@ -178,7 +178,7 @@ describe("NetworkPanel", () => {
         const list = container.querySelector('[role="listbox"]')!;
         expect(button.getAttribute("aria-expanded")).toBe("true");
         const opts = [...list.querySelectorAll('[role="option"]')];
-        expect(opts.map((o) => o.textContent)).toEqual(["All", "Tapped", "Modified", "Tapped / Modified"]);
+        expect(opts.map((o) => o.textContent)).toEqual(["All", "Observed", "Modified", "Touched"]);
         expect(opts.map((o) => [...o.querySelectorAll(".net-mark")].map((m) => m.className))).toEqual([
             [],
             ["net-mark tapped"],
@@ -202,13 +202,13 @@ describe("NetworkPanel", () => {
         expect(list2.getAttribute("aria-activedescendant")).toBe("net-touch-opt-tapped");
         fireEvent.keyDown(list2, { key: "End" });
         fireEvent.keyDown(list2, { key: " " });
-        expect(button.getAttribute("aria-label")).toBe("Script activity: Tapped / Modified");
+        expect(button.getAttribute("aria-label")).toBe("Script activity: Touched");
         // Escape closes without changing; outside click closes
         fireEvent.click(button);
         fireEvent.keyDown(container.querySelector('[role="listbox"]')!, { key: "Home" });
         fireEvent.keyDown(container.querySelector('[role="listbox"]')!, { key: "Escape" });
         expect(container.querySelector('[role="listbox"]')).toBeNull();
-        expect(button.getAttribute("aria-label")).toBe("Script activity: Tapped / Modified");
+        expect(button.getAttribute("aria-label")).toBe("Script activity: Touched");
         fireEvent.click(button);
         fireEvent.mouseDown(document.body);
         expect(container.querySelector('[role="listbox"]')).toBeNull();

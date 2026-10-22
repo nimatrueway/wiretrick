@@ -10,7 +10,7 @@ wt.about("Debug the user API");
 
 const API = "*://app.example.com/api/*";
 
-// Redirect / cancel / request headers / mock:
+// Redirect / block / request headers / respond:
 wt.onRequest(API, (ctx) => {
     // return { redirect: "https://myserver/user.json" };
     // return { block: true };
@@ -36,7 +36,7 @@ wt.onDom("*://app.example.com/*", () => {
 
 Register handlers synchronously at top level. A registration after an
 `await` or inside a callback logs an error and is ignored. A file that
-registers no handlers is a [utility](#utilities-and-recipes).
+registers no handlers is a [library](#libraries-and-recipes).
 
 ## Routes
 
@@ -44,30 +44,30 @@ The first argument of every handler says where it applies:
 
 | form | example |
 |---|---|
-| one pattern | `wt.onRequest("*://example.com/*", fn)` |
+| one URL pattern | `wt.onRequest("*://example.com/*", fn)` |
 | a list | `wt.onRequest(["*://a.example.com/*", "*://b.example.com/*"], fn)` |
-| route object | `wt.onRequest({ url, exclude, methods, types, strategy }, fn)` |
+| route object | `wt.onRequest({ url, exclude, methods, resourceTypes, strategy }, fn)` |
 | `onDom` route object | `wt.onDom({ url, exclude, when }, fn)` |
 
 An empty list matches **nothing**, never everything.
 
-### Patterns
+### URL patterns
 
-Patterns are [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API) strings, the web-standard syntax
+URL patterns are [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API) strings, the web-standard syntax
 also available to scripts as `new URLPattern(...)`. `*` is a wildcard
 within a URL part, `:name` is a named segment, and a query or hash you
 leave out matches any. `"<all_urls>"` matches every URL.
 
-| pattern | matches |
+| URL pattern | matches |
 |---|---|
 | `*://example.com/*` | any scheme, any path on `example.com` (default port only) |
 | `https://*.example.com/api/*` | every subdomain's `/api/…` (not `example.com` itself) |
 | `https://cdn.example.com/static/*.js` | only `.js` files under `/static/` |
 | `https://example.com/users/:id` | `/users/42`, not `/users/42/posts` |
 | `http://localhost:8081/*` | that port only |
-| `*://localhost:*/*` | any port (a pattern without a port matches only 80/443) |
+| `*://localhost:*/*` | any port (a URL pattern without a port matches only 80/443) |
 
-An invalid pattern (e.g. `*example.com*`, which has no scheme) makes the
+An invalid URL pattern (e.g. `*example.com*`, which has no scheme) makes the
 registration throw. The error shows on the script.
 
 Named groups land in `ctx.groups` (`*` wildcards as `"0"`, `"1"`, …):
@@ -78,7 +78,7 @@ wt.onRequest("https://api.example.com/users/:id", (ctx) => {
 });
 ```
 
-### Route object: `exclude`, `methods`, `types`, `strategy`
+### Route object: `exclude`, `methods`, `resourceTypes`, `strategy`
 
 ```ts
 wt.onResponseBody(
@@ -93,35 +93,35 @@ wt.onResponseBody(
 );
 ```
 
-`exclude`, `methods` and `types` only **narrow** a route.
+`exclude`, `methods` and `resourceTypes` only **narrow** a route.
 
 - **`exclude`** — URL patterns to skip even when `url` matches. Cheap: one
-  extra pattern test, only on URLs that already matched `url`, on every
+  extra URL pattern test, only on URLs that already matched `url`, on every
   strategy. It can't narrow what `debugger` or `helper` pause (their filters
   can't express "except"), so an excluded URL may still be paused there and
   continued unchanged. The local helper checks `exclude` itself, so it
   doesn't ask the extension about excluded URLs.
 - **`methods`** — HTTP methods, case-insensitive. Omit for any. As cheap as
   `exclude`, checked the same way everywhere.
-- **`types`** — resource types, the browser's label for why a request was
+- **`resourceTypes`** — resource types, the browser's label for why a request was
   made (webRequest names, also `ctx.resourceType`): `main_frame`,
   `sub_frame`, `stylesheet`, `script`, `image`, `font`, `object`,
   `xmlhttprequest` (fetch and XHR), `ping`, `csp_report`, `media`,
   `websocket`, `other`. Omit for every type. How much it saves depends on
   the strategy:
 
-  | strategy | how `types` is applied |
+  | strategy | how `resourceTypes` is applied |
   |---|---|
   | `debugger` | Only these types are paused (the debugger's `Fetch.enable` patterns); other requests are never stopped. The cheapest way to keep a route off images, fonts and other assets. |
   | `webRequest` | Checked in the listener before any script runs. |
   | `helper` | Checked after the helper pauses the request: filters correctly, saves no work. |
-  | `page` | The hook only sees page fetch/XHR (`xmlhttprequest`). A list without `xmlhttprequest` means the handler never runs, and the LOG warns. |
+  | `page` | Only sees page fetch/XHR (`xmlhttprequest`). A list without `xmlhttprequest` means the handler never runs, and the Log view warns. |
 
-  `onDom` routes have no `types` or `methods`.
+  `onDom` routes have no `resourceTypes` or `methods`.
 - **`strategy`** — run this handler on one [strategy](strategies.md):
   `"helper"`, `"page"`, `"webRequest"` or `"debugger"`. Omit to use the default
   from Settings → Strategy. There is no fallback: when the strategy
-  isn't available, the handler doesn't run and the LOG says why.
+  isn't available, the handler doesn't run and the Log view says why.
 
 > **Tip:** `page` is the lightest strategy, but it only sees the page's own
 > fetch/XHR (REST/API) calls. For documents, `<script src>`, images,
@@ -136,10 +136,10 @@ wt.onResponseBody(
 ## Description and parameters
 
 `wt.about("…")` sets a one-line description, shown as the script's
-tooltip in the manager and in the popup.
+tooltip in the Editor and in the popup.
 
 `wt.params` declares typed knobs the user changes from the popup's ⚙
-dialog, the manager or `settings.yaml` without touching the script:
+dialog, the Editor or `settings.yaml` without touching the script:
 
 ```ts
 wt.about("Force failures on the posts API");
@@ -178,15 +178,15 @@ wt.onResponseHeaders(cfg.hosts.map((h) => `*://${h}/*`), () => ({
 }));
 ```
 
-Param values persist per script and apply on save — the change hot-reloads
+Param values persist per script and apply on save — the change is hot applied
 like a code edit. Parameter types: `boolean` (switch), `number` (with
 optional `min`, `max`, `step`), `string` (text; add `multiline: true` for a
 textarea, written to `settings.yaml` as a `|` block scalar when it contains
 newlines), `enum` (dropdown of `choices`), `stringList` (add/remove list).
 
-## Utilities and recipes
+## Libraries and recipes
 
-A file that registers no handlers is a **utility**: it never runs on its
+A file that registers no handlers is a **library**: it never runs on its
 own (the popup lists it only when it declares params) but other scripts
 import it:
 
@@ -198,12 +198,12 @@ export function double(n: number) { return n * 2; }
 import { double } from "./utils";   // "./utils", "utils", "utils.ts" all resolve
 ```
 
-A utility can export **recipes** — functions that register handlers. The
+A library can export **recipes** — functions that register handlers. The
 handler belongs to the script that calls the recipe (its badge, log, popup
 entry and params):
 
 ```ts
-// utility "mocks":
+// library "mocks":
 export function mockJson(url: string, body: object) {
     wt.onRequest(url, () => ({ respond: { body } }));
 }
@@ -213,23 +213,23 @@ import { mockJson } from "./mocks";
 mockJson("*://api.example.com/me", { id: 1, role: "admin" });
 ```
 
-Utilities may declare params too, as shared config. They're editable in the
-popup (marked 𝑓, no enabled switch), the manager and `settings.yaml`, and
-importers see the utility's values. Whether a file is a utility is decided
-with its current param values, so a utility that registers handlers only
+Libraries may declare params too, as shared config. They're editable in the
+popup (marked 𝑓, no enabled switch), the Editor and `settings.yaml`, and
+importers see the library's values. Whether a file is a library is decided
+with its current param values, so a library that registers handlers only
 for some value becomes a script when you change it (and back):
 
 ```ts
-// utility "gate": a utility until "on" is switched on
+// library "gate": a library until "on" is switched on
 const p = wt.params({ on: { type: "boolean", default: false } });
 if (p.on) wt.onRequest("*://api.example.com/*", () => ({ block: true }));
 ```
 
-Param definitions can be shared too — export them from a utility and pass
+Param definitions can be shared too — export them from a library and pass
 them to `wt.params` (directly or spread); the importer gets its own values:
 
 ```ts
-// utility "utils":
+// library "utils":
 export const envParam = { type: "stringList", default: ["dev"] } as const;
 
 // script:
@@ -308,17 +308,17 @@ title/DOM changes on SPAs.
 ## Multiple handlers — how they stack
 
 When several handlers match the same request, they run in **list order**:
-scripts top to bottom in the manager, then registration order within a
+scripts top to bottom in the Editor, then registration order within a
 script. Per kind:
 
-**`wt.onRequest`** — the first handler that returns a *terminal* result
-(`respond`, `redirect`, or `cancel`) wins and stops the chain; later
+**`wt.onRequest`** — the first handler that returns a *final* result
+(`respond`, `redirect`, or `block`) wins and stops the chain; later
 handlers don't run for that request. Handlers that return nothing (or only
 `headers`) don't stop the chain — their header changes merge (later `set`
 wins per key, `remove` accumulates) and apply even when a later handler
-terminates.
+returns a final result.
 
-**`respond`** — a terminal result that synthesizes the response immediately,
+**`respond`** — a final result that synthesizes the response immediately,
 **without the network request ever happening**:
 
 ```ts
@@ -332,7 +332,7 @@ wt.onRequest("*://api.example.com/me", () => ({
 }));
 ```
 
-It stacks like every terminal result: first handler to `respond` wins. On
+It stacks like every final result: first handler to `respond` wins. On
 `page`, `debugger` and `helper` the response is fulfilled in place with any
 status and headers, URL kept. `webRequest` serves status 200 only (another
 status is skipped with a warning): in place on Firefox, and on Chromium MV2
@@ -365,7 +365,7 @@ result depends on the handler's strategy:
 
 | handler | `page` (page fetch/XHR) | `webRequest`, Chromium MV2 | `webRequest`, Firefox | `debugger` | `helper` |
 |---|---|---|---|---|---|
-| `onRequest` redirect/cancel/respond | ✅ awaited | ⚠ result ignored, error logged — blocking webRequest can't await | ✅ awaited natively | ✅ awaited at the Request stage | ✅ awaited |
+| `onRequest` redirect/block/respond | ✅ awaited | ⚠ result ignored, error logged — blocking webRequest can't await | ✅ awaited natively | ✅ awaited at the Request stage | ✅ awaited |
 | `onRequest` headers | ✅ awaited | ⚠ ignored + error | ✅ awaited | ✅ awaited, applied at the Response stage | ✅ awaited, sent upstream |
 | `onResponseHeaders` | — (not on `page`) | ⚠ ignored + error | ✅ awaited | ✅ awaited, merged into the fulfilled headers | ✅ awaited |
 | `replaceResponse` | ✅ awaited — the page's `fetch`/XHR promise simply takes as long as the handler needs | ⚠ result ignored + error (a sync redirect can't be built late) | ✅ awaited, written in place (URL kept) | ✅ awaited, fulfills the body | ✅ awaited, upstream never contacted |
@@ -376,7 +376,7 @@ Practical rules of thumb:
 
 - **Mocking/transforming APIs (fetch/XHR)?** Async just works — write
   `wt.onResponseBody(API, async (ctx, body) => { const j = await translate(body); return …; })`.
-- **Redirect/cancel or header changes decided asynchronously** on Chromium?
+- **Redirect/block or header changes decided asynchronously** on Chromium?
   Use `helper` or `debugger` (the default `helper` already awaits). Only
   Chromium's `webRequest` can't: there an async result logs an error and the
   request proceeds unmodified — set `strategy: "helper"` or `"debugger"` on the

@@ -90,7 +90,7 @@ declare namespace Wiretrick {
      * (→ `ctx.groups.name`), and an omitted query or hash matches any. An
      * omitted port means the default port only (write `:*` for any).
      * `"<all_urls>"` matches every URL. An empty list matches **nothing**.
-     * An invalid pattern makes the registration throw.
+     * An invalid URL pattern makes the registration throw.
      *
      * @example "*://example.com/*"
      * @example ["https://*.example.com/api/v1/*", "https://cdn.example.com/static/*.js"]
@@ -104,7 +104,7 @@ declare namespace Wiretrick {
         /**
          * URLs to skip even when `url` matches (same syntax).
          *
-         * Cheap: one extra pattern test, only on URLs that already matched
+         * Cheap: one extra URL pattern test, only on URLs that already matched
          * `url`. It filters correctly on every strategy but can't narrow
          * what `debugger`/`helper` pause, so an excluded URL may still be paused
          * there and then continued unchanged.

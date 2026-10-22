@@ -411,8 +411,8 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
                 {" · "}
                 {formatBytes(bytes)} transferred
                 {" · "}
-                <span class="net-touch-count" title="Tapped: a script handler ran on the request without changing it · Modified: a handler changed it">
-                    {touched.tapped} tapped · <span class={touched.modified ? "net-hl" : ""}>{touched.modified} modified</span>
+                <span class="net-touch-count" title="Observed: a script handler ran on the request without changing it · Modified: a handler changed it">
+                    {touched.tapped} observed · <span class={touched.modified ? "net-hl" : ""}>{touched.modified} modified</span>
                 </span>
             </div>
         </div>
@@ -421,12 +421,12 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
 
 const TOUCH_OPTIONS: { value: TouchFilter; label: string; marks: ("tapped" | "modified")[]; title: string }[] = [
     { value: "all", label: "All", marks: [], title: "All requests" },
-    { value: "tapped", label: "Tapped", marks: ["tapped"], title: "A script handler ran on the request without changing it" },
+    { value: "tapped", label: "Observed", marks: ["tapped"], title: "A script handler ran on the request without changing it" },
     { value: "modified", label: "Modified", marks: ["modified"], title: "A script handler changed the request" },
-    { value: "any", label: "Tapped / Modified", marks: ["tapped", "modified"], title: "Any request a script handler ran on" },
+    { value: "any", label: "Touched", marks: ["tapped", "modified"], title: "Any request a script handler ran on" },
 ];
 
-/** the row markers (dashed = tapped, solid = modified) as swatches */
+/** the row markers (dashed = observed, solid = modified) as swatches */
 function Marks({ marks }: { marks: ("tapped" | "modified")[] }) {
     return (
         <span class="net-marks" aria-hidden="true">
@@ -483,7 +483,7 @@ function TouchMenu({ value, onChange }: { value: TouchFilter; onChange: (v: Touc
                 aria-haspopup="listbox"
                 aria-expanded={open}
                 aria-label={`Script activity: ${current.label}`}
-                title={"Filter by script activity\nTapped: a handler ran without changing the request\nModified: a handler changed it"}
+                title={"Filter by script activity\nObserved: a handler ran without changing the request\nModified: a handler changed it"}
                 onClick={() => (open ? close() : show())}
                 onKeyDown={(ev) => {
                     if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
@@ -542,7 +542,7 @@ function TouchMenu({ value, onChange }: { value: TouchFilter; onChange: (v: Touc
 
 const KIND_TITLE: Record<NetIntervention["kind"], string> = {
     modified: "Modified: the handler changed the request",
-    tapped: "Tapped: the handler ran without changing it",
+    tapped: "Observed: the handler ran without changing it",
     missed: "Missed: a body handler should have run here but no strategy ran it",
 };
 

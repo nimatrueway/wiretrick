@@ -41,8 +41,8 @@ describe("tapped vs modified logging", () => {
         return runOp(scripts as any, op, { url, method: "GET", ...args }, { log: (_id: string, level: string, msg: string, kind?: string) => lines.push({ level, msg, kind }) } as any).then((out) => ({ out, lines }));
     }
 
-    it("handlers that change nothing log one DEBUG 'tapped (no change)' line each", async () => {
-        const tapped = (handler: string) => ({ level: "debug", msg: `[S] ${handler} → tapped (no change) ${url}`, kind: "tapped" });
+    it("handlers that change nothing log one DEBUG 'observed (no change)' line each", async () => {
+        const tapped = (handler: string) => ({ level: "debug", msg: `[S] ${handler} → observed (no change) ${url}`, kind: "tapped" });
         expect((await run("requestDecision", { onRequest: [() => undefined, () => ({})] })).lines).toEqual([tapped("onRequest"), tapped("onRequest")]);
         expect((await run("responseHeaders", { onResponseHeaders: [() => ({ headers: { set: {} } })] })).lines).toEqual([tapped("onResponseHeaders")]);
         expect((await run("replace", { replaceResponse: [() => null] })).lines).toEqual([tapped("replaceResponse")]);

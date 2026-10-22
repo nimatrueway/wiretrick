@@ -303,8 +303,8 @@ function renderList(): void {
         name.textContent = scriptFileName(script.meta.name);
         name.title = [
             script.meta.description ?? "",
-            isLib ? "Utility module — registers no handlers, importable by other scripts. Register a handler (e.g. wt.onRequest(url, fn)) to make it a script" : script.meta.match.join(", "),
-            off ? "Disabled — enable it from the editor toolbar or the right-click menu" : "",
+            isLib ? "Library — registers no handlers with its current params, importable by other scripts. Register a handler (e.g. wt.onRequest(url, fn)) to make it a script" : script.meta.match.join(", "),
+            off ? "Disabled — enable it from the toolbar or the right-click menu" : "",
             "Double-click or F2 to rename",
         ].filter(Boolean).join("\n");
 
@@ -896,7 +896,7 @@ function connectLogs(): void {
                 await refresh();
                 const updated = scripts.find((sc) => sc.id === selectedId);
                 if (updated && !dirty) setEditorValue(updated.code);
-                if (updated && dirty) status("script changed on disk — editor has unsaved edits", "dirty");
+                if (updated && dirty) status("script changed on disk — the Code view has unsaved edits", "dirty");
             })();
         }
         if (msg.type === "sync") {
@@ -1624,11 +1624,11 @@ async function autoReconnectFolder(): Promise<void> {
             const ok = await fsBridge.reconnectClicked();
             if (ok) {
                 await markFolderSynced();
-                status("scripts folder reconnected ✓");
+                status("synced folder reconnected ✓");
             }
         };
         btn.addEventListener("click", reconnect);
-        status("scripts folder needs reconnect — click to reconnect", "dirty", () => void reconnect());
+        status("synced folder needs reconnect — click to reconnect", "dirty", () => void reconnect());
     }
 }
 
@@ -1838,8 +1838,8 @@ async function main(): Promise<void> {
         a.remove();
         status(`opening ${file} in VS Code…`);
         const msg = `openInVscode → launching ${url}`;
-        appendLog({ at: Date.now(), message: `[manager] ${msg}`, level: "info" });
-        chrome.runtime.sendMessage({ type: "debugLog", entry: { at: Date.now(), src: "manager", msg, level: "info" } }, () => void chrome.runtime.lastError);
+        appendLog({ at: Date.now(), message: `[editor] ${msg}`, level: "info" });
+        chrome.runtime.sendMessage({ type: "debugLog", entry: { at: Date.now(), src: "editor", msg, level: "info" } }, () => void chrome.runtime.lastError);
     });
     $("#btn-new").addEventListener("click", async () => {
         const id = uuid();
@@ -1899,7 +1899,7 @@ async function main(): Promise<void> {
                 await fsBridge.openFolder();
             } catch (e: any) {
                 if (e?.name === "AbortError") {
-                    managerLog("scripts folder pick cancelled", "warn");
+                    managerLog("folder pick cancelled", "warn");
                     return;
                 }
                 throw e;
@@ -2111,9 +2111,9 @@ let monacoVerbose = false;
  * "Verbose Monaco logging" setting. Verbose lines use "warn" so the panel's
  * level filter never hides them. */
 function managerLog(msg: string, level: string): void {
-    const text = `[manager] ${msg}`;
+    const text = `[editor] ${msg}`;
     appendLog({ at: Date.now(), message: text, level });
-    chrome.runtime.sendMessage({ type: "debugLog", entry: { at: Date.now(), src: "manager", msg, level } }, () => void chrome.runtime.lastError);
+    chrome.runtime.sendMessage({ type: "debugLog", entry: { at: Date.now(), src: "editor", msg, level } }, () => void chrome.runtime.lastError);
 }
 
 function navLog(msg: string, level = "info"): void {
@@ -2121,10 +2121,10 @@ function navLog(msg: string, level = "info"): void {
         if (!monacoVerbose) return;
         level = "warn";
     }
-    const text = `[manager] nav: ${msg}`;
+    const text = `[editor] nav: ${msg}`;
     console.debug(text);
     appendLog({ at: Date.now(), message: text, level });
-    chrome.runtime.sendMessage({ type: "debugLog", entry: { at: Date.now(), src: "manager", msg: `nav: ${msg}`, level } }, () => void chrome.runtime.lastError);
+    chrome.runtime.sendMessage({ type: "debugLog", entry: { at: Date.now(), src: "editor", msg: `nav: ${msg}`, level } }, () => void chrome.runtime.lastError);
 }
 
 /** Verbose-only tracing of the triggers and the TS worker's answer. */

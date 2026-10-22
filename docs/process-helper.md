@@ -9,9 +9,9 @@ script has a handler on the `helper` strategy (the Chromium default — see
 Chrome closes):
 
 1. It listens on `127.0.0.1:<random port>` as an HTTP/HTTPS proxy. HTTPS is
-   terminated with per-host certificates from its own local CA, minted once
-   and cached.
-2. The extension installs a `chrome.proxy` PAC script that sends **only the
+   terminated with per-host certificates signed by the **helper certificate**
+   (its own local CA, minted once and cached).
+2. **Helper routing**: the extension installs a `chrome.proxy` PAC script that sends **only the
    hosts in the routes of `helper` handlers** to the helper. Everything else
    goes exactly where your proxy setting sent it before (direct, fixed
    servers, your PAC, auto-detect, or the system proxy).
@@ -20,8 +20,8 @@ Chrome closes):
    [URLPatterns](https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API)
    as the extension (`<all_urls>` matches everything), and checks the
    routes' `exclude` and `methods` itself, so those requests never reach
-   the extension. `types` is checked extension-side, after the pause. TLS
-   to a host no pattern's hostname/port can match is tunneled untouched.
+   the extension. `resourceTypes` is checked extension-side, after the pause. TLS
+   to a host no URL pattern's hostname/port can match is tunneled untouched.
    Your handlers run in the background page (MV2) or the sandbox (MV3), the
    same code paths as the other strategies. The extension answers continue,
    fulfill, redirect or fail. Requests nobody listens to are not paused, and
@@ -52,7 +52,7 @@ Then click Retry in Settings → Local helper (or reload the extension).
 have, run `wiretrick-helper install --extension-id <extension id> --trust-ca`.
 The installer copies the helper to `<config dir>/bin` and registers it there.
 
-`--trust-ca` adds the helper's CA to the user's trust store: the login
+`--trust-ca` adds the helper certificate to the user's trust store: the login
 keychain on macOS, CurrentUser\Root on Windows, and the NSS db
 (`~/.pki/nssdb`, needs `certutil`) on Linux. Restart Chrome afterwards. Other
 commands: `trust-ca`, `untrust-ca`, `uninstall`, and `--help`. Release builds
@@ -71,7 +71,7 @@ binary.
 
 ## Things to know
 
-- The CA's private key stays in the helper's config dir
+- The helper certificate's private key stays in the helper's config dir
   (`$XDG_CONFIG_HOME/wiretrick-helper`, `~/Library/Application Support/wiretrick-helper`,
   or `%APPDATA%\wiretrick-helper`). It is generated on your machine and never
   leaves it. Anyone who can read it can impersonate sites to this browser
@@ -81,7 +81,7 @@ binary.
   `strategy` on that handler).
 - When another extension or an enterprise policy controls the proxy setting,
   the strategy stays unavailable (shown in Settings). Handlers on `helper` then don't
-  run — there is no fallback; the Log warns and the script gets a ⚠. Pick
+  run — there is no fallback; the Log view warns and the script gets a ⚠. Pick
   another default strategy in Settings → Strategy, or set `strategy`
   on the route.
 - Firefox doesn't need it: `webRequest` already gives the same reach there.

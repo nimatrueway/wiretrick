@@ -142,7 +142,7 @@ describe("Popup", () => {
         const api = fakeApi([script("a", "Alpha")]);
         render(<Popup api={api} />);
         fireEvent.click(await screen.findByLabelText("Edit"));
-        fireEvent.click(screen.getByText("Manage all"));
+        fireEvent.click(screen.getByText("Open Editor"));
         expect(api.calls).toEqual([["openManager", "a"], ["openManager", undefined]]);
     });
 

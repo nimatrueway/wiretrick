@@ -39,7 +39,7 @@ describe("diagnostic report", () => {
         log(3, "[webRequest] request FAILED net::ERR_BLOCKED_BY_CLIENT script https://a/x.js", "warn");
         const { collectDiagnostics } = await import("../src/background/diagnostics");
         const md = await collectDiagnostics({ extensions: [{ name: "uBlock", id: "u", version: "1", enabled: true }], state: { process: { state: "idle" } } });
-        for (const h of ["## Environment", "## Other installed extensions", "## Engine state", "## settings.yaml", "## Scripts (1)", "### redwood.ts — enabled", "## LOG", "## Debug log", "## Network"]) expect(md).toContain(h);
+        for (const h of ["## Environment", "## Other installed extensions", "## Engine state", "## settings.yaml", "## Scripts (1)", "### redwood.ts — enabled", "## Log (", "## Debug log", "## Network"]) expect(md).toContain(h);
         expect(md).toContain("ERR_BLOCKED_BY_CLIENT");
         expect(md).toContain("uBlock");
         expect(md).toContain('"port": "8081"');

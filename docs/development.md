@@ -12,8 +12,8 @@ npm run test:e2e     # full browser e2e (needs E2E_CHROMIUM, see below)
 ```
 
 The e2e suite (`test/e2e.ts`) launches a fresh MV2-capable Chromium, loads the
-extension, seeds sample scripts through the real manager page, and verifies
-every tier against a local HTTP server: matcher, redirect, cancel, request +
+extension, seeds sample scripts through the real Editor page, and verifies
+every strategy against a local HTTP server: matcher, redirect, block, request +
 response headers, replaceResponse (main frame + fetch), onResponseBody (fetch /
 XHR / script-tag CDP), per-tab badge, and enable/disable toggling.
 
@@ -55,11 +55,11 @@ pages, and drops blocking `webRequest`):
   (`offscreen.html` bridges chrome.runtime ⇄ iframe postMessage). Handler
   results, script logs and `wt.storage` round-trip back over the same
   channel.
-- **The hook tier carries page fetch/XHR interception** (patching in the
+- **The `page` strategy carries page fetch/XHR interception** (patching in the
   page's MAIN world — same behavior, transforms execute in the sandbox).
-  The `webRequest` tier is gone (no blocking webRequest in MV3).
+  The `webRequest` strategy is gone (no blocking webRequest in MV3).
 - **Browser-initiated loads (`<script src>`, `<img>`, stylesheets, fonts,
-  main-frame HTML) go through the debugger tier** for handlers whose
+  main-frame HTML) go through the `debugger` strategy** for handlers whose
   strategy is `debugger` (or through the local helper with `helper`).
   The service worker
   drives `chrome.debugger` / CDP `Fetch` (pausing only URLs matching those
@@ -84,7 +84,7 @@ pages, and drops blocking `webRequest`):
     (`Fetch.continueResponse` keeps the body streaming when no body handler
     changes it); redirects/error statuses pass through untransformed.
   - Extra permissions: `debugger`, `webNavigation` (attach as early as
-    `onBeforeNavigate`), `webRequest` (observe-only, for the miss warning).
+    `onBeforeNavigate`), `webRequest` (observe-only, for the Missed warning).
 - **Folder sync works** — the poller runs in the service worker: a 25s
   keep-alive ping (any extension API call resets the SW's ~30s idle
   timer) holds the worker open while a folder is connected, with a 30s
@@ -99,6 +99,6 @@ pages, and drops blocking `webRequest`):
   page scripts may run before an onDom handler does. Fetch/XHR
   interception is unaffected.
 
-Verify the MV3 bundle: `npx tsx test/mv3.e2e.ts` (SW registration, manager,
-script save/list through the sandbox, settings.yaml, hook-tier interception,
-debugger-tier `<script src>` interception incl. gzip, lazy chunks and reloads).
+Verify the MV3 bundle: `npx tsx test/mv3.e2e.ts` (SW registration, Editor,
+script save/list through the sandbox, settings.yaml, `page` interception,
+`debugger` `<script src>` interception incl. gzip, lazy chunks and reloads).

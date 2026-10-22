@@ -6,14 +6,14 @@ Rewrite any request or response in your browser with a few lines of
 TypeScript. Wiretrick is a ground-up rewrite of
 [Resource Override](https://github.com/kylepaulsen/ResourceOverride) where the
 whole interface is a **script editor**: each handler in a script names the
-URLs it handles and what to do — redirect, cancel, edit headers, transform or
+URLs it handles and what to do — redirect, block, edit headers, transform or
 replace bodies, or patch the DOM.
 
-![Wiretrick manager](docs/shots/manager.png)
+![Wiretrick Editor](docs/shots/editor.png)
 
 ## Features
 
-- **Scripts, not rule lists** — Monaco editor with IntelliSense, type checking,
+- **Scripts, not rule lists** — a Monaco code editor with IntelliSense, type checking,
   per-script enable toggles and adjustable parameters.
 - **Every kind of interception** — page fetch/XHR, documents, `<script>`,
   images and workers, through four [strategies](docs/strategies.md): one
@@ -22,9 +22,9 @@ replace bodies, or patch the DOM.
   robust interception.
 - **No debugger banner needed** — the optional [local helper](docs/process-helper.md)
   intercepts at network level on Chrome without the "being debugged" bar.
-- **Built-in devtools** — Log and Network panels show what every script did,
+- **Built-in devtools** — the Log and Network views show what every script did,
   including original vs. modified bodies.
-- **Folder sync** — keep scripts as plain files in a folder of your choice.
+- **Folder sync** — keep scripts as plain files in a synced folder of your choice.
 - **Chrome (MV3), MV2 Chromium and Firefox.**
 
 ## Install
@@ -43,7 +43,7 @@ see [docs/install.md](docs/install.md).
 
 ## Quick start
 
-Open the manager (popup → **Manage all**), click **+ New** and paste:
+Open the Editor (popup → **Open Editor**), click **+ New** and paste:
 
 ```ts
 // Try it: open https://dummyjson.com/todos/1
@@ -64,10 +64,10 @@ Or click **?** → **Samples** for one-click starters against real public sites.
 | | |
 |---|---|
 | [Installing](docs/install.md) | release zips, signed crx, building from source |
-| [Writing scripts](docs/scripting.md) | the `wt` API, routes, parameters, utilities, `onDom`, stacking, async handlers |
-| [Interception strategies](docs/strategies.md) | `page` / `debugger` / `webRequest` / `helper`, the default and per-handler choice, [which strategies keep the URL when replacing a response](docs/strategies.md#how-each-strategy-serves-a-replacement), the “never ran” warning, browser compatibility |
+| [Writing scripts](docs/scripting.md) | the `wt` API, routes, parameters, libraries, `onDom`, stacking, async handlers |
+| [Interception strategies](docs/strategies.md) | `page` / `debugger` / `webRequest` / `helper`, the default and per-handler choice, [which strategies keep the URL when replacing a response](docs/strategies.md#how-each-strategy-serves-a-replacement), the Missed warning, browser compatibility |
 | [Local helper](docs/process-helper.md) | the `helper` strategy: install, how it works, security notes |
-| [The manager](docs/manager.md) | editor, Log & Network panels, folder sync, `settings.yaml` |
+| [The Editor](docs/editor.md) | Code view, Log & Network views, folder sync, `settings.yaml` |
 | [Glossary](GLOSSARY.md) | the words we use for Wiretrick's concepts |
 | [Development](docs/development.md) | build, tests, releases, how the MV3 build works |
 

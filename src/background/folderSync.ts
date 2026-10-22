@@ -74,7 +74,7 @@ function describeHandle(handle: any): Promise<string> {
                 return await handle.getPath(); // Chrome 129+: full path
             }
         } catch {}
-        return handle.name || "(scripts folder)";
+        return handle.name || "(synced folder)";
     })();
 }
 
@@ -697,7 +697,7 @@ async function pollNow(): Promise<void> {
         lastPollError = "";
     } catch (e: any) {
         if (e?.name === "NotAllowedError" || e?.name === "SecurityError") {
-            pause(`Folder sync paused: lost access to "${displayPath}" — open the manager and click the folder button to re-grant`);
+            pause(`Folder sync paused: lost access to "${displayPath}" — open the Editor and click the folder button to re-grant`);
         } else {
             const msg = String(e?.message || e);
             // the same failure repeats every second; report it once
@@ -890,7 +890,7 @@ export async function initFromStorage(): Promise<void> {
     try {
         const perm = await handle.queryPermission({ mode: "readwrite" });
         if (perm !== "granted") {
-            dlogLevel("sync", "warn", `Folder sync paused: the browser needs permission for "${handle.name}" again — open the manager and click the folder button to re-grant`);
+            dlogLevel("sync", "warn", `Folder sync paused: the browser needs permission for "${handle.name}" again — open the Editor and click the folder button to re-grant`);
             broadcastStatus();
             return;
         }

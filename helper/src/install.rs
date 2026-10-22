@@ -116,7 +116,7 @@ fn reg(args: &[&str]) -> bool {
 pub fn install(o: &InstallOpts) -> Result<(), String> {
     if o.extension_ids.is_empty() {
         return Err(
-            "--extension-id is required (shown in the extension manager's Helper panel)".into(),
+            "--extension-id is required (shown in Wiretrick's Settings → Local helper)".into(),
         );
     }
     for id in &o.extension_ids {

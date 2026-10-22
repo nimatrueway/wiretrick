@@ -149,17 +149,17 @@ const SCRIPTS: Record<string, SampleScript> = {
 };
 for (const s of Object.values(SCRIPTS)) await saveScript(s.id, s.code, s.name);
 
-// ---------- 0. imported param definitions + param-gated utility ----------
+// ---------- 0. imported param definitions + param-gated library ----------
 {
     const send = (msg: any): Promise<any> => mgr.evaluate((m) => new Promise((r) => chrome.runtime.sendMessage(m, (x) => r(x ?? null))), msg);
     await saveScript("s_plib", `export const envParam = { type: "stringList", default: ["dev"] } as const;\nconst p = wt.params({ on: { type: "boolean", default: false } });\nif (p.on) wt.onRequest("*://never.invalid/*", () => {});`, "param-lib");
     const user = await saveScript("s_puser", `import { envParam } from "./param-lib";\nwt.params({ intercept_environments: envParam });\nwt.onRequest("*://never.invalid/*", () => {});`, "param-user");
     check("imported param def: no bogus compile error, def captured", !user?.error && user?.paramDefs?.intercept_environments?.type === "stringList", JSON.stringify({ error: user?.error?.split("\n")[0], defs: user?.paramDefs }));
     const lib = (await send({ type: "listScripts" })).find((s: any) => s.id === "s_plib");
-    check("param-gated utility stored as a utility with params", lib?.meta?.active === false && lib?.paramDefs?.on?.type === "boolean", JSON.stringify(lib?.meta));
+    check("param-gated library stored as a library with params", lib?.meta?.active === false && lib?.paramDefs?.on?.type === "boolean", JSON.stringify(lib?.meta));
     await send({ type: "setScriptParam", scriptId: "s_plib", key: "on", value: true });
     const flipped = (await send({ type: "listScripts" })).find((s: any) => s.id === "s_plib");
-    check("utility param on → it becomes a script", flipped?.meta?.active === true, JSON.stringify(flipped?.meta));
+    check("library param on → it becomes a script", flipped?.meta?.active === true, JSON.stringify(flipped?.meta));
     await send({ type: "deleteScript", id: "s_puser" });
     await send({ type: "deleteScript", id: "s_plib" });
 }
@@ -481,7 +481,7 @@ await p10f.close();
 await setEnabled("s_hdr_wr", false);
 await mgr.click("#log-header-title");
 
-// ---------- 11. logs: script output tunnelled to the LOG, page console not captured ----------
+// ---------- 11. logs: script output tunnelled to the Log view, page console not captured ----------
 await saveScript(
     "s_logtunnel",
     `wt.onDom("${ORIGIN}/html", () => { console.warn("E2E-CONSOLE-MARKER", { a: 1 }); wt.log("E2E-RESLOG-MARKER"); });`,
@@ -499,8 +499,8 @@ await p11.close();
 await setEnabled("s_logtunnel", false);
 const logLines11: string[] = await mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line")].map((l) => (l as HTMLElement).dataset.text || ""));
 const warnLine = logLines11.find((l) => l.includes("E2E-CONSOLE-MARKER")) || "";
-check("logs: script console.warn reaches the LOG, attributed", warnLine.includes("[log tunnel] console.warn: E2E-CONSOLE-MARKER {\"a\":1}"), warnLine.slice(0, 160));
-check("logs: script wt.log reaches the LOG", logLines11.some((l) => l.includes("[log tunnel] wt.log: E2E-RESLOG-MARKER")));
+check("logs: script console.warn reaches the Log view, attributed", warnLine.includes("[log tunnel] console.warn: E2E-CONSOLE-MARKER {\"a\":1}"), warnLine.slice(0, 160));
+check("logs: script wt.log reaches the Log view", logLines11.some((l) => l.includes("[log tunnel] wt.log: E2E-RESLOG-MARKER")));
 check("logs: script console output not echoed to the page console", !pageConsole11.some((t) => t.includes("E2E-CONSOLE-MARKER") || t.includes("E2E-RESLOG-MARKER")), pageConsole11.join(" | ").slice(0, 200));
 check("logs: extension adds nothing to the page console", !pageConsole11.some((t) => /\[res:|\[Wiretrick\]/.test(t)), pageConsole11.join(" | ").slice(0, 200));
 const dbgAll: any = await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "getDebugLogs" }, (x) => r(x))));

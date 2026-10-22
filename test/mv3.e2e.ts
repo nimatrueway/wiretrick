@@ -154,7 +154,7 @@ try {
         name: "api-interceptor",
         code: `import { tag } from "./api-lib";\nwt.params({ label: { type: "string", default: "x" } });\nwt.onResponseBody("*://*:*/*", (ctx, body) => tag(body));`,
     }, r)));
-    check("importing script captures its routes (not a utility)",
+    check("importing script captures its routes (not a library)",
         importSave?.meta?.active === true && importSave?.meta?.match?.includes("*://*:*/*") && !importSave.error,
         JSON.stringify(importSave?.meta));
     const list2 = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "listScripts" }, r)));
@@ -162,17 +162,17 @@ try {
     check("importing script listed as active with params", importer?.meta?.active === true && !!importer?.paramDefs?.label, JSON.stringify(list2?.map((s: any) => [s.meta.name, s.meta.active])));
 
     // imported param definitions resolve at save time (sandbox compileOne);
-    // a param-gated utility turns into a script when its param flips
+    // a param-gated library turns into a script when its param flips
     {
         const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
         await send({ type: "saveScript", id: "s_plib", name: "param-lib", code: `export const envParam = { type: "stringList", default: ["dev"] } as const;\nconst p = wt.params({ on: { type: "boolean", default: false } });\nif (p.on) wt.onRequest("*://never.invalid/*", () => {});` });
         const user = await send({ type: "saveScript", id: "s_puser", name: "param-user", code: `import { envParam } from "./param-lib";\nwt.params({ intercept_environments: envParam });\nwt.onRequest("*://never.invalid/*", () => {});` });
         check("imported param def: no bogus compile error, def captured", !user?.error && user?.paramDefs?.intercept_environments?.type === "stringList", JSON.stringify({ error: user?.error?.split("\n")[0], defs: user?.paramDefs }));
         const lib = (await send({ type: "listScripts" })).find((s: any) => s.id === "s_plib");
-        check("param-gated utility stored as a utility with params", lib?.meta?.active === false && lib?.paramDefs?.on?.type === "boolean", JSON.stringify(lib?.meta));
+        check("param-gated library stored as a library with params", lib?.meta?.active === false && lib?.paramDefs?.on?.type === "boolean", JSON.stringify(lib?.meta));
         await send({ type: "setScriptParam", scriptId: "s_plib", key: "on", value: true });
         const flipped = (await send({ type: "listScripts" })).find((s: any) => s.id === "s_plib");
-        check("utility param on → it becomes a script", flipped?.meta?.active === true, JSON.stringify(flipped?.meta));
+        check("library param on → it becomes a script", flipped?.meta?.active === true, JSON.stringify(flipped?.meta));
         await send({ type: "deleteScript", id: "s_puser" });
         await send({ type: "deleteScript", id: "s_plib" });
     }
@@ -208,7 +208,7 @@ try {
     const popupItems = await popup.evaluate(() => [...document.querySelectorAll("#script-list .script-name")].map((e) => e.textContent));
     check("popup lists declared scripts (libraries filtered)", popupItems.includes("MV3 hook") && !popupItems.includes("api-lib"), JSON.stringify(popupItems));
 
-    // the compile/run diagnostics surface in the manager's LOG panel —
+    // the compile/run diagnostics surface in the Editor's Log view —
     // success-path lines are debug-level: set the panel filter to Debug+.
     // (Save is dim/disabled while clean — dirty the editor to enable it.)
     await mgr.evaluate(() => {
@@ -225,11 +225,11 @@ try {
     const sawAnalyze = await mgr.waitForFunction(() =>
         [...document.querySelectorAll("#log-entries .log-line")].some((l) => (l.textContent || "").includes("[sandbox] analyze")), null, { timeout: 8000 }
     ).then(() => true, () => false);
-    check("sandbox analyze diagnostics visible in the LOG panel", sawAnalyze);
+    check("sandbox analyze diagnostics visible in the Log view", sawAnalyze);
     const sawCompile = await mgr.evaluate(() =>
         [...document.querySelectorAll("#log-entries .log-line")].some((l) => (l.textContent || "").includes("[compile]"))
     );
-    check("compile-path diagnostics visible in the LOG panel", sawCompile);
+    check("compile-path diagnostics visible in the Log view", sawCompile);
 
     // VS Code-style hover: lists/code blocks preserved, @example fenced
     const hoverHtml = await mgr.evaluate(async () => {
@@ -360,9 +360,9 @@ try {
         Object.fromEntries([...document.querySelectorAll("#network-view tbody tr")].map((tr) => [tr.querySelector(".net-name")?.textContent || "", tr.classList.contains("modified") ? "modified" : tr.classList.contains("tapped") ? "tapped" : "none"])),
     );
     check("a modifying handler marks its row modified", marks["gz.js"] === "modified", JSON.stringify(marks));
-    check("a handler returning undefined marks its row tapped (not modified)", marks["auto.js"] === "tapped", JSON.stringify(marks));
+    check("a handler returning undefined marks its row observed (not modified)", marks["auto.js"] === "tapped", JSON.stringify(marks));
     const counts = await mgr.evaluate(() => document.querySelector("#network-view .net-status")?.textContent || "");
-    check("Network footer counts tapped and modified rows", /\d+ tapped · \d+ modified/.test(counts), counts);
+    check("Network footer counts observed and modified rows", /\d+ observed · \d+ modified/.test(counts), counts);
     const prevLevel = await mgr.evaluate(() => {
         const sel = document.querySelector("#log-level") as HTMLSelectElement;
         const prev = sel.value;
@@ -370,8 +370,8 @@ try {
         sel.dispatchEvent(new Event("change"));
         return prev;
     });
-    const tappedLog = await mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line.debug")].map((l) => l.textContent || "").find((t) => t.includes("[Watcher] onRequest → tapped (no change)")) || "");
-    check("tapped handler logs a DEBUG 'tapped (no change)' line ending with the URL", /\[Watcher\] onRequest → tapped \(no change\) http:\/\/localhost:\d+\/auto\.js$/.test(tappedLog), tappedLog || "(none)");
+    const tappedLog = await mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line.debug")].map((l) => l.textContent || "").find((t) => t.includes("[Watcher] onRequest → observed (no change)")) || "");
+    check("observed handler logs a DEBUG 'observed (no change)' line ending with the URL", /\[Watcher\] onRequest → observed \(no change\) http:\/\/localhost:\d+\/auto\.js$/.test(tappedLog), tappedLog || "(none)");
     await mgr.evaluate((prev: string) => {
         const sel = document.querySelector("#log-level") as HTMLSelectElement;
         sel.value = prev;
@@ -415,7 +415,7 @@ try {
         });
         return !b.hidden && modified >= 1 && tapped >= 1 ? { title: b.title, modified, tapped } : null;
     }, null, { timeout: 8000, polling: 200 }).then((h: any) => h.jsonValue(), (e: any) => String(e)) as any;
-    check("Network tab badge counts modified + tapped requests while out of view", !!badge && /modified, \d+ tapped since you last looked at Network/.test(badge.title), JSON.stringify(badge));
+    check("Network view badge counts modified + observed requests while hidden", !!badge && /modified, \d+ observed since you last looked at Network/.test(badge.title), JSON.stringify(badge));
     await mgr.click("#network-tab");
     await mgr.waitForTimeout(200);
     check("viewing the Network tab clears its badge", await mgr.evaluate(() => (document.querySelector("#net-badge") as HTMLElement).hidden));
@@ -433,7 +433,7 @@ try {
         const bar = document.getElementById("status-bar")!;
         return bar.offsetHeight > 0 && modified >= 1 && tapped >= 1 ? { modified, tapped, title: (document.getElementById("sb-net") as HTMLElement).title } : null;
     }, null, { timeout: 8000, polling: 200 }).then((h: any) => h.jsonValue(), (e: any) => String(e)) as any;
-    check("status bar shows Network counts while the panel is closed", typeof sb === "object" && /tapped since you last looked/.test(sb.title), JSON.stringify(sb));
+    check("status bar shows Network counts while the panel is closed", typeof sb === "object" && /observed since you last looked/.test(sb.title), JSON.stringify(sb));
     await mgr.click("#sb-net");
     await mgr.waitForTimeout(200);
     const opened = await mgr.evaluate(() => ({

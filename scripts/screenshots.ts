@@ -16,7 +16,7 @@ const ROOT = new URL("..", import.meta.url).pathname;
 const EXT_ROOT = path.join(ROOT, "dist-mv3");
 const OUT = path.join(ROOT, "docs/shots");
 const EXT_ID = crypto.createHash("sha256").update(EXT_ROOT, "utf8").digest("hex").split("").map((c) => String.fromCharCode(parseInt(c, 16) + 97)).join("").slice(0, 32);
-const SHOWN = ["Mock a fetch/XHR API", "CORS unlock", "DOM / title changes", "Rewrite page HTML"];
+const SHOWN = ["Replace a fetch/XHR response", "CORS unlock", "DOM / title changes", "Rewrite page HTML"];
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const profile = mkdtempSync(path.join(tmpdir(), "wiretrick-shots-"));
@@ -48,7 +48,7 @@ try {
 
     await mgr.goto(`chrome-extension://${EXT_ID}/manager.html?script=shot_Mock_a_fetch_XHR_API`);
     await sleep(2500);
-    await mgr.screenshot({ path: path.join(OUT, "manager.png") });
+    await mgr.screenshot({ path: path.join(OUT, "editor.png") });
 
     await mgr.click("#btn-help");
     await mgr.click('[data-help-tab="samples"]');

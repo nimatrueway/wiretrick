@@ -199,7 +199,7 @@ chrome.runtime.onInstalled.addListener(() => {
         if (!d || !d.resManagerOpen) return;
         chrome.tabs.query({}, (tabs) => {
             if (tabs.some((t) => t.url && t.url.includes("manager.html"))) return;
-            dlogLevel("bg", "info", "extension reloaded with the manager open — reopening it as a tab");
+            dlogLevel("bg", "info", "extension reloaded with the Editor open — reopening it as a tab");
             // reopen in a tab of the last focused window — not a new window
             chrome.windows.getLastFocused((win) => {
                 if (win && win.id !== undefined) {
@@ -287,4 +287,4 @@ if (__MV3__) {
     })();
 }
 
-console.log(`[Wiretrick] background ready (${__MV3__ ? "mv3/sandbox" : IS_FIREFOX ? "firefox/webRequest+filterResponseData" : "chrome/tiered"})`);
+console.log(`[Wiretrick] background ready (${__MV3__ ? "mv3/sandbox" : IS_FIREFOX ? "firefox/webRequest+filterResponseData" : "chrome/mv2"})`);

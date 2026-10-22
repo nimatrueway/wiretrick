@@ -1,5 +1,5 @@
 /**
- * chrome.proxy routing for the "helper" tier.
+ * chrome.proxy routing for the "helper" strategy (helper routing).
  *
  * Installs a PAC (shared/pac.ts) that sends hosts of process-owned
  * scripts to the local helper and everything else exactly where the

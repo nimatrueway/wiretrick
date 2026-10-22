@@ -165,7 +165,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                 scriptError(entry.id, formatScriptError(entry.name, e, "onRequest"));
             }
         }
-        if (matched.length) trace(details, `onBeforeRequest ${details.url} → allow (no terminal decision)`);
+        if (matched.length) trace(details, `onBeforeRequest ${details.url} → allow (no final decision)`);
         return { kind: "allow" };
     }
 

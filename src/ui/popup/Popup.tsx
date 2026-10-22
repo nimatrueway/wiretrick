@@ -48,8 +48,8 @@ export function Popup({ api }: { api: PopupApi }) {
         <>
             <div id="header">
                 <span id="title">Wiretrick</span>
-                <button id="btn-manager" title="Open full manager" onClick={() => api.openManager()}>
-                    Manage all
+                <button id="btn-manager" title="Open the Editor" onClick={() => api.openManager()}>
+                    Open Editor
                 </button>
             </div>
             <ul id="script-list">
@@ -59,7 +59,7 @@ export function Popup({ api }: { api: PopupApi }) {
             </ul>
             {load.state === "error" && <div id="empty">Could not reach the extension — close and reopen the popup.</div>}
             {load.state === "ready" && load.scripts.length === 0 && (
-                <div id="empty">No scripts yet — open the manager to create one.</div>
+                <div id="empty">No scripts yet — open the Editor to create one.</div>
             )}
             <ResizeGrip api={api} />
         </>
@@ -77,7 +77,7 @@ function ScriptRow({ script, api, onChanged, version }: { script: ScriptInfo; ap
             <li class={isLib ? "script-item utility" : "script-item"}>
                 {isLib ? (
                     // utilities have no enabled switch (same as the manager / settings.yaml)
-                    <span class="util-ind" role="img" aria-label="utility" title="Utility — registers no handlers with its current params; importable by other scripts">
+                    <span class="util-ind" role="img" aria-label="library" title="Library — registers no handlers with its current params; importable by other scripts">
                         𝑓
                     </span>
                 ) : (
@@ -111,7 +111,7 @@ function ScriptRow({ script, api, onChanged, version }: { script: ScriptInfo; ap
                         ⚠
                     </span>
                 )}
-                <button class="btn-icon" title="Open in full manager" aria-label="Edit" onClick={() => api.openManager(script.id)}>
+                <button class="btn-icon" title="Open in the Editor" aria-label="Edit" onClick={() => api.openManager(script.id)}>
                     <IconPen />
                 </button>
                 {hasParams(script) && (

@@ -215,7 +215,7 @@ function analyze(scripts: PlainScript[], paramValues: Record<string, any>): { re
         sandboxLog(a.error ? `${summary} ERROR ${a.error.split("\n")[0]}` : summary, a.error ? "error" : "debug");
         if (!a.error && !a.meta.active && /\bwt\.(onRequest|onResponseHeaders|replaceResponse|onResponseBody|onDom)\b/.test(c.s.code)) {
             // mentions handlers but none registered at top level (guarded/late calls)
-            sandboxLog(`"${c.s.name}" mentions wt.on…/modify…/replace… but registered no handler at top level — it compiles as a utility (𝑓)`, "warn");
+            sandboxLog(`"${c.s.name}" mentions wt.on…/modify…/replace… but registered no handler at top level — it compiles as a library (𝑓)`, "warn");
         }
     }
     return { results };
