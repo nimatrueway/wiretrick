@@ -2,9 +2,11 @@
  * Manager page: script list + Monaco editor + logs + VS Code bridge.
  */
 
-import { loadMonaco, STARTER_TEMPLATE } from "./monacoSetup";
+import { loadMonaco, STARTER_TEMPLATE, apiTypingsText, onOpenApiDeclaration } from "./monacoSetup";
+import { API_TYPINGS_URI, type Span } from "./apiLinks";
+import { NavHistory } from "./navHistory";
 import { API_REFERENCE } from "./apiReference";
-import { SHORTCUTS, filterShortcuts, formatKey } from "./shortcuts";
+import { SHORTCUTS, filterShortcuts, formatKey, keysFor } from "./shortcuts";
 import { SAMPLES } from "./samples";
 import { settingsDiagnostics, settingsCompletions, settingsHover, type AssistScript } from "../shared/settingsAssist";
 import { dependantsOf, missingImports } from "../shared/scriptImports";
@@ -36,13 +38,16 @@ let scripts: (Script & { runtimeError?: ScriptHealthInput["runtimeError"]; typeE
 let selectedId: string | null = null;
 let editor: any = null;
 let dirty = false;
+/** wt-api.d.ts is shown read-only over the selected script (whose model,
+ * unsaved edits included, stays as it is underneath) */
+let typingsShown = false;
 
 /** Central dirty-state toggle: dims/undims Save. */
 function setDirty(v: boolean): void {
     dirty = v;
-    document.querySelector("#script-list li.selected")?.classList.toggle("dirty", v);
+    if (selectedId) document.querySelector(`#script-list li[data-id="${CSS.escape(selectedId)}"]`)?.classList.toggle("dirty", v);
     const btn = $("#btn-save");
-    if (v) {
+    if (v && !typingsShown) {
         btn.removeAttribute("disabled");
         btn.classList.remove("dim");
         btn.textContent = "Save";
@@ -62,7 +67,7 @@ const setBaseline = (m: any, text: string): void => {
 
 /** dirty = content differs from the file's baseline OR the name differs from the stored one */
 function updateDirty(): void {
-    if (!editor) return;
+    if (!editor || typingsShown) return;
     const m = editor.getModel();
     const dirtyNow = computeDirty(
         m ? m.getValue() : "",
@@ -200,18 +205,24 @@ function registerSettingsAssist(): void {
 }
 
 async function selectSettings(): Promise<void> {
+    // back from the typings: settings.yaml's unsaved edits are still in its model
+    const back = typingsShown && selectedId === SETTINGS_ID;
+    leaveTypings();
     selectedId = SETTINGS_ID;
     focusedId = null;
     renderList();
     $("#btn-save").removeAttribute("disabled");
-    await loadSettingsModel(true);
+    await loadSettingsModel(!back);
     if (editor.getModel() !== settingsModel) {
         captureViewState();
         editor.setModel(settingsModel);
         restoreViewState(settingsModel);
     }
-    setDirty(false);
-    status("saved ✓");
+    if (back) updateDirty();
+    else {
+        setDirty(false);
+        status("saved ✓");
+    }
     updateOpenVscode();
 }
 
@@ -264,13 +275,15 @@ function renderList(): void {
     const list = $("#script-list");
     list.innerHTML = "";
     const cursor = focusedId ?? selectedId;
+    // while wt-api.d.ts is shown no row is the open file (● still marks unsaved edits)
+    const shown = typingsShown ? null : selectedId;
     const row = (id: string, cls: string): HTMLLIElement => {
         const li = document.createElement("li");
-        li.className = "script-item" + cls + (id === selectedId ? " selected" : "") + (id === cursor ? " focused" : "") + (id === selectedId && dirty ? " dirty" : "");
+        li.className = "script-item" + cls + (id === shown ? " selected" : "") + (id === cursor ? " focused" : "") + (id === selectedId && dirty ? " dirty" : "");
         li.dataset.id = id;
         li.id = `explorer-${id}`;
         li.setAttribute("role", "treeitem");
-        li.setAttribute("aria-selected", String(id === selectedId));
+        li.setAttribute("aria-selected", String(id === shown));
         if (id === cursor) list.setAttribute("aria-activedescendant", li.id);
         return li;
     };
@@ -340,7 +353,7 @@ function renderList(): void {
         // re-selecting would rebuild the list and swallow a double-click
         li.addEventListener("click", () => {
             moveExplorerFocus(script.id);
-            if (script.id !== selectedId) select(script.id);
+            if (script.id !== selectedId || typingsShown) select(script.id);
         });
         list.appendChild(li);
     }
@@ -366,7 +379,7 @@ async function deleteScript(script: Script): Promise<void> {
 /** Editor toolbar switch: enable/disable the open script (hidden for settings.yaml and libraries). */
 function updateEnabledToggle(): void {
     const label = $("#script-enabled");
-    const script = scripts.find((s) => s.id === selectedId);
+    const script = typingsShown ? undefined : scripts.find((s) => s.id === selectedId);
     label.hidden = !script || script.meta.active === false;
     if (!script) return;
     label.querySelector(".switch")!.classList.toggle("on", !!script.enabled);
@@ -420,7 +433,7 @@ function setupExplorer(): void {
         else if (e.key === "Home" || e.key === "PageUp") moveExplorerFocus(ids[0]);
         else if (e.key === "End" || e.key === "PageDown") moveExplorerFocus(ids[ids.length - 1]);
         else if ((e.key === "Enter" || e.key === " ") && !mod) {
-            if (cur !== selectedId) select(cur);
+            if (cur !== selectedId || typingsShown) select(cur);
             if (e.key === "Enter") editor?.focus(); // Enter opens and focuses, Space just opens (preview)
         } else if (e.key === "F2" && script) renameInExplorer(cur);
         else if ((e.key === "Delete" || (e.key === "Backspace" && e.metaKey)) && script) void deleteScript(script);
@@ -443,7 +456,7 @@ function setupExplorer(): void {
         moveExplorerFocus(script.id);
         const isLib = script.meta.active === false;
         showContextMenu(e.clientX, e.clientY, [
-            { label: "Open", key: "Enter", run: () => script.id !== selectedId && select(script.id) },
+            { label: "Open", key: "Enter", run: () => (script.id !== selectedId || typingsShown) && select(script.id) },
             null,
             ...(isLib ? [] : [{ label: script.enabled ? "Disable" : "Enable", run: () => void setScriptEnabled(script, !script.enabled) }]),
             { label: "Rename…", key: "F2", run: () => renameInExplorer(script.id) },
@@ -738,6 +751,7 @@ function syncModels(): void {
 }
 
 async function renderEditorEmpty(): Promise<void> {
+    leaveTypings();
     $("#btn-save").setAttribute("disabled", "");
     if (editor) {
         editor.setModel(null);
@@ -752,7 +766,7 @@ function setEditorValue(code: string): void {
     if (m) {
         m.setValue(code);
         setBaseline(m, code);
-    } else editor.setValue(code);
+    } else if (!typingsShown) editor.setValue(code);
     editor.clearHistory?.();
     applyingExternal = false;
     dirty = false;
@@ -764,7 +778,7 @@ function updateOpenVscode(): void {
     const b = $("#btn-open-vscode") as HTMLButtonElement;
     const off = ((window as any).__resLaunchMode || "vscode") === "off";
     b.style.display = off ? "none" : "";
-    if (!off && (window as any).__resSyncActive && selectedId) b.removeAttribute("disabled");
+    if (!off && (window as any).__resSyncActive && selectedId && !typingsShown) b.removeAttribute("disabled");
     else b.setAttribute("disabled", "");
 }
 
@@ -775,6 +789,9 @@ function vscodeScheme(): string {
 }
 
 function selectReal(id: string): void {
+    // back from the typings to the script under them: keep its unsaved edits
+    const back = typingsShown && id === selectedId;
+    leaveTypings();
     selectedId = id;
     focusedId = null;
     renderList();
@@ -792,11 +809,122 @@ function selectReal(id: string): void {
     } else {
         setEditorValue(script.code);
     }
-    setDirty(false);
+    if (back) updateDirty();
+    else setDirty(false);
     updateOpenVscode();
 }
 
+// ---- wt-api.d.ts, read-only (hover type links, Go to Definition) ----
+function typingsModel(): any {
+    const monaco = (window as any).monaco;
+    const uri = monaco.Uri.parse(API_TYPINGS_URI);
+    // Monaco's TS mode may already have made one for a definition lookup
+    return monaco.editor.getModel(uri) ?? monaco.editor.createModel(apiTypingsText(), "typescript", uri);
+}
+
+function showTypings(): void {
+    if (typingsShown) return;
+    captureViewState();
+    typingsShown = true;
+    const m = typingsModel();
+    editor.setModel(m);
+    editor.updateOptions({ readOnly: true, readOnlyMessage: { value: "wt-api.d.ts is the Wiretrick API typings — read-only" } });
+    restoreViewState(m);
+    $("#typings-note").hidden = false;
+    $("#btn-save").setAttribute("disabled", "");
+    $("#btn-save").classList.add("dim");
+    renderList();
+    updateOpenVscode();
+}
+
+/** Flip the Code view back to editable; the caller shows the next model. */
+function leaveTypings(): void {
+    if (!typingsShown) return;
+    captureViewState();
+    typingsShown = false;
+    editor.updateOptions({ readOnly: false });
+    $("#typings-note").hidden = true;
+}
+
+/** a place in the Code view: a script id / SETTINGS_ID / TYPINGS_ID + cursor and scroll */
+interface NavEntry {
+    target: string;
+    view: any;
+}
+const TYPINGS_ID = "__wt_api_typings__";
+const navHistory = new NavHistory<NavEntry>();
+
+function currentPlace(): NavEntry | null {
+    const target = typingsShown ? TYPINGS_ID : selectedId;
+    return target && editor ? { target, view: editor.saveViewState() } : null;
+}
+
+/** Record the current place before a jump (Go to Definition, hover links). */
+function pushNav(): void {
+    const here = currentPlace();
+    if (here) navHistory.push(here);
+}
+
+function revealSelection(selection?: IRange | IPosition): void {
+    if (!selection) return;
+    if ("startLineNumber" in selection) {
+        editor.setSelection(selection);
+        editor.revealRangeInCenter(selection);
+    } else {
+        editor.setPosition(selection);
+        editor.revealPositionInCenter(selection);
+    }
+}
+
+/** Show the declaration at `span` (offsets in wt-api.d.ts) read-only. */
+function openTypingsAt(selection?: IRange | IPosition | Span): void {
+    pushNav();
+    showTypings();
+    if (selection && "start" in selection) {
+        const m = editor.getModel();
+        const a = m.getPositionAt(selection.start);
+        const b = m.getPositionAt(selection.start + selection.length);
+        selection = { startLineNumber: a.lineNumber, startColumn: a.column, endLineNumber: b.lineNumber, endColumn: b.column };
+    }
+    revealSelection(selection);
+    editor.focus();
+}
+
+/** Go to a history entry: false = cancelled, "skip" = its script is gone. */
+function openNavEntry(e: NavEntry): boolean | "skip" {
+    const restore = (): void => {
+        if (e.view) editor.restoreViewState(e.view);
+        editor.focus();
+    };
+    if (e.target === TYPINGS_ID) {
+        showTypings();
+        restore();
+        return true;
+    }
+    if (e.target !== SETTINGS_ID && !scripts.some((s) => s.id === e.target)) return "skip";
+    if (e.target !== selectedId && dirty && selectedId && !confirm("Discard unsaved changes?")) return false;
+    if (e.target === SETTINGS_ID) {
+        if (typingsShown || selectedId !== SETTINGS_ID) void selectSettings().then(restore);
+        else restore();
+        return true;
+    }
+    if (typingsShown || e.target !== selectedId) selectReal(e.target);
+    restore();
+    return true;
+}
+
+function navigateBack(): void {
+    const here = currentPlace();
+    if (here) navHistory.back(here, openNavEntry);
+}
+
+function navigateForward(): void {
+    const here = currentPlace();
+    if (here) navHistory.forward(here, openNavEntry);
+}
+
 async function saveCurrent(): Promise<void> {
+    if (typingsShown) return; // read-only
     if (selectedId === SETTINGS_ID) return saveSettings();
     if (!selectedId || !editor) return;
     const code = editor.getValue();
@@ -1499,7 +1627,7 @@ function renderShortcuts(): void {
             const action = document.createElement("td");
             action.textContent = s.action;
             const keys = document.createElement("td");
-            s.keys.forEach((k, i) => {
+            keysFor(s, isMac).forEach((k, i) => {
                 if (i) keys.append(" / ");
                 const kbd = document.createElement("kbd");
                 kbd.textContent = formatKey(k, isMac);
@@ -1814,6 +1942,7 @@ async function main(): Promise<void> {
         openCodeEditor: (_source, resource, selection) => openScriptAt(resource, selection),
     };
     (window as any).monaco.editor.registerEditorOpener(opener);
+    onOpenApiDeclaration((span) => openTypingsAt(span));
     navLog("editor opener registered");
     installMonacoTrace();
 
@@ -1825,7 +1954,7 @@ async function main(): Promise<void> {
     $("#btn-save").addEventListener("click", () => void saveCurrent());
     $("#btn-open-vscode").addEventListener("click", () => {
         const folder = (window as any).__resSyncPath as string;
-        if (!folder || !selectedId) return;
+        if (!folder || !selectedId || typingsShown) return;
         // the ⚙ settings.yaml entry is virtual (not in `scripts`) — its
         // target is <folder>/settings.yaml, written by folderSync
         const file = vscodeTargetPath(folder, selectedId, scripts.find((s) => s.id === selectedId)?.meta.name, SETTINGS_ID, SETTINGS_FILE);
@@ -2069,7 +2198,20 @@ function layoutShortcut(e: KeyboardEvent): (() => void) | null {
     // ⌥Z types a character (Ω on macOS) in the log/network filter boxes
     const typing = (e.target as HTMLElement | null)?.matches?.("input, textarea, select");
     if (e.altKey && !mod && !e.shiftKey && e.code === "KeyZ" && !typing) return toggleWordWrap;
+    // Go Back / Forward: ⌃- / ⌃⇧- on macOS (⌥← is word-left there), Alt+← / Alt+→
+    // elsewhere — not in text fields, where Alt+arrows are the browser's/OS's
+    if (!typing && isMac && e.ctrlKey && !e.metaKey && !e.altKey && e.code === "Minus") return e.shiftKey ? navigateForward : navigateBack;
+    if (!typing && !isMac && e.altKey && !mod && !e.shiftKey && (e.code === "ArrowLeft" || e.code === "ArrowRight"))
+        return e.code === "ArrowLeft" ? navigateBack : navigateForward;
     return null;
+}
+
+/** Go Back / Go Forward keybindings in the Code view (VS Code's, per platform). */
+function navKeybindings(): { back: number[]; forward: number[] } {
+    const { KeyMod, KeyCode } = (window as any).monaco;
+    return isMac
+        ? { back: [KeyMod.WinCtrl | KeyCode.Minus], forward: [KeyMod.WinCtrl | KeyMod.Shift | KeyCode.Minus] }
+        : { back: [KeyMod.Alt | KeyCode.LeftArrow], forward: [KeyMod.Alt | KeyCode.RightArrow] };
 }
 
 /** The same shortcuts as editor actions: Monaco's keybinding service sees
@@ -2082,6 +2224,8 @@ function registerLayoutActions(): void {
         ["wt.toggleSidebar", "View: Toggle Explorer Visibility", [KeyMod.CtrlCmd | KeyCode.KeyB], toggleSidebar],
         ["wt.togglePanel", "View: Toggle Panel Visibility", [KeyMod.CtrlCmd | KeyCode.KeyJ, KeyMod.CtrlCmd | KeyCode.Backquote], togglePanel],
         ["wt.showShortcuts", "Help: Keyboard Shortcuts", [], showShortcutsHelp],
+        ["wt.navigateBack", "Go Back", navKeybindings().back, navigateBack],
+        ["wt.navigateForward", "Go Forward", navKeybindings().forward, navigateForward],
     ];
     for (const [id, label, keybindings, run] of actions) editor.addAction({ id, label, keybindings, run });
     editor.addAction({ id: "wt.openSettings", label: "Preferences: Open Settings", run: () => openSettings() });
@@ -2096,7 +2240,7 @@ function registerLayoutActions(): void {
 }
 
 function select(id: string): void {
-    if (dirty && selectedId) {
+    if (dirty && selectedId && !(typingsShown && id === selectedId)) {
         if (!confirm("Discard unsaved changes?")) {
             return;
         }
@@ -2179,29 +2323,27 @@ async function traceDefinition(trigger: string, pos?: IPosition): Promise<void> 
 function openScriptAt(resource: Uri, selection?: IRange | IPosition): boolean {
     try {
         const known = [...models].map(([id, m]) => `${id}=${m.uri.toString()}`);
-        navLog(`open ${resource.toString()} sel=${JSON.stringify(selection)} from=${selectedId} dirty=${dirty}`);
+        navLog(`open ${resource.toString()} sel=${JSON.stringify(selection)} from=${typingsShown ? "wt-api.d.ts" : selectedId} dirty=${dirty}`);
+        if (resource.toString() === API_TYPINGS_URI) {
+            openTypingsAt(selection);
+            navLog("opened wt-api.d.ts (read-only)");
+            return true;
+        }
         const target = [...models].find(([, m]) => m.uri.toString() === resource.toString());
         if (!target) {
             navLog(`no script owns ${resource.toString()}; known models: ${known.join(", ")}`, "warn");
             return false;
         }
         const [id] = target;
-        if (id !== selectedId) {
-            if (dirty && selectedId && !confirm("Discard unsaved changes?")) {
+        if (id !== selectedId || typingsShown) {
+            if (id !== selectedId && dirty && selectedId && !confirm("Discard unsaved changes?")) {
                 navLog("canceled by user (unsaved changes kept)");
                 return true;
             }
+            pushNav();
             selectReal(id);
-        }
-        if (selection) {
-            if ("startLineNumber" in selection) {
-                editor.setSelection(selection);
-                editor.revealRangeInCenter(selection);
-            } else {
-                editor.setPosition(selection);
-                editor.revealPositionInCenter(selection);
-            }
-        }
+        } else pushNav();
+        revealSelection(selection);
         editor.focus();
         navLog(`opened ${id}`);
         return true;

@@ -25,6 +25,7 @@ import crypto from "node:crypto";
 import zlib from "node:zlib";
 import { chromium } from "playwright-core";
 import { resolveBrowser } from "./browserSetup";
+import { checkApiTypingsNav } from "./apiTypingsNav";
 
 const EXT_ROOT = path.join(new URL("..", import.meta.url).pathname, "dist-mv3");
 // unpacked extension id = sha256 of the absolute path (hex digits → a-p)
@@ -289,6 +290,8 @@ try {
         popupHtml.details.includes("@param") && popupHtml.details.includes("ParamsOf") && codeBlocks(popupHtml.details) >= 2, popupHtml.details.slice(0, 200));
     check("TS parameter hints: per-param doc + fenced examples (no inline @param)",
         popupHtml.hints.includes("Receives the same") && codeBlocks(popupHtml.hints) >= 1 && !popupHtml.hints.includes("@param"), popupHtml.hints.slice(0, 200));
+
+    await checkApiTypingsNav(mgr, check, "-mv3");
 
     // ---- regression (the user's "onRequest doesn't work in MV3"): a
     // param-gated onRequest must see the REAL stored param values (the

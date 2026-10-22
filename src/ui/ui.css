@@ -242,6 +242,8 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 .file-icon.ts { color: #3178c6; }
 :root:not([data-theme="light"]) .file-icon.ts { color: #519aba; }
 .file-icon.yaml { color: #a074c4; font-size: 13px; font-weight: 400; }
+.file-icon.dts { color: #3178c6; width: auto; }
+:root:not([data-theme="light"]) .file-icon.dts { color: #519aba; }
 
 .script-name {
     flex: 1;
@@ -460,6 +462,9 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 
 #script-enabled { display: flex; align-items: center; gap: 6px; color: var(--fg-dim); font-size: 12px; cursor: pointer; user-select: none; }
 #script-enabled[hidden] { display: none; }
+#typings-note { display: flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
+#typings-note[hidden] { display: none; }
+#typings-note .muted { color: var(--fg-dim); font-style: italic; }
 #script-enabled:hover { color: var(--fg); }
 #layout-controls { display: flex; gap: 2px; margin-left: -4px; }
 .layout-btn { color: var(--fg-dim); }
@@ -472,6 +477,8 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 }
 
 #editor-status { flex: 1; text-align: right; color: var(--fg-dim); }
+/* the status is the script's under the read-only typings */
+#editor-toolbar:has(#typings-note:not([hidden])) #editor-status { visibility: hidden; }
 #editor-status.dirty { color: var(--warn); }
 #editor-status.error { color: var(--err); }
 

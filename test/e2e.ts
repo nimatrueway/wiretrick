@@ -29,6 +29,7 @@ import path from "node:path";
 import http from "node:http";
 import { chromium } from "playwright-core";
 import { resolveBrowser } from "./browserSetup";
+import { checkApiTypingsNav } from "./apiTypingsNav";
 
 const EXT_ROOT = path.join(new URL("..", import.meta.url).pathname, "dist");
 
@@ -600,6 +601,9 @@ const visible = await mgr.evaluate(() =>
 const findable = await mgr.evaluate(() => document.querySelector("#log-entries")?.textContent?.includes("E2E-CONSOLE-MARKER"));
 check("logs: find box filters lines", visible > 0 && !!findable, `visible=${visible}`);
 await mgr.locator("#log-find").fill("");
+
+// ---------- hover type links + read-only API typings + Go Back ----------
+await checkApiTypingsNav(mgr, check);
 
 // ---------- summary ----------
 const failed = results.filter((r) => !r.ok);

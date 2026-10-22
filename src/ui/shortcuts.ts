@@ -1,6 +1,8 @@
 /** Keyboard shortcuts listed in the "?" dialog. "Mod" = ⌘ on macOS, Ctrl elsewhere. */
 export interface Shortcut {
     keys: string[];
+    /** different keys on macOS */
+    macKeys?: string[];
     action: string;
     where: string;
 }
@@ -33,6 +35,8 @@ export const SHORTCUTS: Shortcut[] = [
     { keys: ["F12"], action: "Go to definition", where: "Editor" },
     { keys: ["Alt+F12"], action: "Peek definition", where: "Editor" },
     { keys: ["Shift+F12"], action: "Find references", where: "Editor" },
+    { keys: ["Alt+←"], macKeys: ["Ctrl+-"], action: "Go back (after Go to definition or a hover type link)", where: "Global" },
+    { keys: ["Alt+→"], macKeys: ["Ctrl+Shift+-"], action: "Go forward", where: "Global" },
     { keys: ["F2"], action: "Rename symbol", where: "Editor" },
     { keys: ["Mod+."], action: "Quick fix", where: "Editor" },
     { keys: ["Mod+Space"], action: "Trigger suggestions", where: "Editor" },
@@ -45,19 +49,23 @@ export const SHORTCUTS: Shortcut[] = [
 /** "Mod+Shift+E" → "⌘⇧E" on macOS, "Ctrl+Shift+E" elsewhere. */
 export function formatKey(key: string, mac: boolean): string {
     if (!mac) return key.replace(/Mod/g, "Ctrl");
-    const sym: Record<string, string> = { Mod: "⌘", Shift: "⇧", Alt: "⌥", Backspace: "⌫" };
+    const sym: Record<string, string> = { Mod: "⌘", Ctrl: "⌃", Shift: "⇧", Alt: "⌥", Backspace: "⌫" };
     return key
-        .split("+")
+        .split(/\+(?=.)/)
         .map((p) => sym[p] ?? p)
         .join("");
 }
+
+/** the keys of a shortcut on this platform */
+export const keysFor = (s: Shortcut, mac: boolean): string[] => (mac && s.macKeys) || s.keys;
 
 /** Every whitespace-separated word must appear in the action, context or keys. */
 export function filterShortcuts(list: Shortcut[], query: string, mac: boolean): Shortcut[] {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     if (!words.length) return list;
     return list.filter((s) => {
-        const hay = [s.action, s.where, ...s.keys, ...s.keys.map((k) => formatKey(k, mac))].join(" ").toLowerCase();
+        const keys = keysFor(s, mac);
+        const hay = [s.action, s.where, ...keys, ...keys.map((k) => formatKey(k, mac))].join(" ").toLowerCase();
         return words.every((w) => hay.includes(w));
     });
 }

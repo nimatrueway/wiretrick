@@ -3,9 +3,20 @@
  * into dist/lib/monaco) and wires TS IntelliSense to the `wt` API typings.
  */
 
-import { quickInfoToMarkdown, docsToMarkdown, partsToMarkdown, signatureBlock } from "./hoverMarkdown";
+import { quickInfoToMarkdown, docsToMarkdown, partsToMarkdown, signatureBlock, type LinkResolver } from "./hoverMarkdown";
+import { API_TYPINGS_URI, OPEN_API_COMMAND, apiLinksMarkdown, commandUri, indexTypeDeclarations, typeLinks, type Span } from "./apiLinks";
 
 let monacoApi: any = null;
+let wtApiDts = "";
+let openApiDeclaration: (span: Span) => void = () => {};
+
+/** wt-api.d.ts as loaded into IntelliSense (for the read-only Code view) */
+export const apiTypingsText = (): string => wtApiDts;
+
+/** what a hover's type / {@link} / "Go to definition" link does */
+export function onOpenApiDeclaration(fn: (span: Span) => void): void {
+    openApiDeclaration = fn;
+}
 
 export async function loadMonaco(): Promise<any> {
     if (monacoApi) return monacoApi;
@@ -17,7 +28,7 @@ export async function loadMonaco(): Promise<any> {
             chrome.runtime.getURL("lib/monaco/vs/base/worker/workerMain.js"),
     };
 
-    const wtApiDts = await fetch(chrome.runtime.getURL("lib/wt-api.d.ts")).then((r) => r.text());
+    wtApiDts = await fetch(chrome.runtime.getURL("lib/wt-api.d.ts")).then((r) => r.text());
 
     await new Promise<void>((resolve, reject) => {
         (window as any).require.config({ paths: { vs: "lib/monaco/vs" } });
@@ -29,7 +40,7 @@ export async function loadMonaco(): Promise<any> {
     monacoApi.languages.typescript.typescriptDefaults.setExtraLibs([
         {
             content: wtApiDts,
-            filePath: "file:///wt-api.d.ts",
+            filePath: API_TYPINGS_URI,
         },
     ]);
     const ts = monacoApi.languages.typescript;
@@ -75,18 +86,47 @@ function registerTsHover(monaco: any): void {
     const workerFor = async (uri: any) => (await monaco.languages.typescript.getTypeScriptWorker())(uri);
     const completionKind = (k: string) => monaco.languages.CompletionItemKind[KIND[k] ?? "Property"];
 
+    // links in hovers / completion docs may only run this command
+    monaco.editor.registerCommand(OPEN_API_COMMAND, (_accessor: unknown, span: Span) => {
+        if (span && typeof span.start === "number") openApiDeclaration(span);
+    });
+    const trusted = { enabledCommands: [OPEN_API_COMMAND] };
+    // the typings never change at runtime: index their declarations once
+    let typeIndex: Promise<Map<string, Span>> | null = null;
+    const declarations = (worker: any): Promise<Map<string, Span>> =>
+        (typeIndex ??= worker.getNavigationTree(API_TYPINGS_URI).then((tree: any) => (tree ? indexTypeDeclarations(tree) : new Map())).catch(() => {
+            typeIndex = null;
+            return new Map();
+        }));
+    const resolveLink: LinkResolver = (_name, part) =>
+        part.target?.fileName === API_TYPINGS_URI ? commandUri(OPEN_API_COMMAND, { start: part.target.textSpan.start, length: part.target.textSpan.length }) : undefined;
+
     monaco.languages.registerHoverProvider("typescript", {
         async provideHover(model: any, position: any) {
             const uri = model.uri;
             const worker = await workerFor(uri);
             if (model.isDisposed()) return null;
-            const info = await worker.getQuickInfoAtPosition(uri.toString(), model.getOffsetAt(position));
+            const offset = model.getOffsetAt(position);
+            const [info, defs, index] = await Promise.all([
+                worker.getQuickInfoAtPosition(uri.toString(), offset),
+                worker.getDefinitionAtPosition(uri.toString(), offset).catch(() => null),
+                declarations(worker),
+            ]);
             if (!info || model.isDisposed()) return null;
+            const inTypings = uri.toString() === API_TYPINGS_URI;
+            // "Go to definition" when the symbol is declared in the typings
+            // (not when hovering that very declaration)
+            const def = (defs ?? []).find((d: any) => d.fileName === API_TYPINGS_URI);
+            const definition: Span | null =
+                def && !(inTypings && offset >= def.textSpan.start && offset <= def.textSpan.start + def.textSpan.length)
+                    ? { start: def.textSpan.start, length: def.textSpan.length }
+                    : null;
+            const links = apiLinksMarkdown(definition, typeLinks(info.displayParts, index, inTypings, def?.textSpan ?? null));
             const start = model.getPositionAt(info.textSpan.start);
             const end = model.getPositionAt(info.textSpan.start + info.textSpan.length);
             return {
                 range: new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column),
-                contents: quickInfoToMarkdown(info).map((value) => ({ value })),
+                contents: quickInfoToMarkdown(info, { links, resolve: resolveLink }).map((value) => ({ value, isTrusted: trusted })),
             };
         },
     });
@@ -123,14 +163,15 @@ function registerTsHover(monaco: any): void {
         },
         async resolveCompletionItem(item: any) {
             const worker = await workerFor(item.uri);
-            const d = await worker.getCompletionEntryDetails(item.uri.toString(), item.offset, item.label);
+            const [d, index] = await Promise.all([worker.getCompletionEntryDetails(item.uri.toString(), item.offset, item.label), declarations(worker)]);
             if (!d) return item;
-            const docs = docsToMarkdown(d.documentation, d.tags);
+            const docs = docsToMarkdown(d.documentation, d.tags, undefined, resolveLink);
+            const links = apiLinksMarkdown(null, typeLinks(d.displayParts, index, item.uri.toString() === API_TYPINGS_URI));
             return {
                 ...item,
                 // signature goes into the docs as a highlighted, wrapped code block
                 detail: undefined,
-                documentation: { value: [signatureBlock(partsToMarkdown(d.displayParts)), docs].filter(Boolean).join("\n\n") },
+                documentation: { value: [signatureBlock(partsToMarkdown(d.displayParts)), links, docs].filter(Boolean).join("\n\n"), isTrusted: trusted },
             };
         },
     });

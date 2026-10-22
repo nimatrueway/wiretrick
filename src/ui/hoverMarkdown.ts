@@ -9,7 +9,11 @@
 export interface SymbolPart {
     text: string;
     kind: string;
+    /** {@link} targets (linkName parts) */
+    target?: { fileName: string; textSpan: { start: number; length: number } };
 }
+/** href for a {@link X} reference, or undefined to render it as plain `X` */
+export type LinkResolver = (name: string, part: SymbolPart) => string | undefined;
 export interface TagInfo {
     name: string;
     text?: SymbolPart[] | string;
@@ -20,12 +24,12 @@ export interface QuickInfoLike {
     tags?: TagInfo[];
 }
 
-/** plain text of display parts; {@link X} / {@link X | label} → `X` / label */
-export function partsToMarkdown(parts: SymbolPart[] | string | undefined): string {
+/** plain text of display parts; {@link X} / {@link X | label} → `X` / label (a markdown link when `resolve` knows X) */
+export function partsToMarkdown(parts: SymbolPart[] | string | undefined, resolve?: LinkResolver): string {
     if (!parts) return "";
     if (typeof parts === "string") return parts;
     let out = "";
-    let link: { name: string; text: string } | null = null;
+    let link: { name: string; text: string; part?: SymbolPart } | null = null;
     let afterLink = false;
     for (const p of parts) {
         // TS swallows the line break after a closing `}` of {@link}
@@ -33,11 +37,16 @@ export function partsToMarkdown(parts: SymbolPart[] | string | undefined): strin
         afterLink = false;
         if (p.kind === "link") {
             if (link) {
-                out += link.text.trim() || "`" + link.name + "`";
+                const label = link.text.trim() || "`" + link.name + "`";
+                const href = link.part && resolve?.(link.name, link.part);
+                out += href ? `[${label}](${href})` : label;
                 link = null;
                 afterLink = true;
             } else link = { name: "", text: "" };
-        } else if (link && p.kind === "linkName") link.name += p.text;
+        } else if (link && p.kind === "linkName") {
+            link.name += p.text;
+            link.part ??= p;
+        }
         else if (link && p.kind === "linkText") link.text += p.text;
         else out += p.text;
     }
@@ -46,8 +55,9 @@ export function partsToMarkdown(parts: SymbolPart[] | string | undefined): strin
 
 const codeBlock = (text: string): string => (/^\s*[~`]{3}/m.test(text) ? text : "```typescript\n" + text.replace(/^\n+|\s+$/g, "") + "\n```");
 
-function tagBody(tag: TagInfo): string {
-    const text = partsToMarkdown(tag.text);
+function tagBody(tag: TagInfo, resolve?: LinkResolver): string {
+    const code = tag.name === "example" || tag.name === "default";
+    const text = partsToMarkdown(tag.text, code ? undefined : resolve);
     if (!text) return "";
     if (tag.name === "example") {
         const cap = /^<caption>(.*?)<\/caption>\s*\r?\n/.exec(text);
@@ -57,18 +67,18 @@ function tagBody(tag: TagInfo): string {
     return text;
 }
 
-function tagToMarkdown(tag: TagInfo): string | null {
+function tagToMarkdown(tag: TagInfo, resolve?: LinkResolver): string | null {
     if ((tag.name === "param" || tag.name === "template") && Array.isArray(tag.text)) {
         const i = tag.text.findIndex((p) => p.kind === "parameterName" || p.kind === "typeParameterName");
         if (i >= 0) {
-            const doc = partsToMarkdown(tag.text.slice(i + 1)).trim();
+            const doc = partsToMarkdown(tag.text.slice(i + 1), resolve).trim();
             const label = `*@${tag.name}* \`${tag.text[i].text}\``;
             return doc ? `${label} — ${doc}` : label;
         }
     }
     if ((tag.name === "returns" || tag.name === "return") && !partsToMarkdown(tag.text)) return null;
     const label = `*@${tag.name}*`;
-    const body = tagBody(tag);
+    const body = tagBody(tag, resolve);
     if (!body) return label;
     return label + (/\n/.test(body) ? "  \n" + body : ` — ${body}`);
 }
@@ -152,20 +162,32 @@ function wrapUnion(text: string, width: number, indent: string, leading = false)
 }
 
 /** documentation + tags as markdown, tags separated by blank lines */
-export function docsToMarkdown(documentation: SymbolPart[] | undefined, tags: TagInfo[] | undefined, skip: (t: TagInfo) => boolean = () => false): string {
-    const doc = partsToMarkdown(documentation).trim();
-    const rendered = (tags ?? []).filter((t) => !skip(t)).map(tagToMarkdown).filter((t): t is string => !!t);
+export function docsToMarkdown(
+    documentation: SymbolPart[] | undefined,
+    tags: TagInfo[] | undefined,
+    skip: (t: TagInfo) => boolean = () => false,
+    resolve?: LinkResolver
+): string {
+    const doc = partsToMarkdown(documentation, resolve).trim();
+    const rendered = (tags ?? [])
+        .filter((t) => !skip(t))
+        .map((t) => tagToMarkdown(t, resolve))
+        .filter((t): t is string => !!t);
     return [doc, ...rendered].filter(Boolean).join("\n\n");
 }
 
 export const signatureBlock = (sig: string): string => "```typescript\n" + formatSignature(sig) + "\n```";
 
-/** [signature block, documentation + tags] — empty sections dropped */
-export function quickInfoToMarkdown(info: QuickInfoLike): string[] {
+/**
+ * [signature block, documentation + tags] — empty sections dropped.
+ * `links` (markdown) goes right under the signature; `resolve` links {@link}s.
+ */
+export function quickInfoToMarkdown(info: QuickInfoLike, opts: { links?: string; resolve?: LinkResolver } = {}): string[] {
     const out: string[] = [];
     const sig = partsToMarkdown(info.displayParts);
-    if (sig) out.push(signatureBlock(sig));
-    const body = docsToMarkdown(info.documentation, info.tags);
+    if (sig) out.push(signatureBlock(sig) + (opts.links ? "\n\n" + opts.links : ""));
+    else if (opts.links) out.push(opts.links);
+    const body = docsToMarkdown(info.documentation, info.tags, undefined, opts.resolve);
     if (body) out.push(body);
     return out;
 }
