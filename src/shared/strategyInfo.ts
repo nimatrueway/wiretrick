@@ -27,7 +27,7 @@ export const STRATEGY_INFO: Record<Strategy, StrategyInfo> = {
     webrequest: {
         label: "webrequest — blocking webRequest",
         pros: "No banner, no setup. On Firefox it reaches everything, bodies included.",
-        cons: "Not on Chrome (MV3). Chromium MV2: no modifyResponse, no async handlers, replacements are served by redirect (URL changes, status always 200). Firefox: can't change a replaced response's status.",
+        cons: "Not on Chrome (MV3). Chromium MV2: no modifyResponse, no async handlers, replacements are served by redirect (URL changes, status always 200) — a replaced page shows a chrome-extension:// URL. Firefox: can't change a replaced response's status.",
     },
     cdp: {
         label: "cdp — chrome.debugger",

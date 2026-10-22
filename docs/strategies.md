@@ -48,7 +48,7 @@ The same text is shown under the strategy picker in Settings → Interception.
 |---|---|---|
 | `process` *(default, Chromium)* | Sees everything: documents, `<script src>`, CSS, images, workers, the first navigation. No banner. Async handlers, any status code, URL unchanged. | Chromium only. One-time install of the local helper and trust in its local CA. Matched hosts go through a local proxy (PAC); cert-pinned / mTLS sites break. Small per-request latency; bodies are buffered for `modifyResponse`. |
 | `hook` | No setup, no banner, no permissions, lightest. Works in every browser. | Only the page's own fetch/XHR. Misses documents, `<script src>`, images, workers and requests made before the hook loads. |
-| `webrequest` *(default, Firefox)* | No banner, no setup. On Firefox it reaches everything, bodies included. | Not on Chrome (MV3). Chromium MV2: no `modifyResponse`, no async handlers, replacements are served by redirect (URL changes, status always 200). Firefox: can't change a replaced response's status. |
+| `webrequest` *(default, Firefox)* | No banner, no setup. On Firefox it reaches everything, bodies included. | Not on Chrome (MV3). Chromium MV2: no `modifyResponse`, no async handlers, replacements are served by redirect (URL changes, status always 200) — a replaced page shows a `chrome-extension://` URL. Firefox: can't change a replaced response's status. |
 | `cdp` | Sees everything with nothing to install. | Chromium only. Chrome shows a "being debugged" banner while attached. May miss the first navigation in a fresh tab ([details](#first-page-load-with-cdp)). |
 
 > **Which one?** `hook` is the most lightweight (no banner, no helper, no
@@ -56,6 +56,16 @@ The same text is shown under the strategy picker in Settings → Interception.
 > (REST/API) calls. Documents, `<script src>`, images, workers and requests
 > made before the hook loads go straight past it. For robust interception
 > use `process` (Chromium), `webrequest` (Firefox / MV2 Chromium) or `cdp`.
+
+> **`webrequest` on Chromium MV2 and the page itself (`main_frame`).**
+> Redirect, cancel and request/response header changes work on the page
+> load. Its *body* can't be changed in place: `modifyResponse` never runs,
+> and `replaceResponse` / `respond` are served by redirecting the tab to the
+> extension's `serve.html` — the address bar shows a `chrome-extension://…`
+> URL and the page loses its origin (cookies, relative links, same-origin
+> calls). To rewrite or replace the page itself on Chromium, use `process`
+> or `cdp` on that handler (`wt.onDom` for DOM/title tweaks). Firefox's
+> `webrequest` doesn't have this limit.
 
 ## Which strategy for which job?
 

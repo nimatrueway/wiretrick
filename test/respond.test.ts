@@ -104,3 +104,13 @@ describe("onRequest respond", () => {
         expect(c.set).toEqual({ "x-m": "1" });
     });
 });
+
+describe("replacementContent (webrequest)", () => {
+    it("serves a plain object as JSON, like the other tiers", async () => {
+        const { replacementContent } = await import("../src/background/engine/strategies/webRequestStrategy");
+        expect(replacementContent({ url: "https://dummyjson.com/users/1", type: "main_frame" }, { mocked: true })).toEqual({ mime: "application/json", content: '{"mocked":true}' });
+        expect(replacementContent({ url: "https://x.test/a", type: "xmlhttprequest" }, [1, 2])).toEqual({ mime: "application/json", content: "[1,2]" });
+        expect(replacementContent({ url: "https://x.test/a.html", type: "main_frame" }, "<p>hi</p>")).toEqual({ mime: "text/html", content: "<p>hi</p>" });
+        expect(replacementContent({ url: "https://x.test/a", type: "main_frame" }, null)).toBeNull();
+    });
+});

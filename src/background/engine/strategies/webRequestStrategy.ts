@@ -494,6 +494,10 @@ export function replacementContent(details: { url: string; type?: string }, repl
     if (typeof replacement === "string" || replacement instanceof Uint8Array) {
         return { mime: mimeFor(null), content: replacement };
     }
+    // any other object is a JSON body (as on the other tiers)
+    if (replacement && typeof replacement === "object" && !ArrayBuffer.isView(replacement)) {
+        return { mime: guessMime(null, details.url, "application/json"), content: JSON.stringify(replacement) };
+    }
     return null;
 }
 
