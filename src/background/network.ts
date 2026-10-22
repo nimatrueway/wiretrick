@@ -299,7 +299,8 @@ export function addNetworkPort(port: chrome.runtime.Port): void {
 }
 
 export const URL_AT_END = /\s((?:https?|wss?):\/\/\S+)\s*$/;
-const NAME_PREFIX = /^\[([^\]]+)\]\s*/;
+/** optional tier tag ("[process] [Name] …") then the script name */
+const NAME_PREFIX = /^(?:\[(process|cdp|webrequest|hook|sandbox)\]\s+(?=\[))?\[([^\]]+)\]\s*/;
 
 /**
  * The recorded request a script action/body belongs to: the newest same-URL
@@ -392,8 +393,9 @@ export function annotateFromLog(tabId: number, scriptId: string, message: string
     if (!explicitUrl && !m) return;
     const url = explicitUrl || m![1];
     const nameMatch = NAME_PREFIX.exec(message);
-    const scriptName = nameMatch ? nameMatch[1] : scriptId;
-    const action = message.slice(nameMatch ? nameMatch[0].length : 0, m ? m.index : message.length).trim();
+    const scriptName = nameMatch ? nameMatch[2] : scriptId;
+    let action = message.slice(nameMatch ? nameMatch[0].length : 0, m ? m.index : message.length).trim();
+    if (nameMatch?.[1]) action += ` (${nameMatch[1]})`;
     const now = Date.now();
     const target = entryFor(tabId, url);
     target.interventions.push({ scriptId, scriptName, action, level, kind: interventionKind(level, message, kind), at: now });

@@ -141,6 +141,19 @@ describe("network recorder", () => {
         p.disconnect();
     });
 
+    it("names the script, not the tier tag, for tier-prefixed lines", () => {
+        const p = fakePort();
+        addNetworkPort(p.port);
+        req("1", "https://a.test/api");
+        annotateFromLog(7, "s1", "[process] [My script] modifyResponse applied (1b → 2b) https://a.test/api", "info");
+        annotateFromLog(7, "s2", "[process] onRequest → cancel https://a.test/api", "info");
+        expect(entries.get("1")!.interventions.map((i) => [i.scriptName, i.action])).toEqual([
+            ["My script", "modifyResponse applied (1b → 2b) (process)"],
+            ["process", "onRequest → cancel"],
+        ]);
+        p.disconnect();
+    });
+
     it("creates a synthetic row when nothing hit the network", () => {
         const p = fakePort();
         addNetworkPort(p.port);
