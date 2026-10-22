@@ -27,13 +27,13 @@ export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDomHandler
         onRequest: inert,
         onResponseHeaders: inert,
         replaceResponse: inert,
-        modifyResponse: inert,
+        onResponseBody: inert,
         onDom: (route: unknown, fn: unknown) => {
             if (typeof fn !== "function") throw new Error("wt.onDom: second argument must be the handler function");
             const r = normalizeRoute("onDom", route, dom.length);
             dom.push({ route: r, when: r.when || "DOMContentLoaded", fn: fn as any });
         },
-        describe: inert,
+        about: inert,
         params: (defs: Record<string, unknown>) => Object.freeze(Object.fromEntries(Object.keys(defs || {}).map((k) => [k, o.params[k]]))),
         defineParam: (name: string) => o.params[name],
         log: o.log,

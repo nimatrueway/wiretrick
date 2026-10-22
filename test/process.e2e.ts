@@ -138,18 +138,18 @@ try {
         type: "saveScript",
         id: "p_local",
         name: "Proc local",
-        code: `wt.onRequest({ url: "${ORIGIN}/*", strategy: "process" }, (c) => {
+        code: `wt.onRequest({ url: "${ORIGIN}/*", strategy: "helper" }, (c) => {
     if (c.url.endsWith("/redir")) return { redirect: "${ORIGIN}/target" };
     if (c.url.endsWith("/mock")) return { respond: { body: { mocked: true, type: c.resourceType }, mime: "application/json" } };
 });
-wt.onResponseHeaders({ url: "${ORIGIN}/*", strategy: "process" }, (c) => (c.url.endsWith("/doc") ? { headers: { set: { "x-proc": "yes" } } } : undefined));
-wt.modifyResponse({ url: "${ORIGIN}/*", strategy: "process" }, (c, body) => (c.url.endsWith("/plain") ? undefined : body.replace("ORIGINAL", "PROCESSED")));`,
+wt.onResponseHeaders({ url: "${ORIGIN}/*", strategy: "helper" }, (c) => (c.url.endsWith("/doc") ? { headers: { set: { "x-proc": "yes" } } } : undefined));
+wt.onResponseBody({ url: "${ORIGIN}/*", strategy: "helper" }, (c, body) => (c.url.endsWith("/plain") ? undefined : body.replace("ORIGINAL", "PROCESSED")));`,
     });
     await send({
         type: "saveScript",
         id: "p_https",
         name: "Proc https",
-        code: `wt.modifyResponse({ url: "https://example.com/*", strategy: "process" }, (c, body) => body.replace("<title>Example Domain", "<title>Process Domain"));`,
+        code: `wt.onResponseBody({ url: "https://example.com/*", strategy: "helper" }, (c, body) => body.replace("<title>Example Domain", "<title>Process Domain"));`,
     });
 
     let st: any = null;

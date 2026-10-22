@@ -6,7 +6,7 @@ import { compileScript } from "../src/shared/compile";
 import type { Script } from "../src/background/engine/scriptStore";
 
 // these suites exercise the webRequest tier: make it the settings default
-beforeEach(() => setDefaultStrategy("webrequest"));
+beforeEach(() => setDefaultStrategy("webRequest"));
 afterEach(() => setDefaultStrategy(null));
 
 beforeEach(() => {
@@ -70,7 +70,7 @@ describe("onRequest respond", () => {
 
     it("hook tier: runRequestDecision returns the respond decision (async handler)", async () => {
         const s = new ChromeBodyStrategy();
-        s.reload([makeScript("a", `wt.onRequest({ url: "*", strategy: "hook" }, async () => ({ respond: { body: { ok: 1 }, status: 201 } }));`)]);
+        s.reload([makeScript("a", `wt.onRequest({ url: "*", strategy: "page" }, async () => ({ respond: { body: { ok: 1 }, status: 201 } }));`)]);
         const r = await s.runRequestDecision("https://api.example.com/v1/user", "GET");
         expect(r).not.toBeNull();
         expect(r!.kind).toBe("respond");
@@ -80,7 +80,7 @@ describe("onRequest respond", () => {
 
     it("hook tier: non-respond scripts → headers merged or null", async () => {
         const s = new ChromeBodyStrategy();
-        s.reload([makeScript("a", `wt.onRequest({ url: "*", strategy: "hook" }, () => ({ headers: { set: { "x": "1" } } }));`)]);
+        s.reload([makeScript("a", `wt.onRequest({ url: "*", strategy: "page" }, () => ({ headers: { set: { "x": "1" } } }));`)]);
         const r = await s.runRequestDecision("https://api.example.com/v1/user", "GET");
         expect(r!.kind).toBe("headers");
     });
@@ -88,11 +88,11 @@ describe("onRequest respond", () => {
     it("hook tier: redirect and cancel decisions pass through", async () => {
         const s = new ChromeBodyStrategy();
         s.reload([
-            makeScript("r", `wt.onRequest({ url: "*", strategy: "hook" }, () => ({ redirect: "https://r.com" }));`),
+            makeScript("r", `wt.onRequest({ url: "*", strategy: "page" }, () => ({ redirect: "https://r.com" }));`),
         ]);
         expect((await s.runRequestDecision("https://x.com/", "GET"))!.kind).toBe("redirect");
         const s2 = new ChromeBodyStrategy();
-        s2.reload([makeScript("c", `wt.onRequest({ url: "*", strategy: "hook" }, () => ({ cancel: true }));`)]);
+        s2.reload([makeScript("c", `wt.onRequest({ url: "*", strategy: "page" }, () => ({ block: true }));`)]);
         expect((await s2.runRequestDecision("https://x.com/", "GET"))!.kind).toBe("cancel");
     });
 

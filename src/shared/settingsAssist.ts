@@ -45,7 +45,7 @@ function typeLabel(d: ParamDef): string {
 function globalValueError(key: string, v: any): string | null {
     if (key === "logLevel") return typeof v === "string" && (LOG_LEVELS as readonly string[]).includes(v) ? null : `Expected one of ${LOG_LEVELS.join(" | ")}`;
     if (key === "logCap") return typeof v === "number" && Number.isInteger(v) && v >= 100 && v <= 10000 ? null : "Expected an integer between 100 and 10000";
-    if (key === "strategy") return isStrategy(v) ? null : `Expected one of ${STRATEGIES.join(" | ")}`;
+    if (key === "defaultStrategy") return isStrategy(v) ? null : `Expected one of ${STRATEGIES.join(" | ")}`;
     return null;
 }
 
@@ -273,8 +273,8 @@ export function settingsHover(text: string, offset: number, scripts: AssistScrip
     } else if (c.path.length === 1 && a === "settings" && GLOBAL_PROPS[k]) {
         const d = GLOBAL_PROPS[k];
         const range = d.enum ? d.enum.join(" | ") : d.minimum !== undefined ? `${d.type} ${d.minimum}…${d.maximum}` : d.type;
-        const def = k === "logLevel" ? DEFAULT_LOG_LEVEL : k === "strategy" ? defaultStrategySetting() : DEFAULT_LOG_CAP;
-        md = k === "strategy" ? `**strategy** — ${strategyMarkdown()}` : `**${k}** — ${d.description}\n\n\`${range}\` · default \`${JSON.stringify(def)}\``;
+        const def = k === "logLevel" ? DEFAULT_LOG_LEVEL : k === "defaultStrategy" ? defaultStrategySetting() : DEFAULT_LOG_CAP;
+        md = k === "defaultStrategy" ? `**defaultStrategy** — ${strategyMarkdown()}` : `**${k}** — ${d.description}\n\n\`${range}\` · default \`${JSON.stringify(def)}\``;
     } else if (c.path.length === 1 && a === "params") {
         const s = scripts.find((x) => x.name === k);
         md = s ? `**${k}**\n\n${paramSummary(s)}` : `No script named **${k}** — ignored`;

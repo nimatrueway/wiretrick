@@ -5,7 +5,7 @@
  *   2. the manager opens; scripts save + list (SW ⇄ offscreen ⇄ sandbox
  *      analyze round-trip)
  *   3. settings.yaml saves/loads
- *   4. the hook tier intercepts a page fetch (modifyResponse travels
+ *   4. the hook tier intercepts a page fetch (onResponseBody travels
  *      hook → bridge → SW → sandbox → back)
  *
  * Known MV3 limitations (by design, see README): no blocking webRequest →
@@ -123,7 +123,7 @@ try {
     await mgr.waitForFunction(() => (window as any).monaco?.editor.getEditors().length === 1, null, { timeout: 20000 }).catch((e: any) => console.log("waitForFunction editor failed:", e.message.slice(0, 100)));
     check("manager opens", true);
     // no local helper in this run: routes without their own strategy use the hook
-    await mgr.evaluate(() => new Promise<void>((r) => chrome.storage.local.set({ resStrategy: "hook" }, () => r())));
+    await mgr.evaluate(() => new Promise<void>((r) => chrome.storage.local.set({ resStrategy: "page" }, () => r())));
     const contexts = await mgr.evaluate(() => new Promise<any>((r) => (chrome.runtime as any).getContexts({}, (cs: any[]) => r(cs?.map((c: any) => c.contextType) ?? []))));
     // this chromium reports the MV3 background SW as "BACKGROUND"
     check("extension service worker registered", contexts.includes("BACKGROUND") || contexts.includes("SERVICE_WORKER"), JSON.stringify(contexts));
@@ -133,7 +133,7 @@ try {
         type: "saveScript",
         id: "s_mv3",
         name: "MV3 hook",
-        code: `wt.modifyResponse("*://*:*/*", (ctx, body) => body.replace("ORIGINAL", "MV3"));`,
+        code: `wt.onResponseBody("*://*:*/*", (ctx, body) => body.replace("ORIGINAL", "MV3"));`,
     }, r)));
     check("saveScript round-trips through the sandbox (meta extracted)", saveResult?.meta?.active === true, JSON.stringify(saveResult?.meta));
     const listResult = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "listScripts" }, r)));
@@ -152,7 +152,7 @@ try {
         type: "saveScript",
         id: "s_importer",
         name: "api-interceptor",
-        code: `import { tag } from "./api-lib";\nwt.params({ label: { type: "string", default: "x" } });\nwt.modifyResponse("*://*:*/*", (ctx, body) => tag(body));`,
+        code: `import { tag } from "./api-lib";\nwt.params({ label: { type: "string", default: "x" } });\nwt.onResponseBody("*://*:*/*", (ctx, body) => tag(body));`,
     }, r)));
     check("importing script captures its routes (not a utility)",
         importSave?.meta?.active === true && importSave?.meta?.match?.includes("*://*:*/*") && !importSave.error,
@@ -180,7 +180,7 @@ try {
     // 3. settings.yaml round-trip
     const settings = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "getSettingsYaml" }, r)));
     check("settings.yaml generated (SW storage path)", typeof settings?.text === "string" && settings.text.includes("MV3 hook"));
-    const applyResult = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "applySettingsYaml", text: "settings:\n  logLevel: warn\n  strategy: hook\n" }, r)));
+    const applyResult = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "applySettingsYaml", text: "settings:\n  logLevel: warn\n  defaultStrategy: page\n" }, r)));
     check("applySettingsYaml applies", !applyResult?.error, JSON.stringify(applyResult));
 
     // 4. hook tier intercepts a page fetch (transform runs in the sandbox)
@@ -188,7 +188,7 @@ try {
     await page.goto(`${ORIGIN}/page`);
     await page.waitForFunction(() => document.title.startsWith("DONE:"), null, { timeout: 15000 });
     const result = await page.title();
-    check("hook tier intercepts (modifyResponse via sandbox)", result === "DONE:MV3", result);
+    check("hook tier intercepts (onResponseBody via sandbox)", result === "DONE:MV3", result);
 
     // offscreen document + sandbox actually created
     const swHasOffscreen = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "folderSyncStatus" }, () => r(chrome.runtime.lastError ? null : true))));
@@ -308,32 +308,32 @@ try {
     // ---- MV3 debugger tier: browser-initiated loads (<script src>) ARE
     // intercepted for strategy cdp routes — CDP Fetch pauses in the
     // SW, decisions computed in the sandbox. The user's scenario: page on
-    // one origin, CDN script on another, strategy "cdp" ----
+    // one origin, CDN script on another, strategy "debugger" ----
     const CDN = `http://localhost:${PORT}`;
     if (process.env.DBG) await mgr.evaluate(() => { const sel = document.querySelector("#log-level") as HTMLSelectElement; sel.value = "debug"; sel.dispatchEvent(new Event("change")); });
     await mgr.evaluate((cdn: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_respond", name: "Respond script",
-        code: `wt.onRequest({ url: "${cdn}/app.js*", strategy: "cdp" }, (ctx) => ({ respond: { status: 200, mime: "text/javascript", body: 'window.__marker = "RESPONDED:' + ctx.resourceType + '";' } }));`,
+        code: `wt.onRequest({ url: "${cdn}/app.js*", strategy: "debugger" }, (ctx) => ({ respond: { status: 200, mime: "text/javascript", body: 'window.__marker = "RESPONDED:' + ctx.resourceType + '";' } }));`,
     }, r)), CDN);
     await mgr.evaluate((cdn: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_cdpx", name: "Cdp transform",
-        code: `wt.modifyResponse({ url: ["${cdn}/gz.js", "${cdn}/lazy.js"], strategy: "cdp" }, (ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
+        code: `wt.onResponseBody({ url: ["${cdn}/gz.js", "${cdn}/lazy.js"], strategy: "debugger" }, (ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
     }, r)), CDN);
     await mgr.evaluate((cdn: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_auto", name: "Auto script",
-        code: `wt.modifyResponse("${cdn}/auto.js", (ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
+        code: `wt.onResponseBody("${cdn}/auto.js", (ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
     }, r)), CDN);
     // a handler that runs but changes nothing: the request is "tapped", not "modified"
     await mgr.evaluate((cdn: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_watch", name: "Watcher",
-        code: `wt.onRequest({ url: "${cdn}/auto.js", strategy: "cdp" }, () => undefined);`,
+        code: `wt.onRequest({ url: "${cdn}/auto.js", strategy: "debugger" }, () => undefined);`,
     }, r)), CDN);
     await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_procx", name: "Process listed",
-        code: `wt.modifyResponse({ url: "*://process-listed.invalid/*", strategy: "process" }, (ctx, body) => body);`,
+        code: `wt.onResponseBody({ url: "*://process-listed.invalid/*", strategy: "helper" }, (ctx, body) => body);`,
     }, r)));
     await mgr.waitForTimeout(1500); // pipeline reload → debugger tier armed
-    const helperWarned = await mgr.waitForFunction(() => [...document.querySelectorAll("#log-entries .log-line")].some((l) => /\[Process listed\] modifyResponse #1: strategy "process"/.test(l.textContent || "")), null, { timeout: 8000 }).then(() => true, () => false);
+    const helperWarned = await mgr.waitForFunction(() => [...document.querySelectorAll("#log-entries .log-line")].some((l) => /\[Process listed\] onResponseBody #1: strategy "helper"/.test(l.textContent || "")), null, { timeout: 8000 }).then(() => true, () => false);
     check("process routes warn while the helper is down (no fallback)", helperWarned);
     // Network tab records from now on (listeners attach when it opens)
     await mgr.click("#network-tab");
@@ -343,7 +343,7 @@ try {
     await xoPage.waitForFunction(() => (window as any).__lazy !== undefined, null, { timeout: 15000 }).catch(() => {});
     const xo = await xoPage.evaluate(() => ({ marker: (window as any).__marker, gz: (window as any).__gz, lazy: (window as any).__lazy, auto: (window as any).__auto }));
     check("cross-origin <script src> onRequest respond (strategy cdp → debugger tier)", xo.marker === "RESPONDED:script", JSON.stringify(xo));
-    check("modifyResponse on a gzip-encoded script tag (encoding stripped)", xo.gz === "MODIFIED-GZ", JSON.stringify(xo));
+    check("onResponseBody on a gzip-encoded script tag (encoding stripped)", xo.gz === "MODIFIED-GZ", JSON.stringify(xo));
     check("lazily inserted chunk (2.5s after load) still intercepted", xo.lazy === "MODIFIED-LAZY", JSON.stringify(xo));
     check("default (hook) strategy leaves script tags alone", xo.auto === "ORIGINAL-AUTO", JSON.stringify(xo));
     await mgr.waitForTimeout(800);
@@ -522,18 +522,18 @@ try {
     // same-origin script on the debugger tier
     await mgr.evaluate((origin: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_proxy2", name: "Proxy same-origin",
-        code: `wt.modifyResponse({ url: "${origin}/app.js", strategy: "cdp" }, (ctx, body) => body.replace("ORIGINAL-MARKER", "PROXY-MARKER"));`,
+        code: `wt.onResponseBody({ url: "${origin}/app.js", strategy: "debugger" }, (ctx, body) => body.replace("ORIGINAL-MARKER", "PROXY-MARKER"));`,
     }, r)), ORIGIN);
     await mgr.waitForTimeout(1500);
     const scriptPage = await ctx.newPage();
     await scriptPage.goto(`${ORIGIN}/page-script`);
     await scriptPage.waitForFunction(() => (window as any).__marker !== undefined, null, { timeout: 15000 });
-    check("same-origin <script src> modifyResponse (strategy cdp)", (await scriptPage.evaluate(() => (window as any).__marker)) === "PROXY-MARKER", JSON.stringify(await scriptPage.evaluate(() => (window as any).__marker)));
+    check("same-origin <script src> onResponseBody (strategy cdp)", (await scriptPage.evaluate(() => (window as any).__marker)) === "PROXY-MARKER", JSON.stringify(await scriptPage.evaluate(() => (window as any).__marker)));
     // zero-latency first navigation: may beat the attach — must then be
     // WARNED (never silent), and a reload must intercept
     await mgr.evaluate((origin: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_race", name: "Race script",
-        code: `wt.modifyResponse({ url: "${origin}/race.js", strategy: "cdp" }, (ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
+        code: `wt.onResponseBody({ url: "${origin}/race.js", strategy: "debugger" }, (ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
     }, r)), ORIGIN);
     await mgr.waitForTimeout(1500);
     const racePage = await ctx.newPage();
@@ -552,7 +552,7 @@ try {
     // attach is re-issued through the debugger, so it IS intercepted
     await mgr.evaluate((origin: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_doccold", name: "Doc cold",
-        code: `wt.modifyResponse({ url: "${origin}/doc-cold*", strategy: "cdp" }, (ctx, body) => body.replaceAll("DOC-ORIGINAL", "DOC-MODIFIED"));`,
+        code: `wt.onResponseBody({ url: "${origin}/doc-cold*", strategy: "debugger" }, (ctx, body) => body.replaceAll("DOC-ORIGINAL", "DOC-MODIFIED"));`,
     }, r)), ORIGIN);
     await mgr.waitForTimeout(1500);
     const docPage = await ctx.newPage();

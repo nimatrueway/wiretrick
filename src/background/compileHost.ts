@@ -261,7 +261,7 @@ export async function analyzeScripts(scripts: { id: string; name: string; code: 
     await ensureOffscreen();
     const resp = await sandboxCallSafe({ op: "analyze", scripts: scripts.map((s) => ({ ...s, enabled: true })), paramValues: paramValues || {} });
     if (!resp) {
-        dlogLevel("compile", "error", `sandbox analyze FAILED for ${scripts.length} script(s) — the hook bundle serves WITHOUT them (no interception/onDom until the next successful analyze)`);
+        dlogLevel("compile", "error", `sandbox analyze FAILED for ${scripts.length} script(s) — the page bundle serves WITHOUT them (no interception/onDom until the next successful analyze)`);
         return out;
     }
     for (const s of scripts) {

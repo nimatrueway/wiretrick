@@ -75,11 +75,11 @@ wt.onRequest({ url: "*", strategy: "${strategy}" }, ${async}(ctx) => {
     const x = undefined;
     return x.split(".");
 });`;
-const THROWS = throws("webrequest");
+const THROWS = throws("webRequest");
 
 // line 4 throws at module top level (compile-time):
 const TOPLEVEL = `
-wt.onRequest({ url: "*", strategy: "webrequest" }, () => {});
+wt.onRequest({ url: "*", strategy: "webRequest" }, () => {});
 const x = undefined;
 x.split(".");
 `;
@@ -152,7 +152,7 @@ describe("CDP tier: error logs carry name + user line:col", () => {
     it("onRequest throws at the Request stage → [name] + mapped line", async () => {
         const c = new CdpStrategy();
         // sync onRequest runs in the webRequest tier only; the Request stage runs async ones
-        c.reload([storedScript("a", "Thrower", throws("cdp", "async "))]);
+        c.reload([storedScript("a", "Thrower", throws("debugger", "async "))]);
         await c.handlePaused("tab:1", {
             requestId: "r1",
             request: { url: "https://api.example.com/v1/data", method: "GET" },

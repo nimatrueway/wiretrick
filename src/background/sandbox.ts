@@ -213,7 +213,7 @@ function analyze(scripts: PlainScript[], paramValues: Record<string, any>): { re
         // identify by the CALLER's name (meta.name is a default here)
         const summary = `analyze "${c.s.name}" (${c.s.code.length}b) → active=${a.meta.active} routes=${a.meta.routes.length} match=${JSON.stringify(a.meta.match)} params=[${Object.keys(a.paramDefs).join(", ")}] deps=[${a.deps.join(", ")}]`;
         sandboxLog(a.error ? `${summary} ERROR ${a.error.split("\n")[0]}` : summary, a.error ? "error" : "debug");
-        if (!a.error && !a.meta.active && /\bwt\.(onRequest|onResponseHeaders|replaceResponse|modifyResponse|onDom)\b/.test(c.s.code)) {
+        if (!a.error && !a.meta.active && /\bwt\.(onRequest|onResponseHeaders|replaceResponse|onResponseBody|onDom)\b/.test(c.s.code)) {
             // mentions handlers but none registered at top level (guarded/late calls)
             sandboxLog(`"${c.s.name}" mentions wt.on…/modify…/replace… but registered no handler at top level — it compiles as a utility (𝑓)`, "warn");
         }

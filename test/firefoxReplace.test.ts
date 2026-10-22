@@ -8,7 +8,7 @@ import { compileScript } from "../src/shared/compile";
 import type { Script } from "../src/background/engine/scriptStore";
 
 // these suites exercise the webRequest tier: make it the settings default
-beforeEach(() => setDefaultStrategy("webrequest"));
+beforeEach(() => setDefaultStrategy("webRequest"));
 afterEach(() => setDefaultStrategy(null));
 
 interface FakeFilter {

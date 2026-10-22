@@ -42,7 +42,7 @@ export const SETTINGS_SCHEMA = {
                     default: DEFAULT_LOG_CAP,
                     description: "Log lines kept in the panel",
                 },
-                strategy: {
+                defaultStrategy: {
                     type: "string",
                     enum: [...STRATEGIES],
                     default: builtinStrategy(),

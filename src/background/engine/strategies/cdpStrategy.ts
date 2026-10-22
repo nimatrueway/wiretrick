@@ -1,6 +1,6 @@
 /**
- * cdp tier (strategy "cdp"): chrome.debugger + the CDP Fetch domain. Runs
- * the handler routes whose strategy is "cdp" — any request the tab (or its
+ * cdp tier (strategy "debugger"): chrome.debugger + the CDP Fetch domain. Runs
+ * the handler routes whose strategy is "debugger" — any request the tab (or its
  * workers) makes, in place, with real status codes. Chrome shows a
  * "started debugging this browser" banner while attached.
  *
@@ -40,14 +40,14 @@ export function webRequestTypeOf(cdpType: string | undefined): string {
 type FetchPattern = { urlPattern: string; resourceType?: string; requestStage: "Request" | "Response" };
 
 const REQUEST_KINDS: RouteKind[] = ["onRequest"];
-const RESPONSE_KINDS: RouteKind[] = ["onResponseHeaders", "replaceResponse", "modifyResponse"];
+const RESPONSE_KINDS: RouteKind[] = ["onResponseHeaders", "replaceResponse", "onResponseBody"];
 
 /** Fetch.enable patterns for the owned routes (a coarse glob; handlers re-filter exactly) */
 export function fetchPatternsOf(owned: OwnedRoute[]): FetchPattern[] {
     const out = new Map<string, FetchPattern>();
     for (const { route } of owned) {
         const requestStage = REQUEST_KINDS.includes(route.kind) ? "Request" : "Response";
-        const types = route.types ? [...new Set(route.types.flatMap((t) => CDP_TYPES[t] || ["Other"]))] : [undefined];
+        const types = route.resourceTypes ? [...new Set(route.resourceTypes.flatMap((t) => CDP_TYPES[t] || ["Other"]))] : [undefined];
         for (const m of route.url) {
             const urlPattern = urlGlobOf(m);
             for (const resourceType of types) {
@@ -89,26 +89,26 @@ export class CdpStrategy {
     private recentlyPaused = new Set<string>();
 
     reload(scripts: Script[], paramValues?: { [scriptId: string]: Record<string, any> }): void {
-        const owned = ownedRoutes(scripts, "cdp");
+        const owned = ownedRoutes(scripts, "debugger");
         this.owned = owned;
         this.patterns = fetchPatternsOf(owned);
         if (__MV3__) {
             this.mv3Plain = scripts.filter((s) => s.enabled).map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt, enabled: true }));
             this.mv3Params = paramValues || {};
         } else {
-            this.ops = compileMv2(scripts, paramValues, (s) => ownsAny(s, "cdp")).map((c) => ({ id: c.id, name: c.name, handlers: c.compiled.handlers }));
+            this.ops = compileMv2(scripts, paramValues, (s) => ownsAny(s, "debugger")).map((c) => ({ id: c.id, name: c.name, handlers: c.compiled.handlers }));
         }
         // announce only when the owning set changes (reloads are frequent)
         const names = [...new Set(owned.map((o) => o.name))];
         const summary = JSON.stringify(names);
         if (summary !== this.summary && names.length) {
-            log(-1, `[cdp] debugger tier active for ${names.map((n) => `"${n}"`).join(", ")} — Chrome shows a "started debugging this browser" banner while attached`, "info");
+            log(-1, `[debugger] debugger strategy active for ${names.map((n) => `"${n}"`).join(", ")} — Chrome shows a "started debugging this browser" banner while attached`, "info");
         }
         this.summary = summary;
-        dlog("cdp", "debugger tier reloaded", { scripts: names, patterns: this.patterns.length });
+        dlog("debugger", "debugger strategy reloaded", { scripts: names, patterns: this.patterns.length });
         if (__MV3__) {
             this.ready = this.resyncAttachedMv3().catch((e: any) => {
-                dlogLevel("cdp", "error", `debugger tier resync failed: ${e?.message || e}`);
+                dlogLevel("debugger", "error", `debugger strategy resync failed: ${e?.message || e}`);
             });
         } else {
             for (const key of [...this.attached]) if (!this.owned.length) void this.detachByKey(key);
@@ -134,7 +134,7 @@ export class CdpStrategy {
             try {
                 await debuggerSend({ tabId }, "Fetch.enable", { patterns: this.patterns });
             } catch (e: any) {
-                dlogLevel("cdp", "warn", "Fetch.enable refresh failed", { tabId, error: e?.message || e });
+                dlogLevel("debugger", "warn", "Fetch.enable refresh failed", { tabId, error: e?.message || e });
             }
         }
         if (!this.owned.length) return;
@@ -161,7 +161,7 @@ export class CdpStrategy {
         if (this.shouldAttach(url)) {
             await this.ensureAttached(tabId, url);
         } else if (this.attached.has(key)) {
-            dlogLevel("cdp", "debug", "tab left matching pages → detach", { tabId, url });
+            dlogLevel("debugger", "debug", "tab left matching pages → detach", { tabId, url });
             await this.detachByKey(key);
         }
     }
@@ -178,7 +178,7 @@ export class CdpStrategy {
             await debuggerSend({ tabId }, "Page.navigate", { url });
             return true;
         } catch (e: any) {
-            dlogLevel("cdp", "warn", "re-navigation failed", { tabId, url, error: e?.message || e });
+            dlogLevel("debugger", "warn", "re-navigation failed", { tabId, url, error: e?.message || e });
             return false;
         }
     }
@@ -245,9 +245,9 @@ export class CdpStrategy {
                     await debuggerAttach({ targetId: t.targetId });
                     await debuggerSend({ targetId: t.targetId }, "Fetch.enable", { patterns: this.patterns });
                     this.attached.add(key);
-                    dlogLevel("cdp", "info", "worker target attached", { url: t.url.slice(0, 80) });
+                    dlogLevel("debugger", "info", "worker target attached", { url: t.url.slice(0, 80) });
                 } catch (e: any) {
-                    dlogLevel("cdp", "warn", "worker attach failed", { target: t.url.slice(0, 60), error: e.message || e });
+                    dlogLevel("debugger", "warn", "worker attach failed", { target: t.url.slice(0, 60), error: e.message || e });
                 }
             }
             if (pending === 0) break;
@@ -265,7 +265,7 @@ export class CdpStrategy {
             this.idleTimers.delete(key);
             if (this.attached.has(key)) {
                 void this.detachByKey(key);
-                dlogLevel("cdp", "debug", "idle detach (banner cleared)", { key });
+                dlogLevel("debugger", "debug", "idle detach (banner cleared)", { key });
             }
         }, graceMs);
         this.idleTimers.set(key, t);
@@ -310,7 +310,7 @@ export class CdpStrategy {
 
     private async doEnsureAttached(tabId: number, mainFrameUrl: string): Promise<void> {
         const key = `tab:${tabId}`;
-        dlogLevel("cdp", "debug", "ensureAttached", { tabId, mainFrameUrl, scripts: this.debuggerScriptsFor(mainFrameUrl) });
+        dlogLevel("debugger", "debug", "ensureAttached", { tabId, mainFrameUrl, scripts: this.debuggerScriptsFor(mainFrameUrl) });
         for (let attempt = 0; attempt < 2; attempt++) {
             try {
                 try {
@@ -328,14 +328,14 @@ export class CdpStrategy {
                     throw e;
                 }
                 this.attached.add(key);
-                dlogLevel("cdp", "info", "attached + Fetch.enabled", { tabId, attempt });
-                log(tabId, "[cdp] debugger attached — cdp routes active in this tab", "info");
+                dlogLevel("debugger", "info", "attached + Fetch.enabled", { tabId, attempt });
+                log(tabId, "[debugger] debugger attached — debugger routes active in this tab", "info");
                 return;
             } catch (e: any) {
-                dlogLevel("cdp", "warn", `attach attempt ${attempt} failed`, { tabId, error: e.message || e });
+                dlogLevel("debugger", "warn", `attach attempt ${attempt} failed`, { tabId, error: e.message || e });
                 if (attempt === 1) {
-                    dlogLevel("cdp", "error", "debugger attach failed after all retries", { tabId, error: e.message || e });
-                    log(tabId, `[cdp] debugger attach failed: ${e.message || e}`, "error");
+                    dlogLevel("debugger", "error", "debugger attach failed after all retries", { tabId, error: e.message || e });
+                    log(tabId, `[debugger] debugger attach failed: ${e.message || e}`, "error");
                     return;
                 }
                 await new Promise((r) => setTimeout(r, 150));
@@ -345,11 +345,11 @@ export class CdpStrategy {
 
     /** run a body op over the cdp-owned handlers (locally on MV2, in the sandbox on MV3) */
     private run(op: BodyOp, args: Record<string, any>, tabId: number): Promise<any> {
-        const a = { ...args, tabId, tier: "cdp" };
+        const a = { ...args, tabId, tier: "debugger" };
         if (__MV3__) return runBodyOp(this.mv3Plain as any, this.mv3Params, op, a);
         return runOp(this.ops, op, a, {
             log: (scriptId, level, msg, kind) => log(tabId, msg, level, scriptId, kind),
-            debug: (msg) => dlogLevel("cdp", "debug", msg),
+            debug: (msg) => dlogLevel("debugger", "debug", msg),
         });
     }
 
@@ -376,7 +376,7 @@ export class CdpStrategy {
             if (isRequestStage) {
                 if (!this.wants(url, method, resourceType, REQUEST_KINDS)) return void (await cont());
                 const decision = await this.run("requestDecision", base, tabId);
-                dlogLevel("cdp", "debug", "request decision", { url, resourceType, kind: decision?.kind ?? "none" });
+                dlogLevel("debugger", "debug", "request decision", { url, resourceType, kind: decision?.kind ?? "none" });
                 if (!decision) return void (await cont());
                 if (decision.kind === "respond") {
                     recordNetBody({ tabId, url, method, modified: decision.content ?? "", mime: decision.mime, status: decision.status || 200 });
@@ -422,7 +422,7 @@ export class CdpStrategy {
             const status: number = params.responseStatusCode ?? 0;
             if (params.responseErrorReason || (status >= 300 && status < 400)) return void (await cont());
             const wantsHeaders = this.wants(url, method, resourceType, ["onResponseHeaders"]);
-            const wantsBody = this.wants(url, method, resourceType, ["replaceResponse", "modifyResponse"]);
+            const wantsBody = this.wants(url, method, resourceType, ["replaceResponse", "onResponseBody"]);
             if (!wantsHeaders && !wantsBody) return void (await cont());
             const originalHeaders: { name: string; value: string }[] = params.responseHeaders || [];
             const headerMods = wantsHeaders
@@ -435,7 +435,7 @@ export class CdpStrategy {
             const continueWithHeaders = async () => {
                 if (!headerMods) return void (await cont());
                 await debuggerSend(d, "Fetch.continueResponse", { requestId, responseCode: status || 200, responseHeaders: baseHeaders });
-                dlogLevel("cdp", "info", "response headers modified", { url, resourceType });
+                dlogLevel("debugger", "info", "response headers modified", { url, resourceType });
             };
             if (!wantsBody) return void (await continueWithHeaders());
             const contentType = headerContentType(baseHeaders);
@@ -454,15 +454,15 @@ export class CdpStrategy {
                 // stays bytes on MV2 (the MV3 sandbox gets text only)
                 if (looksTextual(bytes)) input = new TextDecoder().decode(bytes);
                 else if (!__MV3__) input = bytes;
-                else dlogLevel("cdp", "debug", "binary body — modifyResponse skipped", { url, len: bytes.length });
+                else dlogLevel("debugger", "debug", "binary body — onResponseBody skipped", { url, len: bytes.length });
             }
-            if (input !== null && this.wants(url, method, resourceType, ["modifyResponse"])) {
+            if (input !== null && this.wants(url, method, resourceType, ["onResponseBody"])) {
                 const out = await this.run("transform", { ...base, body: input, contentType, status, raw: typeof input !== "string" }, tabId);
                 if (out !== null && out !== undefined) body = out;
             }
             recordNetBody({ tabId, url, method, original: replaced ? null : input, modified: body === input && !replaced ? null : body, mime });
             if (body === null || (body === input && !replaced)) {
-                dlogLevel("cdp", "debug", "no handler changed the body → continue", { url });
+                dlogLevel("debugger", "debug", "no handler changed the body → continue", { url });
                 return void (await continueWithHeaders());
             }
             // the body handed back is decoded — drop the original encoding/length
@@ -477,9 +477,9 @@ export class CdpStrategy {
                 responseHeaders,
                 body: bytesToBase64(outBytes),
             });
-            dlogLevel("cdp", "info", "served modified body", { url, resourceType, len: outBytes.length });
+            dlogLevel("debugger", "info", "served modified body", { url, resourceType, len: outBytes.length });
         } catch (e: any) {
-            log(tabId, `[cdp] debugger interception failed for ${url}: ${e?.message || e} — the load continues UNMODIFIED`, "error");
+            log(tabId, `[debugger] debugger interception failed for ${url}: ${e?.message || e} — the load continues UNMODIFIED`, "error");
             await cont();
         }
     }

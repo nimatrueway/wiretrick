@@ -316,7 +316,7 @@ export function patchSettings(existing: string, g: GlobalSettings, scripts: Scri
     const globals: [string, any, any][] = [
         ["logLevel", g.logLevel, DEFAULT_LOG_LEVEL],
         ["logCap", g.logCap, DEFAULT_LOG_CAP],
-        ["strategy", g.strategy, defaultStrategySetting()],
+        ["defaultStrategy", g.defaultStrategy, defaultStrategySetting()],
     ];
     const settingsTarget = classify(root, "settings");
     if (settingsTarget === null) return null;
@@ -464,7 +464,7 @@ export function patchSettings(existing: string, g: GlobalSettings, scripts: Scri
     // safety net: the result must parse and express exactly the target state
     try {
         const plan = planSettings(parseSettings(out), g, scripts);
-        if (plan.globals.logLevel !== undefined || plan.globals.logCap !== undefined || plan.globals.strategy !== undefined || plan.scripts.length) return null;
+        if (plan.globals.logLevel !== undefined || plan.globals.logCap !== undefined || plan.globals.defaultStrategy !== undefined || plan.scripts.length) return null;
     } catch {
         return null;
     }

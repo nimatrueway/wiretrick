@@ -1,5 +1,5 @@
 /**
- * chrome.proxy routing for the "process" tier.
+ * chrome.proxy routing for the "helper" tier.
  *
  * Installs a PAC (shared/pac.ts) that sends hosts of process-owned
  * scripts to the local helper and everything else exactly where the
@@ -83,7 +83,7 @@ export class ProcessRouting {
     private onSettingChange(d: any): void {
         if (isOurs(d?.value)) return;
         if (d?.levelOfControl === "controlled_by_other_extensions" || d?.levelOfControl === "not_controllable") {
-            dlogLevel("process", "warn", `proxy setting taken over (${d.levelOfControl}) — process tier routing inactive`);
+            dlogLevel("helper", "warn", `proxy setting taken over (${d.levelOfControl}) — helper routing inactive`);
             this.installedPac = null;
             this.status = { active: false, reason: d.levelOfControl === "not_controllable" ? "the proxy setting is locked by policy" : "another extension controls the proxy setting" };
             this.onLost?.();
@@ -150,7 +150,7 @@ export class ProcessRouting {
                 return { ok: false, reason: this.status.reason! };
             }
             this.installedPac = pac;
-            dlogLevel("process", "info", `PAC installed: ${patterns.length} pattern(s) → 127.0.0.1:${port}; other traffic → ${this.user?.mode || "system"} (${res.decision.upstream})`);
+            dlogLevel("helper", "info", `PAC installed: ${patterns.length} pattern(s) → 127.0.0.1:${port}; other traffic → ${this.user?.mode || "system"} (${res.decision.upstream})`);
         }
         const hosts = JSON.stringify([...new Set(patterns)].sort());
         if (hosts !== this.installedHosts) {
@@ -172,7 +172,7 @@ export class ProcessRouting {
         this.installedPac = null;
         this.installedHosts = "";
         await settingsClear();
-        dlogLevel("process", "info", "PAC removed — the browser's own proxy setting is back in effect");
+        dlogLevel("helper", "info", "PAC removed — the browser's own proxy setting is back in effect");
     }
 
     /**

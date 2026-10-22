@@ -6,7 +6,7 @@ import { compileScript } from "../src/shared/compile";
 import type { Script } from "../src/background/engine/scriptStore";
 
 // these suites exercise the webRequest tier: make it the settings default
-beforeEach(() => setDefaultStrategy("webrequest"));
+beforeEach(() => setDefaultStrategy("webRequest"));
 afterEach(() => setDefaultStrategy(null));
 
 beforeEach(() => {
@@ -102,32 +102,32 @@ describe("handler stacking", () => {
         expect(c.remove).toEqual(["x-r1", "x-r2"]);
     });
 
-    it("modifyResponse: transforms COMPOSE in script order (chained)", async () => {
+    it("onResponseBody: transforms COMPOSE in script order (chained)", async () => {
         const { compileScript } = await import("../src/shared/compile");
         const chain = [
-            makeScript("a", `wt.modifyResponse("*", (ctx, body) => body + "-A");`),
-            makeScript("b", `wt.modifyResponse("*", (ctx, body) => body + "-B");`),
+            makeScript("a", `wt.onResponseBody("*", (ctx, body) => body + "-A");`),
+            makeScript("b", `wt.onResponseBody("*", (ctx, body) => body + "-B");`),
         ];
         let out: string | Uint8Array = "base";
         for (const sc of chain) {
             const c = compileScript(sc.code);
-            for (const { fn } of c.handlers.modifyResponse) {
+            for (const { fn } of c.handlers.onResponseBody) {
                 out = await fn({ url: "x" }, out);
             }
         }
         expect(out).toBe("base-A-B");
     });
 
-    it("async modifyResponse: promises compose in script order", async () => {
+    it("async onResponseBody: promises compose in script order", async () => {
         const { compileScript } = await import("../src/shared/compile");
         const chain = [
-            makeScript("a", `wt.modifyResponse("*", async (ctx, body) => body + "-A");`),
-            makeScript("b", `wt.modifyResponse("*", async (ctx, body) => body + "-B");`),
+            makeScript("a", `wt.onResponseBody("*", async (ctx, body) => body + "-A");`),
+            makeScript("b", `wt.onResponseBody("*", async (ctx, body) => body + "-B");`),
         ];
         let out: string | Uint8Array = "base";
         for (const sc of chain) {
             const c = compileScript(sc.code);
-            for (const { fn } of c.handlers.modifyResponse) {
+            for (const { fn } of c.handlers.onResponseBody) {
                 out = await fn({ url: "x" }, out);
             }
         }
@@ -173,19 +173,19 @@ describe("async handlers (CDP tier loading)", () => {
 
     it("async replaceResponse script is loaded into CdpStrategy", () => {
         const c = new CdpStrategy();
-        c.reload([makeScript("a", `wt.replaceResponse({ url: "*", strategy: "cdp" }, async () => "x");`)]);
+        c.reload([makeScript("a", `wt.replaceResponse({ url: "*", strategy: "debugger" }, async () => "x");`)]);
         expect(c.needs({ url: "https://x.com/", method: "GET", type: "main_frame" })).toBe(true);
     });
 
     it("SYNC replaceResponse script IS loaded", () => {
         const c = new CdpStrategy();
-        c.reload([makeScript("a", `wt.replaceResponse({ url: "*", strategy: "cdp" }, () => "x");`)]);
+        c.reload([makeScript("a", `wt.replaceResponse({ url: "*", strategy: "debugger" }, () => "x");`)]);
         expect(c.needs({ url: "https://x.com/", method: "GET", type: "main_frame" })).toBe(true);
     });
 
     it("async onRequest script is loaded (request-stage redirect/cancel)", () => {
         const c = new CdpStrategy();
-        c.reload([makeScript("a", `wt.onRequest({ url: "*", strategy: "cdp" }, async () => ({ cancel: true }));`)]);
+        c.reload([makeScript("a", `wt.onRequest({ url: "*", strategy: "debugger" }, async () => ({ block: true }));`)]);
         expect(c.needs({ url: "https://x.com/", method: "GET", type: "main_frame" })).toBe(true);
     });
 });

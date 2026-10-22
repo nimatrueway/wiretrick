@@ -72,7 +72,7 @@ at the right of the editor toolbar do the same.
   until the log is cleared), a script-activity filter,
   sortable/resizable columns (right-click the header to pick columns) and a
   waterfall. Requests a script handled are flagged in two ways:
-  - **Tapped** — a handler (`onRequest`, `onResponseHeaders`, `modifyResponse`,
+  - **Tapped** — a handler (`onRequest`, `onResponseHeaders`, `onResponseBody`,
     `replaceResponse`, …) ran on the request but changed nothing (returned
     `undefined`, or the same body). Dashed, muted marker; each such run also
     logs a DEBUG line like `[Foo] onRequest → tapped (no change) https://…`.
@@ -97,7 +97,7 @@ at the right of the editor toolbar do the same.
   no extra browser listeners, just the engine's own log lines — up to the
   newest 500, without bodies, headers or timing (status shows as unknown).
   Opening the tab shows them; closing the manager keeps only such rows.
-  - **Missed** — a script's `modifyResponse` / `replaceResponse` route
+  - **Missed** — a script's `onResponseBody` / `replaceResponse` route
     matched a request but the handler never ran on it (see
     [“never ran” warning](strategies.md#never-ran-warning)). It is logged as
     a WARN line and shown as a yellow *missed* entry in the request's
@@ -142,12 +142,12 @@ or *Light*. It applies to the manager, the editor and the popup.
 
 ## Interception
 
-**Settings → Interception → Default strategy** picks the
+**Settings → Strategy → Default strategy** picks the
 [strategy](strategies.md) every handler uses unless its route sets
-`strategy` — `process` on Chromium and `webrequest` on Firefox out of the
+`strategy` — `helper` on Chromium and `webRequest` on Firefox out of the
 box. Strategies the current browser can't use are disabled in the picker,
 and a table lists each one's pros and cons; **Compatibility** links to
-[the full table](strategies.md#compatibility). It is the `strategy:` entry
+[the full table](strategies.md#compatibility). It is the `defaultStrategy:` entry
 in `settings.yaml`. There is no fallback: a handler whose strategy isn't
 available doesn't run — the script gets a ⚠ and the Log a warning.
 
@@ -218,8 +218,8 @@ settings:
   # …
   # Interception strategy for every handler whose route doesn't set `strategy`.
   # …one pros/cons line per strategy…
-  # process | hook | webrequest | cdp
-  # strategy: process
+  # helper | page | webRequest | debugger
+  # defaultStrategy: helper
 
 params:
   Debug header:

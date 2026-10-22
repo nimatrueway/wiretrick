@@ -1,5 +1,5 @@
 /**
- * "modifyResponse never ran" — why a body handler whose route matched a
+ * "onResponseBody never ran" — why a body handler whose route matched a
  * URL didn't run on a completed request, and the up-front warning for a
  * handler route that can never run where it is. Pure, so it is
  * unit-tested; the pipeline gathers the inputs (see pipeline.ts).
@@ -22,10 +22,10 @@ export interface MissedCase {
 }
 
 export const MISSED_REASONS = {
-    hookNotFetch: `the "hook" strategy only sees the page's own fetch/XHR — set strategy: "cdp" or "process" on the route for other loads`,
+    hookNotFetch: `the "page" strategy only sees the page's own fetch/XHR — set strategy: "debugger" or "helper" on the route for other loads`,
     cache: "served from the browser cache — reload with cache disabled / hard reload",
     helperDown: "the local helper isn't running",
-    fallback: "no tier tapped it — check the Log at debug level",
+    fallback: "no strategy observed it — check the Log view at debug level",
 } as const;
 
 /** Types never checked: sockets and fire-and-forget pings. */
@@ -36,14 +36,14 @@ export function missedReason(c: MissedCase): string | null {
     if (MISSED_SKIP_TYPES.has(c.type)) return null;
     // can never run here: routeProblem already warned once at load
     if (strategyUnsupported(c.strategy, c)) return null;
-    if (c.strategy === "webrequest" && !c.firefox) return null;
-    if (c.strategy === "hook") {
+    if (c.strategy === "webRequest" && !c.firefox) return null;
+    if (c.strategy === "page") {
         // the hook reads fetch/XHR bodies lazily — the page may simply never read it
         return c.type === "xmlhttprequest" ? null : MISSED_REASONS.hookNotFetch;
     }
-    if (c.strategy === "process" && !c.helperActive) return MISSED_REASONS.helperDown;
+    if (c.strategy === "helper" && !c.helperActive) return MISSED_REASONS.helperDown;
     if (c.fromCache) return MISSED_REASONS.cache;
-    if (c.strategy === "cdp" && c.cdpWarned) return null;
+    if (c.strategy === "debugger" && c.cdpWarned) return null;
     return MISSED_REASONS.fallback;
 }
 
@@ -52,17 +52,17 @@ export function missedReason(c: MissedCase): string | null {
  * with its strategy in this browser (there is no fallback). null when fine.
  * The helper being down is reported by the process tier itself.
  */
-export function routeProblem(r: { kind: RouteKind; strategy: Strategy; types?: string[] }, env: { firefox: boolean; mv3: boolean }): string | null {
+export function routeProblem(r: { kind: RouteKind; strategy: Strategy; resourceTypes?: string[] }, env: { firefox: boolean; mv3: boolean }): string | null {
     const why = strategyUnsupported(r.strategy, env);
-    if (why) return `strategy "${r.strategy}" is ${why} — this handler doesn't run. Set another strategy in Settings → Interception or on the route`;
-    if (r.strategy === "webrequest" && r.kind === "modifyResponse" && !env.firefox) {
-        return `modifyResponse never runs with strategy "webrequest" on Chromium — its webRequest API can't read response bodies. Use "hook" (page fetch/XHR, no banner), "cdp" (any resource, debugger banner) or "process" (local helper)`;
+    if (why) return `strategy "${r.strategy}" is ${why} — this handler doesn't run. Set another strategy in Settings → Strategy or on the route`;
+    if (r.strategy === "webRequest" && r.kind === "onResponseBody" && !env.firefox) {
+        return `onResponseBody never runs with strategy "webRequest" on Chromium — its webRequest API can't read response bodies. Use "page" (page fetch/XHR, no banner), "debugger" (any resource, debugger banner) or "helper" (local helper)`;
     }
-    if (r.strategy === "hook" && r.kind === "onResponseHeaders") {
-        return `onResponseHeaders never runs with strategy "hook" — the page can't change response headers before the browser enforces them. Use "cdp", "process" or "webrequest"`;
+    if (r.strategy === "page" && r.kind === "onResponseHeaders") {
+        return `onResponseHeaders never runs with strategy "page" — the page can't change response headers before the browser enforces them. Use "debugger", "helper" or "webRequest"`;
     }
-    if (r.strategy === "hook" && r.types && !r.types.includes("xmlhttprequest")) {
-        return `strategy "hook" only sees the page's fetch/XHR, but types [${r.types.join(", ")}] excludes "xmlhttprequest" — this handler never runs`;
+    if (r.strategy === "page" && r.resourceTypes && !r.resourceTypes.includes("xmlhttprequest")) {
+        return `strategy "page" only sees the page's fetch/XHR, but resourceTypes [${r.resourceTypes.join(", ")}] excludes "xmlhttprequest" — this handler never runs`;
     }
     return null;
 }

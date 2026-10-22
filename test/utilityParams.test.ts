@@ -29,7 +29,7 @@ const { currentSettingsState, applySettingsText } = await import("../src/backgro
 const GATE = `
 const p = wt.params({ on: { type: "boolean", default: false, description: "intercept" } });
 export const helper = () => p.on;
-if (p.on) wt.onRequest("*://example.com/*", () => ({ cancel: true }));
+if (p.on) wt.onRequest("*://example.com/*", () => ({ block: true }));
 `;
 
 const get = async (id: string) => (await listScripts()).find((s) => s.id === id)!;

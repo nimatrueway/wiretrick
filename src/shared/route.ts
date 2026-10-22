@@ -2,20 +2,20 @@
  * Handler routes: the first argument of every wt.onXxx registration.
  *
  *   wt.onRequest("*://api.example.com/*", fn)
- *   wt.modifyResponse({ url: [...], exclude, methods, types, strategy }, fn)
+ *   wt.onResponseBody({ url: [...], exclude, methods, resourceTypes, strategy }, fn)
  *   wt.onDom({ url, exclude, when }, fn)
  *
  * Each route is owned by exactly one strategy (tier): its own `strategy`,
- * else settings.strategy, else the per-browser default.
+ * else settings.defaultStrategy, else the per-browser default.
  */
 import { matchAny, matchGroups, matchPatternError } from "./matcher";
 
-export type Strategy = "hook" | "webrequest" | "cdp" | "process";
-export const STRATEGIES: Strategy[] = ["process", "hook", "webrequest", "cdp"];
+export type Strategy = "page" | "webRequest" | "debugger" | "helper";
+export const STRATEGIES: Strategy[] = ["helper", "page", "webRequest", "debugger"];
 
-export type NetKind = "onRequest" | "onResponseHeaders" | "replaceResponse" | "modifyResponse";
+export type NetKind = "onRequest" | "onResponseHeaders" | "replaceResponse" | "onResponseBody";
 export type RouteKind = NetKind | "onDom";
-export const NET_KINDS: NetKind[] = ["onRequest", "onResponseHeaders", "replaceResponse", "modifyResponse"];
+export const NET_KINDS: NetKind[] = ["onRequest", "onResponseHeaders", "replaceResponse", "onResponseBody"];
 
 export type DomWhen = "document_start" | "document_end" | "document_idle" | "DOMContentLoaded";
 const DOM_WHENS: DomWhen[] = ["document_start", "document_end", "document_idle", "DOMContentLoaded"];
@@ -36,7 +36,7 @@ export interface RouteMeta {
     /** uppercase HTTP methods; undefined = any */
     methods?: string[];
     /** webRequest resource types; undefined = any */
-    types?: string[];
+    resourceTypes?: string[];
     /** explicit per-handler strategy; undefined = settings default */
     strategy?: Strategy;
     /** onDom only */
@@ -45,14 +45,14 @@ export interface RouteMeta {
 
 const IS_FIREFOX_RT = typeof (globalThis as any).browser !== "undefined" && typeof (globalThis as any).browser?.webRequest?.filterResponseData === "function";
 
-/** built-in default when settings.strategy is unset */
+/** built-in default when settings.defaultStrategy is unset */
 export function builtinStrategy(firefox = IS_FIREFOX_RT): Strategy {
-    return firefox ? "webrequest" : "process";
+    return firefox ? "webRequest" : "helper";
 }
 
 let defaultStrategy: Strategy = builtinStrategy();
 
-/** settings.strategy (background: set on every reload) */
+/** settings.defaultStrategy (background: set on every reload) */
 export function setDefaultStrategy(s: Strategy | undefined | null): void {
     defaultStrategy = s && STRATEGIES.includes(s) ? s : builtinStrategy();
 }
@@ -103,7 +103,7 @@ export function normalizeRoute(kind: RouteKind, raw: unknown, index: number): Ro
     checkPatterns(exclude, "exclude", where);
     const route: RouteMeta = { kind, index, url, exclude };
     if (kind === "onDom") {
-        for (const k of ["methods", "types", "strategy"]) {
+        for (const k of ["methods", "resourceTypes", "strategy"]) {
             if (obj[k] !== undefined) throw new Error(`${where}: "${k}" doesn't apply to onDom (it runs in the page, not on requests)`);
         }
         if (obj.when !== undefined) {
@@ -117,11 +117,11 @@ export function normalizeRoute(kind: RouteKind, raw: unknown, index: number): Ro
         const m = list(obj.methods, "methods", where).map((x) => x.toUpperCase());
         route.methods = m;
     }
-    if (obj.types !== undefined) {
-        const t = list(obj.types, "types", where);
+    if (obj.resourceTypes !== undefined) {
+        const t = list(obj.resourceTypes, "resourceTypes", where);
         const bad = t.find((x) => !(RESOURCE_TYPES as readonly string[]).includes(x));
         if (bad) throw new Error(`${where}: unknown resource type "${bad}" — one of ${RESOURCE_TYPES.join(", ")}`);
-        route.types = t;
+        route.resourceTypes = t;
     }
     if (obj.strategy !== undefined) {
         if (Array.isArray(obj.strategy)) throw new Error(`${where}: strategy is a single value now (one of ${STRATEGIES.join(", ")}), not a priority list`);
@@ -136,7 +136,7 @@ export function routeMatches(route: RouteMeta, url: string, method?: string, typ
     if (!matchAny(route.url, url)) return false;
     if (route.exclude.length && matchAny(route.exclude, url)) return false;
     if (route.methods && method && !route.methods.includes(method.toUpperCase())) return false;
-    if (route.types && type && !route.types.includes(type)) return false;
+    if (route.resourceTypes && type && !route.resourceTypes.includes(type)) return false;
     return true;
 }
 
@@ -152,12 +152,12 @@ export function scriptUrls(routes: RouteMeta[] | undefined): string[] {
     return [...out];
 }
 
-/** label for logs: `modifyResponse #2` */
+/** label for logs: `onResponseBody #2` */
 export function routeLabel(route: RouteMeta): string {
     return `${route.kind} #${route.index + 1}`;
 }
 
 /** can this route ever fire on the hook (page fetch/XHR only)? */
 export function hookCanSee(route: RouteMeta): boolean {
-    return !route.types || route.types.includes("xmlhttprequest");
+    return !route.resourceTypes || route.resourceTypes.includes("xmlhttprequest");
 }

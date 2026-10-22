@@ -37,7 +37,7 @@ const MISSED_DELAY_MS = 1500;
 /** the helper usually connects within this after a (service-worker) start */
 const HELPER_GRACE_MS = 5000;
 
-/** settings.strategy → route.ts default (every reload and hook bundle) */
+/** settings.defaultStrategy → route.ts default (every reload and hook bundle) */
 function loadDefaultStrategy(): Promise<void> {
     return new Promise((resolve) => {
         try {
@@ -73,7 +73,9 @@ export function createPipeline(
     cdp: CdpStrategy,
     processStrategy: ProcessStrategy,
     updateTabBadge?: (tabId: number, url: string | undefined) => Promise<void>,
-    noteRequestForBadge?: (tabId: number, url: string) => number
+    noteRequestForBadge?: (tabId: number, url: string) => number,
+    /** resolves once startup migrations ran — scripts aren't loaded before */
+    ready: Promise<unknown> = Promise.resolve()
 ): Pipeline {
     const tabUrls = new Map<number, string>();
 
@@ -107,13 +109,13 @@ export function createPipeline(
                 renavigated.add(key);
                 setTimeout(() => renavigated.delete(key), 10000);
                 if (await cdp.renavigate(d.tabId, d.url)) {
-                    log(d.tabId, `[cdp] page load ${d.url} left before the debugger attached — re-loaded it through the debugger so it is intercepted`, "info");
+                    log(d.tabId, `[debugger] page load ${d.url} left before the debugger attached — re-loaded it through the debugger so it is intercepted`, "info");
                 }
             });
         });
         chrome.tabs.onRemoved.addListener((tabId) => mainFrameSeen.delete(tabId));
     }
-    // ---- "modifyResponse never ran" ----
+    // ---- "onResponseBody never ran" ----
     // A body handler can silently not run: Chromium's webRequest can't read
     // bodies and the hook only sees page fetch/XHR, a cached load skips the
     // debugger, the helper is down… Once a matching request completes, warn
@@ -183,9 +185,9 @@ export function createPipeline(
             for (const r of s.meta.routes || []) {
                 if (r.kind === "onDom") continue;
                 const strategy = effectiveStrategy(r);
-                const msg = routeProblem({ kind: r.kind, strategy, types: r.types }, { firefox: IS_FIREFOX, mv3: __MV3__ });
+                const msg = routeProblem({ kind: r.kind, strategy, resourceTypes: r.resourceTypes }, { firefox: IS_FIREFOX, mv3: __MV3__ });
                 if (msg) byMsg.set(msg, [...(byMsg.get(msg) || []), routeLabel(r)]);
-                else if (strategy === "process" && tierUnavailable("process")) down.push(routeLabel(r));
+                else if (strategy === "helper" && tierUnavailable("helper")) down.push(routeLabel(r));
             }
             for (const [msg, labels] of byMsg) problems.push({ id: s.id, name: s.meta.name, msg, labels });
             if (down.length) helperDown.push({ id: s.id, name: s.meta.name, labels: down });
@@ -219,7 +221,7 @@ export function createPipeline(
                 const labels = h.labels.join(", ");
                 if (routeWarned.get(key) === labels) continue;
                 routeWarned.set(key, labels);
-                log(-1, `[${h.name}] ${labels}: strategy "process" — ${tierUnavailable("process")}; these handlers don't run until it is`, "warn", h.id);
+                log(-1, `[${h.name}] ${labels}: strategy "helper" — ${tierUnavailable("helper")}; these handlers don't run until it is`, "warn", h.id);
             }
         };
         helperTimer = setTimeout(check, HELPER_GRACE_MS);
@@ -230,7 +232,7 @@ export function createPipeline(
         for (const s of scripts) {
             if (!s.enabled || !s.meta.active) continue;
             for (const r of s.meta.routes || []) {
-                if (r.kind === "modifyResponse" || r.kind === "replaceResponse") next.push({ id: s.id, name: s.meta.name, route: r, strategy: effectiveStrategy(r) });
+                if (r.kind === "onResponseBody" || r.kind === "replaceResponse") next.push({ id: s.id, name: s.meta.name, route: r, strategy: effectiveStrategy(r) });
             }
         }
         bodyWatch = next;
@@ -256,7 +258,7 @@ export function createPipeline(
                     const hint = __MV3__ ? "Reload the tab (it stays attached from now on)." : "Reload the tab within a few seconds (the debugger detaches when the page goes idle).";
                     cdpWarned.add(`${d.tabId}|${d.url}`);
                     setTimeout(() => cdpWarned.delete(`${d.tabId}|${d.url}`), 10000);
-                    log(d.tabId, `[cdp] ${what} ${d.url}${d.fromCache ? " (from cache)" : ""} was NOT intercepted by ${names.map((n) => `"${n}"`).join(", ")} — it loaded before the debugger attached to this tab. ${hint}`, "warn");
+                    log(d.tabId, `[debugger] ${what} ${d.url}${d.fromCache ? " (from cache)" : ""} was NOT intercepted by ${names.map((n) => `"${n}"`).join(", ")} — it loaded before the debugger attached to this tab. ${hint}`, "warn");
                 }, 300);
             },
             { urls: ["<all_urls>"] }
@@ -378,7 +380,7 @@ export function createPipeline(
                 return { redirectUrl: disposition.url };
             }
             case "cancel": {
-                log(details.tabId, `cancelled ${details.url}`, "info");
+                log(details.tabId, `blocked ${details.url}`, "info");
                 return { cancel: true };
             }
             case "needsCdp": {
@@ -441,10 +443,10 @@ export function createPipeline(
                     extra = extra.filter((s) => s !== "extraHeaders");
                     (chrome.webRequest as any)[event].addListener(fn, FILTER, extra);
                 }
-                dlogLevel("webrequest", "debug", `${event} listener registered (${extra.join(", ")})`);
+                dlogLevel("webRequest", "debug", `${event} listener registered (${extra.join(", ")})`);
             } catch (e: any) {
                 // e.g. a browser build that dropped MV2 blocking webRequest
-                log(-1, `[webrequest] cannot register blocking ${event} listener — the "webrequest" strategy is inactive in this browser: ${e?.message || e}`, "error");
+                log(-1, `[webRequest] cannot register blocking ${event} listener — the "webRequest" strategy is inactive in this browser: ${e?.message || e}`, "error");
             }
         };
         addBlocking("onBeforeRequest", onBeforeRequest, ["blocking"]);
@@ -464,7 +466,7 @@ export function createPipeline(
         const tr = (details: any, msg: string, level: "debug" | "warn" = "debug") => {
             const t = traced.get(details.requestId);
             if (!t) return;
-            log(details.tabId, `[webrequest] ${msg}${details.url !== t.url ? ` (originally ${t.url})` : ""}`, level);
+            log(details.tabId, `[webRequest] ${msg}${details.url !== t.url ? ` (originally ${t.url})` : ""}`, level);
         };
         chrome.webRequest.onBeforeRedirect.addListener(
             (d: any) => tr(d, `browser followed redirect ${d.url} → ${d.redirectUrl} (status ${d.statusCode}${d.fromCache ? ", from cache" : ""})`),
@@ -486,10 +488,10 @@ export function createPipeline(
         // Wiretrick, or an ad blocker redirecting the same request)
         (chrome.webRequest as any).onActionIgnored?.addListener((d: any) => {
             const t = traced.get(d.requestId);
-            log(t?.tabId ?? -1, `[webrequest] the browser IGNORED this extension's "${d.action}"${t ? ` for ${t.url}` : ""} — another extension's change to the same request took precedence (disable other request-modifying extensions, e.g. a second Wiretrick install)`, "warn");
+            log(t?.tabId ?? -1, `[webRequest] the browser IGNORED this extension's "${d.action}"${t ? ` for ${t.url}` : ""} — another extension's change to the same request took precedence (disable other request-modifying extensions, e.g. a second Wiretrick install)`, "warn");
         });
     } else {
-        dlog("pipeline", "MV3: no blocking webRequest — hook tier carries page fetch/XHR; strategy cdp (debugger) or process (local helper) carries browser-initiated loads");
+        dlog("pipeline", "MV3: no blocking webRequest — the page strategy carries page fetch/XHR; the debugger or helper strategy carries browser-initiated loads");
     }
 
     // ---- manager protocol ----
@@ -578,6 +580,7 @@ export function createPipeline(
                 const domHandlers: { scriptId: string; name: string; src: string; params: Record<string, any> }[] = [];
                 const libs = new Map<string, { name: string; src: string; params: Record<string, any> }>();
                 const routes: RouteMeta[] = [];
+                await ready;
                 await loadDefaultStrategy();
                 const pageScripts = await listScripts();
                 const paramValues = await loadAllParamValues();
@@ -591,7 +594,7 @@ export function createPipeline(
                     let dom = false;
                     for (const r of a.meta.routes) {
                         if (r.kind === "onDom") dom ||= routeMatches(r, url);
-                        else if (r.kind !== "onResponseHeaders" && effectiveStrategy(r) === "hook" && hookCanSee(r)) routes.push(r);
+                        else if (r.kind !== "onResponseHeaders" && effectiveStrategy(r) === "page" && hookCanSee(r)) routes.push(r);
                     }
                     if (!dom) continue;
                     for (const d of a.deps) depNames.add(d);
@@ -685,6 +688,7 @@ export function createPipeline(
     let reloadSeq = 0;
     async function reload(): Promise<void> {
         const seq = ++reloadSeq;
+        await ready;
         await loadDefaultStrategy();
         const stored = await listScripts();
         const paramValues = await loadAllParamValues();
@@ -722,7 +726,7 @@ export function createPipeline(
     const off = onScriptsChanged(() => void reload());
     // ownership moves between the process tier and the other tiers
     const offProcess = onProcessActiveChange(() => void reload());
-    // settings.strategy moves ownership between tiers
+    // settings.defaultStrategy moves ownership between tiers
     const onStorage = (changes: Record<string, unknown>, area: string) => {
         if (area === "local" && changes[STRATEGY_KEY]) void reload();
     };

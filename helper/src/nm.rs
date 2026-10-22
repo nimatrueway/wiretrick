@@ -38,7 +38,7 @@ pub struct Route {
     /// onResponseHeaders handlers → pause at the response stage (headers only)
     #[serde(default, rename = "resHeaders")]
     pub res_headers: bool,
-    /// modifyResponse handlers → pause at the response stage with the body
+    /// onResponseBody handlers → pause at the response stage with the body
     #[serde(default)]
     pub body: bool,
 }

@@ -62,7 +62,7 @@ try {
     await seed.goto(`chrome-extension://${extId}/manager.html`);
     await seed.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_h", name: "Hooked",
-        code: `wt.modifyResponse({ url: "*://*:*/*", strategy: "hook" }, (ctx, body) => body.replace("ORIGINAL", "HOOKED"));`,
+        code: `wt.onResponseBody({ url: "*://*:*/*", strategy: "page" }, (ctx, body) => body.replace("ORIGINAL", "HOOKED"));`,
     }, r)));
     await seed.close();
 

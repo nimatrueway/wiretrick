@@ -3,7 +3,7 @@
 /**
  * What a script did to a request: "tapped" — a handler ran but changed
  * nothing (returned undefined, the same body, or threw); "modified" — it
- * changed the body, headers, status, or cancelled/redirected/answered it.
+ * changed the body, headers, status, or blocked/redirected/answered it.
  */
 export type NetKind = "tapped" | "modified";
 /** "missed": a body handler should have run for this request but no tier ran it (a warning — neither tapped nor modified). */
@@ -12,7 +12,7 @@ export type InterventionKind = NetKind | "missed";
 export interface NetIntervention {
     scriptId: string;
     scriptName: string;
-    /** e.g. "modifyResponse applied (120b → 140b)" */
+    /** e.g. "onResponseBody applied (120b → 140b)" */
     action: string;
     level: "debug" | "info" | "warn" | "error";
     kind: InterventionKind;
@@ -22,7 +22,7 @@ export interface NetIntervention {
 const TAPPED_MARK = "→ tapped (no change)";
 const MISSED_MARK = " never ran for ";
 
-/** WARN line for a body handler no tier ran: `[Name] modifyResponse never ran for <url> (document) — reason`. */
+/** WARN line for a body handler no tier ran: `[Name] onResponseBody never ran for <url> (document) — reason`. */
 export function missedLine(scriptName: string, handler: string, url: string, what: string, reason: string): string {
     return `[${scriptName}] ${handler}${MISSED_MARK}${url} (${what}) — ${reason}`;
 }

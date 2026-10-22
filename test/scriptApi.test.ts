@@ -1,5 +1,5 @@
 /**
- * Script API: per-handler routes, wt.describe, wt.params / wt.defineParam,
+ * Script API: per-handler routes, wt.about, wt.params / wt.defineParam,
  * and utilities (no handlers).
  */
 import { describe, expect, it } from "vitest";
@@ -8,7 +8,7 @@ import { compileScript } from "../src/shared/compile";
 import { paramDefault, resolveParamValues, isValidParamValue } from "../src/shared/scriptDef";
 
 const CODE = `
-wt.describe("Blocks things");
+wt.about("Blocks things");
 const cfg = wt.params({
     flag: { type: "boolean", default: true },
     note: { type: "string", default: "hi" },
@@ -16,8 +16,8 @@ const cfg = wt.params({
 });
 const hosts = wt.defineParam("hosts", { type: "stringList", default: ["x"] });
 wt.log("flag", cfg.flag, hosts.join());
-wt.onRequest({ url: ["*://a.com/*", "*://b.com/*"], strategy: "hook" }, () => (cfg.flag ? { cancel: true } : undefined));
-wt.modifyResponse("*://b.com/*", (c, b) => b);
+wt.onRequest({ url: ["*://a.com/*", "*://b.com/*"], strategy: "page" }, () => (cfg.flag ? { block: true } : undefined));
+wt.onResponseBody("*://b.com/*", (c, b) => b);
 `;
 
 describe("script API", () => {
@@ -29,8 +29,8 @@ describe("script API", () => {
         expect(c.meta.active).toBe(true);
         expect(c.meta.match).toEqual(["*://a.com/*", "*://b.com/*"]);
         expect(c.meta.routes.map((r) => [r.kind, r.strategy])).toEqual([
-            ["onRequest", "hook"],
-            ["modifyResponse", undefined],
+            ["onRequest", "page"],
+            ["onResponseBody", undefined],
         ]);
         expect(c.handlers.onRequest).toHaveLength(1);
         expect(c.handlers.onRequest[0].route.url).toEqual(["*://a.com/*", "*://b.com/*"]);
@@ -80,10 +80,10 @@ describe("script API", () => {
     it("route errors surface as script errors", () => {
         expect(compileScript(`wt.onRequest(() => {});`).error).toMatch(/first argument must be a URL pattern/);
         expect(compileScript(`wt.onRequest({ match: "*" }, () => {});`).error).toMatch(/"url", not "match"/);
-        expect(compileScript(`wt.onRequest({ url: "*", strategy: ["hook", "cdp"] }, () => {});`).error).toMatch(/single value/);
+        expect(compileScript(`wt.onRequest({ url: "*", strategy: ["page", "debugger"] }, () => {});`).error).toMatch(/single value/);
         expect(compileScript(`wt.onRequest({ url: "*", strategy: "auto" }, () => {});`).error).toMatch(/unknown strategy/);
-        expect(compileScript(`wt.onRequest({ url: "*", types: ["nope"] }, () => {});`).error).toMatch(/unknown resource type/);
-        expect(compileScript(`wt.onDom({ url: "*", strategy: "hook" }, () => {});`).error).toMatch(/doesn't apply to onDom/);
+        expect(compileScript(`wt.onRequest({ url: "*", resourceTypes: ["nope"] }, () => {});`).error).toMatch(/unknown resource type/);
+        expect(compileScript(`wt.onDom({ url: "*", strategy: "page" }, () => {});`).error).toMatch(/doesn't apply to onDom/);
         expect(compileScript(`wt.onRequest("*", 1);`).error).toMatch(/second argument/);
     });
 
@@ -93,13 +93,13 @@ describe("script API", () => {
         const user = {
             id: "s1",
             name: "user",
-            code: `import { double } from "./utils";\nwt.onRequest("*", () => double(21) === 42 ? { cancel: true } : undefined);`,
+            code: `import { double } from "./utils";\nwt.onRequest("*", () => double(21) === 42 ? { block: true } : undefined);`,
         };
         const resolver = makeModuleResolver([lib, user], () => ({}));
         const c = compileScript(user.code, { importModule: resolver.resolve });
         expect(c.error).toBeNull();
         expect(c.meta.active).toBe(true);
-        expect(c.handlers.onRequest[0].fn({})).toEqual({ cancel: true });
+        expect(c.handlers.onRequest[0].fn({})).toEqual({ block: true });
         expect([...resolver.deps]).toEqual(["utils"]);
     });
 

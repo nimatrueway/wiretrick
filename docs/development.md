@@ -14,7 +14,7 @@ npm run test:e2e     # full browser e2e (needs E2E_CHROMIUM, see below)
 The e2e suite (`test/e2e.ts`) launches a fresh MV2-capable Chromium, loads the
 extension, seeds sample scripts through the real manager page, and verifies
 every tier against a local HTTP server: matcher, redirect, cancel, request +
-response headers, replaceResponse (main frame + fetch), modifyResponse (fetch /
+response headers, replaceResponse (main frame + fetch), onResponseBody (fetch /
 XHR / script-tag CDP), per-tab badge, and enable/disable toggling.
 
 ```bash
@@ -57,16 +57,16 @@ pages, and drops blocking `webRequest`):
   channel.
 - **The hook tier carries page fetch/XHR interception** (patching in the
   page's MAIN world — same behavior, transforms execute in the sandbox).
-  The `webrequest` tier is gone (no blocking webRequest in MV3).
+  The `webRequest` tier is gone (no blocking webRequest in MV3).
 - **Browser-initiated loads (`<script src>`, `<img>`, stylesheets, fonts,
   main-frame HTML) go through the debugger tier** for handlers whose
-  strategy is `cdp` (or through the local helper with `process`).
+  strategy is `debugger` (or through the local helper with `helper`).
   The service worker
   drives `chrome.debugger` / CDP `Fetch` (pausing only URLs matching those
   handlers' routes, fetch/XHR included);
-  handler decisions (`onRequest`, `replaceResponse`, `modifyResponse`) are
+  handler decisions (`onRequest`, `replaceResponse`, `onResponseBody`) are
   computed in the sandbox, so only the owning handlers apply.
-  `hook` handlers stay fetch/XHR-only (a page load they match is warned about).
+  `page` handlers stay fetch/XHR-only (a page load they match is warned about).
   Caveats:
   - Chrome shows its "started debugging this browser" banner, and every
     http(s) tab is attached while such scripts exist (the resource's CDN

@@ -840,8 +840,8 @@ function renderProcessStatus(st: any): void {
     helperStatus = st;
     if (!$("#settings-panel").classList.contains("hidden")) void renderAbout();
     const labels: Record<string, string> = {
-        idle: "not needed — no enabled handler uses the \"process\" strategy",
-        unsupported: "unavailable in this browser (Chrome only) — handlers using \"process\" don't run",
+        idle: "not needed — no enabled handler uses the \"helper\" strategy",
+        unsupported: "unavailable in this browser (Chrome only) — handlers using \"helper\" don't run",
         connecting: "connecting…",
         ready: `running${st.version ? ` (v${st.version})` : ""}${st.port ? ` on 127.0.0.1:${st.port}` : ""}`,
         missing: "not installed",
@@ -862,11 +862,11 @@ function renderProcessStatus(st: any): void {
         if (st.routing && !st.routing.active && st.routing.reason) lines.push(`Routing inactive: ${st.routing.reason}`);
         if (st.routing?.active) lines.push(`Other traffic: your proxy setting (${st.routing.mode})`);
         if (st.routing?.note) lines.push(st.routing.note);
-        if (st.caTrusted === false) lines.push("Chrome does not trust the helper's CA yet — click Trust CA (or run: wiretrick-helper trust-ca).");
-        if (st.caTrusted === true) lines.push("CA trusted ✓");
-        if (st.caFingerprint) lines.push(`CA: ${st.caPath} (SHA-256 ${st.caFingerprint})`);
+        if (st.caTrusted === false) lines.push("Chrome does not trust the helper certificate yet — click Trust certificate (or run: wiretrick-helper trust-ca).");
+        if (st.caTrusted === true) lines.push("Helper certificate trusted ✓");
+        if (st.caFingerprint) lines.push(`Helper certificate: ${st.caPath} (SHA-256 ${st.caFingerprint})`);
     }
-    if (st.trust) lines.push(`Trust CA: ${st.trust.msg}`);
+    if (st.trust) lines.push(`Trust certificate: ${st.trust.msg}`);
     $("#process-detail").textContent = lines.join("\n");
     ($("#btn-process-trust") as HTMLButtonElement).hidden = !(st.state === "ready" && st.caTrusted !== true);
     const copy = $("#btn-process-copy") as HTMLButtonElement;

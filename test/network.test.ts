@@ -95,7 +95,7 @@ describe("network recorder", () => {
 
     it("keeps script-touched rows while no Network tab is open, without listeners or bodies", () => {
         annotateFromLog(7, "s1", "[S] onRequest → tapped (no change) https://a.test/x", "debug", "tapped");
-        annotateFromLog(7, "s1", "[S] modifyResponse applied https://a.test/x", "info");
+        annotateFromLog(7, "s1", "[S] onResponseBody applied https://a.test/x", "info");
         recordNetBody({ tabId: 7, url: "https://a.test/x", modified: "big" });
         expect(listeners.before?.length ?? 0).toBe(0);
         expect([...entries.values()].map((e) => [e.url, e.interventions.map((i) => i.kind), e.responseBody])).toEqual([["https://a.test/x", ["tapped", "modified"], undefined]]);
@@ -110,7 +110,7 @@ describe("network recorder", () => {
         addNetworkPort(p.port);
         req("1", "https://a.test/plain");
         req("2", "https://a.test/hit");
-        annotateFromLog(7, "s1", "[S] modifyResponse applied https://a.test/hit", "info");
+        annotateFromLog(7, "s1", "[S] onResponseBody applied https://a.test/hit", "info");
         recordNetBody({ tabId: 7, url: "https://a.test/hit", original: "a", modified: "b" });
         p.disconnect();
         expect([...entries.keys()]).toEqual(["2"]);
@@ -165,8 +165,8 @@ describe("network recorder", () => {
         addNetworkPort(p.port);
         req("1", "https://a.test/api");
         req("2", "https://a.test/api", { tabId: 9 });
-        annotateFromLog(7, "s1", "[My script] modifyResponse applied (10b → 12b) https://a.test/api", "info");
-        expect(entries.get("1")!.interventions).toMatchObject([{ scriptId: "s1", scriptName: "My script", action: "modifyResponse applied (10b → 12b)" }]);
+        annotateFromLog(7, "s1", "[My script] onResponseBody applied (10b → 12b) https://a.test/api", "info");
+        expect(entries.get("1")!.interventions).toMatchObject([{ scriptId: "s1", scriptName: "My script", action: "onResponseBody applied (10b → 12b)" }]);
         expect(entries.get("2")!.interventions).toEqual([]);
         p.disconnect();
     });
@@ -176,12 +176,12 @@ describe("network recorder", () => {
         addNetworkPort(p.port);
         req("1", "https://a.test/api");
         annotateFromLog(7, "s1", "[W] onRequest → tapped (no change) https://a.test/api", "debug", "tapped");
-        annotateFromLog(7, "s1", "[W] modifyResponse applied (1b → 2b) https://a.test/api", "info");
-        annotateFromLog(7, "s1", "[W] modifyResponse threw: boom https://a.test/api", "error");
+        annotateFromLog(7, "s1", "[W] onResponseBody applied (1b → 2b) https://a.test/api", "info");
+        annotateFromLog(7, "s1", "[W] onResponseBody threw: boom https://a.test/api", "error");
         expect(entries.get("1")!.interventions.map((i) => [i.action, i.kind])).toEqual([
             ["onRequest → tapped (no change)", "tapped"],
-            ["modifyResponse applied (1b → 2b)", "modified"],
-            ["modifyResponse threw: boom", "tapped"],
+            ["onResponseBody applied (1b → 2b)", "modified"],
+            ["onResponseBody threw: boom", "tapped"],
         ]);
         p.disconnect();
     });
@@ -190,11 +190,11 @@ describe("network recorder", () => {
         const p = fakePort();
         addNetworkPort(p.port);
         req("1", "https://a.test/api");
-        annotateFromLog(7, "s1", "[process] [My script] modifyResponse applied (1b → 2b) https://a.test/api", "info");
-        annotateFromLog(7, "s2", "[process] onRequest → cancel https://a.test/api", "info");
+        annotateFromLog(7, "s1", "[helper] [My script] onResponseBody applied (1b → 2b) https://a.test/api", "info");
+        annotateFromLog(7, "s2", "[helper] onRequest → block https://a.test/api", "info");
         expect(entries.get("1")!.interventions.map((i) => [i.scriptName, i.action])).toEqual([
-            ["My script", "modifyResponse applied (1b → 2b) (process)"],
-            ["process", "onRequest → cancel"],
+            ["My script", "onResponseBody applied (1b → 2b) (helper)"],
+            ["helper", "onRequest → block"],
         ]);
         p.disconnect();
     });
@@ -225,8 +225,8 @@ describe("network recorder", () => {
         const p = fakePort();
         addNetworkPort(p.port);
         req("1", "https://a.test/page", { type: "main_frame" });
-        annotateFromLog(7, "s1", "[Mod] modifyResponse never ran for https://a.test/page (document) — the local helper isn't running", "warn", "missed", "https://a.test/page");
-        expect(entries.get("1")!.interventions).toMatchObject([{ scriptName: "Mod", kind: "missed", action: "modifyResponse never ran for https://a.test/page (document) — the local helper isn't running" }]);
+        annotateFromLog(7, "s1", "[Mod] onResponseBody never ran for https://a.test/page (document) — the local helper isn't running", "warn", "missed", "https://a.test/page");
+        expect(entries.get("1")!.interventions).toMatchObject([{ scriptName: "Mod", kind: "missed", action: "onResponseBody never ran for https://a.test/page (document) — the local helper isn't running" }]);
         p.disconnect();
     });
 

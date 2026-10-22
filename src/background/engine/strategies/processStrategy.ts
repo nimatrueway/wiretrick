@@ -1,5 +1,5 @@
 /**
- * Tier P: the "process" strategy — a local helper (wiretrick-helper, Rust)
+ * Tier P: the "helper" strategy — a local helper (wiretrick-helper, Rust)
  * is a loopback MITM proxy that Chrome reaches through a PAC
  * (processRouting.ts) for the hosts of process-owned routes only. It
  * pauses matching requests CDP-Fetch style over native messaging; this
@@ -48,7 +48,7 @@ export function helperRouteOf(route: RouteMeta): HelperRoute {
         methods: route.methods ?? [],
         req: route.kind === "onRequest" || route.kind === "replaceResponse",
         resHeaders: route.kind === "onResponseHeaders",
-        body: route.kind === "modifyResponse",
+        body: route.kind === "onResponseBody",
     };
 }
 
@@ -171,13 +171,13 @@ class RequestContext {
         try {
             chrome.webRequest.onBeforeRequest.addListener(this.listener, { urls });
         } catch (e: any) {
-            dlogLevel("process", "warn", `request-context listener failed: ${e?.message || e}`);
+            dlogLevel("helper", "warn", `request-context listener failed: ${e?.message || e}`);
         }
     }
 
     lookup(method: string, url: string): { tabId: number; type: string; tabUrl: string } {
         const hit = this.recent.get(`${method} ${url}`);
-        // type "" = unknown: route `types` aren't checked (bodyOps)
+        // type "" = unknown: route `resourceTypes` aren't checked (bodyOps)
         return hit ? { tabId: hit.tabId, type: hit.type, tabUrl: hit.tabUrl } : { tabId: -1, type: "", tabUrl: "" };
     }
 
@@ -222,13 +222,13 @@ export class ProcessStrategy {
 
     reload(scripts: Script[], paramValues?: { [scriptId: string]: Record<string, any> }): void {
         this.loaded = this.load(scripts, paramValues || {}).catch((e: any) => {
-            dlogLevel("process", "error", `process tier reload failed: ${e?.message || e}`);
+            dlogLevel("helper", "error", `helper strategy reload failed: ${e?.message || e}`);
         });
     }
 
     private async load(scripts: Script[], paramValues: { [scriptId: string]: Record<string, any> }): Promise<void> {
         // routes come from the pipeline's analyzed meta (with real params)
-        const owned = ownedRoutes(scripts, "process");
+        const owned = ownedRoutes(scripts, "helper");
         if (IS_FIREFOX || typeof (chrome.runtime as any).connectNative !== "function") {
             this.owned = [];
             this.state = owned.length ? "unsupported" : "idle";
@@ -238,7 +238,7 @@ export class ProcessStrategy {
             this.mv3Plain = scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt, enabled: s.enabled }));
             this.mv3Params = paramValues;
         } else {
-            this.mv2Ops = compileMv2(scripts, paramValues, (s) => ownsAny(s, "process")).map((c) => ({ id: c.id, name: c.name, handlers: c.compiled.handlers }));
+            this.mv2Ops = compileMv2(scripts, paramValues, (s) => ownsAny(s, "helper")).map((c) => ({ id: c.id, name: c.name, handlers: c.compiled.handlers }));
         }
         this.owned = owned;
         this.ctx.watch(owned.flatMap((o) => o.route.url));
@@ -297,11 +297,11 @@ export class ProcessStrategy {
                 // not installed / not allowed for this extension id: wait for the user
                 this.state = "missing";
                 this.error = err;
-                dlogLevel("process", "error", `process helper unavailable (${err}) — handlers using the "process" strategy don't run until it is installed. Install it by pasting this into ${helperInstallShell()}: ${helperInstallCommand(chrome.runtime.id)}`);
+                dlogLevel("helper", "error", `local helper unavailable (${err}) — handlers using the "helper" strategy don't run until it is installed. Install it by pasting this into ${helperInstallShell()}: ${helperInstallCommand(chrome.runtime.id)}`);
             } else {
                 this.state = "error";
                 this.error = err;
-                dlogLevel("process", "warn", `process helper disconnected (${err}) — reconnecting in ${this.backoff / 1000}s`);
+                dlogLevel("helper", "warn", `local helper disconnected (${err}) — reconnecting in ${this.backoff / 1000}s`);
                 this.retryTimer = setTimeout(() => {
                     this.retryTimer = null;
                     if (!this.port && this.owned.length) this.connect();
@@ -343,7 +343,7 @@ export class ProcessStrategy {
                 await this.routing.clear();
                 this.routing.status = { active: false, reason: d.reason };
                 setProcessActive(false);
-                dlogLevel("process", "warn", `process tier inactive: ${d.reason}`);
+                dlogLevel("helper", "warn", `helper strategy inactive: ${d.reason}`);
                 this.emit();
                 return;
             }
@@ -352,7 +352,7 @@ export class ProcessStrategy {
             this.send({ t: "config", routes, upstream: d.decision.upstream });
             const applied = await this.routing.apply(helper.port, this.owned.flatMap((o) => o.route.url), this.system);
             setProcessActive(applied.ok);
-            if (applied.ok && applied.decision.note) dlogLevel("process", "warn", applied.decision.note);
+            if (applied.ok && applied.decision.note) dlogLevel("helper", "warn", applied.decision.note);
             this.emit();
             if (applied.ok) void this.probe();
         });
@@ -363,7 +363,7 @@ export class ProcessStrategy {
         const ok = await this.routing.probe();
         if (ok !== this.caTrusted) {
             this.caTrusted = ok;
-            if (!ok) dlogLevel("process", "warn", `Chrome does not trust the helper's CA yet — intercepted HTTPS sites will show certificate errors. Run: wiretrick-helper trust-ca (or use "Trust CA" in the manager)`);
+            if (!ok) dlogLevel("helper", "warn", `Chrome does not trust the helper certificate yet — intercepted HTTPS sites will show certificate errors. Run: wiretrick-helper trust-ca (or use "Trust certificate" in the Editor)`);
             this.emit();
         }
     }
@@ -405,7 +405,7 @@ export class ProcessStrategy {
         try {
             this.port?.postMessage(msg);
         } catch (e: any) {
-            dlogLevel("process", "warn", `helper send failed: ${e?.message || e}`);
+            dlogLevel("helper", "warn", `helper send failed: ${e?.message || e}`);
         }
     }
 
@@ -419,13 +419,13 @@ export class ProcessStrategy {
                 this.error = undefined;
                 this.backoff = 1000;
                 this.caTrusted = null;
-                dlogLevel("process", "info", `process helper ${m.version} ready on 127.0.0.1:${m.port}`);
+                dlogLevel("helper", "info", `local helper ${m.version} ready on 127.0.0.1:${m.port}`);
                 if (isHelperOutdated(m.version) && this.warnedOutdated !== m.version) {
                     this.warnedOutdated = m.version;
                     dlogLevel(
-                        "process",
+                        "helper",
                         "error",
-                        `process helper v${m.version} is older than this extension needs (v${MIN_HELPER_VERSION}+) — upgrade it by re-running this in ${helperInstallShell()}: ${helperInstallCommand(chrome.runtime.id)}`,
+                        `local helper v${m.version} is older than this extension needs (v${MIN_HELPER_VERSION}+) — upgrade it by re-running this in ${helperInstallShell()}: ${helperInstallCommand(chrome.runtime.id)}`,
                     );
                 }
                 void this.loaded.then(() => this.pushConfig());
@@ -453,33 +453,33 @@ export class ProcessStrategy {
                 return;
             case "trustResult":
                 this.trust = { ok: !!m.ok, msg: String(m.msg || "") };
-                dlogLevel("process", m.ok ? "info" : "warn", `trust CA: ${m.msg}`);
+                dlogLevel("helper", m.ok ? "info" : "warn", `trust helper certificate: ${m.msg}`);
                 this.caTrusted = null;
                 this.emit();
                 void this.probe();
                 return;
             case "log":
-                dlogLevel("process", m.level === "warn" || m.level === "error" ? m.level : m.level === "debug" ? "debug" : "info", `[helper] ${m.msg}`);
+                dlogLevel("helper", m.level === "warn" || m.level === "error" ? m.level : m.level === "debug" ? "debug" : "info", m.msg);
                 return;
         }
     }
 
     private fallback(id: number, stage: string, e: any): void {
-        dlogLevel("process", "error", `process ${stage} handling failed: ${e?.message || e}`);
+        dlogLevel("helper", "error", `process ${stage} handling failed: ${e?.message || e}`);
         this.chunks.delete(id);
         this.send({ t: "continue", id });
     }
 
     private run(op: BodyOp, args: any): Promise<any> {
-        args.tier = "process";
+        args.tier = "helper";
         if (__MV3__) return runBodyOp(this.mv3Plain, this.mv3Params, op, args);
         return runOp(this.mv2Ops, op, args, {
-            log: (scriptId, level, msg, kind) => log(args.tabId ?? -1, `[process] ${msg}`, level, scriptId, kind),
-            debug: (msg) => dlogLevel("process", "debug", msg),
+            log: (scriptId, level, msg, kind) => log(args.tabId ?? -1, `[helper] ${msg}`, level, scriptId, kind),
+            debug: (msg) => dlogLevel("helper", "debug", msg),
         });
     }
 
-    /** a process route wanting `flag` matches (types: extension-side only — the helper can't see them) */
+    /** a process route wanting `flag` matches (resourceTypes: extension-side only — the helper can't see them) */
     private matching(url: string, method: string, type: string, flag: Flag): boolean {
         return this.owned.some((o) => helperRouteOf(o.route)[flag] && routeMatches(o.route, url, method, type || undefined));
     }
@@ -546,7 +546,7 @@ export class ProcessStrategy {
                 const body: string | Uint8Array = textual ? new TextDecoder().decode(bytes) : bytes;
                 out = await this.run("transform", { ...base, body, contentType: pairsToObject(headers)["content-type"] || "" });
             } else {
-                dlogLevel("process", "debug", `binary body skipped for modifyResponse (MV3 passes text only): ${m.url}`);
+                dlogLevel("helper", "debug", `binary body skipped for onResponseBody (MV3 passes text only): ${m.url}`);
             }
             recordNetBody({ tabId: c.tabId, url: m.url, method: m.method, original: bytes, modified: out });
             if (out !== null && out !== undefined) {
@@ -554,7 +554,7 @@ export class ProcessStrategy {
                 return;
             }
         } else if (m.body.startsWith("skipped:") && this.matching(m.url, m.method, c.type, "body")) {
-            dlogLevel("process", "debug", `modifyResponse not run (${m.body.slice(8)}): ${m.url}`);
+            dlogLevel("helper", "debug", `onResponseBody not run (${m.body.slice(8)}): ${m.url}`);
         }
         this.send(headersChanged ? { t: "continue", id: m.id, headers } : { t: "continue", id: m.id });
     }

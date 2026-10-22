@@ -9,7 +9,7 @@ export type { Strategy } from "./route";
 
 export interface ResMeta {
     name: string;
-    /** wt.describe(text) */
+    /** wt.about(text) */
     description?: string;
     /** registered at least one handler at top level (else: utility) */
     active: boolean;

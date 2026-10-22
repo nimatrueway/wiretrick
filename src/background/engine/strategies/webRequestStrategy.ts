@@ -1,10 +1,10 @@
 /**
  * Blocking-webRequest strategy: Firefox and MV2-capable Chromium browsers
- * (ungoogled-chromium, Brave, Opera…). Redirect/cancel, request/response
+ * (ungoogled-chromium, Brave, Opera…). Redirect/block, request/response
  * headers and synchronous respond/replaceResponse work everywhere with no
  * debugger involvement.
  *
- * Runs only handler routes whose strategy is "webrequest".
+ * Runs only handler routes whose strategy is "webRequest".
  *
  * How a replacement (replaceResponse, or onRequest `respond`) is served:
  * - Firefox: in place — the request proceeds and filterResponseData swaps
@@ -14,7 +14,7 @@
  *   address bar shows the extension URL and the page loses its origin).
  *   Neither can carry a status: non-200 responds aren't served here.
  *
- * Response-body streaming (modifyResponse via filterResponseData) and
+ * Response-body streaming (onResponseBody via filterResponseData) and
  * awaiting async handlers are Firefox-only. MV3 has no blocking webRequest
  * at all.
  */
@@ -29,7 +29,7 @@ import { dlogLevel } from "../../../shared/debugLog";
 import { IS_FIREFOX } from "./processState";
 import { compileMv2, ownsAny } from "./tiers";
 
-type Kind = "onRequest" | "onResponseHeaders" | "replaceResponse" | "modifyResponse";
+type Kind = "onRequest" | "onResponseHeaders" | "replaceResponse" | "onResponseBody";
 
 /** a script's webrequest-owned handlers (each with its route) */
 interface Entry {
@@ -38,10 +38,10 @@ interface Entry {
     handlers: Record<Kind, Routed[]>;
 }
 
-const KINDS: Kind[] = ["onRequest", "onResponseHeaders", "replaceResponse", "modifyResponse"];
+const KINDS: Kind[] = ["onRequest", "onResponseHeaders", "replaceResponse", "onResponseBody"];
 
 export class WebRequestStrategy implements InterceptionStrategy {
-    readonly name = "webrequest";
+    readonly name = "webRequest";
 
     private entries: Entry[] = [];
 
@@ -51,11 +51,11 @@ export class WebRequestStrategy implements InterceptionStrategy {
             this.entries = [];
             return;
         }
-        this.entries = compileMv2(scripts, paramValues, (s) => ownsAny(s, "webrequest")).map(({ id, name, compiled }) => {
+        this.entries = compileMv2(scripts, paramValues, (s) => ownsAny(s, "webRequest")).map(({ id, name, compiled }) => {
             if (compiled.error) scriptError(id, formatScriptError(name, compiled.error));
             const handlers = {} as Record<Kind, Routed[]>;
-            for (const k of KINDS) handlers[k] = compiled.handlers[k].filter((h) => effectiveStrategy(h.route) === "webrequest");
-            dlogLevel("webrequest", "debug", `loaded "${name}" routes: ${KINDS.flatMap((k) => handlers[k].map((h) => `${routeLabel(h.route)} ${JSON.stringify(h.route.url)}`)).join(", ") || "none"}${compiled.error ? ` ERROR: ${compiled.error}` : ""}`);
+            for (const k of KINDS) handlers[k] = compiled.handlers[k].filter((h) => effectiveStrategy(h.route) === "webRequest");
+            dlogLevel("webRequest", "debug", `loaded "${name}" routes: ${KINDS.flatMap((k) => handlers[k].map((h) => `${routeLabel(h.route)} ${JSON.stringify(h.route.url)}`)).join(", ") || "none"}${compiled.error ? ` ERROR: ${compiled.error}` : ""}`);
             return { id, name, handlers };
         });
     }
@@ -103,8 +103,8 @@ export class WebRequestStrategy implements InterceptionStrategy {
                                     );
                                 }
                                 if (r && r.respond) return this.respond(details, r.respond, entry);
-                                if (r && (r.redirect || r.cancel)) {
-                                    log(details.tabId, `[${entry.name}] onRequest → ${r.cancel ? "cancel" : `redirect → ${r.redirect}`} ${details.url}`, "info", entry.id);
+                                if (r && (r.redirect || r.block)) {
+                                    log(details.tabId, `[${entry.name}] onRequest → ${r.block ? "block" : `redirect → ${r.redirect}`} ${details.url}`, "info", entry.id);
                                     return normalize(r);
                                 }
                                 if (!hasHeaders) logTapped(details.tabId, entry.name, "onRequest", details.url, entry.id);
@@ -112,7 +112,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                             });
                         }
                         // Chrome: blocking webRequest cannot await — the result would be decided too late
-                        scriptError(entry.id, `async ${routeLabel(h.route)}: Chrome's blocking webRequest cannot await. Return synchronously, or set strategy: "cdp" or "process" on this route.`);
+                        scriptError(entry.id, `async ${routeLabel(h.route)}: Chrome's blocking webRequest cannot await. Return synchronously, or set strategy: "debugger" or "helper" on this route.`);
                         continue;
                     }
                     // cache header mods so onBeforeSendHeaders doesn't re-run the handler
@@ -127,11 +127,11 @@ export class WebRequestStrategy implements InterceptionStrategy {
                     }
                     // respond: synthesize the response (terminal, first wins)
                     if (result && result.respond) return this.respond(details, result.respond, entry);
-                    if (result && (result.redirect || result.cancel)) {
-                        log(details.tabId, `[${entry.name}] onRequest → ${result.cancel ? "cancel" : `redirect → ${result.redirect}`} ${details.url}`, "info", entry.id);
+                    if (result && (result.redirect || result.block)) {
+                        log(details.tabId, `[${entry.name}] onRequest → ${result.block ? "block" : `redirect → ${result.redirect}`} ${details.url}`, "info", entry.id);
                         return normalize(result);
                     }
-                    trace(details, `[${entry.name}] onRequest returned ${describeResult(result)} (no redirect/cancel/respond) for ${details.url}`);
+                    trace(details, `[${entry.name}] onRequest returned ${describeResult(result)} (no redirect/block/respond) for ${details.url}`);
                     if (!hasHeaders) logTapped(details.tabId, entry.name, "onRequest", details.url, entry.id);
                 }
                 for (const h of this.hits(entry, "replaceResponse", details)) {
@@ -146,7 +146,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                                 return this.replace(details, r, entry.id, entry.name);
                             });
                         }
-                        scriptError(entry.id, `async ${routeLabel(h.route)}: Chrome's blocking webRequest cannot await. Return synchronously, or set strategy: "cdp" or "process" on this route.`);
+                        scriptError(entry.id, `async ${routeLabel(h.route)}: Chrome's blocking webRequest cannot await. Return synchronously, or set strategy: "debugger" or "helper" on this route.`);
                         continue;
                     }
                     if (replacement !== undefined && replacement !== null) return this.replace(details, replacement, entry.id, entry.name);
@@ -155,7 +155,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                 // Firefox: stream via filterResponseData at onHeadersReceived time;
                 // here we only mark the request so the header-phase hook wires the filter.
                 // (Chromium can't read bodies here — the pipeline warns at load.)
-                const transforms = this.hits(entry, "modifyResponse", details);
+                const transforms = this.hits(entry, "onResponseBody", details);
                 if (transforms.length && IS_FIREFOX) {
                     const list = pendingFirefoxStreams.get(details.requestId)?.list ?? [];
                     list.push({ id: entry.id, name: entry.name, handlers: transforms });
@@ -207,7 +207,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
         const mime = respond.mime || guessMime(null, details.url, "application/json");
         const status = respond.status ?? 200;
         if (status !== 200) {
-            log(details.tabId, `[${entry.name}] onRequest → respond ${status} not served: webRequest can't set a response status (only 200) — set strategy: "cdp" or "process" on this route ${details.url}`, "warn", entry.id);
+            log(details.tabId, `[${entry.name}] onRequest → respond ${status} not served: webRequest can't set a response status (only 200) — set strategy: "debugger" or "helper" on this route ${details.url}`, "warn", entry.id);
             return { kind: "allow" };
         }
         if (IS_FIREFOX) return this.firefoxReplaceLater(details, body, mime, entry.id, entry.name, "respond");
@@ -288,7 +288,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                             return null;
                         });
                     }
-                    scriptError(entry.id, `async ${routeLabel(h.route)}: Chrome's blocking webRequest cannot await. Return synchronously, or set strategy: "cdp" or "process" on this route.`);
+                    scriptError(entry.id, `async ${routeLabel(h.route)}: Chrome's blocking webRequest cannot await. Return synchronously, or set strategy: "debugger" or "helper" on this route.`);
                     continue;
                 }
                 const mods = (result as any)?.headers;
@@ -332,11 +332,11 @@ export class WebRequestStrategy implements InterceptionStrategy {
                         const out = await h.fn(ctx, body);
                         if (out !== undefined && out !== null && out !== body) {
                             const size = (b: any) => (typeof b === "string" ? b.length : (b?.byteLength ?? 0));
-                            log(details.tabId, `[${scriptName}] modifyResponse applied (${size(body)}b → ${size(out)}b) ${details.url}`, "info", scriptId);
+                            log(details.tabId, `[${scriptName}] onResponseBody applied (${size(body)}b → ${size(out)}b) ${details.url}`, "info", scriptId);
                             body = out;
-                        } else logTapped(details.tabId, scriptName, "modifyResponse", details.url, scriptId);
+                        } else logTapped(details.tabId, scriptName, "onResponseBody", details.url, scriptId);
                     } catch (e: any) {
-                        scriptError(scriptId, formatScriptError(scriptName, e, "modifyResponse"));
+                        scriptError(scriptId, formatScriptError(scriptName, e, "onResponseBody"));
                     }
                 }
                 const outBytes = typeof body === "string" ? encoder.encode(body) : body;
@@ -354,7 +354,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
 
 /** request-level diagnostics: visible in the LOG panel at logLevel: debug */
 function trace(details: WebRequestDetailsLike, msg: string): void {
-    log(details.tabId, `[webrequest] ${msg}`, "debug");
+    log(details.tabId, `[webRequest] ${msg}`, "debug");
 }
 
 function describeResult(r: any): string {
@@ -396,7 +396,7 @@ function ctxFor(details: WebRequestDetailsLike, tabUrl: string | null, route: Ro
 
 export function normalize(result: any): HookDisposition {
     if (result.respond) return { kind: "respond", serve: result.respond } as any;
-    if (result.cancel) return { kind: "cancel" };
+    if (result.block) return { kind: "cancel" };
     if (result.redirect) return { kind: "redirect", url: result.redirect };
     if (result.headers) return { kind: "headers", changes: result.headers };
     return { kind: "allow" };
@@ -530,7 +530,7 @@ interface StreamEntry {
     handlers: Routed[];
 }
 
-/** requestId → the modifyResponse handlers awaiting a Firefox stream filter */
+/** requestId → the onResponseBody handlers awaiting a Firefox stream filter */
 const pendingFirefoxStreams = new Map<string, { list: StreamEntry[]; tabUrl: string | null }>();
 
 /** requestId → request header mods already computed by onRequest (issue: run once) */

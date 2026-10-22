@@ -145,7 +145,7 @@ describe("settings.yaml folder sync", () => {
         await ss.saveScript({
             id,
             name: "S",
-            code: `wt.describe("Extra knob"); wt.params({ n: { type: "number", default: 1 }, extra: { type: "string", default: "x", description: "Extra knob" } });`,
+            code: `wt.about("Extra knob"); wt.params({ n: { type: "number", default: 1 }, extra: { type: "string", default: "x", description: "Extra knob" } });`,
         });
         await sleep(800);
         let text = files.get("settings.yaml")!.text;
@@ -159,7 +159,7 @@ describe("settings.yaml folder sync", () => {
         await ss.saveScript({
             id,
             name: "S",
-            code: `wt.describe("Extra knob"); wt.params({ extra: { type: "string", default: "x", description: "Extra knob" } });`,
+            code: `wt.about("Extra knob"); wt.params({ extra: { type: "string", default: "x", description: "Extra knob" } });`,
         });
         await sleep(800);
         text = files.get("settings.yaml")!.text;

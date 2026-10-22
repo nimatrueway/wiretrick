@@ -120,10 +120,10 @@ export async function collectDiagnostics(extra: DiagnosticsExtra = {}): Promise<
     out.push("");
     out.push(
         [
-            "Wiretrick is a browser extension that runs user TypeScript scripts (`wt.onRequest(url, fn)`, `wt.modifyResponse(url, fn)`, …) to intercept requests.",
-            "Interception strategies: `hook` (page fetch/XHR patch), `cdp` (chrome.debugger), `webrequest` (MV2 blocking webRequest), `process` (local helper proxy).",
-            "LOG lines are per-tab (`tab=-1` = background/global); `[webrequest]` lines trace the blocking-webRequest tier (onBeforeRequest → script decision → redirect/complete/FAILED/IGNORED).",
-            "If a URL never appears in the LOG/debug log, the extension never saw that request. Debug-level lines are only produced when `logLevel: debug`.",
+            "Wiretrick is a browser extension that runs user TypeScript scripts (`wt.onRequest(url, fn)`, `wt.onResponseBody(url, fn)`, …) to intercept requests.",
+            "Interception strategies: `page` (page fetch/XHR patch), `debugger` (chrome.debugger), `webRequest` (MV2 blocking webRequest), `helper` (local helper proxy).",
+            "Log view lines are per-tab (`tab=-1` = background/global); `[webRequest]` lines trace the webRequest strategy (onBeforeRequest → script decision → redirect/complete/FAILED/IGNORED).",
+            "If a URL never appears in the Log view/debug log, the extension never saw that request. Debug-level lines are only produced when `logLevel: debug`.",
         ].join("\n")
     );
     out.push("");

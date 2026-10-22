@@ -28,7 +28,7 @@ export interface ScriptHandlers {
     onRequest: Routed[];
     onResponseHeaders: Routed[];
     replaceResponse: Routed[];
-    modifyResponse: Routed[];
+    onResponseBody: Routed[];
     /** run in the page — DOM/title manipulation (route.when = timing) */
     onDom: Routed[];
 }
@@ -282,7 +282,7 @@ function createCollector(): ScriptHandlers {
         onRequest: [],
         onResponseHeaders: [],
         replaceResponse: [],
-        modifyResponse: [],
+        onResponseBody: [],
         onDom: [],
     };
 }
@@ -309,16 +309,16 @@ function withCollector<T>(c: ScriptHandlers, run: () => T): T {
 }
 
 function routesOf(h: ScriptHandlers): RouteMeta[] {
-    return [...h.onRequest, ...h.onResponseHeaders, ...h.replaceResponse, ...h.modifyResponse, ...h.onDom].map((x) => x.route);
+    return [...h.onRequest, ...h.onResponseHeaders, ...h.replaceResponse, ...h.onResponseBody, ...h.onDom].map((x) => x.route);
 }
 
 const PARAM_TYPES = ["boolean", "number", "string", "enum", "stringList"];
 
-/** per-script state behind wt.describe / wt.params / wt.defineParam */
+/** per-script state behind wt.about / wt.params / wt.defineParam */
 function createOwner(meta: ResMeta, storedValues?: Record<string, any>) {
     let defs: Record<string, ParamDef> | undefined;
     return {
-        describe(text: unknown) {
+        about(text: unknown) {
             meta.description = String(text ?? "");
         },
         add(next: Record<string, ParamDef>, where: string): Record<string, any> {
@@ -370,9 +370,9 @@ function makeShim(owner: ReturnType<typeof createOwner>, overrides?: ResApiOverr
         onRequest: register("onRequest"),
         onResponseHeaders: register("onResponseHeaders"),
         replaceResponse: register("replaceResponse"),
-        modifyResponse: register("modifyResponse"),
+        onResponseBody: register("onResponseBody"),
         onDom: register("onDom"),
-        describe: (text: unknown) => owner.describe(text),
+        about: (text: unknown) => owner.about(text),
         params: (defs: Record<string, ParamDef>) => {
             const values = owner.add(defs, "wt.params");
             return isStub(values) ? values : Object.freeze(values); // a stub proxy can't be frozen

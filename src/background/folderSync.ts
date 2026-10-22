@@ -30,6 +30,8 @@ import { API_DTS_FILE, TSCONFIG_FILE, apiDtsText, tsconfigText } from "../shared
 import { broadcastToUi } from "./engine/logs";
 import { dlogLevel } from "../shared/debugLog";
 import { scriptFileName, scriptNameFromFile } from "../shared/scriptName";
+import { migrateSettingsText } from "../shared/migration";
+import { PENDING_DISK_KEY, type PendingDisk } from "./migration";
 const POLL_MS = 1000;
 export const BACKUP_DIR = ".wiretrick-backup";
 
@@ -191,16 +193,17 @@ async function removeFile(fileName: string): Promise<void> {
     known.delete(fileName);
 }
 
-/** keep a copy of a version about to be overwritten (both sides had changed) */
-async function backup(fileName: string, content: string, why: string): Promise<void> {
+/** keep a copy of a version about to be overwritten (both sides had changed, or a migration) */
+async function backup(fileName: string, content: string, why: string, what = "the other version"): Promise<void> {
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const name = `${fileName.replace(/\.ts$/, "")} ${stamp}.ts.bak`;
+    const dot = fileName.lastIndexOf(".");
+    const name = dot > 0 ? `${fileName.slice(0, dot)} ${stamp}${fileName.slice(dot)}.bak` : `${fileName} ${stamp}.bak`;
     try {
         const d = await dirHandle.getDirectoryHandle(BACKUP_DIR, { create: true });
         const w = await (await d.getFileHandle(name, { create: true })).createWritable();
         await w.write(content);
         await w.close();
-        dlogLevel("sync", "warn", `Folder sync: ${why} — the other version was saved to ${BACKUP_DIR}/${name}`);
+        dlogLevel("sync", what === "the other version" ? "warn" : "info", `Folder sync: ${why} — ${what} was saved to ${BACKUP_DIR}/${name}`);
     } catch (e: any) {
         dlogLevel("sync", "warn", `Folder sync: ${why} — keeping a backup failed: ${e?.message || e}`);
     }
@@ -780,6 +783,7 @@ async function start(opts: { fresh?: boolean }): Promise<boolean> {
     const resumingSame = !opts.fresh && dirHandle !== null && timer !== null;
     dirHandle = handle;
     displayPath = await describeHandle(handle);
+    await applyPendingMigration();
     lastPollError = "";
     clashWarned = new Set();
     if (opts.fresh) {
@@ -819,6 +823,29 @@ async function start(opts: { fresh?: boolean }): Promise<boolean> {
     broadcastStatus();
     dlogLevel("sync", "info", `Folder sync: watching "${displayPath}"`);
     return true;
+}
+
+/**
+ * After the one-time API migration (background/migration.ts): back up the
+ * originals of the rewritten scripts (the reconcile below then writes the
+ * new sources over the files) and migrate settings.yaml on disk before it
+ * is read — an old `strategy:` key would otherwise reset the default.
+ */
+async function applyPendingMigration(): Promise<void> {
+    const area = storageLocal();
+    if (!area) return;
+    const pending: PendingDisk | undefined = (await new Promise<any>((r) => area.get(PENDING_DISK_KEY, r)))?.[PENDING_DISK_KEY];
+    if (!pending) return;
+    for (const s of pending.scripts || []) await backup(canonicalFileName(s.name), s.code, `"${s.name}" was migrated to the renamed script API`, "the original");
+    const f = pending.settings ? await readSettingsFile() : null;
+    if (f) {
+        const next = migrateSettingsText(f.text);
+        if (next !== f.text) {
+            await backup(SETTINGS_FILE, f.text, `${SETTINGS_FILE} was migrated (strategy → defaultStrategy)`, "the original");
+            await writeFile(SETTINGS_FILE, next);
+        }
+    }
+    await new Promise<void>((r) => area.remove(PENDING_DISK_KEY, () => r()));
 }
 
 /** Stop timers only, keeping persisted state — as when the worker dies (test seam). */

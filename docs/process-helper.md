@@ -1,10 +1,10 @@
-# Local helper (strategy `"process"`)
+# Local helper (strategy `"helper"`)
 
 [← README](../README.md) · [Glossary](../GLOSSARY.md)
 
 `wiretrick-helper` is a small (~3 MB) Rust program for Linux, macOS and
 Windows. Chrome starts it through **native messaging** when an enabled
-script has a handler on the `process` strategy (the Chromium default — see
+script has a handler on the `helper` strategy (the Chromium default — see
 [strategies](strategies.md)), and it exits when no such handler is left (or
 Chrome closes):
 
@@ -12,7 +12,7 @@ Chrome closes):
    terminated with per-host certificates from its own local CA, minted once
    and cached.
 2. The extension installs a `chrome.proxy` PAC script that sends **only the
-   hosts in the routes of `process` handlers** to the helper. Everything else
+   hosts in the routes of `helper` handlers** to the helper. Everything else
    goes exactly where your proxy setting sent it before (direct, fixed
    servers, your PAC, auto-detect, or the system proxy).
 3. The helper pauses matching requests and responses and asks the extension.
@@ -25,7 +25,7 @@ Chrome closes):
    Your handlers run in the background page (MV2) or the sandbox (MV3), the
    same code paths as the other strategies. The extension answers continue,
    fulfill, redirect or fail. Requests nobody listens to are not paused, and
-   bodies are buffered only for `modifyResponse` handlers.
+   bodies are buffered only for `onResponseBody` handlers.
 4. The helper's own upstream connection follows your proxy setting too. It
    asks the extension per host, so your PAC/fixed proxies are honored even
    for intercepted traffic.
@@ -77,17 +77,17 @@ binary.
   leaves it. Anyone who can read it can impersonate sites to this browser
   profile, so treat it like a password. `untrust-ca` removes trust.
 - Sites that pin certificates or require client certificates (mTLS) fail
-  through the helper. Leave them out of `process` routes (use another
+  through the helper. Leave them out of `helper` routes (use another
   `strategy` on that handler).
 - When another extension or an enterprise policy controls the proxy setting,
-  the strategy stays unavailable (shown in Settings). Handlers on `process` then don't
+  the strategy stays unavailable (shown in Settings). Handlers on `helper` then don't
   run — there is no fallback; the Log warns and the script gets a ⚠. Pick
-  another default strategy in Settings → Interception, or set `strategy`
+  another default strategy in Settings → Strategy, or set `strategy`
   on the route.
-- Firefox doesn't need it: `webrequest` already gives the same reach there.
+- Firefox doesn't need it: `webRequest` already gives the same reach there.
 - Responses rewritten by the helper are served `no-store`. The browser cache
-  for literal hosts in `process` routes is cleared when the routed set changes, so
+  for literal hosts in `helper` routes is cleared when the routed set changes, so
   stale cached copies don't skip your handlers.
 - Overhead: requests to unmatched hosts don't touch the helper at all. Matched
-  hosts add one loopback hop. With a `modifyResponse` handler, the e2e suite
+  hosts add one loopback hop. With a `onResponseBody` handler, the e2e suite
   measures about 10 ms per navigation.

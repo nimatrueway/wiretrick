@@ -4,9 +4,9 @@
  * so chain semantics are identical everywhere:
  *
  *   requestDecision — onRequest handlers in order; the first terminal result
- *                     (respond / redirect / cancel) wins, header edits merge
+ *                     (respond / redirect / block) wins, header edits merge
  *   replace         — replaceResponse handlers; first non-null result wins
- *   transform       — modifyResponse handlers compose in order
+ *   transform       — onResponseBody handlers compose in order
  *   responseHeaders — onResponseHeaders handlers; header edits merge
  */
 import { formatScriptError } from "./scriptError";
@@ -86,7 +86,7 @@ export function serializeRespondBody(body: any): string {
 
 const HANDLER_OF: Record<BodyOp, keyof ScriptHandlers> = {
     requestDecision: "onRequest",
-    transform: "modifyResponse",
+    transform: "onResponseBody",
     replace: "replaceResponse",
     responseHeaders: "onResponseHeaders",
 };
@@ -115,7 +115,7 @@ function hasHeaderMods(h: any): boolean {
 export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpEnv): Promise<any> {
     const url: string = args.url;
     const method: string = args.method;
-    // "" = unknown (process tier, uncorrelated request): ctx says "other", route `types` aren't checked
+    // "" = unknown (process tier, uncorrelated request): ctx says "other", route `resourceTypes` aren't checked
     const known: string | undefined = args.resourceType === undefined ? "xmlhttprequest" : args.resourceType || undefined;
     const resourceType: string = known ?? "other";
     const base = (h: Routed) => ({
@@ -150,8 +150,8 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
                         env.log(s.id, "info", `[${s.name}] onRequest → redirect → ${result.redirect} ${url}`);
                         return { kind: "redirect", url: result.redirect };
                     }
-                    if (result.cancel) {
-                        env.log(s.id, "info", `[${s.name}] onRequest → cancel ${url}`);
+                    if (result.block) {
+                        env.log(s.id, "info", `[${s.name}] onRequest → block ${url}`);
                         return { kind: "cancel" };
                     }
                     if (hasHeaderMods(result.headers)) {
@@ -200,12 +200,12 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
                         const next = typeof result === "string" ? result : result instanceof Uint8Array ? result : JSON.stringify(result);
                         const after = typeof next === "string" ? next.length : next.byteLength;
                         out = next;
-                        if (next !== prevOut) env.log(s.id, "info", `[${s.name}] modifyResponse applied (${before}b → ${after}b) ${url}`);
-                        else tapped(s, "modifyResponse");
+                        if (next !== prevOut) env.log(s.id, "info", `[${s.name}] onResponseBody applied (${before}b → ${after}b) ${url}`);
+                        else tapped(s, "onResponseBody");
                         touched = true;
-                    } else tapped(s, "modifyResponse");
+                    } else tapped(s, "onResponseBody");
                 } catch (e: any) {
-                    env.log(s.id, "error", formatScriptError(s.name, e, "modifyResponse"));
+                    env.log(s.id, "error", formatScriptError(s.name, e, "onResponseBody"));
                 }
             }
         }

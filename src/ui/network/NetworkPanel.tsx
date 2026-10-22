@@ -543,7 +543,7 @@ function TouchMenu({ value, onChange }: { value: TouchFilter; onChange: (v: Touc
 const KIND_TITLE: Record<NetIntervention["kind"], string> = {
     modified: "Modified: the handler changed the request",
     tapped: "Tapped: the handler ran without changing it",
-    missed: "Missed: a body handler should have run here but no tier ran it",
+    missed: "Missed: a body handler should have run here but no strategy ran it",
 };
 
 function rowClass(e: NetEntry, selected: boolean): string {

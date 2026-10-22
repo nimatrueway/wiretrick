@@ -80,14 +80,14 @@ export function log(tabId: number, message: string, level: LogEntry["level"] = "
 // ---- tap registry: did a script's handler run for a URL? ----
 // Recorded whether or not a manager is open (annotateFromLog needs a port),
 // keyed without the tab — the process tier logs with tabId -1. Feeds the
-// "modifyResponse never ran" warning (pipeline.ts).
+// "onResponseBody never ran" warning (pipeline.ts).
 
 const MAX_TAPS = 2000;
 /** `${scriptId}|${url}` → when a body handler last ran (or onRequest ended the request) */
 const bodyTaps = new Map<string, number>();
 const lastScriptError = new Map<string, number>();
 /** lines that mean the body handlers ran — or legitimately never will */
-const BODY_TAP = /\b(modifyResponse|replaceResponse)\b|onRequest → (respond|cancel|redirect)\b/;
+const BODY_TAP = /\b(onResponseBody|replaceResponse)\b|onRequest → (respond|block|redirect)\b/;
 
 function noteTap(scriptId: string, level: LogEntry["level"], message: string): void {
     const now = Date.now();

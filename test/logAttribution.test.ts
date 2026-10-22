@@ -17,7 +17,7 @@ import { compileScript } from "../src/shared/compile";
 import type { Script } from "../src/background/engine/scriptStore";
 
 // these suites exercise the webRequest tier: make it the settings default
-beforeEach(() => setDefaultStrategy("webrequest"));
+beforeEach(() => setDefaultStrategy("webRequest"));
 afterEach(() => setDefaultStrategy(null));
 
 // ---- log capture via a fake UI port ----
@@ -171,7 +171,7 @@ describe("CDP tier: request-stage respond fulfillment", () => {
         resourceType: "xmlhttprequest",
         ...over,
     });
-    const CDP_500 = RESPOND_500.replace(`"*://api.example.com/*"`, `{ url: "*://api.example.com/*", strategy: "cdp" }`);
+    const CDP_500 = RESPOND_500.replace(`"*://api.example.com/*"`, `{ url: "*://api.example.com/*", strategy: "debugger" }`);
 
     it("SYNC onRequest respond-500 is fulfilled + named success log", async () => {
         const c = new CdpStrategy();
@@ -196,7 +196,7 @@ describe("CDP tier: request-stage respond fulfillment", () => {
     });
 
     it("sync respond 200 is fulfilled in place by the debugger tier (no redirect)", async () => {
-        const code = `wt.onRequest({ url: "*", strategy: "cdp" }, () => ({ respond: { body: "<h1>mock</h1>", mime: "text/html" } }));`;
+        const code = `wt.onRequest({ url: "*", strategy: "debugger" }, () => ({ respond: { body: "<h1>mock</h1>", mime: "text/html" } }));`;
         const c = new CdpStrategy();
         c.reload([storedScript("a", "Page mock", code)]);
         await c.handlePaused("tab:1", paused({ resourceType: "Document" }));
@@ -209,7 +209,7 @@ describe("CDP tier: request-stage respond fulfillment", () => {
     });
 
     it("sync replaceResponse runs once, in the debugger tier", async () => {
-        const code = `wt.replaceResponse({ url: "*", strategy: "cdp" }, () => "<h1>replaced</h1>");`;
+        const code = `wt.replaceResponse({ url: "*", strategy: "debugger" }, () => "<h1>replaced</h1>");`;
         const w = new WebRequestStrategy();
         const c = new CdpStrategy();
         w.reload([storedScript("a", "Page mock", code)]);
@@ -239,7 +239,7 @@ describe("CDP tier: request-stage respond fulfillment", () => {
 
     it("async onRequest respond is fulfilled", async () => {
         const c = new CdpStrategy();
-        c.reload([storedScript("a", "API mocker", `wt.onRequest({ url: "*", strategy: "cdp" }, async () => ({ respond: { status: 503, body: "later" } }));`)]);
+        c.reload([storedScript("a", "API mocker", `wt.onRequest({ url: "*", strategy: "debugger" }, async () => ({ respond: { status: 503, body: "later" } }));`)]);
         await c.handlePaused("tab:1", paused());
         const fulfill = debuggerCalls.find((x) => x.command === "Fetch.fulfillRequest");
         expect(fulfill).toBeTruthy();
@@ -316,7 +316,7 @@ describe("Chromium webRequest tier: how it serves replacements (redirect)", () =
     });
     it("a route on another strategy is left alone", () => {
         const s = new WebRequestStrategy();
-        s.reload([storedScript("a", "Cdp api", `wt.replaceResponse({ url: "*", strategy: "cdp" }, () => "<h1>x</h1>");`)]);
+        s.reload([storedScript("a", "Cdp api", `wt.replaceResponse({ url: "*", strategy: "debugger" }, () => "<h1>x</h1>");`)]);
         expect((s.handleBeforeRequest(details(), null) as any).kind).toBe("allow");
         expect(entries.filter((e) => e.scriptId === "a")).toEqual([]);
     });

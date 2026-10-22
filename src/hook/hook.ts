@@ -42,7 +42,7 @@ import { makePageShim, domHandlersFor, scheduleDom } from "../shared/pageShim";
     /** hook diagnostics → extension debug log (never the page console) */
     function logUp(msg: string, level: ScriptLogLevel = "info"): void {
         try {
-            window.postMessage({ source: HOOK_SOURCE, kind: "log", msg, level, src: "hook" }, window.location.origin);
+            window.postMessage({ source: HOOK_SOURCE, kind: "log", msg, level, src: "page" }, window.location.origin);
         } catch {}
     }
 

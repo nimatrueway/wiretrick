@@ -1,5 +1,5 @@
 /**
- * PAC generation for the "process" tier (pure — no chrome.* here).
+ * PAC generation for the "helper" tier (pure — no chrome.* here).
  *
  * The extension installs ONE PAC that:
  *   - sends hosts the helper may need to intercept (same rule as the
@@ -184,11 +184,11 @@ export function buildUserDecision(value: UserProxyValue | null | undefined, syst
     if (mode === "pac_script") {
         const src = value?.pacScript?.data || fetchedPac;
         if (src) return { source: embedUserPac(src), upstream: "ask" };
-        return { source: `function __resUser() { return "DIRECT"; }`, upstream: "direct", note: `could not load the configured PAC script (${value?.pacScript?.url || "no url"}) — non-intercepted traffic goes DIRECT while the process tier is active` };
+        return { source: `function __resUser() { return "DIRECT"; }`, upstream: "direct", note: `could not load the configured PAC script (${value?.pacScript?.url || "no url"}) — non-intercepted traffic goes DIRECT while helper routing is active` };
     }
     if (mode === "auto_detect") {
         if (fetchedPac) return { source: embedUserPac(fetchedPac), upstream: "ask" };
-        return { source: `function __resUser() { return "DIRECT"; }`, upstream: "direct", note: "proxy auto-detect (WPAD) found no PAC — traffic goes DIRECT while the process tier is active" };
+        return { source: `function __resUser() { return "DIRECT"; }`, upstream: "direct", note: "proxy auto-detect (WPAD) found no PAC — traffic goes DIRECT while helper routing is active" };
     }
     // system
     if (system?.pacUrl && fetchedPac) return { source: embedUserPac(fetchedPac), upstream: "ask" };
@@ -207,7 +207,7 @@ export function buildUserDecision(value: UserProxyValue | null | undefined, syst
     return {
         source: `function __resUser() { return "DIRECT"; }`,
         upstream: "direct",
-        note: system?.pacUrl ? `could not load the system PAC (${system.pacUrl}) — traffic goes DIRECT while the process tier is active` : undefined,
+        note: system?.pacUrl ? `could not load the system PAC (${system.pacUrl}) — traffic goes DIRECT while helper routing is active` : undefined,
     };
 }
 
@@ -217,7 +217,7 @@ export function buildPac(port: number, matchPatterns: string[], user: UserDecisi
     const hosts = [...new Set(matchPatterns.map(hostPatternOf))];
     const any = hosts.includes(null);
     const list = hosts.filter((h): h is string => h !== null);
-    return asciiOnly(`// Wiretrick — process tier routing (generated)
+    return asciiOnly(`// Wiretrick — helper routing (managed by Wiretrick)
 ${MATCH_SRC}
 ${BYPASS_SRC}
 ${user.source}

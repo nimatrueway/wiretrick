@@ -330,8 +330,8 @@ export function addNetworkPort(port: chrome.runtime.Port): void {
 }
 
 export const URL_AT_END = /\s((?:https?|wss?):\/\/\S+)\s*$/;
-/** optional tier tag ("[process] [Name] …") then the script name */
-const NAME_PREFIX = /^(?:\[(process|cdp|webrequest|hook|sandbox)\]\s+(?=\[))?\[([^\]]+)\]\s*/;
+/** optional tier tag ("[helper] [Name] …") then the script name */
+const NAME_PREFIX = /^(?:\[(helper|debugger|webRequest|page|sandbox)\]\s+(?=\[))?\[([^\]]+)\]\s*/;
 
 /**
  * The recorded request a script action/body belongs to: the newest same-URL
@@ -414,7 +414,7 @@ export function recordNetBody(r: NetBodyRecord): void {
 }
 
 /**
- * Attach a script-attributed log line ("[name] modifyResponse applied
+ * Attach a script-attributed log line ("[name] onResponseBody applied
  * (…) https://…") to the request it describes, as "tapped" or "modified"
  * (inferred from the line when not given). A line with no matching
  * recorded request becomes a synthetic entry (see entryFor). Runs while

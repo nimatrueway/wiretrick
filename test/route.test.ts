@@ -9,14 +9,14 @@ describe("normalizeRoute", () => {
     it("accepts a string, a list, or { url, … }", () => {
         expect(normalizeRoute("onRequest", "*://a.com/*", 0)).toEqual({ kind: "onRequest", index: 0, url: ["*://a.com/*"], exclude: [] });
         expect(normalizeRoute("onRequest", ["*://a.com/*", "*://b.com/*"], 1).url).toEqual(["*://a.com/*", "*://b.com/*"]);
-        expect(normalizeRoute("modifyResponse", { url: "*", exclude: "*://a.com/*", methods: ["get", "Post"], types: ["script"], strategy: "cdp" }, 2)).toEqual({
-            kind: "modifyResponse",
+        expect(normalizeRoute("onResponseBody", { url: "*", exclude: "*://a.com/*", methods: ["get", "Post"], resourceTypes: ["script"], strategy: "debugger" }, 2)).toEqual({
+            kind: "onResponseBody",
             index: 2,
             url: ["*"],
             exclude: ["*://a.com/*"],
             methods: ["GET", "POST"],
-            types: ["script"],
-            strategy: "cdp",
+            resourceTypes: ["script"],
+            strategy: "debugger",
         });
     });
 
@@ -34,7 +34,7 @@ describe("normalizeRoute", () => {
         expect(() => normalizeRoute("onRequest", {}, 0)).toThrow(/missing "url"/);
         expect(() => normalizeRoute("onRequest", { url: [1] }, 0)).toThrow(/must be strings/);
         expect(() => normalizeRoute("onRequest", { url: "*", strategy: "auto" }, 0)).toThrow(/unknown strategy/);
-        expect(() => normalizeRoute("onRequest", { url: "*", strategy: ["hook"] }, 0)).toThrow(/single value/);
+        expect(() => normalizeRoute("onRequest", { url: "*", strategy: ["page"] }, 0)).toThrow(/single value/);
     });
 });
 
@@ -50,7 +50,7 @@ describe("routeMatches", () => {
     });
 
     it("methods (case-insensitive) and types; unknown method/type passes", () => {
-        const route = r({ url: "*", methods: ["POST"], types: ["xmlhttprequest"] });
+        const route = r({ url: "*", methods: ["POST"], resourceTypes: ["xmlhttprequest"] });
         expect(routeMatches(route, "https://x.com/", "post", "xmlhttprequest")).toBe(true);
         expect(routeMatches(route, "https://x.com/", "GET", "xmlhttprequest")).toBe(false);
         expect(routeMatches(route, "https://x.com/", "POST", "script")).toBe(false);
@@ -60,7 +60,7 @@ describe("routeMatches", () => {
     it("empty lists match nothing", () => {
         expect(routeMatches(r([]), "https://x.com/")).toBe(false);
         expect(routeMatches(r({ url: "*", methods: [] }), "https://x.com/", "GET")).toBe(false);
-        expect(routeMatches(r({ url: "*", types: [] }), "https://x.com/", "GET", "script")).toBe(false);
+        expect(routeMatches(r({ url: "*", resourceTypes: [] }), "https://x.com/", "GET", "script")).toBe(false);
     });
 
     it("* and <all_urls> match everything", () => {
@@ -75,26 +75,26 @@ describe("routeMatches", () => {
 });
 
 describe("strategy", () => {
-    it("route.strategy wins; otherwise settings.strategy; built-in default per browser", () => {
-        expect(builtinStrategy(false)).toBe("process");
-        expect(builtinStrategy(true)).toBe("webrequest");
-        expect(getDefaultStrategy()).toBe("process");
-        setDefaultStrategy("hook");
-        expect(effectiveStrategy({})).toBe("hook");
-        expect(effectiveStrategy({ strategy: "cdp" })).toBe("cdp");
+    it("route.strategy wins; otherwise settings.defaultStrategy; built-in default per browser", () => {
+        expect(builtinStrategy(false)).toBe("helper");
+        expect(builtinStrategy(true)).toBe("webRequest");
+        expect(getDefaultStrategy()).toBe("helper");
+        setDefaultStrategy("page");
+        expect(effectiveStrategy({})).toBe("page");
+        expect(effectiveStrategy({ strategy: "debugger" })).toBe("debugger");
         setDefaultStrategy(null);
-        expect(effectiveStrategy({})).toBe("process");
+        expect(effectiveStrategy({})).toBe("helper");
     });
 
     it("hookCanSee: only fetch/XHR", () => {
         expect(hookCanSee(normalizeRoute("onRequest", "*", 0))).toBe(true);
-        expect(hookCanSee(normalizeRoute("onRequest", { url: "*", types: ["script"] }, 0))).toBe(false);
+        expect(hookCanSee(normalizeRoute("onRequest", { url: "*", resourceTypes: ["script"] }, 0))).toBe(false);
     });
 
     it("labels and url union", () => {
-        const a = normalizeRoute("modifyResponse", ["*://a.com/*", "*://b.com/*"], 1);
+        const a = normalizeRoute("onResponseBody", ["*://a.com/*", "*://b.com/*"], 1);
         const b = normalizeRoute("onDom", "*://a.com/*", 0);
-        expect(routeLabel(a)).toBe("modifyResponse #2");
+        expect(routeLabel(a)).toBe("onResponseBody #2");
         expect(scriptUrls([a, b])).toEqual(["*://a.com/*", "*://b.com/*"]);
     });
 });

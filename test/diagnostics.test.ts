@@ -36,7 +36,7 @@ describe("diagnostic report", () => {
         const settings = await import("../src/background/settingsFile");
         vi.spyOn(settings, "getSettingsText").mockResolvedValue("settings:\n  logLevel: debug\n");
         const { log } = await import("../src/background/engine/logs");
-        log(3, "[webrequest] request FAILED net::ERR_BLOCKED_BY_CLIENT script https://a/x.js", "warn");
+        log(3, "[webRequest] request FAILED net::ERR_BLOCKED_BY_CLIENT script https://a/x.js", "warn");
         const { collectDiagnostics } = await import("../src/background/diagnostics");
         const md = await collectDiagnostics({ extensions: [{ name: "uBlock", id: "u", version: "1", enabled: true }], state: { process: { state: "idle" } } });
         for (const h of ["## Environment", "## Other installed extensions", "## Engine state", "## settings.yaml", "## Scripts (1)", "### redwood.ts — enabled", "## LOG", "## Debug log", "## Network"]) expect(md).toContain(h);

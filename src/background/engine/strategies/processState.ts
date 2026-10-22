@@ -1,6 +1,6 @@
 /**
  * Tier availability. Every handler route is owned by exactly one strategy
- * (route.strategy, else settings.strategy — see shared/route.ts); a tier
+ * (route.strategy, else settings.defaultStrategy — see shared/route.ts); a tier
  * runs only the handlers it owns, so nothing runs twice. When the owning
  * tier can't run here (helper down, debugger missing in Firefox, blocking
  * webRequest on MV3) the handler doesn't run — the pipeline warns once.
@@ -33,7 +33,7 @@ export function onProcessActiveChange(fn: () => void): () => void {
 export function tierUnavailable(s: Strategy): string | null {
     const why = strategyUnsupported(s, { firefox: IS_FIREFOX, mv3: __MV3__ });
     if (why) return why;
-    if (s === "process" && !active) return "the local helper isn't connected (Settings → Local helper)";
-    if (s === "cdp" && typeof chrome !== "undefined" && !chrome.debugger) return "chrome.debugger is unavailable";
+    if (s === "helper" && !active) return "the local helper isn't connected (Settings → Local helper)";
+    if (s === "debugger" && typeof chrome !== "undefined" && !chrome.debugger) return "chrome.debugger is unavailable";
     return null;
 }

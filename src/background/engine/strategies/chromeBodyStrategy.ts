@@ -1,11 +1,11 @@
 /**
- * Hook tier (strategy "hook"): a MAIN-world content script overrides
+ * Hook tier (strategy "page"): a MAIN-world content script overrides
  * fetch/XHR and asks the background to run the hook-owned handlers for
  * page-initiated requests — onRequest decisions, replaceResponse and
- * modifyResponse (streamed body). Banner-free. The page claims each request
+ * onResponseBody (streamed body). Banner-free. The page claims each request
  * it handles so the other tiers skip it.
  *
- * Only routes whose strategy is "hook" run here; navigations, subresources,
+ * Only routes whose strategy is "page" run here; navigations, subresources,
  * workers and anything the page didn't fetch itself never reach this tier.
  */
 import { runOp, type OpScript } from "../../../shared/bodyOps";
@@ -19,7 +19,7 @@ import { compileMv2, ownsAny } from "./tiers";
 type Decision = { kind: "respond"; mime: string; content: string; status?: number; headers?: any; scriptId?: string; scriptName?: string } | { kind: "redirect"; url: string } | { kind: "cancel" } | { kind: "headers"; changes: any } | null;
 
 export class ChromeBodyStrategy implements InterceptionStrategy {
-    readonly name = "hook";
+    readonly name = "page";
 
     /** MV2: compiled scripts owning hook routes */
     private ops: OpScript[] = [];
@@ -30,7 +30,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
     private claimedUrls = new Map<string, number>();
 
     reload(scripts: Script[], paramValues?: { [scriptId: string]: Record<string, any> }): void {
-        const owners = scripts.filter((s) => s.enabled && ownsAny(s, "hook"));
+        const owners = scripts.filter((s) => s.enabled && ownsAny(s, "page"));
         this.hookOwners = owners.length;
         if (__MV3__) {
             // the SW cannot compile — handlers execute in the sandbox page; the
@@ -39,7 +39,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
             this.mv3Params = paramValues || {};
             return;
         }
-        this.ops = compileMv2(scripts, paramValues, (s) => ownsAny(s, "hook")).map((c) => ({ id: c.id, name: c.name, handlers: c.compiled.handlers }));
+        this.ops = compileMv2(scripts, paramValues, (s) => ownsAny(s, "page")).map((c) => ({ id: c.id, name: c.name, handlers: c.compiled.handlers }));
     }
 
     /** does any enabled script own a hook route? */
@@ -48,11 +48,11 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
     }
 
     private run(op: "requestDecision" | "transform" | "replace", args: Record<string, any>, tabId: number): Promise<any> {
-        const a = { ...args, tabId, tier: "hook", resourceType: "xmlhttprequest" };
+        const a = { ...args, tabId, tier: "page", resourceType: "xmlhttprequest" };
         if (__MV3__) return runBodyOp(this.mv3Scripts, this.mv3Params, op, a);
         return runOp(this.ops, op, a, {
             log: (scriptId, level, msg, kind) => log(tabId, msg, level, scriptId, kind),
-            debug: (msg) => dlogLevel("hook", "debug", msg),
+            debug: (msg) => dlogLevel("page", "debug", msg),
         });
     }
 
@@ -61,7 +61,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
         return this.run("requestDecision", { url, method }, tabId);
     }
 
-    /** chained modifyResponse over the body (async handlers awaited) */
+    /** chained onResponseBody over the body (async handlers awaited) */
     runTransform(url: string, method: string, body: string, extra?: { status?: number; contentType?: string }, tabId = -1): Promise<string | null> {
         return this.run("transform", { url, method, body, status: extra?.status, contentType: extra?.contentType }, tabId);
     }

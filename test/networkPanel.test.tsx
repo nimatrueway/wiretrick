@@ -145,7 +145,7 @@ describe("NetworkPanel", () => {
 
     it("marks tapped vs modified rows; Tapped = tapped-only, Modified, Tapped / Modified = either; footer counts", () => {
         const tapped = { scriptId: "s", scriptName: "Watcher", action: "onRequest → tapped (no change)", level: "debug" as const, kind: "tapped" as const, at: base };
-        const modified = { scriptId: "m", scriptName: "Mocker", action: "modifyResponse applied (1b → 2b)", level: "info" as const, kind: "modified" as const, at: base };
+        const modified = { scriptId: "m", scriptName: "Mocker", action: "onResponseBody applied (1b → 2b)", level: "info" as const, kind: "modified" as const, at: base };
         const { container } = setup([
             entry("plain"),
             entry("watched", { startedAt: base + 1, interventions: [tapped] }),
@@ -226,12 +226,12 @@ describe("NetworkPanel", () => {
         const hit = entry("api", {
             responseHeaders: [["content-type", "application/json"]],
             requestHeaders: [["accept", "*/*"]],
-            interventions: [{ scriptId: "s", scriptName: "Mocker", action: "modifyResponse applied", level: "info", kind: "modified", at: base }],
+            interventions: [{ scriptId: "s", scriptName: "Mocker", action: "onResponseBody applied", level: "info", kind: "modified", at: base }],
         });
         const { container, getByText } = setup([hit]);
         fireEvent.click(container.querySelector("tbody tr")!);
         // a script ran on it → opens on the Wiretrick tab
-        expect(container.querySelector(".net-action")!.textContent).toContain("modifyResponse applied");
+        expect(container.querySelector(".net-action")!.textContent).toContain("onResponseBody applied");
         fireEvent.click(getByText("Headers"));
         const text = container.querySelector(".net-details-body")!.textContent!;
         expect(text).toContain("Response Headers");

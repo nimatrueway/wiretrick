@@ -125,7 +125,7 @@ import { makePageShim, domHandlersFor, scheduleDom, type PageDomHandler } from "
         }
         if (data.kind === "log") {
             safeSend(
-                { type: "debugLog", entry: { at: Date.now(), src: data.src || "hook", msg: data.msg, level: data.level || "info" } }
+                { type: "debugLog", entry: { at: Date.now(), src: data.src || "page", msg: data.msg, level: data.level || "info" } }
             );
         }
         if (data.kind === "scriptLog") {

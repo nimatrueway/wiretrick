@@ -184,7 +184,7 @@ jobs:
             MV2-capable Chromium: unzip `wiretrick-mv2-v*.zip` and load its `dist` folder.
             Signed `.crx` packages (MV3 and MV2, extension id `jcoealmhehnajkglhfchcnjdpkhnkdei`) are for policy-managed installs or drag-and-drop on Linux; see the README.
 
-            Optional local helper for `strategy: ["process"]` (Chrome). Settings → Local helper shows the command with your extension id filled in; it downloads the right `wiretrick-helper-*` binary below, checks it against `SHA256SUMS`, and installs it:
+            Optional local helper for `strategy: ["helper"]` (Chrome). Settings → Local helper shows the command with your extension id filled in; it downloads the right `wiretrick-helper-*` binary below, checks it against `SHA256SUMS`, and installs it:
 
             ```sh
             # macOS / Linux

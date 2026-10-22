@@ -25,26 +25,26 @@ describe("tier C participation gate (route ownership)", () => {
 
     it("a hook route is NOT loaded into CdpStrategy", () => {
         const c = new CdpStrategy();
-        c.reload([makeScript("a", `wt.modifyResponse({ url: "*", strategy: "hook" }, (c, b) => b);`)]);
+        c.reload([makeScript("a", `wt.onResponseBody({ url: "*", strategy: "page" }, (c, b) => b);`)]);
         expect(c.hasOwners()).toBe(false);
         expect(needsAny(c)).toBe(false);
     });
 
     it("a cdp route IS loaded", () => {
         const c = new CdpStrategy();
-        c.reload([makeScript("a", `wt.modifyResponse({ url: "*", strategy: "cdp" }, (c, b) => b);`)]);
+        c.reload([makeScript("a", `wt.onResponseBody({ url: "*", strategy: "debugger" }, (c, b) => b);`)]);
         expect(c.hasOwners()).toBe(true);
         expect(needsAny(c)).toBe(true);
     });
 
-    it("routes without a strategy follow settings.strategy", () => {
+    it("routes without a strategy follow settings.defaultStrategy", () => {
         const c = new CdpStrategy();
-        const scripts = [makeScript("a", `wt.modifyResponse("*", (c, b) => b);`)];
+        const scripts = [makeScript("a", `wt.onResponseBody("*", (c, b) => b);`)];
         try {
-            setDefaultStrategy("cdp");
+            setDefaultStrategy("debugger");
             c.reload(scripts);
             expect(needsAny(c)).toBe(true);
-            setDefaultStrategy("process");
+            setDefaultStrategy("helper");
             c.reload(scripts);
             expect(needsAny(c)).toBe(false);
         } finally {
@@ -54,7 +54,7 @@ describe("tier C participation gate (route ownership)", () => {
 
     it("only matching url / method / type are needed", () => {
         const c = new CdpStrategy();
-        c.reload([makeScript("a", `wt.onRequest({ url: "https://x.com/api/*", exclude: "https://x.com/api/health", methods: ["POST"], types: ["xmlhttprequest"], strategy: "cdp" }, () => ({ cancel: true }));`)]);
+        c.reload([makeScript("a", `wt.onRequest({ url: "https://x.com/api/*", exclude: "https://x.com/api/health", methods: ["POST"], resourceTypes: ["xmlhttprequest"], strategy: "debugger" }, () => ({ block: true }));`)]);
         const req = (url: string, method = "POST", type = "xmlhttprequest") => c.needs({ url, method, type });
         expect(req("https://x.com/api/users")).toBe(true);
         expect(req("https://x.com/api/users", "post")).toBe(true);
@@ -65,7 +65,7 @@ describe("tier C participation gate (route ownership)", () => {
     });
 
     it("disabled scripts never load", () => {
-        const s = makeScript("a", `wt.modifyResponse({ url: "*", strategy: "cdp" }, (c, b) => b);`);
+        const s = makeScript("a", `wt.onResponseBody({ url: "*", strategy: "debugger" }, (c, b) => b);`);
         s.enabled = false;
         const c = new CdpStrategy();
         c.reload([s]);

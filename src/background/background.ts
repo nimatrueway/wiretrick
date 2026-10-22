@@ -6,6 +6,7 @@ import { ChromeBodyStrategy } from "./engine/strategies/chromeBodyStrategy";
 import { CdpStrategy } from "./engine/strategies/cdpStrategy";
 import { ProcessStrategy } from "./engine/strategies/processStrategy";
 import { createPipeline } from "./engine/pipeline";
+import { runMigrations } from "./migration";
 import { addUiPort, clearTab, clearLogHistory, log, broadcastEntry, broadcastToUi, clearScriptErrors, setScriptTypeErrors } from "./engine/logs";
 import { onScriptsChanged, listScripts } from "./engine/scriptStore";
 import { dlog, dlogLevel, getDebugBuffer, pushEntry, clearDebugBuffer, setSink } from "../shared/debugLog";
@@ -22,7 +23,7 @@ const IS_FIREFOX =
 
 dlog("bg", "background starting", { firefox: (globalThis as any).browser !== undefined });
 
-// mirror every debug entry into the manager's LOG panel
+// mirror every debug entry into the Editor's Log view
 setSink((e) =>
     broadcastEntry({ tabId: -1, scriptId: null, level: e.level || "info", message: `[${e.src}] ${e.msg}`, at: e.at })
 );
@@ -33,9 +34,13 @@ const cdp = new CdpStrategy();
 const processStrategy = new ProcessStrategy();
 processStrategy.onStatus = (status) => broadcastToUi({ type: "processStatus", status });
 
-createPipeline(webRequestStrategy, chromeBody, cdp, processStrategy, updateTabBadge, noteRequestForBadge);
+// one-time rewrite of stored scripts/settings to the renamed API; the
+// pipeline waits for it before loading scripts (listeners register now)
+const migrated = runMigrations().catch((e) => dlogLevel("bg", "error", `migration failed: ${e?.message || e}`));
 
-// ---- process tier (local helper) controls for the manager ----
+createPipeline(webRequestStrategy, chromeBody, cdp, processStrategy, updateTabBadge, noteRequestForBadge, migrated);
+
+// ---- local helper controls for the Editor ----
 chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
     if (msg?.type === "processStatus") {
         sendResponse(processStrategy.status());
@@ -54,8 +59,8 @@ chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
     return false;
 });
 
-// ---- scripts folder sync (watching runs here: persistent page, never throttled) ----
-void folderSync.initFromStorage();
+// ---- synced folder (watching runs here: persistent page, never throttled) ----
+void migrated.then(() => folderSync.initFromStorage());
 chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
     if (msg && msg.type === "hookCspBlocked" && _s && _s.tab && _s.tab.id !== undefined) {
         dlogLevel("bg", "info", "page CSP blocks compiling scripts in the page — onDom runs in the isolated world in this tab", { tabId: _s.tab.id });
@@ -163,16 +168,16 @@ chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
 if (chrome.debugger) {
     chrome.debugger.onEvent.addListener((source, method, params) => {
         if (method === "Fetch.requestPaused" && source.tabId !== undefined) {
-            const pp = params as any; dlog("cdp", "requestPaused", { tabId: source.tabId, url: pp?.request?.url, status: pp?.responseStatusCode });
+            const pp = params as any; dlog("debugger", "requestPaused", { tabId: source.tabId, url: pp?.request?.url, status: pp?.responseStatusCode });
             void cdp.handlePaused(`tab:${source.tabId}`, params);
         }
     });
     chrome.debugger.onDetach.addListener((source) => {
         if (source.tabId !== undefined) {
-            dlog("cdp", "detached", { tabId: source.tabId });
+            dlog("debugger", "detached", { tabId: source.tabId });
             void cdp.handleDetach(`tab:${source.tabId}`);
         } else if (source.targetId) {
-            dlog("cdp", "detached", { targetId: source.targetId });
+            dlog("debugger", "detached", { targetId: source.targetId });
             void cdp.handleDetach(`tgt:${source.targetId}`);
         }
     });

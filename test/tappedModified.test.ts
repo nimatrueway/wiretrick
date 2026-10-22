@@ -7,7 +7,7 @@ import { matches, touchCounts, touchState, ALL_TYPES, type NetFilter } from "../
 import type { NetEntry, NetIntervention } from "../src/shared/netTypes";
 
 // these suites exercise the webRequest tier: make it the settings default
-beforeEach(() => setDefaultStrategy("webrequest"));
+beforeEach(() => setDefaultStrategy("webRequest"));
 afterEach(() => setDefaultStrategy(null));
 
 describe("interventionKind", () => {
@@ -17,7 +17,7 @@ describe("interventionKind", () => {
     });
 
     it("infers: engine INFO action lines → modified; tapped marks, debug, errors, script console → tapped", () => {
-        expect(interventionKind("info", "[S] modifyResponse applied (1b → 2b) https://a/")).toBe("modified");
+        expect(interventionKind("info", "[S] onResponseBody applied (1b → 2b) https://a/")).toBe("modified");
         expect(interventionKind("info", "[S] onRequest → redirect → https://b/ https://a/")).toBe("modified");
         expect(interventionKind("info", tappedLine("S", "onRequest", "https://a/"))).toBe("tapped");
         expect(interventionKind("debug", "[S] whatever https://a/")).toBe("tapped");
@@ -35,7 +35,7 @@ describe("tapped log lines don't flood the log ring", () => {
     it("are kept in their own small per-tab ring, replayed and reported alongside", () => {
         const tab = 4242;
         clearTab(tab);
-        log(tab, "[S] modifyResponse applied (1b → 2b) https://a/", "info", "s");
+        log(tab, "[S] onResponseBody applied (1b → 2b) https://a/", "info", "s");
         for (let i = 0; i < 300; i++) logTapped(tab, "S", "onRequest", `https://a/${i}`, "s");
         const mine = allLogs().filter((e) => e.tabId === tab);
         expect(mine.filter((e) => e.kind === "tapped")).toHaveLength(50);
@@ -53,7 +53,7 @@ describe("Network filter and counts", () => {
     const iv = (kind: "tapped" | "modified"): NetIntervention => ({ scriptId: "s", scriptName: "S", action: "x", level: kind === "tapped" ? "debug" : "info", kind, at: 0 });
     const e = (id: string, interventions: NetIntervention[]): NetEntry =>
         ({ id, tabId: 1, url: `https://a/${id}`, method: "GET", type: "script", status: 200, statusText: "", mime: "", size: 1, fromCache: false, startedAt: 0, endedAt: 1, state: "done", interventions }) as NetEntry;
-    const missed: NetIntervention = { scriptId: "s", scriptName: "S", action: "modifyResponse never ran", level: "warn", kind: "missed", at: 0 };
+    const missed: NetIntervention = { scriptId: "s", scriptName: "S", action: "onResponseBody never ran", level: "warn", kind: "missed", at: 0 };
     const rows = [e("none", []), e("tapped", [iv("tapped")]), e("both", [iv("tapped"), iv("modified")]), e("missed", [missed])];
     const f = (touched: NetFilter["touched"]): NetFilter => ({ text: "", types: ALL_TYPES, touched, tabId: null });
 

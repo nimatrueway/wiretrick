@@ -74,7 +74,7 @@ const details = (over: Partial<any> = {}) => ({
 });
 
 describe("WebRequestStrategy", () => {
-    beforeEach(() => setDefaultStrategy("webrequest"));
+    beforeEach(() => setDefaultStrategy("webRequest"));
     afterEach(() => setDefaultStrategy(null));
     it("onRequest redirect", () => {
         const s = new WebRequestStrategy();
@@ -96,7 +96,7 @@ describe("WebRequestStrategy", () => {
     it("disabled script does nothing", () => {
         const s = new WebRequestStrategy();
         s.reload([
-            makeScript("a", `wt.onRequest("*", () => ({ cancel: true }));`, false),
+            makeScript("a", `wt.onRequest("*", () => ({ block: true }));`, false),
         ]);
         expect((s.handleBeforeRequest(details(), null) as any).kind).toBe("allow");
     });
@@ -149,16 +149,16 @@ describe("WebRequestStrategy", () => {
 describe("ChromeBodyStrategy (hook tier)", () => {
     it("owns only hook routes and never asks for the debugger itself", () => {
         const s = new ChromeBodyStrategy();
-        s.reload([makeScript("a", `wt.modifyResponse({ url: "*", strategy: "hook" }, (ctx, body) => body);`)]);
+        s.reload([makeScript("a", `wt.onResponseBody({ url: "*", strategy: "page" }, (ctx, body) => body);`)]);
         expect(s.hasOwners()).toBe(true);
         expect((s.handleBeforeRequest(details({ type: "script" }), null) as any).kind).toBe("allow");
-        s.reload([makeScript("a", `wt.modifyResponse({ url: "*", strategy: "cdp" }, (ctx, body) => body);`)]);
+        s.reload([makeScript("a", `wt.onResponseBody({ url: "*", strategy: "debugger" }, (ctx, body) => body);`)]);
         expect(s.hasOwners()).toBe(false);
     });
 
     it("claimed urls (tier A) are tracked", () => {
         const s = new ChromeBodyStrategy();
-        s.reload([makeScript("a", `wt.modifyResponse({ url: "*", strategy: "hook" }, (ctx, body) => body);`)]);
+        s.reload([makeScript("a", `wt.onResponseBody({ url: "*", strategy: "page" }, (ctx, body) => body);`)]);
         s.claimRequest("https://cdn.example.com/lib.js");
         expect(s.isClaimed("https://cdn.example.com/lib.js")).toBe(true);
         expect(s.isClaimed("https://cdn.example.com/other.js")).toBe(false);

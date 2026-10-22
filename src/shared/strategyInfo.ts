@@ -14,23 +14,23 @@ export interface StrategyInfo {
 }
 
 export const STRATEGY_INFO: Record<Strategy, StrategyInfo> = {
-    process: {
-        label: "process — local helper proxy",
+    helper: {
+        label: "helper — local helper proxy",
         pros: "Sees everything: documents, <script src>, CSS, images, workers, the first navigation. No banner. Async handlers, any status code, URL unchanged.",
-        cons: "Chromium only. One-time install of the local helper and trust in its local CA. Matched hosts go through a local proxy (PAC); cert-pinned / mTLS sites break. Small per-request latency; bodies are buffered for modifyResponse.",
+        cons: "Chromium only. One-time install of the local helper and trust in its helper certificate. Matched hosts go through a local proxy (PAC); cert-pinned / mTLS sites break. Small per-request latency; bodies are buffered for onResponseBody.",
     },
-    hook: {
-        label: "hook — in-page fetch/XHR patch",
+    page: {
+        label: "page — in-page fetch/XHR patch",
         pros: "No setup, no banner, no permissions, lightest. Works in every browser.",
-        cons: "Only the page's own fetch/XHR. Misses documents, <script src>, images, workers and requests made before the hook loads.",
+        cons: "Only the page's own fetch/XHR. Misses documents, <script src>, images, workers and requests made before the page patch loads.",
     },
-    webrequest: {
-        label: "webrequest — blocking webRequest",
+    webRequest: {
+        label: "webRequest — blocking webRequest",
         pros: "No banner, no setup. On Firefox it reaches everything, bodies included.",
-        cons: "Not on Chrome (MV3). Chromium MV2: no modifyResponse, no async handlers, replacements are served by redirect (URL changes, status always 200) — a replaced page shows a chrome-extension:// URL. Firefox: can't change a replaced response's status.",
+        cons: "Not on Chrome (MV3). Chromium MV2: no onResponseBody, no async handlers, replacements are served by redirect (URL changes, status always 200) — a replaced page shows a chrome-extension:// URL. Firefox: can't change a replaced response's status.",
     },
-    cdp: {
-        label: "cdp — chrome.debugger",
+    debugger: {
+        label: "debugger — chrome.debugger",
         pros: "Sees everything with nothing to install.",
         cons: "Chromium only. Chrome shows a \"being debugged\" banner while attached. May miss the first navigation in a fresh tab.",
     },
@@ -38,8 +38,8 @@ export const STRATEGY_INFO: Record<Strategy, StrategyInfo> = {
 
 /** why a strategy can't run in this build/browser, or null when it can */
 export function strategyUnsupported(s: Strategy, env: { firefox: boolean; mv3: boolean }): string | null {
-    if (env.firefox && (s === "process" || s === "cdp")) return "not available in Firefox";
-    if (!env.firefox && env.mv3 && s === "webrequest") return "not available in Chrome MV3 (blocking webRequest was removed)";
+    if (env.firefox && (s === "helper" || s === "debugger")) return "not available in Firefox";
+    if (!env.firefox && env.mv3 && s === "webRequest") return "not available in Chrome MV3 (blocking webRequest was removed)";
     return null;
 }
 

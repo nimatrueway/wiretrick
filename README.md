@@ -17,8 +17,8 @@ replace bodies, or patch the DOM.
   per-script enable toggles and adjustable parameters.
 - **Every kind of interception** — page fetch/XHR, documents, `<script>`,
   images and workers, through four [strategies](docs/strategies.md): one
-  default in Settings, overridable per handler. `hook` is the lightest but
-  only sees fetch/XHR (REST) calls; use `process`, `webrequest` or `cdp` for
+  default in Settings, overridable per handler. `page` is the lightest but
+  only sees fetch/XHR (REST) calls; use `helper`, `webRequest` or `debugger` for
   robust interception.
 - **No debugger banner needed** — the optional [local helper](docs/process-helper.md)
   intercepts at network level on Chrome without the "being debugged" bar.
@@ -47,7 +47,7 @@ Open the manager (popup → **Manage all**), click **+ New** and paste:
 
 ```ts
 // Try it: open https://dummyjson.com/todos/1
-wt.modifyResponse("*://dummyjson.com/todos/*", (ctx, body) => {
+wt.onResponseBody("*://dummyjson.com/todos/*", (ctx, body) => {
     const text = typeof body === "string" ? body : new TextDecoder().decode(body);
     const json = JSON.parse(text);
     json.todo = "Transformed by Wiretrick";
@@ -65,8 +65,8 @@ Or click **?** → **Samples** for one-click starters against real public sites.
 |---|---|
 | [Installing](docs/install.md) | release zips, signed crx, building from source |
 | [Writing scripts](docs/scripting.md) | the `wt` API, routes, parameters, utilities, `onDom`, stacking, async handlers |
-| [Interception strategies](docs/strategies.md) | `hook` / `cdp` / `webrequest` / `process`, the default and per-handler choice, [which strategies keep the URL when replacing a response](docs/strategies.md#how-each-strategy-serves-a-replacement), the “never ran” warning, browser compatibility |
-| [Local helper](docs/process-helper.md) | the `process` strategy: install, how it works, security notes |
+| [Interception strategies](docs/strategies.md) | `page` / `debugger` / `webRequest` / `helper`, the default and per-handler choice, [which strategies keep the URL when replacing a response](docs/strategies.md#how-each-strategy-serves-a-replacement), the “never ran” warning, browser compatibility |
+| [Local helper](docs/process-helper.md) | the `helper` strategy: install, how it works, security notes |
 | [The manager](docs/manager.md) | editor, Log & Network panels, folder sync, `settings.yaml` |
 | [Glossary](GLOSSARY.md) | the words we use for Wiretrick's concepts |
 | [Development](docs/development.md) | build, tests, releases, how the MV3 build works |

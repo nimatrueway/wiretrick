@@ -10,7 +10,7 @@
  *     # Minimum log level shown in the panel: debug | info | warn | error
  *     # logLevel: info
  *     # …strategy help (link + pros/cons)…
- *     # strategy: process
+ *     # defaultStrategy: helper
  *
  *   params:
  *     My Script:
@@ -50,10 +50,10 @@ export interface GlobalSettings {
     logLevel: string;
     logCap: number;
     /** default interception strategy (route.strategy overrides per handler) */
-    strategy: string;
+    defaultStrategy: string;
 }
 
-/** the strategy settings.yaml falls back to when `strategy` is absent */
+/** the strategy settings.yaml falls back to when `defaultStrategy` is absent */
 export const defaultStrategySetting = (): string => builtinStrategy();
 
 export const isStrategy = (v: unknown): boolean => typeof v === "string" && (STRATEGIES as string[]).includes(v);
@@ -137,7 +137,7 @@ export function commentedDefaultLines(key: string, d: ParamDef | undefined): str
     return out;
 }
 
-export const GLOBAL_KEYS = ["logLevel", "logCap", "strategy"] as const;
+export const GLOBAL_KEYS = ["logLevel", "logCap", "defaultStrategy"] as const;
 
 /**
  * One global setting's documented lines at indent 0 (description comments
@@ -153,7 +153,7 @@ export function globalOptionLines(key: (typeof GLOBAL_KEYS)[number], g: GlobalSe
         out.push("# An unavailable strategy means the handler doesn't run (warned) — no fallback.");
         out.push(`# Compatibility: ${STRATEGY_DOC_URL}`);
         for (const s of STRATEGIES) out.push(`#   ${s}: + ${clean(STRATEGY_INFO[s].pros)} − ${clean(STRATEGY_INFO[s].cons)}`);
-        option(out, 0, "strategy", `${STRATEGIES.join(" | ")}`, g.strategy, defaultStrategySetting());
+        option(out, 0, "defaultStrategy", `${STRATEGIES.join(" | ")}`, g.defaultStrategy, defaultStrategySetting());
     }
     return out;
 }
@@ -239,8 +239,8 @@ export function planSettings(doc: SettingsDoc, current: GlobalSettings, scripts:
         if (typeof lv === "string" && (LOG_LEVELS as readonly string[]).includes(lv) && lv !== current.logLevel) globals.logLevel = lv;
         const cap = doc.settings.logCap === undefined ? DEFAULT_LOG_CAP : doc.settings.logCap;
         if (typeof cap === "number" && Number.isInteger(cap) && cap >= 100 && cap <= 10000 && cap !== current.logCap) globals.logCap = cap;
-        const st = doc.settings.strategy === undefined ? defaultStrategySetting() : doc.settings.strategy;
-        if (isStrategy(st) && st !== current.strategy) globals.strategy = st as string;
+        const st = doc.settings.defaultStrategy === undefined ? defaultStrategySetting() : doc.settings.defaultStrategy;
+        if (isStrategy(st) && st !== current.defaultStrategy) globals.defaultStrategy = st as string;
     }
     const plans: SettingsPlan["scripts"] = [];
     for (const s of scripts) {

@@ -29,14 +29,16 @@ export async function currentSettingsState(): Promise<{ globals: GlobalSettings;
         defs: s.paramDefs ?? {},
         values: stored[s.id] ?? {},
     }));
-    const strategy = isStrategy(g[STRATEGY_KEY]) ? g[STRATEGY_KEY] : defaultStrategySetting();
-    return { globals: { logLevel: g.resLogLevel ?? DEFAULT_LOG_LEVEL, logCap: g.resLogCap ?? DEFAULT_LOG_CAP, strategy }, scripts };
+    const defaultStrategy = isStrategy(g[STRATEGY_KEY]) ? g[STRATEGY_KEY] : defaultStrategySetting();
+    return { globals: { logLevel: g.resLogLevel ?? DEFAULT_LOG_LEVEL, logCap: g.resLogCap ?? DEFAULT_LOG_CAP, defaultStrategy }, scripts };
 }
 
-/** chrome.storage key of settings.strategy (absent: per-browser default) */
+/** chrome.storage key of settings.defaultStrategy (absent: per-browser default) */
 export const STRATEGY_KEY = "resStrategy";
 
-const TEXT_KEY = "resSettingsText";
+/** chrome.storage key of the last applied settings.yaml text */
+export const SETTINGS_TEXT_KEY = "resSettingsText";
+const TEXT_KEY = SETTINGS_TEXT_KEY;
 
 // a renamed script keeps its settings section (values, comments)
 onScriptRenamed(async (oldName, newName) => {
@@ -83,7 +85,7 @@ async function applyPlan(plan: SettingsPlan): Promise<void> {
     const patch: Record<string, any> = {};
     if (plan.globals.logLevel) patch.resLogLevel = plan.globals.logLevel;
     if (plan.globals.logCap) patch.resLogCap = plan.globals.logCap;
-    if (plan.globals.strategy) patch[STRATEGY_KEY] = plan.globals.strategy;
+    if (plan.globals.defaultStrategy) patch[STRATEGY_KEY] = plan.globals.defaultStrategy;
     if (Object.keys(patch).length) await storageSet(patch);
 }
 

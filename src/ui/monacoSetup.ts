@@ -175,7 +175,7 @@ function registerTsHover(monaco: any): void {
     });
 }
 
-export const STARTER_TEMPLATE = `wt.describe("What this script does");
+export const STARTER_TEMPLATE = `wt.about("What this script does");
 
 // Adjustable parameters (editable in settings.yaml / the popup ⚙ dialog):
 const cfg = wt.params({
@@ -188,7 +188,7 @@ const cfg = wt.params({
 wt.onRequest(\`*://\${cfg.host}/*\`, (ctx) => {
     if (cfg.debug) wt.log("request to", ctx.url);
     // return { redirect: "https://example.com/other" };
-    // return { cancel: true };
+    // return { block: true };
     // return { headers: { set: { "x-debug": "1" } } };
 });
 
@@ -199,5 +199,5 @@ wt.onRequest(\`*://\${cfg.host}/*\`, (ctx) => {
 // wt.replaceResponse(\`*://\${cfg.host}/api/*\`, (ctx) => ({ mocked: true }));
 
 // Modify the response body (route object: exclude / methods / types / strategy):
-// wt.modifyResponse({ url: \`*://\${cfg.host}/*\`, exclude: "*://*/*.png", strategy: "hook" }, (ctx, body) => body.replace("foo", "bar"));
+// wt.onResponseBody({ url: \`*://\${cfg.host}/*\`, exclude: "*://*/*.png", strategy: "page" }, (ctx, body) => body.replace("foo", "bar"));
 `;

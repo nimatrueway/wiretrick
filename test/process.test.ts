@@ -113,32 +113,32 @@ afterEach(() => setProcessActive(false));
 
 describe("process ownership (single strategy, no fallback)", () => {
     it("a process route belongs to the process tier only — helper up or down", () => {
-        const scripts = [makeScript("a", `wt.modifyResponse({ url: "*", strategy: "process" }, (c, b) => b);`)];
-        expect(ownedRoutes(scripts, "process")).toHaveLength(1);
-        expect(ownedRoutes(scripts, "cdp")).toEqual([]);
-        expect(ownedRoutes(scripts, "hook")).toEqual([]);
+        const scripts = [makeScript("a", `wt.onResponseBody({ url: "*", strategy: "helper" }, (c, b) => b);`)];
+        expect(ownedRoutes(scripts, "helper")).toHaveLength(1);
+        expect(ownedRoutes(scripts, "debugger")).toEqual([]);
+        expect(ownedRoutes(scripts, "page")).toEqual([]);
         setProcessActive(true);
-        expect(ownedRoutes(scripts, "process")).toHaveLength(1);
+        expect(ownedRoutes(scripts, "helper")).toHaveLength(1);
         const c = new CdpStrategy();
         c.reload(scripts);
         expect(c.hasOwners()).toBe(false);
     });
-    it("routes without a strategy follow settings.strategy", () => {
+    it("routes without a strategy follow settings.defaultStrategy", () => {
         const scripts = [makeScript("a", `wt.onRequest("*", () => {});`)];
         try {
-            setDefaultStrategy("process");
-            expect(ownedRoutes(scripts, "process")).toHaveLength(1);
-            setDefaultStrategy("hook");
-            expect(ownedRoutes(scripts, "process")).toEqual([]);
-            expect(ownedRoutes(scripts, "hook")).toHaveLength(1);
+            setDefaultStrategy("helper");
+            expect(ownedRoutes(scripts, "helper")).toHaveLength(1);
+            setDefaultStrategy("page");
+            expect(ownedRoutes(scripts, "helper")).toEqual([]);
+            expect(ownedRoutes(scripts, "page")).toHaveLength(1);
         } finally {
             setDefaultStrategy(null);
         }
     });
     it("tierUnavailable: process needs a connected helper", () => {
-        expect(tierUnavailable("process")).toMatch(/helper/);
+        expect(tierUnavailable("helper")).toMatch(/helper/);
         setProcessActive(true);
-        expect(tierUnavailable("process")).toBeNull();
+        expect(tierUnavailable("helper")).toBeNull();
     });
 });
 
@@ -148,7 +148,7 @@ describe("helpers", () => {
         expect(r("onRequest", "*")).toMatchObject({ match: ["*"], req: true, resHeaders: false, body: false });
         expect(r("replaceResponse", "*")).toMatchObject({ req: true, body: false });
         expect(r("onResponseHeaders", "*")).toMatchObject({ req: false, resHeaders: true });
-        expect(r("modifyResponse", "*")).toMatchObject({ req: false, body: true });
+        expect(r("onResponseBody", "*")).toMatchObject({ req: false, body: true });
         expect(r("onRequest", { url: "https://x.com/*", exclude: "https://x.com/a", methods: ["post"] })).toEqual({
             match: ["https://x.com/*"],
             exclude: ["https://x.com/a"],
@@ -188,7 +188,7 @@ describe("helpers", () => {
 describe("ProcessStrategy ⇄ helper protocol", () => {
     it("no process scripts → never connects", async () => {
         const p = new ProcessStrategy();
-        p.reload([makeScript("a", `wt.modifyResponse({ url: "*", strategy: "cdp" }, (c, b) => b);`)]);
+        p.reload([makeScript("a", `wt.onResponseBody({ url: "*", strategy: "debugger" }, (c, b) => b);`)]);
         await settle();
         expect(fake.connects).toBe(0);
         expect(p.status().state).toBe("idle");
@@ -197,7 +197,7 @@ describe("ProcessStrategy ⇄ helper protocol", () => {
     it("ready → config, PAC install, active; user proxy captured & respected", async () => {
         fake.proxyValue = { mode: "fixed_servers", rules: { singleProxy: { scheme: "http", host: "corp", port: 3128 } } };
         const p = new ProcessStrategy();
-        await ready(p, [makeScript("a", `wt.modifyResponse({ url: "https://api.x.com/*", strategy: "process" }, (c, b) => b + "!");`)]);
+        await ready(p, [makeScript("a", `wt.onResponseBody({ url: "https://api.x.com/*", strategy: "helper" }, (c, b) => b + "!");`)]);
         const cfg = fake.sent.find((m) => m.t === "config");
         expect(cfg.routes).toEqual([{ match: ["https://api.x.com/*"], exclude: [], methods: [], req: false, resHeaders: false, body: true }]);
         expect(cfg.upstream).toBe("ask");
@@ -217,7 +217,7 @@ describe("ProcessStrategy ⇄ helper protocol", () => {
     it("blocked proxy control → inactive, fall through", async () => {
         fake.levelOfControl = "controlled_by_other_extensions";
         const p = new ProcessStrategy();
-        await ready(p, [makeScript("a", `wt.onRequest({ url: "*", strategy: "process" }, () => {});`)]);
+        await ready(p, [makeScript("a", `wt.onRequest({ url: "*", strategy: "helper" }, () => {});`)]);
         expect(processActive()).toBe(false);
         expect(p.status().routing?.active).toBe(false);
         expect(fake.sent.find((m) => m.t === "config").routes).toEqual([]);
@@ -228,13 +228,13 @@ describe("ProcessStrategy ⇄ helper protocol", () => {
         await ready(p, [
             makeScript(
                 "a",
-                `wt.onRequest({ url: "https://x.com/*", strategy: "process" }, (c) => {
+                `wt.onRequest({ url: "https://x.com/*", strategy: "helper" }, (c) => {
     if (c.url.endsWith("/r")) return { redirect: "https://x.com/target" };
     if (c.url.endsWith("/j")) return { respond: { status: 201, body: { ok: 1 }, mime: "application/json" } };
-    if (c.url.endsWith("/c")) return { cancel: true };
+    if (c.url.endsWith("/c")) return { block: true };
     if (c.url.endsWith("/h")) return { headers: { set: { "X-Added": "1" }, remove: ["cookie"] } };
 });
-wt.replaceResponse({ url: "https://x.com/*", strategy: "process" }, (c) => (c.url.endsWith("/rep") ? "replaced" : undefined));`
+wt.replaceResponse({ url: "https://x.com/*", strategy: "helper" }, (c) => (c.url.endsWith("/rep") ? "replaced" : undefined));`
             ),
         ]);
         const H: [string, string][] = [
@@ -265,8 +265,8 @@ wt.replaceResponse({ url: "https://x.com/*", strategy: "process" }, (c) => (c.ur
         await ready(p, [
             makeScript(
                 "a",
-                `wt.onResponseHeaders({ url: "https://x.com/*", strategy: "process" }, (c) => ({ headers: { set: { "x-seen": c.statusLine.split(" ")[1] } } }));
-wt.modifyResponse({ url: "https://x.com/*", strategy: "process" }, (c, body) => (c.url.endsWith("/t") ? body.toUpperCase() : undefined));`
+                `wt.onResponseHeaders({ url: "https://x.com/*", strategy: "helper" }, (c) => ({ headers: { set: { "x-seen": c.statusLine.split(" ")[1] } } }));
+wt.onResponseBody({ url: "https://x.com/*", strategy: "helper" }, (c, body) => (c.url.endsWith("/t") ? body.toUpperCase() : undefined));`
             ),
         ]);
         const headers: [string, string][] = [
@@ -290,9 +290,9 @@ wt.modifyResponse({ url: "https://x.com/*", strategy: "process" }, (c, body) => 
         expect(r2.headers).toContainEqual(["x-seen", "404"]);
     });
 
-    it("binary bodies reach modifyResponse as bytes (MV2)", async () => {
+    it("binary bodies reach onResponseBody as bytes (MV2)", async () => {
         const p = new ProcessStrategy();
-        await ready(p, [makeScript("a", `wt.modifyResponse({ url: "https://x.com/*", strategy: "process" }, (c, body) => typeof body === "string" ? "text" : "bytes:" + body.length);`)]);
+        await ready(p, [makeScript("a", `wt.onResponseBody({ url: "https://x.com/*", strategy: "helper" }, (c, body) => typeof body === "string" ? "text" : "bytes:" + body.length);`)]);
         fake.deliver({ t: "chunk", id: 1, data: bytesToBase64(new Uint8Array([0, 1, 2, 3])) });
         fake.deliver({ t: "res", id: 1, url: "https://x.com/b.png", method: "GET", status: 200, headers: [["content-type", "image/png"]], body: "chunks" });
         await settle(40);
@@ -301,7 +301,7 @@ wt.modifyResponse({ url: "https://x.com/*", strategy: "process" }, (c, body) => 
 
     it("helper missing → state missing, no retry loop; Retry reconnects", async () => {
         const p = new ProcessStrategy();
-        p.reload([makeScript("a", `wt.onRequest({ url: "*", strategy: "process" }, () => {});`)]);
+        p.reload([makeScript("a", `wt.onRequest({ url: "*", strategy: "helper" }, () => {});`)]);
         await settle();
         fake.disconnect("Specified native messaging host not found.");
         expect(p.status().state).toBe("missing");
@@ -314,7 +314,7 @@ wt.modifyResponse({ url: "https://x.com/*", strategy: "process" }, (c, body) => 
     it("helper crash → inactive and PAC removed (browser proxy restored)", async () => {
         fake.proxyValue = { mode: "direct" };
         const p = new ProcessStrategy();
-        await ready(p, [makeScript("a", `wt.onRequest({ url: "*", strategy: "process" }, () => {});`)]);
+        await ready(p, [makeScript("a", `wt.onRequest({ url: "*", strategy: "helper" }, () => {});`)]);
         expect(processActive()).toBe(true);
         fake.disconnect("Native host has exited.");
         await settle();
@@ -340,7 +340,7 @@ describe("helper version check", () => {
     it("helper below the minimum → one error with the upgrade command; Retry restarts it", async () => {
         clearDebugBuffer();
         const p = new ProcessStrategy();
-        await ready(p, [makeScript("a", `wt.onRequest({ url: "*://x.com/*", strategy: "process" }, () => {});`)], "0.0.0");
+        await ready(p, [makeScript("a", `wt.onRequest({ url: "*://x.com/*", strategy: "helper" }, () => {});`)], "0.0.0");
         expect(p.status().outdated).toBe(true);
         const errs = getDebugBuffer().filter((e) => e.level === "error" && /older than this extension needs/.test(e.msg));
         expect(errs.length).toBe(1);
@@ -361,7 +361,7 @@ describe("helper version check", () => {
         (globalThis as any).chrome.runtime.getManifest = () => ({ version: "9.9.9" });
         clearDebugBuffer();
         const p = new ProcessStrategy();
-        await ready(p, [makeScript("a", `wt.onRequest({ url: "*://x.com/*", strategy: "process" }, () => {});`)], MIN_HELPER_VERSION);
+        await ready(p, [makeScript("a", `wt.onRequest({ url: "*://x.com/*", strategy: "helper" }, () => {});`)], MIN_HELPER_VERSION);
         expect(p.status().outdated).toBe(false);
         expect(getDebugBuffer().some((e) => /older than this extension needs/.test(e.msg))).toBe(false);
     });

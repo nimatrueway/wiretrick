@@ -6,14 +6,14 @@ A script registers **handlers** at top level. Each handler takes its own
 [route](#routes) first, then the function:
 
 ```ts
-wt.describe("Debug the user API");
+wt.about("Debug the user API");
 
 const API = "*://app.example.com/api/*";
 
 // Redirect / cancel / request headers / mock:
 wt.onRequest(API, (ctx) => {
     // return { redirect: "https://myserver/user.json" };
-    // return { cancel: true };
+    // return { block: true };
     return { headers: { set: { "x-debug": "1" } } };
 });
 
@@ -26,7 +26,7 @@ wt.onResponseHeaders(API, () => ({
 // wt.replaceResponse("*://app.example.com/api/flags", () => ({ beta: true }));
 
 // Stream-modify the body:
-wt.modifyResponse("*://app.example.com/api/user*", (ctx, body) => String(body).replace('"role":"user"', '"role":"admin"'));
+wt.onResponseBody("*://app.example.com/api/user*", (ctx, body) => String(body).replace('"role":"user"', '"role":"admin"'));
 
 // Patch the page itself:
 wt.onDom("*://app.example.com/*", () => {
@@ -81,13 +81,13 @@ wt.onRequest("https://api.example.com/users/:id", (ctx) => {
 ### Route object: `exclude`, `methods`, `types`, `strategy`
 
 ```ts
-wt.modifyResponse(
+wt.onResponseBody(
     {
         url: "https://example.com/app/*",
         exclude: ["https://example.com/app/vendor/*"],
         methods: ["GET"],
-        types: ["script"],
-        strategy: "cdp",
+        resourceTypes: ["script"],
+        strategy: "debugger",
     },
     (ctx, body) => String(body).replace("DEBUG=false", "DEBUG=true"),
 );
@@ -97,7 +97,7 @@ wt.modifyResponse(
 
 - **`exclude`** — URL patterns to skip even when `url` matches. Cheap: one
   extra pattern test, only on URLs that already matched `url`, on every
-  strategy. It can't narrow what `cdp` or `process` pause (their filters
+  strategy. It can't narrow what `debugger` or `helper` pause (their filters
   can't express "except"), so an excluded URL may still be paused there and
   continued unchanged. The local helper checks `exclude` itself, so it
   doesn't ask the extension about excluded URLs.
@@ -112,37 +112,37 @@ wt.modifyResponse(
 
   | strategy | how `types` is applied |
   |---|---|
-  | `cdp` | Only these types are paused (the debugger's `Fetch.enable` patterns); other requests are never stopped. The cheapest way to keep a route off images, fonts and other assets. |
-  | `webrequest` | Checked in the listener before any script runs. |
-  | `process` | Checked after the helper pauses the request: filters correctly, saves no work. |
-  | `hook` | The hook only sees page fetch/XHR (`xmlhttprequest`). A list without `xmlhttprequest` means the handler never runs, and the LOG warns. |
+  | `debugger` | Only these types are paused (the debugger's `Fetch.enable` patterns); other requests are never stopped. The cheapest way to keep a route off images, fonts and other assets. |
+  | `webRequest` | Checked in the listener before any script runs. |
+  | `helper` | Checked after the helper pauses the request: filters correctly, saves no work. |
+  | `page` | The hook only sees page fetch/XHR (`xmlhttprequest`). A list without `xmlhttprequest` means the handler never runs, and the LOG warns. |
 
   `onDom` routes have no `types` or `methods`.
 - **`strategy`** — run this handler on one [strategy](strategies.md):
-  `"process"`, `"hook"`, `"webrequest"` or `"cdp"`. Omit to use the default
-  from Settings → Interception. There is no fallback: when the strategy
+  `"helper"`, `"page"`, `"webRequest"` or `"debugger"`. Omit to use the default
+  from Settings → Strategy. There is no fallback: when the strategy
   isn't available, the handler doesn't run and the LOG says why.
 
-> **Tip:** `hook` is the lightest strategy, but it only sees the page's own
+> **Tip:** `page` is the lightest strategy, but it only sees the page's own
 > fetch/XHR (REST/API) calls. For documents, `<script src>`, images,
-> workers, or anything that must not slip through, use `process`,
-> `webrequest` or `cdp`. See [strategies](strategies.md).
+> workers, or anything that must not slip through, use `helper`,
+> `webRequest` or `debugger`. See [strategies](strategies.md).
 >
-> **Note:** on Chromium MV2, `webrequest` can redirect the page itself and
-> change its headers, but not its body in place: `modifyResponse` never
+> **Note:** on Chromium MV2, `webRequest` can redirect the page itself and
+> change its headers, but not its body in place: `onResponseBody` never
 > runs and a replaced page moves to a `chrome-extension://` URL. Use
-> `process` or `cdp` for that ([details](strategies.md#which-strategy-for-which-job)).
+> `helper` or `debugger` for that ([details](strategies.md#which-strategy-for-which-job)).
 
 ## Description and parameters
 
-`wt.describe("…")` sets a one-line description, shown as the script's
+`wt.about("…")` sets a one-line description, shown as the script's
 tooltip in the manager and in the popup.
 
 `wt.params` declares typed knobs the user changes from the popup's ⚙
 dialog, the manager or `settings.yaml` without touching the script:
 
 ```ts
-wt.describe("Force failures on the posts API");
+wt.about("Force failures on the posts API");
 
 const cfg = wt.params({
     enabled: { type: "boolean", default: true, description: "Master switch" },
@@ -222,7 +222,7 @@ for some value becomes a script when you change it (and back):
 ```ts
 // utility "gate": a utility until "on" is switched on
 const p = wt.params({ on: { type: "boolean", default: false } });
-if (p.on) wt.onRequest("*://api.example.com/*", () => ({ cancel: true }));
+if (p.on) wt.onRequest("*://api.example.com/*", () => ({ block: true }));
 ```
 
 Param definitions can be shared too — export them from a utility and pass
@@ -286,7 +286,7 @@ timing:
      and reliably beats page scripts. In the MV3 build a cold service
      worker can take ~50-100ms, so early inline `<script>`s may already
      have run. When page code *must* see your change, rewrite the response
-     with `modifyResponse` instead.
+     with `onResponseBody` instead.
    - **`document_idle` always waits for `load`**, unlike Chrome's
      content-script `document_idle`; one slow image or ad iframe delays it.
    - **Once per document, per matching frame.** Every frame (iframes too)
@@ -333,8 +333,8 @@ wt.onRequest("*://api.example.com/me", () => ({
 ```
 
 It stacks like every terminal result: first handler to `respond` wins. On
-`hook`, `cdp` and `process` the response is fulfilled in place with any
-status and headers, URL kept. `webrequest` serves status 200 only (another
+`page`, `debugger` and `helper` the response is fulfilled in place with any
+status and headers, URL kept. `webRequest` serves status 200 only (another
 status is skipped with a warning): in place on Firefox, and on Chromium MV2
 by redirect (a `data:` URL, or the extension's `serve.html` for page loads),
 so the URL changes. See
@@ -344,7 +344,7 @@ so the URL changes. See
 **merge**: `set` keys are applied in order (a later handler's `set` of the
 same header overwrites earlier ones), `remove` lists accumulate.
 
-**`wt.modifyResponse`** — transforms **compose** like a pipeline: handler
+**`wt.onResponseBody`** — transforms **compose** like a pipeline: handler
 A's output becomes handler B's input, in list order.
 
 ```text
@@ -363,23 +363,23 @@ uses.
 All `wt.*` handlers may be `async` (return a Promise). What happens with the
 result depends on the handler's strategy:
 
-| handler | `hook` (page fetch/XHR) | `webrequest`, Chromium MV2 | `webrequest`, Firefox | `cdp` | `process` |
+| handler | `page` (page fetch/XHR) | `webRequest`, Chromium MV2 | `webRequest`, Firefox | `debugger` | `helper` |
 |---|---|---|---|---|---|
 | `onRequest` redirect/cancel/respond | ✅ awaited | ⚠ result ignored, error logged — blocking webRequest can't await | ✅ awaited natively | ✅ awaited at the Request stage | ✅ awaited |
 | `onRequest` headers | ✅ awaited | ⚠ ignored + error | ✅ awaited | ✅ awaited, applied at the Response stage | ✅ awaited, sent upstream |
-| `onResponseHeaders` | — (not on `hook`) | ⚠ ignored + error | ✅ awaited | ✅ awaited, merged into the fulfilled headers | ✅ awaited |
+| `onResponseHeaders` | — (not on `page`) | ⚠ ignored + error | ✅ awaited | ✅ awaited, merged into the fulfilled headers | ✅ awaited |
 | `replaceResponse` | ✅ awaited — the page's `fetch`/XHR promise simply takes as long as the handler needs | ⚠ result ignored + error (a sync redirect can't be built late) | ✅ awaited, written in place (URL kept) | ✅ awaited, fulfills the body | ✅ awaited, upstream never contacted |
-| `modifyResponse` | ✅ awaited (chained between handlers) | — (can't read bodies) | ✅ awaited | ✅ awaited | ✅ awaited (served `no-store`) |
+| `onResponseBody` | ✅ awaited (chained between handlers) | — (can't read bodies) | ✅ awaited | ✅ awaited | ✅ awaited (served `no-store`) |
 | `onDom` | runs in the page on every strategy; not awaited (fire-and-forget) | | | | |
 
 Practical rules of thumb:
 
 - **Mocking/transforming APIs (fetch/XHR)?** Async just works — write
-  `wt.modifyResponse(API, async (ctx, body) => { const j = await translate(body); return …; })`.
+  `wt.onResponseBody(API, async (ctx, body) => { const j = await translate(body); return …; })`.
 - **Redirect/cancel or header changes decided asynchronously** on Chromium?
-  Use `process` or `cdp` (the default `process` already awaits). Only
-  Chromium's `webrequest` can't: there an async result logs an error and the
-  request proceeds unmodified — set `strategy: "process"` or `"cdp"` on the
+  Use `helper` or `debugger` (the default `helper` already awaits). Only
+  Chromium's `webRequest` can't: there an async result logs an error and the
+  request proceeds unmodified — set `strategy: "helper"` or `"debugger"` on the
   route.
 - **Static replacement from an async source** (file read, fetch): async
   `replaceResponse` on the default strategy is all you need.

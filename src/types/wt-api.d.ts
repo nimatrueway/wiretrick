@@ -43,30 +43,30 @@ declare namespace Wiretrick {
     }
 
     /**
-     * Interception strategy (tier) that runs a handler. Every handler runs
+     * Interception strategy that runs a handler. Every handler runs
      * on exactly **one** strategy: its route's `strategy`, else
-     * `settings.strategy` (Settings → Interception; default `"process"` on
-     * Chromium, `"webrequest"` on Firefox). There is no fallback: when the
-     * strategy isn't available, the handler doesn't run and the LOG says why.
+     * `settings.defaultStrategy` (Settings → Strategy; default `"helper"` on
+     * Chromium, `"webRequest"` on Firefox). There is no fallback: when the
+     * strategy isn't available, the handler doesn't run and the Log view says why.
      *
-     * - `"process"` — the local wiretrick-helper (a proxy). Sees every
+     * - `"helper"` — the local wiretrick-helper (a proxy). Sees every
      *   request incl. documents, scripts and service workers; no banner.
      *   Needs the helper installed. Chromium only.
-     * - `"hook"` — patches the page's own `fetch`/XHR. Lightest (no banner,
+     * - `"page"` — patches the page's own `fetch`/XHR. Lightest (no banner,
      *   no helper) but sees **only** page fetch/XHR (`"xmlhttprequest"`) —
      *   no documents, `<script src>`, images or worker requests, and no
      *   `onResponseHeaders`.
-     * - `"webrequest"` — blocking webRequest. Firefox (reads bodies) and MV2
-     *   Chromium (no `modifyResponse`, sync handlers only). On Chromium the
+     * - `"webRequest"` — blocking webRequest. Firefox (reads bodies) and MV2
+     *   Chromium (no `onResponseBody`, sync handlers only). On Chromium the
      *   page itself (`main_frame`) can be redirected and its headers changed,
      *   but a replaced page is served from a `chrome-extension://` URL — use
-     *   `"process"` or `"cdp"` to rewrite or replace the page in place.
-     * - `"cdp"` — the Chrome debugger. Sees everything; Chrome shows a
+     *   `"helper"` or `"debugger"` to rewrite or replace the page in place.
+     * - `"debugger"` — the Chrome debugger. Sees everything; Chrome shows a
      *   "started debugging this browser" banner while attached. Chromium only.
      *
      * @see https://github.com/nimatrueway/wiretrick/blob/main/docs/strategies.md#compatibility
      */
-    type Strategy = "process" | "hook" | "webrequest" | "cdp";
+    type Strategy = "helper" | "page" | "webRequest" | "debugger";
 
     /** webRequest resource type names (also `ctx.resourceType`). */
     type ResourceType =
@@ -97,7 +97,7 @@ declare namespace Wiretrick {
      */
     type UrlPatterns = string | string[];
 
-    /** Full route form for network handlers (`onRequest`, `onResponseHeaders`, `replaceResponse`, `modifyResponse`). */
+    /** Full route form for network handlers (`onRequest`, `onResponseHeaders`, `replaceResponse`, `onResponseBody`). */
     interface RouteOptions {
         /** URLs this handler applies to. See {@link UrlPatterns}. */
         url: UrlPatterns;
@@ -106,7 +106,7 @@ declare namespace Wiretrick {
          *
          * Cheap: one extra pattern test, only on URLs that already matched
          * `url`. It filters correctly on every strategy but can't narrow
-         * what `cdp`/`process` pause, so an excluded URL may still be paused
+         * what `debugger`/`helper` pause, so an excluded URL may still be paused
          * there and then continued unchanged.
          *
          * @example { url: "*://example.com/*", exclude: ["*://example.com/*.png", "*://example.com/health"] }
@@ -123,24 +123,24 @@ declare namespace Wiretrick {
          * `ctx.resourceType`). Omit to handle every type.
          *
          * How much this saves depends on the strategy:
-         * - `cdp`: the debugger only pauses these types (`Fetch.enable`
+         * - `debugger`: the debugger only pauses these types (`Fetch.enable`
          *   patterns), so other requests are never stopped — the cheapest
          *   way to keep a route off images, fonts and other assets.
-         * - `webrequest`: checked in the listener before any script runs.
-         * - `process`: checked after the helper pauses the request, so it
+         * - `webRequest`: checked in the listener before any script runs.
+         * - `helper`: checked after the helper pauses the request, so it
          *   filters correctly but saves no work.
-         * - `hook`: the hook only sees page fetch/XHR (`"xmlhttprequest"`);
-         *   any list without it means the handler never runs (the LOG warns).
+         * - `page`: only sees page fetch/XHR (`"xmlhttprequest"`); any list
+         *   without it means the handler never runs (the Log view warns).
          *
-         * @example { url: "https://app.example.com/*", types: ["main_frame"] } // navigations only
+         * @example { url: "https://app.example.com/*", resourceTypes: ["main_frame"] } // navigations only
          * @see https://github.com/nimatrueway/wiretrick/blob/main/docs/strategies.md#compatibility
          */
-        types?: ResourceType[];
+        resourceTypes?: ResourceType[];
         /**
-         * Run this handler on this strategy instead of `settings.strategy`.
+         * Run this handler on this strategy instead of `settings.defaultStrategy`.
          * A single value — there is no fallback. See {@link Strategy}.
          *
-         * @example { url: "*://example.com/app/*.js", types: ["script"], strategy: "cdp" }
+         * @example { url: "*://example.com/app/*.js", resourceTypes: ["script"], strategy: "debugger" }
          */
         strategy?: Strategy;
     }
@@ -196,17 +196,17 @@ declare namespace Wiretrick {
     }
 
     /**
-     * What `onRequest` may return. `respond`, `redirect` and `cancel` are
-     * **terminal** (first script wins); `headers` is not.
+     * What `onRequest` may return. `respond`, `redirect` and `block` are
+     * **final** (first script wins); `headers` is not.
      */
     interface RequestResult {
-        /** Respond immediately without contacting the network (terminal). */
+        /** Respond immediately without contacting the network (final). */
         respond?: RespondOptions;
-        /** Redirect the request to this URL (terminal). */
+        /** Redirect the request to this URL (final). */
         redirect?: string;
-        /** Block the request entirely (terminal). */
-        cancel?: boolean;
-        /** Modify request headers on the way out (non-terminal). */
+        /** Block the request entirely (final). */
+        block?: boolean;
+        /** Modify request headers on the way out (not final). */
         headers?: HeaderMod;
     }
 
@@ -230,7 +230,7 @@ declare namespace Wiretrick {
         mime?: string;
     }
 
-    /** `modifyResponse` context. */
+    /** `onResponseBody` context. */
     interface BodyCtx extends ReplaceCtx {
         /** Response status code, when available. */
         status?: number;
@@ -282,7 +282,7 @@ declare namespace Wiretrick {
          *   reliably beats the page's scripts. In the MV3 build a cold service
          *   worker can take ~50–100 ms to answer, so early inline `<script>`s
          *   **may already have run**. Don't rely on winning the race for
-         *   correctness — use `modifyResponse` when you must change what page
+         *   correctness — use `onResponseBody` when you must change what page
          *   code sees.
          *
          * **`"DOMContentLoaded"`** — `defer`/module scripts have run; images,
@@ -429,59 +429,59 @@ declare namespace Wiretrick {
  *
  * A script is a file that registers handlers at top level. Each handler
  * takes its own **route** first — a URL pattern, a list, or a route object
- * (`url`, `exclude`, `methods`, `types`, `strategy`) — then the handler:
+ * (`url`, `exclude`, `methods`, `resourceTypes`, `strategy`) — then the handler:
  *
  * ```ts
  * wt.onRequest("*://api.example.com/*", (ctx) => ({ headers: { set: { "x-debug": "1" } } }));
  * ```
  *
- * A file that registers **no** handlers is a *utility*: other scripts
+ * A file that registers **no** handlers is a *library*: other scripts
  * import it, and it never runs on its own.
  *
  * **Stacking** — when several handlers match one request they run in list
- * order (scripts top to bottom in the manager, then registration order):
- * - `onRequest`: the first *terminal* result (`respond`/`redirect`/
- *   `cancel`) wins and stops the chain; headers-only or `void` results
+ * order (scripts top to bottom in the Editor, then registration order):
+ * - `onRequest`: the first *final* result (`respond`/`redirect`/
+ *   `block`) wins and stops the chain; headers-only or `void` results
  *   don't stop it.
  * - `onResponseHeaders`: **all** matching handlers run; `set` is applied in
  *   order (later overwrites), `remove` accumulates.
- * - `modifyResponse`: transforms **compose** — each output is the next input.
+ * - `onResponseBody`: transforms **compose** — each output is the next input.
  * - `replaceResponse`: the first handler returning a body wins.
  *
  * Handlers on different strategies run independently, each on its own
  * strategy (see {@link Wiretrick.Strategy}).
  *
  * **Async** — every handler may return a Promise. On Chromium's
- * `"webrequest"` strategy `onRequest`/`onResponseHeaders` must be
+ * `"webRequest"` strategy `onRequest`/`onResponseHeaders` must be
  * synchronous (an async result is ignored with a warning); every other
  * strategy awaits it.
  */
 declare const wt: {
     /**
      * Intercept a request before it is sent. Return `{ respond }`,
-     * `{ redirect }`, `{ cancel }`, `{ headers }` or a combination.
+     * `{ redirect }`, `{ block }`, `{ headers }` or a combination.
      *
-     * **Terminal** results — the first one wins and stops the chain:
+     * **Final** results — the first one wins and stops the chain:
      * - `respond` — synthesize the response; the network is never contacted.
-     *   On Chromium's `"webrequest"` strategy it is served as a data-URL
+     *   On Chromium's `"webRequest"` strategy it is served as a data-URL
      *   redirect, so only status 200 is possible there.
      * - `redirect` — continue at another URL.
-     * - `cancel` — fail the request.
+     * - `block` — fail the request.
      *
-     * **Non-terminal:** `{ headers }` — applied, and later handlers still run.
+     * **Not final:** `{ headers }` — applied, and later handlers still run.
      *
      * @param route Where it applies — see {@link Wiretrick.Route}.
      * @param handler Called once per matching request with its context.
      *
      * @example
-     * // mock an endpoint
+     * // answer an endpoint without the network
      * wt.onRequest("https://api.example.com/users/:id", (ctx) => ({
      *     respond: { body: { id: Number(ctx.groups.id), name: "Mock" } },
      * }));
      *
      * @example
      * // add a header to every POST, on the debugger
-     * wt.onRequest({ url: "*://example.com/*", methods: ["POST"], strategy: "cdp" }, () => ({
+     * wt.onRequest({ url: "*://example.com/*", methods: ["POST"], strategy: "debugger" }, () => ({
      *     headers: { set: { "x-debug": "1" } },
      * }));
      */
@@ -489,7 +489,7 @@ declare const wt: {
 
     /**
      * Inspect / modify response headers. **All** matching handlers run.
-     * Not available on the `"hook"` strategy (the page can't change headers
+     * Not available on the `"page"` strategy (the page can't change headers
      * before the browser enforces them).
      *
      * @param route Where it applies — see {@link Wiretrick.Route}.
@@ -535,22 +535,22 @@ declare const wt: {
      * Transform the response body: receives the original body (string or
      * bytes) and returns the new one. Matching transforms compose in order.
      *
-     * Needs a strategy that reads bodies: `"process"`, `"cdp"`, `"hook"`
-     * (page fetch/XHR only) or `"webrequest"` on Firefox. Chromium's
-     * `"webrequest"` can't read bodies — the handler doesn't run there and
-     * the LOG says so.
+     * Needs a strategy that reads bodies: `"helper"`, `"debugger"`, `"page"`
+     * (page fetch/XHR only) or `"webRequest"` on Firefox. Chromium's
+     * `"webRequest"` can't read bodies — the handler doesn't run there and
+     * the Log view says so.
      *
      * @param route Where it applies — see {@link Wiretrick.Route}.
      * @param transform Receives the context and the original body; returns
      * the new body.
      *
      * @example
-     * wt.modifyResponse({ url: "*://example.com/app/*.js", types: ["script"] }, (ctx, body) => {
+     * wt.onResponseBody({ url: "*://example.com/app/*.js", resourceTypes: ["script"] }, (ctx, body) => {
      *     const text = typeof body === "string" ? body : new TextDecoder().decode(body);
      *     return text.replace("DEBUG=false", "DEBUG=true");
      * });
      */
-    modifyResponse(
+    onResponseBody(
         route: Wiretrick.Route,
         transform: (ctx: Wiretrick.BodyCtx, body: string | Uint8Array) => Wiretrick.Awaitable<string | Uint8Array>
     ): void;
@@ -586,20 +586,20 @@ declare const wt: {
     onDom(route: Wiretrick.DomRoute, handler: (ctx: Wiretrick.RequestCtx) => Wiretrick.Awaitable<void>): void;
 
     /**
-     * One-line description: shown as a tooltip in the manager and the
+     * One-line description: shown as a tooltip in the Editor and the
      * popup, and in diagnostics.
      *
      * @example
-     * wt.describe("Force failures on the posts API");
+     * wt.about("Force failures on the posts API");
      */
-    describe(text: string): void;
+    about(text: string): void;
 
     /**
      * Declare adjustable parameters, editable from the popup's ⚙ dialog,
-     * the manager and settings.yaml without touching the script. Returns
+     * the Editor and settings.yaml without touching the script. Returns
      * the current values (stored values over your defaults), typed from
      * your defs. Routes may be built from them — a change re-runs the
-     * script. Utilities may declare params too (listed in the popup; one
+     * script. Libraries may declare params too (listed in the popup; one
      * that registers handlers only for some value becomes a script then).
      * Definitions may come from an import (`{ env: envParam }`, `{ ...defs }`).
      *
@@ -642,7 +642,7 @@ declare const wt: {
     storage: Wiretrick.Storage;
 
     /**
-     * Log to the manager's LOG panel for the current tab.
+     * Log to the Editor's Log view for the current tab.
      *
      * @example
      * wt.log("request to", ctx.url, { method: ctx.method });

@@ -47,14 +47,14 @@ describe("tapped vs modified logging", () => {
         expect((await run("responseHeaders", { onResponseHeaders: [() => ({ headers: { set: {} } })] })).lines).toEqual([tapped("onResponseHeaders")]);
         expect((await run("replace", { replaceResponse: [() => null] })).lines).toEqual([tapped("replaceResponse")]);
         // returning the identical body is no change
-        const same = await run("transform", { modifyResponse: [(_c: any, b: string) => b, () => undefined] }, { body: "abc" });
-        expect(same.lines).toEqual([tapped("modifyResponse"), tapped("modifyResponse")]);
+        const same = await run("transform", { onResponseBody: [(_c: any, b: string) => b, () => undefined] }, { body: "abc" });
+        expect(same.lines).toEqual([tapped("onResponseBody"), tapped("onResponseBody")]);
     });
 
     it("changes keep their INFO lines (no tapped line)", async () => {
-        const { out, lines } = await run("transform", { modifyResponse: [(_c: any, b: string) => b + "!"] }, { body: "abc" });
+        const { out, lines } = await run("transform", { onResponseBody: [(_c: any, b: string) => b + "!"] }, { body: "abc" });
         expect(out).toBe("abc!");
-        expect(lines).toEqual([{ level: "info", msg: `[S] modifyResponse applied (3b → 4b) ${url}`, kind: undefined }]);
+        expect(lines).toEqual([{ level: "info", msg: `[S] onResponseBody applied (3b → 4b) ${url}`, kind: undefined }]);
         const hdr = await run("requestDecision", { onRequest: [() => ({ headers: { set: { "x-a": "1" } } })] });
         expect(hdr.lines.map((l) => l.level)).toEqual(["info"]);
     });
