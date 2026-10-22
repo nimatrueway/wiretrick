@@ -113,6 +113,13 @@ export function checkLatestRelease(fetchFn: typeof fetch = fetch): Promise<Lates
     return latestCheck;
 }
 
+/** Build timestamp (ISO, UTC) in the user's time zone, e.g. "Oct 21, 2026, 4:08:58 PM PDT". */
+export function formatBuildTime(iso: string, timeZone?: string): string {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "long", timeZone });
+}
+
 /** Label/value rows for the About section, in display order. */
 export async function aboutRows(helper: HelperStatus | null): Promise<[string, string][]> {
     const manifest = chrome.runtime.getManifest();
@@ -120,7 +127,7 @@ export async function aboutRows(helper: HelperStatus | null): Promise<[string, s
     return [
         ["Version", manifest.version],
         ["Commit", __COMMIT__],
-        ["Built", __BUILD_TIME__],
+        ["Built", formatBuildTime(__BUILD_TIME__)],
         ["Build", `${__MV3__ ? "MV3" : "MV2"} (manifest_version ${manifest.manifest_version})`],
         ["Browser", describeBrowser(ua, navigator.userAgent, firefox)],
         ["OS", describeOs(platform, ua)],

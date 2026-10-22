@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aboutText, checkLatestRelease, describeBrowser, describeHelper, describeLatest, describeOs, diagnosticsFileName, isNewerVersion } from "../src/ui/about";
+import { aboutText, checkLatestRelease, describeBrowser, describeHelper, describeLatest, describeOs, diagnosticsFileName, formatBuildTime, isNewerVersion } from "../src/ui/about";
 
 describe("About section", () => {
     it("names the branded browser and its Chromium version", () => {
@@ -61,3 +61,16 @@ describe("About section", () => {
         expect(calls).toBe(2);
     });
 });
+
+describe("formatBuildTime", () => {
+    it("renders the UTC build time in the given time zone", () => {
+        const out = formatBuildTime("2026-10-21T23:08:58.118Z", "America/Los_Angeles");
+        expect(out).toMatch(/2026/);
+        expect(out).toMatch(/4:08:58/);
+        expect(out).not.toMatch(/23:08/);
+    });
+    it("passes through unparseable values", () => {
+        expect(formatBuildTime("dev")).toBe("dev");
+    });
+});
+
