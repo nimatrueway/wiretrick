@@ -429,7 +429,9 @@ async fn exclude_and_methods_skip_the_pause() {
         ..route("https://localhost:*/*", true, false, false)
     }])
     .await;
-    env.on(|_, _| Some(json!({"t": "fulfill", "status": 200, "headers": [], "body": b64("mocked")})));
+    env.on(|_, _| {
+        Some(json!({"t": "fulfill", "status": 200, "headers": [], "body": b64("mocked")}))
+    });
     let g = env.get("/echo", false, &[]).await.unwrap();
     assert_ne!(g.body, b"mocked", "excluded path is not paused");
     let g = env.get("/text", false, &[]).await.unwrap();

@@ -124,7 +124,10 @@ impl State {
             if r.patterns.iter().any(|p| p.test(&url))
                 && !r.exclude.iter().any(|p| p.test(&url))
                 && (r.flags.methods.is_empty()
-                    || r.flags.methods.iter().any(|m| m.eq_ignore_ascii_case(method)))
+                    || r.flags
+                        .methods
+                        .iter()
+                        .any(|m| m.eq_ignore_ascii_case(method)))
             {
                 f.req |= r.flags.req;
                 f.res_headers |= r.flags.res_headers;

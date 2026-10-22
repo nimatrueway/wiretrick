@@ -331,7 +331,9 @@ mod tests {
     #[test]
     fn parses_route_exclude_and_methods() {
         let m: In = serde_json::from_str(r#"{"t":"config","routes":[{"match":["*://a/*"],"exclude":["*://a/x"],"methods":["POST"],"req":true}]}"#).unwrap();
-        let In::Config { routes, .. } = m else { panic!() };
+        let In::Config { routes, .. } = m else {
+            panic!()
+        };
         assert_eq!(routes[0].exclude, vec!["*://a/x".to_string()]);
         assert_eq!(routes[0].methods, vec!["POST".to_string()]);
     }
