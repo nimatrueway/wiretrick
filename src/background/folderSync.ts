@@ -26,6 +26,7 @@ import { getSettingsText, applySettingsText, rememberSettingsText, currentSettin
 import { SETTINGS_FILE, SCHEMA_FILE } from "../shared/settingsYaml";
 import { renameSettingsSection } from "../shared/settingsYamlPatch";
 import { settingsSchemaJson } from "../shared/settingsSchema";
+import { API_DTS_FILE, TSCONFIG_FILE, apiDtsText, tsconfigText } from "../shared/generatedFiles";
 import { broadcastToUi } from "./engine/logs";
 import { dlogLevel } from "../shared/debugLog";
 import { scriptFileName, scriptNameFromFile } from "../shared/scriptName";
@@ -588,17 +589,39 @@ async function exportSettings(base?: string): Promise<void> {
     }
 }
 
-/** the JSON schema the settings.yaml modeline points at (VS Code YAML extension) */
-async function ensureSchemaFile(): Promise<void> {
+/** write a Wiretrick-owned file unless it already has exactly this content */
+async function ensureFile(fileName: string, content: string): Promise<void> {
     if (!dirHandle) return;
-    const json = settingsSchemaJson((await currentSettingsState()).scripts);
     try {
-        const f = await (await dirHandle.getFileHandle(SCHEMA_FILE)).getFile();
-        if ((await f.text()) === json) return;
+        const f = await (await dirHandle.getFileHandle(fileName)).getFile();
+        if ((await f.text()) === content) return;
     } catch {
         // missing → write below
     }
-    await writeFile(SCHEMA_FILE, json);
+    await writeFile(fileName, content);
+}
+
+/** the JSON schema the settings.yaml modeline points at (VS Code YAML extension) */
+async function ensureSchemaFile(): Promise<void> {
+    await ensureFile(SCHEMA_FILE, settingsSchemaJson((await currentSettingsState()).scripts));
+}
+
+/**
+ * Typings + tsconfig for VS Code, refreshed on every start — so an
+ * extension update (new APIs) reaches an already-synced folder.
+ */
+async function ensureSupportFiles(): Promise<void> {
+    try {
+        const dts = await fetch(chrome.runtime.getURL("lib/wt-api.d.ts")).then((r) => {
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.text();
+        });
+        await ensureFile(API_DTS_FILE, apiDtsText(dts));
+    } catch (e: any) {
+        dlogLevel("sync", "warn", `Folder sync: could not refresh ${API_DTS_FILE}: ${e?.message || e}`);
+    }
+    await ensureFile(TSCONFIG_FILE, tsconfigText());
+    await ensureSchemaFile();
 }
 
 /** settings.yaml was saved in the manager: write that text out as-is */
@@ -792,6 +815,7 @@ async function start(opts: { fresh?: boolean }): Promise<boolean> {
     settingsBroken = false;
     if (await readSettingsFile()) await pollSettings();
     else await exportSettings();
+    await ensureSupportFiles();
     broadcastStatus();
     dlogLevel("sync", "info", `Folder sync: watching "${displayPath}"`);
     return true;

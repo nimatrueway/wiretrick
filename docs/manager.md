@@ -113,8 +113,13 @@ save) and the other copy is kept in `.wiretrick-backup/` — the manager lists
 these before connecting so you can cancel. The same reconcile runs on every
 reconnect and browser restart; there, only the side that actually changed
 since the last sync wins, so a backup is made only when both changed.
-`wt-api.d.ts` and `tsconfig.json` are written alongside. Edit in VS Code (or any editor) with full
+`wt-api.d.ts`, `tsconfig.json` and `settings.schema.json` are written alongside. Edit in VS Code (or any editor) with full
 TypeScript completions; saves hot-reload into the engine instantly.
+
+Wiretrick owns those three files: they're refreshed on every browser start
+and extension update, so new APIs and settings reach an already-synced folder.
+Don't edit them; your changes are overwritten. `settings.yaml` is yours: an
+update only adds documentation for settings it doesn't mention yet.
 
 Sync is two-way and watches the folder for **creates, renames/moves and
 deletes** too: a new `.ts` file becomes a script, deleting a file removes its

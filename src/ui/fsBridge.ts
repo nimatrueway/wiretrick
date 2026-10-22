@@ -13,8 +13,6 @@
 import { loadSavedHandle, clearSavedHandle, saveHandle } from "../shared/folderSync";
 import { scriptFileName } from "../shared/scriptName";
 
-const WT_API_DTS_URL = "lib/wt-api.d.ts";
-
 export interface FolderSyncHandlers {
     onFileChanged(fileName: string, js: string): void;
     onFileAdded(fileName: string, js: string): void;
@@ -61,7 +59,7 @@ export async function adoptForWatch(handle: any): Promise<boolean> {
 
 /**
  * Pick a folder (user gesture required) and hand it to the background
- * watcher, which runs a two-way initial sync; typings are written here.
+ * watcher, which runs a two-way initial sync and writes the support files.
  */
 export async function openFolder(handlers?: FolderSyncHandlers): Promise<void> {
     void handlers;
@@ -85,38 +83,7 @@ export async function openFolder(handlers?: FolderSyncHandlers): Promise<void> {
         throw new Error("folder sync could not start in the background (see the extension logs)");
     }
 
-    const apiDts = await fetch(chrome.runtime.getURL(WT_API_DTS_URL)).then((r) => r.text());
-    await writeHandleText(dirHandle, "wt-api.d.ts", apiDts);
-    await writeHandleText(
-        dirHandle,
-        "tsconfig.json",
-        JSON.stringify(
-            {
-                compilerOptions: {
-                    target: "esnext",
-                    lib: ["esnext", "dom", "dom.iterable"],
-                    // wt-api.d.ts declares web APIs (URLPattern…) that newer TS libs may also have
-                    skipLibCheck: true,
-                    module: "esnext",
-                    moduleResolution: "bundler",
-                    allowImportingTsExtensions: true,
-                    allowNonTsExtensions: true,
-                    noEmit: true,
-                },
-                include: ["**/*.ts"],
-            },
-            null,
-            2
-        )
-    );
-    // scripts ⇄ files: the background's initial two-way sync handles them
-}
-
-async function writeHandleText(dirHandle: any, name: string, content: string): Promise<void> {
-    const fh = await dirHandle.getFileHandle(name, { create: true });
-    const w = await fh.createWritable();
-    await w.write(content);
-    await w.close();
+    // scripts ⇄ files and the support files (typings, tsconfig, schema): the background writes them
 }
 
 export function stopSync(): Promise<void> {

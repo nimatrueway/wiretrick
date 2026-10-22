@@ -137,6 +137,27 @@ export function commentedDefaultLines(key: string, d: ParamDef | undefined): str
     return out;
 }
 
+export const GLOBAL_KEYS = ["logLevel", "logCap", "strategy"] as const;
+
+/**
+ * One global setting's documented lines at indent 0 (description comments
+ * + live entry, or commented default). Also inserted into an existing file
+ * that doesn't mention the key yet, e.g. a setting added by an update.
+ */
+export function globalOptionLines(key: (typeof GLOBAL_KEYS)[number], g: GlobalSettings): string[] {
+    const out: string[] = [];
+    if (key === "logLevel") option(out, 0, "logLevel", `Minimum log level shown in the panel: ${LOG_LEVELS.join(" | ")}`, g.logLevel, DEFAULT_LOG_LEVEL);
+    else if (key === "logCap") option(out, 0, "logCap", "Log lines kept in the panel (100..10000)", g.logCap, DEFAULT_LOG_CAP);
+    else {
+        out.push("# Interception strategy for every handler whose route doesn't set `strategy`.");
+        out.push("# An unavailable strategy means the handler doesn't run (warned) — no fallback.");
+        out.push(`# Compatibility: ${STRATEGY_DOC_URL}`);
+        for (const s of STRATEGIES) out.push(`#   ${s}: + ${clean(STRATEGY_INFO[s].pros)} − ${clean(STRATEGY_INFO[s].cons)}`);
+        option(out, 0, "strategy", `${STRATEGIES.join(" | ")}`, g.strategy, defaultStrategySetting());
+    }
+    return out;
+}
+
 /** Canonical, deterministic text for the given state. */
 export function renderSettings(g: GlobalSettings, scripts: ScriptSettingsState[]): string {
     const out: string[] = [
@@ -145,13 +166,7 @@ export function renderSettings(g: GlobalSettings, scripts: ScriptSettingsState[]
         "",
         "settings:",
     ];
-    option(out, 2, "logLevel", `Minimum log level shown in the panel: ${LOG_LEVELS.join(" | ")}`, g.logLevel, DEFAULT_LOG_LEVEL);
-    option(out, 2, "logCap", "Log lines kept in the panel (100..10000)", g.logCap, DEFAULT_LOG_CAP);
-    out.push("  # Interception strategy for every handler whose route doesn't set `strategy`.");
-    out.push("  # An unavailable strategy means the handler doesn't run (warned) — no fallback.");
-    out.push(`  # Compatibility: ${STRATEGY_DOC_URL}`);
-    for (const s of STRATEGIES) out.push(`  #   ${s}: + ${clean(STRATEGY_INFO[s].pros)} − ${clean(STRATEGY_INFO[s].cons)}`);
-    option(out, 2, "strategy", `${STRATEGIES.join(" | ")}`, g.strategy, defaultStrategySetting());
+    for (const k of GLOBAL_KEYS) out.push(...globalOptionLines(k, g).map((l) => "  " + l));
     const blocks = scripts.map((s) => scriptBlock(s)).filter((b): b is string[] => !!b);
     if (blocks.length) {
         out.push("", "params:");

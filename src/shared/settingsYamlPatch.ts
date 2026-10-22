@@ -21,7 +21,7 @@
 import { parseDocument, isMap, isScalar, Scalar, stringify, type YAMLMap } from "yaml";
 import { resolveParamValues, paramDefault } from "./scriptDef";
 import {
-    parseSettings, planSettings, scriptKeys, scriptBlock, entryLines, commentedDefaultLines, renderedKeyText,
+    parseSettings, planSettings, scriptKeys, scriptBlock, entryLines, commentedDefaultLines, renderedKeyText, globalOptionLines,
     DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL, defaultStrategySetting,
     type GlobalSettings, type ScriptSettingsState,
 } from "./settingsYaml";
@@ -327,15 +327,24 @@ export function patchSettings(existing: string, g: GlobalSettings, scripts: Scri
             for (const [k, v] of needed) appended.push(...entryLines(k, v).map((l) => "  " + l));
         }
     } else {
+        const settingsPair = findPair(root, "settings");
+        const settingsSrc = sectionSource(existing, settingsPair);
+        const documents = settingsTarget.kind === "empty" || DOCUMENTS_ENTRIES.test(settingsSrc);
+        const undocumented: string[] = [];
         for (const [k, want, def] of globals) {
-            if (same((current.settings as any)?.[k] ?? def, want)) continue;
             const pair = settingsTarget.kind === "map" ? findPair(settingsTarget.node, k) : undefined;
+            if (same((current.settings as any)?.[k] ?? def, want)) {
+                // a setting the file doesn't mention yet (added by an update): document it
+                if (!pair && documents && !documentedIn(settingsSrc, k)) undocumented.push(...globalOptionLines(k as any, g));
+                continue;
+            }
             if (pair) {
                 const edit = replaceValueEdit(existing, pair, want, eol);
                 if (!edit) return null;
                 edits.push(edit);
             } else if (!insertInto(settingsTarget, entryLines(k, want))) return null;
         }
+        if (undocumented.length && !insertInto(settingsTarget, undocumented)) return null;
     }
 
     // --- scripts ---

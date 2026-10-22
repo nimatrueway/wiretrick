@@ -2,7 +2,7 @@ import { renameSettingsSection } from "../src/shared/settingsYamlPatch";
 import { uniqueScriptName } from "../src/shared/scriptName";
 import { describe, it, expect } from "vitest";
 import {
-    parseSettings, renderSettings, planSettings, yamlKey, SCHEMA_MODELINE, SETTINGS_FILE,
+    parseSettings, renderSettings, planSettings, yamlKey, SCHEMA_MODELINE, SETTINGS_FILE, defaultStrategySetting,
     type ScriptSettingsState,
 } from "../src/shared/settingsYaml";
 import { patchSettings } from "../src/shared/settingsYamlPatch";
@@ -316,5 +316,22 @@ describe("script name helpers", () => {
     it("uniqueScriptName ignores letter case", () => {
         expect(uniqueScriptName("x", ["a"])).toBe("x");
         expect(uniqueScriptName("X", ["x", "x (2)"])).toBe("X (3)");
+    });
+});
+
+describe("settings added by an update", () => {
+    it("documents a global setting an existing file doesn't mention, leaving the rest byte-for-byte", () => {
+        const G = { logLevel: "info", logCap: 500, strategy: defaultStrategySetting() } as any;
+        const full = renderSettings(G, []);
+        // an older file: no strategy documentation at all
+        const old = full.slice(0, full.indexOf("  # Interception strategy"));
+        const patched = patchSettings(old, G, [])!;
+        expect(patched).toBe(full);
+        expect(patchSettings(full, G, [])).toBe(full);
+    });
+
+    it("doesn't add documentation to a settings section the user stripped of comments", () => {
+        const text = "settings:\n  logLevel: warn\n";
+        expect(patchSettings(text, { logLevel: "warn", logCap: 500, strategy: defaultStrategySetting() } as any, [])).toBe(text);
     });
 });

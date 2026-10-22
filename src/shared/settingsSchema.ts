@@ -14,9 +14,11 @@ import { LOG_LEVELS, DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL, type ScriptSettingsStat
 import { paramDefault, type ParamDef } from "./scriptDef";
 import { builtinStrategy, STRATEGIES } from "./route";
 import { strategyMarkdown, strategyEnumMarkdown } from "./strategyInfo";
+import { GENERATED_NOTE } from "./generatedFiles";
 
 export const SETTINGS_SCHEMA = {
     $schema: "http://json-schema.org/draft-07/schema#",
+    $comment: GENERATED_NOTE,
     title: "Wiretrick settings",
     description: "Extension settings + per-script params & enabled state (settings.yaml)",
     type: "object",
