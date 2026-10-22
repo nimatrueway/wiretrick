@@ -567,7 +567,7 @@ try {
     await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "deleteScript", id: "s_doccold" }, r)));
     const logText = await mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line")].map((l) => l.textContent || "").join("\n"));
     if (process.env.DBG) console.log(logText.split("\n").filter((l: string) => /Tier C|cdp|debugger|attach|requestPaused/i.test(l)).slice(-40).join("\n"));
-    check("debugger tier activation is logged", logText.includes("debugger tier active"));
+    check("debugger strategy activation is logged", logText.includes("debugger strategy active"));
     for (const id of ["s_respond", "s_cdpx", "s_auto", "s_procx", "s_proxy2", "s_race"]) {
         await mgr.evaluate((id: string) => new Promise((r) => chrome.runtime.sendMessage({ type: "deleteScript", id }, r)), id);
     }
@@ -678,7 +678,7 @@ try {
     const byName = new Map<string, any>((imported || []).map((s: any) => [s.meta.name, s]));
     check("import re-detects routes (MV3 hook + api-interceptor active)", byName.get("MV3 hook")?.meta?.active === true && byName.get("api-interceptor")?.meta?.active === true, JSON.stringify((imported || []).map((s: any) => [s.meta.name, s.meta.active])));
     check("import restores params (api-interceptor.label)", !!byName.get("api-interceptor")?.paramDefs?.label);
-    check("import keeps utilities as utilities (api-lib)", byName.get("api-lib")?.meta?.active === false);
+    check("import keeps libraries as libraries (api-lib)", byName.get("api-lib")?.meta?.active === false);
     check("import restores enabled state", byName.get("MV3 hook")?.enabled === true && byName.get("api-interceptor")?.enabled === true);
     check("partial import skips the unticked script", !!skipName && !byName.has(skipName), String(skipName));
     check("import status shows success", (await mgr.evaluate(() => document.querySelector("#editor-status")?.textContent ?? "")).includes("imported"));

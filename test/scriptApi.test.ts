@@ -69,7 +69,7 @@ describe("script API", () => {
         expect(compileScript(`wt.params({ a: { type: "number" } }); wt.defineParam("a", { type: "number" });`).error).toMatch(/already defined/);
     });
 
-    it("a script without handlers is a utility (params allowed)", () => {
+    it("a script without handlers is a library (params allowed)", () => {
         const c = compileScript(`wt.params({ n: { type: "number", default: 2 } });\nexport const helper = () => 42;`);
         expect(c.error).toBeNull();
         expect(c.meta.active).toBe(false);

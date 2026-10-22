@@ -34,12 +34,12 @@ if (p.on) wt.onRequest("*://example.com/*", () => ({ block: true }));
 
 const get = async (id: string) => (await listScripts()).find((s) => s.id === id)!;
 
-describe("utility scripts with params", () => {
+describe("library scripts with params", () => {
     beforeEach(() => {
         for (const k of Object.keys(store)) delete store[k];
     });
 
-    it("stores a param-gated utility as a utility with its paramDefs", async () => {
+    it("stores a param-gated library as a library with its paramDefs", async () => {
         const s = await saveScript({ id: "g", name: "gate", code: GATE });
         expect(s.error).toBeNull();
         expect(s.meta.active).toBe(false);
@@ -73,7 +73,7 @@ describe("utility scripts with params", () => {
         expect((await analyzeScripts(scripts, { g: { on: true } })).get("g")!.meta.active).toBe(true);
     });
 
-    it("settings.yaml lists the utility's params and gains `enabled` once it's a script", async () => {
+    it("settings.yaml lists the library's params and gains `enabled` once it's a script", async () => {
         await saveScript({ id: "g", name: "gate", code: GATE });
         let st = await currentSettingsState();
         expect(st.scripts.find((x) => x.name === "gate")).toMatchObject({ declared: false, defs: { on: { type: "boolean" } } });
@@ -84,7 +84,7 @@ describe("utility scripts with params", () => {
         expect(st.scripts.find((x) => x.name === "gate")?.declared).toBe(true);
     });
 
-    it("importers keep working when a utility flips (its exports stay importable)", async () => {
+    it("importers keep working when a library flips (its exports stay importable)", async () => {
         await saveScript({ id: "g", name: "gate", code: GATE });
         const m = await saveScript({ id: "m", name: "main", code: `import { helper } from "./gate";\nwt.onRequest("*://a.test/*", () => { helper(); });` });
         expect(m.error).toBeNull();

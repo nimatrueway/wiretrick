@@ -38,13 +38,13 @@ const script = (id: string, name: string, extra: Partial<ScriptInfo> = {}): Scri
 const names = (c: Element) => [...c.querySelectorAll("#script-list .script-name")].map((n) => n.textContent);
 
 describe("Popup", () => {
-    it("lists active scripts and hides utilities without params", async () => {
+    it("lists active scripts and hides libraries without params", async () => {
         const { container } = render(<Popup api={fakeApi([script("a", "Alpha"), script("l", "lib", { meta: { name: "lib", active: false } })])} />);
         await waitFor(() => expect(names(container)).toEqual(["Alpha"]));
         expect(container.querySelector("#empty")).toBeNull();
     });
 
-    it("lists utilities that declare params, without an enabled switch, with editable params", async () => {
+    it("lists libraries that declare params, without an enabled switch, with editable params", async () => {
         const defs = { on: { type: "boolean", default: false, description: "Turn interception on" } } as any;
         let values: any = { on: false };
         const util = (active: boolean) => script("u", "gate", { meta: { name: "gate", active }, paramDefs: defs });

@@ -53,7 +53,7 @@ describe("saveScript sandbox-failure resilience", () => {
         compileResult.paramDefs = {};
         compileResult.error = "sandbox compile failed";
         const again = await saveScript({ id, code: "x" });
-        expect(again.meta.active).toBe(true); // not corrupted to a utility
+        expect(again.meta.active).toBe(true); // not corrupted to a library
         expect(again.meta.name).toBe("Mine"); // name kept
         expect(again.paramDefs?.p).toBeTruthy();
         expect(good.meta.active).toBe(true);

@@ -22,7 +22,7 @@ wt.onRequest("*://en.wikipedia.org/wiki/Cat", () => ({
     },
     {
         name: "Block requests",
-        blurb: "Cancel matching requests — here only images, via the route's types filter. Try it: open any Wikipedia article — every image is gone.",
+        blurb: "Block matching requests — here only images, via the route's resourceTypes filter. Try it: open any Wikipedia article — every image is gone.",
         code: `// Try it: open https://en.wikipedia.org/wiki/Cat
 wt.about("Block Wikipedia images");
 
@@ -91,7 +91,7 @@ wt.onDom("*://example.org/*", () => {
         name: "Replace a fetch/XHR response",
         blurb: "Replace a JSON API response; :id in the route is read back as ctx.groups.id. Try it: open dummyjson.com/users/1.",
         code: `// Try it: open https://dummyjson.com/users/1
-wt.about("Mock the users API");
+wt.about("Replace the users API response");
 
 wt.replaceResponse("*://dummyjson.com/users/:id", (ctx) => ({
     id: Number(ctx.groups.id),
