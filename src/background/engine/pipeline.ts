@@ -172,7 +172,6 @@ export function createPipeline(
     /** `${scriptId}|${message}` → handler labels last reported */
     let routeWarned = new Map<string, string>();
     let helperTimer: ReturnType<typeof setTimeout> | undefined;
-    const startedAt = Date.now();
     function warnRoutes(scripts: Script[]): void {
         const next = new Map<string, string>();
         const problems: { id: string; name: string; msg: string; labels: string[] }[] = [];
@@ -205,8 +204,16 @@ export function createPipeline(
             for (const k of [...routeWarned.keys()]) if (k.endsWith("|helper")) routeWarned.delete(k);
             return;
         }
-        helperTimer = setTimeout(() => {
+        // the helper may only now be (re)starting: give every reload a grace
+        // period, and keep waiting while it is still connecting
+        const check = (): void => {
+            helperTimer = undefined;
             if (processActive()) return;
+            const st = processStrategy.status();
+            if (st.state === "connecting" || (st.state === "ready" && !st.routing?.reason)) {
+                helperTimer = setTimeout(check, HELPER_GRACE_MS);
+                return;
+            }
             for (const h of helperDown) {
                 const key = `${h.id}|helper`;
                 const labels = h.labels.join(", ");
@@ -214,7 +221,8 @@ export function createPipeline(
                 routeWarned.set(key, labels);
                 log(-1, `[${h.name}] ${labels}: strategy "process" — ${tierUnavailable("process")}; these handlers don't run until it is`, "warn", h.id);
             }
-        }, Math.max(0, HELPER_GRACE_MS - (Date.now() - startedAt)));
+        };
+        helperTimer = setTimeout(check, HELPER_GRACE_MS);
     }
 
     function refreshBodyWatch(scripts: Script[]): void {
