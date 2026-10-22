@@ -1,6 +1,6 @@
 {
   "name": "wiretrick",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Script-based request/response override extension (TypeScript rewrite)",
   "private": true,
   "type": "module",
