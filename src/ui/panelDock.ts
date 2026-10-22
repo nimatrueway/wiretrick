@@ -248,15 +248,7 @@ function makeDraggable(): void {
 }
 
 export function setupPanelDock(): void {
-    let l = load();
-    // migrate the old layout key's dock/height
-    if (!l.dock) {
-        try {
-            const old = JSON.parse(localStorage.getItem("resPanelLayout") || "{}");
-            l = { dock: old.logDock === "right" ? "right" : "bottom", size: old.logH ? { bottom: old.logH } : {} };
-            save(l);
-        } catch {}
-    }
+    const l = load();
     dockSidebar(l.side === "right" ? "right" : "left", false);
     dockPanel(l.dock || "bottom", false);
     makeSplitter();

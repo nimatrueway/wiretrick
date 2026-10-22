@@ -5,7 +5,7 @@
  * onDom registrations are collected with their routes, and params resolve
  * to the values the background shipped in the bundle.
  */
-import { DECLARE_REMOVED, normalizeRoute, routeMatches, type DomWhen, type RouteMeta } from "./route";
+import { normalizeRoute, routeMatches, type DomWhen, type RouteMeta } from "./route";
 
 export interface PageDomHandler {
     route: RouteMeta;
@@ -36,9 +36,6 @@ export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDomHandler
         describe: inert,
         params: (defs: Record<string, unknown>) => Object.freeze(Object.fromEntries(Object.keys(defs || {}).map((k) => [k, o.params[k]]))),
         defineParam: (name: string) => o.params[name],
-        declareScript: () => {
-            throw new Error(DECLARE_REMOVED);
-        },
         log: o.log,
         storage: o.storage,
     };

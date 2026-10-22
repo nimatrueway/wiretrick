@@ -38,10 +38,6 @@ Register handlers synchronously at top level. A registration after an
 `await` or inside a callback logs an error and is ignored. A file that
 registers no handlers is a [utility](#utilities-and-recipes).
 
-`wt.declareScript` was removed. A script that still calls it fails with an
-error. Pass the pattern to each handler instead, and use
-[`wt.params`](#description-and-parameters) and `wt.describe`.
-
 ## Routes
 
 The first argument of every handler says where it applies:
@@ -71,8 +67,8 @@ leave out matches any. `"<all_urls>"` matches every URL.
 | `http://localhost:8081/*` | that port only |
 | `*://localhost:*/*` | any port (a pattern without a port matches only 80/443) |
 
-An invalid pattern (e.g. the old `*example.com*` style, which has no
-scheme) makes the registration throw. The error shows on the script.
+An invalid pattern (e.g. `*example.com*`, which has no scheme) makes the
+registration throw. The error shows on the script.
 
 Named groups land in `ctx.groups` (`*` wildcards as `"0"`, `"1"`, …):
 
@@ -131,6 +127,11 @@ wt.modifyResponse(
 > fetch/XHR (REST/API) calls. For documents, `<script src>`, images,
 > workers, or anything that must not slip through, use `process`,
 > `webrequest` or `cdp`. See [strategies](strategies.md).
+>
+> **Note:** on Chromium MV2, `webrequest` can redirect the page itself and
+> change its headers, but not its body in place: `modifyResponse` never
+> runs and a replaced page moves to a `chrome-extension://` URL. Use
+> `process` or `cdp` for that ([details](strategies.md#which-strategy-for-which-job)).
 
 ## Description and parameters
 

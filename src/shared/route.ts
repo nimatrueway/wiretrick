@@ -10,9 +10,6 @@
  */
 import { matchAny, matchGroups, matchPatternError } from "./matcher";
 
-/** thrown by the removed wt.declareScript */
-export const DECLARE_REMOVED = "wt.declareScript was removed — pass the URL pattern to each handler: wt.onRequest(\"*://example.com/*\", fn); params: wt.params({...}); description: wt.describe(\"…\")";
-
 export type Strategy = "hook" | "webrequest" | "cdp" | "process";
 export const STRATEGIES: Strategy[] = ["process", "hook", "webrequest", "cdp"];
 

@@ -16,9 +16,7 @@
  *       code: |-
  *         wt.onRequest("*://example.com/*", …
  *
- * Import accepts that YAML shape (.yaml/.yml) AND legacy JSON bundles
- * (.json, format version 1): a `settings` object ({ logLevel, logCap }) is
- * still applied. Settings are always YAML.
+ * Import accepts that YAML shape (.yaml/.yml).
  */
 import { parse, stringify } from "yaml";
 import type { SettingsDoc } from "../shared/settingsYaml";
@@ -28,19 +26,17 @@ export interface BundleScript {
     name?: string;
     code: string;
     enabled?: boolean;
-    /** non-default param values (new yaml bundles) */
+    /** non-default param values */
     params?: Record<string, any>;
 }
 
 export interface ParsedBundle {
     scripts: BundleScript[];
-    /** structured globals (new yaml bundles + legacy json `settings` object) */
+    /** structured globals */
     settings?: { logLevel?: string; logCap?: number };
 }
 
 export const BUNDLE_FORMAT = "wiretrick-bundle";
-/** formats accepted on import (exports from before the rename) */
-const LEGACY_BUNDLE_FORMATS = ["rescript-bundle"];
 
 /** File name within the synced folder for a script — or settings.yaml for the virtual settings entry. */
 export function syncFileNameFor(selectedId: string, scriptName: string | undefined, settingsId: string, settingsFile: string): string {
@@ -81,24 +77,15 @@ export function buildBundle(doc: SettingsDoc, scripts: BundleScript[]): string {
     return "# Wiretrick export — scripts + settings\n" + stringify(out, { lineWidth: 0 });
 }
 
-/** Parse bundle text: YAML (new) or JSON (legacy). null when it isn't a wiretrick-bundle. */
+/** Parse bundle YAML. null when it isn't a wiretrick-bundle. */
 export function parseBundleText(text: string): ParsedBundle | null {
-    const t = text.trimStart();
     let parsed: any;
-    if (t.startsWith("{") || t.startsWith("[")) {
-        try {
-            parsed = JSON.parse(text);
-        } catch {
-            return null;
-        }
-    } else {
-        try {
-            parsed = parse(text);
-        } catch {
-            return null;
-        }
+    try {
+        parsed = parse(text);
+    } catch {
+        return null;
     }
-    if (!parsed || (parsed.format !== BUNDLE_FORMAT && !LEGACY_BUNDLE_FORMATS.includes(parsed.format))) return null;
+    if (!parsed || parsed.format !== BUNDLE_FORMAT) return null;
     const out: ParsedBundle = { scripts: [] };
     if (Array.isArray(parsed.scripts)) {
         out.scripts = parsed.scripts

@@ -54,8 +54,3 @@ export function uniqueScriptName(base: string, taken: string[]): string {
 export function scriptNameFromFile(fileName: string): string {
     return fileName.replace(/\.ts$/, "") || "Imported script";
 }
-
-/** the old lossy mapping ("Redirect a URL" → "Redirect_a_URL.ts"), for migration */
-export function legacyScriptFileName(name: string): string {
-    return ((name || "script").replace(/[^a-zA-Z0-9_-]+/g, "_").slice(0, 60) || "script") + ".ts";
-}

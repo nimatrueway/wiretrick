@@ -24,8 +24,6 @@ A route is a URLPattern string, a list of them, or an object (next section). Pat
     "*://localhost:*/*"                     any port (no port in the pattern = 80/443 only)
 An invalid pattern makes the registration throw (shown as the script's error). Register handlers synchronously at top level — a registration after an await or inside a callback is ignored with an error.
 
-wt.declareScript was removed: pass the pattern to each handler, wt.params({…}) for parameters, wt.describe("…") for the description.
-
 Tip: ${ADV_SHORT}`,
     },
     {

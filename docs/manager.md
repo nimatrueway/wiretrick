@@ -38,8 +38,7 @@ editor toolbar turns the open script on or off.
 Double-click a script (or F2) to rename it (Enter saves, Esc cancels).
 The name is the file name in the scripts folder (`My script.ts`), so anything
 works except `< > : " / \ | ? *`, a trailing dot or space, and Windows device
-names like `CON`; a name that clashes with another script is refused. Older
-underscore files (`My_script.ts`) are renamed to the exact name on connect.
+names like `CON`; a name that clashes with another script is refused.
 Reverting an edit back to the saved text clears the unsaved-changes state —
 no discard prompt on a no-op edit.
 

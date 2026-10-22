@@ -28,19 +28,13 @@ import { renameSettingsSection } from "../shared/settingsYamlPatch";
 import { settingsSchemaJson } from "../shared/settingsSchema";
 import { broadcastToUi } from "./engine/logs";
 import { dlogLevel } from "../shared/debugLog";
-import { scriptFileName, scriptNameFromFile, legacyScriptFileName } from "../shared/scriptName";
+import { scriptFileName, scriptNameFromFile } from "../shared/scriptName";
 const POLL_MS = 1000;
-const SCRIPT_EXT = ".ts";
 export const BACKUP_DIR = ".wiretrick-backup";
 
 /** canonical script file name for a display name */
 function canonicalFileName(name: string): string {
     return scriptFileName(name);
-}
-
-/** legacy <name>.script.ts → canonical <name>.ts */
-function canonicalizeFileName(fileName: string): string {
-    return fileName.endsWith(".script.ts") ? fileName.replace(/\.script\.ts$/, SCRIPT_EXT) : fileName;
 }
 
 const isScriptFile = (name: string) => name.endsWith(".ts") && !name.endsWith(".d.ts");
@@ -53,8 +47,6 @@ let dirHandle: any = null;
 let known = new Map<string, FileSig>();
 /** script id → the file it owns + merge base */
 let owned = new Map<string, Owned>();
-/** canonical name → actual on-disk name when a legacy file stands in for it */
-let realNameOf = new Map<string, string>();
 let timer: ReturnType<typeof setInterval> | null = null;
 let displayPath = "";
 let settingsHooked = false;
@@ -84,9 +76,7 @@ function describeHandle(handle: any): Promise<string> {
 }
 
 async function refreshKnown(): Promise<void> {
-    const { seen, aliases } = await scanFolder();
-    known = seen;
-    realNameOf = aliases;
+    known = await scanFolder();
     await persistState();
 }
 
@@ -115,8 +105,7 @@ async function loadPersistedState(): Promise<{ files: Map<string, FileSig>; owne
     const obj: any = await new Promise((r) => area.get(KNOWN_KEY, r));
     const st = obj?.[KNOWN_KEY];
     if (!st || typeof st !== "object") return null;
-    // pre-`owned` format: the bare file → sig map
-    const files = st.files && typeof st.files === "object" ? st.files : st.owned ? {} : st;
+    const files = st.files && typeof st.files === "object" ? st.files : {};
     return {
         files: new Map(Object.entries(files) as [string, FileSig][]),
         owned: new Map(Object.entries(st.owned && typeof st.owned === "object" ? st.owned : {}) as [string, Owned][]),
@@ -129,15 +118,9 @@ async function clearPersistedState(): Promise<void> {
     await new Promise<void>((r) => area.remove(KNOWN_KEY, () => r()));
 }
 
-/**
- * List script files as canonical names. Every .ts file is a script file;
- * .d.ts files are ignored. Legacy .script.ts files stand in for their
- * canonical .ts name (canonical wins when both exist) and migrate back.
- */
-async function scanFolder(handle: any = dirHandle): Promise<{ seen: Map<string, FileSig>; aliases: Map<string, string> }> {
+/** List script files: every .ts file is a script file; .d.ts files are ignored. */
+async function scanFolder(handle: any = dirHandle): Promise<Map<string, FileSig>> {
     const seen = new Map<string, FileSig>();
-    const aliases = new Map<string, string>();
-    const legacy: { name: string; sig: FileSig }[] = [];
     for await (const entry of handle.values()) {
         if (entry.kind !== "file" || !isScriptFile(entry.name)) continue;
         let f: File;
@@ -148,22 +131,13 @@ async function scanFolder(handle: any = dirHandle): Promise<{ seen: Map<string, 
             if (e?.name === "NotFoundError") continue;
             throw e;
         }
-        const sig = { lastModified: f.lastModified, size: f.size };
-        if (entry.name.endsWith(".script.ts")) legacy.push({ name: entry.name, sig });
-        else seen.set(entry.name, sig);
+        seen.set(entry.name, { lastModified: f.lastModified, size: f.size });
     }
-    for (const { name, sig } of legacy) {
-        const canonical = canonicalizeFileName(name);
-        if (!seen.has(canonical)) {
-            seen.set(canonical, sig);
-            aliases.set(canonical, name);
-        }
-    }
-    return { seen, aliases };
+    return seen;
 }
 
 async function readText(fileName: string): Promise<string> {
-    const fh = await dirHandle.getFileHandle(realNameOf.get(fileName) || fileName);
+    const fh = await dirHandle.getFileHandle(fileName);
     return await (await fh.getFile()).text();
 }
 
@@ -178,7 +152,7 @@ async function readTextOrNull(fileName: string): Promise<string | null> {
 
 async function statFile(fileName: string): Promise<FileSig | null> {
     try {
-        const f = await (await dirHandle.getFileHandle(realNameOf.get(fileName) || fileName)).getFile();
+        const f = await (await dirHandle.getFileHandle(fileName)).getFile();
         return { lastModified: f.lastModified, size: f.size };
     } catch {
         return null;
@@ -202,22 +176,18 @@ async function writeFile(fileName: string, content: string): Promise<boolean> {
         return false;
     }
     if (isScriptFile(fileName)) {
-        realNameOf.delete(fileName);
         const sig = await statFile(fileName);
         if (sig) known.set(fileName, sig);
     }
     return true;
 }
 
-/** remove a script file (and a legacy alias standing in for it) */
+/** remove a script file */
 async function removeFile(fileName: string): Promise<void> {
-    for (const n of new Set([fileName, realNameOf.get(fileName) || fileName])) {
-        try {
-            await dirHandle.removeEntry(n);
-        } catch {}
-    }
+    try {
+        await dirHandle.removeEntry(fileName);
+    } catch {}
     known.delete(fileName);
-    realNameOf.delete(fileName);
 }
 
 /** keep a copy of a version about to be overwritten (both sides had changed) */
@@ -233,21 +203,6 @@ async function backup(fileName: string, content: string, why: string): Promise<v
     } catch (e: any) {
         dlogLevel("sync", "warn", `Folder sync: ${why} — keeping a backup failed: ${e?.message || e}`);
     }
-}
-
-/** Legacy <name>.script.ts standing in for <name>.ts → write canonical, drop legacy. */
-async function migrateLegacy(fileName: string, content: string): Promise<void> {
-    const real = realNameOf.get(fileName);
-    if (!real) return;
-    realNameOf.delete(fileName);
-    if (!(await writeFile(fileName, content))) {
-        realNameOf.set(fileName, real);
-        return;
-    }
-    try {
-        await dirHandle.removeEntry(real);
-        dlogLevel("sync", "info", `Folder sync: migrated legacy "${real}" → "${fileName}"`);
-    } catch {}
 }
 
 function displayNameFromFile(fileName: string): string {
@@ -290,7 +245,6 @@ async function pullChange(file: string, text: string, s: Script): Promise<boolea
     }
     owned.set(s.id, { file, hash: h });
     await saveScript({ id: s.id, code: text, name: s.meta.name });
-    await migrateLegacy(file, text);
     dlogLevel("sync", "info", `Folder sync: "${file}" changed on disk — script "${s.meta.name}" updated`);
     return true;
 }
@@ -365,7 +319,6 @@ async function applyEvents(events: ReturnType<typeof computeEvents>): Promise<vo
         const id = newId();
         owned.set(id, { file: canonicalFileName(name), hash: contentHash(text) });
         await saveScript({ id, code: text, name });
-        await migrateLegacy(file, text);
         await adoptCanonicalName(file, name, text);
         scripts = await listScripts();
         dlogLevel("sync", "info", `Folder sync: new file "${file}" imported as script "${name}"`);
@@ -399,7 +352,7 @@ async function applyEvents(events: ReturnType<typeof computeEvents>): Promise<vo
  */
 async function adoptCanonicalName(fileName: string, scriptName: string, code: string): Promise<void> {
     const canonical = canonicalFileName(scriptName);
-    if (canonical === fileName || realNameOf.has(fileName)) return;
+    if (canonical === fileName) return;
     if (!(await writeFile(canonical, code))) return;
     try {
         await dirHandle.removeEntry(fileName);
@@ -497,30 +450,6 @@ async function renameSettingsOnDisk(oldName: string, newName: string): Promise<v
     if (await writeFile(SETTINGS_FILE, next)) settingsSig = (await readSettingsFile())?.sig ?? null;
 }
 
-/**
- * Files used to be named by a lossy mapping ("Redirect a URL" →
- * "Redirect_a_URL.ts"); now the file name is the script name. Rename old
- * files whose script has no file under its exact name yet.
- */
-async function migrateLegacyNames(seen: Map<string, FileSig>, byFile: Map<string, any>): Promise<void> {
-    for (const [canonical, s] of byFile) {
-        const legacy = legacyScriptFileName(s.meta.name);
-        if (legacy === canonical || seen.has(canonical) || !seen.has(legacy) || byFile.has(legacy)) continue;
-        try {
-            const text = await readText(legacy);
-            await writeFile(canonical, text);
-            await dirHandle.removeEntry(realNameOf.get(legacy) || legacy);
-            const f = await (await dirHandle.getFileHandle(canonical)).getFile();
-            seen.delete(legacy);
-            realNameOf.delete(legacy);
-            seen.set(canonical, { lastModified: f.lastModified, size: f.size });
-            dlogLevel("sync", "info", `Folder sync: renamed "${legacy}" → "${canonical}" (file names now match script names exactly)`);
-        } catch (e: any) {
-            dlogLevel("sync", "warn", `Folder sync: renaming "${legacy}" → "${canonical}" failed: ${e?.message || e}`);
-        }
-    }
-}
-
 export interface FolderPreview {
     /** files that become new scripts */
     imported: string[];
@@ -540,15 +469,11 @@ export interface FolderPreview {
 async function initialSync(opts: { dry?: boolean; handle?: any; base?: Map<string, Owned> } = {}): Promise<FolderPreview> {
     const dry = !!opts.dry;
     const handle = opts.handle ?? dirHandle;
-    const { seen, aliases } = await scanFolder(handle);
+    const seen = await scanFolder(handle);
     const scripts = await listScripts();
     const byFile = new Map(scripts.map((s) => [canonicalFileName(s.meta.name), s]));
     const out: FolderPreview = { imported: [], written: [], conflicts: [] };
-    const readFrom = async (name: string) => (await (await handle.getFileHandle(aliases.get(name) || name)).getFile()).text();
-    if (!dry) {
-        realNameOf = aliases;
-        await migrateLegacyNames(seen, byFile);
-    }
+    const readFrom = async (name: string) => (await (await handle.getFileHandle(name)).getFile()).text();
     for (const [fileName, sig] of seen) {
         const text = await readFrom(fileName);
         const s = byFile.get(fileName);
@@ -565,17 +490,13 @@ async function initialSync(opts: { dry?: boolean; handle?: any; base?: Map<strin
             const id = newId();
             owned.set(id, { file: canonicalFileName(name), hash: contentHash(text) });
             await saveScript({ id, code: text, name });
-            await migrateLegacy(fileName, text);
             await adoptCanonicalName(fileName, name, text);
             continue;
         }
         const hd = contentHash(text);
         const hs = contentHash(s.code);
         if (hd === hs) {
-            if (!dry) {
-                owned.set(s.id, { file: fileName, hash: hd });
-                await migrateLegacy(fileName, text);
-            }
+            if (!dry) owned.set(s.id, { file: fileName, hash: hd });
             continue;
         }
         const rec = (opts.base ?? owned).get(s.id);
@@ -594,12 +515,10 @@ async function initialSync(opts: { dry?: boolean; handle?: any; base?: Map<strin
             if (conflict) await backup(fileName, s.code, `script "${s.meta.name}" and "${fileName}" both changed; the newer file wins`);
             owned.set(s.id, { file: fileName, hash: hd });
             await saveScript({ id: s.id, code: text, name: s.meta.name });
-            await migrateLegacy(fileName, text);
         } else {
             if (conflict) await backup(fileName, text, `script "${s.meta.name}" and "${fileName}" both changed; the newer script wins`);
             await writeFile(fileName, s.code);
             owned.set(s.id, { file: fileName, hash: hs });
-            await migrateLegacy(fileName, s.code);
         }
     }
     for (const [fileName, s] of byFile) {
@@ -744,10 +663,9 @@ async function pollNow(): Promise<void> {
     if (!dirHandle) return;
     try {
         await pollSettings();
-        const { seen, aliases } = await scanFolder();
+        const seen = await scanFolder();
         const events = computeEvents(known, seen);
         known = seen;
-        realNameOf = aliases;
         await applyEvents(events);
         if (events.changed.length || events.added.length || events.removed.length) await persistState();
         lastPollError = "";

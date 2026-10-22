@@ -115,11 +115,10 @@ describe("page shim (onDom in the page)", () => {
         expect(domHandlersFor(dom, "https://c.com/")).toEqual([]);
     });
 
-    it("params resolve from the bundle; declareScript throws", () => {
+    it("params resolve from the bundle", () => {
         const { wt } = shim();
         expect(wt.params({ host: { type: "string" } })).toEqual({ host: "a.com" });
         expect(wt.defineParam("n", { type: "number" })).toBe(3);
-        expect(() => wt.declareScript({})).toThrow(/was removed/);
         expect(() => wt.onDom("*")).toThrow(/second argument/);
     });
 });

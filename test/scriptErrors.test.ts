@@ -164,17 +164,3 @@ describe("CDP tier: error logs carry name + user line:col", () => {
         expect(line!.message).toMatch(/Thrower:4:\d+/);
     });
 });
-
-describe("legacy `res` alias", () => {
-    it("binds res only for scripts that call res.<api>", async () => {
-        const { scriptFunction, usesLegacyApi } = await import("../src/shared/scriptFn");
-        expect(usesLegacyApi(`res.declareScript({ match: ["*"] })`)).toBe(true);
-        expect(usesLegacyApi(`const res = await fetch(u); wt.log(res.status)`)).toBe(false);
-        const seen: any[] = [];
-        const api = { log: (v: any) => seen.push(v) };
-        scriptFunction(`res.log(1); wt.log(2);`)(api, console, null, {}, {});
-        // a script may own a variable named res
-        scriptFunction(`const res = 3; wt.log(res);`)(api, console, null, {}, {});
-        expect(seen).toEqual([1, 2, 3]);
-    });
-});

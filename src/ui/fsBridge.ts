@@ -87,8 +87,6 @@ export async function openFolder(handlers?: FolderSyncHandlers): Promise<void> {
 
     const apiDts = await fetch(chrome.runtime.getURL(WT_API_DTS_URL)).then((r) => r.text());
     await writeHandleText(dirHandle, "wt-api.d.ts", apiDts);
-    // pre-rename typings declared a global `res` — drop them so it can't clash
-    await (dirHandle as any).removeEntry?.("res-api.d.ts").catch(() => {});
     await writeHandleText(
         dirHandle,
         "tsconfig.json",

@@ -145,15 +145,14 @@ describe("scripts folder sync", () => {
         await sync.stop();
     });
 
-    it("migrates old underscore file names to the exact script name", async () => {
-        const ss = await import("../src/background/engine/scriptStore");
-        await ss.saveScript({ id: "m1", code: "// same", name: "Redirect a URL" });
-        put("Redirect_a_URL.ts", "// same");
-        put("my notes (v2).ts", "// imported");
+    it("every .ts file is a script named exactly after it (no renaming)", async () => {
+        put("Redirect_a_URL.ts", "// a");
+        put("x.script.ts", "// b");
+        put("my notes (v2).ts", "// c");
         const sync = await import("../src/background/folderSync");
         await sync.startFromStoredHandle({ fresh: true });
-        expect([...files.keys()].filter((f) => f.endsWith(".ts") && !f.endsWith(".d.ts")).sort()).toEqual(["Redirect a URL.ts", "my notes (v2).ts"]);
-        expect(await names()).toEqual(["Redirect a URL", "my notes (v2)"]);
+        expect([...files.keys()].filter((f) => f.endsWith(".ts") && !f.endsWith(".d.ts")).sort()).toEqual(["Redirect_a_URL.ts", "my notes (v2).ts", "x.script.ts"]);
+        expect(await names()).toEqual(["Redirect_a_URL", "my notes (v2)", "x.script"]);
         await sync.stop();
     });
 });

@@ -1,7 +1,6 @@
 /**
  * Import/export bundle: export writes one YAML document (settings +
- * scripts), import accepts that YAML shape AND legacy JSON bundles (with a
- * `settings` object still applied).
+ * scripts), import accepts that YAML shape.
  * Settings land through the real apply path (settingsFile.applySettingsDoc
  * → params + globals).
  */
@@ -71,30 +70,8 @@ describe("export bundle shape (yaml)", () => {
 });
 
 describe("parseBundleText", () => {
-    it("legacy json bundle (settings object) → settings, still imports", () => {
-        const old = {
-            format: "wiretrick-bundle",
-            version: 1,
-            settings: { logLevel: "debug", logCap: 1234 },
-            scripts: [{ name: "Old", code: "", enabled: true }],
-        };
-        const b = parseBundleText(JSON.stringify(old));
-        expect(b).not.toBeNull();
-        expect(b!.settings).toEqual({ logLevel: "debug", logCap: 1234 });
-        expect(b!.scripts.length).toBe(1);
-    });
-
-    it("legacy json bundle with a settingsToml field → field ignored (settings are YAML)", () => {
-        const legacy = parseBundleText(
-            JSON.stringify({ format: "rescript-bundle", version: 1, settingsToml: '[settings]\nlogLevel = "warn"\n', scripts: [] })
-        );
-        expect(legacy).not.toBeNull();
-        expect(bundleSettingsDoc(legacy!)).toBeNull(); // no settings carried
-    });
-
-    it("exports from before the rename (format: rescript-bundle) still import", () => {
-        const old = parseBundleText("format: rescript-bundle\nversion: 1\nscripts:\n  - name: Old\n    code: wt.onDom(() => {})\n");
-        expect(old?.scripts.length).toBe(1);
+    it("other formats (rescript-bundle) → null", () => {
+        expect(parseBundleText("format: rescript-bundle\nversion: 1\nscripts:\n  - name: Old\n    code: wt.onDom(() => {})\n")).toBeNull();
     });
 
     it("non-bundle payloads → null (plain array / single script / yaml / garbage)", () => {

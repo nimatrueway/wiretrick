@@ -45,9 +45,6 @@ export interface CompiledScript {
     exports?: any;
 }
 
-import { DECLARE_REMOVED } from "./route";
-export { DECLARE_REMOVED };
-
 /** true if the value looks like a Promise (thenable). */
 export function isThenable(v: any): v is Promise<any> {
     return !!v && typeof v.then === "function";
@@ -331,9 +328,6 @@ function makeShim(owner: ReturnType<typeof createOwner>, overrides?: ResApiOverr
         defineParam: (name: string, def: ParamDef) => {
             if (typeof name !== "string" || !name) throw new Error("wt.defineParam: first argument must be the parameter name");
             return owner.add({ [name]: def }, "wt.defineParam")[name];
-        },
-        declareScript: () => {
-            throw new Error(DECLARE_REMOVED);
         },
         storage: overrides?.storage || {
             get: () => undefined,

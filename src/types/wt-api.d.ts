@@ -57,7 +57,10 @@ declare namespace Wiretrick {
      *   no documents, `<script src>`, images or worker requests, and no
      *   `onResponseHeaders`.
      * - `"webrequest"` — blocking webRequest. Firefox (reads bodies) and MV2
-     *   Chromium (no `modifyResponse`, sync handlers only).
+     *   Chromium (no `modifyResponse`, sync handlers only). On Chromium the
+     *   page itself (`main_frame`) can be redirected and its headers changed,
+     *   but a replaced page is served from a `chrome-extension://` URL — use
+     *   `"process"` or `"cdp"` to rewrite or replace the page in place.
      * - `"cdp"` — the Chrome debugger. Sees everything; Chrome shows a
      *   "started debugging this browser" banner while attached. Chromium only.
      *
@@ -643,9 +646,6 @@ declare const wt: {
      * wt.log("request to", ctx.url, { method: ctx.method });
      */
     log(...args: unknown[]): void;
-
-    /** @deprecated Removed — pass the URL pattern to each handler, `wt.params({…})` for parameters, `wt.describe("…")` for the description. Calling it throws. */
-    declareScript(def: unknown): never;
 };
 
 /*

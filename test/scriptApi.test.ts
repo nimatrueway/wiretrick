@@ -1,11 +1,10 @@
 /**
  * Script API: per-handler routes, wt.describe, wt.params / wt.defineParam,
- * utilities (no handlers), and the removed wt.declareScript.
+ * and utilities (no handlers).
  */
 import { describe, expect, it } from "vitest";
 import "../src/shared/transpile"; // register the sucrase TS/imports transpiler
 import { compileScript } from "../src/shared/compile";
-import { DECLARE_REMOVED } from "../src/shared/route";
 import { paramDefault, resolveParamValues, isValidParamValue } from "../src/shared/scriptDef";
 
 const CODE = `
@@ -76,10 +75,6 @@ describe("script API", () => {
         expect(c.meta.active).toBe(false);
         expect(c.paramDefs).toHaveProperty("n");
         expect(c.handlers.onRequest).toHaveLength(0);
-    });
-
-    it("wt.declareScript throws a migration error", () => {
-        expect(compileScript(`wt.declareScript({ match: ["*"] });`).error).toContain(DECLARE_REMOVED);
     });
 
     it("route errors surface as script errors", () => {

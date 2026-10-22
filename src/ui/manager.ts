@@ -1954,15 +1954,12 @@ async function main(): Promise<void> {
     $("#btn-import").addEventListener("click", () => {
         const input = document.createElement("input");
         input.type = "file";
-        input.accept = ".yaml,.yml,.json,.ts,.js";
+        input.accept = ".yaml,.yml,.ts,.js";
         input.onchange = async () => {
             const file = input.files?.[0];
             if (!file) return;
             const text = await file.text();
-            const isYaml = /\.ya?ml$/i.test(file.name);
-            if (isYaml || file.name.endsWith(".json")) {
-                // bundle formats: yaml (new) or json (legacy, incl. its
-                // settings object)
+            if (/\.ya?ml$/i.test(file.name)) {
                 const full = parseBundleText(text);
                 if (full) {
                     const offset = full.settings ? 1 : 0;
@@ -2002,21 +1999,13 @@ async function main(): Promise<void> {
                     status(`imported ${bundle.scripts.length} script(s)${bundle.settings ? " + settings" : ""} ✓`);
                     return;
                 }
-                if (isYaml) {
-                    status('not a Wiretrick export (missing "format: wiretrick-bundle")', "error");
-                    return;
-                }
-                // legacy: a plain json array / single script object
-                const parsed = JSON.parse(text);
-                const items = Array.isArray(parsed) ? parsed : [parsed];
-                for (const item of items) await saveImported(item);
-                status(`imported ${items.length} script(s) ✓`);
-            } else {
-                const base = cleanScriptName(file.name.replace(/\.ts$/i, "").replace(/\.script$/i, "")) || "Imported script";
-                const name = uniqueScriptName(base, scripts.map((s) => s.meta.name));
-                await send({ type: "saveScript", id: uuid(), code: text, name });
-                status("imported script ✓");
+                status('not a Wiretrick export (missing "format: wiretrick-bundle")', "error");
+                return;
             }
+            const base = cleanScriptName(file.name.replace(/\.ts$/i, "")) || "Imported script";
+            const name = uniqueScriptName(base, scripts.map((s) => s.meta.name));
+            await send({ type: "saveScript", id: uuid(), code: text, name });
+            status("imported script ✓");
             await refresh();
         };
         input.click();
