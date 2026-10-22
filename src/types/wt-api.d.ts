@@ -599,7 +599,9 @@ declare const wt: {
      * the manager and settings.yaml without touching the script. Returns
      * the current values (stored values over your defaults), typed from
      * your defs. Routes may be built from them — a change re-runs the
-     * script. Utilities may declare params too.
+     * script. Utilities may declare params too (listed in the popup; one
+     * that registers handlers only for some value becomes a script then).
+     * Definitions may come from an import (`{ env: envParam }`, `{ ...defs }`).
      *
      * @param defs Parameter name → definition (`type`, `default`, optional
      *   `description`); see {@link Wiretrick.ParamDef}.

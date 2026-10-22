@@ -497,10 +497,10 @@ export function createPipeline(
         if (msg && msg.type === "listScripts") {
             listScripts().then(async (scripts) => {
                 // scripts saved before params existed have no stored
-                // paramDefs — compile them on the fly (imports stubbed: we
-                // only need declarations here) so the UI can offer ⚙
-                const missing = scripts.filter((s) => s.paramDefs === undefined);
-                const analyzed = await analyzeScripts(missing.map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt })));
+                // paramDefs — compile them on the fly so the UI can offer ⚙
+                // (with every script: imported param definitions resolve)
+                const missing = scripts.some((s) => s.paramDefs === undefined);
+                const analyzed = missing ? await analyzeScripts(scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt })), await loadAllParamValues()) : new Map<string, Analyzed>();
                 const errors = await getScriptErrors();
                 const typeErrors = await getScriptTypeErrors();
                 sendResponse(
@@ -622,7 +622,8 @@ export function createPipeline(
                     return;
                 }
                 // analyze with all scripts so the module resolver sees imported libraries
-                const analyzed = await analyzeScripts(scripts.map((x) => ({ id: x.id, name: x.meta.name, code: x.code, updatedAt: x.updatedAt })));
+                // (and the stored values: params may be declared conditionally)
+                const analyzed = await analyzeScripts(scripts.map((x) => ({ id: x.id, name: x.meta.name, code: x.code, updatedAt: x.updatedAt })), await loadAllParamValues());
                 const defs = analyzed.get(s.id)?.paramDefs || {};
                 sendResponse({
                     defs,

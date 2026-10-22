@@ -149,6 +149,21 @@ const SCRIPTS: Record<string, SampleScript> = {
 };
 for (const s of Object.values(SCRIPTS)) await saveScript(s.id, s.code, s.name);
 
+// ---------- 0. imported param definitions + param-gated utility ----------
+{
+    const send = (msg: any): Promise<any> => mgr.evaluate((m) => new Promise((r) => chrome.runtime.sendMessage(m, (x) => r(x ?? null))), msg);
+    await saveScript("s_plib", `export const envParam = { type: "stringList", default: ["dev"] } as const;\nconst p = wt.params({ on: { type: "boolean", default: false } });\nif (p.on) wt.onRequest("*://never.invalid/*", () => {});`, "param-lib");
+    const user = await saveScript("s_puser", `import { envParam } from "./param-lib";\nwt.params({ intercept_environments: envParam });\nwt.onRequest("*://never.invalid/*", () => {});`, "param-user");
+    check("imported param def: no bogus compile error, def captured", !user?.error && user?.paramDefs?.intercept_environments?.type === "stringList", JSON.stringify({ error: user?.error?.split("\n")[0], defs: user?.paramDefs }));
+    const lib = (await send({ type: "listScripts" })).find((s: any) => s.id === "s_plib");
+    check("param-gated utility stored as a utility with params", lib?.meta?.active === false && lib?.paramDefs?.on?.type === "boolean", JSON.stringify(lib?.meta));
+    await send({ type: "setScriptParam", scriptId: "s_plib", key: "on", value: true });
+    const flipped = (await send({ type: "listScripts" })).find((s: any) => s.id === "s_plib");
+    check("utility param on → it becomes a script", flipped?.meta?.active === true, JSON.stringify(flipped?.meta));
+    await send({ type: "deleteScript", id: "s_puser" });
+    await send({ type: "deleteScript", id: "s_plib" });
+}
+
 const newPage = async (pathName: string): Promise<any> => {
     const p = await ctx.newPage();
     p.on("console", (m) => console.log(`  [page${pathName}]`, m.text().slice(0, 160)));

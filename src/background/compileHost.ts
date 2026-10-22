@@ -8,13 +8,14 @@
  * execution are RPCs into the sandbox page (bridged by the offscreen
  * document) — the ONLY eval-permitted context in MV3:
  *
- *   compileForStorage / analyzeScripts → sandbox 'analyze'
+ *   compileForStorage                  → sandbox 'compileOne'
+ *   analyzeScripts                     → sandbox 'analyze'
  *   runBodyOp                          → sandbox 'run'
  *
  * scriptStore and the pipeline never call compileScript directly; they go
  * through this module.
  */
-import { compileScript, makeModuleResolver, makeStubModule } from "../shared/compile";
+import { compileScript, compileWithLibs, makeModuleResolver } from "../shared/compile";
 import { defaultMeta, type ResMeta } from "../shared/metaParser";
 import type { ParamDef } from "../shared/scriptDef";
 import { dlogLevel } from "../shared/debugLog";
@@ -170,31 +171,51 @@ if (__MV3__) {
 /** compileForStorage error when the sandbox host itself failed (not user code). */
 export const SANDBOX_COMPILE_FAILED = "sandbox compile failed";
 
+/** the stored scripts a save-time compile resolves imports against */
+export interface StorageCompileContext {
+    /** the saved script's id (it replaces its stored copy in `scripts`) */
+    id: string;
+    scripts: { id: string; name: string; code: string }[];
+    /** every script's stored param values (libraries compile with theirs) */
+    paramValues?: ParamValues;
+}
+
 /**
  * Compile a saved script for storage: meta + paramDefs (saveScript path).
- * Imports are stubbed here, so routes built from imported values come
- * out empty — the reload-time analyze (real imports) fills them in.
+ * Imports resolve against the stored scripts in `ctx` (so e.g. a param
+ * definition imported from a utility is captured with its real type);
+ * imports with no matching (or a broken) library resolve to inert stubs —
+ * routes built from those come out empty until the reload-time analyze.
  */
-export async function compileForStorage(code: string, name?: string, paramValues?: Record<string, any>): Promise<{ meta: ResMeta; paramDefs: Record<string, ParamDef>; error: string | null }> {
+export async function compileForStorage(
+    code: string,
+    name?: string,
+    paramValues?: Record<string, any>,
+    ctx?: StorageCompileContext
+): Promise<{ meta: ResMeta; paramDefs: Record<string, ParamDef>; error: string | null }> {
     const label = name || "x";
+    const id = ctx?.id ?? "x";
+    const target = { id, name: label, code };
+    const scripts = (ctx?.scripts ?? []).filter((s) => s.id !== id);
+    const values: ParamValues = { ...(ctx?.paramValues ?? {}), [id]: paramValues ?? {} };
     if (!__MV3__) {
-        const c = compileScript(code, { importModule: () => makeStubModule(), paramValues });
+        const c = compileWithLibs(target, scripts, values);
         dlogLevel(
             "compile", c.error ? "error" : "debug",
-            `compiled "${label}" → active=${c.meta.active} match=${JSON.stringify(c.meta.match)} params=[${Object.keys(c.paramDefs || {}).join(", ")}]${c.error ? " ERROR " + c.error.split("\n")[0] : ""}`
+            `compiled "${label}" → active=${c.meta.active} match=${JSON.stringify(c.meta.match)} params=[${Object.keys(c.paramDefs || {}).join(", ")}] deps=[${c.deps.join(", ")}]${c.error ? " ERROR " + c.error.split("\n")[0] : ""}`
         );
         return { meta: c.meta, paramDefs: c.paramDefs || {}, error: c.error };
     }
     await ensureOffscreen();
-    const resp = await sandboxCallSafe({ op: "analyze", scripts: [{ id: "x", name: label, code, updatedAt: 0, enabled: true }], paramValues: paramValues ? { x: paramValues } : {} });
-    const r = resp?.results?.x;
+    const resp = await sandboxCallSafe({ op: "compileOne", target, scripts, paramValues: values });
+    const r = resp?.result;
     if (!r) {
-        dlogLevel("compile", "warn", `compileForStorage "${label}": sandbox analyze returned nothing — script meta NOT updated`);
+        dlogLevel("compile", "warn", `compileForStorage "${label}": sandbox compile returned nothing — script meta NOT updated`);
         return { meta: defaultMeta(), paramDefs: {}, error: SANDBOX_COMPILE_FAILED };
     }
     dlogLevel(
         "compile", r.error ? "error" : "debug",
-        `compiled "${label}" → active=${r.meta.active} match=${JSON.stringify(r.meta.match)} params=[${Object.keys(r.paramDefs || {}).join(", ")}]${r.error ? " ERROR " + r.error.split("\n")[0] : ""}`
+        `compiled "${label}" → active=${r.meta.active} match=${JSON.stringify(r.meta.match)} params=[${Object.keys(r.paramDefs || {}).join(", ")}] deps=[${(r.deps || []).join(", ")}]${r.error ? " ERROR " + r.error.split("\n")[0] : ""}`
     );
     return { meta: r.meta, paramDefs: r.paramDefs, error: r.error };
 }

@@ -39,9 +39,10 @@ export function Popup({ api }: { api: PopupApi }) {
         };
     }, []);
 
-    // utilities (no handlers) never appear in the popup — they're
-    // inert on their own and only imported by other scripts
-    const visible = load.state === "ready" ? load.scripts.filter((s) => s.meta.active !== false) : [];
+    // utilities (no handlers) appear only when they declare params — a
+    // param value may turn one into a script (handlers registered under
+    // `if (p.on)`), and imported helpers may read them
+    const visible = load.state === "ready" ? load.scripts.filter((s) => s.meta.active !== false || hasParams(s)) : [];
 
     return (
         <>
@@ -65,21 +66,30 @@ export function Popup({ api }: { api: PopupApi }) {
     );
 }
 
+const hasParams = (s: ScriptInfo) => !!s.paramDefs && Object.keys(s.paramDefs).length > 0;
+
 function ScriptRow({ script, api, onChanged, version }: { script: ScriptInfo; api: PopupApi; onChanged: () => void; version: number }) {
     const [open, setOpen] = useState(false);
-    const hasParams = !!script.paramDefs && Object.keys(script.paramDefs).length > 0;
+    const isLib = script.meta.active === false;
     const health = scriptHealth(script);
     return (
         <>
-            <li class="script-item">
-                <Switch
-                    on={script.enabled}
-                    title={script.enabled ? "Disable" : "Enable"}
-                    onToggle={async (next) => {
-                        await api.setEnabled(script.id, next);
-                        onChanged();
-                    }}
-                />
+            <li class={isLib ? "script-item utility" : "script-item"}>
+                {isLib ? (
+                    // utilities have no enabled switch (same as the manager / settings.yaml)
+                    <span class="util-ind" role="img" aria-label="utility" title="Utility — registers no handlers with its current params; importable by other scripts">
+                        𝑓
+                    </span>
+                ) : (
+                    <Switch
+                        on={script.enabled}
+                        title={script.enabled ? "Disable" : "Enable"}
+                        onToggle={async (next) => {
+                            await api.setEnabled(script.id, next);
+                            onChanged();
+                        }}
+                    />
+                )}
                 <span class={health ? "script-name error" : "script-name"} title={script.meta.description}>
                     {script.meta.name}
                 </span>
@@ -104,7 +114,7 @@ function ScriptRow({ script, api, onChanged, version }: { script: ScriptInfo; ap
                 <button class="btn-icon" title="Open in full manager" aria-label="Edit" onClick={() => api.openManager(script.id)}>
                     <IconPen />
                 </button>
-                {hasParams && (
+                {hasParams(script) && (
                     <button
                         class="btn-fold"
                         title={open ? "Hide parameters" : "Show parameters"}

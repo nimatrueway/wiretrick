@@ -69,6 +69,8 @@ body.resizing * { pointer-events: none; }
     white-space: nowrap;
 }
 .script-name.error { color: var(--err); }
+.script-item.utility .script-name { color: var(--fg-dim); font-style: italic; }
+.util-ind { width: 28px; flex-shrink: 0; text-align: center; color: var(--fg-dim); cursor: help; }
 .err-ind { color: var(--err); font-size: 12px; padding: 0 2px; cursor: help; flex-shrink: 0; }
 .err-ind.runtime { color: var(--warn); cursor: pointer; }
 .err-ind.runtime:hover { color: var(--err); }

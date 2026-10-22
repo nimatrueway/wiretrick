@@ -187,7 +187,8 @@ newlines), `enum` (dropdown of `choices`), `stringList` (add/remove list).
 ## Utilities and recipes
 
 A file that registers no handlers is a **utility**: it never runs on its
-own (hidden from the popup) but other scripts import it:
+own (the popup lists it only when it declares params) but other scripts
+import it:
 
 ```ts
 // saved script named "utils" (utils.ts in the synced folder):
@@ -213,8 +214,28 @@ mockJson("*://api.example.com/me", { id: 1, role: "admin" });
 ```
 
 Utilities may declare params too, as shared config. They're editable in the
-manager and `settings.yaml` (not in the popup), and importers see the
-utility's values.
+popup (marked 𝑓, no enabled switch), the manager and `settings.yaml`, and
+importers see the utility's values. Whether a file is a utility is decided
+with its current param values, so a utility that registers handlers only
+for some value becomes a script when you change it (and back):
+
+```ts
+// utility "gate": a utility until "on" is switched on
+const p = wt.params({ on: { type: "boolean", default: false } });
+if (p.on) wt.onRequest("*://api.example.com/*", () => ({ cancel: true }));
+```
+
+Param definitions can be shared too — export them from a utility and pass
+them to `wt.params` (directly or spread); the importer gets its own values:
+
+```ts
+// utility "utils":
+export const envParam = { type: "stringList", default: ["dev"] } as const;
+
+// script:
+import { envParam } from "./utils";
+const cfg = wt.params({ intercept_environments: envParam });
+```
 
 ## DOM changes — `wt.onDom`
 

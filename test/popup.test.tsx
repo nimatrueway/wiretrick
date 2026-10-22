@@ -38,10 +38,39 @@ const script = (id: string, name: string, extra: Partial<ScriptInfo> = {}): Scri
 const names = (c: Element) => [...c.querySelectorAll("#script-list .script-name")].map((n) => n.textContent);
 
 describe("Popup", () => {
-    it("lists active scripts and hides utilities", async () => {
+    it("lists active scripts and hides utilities without params", async () => {
         const { container } = render(<Popup api={fakeApi([script("a", "Alpha"), script("l", "lib", { meta: { name: "lib", active: false } })])} />);
         await waitFor(() => expect(names(container)).toEqual(["Alpha"]));
         expect(container.querySelector("#empty")).toBeNull();
+    });
+
+    it("lists utilities that declare params, without an enabled switch, with editable params", async () => {
+        const defs = { on: { type: "boolean", default: false, description: "Turn interception on" } } as any;
+        let values: any = { on: false };
+        const util = (active: boolean) => script("u", "gate", { meta: { name: "gate", active }, paramDefs: defs });
+        const api = fakeApi([script("a", "Alpha"), util(false)]);
+        api.getParams = vi.fn(async () => ({ defs, values }));
+        let fire = () => {};
+        api.onChange = (fn) => ((fire = fn), () => {});
+        const { container } = render(<Popup api={api} />);
+        await waitFor(() => expect(names(container)).toEqual(["Alpha", "gate"]));
+        const row = () => container.querySelectorAll("#script-list .script-item")[1];
+        expect(row().classList.contains("utility")).toBe(true);
+        expect(row().querySelector(".switch")).toBeNull();
+        expect(row().querySelector(".util-ind")).not.toBeNull();
+
+        fireEvent.click(row().querySelector(".btn-fold")!);
+        await screen.findByText("Turn interception on");
+        fireEvent.click(container.querySelector(".param-fold .switch")!);
+        expect(api.calls).toContainEqual(["setParam", "u", "on", true]);
+
+        // the extension recompiled it with on=true: it registered handlers → a script
+        values = { on: true };
+        (api.listScripts as any).mockImplementation(async () => [script("a", "Alpha"), util(true)]);
+        fire();
+        await waitFor(() => expect(row().classList.contains("utility")).toBe(false));
+        expect(row().querySelector(".switch.on")).not.toBeNull();
+        expect(container.querySelector(".param-fold .switch.on")).not.toBeNull(); // fold stays open
     });
 
     it("shows the empty state", async () => {

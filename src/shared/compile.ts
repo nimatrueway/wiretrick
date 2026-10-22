@@ -139,9 +139,13 @@ export function compileScript(code: string, overrides?: ResApiOverrides): Compil
 
 const stubs = new WeakSet<object>();
 
+/** a value that came from a stubbed import (meta-only compiles) */
+function isStub(x: unknown): boolean {
+    return typeof x === "function" && stubs.has(x as object);
+}
+
 /** a route that mentions a stubbed import — its real value is only known once imports resolve */
 function mentionsStub(route: unknown): boolean {
-    const isStub = (x: unknown) => typeof x === "function" && stubs.has(x as object);
     if (isStub(route)) return true;
     const parts: unknown[] = Array.isArray(route) ? route : route && typeof route === "object" ? [(route as any).url, (route as any).exclude] : [];
     return parts.some((p) => isStub(p) || (Array.isArray(p) && p.some(isStub)));
@@ -169,7 +173,8 @@ export function makeStubModule(): any {
  */
 export function makeModuleResolver(
     scripts: { id: string; name: string; code: string }[],
-    overridesFor: (s: { id: string; name: string; code: string }) => ResApiOverrides
+    overridesFor: (s: { id: string; name: string; code: string }) => ResApiOverrides,
+    opts?: { stubUnresolved?: boolean }
 ): { resolve: (spec: string) => any; deps: Set<string> } {
     const cache = new Map<string, any>();
     const compiling = new Set<string>();
@@ -190,7 +195,10 @@ export function makeModuleResolver(
         const key = norm(spec);
         if (cache.has(key)) return cache.get(key);
         const lib = byKey.get(key);
-        if (!lib) throw new Error(`unknown module "${spec}" — no script named "${spec.replace(/^\.\//, "").replace(/\.(ts|js)$/, "")}"`);
+        if (!lib) {
+            if (opts?.stubUnresolved) return makeStubModule();
+            throw new Error(`unknown module "${spec}" — no script named "${spec.replace(/^\.\//, "").replace(/\.(ts|js)$/, "")}"`);
+        }
         deps.add(lib.name);
         if (compiling.has(key)) return cache.get(key); // cycle: partial exports
         compiling.add(key);
@@ -202,20 +210,50 @@ export function makeModuleResolver(
         // the lib's own top-level registrations make IT active (it's compiled
         // on its own as a script too); recipes it exports and the importer
         // calls register into the importer's collector
-        withCollector(createCollector(), () =>
-            scriptFunction(js)(
-                makeShim(createOwner(defaultMeta(lib.name), libOverrides.paramValues), libOverrides),
-                makeForwardingConsole(libOverrides.logSink),
-                resolve,
-                moduleObj,
-                moduleObj.exports
-            )
-        );
+        try {
+            withCollector(createCollector(), () =>
+                scriptFunction(js)(
+                    makeShim(createOwner(defaultMeta(lib.name), libOverrides.paramValues), libOverrides),
+                    makeForwardingConsole(libOverrides.logSink),
+                    resolve,
+                    moduleObj,
+                    moduleObj.exports
+                )
+            );
+        } catch (e) {
+            compiling.delete(key);
+            if (!opts?.stubUnresolved) throw e;
+            // meta-only: a broken library is inert, not the importer's compile error
+            const stub = makeStubModule();
+            cache.set(key, stub);
+            return stub;
+        }
         compiling.delete(key);
         cache.set(key, moduleObj.exports);
         return moduleObj.exports;
     };
     return { resolve, deps };
+}
+
+/**
+ * Meta-only compile of one script against the stored scripts (save time):
+ * imports resolve to the REAL libraries where a script by that name exists
+ * — params/routes built from imported values (e.g. a param definition
+ * exported by a utility) are captured — and to silent stubs otherwise.
+ * `target` replaces any stored script with the same id.
+ */
+export function compileWithLibs(
+    target: { id: string; name: string; code: string },
+    scripts: { id: string; name: string; code: string }[],
+    paramValues?: { [scriptId: string]: Record<string, any> | undefined }
+): CompiledScript & { deps: string[] } {
+    const resolver = makeModuleResolver(
+        [target, ...scripts.filter((s) => s.id !== target.id)],
+        (lib) => ({ paramValues: paramValues?.[lib.id] }),
+        { stubUnresolved: true }
+    );
+    const c = compileScript(target.code, { importModule: resolver.resolve, paramValues: paramValues?.[target.id] });
+    return { ...c, deps: [...resolver.deps] };
 }
 
 /**
@@ -284,16 +322,27 @@ function createOwner(meta: ResMeta, storedValues?: Record<string, any>) {
             meta.description = String(text ?? "");
         },
         add(next: Record<string, ParamDef>, where: string): Record<string, any> {
+            // defs that come from a stubbed import (meta-only compiles) are
+            // unknown here, not invalid: skip them — their values read as
+            // stubs — instead of failing the whole script
+            if (isStub(next)) return next;
             if (!next || typeof next !== "object") throw new Error(`${where}: expected an object of parameter definitions`);
+            const known: Record<string, ParamDef> = {};
+            const unknown: Record<string, any> = {};
             for (const [k, d] of Object.entries(next)) {
                 if (defs && k in defs) throw new Error(`${where}: parameter "${k}" is already defined`);
+                if (isStub(d) || (d && typeof d === "object" && Object.values(d).some(isStub))) {
+                    unknown[k] = makeStubModule();
+                    continue;
+                }
                 if (!d || typeof d !== "object" || !PARAM_TYPES.includes((d as any).type)) {
                     throw new Error(`${where}: parameter "${k}" needs a type (${PARAM_TYPES.join(", ")})`);
                 }
                 if ((d as any).type === "enum" && !Array.isArray((d as any).choices)) throw new Error(`${where}: enum parameter "${k}" needs choices`);
+                known[k] = d;
             }
-            defs = { ...(defs || {}), ...next };
-            return resolveParamValues(next, storedValues);
+            if (Object.keys(known).length) defs = { ...(defs || {}), ...known };
+            return { ...resolveParamValues(known, storedValues), ...unknown };
         },
         get defs() {
             return defs;
@@ -324,7 +373,10 @@ function makeShim(owner: ReturnType<typeof createOwner>, overrides?: ResApiOverr
         modifyResponse: register("modifyResponse"),
         onDom: register("onDom"),
         describe: (text: unknown) => owner.describe(text),
-        params: (defs: Record<string, ParamDef>) => Object.freeze(owner.add(defs, "wt.params")),
+        params: (defs: Record<string, ParamDef>) => {
+            const values = owner.add(defs, "wt.params");
+            return isStub(values) ? values : Object.freeze(values); // a stub proxy can't be frozen
+        },
         defineParam: (name: string, def: ParamDef) => {
             if (typeof name !== "string" || !name) throw new Error("wt.defineParam: first argument must be the parameter name");
             return owner.add({ [name]: def }, "wt.defineParam")[name];

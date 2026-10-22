@@ -161,6 +161,22 @@ try {
     const importer = list2.find((s: any) => s.meta.name === "api-interceptor");
     check("importing script listed as active with params", importer?.meta?.active === true && !!importer?.paramDefs?.label, JSON.stringify(list2?.map((s: any) => [s.meta.name, s.meta.active])));
 
+    // imported param definitions resolve at save time (sandbox compileOne);
+    // a param-gated utility turns into a script when its param flips
+    {
+        const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
+        await send({ type: "saveScript", id: "s_plib", name: "param-lib", code: `export const envParam = { type: "stringList", default: ["dev"] } as const;\nconst p = wt.params({ on: { type: "boolean", default: false } });\nif (p.on) wt.onRequest("*://never.invalid/*", () => {});` });
+        const user = await send({ type: "saveScript", id: "s_puser", name: "param-user", code: `import { envParam } from "./param-lib";\nwt.params({ intercept_environments: envParam });\nwt.onRequest("*://never.invalid/*", () => {});` });
+        check("imported param def: no bogus compile error, def captured", !user?.error && user?.paramDefs?.intercept_environments?.type === "stringList", JSON.stringify({ error: user?.error?.split("\n")[0], defs: user?.paramDefs }));
+        const lib = (await send({ type: "listScripts" })).find((s: any) => s.id === "s_plib");
+        check("param-gated utility stored as a utility with params", lib?.meta?.active === false && lib?.paramDefs?.on?.type === "boolean", JSON.stringify(lib?.meta));
+        await send({ type: "setScriptParam", scriptId: "s_plib", key: "on", value: true });
+        const flipped = (await send({ type: "listScripts" })).find((s: any) => s.id === "s_plib");
+        check("utility param on → it becomes a script", flipped?.meta?.active === true, JSON.stringify(flipped?.meta));
+        await send({ type: "deleteScript", id: "s_puser" });
+        await send({ type: "deleteScript", id: "s_plib" });
+    }
+
     // 3. settings.yaml round-trip
     const settings = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "getSettingsYaml" }, r)));
     check("settings.yaml generated (SW storage path)", typeof settings?.text === "string" && settings.text.includes("MV3 hook"));

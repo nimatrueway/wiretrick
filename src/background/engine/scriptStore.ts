@@ -83,11 +83,14 @@ export async function saveScript(partial: Pick<Script, "id" | "code"> & Partial<
     // compiling so sandbox analyze logs identify the script.
     const name = partial.name ?? prev?.meta.name;
     // compile (not just parse) so handler routes and params land in meta;
-    // imports resolve to stubs here — capture must not depend on other
-    // scripts loading cleanly (routes built from imports are refined by the
+    // imports resolve against the other stored scripts (a param definition
+    // imported from a utility is captured with its real type) and to stubs
+    // where they don't resolve — capture must not depend on other scripts
+    // loading cleanly (routes built from imports are refined by the
     // reload-time analyze). MV3: compiles in the sandbox page (the SW
     // cannot eval) — see compileHost.
-    const compiled = await compileForStorage(partial.code, name, (await loadAllParamValues())[partial.id]);
+    const allValues = await loadAllParamValues();
+    const compiled = await compileForStorage(partial.code, name, allValues[partial.id], { id: partial.id, scripts: plain(byId), paramValues: allValues });
     // MV3 sandbox RPC failure (host unavailable): keep the previous
     // meta/paramDefs rather than corrupting an active script into a
     // utility — the next save recomputes. (The sentinel error string comes
@@ -111,6 +114,13 @@ export async function saveScript(partial: Pick<Script, "id" | "code"> & Partial<
     if (!order.includes(partial.id)) {
         order.push(partial.id);
     }
+    // new code/name → the scripts importing it see different exports (or,
+    // for a library saved after its importers, see it at all)
+    if (!prev || prev.code !== script.code || prev.meta.name !== script.meta.name) {
+        const importers = dependantsOf(script.meta.name, plain(byId)).filter((id) => id !== script.id);
+        if (prev && prev.meta.name !== script.meta.name) importers.push(...dependantsOf(prev.meta.name, plain(byId)).filter((id) => id !== script.id && !importers.includes(id)));
+        await recompileMeta(byId, importers, allValues);
+    }
     await storageSet({ [STORE_KEY]: byId, [ORDER_KEY]: order });
     if (prev && prev.meta.name !== script.meta.name) {
         for (const fn of renameListeners) await fn(prev.meta.name, script.meta.name);
@@ -126,13 +136,44 @@ export async function saveScript(partial: Pick<Script, "id" | "code"> & Partial<
     return script;
 }
 
+function plain(byId: { [id: string]: Script }): { id: string; name: string; code: string }[] {
+    return Object.values(byId).map((x) => ({ id: x.id, name: x.meta.name, code: x.code }));
+}
+
+/**
+ * Re-derive stored meta/paramDefs/error of `ids` in place (their code is
+ * unchanged, but what they import or their param values changed — e.g. a
+ * utility whose handlers register only for some param value becomes a
+ * script). Returns the ids that changed. updatedAt is left alone: the
+ * code didn't change.
+ */
+async function recompileMeta(byId: { [id: string]: Script }, ids: string[], allValues: { [scriptId: string]: Record<string, any> }): Promise<string[]> {
+    const changed: string[] = [];
+    for (const id of ids) {
+        const s = byId[id];
+        if (!s) continue;
+        const c = await compileForStorage(s.code, s.meta.name, allValues[id], { id, scripts: plain(byId), paramValues: allValues });
+        if (c.error === SANDBOX_COMPILE_FAILED) continue; // keep what we have
+        const meta = { ...c.meta, name: s.meta.name };
+        const paramDefs = c.paramDefs ?? s.paramDefs;
+        if (JSON.stringify([meta, paramDefs, c.error]) === JSON.stringify([s.meta, s.paramDefs, s.error])) continue;
+        byId[id] = { ...s, meta, paramDefs, error: c.error };
+        changed.push(id);
+    }
+    return changed;
+}
+
 export async function deleteScript(id: string): Promise<void> {
     void clearScriptErrors(id);
     void clearScriptTypeErrors(id);
     const obj = await storageGet([STORE_KEY, ORDER_KEY]);
     const byId: { [id: string]: Script } = obj[STORE_KEY] || {};
     const order: string[] = obj[ORDER_KEY] || [];
+    const gone = byId[id];
+    const importers = gone ? dependantsOf(gone.meta.name, plain(byId)).filter((x) => x !== id) : [];
     delete byId[id];
+    // its importers' imports now resolve to stubs: drop what came from it (e.g. imported param defs)
+    if (importers.length) await recompileMeta(byId, importers, await loadAllParamValues());
     await storageSet({
         [STORE_KEY]: byId,
         [ORDER_KEY]: order.filter((x) => x !== id),
@@ -184,5 +225,21 @@ export async function setParamValue(scriptId: string, key: string, value: any): 
     const all = await loadAllParamValues();
     all[scriptId] = { ...(all[scriptId] || {}), [key]: value };
     await storageSet({ [PARAMS_KEY]: all });
+    // handlers/params may depend on param values (a utility that registers
+    // handlers only when a param is on turns into a script): refresh the
+    // stored meta of the script and its importers
+    const obj = await storageGet(STORE_KEY);
+    const byId: { [id: string]: Script } = obj[STORE_KEY] || {};
+    const s = byId[scriptId];
+    const changed = s ? await recompileMeta(byId, [scriptId, ...dependantsOf(s.meta.name, plain(byId)).filter((id) => id !== scriptId)], all) : [];
+    if (changed.length) {
+        // re-read: a save may have landed while compiling (MV3: sandbox RPC)
+        const fresh: { [id: string]: Script } = (await storageGet(STORE_KEY))[STORE_KEY] || {};
+        for (const id of changed) {
+            const u = byId[id];
+            if (fresh[id]?.code === u.code) fresh[id] = { ...fresh[id], meta: u.meta, paramDefs: u.paramDefs, error: u.error };
+        }
+        await storageSet({ [STORE_KEY]: fresh });
+    }
     notify();
 }

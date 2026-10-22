@@ -93,7 +93,7 @@ export function mockJson(url: string, body: object) {
 import { mockJson } from "./mocks";
 mockJson("*://api.example.com/me", { id: 1, role: "admin" });
 
-Utilities may declare params (shared config, editable in the manager and settings.yaml). Imports work everywhere (background and the page-side onDom hook). "./utils", "utils", "utils.ts" all resolve.`,
+Utilities may declare params (shared config, editable in the popup, the manager and settings.yaml); a utility that registers handlers only for some param value becomes a script when it's set. Exported param definitions can be passed to wt.params ({ env: envParam } or { ...defs }). Imports work everywhere (background and the page-side onDom hook). "./utils", "utils", "utils.ts" all resolve.`,
     },
     {
         title: "wt.onRequest — redirect, cancel, request headers",
