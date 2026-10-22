@@ -31,6 +31,8 @@ try {
     await mgr.setViewportSize({ width: 1280, height: 720 });
     await mgr.goto(`chrome-extension://${EXT_ID}/manager.html`);
     const send = (msg: any) => mgr.evaluate((m: any) => new Promise<any>((r) => chrome.runtime.sendMessage(m, r)), msg);
+    // no local helper here: use the debugger strategy so the log shows real activity
+    await mgr.evaluate(() => new Promise<void>((r) => chrome.storage.local.set({ resStrategy: "cdp" }, () => r())));
 
     for (const name of SHOWN) {
         const s = SAMPLES.find((x) => x.name === name)!;
@@ -48,7 +50,8 @@ try {
     await sleep(2500);
     await mgr.screenshot({ path: path.join(OUT, "manager.png") });
 
-    await mgr.click("#btn-samples");
+    await mgr.click("#btn-help");
+    await mgr.click('[data-help-tab="samples"]');
     await sleep(800);
     await mgr.screenshot({ path: path.join(OUT, "samples.png") });
 
