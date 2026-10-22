@@ -66,6 +66,9 @@ const server = http.createServer((req: http.IncomingMessage, res: http.ServerRes
     if (url.pathname === "/img") { res.writeHead(200, { "content-type": "image/png" }); return res.end(PNG); }
     if (url.pathname === "/redirect-target") return send("text/html", "<html><body>REDIRECT-LANDING</body></html>");
     if (url.pathname === "/redirected") return send("text/html", "<html><body>REDIRECTED-OK</body></html>");
+    if (url.pathname.startsWith("/tap-api/")) return send("application/json", JSON.stringify({ value: url.pathname }));
+    if (url.pathname === "/page-taps")
+        return send("text/html", `<html><body><script>setTimeout(async()=>{for(const p of ['m1','t1','t2','m2','t3'])await fetch('/tap-api/'+p).then(r=>r.text());document.body.dataset.done='1';},800)</script></body></html>`);
     if (url.pathname === "/html-missed") return send("text/html", "<html><body><h1>MISSED-ORIGINAL</h1></body></html>");
     if (url.pathname === "/cdp-replace") return send("text/html", "<html><body><h1>CDP-ORIGINAL</h1></body></html>");
     if (url.pathname === "/page-fetch")
@@ -385,6 +388,43 @@ const row10d: { cls: string; badges: string[] } | null = await mgr.evaluate(() =
 check("missed: the Network row is not marked tapped or modified", !!row10d && !/\b(tapped|modified)\b/.test(row10d.cls) && row10d.badges.some((c) => c.includes("missed")), JSON.stringify(row10d));
 await p10d.close();
 await setEnabled("s_missed", false);
+
+// ---------- 10e. row markers: every tapped-only row carries the dashed marker (incl. consecutive ones) ----------
+await saveScript("s_tapper", `wt.declareScript({ match: ["${ORIGIN}/tap-api/*"], strategy: ["hook"] });\nwt.modifyResponse(() => undefined);`, "marker tapper");
+await saveScript("s_marker_mod", `wt.declareScript({ match: ["${ORIGIN}/tap-api/m*"], strategy: ["hook"] });\nwt.modifyResponse((ctx, body) => String(body).replace("tap-api", "TAP-API"));`, "marker modifier");
+await new Promise((r) => setTimeout(r, 600));
+const p10e = await newPage("/page-taps");
+await p10e.waitForSelector("body[data-done]", { timeout: 10000 }).catch(() => {});
+await mgr.waitForTimeout(800);
+const rows10e: { name: string; cls: string; badges: string[]; bgImg: string; bgSize: string }[] = await mgr.evaluate(() =>
+    [...document.querySelectorAll("#network-view tbody tr.net-row")]
+        .filter((t) => (t.getAttribute("title") || "").includes("/tap-api/"))
+        .map((tr) => {
+            const td = tr.querySelector("td.c-name") as HTMLElement;
+            const cs = getComputedStyle(td);
+            return { name: tr.getAttribute("title") || "", cls: tr.className, badges: [...tr.querySelectorAll(".net-badge")].map((b) => b.className), bgImg: cs.backgroundImage, bgSize: cs.backgroundSize };
+        })
+);
+const tappedOnly10e = rows10e.filter((r) => r.badges.length > 0 && r.badges.every((b) => /\btapped\b/.test(b)));
+const modified10e = rows10e.filter((r) => r.badges.some((b) => /\bmodified\b/.test(b)));
+check(
+    "network: every row whose tags are all tapped has class `tapped` and a visible marker",
+    tappedOnly10e.length >= 3 && tappedOnly10e.every((r) => /\btapped\b/.test(r.cls) && r.bgImg !== "none"),
+    JSON.stringify(tappedOnly10e.map((r) => [r.name.replace(ORIGIN, ""), r.cls, r.bgImg.slice(0, 30)]))
+);
+check(
+    "network: modified rows have class `modified` and a visible marker",
+    modified10e.length >= 2 && modified10e.every((r) => /\bmodified\b/.test(r.cls) && r.bgImg !== "none"),
+    JSON.stringify(modified10e.map((r) => [r.name.replace(ORIGIN, ""), r.cls]))
+);
+check(
+    "network: markers are inset per row (consecutive marked rows don't merge into one line)",
+    [...tappedOnly10e, ...modified10e].every((r) => /calc\(100% - [1-9]\d*px\)/.test(r.bgSize)),
+    JSON.stringify([...new Set(rows10e.map((r) => r.bgSize))])
+);
+await p10e.close();
+await setEnabled("s_tapper", false);
+await setEnabled("s_marker_mod", false);
 await mgr.click("#log-header-title");
 
 // ---------- 11. logs: script output tunnelled to the LOG, page console not captured ----------
