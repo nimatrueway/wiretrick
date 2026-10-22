@@ -923,7 +923,16 @@ function navigateForward(): void {
     if (here) navHistory.forward(here, openNavEntry);
 }
 
-async function saveCurrent(): Promise<void> {
+// Saves run one at a time: a second ⌘S fired before the first returns must
+// send the baseline the first one set, or it looks like a conflict.
+let saveChain: Promise<void> = Promise.resolve();
+function saveCurrent(): Promise<void> {
+    const p = saveChain.then(saveCurrentNow);
+    saveChain = p.catch(() => {});
+    return p;
+}
+
+async function saveCurrentNow(): Promise<void> {
     if (typingsShown) return; // read-only
     if (selectedId === SETTINGS_ID) return saveSettings();
     if (!selectedId || !editor) return;

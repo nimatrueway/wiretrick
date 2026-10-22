@@ -32,6 +32,12 @@ Explorer layout, panel visibility and word wrap are remembered. To debug the
 engine itself, open `chrome://extensions` and click the service worker /
 background page under *Inspect views*.
 
+If the stored script changed since you opened it (synced folder, another tab),
+⌘S shows a **save conflict** diff instead of saving. It takes the keyboard:
+**O** overwrite with mine, **T** take theirs, **K** or Esc keep editing (for
+a deleted script: **R** recreate, **D** discard my text). Saves in quick
+succession run one after another, so they never conflict with each other.
+
 ## Explorer
 
 The explorer on the left looks and works like VS Code's explorer: one
@@ -122,6 +128,9 @@ save) and the other copy is kept in `.wiretrick-backup/` — the Editor lists
 these before connecting so you can cancel. The same reconcile runs on every
 reconnect and browser restart; there, only the side that actually changed
 since the last sync wins, so a backup is made only when both changed.
+A slow drive (network share, cloud folder) that reports an earlier Wiretrick
+write back late isn't mistaken for an outside edit; the newer text is
+written again.
 `wt-api.d.ts`, `tsconfig.json` and `settings.schema.json` are written alongside. Edit in VS Code (or any editor) with full
 TypeScript completions; saves hot apply instantly.
 

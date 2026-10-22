@@ -512,10 +512,29 @@ try {
     await mgr.waitForTimeout(500);
     await mgr.locator("#btn-save").click();
     const conflictShown = await mgr.waitForSelector("#conflict-dialog .conflict-diff", { timeout: 8000 }).then(() => true, () => false);
-    await mgr.locator('#conflict-dialog [data-act="theirs"]').click().catch(() => {});
+    const focusedIn = await mgr.evaluate(() => !!document.activeElement?.closest("#conflict-dialog"));
+    await mgr.keyboard.press("x"); // must not reach the editor behind the dialog
+    await mgr.waitForTimeout(300); // past the arm delay
+    await mgr.keyboard.press("t"); // Take theirs
     await mgr.waitForTimeout(300);
     const afterTheirs = await mgr.evaluate(() => (window as any).monaco.editor.getEditors()[0].getValue());
-    check("saving over an outside change opens the conflict diff; Take theirs loads it", conflictShown && afterTheirs === "// theirs\n", JSON.stringify({ conflictShown, afterTheirs }));
+    check("saving over an outside change opens the conflict diff; T takes theirs", conflictShown && focusedIn && afterTheirs === "// theirs\n", JSON.stringify({ conflictShown, focusedIn, afterTheirs }));
+    // two quick saves in a row: the second waits for the first's baseline
+    await mgr.evaluate(() => (window as any).monaco.editor.getEditors()[0].trigger("t", "type", { text: "// a\n" }));
+    await mgr.evaluate(() => {
+        const ed = (window as any).monaco.editor.getEditors()[0];
+        (document.querySelector("#btn-save") as HTMLElement).click();
+        ed.trigger("t", "type", { text: "// b\n" });
+        (document.querySelector("#btn-save") as HTMLElement).click();
+    });
+    await mgr.waitForTimeout(1000);
+    const quick = await mgr.evaluate(async () => ({
+        dialog: !!document.querySelector("#conflict-dialog"),
+        text: (window as any).monaco.editor.getEditors()[0].getValue(),
+        stored: ((await new Promise((r) => chrome.runtime.sendMessage({ type: "listScripts" }, r))) as any[]).find((s) => s.id === "s_conf")?.code,
+    }));
+    if (quick.dialog) await mgr.keyboard.press("Escape");
+    check("two quick saves don't raise a conflict", !quick.dialog && quick.stored === quick.text && quick.text.includes("// b"), JSON.stringify(quick));
     await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "deleteScript", id: "s_conf" }, r)));
     for (const id of ["s_throws", "s_broken", "s_typed", "s_typed2"]) await mgr.evaluate((id: string) => new Promise((r) => chrome.runtime.sendMessage({ type: "deleteScript", id }, r)), id);
     // a reload in the already-attached tab (no first-navigation race)

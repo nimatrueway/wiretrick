@@ -181,8 +181,29 @@ async function writeFile(fileName: string, content: string): Promise<boolean> {
     if (isScriptFile(fileName)) {
         const sig = await statFile(fileName);
         if (sig) known.set(fileName, sig);
+        noteOwnWrite(fileName, content);
     }
     return true;
+}
+
+// Slow or cloud-backed drives can report one of our earlier writes back
+// after a newer one (two quick saves). Such a stale echo is not an edit on
+// disk: storage keeps its text and the file is rewritten.
+const ECHO_MS = 60_000;
+const recentWrites = new Map<string, { hash: string; at: number }[]>();
+/** script ids whose file must be rewritten even though `owned` says in sync */
+const rewrite = new Set<string>();
+
+function noteOwnWrite(file: string, content: string): void {
+    const now = Date.now();
+    const list = (recentWrites.get(file) ?? []).filter((w) => now - w.at < ECHO_MS).slice(-7);
+    list.push({ hash: contentHash(content), at: now });
+    recentWrites.set(file, list);
+}
+
+function isStaleEcho(file: string, hash: string): boolean {
+    const now = Date.now();
+    return !!recentWrites.get(file)?.some((w) => w.hash === hash && now - w.at < ECHO_MS);
 }
 
 /** remove a script file */
@@ -242,8 +263,18 @@ async function pullChange(file: string, text: string, s: Script): Promise<boolea
         return false;
     }
     // disk still holds the last-synced text: storage moved on and its write
-    // is queued — don't revert storage to the old text
-    if (rec && rec.file === file && rec.hash === h) return false;
+    // is queued (or was skipped for this poll) — don't revert storage to the
+    // old text; make sure the newer text gets written
+    if (rec && rec.file === file && rec.hash === h) {
+        scheduleReconcile();
+        return false;
+    }
+    if (rec && rec.file === file && isStaleEcho(file, h)) {
+        dlogLevel("sync", "debug", `Folder sync: "${file}" reported an earlier version written by Wiretrick — kept script "${s.meta.name}" and rewrote the file`);
+        rewrite.add(s.id);
+        scheduleReconcile();
+        return false;
+    }
     if (rec && rec.hash !== storeHash) {
         await backup(file, s.code, `"${file}" changed on disk while script "${s.meta.name}" also changed in the extension; the file wins`);
     }
@@ -427,18 +458,20 @@ async function reconcileToDisk(): Promise<void> {
             wrote = true;
             continue;
         }
-        if (rec && rec.hash === h) continue; // in sync
+        if (rec && rec.hash === h && !rewrite.has(s.id)) continue; // in sync
         const sig = await statFile(file);
         const seen = known.get(file);
         if (sig && (!seen || seen.lastModified !== sig.lastModified || seen.size !== sig.size)) continue; // unseen external edit: poll first
         const cur = sig ? await readTextOrNull(file) : null;
         if (cur !== null && contentHash(cur) === h) {
             owned.set(s.id, { file, hash: h });
+            rewrite.delete(s.id);
             continue;
         }
         if (cur !== null && !rec) await backup(file, cur, `"${file}" was replaced by script "${s.meta.name}"`);
         if (!(await writeFile(file, s.code))) continue;
         owned.set(s.id, { file, hash: h });
+        rewrite.delete(s.id);
         wrote = true;
     }
     if (wrote) await persistState();
@@ -871,6 +904,8 @@ async function stopNow(): Promise<void> {
     settingsSig = null;
     known = new Map();
     owned = new Map();
+    recentWrites.clear();
+    rewrite.clear();
     await clearPersistedState();
     stopKeepAlive();
     const alarms = alarmsApi();

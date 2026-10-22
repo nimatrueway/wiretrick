@@ -104,6 +104,55 @@ describe("folder sync: the background is the only writer", () => {
         await sync.stop();
     });
 
+    it("a slow drive reporting an earlier write back doesn't revert a newer save", async () => {
+        const sync = await started();
+        const { saveScript } = await ss();
+        await saveScript({ id: "a", code: "// one", name: "alpha" });
+        await sync.flush();
+        await saveScript({ id: "a", code: "// two", name: "alpha" });
+        await sync.flush();
+        expect(files.get("alpha.ts")?.text).toBe("// two");
+        put("alpha.ts", "// one"); // the drive delivers the first write late
+        await sync.flush();
+        expect((await all())[0].code).toBe("// two");
+        await sync.flush();
+        expect(files.get("alpha.ts")?.text).toBe("// two"); // rewritten
+        expect(backups.size).toBe(0);
+        await sync.stop();
+    });
+
+    it("a write skipped while a file's mtime moved is retried after the poll", async () => {
+        const sync = await started();
+        const { saveScript } = await ss();
+        await saveScript({ id: "a", code: "// one", name: "alpha" });
+        await sync.flush();
+        put("alpha.ts", "// one"); // same text, new mtime (drive flushed its timestamp)
+        await saveScript({ id: "a", code: "// two", name: "alpha" });
+        await sync.flush(); // reconcile skips (unseen change), then the poll sees the old text
+        expect((await all())[0].code).toBe("// two");
+        await sync.flush();
+        expect(files.get("alpha.ts")?.text).toBe("// two");
+        await sync.stop();
+    });
+
+    it("an external edit back to an old text after the echo window is still pulled", async () => {
+        const now = vi.spyOn(Date, "now");
+        let t = 1_000_000;
+        now.mockImplementation(() => t);
+        const sync = await started();
+        const { saveScript } = await ss();
+        await saveScript({ id: "a", code: "// one", name: "alpha" });
+        await sync.flush();
+        await saveScript({ id: "a", code: "// two", name: "alpha" });
+        await sync.flush();
+        t += 120_000;
+        put("alpha.ts", "// one");
+        await sync.flush();
+        expect((await all())[0].code).toBe("// one");
+        now.mockRestore();
+        await sync.stop();
+    });
+
     it("renaming in the store renames the script's settings.yaml section", async () => {
         const sync = await started();
         const { saveScript } = await ss();
