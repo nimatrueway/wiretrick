@@ -681,6 +681,9 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 .tab-badge { min-width: 15px; padding: 0 4px; border-radius: 8px; font-size: 10px; font-weight: 600; line-height: 15px; text-align: center; color: #fff; box-sizing: border-box; }
 .tab-badge.error { background: var(--err); }
 .tab-badge.warn { background: var(--warn); color: #1e1e1e; }
+/* Network tab: altered = solid, seen = hollow */
+.tab-badge.altered { background: var(--ok); color: #1e1e1e; }
+.tab-badge.seen { background: transparent; color: var(--fg-dim); box-shadow: inset 0 0 0 1px var(--fg-dim); }
 #log-tools { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 #log-tools[hidden], #log-entries[hidden], #network-view[hidden] { display: none; }
 #log-entries { flex: 1; min-height: 0; }
@@ -698,7 +701,7 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 }
 .net-toolbar button:hover, .net-details-tabs button:hover { color: var(--fg); background: var(--bg-hover); }
 .net-clear { font-size: 13px !important; }
-.net-filter, .net-tab {
+.net-filter, .net-tab, .net-touched {
     background: var(--bg); border: 1px solid var(--border); color: var(--fg);
     border-radius: 3px; padding: 2px 6px; font-size: 11px;
 }
@@ -706,8 +709,7 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 .net-tab { max-width: 180px; }
 .net-tab.closed, .net-tab option.closed { color: var(--fg-dim); font-style: italic; }
 .net-tab option:not(.closed) { color: var(--fg); font-style: normal; }
-.net-filter:focus, .net-tab:focus { border-color: var(--accent); outline: none; }
-.net-check { display: flex; align-items: center; gap: 3px; color: var(--fg-dim); cursor: pointer; }
+.net-filter:focus, .net-tab:focus, .net-touched:focus { border-color: var(--accent); outline: none; }
 .net-chips { display: flex; gap: 2px; flex-wrap: wrap; }
 .net-chip.active { background: var(--bg-active) !important; color: var(--fg) !important; }
 
@@ -748,7 +750,12 @@ body.net-dragging { user-select: none; }
 .net-row.selected { background: var(--sel); }
 .net-row.err td { color: var(--err); }
 .net-row.pending td.c-status, .net-row.pending td.c-time { color: var(--fg-dim); }
-.net-row.intercepted td.c-name { box-shadow: inset 2px 0 0 var(--accent); }
+/* row marker: altered = solid accent bar, seen = dashed, muted bar */
+.net-row.altered td.c-name { box-shadow: inset 2px 0 0 var(--accent); }
+.net-row.seen td.c-name {
+    background-image: linear-gradient(color-mix(in srgb, var(--accent) 70%, transparent) 60%, transparent 0);
+    background-size: 2px 5px; background-repeat: repeat-y; background-position: left top;
+}
 .c-name { width: auto; }
 .c-status { width: 70px; }
 .c-method { width: 60px; }
@@ -762,10 +769,11 @@ body.net-dragging { user-select: none; }
     display: inline-block; background: var(--tag-bg); color: var(--key); border-radius: 3px;
     padding: 0 5px; margin-right: 3px; font-size: 10px; line-height: 15px;
 }
+.net-badge.seen { background: transparent; color: var(--fg-dim); box-shadow: inset 0 0 0 1px var(--border); }
 .net-wf { position: relative; height: 10px; }
 .net-wf-bar { position: absolute; top: 2px; height: 6px; background: var(--bar); border-radius: 1px; min-width: 2px; }
 .net-wf-bar.pending { background: var(--pending); }
-.net-row.intercepted .net-wf-bar { background: var(--ok); }
+.net-row.altered .net-wf-bar { background: var(--ok); }
 .net-row.err .net-wf-bar { background: var(--err); }
 .net-empty { color: var(--fg-dim); padding: 14px; text-align: center; }
 .net-empty.small { padding: 2px 14px; text-align: left; }
@@ -792,6 +800,7 @@ body.net-dragging { user-select: none; }
 .net-actions { list-style: none; margin: 0; padding: 0; font: 11px/1.7 "SF Mono", Menlo, Consolas, monospace; }
 .net-action { display: flex; gap: 6px; align-items: baseline; border-bottom: 1px solid var(--line-sep); }
 .net-action time { color: var(--fg-dim); }
+.net-action.seen { color: var(--fg-dim); }
 .net-action.warn { color: var(--warn); }
 .net-action.error { color: var(--err); }
 

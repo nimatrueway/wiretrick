@@ -32,7 +32,7 @@ export function createNetStore() {
             send?.({ type: "netClear" });
         },
         /** wire to the background "network" port (reconnects after SW restarts) */
-        connect(): void {
+        connect(onMessage?: (m: NetPortMsg) => void): void {
             const open = () => {
                 let port: chrome.runtime.Port;
                 try {
@@ -41,7 +41,10 @@ export function createNetStore() {
                     return; // extension reloading — the manager reloads itself
                 }
                 send = (m) => port.postMessage(m);
-                port.onMessage.addListener((m: NetPortMsg) => apply(m));
+                port.onMessage.addListener((m: NetPortMsg) => {
+                    apply(m);
+                    onMessage?.(m);
+                });
                 port.onDisconnect.addListener(() => {
                     send = null;
                     void chrome.runtime.lastError;

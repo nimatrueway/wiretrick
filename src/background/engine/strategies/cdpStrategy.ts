@@ -11,7 +11,7 @@ import { scriptLogLine } from "../../../shared/scriptLog";
 import { formatScriptError } from "../../../shared/scriptError";
 import { storageGet, storageSet } from "../../../shared/chromeApi";
 import type { Script } from "../scriptStore";
-import { log } from "../logs";
+import { log, logSeen } from "../logs";
 import { scriptStorageGet, scriptStorageSet } from "../scriptStore";
 import { dlog, dlogLevel } from "../../../shared/debugLog";
 import { debuggerAttach, debuggerSend, debuggerDetach, debuggerGetTargets, type Debuggee } from "../../../shared/chromeApi";
@@ -545,7 +545,12 @@ export class CdpStrategy {
                         log(tabId, formatScriptError(s.name, e, "onRequest"), "error", s.scriptId);
                         continue;
                     }
-                    if (!resolved) continue;
+                    // sync handlers already ran (and were reported) in the
+                    // blocking webRequest tier — see below
+                    if (!resolved) {
+                        if (isAsyncFn(handler)) logSeen(tabId, s.name, "onRequest", url, s.scriptId);
+                        continue;
+                    }
 
                     // Sync handlers already ran in the blocking webRequest
                     // tier, which applies everything they return EXCEPT a
@@ -622,8 +627,9 @@ export class CdpStrategy {
                         return;
                     }
                     if (resolved.headers && (resolved.headers.set || resolved.headers.remove)) {
+                        log(tabId, `[${s.name}] onRequest → request headers (${describeHeaderMods(resolved.headers)}) ${url}`, "info", s.scriptId);
                         headerPromises.push(Promise.resolve(resolved.headers));
-                    }
+                    } else logSeen(tabId, s.name, "onRequest", url, s.scriptId);
                 }
                 void terminal;
             }
@@ -656,6 +662,11 @@ export class CdpStrategy {
                     try {
                         const r = await handler({ url, method: request.method, tabUrl: url, resourceType: params.resourceType || "other", requestHeaders: {}, statusLine: "", responseHeaders: params.responseHeaders || [] });
                         if (r && r.headers) headerChanges.push(r.headers);
+                        // sync handlers were reported by the webRequest tier
+                        if (isAsyncFn(handler)) {
+                            if (r && r.headers && (r.headers.set || r.headers.remove)) log(tabId, `[${s.name}] onResponseHeaders → ${describeHeaderMods(r.headers)} ${url}`, "info", s.scriptId);
+                            else logSeen(tabId, s.name, "onResponseHeaders", url, s.scriptId);
+                        }
                     } catch (e: any) {
                         log(tabId, formatScriptError(s.name, e, "async onResponseHeaders"), "error", s.scriptId);
                     }
@@ -687,6 +698,7 @@ export class CdpStrategy {
                             log(tabId, `[${s.name}] replaceResponse → (${outLen}b) ${url}`, "info", s.scriptId);
                             break replaceOuter;
                         }
+                        if (isAsyncFn(handler)) logSeen(tabId, s.name, "replaceResponse", url, s.scriptId);
                     } catch (e: any) {
                         dlogLevel("cdp", "debug", `replaceResponse of "${s.name}" threw: ${e.message || e}`);
                         log(tabId, formatScriptError(s.name, e, "async replaceResponse"), "error", s.scriptId);
@@ -718,11 +730,11 @@ export class CdpStrategy {
                             body = out;
                             const len = typeof body === "string" ? body.length : body.byteLength;
                             dlogLevel("cdp", "info", `transform ${s.name} applied`, { outLen: len });
-                            // unchanged output = do-nothing, don't log it
+                            // unchanged output = do-nothing: "seen", not "applied"
                             if (out !== prevBody) {
                                 log(tabId, `[${s.name}] modifyResponse applied (${before}b → ${len}b) ${url}`, "info", s.scriptId);
-                            }
-                        }
+                            } else logSeen(tabId, s.name, "modifyResponse", url, s.scriptId);
+                        } else logSeen(tabId, s.name, "modifyResponse", url, s.scriptId);
                     } catch (e: any) {
                         dlogLevel("cdp", "debug", `modifyResponse of "${s.name}" threw: ${e.message || e}`);
                         log(tabId, formatScriptError(s.name, e, "modifyResponse (cdp)"), "error", s.scriptId);
@@ -951,4 +963,11 @@ function bytesToBase64(bytes: Uint8Array): string {
     let bin = "";
     for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000) as any);
     return btoa(bin);
+}
+
+function describeHeaderMods(m: { set?: Record<string, string>; remove?: string[] }): string {
+    const parts: string[] = [];
+    if (m.set && Object.keys(m.set).length) parts.push(`set ${Object.keys(m.set).join(", ")}`);
+    if (m.remove?.length) parts.push(`remove ${m.remove.join(", ")}`);
+    return parts.join("; ");
 }

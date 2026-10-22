@@ -58,8 +58,8 @@ at the right of the editor toolbar do the same.
 - **Log** — engine and script log lines with level and source filters. While
   the Log tab is out of view (Network tab open, panel hidden, or the manager
   in the background), new errors and warnings are counted in red/yellow
-  badges on its title; looking at it clears them. Turn this off in
-  **Settings → Logging → Tab badge**. Script
+  badges on its title; looking at it clears them. Turn this off (for both
+  tabs) in **Settings → Logging → Tab badges**. Script
   errors (exceptions in handlers, failed compiles) are logged at ERROR, and
   the script gets a ⚠ indicator in the list and the popup. TypeScript errors
   in a saved script also show up there. The download button (↓) saves the
@@ -67,10 +67,25 @@ at the right of the editor toolbar do the same.
   reporting issues.
 - **Network** — a devtools-style request table: filter text, per-type
   toggles, a tab picker (closed tabs stay listed, dimmed under *Closed tabs*,
-  until the log is cleared), "Intercepted only", sortable/resizable columns
-  (right-click the header to pick columns) and a waterfall. Selecting a
-  request shows its headers, request payload, the response body (modified
-  and original, when Wiretrick handled it) and what each script did.
+  until the log is cleared), an All / Seen / Altered filter,
+  sortable/resizable columns (right-click the header to pick columns) and a
+  waterfall. Requests a script handled are flagged in two ways:
+  - **Seen** — a handler (`onRequest`, `onResponseHeaders`, `modifyResponse`,
+    `replaceResponse`, …) ran on the request but changed nothing (returned
+    `undefined`, or the same body). Dashed, muted marker; each such run also
+    logs a DEBUG line like `[Foo] onRequest → seen (no change) https://…`.
+  - **Altered** — a handler changed it: body, headers, status, a
+    redirect/cancel or a synthetic response. Solid accent marker and a
+    green waterfall bar; the action is logged at INFO as before.
+
+  The *Seen* filter shows everything a script ran on (altered included),
+  *Altered* only what was changed; the footer counts both ("N seen · M
+  altered"). While the Network tab is out of view, requests that become
+  altered / seen are counted in a solid / outlined badge on its title (a
+  request that goes from seen to altered moves to the altered count);
+  looking at it clears them. Selecting a request shows its headers, request
+  payload, the response body (modified and original, when Wiretrick handled
+  it) and what each script did (seen entries muted).
 
 ## Dedicated scripts folder
 

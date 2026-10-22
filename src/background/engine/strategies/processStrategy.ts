@@ -494,7 +494,7 @@ export class ProcessStrategy {
         args.onlyIds = this.owned.map((o) => o.id);
         if (__MV3__) return runBodyOp(this.mv3Plain, this.mv3Params, op, args);
         return runOp(this.mv2Ops, op, args, {
-            log: (scriptId, level, msg) => log(args.tabId ?? -1, `[process] ${msg}`, level, scriptId),
+            log: (scriptId, level, msg, kind) => log(args.tabId ?? -1, `[process] ${msg}`, level, scriptId, kind),
             debug: (msg) => dlogLevel("process", "debug", msg),
         });
     }

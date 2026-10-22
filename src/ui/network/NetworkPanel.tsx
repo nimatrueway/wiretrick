@@ -15,6 +15,8 @@ import {
     formatMs,
     matches,
     statusText,
+    touchCounts,
+    touchState,
     typeLabel,
     type NetFilter,
     type SortKey,
@@ -76,7 +78,7 @@ function dragX(down: MouseEvent, onMove: (dx: number) => void, cursor: string): 
 }
 
 export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: () => Promise<TabInfo[]> }) {
-    const [filter, setFilter] = useState<NetFilter>({ text: "", types: ALL_TYPES, interceptedOnly: false, tabId: null });
+    const [filter, setFilter] = useState<NetFilter>({ text: "", types: ALL_TYPES, touched: "all", tabId: null });
     const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "start", dir: 1 });
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [tabs, setTabs] = useState<TabInfo[]>([]);
@@ -234,7 +236,7 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
     const selectedClosed = filter.tabId !== null && closedTabs.some((t) => t.id === filter.tabId);
     const short = (s: string) => (s.length > 40 ? s.slice(0, 40) + "…" : s);
 
-    const intercepted = rows.filter((e) => e.interventions.length).length;
+    const touched = touchCounts(rows);
     const bytes = rows.reduce((n, e) => n + (e.size ?? 0), 0);
 
     return (
@@ -250,14 +252,17 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
                     value={filter.text}
                     onInput={(e) => setFilter({ ...filter, text: e.currentTarget.value })}
                 />
-                <label class="net-check" title="Only requests a Wiretrick script acted on">
-                    <input
-                        type="checkbox"
-                        checked={filter.interceptedOnly}
-                        onChange={(e) => setFilter({ ...filter, interceptedOnly: e.currentTarget.checked })}
-                    />
-                    Intercepted only
-                </label>
+                <select
+                    class="net-touched"
+                    aria-label="Script activity"
+                    title={"Seen: a script handler ran on the request (changed or not)\nAltered: a handler changed it"}
+                    value={filter.touched}
+                    onChange={(e) => setFilter({ ...filter, touched: e.currentTarget.value as NetFilter["touched"] })}
+                >
+                    <option value="all">All</option>
+                    <option value="seen">Seen</option>
+                    <option value="altered">Altered</option>
+                </select>
                 {listTabs && (
                     <select
                         class={"net-tab" + (selectedClosed ? " closed" : "")}
@@ -415,7 +420,9 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
                 {" · "}
                 {formatBytes(bytes)} transferred
                 {" · "}
-                <span class={intercepted ? "net-hl" : ""}>{intercepted} intercepted</span>
+                <span class="net-touch-count" title="Seen: a script handler ran on the request · Altered: a handler changed it">
+                    {touched.seen} seen · <span class={touched.altered ? "net-hl" : ""}>{touched.altered} altered</span>
+                </span>
             </div>
         </div>
     );
@@ -426,7 +433,8 @@ function rowClass(e: NetEntry, selected: boolean): string {
     if (selected) c.push("selected");
     if (e.state === "failed" || (e.status !== null && e.status >= 400)) c.push("err");
     if (e.state === "pending") c.push("pending");
-    if (e.interventions.length) c.push("intercepted");
+    const t = touchState(e);
+    if (t !== "none") c.push(t);
     return c.join(" ");
 }
 
@@ -486,18 +494,18 @@ function Row({
             case "script":
                 return (
                     <td key={k} class="c-script">
-                        {scriptNames(e).map((n) => (
-                            <span
-                                key={n}
-                                class="net-badge"
-                                title={e.interventions
-                                    .filter((i) => i.scriptName === n)
-                                    .map((i) => i.action)
-                                    .join("\n")}
-                            >
-                                {n}
-                            </span>
-                        ))}
+                        {scriptNames(e).map((n) => {
+                            const mine = e.interventions.filter((i) => i.scriptName === n);
+                            return (
+                                <span
+                                    key={n}
+                                    class={mine.some((i) => i.kind === "altered") ? "net-badge altered" : "net-badge seen"}
+                                    title={mine.map((i) => i.action).join("\n")}
+                                >
+                                    {n}
+                                </span>
+                            );
+                        })}
                     </td>
                 );
             case "size":
@@ -582,15 +590,15 @@ function Details({ e, width, onClose }: { e: NetEntry; width: number | null; onC
                 ) : e.interventions.length ? (
                     <ul class="net-actions">
                         {e.interventions.map((i, n) => (
-                            <li key={n} class={`net-action ${i.level}`}>
+                            <li key={n} class={`net-action ${i.level} ${i.kind}`} title={i.kind === "altered" ? "Altered: the handler changed the request" : "Seen: the handler ran without changing it"}>
                                 <time>{new Date(i.at).toLocaleTimeString()}</time>
-                                <span class="net-badge">{i.scriptName}</span>
+                                <span class={`net-badge ${i.kind}`}>{i.scriptName}</span>
                                 <span>{i.action}</span>
                             </li>
                         ))}
                     </ul>
                 ) : (
-                    <div class="net-empty">No Wiretrick script touched this request.</div>
+                    <div class="net-empty">No Wiretrick script handler ran on this request.</div>
                 )}
             </div>
         </div>

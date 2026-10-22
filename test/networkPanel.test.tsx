@@ -106,34 +106,58 @@ describe("NetworkPanel", () => {
         expect(container.querySelector("tbody .c-status")!.textContent).toBe("200");
     });
 
-    it("filters by text, type chip and intercepted-only", async () => {
-        const hit = entry("api", { type: "xmlhttprequest", interventions: [{ scriptId: "s", scriptName: "Mocker", action: "respond 200", level: "info", at: base }] });
+    it("filters by text, type chip and script activity (all / seen / altered)", async () => {
+        const hit = entry("api", { type: "xmlhttprequest", interventions: [{ scriptId: "s", scriptName: "Mocker", action: "respond 200", level: "info", kind: "altered", at: base }] });
         const { container, getByText, getByPlaceholderText, getByLabelText } = setup([entry("a"), hit]);
         // independent toggles: switching off JS keeps Fetch/XHR on
         fireEvent.click(getByText("JS"));
         expect(rowNames(container)).toEqual(["api.js"]);
-        expect(getByText("All").getAttribute("aria-pressed")).toBe("false");
+        expect(getByText("All", { selector: "button" }).getAttribute("aria-pressed")).toBe("false");
         expect(getByText("Fetch/XHR").getAttribute("aria-pressed")).toBe("true");
         // All (not all on) → everything on
-        fireEvent.click(getByText("All"));
+        fireEvent.click(getByText("All", { selector: "button" }));
         expect(rowNames(container)).toEqual(["a.js", "api.js"]);
         // All (all on) → everything off
-        fireEvent.click(getByText("All"));
+        fireEvent.click(getByText("All", { selector: "button" }));
         expect(rowNames(container)).toEqual([]);
         expect(container.querySelector(".net-empty")!.textContent).toContain("No request types selected");
         fireEvent.click(getByText("Fetch/XHR"));
         fireEvent.click(getByText("JS"));
         expect(rowNames(container)).toEqual(["a.js", "api.js"]);
-        expect(getByText("All").getAttribute("aria-pressed")).toBe("false");
-        fireEvent.click(getByText("All"));
-        expect(getByText("All").getAttribute("aria-pressed")).toBe("true");
+        expect(getByText("All", { selector: "button" }).getAttribute("aria-pressed")).toBe("false");
+        fireEvent.click(getByText("All", { selector: "button" }));
+        expect(getByText("All", { selector: "button" }).getAttribute("aria-pressed")).toBe("true");
         fireEvent.input(getByPlaceholderText(/Filter/), { target: { value: "-api" } });
         expect(rowNames(container)).toEqual(["a.js"]);
         fireEvent.input(getByPlaceholderText(/Filter/), { target: { value: "" } });
-        fireEvent.click(getByLabelText("Intercepted only"));
+        fireEvent.change(getByLabelText("Script activity"), { target: { value: "altered" } });
         expect(rowNames(container)).toEqual(["api.js"]);
         expect(container.querySelector(".net-badge")!.textContent).toBe("Mocker");
-        expect(container.querySelector("tbody tr")!.classList.contains("intercepted")).toBe(true);
+        expect(container.querySelector("tbody tr")!.classList.contains("altered")).toBe(true);
+    });
+
+    it("marks seen vs altered rows; Seen filter keeps both, Altered only changed ones; footer counts", () => {
+        const seen = { scriptId: "s", scriptName: "Watcher", action: "onRequest → seen (no change)", level: "debug" as const, kind: "seen" as const, at: base };
+        const altered = { scriptId: "m", scriptName: "Mocker", action: "modifyResponse applied (1b → 2b)", level: "info" as const, kind: "altered" as const, at: base };
+        const { container, getByLabelText } = setup([
+            entry("plain"),
+            entry("watched", { startedAt: base + 1, interventions: [seen] }),
+            entry("changed", { startedAt: base + 2, interventions: [seen, altered] }),
+        ]);
+        const rows = [...container.querySelectorAll("tbody tr")];
+        expect(rows.map((r) => (r.classList.contains("altered") ? "altered" : r.classList.contains("seen") ? "seen" : "none"))).toEqual(["none", "seen", "altered"]);
+        expect(container.querySelector(".net-status")!.textContent).toContain("2 seen · 1 altered");
+        expect(container.querySelector(".net-status .net-hl")!.textContent).toBe("1 altered");
+        // per-script badges: hollow for a script that only looked
+        expect([...rows[2].querySelectorAll(".net-badge")].map((b) => b.className)).toEqual(["net-badge seen", "net-badge altered"]);
+        fireEvent.change(getByLabelText("Script activity"), { target: { value: "seen" } });
+        expect(rowNames(container)).toEqual(["watched.js", "changed.js"]);
+        fireEvent.change(getByLabelText("Script activity"), { target: { value: "altered" } });
+        expect(rowNames(container)).toEqual(["changed.js"]);
+        // details list: seen entries muted
+        fireEvent.click(container.querySelector("tbody tr")!);
+        const actions = [...container.querySelectorAll(".net-action")];
+        expect(actions.map((a) => a.classList.contains("seen"))).toEqual([true, false]);
     });
 
     it("sorts by a column header, toggling direction", () => {
@@ -148,11 +172,11 @@ describe("NetworkPanel", () => {
         const hit = entry("api", {
             responseHeaders: [["content-type", "application/json"]],
             requestHeaders: [["accept", "*/*"]],
-            interventions: [{ scriptId: "s", scriptName: "Mocker", action: "modifyResponse applied", level: "info", at: base }],
+            interventions: [{ scriptId: "s", scriptName: "Mocker", action: "modifyResponse applied", level: "info", kind: "altered", at: base }],
         });
         const { container, getByText } = setup([hit]);
         fireEvent.click(container.querySelector("tbody tr")!);
-        // intercepted → opens on the Wiretrick tab
+        // a script ran on it → opens on the Wiretrick tab
         expect(container.querySelector(".net-action")!.textContent).toContain("modifyResponse applied");
         fireEvent.click(getByText("Headers"));
         const text = container.querySelector(".net-details-body")!.textContent!;

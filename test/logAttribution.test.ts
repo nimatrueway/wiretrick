@@ -136,13 +136,33 @@ wt.replaceResponse(() => '{"mocked":true}');`)]);
     });
 
 
-    it("no-match (handler returns undefined) stays silent", () => {
+    it("no-match (handler returns undefined) logs only a DEBUG 'seen (no change)' line", () => {
         const s = new WebRequestStrategy();
         s.reload([storedScript("a", "API mocker", `wt.declareScript({ match: ["*"] });
 wt.onRequest(() => undefined);`)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("allow");
-        expect(entries.filter((e) => e.message.includes("onRequest →"))).toEqual([]);
+        const lines = entries.filter((e) => e.message.includes("onRequest →"));
+        expect(lines.map((e) => [e.level, e.kind, e.scriptId])).toEqual([["debug", "seen", "a"]]);
+        expect(lines[0].message).toMatch(/^\[API mocker\] onRequest → seen \(no change\) https:\/\//);
+    });
+
+    it("replaceResponse → null and no-op onResponseHeaders are seen; header changes stay INFO", () => {
+        const s = new WebRequestStrategy();
+        s.reload([
+            storedScript("a", "Looker", `wt.declareScript({ match: ["*"] });
+wt.replaceResponse(() => null);
+wt.onResponseHeaders(() => undefined);`),
+            storedScript("b", "Hdr", `wt.declareScript({ match: ["*"] });
+wt.onResponseHeaders(() => ({ headers: { set: { "x-a": "1" } } }));`),
+        ]);
+        s.handleBeforeRequest(details(), null);
+        s.handleHeadersReceived(details(), null);
+        expect(entries.filter((e) => e.scriptId).map((e) => [e.level, e.message.replace(/ https:.*/, "")])).toEqual([
+            ["debug", "[Looker] replaceResponse → seen (no change)"],
+            ["debug", "[Looker] onResponseHeaders → seen (no change)"],
+            ["info", "[Hdr] onResponseHeaders → set x-a"],
+        ]);
     });
 });
 

@@ -9,7 +9,7 @@
  * the request URL); bodies via recordNetBody from the strategies that
  * handle them (the browser exposes no response bodies to webRequest).
  */
-import type { NetBody, NetEntry, NetPortMsg } from "../shared/netTypes";
+import { interventionKind, type NetBody, type NetEntry, type NetKind, type NetPortMsg } from "../shared/netTypes";
 
 const MAX_ENTRIES = 1000;
 /** per-body capture cap (chars of text) */
@@ -382,10 +382,11 @@ export function recordNetBody(r: NetBodyRecord): void {
 
 /**
  * Attach a script-attributed log line ("[name] modifyResponse applied
- * (…) https://…") to the request it describes. A line with no matching
+ * (…) https://…") to the request it describes, as "seen" or "altered"
+ * (inferred from the line when not given). A line with no matching
  * recorded request becomes a synthetic entry (see entryFor).
  */
-export function annotateFromLog(tabId: number, scriptId: string, message: string, level: NetEntry["interventions"][number]["level"]): void {
+export function annotateFromLog(tabId: number, scriptId: string, message: string, level: NetEntry["interventions"][number]["level"], kind?: NetKind): void {
     if (!ports.size) return;
     const m = URL_AT_END.exec(message);
     if (!m) return;
@@ -395,7 +396,7 @@ export function annotateFromLog(tabId: number, scriptId: string, message: string
     const action = message.slice(nameMatch ? nameMatch[0].length : 0, m.index).trim();
     const now = Date.now();
     const target = entryFor(tabId, url);
-    target.interventions.push({ scriptId, scriptName, action, level, at: now });
+    target.interventions.push({ scriptId, scriptName, action, level, kind: interventionKind(level, message, kind), at: now });
     touch(target.id);
 }
 

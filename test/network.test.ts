@@ -126,6 +126,21 @@ describe("network recorder", () => {
         p.disconnect();
     });
 
+    it("records each annotation as seen or altered", () => {
+        const p = fakePort();
+        addNetworkPort(p.port);
+        req("1", "https://a.test/api");
+        annotateFromLog(7, "s1", "[W] onRequest → seen (no change) https://a.test/api", "debug", "seen");
+        annotateFromLog(7, "s1", "[W] modifyResponse applied (1b → 2b) https://a.test/api", "info");
+        annotateFromLog(7, "s1", "[W] modifyResponse threw: boom https://a.test/api", "error");
+        expect(entries.get("1")!.interventions.map((i) => [i.action, i.kind])).toEqual([
+            ["onRequest → seen (no change)", "seen"],
+            ["modifyResponse applied (1b → 2b)", "altered"],
+            ["modifyResponse threw: boom", "seen"],
+        ]);
+        p.disconnect();
+    });
+
     it("creates a synthetic row when nothing hit the network", () => {
         const p = fakePort();
         addNetworkPort(p.port);

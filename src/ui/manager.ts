@@ -24,7 +24,9 @@ import { scriptHealth, type ScriptHealthInput } from "../shared/scriptHealth";
 import type { Uri, IPosition, IRange, IKeyboardEvent, editor as MonacoEditor } from "monaco-editor";
 import type { Script } from "../background/engine/scriptStore";
 import { setupPanelDock, currentSide, currentDock } from "./panelDock";
-import { badgeCount, LogBadge } from "./logBadge";
+import { badgeCount, LogBadge, NetBadge, type TabBadge } from "./logBadge";
+import { touchState } from "./network/netFormat";
+import type { NetPortMsg } from "../shared/netTypes";
 import { aboutRows, aboutText, checkLatestRelease, collectDiagnostics, describeLatest, diagnosticsFileName, downloadText, RELEASES_URL, type HelperStatus } from "./about";
 
 // ---- state ----
@@ -977,34 +979,62 @@ function renderLogLine(line: HTMLElement, text: string, level: string, source: s
     line.appendChild(document.createTextNode(text));
 }
 
-// ---- Log tab badge: errors/warnings that arrived while the Log was out of view ----
+// ---- Tab badges: Log errors/warnings and Network seen/altered requests
+// that arrived while that tab was out of view ----
 const logBadge = new LogBadge();
+const netBadge = new NetBadge();
 let logBadgeEnabled = true;
 
-function logInView(): boolean {
-    return $("#log-panel").dataset.tab === "log" && !$("#app").classList.contains("panel-hidden") && document.visibilityState === "visible";
+function tabInView(tab: "log" | "network"): boolean {
+    return $("#log-panel").dataset.tab === tab && !$("#app").classList.contains("panel-hidden") && document.visibilityState === "visible";
 }
 
-function renderLogBadge(): void {
-    if (!logBadgeEnabled || logInView()) logBadge.reset();
-    const el = $("#log-badge");
-    el.hidden = logBadge.empty;
-    el.title = logBadge.empty ? "" : logBadge.title;
-    for (const [cls, n] of [["error", logBadge.errors], ["warn", logBadge.warnings]] as const) {
+function renderBadge(el: HTMLElement, badge: TabBadge, inView: boolean): void {
+    if (!logBadgeEnabled || inView) badge.reset();
+    el.hidden = badge.empty;
+    el.title = badge.empty ? "" : badge.title;
+    for (const [cls, n] of badge.counts) {
         const b = el.querySelector<HTMLElement>(`.tab-badge.${cls}`)!;
         b.hidden = !n;
         b.textContent = badgeCount(n);
     }
 }
 
+function renderTabBadges(): void {
+    renderBadge($("#log-badge"), logBadge, tabInView("log"));
+    renderBadge($("#net-badge"), netBadge, tabInView("network"));
+}
+
+/** Network recorder traffic (after the panel's store applied it): feeds the Network badge. */
+function noteNetMessage(msg: NetPortMsg): void {
+    if (msg.type === "netCleared") netBadge.clearAll();
+    else if (msg.type === "netRemoved") netBadge.forget(msg.ids);
+    else {
+        const unseen = logBadgeEnabled && !tabInView("network");
+        for (const e of msg.entries) netBadge.note(e.id, touchState(e), unseen);
+    }
+    renderBadge($("#net-badge"), netBadge, tabInView("network"));
+}
+
 /** All received entries — filtered ones stay here (re-renderable), just not in the DOM. */
-const logEntries: { text: string; level: string; source: string }[] = [];
+const logEntries: { text: string; level: string; source: string; seen?: boolean }[] = [];
+/** "seen (no change)" DEBUG lines (one per handler run) may fill at most this much of the buffer */
+const MAX_SEEN_ENTRIES = 300;
+let seenEntries = 0;
 
 function appendLog(entry: any): void {
     const time = new Date(entry.at).toLocaleTimeString();
     const source = sourceOf(entry.message || "");
-    logEntries.push({ text: `[${time}] ${entry.message}`, level: entry.level || "info", source });
-    if (logEntries.length > 2000) logEntries.splice(0, logEntries.length - 2000); // absolute buffer cap
+    const seen = entry.kind === "seen";
+    logEntries.push({ text: `[${time}] ${entry.message}`, level: entry.level || "info", source, ...(seen ? { seen } : {}) });
+    if (seen && ++seenEntries > MAX_SEEN_ENTRIES) {
+        logEntries.splice(logEntries.findIndex((e) => e.seen), 1);
+        seenEntries--;
+    }
+    if (logEntries.length > 2000) {
+        // absolute buffer cap
+        for (const e of logEntries.splice(0, logEntries.length - 2000)) if (e.seen) seenEntries--;
+    }
     rememberSource(source);
 
     const text = logEntries[logEntries.length - 1].text;
@@ -1012,7 +1042,7 @@ function appendLog(entry: any): void {
     if (!linePassesFilters(text, level, source)) return; // don't let hidden entries churn the DOM ring
     if (level === "error" || level === "warn") {
         logBadge.note(level);
-        renderLogBadge();
+        renderTabBadges();
     }
 
     const box = $("#log-entries");
@@ -1306,17 +1336,17 @@ function setupDialogs(): void {
         navLog(`verbose logging ${monacoVerbose ? "on" : "off"}`, "warn");
     });
 
-    // Log tab badge
+    // Tab badges (Log + Network), one toggle
     const badgeBox = $("#settings-log-badge") as HTMLInputElement;
     chrome.storage.local.get("resLogBadge", (d) => {
         logBadgeEnabled = d?.resLogBadge !== false;
         badgeBox.checked = logBadgeEnabled;
-        renderLogBadge();
+        renderTabBadges();
     });
     badgeBox.addEventListener("change", () => {
         logBadgeEnabled = badgeBox.checked;
         chrome.storage.local.set({ resLogBadge: logBadgeEnabled });
-        renderLogBadge();
+        renderTabBadges();
     });
 
     // panel history size
@@ -1582,7 +1612,7 @@ function setPanelHidden(hidden: boolean, persist = true): void {
     app.classList.toggle("panel-hidden", hidden);
     $("#btn-toggle-panel").setAttribute("aria-pressed", String(!hidden));
     if (persist) saveLayout({ ...loadLayout(), panelHidden: hidden });
-    renderLogBadge();
+    renderTabBadges();
     window.dispatchEvent(new Event("resize"));
 }
 
@@ -1633,11 +1663,11 @@ function setupPanelTabs(): void {
         $("#log-tools").hidden = which !== "log";
         $("#network-view").hidden = which !== "network";
         $("#log-panel").dataset.tab = which;
-        renderLogBadge();
+        renderTabBadges();
         // recording starts the first time the tab is shown (zero cost before)
         if (which === "network" && !networkMounted) {
             networkMounted = true;
-            mountNetworkPanel($("#network-view"));
+            mountNetworkPanel($("#network-view"), noteNetMessage);
         }
         const l = loadLayout();
         l.panelTab = which;
@@ -1743,11 +1773,11 @@ async function main(): Promise<void> {
         await refresh();
         selectReal(id);
     });
-    document.addEventListener("visibilitychange", renderLogBadge);
+    document.addEventListener("visibilitychange", renderTabBadges);
     $("#btn-clear-log").addEventListener("click", () => {
         $("#log-entries").innerHTML = "";
         logBadge.reset();
-        renderLogBadge();
+        renderTabBadges();
         void send({ type: "clearDebugLogs" });
     });
     $("#btn-logs").addEventListener("click", async () => {

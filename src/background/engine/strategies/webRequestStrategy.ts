@@ -15,7 +15,7 @@ import { scriptLogLine, type ScriptLogLevel } from "../../../shared/scriptLog";
 import { formatScriptError } from "../../../shared/scriptError";
 import type { BodyScriptInfo, HeaderChanges, HookDisposition, InterceptionStrategy, MaybePromise, WebRequestDetailsLike } from "./types";
 import type { Script } from "../scriptStore";
-import { log, scriptError } from "../logs";
+import { log, logSeen, scriptError } from "../logs";
 import { dlogLevel } from "../../../shared/debugLog";
 import { parseStrategyList } from "../../../shared/metaParser";
 import { scriptStorageGet, scriptStorageSet } from "../scriptStore";
@@ -115,13 +115,20 @@ export class WebRequestStrategy implements InterceptionStrategy {
                         if (IS_FIREFOX) {
                             // Firefox blocking listeners accept promises natively
                             return result.then((r: any): HookDisposition => {
-                                if (r && r.headers && (r.headers.set || r.headers.remove)) {
+                                const hasHeaders = !!(r && r.headers && (r.headers.set || r.headers.remove));
+                                if (hasHeaders) {
+                                    log(details.tabId, `[${entry.name}] onRequest → request headers (${describeHeaderMods(r.headers)}) ${details.url}`, "info", entry.id);
                                     pendingRequestHeaderMods.set(
                                         details.requestId,
                                         mergeHeaderMods(pendingRequestHeaderMods.get(details.requestId), r.headers)
                                     );
                                 }
-                                return r && (r.redirect || r.cancel) ? normalize(r) : { kind: "allow" };
+                                if (r && (r.redirect || r.cancel)) {
+                                    log(details.tabId, `[${entry.name}] onRequest → ${r.cancel ? "cancel" : `redirect → ${r.redirect}`} ${details.url}`, "info", entry.id);
+                                    return normalize(r);
+                                }
+                                if (!hasHeaders) logSeen(details.tabId, entry.name, "onRequest", details.url, entry.id);
+                                return { kind: "allow" };
                             });
                         }
                         // Chrome: blocking webRequest cannot await — the
@@ -130,7 +137,8 @@ export class WebRequestStrategy implements InterceptionStrategy {
                         continue;
                     }
                     // cache header mods so onBeforeSendHeaders doesn't re-run the handler
-                    if (result && result.headers && (result.headers.set || result.headers.remove)) {
+                    const hasHeaders = !!(result && result.headers && (result.headers.set || result.headers.remove));
+                    if (hasHeaders) {
                         log(details.tabId, `[${entry.name}] onRequest → request headers (${describeHeaderMods(result.headers)}) ${details.url}`, "info", entry.id);
                         // MERGE across stacked scripts (set: later wins per
                         // key; remove accumulates) — matches the
@@ -160,17 +168,22 @@ export class WebRequestStrategy implements InterceptionStrategy {
                         return normalize(result);
                     }
                     trace(details, `[${entry.name}] onRequest returned ${describeResult(result)} (no redirect/cancel/respond) for ${details.url}`);
+                    if (!hasHeaders) logSeen(details.tabId, entry.name, "onRequest", details.url, entry.id);
                 }
                 if (script.handlers.replaceResponse.length) {
                     let replacement: any = undefined;
                     for (const replaceHandler of script.handlers.replaceResponse) {
                         replacement = replaceHandler(makeCtx(details, tabUrl));
                         if (replacement !== undefined && replacement !== null) break;
+                        logSeen(details.tabId, entry.name, "replaceResponse", details.url, entry.id);
                     }
                     if (isThenable(replacement)) {
                         if (IS_FIREFOX) {
                             return replacement.then((r: any) => {
-                                if (r === undefined || r === null) return { kind: "allow" } as HookDisposition;
+                                if (r === undefined || r === null) {
+                                    logSeen(details.tabId, entry.name, "replaceResponse", details.url, entry.id);
+                                    return { kind: "allow" } as HookDisposition;
+                                }
                                 return this.staticReplace(details, r, entry.id, entry.name);
                             });
                         }
@@ -284,7 +297,15 @@ export class WebRequestStrategy implements InterceptionStrategy {
                 if (isThenable(result)) {
                     if (IS_FIREFOX) {
                         // resolved below by the pipeline passthrough
-                        return result.then((r: any) => (r && r.headers ? { ...r.headers } : null));
+                        return result.then((r: any) => {
+                            const m = r && r.headers;
+                            if (m && (m.set || m.remove)) {
+                                log(details.tabId, `[${entry.name}] onResponseHeaders → ${describeHeaderMods(m)} ${details.url}`, "info", entry.id);
+                                return { ...m };
+                            }
+                            logSeen(details.tabId, entry.name, "onResponseHeaders", details.url, entry.id);
+                            return null;
+                        });
                     }
                     scriptError(entry.id, "async onResponseHeaders: Chrome's blocking webRequest cannot await. Add 'cdp' to the declareScript strategy list to apply async header changes in the debugger tier.");
                     continue;
@@ -295,7 +316,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                     changes = changes || {};
                     changes.set = { ...changes.set, ...mods.set };
                     changes.remove = [...(changes.remove || []), ...(mods.remove || [])];
-                }
+                } else logSeen(details.tabId, entry.name, "onResponseHeaders", details.url, entry.id);
             } catch (e: any) {
                 scriptError(entry.id, formatScriptError(entry.name, e, "onResponseHeaders"));
             }
@@ -327,7 +348,11 @@ export class WebRequestStrategy implements InterceptionStrategy {
                 for (const transform of script.handlers.modifyResponse) {
                     try {
                         const out = await transform(ctx, body);
-                        if (out !== undefined && out !== null) body = out;
+                        if (out !== undefined && out !== null && out !== body) {
+                            const size = (b: any) => (typeof b === "string" ? b.length : (b?.byteLength ?? 0));
+                            log(details.tabId, `[${scriptName}] modifyResponse applied (${size(body)}b → ${size(out)}b) ${details.url}`, "info", scriptId);
+                            body = out;
+                        } else logSeen(details.tabId, scriptName, "modifyResponse", details.url, scriptId);
                     } catch (e: any) {
                         scriptError(scriptId, formatScriptError(scriptName, e, "modifyResponse"));
                     }

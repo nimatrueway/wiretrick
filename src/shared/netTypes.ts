@@ -1,12 +1,40 @@
 /** Network-tab records shared by the background recorder and the manager UI. */
 
+/**
+ * What a script did to a request: "seen" — a handler ran but changed
+ * nothing (returned undefined, the same body, or threw); "altered" — it
+ * changed the body, headers, status, or cancelled/redirected/answered it.
+ */
+export type NetKind = "seen" | "altered";
+
 export interface NetIntervention {
     scriptId: string;
     scriptName: string;
     /** e.g. "modifyResponse applied (120b → 140b)" */
     action: string;
     level: "debug" | "info" | "warn" | "error";
+    kind: NetKind;
     at: number;
+}
+
+const SEEN_MARK = "→ seen (no change)";
+
+/** DEBUG log line for a handler that ran without changing anything (ends with the URL, so it annotates the request). */
+export function seenLine(scriptName: string, handler: string, url: string): string {
+    return `[${scriptName}] ${handler} ${SEEN_MARK} ${url}`;
+}
+
+/**
+ * Seen vs altered for a script-attributed log line. Engine code passes the
+ * kind explicitly; relayed lines without one fall back to: errors, debug
+ * lines, "seen (no change)" lines and the script's own console/wt.log
+ * output → seen; anything else (the engine's INFO action lines) → altered.
+ */
+export function interventionKind(level: string, message: string, explicit?: NetKind): NetKind {
+    if (explicit === "seen" || explicit === "altered") return explicit;
+    if (level === "debug" || level === "error" || message.includes(SEEN_MARK)) return "seen";
+    if (/^\[[^\]]*\] (wt\.log|console\.\w+):/.test(message)) return "seen";
+    return "altered";
 }
 
 /** A captured request/response body (text, capped; binary as a placeholder). */

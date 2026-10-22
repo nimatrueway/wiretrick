@@ -305,6 +305,11 @@ try {
         type: "saveScript", id: "s_auto", name: "Auto script",
         code: `wt.declareScript({ match: ["${cdn}/auto.js"] });\nwt.modifyResponse((ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
     }, r)), CDN);
+    // a handler that runs but changes nothing: the request is "seen", not "altered"
+    await mgr.evaluate((cdn: string) => new Promise((r) => chrome.runtime.sendMessage({
+        type: "saveScript", id: "s_watch", name: "Watcher",
+        code: `wt.declareScript({ match: ["${cdn}/auto.js"], strategy: ["cdp"] });\nwt.onRequest(() => undefined);`,
+    }, r)), CDN);
     await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_procx", name: "Process listed",
         code: `wt.declareScript({ match: ["*://process-listed.invalid/*"], strategy: ["process"] });\nwt.modifyResponse((ctx, body) => body);`,
@@ -330,7 +335,28 @@ try {
         })),
     );
     check("Network tab lists the page's requests", net.some((r) => r.name.startsWith("page-xo") && r.status === "200") && net.some((r) => r.name.startsWith("auto.js")), JSON.stringify(net.map((r) => r.name)));
-    check("Network tab shows which script intercepted a request", net.some((r) => r.name.startsWith("gz.js") && r.scripts.includes("Cdp transform")), JSON.stringify(net.filter((r) => r.scripts.length)));
+    check("Network tab shows which script altered a request", net.some((r) => r.name.startsWith("gz.js") && r.scripts.includes("Cdp transform")), JSON.stringify(net.filter((r) => r.scripts.length)));
+    const marks: Record<string, string> = await mgr.evaluate(() =>
+        Object.fromEntries([...document.querySelectorAll("#network-view tbody tr")].map((tr) => [tr.querySelector(".net-name")?.textContent || "", tr.classList.contains("altered") ? "altered" : tr.classList.contains("seen") ? "seen" : "none"])),
+    );
+    check("a modifying handler marks its row altered", marks["gz.js"] === "altered", JSON.stringify(marks));
+    check("a handler returning undefined marks its row seen (not altered)", marks["auto.js"] === "seen", JSON.stringify(marks));
+    const counts = await mgr.evaluate(() => document.querySelector("#network-view .net-status")?.textContent || "");
+    check("Network footer counts seen and altered rows", /\d+ seen · \d+ altered/.test(counts), counts);
+    const prevLevel = await mgr.evaluate(() => {
+        const sel = document.querySelector("#log-level") as HTMLSelectElement;
+        const prev = sel.value;
+        sel.value = "debug";
+        sel.dispatchEvent(new Event("change"));
+        return prev;
+    });
+    const seenLog = await mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line.debug")].map((l) => l.textContent || "").find((t) => t.includes("[Watcher] onRequest → seen (no change)")) || "");
+    check("seen handler logs a DEBUG 'seen (no change)' line ending with the URL", /\[Watcher\] onRequest → seen \(no change\) http:\/\/localhost:\d+\/auto\.js$/.test(seenLog), seenLog || "(none)");
+    await mgr.evaluate((prev: string) => {
+        const sel = document.querySelector("#log-level") as HTMLSelectElement;
+        sel.value = prev;
+        sel.dispatchEvent(new Event("change"));
+    }, prevLevel);
     // response body of an intercepted request: served (modified) + original
     await mgr.evaluate(() => {
         const tr = [...document.querySelectorAll("#network-view tbody tr")].find((t) => t.querySelector(".net-name")?.textContent?.startsWith("gz.js"));
@@ -351,6 +377,28 @@ try {
     const inTab: string[] = await mgr.evaluate(() => [...document.querySelectorAll("#network-view tbody .net-name")].map((n) => n.textContent || ""));
     check("Network tab filter keeps the tab's intercepted requests", inTab.some((n) => n.startsWith("gz.js")) && inTab.some((n) => n.startsWith("page-xo")), JSON.stringify(inTab));
     await mgr.selectOption("#network-view .net-tab", "");
+    await mgr.click("#log-header-title");
+    // Network tab badge: requests seen/altered while it's out of view
+    // fresh (cache-busted) script tags: gz.js → altered (Cdp transform), auto.js → seen (Watcher)
+    await xoPage.evaluate((cdn: string) => Promise.all(["gz.js", "auto.js"].map((f) => new Promise((r) => {
+        const s = document.createElement("script");
+        s.src = `${cdn}/${f}?badge=${Date.now()}`;
+        s.onload = s.onerror = r;
+        document.head.appendChild(s);
+    }))), CDN);
+    await mgr.bringToFront(); // a background tab throttles the port + polling
+    const badge = await mgr.waitForFunction(() => {
+        const b = document.querySelector("#net-badge") as HTMLElement;
+        const [altered, seen] = [".altered", ".seen"].map((c) => {
+            const pill = b.querySelector(`.tab-badge${c}`) as HTMLElement;
+            return pill.hidden ? 0 : Number(pill.textContent);
+        });
+        return !b.hidden && altered >= 1 && seen >= 1 ? { title: b.title, altered, seen } : null;
+    }, null, { timeout: 8000, polling: 200 }).then((h: any) => h.jsonValue(), (e: any) => String(e)) as any;
+    check("Network tab badge counts altered + seen requests while out of view", !!badge && /altered, \d+ seen since you last looked at Network/.test(badge.title), JSON.stringify(badge));
+    await mgr.click("#network-tab");
+    await mgr.waitForTimeout(200);
+    check("viewing the Network tab clears its badge", await mgr.evaluate(() => (document.querySelector("#net-badge") as HTMLElement).hidden));
     await mgr.click("#log-header-title");
 
     // ---- script error indicators: compile error + runtime error ----

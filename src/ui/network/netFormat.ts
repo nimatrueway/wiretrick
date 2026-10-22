@@ -101,17 +101,41 @@ export function statusText(e: NetEntry): string {
     return String(e.status);
 }
 
+/** "altered" if any script changed the request, "seen" if one only ran on it */
+export type TouchState = "none" | "seen" | "altered";
+
+export function touchState(e: NetEntry): TouchState {
+    if (!e.interventions.length) return "none";
+    return e.interventions.some((i) => i.kind === "altered") ? "altered" : "seen";
+}
+
+/** seen = rows any script ran on (altered included); altered = rows a script changed */
+export function touchCounts(rows: NetEntry[]): { seen: number; altered: number } {
+    let seen = 0;
+    let altered = 0;
+    for (const e of rows) {
+        const t = touchState(e);
+        if (t !== "none") seen++;
+        if (t === "altered") altered++;
+    }
+    return { seen, altered };
+}
+
 export interface NetFilter {
     text: string;
     /** categories toggled on (independent toggles; ALL_TYPES = everything) */
     types: TypeCategory[];
-    interceptedOnly: boolean;
+    /** "seen" = anything a script ran on (altered included); "altered" = changed only */
+    touched: "all" | "seen" | "altered";
     tabId: number | null;
 }
 
 export function matches(e: NetEntry, f: NetFilter): boolean {
     if (!f.types.includes(category(e))) return false;
-    if (f.interceptedOnly && e.interventions.length === 0) return false;
+    if (f.touched !== "all") {
+        const t = touchState(e);
+        if (t === "none" || (f.touched === "altered" && t !== "altered")) return false;
+    }
     if (f.tabId !== null && e.tabId !== f.tabId) return false;
     const q = f.text.trim();
     if (!q) return true;

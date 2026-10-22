@@ -12,6 +12,7 @@
 import { formatScriptError } from "./scriptError";
 import { matchAny } from "./matcher";
 import type { ScriptHandlers } from "./compile";
+import { seenLine, type NetKind } from "./netTypes";
 
 export type BodyOp = "requestDecision" | "transform" | "replace" | "responseHeaders";
 
@@ -23,7 +24,8 @@ export interface OpScript {
 }
 
 export interface OpEnv {
-    log(scriptId: string, level: "info" | "warn" | "error", msg: string): void;
+    /** kind "seen": the handler ran but changed nothing (DEBUG line) */
+    log(scriptId: string, level: "debug" | "info" | "warn" | "error", msg: string, kind?: NetKind): void;
     debug?(msg: string): void;
 }
 
@@ -99,6 +101,7 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
         requestHeaders: args.requestHeaders || {},
     });
     const list = matching(scripts, op, url, args.onlyIds, env);
+    const seen = (s: OpScript, handler: string) => env.log(s.id, "debug", seenLine(s.name, handler, url), "seen");
 
     if (op === "requestDecision") {
         let headerMods: any = null;
@@ -106,7 +109,10 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
             for (const onRequest of handlers) {
                 try {
                     const result = await onRequest(base());
-                    if (!result) continue;
+                    if (!result) {
+                        seen(s, "onRequest");
+                        continue;
+                    }
                     if (result.respond) {
                         const r = result.respond;
                         const mime = r.mime || guessMimeFromUrl(url);
@@ -128,7 +134,7 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
                         if (result.headers.remove && result.headers.remove.length) parts.push(`remove ${result.headers.remove.join(", ")}`);
                         env.log(s.id, "info", `[${s.name}] onRequest → request headers (${parts.join("; ")}) ${url}`);
                         headerMods = mergeHeaderMods(headerMods, result.headers);
-                    }
+                    } else seen(s, "onRequest");
                 } catch (e: any) {
                     env.log(s.id, "error", formatScriptError(s.name, e, "onRequest"));
                 }
@@ -146,7 +152,7 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
                     if (hasHeaderMods(result?.headers)) {
                         env.log(s.id, "info", `[${s.name}] onResponseHeaders → ${Object.keys(result.headers.set || {}).length} set, ${(result.headers.remove || []).length} removed ${url}`);
                         mods = mergeHeaderMods(mods, result.headers);
-                    }
+                    } else seen(s, "onResponseHeaders");
                 } catch (e: any) {
                     env.log(s.id, "error", formatScriptError(s.name, e, "onResponseHeaders"));
                 }
@@ -169,8 +175,9 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
                         const after = typeof next === "string" ? next.length : next.byteLength;
                         out = next;
                         if (next !== prevOut) env.log(s.id, "info", `[${s.name}] modifyResponse applied (${before}b → ${after}b) ${url}`);
+                        else seen(s, "modifyResponse");
                         touched = true;
-                    }
+                    } else seen(s, "modifyResponse");
                 } catch (e: any) {
                     env.log(s.id, "error", formatScriptError(s.name, e, "modifyResponse"));
                 }
@@ -190,6 +197,7 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
                         env.log(s.id, "info", `[${s.name}] replaceResponse → ${mime} (${body.length}b) ${url}`);
                         return { mime, content: body };
                     }
+                    seen(s, "replaceResponse");
                 } catch (e: any) {
                     env.log(s.id, "error", formatScriptError(s.name, e, "replaceResponse"));
                 }

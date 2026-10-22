@@ -256,7 +256,7 @@ function run(scripts: PlainScript[], paramValues: Record<string, any>, op: BodyO
     }
     // tabId rides along so the SW attributes the line to the right tab
     const tabId = typeof args?.tabId === "number" ? args.tabId : -1;
-    const log = (scriptId: string, level: ScriptLogLevel, msg: string) => void reverseCall({ op: "log", scriptId, level, msg, tabId });
+    const log = (scriptId: string, level: ScriptLogLevel, msg: string, kind?: string) => void reverseCall({ op: "log", scriptId, level, msg, tabId, netKind: kind });
     return runOp(list, op, args, { log, debug: (m) => sandboxLog(m, "debug") });
 }
 
