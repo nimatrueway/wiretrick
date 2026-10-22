@@ -425,6 +425,33 @@ check(
 await p10e.close();
 await setEnabled("s_tapper", false);
 await setEnabled("s_marker_mod", false);
+
+// ---------- 10f. webrequest header changes on a page opened from the manager ----------
+await saveScript(
+    "s_hdr_wr",
+    `wt.declareScript({ match: ["${ORIGIN}/echo-headers"], strategy: ["webrequest"] });\nwt.onRequest(() => ({ headers: { set: { "x-wt-req": "1" }, remove: ["accept-language"] } }));\nwt.onResponseHeaders(() => ({ headers: { set: { "x-wt-res": "1" } } }));`,
+    "header probe"
+);
+await new Promise((r) => setTimeout(r, 600));
+const [p10f] = await Promise.all([ctx.waitForEvent("page"), mgr.evaluate((u) => void window.open(u), `${ORIGIN}/echo-headers`)]);
+await p10f.waitForLoadState("domcontentloaded");
+const echoed10f = JSON.parse((await p10f.textContent("body")) || "{}");
+check("webrequest onRequest: Accept-Language removed (extraHeaders) and x-wt-req set", echoed10f["x-wt-req"] === "1" && !("accept-language" in echoed10f), JSON.stringify(echoed10f));
+await p10f.waitForTimeout(500);
+const net10f: any[] = await mgr.evaluate(() => new Promise((resolve) => {
+    const port = chrome.runtime.connect({ name: "network" });
+    port.onMessage.addListener((m: any) => { if (m.type === "netSnapshot") { port.disconnect(); resolve(m.entries); } });
+}));
+const rows10f = net10f.filter((e) => e.url === `${ORIGIN}/echo-headers`);
+const page10f = rows10f.find((e) => e.type === "main_frame");
+check(
+    "network: a page opened from the manager is recorded; header annotations land on it, not a synthetic row",
+    !!page10f && page10f.interventions.length >= 2 && !rows10f.some((e) => e.synthetic),
+    JSON.stringify(rows10f.map((e) => [e.id, e.type, e.interventions.length]))
+);
+check("network: recorded response headers include onResponseHeaders changes", !!page10f?.responseHeaders?.some(([n, v]: string[]) => n.toLowerCase() === "x-wt-res" && v === "1"), JSON.stringify(page10f?.responseHeaders));
+await p10f.close();
+await setEnabled("s_hdr_wr", false);
 await mgr.click("#log-header-title");
 
 // ---------- 11. logs: script output tunnelled to the LOG, page console not captured ----------

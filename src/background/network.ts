@@ -31,8 +31,10 @@ const ownOrigin = (() => {
     }
 })();
 
-function ignored(d: { url: string; initiator?: string; originUrl?: string }): boolean {
+function ignored(d: { url: string; type?: string; initiator?: string; originUrl?: string }): boolean {
     if (!/^(https?|wss?):/.test(d.url)) return true;
+    // a page opened from the manager (e.g. a link in the editor) is a real navigation
+    if (d.type === "main_frame" || d.type === "sub_frame") return false;
     const from = d.initiator || d.originUrl || "";
     return from.startsWith(ownOrigin); // the extension's own fetches
 }
@@ -218,7 +220,9 @@ const L = {
         e.ip = d.ip;
         e.endedAt = d.timeStamp;
         e.state = "done";
-        if (!e.responseHeaders) e.responseHeaders = headerPairs(d.responseHeaders);
+        // onHeadersReceived observers see the original headers; these include
+        // changes made by blocking listeners (onResponseHeaders)
+        e.responseHeaders = headerPairs(d.responseHeaders) ?? e.responseHeaders;
         touch(e.id);
     },
     error(d: chrome.webRequest.WebResponseErrorDetails): void {
@@ -251,7 +255,7 @@ function attach(): void {
     addWithFallback(wr.onSendHeaders, L.sendHeaders, ["requestHeaders", "extraHeaders"]);
     addWithFallback(wr.onHeadersReceived, L.headersReceived, ["responseHeaders", "extraHeaders"]);
     wr.onBeforeRedirect.addListener(L.redirect, FILTER, ["responseHeaders"]);
-    wr.onCompleted.addListener(L.completed, FILTER, ["responseHeaders"]);
+    addWithFallback(wr.onCompleted, L.completed, ["responseHeaders", "extraHeaders"]);
     wr.onErrorOccurred.addListener(L.error, FILTER);
 }
 

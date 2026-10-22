@@ -407,7 +407,15 @@ export function createPipeline(
         // forbids "blocking" — the hook tier (below) carries interception.
         const addBlocking = (event: string, fn: any, extra: string[]) => {
             try {
-                (chrome.webRequest as any)[event].addListener(fn, FILTER, extra);
+                try {
+                    // Chrome hides Cookie/Referer/Accept-Language/Set-Cookie from header listeners without it
+                    (chrome.webRequest as any)[event].addListener(fn, FILTER, extra);
+                } catch (e) {
+                    // Firefox rejects "extraHeaders"
+                    if (!extra.includes("extraHeaders")) throw e;
+                    extra = extra.filter((s) => s !== "extraHeaders");
+                    (chrome.webRequest as any)[event].addListener(fn, FILTER, extra);
+                }
                 dlogLevel("webrequest", "debug", `${event} listener registered (${extra.join(", ")})`);
             } catch (e: any) {
                 // e.g. a browser build that dropped MV2 blocking webRequest
@@ -415,8 +423,8 @@ export function createPipeline(
             }
         };
         addBlocking("onBeforeRequest", onBeforeRequest, ["blocking"]);
-        addBlocking("onBeforeSendHeaders", onBeforeSendHeaders, ["requestHeaders", "blocking"]);
-        addBlocking("onHeadersReceived", onHeadersReceived, ["responseHeaders", "blocking"]);
+        addBlocking("onBeforeSendHeaders", onBeforeSendHeaders, ["requestHeaders", "blocking", "extraHeaders"]);
+        addBlocking("onHeadersReceived", onHeadersReceived, ["responseHeaders", "blocking", "extraHeaders"]);
 
         // per-request caches must not leak for requests that never reach the
         // response-header phase

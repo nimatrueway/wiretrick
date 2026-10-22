@@ -93,6 +93,25 @@ describe("network recorder", () => {
         p.disconnect();
     });
 
+    it("records a page navigation opened from the extension (e.g. an editor link)", () => {
+        const p = fakePort();
+        addNetworkPort(p.port);
+        req("1", "https://a.test/", { type: "main_frame", initiator: "chrome-extension://ext" });
+        annotateFromLog(7, "s1", "[S] onResponseHeaders → set x-a https://a.test/", "info");
+        expect([...entries.values()].map((e) => [e.id, e.interventions.length])).toEqual([["1", 1]]);
+        p.disconnect();
+    });
+
+    it("shows the final response headers, including blocking-listener changes", () => {
+        const p = fakePort();
+        addNetworkPort(p.port);
+        req("1", "https://a.test/");
+        L.headersReceived({ requestId: "1", statusCode: 200, responseHeaders: [{ name: "a", value: "1" }] } as any);
+        L.completed({ requestId: "1", statusCode: 200, timeStamp: Date.now(), responseHeaders: [{ name: "a", value: "1" }, { name: "x-debug", value: "1" }] } as any);
+        expect(entries.get("1")!.responseHeaders).toEqual([["a", "1"], ["x-debug", "1"]]);
+        p.disconnect();
+    });
+
     it("archives redirect hops as their own rows", () => {
         const p = fakePort();
         addNetworkPort(p.port);
