@@ -88,6 +88,13 @@ at the right of the editor toolbar do the same.
   them. Selecting a request shows its headers, request payload, the response
   body (modified and original, when Wiretrick handled it) and what each
   script did (tapped entries muted).
+
+  Full recording (every request, headers, timing, bodies) starts the first
+  time the Network tab is shown and stops when that manager closes. Before
+  and after, requests a script tapped, modified or missed are still kept —
+  no extra browser listeners, just the engine's own log lines — up to the
+  newest 500, without bodies, headers or timing (status shows as unknown).
+  Opening the tab shows them; closing the manager keeps only such rows.
   - **Missed** — a script with `modifyResponse` / `replaceResponse` matched
     a request but no tier ever ran the handler (see
     [“never ran” warning](strategies.md#never-ran-warning)). It is logged as

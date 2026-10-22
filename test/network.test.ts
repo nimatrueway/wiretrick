@@ -18,7 +18,7 @@ const ev = (name: string) => ({
     },
 };
 
-const { addNetworkPort, annotateFromLog, recordNetBody, toNetBody, MAX_BODY, __test } = await import("../src/background/network");
+const { addNetworkPort, annotateFromLog, recordNetBody, toNetBody, MAX_BODY, MAX_IDLE, __test } = await import("../src/background/network");
 const { L, entries } = __test;
 
 function fakePort() {
@@ -91,6 +91,32 @@ describe("network recorder", () => {
         req("2", "data:text/plain,hi");
         expect(entries.size).toBe(0);
         p.disconnect();
+    });
+
+    it("keeps script-touched rows while no Network tab is open, without listeners or bodies", () => {
+        annotateFromLog(7, "s1", "[S] onRequest → tapped (no change) https://a.test/x", "debug", "tapped");
+        annotateFromLog(7, "s1", "[S] modifyResponse applied https://a.test/x", "info");
+        recordNetBody({ tabId: 7, url: "https://a.test/x", modified: "big" });
+        expect(listeners.before?.length ?? 0).toBe(0);
+        expect([...entries.values()].map((e) => [e.url, e.interventions.map((i) => i.kind), e.responseBody])).toEqual([["https://a.test/x", ["tapped", "modified"], undefined]]);
+        const p = fakePort();
+        addNetworkPort(p.port);
+        expect(p.sent[0].entries.length).toBe(1);
+        p.disconnect();
+    });
+
+    it("on close keeps only touched rows (bodies dropped, pending settled) and caps idle rows", () => {
+        const p = fakePort();
+        addNetworkPort(p.port);
+        req("1", "https://a.test/plain");
+        req("2", "https://a.test/hit");
+        annotateFromLog(7, "s1", "[S] modifyResponse applied https://a.test/hit", "info");
+        recordNetBody({ tabId: 7, url: "https://a.test/hit", original: "a", modified: "b" });
+        p.disconnect();
+        expect([...entries.keys()]).toEqual(["2"]);
+        expect(entries.get("2")).toMatchObject({ state: "done", responseBody: undefined, originalResponseBody: undefined });
+        for (let i = 0; i < MAX_IDLE + 20; i++) annotateFromLog(7, "s1", `[S] onRequest → set x https://a.test/${i}`, "info");
+        expect(entries.size).toBe(MAX_IDLE);
     });
 
     it("records a page navigation opened from the extension (e.g. an editor link)", () => {
@@ -204,8 +230,8 @@ describe("network recorder", () => {
         p.disconnect();
     });
 
-    it("does nothing without a viewer, and ignores lines without a URL", () => {
-        annotateFromLog(7, "s1", "[Mock] respond 200 https://a.test/x", "info");
+    it("ignores lines without a URL, with or without a viewer", () => {
+        annotateFromLog(7, "s1", "[Mock] compiled ok", "info");
         expect(entries.size).toBe(0);
         const p = fakePort();
         addNetworkPort(p.port);

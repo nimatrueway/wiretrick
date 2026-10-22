@@ -4,6 +4,10 @@
  * are attached while at least one manager holds a "network" port and
  * removed when the last one closes — zero cost otherwise.
  *
+ * While nobody watches, rows a script tapped/modified/missed are still kept
+ * (no listeners: just the engine's own log lines, capped at MAX_IDLE, no
+ * bodies), so opening the Network tab shows recent script activity.
+ *
  * Script actions are attached to the request they touched via
  * annotateFromLog (every script-attributed engine log line that ends in
  * the request URL); bodies via recordNetBody from the strategies that
@@ -12,6 +16,10 @@
 import { interventionKind, type InterventionKind, type NetBody, type NetEntry, type NetPortMsg } from "../shared/netTypes";
 
 const MAX_ENTRIES = 1000;
+/** rows kept while no Network tab is open (script-touched only) */
+export const MAX_IDLE = 500;
+/** while idle every row is synthetic: one request's log lines arrive within this */
+const IDLE_MATCH_WINDOW_MS = 10_000;
 /** per-body capture cap (chars of text) */
 export const MAX_BODY = 256 * 1024;
 const FLUSH_MS = 120;
@@ -48,6 +56,7 @@ function post(msg: NetPortMsg): void {
 }
 
 function touch(id: string): void {
+    if (!ports.size) return;
     dirty.add(id);
     if (!flushTimer) {
         flushTimer = setTimeout(() => {
@@ -61,7 +70,7 @@ function touch(id: string): void {
 
 function add(e: NetEntry): void {
     entries.set(e.id, e);
-    if (entries.size > MAX_ENTRIES) {
+    if (entries.size > (ports.size ? MAX_ENTRIES : MAX_IDLE)) {
         const oldest = entries.keys().next().value;
         if (oldest !== undefined) entries.delete(oldest);
     }
@@ -286,6 +295,24 @@ export function clearNetwork(): void {
     post({ type: "netCleared" });
 }
 
+/** Recording stopped: keep only script-touched rows, small (no bodies), newest MAX_IDLE. */
+function keepTouchedOnly(): void {
+    if (flushTimer) clearTimeout(flushTimer);
+    flushTimer = null;
+    dirty.clear();
+    const now = Date.now();
+    const kept = [...entries.values()].filter((e) => e.interventions.length).slice(-MAX_IDLE);
+    entries.clear();
+    for (const e of kept) {
+        e.requestBody = e.responseBody = e.originalResponseBody = undefined;
+        if (e.state === "pending") {
+            e.state = "done"; // its listeners are gone
+            e.endedAt ??= now;
+        }
+        entries.set(e.id, e);
+    }
+}
+
 export function addNetworkPort(port: chrome.runtime.Port): void {
     ports.add(port);
     attach();
@@ -297,7 +324,7 @@ export function addNetworkPort(port: chrome.runtime.Port): void {
         ports.delete(port);
         if (!ports.size) {
             detach();
-            entries.clear(); // devtools semantics: nothing kept while nobody watches
+            keepTouchedOnly();
         }
     });
 }
@@ -315,8 +342,9 @@ const NAME_PREFIX = /^(?:\[(process|cdp|webrequest|hook|sandbox)\]\s+(?=\[))?\[(
 function entryFor(tabId: number, url: string, method?: string): NetEntry {
     const now = Date.now();
     let target: NetEntry | undefined;
+    const window = ports.size ? MATCH_WINDOW_MS : IDLE_MATCH_WINDOW_MS;
     for (const e of [...entries.values()].reverse()) {
-        if (now - e.startedAt > MATCH_WINDOW_MS) break;
+        if (now - e.startedAt > window) break;
         if (e.url !== url || e.redirectTo) continue;
         if (method && !e.synthetic && e.method !== method) continue;
         if (tabId >= 0 && e.tabId >= 0 && e.tabId !== tabId) continue;
@@ -389,10 +417,10 @@ export function recordNetBody(r: NetBodyRecord): void {
  * Attach a script-attributed log line ("[name] modifyResponse applied
  * (…) https://…") to the request it describes, as "tapped" or "modified"
  * (inferred from the line when not given). A line with no matching
- * recorded request becomes a synthetic entry (see entryFor).
+ * recorded request becomes a synthetic entry (see entryFor). Runs while
+ * idle too (see MAX_IDLE).
  */
 export function annotateFromLog(tabId: number, scriptId: string, message: string, level: NetEntry["interventions"][number]["level"], kind?: InterventionKind, explicitUrl?: string): void {
-    if (!ports.size) return;
     const m = explicitUrl ? null : URL_AT_END.exec(message);
     if (!explicitUrl && !m) return;
     const url = explicitUrl || m![1];

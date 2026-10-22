@@ -375,6 +375,11 @@ check("replaceResponse [\"cdp\"]: handler ran once per load (one log line per lo
 // ---------- 10d. "never ran" warning: ["webrequest"] modifyResponse on a page load (Chromium can't read bodies) ----------
 await mgr.click("#network-tab"); // the Network tab records from now on
 await mgr.waitForSelector("#network-view .net-toolbar", { timeout: 5000 });
+await mgr.waitForTimeout(300);
+const early10d: { n: number }[] = await mgr.evaluate(() =>
+    [...document.querySelectorAll("#network-view tbody tr.net-row")].map((tr) => ({ n: tr.querySelectorAll(".net-badge").length }))
+);
+check("network: script activity from before the tab was opened is listed", early10d.length > 0 && early10d.every((r) => r.n > 0), `rows=${early10d.length}`);
 await saveScript("s_missed", `wt.declareScript({ match: ["${ORIGIN}/html-missed"], strategy: ["webrequest"] });\nwt.modifyResponse((ctx, body) => body.replace("MISSED-ORIGINAL", "NEVER"));`, "missed probe");
 await new Promise((r) => setTimeout(r, 600));
 const p10d = await newPage("/html-missed");
@@ -433,6 +438,7 @@ await saveScript(
     "header probe"
 );
 await new Promise((r) => setTimeout(r, 600));
+const t10f = Date.now();
 const [p10f] = await Promise.all([ctx.waitForEvent("page"), mgr.evaluate((u) => void window.open(u), `${ORIGIN}/echo-headers`)]);
 await p10f.waitForLoadState("domcontentloaded");
 const echoed10f = JSON.parse((await p10f.textContent("body")) || "{}");
@@ -442,7 +448,8 @@ const net10f: any[] = await mgr.evaluate(() => new Promise((resolve) => {
     const port = chrome.runtime.connect({ name: "network" });
     port.onMessage.addListener((m: any) => { if (m.type === "netSnapshot") { port.disconnect(); resolve(m.entries); } });
 }));
-const rows10f = net10f.filter((e) => e.url === `${ORIGIN}/echo-headers`);
+// earlier sections' activity on this URL is kept from before the tab opened
+const rows10f = net10f.filter((e) => e.url === `${ORIGIN}/echo-headers` && e.startedAt >= t10f - 50);
 const page10f = rows10f.find((e) => e.type === "main_frame");
 check(
     "network: a page opened from the manager is recorded; header annotations land on it, not a synthetic row",

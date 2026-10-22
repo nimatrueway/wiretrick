@@ -169,7 +169,7 @@ export async function collectDiagnostics(extra: DiagnosticsExtra = {}): Promise<
     out.push("");
     out.push(fence("text", debug.map((d) => `${iso(d.at)} ${(d.level || "debug").toUpperCase().padEnd(5)} [${d.src}] ${d.msg}`).join("\n") || "(empty)"));
     out.push("");
-    out.push(`## Network (${net.length} requests${isRecording() ? "" : " — recording is OFF: open the manager's Network tab, reproduce, then collect again"})`);
+    out.push(`## Network (${net.length} requests${isRecording() ? "" : " — recording is OFF, only script-touched requests are kept: open the manager's Network tab, reproduce, then collect again for full detail"})`);
     out.push("");
     out.push(fence("json", net.length ? net.map((e) => JSON.stringify(e)).join("\n") : "(empty)"));
     out.push("");
