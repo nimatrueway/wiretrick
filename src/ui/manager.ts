@@ -1691,6 +1691,7 @@ async function main(): Promise<void> {
         minimap: { enabled: false },
         automaticLayout: true,
         fontSize: 13,
+        scrollBeyondLastLine: false,
         wordWrap: loadLayout().wordWrap ? "on" : "off",
     });
     editor.addCommand((window as any).monaco.KeyMod.CtrlCmd | (window as any).monaco.KeyCode.KeyS, () => void saveCurrent());

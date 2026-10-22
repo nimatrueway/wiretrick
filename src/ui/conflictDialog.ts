@@ -40,7 +40,7 @@ export function resolveConflict(opts: { name: string; theirs: string | null; min
         const a = monaco.editor.createModel(opts.theirs, "typescript");
         const b = monaco.editor.createModel(opts.mine, "typescript");
         disposables.push(a, b);
-        diff = monaco.editor.createDiffEditor(host, { readOnly: true, originalEditable: false, automaticLayout: true, renderSideBySide: true, minimap: { enabled: false } });
+        diff = monaco.editor.createDiffEditor(host, { readOnly: true, originalEditable: false, automaticLayout: true, renderSideBySide: true, minimap: { enabled: false }, scrollBeyondLastLine: false });
         diff.setModel({ original: a, modified: b });
     }
 
