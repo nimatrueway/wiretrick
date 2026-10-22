@@ -399,6 +399,29 @@ try {
     await mgr.click("#network-tab");
     await mgr.waitForTimeout(200);
     check("viewing the Network tab clears its badge", await mgr.evaluate(() => (document.querySelector("#net-badge") as HTMLElement).hidden));
+    // status bar: the same counts while the bottom panel is closed; clicking opens it on that tab
+    await mgr.click("#btn-toggle-panel");
+    await xoPage.evaluate((cdn: string) => Promise.all(["gz.js", "auto.js"].map((f) => new Promise((r) => {
+        const s = document.createElement("script");
+        s.src = `${cdn}/${f}?sb=${Date.now()}`;
+        s.onload = s.onerror = r;
+        document.head.appendChild(s);
+    }))), CDN);
+    await mgr.bringToFront();
+    const sb = await mgr.waitForFunction(() => {
+        const [modified, tapped] = ["modified", "tapped"].map((k) => Number(document.querySelector(`#sb-net .sb-n[data-k="${k}"]`)?.textContent));
+        const bar = document.getElementById("status-bar")!;
+        return bar.offsetHeight > 0 && modified >= 1 && tapped >= 1 ? { modified, tapped, title: (document.getElementById("sb-net") as HTMLElement).title } : null;
+    }, null, { timeout: 8000, polling: 200 }).then((h: any) => h.jsonValue(), (e: any) => String(e)) as any;
+    check("status bar shows Network counts while the panel is closed", typeof sb === "object" && /tapped since you last looked/.test(sb.title), JSON.stringify(sb));
+    await mgr.click("#sb-net");
+    await mgr.waitForTimeout(200);
+    const opened = await mgr.evaluate(() => ({
+        panel: !document.getElementById("app")!.classList.contains("panel-hidden"),
+        tab: document.getElementById("log-panel")!.dataset.tab,
+        modified: document.querySelector('#sb-net .sb-n[data-k="modified"]')?.textContent,
+    }));
+    check("clicking the status bar item opens the panel on Network and clears its count", opened.panel && opened.tab === "network" && opened.modified === "0", JSON.stringify(opened));
     await mgr.click("#log-header-title");
 
     // ---- script error indicators: compile error + runtime error ----

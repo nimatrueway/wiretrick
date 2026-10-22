@@ -58,7 +58,10 @@ at the right of the editor toolbar do the same.
 - **Log** — engine and script log lines with level and source filters. While
   the Log tab is out of view (Network tab open, panel hidden, or the manager
   in the background), new errors and warnings are counted in red/yellow
-  badges on its title; looking at it clears them. Turn this off (for both
+  badges on its title; looking at it clears them. A VS Code-style status bar
+  along the bottom shows the same unseen counts for both tabs (errors ·
+  warnings, modified · tapped) even while the panel is closed; clicking one
+  opens the panel on that tab. Turn this off (badges and status bar, both
   tabs) in **Settings → Logging → Tab badges**. Script
   errors (exceptions in handlers, failed compiles) are logged at ERROR, and
   the script gets a ⚠ indicator in the list and the popup. TypeScript errors

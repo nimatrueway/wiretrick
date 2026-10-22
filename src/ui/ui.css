@@ -11,8 +11,48 @@ html, body {
 
 #app {
     display: flex;
-    height: 100vh;
+    height: calc(100vh - var(--status-h));
 }
+:root { --status-h: 22px; }
+body.no-status { --status-h: 0px; }
+body.no-status #status-bar { display: none; }
+
+/* ---- VS Code-style status bar: unseen Log / Network counts ---- */
+#status-bar {
+    height: var(--status-h);
+    display: flex;
+    align-items: stretch;
+    gap: 2px;
+    padding: 0 6px;
+    box-sizing: border-box;
+    border-top: 1px solid var(--border);
+    background: var(--bg-panel);
+    font-size: 12px;
+    color: var(--fg-dim);
+    overflow: hidden;
+}
+.sb-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 0 6px;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+.sb-item:hover { background: color-mix(in srgb, var(--fg) 12%, transparent); color: var(--fg); }
+.sb-item:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.sb-ico { flex-shrink: 0; }
+.sb-n { margin-right: 5px; font-variant-numeric: tabular-nums; }
+.sb-n:last-child { margin-right: 0; }
+/* only non-zero counts are coloured */
+.sb-item .sb-ico.error.on { color: var(--err); }
+.sb-item .sb-ico.warn.on { color: var(--warn); }
+.sb-item .sb-ico.modified.on { color: var(--ok); }
+.sb-item .sb-n.on { color: var(--fg); }
 
 /* ---- splitters ---- */
 #split-v {

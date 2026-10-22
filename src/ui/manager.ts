@@ -991,6 +991,8 @@ function tabInView(tab: "log" | "network"): boolean {
 
 function renderBadge(el: HTMLElement, badge: TabBadge, inView: boolean): void {
     if (!logBadgeEnabled || inView) badge.reset();
+    document.body.classList.toggle("no-status", !logBadgeEnabled);
+    renderStatusBadge(badge === logBadge ? $("#sb-log") : $("#sb-net"), badge, badge === logBadge ? "Log (⌘J)" : "Network");
     el.hidden = badge.empty;
     el.title = badge.empty ? "" : badge.title;
     for (const [cls, n] of badge.counts) {
@@ -1003,6 +1005,16 @@ function renderBadge(el: HTMLElement, badge: TabBadge, inView: boolean): void {
 function renderTabBadges(): void {
     renderBadge($("#log-badge"), logBadge, tabInView("log"));
     renderBadge($("#net-badge"), netBadge, tabInView("network"));
+}
+
+/** Status bar mirror of the tab badges, visible even with the panel closed. */
+function renderStatusBadge(el: HTMLElement, badge: TabBadge, label: string): void {
+    for (const [cls, n] of badge.counts) {
+        el.querySelector(`.sb-n[data-k="${cls}"]`)!.textContent = badgeCount(n);
+        el.querySelector(`.sb-n[data-k="${cls}"]`)!.classList.toggle("on", n > 0);
+        el.querySelector(`.sb-ico.${cls}`)!.classList.toggle("on", n > 0);
+    }
+    el.title = badge.empty ? label : `${label} — ${badge.title}`;
 }
 
 /** Network recorder traffic (after the panel's store applied it): feeds the Network badge. */
@@ -1675,6 +1687,13 @@ function setupPanelTabs(): void {
     };
     for (const t of document.querySelectorAll<HTMLElement>(".panel-tab")) {
         t.addEventListener("click", () => show(t.dataset.panel as "log" | "network"));
+    }
+    // status bar: open the panel on that tab
+    for (const [btn, which] of [["#sb-log", "log"], ["#sb-net", "network"]] as const) {
+        $(btn).addEventListener("click", () => {
+            setPanelHidden(false);
+            show(which);
+        });
     }
     show(loadLayout().panelTab === "network" ? "network" : "log");
 }
