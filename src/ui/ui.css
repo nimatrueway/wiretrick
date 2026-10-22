@@ -632,14 +632,14 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 
 #help-panel .dialog { height: min(720px, 86vh); }
 #help-panel .dialog-body { flex: 1; }
-#shortcuts-body { padding-top: 0; }
-#shortcuts-filter {
+#help-panel .dialog-body:has(> .help-filter) { padding-top: 0; }
+#help-panel .help-filter {
     position: sticky; top: 0; z-index: 1; box-sizing: border-box; width: 100%;
     margin: 12px 0 6px; padding: 5px 8px; font: inherit; font-size: 13px;
     color: var(--fg); background: var(--bg); border: 1px solid var(--border); border-radius: 3px;
     box-shadow: 0 -12px 0 var(--bg-panel), 0 6px 0 var(--bg-panel); /* covers rows scrolling under it */
 }
-#shortcuts-filter:focus { outline: 1px solid var(--accent); outline-offset: -1px; }
+#help-panel .help-filter:focus { outline: 1px solid var(--accent); outline-offset: -1px; }
 #shortcuts-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 #shortcuts-table th { text-align: left; font-weight: 600; color: var(--fg-dim); padding: 4px 8px; border-bottom: 1px solid var(--border); }
 #shortcuts-table td { padding: 4px 8px; border-bottom: 1px solid var(--border); }
@@ -649,6 +649,7 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
     font: 11px "SF Mono", Menlo, Consolas, monospace;
     padding: 1px 5px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 3px;
 }
+#help-list > [hidden], #samples-list > [hidden] { display: none; }
 #help-body .api-section { margin-bottom: 16px; }
 #help-body .api-title { font-weight: 600; margin-bottom: 4px; color: var(--ok); }
 

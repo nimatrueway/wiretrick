@@ -251,10 +251,18 @@
                 </div>
                 <button class="btn-close" data-close>✕</button>
             </div>
-            <div class="dialog-body" id="help-body" data-pane="reference"></div>
-            <div class="dialog-body" id="samples-body" data-pane="samples" hidden></div>
+            <div class="dialog-body" id="help-body" data-pane="reference">
+                <input id="help-filter" class="help-filter" type="search" placeholder="Type to search the API reference (e.g. replaceResponse, onDom, strategy)" autocomplete="off" spellcheck="false">
+                <div id="help-list"></div>
+                <p id="help-empty" class="muted" hidden>No matching sections.</p>
+            </div>
+            <div class="dialog-body" id="samples-body" data-pane="samples" hidden>
+                <input id="samples-filter" class="help-filter" type="search" placeholder="Type to search samples (e.g. cors, mock, headers)" autocomplete="off" spellcheck="false">
+                <div id="samples-list"></div>
+                <p id="samples-empty" class="muted" hidden>No matching samples.</p>
+            </div>
             <div class="dialog-body" id="shortcuts-body" data-pane="shortcuts" hidden>
-                <input id="shortcuts-filter" type="search" placeholder="Type to search keybindings (e.g. panel, ctrl+j, explorer)" autocomplete="off" spellcheck="false">
+                <input id="shortcuts-filter" class="help-filter" type="search" placeholder="Type to search keybindings (e.g. panel, ctrl+j, explorer)" autocomplete="off" spellcheck="false">
                 <table id="shortcuts-table"><thead><tr><th>Command</th><th>Keybinding</th><th>When</th></tr></thead><tbody></tbody></table>
                 <p id="shortcuts-empty" class="muted" hidden>No matching shortcuts.</p>
             </div>

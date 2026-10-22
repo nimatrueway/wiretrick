@@ -1299,11 +1299,16 @@ function setupDialogs(): void {
         setTimeout(() => (b.textContent = "Copy install command"), 1500);
     });
     $("#btn-process-trust").addEventListener("click", () => chrome.runtime.sendMessage({ type: "processTrustCa" }, () => void chrome.runtime.lastError));
-    $("#btn-help").addEventListener("click", () => openDialog("help-panel"));
+    $("#btn-help").addEventListener("click", () => {
+        openDialog("help-panel");
+        showHelpTab(document.querySelector<HTMLElement>("[data-help-tab].active")?.dataset.helpTab || "reference");
+    });
     for (const tab of document.querySelectorAll<HTMLElement>("[data-help-tab]")) {
         tab.addEventListener("click", () => showHelpTab(tab.dataset.helpTab!));
     }
     $input("#shortcuts-filter").addEventListener("input", renderShortcuts);
+    $input("#help-filter").addEventListener("input", () => filterHelpList("help"));
+    $input("#samples-filter").addEventListener("input", () => filterHelpList("samples"));
     for (const overlay of document.querySelectorAll(".overlay")) {
         overlay.addEventListener("mousedown", (e) => {
             if (e.target === overlay) closeDialog(overlay);
@@ -1467,11 +1472,10 @@ function applyLogLevel(level: string): void {
 }
 
 function showHelpTab(name: string): void {
-    if (name === "samples" && !$("#samples-body").childElementCount) renderSamples();
-    if (name === "shortcuts") {
-        renderShortcuts();
-        setTimeout(() => $input("#shortcuts-filter").focus());
-    }
+    if (name === "samples" && !$("#samples-list").childElementCount) renderSamples();
+    if (name === "shortcuts") renderShortcuts();
+    const filter = { reference: "#help-filter", samples: "#samples-filter", shortcuts: "#shortcuts-filter" }[name];
+    if (filter) setTimeout(() => $input(filter).focus());
     for (const tab of document.querySelectorAll<HTMLElement>("[data-help-tab]")) {
         tab.classList.toggle("active", tab.dataset.helpTab === name);
         tab.setAttribute("aria-selected", String(tab.dataset.helpTab === name));
@@ -1511,8 +1515,20 @@ function renderShortcuts(): void {
     $("#shortcuts-empty").hidden = rows.length > 0;
 }
 
+/** Hides Reference sections / Samples cards that don't contain every typed word. */
+function filterHelpList(pane: "help" | "samples"): void {
+    const words = $input(`#${pane}-filter`).value.toLowerCase().split(/\s+/).filter(Boolean);
+    let shown = 0;
+    for (const el of Array.from($(`#${pane}-list`).children) as HTMLElement[]) {
+        const text = (el.textContent || "").toLowerCase();
+        el.hidden = !words.every((w) => text.includes(w));
+        if (!el.hidden) shown++;
+    }
+    $(`#${pane}-empty`).hidden = shown > 0;
+}
+
 function renderHelp(): void {
-    const body = $("#help-body");
+    const body = $("#help-list");
     body.innerHTML = "";
     for (const section of API_REFERENCE) {
         const div = document.createElement("div");
@@ -1528,7 +1544,7 @@ function renderHelp(): void {
 }
 
 function renderSamples(): void {
-    const body = $("#samples-body");
+    const body = $("#samples-list");
     body.innerHTML = "";
     for (const sample of SAMPLES) {
         const card = document.createElement("div");
@@ -1558,6 +1574,7 @@ function renderSamples(): void {
         card.append(head, blurb, pre);
         body.appendChild(card);
     }
+    filterHelpList("samples");
 }
 
 // ---- dedicated scripts folder: pick once, edits sync both ways ----
