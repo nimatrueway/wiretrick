@@ -43,10 +43,10 @@ wt.onRequest("*://postman-echo.com/*", () => ({
     },
     {
         name: "CORS unlock",
-        blurb: "Add permissive response headers so other pages can consume a resource. Try it: run the fetch from the comment in example.org's console.",
-        code: `// Try it: open https://example.org/, then in DevTools → Console run
-//   fetch("https://example.com/").then(r => r.text()).then(console.log)
-// Without this script it fails with a CORS error; with it the HTML prints.
+        blurb: "Add permissive response headers so other pages can consume a resource. Try it: open example.org — a line at the top shows whether it could read example.com.",
+        code: `// Try it: open https://example.org/ — a line at the top says whether the
+// page could read https://example.com/. Comment out the onResponseHeaders
+// handler, save and reload to see the browser block it with a CORS error.
 wt.describe("Let any origin read example.com");
 
 wt.onResponseHeaders("*://example.com/*", () => ({
@@ -55,9 +55,37 @@ wt.onResponseHeaders("*://example.com/*", () => ({
             "access-control-allow-origin": "*",
             "access-control-allow-headers": "*",
         },
-        remove: ["x-frame-options"],
     },
-}));`,
+}));
+
+// the demo: example.org's own page code fetches example.com
+// (plain JS only: it runs as page code, without the script compiler's helpers)
+function demo() {
+    if (document.getElementById("wt-cors-demo")) return;
+    const out = document.createElement("p");
+    out.id = "wt-cors-demo";
+    out.style.cssText = "font: bold 16px system-ui; padding: 8px; color: #fff; background: #555";
+    out.textContent = "Reading https://example.com/ …";
+    document.body.prepend(out);
+    fetch("https://example.com/")
+        .then((r) => r.text())
+        .then((html) => {
+            const title = html.match(/<title>(.*?)<\\/title>/);
+            out.textContent = "✓ Read example.com: " + (title ? title[1] : html.length + " bytes");
+            out.style.background = "#2a7";
+        })
+        .catch(() => {
+            out.textContent = "✗ Blocked by CORS (see the console)";
+            out.style.background = "#c33";
+        });
+}
+
+wt.onDom("*://example.org/*", () => {
+    // run in the page itself (an onDom handler runs beside it, in the extension)
+    const s = document.createElement("script");
+    s.textContent = \`(\${demo})()\`;
+    document.head.append(s);
+});`,
     },
     {
         name: "Mock a fetch/XHR API",
