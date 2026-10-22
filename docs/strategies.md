@@ -148,7 +148,8 @@ The reason is picked from the situation:
 
 - the script's tiers can't touch this body on Chromium (e.g. only
   `"webrequest"` / `"hook"` for a page, script or stylesheet) → add `"cdp"`
-  or `"process"`;
+  or `"process"`; for a page fetch/XHR with only `"webrequest"` → add
+  `"hook"`, `"cdp"` or `"process"`;
 - served from the browser cache → reload with the cache disabled (hard
   reload);
 - `"cdp"` listed but the debugger wasn't attached in time → the existing
@@ -157,12 +158,21 @@ The reason is picked from the situation:
   helper;
 - otherwise → “no tier tapped it — check the Log at debug level”.
 
-Skipped: requests the page hook claimed (the page may simply never read the
-body), fetch/XHR, websocket, ping/beacon, CSP reports, the extension's own
+Skipped: requests the page hook claimed or may run (it reads fetch/XHR
+bodies lazily — the page may simply never read one), websocket, ping/beacon, CSP reports, the extension's own
 requests, library scripts, and requests a script already ended in
 `onRequest` (cancel/redirect/respond). Each script + URL warns at most once
 a minute, and at most 20 warnings a minute overall. In the Network panel
 it shows as a yellow *missed* entry; the row is not marked tapped.
+
+On Chromium MV2 a script whose `modifyResponse` can never run — its
+`strategy` names none of `"hook"`, `"auto"`, `"cdp"`, `"process"`, e.g.
+`strategy: ["webrequest"]` — also gets a WARN as soon as it loads, before
+any request:
+
+```text
+[My script] modifyResponse will never run with strategy ["webrequest"] on Chromium — its webRequest API can't read response bodies. Add "hook" (page fetch/XHR, no banner), "cdp" (any resource, debugger banner) or "process" (local helper)
+```
 
 ## First page load with `cdp`
 

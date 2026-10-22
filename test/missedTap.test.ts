@@ -1,6 +1,6 @@
 /** "modifyResponse never ran": reason selection, throttle, and the tap registry. */
 import { describe, it, expect, beforeEach } from "vitest";
-import { makeMissedThrottle, missedReason, missedWhat, MISSED_REASONS, type MissedCase } from "../src/shared/missedTap";
+import { bodyTierGap, makeMissedThrottle, missedReason, missedWhat, MISSED_REASONS, type MissedCase } from "../src/shared/missedTap";
 import { interventionKind, missedLine } from "../src/shared/netTypes";
 import { __resetTaps, bodyTappedSince, log, logTapped } from "../src/background/engine/logs";
 
@@ -44,13 +44,34 @@ describe("missedReason", () => {
         expect(reason({ tiers: ["webrequest"], firefox: true, fromCache: true })).toBe(MISSED_REASONS.cache);
     });
 
-    it("skips page fetch/XHR, sockets and pings", () => {
-        for (const type of ["xmlhttprequest", "websocket", "ping", "csp_report"]) expect(reason({ tiers: ["webrequest"], type })).toBeNull();
+    it("skips sockets and pings", () => {
+        for (const type of ["websocket", "ping", "csp_report"]) expect(reason({ tiers: ["webrequest"], type })).toBeNull();
+    });
+
+    it("fetch/XHR: silent when the hook may run it, warns when nothing can", () => {
+        const xhr = { type: "xmlhttprequest" };
+        for (const tiers of [["hook"], ["auto"], ["webrequest", "hook"]]) expect(reason({ ...xhr, tiers })).toBeNull();
+        expect(reason({ ...xhr, tiers: ["webrequest"], mv3: true })).toBeNull(); // MV3: webrequest → hook
+        expect(reason({ ...xhr, tiers: ["webrequest"] })).toBe(MISSED_REASONS.chromiumNoBodyXhr);
+        expect(reason({ ...xhr, tiers: ["process"] })).toBe(MISSED_REASONS.helperDown);
+        expect(reason({ ...xhr, tiers: ["webrequest"], replaceOnly: true })).toBe(MISSED_REASONS.fallback);
+        expect(reason({ ...xhr, tiers: ["cdp"] })).toBe(MISSED_REASONS.fallback);
+        expect(reason({ ...xhr, tiers: ["webrequest"], firefox: true })).toBe(MISSED_REASONS.fallback);
     });
 
     it("names the request type", () => {
         expect(missedWhat("main_frame")).toBe("document");
         expect(missedWhat("script")).toBe("script");
+    });
+});
+
+describe("bodyTierGap (up-front warning)", () => {
+    it("only Chromium MV2 modifyResponse with no body-capable tier", () => {
+        expect(bodyTierGap(["webrequest"], false, false, true)).toMatch(/never run with strategy \["webrequest"\]/);
+        for (const t of ["hook", "auto", "cdp", "process"]) expect(bodyTierGap(["webrequest", t], false, false, true)).toBeNull();
+        expect(bodyTierGap(["webrequest"], true, false, true)).toBeNull(); // Firefox streams bodies
+        expect(bodyTierGap(["webrequest"], false, true, true)).toBeNull(); // MV3: falls back to the hook
+        expect(bodyTierGap(["webrequest"], false, false, false)).toBeNull(); // replaceResponse only: redirect works
     });
 });
 

@@ -20,7 +20,7 @@ void toRunnableJs;
 import { log, getScriptErrors, getScriptTypeErrors, bodyTappedSince } from "./logs";
 import { parseStrategyList } from "../../shared/metaParser";
 import { missedLine } from "../../shared/netTypes";
-import { makeMissedThrottle, missedReason, missedWhat, MISSED_SKIP_TYPES } from "../../shared/missedTap";
+import { bodyTierGap, makeMissedThrottle, missedReason, missedWhat, MISSED_SKIP_TYPES } from "../../shared/missedTap";
 import { serializeHandlers, type HandlerSources } from "../../shared/compile";
 import { resolveParamValues } from "../../shared/scriptDef";
 import { unknownStrategies } from "../../shared/metaParser";
@@ -124,6 +124,8 @@ export function createPipeline(
     /** `${tabId}|${url}` loads the debugger-tier warning below already reported */
     const cdpWarned = new Set<string>();
     const missedThrottle = makeMissedThrottle();
+    /** scriptId → last up-front tier-gap state reported (see bodyTierGap) */
+    const gapWarned = new Map<string, string>();
     const extOrigin = chrome.runtime.getURL("");
     const watchedFor = (url: string) => bodyWatch.filter((w) => matchAny(w.match, url));
     const ownRequest = (d: any) => d.url.startsWith(extOrigin) || (d.initiator || d.originUrl || "").startsWith(extOrigin.replace(/\/$/, ""));
@@ -184,6 +186,14 @@ export function createPipeline(
                 });
             }
             bodyWatch = next;
+            // say it once per script + strategy, not on every request
+            for (const w of next) {
+                const gap = bodyTierGap(w.tiers, IS_FIREFOX, __MV3__, w.modify);
+                const key = `${w.tiers.join(",")}|${gap}`;
+                if (gapWarned.get(w.id) === key) continue;
+                gapWarned.set(w.id, key);
+                if (gap) log(-1, `[${w.name}] ${gap}`, "warn", w.id);
+            }
         } catch (e: any) {
             dlogLevel("pipeline", "debug", `body-handler watch refresh failed: ${e?.message || e}`);
         }
