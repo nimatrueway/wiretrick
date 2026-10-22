@@ -33,6 +33,12 @@ function pushCapped(rings: Map<number, LogEntry[]>, entry: LogEntry, cap: number
 
 const uiPorts = new Set<chrome.runtime.Port>();
 
+/** The manager's "clear": drop the replay rings too, so a reconnecting manager doesn't bring old lines back. */
+export function clearLogHistory(): void {
+    tabLogs.clear();
+    tappedLogs.clear();
+}
+
 export function addUiPort(port: chrome.runtime.Port): void {
     uiPorts.add(port);
     port.onDisconnect.addListener(() => uiPorts.delete(port));

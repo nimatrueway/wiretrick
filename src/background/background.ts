@@ -6,7 +6,7 @@ import { ChromeBodyStrategy } from "./engine/strategies/chromeBodyStrategy";
 import { CdpStrategy } from "./engine/strategies/cdpStrategy";
 import { ProcessStrategy } from "./engine/strategies/processStrategy";
 import { createPipeline } from "./engine/pipeline";
-import { addUiPort, clearTab, log, broadcastEntry, broadcastToUi, clearScriptErrors, setScriptTypeErrors } from "./engine/logs";
+import { addUiPort, clearTab, clearLogHistory, log, broadcastEntry, broadcastToUi, clearScriptErrors, setScriptTypeErrors } from "./engine/logs";
 import { onScriptsChanged, listScripts } from "./engine/scriptStore";
 import { dlog, dlogLevel, getDebugBuffer, pushEntry, clearDebugBuffer, setSink } from "../shared/debugLog";
 import * as folderSync from "./folderSync";
@@ -149,6 +149,7 @@ chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
     }
     if (msg && msg.type === "clearDebugLogs") {
         clearDebugBuffer();
+        clearLogHistory();
         sendResponse({});
         return false;
     }
