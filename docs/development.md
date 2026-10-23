@@ -35,7 +35,12 @@ The helper is versioned separately in `helper/Cargo.toml`: bump it only when
 the helper changes. When the extension starts depending on new helper
 behavior, also raise `MIN_HELPER_VERSION` in `src/shared/helperInstall.ts` —
 older helpers then log an upgrade error. Every release still ships helper
-binaries, so the install command always fetches the newest one.
+binaries, so the install command always fetches the newest one. When nothing
+the helper is built or tested from (`helper/src`, `helper/Cargo.*`, the
+shared matcher fixtures) changed since the previous release, the Action
+copies that release's binaries (checked against its `SHA256SUMS`) instead of
+rebuilding them; run the workflow by hand with **rebuild_helper** to force a
+rebuild.
 
 ## How the MV3 build works
 

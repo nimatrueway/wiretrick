@@ -4,12 +4,51 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      rebuild_helper:
+        description: Rebuild the helper even if it hasn't changed since the last release
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 jobs:
+  # The helper rarely changes: when nothing it's built or tested from changed
+  # since the last release, that release's binaries are reused instead of
+  # rebuilding them on four runners. (Not actions/cache: a tag's run can't
+  # read another tag's cache, and caches expire after a week.)
+  helper-plan:
+    runs-on: ubuntu-latest
+    outputs:
+      reuse: ${{ steps.find.outputs.reuse }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REBUILD: ${{ inputs.rebuild_helper }}
+          INPUTS: helper/src helper/Cargo.toml helper/Cargo.lock test/fixtures/urlpattern.json test/fixtures/matcher.json
+          # 4 tarballs + the Windows .exe
+          ASSETS: 5
+        run: |
+          if [ "$REBUILD" = "true" ]; then echo "rebuild requested"; exit 0; fi
+          PREV=$(gh release list --exclude-drafts --limit 20 --json tagName -q '.[].tagName' | awk -v cur="$GITHUB_REF_NAME" '$0 != cur { print; exit }')
+          if [ -z "$PREV" ]; then echo "no previous release → build"; exit 0; fi
+          if ! git diff --quiet "$PREV" HEAD -- $INPUTS; then
+            echo "helper changed since $PREV → build"; git diff --stat "$PREV" HEAD -- $INPUTS; exit 0
+          fi
+          N=$(gh release view "$PREV" --json assets -q '[.assets[].name | select(startswith("wiretrick-helper-"))] | length')
+          if [ "$N" != "$ASSETS" ]; then echo "$PREV has $N helper binaries, not $ASSETS → build"; exit 0; fi
+          echo "helper unchanged since $PREV → reusing its binaries"
+          echo "reuse=$PREV" >> "$GITHUB_OUTPUT"
+
   helper:
+    needs: helper-plan
+    if: needs.helper-plan.outputs.reuse == ''
     # one runner per OS; `targets` lists what it builds (first = host,
     # which is also where the tests run). Both macOS targets share the
     # Intel runner: Apple Silicon runners often queue for a long time.
@@ -75,7 +114,9 @@ jobs:
           path: helper-dist/*
 
   release:
-    needs: helper
+    needs: [helper-plan, helper]
+    # runs when the helper was built, or skipped because it's reused
+    if: always() && needs.helper-plan.result == 'success' && (needs.helper.result == 'success' || needs.helper.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -155,11 +196,21 @@ jobs:
           path: dist/**
 
       - name: Download helper binaries
+        if: needs.helper-plan.outputs.reuse == ''
         uses: actions/download-artifact@v4
         with:
           pattern: helper-*
           path: helper-dist
           merge-multiple: true
+
+      - name: Reuse helper binaries from ${{ needs.helper-plan.outputs.reuse }}
+        if: needs.helper-plan.outputs.reuse != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FROM: ${{ needs.helper-plan.outputs.reuse }}
+        run: |
+          gh release download "$FROM" -p 'wiretrick-helper-*' -p SHA256SUMS -D helper-dist
+          (cd helper-dist && sha256sum -c SHA256SUMS && rm SHA256SUMS)
 
       - name: Checksums
         run: |
