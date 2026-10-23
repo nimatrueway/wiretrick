@@ -7,6 +7,8 @@
  * While nobody watches, rows a script observed/modified/missed are still kept
  * (no listeners: just the engine's own log lines, capped at MAX_IDLE, no
  * bodies), so opening the Network tab shows recent script activity.
+ * Passive "network-counts" ports (the editor's Panel counts) get those rows
+ * as they change without starting the recording.
  *
  * Script actions are attached to the request they touched via
  * annotateFromLog (every script-attributed engine log line that ends in
@@ -27,6 +29,8 @@ const MATCH_WINDOW_MS = 120_000;
 
 const entries = new Map<string, NetEntry>();
 const ports = new Set<chrome.runtime.Port>();
+/** passive listeners: get every update but don't start the recording */
+const watchers = new Set<chrome.runtime.Port>();
 const dirty = new Set<string>();
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let syntheticSeq = 0;
@@ -48,15 +52,11 @@ function ignored(d: { url: string; type?: string; initiator?: string; originUrl?
 }
 
 function post(msg: NetPortMsg): void {
-    for (const p of ports) {
-        try {
-            p.postMessage(msg);
-        } catch {}
-    }
+    postTo([...ports, ...watchers], msg);
 }
 
 function touch(id: string): void {
-    if (!ports.size) return;
+    if (!ports.size && !watchers.size) return;
     dirty.add(id);
     if (!flushTimer) {
         flushTimer = setTimeout(() => {
@@ -325,8 +325,24 @@ export function addNetworkPort(port: chrome.runtime.Port): void {
         if (!ports.size) {
             detach();
             keepTouchedOnly();
+            postTo(watchers, { type: "netSnapshot", entries: [...entries.values()] });
         }
     });
+}
+
+/** A passive listener (Panel counts): gets the rows and their updates, never starts recording. */
+export function addNetworkCountsPort(port: chrome.runtime.Port): void {
+    watchers.add(port);
+    postTo([port], { type: "netSnapshot", entries: [...entries.values()] });
+    port.onDisconnect.addListener(() => watchers.delete(port));
+}
+
+function postTo(list: Iterable<chrome.runtime.Port>, msg: NetPortMsg): void {
+    for (const p of list) {
+        try {
+            p.postMessage(msg);
+        } catch {}
+    }
 }
 
 export const URL_AT_END = /\s((?:https?|wss?):\/\/\S+)\s*$/;
@@ -444,6 +460,7 @@ export const __test = {
         entries.clear();
         dirty.clear();
         ports.clear();
+        watchers.clear();
         attached = false;
     },
 };

@@ -79,7 +79,7 @@ function dragX(down: MouseEvent, onMove: (dx: number) => void, cursor: string): 
 }
 
 export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: () => Promise<TabInfo[]> }) {
-    const [filter, setFilter] = useState<NetFilter>({ text: "", types: ALL_TYPES, touched: "all", tabId: null });
+    const [filter, setFilter] = useState<NetFilter>({ text: "", types: ALL_TYPES, touched: "any", tabId: null });
     const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "start", dir: 1 });
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [tabs, setTabs] = useState<TabInfo[]>([]);

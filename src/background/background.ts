@@ -12,7 +12,7 @@ import { addUiPort, clearTab, clearLogHistory, log, broadcastEntry, broadcastToU
 import { onScriptsChanged, listScripts } from "./engine/scriptStore";
 import { dlog, dlogLevel, getDebugBuffer, pushEntry, clearDebugBuffer, setSink } from "../shared/debugLog";
 import * as folderSync from "./folderSync";
-import { addNetworkPort } from "./network";
+import { addNetworkCountsPort, addNetworkPort } from "./network";
 import { collectDiagnostics } from "./diagnostics";
 import { getSettingsText, applySettingsText, applySettingsDoc } from "./settingsFile";
 import { badgeSetText, badgeSetColor, tabsQueryAll, tabsGet } from "../shared/chromeApi";
@@ -115,6 +115,9 @@ chrome.runtime.onConnect.addListener((port) => {
     }
     if (port.name === "network") {
         addNetworkPort(port);
+    }
+    if (port.name === "network-counts") {
+        addNetworkCountsPort(port);
     }
 });
 

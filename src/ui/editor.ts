@@ -24,6 +24,7 @@ import { STRATEGY_DOC_URL, STRATEGY_INFO, strategyUnsupported } from "../shared/
 import { dlogLevel } from "../shared/debugLog";
 import { helperInstallCommand, helperInstallShell } from "../shared/helperInstall";
 import { mountNetworkPanel } from "./network/mount";
+import { createNetStore } from "./network/netStore";
 import { installTooltips } from "./tooltip";
 import { scriptHealth, type ScriptHealthInput } from "../shared/scriptHealth";
 import type { Uri, IPosition, IRange, IKeyboardEvent, editor as MonacoEditor } from "monaco-editor";
@@ -31,7 +32,7 @@ import type { Script } from "../background/engine/scriptStore";
 import { setupPanelDock, currentSide, currentDock } from "./panelDock";
 import { badgeCount, LogBadge, NetBadge, type TabBadge } from "./logBadge";
 import { touchCounts } from "./network/netFormat";
-import type { NetEntry } from "../shared/netTypes";
+import { effect } from "@preact/signals";
 import { aboutRows, aboutText, checkLatestRelease, collectDiagnostics, describeLatest, diagnosticsFileName, downloadText, RELEASES_URL, type HelperStatus } from "./about";
 
 // ---- state ----
@@ -1165,10 +1166,14 @@ function renderStatusBadge(el: HTMLElement, badge: TabBadge, label: string): voi
     el.title = badge.empty ? label : `${label} — ${badge.title}`;
 }
 
-/** Network recorder traffic (after the panel's store applied it): recount the Network badge. */
-function noteNetMessage(entries: NetEntry[]): void {
-    netBadge.set(touchCounts(entries));
-    renderBadge($("#net-badge"), netBadge);
+/** Network counts from a passive connection: live before the Network tab is ever opened. */
+function watchNetCounts(): void {
+    const store = createNetStore();
+    effect(() => {
+        netBadge.set(touchCounts(store.entries.value));
+        renderBadge($("#net-badge"), netBadge);
+    });
+    store.connect(undefined, "network-counts");
 }
 
 /** All received entries — filtered ones stay here (re-renderable), just not in the DOM. */
@@ -1907,7 +1912,7 @@ function setupPanelTabs(): void {
         // recording starts the first time the tab is shown (zero cost before)
         if (which === "network" && !networkMounted) {
             networkMounted = true;
-            mountNetworkPanel($("#network-view"), noteNetMessage);
+            mountNetworkPanel($("#network-view"));
         }
         const l = loadLayout();
         l.panelTab = which;
@@ -1984,6 +1989,7 @@ async function main(): Promise<void> {
     });
     $("#btn-toggle-sidebar").addEventListener("click", toggleSidebar);
     $("#btn-toggle-panel").addEventListener("click", togglePanel);
+    $("#btn-close-panel").addEventListener("click", () => setPanelHidden(true));
     setupExplorer();
     const opener: MonacoEditor.ICodeEditorOpener = {
         openCodeEditor: (_source, resource, selection) => openScriptAt(resource, selection),
@@ -2217,6 +2223,7 @@ async function main(): Promise<void> {
     setupPanelDock();
     makeLogFilters();
     setupPanelTabs();
+    watchNetCounts();
     startKeepAlive();
     setupDialogs();
     

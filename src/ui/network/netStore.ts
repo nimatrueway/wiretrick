@@ -31,12 +31,13 @@ export function createNetStore() {
             version.value++;
             send?.({ type: "netClear" });
         },
-        /** wire to the background "network" port (reconnects after SW restarts) */
-        connect(onMessage?: (m: NetPortMsg) => void): void {
+        /** wire to the background "network" port, or the passive "network-counts" one
+         * that doesn't start the recording (reconnects after SW restarts) */
+        connect(onMessage?: (m: NetPortMsg) => void, name: "network" | "network-counts" = "network"): void {
             const open = () => {
                 let port: chrome.runtime.Port;
                 try {
-                    port = chrome.runtime.connect({ name: "network" });
+                    port = chrome.runtime.connect({ name });
                 } catch {
                     return; // extension reloading — the manager reloads itself
                 }

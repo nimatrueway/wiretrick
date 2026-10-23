@@ -403,6 +403,11 @@ const replLines10c = log10c.filter((l) => l.includes("[cdp replace page] replace
 check("replaceResponse [\"cdp\"]: handler ran once per load (one log line per load, no serve.html)", replLines10c.length >= 1 && replLines10c.length <= 2 && !log10c.some((l) => l.includes("/cdp-replace") && l.includes("serve.html")), JSON.stringify(replLines10c));
 
 // ---------- 10d. "never ran" warnings: a hook route hit by a page load (per request), and a webrequest onResponseBody on Chromium (up front) ----------
+const sbNet10d = await mgr.evaluate(() => ({
+    opened: !!document.querySelector("#network-view .net-toolbar"),
+    n: ["modified", "observed"].reduce((t, k) => t + Number(document.querySelector(`#sb-net .sb-n[data-k="${k}"]`)?.textContent || 0), 0),
+}));
+check("status bar counts script activity before the Network tab was ever opened", !sbNet10d.opened && sbNet10d.n > 0, JSON.stringify(sbNet10d));
 await mgr.click("#network-tab"); // the Network tab records from now on
 await mgr.waitForSelector("#network-view .net-toolbar", { timeout: 5000 });
 await mgr.waitForTimeout(300);
@@ -410,6 +415,10 @@ const early10d: { n: number }[] = await mgr.evaluate(() =>
     [...document.querySelectorAll("#network-view tbody tr.net-row")].map((tr) => ({ n: tr.querySelectorAll(".net-badge").length }))
 );
 check("network: script activity from before the tab was opened is listed", early10d.length > 0 && early10d.every((r) => r.n > 0), `rows=${early10d.length}`);
+const touchLabel10d = await mgr.getAttribute("#network-view .net-touch-button", "aria-label");
+check("the Network view shows Touched requests by default", touchLabel10d === "Script activity: Touched", String(touchLabel10d));
+await mgr.click("#network-view .net-touch-button"); // show all requests from here on
+await mgr.click('#network-view [role="option"]:has-text("All")');
 await saveScript("s_missed", `wt.onResponseBody({ url: "${ORIGIN}/html-missed", strategy: "page" }, (ctx, body) => body.replace("MISSED-ORIGINAL", "NEVER"));`, "missed probe");
 await saveScript("s_missed_wr", `wt.onResponseBody({ url: "${ORIGIN}/html-missed-wr", strategy: "extension" }, (ctx, body) => body);`, "webrequest body probe");
 await new Promise((r) => setTimeout(r, 600));

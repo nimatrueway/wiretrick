@@ -79,7 +79,8 @@ beside the Code view**, or **under the explorer**. Drag its edge to resize; each
 dock remembers its own size, and Esc cancels a drag.
 
 The explorer moves too: drag its header (the **Explorer** title) to the
-left or right edge of the window. ⌘J hides the panel wherever it is docked;
+left or right edge of the window. ⌘J hides the panel wherever it is docked
+(so does the × at the right of its header);
 ⌘B hides the explorer (and a panel docked under it). The two layout buttons
 at the right of the toolbar do the same.
 
@@ -110,11 +111,12 @@ at the right of the toolbar do the same.
 
   The filter menu shows each choice with the row marker it selects:
   **All**, **Observed** (ran but changed nothing — observed only), **Modified**,
-  and **Touched** (anything a script observed or modified). The footer counts
+  and **Touched** (anything a script observed or modified — the default). The footer counts
   the same two groups ("N observed · M modified", observed = observed only). The
   recorded modified / observed requests are also counted in a solid /
   outlined badge on its title (a request that goes from observed to modified
-  moves to the modified count); they stay until the Network log is cleared. Selecting a request shows its headers, request payload, the response
+  moves to the modified count); they stay until the Network log is cleared, and
+  are live before the Network view is first opened. Selecting a request shows its headers, request payload, the response
   body (modified and original, when Wiretrick handled it) and what each
   script did (observed entries muted).
 

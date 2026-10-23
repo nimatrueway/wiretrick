@@ -799,6 +799,7 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 #log-header { align-items: center; gap: 4px 8px; flex-wrap: wrap; }
 #panel-tabs { display: flex; gap: 14px; }
 #log-tools { min-width: 0; flex: 1 1 auto; }
+#btn-close-panel { margin-left: auto; }
 #app[data-dock="left"] #log-source, #app[data-dock="left"] #log-find { width: 84px; }
 .panel-tab {
     cursor: pointer;

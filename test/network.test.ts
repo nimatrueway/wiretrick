@@ -18,7 +18,7 @@ const ev = (name: string) => ({
     },
 };
 
-const { addNetworkPort, annotateFromLog, recordNetBody, toNetBody, MAX_BODY, MAX_IDLE, __test } = await import("../src/background/network");
+const { addNetworkCountsPort, addNetworkPort, annotateFromLog, recordNetBody, toNetBody, MAX_BODY, MAX_IDLE, __test } = await import("../src/background/network");
 const { L, entries } = __test;
 
 function fakePort() {
@@ -103,6 +103,35 @@ describe("network recorder", () => {
         addNetworkPort(p.port);
         expect(p.sent[0].entries.length).toBe(1);
         p.disconnect();
+    });
+
+    it("a passive counts port gets script-touched rows without starting the recording", async () => {
+        vi.useFakeTimers();
+        try {
+            const c = fakePort();
+            const last = () => c.sent[c.sent.length - 1];
+            addNetworkCountsPort(c.port);
+            expect(listeners.before?.length ?? 0).toBe(0);
+            expect(c.sent[0]).toEqual({ type: "netSnapshot", entries: [] });
+            annotateFromLog(7, "s1", "[S] onRequest → observed (no change) https://a.test/x", "debug", "observed");
+            await vi.advanceTimersByTimeAsync(200);
+            expect(last().type).toBe("netUpdate");
+            expect(last().entries.map((e: any) => e.url)).toEqual(["https://a.test/x"]);
+            // the Network tab opens and closes: untouched rows go, the counts port is resynced
+            const p = fakePort();
+            addNetworkPort(p.port);
+            req("1", "https://a.test/plain");
+            p.disconnect();
+            expect(last()).toMatchObject({ type: "netSnapshot" });
+            expect(last().entries.map((e: any) => e.url)).toEqual(["https://a.test/x"]);
+            c.disconnect();
+            annotateFromLog(7, "s1", "[S] onRequest → observed (no change) https://a.test/y", "debug", "observed");
+            const n = c.sent.length;
+            await vi.advanceTimersByTimeAsync(200);
+            expect(c.sent.length).toBe(n);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it("on close keeps only touched rows (bodies dropped, pending settled) and caps idle rows", () => {

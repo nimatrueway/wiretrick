@@ -362,6 +362,10 @@ try {
     // Network tab records from now on (listeners attach when it opens)
     await mgr.click("#network-tab");
     await mgr.waitForSelector("#network-view .net-toolbar", { timeout: 5000 });
+    const touchLabel = await mgr.getAttribute("#network-view .net-touch-button", "aria-label");
+    check("the Network view shows Touched requests by default", touchLabel === "Script activity: Touched", String(touchLabel));
+    await mgr.click("#network-view .net-touch-button"); // show all requests from here on
+    await mgr.click('#network-view [role="option"]:has-text("All")');
     const xoPage = await ctx.newPage();
     await xoPage.goto(`${ORIGIN}/page-xo`);
     await xoPage.waitForFunction(() => (window as any).__lazy !== undefined, null, { timeout: 15000 }).catch(() => {});
@@ -443,8 +447,9 @@ try {
     await mgr.click("#network-tab");
     await mgr.waitForTimeout(200);
     check("viewing the Network tab keeps its badge", await mgr.evaluate(() => !(document.querySelector("#net-badge") as HTMLElement).hidden));
-    // status bar: the same counts while the bottom panel is closed; clicking opens it on that tab
-    await mgr.click("#btn-toggle-panel");
+    // status bar: the same counts while the bottom panel is closed (its × button); clicking opens it on that tab
+    await mgr.click("#btn-close-panel");
+    check("the panel's × button closes it", await mgr.evaluate(() => document.getElementById("app")!.classList.contains("panel-hidden")));
     await xoPage.evaluate((cdn: string) => Promise.all(["gz.js", "auto.js"].map((f) => new Promise((r) => {
         const s = document.createElement("script");
         s.src = `${cdn}/${f}?sb=${Date.now()}`;

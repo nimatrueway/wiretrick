@@ -47,11 +47,23 @@ const rowNames = (c: Element) => [...c.querySelectorAll("tbody .net-name")].map(
 describe("NetworkPanel", () => {
     afterEach(cleanup);
 
+    /** rendered with the script-activity filter on All (the default is Touched) */
     function setup(list: NetEntry[]) {
         const store = createNetStore();
         store.apply({ type: "netSnapshot", entries: list });
-        return { store, ...render(<NetworkPanel store={store} />) };
+        const r = render(<NetworkPanel store={store} />);
+        pickActivity(r.container, "All");
+        return { store, ...r };
     }
+
+    it("shows only requests a script touched by default", () => {
+        const observed = { scriptId: "s", scriptName: "Watcher", action: "onRequest → observed (no change)", level: "debug" as const, kind: "observed" as const, at: base };
+        const store = createNetStore();
+        store.apply({ type: "netSnapshot", entries: [entry("plain"), entry("watched", { startedAt: base + 1, outcomes: [observed] })] });
+        const { container } = render(<NetworkPanel store={store} />);
+        expect(container.querySelector(".net-touch-button")!.getAttribute("aria-label")).toBe("Script activity: Touched");
+        expect(rowNames(container)).toEqual(["watched.js"]);
+    });
 
     it("renders rows devtools-style, with status, size and time", () => {
         const { container } = setup([entry("a"), entry("b", { status: 404, statusText: "Not Found", startedAt: base + 1 })]);
@@ -284,6 +296,7 @@ describe("NetworkPanel", () => {
             { id: 9, title: "Soon closed" },
         ];
         const { container } = render(<NetworkPanel store={store} listTabs={async () => live} />);
+        pickActivity(container, "All");
         const sel = container.querySelector("select.net-tab") as HTMLSelectElement;
         const closedLabels = () => [...sel.querySelectorAll("optgroup option")].map((o) => o.textContent);
         await waitFor(() => expect(closedLabels()).toEqual(["✕ https://gone.test/"]));
