@@ -7,6 +7,8 @@ export interface ParamDefBoolean {
     type: "boolean";
     default?: boolean;
     description?: string;
+    /** turns the raw value into what the script receives; never stored or serialized */
+    parse?: (raw: boolean) => unknown;
 }
 export interface ParamDefNumber {
     type: "number";
@@ -17,6 +19,7 @@ export interface ParamDefNumber {
     max?: number;
     /** step for the number input (default 1; use e.g. 0.1 for decimals) */
     step?: number;
+    parse?: (raw: number) => unknown;
 }
 export interface ParamDefString {
     type: "string";
@@ -24,21 +27,25 @@ export interface ParamDefString {
     multiline?: boolean;
     default?: string;
     description?: string;
+    parse?: (raw: string) => unknown;
 }
 export interface ParamDefEnum {
     type: "enum";
     choices: string[];
     default?: string;
     description?: string;
+    parse?: (raw: string) => unknown;
 }
 export interface ParamDefStringList {
     type: "stringList";
     default?: string[];
     description?: string;
+    parse?: (raw: string[]) => unknown;
 }
 export type ParamDef = ParamDefBoolean | ParamDefNumber | ParamDefString | ParamDefEnum | ParamDefStringList;
 
-export type ParamValue<D extends ParamDef> = D extends ParamDefBoolean
+/** the stored/edited value type of a def (what `parse` receives) */
+export type ParamRawValue<D extends ParamDef> = D extends ParamDefBoolean
     ? boolean
     : D extends ParamDefNumber
       ? number
@@ -49,6 +56,9 @@ export type ParamValue<D extends ParamDef> = D extends ParamDefBoolean
           : D extends ParamDefStringList
             ? string[]
             : never;
+
+/** what the script sees: the parser's return type when `parse` is set, else the raw value */
+export type ParamValue<D extends ParamDef> = D extends { parse: (raw: never) => infer R } ? R : ParamRawValue<D>;
 
 export type ParamsOf<T extends Record<string, ParamDef>> = {
     readonly [K in keyof T]: ParamValue<T[K]>;
@@ -93,5 +103,29 @@ export function isValidParamValue(def: ParamDef, v: any): boolean {
             return typeof v === "string" && def.choices.includes(v);
         case "stringList":
             return Array.isArray(v) && v.every((x) => typeof x === "string");
+    }
+}
+
+/** a def without its `parse` function — what gets stored, messaged and diffed */
+export function serializableParamDef<D extends ParamDef>(def: D): D {
+    if (!("parse" in def)) return def;
+    const { parse: _parse, ...rest } = def;
+    return rest as D;
+}
+
+/**
+ * Run the def's `parse` (if any) over a resolved raw value. A throwing
+ * parser becomes an error naming the param and the value.
+ */
+export function parseParamValue(key: string, def: ParamDef, raw: any): any {
+    const parse = (def as { parse?: unknown }).parse;
+    if (parse === undefined) return raw;
+    if (typeof parse !== "function") throw new Error(`param "${key}": parse must be a function`);
+    try {
+        return parse(Array.isArray(raw) ? [...raw] : raw);
+    } catch (e: any) {
+        let shown = JSON.stringify(raw) ?? String(raw);
+        if (shown.length > 200) shown = shown.slice(0, 200) + "…";
+        throw new Error(`param "${key}": parse failed for value ${shown}: ${e && typeof e.message === "string" ? e.message : String(e)}`);
     }
 }

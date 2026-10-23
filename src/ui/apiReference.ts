@@ -67,6 +67,10 @@ const cfg = wt.params({
 // one at a time (same store; UI order = call order):
 const host = wt.defineParam("host", { type: "string", default: "api.example.com" });
 
+parse (any type) turns the raw value into something handier; the param takes the parser's return type, while the ⚙ dialog / settings.yaml keep editing the raw value. A throw is a script error naming the param:
+const p = wt.params({ origin: { type: "string", default: "https://app.example.com", parse: (s) => new URL(s) } }); // p.origin: URL
+const ids = wt.defineParam("ids", { type: "stringList", parse: (l) => new Set(l) }); // Set<string>
+
 Routes may be built from params — a change re-runs the script:
 wt.onResponseHeaders(cfg.hosts.map((h) => \`*://\${h}/*\`), () => ({ headers: { set: { "access-control-allow-origin": "*" } } }));
 

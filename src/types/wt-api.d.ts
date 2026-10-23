@@ -355,6 +355,16 @@ declare namespace Wiretrick {
         default?: boolean;
         /** Shown next to the control and in settings.yaml. */
         description?: string;
+        /**
+         * Turn the raw value into what the script receives — the param's
+         * type becomes this function's return type. The ⚙ dialog, Editor and
+         * settings.yaml keep editing the raw value; `parse` re-runs whenever
+         * it changes. A throw is a script error naming the param.
+         *
+         * @example
+         * { type: "boolean", default: true, parse: (on) => (on ? "verbose" : "quiet") }
+         */
+        parse?: (raw: boolean) => unknown;
     }
     /** A number — a number input in the ⚙ dialog. */
     interface ParamDefNumber {
@@ -369,6 +379,16 @@ declare namespace Wiretrick {
         max?: number;
         /** Step for the number input. Default `1`; use e.g. `0.1` for decimals. */
         step?: number;
+        /**
+         * Turn the raw value into what the script receives — the param's
+         * type becomes this function's return type. The ⚙ dialog, Editor and
+         * settings.yaml keep editing the raw value; `parse` re-runs whenever
+         * it changes. A throw is a script error naming the param.
+         *
+         * @example
+         * { type: "number", default: 2, parse: (sec) => sec * 1000 } // seconds → ms
+         */
+        parse?: (raw: number) => unknown;
     }
     /** Free text — a text input (or textarea) in the ⚙ dialog. */
     interface ParamDefString {
@@ -382,6 +402,16 @@ declare namespace Wiretrick {
         default?: string;
         /** Shown next to the control and in settings.yaml. */
         description?: string;
+        /**
+         * Turn the raw value into what the script receives — the param's
+         * type becomes this function's return type. The ⚙ dialog, Editor and
+         * settings.yaml keep editing the raw value; `parse` re-runs whenever
+         * it changes. A throw is a script error naming the param.
+         *
+         * @example
+         * { type: "string", default: "https://api.example.com", parse: (s) => new URL(s) }
+         */
+        parse?: (raw: string) => unknown;
     }
     /** One of fixed choices — a dropdown in the ⚙ dialog. */
     interface ParamDefEnum {
@@ -392,6 +422,18 @@ declare namespace Wiretrick {
         default?: string;
         /** Shown next to the control and in settings.yaml. */
         description?: string;
+        /**
+         * Turn the raw value into what the script receives — the param's
+         * type becomes this function's return type. The ⚙ dialog, Editor and
+         * settings.yaml keep editing the raw value; `parse` re-runs whenever
+         * it changes. A throw is a script error naming the param.
+         *
+         * @example
+         * { type: "enum", choices: ["500", "503"], parse: (c) => Number(c) }
+         *
+         * `raw` is typed `string` here (always one of `choices` at run time).
+         */
+        parse?: (raw: string) => unknown;
     }
     /** A list of strings — one entry per line in the ⚙ dialog. */
     interface ParamDefStringList {
@@ -400,12 +442,22 @@ declare namespace Wiretrick {
         default?: string[];
         /** Shown next to the control and in settings.yaml. */
         description?: string;
+        /**
+         * Turn the raw value into what the script receives — the param's
+         * type becomes this function's return type. The ⚙ dialog, Editor and
+         * settings.yaml keep editing the raw value; `parse` re-runs whenever
+         * it changes. A throw is a script error naming the param.
+         *
+         * @example
+         * { type: "stringList", default: ["a.com"], parse: (l) => new Set(l) }
+         */
+        parse?: (raw: string[]) => unknown;
     }
     /** One adjustable parameter, discriminated by `type`. */
     type ParamDef = ParamDefBoolean | ParamDefNumber | ParamDefString | ParamDefEnum | ParamDefStringList;
 
-    /** The value type a param def resolves to. */
-    type ParamValue<D extends ParamDef> = D extends ParamDefBoolean
+    /** The raw (stored, edited) value type of a param def — what `parse` receives. */
+    type ParamRawValue<D extends ParamDef> = D extends ParamDefBoolean
         ? boolean
         : D extends ParamDefNumber
           ? number
@@ -416,6 +468,12 @@ declare namespace Wiretrick {
               : D extends ParamDefStringList
                 ? string[]
                 : never;
+
+    /**
+     * The value type a param def resolves to: `parse`'s return type when
+     * the def has one, else {@link Wiretrick.ParamRawValue}.
+     */
+    type ParamValue<D extends ParamDef> = D extends { parse: (raw: never) => infer R } ? R : ParamRawValue<D>;
 
     /** Resolved parameter values, typed from the defs you passed. */
     type ParamsOf<T extends Record<string, ParamDef>> = {
@@ -604,7 +662,9 @@ declare const wt: {
      * Definitions may come from an import (`{ env: envParam }`, `{ ...defs }`).
      *
      * @param defs Parameter name → definition (`type`, `default`, optional
-     *   `description`); see {@link Wiretrick.ParamDef}.
+     *   `description` and `parse`); see {@link Wiretrick.ParamDef}. With
+     *   `parse`, the param's value is the parser's result (raw value in,
+     *   e.g. a `URL` out) while the stored/edited value stays raw.
      * @returns The current values, typed from `defs`.
      *
      * @example
@@ -617,6 +677,15 @@ declare const wt: {
      * wt.onRequest(cfg.hosts.map((h) => `*://${h}/api/*`), () => {
      *     if (cfg.enabled) return { respond: { status: Number(cfg.status), body: { error: "forced" } } };
      * });
+     *
+     * @example
+     * // parse: the script gets a URL (cfg.origin: URL), the ⚙ dialog edits the string
+     * const cfg = wt.params({
+     *     origin: { type: "string", default: "https://app.example.com", parse: (s) => new URL(s) },
+     * });
+     * wt.onResponseHeaders("*://api.example.com/*", () => ({
+     *     headers: { set: { "access-control-allow-origin": cfg.origin.origin } },
+     * }));
      */
     params<const T extends Record<string, Wiretrick.ParamDef>>(defs: T): Wiretrick.ParamsOf<T>;
 
@@ -627,6 +696,10 @@ declare const wt: {
      * @example
      * const host = wt.defineParam("host", { type: "string", default: "api.example.com" });
      * wt.onRequest(`*://${host}/*`, () => ({ headers: { set: { "x-debug": "1" } } }));
+     *
+     * @example
+     * // parse: hosts is a Set<string>; the stored value stays a list
+     * const hosts = wt.defineParam("hosts", { type: "stringList", parse: (l) => new Set(l) });
      */
     defineParam<const D extends Wiretrick.ParamDef>(name: string, def: D): Wiretrick.ParamValue<D>;
 

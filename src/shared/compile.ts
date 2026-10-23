@@ -5,7 +5,7 @@
  * handler sources with `new Function`.
  */
 import { defaultMeta, finishMeta, type ResMeta } from "./metaParser";
-import { resolveParamValues, type ParamDef } from "./scriptDef";
+import { parseParamValue, resolveParamValues, serializableParamDef, type ParamDef } from "./scriptDef";
 import { formatLogArgs, makeScriptConsole, type ScriptLogLevel } from "./scriptLog";
 import { scriptFunction } from "./scriptFn";
 import { normalizeRoute, type RouteKind, type RouteMeta } from "./route";
@@ -327,6 +327,8 @@ function createOwner(meta: ResMeta, storedValues?: Record<string, any>) {
             // stubs — instead of failing the whole script
             if (isStub(next)) return next;
             if (!next || typeof next !== "object") throw new Error(`${where}: expected an object of parameter definitions`);
+            // `known` keeps the parsers (to resolve values); `defs` — stored,
+            // messaged, diffed — holds them stripped
             const known: Record<string, ParamDef> = {};
             const unknown: Record<string, any> = {};
             for (const [k, d] of Object.entries(next)) {
@@ -341,8 +343,10 @@ function createOwner(meta: ResMeta, storedValues?: Record<string, any>) {
                 if ((d as any).type === "enum" && !Array.isArray((d as any).choices)) throw new Error(`${where}: enum parameter "${k}" needs choices`);
                 known[k] = d;
             }
-            if (Object.keys(known).length) defs = { ...(defs || {}), ...known };
-            return { ...resolveParamValues(known, storedValues), ...unknown };
+            if (Object.keys(known).length) defs = { ...(defs || {}), ...Object.fromEntries(Object.entries(known).map(([k, d]) => [k, serializableParamDef(d)])) };
+            const raw = resolveParamValues(known, storedValues);
+            const values = Object.fromEntries(Object.entries(known).map(([k, d]) => [k, parseParamValue(k, d, raw[k])]));
+            return { ...values, ...unknown };
         },
         get defs() {
             return defs;

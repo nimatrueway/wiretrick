@@ -163,6 +163,16 @@ for (const s of Object.values(SCRIPTS)) await saveScript(s.id, s.code, s.name);
     check("library param on → it becomes a script", flipped?.meta?.active === true, JSON.stringify(flipped?.meta));
     await send({ type: "deleteScript", id: "s_puser" });
     await send({ type: "deleteScript", id: "s_plib" });
+
+    // param `parse`: the script gets the parsed value, defs are stored without the function
+    const pp = await saveScript("s_pparse", 'const c = wt.params({ origin: { type: "string", default: "https://a.com", parse: (s) => new URL(s) } });\nwt.onRequest(`*://${c.origin.host}/never/*`, () => {});', "param-parse");
+    check("param parse: parsed value feeds the route, def stored without parse", !pp?.error && pp?.meta?.match?.[0] === "*://a.com/never/*" && pp?.paramDefs?.origin?.type === "string" && !("parse" in pp.paramDefs.origin), JSON.stringify({ error: pp?.error?.split("\n")[0], match: pp?.meta?.match, defs: pp?.paramDefs }));
+    await send({ type: "setScriptParam", scriptId: "s_pparse", key: "origin", value: "xyz" });
+    const ppBroken = (await send({ type: "listScripts" })).find((s: any) => s.id === "s_pparse");
+    check("param parse failure: script error naming the param and value", /param "origin": parse failed for value "xyz"/.test(ppBroken?.error || ""), String(ppBroken?.error).split("\n")[0]);
+    const ppLogged = await mgr.waitForFunction(() => [...document.querySelectorAll("#log-entries .log-line")].some((l) => /\[param-parse\].*param "origin": parse failed for value "xyz"/.test((l as HTMLElement).dataset.text || l.textContent || "")), null, { timeout: 8000 }).then(() => true, () => false);
+    check("param parse failure: ERROR line in the log", ppLogged);
+    await send({ type: "deleteScript", id: "s_pparse" });
 }
 
 const newPage = async (pathName: string): Promise<any> => {

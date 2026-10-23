@@ -305,16 +305,18 @@ try {
     // param-gated onRequest must see the REAL stored param values (the
     // sandbox used to compile with defaults → handlers did nothing) and
     // its decision must be honored by the hook tier ----
-    await mgr.evaluate((origin: string) => new Promise((r) => chrome.runtime.sendMessage({
+    // (with `parse`: the sandbox runs the parsers; the defs it posts back are stripped of them)
+    const pgSaved: any = await mgr.evaluate((origin: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_pg", name: "Param gated",
-        code: `const cfg = wt.params({ intercept: { type: "boolean", default: false, description: "Intercept" } });\nwt.onRequest("${origin}/*", (ctx) => { if (cfg.intercept) return { respond: { status: 200, body: { value: "PARAM-GATED" } } }; });`,
+        code: `const cfg = wt.params({ intercept: { type: "boolean", default: false, description: "Intercept", parse: (on) => (on ? "PARAM-GATED" : null) } });\nconst tags = wt.defineParam("tags", { type: "stringList", default: ["a", "b"], parse: (l) => new Set(l) });\nwt.onRequest("${origin}/*", (ctx) => { if (cfg.intercept) return { respond: { status: 200, body: { value: cfg.intercept, tags: tags.size } } }; });`,
     }, r)), ORIGIN);
+    check("param parse: saved without error, defs stored raw (no parse)", !pgSaved?.error && pgSaved?.paramDefs?.tags?.type === "stringList" && !JSON.stringify(pgSaved?.paramDefs).includes("parse"), JSON.stringify({ error: pgSaved?.error, defs: pgSaved?.paramDefs }));
     await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "setScriptParam", scriptId: "s_pg", key: "intercept", value: true }, r)));
     await mgr.waitForTimeout(1500); // pipeline reload + analyze-cache warm with the new params
     const gatedPage = await ctx.newPage();
     await gatedPage.goto(`${ORIGIN}/data`);
     const gated = await gatedPage.evaluate((origin: string) => fetch(`${origin}/data`).then((r: any) => r.json()), ORIGIN);
-    check("param-gated onRequest honored (real stored params, not defaults)", gated.value === "PARAM-GATED", JSON.stringify(gated));
+    check("param-gated onRequest honored (real stored params, not defaults; parsed)", gated.value === "PARAM-GATED" && gated.tags === 2, JSON.stringify(gated));
 
     // ---- MV3 debugger tier: browser-initiated loads (<script src>) ARE
     // intercepted for strategy cdp routes — CDP Fetch pauses in the

@@ -3,9 +3,11 @@
  * page (hook.ts, MAIN world) or the isolated-world fallback (bridge.ts).
  * Network registrations are inert here (they run in the background);
  * onDom registrations are collected with their routes, and params resolve
- * to the values the background shipped in the bundle.
+ * to the raw values the background shipped in the bundle (each def's
+ * `parse` runs here, in the page).
  */
 import { normalizeRoute, routeMatches, type DomWhen, type RouteMeta } from "./route";
+import { parseParamValue, type ParamDef } from "./scriptDef";
 
 export interface PageDomHandler {
     route: RouteMeta;
@@ -14,7 +16,7 @@ export interface PageDomHandler {
 }
 
 export interface PageShimOptions {
-    /** resolved param values (from the bundle) */
+    /** resolved RAW param values (from the bundle) */
     params: Record<string, any>;
     log: (...args: any[]) => void;
     storage: { get(key: string): any; set(key: string, value: any): any };
@@ -23,6 +25,7 @@ export interface PageShimOptions {
 export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDomHandler[] } {
     const dom: PageDomHandler[] = [];
     const inert = () => {};
+    const parsed = (key: string, def: ParamDef | undefined) => (def && typeof def === "object" ? parseParamValue(key, def, o.params[key]) : o.params[key]);
     const wt = {
         onRequest: inert,
         onResponseHeaders: inert,
@@ -34,8 +37,8 @@ export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDomHandler
             dom.push({ route: r, when: r.when || "DOMContentLoaded", fn: fn as any });
         },
         about: inert,
-        params: (defs: Record<string, unknown>) => Object.freeze(Object.fromEntries(Object.keys(defs || {}).map((k) => [k, o.params[k]]))),
-        defineParam: (name: string) => o.params[name],
+        params: (defs: Record<string, ParamDef>) => Object.freeze(Object.fromEntries(Object.entries(defs || {}).map(([k, d]) => [k, parsed(k, d)]))),
+        defineParam: (name: string, def: ParamDef) => parsed(name, def),
         log: o.log,
         storage: o.storage,
     };

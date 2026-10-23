@@ -184,6 +184,28 @@ optional `min`, `max`, `step`), `string` (text; add `multiline: true` for a
 textarea, written to `settings.yaml` as a `|` block scalar when it contains
 newlines), `enum` (dropdown of `choices`), `stringList` (add/remove list).
 
+Every param type accepts an optional `parse` function that turns the raw
+value into something more convenient for the script. The param's type
+becomes the parser's return type; the ⚙ dialog, the Editor and
+`settings.yaml` keep editing (and storing) the raw value, and `parse` re-runs
+on every change:
+
+```ts
+const cfg = wt.params({
+    origin: { type: "string", default: "https://app.example.com", parse: (s) => new URL(s) },
+    delay:  { type: "number", default: 2, description: "Seconds", parse: (sec) => sec * 1000 },
+});
+// cfg.origin: URL · cfg.delay: number (ms)
+
+const hosts = wt.defineParam("hosts", { type: "stringList", default: ["a.com"], parse: (l) => new Set(l) });
+// hosts: Set<string>
+```
+
+A parser that throws is a script error naming the param, e.g.
+`param "origin": parse failed for value "xyz": Invalid URL` — the script
+shows its error indicator and the Log an ERROR line, like any other load
+error. For `enum`, `parse` receives the choice typed as `string`.
+
 ## Libraries and recipes
 
 A file that registers no handlers is a **library**: it never runs on its
