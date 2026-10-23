@@ -195,7 +195,7 @@ The panel view listing the requests of a tab and what each script did to them.
 _Avoid_: network panel, network tab
 
 **Panel counts**:
-The counts shown on each panel view's title and in the status bar: errors and warnings among the current problems (they drop as problems are fixed), errors and warnings in the Log view, and observed and modified requests in the Network view (both kept until that view is cleared).
+The counts shown in the status bar, one item per panel view: errors and warnings among the current problems (they drop as problems are fixed), errors and warnings in the Log view, and observed and modified requests in the Network view (both kept until that view is cleared).
 _Avoid_: unread counts, tab badges
 
 **Popup**:
