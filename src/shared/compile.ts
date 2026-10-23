@@ -9,6 +9,7 @@ import { parseParamValue, resolveParamValues, serializableParamDef, type ParamDe
 import { formatLogArgs, makeScriptConsole, type ScriptLogLevel } from "./scriptLog";
 import { scriptFunction } from "./scriptFn";
 import { normalizeRoute, type RouteKind, type RouteMeta } from "./route";
+import { scriptEnv } from "./scriptEnv";
 
 export type { DomWhen } from "./route";
 
@@ -390,5 +391,6 @@ function makeShim(owner: ReturnType<typeof createOwner>, overrides?: ResApiOverr
             set: () => undefined,
         },
         log: (...args: any[]) => (overrides?.logSink ? overrides.logSink("info", "wt.log", formatLogArgs(args)) : console.log("[Wiretrick] wt.log:", ...args)),
+        ...scriptEnv(),
     };
 }

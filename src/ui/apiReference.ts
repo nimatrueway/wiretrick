@@ -230,6 +230,10 @@ debugger — chrome.debugger + Fetch domain. Sees everything, but Chrome shows a
 
 wt.onRequest({ url: "*://example.com/*", strategy: "debugger" }, fn);   // this handler only
 
+Pick per browser/build with wt.isChrome / wt.isFirefox / wt.isMV2 / wt.isMV3:
+
+wt.onResponseBody({ url: "*://example.com/app.js", strategy: wt.isFirefox ? "webRequest" : "helper" }, fn);
+
 No fallback: when the strategy isn't available (helper not running, wrong browser, a kind it can't do), the handler doesn't run and the Log view warns. Hover "strategy" in the Code view or see Settings → Strategy for pros/cons.
 
 Tip: ${ADV_SHORT}`,

@@ -8,6 +8,7 @@
  */
 import { normalizeRoute, routeMatches, type DomWhen, type RouteMeta } from "./route";
 import { parseParamValue, type ParamDef } from "./scriptDef";
+import { scriptEnv } from "./scriptEnv";
 
 export interface PageDomHandler {
     route: RouteMeta;
@@ -41,6 +42,7 @@ export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDomHandler
         defineParam: (name: string, def: ParamDef) => parsed(name, def),
         log: o.log,
         storage: o.storage,
+        ...scriptEnv(),
     };
     return { wt, dom };
 }

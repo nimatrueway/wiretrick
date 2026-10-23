@@ -122,6 +122,14 @@ wt.onResponseBody(
   `"helper"`, `"page"`, `"webRequest"` or `"debugger"`. Omit to use the default
   from Settings → Strategy. There is no fallback: when the strategy
   isn't available, the handler doesn't run and the Log view says why.
+  To pick per browser or build, use `wt.isChrome`, `wt.isFirefox`,
+  `wt.isMV2` and `wt.isMV3` (Chromium-based browsers count as Chrome;
+  MV3 is the `dist-mv3/` build):
+
+  ```ts
+  wt.onResponseBody({ url: "*://example.com/app.js", strategy: wt.isFirefox ? "webRequest" : "helper" }, (ctx, body) => body);
+  wt.onRequest({ url: "*://api.example.com/*", strategy: wt.isMV3 ? "debugger" : "webRequest" }, fn);
+  ```
 
 > **Tip:** `page` is the lightest strategy, but it only sees the page's own
 > fetch/XHR (REST/API) calls. For documents, `<script src>`, images,

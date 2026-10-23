@@ -721,6 +721,33 @@ declare const wt: {
      * wt.log("request to", ctx.url, { method: ctx.method });
      */
     log(...args: unknown[]): void;
+
+    /**
+     * `true` in Chromium-based browsers (Chrome, Edge, Brave, Vivaldi, Opera…).
+     * Always the opposite of {@link isFirefox}.
+     *
+     * @example
+     * wt.onResponseBody({ url: "*://example.com/app.js", strategy: wt.isFirefox ? "webRequest" : "helper" }, (ctx, body) => body);
+     */
+    readonly isChrome: boolean;
+
+    /** `true` in Firefox. Always the opposite of {@link isChrome}. */
+    readonly isFirefox: boolean;
+
+    /**
+     * `true` in the Manifest V2 build (`dist/`: Firefox, and Chromium browsers
+     * that still load MV2 extensions). Always the opposite of {@link isMV3}.
+     */
+    readonly isMV2: boolean;
+
+    /**
+     * `true` in the Manifest V3 build (`dist-mv3/`: current Chrome / Edge),
+     * where the `webRequest` strategy isn't available.
+     *
+     * @example
+     * wt.onRequest({ url: "*://api.example.com/*", strategy: wt.isMV3 ? "debugger" : "webRequest" }, fn);
+     */
+    readonly isMV3: boolean;
 };
 
 /*
