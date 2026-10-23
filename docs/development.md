@@ -41,7 +41,11 @@ binaries, so the install command always fetches the newest one.
 
 `npm run build` produces both bundles:
 
-- **`dist/` (= `dist-mv2/`)** — the MV2 build.
+- **`dist/` (= `dist-mv2/`)** — the MV2 build for Chromium.
+- **`dist-firefox/`** — the same MV2 build for Firefox (the `.xpi`): its
+  manifest also registers the page hook as a MAIN-world content script,
+  which Chromium's MV2 rejects ("The 'world' property is restricted…").
+  On Chromium MV2 the bridge injects the hook with a `<script>` tag instead.
 - **`dist-mv3/`** — the Manifest V3 build (`manifest_version: 3`,
   background service worker, `action`, `host_permissions`).
 

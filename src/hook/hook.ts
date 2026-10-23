@@ -14,6 +14,9 @@ import { makePageShim, domHandlersFor, scheduleDocument } from "../shared/pageSh
 
 (() => {
     const w = window as any;
+    // only the page's own world: as an isolated content script (a browser
+    // that ignores the manifest's `world: "MAIN"`) the bridge injects us instead
+    if (w.chrome?.runtime?.id || w.browser?.runtime?.id) return;
     if (w.__resOverrideHooked) return;
     w.__resOverrideHooked = true;
 

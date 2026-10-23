@@ -8,7 +8,9 @@
  *                          hook tier carries interception — webRequest/
  *                          cdp tiers disabled at runtime)
  *
- * The MV3 manifest is derived from manifest.json at build time.
+ *   dist-firefox/        — the MV2 build for Firefox (the .xpi)
+ *
+ * The MV3 and Firefox manifests are derived from manifest.json at build time.
  */
 import { rolldown } from "rolldown";
 import { cp, mkdir, rm, writeFile, copyFile, readFile } from "node:fs/promises";
@@ -85,6 +87,20 @@ function entriesFor(dist, mv3) {
     return list;
 }
 
+/**
+ * The page hook as a MAIN-world content script, so it patches fetch/XHR
+ * before the page's own scripts run. Chromium rejects `world` in MV2
+ * manifests (it warns and ignores it), so manifest.json leaves it out and
+ * the bridge injects hook.js with a <script> tag there; MV3 and Firefox
+ * (128+) get it here.
+ */
+const HOOK_MAIN = { matches: ["*://*/*"], js: ["hook.js"], all_frames: true, run_at: "document_start", world: "MAIN" };
+
+/** manifest.json → Firefox manifest object */
+function firefoxManifest(mv2) {
+    return { ...mv2, content_scripts: [HOOK_MAIN, ...mv2.content_scripts] };
+}
+
 /** manifest.json → MV3 manifest object */
 function mv3Manifest(mv2) {
     return {
@@ -99,7 +115,7 @@ function mv3Manifest(mv2) {
         },
         options_ui: mv2.options_ui,
         background: { service_worker: "background.js" },
-        content_scripts: mv2.content_scripts,
+        content_scripts: [HOOK_MAIN, ...mv2.content_scripts],
         permissions: ["storage", "unlimitedStorage", "tabs", "debugger", "offscreen", "webNavigation", "webRequest", "alarms", "proxy", "nativeMessaging", "browsingData", "declarativeNetRequestWithHostAccess"],
         host_permissions: ["<all_urls>"],
         optional_permissions: mv2.optional_permissions,
@@ -187,6 +203,12 @@ async function buildAll() {
     await rm(path.join(root, "dist-mv2"), { recursive: true, force: true });
     await cp(path.join(root, "dist"), path.join(root, "dist-mv2"), { recursive: true });
     console.log("dist-mv2/ (copy of dist/) written");
+    const firefox = path.join(root, "dist-firefox");
+    await rm(firefox, { recursive: true, force: true });
+    await cp(path.join(root, "dist"), firefox, { recursive: true });
+    const mv2 = JSON.parse(await readFile(path.join(root, "manifest.json"), "utf8"));
+    await writeFile(path.join(firefox, "manifest.json"), JSON.stringify(firefoxManifest(mv2), null, 4) + "\n");
+    console.log("dist-firefox/ (dist/ + MAIN-world hook) written");
 
     // MV3: service worker + sandbox compile host
     await rm(path.join(root, "dist-mv3"), { recursive: true, force: true });

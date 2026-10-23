@@ -27,13 +27,6 @@
     "content_scripts": [
         {
             "matches": ["*://*/*"],
-            "js": ["hook.js"],
-            "all_frames": true,
-            "run_at": "document_start",
-            "world": "MAIN"
-        },
-        {
-            "matches": ["*://*/*"],
             "js": ["bridge.js"],
             "all_frames": true,
             "run_at": "document_start"

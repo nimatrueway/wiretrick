@@ -2,5 +2,6 @@ node_modules/
 dist/
 dist-mv2/
 dist-mv3/
+dist-firefox/
 helper/target/
 dist-helper/

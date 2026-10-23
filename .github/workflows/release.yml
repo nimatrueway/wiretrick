@@ -138,13 +138,13 @@ jobs:
           AMO_JWT_ISSUER=$(printf %s "$AMO_JWT_ISSUER" | tr -d '[:space:]')
           AMO_JWT_SECRET=$(printf %s "$AMO_JWT_SECRET" | tr -d '[:space:]')
           if [ -n "$AMO_JWT_ISSUER" ] && [ -n "$AMO_JWT_SECRET" ] && \
-             npx -y web-ext@8 sign -s dist -a amo-signed --channel unlisted \
+             npx -y web-ext@8 sign -s dist-firefox -a amo-signed --channel unlisted \
                --api-key "$AMO_JWT_ISSUER" --api-secret "$AMO_JWT_SECRET"; then
             mv amo-signed/*.xpi "$XPI"
             echo "signed $XPI"
           else
             echo "::warning::Firefox xpi is unsigned (AMO_JWT_ISSUER/AMO_JWT_SECRET missing or signing failed)"
-            (cd dist && zip -qr "../$XPI" .)
+            (cd dist-firefox && zip -qr "../$XPI" .)
           fi
           echo "XPI_NAME=$XPI" >> "$GITHUB_ENV"
 
