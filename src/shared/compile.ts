@@ -8,6 +8,7 @@ import { defaultMeta, finishMeta, type ResMeta } from "./metaParser";
 import { parseParamValue, resolveParamValues, serializableParamDef, type ParamDef } from "./scriptDef";
 import { formatLogArgs, makeScriptConsole, type ScriptLogLevel } from "./scriptLog";
 import { scriptFunction } from "./scriptFn";
+import { callerLine } from "./scriptError";
 import { normalizeRoute, type RouteKind, type RouteMeta } from "./route";
 import { scriptEnv } from "./scriptEnv";
 
@@ -116,8 +117,14 @@ export function compileScript(code: string, overrides?: ResApiOverrides): Compil
     const meta = defaultMeta();
     const owner = createOwner(meta, overrides?.paramValues);
     const store = createCollector();
+    let syntax: any = null;
     try {
-        const js = toRunnableJs(code);
+        let js = code;
+        try {
+            if (transpiler) js = transpiler(code);
+        } catch (e) {
+            syntax = e;
+        }
         const moduleObj = { exports: {} as any };
         // eslint-disable-next-line no-new-func
         const fn = scriptFunction(js);
@@ -134,7 +141,11 @@ export function compileScript(code: string, overrides?: ResApiOverrides): Compil
     } catch (e: any) {
         meta.routes = [];
         finishMeta(meta);
-        return { meta, handlers: emptyHandlers(), error: e && e.stack ? e.stack : String(e), code, paramDefs: owner.defs };
+        // the raw TS that the failed transpile left is rejected wherever its
+        // first type is, without a position: the transpiler's error has the real one
+        const at = e?.name === "SyntaxError" && syntax?.loc?.line;
+        const error = at ? `SyntaxError: ${String(syntax.message).replace(/\s*\(\d+:\d+\)$/, "")} (line ${at})` : e && e.stack ? e.stack : String(e);
+        return { meta, handlers: emptyHandlers(), error, code, paramDefs: owner.defs };
     }
 }
 
@@ -368,7 +379,9 @@ function makeShim(owner: ReturnType<typeof createOwner>, overrides?: ResApiOverr
         if (typeof fn !== "function") throw new Error(`wt.${kind}: second argument must be the handler function`);
         const list = top[kind];
         // save-time compile with stubbed imports: route unknown until analyzed
-        const r = mentionsStub(route) ? { kind, index: list.length, url: [], exclude: [] } : normalizeRoute(kind, route, list.length);
+        const r: RouteMeta = mentionsStub(route) ? { kind, index: list.length, url: [], exclude: [] } : normalizeRoute(kind, route, list.length);
+        const line = callerLine();
+        if (line) r.line = line;
         list.push({ fn: fn as HandlerFn, route: r });
     };
     return {

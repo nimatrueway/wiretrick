@@ -92,11 +92,13 @@ at the right of the toolbar do the same.
   down) and `settings.yaml` errors. Unlike the Log, entries go away by
   themselves once fixed: TypeScript problems update live as you type (even
   before saving); compile, rules and route problems on save; a runtime error
-  on save or with its ×. Click an entry (or Enter) to open the script at that
-  line; ↑/↓ move, ←/→ collapse/expand a file; the box at the top filters by
+  on save or with its ×. Every entry has a line: where the error was thrown,
+  or the `wt.*` call that registered the handler it names. Click an entry (or
+  Enter) to open the script at that line; ↑/↓ move, ←/→ collapse/expand a file; the box at the top filters by
   text. ⌘⇧M shows it. Its error/warning counts are on its title and at the
-  far left of the status bar, and follow the scripts — the Log keeps the
-  history.
+  far left of the status bar, and follow the scripts. Compile, TypeScript,
+  rules errors and route warnings appear only here, not in the Log; a
+  runtime error appears in both (the Log has every occurrence, with its URL).
 - **Log view** — engine and script log lines with level and source filters.
   The errors and warnings it holds are counted in red/yellow badges on its
   title; they stay until the log is cleared (🗑), whether or not you've looked.
@@ -105,9 +107,9 @@ at the right of the toolbar do the same.
   modified · observed) even while the panel is closed; clicking one opens the
   panel on that view. Turn this off (badges and status bar, all views) in
   **Settings → Logging → Panel counts**. Script
-  errors (exceptions in handlers, failed compiles) are logged at ERROR, and
-  the script gets a ⚠ indicator in the list and the popup. TypeScript errors
-  in a saved script also show up there. The download button (↓) saves the
+  exceptions in handlers are logged at ERROR, and the script gets a ⚠
+  indicator in the list and the popup — as it does for compile, TypeScript
+  and rules errors, which go to the Problems view instead of the Log. The download button (↓) saves the
   full debug log — every engine decision with timestamps; attach it when
   reporting issues.
 - **Network view** — a devtools-style request table: filter text, per-type
@@ -178,9 +180,11 @@ browser restart, per Chrome's File System Access rules — click the toolbar
 notice or the button).
 
 The folder button next to **Save** shows the sync state: no badge (off), a
-green dot (connected), a triangle moving up **▲** (writing to the folder) or
-down **▼** (picking up a change from it), and a yellow **!** (disconnected — needs
-a re-grant). Clicking it reconnects when disconnected; otherwise it opens
+green dot (connected), a triangle moving up **▲** (writing a change made in the
+extension to the folder) or down **▼** (picking up a change from it), and a yellow **!** (disconnected — needs
+a re-grant). A change picked up from the folder is never sent back: updating
+`settings.yaml` and its schema to match (e.g. commenting out the section of a
+script whose file was deleted) is part of the **▼**. Clicking it reconnects when disconnected; otherwise it opens
 **Settings → Synced folder**.
 
 ## Appearance
@@ -201,7 +205,7 @@ box. Strategies the current browser can't use are disabled in the picker,
 and a table lists each one's pros and cons; **Compatibility** links to
 [the full table](strategies.md#compatibility). It is the `defaultStrategy:` entry
 in `settings.yaml`. There is no fallback: a handler whose strategy isn't
-available doesn't run — the script gets a ⚠ and the Log view a warning.
+available doesn't run — the script gets a ⚠ and the Problems view a warning.
 
 ## About and diagnostics
 

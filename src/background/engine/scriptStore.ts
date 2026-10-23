@@ -5,8 +5,7 @@ import { dependantsOf } from "../../shared/scriptImports";
 import type { ResMeta } from "../../shared/metaParser";
 import { compileForStorage, SANDBOX_COMPILE_FAILED } from "../compileHost";
 import { dlogLevel } from "../../shared/debugLog";
-import { clearScriptErrors, clearScriptTypeErrors, scriptError } from "./logs";
-import { formatScriptError } from "../../shared/scriptError";
+import { clearScriptErrors, clearScriptTypeErrors } from "./logs";
 
 export interface Script {
     id: string;
@@ -239,9 +238,8 @@ export async function setParamValue(scriptId: string, key: string, value: any): 
         for (const id of changed) {
             const u = byId[id];
             if (fresh[id]?.code !== u.code) continue;
-            // a value the script can't load with (e.g. its `parse` throws) — say so in the log
-            if (u.error && u.error !== fresh[id].error) scriptError(id, formatScriptError(u.meta.name, u.error, "after param change"));
-            else if (!u.error && fresh[id].error) void clearScriptErrors(id); // fixed: drop the error that line recorded
+            // a value the script can't load with (e.g. its `parse` throws) is
+            // a compile error: stored below, shown in the Problems view
             fresh[id] = { ...fresh[id], meta: u.meta, paramDefs: u.paramDefs, error: u.error };
         }
         await storageSet({ [STORE_KEY]: fresh });

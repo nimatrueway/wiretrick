@@ -1,7 +1,7 @@
 /**
  * Param `parse` through the store: defs persist without the function, the
  * stored / settings.yaml value stays raw, and a value the parser rejects
- * marks the script errored with an ERROR log line naming the param.
+ * marks the script errored (a compile error naming the param — a problem, not a Log line).
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import "../src/shared/transpile";
@@ -56,21 +56,18 @@ describe("param parse — store and settings", () => {
         expect(await getSettingsText()).toContain("origin: https://b.org");
     });
 
-    it("a value the parser rejects: script error + ERROR log line naming the param", async () => {
+    it("a value the parser rejects: a compile error naming the param, not logged", async () => {
         await saveScript({ id: "p", name: "parsed", code: CODE });
         await setParamValue("p", "origin", "xyz");
         const s = await get("p");
         expect(s.error).toMatch(/param "origin": parse failed for value "xyz": Invalid URL/);
         expect(s.meta.active).toBe(false);
         expect((await loadAllParamValues()).p).toEqual({ origin: "xyz" }); // raw value kept: fixable from ⚙
-        const line = logs.find((l) => l.level === "error" && l.scriptId === "p");
-        expect(line?.message).toMatch(/^\[parsed\] after param change: Error: param "origin": parse failed for value "xyz"/);
-        expect((await getScriptErrors()).get("p")?.message).toMatch(/parse failed/);
-        // fixing the value clears the error (and the indicator it recorded)
+        expect(logs.find((l) => l.level === "error" && l.scriptId === "p")).toBeUndefined();
+        expect((await getScriptErrors()).get("p")).toBeUndefined(); // not a runtime error either
+        // fixing the value clears the error
         await setParamValue("p", "origin", "https://c.io");
         expect((await get("p")).error).toBeNull();
-        await new Promise((r) => setTimeout(r, 0));
-        expect((await getScriptErrors()).get("p")).toBeUndefined();
         expect((await get("p")).meta.match).toEqual(["*://c.io/*"]);
     });
 });

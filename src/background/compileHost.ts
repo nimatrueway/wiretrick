@@ -203,8 +203,8 @@ export async function compileForStorage(
     if (!__MV3__) {
         const c = compileWithLibs(target, scripts, values);
         dlogLevel(
-            "compile", c.error ? "error" : "debug",
-            `compiled "${label}" → active=${c.meta.active} match=${JSON.stringify(c.meta.match)} params=[${Object.keys(c.paramDefs || {}).join(", ")}] deps=[${c.deps.join(", ")}]${c.error ? " ERROR " + c.error.split("\n")[0] : ""}`
+            "compile", "debug",
+            `compiled "${label}" → active=${c.meta.active} match=${JSON.stringify(c.meta.match)} params=[${Object.keys(c.paramDefs || {}).join(", ")}] deps=[${c.deps.join(", ")}]${c.error ? " — compile error (in the Problems view)" : ""}`
         );
         return { meta: c.meta, paramDefs: c.paramDefs || {}, error: c.error };
     }
@@ -216,8 +216,8 @@ export async function compileForStorage(
         return { meta: defaultMeta(), paramDefs: {}, error: SANDBOX_COMPILE_FAILED };
     }
     dlogLevel(
-        "compile", r.error ? "error" : "debug",
-        `compiled "${label}" → active=${r.meta.active} match=${JSON.stringify(r.meta.match)} params=[${Object.keys(r.paramDefs || {}).join(", ")}] deps=[${(r.deps || []).join(", ")}]${r.error ? " ERROR " + r.error.split("\n")[0] : ""}`
+        "compile", "debug",
+        `compiled "${label}" → active=${r.meta.active} match=${JSON.stringify(r.meta.match)} params=[${Object.keys(r.paramDefs || {}).join(", ")}] deps=[${(r.deps || []).join(", ")}]${r.error ? " — compile error (in the Problems view)" : ""}`
     );
     return { meta: r.meta, paramDefs: r.paramDefs, error: r.error };
 }

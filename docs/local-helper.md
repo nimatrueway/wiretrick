@@ -81,7 +81,7 @@ binary.
   `strategy` on that handler).
 - When another extension or an enterprise policy controls the proxy setting,
   the strategy stays unavailable (shown in Settings). Handlers on `helper` then don't
-  run — there is no fallback; the Log view warns and the script gets a ⚠. Pick
+  run — there is no fallback; the Problems view warns and the script gets a ⚠. Pick
   another default strategy in Settings → Strategy, or set `strategy`
   on the route.
 - Firefox doesn't need it: the `extension` strategy already gives the same reach there.

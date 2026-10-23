@@ -172,8 +172,9 @@ for (const s of Object.values(SCRIPTS)) await saveScript(s.id, s.code, s.name);
     await send({ type: "setScriptParam", scriptId: "s_pparse", key: "origin", value: "xyz" });
     const ppBroken = (await send({ type: "listScripts" })).find((s: any) => s.id === "s_pparse");
     check("param parse failure: script error naming the param and value", /param "origin": parse failed for value "xyz"/.test(ppBroken?.error || ""), String(ppBroken?.error).split("\n")[0]);
-    const ppLogged = await mgr.waitForFunction(() => [...document.querySelectorAll("#log-entries .log-line")].some((l) => /\[param-parse\].*param "origin": parse failed for value "xyz"/.test((l as HTMLElement).dataset.text || l.textContent || "")), null, { timeout: 8000 }).then(() => true, () => false);
-    check("param parse failure: ERROR line in the log", ppLogged);
+    const ppProblem = await mgr.waitForFunction(() => [...document.querySelectorAll("#problems-list .pb-item.error")].some((l) => /param "origin": parse failed for value "xyz"/.test(l.textContent || "") && /\[Ln 1\b/.test(l.textContent || "")), null, { timeout: 8000 }).then(() => true, () => false);
+    const ppLogged = await mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line")].map((l) => (l as HTMLElement).dataset.text || l.textContent || "").filter((t) => /parse failed for value "xyz"/.test(t)));
+    check("param parse failure: a compile error in Problems at the wt.params line, not in the Log", ppProblem && !ppLogged.length, JSON.stringify({ ppProblem, ppLogged }));
     await send({ type: "deleteScript", id: "s_pparse" });
 }
 
@@ -426,7 +427,7 @@ const p10d = await newPage("/html-missed");
 await p10d.waitForTimeout(2500); // the check runs 1.5 s after the load completes
 const log10d: string = await mgr.evaluate(() => document.getElementById("log-entries")!.textContent || "");
 check("missed: WARN 'onResponseBody never ran' for a hook route hit by a page load", log10d.includes(`[missed probe] onResponseBody #1 never ran for ${ORIGIN}/html-missed (document) — the "page" strategy only sees`), log10d.match(/.{0,20}never ran.{0,120}/)?.[0] || "(no warning)");
-check("up-front WARN: webrequest onResponseBody can't run on Chromium", log10d.includes(`[webrequest body probe] onResponseBody #1: onResponseBody never runs with strategy "extension" on Chromium`), log10d.match(/.{0,40}never runs with.{0,80}/)?.[0] || "(no warning)");
+check("an up-front route warning is a Problem, not a Log line", !log10d.includes("never runs with"), log10d.match(/.{0,40}never runs with.{0,80}/)?.[0] || "");
 const pbRoute10d = () => mgr.evaluate(() => {
     const items = [...document.querySelectorAll("#problems-list .pb-item.warn")].map((e) => e.textContent || "");
     return { heads: [...document.querySelectorAll("#problems-list .pb-file")].map((e) => e.textContent), route: items.filter((t) => t.includes("never runs with") && /\broute\b/.test(t)), warnings: Number(document.querySelector('#sb-problems .sb-n[data-k="warn"]')?.textContent) };

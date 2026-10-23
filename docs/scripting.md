@@ -115,7 +115,7 @@ wt.onResponseBody(
   | `debugger` | Only these types are paused (the debugger's `Fetch.enable` patterns); other requests are never stopped. The cheapest way to keep a route off images, fonts and other assets. |
   | `extension` | Checked in the listener before any script runs. |
   | `helper` | Checked after the helper pauses the request: filters correctly, saves no work. |
-  | `page` | Only sees page fetch/XHR (`xmlhttprequest`). A list without `xmlhttprequest` means the handler never runs, and the Log view warns. |
+  | `page` | Only sees page fetch/XHR (`xmlhttprequest`). A list without `xmlhttprequest` means the handler never runs, and the Problems view warns. |
   | `rules` | Part of the browser-native rule: other types never match. |
 
   `onDocument` routes have no `resourceTypes` or `methods`.

@@ -31,6 +31,27 @@ export function formatScriptError(name: string, e: any, context?: string): strin
 }
 
 /**
+ * The user-source line of the outermost script frame on the current stack:
+ * the line in the script's top level that made the current call (for
+ * `wt.onRequest(…)`, its registration — also when a recipe from an imported
+ * utility registered it).
+ */
+export function callerLine(): number | undefined {
+    const E = Error as any;
+    const limit = E.stackTraceLimit;
+    E.stackTraceLimit = 100;
+    const stack = String(new Error().stack || "");
+    E.stackTraceLimit = limit;
+    const frame = /(?:<anonymous>|> Function):(\d+):\d+/g;
+    let line: number | undefined;
+    for (let m = frame.exec(stack); m; m = frame.exec(stack)) {
+        const l = Number(m[1]) - EVAL_WRAPPER_LINES;
+        if (l >= 1) line = l;
+    }
+    return line;
+}
+
+/**
  * One stack frame line → the user-source frame, or null to drop it
  * (extension / eval machinery). Returns the line unchanged when it isn't a
  * frame (a continuation of a multi-line message).

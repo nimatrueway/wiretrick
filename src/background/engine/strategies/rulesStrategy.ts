@@ -7,8 +7,8 @@
  * in the sandbox; MV2: right here — src/shared/rulesProbe.ts) and is
  * translated to rule specs (src/shared/dnrRules.ts). Then this extension's
  * session rules are replaced wholesale. A handler that can't become a rule
- * is skipped — its script gets a red ⚠ ("rules error") and the Log view an
- * ERROR line — while the script's other handlers keep running.
+ * is skipped — its script gets a red ⚠ and a rules error in the Problems
+ * view — while the script's other handlers keep running.
  *
  * Requests matched by an active rule are marked Modified in the Network
  * view (our own matcher on observed requests; no feedback permission).

@@ -357,8 +357,8 @@ try {
         code: `wt.onResponseBody({ url: "*://process-listed.invalid/*", strategy: "helper" }, (ctx, body) => body);`,
     }, r)));
     await mgr.waitForTimeout(1500); // pipeline reload → debugger tier armed
-    const helperWarned = await mgr.waitForFunction(() => [...document.querySelectorAll("#log-entries .log-line")].some((l) => /\[Process listed\] onResponseBody #1: strategy "helper"/.test(l.textContent || "")), null, { timeout: 8000 }).then(() => true, () => false);
-    check("process routes warn while the helper is down (no fallback)", helperWarned);
+    const helperWarned = await mgr.waitForFunction(() => [...document.querySelectorAll("#problems-list .pb-item.warn")].some((l) => /onResponseBody #1: strategy "helper"/.test(l.textContent || "") && /\[Ln 1\]/.test(l.textContent || "")), null, { timeout: 8000 }).then(() => true, () => false);
+    check("process routes warn while the helper is down (no fallback) — in Problems, at the handler's line", helperWarned);
     // Network tab records from now on (listeners attach when it opens)
     await mgr.click("#network-tab");
     await mgr.waitForSelector("#network-view .net-toolbar", { timeout: 5000 });
@@ -519,7 +519,7 @@ try {
     await mgr.waitForTimeout(500);
     check("clicking the runtime indicator dismisses it", !(await mgr.$('#script-list li[data-id="s_throws"] .err-ind')));
     await errPopup.close();
-    // TypeScript errors (editor squiggles) → ERROR log + "types" badge; two
+    // TypeScript errors (editor squiggles) → a Problem + "types" badge, not a Log line; two
     // scripts declaring the same top-level name must not collide
     for (const [id, name, code] of [
         ["s_typed", "Typed", `wt.onRequest("*://typed.invalid/*", () => {});\nconst cfg = 1;\nconst n: number = "not a number";`],
@@ -529,11 +529,12 @@ try {
     const typed = await mgr.evaluate(() => ({
         badge: document.querySelector('#script-list li[data-id="s_typed"] .err-ind.types')?.getAttribute("title") || "",
         clean: !document.querySelector('#script-list li[data-id="s_typed2"] .err-ind'),
-        logged: [...document.querySelectorAll("#log-entries .log-line.error")].map((l) => (l as HTMLElement).dataset.text || l.textContent || "").filter((t) => t.includes("type error")),
+        logged: [...document.querySelectorAll("#log-entries .log-line")].map((l) => (l as HTMLElement).dataset.text || l.textContent || "").filter((t) => t.includes("Typed")),
+        problem: [...document.querySelectorAll("#problems-list .pb-item.error")].map((l) => l.textContent || "").filter((t) => t.includes("not assignable")),
     }));
     check("TypeScript error → types indicator in the manager list", typed.badge.includes("line 3:") && !typed.badge.includes("cfg"), JSON.stringify(typed));
     check("scripts don't share a global scope; DOM globals (TextDecoder…) are typed", typed.clean, JSON.stringify(typed));
-    check("TypeScript error logged at ERROR level", typed.logged.some((t: string) => t.includes("[Typed] type error: line 3")), JSON.stringify(typed.logged));
+    check("TypeScript error is a Problem, not a Log line", typed.problem.length >= 1 && !typed.logged.some((t: string) => /type error|not assignable/.test(t)), JSON.stringify(typed));
     // custom tooltips: stay up over the tooltip, click copies, title restored after
     // a string: tsx would wrap a named arrow in __name(), undefined in the page
     const stubClipboard = `window.__copied = []; Object.defineProperty(navigator.clipboard, "writeText", { configurable: true, value: async (t) => void window.__copied.push(t) })`;

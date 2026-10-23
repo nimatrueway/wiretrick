@@ -98,11 +98,11 @@ The same text is shown under the strategy picker in Settings → Strategy.
 
 ## When a strategy isn't available
 
-The handler doesn't run, and the Log view gets one warning per script naming the
-handlers, e.g.
+The handler doesn't run, and the Problems view gets a warning under the
+script for each such handler, e.g.
 
 ```text
-[My script] onResponseBody #1: onResponseBody never runs with strategy "extension" on Chromium — its webRequest API can't read response bodies. Use "page" (page fetch/XHR, no banner), "debugger" (any resource, debugger banner) or "helper" (local helper)
+onResponseBody #1: onResponseBody never runs with strategy "extension" on Chromium — its webRequest API can't read response bodies. Use "page" (page fetch/XHR, no banner), "debugger" (any resource, debugger banner) or "helper" (local helper)
 ```
 
 Cases warned about as soon as scripts load:
@@ -120,10 +120,10 @@ Cases warned about as soon as scripts load:
 A handler on `rules` that can't become a rule is an **error**, also found as
 soon as scripts load (after every save): the script gets a red ⚠ in the
 Editor and the popup whose tooltip names the handler and the reason, and the
-Log view gets an ERROR line, e.g.
+Problems view gets an error under the script, e.g.
 
 ```text
-[My script] rules error: onRequest #2: rules are fixed: the handler must return the same result for every request (it reads ctx.method) — this handler doesn't run
+onRequest #2: rules are fixed: the handler must return the same result for every request (it reads ctx.method) — this handler doesn't run
 ```
 
 Only that handler is skipped; the script's other handlers keep running.

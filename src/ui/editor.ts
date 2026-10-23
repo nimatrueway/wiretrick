@@ -1221,7 +1221,7 @@ function updateProblems(): void {
     }
     const settings = monaco && settingsModel && !settingsModel.isDisposed() ? modelProblems(settingsModel) : undefined;
     problemGroups = collectProblems(
-        scripts.map((s) => ({ id: s.id, label: scriptFileName(s.meta.name), error: s.error, ruleErrors: s.ruleErrors, runtimeError: s.runtimeError, typeErrors: s.typeErrors, routeWarnings: s.routeWarnings })),
+        scripts.map((s) => ({ id: s.id, label: scriptFileName(s.meta.name), error: s.error, ruleErrors: s.ruleErrors, runtimeError: s.runtimeError, typeErrors: s.typeErrors, routeWarnings: s.routeWarnings, routes: s.meta.routes })),
         live,
         settings
     );

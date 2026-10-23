@@ -12,10 +12,8 @@ setTranspiler((code) => {
     try {
         return transform(code, { transforms: ["typescript", "imports"] }).code;
     } catch (e: any) {
-        // the compile then falls back to the RAW source, which new Function
-        // usually rejects — the script's error field carries it; this log
-        // says WHY (a TS syntax sucrase can't handle)
-        dlogLevel("compile", "warn", `TS transpile failed — running raw source (likely a syntax error): ${e?.message || e}`);
+        // the script's error (Problems view) carries the syntax error and its line
+        dlogLevel("compile", "debug", "TS transpile failed (a syntax error — see the Problems view)");
         throw e;
     }
 });

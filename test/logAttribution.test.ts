@@ -278,7 +278,7 @@ describe("per-script runtime error tracking", () => {
 });
 
 describe("per-script TypeScript error tracking", () => {
-    it("logs new type errors once at ERROR, not as runtime errors; clears", async () => {
+    it("stores type errors as problems, without Log lines or runtime errors; clears", async () => {
         const logs = await import("../src/background/engine/logs");
         const entries: LogEntry[] = [];
         logs.addUiPort({ postMessage: (m: any) => m.type === "log" && entries.push(m.entry), onDisconnect: { addListener() {} } } as any);
@@ -287,10 +287,7 @@ describe("per-script TypeScript error tracking", () => {
         await logs.setScriptTypeErrors("tx", "Typed", ["line 1: bad"]);
         await logs.setScriptTypeErrors("tx", "Typed", ["line 1: bad", "line 2: worse"]);
         const lines = entries.filter((e) => e.message.includes("type error"));
-        expect(lines.map((e) => [e.level, e.message, e.scriptId])).toEqual([
-            ["error", "[Typed] type error: line 1: bad", "tx"],
-            ["error", "[Typed] type error: line 2: worse", "tx"],
-        ]);
+        expect(lines).toEqual([]);
         expect((await logs.getScriptErrors()).has("tx")).toBe(false);
         expect((await logs.getScriptTypeErrors()).get("tx")).toEqual(["line 1: bad", "line 2: worse"]);
         await logs.setScriptTypeErrors("tx", "Typed", []);

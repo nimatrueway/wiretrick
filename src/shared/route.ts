@@ -30,6 +30,8 @@ export interface RouteMeta {
     kind: RouteKind;
     /** registration order within kind (0-based) */
     index: number;
+    /** the source line of the wt.* call that registered it (Problems view) */
+    line?: number;
     /** URLPatterns; [] matches nothing */
     url: string[];
     exclude: string[];

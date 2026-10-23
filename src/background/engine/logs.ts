@@ -71,7 +71,7 @@ export function log(tabId: number, message: string, level: LogEntry["level"] = "
         port.postMessage({ type: "log", entry });
     }
     if (scriptId) annotateFromLog(tabId, scriptId, message, level, netKind, url);
-    if (scriptId && level === "error" && !/^\[[^\]]*\] (console\.error|type error|rules error)/.test(message)) recordScriptError(scriptId, message);
+    if (scriptId && level === "error" && !/^\[[^\]]*\] console\.error/.test(message)) recordScriptError(scriptId, message);
     if (level === "error") {
         console.error("[Wiretrick]", message);
     }
@@ -91,7 +91,7 @@ const BODY_TAP = /\b(onResponseBody|replaceResponse)\b|onRequest → (block|redi
 
 function noteTap(scriptId: string, level: LogEntry["level"], message: string): void {
     const now = Date.now();
-    if (level === "error" && !/^\[[^\]]*\] (console\.error|type error|rules error)/.test(message)) lastScriptError.set(scriptId, now);
+    if (level === "error" && !/^\[[^\]]*\] console\.error/.test(message)) lastScriptError.set(scriptId, now);
     if (!BODY_TAP.test(message)) return;
     const m = URL_AT_END.exec(message);
     if (!m) return;
@@ -250,16 +250,13 @@ export async function getScriptTypeErrors(): Promise<Map<string, string[]>> {
 
 /**
  * The editor's TypeScript errors for a script's saved code (empty = clean).
- * Newly appearing errors are logged once at ERROR; unchanged reports are
- * silent, so re-reports (every manager load) don't spam the log.
+ * They're problems (Problems view), not Log lines.
  */
-export async function setScriptTypeErrors(scriptId: string, name: string, errors: string[]): Promise<void> {
+export async function setScriptTypeErrors(scriptId: string, _name: string, errors: string[]): Promise<void> {
     await loadErrors();
     const prev = typeErrors.get(scriptId) || [];
     const next = errors.slice(0, 50).map((e) => e.slice(0, 500));
     if (JSON.stringify(prev) === JSON.stringify(next)) return;
-    const seen = new Set(prev);
-    for (const e of next) if (!seen.has(e)) log(-1, `[${name}] type error: ${e}`, "error", scriptId);
     if (next.length) typeErrors.set(scriptId, next);
     else typeErrors.delete(scriptId);
     errorsChanged();
@@ -277,9 +274,9 @@ export async function getScriptRuleErrors(): Promise<Map<string, string[]>> {
 
 /**
  * Replace every script's `rules` errors (scriptId → "onRequest #2: reason").
- * Newly appearing errors are logged once at ERROR, attributed to the script.
+ * They're problems (Problems view), not Log lines.
  */
-export async function setScriptRuleErrors(next: Map<string, string[]>, names: Map<string, string>): Promise<void> {
+export async function setScriptRuleErrors(next: Map<string, string[]>, _names: Map<string, string>): Promise<void> {
     await loadErrors();
     let changed = false;
     for (const id of [...ruleErrors.keys()]) {
@@ -291,8 +288,6 @@ export async function setScriptRuleErrors(next: Map<string, string[]>, names: Ma
     for (const [id, errs] of next) {
         const prev = ruleErrors.get(id) || [];
         if (JSON.stringify(prev) === JSON.stringify(errs)) continue;
-        const seen = new Set(prev);
-        for (const e of errs) if (!seen.has(e)) log(-1, `[${names.get(id) ?? id}] rules error: ${e} — this handler doesn't run`, "error", id);
         if (errs.length) ruleErrors.set(id, errs);
         else ruleErrors.delete(id);
         changed = true;
@@ -307,7 +302,7 @@ export async function getScriptRouteWarnings(): Promise<Map<string, string[]>> {
 
 /**
  * Replace every script's route warnings (scriptId → "<route labels>: <why>").
- * Not logged here — the pipeline logs each one once when it first appears.
+ * They're problems (Problems view), not Log lines.
  */
 export async function setScriptRouteWarnings(next: Map<string, string[]>): Promise<void> {
     await loadErrors();

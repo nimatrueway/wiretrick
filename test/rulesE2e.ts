@@ -48,8 +48,8 @@ export async function checkRulesStrategy(ctx: any, mgr: any, origin: string, che
 
     const hasDnr: boolean = await mgr.evaluate(() => !!(chrome as any).declarativeNetRequest);
     if (!hasDnr) {
-        const warned = await mgr.waitForFunction(() => [...document.querySelectorAll("#log-entries .log-line")].some((l) => /rules.*not available in this browser \(no declarativeNetRequest\)/.test((l as HTMLElement).dataset.text || l.textContent || "")), null, { timeout: 8000 }).then(() => true, () => false);
-        check(t("no declarativeNetRequest here → the unavailable warning"), warned);
+        const warned = await mgr.waitForFunction(() => [...document.querySelectorAll("#problems-list .pb-item.warn")].some((l) => /rules.*not available in this browser \(no declarativeNetRequest\)/.test(l.textContent || "")), null, { timeout: 8000 }).then(() => true, () => false);
+        check(t("no declarativeNetRequest here → the unavailable warning in Problems"), warned);
         await send({ type: "deleteScript", id: "s_rules" });
         return;
     }
@@ -62,8 +62,9 @@ export async function checkRulesStrategy(ctx: any, mgr: any, origin: string, che
         return el ? { title: el.title, aria: el.getAttribute("aria-label"), color: getComputedStyle(el).color } : null;
     }, indSel);
     check(t("a handler reading ctx.method → red ⚠ naming the handler and reason"), !!ind && ind.aria === "rules error" && /onRequest #2: rules are fixed.*ctx\.method/.test(ind.title), JSON.stringify(ind));
-    const logged = await mgr.waitForFunction(() => [...document.querySelectorAll("#log-entries .log-line")].some((l) => /\[rules probe\] rules error: onRequest #2: .*ctx\.method/.test((l as HTMLElement).dataset.text || l.textContent || "")), null, { timeout: 8000 }).then(() => true, () => false);
-    check(t("ERROR line in the Log view, attributed to the script"), logged);
+    const problem = await mgr.waitForFunction(() => [...document.querySelectorAll("#problems-list .pb-item.error")].some((l) => /onRequest #2: .*ctx\.method/.test(l.textContent || "") && /\[Ln 2\]/.test(l.textContent || "")), null, { timeout: 8000 }).then(() => true, () => false);
+    const logged = await mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line")].some((l) => /rules error/.test((l as HTMLElement).dataset.text || l.textContent || "")));
+    check(t("a rules error in the Problems view at its handler's line, not in the Log"), problem && !logged, JSON.stringify({ problem, logged }));
     const listed = (await send({ type: "listScripts" })).find((s: any) => s.id === "s_rules");
     check(t("listScripts carries the per-handler rule error"), listed?.ruleErrors?.length === 1 && /^onRequest #2:/.test(listed.ruleErrors[0]), JSON.stringify(listed?.ruleErrors));
 

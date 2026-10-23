@@ -172,57 +172,41 @@ export function createPipeline(
         }, MISSED_DELAY_MS);
     }
 
-    // ---- up-front: handlers that can't run where they are ----
-    /** `${scriptId}|${message}` → handler labels last reported */
-    let routeWarned = new Map<string, string>();
+    // ---- up-front: handlers that can't run where they are (Problems view, not the Log) ----
     let helperTimer: ReturnType<typeof setTimeout> | undefined;
-    /** the current route warnings (Problems view): scriptId → "<labels>: <why>" */
+    /** the current route warnings (Problems view): scriptId → "<handler>: <why>", one per handler */
     let routeNow = new Map<string, string[]>();
-    /** helper-down warnings, once their grace period has passed: scriptId → line */
-    let helperNow = new Map<string, string>();
+    /** helper-down warnings, once their grace period has passed: scriptId → one per handler */
+    let helperNow = new Map<string, string[]>();
     function publishRouteWarnings(): void {
         const all = new Map<string, string[]>();
         for (const [id, w] of routeNow) all.set(id, [...w]);
-        for (const [id, w] of helperNow) all.set(id, [...(all.get(id) || []), w]);
+        for (const [id, w] of helperNow) all.set(id, [...(all.get(id) || []), ...w]);
         void setScriptRouteWarnings(all);
     }
     function warnRoutes(scripts: Script[]): void {
-        const next = new Map<string, string>();
-        const problems: { id: string; name: string; msg: string; labels: string[] }[] = [];
+        const problems: { id: string; msg: string }[] = [];
         const helperDown: { id: string; name: string; labels: string[] }[] = [];
         for (const s of scripts) {
             if (!s.enabled || !s.meta.active) continue;
-            const byMsg = new Map<string, string[]>();
             const down: string[] = [];
             for (const r of s.meta.routes || []) {
                 if (r.kind === "onDocument") continue;
                 const strategy = effectiveStrategy(r);
                 const msg = routeProblem({ kind: r.kind, strategy, resourceTypes: r.resourceTypes }, { firefox: IS_FIREFOX, mv3: __MV3__ });
-                if (msg) byMsg.set(msg, [...(byMsg.get(msg) || []), routeLabel(r)]);
+                // one warning per handler: each points at its own line
+                if (msg) problems.push({ id: s.id, msg: `${routeLabel(r)}: ${msg}` });
                 else if (strategy === "helper" && strategyUnavailable("helper")) down.push(routeLabel(r));
             }
-            for (const [msg, labels] of byMsg) problems.push({ id: s.id, name: s.meta.name, msg, labels });
             if (down.length) helperDown.push({ id: s.id, name: s.meta.name, labels: down });
         }
         routeNow = new Map();
-        for (const p of problems) {
-            const key = `${p.id}|${p.msg}`;
-            const labels = p.labels.join(", ");
-            next.set(key, labels);
-            if (routeWarned.get(key) !== labels) log(-1, `[${p.name}] ${labels}: ${p.msg}`, "warn", p.id);
-            routeNow.set(p.id, [...(routeNow.get(p.id) || []), `${labels}: ${p.msg}`]);
-        }
-        // keep helper-down keys so a reload while it stays down doesn't repeat it
-        for (const [k, v] of routeWarned) if (k.endsWith("|helper")) next.set(k, v);
-        routeWarned = next;
+        for (const p of problems) routeNow.set(p.id, [...(routeNow.get(p.id) || []), p.msg]);
         if (helperTimer) clearTimeout(helperTimer);
         const stillDown = new Set(helperDown.map((h) => h.id));
         helperNow = new Map([...helperNow].filter(([id]) => stillDown.has(id)));
         publishRouteWarnings();
-        if (!helperDown.length) {
-            for (const k of [...routeWarned.keys()]) if (k.endsWith("|helper")) routeWarned.delete(k);
-            return;
-        }
+        if (!helperDown.length) return;
         // the helper may only now be (re)starting: give every reload a grace
         // period, and keep waiting while it is still connecting
         const check = (): void => {
@@ -233,15 +217,8 @@ export function createPipeline(
                 helperTimer = setTimeout(check, HELPER_GRACE_MS);
                 return;
             }
-            for (const h of helperDown) {
-                const key = `${h.id}|helper`;
-                const labels = h.labels.join(", ");
-                const why = `strategy "helper" — ${strategyUnavailable("helper")}; these handlers don't run until it is`;
-                helperNow.set(h.id, `${labels}: ${why}`);
-                if (routeWarned.get(key) === labels) continue;
-                routeWarned.set(key, labels);
-                log(-1, `[${h.name}] ${labels}: ${why}`, "warn", h.id);
-            }
+            const why = `strategy "helper" — ${strategyUnavailable("helper")}; these handlers don't run until it is`;
+            for (const h of helperDown) helperNow.set(h.id, h.labels.map((l) => `${l}: ${why}`));
             publishRouteWarnings();
         };
         helperTimer = setTimeout(check, HELPER_GRACE_MS);

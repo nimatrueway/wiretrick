@@ -52,7 +52,7 @@ export class ExtensionStrategy implements InterceptionStrategy {
             return;
         }
         this.entries = compileMv2(scripts, paramValues, (s) => ownsAny(s, "extension")).map(({ id, name, compiled }) => {
-            if (compiled.error) scriptError(id, formatScriptError(name, compiled.error));
+            // a compile error is a problem (Problems view), not a Log line
             const handlers = {} as Record<Kind, Routed[]>;
             for (const k of KINDS) handlers[k] = compiled.handlers[k].filter((h) => effectiveStrategy(h.route) === "extension");
             dlogLevel("extension", "debug", `loaded "${name}" routes: ${KINDS.flatMap((k) => handlers[k].map((h) => `${routeLabel(h.route)} ${JSON.stringify(h.route.url)}`)).join(", ") || "none"}${compiled.error ? ` ERROR: ${compiled.error}` : ""}`);

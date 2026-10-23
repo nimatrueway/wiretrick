@@ -136,15 +136,15 @@ describe("extension strategy: error logs carry name + user line:col", () => {
         expect(line!.message).not.toContain("<anonymous>");
     });
 
-    it("compile-time (top-level) throw → [name] + mapped line", () => {
+    it("compile-time (top-level) throw → a problem with the mapped line, not a Log line", () => {
         const s = new ExtensionStrategy();
         // stored meta is from the last good save (saveScript keeps it on a failed compile)
         const good = storedScript("a", "Thrower", TOPLEVEL.replace(`x.split(".");`, ""));
         s.reload([{ ...good, code: TOPLEVEL }]);
-        const line = entries.find((e) => e.level === "error");
-        expect(line, "a compile error log line must exist").toBeTruthy();
-        expect(line!.message).toContain("[Thrower]");
-        expect(line!.message).toMatch(/Thrower:4:\d+/);
+        expect(entries.filter((e) => e.level === "error")).toEqual([]);
+        const err = compileScript(TOPLEVEL).error;
+        expect(formatScriptError("Thrower", err)).toContain("[Thrower]");
+        expect(formatScriptError("Thrower", err)).toMatch(/Thrower:4:\d+/);
     });
 });
 
@@ -162,5 +162,23 @@ describe("CDP tier: error logs carry name + user line:col", () => {
         expect(line, "an error log line must exist").toBeTruthy();
         expect(line!.message).toContain("[Thrower]");
         expect(line!.message).toMatch(/Thrower:4:\d+/);
+    });
+});
+
+describe("compile: positions for the Problems view", () => {
+    it("each route records the line of its registration (also in a loop / helper)", () => {
+        const c = compileScript(["// a", 'wt.onRequest("*://a.test/*", () => {});', "", "function reg(u) {", "    wt.onResponseBody(u, (ctx, b) => b);", "}", 'reg("*://b.test/*");', 'wt.onRequest("*://c.test/*", () => {});'].join("\n"));
+        expect(c.error).toBeNull();
+        expect(c.meta.routes.map((r) => [r.kind, r.index, r.line])).toEqual([
+            ["onRequest", 0, 2],
+            ["onRequest", 1, 8],
+            ["onResponseBody", 0, 7],
+        ]);
+    });
+
+    it("a syntax error names the line the transpiler found", async () => {
+        await import("../src/shared/transpile");
+        const c = compileScript(["const a: number = 1;", 'wt.onRequest("*://a.test/*", () => {});', "foo(", "const b = 2;"].join("\n"));
+        expect(c.error).toMatch(/^SyntaxError: .* \(line 4\)$/);
     });
 });

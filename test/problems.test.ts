@@ -12,7 +12,7 @@ describe("collectProblems", () => {
 
     it("compile error drops engine stack frames", () => {
         const [g] = collectProblems([script("a", { error: "SyntaxError: Unexpected token\n    at x (chrome-extension://abc/background.js:1:2)\n    at a.ts:3:1" })], none);
-        expect(g.problems).toEqual([{ severity: "error", kind: "compile", message: "SyntaxError: Unexpected token\n    at a.ts:3:1" }]);
+        expect(g.problems).toEqual([{ severity: "error", kind: "compile", message: "SyntaxError: Unexpected token\n    at a.ts:3:1", line: 3, column: 1 }]);
     });
 
     it("rules errors: one problem each", () => {
@@ -35,7 +35,7 @@ describe("collectProblems", () => {
     it("stored type errors (no editor model): line parsed", () => {
         const [g] = collectProblems([script("a", { typeErrors: ["line 7: Type 'string' is not assignable to type 'number'.", "odd"] })], none);
         expect(g.problems).toEqual([
-            { severity: "error", kind: "ts", message: "odd" },
+            { severity: "error", kind: "ts", message: "odd", line: 1 },
             { severity: "error", kind: "ts", message: "Type 'string' is not assignable to type 'number'.", line: 7 },
         ]);
     });
@@ -53,7 +53,39 @@ describe("collectProblems", () => {
 
     it("route warnings are warnings", () => {
         const [g] = collectProblems([script("a", { routeWarnings: ['onResponseBody: strategy "rules" can\'t do this'] })], none);
-        expect(g.problems).toEqual([{ severity: "warning", kind: "route", message: 'onResponseBody: strategy "rules" can\'t do this' }]);
+        expect(g.problems).toEqual([{ severity: "warning", kind: "route", message: 'onResponseBody: strategy "rules" can\'t do this', line: 1 }]);
+    });
+
+    it("every problem points at a line: frame, handler registration, syntax position, else line 1", () => {
+        const routes = [
+            { kind: "onRequest", index: 0, line: 4 },
+            { kind: "onRequest", index: 1, line: 9 },
+            { kind: "onResponseBody", index: 0, line: 12 },
+        ];
+        const [g] = collectProblems(
+            [
+                script("a", {
+                    routes,
+                    ruleErrors: ["onRequest #2: rules are fixed"],
+                    routeWarnings: ["onResponseBody #1: never runs", "onDocument #1: unknown handler"],
+                    runtimeError: { message: "[a] TypeError: x\n    at handler (a:17:3)", at: Date.now(), count: 1 },
+                }),
+            ],
+            none
+        );
+        const at = (kind: string, text: string) => g.problems.find((p) => p.kind === kind && p.message.includes(text));
+        expect(at("rules", "rules are fixed")).toMatchObject({ line: 9 });
+        expect(at("route", "never runs")).toMatchObject({ line: 12 });
+        expect(at("route", "unknown handler")).toMatchObject({ line: 1 });
+        expect(at("runtime", "TypeError")).toMatchObject({ line: 17, column: 3 });
+        // raw eval frames (stored compile errors) are past the 3 wrapper lines
+        const raw = "Error: top\n    at eval (eval at scriptFunction (chrome-extension://x/bg.js:1:2), <anonymous>:7:9)\n    at new Function (<anonymous>)";
+        expect(collectProblems([script("b", { error: raw })], none)[0].problems[0]).toMatchObject({ kind: "compile", line: 4, column: 9 });
+        expect(collectProblems([script("c", { error: "SyntaxError: Unexpected token (line 6)" })], none)[0].problems[0]).toMatchObject({ line: 6 });
+        // no position at all: the first live error, else line 1
+        const live = new Map<string, ProblemMarker[]>([["d", [{ severity: "error", message: "';' expected.", line: 5, column: 2 }]]]);
+        expect(collectProblems([script("d", { error: "SyntaxError: odd" })], live)[0].problems.find((p) => p.kind === "compile")).toMatchObject({ line: 5 });
+        expect(collectProblems([script("e", { error: "SyntaxError: odd" })], none)[0].problems[0]).toMatchObject({ line: 1 });
     });
 
     it("sorts errors before warnings, then by line/column", () => {
