@@ -116,10 +116,11 @@ wt.onResponseBody(
   | `webRequest` | Checked in the listener before any script runs. |
   | `helper` | Checked after the helper pauses the request: filters correctly, saves no work. |
   | `page` | Only sees page fetch/XHR (`xmlhttprequest`). A list without `xmlhttprequest` means the handler never runs, and the Log view warns. |
+  | `rules` | Part of the browser-native rule: other types never match. |
 
   `onDom` routes have no `resourceTypes` or `methods`.
 - **`strategy`** — run this handler on one [strategy](strategies.md):
-  `"helper"`, `"page"`, `"webRequest"` or `"debugger"`. Omit to use the default
+  `"helper"`, `"page"`, `"webRequest"`, `"debugger"` or `"rules"`. Omit to use the default
   from Settings → Strategy. There is no fallback: when the strategy
   isn't available, the handler doesn't run and the Log view says why.
   To pick per browser or build, use `wt.isChrome`, `wt.isFirefox`,
@@ -129,7 +130,12 @@ wt.onResponseBody(
   ```ts
   wt.onResponseBody({ url: "*://example.com/app.js", strategy: wt.isFirefox ? "webRequest" : "helper" }, (ctx, body) => body);
   wt.onRequest({ url: "*://api.example.com/*", strategy: wt.isMV3 ? "debugger" : "webRequest" }, fn);
+  wt.onRequest({ url: "*://ads.example.com/*", strategy: wt.isMV3 ? "rules" : "webRequest" }, () => ({ block: true }));
   ```
+
+  On `rules` the handler runs once when scripts load and its fixed result
+  (block, redirect, headers) becomes a browser-native rule; `exclude`
+  isn't supported there ([what `rules` can do](strategies.md#what-rules-can-do)).
 
 > **Tip:** `page` is the lightest strategy, but it only sees the page's own
 > fetch/XHR (REST/API) calls. For documents, `<script src>`, images,

@@ -62,11 +62,15 @@ _Avoid_: hot reload, live reload, restart
 A TypeScript or syntax error in a script; the script doesn't run until it's fixed.
 _Avoid_: build error, script crash
 
+**Rules error**:
+A handler on the `rules` strategy whose result can't become a browser rule (for example it reads the request); that handler doesn't run, the rest of the script does.
+_Avoid_: DNR error, rule failure
+
 ## Interception
 
 **Strategy**:
-The browser mechanism a handler intercepts through: `helper`, `page`, `webRequest` or `debugger`. Each handler uses exactly one.
-_Avoid_: tier, mode, backend, method, interception (as a section name), `process`, `hook`, `webrequest`, `cdp`
+The browser mechanism a handler intercepts through: `helper`, `page`, `webRequest`, `debugger` or `rules`. Each handler uses exactly one.
+_Avoid_: tier, mode, backend, method, interception (as a section name), `process`, `hook`, `webrequest`, `cdp`, `dnr`, `declarative`
 
 **Default strategy**:
 The strategy a handler uses when its route doesn't name one, chosen in Settings (`defaultStrategy` in `settings.yaml`).

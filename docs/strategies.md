@@ -4,7 +4,7 @@
 
 Chrome and Firefox have fundamentally different extension APIs, and Chrome
 itself can only reach some resources through some paths. Wiretrick therefore
-has four **interception strategies**. Every handler runs on exactly
+has five **interception strategies**. Every handler runs on exactly
 **one** of them:
 
 1. its route's `strategy`, if set;
@@ -36,6 +36,7 @@ most once.
 | `page` | MAIN-world content script overrides `fetch` and `XMLHttpRequest` | requests the page's own JS makes (fetch/XHR — the majority of API traffic) | **never** | misses `<script src>`, `<img>`, documents, workers and requests made before the page patch loads; no `onResponseHeaders` |
 | `webRequest` | blocking `webRequest` (+ `filterResponseData` on Firefox) | everything | never | **MV2 builds only** — Firefox and Chromium browsers that still run MV2 (ungoogled-chromium, Brave, Arc…). Redirect, block, request/response headers and synchronous `onRequest` respond / `replaceResponse` work on both (Chromium serves replacements by redirecting, Firefox in place — see [below](#how-each-strategy-serves-a-replacement)); `onResponseBody` and awaiting async handlers are Firefox-only (Chromium has no `filterResponseData`, and its blocking webRequest can't await) |
 | `debugger` | `chrome.debugger` + CDP Fetch domain: pause → run handlers → continue or fulfill | **everything**: documents, script tags, images, fonts, XHR — even requests the page didn't initiate | **yes** — Chrome shows a yellow "being debugged" bar while attached | Chromium-only; attach/detach is lazy and automatic |
+| `rules` | each handler runs **once** when scripts load; its result becomes a browser-native rule (`declarativeNetRequest`) that the browser applies itself | **everything**, the first navigation included | **never** | block, redirect and request/response headers only, with a fixed result ([what `rules` can do](#what-rules-can-do)); Chrome MV3, Chromium MV2 and Firefox 113+ |
 
 `wt.onDom` isn't a network strategy: it runs in the page whatever the
 setting ([details](scripting.md#dom-changes--wtondom)).
@@ -50,12 +51,15 @@ The same text is shown under the strategy picker in Settings → Strategy.
 | `page` | No setup, no banner, no permissions, lightest. Works in every browser. | Only the page's own fetch/XHR. Misses documents, `<script src>`, images, workers and requests made before the page patch loads. |
 | `webRequest` *(default, Firefox)* | No banner, no setup. On Firefox it reaches everything, bodies included. | Not on Chrome (MV3). Chromium MV2: no `onResponseBody`, no async handlers, replacements are served by redirect (URL changes, status always 200) — a replaced page shows a `chrome-extension://` URL. Firefox: can't change a replaced response's status. |
 | `debugger` | Sees everything with nothing to install. | Chromium only. Chrome shows a "being debugged" banner while attached. May miss the first navigation in a fresh tab ([details](#first-page-load-with-debugger)). |
+| `rules` | No banner, no setup, nothing runs per request: the browser itself applies the rules to every request, the first navigation included. Works in Chrome (MV3 and MV2) and Firefox. | Fixed results only: block, redirect (captures inserted as-is), set/remove request or response headers. No respond, replaceResponse or onResponseBody, no exclude. The handler runs once when scripts load and can't read the request (method, headers…). |
 
 > **Which one?** `page` is the most lightweight (no banner, no helper, no
 > permissions prompt), but it only works on the page's own fetch/XHR
 > (REST/API) calls. Documents, `<script src>`, images, workers and requests
 > made before the page patch loads go straight past it. For robust interception
 > use `helper` (Chromium), `webRequest` (Firefox / MV2 Chromium) or `debugger`.
+> For a fixed block, redirect or header change, `rules` is lighter still and
+> reaches everything.
 
 > **`webRequest` on Chromium MV2 and the page itself (`main_frame`).**
 > Redirect, block and request/response header changes work on the page
@@ -76,6 +80,10 @@ The same text is shown under the strategy picker in Settings → Strategy.
   banner, ever.
 - **Nothing to install on Chrome** → `debugger` (sees everything, shows the
   banner) or `page` (no banner, fetch/XHR only).
+- **Block, redirect or set headers the same way every time** → `rules`:
+  the browser applies them itself — every resource type, no banner,
+  nothing to install, in Chrome and Firefox
+  ([what `rules` can do](#what-rules-can-do)).
 - **Replace/transform JSON APIs only, lightest path** →
   `{ url, resourceTypes: ["xmlhttprequest"], strategy: "page" }`.
 - **Rewrite page HTML / `<script src>` bodies** → `helper` or `debugger` on
@@ -100,7 +108,8 @@ handlers, e.g.
 Cases warned about as soon as scripts load:
 
 - the strategy doesn't exist in this build — `webRequest` on Chrome MV3,
-  `helper` or `debugger` on Firefox;
+  `helper` or `debugger` on Firefox, `rules` in a browser without
+  `declarativeNetRequest` (Firefox before 113);
 - `onResponseBody` on Chromium's `webRequest` (it can't read bodies);
 - `onResponseHeaders` on `page` (the page can't change response headers
   before the browser enforces them);
@@ -108,8 +117,110 @@ Cases warned about as soon as scripts load:
 - `helper` while the local helper isn't running (after a short grace
   period at startup) — the handlers start working once it connects.
 
+A handler on `rules` that can't become a rule is an **error**, also found as
+soon as scripts load (after every save): the script gets a red ⚠ in the
+Editor and the popup whose tooltip names the handler and the reason, and the
+Log view gets an ERROR line, e.g.
+
+```text
+[My script] rules error: onRequest #2: rules are fixed: the handler must return the same result for every request (it reads ctx.method) — this handler doesn't run
+```
+
+Only that handler is skipped; the script's other handlers keep running.
+Saving the fixed script clears the error. The reasons are listed under
+[what `rules` can do](#what-rules-can-do).
+
 Body handlers that matched a request but didn't run on it get the
 [Missed warning](#missed-warning).
+
+## What `rules` can do
+
+A `rules` handler doesn't run per request. When scripts load (after every
+save, param change or enable toggle) Wiretrick runs it **once** and turns
+what it returns into browser-native rules (`declarativeNetRequest` session
+rules) that the browser then applies by itself — to every request, the
+first navigation included, with no banner and no helper.
+
+| handler returns | the rule |
+|---|---|
+| `onRequest` → `{ block: true }` | blocks the request |
+| `onRequest` → `{ redirect: url }` | redirects it; `ctx.groups.*` and `ctx.url` may appear in the URL ([below](#captures-in-a-redirect)) |
+| `onRequest` → `{ headers: { set, remove } }` | sets / removes request headers |
+| `onResponseHeaders` → `{ headers: { set, remove } }` | sets / removes response headers |
+
+The route works as everywhere: the full URL pattern syntax (named groups,
+optional parts, custom regular expressions, wildcards), `methods` and
+`resourceTypes`. Scripts stack as usual: the first script's block or
+redirect wins, and when two scripts set the same header the later one
+wins. A block or redirect makes the same handler's `headers` moot, as on
+every strategy.
+
+```ts
+wt.onRequest({ url: "*://ads.example.com/*", strategy: "rules" }, () => ({ block: true }));
+wt.onRequest({ url: "https://api.example.com/*", strategy: "rules" }, () => ({
+    headers: { set: { "x-debug": "1" }, remove: ["cookie"] },
+}));
+wt.onResponseHeaders({ url: "https://example.com/*", strategy: "rules" }, () => ({
+    headers: { remove: ["content-security-policy"] },
+}));
+// rules where the browser has them, the per-request webRequest elsewhere
+wt.onRequest({ url: "*://tracker.example.com/*", strategy: wt.isMV3 ? "rules" : "webRequest" }, () => ({ block: true }));
+```
+
+### Captures in a redirect
+
+The redirect URL may contain the route's captures (`ctx.groups.name`,
+`ctx.groups["0"]` for a `*`) and `ctx.url`, inserted **as-is** — the
+browser substitutes them per request:
+
+```ts
+// /api/users/7    → https://staging.example.com/users/7?v=
+// /api/v2/users/7 → https://staging.example.com/users/7?v=2
+wt.onRequest(
+    { url: "https://example.com/api{/v:ver}?/users/:id(\\d+)", strategy: "rules" },
+    (ctx) => ({ redirect: `https://staging.example.com/users/${ctx.groups.id}?v=${ctx.groups.ver ?? ""}` }),
+);
+```
+
+An optional group that didn't match is empty in the rule, so the handler
+must say so with `?? ""`; any other fallback (`ctx.groups.ver ?? "1"`,
+`ctx.groups.ver || "1"`) is an error, because a rule can't pick a value.
+When the two forms need different results, write two handlers.
+
+### Errors
+
+Each of these is a red ⚠ on the script naming the handler; that handler
+doesn't run, the rest of the script does:
+
+- the handler reads the request — `ctx.method`, `ctx.requestHeaders`,
+  `ctx.tabUrl`, `ctx.resourceType`, `ctx.statusLine`,
+  `ctx.responseHeaders` (destructuring counts): a rule's result is fixed
+  ("rules are fixed: the handler must return the same result for every
+  request (it reads ctx.method)");
+- a capture used anywhere but as-is in the redirect URL — in a header, an
+  `if`, `.toUpperCase()`… ("captures can only be inserted into the redirect
+  URL as-is"), or an optional capture without `?? ""`;
+- more than 9 captures in one redirect (the browser substitutes `\1`–`\9`);
+- `onResponseBody`, `replaceResponse` or `onRequest` → `respond`;
+- `exclude` on the route — narrow the URL pattern instead;
+- a method a rule can't match (e.g. `CONNECT`);
+- the handler returns nothing ("does nothing on `rules`" — rules can't just
+  observe requests);
+- it throws, or doesn't settle within 2 s, during its one-time run;
+- a custom regular expression the browser's regex engine (RE2) rejects —
+  lookahead, lookbehind, backreferences — with the browser's reason;
+- the browser refuses the rule (e.g. its limit on session or regex rules is
+  reached), with the browser's reason.
+
+> **State is frozen at load.** The one run sees params, but anything else the
+> handler reads — the time, `wt.storage`, `Math.random()`, a counter — is
+> read once and baked into the rule. It's refreshed only when scripts
+> reload (a save, a param change, an enable toggle). Use another strategy
+> for results that must change per request.
+
+In the Network view a request a rule matched is marked Modified, with the
+rule's action (e.g. `onRequest → block (rules)`). The Log view's line for
+it is info level.
 
 ## The debugger banner
 
@@ -174,8 +285,9 @@ The reason is picked from the situation:
   “was NOT intercepted” warning (logged once, not twice);
 - otherwise → “no strategy observed it — check the Log view at debug level”.
 
-Skipped: handlers that can never run where they are (already warned at
-load, see [above](#when-a-strategy-isnt-available)), page fetch/XHR on
+Skipped: handlers on `rules` (the browser applies them; their body
+handlers are errors at load), handlers that can never run where they are
+(already warned at load, see [above](#when-a-strategy-isnt-available)), page fetch/XHR on
 `page` (it reads bodies lazily — the page may simply never read one),
 websocket, ping/beacon, CSP reports, the extension's own requests, and
 requests a script already ended in `onRequest` (block/redirect/respond).
@@ -204,23 +316,24 @@ Which strategies each browser and build gives you
 ([strategies](#interception-strategies) explained above). The Settings
 strategy picker disables the ones the current browser can't use.
 
-| | `helper` (local helper) | `page` (page fetch/XHR) | `webRequest` | `debugger` (chrome.debugger) | `wt.onDom` |
-|---|---|---|---|---|---|
-| **Chrome / Edge / Brave / Vivaldi, current** — `dist-mv3/` | ✅ no banner — **default** | ✅ | ❌ | ✅ banner shown | ✅ |
-| **Chromium with MV2** (ungoogled-chromium, Brave, Arc… — any Chromium that still loads MV2 extensions) — `dist/` | ✅ no banner — **default** | ✅ | ✅ no banner — redirect, block, headers, sync respond/replace; no body streaming or async (see [async](scripting.md#async-handlers)) | ✅ banner shown | ✅ |
-| **Firefox** — `dist/` | ❌ (not needed: `webRequest` reaches everything) | ✅ | ✅ no banner — **default** | ❌ | ✅ |
+| | `helper` (local helper) | `page` (page fetch/XHR) | `webRequest` | `debugger` (chrome.debugger) | `rules` (browser-native rules) | `wt.onDom` |
+|---|---|---|---|---|---|---|
+| **Chrome / Edge / Brave / Vivaldi, current** — `dist-mv3/` | ✅ no banner — **default** | ✅ | ❌ | ✅ banner shown | ✅ | ✅ |
+| **Chromium with MV2** (ungoogled-chromium, Brave, Arc… — any Chromium that still loads MV2 extensions) — `dist/` | ✅ no banner — **default** | ✅ | ✅ no banner — redirect, block, headers, sync respond/replace; no body streaming or async (see [async](scripting.md#async-handlers)) | ✅ banner shown | ✅ | ✅ |
+| **Firefox** — `dist/` | ❌ (not needed: `webRequest` reaches everything) | ✅ | ✅ no banner — **default** | ❌ | ✅ 113+ | ✅ |
 
 What reaches what on Chrome:
 
-| resource | `helper` | `page` | `debugger` |
-|---|---|---|---|
-| page `fetch` / XHR | ✅ | ✅ | ✅ |
-| main-frame HTML, iframes | ✅ | ❌ | ✅ |
-| `<script src>`, CSS, images, fonts | ✅ | ❌ | ✅ |
-| service/web workers' requests | ✅ | ❌ | ⚠ partly |
-| first navigation in a fresh tab | ✅ | ❌ | ⚠ may miss it ([details](#first-page-load-with-debugger)) |
-| sites pinning certs / mTLS | ❌ leave them out of `helper` routes | ✅ | ✅ |
-| `onResponseHeaders` | ✅ | ❌ | ✅ |
+| resource | `helper` | `page` | `debugger` | `rules` |
+|---|---|---|---|---|
+| page `fetch` / XHR | ✅ | ✅ | ✅ | ✅ |
+| main-frame HTML, iframes | ✅ | ❌ | ✅ | ✅ |
+| `<script src>`, CSS, images, fonts | ✅ | ❌ | ✅ | ✅ |
+| service/web workers' requests | ✅ | ❌ | ⚠ partly | ✅ |
+| first navigation in a fresh tab | ✅ | ❌ | ⚠ may miss it ([details](#first-page-load-with-debugger)) | ✅ |
+| sites pinning certs / mTLS | ❌ leave them out of `helper` routes | ✅ | ✅ | ✅ |
+| `onResponseHeaders` | ✅ | ❌ | ✅ | ✅ fixed headers only |
+| bodies (`onResponseBody`, `replaceResponse`, `respond`) | ✅ | ✅ | ✅ | ❌ |
 
 The local helper ships for these platforms (each release attaches the
 binaries and a `SHA256SUMS`; the [installer](process-helper.md)
