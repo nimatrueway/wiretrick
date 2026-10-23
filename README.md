@@ -15,6 +15,9 @@ replace bodies, or patch the DOM.
 
 - **Scripts, not rule lists** — a Monaco code editor with IntelliSense, type checking,
   per-script enable toggles and adjustable parameters.
+- **Hot apply** — saving a script, changing a param or a setting takes effect
+  immediately: no extension reload, no browser restart. Edits made in your own
+  editor apply the same way through folder sync.
 - **Every kind of interception** — page fetch/XHR, documents, `<script>`,
   images and workers, through five [strategies](docs/strategies.md): one
   default in Settings, overridable per handler. `page` is the lightest but
