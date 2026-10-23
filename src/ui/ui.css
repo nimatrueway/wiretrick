@@ -566,11 +566,22 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 #btn-folder-sync[data-state="connected"] .sync-ind { background: var(--ok, #3fb950); min-width: 7px; height: 7px; right: 3px; bottom: 2px; }
 #btn-folder-sync[data-state="disconnected"] .sync-ind { background: var(--warn); }
 #btn-folder-sync[data-state="disconnected"] .sync-ind::before { content: "!"; }
+/* a solid triangle that travels in its direction: up = sending, down = receiving */
 #btn-folder-sync[data-state="sending"] .sync-ind,
-#btn-folder-sync[data-state="receiving"] .sync-ind { background: var(--accent); animation: wt-pulse 0.8s ease-in-out infinite alternate; }
-#btn-folder-sync[data-state="sending"] .sync-ind::before { content: "↑"; }
-#btn-folder-sync[data-state="receiving"] .sync-ind::before { content: "↓"; }
-@keyframes wt-pulse { from { opacity: 1; } to { opacity: 0.45; } }
+#btn-folder-sync[data-state="receiving"] .sync-ind {
+    min-width: 0;
+    width: 0;
+    height: 0;
+    right: 1px;
+    bottom: 2px;
+    border-radius: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+}
+#btn-folder-sync[data-state="sending"] .sync-ind { border-bottom: 7px solid var(--accent); animation: wt-sync-up 0.8s ease-in-out infinite; }
+#btn-folder-sync[data-state="receiving"] .sync-ind { border-top: 7px solid var(--accent); animation: wt-sync-down 0.8s ease-in-out infinite; }
+@keyframes wt-sync-up { from { transform: translateY(3px); opacity: 0.4; } to { transform: translateY(-3px); opacity: 1; } }
+@keyframes wt-sync-down { from { transform: translateY(-3px); opacity: 0.4; } to { transform: translateY(3px); opacity: 1; } }
 
 #btn-open-vscode {
     display: inline-flex;

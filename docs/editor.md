@@ -164,8 +164,8 @@ browser restart, per Chrome's File System Access rules — click the toolbar
 notice or the button).
 
 The folder button next to **Save** shows the sync state: no badge (off), a
-green dot (connected), a pulsing **↑** (writing to the folder) or **↓**
-(picking up a change from it), and a yellow **!** (disconnected — needs
+green dot (connected), a triangle moving up **▲** (writing to the folder) or
+down **▼** (picking up a change from it), and a yellow **!** (disconnected — needs
 a re-grant). Clicking it reconnects when disconnected; otherwise it opens
 **Settings → Synced folder**.
 
