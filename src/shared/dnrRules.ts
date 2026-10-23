@@ -410,15 +410,19 @@ function optionsFor(c: Comp, special: boolean): CompOptions {
     return NO_OPTIONS;
 }
 
-/** characters that end each component in a full URL: a component's regex may not cross them */
+/**
+ * characters that end each component in a request URL: a component's regex
+ * may not cross them. Request URLs have no fragment, so "#" never needs
+ * excluding (each excluded character costs RE2 memory).
+ */
 const TERMINATORS: Record<Comp, string> = {
-    protocol: ":/?#",
-    username: ":@/?#",
-    password: "@/?#",
-    hostname: ":/?#@",
-    port: "/?#",
-    pathname: "?#",
-    search: "#",
+    protocol: ":/?",
+    username: ":@/?",
+    password: "@/?",
+    hostname: ":/?@",
+    port: "/?",
+    pathname: "?",
+    search: "",
     hash: "",
 };
 
@@ -543,7 +547,8 @@ export interface PatternRegex {
 
 /**
  * A URLPattern string (constructor syntax, or an all-URLs alias) → one
- * regex over the full URL that matches exactly what URLPattern.test does.
+ * regex over a request URL (which never has a fragment) that matches
+ * exactly what URLPattern.test does.
  * `capture` lists the ctx.groups names that should be numbered groups;
  * everything else is non-capturing. Throws on an invalid pattern.
  */
@@ -559,8 +564,13 @@ export function patternToRegex(pattern: string, capture: string[] = []): Pattern
             return false;
         }
     };
+    // RE2's memory limit (2KB in Chrome) is spent mostly on character
+    // classes, so parts that can't change the outcome are left out or merged
+    const captured = (c: Comp): boolean => capture.some((n) => p.owner.get(n) === c);
+    const wild = (c: Comp): boolean => p.comps[c] === "*" && !captured(c);
     let re = `^${body("protocol")}://`;
-    if (p.comps.username !== "" || p.comps.password !== "") {
+    if (wild("username") && wild("password")) re += "(?:[^@/?]*@)?"; // user(:pass)?@ in one class
+    else if (p.comps.username !== "" || p.comps.password !== "") {
         const userOpt = emptyOk("username");
         const passOpt = emptyOk("password");
         const user = body("username");
@@ -571,10 +581,12 @@ export function patternToRegex(pattern: string, capture: string[] = []): Pattern
     re += body("hostname");
     if (p.comps.port !== "") re += emptyOk("port") ? `(?::${body("port")})?` : `:${body("port")}`;
     re += body("pathname");
+    // request URLs never carry a fragment: a hash that may be empty always matches
+    const noHash = !captured("hash") && (p.comps.hash === "" || emptyOk("hash"));
+    if (noHash && wild("search")) return { regex: `${re}(?:\\?|$)`, index };
     if (p.comps.search === "") re += "\\??";
     else re += emptyOk("search") ? `(?:\\?${body("search")})?` : `\\?${body("search")}`;
-    if (p.comps.hash === "") re += "#?";
-    else re += emptyOk("hash") ? `(?:#${body("hash")})?` : `#${body("hash")}`;
+    if (!noHash) re += p.comps.hash === "" ? "#?" : emptyOk("hash") ? `(?:#${body("hash")})?` : `#${body("hash")}`;
     return { regex: re + "$", index };
 }
 

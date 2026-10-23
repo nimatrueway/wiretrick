@@ -41,6 +41,11 @@ const PATTERNS = [
     "https://a.com/\\:literal",
     "https://:host(a|b).com/*",
     "*://example.com:*/*",
+    "https://u{:p}?@a.com/*",
+    "https://*:*@a.com/*",
+    "https://a.com/x#frag",
+    "https://a.com/x?*#*",
+    "https://a.com/x?:q#*",
 ];
 
 const URLS = [
@@ -60,21 +65,29 @@ const URLS = [
     "https://a.com/file.png", "https://a.com/d/file.jpg", "https://a.com/foo.bar", "https://a.com/fooxbar",
     "https://a.com/:literal", "https://a.com/literal", "https://a.com/v.txt", "https://b.com/z", "https://c.com/z",
     "https://A.com/Path", "https://a.com/X", "file:///etc/hosts", "https://a.com/%E2%9C%93",
-].map((u) => new URL(u).href); // the browser hands rules normalized URLs (lowercase host, …)
+    "https://u:pw@a.com/z", "https://v@a.com/z", "https://u:@a.com/z",
+].map((u) => {
+    // the browser hands rules normalized URLs (lowercase host, …) without a fragment
+    const url = new URL(u);
+    url.hash = "";
+    return url.href;
+});
 
 describe("patternToRegex agrees with URLPattern", () => {
     for (const p of PATTERNS) {
         it(p, () => {
             const names = patternGroups(p).map((g) => g.name);
-            const { regex, index } = patternToRegex(p, names);
-            const re = new RegExp(regex);
-            for (const u of URLS) {
-                const want = matchAny([p], u);
-                const m = re.exec(u);
-                expect(!!m, `${u} (${regex})`).toBe(want);
-                if (!m) continue;
-                const g = matchGroups([p], u)!;
-                for (const n of names) expect(m[index[n]] ?? "", `${u} groups.${n}`).toBe(g[n] ?? "");
+            for (const capture of [[], names]) {
+                const { regex, index } = patternToRegex(p, capture);
+                const re = new RegExp(regex);
+                for (const u of URLS) {
+                    const want = matchAny([p], u);
+                    const m = re.exec(u);
+                    expect(!!m, `${u} (${regex})`).toBe(want);
+                    if (!m) continue;
+                    const g = matchGroups([p], u)!;
+                    for (const n of capture) expect(m[index[n]] ?? "", `${u} groups.${n}`).toBe(g[n] ?? "");
+                }
             }
         });
     }

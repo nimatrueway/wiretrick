@@ -209,6 +209,9 @@ doesn't run, the rest of the script does:
 - it throws, or doesn't settle within 2 s, during its one-time run;
 - a custom regular expression the browser's regex engine (RE2) rejects —
   lookahead, lookbehind, backreferences — with the browser's reason;
+- a URL pattern too complex for the browser's regex memory limit (2 KB in
+  Chrome): about ten `:name` groups in one pattern, fewer with custom
+  regexps. Use `*` for a run of segments you don't need;
 - the browser refuses the rule (e.g. its limit on session or regex rules is
   reached), with the browser's reason.
 

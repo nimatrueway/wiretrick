@@ -27,7 +27,7 @@ export function rulesServerRoute(req: http.IncomingMessage, res: http.ServerResp
     if (url.pathname === "/rules-echo") return json({ query: Object.fromEntries(url.searchParams), headers: req.headers });
     if (url.pathname === "/rules-blocked" || url.pathname === "/rules-method") return json({ reached: true });
     if (url.pathname === "/rules-api") return json({ ok: 1 });
-    if (url.pathname.startsWith("/rr/") || url.pathname.startsWith("/rules-redirect-src")) return json({ unredirected: url.pathname });
+    if (url.pathname.startsWith("/rr/") || url.pathname.startsWith("/deep/") || url.pathname.startsWith("/rules-redirect-src")) return json({ unredirected: url.pathname });
     return false;
 }
 
@@ -125,4 +125,25 @@ export async function checkRulesStrategy(ctx: any, mgr: any, origin: string, che
     check(t("disabling the script removes its rules"), after === "reached", after);
     await page2.close();
     await send({ type: "deleteScript", id: "s_rules" });
+
+    // a regex near the browser's memory limit: a many-group capturing route
+    // fits; a far bigger one is reported per handler, not silently dropped
+    const deep = [
+        `wt.onRequest({ url: ${O} + "/deep{/v:ver}?/users/:id/posts/:post/comments/:c", strategy: "rules" }, (ctx) => ({ redirect: ${O} + "/rules-echo?id=" + ctx.groups.id + "&post=" + ctx.groups.post + "&c=" + ctx.groups.c + "&ver=" + (ctx.groups.ver ?? "") }));`,
+        `wt.onRequest({ url: ${O} + "/huge/:a/:b/:c/:d/:e/:f/:g/:h/:i/:j/:k/:l/:m/:n/:o/:p/:q/:r", strategy: "rules" }, () => ({ block: true }));`,
+    ].join("\n");
+    await send({ type: "saveScript", id: "s_rules_deep", name: "rules deep", code: deep });
+    const page3 = await ctx.newPage();
+    await page3.goto(`${origin}/rules-page`, { waitUntil: "domcontentloaded" });
+    let q: any = {};
+    for (let i = 0; i < 20; i++) {
+        q = await page3.evaluate(async () => (await (await fetch("/deep/v1/users/5/posts/6/comments/7")).json()).query ?? {}).catch(() => ({}));
+        if (q.id) break;
+        await page3.waitForTimeout(250);
+    }
+    await page3.close();
+    check(t("a 4-capture route with an optional group fits the regex memory limit"), q.id === "5" && q.post === "6" && q.c === "7" && q.ver === "1", JSON.stringify(q));
+    const deepErrors = (await send({ type: "listScripts" })).find((s: any) => s.id === "s_rules_deep")?.ruleErrors;
+    check(t("an over-limit route → its handler's error says it's too complex"), deepErrors?.length === 1 && /^onRequest #2: .*too complex/.test(deepErrors[0]), JSON.stringify(deepErrors));
+    await send({ type: "deleteScript", id: "s_rules_deep" });
 }

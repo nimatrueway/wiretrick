@@ -55,12 +55,12 @@ function dnrCall<T = any>(fn: string, ...args: any[]): Promise<T> {
 }
 
 /** why a url pattern's regex can't be a rule (isRegexSupported), or null */
-async function regexProblem(regex: string, pattern: string): Promise<string | null> {
+async function regexProblem(regex: string, pattern: string, requireCapturing: boolean): Promise<string | null> {
     if (typeof dnrApi()?.isRegexSupported !== "function") return null;
     try {
-        const r: any = await dnrCall("isRegexSupported", { regex, isCaseSensitive: true });
+        const r: any = await dnrCall("isRegexSupported", { regex, isCaseSensitive: true, requireCapturing });
         if (!r || r.isSupported) return null;
-        if (r.reason === "memoryLimitExceeded") return `url pattern "${pattern}" is too complex for a rule (the browser's regex memory limit)`;
+        if (r.reason === "memoryLimitExceeded") return `url pattern "${pattern}" is too complex for a rule (the browser's regex memory limit) — use fewer groups or wildcards, e.g. one * for a run of segments`;
         return `url pattern "${pattern}" can't be a rule: the browser's regex engine (RE2) rejects it (${r.reason || "syntaxError"}) — no lookahead, lookbehind or backreferences in custom groups`;
     } catch {
         return null;
@@ -118,8 +118,10 @@ export class RulesStrategy {
             let problem: string | null = null;
             for (const spec of g.specs) {
                 const re = spec.condition.regexFilter as string;
-                if (!regexOk.has(re)) regexOk.set(re, await regexProblem(re, spec.pattern));
-                problem = regexOk.get(re)!;
+                const capturing = typeof spec.action.redirect?.regexSubstitution === "string";
+                const key = `${capturing ? 1 : 0}${re}`;
+                if (!regexOk.has(key)) regexOk.set(key, await regexProblem(re, spec.pattern, capturing));
+                problem = regexOk.get(key)!;
                 if (problem) break;
             }
             if (problem) addError(g.scriptId, ruleErrorLine(g.route, problem));
