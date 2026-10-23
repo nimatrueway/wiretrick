@@ -7,6 +7,7 @@ import type { InterceptionStrategy } from "./strategies/types";
 import type { ChromeBodyStrategy } from "./strategies/chromeBodyStrategy";
 import type { CdpStrategy } from "./strategies/cdpStrategy";
 import type { ProcessStrategy } from "./strategies/processStrategy";
+import type { RulesStrategy } from "./strategies/rulesStrategy";
 import { IS_FIREFOX, onProcessActiveChange, processActive, tierUnavailable } from "./strategies/processState";
 import type { HeaderChanges } from "./strategies/types";
 import type { Script } from "./scriptStore";
@@ -15,7 +16,7 @@ import { serveStore } from "./strategies/webRequestStrategy";
 import { dlog, dlogLevel } from "../../shared/debugLog";
 import { isThenable, toRunnableJs } from "../../shared/compile";
 import "../../shared/transpile";
-import { log, getScriptErrors, getScriptTypeErrors, bodyTappedSince } from "./logs";
+import { log, getScriptErrors, getScriptTypeErrors, getScriptRuleErrors, bodyTappedSince } from "./logs";
 import { missedLine } from "../../shared/netTypes";
 import { makeMissedThrottle, missedReason, missedWhat, routeProblem, MISSED_SKIP_TYPES } from "../../shared/missedTap";
 import { resolveParamValues } from "../../shared/scriptDef";
@@ -72,6 +73,7 @@ export function createPipeline(
     chromeBody: ChromeBodyStrategy,
     cdp: CdpStrategy,
     processStrategy: ProcessStrategy,
+    rulesStrategy: RulesStrategy,
     updateTabBadge?: (tabId: number, url: string | undefined) => Promise<void>,
     noteRequestForBadge?: (tabId: number, url: string) => number,
     /** resolves once startup migrations ran — scripts aren't loaded before */
@@ -505,12 +507,14 @@ export function createPipeline(
                 const analyzed = missing ? await analyzeScripts(scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt })), await loadAllParamValues()) : new Map<string, Analyzed>();
                 const errors = await getScriptErrors();
                 const typeErrors = await getScriptTypeErrors();
+                const ruleErrors = await getScriptRuleErrors();
                 sendResponse(
                     scripts.map((s) => ({
                         ...s,
                         paramDefs: s.paramDefs === undefined ? analyzed.get(s.id)?.paramDefs || {} : s.paramDefs,
                         runtimeError: errors.get(s.id) ?? null,
                         typeErrors: typeErrors.get(s.id) ?? [],
+                        ruleErrors: ruleErrors.get(s.id) ?? [],
                     }))
                 );
             });
@@ -708,6 +712,7 @@ export function createPipeline(
         chromeBody.reload(scripts, paramValues);
         cdp.reload(scripts, paramValues);
         processStrategy.reload(scripts, paramValues);
+        void rulesStrategy.reload(scripts, paramValues);
         refreshBodyWatch(scripts);
         warnRoutes(scripts);
 

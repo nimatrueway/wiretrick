@@ -100,7 +100,7 @@ function mv3Manifest(mv2) {
         options_ui: mv2.options_ui,
         background: { service_worker: "background.js" },
         content_scripts: mv2.content_scripts,
-        permissions: ["storage", "unlimitedStorage", "tabs", "debugger", "offscreen", "webNavigation", "webRequest", "alarms", "proxy", "nativeMessaging", "browsingData"],
+        permissions: ["storage", "unlimitedStorage", "tabs", "debugger", "offscreen", "webNavigation", "webRequest", "alarms", "proxy", "nativeMessaging", "browsingData", "declarativeNetRequestWithHostAccess"],
         host_permissions: ["<all_urls>"],
         optional_permissions: mv2.optional_permissions,
         web_accessible_resources: [{ resources: ["hook.js"], matches: ["<all_urls>"] }],

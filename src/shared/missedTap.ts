@@ -34,6 +34,8 @@ export const MISSED_SKIP_TYPES = new Set(["websocket", "ping", "beacon", "csp_re
 /** The reason to warn with, or null when no warning is due. */
 export function missedReason(c: MissedCase): string | null {
     if (MISSED_SKIP_TYPES.has(c.type)) return null;
+    // the browser applies rules itself; body handlers on rules are errors at load
+    if (c.strategy === "rules") return null;
     // can never run here: routeProblem already warned once at load
     if (strategyUnsupported(c.strategy, c)) return null;
     if (c.strategy === "webRequest" && !c.firefox) return null;

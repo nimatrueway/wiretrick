@@ -11,6 +11,7 @@
  *   compileForStorage                  → sandbox 'compileOne'
  *   analyzeScripts                     → sandbox 'analyze'
  *   runBodyOp                          → sandbox 'run'
+ *   probeRules                         → sandbox 'rules'
  *
  * scriptStore and the pipeline never call compileScript directly; they go
  * through this module.
@@ -21,6 +22,7 @@ import type { ParamDef } from "../shared/scriptDef";
 import { dlogLevel } from "../shared/debugLog";
 import { compileDecision } from "../shared/pac";
 import { getDefaultStrategy } from "../shared/route";
+import type { ScriptRules } from "../shared/rulesProbe";
 
 interface PlainScript {
     id: string;
@@ -320,6 +322,16 @@ export async function runBodyOp(
     const out = await sandboxCallSafe({ op: "run", runOp: op, scripts, paramValues, args: { defaultStrategy: getDefaultStrategy(), ...args } });
     dlogLevel("compile", "debug", `runBodyOp ${op} → ${JSON.stringify(out)?.slice(0, 120)}`);
     return out;
+}
+
+/**
+ * MV3: run every enabled script's `rules` handlers once in the sandbox and
+ * translate them (src/shared/rulesProbe.ts). null on failure.
+ */
+export async function probeRules(scripts: PlainScript[], paramValues: Record<string, any>): Promise<Record<string, ScriptRules> | null> {
+    await ensureOffscreen();
+    const out = await sandboxCallSafe({ op: "rules", scripts, paramValues, defaultStrategy: getDefaultStrategy() });
+    return out?.results ?? null;
 }
 
 let pacCache: { source: string; fn: (url: string, host: string) => string } | null = null;

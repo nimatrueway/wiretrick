@@ -49,7 +49,7 @@ describe("settings.yaml completion", () => {
     it("global keys and values", () => {
         expect(labels(`settings:\n  |`)).toEqual(["logLevel", "logCap", "defaultStrategy"]);
         expect(labels(`settings:\n  logCap: 500\n  |`)).toEqual(["logLevel", "defaultStrategy"]);
-        expect(labels(`settings:\n  defaultStrategy: |`)).toEqual(["helper", "page", "webRequest", "debugger"]);
+        expect(labels(`settings:\n  defaultStrategy: |`)).toEqual(["helper", "page", "webRequest", "debugger", "rules"]);
         expect(labels(`settings:\n  logLevel: |`)).toEqual(["debug", "info", "warn", "error"]);
         expect(labels(`settings:\n  logLevel: in|`)).toEqual(["debug", "info", "warn", "error"]);
     });

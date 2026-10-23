@@ -5,6 +5,7 @@ import { WebRequestStrategy } from "./engine/strategies/webRequestStrategy";
 import { ChromeBodyStrategy } from "./engine/strategies/chromeBodyStrategy";
 import { CdpStrategy } from "./engine/strategies/cdpStrategy";
 import { ProcessStrategy } from "./engine/strategies/processStrategy";
+import { RulesStrategy } from "./engine/strategies/rulesStrategy";
 import { createPipeline } from "./engine/pipeline";
 import { runMigrations } from "./migration";
 import { addUiPort, clearTab, clearLogHistory, log, broadcastEntry, broadcastToUi, clearScriptErrors, setScriptTypeErrors } from "./engine/logs";
@@ -38,7 +39,7 @@ processStrategy.onStatus = (status) => broadcastToUi({ type: "processStatus", st
 // pipeline waits for it before loading scripts (listeners register now)
 const migrated = runMigrations().catch((e) => dlogLevel("bg", "error", `migration failed: ${e?.message || e}`));
 
-createPipeline(webRequestStrategy, chromeBody, cdp, processStrategy, updateTabBadge, noteRequestForBadge, migrated);
+createPipeline(webRequestStrategy, chromeBody, cdp, processStrategy, new RulesStrategy(), updateTabBadge, noteRequestForBadge, migrated);
 
 // ---- local helper controls for the Editor ----
 chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {

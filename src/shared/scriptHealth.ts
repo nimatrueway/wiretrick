@@ -4,12 +4,15 @@ export interface ScriptHealthInput {
     runtimeError?: { message: string; at: number; count: number } | null;
     /** TypeScript errors in the saved code ("line N: message") */
     typeErrors?: string[];
+    /** `rules` handlers that couldn't become rules ("onRequest #2: reason") */
+    ruleErrors?: string[];
 }
 
 export interface ScriptHealth {
     /** "compile": the script failed to load; "runtime": a hook threw/failed;
+     * "rules": some handlers couldn't become `rules` (they don't run; the rest do);
      * "types": TypeScript errors (the script still runs — types are stripped) */
-    kind: "compile" | "runtime" | "types";
+    kind: "compile" | "rules" | "runtime" | "types";
     tooltip: string;
 }
 
@@ -23,6 +26,8 @@ function userFrames(msg: string): string {
 
 export function scriptHealth(s: ScriptHealthInput): ScriptHealth | null {
     if (s.error) return { kind: "compile", tooltip: `Compile error — the script is not running:\n${userFrames(s.error)}` };
+    const rules = s.ruleErrors || [];
+    if (rules.length) return { kind: "rules", tooltip: `Rules error — ${rules.length > 1 ? "these handlers don't" : "this handler doesn't"} run (the script's other handlers do):\n${rules.join("\n")}\n\nFix the script and save it.` };
     const r = s.runtimeError;
     if (!r) {
         const t = s.typeErrors || [];

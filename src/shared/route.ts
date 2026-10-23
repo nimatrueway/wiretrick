@@ -10,8 +10,8 @@
  */
 import { matchAny, matchGroups, matchPatternError } from "./matcher";
 
-export type Strategy = "page" | "webRequest" | "debugger" | "helper";
-export const STRATEGIES: Strategy[] = ["helper", "page", "webRequest", "debugger"];
+export type Strategy = "page" | "webRequest" | "debugger" | "helper" | "rules";
+export const STRATEGIES: Strategy[] = ["helper", "page", "webRequest", "debugger", "rules"];
 
 export type NetKind = "onRequest" | "onResponseHeaders" | "replaceResponse" | "onResponseBody";
 export type RouteKind = NetKind | "onDom";

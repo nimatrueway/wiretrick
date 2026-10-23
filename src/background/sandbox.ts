@@ -18,6 +18,8 @@
  *             against the given stored scripts (saveScript metadata);
  *             leaves the analyze/run cache alone
  *   pac     — evaluate the user's proxy decision (process tier upstream)
+ *   rules   — run each `rules`-strategy handler once with a tripwire ctx
+ *             and translate it to declarativeNetRequest rule specs
  *   run     — execute the body ops (requestDecision / transform / replace /
  *             responseHeaders) with the same semantics as ChromeBodyStrategy's
  *             MV2 in-SW execution, mirroring its log lines
@@ -30,6 +32,8 @@ import { runOp, type BodyOp, type OpScript } from "../shared/bodyOps";
 import { compileDecision } from "../shared/pac";
 import "../shared/transpile";
 import { scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
+import { probeScriptRules, type ScriptRules } from "../shared/rulesProbe";
+import type { Strategy } from "../shared/route";
 
 /**
  * Environment parity with the MV2 background page: sandboxed pages get NO
@@ -252,6 +256,20 @@ function run(scripts: PlainScript[], paramValues: Record<string, any>, op: BodyO
     return runOp(list, op, args, { log, debug: (m) => sandboxLog(m, "debug") });
 }
 
+// ---- rules strategy: run each rules handler once (src/shared/rulesProbe.ts) ----
+
+async function rules(scripts: PlainScript[], paramValues: Record<string, any>, defaultStrategy: Strategy): Promise<{ results: Record<string, ScriptRules> }> {
+    ensureCompiled(scripts, paramValues ?? {});
+    const results: Record<string, ScriptRules> = {};
+    for (const [id, c] of cache) {
+        const s = scripts.find((x) => x.id === id);
+        if (!s || !s.enabled || !c.result.meta.active || c.compiled.error) continue;
+        const r = await probeScriptRules(c.compiled.handlers, defaultStrategy);
+        if (r.rules.length || r.errors.length) results[id] = r;
+    }
+    return { results };
+}
+
 // ---- proxy decisions (process tier: evaluate the user's PAC/rules) ----
 
 let pacCache: { source: string; fn: (url: string, host: string) => string } | null = null;
@@ -281,6 +299,7 @@ window.addEventListener("message", async (event) => {
         else if (op === "analyze") result = analyze(scripts, paramValues);
         else if (op === "compileOne") result = compileOne(data.payload.target, scripts, paramValues);
         else if (op === "run") result = await run(scripts, paramValues, bodyOp, args);
+        else if (op === "rules") result = await rules(scripts, paramValues, data.payload.defaultStrategy);
         else if (op === "pac") result = { result: pacDecision(data.payload.source)(args.url, args.host) };
         else result = { error: `unknown op ${op}` };
         post({ kind: "sandboxResult", reqId: data.reqId, result });

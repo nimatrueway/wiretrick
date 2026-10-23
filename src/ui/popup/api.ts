@@ -8,6 +8,7 @@ export interface ScriptInfo {
     error: string | null;
     runtimeError?: ScriptHealthInput["runtimeError"];
     typeErrors?: string[];
+    ruleErrors?: string[];
     meta: { name: string; active?: boolean; description?: string };
     paramDefs?: Record<string, any>;
 }

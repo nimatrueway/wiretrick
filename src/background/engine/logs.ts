@@ -71,7 +71,7 @@ export function log(tabId: number, message: string, level: LogEntry["level"] = "
         port.postMessage({ type: "log", entry });
     }
     if (scriptId) annotateFromLog(tabId, scriptId, message, level, netKind, url);
-    if (scriptId && level === "error" && !/^\[[^\]]*\] (console\.error|type error)/.test(message)) recordScriptError(scriptId, message);
+    if (scriptId && level === "error" && !/^\[[^\]]*\] (console\.error|type error|rules error)/.test(message)) recordScriptError(scriptId, message);
     if (level === "error") {
         console.error("[Wiretrick]", message);
     }
@@ -91,7 +91,7 @@ const BODY_TAP = /\b(onResponseBody|replaceResponse)\b|onRequest → (respond|bl
 
 function noteTap(scriptId: string, level: LogEntry["level"], message: string): void {
     const now = Date.now();
-    if (level === "error" && !/^\[[^\]]*\] (console\.error|type error)/.test(message)) lastScriptError.set(scriptId, now);
+    if (level === "error" && !/^\[[^\]]*\] (console\.error|type error|rules error)/.test(message)) lastScriptError.set(scriptId, now);
     if (!BODY_TAP.test(message)) return;
     const m = URL_AT_END.exec(message);
     if (!m) return;
@@ -158,9 +158,12 @@ export interface ScriptRuntimeError {
 
 const ERR_KEY = "wtScriptErrors";
 const TYPE_KEY = "wtScriptTypeErrors";
+const RULE_KEY = "wtScriptRuleErrors";
 const runtimeErrors = new Map<string, ScriptRuntimeError>();
 /** TypeScript diagnostics of the SAVED code, reported by the manager's editor */
 const typeErrors = new Map<string, string[]>();
+/** `rules` handlers that couldn't become rules: "onRequest #2: reason" */
+const ruleErrors = new Map<string, string[]>();
 let errorsLoaded: Promise<void> | null = null;
 let errorsTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -177,13 +180,16 @@ function loadErrors(): Promise<void> {
     if (!errorsLoaded) {
         const area = sessionArea();
         errorsLoaded = area
-            ? area.get([ERR_KEY, TYPE_KEY]).then(
+            ? area.get([ERR_KEY, TYPE_KEY, RULE_KEY]).then(
                   (d) => {
                       for (const [k, v] of Object.entries((d?.[ERR_KEY] || {}) as Record<string, ScriptRuntimeError>)) {
                           if (!runtimeErrors.has(k)) runtimeErrors.set(k, v);
                       }
                       for (const [k, v] of Object.entries((d?.[TYPE_KEY] || {}) as Record<string, string[]>)) {
                           if (!typeErrors.has(k)) typeErrors.set(k, v);
+                      }
+                      for (const [k, v] of Object.entries((d?.[RULE_KEY] || {}) as Record<string, string[]>)) {
+                          if (!ruleErrors.has(k)) ruleErrors.set(k, v);
                       }
                   },
                   () => {}
@@ -197,8 +203,8 @@ function errorsChanged(): void {
     if (errorsTimer) return;
     errorsTimer = setTimeout(() => {
         errorsTimer = null;
-        void sessionArea()?.set({ [ERR_KEY]: Object.fromEntries(runtimeErrors), [TYPE_KEY]: Object.fromEntries(typeErrors) }).catch(() => {});
-        broadcastToUi({ type: "scriptErrors", errors: Object.fromEntries(runtimeErrors), typeErrors: Object.fromEntries(typeErrors) });
+        void sessionArea()?.set({ [ERR_KEY]: Object.fromEntries(runtimeErrors), [TYPE_KEY]: Object.fromEntries(typeErrors), [RULE_KEY]: Object.fromEntries(ruleErrors) }).catch(() => {});
+        broadcastToUi({ type: "scriptErrors", errors: Object.fromEntries(runtimeErrors), typeErrors: Object.fromEntries(typeErrors), ruleErrors: Object.fromEntries(ruleErrors) });
     }, 150);
 }
 
@@ -250,4 +256,34 @@ export async function setScriptTypeErrors(scriptId: string, name: string, errors
 export async function clearScriptTypeErrors(scriptId: string): Promise<void> {
     await loadErrors();
     if (typeErrors.delete(scriptId)) errorsChanged();
+}
+
+export async function getScriptRuleErrors(): Promise<Map<string, string[]>> {
+    await loadErrors();
+    return ruleErrors;
+}
+
+/**
+ * Replace every script's `rules` errors (scriptId → "onRequest #2: reason").
+ * Newly appearing errors are logged once at ERROR, attributed to the script.
+ */
+export async function setScriptRuleErrors(next: Map<string, string[]>, names: Map<string, string>): Promise<void> {
+    await loadErrors();
+    let changed = false;
+    for (const id of [...ruleErrors.keys()]) {
+        if (!next.has(id)) {
+            ruleErrors.delete(id);
+            changed = true;
+        }
+    }
+    for (const [id, errs] of next) {
+        const prev = ruleErrors.get(id) || [];
+        if (JSON.stringify(prev) === JSON.stringify(errs)) continue;
+        const seen = new Set(prev);
+        for (const e of errs) if (!seen.has(e)) log(-1, `[${names.get(id) ?? id}] rules error: ${e} — this handler doesn't run`, "error", id);
+        if (errs.length) ruleErrors.set(id, errs);
+        else ruleErrors.delete(id);
+        changed = true;
+    }
+    if (changed) errorsChanged();
 }

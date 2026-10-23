@@ -49,6 +49,7 @@
         "proxy",
         "nativeMessaging",
         "browsingData",
+        "declarativeNetRequestWithHostAccess",
         "<all_urls>"
     ],
     "optional_permissions": ["management"],

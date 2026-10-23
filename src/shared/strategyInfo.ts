@@ -34,10 +34,21 @@ export const STRATEGY_INFO: Record<Strategy, StrategyInfo> = {
         pros: "Sees everything with nothing to install.",
         cons: "Chromium only. Chrome shows a \"being debugged\" banner while attached. May miss the first navigation in a fresh tab.",
     },
+    rules: {
+        label: "rules — browser-native rules",
+        pros: "No banner, no setup, nothing runs per request: the browser itself applies the rules to every request, the first navigation included. Works in Chrome (MV3 and MV2) and Firefox.",
+        cons: "Fixed results only: block, redirect (captures inserted as-is), set/remove request or response headers. No respond, replaceResponse or onResponseBody, no exclude. The handler runs once when scripts load and can't read the request (method, headers…).",
+    },
 };
 
+function hasDnr(): boolean {
+    const g = globalThis as any;
+    return !!(g.chrome?.declarativeNetRequest || g.browser?.declarativeNetRequest);
+}
+
 /** why a strategy can't run in this build/browser, or null when it can */
-export function strategyUnsupported(s: Strategy, env: { firefox: boolean; mv3: boolean }): string | null {
+export function strategyUnsupported(s: Strategy, env: { firefox: boolean; mv3: boolean; dnr?: boolean }): string | null {
+    if (s === "rules") return (env.dnr ?? hasDnr()) ? null : "not available in this browser (no declarativeNetRequest)";
     if (env.firefox && (s === "helper" || s === "debugger")) return "not available in Firefox";
     if (!env.firefox && env.mv3 && s === "webRequest") return "not available in Chrome MV3 (blocking webRequest was removed)";
     return null;

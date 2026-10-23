@@ -63,10 +63,19 @@ declare namespace Wiretrick {
      *   `"helper"` or `"debugger"` to rewrite or replace the page in place.
      * - `"debugger"` — the Chrome debugger. Sees everything; Chrome shows a
      *   "started debugging this browser" banner while attached. Chromium only.
+     * - `"rules"` — browser-native rules (declarativeNetRequest): the browser
+     *   itself blocks, redirects or sets/removes request and response
+     *   headers, on every request; no banner, no helper. The handler runs
+     *   **once** when scripts load and must return the same result for every
+     *   request: it may use `ctx.groups.*` and `ctx.url` only as-is inside a
+     *   redirect URL, and may not read anything else from `ctx`. No
+     *   `respond`, `replaceResponse`, `onResponseBody` or `exclude`. A handler
+     *   that can't become a rule doesn't run, and its script shows an error.
+     *   Chrome (MV3 and MV2) and Firefox.
      *
      * @see https://github.com/nimatrueway/wiretrick/blob/main/docs/strategies.md#compatibility
      */
-    type Strategy = "helper" | "page" | "webRequest" | "debugger";
+    type Strategy = "helper" | "page" | "webRequest" | "debugger" | "rules";
 
     /** webRequest resource type names (also `ctx.resourceType`). */
     type ResourceType =
@@ -141,6 +150,7 @@ declare namespace Wiretrick {
          * A single value — there is no fallback. See {@link Strategy}.
          *
          * @example { url: "*://example.com/app/*.js", resourceTypes: ["script"], strategy: "debugger" }
+         * @example { url: "*://ads.example.com/*", strategy: wt.isMV3 ? "rules" : "webRequest" }
          */
         strategy?: Strategy;
     }

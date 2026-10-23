@@ -34,7 +34,7 @@ import type { NetPortMsg } from "../shared/netTypes";
 import { aboutRows, aboutText, checkLatestRelease, collectDiagnostics, describeLatest, diagnosticsFileName, downloadText, RELEASES_URL, type HelperStatus } from "./about";
 
 // ---- state ----
-let scripts: (Script & { runtimeError?: ScriptHealthInput["runtimeError"]; typeErrors?: string[] })[] = [];
+let scripts: (Script & { runtimeError?: ScriptHealthInput["runtimeError"]; typeErrors?: string[]; ruleErrors?: string[] })[] = [];
 let selectedId: string | null = null;
 let editor: any = null;
 let dirty = false;
@@ -1031,6 +1031,7 @@ function connectLogs(): void {
             for (const s of scripts) {
                 s.runtimeError = msg.errors[s.id] ?? null;
                 s.typeErrors = msg.typeErrors?.[s.id] ?? [];
+                s.ruleErrors = msg.ruleErrors?.[s.id] ?? [];
             }
             renderList();
         }

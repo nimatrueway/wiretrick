@@ -35,16 +35,17 @@ wt.onRequest({
     exclude: ["*://app.example.com/health"],  // skip these even when url matches
     methods: ["POST", "PUT"],                 // HTTP methods, case-insensitive; omit = any
     resourceTypes: ["xmlhttprequest"],        // resource types (ctx.resourceType); omit = any
-    strategy: "page",                         // one of helper | page | webRequest | debugger
+    strategy: "page",                         // one of helper | page | webRequest | debugger | rules
 }, (ctx) => { … });
 
-exclude and methods are cheap: an extra check on requests that already matched url, on every strategy (the local helper checks them itself too).
+exclude and methods are cheap: an extra check on requests that already matched url, on every strategy (the local helper checks them itself too). The rules strategy doesn't support exclude.
 
 resourceTypes — webRequest names: main_frame, sub_frame, stylesheet, script, image, font, object, xmlhttprequest (fetch/XHR), ping, csp_report, media, websocket, other. What it saves depends on the strategy:
 - debugger — only these types are paused at all (cheapest way to keep a route off images, fonts…)
 - webRequest — checked in the listener before any script runs
 - helper — checked after the helper pauses the request: correct, but saves no work
 - page — only sees page fetch/XHR ("xmlhttprequest"); a list without it means the handler never runs (the Log view warns)
+- rules — part of the rule: the browser checks it
 
 strategy — a single value overriding the default from Settings → Strategy. No fallback: when it isn't available here, the handler doesn't run and the Log view says why.`,
     },
@@ -227,12 +228,14 @@ helper — Chrome: a tiny local helper (wiretrick-helper) proxies ONLY matched h
 page — page-level fetch/XHR override. No banner, no setup, every browser. Misses <script src>, <img>, documents, and requests made before the page patch loads; no onResponseHeaders.
 webRequest — blocking webRequest: Firefox (reaches everything, bodies included), and Chromium browsers that still run MV2 extensions (ungoogled-chromium, Brave, Opera…) — redirect, block, headers and synchronous respond/replaceResponse there, served by redirect; no onResponseBody or async handlers. Not available in MV3.
 debugger — chrome.debugger + Fetch domain. Sees everything, but Chrome shows a "debugging" banner while attached.
+rules — browser-native rules (declarativeNetRequest): the browser blocks, redirects or sets/removes headers itself, on every request, with no banner or helper. The handler runs once when scripts load and must return a fixed result — ctx.groups.* / ctx.url only as-is in a redirect URL; no respond, replaceResponse, onResponseBody or exclude. A handler that can't be a rule doesn't run and its script shows an error.
 
 wt.onRequest({ url: "*://example.com/*", strategy: "debugger" }, fn);   // this handler only
 
 Pick per browser/build with wt.isChrome / wt.isFirefox / wt.isMV2 / wt.isMV3:
 
 wt.onResponseBody({ url: "*://example.com/app.js", strategy: wt.isFirefox ? "webRequest" : "helper" }, fn);
+wt.onRequest({ url: "*://ads.example.com/*", strategy: wt.isMV3 ? "rules" : "webRequest" }, () => ({ block: true }));
 
 No fallback: when the strategy isn't available (helper not running, wrong browser, a kind it can't do), the handler doesn't run and the Log view warns. Hover "strategy" in the Code view or see Settings → Strategy for pros/cons.
 

@@ -26,6 +26,7 @@ import zlib from "node:zlib";
 import { chromium } from "playwright-core";
 import { resolveBrowser } from "./browserSetup";
 import { checkApiTypingsNav } from "./apiTypingsNav";
+import { checkRulesStrategy, rulesServerRoute } from "./rulesE2e";
 
 const EXT_ROOT = path.join(new URL("..", import.meta.url).pathname, "dist-mv3");
 // unpacked extension id = sha256 of the absolute path (hex digits → a-p)
@@ -34,6 +35,7 @@ const EXT_ID = crypto.createHash("sha256").update(EXT_ROOT, "utf8").digest("hex"
 const PORT = 8909;
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const server = http.createServer((req: http.IncomingMessage, res: http.ServerResponse) => {
+    if (rulesServerRoute(req, res, ORIGIN)) return;
     if (req.url?.startsWith("/data")) {
         res.writeHead(200, { "content-type": "application/json" });
         return res.end(JSON.stringify({ value: "ORIGINAL" }));
@@ -101,7 +103,7 @@ const proc = spawn(await resolveBrowser(), [
     "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check", "about:blank",
 ], { stdio: "ignore" });
 await new Promise((r) => setTimeout(r, 5000));
-setTimeout(() => { console.log("FAIL  global watchdog timeout"); process.exit(1); }, 120000);
+setTimeout(() => { console.log("FAIL  global watchdog timeout"); process.exit(1); }, 180000);
 
 let failed = 0;
 const check = (name: string, ok: boolean, extra = ""): void => {
@@ -300,6 +302,15 @@ try {
         popupHtml.hints.includes("Receives the same") && codeBlocks(popupHtml.hints) >= 1 && !popupHtml.hints.includes("@param"), popupHtml.hints.slice(0, 200));
 
     await checkApiTypingsNav(mgr, check, "-mv3");
+
+    // the rules strategy — with the other scripts off (their page hook would wrap the probe's fetches)
+    {
+        const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
+        const on: string[] = (await send({ type: "listScripts" })).filter((s: any) => s.enabled).map((s: any) => s.id);
+        for (const id of on) await send({ type: "setEnabled", id, enabled: false });
+        await checkRulesStrategy(ctx, mgr, ORIGIN, check, " (MV3)");
+        for (const id of on) await send({ type: "setEnabled", id, enabled: true });
+    }
 
     // ---- regression (the user's "onRequest doesn't work in MV3"): a
     // param-gated onRequest must see the REAL stored param values (the
