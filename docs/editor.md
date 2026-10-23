@@ -117,7 +117,9 @@ at the right of the toolbar do the same.
   reporting issues.
 - **Network view** — a devtools-style request table: filter text, per-type
   toggles, a tab picker (closed tabs stay listed, dimmed under *Closed tabs*,
-  until the log is cleared), a script-activity filter,
+  until the log is cleared), a script-activity filter, a script picker
+  (only requests one script ran on — the *Wiretrick* column; the activity
+  filter then judges that script alone),
   sortable/resizable columns (right-click the header to pick columns) and a
   waterfall. Requests a script handled are flagged with their outcome:
   - **Observed** — a handler (`onRequest`, `onResponseHeaders`, `onResponseBody`,

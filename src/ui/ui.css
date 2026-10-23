@@ -885,15 +885,16 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 }
 .net-toolbar button:hover, .net-details-tabs button:hover { color: var(--fg); background: var(--bg-hover); }
 .net-clear { font-size: 13px !important; }
-.net-filter, .net-tab, .net-toolbar .net-touch-button {
+.net-filter, .net-tab, .net-script, .net-toolbar .net-touch-button {
     background: var(--bg); border: 1px solid var(--border); color: var(--fg);
     border-radius: 3px; padding: 2px 6px; font-size: 11px;
 }
 .net-filter { width: 180px; }
-.net-tab { max-width: 180px; }
+.net-tab, .net-script { max-width: 180px; }
+.net-script.active { border-color: var(--accent); }
 .net-tab.closed, .net-tab option.closed { color: var(--fg-dim); font-style: italic; }
 .net-tab option:not(.closed) { color: var(--fg); font-style: normal; }
-.net-filter:focus, .net-tab:focus, .net-toolbar .net-touch-button:focus-visible { border-color: var(--accent); outline: none; }
+.net-filter:focus, .net-tab:focus, .net-script:focus, .net-toolbar .net-touch-button:focus-visible { border-color: var(--accent); outline: none; }
 /* script-activity filter: a listbox whose items carry the row markers */
 .net-touch { position: relative; display: inline-flex; }
 .net-toolbar .net-touch-button { display: inline-flex; align-items: center; gap: 5px; padding: 2px 6px; }

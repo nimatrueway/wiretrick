@@ -441,6 +441,14 @@ try {
     const inTab: string[] = await mgr.evaluate(() => [...document.querySelectorAll("#network-view tbody .net-name")].map((n) => n.textContent || ""));
     check("Network tab filter keeps the tab's intercepted requests", inTab.some((n) => n.startsWith("gz.js")) && inTab.some((n) => n.startsWith("page-xo")), JSON.stringify(inTab));
     await mgr.selectOption("#network-view .net-tab", "");
+    // script filter: only rows the picked script ran on (the Wiretrick column)
+    const scriptOpts: string[] = await mgr.evaluate(() => [...document.querySelectorAll("#network-view .net-script option")].map((o) => (o as HTMLOptionElement).value).filter(Boolean));
+    const pick = scriptOpts[0] ?? "";
+    await mgr.selectOption("#network-view .net-script", pick);
+    await mgr.waitForTimeout(300);
+    const byScript: string[][] = await mgr.evaluate(() => [...document.querySelectorAll("#network-view tbody tr")].filter((t) => t.querySelector(".net-name")).map((t) => [...t.querySelectorAll(".c-script .net-badge")].map((b) => b.textContent || "")));
+    check("Network script filter keeps only the picked script's requests", !!pick && byScript.length > 0 && byScript.every((names) => names.includes(pick)), JSON.stringify({ scriptOpts, byScript }));
+    await mgr.selectOption("#network-view .net-script", "");
     await mgr.click("#log-header-title");
     // Network panel count: recorded observed/modified requests, until cleared
     // fresh (cache-busted) script tags: gz.js → modified (Cdp transform), auto.js → observed (Watcher)

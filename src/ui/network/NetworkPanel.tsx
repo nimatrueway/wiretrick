@@ -79,7 +79,7 @@ function dragX(down: MouseEvent, onMove: (dx: number) => void, cursor: string): 
 }
 
 export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: () => Promise<TabInfo[]> }) {
-    const [filter, setFilter] = useState<NetFilter>({ text: "", types: ALL_TYPES, touched: "any", tabId: null });
+    const [filter, setFilter] = useState<NetFilter>({ text: "", types: ALL_TYPES, touched: "any", tabId: null, script: null });
     const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "start", dir: 1 });
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [tabs, setTabs] = useState<TabInfo[]>([]);
@@ -234,6 +234,12 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
         }
         return [...out].map(([id, title]) => ({ id, title }));
     }, [all, tabs, filter.tabId]);
+    const scripts = useMemo(() => {
+        const out = new Set<string>();
+        for (const e of all) for (const i of e.outcomes) out.add(i.scriptName);
+        if (filter.script !== null) out.add(filter.script);
+        return [...out].sort((a, b) => a.localeCompare(b));
+    }, [all, filter.script]);
     const selectedClosed = filter.tabId !== null && closedTabs.some((t) => t.id === filter.tabId);
     const short = (s: string) => (s.length > 40 ? s.slice(0, 40) + "…" : s);
 
@@ -254,6 +260,20 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
                     onInput={(e) => setFilter({ ...filter, text: e.currentTarget.value })}
                 />
                 <TouchMenu value={filter.touched} onChange={(touched) => setFilter({ ...filter, touched })} />
+                <select
+                    class={"net-script" + (filter.script !== null ? " active" : "")}
+                    title="Show requests one script ran on (the Wiretrick column)"
+                    aria-label="Script"
+                    value={filter.script ?? ""}
+                    onChange={(e) => setFilter({ ...filter, script: e.currentTarget.value === "" ? null : e.currentTarget.value })}
+                >
+                    <option value="">All scripts</option>
+                    {scripts.map((n) => (
+                        <option key={n} value={n}>
+                            {short(n)}
+                        </option>
+                    ))}
+                </select>
                 {listTabs && (
                     <select
                         class={"net-tab" + (selectedClosed ? " closed" : "")}

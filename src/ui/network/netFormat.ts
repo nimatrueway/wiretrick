@@ -134,10 +134,17 @@ export interface NetFilter {
     types: TypeCategory[];
     touched: TouchFilter;
     tabId: number | null;
+    /** only rows this script (by name) ran on; the activity filter then judges that script alone */
+    script: string | null;
 }
 
 export function matches(e: NetEntry, f: NetFilter): boolean {
     if (!f.types.includes(category(e))) return false;
+    if (f.script !== null) {
+        const mine = e.outcomes.filter((i) => i.scriptName === f.script);
+        if (!mine.length) return false;
+        e = { ...e, outcomes: mine };
+    }
     if (f.touched !== "all") {
         const t = touchState(e);
         if (t === "none" || (f.touched !== "any" && t !== f.touched)) return false;
