@@ -8,7 +8,9 @@
  * While an anchor is hovered its `title` is parked in `data-wt-title` (that
  * suppresses the native tooltip) and put back when the pointer leaves, so
  * code reading `title` afterwards sees the usual value. Title changes made
- * while it's parked (`el.title = …`) are picked up and shown live.
+ * while it's parked (`el.title = …`) are picked up and shown live. Titled
+ * ancestors are parked too: otherwise the browser falls back to theirs and
+ * shows a native tooltip (e.g. the panel header's) on top of ours.
  */
 import { copyWithToast } from "./toast";
 
@@ -33,6 +35,8 @@ export function installTooltips(): void {
     tip.hidden = true;
 
     let anchor: HTMLElement | null = null;
+    /** titled ancestors of the anchor, their titles removed while it's tracked */
+    let ancestors: [HTMLElement, string][] = [];
     let text = "";
     let visible = false;
     let dismissed: HTMLElement | null = null; // clicked/escaped: no tooltip until the pointer leaves it
@@ -74,6 +78,8 @@ export function installTooltips(): void {
             anchor.removeAttribute(PARKED);
             if (!anchor.hasAttribute("title")) anchor.setAttribute("title", text);
         }
+        for (const [el, t] of ancestors) if (!el.hasAttribute("title")) el.setAttribute("title", t);
+        ancestors = [];
         anchor = null;
     }
 
@@ -83,6 +89,12 @@ export function installTooltips(): void {
         text = el.getAttribute("title") || "";
         el.removeAttribute("title");
         el.setAttribute(PARKED, text);
+        for (let p = el.parentElement; p; p = p.parentElement) {
+            const t = p.getAttribute("title");
+            if (t === null) continue;
+            ancestors.push([p, t]);
+            p.removeAttribute("title");
+        }
         observer.observe(el, { attributes: true, attributeFilter: ["title"] });
         // the anchor going away or hidden (re-render, dialog closed) takes the tooltip with it
         watch = setInterval(() => {
