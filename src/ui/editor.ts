@@ -966,7 +966,9 @@ async function saveCurrentNow(): Promise<void> {
         }
         result = await send({ type: "saveScript", id, code, name });
     }
-    if (result && result.error) {
+    // a saved script comes back with an id; its `error` is a compile error
+    // (shown on the script), not a failed save — the code is stored either way
+    if (result && result.error && !result.id) {
         status(`save failed: ${result.error}`, "error");
     } else {
         status("");

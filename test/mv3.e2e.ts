@@ -570,6 +570,22 @@ try {
     }));
     if (quick.dialog) await mgr.keyboard.press("Escape");
     check("two quick saves don't raise a conflict", !quick.dialog && quick.stored === quick.text && quick.text.includes("// b"), JSON.stringify(quick));
+    // saving code with a compile error still stores it: fixing it and saving again isn't a conflict
+    await mgr.evaluate(() => (window as any).monaco.editor.getEditors()[0].trigger("t", "type", { text: "const = ;\n" }));
+    await mgr.locator("#btn-save").click();
+    await mgr.waitForTimeout(1000);
+    await mgr.evaluate(() => {
+        const m = (window as any).monaco.editor.getEditors()[0].getModel();
+        m.setValue(m.getValue().replace("const = ;\n", "// fixed\n"));
+    });
+    await mgr.locator("#btn-save").click();
+    await mgr.waitForTimeout(1000);
+    const fixed = await mgr.evaluate(async () => ({
+        dialog: !!document.querySelector("#conflict-dialog"),
+        stored: ((await new Promise((r) => chrome.runtime.sendMessage({ type: "listScripts" }, r))) as any[]).find((s) => s.id === "s_conf")?.code,
+    }));
+    if (fixed.dialog) await mgr.keyboard.press("Escape");
+    check("fixing a compile error and saving again doesn't raise a conflict", !fixed.dialog && fixed.stored?.includes("// fixed"), JSON.stringify(fixed));
     await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "deleteScript", id: "s_conf" }, r)));
     for (const id of ["s_throws", "s_broken", "s_typed", "s_typed2"]) await mgr.evaluate((id: string) => new Promise((r) => chrome.runtime.sendMessage({ type: "deleteScript", id }, r)), id);
     // a reload in the already-attached tab (no first-navigation race)
