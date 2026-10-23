@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { AS_IS, URL_TOKEN, captureToken, patternGroups, patternToRegex, rulesForProbe, substitute, type RuleProbe } from "../src/shared/dnrRules";
+import { AS_IS, URL_TOKEN, captureToken, patternGroups, patternToRegex, regexCost, rulesForProbe, substitute, type RuleProbe } from "../src/shared/dnrRules";
 import { matchAny, matchGroups } from "../src/shared/matcher";
 import { normalizeRoute, type NetKind } from "../src/shared/route";
 
@@ -197,5 +197,12 @@ describe("rulesForProbe", () => {
         expect(err(probe("onRequest", { url: "*://e.com/*", methods: ["PROPFIND"] }, { block: true }))).toContain('"PROPFIND"');
         const ten = Array.from({ length: 10 }, (_, i) => `n${i}`);
         expect(err(probe("onRequest", `https://e.com/${ten.map((n) => `:${n}`).join("/")}`, { redirect: `https://x.com/${ten.map(captureToken).join("/")}` }, { captures: ten }))).toContain("at most 9");
+    });
+});
+
+describe("regexCost", () => {
+    it("counts character classes (incl. `.`), groups and captures, skipping escapes and class contents", () => {
+        expect(regexCost(String.raw`^https://a\.com/([^/?]+)(?:/(.*))?\.[(.]x`)).toEqual({ classes: 3, groups: 3, captures: 2 });
+        expect(regexCost(String.raw`^a\(b\[c\]`)).toEqual({ classes: 0, groups: 0, captures: 0 });
     });
 });

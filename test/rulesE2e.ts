@@ -131,6 +131,7 @@ export async function checkRulesStrategy(ctx: any, mgr: any, origin: string, che
     const deep = [
         `wt.onRequest({ url: ${O} + "/deep{/v:ver}?/users/:id/posts/:post/comments/:c", strategy: "rules" }, (ctx) => ({ redirect: ${O} + "/rules-echo?id=" + ctx.groups.id + "&post=" + ctx.groups.post + "&c=" + ctx.groups.c + "&ver=" + (ctx.groups.ver ?? "") }));`,
         `wt.onRequest({ url: ${O} + "/huge/:a/:b/:c/:d/:e/:f/:g/:h/:i/:j/:k/:l/:m/:n/:o/:p/:q/:r", strategy: "rules" }, () => ({ block: true }));`,
+        `wt.onRequest({ url: ${O} + "/cap/:a/:b/:c/:d/:e/:f/:g/:h/:i/:j/:k", strategy: "rules" }, (ctx) => ({ redirect: ${O} + "/rules-echo?v=" + ctx.groups.a + ctx.groups.b + ctx.groups.c + ctx.groups.d + ctx.groups.e + ctx.groups.f + ctx.groups.g + ctx.groups.h + ctx.groups.i }));`,
     ].join("\n");
     await send({ type: "saveScript", id: "s_rules_deep", name: "rules deep", code: deep });
     const page3 = await ctx.newPage();
@@ -144,6 +145,7 @@ export async function checkRulesStrategy(ctx: any, mgr: any, origin: string, che
     await page3.close();
     check(t("a 4-capture route with an optional group fits the regex memory limit"), q.id === "5" && q.post === "6" && q.c === "7" && q.ver === "1", JSON.stringify(q));
     const deepErrors = (await send({ type: "listScripts" })).find((s: any) => s.id === "s_rules_deep")?.ruleErrors;
-    check(t("an over-limit route → its handler's error says it's too complex"), deepErrors?.length === 1 && /^onRequest #2: .*too complex/.test(deepErrors[0]), JSON.stringify(deepErrors));
+    check(t("an over-limit route → its handler's error says it's too complex, with the regex and its size"), deepErrors?.length === 2 && /^onRequest #2: .*too complex.*Regex: \^http.*\(\d+ chars, \d+ character classes, \d+ groups\) — use fewer groups/.test(deepErrors[0]), JSON.stringify(deepErrors));
+    check(t("a route that only overflows with the redirect's captures → the error says so"), /^onRequest #3: .*9 captured for the redirect\) — it fits without captures/.test(deepErrors?.[1] ?? ""), JSON.stringify(deepErrors));
     await send({ type: "deleteScript", id: "s_rules_deep" });
 }

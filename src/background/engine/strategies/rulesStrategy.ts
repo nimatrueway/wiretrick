@@ -14,7 +14,7 @@
  * view (our own matcher on observed requests; no feedback permission).
  */
 import { getDefaultStrategy, routeLabel, routeMatches, type RouteMeta } from "../../../shared/route";
-import { ruleErrorLine, substitute, type RuleSpec } from "../../../shared/dnrRules";
+import { regexCost, ruleErrorLine, substitute, type RuleSpec } from "../../../shared/dnrRules";
 import { probeScriptRules, type ScriptRules } from "../../../shared/rulesProbe";
 import { strategyUnsupported } from "../../../shared/strategyInfo";
 import { dlogLevel } from "../../../shared/debugLog";
@@ -54,14 +54,27 @@ function dnrCall<T = any>(fn: string, ...args: any[]): Promise<T> {
     });
 }
 
+async function regexSupported(regex: string, requireCapturing: boolean): Promise<any> {
+    return dnrCall("isRegexSupported", { regex, isCaseSensitive: true, requireCapturing });
+}
+
 /** why a url pattern's regex can't be a rule (isRegexSupported), or null */
 async function regexProblem(regex: string, pattern: string, requireCapturing: boolean): Promise<string | null> {
     if (typeof dnrApi()?.isRegexSupported !== "function") return null;
     try {
-        const r: any = await dnrCall("isRegexSupported", { regex, isCaseSensitive: true, requireCapturing });
+        const r: any = await regexSupported(regex, requireCapturing);
         if (!r || r.isSupported) return null;
-        if (r.reason === "memoryLimitExceeded") return `url pattern "${pattern}" is too complex for a rule (the browser's regex memory limit) — use fewer groups or wildcards, e.g. one * for a run of segments`;
-        return `url pattern "${pattern}" can't be a rule: the browser's regex engine (RE2) rejects it (${r.reason || "syntaxError"}) — no lookahead, lookbehind or backreferences in custom groups`;
+        if (r.reason === "memoryLimitExceeded") {
+            const { classes, groups, captures } = regexCost(regex);
+            const capturesOnly = requireCapturing && (await regexSupported(regex, false).catch(() => null))?.isSupported;
+            const fix = capturesOnly
+                ? `it fits without captures, so the redirect's ${captures} captures push it over — use fewer ctx.groups in the redirect`
+                : `use fewer groups or wildcards, e.g. one * for a run of segments`;
+            return `url pattern "${pattern}" is too complex for a rule: its regex exceeds the browser's regex memory limit ` +
+                `(2 KB of compiled RE2 program in Chrome; the size grows with character classes and groups, not text length — roughly 10 :name groups or wildcards fit). ` +
+                `Regex: ${regex} (${regex.length} chars, ${classes} character classes, ${groups} groups${requireCapturing ? `, ${captures} captured for the redirect` : ""}) — ${fix}`;
+        }
+        return `url pattern "${pattern}" can't be a rule: the browser's regex engine (RE2) rejects its regex ${regex} (${r.reason || "syntaxError"}) — no lookahead, lookbehind or backreferences in custom groups`;
     } catch {
         return null;
     }

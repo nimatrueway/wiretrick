@@ -748,3 +748,17 @@ export function substitute(regex: string, substitution: string, url: string): st
 export function ruleErrorLine(route: RouteMeta, reason: string): string {
     return `${routeLabel(route)}: ${reason}`;
 }
+
+/** what drives a regex's compiled size: character classes (incl. `.`) and groups */
+export function regexCost(regex: string): { classes: number; groups: number; captures: number } {
+    let classes = 0, groups = 0, captures = 0, inClass = false;
+    for (let i = 0; i < regex.length; i++) {
+        const c = regex[i];
+        if (c === "\\") { i++; continue; }
+        if (inClass) { if (c === "]") inClass = false; continue; }
+        if (c === "[") { inClass = true; classes++; }
+        else if (c === ".") classes++;
+        else if (c === "(") { groups++; if (regex[i + 1] !== "?") captures++; }
+    }
+    return { classes, groups, captures };
+}

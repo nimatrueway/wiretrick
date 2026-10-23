@@ -211,7 +211,10 @@ doesn't run, the rest of the script does:
   lookahead, lookbehind, backreferences — with the browser's reason;
 - a URL pattern too complex for the browser's regex memory limit (2 KB in
   Chrome): about ten `:name` groups in one pattern, fewer with custom
-  regexps. Use `*` for a run of segments you don't need;
+  regexps. Use `*` for a run of segments you don't need. The error shows
+  the generated regex, its length and its count of character classes,
+  groups and captures, and says when the redirect's captures alone push it
+  over;
 - the browser refuses the rule (e.g. its limit on session or regex rules is
   reached), with the browser's reason.
 
