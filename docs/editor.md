@@ -19,6 +19,7 @@ searchable list of all of them):
 | ⌥Z | Toggle word wrap |
 | ⌘, | Open Settings |
 | ⌘/, ⌘F, ⌘D | Comment, find, select next occurrence (Monaco) |
+| F8 / ⇧F8 | Go to the next / previous problem in the script (TypeScript, compile, rules, runtime, route) |
 | F12 | Go to definition — also into the `wt` API typings |
 | Alt+← / Alt+→ (⌃- / ⌃⇧- on macOS) | Go back / forward after a definition jump or a hover type link |
 
@@ -95,7 +96,7 @@ at the right of the toolbar do the same.
   on save or with its ×. Every entry has a line and column: where the error
   was thrown, the URL pattern a rules error is about, or the `wt.*` call that
   registered the handler it names — and is squiggled there in the editor
-  (hover for the message), like TypeScript errors. Click an entry (or
+  like TypeScript errors (its hover comes before the API docs; F8 reaches it). Click an entry (or
   Enter) to open the script at that line; ↑/↓ move, ←/→ collapse/expand a file; the box at the top filters by
   text. ⌘⇧M shows it. Its error/warning counts are on its title and at the
   far left of the status bar, and follow the scripts. Compile, TypeScript,

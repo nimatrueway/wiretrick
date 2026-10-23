@@ -76,12 +76,24 @@ export async function checkRulesStrategy(ctx: any, mgr: any, origin: string, che
     check(t("a too-complex pattern → a problem at the pattern's line and column"), !!cxProblem && /\[Ln 3, Col 11\]/.test(cxProblem), String(cxProblem).slice(-80));
     await mgr.evaluate(() => (document.querySelector('#script-list li[data-id="s_rules_cx"]') as HTMLElement).click());
     const squiggle = await mgr.waitForFunction((len: number) => {
-        const m = (window as any).monaco?.editor.getModels().find((x: any) => x.getValue().includes("// too complex"));
-        const d = m?.getAllDecorations().find((x: any) => x.options.className === "squiggly-error" && /too complex/.test(x.options.hoverMessage?.value || ""));
-        const r = d?.range;
+        const monaco = (window as any).monaco;
+        const m = monaco?.editor.getModels().find((x: any) => x.getValue().includes("// too complex"));
+        const r = m && monaco.editor.getModelMarkers({ resource: m.uri, owner: "wiretrick" }).find((x: any) => x.severity === monaco.MarkerSeverity.Error && /too complex/.test(x.message));
         return r && r.startLineNumber === 3 && r.startColumn === 11 && r.endColumn === 11 + len ? JSON.stringify(r) : false;
     }, cx.length, { timeout: 10000 }).then((h: any) => h.jsonValue(), () => null);
     check(t("the editor squiggles the too-complex pattern"), !!squiggle, String(squiggle));
+    const nextProblem = await mgr.evaluate(async () => {
+        const ed = (window as any).monaco.editor.getEditors().find((e: any) => e.getModel()?.getValue().includes("// too complex"));
+        ed.focus();
+        ed.setPosition({ lineNumber: 1, column: 1 });
+        await ed.getAction("editor.action.marker.next").run();
+        const p = ed.getPosition();
+        const widget = document.querySelector(".marker-widget")?.textContent || "";
+        await new Promise((r) => setTimeout(r, 50));
+        ed.trigger("e2e", "closeMarkersNavigation", {});
+        return { line: p.lineNumber, column: p.column, shown: /too complex/.test(widget) };
+    });
+    check(t("Go to Next Problem (F8) lands on it"), nextProblem.line === 3 && nextProblem.column === 11 && nextProblem.shown, JSON.stringify(nextProblem));
     await send({ type: "deleteScript", id: "s_rules_cx" });
 
     const page = await ctx.newPage();

@@ -359,6 +359,22 @@ try {
     await mgr.waitForTimeout(1500); // pipeline reload → debugger tier armed
     const helperWarned = await mgr.waitForFunction(() => [...document.querySelectorAll("#problems-list .pb-item.warn")].some((l) => /onResponseBody #1: strategy "helper"/.test(l.textContent || "") && /\[Ln 1\b/.test(l.textContent || "")), null, { timeout: 8000 }).then(() => true, () => false);
     check("process routes warn while the helper is down (no fallback) — in Problems, at the handler's line", helperWarned);
+    // its squiggle's hover: the warning comes before the API docs, like a TypeScript error's
+    await mgr.evaluate(() => (document.querySelector('#script-list li[data-id="s_procx"]') as HTMLElement).click());
+    const hoverRows = await mgr.waitForFunction(() => {
+        const ed = (window as any).monaco?.editor.getEditors().find((e: any) => e.getModel()?.getValue().includes("process-listed.invalid"));
+        if (!ed) return false;
+        const rows = [...document.querySelectorAll(".monaco-hover .monaco-hover-content > *")].map((r) => r.textContent || "");
+        const warn = rows.findIndex((r) => /strategy "helper"/.test(r));
+        const docs = rows.findIndex((r) => /onResponseBody\(/.test(r) && !/strategy "helper"/.test(r));
+        if (warn >= 0 && docs >= 0) return { warn, docs };
+        ed.focus();
+        ed.setPosition({ lineNumber: 1, column: 6 });
+        ed.trigger("e2e", "editor.action.showHover", {});
+        return false;
+    }, null, { timeout: 8000, polling: 500 }).then((h: any) => h.jsonValue(), () => null);
+    check("a problem's hover comes before the API docs hover", !!hoverRows && hoverRows.warn < hoverRows.docs, JSON.stringify(hoverRows));
+    await mgr.keyboard.press("Escape");
     // Network tab records from now on (listeners attach when it opens)
     await mgr.click("#network-tab");
     await mgr.waitForSelector("#network-view .net-toolbar", { timeout: 5000 });

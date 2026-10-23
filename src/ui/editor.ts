@@ -608,7 +608,7 @@ function scheduleDiagnostics(): void {
             if (!m || m.isDisposed?.() || m.getValue() !== s.code) continue;
             // a compile failure is already badged + logged; don't echo its syntax errors
             const errors = s.error ? [] : monaco.editor
-                .getModelMarkers({ resource: m.uri })
+                .getModelMarkers({ resource: m.uri, owner: "typescript" })
                 .filter((mk: any) => mk.severity === monaco.MarkerSeverity.Error)
                 .sort((a: any, b: any) => a.startLineNumber - b.startLineNumber || a.startColumn - b.startColumn)
                 .map((mk: any) => `line ${mk.startLineNumber}: ${String(mk.message).split("\n")[0]}`);
@@ -1204,23 +1204,30 @@ function modelProblems(m: any): ProblemMarker[] {
     const { MarkerSeverity, editor: ed } = (window as any).monaco;
     return ed
         .getModelMarkers({ resource: m.uri })
-        .filter((mk: any) => mk.severity === MarkerSeverity.Error || mk.severity === MarkerSeverity.Warning)
+        .filter((mk: any) => mk.owner !== PROBLEM_OWNER && (mk.severity === MarkerSeverity.Error || mk.severity === MarkerSeverity.Warning))
         .map((mk: any) => ({ severity: mk.severity === MarkerSeverity.Error ? "error" : "warning", message: String(mk.message), line: mk.startLineNumber, column: mk.startColumn }));
 }
 
-/** model → [its squiggle decoration ids, the problems they show] */
-const problemDecorations = new WeakMap<any, { ids: string[]; key: string }>();
+/** the owner of the markers for Wiretrick's own problems (compile, rules, runtime, route) */
+const PROBLEM_OWNER = "wiretrick";
+/** model → the problems its markers show */
+const problemMarkerKeys = new WeakMap<any, string>();
+/** URIs whose marker change is our own: not a sign TypeScript has checked them */
+const ownMarkerWrites = new Set<string>();
 
-const escapeMd = (t: string) => t.replace(/[\\`*_{}[\]()#+\-.!|<>]/g, "\\$&");
+function setProblemMarkers(m: any, markers: any[]): void {
+    ownMarkerWrites.add(m.uri.toString());
+    (window as any).monaco.editor.setModelMarkers(m, PROBLEM_OWNER, markers);
+}
 
 /**
- * Squiggles for the problems Monaco doesn't mark itself (compile, rules,
- * runtime, route — TypeScript and settings.yaml problems are its own
- * markers). Decorations, not markers: they don't feed back into the
- * marker-driven type checking. Their positions are in the saved code, so a
- * model with unsaved edits keeps the ones it has (they move with the edits).
+ * Squiggles for the problems Monaco doesn't mark itself (TypeScript and
+ * settings.yaml problems are its own markers). Markers, like TypeScript's,
+ * so their hover comes before the API docs one. Their positions are in the
+ * saved code, so a model with unsaved edits keeps the ones it has (they move
+ * with the edits).
  */
-function decorateProblems(): void {
+function markProblems(): void {
     const monaco = (window as any).monaco;
     if (!monaco) return;
     const byId = new Map(problemGroups.map((g) => [g.id, g.problems]));
@@ -1229,27 +1236,19 @@ function decorateProblems(): void {
         if (!m || m.isDisposed() || m.getValue() !== s.code) continue;
         const own = (byId.get(s.id) || []).filter((p) => p.kind !== "ts" && p.kind !== "settings" && p.line);
         const key = JSON.stringify(own.map((p) => [p.severity, p.message, p.line, p.column, p.endLine, p.endColumn]));
-        const prev = problemDecorations.get(m);
-        if (prev?.key === key) continue;
-        const error = (p: Problem) => p.severity === "error";
-        const decos = own.map((p) => {
-            const line = Math.min(p.line!, m.getLineCount());
-            const column = p.column ?? m.getLineFirstNonWhitespaceColumn(line) ?? 1;
-            const endLine = Math.min(p.endLine ?? line, m.getLineCount());
-            const endColumn = p.endColumn ?? Math.max(m.getLineLastNonWhitespaceColumn(endLine), column + 1);
-            return {
-                range: new monaco.Range(line, column, endLine, endColumn),
-                options: {
-                    className: error(p) ? "squiggly-error" : "squiggly-warning",
-                    hoverMessage: { value: `${escapeMd(p.message)}\n\nWiretrick (${p.kind})` },
-                    overviewRuler: { color: { id: error(p) ? "editorOverviewRuler.errorForeground" : "editorOverviewRuler.warningForeground" }, position: monaco.editor.OverviewRulerLane.Right },
-                    minimap: { color: { id: error(p) ? "minimap.errorHighlight" : "minimap.warningHighlight" }, position: monaco.editor.MinimapPosition.Inline },
-                    stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
-                    zIndex: 30,
-                },
-            };
-        });
-        problemDecorations.set(m, { ids: m.deltaDecorations(prev?.ids || [], decos), key });
+        if ((problemMarkerKeys.get(m) ?? "[]") === key) continue;
+        problemMarkerKeys.set(m, key);
+        setProblemMarkers(
+            m,
+            own.map((p) => {
+                const line = Math.min(p.line!, m.getLineCount());
+                const column = p.column ?? m.getLineFirstNonWhitespaceColumn(line) ?? 1;
+                const endLine = Math.min(p.endLine ?? line, m.getLineCount());
+                const endColumn = p.endColumn ?? Math.max(m.getLineLastNonWhitespaceColumn(endLine), column + 1);
+                const severity = p.severity === "error" ? monaco.MarkerSeverity.Error : monaco.MarkerSeverity.Warning;
+                return { severity, message: p.message, source: "Wiretrick", code: p.kind, startLineNumber: line, startColumn: column, endLineNumber: endLine, endColumn };
+            })
+        );
     }
 }
 
@@ -1270,7 +1269,7 @@ function updateProblems(): void {
         live,
         settings
     );
-    decorateProblems();
+    markProblems();
     problemsBadge.set(problemCounts(problemGroups));
     renderBadge($("#problems-badge"), problemsBadge);
     renderProblems();
@@ -2197,12 +2196,13 @@ async function main(): Promise<void> {
     editor.addCommand((window as any).monaco.KeyMod.CtrlCmd | (window as any).monaco.KeyCode.KeyS, () => void saveCurrent());
     registerLayoutActions();
     (window as any).monaco.editor.onDidChangeMarkers((uris: Uri[]) => {
-        for (const u of uris) checkedUris.add(u.toString());
+        for (const u of uris) if (!ownMarkerWrites.delete(u.toString())) checkedUris.add(u.toString());
         scheduleDiagnostics();
         scheduleProblems();
     });
     (window as any).monaco.editor.onWillDisposeModel((m: any) => {
         checkedUris.delete(m.uri.toString());
+        if ((problemMarkerKeys.get(m) ?? "[]") !== "[]") setProblemMarkers(m, []);
         scheduleProblems();
     });
     registerSettingsAssist();
