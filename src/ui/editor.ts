@@ -31,12 +31,13 @@ import type { Uri, IPosition, IRange, IKeyboardEvent, editor as MonacoEditor } f
 import type { Script } from "../background/engine/scriptStore";
 import { setupPanelDock, currentSide, currentDock } from "./panelDock";
 import { badgeCount, LogBadge, NetBadge, type TabBadge } from "./logBadge";
+import { collectProblems, filterProblems, problemCounts, ProblemsBadge, type Problem, type ProblemGroup, type ProblemMarker } from "./problems";
 import { touchCounts } from "./network/netFormat";
 import { effect } from "@preact/signals";
 import { aboutRows, aboutText, checkLatestRelease, collectDiagnostics, describeLatest, diagnosticsFileName, downloadText, RELEASES_URL, type HelperStatus } from "./about";
 
 // ---- state ----
-let scripts: (Script & { runtimeError?: ScriptHealthInput["runtimeError"]; typeErrors?: string[]; ruleErrors?: string[] })[] = [];
+let scripts: (Script & { runtimeError?: ScriptHealthInput["runtimeError"]; typeErrors?: string[]; ruleErrors?: string[]; routeWarnings?: string[] })[] = [];
 let selectedId: string | null = null;
 let editor: any = null;
 let dirty = false;
@@ -277,6 +278,7 @@ let focusedId: string | null = null;
 
 function renderList(): void {
     updateEnabledToggle();
+    scheduleProblems();
     if (renaming) return; // a rebuild would drop the inline rename input
     const list = $("#script-list");
     list.innerHTML = "";
@@ -1036,6 +1038,7 @@ function connectLogs(): void {
                 s.runtimeError = msg.errors[s.id] ?? null;
                 s.typeErrors = msg.typeErrors?.[s.id] ?? [];
                 s.ruleErrors = msg.ruleErrors?.[s.id] ?? [];
+                s.routeWarnings = msg.routeWarnings?.[s.id] ?? [];
             }
             renderList();
         }
@@ -1137,11 +1140,13 @@ function renderLogLine(line: HTMLElement, text: string, level: string, source: s
 // requests, shown until that view is cleared ----
 const logBadge = new LogBadge();
 const netBadge = new NetBadge();
+const problemsBadge = new ProblemsBadge();
 let logBadgeEnabled = true;
 
 function renderBadge(el: HTMLElement, badge: TabBadge): void {
     document.body.classList.toggle("no-status", !logBadgeEnabled);
-    renderStatusBadge(badge === logBadge ? $("#sb-log") : $("#sb-net"), badge, badge === logBadge ? "Log (⌘J)" : "Network");
+    const [sb, label] = badge === logBadge ? ["#sb-log", "Log (⌘J)"] : badge === problemsBadge ? ["#sb-problems", "Problems (⌘⇧M)"] : ["#sb-net", "Network"];
+    renderStatusBadge($(sb), badge, label);
     el.hidden = !logBadgeEnabled || badge.empty;
     el.title = badge.empty ? "" : badge.title;
     for (const [cls, n] of badge.counts) {
@@ -1152,6 +1157,7 @@ function renderBadge(el: HTMLElement, badge: TabBadge): void {
 }
 
 function renderTabBadges(): void {
+    renderBadge($("#problems-badge"), problemsBadge);
     renderBadge($("#log-badge"), logBadge);
     renderBadge($("#net-badge"), netBadge);
 }
@@ -1174,6 +1180,197 @@ function watchNetCounts(): void {
         renderBadge($("#net-badge"), netBadge);
     });
     store.connect(undefined, "network-counts");
+}
+
+// ---- Problems view: what is wrong with each script right now (VS Code's
+// Problems). Entries go away by themselves once fixed; the Log keeps history. ----
+let problemGroups: ProblemGroup[] = [];
+let problemsTimer: ReturnType<typeof setTimeout> | null = null;
+const collapsedProblems = new Set<string>();
+/** models Monaco has published markers for: until then a script's stored (saved-code) type errors stand in */
+const checkedUris = new Set<string>();
+
+/** Coalesces, but never postpones: a stream of marker events (the TS worker
+ *  checking script after script) can't hold the view back past 200 ms. */
+function scheduleProblems(): void {
+    if (problemsTimer) return;
+    problemsTimer = setTimeout(() => {
+        problemsTimer = null;
+        updateProblems();
+    }, 200);
+}
+
+function modelProblems(m: any): ProblemMarker[] {
+    const { MarkerSeverity, editor: ed } = (window as any).monaco;
+    return ed
+        .getModelMarkers({ resource: m.uri })
+        .filter((mk: any) => mk.severity === MarkerSeverity.Error || mk.severity === MarkerSeverity.Warning)
+        .map((mk: any) => ({ severity: mk.severity === MarkerSeverity.Error ? "error" : "warning", message: String(mk.message), line: mk.startLineNumber, column: mk.startColumn }));
+}
+
+function updateProblems(): void {
+    const live = new Map<string, ProblemMarker[]>();
+    const monaco = (window as any).monaco;
+    if (monaco) {
+        for (const s of scripts) {
+            const m = models.get(s.id);
+            if (!m || m.isDisposed()) continue;
+            if (!checkedUris.has(m.uri.toString()) && m.getValue() === s.code && s.typeErrors?.length) continue;
+            live.set(s.id, modelProblems(m));
+        }
+    }
+    const settings = monaco && settingsModel && !settingsModel.isDisposed() ? modelProblems(settingsModel) : undefined;
+    problemGroups = collectProblems(
+        scripts.map((s) => ({ id: s.id, label: scriptFileName(s.meta.name), error: s.error, ruleErrors: s.ruleErrors, runtimeError: s.runtimeError, typeErrors: s.typeErrors, routeWarnings: s.routeWarnings })),
+        live,
+        settings
+    );
+    problemsBadge.set(problemCounts(problemGroups));
+    renderBadge($("#problems-badge"), problemsBadge);
+    renderProblems();
+}
+
+const ERROR_ICON = `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.8 5.8l4.4 4.4M10.2 5.8l-4.4 4.4" stroke="currentColor" stroke-width="1.3"/></svg>`;
+const WARN_ICON = `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 2 14.5 13.5h-13z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 6.5v3.5M8 11.5v.6" stroke="currentColor" stroke-width="1.3"/></svg>`;
+const CHEVRON = `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+function pbSpan(cls: string, text = ""): HTMLSpanElement {
+    const el = document.createElement("span");
+    el.className = cls;
+    el.textContent = text;
+    return el;
+}
+
+function renderProblems(): void {
+    const list = $("#problems-list");
+    const active = document.activeElement as HTMLElement | null;
+    const focusKey = active && list.contains(active) ? active.dataset.key : undefined;
+    list.innerHTML = "";
+    const groups = filterProblems(problemGroups, $input("#problems-filter").value);
+    if (!groups.length) {
+        list.append(pbSpan("problems-empty", problemGroups.length ? "No results found with the provided filter." : "No problems have been detected in the scripts."));
+        return;
+    }
+    const row = (key: string, cls: string, level: number): HTMLDivElement => {
+        const el = document.createElement("div");
+        el.className = `pb-row ${cls}`;
+        el.dataset.key = key;
+        el.tabIndex = -1;
+        el.setAttribute("role", "treeitem");
+        el.setAttribute("aria-level", String(level));
+        list.append(el);
+        return el;
+    };
+    for (const g of groups) {
+        const open = !collapsedProblems.has(g.id);
+        const head = row(`g:${g.id}`, "pb-head" + (open ? " open" : ""), 1);
+        head.dataset.group = g.id;
+        head.setAttribute("aria-expanded", String(open));
+        const chev = pbSpan("pb-chev");
+        chev.innerHTML = CHEVRON;
+        const counts = problemCounts([g]);
+        head.append(chev, pbSpan(`file-icon ${g.file}`, g.file === "ts" ? "TS" : "⚙"), pbSpan("pb-file", g.label), pbSpan("pb-count", badgeCount(g.problems.length)));
+        head.title = `${g.label}: ${[counts.errors && `${counts.errors} error${counts.errors > 1 ? "s" : ""}`, counts.warnings && `${counts.warnings} warning${counts.warnings > 1 ? "s" : ""}`].filter(Boolean).join(", ")}`;
+        head.addEventListener("click", () => toggleProblemGroup(g.id));
+        if (!open) continue;
+        g.problems.forEach((p, i) => {
+            const el = row(`p:${g.id}:${i}`, `pb-item ${p.severity === "error" ? "error" : "warn"}`, 2);
+            el.dataset.group = g.id;
+            const ico = pbSpan(`pb-ico ${p.severity === "error" ? "error" : "warn"}`);
+            ico.innerHTML = p.severity === "error" ? ERROR_ICON : WARN_ICON;
+            ico.setAttribute("role", "img");
+            ico.setAttribute("aria-label", p.severity);
+            el.append(ico, pbSpan("pb-msg", p.message.split("\n")[0]), pbSpan("pb-src", p.kind));
+            if (p.line) el.append(pbSpan("pb-pos", `[Ln ${p.line}${p.column ? `, Col ${p.column}` : ""}]`));
+            if (p.dismissible) {
+                const x = document.createElement("button");
+                x.className = "pb-dismiss";
+                x.textContent = "✕";
+                x.title = "Dismiss this runtime error (saving the script clears it too)";
+                x.setAttribute("aria-label", "Dismiss");
+                x.tabIndex = -1;
+                x.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    void send({ type: "clearScriptError", scriptId: g.id });
+                });
+                el.append(x);
+            }
+            el.title = `${p.message}\n\n${g.label}${p.line ? ` [Ln ${p.line}${p.column ? `, Col ${p.column}` : ""}]` : ""} · ${p.kind}`;
+            el.addEventListener("click", () => void openProblem(g.id, p));
+            el.addEventListener("dblclick", () => editor?.focus());
+        });
+    }
+    const rows = [...list.querySelectorAll<HTMLElement>(".pb-row")];
+    const target = (focusKey && rows.find((r) => r.dataset.key === focusKey)) || rows[0];
+    target.tabIndex = 0;
+    if (focusKey) target.focus();
+}
+
+function toggleProblemGroup(id: string, open?: boolean): void {
+    const want = open ?? collapsedProblems.has(id);
+    if (want) collapsedProblems.delete(id);
+    else collapsedProblems.add(id);
+    renderProblems();
+    const head = [...$("#problems-list").querySelectorAll<HTMLElement>(".pb-head")].find((h) => h.dataset.group === id);
+    if (head) focusProblemRow(head);
+}
+
+function focusProblemRow(el: HTMLElement): void {
+    for (const r of $("#problems-list").querySelectorAll<HTMLElement>(".pb-row")) r.tabIndex = -1;
+    el.tabIndex = 0;
+    el.focus();
+}
+
+/** Open the problem's file (like an explorer click) and put the cursor on it. */
+async function openProblem(id: string, p: Problem): Promise<void> {
+    if (!editor) return;
+    if (p.line) pushNav();
+    if (id !== selectedId || typingsShown) {
+        await select(id);
+        if (id !== selectedId || typingsShown) return; // kept the unsaved edits
+    }
+    if (p.line) {
+        const pos = { lineNumber: p.line, column: p.column ?? 1 };
+        editor.setPosition(pos);
+        editor.revealPositionInCenterIfOutsideViewport(pos);
+    }
+    editor.focus();
+}
+
+function setupProblemsView(): void {
+    const list = $("#problems-list");
+    $input("#problems-filter").addEventListener("input", () => renderProblems());
+    list.addEventListener("keydown", (e) => {
+        const rows = [...list.querySelectorAll<HTMLElement>(".pb-row")];
+        const cur = (e.target as HTMLElement).closest<HTMLElement>(".pb-row");
+        if (!cur || !rows.length) return;
+        const i = rows.indexOf(cur);
+        const head = cur.classList.contains("pb-head");
+        let next: HTMLElement | undefined;
+        if (e.key === "ArrowDown") next = rows[Math.min(rows.length - 1, i + 1)];
+        else if (e.key === "ArrowUp") next = rows[Math.max(0, i - 1)];
+        else if (e.key === "Home") next = rows[0];
+        else if (e.key === "End") next = rows[rows.length - 1];
+        else if (head && (e.key === "ArrowLeft" || e.key === "ArrowRight")) toggleProblemGroup(cur.dataset.group!, e.key === "ArrowRight");
+        else if (!head && e.key === "ArrowLeft") next = rows.slice(0, i).reverse().find((r) => r.classList.contains("pb-head"));
+        else if (e.key === "Enter" || e.key === " ") cur.click();
+        else return;
+        e.preventDefault();
+        if (next) focusProblemRow(next);
+    });
+}
+
+/** ⌘⇧M: show the Problems view (and focus it), or close the panel when it's already showing it. */
+function toggleProblems(): void {
+    if (!$("#app").classList.contains("panel-hidden") && $("#log-panel").dataset.tab === "problems") {
+        setPanelHidden(true);
+        return;
+    }
+    setPanelHidden(false);
+    showPanelTab("problems");
+    const row = $("#problems-list").querySelector<HTMLElement>('.pb-row[tabindex="0"]');
+    if (row) row.focus();
+    else $input("#problems-filter").focus();
 }
 
 /** All received entries — filtered ones stay here (re-renderable), just not in the DOM. */
@@ -1814,7 +2011,7 @@ async function autoReconnectFolder(): Promise<void> {
 // ---- movable panels ----
 interface PanelLayout {
     sidebarW?: number;
-    panelTab?: "log" | "network";
+    panelTab?: "problems" | "log" | "network";
     sidebarHidden?: boolean;
     panelHidden?: boolean;
     wordWrap?: boolean;
@@ -1895,40 +2092,44 @@ function makeSplitV(): void {
 }
 
 let networkMounted = false;
+type PanelTab = "problems" | "log" | "network";
 
-/** VS Code–style bottom panel tabs: LOG | NETWORK */
-function setupPanelTabs(): void {
-    const show = (which: "log" | "network") => {
-        for (const t of document.querySelectorAll<HTMLElement>(".panel-tab")) {
-            const on = t.dataset.panel === which;
-            t.classList.toggle("active", on);
-            t.setAttribute("aria-selected", String(on));
-        }
-        $("#log-entries").hidden = which !== "log";
-        $("#log-tools").hidden = which !== "log";
-        $("#network-view").hidden = which !== "network";
-        $("#log-panel").dataset.tab = which;
-        renderTabBadges();
-        // recording starts the first time the tab is shown (zero cost before)
-        if (which === "network" && !networkMounted) {
-            networkMounted = true;
-            mountNetworkPanel($("#network-view"));
-        }
-        const l = loadLayout();
-        l.panelTab = which;
-        saveLayout(l);
-    };
+/** VS Code–style bottom panel tabs: PROBLEMS | LOG | NETWORK */
+function showPanelTab(which: PanelTab): void {
     for (const t of document.querySelectorAll<HTMLElement>(".panel-tab")) {
-        t.addEventListener("click", () => show(t.dataset.panel as "log" | "network"));
+        const on = t.dataset.panel === which;
+        t.classList.toggle("active", on);
+        t.setAttribute("aria-selected", String(on));
+    }
+    $("#log-entries").hidden = which !== "log";
+    $("#log-tools").hidden = which !== "log";
+    $("#network-view").hidden = which !== "network";
+    $("#problems-view").hidden = which !== "problems";
+    $("#log-panel").dataset.tab = which;
+    renderTabBadges();
+    // recording starts the first time the tab is shown (zero cost before)
+    if (which === "network" && !networkMounted) {
+        networkMounted = true;
+        mountNetworkPanel($("#network-view"));
+    }
+    const l = loadLayout();
+    l.panelTab = which;
+    saveLayout(l);
+}
+
+function setupPanelTabs(): void {
+    for (const t of document.querySelectorAll<HTMLElement>(".panel-tab")) {
+        t.addEventListener("click", () => showPanelTab(t.dataset.panel as PanelTab));
     }
     // status bar: open the panel on that tab
-    for (const [btn, which] of [["#sb-log", "log"], ["#sb-net", "network"]] as const) {
+    for (const [btn, which] of [["#sb-problems", "problems"], ["#sb-log", "log"], ["#sb-net", "network"]] as const) {
         $(btn).addEventListener("click", () => {
             setPanelHidden(false);
-            show(which);
+            showPanelTab(which);
         });
     }
-    show(loadLayout().panelTab === "network" ? "network" : "log");
+    const saved = loadLayout().panelTab;
+    showPanelTab(saved === "network" || saved === "problems" ? saved : "log");
 }
 
 // ---- wiring ----
@@ -1949,7 +2150,15 @@ async function main(): Promise<void> {
     });
     editor.addCommand((window as any).monaco.KeyMod.CtrlCmd | (window as any).monaco.KeyCode.KeyS, () => void saveCurrent());
     registerLayoutActions();
-    (window as any).monaco.editor.onDidChangeMarkers(() => scheduleDiagnostics());
+    (window as any).monaco.editor.onDidChangeMarkers((uris: Uri[]) => {
+        for (const u of uris) checkedUris.add(u.toString());
+        scheduleDiagnostics();
+        scheduleProblems();
+    });
+    (window as any).monaco.editor.onWillDisposeModel((m: any) => {
+        checkedUris.delete(m.uri.toString());
+        scheduleProblems();
+    });
     registerSettingsAssist();
     // Monaco re-checks only the edited file; its importers keep stale errors
     (window as any).monaco.editor.onDidCreateModel((m: any) => {
@@ -1958,8 +2167,9 @@ async function main(): Promise<void> {
     for (const m of models.values()) m.onDidChangeContent(() => scheduleDependantRecheck(m));
     // VS Code shortcuts: ⌘P quick-open (scripts + settings.yaml), ⌘, opens
     // the Settings dialog, ⌘⇧E focuses the explorer, ⌘B / ⌘J toggle the
-    // explorer / panel, ⌥Z toggles word wrap (the last four are also editor
-    // actions, so they work while Monaco has focus and show up in F1).
+    // explorer / panel, ⌘⇧M toggles the Problems view, ⌥Z toggles word wrap
+    // (the last five are also editor actions, so they work while Monaco has
+    // focus and show up in F1).
     // ⌘/ (comment), ⌘F (find), ⌘D (next occurrence) and Shift+Alt+A (block
     // comment) are Monaco built-ins.
     const palette = createQuickOpenPalette(
@@ -2223,6 +2433,7 @@ async function main(): Promise<void> {
     setupPanelDock();
     makeLogFilters();
     setupPanelTabs();
+    setupProblemsView();
     watchNetCounts();
     startKeepAlive();
     setupDialogs();
@@ -2257,6 +2468,7 @@ function layoutShortcut(e: KeyboardEvent): (() => void) | null {
     if (mod && e.shiftKey && !e.altKey && e.code === "KeyE") return focusExplorer;
     if (mod && !e.shiftKey && !e.altKey && e.code === "KeyB") return toggleSidebar;
     if (mod && !e.shiftKey && !e.altKey && (e.code === "KeyJ" || e.code === "Backquote")) return togglePanel;
+    if (mod && e.shiftKey && !e.altKey && e.code === "KeyM") return toggleProblems;
     // ⌥Z types a character (Ω on macOS) in the log/network filter boxes
     const typing = (e.target as HTMLElement | null)?.matches?.("input, textarea, select");
     if (e.altKey && !mod && !e.shiftKey && e.code === "KeyZ" && !typing) return toggleWordWrap;
@@ -2285,6 +2497,7 @@ function registerLayoutActions(): void {
         ["wt.focusExplorer", "View: Focus on Explorer", [KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyE], focusExplorer],
         ["wt.toggleSidebar", "View: Toggle Explorer Visibility", [KeyMod.CtrlCmd | KeyCode.KeyB], toggleSidebar],
         ["wt.togglePanel", "View: Toggle Panel Visibility", [KeyMod.CtrlCmd | KeyCode.KeyJ, KeyMod.CtrlCmd | KeyCode.Backquote], togglePanel],
+        ["wt.toggleProblems", "View: Toggle Problems", [KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyM], toggleProblems],
         ["wt.showShortcuts", "Help: Keyboard Shortcuts", [], showShortcutsHelp],
         ["wt.navigateBack", "Go Back", navKeybindings().back, navigateBack],
         ["wt.navigateForward", "Go Forward", navKeybindings().forward, navigateForward],
@@ -2301,14 +2514,15 @@ function registerLayoutActions(): void {
     });
 }
 
-function select(id: string): void {
+function select(id: string): Promise<void> {
     if (dirty && selectedId && !(typingsShown && id === selectedId)) {
         if (!confirm("Discard unsaved changes?")) {
-            return;
+            return Promise.resolve();
         }
     }
-    if (id === SETTINGS_ID) void selectSettings();
-    else selectReal(id);
+    if (id === SETTINGS_ID) return selectSettings();
+    selectReal(id);
+    return Promise.resolve();
 }
 
 let monacoVerbose = false;

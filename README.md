@@ -28,7 +28,8 @@ block, edit headers, transform or replace bodies, or patch the DOM.
   changes into browser-native rules.
 - **No debugger banner needed** — the optional [local helper](docs/local-helper.md)
   intercepts at network level on Chrome without the "being debugged" bar.
-- **Built-in devtools** — the Log and Network views show what every script did,
+- **Built-in devtools** — the Problems view lists what's wrong with your scripts
+  right now (gone once fixed); the Log and Network views show what every script did,
   including original vs. modified bodies.
 - **Folder sync** — keep scripts as plain files in a synced folder of your choice.
 - **Chrome (MV3), MV2 Chromium and Firefox.**
@@ -73,7 +74,7 @@ Or click **?** → **Samples** for one-click starters against real public sites.
 | [Writing scripts](docs/scripting.md) | the `wt` API, routes, parameters, libraries, `onDocument`, stacking, async handlers |
 | [Interception strategies](docs/strategies.md) | `page` / `debugger` / `extension` / `helper` / `rules`, the default and per-handler choice, [which strategies keep the URL when replacing a response](docs/strategies.md#how-each-strategy-serves-a-replacement), the Missed warning, browser compatibility |
 | [Local helper](docs/local-helper.md) | the `helper` strategy: install, how it works, security notes |
-| [The Editor](docs/editor.md) | Code view, Log & Network views, folder sync, `settings.yaml` |
+| [The Editor](docs/editor.md) | Code view, Problems, Log & Network views, folder sync, `settings.yaml` |
 | [Glossary](GLOSSARY.md) | the words we use for Wiretrick's concepts |
 | [Development](docs/development.md) | build, tests, releases, how the MV3 build works |
 

@@ -43,6 +43,7 @@
                 <div id="log-panel">
                     <div id="log-header" title="Drag to dock: below the Code view, beside it, or under the script list">
                         <span id="panel-tabs" role="tablist">
+                            <span id="problems-tab" class="panel-tab" role="tab" data-panel="problems" title="Problems — what is wrong with your scripts right now; each one goes away once fixed (⌘⇧M)">Problems<span id="problems-badge" class="tab-badges" hidden><span class="tab-badge error" hidden></span><span class="tab-badge warn" hidden></span></span></span>
                             <span id="log-header-title" class="panel-tab active" role="tab" data-panel="log" title="Extension and script log">Log<span id="log-badge" class="tab-badges" hidden><span class="tab-badge error" hidden></span><span class="tab-badge warn" hidden></span></span></span>
                             <span id="network-tab" class="panel-tab" role="tab" data-panel="network" title="Network activity, with what Wiretrick scripts did to each request">Network<span id="net-badge" class="tab-badges" hidden><span class="tab-badge modified" hidden></span><span class="tab-badge observed" hidden></span></span></span>
                         </span>
@@ -63,12 +64,19 @@
                     </div>
                     <div id="log-entries"></div>
                     <div id="network-view" hidden></div>
+                    <div id="problems-view" hidden>
+                        <div class="problems-toolbar">
+                            <input id="problems-filter" type="text" placeholder="Filter (e.g. text, script name)" title="Show only problems whose message or script name contains this text" autocomplete="off" spellcheck="false">
+                        </div>
+                        <div id="problems-list" role="tree" aria-label="Problems"></div>
+                    </div>
                 </div>
             </div>
         </main>
     </div>
     <footer id="status-bar" aria-label="Status bar">
-        <button id="sb-log" class="sb-item" title="Log (⌘J)" aria-label="Show the Log"><svg class="sb-ico error" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.8 5.8l4.4 4.4M10.2 5.8l-4.4 4.4" stroke="currentColor" stroke-width="1.3"/></svg><span class="sb-n" data-k="error">0</span><svg class="sb-ico warn" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 2 14.5 13.5h-13z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 6.5v3.5M8 11.5v.6" stroke="currentColor" stroke-width="1.3"/></svg><span class="sb-n" data-k="warn">0</span></button>
+        <button id="sb-problems" class="sb-item" title="Problems (⌘⇧M)" aria-label="Show the Problems view"><svg class="sb-ico error" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.8 5.8l4.4 4.4M10.2 5.8l-4.4 4.4" stroke="currentColor" stroke-width="1.3"/></svg><span class="sb-n" data-k="error">0</span><svg class="sb-ico warn" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 2 14.5 13.5h-13z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 6.5v3.5M8 11.5v.6" stroke="currentColor" stroke-width="1.3"/></svg><span class="sb-n" data-k="warn">0</span></button>
+        <button id="sb-log" class="sb-item" title="Log (⌘J)" aria-label="Show the Log"><span class="sb-label">Log</span><svg class="sb-ico error" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.8 5.8l4.4 4.4M10.2 5.8l-4.4 4.4" stroke="currentColor" stroke-width="1.3"/></svg><span class="sb-n" data-k="error">0</span><svg class="sb-ico warn" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 2 14.5 13.5h-13z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 6.5v3.5M8 11.5v.6" stroke="currentColor" stroke-width="1.3"/></svg><span class="sb-n" data-k="warn">0</span></button>
         <button id="sb-net" class="sb-item" title="Network" aria-label="Show the Network view"><svg class="sb-ico modified" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="4.5" fill="currentColor"/></svg><span class="sb-n" data-k="modified">0</span><svg class="sb-ico observed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="4.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 1.6"/></svg><span class="sb-n" data-k="observed">0</span></button>
     </footer>
 
@@ -211,8 +219,8 @@
                         <div class="setting">
                             <span class="setting-label">Panel counts</span>
                             <div class="setting-control">
-                                <label class="setting-check"><input id="settings-log-badge" type="checkbox" checked> Count errors/warnings in the Log view and observed/modified requests in the Network view, on their titles and in the status bar</label>
-                                <p class="setting-help">They stay until the view is cleared. Network counts start once the Network view has been opened (that starts recording). Observed: a script handler ran on the request without changing it; modified: a handler changed it.</p>
+                                <label class="setting-check"><input id="settings-log-badge" type="checkbox" checked> Count current problems in the Problems view, errors/warnings in the Log view and observed/modified requests in the Network view, on their titles and in the status bar</label>
+                                <p class="setting-help">Problems counts follow the scripts — they drop as problems are fixed. Log and Network counts stay until the view is cleared. Network counts start once the Network view has been opened (that starts recording). Observed: a script handler ran on the request without changing it; modified: a handler changed it.</p>
                             </div>
                         </div>
                     </section>

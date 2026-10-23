@@ -620,6 +620,54 @@ try {
     check("popup shows the TypeScript error indicator", typedInd.includes("Typed"), JSON.stringify(typedInd));
     await tipFlow(typedPopup, "li.script-item .err-ind.types", "popup", { x: 600, y: 400 });
     await typedPopup.close();
+    // Problems view: current problems (live TS markers), gone once fixed; a click jumps to the line
+    await mgr.bringToFront();
+    const sbProblems = () => mgr.evaluate(() => ({
+        errors: Number(document.querySelector('#sb-problems .sb-n[data-k="error"]')?.textContent),
+        warnings: Number(document.querySelector('#sb-problems .sb-n[data-k="warn"]')?.textContent),
+    }));
+    await mgr.evaluate(() => (window as any).monaco.editor.getEditors()[0].focus());
+    await mgr.keyboard.press("Escape"); // the sticky type hover from above
+    await mgr.mouse.move(2, 2);
+    await mgr.waitForTimeout(300);
+    await mgr.locator("#problems-tab").click();
+    await mgr.waitForFunction(() => /Ln 3/.test(document.querySelector("#problems-list")?.textContent || ""), null, { timeout: 8000 }).catch(() => {});
+    const pb0 = await mgr.evaluate(() => ({
+        tab: document.getElementById("log-panel")!.dataset.tab,
+        heads: [...document.querySelectorAll("#problems-list .pb-head .pb-file")].map((e) => e.textContent),
+        typed: [...document.querySelectorAll("#problems-list .pb-item")].map((e) => e.textContent || "").filter((t: string) => /not assignable/.test(t)),
+        badge: !(document.querySelector("#problems-badge") as HTMLElement).hidden,
+    }));
+    const before = await sbProblems();
+    check("Problems view lists the TypeScript error with its line; counts on the tab + far-left status bar", pb0.tab === "problems" && pb0.heads.includes("Typed.ts") && pb0.typed.some((t: string) => /\bts\b/.test(t) && t.includes("Ln 3")) && pb0.badge && before.errors >= 1 && (await mgr.evaluate(() => document.querySelector("#status-bar .sb-item")?.id)) === "sb-problems", JSON.stringify({ pb0, before }));
+    const typedCode = await mgr.evaluate(() => (window as any).monaco.editor.getEditors()[0].getValue());
+    await mgr.evaluate(() => {
+        const m = (window as any).monaco.editor.getEditors()[0].getModel();
+        m.setValue(m.getValue() + `\nconst bad: string = 5;`);
+    });
+    const added = await mgr.waitForFunction((n: number) => Number(document.querySelector('#sb-problems .sb-n[data-k="error"]')?.textContent) > n, before.errors, { timeout: 8000 }).then(() => true, () => false);
+    const listedNew = await mgr.evaluate(() => [...document.querySelectorAll("#problems-list .pb-item")].some((e) => /Ln 4\b/.test(e.textContent || "")));
+    check("an unsaved TypeScript error shows up in Problems right away", added && listedNew, JSON.stringify({ before, now: await sbProblems(), listedNew }));
+    await mgr.evaluate((code: string) => (window as any).monaco.editor.getEditors()[0].getModel().setValue(code), typedCode);
+    const gone = await mgr.waitForFunction((n: number) => Number(document.querySelector('#sb-problems .sb-n[data-k="error"]')?.textContent) === n, before.errors, { timeout: 8000 }).then(() => true, () => false);
+    check("fixing it removes the problem (no clearing needed)", gone, JSON.stringify({ before, now: await sbProblems() }));
+    await mgr.evaluate(() => (document.querySelector('#script-list li[data-id="s_typed2"]') as HTMLElement).click());
+    await mgr.waitForFunction(() => (window as any).monaco.editor.getEditors()[0].getModel()?.uri.path === "/Typed2.ts", null, { timeout: 8000 }).catch(() => {});
+    await mgr.locator("#problems-list .pb-item", { hasText: "Type 'string' is not assignable to type 'number'" }).first().click();
+    await mgr.waitForTimeout(300);
+    const jumped = await mgr.evaluate(() => {
+        const ed = (window as any).monaco.editor.getEditors()[0];
+        return { file: ed.getModel()?.uri.path, pos: ed.getPosition(), focused: ed.hasTextFocus() };
+    });
+    check("clicking a problem opens its script with the cursor on its line", jumped.file === "/Typed.ts" && jumped.pos?.lineNumber === 3 && jumped.pos?.column === 7 && jumped.focused, JSON.stringify(jumped));
+    await mgr.keyboard.press("Control+Shift+KeyM");
+    await mgr.waitForTimeout(200);
+    const toggled = await mgr.evaluate(() => document.getElementById("app")!.classList.contains("panel-hidden"));
+    await mgr.keyboard.press("Control+Shift+KeyM");
+    await mgr.waitForTimeout(200);
+    const reshown = await mgr.evaluate(() => !document.getElementById("app")!.classList.contains("panel-hidden") && document.getElementById("log-panel")!.dataset.tab);
+    check("⌘⇧M toggles the Problems view", toggled && reshown === "problems", JSON.stringify({ toggled, reshown }));
+    await mgr.locator("#log-header-title").click();
     // save conflict: the stored copy changes while the editor holds unsaved edits
     await mgr.bringToFront();
     await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "saveScript", id: "s_conf", name: "Conflicted", code: "// v1\n" }, r)));

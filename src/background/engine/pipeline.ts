@@ -16,7 +16,7 @@ import { serveStore } from "./strategies/extensionStrategy";
 import { dlog, dlogLevel } from "../../shared/debugLog";
 import { isThenable, toRunnableJs } from "../../shared/compile";
 import "../../shared/transpile";
-import { log, getScriptErrors, getScriptTypeErrors, getScriptRuleErrors, bodyObservedSince } from "./logs";
+import { log, getScriptErrors, getScriptTypeErrors, getScriptRuleErrors, getScriptRouteWarnings, setScriptRouteWarnings, bodyObservedSince } from "./logs";
 import { missedLine } from "../../shared/netTypes";
 import { makeMissedThrottle, missedReason, missedWhat, routeProblem, MISSED_SKIP_TYPES } from "../../shared/missedTap";
 import { resolveParamValues } from "../../shared/scriptDef";
@@ -176,6 +176,16 @@ export function createPipeline(
     /** `${scriptId}|${message}` → handler labels last reported */
     let routeWarned = new Map<string, string>();
     let helperTimer: ReturnType<typeof setTimeout> | undefined;
+    /** the current route warnings (Problems view): scriptId → "<labels>: <why>" */
+    let routeNow = new Map<string, string[]>();
+    /** helper-down warnings, once their grace period has passed: scriptId → line */
+    let helperNow = new Map<string, string>();
+    function publishRouteWarnings(): void {
+        const all = new Map<string, string[]>();
+        for (const [id, w] of routeNow) all.set(id, [...w]);
+        for (const [id, w] of helperNow) all.set(id, [...(all.get(id) || []), w]);
+        void setScriptRouteWarnings(all);
+    }
     function warnRoutes(scripts: Script[]): void {
         const next = new Map<string, string>();
         const problems: { id: string; name: string; msg: string; labels: string[] }[] = [];
@@ -194,16 +204,21 @@ export function createPipeline(
             for (const [msg, labels] of byMsg) problems.push({ id: s.id, name: s.meta.name, msg, labels });
             if (down.length) helperDown.push({ id: s.id, name: s.meta.name, labels: down });
         }
+        routeNow = new Map();
         for (const p of problems) {
             const key = `${p.id}|${p.msg}`;
             const labels = p.labels.join(", ");
             next.set(key, labels);
             if (routeWarned.get(key) !== labels) log(-1, `[${p.name}] ${labels}: ${p.msg}`, "warn", p.id);
+            routeNow.set(p.id, [...(routeNow.get(p.id) || []), `${labels}: ${p.msg}`]);
         }
         // keep helper-down keys so a reload while it stays down doesn't repeat it
         for (const [k, v] of routeWarned) if (k.endsWith("|helper")) next.set(k, v);
         routeWarned = next;
         if (helperTimer) clearTimeout(helperTimer);
+        const stillDown = new Set(helperDown.map((h) => h.id));
+        helperNow = new Map([...helperNow].filter(([id]) => stillDown.has(id)));
+        publishRouteWarnings();
         if (!helperDown.length) {
             for (const k of [...routeWarned.keys()]) if (k.endsWith("|helper")) routeWarned.delete(k);
             return;
@@ -221,10 +236,13 @@ export function createPipeline(
             for (const h of helperDown) {
                 const key = `${h.id}|helper`;
                 const labels = h.labels.join(", ");
+                const why = `strategy "helper" — ${strategyUnavailable("helper")}; these handlers don't run until it is`;
+                helperNow.set(h.id, `${labels}: ${why}`);
                 if (routeWarned.get(key) === labels) continue;
                 routeWarned.set(key, labels);
-                log(-1, `[${h.name}] ${labels}: strategy "helper" — ${strategyUnavailable("helper")}; these handlers don't run until it is`, "warn", h.id);
+                log(-1, `[${h.name}] ${labels}: ${why}`, "warn", h.id);
             }
+            publishRouteWarnings();
         };
         helperTimer = setTimeout(check, HELPER_GRACE_MS);
     }
@@ -508,6 +526,7 @@ export function createPipeline(
                 const errors = await getScriptErrors();
                 const typeErrors = await getScriptTypeErrors();
                 const ruleErrors = await getScriptRuleErrors();
+                const routeWarnings = await getScriptRouteWarnings();
                 sendResponse(
                     scripts.map((s) => ({
                         ...s,
@@ -515,6 +534,7 @@ export function createPipeline(
                         runtimeError: errors.get(s.id) ?? null,
                         typeErrors: typeErrors.get(s.id) ?? [],
                         ruleErrors: ruleErrors.get(s.id) ?? [],
+                        routeWarnings: routeWarnings.get(s.id) ?? [],
                     }))
                 );
             });

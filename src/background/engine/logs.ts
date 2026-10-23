@@ -159,11 +159,14 @@ export interface ScriptRuntimeError {
 const ERR_KEY = "wtScriptErrors";
 const TYPE_KEY = "wtScriptTypeErrors";
 const RULE_KEY = "wtScriptRuleErrors";
+const ROUTE_KEY = "wtScriptRouteWarnings";
 const runtimeErrors = new Map<string, ScriptRuntimeError>();
 /** TypeScript diagnostics of the SAVED code, reported by the manager's editor */
 const typeErrors = new Map<string, string[]>();
 /** `rules` handlers that couldn't become rules: "onRequest #2: reason" */
 const ruleErrors = new Map<string, string[]>();
+/** handlers that can't run where they are: "<route labels>: <why>" (Problems view warnings) */
+const routeWarnings = new Map<string, string[]>();
 let errorsLoaded: Promise<void> | null = null;
 let errorsTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -180,7 +183,7 @@ function loadErrors(): Promise<void> {
     if (!errorsLoaded) {
         const area = sessionArea();
         errorsLoaded = area
-            ? area.get([ERR_KEY, TYPE_KEY, RULE_KEY]).then(
+            ? area.get([ERR_KEY, TYPE_KEY, RULE_KEY, ROUTE_KEY]).then(
                   (d) => {
                       for (const [k, v] of Object.entries((d?.[ERR_KEY] || {}) as Record<string, ScriptRuntimeError>)) {
                           if (!runtimeErrors.has(k)) runtimeErrors.set(k, v);
@@ -190,6 +193,9 @@ function loadErrors(): Promise<void> {
                       }
                       for (const [k, v] of Object.entries((d?.[RULE_KEY] || {}) as Record<string, string[]>)) {
                           if (!ruleErrors.has(k)) ruleErrors.set(k, v);
+                      }
+                      for (const [k, v] of Object.entries((d?.[ROUTE_KEY] || {}) as Record<string, string[]>)) {
+                          if (!routeWarnings.has(k)) routeWarnings.set(k, v);
                       }
                   },
                   () => {}
@@ -203,8 +209,14 @@ function errorsChanged(): void {
     if (errorsTimer) return;
     errorsTimer = setTimeout(() => {
         errorsTimer = null;
-        void sessionArea()?.set({ [ERR_KEY]: Object.fromEntries(runtimeErrors), [TYPE_KEY]: Object.fromEntries(typeErrors), [RULE_KEY]: Object.fromEntries(ruleErrors) }).catch(() => {});
-        broadcastToUi({ type: "scriptErrors", errors: Object.fromEntries(runtimeErrors), typeErrors: Object.fromEntries(typeErrors), ruleErrors: Object.fromEntries(ruleErrors) });
+        void sessionArea()?.set({ [ERR_KEY]: Object.fromEntries(runtimeErrors), [TYPE_KEY]: Object.fromEntries(typeErrors), [RULE_KEY]: Object.fromEntries(ruleErrors), [ROUTE_KEY]: Object.fromEntries(routeWarnings) }).catch(() => {});
+        broadcastToUi({
+            type: "scriptErrors",
+            errors: Object.fromEntries(runtimeErrors),
+            typeErrors: Object.fromEntries(typeErrors),
+            ruleErrors: Object.fromEntries(ruleErrors),
+            routeWarnings: Object.fromEntries(routeWarnings),
+        });
     }, 150);
 }
 
@@ -286,4 +298,23 @@ export async function setScriptRuleErrors(next: Map<string, string[]>, names: Ma
         changed = true;
     }
     if (changed) errorsChanged();
+}
+
+export async function getScriptRouteWarnings(): Promise<Map<string, string[]>> {
+    await loadErrors();
+    return routeWarnings;
+}
+
+/**
+ * Replace every script's route warnings (scriptId → "<route labels>: <why>").
+ * Not logged here — the pipeline logs each one once when it first appears.
+ */
+export async function setScriptRouteWarnings(next: Map<string, string[]>): Promise<void> {
+    await loadErrors();
+    const cur = JSON.stringify([...routeWarnings].sort(([a], [b]) => a.localeCompare(b)));
+    const want = [...next].filter(([, w]) => w.length).sort(([a], [b]) => a.localeCompare(b));
+    if (cur === JSON.stringify(want)) return;
+    routeWarnings.clear();
+    for (const [id, w] of want) routeWarnings.set(id, w);
+    errorsChanged();
 }

@@ -321,3 +321,30 @@ describe("Chromium extension strategy: how it serves replacements (redirect)", (
         expect(entries.filter((e) => e.scriptId === "a")).toEqual([]);
     });
 });
+
+describe("per-script route warnings (Problems view)", () => {
+    it("replaces the whole map, broadcasts it with scriptErrors, logs nothing; clears", async () => {
+        const logs = await import("../src/background/engine/logs");
+        const msgs: any[] = [];
+        logs.addUiPort({ postMessage: (m: any) => msgs.push(m), onDisconnect: { addListener() {} } } as any);
+        const lastBroadcast = async () => {
+            await new Promise((r) => setTimeout(r, 200));
+            return msgs.filter((m) => m.type === "scriptErrors").pop();
+        };
+        await logs.setScriptRouteWarnings(new Map([["ra", ["onResponseBody: no bodies here"]], ["rb", ["onRequest: helper down"]]]));
+        expect(Object.fromEntries(await logs.getScriptRouteWarnings())).toEqual({ ra: ["onResponseBody: no bodies here"], rb: ["onRequest: helper down"] });
+        expect((await lastBroadcast())?.routeWarnings).toEqual({ ra: ["onResponseBody: no bodies here"], rb: ["onRequest: helper down"] });
+        expect(msgs.some((m) => m.type === "log" && /no bodies here|helper down/.test(m.entry.message))).toBe(false);
+        // unchanged → no new broadcast
+        const n = msgs.length;
+        await logs.setScriptRouteWarnings(new Map([["rb", ["onRequest: helper down"]], ["ra", ["onResponseBody: no bodies here"]]]));
+        await new Promise((r) => setTimeout(r, 200));
+        expect(msgs.length).toBe(n);
+        // a fixed script drops out; empty lists don't count
+        await logs.setScriptRouteWarnings(new Map([["ra", []], ["rb", ["onRequest: helper down"]]]));
+        expect([...(await logs.getScriptRouteWarnings()).keys()]).toEqual(["rb"]);
+        expect((await lastBroadcast())?.routeWarnings).toEqual({ rb: ["onRequest: helper down"] });
+        await logs.setScriptRouteWarnings(new Map());
+        expect((await logs.getScriptRouteWarnings()).size).toBe(0);
+    });
+});

@@ -59,12 +59,28 @@ A saved script, param or setting change taking effect right away, without reload
 _Avoid_: hot reload, live reload, restart
 
 **Compile error**:
-A TypeScript or syntax error in a script; the script doesn't run until it's fixed.
+A syntax error or other failure to load a script; the script doesn't run until it's fixed.
 _Avoid_: build error, script crash
+
+**Type error**:
+A TypeScript type error in a script; the script still runs, since types are dropped when it loads.
+_Avoid_: compile error (for type-only errors), lint error
 
 **Rules error**:
 A handler on the `rules` strategy whose result can't become a browser rule (for example it reads the request); that handler doesn't run, the rest of the script does.
 _Avoid_: DNR error, rule failure
+
+**Runtime error**:
+A handler of a script throwing or failing while it runs; it's shown until the script is saved again or the user dismisses it.
+_Avoid_: crash, exception (in UI text)
+
+**Route warning**:
+A route whose handler can never run with its strategy in the current browser, or whose strategy isn't available right now.
+_Avoid_: strategy error, unsupported route
+
+**Problem**:
+Something currently wrong with a script or `settings.yaml`: a compile error, type error, rules error, runtime error or route warning. It goes away by itself once it's fixed; a missed warning is not a problem, it's about one request.
+_Avoid_: issue, diagnostic, error log
 
 ## Interception
 
@@ -155,8 +171,12 @@ The Editor's list of scripts and `settings.yaml`.
 _Avoid_: script list, sidebar, file tree
 
 **Panel**:
-The Editor's dockable area holding the Log view and the Network view.
+The Editor's dockable area holding the Problems view, the Log view and the Network view.
 _Avoid_: bottom panel, console, devtools
+
+**Problems view**:
+The panel view listing the current problems, grouped by script.
+_Avoid_: issues panel, problems tab, diagnostics
 
 **Log view**:
 The panel view listing engine and script log lines.
@@ -167,7 +187,7 @@ The panel view listing the requests of a tab and what each script did to them.
 _Avoid_: network panel, network tab
 
 **Panel counts**:
-The counts of errors and warnings in the Log view, and observed and modified requests in the Network view, shown on each view's title and in the status bar until that view is cleared.
+The counts shown on each panel view's title and in the status bar: errors and warnings among the current problems (they drop as problems are fixed), errors and warnings in the Log view, and observed and modified requests in the Network view (both kept until that view is cleared).
 _Avoid_: unread counts, tab badges
 
 **Popup**:

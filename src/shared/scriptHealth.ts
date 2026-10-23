@@ -17,7 +17,7 @@ export interface ScriptHealth {
 }
 
 /** Drop engine-internal stack frames (extension / anonymous) — keep the user's. */
-function userFrames(msg: string): string {
+export function userFrames(msg: string): string {
     return msg
         .split("\n")
         .filter((l) => !/^\s*at .*(chrome-extension:|moz-extension:|<anonymous>)/.test(l))

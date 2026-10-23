@@ -14,7 +14,8 @@ searchable list of all of them):
 | ⌘P | Quick-open a script or settings.yaml (cursor position is remembered per file) |
 | ⌘⇧E | Focus the explorer |
 | ⌘B | Show/hide the explorer |
-| ⌘J or ⌘` | Show/hide the Log/Network views |
+| ⌘J or ⌘` | Show/hide the Problems/Log/Network views |
+| ⌘⇧M | Show the Problems view (again: hide it) |
 | ⌥Z | Toggle word wrap |
 | ⌘, | Open Settings |
 | ⌘/, ⌘F, ⌘D | Comment, find, select next occurrence (Monaco) |
@@ -71,9 +72,9 @@ names like `CON`; a name that clashes with another script is refused.
 Reverting an edit back to the saved text clears the unsaved-changes state —
 no discard prompt on a no-op edit.
 
-## Log and Network views
+## Problems, Log and Network views
 
-The bottom panel holds two views. Drag its header (or a view title) to dock it — a
+The bottom panel holds three views. Drag its header (or a view title) to dock it — a
 highlighted preview shows where it lands: **below the Code view**, **full height
 beside the Code view**, or **under the explorer**. Drag its edge to resize; each
 dock remembers its own size, and Esc cancels a drag.
@@ -84,13 +85,26 @@ left or right edge of the window. ⌘J hides the panel wherever it is docked
 ⌘B hides the explorer (and a panel docked under it). The two layout buttons
 at the right of the toolbar do the same.
 
+- **Problems view** — what's wrong with your scripts *right now*, grouped by
+  file like VS Code's: TypeScript errors and warnings, compile errors,
+  invalid `rules` handlers, the last runtime error (exception in a handler),
+  route warnings (a handler its strategy can't run here, or the helper being
+  down) and `settings.yaml` errors. Unlike the Log, entries go away by
+  themselves once fixed: TypeScript problems update live as you type (even
+  before saving); compile, rules and route problems on save; a runtime error
+  on save or with its ×. Click an entry (or Enter) to open the script at that
+  line; ↑/↓ move, ←/→ collapse/expand a file; the box at the top filters by
+  text. ⌘⇧M shows it. Its error/warning counts are on its title and at the
+  far left of the status bar, and follow the scripts — the Log keeps the
+  history.
 - **Log view** — engine and script log lines with level and source filters.
   The errors and warnings it holds are counted in red/yellow badges on its
   title; they stay until the log is cleared (🗑), whether or not you've looked.
-  A VS Code-style status bar along the bottom shows the same counts for both
-  views (errors · warnings, modified · observed) even while the panel is
-  closed; clicking one opens the panel on that view. Turn this off (badges
-  and status bar, both views) in **Settings → Logging → Panel counts**. Script
+  A VS Code-style status bar along the bottom shows the same counts for all
+  three views (Problems at the far left, then Log errors · warnings, Network
+  modified · observed) even while the panel is closed; clicking one opens the
+  panel on that view. Turn this off (badges and status bar, all views) in
+  **Settings → Logging → Panel counts**. Script
   errors (exceptions in handlers, failed compiles) are logged at ERROR, and
   the script gets a ⚠ indicator in the list and the popup. TypeScript errors
   in a saved script also show up there. The download button (↓) saves the

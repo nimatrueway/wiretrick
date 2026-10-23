@@ -427,6 +427,12 @@ await p10d.waitForTimeout(2500); // the check runs 1.5 s after the load complete
 const log10d: string = await mgr.evaluate(() => document.getElementById("log-entries")!.textContent || "");
 check("missed: WARN 'onResponseBody never ran' for a hook route hit by a page load", log10d.includes(`[missed probe] onResponseBody #1 never ran for ${ORIGIN}/html-missed (document) — the "page" strategy only sees`), log10d.match(/.{0,20}never ran.{0,120}/)?.[0] || "(no warning)");
 check("up-front WARN: webrequest onResponseBody can't run on Chromium", log10d.includes(`[webrequest body probe] onResponseBody #1: onResponseBody never runs with strategy "extension" on Chromium`), log10d.match(/.{0,40}never runs with.{0,80}/)?.[0] || "(no warning)");
+const pbRoute10d = () => mgr.evaluate(() => {
+    const items = [...document.querySelectorAll("#problems-list .pb-item.warn")].map((e) => e.textContent || "");
+    return { heads: [...document.querySelectorAll("#problems-list .pb-file")].map((e) => e.textContent), route: items.filter((t) => t.includes("never runs with") && /\broute\b/.test(t)), warnings: Number(document.querySelector('#sb-problems .sb-n[data-k="warn"]')?.textContent) };
+});
+const pb10d = await pbRoute10d();
+check("the up-front route warning is a Problem (warning) of its script", pb10d.heads.includes("webrequest body probe.ts") && pb10d.route.length === 1 && pb10d.warnings >= 1, JSON.stringify(pb10d));
 const row10d: { cls: string; badges: string[] } | null = await mgr.evaluate(() => {
     const tr = [...document.querySelectorAll("#network-view tbody tr")].find((t) => (t.querySelector(".net-name")?.textContent || "").includes("html-missed"));
     return tr ? { cls: tr.className, badges: [...tr.querySelectorAll(".net-badge")].map((b) => b.className) } : null;
@@ -435,6 +441,9 @@ check("missed: the Network row is not marked observed or modified", !!row10d && 
 await p10d.close();
 await setEnabled("s_missed", false);
 await setEnabled("s_missed_wr", false);
+await mgr.waitForFunction(() => ![...document.querySelectorAll("#problems-list .pb-file")].some((e) => e.textContent === "webrequest body probe.ts"), null, { timeout: 5000 }).catch(() => {});
+const pbGone10d = await pbRoute10d();
+check("disabling the script removes its route warning from Problems", !pbGone10d.heads.includes("webrequest body probe.ts") && pbGone10d.warnings < pb10d.warnings, JSON.stringify(pbGone10d));
 
 // ---------- 10e. row markers: every observed-only row carries the dashed marker (incl. consecutive ones) ----------
 await saveScript("s_tapper", `wt.onResponseBody({ url: "${ORIGIN}/tap-api/*", strategy: "page" }, () => undefined);`, "marker tapper");
