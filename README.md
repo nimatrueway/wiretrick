@@ -25,7 +25,7 @@ replace bodies, or patch the DOM.
   only sees fetch/XHR (REST) calls; use `helper`, `extension` or `debugger` for
   robust interception; `rules` turns fixed blocks, redirects and header
   changes into browser-native rules.
-- **No debugger banner needed** — the optional [local helper](docs/process-helper.md)
+- **No debugger banner needed** — the optional [local helper](docs/local-helper.md)
   intercepts at network level on Chrome without the "being debugged" bar.
 - **Built-in devtools** — the Log and Network views show what every script did,
   including original vs. modified bodies.
@@ -71,7 +71,7 @@ Or click **?** → **Samples** for one-click starters against real public sites.
 | [Installing](docs/install.md) | release zips, signed crx, building from source |
 | [Writing scripts](docs/scripting.md) | the `wt` API, routes, parameters, libraries, `onDocument`, stacking, async handlers |
 | [Interception strategies](docs/strategies.md) | `page` / `debugger` / `extension` / `helper` / `rules`, the default and per-handler choice, [which strategies keep the URL when replacing a response](docs/strategies.md#how-each-strategy-serves-a-replacement), the Missed warning, browser compatibility |
-| [Local helper](docs/process-helper.md) | the `helper` strategy: install, how it works, security notes |
+| [Local helper](docs/local-helper.md) | the `helper` strategy: install, how it works, security notes |
 | [The Editor](docs/editor.md) | Code view, Log & Network views, folder sync, `settings.yaml` |
 | [Glossary](GLOSSARY.md) | the words we use for Wiretrick's concepts |
 | [Development](docs/development.md) | build, tests, releases, how the MV3 build works |

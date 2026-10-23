@@ -119,12 +119,12 @@ const targetList = await (await fetch(`http://127.0.0.1:${port}/json/list`)).jso
 const bgWsUrl = targetList.find((t: any) => t.type === "background_page").webSocketDebuggerUrl;
 await new Promise<void>((resolve, reject) => {
     const ws = new WebSocket(bgWsUrl);
-    ws.onopen = () => ws.send(JSON.stringify({ id: 1, method: "Runtime.evaluate", params: { expression: `chrome.tabs.create({url: chrome.runtime.getURL("manager.html")})` } }));
+    ws.onopen = () => ws.send(JSON.stringify({ id: 1, method: "Runtime.evaluate", params: { expression: `chrome.tabs.create({url: chrome.runtime.getURL("editor.html")})` } }));
     ws.onmessage = (m) => { if (JSON.parse(m.data).id === 1) { ws.close(); resolve(); } };
     ws.onerror = () => reject(new Error("background ws error"));
 });
 await new Promise((r) => setTimeout(r, 3000));
-const mgr = ctx.pages().find((p) => p.url().includes("manager.html"));
+const mgr = ctx.pages().find((p) => p.url().includes("editor.html"));
 if (!mgr) { console.error("FATAL: manager page did not open"); process.exit(1); }
 
 const saveScript = (id: string, code: string, name: string): Promise<any> =>

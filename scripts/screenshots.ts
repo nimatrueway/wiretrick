@@ -29,7 +29,7 @@ try {
     const ctx = browser.contexts()[0];
     const mgr = await ctx.newPage();
     await mgr.setViewportSize({ width: 1280, height: 720 });
-    await mgr.goto(`chrome-extension://${EXT_ID}/manager.html`);
+    await mgr.goto(`chrome-extension://${EXT_ID}/editor.html`);
     const send = (msg: any) => mgr.evaluate((m: any) => new Promise<any>((r) => chrome.runtime.sendMessage(m, r)), msg);
     // no local helper here: use the debugger strategy so the log shows real activity
     await mgr.evaluate(() => new Promise<void>((r) => chrome.storage.local.set({ resStrategy: "debugger" }, () => r())));
@@ -46,7 +46,7 @@ try {
     await page.goto("https://dummyjson.com/users/1").catch(() => {});
     await page.close();
 
-    await mgr.goto(`chrome-extension://${EXT_ID}/manager.html?script=shot_Mock_a_fetch_XHR_API`);
+    await mgr.goto(`chrome-extension://${EXT_ID}/editor.html?script=shot_Mock_a_fetch_XHR_API`);
     await sleep(2500);
     await mgr.screenshot({ path: path.join(OUT, "editor.png") });
 

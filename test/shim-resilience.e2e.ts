@@ -60,7 +60,7 @@ try {
     const extId = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find((t: any) => t.type === "background_page").url.split("/")[2];
 
     const seed = await ctx.newPage();
-    await seed.goto(`chrome-extension://${extId}/manager.html`);
+    await seed.goto(`chrome-extension://${extId}/editor.html`);
     await seed.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_shim", name: "Shim probe",
         code: `wt.onResponseBody({ url: "*://*:*/*", strategy: "page" }, (ctx, body) => body);`, // pass-through shim

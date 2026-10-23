@@ -9,7 +9,7 @@ import { parse as parseYaml } from "yaml";
 import { buildBundle, parseBundleText, bundleSettingsDoc, pickBundle, syncFileNameFor, vscodeTargetPath } from "../src/ui/bundle";
 import { SETTINGS_FILE, type SettingsDoc } from "../src/shared/settingsYaml";
 
-const SETTINGS_ID = "__settings__"; // mirrors manager.ts's virtual entry id
+const SETTINGS_ID = "__settings__"; // mirrors editor.ts's virtual entry id
 
 // in-memory chrome.storage — must exist before scriptStore/settingsFile load
 const store: Record<string, any> = {};

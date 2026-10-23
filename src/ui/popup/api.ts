@@ -40,7 +40,7 @@ export const chromePopupApi: PopupApi = {
     getParams: (scriptId) => send({ type: "getScriptParams", scriptId }),
     setParam: async (scriptId, key, value) => void (await send({ type: "setScriptParam", scriptId, key, value })),
     openManager(scriptId) {
-        const url = chrome.runtime.getURL("manager.html") + (scriptId ? `?script=${encodeURIComponent(scriptId)}` : "");
+        const url = chrome.runtime.getURL("editor.html") + (scriptId ? `?script=${encodeURIComponent(scriptId)}` : "");
         chrome.tabs.create({ url });
         window.close();
     },

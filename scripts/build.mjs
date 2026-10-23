@@ -46,8 +46,8 @@ function entriesFor(dist, mv3) {
             output: { file: path.join(dist, "bridge.js"), format: "iife" },
         },
         {
-            input: path.join(root, "src/ui/manager.ts"),
-            output: { file: path.join(dist, "manager.js"), format: "iife" },
+            input: path.join(root, "src/ui/editor.ts"),
+            output: { file: path.join(dist, "editor.js"), format: "iife" },
             external: [/^lib\//],
         },
         {
@@ -125,7 +125,7 @@ async function buildOnce(dist, mv3) {
 /**
  * Monaco files the editor can load: models are only ever "typescript"
  * (scripts, diff editor) and "yaml" (settings) — see monacoSetup.ts and
- * manager.ts — so other languages' modes/workers are skipped. The
+ * editor.ts — so other languages' modes/workers are skipped. The
  * nls.messages.<locale> files load only when a locale is configured
  * (we don't), so the editor stays English.
  */
@@ -154,7 +154,7 @@ async function copyStatic(dist, mv3) {
         await copyFile(path.join(root, "src/background/background.html"), path.join(dist, "background.html"));
         await copyFile(path.join(root, "src/ui/serve.html"), path.join(dist, "serve.html"));
     }
-    await copyFile(path.join(root, "src/ui/manager.html"), path.join(dist, "manager.html"));
+    await copyFile(path.join(root, "src/ui/editor.html"), path.join(dist, "editor.html"));
     await copyFile(path.join(root, "src/ui/ui.css"), path.join(dist, "ui.css"));
     await copyFile(path.join(root, "src/ui/popup.html"), path.join(dist, "popup.html"));
     await copyFile(path.join(root, "src/ui/popup.css"), path.join(dist, "popup.css"));

@@ -32,7 +32,7 @@ most once.
 
 | strategy | how it works | can see | banner? | notes |
 |---|---|---|---|---|
-| `helper` | a tiny local helper ([wiretrick-helper](process-helper.md)) is a loopback HTTPS proxy; a PAC routes only the hosts of `helper` handlers to it and it pauses requests for your handlers | **everything**: documents, script tags, images, workers, XHR — MV2 and MV3 | **never** | **Chromium-only**, needs the helper installed + the helper certificate trusted; your own proxy setting stays in effect |
+| `helper` | a tiny local helper ([wiretrick-helper](local-helper.md)) is a loopback HTTPS proxy; a PAC routes only the hosts of `helper` handlers to it and it pauses requests for your handlers | **everything**: documents, script tags, images, workers, XHR — MV2 and MV3 | **never** | **Chromium-only**, needs the helper installed + the helper certificate trusted; your own proxy setting stays in effect |
 | `page` | MAIN-world content script overrides `fetch` and `XMLHttpRequest` | requests the page's own JS makes (fetch/XHR — the majority of API traffic) | **never** | misses `<script src>`, `<img>`, documents, workers and requests made before the page patch loads; no `onResponseHeaders` |
 | `extension` | the extension handles each request: blocking `webRequest` (+ `filterResponseData` on Firefox) | everything | never | **MV2 builds only** — Firefox and Chromium browsers that still run MV2 (ungoogled-chromium, Brave, Arc…). Redirect, block, request/response headers and synchronous `replaceResponse` (handler or `onRequest` result) work on both (Chromium serves replacements by redirecting, Firefox in place — see [below](#how-each-strategy-serves-a-replacement)); `onResponseBody` and awaiting async handlers are Firefox-only (Chromium has no `filterResponseData`, and its blocking webRequest can't await) |
 | `debugger` | `chrome.debugger` + CDP Fetch domain: pause → run handlers → continue or fulfill | **everything**: documents, script tags, images, fonts, XHR — even requests the page didn't initiate | **yes** — Chrome shows a yellow "being debugged" bar while attached | Chromium-only; attach/detach is lazy and automatic |
@@ -74,7 +74,7 @@ The same text is shown under the strategy picker in Settings → Strategy.
 ## Which strategy for which job?
 
 - **Most things on Chromium** → the default `helper`, with the
-  [local helper](process-helper.md) installed: every resource type, async
+  [local helper](local-helper.md) installed: every resource type, async
   handlers, no banner.
 - **Firefox** → the default `extension`: everything is network-level, no
   banner, ever.
@@ -336,7 +336,7 @@ What reaches what on Chrome:
 | bodies (`onResponseBody`, `replaceResponse`) | ✅ | ✅ | ✅ | ❌ |
 
 The local helper ships for these platforms (each release attaches the
-binaries and a `SHA256SUMS`; the [installer](process-helper.md)
+binaries and a `SHA256SUMS`; the [installer](local-helper.md)
 picks the right one):
 
 | OS | x86-64 | ARM64 |

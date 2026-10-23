@@ -111,7 +111,7 @@ try {
     browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 90000 });
     const ctx = browser.contexts()[0];
     const mgr = await ctx.newPage();
-    await mgr.goto(`chrome-extension://${EXT_ID}/manager.html`);
+    await mgr.goto(`chrome-extension://${EXT_ID}/editor.html`);
     const send = (msg: any) => mgr.evaluate((m: any) => new Promise<any>((r) => chrome.runtime.sendMessage(m, r)), msg);
     // no local helper here: run the samples on the debugger tier (settings.defaultStrategy)
     await mgr.evaluate(() => new Promise<void>((r) => chrome.storage.local.set({ resStrategy: "debugger" }, () => r())));

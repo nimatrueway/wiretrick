@@ -199,14 +199,14 @@ chrome.runtime.onInstalled.addListener(() => {
     chrome.storage.local.get("resManagerOpen", (d) => {
         if (!d || !d.resManagerOpen) return;
         chrome.tabs.query({}, (tabs) => {
-            if (tabs.some((t) => t.url && t.url.includes("manager.html"))) return;
+            if (tabs.some((t) => t.url && t.url.includes("editor.html"))) return;
             dlogLevel("bg", "info", "extension reloaded with the Editor open — reopening it as a tab");
             // reopen in a tab of the last focused window — not a new window
             chrome.windows.getLastFocused((win) => {
                 if (win && win.id !== undefined) {
-                    chrome.tabs.create({ windowId: win.id, url: chrome.runtime.getURL("manager.html") });
+                    chrome.tabs.create({ windowId: win.id, url: chrome.runtime.getURL("editor.html") });
                 } else {
-                    chrome.windows.create({ url: chrome.runtime.getURL("manager.html"), width: 1100, height: 750 });
+                    chrome.windows.create({ url: chrome.runtime.getURL("editor.html"), width: 1100, height: 750 });
                 }
             });
         });

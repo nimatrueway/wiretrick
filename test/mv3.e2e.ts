@@ -122,7 +122,7 @@ try {
     // background_page, MV3 SWs never appear in /json/list) — verify it
     // registers and answers via a manager-page round-trip below
     const mgr = await ctx.newPage();
-    await mgr.goto(`chrome-extension://${extId}/manager.html`);
+    await mgr.goto(`chrome-extension://${extId}/editor.html`);
     await mgr.waitForFunction(() => (window as any).monaco?.editor.getEditors().length === 1, null, { timeout: 20000 }).catch((e: any) => console.log("waitForFunction editor failed:", e.message.slice(0, 100)));
     check("manager opens", true);
     // no local helper in this run: routes without their own strategy use the hook
@@ -762,7 +762,7 @@ try {
     // analyze cache removes the sandbox round-trip; the cache-hit line
     // proves the fast path)
     const warm = await ctx.newPage();
-    await warm.goto(`chrome-extension://${extId}/manager.html`);
+    await warm.goto(`chrome-extension://${extId}/editor.html`);
     await warm.waitForFunction(() => (window as any).monaco?.editor.getEditors().length === 1, null, { timeout: 20000 });
     // the cache-hit line is debug-level — open the filter (also proves the
     // debug path end-to-end)
@@ -797,7 +797,7 @@ try {
     // (a 25s keep-alive ping + a 30s alarms fallback; previously MV3 refused
     // to sync at all while the manager still showed "Scripts Folder ✓")
     const fPage = await ctx.newPage();
-    await fPage.goto(`chrome-extension://${extId}/manager.html`);
+    await fPage.goto(`chrome-extension://${extId}/editor.html`);
     await fPage.waitForFunction(() => (window as any).monaco?.editor.getEditors().length === 1, null, { timeout: 20000 });
     const adopted = await fPage.evaluate(async () => {
         const root = await navigator.storage.getDirectory();

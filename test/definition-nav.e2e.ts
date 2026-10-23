@@ -46,7 +46,7 @@ const ctx = browser.contexts()[0];
 const extId = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find((t: any) => t.type === "background_page").url.split("/")[2];
 const openManager = async (): Promise<any> => {
     const p = await ctx.newPage();
-    await p.goto(`chrome-extension://${extId}/manager.html`);
+    await p.goto(`chrome-extension://${extId}/editor.html`);
     return p;
 };
 

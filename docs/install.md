@@ -53,6 +53,6 @@ npm install && npm run build
 
 ## Optional: local helper
 
-The [`helper` strategy](process-helper.md) needs a small native helper.
+The [`helper` strategy](local-helper.md) needs a small native helper.
 Settings → Local helper shows a one-line install command with your extension
-id filled in; see [process-helper.md](process-helper.md#install).
+id filled in; see [local-helper.md](local-helper.md#install).

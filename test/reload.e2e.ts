@@ -59,7 +59,7 @@ try {
 
     // a hook-tier script: transform /data responses
     const seed = await ctx.newPage();
-    await seed.goto(`chrome-extension://${extId}/manager.html`);
+    await seed.goto(`chrome-extension://${extId}/editor.html`);
     await seed.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_h", name: "Hooked",
         code: `wt.onResponseBody({ url: "*://*:*/*", strategy: "page" }, (ctx, body) => body.replace("ORIGINAL", "HOOKED"));`,
@@ -77,7 +77,7 @@ try {
 
     // reload the extension — the old content scripts' context dies
     const mgr = await ctx.newPage();
-    await mgr.goto(`chrome-extension://${extId}/manager.html`);
+    await mgr.goto(`chrome-extension://${extId}/editor.html`);
     await mgr.waitForTimeout(1000);
     await mgr.evaluate(() => chrome.runtime.reload());
     // NOTE: mgr's context dies with the reload — don't touch it again
