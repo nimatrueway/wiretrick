@@ -234,7 +234,7 @@ export async function analyzeScripts(scripts: { id: string; name: string; code: 
         // FAST PATH: chrome.storage.session-cached analyses, valid while no
         // script's updatedAt changed. A freshly-woken SW serves a page's
         // getHookBundle from here (one storage read) instead of booting the
-        // offscreen doc + sandbox — the difference between onDom running at
+        // offscreen doc + sandbox — the difference between onDocument running at
         // document_start and after the page already initialized.
         const cached = await readAnalyzeCache();
         if (cached && scripts.every((s) => cached[s.id]?.updatedAt === s.updatedAt && cached[s.id]?.paramSig === sig)) {
@@ -263,7 +263,7 @@ export async function analyzeScripts(scripts: { id: string; name: string; code: 
     await ensureOffscreen();
     const resp = await sandboxCallSafe({ op: "analyze", scripts: scripts.map((s) => ({ ...s, enabled: true })), paramValues: paramValues || {} });
     if (!resp) {
-        dlogLevel("compile", "error", `sandbox analyze FAILED for ${scripts.length} script(s) — the page bundle serves WITHOUT them (no interception/onDom until the next successful analyze)`);
+        dlogLevel("compile", "error", `sandbox analyze FAILED for ${scripts.length} script(s) — the page bundle serves WITHOUT them (no interception/onDocument until the next successful analyze)`);
         return out;
     }
     for (const s of scripts) {

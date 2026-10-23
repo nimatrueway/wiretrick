@@ -84,7 +84,7 @@ binary.
   run — there is no fallback; the Log view warns and the script gets a ⚠. Pick
   another default strategy in Settings → Strategy, or set `strategy`
   on the route.
-- Firefox doesn't need it: `webRequest` already gives the same reach there.
+- Firefox doesn't need it: the `extension` strategy already gives the same reach there.
 - Responses rewritten by the helper are served `no-store`. The browser cache
   for literal hosts in `helper` routes is cleared when the routed set changes, so
   stale cached copies don't skip your handlers.

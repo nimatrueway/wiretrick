@@ -36,7 +36,7 @@ declare namespace Wiretrick {
          *
          * @example
          * wt.onRequest("https://api.example.com/users/:id", (ctx) => {
-         *     if (ctx.groups.id === "42") return { respond: { body: { id: 42 } } };
+         *     if (ctx.groups.id === "42") return { replaceResponse: { body: { id: 42 } } };
          * });
          */
         groups: { [name: string]: string };
@@ -46,7 +46,7 @@ declare namespace Wiretrick {
      * Interception strategy that runs a handler. Every handler runs
      * on exactly **one** strategy: its route's `strategy`, else
      * `settings.defaultStrategy` (Settings → Strategy; default `"helper"` on
-     * Chromium, `"webRequest"` on Firefox). There is no fallback: when the
+     * Chromium, `"extension"` on Firefox). There is no fallback: when the
      * strategy isn't available, the handler doesn't run and the Log view says why.
      *
      * - `"helper"` — the local wiretrick-helper (a proxy). Sees every
@@ -56,7 +56,8 @@ declare namespace Wiretrick {
      *   no helper) but sees **only** page fetch/XHR (`"xmlhttprequest"`) —
      *   no documents, `<script src>`, images or worker requests, and no
      *   `onResponseHeaders`.
-     * - `"webRequest"` — blocking webRequest. Firefox (reads bodies) and MV2
+     * - `"extension"` — the extension handles each request (blocking
+     *   webRequest). Firefox (reads bodies) and MV2
      *   Chromium (no `onResponseBody`, sync handlers only). On Chromium the
      *   page itself (`main_frame`) can be redirected and its headers changed,
      *   but a replaced page is served from a `chrome-extension://` URL — use
@@ -69,13 +70,13 @@ declare namespace Wiretrick {
      *   **once** when scripts load and must return the same result for every
      *   request: it may use `ctx.groups.*` and `ctx.url` only as-is inside a
      *   redirect URL, and may not read anything else from `ctx`. No
-     *   `respond`, `replaceResponse`, `onResponseBody` or `exclude`. A handler
+     *   `replaceResponse` (handler or result), `onResponseBody` or `exclude`. A handler
      *   that can't become a rule doesn't run, and its script shows an error.
      *   Chrome (MV3 and MV2) and Firefox.
      *
      * @see https://github.com/nimatrueway/wiretrick/blob/main/docs/strategies.md#compatibility
      */
-    type Strategy = "helper" | "page" | "webRequest" | "debugger" | "rules";
+    type Strategy = "helper" | "page" | "extension" | "debugger" | "rules";
 
     /** webRequest resource type names (also `ctx.resourceType`). */
     type ResourceType =
@@ -135,7 +136,7 @@ declare namespace Wiretrick {
          * - `debugger`: the debugger only pauses these types (`Fetch.enable`
          *   patterns), so other requests are never stopped — the cheapest
          *   way to keep a route off images, fonts and other assets.
-         * - `webRequest`: checked in the listener before any script runs.
+         * - `extension`: checked in the listener before any script runs.
          * - `helper`: checked after the helper pauses the request, so it
          *   filters correctly but saves no work.
          * - `page`: only sees page fetch/XHR (`"xmlhttprequest"`); any list
@@ -150,7 +151,7 @@ declare namespace Wiretrick {
          * A single value — there is no fallback. See {@link Strategy}.
          *
          * @example { url: "*://example.com/app/*.js", resourceTypes: ["script"], strategy: "debugger" }
-         * @example { url: "*://ads.example.com/*", strategy: wt.isMV3 ? "rules" : "webRequest" }
+         * @example { url: "*://ads.example.com/*", strategy: wt.isMV3 ? "rules" : "extension" }
          */
         strategy?: Strategy;
     }
@@ -158,16 +159,16 @@ declare namespace Wiretrick {
     /** Where a network handler applies: URL pattern(s) or the full {@link RouteOptions} form. */
     type Route = UrlPatterns | RouteOptions;
 
-    /** Full route form for `wt.onDom`. */
-    interface DomRouteOptions extends DomOptions {
+    /** Full route form for `wt.onDocument`. */
+    interface DocumentRouteOptions extends DocumentOptions {
         /** Frame URLs (top page and iframes) to run in. See {@link UrlPatterns}. */
         url: UrlPatterns;
         /** Frame URLs to skip even when `url` matches. */
         exclude?: UrlPatterns;
     }
 
-    /** Where an `onDom` handler runs: URL pattern(s) or the full {@link DomRouteOptions} form. */
-    type DomRoute = UrlPatterns | DomRouteOptions;
+    /** Where an `onDocument` handler runs: URL pattern(s) or the full {@link DocumentRouteOptions} form. */
+    type DocumentRoute = UrlPatterns | DocumentRouteOptions;
 
     /** Header edits. */
     interface HeaderMod {
@@ -187,8 +188,8 @@ declare namespace Wiretrick {
         remove?: string[];
     }
 
-    /** A synthesized response (`onRequest` → `{ respond }`). */
-    interface RespondOptions {
+    /** A synthesized response: the `onRequest` → `{ replaceResponse }` result (a replacement). */
+    interface ReplacementOptions {
         /**
          * Response body. Strings and bytes are sent as-is; any other object
          * is JSON-serialized.
@@ -206,12 +207,12 @@ declare namespace Wiretrick {
     }
 
     /**
-     * What `onRequest` may return. `respond`, `redirect` and `block` are
+     * What `onRequest` may return. `replaceResponse`, `redirect` and `block` are
      * **final** (first script wins); `headers` is not.
      */
     interface RequestResult {
-        /** Respond immediately without contacting the network (final). */
-        respond?: RespondOptions;
+        /** Serve this replacement without contacting the network (final). */
+        replaceResponse?: ReplacementOptions;
         /** Redirect the request to this URL (final). */
         redirect?: string;
         /** Block the request entirely (final). */
@@ -264,15 +265,15 @@ declare namespace Wiretrick {
         set(key: string, value: any): Promise<void>;
     }
 
-    /** Timing for `wt.onDom` (part of its route object). */
-    interface DomOptions {
+    /** Timing for `wt.onDocument` (part of its route object). */
+    interface DocumentOptions {
         /**
-         * **When** the `onDom` handler runs, relative to the page's own loading.
+         * **When** the `onDocument` handler runs, relative to the page's own loading.
          * Default: `"DOMContentLoaded"`.
          *
          * **How it gets there:** in every frame (top page *and* iframes) the
          * extension injects a small hook at `document_start`. The hook asks
-         * the background for the scripts with an `onDom` route covering *that
+         * the background for the scripts with an `onDocument` route covering *that
          * frame's* URL, compiles them, and schedules each matching handler
          * according to its own `when`.
          *
@@ -316,7 +317,7 @@ declare namespace Wiretrick {
          * - Saving the script while the page is open re-runs the handler
          *   **immediately**, regardless of `when` (live update) — make
          *   handlers idempotent.
-         * - A script may register several `onDom` handlers, each with its
+         * - A script may register several `onDocument` handlers, each with its
          *   own route and `when`. Handlers with the same `when` run in
          *   script-list order, then registration order.
          * - Async handlers are not awaited; `when` controls only when they
@@ -328,13 +329,13 @@ declare namespace Wiretrick {
          *
          * @example
          * // default: DOMContentLoaded
-         * wt.onDom("*://example.com/*", () => {
+         * wt.onDocument("*://example.com/*", () => {
          *     document.title = "🎯 " + document.title;
          * });
          *
          * @example
          * // before page scripts (best effort, see race caveat)
-         * wt.onDom({ url: "*://example.com/*", when: "document_start" }, () => {
+         * wt.onDocument({ url: "*://example.com/*", when: "document_start" }, () => {
          *     Object.defineProperty(navigator, "webdriver", {
          *         get: () => false,
          *     });
@@ -342,7 +343,7 @@ declare namespace Wiretrick {
          *
          * @example
          * // after everything loaded, then keep it applied across re-renders
-         * wt.onDom({ url: "*://example.com/*", when: "document_idle" }, () => {
+         * wt.onDocument({ url: "*://example.com/*", when: "document_idle" }, () => {
          *     const apply = () => {
          *         for (const ad of document.querySelectorAll(".ad")) ad.remove();
          *     };
@@ -508,7 +509,7 @@ declare namespace Wiretrick {
  *
  * **Stacking** — when several handlers match one request they run in list
  * order (scripts top to bottom in the Editor, then registration order):
- * - `onRequest`: the first *final* result (`respond`/`redirect`/
+ * - `onRequest`: the first *final* result (`replaceResponse`/`redirect`/
  *   `block`) wins and stops the chain; headers-only or `void` results
  *   don't stop it.
  * - `onResponseHeaders`: **all** matching handlers run; `set` is applied in
@@ -520,18 +521,18 @@ declare namespace Wiretrick {
  * strategy (see {@link Wiretrick.Strategy}).
  *
  * **Async** — every handler may return a Promise. On Chromium's
- * `"webRequest"` strategy `onRequest`/`onResponseHeaders` must be
+ * `"extension"` strategy `onRequest`/`onResponseHeaders` must be
  * synchronous (an async result is ignored with a warning); every other
  * strategy awaits it.
  */
 declare const wt: {
     /**
-     * Intercept a request before it is sent. Return `{ respond }`,
+     * Intercept a request before it is sent. Return `{ replaceResponse }`,
      * `{ redirect }`, `{ block }`, `{ headers }` or a combination.
      *
      * **Final** results — the first one wins and stops the chain:
-     * - `respond` — synthesize the response; the network is never contacted.
-     *   On Chromium's `"webRequest"` strategy it is served as a data-URL
+     * - `replaceResponse` — synthesize the response; the network is never contacted.
+     *   On Chromium's `"extension"` strategy it is served as a data-URL
      *   redirect, so only status 200 is possible there.
      * - `redirect` — continue at another URL.
      * - `block` — fail the request.
@@ -544,7 +545,7 @@ declare const wt: {
      * @example
      * // answer an endpoint without the network
      * wt.onRequest("https://api.example.com/users/:id", (ctx) => ({
-     *     respond: { body: { id: Number(ctx.groups.id), name: "Mock" } },
+     *     replaceResponse: { body: { id: Number(ctx.groups.id), name: "Mock" } },
      * }));
      *
      * @example
@@ -604,8 +605,8 @@ declare const wt: {
      * bytes) and returns the new one. Matching transforms compose in order.
      *
      * Needs a strategy that reads bodies: `"helper"`, `"debugger"`, `"page"`
-     * (page fetch/XHR only) or `"webRequest"` on Firefox. Chromium's
-     * `"webRequest"` can't read bodies — the handler doesn't run there and
+     * (page fetch/XHR only) or `"extension"` on Firefox. Chromium's
+     * `"extension"` strategy can't read bodies — the handler doesn't run there and
      * the Log view says so.
      *
      * @param route Where it applies — see {@link Wiretrick.Route}.
@@ -634,24 +635,24 @@ declare const wt: {
      * several, each with its own route and `when`.
      *
      * @param route Frame URL pattern(s), or `{ url, exclude, when }`. See
-     * {@link Wiretrick.DomOptions.when} for exact timing, the MV3
+     * {@link Wiretrick.DocumentOptions.when} for exact timing, the MV3
      * `document_start` race, SPA/re-render behavior and live-update re-runs.
      * @param handler Receives the same `ctx` shape as `onRequest` (`url` is
      * the frame's URL). May be async (not awaited).
      *
      * @example
-     * wt.onDom("*://example.com/*", () => {
+     * wt.onDocument("*://example.com/*", () => {
      *     document.title = "🎯 " + document.title;
      * });
      *
      * @example
      * // after everything settled
-     * wt.onDom({ url: "*://example.com/*", when: "document_idle" }, () => {
+     * wt.onDocument({ url: "*://example.com/*", when: "document_idle" }, () => {
      *     const el = document.querySelector("h1");
      *     if (el) el.textContent = "Intercepted";
      * });
      */
-    onDom(route: Wiretrick.DomRoute, handler: (ctx: Wiretrick.RequestCtx) => Wiretrick.Awaitable<void>): void;
+    onDocument(route: Wiretrick.DocumentRoute, handler: (ctx: Wiretrick.RequestCtx) => Wiretrick.Awaitable<void>): void;
 
     /**
      * One-line description: shown as a tooltip in the Editor and the
@@ -685,7 +686,7 @@ declare const wt: {
      * });
      *
      * wt.onRequest(cfg.hosts.map((h) => `*://${h}/api/*`), () => {
-     *     if (cfg.enabled) return { respond: { status: Number(cfg.status), body: { error: "forced" } } };
+     *     if (cfg.enabled) return { replaceResponse: { status: Number(cfg.status), body: { error: "forced" } } };
      * });
      *
      * @example
@@ -737,7 +738,7 @@ declare const wt: {
      * Always the opposite of {@link isFirefox}.
      *
      * @example
-     * wt.onResponseBody({ url: "*://example.com/app.js", strategy: wt.isFirefox ? "webRequest" : "helper" }, (ctx, body) => body);
+     * wt.onResponseBody({ url: "*://example.com/app.js", strategy: wt.isFirefox ? "extension" : "helper" }, (ctx, body) => body);
      */
     readonly isChrome: boolean;
 
@@ -752,10 +753,10 @@ declare const wt: {
 
     /**
      * `true` in the Manifest V3 build (`dist-mv3/`: current Chrome / Edge),
-     * where the `webRequest` strategy isn't available.
+     * where the `extension` strategy isn't available.
      *
      * @example
-     * wt.onRequest({ url: "*://api.example.com/*", strategy: wt.isMV3 ? "debugger" : "webRequest" }, fn);
+     * wt.onRequest({ url: "*://api.example.com/*", strategy: wt.isMV3 ? "debugger" : "extension" }, fn);
      */
     readonly isMV3: boolean;
 };

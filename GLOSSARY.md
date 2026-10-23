@@ -19,8 +19,8 @@ A function exported by a library that registers handlers on behalf of the script
 _Avoid_: macro, preset
 
 **Handler**:
-One registration in a script (`wt.onRequest`, `wt.onResponseHeaders`, `wt.onResponseBody`, `wt.replaceResponse` or `wt.onDom`) pairing a route with a function.
-_Avoid_: hook, rule, interceptor, listener
+One registration in a script (`wt.onRequest`, `wt.onResponseHeaders`, `wt.onResponseBody`, `wt.replaceResponse` or `wt.onDocument`) pairing a route with a function.
+_Avoid_: hook, rule, interceptor, listener, onDom
 
 **Body handler**:
 A `wt.onResponseBody` or `wt.replaceResponse` handler: one that works on a response body.
@@ -43,12 +43,12 @@ The user's on/off switch for a script; a library has none.
 _Avoid_: active, on, running
 
 **Final result**:
-An `onRequest` result that ends the request's handler chain: respond, redirect or block.
-_Avoid_: terminal result, short-circuit, cancel
+An `onRequest` result that ends the request's handler chain: `replaceResponse`, `redirect` or `block`.
+_Avoid_: terminal result, short-circuit, cancel, respond
 
 **Replacement**:
-A whole new response that Wiretrick serves instead of the real one (from `replaceResponse` or `respond`).
-_Avoid_: mock, override, fake response
+A whole new response that Wiretrick serves instead of the real one (from a `wt.replaceResponse` handler or an `onRequest` `replaceResponse` result).
+_Avoid_: mock, override, fake response, respond
 
 **Stacking**:
 How several handlers matching the same request combine, in explorer order.
@@ -69,8 +69,8 @@ _Avoid_: DNR error, rule failure
 ## Interception
 
 **Strategy**:
-The browser mechanism a handler intercepts through: `helper`, `page`, `webRequest`, `debugger` or `rules`. Each handler uses exactly one.
-_Avoid_: tier, mode, backend, method, interception (as a section name), `process`, `hook`, `webrequest`, `cdp`, `dnr`, `declarative`
+The browser mechanism a handler intercepts through: `helper`, `page`, `extension` (the extension handles each request), `debugger` or `rules`. Each handler uses exactly one.
+_Avoid_: tier, mode, backend, method, interception (as a section name), `process`, `hook`, `webrequest`, `webRequest`, `cdp`, `dnr`, `declarative`
 
 **Default strategy**:
 The strategy a handler uses when its route doesn't name one, chosen in Settings (`defaultStrategy` in `settings.yaml`).

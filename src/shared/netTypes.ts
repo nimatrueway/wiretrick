@@ -84,7 +84,7 @@ export interface NetEntry {
     responseBody?: NetBody;
     /** the upstream body before a script modified it */
     originalResponseBody?: NetBody;
-    /** recorded only from a script action (hook-tier respond/replace never hits the network) */
+    /** recorded only from a script action (a page-strategy replacement never hits the network) */
     synthetic?: boolean;
     interventions: NetIntervention[];
 }

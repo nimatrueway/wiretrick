@@ -20,12 +20,12 @@ describe("normalizeRoute", () => {
         });
     });
 
-    it("onDom: when defaults to DOMContentLoaded; request-only options are rejected", () => {
-        expect(normalizeRoute("onDom", "*", 0).when).toBe("DOMContentLoaded");
-        expect(normalizeRoute("onDom", { url: "*", when: "document_idle" }, 0).when).toBe("document_idle");
-        expect(() => normalizeRoute("onDom", { url: "*", when: "later" }, 0)).toThrow(/when must be one of/);
-        expect(() => normalizeRoute("onDom", { url: "*", methods: ["GET"] }, 0)).toThrow(/doesn't apply to onDom/);
-        expect(() => normalizeRoute("onRequest", { url: "*", when: "document_idle" }, 0)).toThrow(/onDom only/);
+    it("onDocument: when defaults to DOMContentLoaded; request-only options are rejected", () => {
+        expect(normalizeRoute("onDocument", "*", 0).when).toBe("DOMContentLoaded");
+        expect(normalizeRoute("onDocument", { url: "*", when: "document_idle" }, 0).when).toBe("document_idle");
+        expect(() => normalizeRoute("onDocument", { url: "*", when: "later" }, 0)).toThrow(/when must be one of/);
+        expect(() => normalizeRoute("onDocument", { url: "*", methods: ["GET"] }, 0)).toThrow(/doesn't apply to onDocument/);
+        expect(() => normalizeRoute("onRequest", { url: "*", when: "document_idle" }, 0)).toThrow(/onDocument only/);
     });
 
     it("rejects missing / malformed routes", () => {
@@ -77,7 +77,7 @@ describe("routeMatches", () => {
 describe("strategy", () => {
     it("route.strategy wins; otherwise settings.defaultStrategy; built-in default per browser", () => {
         expect(builtinStrategy(false)).toBe("helper");
-        expect(builtinStrategy(true)).toBe("webRequest");
+        expect(builtinStrategy(true)).toBe("extension");
         expect(getDefaultStrategy()).toBe("helper");
         setDefaultStrategy("page");
         expect(effectiveStrategy({})).toBe("page");
@@ -93,20 +93,20 @@ describe("strategy", () => {
 
     it("labels and url union", () => {
         const a = normalizeRoute("onResponseBody", ["*://a.com/*", "*://b.com/*"], 1);
-        const b = normalizeRoute("onDom", "*://a.com/*", 0);
+        const b = normalizeRoute("onDocument", "*://a.com/*", 0);
         expect(routeLabel(a)).toBe("onResponseBody #2");
         expect(scriptUrls([a, b])).toEqual(["*://a.com/*", "*://b.com/*"]);
     });
 });
 
-describe("page shim (onDom in the page)", () => {
+describe("page shim (onDocument in the page)", () => {
     const shim = () => makePageShim({ params: { host: "a.com", n: 3 }, log: () => {}, storage: { get: () => undefined, set: () => undefined } });
 
-    it("collects several onDom handlers with routes; network handlers are inert", () => {
+    it("collects several onDocument handlers with routes; network handlers are inert", () => {
         const { wt, dom } = shim();
         wt.onRequest("*", () => {});
-        wt.onDom({ url: "*://a.com/*", when: "document_idle" }, () => 1);
-        wt.onDom("*://b.com/*", () => 2);
+        wt.onDocument({ url: "*://a.com/*", when: "document_idle" }, () => 1);
+        wt.onDocument("*://b.com/*", () => 2);
         expect(dom.map((d) => [d.when, d.route.index])).toEqual([
             ["document_idle", 0],
             ["DOMContentLoaded", 1],
@@ -119,6 +119,6 @@ describe("page shim (onDom in the page)", () => {
         const { wt } = shim();
         expect(wt.params({ host: { type: "string" } })).toEqual({ host: "a.com" });
         expect(wt.defineParam("n", { type: "number" })).toBe(3);
-        expect(() => wt.onDom("*")).toThrow(/second argument/);
+        expect(() => wt.onDocument("*")).toThrow(/second argument/);
     });
 });

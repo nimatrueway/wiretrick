@@ -10,7 +10,7 @@ wt.about("Debug the user API");
 
 const API = "*://app.example.com/api/*";
 
-// Redirect / block / request headers / respond:
+// Redirect / block / request headers / replaceResponse:
 wt.onRequest(API, (ctx) => {
     // return { redirect: "https://myserver/user.json" };
     // return { block: true };
@@ -29,7 +29,7 @@ wt.onResponseHeaders(API, () => ({
 wt.onResponseBody("*://app.example.com/api/user*", (ctx, body) => String(body).replace('"role":"user"', '"role":"admin"'));
 
 // Patch the page itself:
-wt.onDom("*://app.example.com/*", () => {
+wt.onDocument("*://app.example.com/*", () => {
     document.title = "🎯 " + document.title;
 });
 ```
@@ -47,7 +47,7 @@ The first argument of every handler says where it applies:
 | one URL pattern | `wt.onRequest("*://example.com/*", fn)` |
 | a list | `wt.onRequest(["*://a.example.com/*", "*://b.example.com/*"], fn)` |
 | route object | `wt.onRequest({ url, exclude, methods, resourceTypes, strategy }, fn)` |
-| `onDom` route object | `wt.onDom({ url, exclude, when }, fn)` |
+| `onDocument` route object | `wt.onDocument({ url, exclude, when }, fn)` |
 
 An empty list matches **nothing**, never everything.
 
@@ -74,7 +74,7 @@ Named groups land in `ctx.groups` (`*` wildcards as `"0"`, `"1"`, …):
 
 ```ts
 wt.onRequest("https://api.example.com/users/:id", (ctx) => {
-    if (ctx.groups.id === "42") return { respond: { body: { id: 42, name: "Mock" } } };
+    if (ctx.groups.id === "42") return { replaceResponse: { body: { id: 42, name: "Mock" } } };
 });
 ```
 
@@ -113,14 +113,14 @@ wt.onResponseBody(
   | strategy | how `resourceTypes` is applied |
   |---|---|
   | `debugger` | Only these types are paused (the debugger's `Fetch.enable` patterns); other requests are never stopped. The cheapest way to keep a route off images, fonts and other assets. |
-  | `webRequest` | Checked in the listener before any script runs. |
+  | `extension` | Checked in the listener before any script runs. |
   | `helper` | Checked after the helper pauses the request: filters correctly, saves no work. |
   | `page` | Only sees page fetch/XHR (`xmlhttprequest`). A list without `xmlhttprequest` means the handler never runs, and the Log view warns. |
   | `rules` | Part of the browser-native rule: other types never match. |
 
-  `onDom` routes have no `resourceTypes` or `methods`.
+  `onDocument` routes have no `resourceTypes` or `methods`.
 - **`strategy`** — run this handler on one [strategy](strategies.md):
-  `"helper"`, `"page"`, `"webRequest"`, `"debugger"` or `"rules"`. Omit to use the default
+  `"helper"`, `"page"`, `"extension"`, `"debugger"` or `"rules"`. Omit to use the default
   from Settings → Strategy. There is no fallback: when the strategy
   isn't available, the handler doesn't run and the Log view says why.
   To pick per browser or build, use `wt.isChrome`, `wt.isFirefox`,
@@ -128,9 +128,9 @@ wt.onResponseBody(
   MV3 is the `dist-mv3/` build):
 
   ```ts
-  wt.onResponseBody({ url: "*://example.com/app.js", strategy: wt.isFirefox ? "webRequest" : "helper" }, (ctx, body) => body);
-  wt.onRequest({ url: "*://api.example.com/*", strategy: wt.isMV3 ? "debugger" : "webRequest" }, fn);
-  wt.onRequest({ url: "*://ads.example.com/*", strategy: wt.isMV3 ? "rules" : "webRequest" }, () => ({ block: true }));
+  wt.onResponseBody({ url: "*://example.com/app.js", strategy: wt.isFirefox ? "extension" : "helper" }, (ctx, body) => body);
+  wt.onRequest({ url: "*://api.example.com/*", strategy: wt.isMV3 ? "debugger" : "extension" }, fn);
+  wt.onRequest({ url: "*://ads.example.com/*", strategy: wt.isMV3 ? "rules" : "extension" }, () => ({ block: true }));
   ```
 
   On `rules` the handler runs once when scripts load and its fixed result
@@ -140,9 +140,9 @@ wt.onResponseBody(
 > **Tip:** `page` is the lightest strategy, but it only sees the page's own
 > fetch/XHR (REST/API) calls. For documents, `<script src>`, images,
 > workers, or anything that must not slip through, use `helper`,
-> `webRequest` or `debugger`. See [strategies](strategies.md).
+> `extension` or `debugger`. See [strategies](strategies.md).
 >
-> **Note:** on Chromium MV2, `webRequest` can redirect the page itself and
+> **Note:** on Chromium MV2, `extension` can redirect the page itself and
 > change its headers, but not its body in place: `onResponseBody` never
 > runs and a replaced page moves to a `chrome-extension://` URL. Use
 > `helper` or `debugger` for that ([details](strategies.md#which-strategy-for-which-job)).
@@ -168,7 +168,7 @@ const cfg = wt.params({
 
 wt.onRequest("*://app.example.com/posts/*", () => {
     if (!cfg.enabled) return;
-    return { respond: { status: Number(cfg.status), body: { error: cfg.note, tags: cfg.tags } } };
+    return { replaceResponse: { status: Number(cfg.status), body: { error: cfg.note, tags: cfg.tags } } };
 });
 ```
 
@@ -241,7 +241,7 @@ entry and params):
 ```ts
 // library "mocks":
 export function mockJson(url: string, body: object) {
-    wt.onRequest(url, () => ({ respond: { body } }));
+    wt.onRequest(url, () => ({ replaceResponse: { body } }));
 }
 
 // script:
@@ -273,9 +273,9 @@ import { envParam } from "./utils";
 const cfg = wt.params({ intercept_environments: envParam });
 ```
 
-## DOM changes — `wt.onDom`
+## DOM changes — `wt.onDocument`
 
-`wt.onDom` is not a network strategy — it registers a **DOM-ready callback
+`wt.onDocument` is not a network strategy — it registers a **DOM-ready callback
 that runs inside the page's MAIN world** (the same world as the page's own
 JS). Its route is frame URL pattern(s), or `{ url, exclude, when }`. A
 script may register several, each with its own route and `when`. Exact
@@ -284,8 +284,8 @@ timing:
 1. **Injection**: our bridge content script (`document_start`, isolated
    world) injects `hook.js` into the page via a script tag before any page
    script runs. The hook asks the background for the scripts with an
-   `onDom` route matching this frame's URL and compiles them.
-2. **Registration**: while compiling, the `wt.onDom(route, handler)` calls
+   `onDocument` route matching this frame's URL and compiles them.
+2. **Registration**: while compiling, the `wt.onDocument(route, handler)` calls
    whose route matches the frame are captured (the handler is stored, not
    yet run).
 3. **Execution**: by default the captured handlers run exactly once, when
@@ -303,10 +303,10 @@ timing:
    the same `when` run in script-list order, then registration order.
 
    ```ts
-   wt.onDom("*://example.com/*", () => { ... });                                       // default: DOMContentLoaded
-   wt.onDom({ url: "*://example.com/*", when: "document_start" }, () => { ... });      // while HTML is still parsing
-   wt.onDom({ url: "*://example.com/*", when: "document_end" }, () => { ... });        // alias of DOMContentLoaded
-   wt.onDom({ url: "*://example.com/*", when: "document_idle" }, () => { ... });       // after window load
+   wt.onDocument("*://example.com/*", () => { ... });                                       // default: DOMContentLoaded
+   wt.onDocument({ url: "*://example.com/*", when: "document_start" }, () => { ... });      // while HTML is still parsing
+   wt.onDocument({ url: "*://example.com/*", when: "document_end" }, () => { ... });        // alias of DOMContentLoaded
+   wt.onDocument({ url: "*://example.com/*", when: "document_idle" }, () => { ... });       // after window load
    ```
 
    | `when` | Runs | DOM state | Use for |
@@ -336,7 +336,7 @@ timing:
      extension's isolated world — same DOM and timing, but page globals
      (`window.myApp`) aren't visible.
 
-Because it runs as page JS, `wt.onDom` works regardless of how the response
+Because it runs as page JS, `wt.onDocument` works regardless of how the response
 arrived — service-worker-served HTML, cached pages, or hydration overwriting
 a body transform — which is exactly why it's the resilient choice for
 title/DOM changes on SPAs.
@@ -348,18 +348,18 @@ scripts top to bottom in the Editor, then registration order within a
 script. Per kind:
 
 **`wt.onRequest`** — the first handler that returns a *final* result
-(`respond`, `redirect`, or `block`) wins and stops the chain; later
+(`replaceResponse`, `redirect`, or `block`) wins and stops the chain; later
 handlers don't run for that request. Handlers that return nothing (or only
 `headers`) don't stop the chain — their header changes merge (later `set`
 wins per key, `remove` accumulates) and apply even when a later handler
 returns a final result.
 
-**`respond`** — a final result that synthesizes the response immediately,
+**`replaceResponse`** — a final result that synthesizes the response immediately,
 **without the network request ever happening**:
 
 ```ts
 wt.onRequest("*://api.example.com/me", () => ({
-    respond: {
+    replaceResponse: {
         body: { id: 1, name: "Mocked User" },  // object → JSON; strings/bytes pass through
         status: 200,                            // default 200
         mime: "application/json",               // default: guessed from the URL
@@ -368,9 +368,9 @@ wt.onRequest("*://api.example.com/me", () => ({
 }));
 ```
 
-It stacks like every final result: first handler to `respond` wins. On
+It stacks like every final result: first handler to return `replaceResponse` wins. On
 `page`, `debugger` and `helper` the response is fulfilled in place with any
-status and headers, URL kept. `webRequest` serves status 200 only (another
+status and headers, URL kept. `extension` serves status 200 only (another
 status is skipped with a warning): in place on Firefox, and on Chromium MV2
 by redirect (a `data:` URL, or the extension's `serve.html` for page loads),
 so the URL changes. See
@@ -399,14 +399,14 @@ uses.
 All `wt.*` handlers may be `async` (return a Promise). What happens with the
 result depends on the handler's strategy:
 
-| handler | `page` (page fetch/XHR) | `webRequest`, Chromium MV2 | `webRequest`, Firefox | `debugger` | `helper` |
+| handler | `page` (page fetch/XHR) | `extension`, Chromium MV2 | `extension`, Firefox | `debugger` | `helper` |
 |---|---|---|---|---|---|
-| `onRequest` redirect/block/respond | ✅ awaited | ⚠ result ignored, error logged — blocking webRequest can't await | ✅ awaited natively | ✅ awaited at the Request stage | ✅ awaited |
+| `onRequest` redirect/block/replaceResponse | ✅ awaited | ⚠ result ignored, error logged — blocking webRequest can't await | ✅ awaited natively | ✅ awaited at the Request stage | ✅ awaited |
 | `onRequest` headers | ✅ awaited | ⚠ ignored + error | ✅ awaited | ✅ awaited, applied at the Response stage | ✅ awaited, sent upstream |
 | `onResponseHeaders` | — (not on `page`) | ⚠ ignored + error | ✅ awaited | ✅ awaited, merged into the fulfilled headers | ✅ awaited |
 | `replaceResponse` | ✅ awaited — the page's `fetch`/XHR promise simply takes as long as the handler needs | ⚠ result ignored + error (a sync redirect can't be built late) | ✅ awaited, written in place (URL kept) | ✅ awaited, fulfills the body | ✅ awaited, upstream never contacted |
 | `onResponseBody` | ✅ awaited (chained between handlers) | — (can't read bodies) | ✅ awaited | ✅ awaited | ✅ awaited (served `no-store`) |
-| `onDom` | runs in the page on every strategy; not awaited (fire-and-forget) | | | | |
+| `onDocument` | runs in the page on every strategy; not awaited (fire-and-forget) | | | | |
 
 Practical rules of thumb:
 
@@ -414,7 +414,7 @@ Practical rules of thumb:
   `wt.onResponseBody(API, async (ctx, body) => { const j = await translate(body); return …; })`.
 - **Redirect/block or header changes decided asynchronously** on Chromium?
   Use `helper` or `debugger` (the default `helper` already awaits). Only
-  Chromium's `webRequest` can't: there an async result logs an error and the
+  the `extension` strategy on Chromium can't: there an async result logs an error and the
   request proceeds unmodified — set `strategy: "helper"` or `"debugger"` on the
   route.
 - **Static replacement from an async source** (file read, fetch): async

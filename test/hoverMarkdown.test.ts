@@ -6,10 +6,10 @@ const t = (text: string, kind = "text") => ({ text, kind });
 describe("hover markdown", () => {
     it("fences the signature and keeps documentation markdown as-is", () => {
         const md = quickInfoToMarkdown({
-            displayParts: [t("(method) "), t("onDom", "methodName"), t("(): void")],
+            displayParts: [t("(method) "), t("onDocument", "methodName"), t("(): void")],
             documentation: [t("Line one\n\n- a\n- b")],
         });
-        expect(md).toEqual(["```typescript\n(method) onDom(): void\n```", "Line one\n\n- a\n- b"]);
+        expect(md).toEqual(["```typescript\n(method) onDocument(): void\n```", "Line one\n\n- a\n- b"]);
     });
 
     it("renders @example as a code block, keeping existing fences and captions", () => {
@@ -49,7 +49,7 @@ describe("hover markdown", () => {
     });
 
     it("wraps long signatures: one parameter per line, long unions one member per line", () => {
-        expect(formatSignature("(method) onDom(): void")).toBe("(method) onDom(): void");
+        expect(formatSignature("(method) onDocument(): void")).toBe("(method) onDocument(): void");
         expect(formatSignature("(method) f<T extends Record<string, X>>(def: Wiretrick.ScriptDef<T>, opts?: { a: (x: number) => void; b: string }): R<T>", 40)).toBe(
             "(method) f<T extends Record<string, X>>(\n    def: Wiretrick.ScriptDef<T>,\n    opts?: { a: (x: number) => void; b: string }\n): R<T>"
         );

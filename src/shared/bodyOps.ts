@@ -4,7 +4,7 @@
  * so chain semantics are identical everywhere:
  *
  *   requestDecision — onRequest handlers in order; the first terminal result
- *                     (respond / redirect / block) wins, header edits merge
+ *                     (replaceResponse / redirect / block) wins, header edits merge
  *   replace         — replaceResponse handlers; first non-null result wins
  *   transform       — onResponseBody handlers compose in order
  *   responseHeaders — onResponseHeaders handlers; header edits merge
@@ -139,11 +139,11 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
                         tapped(s, "onRequest");
                         continue;
                     }
-                    if (result.respond) {
-                        const r = result.respond;
+                    if (result.replaceResponse) {
+                        const r = result.replaceResponse;
                         const mime = r.mime || guessMimeFromUrl(url);
                         const content = serializeRespondBody(r.body);
-                        env.log(s.id, "info", `[${s.name}] onRequest → respond ${r.status || 200} ${mime} (${content.length}b) ${url}`);
+                        env.log(s.id, "info", `[${s.name}] onRequest → replaceResponse ${r.status || 200} ${mime} (${content.length}b) ${url}`);
                         return { kind: "respond", mime, content, status: r.status, headers: r.headers?.set, scriptId: s.id, scriptName: s.name };
                     }
                     if (result.redirect) {

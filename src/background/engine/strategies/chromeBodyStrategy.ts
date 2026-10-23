@@ -56,7 +56,7 @@ export class ChromeBodyStrategy implements InterceptionStrategy {
         });
     }
 
-    /** onRequest handlers ONCE: the first terminal decision (respond | redirect | cancel) or merged headers; null = none. */
+    /** onRequest handlers ONCE: the first final decision (replaceResponse | redirect | block) or merged headers; null = none. */
     runRequestDecision(url: string, method: string, tabId = -1): Promise<Decision> {
         return this.run("requestDecision", { url, method }, tabId);
     }

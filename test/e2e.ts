@@ -139,16 +139,16 @@ const setEnabled = (id: string, enabled: boolean): Promise<void> =>
 // ---------- the sample scripts ----------
 interface SampleScript { id: string; name: string; code: string }
 const SCRIPTS: Record<string, SampleScript> = {
-    matcherRedirect: { id: "s_matcher", name: "redirect main frame", code: `wt.onRequest({ url: "${ORIGIN}/redirect-target", strategy: "webRequest" }, (ctx) => ({ redirect: "${ORIGIN}/redirected" }));` },
-    cancel: { id: "s_cancel", name: "cancel blocked.js", code: `wt.onRequest({ url: "${ORIGIN}/blocked.js", strategy: "webRequest" }, () => ({ block: true }));` },
-    reqHeaders: { id: "s_reqheaders", name: "request header", code: `wt.onRequest({ url: "${ORIGIN}/echo-headers", strategy: "webRequest" }, () => ({ headers: { set: { "x-resso": "injected" } } }));` },
-    resHeaders: { id: "s_resheaders", name: "response header", code: `wt.onResponseHeaders({ url: "${ORIGIN}/api", strategy: "webRequest" }, () => ({ headers: { set: { "x-mock-header": "hello" } } }));` },
+    matcherRedirect: { id: "s_matcher", name: "redirect main frame", code: `wt.onRequest({ url: "${ORIGIN}/redirect-target", strategy: "extension" }, (ctx) => ({ redirect: "${ORIGIN}/redirected" }));` },
+    cancel: { id: "s_cancel", name: "cancel blocked.js", code: `wt.onRequest({ url: "${ORIGIN}/blocked.js", strategy: "extension" }, () => ({ block: true }));` },
+    reqHeaders: { id: "s_reqheaders", name: "request header", code: `wt.onRequest({ url: "${ORIGIN}/echo-headers", strategy: "extension" }, () => ({ headers: { set: { "x-resso": "injected" } } }));` },
+    resHeaders: { id: "s_resheaders", name: "response header", code: `wt.onResponseHeaders({ url: "${ORIGIN}/api", strategy: "extension" }, () => ({ headers: { set: { "x-mock-header": "hello" } } }));` },
     replaceMain: { id: "s_replacemain", name: "replace main frame", code: `wt.replaceResponse({ url: "${ORIGIN}/serve-me", strategy: "debugger" }, () => "<html><body><h1>SERVE-PAGE-WORKS</h1></body></html>");` },
     replaceFetch: { id: "s_replacefetch", name: "replace fetch body", code: `wt.replaceResponse({ url: "${ORIGIN}/api-replace", strategy: "page" }, () => JSON.stringify({ value: "REPLACED-BY-HOOK" }));` },
     modifyTierA: { id: "s_modifya", name: "modify response (hook tier)", code: `wt.onResponseBody({ url: "${ORIGIN}/api", strategy: "page" }, (ctx, body) => body.replace("original-value", "TIERA-VALUE"));` },
     modifyCdp: { id: "s_modifycdp", name: "modify response (cdp tier)", code: `wt.onResponseBody({ url: "${ORIGIN}/app.js", strategy: "debugger" }, (ctx, body) => body.replace("ORIGINAL-MARKER", "CDP-MARKER"));` },
     badgeProbe: { id: "s_badge", name: "badge probe", code: `wt.onRequest({ url: "${ORIGIN}/page-fetch*", strategy: "page" }, () => {});` },
-    modifyMain: { id: "s_modifymain", name: "modify main frame html", code: `wt.onResponseBody({ url: "${ORIGIN}/page-title", strategy: "debugger" }, (ctx, body) => (typeof body === "string" ? body : new TextDecoder().decode(body)).replace("SITE-TITLE-PLACEHOLDER", "CDP-HTML-MARKER"));\nwt.onDom("${ORIGIN}/page-title", () => { document.title = "DOM-HOOK-TITLE"; });` },
+    modifyMain: { id: "s_modifymain", name: "modify main frame html", code: `wt.onResponseBody({ url: "${ORIGIN}/page-title", strategy: "debugger" }, (ctx, body) => (typeof body === "string" ? body : new TextDecoder().decode(body)).replace("SITE-TITLE-PLACEHOLDER", "CDP-HTML-MARKER"));\nwt.onDocument("${ORIGIN}/page-title", () => { document.title = "DOM-HOOK-TITLE"; });` },
 };
 for (const s of Object.values(SCRIPTS)) await saveScript(s.id, s.code, s.name);
 
@@ -202,8 +202,8 @@ await p2.goto(`${ORIGIN}/serve-me`, { waitUntil: "domcontentloaded", timeout: 15
 await p2.waitForTimeout(300);
 check("replaceResponse: main frame in place (cdp → debugger tier, URL kept)", (await p2.content()).includes("SERVE-PAGE-WORKS") && p2.url() === `${ORIGIN}/serve-me`, `url=${p2.url()}`);
 await p2.close();
-// "webRequest" listed first: Chromium's webRequest can only redirect — page loads go to serve.html
-await saveScript("s_replaceserve", `wt.replaceResponse({ url: "${ORIGIN}/serve-wr", strategy: "webRequest" }, () => "<html><body><h1>SERVE-PAGE-WORKS</h1></body></html>");`, "replace via serve page");
+// "extension" listed first: Chromium's webRequest can only redirect — page loads go to serve.html
+await saveScript("s_replaceserve", `wt.replaceResponse({ url: "${ORIGIN}/serve-wr", strategy: "extension" }, () => "<html><body><h1>SERVE-PAGE-WORKS</h1></body></html>");`, "replace via serve page");
 await new Promise((r) => setTimeout(r, 600));
 const p2b = await newPage("/serve-wr");
 check("replaceResponse: webrequest-first main frame via serve page (redirect)", (await p2b.content()).includes("SERVE-PAGE-WORKS") && p2b.url().includes("/serve.html"), `url=${p2b.url()}`);
@@ -342,13 +342,13 @@ if (HEADLESS) {
 
 }
 
-// ---------- 9c. onDom: DOM/title hook (works everywhere — it is page-level JS) ----------
+// ---------- 9c. onDocument: DOM/title hook (works everywhere — it is page-level JS) ----------
 {
     const p9d = await ctx.newPage();
     await p9d.goto(`${ORIGIN}/page-title`, { waitUntil: "domcontentloaded" }).catch(() => {});
     await p9d.waitForTimeout(2500);
     const domState = await p9d.evaluate(() => ({ title: document.title, h1: document.querySelector("h1")?.textContent }));
-    check("onDom: document.title rewritten in page", domState.title === "DOM-HOOK-TITLE", JSON.stringify(domState));
+    check("onDocument: document.title rewritten in page", domState.title === "DOM-HOOK-TITLE", JSON.stringify(domState));
     await p9d.close();
     // that cold load reached the page before the debugger attached → warned
     await new Promise((r) => setTimeout(r, 600));
@@ -370,7 +370,7 @@ await p10.close();
 // debugger tier must fulfill it — and every log line must name the stored script.
 await saveScript(
     "s_respond500",
-    `wt.onRequest({ url: "${ORIGIN}/nav-500", strategy: "debugger" }, () => ({ respond: { status: 500, body: { error: "e2e-500" }, mime: "application/json" } }));`,
+    `wt.onRequest({ url: "${ORIGIN}/nav-500", strategy: "debugger" }, () => ({ replaceResponse: { status: 500, body: { error: "e2e-500" }, mime: "application/json" } }));`,
     "e2e respond 500"
 );
 const p10b = await ctx.newPage();
@@ -381,7 +381,7 @@ const navBody = await p10b.evaluate(() => document.body.innerText).catch(() => "
 check("respond 500: main frame fulfilled via debugger tier", navResp?.status() === 500 && navBody.includes("e2e-500"), `status=${navResp?.status()} body=${navBody.slice(0, 60)}`);
 await p10b.waitForTimeout(800);
 const logText10b: string = await mgr.evaluate(() => document.getElementById("log-entries")!.textContent || "");
-check("logs: respond 500 attributed to the stored script name", logText10b.includes("[e2e respond 500] onRequest → respond 500"));
+check("logs: respond 500 attributed to the stored script name", logText10b.includes("[e2e respond 500] onRequest → replaceResponse 500"));
 check("logs: no [Untitled script] anywhere", !logText10b.includes("[Untitled script]"));
 await p10b.close();
 
@@ -411,13 +411,13 @@ const early10d: { n: number }[] = await mgr.evaluate(() =>
 );
 check("network: script activity from before the tab was opened is listed", early10d.length > 0 && early10d.every((r) => r.n > 0), `rows=${early10d.length}`);
 await saveScript("s_missed", `wt.onResponseBody({ url: "${ORIGIN}/html-missed", strategy: "page" }, (ctx, body) => body.replace("MISSED-ORIGINAL", "NEVER"));`, "missed probe");
-await saveScript("s_missed_wr", `wt.onResponseBody({ url: "${ORIGIN}/html-missed-wr", strategy: "webRequest" }, (ctx, body) => body);`, "webrequest body probe");
+await saveScript("s_missed_wr", `wt.onResponseBody({ url: "${ORIGIN}/html-missed-wr", strategy: "extension" }, (ctx, body) => body);`, "webrequest body probe");
 await new Promise((r) => setTimeout(r, 600));
 const p10d = await newPage("/html-missed");
 await p10d.waitForTimeout(2500); // the check runs 1.5 s after the load completes
 const log10d: string = await mgr.evaluate(() => document.getElementById("log-entries")!.textContent || "");
 check("missed: WARN 'onResponseBody never ran' for a hook route hit by a page load", log10d.includes(`[missed probe] onResponseBody #1 never ran for ${ORIGIN}/html-missed (document) — the "page" strategy only sees`), log10d.match(/.{0,20}never ran.{0,120}/)?.[0] || "(no warning)");
-check("up-front WARN: webrequest onResponseBody can't run on Chromium", log10d.includes(`[webrequest body probe] onResponseBody #1: onResponseBody never runs with strategy "webRequest" on Chromium`), log10d.match(/.{0,40}never runs with.{0,80}/)?.[0] || "(no warning)");
+check("up-front WARN: webrequest onResponseBody can't run on Chromium", log10d.includes(`[webrequest body probe] onResponseBody #1: onResponseBody never runs with strategy "extension" on Chromium`), log10d.match(/.{0,40}never runs with.{0,80}/)?.[0] || "(no warning)");
 const row10d: { cls: string; badges: string[] } | null = await mgr.evaluate(() => {
     const tr = [...document.querySelectorAll("#network-view tbody tr")].find((t) => (t.querySelector(".net-name")?.textContent || "").includes("html-missed"));
     return tr ? { cls: tr.className, badges: [...tr.querySelectorAll(".net-badge")].map((b) => b.className) } : null;
@@ -467,7 +467,7 @@ await setEnabled("s_marker_mod", false);
 // ---------- 10f. webrequest header changes on a page opened from the manager ----------
 await saveScript(
     "s_hdr_wr",
-    `wt.onRequest({ url: "${ORIGIN}/echo-headers", strategy: "webRequest" }, () => ({ headers: { set: { "x-wt-req": "1" }, remove: ["accept-language"] } }));\nwt.onResponseHeaders({ url: "${ORIGIN}/echo-headers", strategy: "webRequest" }, () => ({ headers: { set: { "x-wt-res": "1" } } }));`,
+    `wt.onRequest({ url: "${ORIGIN}/echo-headers", strategy: "extension" }, () => ({ headers: { set: { "x-wt-req": "1" }, remove: ["accept-language"] } }));\nwt.onResponseHeaders({ url: "${ORIGIN}/echo-headers", strategy: "extension" }, () => ({ headers: { set: { "x-wt-res": "1" } } }));`,
     "header probe"
 );
 await new Promise((r) => setTimeout(r, 600));
@@ -500,7 +500,7 @@ await checkRulesStrategy(ctx, mgr, ORIGIN, check);
 // ---------- 11. logs: script output tunnelled to the Log view, page console not captured ----------
 await saveScript(
     "s_logtunnel",
-    `wt.onDom("${ORIGIN}/html", () => { console.warn("E2E-CONSOLE-MARKER", { a: 1 }); wt.log("E2E-RESLOG-MARKER"); });`,
+    `wt.onDocument("${ORIGIN}/html", () => { console.warn("E2E-CONSOLE-MARKER", { a: 1 }); wt.log("E2E-RESLOG-MARKER"); });`,
     "log tunnel"
 );
 await new Promise((r) => setTimeout(r, 800));

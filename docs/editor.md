@@ -176,7 +176,7 @@ or *Light*. It applies to the Editor (Code view included) and the popup.
 
 **Settings → Strategy → Default strategy** picks the
 [strategy](strategies.md) every handler uses unless its route sets
-`strategy` — `helper` on Chromium and `webRequest` on Firefox out of the
+`strategy` — `helper` on Chromium and `extension` on Firefox out of the
 box. Strategies the current browser can't use are disabled in the picker,
 and a table lists each one's pros and cons; **Compatibility** links to
 [the full table](strategies.md#compatibility). It is the `defaultStrategy:` entry
@@ -250,7 +250,7 @@ settings:
   # …
   # Interception strategy for every handler whose route doesn't set `strategy`.
   # …one pros/cons line per strategy…
-  # helper | page | webRequest | debugger
+  # helper | page | extension | debugger | rules
   # defaultStrategy: helper
 
 params:

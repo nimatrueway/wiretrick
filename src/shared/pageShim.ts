@@ -1,18 +1,18 @@
 /**
- * The `wt` object a script sees when its onDom handlers compile in the
+ * The `wt` object a script sees when its onDocument handlers compile in the
  * page (hook.ts, MAIN world) or the isolated-world fallback (bridge.ts).
  * Network registrations are inert here (they run in the background);
- * onDom registrations are collected with their routes, and params resolve
+ * onDocument registrations are collected with their routes, and params resolve
  * to the raw values the background shipped in the bundle (each def's
  * `parse` runs here, in the page).
  */
-import { normalizeRoute, routeMatches, type DomWhen, type RouteMeta } from "./route";
+import { normalizeRoute, routeMatches, type DocumentWhen, type RouteMeta } from "./route";
 import { parseParamValue, type ParamDef } from "./scriptDef";
 import { scriptEnv } from "./scriptEnv";
 
-export interface PageDomHandler {
+export interface PageDocumentHandler {
     route: RouteMeta;
-    when: DomWhen;
+    when: DocumentWhen;
     fn: (ctx: any) => any;
 }
 
@@ -23,8 +23,8 @@ export interface PageShimOptions {
     storage: { get(key: string): any; set(key: string, value: any): any };
 }
 
-export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDomHandler[] } {
-    const dom: PageDomHandler[] = [];
+export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDocumentHandler[] } {
+    const dom: PageDocumentHandler[] = [];
     const inert = () => {};
     const parsed = (key: string, def: ParamDef | undefined) => (def && typeof def === "object" ? parseParamValue(key, def, o.params[key]) : o.params[key]);
     const wt = {
@@ -32,9 +32,9 @@ export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDomHandler
         onResponseHeaders: inert,
         replaceResponse: inert,
         onResponseBody: inert,
-        onDom: (route: unknown, fn: unknown) => {
-            if (typeof fn !== "function") throw new Error("wt.onDom: second argument must be the handler function");
-            const r = normalizeRoute("onDom", route, dom.length);
+        onDocument: (route: unknown, fn: unknown) => {
+            if (typeof fn !== "function") throw new Error("wt.onDocument: second argument must be the handler function");
+            const r = normalizeRoute("onDocument", route, dom.length);
             dom.push({ route: r, when: r.when || "DOMContentLoaded", fn: fn as any });
         },
         about: inert,
@@ -48,12 +48,12 @@ export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDomHandler
 }
 
 /** the handlers whose route matches this frame's URL */
-export function domHandlersFor(dom: PageDomHandler[], url: string): PageDomHandler[] {
+export function domHandlersFor(dom: PageDocumentHandler[], url: string): PageDocumentHandler[] {
     return dom.filter((h) => routeMatches(h.route, url));
 }
 
 /** run `run` at the handler's `when` (immediately when `now`) */
-export function scheduleDom(when: DomWhen, run: () => void, now = false): void {
+export function scheduleDocument(when: DocumentWhen, run: () => void, now = false): void {
     if (now || when === "document_start") run();
     else if (when === "document_idle") {
         if (document.readyState === "complete") run();

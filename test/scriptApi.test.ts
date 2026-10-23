@@ -83,7 +83,7 @@ describe("script API", () => {
         expect(compileScript(`wt.onRequest({ url: "*", strategy: ["page", "debugger"] }, () => {});`).error).toMatch(/single value/);
         expect(compileScript(`wt.onRequest({ url: "*", strategy: "auto" }, () => {});`).error).toMatch(/unknown strategy/);
         expect(compileScript(`wt.onRequest({ url: "*", resourceTypes: ["nope"] }, () => {});`).error).toMatch(/unknown resource type/);
-        expect(compileScript(`wt.onDom({ url: "*", strategy: "page" }, () => {});`).error).toMatch(/doesn't apply to onDom/);
+        expect(compileScript(`wt.onDocument({ url: "*", strategy: "page" }, () => {});`).error).toMatch(/doesn't apply to onDocument/);
         expect(compileScript(`wt.onRequest("*", 1);`).error).toMatch(/second argument/);
     });
 

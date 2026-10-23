@@ -75,11 +75,11 @@ wt.onRequest({ url: "*", strategy: "${strategy}" }, ${async}(ctx) => {
     const x = undefined;
     return x.split(".");
 });`;
-const THROWS = throws("webRequest");
+const THROWS = throws("extension");
 
 // line 4 throws at module top level (compile-time):
 const TOPLEVEL = `
-wt.onRequest({ url: "*", strategy: "webRequest" }, () => {});
+wt.onRequest({ url: "*", strategy: "extension" }, () => {});
 const x = undefined;
 x.split(".");
 `;
@@ -122,7 +122,7 @@ describe("formatScriptError / rewriteFrame", () => {
     });
 });
 
-describe("webRequest tier: error logs carry name + user line:col", () => {
+describe("extension strategy: error logs carry name + user line:col", () => {
     it("handler throws → [name] + mapped line", () => {
         const s = new WebRequestStrategy();
         s.reload([storedScript("a", "Thrower", THROWS)]);
@@ -151,7 +151,7 @@ describe("webRequest tier: error logs carry name + user line:col", () => {
 describe("CDP tier: error logs carry name + user line:col", () => {
     it("onRequest throws at the Request stage → [name] + mapped line", async () => {
         const c = new CdpStrategy();
-        // sync onRequest runs in the webRequest tier only; the Request stage runs async ones
+        // sync onRequest runs in the extension strategy only; the Request stage runs async ones
         c.reload([storedScript("a", "Thrower", throws("debugger", "async "))]);
         await c.handlePaused("tab:1", {
             requestId: "r1",

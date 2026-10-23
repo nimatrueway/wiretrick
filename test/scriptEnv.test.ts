@@ -25,7 +25,7 @@ describe("wt.isChrome / isFirefox / isMV2 / isMV3", () => {
     });
 
     it("can pick a route's strategy", () => {
-        const c = compileScript(`wt.onRequest({ url: "*://a.com/*", strategy: wt.isFirefox ? "webRequest" : "debugger" }, () => {});`);
+        const c = compileScript(`wt.onRequest({ url: "*://a.com/*", strategy: wt.isFirefox ? "extension" : "debugger" }, () => {});`);
         expect(c.meta.routes[0].strategy).toBe("debugger");
     });
 });

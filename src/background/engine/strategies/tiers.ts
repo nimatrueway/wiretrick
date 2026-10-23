@@ -23,13 +23,13 @@ export interface OwnedRoute {
     route: RouteMeta;
 }
 
-/** enabled scripts' request routes (onDom excluded) whose effective strategy is `tier` */
+/** enabled scripts' request routes (onDocument excluded) whose effective strategy is `tier` */
 export function ownedRoutes(scripts: ScriptLike[], tier: Strategy): OwnedRoute[] {
     const out: OwnedRoute[] = [];
     for (const s of scripts) {
         if (!s.enabled || !s.meta.active) continue;
         for (const r of s.meta.routes || []) {
-            if (r.kind !== "onDom" && effectiveStrategy(r) === tier) out.push({ id: s.id, name: s.meta.name, route: r });
+            if (r.kind !== "onDocument" && effectiveStrategy(r) === tier) out.push({ id: s.id, name: s.meta.name, route: r });
         }
     }
     return out;
@@ -67,5 +67,5 @@ export function compileMv2(scripts: ScriptLike[], paramValues: { [scriptId: stri
 
 /** does the script own any route on `tier` (from its analyzed meta)? */
 export function ownsAny(s: ScriptLike, tier: Strategy): boolean {
-    return (s.meta.routes || []).some((r) => r.kind !== "onDom" && effectiveStrategy(r) === tier);
+    return (s.meta.routes || []).some((r) => r.kind !== "onDocument" && effectiveStrategy(r) === tier);
 }

@@ -114,7 +114,7 @@ describe("NetworkPanel", () => {
     });
 
     it("filters by text, type chip and script activity (all / tapped / modified)", async () => {
-        const hit = entry("api", { type: "xmlhttprequest", interventions: [{ scriptId: "s", scriptName: "Mocker", action: "respond 200", level: "info", kind: "modified", at: base }] });
+        const hit = entry("api", { type: "xmlhttprequest", interventions: [{ scriptId: "s", scriptName: "Mocker", action: "onRequest → replaceResponse 200", level: "info", kind: "modified", at: base }] });
         const { container, getByText, getByPlaceholderText } = setup([entry("a"), hit]);
         // independent toggles: switching off JS keeps Fetch/XHR on
         fireEvent.click(getByText("JS"));

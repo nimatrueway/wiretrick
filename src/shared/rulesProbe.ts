@@ -66,7 +66,7 @@ function serializeResult(r: any): ProbeResult | null {
     if (!r) return null;
     if (typeof r !== "object") return {};
     const out: ProbeResult = {};
-    if (r.respond) out.respond = true;
+    if (r.replaceResponse) out.replaceResponse = true;
     if (r.redirect) out.redirect = String(r.redirect);
     if (r.block) out.block = true;
     const h = r.headers;

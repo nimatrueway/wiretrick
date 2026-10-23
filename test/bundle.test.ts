@@ -71,7 +71,7 @@ describe("export bundle shape (yaml)", () => {
 
 describe("parseBundleText", () => {
     it("other formats (rescript-bundle) → null", () => {
-        expect(parseBundleText("format: rescript-bundle\nversion: 1\nscripts:\n  - name: Old\n    code: wt.onDom(() => {})\n")).toBeNull();
+        expect(parseBundleText("format: rescript-bundle\nversion: 1\nscripts:\n  - name: Old\n    code: wt.onDocument(() => {})\n")).toBeNull();
     });
 
     it("non-bundle payloads → null (plain array / single script / yaml / garbage)", () => {

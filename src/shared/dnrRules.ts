@@ -597,7 +597,7 @@ export interface RuleProbe {
 }
 
 export interface ProbeResult {
-    respond?: boolean;
+    replaceResponse?: boolean;
     redirect?: string;
     block?: boolean;
     headers?: { set?: Record<string, string>; remove?: string[] };
@@ -650,7 +650,7 @@ export function rulesForProbe(o: RuleProbe): { rules: RuleSpec[] } | { error: st
     const route = o.route;
     if (route.exclude.length) return fail("`exclude` is not supported on rules — narrow the url pattern instead");
     const r = o.result || {};
-    if (o.kind === "onRequest" && r.respond) return fail("`respond` is not supported on rules — use another strategy for this handler");
+    if (o.kind === "onRequest" && r.replaceResponse) return fail("a `replaceResponse` result is not supported on rules — use another strategy for this handler");
     const redirect = o.kind === "onRequest" && r.redirect ? r.redirect : undefined;
     const block = o.kind === "onRequest" && !redirect && !!r.block;
     // a final action drops header edits (as at runtime)

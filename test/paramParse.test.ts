@@ -81,7 +81,7 @@ describe("param parse (runtime)", () => {
         expect(parseParamValue("k", { type: "string" }, "abc")).toBe("abc");
     });
 
-    it("page (onDom) shim parses the raw bundle values", () => {
+    it("page (onDocument) shim parses the raw bundle values", () => {
         const { wt } = makePageShim({ params: { origin: "https://p.dev", hosts: ["h"] }, log: () => {}, storage: { get: () => undefined, set: () => undefined } });
         const cfg = wt.params({ origin: { type: "string", parse: (s: string) => new URL(s) } });
         expect(cfg.origin).toBeInstanceOf(URL);

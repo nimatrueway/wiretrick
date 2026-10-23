@@ -140,7 +140,7 @@ try {
         name: "Proc local",
         code: `wt.onRequest({ url: "${ORIGIN}/*", strategy: "helper" }, (c) => {
     if (c.url.endsWith("/redir")) return { redirect: "${ORIGIN}/target" };
-    if (c.url.endsWith("/mock")) return { respond: { body: { mocked: true, type: c.resourceType }, mime: "application/json" } };
+    if (c.url.endsWith("/mock")) return { replaceResponse: { body: { mocked: true, type: c.resourceType }, mime: "application/json" } };
 });
 wt.onResponseHeaders({ url: "${ORIGIN}/*", strategy: "helper" }, (c) => (c.url.endsWith("/doc") ? { headers: { set: { "x-proc": "yes" } } } : undefined));
 wt.onResponseBody({ url: "${ORIGIN}/*", strategy: "helper" }, (c, body) => (c.url.endsWith("/plain") ? undefined : body.replace("ORIGINAL", "PROCESSED")));`,

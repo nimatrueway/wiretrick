@@ -57,7 +57,7 @@ pages, and drops blocking `webRequest`):
   channel.
 - **The `page` strategy carries page fetch/XHR interception** (patching in the
   page's MAIN world — same behavior, transforms execute in the sandbox).
-  The `webRequest` strategy is gone (no blocking webRequest in MV3).
+  The `extension` strategy is gone (no blocking webRequest in MV3).
 - **Browser-initiated loads (`<script src>`, `<img>`, stylesheets, fonts,
   main-frame HTML) go through the `debugger` strategy** for handlers whose
   strategy is `debugger` (or through the local helper with `helper`).
@@ -89,14 +89,14 @@ pages, and drops blocking `webRequest`):
   keep-alive ping (any extension API call resets the SW's ~30s idle
   timer) holds the worker open while a folder is connected, with a 30s
   `chrome.alarms` poll as the fallback if the worker is reaped anyway.
-- onDom runs in the page (MAIN world when the page CSP allows, isolated
+- onDocument runs in the page (MAIN world when the page CSP allows, isolated
   fallback otherwise). **`document_start` timing caveat:** in MV2 the
-  always-alive background answers the bundle in ~1ms, so onDom handlers
+  always-alive background answers the bundle in ~1ms, so onDocument handlers
   reliably beat the page's own scripts. In MV3 the service worker must
   wake first — analyses are cached in `chrome.storage.session` (and
   refreshed on every script change), so the bundle is served from storage
   without waking the sandbox, but a cold SW still costs ~50-100ms; inline
-  page scripts may run before an onDom handler does. Fetch/XHR
+  page scripts may run before an onDocument handler does. Fetch/XHR
   interception is unaffected.
 
 Verify the MV3 bundle: `npx tsx test/mv3.e2e.ts` (SW registration, Editor,

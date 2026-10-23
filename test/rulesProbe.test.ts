@@ -62,7 +62,7 @@ describe("rules probe (tripwire ctx)", () => {
             wt.onRequest({ url: "*://b.com/*", strategy: "rules" }, (ctx) => ctx.method === "POST" ? { block: true } : undefined);
             wt.onRequest({ url: "*://c.com/:id", strategy: "rules" }, (ctx) => ({ redirect: "https://x.com/" + ctx.groups.id.toUpperCase() }));
             wt.onRequest({ url: "*://d.com/:id", strategy: "rules" }, (ctx) => ({ headers: { set: { id: ctx.groups.id } } }));
-            wt.onRequest({ url: "*://e.com/*", strategy: "rules" }, () => ({ respond: { body: "x" } }));
+            wt.onRequest({ url: "*://e.com/*", strategy: "rules" }, () => ({ replaceResponse: { body: "x" } }));
             wt.onRequest({ url: "*://f.com/*", strategy: "rules" }, () => { throw new Error("nope"); });
             wt.onRequest({ url: "*://g.com/*", strategy: "rules" }, () => {});
             wt.onRequest({ url: "*://h.com/*", strategy: "rules" }, ({ requestHeaders }) => ({ block: !!requestHeaders.cookie }));
@@ -75,7 +75,7 @@ describe("rules probe (tripwire ctx)", () => {
         expect(r.errors[0]).toMatch(/^onRequest #2: rules are fixed: .*it reads ctx\.method/);
         expect(r.errors[1]).toMatch(/^onRequest #3: on `rules`, captures can only be inserted into the redirect URL as-is/);
         expect(r.errors[2]).toMatch(/^onRequest #4: on `rules`, captures/);
-        expect(r.errors[3]).toMatch(/^onRequest #5: `respond` is not supported on rules/);
+        expect(r.errors[3]).toMatch(/^onRequest #5: a `replaceResponse` result is not supported on rules/);
         expect(r.errors[4]).toMatch(/^onRequest #6: threw during its one-time run: nope/);
         expect(r.errors[5]).toMatch(/^onRequest #7: does nothing on `rules`/);
         expect(r.errors[6]).toMatch(/^onRequest #8: rules are fixed: .*ctx\.requestHeaders/);

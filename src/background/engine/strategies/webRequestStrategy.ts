@@ -1,18 +1,18 @@
 /**
  * Blocking-webRequest strategy: Firefox and MV2-capable Chromium browsers
  * (ungoogled-chromium, Brave, Opera…). Redirect/block, request/response
- * headers and synchronous respond/replaceResponse work everywhere with no
+ * headers and synchronous replaceResponse (handler or onRequest result) work everywhere with no
  * debugger involvement.
  *
- * Runs only handler routes whose strategy is "webRequest".
+ * Runs only handler routes whose strategy is "extension".
  *
- * How a replacement (replaceResponse, or onRequest `respond`) is served:
+ * How a replacement (a replaceResponse handler, or the onRequest `replaceResponse` result) is served:
  * - Firefox: in place — the request proceeds and filterResponseData swaps
  *   the body, so the URL is kept (the upstream status code is, too).
  * - Chromium: webRequest can't touch bodies, so the only way is a redirect —
  *   to a data: URL, or for page loads to the extension's serve.html (the
  *   address bar shows the extension URL and the page loses its origin).
- *   Neither can carry a status: non-200 responds aren't served here.
+ *   Neither can carry a status: non-200 replacements aren't served here.
  *
  * Response-body streaming (onResponseBody via filterResponseData) and
  * awaiting async handlers are Firefox-only. MV3 has no blocking webRequest
@@ -41,7 +41,7 @@ interface Entry {
 const KINDS: Kind[] = ["onRequest", "onResponseHeaders", "replaceResponse", "onResponseBody"];
 
 export class WebRequestStrategy implements InterceptionStrategy {
-    readonly name = "webRequest";
+    readonly name = "extension";
 
     private entries: Entry[] = [];
 
@@ -51,11 +51,11 @@ export class WebRequestStrategy implements InterceptionStrategy {
             this.entries = [];
             return;
         }
-        this.entries = compileMv2(scripts, paramValues, (s) => ownsAny(s, "webRequest")).map(({ id, name, compiled }) => {
+        this.entries = compileMv2(scripts, paramValues, (s) => ownsAny(s, "extension")).map(({ id, name, compiled }) => {
             if (compiled.error) scriptError(id, formatScriptError(name, compiled.error));
             const handlers = {} as Record<Kind, Routed[]>;
-            for (const k of KINDS) handlers[k] = compiled.handlers[k].filter((h) => effectiveStrategy(h.route) === "webRequest");
-            dlogLevel("webRequest", "debug", `loaded "${name}" routes: ${KINDS.flatMap((k) => handlers[k].map((h) => `${routeLabel(h.route)} ${JSON.stringify(h.route.url)}`)).join(", ") || "none"}${compiled.error ? ` ERROR: ${compiled.error}` : ""}`);
+            for (const k of KINDS) handlers[k] = compiled.handlers[k].filter((h) => effectiveStrategy(h.route) === "extension");
+            dlogLevel("extension", "debug", `loaded "${name}" routes: ${KINDS.flatMap((k) => handlers[k].map((h) => `${routeLabel(h.route)} ${JSON.stringify(h.route.url)}`)).join(", ") || "none"}${compiled.error ? ` ERROR: ${compiled.error}` : ""}`);
             return { id, name, handlers };
         });
     }
@@ -102,7 +102,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                                         mergeHeaderMods(pendingRequestHeaderMods.get(details.requestId), r.headers)
                                     );
                                 }
-                                if (r && r.respond) return this.respond(details, r.respond, entry);
+                                if (r && r.replaceResponse) return this.replaceFromRequest(details, r.replaceResponse, entry);
                                 if (r && (r.redirect || r.block)) {
                                     log(details.tabId, `[${entry.name}] onRequest → ${r.block ? "block" : `redirect → ${r.redirect}`} ${details.url}`, "info", entry.id);
                                     return normalize(r);
@@ -125,13 +125,13 @@ export class WebRequestStrategy implements InterceptionStrategy {
                             mergeHeaderMods(pendingRequestHeaderMods.get(details.requestId), result.headers)
                         );
                     }
-                    // respond: synthesize the response (terminal, first wins)
-                    if (result && result.respond) return this.respond(details, result.respond, entry);
+                    // replaceResponse: synthesize the response (final, first wins)
+                    if (result && result.replaceResponse) return this.replaceFromRequest(details, result.replaceResponse, entry);
                     if (result && (result.redirect || result.block)) {
                         log(details.tabId, `[${entry.name}] onRequest → ${result.block ? "block" : `redirect → ${result.redirect}`} ${details.url}`, "info", entry.id);
                         return normalize(result);
                     }
-                    trace(details, `[${entry.name}] onRequest returned ${describeResult(result)} (no redirect/block/respond) for ${details.url}`);
+                    trace(details, `[${entry.name}] onRequest returned ${describeResult(result)} (no redirect/block/replaceResponse) for ${details.url}`);
                     if (!hasHeaders) logTapped(details.tabId, entry.name, "onRequest", details.url, entry.id);
                 }
                 for (const h of this.hits(entry, "replaceResponse", details)) {
@@ -201,17 +201,17 @@ export class WebRequestStrategy implements InterceptionStrategy {
         this.entries = [];
     }
 
-    /** onRequest `respond`: 200 only (neither a redirect nor a stream filter carries a status) */
-    private respond(details: WebRequestDetailsLike, respond: any, entry: { id: string; name: string }): HookDisposition {
-        const body = serializeRespondBody(respond.body);
-        const mime = respond.mime || guessMime(null, details.url, "application/json");
-        const status = respond.status ?? 200;
+    /** onRequest `replaceResponse` result: 200 only (neither a redirect nor a stream filter carries a status) */
+    private replaceFromRequest(details: WebRequestDetailsLike, rep: any, entry: { id: string; name: string }): HookDisposition {
+        const body = serializeRespondBody(rep.body);
+        const mime = rep.mime || guessMime(null, details.url, "application/json");
+        const status = rep.status ?? 200;
         if (status !== 200) {
-            log(details.tabId, `[${entry.name}] onRequest → respond ${status} not served: webRequest can't set a response status (only 200) — set strategy: "debugger" or "helper" on this route ${details.url}`, "warn", entry.id);
+            log(details.tabId, `[${entry.name}] onRequest → replaceResponse ${status} not served: webRequest can't set a response status (only 200) — set strategy: "debugger" or "helper" on this route ${details.url}`, "warn", entry.id);
             return { kind: "allow" };
         }
-        if (IS_FIREFOX) return this.firefoxReplaceLater(details, body, mime, entry.id, entry.name, "respond");
-        log(details.tabId, `[${entry.name}] onRequest → respond 200 ${mime} (${body.length}b) ${details.url}`, "info", entry.id);
+        if (IS_FIREFOX) return this.firefoxReplaceLater(details, body, mime, entry.id, entry.name, "onRequest");
+        log(details.tabId, `[${entry.name}] onRequest → replaceResponse 200 ${mime} (${body.length}b) ${details.url}`, "info", entry.id);
         return this.redirectServe(details, body, mime);
     }
 
@@ -243,13 +243,13 @@ export class WebRequestStrategy implements InterceptionStrategy {
      * Firefox: no redirect — let the request proceed and swap its body at
      * onHeadersReceived (wireFirefoxReplace), so the URL and origin stay.
      */
-    private firefoxReplaceLater(details: WebRequestDetailsLike, content: string | Uint8Array, mime: string, scriptId: string, scriptName: string, via: "replaceResponse" | "respond"): HookDisposition {
+    private firefoxReplaceLater(details: WebRequestDetailsLike, content: string | Uint8Array, mime: string, scriptId: string, scriptName: string, via: "replaceResponse" | "onRequest"): HookDisposition {
         pendingFirefoxReplace.set(details.requestId, { content, mime, scriptId, scriptName, via });
         return { kind: "allow" };
     }
 
     private wireFirefoxReplace(details: WebRequestDetailsLike, rep: FirefoxReplacement): void {
-        const what = rep.via === "respond" ? `onRequest → respond 200 ${rep.mime} (${rep.content.length}b)` : `replaceResponse → ${rep.mime} (${rep.content.length} bytes)`;
+        const what = rep.via === "onRequest" ? `onRequest → replaceResponse 200 ${rep.mime} (${rep.content.length}b)` : `replaceResponse → ${rep.mime} (${rep.content.length} bytes)`;
         try {
             const filter = ((globalThis as any).browser?.webRequest ?? chrome.webRequest).filterResponseData(details.requestId);
             const bytes = typeof rep.content === "string" ? new TextEncoder().encode(rep.content) : rep.content;
@@ -354,7 +354,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
 
 /** request-level diagnostics: visible in the LOG panel at logLevel: debug */
 function trace(details: WebRequestDetailsLike, msg: string): void {
-    log(details.tabId, `[webRequest] ${msg}`, "debug");
+    log(details.tabId, `[extension] ${msg}`, "debug");
 }
 
 function describeResult(r: any): string {
@@ -395,7 +395,7 @@ function ctxFor(details: WebRequestDetailsLike, tabUrl: string | null, route: Ro
 }
 
 export function normalize(result: any): HookDisposition {
-    if (result.respond) return { kind: "respond", serve: result.respond } as any;
+    if (result.replaceResponse) return { kind: "respond", serve: result.replaceResponse } as any;
     if (result.block) return { kind: "cancel" };
     if (result.redirect) return { kind: "redirect", url: result.redirect };
     if (result.headers) return { kind: "headers", changes: result.headers };
@@ -473,7 +473,7 @@ interface FirefoxReplacement {
     mime: string;
     scriptId: string;
     scriptName: string;
-    via: "replaceResponse" | "respond";
+    via: "replaceResponse" | "onRequest";
 }
 
 /** requestId → a replacement body Firefox writes in place at onHeadersReceived */

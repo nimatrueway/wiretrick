@@ -11,7 +11,7 @@ import { scriptFunction } from "./scriptFn";
 import { normalizeRoute, type RouteKind, type RouteMeta } from "./route";
 import { scriptEnv } from "./scriptEnv";
 
-export type { DomWhen } from "./route";
+export type { DocumentWhen } from "./route";
 
 export type HandlerFn = (...args: any[]) => any;
 
@@ -31,7 +31,7 @@ export interface ScriptHandlers {
     replaceResponse: Routed[];
     onResponseBody: Routed[];
     /** run in the page — DOM/title manipulation (route.when = timing) */
-    onDom: Routed[];
+    onDocument: Routed[];
 }
 
 export interface CompiledScript {
@@ -284,7 +284,7 @@ function createCollector(): ScriptHandlers {
         onResponseHeaders: [],
         replaceResponse: [],
         onResponseBody: [],
-        onDom: [],
+        onDocument: [],
     };
 }
 
@@ -310,7 +310,7 @@ function withCollector<T>(c: ScriptHandlers, run: () => T): T {
 }
 
 function routesOf(h: ScriptHandlers): RouteMeta[] {
-    return [...h.onRequest, ...h.onResponseHeaders, ...h.replaceResponse, ...h.onResponseBody, ...h.onDom].map((x) => x.route);
+    return [...h.onRequest, ...h.onResponseHeaders, ...h.replaceResponse, ...h.onResponseBody, ...h.onDocument].map((x) => x.route);
 }
 
 const PARAM_TYPES = ["boolean", "number", "string", "enum", "stringList"];
@@ -376,7 +376,7 @@ function makeShim(owner: ReturnType<typeof createOwner>, overrides?: ResApiOverr
         onResponseHeaders: register("onResponseHeaders"),
         replaceResponse: register("replaceResponse"),
         onResponseBody: register("onResponseBody"),
-        onDom: register("onDom"),
+        onDocument: register("onDocument"),
         about: (text: unknown) => owner.about(text),
         params: (defs: Record<string, ParamDef>) => {
             const values = owner.add(defs, "wt.params");

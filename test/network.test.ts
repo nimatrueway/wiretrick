@@ -202,14 +202,14 @@ describe("network recorder", () => {
     it("creates a synthetic row when nothing hit the network", () => {
         const p = fakePort();
         addNetworkPort(p.port);
-        annotateFromLog(7, "s1", "[Mock] respond 200 https://a.test/mocked", "info");
+        annotateFromLog(7, "s1", "[Mock] replaceResponse 200 https://a.test/mocked", "info");
         const [e] = [...entries.values()];
         expect(e).toMatchObject({ synthetic: true, url: "https://a.test/mocked", tabId: 7 });
-        expect(e.interventions[0].action).toBe("respond 200");
+        expect(e.interventions[0].action).toBe("replaceResponse 200");
         p.disconnect();
     });
 
-    it("a webRequest-strategy annotation made before the recorder saw the request lands on the real row", () => {
+    it("a extension-strategy annotation made before the recorder saw the request lands on the real row", () => {
         const p = fakePort();
         addNetworkPort(p.port);
         // the pipeline's blocking onBeforeRequest runs before the recorder's
@@ -279,7 +279,7 @@ describe("network recorder", () => {
     it("a script-served response becomes a synthetic row in the right tab", () => {
         const p = fakePort();
         addNetworkPort(p.port);
-        annotateFromLog(-1, "s1", "[Mock] onRequest → respond 200 https://a.test/mocked", "info");
+        annotateFromLog(-1, "s1", "[Mock] onRequest → replaceResponse 200 https://a.test/mocked", "info");
         recordNetBody({ tabId: 9, url: "https://a.test/mocked", method: "POST", modified: "{}", mime: "application/json", status: 201 });
         expect(entries.size).toBe(1);
         const [e] = [...entries.values()];

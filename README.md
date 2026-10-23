@@ -22,7 +22,7 @@ replace bodies, or patch the DOM.
 - **Every kind of interception** — page fetch/XHR, documents, `<script>`,
   images and workers, through five [strategies](docs/strategies.md): one
   default in Settings, overridable per handler. `page` is the lightest but
-  only sees fetch/XHR (REST) calls; use `helper`, `webRequest` or `debugger` for
+  only sees fetch/XHR (REST) calls; use `helper`, `extension` or `debugger` for
   robust interception; `rules` turns fixed blocks, redirects and header
   changes into browser-native rules.
 - **No debugger banner needed** — the optional [local helper](docs/process-helper.md)
@@ -69,8 +69,8 @@ Or click **?** → **Samples** for one-click starters against real public sites.
 | | |
 |---|---|
 | [Installing](docs/install.md) | release zips, signed crx, building from source |
-| [Writing scripts](docs/scripting.md) | the `wt` API, routes, parameters, libraries, `onDom`, stacking, async handlers |
-| [Interception strategies](docs/strategies.md) | `page` / `debugger` / `webRequest` / `helper` / `rules`, the default and per-handler choice, [which strategies keep the URL when replacing a response](docs/strategies.md#how-each-strategy-serves-a-replacement), the Missed warning, browser compatibility |
+| [Writing scripts](docs/scripting.md) | the `wt` API, routes, parameters, libraries, `onDocument`, stacking, async handlers |
+| [Interception strategies](docs/strategies.md) | `page` / `debugger` / `extension` / `helper` / `rules`, the default and per-handler choice, [which strategies keep the URL when replacing a response](docs/strategies.md#how-each-strategy-serves-a-replacement), the Missed warning, browser compatibility |
 | [Local helper](docs/process-helper.md) | the `helper` strategy: install, how it works, security notes |
 | [The Editor](docs/editor.md) | Code view, Log & Network views, folder sync, `settings.yaml` |
 | [Glossary](GLOSSARY.md) | the words we use for Wiretrick's concepts |

@@ -24,8 +24,8 @@ export const STRATEGY_INFO: Record<Strategy, StrategyInfo> = {
         pros: "No setup, no banner, no permissions, lightest. Works in every browser.",
         cons: "Only the page's own fetch/XHR. Misses documents, <script src>, images, workers and requests made before the page patch loads.",
     },
-    webRequest: {
-        label: "webRequest — blocking webRequest",
+    extension: {
+        label: "extension — the extension handles each request (blocking webRequest)",
         pros: "No banner, no setup. On Firefox it reaches everything, bodies included.",
         cons: "Not on Chrome (MV3). Chromium MV2: no onResponseBody, no async handlers, replacements are served by redirect (URL changes, status always 200) — a replaced page shows a chrome-extension:// URL. Firefox: can't change a replaced response's status.",
     },
@@ -37,7 +37,7 @@ export const STRATEGY_INFO: Record<Strategy, StrategyInfo> = {
     rules: {
         label: "rules — browser-native rules",
         pros: "No banner, no setup, nothing runs per request: the browser itself applies the rules to every request, the first navigation included. Works in Chrome (MV3 and MV2) and Firefox.",
-        cons: "Fixed results only: block, redirect (captures inserted as-is), set/remove request or response headers. No respond, replaceResponse or onResponseBody, no exclude. The handler runs once when scripts load and can't read the request (method, headers…).",
+        cons: "Fixed results only: block, redirect (captures inserted as-is), set/remove request or response headers. No replaceResponse (handler or result) or onResponseBody, no exclude. The handler runs once when scripts load and can't read the request (method, headers…).",
     },
 };
 
@@ -50,7 +50,7 @@ function hasDnr(): boolean {
 export function strategyUnsupported(s: Strategy, env: { firefox: boolean; mv3: boolean; dnr?: boolean }): string | null {
     if (s === "rules") return (env.dnr ?? hasDnr()) ? null : "not available in this browser (no declarativeNetRequest)";
     if (env.firefox && (s === "helper" || s === "debugger")) return "not available in Firefox";
-    if (!env.firefox && env.mv3 && s === "webRequest") return "not available in Chrome MV3 (blocking webRequest was removed)";
+    if (!env.firefox && env.mv3 && s === "extension") return "not available in Chrome MV3 (blocking webRequest, which it relies on, was removed)";
     return null;
 }
 

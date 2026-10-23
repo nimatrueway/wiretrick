@@ -64,7 +64,7 @@ chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
 void migrated.then(() => folderSync.initFromStorage());
 chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
     if (msg && msg.type === "hookCspBlocked" && _s && _s.tab && _s.tab.id !== undefined) {
-        dlogLevel("bg", "info", "page CSP blocks compiling scripts in the page — onDom runs in the isolated world in this tab", { tabId: _s.tab.id });
+        dlogLevel("bg", "info", "page CSP blocks compiling scripts in the page — onDocument runs in the isolated world in this tab", { tabId: _s.tab.id });
         sendResponse({});
         return false;
     }

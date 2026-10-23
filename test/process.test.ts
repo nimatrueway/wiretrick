@@ -230,7 +230,7 @@ describe("ProcessStrategy ⇄ helper protocol", () => {
                 "a",
                 `wt.onRequest({ url: "https://x.com/*", strategy: "helper" }, (c) => {
     if (c.url.endsWith("/r")) return { redirect: "https://x.com/target" };
-    if (c.url.endsWith("/j")) return { respond: { status: 201, body: { ok: 1 }, mime: "application/json" } };
+    if (c.url.endsWith("/j")) return { replaceResponse: { status: 201, body: { ok: 1 }, mime: "application/json" } };
     if (c.url.endsWith("/c")) return { block: true };
     if (c.url.endsWith("/h")) return { headers: { set: { "X-Added": "1" }, remove: ["cookie"] } };
 });

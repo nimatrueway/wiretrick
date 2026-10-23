@@ -11,9 +11,9 @@ describe("missedReason", () => {
     it("routes whose strategy can't run here were already warned at load", () => {
         expect(reason({ strategy: "helper", firefox: true })).toBeNull();
         expect(reason({ strategy: "debugger", firefox: true })).toBeNull();
-        expect(reason({ strategy: "webRequest", mv3: true })).toBeNull();
+        expect(reason({ strategy: "extension", mv3: true })).toBeNull();
         // Chromium webrequest can't read bodies: routeProblem covers it
-        expect(reason({ strategy: "webRequest" })).toBeNull();
+        expect(reason({ strategy: "extension" })).toBeNull();
     });
 
     it("hook: silent for fetch/XHR (the page may never read it), explains other loads", () => {
@@ -35,8 +35,8 @@ describe("missedReason", () => {
     });
 
     it("Firefox: the webrequest tier streams every body", () => {
-        expect(reason({ strategy: "webRequest", firefox: true })).toBe(MISSED_REASONS.fallback);
-        expect(reason({ strategy: "webRequest", firefox: true, fromCache: true })).toBe(MISSED_REASONS.cache);
+        expect(reason({ strategy: "extension", firefox: true })).toBe(MISSED_REASONS.fallback);
+        expect(reason({ strategy: "extension", firefox: true, fromCache: true })).toBe(MISSED_REASONS.cache);
     });
 
     it("skips sockets and pings", () => {
@@ -56,15 +56,15 @@ describe("routeProblem (up-front warning, no fallback)", () => {
     it("unavailable strategies", () => {
         expect(p("onRequest", "helper", { firefox: true, mv3: false })).toMatch(/not available in Firefox/);
         expect(p("onRequest", "debugger", { firefox: true, mv3: false })).toMatch(/not available in Firefox/);
-        expect(p("onRequest", "webRequest", { firefox: false, mv3: true })).toMatch(/MV3/);
-        expect(p("onRequest", "webRequest", chrome)).toBeNull();
+        expect(p("onRequest", "extension", { firefox: false, mv3: true })).toMatch(/MV3/);
+        expect(p("onRequest", "extension", chrome)).toBeNull();
         expect(p("onRequest", "helper", chrome)).toBeNull(); // helper down is reported by the tier
     });
 
     it("Chromium webrequest can't read bodies; Firefox can", () => {
-        expect(p("onResponseBody", "webRequest")).toMatch(/can't read response bodies/);
-        expect(p("replaceResponse", "webRequest")).toBeNull();
-        expect(p("onResponseBody", "webRequest", { firefox: true, mv3: false })).toBeNull();
+        expect(p("onResponseBody", "extension")).toMatch(/can't read response bodies/);
+        expect(p("replaceResponse", "extension")).toBeNull();
+        expect(p("onResponseBody", "extension", { firefox: true, mv3: false })).toBeNull();
     });
 
     it("hook: no response headers, and types must include xmlhttprequest", () => {

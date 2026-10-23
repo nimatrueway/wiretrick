@@ -5,7 +5,7 @@
  *
  *   hook (MAIN, no eval) ← postMessage → bridge (isolated) ⇄ background
  *
- * Also owns wt.onDom: the background sends compiled handler SOURCES, the
+ * Also owns wt.onDocument: the background sends compiled handler SOURCES, the
  * bridge re-compiles them (isolated world allows eval in MV2) and runs
  * them at the requested DOM moment — the isolated world shares the page's
  * DOM, so title/text changes work without touching the page's JS world.
@@ -13,7 +13,7 @@
 import { formatScriptError } from "../shared/scriptError";
 import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
 import { scriptFunction } from "../shared/scriptFn";
-import { makePageShim, domHandlersFor, scheduleDom, type PageDomHandler } from "../shared/pageShim";
+import { makePageShim, domHandlersFor, scheduleDocument, type PageDocumentHandler } from "../shared/pageShim";
 
 (() => {
     const MAIN_SOURCE = "res-override-bridge";
@@ -134,12 +134,12 @@ import { makePageShim, domHandlersFor, scheduleDom, type PageDomHandler } from "
         });
     });
 
-    // ---- wt.onDom fallback (isolated world): compiles the FULL script
+    // ---- wt.onDocument fallback (isolated world): compiles the FULL script
     // source with a shim so top-level helpers/closures survive; the DOM is
     // shared with the page, window (page JS globals) is not ----
-    interface DomHandler { scriptId: string; name: string; src: string; params?: Record<string, any> }
+    interface DocumentHandler { scriptId: string; name: string; src: string; params?: Record<string, any> }
 
-    async function runDomHandlers(hot: boolean): Promise<void> {
+    async function runDocumentHandlers(hot: boolean): Promise<void> {
         if (dead) return;
         // handlers come embedded in the hook bundle (getHookBundle)
         const bundle = await new Promise<any>((resolve) => {
@@ -147,9 +147,9 @@ import { makePageShim, domHandlersFor, scheduleDom, type PageDomHandler } from "
             // dead bridge: safeSend never answers — resolve empty after a beat
             setTimeout(() => resolve({ domHandlers: [] }), 1000);
         });
-        const handlers: DomHandler[] = bundle.domHandlers || [];
+        const handlers: DocumentHandler[] = bundle.domHandlers || [];
         const libSources: { name: string; src: string; params?: Record<string, any> }[] = bundle.libs || [];
-        dlog("debug", `onDom (isolated world): running ${handlers.length} script(s)${hot ? " (hot refire)" : ""}`);
+        dlog("debug", `onDocument (isolated world): running ${handlers.length} script(s)${hot ? " (hot refire)" : ""}`);
         const shimFor = (scriptId: string | null, name: string, params: Record<string, any>) =>
             makePageShim({
                 params,
@@ -163,7 +163,7 @@ import { makePageShim, domHandlersFor, scheduleDom, type PageDomHandler } from "
             // shadow console like the MAIN-world path: script console.*
             // calls go to the extension LOG, not the page console
             const consoleProxy = makeScriptConsole((level, source, text) => scriptLog(h.scriptId, level, scriptLogLine(h.name, source, text)));
-            let dom: PageDomHandler[];
+            let dom: PageDocumentHandler[];
             try {
                 // page-side require over the shipped library sources
                 const libModules = new Map<string, any>();
@@ -185,7 +185,7 @@ import { makePageShim, domHandlersFor, scheduleDom, type PageDomHandler } from "
                 scriptFunction(h.src)(shim.wt, consoleProxy, requireLib, moduleObj, moduleObj.exports);
                 dom = shim.dom;
             } catch (e: any) {
-                scriptLog(h.scriptId, "error", formatScriptError(h.name, e, "onDom compile (isolated world)"));
+                scriptLog(h.scriptId, "error", formatScriptError(h.name, e, "onDocument compile (isolated world)"));
                 continue;
             }
             for (const d of domHandlersFor(dom, location.href)) {
@@ -193,10 +193,10 @@ import { makePageShim, domHandlersFor, scheduleDom, type PageDomHandler } from "
                     try {
                         d.fn({ url: location.href, method: "GET", tabUrl: location.href });
                     } catch (e: any) {
-                        scriptLog(h.scriptId, "error", formatScriptError(h.name, e, "onDom"));
+                        scriptLog(h.scriptId, "error", formatScriptError(h.name, e, "onDocument"));
                     }
                 };
-                scheduleDom(d.when, run, hot);
+                scheduleDocument(d.when, run, hot);
             }
         }
     }
@@ -209,9 +209,9 @@ import { makePageShim, domHandlersFor, scheduleDom, type PageDomHandler } from "
                 hookBroken = true;
             }
             if (msg && msg.type === "bundleUpdate") {
-                // scripts changed: refresh hook status; onDom refires in the
+                // scripts changed: refresh hook status; onDocument refires in the
                 // MAIN world (hook) when healthy, else here (isolated)
-                if (hookBroken) void runDomHandlers(true);
+                if (hookBroken) void runDocumentHandlers(true);
                 safeSend({ type: "getHookBundle", url: location.href }, (resp: any) => {
                     const active = !!(resp && (resp.count > 0 || (resp.domHandlers || []).length));
                     window.postMessage(

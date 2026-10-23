@@ -9,8 +9,8 @@
 import { formatScriptError } from "../shared/scriptError";
 import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
 import { scriptFunction } from "../shared/scriptFn";
-import { routeMatches, type DomWhen, type RouteMeta } from "../shared/route";
-import { makePageShim, domHandlersFor, scheduleDom } from "../shared/pageShim";
+import { routeMatches, type DocumentWhen, type RouteMeta } from "../shared/route";
+import { makePageShim, domHandlersFor, scheduleDocument } from "../shared/pageShim";
 
 (() => {
     const w = window as any;
@@ -99,7 +99,7 @@ import { makePageShim, domHandlersFor, scheduleDom } from "../shared/pageShim";
             logUp(`status: ${active ? "active" : "inactive"}, dom=${domHandlers.length}${data.hot ? " (hot)" : ""}`, "debug");
             if (active) install();
             else if (wasActive) goDormant();
-            compileAndScheduleDom(!!data.hot);
+            compileAndScheduleDocument(!!data.hot);
         }
     });
 
@@ -124,13 +124,13 @@ import { makePageShim, domHandlersFor, scheduleDom } from "../shared/pageShim";
     }
 
     /**
-     * onDom handlers compile in THIS world (MAIN) so the handler sees the
+     * onDocument handlers compile in THIS world (MAIN) so the handler sees the
      * page's window (window.PARAMS etc.). The FULL script source is
      * compiled with a shim, so top-level helpers/closures survive. If the
      * page CSP forbids eval, report it — the bridge then runs the whole
      * script in the isolated world (shared DOM, no page window).
      */
-    function compileAndScheduleDom(hot: boolean): void {
+    function compileAndScheduleDocument(hot: boolean): void {
         if (domHandlers.length === 0) return;
         // module registry over the shipped library sources: the page-side
         // `require` backing ES imports ("./utils" → the script named utils)
@@ -145,11 +145,11 @@ import { makePageShim, domHandlersFor, scheduleDom } from "../shared/pageShim";
             const moduleObj = { exports: {} as any };
             libModules.set(key, moduleObj.exports); // early: cycle protection
             const fn = scriptFunction(lib.src);
-            fn(makeDomShim(null, lib.name, lib.params || {}).wt, scriptConsole(null, lib.name), requireLib, moduleObj, moduleObj.exports);
+            fn(makeDocumentShim(null, lib.name, lib.params || {}).wt, scriptConsole(null, lib.name), requireLib, moduleObj, moduleObj.exports);
             libModules.set(key, moduleObj.exports);
             return moduleObj.exports;
         };
-        const compiledDom: { scriptId: string; name: string; when: DomWhen; fn: (ctx: any) => any }[] = [];
+        const compiledDocument: { scriptId: string; name: string; when: DocumentWhen; fn: (ctx: any) => any }[] = [];
         let cspBlocked = false;
         for (const d of domHandlers) {
             try {
@@ -158,44 +158,44 @@ import { makePageShim, domHandlersFor, scheduleDom } from "../shared/pageShim";
                 // require resolves the shipped libs
                 const fn = scriptFunction(d.src);
                 const moduleObj = { exports: {} as any };
-                const { wt, dom } = makeDomShim(d.scriptId, d.name, d.params || {});
+                const { wt, dom } = makeDocumentShim(d.scriptId, d.name, d.params || {});
                 fn(wt, scriptConsole(d.scriptId, d.name), requireLib, moduleObj, moduleObj.exports);
-                for (const h of domHandlersFor(dom, location.href)) compiledDom.push({ scriptId: d.scriptId, name: d.name, when: h.when, fn: h.fn });
+                for (const h of domHandlersFor(dom, location.href)) compiledDocument.push({ scriptId: d.scriptId, name: d.name, when: h.when, fn: h.fn });
             } catch (e: any) {
                 if (/Evaluating a string as JavaScript|unsafe-eval/i.test(e.message || "")) {
                     cspBlocked = true;
                 } else {
-                    scriptLogUp(d.scriptId, "error", formatScriptError(d.name, e, "onDom compile"));
+                    scriptLogUp(d.scriptId, "error", formatScriptError(d.name, e, "onDocument compile"));
                 }
             }
         }
         if (cspBlocked) {
-            logUp("page CSP blocks eval in the page world — running onDom handlers in the isolated world instead", "info");
+            logUp("page CSP blocks eval in the page world — running onDocument handlers in the isolated world instead", "info");
             try {
                 window.postMessage({ source: HOOK_SOURCE, kind: "cspBlocked" }, window.location.origin);
             } catch {}
         }
-        if (compiledDom.length === 0) return;
+        if (compiledDocument.length === 0) return;
 
         const injected = (document.currentScript as HTMLScriptElement | null)
             ? "document.currentScript"
             : (document.querySelector("script[data-res-override-hook]") ? "script tag (already in DOM)" : "bundle message");
-        const fire = ({ scriptId, name, when, fn }: (typeof compiledDom)[number]) => {
+        const fire = ({ scriptId, name, when, fn }: (typeof compiledDocument)[number]) => {
             try {
-                scriptLogUp(scriptId, "debug", scriptLogLine(name, "onDom", `running (${when}) on ${location.href} [${document.readyState}], hook injected via ${injected}`));
+                scriptLogUp(scriptId, "debug", scriptLogLine(name, "onDocument", `running (${when}) on ${location.href} [${document.readyState}], hook injected via ${injected}`));
                 fn(makeCtx(location.href, "GET"));
             } catch (e: any) {
-                scriptLogUp(scriptId, "error", formatScriptError(name, e, "onDom"));
+                scriptLogUp(scriptId, "error", formatScriptError(name, e, "onDocument"));
             }
         };
         if (hot) {
-            compiledDom.forEach(fire); // hot update: refire immediately so edits are visible live
+            compiledDocument.forEach(fire); // hot update: refire immediately so edits are visible live
             return;
         }
         if (domFired) return; // initial + ready re-sends fire only once
         domFired = true;
         // each handler keeps its own { when } (same as the isolated-world fallback)
-        for (const h of compiledDom) scheduleDom(h.when, () => fire(h));
+        for (const h of compiledDocument) scheduleDocument(h.when, () => fire(h));
     }
 
     function requestStatus(): void {
@@ -210,7 +210,7 @@ import { makePageShim, domHandlersFor, scheduleDom } from "../shared/pageShim";
     }
 
     /** shim for compiled dom scripts: log → extension LOG (script-tagged), storage → bridge relay */
-    function makeDomShim(scriptId: string | null, name: string, params: Record<string, any>) {
+    function makeDocumentShim(scriptId: string | null, name: string, params: Record<string, any>) {
         return makePageShim({
             params,
             log: (...args: any[]) => scriptLogUp(scriptId, "info", scriptLogLine(name, "wt.log", formatLogArgs(args))),
@@ -305,7 +305,7 @@ import { makePageShim, domHandlersFor, scheduleDom } from "../shared/pageShim";
             const abortP = abortRace(signal);
 
             try {
-                // 1. respond (onRequest terminal result) — no network at all
+                // 1. replaceResponse (onRequest final result) — no network at all
                 const resp0 = abortP ? await Promise.race([viaBridge({ op: "respond", url, method }), abortP]) : await viaBridge({ op: "respond", url, method });
                 if (resp0 && resp0.content !== null && resp0.content !== undefined) {
                     const hdrs = new Headers({ "content-type": resp0.mime || "text/plain" });

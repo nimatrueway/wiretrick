@@ -74,7 +74,7 @@ const details = (over: Partial<any> = {}) => ({
 });
 
 describe("WebRequestStrategy", () => {
-    beforeEach(() => setDefaultStrategy("webRequest"));
+    beforeEach(() => setDefaultStrategy("extension"));
     afterEach(() => setDefaultStrategy(null));
     it("onRequest redirect", () => {
         const s = new WebRequestStrategy();

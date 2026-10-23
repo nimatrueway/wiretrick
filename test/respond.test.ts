@@ -5,8 +5,8 @@ import { ChromeBodyStrategy } from "../src/background/engine/strategies/chromeBo
 import { compileScript } from "../src/shared/compile";
 import type { Script } from "../src/background/engine/scriptStore";
 
-// these suites exercise the webRequest tier: make it the settings default
-beforeEach(() => setDefaultStrategy("webRequest"));
+// these suites exercise the extension strategy: make it the settings default
+beforeEach(() => setDefaultStrategy("extension"));
 afterEach(() => setDefaultStrategy(null));
 
 beforeEach(() => {
@@ -40,18 +40,18 @@ const details = () => ({
 });
 
 describe("onRequest respond", () => {
-    it("webRequest tier: object body → JSON data-url redirect", () => {
+    it("extension strategy: object body → JSON data-url redirect", () => {
         const s = new WebRequestStrategy();
-        s.reload([makeScript("a", `wt.onRequest("*", () => ({ respond: { body: { mocked: true } } }));`)]);
+        s.reload([makeScript("a", `wt.onRequest("*", () => ({ replaceResponse: { body: { mocked: true } } }));`)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("redirect");
         expect(decodeURIComponent(d.url)).toContain('"mocked"');
         expect(d.url).toContain("application/json");
     });
 
-    it("webRequest tier: string body + explicit mime", () => {
+    it("extension strategy: string body + explicit mime", () => {
         const s = new WebRequestStrategy();
-        s.reload([makeScript("a", `wt.onRequest("*", () => ({ respond: { body: "<h1>hi</h1>", mime: "text/html" } }));`)]);
+        s.reload([makeScript("a", `wt.onRequest("*", () => ({ replaceResponse: { body: "<h1>hi</h1>", mime: "text/html" } }));`)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("redirect");
         expect(d.url).toContain("text/html");
@@ -60,7 +60,7 @@ describe("onRequest respond", () => {
     it("respond is terminal: later scripts don't run", () => {
         const s = new WebRequestStrategy();
         s.reload([
-            makeScript("a", `wt.onRequest("*", () => ({ respond: { body: "first" } }));`),
+            makeScript("a", `wt.onRequest("*", () => ({ replaceResponse: { body: "first" } }));`),
             makeScript("b", `wt.onRequest("*", () => ({ redirect: "https://second.com" }));`),
         ]);
         const d = s.handleBeforeRequest(details(), null) as any;
@@ -70,7 +70,7 @@ describe("onRequest respond", () => {
 
     it("hook tier: runRequestDecision returns the respond decision (async handler)", async () => {
         const s = new ChromeBodyStrategy();
-        s.reload([makeScript("a", `wt.onRequest({ url: "*", strategy: "page" }, async () => ({ respond: { body: { ok: 1 }, status: 201 } }));`)]);
+        s.reload([makeScript("a", `wt.onRequest({ url: "*", strategy: "page" }, async () => ({ replaceResponse: { body: { ok: 1 }, status: 201 } }));`)]);
         const r = await s.runRequestDecision("https://api.example.com/v1/user", "GET");
         expect(r).not.toBeNull();
         expect(r!.kind).toBe("respond");
@@ -96,9 +96,9 @@ describe("onRequest respond", () => {
         expect((await s2.runRequestDecision("https://x.com/", "GET"))!.kind).toBe("cancel");
     });
 
-    it("webRequest tier: respond + headers in one result apply the headers", () => {
+    it("extension strategy: respond + headers in one result apply the headers", () => {
         const s = new WebRequestStrategy();
-        s.reload([makeScript("a", `wt.onRequest("*", () => ({ respond: { body: "x" }, headers: { set: { "x-m": "1" } } }));`)]);
+        s.reload([makeScript("a", `wt.onRequest("*", () => ({ replaceResponse: { body: "x" }, headers: { set: { "x-m": "1" } } }));`)]);
         s.handleBeforeRequest(details(), null);
         const c = s.handleBeforeSendHeaders(details(), null) as any;
         expect(c.set).toEqual({ "x-m": "1" });

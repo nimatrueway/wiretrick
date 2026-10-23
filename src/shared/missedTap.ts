@@ -38,7 +38,7 @@ export function missedReason(c: MissedCase): string | null {
     if (c.strategy === "rules") return null;
     // can never run here: routeProblem already warned once at load
     if (strategyUnsupported(c.strategy, c)) return null;
-    if (c.strategy === "webRequest" && !c.firefox) return null;
+    if (c.strategy === "extension" && !c.firefox) return null;
     if (c.strategy === "page") {
         // the hook reads fetch/XHR bodies lazily — the page may simply never read it
         return c.type === "xmlhttprequest" ? null : MISSED_REASONS.hookNotFetch;
@@ -57,11 +57,11 @@ export function missedReason(c: MissedCase): string | null {
 export function routeProblem(r: { kind: RouteKind; strategy: Strategy; resourceTypes?: string[] }, env: { firefox: boolean; mv3: boolean }): string | null {
     const why = strategyUnsupported(r.strategy, env);
     if (why) return `strategy "${r.strategy}" is ${why} — this handler doesn't run. Set another strategy in Settings → Strategy or on the route`;
-    if (r.strategy === "webRequest" && r.kind === "onResponseBody" && !env.firefox) {
-        return `onResponseBody never runs with strategy "webRequest" on Chromium — its webRequest API can't read response bodies. Use "page" (page fetch/XHR, no banner), "debugger" (any resource, debugger banner) or "helper" (local helper)`;
+    if (r.strategy === "extension" && r.kind === "onResponseBody" && !env.firefox) {
+        return `onResponseBody never runs with strategy "extension" on Chromium — its webRequest API can't read response bodies. Use "page" (page fetch/XHR, no banner), "debugger" (any resource, debugger banner) or "helper" (local helper)`;
     }
     if (r.strategy === "page" && r.kind === "onResponseHeaders") {
-        return `onResponseHeaders never runs with strategy "page" — the page can't change response headers before the browser enforces them. Use "debugger", "helper" or "webRequest"`;
+        return `onResponseHeaders never runs with strategy "page" — the page can't change response headers before the browser enforces them. Use "debugger", "helper" or "extension"`;
     }
     if (r.strategy === "page" && r.resourceTypes && !r.resourceTypes.includes("xmlhttprequest")) {
         return `strategy "page" only sees the page's fetch/XHR, but resourceTypes [${r.resourceTypes.join(", ")}] excludes "xmlhttprequest" — this handler never runs`;

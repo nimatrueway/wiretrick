@@ -87,7 +87,7 @@ const MAX_TAPS = 2000;
 const bodyTaps = new Map<string, number>();
 const lastScriptError = new Map<string, number>();
 /** lines that mean the body handlers ran — or legitimately never will */
-const BODY_TAP = /\b(onResponseBody|replaceResponse)\b|onRequest → (respond|block|redirect)\b/;
+const BODY_TAP = /\b(onResponseBody|replaceResponse)\b|onRequest → (block|redirect)\b/;
 
 function noteTap(scriptId: string, level: LogEntry["level"], message: string): void {
     const now = Date.now();

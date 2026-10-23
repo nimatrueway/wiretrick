@@ -3,22 +3,22 @@
  *
  *   wt.onRequest("*://api.example.com/*", fn)
  *   wt.onResponseBody({ url: [...], exclude, methods, resourceTypes, strategy }, fn)
- *   wt.onDom({ url, exclude, when }, fn)
+ *   wt.onDocument({ url, exclude, when }, fn)
  *
  * Each route is owned by exactly one strategy (tier): its own `strategy`,
  * else settings.defaultStrategy, else the per-browser default.
  */
 import { matchAny, matchGroups, matchPatternError } from "./matcher";
 
-export type Strategy = "page" | "webRequest" | "debugger" | "helper" | "rules";
-export const STRATEGIES: Strategy[] = ["helper", "page", "webRequest", "debugger", "rules"];
+export type Strategy = "page" | "extension" | "debugger" | "helper" | "rules";
+export const STRATEGIES: Strategy[] = ["helper", "page", "extension", "debugger", "rules"];
 
 export type NetKind = "onRequest" | "onResponseHeaders" | "replaceResponse" | "onResponseBody";
-export type RouteKind = NetKind | "onDom";
+export type RouteKind = NetKind | "onDocument";
 export const NET_KINDS: NetKind[] = ["onRequest", "onResponseHeaders", "replaceResponse", "onResponseBody"];
 
-export type DomWhen = "document_start" | "document_end" | "document_idle" | "DOMContentLoaded";
-const DOM_WHENS: DomWhen[] = ["document_start", "document_end", "document_idle", "DOMContentLoaded"];
+export type DocumentWhen = "document_start" | "document_end" | "document_idle" | "DOMContentLoaded";
+const DOCUMENT_WHENS: DocumentWhen[] = ["document_start", "document_end", "document_idle", "DOMContentLoaded"];
 
 /** webRequest resource type names (also ctx.resourceType) */
 export const RESOURCE_TYPES = [
@@ -39,15 +39,15 @@ export interface RouteMeta {
     resourceTypes?: string[];
     /** explicit per-handler strategy; undefined = settings default */
     strategy?: Strategy;
-    /** onDom only */
-    when?: DomWhen;
+    /** onDocument only */
+    when?: DocumentWhen;
 }
 
 const IS_FIREFOX_RT = typeof (globalThis as any).browser !== "undefined" && typeof (globalThis as any).browser?.webRequest?.filterResponseData === "function";
 
 /** built-in default when settings.defaultStrategy is unset */
 export function builtinStrategy(firefox = IS_FIREFOX_RT): Strategy {
-    return firefox ? "webRequest" : "helper";
+    return firefox ? "extension" : "helper";
 }
 
 let defaultStrategy: Strategy = builtinStrategy();
@@ -102,17 +102,17 @@ export function normalizeRoute(kind: RouteKind, raw: unknown, index: number): Ro
     checkPatterns(url, "url", where);
     checkPatterns(exclude, "exclude", where);
     const route: RouteMeta = { kind, index, url, exclude };
-    if (kind === "onDom") {
+    if (kind === "onDocument") {
         for (const k of ["methods", "resourceTypes", "strategy"]) {
-            if (obj[k] !== undefined) throw new Error(`${where}: "${k}" doesn't apply to onDom (it runs in the page, not on requests)`);
+            if (obj[k] !== undefined) throw new Error(`${where}: "${k}" doesn't apply to onDocument (it runs in the page, not on requests)`);
         }
         if (obj.when !== undefined) {
-            if (!DOM_WHENS.includes(obj.when)) throw new Error(`${where}: when must be one of ${DOM_WHENS.join(", ")}`);
+            if (!DOCUMENT_WHENS.includes(obj.when)) throw new Error(`${where}: when must be one of ${DOCUMENT_WHENS.join(", ")}`);
             route.when = obj.when;
         } else route.when = "DOMContentLoaded";
         return route;
     }
-    if (obj.when !== undefined) throw new Error(`${where}: "when" applies to onDom only`);
+    if (obj.when !== undefined) throw new Error(`${where}: "when" applies to onDocument only`);
     if (obj.methods !== undefined) {
         const m = list(obj.methods, "methods", where).map((x) => x.toUpperCase());
         route.methods = m;

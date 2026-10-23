@@ -331,7 +331,7 @@ export function addNetworkPort(port: chrome.runtime.Port): void {
 
 export const URL_AT_END = /\s((?:https?|wss?):\/\/\S+)\s*$/;
 /** optional tier tag ("[helper] [Name] …") then the script name */
-const NAME_PREFIX = /^(?:\[(helper|debugger|webRequest|page|sandbox|rules)\]\s+(?=\[))?\[([^\]]+)\]\s*/;
+const NAME_PREFIX = /^(?:\[(helper|debugger|extension|page|sandbox|rules)\]\s+(?=\[))?\[([^\]]+)\]\s*/;
 
 /**
  * The recorded request a script action/body belongs to: the newest same-URL

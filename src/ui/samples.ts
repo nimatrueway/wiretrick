@@ -80,8 +80,8 @@ function demo() {
         });
 }
 
-wt.onDom("*://example.org/*", () => {
-    // run in the page itself (an onDom handler runs beside it, in the extension)
+wt.onDocument("*://example.org/*", () => {
+    // run in the page itself (an onDocument handler runs beside it, in the extension)
     const s = document.createElement("script");
     s.textContent = \`(\${demo})()\`;
     document.head.append(s);
@@ -114,7 +114,7 @@ wt.onResponseBody("*://dummyjson.com/todos/*", (ctx, body) => {
     },
     {
         name: "Rewrite page HTML",
-        blurb: "Transform the document itself. Needs a strategy that reads page bodies: helper or debugger on Chrome, webRequest on Firefox (not page). Try it: open example.com — a red banner appears.",
+        blurb: "Transform the document itself. Needs a strategy that reads page bodies: helper or debugger on Chrome, extension on Firefox (not page). Try it: open example.com — a red banner appears.",
         code: `// Try it: open https://example.com/
 wt.about("Rewrite example.com's HTML");
 
@@ -131,7 +131,7 @@ wt.onResponseBody({ url: "*://example.com/*", resourceTypes: ["main_frame"] }, (
         code: `// Try it: open https://en.wikipedia.org/wiki/Cat
 wt.about("Retitle Wikipedia articles");
 
-wt.onDom("*://en.wikipedia.org/wiki/*", () => {
+wt.onDocument("*://en.wikipedia.org/wiki/*", () => {
     document.title = "🎯 " + document.title;
     const el = document.querySelector("h1");
     if (el) el.textContent = "Hello from Wiretrick";
@@ -178,7 +178,7 @@ const cfg = wt.params({
 wt.onRequest("*://dummyjson.com/posts/*", () => {
     if (!cfg.enabled) return;
     return {
-        respond: {
+        replaceResponse: {
             status: Number(cfg.status),
             body: { error: cfg.message, retries: cfg.retries, tags: cfg.extraHeaders },
             mime: "application/json",

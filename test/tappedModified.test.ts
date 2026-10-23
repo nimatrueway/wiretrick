@@ -6,8 +6,8 @@ import { addUiPort, allLogs, clearTab, log, logTapped, type LogEntry } from "../
 import { matches, touchCounts, touchState, ALL_TYPES, type NetFilter } from "../src/ui/network/netFormat";
 import type { NetEntry, NetIntervention } from "../src/shared/netTypes";
 
-// these suites exercise the webRequest tier: make it the settings default
-beforeEach(() => setDefaultStrategy("webRequest"));
+// these suites exercise the extension strategy: make it the settings default
+beforeEach(() => setDefaultStrategy("extension"));
 afterEach(() => setDefaultStrategy(null));
 
 describe("interventionKind", () => {

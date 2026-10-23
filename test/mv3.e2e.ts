@@ -247,7 +247,7 @@ try {
         const m = (window as any).monaco;
         const ed = m.editor.getEditors()[0];
         const prev = ed.getModel();
-        const model = m.editor.createModel('wt.onDom({ url: "*", when: "document_idle" }, () => {});\n', "typescript", m.Uri.parse("file:///hover-probe.ts"));
+        const model = m.editor.createModel('wt.onDocument({ url: "*", when: "document_idle" }, () => {});\n', "typescript", m.Uri.parse("file:///hover-probe.ts"));
         ed.setModel(model);
         ed.setPosition({ lineNumber: 1, column: 23 }); // on `when`
         ed.focus();
@@ -283,7 +283,7 @@ try {
             details = document.querySelector(".suggest-details")?.innerHTML ?? "";
         }
         ed.trigger("t", "hideSuggestWidget", {});
-        model.setValue('wt.onDom("*", ');
+        model.setValue('wt.onDocument("*", ');
         ed.setPosition({ lineNumber: 1, column: 15 }); // on the handler argument
         let hints = "";
         for (let i = 0; i < 40 && !hints.includes("Receives the same"); i++) {
@@ -319,7 +319,7 @@ try {
     // (with `parse`: the sandbox runs the parsers; the defs it posts back are stripped of them)
     const pgSaved: any = await mgr.evaluate((origin: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_pg", name: "Param gated",
-        code: `const cfg = wt.params({ intercept: { type: "boolean", default: false, description: "Intercept", parse: (on) => (on ? "PARAM-GATED" : null) } });\nconst tags = wt.defineParam("tags", { type: "stringList", default: ["a", "b"], parse: (l) => new Set(l) });\nwt.onRequest("${origin}/*", (ctx) => { if (cfg.intercept) return { respond: { status: 200, body: { value: cfg.intercept, tags: tags.size } } }; });`,
+        code: `const cfg = wt.params({ intercept: { type: "boolean", default: false, description: "Intercept", parse: (on) => (on ? "PARAM-GATED" : null) } });\nconst tags = wt.defineParam("tags", { type: "stringList", default: ["a", "b"], parse: (l) => new Set(l) });\nwt.onRequest("${origin}/*", (ctx) => { if (cfg.intercept) return { replaceResponse: { status: 200, body: { value: cfg.intercept, tags: tags.size } } }; });`,
     }, r)), ORIGIN);
     check("param parse: saved without error, defs stored raw (no parse)", !pgSaved?.error && pgSaved?.paramDefs?.tags?.type === "stringList" && !JSON.stringify(pgSaved?.paramDefs).includes("parse"), JSON.stringify({ error: pgSaved?.error, defs: pgSaved?.paramDefs }));
     await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "setScriptParam", scriptId: "s_pg", key: "intercept", value: true }, r)));
@@ -337,7 +337,7 @@ try {
     if (process.env.DBG) await mgr.evaluate(() => { const sel = document.querySelector("#log-level") as HTMLSelectElement; sel.value = "debug"; sel.dispatchEvent(new Event("change")); });
     await mgr.evaluate((cdn: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_respond", name: "Respond script",
-        code: `wt.onRequest({ url: "${cdn}/app.js*", strategy: "debugger" }, (ctx) => ({ respond: { status: 200, mime: "text/javascript", body: 'window.__marker = "RESPONDED:' + ctx.resourceType + '";' } }));`,
+        code: `wt.onRequest({ url: "${cdn}/app.js*", strategy: "debugger" }, (ctx) => ({ replaceResponse: { status: 200, mime: "text/javascript", body: 'window.__marker = "RESPONDED:' + ctx.resourceType + '";' } }));`,
     }, r)), CDN);
     await mgr.evaluate((cdn: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_cdpx", name: "Cdp transform",
@@ -757,7 +757,7 @@ try {
     check("popup lists scripts on a COLD SW wake (idle restart)", coldItems.includes("MV3 hook"), `swWasUp=${wasSwUp} items=${JSON.stringify(coldItems)} errors=${JSON.stringify(coldErrors.slice(0, 2))}`);
     check("cold popup has no page errors", coldErrors.length === 0, JSON.stringify(coldErrors.slice(0, 3)));
 
-    // ---- MV3 onDom: document_start handlers run from the cached bundle ----
+    // ---- MV3 onDocument: document_start handlers run from the cached bundle ----
     // (MV3 limitation: the bundle answers at SW-wake time — the session
     // analyze cache removes the sandbox round-trip; the cache-hit line
     // proves the fast path)
@@ -773,21 +773,21 @@ try {
     });
     await warm.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_dom", name: "Early dom",
-        code: `wt.onDom({ url: "*://*:*/*", when: "document_start" }, (ctx) => { document.title = "DOM-RAN:" + document.readyState; });`,
+        code: `wt.onDocument({ url: "*://*:*/*", when: "document_start" }, (ctx) => { document.title = "DOM-RAN:" + document.readyState; });`,
     }, r)));
     // a second script with its own `when` must not inherit the first's
     await warm.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_idle", name: "Idle dom",
-        code: `wt.onDom({ url: "*://*:*/*", when: "document_idle" }, () => { document.documentElement.dataset.idle = document.readyState; });`,
+        code: `wt.onDocument({ url: "*://*:*/*", when: "document_idle" }, () => { document.documentElement.dataset.idle = document.readyState; });`,
     }, r)));
     await warm.waitForTimeout(1500); // cache refresh (pipeline reload warm)
     const domPage = await ctx.newPage();
     await domPage.goto(`${ORIGIN}/page`);
     await domPage.waitForFunction(() => document.title.startsWith("DOM-RAN"), null, { timeout: 15000 });
-    check("onDom document_start runs in MV3", true, await domPage.title());
+    check("onDocument document_start runs in MV3", true, await domPage.title());
     await domPage.waitForFunction(() => !!document.documentElement.dataset.idle, null, { timeout: 15000 }).catch(() => null);
     const idleState = await domPage.evaluate(() => document.documentElement.dataset.idle);
-    check("onDom: each script keeps its own when (document_idle runs after load)", idleState === "complete", String(idleState));
+    check("onDocument: each script keeps its own when (document_idle runs after load)", idleState === "complete", String(idleState));
     const cacheHit = await warm.evaluate(() =>
         [...document.querySelectorAll("#log-entries .log-line")].some((l) => (l.textContent || "").includes("analyze cache hit"))
     );

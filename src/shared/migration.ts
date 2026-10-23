@@ -3,26 +3,46 @@
  * API names (pure functions; the background runner is
  * background/migration.ts). There are no runtime aliases: anything this
  * misses (or a script pasted later) fails to compile against the current
- * wt-api.d.ts.
+ * wt-api.d.ts. Every rewrite is idempotent, so a profile at any older
+ * version gets all of them (v1 and v2) in one pass.
+ *
+ * v1: process/cdp/hook/webrequest strategies → helper/debugger/page/…,
+ *     wt.describe → wt.about, wt.modifyResponse → wt.onResponseBody,
+ *     cancel: → block:, types: → resourceTypes:, settings `strategy` →
+ *     `defaultStrategy`.
+ * v2: strategy webRequest → extension, wt.onDom → wt.onDocument, the
+ *     onRequest result `respond:` → `replaceResponse:` (and the renamed
+ *     Wiretrick.* types).
  *
  * Accepted risk: the rewrite is regex based, not syntax aware. In a script
- * that uses `wt.`, every `cancel:` becomes `block:` and every `types:`
- * becomes `resourceTypes:` — also an unrelated object key of that name
- * outside a handler route/result (rare in interception scripts; the
- * original is kept as a backup and the change is logged).
+ * that uses `wt.`, every `cancel:` becomes `block:`, every `types:` becomes
+ * `resourceTypes:`, every `respond:` becomes `replaceResponse:` (also a
+ * `cond ? respond : x` ternary) and every "webRequest" string literal
+ * becomes "extension" — also an unrelated object key or string of that
+ * name outside a handler route/result (rare in interception scripts; the
+ * original is kept as a backup and the change is logged). A shorthand
+ * `{ respond }` result isn't recognized.
  */
 import { globalOptionLines, defaultStrategySetting, type GlobalSettings } from "./settingsYaml";
 
 /** bumped when a new rewrite is added */
-export const MIGRATION_VERSION = 1;
+export const MIGRATION_VERSION = 2;
 
 /** old strategy value → current one */
-export const OLD_STRATEGIES: Record<string, string> = { process: "helper", cdp: "debugger", hook: "page", webrequest: "webRequest" };
+export const OLD_STRATEGIES: Record<string, string> = { process: "helper", cdp: "debugger", hook: "page", webrequest: "extension", webRequest: "extension" };
 
 /** an old strategy value mapped to the current name; anything else unchanged */
 export function mapStrategy(v: string): string {
     return OLD_STRATEGIES[v] ?? v;
 }
+
+/** renamed Wiretrick.* types (v2) */
+const OLD_TYPES: Record<string, string> = {
+    RespondOptions: "ReplacementOptions",
+    DomRouteOptions: "DocumentRouteOptions",
+    DomRoute: "DocumentRoute",
+    DomOptions: "DocumentOptions",
+};
 
 export interface ScriptMigration {
     code: string;
@@ -41,6 +61,7 @@ export function migrateScriptSource(code: string): ScriptMigration {
             return typeof to === "string" ? to : to(...m);
         });
     };
+    // v1
     rule(/\bwt\.describe\b/g, "wt.about", "wt.describe → wt.about");
     rule(/\bwt\.modifyResponse\b/g, "wt.onResponseBody", "wt.modifyResponse → wt.onResponseBody");
     rule(
@@ -50,30 +71,42 @@ export function migrateScriptSource(code: string): ScriptMigration {
     );
     rule(/\bcancel(\s*):/g, (_m, sp) => `block${sp}:`, "cancel: → block:");
     rule(/\btypes(\s*):/g, (_m, sp) => `resourceTypes${sp}:`, "types: → resourceTypes:");
+    // v2
+    rule(/(["'`])webRequest\1/g, (_m, q) => `${q}extension${q}`, 'strategy "webRequest" → "extension"');
+    rule(/\bwt\.onDom\b/g, "wt.onDocument", "wt.onDom → wt.onDocument");
+    rule(/\brespond(\s*):/g, (_m, sp) => `replaceResponse${sp}:`, "respond: → replaceResponse:");
+    rule(
+        /\bWiretrick\.(RespondOptions|DomRouteOptions|DomRoute|DomOptions)\b/g,
+        (_m, t) => `Wiretrick.${OLD_TYPES[t]}`,
+        (m) => `Wiretrick.${m[1]} → Wiretrick.${OLD_TYPES[m[1]]}`
+    );
     return { code, changes };
 }
 
-const OLD_DOC_START = /^(\s*)# Interception strategy for every handler/;
-/** comment lines of the old generated strategy documentation (after its first line) */
-const OLD_DOC_LINE = /^\s*#\s*(An unavailable strategy|Compatibility:|\s*(process|hook|webrequest|cdp):|(process|hook|webrequest|cdp)( \| \w+)+\s*$|strategy:|default:\s*["']?(process|hook|webrequest|cdp)\b)/;
-/** the old block lists the old strategy names (the current one starts the same) */
-const OLD_DOC_NAMES = /^\s*#\s+(process|hook|webrequest|cdp):/;
-const LIVE_KEY = /^(\s+)strategy(\s*:)(.*)$/;
-const COMMENTED_KEY = /^(\s*#\s*)strategy(\s*:)(.*)$/;
+const STALE = "process|hook|webrequest|webRequest|cdp";
+const DOC_START = /^(\s*)# Interception strategy for every handler/;
+/** comment lines of a generated strategy documentation block (after its first line) */
+const DOC_LINE = /^\s*#\s*(An unavailable strategy|Compatibility:|\w+: \+ |\w+( \| \w+)+\s*$|(defaultStrategy|strategy|default)\s*:)/;
+/** a generated block naming a renamed strategy is stale */
+const STALE_DOC_LINE = new RegExp(`^\\s*#\\s+(${STALE}):`);
+const LIVE_KEY = /^(\s+)(strategy|defaultStrategy)(\s*:)(.*)$/;
+const COMMENTED_KEY = /^(\s*#\s*)(strategy|defaultStrategy)(\s*:)(.*)$/;
+const STALE_VALUE = new RegExp(`\\b(${STALE})\\b`, "g");
 
 /** old strategy names in a YAML value (before any trailing comment) */
 function mapValue(rest: string): string {
     const hash = rest.search(/\s#/);
     const v = hash < 0 ? rest : rest.slice(0, hash);
     const tail = hash < 0 ? "" : rest.slice(hash);
-    return v.replace(/\b(process|cdp|hook|webrequest)\b/g, (n) => OLD_STRATEGIES[n]) + tail;
+    return v.replace(STALE_VALUE, (n) => OLD_STRATEGIES[n]) + tail;
 }
 
 /**
- * settings.yaml: `settings.strategy` → `settings.defaultStrategy` (value
- * mapped). The generated strategy documentation above it is regenerated
- * (it names the old strategies); everything else — other comments, order,
- * formatting — is kept. Flow-style `settings: { … }` is left alone.
+ * settings.yaml: `settings.strategy` → `settings.defaultStrategy`, old
+ * strategy values (process, cdp, hook, webrequest, webRequest) mapped. A
+ * generated strategy documentation block that names an old strategy is
+ * regenerated; everything else — other comments, order, formatting — is
+ * kept. Flow-style `settings: { … }` is left alone.
  */
 export function migrateSettingsText(text: string): string {
     const eol = text.includes("\r\n") ? "\r\n" : "\n";
@@ -87,15 +120,15 @@ export function migrateSettingsText(text: string): string {
             out.push(line);
             continue;
         }
-        const doc = OLD_DOC_START.exec(line);
+        const doc = DOC_START.exec(line);
         let j = i + 1;
-        while (doc && j < lines.length && OLD_DOC_LINE.test(lines[j])) j++;
-        if (doc && lines.slice(i + 1, j).some((l) => OLD_DOC_NAMES.test(l))) {
-            // the old generated block: description lines, optional live entry
+        while (doc && j < lines.length && DOC_LINE.test(lines[j])) j++;
+        if (doc && lines.slice(i + 1, j).some((l) => STALE_DOC_LINE.test(l))) {
+            // a stale generated block: description lines, optional live entry
             let value: string | undefined;
             const live = j < lines.length ? LIVE_KEY.exec(lines[j]) : null;
             if (live && live[1] === doc[1]) {
-                value = mapValue(live[3].replace(/\s#.*$/, "")).trim().replace(/^["']|["']$/g, "");
+                value = mapValue(live[4].replace(/\s#.*$/, "")).trim().replace(/^["']|["']$/g, "");
                 j++;
             }
             const g = { defaultStrategy: value ?? defaultStrategySetting() } as GlobalSettings;
@@ -105,12 +138,12 @@ export function migrateSettingsText(text: string): string {
         }
         const live = LIVE_KEY.exec(line);
         if (live) {
-            out.push(`${live[1]}defaultStrategy${live[2]}${mapValue(live[3])}`);
+            out.push(`${live[1]}defaultStrategy${live[3]}${mapValue(live[4])}`);
             continue;
         }
         const commented = COMMENTED_KEY.exec(line);
         if (commented) {
-            out.push(`${commented[1]}defaultStrategy${commented[2]}${mapValue(commented[3])}`);
+            out.push(`${commented[1]}defaultStrategy${commented[3]}${mapValue(commented[4])}`);
             continue;
         }
         out.push(line);

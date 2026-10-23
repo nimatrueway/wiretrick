@@ -4,7 +4,7 @@ import { normalizeRoute, NET_KINDS } from "../src/shared/route";
 
 /** bare fns → routed handlers on "*://x.test/*" (every kind present) */
 const routed = (h: Record<string, Function[]>): any =>
-    Object.fromEntries([...NET_KINDS, "onDom"].map((k) => [k, (h[k] ?? []).map((fn, i) => ({ fn, route: normalizeRoute(k as any, "*://x.test/*", i) }))]));
+    Object.fromEntries([...NET_KINDS, "onDocument"].map((k) => [k, (h[k] ?? []).map((fn, i) => ({ fn, route: normalizeRoute(k as any, "*://x.test/*", i) }))]));
 
 describe("replaceResponse { file }", () => {
     it("decodes base64 data: URLs and uses their media type", () => {

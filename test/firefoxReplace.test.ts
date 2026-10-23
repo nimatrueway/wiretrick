@@ -1,5 +1,5 @@
 /**
- * Firefox: the webRequest tier serves replaceResponse / respond 200 in place
+ * Firefox: the extension strategy serves replaceResponse / respond 200 in place
  * (filterResponseData) instead of redirecting, so the URL is kept.
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
@@ -7,8 +7,8 @@ import { setDefaultStrategy } from "../src/shared/route";
 import { compileScript } from "../src/shared/compile";
 import type { Script } from "../src/background/engine/scriptStore";
 
-// these suites exercise the webRequest tier: make it the settings default
-beforeEach(() => setDefaultStrategy("webRequest"));
+// these suites exercise the extension strategy: make it the settings default
+beforeEach(() => setDefaultStrategy("extension"));
 afterEach(() => setDefaultStrategy(null));
 
 interface FakeFilter {
@@ -81,7 +81,7 @@ beforeEach(() => {
     delete (globalThis as any).browser;
 });
 
-describe("Firefox webRequest tier: in-place replacement", () => {
+describe("Firefox extension strategy: in-place replacement", () => {
     it("sync replaceResponse on a page load: no redirect, body swapped, headers fixed", async () => {
         const s = await load();
         s.reload([makeScript("a", "Page swap", `wt.replaceResponse("*", () => "<h1>NEW</h1>");`)]);
@@ -112,7 +112,7 @@ describe("Firefox webRequest tier: in-place replacement", () => {
 
     it("respond 200 in place; a redirect hop keeps the replacement for the final response", async () => {
         const s = await load();
-        s.reload([makeScript("a", "Mock", `wt.onRequest("*", () => ({ respond: { body: { m: true } } }));`)]);
+        s.reload([makeScript("a", "Mock", `wt.onRequest("*", () => ({ replaceResponse: { body: { m: true } } }));`)]);
         expect((s.handleBeforeRequest(page(), null) as any).kind).toBe("allow");
         await s.handleHeadersReceived(page({ statusCode: 302, responseHeaders: [{ name: "Location", value: "/other" }] }), null);
         expect(filters.size).toBe(0);
@@ -121,16 +121,16 @@ describe("Firefox webRequest tier: in-place replacement", () => {
         const f = filters.get("f1")!;
         f.onstart!();
         expect(text(f)).toBe('{"m":true}');
-        expect(entries.find((e) => e.scriptId === "a")!.message).toMatch(/^\[Mock\] onRequest → respond 200 application\/json/);
+        expect(entries.find((e) => e.scriptId === "a")!.message).toMatch(/^\[Mock\] onRequest → replaceResponse 200 application\/json/);
     });
 
     it("respond with a non-200 status isn't served (no status control) and says so", async () => {
         const s = await load();
-        s.reload([makeScript("a", "Mock", `wt.onRequest("*", () => ({ respond: { status: 404, body: "no" } }));`)]);
+        s.reload([makeScript("a", "Mock", `wt.onRequest("*", () => ({ replaceResponse: { status: 404, body: "no" } }));`)]);
         expect((s.handleBeforeRequest(page(), null) as any).kind).toBe("allow");
         await s.handleHeadersReceived(page(), null);
         expect(filters.size).toBe(0);
-        expect(entries.find((e) => e.scriptId === "a")).toMatchObject({ level: "warn", message: expect.stringContaining("respond 404 not served") });
+        expect(entries.find((e) => e.scriptId === "a")).toMatchObject({ level: "warn", message: expect.stringContaining("replaceResponse 404 not served") });
     });
 
     it("a pruned request leaves nothing behind", async () => {

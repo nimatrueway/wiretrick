@@ -3,7 +3,7 @@
  * script name (scriptStore meta.name), never the compiled metadata
  * (scripts have no name of their own — compiled meta is "Untitled script").
  *
- * Also covers the respond-result emit paths: Chromium's webRequest tier
+ * Also covers the respond-result emit paths: Chromium's extension strategy
  * can't serve a non-200 respond (data-URLs carry no status) and says so;
  * the CDP tier fulfills a respond itself and logs the success, or logs a
  * script-attributed error when fulfillment fails.
@@ -16,8 +16,8 @@ import { addUiPort, type LogEntry } from "../src/background/engine/logs";
 import { compileScript } from "../src/shared/compile";
 import type { Script } from "../src/background/engine/scriptStore";
 
-// these suites exercise the webRequest tier: make it the settings default
-beforeEach(() => setDefaultStrategy("webRequest"));
+// these suites exercise the extension strategy: make it the settings default
+beforeEach(() => setDefaultStrategy("extension"));
 afterEach(() => setDefaultStrategy(null));
 
 // ---- log capture via a fake UI port ----
@@ -92,16 +92,16 @@ const details = (over: Record<string, any> = {}) => ({
 });
 
 const RESPOND_500 = `wt.onRequest("*://api.example.com/*", (ctx) => {
-    if (ctx.url.includes("/v1/")) return { respond: { status: 500, body: { error: "boom" }, mime: "application/json" } };
+    if (ctx.url.includes("/v1/")) return { replaceResponse: { status: 500, body: { error: "boom" }, mime: "application/json" } };
 });`;
 
-describe("webRequest tier: log lines use the stored script name", () => {
+describe("extension strategy: log lines use the stored script name", () => {
     it("sync respond with non-200 status → not served + named warning", () => {
         const s = new WebRequestStrategy();
         s.reload([storedScript("a", "API mocker", RESPOND_500)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("allow");
-        const line = entries.find((e) => e.message.includes("respond 500"));
+        const line = entries.find((e) => e.message.includes("replaceResponse 500"));
         expect(line, "a respond-500 log line must exist").toBeTruthy();
         expect(line!.message).toContain("[API mocker]");
         expect(entries.some((e) => e.message.includes("[Untitled script]"))).toBe(false);
@@ -109,10 +109,10 @@ describe("webRequest tier: log lines use the stored script name", () => {
 
     it("sync respond 200 → served + named serve log", () => {
         const s = new WebRequestStrategy();
-        s.reload([storedScript("a", "API mocker", `wt.onRequest("*", () => ({ respond: { body: "ok", mime: "text/plain" } }));`)]);
+        s.reload([storedScript("a", "API mocker", `wt.onRequest("*", () => ({ replaceResponse: { body: "ok", mime: "text/plain" } }));`)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("redirect");
-        const line = entries.find((e) => e.message.includes("respond 200"));
+        const line = entries.find((e) => e.message.includes("replaceResponse 200"));
         expect(line, "a respond log line must exist").toBeTruthy();
         expect(line!.message).toContain("[API mocker]");
     });
@@ -180,7 +180,7 @@ describe("CDP tier: request-stage respond fulfillment", () => {
         const fulfill = debuggerCalls.find((x) => x.command === "Fetch.fulfillRequest");
         expect(fulfill, "the respond must be fulfilled at the Request stage").toBeTruthy();
         expect(fulfill!.params.responseCode).toBe(500);
-        const line = entries.find((e) => e.message.includes("respond 500"));
+        const line = entries.find((e) => e.message.includes("replaceResponse 500"));
         expect(line, "a respond-500 success log must exist").toBeTruthy();
         expect(line!.message).toContain("[API mocker]");
         expect(line!.level).toBe("info");
@@ -188,7 +188,7 @@ describe("CDP tier: request-stage respond fulfillment", () => {
         expect(entries.filter((e) => e.scriptId === "a")).toHaveLength(1);
     });
 
-    it("a cdp route is never run by the webRequest tier", () => {
+    it("a cdp route is never run by the extension strategy", () => {
         const w = new WebRequestStrategy();
         w.reload([storedScript("a", "API mocker", CDP_500)]);
         expect((w.handleBeforeRequest(details(), null) as any).kind).toBe("allow");
@@ -196,7 +196,7 @@ describe("CDP tier: request-stage respond fulfillment", () => {
     });
 
     it("sync respond 200 is fulfilled in place by the debugger tier (no redirect)", async () => {
-        const code = `wt.onRequest({ url: "*", strategy: "debugger" }, () => ({ respond: { body: "<h1>mock</h1>", mime: "text/html" } }));`;
+        const code = `wt.onRequest({ url: "*", strategy: "debugger" }, () => ({ replaceResponse: { body: "<h1>mock</h1>", mime: "text/html" } }));`;
         const c = new CdpStrategy();
         c.reload([storedScript("a", "Page mock", code)]);
         await c.handlePaused("tab:1", paused({ resourceType: "Document" }));
@@ -204,7 +204,7 @@ describe("CDP tier: request-stage respond fulfillment", () => {
         expect(fulfill!.params.responseCode).toBe(200);
         expect(atob(fulfill!.params.body)).toBe("<h1>mock</h1>");
         expect(entries.filter((e) => e.scriptId === "a").map((e) => e.message.replace(/ https:.*/, ""))).toEqual([
-            "[Page mock] onRequest → respond 200 text/html (13b)",
+            "[Page mock] onRequest → replaceResponse 200 text/html (13b)",
         ]);
     });
 
@@ -227,7 +227,7 @@ describe("CDP tier: request-stage respond fulfillment", () => {
         const c = new CdpStrategy();
         c.reload([
             storedScript("a", "API mocker", `wt.onRequest("*", () => ({ redirect: "https://mocked.example.com/x" }));`),
-            storedScript("b", "Responder", `wt.onRequest("*", () => ({ respond: { body: "ok" } }));`),
+            storedScript("b", "Responder", `wt.onRequest("*", () => ({ replaceResponse: { body: "ok" } }));`),
         ]);
         await c.handlePaused("tab:1", paused());
         expect(debuggerCalls.filter((x) => x.command === "Fetch.fulfillRequest")).toEqual([]);
@@ -239,12 +239,12 @@ describe("CDP tier: request-stage respond fulfillment", () => {
 
     it("async onRequest respond is fulfilled", async () => {
         const c = new CdpStrategy();
-        c.reload([storedScript("a", "API mocker", `wt.onRequest({ url: "*", strategy: "debugger" }, async () => ({ respond: { status: 503, body: "later" } }));`)]);
+        c.reload([storedScript("a", "API mocker", `wt.onRequest({ url: "*", strategy: "debugger" }, async () => ({ replaceResponse: { status: 503, body: "later" } }));`)]);
         await c.handlePaused("tab:1", paused());
         const fulfill = debuggerCalls.find((x) => x.command === "Fetch.fulfillRequest");
         expect(fulfill).toBeTruthy();
         expect(fulfill!.params.responseCode).toBe(503);
-        expect(entries.find((e) => e.message.includes("respond 503"))!.message).toContain("[API mocker]");
+        expect(entries.find((e) => e.message.includes("replaceResponse 503"))!.message).toContain("[API mocker]");
     });
 
     it("fulfill failure → script-attributed error log + request continued", async () => {
@@ -252,7 +252,7 @@ describe("CDP tier: request-stage respond fulfillment", () => {
         const c = new CdpStrategy();
         c.reload([storedScript("a", "API mocker", CDP_500)]);
         await c.handlePaused("tab:1", paused());
-        const line = entries.find((e) => e.level === "error" && e.message.includes("respond 500"));
+        const line = entries.find((e) => e.level === "error" && e.message.includes("replaceResponse 500"));
         expect(line, "a script-attributed failure log must exist").toBeTruthy();
         expect(line!.message).toContain("[API mocker]");
         expect(debuggerCalls.some((x) => x.command === "Fetch.continueRequest")).toBe(true);
@@ -298,7 +298,7 @@ describe("per-script TypeScript error tracking", () => {
     });
 });
 
-describe("Chromium webRequest tier: how it serves replacements (redirect)", () => {
+describe("Chromium extension strategy: how it serves replacements (redirect)", () => {
     const REPLACE = `wt.replaceResponse("*", () => "<h1>x</h1>");`;
     it("a page load is served via serve.html", () => {
         const s = new WebRequestStrategy();

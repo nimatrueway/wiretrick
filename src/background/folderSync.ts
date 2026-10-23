@@ -898,7 +898,7 @@ async function applyPendingMigration(): Promise<void> {
     if (f) {
         const next = migrateSettingsText(f.text);
         if (next !== f.text) {
-            await backup(SETTINGS_FILE, f.text, `${SETTINGS_FILE} was migrated (strategy → defaultStrategy)`, "the original");
+            await backup(SETTINGS_FILE, f.text, `${SETTINGS_FILE} was migrated to the renamed settings`, "the original");
             await writeFile(SETTINGS_FILE, next);
         }
     }

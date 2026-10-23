@@ -392,7 +392,7 @@ export class CdpStrategy {
                             body: bytesToBase64(new TextEncoder().encode(decision.content ?? "")),
                         });
                     } catch (e: any) {
-                        log(tabId, `[${decision.scriptName}] onRequest → respond ${decision.status || 200} failed: ${e?.message || e} — the request continues UNMODIFIED ${url}`, "error", decision.scriptId);
+                        log(tabId, `[${decision.scriptName}] onRequest → replaceResponse ${decision.status || 200} failed: ${e?.message || e} — the request continues UNMODIFIED ${url}`, "error", decision.scriptId);
                         await cont();
                     }
                     return;

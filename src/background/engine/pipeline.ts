@@ -185,7 +185,7 @@ export function createPipeline(
             const byMsg = new Map<string, string[]>();
             const down: string[] = [];
             for (const r of s.meta.routes || []) {
-                if (r.kind === "onDom") continue;
+                if (r.kind === "onDocument") continue;
                 const strategy = effectiveStrategy(r);
                 const msg = routeProblem({ kind: r.kind, strategy, resourceTypes: r.resourceTypes }, { firefox: IS_FIREFOX, mv3: __MV3__ });
                 if (msg) byMsg.set(msg, [...(byMsg.get(msg) || []), routeLabel(r)]);
@@ -445,10 +445,10 @@ export function createPipeline(
                     extra = extra.filter((s) => s !== "extraHeaders");
                     (chrome.webRequest as any)[event].addListener(fn, FILTER, extra);
                 }
-                dlogLevel("webRequest", "debug", `${event} listener registered (${extra.join(", ")})`);
+                dlogLevel("extension", "debug", `${event} listener registered (${extra.join(", ")})`);
             } catch (e: any) {
                 // e.g. a browser build that dropped MV2 blocking webRequest
-                log(-1, `[webRequest] cannot register blocking ${event} listener — the "webRequest" strategy is inactive in this browser: ${e?.message || e}`, "error");
+                log(-1, `[extension] cannot register blocking ${event} listener — the "extension" strategy is inactive in this browser: ${e?.message || e}`, "error");
             }
         };
         addBlocking("onBeforeRequest", onBeforeRequest, ["blocking"]);
@@ -468,7 +468,7 @@ export function createPipeline(
         const tr = (details: any, msg: string, level: "debug" | "warn" = "debug") => {
             const t = traced.get(details.requestId);
             if (!t) return;
-            log(details.tabId, `[webRequest] ${msg}${details.url !== t.url ? ` (originally ${t.url})` : ""}`, level);
+            log(details.tabId, `[extension] ${msg}${details.url !== t.url ? ` (originally ${t.url})` : ""}`, level);
         };
         chrome.webRequest.onBeforeRedirect.addListener(
             (d: any) => tr(d, `browser followed redirect ${d.url} → ${d.redirectUrl} (status ${d.statusCode}${d.fromCache ? ", from cache" : ""})`),
@@ -490,7 +490,7 @@ export function createPipeline(
         // Wiretrick, or an ad blocker redirecting the same request)
         (chrome.webRequest as any).onActionIgnored?.addListener((d: any) => {
             const t = traced.get(d.requestId);
-            log(t?.tabId ?? -1, `[webRequest] the browser IGNORED this extension's "${d.action}"${t ? ` for ${t.url}` : ""} — another extension's change to the same request took precedence (disable other request-modifying extensions, e.g. a second Wiretrick install)`, "warn");
+            log(t?.tabId ?? -1, `[extension] the browser IGNORED this extension's "${d.action}"${t ? ` for ${t.url}` : ""} — another extension's change to the same request took precedence (disable other request-modifying extensions, e.g. a second Wiretrick install)`, "warn");
         });
     } else {
         dlog("pipeline", "MV3: no blocking webRequest — the page strategy carries page fetch/XHR; the debugger or helper strategy carries browser-initiated loads");
@@ -576,7 +576,7 @@ export function createPipeline(
                 // Network handlers run in the background (the hook is
                 // eval-free and immune to page CSP): the page gets only the
                 // ROUTES of hook-owned handlers, so it touches fetch/XHR to
-                // those and leaves everything else native. onDom handlers
+                // those and leaves everything else native. onDocument handlers
                 // need the page's window: their scripts' FULL sources ship
                 // (top-level helpers/closures survive), compiled in the MAIN
                 // world when the page CSP allows, else in the bridge.
@@ -597,7 +597,7 @@ export function createPipeline(
                     if (!s.enabled || !a || a.error || !a.meta.active) continue;
                     let dom = false;
                     for (const r of a.meta.routes) {
-                        if (r.kind === "onDom") dom ||= routeMatches(r, url);
+                        if (r.kind === "onDocument") dom ||= routeMatches(r, url);
                         else if (r.kind !== "onResponseHeaders" && effectiveStrategy(r) === "page" && hookCanSee(r)) routes.push(r);
                     }
                     if (!dom) continue;
@@ -699,7 +699,7 @@ export function createPipeline(
         // routes come from running each script's top level with its real
         // params and imports (stored meta had imports stubbed). MV3: this
         // also warms the analyze cache so the next getHookBundle is served
-        // without waking the sandbox (keeps onDom document_start early).
+        // without waking the sandbox (keeps onDocument document_start early).
         let scripts = stored;
         try {
             scripts = withAnalyzedMeta(stored, await analyzeScripts(stored.map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt })), paramValues));

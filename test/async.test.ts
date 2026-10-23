@@ -5,8 +5,8 @@ import { CdpStrategy } from "../src/background/engine/strategies/cdpStrategy";
 import { compileScript } from "../src/shared/compile";
 import type { Script } from "../src/background/engine/scriptStore";
 
-// these suites exercise the webRequest tier: make it the settings default
-beforeEach(() => setDefaultStrategy("webRequest"));
+// these suites exercise the extension strategy: make it the settings default
+beforeEach(() => setDefaultStrategy("extension"));
 afterEach(() => setDefaultStrategy(null));
 
 beforeEach(() => {
@@ -137,7 +137,7 @@ describe("handler stacking", () => {
 
 // ---------- async handlers ----------
 
-describe("async handlers (Chrome webRequest tier)", () => {
+describe("async handlers (Chrome extension strategy)", () => {
     it("async onRequest redirect → skipped with allow (needs sync or cdp)", async () => {
         const s = new WebRequestStrategy();
         s.reload([makeScript("a", `wt.onRequest("*", async (ctx) => ({ redirect: "https://async.com" }));`)]);
