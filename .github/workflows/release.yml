@@ -169,31 +169,17 @@ jobs:
           rm -f "$KEY"
           ls -la *.crx
 
-      - name: Package Firefox xpi (signed via AMO when AMO_JWT_* secrets are set)
-        env:
-          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
-          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
-        run: |
-          XPI="wiretrick-firefox-v${VERSION}.xpi"
-          # pasted secrets often carry a trailing newline/space
-          AMO_JWT_ISSUER=$(printf %s "$AMO_JWT_ISSUER" | tr -d '[:space:]')
-          AMO_JWT_SECRET=$(printf %s "$AMO_JWT_SECRET" | tr -d '[:space:]')
-          if [ -n "$AMO_JWT_ISSUER" ] && [ -n "$AMO_JWT_SECRET" ] && \
-             npx -y web-ext@8 sign -s dist-firefox -a amo-signed --channel unlisted \
-               --api-key "$AMO_JWT_ISSUER" --api-secret "$AMO_JWT_SECRET"; then
-            mv amo-signed/*.xpi "$XPI"
-            echo "signed $XPI"
-          else
-            echo "::warning::Firefox xpi is unsigned (AMO_JWT_ISSUER/AMO_JWT_SECRET missing or signing failed)"
-            (cd dist-firefox && zip -qr "../$XPI" .)
-          fi
-          echo "XPI_NAME=$XPI" >> "$GITHUB_ENV"
-
       - name: Upload build artifact (every run)
         uses: actions/upload-artifact@v4
         with:
           name: wiretrick
           path: dist/**
+
+      - name: Upload the Firefox build (signed by the firefox job)
+        uses: actions/upload-artifact@v4
+        with:
+          name: wiretrick-firefox
+          path: dist-firefox/**
 
       - name: Download helper binaries
         if: needs.helper-plan.outputs.reuse == ''
@@ -225,13 +211,12 @@ jobs:
           files: |
             ${{ env.ZIP_NAME }}
             ${{ env.ZIP_MV3_NAME }}
-            ${{ env.XPI_NAME }}
             wiretrick-*.crx
             helper-dist/*
           generate_release_notes: true
           body: |
             Current Chrome / Edge / Brave: unzip `wiretrick-mv3-v*.zip`, then chrome://extensions → Developer mode → Load unpacked → the unzipped folder.
-            Firefox: install `wiretrick-firefox-v*.xpi` (drag it onto Firefox; an unsigned one needs about:debugging → Load Temporary Add-on, or Developer Edition/Nightly with `xpinstall.signatures.required=false`).
+            Firefox: install `wiretrick-firefox-v*.xpi` — added to this release a few minutes after it's published, once Mozilla signs it (drag it onto Firefox; an unsigned one needs about:debugging → Load Temporary Add-on, or Developer Edition/Nightly with `xpinstall.signatures.required=false`).
             MV2-capable Chromium: unzip `wiretrick-mv2-v*.zip` and load its `dist` folder.
             Signed `.crx` packages (MV3 and MV2, extension id `jcoealmhehnajkglhfchcnjdpkhnkdei`) are for policy-managed installs or drag-and-drop on Linux; see the README.
 
@@ -245,3 +230,53 @@ jobs:
             # Windows (PowerShell)
             & ([scriptblock]::Create((irm https://raw.githubusercontent.com/nimatrueway/wiretrick/master/helper/install.ps1))) -ExtensionId <id> -TrustCa
             ```
+
+  # AMO signing can take a long time: the release is published without the
+  # Firefox package, which this job adds when it's ready.
+  firefox:
+    needs: release
+    if: always() && needs.release.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: wiretrick-firefox
+          path: dist-firefox
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Package Firefox xpi (signed via AMO when AMO_JWT_* secrets are set)
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: |
+          VERSION=$(node -p "require('./dist-firefox/manifest.json').version")
+          XPI="wiretrick-firefox-v${VERSION}.xpi"
+          # pasted secrets often carry a trailing newline/space
+          AMO_JWT_ISSUER=$(printf %s "$AMO_JWT_ISSUER" | tr -d '[:space:]')
+          AMO_JWT_SECRET=$(printf %s "$AMO_JWT_SECRET" | tr -d '[:space:]')
+          if [ -n "$AMO_JWT_ISSUER" ] && [ -n "$AMO_JWT_SECRET" ] && \
+             npx -y web-ext@8 sign -s dist-firefox -a amo-signed --channel unlisted \
+               --api-key "$AMO_JWT_ISSUER" --api-secret "$AMO_JWT_SECRET"; then
+            mv amo-signed/*.xpi "$XPI"
+            echo "signed $XPI"
+          else
+            echo "::warning::Firefox xpi is unsigned (AMO_JWT_ISSUER/AMO_JWT_SECRET missing or signing failed)"
+            (cd dist-firefox && zip -qr "../$XPI" .)
+          fi
+          echo "XPI_NAME=$XPI" >> "$GITHUB_ENV"
+
+      - name: Add it to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" "$XPI_NAME" --clobber -R "$GITHUB_REPOSITORY"
+
+      - name: Upload artifact (runs without a tag)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: wiretrick-firefox-xpi
+          path: ${{ env.XPI_NAME }}

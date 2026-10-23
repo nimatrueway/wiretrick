@@ -29,7 +29,10 @@ Load the extension from `dist/` ("Load unpacked", MV2), or any recent Firefox
 
 Pushing a `vX.Y.Z` tag runs the GitHub Action (typecheck → tests → build →
 zips + signed `.crx` → helper binaries → GitHub release), so the artifacts
-always match the tagged `manifest.json` version.
+always match the tagged `manifest.json` version. The Firefox `.xpi` is signed
+by Mozilla (AMO) in a separate job, which can take a while: the release is
+published without it, and the `.xpi` is added to it when signing finishes (an
+unsigned one if signing fails).
 
 The helper is versioned separately in `helper/Cargo.toml`: bump it only when
 the helper changes. When the extension starts depending on new helper
