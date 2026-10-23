@@ -92,8 +92,10 @@ at the right of the toolbar do the same.
   down) and `settings.yaml` errors. Unlike the Log, entries go away by
   themselves once fixed: TypeScript problems update live as you type (even
   before saving); compile, rules and route problems on save; a runtime error
-  on save or with its ×. Every entry has a line: where the error was thrown,
-  or the `wt.*` call that registered the handler it names. Click an entry (or
+  on save or with its ×. Every entry has a line and column: where the error
+  was thrown, the URL pattern a rules error is about, or the `wt.*` call that
+  registered the handler it names — and is squiggled there in the editor
+  (hover for the message), like TypeScript errors. Click an entry (or
   Enter) to open the script at that line; ↑/↓ move, ←/→ collapse/expand a file; the box at the top filters by
   text. ⌘⇧M shows it. Its error/warning counts are on its title and at the
   far left of the status bar, and follow the scripts. Compile, TypeScript,

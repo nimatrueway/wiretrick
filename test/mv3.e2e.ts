@@ -357,7 +357,7 @@ try {
         code: `wt.onResponseBody({ url: "*://process-listed.invalid/*", strategy: "helper" }, (ctx, body) => body);`,
     }, r)));
     await mgr.waitForTimeout(1500); // pipeline reload → debugger tier armed
-    const helperWarned = await mgr.waitForFunction(() => [...document.querySelectorAll("#problems-list .pb-item.warn")].some((l) => /onResponseBody #1: strategy "helper"/.test(l.textContent || "") && /\[Ln 1\]/.test(l.textContent || "")), null, { timeout: 8000 }).then(() => true, () => false);
+    const helperWarned = await mgr.waitForFunction(() => [...document.querySelectorAll("#problems-list .pb-item.warn")].some((l) => /onResponseBody #1: strategy "helper"/.test(l.textContent || "") && /\[Ln 1\b/.test(l.textContent || "")), null, { timeout: 8000 }).then(() => true, () => false);
     check("process routes warn while the helper is down (no fallback) — in Problems, at the handler's line", helperWarned);
     // Network tab records from now on (listeners attach when it opens)
     await mgr.click("#network-tab");

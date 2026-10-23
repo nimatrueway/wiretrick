@@ -9,7 +9,7 @@ import { RulesStrategy } from "./engine/strategies/rulesStrategy";
 import { createPipeline } from "./engine/pipeline";
 import { runMigrations } from "./migration";
 import { addUiPort, clearTab, clearLogHistory, log, broadcastEntry, broadcastToUi, clearScriptErrors, setScriptTypeErrors } from "./engine/logs";
-import { onScriptsChanged, listScripts } from "./engine/scriptStore";
+import { onScriptsChanged, listScripts, refreshStaleMeta } from "./engine/scriptStore";
 import { dlog, dlogLevel, getDebugBuffer, pushEntry, clearDebugBuffer, setSink } from "../shared/debugLog";
 import * as folderSync from "./folderSync";
 import { addNetworkCountsPort, addNetworkPort } from "./network";
@@ -225,6 +225,7 @@ async function refreshCache(): Promise<void> {
     cachedScripts = await listScripts();
 }
 onScriptsChanged(() => void refreshCache());
+void refreshStaleMeta().catch((e) => dlogLevel("bg", "warn", `refreshing stored script meta failed: ${e?.message || e}`));
 
 /** Record scripts matching a request from a tab; returns the active count. */
 function noteRequestForBadge(tabId: number, url: string): number {

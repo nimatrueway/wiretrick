@@ -88,6 +88,38 @@ describe("collectProblems", () => {
         expect(collectProblems([script("e", { error: "SyntaxError: odd" })], none)[0].problems[0]).toMatchObject({ line: 1 });
     });
 
+    it("with the source: ranges on the URL pattern, the registration, the thrown-at token", () => {
+        const pat = "https://a.test/:p+/:name";
+        const code = ["// x", "wt.onRequest({", `    url: ${JSON.stringify(pat)},`, '    strategy: "rules",', "}, () => ({ block: true }));", "", '  wt.onResponseBody("*://b.test/*", (c, b) => b);', "const v = boom();"].join("\n");
+        const routes = [
+            { kind: "onRequest", index: 0, line: 2, url: [pat] },
+            { kind: "onResponseBody", index: 0, line: 7, url: ["*://b.test/*"] },
+        ];
+        const [g] = collectProblems(
+            [
+                script("a", {
+                    code,
+                    routes,
+                    ruleErrors: [`onRequest #1: url pattern "${pat}" is too complex for a rule`],
+                    routeWarnings: ["onResponseBody #1: never runs"],
+                    runtimeError: { message: "[a] TypeError: x\n    at a:8:11", at: Date.now(), count: 1 },
+                }),
+            ],
+            none
+        );
+        const of = (kind: string) => g.problems.find((p) => p.kind === kind)!;
+        expect(of("rules")).toMatchObject({ line: 3, column: 11, endLine: 3, endColumn: 11 + pat.length });
+        expect(of("route")).toMatchObject({ line: 7, column: 3, endColumn: code.split("\n")[6].length + 1 });
+        expect(of("runtime")).toMatchObject({ line: 8, column: 11, endColumn: 15 });
+        // stale meta (no stored lines): the Nth wt.<kind>( call in the source
+        const [stale] = collectProblems([script("b", { code, routes: routes.map(({ line, ...r }) => r), routeWarnings: ["onResponseBody #1: never runs"] })], none);
+        expect(stale.problems[0]).toMatchObject({ line: 7, column: 3 });
+        // a pattern held in a constant above the registration
+        const code2 = [`const P = ${JSON.stringify(pat)};`, "wt.onRequest(P, () => ({ block: true }));"].join("\n");
+        const [c] = collectProblems([script("c", { code: code2, routes: [{ kind: "onRequest", index: 0, line: 2, url: [pat] }], ruleErrors: [`onRequest #1: url pattern "${pat}" is too complex`] })], none);
+        expect(c.problems[0]).toMatchObject({ line: 1, column: 12, endColumn: 12 + pat.length });
+    });
+
     it("sorts errors before warnings, then by line/column", () => {
         const live = new Map<string, ProblemMarker[]>([
             [

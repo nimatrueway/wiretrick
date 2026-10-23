@@ -62,11 +62,27 @@ export async function checkRulesStrategy(ctx: any, mgr: any, origin: string, che
         return el ? { title: el.title, aria: el.getAttribute("aria-label"), color: getComputedStyle(el).color } : null;
     }, indSel);
     check(t("a handler reading ctx.method → red ⚠ naming the handler and reason"), !!ind && ind.aria === "rules error" && /onRequest #2: rules are fixed.*ctx\.method/.test(ind.title), JSON.stringify(ind));
-    const problem = await mgr.waitForFunction(() => [...document.querySelectorAll("#problems-list .pb-item.error")].some((l) => /onRequest #2: .*ctx\.method/.test(l.textContent || "") && /\[Ln 2\]/.test(l.textContent || "")), null, { timeout: 8000 }).then(() => true, () => false);
+    const problem = await mgr.waitForFunction(() => [...document.querySelectorAll("#problems-list .pb-item.error")].some((l) => /onRequest #2: .*ctx\.method/.test(l.textContent || "") && /\[Ln 2\b/.test(l.textContent || "")), null, { timeout: 8000 }).then(() => true, () => false);
     const logged = await mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line")].some((l) => /rules error/.test((l as HTMLElement).dataset.text || l.textContent || "")));
     check(t("a rules error in the Problems view at its handler's line, not in the Log"), problem && !logged, JSON.stringify({ problem, logged }));
     const listed = (await send({ type: "listScripts" })).find((s: any) => s.id === "s_rules");
     check(t("listScripts carries the per-handler rule error"), listed?.ruleErrors?.length === 1 && /^onRequest #2:/.test(listed.ruleErrors[0]), JSON.stringify(listed?.ruleErrors));
+
+    // a URL pattern too complex for a rule: the problem points at the pattern
+    // itself (line 3, where the string starts), and the editor squiggles it
+    const cx = `https://cx{-(dev)}.example.test/{mms/}?static/:path+/:a/:b/:c/:d/:e/:f/:g/:h/:i/:j/:k/:name{.:hash([0-9a-f]{20,})}?{.min}?.:ext(js|css|json)`;
+    await send({ type: "saveScript", id: "s_rules_cx", name: "rules complex", code: ["// too complex", "wt.onRequest({", `    url: ${JSON.stringify(cx)},`, '    strategy: "rules",', `}, (ctx) => ({ redirect: ${O} + "/rules-echo?" + ctx.groups.k + ctx.groups.name + ctx.groups.ext }));`].join("\n") });
+    const cxProblem = await mgr.waitForFunction(() => [...document.querySelectorAll("#problems-list .pb-item.error")].map((l) => l.textContent || "").find((t) => t.includes("too complex for a rule")), null, { timeout: 10000 }).then((h: any) => h.jsonValue(), () => null);
+    check(t("a too-complex pattern → a problem at the pattern's line and column"), !!cxProblem && /\[Ln 3, Col 11\]/.test(cxProblem), String(cxProblem).slice(-80));
+    await mgr.evaluate(() => (document.querySelector('#script-list li[data-id="s_rules_cx"]') as HTMLElement).click());
+    const squiggle = await mgr.waitForFunction((len: number) => {
+        const m = (window as any).monaco?.editor.getModels().find((x: any) => x.getValue().includes("// too complex"));
+        const d = m?.getAllDecorations().find((x: any) => x.options.className === "squiggly-error" && /too complex/.test(x.options.hoverMessage?.value || ""));
+        const r = d?.range;
+        return r && r.startLineNumber === 3 && r.startColumn === 11 && r.endColumn === 11 + len ? JSON.stringify(r) : false;
+    }, cx.length, { timeout: 10000 }).then((h: any) => h.jsonValue(), () => null);
+    check(t("the editor squiggles the too-complex pattern"), !!squiggle, String(squiggle));
+    await send({ type: "deleteScript", id: "s_rules_cx" });
 
     const page = await ctx.newPage();
     await page.goto(`${origin}/rules-page`, { waitUntil: "domcontentloaded" });

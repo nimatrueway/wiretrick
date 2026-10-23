@@ -163,6 +163,23 @@ async function recompileMeta(byId: { [id: string]: Script }, ids: string[], allV
     return changed;
 }
 
+/**
+ * Meta stored before routes recorded their registration line (Problems
+ * view positions): recompile it once, at startup.
+ */
+export async function refreshStaleMeta(): Promise<void> {
+    const byId: { [id: string]: Script } = (await storageGet(STORE_KEY))[STORE_KEY] || {};
+    const stale = Object.values(byId).filter((s) => s.meta.routes?.some((r) => r.line === undefined)).map((s) => s.id);
+    if (!stale.length) return;
+    const changed = await recompileMeta(byId, stale, await loadAllParamValues());
+    if (!changed.length) return;
+    // re-read: a save may have landed while compiling (MV3: sandbox RPC)
+    const fresh: { [id: string]: Script } = (await storageGet(STORE_KEY))[STORE_KEY] || {};
+    for (const id of changed) if (fresh[id]?.code === byId[id].code) fresh[id] = { ...fresh[id], meta: byId[id].meta, paramDefs: byId[id].paramDefs, error: byId[id].error };
+    await storageSet({ [STORE_KEY]: fresh });
+    notify();
+}
+
 export async function deleteScript(id: string): Promise<void> {
     void clearScriptErrors(id);
     void clearScriptTypeErrors(id);

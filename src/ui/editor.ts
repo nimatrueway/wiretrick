@@ -1208,6 +1208,51 @@ function modelProblems(m: any): ProblemMarker[] {
         .map((mk: any) => ({ severity: mk.severity === MarkerSeverity.Error ? "error" : "warning", message: String(mk.message), line: mk.startLineNumber, column: mk.startColumn }));
 }
 
+/** model → [its squiggle decoration ids, the problems they show] */
+const problemDecorations = new WeakMap<any, { ids: string[]; key: string }>();
+
+const escapeMd = (t: string) => t.replace(/[\\`*_{}[\]()#+\-.!|<>]/g, "\\$&");
+
+/**
+ * Squiggles for the problems Monaco doesn't mark itself (compile, rules,
+ * runtime, route — TypeScript and settings.yaml problems are its own
+ * markers). Decorations, not markers: they don't feed back into the
+ * marker-driven type checking. Their positions are in the saved code, so a
+ * model with unsaved edits keeps the ones it has (they move with the edits).
+ */
+function decorateProblems(): void {
+    const monaco = (window as any).monaco;
+    if (!monaco) return;
+    const byId = new Map(problemGroups.map((g) => [g.id, g.problems]));
+    for (const s of scripts) {
+        const m = models.get(s.id);
+        if (!m || m.isDisposed() || m.getValue() !== s.code) continue;
+        const own = (byId.get(s.id) || []).filter((p) => p.kind !== "ts" && p.kind !== "settings" && p.line);
+        const key = JSON.stringify(own.map((p) => [p.severity, p.message, p.line, p.column, p.endLine, p.endColumn]));
+        const prev = problemDecorations.get(m);
+        if (prev?.key === key) continue;
+        const error = (p: Problem) => p.severity === "error";
+        const decos = own.map((p) => {
+            const line = Math.min(p.line!, m.getLineCount());
+            const column = p.column ?? m.getLineFirstNonWhitespaceColumn(line) ?? 1;
+            const endLine = Math.min(p.endLine ?? line, m.getLineCount());
+            const endColumn = p.endColumn ?? Math.max(m.getLineLastNonWhitespaceColumn(endLine), column + 1);
+            return {
+                range: new monaco.Range(line, column, endLine, endColumn),
+                options: {
+                    className: error(p) ? "squiggly-error" : "squiggly-warning",
+                    hoverMessage: { value: `${escapeMd(p.message)}\n\nWiretrick (${p.kind})` },
+                    overviewRuler: { color: { id: error(p) ? "editorOverviewRuler.errorForeground" : "editorOverviewRuler.warningForeground" }, position: monaco.editor.OverviewRulerLane.Right },
+                    minimap: { color: { id: error(p) ? "minimap.errorHighlight" : "minimap.warningHighlight" }, position: monaco.editor.MinimapPosition.Inline },
+                    stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+                    zIndex: 30,
+                },
+            };
+        });
+        problemDecorations.set(m, { ids: m.deltaDecorations(prev?.ids || [], decos), key });
+    }
+}
+
 function updateProblems(): void {
     const live = new Map<string, ProblemMarker[]>();
     const monaco = (window as any).monaco;
@@ -1221,10 +1266,11 @@ function updateProblems(): void {
     }
     const settings = monaco && settingsModel && !settingsModel.isDisposed() ? modelProblems(settingsModel) : undefined;
     problemGroups = collectProblems(
-        scripts.map((s) => ({ id: s.id, label: scriptFileName(s.meta.name), error: s.error, ruleErrors: s.ruleErrors, runtimeError: s.runtimeError, typeErrors: s.typeErrors, routeWarnings: s.routeWarnings, routes: s.meta.routes })),
+        scripts.map((s) => ({ id: s.id, label: scriptFileName(s.meta.name), error: s.error, ruleErrors: s.ruleErrors, runtimeError: s.runtimeError, typeErrors: s.typeErrors, routeWarnings: s.routeWarnings, routes: s.meta.routes, code: s.code })),
         live,
         settings
     );
+    decorateProblems();
     problemsBadge.set(problemCounts(problemGroups));
     renderBadge($("#problems-badge"), problemsBadge);
     renderProblems();
