@@ -9,6 +9,7 @@ import type { ResMeta } from "../../../shared/metaParser";
 import { scriptLogLine } from "../../../shared/scriptLog";
 import { log } from "../logs";
 import { scriptStorageGet, scriptStorageSet } from "../scriptStore";
+import { dataFilesSnapshot } from "../dataFiles";
 
 export interface ScriptLike {
     id: string;
@@ -46,15 +47,16 @@ export interface CompiledEntry {
  * imports. `name` is the STORED script name (log attribution).
  */
 export function compileMv2(scripts: ScriptLike[], paramValues: { [scriptId: string]: Record<string, any> } | undefined, want: (s: ScriptLike) => boolean): CompiledEntry[] {
-    let resolveSpec: (spec: string) => any = (spec) => {
+    let resolveFrom: (importer: string) => (spec: string) => any = () => (spec) => {
         throw new Error(`cannot import "${spec}" before the module registry is ready`);
     };
     const overridesFor = (s: { id: string; name: string; code: string }) =>
-        makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, level, source, text) => log(-1, scriptLogLine(s.name, source, text), level, id), paramValues?.[s.id], (spec) => resolveSpec(spec));
-    resolveSpec = makeModuleResolver(
+        makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, level, source, text) => log(-1, scriptLogLine(s.name, source, text), level, id), paramValues?.[s.id], (spec) => resolveFrom(s.name)(spec));
+    resolveFrom = makeModuleResolver(
         scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code })),
-        overridesFor
-    ).resolve;
+        overridesFor,
+        { dataFiles: dataFilesSnapshot() }
+    ).resolveFrom;
     const out: CompiledEntry[] = [];
     for (const s of scripts) {
         if (!s.enabled || !want(s)) continue;

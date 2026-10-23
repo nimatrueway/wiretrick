@@ -25,6 +25,8 @@ export function tsconfigText(): string {
             moduleResolution: "bundler",
             allowImportingTsExtensions: true,
             allowNonTsExtensions: true,
+            // `import x from "./mock/data.json"` (data files)
+            resolveJsonModule: true,
             noEmit: true,
         },
         include: ["**/*.ts"],

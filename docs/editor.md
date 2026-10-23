@@ -67,9 +67,11 @@ confirmation, Esc returns to the Code view. Right-click a row for **Open**,
 toolbar turns the open script on or off.
 
 Double-click a script (or F2) to rename it (Enter saves, Esc cancels).
-The name is the file name in the synced folder (`My script.ts`), so anything
-works except `< > : " / \ | ? *`, a trailing dot or space, and Windows device
-names like `CON`; a name that clashes with another script is refused.
+The name is the script's path in the synced folder (`My script.ts`); a `/`
+puts it in a [folder](scripting.md#imports-folders-and-data-files)
+(`mock/api mock` → `mock/api mock.ts`). Each segment may hold anything
+except `< > : " \ | ? *`, a trailing dot or space, and Windows device names
+like `CON`; a name that clashes with another script is refused.
 Reverting an edit back to the saved text clears the unsaved-changes state —
 no discard prompt on a no-op edit.
 
@@ -158,10 +160,17 @@ at the right of the toolbar do the same.
 ## Synced folder
 
 Click **Folder…** and pick a folder (e.g. `~/Wiretricks`) — that becomes your
-synced folder. Connecting runs a two-way initial sync: `.ts` files without a
-script are imported, scripts without a file are written out, and where both
-exist but differ the newer one wins (file modified time vs. the script's last
-save) and the other copy is kept in `.wiretrick-backup/` — the Editor lists
+synced folder. Its subfolders mirror the explorer's folders (empty ones too),
+`.ts` files are scripts and `.json` files are
+[data files](scripting.md#imports-folders-and-data-files), at their relative
+paths. Dot entries (`.git`, `.vscode`, `.wiretrick-backup`, …),
+`node_modules`, `.d.ts` files and config JSON (`package.json`,
+`package-lock.json`, `tsconfig*.json`, `jsconfig.json`, the root
+`settings.schema.json`) are left alone. Connecting runs a two-way initial
+sync: files without a script or data file are imported, scripts and data
+files without a file are written out, and where both exist but differ the
+newer one wins (file modified time vs. the last save) and the other copy is
+kept in `.wiretrick-backup/` at the same relative path — the Editor lists
 these before connecting so you can cancel. The same reconcile runs on every
 reconnect and browser restart; there, only the side that actually changed
 since the last sync wins, so a backup is made only when both changed.
@@ -178,8 +187,9 @@ update only adds documentation for settings it doesn't mention yet.
 
 Sync is two-way and watches the folder for **creates, renames/moves and
 deletes** too: a new `.ts` file becomes a script, deleting a file removes its
-script, renaming a file renames the script (its `settings.yaml` section moves
-with it). If a file and its script both change before a sync, the file wins
+script, renaming or moving a file renames the script (its `settings.yaml`
+section moves with it); the same goes for `.json` files and data files, and
+for subfolders and folders. If a file and its script both change before a sync, the file wins
 and the script's version goes to `.wiretrick-backup/`. Saving in the Editor
 over a script that changed elsewhere shows a diff to overwrite or take theirs. The folder choice is remembered —
 the Editor reconnects automatically on open (one click to re-grant after a
@@ -236,13 +246,15 @@ text.
 
 ## Import / export
 
-**Settings → Export…** and **Import…** open a checklist: tick the scripts
-(and *Settings (globals)*) to include. Export writes one YAML bundle — each
-script with its code, enabled state and non-default params. Import reads a
+**Settings → Export…** and **Import…** open a checklist: tick the scripts,
+data files and folders (and *Settings (globals)*) to include. Export writes
+one YAML bundle — each script with its code, enabled state and non-default
+params, each data file with its path and text. Import reads a
 bundle and lets you pick which of its items to take; each row says whether
 it's **new** or **replaces existing** (a script of the same name is
 overwritten rather than duplicated). If a picked script imports a library
-that isn't picked, the dialog warns and **Add them** ticks the missing ones.
+or data file that isn't picked, the dialog warns and **Add them** ticks the
+missing ones.
 A plain `.ts`/`.js` file imports as a single script.
 
 ## `settings.yaml`

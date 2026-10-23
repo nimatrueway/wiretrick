@@ -27,7 +27,7 @@
  * Reverse calls (wt.storage.* and script logging) travel the other way
  * with the same reqId pattern.
  */
-import { compileScript, compileWithLibs, makeModuleResolver, makeStubModule, type CompiledScript } from "../shared/compile";
+import { compileScript, compileWithLibs, isDataFileImportError, makeModuleResolver, makeStubModule, type CompiledScript, type DataFileSource } from "../shared/compile";
 import { runOp, type BodyOp, type OpScript } from "../shared/bodyOps";
 import { compileDecision } from "../shared/pac";
 import "../shared/transpile";
@@ -129,14 +129,18 @@ function sandboxLog(msg: string, level: "debug" | "info" | "warn" | "error" = "d
 const cache = new Map<string, { s: PlainScript; compiled: CompiledScript; result: AnalyzeResult }>();
 let cacheSig = "";
 
-/** signature over the script set (incl. code hash) + param values */
+/** the data files scripts import, as last sent by the SW (only when its signature changes) */
+let dataFiles: DataFileSource[] = [];
+let dataSig = "";
+
+/** signature over the script set (incl. name, code hash) + param values + data files */
 function compileSignature(scripts: PlainScript[], paramValues: Record<string, any>): string {
     const hash = (s: string): string => {
         let h = 5381;
         for (let i = 0; i < s.length; i++) h = (((h << 5) + h + s.charCodeAt(i)) | 0) >>> 0;
         return h.toString(36);
     };
-    return JSON.stringify([scripts.map((s) => [s.id, s.updatedAt, s.enabled, hash(s.code)]), paramValues ?? {}]);
+    return JSON.stringify([scripts.map((s) => [s.id, s.name, s.updatedAt, s.enabled, hash(s.code)]), paramValues ?? {}, dataSig]);
 }
 
 /**
@@ -162,19 +166,22 @@ function ensureCompiled(scripts: PlainScript[], paramValues: Record<string, any>
     });
     const resolver = makeModuleResolver(
         scripts.map((s) => ({ id: s.id, name: s.name, code: s.code })),
-        (lib) => overridesForScript(lib.id)
+        (lib) => overridesForScript(lib.id),
+        { dataFiles }
     );
     // unknown/missing imports resolve to silent stubs — a script whose
     // import fails must still run its body so its handlers register
-    // (otherwise it silently stores as a utility: 𝑓 icon, never matches)
+    // (otherwise it silently stores as a utility: 𝑓 icon, never matches).
+    // A data file that fails to import is the importer's compile error.
     let currentDeps: Set<string> | null = null;
-    const resolveImport = (spec: string): any => {
+    const resolveImport = (importer: string) => (spec: string): any => {
         const before = new Set(resolver.deps);
         try {
-            const out = resolver.resolve(spec);
+            const out = resolver.resolveFrom(importer)(spec);
             sandboxLog(`import "${spec}" → module resolved`, "debug");
             return out;
-        } catch {
+        } catch (e) {
+            if (isDataFileImportError(e)) throw e;
             sandboxLog(`import "${spec}" → STUB (no script with that name; its exports are inert in meta-only compiles)`, "debug");
             return makeStubModule();
         } finally {
@@ -185,7 +192,7 @@ function ensureCompiled(scripts: PlainScript[], paramValues: Record<string, any>
         const deps = new Set<string>();
         currentDeps = deps;
         const compiledScript = compileScript(s.code, {
-            importModule: resolveImport,
+            importModule: resolveImport(s.name),
             paramValues: paramValues?.[s.id],
             storage: {
                 get: (key: string) => reverseCall({ op: "storageGet", scriptId: s.id, key }).then((r: any) => r?.value),
@@ -230,7 +237,7 @@ function compileOne(
     scripts: { id: string; name: string; code: string }[],
     paramValues: Record<string, any>
 ): { result: AnalyzeResult } {
-    const c = compileWithLibs(target, scripts || [], paramValues || {});
+    const c = compileWithLibs(target, scripts || [], paramValues || {}, dataFiles);
     const summary = `compileOne "${target.name}" → active=${c.meta.active} params=[${Object.keys(c.paramDefs || {}).join(", ")}] deps=[${c.deps.join(", ")}]`;
     sandboxLog(c.error ? `${summary} ERROR ${c.error.split("\n")[0]}` : summary, c.error ? "error" : "debug");
     return { result: { meta: c.meta, paramDefs: c.paramDefs || {}, error: c.error, deps: c.deps } };
@@ -295,7 +302,12 @@ window.addEventListener("message", async (event) => {
     try {
         const { op, scripts, paramValues, runOp: bodyOp, args } = data.payload;
         let result: any;
-        if (op === "ping") result = { pong: true };
+        if (Array.isArray(data.payload.dataFiles)) {
+            dataFiles = data.payload.dataFiles;
+            dataSig = data.payload.dataSig;
+        }
+        if (typeof data.payload.dataSig === "string" && data.payload.dataSig !== dataSig) result = { needDataFiles: true };
+        else if (op === "ping") result = { pong: true };
         else if (op === "analyze") result = analyze(scripts, paramValues);
         else if (op === "compileOne") result = compileOne(data.payload.target, scripts, paramValues);
         else if (op === "run") result = await run(scripts, paramValues, bodyOp, args);

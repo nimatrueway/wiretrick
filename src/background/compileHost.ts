@@ -23,6 +23,7 @@ import { dlogLevel } from "../shared/debugLog";
 import { compileDecision } from "../shared/pac";
 import { getDefaultStrategy } from "../shared/route";
 import type { ScriptRules } from "../shared/rulesProbe";
+import { dataFilesSig, ensureDataFiles } from "./engine/dataFiles";
 
 interface PlainScript {
     id: string;
@@ -64,6 +65,18 @@ function sandboxCall(payload: any): Promise<any> {
             resolve(resp);
         });
     });
+}
+
+/**
+ * RPC that compiles against the data files: the sandbox keeps the last
+ * set it got and answers `needDataFiles` when its signature differs —
+ * then (only) the files ride along.
+ */
+async function sandboxCallWithData(payload: any): Promise<any | null> {
+    const dataFiles = await ensureDataFiles();
+    const dataSig = dataFilesSig();
+    const out = await sandboxCallSafe({ ...payload, dataSig });
+    return out?.needDataFiles ? sandboxCallSafe({ ...payload, dataSig, dataFiles }) : out;
 }
 
 /**
@@ -201,7 +214,7 @@ export async function compileForStorage(
     const scripts = (ctx?.scripts ?? []).filter((s) => s.id !== id);
     const values: ParamValues = { ...(ctx?.paramValues ?? {}), [id]: paramValues ?? {} };
     if (!__MV3__) {
-        const c = compileWithLibs(target, scripts, values);
+        const c = compileWithLibs(target, scripts, values, await ensureDataFiles());
         dlogLevel(
             "compile", "debug",
             `compiled "${label}" → active=${c.meta.active} match=${JSON.stringify(c.meta.match)} params=[${Object.keys(c.paramDefs || {}).join(", ")}] deps=[${c.deps.join(", ")}]${c.error ? " — compile error (in the Problems view)" : ""}`
@@ -209,7 +222,7 @@ export async function compileForStorage(
         return { meta: c.meta, paramDefs: c.paramDefs || {}, error: c.error };
     }
     await ensureOffscreen();
-    const resp = await sandboxCallSafe({ op: "compileOne", target, scripts, paramValues: values });
+    const resp = await sandboxCallWithData({ op: "compileOne", target, scripts, paramValues: values });
     const r = resp?.result;
     if (!r) {
         dlogLevel("compile", "warn", `compileForStorage "${label}": sandbox compile returned nothing — script meta NOT updated`);
@@ -229,7 +242,9 @@ export async function compileForStorage(
 export async function analyzeScripts(scripts: { id: string; name: string; code: string; updatedAt: number }[], paramValues?: ParamValues): Promise<Map<string, Analyzed>> {
     const out = new Map<string, Analyzed>();
     if (!scripts.length) return out;
-    const sig = paramSig(paramValues);
+    // imports resolve by name (relative paths) and into the data files
+    await ensureDataFiles();
+    const sig = paramSig(paramValues) + "." + dataFilesSig();
     if (__MV3__) {
         // FAST PATH: chrome.storage.session-cached analyses, valid while no
         // script's updatedAt changed. A freshly-woken SW serves a page's
@@ -237,7 +252,7 @@ export async function analyzeScripts(scripts: { id: string; name: string; code: 
         // offscreen doc + sandbox — the difference between onDocument running at
         // document_start and after the page already initialized.
         const cached = await readAnalyzeCache();
-        if (cached && scripts.every((s) => cached[s.id]?.updatedAt === s.updatedAt && cached[s.id]?.paramSig === sig)) {
+        if (cached && scripts.every((s) => cached[s.id]?.updatedAt === s.updatedAt && cached[s.id]?.paramSig === sig && cached[s.id]?.name === s.name)) {
             for (const s of scripts) out.set(s.id, cached[s.id].analyzed);
             dlogLevel("compile", "debug", `analyze cache hit — ${scripts.length} script(s) served from session storage (no sandbox round-trip)`);
             return out;
@@ -247,10 +262,11 @@ export async function analyzeScripts(scripts: { id: string; name: string; code: 
         // MV2: in-page compile, same as before
         const resolver = makeModuleResolver(
             scripts.map((s) => ({ id: s.id, name: s.name, code: s.code })),
-            (lib) => ({ paramValues: paramValues?.[lib.id] })
+            (lib) => ({ paramValues: paramValues?.[lib.id] }),
+            { dataFiles: await ensureDataFiles() }
         );
         for (const s of scripts) {
-            const c = compileScript(s.code, { importModule: (spec) => resolver.resolve(spec), paramValues: paramValues?.[s.id] });
+            const c = compileScript(s.code, { importModule: resolver.resolveFrom(s.name), paramValues: paramValues?.[s.id] });
             out.set(s.id, {
                 meta: c.meta,
                 paramDefs: c.paramDefs || {},
@@ -261,7 +277,7 @@ export async function analyzeScripts(scripts: { id: string; name: string; code: 
         return out;
     }
     await ensureOffscreen();
-    const resp = await sandboxCallSafe({ op: "analyze", scripts: scripts.map((s) => ({ ...s, enabled: true })), paramValues: paramValues || {} });
+    const resp = await sandboxCallWithData({ op: "analyze", scripts: scripts.map((s) => ({ ...s, enabled: true })), paramValues: paramValues || {} });
     if (!resp) {
         dlogLevel("compile", "error", `sandbox analyze FAILED for ${scripts.length} script(s) — the page bundle serves WITHOUT them (no interception/onDocument until the next successful analyze)`);
         return out;
@@ -272,7 +288,7 @@ export async function analyzeScripts(scripts: { id: string; name: string; code: 
         else dlogLevel("compile", "warn", `sandbox analyze returned no result for "${s.name}" — it will not intercept in this bundle`);
     }
     await persistAnalyzeCache(
-        scripts.filter((s) => out.has(s.id)).map((s) => ({ id: s.id, updatedAt: s.updatedAt, paramSig: sig, analyzed: out.get(s.id)! }))
+        scripts.filter((s) => out.has(s.id)).map((s) => ({ id: s.id, name: s.name, updatedAt: s.updatedAt, paramSig: sig, analyzed: out.get(s.id)! }))
     );
     return out;
 }
@@ -281,7 +297,7 @@ export async function analyzeScripts(scripts: { id: string; name: string; code: 
 
 const ANALYZE_CACHE_KEY = "resAnalyzeCache";
 
-type AnalyzeCache = Record<string, { updatedAt: number; paramSig?: string; analyzed: Analyzed }>;
+type AnalyzeCache = Record<string, { updatedAt: number; name?: string; paramSig?: string; analyzed: Analyzed }>;
 
 async function readAnalyzeCache(): Promise<AnalyzeCache | null> {
     try {
@@ -292,11 +308,11 @@ async function readAnalyzeCache(): Promise<AnalyzeCache | null> {
     }
 }
 
-async function persistAnalyzeCache(entries: { id: string; updatedAt: number; paramSig: string; analyzed: Analyzed }[]): Promise<void> {
+async function persistAnalyzeCache(entries: { id: string; name: string; updatedAt: number; paramSig: string; analyzed: Analyzed }[]): Promise<void> {
     try {
         // keyed by script id; each write overwrites that id's older entry
         const cached = (await readAnalyzeCache()) ?? {};
-        for (const e of entries) cached[e.id] = { updatedAt: e.updatedAt, paramSig: e.paramSig, analyzed: e.analyzed };
+        for (const e of entries) cached[e.id] = { updatedAt: e.updatedAt, name: e.name, paramSig: e.paramSig, analyzed: e.analyzed };
         // bound growth: drop ids not seen in a while (keep ≤ 200)
         const ids = Object.keys(cached);
         if (ids.length > 200) for (const id of ids.slice(0, ids.length - 200)) delete cached[id];
@@ -319,7 +335,7 @@ export async function runBodyOp(
 ): Promise<any | null> {
     await ensureOffscreen();
     // the sandbox has no settings: the default strategy rides along
-    const out = await sandboxCallSafe({ op: "run", runOp: op, scripts, paramValues, args: { defaultStrategy: getDefaultStrategy(), ...args } });
+    const out = await sandboxCallWithData({ op: "run", runOp: op, scripts, paramValues, args: { defaultStrategy: getDefaultStrategy(), ...args } });
     dlogLevel("compile", "debug", `runBodyOp ${op} → ${JSON.stringify(out)?.slice(0, 120)}`);
     return out;
 }
@@ -330,7 +346,7 @@ export async function runBodyOp(
  */
 export async function probeRules(scripts: PlainScript[], paramValues: Record<string, any>): Promise<Record<string, ScriptRules> | null> {
     await ensureOffscreen();
-    const out = await sandboxCallSafe({ op: "rules", scripts, paramValues, defaultStrategy: getDefaultStrategy() });
+    const out = await sandboxCallWithData({ op: "rules", scripts, paramValues, defaultStrategy: getDefaultStrategy() });
     return out?.results ?? null;
 }
 

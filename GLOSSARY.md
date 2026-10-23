@@ -7,12 +7,20 @@ docs, UI text, issues and conversation.
 ## Scripts
 
 **Script**:
-A TypeScript file the user writes that registers handlers.
+A TypeScript file the user writes that registers handlers. Its name is its path in the explorer, folders included (`mock/api mock`).
 _Avoid_: rule, override, userscript
 
 **Library**:
 A script that registers no handlers with its current param values; it only runs when another script imports it.
 _Avoid_: utility, lib, helper
+
+**Data file**:
+A JSON file (`.json`) in the explorer that scripts import; it never runs.
+_Avoid_: fixture, asset, JSON script
+
+**Folder**:
+A folder in the explorer grouping scripts and data files; folders nest, can be empty, and mirror subfolders of the synced folder.
+_Avoid_: directory, group, namespace
 
 **Recipe**:
 A function exported by a library that registers handlers on behalf of the script that calls it.
@@ -51,11 +59,11 @@ A whole new response that Wiretrick serves instead of the real one (from a `wt.r
 _Avoid_: mock, override, fake response, respond
 
 **Stacking**:
-How several handlers matching the same request combine, in explorer order.
+How several handlers matching the same request combine, in explorer order (each folder's subfolders first, then its scripts).
 _Avoid_: chaining, priority, precedence
 
 **Hot apply**:
-A saved script, param or setting change taking effect right away, without reloading the extension or the browser.
+A saved script, data file, param or setting change taking effect right away, without reloading the extension or the browser.
 _Avoid_: hot reload, live reload, restart
 
 **Compile error**:
@@ -167,7 +175,7 @@ The code pane inside the Editor.
 _Avoid_: editor, IDE
 
 **Explorer**:
-The Editor's list of scripts and `settings.yaml`.
+The Editor's list of folders, scripts, data files and `settings.yaml`.
 _Avoid_: script list, sidebar, file tree
 
 **Panel**:
@@ -207,11 +215,11 @@ The user-owned file holding settings, every script's params and enabled state.
 _Avoid_: config file, settings file
 
 **Synced folder**:
-A folder the user picks that Wiretrick keeps in two-way sync with the scripts.
+A folder the user picks that Wiretrick keeps in two-way sync with the scripts, data files and folders; its subfolders mirror the explorer's folders.
 _Avoid_: scripts folder, workspace, dedicated folder
 
 **Folder sync**:
-The two-way mirroring between scripts and the synced folder.
+The two-way mirroring between the explorer (scripts, data files, folders) and the synced folder.
 _Avoid_: export, backup
 
 **Managed files**:

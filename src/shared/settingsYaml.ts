@@ -97,7 +97,7 @@ export function renderedKeyText(k: string): string {
     return line.endsWith(": null") ? line.slice(0, -": null".length) : line;
 }
 
-const PLAIN_KEY = /^[A-Za-z0-9_][A-Za-z0-9_ .-]*$/;
+const PLAIN_KEY = /^[A-Za-z0-9_][A-Za-z0-9_ ./-]*$/;
 /** plain-looking keys that would parse back as non-strings must be quoted */
 const SCALARISH_KEY = /^(null|~|true|false|yes|no|on|off|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?|0x[0-9a-fA-F]+|0o[0-7]+|\.inf|\.nan)$/i;
 

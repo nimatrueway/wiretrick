@@ -15,8 +15,15 @@
  *         level: trace
  *       code: |-
  *         wt.onRequest("*://example.com/*", …
+ *   dataFiles:           # JSON data files, by path
+ *     - path: mock/rate-limits.json
+ *       text: |-
+ *         { "max": 10 }
+ *   folders:             # explicit (e.g. empty) folders
+ *     - mock/empty
  *
- * Import accepts that YAML shape (.yaml/.yml).
+ * A script's name is its path (`mock/helpers`). Import accepts that YAML
+ * shape (.yaml/.yml).
  */
 import { parse, stringify } from "yaml";
 import type { SettingsDoc } from "../shared/settingsYaml";
@@ -30,8 +37,16 @@ export interface BundleScript {
     params?: Record<string, any>;
 }
 
+export interface BundleDataFile {
+    /** path incl. `.json`, e.g. mock/rate-limits.json */
+    path: string;
+    text: string;
+}
+
 export interface ParsedBundle {
     scripts: BundleScript[];
+    dataFiles?: BundleDataFile[];
+    folders?: string[];
     /** structured globals */
     settings?: { logLevel?: string; logCap?: number };
 }
@@ -54,7 +69,7 @@ export function vscodeTargetPath(folder: string, selectedId: string, scriptName:
  * should carry); each script's `enabled` comes from the script list, its
  * params from the doc's params section (keyed by name).
  */
-export function buildBundle(doc: SettingsDoc, scripts: BundleScript[]): string {
+export function buildBundle(doc: SettingsDoc, scripts: BundleScript[], dataFiles: BundleDataFile[] = [], folders: string[] = []): string {
     const entries = scripts.map((s) => {
         const entry: Record<string, any> = {};
         if (s.name !== undefined) entry.name = s.name;
@@ -74,6 +89,8 @@ export function buildBundle(doc: SettingsDoc, scripts: BundleScript[]): string {
     };
     if (doc.settings && Object.keys(doc.settings).length) out.settings = doc.settings;
     out.scripts = entries;
+    if (dataFiles.length) out.dataFiles = dataFiles.map((d) => ({ path: d.path, text: d.text }));
+    if (folders.length) out.folders = [...folders];
     return "# Wiretrick export — scripts + settings\n" + stringify(out, { lineWidth: 0 });
 }
 
@@ -97,6 +114,16 @@ export function parseBundleText(text: string): ParsedBundle | null {
                 if (s.params && typeof s.params === "object" && !Array.isArray(s.params)) b.params = s.params;
                 return b;
             });
+    }
+    if (Array.isArray(parsed.dataFiles)) {
+        const dataFiles = parsed.dataFiles
+            .filter((d: any) => d && typeof d === "object" && typeof d.path === "string" && typeof d.text === "string")
+            .map((d: any) => ({ path: d.path, text: d.text }));
+        if (dataFiles.length) out.dataFiles = dataFiles;
+    }
+    if (Array.isArray(parsed.folders)) {
+        const folders = parsed.folders.filter((f: any) => typeof f === "string" && f);
+        if (folders.length) out.folders = folders;
     }
     if (parsed.settings && typeof parsed.settings === "object" && !Array.isArray(parsed.settings)) {
         const settings: { logLevel?: string; logCap?: number } = {};
@@ -138,9 +165,16 @@ export function bundleSettingsDoc(bundle: ParsedBundle): SettingsDoc | null {
     return { settings: Object.keys(settings).length ? settings : null, params };
 }
 
-/** The part of a bundle the user picked: its settings (globals) and these scripts. */
-export function pickBundle(bundle: ParsedBundle, keepSettings: boolean, scriptIndices: number[]): ParsedBundle {
+/**
+ * The part of a bundle the user picked: its settings (globals), these
+ * scripts and these data files (indices into bundle.dataFiles). Folders
+ * always come along (they only matter when empty).
+ */
+export function pickBundle(bundle: ParsedBundle, keepSettings: boolean, scriptIndices: number[], dataIndices: number[] = []): ParsedBundle {
     const out: ParsedBundle = { scripts: scriptIndices.map((i) => bundle.scripts[i]).filter(Boolean) };
+    const dataFiles = dataIndices.map((i) => bundle.dataFiles?.[i]).filter((d): d is BundleDataFile => !!d);
+    if (dataFiles.length) out.dataFiles = dataFiles;
+    if (bundle.folders?.length) out.folders = bundle.folders;
     if (keepSettings && bundle.settings) out.settings = bundle.settings;
     return out;
 }

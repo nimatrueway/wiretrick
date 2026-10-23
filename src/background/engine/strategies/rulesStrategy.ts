@@ -20,6 +20,7 @@ import { strategyUnsupported } from "../../../shared/strategyInfo";
 import { dlogLevel } from "../../../shared/debugLog";
 import { probeRules } from "../../compileHost";
 import { log, setScriptRuleErrors } from "../logs";
+import { dataFilesSig } from "../dataFiles";
 import type { Script } from "../scriptStore";
 import { compileMv2, ownsAny } from "./strategyScripts";
 import { IS_FIREFOX } from "./helperState";
@@ -110,7 +111,7 @@ export class RulesStrategy {
             return;
         }
         const enabled = scripts.filter((s) => s.enabled);
-        const sig = JSON.stringify([enabled.map((s) => [s.id, s.updatedAt]), paramValues, getDefaultStrategy()]);
+        const sig = JSON.stringify([enabled.map((s) => [s.id, s.updatedAt, s.meta.name]), paramValues, getDefaultStrategy(), dataFilesSig()]);
         if (__MV3__ && (await this.restoreCache(sig))) return;
 
         const probed = await this.probe(scripts, owners, paramValues);

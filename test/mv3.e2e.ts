@@ -27,6 +27,7 @@ import { chromium } from "playwright-core";
 import { resolveBrowser } from "./browserSetup";
 import { checkApiTypingsNav } from "./apiTypingsNav";
 import { checkRulesStrategy, rulesServerRoute } from "./rulesE2e";
+import { checkFoldersAndDataFiles, foldersServerRoute } from "./foldersE2e";
 
 const EXT_ROOT = path.join(new URL("..", import.meta.url).pathname, "dist-mv3");
 // unpacked extension id = sha256 of the absolute path (hex digits → a-p)
@@ -36,6 +37,7 @@ const PORT = 8909;
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const server = http.createServer((req: http.IncomingMessage, res: http.ServerResponse) => {
     if (rulesServerRoute(req, res, ORIGIN)) return;
+    if (foldersServerRoute(req, res, ORIGIN)) return;
     if (req.url?.startsWith("/data")) {
         res.writeHead(200, { "content-type": "application/json" });
         return res.end(JSON.stringify({ value: "ORIGINAL" }));
@@ -309,6 +311,7 @@ try {
         const on: string[] = (await send({ type: "listScripts" })).filter((s: any) => s.enabled).map((s: any) => s.id);
         for (const id of on) await send({ type: "setEnabled", id, enabled: false });
         await checkRulesStrategy(ctx, mgr, ORIGIN, check, " (MV3)");
+        await checkFoldersAndDataFiles(ctx, mgr, ORIGIN, check, " (MV3)");
         for (const id of on) await send({ type: "setEnabled", id, enabled: true });
     }
 

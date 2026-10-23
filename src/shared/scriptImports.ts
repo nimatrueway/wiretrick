@@ -1,16 +1,18 @@
 /**
- * Which scripts import which: ES `import … from "./utils"` resolves to the
- * script named "utils" (same keys as makeModuleResolver in compile.ts).
+ * Import resolution, shared by the compilers, the page hook, dependency
+ * tracking and the Editor. Like TypeScript, a specifier resolves relative
+ * to the importing script's folder (`./x`, `../lib/x`); a bare one
+ * (`utils`) resolves from the root. A specifier ending in `.json` names a
+ * data file (its path, case-insensitive); anything else a script: the path
+ * with an optional `.ts`/`.js`, matched case-insensitively against script
+ * names (paths) or their legacy key (each segment's other characters → `_`,
+ * so `./My_Utils` finds "My Utils").
  */
 
 const IMPORT_RE = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["']([^"'\n]+)["']/g;
 
 function specKey(spec: string): string {
     return spec.replace(/^\.\//, "").replace(/\.(ts|js)$/, "").toLowerCase();
-}
-
-function nameKeys(name: string): string[] {
-    return [name.replace(/[^a-zA-Z0-9_-]+/g, "_").toLowerCase(), name.toLowerCase()];
 }
 
 /** normalized import specifiers in code */
@@ -20,38 +22,167 @@ export function importKeys(code: string): Set<string> {
     return out;
 }
 
-/** ids of scripts that import `name`, directly or through other scripts */
-export function dependantsOf<T extends { id: string; name: string; code: string }>(name: string, scripts: T[]): string[] {
-    const imports = new Map(scripts.map((s) => [s.id, importKeys(s.code)]));
+/** import specifiers in code, as written */
+export function importSpecs(code: string): Set<string> {
+    const out = new Set<string>();
+    for (const m of code.matchAll(IMPORT_RE)) out.add(m[1]);
+    return out;
+}
+
+/** 1-based line of the first import of `spec` in code */
+export function importLine(code: string, spec: string): number | undefined {
+    for (const m of code.matchAll(IMPORT_RE)) if (m[1] === spec) return code.slice(0, m.index).split("\n").length;
+    return undefined;
+}
+
+/** does the specifier (or path) name a data file? */
+export function isDataSpec(spec: string): boolean {
+    return /\.json$/i.test(spec);
+}
+
+/** folder part of a path ("" at the root) */
+export function folderOf(path: string): string {
+    const i = path.lastIndexOf("/");
+    return i < 0 ? "" : path.slice(0, i);
+}
+
+/** the path `spec` points at from the script named `importer`; null when it climbs above the root */
+export function importPath(importer: string, spec: string): string | null {
+    const out = /^\.\.?(\/|$)/.test(spec) ? folderOf(importer).split("/").filter(Boolean) : [];
+    for (const seg of spec.split("/")) {
+        if (!seg || seg === ".") continue;
+        if (seg !== "..") out.push(seg);
+        else if (!out.pop()) return null;
+    }
+    return out.length ? out.join("/") : null;
+}
+
+function legacyKey(path: string): string {
+    return path
+        .split("/")
+        .map((seg) => seg.replace(/[^a-zA-Z0-9_-]+/g, "_"))
+        .join("/")
+        .toLowerCase();
+}
+
+export type ResolvedImport = { kind: "script"; name: string } | { kind: "data"; path: string };
+
+/**
+ * Resolver over these script names and data file paths: what `spec`,
+ * imported by the script named `importer`, refers to (the stored name /
+ * path), or undefined. The first script with a matching key wins.
+ */
+export function importResolver(scriptNames: Iterable<string>, dataPaths: Iterable<string> = []): (importer: string, spec: string) => ResolvedImport | undefined {
+    const scripts = new Map<string, string>();
+    for (const n of scriptNames) for (const k of [legacyKey(n), n.toLowerCase()]) if (!scripts.has(k)) scripts.set(k, n);
+    const data = new Map<string, string>();
+    for (const p of dataPaths) if (!data.has(p.toLowerCase())) data.set(p.toLowerCase(), p);
+    return (importer, spec) => {
+        const path = importPath(importer, spec);
+        if (path === null) return undefined;
+        if (isDataSpec(path)) {
+            const p = data.get(path.toLowerCase());
+            return p === undefined ? undefined : { kind: "data", path: p };
+        }
+        const name = scripts.get(path.replace(/\.(ts|js)$/, "").toLowerCase());
+        return name === undefined ? undefined : { kind: "script", name };
+    };
+}
+
+/**
+ * ids of scripts that import the script named `target` (or, kind "data",
+ * the data file at that path), directly or through other scripts. The
+ * target needn't exist any more (a rename's old name).
+ */
+export function dependantsOf<T extends { id: string; name: string; code: string }>(target: string, scripts: T[], kind: "script" | "data" = "script"): string[] {
+    const names = scripts.map((s) => s.name);
+    const resolve = kind === "data" ? importResolver(names, [target]) : importResolver([...names, target]);
+    const specs = new Map(scripts.map((s) => [s.id, [...importSpecs(s.code)]]));
     const found = new Set<string>();
-    const queue = [name];
+    const queue: ResolvedImport[] = [kind === "data" ? { kind, path: target } : { kind, name: target }];
     while (queue.length) {
-        const keys = nameKeys(queue.shift()!);
+        const t = queue.shift()!;
         for (const s of scripts) {
-            if (found.has(s.id) || !keys.some((k) => imports.get(s.id)!.has(k))) continue;
+            if (found.has(s.id)) continue;
+            const hit = specs.get(s.id)!.some((spec) => {
+                const r = resolve(s.name, spec);
+                return r?.kind === "data" ? t.kind === "data" && r.path.toLowerCase() === t.path.toLowerCase() : r?.kind === "script" && t.kind === "script" && r.name === t.name;
+            });
+            if (!hit) continue;
             found.add(s.id);
-            queue.push(s.name);
+            queue.push({ kind: "script", name: s.name });
         }
     }
     return [...found];
 }
 
 /**
- * Indices of `scripts` that the `chosen` ones import (directly or through
- * other scripts) but that aren't chosen — libraries a partial export or
- * import would leave dangling.
+ * Indices of `items` that the `chosen` ones import (directly or through
+ * other scripts) but that aren't chosen — libraries and data files
+ * (`data: true`, `name` = path) a partial export or import would leave
+ * dangling.
  */
-export function missingImports<T extends { name: string; code: string }>(chosen: number[], scripts: T[]): number[] {
+export function missingImports<T extends { name: string; code: string; data?: boolean }>(chosen: number[], items: T[]): number[] {
+    const resolve = importResolver(
+        items.filter((i) => !i.data).map((i) => i.name),
+        items.filter((i) => i.data).map((i) => i.name)
+    );
+    const index = new Map<string, number>();
+    items.forEach((it, i) => {
+        const k = `${it.data ? "d" : "s"}:${it.data ? it.name.toLowerCase() : it.name}`;
+        if (!index.has(k)) index.set(k, i);
+    });
     const picked = new Set(chosen);
     const missing = new Set<number>();
     const queue = [...chosen];
     while (queue.length) {
-        const keys = importKeys(scripts[queue.shift()!].code);
-        scripts.forEach((s, i) => {
-            if (picked.has(i) || missing.has(i) || !nameKeys(s.name).some((k) => keys.has(k))) return;
+        const it = items[queue.shift()!];
+        if (it.data) continue;
+        for (const spec of importSpecs(it.code)) {
+            const r = resolve(it.name, spec);
+            const i = r && index.get(r.kind === "data" ? `d:${r.path.toLowerCase()}` : `s:${r.name}`);
+            if (i === undefined || picked.has(i) || missing.has(i)) continue;
             missing.add(i);
             queue.push(i);
-        });
+        }
     }
     return [...missing].sort((a, b) => a - b);
+}
+
+/** a library source or data file shipped to the page (getHookBundle `libs`) */
+export interface ShippedLib {
+    name: string;
+    /** a library's runnable JS */
+    src?: string;
+    /** a data file's text (`name` is its path) */
+    json?: string;
+    params?: Record<string, any>;
+}
+
+/**
+ * Page-side `require` over the shipped libraries and data files (hook and
+ * bridge): `requireFrom(importer)` resolves like the background does.
+ * Libraries run once (`run`); data files parse fresh per import.
+ */
+export function makeLibRequire<L extends ShippedLib>(libs: L[], run: (lib: L, require: (spec: string) => any, module: { exports: any }) => void): (importer: string) => (spec: string) => any {
+    const resolve = importResolver(
+        libs.filter((l) => l.json === undefined).map((l) => l.name),
+        libs.filter((l) => l.json !== undefined).map((l) => l.name)
+    );
+    const modules = new Map<string, any>();
+    const requireFrom =
+        (importer: string) =>
+        (spec: string): any => {
+            const r = resolve(importer, spec);
+            if (!r) throw new Error(`cannot import "${spec}" — is the ${isDataSpec(spec) ? "data file" : "library script"} saved?`);
+            if (r.kind === "data") return JSON.parse(libs.find((l) => l.json !== undefined && l.name === r.path)!.json!);
+            if (modules.has(r.name)) return modules.get(r.name);
+            const lib = libs.find((l) => l.json === undefined && l.name === r.name)!;
+            const moduleObj = { exports: {} as any };
+            modules.set(r.name, moduleObj.exports); // early: cycle protection
+            run(lib, requireFrom(lib.name), moduleObj);
+            modules.set(r.name, moduleObj.exports);
+            return moduleObj.exports;
+        };
+    return requireFrom;
 }

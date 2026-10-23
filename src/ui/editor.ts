@@ -14,7 +14,7 @@ import { pickRows } from "./bundlePicker";
 import { resolveConflict } from "./conflictDialog";
 import { watchTheme, saveTheme, type Theme, type ThemePref } from "./theme";
 import * as fsBridge from "./fsBridge";
-import { cleanScriptName, scriptNameProblem, scriptFileName, scriptFileKey, uniqueScriptName, MAX_NAME } from "../shared/scriptName";
+import { cleanScriptName, scriptNameProblem, scriptFileName, scriptFileKey, uniqueScriptName, MAX_PATH } from "../shared/scriptName";
 import { buildBundle, parseBundleText, bundleSettingsDoc, pickBundle, vscodeTargetPath } from "./bundle";
 import { createQuickOpenPalette } from "./quickOpen";
 import { computeDirty } from "./dirtyState";
@@ -536,8 +536,8 @@ function startRename(label: HTMLElement, script: Script, refocusList = false): v
     const input = document.createElement("input");
     input.className = "script-rename";
     input.value = cleanScriptName(script.meta.name);
-    input.maxLength = MAX_NAME;
-    input.title = 'The name is also the file name: any characters except < > : " / \\ | ? *';
+    input.maxLength = MAX_PATH;
+    input.title = 'The name is also the file name: any characters except < > : " \\ | ? * — a / puts the script in a folder (e.g. mock/helpers)';
     input.addEventListener("input", () => {
         const clean = cleanScriptName(input.value);
         if (clean === input.value) return;
@@ -609,7 +609,7 @@ function scheduleDiagnostics(): void {
             // a compile failure is already badged + logged; don't echo its syntax errors
             const errors = s.error ? [] : monaco.editor
                 .getModelMarkers({ resource: m.uri, owner: "typescript" })
-                .filter((mk: any) => mk.severity === monaco.MarkerSeverity.Error)
+                .filter((mk: any) => mk.severity === monaco.MarkerSeverity.Error && !isDataFileNotFound(mk))
                 .sort((a: any, b: any) => a.startLineNumber - b.startLineNumber || a.startColumn - b.startColumn)
                 .map((mk: any) => `line ${mk.startLineNumber}: ${String(mk.message).split("\n")[0]}`);
             const key = JSON.stringify(errors);
@@ -1200,11 +1200,16 @@ function scheduleProblems(): void {
     }, 200);
 }
 
+/** TypeScript can't see data files: a JSON import it can't resolve isn't a problem (a missing data file is the importer's compile error) */
+function isDataFileNotFound(mk: any): boolean {
+    return mk.owner === "typescript" && /^Cannot find module '[^']+\.json'/.test(String(mk.message));
+}
+
 function modelProblems(m: any): ProblemMarker[] {
     const { MarkerSeverity, editor: ed } = (window as any).monaco;
     return ed
         .getModelMarkers({ resource: m.uri })
-        .filter((mk: any) => mk.owner !== PROBLEM_OWNER && (mk.severity === MarkerSeverity.Error || mk.severity === MarkerSeverity.Warning))
+        .filter((mk: any) => mk.owner !== PROBLEM_OWNER && (mk.severity === MarkerSeverity.Error || mk.severity === MarkerSeverity.Warning) && !isDataFileNotFound(mk))
         .map((mk: any) => ({ severity: mk.severity === MarkerSeverity.Error ? "error" : "warning", message: String(mk.message), line: mk.startLineNumber, column: mk.startColumn }));
 }
 
@@ -1828,10 +1833,11 @@ function setupDialogs(): void {
             capInput.value = String(logCap);
             refilterLog();
         }
-        if (c.resScripts || c.resParams || c.resLogLevel || c.resLogCap || c.resStrategy || c.resSettingsText) {
+        if (c.resScripts || c.resParams || c.resLogLevel || c.resLogCap || c.resStrategy || c.resSettingsText || c.resDataFiles || c.resFolders) {
             void (async () => {
                 if (selectedId === SETTINGS_ID) await loadSettingsModel();
-                if (c.resScripts) await refresh();
+                // data files / folders change the script order (folders) or importers' errors
+                if (c.resScripts || c.resDataFiles || c.resFolders) await refresh();
             })();
         }
     });
@@ -2371,12 +2377,13 @@ async function main(): Promise<void> {
         label: "Settings (globals)",
         detail: Object.entries(g).map(([k, v]) => `${k}: ${v}`).join(", "),
     });
-    const importsWarning = (names: { name: string; code: string }[], offset: number) => (checked: number[]) => {
+    // rows after the settings row: scripts, then data files (`data`, name = path)
+    const importsWarning = (names: { name: string; code: string; data?: boolean }[], offset: number) => (checked: number[]) => {
         const picked = checked.filter((i) => i >= offset).map((i) => i - offset);
         const missing = missingImports(picked, names);
         if (!missing.length) return null;
         return {
-            text: `selected scripts import ${missing.map((i) => `"${names[i].name}"`).join(", ")}, which isn't selected`,
+            text: `selected scripts import ${missing.map((i) => `"${names[i].name}"`).join(", ")}, which ${missing.length > 1 ? "aren't" : "isn't"} selected`,
             fix: missing.map((i) => i + offset),
         };
     };
@@ -2392,28 +2399,38 @@ async function main(): Promise<void> {
         }
         const globals = doc.settings && Object.keys(doc.settings).length ? doc.settings : null;
         const offset = globals ? 1 : 0;
-        const list = scripts.map((s) => ({ name: s.meta.name, code: s.code, enabled: s.enabled }));
+        const dataFiles: { path: string; text: string }[] = (await send({ type: "listDataFiles" })) || [];
+        const folders: string[] = (await send({ type: "listFolders" })) || [];
+        const list = [
+            ...scripts.map((s) => ({ name: s.meta.name, code: s.code, enabled: s.enabled as boolean | undefined, data: false })),
+            ...dataFiles.map((d) => ({ name: d.path, code: d.text, enabled: undefined, data: true })),
+        ];
         const chosen = await pickRows({
             title: "Export",
-            intro: "Pick what goes into the YAML bundle. Each script carries its code, enabled state and non-default params.",
+            intro: "Pick what goes into the YAML bundle. Each script carries its code, enabled state and non-default params; each data file its path and text.",
             rows: [
                 ...(globals ? [settingsRow(globals)] : []),
-                ...list.map((s) => ({ label: s.name, badge: s.enabled ? undefined : "disabled" })),
+                ...list.map((s) => ({ label: s.name, badge: s.data ? "data file" : s.enabled ? undefined : "disabled" })),
             ],
             confirm: "Export",
             warn: importsWarning(list, offset),
         });
         if (!chosen) return;
-        const picked = chosen.filter((i) => i >= offset).map((i) => list[i - offset]);
-        const payload = buildBundle({ ...doc, settings: globals && chosen.includes(0) ? globals : null }, picked);
+        const rows = chosen.filter((i) => i >= offset).map((i) => list[i - offset]);
+        const picked = rows.filter((r) => !r.data).map(({ name, code, enabled }) => ({ name, code, enabled }));
+        const pickedData = rows.filter((r) => r.data).map((r) => ({ path: r.name, text: r.code }));
+        // empty folders travel too (the others come with their contents)
+        const paths = list.map((r) => r.name.toLowerCase());
+        const empty = folders.filter((f) => !paths.some((p) => p.startsWith(f.toLowerCase() + "/")));
+        const payload = buildBundle({ ...doc, settings: globals && chosen.includes(0) ? globals : null }, picked, pickedData, empty);
         const blob = new Blob([payload], { type: "text/yaml" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = picked.length === 1 && chosen.length === 1 ? `${picked[0].name}.wiretrick.yaml` : "wiretrick-export.yaml";
+        a.download = picked.length === 1 && chosen.length === 1 ? `${picked[0].name.replace(/.*\//, "")}.wiretrick.yaml` : "wiretrick-export.yaml";
         a.click();
         URL.revokeObjectURL(url);
-        status(`exported ${picked.length} script(s)${offset && chosen.includes(0) ? " + settings" : ""} ✓`);
+        status(`exported ${picked.length} script(s)${pickedData.length ? ` + ${pickedData.length} data file(s)` : ""}${offset && chosen.includes(0) ? " + settings" : ""} ✓`);
     });
     // an imported script replaces the existing script of the same name
     const saveImported = async (item: { code: string; name?: string; enabled?: boolean }) => {
@@ -2434,27 +2451,46 @@ async function main(): Promise<void> {
                 const full = parseBundleText(text);
                 if (full) {
                     const offset = full.settings ? 1 : 0;
-                    const named = full.scripts.map((s, i) => ({ name: s.name ?? `script ${i + 1}`, code: s.code }));
+                    const fullData = full.dataFiles ?? [];
+                    const existingData: { id: string; path: string }[] = fullData.length ? (await send({ type: "listDataFiles" })) || [] : [];
+                    const dataFileIn = (path: string) => existingData.find((d) => d.path.toLowerCase() === path.toLowerCase());
+                    const named = [
+                        ...full.scripts.map((s, i) => ({ name: s.name ?? `script ${i + 1}`, code: s.code, data: false })),
+                        ...fullData.map((d) => ({ name: d.path, code: d.text, data: true })),
+                    ];
                     const chosen = await pickRows({
                         title: `Import ${file.name}`,
-                        intro: "Pick what to import. A script replaces the existing script of the same name.",
+                        intro: "Pick what to import. A script (data file) replaces the existing script (data file) of the same name (path).",
                         rows: [
                             ...(full.settings ? [settingsRow(full.settings)] : []),
-                            ...named.map((s, i) => ({
-                                label: s.name,
-                                badge: existsBadge(full.scripts[i].name),
-                                detail: full.scripts[i].params ? `params: ${Object.keys(full.scripts[i].params!).join(", ")}` : undefined,
+                            ...full.scripts.map((s, i) => ({
+                                label: named[i].name,
+                                badge: existsBadge(s.name),
+                                detail: s.params ? `params: ${Object.keys(s.params!).join(", ")}` : undefined,
                             })),
+                            ...fullData.map((d) => ({ label: d.path, badge: dataFileIn(d.path) ? "replaces existing" : "new data file" })),
                         ],
                         confirm: "Import",
                         warn: importsWarning(named, offset),
                     });
                     if (!chosen) return;
+                    const rows = chosen.filter((i) => i >= offset).map((i) => i - offset);
                     const bundle = pickBundle(
                         full,
                         offset > 0 && chosen.includes(0),
-                        chosen.filter((i) => i >= offset).map((i) => i - offset)
+                        rows.filter((i) => i < full.scripts.length),
+                        rows.filter((i) => i >= full.scripts.length).map((i) => i - full.scripts.length)
                     );
+                    // folders and data files first: the scripts compile against them
+                    const failed: string[] = [];
+                    for (const f of bundle.folders ?? []) {
+                        const r = await send({ type: "createFolder", path: f });
+                        if (r?.error) failed.push(r.error);
+                    }
+                    for (const d of bundle.dataFiles ?? []) {
+                        const r = await send({ type: "saveDataFile", id: dataFileIn(d.path)?.id, path: d.path, text: d.text });
+                        if (r?.error) failed.push(r.error);
+                    }
                     for (const item of bundle.scripts) await saveImported(item);
                     await refresh();
                     // settings apply through the real path (params +
@@ -2467,7 +2503,12 @@ async function main(): Promise<void> {
                             return;
                         }
                     }
-                    status(`imported ${bundle.scripts.length} script(s)${bundle.settings ? " + settings" : ""} ✓`);
+                    if (failed.length) {
+                        status(`imported ${bundle.scripts.length} script(s); ${failed.join("; ")}`, "error");
+                        return;
+                    }
+                    const nData = bundle.dataFiles?.length ?? 0;
+                    status(`imported ${bundle.scripts.length} script(s)${nData ? ` + ${nData} data file(s)` : ""}${bundle.settings ? " + settings" : ""} ✓`);
                     return;
                 }
                 status('not a Wiretrick export (missing "format: wiretrick-bundle")', "error");

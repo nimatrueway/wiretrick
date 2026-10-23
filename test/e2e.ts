@@ -31,6 +31,7 @@ import { chromium } from "playwright-core";
 import { resolveBrowser } from "./browserSetup";
 import { checkApiTypingsNav } from "./apiTypingsNav";
 import { checkRulesStrategy, rulesServerRoute } from "./rulesE2e";
+import { checkFoldersAndDataFiles, foldersServerRoute } from "./foldersE2e";
 
 const EXT_ROOT = path.join(new URL("..", import.meta.url).pathname, "dist");
 
@@ -50,6 +51,7 @@ function check(name: string, ok: boolean, extra = ""): void {
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
 const server = http.createServer((req: http.IncomingMessage, res: http.ServerResponse) => {
     if (rulesServerRoute(req, res, ORIGIN)) return;
+    if (foldersServerRoute(req, res, ORIGIN)) return;
     const url = new URL(req.url || "/", ORIGIN);
     const send = (ct: string, body: string | Buffer) => { res.writeHead(200, { "content-type": ct }); res.end(body); };
     if (url.pathname === "/html") return send("text/html", "<html><body><h1 id='t'>ORIGINAL TITLE</h1></body></html>");
@@ -515,6 +517,9 @@ await mgr.click("#log-header-title");
 
 // ---------- 10g. the rules strategy (declarativeNetRequest session rules) ----------
 await checkRulesStrategy(ctx, mgr, ORIGIN, check);
+
+// ---------- 10h. folders and JSON data files ----------
+await checkFoldersAndDataFiles(ctx, mgr, ORIGIN, check);
 
 // ---------- 11. logs: script output tunnelled to the Log view, page console not captured ----------
 await saveScript(

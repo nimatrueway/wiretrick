@@ -9,6 +9,7 @@
 import { formatScriptError } from "../shared/scriptError";
 import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
 import { scriptFunction } from "../shared/scriptFn";
+import { makeLibRequire, type ShippedLib } from "../shared/scriptImports";
 import { routeMatches, type DocumentWhen, type RouteMeta } from "../shared/route";
 import { makePageShim, domHandlersFor, scheduleDocument } from "../shared/pageShim";
 
@@ -37,7 +38,7 @@ import { makePageShim, domHandlersFor, scheduleDocument } from "../shared/pageSh
     /** the bridge reported the extension context dead (extension reload) */
     let dead = false;
     let domHandlers: { scriptId: string; name: string; src: string; params?: Record<string, any> }[] = [];
-    let libSources: { name: string; src: string; params?: Record<string, any> }[] = [];
+    let libSources: ShippedLib[] = [];
     let domFired = false;
     let reqSeq = 0;
     const pending = new Map<number, (v: any) => void>();
@@ -135,23 +136,12 @@ import { makePageShim, domHandlersFor, scheduleDocument } from "../shared/pageSh
      */
     function compileAndScheduleDocument(hot: boolean): void {
         if (domHandlers.length === 0) return;
-        // module registry over the shipped library sources: the page-side
-        // `require` backing ES imports ("./utils" → the script named utils)
-        const libModules = new Map<string, any>();
-        const normSpec = (spec: string) =>
-            spec.replace(/^\.\//, "").replace(/\.(ts|js)$/, "").replace(/[^a-zA-Z0-9_-]+/g, "_").toLowerCase();
-        const requireLib = (spec: string): any => {
-            const key = normSpec(spec);
-            if (libModules.has(key)) return libModules.get(key);
-            const lib = libSources.find((l) => normSpec(l.name) === key);
-            if (!lib) throw new Error(`cannot import "${spec}" — is the library script saved?`);
-            const moduleObj = { exports: {} as any };
-            libModules.set(key, moduleObj.exports); // early: cycle protection
-            const fn = scriptFunction(lib.src);
-            fn(makeDocumentShim(null, lib.name, lib.params || {}).wt, scriptConsole(null, lib.name), requireLib, moduleObj, moduleObj.exports);
-            libModules.set(key, moduleObj.exports);
-            return moduleObj.exports;
-        };
+        // module registry over the shipped library sources and data files:
+        // the page-side `require` backing ES imports ("./utils" → the script
+        // named utils, "./a.json" → the data file)
+        const requireFrom = makeLibRequire(libSources, (lib, require, moduleObj) =>
+            scriptFunction(lib.src!)(makeDocumentShim(null, lib.name, lib.params || {}).wt, scriptConsole(null, lib.name), require, moduleObj, moduleObj.exports)
+        );
         const compiledDocument: { scriptId: string; name: string; when: DocumentWhen; fn: (ctx: any) => any }[] = [];
         let cspBlocked = false;
         for (const d of domHandlers) {
@@ -162,7 +152,7 @@ import { makePageShim, domHandlersFor, scheduleDocument } from "../shared/pageSh
                 const fn = scriptFunction(d.src);
                 const moduleObj = { exports: {} as any };
                 const { wt, dom } = makeDocumentShim(d.scriptId, d.name, d.params || {});
-                fn(wt, scriptConsole(d.scriptId, d.name), requireLib, moduleObj, moduleObj.exports);
+                fn(wt, scriptConsole(d.scriptId, d.name), requireFrom(d.name), moduleObj, moduleObj.exports);
                 for (const h of domHandlersFor(dom, location.href)) compiledDocument.push({ scriptId: d.scriptId, name: d.name, when: h.when, fn: h.fn });
             } catch (e: any) {
                 if (/Evaluating a string as JavaScript|unsafe-eval/i.test(e.message || "")) {

@@ -273,6 +273,43 @@ import { envParam } from "./utils";
 const cfg = wt.params({ intercept_environments: envParam });
 ```
 
+## Imports, folders and data files
+
+A script's name is its path in the explorer: a script `api mock` in the
+folder `mock` is named `mock/api mock` (`mock/api mock.ts` in the synced
+folder). Imports resolve like TypeScript, relative to the importing
+script's folder:
+
+```ts
+// in "mock/api mock":
+import { double } from "./helpers";          // the script "mock/helpers"
+import { envParam } from "../utils";         // the script "utils" at the root
+import { mockJson } from "utils";            // bare: resolved from the root
+```
+
+The `.ts`/`.js` extension is optional and matching is case-insensitive. A
+segment may also be written with every character other than letters,
+digits, `_` and `-` replaced by `_` (`./My_Utils` finds "My Utils").
+
+A **data file** is a JSON file in the explorer (`.json`); it never runs,
+scripts import it by its path:
+
+```ts
+// data file "mock/rate-limits.json": { "max": 5, "window": 60 }
+import limits from "./mock/rate-limits.json"; // the whole object
+import { max } from "./mock/rate-limits.json"; // one property
+
+wt.onRequest("*://api.example.com/*", () => ({ headers: { set: { "x-limit": String(max) } } }));
+```
+
+Each import gets a freshly parsed copy, so a handler changing it doesn't
+affect other scripts. Saving, renaming or deleting a data file hot-applies
+every script that imports it (directly or through a library). A missing
+data file or invalid JSON is a compile error on the importing script,
+naming the data file and the JSON error's line and column. Renaming or
+moving a script, data file or folder doesn't rewrite the import specifiers
+pointing at it.
+
 ## DOM changes — `wt.onDocument`
 
 `wt.onDocument` is not a network strategy — it registers a **DOM-ready callback
@@ -344,8 +381,10 @@ title/DOM changes on SPAs.
 ## Multiple handlers — how they stack
 
 When several handlers match the same request, they run in **list order**:
-scripts top to bottom in the Editor, then registration order within a
-script. Per kind:
+scripts top to bottom in the Editor's explorer, then registration order
+within a script. With folders, the explorer order is depth-first: in each
+folder, its subfolders first (alphabetically, each with its whole content),
+then its scripts in their own order. Per kind:
 
 **`wt.onRequest`** — the first handler that returns a *final* result
 (`replaceResponse`, `redirect`, or `block`) wins and stops the chain; later

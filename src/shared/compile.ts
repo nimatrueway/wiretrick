@@ -11,6 +11,7 @@ import { scriptFunction } from "./scriptFn";
 import { callerLine } from "./scriptError";
 import { normalizeRoute, type RouteKind, type RouteMeta } from "./route";
 import { scriptEnv } from "./scriptEnv";
+import { importLine, importPath, importResolver, isDataSpec } from "./scriptImports";
 
 export type { DocumentWhen } from "./route";
 
@@ -177,40 +178,170 @@ export function makeStubModule(): any {
     return stub;
 }
 
+/** a data file as the compilers see it: its path (with `.json`) and text */
+export interface DataFileSource {
+    path: string;
+    text: string;
+}
+
 /**
- * Module registry over the stored scripts: ES `import ... from "./utils"`
- * resolves against script names (case-insensitive, "./x", "x.ts" all match
- * the script named "x"). Libs compile lazily and memoize; circular imports
- * get the partially-initialized exports.
+ * Importing a data file failed (missing, invalid JSON). Never stubbed:
+ * the importer (transitively) fails to compile, positioned at its import
+ * line (`(line N)`, rewritten at each level as it propagates).
+ */
+class DataFileImportError extends Error {
+    dataFileImport = true;
+}
+
+export function isDataFileImportError(e: unknown): boolean {
+    return !!(e && (e as any).dataFileImport === true);
+}
+
+function at(e: any, code: string | undefined, spec: string): any {
+    const line = code === undefined ? undefined : importLine(code, spec);
+    e.stack = line ? `Error: ${e.message} (line ${line})` : `Error: ${e.message}`;
+    return e;
+}
+
+/** offset of the first character `JSON.parse` rejects (V8's "Unexpected token" message has no position) */
+function jsonErrorOffset(text: string): number {
+    let i = 0;
+    const fail = (): never => {
+        throw i;
+    };
+    const ws = () => {
+        while (" \t\n\r".includes(text[i] ?? "x")) i++;
+    };
+    const str = () => {
+        for (i++; text[i] !== '"'; i++) {
+            if (i >= text.length || text[i] < " ") fail();
+            if (text[i] === "\\") i++;
+        }
+        i++;
+    };
+    const value = (): void => {
+        ws();
+        const c = text[i];
+        if (c === '"') return str();
+        if (c !== "{" && c !== "[") {
+            const m = /^(?:-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)/.exec(text.slice(i));
+            if (!m) fail();
+            i += m![0].length;
+            return;
+        }
+        const close = c === "{" ? "}" : "]";
+        i++;
+        ws();
+        if (text[i] === close) return void i++;
+        for (;;) {
+            if (c === "{") {
+                ws();
+                if (text[i] !== '"') fail();
+                str();
+                ws();
+                if (text[i] !== ":") fail();
+                i++;
+            }
+            value();
+            ws();
+            if (text[i] === close) return void i++;
+            if (text[i] !== ",") fail();
+            i++;
+        }
+    };
+    try {
+        value();
+        ws();
+        return i;
+    } catch (at) {
+        return at as number;
+    }
+}
+
+/** `JSON.parse` error → "path:line:col message" (positions from V8's "at position N", Firefox's "line L column C", or located) */
+function jsonError(path: string, text: string, e: any): string {
+    const msg = String(e?.message ?? e);
+    let line: number;
+    let col: number;
+    const lc = /line (\d+) column (\d+)/.exec(msg);
+    const pos = /at position (\d+)/.exec(msg);
+    if (lc) [line, col] = [Number(lc[1]), Number(lc[2])];
+    else {
+        const off = pos ? Number(pos[1]) : /end of (JSON )?(input|data)/i.test(msg) ? text.length : jsonErrorOffset(text);
+        const before = text.slice(0, off).split("\n");
+        [line, col] = [before.length, before[before.length - 1].length + 1];
+    }
+    const clean = msg
+        .replace(/^JSON\.parse:\s*/, "")
+        .replace(/\s*(in JSON )?at position \d+.*$/, "")
+        .replace(/\s*at line \d+ column \d+.*$/, "")
+        .replace(/, "[\s\S]*" is not valid JSON$/, "");
+    return `${path}:${line}:${col} is not valid JSON — ${clean}`;
+}
+
+/** parse a data file's text (fresh each import: handlers mutating it don't leak across scripts) */
+function parseDataFile(spec: string, d: DataFileSource): any {
+    try {
+        return JSON.parse(d.text);
+    } catch (e) {
+        throw new DataFileImportError(`cannot import "${spec}": ${jsonError(d.path, d.text, e)}`);
+    }
+}
+
+/**
+ * Module registry over the stored scripts and data files: an ES `import`
+ * resolves like TypeScript (shared/scriptImports: relative to the
+ * importer's folder, bare from the root, case-insensitive, "./x", "x.ts"
+ * match the script named "x", "./a.json" the data file). Libs compile
+ * lazily and memoize; circular imports get the partially-initialized
+ * exports. `resolveFrom(name)` is the `require` of the script named
+ * `name`; `resolve` resolves from the root. `deps` collects the imported
+ * script names and data file paths.
  */
 export function makeModuleResolver(
     scripts: { id: string; name: string; code: string }[],
     overridesFor: (s: { id: string; name: string; code: string }) => ResApiOverrides,
-    opts?: { stubUnresolved?: boolean }
-): { resolve: (spec: string) => any; deps: Set<string> } {
+    opts?: { stubUnresolved?: boolean; dataFiles?: DataFileSource[] }
+): { resolve: (spec: string) => any; resolveFrom: (importer: string) => (spec: string) => any; deps: Set<string> } {
     const cache = new Map<string, any>();
     const compiling = new Set<string>();
     const deps = new Set<string>();
-    const norm = (spec: string) =>
-        spec
-            .replace(/^\.\//, "")
-            .replace(/\.(ts|js)$/, "")
-            .toLowerCase();
-    const byKey = new Map<string, { id: string; name: string; code: string }>();
-    for (const s of scripts) {
-        const key = s.name.replace(/[^a-zA-Z0-9_-]+/g, "_").toLowerCase();
-        if (!byKey.has(key)) byKey.set(key, s);
-        const plain = s.name.toLowerCase();
-        if (!byKey.has(plain)) byKey.set(plain, s);
-    }
-    const resolve = (spec: string): any => {
-        const key = norm(spec);
-        if (cache.has(key)) return cache.get(key);
-        const lib = byKey.get(key);
-        if (!lib) {
+    const dataFiles = opts?.dataFiles || [];
+    const lookup = importResolver(
+        scripts.map((s) => s.name),
+        dataFiles.map((d) => d.path)
+    );
+    const byName = new Map<string, { id: string; name: string; code: string }>();
+    for (const s of scripts) if (!byName.has(s.name)) byName.set(s.name, s);
+    const requires = new Map<string, (spec: string) => any>();
+    const resolveFrom = (importer: string): ((spec: string) => any) => {
+        let r = requires.get(importer);
+        if (!r) requires.set(importer, (r = (spec) => {
+            try {
+                return load(importer, spec);
+            } catch (e) {
+                throw isDataFileImportError(e) ? at(e, byName.get(importer)?.code, spec) : e;
+            }
+        }));
+        return r;
+    };
+    const load = (importer: string, spec: string): any => {
+        const found = lookup(importer, spec);
+        if (!found) {
+            if (isDataSpec(spec)) {
+                const path = importPath(importer, spec);
+                throw new DataFileImportError(`cannot import "${spec}": ${path ? `no data file "${path}"` : "the path goes above the root folder"}`);
+            }
             if (opts?.stubUnresolved) return makeStubModule();
             throw new Error(`unknown module "${spec}" — no script named "${spec.replace(/^\.\//, "").replace(/\.(ts|js)$/, "")}"`);
         }
+        if (found.kind === "data") {
+            deps.add(found.path);
+            return parseDataFile(spec, dataFiles.find((d) => d.path === found.path)!);
+        }
+        const key = found.name;
+        if (cache.has(key)) return cache.get(key);
+        const lib = byName.get(key)!;
         deps.add(lib.name);
         if (compiling.has(key)) return cache.get(key); // cycle: partial exports
         compiling.add(key);
@@ -227,13 +358,17 @@ export function makeModuleResolver(
                 scriptFunction(js)(
                     makeShim(createOwner(defaultMeta(lib.name), libOverrides.paramValues), libOverrides),
                     makeForwardingConsole(libOverrides.logSink),
-                    resolve,
+                    resolveFrom(lib.name),
                     moduleObj,
                     moduleObj.exports
                 )
             );
         } catch (e) {
             compiling.delete(key);
+            if (isDataFileImportError(e)) {
+                cache.delete(key);
+                throw e;
+            }
             if (!opts?.stubUnresolved) throw e;
             // meta-only: a broken library is inert, not the importer's compile error
             const stub = makeStubModule();
@@ -244,7 +379,7 @@ export function makeModuleResolver(
         cache.set(key, moduleObj.exports);
         return moduleObj.exports;
     };
-    return { resolve, deps };
+    return { resolve: resolveFrom(""), resolveFrom, deps };
 }
 
 /**
@@ -257,14 +392,15 @@ export function makeModuleResolver(
 export function compileWithLibs(
     target: { id: string; name: string; code: string },
     scripts: { id: string; name: string; code: string }[],
-    paramValues?: { [scriptId: string]: Record<string, any> | undefined }
+    paramValues?: { [scriptId: string]: Record<string, any> | undefined },
+    dataFiles?: DataFileSource[]
 ): CompiledScript & { deps: string[] } {
     const resolver = makeModuleResolver(
         [target, ...scripts.filter((s) => s.id !== target.id)],
         (lib) => ({ paramValues: paramValues?.[lib.id] }),
-        { stubUnresolved: true }
+        { stubUnresolved: true, dataFiles }
     );
-    const c = compileScript(target.code, { importModule: resolver.resolve, paramValues: paramValues?.[target.id] });
+    const c = compileScript(target.code, { importModule: resolver.resolveFrom(target.name), paramValues: paramValues?.[target.id] });
     return { ...c, deps: [...resolver.deps] };
 }
 
@@ -274,12 +410,14 @@ export function compileWithLibs(
  * anywhere meta capture must not depend on the import graph): a script
  * whose `import` fails must still run its body so its registrations
  * and params are captured — otherwise it silently stores as a utility.
+ * A data file that fails to import is still the importer's error.
  */
 export function resolveWithStubFallback(resolve: (spec: string) => any): (spec: string) => any {
     return (spec) => {
         try {
             return resolve(spec);
-        } catch {
+        } catch (e) {
+            if (isDataFileImportError(e)) throw e;
             return makeStubModule();
         }
     };

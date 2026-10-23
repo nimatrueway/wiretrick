@@ -13,6 +13,7 @@
 import { formatScriptError } from "../shared/scriptError";
 import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
 import { scriptFunction } from "../shared/scriptFn";
+import { makeLibRequire, type ShippedLib } from "../shared/scriptImports";
 import { makePageShim, domHandlersFor, scheduleDocument, type PageDocumentHandler } from "../shared/pageShim";
 
 (() => {
@@ -148,7 +149,7 @@ import { makePageShim, domHandlersFor, scheduleDocument, type PageDocumentHandle
             setTimeout(() => resolve({ domHandlers: [] }), 1000);
         });
         const handlers: DocumentHandler[] = bundle.domHandlers || [];
-        const libSources: { name: string; src: string; params?: Record<string, any> }[] = bundle.libs || [];
+        const libSources: ShippedLib[] = bundle.libs || [];
         dlog("debug", `onDocument (isolated world): running ${handlers.length} script(s)${hot ? " (hot refire)" : ""}`);
         const shimFor = (scriptId: string | null, name: string, params: Record<string, any>) =>
             makePageShim({
@@ -165,24 +166,13 @@ import { makePageShim, domHandlersFor, scheduleDocument, type PageDocumentHandle
             const consoleProxy = makeScriptConsole((level, source, text) => scriptLog(h.scriptId, level, scriptLogLine(h.name, source, text)));
             let dom: PageDocumentHandler[];
             try {
-                // page-side require over the shipped library sources
-                const libModules = new Map<string, any>();
-                const normSpec = (spec: string) =>
-                    spec.replace(/^\.\//, "").replace(/\.(ts|js)$/, "").replace(/[^a-zA-Z0-9_-]+/g, "_").toLowerCase();
-                const requireLib = (spec: string): any => {
-                    const key = normSpec(spec);
-                    if (libModules.has(key)) return libModules.get(key);
-                    const lib = libSources.find((l) => normSpec(l.name) === key);
-                    if (!lib) throw new Error(`cannot import "${spec}" — is the library script saved?`);
-                    const moduleObj = { exports: {} as any };
-                    libModules.set(key, moduleObj.exports);
-                    scriptFunction(lib.src)(shimFor(null, lib.name, lib.params || {}).wt, consoleProxy, requireLib, moduleObj, moduleObj.exports);
-                    libModules.set(key, moduleObj.exports);
-                    return moduleObj.exports;
-                };
+                // page-side require over the shipped library sources and data files
+                const requireFrom = makeLibRequire(libSources, (lib, require, moduleObj) =>
+                    scriptFunction(lib.src!)(shimFor(null, lib.name, lib.params || {}).wt, consoleProxy, require, moduleObj, moduleObj.exports)
+                );
                 const moduleObj = { exports: {} as any };
                 const shim = shimFor(h.scriptId, h.name, h.params || {});
-                scriptFunction(h.src)(shim.wt, consoleProxy, requireLib, moduleObj, moduleObj.exports);
+                scriptFunction(h.src)(shim.wt, consoleProxy, requireFrom(h.name), moduleObj, moduleObj.exports);
                 dom = shim.dom;
             } catch (e: any) {
                 scriptLog(h.scriptId, "error", formatScriptError(h.name, e, "onDocument compile (isolated world)"));

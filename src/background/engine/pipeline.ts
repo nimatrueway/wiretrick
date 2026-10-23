@@ -11,7 +11,11 @@ import type { RulesStrategy } from "./strategies/rulesStrategy";
 import { IS_FIREFOX, onHelperActiveChange, helperActive, strategyUnavailable } from "./strategies/helperState";
 import type { HeaderChanges } from "./strategies/types";
 import type { Script } from "./scriptStore";
-import { listScripts, getScript, onScriptsChanged, saveScript, deleteScript, setEnabled, newId, scriptStorageGet, scriptStorageSet, loadAllParamValues, getParamValues, setParamValue } from "./scriptStore";
+import {
+    listScripts, getScript, onScriptsChanged, saveScript, deleteScript, setEnabled, newId, scriptStorageGet, scriptStorageSet, loadAllParamValues, getParamValues, setParamValue,
+    listDataFiles, getDataFile, saveDataFile, deleteDataFile, listFolders, createFolder, renameFolder, deleteFolder,
+} from "./scriptStore";
+import { loadDataFiles } from "./dataFiles";
 import { serveStore } from "./strategies/extensionStrategy";
 import { dlog, dlogLevel } from "../../shared/debugLog";
 import { isThenable, toRunnableJs } from "../../shared/compile";
@@ -20,6 +24,7 @@ import { log, getScriptErrors, getScriptTypeErrors, getScriptRuleErrors, getScri
 import { missedLine } from "../../shared/netTypes";
 import { makeMissedThrottle, missedReason, missedWhat, routeProblem, MISSED_SKIP_TYPES } from "../../shared/missedTap";
 import { resolveParamValues } from "../../shared/scriptDef";
+import type { ShippedLib } from "../../shared/scriptImports";
 import { effectiveStrategy, hookCanSee, routeLabel, routeMatches, setDefaultStrategy, type RouteMeta, type Strategy } from "../../shared/route";
 import { analyzeScripts, runBodyOp, type Analyzed } from "../compileHost";
 import { recordNetBody } from "../network";
@@ -537,6 +542,47 @@ export function createPipeline(
                 .catch((e) => sendResponse({ error: String(e) }));
             return true;
         }
+        // data files and folders (the Editor's explorer); changes notify like
+        // script changes (chrome.storage resDataFiles / resFolders)
+        if (msg && msg.type === "listDataFiles") {
+            listDataFiles().then((files) => sendResponse(files));
+            return true;
+        }
+        if (msg && msg.type === "listFolders") {
+            listFolders().then((folders) => sendResponse(folders));
+            return true;
+        }
+        if (msg && msg.type === "saveDataFile") {
+            void (async () => {
+                // optimistic concurrency like saveScript: `base` is the text the editor loaded
+                if (typeof msg.base === "string" && msg.id) {
+                    const cur = await getDataFile(msg.id);
+                    if (!cur) return { conflict: "deleted" };
+                    if (cur.text !== msg.base && cur.text !== msg.text) return { conflict: "changed", text: cur.text };
+                }
+                return saveDataFile({ id: msg.id, path: msg.path, text: msg.text });
+            })()
+                .then((d) => sendResponse(d))
+                .catch((e) => sendResponse({ error: String(e?.message || e) }));
+            return true;
+        }
+        if (msg && msg.type === "renameDataFile") {
+            saveDataFile({ id: msg.id, path: msg.path })
+                .then((d) => sendResponse(d))
+                .catch((e) => sendResponse({ error: String(e?.message || e) }));
+            return true;
+        }
+        if (msg && msg.type === "deleteDataFile") {
+            deleteDataFile(msg.id).then(() => sendResponse({}));
+            return true;
+        }
+        if (msg && (msg.type === "createFolder" || msg.type === "renameFolder" || msg.type === "deleteFolder")) {
+            const op = msg.type === "createFolder" ? createFolder(msg.path) : msg.type === "renameFolder" ? renameFolder(msg.from, msg.to) : deleteFolder(msg.path);
+            (op as Promise<unknown>)
+                .then((r) => sendResponse(r ?? {}))
+                .catch((e) => sendResponse({ error: String(e?.message || e) }));
+            return true;
+        }
         if (msg && msg.type === "deleteScript") {
             deleteScript(msg.id).then(() => sendResponse({}));
             return true;
@@ -579,7 +625,7 @@ export function createPipeline(
                 // world when the page CSP allows, else in the bridge.
                 const url = msg.url || "";
                 const domHandlers: { scriptId: string; name: string; src: string; params: Record<string, any> }[] = [];
-                const libs = new Map<string, { name: string; src: string; params: Record<string, any> }>();
+                const libs = new Map<string, ShippedLib>();
                 const routes: RouteMeta[] = [];
                 await ready;
                 await loadDefaultStrategy();
@@ -601,9 +647,12 @@ export function createPipeline(
                     for (const d of a.deps) depNames.add(d);
                     domHandlers.push({ scriptId: s.id, name: s.meta.name, src: toRunnableJs(s.code), params: resolveParamValues(a.paramDefs || {}, paramValues[s.id]) });
                 }
-                // ship the transitively imported library sources once
+                // ship the transitively imported library sources (and data files) once
+                const dataFiles = depNames.size ? await listDataFiles() : [];
                 for (const depName of depNames) {
                     const lib = pageScripts.find((x) => x.meta.name === depName);
+                    const data = !lib && dataFiles.find((d) => d.path === depName);
+                    if (data && !libs.has(data.path)) libs.set(data.path, { name: data.path, json: data.text });
                     if (!lib || libs.has(lib.meta.name)) continue;
                     const defs = analyzed.get(lib.id)?.paramDefs || {};
                     libs.set(lib.meta.name, { name: lib.meta.name, src: toRunnableJs(lib.code), params: resolveParamValues(defs, paramValues[lib.id]) });
@@ -691,6 +740,7 @@ export function createPipeline(
         const seq = ++reloadSeq;
         await ready;
         await loadDefaultStrategy();
+        await loadDataFiles();
         const stored = await listScripts();
         const paramValues = await loadAllParamValues();
         // routes come from running each script's top level with its real

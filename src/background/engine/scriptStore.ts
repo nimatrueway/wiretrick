@@ -1,11 +1,14 @@
 /**
  * chrome.storage.local backed script store.
  */
-import { dependantsOf } from "../../shared/scriptImports";
+import { dependantsOf, folderOf } from "../../shared/scriptImports";
 import type { ResMeta } from "../../shared/metaParser";
 import { compileForStorage, SANDBOX_COMPILE_FAILED } from "../compileHost";
 import { dlogLevel } from "../../shared/debugLog";
 import { clearScriptErrors, clearScriptTypeErrors } from "./logs";
+import { DATA_FILES_KEY, FOLDERS_KEY, MAX_DATA_FILE, setDataFilesSnapshot, type DataFile } from "./dataFiles";
+import { allFolders, ancestorFolders, isInFolder, movedPath, stackingOrder } from "../../shared/folders";
+import { dataFilePathProblem, folderPathProblem, scriptNameProblem, scriptFileKey } from "../../shared/scriptName";
 
 export interface Script {
     id: string;
@@ -61,11 +64,16 @@ function notify(): void {
     listeners.forEach((fn) => fn());
 }
 
+/** every script in stacking order (= explorer order: depth-first, subfolders before a folder's scripts) */
 export async function listScripts(): Promise<Script[]> {
-    const obj = await storageGet([STORE_KEY, ORDER_KEY]);
+    const obj = await storageGet([STORE_KEY, ORDER_KEY, FOLDERS_KEY]);
     const byId: { [id: string]: Script } = obj[STORE_KEY] || {};
     const order: string[] = obj[ORDER_KEY] || Object.keys(byId);
-    return order.filter((id) => byId[id]).map((id) => byId[id]);
+    return stackingOrder(
+        order.filter((id) => byId[id]).map((id) => byId[id]),
+        (s) => s.meta.name,
+        obj[FOLDERS_KEY] || []
+    );
 }
 
 export async function getScript(id: string): Promise<Script | undefined> {
@@ -121,7 +129,13 @@ export async function saveScript(partial: Pick<Script, "id" | "code"> & Partial<
         if (prev && prev.meta.name !== script.meta.name) importers.push(...dependantsOf(prev.meta.name, plain(byId)).filter((id) => id !== script.id && !importers.includes(id)));
         await recompileMeta(byId, importers, allValues);
     }
-    await storageSet({ [STORE_KEY]: byId, [ORDER_KEY]: order });
+    const items: Record<string, any> = { [STORE_KEY]: byId, [ORDER_KEY]: order };
+    // moved out of a folder: the folder stays (as on disk)
+    if (prev && folderOf(prev.meta.name) !== folderOf(script.meta.name)) {
+        const folders = await keptFolders([prev.meta.name]);
+        if (folders) items[FOLDERS_KEY] = folders;
+    }
+    await storageSet(items);
     if (prev && prev.meta.name !== script.meta.name) {
         for (const fn of renameListeners) await fn(prev.meta.name, script.meta.name);
     }
@@ -191,9 +205,11 @@ export async function deleteScript(id: string): Promise<void> {
     delete byId[id];
     // its importers' imports now resolve to stubs: drop what came from it (e.g. imported param defs)
     if (importers.length) await recompileMeta(byId, importers, await loadAllParamValues());
+    const folders = gone ? await keptFolders([gone.meta.name]) : null;
     await storageSet({
         [STORE_KEY]: byId,
         [ORDER_KEY]: order.filter((x) => x !== id),
+        ...(folders ? { [FOLDERS_KEY]: folders } : {}),
     });
     notify();
 }
@@ -207,6 +223,229 @@ export async function setEnabled(id: string, enabled: boolean): Promise<void> {
 
 export function newId(): string {
     return "s_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
+}
+
+// ---- data files and folders ----
+
+async function loadDataStore(): Promise<{ [id: string]: DataFile }> {
+    return (await storageGet(DATA_FILES_KEY))[DATA_FILES_KEY] || {};
+}
+
+async function loadFolderList(): Promise<string[]> {
+    return (await storageGet(FOLDERS_KEY))[FOLDERS_KEY] || [];
+}
+
+/**
+ * The explicit folder list plus the folders of `paths` (about to be
+ * deleted or moved away — their folders stay, like on disk), or null when
+ * nothing needs adding.
+ */
+async function keptFolders(paths: string[]): Promise<string[] | null> {
+    const folders = await loadFolderList();
+    const keys = new Set(folders.map((f) => f.toLowerCase()));
+    let added = false;
+    for (const p of paths) {
+        const f = folderOf(p);
+        if (f && !keys.has(f.toLowerCase())) {
+            folders.push(f);
+            keys.add(f.toLowerCase());
+            added = true;
+        }
+    }
+    return added ? folders : null;
+}
+
+export function newDataFileId(): string {
+    return "d_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
+}
+
+/** data files sorted by path */
+export async function listDataFiles(): Promise<DataFile[]> {
+    return Object.values(await loadDataStore()).sort((a, b) => a.path.localeCompare(b.path, undefined, { sensitivity: "base" }));
+}
+
+export async function getDataFile(id: string): Promise<DataFile | undefined> {
+    return (await loadDataStore())[id];
+}
+
+/** every folder path, explicit (empty ones included) and implied by the scripts and data files in it, sorted */
+export async function listFolders(): Promise<string[]> {
+    const obj = await storageGet([STORE_KEY, DATA_FILES_KEY, FOLDERS_KEY]);
+    const scripts: Script[] = Object.values(obj[STORE_KEY] || {});
+    const data: DataFile[] = Object.values(obj[DATA_FILES_KEY] || {});
+    return allFolders(obj[FOLDERS_KEY] || [], [...scripts.map((s) => s.meta.name), ...data.map((d) => d.path)]);
+}
+
+/** a data file's path clash with another data file or a folder (case-insensitive), or "" */
+function dataFileClash(path: string, data: { [id: string]: DataFile }, folders: string[], selfId?: string): string {
+    const key = path.toLowerCase();
+    const other = Object.values(data).find((d) => d.id !== selfId && d.path.toLowerCase() === key);
+    if (other) return `a data file "${other.path}" already exists`;
+    if (folders.some((f) => f.toLowerCase() === key)) return `a folder "${path}" already exists`;
+    const asFolder = ancestorFolders(path).find((f) => Object.values(data).some((d) => d.id !== selfId && d.path.toLowerCase() === f.toLowerCase()));
+    if (asFolder) return `"${asFolder}" is a data file, not a folder`;
+    return "";
+}
+
+/** after data files changed: the snapshot, the importers' meta, storage, errors, listeners */
+async function commitDataFiles(byId: { [id: string]: Script }, data: { [id: string]: DataFile }, importers: string[], extra: Record<string, any> = {}): Promise<void> {
+    setDataFilesSnapshot(data);
+    await recompileMeta(byId, importers, await loadAllParamValues());
+    await storageSet({ [STORE_KEY]: byId, [DATA_FILES_KEY]: data, ...extra });
+    // they run with the new data from now on
+    for (const id of importers) void clearScriptErrors(id);
+    notify();
+}
+
+/**
+ * Create or update a data file (`id` absent: a new one). `path` absent
+ * keeps the stored path (a different one renames/moves it), `text` absent
+ * the stored text. Its importers (transitively) recompile and hot-apply.
+ * Throws on an invalid path, a clash, or a text over MAX_DATA_FILE.
+ */
+export async function saveDataFile(partial: { id?: string; path?: string; text?: string }): Promise<DataFile> {
+    const obj = await storageGet([STORE_KEY, DATA_FILES_KEY, FOLDERS_KEY]);
+    const byId: { [id: string]: Script } = obj[STORE_KEY] || {};
+    const data: { [id: string]: DataFile } = obj[DATA_FILES_KEY] || {};
+    const id = partial.id || newDataFileId();
+    const prev = data[id];
+    const path = partial.path ?? prev?.path;
+    const text = partial.text ?? prev?.text ?? "";
+    if (!path) throw new Error("a data file needs a path");
+    const problem = dataFilePathProblem(path);
+    if (problem) throw new Error(`invalid data file path "${path}": ${problem}`);
+    if (text.length > MAX_DATA_FILE) throw new Error(`data file "${path}" is too large (${(text.length / 1048576).toFixed(1)} MB; at most 5 MB)`);
+    const folders = allFolders(obj[FOLDERS_KEY] || [], [...Object.values(byId).map((s) => s.meta.name), ...Object.values(data).filter((d) => d.id !== id).map((d) => d.path)]);
+    const clash = dataFileClash(path, data, folders, id);
+    if (clash) throw new Error(clash);
+    const file: DataFile = { id, path, text, savedAt: Date.now() };
+    data[id] = file;
+    const importers = dependantsOf(path, plain(byId), "data");
+    if (prev && prev.path !== path) for (const x of dependantsOf(prev.path, plain(byId), "data")) if (!importers.includes(x)) importers.push(x);
+    const kept = prev && folderOf(prev.path) !== folderOf(path) ? await keptFolders([prev.path]) : null;
+    await commitDataFiles(byId, data, importers, kept ? { [FOLDERS_KEY]: kept } : {});
+    return file;
+}
+
+export async function deleteDataFile(id: string): Promise<void> {
+    const obj = await storageGet([STORE_KEY, DATA_FILES_KEY]);
+    const byId: { [id: string]: Script } = obj[STORE_KEY] || {};
+    const data: { [id: string]: DataFile } = obj[DATA_FILES_KEY] || {};
+    const gone = data[id];
+    if (!gone) return;
+    delete data[id];
+    const kept = await keptFolders([gone.path]);
+    await commitDataFiles(byId, data, dependantsOf(gone.path, plain(byId), "data"), kept ? { [FOLDERS_KEY]: kept } : {});
+}
+
+/** add an (empty) folder; its missing parents are implied. Throws on an invalid path or a clash with a data file. */
+export async function createFolder(path: string): Promise<void> {
+    const problem = folderPathProblem(path);
+    if (problem) throw new Error(`invalid folder name "${path}": ${problem}`);
+    const data = await loadDataStore();
+    const clash = [path, ...ancestorFolders(path)].find((f) => Object.values(data).some((d) => d.path.toLowerCase() === f.toLowerCase()));
+    if (clash) throw new Error(`"${clash}" is a data file`);
+    const folders = await loadFolderList();
+    if (folders.some((f) => f.toLowerCase() === path.toLowerCase())) return;
+    await storageSet({ [FOLDERS_KEY]: [...folders, path] });
+    notify();
+}
+
+/**
+ * Rename/move a folder: every script, data file and subfolder in it moves
+ * along (scripts keep their settings.yaml sections, like a script rename).
+ * Import specifiers elsewhere are not rewritten. Throws on an invalid
+ * target, a move into itself, or a clash.
+ */
+export async function renameFolder(from: string, to: string): Promise<void> {
+    if (from === to) return;
+    const problem = folderPathProblem(to);
+    if (problem) throw new Error(`invalid folder name "${to}": ${problem}`);
+    if (isInFolder(to, from)) throw new Error(`can't move "${from}" into itself`);
+    const obj = await storageGet([STORE_KEY, DATA_FILES_KEY, FOLDERS_KEY]);
+    const byId: { [id: string]: Script } = obj[STORE_KEY] || {};
+    const data: { [id: string]: DataFile } = obj[DATA_FILES_KEY] || {};
+    const explicit: string[] = obj[FOLDERS_KEY] || [];
+    const scripts = Object.values(byId);
+    const files = Object.values(data);
+    const existing = allFolders(explicit, [...scripts.map((s) => s.meta.name), ...files.map((d) => d.path)]);
+    if (!existing.includes(from)) throw new Error(`no folder "${from}"`);
+    // only a case change may land on an existing folder (itself)
+    if (to.toLowerCase() !== from.toLowerCase() && existing.some((f) => f.toLowerCase() === to.toLowerCase())) throw new Error(`a folder "${to}" already exists`);
+    const dataClash = [to, ...ancestorFolders(to)].find((f) => files.some((d) => !isInFolder(d.path, from) && d.path.toLowerCase() === f.toLowerCase()));
+    if (dataClash) throw new Error(`"${dataClash}" is a data file`);
+    const before = plain(byId);
+    const renamed: [string, string][] = [];
+    const moved: string[] = [];
+    for (const s of scripts) {
+        if (!isInFolder(s.meta.name, from)) continue;
+        const next = movedPath(s.meta.name, from, to);
+        if (scriptNameProblem(next)) throw new Error(`can't move "${s.meta.name}": ${scriptNameProblem(next)}`);
+        renamed.push([s.meta.name, next]);
+        moved.push(s.id);
+    }
+    const takenKeys = new Set(scripts.filter((s) => !isInFolder(s.meta.name, from)).map((s) => scriptFileKey(s.meta.name)));
+    const taken = renamed.find(([, next]) => takenKeys.has(scriptFileKey(next)));
+    if (taken) throw new Error(`a script named "${taken[1]}" already exists`);
+    const movedData: [string, string][] = [];
+    for (const d of files) {
+        if (!isInFolder(d.path, from)) continue;
+        const next = movedPath(d.path, from, to);
+        movedData.push([d.path, next]);
+        data[d.id] = { ...d, path: next };
+    }
+    for (const s of scripts) if (moved.includes(s.id)) byId[s.id] = { ...s, meta: { ...s.meta, name: movedPath(s.meta.name, from, to) } };
+    const after = plain(byId);
+    const folders = explicit.map((f) => (f.toLowerCase() === from.toLowerCase() ? to : movedPath(f, from, to)));
+    if (!folders.includes(to)) folders.push(to);
+    // the moved scripts resolve their relative imports from the new folder;
+    // whatever imported the old or imports the new paths recompiles
+    const affected = new Set(moved);
+    for (const [a, b] of renamed) for (const id of [...dependantsOf(a, before), ...dependantsOf(b, after)]) affected.add(id);
+    for (const [a, b] of movedData) for (const id of [...dependantsOf(a, before, "data"), ...dependantsOf(b, after, "data")]) affected.add(id);
+    setDataFilesSnapshot(data);
+    await recompileMeta(byId, [...affected], await loadAllParamValues());
+    await storageSet({ [STORE_KEY]: byId, [DATA_FILES_KEY]: data, [FOLDERS_KEY]: folders });
+    for (const [a, b] of renamed) for (const fn of renameListeners) await fn(a, b);
+    for (const id of affected) void clearScriptErrors(id);
+    notify();
+}
+
+/** delete a folder and everything in it; the counts of what went */
+export async function deleteFolder(path: string): Promise<{ scripts: number; dataFiles: number; folders: number }> {
+    const obj = await storageGet([STORE_KEY, ORDER_KEY, DATA_FILES_KEY, FOLDERS_KEY]);
+    const byId: { [id: string]: Script } = obj[STORE_KEY] || {};
+    const order: string[] = obj[ORDER_KEY] || Object.keys(byId);
+    const data: { [id: string]: DataFile } = obj[DATA_FILES_KEY] || {};
+    const explicit: string[] = obj[FOLDERS_KEY] || [];
+    const inside = (p: string) => isInFolder(p, path);
+    const before = plain(byId);
+    const goneScripts = Object.values(byId).filter((s) => inside(s.meta.name));
+    const goneData = Object.values(data).filter((d) => inside(d.path));
+    const subfolders = allFolders(explicit, [...before.map((s) => s.name), ...Object.values(data).map((d) => d.path)]).filter(inside);
+    for (const s of goneScripts) {
+        delete byId[s.id];
+        void clearScriptErrors(s.id);
+        void clearScriptTypeErrors(s.id);
+    }
+    for (const d of goneData) delete data[d.id];
+    const importers = new Set<string>();
+    for (const s of goneScripts) for (const id of dependantsOf(s.meta.name, before)) if (byId[id]) importers.add(id);
+    for (const d of goneData) for (const id of dependantsOf(d.path, before, "data")) if (byId[id]) importers.add(id);
+    setDataFilesSnapshot(data);
+    if (importers.size) await recompileMeta(byId, [...importers], await loadAllParamValues());
+    const folders = explicit.filter((f) => f.toLowerCase() !== path.toLowerCase() && !inside(f));
+    // its parent stays
+    const parent = folderOf(path);
+    if (parent && !folders.some((f) => f.toLowerCase() === parent.toLowerCase())) folders.push(parent);
+    await storageSet({
+        [STORE_KEY]: byId,
+        [ORDER_KEY]: order.filter((id) => byId[id]),
+        [DATA_FILES_KEY]: data,
+        [FOLDERS_KEY]: folders,
+    });
+    notify();
+    return { scripts: goneScripts.length, dataFiles: goneData.length, folders: subfolders.length };
 }
 
 // ---- per-script KV storage ----

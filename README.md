@@ -31,7 +31,7 @@ block, edit headers, transform or replace bodies, or patch the DOM.
 - **Built-in devtools** — the Problems view lists what's wrong with your scripts
   right now (gone once fixed); the Log and Network views show what every script did,
   including original vs. modified bodies.
-- **Folder sync** — keep scripts as plain files in a synced folder of your choice.
+- **Folder sync** — keep scripts, JSON data files and their folders as plain files in a synced folder of your choice.
 - **Chrome (MV3), MV2 Chromium and Firefox.**
 
 ## Install
@@ -71,7 +71,7 @@ Or click **?** → **Samples** for one-click starters against real public sites.
 | | |
 |---|---|
 | [Installing](docs/install.md) | release zips, signed crx, building from source |
-| [Writing scripts](docs/scripting.md) | the `wt` API, routes, parameters, libraries, `onDocument`, stacking, async handlers |
+| [Writing scripts](docs/scripting.md) | the `wt` API, routes, parameters, libraries, imports and data files, `onDocument`, stacking, async handlers |
 | [Interception strategies](docs/strategies.md) | `page` / `debugger` / `extension` / `helper` / `rules`, the default and per-handler choice, [which strategies keep the URL when replacing a response](docs/strategies.md#how-each-strategy-serves-a-replacement), the Missed warning, browser compatibility |
 | [Local helper](docs/local-helper.md) | the `helper` strategy: install, how it works, security notes |
 | [The Editor](docs/editor.md) | Code view, Problems, Log & Network views, folder sync, `settings.yaml` |
