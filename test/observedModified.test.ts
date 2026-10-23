@@ -28,6 +28,9 @@ describe("outcomeKind", () => {
 
     it("formats the observed line with the handler and the URL last", () => {
         expect(observedLine("Foo", "onRequest", "https://a.test/x")).toBe("[Foo] onRequest → observed (no change) https://a.test/x");
+        const same = observedLine("Foo", "onResponseBody", "https://a.test/x", "it returned the same body it received");
+        expect(same).toBe("[Foo] onResponseBody → observed (no change) — it returned the same body it received https://a.test/x");
+        expect(outcomeKind("info", same)).toBe("observed");
     });
 });
 

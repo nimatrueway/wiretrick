@@ -127,7 +127,7 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
         groups: routeGroups(h.route, url),
     });
     const list = matching(scripts, op, { url, method, resourceType: known, tier: args.tier, defaultStrategy: args.defaultStrategy, onlyIds: args.onlyIds }, env);
-    const observed = (s: OpScript, handler: string) => env.log(s.id, "debug", observedLine(s.name, handler, url), "observed");
+    const observed = (s: OpScript, handler: string, why?: string) => env.log(s.id, "debug", observedLine(s.name, handler, url, why), "observed");
 
     if (op === "requestDecision") {
         let headerMods: any = null;
@@ -201,7 +201,7 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
                         const after = typeof next === "string" ? next.length : next.byteLength;
                         out = next;
                         if (next !== prevOut) env.log(s.id, "info", `[${s.name}] onResponseBody applied (${before}b → ${after}b) ${url}`);
-                        else observed(s, "onResponseBody");
+                        else observed(s, "onResponseBody", "it returned the same body it received");
                         touched = true;
                     } else observed(s, "onResponseBody");
                 } catch (e: any) {

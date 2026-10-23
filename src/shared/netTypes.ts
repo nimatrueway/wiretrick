@@ -28,8 +28,8 @@ export function missedLine(scriptName: string, handler: string, url: string, wha
 }
 
 /** DEBUG log line for a handler that ran without changing anything (ends with the URL, so it annotates the request). */
-export function observedLine(scriptName: string, handler: string, url: string): string {
-    return `[${scriptName}] ${handler} ${OBSERVED_MARK} ${url}`;
+export function observedLine(scriptName: string, handler: string, url: string, why?: string): string {
+    return `[${scriptName}] ${handler} ${OBSERVED_MARK}${why ? ` — ${why}` : ""} ${url}`;
 }
 
 /**

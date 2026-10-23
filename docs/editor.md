@@ -125,7 +125,9 @@ at the right of the toolbar do the same.
   - **Observed** — a handler (`onRequest`, `onResponseHeaders`, `onResponseBody`,
     `replaceResponse`, …) ran on the request but changed nothing (returned
     `undefined`, or the same body). Dashed, muted marker; each such run also
-    logs a DEBUG line like `[Foo] onRequest → observed (no change) https://…`.
+    logs a DEBUG line like `[Foo] onRequest → observed (no change) https://…`
+    (an `onResponseBody` that returns exactly the body it received adds
+    *— it returned the same body it received*).
   - **Modified** — a handler changed it: body, headers, status, a
     redirect/block or a synthetic response. Solid accent marker and a
     green waterfall bar; the action is logged at INFO as before.

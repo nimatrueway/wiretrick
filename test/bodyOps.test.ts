@@ -48,7 +48,10 @@ describe("observed vs modified logging", () => {
         expect((await run("replace", { replaceResponse: [() => null] })).lines).toEqual([observed("replaceResponse")]);
         // returning the identical body is no change
         const same = await run("transform", { onResponseBody: [(_c: any, b: string) => b, () => undefined] }, { body: "abc" });
-        expect(same.lines).toEqual([observed("onResponseBody"), observed("onResponseBody")]);
+        expect(same.lines).toEqual([
+            { ...observed("onResponseBody"), msg: `[S] onResponseBody → observed (no change) — it returned the same body it received ${url}` },
+            observed("onResponseBody"),
+        ]);
     });
 
     it("changes keep their INFO lines (no observed line)", async () => {
