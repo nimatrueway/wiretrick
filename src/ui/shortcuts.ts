@@ -8,8 +8,8 @@ export interface Shortcut {
 }
 
 export const SHORTCUTS: Shortcut[] = [
-    { keys: ["Mod+S"], action: "Save and hot-apply the script", where: "Editor" },
-    { keys: ["Mod+P"], action: "Quick open a script or settings.yaml", where: "Global" },
+    { keys: ["Mod+S"], action: "Save and hot-apply the script (or save the data file)", where: "Editor" },
+    { keys: ["Mod+P"], action: "Quick open a script, data file or settings.yaml", where: "Global" },
     { keys: ["Mod+,"], action: "Open Settings", where: "Global" },
     { keys: ["F1"], action: "Command palette (all editor commands)", where: "Editor" },
     { keys: ["Mod+Shift+E"], action: "Focus the explorer", where: "Global" },
@@ -19,10 +19,11 @@ export const SHORTCUTS: Shortcut[] = [
     { keys: ["Alt+Z"], action: "Toggle word wrap", where: "Global" },
     { keys: ["Esc"], action: "Close dialog / return to the editor", where: "Global" },
     { keys: ["↑", "↓", "Home", "End"], action: "Move selection", where: "Explorer" },
-    { keys: ["Enter"], action: "Open script and focus the editor", where: "Explorer" },
-    { keys: ["Space"], action: "Open script, keep focus in the list", where: "Explorer" },
-    { keys: ["F2"], action: "Rename script", where: "Explorer" },
-    { keys: ["Delete", "Mod+Backspace"], action: "Delete script (asks first)", where: "Explorer" },
+    { keys: ["←", "→"], action: "Collapse / expand a folder (←: go to the parent folder)", where: "Explorer" },
+    { keys: ["Enter"], action: "Open the file and focus the editor (a folder: collapse / expand)", where: "Explorer" },
+    { keys: ["Space"], action: "Open the file, keep focus in the list", where: "Explorer" },
+    { keys: ["F2"], action: "Rename (a / in the name moves it into a folder)", where: "Explorer" },
+    { keys: ["Delete", "Mod+Backspace"], action: "Delete (asks first; a folder with its contents)", where: "Explorer" },
     { keys: ["Mod+/"], action: "Toggle line comment", where: "Editor" },
     { keys: ["Mod+F"], action: "Find", where: "Editor" },
     { keys: ["Mod+H"], action: "Replace", where: "Editor" },

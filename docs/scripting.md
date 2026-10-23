@@ -306,7 +306,9 @@ Each import gets a freshly parsed copy, so a handler changing it doesn't
 affect other scripts. Saving, renaming or deleting a data file hot-applies
 every script that imports it (directly or through a library). A missing
 data file or invalid JSON is a compile error on the importing script,
-naming the data file and the JSON error's line and column. Renaming or
+naming the data file and the JSON error's line and column. In the Code
+view the import is typed from the data file (hovers and completions show its
+properties) and F12 on it opens the data file. Renaming or
 moving a script, data file or folder doesn't rewrite the import specifiers
 pointing at it.
 

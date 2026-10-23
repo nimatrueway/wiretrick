@@ -24,6 +24,7 @@ import {
     type NavTreeItem,
     type Span,
 } from "./apiLinks";
+import { JSON_FALLBACK_DTS, jsonDeclPath, jsonModuleDts } from "./jsonTypes";
 
 let monacoApi: any = null;
 let wtApiDts = "";
@@ -55,6 +56,7 @@ export async function loadMonaco(): Promise<any> {
             content: wtApiDts,
             filePath: API_TYPINGS_URI,
         },
+        { content: JSON_FALLBACK_DTS, filePath: "file:///__wt__/json-modules.d.ts" },
     ]);
     const ts = monacoApi.languages.typescript;
     monacoApi.languages.typescript.typescriptDefaults.setCompilerOptions({
@@ -69,6 +71,11 @@ export async function loadMonaco(): Promise<any> {
         module: ts.ModuleKind.ESNext,
         moduleResolution: ts.ModuleResolutionKind.Bundler ?? 100,
         allowImportingTsExtensions: true,
+        // data files: `import x from "./mock/a.json"` resolves to the
+        // declaration setDataFileTypings puts next to it (a.d.json.ts)
+        resolveJsonModule: true,
+        // without it TypeScript ignores a .d.json.ts it resolved to (and falls back to "*.json")
+        allowArbitraryExtensions: true,
         // each script is its own module: top-level names in different
         // scripts (e.g. two \`const cfg\`) must not collide as globals
         moduleDetection: 3, // ts.ModuleDetectionKind.Force
@@ -77,6 +84,35 @@ export async function loadMonaco(): Promise<any> {
     registerTsHover(monacoApi);
 
     return monacoApi;
+}
+
+const dataFileLibs = new Map<string, { content: string; lib: { dispose(): void } }>();
+
+/**
+ * Type the data files for the TS worker (text as in the Code view, unsaved
+ * edits included): one declaration per file next to it. TypeScript looks it
+ * up by the importer's model path, which is %-encoded when a folder has a
+ * space — so a path with one gets both spellings. Returns the URIs whose
+ * declaration changed or went away.
+ */
+export function setDataFileTypings(files: { path: string; text: string }[]): string[] {
+    const ts = monacoApi.languages.typescript.typescriptDefaults;
+    const want = new Map<string, string>();
+    const changed: string[] = [];
+    for (const f of files) {
+        const decl = jsonDeclPath(f.path);
+        const content = jsonModuleDts(f.text);
+        want.set("file:///" + decl, content);
+        want.set(monacoApi.Uri.file("/" + decl).toString(), content);
+    }
+    for (const [uri, cur] of dataFileLibs) {
+        if (want.get(uri) === cur.content) continue;
+        cur.lib.dispose();
+        dataFileLibs.delete(uri);
+        changed.push(uri);
+    }
+    for (const [uri, content] of want) if (!dataFileLibs.has(uri)) dataFileLibs.set(uri, { content, lib: ts.addExtraLib(content, uri) });
+    return changed;
 }
 
 // TS ScriptElementKind → Monaco CompletionItemKind name (as tsMode.js maps it)

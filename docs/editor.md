@@ -10,8 +10,8 @@ searchable list of all of them):
 
 | Shortcut | Action |
 | --- | --- |
-| ⌘S | Save and hot apply the script |
-| ⌘P | Quick-open a script or settings.yaml (cursor position is remembered per file) |
+| ⌘S | Save and hot apply the script (or save the data file) |
+| ⌘P | Quick-open a script, data file or settings.yaml by path (cursor position is remembered per file) |
 | ⌘⇧E | Focus the explorer |
 | ⌘B | Show/hide the explorer |
 | ⌘J or ⌘` | Show/hide the Problems/Log/Network views |
@@ -20,7 +20,7 @@ searchable list of all of them):
 | ⌘, | Open Settings |
 | ⌘/, ⌘F, ⌘D | Comment, find, select next occurrence (Monaco) |
 | F8 / ⇧F8 | Go to the next / previous problem in the script (TypeScript, compile, rules, runtime, route) |
-| F12 | Go to definition — also into the `wt` API typings |
+| F12 | Go to definition — also into the `wt` API typings; on a JSON import it opens the data file |
 | Alt+← / Alt+→ (⌃- / ⌃⇧- on macOS) | Go back / forward after a definition jump or a hover type link |
 
 In a hover, the `wt` API types in the signature (`Route`, `RequestCtx`, …,
@@ -41,10 +41,10 @@ Explorer layout, panel visibility and word wrap are remembered. To debug the
 engine itself, open `chrome://extensions` and click the service worker /
 background page under *Inspect views*.
 
-If the stored script changed since you opened it (synced folder, another tab),
+If the stored script (or data file) changed since you opened it (synced folder, another tab),
 ⌘S shows a **save conflict** diff instead of saving. It takes the keyboard:
 **O** overwrite with mine, **T** take theirs, **K** or Esc keep editing (for
-a deleted script: **R** recreate, **D** discard my text). Saves in quick
+a deleted script or data file: **R** recreate, **D** discard my text). Saves in quick
 succession run one after another, so they never conflict with each other.
 
 The **Save** button shows the save state itself: **● Save** (unsaved
@@ -56,24 +56,56 @@ synced folder in VS Code (it shows the VS Code Insiders icon when
 
 ## Explorer
 
-The explorer on the left looks and works like VS Code's explorer: one
-`Name.ts` row per script ([libraries](scripting.md#libraries-and-recipes) in italics, disabled scripts dimmed and
-struck through, ● for unsaved changes, ⚠ for errors). Click the **Wiretrick**
-header to collapse it. With the list focused (⌘⇧E or a click): ↑/↓,
-Home/End move, Enter opens the script and focuses the Code view, Space opens it
-and keeps focus in the list, F2 renames, Delete (⌘⌫ on macOS) deletes after a
-confirmation, Esc returns to the Code view. Right-click a row for **Open**,
-**Enable/Disable**, **Rename…** and **Delete**. The **Enabled** switch in the
-toolbar turns the open script on or off.
+The explorer on the left looks and works like VS Code's explorer: a tree of
+[folders](scripting.md#imports-folders-and-data-files) (chevron, indent
+guides), one `Name.ts` row per script ([libraries](scripting.md#libraries-and-recipes) in italics, disabled scripts dimmed and
+struck through, ● for unsaved changes, ⚠ for errors) and one `name.json` row
+per [data file](scripting.md#imports-folders-and-data-files) (`{}` icon,
+red when its JSON is invalid). Each folder lists its subfolders
+(alphabetical), then its scripts (in stacking order), then its data files
+(alphabetical); ⚙ **settings.yaml** stays at the top. Scripts without a
+folder sit at the root, as before. Which folders are collapsed is remembered.
+Click the **Wiretrick** header to collapse the whole tree.
 
-Double-click a script (or F2) to rename it (Enter saves, Esc cancels).
-The name is the script's path in the synced folder (`My script.ts`); a `/`
-puts it in a [folder](scripting.md#imports-folders-and-data-files)
-(`mock/api mock` → `mock/api mock.ts`). Each segment may hold anything
+Hovering the explorer shows the header buttons: **New Script…**, **New JSON
+File…**, **New Folder…** and **Collapse Folders in Explorer**. A new item
+goes into the selected folder (or the selected file's folder) and is named in
+an inline box, like VS Code (Enter creates, Esc cancels). A new data file
+starts as `{}` and opens in the Code view.
+
+With the tree focused (⌘⇧E or a click): ↑/↓, Home/End move, ← collapses a
+folder (or goes to its parent folder), → expands it (or goes to its first
+item), Enter opens the file and focuses the Code view (on a folder: expand /
+collapse), Space opens it and keeps focus in the tree, F2 renames, Delete
+(⌘⌫ on macOS) deletes after a confirmation — a folder's warns that it deletes
+its contents, with counts — and Esc returns to the Code view. Right-click a
+row for **Open**, **Enable/Disable** (scripts), **New Script…**, **New JSON
+File…**, **New Folder…** (in that folder), **Copy Path**, **Rename…** and
+**Delete**; right-click the empty area for the New items at the root. Drag a
+script, data file or folder onto a folder to move it there (onto the empty
+area: to the root); hovering a collapsed folder while dragging expands it. The
+**Enabled** switch in the toolbar turns the open script on or off.
+
+Double-click a file (or F2 on a file or folder) to rename it (Enter saves, Esc cancels).
+The name is the path in the synced folder (`My script.ts`); a `/`
+moves it into a folder (`mock/api mock` → `mock/api mock.ts`; renaming a
+folder moves everything in it). Each segment may hold anything
 except `< > : " \ | ? *`, a trailing dot or space, and Windows device names
-like `CON`; a name that clashes with another script is refused.
+like `CON`; a name that clashes with another script (data file, folder) is refused.
+Moving a file doesn't rewrite the import specifiers that point at it.
 Reverting an edit back to the saved text clears the unsaved-changes state —
 no discard prompt on a no-op edit.
+
+### Data files
+
+A data file opens in the Code view with Monaco's JSON support (folding,
+formatting, bracket matching). JSON syntax errors are squiggled and listed in
+the Problems view under the data file, with their line. ⌘S saves it
+(unsaved changes, save conflicts and changes from the synced folder or another
+tab work like a script's); its importers are recompiled and hot-applied. In a
+script, `import limits from "./mock/rate-limits.json"` (relative to the
+script's folder) is typed from the data file's current text — hovers and
+completions show its properties — and F12 on the import opens the data file.
 
 ## Problems, Log and Network views
 
@@ -88,18 +120,18 @@ left or right edge of the window. ⌘J hides the panel wherever it is docked
 ⌘B hides the explorer (and a panel docked under it). The two layout buttons
 at the right of the toolbar do the same.
 
-- **Problems view** — what's wrong with your scripts *right now*, grouped by
-  file like VS Code's: TypeScript errors and warnings, compile errors,
+- **Problems view** — what's wrong with your scripts and data files *right now*, grouped by
+  file path like VS Code's (`mock/api mock.ts`): TypeScript errors and warnings, compile errors,
   invalid `rules` handlers, the last runtime error (exception in a handler),
   route warnings (a handler its strategy can't run here, or the helper being
-  down) and `settings.yaml` errors. Unlike the Log, entries go away by
+  down), `settings.yaml` errors and JSON syntax errors in data files. Unlike the Log, entries go away by
   themselves once fixed: TypeScript problems update live as you type (even
   before saving); compile, rules and route problems on save; a runtime error
   on save or with its ×. Every entry has a line and column: where the error
   was thrown, the URL pattern a rules error is about, or the `wt.*` call that
   registered the handler it names — and is squiggled there in the editor
   like TypeScript errors (its hover comes before the API docs; F8 reaches it). Click an entry (or
-  Enter) to open the script at that line; ↑/↓ move, ←/→ collapse/expand a file; the box at the top filters by
+  Enter) to open the file at that line; ↑/↓ move, ←/→ collapse/expand a file; the box at the top filters by
   text. ⌘⇧M shows it. Its error/warning counts are on its title and at the
   far left of the status bar, and follow the scripts. Compile, TypeScript,
   rules errors and route warnings appear only here, not in the Log; a

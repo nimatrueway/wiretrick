@@ -175,7 +175,7 @@ The code pane inside the Editor.
 _Avoid_: editor, IDE
 
 **Explorer**:
-The Editor's list of folders, scripts, data files and `settings.yaml`.
+The Editor's tree of folders, scripts, data files and `settings.yaml`.
 _Avoid_: script list, sidebar, file tree
 
 **Panel**:
@@ -183,7 +183,7 @@ The Editor's dockable area holding the Problems view, the Log view and the Netwo
 _Avoid_: bottom panel, console, devtools
 
 **Problems view**:
-The panel view listing the current problems, grouped by script.
+The panel view listing the current problems, grouped by file (script, data file or `settings.yaml`).
 _Avoid_: issues panel, problems tab, diagnostics
 
 **Log view**:

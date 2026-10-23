@@ -1,6 +1,6 @@
 /**
- * Problems view: what is currently wrong with each script (and
- * settings.yaml). Unlike Log lines, a Problem goes away by itself once it is
+ * Problems view: what is currently wrong with each script (and each data
+ * file, and settings.yaml). Unlike Log lines, a Problem goes away by itself once it is
  * fixed — type errors live as you type, the rest when the script is saved.
  */
 import { EVAL_WRAPPER_LINES } from "../shared/scriptError";
@@ -8,7 +8,7 @@ import { userFrames } from "../shared/scriptHealth";
 import type { TabBadge } from "./logBadge";
 
 export type ProblemSeverity = "error" | "warning";
-export type ProblemKind = "compile" | "rules" | "runtime" | "ts" | "route" | "settings";
+export type ProblemKind = "compile" | "rules" | "runtime" | "ts" | "route" | "settings" | "json";
 
 export interface Problem {
     severity: ProblemSeverity;
@@ -24,11 +24,11 @@ export interface Problem {
 }
 
 export interface ProblemGroup {
-    /** script id, or the settings id for settings.yaml */
+    /** script / data file id, or the settings id for settings.yaml */
     id: string;
-    /** file name shown in the group header */
+    /** file path shown in the group header */
     label: string;
-    file: "ts" | "yaml";
+    file: "ts" | "yaml" | "json";
     problems: Problem[];
 }
 
@@ -54,6 +54,14 @@ export interface ProblemScript {
     routes?: { kind: string; index: number; line?: number; url?: string[] }[];
     /** the saved source: positions get a range (the token, the URL pattern) */
     code?: string;
+}
+
+/** A data file's JSON syntax errors (its editor model's markers). */
+export interface ProblemDataFile {
+    id: string;
+    /** its path (e.g. "mock/limits.json") */
+    label: string;
+    markers: ProblemMarker[];
 }
 
 export const SETTINGS_GROUP = { id: "__settings__", label: "settings.yaml" };
@@ -174,11 +182,12 @@ function byPosition(a: Problem, b: Problem): number {
 
 /**
  * Every current problem, one group per file that has any: settings.yaml
- * first, then the scripts in the given (explorer) order. A script with a
+ * first, then the scripts in the given (explorer) order, then the data
+ * files. A script with a
  * live editor model uses its markers (`liveMarkers` has its id); otherwise
  * the saved code's stored type errors stand in.
  */
-export function collectProblems(scripts: ProblemScript[], liveMarkers: Map<string, ProblemMarker[]>, settingsMarkers?: ProblemMarker[]): ProblemGroup[] {
+export function collectProblems(scripts: ProblemScript[], liveMarkers: Map<string, ProblemMarker[]>, settingsMarkers?: ProblemMarker[], dataFiles: ProblemDataFile[] = []): ProblemGroup[] {
     const groups: ProblemGroup[] = [];
     if (settingsMarkers?.length) groups.push({ ...SETTINGS_GROUP, file: "yaml", problems: fromMarkers(settingsMarkers, "settings").sort(byPosition) });
     for (const s of scripts) {
@@ -205,6 +214,7 @@ export function collectProblems(scripts: ProblemScript[], liveMarkers: Map<strin
         for (const w of s.routeWarnings || []) problems.push({ severity: "warning", kind: "route", message: w, ...handler(w) });
         if (problems.length) groups.push({ id: s.id, label: s.label, file: "ts", problems: problems.sort(byPosition) });
     }
+    for (const d of dataFiles) if (d.markers.length) groups.push({ id: d.id, label: d.label, file: "json", problems: fromMarkers(d.markers, "json").sort(byPosition) });
     return groups;
 }
 

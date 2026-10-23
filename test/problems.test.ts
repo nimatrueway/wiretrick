@@ -10,6 +10,15 @@ describe("collectProblems", () => {
         expect(collectProblems([], none, [])).toEqual([]);
     });
 
+    it("data files: JSON errors grouped by path, after the scripts", () => {
+        const groups = collectProblems([script("a", { typeErrors: ["line 1: x"] })], none, undefined, [
+            { id: "d1", label: "mock/a.json", markers: [] },
+            { id: "d2", label: "mock/b.json", markers: [{ severity: "error", message: "Expected comma", line: 3, column: 5 }] },
+        ]);
+        expect(groups.map((g) => [g.id, g.label, g.file])).toEqual([["a", "a.ts", "ts"], ["d2", "mock/b.json", "json"]]);
+        expect(groups[1].problems).toEqual([{ severity: "error", kind: "json", message: "Expected comma", line: 3, column: 5 }]);
+    });
+
     it("compile error drops engine stack frames", () => {
         const [g] = collectProblems([script("a", { error: "SyntaxError: Unexpected token\n    at x (chrome-extension://abc/background.js:1:2)\n    at a.ts:3:1" })], none);
         expect(g.problems).toEqual([{ severity: "error", kind: "compile", message: "SyntaxError: Unexpected token\n    at a.ts:3:1", line: 3, column: 1 }]);

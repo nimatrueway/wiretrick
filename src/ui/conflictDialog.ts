@@ -1,5 +1,5 @@
 /**
- * Save conflict: the stored script changed (folder sync, another tab) since
+ * Save conflict: the stored script (or data file) changed (folder sync, another tab) since
  * the editor loaded it. Shows theirs ↔ yours side by side and lets the user
  * overwrite, take the stored copy, or keep editing.
  *
@@ -10,7 +10,8 @@
 
 export type ConflictChoice = "overwrite" | "theirs" | "cancel";
 
-export function resolveConflict(opts: { name: string; theirs: string | null; mine: string }): Promise<ConflictChoice> {
+/** `kind`/`language`: a data file is a "data file" shown as "json" (default: a script, "typescript") */
+export function resolveConflict(opts: { name: string; theirs: string | null; mine: string; kind?: string; language?: string }): Promise<ConflictChoice> {
     const monaco = (window as any).monaco;
     const overlay = document.createElement("div");
     overlay.className = "overlay";
@@ -27,7 +28,7 @@ export function resolveConflict(opts: { name: string; theirs: string | null; min
         </div>`;
     overlay.querySelector("h2")!.textContent = deleted ? `"${opts.name}" was deleted` : `"${opts.name}" changed since you opened it`;
     overlay.querySelector(".conflict-intro")!.textContent = deleted
-        ? "The script was deleted outside this editor (folder sync or another tab). Save recreates it with your text."
+        ? `The ${opts.kind ?? "script"} was deleted outside this editor (folder sync or another tab). Save recreates it with your text.`
         : "Left: the stored version (changed outside this editor). Right: your unsaved text.";
     const keys: Record<string, ConflictChoice> = { escape: "cancel" };
     const label = (act: ConflictChoice, text: string, key: string) => {
@@ -61,8 +62,8 @@ export function resolveConflict(opts: { name: string; theirs: string | null; min
     if (deleted || !monaco) {
         host.remove();
     } else {
-        const a = monaco.editor.createModel(opts.theirs, "typescript");
-        const b = monaco.editor.createModel(opts.mine, "typescript");
+        const a = monaco.editor.createModel(opts.theirs, opts.language ?? "typescript");
+        const b = monaco.editor.createModel(opts.mine, opts.language ?? "typescript");
         disposables.push(a, b);
         diff = monaco.editor.createDiffEditor(host, { readOnly: true, originalEditable: false, automaticLayout: true, renderSideBySide: true, minimap: { enabled: false }, scrollBeyondLastLine: false });
         diff.setModel({ original: a, modified: b });

@@ -209,6 +209,25 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 }
 #explorer-section[aria-expanded="false"] .chevron::before { transform: translateX(-1px) rotate(-45deg); }
 #explorer-section[aria-expanded="false"] + #script-list { display: none; }
+#explorer-section .section-title { flex: 1; }
+/* New Script / New JSON File / New Folder / Collapse All: shown while the explorer is hovered or focused, as in VS Code */
+.section-actions { display: flex; gap: 1px; opacity: 0; }
+#sidebar:hover .section-actions, #sidebar:focus-within .section-actions { opacity: 1; }
+.section-actions button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    background: none;
+    border: none;
+    border-radius: 4px;
+    color: var(--fg);
+    cursor: pointer;
+}
+.section-actions button:hover { background: var(--bg-hover); }
+.section-actions button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 
 /* ---- script list ---- */
 #script-list {
@@ -220,15 +239,42 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
     outline: none;
 }
 
+/* a tree row: [indent][twistie][icon][name]; --depth is the folder level (VS Code's 8px indent) */
 .script-item {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 6px;
     height: 22px;
-    padding: 0 8px 0 20px;
+    padding: 0 8px 0 calc(4px + var(--depth, 0) * 8px);
     cursor: pointer;
     user-select: none;
 }
+.twistie {
+    display: inline-flex;
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    margin-right: -6px;
+    color: var(--fg-dim);
+}
+.twistie.collapsible svg { transition: transform 0.1s; }
+.twistie.open svg { transform: rotate(90deg); }
+/* indent guides: a line under each ancestor folder's chevron */
+.indent-guide {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: calc(11px + var(--level) * 8px);
+    border-left: 1px solid transparent;
+    pointer-events: none;
+}
+#sidebar:hover .indent-guide, #script-list:focus-within .indent-guide { border-left-color: var(--border); }
+.script-item.folder .script-name { color: var(--fg); }
+/* drag-and-drop: the folder (and what's in it) or the root a drop lands in */
+.script-item.drop-target { background: var(--bg-active); }
+#script-list.drop-root { box-shadow: inset 0 0 0 1px var(--accent); }
+.script-item.creating { cursor: default; }
 .script-item:hover { background: var(--bg-hover); }
 .script-item.selected { background: var(--bg-active); }
 #script-list:focus .script-item.selected { background: var(--sel); }
@@ -244,6 +290,10 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 .file-icon.ts { color: #3178c6; }
 :root:not([data-theme="light"]) .file-icon.ts { color: #519aba; }
 .file-icon.yaml { color: #a074c4; font-size: 13px; font-weight: 400; }
+.file-icon.json { color: #b8a200; font-size: 10px; letter-spacing: 0; }
+:root:not([data-theme="light"]) .file-icon.json { color: #cbcb41; }
+.file-icon.folder { display: inline-flex; height: 16px; color: #c09553; }
+:root:not([data-theme="light"]) .file-icon.folder { color: #dcb67a; }
 .file-icon.dts { color: #3178c6; width: auto; }
 :root:not([data-theme="light"]) .file-icon.dts { color: #519aba; }
 
