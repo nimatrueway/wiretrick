@@ -12,7 +12,7 @@ export interface SymbolPart {
     /** {@link} targets (linkName parts) */
     target?: { fileName: string; textSpan: { start: number; length: number } };
 }
-/** href for a {@link X} reference, or undefined to render it as plain `X` */
+/** link destination (optionally `href "title"`) for a {@link X} reference, or undefined to render it as plain `X` */
 export type LinkResolver = (name: string, part: SymbolPart) => string | undefined;
 export interface TagInfo {
     name: string;
@@ -178,16 +178,89 @@ export function docsToMarkdown(
 
 export const signatureBlock = (sig: string): string => "```typescript\n" + formatSignature(sig) + "\n```";
 
-/**
- * [signature block, documentation + tags] — empty sections dropped.
- * `links` (markdown) goes right under the signature; `resolve` links {@link}s.
- */
-export function quickInfoToMarkdown(info: QuickInfoLike, opts: { links?: string; resolve?: LinkResolver } = {}): string[] {
+/** [signature block, documentation + tags] — empty sections dropped; `resolve` links {@link}s */
+export function quickInfoToMarkdown(info: QuickInfoLike, opts: { resolve?: LinkResolver } = {}): string[] {
     const out: string[] = [];
     const sig = partsToMarkdown(info.displayParts);
-    if (sig) out.push(signatureBlock(sig) + (opts.links ? "\n\n" + opts.links : ""));
-    else if (opts.links) out.push(opts.links);
+    if (sig) out.push(signatureBlock(sig));
     const body = docsToMarkdown(info.documentation, info.tags, undefined, opts.resolve);
     if (body) out.push(body);
     return out;
+}
+
+const isSpace = (c: string): boolean => /\s/.test(c);
+
+/**
+ * `[start, end)` in a signature → the same characters in its
+ * formatSignature() version (which only adds/removes whitespace).
+ * `start`/`end - 1` must not be whitespace.
+ */
+export function mapToFormatted(raw: string, formatted: string, start: number, end: number): [number, number] {
+    const rank = (i: number): number => {
+        let k = 0;
+        for (let j = 0; j < i; j++) if (!isSpace(raw[j])) k++;
+        return k;
+    };
+    const nth = (k: number): number => {
+        for (let j = 0; j < formatted.length; j++) if (!isSpace(formatted[j]) && k-- === 0) return j;
+        return formatted.length;
+    };
+    return [nth(rank(start)), nth(rank(end) - 1) + 1];
+}
+
+/** a run of signature text in one token color (`#rrggbb`) */
+export interface ColoredText {
+    text: string;
+    color?: string;
+}
+export interface SignatureLink {
+    start: number;
+    end: number;
+    href: string;
+    title?: string;
+}
+
+const escapeHtml = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+/**
+ * The highlighted signature as hover HTML, with `links` (offsets into the
+ * concatenated text) as anchors around its tokens. Only what Monaco's
+ * markdown sanitizer keeps: `<pre>`, `<a href>` and `<span style="color:…;">`.
+ */
+export function signatureHtml(segments: ColoredText[], links: SignatureLink[] = []): string {
+    const sorted = [...links].sort((a, b) => a.start - b.start);
+    let html = "";
+    let pos = 0;
+    let open: SignatureLink | undefined;
+    const emit = (text: string, color?: string): void => {
+        if (!text) return;
+        html += color && /\S/.test(text) ? `<span style="color:${color};">${escapeHtml(text)}</span>` : escapeHtml(text);
+    };
+    for (const seg of segments) {
+        let i = 0;
+        while (i < seg.text.length) {
+            const at = pos + i;
+            if (open && at >= open.end) {
+                html += "</a>";
+                open = undefined;
+            }
+            if (!open) {
+                const link = sorted.find((l) => l.start <= at && at < l.end);
+                if (link) {
+                    open = link;
+                    html += `<a href="${escapeHtml(link.href)}"${link.title ? ` title="${escapeHtml(link.title)}"` : ""}>`;
+                }
+            }
+            // up to the next link boundary inside this segment
+            const stops = [seg.text.length];
+            if (open) stops.push(open.end - pos);
+            else for (const l of sorted) if (l.start > at) stops.push(l.start - pos);
+            const next = Math.min(...stops.filter((n) => n > i));
+            emit(seg.text.slice(i, next), seg.color);
+            i = next;
+        }
+        pos += seg.text.length;
+    }
+    if (open) html += "</a>";
+    return `<pre>${html}</pre>`;
 }

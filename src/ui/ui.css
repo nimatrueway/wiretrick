@@ -476,6 +476,31 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
     text-decoration: underline;
 }
 
+/* TS hovers: the signature is a highlighted <pre> (monacoSetup.ts) whose
+   wt-api.d.ts types are links — styled like Monaco's own code block */
+.monaco-hover .markdown-hover > .hover-contents:has(pre) { max-width: none; }
+.monaco-hover .markdown-hover .hover-contents pre {
+    margin: 8px 0;
+    font-family: var(--wt-hover-code-font, var(--monaco-monospace-font, monospace));
+    font-size: inherit;
+    line-height: inherit;
+    white-space: pre-wrap;
+    font-feature-settings: "liga" 0, "calt" 0; /* as in the Code view */
+}
+.monaco-hover .markdown-hover .hover-contents pre:first-child { margin-top: 0; }
+.monaco-hover .markdown-hover .hover-contents pre:last-child { margin-bottom: 0; }
+.monaco-hover .markdown-hover .hover-contents:not(.code-hover-contents):not(.html-hover-contents) pre span { display: inline; margin: 0; }
+.monaco-hover .markdown-hover .hover-contents pre a { color: inherit; text-decoration: none; cursor: pointer; }
+/* a faint dotted underline says "clickable"; solid on hover */
+.monaco-hover .markdown-hover .hover-contents pre a span {
+    text-decoration: underline dotted color-mix(in srgb, currentColor 55%, transparent);
+    text-underline-offset: 3px;
+}
+.monaco-hover .markdown-hover .hover-contents pre a:hover span,
+.monaco-hover .markdown-hover .hover-contents pre a:focus-visible span { text-decoration: underline solid currentColor; }
+/* drill-down rides on hover verbosity: hide its +/− buttons */
+.monaco-editor .monaco-hover .hover-row .verbosity-actions { display: none !important; }
+
 #editor-status { flex: 1; text-align: right; color: var(--fg-dim); }
 /* the status is the script's under the read-only typings */
 #editor-toolbar:has(#typings-note:not([hidden])) #editor-status { visibility: hidden; }

@@ -1,13 +1,11 @@
 /**
  * Clickable `wt` API types in hovers: which declared types a TS signature
- * mentions, where they live in wt-api.d.ts, and the command links that
- * open them read-only in the Code view.
+ * mentions and where they live in wt-api.d.ts (so a hover can show theirs).
  */
 
 import type { SymbolPart } from "./hoverMarkdown";
 
 export const API_TYPINGS_URI = "file:///wt-api.d.ts";
-export const OPEN_API_COMMAND = "wt.openApiDeclaration";
 
 export interface Span {
     start: number;
@@ -15,21 +13,6 @@ export interface Span {
 }
 
 const TYPE_PART_KINDS = new Set(["interfaceName", "aliasName", "className", "enumName"]);
-
-/**
- * Distinct type names a signature's display parts mention, in order, with
- * their namespace qualifier (`Wiretrick.Route`, `URLPattern`).
- */
-export function referencedTypeNames(parts: SymbolPart[] | undefined): string[] {
-    const out: string[] = [];
-    (parts ?? []).forEach((p, i) => {
-        if (!TYPE_PART_KINDS.has(p.kind)) return;
-        let name = p.text;
-        for (let j = i - 1; j >= 1 && parts![j].text === "." && parts![j - 1].kind === "moduleName"; j -= 2) name = parts![j - 1].text + "." + name;
-        if (!out.includes(name)) out.push(name);
-    });
-    return out;
-}
 
 export interface NavTreeItem {
     text: string;
@@ -72,33 +55,60 @@ export function commandUri(command: string, args: unknown): string {
     return `command:${command}?${encodeURIComponent(JSON.stringify(args)).replace(/\(/g, "%28").replace(/\)/g, "%29")}`;
 }
 
-const escapeLabel = (s: string): string => s.replace(/[\\[\]*_`<>]/g, "\\$&");
-
-export interface ApiLink {
-    label: string;
-    title: string;
+/** A type name inside a signature that links to its wt-api.d.ts declaration */
+export interface TypeRef {
+    /** offsets in the signature's plain text */
+    start: number;
+    end: number;
+    /** qualified name (`Wiretrick.Route`) */
+    name: string;
+    /** the declaration's name in wt-api.d.ts */
     span: Span;
 }
 
-export function apiLinkMarkdown(link: ApiLink): string {
-    return `[${escapeLabel(link.label)}](${commandUri(OPEN_API_COMMAND, link.span)} "${link.title.replace(/"/g, "'")}")`;
-}
-
-/** "Go to definition · Types: Route, RequestCtx" — empty when there's nothing to link */
-export function apiLinksMarkdown(definition: Span | null, types: ApiLink[]): string {
-    const out: string[] = [];
-    if (definition) out.push(apiLinkMarkdown({ label: "Go to definition", title: "Open the declaration in wt-api.d.ts", span: definition }));
-    if (types.length) out.push("Types: " + types.map(apiLinkMarkdown).join(", "));
-    return out.join(" · ");
-}
-
-/** the type links for a signature (the hovered symbol's own declaration excluded) */
-export function typeLinks(parts: SymbolPart[] | undefined, index: Map<string, Span>, inTypings: boolean, definition: Span | null = null): ApiLink[] {
-    const out: ApiLink[] = [];
-    for (const name of referencedTypeNames(parts)) {
+/**
+ * Every type name in a signature that's declared in wt-api.d.ts, except the
+ * hovered declaration itself (`exclude`: its name span).
+ */
+export function typeRefs(parts: SymbolPart[] | undefined, index: Map<string, Span>, inTypings: boolean, exclude?: Span | null): TypeRef[] {
+    const out: TypeRef[] = [];
+    let offset = 0;
+    (parts ?? []).forEach((p, i) => {
+        const start = offset;
+        offset += p.text.length;
+        if (!TYPE_PART_KINDS.has(p.kind)) return;
+        let name = p.text;
+        for (let j = i - 1; j >= 1 && parts![j].text === "." && parts![j - 1].kind === "moduleName"; j -= 2) name = parts![j - 1].text + "." + name;
         const span = resolveTypeName(index, name, inTypings);
-        if (!span || (definition && span.start === definition.start) || out.some((l) => l.span.start === span.start)) continue;
-        out.push({ label: name.slice(name.lastIndexOf(".") + 1), title: `${name} — open in wt-api.d.ts`, span });
-    }
+        if (span && !(exclude && span.start === exclude.start)) out.push({ start, end: offset, name, span });
+    });
     return out;
+}
+
+/** every declaration in the navigation tree (members too), depth first */
+export function flattenNavTree(root: NavTreeItem): NavTreeItem[] {
+    const out: NavTreeItem[] = [];
+    const walk = (item: NavTreeItem): void => {
+        for (const c of item.childItems ?? []) {
+            out.push(c);
+            walk(c);
+        }
+    };
+    walk(root);
+    return out;
+}
+
+/**
+ * The name of the declaration a {@link} target (a whole declaration's span)
+ * points at — where TS quick info for it has to be asked.
+ */
+export function declarationName(items: NavTreeItem[], target: Span): Span | undefined {
+    const exact = items.find((d) => d.spans.some((s) => s.start === target.start));
+    if (exact) return exact.nameSpan ?? exact.spans[0];
+    let best: NavTreeItem | undefined;
+    for (const d of items) {
+        const s = d.spans[0];
+        if (s && s.start <= target.start && target.start < s.start + s.length && (!best || s.length < best.spans[0].length)) best = d;
+    }
+    return best?.nameSpan;
 }

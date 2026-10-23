@@ -1,16 +1,7 @@
 import { describe, it, expect } from "vitest";
-import {
-    referencedTypeNames,
-    indexTypeDeclarations,
-    resolveTypeName,
-    commandUri,
-    apiLinksMarkdown,
-    typeLinks,
-    OPEN_API_COMMAND,
-    type NavTreeItem,
-} from "../src/ui/apiLinks";
+import { indexTypeDeclarations, resolveTypeName, commandUri, typeRefs, flattenNavTree, declarationName, type NavTreeItem } from "../src/ui/apiLinks";
 import { NavHistory } from "../src/ui/navHistory";
-import { partsToMarkdown, docsToMarkdown, quickInfoToMarkdown } from "../src/ui/hoverMarkdown";
+import { partsToMarkdown, docsToMarkdown } from "../src/ui/hoverMarkdown";
 
 const t = (text: string, kind = "text") => ({ text, kind });
 const sp = (start: number, length = 1) => ({ start, length });
@@ -34,12 +25,6 @@ const tree: NavTreeItem = nav("<global>", "script", 0, [
 ]);
 
 describe("api type links", () => {
-    it("extracts distinct qualified type names from display parts (no type parameters)", () => {
-        expect(referencedTypeNames(onRequestParts)).toEqual(["Wiretrick.Route", "Wiretrick.RequestCtx", "Wiretrick.Awaitable", "Response"]);
-        expect(referencedTypeNames([t("x: "), t("URLPattern", "interfaceName")])).toEqual(["URLPattern"]);
-        expect(referencedTypeNames(undefined)).toEqual([]);
-    });
-
     it("indexes namespace members and top-level types from the navigation tree", () => {
         const index = indexTypeDeclarations(tree);
         expect([...index.keys()]).toEqual(["Wiretrick.Route", "Wiretrick.RequestCtx", "Wiretrick.Awaitable", "URLPattern"]);
@@ -55,28 +40,34 @@ describe("api type links", () => {
         expect(resolveTypeName(index, "Response", true)).toBeUndefined();
     });
 
-    it("links only wt-api.d.ts types, minus the hovered declaration itself", () => {
+    it("finds every wt-api.d.ts type in a signature, minus the hovered declaration itself", () => {
         const index = indexTypeDeclarations(tree);
-        expect(typeLinks(onRequestParts, index, false).map((l) => l.label)).toEqual(["Route", "RequestCtx", "Awaitable"]);
-        expect(typeLinks(onRequestParts, index, false, sp(100, 5)).map((l) => l.label)).toEqual(["RequestCtx", "Awaitable"]);
-        expect(typeLinks(onRequestParts, index, false)[1]).toMatchObject({ title: "Wiretrick.RequestCtx — open in wt-api.d.ts", span: sp(200, 10) });
+        const sig = partsToMarkdown(onRequestParts);
+        const refs = typeRefs(onRequestParts, index, false);
+        expect(refs.map((r) => sig.slice(r.start, r.end))).toEqual(["Route", "RequestCtx", "Awaitable", "Route"]);
+        expect(refs.map((r) => r.name)).toEqual(["Wiretrick.Route", "Wiretrick.RequestCtx", "Wiretrick.Awaitable", "Wiretrick.Route"]);
+        expect(refs[1].span).toEqual(sp(200, 10));
+        expect(typeRefs(onRequestParts, index, false, sp(100, 5)).map((r) => r.name)).toEqual(["Wiretrick.RequestCtx", "Wiretrick.Awaitable"]);
+        // inside the typings TS doesn't qualify namespace members
+        expect(typeRefs([t("x: "), t("Route", "aliasName")], index, true)).toEqual([{ start: 3, end: 8, name: "Route", span: sp(100, 5) }]);
+        expect(typeRefs([t("x: "), t("Route", "aliasName")], index, false)).toEqual([]);
+        expect(typeRefs(undefined, index, false)).toEqual([]);
     });
 
-    it("renders command links Monaco can execute", () => {
-        const uri = commandUri(OPEN_API_COMMAND, { start: 5, length: 3 });
-        expect(uri).toBe(`command:${OPEN_API_COMMAND}?${encodeURIComponent('{"start":5,"length":3}')}`);
-        expect(JSON.parse(decodeURIComponent(uri.split("?")[1]))).toEqual({ start: 5, length: 3 });
+    it("maps a {@link} target (a whole declaration) to the declaration's name", () => {
+        const items = flattenNavTree(tree);
+        expect(items.map((i) => i.text)).toEqual(["Wiretrick", "Route", "RequestCtx", "url", "Awaitable", "wt", "URLPattern", "URLPattern"]);
+        expect(declarationName(items, sp(199, 50))).toEqual(sp(200, 10)); // interface RequestCtx
+        expect(declarationName(items, sp(209, 50))).toEqual(sp(210, 3)); // RequestCtx.url
+        expect(declarationName(items, sp(205, 3))).toEqual(sp(200, 10)); // inside RequestCtx: innermost container
+        expect(declarationName(items, sp(5000, 3))).toBeUndefined();
+    });
+
+    it("builds command links Monaco can execute", () => {
+        const uri = commandUri("wt.x", { start: 5, label: "Route" });
+        expect(uri).toBe(`command:wt.x?${encodeURIComponent('{"start":5,"label":"Route"}')}`);
+        expect(JSON.parse(decodeURIComponent(uri.split("?")[1]))).toEqual({ start: 5, label: "Route" });
         expect(commandUri("x", { a: "f(1)" })).not.toMatch(/[()]/);
-        const md = apiLinksMarkdown(sp(1, 2), [{ label: "Route", title: "Wiretrick.Route — open", span: sp(100, 5) }]);
-        expect(md).toBe(
-            `[Go to definition](${commandUri(OPEN_API_COMMAND, sp(1, 2))} "Open the declaration in wt-api.d.ts") · ` +
-                `Types: [Route](${commandUri(OPEN_API_COMMAND, sp(100, 5))} "Wiretrick.Route — open")`
-        );
-        expect(apiLinksMarkdown(null, [])).toBe("");
-    });
-
-    it("puts the links right under the signature, before the docs", () => {
-        expect(quickInfoToMarkdown({ displayParts: [t("x")], documentation: [t("Doc.")] }, { links: "LINKS" })).toEqual(["```typescript\nx\n```\n\nLINKS", "Doc."]);
     });
 
     it("links {@link X} when the resolver knows its target, else keeps `X`", () => {

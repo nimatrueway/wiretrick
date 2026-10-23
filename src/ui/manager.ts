@@ -2,8 +2,8 @@
  * Manager page: script list + Monaco editor + logs + VS Code bridge.
  */
 
-import { loadMonaco, STARTER_TEMPLATE, apiTypingsText, onOpenApiDeclaration } from "./monacoSetup";
-import { API_TYPINGS_URI, type Span } from "./apiLinks";
+import { loadMonaco, STARTER_TEMPLATE, apiTypingsText } from "./monacoSetup";
+import { API_TYPINGS_URI } from "./apiLinks";
 import { NavHistory } from "./navHistory";
 import { API_REFERENCE } from "./apiReference";
 import { SHORTCUTS, filterShortcuts, formatKey, keysFor } from "./shortcuts";
@@ -822,7 +822,7 @@ function selectReal(id: string): void {
     updateOpenVscode();
 }
 
-// ---- wt-api.d.ts, read-only (hover type links, Go to Definition) ----
+// ---- wt-api.d.ts, read-only (Go to Definition) ----
 function typingsModel(): any {
     const monaco = (window as any).monaco;
     const uri = monaco.Uri.parse(API_TYPINGS_URI);
@@ -867,7 +867,7 @@ function currentPlace(): NavEntry | null {
     return target && editor ? { target, view: editor.saveViewState() } : null;
 }
 
-/** Record the current place before a jump (Go to Definition, hover links). */
+/** Record the current place before a jump (Go to Definition). */
 function pushNav(): void {
     const here = currentPlace();
     if (here) navHistory.push(here);
@@ -884,16 +884,10 @@ function revealSelection(selection?: IRange | IPosition): void {
     }
 }
 
-/** Show the declaration at `span` (offsets in wt-api.d.ts) read-only. */
-function openTypingsAt(selection?: IRange | IPosition | Span): void {
+/** Show a declaration in wt-api.d.ts read-only. */
+function openTypingsAt(selection?: IRange | IPosition): void {
     pushNav();
     showTypings();
-    if (selection && "start" in selection) {
-        const m = editor.getModel();
-        const a = m.getPositionAt(selection.start);
-        const b = m.getPositionAt(selection.start + selection.length);
-        selection = { startLineNumber: a.lineNumber, startColumn: a.column, endLineNumber: b.lineNumber, endColumn: b.column };
-    }
     revealSelection(selection);
     editor.focus();
 }
@@ -1997,7 +1991,6 @@ async function main(): Promise<void> {
         openCodeEditor: (_source, resource, selection) => openScriptAt(resource, selection),
     };
     (window as any).monaco.editor.registerEditorOpener(opener);
-    onOpenApiDeclaration((span) => openTypingsAt(span));
     navLog("editor opener registered");
     installMonacoTrace();
 

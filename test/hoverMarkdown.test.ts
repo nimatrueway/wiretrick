@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { quickInfoToMarkdown, partsToMarkdown, formatSignature, docsToMarkdown } from "../src/ui/hoverMarkdown";
+import { quickInfoToMarkdown, partsToMarkdown, formatSignature, docsToMarkdown, mapToFormatted, signatureHtml } from "../src/ui/hoverMarkdown";
 
 const t = (text: string, kind = "text") => ({ text, kind });
 
@@ -62,5 +62,49 @@ describe("hover markdown", () => {
         expect(docsToMarkdown([t("Doc.")], [{ name: "param", text: [t("x", "parameterName")] }, { name: "example", text: "f()" }], (tag) => tag.name === "param")).toBe(
             "Doc.\n\n*@example*  \n```typescript\nf()\n```"
         );
+    });
+});
+
+describe("signature html", () => {
+    it("maps offsets into the wrapped signature", () => {
+        const raw = "(method) onRequest(route: Wiretrick.Route, handler: (ctx: Wiretrick.RequestCtx) => void, extra: Wiretrick.Route): void";
+        const wrapped = formatSignature(raw);
+        expect(wrapped).toContain("\n    route: Wiretrick.Route,\n");
+        for (const name of ["Route", "RequestCtx"]) {
+            const at = raw.indexOf(name);
+            const [s, e] = mapToFormatted(raw, wrapped, at, at + name.length);
+            expect(wrapped.slice(s, e)).toBe(name);
+        }
+        const last = raw.lastIndexOf("Route");
+        const [s, e] = mapToFormatted(raw, wrapped, last, last + 5);
+        expect([wrapped.slice(s, e), s]).toEqual(["Route", wrapped.lastIndexOf("Route")]);
+    });
+
+    it("keeps token colors and wraps links around their tokens, escaping text", () => {
+        const html = signatureHtml(
+            [
+                { text: "x", color: "#001080" },
+                { text: ": ", color: "#000000" },
+                { text: "Wiretrick.Route", color: "#267f99" },
+                { text: " | " },
+                { text: "Map<a, b>", color: "#267f99" },
+            ],
+            [
+                { start: 13, end: 18, href: "command:go?1", title: 'W.R "x"' },
+                { start: 21, end: 24, href: "command:go?2" },
+            ]
+        );
+        expect(html).toBe(
+            '<pre><span style="color:#001080;">x</span><span style="color:#000000;">: </span>' +
+                '<span style="color:#267f99;">Wiretrick.</span><a href="command:go?1" title="W.R &quot;x&quot;"><span style="color:#267f99;">Route</span></a> | ' +
+                '<a href="command:go?2"><span style="color:#267f99;">Map</span></a><span style="color:#267f99;">&lt;a, b&gt;</span></pre>'
+        );
+    });
+
+    it("lets a link span several tokens and renders uncolored text plainly", () => {
+        expect(signatureHtml([{ text: "a" }, { text: "b", color: "#111111" }, { text: "c" }], [{ start: 0, end: 2, href: "h" }])).toBe(
+            '<pre><a href="h">a<span style="color:#111111;">b</span></a>c</pre>'
+        );
+        expect(signatureHtml([{ text: "a\nb" }])).toBe("<pre>a\nb</pre>");
     });
 });

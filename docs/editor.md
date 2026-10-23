@@ -21,12 +21,15 @@ searchable list of all of them):
 | F12 | Go to definition — also into the `wt` API typings |
 | Alt+← / Alt+→ (⌃- / ⌃⇧- on macOS) | Go back / forward after a definition jump or a hover type link |
 
-Hovers list the `wt` API types a signature uses (**Types:** `Route`,
-`RequestCtx`, …) plus **Go to definition** for API members; click one —
-or press F12 / ⌘-click on `wt.onRequest`, `ctx.url`, a `Wiretrick.*` type —
-to open the API typings (`wt-api.d.ts`) read-only in the Code view at that
-declaration. Hovers and F12 work there too, so you can keep digging; Go back
-returns to your script with its cursor and unsaved edits intact.
+In a hover, the `wt` API types in the signature (`Route`, `RequestCtx`, …,
+dotted underline) and `{@link}`s in its docs are clickable: a click swaps the
+same hover for that type's signature and docs, so you can drill down type by
+type without leaving your script; **← Back to …** at the top walks back up.
+To read the source, press F12 / ⌘-click on `wt.onRequest`, `ctx.url`, a
+`Wiretrick.*` type: the API typings (`wt-api.d.ts`) open read-only in the
+Code view at that declaration. Hovers and F12 work there too, so you can keep
+digging; Go back returns to your script with its cursor and unsaved edits
+intact.
 
 Explorer layout, panel visibility and word wrap are remembered. To debug the
 engine itself, open `chrome://extensions` and click the service worker /
