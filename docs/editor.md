@@ -31,6 +31,10 @@ Code view at that declaration. Hovers and F12 work there too, so you can keep
 digging; Go back returns to your script with its cursor and unsaved edits
 intact.
 
+Tooltips (in the Editor and the popup) and Code view hovers stay open while
+the pointer is over them; click one to copy its text (error messages
+included) — links in a hover keep working.
+
 Explorer layout, panel visibility and word wrap are remembered. To debug the
 engine itself, open `chrome://extensions` and click the service worker /
 background page under *Inspect views*.

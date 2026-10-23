@@ -24,6 +24,7 @@ import { STRATEGY_DOC_URL, STRATEGY_INFO, strategyUnsupported } from "../shared/
 import { dlogLevel } from "../shared/debugLog";
 import { helperInstallCommand, helperInstallShell } from "../shared/helperInstall";
 import { mountNetworkPanel } from "./network/mount";
+import { installTooltips } from "./tooltip";
 import { scriptHealth, type ScriptHealthInput } from "../shared/scriptHealth";
 import type { Uri, IPosition, IRange, IKeyboardEvent, editor as MonacoEditor } from "monaco-editor";
 import type { Script } from "../background/engine/scriptStore";
@@ -1939,6 +1940,7 @@ async function main(): Promise<void> {
         fontSize: 13,
         scrollBeyondLastLine: false,
         wordWrap: loadLayout().wordWrap ? "on" : "off",
+        hover: { sticky: true }, // reachable, so tooltip.ts can copy it on click
     });
     editor.addCommand((window as any).monaco.KeyMod.CtrlCmd | (window as any).monaco.KeyCode.KeyS, () => void saveCurrent());
     registerLayoutActions();
@@ -2406,4 +2408,5 @@ function openScriptAt(resource: Uri, selection?: IRange | IPosition): boolean {
     }
 }
 
+installTooltips();
 main();

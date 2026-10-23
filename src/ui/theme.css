@@ -77,3 +77,46 @@
     --pending: #bdbdbd;
     --bar: #3794ff;
 }
+
+/* ---- shared by every page: tooltips (tooltip.ts) and toasts (toast.ts) ---- */
+.wt-tip {
+    position: fixed;
+    z-index: 2147483000;
+    max-width: min(480px, calc(100vw - 12px));
+    max-height: calc(100vh - 12px);
+    overflow: auto;
+    padding: 4px 8px;
+    background: var(--bg-panel);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+    font: 12px/1.45 -apple-system, "Segoe UI", sans-serif;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    user-select: text;
+    cursor: copy;
+}
+.wt-tip[hidden] { display: none; }
+.monaco-hover .monaco-hover-content { cursor: copy; }
+.monaco-hover .monaco-hover-content :is(a, .verbosity-actions, .status-bar) { cursor: pointer; }
+.wt-toast {
+    position: fixed;
+    z-index: 2147483001;
+    left: 50%;
+    bottom: 36px;
+    transform: translate(-50%, 8px);
+    padding: 6px 14px;
+    background: var(--bg-panel);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 4px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+    font: 12px/1.4 -apple-system, "Segoe UI", sans-serif;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.15s, transform 0.15s, visibility 0.15s;
+}
+.wt-toast.show { opacity: 1; visibility: visible; transform: translate(-50%, 0); }

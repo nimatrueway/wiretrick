@@ -103,7 +103,7 @@ const proc = spawn(await resolveBrowser(), [
     "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check", "about:blank",
 ], { stdio: "ignore" });
 await new Promise((r) => setTimeout(r, 5000));
-setTimeout(() => { console.log("FAIL  global watchdog timeout"); process.exit(1); }, 180000);
+setTimeout(() => { console.log("FAIL  global watchdog timeout"); process.exit(1); }, 240000);
 
 let failed = 0;
 const check = (name: string, ok: boolean, extra = ""): void => {
@@ -529,11 +529,91 @@ try {
     check("TypeScript error → types indicator in the manager list", typed.badge.includes("line 3:") && !typed.badge.includes("cfg"), JSON.stringify(typed));
     check("scripts don't share a global scope; DOM globals (TextDecoder…) are typed", typed.clean, JSON.stringify(typed));
     check("TypeScript error logged at ERROR level", typed.logged.some((t: string) => t.includes("[Typed] type error: line 3")), JSON.stringify(typed.logged));
+    // custom tooltips: stay up over the tooltip, click copies, title restored after
+    // a string: tsx would wrap a named arrow in __name(), undefined in the page
+    const stubClipboard = `window.__copied = []; Object.defineProperty(navigator.clipboard, "writeText", { configurable: true, value: async (t) => void window.__copied.push(t) })`;
+    const tipState = (sel: string) => {
+        const tip = document.querySelector(".wt-tip") as HTMLElement | null;
+        const el = document.querySelector(sel);
+        const toast = document.querySelector(".wt-toast.show");
+        return {
+            shown: !!tip && !tip.hidden, text: tip?.textContent || "", title: el?.getAttribute("title") ?? null,
+            copied: (window as any).__copied as string[], toast: toast?.textContent || "",
+        };
+    };
+    const tipFlow = async (page: any, sel: string, label: string, away: { x: number; y: number }) => {
+        await page.evaluate(stubClipboard);
+        await page.mouse.move(away.x, away.y); // off any earlier tooltip's anchor
+        await page.waitForTimeout(300);
+        const title = await page.evaluate((s: string) => document.querySelector(s)?.getAttribute("title") || "", sel);
+        await page.hover(sel);
+        await page.waitForTimeout(700);
+        const hovered = await page.evaluate(tipState, sel);
+        check(`${label}: hovering a titled element shows the custom tooltip (no native title)`, !!title && hovered.shown && hovered.text === title && hovered.title === null, JSON.stringify({ title, hovered }));
+        const box = await page.locator(".wt-tip").boundingBox();
+        if (!box) return;
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 4 });
+        await page.waitForTimeout(450);
+        const onTip = await page.evaluate(tipState, sel);
+        check(`${label}: tooltip stays while the pointer is over it`, onTip.shown && onTip.text === title, JSON.stringify(onTip));
+        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+        await page.waitForTimeout(200);
+        const clicked = await page.evaluate(tipState, sel);
+        check(`${label}: clicking the tooltip copies its text + toast`, clicked.copied.at(-1) === title && clicked.toast === "Copied to clipboard", JSON.stringify(clicked));
+        return title;
+    };
+    const typedSel = '#script-list li[data-id="s_typed"] .err-ind.types';
+    const host = (await mgr.locator("#monaco-host").boundingBox())!;
+    const typedTitle = await tipFlow(mgr, typedSel, "manager", { x: host.x + host.width / 2, y: host.y + host.height - 20 });
+    await mgr.mouse.move(host.x + host.width / 2, host.y + host.height - 20, { steps: 4 });
+    await mgr.waitForTimeout(500);
+    const left = await mgr.evaluate(tipState, typedSel);
+    check("manager: leaving anchor + tooltip hides it and restores the title", !left.shown && left.title === typedTitle, JSON.stringify(left));
+    // Monaco hovers: click copies the hover text; links inside keep navigating
+    const acceptDialog = (d: any) => void d.accept().catch(() => {});
+    mgr.on("dialog", acceptDialog);
+    await mgr.evaluate(() => (document.querySelector('#script-list li[data-id="s_typed"]') as HTMLElement).click());
+    mgr.off("dialog", acceptDialog);
+    await mgr.waitForFunction(() => (window as any).monaco.editor.getEditors()[0].getValue().includes("not a number"), null, { timeout: 8000 }).catch(() => {});
+    await mgr.waitForSelector("#monaco-host .squiggly-error", { timeout: 15000 }).catch(() => {});
+    await mgr.evaluate(stubClipboard);
+    const at = (line: number, col: number) => mgr.evaluate(([l, c]: number[]) => {
+        const ed = (window as any).monaco.editor.getEditors()[0];
+        const p = ed.getScrolledVisiblePosition({ lineNumber: l, column: c });
+        const r = ed.getDomNode().getBoundingClientRect();
+        return { x: r.left + p.left + 2, y: r.top + p.top + p.height / 2 };
+    }, [line, col]);
+    const sq = await at(3, 8); // `n` in `const n: number = "not a number"`
+    await mgr.mouse.move(sq.x - 30, sq.y, { steps: 3 });
+    await mgr.mouse.move(sq.x, sq.y, { steps: 3 });
+    const hoverRow = ".monaco-hover:not(.hidden) .monaco-hover-content > :first-child";
+    await mgr.waitForFunction((s: string) => /not assignable/.test((document.querySelector(s) as HTMLElement | null)?.innerText || ""), hoverRow, { timeout: 8000 }).catch(() => {});
+    await mgr.locator(hoverRow).click({ position: { x: 4, y: 4 } }).catch(() => {});
+    await mgr.waitForTimeout(200);
+    const monacoCopy = await mgr.evaluate(() => ({ copied: (window as any).__copied as string[], toast: document.querySelector(".wt-toast.show")?.textContent || "" }));
+    check("Monaco error hover: click copies its text (not the action bar) + toast", /not assignable/.test(monacoCopy.copied.at(-1) || "") && !/Quick Fix|View Problem/.test(monacoCopy.copied.at(-1) || "") && monacoCopy.toast === "Copied to clipboard", JSON.stringify(monacoCopy));
+    await mgr.evaluate(() => (window as any).monaco.editor.getEditors()[0].focus());
+    await mgr.keyboard.press("Escape"); // the error hover may sit over line 1
+    const fn = await at(1, 6); // `onRequest`
+    await mgr.mouse.move(fn.x - 30, fn.y + 10);
+    await mgr.mouse.move(fn.x, fn.y, { steps: 3 });
+    const typeLink = ".monaco-hover:not(.hidden) .monaco-hover-content pre a";
+    await mgr.waitForSelector(typeLink, { timeout: 8000 }).catch(() => {});
+    const copiesBefore = await mgr.evaluate(() => (window as any).__copied.length);
+    await mgr.locator(typeLink).first().click().catch(() => {});
+    await mgr.waitForTimeout(700);
+    const linked = await mgr.evaluate(() => ({
+        copies: (window as any).__copied.length,
+        hover: ((document.querySelector(".monaco-hover:not(.hidden) .monaco-hover-content") as HTMLElement | null)?.innerText || "").slice(0, 120),
+    }));
+    check("Monaco hover: clicking a type link navigates, doesn't copy", linked.copies === copiesBefore && /Back to/.test(linked.hover), JSON.stringify({ copiesBefore, linked }));
+    await mgr.mouse.move(host.x + host.width / 2, host.y + host.height - 20, { steps: 4 });
     const typedPopup = await ctx.newPage();
     await typedPopup.goto(`chrome-extension://${extId}/popup.html`);
     await typedPopup.waitForSelector("#script-list li.script-item", { timeout: 8000 });
     const typedInd = await typedPopup.evaluate(() => [...document.querySelectorAll("li.script-item")].filter((li) => li.querySelector(".err-ind.types")).map((li) => li.querySelector(".script-name")?.textContent));
     check("popup shows the TypeScript error indicator", typedInd.includes("Typed"), JSON.stringify(typedInd));
+    await tipFlow(typedPopup, "li.script-item .err-ind.types", "popup", { x: 600, y: 400 });
     await typedPopup.close();
     // save conflict: the stored copy changes while the editor holds unsaved edits
     await mgr.bringToFront();
