@@ -1,6 +1,6 @@
 /** "onResponseBody never ran": reason selection, throttle, and the tap registry. */
 import { describe, it, expect, beforeEach } from "vitest";
-import { makeMissedThrottle, missedReason, missedWhat, routeProblem, MISSED_REASONS, type MissedCase } from "../src/shared/missedTap";
+import { frameHasHook, makeMissedThrottle, missedReason, missedWhat, routeProblem, MISSED_REASONS, type MissedCase } from "../src/shared/missedTap";
 import { outcomeKind, missedLine } from "../src/shared/netTypes";
 import { __resetTaps, bodyObservedSince, log, logObserved } from "../src/background/engine/logs";
 
@@ -20,6 +20,11 @@ describe("missedReason", () => {
         expect(reason({ strategy: "page", type: "xmlhttprequest" })).toBeNull();
         expect(reason({ strategy: "page", type: "script" })).toBe(MISSED_REASONS.hookNotFetch);
         expect(reason({ strategy: "page" })).toBe(MISSED_REASONS.hookNotFetch);
+    });
+
+    it("hook: fetch/XHR in a tab without the page hook (opened before Wiretrick started)", () => {
+        expect(reason({ strategy: "page", type: "xmlhttprequest", hookLoaded: false })).toBe(MISSED_REASONS.hookNotLoaded);
+        expect(reason({ strategy: "page", type: "xmlhttprequest", hookLoaded: true })).toBeNull();
     });
 
     it("process with the helper down", () => {
@@ -124,5 +129,19 @@ describe("body tap registry", () => {
         expect(bodyObservedSince("s1", "https://a.test/m", t0)).toBe(false);
         log(3, "[S] onResponseBody threw: boom", "error", "s1");
         expect(bodyObservedSince("s1", "https://a.test/m", t0)).toBe(true);
+    });
+});
+
+describe("frameHasHook", () => {
+    const tabs = (reply: (cb: (r: any) => void) => void) => ({ sendMessage: (_t: number, _m: any, _o: any, cb: (r: any) => void) => reply(cb) });
+    it("a frame whose bridge answers has the hook", async () => {
+        expect(await frameHasHook(tabs((cb) => cb({ ok: true })), () => undefined, 1, 0)).toBe(true);
+    });
+    it("no receiver (lastError) or a throwing sendMessage: no hook", async () => {
+        expect(await frameHasHook(tabs((cb) => cb(undefined)), () => ({ message: "Receiving end does not exist." }), 1, 0)).toBe(false);
+        expect(await frameHasHook({ sendMessage: () => { throw new Error("x"); } }, () => undefined, 1, 0)).toBe(false);
+    });
+    it("no reply in time (a busy page) doesn't count as missing", async () => {
+        expect(await frameHasHook(tabs(() => {}), () => undefined, 1, 0, 5)).toBe(true);
     });
 });

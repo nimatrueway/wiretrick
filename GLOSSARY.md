@@ -147,7 +147,7 @@ A request some script observed or modified; the Network view's filter for them.
 _Avoid_: tapped / modified, intercepted
 
 **Missed**:
-A body handler's route matched a request, but the handler never ran on it.
+A body handler's (or a `page` onRequest handler's) route matched a request, but the handler never ran on it.
 _Avoid_: skipped, failed, not intercepted
 
 **Missed warning**:

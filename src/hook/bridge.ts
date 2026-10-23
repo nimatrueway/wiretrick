@@ -193,7 +193,12 @@ import { makePageShim, domHandlersFor, scheduleDocument, type PageDocumentHandle
 
     let hookBroken = false;
 
-    chrome.runtime.onMessage.addListener((msg: any) => {
+    chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (r: any) => void) => {
+        // the background asks whether this frame has a live hook (see pipeline.ts checkMissed)
+        if (msg && msg.type === "hookPing") {
+            sendResponse({ ok: true });
+            return false;
+        }
         guard(() => {
             if (msg && msg.type === "hookCspBlocked") {
                 hookBroken = true;

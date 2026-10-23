@@ -273,7 +273,7 @@ To keep the URL on Chromium, use `helper` or `debugger` for that handler.
 A body handler that silently does nothing is hard to spot, so after a
 request completes (~1.5 s later) Wiretrick checks every enabled script's
 `onResponseBody` and `replaceResponse` handlers whose route covers the
-request. If none of the script's body handlers ran for it, a WARN line
+request (and `onRequest` handlers on `page`, for page fetch/XHR). If none of the script's body handlers ran for it, a WARN line
 attributed to the script is logged, e.g.
 
 ```text
@@ -284,6 +284,9 @@ The reason is picked from the situation:
 
 - the handler is on `page` and the request isn't page fetch/XHR → set
   `strategy: "debugger"` or `"helper"` on the route;
+- the handler is on `page` and the tab has no page hook (it was open
+  before Wiretrick started or updated, so its content scripts never
+  loaded) → reload the tab;
 - on `helper` and the helper isn't running → start/install the helper;
 - served from the browser cache → reload with the cache disabled (hard
   reload);
@@ -294,7 +297,7 @@ The reason is picked from the situation:
 Skipped: handlers on `rules` (the browser applies them; their body
 handlers are errors at load), handlers that can never run where they are
 (already warned at load, see [above](#when-a-strategy-isnt-available)), page fetch/XHR on
-`page` (it reads bodies lazily — the page may simply never read one),
+`page` in a tab with the hook (it reads bodies lazily — the page may simply never read one),
 websocket, ping/beacon, CSP reports, the extension's own requests, and
 requests a script already ended in `onRequest` (block/redirect/replaceResponse).
 Each script + URL warns at most once a minute, and at most 20 warnings a

@@ -19,10 +19,13 @@ export interface MissedCase {
     helperActive: boolean;
     /** the debugger strategy's own "was NOT intercepted" warning already covers this load */
     cdpWarned: boolean;
+    /** page strategy: false when the request's frame has no page hook (the tab was open before Wiretrick started) */
+    hookLoaded?: boolean;
 }
 
 export const MISSED_REASONS = {
     hookNotFetch: `the "page" strategy only sees the page's own fetch/XHR — set strategy: "debugger" or "helper" on the route for other loads`,
+    hookNotLoaded: `the page hook isn't loaded in this tab (it was open before Wiretrick started or updated) — reload the tab`,
     cache: "served from the browser cache — reload with cache disabled / hard reload",
     helperDown: "the local helper isn't running",
     fallback: "no strategy observed it — check the Log view at debug level",
@@ -40,8 +43,10 @@ export function missedReason(c: MissedCase): string | null {
     if (strategyUnsupported(c.strategy, c)) return null;
     if (c.strategy === "extension" && !c.firefox) return null;
     if (c.strategy === "page") {
+        if (c.type !== "xmlhttprequest") return MISSED_REASONS.hookNotFetch;
+        if (c.hookLoaded === false) return MISSED_REASONS.hookNotLoaded;
         // the hook reads fetch/XHR bodies lazily — the page may simply never read it
-        return c.type === "xmlhttprequest" ? null : MISSED_REASONS.hookNotFetch;
+        return null;
     }
     if (c.strategy === "helper" && !c.helperActive) return MISSED_REASONS.helperDown;
     if (c.fromCache) return MISSED_REASONS.cache;
@@ -95,4 +100,24 @@ export function makeMissedThrottle(perKeyMs = 60000, perMinute = 20): (key: stri
         }
         return true;
     };
+}
+
+/**
+ * Does the frame answer the bridge's "hookPing"? A tab loaded before
+ * Wiretrick started has no bridge (no receiver). No reply in time (a busy
+ * page) counts as loaded — only a definite "no receiver" warns.
+ */
+export function frameHasHook(tabs: { sendMessage: (...a: any[]) => void }, lastError: () => unknown, tabId: number, frameId = 0, timeoutMs = 1000): Promise<boolean> {
+    return new Promise((resolve) => {
+        const timer = setTimeout(() => resolve(true), timeoutMs);
+        try {
+            tabs.sendMessage(tabId, { type: "hookPing" }, { frameId }, (resp: any) => {
+                clearTimeout(timer);
+                resolve(!lastError() && !!resp?.ok);
+            });
+        } catch {
+            clearTimeout(timer);
+            resolve(false);
+        }
+    });
 }

@@ -22,7 +22,7 @@ import { isThenable, toRunnableJs } from "../../shared/compile";
 import "../../shared/transpile";
 import { log, getScriptErrors, getScriptTypeErrors, getScriptRuleErrors, getScriptRouteWarnings, setScriptRouteWarnings, bodyObservedSince } from "./logs";
 import { missedLine } from "../../shared/netTypes";
-import { makeMissedThrottle, missedReason, missedWhat, routeProblem, MISSED_SKIP_TYPES } from "../../shared/missedTap";
+import { frameHasHook as pingHook, makeMissedThrottle, missedReason, missedWhat, routeProblem, MISSED_SKIP_TYPES } from "../../shared/missedTap";
 import { resolveParamValues } from "../../shared/scriptDef";
 import type { ShippedLib } from "../../shared/scriptImports";
 import { effectiveStrategy, hookCanSee, routeLabel, routeMatches, setDefaultStrategy, type RouteMeta, type Strategy } from "../../shared/route";
@@ -133,6 +133,7 @@ export function createPipeline(
     /** `${tabId}|${url}` loads the debugger strategy warning below already reported */
     const cdpWarned = new Set<string>();
     const missedThrottle = makeMissedThrottle();
+    const frameHasHook = (tabId: number, frameId?: number) => pingHook(chrome.tabs, () => chrome.runtime.lastError, tabId, frameId);
     const extOrigin = chrome.runtime.getURL("");
     const watchedFor = (url: string, method?: string, type?: string) => bodyWatch.filter((w) => routeMatches(w.route, url, method, type));
     const ownRequest = (d: any) => d.url.startsWith(extOrigin) || (d.initiator || d.originUrl || "").startsWith(extOrigin.replace(/\/$/, ""));
@@ -152,11 +153,13 @@ export function createPipeline(
         if (start === undefined) return;
         watchedStarts.delete(d.requestId);
         if (ownRequest(d)) return;
-        const routes = watchedFor(d.url, (d as any).method, d.type);
+        // page onRequest routes: only the page's fetch/XHR (a matching document load isn't a miss)
+        const routes = watchedFor(d.url, (d as any).method, d.type).filter((w) => w.route.kind !== "onRequest" || d.type === "xmlhttprequest");
         if (!routes.length) return;
-        setTimeout(() => {
+        setTimeout(async () => {
             // the hook took it: the page may simply never read the body
             if (pageStrategy.isClaimed(d.url)) return;
+            const hookLoaded = d.type === "xmlhttprequest" && routes.some((w) => w.strategy === "page") ? await frameHasHook(d.tabId, d.frameId) : undefined;
             const done = new Set<string>();
             for (const w of routes) {
                 if (done.has(w.id)) continue;
@@ -170,6 +173,7 @@ export function createPipeline(
                     fromCache: !!d.fromCache,
                     helperActive: helperActive(),
                     cdpWarned: cdpWarned.has(`${d.tabId}|${d.url}`),
+                    hookLoaded,
                 });
                 if (!reason || !missedThrottle(`${w.id}|${d.url}`)) continue;
                 log(d.tabId, missedLine(w.name, routeLabel(w.route), d.url, missedWhat(d.type), reason), "warn", w.id, "missed", d.url);
@@ -234,7 +238,9 @@ export function createPipeline(
         for (const s of scripts) {
             if (!s.enabled || !s.meta.active) continue;
             for (const r of s.meta.routes || []) {
-                if (r.kind === "onResponseBody" || r.kind === "replaceResponse") next.push({ id: s.id, name: s.meta.name, route: r, strategy: effectiveStrategy(r) });
+                const strategy = effectiveStrategy(r);
+                // onRequest: only "page" routes — the hook claims every request it handles, so an unclaimed one in a hook-less tab was missed
+                if (r.kind === "onResponseBody" || r.kind === "replaceResponse" || (r.kind === "onRequest" && strategy === "page")) next.push({ id: s.id, name: s.meta.name, route: r, strategy });
             }
         }
         bodyWatch = next;
