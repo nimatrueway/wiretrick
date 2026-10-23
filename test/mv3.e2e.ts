@@ -221,8 +221,16 @@ try {
     });
     await mgr.waitForTimeout(400);
     await mgr.evaluate(() => (window as any).monaco.editor.getEditors()[0].trigger("t", "type", { text: " " }));
+    check("Save button shows unsaved after an edit", (await mgr.evaluate(() => document.querySelector("#btn-save")?.getAttribute("data-state"))) === "unsaved");
+    await mgr.evaluate(() => {
+        const btn = document.querySelector("#btn-save")!;
+        const seen: string[] = ((window as any).__saveStates = []);
+        new MutationObserver(() => seen.push(btn.getAttribute("data-state") || "")).observe(btn, { attributes: true, attributeFilter: ["data-state"] });
+    });
     await mgr.locator("#btn-save").click();
-    await mgr.waitForFunction(() => (document.querySelector("#editor-status")?.textContent ?? "").includes("saved"), null, { timeout: 20000 });
+    await mgr.waitForFunction(() => document.querySelector("#btn-save")?.getAttribute("data-state") === "saved", null, { timeout: 20000 });
+    const saveStates = await mgr.evaluate(() => ({ seen: (window as any).__saveStates, status: document.querySelector("#editor-status")?.textContent }));
+    check("Save button goes saving → saved; no separate saved text", saveStates.seen.includes("saving") && saveStates.seen.at(-1) === "saved" && !saveStates.status, JSON.stringify(saveStates));
     const sawAnalyze = await mgr.waitForFunction(() =>
         [...document.querySelectorAll("#log-entries .log-line")].some((l) => (l.textContent || "").includes("[sandbox] analyze")), null, { timeout: 8000 }
     ).then(() => true, () => false);
@@ -771,6 +779,12 @@ try {
     check("MV3 folder sync: OPFS folder adopted by the SW", adopted === true);
     const fst = await fPage.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "folderSyncStatus" }, r)));
     check("MV3 folder sync: status reports active", !!(fst as any)?.active, JSON.stringify(fst));
+    await fPage.waitForFunction(() => document.querySelector("#btn-folder-sync")?.getAttribute("data-state") !== "off", null, { timeout: 5000 }).catch(() => {});
+    await fPage.evaluate(() => {
+        const btn = document.querySelector("#btn-folder-sync")!;
+        const seen: string[] = ((window as any).__syncStates = [btn.getAttribute("data-state") || ""]);
+        new MutationObserver(() => seen.push(btn.getAttribute("data-state") || "")).observe(btn, { attributes: true, attributeFilter: ["data-state"] });
+    });
 
     const opfsText = (name: string): Promise<string | null> =>
         fPage.evaluate(async (n: string) => {
@@ -807,6 +821,8 @@ try {
     await fPage.waitForTimeout(2500);
     const p1 = await fPage.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "getScriptParams", scriptId: "s_sync" }, r)));
     check("MV3 folder sync: external settings.yaml edit applied", (p1 as any)?.values?.token === "xyz", JSON.stringify(p1));
+    const syncStates = await fPage.evaluate(() => (window as any).__syncStates as string[]);
+    check("folder sync button: connected, then shows sending and receiving", syncStates[0] !== "off" && syncStates.includes("sending") && syncStates.includes("receiving") && syncStates.at(-1) === "connected", JSON.stringify(syncStates));
 
     // whole-file sync: a comment-only disk edit reaches the manager's open editor verbatim
     await fPage.locator(".script-item", { hasText: "settings.yaml" }).click();

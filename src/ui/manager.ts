@@ -46,16 +46,18 @@ let typingsShown = false;
 function setDirty(v: boolean): void {
     dirty = v;
     if (selectedId) document.querySelector(`#script-list li[data-id="${CSS.escape(selectedId)}"]`)?.classList.toggle("dirty", v);
+    setSaveState(v ? "unsaved" : "saved");
+}
+
+/** The Save button is the save indicator: ● unsaved, spinner while saving, ✓ saved. */
+function setSaveState(state: "saved" | "unsaved" | "saving"): void {
     const btn = $("#btn-save");
-    if (v && !typingsShown) {
-        btn.removeAttribute("disabled");
-        btn.classList.remove("dim");
-        btn.textContent = "Save";
-    } else {
-        btn.setAttribute("disabled", "");
-        btn.classList.add("dim");
-        btn.textContent = "Save";
-    }
+    btn.dataset.state = state;
+    const can = state === "unsaved" && !typingsShown;
+    btn.toggleAttribute("disabled", !can);
+    btn.classList.toggle("dim", !can);
+    btn.querySelector(".save-label")!.textContent = state === "saved" ? "Saved" : state === "saving" ? "Saving…" : "Save";
+    btn.title = state === "saved" ? "Saved — no unsaved changes" : state === "saving" ? "Saving…" : "Unsaved changes — Save (⌘S)";
 }
 let applyingExternal = false;
 
@@ -76,7 +78,7 @@ function updateDirty(): void {
         undefined
     );
     setDirty(dirtyNow);
-    status(dirtyNow ? "unsaved…" : "saved ✓", dirtyNow ? "dirty" : "");
+    status("");
 }
 
 // ---- elements ----
@@ -221,20 +223,22 @@ async function selectSettings(): Promise<void> {
     if (back) updateDirty();
     else {
         setDirty(false);
-        status("saved ✓");
+        status("");
     }
     updateOpenVscode();
 }
 
 async function saveSettings(): Promise<void> {
+    setSaveState("saving");
     const res = await send({ type: "applySettingsYaml", text: editor.getValue() });
     if (res && res.error) {
+        setSaveState("unsaved");
         status(`settings.yaml: ${res.error}`, "error");
         return;
     }
     await loadSettingsModel(true); // re-canonicalize (restores commented defaults)
     setDirty(false);
-    status("saved ✓");
+    status("");
     await refresh();
 }
 
@@ -769,8 +773,8 @@ function setEditorValue(code: string): void {
     } else if (!typingsShown) editor.setValue(code);
     editor.clearHistory?.();
     applyingExternal = false;
-    dirty = false;
-    status("saved ✓");
+    setDirty(false);
+    status("");
 }
 
 /** Enable ↗ VS Code only while folder sync is active and a script is selected. */
@@ -778,6 +782,10 @@ function updateOpenVscode(): void {
     const b = $("#btn-open-vscode") as HTMLButtonElement;
     const off = ((window as any).__resLaunchMode || "vscode") === "off";
     b.style.display = off ? "none" : "";
+    const app = (window as any).__resLaunchMode === "vscode-insiders" ? "VS Code Insiders" : "VS Code";
+    b.classList.toggle("insiders", app !== "VS Code");
+    b.title = `Open this script's synced file in ${app} (requires a synced folder)`;
+    b.setAttribute("aria-label", `Open in ${app}`);
     if (!off && (window as any).__resSyncActive && selectedId && !typingsShown) b.removeAttribute("disabled");
     else b.setAttribute("disabled", "");
 }
@@ -803,8 +811,8 @@ function selectReal(id: string): void {
     if (m && editor.getModel() !== m) {
         captureViewState();
         editor.setModel(m);
-        dirty = false;
-        status("saved ✓");
+        setDirty(false);
+        status("");
         restoreViewState(m);
     } else {
         setEditorValue(script.code);
@@ -941,11 +949,15 @@ async function saveCurrentNow(): Promise<void> {
     const id = selectedId;
     const m = models.get(id);
     const base = m ? baselines.get(m.uri.toString()) : undefined;
+    setSaveState("saving");
     let result = await send({ type: "saveScript", id, code, name, base });
     if (result?.conflict) {
         const deleted = result.conflict === "deleted";
         const choice = await resolveConflict({ name, theirs: deleted ? null : result.code, mine: code });
-        if (choice === "cancel") return;
+        if (choice === "cancel") {
+            updateDirty();
+            return;
+        }
         if (choice === "theirs") {
             if (!deleted && m) {
                 applyingExternal = true;
@@ -961,12 +973,14 @@ async function saveCurrentNow(): Promise<void> {
         result = await send({ type: "saveScript", id, code, name });
     }
     if (result && result.error) {
-        status("script error — see log", "error");
+        status(`save failed: ${result.error}`, "error");
     } else {
-        status("saved ✓");
+        status("");
         if (m) setBaseline(m, code); // the stored text is now the baseline
     }
-    setDirty(false);
+    // edits typed while saving keep the file unsaved
+    if (editor.getModel() === m) updateDirty();
+    else setDirty(false);
     await refresh();
     renderList();
 }
@@ -1037,6 +1051,7 @@ function connectLogs(): void {
             })();
         }
         if (msg.type === "sync") {
+            renderFolderSync(msg.status);
             (window as any).__resSyncActive = msg.status.active;
             fsBridge.setCachedActive(msg.status.active);
             if (msg.status.active) {
@@ -1714,6 +1729,35 @@ function renderSamples(): void {
     filterHelpList("samples");
 }
 
+// ---- toolbar folder sync button: off / disconnected / connected / sending / receiving ----
+let folderNeedsGrant = false; // a saved folder waits for a permission click
+function renderFolderSync(st: { active: boolean; path?: string; paused?: boolean; activity?: string }): void {
+    const btn = $("#btn-folder-sync");
+    if (st.active) folderNeedsGrant = false;
+    else if (st.paused) folderNeedsGrant = true;
+    const state = st.active ? (st.activity === "sending" || st.activity === "receiving" ? st.activity : "connected") : folderNeedsGrant ? "disconnected" : "off";
+    btn.dataset.state = state;
+    const where = st.path ? ` "${st.path}"` : "";
+    const text: Record<string, string> = {
+        off: "Folder sync is off — click to set it up",
+        disconnected: "Folder sync disconnected — click to reconnect",
+        connected: `Synced with${where || " the folder"} — click for folder sync settings`,
+        sending: `Writing changes to${where || " the folder"}…`,
+        receiving: `Reading changes from${where || " the folder"}…`,
+    };
+    btn.title = text[state];
+    btn.setAttribute("aria-label", `Folder sync: ${state}`);
+}
+
+async function folderSyncButtonClicked(): Promise<void> {
+    if ($("#btn-folder-sync").dataset.state === "disconnected" && (await fsBridge.reconnectClicked())) {
+        await markFolderSynced();
+        status("synced folder reconnected ✓");
+        return;
+    }
+    openSettings("settings-sec-folder");
+}
+
 // ---- dedicated scripts folder: pick once, edits sync both ways ----
 async function markFolderSynced(): Promise<void> {
     const btn = $("#btn-vscode");
@@ -1723,6 +1767,7 @@ async function markFolderSynced(): Promise<void> {
     fsBridge.setCachedActive(true);
     updateOpenVscode();
     const st = await fsBridge.queryStatus();
+    renderFolderSync(st);
     $("#folder-state").textContent = st.path || "(syncing)";
     await refreshSyncPath();
 }
@@ -1755,6 +1800,7 @@ async function autoReconnectFolder(): Promise<void> {
         // one click re-grants (Chrome drops FS grants between restarts)
         btn.textContent = "Scripts Folder… (reconnect)";
         $("#folder-state").textContent = "reconnect needed";
+        renderFolderSync({ active: false, paused: true });
         const reconnect = async (): Promise<void> => {
             btn.removeEventListener("click", reconnect);
             if (fsBridge.isSyncing()) return;
@@ -2030,6 +2076,8 @@ async function main(): Promise<void> {
                 btn.classList.remove("active");
                 btn.textContent = "Scripts Folder…";
                 $("#folder-state").textContent = "";
+                folderNeedsGrant = false;
+                renderFolderSync({ active: false });
                 updateOpenVscode();
                 return;
             }
@@ -2047,6 +2095,12 @@ async function main(): Promise<void> {
     } else {
         btn.setAttribute("disabled", "");
         btn.title = "File System Access API unavailable (Firefox) — use Import/Export";
+    }
+    const syncBtn = $("#btn-folder-sync");
+    if (fsBridge.isSupported()) syncBtn.addEventListener("click", () => void folderSyncButtonClicked());
+    else {
+        syncBtn.setAttribute("disabled", "");
+        syncBtn.title = "Folder sync needs the File System Access API (not in Firefox) — use Import/Export";
     }
 
     // import / export

@@ -72,7 +72,7 @@ try {
     const set = (v: string) => mgr.evaluate((v: string) => (window as any).monaco.editor.getEditors()[0].setValue(v), v);
     await set(t.replace("level: trace", "level: debug").replace("# enabled: true", "enabled: false"));
     await mgr.locator("#btn-save").click();
-    await mgr.waitForFunction(() => (document.querySelector("#editor-status")?.textContent ?? "").includes("saved"));
+    await mgr.waitForFunction(() => document.querySelector("#btn-save")?.getAttribute("data-state") === "saved");
     let st = await params();
     check("YAML edit applied to params", st.resParams?.s_dbg?.level === "debug");
     check("YAML edit toggled script off", st.resScripts?.s_dbg?.enabled === false, JSON.stringify(st.resScripts?.s_dbg && { enabled: st.resScripts.s_dbg.enabled }));
@@ -97,7 +97,7 @@ try {
     // block scalar content must stay indented — replace whole lines
     await set(t.replace("      line one\n", "      first\n      second\n"));
     await mgr.locator("#btn-save").click();
-    await mgr.waitForFunction(() => (document.querySelector("#editor-status")?.textContent ?? "").includes("saved"));
+    await mgr.waitForFunction(() => document.querySelector("#btn-save")?.getAttribute("data-state") === "saved");
     check("YAML block scalar edit applied", (await params()).resParams?.s_note?.body === 'first\nsecond\nline "two"');
 
     // ---- VS Code shortcuts: Cmd+/ toggles a comment, Cmd+P quick-opens settings.yaml ----
@@ -113,7 +113,7 @@ try {
     const line1Restored = await mgr.evaluate(() => (window as any).monaco.editor.getEditors()[0].getModel().getLineContent(1));
     check("Cmd+/ again uncomments", line1Restored === line1Before, line1Restored);
     await mgr.keyboard.press("Meta+s");
-    await mgr.waitForFunction(() => (document.querySelector("#editor-status")?.textContent ?? "").includes("saved"));
+    await mgr.waitForFunction(() => document.querySelector("#btn-save")?.getAttribute("data-state") === "saved");
 
     await mgr.keyboard.press("Meta+p");
     await mgr.waitForSelector("#quick-open:not(.hidden)");

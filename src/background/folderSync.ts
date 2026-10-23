@@ -63,8 +63,27 @@ function serial<T>(fn: () => Promise<T>): Promise<T> {
     return p;
 }
 
+// What the folder link is doing right now, for the Editor's sync button.
+export type SyncActivity = "idle" | "sending" | "receiving";
+let activity: SyncActivity = "idle";
+let activityTimer: ReturnType<typeof setTimeout> | null = null;
+let paused = false;
+
 function broadcastStatus(): void {
-    broadcastToUi({ type: "sync", status: { active: !!dirHandle, path: displayPath } } as any);
+    broadcastToUi({ type: "sync", status: getStatus() } as any);
+}
+
+/** Flag a write to (sending) or a pull from (receiving) the folder; falls back to idle shortly after. */
+function signal(kind: Exclude<SyncActivity, "idle">): void {
+    if (activityTimer) clearTimeout(activityTimer);
+    activityTimer = setTimeout(() => {
+        activityTimer = null;
+        activity = "idle";
+        broadcastStatus();
+    }, 800);
+    if (activity === kind) return;
+    activity = kind;
+    broadcastStatus();
 }
 
 function describeHandle(handle: any): Promise<string> {
@@ -174,6 +193,7 @@ async function writeFile(fileName: string, content: string): Promise<boolean> {
         const w = await fh.createWritable();
         await w.write(content);
         await w.close();
+        signal("sending");
     } catch (e: any) {
         dlogLevel("sync", "warn", `Folder sync: writing "${fileName}" failed: ${e?.message || e}`);
         return false;
@@ -296,6 +316,7 @@ async function applyEvents(events: ReturnType<typeof computeEvents>): Promise<vo
     let touched = false;
     const announce = (file?: string) => {
         touched = true;
+        signal("receiving");
         broadcastToUi({ type: "scriptsChanged", source: "folder", file } as any);
     };
 
@@ -701,6 +722,7 @@ async function pollSettings(): Promise<void> {
         dlogLevel("sync", "warn", `Folder sync: ${SETTINGS_FILE} has an error and was not applied: ${error}`);
         return;
     }
+    signal("receiving");
     dlogLevel("sync", "info", `Folder sync: ${SETTINGS_FILE} changed on disk — reloaded the whole file`);
     await exportSettings();
 }
@@ -742,6 +764,7 @@ async function pollNow(): Promise<void> {
 
 /** stop watching but keep the saved handle so the manager can re-grant */
 function pause(reason: string): void {
+    paused = true;
     if (timer) clearInterval(timer);
     timer = null;
     dirHandle = null;
@@ -815,6 +838,7 @@ async function start(opts: { fresh?: boolean }): Promise<boolean> {
     if (!handle) return false;
     const resumingSame = !opts.fresh && dirHandle !== null && timer !== null;
     dirHandle = handle;
+    paused = false;
     displayPath = await describeHandle(handle);
     await applyPendingMigration();
     lastPollError = "";
@@ -900,6 +924,7 @@ async function stopNow(): Promise<void> {
     if (reconcileTimer) clearTimeout(reconcileTimer);
     reconcileTimer = null;
     dirHandle = null;
+    paused = false;
     displayPath = "";
     settingsSig = null;
     known = new Map();
@@ -914,8 +939,8 @@ async function stopNow(): Promise<void> {
     broadcastStatus();
 }
 
-export function getStatus(): { active: boolean; path: string } {
-    return { active: !!dirHandle, path: displayPath };
+export function getStatus(): { active: boolean; path: string; paused: boolean; activity: SyncActivity } {
+    return { active: !!dirHandle, path: displayPath, paused: !dirHandle && paused, activity: dirHandle ? activity : "idle" };
 }
 
 /** On background start: reconnect silently if the grant is still valid. */
@@ -926,6 +951,7 @@ export async function initFromStorage(): Promise<void> {
         const perm = await handle.queryPermission({ mode: "readwrite" });
         if (perm !== "granted") {
             dlogLevel("sync", "warn", `Folder sync paused: the browser needs permission for "${handle.name}" again — open the Editor and click the folder button to re-grant`);
+            paused = true;
             broadcastStatus();
             return;
         }

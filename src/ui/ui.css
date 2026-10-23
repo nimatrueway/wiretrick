@@ -482,16 +482,70 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 #editor-status.dirty { color: var(--warn); }
 #editor-status.error { color: var(--err); }
 
+/* the Save button is the save indicator: ● unsaved, spinner while saving, ✓ saved */
 #btn-save {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 76px;
+    justify-content: center;
     background: var(--accent);
-    border: none;
+    border: 1px solid var(--accent);
     color: #fff;
     border-radius: 3px;
-    padding: 5px 14px;
+    padding: 4px 12px;
     cursor: pointer;
     font-size: 12px;
 }
-#btn-save:disabled { opacity: 0.4; cursor: default; }
+#btn-save:disabled { cursor: default; }
+#btn-save .save-ind { width: 8px; height: 8px; border-radius: 50%; box-sizing: border-box; flex: none; }
+#btn-save[data-state="unsaved"] .save-ind { background: currentColor; }
+#btn-save[data-state="unsaved"]:disabled { opacity: 0.4; }
+#btn-save[data-state="saving"] .save-ind { border: 1.5px solid rgba(255, 255, 255, 0.35); border-top-color: #fff; animation: wt-spin 0.7s linear infinite; }
+#btn-save[data-state="saved"] { background: transparent; border-color: var(--border); color: var(--fg-dim); }
+#btn-save[data-state="saved"] .save-ind { width: auto; height: auto; border-radius: 0; color: var(--ok, #3fb950); }
+#btn-save[data-state="saved"] .save-ind::before { content: "✓"; }
+@keyframes wt-spin { to { transform: rotate(360deg); } }
+
+/* folder sync: folder icon + a badge for the link state */
+#btn-folder-sync {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 4px 8px;
+    cursor: pointer;
+    color: var(--fg-dim);
+}
+#btn-folder-sync:hover:not(:disabled) { border-color: var(--accent); background: var(--bg-hover); }
+#btn-folder-sync:disabled { opacity: 0.4; cursor: default; }
+#btn-folder-sync svg { display: block; }
+#btn-folder-sync .sync-ind {
+    position: absolute;
+    right: 2px;
+    bottom: 1px;
+    min-width: 9px;
+    height: 9px;
+    border-radius: 5px;
+    font-size: 8px;
+    line-height: 9px;
+    font-weight: 700;
+    text-align: center;
+    color: #fff;
+}
+#btn-folder-sync[data-state="off"] .sync-ind { display: none; }
+#btn-folder-sync:not([data-state="off"]) { color: var(--fg); }
+#btn-folder-sync[data-state="connected"] .sync-ind { background: var(--ok, #3fb950); min-width: 7px; height: 7px; right: 3px; bottom: 2px; }
+#btn-folder-sync[data-state="disconnected"] .sync-ind { background: var(--warn); }
+#btn-folder-sync[data-state="disconnected"] .sync-ind::before { content: "!"; }
+#btn-folder-sync[data-state="sending"] .sync-ind,
+#btn-folder-sync[data-state="receiving"] .sync-ind { background: var(--accent); animation: wt-pulse 0.8s ease-in-out infinite alternate; }
+#btn-folder-sync[data-state="sending"] .sync-ind::before { content: "↑"; }
+#btn-folder-sync[data-state="receiving"] .sync-ind::before { content: "↓"; }
+@keyframes wt-pulse { from { opacity: 1; } to { opacity: 0.45; } }
 
 #btn-open-vscode {
     display: inline-flex;
@@ -507,6 +561,7 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 #btn-open-vscode:disabled { opacity: 0.4; cursor: default; }
 #btn-open-vscode:disabled:hover { border-color: var(--border); background: var(--bg); }
 #btn-open-vscode svg { display: block; }
+#btn-open-vscode.insiders path { fill: #24bfa5; }
 
 #monaco-host {
     flex: 1;

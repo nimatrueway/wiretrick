@@ -38,6 +38,13 @@ If the stored script changed since you opened it (synced folder, another tab),
 a deleted script: **R** recreate, **D** discard my text). Saves in quick
 succession run one after another, so they never conflict with each other.
 
+The **Save** button shows the save state itself: **● Save** (unsaved
+changes), a spinner while saving, and a dimmed **✓ Saved** when there's
+nothing to save. Next to it, the folder button shows
+[folder sync](#synced-folder) at a glance, and the VS Code button opens the
+synced folder in VS Code (it shows the VS Code Insiders icon when
+**Settings → Open button** is VS Code Insiders).
+
 ## Explorer
 
 The explorer on the left looks and works like VS Code's explorer: one
@@ -148,6 +155,12 @@ over a script that changed elsewhere shows a diff to overwrite or take theirs. T
 the Editor reconnects automatically on open (one click to re-grant after a
 browser restart, per Chrome's File System Access rules — click the toolbar
 notice or the button).
+
+The folder button next to **Save** shows the sync state: no badge (off), a
+green dot (connected), a pulsing **↑** (writing to the folder) or **↓**
+(picking up a change from it), and a yellow **!** (disconnected — needs
+a re-grant). Clicking it reconnects when disconnected; otherwise it opens
+**Settings → Synced folder**.
 
 ## Appearance
 
