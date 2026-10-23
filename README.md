@@ -5,10 +5,11 @@
 Rewrite any request or response in your browser with a few lines of
 TypeScript. Wiretrick is a ground-up rewrite of
 [Resource Override](https://github.com/kylepaulsen/ResourceOverride), also
-inspired by [Inssman](https://github.com/vvmgev/Inssman), where the
-whole interface is a **script editor**: each handler in a script names the
-URLs it handles and what to do — redirect, block, edit headers, transform or
-replace bodies, or patch the DOM.
+inspired by [Inssman](https://github.com/vvmgev/Inssman) and
+[Tampermonkey](https://www.tampermonkey.net/) — userscripts, but built for
+modifying requests and responses. The whole interface is a **script editor**:
+each handler in a script names the URLs it handles and what to do — redirect,
+block, edit headers, transform or replace bodies, or patch the DOM.
 
 ![Wiretrick Editor](docs/shots/editor.png)
 
