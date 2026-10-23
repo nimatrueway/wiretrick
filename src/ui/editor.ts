@@ -979,7 +979,7 @@ async function saveCurrentNow(): Promise<void> {
     renderList();
 }
 
-// ---- process tier (local helper) ----
+// ---- helper strategy (local helper) ----
 let helperStatus: HelperStatus | null = null;
 function renderProcessStatus(st: any): void {
     helperStatus = st;
@@ -1169,26 +1169,26 @@ function noteNetMessage(entries: NetEntry[]): void {
 }
 
 /** All received entries — filtered ones stay here (re-renderable), just not in the DOM. */
-const logEntries: { text: string; level: string; source: string; tapped?: boolean }[] = [];
-/** "tapped (no change)" DEBUG lines (one per handler run) may fill at most this much of the buffer */
-const MAX_TAPPED_ENTRIES = 300;
-let tappedEntries = 0;
+const logEntries: { text: string; level: string; source: string; observed?: boolean }[] = [];
+/** "observed (no change)" DEBUG lines (one per handler run) may fill at most this much of the buffer */
+const MAX_OBSERVED_ENTRIES = 300;
+let observedEntries = 0;
 
 function appendLog(entry: any): void {
     const time = new Date(entry.at).toLocaleTimeString();
     const source = sourceOf(entry.message || "");
-    const tapped = entry.kind === "tapped";
-    logEntries.push({ text: `[${time}] ${entry.message}`, level: entry.level || "info", source, ...(tapped ? { tapped } : {}) });
+    const observed = entry.kind === "observed";
+    logEntries.push({ text: `[${time}] ${entry.message}`, level: entry.level || "info", source, ...(observed ? { observed } : {}) });
     logBadge.note(entry.level || "info");
     let counted = entry.level === "error" || entry.level === "warn";
-    if (tapped && ++tappedEntries > MAX_TAPPED_ENTRIES) {
-        logEntries.splice(logEntries.findIndex((e) => e.tapped), 1);
-        tappedEntries--;
+    if (observed && ++observedEntries > MAX_OBSERVED_ENTRIES) {
+        logEntries.splice(logEntries.findIndex((e) => e.observed), 1);
+        observedEntries--;
     }
     if (logEntries.length > 2000) {
         // absolute buffer cap
         for (const e of logEntries.splice(0, logEntries.length - 2000)) {
-            if (e.tapped) tappedEntries--;
+            if (e.observed) observedEntries--;
             logBadge.drop(e.level);
             counted ||= e.level === "error" || e.level === "warn";
         }
@@ -2021,7 +2021,7 @@ async function main(): Promise<void> {
     $("#btn-clear-log").addEventListener("click", () => {
         $("#log-entries").innerHTML = "";
         logEntries.length = 0;
-        tappedEntries = 0;
+        observedEntries = 0;
         logBadge.reset();
         renderTabBadges();
         void send({ type: "clearDebugLogs" });

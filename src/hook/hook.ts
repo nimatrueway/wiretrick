@@ -1,5 +1,5 @@
 /**
- * Tier A — MAIN-world page hook. STATIC file: contains no eval and no user
+ * Page strategy — MAIN-world page hook. STATIC file: contains no eval and no user
  * code, so page CSP (however strict) cannot break it.
  *
  * It patches fetch/XHR and, per request, relays bodies through the

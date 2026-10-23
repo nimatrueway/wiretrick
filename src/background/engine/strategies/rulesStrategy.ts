@@ -1,5 +1,5 @@
 /**
- * The `rules` tier: handlers become declarativeNetRequest SESSION rules
+ * The `rules` strategy: handlers become declarativeNetRequest SESSION rules
  * that the browser applies itself (no banner, no helper, nothing runs per
  * request).
  *
@@ -21,8 +21,8 @@ import { dlogLevel } from "../../../shared/debugLog";
 import { probeRules } from "../../compileHost";
 import { log, setScriptRuleErrors } from "../logs";
 import type { Script } from "../scriptStore";
-import { compileMv2, ownsAny } from "./tiers";
-import { IS_FIREFOX } from "./processState";
+import { compileMv2, ownsAny } from "./strategyScripts";
+import { IS_FIREFOX } from "./helperState";
 
 type ParamValues = { [scriptId: string]: Record<string, any> };
 
@@ -165,7 +165,7 @@ export class RulesStrategy {
     private async probe(scripts: Script[], owners: Script[], paramValues: ParamValues): Promise<Map<string, ScriptRules>> {
         const out = new Map<string, ScriptRules>();
         if (__MV3__) {
-            // the same script set the other tiers send: keeps the sandbox's compile cache warm
+            // the same script set the other strategies send: keeps the sandbox's compile cache warm
             const plain = scripts.filter((s) => s.enabled).map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt, enabled: true }));
             const results = await probeRules(plain, paramValues);
             if (!results) {

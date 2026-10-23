@@ -4,7 +4,7 @@
  * pane showing headers and what Wiretrick scripts did to the request.
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
-import type { NetBody, NetEntry, NetIntervention } from "../../shared/netTypes";
+import type { NetBody, NetEntry, NetOutcome } from "../../shared/netTypes";
 import type { NetStore } from "./netStore";
 import {
     TYPE_FILTERS,
@@ -412,22 +412,22 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
                 {formatBytes(bytes)} transferred
                 {" · "}
                 <span class="net-touch-count" title="Observed: a script handler ran on the request without changing it · Modified: a handler changed it">
-                    {touched.tapped} observed · <span class={touched.modified ? "net-hl" : ""}>{touched.modified} modified</span>
+                    {touched.observed} observed · <span class={touched.modified ? "net-hl" : ""}>{touched.modified} modified</span>
                 </span>
             </div>
         </div>
     );
 }
 
-const TOUCH_OPTIONS: { value: TouchFilter; label: string; marks: ("tapped" | "modified")[]; title: string }[] = [
+const TOUCH_OPTIONS: { value: TouchFilter; label: string; marks: ("observed" | "modified")[]; title: string }[] = [
     { value: "all", label: "All", marks: [], title: "All requests" },
-    { value: "tapped", label: "Observed", marks: ["tapped"], title: "A script handler ran on the request without changing it" },
+    { value: "observed", label: "Observed", marks: ["observed"], title: "A script handler ran on the request without changing it" },
     { value: "modified", label: "Modified", marks: ["modified"], title: "A script handler changed the request" },
-    { value: "any", label: "Touched", marks: ["tapped", "modified"], title: "Any request a script handler ran on" },
+    { value: "any", label: "Touched", marks: ["observed", "modified"], title: "Any request a script handler ran on" },
 ];
 
 /** the row markers (dashed = observed, solid = modified) as swatches */
-function Marks({ marks }: { marks: ("tapped" | "modified")[] }) {
+function Marks({ marks }: { marks: ("observed" | "modified")[] }) {
     return (
         <span class="net-marks" aria-hidden="true">
             {marks.map((m) => (
@@ -540,9 +540,9 @@ function TouchMenu({ value, onChange }: { value: TouchFilter; onChange: (v: Touc
     );
 }
 
-const KIND_TITLE: Record<NetIntervention["kind"], string> = {
+const KIND_TITLE: Record<NetOutcome["kind"], string> = {
     modified: "Modified: the handler changed the request",
-    tapped: "Observed: the handler ran without changing it",
+    observed: "Observed: the handler ran without changing it",
     missed: "Missed: a body handler should have run here but no strategy ran it",
 };
 
@@ -557,7 +557,7 @@ function rowClass(e: NetEntry, selected: boolean): string {
 }
 
 function scriptNames(e: NetEntry): string[] {
-    return [...new Set(e.interventions.map((i) => i.scriptName))];
+    return [...new Set(e.outcomes.map((i) => i.scriptName))];
 }
 
 function Row({
@@ -613,11 +613,11 @@ function Row({
                 return (
                     <td key={k} class="c-script">
                         {scriptNames(e).map((n) => {
-                            const mine = e.interventions.filter((i) => i.scriptName === n);
+                            const mine = e.outcomes.filter((i) => i.scriptName === n);
                             return (
                                 <span
                                     key={n}
-                                    class={`net-badge ${mine.some((i) => i.kind === "modified") ? "modified" : mine.some((i) => i.kind === "tapped") ? "tapped" : "missed"}`}
+                                    class={`net-badge ${mine.some((i) => i.kind === "modified") ? "modified" : mine.some((i) => i.kind === "observed") ? "observed" : "missed"}`}
                                     title={mine.map((i) => i.action).join("\n")}
                                 >
                                     {n}
@@ -656,7 +656,7 @@ function Row({
 type DetailTab = "headers" | "payload" | "response" | "wiretrick";
 
 function Details({ e, width, onClose }: { e: NetEntry; width: number | null; onClose: () => void }) {
-    const [tab, setTab] = useState<DetailTab>(e.interventions.length ? "wiretrick" : "headers");
+    const [tab, setTab] = useState<DetailTab>(e.outcomes.length ? "wiretrick" : "headers");
     const general: [string, string | undefined][] = [
         ["Request URL", e.url],
         ["Request Method", e.method],
@@ -691,7 +691,7 @@ function Details({ e, width, onClose }: { e: NetEntry; width: number | null; onC
                 </button>
                 <button class={tab === "wiretrick" ? "active" : ""} onClick={() => setTab("wiretrick")}>
                     Wiretrick
-                    {e.interventions.length ? ` (${e.interventions.length})` : ""}
+                    {e.outcomes.length ? ` (${e.outcomes.length})` : ""}
                 </button>
             </div>
             <div class="net-details-body">
@@ -705,9 +705,9 @@ function Details({ e, width, onClose }: { e: NetEntry; width: number | null; onC
                     <BodyView body={e.requestBody} mime={headerOf(e.requestHeaders, "content-type")} />
                 ) : tab === "response" ? (
                     <ResponseView e={e} />
-                ) : e.interventions.length ? (
+                ) : e.outcomes.length ? (
                     <ul class="net-actions">
-                        {e.interventions.map((i, n) => (
+                        {e.outcomes.map((i, n) => (
                             <li key={n} class={`net-action ${i.level} ${i.kind}`} title={KIND_TITLE[i.kind]}>
                                 <time>{new Date(i.at).toLocaleTimeString()}</time>
                                 <span class={`net-badge ${i.kind}`}>{i.scriptName}</span>

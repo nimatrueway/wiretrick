@@ -33,10 +33,10 @@ describe("Network view count", () => {
     it("mirrors the recorded rows' observed / modified counts", () => {
         const b = new NetBadge();
         expect(b.empty).toBe(true);
-        b.set({ modified: 1, tapped: 2 });
-        expect(b.counts).toEqual([["modified", 1], ["tapped", 2]]);
+        b.set({ modified: 1, observed: 2 });
+        expect(b.counts).toEqual([["modified", 1], ["observed", 2]]);
         expect(b.title).toBe("1 modified, 2 observed in Network");
-        b.set({ modified: 2, tapped: 0 });
+        b.set({ modified: 2, observed: 0 });
         expect(b.title).toBe("2 modified in Network");
         b.reset();
         expect(b.empty).toBe(true);

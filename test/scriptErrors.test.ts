@@ -5,8 +5,8 @@
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { formatScriptError, rewriteFrame, EVAL_WRAPPER_LINES } from "../src/shared/scriptError";
-import { WebRequestStrategy } from "../src/background/engine/strategies/webRequestStrategy";
-import { CdpStrategy } from "../src/background/engine/strategies/cdpStrategy";
+import { ExtensionStrategy } from "../src/background/engine/strategies/extensionStrategy";
+import { DebuggerStrategy } from "../src/background/engine/strategies/debuggerStrategy";
 import { addUiPort, type LogEntry } from "../src/background/engine/logs";
 import { compileScript } from "../src/shared/compile";
 import type { Script } from "../src/background/engine/scriptStore";
@@ -124,7 +124,7 @@ describe("formatScriptError / rewriteFrame", () => {
 
 describe("extension strategy: error logs carry name + user line:col", () => {
     it("handler throws → [name] + mapped line", () => {
-        const s = new WebRequestStrategy();
+        const s = new ExtensionStrategy();
         s.reload([storedScript("a", "Thrower", THROWS)]);
         s.handleBeforeRequest(details(), null);
         const line = entries.find((e) => e.level === "error");
@@ -137,7 +137,7 @@ describe("extension strategy: error logs carry name + user line:col", () => {
     });
 
     it("compile-time (top-level) throw → [name] + mapped line", () => {
-        const s = new WebRequestStrategy();
+        const s = new ExtensionStrategy();
         // stored meta is from the last good save (saveScript keeps it on a failed compile)
         const good = storedScript("a", "Thrower", TOPLEVEL.replace(`x.split(".");`, ""));
         s.reload([{ ...good, code: TOPLEVEL }]);
@@ -150,7 +150,7 @@ describe("extension strategy: error logs carry name + user line:col", () => {
 
 describe("CDP tier: error logs carry name + user line:col", () => {
     it("onRequest throws at the Request stage → [name] + mapped line", async () => {
-        const c = new CdpStrategy();
+        const c = new DebuggerStrategy();
         // sync onRequest runs in the extension strategy only; the Request stage runs async ones
         c.reload([storedScript("a", "Thrower", throws("debugger", "async "))]);
         await c.handlePaused("tab:1", {

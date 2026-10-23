@@ -1,10 +1,10 @@
 /**
  * Background entry point (MV2 event page).
  */
-import { WebRequestStrategy } from "./engine/strategies/webRequestStrategy";
-import { ChromeBodyStrategy } from "./engine/strategies/chromeBodyStrategy";
-import { CdpStrategy } from "./engine/strategies/cdpStrategy";
-import { ProcessStrategy } from "./engine/strategies/processStrategy";
+import { ExtensionStrategy } from "./engine/strategies/extensionStrategy";
+import { PageStrategy } from "./engine/strategies/pageStrategy";
+import { DebuggerStrategy } from "./engine/strategies/debuggerStrategy";
+import { HelperStrategy } from "./engine/strategies/helperStrategy";
 import { RulesStrategy } from "./engine/strategies/rulesStrategy";
 import { createPipeline } from "./engine/pipeline";
 import { runMigrations } from "./migration";
@@ -29,31 +29,31 @@ setSink((e) =>
     broadcastEntry({ tabId: -1, scriptId: null, level: e.level || "info", message: `[${e.src}] ${e.msg}`, at: e.at })
 );
 
-const webRequestStrategy = new WebRequestStrategy();
-const chromeBody = new ChromeBodyStrategy();
-const cdp = new CdpStrategy();
-const processStrategy = new ProcessStrategy();
-processStrategy.onStatus = (status) => broadcastToUi({ type: "processStatus", status });
+const extensionStrategy = new ExtensionStrategy();
+const pageStrategy = new PageStrategy();
+const debuggerStrategy = new DebuggerStrategy();
+const helperStrategy = new HelperStrategy();
+helperStrategy.onStatus = (status) => broadcastToUi({ type: "processStatus", status });
 
 // one-time rewrite of stored scripts/settings to the renamed API; the
 // pipeline waits for it before loading scripts (listeners register now)
 const migrated = runMigrations().catch((e) => dlogLevel("bg", "error", `migration failed: ${e?.message || e}`));
 
-createPipeline(webRequestStrategy, chromeBody, cdp, processStrategy, new RulesStrategy(), updateTabBadge, noteRequestForBadge, migrated);
+createPipeline(extensionStrategy, pageStrategy, debuggerStrategy, helperStrategy, new RulesStrategy(), updateTabBadge, noteRequestForBadge, migrated);
 
 // ---- local helper controls for the Editor ----
 chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
     if (msg?.type === "processStatus") {
-        sendResponse(processStrategy.status());
+        sendResponse(helperStrategy.status());
         return false;
     }
     if (msg?.type === "processRetry") {
-        processStrategy.reconnect();
-        sendResponse(processStrategy.status());
+        helperStrategy.reconnect();
+        sendResponse(helperStrategy.status());
         return false;
     }
     if (msg?.type === "processTrustCa") {
-        processStrategy.trustCa();
+        helperStrategy.trustCa();
         sendResponse({});
         return false;
     }
@@ -147,7 +147,7 @@ chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
     if (msg && msg.type === "collectDiagnostics") {
         void collectDiagnostics({
             ...(msg.extra || {}),
-            state: { process: processStrategy.status(), folderSync: folderSync.getStatus() },
+            state: { process: helperStrategy.status(), folderSync: folderSync.getStatus() },
         })
             .then((report) => sendResponse({ report }))
             .catch((e) => sendResponse({ error: String(e?.message || e) }));
@@ -165,25 +165,25 @@ chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
 // debug seam: raw buffer access for e2e/diagnostics
 (globalThis as any).__resDebugBuffer = getDebugBuffer;
 
-// ---- CDP debugger events (Tier C) ----
+// ---- CDP debugger events (debugger strategy) ----
 if (chrome.debugger) {
     chrome.debugger.onEvent.addListener((source, method, params) => {
         if (method === "Fetch.requestPaused" && source.tabId !== undefined) {
             const pp = params as any; dlog("debugger", "requestPaused", { tabId: source.tabId, url: pp?.request?.url, status: pp?.responseStatusCode });
-            void cdp.handlePaused(`tab:${source.tabId}`, params);
+            void debuggerStrategy.handlePaused(`tab:${source.tabId}`, params);
         }
     });
     chrome.debugger.onDetach.addListener((source) => {
         if (source.tabId !== undefined) {
             dlog("debugger", "detached", { tabId: source.tabId });
-            void cdp.handleDetach(`tab:${source.tabId}`);
+            void debuggerStrategy.handleDetach(`tab:${source.tabId}`);
         } else if (source.targetId) {
             dlog("debugger", "detached", { targetId: source.targetId });
-            void cdp.handleDetach(`tgt:${source.targetId}`);
+            void debuggerStrategy.handleDetach(`tgt:${source.targetId}`);
         }
     });
     chrome.tabs.onRemoved.addListener((tabId) => {
-        void cdp.detach(tabId);
+        void debuggerStrategy.detach(tabId);
     });
 }
 

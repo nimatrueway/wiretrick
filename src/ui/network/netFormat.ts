@@ -101,32 +101,32 @@ export function statusText(e: NetEntry): string {
     return String(e.status);
 }
 
-/** "modified" if any script changed the request, "tapped" if one only ran on it ("missed" warnings don't count) */
-export type TouchState = "none" | "tapped" | "modified";
+/** "modified" if any script changed the request, "observed" if one only ran on it ("missed" warnings don't count) */
+export type TouchState = "none" | "observed" | "modified";
 
 export function touchState(e: NetEntry): TouchState {
-    let tapped = false;
-    for (const i of e.interventions) {
+    let observed = false;
+    for (const i of e.outcomes) {
         if (i.kind === "modified") return "modified";
-        if (i.kind === "tapped") tapped = true;
+        if (i.kind === "observed") observed = true;
     }
-    return tapped ? "tapped" : "none";
+    return observed ? "observed" : "none";
 }
 
-/** tapped = rows a script ran on without changing them; modified = rows a script changed */
-export function touchCounts(rows: NetEntry[]): { tapped: number; modified: number } {
-    let tapped = 0;
+/** observed = rows a script ran on without changing them; modified = rows a script changed */
+export function touchCounts(rows: NetEntry[]): { observed: number; modified: number } {
+    let observed = 0;
     let modified = 0;
     for (const e of rows) {
         const t = touchState(e);
-        if (t === "tapped") tapped++;
+        if (t === "observed") observed++;
         else if (t === "modified") modified++;
     }
-    return { tapped, modified };
+    return { observed, modified };
 }
 
-/** Script-activity filter: tapped-only, modified, or any row a script touched (either) */
-export type TouchFilter = "all" | "tapped" | "modified" | "any";
+/** Script-activity filter: observed-only, modified, or any row a script touched (either) */
+export type TouchFilter = "all" | "observed" | "modified" | "any";
 
 export interface NetFilter {
     text: string;
@@ -148,7 +148,7 @@ export function matches(e: NetEntry, f: NetFilter): boolean {
     const negate = q.startsWith("-");
     const needle = (negate ? q.slice(1) : q).toLowerCase();
     if (!needle) return true;
-    const hay = `${e.url} ${e.method} ${e.status ?? ""} ${e.mime} ${e.interventions.map((i) => i.scriptName).join(" ")}`.toLowerCase();
+    const hay = `${e.url} ${e.method} ${e.status ?? ""} ${e.mime} ${e.outcomes.map((i) => i.scriptName).join(" ")}`.toLowerCase();
     return hay.includes(needle) !== negate;
 }
 
@@ -167,7 +167,7 @@ export function compare(key: SortKey): (a: NetEntry, b: NetEntry) => number {
         case "type":
             return str(typeLabel);
         case "script":
-            return str((e) => e.interventions.map((i) => i.scriptName).join(","));
+            return str((e) => e.outcomes.map((i) => i.scriptName).join(","));
         case "size":
             return num((e) => e.size);
         case "time":

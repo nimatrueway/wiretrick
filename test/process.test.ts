@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { ProcessStrategy, applyHeaderMods, base64ToBytes, bytesToBase64, filterUrlsFor, helperRouteOf, pairsToObject } from "../src/background/engine/strategies/processStrategy";
-import { processActive, setProcessActive, tierUnavailable } from "../src/background/engine/strategies/processState";
-import { ownedRoutes } from "../src/background/engine/strategies/tiers";
+import { HelperStrategy, applyHeaderMods, base64ToBytes, bytesToBase64, filterUrlsFor, helperRouteOf, pairsToObject } from "../src/background/engine/strategies/helperStrategy";
+import { helperActive, setHelperActive, strategyUnavailable } from "../src/background/engine/strategies/helperState";
+import { ownedRoutes } from "../src/background/engine/strategies/strategyScripts";
 import { normalizeRoute, setDefaultStrategy } from "../src/shared/route";
-import { CdpStrategy } from "../src/background/engine/strategies/cdpStrategy";
+import { DebuggerStrategy } from "../src/background/engine/strategies/debuggerStrategy";
 import { compileScript } from "../src/shared/compile";
 import { isHelperOutdated, MIN_HELPER_VERSION } from "../src/shared/helperInstall";
 import { clearDebugBuffer, getDebugBuffer } from "../src/shared/debugLog";
@@ -95,7 +95,7 @@ function reply(id: number): any {
     return fake.sent.find((m) => m.id === id && m.t !== "upstream");
 }
 
-async function ready(p: ProcessStrategy, scripts: Script[], version = "0.1.0"): Promise<void> {
+async function ready(p: HelperStrategy, scripts: Script[], version = "0.1.0"): Promise<void> {
     p.reload(scripts);
     await settle();
     fake.deliver({ t: "ready", port: 41234, version, caPem: "", caFingerprint: "AA", caPath: "/tmp/ca.pem" });
@@ -107,9 +107,9 @@ const dec = (b: string) => new TextDecoder().decode(base64ToBytes(b));
 
 beforeEach(() => {
     installChrome();
-    setProcessActive(false);
+    setHelperActive(false);
 });
-afterEach(() => setProcessActive(false));
+afterEach(() => setHelperActive(false));
 
 describe("process ownership (single strategy, no fallback)", () => {
     it("a process route belongs to the process tier only — helper up or down", () => {
@@ -117,9 +117,9 @@ describe("process ownership (single strategy, no fallback)", () => {
         expect(ownedRoutes(scripts, "helper")).toHaveLength(1);
         expect(ownedRoutes(scripts, "debugger")).toEqual([]);
         expect(ownedRoutes(scripts, "page")).toEqual([]);
-        setProcessActive(true);
+        setHelperActive(true);
         expect(ownedRoutes(scripts, "helper")).toHaveLength(1);
-        const c = new CdpStrategy();
+        const c = new DebuggerStrategy();
         c.reload(scripts);
         expect(c.hasOwners()).toBe(false);
     });
@@ -135,10 +135,10 @@ describe("process ownership (single strategy, no fallback)", () => {
             setDefaultStrategy(null);
         }
     });
-    it("tierUnavailable: process needs a connected helper", () => {
-        expect(tierUnavailable("helper")).toMatch(/helper/);
-        setProcessActive(true);
-        expect(tierUnavailable("helper")).toBeNull();
+    it("strategyUnavailable: process needs a connected helper", () => {
+        expect(strategyUnavailable("helper")).toMatch(/helper/);
+        setHelperActive(true);
+        expect(strategyUnavailable("helper")).toBeNull();
     });
 });
 
@@ -185,9 +185,9 @@ describe("helpers", () => {
     });
 });
 
-describe("ProcessStrategy ⇄ helper protocol", () => {
+describe("HelperStrategy ⇄ helper protocol", () => {
     it("no process scripts → never connects", async () => {
-        const p = new ProcessStrategy();
+        const p = new HelperStrategy();
         p.reload([makeScript("a", `wt.onResponseBody({ url: "*", strategy: "debugger" }, (c, b) => b);`)]);
         await settle();
         expect(fake.connects).toBe(0);
@@ -196,14 +196,14 @@ describe("ProcessStrategy ⇄ helper protocol", () => {
 
     it("ready → config, PAC install, active; user proxy captured & respected", async () => {
         fake.proxyValue = { mode: "fixed_servers", rules: { singleProxy: { scheme: "http", host: "corp", port: 3128 } } };
-        const p = new ProcessStrategy();
+        const p = new HelperStrategy();
         await ready(p, [makeScript("a", `wt.onResponseBody({ url: "https://api.x.com/*", strategy: "helper" }, (c, b) => b + "!");`)]);
         const cfg = fake.sent.find((m) => m.t === "config");
         expect(cfg.routes).toEqual([{ match: ["https://api.x.com/*"], exclude: [], methods: [], req: false, resHeaders: false, body: true }]);
         expect(cfg.upstream).toBe("ask");
         expect(fake.proxyValue.mode).toBe("pac_script");
         expect(fake.proxyValue.pacScript.data).toContain("127.0.0.1:41234");
-        expect(processActive()).toBe(true);
+        expect(helperActive()).toBe(true);
         const st = p.status();
         expect(st.state).toBe("ready");
         expect(st.routing?.mode).toBe("fixed_servers");
@@ -216,15 +216,15 @@ describe("ProcessStrategy ⇄ helper protocol", () => {
 
     it("blocked proxy control → inactive, fall through", async () => {
         fake.levelOfControl = "controlled_by_other_extensions";
-        const p = new ProcessStrategy();
+        const p = new HelperStrategy();
         await ready(p, [makeScript("a", `wt.onRequest({ url: "*", strategy: "helper" }, () => {});`)]);
-        expect(processActive()).toBe(false);
+        expect(helperActive()).toBe(false);
         expect(p.status().routing?.active).toBe(false);
         expect(fake.sent.find((m) => m.t === "config").routes).toEqual([]);
     });
 
     it("request stage: redirect / respond / cancel / headers / replaceResponse", async () => {
-        const p = new ProcessStrategy();
+        const p = new HelperStrategy();
         await ready(p, [
             makeScript(
                 "a",
@@ -261,7 +261,7 @@ wt.replaceResponse({ url: "https://x.com/*", strategy: "helper" }, (c) => (c.url
     });
 
     it("response stage: chunks reassembled, transform → fulfill; headers-only → continue{headers}", async () => {
-        const p = new ProcessStrategy();
+        const p = new HelperStrategy();
         await ready(p, [
             makeScript(
                 "a",
@@ -291,7 +291,7 @@ wt.onResponseBody({ url: "https://x.com/*", strategy: "helper" }, (c, body) => (
     });
 
     it("binary bodies reach onResponseBody as bytes (MV2)", async () => {
-        const p = new ProcessStrategy();
+        const p = new HelperStrategy();
         await ready(p, [makeScript("a", `wt.onResponseBody({ url: "https://x.com/*", strategy: "helper" }, (c, body) => typeof body === "string" ? "text" : "bytes:" + body.length);`)]);
         fake.deliver({ t: "chunk", id: 1, data: bytesToBase64(new Uint8Array([0, 1, 2, 3])) });
         fake.deliver({ t: "res", id: 1, url: "https://x.com/b.png", method: "GET", status: 200, headers: [["content-type", "image/png"]], body: "chunks" });
@@ -300,12 +300,12 @@ wt.onResponseBody({ url: "https://x.com/*", strategy: "helper" }, (c, body) => (
     });
 
     it("helper missing → state missing, no retry loop; Retry reconnects", async () => {
-        const p = new ProcessStrategy();
+        const p = new HelperStrategy();
         p.reload([makeScript("a", `wt.onRequest({ url: "*", strategy: "helper" }, () => {});`)]);
         await settle();
         fake.disconnect("Specified native messaging host not found.");
         expect(p.status().state).toBe("missing");
-        expect(processActive()).toBe(false);
+        expect(helperActive()).toBe(false);
         expect(fake.connects).toBe(1);
         p.reconnect();
         expect(fake.connects).toBe(2);
@@ -313,12 +313,12 @@ wt.onResponseBody({ url: "https://x.com/*", strategy: "helper" }, (c, body) => (
 
     it("helper crash → inactive and PAC removed (browser proxy restored)", async () => {
         fake.proxyValue = { mode: "direct" };
-        const p = new ProcessStrategy();
+        const p = new HelperStrategy();
         await ready(p, [makeScript("a", `wt.onRequest({ url: "*", strategy: "helper" }, () => {});`)]);
-        expect(processActive()).toBe(true);
+        expect(helperActive()).toBe(true);
         fake.disconnect("Native host has exited.");
         await settle();
-        expect(processActive()).toBe(false);
+        expect(helperActive()).toBe(false);
         expect(fake.proxyValue.mode).toBe("system"); // cleared → browser default
         expect(p.status().state).toBe("error");
     });
@@ -339,7 +339,7 @@ describe("helper version check", () => {
 
     it("helper below the minimum → one error with the upgrade command; Retry restarts it", async () => {
         clearDebugBuffer();
-        const p = new ProcessStrategy();
+        const p = new HelperStrategy();
         await ready(p, [makeScript("a", `wt.onRequest({ url: "*://x.com/*", strategy: "helper" }, () => {});`)], "0.0.0");
         expect(p.status().outdated).toBe(true);
         const errs = getDebugBuffer().filter((e) => e.level === "error" && /older than this extension needs/.test(e.msg));
@@ -360,7 +360,7 @@ describe("helper version check", () => {
     it("helper older than the extension but ≥ minimum → no error", async () => {
         (globalThis as any).chrome.runtime.getManifest = () => ({ version: "9.9.9" });
         clearDebugBuffer();
-        const p = new ProcessStrategy();
+        const p = new HelperStrategy();
         await ready(p, [makeScript("a", `wt.onRequest({ url: "*://x.com/*", strategy: "helper" }, () => {});`)], MIN_HELPER_VERSION);
         expect(p.status().outdated).toBe(false);
         expect(getDebugBuffer().some((e) => /older than this extension needs/.test(e.msg))).toBe(false);

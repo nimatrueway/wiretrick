@@ -814,9 +814,9 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 .tab-badge { min-width: 15px; padding: 0 4px; border-radius: 8px; font-size: 10px; font-weight: 600; line-height: 15px; text-align: center; color: #fff; box-sizing: border-box; }
 .tab-badge.error { background: var(--err); }
 .tab-badge.warn { background: var(--warn); color: #1e1e1e; }
-/* Network tab: modified = solid, tapped = hollow */
+/* Network tab: modified = solid, observed = hollow */
 .tab-badge.modified { background: var(--ok); color: #1e1e1e; }
-.tab-badge.tapped { background: transparent; color: var(--fg-dim); box-shadow: inset 0 0 0 1px var(--fg-dim); }
+.tab-badge.observed { background: transparent; color: var(--fg-dim); box-shadow: inset 0 0 0 1px var(--fg-dim); }
 #log-tools { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 #log-tools[hidden], #log-entries[hidden], #network-view[hidden] { display: none; }
 #log-entries { flex: 1; min-height: 0; }
@@ -900,18 +900,18 @@ body.net-dragging { user-select: none; }
 .net-row.selected { background: var(--sel); }
 .net-row.err td { color: var(--err); }
 .net-row.pending td.c-status, .net-row.pending td.c-time { color: var(--fg-dim); }
-/* row marker: modified = solid accent bar, tapped = dashed, muted bar.
+/* row marker: modified = solid accent bar, observed = dashed, muted bar.
    Inset 3px from the row's top/bottom so consecutive marked rows read as
    separate markers instead of one continuous line. */
-.net-row.modified td.c-name, .net-row.tapped td.c-name {
+.net-row.modified td.c-name, .net-row.observed td.c-name {
     background-size: 2px calc(100% - 6px); background-repeat: no-repeat; background-position: left center;
 }
 .net-row.modified td.c-name { background-image: linear-gradient(var(--accent), var(--accent)); }
-.net-row.tapped td.c-name {
+.net-row.observed td.c-name {
     background-image: repeating-linear-gradient(color-mix(in srgb, var(--accent) 70%, transparent) 0 3px, transparent 3px 5px);
 }
 .net-mark.modified { background: var(--accent); }
-.net-mark.tapped {
+.net-mark.observed {
     background-image: linear-gradient(color-mix(in srgb, var(--accent) 70%, transparent) 60%, transparent 0);
     background-size: 2px 5px; background-repeat: repeat-y; background-position: left top;
 }
@@ -928,7 +928,7 @@ body.net-dragging { user-select: none; }
     display: inline-block; background: var(--tag-bg); color: var(--key); border-radius: 3px;
     padding: 0 5px; margin-right: 3px; font-size: 10px; line-height: 15px;
 }
-.net-badge.tapped { background: transparent; color: var(--fg-dim); box-shadow: inset 0 0 0 1px var(--border); }
+.net-badge.observed { background: transparent; color: var(--fg-dim); box-shadow: inset 0 0 0 1px var(--border); }
 .net-badge.missed { background: transparent; color: var(--warn); box-shadow: inset 0 0 0 1px var(--warn); opacity: 0.8; }
 .net-wf { position: relative; height: 10px; }
 .net-wf-bar { position: absolute; top: 2px; height: 6px; background: var(--bar); border-radius: 1px; min-width: 2px; }
@@ -960,7 +960,7 @@ body.net-dragging { user-select: none; }
 .net-actions { list-style: none; margin: 0; padding: 0; font: 11px/1.7 "SF Mono", Menlo, Consolas, monospace; }
 .net-action { display: flex; gap: 6px; align-items: baseline; border-bottom: 1px solid var(--line-sep); }
 .net-action time { color: var(--fg-dim); }
-.net-action.tapped { color: var(--fg-dim); }
+.net-action.observed { color: var(--fg-dim); }
 .net-action.warn { color: var(--warn); }
 .net-action.missed { color: var(--warn); opacity: 0.85; }
 .net-action.error { color: var(--err); }

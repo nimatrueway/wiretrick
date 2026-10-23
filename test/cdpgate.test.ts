@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { CdpStrategy } from "../src/background/engine/strategies/cdpStrategy";
+import { DebuggerStrategy } from "../src/background/engine/strategies/debuggerStrategy";
 import { setDefaultStrategy } from "../src/shared/route";
 import { compileScript } from "../src/shared/compile";
 import type { Script } from "../src/background/engine/scriptStore";
@@ -21,24 +21,24 @@ function makeScript(id: string, code: string): Script {
 }
 
 describe("tier C participation gate (route ownership)", () => {
-    const needsAny = (c: CdpStrategy) => c.needs({ url: "https://x.com/anything", method: "GET", type: "script" });
+    const needsAny = (c: DebuggerStrategy) => c.needs({ url: "https://x.com/anything", method: "GET", type: "script" });
 
-    it("a hook route is NOT loaded into CdpStrategy", () => {
-        const c = new CdpStrategy();
+    it("a hook route is NOT loaded into DebuggerStrategy", () => {
+        const c = new DebuggerStrategy();
         c.reload([makeScript("a", `wt.onResponseBody({ url: "*", strategy: "page" }, (c, b) => b);`)]);
         expect(c.hasOwners()).toBe(false);
         expect(needsAny(c)).toBe(false);
     });
 
     it("a cdp route IS loaded", () => {
-        const c = new CdpStrategy();
+        const c = new DebuggerStrategy();
         c.reload([makeScript("a", `wt.onResponseBody({ url: "*", strategy: "debugger" }, (c, b) => b);`)]);
         expect(c.hasOwners()).toBe(true);
         expect(needsAny(c)).toBe(true);
     });
 
     it("routes without a strategy follow settings.defaultStrategy", () => {
-        const c = new CdpStrategy();
+        const c = new DebuggerStrategy();
         const scripts = [makeScript("a", `wt.onResponseBody("*", (c, b) => b);`)];
         try {
             setDefaultStrategy("debugger");
@@ -53,7 +53,7 @@ describe("tier C participation gate (route ownership)", () => {
     });
 
     it("only matching url / method / type are needed", () => {
-        const c = new CdpStrategy();
+        const c = new DebuggerStrategy();
         c.reload([makeScript("a", `wt.onRequest({ url: "https://x.com/api/*", exclude: "https://x.com/api/health", methods: ["POST"], resourceTypes: ["xmlhttprequest"], strategy: "debugger" }, () => ({ block: true }));`)]);
         const req = (url: string, method = "POST", type = "xmlhttprequest") => c.needs({ url, method, type });
         expect(req("https://x.com/api/users")).toBe(true);
@@ -67,7 +67,7 @@ describe("tier C participation gate (route ownership)", () => {
     it("disabled scripts never load", () => {
         const s = makeScript("a", `wt.onResponseBody({ url: "*", strategy: "debugger" }, (c, b) => b);`);
         s.enabled = false;
-        const c = new CdpStrategy();
+        const c = new DebuggerStrategy();
         c.reload([s]);
         expect(c.hasOwners()).toBe(false);
     });

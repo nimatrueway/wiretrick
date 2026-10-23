@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { setDefaultStrategy } from "../src/shared/route";
-import { WebRequestStrategy } from "../src/background/engine/strategies/webRequestStrategy";
-import { CdpStrategy } from "../src/background/engine/strategies/cdpStrategy";
+import { ExtensionStrategy } from "../src/background/engine/strategies/extensionStrategy";
+import { DebuggerStrategy } from "../src/background/engine/strategies/debuggerStrategy";
 import { compileScript } from "../src/shared/compile";
 import type { Script } from "../src/background/engine/scriptStore";
 
@@ -25,7 +25,7 @@ beforeEach(() => {
     // not Firefox in unit tests
     delete (globalThis as any).browser;
     // clear the module-static per-request caches between tests
-    new WebRequestStrategy().pruneRequest("r1");
+    new ExtensionStrategy().pruneRequest("r1");
 });
 
 function makeScript(id: string, code: string): Script {
@@ -48,7 +48,7 @@ const details = () => ({
 
 describe("handler stacking", () => {
     it("onRequest: first matching script's redirect wins (later scripts skipped)", () => {
-        const s = new WebRequestStrategy();
+        const s = new ExtensionStrategy();
         s.reload([
             makeScript("first", `wt.onRequest("*", () => ({ redirect: "https://first.com" }));`),
             makeScript("second", `wt.onRequest("*", () => ({ redirect: "https://second.com" }));`),
@@ -58,7 +58,7 @@ describe("handler stacking", () => {
     });
 
     it("onRequest: non-terminal results don't stop later scripts", () => {
-        const s = new WebRequestStrategy();
+        const s = new ExtensionStrategy();
         s.reload([
             makeScript("logger", `wt.onRequest("*", () => { wt.log("just logging"); });`),
             makeScript("redirector", `wt.onRequest("*", () => ({ redirect: "https://second.com" }));`),
@@ -68,7 +68,7 @@ describe("handler stacking", () => {
     });
 
     it("onRequest: header changes from MULTIPLE scripts merge (later set wins, removes accumulate)", () => {
-        const s = new WebRequestStrategy();
+        const s = new ExtensionStrategy();
         s.reload([
             makeScript("a", `wt.onRequest("*", () => ({ headers: { set: { "x-a": "1", "x-b": "old" }, remove: ["x-r1"] } }));`),
             makeScript("b", `wt.onRequest("*", () => ({ headers: { set: { "x-b": "new", "x-c": "3" }, remove: ["x-r2"] } }));`),
@@ -80,7 +80,7 @@ describe("handler stacking", () => {
     });
 
     it("onRequest: headers from an earlier non-terminal script APPLY even when a later script redirects", () => {
-        const s = new WebRequestStrategy();
+        const s = new ExtensionStrategy();
         s.reload([
             makeScript("a", `wt.onRequest("*", () => ({ headers: { set: { "x-keep": "yes" } } }));`),
             makeScript("b", `wt.onRequest("*", () => ({ redirect: "https://win.com" }));`),
@@ -92,7 +92,7 @@ describe("handler stacking", () => {
     });
 
     it("onResponseHeaders: multiple scripts MERGE — set overwritten by later, removes accumulate", () => {
-        const s = new WebRequestStrategy();
+        const s = new ExtensionStrategy();
         s.reload([
             makeScript("a", `wt.onResponseHeaders("*", () => ({ headers: { set: { "x-a": "1", "x-b": "old" }, remove: ["x-r1"] } }));`),
             makeScript("b", `wt.onResponseHeaders("*", () => ({ headers: { set: { "x-b": "new", "x-c": "3" }, remove: ["x-r2"] } }));`),
@@ -139,7 +139,7 @@ describe("handler stacking", () => {
 
 describe("async handlers (Chrome extension strategy)", () => {
     it("async onRequest redirect → skipped with allow (needs sync or cdp)", async () => {
-        const s = new WebRequestStrategy();
+        const s = new ExtensionStrategy();
         s.reload([makeScript("a", `wt.onRequest("*", async (ctx) => ({ redirect: "https://async.com" }));`)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         // not a promise (Chrome path) and not a redirect — allow
@@ -148,14 +148,14 @@ describe("async handlers (Chrome extension strategy)", () => {
     });
 
     it("async replaceResponse → not served (no fallback; the error says to pick cdp/process)", () => {
-        const s = new WebRequestStrategy();
+        const s = new ExtensionStrategy();
         s.reload([makeScript("a", `wt.replaceResponse("*", async () => JSON.stringify({ async: true }));`)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("allow");
     });
 
     it("sync replaceResponse still redirects synchronously", () => {
-        const s = new WebRequestStrategy();
+        const s = new ExtensionStrategy();
         s.reload([makeScript("a", `wt.replaceResponse("*", () => "static body");`)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("redirect");
@@ -165,26 +165,26 @@ describe("async handlers (Chrome extension strategy)", () => {
 
 describe("async handlers (CDP tier loading)", () => {
     it("routes on other strategies are not loaded", () => {
-        const c = new CdpStrategy();
+        const c = new DebuggerStrategy();
         c.reload([makeScript("a", `wt.replaceResponse("*", async () => "x");`)]);
         expect(c.hasOwners()).toBe(false);
         expect(c.needs({ url: "https://x.com/", method: "GET", type: "main_frame" })).toBe(false);
     });
 
-    it("async replaceResponse script is loaded into CdpStrategy", () => {
-        const c = new CdpStrategy();
+    it("async replaceResponse script is loaded into DebuggerStrategy", () => {
+        const c = new DebuggerStrategy();
         c.reload([makeScript("a", `wt.replaceResponse({ url: "*", strategy: "debugger" }, async () => "x");`)]);
         expect(c.needs({ url: "https://x.com/", method: "GET", type: "main_frame" })).toBe(true);
     });
 
     it("SYNC replaceResponse script IS loaded", () => {
-        const c = new CdpStrategy();
+        const c = new DebuggerStrategy();
         c.reload([makeScript("a", `wt.replaceResponse({ url: "*", strategy: "debugger" }, () => "x");`)]);
         expect(c.needs({ url: "https://x.com/", method: "GET", type: "main_frame" })).toBe(true);
     });
 
     it("async onRequest script is loaded (request-stage redirect/cancel)", () => {
-        const c = new CdpStrategy();
+        const c = new DebuggerStrategy();
         c.reload([makeScript("a", `wt.onRequest({ url: "*", strategy: "debugger" }, async () => ({ block: true }));`)]);
         expect(c.needs({ url: "https://x.com/", method: "GET", type: "main_frame" })).toBe(true);
     });

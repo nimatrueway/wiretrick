@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { setDefaultStrategy } from "../src/shared/route";
-import { WebRequestStrategy } from "../src/background/engine/strategies/webRequestStrategy";
-import { ChromeBodyStrategy } from "../src/background/engine/strategies/chromeBodyStrategy";
+import { ExtensionStrategy } from "../src/background/engine/strategies/extensionStrategy";
+import { PageStrategy } from "../src/background/engine/strategies/pageStrategy";
 import type { Script } from "../src/background/engine/scriptStore";
 import { compileScript } from "../src/shared/compile";
 
@@ -73,11 +73,11 @@ const details = (over: Partial<any> = {}) => ({
     ...over,
 });
 
-describe("WebRequestStrategy", () => {
+describe("ExtensionStrategy", () => {
     beforeEach(() => setDefaultStrategy("extension"));
     afterEach(() => setDefaultStrategy(null));
     it("onRequest redirect", () => {
-        const s = new WebRequestStrategy();
+        const s = new ExtensionStrategy();
         s.reload([
             makeScript("a", `wt.onRequest("*://api.example.com/*", (ctx) => ({ redirect: "https://mocked.example.com/data" }));`),
         ]);
@@ -86,7 +86,7 @@ describe("WebRequestStrategy", () => {
     });
 
     it("non-matching url → allow", () => {
-        const s = new WebRequestStrategy();
+        const s = new ExtensionStrategy();
         s.reload([
             makeScript("a", `wt.onRequest("*://other.com/*", () => ({ redirect: "https://x.com" }));`),
         ]);
@@ -94,7 +94,7 @@ describe("WebRequestStrategy", () => {
     });
 
     it("disabled script does nothing", () => {
-        const s = new WebRequestStrategy();
+        const s = new ExtensionStrategy();
         s.reload([
             makeScript("a", `wt.onRequest("*", () => ({ block: true }));`, false),
         ]);
@@ -102,7 +102,7 @@ describe("WebRequestStrategy", () => {
     });
 
     it("static replaceResponse → data url redirect", () => {
-        const s = new WebRequestStrategy();
+        const s = new ExtensionStrategy();
         s.reload([
             makeScript("a", `wt.replaceResponse("*://api.example.com/v1/data", () => JSON.stringify({ mocked: true }));`),
         ]);
@@ -115,7 +115,7 @@ describe("WebRequestStrategy", () => {
     });
 
     it("onResponseHeaders modifies headers", () => {
-        const s = new WebRequestStrategy();
+        const s = new ExtensionStrategy();
         s.reload([
             makeScript("a", `wt.onResponseHeaders("*://api.example.com/*", () => ({ headers: { set: { "access-control-allow-origin": "*" }, remove: ["x-frame-options"] } }));`),
         ]);
@@ -126,7 +126,7 @@ describe("WebRequestStrategy", () => {
     });
 
     it("request header modification via onRequest (run once, cached for header phase)", () => {
-        const s = new WebRequestStrategy();
+        const s = new ExtensionStrategy();
         const code = `wt.onRequest("*://api.example.com/*", () => ({ headers: { set: { authorization: "Bearer x" } } }));`;
         s.reload([makeScript("a", code)]);
         // header phase alone does nothing (cache empty — onRequest hasn't run)
@@ -138,7 +138,7 @@ describe("WebRequestStrategy", () => {
     });
 
     it("script throwing does not break the pipeline", () => {
-        const s = new WebRequestStrategy();
+        const s = new ExtensionStrategy();
         s.reload([
             makeScript("a", `wt.onRequest("*", () => { throw new Error("boom"); });`),
         ]);
@@ -146,9 +146,9 @@ describe("WebRequestStrategy", () => {
     });
 });
 
-describe("ChromeBodyStrategy (hook tier)", () => {
+describe("PageStrategy (hook tier)", () => {
     it("owns only hook routes and never asks for the debugger itself", () => {
-        const s = new ChromeBodyStrategy();
+        const s = new PageStrategy();
         s.reload([makeScript("a", `wt.onResponseBody({ url: "*", strategy: "page" }, (ctx, body) => body);`)]);
         expect(s.hasOwners()).toBe(true);
         expect((s.handleBeforeRequest(details({ type: "script" }), null) as any).kind).toBe("allow");
@@ -157,7 +157,7 @@ describe("ChromeBodyStrategy (hook tier)", () => {
     });
 
     it("claimed urls (tier A) are tracked", () => {
-        const s = new ChromeBodyStrategy();
+        const s = new PageStrategy();
         s.reload([makeScript("a", `wt.onResponseBody({ url: "*", strategy: "page" }, (ctx, body) => body);`)]);
         s.claimRequest("https://cdn.example.com/lib.js");
         expect(s.isClaimed("https://cdn.example.com/lib.js")).toBe(true);

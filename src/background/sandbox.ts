@@ -17,11 +17,11 @@
  *   compileOne — save-time meta compile of one script, imports resolved
  *             against the given stored scripts (saveScript metadata);
  *             leaves the analyze/run cache alone
- *   pac     — evaluate the user's proxy decision (process tier upstream)
+ *   pac     — evaluate the user's proxy decision (helper strategy upstream)
  *   rules   — run each `rules`-strategy handler once with a tripwire ctx
  *             and translate it to declarativeNetRequest rule specs
  *   run     — execute the body ops (requestDecision / transform / replace /
- *             responseHeaders) with the same semantics as ChromeBodyStrategy's
+ *             responseHeaders) with the same semantics as PageStrategy's
  *             MV2 in-SW execution, mirroring its log lines
  *
  * Reverse calls (wt.storage.* and script logging) travel the other way
@@ -270,7 +270,7 @@ async function rules(scripts: PlainScript[], paramValues: Record<string, any>, d
     return { results };
 }
 
-// ---- proxy decisions (process tier: evaluate the user's PAC/rules) ----
+// ---- proxy decisions (helper strategy: evaluate the user's PAC/rules) ----
 
 let pacCache: { source: string; fn: (url: string, host: string) => string } | null = null;
 

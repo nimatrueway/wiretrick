@@ -55,8 +55,8 @@ async function load() {
     (globalThis as any).browser = { webRequest };
     const logs = await import("../src/background/engine/logs");
     logs.addUiPort({ postMessage: (m: any) => m?.type === "log" && entries.push(m.entry), onDisconnect: { addListener: () => {} } } as any);
-    const { WebRequestStrategy } = await import("../src/background/engine/strategies/webRequestStrategy");
-    return new WebRequestStrategy();
+    const { ExtensionStrategy } = await import("../src/background/engine/strategies/extensionStrategy");
+    return new ExtensionStrategy();
 }
 
 const page = (over: Record<string, any> = {}) => ({

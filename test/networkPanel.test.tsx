@@ -37,7 +37,7 @@ function entry(id: string, over: Partial<NetEntry> = {}): NetEntry {
         startedAt: base,
         endedAt: base + 30,
         state: "done",
-        interventions: [],
+        outcomes: [],
         ...over,
     };
 }
@@ -113,8 +113,8 @@ describe("NetworkPanel", () => {
         expect(container.querySelector("tbody .c-status")!.textContent).toBe("200");
     });
 
-    it("filters by text, type chip and script activity (all / tapped / modified)", async () => {
-        const hit = entry("api", { type: "xmlhttprequest", interventions: [{ scriptId: "s", scriptName: "Mocker", action: "onRequest → replaceResponse 200", level: "info", kind: "modified", at: base }] });
+    it("filters by text, type chip and script activity (all / observed / modified)", async () => {
+        const hit = entry("api", { type: "xmlhttprequest", outcomes: [{ scriptId: "s", scriptName: "Mocker", action: "onRequest → replaceResponse 200", level: "info", kind: "modified", at: base }] });
         const { container, getByText, getByPlaceholderText } = setup([entry("a"), hit]);
         // independent toggles: switching off JS keeps Fetch/XHR on
         fireEvent.click(getByText("JS"));
@@ -144,29 +144,29 @@ describe("NetworkPanel", () => {
     });
 
     it("marks observed vs modified rows; Observed = observed-only, Modified, Touched = either; footer counts", () => {
-        const tapped = { scriptId: "s", scriptName: "Watcher", action: "onRequest → observed (no change)", level: "debug" as const, kind: "tapped" as const, at: base };
+        const observed = { scriptId: "s", scriptName: "Watcher", action: "onRequest → observed (no change)", level: "debug" as const, kind: "observed" as const, at: base };
         const modified = { scriptId: "m", scriptName: "Mocker", action: "onResponseBody applied (1b → 2b)", level: "info" as const, kind: "modified" as const, at: base };
         const { container } = setup([
             entry("plain"),
-            entry("watched", { startedAt: base + 1, interventions: [tapped] }),
-            entry("changed", { startedAt: base + 2, interventions: [tapped, modified] }),
+            entry("watched", { startedAt: base + 1, outcomes: [observed] }),
+            entry("changed", { startedAt: base + 2, outcomes: [observed, modified] }),
         ]);
         const rows = [...container.querySelectorAll("tbody tr")];
-        expect(rows.map((r) => (r.classList.contains("modified") ? "modified" : r.classList.contains("tapped") ? "tapped" : "none"))).toEqual(["none", "tapped", "modified"]);
+        expect(rows.map((r) => (r.classList.contains("modified") ? "modified" : r.classList.contains("observed") ? "observed" : "none"))).toEqual(["none", "observed", "modified"]);
         expect(container.querySelector(".net-status")!.textContent).toContain("1 observed · 1 modified");
         expect(container.querySelector(".net-status .net-hl")!.textContent).toBe("1 modified");
         // per-script badges: hollow for a script that only looked
-        expect([...rows[2].querySelectorAll(".net-badge")].map((b) => b.className)).toEqual(["net-badge tapped", "net-badge modified"]);
+        expect([...rows[2].querySelectorAll(".net-badge")].map((b) => b.className)).toEqual(["net-badge observed", "net-badge modified"]);
         pickActivity(container, "Observed");
         expect(rowNames(container)).toEqual(["watched.js"]);
         pickActivity(container, "Touched");
         expect(rowNames(container)).toEqual(["watched.js", "changed.js"]);
         pickActivity(container, "Modified");
         expect(rowNames(container)).toEqual(["changed.js"]);
-        // details list: tapped entries muted
+        // details list: observed entries muted
         fireEvent.click(container.querySelector("tbody tr")!);
         const actions = [...container.querySelectorAll(".net-action")];
-        expect(actions.map((a) => a.classList.contains("tapped"))).toEqual([true, false]);
+        expect(actions.map((a) => a.classList.contains("observed"))).toEqual([true, false]);
     });
 
     it("script-activity menu: listbox with row markers, keyboard + outside click", () => {
@@ -181,9 +181,9 @@ describe("NetworkPanel", () => {
         expect(opts.map((o) => o.textContent)).toEqual(["All", "Observed", "Modified", "Touched"]);
         expect(opts.map((o) => [...o.querySelectorAll(".net-mark")].map((m) => m.className))).toEqual([
             [],
-            ["net-mark tapped"],
+            ["net-mark observed"],
             ["net-mark modified"],
-            ["net-mark tapped", "net-mark modified"],
+            ["net-mark observed", "net-mark modified"],
         ]);
         expect(opts.map((o) => o.getAttribute("aria-selected"))).toEqual(["true", "false", "false", "false"]);
         expect(document.activeElement).toBe(list);
@@ -199,7 +199,7 @@ describe("NetworkPanel", () => {
         // ArrowUp on the button opens at the previous option; Space picks; wraps around
         fireEvent.keyDown(button, { key: "ArrowUp" });
         const list2 = container.querySelector('[role="listbox"]')!;
-        expect(list2.getAttribute("aria-activedescendant")).toBe("net-touch-opt-tapped");
+        expect(list2.getAttribute("aria-activedescendant")).toBe("net-touch-opt-observed");
         fireEvent.keyDown(list2, { key: "End" });
         fireEvent.keyDown(list2, { key: " " });
         expect(button.getAttribute("aria-label")).toBe("Script activity: Touched");
@@ -226,7 +226,7 @@ describe("NetworkPanel", () => {
         const hit = entry("api", {
             responseHeaders: [["content-type", "application/json"]],
             requestHeaders: [["accept", "*/*"]],
-            interventions: [{ scriptId: "s", scriptName: "Mocker", action: "onResponseBody applied", level: "info", kind: "modified", at: base }],
+            outcomes: [{ scriptId: "s", scriptName: "Mocker", action: "onResponseBody applied", level: "info", kind: "modified", at: base }],
         });
         const { container, getByText } = setup([hit]);
         fireEvent.click(container.querySelector("tbody tr")!);

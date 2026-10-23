@@ -94,11 +94,11 @@ describe("network recorder", () => {
     });
 
     it("keeps script-touched rows while no Network tab is open, without listeners or bodies", () => {
-        annotateFromLog(7, "s1", "[S] onRequest → observed (no change) https://a.test/x", "debug", "tapped");
+        annotateFromLog(7, "s1", "[S] onRequest → observed (no change) https://a.test/x", "debug", "observed");
         annotateFromLog(7, "s1", "[S] onResponseBody applied https://a.test/x", "info");
         recordNetBody({ tabId: 7, url: "https://a.test/x", modified: "big" });
         expect(listeners.before?.length ?? 0).toBe(0);
-        expect([...entries.values()].map((e) => [e.url, e.interventions.map((i) => i.kind), e.responseBody])).toEqual([["https://a.test/x", ["tapped", "modified"], undefined]]);
+        expect([...entries.values()].map((e) => [e.url, e.outcomes.map((i) => i.kind), e.responseBody])).toEqual([["https://a.test/x", ["observed", "modified"], undefined]]);
         const p = fakePort();
         addNetworkPort(p.port);
         expect(p.sent[0].entries.length).toBe(1);
@@ -124,7 +124,7 @@ describe("network recorder", () => {
         addNetworkPort(p.port);
         req("1", "https://a.test/", { type: "main_frame", initiator: "chrome-extension://ext" });
         annotateFromLog(7, "s1", "[S] onResponseHeaders → set x-a https://a.test/", "info");
-        expect([...entries.values()].map((e) => [e.id, e.interventions.length])).toEqual([["1", 1]]);
+        expect([...entries.values()].map((e) => [e.id, e.outcomes.length])).toEqual([["1", 1]]);
         p.disconnect();
     });
 
@@ -166,22 +166,22 @@ describe("network recorder", () => {
         req("1", "https://a.test/api");
         req("2", "https://a.test/api", { tabId: 9 });
         annotateFromLog(7, "s1", "[My script] onResponseBody applied (10b → 12b) https://a.test/api", "info");
-        expect(entries.get("1")!.interventions).toMatchObject([{ scriptId: "s1", scriptName: "My script", action: "onResponseBody applied (10b → 12b)" }]);
-        expect(entries.get("2")!.interventions).toEqual([]);
+        expect(entries.get("1")!.outcomes).toMatchObject([{ scriptId: "s1", scriptName: "My script", action: "onResponseBody applied (10b → 12b)" }]);
+        expect(entries.get("2")!.outcomes).toEqual([]);
         p.disconnect();
     });
 
-    it("records each annotation as tapped or modified", () => {
+    it("records each annotation as observed or modified", () => {
         const p = fakePort();
         addNetworkPort(p.port);
         req("1", "https://a.test/api");
-        annotateFromLog(7, "s1", "[W] onRequest → observed (no change) https://a.test/api", "debug", "tapped");
+        annotateFromLog(7, "s1", "[W] onRequest → observed (no change) https://a.test/api", "debug", "observed");
         annotateFromLog(7, "s1", "[W] onResponseBody applied (1b → 2b) https://a.test/api", "info");
         annotateFromLog(7, "s1", "[W] onResponseBody threw: boom https://a.test/api", "error");
-        expect(entries.get("1")!.interventions.map((i) => [i.action, i.kind])).toEqual([
-            ["onRequest → observed (no change)", "tapped"],
+        expect(entries.get("1")!.outcomes.map((i) => [i.action, i.kind])).toEqual([
+            ["onRequest → observed (no change)", "observed"],
             ["onResponseBody applied (1b → 2b)", "modified"],
-            ["onResponseBody threw: boom", "tapped"],
+            ["onResponseBody threw: boom", "observed"],
         ]);
         p.disconnect();
     });
@@ -192,7 +192,7 @@ describe("network recorder", () => {
         req("1", "https://a.test/api");
         annotateFromLog(7, "s1", "[helper] [My script] onResponseBody applied (1b → 2b) https://a.test/api", "info");
         annotateFromLog(7, "s2", "[helper] onRequest → block https://a.test/api", "info");
-        expect(entries.get("1")!.interventions.map((i) => [i.scriptName, i.action])).toEqual([
+        expect(entries.get("1")!.outcomes.map((i) => [i.scriptName, i.action])).toEqual([
             ["My script", "onResponseBody applied (1b → 2b) (helper)"],
             ["helper", "onRequest → block"],
         ]);
@@ -205,7 +205,7 @@ describe("network recorder", () => {
         annotateFromLog(7, "s1", "[Mock] replaceResponse 200 https://a.test/mocked", "info");
         const [e] = [...entries.values()];
         expect(e).toMatchObject({ synthetic: true, url: "https://a.test/mocked", tabId: 7 });
-        expect(e.interventions[0].action).toBe("replaceResponse 200");
+        expect(e.outcomes[0].action).toBe("replaceResponse 200");
         p.disconnect();
     });
 
@@ -216,7 +216,7 @@ describe("network recorder", () => {
         annotateFromLog(7, "s1", "[Hdr] onRequest → request headers (set x-a) https://a.test/api", "info");
         req("1", "https://a.test/api");
         expect([...entries.values()].filter((e) => e.synthetic)).toEqual([]);
-        expect(entries.get("1")!.interventions).toMatchObject([{ scriptName: "Hdr", action: "onRequest → request headers (set x-a)" }]);
+        expect(entries.get("1")!.outcomes).toMatchObject([{ scriptName: "Hdr", action: "onRequest → request headers (set x-a)" }]);
         expect(p.sent.some((m) => m.type === "netRemoved")).toBe(true);
         p.disconnect();
     });
@@ -226,7 +226,7 @@ describe("network recorder", () => {
         addNetworkPort(p.port);
         req("1", "https://a.test/page", { type: "main_frame" });
         annotateFromLog(7, "s1", "[Mod] onResponseBody never ran for https://a.test/page (document) — the local helper isn't running", "warn", "missed", "https://a.test/page");
-        expect(entries.get("1")!.interventions).toMatchObject([{ scriptName: "Mod", kind: "missed", action: "onResponseBody never ran for https://a.test/page (document) — the local helper isn't running" }]);
+        expect(entries.get("1")!.outcomes).toMatchObject([{ scriptName: "Mod", kind: "missed", action: "onResponseBody never ran for https://a.test/page (document) — the local helper isn't running" }]);
         p.disconnect();
     });
 
@@ -285,7 +285,7 @@ describe("network recorder", () => {
         const [e] = [...entries.values()];
         // the unknown-tab annotation and the tab-aware body land on one row
         expect(e).toMatchObject({ synthetic: true, tabId: 9, method: "POST", mime: "application/json", status: 201 });
-        expect(e.interventions).toHaveLength(1);
+        expect(e.outcomes).toHaveLength(1);
         expect(e.responseBody!.text).toBe("{}");
         p.disconnect();
     });

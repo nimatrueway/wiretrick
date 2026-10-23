@@ -422,12 +422,12 @@ const row10d: { cls: string; badges: string[] } | null = await mgr.evaluate(() =
     const tr = [...document.querySelectorAll("#network-view tbody tr")].find((t) => (t.querySelector(".net-name")?.textContent || "").includes("html-missed"));
     return tr ? { cls: tr.className, badges: [...tr.querySelectorAll(".net-badge")].map((b) => b.className) } : null;
 });
-check("missed: the Network row is not marked tapped or modified", !!row10d && !/\b(tapped|modified)\b/.test(row10d.cls) && row10d.badges.some((c) => c.includes("missed")), JSON.stringify(row10d));
+check("missed: the Network row is not marked observed or modified", !!row10d && !/\b(observed|modified)\b/.test(row10d.cls) && row10d.badges.some((c) => c.includes("missed")), JSON.stringify(row10d));
 await p10d.close();
 await setEnabled("s_missed", false);
 await setEnabled("s_missed_wr", false);
 
-// ---------- 10e. row markers: every tapped-only row carries the dashed marker (incl. consecutive ones) ----------
+// ---------- 10e. row markers: every observed-only row carries the dashed marker (incl. consecutive ones) ----------
 await saveScript("s_tapper", `wt.onResponseBody({ url: "${ORIGIN}/tap-api/*", strategy: "page" }, () => undefined);`, "marker tapper");
 await saveScript("s_marker_mod", `wt.onResponseBody({ url: "${ORIGIN}/tap-api/m*", strategy: "page" }, (ctx, body) => String(body).replace("tap-api", "TAP-API"));`, "marker modifier");
 await new Promise((r) => setTimeout(r, 600));
@@ -443,12 +443,12 @@ const rows10e: { name: string; cls: string; badges: string[]; bgImg: string; bgS
             return { name: tr.getAttribute("title") || "", cls: tr.className, badges: [...tr.querySelectorAll(".net-badge")].map((b) => b.className), bgImg: cs.backgroundImage, bgSize: cs.backgroundSize };
         })
 );
-const tappedOnly10e = rows10e.filter((r) => r.badges.length > 0 && r.badges.every((b) => /\btapped\b/.test(b)));
+const observedOnly10e = rows10e.filter((r) => r.badges.length > 0 && r.badges.every((b) => /\bobserved\b/.test(b)));
 const modified10e = rows10e.filter((r) => r.badges.some((b) => /\bmodified\b/.test(b)));
 check(
-    "network: every row whose tags are all tapped has class `tapped` and a visible marker",
-    tappedOnly10e.length >= 3 && tappedOnly10e.every((r) => /\btapped\b/.test(r.cls) && r.bgImg !== "none"),
-    JSON.stringify(tappedOnly10e.map((r) => [r.name.replace(ORIGIN, ""), r.cls, r.bgImg.slice(0, 30)]))
+    "network: every row whose tags are all observed has class `observed` and a visible marker",
+    observedOnly10e.length >= 3 && observedOnly10e.every((r) => /\bobserved\b/.test(r.cls) && r.bgImg !== "none"),
+    JSON.stringify(observedOnly10e.map((r) => [r.name.replace(ORIGIN, ""), r.cls, r.bgImg.slice(0, 30)]))
 );
 check(
     "network: modified rows have class `modified` and a visible marker",
@@ -457,7 +457,7 @@ check(
 );
 check(
     "network: markers are inset per row (consecutive marked rows don't merge into one line)",
-    [...tappedOnly10e, ...modified10e].every((r) => /calc\(100% - [1-9]\d*px\)/.test(r.bgSize)),
+    [...observedOnly10e, ...modified10e].every((r) => /calc\(100% - [1-9]\d*px\)/.test(r.bgSize)),
     JSON.stringify([...new Set(rows10e.map((r) => r.bgSize))])
 );
 await p10e.close();
@@ -486,8 +486,8 @@ const rows10f = net10f.filter((e) => e.url === `${ORIGIN}/echo-headers` && e.sta
 const page10f = rows10f.find((e) => e.type === "main_frame");
 check(
     "network: a page opened from the manager is recorded; header annotations land on it, not a synthetic row",
-    !!page10f && page10f.interventions.length >= 2 && !rows10f.some((e) => e.synthetic),
-    JSON.stringify(rows10f.map((e) => [e.id, e.type, e.interventions.length]))
+    !!page10f && page10f.outcomes.length >= 2 && !rows10f.some((e) => e.synthetic),
+    JSON.stringify(rows10f.map((e) => [e.id, e.type, e.outcomes.length]))
 );
 check("network: recorded response headers include onResponseHeaders changes", !!page10f?.responseHeaders?.some(([n, v]: string[]) => n.toLowerCase() === "x-wt-res" && v === "1"), JSON.stringify(page10f?.responseHeaders));
 await p10f.close();

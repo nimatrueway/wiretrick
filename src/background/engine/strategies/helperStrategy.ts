@@ -1,14 +1,14 @@
 /**
- * Tier P: the "helper" strategy — a local helper (wiretrick-helper, Rust)
+ * The "helper" strategy — a local helper (wiretrick-helper, Rust)
  * is a loopback MITM proxy that Chrome reaches through a PAC
- * (processRouting.ts) for the hosts of process-owned routes only. It
+ * (helperRouting.ts) for the hosts of helper-owned routes only. It
  * pauses matching requests CDP-Fetch style over native messaging; this
  * class runs the scripts' handlers and answers continue / fulfill /
  * redirect / fail. No debugger, no banner, every handler kind (sync and
  * async), every resource type (documents, scripts, images, workers...).
  *
- * Handler chains share src/shared/bodyOps.ts with the hook and debugger
- * tiers: MV2 compiles in the background page, MV3 runs in the sandbox.
+ * Handler chains share src/shared/bodyOps.ts with the page and debugger
+ * strategies: MV2 compiles in the background page, MV3 runs in the sandbox.
  */
 import { runOp, type BodyOp, type OpScript } from "../../../shared/bodyOps";
 import { hostPatternOf, type SystemProxyInfo } from "../../../shared/pac";
@@ -19,15 +19,15 @@ import type { Script } from "../scriptStore";
 import { log } from "../logs";
 import { evalProxyDecision, runBodyOp } from "../../compileHost";
 import { recordNetBody } from "../../network";
-import { ProcessRouting } from "../../processRouting";
-import { IS_FIREFOX, setProcessActive } from "./processState";
-import { compileMv2, ownedRoutes, ownsAny, type OwnedRoute } from "./tiers";
+import { HelperRouting } from "../../helperRouting";
+import { IS_FIREFOX, setHelperActive } from "./helperState";
+import { compileMv2, ownedRoutes, ownsAny, type OwnedRoute } from "./strategyScripts";
 
 export const NM_HOST = "com.wiretrick.helper";
 
 type Pairs = [string, string][];
 
-/** helper route JSON (helper/src/nm.rs Route): one per process-owned handler route */
+/** helper route JSON (helper/src/nm.rs Route): one per helper-owned handler route */
 export interface HelperRoute {
     match: string[];
     exclude: string[];
@@ -63,7 +63,7 @@ interface HelperReady {
 export interface ProcessStatus {
     state: "idle" | "unsupported" | "connecting" | "ready" | "missing" | "error";
     extensionId: string;
-    /** scripts with process-owned handlers (names) */
+    /** scripts with helper-owned handlers (names) */
     scripts: string[];
     version?: string;
     /** the helper is older than MIN_HELPER_VERSION — reinstall it */
@@ -186,11 +186,11 @@ class RequestContext {
     }
 }
 
-export class ProcessStrategy {
+export class HelperStrategy {
     /** status changes (manager UI) */
     onStatus: (s: ProcessStatus) => void = () => {};
 
-    private routing = new ProcessRouting();
+    private routing = new HelperRouting();
     private ctx = new RequestContext();
     private port: chrome.runtime.Port | null = null;
     private helper: HelperReady | null = null;
@@ -213,7 +213,7 @@ export class ProcessStrategy {
 
     constructor() {
         this.routing.onLost = () => {
-            setProcessActive(false);
+            setHelperActive(false);
             this.emit();
         };
     }
@@ -286,7 +286,7 @@ export class ProcessStrategy {
             this.port = null;
             this.helper = null;
             this.chunks.clear();
-            setProcessActive(false);
+            setHelperActive(false);
             void this.routing.clear();
             if (!this.owned.length) {
                 this.state = "idle";
@@ -324,7 +324,7 @@ export class ProcessStrategy {
         } catch {
             /* already gone */
         }
-        setProcessActive(false);
+        setHelperActive(false);
         void this.routing.clear();
         this.state = "idle";
         this.error = undefined;
@@ -342,7 +342,7 @@ export class ProcessStrategy {
                 this.send({ t: "config", routes: [], upstream: "direct" });
                 await this.routing.clear();
                 this.routing.status = { active: false, reason: d.reason };
-                setProcessActive(false);
+                setHelperActive(false);
                 dlogLevel("helper", "warn", `helper strategy inactive: ${d.reason}`);
                 this.emit();
                 return;
@@ -351,7 +351,7 @@ export class ProcessStrategy {
             // routes first: the helper must know them before traffic arrives
             this.send({ t: "config", routes, upstream: d.decision.upstream });
             const applied = await this.routing.apply(helper.port, this.owned.flatMap((o) => o.route.url), this.system);
-            setProcessActive(applied.ok);
+            setHelperActive(applied.ok);
             if (applied.ok && applied.decision.note) dlogLevel("helper", "warn", applied.decision.note);
             this.emit();
             if (applied.ok) void this.probe();

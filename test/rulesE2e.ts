@@ -104,8 +104,8 @@ export async function checkRulesStrategy(ctx: any, mgr: any, origin: string, che
         const port = chrome.runtime.connect({ name: "network" });
         port.onMessage.addListener((m: any) => { if (m.type === "netSnapshot") { port.disconnect(); resolve(m.entries); } });
     }));
-    const marked = net.filter((e) => e.url === `${origin}/rules-blocked` && e.interventions?.some((i: any) => i.kind === "modified" && /block/.test(i.action || "")));
-    check(t("Network: a blocked request is marked Modified (rules: block)"), marked.length > 0, JSON.stringify(net.filter((e) => e.url?.includes("/rules-")).map((e) => [e.url.replace(origin, ""), e.interventions?.map((i: any) => [i.kind, i.action])])).slice(0, 400));
+    const marked = net.filter((e) => e.url === `${origin}/rules-blocked` && e.outcomes?.some((i: any) => i.kind === "modified" && /block/.test(i.action || "")));
+    check(t("Network: a blocked request is marked Modified (rules: block)"), marked.length > 0, JSON.stringify(net.filter((e) => e.url?.includes("/rules-")).map((e) => [e.url.replace(origin, ""), e.outcomes?.map((i: any) => [i.kind, i.action])])).slice(0, 400));
 
     // saving a fixed script clears the error
     await send({ type: "saveScript", id: "s_rules", name: "rules probe", code: code.replace(`(ctx) => (ctx.method === "POST" ? { block: true } : undefined)`, `() => ({ block: true })`) });

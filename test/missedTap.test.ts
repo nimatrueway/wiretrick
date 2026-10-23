@@ -1,8 +1,8 @@
 /** "onResponseBody never ran": reason selection, throttle, and the tap registry. */
 import { describe, it, expect, beforeEach } from "vitest";
 import { makeMissedThrottle, missedReason, missedWhat, routeProblem, MISSED_REASONS, type MissedCase } from "../src/shared/missedTap";
-import { interventionKind, missedLine } from "../src/shared/netTypes";
-import { __resetTaps, bodyTappedSince, log, logTapped } from "../src/background/engine/logs";
+import { outcomeKind, missedLine } from "../src/shared/netTypes";
+import { __resetTaps, bodyObservedSince, log, logObserved } from "../src/background/engine/logs";
 
 const base: MissedCase = { strategy: "debugger", type: "main_frame", firefox: false, mv3: false, fromCache: false, helperActive: false, cdpWarned: false };
 const reason = (over: Partial<MissedCase>) => missedReason({ ...base, ...over });
@@ -76,11 +76,11 @@ describe("routeProblem (up-front warning, no fallback)", () => {
 });
 
 describe("missed warning line", () => {
-    it("is classified missed — never tapped — with or without an explicit kind", () => {
+    it("is classified missed — never observed — with or without an explicit kind", () => {
         const line = missedLine("Mod", "onResponseBody", "https://a.test/", "document", MISSED_REASONS.helperDown);
         expect(line).toBe(`[Mod] onResponseBody never ran for https://a.test/ (document) — ${MISSED_REASONS.helperDown}`);
-        expect(interventionKind("warn", line)).toBe("missed");
-        expect(interventionKind("warn", line, "missed")).toBe("missed");
+        expect(outcomeKind("warn", line)).toBe("missed");
+        expect(outcomeKind("warn", line, "missed")).toBe("missed");
     });
 });
 
@@ -102,27 +102,27 @@ describe("body tap registry", () => {
 
     it("records body-handler lines per script+url, whatever the tab, with no manager open", () => {
         const t0 = Date.now() - 10;
-        expect(bodyTappedSince("s1", "https://a.test/x", t0)).toBe(false);
-        logTapped(-1, "S", "onResponseBody", "https://a.test/x", "s1");
-        expect(bodyTappedSince("s1", "https://a.test/x", t0)).toBe(true);
-        expect(bodyTappedSince("s2", "https://a.test/x", t0)).toBe(false);
-        expect(bodyTappedSince("s1", "https://a.test/x", Date.now() + 1000)).toBe(false);
+        expect(bodyObservedSince("s1", "https://a.test/x", t0)).toBe(false);
+        logObserved(-1, "S", "onResponseBody", "https://a.test/x", "s1");
+        expect(bodyObservedSince("s1", "https://a.test/x", t0)).toBe(true);
+        expect(bodyObservedSince("s2", "https://a.test/x", t0)).toBe(false);
+        expect(bodyObservedSince("s1", "https://a.test/x", Date.now() + 1000)).toBe(false);
     });
 
     it("onRequest header taps don't count; terminal onRequest results do", () => {
         const t0 = Date.now() - 10;
-        logTapped(3, "S", "onRequest", "https://a.test/h", "s1");
+        logObserved(3, "S", "onRequest", "https://a.test/h", "s1");
         log(3, "[S] onRequest → request headers (set x) https://a.test/h", "info", "s1");
-        expect(bodyTappedSince("s1", "https://a.test/h", t0)).toBe(false);
+        expect(bodyObservedSince("s1", "https://a.test/h", t0)).toBe(false);
         log(3, "[S] onRequest → block https://a.test/h", "info", "s1");
-        expect(bodyTappedSince("s1", "https://a.test/h", t0)).toBe(true);
+        expect(bodyObservedSince("s1", "https://a.test/h", t0)).toBe(true);
     });
 
     it("a script error counts (it ran), the missed line itself doesn't", () => {
         const t0 = Date.now() - 10;
         log(3, "[S] onResponseBody never ran for https://a.test/m (document) — x", "warn", "s1", "missed", "https://a.test/m");
-        expect(bodyTappedSince("s1", "https://a.test/m", t0)).toBe(false);
+        expect(bodyObservedSince("s1", "https://a.test/m", t0)).toBe(false);
         log(3, "[S] onResponseBody threw: boom", "error", "s1");
-        expect(bodyTappedSince("s1", "https://a.test/m", t0)).toBe(true);
+        expect(bodyObservedSince("s1", "https://a.test/m", t0)).toBe(true);
     });
 });

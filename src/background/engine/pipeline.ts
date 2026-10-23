@@ -4,19 +4,19 @@
  * browser-specific below it lives in strategies/.
  */
 import type { InterceptionStrategy } from "./strategies/types";
-import type { ChromeBodyStrategy } from "./strategies/chromeBodyStrategy";
-import type { CdpStrategy } from "./strategies/cdpStrategy";
-import type { ProcessStrategy } from "./strategies/processStrategy";
+import type { PageStrategy } from "./strategies/pageStrategy";
+import type { DebuggerStrategy } from "./strategies/debuggerStrategy";
+import type { HelperStrategy } from "./strategies/helperStrategy";
 import type { RulesStrategy } from "./strategies/rulesStrategy";
-import { IS_FIREFOX, onProcessActiveChange, processActive, tierUnavailable } from "./strategies/processState";
+import { IS_FIREFOX, onHelperActiveChange, helperActive, strategyUnavailable } from "./strategies/helperState";
 import type { HeaderChanges } from "./strategies/types";
 import type { Script } from "./scriptStore";
 import { listScripts, getScript, onScriptsChanged, saveScript, deleteScript, setEnabled, newId, scriptStorageGet, scriptStorageSet, loadAllParamValues, getParamValues, setParamValue } from "./scriptStore";
-import { serveStore } from "./strategies/webRequestStrategy";
+import { serveStore } from "./strategies/extensionStrategy";
 import { dlog, dlogLevel } from "../../shared/debugLog";
 import { isThenable, toRunnableJs } from "../../shared/compile";
 import "../../shared/transpile";
-import { log, getScriptErrors, getScriptTypeErrors, getScriptRuleErrors, bodyTappedSince } from "./logs";
+import { log, getScriptErrors, getScriptTypeErrors, getScriptRuleErrors, bodyObservedSince } from "./logs";
 import { missedLine } from "../../shared/netTypes";
 import { makeMissedThrottle, missedReason, missedWhat, routeProblem, MISSED_SKIP_TYPES } from "../../shared/missedTap";
 import { resolveParamValues } from "../../shared/scriptDef";
@@ -63,16 +63,16 @@ function withAnalyzedMeta(scripts: Script[], analyzed: Map<string, Analyzed>): S
 
 export interface Pipeline {
     reload(): Promise<void>;
-    chromeBody: ChromeBodyStrategy;
-    cdp: CdpStrategy;
+    pageStrategy: PageStrategy;
+    cdp: DebuggerStrategy;
     dispose(): void;
 }
 
 export function createPipeline(
-    webRequestStrategy: InterceptionStrategy & { reload(s: Script[], paramValues?: { [scriptId: string]: Record<string, any> }): void; matchingNames?(url: string): string[] },
-    chromeBody: ChromeBodyStrategy,
-    cdp: CdpStrategy,
-    processStrategy: ProcessStrategy,
+    extensionStrategy: InterceptionStrategy & { reload(s: Script[], paramValues?: { [scriptId: string]: Record<string, any> }): void; matchingNames?(url: string): string[] },
+    pageStrategy: PageStrategy,
+    cdp: DebuggerStrategy,
+    helperStrategy: HelperStrategy,
     rulesStrategy: RulesStrategy,
     updateTabBadge?: (tabId: number, url: string | undefined) => Promise<void>,
     noteRequestForBadge?: (tabId: number, url: string) => number,
@@ -94,7 +94,7 @@ export function createPipeline(
             },
             { urls: ["<all_urls>"], types: ["main_frame"] }
         );
-        // MV3 debugger tier: attach BEFORE the navigation's subresources
+        // MV3 debugger strategy: attach BEFORE the navigation's subresources
         // load (webNavigation also wakes an idle service worker)
         chrome.webNavigation.onBeforeNavigate.addListener((d) => {
             if (d.frameId !== 0) return;
@@ -125,7 +125,7 @@ export function createPipeline(
     let bodyWatch: BodyWatch[] = [];
     /** requestId → start time, only for requests a watched script matches */
     const watchedStarts = new Map<string, number>();
-    /** `${tabId}|${url}` loads the debugger-tier warning below already reported */
+    /** `${tabId}|${url}` loads the debugger strategy warning below already reported */
     const cdpWarned = new Set<string>();
     const missedThrottle = makeMissedThrottle();
     const extOrigin = chrome.runtime.getURL("");
@@ -151,19 +151,19 @@ export function createPipeline(
         if (!routes.length) return;
         setTimeout(() => {
             // the hook took it: the page may simply never read the body
-            if (chromeBody.isClaimed(d.url)) return;
+            if (pageStrategy.isClaimed(d.url)) return;
             const done = new Set<string>();
             for (const w of routes) {
                 if (done.has(w.id)) continue;
                 done.add(w.id);
-                if (bodyTappedSince(w.id, d.url, start - 250)) continue;
+                if (bodyObservedSince(w.id, d.url, start - 250)) continue;
                 const reason = missedReason({
                     strategy: w.strategy,
                     type: d.type,
                     firefox: IS_FIREFOX,
                     mv3: __MV3__,
                     fromCache: !!d.fromCache,
-                    helperActive: processActive(),
+                    helperActive: helperActive(),
                     cdpWarned: cdpWarned.has(`${d.tabId}|${d.url}`),
                 });
                 if (!reason || !missedThrottle(`${w.id}|${d.url}`)) continue;
@@ -189,7 +189,7 @@ export function createPipeline(
                 const strategy = effectiveStrategy(r);
                 const msg = routeProblem({ kind: r.kind, strategy, resourceTypes: r.resourceTypes }, { firefox: IS_FIREFOX, mv3: __MV3__ });
                 if (msg) byMsg.set(msg, [...(byMsg.get(msg) || []), routeLabel(r)]);
-                else if (strategy === "helper" && tierUnavailable("helper")) down.push(routeLabel(r));
+                else if (strategy === "helper" && strategyUnavailable("helper")) down.push(routeLabel(r));
             }
             for (const [msg, labels] of byMsg) problems.push({ id: s.id, name: s.meta.name, msg, labels });
             if (down.length) helperDown.push({ id: s.id, name: s.meta.name, labels: down });
@@ -212,8 +212,8 @@ export function createPipeline(
         // period, and keep waiting while it is still connecting
         const check = (): void => {
             helperTimer = undefined;
-            if (processActive()) return;
-            const st = processStrategy.status();
+            if (helperActive()) return;
+            const st = helperStrategy.status();
             if (st.state === "connecting" || (st.state === "ready" && !st.routing?.reason)) {
                 helperTimer = setTimeout(check, HELPER_GRACE_MS);
                 return;
@@ -223,7 +223,7 @@ export function createPipeline(
                 const labels = h.labels.join(", ");
                 if (routeWarned.get(key) === labels) continue;
                 routeWarned.set(key, labels);
-                log(-1, `[${h.name}] ${labels}: strategy "helper" — ${tierUnavailable("helper")}; these handlers don't run until it is`, "warn", h.id);
+                log(-1, `[${h.name}] ${labels}: strategy "helper" — ${strategyUnavailable("helper")}; these handlers don't run until it is`, "warn", h.id);
             }
         };
         helperTimer = setTimeout(check, HELPER_GRACE_MS);
@@ -242,7 +242,7 @@ export function createPipeline(
 
     if (chrome.webRequest?.onCompleted) {
         chrome.webRequest.onCompleted.addListener((d) => checkMissed(d), { urls: ["<all_urls>"] });
-        // observe-only (MV3-legal): a debugger-tier load that left before
+        // observe-only (MV3-legal): a debugger strategy load that left before
         // the tab's debugger attached is NOT intercepted — say so instead of
         // failing silently. Typical: the page itself on a first visit (MV2
         // attaches only once the navigation has started; MV3 after a cold
@@ -290,9 +290,9 @@ export function createPipeline(
     });
     chrome.tabs.onRemoved.addListener((tabId) => {
         tabUrls.delete(tabId);
-        chromeBody.forgetTab(tabId);
+        pageStrategy.forgetTab(tabId);
         cdp.forgetTab(tabId);
-        processStrategy.forgetTab(tabId);
+        helperStrategy.forgetTab(tabId);
     });
 
     function tabUrlFor(tabId: number, requestUrl: string): string | null {
@@ -331,7 +331,7 @@ export function createPipeline(
     }
 
     // ---- webRequest wiring ----
-    /** requestId → first URL of requests a webrequest-tier script matched (diagnostics) */
+    /** requestId → first URL of requests a extension-strategy script matched (diagnostics) */
     const traced = new Map<string, { url: string; tabId: number; at: number }>();
     const onBeforeRequest = (details: any) => {
         const tabUrl = tabUrlFor(details.tabId, details.url);
@@ -356,8 +356,8 @@ export function createPipeline(
             if (n !== undefined && n > 0) void updateTabBadge?.(details.tabId, details.url);
         }
 
-        const disposition = webRequestStrategy.handleBeforeRequest(details, tabUrl);
-        if (!traced.has(details.requestId) && webRequestStrategy.matchingNames?.(details.url).length) {
+        const disposition = extensionStrategy.handleBeforeRequest(details, tabUrl);
+        if (!traced.has(details.requestId) && extensionStrategy.matchingNames?.(details.url).length) {
             traced.set(details.requestId, { url: details.url, tabId: details.tabId, at: Date.now() });
             if (traced.size > 500) traced.delete(traced.keys().next().value as string);
         }
@@ -410,8 +410,8 @@ export function createPipeline(
     const onBeforeSendHeaders = (details: any) => {
         const tabUrl = tabUrlFor(details.tabId, details.url);
         const changes =
-            webRequestStrategy.handleBeforeSendHeaders(details, tabUrl) ||
-            chromeBody.handleBeforeSendHeaders(details, tabUrl);
+            extensionStrategy.handleBeforeSendHeaders(details, tabUrl) ||
+            pageStrategy.handleBeforeSendHeaders(details, tabUrl);
         if (isThenable(changes)) {
             return changes.then((c: any) => (c ? { requestHeaders: applyHeaderChanges(details.requestHeaders || [], c) } : {}));
         }
@@ -422,8 +422,8 @@ export function createPipeline(
     const onHeadersReceived = (details: any) => {
         const tabUrl = tabUrlFor(details.tabId, details.url);
         const changes =
-            webRequestStrategy.handleHeadersReceived(details, tabUrl) ||
-            chromeBody.handleHeadersReceived(details, tabUrl);
+            extensionStrategy.handleHeadersReceived(details, tabUrl) ||
+            pageStrategy.handleHeadersReceived(details, tabUrl);
         if (isThenable(changes)) {
             return changes.then((c: any) => (c ? { responseHeaders: applyHeaderChanges(details.responseHeaders || [], c) } : {}));
         }
@@ -432,8 +432,8 @@ export function createPipeline(
     };
 
     if (!__MV3__) {
-        // MV2-only: blocking webRequest is the Tier-A2 dispatch path. MV3
-        // forbids "blocking" — the hook tier (below) carries interception.
+        // MV2-only: blocking webRequest is the extension strategy's dispatch path. MV3
+        // forbids "blocking" — the page strategy (below) carries interception.
         const addBlocking = (event: string, fn: any, extra: string[]) => {
             try {
                 try {
@@ -458,12 +458,12 @@ export function createPipeline(
         // per-request caches must not leak for requests that never reach the
         // response-header phase
         const onDone = (details: any) => {
-            webRequestStrategy.pruneRequest?.(details.requestId);
+            extensionStrategy.pruneRequest?.(details.requestId);
         };
         chrome.webRequest.onCompleted.addListener(onDone, FILTER);
         chrome.webRequest.onErrorOccurred.addListener(onDone, FILTER);
 
-        // diagnostics: what the browser did with requests a webrequest-tier
+        // diagnostics: what the browser did with requests a extension-strategy
         // script matched (LOG panel at logLevel: debug; failures as warn)
         const tr = (details: any, msg: string, level: "debug" | "warn" = "debug") => {
             const t = traced.get(details.requestId);
@@ -567,7 +567,7 @@ export function createPipeline(
         }
 
         if (msg && msg.type === "claimRequest") {
-            chromeBody.claimRequest(msg.url);
+            pageStrategy.claimRequest(msg.url);
             sendResponse({});
             return false;
         }
@@ -656,12 +656,12 @@ export function createPipeline(
             scriptStorageSet(msg.scriptId, msg.key, msg.value).then(() => sendResponse({}));
             return true;
         }
-        // hook tier (page fetch/XHR) — bodies recorded for the Network tab
+        // page strategy (page fetch/XHR) — bodies recorded for the Network tab
         if (msg && msg.type === "runRequestDecision") {
             dlogLevel("pipeline", "debug", `runRequestDecision ${msg.url}`);
             const tabId = sender?.tab?.id ?? -1;
             const method = msg.method || "GET";
-            chromeBody.runRequestDecision(msg.url, method, tabId).then((r) => {
+            pageStrategy.runRequestDecision(msg.url, method, tabId).then((r) => {
                 if (r?.kind === "respond") recordNetBody({ tabId, url: msg.url, method, modified: r.content, mime: r.mime, status: r.status || 200 });
                 sendResponse(r || null);
             });
@@ -670,7 +670,7 @@ export function createPipeline(
         if (msg && msg.type === "runTransform") {
             const tabId = sender?.tab?.id ?? -1;
             const method = msg.method || "GET";
-            chromeBody.runTransform(msg.url, method, msg.body || "", { status: msg.status, contentType: msg.contentType }, tabId).then((body) => {
+            pageStrategy.runTransform(msg.url, method, msg.body || "", { status: msg.status, contentType: msg.contentType }, tabId).then((body) => {
                 recordNetBody({ tabId, url: msg.url, method, original: msg.body ?? "", modified: body });
                 sendResponse({ body });
             });
@@ -679,7 +679,7 @@ export function createPipeline(
         if (msg && msg.type === "runReplace") {
             const tabId = sender?.tab?.id ?? -1;
             const method = msg.method || "GET";
-            chromeBody.runReplace(msg.url, method, tabId).then((r) => {
+            pageStrategy.runReplace(msg.url, method, tabId).then((r) => {
                 if (r) recordNetBody({ tabId, url: msg.url, method, modified: r.content, mime: r.mime, status: 200 });
                 sendResponse(r || { content: null });
             });
@@ -708,10 +708,10 @@ export function createPipeline(
         }
         if (seq !== reloadSeq) return; // superseded by a newer reload
         dlog("pipeline", "reload", { total: scripts.length, enabled: scripts.filter((x) => x.enabled).map((x) => x.meta.name) });
-        webRequestStrategy.reload(scripts, paramValues);
-        chromeBody.reload(scripts, paramValues);
+        extensionStrategy.reload(scripts, paramValues);
+        pageStrategy.reload(scripts, paramValues);
         cdp.reload(scripts, paramValues);
-        processStrategy.reload(scripts, paramValues);
+        helperStrategy.reload(scripts, paramValues);
         void rulesStrategy.reload(scripts, paramValues);
         refreshBodyWatch(scripts);
         warnRoutes(scripts);
@@ -729,9 +729,9 @@ export function createPipeline(
     }
 
     const off = onScriptsChanged(() => void reload());
-    // ownership moves between the process tier and the other tiers
-    const offProcess = onProcessActiveChange(() => void reload());
-    // settings.defaultStrategy moves ownership between tiers
+    // ownership moves between the helper strategy and the other strategies
+    const offProcess = onHelperActiveChange(() => void reload());
+    // settings.defaultStrategy moves ownership between strategies
     const onStorage = (changes: Record<string, unknown>, area: string) => {
         if (area === "local" && changes[STRATEGY_KEY]) void reload();
     };
@@ -740,7 +740,7 @@ export function createPipeline(
 
     return {
         reload,
-        chromeBody,
+        pageStrategy,
         cdp,
         dispose() {
             off();
@@ -748,7 +748,7 @@ export function createPipeline(
             chrome.storage.onChanged.removeListener(onStorage);
             if (!__MV3__) {
                 const onDone = (details: any) => {
-                    webRequestStrategy.pruneRequest?.(details.requestId);
+                    extensionStrategy.pruneRequest?.(details.requestId);
                 };
                 chrome.webRequest.onBeforeRequest.removeListener(onBeforeRequest);
                 chrome.webRequest.onBeforeSendHeaders.removeListener(onBeforeSendHeaders as any);
@@ -756,8 +756,8 @@ export function createPipeline(
                 chrome.webRequest.onCompleted.removeListener(onDone);
                 chrome.webRequest.onErrorOccurred.removeListener(onDone);
             }
-            webRequestStrategy.dispose();
-            chromeBody.dispose();
+            extensionStrategy.dispose();
+            pageStrategy.dispose();
         },
     };
 }

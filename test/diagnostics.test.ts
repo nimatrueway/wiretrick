@@ -15,7 +15,7 @@ describe("diagnostic report", () => {
     it("redacts credential headers and caps bodies", async () => {
         const { redactEntry } = await import("../src/background/diagnostics");
         const e = redactEntry({
-            id: "1", tabId: 1, url: "https://x/", method: "GET", type: "script", status: 200, statusText: "", mime: "", size: null, fromCache: false, startedAt: 0, endedAt: 1, state: "done", interventions: [],
+            id: "1", tabId: 1, url: "https://x/", method: "GET", type: "script", status: 200, statusText: "", mime: "", size: null, fromCache: false, startedAt: 0, endedAt: 1, state: "done", outcomes: [],
             requestHeaders: [["Cookie", "sid=secret"], ["Accept", "*/*"], ["Authorization", "Bearer abc"]],
             responseBody: { text: "x".repeat(10000), size: 10000, truncated: false, binary: false },
         });

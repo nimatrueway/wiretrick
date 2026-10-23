@@ -50,27 +50,27 @@ export class LogBadge implements TabBadge {
 /** Network view: requests a script observed / modified, among the recorded rows. */
 export class NetBadge implements TabBadge {
     modified = 0;
-    tapped = 0;
+    observed = 0;
 
-    set(c: { modified: number; tapped: number }): void {
+    set(c: { modified: number; observed: number }): void {
         this.modified = c.modified;
-        this.tapped = c.tapped;
+        this.observed = c.observed;
     }
 
     reset(): void {
-        this.modified = this.tapped = 0;
+        this.modified = this.observed = 0;
     }
 
     get counts() {
-        return [["modified", this.modified], ["tapped", this.tapped]] as const;
+        return [["modified", this.modified], ["observed", this.observed]] as const;
     }
 
     get empty(): boolean {
-        return !this.modified && !this.tapped;
+        return !this.modified && !this.observed;
     }
 
     get title(): string {
-        const parts = [this.modified && `${this.modified} modified`, this.tapped && `${this.tapped} observed`].filter(Boolean);
+        const parts = [this.modified && `${this.modified} modified`, this.observed && `${this.observed} observed`].filter(Boolean);
         return `${parts.join(", ")} in Network`;
     }
 }

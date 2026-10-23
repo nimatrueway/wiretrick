@@ -249,7 +249,7 @@ try {
         const prev = ed.getModel();
         const model = m.editor.createModel('wt.onDocument({ url: "*", when: "document_idle" }, () => {});\n', "typescript", m.Uri.parse("file:///hover-probe.ts"));
         ed.setModel(model);
-        ed.setPosition({ lineNumber: 1, column: 23 }); // on `when`
+        ed.setPosition({ lineNumber: 1, column: 28 }); // on `when`
         ed.focus();
         let html = "";
         for (let i = 0; i < 40 && !html.includes("<li"); i++) {
@@ -284,7 +284,7 @@ try {
         }
         ed.trigger("t", "hideSuggestWidget", {});
         model.setValue('wt.onDocument("*", ');
-        ed.setPosition({ lineNumber: 1, column: 15 }); // on the handler argument
+        ed.setPosition({ lineNumber: 1, column: 20 }); // on the handler argument
         let hints = "";
         for (let i = 0; i < 40 && !hints.includes("Receives the same"); i++) {
             ed.trigger("t", "editor.action.triggerParameterHints", {});
@@ -347,7 +347,7 @@ try {
         type: "saveScript", id: "s_auto", name: "Auto script",
         code: `wt.onResponseBody("${cdn}/auto.js", (ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
     }, r)), CDN);
-    // a handler that runs but changes nothing: the request is "tapped", not "modified"
+    // a handler that runs but changes nothing: the request is "observed", not "modified"
     await mgr.evaluate((cdn: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_watch", name: "Watcher",
         code: `wt.onRequest({ url: "${cdn}/auto.js", strategy: "debugger" }, () => undefined);`,
@@ -381,10 +381,10 @@ try {
     check("Network tab lists the page's requests", net.some((r) => r.name.startsWith("page-xo") && r.status === "200") && net.some((r) => r.name.startsWith("auto.js")), JSON.stringify(net.map((r) => r.name)));
     check("Network tab shows which script modified a request", net.some((r) => r.name.startsWith("gz.js") && r.scripts.includes("Cdp transform")), JSON.stringify(net.filter((r) => r.scripts.length)));
     const marks: Record<string, string> = await mgr.evaluate(() =>
-        Object.fromEntries([...document.querySelectorAll("#network-view tbody tr")].map((tr) => [tr.querySelector(".net-name")?.textContent || "", tr.classList.contains("modified") ? "modified" : tr.classList.contains("tapped") ? "tapped" : "none"])),
+        Object.fromEntries([...document.querySelectorAll("#network-view tbody tr")].map((tr) => [tr.querySelector(".net-name")?.textContent || "", tr.classList.contains("modified") ? "modified" : tr.classList.contains("observed") ? "observed" : "none"])),
     );
     check("a modifying handler marks its row modified", marks["gz.js"] === "modified", JSON.stringify(marks));
-    check("a handler returning undefined marks its row observed (not modified)", marks["auto.js"] === "tapped", JSON.stringify(marks));
+    check("a handler returning undefined marks its row observed (not modified)", marks["auto.js"] === "observed", JSON.stringify(marks));
     const counts = await mgr.evaluate(() => document.querySelector("#network-view .net-status")?.textContent || "");
     check("Network footer counts observed and modified rows", /\d+ observed · \d+ modified/.test(counts), counts);
     const prevLevel = await mgr.evaluate(() => {
@@ -394,8 +394,8 @@ try {
         sel.dispatchEvent(new Event("change"));
         return prev;
     });
-    const tappedLog = await mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line.debug")].map((l) => l.textContent || "").find((t) => t.includes("[Watcher] onRequest → observed (no change)")) || "");
-    check("observed handler logs a DEBUG 'observed (no change)' line ending with the URL", /\[Watcher\] onRequest → observed \(no change\) http:\/\/localhost:\d+\/auto\.js$/.test(tappedLog), tappedLog || "(none)");
+    const observedLog = await mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line.debug")].map((l) => l.textContent || "").find((t) => t.includes("[Watcher] onRequest → observed (no change)")) || "");
+    check("observed handler logs a DEBUG 'observed (no change)' line ending with the URL", /\[Watcher\] onRequest → observed \(no change\) http:\/\/localhost:\d+\/auto\.js$/.test(observedLog), observedLog || "(none)");
     await mgr.evaluate((prev: string) => {
         const sel = document.querySelector("#log-level") as HTMLSelectElement;
         sel.value = prev;
@@ -422,8 +422,8 @@ try {
     check("Network tab filter keeps the tab's intercepted requests", inTab.some((n) => n.startsWith("gz.js")) && inTab.some((n) => n.startsWith("page-xo")), JSON.stringify(inTab));
     await mgr.selectOption("#network-view .net-tab", "");
     await mgr.click("#log-header-title");
-    // Network panel count: recorded tapped/modified requests, until cleared
-    // fresh (cache-busted) script tags: gz.js → modified (Cdp transform), auto.js → tapped (Watcher)
+    // Network panel count: recorded observed/modified requests, until cleared
+    // fresh (cache-busted) script tags: gz.js → modified (Cdp transform), auto.js → observed (Watcher)
     await xoPage.evaluate((cdn: string) => Promise.all(["gz.js", "auto.js"].map((f) => new Promise((r) => {
         const s = document.createElement("script");
         s.src = `${cdn}/${f}?badge=${Date.now()}`;
@@ -433,11 +433,11 @@ try {
     await mgr.bringToFront(); // a background tab throttles the port + polling
     const badge = await mgr.waitForFunction(() => {
         const b = document.querySelector("#net-badge") as HTMLElement;
-        const [modified, tapped] = [".modified", ".tapped"].map((c) => {
+        const [modified, observed] = [".modified", ".observed"].map((c) => {
             const pill = b.querySelector(`.tab-badge${c}`) as HTMLElement;
             return pill.hidden ? 0 : Number(pill.textContent);
         });
-        return !b.hidden && modified >= 1 && tapped >= 1 ? { title: b.title, modified, tapped } : null;
+        return !b.hidden && modified >= 1 && observed >= 1 ? { title: b.title, modified, observed } : null;
     }, null, { timeout: 8000, polling: 200 }).then((h: any) => h.jsonValue(), (e: any) => String(e)) as any;
     check("Network view badge counts modified + observed requests", !!badge && /modified, \d+ observed in Network/.test(badge.title), JSON.stringify(badge));
     await mgr.click("#network-tab");
@@ -453,9 +453,9 @@ try {
     }))), CDN);
     await mgr.bringToFront();
     const sb = await mgr.waitForFunction(() => {
-        const [modified, tapped] = ["modified", "tapped"].map((k) => Number(document.querySelector(`#sb-net .sb-n[data-k="${k}"]`)?.textContent));
+        const [modified, observed] = ["modified", "observed"].map((k) => Number(document.querySelector(`#sb-net .sb-n[data-k="${k}"]`)?.textContent));
         const bar = document.getElementById("status-bar")!;
-        return bar.offsetHeight > 0 && modified >= 1 && tapped >= 1 ? { modified, tapped, title: (document.getElementById("sb-net") as HTMLElement).title } : null;
+        return bar.offsetHeight > 0 && modified >= 1 && observed >= 1 ? { modified, observed, title: (document.getElementById("sb-net") as HTMLElement).title } : null;
     }, null, { timeout: 8000, polling: 200 }).then((h: any) => h.jsonValue(), (e: any) => String(e)) as any;
     check("status bar shows Network counts while the panel is closed", typeof sb === "object" && /observed in Network/.test(sb.title), JSON.stringify(sb));
     await mgr.click("#sb-net");
@@ -471,9 +471,9 @@ try {
     const cleared = await mgr.evaluate(() => ({
         badge: (document.querySelector("#net-badge") as HTMLElement).hidden,
         modified: document.querySelector('#sb-net .sb-n[data-k="modified"]')?.textContent,
-        tapped: document.querySelector('#sb-net .sb-n[data-k="tapped"]')?.textContent,
+        observed: document.querySelector('#sb-net .sb-n[data-k="observed"]')?.textContent,
     }));
-    check("clearing the Network log clears its counts", cleared.badge && cleared.modified === "0" && cleared.tapped === "0", JSON.stringify(cleared));
+    check("clearing the Network log clears its counts", cleared.badge && cleared.modified === "0" && cleared.observed === "0", JSON.stringify(cleared));
     await mgr.click("#log-header-title");
 
     // ---- script error indicators: compile error + runtime error ----

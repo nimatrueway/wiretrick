@@ -147,7 +147,7 @@ if (__MV3__) {
         if (!msg || msg.type !== "__resReverse") return false;
         const payload = msg.payload || {};
         if (payload.op === "log") {
-            import("./engine/logs").then(({ log }) => log(typeof payload.tabId === "number" ? payload.tabId : -1, payload.msg, payload.level || "info", payload.scriptId, payload.netKind === "tapped" || payload.netKind === "modified" || payload.netKind === "missed" ? payload.netKind : undefined));
+            import("./engine/logs").then(({ log }) => log(typeof payload.tabId === "number" ? payload.tabId : -1, payload.msg, payload.level || "info", payload.scriptId, payload.netKind === "observed" || payload.netKind === "modified" || payload.netKind === "missed" ? payload.netKind : undefined));
             sendResponse({});
             return false;
         }

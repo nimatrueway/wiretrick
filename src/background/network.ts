@@ -4,7 +4,7 @@
  * are attached while at least one manager holds a "network" port and
  * removed when the last one closes — zero cost otherwise.
  *
- * While nobody watches, rows a script tapped/modified/missed are still kept
+ * While nobody watches, rows a script observed/modified/missed are still kept
  * (no listeners: just the engine's own log lines, capped at MAX_IDLE, no
  * bodies), so opening the Network tab shows recent script activity.
  *
@@ -13,7 +13,7 @@
  * the request URL); bodies via recordNetBody from the strategies that
  * handle them (the browser exposes no response bodies to webRequest).
  */
-import { interventionKind, type InterventionKind, type NetBody, type NetEntry, type NetPortMsg } from "../shared/netTypes";
+import { outcomeKind, type OutcomeKind, type NetBody, type NetEntry, type NetPortMsg } from "../shared/netTypes";
 
 const MAX_ENTRIES = 1000;
 /** rows kept while no Network tab is open (script-touched only) */
@@ -150,7 +150,7 @@ function archiveRedirect(e: NetEntry, d: chrome.webRequest.WebRedirectionRespons
         responseHeaders: undefined,
         responseBody: undefined,
         originalResponseBody: undefined,
-        interventions: [],
+        outcomes: [],
     });
 }
 
@@ -164,7 +164,7 @@ function adoptSynthetic(e: NetEntry): void {
         if (now - s.startedAt > 2000) break;
         if (!s.synthetic || s.url !== e.url) continue;
         if (s.tabId >= 0 && e.tabId >= 0 && s.tabId !== e.tabId) continue;
-        e.interventions.push(...s.interventions);
+        e.outcomes.push(...s.outcomes);
         if (s.responseBody) {
             e.responseBody = s.responseBody;
             e.originalResponseBody = s.originalResponseBody;
@@ -195,7 +195,7 @@ const L = {
             state: "pending",
             initiator: d.initiator || (d as any).originUrl,
             requestBody: requestBodyOf(d.requestBody),
-            interventions: [],
+            outcomes: [],
         };
         adoptSynthetic(e);
         add(e);
@@ -301,7 +301,7 @@ function keepTouchedOnly(): void {
     flushTimer = null;
     dirty.clear();
     const now = Date.now();
-    const kept = [...entries.values()].filter((e) => e.interventions.length).slice(-MAX_IDLE);
+    const kept = [...entries.values()].filter((e) => e.outcomes.length).slice(-MAX_IDLE);
     entries.clear();
     for (const e of kept) {
         e.requestBody = e.responseBody = e.originalResponseBody = undefined;
@@ -330,7 +330,7 @@ export function addNetworkPort(port: chrome.runtime.Port): void {
 }
 
 export const URL_AT_END = /\s((?:https?|wss?):\/\/\S+)\s*$/;
-/** optional tier tag ("[helper] [Name] …") then the script name */
+/** optional strategy tag ("[helper] [Name] …") then the script name */
 const NAME_PREFIX = /^(?:\[(helper|debugger|extension|page|sandbox|rules)\]\s+(?=\[))?\[([^\]]+)\]\s*/;
 
 /**
@@ -367,7 +367,7 @@ function entryFor(tabId: number, url: string, method?: string): NetEntry {
             endedAt: now,
             state: "done",
             synthetic: true,
-            interventions: [],
+            outcomes: [],
         };
         add(target);
     }
@@ -415,12 +415,12 @@ export function recordNetBody(r: NetBodyRecord): void {
 
 /**
  * Attach a script-attributed log line ("[name] onResponseBody applied
- * (…) https://…") to the request it describes, as "tapped" or "modified"
+ * (…) https://…") to the request it describes, as "observed" or "modified"
  * (inferred from the line when not given). A line with no matching
  * recorded request becomes a synthetic entry (see entryFor). Runs while
  * idle too (see MAX_IDLE).
  */
-export function annotateFromLog(tabId: number, scriptId: string, message: string, level: NetEntry["interventions"][number]["level"], kind?: InterventionKind, explicitUrl?: string): void {
+export function annotateFromLog(tabId: number, scriptId: string, message: string, level: NetEntry["outcomes"][number]["level"], kind?: OutcomeKind, explicitUrl?: string): void {
     const m = explicitUrl ? null : URL_AT_END.exec(message);
     if (!explicitUrl && !m) return;
     const url = explicitUrl || m![1];
@@ -430,7 +430,7 @@ export function annotateFromLog(tabId: number, scriptId: string, message: string
     if (nameMatch?.[1]) action += ` (${nameMatch[1]})`;
     const now = Date.now();
     const target = entryFor(tabId, url);
-    target.interventions.push({ scriptId, scriptName, action, level, kind: interventionKind(level, message, kind), at: now });
+    target.outcomes.push({ scriptId, scriptName, action, level, kind: outcomeKind(level, message, kind), at: now });
     touch(target.id);
 }
 

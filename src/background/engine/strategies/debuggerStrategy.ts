@@ -1,5 +1,5 @@
 /**
- * cdp tier (strategy "debugger"): chrome.debugger + the CDP Fetch domain. Runs
+ * Debugger strategy: chrome.debugger + the CDP Fetch domain. Runs
  * the handler routes whose strategy is "debugger" — any request the tab (or its
  * workers) makes, in place, with real status codes. Chrome shows a
  * "started debugging this browser" banner while attached.
@@ -7,7 +7,7 @@
  * MV2 attaches when a cdp route matches the page or a request (and
  * detaches when the page settles); MV3 keeps matching tabs attached.
  * Handlers run through the shared body ops (bodyOps.runOp) — locally on
- * MV2, in the sandbox page on MV3 — so chain semantics match every tier.
+ * MV2, in the sandbox page on MV3 — so chain semantics match every strategy.
  */
 import { urlGlobOf } from "../../../shared/matcher";
 import { runOp, type BodyOp, type OpScript } from "../../../shared/bodyOps";
@@ -18,7 +18,7 @@ import { dlog, dlogLevel } from "../../../shared/debugLog";
 import { debuggerAttach, debuggerSend, debuggerDetach, debuggerGetTargets, type Debuggee } from "../../../shared/chromeApi";
 import { runBodyOp } from "../../compileHost";
 import { recordNetBody } from "../../network";
-import { compileMv2, ownedRoutes, ownsAny, type OwnedRoute } from "./tiers";
+import { compileMv2, ownedRoutes, ownsAny, type OwnedRoute } from "./strategyScripts";
 
 /** webRequest resource type → CDP Fetch resource types */
 const CDP_TYPES: Record<string, string[]> = {
@@ -66,7 +66,7 @@ interface Mv3Plain {
     enabled: boolean;
 }
 
-export class CdpStrategy {
+export class DebuggerStrategy {
     /** attached sessions, keyed "tab:<id>" or "tgt:<targetId>" */
     private attached = new Set<string>();
     /** cdp-owned handler routes */

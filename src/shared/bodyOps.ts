@@ -1,6 +1,6 @@
 /**
  * Handler execution for the "body ops" — shared by the MV3 sandbox (hook,
- * debugger and process tiers) and the MV2 background page (process tier),
+ * debugger and helper strategies) and the MV2 background page (helper strategy),
  * so chain semantics are identical everywhere:
  *
  *   requestDecision — onRequest handlers in order; the first terminal result
@@ -12,7 +12,7 @@
 import { formatScriptError } from "./scriptError";
 import { effectiveStrategy, routeGroups, routeMatches, type Strategy } from "./route";
 import type { Routed, ScriptHandlers } from "./compile";
-import { tappedLine, type NetKind } from "./netTypes";
+import { observedLine, type NetKind } from "./netTypes";
 
 export type BodyOp = "requestDecision" | "transform" | "replace" | "responseHeaders";
 
@@ -24,9 +24,9 @@ export interface OpScript {
 
 /**
  * Which handlers an op runs: routes matching (url, method, type) and —
- * when `tier` is given — owned by that tier (route.strategy, else
+ * when `tier` is given — owned by that strategy (route.strategy, else
  * `defaultStrategy`). Each route has exactly one owner, so no handler runs
- * on two tiers.
+ * on two strategies.
  */
 export interface OpFilter {
     url: string;
@@ -44,7 +44,7 @@ export function handlerRuns(h: Routed, f: OpFilter): boolean {
 }
 
 export interface OpEnv {
-    /** kind "tapped": the handler ran but changed nothing (DEBUG line) */
+    /** kind "observed": the handler ran but changed nothing (DEBUG line) */
     log(scriptId: string, level: "debug" | "info" | "warn" | "error", msg: string, kind?: NetKind): void;
     debug?(msg: string): void;
 }
@@ -115,7 +115,7 @@ function hasHeaderMods(h: any): boolean {
 export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpEnv): Promise<any> {
     const url: string = args.url;
     const method: string = args.method;
-    // "" = unknown (process tier, uncorrelated request): ctx says "other", route `resourceTypes` aren't checked
+    // "" = unknown (helper strategy, uncorrelated request): ctx says "other", route `resourceTypes` aren't checked
     const known: string | undefined = args.resourceType === undefined ? "xmlhttprequest" : args.resourceType || undefined;
     const resourceType: string = known ?? "other";
     const base = (h: Routed) => ({
@@ -127,7 +127,7 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
         groups: routeGroups(h.route, url),
     });
     const list = matching(scripts, op, { url, method, resourceType: known, tier: args.tier, defaultStrategy: args.defaultStrategy, onlyIds: args.onlyIds }, env);
-    const tapped = (s: OpScript, handler: string) => env.log(s.id, "debug", tappedLine(s.name, handler, url), "tapped");
+    const observed = (s: OpScript, handler: string) => env.log(s.id, "debug", observedLine(s.name, handler, url), "observed");
 
     if (op === "requestDecision") {
         let headerMods: any = null;
@@ -136,7 +136,7 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
                 try {
                     const result = await h.fn(base(h));
                     if (!result) {
-                        tapped(s, "onRequest");
+                        observed(s, "onRequest");
                         continue;
                     }
                     if (result.replaceResponse) {
@@ -160,7 +160,7 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
                         if (result.headers.remove && result.headers.remove.length) parts.push(`remove ${result.headers.remove.join(", ")}`);
                         env.log(s.id, "info", `[${s.name}] onRequest → request headers (${parts.join("; ")}) ${url}`);
                         headerMods = mergeHeaderMods(headerMods, result.headers);
-                    } else tapped(s, "onRequest");
+                    } else observed(s, "onRequest");
                 } catch (e: any) {
                     env.log(s.id, "error", formatScriptError(s.name, e, "onRequest"));
                 }
@@ -178,7 +178,7 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
                     if (hasHeaderMods(result?.headers)) {
                         env.log(s.id, "info", `[${s.name}] onResponseHeaders → ${Object.keys(result.headers.set || {}).length} set, ${(result.headers.remove || []).length} removed ${url}`);
                         mods = mergeHeaderMods(mods, result.headers);
-                    } else tapped(s, "onResponseHeaders");
+                    } else observed(s, "onResponseHeaders");
                 } catch (e: any) {
                     env.log(s.id, "error", formatScriptError(s.name, e, "onResponseHeaders"));
                 }
@@ -201,9 +201,9 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
                         const after = typeof next === "string" ? next.length : next.byteLength;
                         out = next;
                         if (next !== prevOut) env.log(s.id, "info", `[${s.name}] onResponseBody applied (${before}b → ${after}b) ${url}`);
-                        else tapped(s, "onResponseBody");
+                        else observed(s, "onResponseBody");
                         touched = true;
-                    } else tapped(s, "onResponseBody");
+                    } else observed(s, "onResponseBody");
                 } catch (e: any) {
                     env.log(s.id, "error", formatScriptError(s.name, e, "onResponseBody"));
                 }
@@ -224,7 +224,7 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
                         env.log(s.id, "info", `[${s.name}] replaceResponse → ${mime} (${body.length}b) ${url}`);
                         return { mime, content: body };
                     }
-                    tapped(s, "replaceResponse");
+                    observed(s, "replaceResponse");
                 } catch (e: any) {
                     env.log(s.id, "error", formatScriptError(s.name, e, "replaceResponse"));
                 }

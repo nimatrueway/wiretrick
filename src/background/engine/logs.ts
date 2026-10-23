@@ -2,7 +2,7 @@
  * Rolling per-tab request log, pushed to the manager UI over a port.
  */
 import { annotateFromLog, URL_AT_END } from "../network";
-import { interventionKind, tappedLine, type InterventionKind, type NetKind } from "../../shared/netTypes";
+import { outcomeKind, observedLine, type OutcomeKind, type NetKind } from "../../shared/netTypes";
 
 export interface LogEntry {
     tabId: number;
@@ -10,19 +10,19 @@ export interface LogEntry {
     level: "debug" | "info" | "warn" | "error";
     message: string;
     at: number;
-    /** set on "tapped (no change)" lines — the UI caps how many it keeps */
+    /** set on "observed (no change)" lines — the UI caps how many it keeps */
     kind?: NetKind;
 }
 
 const MAX_PER_TAB = 200;
 const tabLogs = new Map<number, LogEntry[]>();
 /**
- * "tapped (no change)" DEBUG lines (one per handler run) get their own small
+ * "observed (no change)" DEBUG lines (one per handler run) get their own small
  * per-tab ring, so a busy page can't evict the useful lines from the
  * replay ring above.
  */
-const MAX_TAPPED_PER_TAB = 50;
-const tappedLogs = new Map<number, LogEntry[]>();
+const MAX_OBSERVED_PER_TAB = 50;
+const observedLogs = new Map<number, LogEntry[]>();
 
 function pushCapped(rings: Map<number, LogEntry[]>, entry: LogEntry, cap: number): void {
     const list = rings.get(entry.tabId) || [];
@@ -36,7 +36,7 @@ const uiPorts = new Set<chrome.runtime.Port>();
 /** The manager's "clear": drop the replay rings too, so a reconnecting manager doesn't bring old lines back. */
 export function clearLogHistory(): void {
     tabLogs.clear();
-    tappedLogs.clear();
+    observedLogs.clear();
 }
 
 export function addUiPort(port: chrome.runtime.Port): void {
@@ -48,8 +48,8 @@ export function addUiPort(port: chrome.runtime.Port): void {
         all.push(...entries);
     }
     all.sort((a, b) => a.at - b.at);
-    const tapped = [...tappedLogs.values()].flat();
-    const replay = tapped.length ? [...all.slice(-MAX_PER_TAB), ...tapped].sort((a, b) => a.at - b.at) : all.slice(-MAX_PER_TAB);
+    const observed = [...observedLogs.values()].flat();
+    const replay = observed.length ? [...all.slice(-MAX_PER_TAB), ...observed].sort((a, b) => a.at - b.at) : all.slice(-MAX_PER_TAB);
     for (const entry of replay) {
         port.postMessage({ type: "log", entry });
     }
@@ -57,15 +57,15 @@ export function addUiPort(port: chrome.runtime.Port): void {
 
 /**
  * `kind` marks a script-attributed line that names a request (ends with its
- * URL) as "tapped" (handler ran, no change) or "modified"; omitted, it is
- * inferred (see interventionKind).
+ * URL) as "observed" (handler ran, no change) or "modified"; omitted, it is
+ * inferred (see outcomeKind).
  */
-export function log(tabId: number, message: string, level: LogEntry["level"] = "info", scriptId: string | null = null, kind?: InterventionKind, url?: string): void {
-    const netKind = scriptId ? interventionKind(level, message, kind) : undefined;
+export function log(tabId: number, message: string, level: LogEntry["level"] = "info", scriptId: string | null = null, kind?: OutcomeKind, url?: string): void {
+    const netKind = scriptId ? outcomeKind(level, message, kind) : undefined;
     if (scriptId && netKind !== "missed") noteTap(scriptId, level, message);
-    const tappedOnly = kind === "tapped" && level === "debug";
-    const entry: LogEntry = { tabId, scriptId, level, message, at: Date.now(), ...(tappedOnly ? { kind: "tapped" as const } : {}) };
-    if (tappedOnly) pushCapped(tappedLogs, entry, MAX_TAPPED_PER_TAB);
+    const observedOnly = kind === "observed" && level === "debug";
+    const entry: LogEntry = { tabId, scriptId, level, message, at: Date.now(), ...(observedOnly ? { kind: "observed" as const } : {}) };
+    if (observedOnly) pushCapped(observedLogs, entry, MAX_OBSERVED_PER_TAB);
     else pushCapped(tabLogs, entry, MAX_PER_TAB);
     for (const port of uiPorts) {
         port.postMessage({ type: "log", entry });
@@ -79,7 +79,7 @@ export function log(tabId: number, message: string, level: LogEntry["level"] = "
 
 // ---- tap registry: did a script's handler run for a URL? ----
 // Recorded whether or not a manager is open (annotateFromLog needs a port),
-// keyed without the tab — the process tier logs with tabId -1. Feeds the
+// keyed without the tab — the helper strategy logs with tabId -1. Feeds the
 // "onResponseBody never ran" warning (pipeline.ts).
 
 const MAX_TAPS = 2000;
@@ -102,7 +102,7 @@ function noteTap(scriptId: string, level: LogEntry["level"], message: string): v
 }
 
 /** Did a body handler of scriptId run for url (or the script throw anywhere) at or after `since` (ms epoch)? */
-export function bodyTappedSince(scriptId: string, url: string, since: number): boolean {
+export function bodyObservedSince(scriptId: string, url: string, since: number): boolean {
     const t = bodyTaps.get(`${scriptId}|${url}`);
     if (t !== undefined && t >= since) return true;
     const e = lastScriptError.get(scriptId);
@@ -115,14 +115,14 @@ export function __resetTaps(): void {
     lastScriptError.clear();
 }
 
-/** A handler ran for `url` but changed nothing: a DEBUG line that marks the request "tapped". */
-export function logTapped(tabId: number, scriptName: string, handler: string, url: string, scriptId: string): void {
-    log(tabId, tappedLine(scriptName, handler, url), "debug", scriptId, "tapped");
+/** A handler ran for `url` but changed nothing: a DEBUG line that marks the request "observed". */
+export function logObserved(tabId: number, scriptName: string, handler: string, url: string, scriptId: string): void {
+    log(tabId, observedLine(scriptName, handler, url), "debug", scriptId, "observed");
 }
 
 /** every tab's retained LOG lines, oldest first (diagnostic report) */
 export function allLogs(): LogEntry[] {
-    return [...tabLogs.values(), ...tappedLogs.values()].flat().sort((a, b) => a.at - b.at);
+    return [...tabLogs.values(), ...observedLogs.values()].flat().sort((a, b) => a.at - b.at);
 }
 
 /** Push an arbitrary message to all connected manager/popup pages. */
@@ -141,7 +141,7 @@ export function broadcastEntry(entry: LogEntry): void {
 
 export function clearTab(tabId: number): void {
     tabLogs.delete(tabId);
-    tappedLogs.delete(tabId);
+    observedLogs.delete(tabId);
 }
 
 export function scriptError(scriptId: string, message: string): void {

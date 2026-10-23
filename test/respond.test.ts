@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { setDefaultStrategy } from "../src/shared/route";
-import { WebRequestStrategy } from "../src/background/engine/strategies/webRequestStrategy";
-import { ChromeBodyStrategy } from "../src/background/engine/strategies/chromeBodyStrategy";
+import { ExtensionStrategy } from "../src/background/engine/strategies/extensionStrategy";
+import { PageStrategy } from "../src/background/engine/strategies/pageStrategy";
 import { compileScript } from "../src/shared/compile";
 import type { Script } from "../src/background/engine/scriptStore";
 
@@ -23,7 +23,7 @@ beforeEach(() => {
         tabs: { onUpdated: { addListener: vi.fn() }, onRemoved: { addListener: vi.fn() } },
     };
     delete (globalThis as any).browser;
-    new WebRequestStrategy().pruneRequest("r1");
+    new ExtensionStrategy().pruneRequest("r1");
 });
 
 function makeScript(id: string, code: string): Script {
@@ -41,7 +41,7 @@ const details = () => ({
 
 describe("onRequest respond", () => {
     it("extension strategy: object body → JSON data-url redirect", () => {
-        const s = new WebRequestStrategy();
+        const s = new ExtensionStrategy();
         s.reload([makeScript("a", `wt.onRequest("*", () => ({ replaceResponse: { body: { mocked: true } } }));`)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("redirect");
@@ -50,7 +50,7 @@ describe("onRequest respond", () => {
     });
 
     it("extension strategy: string body + explicit mime", () => {
-        const s = new WebRequestStrategy();
+        const s = new ExtensionStrategy();
         s.reload([makeScript("a", `wt.onRequest("*", () => ({ replaceResponse: { body: "<h1>hi</h1>", mime: "text/html" } }));`)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("redirect");
@@ -58,7 +58,7 @@ describe("onRequest respond", () => {
     });
 
     it("respond is terminal: later scripts don't run", () => {
-        const s = new WebRequestStrategy();
+        const s = new ExtensionStrategy();
         s.reload([
             makeScript("a", `wt.onRequest("*", () => ({ replaceResponse: { body: "first" } }));`),
             makeScript("b", `wt.onRequest("*", () => ({ redirect: "https://second.com" }));`),
@@ -69,7 +69,7 @@ describe("onRequest respond", () => {
     });
 
     it("hook tier: runRequestDecision returns the respond decision (async handler)", async () => {
-        const s = new ChromeBodyStrategy();
+        const s = new PageStrategy();
         s.reload([makeScript("a", `wt.onRequest({ url: "*", strategy: "page" }, async () => ({ replaceResponse: { body: { ok: 1 }, status: 201 } }));`)]);
         const r = await s.runRequestDecision("https://api.example.com/v1/user", "GET");
         expect(r).not.toBeNull();
@@ -79,25 +79,25 @@ describe("onRequest respond", () => {
     });
 
     it("hook tier: non-respond scripts → headers merged or null", async () => {
-        const s = new ChromeBodyStrategy();
+        const s = new PageStrategy();
         s.reload([makeScript("a", `wt.onRequest({ url: "*", strategy: "page" }, () => ({ headers: { set: { "x": "1" } } }));`)]);
         const r = await s.runRequestDecision("https://api.example.com/v1/user", "GET");
         expect(r!.kind).toBe("headers");
     });
 
     it("hook tier: redirect and cancel decisions pass through", async () => {
-        const s = new ChromeBodyStrategy();
+        const s = new PageStrategy();
         s.reload([
             makeScript("r", `wt.onRequest({ url: "*", strategy: "page" }, () => ({ redirect: "https://r.com" }));`),
         ]);
         expect((await s.runRequestDecision("https://x.com/", "GET"))!.kind).toBe("redirect");
-        const s2 = new ChromeBodyStrategy();
+        const s2 = new PageStrategy();
         s2.reload([makeScript("c", `wt.onRequest({ url: "*", strategy: "page" }, () => ({ block: true }));`)]);
         expect((await s2.runRequestDecision("https://x.com/", "GET"))!.kind).toBe("cancel");
     });
 
     it("extension strategy: respond + headers in one result apply the headers", () => {
-        const s = new WebRequestStrategy();
+        const s = new ExtensionStrategy();
         s.reload([makeScript("a", `wt.onRequest("*", () => ({ replaceResponse: { body: "x" }, headers: { set: { "x-m": "1" } } }));`)]);
         s.handleBeforeRequest(details(), null);
         const c = s.handleBeforeSendHeaders(details(), null) as any;
@@ -107,7 +107,7 @@ describe("onRequest respond", () => {
 
 describe("replacementContent (webrequest)", () => {
     it("serves a plain object as JSON, like the other tiers", async () => {
-        const { replacementContent } = await import("../src/background/engine/strategies/webRequestStrategy");
+        const { replacementContent } = await import("../src/background/engine/strategies/extensionStrategy");
         expect(replacementContent({ url: "https://dummyjson.com/users/1", type: "main_frame" }, { mocked: true })).toEqual({ mime: "application/json", content: '{"mocked":true}' });
         expect(replacementContent({ url: "https://x.test/a", type: "xmlhttprequest" }, [1, 2])).toEqual({ mime: "application/json", content: "[1,2]" });
         expect(replacementContent({ url: "https://x.test/a.html", type: "main_frame" }, "<p>hi</p>")).toEqual({ mime: "text/html", content: "<p>hi</p>" });

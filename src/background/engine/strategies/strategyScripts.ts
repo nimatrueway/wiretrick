@@ -1,5 +1,5 @@
 /**
- * Shared per-tier plumbing: which handler routes a tier owns, and MV2
+ * Shared per-strategy plumbing: which handler routes a strategy owns, and MV2
  * in-page compilation of the scripts that own them (MV3 compiles in the
  * sandbox instead — see compileHost).
  */
@@ -59,7 +59,7 @@ export function compileMv2(scripts: ScriptLike[], paramValues: { [scriptId: stri
     for (const s of scripts) {
         if (!s.enabled || !want(s)) continue;
         const compiled = compileScript(s.code, overridesFor({ id: s.id, name: s.meta.name, code: s.code }));
-        // errored compiles stay in so the tier logs the error (meta.active is false then)
+        // errored compiles stay in so the strategy logs the error (meta.active is false then)
         if (compiled.meta.active || compiled.error) out.push({ id: s.id, name: s.meta.name, compiled });
     }
     return out;

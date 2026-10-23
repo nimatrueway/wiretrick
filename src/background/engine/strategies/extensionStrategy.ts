@@ -24,10 +24,10 @@ import { effectiveStrategy, routeGroups, routeLabel, routeMatches, type RouteMet
 import { formatScriptError } from "../../../shared/scriptError";
 import type { HeaderChanges, HookDisposition, InterceptionStrategy, MaybePromise, WebRequestDetailsLike } from "./types";
 import type { Script } from "../scriptStore";
-import { log, logTapped, scriptError } from "../logs";
+import { log, logObserved, scriptError } from "../logs";
 import { dlogLevel } from "../../../shared/debugLog";
-import { IS_FIREFOX } from "./processState";
-import { compileMv2, ownsAny } from "./tiers";
+import { IS_FIREFOX } from "./helperState";
+import { compileMv2, ownsAny } from "./strategyScripts";
 
 type Kind = "onRequest" | "onResponseHeaders" | "replaceResponse" | "onResponseBody";
 
@@ -40,13 +40,13 @@ interface Entry {
 
 const KINDS: Kind[] = ["onRequest", "onResponseHeaders", "replaceResponse", "onResponseBody"];
 
-export class WebRequestStrategy implements InterceptionStrategy {
+export class ExtensionStrategy implements InterceptionStrategy {
     readonly name = "extension";
 
     private entries: Entry[] = [];
 
     reload(scripts: Script[], paramValues?: { [scriptId: string]: Record<string, any> }): void {
-        // MV3: no blocking webRequest — the pipeline warns per handler (tierUnavailable)
+        // MV3: no blocking webRequest — the pipeline warns per handler (strategyUnavailable)
         if (__MV3__) {
             this.entries = [];
             return;
@@ -60,7 +60,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
         });
     }
 
-    /** names of the scripts this tier runs for `url` (diagnostics) */
+    /** names of the scripts this strategy runs for `url` (diagnostics) */
     matchingNames(url: string): string[] {
         return this.entries.filter((e) => KINDS.some((k) => e.handlers[k].some((h) => routeMatches(h.route, url)))).map((e) => e.name);
     }
@@ -107,7 +107,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                                     log(details.tabId, `[${entry.name}] onRequest → ${r.block ? "block" : `redirect → ${r.redirect}`} ${details.url}`, "info", entry.id);
                                     return normalize(r);
                                 }
-                                if (!hasHeaders) logTapped(details.tabId, entry.name, "onRequest", details.url, entry.id);
+                                if (!hasHeaders) logObserved(details.tabId, entry.name, "onRequest", details.url, entry.id);
                                 return { kind: "allow" };
                             });
                         }
@@ -132,7 +132,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                         return normalize(result);
                     }
                     trace(details, `[${entry.name}] onRequest returned ${describeResult(result)} (no redirect/block/replaceResponse) for ${details.url}`);
-                    if (!hasHeaders) logTapped(details.tabId, entry.name, "onRequest", details.url, entry.id);
+                    if (!hasHeaders) logObserved(details.tabId, entry.name, "onRequest", details.url, entry.id);
                 }
                 for (const h of this.hits(entry, "replaceResponse", details)) {
                     const replacement = h.fn(ctxFor(details, tabUrl, h.route));
@@ -140,7 +140,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                         if (IS_FIREFOX) {
                             return replacement.then((r: any) => {
                                 if (r === undefined || r === null) {
-                                    logTapped(details.tabId, entry.name, "replaceResponse", details.url, entry.id);
+                                    logObserved(details.tabId, entry.name, "replaceResponse", details.url, entry.id);
                                     return { kind: "allow" } as HookDisposition;
                                 }
                                 return this.replace(details, r, entry.id, entry.name);
@@ -150,7 +150,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                         continue;
                     }
                     if (replacement !== undefined && replacement !== null) return this.replace(details, replacement, entry.id, entry.name);
-                    logTapped(details.tabId, entry.name, "replaceResponse", details.url, entry.id);
+                    logObserved(details.tabId, entry.name, "replaceResponse", details.url, entry.id);
                 }
                 // Firefox: stream via filterResponseData at onHeadersReceived time;
                 // here we only mark the request so the header-phase hook wires the filter.
@@ -284,7 +284,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                                 log(details.tabId, `[${entry.name}] onResponseHeaders → ${describeHeaderMods(m)} ${details.url}`, "info", entry.id);
                                 return { ...m };
                             }
-                            logTapped(details.tabId, entry.name, "onResponseHeaders", details.url, entry.id);
+                            logObserved(details.tabId, entry.name, "onResponseHeaders", details.url, entry.id);
                             return null;
                         });
                     }
@@ -297,7 +297,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                     changes = changes || {};
                     changes.set = { ...changes.set, ...mods.set };
                     changes.remove = [...(changes.remove || []), ...(mods.remove || [])];
-                } else logTapped(details.tabId, entry.name, "onResponseHeaders", details.url, entry.id);
+                } else logObserved(details.tabId, entry.name, "onResponseHeaders", details.url, entry.id);
             } catch (e: any) {
                 scriptError(entry.id, formatScriptError(entry.name, e, "onResponseHeaders"));
             }
@@ -334,7 +334,7 @@ export class WebRequestStrategy implements InterceptionStrategy {
                             const size = (b: any) => (typeof b === "string" ? b.length : (b?.byteLength ?? 0));
                             log(details.tabId, `[${scriptName}] onResponseBody applied (${size(body)}b → ${size(out)}b) ${details.url}`, "info", scriptId);
                             body = out;
-                        } else logTapped(details.tabId, scriptName, "onResponseBody", details.url, scriptId);
+                        } else logObserved(details.tabId, scriptName, "onResponseBody", details.url, scriptId);
                     } catch (e: any) {
                         scriptError(scriptId, formatScriptError(scriptName, e, "onResponseBody"));
                     }
@@ -494,7 +494,7 @@ export function replacementContent(details: { url: string; type?: string }, repl
     if (typeof replacement === "string" || replacement instanceof Uint8Array) {
         return { mime: mimeFor(null), content: replacement };
     }
-    // any other object is a JSON body (as on the other tiers)
+    // any other object is a JSON body (as on the other strategies)
     if (replacement && typeof replacement === "object" && !ArrayBuffer.isView(replacement)) {
         return { mime: guessMime(null, details.url, "application/json"), content: JSON.stringify(replacement) };
     }

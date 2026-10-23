@@ -1,0 +1,71 @@
+/** Observed vs modified: log-line classification, the separate "observed" log ring, and the Network filter/counts. */
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { setDefaultStrategy } from "../src/shared/route";
+import { outcomeKind, observedLine } from "../src/shared/netTypes";
+import { addUiPort, allLogs, clearTab, log, logObserved, type LogEntry } from "../src/background/engine/logs";
+import { matches, touchCounts, touchState, ALL_TYPES, type NetFilter } from "../src/ui/network/netFormat";
+import type { NetEntry, NetOutcome } from "../src/shared/netTypes";
+
+// these suites exercise the extension strategy: make it the settings default
+beforeEach(() => setDefaultStrategy("extension"));
+afterEach(() => setDefaultStrategy(null));
+
+describe("outcomeKind", () => {
+    it("an explicit kind wins", () => {
+        expect(outcomeKind("info", "[S] x https://a/", "observed")).toBe("observed");
+        expect(outcomeKind("debug", "[S] x https://a/", "modified")).toBe("modified");
+    });
+
+    it("infers: engine INFO action lines → modified; observed marks, debug, errors, script console → observed", () => {
+        expect(outcomeKind("info", "[S] onResponseBody applied (1b → 2b) https://a/")).toBe("modified");
+        expect(outcomeKind("info", "[S] onRequest → redirect → https://b/ https://a/")).toBe("modified");
+        expect(outcomeKind("info", observedLine("S", "onRequest", "https://a/"))).toBe("observed");
+        expect(outcomeKind("debug", "[S] whatever https://a/")).toBe("observed");
+        expect(outcomeKind("error", "[S] onRequest threw: x https://a/")).toBe("observed");
+        expect(outcomeKind("info", "[S] console.log: fetching https://a/")).toBe("observed");
+        expect(outcomeKind("warn", "[S] wt.log: hi https://a/")).toBe("observed");
+    });
+
+    it("formats the observed line with the handler and the URL last", () => {
+        expect(observedLine("Foo", "onRequest", "https://a.test/x")).toBe("[Foo] onRequest → observed (no change) https://a.test/x");
+    });
+});
+
+describe("observed log lines don't flood the log ring", () => {
+    it("are kept in their own small per-tab ring, replayed and reported alongside", () => {
+        const tab = 4242;
+        clearTab(tab);
+        log(tab, "[S] onResponseBody applied (1b → 2b) https://a/", "info", "s");
+        for (let i = 0; i < 300; i++) logObserved(tab, "S", "onRequest", `https://a/${i}`, "s");
+        const mine = allLogs().filter((e) => e.tabId === tab);
+        expect(mine.filter((e) => e.kind === "observed")).toHaveLength(50);
+        expect(mine.filter((e) => e.level === "info")).toHaveLength(1);
+        expect(mine[mine.length - 1].message).toBe("[S] onRequest → observed (no change) https://a/299");
+        const replay: LogEntry[] = [];
+        addUiPort({ postMessage: (m: any) => replay.push(m.entry), onDisconnect: { addListener: () => {} } } as any);
+        expect(replay.filter((e) => e.tabId === tab)).toHaveLength(51);
+        clearTab(tab);
+        expect(allLogs().filter((e) => e.tabId === tab)).toEqual([]);
+    });
+});
+
+describe("Network filter and counts", () => {
+    const iv = (kind: "observed" | "modified"): NetOutcome => ({ scriptId: "s", scriptName: "S", action: "x", level: kind === "observed" ? "debug" : "info", kind, at: 0 });
+    const e = (id: string, outcomes: NetOutcome[]): NetEntry =>
+        ({ id, tabId: 1, url: `https://a/${id}`, method: "GET", type: "script", status: 200, statusText: "", mime: "", size: 1, fromCache: false, startedAt: 0, endedAt: 1, state: "done", outcomes }) as NetEntry;
+    const missed: NetOutcome = { scriptId: "s", scriptName: "S", action: "onResponseBody never ran", level: "warn", kind: "missed", at: 0 };
+    const rows = [e("none", []), e("observed", [iv("observed")]), e("both", [iv("observed"), iv("modified")]), e("missed", [missed])];
+    const f = (touched: NetFilter["touched"]): NetFilter => ({ text: "", types: ALL_TYPES, touched, tabId: null });
+
+    it("classifies rows and filters all / observed-only / modified / any; a missed warning is not a tap", () => {
+        expect(rows.map(touchState)).toEqual(["none", "observed", "modified", "none"]);
+        expect(rows.filter((r) => matches(r, f("all"))).map((r) => r.id)).toEqual(["none", "observed", "both", "missed"]);
+        expect(rows.filter((r) => matches(r, f("observed"))).map((r) => r.id)).toEqual(["observed"]);
+        expect(rows.filter((r) => matches(r, f("modified"))).map((r) => r.id)).toEqual(["both"]);
+        expect(rows.filter((r) => matches(r, f("any"))).map((r) => r.id)).toEqual(["observed", "both"]);
+    });
+
+    it("counts observed-only and modified rows", () => {
+        expect(touchCounts(rows)).toEqual({ observed: 1, modified: 1 });
+    });
+});

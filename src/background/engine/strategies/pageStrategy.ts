@@ -1,12 +1,12 @@
 /**
- * Hook tier (strategy "page"): a MAIN-world content script overrides
+ * Page strategy: a MAIN-world content script overrides
  * fetch/XHR and asks the background to run the hook-owned handlers for
  * page-initiated requests — onRequest decisions, replaceResponse and
  * onResponseBody (streamed body). Banner-free. The page claims each request
- * it handles so the other tiers skip it.
+ * it handles so the other strategies skip it.
  *
  * Only routes whose strategy is "page" run here; navigations, subresources,
- * workers and anything the page didn't fetch itself never reach this tier.
+ * workers and anything the page didn't fetch itself never reach this strategy.
  */
 import { runOp, type OpScript } from "../../../shared/bodyOps";
 import type { HeaderChanges, HookDisposition, InterceptionStrategy, MaybePromise, WebRequestDetailsLike } from "./types";
@@ -14,11 +14,11 @@ import type { Script } from "../scriptStore";
 import { log } from "../logs";
 import { runBodyOp } from "../../compileHost";
 import { dlogLevel } from "../../../shared/debugLog";
-import { compileMv2, ownsAny } from "./tiers";
+import { compileMv2, ownsAny } from "./strategyScripts";
 
 type Decision = { kind: "respond"; mime: string; content: string; status?: number; headers?: any; scriptId?: string; scriptName?: string } | { kind: "redirect"; url: string } | { kind: "cancel" } | { kind: "headers"; changes: any } | null;
 
-export class ChromeBodyStrategy implements InterceptionStrategy {
+export class PageStrategy implements InterceptionStrategy {
     readonly name = "page";
 
     /** MV2: compiled scripts owning hook routes */

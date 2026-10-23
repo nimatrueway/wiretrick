@@ -15,9 +15,9 @@ export interface MissedCase {
     firefox: boolean;
     mv3: boolean;
     fromCache: boolean;
-    /** the local helper (process tier) is connected and routing */
+    /** the local helper (helper strategy) is connected and routing */
     helperActive: boolean;
-    /** the debugger tier's own "was NOT intercepted" warning already covers this load */
+    /** the debugger strategy's own "was NOT intercepted" warning already covers this load */
     cdpWarned: boolean;
 }
 
@@ -52,7 +52,7 @@ export function missedReason(c: MissedCase): string | null {
 /**
  * Up-front warning when scripts load: a handler route that can never run
  * with its strategy in this browser (there is no fallback). null when fine.
- * The helper being down is reported by the process tier itself.
+ * The helper being down is reported by the helper strategy itself.
  */
 export function routeProblem(r: { kind: RouteKind; strategy: Strategy; resourceTypes?: string[] }, env: { firefox: boolean; mv3: boolean }): string | null {
     const why = strategyUnsupported(r.strategy, env);

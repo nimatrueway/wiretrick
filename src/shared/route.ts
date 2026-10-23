@@ -5,7 +5,7 @@
  *   wt.onResponseBody({ url: [...], exclude, methods, resourceTypes, strategy }, fn)
  *   wt.onDocument({ url, exclude, when }, fn)
  *
- * Each route is owned by exactly one strategy (tier): its own `strategy`,
+ * Each route is owned by exactly one strategy: its own `strategy`,
  * else settings.defaultStrategy, else the per-browser default.
  */
 import { matchAny, matchGroups, matchPatternError } from "./matcher";
@@ -61,7 +61,7 @@ export function getDefaultStrategy(): Strategy {
     return defaultStrategy;
 }
 
-/** the tier that owns a route */
+/** the strategy that owns a route */
 export function effectiveStrategy(route: Pick<RouteMeta, "strategy">, fallback: Strategy = defaultStrategy): Strategy {
     return route.strategy || fallback;
 }

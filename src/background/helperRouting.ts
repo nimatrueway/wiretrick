@@ -1,7 +1,7 @@
 /**
  * chrome.proxy routing for the "helper" strategy (helper routing).
  *
- * Installs a PAC (shared/pac.ts) that sends hosts of process-owned
+ * Installs a PAC (shared/pac.ts) that sends hosts of helper-owned
  * scripts to the local helper and everything else exactly where the
  * user's own proxy setting sent it. The user's setting is captured
  * before we take control (and persisted, since ours masks it while it's
@@ -64,7 +64,7 @@ function isOurs(value: any): boolean {
     return value?.mode === "pac_script" && typeof value?.pacScript?.data === "string" && value.pacScript.data.startsWith("// Wiretrick");
 }
 
-export class ProcessRouting {
+export class HelperRouting {
     private installedPac: string | null = null;
     private installedHosts = "";
     private user: UserProxyValue | null = null;
@@ -76,7 +76,7 @@ export class ProcessRouting {
         try {
             proxyApi()?.settings?.onChange?.addListener((d: any) => this.onSettingChange(d));
         } catch {
-            /* Firefox: the process tier is disabled there anyway */
+            /* Firefox: the helper strategy is disabled there anyway */
         }
     }
 

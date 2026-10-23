@@ -1,5 +1,5 @@
 /**
- * PAC generation for the "helper" tier (pure — no chrome.* here).
+ * PAC generation for the "helper" strategy (pure — no chrome.* here).
  *
  * The extension installs ONE PAC that:
  *   - sends hosts the helper may need to intercept (same rule as the
