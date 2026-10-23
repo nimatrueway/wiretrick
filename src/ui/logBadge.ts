@@ -1,6 +1,7 @@
 /**
- * Tab badges: counts of things that happened while a tab was out of view
- * (like VS Code's Problems badge). Each renders as up to two pills.
+ * Panel counts: what the Log / Network views currently hold (like VS Code's
+ * Problems count). They stay until the view is cleared; looking at a view
+ * doesn't reset them. Each renders as up to two pills.
  */
 export interface TabBadge {
     /** pill class → count, in display order */
@@ -12,15 +13,21 @@ export interface TabBadge {
 
 const plural = (c: number, w: string) => `${c} ${w}${c === 1 ? "" : "s"}`;
 
-/** Log tab: unseen errors / warnings. */
+/** Log view: errors / warnings in the log buffer. */
 export class LogBadge implements TabBadge {
     errors = 0;
     warnings = 0;
 
-    /** Count a log entry the user hasn't seen; other levels are ignored. */
+    /** A log entry joined the buffer; other levels are ignored. */
     note(level: string): void {
         if (level === "error") this.errors++;
         else if (level === "warn") this.warnings++;
+    }
+
+    /** A log entry fell out of the buffer. */
+    drop(level: string): void {
+        if (level === "error") this.errors = Math.max(0, this.errors - 1);
+        else if (level === "warn") this.warnings = Math.max(0, this.warnings - 1);
     }
 
     reset(): void {
@@ -36,67 +43,22 @@ export class LogBadge implements TabBadge {
     }
 
     get title(): string {
-        return `${[this.errors && plural(this.errors, "error"), this.warnings && plural(this.warnings, "warning")].filter(Boolean).join(", ")} since you last looked at the Log`;
+        return `${[this.errors && plural(this.errors, "error"), this.warnings && plural(this.warnings, "warning")].filter(Boolean).join(", ")} in the Log`;
     }
 }
 
-type Touch = "tapped" | "modified";
-const RANK = { none: 0, tapped: 1, modified: 2 } as const;
-const MAX_KNOWN = 5000;
-
-/**
- * Network tab: requests a script newly tapped / modified while the tab was out
- * of view. Each request counts once, in its latest category — one that
- * goes tapped → modified moves from the tapped pill to the modified pill.
- */
+/** Network view: requests a script observed / modified, among the recorded rows. */
 export class NetBadge implements TabBadge {
-    /** last state per request, kept across resets so updates don't recount */
-    private known = new Map<string, Touch>();
-    /** requests that changed state since the last reset */
-    private pending = new Map<string, Touch>();
+    modified = 0;
+    tapped = 0;
 
-    /** redirect hops (`id:rN`) are the same request */
-    private static key(id: string): string {
-        return id.replace(/:r\d+$/, "");
-    }
-
-    /** Record a request's current state; `unseen` = the Network tab is out of view. */
-    note(id: string, state: "none" | Touch, unseen: boolean): void {
-        if (state === "none") return;
-        const key = NetBadge.key(id);
-        if (RANK[state] <= RANK[this.known.get(key) ?? "none"]) return;
-        this.known.delete(key);
-        this.known.set(key, state);
-        if (this.known.size > MAX_KNOWN) this.known.delete(this.known.keys().next().value!);
-        if (unseen) this.pending.set(key, state);
-    }
-
-    /** requests dropped by the recorder (e.g. a script-only row folded into the real one) */
-    forget(ids: string[]): void {
-        for (const id of ids) {
-            if (NetBadge.key(id) !== id) continue;
-            this.known.delete(id);
-            this.pending.delete(id);
-        }
-    }
-
-    clearAll(): void {
-        this.known.clear();
-        this.pending.clear();
+    set(c: { modified: number; tapped: number }): void {
+        this.modified = c.modified;
+        this.tapped = c.tapped;
     }
 
     reset(): void {
-        this.pending.clear();
-    }
-
-    get modified(): number {
-        let n = 0;
-        for (const s of this.pending.values()) if (s === "modified") n++;
-        return n;
-    }
-
-    get tapped(): number {
-        return this.pending.size - this.modified;
+        this.modified = this.tapped = 0;
     }
 
     get counts() {
@@ -104,12 +66,12 @@ export class NetBadge implements TabBadge {
     }
 
     get empty(): boolean {
-        return this.pending.size === 0;
+        return !this.modified && !this.tapped;
     }
 
     get title(): string {
         const parts = [this.modified && `${this.modified} modified`, this.tapped && `${this.tapped} observed`].filter(Boolean);
-        return `${parts.join(", ")} since you last looked at Network`;
+        return `${parts.join(", ")} in Network`;
     }
 }
 

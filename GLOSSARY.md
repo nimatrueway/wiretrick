@@ -166,9 +166,9 @@ _Avoid_: LOG, log panel, log tab, console
 The panel view listing the requests of a tab and what each script did to them.
 _Avoid_: network panel, network tab
 
-**Unread counts**:
-The counts of new errors and warnings in the Log view, and observed and modified requests in the Network view, shown while that view is hidden and in the status bar.
-_Avoid_: tab badges
+**Panel counts**:
+The counts of errors and warnings in the Log view, and observed and modified requests in the Network view, shown on each view's title and in the status bar until that view is cleared.
+_Avoid_: unread counts, tab badges
 
 **Popup**:
 The toolbar icon's dropdown listing the scripts for the current tab, with their switches and params.

@@ -79,14 +79,13 @@ left or right edge of the window. ⌘J hides the panel wherever it is docked;
 ⌘B hides the explorer (and a panel docked under it). The two layout buttons
 at the right of the toolbar do the same.
 
-- **Log view** — engine and script log lines with level and source filters. While
-  the Log view is hidden (Network view open, panel hidden, or the Editor
-  in the background), new errors and warnings are counted in red/yellow
-  badges on its title; looking at it clears them. A VS Code-style status bar
-  along the bottom shows the same unread counts for both views (errors ·
-  warnings, modified · observed) even while the panel is closed; clicking one
-  opens the panel on that view. Turn this off (badges and status bar, both
-  views) in **Settings → Logging → Unread counts**. Script
+- **Log view** — engine and script log lines with level and source filters.
+  The errors and warnings it holds are counted in red/yellow badges on its
+  title; they stay until the log is cleared (🗑), whether or not you've looked.
+  A VS Code-style status bar along the bottom shows the same counts for both
+  views (errors · warnings, modified · observed) even while the panel is
+  closed; clicking one opens the panel on that view. Turn this off (badges
+  and status bar, both views) in **Settings → Logging → Panel counts**. Script
   errors (exceptions in handlers, failed compiles) are logged at ERROR, and
   the script gets a ⚠ indicator in the list and the popup. TypeScript errors
   in a saved script also show up there. The download button (↓) saves the
@@ -108,11 +107,10 @@ at the right of the toolbar do the same.
   The filter menu shows each choice with the row marker it selects:
   **All**, **Observed** (ran but changed nothing — observed only), **Modified**,
   and **Touched** (anything a script observed or modified). The footer counts
-  the same two groups ("N observed · M modified", observed = observed only). While
-  the Network view is hidden, requests that become modified / observed are
-  counted in a solid / outlined badge on its title (a request that goes from
-  observed to modified moves to the modified count); looking at it clears
-  them. Selecting a request shows its headers, request payload, the response
+  the same two groups ("N observed · M modified", observed = observed only). The
+  recorded modified / observed requests are also counted in a solid /
+  outlined badge on its title (a request that goes from observed to modified
+  moves to the modified count); they stay until the Network log is cleared. Selecting a request shows its headers, request payload, the response
   body (modified and original, when Wiretrick handled it) and what each
   script did (observed entries muted).
 

@@ -29,8 +29,8 @@ import type { Uri, IPosition, IRange, IKeyboardEvent, editor as MonacoEditor } f
 import type { Script } from "../background/engine/scriptStore";
 import { setupPanelDock, currentSide, currentDock } from "./panelDock";
 import { badgeCount, LogBadge, NetBadge, type TabBadge } from "./logBadge";
-import { touchState } from "./network/netFormat";
-import type { NetPortMsg } from "../shared/netTypes";
+import { touchCounts } from "./network/netFormat";
+import type { NetEntry } from "../shared/netTypes";
 import { aboutRows, aboutText, checkLatestRelease, collectDiagnostics, describeLatest, diagnosticsFileName, downloadText, RELEASES_URL, type HelperStatus } from "./about";
 
 // ---- state ----
@@ -1129,21 +1129,16 @@ function renderLogLine(line: HTMLElement, text: string, level: string, source: s
     line.appendChild(document.createTextNode(text));
 }
 
-// ---- Tab badges: Log errors/warnings and Network tapped/modified requests
-// that arrived while that tab was out of view ----
+// ---- Panel counts: Log errors/warnings and Network observed/modified
+// requests, shown until that view is cleared ----
 const logBadge = new LogBadge();
 const netBadge = new NetBadge();
 let logBadgeEnabled = true;
 
-function tabInView(tab: "log" | "network"): boolean {
-    return $("#log-panel").dataset.tab === tab && !$("#app").classList.contains("panel-hidden") && document.visibilityState === "visible";
-}
-
-function renderBadge(el: HTMLElement, badge: TabBadge, inView: boolean): void {
-    if (!logBadgeEnabled || inView) badge.reset();
+function renderBadge(el: HTMLElement, badge: TabBadge): void {
     document.body.classList.toggle("no-status", !logBadgeEnabled);
     renderStatusBadge(badge === logBadge ? $("#sb-log") : $("#sb-net"), badge, badge === logBadge ? "Log (⌘J)" : "Network");
-    el.hidden = badge.empty;
+    el.hidden = !logBadgeEnabled || badge.empty;
     el.title = badge.empty ? "" : badge.title;
     for (const [cls, n] of badge.counts) {
         const b = el.querySelector<HTMLElement>(`.tab-badge.${cls}`)!;
@@ -1153,8 +1148,8 @@ function renderBadge(el: HTMLElement, badge: TabBadge, inView: boolean): void {
 }
 
 function renderTabBadges(): void {
-    renderBadge($("#log-badge"), logBadge, tabInView("log"));
-    renderBadge($("#net-badge"), netBadge, tabInView("network"));
+    renderBadge($("#log-badge"), logBadge);
+    renderBadge($("#net-badge"), netBadge);
 }
 
 /** Status bar mirror of the tab badges, visible even with the panel closed. */
@@ -1167,15 +1162,10 @@ function renderStatusBadge(el: HTMLElement, badge: TabBadge, label: string): voi
     el.title = badge.empty ? label : `${label} — ${badge.title}`;
 }
 
-/** Network recorder traffic (after the panel's store applied it): feeds the Network badge. */
-function noteNetMessage(msg: NetPortMsg): void {
-    if (msg.type === "netCleared") netBadge.clearAll();
-    else if (msg.type === "netRemoved") netBadge.forget(msg.ids);
-    else {
-        const unseen = logBadgeEnabled && !tabInView("network");
-        for (const e of msg.entries) netBadge.note(e.id, touchState(e), unseen);
-    }
-    renderBadge($("#net-badge"), netBadge, tabInView("network"));
+/** Network recorder traffic (after the panel's store applied it): recount the Network badge. */
+function noteNetMessage(entries: NetEntry[]): void {
+    netBadge.set(touchCounts(entries));
+    renderBadge($("#net-badge"), netBadge);
 }
 
 /** All received entries — filtered ones stay here (re-renderable), just not in the DOM. */
@@ -1189,23 +1179,26 @@ function appendLog(entry: any): void {
     const source = sourceOf(entry.message || "");
     const tapped = entry.kind === "tapped";
     logEntries.push({ text: `[${time}] ${entry.message}`, level: entry.level || "info", source, ...(tapped ? { tapped } : {}) });
+    logBadge.note(entry.level || "info");
+    let counted = entry.level === "error" || entry.level === "warn";
     if (tapped && ++tappedEntries > MAX_TAPPED_ENTRIES) {
         logEntries.splice(logEntries.findIndex((e) => e.tapped), 1);
         tappedEntries--;
     }
     if (logEntries.length > 2000) {
         // absolute buffer cap
-        for (const e of logEntries.splice(0, logEntries.length - 2000)) if (e.tapped) tappedEntries--;
+        for (const e of logEntries.splice(0, logEntries.length - 2000)) {
+            if (e.tapped) tappedEntries--;
+            logBadge.drop(e.level);
+            counted ||= e.level === "error" || e.level === "warn";
+        }
     }
+    if (counted) renderTabBadges();
     rememberSource(source);
 
     const text = logEntries[logEntries.length - 1].text;
     const level = logEntries[logEntries.length - 1].level;
     if (!linePassesFilters(text, level, source)) return; // don't let hidden entries churn the DOM ring
-    if (level === "error" || level === "warn") {
-        logBadge.note(level);
-        renderTabBadges();
-    }
 
     const box = $("#log-entries");
     const line = document.createElement("div");
@@ -2025,9 +2018,10 @@ async function main(): Promise<void> {
         await refresh();
         selectReal(id);
     });
-    document.addEventListener("visibilitychange", renderTabBadges);
     $("#btn-clear-log").addEventListener("click", () => {
         $("#log-entries").innerHTML = "";
+        logEntries.length = 0;
+        tappedEntries = 0;
         logBadge.reset();
         renderTabBadges();
         void send({ type: "clearDebugLogs" });

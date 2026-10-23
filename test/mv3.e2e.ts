@@ -422,7 +422,7 @@ try {
     check("Network tab filter keeps the tab's intercepted requests", inTab.some((n) => n.startsWith("gz.js")) && inTab.some((n) => n.startsWith("page-xo")), JSON.stringify(inTab));
     await mgr.selectOption("#network-view .net-tab", "");
     await mgr.click("#log-header-title");
-    // Network tab badge: requests tapped/modified while it's out of view
+    // Network panel count: recorded tapped/modified requests, until cleared
     // fresh (cache-busted) script tags: gz.js → modified (Cdp transform), auto.js → tapped (Watcher)
     await xoPage.evaluate((cdn: string) => Promise.all(["gz.js", "auto.js"].map((f) => new Promise((r) => {
         const s = document.createElement("script");
@@ -439,10 +439,10 @@ try {
         });
         return !b.hidden && modified >= 1 && tapped >= 1 ? { title: b.title, modified, tapped } : null;
     }, null, { timeout: 8000, polling: 200 }).then((h: any) => h.jsonValue(), (e: any) => String(e)) as any;
-    check("Network view badge counts modified + observed requests while hidden", !!badge && /modified, \d+ observed since you last looked at Network/.test(badge.title), JSON.stringify(badge));
+    check("Network view badge counts modified + observed requests", !!badge && /modified, \d+ observed in Network/.test(badge.title), JSON.stringify(badge));
     await mgr.click("#network-tab");
     await mgr.waitForTimeout(200);
-    check("viewing the Network tab clears its badge", await mgr.evaluate(() => (document.querySelector("#net-badge") as HTMLElement).hidden));
+    check("viewing the Network tab keeps its badge", await mgr.evaluate(() => !(document.querySelector("#net-badge") as HTMLElement).hidden));
     // status bar: the same counts while the bottom panel is closed; clicking opens it on that tab
     await mgr.click("#btn-toggle-panel");
     await xoPage.evaluate((cdn: string) => Promise.all(["gz.js", "auto.js"].map((f) => new Promise((r) => {
@@ -457,7 +457,7 @@ try {
         const bar = document.getElementById("status-bar")!;
         return bar.offsetHeight > 0 && modified >= 1 && tapped >= 1 ? { modified, tapped, title: (document.getElementById("sb-net") as HTMLElement).title } : null;
     }, null, { timeout: 8000, polling: 200 }).then((h: any) => h.jsonValue(), (e: any) => String(e)) as any;
-    check("status bar shows Network counts while the panel is closed", typeof sb === "object" && /observed since you last looked/.test(sb.title), JSON.stringify(sb));
+    check("status bar shows Network counts while the panel is closed", typeof sb === "object" && /observed in Network/.test(sb.title), JSON.stringify(sb));
     await mgr.click("#sb-net");
     await mgr.waitForTimeout(200);
     const opened = await mgr.evaluate(() => ({
@@ -465,7 +465,15 @@ try {
         tab: document.getElementById("log-panel")!.dataset.tab,
         modified: document.querySelector('#sb-net .sb-n[data-k="modified"]')?.textContent,
     }));
-    check("clicking the status bar item opens the panel on Network and clears its count", opened.panel && opened.tab === "network" && opened.modified === "0", JSON.stringify(opened));
+    check("clicking the status bar item opens the panel on Network (count stays)", opened.panel && opened.tab === "network" && Number(opened.modified) >= 1, JSON.stringify(opened));
+    await mgr.click("#network-view .net-clear");
+    await mgr.waitForTimeout(500);
+    const cleared = await mgr.evaluate(() => ({
+        badge: (document.querySelector("#net-badge") as HTMLElement).hidden,
+        modified: document.querySelector('#sb-net .sb-n[data-k="modified"]')?.textContent,
+        tapped: document.querySelector('#sb-net .sb-n[data-k="tapped"]')?.textContent,
+    }));
+    check("clearing the Network log clears its counts", cleared.badge && cleared.modified === "0" && cleared.tapped === "0", JSON.stringify(cleared));
     await mgr.click("#log-header-title");
 
     // ---- script error indicators: compile error + runtime error ----
@@ -491,6 +499,12 @@ try {
     check("runtime script error → indicator in the manager list", ind.runtime.includes("kaboom"), JSON.stringify(ind));
     check("compile error → indicator in the manager list", ind.compile.includes("Compile error"), JSON.stringify(ind));
     check("runtime script error logged at ERROR level", ind.logged);
+    const logCount = await mgr.evaluate(() => ({
+        tab: document.getElementById("log-panel")!.dataset.tab,
+        badge: !(document.querySelector("#log-badge") as HTMLElement).hidden,
+        errors: Number(document.querySelector('#sb-log .sb-n[data-k="error"]')?.textContent),
+    }));
+    check("Log error count stays while the Log view is open", logCount.tab === "log" && logCount.badge && logCount.errors >= 1, JSON.stringify(logCount));
     const errPopup = await ctx.newPage();
     await errPopup.goto(`chrome-extension://${extId}/popup.html`);
     await errPopup.waitForSelector("#script-list li.script-item", { timeout: 8000 });
