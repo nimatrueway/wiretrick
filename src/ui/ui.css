@@ -17,44 +17,58 @@ html, body {
 body.no-status { --status-h: 0px; }
 body.no-status #status-bar { display: none; }
 
-/* ---- VS Code-style status bar: unseen Log / Network counts ---- */
+/* ---- status bar (VS Code / JetBrains style): one item per panel view, icon + counts ---- */
 #status-bar {
     height: var(--status-h);
     display: flex;
     align-items: stretch;
-    gap: 2px;
-    padding: 0 6px;
-    box-sizing: border-box;
+    padding: 0 4px;
     border-top: 1px solid var(--border);
     background: var(--bg-panel);
     font-size: 12px;
+    line-height: 1;
     color: var(--fg-dim);
     overflow: hidden;
+    user-select: none;
 }
 .sb-item {
+    position: relative;
     display: inline-flex;
     align-items: center;
-    gap: 3px;
-    padding: 0 6px;
+    gap: 8px;
+    padding: 0 8px;
     border: 0;
     border-radius: 0;
     background: none;
     color: inherit;
     font: inherit;
+    white-space: nowrap;
     cursor: pointer;
 }
-.sb-item:hover { background: color-mix(in srgb, var(--fg) 12%, transparent); color: var(--fg); }
+/* a hairline between items */
+.sb-item + .sb-item::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 5px;
+    bottom: 5px;
+    border-left: 1px solid var(--border);
+}
+.sb-item:hover { background: color-mix(in srgb, var(--fg) 10%, transparent); color: var(--fg); }
 .sb-item:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
-.sb-ico { flex-shrink: 0; }
-.sb-n { margin-right: 5px; font-variant-numeric: tabular-nums; }
-.sb-n:last-child { margin-right: 0; }
-/* only non-zero counts are coloured */
-.sb-item .sb-ico.error.on { color: var(--err); }
-.sb-item .sb-ico.warn.on { color: var(--warn); }
-.sb-item .sb-ico.modified.on { color: var(--ok); }
-.sb-item .sb-n.on { color: var(--fg); }
-.sb-label { margin-right: 3px; color: var(--fg-faint); }
-.sb-item:hover .sb-label { color: inherit; }
+/* the view open in the panel */
+.sb-item.active { color: var(--fg); box-shadow: inset 0 -2px 0 var(--accent); }
+.sb-kind, .sb-ico { width: 14px; height: 14px; flex-shrink: 0; }
+.sb-kind { margin-right: -4px; }
+.sb-label { color: inherit; }
+.sb-pair { display: inline-flex; align-items: center; gap: 3px; }
+.sb-n { min-width: 1ch; font-variant-numeric: tabular-nums; }
+/* zero counts stay quiet; non-zero ones are coloured */
+.sb-pair:not(.on) { opacity: 0.6; }
+.sb-pair.on .sb-n { color: var(--fg); }
+.sb-pair.on .sb-ico.error { color: var(--err); }
+.sb-pair.on .sb-ico.warn { color: var(--warn); }
+.sb-pair.on .sb-ico.modified { color: var(--ok); }
 
 /* ---- splitters ---- */
 #split-v {
@@ -278,6 +292,20 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 .script-item:hover { background: var(--bg-hover); }
 .script-item.selected { background: var(--bg-active); }
 #script-list:focus .script-item.selected { background: var(--sel); }
+/* multi-selection (⌘/Ctrl-click, Shift-click) */
+.script-item.multi { background: var(--bg-active); }
+#script-list:focus .script-item.multi { background: var(--sel); }
+/* what a multi-selection drag shows under the pointer */
+.drag-ghost {
+    position: fixed;
+    top: -100px;
+    left: 0;
+    padding: 2px 8px;
+    border-radius: 3px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 12px;
+}
 #script-list:focus .script-item.focused { outline: 1px solid var(--accent); outline-offset: -1px; }
 
 .file-icon {
@@ -873,14 +901,6 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 }
 .panel-tab:hover { color: var(--fg); }
 .panel-tab.active { color: var(--fg); border-bottom-color: var(--fg); }
-.tab-badges { display: inline-flex; gap: 3px; margin-left: 5px; vertical-align: 1px; }
-.tab-badges[hidden], .tab-badge[hidden] { display: none; }
-.tab-badge { min-width: 15px; padding: 0 4px; border-radius: 8px; font-size: 10px; font-weight: 600; line-height: 15px; text-align: center; color: #fff; box-sizing: border-box; }
-.tab-badge.error { background: var(--err); }
-.tab-badge.warn { background: var(--warn); color: #1e1e1e; }
-/* Network tab: modified = solid, observed = hollow */
-.tab-badge.modified { background: var(--ok); color: #1e1e1e; }
-.tab-badge.observed { background: transparent; color: var(--fg-dim); box-shadow: inset 0 0 0 1px var(--fg-dim); }
 #log-tools, #net-tools { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 #log-tools[hidden], #net-tools[hidden], #log-entries[hidden], #network-view[hidden], #problems-view[hidden] { display: none; }
 #log-entries { flex: 1; min-height: 0; }

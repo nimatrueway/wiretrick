@@ -465,17 +465,14 @@ try {
     }))), CDN);
     await mgr.bringToFront(); // a background tab throttles the port + polling
     const badge = await mgr.waitForFunction(() => {
-        const b = document.querySelector("#net-badge") as HTMLElement;
-        const [modified, observed] = [".modified", ".observed"].map((c) => {
-            const pill = b.querySelector(`.tab-badge${c}`) as HTMLElement;
-            return pill.hidden ? 0 : Number(pill.textContent);
-        });
-        return !b.hidden && modified >= 1 && observed >= 1 ? { title: b.title, modified, observed } : null;
+        const b = document.querySelector("#sb-net") as HTMLElement;
+        const [modified, observed] = ["modified", "observed"].map((k) => Number(b.querySelector(`.sb-n[data-k="${k}"]`)?.textContent));
+        return modified >= 1 && observed >= 1 ? { title: b.title, modified, observed } : null;
     }, null, { timeout: 8000, polling: 200 }).then((h: any) => h.jsonValue(), (e: any) => String(e)) as any;
-    check("Network view badge counts modified + observed requests", !!badge && /modified, \d+ observed in Network/.test(badge.title), JSON.stringify(badge));
+    check("status bar counts modified + observed Network requests", !!badge && /modified, \d+ observed in Network/.test(badge.title), JSON.stringify(badge));
     await mgr.click("#network-tab");
     await mgr.waitForTimeout(200);
-    check("viewing the Network tab keeps its badge", await mgr.evaluate(() => !(document.querySelector("#net-badge") as HTMLElement).hidden));
+    check("viewing the Network tab keeps its count and marks its status bar item", await mgr.evaluate(() => Number(document.querySelector('#sb-net .sb-n[data-k="modified"]')?.textContent) >= 1 && document.getElementById("sb-net")!.classList.contains("active")));
     // status bar: the same counts while the bottom panel is closed (its × button); clicking opens it on that tab
     await mgr.click("#btn-close-panel");
     check("the panel's × button closes it", await mgr.evaluate(() => document.getElementById("app")!.classList.contains("panel-hidden")));
@@ -503,11 +500,10 @@ try {
     await mgr.click("#network-view .net-clear");
     await mgr.waitForTimeout(500);
     const cleared = await mgr.evaluate(() => ({
-        badge: (document.querySelector("#net-badge") as HTMLElement).hidden,
         modified: document.querySelector('#sb-net .sb-n[data-k="modified"]')?.textContent,
         observed: document.querySelector('#sb-net .sb-n[data-k="observed"]')?.textContent,
     }));
-    check("clearing the Network log clears its counts", cleared.badge && cleared.modified === "0" && cleared.observed === "0", JSON.stringify(cleared));
+    check("clearing the Network log clears its counts", cleared.modified === "0" && cleared.observed === "0", JSON.stringify(cleared));
     await mgr.click("#log-header-title");
 
     // ---- script error indicators: compile error + runtime error ----
@@ -535,10 +531,9 @@ try {
     check("runtime script error logged at ERROR level", ind.logged);
     const logCount = await mgr.evaluate(() => ({
         tab: document.getElementById("log-panel")!.dataset.tab,
-        badge: !(document.querySelector("#log-badge") as HTMLElement).hidden,
         errors: Number(document.querySelector('#sb-log .sb-n[data-k="error"]')?.textContent),
     }));
-    check("Log error count stays while the Log view is open", logCount.tab === "log" && logCount.badge && logCount.errors >= 1, JSON.stringify(logCount));
+    check("Log error count stays while the Log view is open", logCount.tab === "log" && logCount.errors >= 1, JSON.stringify(logCount));
     const errPopup = await ctx.newPage();
     await errPopup.goto(`chrome-extension://${extId}/popup.html`);
     await errPopup.waitForSelector("#script-list li.script-item", { timeout: 8000 });
@@ -666,10 +661,9 @@ try {
         tab: document.getElementById("log-panel")!.dataset.tab,
         heads: [...document.querySelectorAll("#problems-list .pb-head .pb-file")].map((e) => e.textContent),
         typed: [...document.querySelectorAll("#problems-list .pb-item")].map((e) => e.textContent || "").filter((t: string) => /not assignable/.test(t)),
-        badge: !(document.querySelector("#problems-badge") as HTMLElement).hidden,
     }));
     const before = await sbProblems();
-    check("Problems view lists the TypeScript error with its line; counts on the tab + far-left status bar", pb0.tab === "problems" && pb0.heads.includes("Typed.ts") && pb0.typed.some((t: string) => /\bts\b/.test(t) && t.includes("Ln 3")) && pb0.badge && before.errors >= 1 && (await mgr.evaluate(() => document.querySelector("#status-bar .sb-item")?.id)) === "sb-problems", JSON.stringify({ pb0, before }));
+    check("Problems view lists the TypeScript error with its line; counts at the far left of the status bar", pb0.tab === "problems" && pb0.heads.includes("Typed.ts") && pb0.typed.some((t: string) => /\bts\b/.test(t) && t.includes("Ln 3")) && before.errors >= 1 && (await mgr.evaluate(() => document.querySelector("#status-bar .sb-item")?.id)) === "sb-problems", JSON.stringify({ pb0, before }));
     const typedCode = await mgr.evaluate(() => (window as any).monaco.editor.getEditors()[0].getValue());
     await mgr.evaluate(() => {
         const m = (window as any).monaco.editor.getEditors()[0].getModel();

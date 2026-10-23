@@ -83,11 +83,20 @@ row for **Open**, **Enable/Disable** (scripts), **New Script…**, **New JSON
 File…**, **New Folder…** (in that folder), **Copy Path**, **Rename…** and
 **Delete**; right-click the empty area for the New items at the root. Drag a
 script, data file or folder onto a folder to move it there (onto the empty
-area: to the root); hovering a collapsed folder while dragging expands it. The
+area: to the root); hovering a collapsed folder while dragging expands it.
+
+Select several items as in VS Code: ⌘-click (Ctrl-click) adds or removes a
+row, Shift-click (or Shift+↑/↓) selects a range, ⌘A (Ctrl+A) selects every
+shown row and Esc clears the selection. Drag any selected row to move them all
+into a folder, or press Delete (or right-click → **Delete N Items**) to delete
+them after one confirmation that counts everything going; right-click also
+offers **Copy Paths**. Items inside a selected folder go with it. The
 **Enabled** switch in the toolbar turns the open script on or off.
 
 Double-click a file (or F2 on a file or folder) to rename it (Enter saves, Esc cancels).
-The name is the path in the synced folder (`My script.ts`); a `/`
+The box shows the full file name, extension included (`My script.ts`,
+`users.json`), with only the name before it selected; the `.ts` of a script is
+optional when you type. The name is the path in the synced folder; a `/`
 moves it into a folder (`mock/api mock` → `mock/api mock.ts`; renaming a
 folder moves everything in it). Each segment may hold anything
 except `< > : " \ | ? *`, a trailing dot or space, and Windows device names
@@ -132,17 +141,19 @@ at the right of the toolbar do the same.
   registered the handler it names — and is squiggled there in the editor
   like TypeScript errors (its hover comes before the API docs; F8 reaches it). Click an entry (or
   Enter) to open the file at that line; ↑/↓ move, ←/→ collapse/expand a file; the box at the top filters by
-  text. ⌘⇧M shows it. Its error/warning counts are on its title and at the
-  far left of the status bar, and follow the scripts. Compile, TypeScript,
+  text. ⌘⇧M shows it. Its error/warning counts are at the far left of the
+  status bar, and follow the scripts. Compile, TypeScript,
   rules errors and route warnings appear only here, not in the Log; a
   runtime error appears in both (the Log has every occurrence, with its URL).
 - **Log view** — engine and script log lines with level and source filters.
-  The errors and warnings it holds are counted in red/yellow badges on its
-  title; they stay until the log is cleared (🗑), whether or not you've looked.
-  A VS Code-style status bar along the bottom shows the same counts for all
-  three views (Problems at the far left, then Log errors · warnings, Network
-  modified · observed) even while the panel is closed; clicking one opens the
-  panel on that view. Turn this off (badges and status bar, all views) in
+  The errors and warnings it holds are counted in the status bar; they stay
+  until the log is cleared (🗑), whether or not you've looked.
+  A VS Code-style status bar along the bottom holds the counts for all
+  three views (Problems errors · warnings at the far left, then Log errors ·
+  warnings, Network modified · observed), even while the panel is closed;
+  non-zero counts are coloured and the view open in the panel is underlined.
+  Clicking an item opens the panel on that view (clicking the open one closes
+  the panel). Turn the counts and status bar off in
   **Settings → Logging → Panel counts**. Script
   exceptions in handlers are logged at ERROR, and the script gets a ⚠
   indicator in the list and the popup — as it does for compile, TypeScript

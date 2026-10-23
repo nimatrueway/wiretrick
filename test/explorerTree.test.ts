@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { baseName, dropPath, explorerTree, folderPathOfRowId, folderRowId, isFolderRowId, joinPath, movedCollapsed, targetFolder } from "../src/ui/explorerTree";
+import { baseName, dropPath, dropPlan, explorerTree, folderPathOfRowId, folderRowId, idRange, isFolderRowId, joinPath, movedCollapsed, targetFolder, topLevelRows } from "../src/ui/explorerTree";
 
 const rows = (input: Parameters<typeof explorerTree>[0]) => explorerTree(input).map((r) => `${"  ".repeat(r.depth)}${r.kind === "folder" ? (r.expanded ? "v " : "> ") : ""}${r.name}`);
 
@@ -72,5 +72,30 @@ describe("path helpers", () => {
 
     it("movedCollapsed keeps a moved folder's state and its subfolders'", () => {
         expect([...movedCollapsed(new Set(["a", "a/b", "c", "ab"]), "a", "z/a")].sort()).toEqual(["ab", "c", "z/a", "z/a/b"]);
+    });
+});
+
+describe("multi-selection helpers", () => {
+    const f = (path: string) => ({ kind: "folder" as const, path });
+    const s = (path: string) => ({ kind: "script" as const, path });
+
+    it("topLevelRows drops items inside a selected folder", () => {
+        expect(topLevelRows([f("mock"), s("mock/a"), f("mock/deep"), s("other"), s("mockish/b")]).map((r) => r.path)).toEqual(["mock", "other", "mockish/b"]);
+    });
+
+    it("dropPlan moves what isn't already there, and refuses a folder into itself", () => {
+        expect(dropPlan([s("a"), s("mock/b"), f("x")], "mock")).toEqual([
+            { item: s("a"), to: "mock/a" },
+            { item: f("x"), to: "mock/x" },
+        ]);
+        expect(dropPlan([s("a"), f("mock")], "mock/deep")).toBeNull();
+        expect(dropPlan([s("mock/b")], "mock")).toBeNull();
+    });
+
+    it("idRange spans either direction", () => {
+        const ids = ["a", "b", "c", "d"];
+        expect(idRange(ids, "b", "d")).toEqual(["b", "c", "d"]);
+        expect(idRange(ids, "d", "b")).toEqual(["b", "c", "d"]);
+        expect(idRange(ids, "gone", "c")).toEqual(["c"]);
     });
 });

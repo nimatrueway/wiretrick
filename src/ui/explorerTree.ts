@@ -84,3 +84,32 @@ export function movedCollapsed(collapsed: ReadonlySet<string>, from: string, to:
     for (const f of collapsed) out.add(f === from ? to : isInFolder(f, from) ? to + f.slice(from.length) : f);
     return out;
 }
+
+/** The rows of a multi-selection that act for it: those not inside another selected folder. */
+export function topLevelRows<T extends Pick<TreeRow, "kind" | "path">>(rows: T[]): T[] {
+    const dirs = rows.filter((r) => r.kind === "folder").map((r) => r.path);
+    return rows.filter((r) => !dirs.some((d) => isInFolder(r.path, d)));
+}
+
+/**
+ * Where dragged items land when dropped into `folder`: the ones that move
+ * and their new paths, or null when the drop isn't allowed (a folder into
+ * itself) or nothing moves.
+ */
+export function dropPlan<T extends Pick<TreeRow, "kind" | "path">>(items: T[], folder: string): { item: T; to: string }[] | null {
+    if (items.some((i) => i.kind === "folder" && (folder === i.path || isInFolder(folder, i.path)))) return null;
+    const plan = items.flatMap((item) => {
+        const to = dropPath(item, folder);
+        return to === null ? [] : [{ item, to }];
+    });
+    return plan.length ? plan : null;
+}
+
+/** The ids from `a` to `b` (either order) in `ids`, for a shift-click / shift-arrow range. */
+export function idRange(ids: string[], a: string, b: string): string[] {
+    const i = ids.indexOf(a);
+    const j = ids.indexOf(b);
+    if (j < 0) return [];
+    if (i < 0) return [b];
+    return ids.slice(Math.min(i, j), Math.max(i, j) + 1);
+}

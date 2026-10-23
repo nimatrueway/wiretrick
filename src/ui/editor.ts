@@ -11,7 +11,7 @@ import { SAMPLES } from "./samples";
 import { settingsDiagnostics, settingsCompletions, settingsHover, type AssistScript } from "../shared/settingsAssist";
 import { dependantsOf, folderOf, missingImports } from "../shared/scriptImports";
 import { allFolders, ancestorFolders, isInFolder, movedPath } from "../shared/folders";
-import { baseName, dropPath, explorerTree, folderPathOfRowId, folderRowId, isFolderRowId, joinPath, movedCollapsed, targetFolder, type TreeRow } from "./explorerTree";
+import { baseName, dropPlan, explorerTree, folderPathOfRowId, folderRowId, idRange, isFolderRowId, joinPath, movedCollapsed, targetFolder, topLevelRows, type TreeRow } from "./explorerTree";
 import { dataPathOfDecl } from "./jsonTypes";
 import { pickRows } from "./bundlePicker";
 import { resolveConflict } from "./conflictDialog";
@@ -293,6 +293,10 @@ async function refresh(): Promise<void> {
 let renaming = false;
 /** keyboard cursor in the explorer (VS Code "focused" row); null = follow the open file */
 let focusedId: string | null = null;
+/** the explorer's multi-selection (⌘/Ctrl-click, Shift-click, Shift+↑/↓); fewer than 2 = just the cursor row */
+let explorerSel = new Set<string>();
+/** where a Shift range starts (null: the cursor) */
+let selAnchor: string | null = null;
 /** the tree rows renderList showed (not the contents of collapsed folders) */
 let visibleRows: TreeRow[] = [];
 /** data files whose JSON has errors (their name shows red, like a script's) */
@@ -364,16 +368,21 @@ function renderList(): void {
     const list = $("#script-list");
     list.innerHTML = "";
     visibleRows = treeRows();
+    if (explorerSel.size) {
+        const all = new Set(treeRows(true).map((r) => r.id));
+        explorerSel = new Set([...explorerSel].filter((id) => all.has(id)));
+    }
+    const multi = explorerSel.size > 1;
     const cursor = focusedId ?? selectedId;
     // while wt-api.d.ts is shown no row is the open file (● still marks unsaved edits)
     const shown = typingsShown ? null : selectedId;
     const row = (id: string, cls: string, depth = 0, folder?: boolean): HTMLLIElement => {
         const li = document.createElement("li");
-        li.className = "script-item" + cls + (id === shown ? " selected" : "") + (id === cursor ? " focused" : "") + (id === selectedId && dirty ? " dirty" : "");
+        li.className = "script-item" + cls + (id === shown ? " selected" : "") + (id === cursor ? " focused" : "") + (id === selectedId && dirty ? " dirty" : "") + (multi && explorerSel.has(id) ? " multi" : "");
         li.dataset.id = id;
         li.id = `explorer-${encodeURIComponent(id)}`;
         li.setAttribute("role", "treeitem");
-        li.setAttribute("aria-selected", String(id === shown));
+        li.setAttribute("aria-selected", String(id === shown || (multi && explorerSel.has(id))));
         li.setAttribute("aria-level", String(depth + 1));
         li.style.setProperty("--depth", String(depth));
         if (id === cursor) list.setAttribute("aria-activedescendant", li.id);
@@ -394,7 +403,7 @@ function renderList(): void {
         del.tabIndex = -1;
         del.addEventListener("click", (e) => {
             e.stopPropagation();
-            void deleteRow(r);
+            void deleteRows([r]);
         });
         return del;
     };
@@ -513,31 +522,43 @@ async function setScriptEnabled(script: Script, enabled: boolean): Promise<void>
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** Delete with confirmation (a folder: everything in it); the explorer cursor moves to the next row. */
-async function deleteRow(row: TreeRow): Promise<void> {
-    const inside = (path: string): boolean => row.kind === "folder" && isInFolder(path, row.path);
-    let question = `Delete "${row.path}"?`;
-    if (row.kind === "folder") {
-        const counts = [
-            plural(scripts.filter((s) => inside(s.meta.name)).length, "script"),
-            plural(dataFiles.filter((d) => inside(d.path)).length, "data file"),
-            plural(everyFolder().filter(inside).length, "folder"),
+async function deleteRows(rows: TreeRow[]): Promise<void> {
+    if (!rows.length) return;
+    const dirs = rows.filter((r) => r.kind === "folder").map((r) => r.path);
+    const inside = (path: string): boolean => dirs.some((d) => isInFolder(path, d));
+    const chosen = new Set(rows.map((r) => r.id));
+    const counts = (self: boolean): string[] =>
+        [
+            plural(scripts.filter((s) => (self && chosen.has(s.id)) || inside(s.meta.name)).length, "script"),
+            plural(dataFiles.filter((d) => (self && chosen.has(d.id)) || inside(d.path)).length, "data file"),
+            plural(everyFolder().filter((f) => (self && dirs.includes(f)) || inside(f)).length, "folder"),
         ].filter((c) => !c.startsWith("0 "));
-        question = counts.length ? `Delete the folder "${row.path}" and everything in it (${counts.join(", ")})?` : `Delete the folder "${row.path}"?`;
+    const one = rows[0];
+    let question = `Delete "${one.path}"?`;
+    if (rows.length > 1) question = `Delete these ${rows.length} items (${counts(true).join(", ")})?`;
+    else if (one.kind === "folder") {
+        const c = counts(false);
+        question = c.length ? `Delete the folder "${one.path}" and everything in it (${c.join(", ")})?` : `Delete the folder "${one.path}"?`;
     }
     if (!confirm(question)) return;
-    if ((focusedId ?? selectedId) === row.id) {
-        const gone = new Set(visibleRows.filter((r) => r.id === row.id || inside(r.path)).map((r) => r.id));
+    const cur = focusedId ?? selectedId;
+    const gone = (id: string, path: string): boolean => chosen.has(id) || inside(path);
+    if (cur && treeRow(cur) && gone(cur, treeRow(cur)!.path)) {
+        const goneIds = new Set(visibleRows.filter((r) => gone(r.id, r.path)).map((r) => r.id));
         const ids = explorerIds();
-        const i = ids.indexOf(row.id);
-        focusedId = ids.slice(i + 1).find((id) => !gone.has(id)) ?? ids.slice(0, Math.max(i, 0)).reverse().find((id) => !gone.has(id)) ?? null;
+        const i = ids.indexOf(cur);
+        focusedId = ids.slice(i + 1).find((id) => !goneIds.has(id)) ?? ids.slice(0, Math.max(i, 0)).reverse().find((id) => !goneIds.has(id)) ?? null;
     }
-    const r =
-        row.kind === "script"
-            ? await send({ type: "deleteScript", id: row.id })
-            : row.kind === "data"
-              ? await send({ type: "deleteDataFile", id: row.id })
-              : await send({ type: "deleteFolder", path: row.path });
-    if (r?.error) status(`can't delete "${row.path}": ${r.error}`, "error");
+    clearExplorerSel();
+    for (const row of rows) {
+        const r =
+            row.kind === "script"
+                ? await send({ type: "deleteScript", id: row.id })
+                : row.kind === "data"
+                  ? await send({ type: "deleteDataFile", id: row.id })
+                  : await send({ type: "deleteFolder", path: row.path });
+        if (r?.error) status(`can't delete "${row.path}": ${r.error}`, "error");
+    }
     await refresh();
 }
 
@@ -567,14 +588,52 @@ function focusExplorer(): void {
 function moveExplorerFocus(id: string): void {
     focusedId = id;
     const list = $("#script-list");
+    const multi = explorerSel.size > 1;
     for (const li of list.querySelectorAll<HTMLElement>("li.script-item")) {
         const on = li.dataset.id === id;
         li.classList.toggle("focused", on);
+        const sel = multi && explorerSel.has(li.dataset.id!);
+        li.classList.toggle("multi", sel);
+        li.setAttribute("aria-selected", String(sel || li.classList.contains("selected")));
         if (on) {
             list.setAttribute("aria-activedescendant", li.id);
             li.scrollIntoView({ block: "nearest" });
         }
     }
+}
+
+/** the ids a multi-selection can hold (settings.yaml isn't one) */
+const selectableIds = (): string[] => visibleRows.map((r) => r.id);
+
+function clearExplorerSel(): void {
+    explorerSel = new Set();
+    selAnchor = null;
+}
+
+/** Shift-click / Shift+↑↓: select from the anchor (default: the cursor) to `id`; `add` keeps what was selected */
+function selectExplorerRange(id: string, add = false): void {
+    const cur = focusedId ?? selectedId;
+    const anchor = selAnchor ?? (cur && cur !== SETTINGS_ID ? cur : id);
+    explorerSel = new Set([...(add ? explorerSel : []), ...idRange(selectableIds(), anchor, id)]);
+    selAnchor = anchor;
+    moveExplorerFocus(id);
+}
+
+/** ⌘/Ctrl-click: add `id` to the selection (with the cursor row, when starting one) or take it out */
+function toggleExplorerSel(id: string): void {
+    const cur = focusedId ?? selectedId;
+    if (explorerSel.size < 2) explorerSel = new Set(cur && cur !== SETTINGS_ID && treeRow(cur) ? [cur] : []);
+    if (explorerSel.has(id)) explorerSel.delete(id);
+    else explorerSel.add(id);
+    selAnchor = id;
+    moveExplorerFocus(id);
+}
+
+/** what an action on row `id` applies to: the multi-selection when `id` is in it (not what's inside its selected folders), else that row */
+function actionRows(id: string): TreeRow[] {
+    if (explorerSel.size > 1 && explorerSel.has(id)) return topLevelRows(treeRows(true).filter((r) => explorerSel.has(r.id)));
+    const row = treeRow(id);
+    return row ? [row] : [];
 }
 
 function renameInExplorer(id: string): void {
@@ -607,11 +666,15 @@ function setupExplorer(): void {
         const mod = e.metaKey || e.ctrlKey;
         const plain = !mod && !e.altKey && !e.shiftKey;
         let handled = true;
-        if (e.key === "ArrowDown") moveExplorerFocus(ids[Math.min(i + 1, ids.length - 1)]);
-        else if (e.key === "ArrowUp") moveExplorerFocus(ids[Math.max(i - 1, 0)]);
-        else if (e.key === "Home" || e.key === "PageUp") moveExplorerFocus(ids[0]);
-        else if (e.key === "End" || e.key === "PageDown") moveExplorerFocus(ids[ids.length - 1]);
-        else if (e.key === "ArrowRight" && plain) {
+        const nav: Record<string, string> = { ArrowDown: ids[Math.min(i + 1, ids.length - 1)], ArrowUp: ids[Math.max(i - 1, 0)], Home: ids[0], PageUp: ids[0], End: ids[ids.length - 1], PageDown: ids[ids.length - 1] };
+        if (e.key in nav && e.shiftKey && !mod && nav[e.key] !== SETTINGS_ID) selectExplorerRange(nav[e.key]);
+        else if (e.key in nav) {
+            clearExplorerSel();
+            moveExplorerFocus(nav[e.key]);
+        } else if (e.key.toLowerCase() === "a" && mod && !e.shiftKey && !e.altKey) {
+            explorerSel = new Set(selectableIds());
+            moveExplorerFocus(cur);
+        } else if (e.key === "ArrowRight" && plain) {
             // expand, or (expanded) go to the first child
             if (row?.kind === "folder" && !row.expanded) setFolderExpanded(row.path, true);
             else if (row?.kind === "folder" && (visibleRows.find((r) => r.id === ids[i + 1])?.depth ?? -1) > row.depth) moveExplorerFocus(ids[i + 1]);
@@ -626,8 +689,11 @@ function setupExplorer(): void {
                 if (e.key === "Enter") editor?.focus(); // Enter opens and focuses, Space just opens (preview)
             }
         } else if (e.key === "F2" && row) renameInExplorer(cur);
-        else if ((e.key === "Delete" || (e.key === "Backspace" && e.metaKey)) && row) void deleteRow(row);
-        else if (e.key === "Escape") editor?.focus();
+        else if ((e.key === "Delete" || (e.key === "Backspace" && e.metaKey)) && row) void deleteRows(actionRows(cur));
+        else if (e.key === "Escape" && explorerSel.size > 1) {
+            clearExplorerSel();
+            moveExplorerFocus(cur);
+        } else if (e.key === "Escape") editor?.focus();
         else handled = false;
         if (handled) {
             e.preventDefault();
@@ -638,11 +704,45 @@ function setupExplorer(): void {
     list.addEventListener("mousedown", (e) => {
         if (!(e.target as HTMLElement).closest("input")) setTimeout(() => list.focus());
     });
+    // ⌘/Ctrl-click and Shift-click select (without opening); a plain click selects just its row
+    list.addEventListener(
+        "click",
+        (e) => {
+            const target = e.target as HTMLElement;
+            if (target.closest("input, .btn-del, .err-ind")) return;
+            const id = target.closest<HTMLElement>("li.script-item:not(.creating)")?.dataset.id;
+            if (!id) return;
+            const mod = e.metaKey || e.ctrlKey;
+            if (id !== SETTINGS_ID && (mod || e.shiftKey)) {
+                e.stopPropagation();
+                e.preventDefault();
+                if (e.shiftKey) selectExplorerRange(id, mod);
+                else toggleExplorerSel(id);
+                return;
+            }
+            explorerSel = new Set(id === SETTINGS_ID ? [] : [id]);
+            selAnchor = null;
+        },
+        true,
+    );
     list.addEventListener("contextmenu", (e) => {
         if ((e.target as HTMLElement).closest("input")) return;
         e.preventDefault();
         const li = (e.target as HTMLElement).closest<HTMLElement>("li.script-item");
         const id = li?.dataset.id;
+        if (!(id && explorerSel.size > 1 && explorerSel.has(id))) clearExplorerSel();
+        if (id && explorerSel.size > 1) {
+            // on a multi-selection: what applies to all of it
+            moveExplorerFocus(id);
+            const rows = actionRows(id);
+            const paths = rows.map(rowFilePath).join("\n");
+            showContextMenu(e.clientX, e.clientY, [
+                { label: "Copy Paths", run: () => void navigator.clipboard?.writeText(paths).then(() => status(`copied ${plural(rows.length, "path")}`)) },
+                null,
+                { label: `Delete ${rows.length} Items`, key: "Delete", run: () => void deleteRows(rows) },
+            ]);
+            return;
+        }
         if (!id || id === SETTINGS_ID) {
             // settings.yaml and the empty space below the tree: the root
             if (id) moveExplorerFocus(id);
@@ -662,7 +762,7 @@ function setupExplorer(): void {
             { label: "Copy Path", run: () => void navigator.clipboard?.writeText(rowFilePath(row)).then(() => status(`copied ${rowFilePath(row)}`)) },
             null,
             { label: "Rename…", key: "F2", run: () => renameInExplorer(id) },
-            { label: "Delete", key: "Delete", run: () => void deleteRow(row) },
+            { label: "Delete", key: "Delete", run: () => void deleteRows([row]) },
         ]);
     });
     setupExplorerDnd(list);
@@ -683,9 +783,9 @@ function setupExplorer(): void {
     });
 }
 
-/** Drag rows onto a folder (or a file in it), or below the tree for the root, to move them. */
+/** Drag rows (a multi-selection: all of it) onto a folder (or a file in it), or below the tree for the root, to move them. */
 function setupExplorerDnd(list: HTMLElement): void {
-    let dragged: TreeRow | null = null;
+    let dragged: TreeRow[] = [];
     let hoverTimer: ReturnType<typeof setTimeout> | null = null;
     let hoverId = "";
     const rowAt = (e: DragEvent): TreeRow | undefined => {
@@ -694,9 +794,9 @@ function setupExplorerDnd(list: HTMLElement): void {
     };
     /** the folder the drop lands in, or null when it can't go there */
     const dropFolder = (e: DragEvent): string | null => {
-        if (!dragged) return null;
+        if (!dragged.length) return null;
         const folder = targetFolder(rowAt(e));
-        return dropPath(dragged, folder) === null ? null : folder;
+        return dropPlan(dragged, folder) ? folder : null;
     };
     const mark = (folder: string | null): void => {
         list.classList.toggle("drop-root", folder === "");
@@ -717,16 +817,22 @@ function setupExplorerDnd(list: HTMLElement): void {
             e.preventDefault();
             return;
         }
-        dragged = r;
+        dragged = actionRows(r.id);
         e.dataTransfer!.effectAllowed = "move";
-        e.dataTransfer!.setData("text/plain", rowFilePath(r));
+        e.dataTransfer!.setData("text/plain", dragged.map(rowFilePath).join("\n"));
+        if (dragged.length > 1) {
+            const ghost = Object.assign(document.createElement("div"), { className: "drag-ghost", textContent: `${dragged.length} items` });
+            document.body.append(ghost);
+            e.dataTransfer!.setDragImage(ghost, -8, -8);
+            setTimeout(() => ghost.remove());
+        }
     });
     list.addEventListener("dragover", (e) => {
         const folder = dropFolder(e);
         mark(folder);
         // hovering a collapsed folder opens it
         const r = rowAt(e);
-        if (r?.kind === "folder" && !r.expanded && dragged) {
+        if (r?.kind === "folder" && !r.expanded && dragged.length) {
             if (hoverId !== r.id) {
                 stopHover();
                 hoverId = r.id;
@@ -745,16 +851,16 @@ function setupExplorerDnd(list: HTMLElement): void {
     });
     list.addEventListener("drop", (e) => {
         const folder = dropFolder(e);
-        const r = dragged;
-        dragged = null;
+        const plan = folder === null ? null : dropPlan(dragged, folder);
+        dragged = [];
         mark(null);
         stopHover();
-        if (folder === null || !r) return;
+        if (!plan) return;
         e.preventDefault();
-        void moveRow(r, dropPath(r, folder)!);
+        void moveRows(plan);
     });
     list.addEventListener("dragend", () => {
-        dragged = null;
+        dragged = [];
         mark(null);
         stopHover();
     });
@@ -880,18 +986,20 @@ const withJson = (path: string): string => (/\.json$/i.test(path) ? path : path 
 /** Inline rename in the explorer (double-click a name, or F2); a / in the new name moves the item. */
 function startRename(label: HTMLElement, row: TreeRow, refocusList = false): void {
     const kind: NewKind = row.kind;
-    const current = row.kind === "script" ? cleanScriptName(row.path) : row.path;
+    const current = row.kind === "script" ? cleanScriptName(row.path) + ".ts" : row.path;
     const input = nameInput(kind, current);
     label.replaceWith(input);
     renaming = true;
     input.focus();
-    // select the name, not its folder or .json (as VS Code does)
+    // select the name, not its folder or extension (as VS Code does)
     const start = current.lastIndexOf("/") + 1;
-    input.setSelectionRange(start, kind === "data" ? current.length - (/\.json$/i.test(current) ? 5 : 0) : current.length);
+    const ext = kind === "script" ? 3 : kind === "data" && /\.json$/i.test(current) ? 5 : 0;
+    input.setSelectionRange(start, current.length - ext);
     onInputDone(input, (commit) => {
         renaming = false;
         if (refocusList) $("#script-list").focus();
         let next = cleanScriptName(input.value).trim();
+        if (kind === "script") next = next.replace(/\.ts$/i, "");
         if (kind === "data" && next) next = withJson(next);
         let problem = commit && next && next !== row.path ? itemPathProblem(kind, next, row.kind === "folder" ? undefined : row.id) : "";
         if (!problem && kind === "folder" && commit && isInFolder(next, row.path)) problem = "a folder can't move into itself";
@@ -906,29 +1014,34 @@ function startRename(label: HTMLElement, row: TreeRow, refocusList = false): voi
 }
 
 /** Rename or move a script, data file or folder (with its contents) to `to`. */
-async function moveRow(row: TreeRow, to: string): Promise<void> {
-    let r: any;
-    if (row.kind === "script") {
-        const script = scripts.find((s) => s.id === row.id);
-        if (!script) return;
-        r = await send({ type: "saveScript", id: script.id, code: script.code, name: to });
-        // an error with an id is a compile error: the script was still saved
-        if (r?.error && r.id) {
-            status("script error — see log", "error");
-            r = null;
+const moveRow = (row: TreeRow, to: string): Promise<void> => moveRows([{ item: row, to }]);
+
+async function moveRows(plan: { item: TreeRow; to: string }[]): Promise<void> {
+    for (const { item: row, to } of plan) {
+        let r: any;
+        if (row.kind === "script") {
+            const script = scripts.find((s) => s.id === row.id);
+            if (!script) continue;
+            r = await send({ type: "saveScript", id: script.id, code: script.code, name: to });
+            // an error with an id is a compile error: the script was still saved
+            if (r?.error && r.id) {
+                status("script error — see log", "error");
+                r = null;
+            }
+        } else if (row.kind === "data") {
+            r = await send({ type: "renameDataFile", id: row.id, path: to });
+        } else {
+            r = await send({ type: "renameFolder", from: row.path, to });
+            if (!r?.error) {
+                setCollapsed(movedCollapsed(collapsed, row.path, to));
+                if (focusedId === row.id) focusedId = folderRowId(to);
+                else if (focusedId && isFolderRowId(focusedId) && isInFolder(folderPathOfRowId(focusedId), row.path)) focusedId = folderRowId(movedPath(folderPathOfRowId(focusedId), row.path, to));
+                if (explorerSel.delete(row.id)) explorerSel.add(folderRowId(to));
+            }
         }
-    } else if (row.kind === "data") {
-        r = await send({ type: "renameDataFile", id: row.id, path: to });
-    } else {
-        r = await send({ type: "renameFolder", from: row.path, to });
-        if (!r?.error) {
-            setCollapsed(movedCollapsed(collapsed, row.path, to));
-            if (focusedId === row.id) focusedId = folderRowId(to);
-            else if (focusedId && isFolderRowId(focusedId) && isInFolder(folderPathOfRowId(focusedId), row.path)) focusedId = folderRowId(movedPath(folderPathOfRowId(focusedId), row.path, to));
-        }
+        if (r?.error) status(`can't move "${row.path}": ${r.error}`, "error");
+        else revealInExplorer(to);
     }
-    if (r?.error) status(`can't move "${row.path}": ${r.error}`, "error");
-    else revealInExplorer(to);
     await refresh();
 }
 
@@ -1685,33 +1798,30 @@ const netBadge = new NetBadge();
 const problemsBadge = new ProblemsBadge();
 let logBadgeEnabled = true;
 
-function renderBadge(el: HTMLElement, badge: TabBadge): void {
+/** The status bar's count for a view: visible even with the panel closed. */
+function renderBadge(badge: TabBadge): void {
     document.body.classList.toggle("no-status", !logBadgeEnabled);
-    const [sb, label] = badge === logBadge ? ["#sb-log", "Log (⌘J)"] : badge === problemsBadge ? ["#sb-problems", "Problems (⌘⇧M)"] : ["#sb-net", "Network"];
-    renderStatusBadge($(sb), badge, label);
-    el.hidden = !logBadgeEnabled || badge.empty;
-    el.title = badge.empty ? "" : badge.title;
+    const [sel, label] = badge === logBadge ? ["#sb-log", "Log (⌘J)"] : badge === problemsBadge ? ["#sb-problems", "Problems (⌘⇧M)"] : ["#sb-net", "Network"];
+    const el = $(sel);
     for (const [cls, n] of badge.counts) {
-        const b = el.querySelector<HTMLElement>(`.tab-badge.${cls}`)!;
-        b.hidden = !n;
-        b.textContent = badgeCount(n);
-    }
-}
-
-function renderTabBadges(): void {
-    renderBadge($("#problems-badge"), problemsBadge);
-    renderBadge($("#log-badge"), logBadge);
-    renderBadge($("#net-badge"), netBadge);
-}
-
-/** Status bar mirror of the tab badges, visible even with the panel closed. */
-function renderStatusBadge(el: HTMLElement, badge: TabBadge, label: string): void {
-    for (const [cls, n] of badge.counts) {
-        el.querySelector(`.sb-n[data-k="${cls}"]`)!.textContent = badgeCount(n);
-        el.querySelector(`.sb-n[data-k="${cls}"]`)!.classList.toggle("on", n > 0);
-        el.querySelector(`.sb-ico.${cls}`)!.classList.toggle("on", n > 0);
+        const count = el.querySelector<HTMLElement>(`.sb-n[data-k="${cls}"]`)!;
+        count.textContent = badgeCount(n);
+        count.parentElement!.classList.toggle("on", n > 0);
     }
     el.title = badge.empty ? label : `${label} — ${badge.title}`;
+}
+
+/** the status bar: every view's counts, and which view the panel shows */
+function renderTabBadges(): void {
+    renderBadge(problemsBadge);
+    renderBadge(logBadge);
+    renderBadge(netBadge);
+    const open = !$("#app").classList.contains("panel-hidden") && $("#log-panel").dataset.tab;
+    for (const item of document.querySelectorAll<HTMLElement>("#status-bar .sb-item")) {
+        const on = item.dataset.panel === open;
+        item.classList.toggle("active", on);
+        item.setAttribute("aria-pressed", String(on));
+    }
 }
 
 /** Network counts from a passive connection: live before the Network tab is ever opened. */
@@ -1719,7 +1829,7 @@ function watchNetCounts(): void {
     const store = createNetStore();
     effect(() => {
         netBadge.set(touchCounts(store.entries.value));
-        renderBadge($("#net-badge"), netBadge);
+        renderBadge(netBadge);
     });
     store.connect(undefined, "network-counts");
 }
@@ -1827,7 +1937,7 @@ function updateProblems(): void {
     }
     markProblems();
     problemsBadge.set(problemCounts(problemGroups));
-    renderBadge($("#problems-badge"), problemsBadge);
+    renderBadge(problemsBadge);
     renderProblems();
 }
 
@@ -2731,10 +2841,13 @@ function setupPanelTabs(): void {
     for (const t of document.querySelectorAll<HTMLElement>(".panel-tab")) {
         t.addEventListener("click", () => showPanelTab(t.dataset.panel as PanelTab));
     }
-    // status bar: open the panel on that tab
-    for (const [btn, which] of [["#sb-problems", "problems"], ["#sb-log", "log"], ["#sb-net", "network"]] as const) {
-        $(btn).addEventListener("click", () => {
-            setPanelHidden(false);
+    // status bar: open the panel on that view (VS Code: clicking the open one closes the panel)
+    for (const item of document.querySelectorAll<HTMLElement>("#status-bar .sb-item")) {
+        item.addEventListener("click", () => {
+            const which = item.dataset.panel as PanelTab;
+            const hidden = $("#app").classList.contains("panel-hidden");
+            if (!hidden && $("#log-panel").dataset.tab === which) return setPanelHidden(true);
+            if (hidden) setPanelHidden(false);
             showPanelTab(which);
         });
     }
