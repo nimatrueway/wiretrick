@@ -12,7 +12,9 @@
  *     `defaultStrategy`.
  * v2: strategy webRequest → extension, wt.onDom → wt.onDocument, the
  *     onRequest result `respond:` → `replaceResponse:` (and the renamed
- *     Wiretrick.* types).
+ *     Wiretrick.* types), onDocument `when: "DOMContentLoaded"` →
+ *     `when: "document_end"` (same timing; only after `when:`, so
+ *     `addEventListener("DOMContentLoaded", …)` is left alone).
  *
  * Accepted risk: the rewrite is regex based, not syntax aware. In a script
  * that uses `wt.`, every `cancel:` becomes `block:`, every `types:` becomes
@@ -74,6 +76,7 @@ export function migrateScriptSource(code: string): ScriptMigration {
     // v2
     rule(/(["'`])webRequest\1/g, (_m, q) => `${q}extension${q}`, 'strategy "webRequest" → "extension"');
     rule(/\bwt\.onDom\b/g, "wt.onDocument", "wt.onDom → wt.onDocument");
+    rule(/\b(when\s*:\s*)(["'`])DOMContentLoaded\2/g, (_m, pre, q) => `${pre}${q}document_end${q}`, 'when "DOMContentLoaded" → "document_end"');
     rule(/\brespond(\s*):/g, (_m, sp) => `replaceResponse${sp}:`, "respond: → replaceResponse:");
     rule(
         /\bWiretrick\.(RespondOptions|DomRouteOptions|DomRoute|DomOptions)\b/g,

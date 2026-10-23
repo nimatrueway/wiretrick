@@ -142,7 +142,7 @@ Needs a strategy that reads bodies: "helper" or "debugger" (any resource), "page
     },
     {
         title: "wt.onDocument — DOM & title changes",
-        body: `Runs in the page (MAIN world) in every frame whose own URL matches the route — by default once DOMContentLoaded fires (DOM parsed; hydration not finished). If the bundle arrives after that, it runs immediately. Works even when the HTML is service-worker served or hydration re-renders it. Strategies don't apply.
+        body: `Runs in the page (MAIN world) in every frame whose own URL matches the route — by default at document_end, once DOMContentLoaded fires (DOM parsed; hydration not finished). If the bundle arrives after that, it runs immediately. Works even when the HTML is service-worker served or hydration re-renders it. Strategies don't apply.
 
 wt.onDocument("*://example.com/*", () => {
     document.title = "🎯 " + document.title;
@@ -157,11 +157,10 @@ wt.onDocument({ url: "*://example.com/*", when: "document_idle" }, () => {
     if (el) el.textContent = "Intercepted";
 });
 
-Timing: when: "DOMContentLoaded" (default) | "document_start" | "document_end" | "document_idle"
+Timing: when: "document_end" (default) | "document_start" | "document_idle"
 - document_start — while the HTML is still parsing: <html> exists, head/body usually null. For stubbing globals / observers ahead of page code. MV3: a cold service worker (~50-100ms) can lose the race to early inline scripts
-- DOMContentLoaded — HTML parsed, defer scripts done; images may load and frameworks may not have hydrated yet
-- document_end — alias of DOMContentLoaded
-- document_idle — after window load (always waits for it; a slow image delays it)
+- document_end — DOMContentLoaded (DOM parsed), defer scripts done; images may load and frameworks may not have hydrated yet
+- document_idle — after the page's load event (always waits for it, unlike Chrome's run_at document_idle; a slow image delays it)
 Already past the moment? Runs immediately.
 
 Runs once per document per matching frame. SPA navigations and re-renders don't re-run it (use a MutationObserver inside). Saving the script with the page open re-runs it immediately — keep it idempotent. A script may register several onDocument handlers, each with its own route and when. Hover "when" in the Code view for the full reference.`,

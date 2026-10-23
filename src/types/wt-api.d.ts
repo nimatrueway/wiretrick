@@ -269,7 +269,7 @@ declare namespace Wiretrick {
     interface DocumentOptions {
         /**
          * **When** the `onDocument` handler runs, relative to the page's own loading.
-         * Default: `"DOMContentLoaded"`.
+         * Default: `"document_end"`.
          *
          * **How it gets there:** in every frame (top page *and* iframes) the
          * extension injects a small hook at `document_start`. The hook asks
@@ -280,9 +280,8 @@ declare namespace Wiretrick {
          * | `when` | Fires | DOM state |
          * |---|---|---|
          * | `"document_start"` | as soon as the script is compiled | only `<html>`; `head`/`body` usually `null` |
-         * | `"DOMContentLoaded"` *(default)* | HTML fully parsed | whole DOM queryable; images/iframes may still load |
-         * | `"document_end"` | same as `DOMContentLoaded` | alias matching the content-script `run_at` spelling |
-         * | `"document_idle"` | after window `load` | every subresource finished |
+         * | `"document_end"` *(default)* | at `DOMContentLoaded` (DOM parsed) | whole DOM queryable; images/iframes may still load |
+         * | `"document_idle"` | after the page's `load` event | every subresource finished |
          *
          * **`"document_start"`** — runs while the HTML is still being parsed,
          * so `querySelector` finds (almost) nothing. Use it to get in *ahead*
@@ -296,19 +295,20 @@ declare namespace Wiretrick {
          *   correctness — use `onResponseBody` when you must change what page
          *   code sees.
          *
-         * **`"DOMContentLoaded"`** — `defer`/module scripts have run; images,
+         * **`"document_end"`** — at `DOMContentLoaded` (DOM parsed):
+         * `defer`/module scripts have run; images,
          * stylesheets and iframes may still be loading, and frameworks (React,
          * Vue, …) may not have hydrated yet, so a re-render can overwrite your
          * change. The right choice for most title/text/attribute tweaks. If
          * the page is already past this point when the script arrives (slow
          * bundle, bfcache restore), the handler runs immediately.
          *
-         * **`"document_idle"`** — best for reading final layout/sizes or
-         * tweaking content that page scripts build during load. The slowest
-         * choice: one hanging image or ad iframe delays it. Runs immediately
-         * if `load` already fired. Unlike Chrome's content-script
-         * `document_idle` (which can fire before `load`), this **always**
-         * waits for `load`.
+         * **`"document_idle"`** — after the page's `load` event. Best for
+         * reading final layout/sizes or tweaking content that page scripts
+         * build during load. The slowest choice: one hanging image or ad
+         * iframe delays it. Runs immediately if `load` already fired. Unlike
+         * Chrome's content-script `run_at: "document_idle"` (which can fire
+         * before `load`), this **always** waits for `load`.
          *
          * **Applies to every value:**
          * - Runs **once** per document load, per matching frame. SPA route
@@ -328,7 +328,7 @@ declare namespace Wiretrick {
          *   (e.g. `window.myApp`) are not visible.
          *
          * @example
-         * // default: DOMContentLoaded
+         * // default: document_end (DOMContentLoaded)
          * wt.onDocument("*://example.com/*", () => {
          *     document.title = "🎯 " + document.title;
          * });
@@ -354,7 +354,7 @@ declare namespace Wiretrick {
          *     });
          * });
          */
-        when?: "DOMContentLoaded" | "document_start" | "document_end" | "document_idle";
+        when?: "document_start" | "document_end" | "document_idle";
     }
 
     // ---- wt.params / wt.defineParam: typed, user-adjustable parameters ----
@@ -631,7 +631,7 @@ declare const wt: {
      * don't apply.
      *
      * Runs once per document load in every frame whose URL matches the
-     * route — by default at `DOMContentLoaded`. A script may register
+     * route — by default at `DOMContentLoaded` (`when: "document_end"`). A script may register
      * several, each with its own route and `when`.
      *
      * @param route Frame URL pattern(s), or `{ url, exclude, when }`. See
@@ -646,7 +646,7 @@ declare const wt: {
      * });
      *
      * @example
-     * // after everything settled
+     * // after the page's load event
      * wt.onDocument({ url: "*://example.com/*", when: "document_idle" }, () => {
      *     const el = document.querySelector("h1");
      *     if (el) el.textContent = "Intercepted";

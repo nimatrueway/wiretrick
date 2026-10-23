@@ -17,8 +17,8 @@ export type NetKind = "onRequest" | "onResponseHeaders" | "replaceResponse" | "o
 export type RouteKind = NetKind | "onDocument";
 export const NET_KINDS: NetKind[] = ["onRequest", "onResponseHeaders", "replaceResponse", "onResponseBody"];
 
-export type DocumentWhen = "document_start" | "document_end" | "document_idle" | "DOMContentLoaded";
-const DOCUMENT_WHENS: DocumentWhen[] = ["document_start", "document_end", "document_idle", "DOMContentLoaded"];
+export type DocumentWhen = "document_start" | "document_end" | "document_idle";
+const DOCUMENT_WHENS: DocumentWhen[] = ["document_start", "document_end", "document_idle"];
 
 /** webRequest resource type names (also ctx.resourceType) */
 export const RESOURCE_TYPES = [
@@ -109,7 +109,7 @@ export function normalizeRoute(kind: RouteKind, raw: unknown, index: number): Ro
         if (obj.when !== undefined) {
             if (!DOCUMENT_WHENS.includes(obj.when)) throw new Error(`${where}: when must be one of ${DOCUMENT_WHENS.join(", ")}`);
             route.when = obj.when;
-        } else route.when = "DOMContentLoaded";
+        } else route.when = "document_end";
         return route;
     }
     if (obj.when !== undefined) throw new Error(`${where}: "when" applies to onDocument only`);

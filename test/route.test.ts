@@ -20,10 +20,11 @@ describe("normalizeRoute", () => {
         });
     });
 
-    it("onDocument: when defaults to DOMContentLoaded; request-only options are rejected", () => {
-        expect(normalizeRoute("onDocument", "*", 0).when).toBe("DOMContentLoaded");
+    it("onDocument: when defaults to document_end; request-only options are rejected", () => {
+        expect(normalizeRoute("onDocument", "*", 0).when).toBe("document_end");
         expect(normalizeRoute("onDocument", { url: "*", when: "document_idle" }, 0).when).toBe("document_idle");
         expect(() => normalizeRoute("onDocument", { url: "*", when: "later" }, 0)).toThrow(/when must be one of/);
+        expect(() => normalizeRoute("onDocument", { url: "*", when: "DOMContentLoaded" }, 0)).toThrow(/when must be one of document_start, document_end, document_idle$/);
         expect(() => normalizeRoute("onDocument", { url: "*", methods: ["GET"] }, 0)).toThrow(/doesn't apply to onDocument/);
         expect(() => normalizeRoute("onRequest", { url: "*", when: "document_idle" }, 0)).toThrow(/onDocument only/);
     });
@@ -109,7 +110,7 @@ describe("page shim (onDocument in the page)", () => {
         wt.onDocument("*://b.com/*", () => 2);
         expect(dom.map((d) => [d.when, d.route.index])).toEqual([
             ["document_idle", 0],
-            ["DOMContentLoaded", 1],
+            ["document_end", 1],
         ]);
         expect(domHandlersFor(dom, "https://a.com/x").map((d) => d.fn({}))).toEqual([1]);
         expect(domHandlersFor(dom, "https://c.com/")).toEqual([]);

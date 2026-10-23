@@ -288,9 +288,9 @@ timing:
 2. **Registration**: while compiling, the `wt.onDocument(route, handler)` calls
    whose route matches the frame are captured (the handler is stored, not
    yet run).
-3. **Execution**: by default the captured handlers run exactly once, when
-   the `DOMContentLoaded` event fires — i.e. the full DOM is parsed and
-   queryable, but stylesheets/images may still be loading, and framework
+3. **Execution**: by default (`when: "document_end"`) the captured handlers
+   run exactly once, when the `DOMContentLoaded` event fires — i.e. the
+   full DOM is parsed and queryable, but stylesheets/images may still be loading, and framework
    hydration (React/Vue) has *not* necessarily finished yet.
    - If the hook's bundle arrives **after** `DOMContentLoaded` already fired
      (late bundle, bfcache restore), handlers run immediately at
@@ -303,18 +303,17 @@ timing:
    the same `when` run in script-list order, then registration order.
 
    ```ts
-   wt.onDocument("*://example.com/*", () => { ... });                                       // default: DOMContentLoaded
+   wt.onDocument("*://example.com/*", () => { ... });                                       // default: document_end
    wt.onDocument({ url: "*://example.com/*", when: "document_start" }, () => { ... });      // while HTML is still parsing
-   wt.onDocument({ url: "*://example.com/*", when: "document_end" }, () => { ... });        // alias of DOMContentLoaded
-   wt.onDocument({ url: "*://example.com/*", when: "document_idle" }, () => { ... });       // after window load
+   wt.onDocument({ url: "*://example.com/*", when: "document_end" }, () => { ... });        // DOMContentLoaded (DOM parsed)
+   wt.onDocument({ url: "*://example.com/*", when: "document_idle" }, () => { ... });       // after the page's load event
    ```
 
    | `when` | Runs | DOM state | Use for |
    |---|---|---|---|
    | `document_start` | as soon as the script is compiled | `<html>` only; `head`/`body` usually `null` | stubbing globals, `MutationObserver` on `document`, capture listeners — getting in ahead of page code |
-   | `DOMContentLoaded` *(default)* | HTML fully parsed, `defer`/module scripts done | complete DOM; images/CSS/iframes may still load; framework hydration may not have happened | most title/text/attribute changes |
-   | `document_end` | same as `DOMContentLoaded` | same | alias matching content-script `run_at` |
-   | `document_idle` | after window `load` | everything loaded | final layout/sizes, content built during load |
+   | `document_end` *(default)* | at `DOMContentLoaded` (DOM parsed), `defer`/module scripts done | complete DOM; images/CSS/iframes may still load; framework hydration may not have happened | most title/text/attribute changes |
+   | `document_idle` | after the page's `load` event | everything loaded | final layout/sizes, content built during load |
 
    - **Already past that moment?** (slow bundle, bfcache restore) The
      handler runs immediately.
@@ -323,8 +322,9 @@ timing:
      worker can take ~50-100ms, so early inline `<script>`s may already
      have run. When page code *must* see your change, rewrite the response
      with `onResponseBody` instead.
-   - **`document_idle` always waits for `load`**, unlike Chrome's
-     content-script `document_idle`; one slow image or ad iframe delays it.
+   - **`document_idle` always waits for the page's `load` event**, unlike
+     Chrome's content-script `run_at: "document_idle"` (which can fire
+     before `load`); one slow image or ad iframe delays it.
    - **Once per document, per matching frame.** Every frame (iframes too)
      is matched against its *own* URL. SPA soft navigations (`pushState`)
      and framework re-renders don't re-run it — start a `MutationObserver`

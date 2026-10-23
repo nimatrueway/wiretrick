@@ -35,7 +35,7 @@ export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDocumentHa
         onDocument: (route: unknown, fn: unknown) => {
             if (typeof fn !== "function") throw new Error("wt.onDocument: second argument must be the handler function");
             const r = normalizeRoute("onDocument", route, dom.length);
-            dom.push({ route: r, when: r.when || "DOMContentLoaded", fn: fn as any });
+            dom.push({ route: r, when: r.when || "document_end", fn: fn as any });
         },
         about: inert,
         params: (defs: Record<string, ParamDef>) => Object.freeze(Object.fromEntries(Object.entries(defs || {}).map(([k, d]) => [k, parsed(k, d)]))),

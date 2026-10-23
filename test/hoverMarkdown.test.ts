@@ -53,8 +53,8 @@ describe("hover markdown", () => {
         expect(formatSignature("(method) f<T extends Record<string, X>>(def: Wiretrick.ScriptDef<T>, opts?: { a: (x: number) => void; b: string }): R<T>", 40)).toBe(
             "(method) f<T extends Record<string, X>>(\n    def: Wiretrick.ScriptDef<T>,\n    opts?: { a: (x: number) => void; b: string }\n): R<T>"
         );
-        expect(formatSignature('(property) A.when?: "document_idle" | "DOMContentLoaded" | "a, b" | "document_end"', 40)).toBe(
-            '(property) A.when?:\n    | "document_idle"\n    | "DOMContentLoaded"\n    | "a, b"\n    | "document_end"'
+        expect(formatSignature('(property) A.when?: "document_idle" | "document_start" | "a, b" | "document_end"', 40)).toBe(
+            '(property) A.when?:\n    | "document_idle"\n    | "document_start"\n    | "a, b"\n    | "document_end"'
         );
     });
 

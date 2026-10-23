@@ -21,8 +21,8 @@ describe("wt.onDocument options", () => {
         expect(c.handlers.onDocument[0].route.when).toBe("document_idle");
     });
 
-    it("defaults: when = DOMContentLoaded", () => {
+    it("defaults: when = document_end", () => {
         const c = compileScript(`wt.onDocument("*", () => {});`);
-        expect(c.handlers.onDocument[0]?.route.when).toBe("DOMContentLoaded");
+        expect(c.handlers.onDocument[0]?.route.when).toBe("document_end");
     });
 });

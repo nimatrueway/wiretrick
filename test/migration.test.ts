@@ -61,20 +61,23 @@ wt.onRequest({ match: "*://d.test/*", strategy: "extension" }, () => {});
     it("rewrites the v2 names", () => {
         const v1 = `wt.about("x");
 wt.onRequest({ match: "*://a/*", strategy: wt.isFirefox ? "webRequest" : 'helper' }, () => ({ respond: { status: 200, body: "hi" } }));
-wt.onDom({ match: "*://b/*", strategy: \`webRequest\` }, (doc) => {});
+wt.onDom({ match: "*://b/*", when: "DOMContentLoaded" }, (doc) => {});
+wt.onDom({ match: "*://c/*", when :'DOMContentLoaded', strategy: \`webRequest\` }, () => { document.addEventListener("DOMContentLoaded", () => {}); });
 const r: Wiretrick.RespondOptions = { respond : 1 } as any;
 let o: Wiretrick.DomRouteOptions, p: Wiretrick.DomRoute, q: Wiretrick.DomOptions;
 `;
         const r = migrateScriptSource(v1);
         expect(r.code).toBe(`wt.about("x");
 wt.onRequest({ match: "*://a/*", strategy: wt.isFirefox ? "extension" : 'helper' }, () => ({ replaceResponse: { status: 200, body: "hi" } }));
-wt.onDocument({ match: "*://b/*", strategy: \`extension\` }, (doc) => {});
+wt.onDocument({ match: "*://b/*", when: "document_end" }, (doc) => {});
+wt.onDocument({ match: "*://c/*", when :'document_end', strategy: \`extension\` }, () => { document.addEventListener("DOMContentLoaded", () => {}); });
 const r: Wiretrick.ReplacementOptions = { replaceResponse : 1 } as any;
 let o: Wiretrick.DocumentRouteOptions, p: Wiretrick.DocumentRoute, q: Wiretrick.DocumentOptions;
 `);
         expect(r.changes).toEqual([
             'strategy "webRequest" → "extension"',
             "wt.onDom → wt.onDocument",
+            'when "DOMContentLoaded" → "document_end"',
             "respond: → replaceResponse:",
             "Wiretrick.RespondOptions → Wiretrick.ReplacementOptions",
             "Wiretrick.DomRouteOptions → Wiretrick.DocumentRouteOptions",
@@ -85,7 +88,7 @@ let o: Wiretrick.DocumentRouteOptions, p: Wiretrick.DocumentRoute, q: Wiretrick.
     });
 
     it("keeps v2 look-alikes", () => {
-        const src = `wt.about("x");\nconst o = { responder: 1, respondTo: 2 }; obj.onDom(1); wt.onDomain; chrome.webRequest.onBeforeRequest; const w = "webRequests";\n`;
+        const src = `wt.about("x");\nconst o = { responder: 1, respondTo: 2 }; obj.onDom(1); wt.onDomain; addEventListener("DOMContentLoaded", f); window.addEventListener('DOMContentLoaded', f); const e = \`DOMContentLoaded\`; chrome.webRequest.onBeforeRequest; const w = "webRequests";\n`;
         expect(migrateScriptSource(src)).toEqual({ code: src, changes: [] });
     });
 
