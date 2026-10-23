@@ -86,6 +86,24 @@ function signal(kind: Exclude<SyncActivity, "idle">): void {
     broadcastStatus();
 }
 
+/**
+ * What our folder writes count as. A change made in the extension is sent;
+ * the follow-up writes of applying a change read from the folder (its
+ * settings.yaml section, the schema, a canonical file name) are part of
+ * receiving it — they must not show as an upload of that same change.
+ * Only set inside serial() operations, so it can't leak into another one.
+ */
+let writeKind: Exclude<SyncActivity, "idle"> = "sending";
+async function writingAs<T>(kind: Exclude<SyncActivity, "idle">, fn: () => Promise<T>): Promise<T> {
+    const prev = writeKind;
+    writeKind = kind;
+    try {
+        return await fn();
+    } finally {
+        writeKind = prev;
+    }
+}
+
 function describeHandle(handle: any): Promise<string> {
     return (async () => {
         try {
@@ -193,7 +211,7 @@ async function writeFile(fileName: string, content: string): Promise<boolean> {
         const w = await fh.createWritable();
         await w.write(content);
         await w.close();
-        signal("sending");
+        signal(writeKind);
     } catch (e: any) {
         dlogLevel("sync", "warn", `Folder sync: writing "${fileName}" failed: ${e?.message || e}`);
         return false;
@@ -230,6 +248,7 @@ function isStaleEcho(file: string, hash: string): boolean {
 async function removeFile(fileName: string): Promise<void> {
     try {
         await dirHandle.removeEntry(fileName);
+        signal(writeKind);
     } catch {}
     known.delete(fileName);
 }
@@ -305,8 +324,18 @@ async function pullChange(file: string, text: string, s: Script): Promise<boolea
 }
 
 async function applyEvents(events: ReturnType<typeof computeEvents>): Promise<void> {
+    if (!events.changed.length && !events.added.length && !events.removed.length) return;
+    await writingAs("receiving", async () => {
+        if (!(await applyFolderEvents(events))) return;
+        // the store's settings.yaml / schema follow the scripts now, as part
+        // of receiving — the store-change reconcile then finds nothing to write
+        await exportSettings();
+    });
+}
+
+/** apply disk changes to the store; true when a script changed */
+async function applyFolderEvents(events: ReturnType<typeof computeEvents>): Promise<boolean> {
     const { changed, added, removed } = events;
-    if (!changed.length && !added.length && !removed.length) return;
     let scripts = await listScripts();
     const texts = new Map<string, string | null>();
     const read = async (f: string) => {
@@ -388,7 +417,7 @@ async function applyEvents(events: ReturnType<typeof computeEvents>): Promise<vo
         if (rec && rec.hash !== contentHash(s.code)) {
             // the script changed in the extension since the last sync: its
             // edits would be lost — write the file back instead of deleting
-            await writeFile(file, s.code);
+            await writingAs("sending", () => writeFile(file, s.code));
             owned.set(s.id, { file, hash: contentHash(s.code) });
             dlogLevel("sync", "warn", `Folder sync: "${file}" was deleted on disk, but script "${s.meta.name}" has newer changes in the extension — the file was written back`);
             continue;
@@ -398,6 +427,7 @@ async function applyEvents(events: ReturnType<typeof computeEvents>): Promise<vo
         dlogLevel("sync", "info", `Folder sync: "${file}" deleted on disk — script "${s.meta.name}" removed`);
         announce(file);
     }
+    return touched;
 }
 
 /**
@@ -724,7 +754,7 @@ async function pollSettings(): Promise<void> {
     }
     signal("receiving");
     dlogLevel("sync", "info", `Folder sync: ${SETTINGS_FILE} changed on disk — reloaded the whole file`);
-    await exportSettings();
+    await writingAs("receiving", () => exportSettings());
 }
 
 let pollQueued = false;
