@@ -221,7 +221,8 @@ the build (MV2/MV3), browser, OS, extension ID and the local helper's state.
 **Copy** puts that on the clipboard as text — paste it into bug reports.
 
 **Collect diagnostics…** (also *Wiretrick: Collect Diagnostics…* in the
-Code view's F1 menu) downloads a Markdown report meant to be handed to a person
+Code view's F1 menu, and **collect diagnostics…** at the right of the panel
+header while the Network view is open) downloads a Markdown report meant to be handed to a person
 or an LLM: environment, scripts, settings.yaml, recent log and network
 entries, and Editor state (theme, layout). It first asks for the optional
 *management* permission to list your other extensions (they can interfere

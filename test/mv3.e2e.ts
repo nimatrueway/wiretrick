@@ -449,6 +449,8 @@ try {
     const byScript: string[][] = await mgr.evaluate(() => [...document.querySelectorAll("#network-view tbody tr")].filter((t) => t.querySelector(".net-name")).map((t) => [...t.querySelectorAll(".c-script .net-badge")].map((b) => b.textContent || "")));
     check("Network script filter keeps only the picked script's requests", !!pick && byScript.length > 0 && byScript.every((names) => names.includes(pick)), JSON.stringify({ scriptOpts, byScript }));
     await mgr.selectOption("#network-view .net-script", "");
+    const netTools = await mgr.evaluate(() => ({ net: !(document.querySelector("#net-tools") as HTMLElement).hidden, log: !(document.querySelector("#log-tools") as HTMLElement).hidden, label: document.querySelector("#btn-net-diagnostics")?.textContent }));
+    check("the Network tab shows the diagnostics collector in the panel header (not the Log tools)", netTools.net && !netTools.log && netTools.label === "collect diagnostics…", JSON.stringify(netTools));
     await mgr.click("#log-header-title");
     // Network panel count: recorded observed/modified requests, until cleared
     // fresh (cache-busted) script tags: gz.js → modified (Cdp transform), auto.js → observed (Watcher)

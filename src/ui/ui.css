@@ -811,7 +811,7 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 /* ---- bottom panel tabs (VS Code style) ---- */
 #log-header { align-items: center; gap: 4px 8px; flex-wrap: wrap; }
 #panel-tabs { display: flex; gap: 14px; }
-#log-tools { min-width: 0; flex: 1 1 auto; }
+#log-tools, #net-tools { min-width: 0; flex: 1 1 auto; }
 #btn-close-panel { margin-left: auto; }
 #app[data-dock="left"] #log-source, #app[data-dock="left"] #log-find { width: 84px; }
 .panel-tab {
@@ -831,8 +831,8 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 /* Network tab: modified = solid, observed = hollow */
 .tab-badge.modified { background: var(--ok); color: #1e1e1e; }
 .tab-badge.observed { background: transparent; color: var(--fg-dim); box-shadow: inset 0 0 0 1px var(--fg-dim); }
-#log-tools { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
-#log-tools[hidden], #log-entries[hidden], #network-view[hidden], #problems-view[hidden] { display: none; }
+#log-tools, #net-tools { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+#log-tools[hidden], #net-tools[hidden], #log-entries[hidden], #network-view[hidden], #problems-view[hidden] { display: none; }
 #log-entries { flex: 1; min-height: 0; }
 #network-view { flex: 1; min-height: 0; display: flex; container-type: inline-size; }
 

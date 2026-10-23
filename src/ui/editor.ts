@@ -1646,9 +1646,11 @@ async function runDiagnostics(): Promise<void> {
     const btn = $("#btn-diagnostics") as HTMLButtonElement;
     const state = $("#diagnostics-state");
     const copy = $("#btn-diagnostics-copy");
-    btn.disabled = true;
+    const net = $("#btn-net-diagnostics") as HTMLButtonElement;
+    const netLabel = net.textContent;
+    btn.disabled = net.disabled = true;
     copy.hidden = true;
-    state.textContent = "collecting…";
+    state.textContent = net.textContent = "collecting…";
     try {
         const name = diagnosticsFileName();
         diagnosticsReport = await collectDiagnostics(managerUiState());
@@ -1656,10 +1658,14 @@ async function runDiagnostics(): Promise<void> {
         state.textContent = `downloaded (${Math.ceil(diagnosticsReport.length / 1024)} KB)`;
         state.title = name;
         copy.hidden = false;
+        net.textContent = "downloaded ✓";
     } catch (e: any) {
         state.textContent = `failed: ${e?.message || e}`;
+        net.textContent = "failed";
+        net.title = state.textContent;
     } finally {
-        btn.disabled = false;
+        btn.disabled = net.disabled = false;
+        setTimeout(() => (net.textContent = netLabel), 1500);
     }
 }
 
@@ -1672,6 +1678,7 @@ function setupDialogs(): void {
         await navigator.clipboard.writeText(aboutText(aboutInfo)).then(() => flash(b, "Copied ✓"), () => flash(b, "Copy failed"));
     });
     $("#btn-diagnostics").addEventListener("click", () => void runDiagnostics());
+    $("#btn-net-diagnostics").addEventListener("click", () => void runDiagnostics());
     $("#btn-diagnostics-copy").addEventListener("click", (e) => {
         const b = e.currentTarget as HTMLElement;
         void navigator.clipboard.writeText(diagnosticsReport).then(() => flash(b, "Copied ✓"), () => flash(b, "Copy failed"));
@@ -2148,6 +2155,7 @@ function showPanelTab(which: PanelTab): void {
     }
     $("#log-entries").hidden = which !== "log";
     $("#log-tools").hidden = which !== "log";
+    $("#net-tools").hidden = which !== "network";
     $("#network-view").hidden = which !== "network";
     $("#problems-view").hidden = which !== "problems";
     $("#log-panel").dataset.tab = which;
