@@ -117,7 +117,7 @@ function makeSidebarDraggable(): void {
     const header = el("brand");
     header.addEventListener("mousedown", (e) => {
         if (e.button !== 0) return;
-        if ((e.target as HTMLElement).closest("button, input, select, option, textarea")) return;
+        if ((e.target as HTMLElement).closest("button, input, select, option, textarea, .no-dock")) return;
         e.preventDefault();
         const preview = makePreview();
         let target: Side | null = null;
@@ -229,7 +229,7 @@ function makeDraggable(): void {
     header.addEventListener("mousedown", (e) => {
         if (e.button !== 0) return;
         // controls in the header (filters, buttons) keep their own behavior
-        if ((e.target as HTMLElement).closest("button, input, select, option, textarea")) return;
+        if ((e.target as HTMLElement).closest("button, input, select, option, textarea, .no-dock")) return;
         e.preventDefault();
         const preview = makePreview();
         let target: Target | null = null;

@@ -19,6 +19,12 @@ its section below.
 
 - Network filter: suggestions open under the word being completed instead
   of spanning the whole box.
+- Panel: the Problems, Log and Network filters sit in the same slim spot in
+  the panel header, next to the tabs (Network no longer has a filter bar of
+  its own); clear and Network's collect diagnostics are icons after them.
+  When the panel is narrow the filters move to a row of their own.
+- Network filter: Basic/Advanced is a single `{ }` toggle inside the filter
+  box.
 
 ### Fixed
 

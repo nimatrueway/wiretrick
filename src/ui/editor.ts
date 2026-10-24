@@ -2345,10 +2345,12 @@ async function runDiagnostics(): Promise<void> {
     const state = $("#diagnostics-state");
     const copy = $("#btn-diagnostics-copy");
     const net = $("#btn-net-diagnostics") as HTMLButtonElement;
-    const netLabel = net.textContent;
+    const netTitle = net.title;
+    const netState = (k: string, title: string) => ((net.dataset.state = k), (net.title = title));
     btn.disabled = net.disabled = true;
     copy.hidden = true;
-    state.textContent = net.textContent = "collecting…";
+    state.textContent = "collecting…";
+    netState("busy", "Collecting diagnostics…");
     try {
         const name = diagnosticsFileName();
         diagnosticsReport = await collectDiagnostics(managerUiState());
@@ -2356,14 +2358,15 @@ async function runDiagnostics(): Promise<void> {
         state.textContent = `downloaded (${Math.ceil(diagnosticsReport.length / 1024)} KB)`;
         state.title = name;
         copy.hidden = false;
-        net.textContent = "downloaded ✓";
+        netState("ok", `Diagnostics downloaded: ${name}`);
+        status(`diagnostics downloaded: ${name}`);
     } catch (e: any) {
         state.textContent = `failed: ${e?.message || e}`;
-        net.textContent = "failed";
-        net.title = state.textContent;
+        netState("error", `Diagnostics failed: ${e?.message || e}`);
+        status(`diagnostics failed: ${e?.message || e}`, "error");
     } finally {
         btn.disabled = net.disabled = false;
-        setTimeout(() => (net.textContent = netLabel), 1500);
+        setTimeout(() => (delete net.dataset.state, (net.title = netTitle)), 2500);
     }
 }
 
@@ -2864,6 +2867,7 @@ function showPanelTab(which: PanelTab): void {
         t.setAttribute("aria-selected", String(on));
     }
     $("#log-entries").hidden = which !== "log";
+    $("#problems-tools").hidden = which !== "problems";
     $("#log-tools").hidden = which !== "log";
     $("#net-tools").hidden = which !== "network";
     $("#network-view").hidden = which !== "network";

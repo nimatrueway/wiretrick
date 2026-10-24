@@ -3,7 +3,7 @@
  * box and chips ("+ Filter": field → operator → value); Advanced edits the
  * query directly with autocomplete, error underlines and a "?" syntax help.
  */
-import { Fragment, type JSX } from "preact";
+import { Fragment, type ComponentChildren, type JSX } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { RefObject } from "preact";
 import {
@@ -142,14 +142,19 @@ export function FilterBar({ state, onChange, error, data }: { state: FilterState
     const warnRef = useRef<HTMLDivElement>(null);
     useDismiss(warnRef, warn, () => setWarn(false));
     const advanced = state.mode === "advanced";
-    return (
-        <div class="net-qbar">
-            <div class="net-qmode" role="group" aria-label="Filter mode" ref={warnRef}>
-                <button aria-pressed={!advanced} class={advanced ? "" : "on"} title="Build the filter with chips" onClick={() => setMode("basic")}>
-                    Basic
-                </button>
-                <button aria-pressed={advanced} class={advanced ? "on" : ""} title="Type a query: field:value, OR, NOT, ( )" onClick={() => setMode("advanced")}>
-                    Advanced
+    // inside the filter box, at its end: the Basic ⇄ Advanced toggle and the syntax help
+    const tail = (
+        <>
+            <span class="net-qmode" ref={warnRef}>
+                <button
+                    class={"net-qmode-btn" + (advanced ? " on" : "")}
+                    aria-pressed={advanced}
+                    aria-label="Advanced query"
+                    title={advanced ? "Advanced: typing the query as text (field:value, OR, NOT, ( )) — click for Basic capsules" : "Basic: capsules — click to type the query as text (Advanced)"}
+                    onMouseDown={(ev) => ev.preventDefault()}
+                    onClick={() => setMode(advanced ? "basic" : "advanced")}
+                >
+                    {"{ }"}
                 </button>
                 {warn && (
                     <div class="net-pop net-qwarn" role="alertdialog" aria-label="Query has an error">
@@ -169,13 +174,13 @@ export function FilterBar({ state, onChange, error, data }: { state: FilterState
                         </div>
                     </div>
                 )}
-            </div>
-            {advanced ? (
-                <QueryInput value={state.query} onInput={(query) => onChange({ ...state, query })} error={error} data={data} />
-            ) : (
-                <BasicInput value={state.basic} onInput={(basic) => onChange({ ...state, basic })} error={error} data={data} />
-            )}
+            </span>
             <SyntaxHelp onPick={(query) => (setWarn(false), onChange({ ...state, mode: "advanced", query }))} />
+        </>
+    );
+    return (
+        <div class="net-qbar no-dock">
+            {advanced ? <QueryInput value={state.query} onInput={(query) => onChange({ ...state, query })} error={error} data={data} tail={tail} /> : <BasicInput value={state.basic} onInput={(basic) => onChange({ ...state, basic })} error={error} data={data} tail={tail} />}
         </div>
     );
 }
@@ -245,7 +250,7 @@ function useBasicUndo(value: BasicFilter, onInput: (b: BasicFilter) => void) {
     };
 }
 
-function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInput: (b: BasicFilter) => void; error: QueryError | null; data: SuggestData }) {
+function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter; onInput: (b: BasicFilter) => void; error: QueryError | null; data: SuggestData; tail?: ComponentChildren }) {
     const box = useRef<HTMLDivElement>(null);
     const input = useRef<HTMLInputElement>(null);
     const listRef = useRef<HTMLUListElement>(null);
@@ -737,12 +742,15 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
             ) : (
                 textBox
             )}
-            <AddFilter
-                data={data}
-                onAdd={(chip) => (gap ? (onInput(insertAtGap(value, { items: [{ k: "chip", chip }], conns: [] })), toInput(cur.length)) : (onInput(addChip(value, chip)), toInput(value.text.length)))}
-                request={request}
-                onRequestDone={() => setRequest(null)}
-            />
+            <span class="net-qtail">
+                <AddFilter
+                    data={data}
+                    onAdd={(chip) => (gap ? (onInput(insertAtGap(value, { items: [{ k: "chip", chip }], conns: [] })), toInput(cur.length)) : (onInput(addChip(value, chip)), toInput(value.text.length)))}
+                    request={request}
+                    onRequestDone={() => setRequest(null)}
+                />
+                {tail}
+            </span>
         </div>
     );
 }
@@ -937,7 +945,7 @@ function AddFilter({ data, onAdd, request, onRequestDone }: { data: SuggestData;
 
 // ── Advanced ─────────────────────────────────────────────────────────
 
-function QueryInput({ value, onInput, error, data }: { value: string; onInput: (q: string) => void; error: QueryError | null; data: SuggestData }) {
+function QueryInput({ value, onInput, error, data, tail }: { value: string; onInput: (q: string) => void; error: QueryError | null; data: SuggestData; tail?: ComponentChildren }) {
     const input = useRef<HTMLInputElement>(null);
     const mirror = useRef<HTMLDivElement>(null);
     const [ac, setAc] = useState<(Completion & { active: number }) | null>(null);
@@ -1049,6 +1057,7 @@ function QueryInput({ value, onInput, error, data }: { value: string; onInput: (
                     ))}
                 </ul>
             )}
+            {tail}
         </div>
     );
 }

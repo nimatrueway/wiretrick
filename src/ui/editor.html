@@ -46,13 +46,17 @@
                 <div id="monaco-host"></div>
                 <div id="split-h" title="Drag to resize"></div>
                 <div id="log-panel">
-                    <div id="log-header" title="Drag to dock: below the Code view, beside it, or under the script list">
-                        <span id="panel-tabs" role="tablist">
+                    <div id="log-header">
+                        <span id="panel-tabs" role="tablist" title="Drag to dock: below the Code view, beside it, or under the script list">
                             <span id="problems-tab" class="panel-tab" role="tab" data-panel="problems" title="Problems — what is wrong with your scripts right now; each one goes away once fixed (⌘⇧M)">Problems</span>
                             <span id="log-header-title" class="panel-tab active" role="tab" data-panel="log" title="Extension and script log">Log</span>
                             <span id="network-tab" class="panel-tab" role="tab" data-panel="network" title="Network activity, with what Wiretrick scripts did to each request">Network</span>
                         </span>
-                        <span id="log-tools">
+                        <span id="problems-tools" class="panel-tools" hidden>
+                        <input id="problems-filter" class="panel-filter" type="text" placeholder="Filter (e.g. text, script name)" title="Show only problems whose message or script name contains this text" autocomplete="off" spellcheck="false">
+                        </span>
+                        <span id="log-tools" class="panel-tools">
+                        <input id="log-find" class="panel-filter" type="text" placeholder="Filter (text or regex)" title="Show only log lines matching this text (regex ok)" autocomplete="off" spellcheck="false">
                         <input id="log-source" type="text" list="log-source-options" placeholder="source…" title="Filter by source — script name or engine component (e.g. pipeline, page). Substring match; empty = all">
                         <datalist id="log-source-options"></datalist>
                         <select id="log-level" title="Minimum log level">
@@ -61,21 +65,18 @@
                             <option value="warn">Warn+</option>
                             <option value="error">Error only</option>
                         </select>
-                        <input id="log-find" type="text" placeholder="find…" title="Filter log lines (regex ok)">
-                        <button id="btn-clear-log" title="Clear the log panel">clear</button>
+                        <button id="btn-clear-log" class="icon-btn" title="Clear the log" aria-label="Clear the log"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" d="M2.5 4h9M2.5 7.5h9M2.5 11h4.5M9.5 10l3.5 3.5M13 10l-3.5 3.5"/></svg></button>
                         <button id="btn-logs" class="icon-btn" title="Download the full debug log (engine + page patch + page console)" aria-label="Download debug log"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M8 2v8m-3.5-3.5L8 10l3.5-3.5M2.5 11.5v2h11v-2"/></svg></button>
                         </span>
-                        <span id="net-tools" hidden>
-                        <button id="btn-net-diagnostics" title="Collect diagnostics — downloads a report with the recorded network requests, the log, scripts and settings. Review before sharing; cookies/authorization headers are redacted.">collect diagnostics…</button>
+                        <span id="net-tools" class="panel-tools" hidden>
+                        <span id="net-filter-host"></span>
+                        <button id="btn-net-diagnostics" class="icon-btn" title="Collect diagnostics — downloads a report with the recorded network requests, the log, scripts and settings. Review before sharing; cookies/authorization headers are redacted." aria-label="Collect diagnostics"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round" d="M3.5 1.5h6l3 3v10h-9zM9.5 1.5v3h3M5 9.5h1.5l1-2 1.5 4 1-2H11"/></svg></button>
                         </span>
                         <button id="btn-close-panel" class="icon-btn" title="Close Panel (⌘J)" aria-label="Close Panel"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>
                     </div>
                     <div id="log-entries"></div>
                     <div id="network-view" hidden></div>
                     <div id="problems-view" hidden>
-                        <div class="problems-toolbar">
-                            <input id="problems-filter" type="text" placeholder="Filter (e.g. text, script name)" title="Show only problems whose message or script name contains this text" autocomplete="off" spellcheck="false">
-                        </div>
                         <div id="problems-list" role="tree" aria-label="Problems"></div>
                     </div>
                 </div>

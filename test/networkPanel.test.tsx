@@ -344,7 +344,7 @@ describe("NetworkPanel", () => {
         it("Advanced: carries the Basic query over, filters as you type, keeps the last valid filter on errors", () => {
             const { container, getByText } = setup(rows3());
             fireEvent.input(container.querySelector(".net-qbox .net-filter")!, { target: { value: "site" } });
-            fireEvent.click(getByText("Advanced"));
+            fireEvent.click(container.querySelector("[aria-label=\"Advanced query\"]")!);
             expect(localStorage.getItem("wt.network.filterMode")).toBe("advanced");
             expect(q(container).value).toBe("site");
             fireEvent.input(q(container), { target: { value: "status:5xx OR host:cdn" } });
@@ -359,26 +359,26 @@ describe("NetworkPanel", () => {
         it("AND / OR / groups carry over between Advanced and Basic; connectors toggle in Basic", () => {
             const { container, getByText, getAllByLabelText } = setup(rows3());
             const box = () => container.querySelector(".net-qbox .net-filter") as HTMLInputElement;
-            fireEvent.click(getByText("Advanced"));
+            fireEvent.click(container.querySelector("[aria-label=\"Advanced query\"]")!);
             fireEvent.input(q(container), { target: { value: "status:5xx OR host:cdn" } });
-            fireEvent.click(getByText("Basic"));
+            fireEvent.click(container.querySelector("[aria-label=\"Advanced query\"]")!);
             expect(container.querySelector(".net-qwarn")).toBeNull();
             expect([...container.querySelectorAll(".net-qchip-vals")].map((n) => n.textContent)).toEqual(["5xx", "cdn"]);
             expect(container.querySelector(".net-qconn")!.textContent).toBe("OR");
             expect(rowNames(container)).toEqual(["b.js", "c.js"]);
             fireEvent.click(getAllByLabelText("OR, click to switch")[0]);
             expect(rowNames(container)).toEqual([]);
-            fireEvent.click(getByText("Advanced"));
+            fireEvent.click(container.querySelector("[aria-label=\"Advanced query\"]")!);
             expect(q(container).value).toBe("status:5xx host:cdn");
             fireEvent.input(q(container), { target: { value: "cdn (method:POST OR host:cdn)" } });
-            fireEvent.click(getByText("Basic"));
+            fireEvent.click(container.querySelector("[aria-label=\"Advanced query\"]")!);
             expect(box().value).toBe("cdn");
             expect(container.querySelector(".net-qgroup")).not.toBeNull();
             expect(rowNames(container)).toEqual(["c.js"]);
             // only a broken query can't be shown
-            fireEvent.click(getByText("Advanced"));
+            fireEvent.click(container.querySelector("[aria-label=\"Advanced query\"]")!);
             fireEvent.input(q(container), { target: { value: "(host:x" } });
-            fireEvent.click(getByText("Basic"));
+            fireEvent.click(container.querySelector("[aria-label=\"Advanced query\"]")!);
             expect(container.querySelector(".net-qwarn")).not.toBeNull();
             fireEvent.click(getByText("Stay in Advanced"));
             expect(q(container).value).toBe("(host:x");
@@ -439,9 +439,9 @@ describe("NetworkPanel", () => {
 
         it("Basic: chips select and delete like text", () => {
             const { container, getByText } = setup(rows3());
-            fireEvent.click(getByText("Advanced"));
+            fireEvent.click(container.querySelector("[aria-label=\"Advanced query\"]")!);
             fireEvent.input(q(container), { target: { value: "method:POST host:cdn status:5xx" } });
-            fireEvent.click(getByText("Basic"));
+            fireEvent.click(container.querySelector("[aria-label=\"Advanced query\"]")!);
             let box = container.querySelector(".net-qbox .net-filter") as HTMLInputElement;
             const qbox = container.querySelector(".net-qbox") as HTMLElement;
             const vals = () => [...container.querySelectorAll(".net-qchip-vals")].map((n) => n.textContent);
@@ -474,9 +474,9 @@ describe("NetworkPanel", () => {
 
         it("Basic: the caret stops on both sides of each capsule; text typed there goes there", () => {
             const { container, getByText } = setup(rows3());
-            fireEvent.click(getByText("Advanced"));
+            fireEvent.click(container.querySelector("[aria-label=\"Advanced query\"]")!);
             fireEvent.input(q(container), { target: { value: "method:POST OR host:cdn" } });
-            fireEvent.click(getByText("Basic"));
+            fireEvent.click(container.querySelector("[aria-label=\"Advanced query\"]")!);
             const qbox = container.querySelector(".net-qbox") as HTMLElement;
             const input = () => container.querySelector(".net-qbox .net-filter") as HTMLInputElement;
             const caps = () => [...qbox.querySelectorAll(".net-qchip-vals, .net-qconn, .net-qtext")].map((n) => (n.classList.contains("net-qtext") ? "|" : n.textContent));
@@ -503,9 +503,9 @@ describe("NetworkPanel", () => {
 
         it("Basic: ( typed among the capsules, ) typed further on", () => {
             const { container, getByText } = setup(rows3());
-            fireEvent.click(getByText("Advanced"));
+            fireEvent.click(container.querySelector("[aria-label=\"Advanced query\"]")!);
             fireEvent.input(q(container), { target: { value: "method:POST OR host:cdn status:500" } });
-            fireEvent.click(getByText("Basic"));
+            fireEvent.click(container.querySelector("[aria-label=\"Advanced query\"]")!);
             const qbox = container.querySelector(".net-qbox") as HTMLElement;
             const input = () => container.querySelector(".net-qbox .net-filter") as HTMLInputElement;
             const caps = () => [...qbox.querySelectorAll(".net-qchip-vals, .net-qconn, .net-qtext, .net-qgroup-op")].map((n) => (n.classList.contains("net-qtext") ? "|" : n.textContent));
@@ -528,9 +528,9 @@ describe("NetworkPanel", () => {
 
         it("Basic: OR / AND typed among the capsules set the connector there", () => {
             const { container, getByText } = setup(rows3());
-            fireEvent.click(getByText("Advanced"));
+            fireEvent.click(container.querySelector("[aria-label=\"Advanced query\"]")!);
             fireEvent.input(q(container), { target: { value: "method:POST host:cdn" } });
-            fireEvent.click(getByText("Basic"));
+            fireEvent.click(container.querySelector("[aria-label=\"Advanced query\"]")!);
             const qbox = container.querySelector(".net-qbox") as HTMLElement;
             const input = () => container.querySelector(".net-qbox .net-filter") as HTMLInputElement;
             const caps = () => [...qbox.querySelectorAll(".net-qchip-vals, .net-qconn, .net-qtext")].map((n) => (n.classList.contains("net-qtext") ? "|" : n.textContent));
@@ -551,9 +551,9 @@ describe("NetworkPanel", () => {
 
         it("Basic: Shift+arrows, Shift+click and dragging select from the caret", () => {
             const { container, getByText } = setup(rows3());
-            fireEvent.click(getByText("Advanced"));
+            fireEvent.click(container.querySelector("[aria-label=\"Advanced query\"]")!);
             fireEvent.input(q(container), { target: { value: "method:POST host:cdn status:500" } });
-            fireEvent.click(getByText("Basic"));
+            fireEvent.click(container.querySelector("[aria-label=\"Advanced query\"]")!);
             const qbox = container.querySelector(".net-qbox") as HTMLElement;
             const input = () => container.querySelector(".net-qbox .net-filter") as HTMLInputElement;
             const chips = () => container.querySelectorAll(".net-qchip-vals");
@@ -595,9 +595,9 @@ describe("NetworkPanel", () => {
 
         it("Basic: Enter / Space on a capsule edits it in place", () => {
             const { container, getByText } = setup(rows3());
-            fireEvent.click(getByText("Advanced"));
+            fireEvent.click(container.querySelector("[aria-label=\"Advanced query\"]")!);
             fireEvent.input(q(container), { target: { value: "method:POST host:cdn" } });
-            fireEvent.click(getByText("Basic"));
+            fireEvent.click(container.querySelector("[aria-label=\"Advanced query\"]")!);
             const qbox = container.querySelector(".net-qbox") as HTMLElement;
             const input = () => container.querySelector(".net-qbox .net-filter") as HTMLInputElement;
             const vals = () => [...container.querySelectorAll(".net-qchip-vals")].map((n) => n.textContent);
@@ -650,9 +650,9 @@ describe("NetworkPanel", () => {
 
         it("Basic: Ctrl+Z / Ctrl+Shift+Z undo and redo chip and text changes", () => {
             const { container, getByText } = setup(rows3());
-            fireEvent.click(getByText("Advanced"));
+            fireEvent.click(container.querySelector("[aria-label=\"Advanced query\"]")!);
             fireEvent.input(q(container), { target: { value: "method:POST host:cdn" } });
-            fireEvent.click(getByText("Basic"));
+            fireEvent.click(container.querySelector("[aria-label=\"Advanced query\"]")!);
             const box = container.querySelector(".net-qbox .net-filter") as HTMLInputElement;
             const vals = () => [...container.querySelectorAll(".net-qchip-vals")].map((n) => n.textContent);
             fireEvent.click(container.querySelectorAll(".net-qchip-x")[0] as HTMLElement); // × on a chip
@@ -682,7 +682,7 @@ describe("NetworkPanel", () => {
 
         it("Advanced: autocompletes fields then values with the keyboard", () => {
             const { container, getByText } = setup(rows3());
-            fireEvent.click(getByText("Advanced"));
+            fireEvent.click(container.querySelector("[aria-label=\"Advanced query\"]")!);
             const input = q(container);
             input.value = "meth";
             input.setSelectionRange(4, 4);

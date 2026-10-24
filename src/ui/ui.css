@@ -137,7 +137,7 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 #app[data-side="right"] > #sidebar { order: 4; border-right: none; border-left: 1px solid var(--border); }
 #brand { cursor: grab; }
 #brand button { cursor: auto; }
-#log-header select, #log-header input, #log-header button { cursor: auto; }
+.panel-tools, :where(#log-header) select, :where(#log-header) input, :where(#log-header) button { cursor: auto; }
 
 /* ---- sidebar ---- */
 #sidebar {
@@ -423,7 +423,7 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
-#log-header button {
+:where(#log-header) button {
     background: none;
     border: 1px solid transparent;
     color: var(--fg-dim);
@@ -434,23 +434,34 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
     padding: 2px 8px;
     font-size: 11px;
 }
-#log-header button.icon-btn { padding: 2px 4px; line-height: 0; }
-#log-header button:hover { color: var(--fg); border-color: var(--border); background: var(--bg-hover); }
-
-#log-find {
-    background: var(--bg);
-    border: 1px solid var(--border);
-    color: var(--fg);
-    border-radius: 3px;
-    padding: 2px 8px;
-    font-size: 11px;
-    width: 130px;
-    text-transform: none;
-    letter-spacing: normal;
+:where(#log-header) button:hover { color: var(--fg); border-color: var(--border); background: var(--bg-hover); }
+/* the panel's icon actions (clear, download, diagnostics, close): one look in every view */
+#log-header button.icon-btn {
+    padding: 3px; line-height: 0; background: none; border: 1px solid transparent; border-radius: 3px; color: var(--fg-dim); cursor: pointer;
 }
-#log-find:focus { border-color: var(--accent); outline: none; }
+#log-header button.icon-btn:hover { color: var(--fg); background: var(--bg-hover); border-color: transparent; }
+#log-header button.icon-btn[data-state="busy"] { color: var(--accent); animation: pulse 1s ease-in-out infinite alternate; }
+#log-header button.icon-btn[data-state="ok"] { color: var(--ok, #3fb950); }
+#log-header button.icon-btn[data-state="error"] { color: var(--err); }
+@keyframes pulse { to { opacity: 0.35; } }
+
+/* each view's filter: the same box, same place (first in the view's tools) */
+.panel-filter, .panel-tools .net-qbar { flex: 1 1 120px; min-width: 100px; }
+.panel-tools { margin-left: 12px; }
+/* narrow (docked beside): tabs and close on one row, the view's tools on their own row below */
+#log-header { container-type: inline-size; flex-wrap: wrap; row-gap: 4px; }
+@container (max-width: 480px) {
+    #btn-close-panel { order: 1; margin-left: auto; }
+    #log-header .panel-tools { order: 2; flex-basis: 100%; margin-left: 0; }
+}
+.panel-filter {
+    height: 22px; box-sizing: border-box; padding: 2px 6px; font-size: 11px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 3px; color: var(--fg);
+}
+.panel-filter:focus { border-color: var(--accent); outline: none; }
 
 #log-level, #log-source {
+    height: 22px; box-sizing: border-box;
     background: var(--bg);
     border: 1px solid var(--border);
     color: var(--fg);
@@ -460,9 +471,8 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
     text-transform: none;
     letter-spacing: normal;
 }
-#log-source {
-    width: 110px;
-}
+#log-source { flex: 0 1 110px; width: 0; min-width: 64px; }
+#log-level, .panel-tools .icon-btn { flex: none; }
 #log-source:focus { border-color: var(--accent); outline: none; }
 
 .log-line .lv {
@@ -892,9 +902,8 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 /* ---- bottom panel tabs (VS Code style) ---- */
 #log-header { align-items: center; gap: 4px 8px; flex-wrap: wrap; }
 #panel-tabs { display: flex; gap: 14px; }
-#log-tools, #net-tools { min-width: 0; flex: 1 1 auto; }
+.panel-tools { min-width: 0; flex: 1 1 0; text-transform: none; letter-spacing: normal; }
 #btn-close-panel { margin-left: auto; }
-#app[data-dock="left"] #log-source, #app[data-dock="left"] #log-find { width: 84px; }
 .panel-tab {
     cursor: pointer;
     color: var(--fg-dim);
@@ -904,19 +913,14 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 }
 .panel-tab:hover { color: var(--fg); }
 .panel-tab.active { color: var(--fg); border-bottom-color: var(--fg); }
-#log-tools, #net-tools { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
-#log-tools[hidden], #net-tools[hidden], #log-entries[hidden], #network-view[hidden], #problems-view[hidden] { display: none; }
+.panel-tools { display: flex; gap: 4px 6px; align-items: center; justify-content: flex-end; }
+@container (max-width: 340px) { #log-header .panel-tools { flex-wrap: wrap; } }
+.panel-tools[hidden], #log-entries[hidden], #network-view[hidden], #problems-view[hidden] { display: none; }
 #log-entries { flex: 1; min-height: 0; }
 #network-view { flex: 1; min-height: 0; display: flex; container-type: inline-size; }
 
 /* ---- Problems view (VS Code's Problems) ---- */
 #problems-view { flex: 1; min-height: 0; display: flex; flex-direction: column; font-size: 12px; }
-.problems-toolbar { display: flex; align-items: center; gap: 6px; padding: 3px 8px; border-bottom: 1px solid var(--border); }
-#problems-filter {
-    width: min(320px, 100%); background: var(--bg); border: 1px solid var(--border); color: var(--fg);
-    border-radius: 3px; padding: 2px 6px; font-size: 11px;
-}
-#problems-filter:focus { border-color: var(--accent); outline: none; }
 #problems-list { flex: 1; min-height: 0; overflow: auto; padding: 2px 0 6px; }
 #problems-list::-webkit-scrollbar { width: 8px; height: 8px; }
 #problems-list::-webkit-scrollbar-thumb { background: var(--scroll); border-radius: 4px; }
@@ -959,7 +963,10 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
     border-radius: 3px; cursor: pointer; font-size: 11px; padding: 1px 6px;
 }
 .net-toolbar button:hover, .net-details-tabs button:hover { color: var(--fg); background: var(--bg-hover); }
-.net-clear { font-size: 13px !important; }
+/* in the panel header (beside the other views' tools) */
+#net-filter-host { display: contents; }
+#net-filter-host > .net-toolbar { display: contents; }
+.net-toolbar .net-clear.icon-btn { padding: 3px; line-height: 0; }
 .net-filter {
     background: var(--bg); border: 1px solid var(--border); color: var(--fg);
     border-radius: 3px; padding: 2px 6px; font-size: 11px;
@@ -969,11 +976,16 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 .net-chip.active { background: var(--bg-active) !important; color: var(--fg) !important; }
 
 /* filter bar: Basic|Advanced toggle, chips / query box, "+ Filter", "?" help */
-.net-qbar { display: flex; align-items: center; gap: 6px; flex: 1 1 380px; min-width: 260px; }
-.net-qmode { position: relative; display: inline-flex; flex: none; border: 1px solid var(--border); border-radius: 3px; }
-.net-toolbar .net-qmode > button { border: none; border-radius: 0; padding: 2px 7px; }
-.net-toolbar .net-qmode > button + button { border-left: 1px solid var(--border); }
-.net-toolbar .net-qmode > button.on { background: var(--bg-active); color: var(--fg); }
+.net-qbar { display: flex; align-items: center; flex: 1 1 380px; min-width: 200px; }
+.net-qbar > .net-qbox { flex: 1; }
+/* Basic ⇄ Advanced: one inline toggle at the end of the box, like an editor's find options */
+.net-qmode { position: relative; display: inline-flex; flex: none; }
+.net-toolbar .net-qmode-btn {
+    height: 18px; padding: 0 4px; border: 1px solid transparent; border-radius: 3px;
+    font: 600 10px/16px var(--mono, ui-monospace, monospace); color: var(--fg-dim); letter-spacing: -0.5px;
+}
+.net-toolbar .net-qmode-btn.on { color: var(--fg); background: color-mix(in srgb, var(--accent) 22%, transparent); border-color: var(--accent); }
+.net-qmode .net-qwarn { left: auto; right: 0; }
 .net-qbox {
     position: relative; flex: 1; min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 3px;
     min-height: 22px; padding: 1px 2px; background: var(--bg); border: 1px solid var(--border); border-radius: 3px;
@@ -1014,10 +1026,15 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 .net-toolbar .net-qgroup > .net-qchip-x { border: none; background: transparent; padding: 0 4px; opacity: 0.7; color: var(--fg); }
 .net-qadd, .net-qhelp { position: relative; display: inline-flex; }
 .net-qadd { margin-left: auto; }
+/* "+ Filter", { } and ? stay together at the end, never split across wrapped rows */
+.net-qtail { display: inline-flex; align-items: center; flex: none; margin-left: auto; }
+.net-qtail > .net-qadd { margin-left: 0; }
 .net-toolbar .net-qadd-btn { white-space: nowrap; padding: 1px 6px; }
 .net-toolbar .net-qhelp-btn {
     width: 18px; height: 18px; padding: 0; border-radius: 50%; border-color: var(--border); font-weight: 600;
 }
+.net-qbox .net-qmode, .net-qbox .net-qhelp { margin-right: 1px; }
+.net-qadv > .net-qmode { margin-left: 2px; }
 .net-pop {
     position: absolute; top: calc(100% + 4px); left: 0; z-index: 1000; padding: 4px; font-size: 11px; color: var(--fg);
     background: var(--bg-panel); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 4px 14px rgba(0,0,0,0.5);

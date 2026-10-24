@@ -144,14 +144,16 @@ at the right of the toolbar do the same.
   was thrown, the URL pattern a rules error is about, or the `wt.*` call that
   registered the handler it names — and is squiggled there in the editor
   like TypeScript errors (its hover comes before the API docs; F8 reaches it). Click an entry (or
-  Enter) to open the file at that line; ↑/↓ move, ←/→ collapse/expand a file; the box at the top filters by
-  text. ⌘⇧M shows it. Its error/warning counts are at the far left of the
+  Enter) to open the file at that line; ↑/↓ move, ←/→ collapse/expand a file; the filter box in
+  the panel header filters by text. ⌘⇧M shows it. Its error/warning counts are at the far left of the
   status bar, and follow the scripts. Compile, TypeScript,
   rules errors and route warnings appear only here, not in the Log; a
   runtime error appears in both (the Log has every occurrence, with its URL).
-- **Log view** — engine and script log lines with level and source filters.
+- **Log view** — engine and script log lines with text (or regex), source
+  and level filters. Each view's filter sits in the same place, the panel
+  header next to the tabs, with its clear icon after it.
   The errors and warnings it holds are counted in the status bar; they stay
-  until the log is cleared (🗑), whether or not you've looked.
+  until the log is cleared (clear icon), whether or not you've looked.
   A VS Code-style status bar along the bottom holds the counts for all
   three views (Problems errors · warnings at the far left, then Log errors ·
   warnings, Network modified · observed), even while the panel is closed;
@@ -207,7 +209,8 @@ at the right of the toolbar do the same.
 
 ### Network filter
 
-The filter bar has two modes (the choice is remembered):
+The filter box sits in the panel header. It has two modes, switched with
+the `{ }` button inside it (the choice is remembered):
 
 - **Basic** — a URL text box plus chips. Typing suggests fields and values
   (↑/↓ show the highlighted one in the box, Esc puts back what you typed,
@@ -342,7 +345,7 @@ the build (MV2/MV3), browser, OS, extension ID and the local helper's state.
 **Copy** puts that on the clipboard as text — paste it into bug reports.
 
 **Collect diagnostics…** (also *Wiretrick: Collect Diagnostics…* in the
-Code view's F1 menu, and **collect diagnostics…** at the right of the panel
+Code view's F1 menu, and the diagnostics icon at the right of the panel
 header while the Network view is open) downloads a Markdown report meant to be handed to a person
 or an LLM: environment, scripts, settings.yaml, recent log and network
 entries, and Editor state (theme, layout). It first asks for the optional

@@ -12,5 +12,5 @@ async function listTabs(): Promise<TabInfo[]> {
 export function mountNetworkPanel(el: HTMLElement): void {
     const store = createNetStore();
     store.connect();
-    render(<NetworkPanel store={store} listTabs={listTabs} />, el);
+    render(<NetworkPanel store={store} listTabs={listTabs} toolsHost={document.getElementById("net-filter-host")} />, el);
 }

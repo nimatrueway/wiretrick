@@ -3,6 +3,7 @@
  * table (query filter, sortable columns, waterfall) with a details
  * pane showing headers and what Wiretrick scripts did to the request.
  */
+import { createPortal } from "preact";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { NetBody, NetEntry, NetOutcome } from "../../shared/netTypes";
 import type { NetStore } from "./netStore";
@@ -74,7 +75,8 @@ function dragX(down: MouseEvent, onMove: (dx: number) => void, cursor: string): 
     document.addEventListener("mouseup", up);
 }
 
-export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: () => Promise<TabInfo[]> }) {
+/** `toolsHost`: where the filter and clear button go (the panel header, beside the Log's); without one they sit above the table */
+export function NetworkPanel({ store, listTabs, toolsHost }: { store: NetStore; listTabs?: () => Promise<TabInfo[]>; toolsHost?: HTMLElement | null }) {
     const [tabs, setTabs] = useState<TabInfo[]>([]);
     const [fq, setFq] = useState<FilterState>(initialFilterState);
     const parsed = useMemo(() => parseQuery(effectiveQuery(fq)), [fq]);
@@ -225,14 +227,20 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
     const touched = touchCounts(rows);
     const bytes = rows.reduce((n, e) => n + (e.size ?? 0), 0);
 
+    const toolbar = (
+        <div class="net-toolbar">
+            <FilterBar state={fq} onChange={setFq} error={parsed.error} data={suggestions} />
+            <button class="net-clear icon-btn" title="Clear the network log" aria-label="Clear network log" onClick={() => (store.clear(), setSelectedId(null))}>
+                <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                <path fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" d="M2.5 4h9M2.5 7.5h9M2.5 11h4.5M9.5 10l3.5 3.5M13 10l-3.5 3.5" />
+            </svg>
+            </button>
+        </div>
+    );
+
     return (
         <div class="net">
-            <div class="net-toolbar">
-                <button class="net-clear" title="Clear network log" aria-label="Clear network log" onClick={() => (store.clear(), setSelectedId(null))}>
-                    ⊘
-                </button>
-                <FilterBar state={fq} onChange={setFq} error={parsed.error} data={suggestions} />
-            </div>
+            {toolsHost ? createPortal(toolbar, toolsHost) : toolbar}
             <div class={selected ? "net-body with-details" : "net-body"} ref={bodyRef}>
                 <div
                     class="net-table-wrap"
