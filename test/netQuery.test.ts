@@ -1,6 +1,6 @@
 /** Network filter query language: parsing, errors, matching, Basic chips ⇄ query and autocomplete. */
 import { describe, it, expect } from "vitest";
-import { addChip, backspaceStructure, basicStops, basicSuggest, closeGap, commitGap, commitTyped, compileQuery, complete, emptyBasic, fromBasic, leafChips, nodeToString, parseQuery, removeChips, suggestData, toBasic, toggleConn, typeStructure, type BasicFilter, type BasicGap, type QueryCtx, type SuggestData } from "../src/ui/network/netQuery";
+import { addChip, backspaceStructure, basicStops, basicSuggest, closeGap, commitGap, commitTyped, deleteAtGap, openPath, parenAtGap, compileQuery, complete, emptyBasic, fromBasic, leafChips, nodeToString, parseQuery, removeChips, suggestData, toBasic, toggleConn, typeStructure, type BasicFilter, type BasicGap, type QueryCtx, type SuggestData } from "../src/ui/network/netQuery";
 import type { NetEntry, NetOutcome } from "../src/shared/netTypes";
 
 const out = (scriptName: string, kind: NetOutcome["kind"]): NetOutcome => ({ scriptId: scriptName, scriptName, action: "x", level: "info", kind, at: 0 });
@@ -277,6 +277,43 @@ describe("Basic: the text box among the chips", () => {
         const x = leafChips(b.expr)[1];
         expect(fromBasic({ ...b, expr: removeChips(b.expr, new Set([x])) })).toBe("a b");
         expect(fromBasic({ ...b, expr: removeChips(b.expr, new Set([x]), true, true) })).toBe("a OR b");
+    });
+});
+
+describe("Basic: parentheses among the chips, as in text", () => {
+    const at = (q: string, path: number[], index: number): BasicFilter => ({ ...toBasic(parseQuery(q).ast), at: { path, index, text: "" } });
+    it("( here, then ) further on", () => {
+        const open = parenAtGap(at("host:a OR path:b host:c", [], 0), "(")!;
+        expect(open.at).toEqual({ path: [0], index: 0, text: "" });
+        expect(open.expr.items[0]).toMatchObject({ k: "group", open: true });
+        const closed = parenAtGap({ ...open, at: { path: [0], index: 2, text: "" } }, ")")!;
+        expect(fromBasic(closed)).toBe("(host:a OR path:b) host:c");
+        expect(closed.at).toEqual({ path: [], index: 1, text: "" });
+    });
+    it(") first, then ( before it; -( negates", () => {
+        const u = parenAtGap(at("host:x host:a OR path:b host:c", [], 3), ")")!;
+        expect(u.expr.items[0]).toMatchObject({ k: "group", unopened: true });
+        expect(u.at).toEqual({ path: [], index: 1, text: "" });
+        const done = parenAtGap({ ...u, at: { path: [0], index: 1, text: "" } }, "-(")!;
+        expect(fromBasic(done)).toBe("host:x -(host:a OR path:b) host:c");
+        expect(done.at).toEqual({ path: [1], index: 0, text: "" });
+    });
+    it("Backspace / Delete next to a parenthesis deletes just it", () => {
+        const reopened = deleteAtGap(at("(host:a OR path:b) host:c", [], 1), -1)!; // ")" goes: the group runs to the end
+        expect(reopened.expr.items).toHaveLength(1);
+        expect(reopened.expr.items[0]).toMatchObject({ open: true });
+        expect(reopened.at).toEqual({ path: [0], index: 2, text: "" });
+        const flat = deleteAtGap({ ...reopened, at: { path: [0], index: 0, text: "" } }, -1)!; // and its "(" too
+        expect([fromBasic(flat), flat.at]).toEqual(["host:a OR path:b host:c", { path: [], index: 0, text: "" }]);
+        const fromStart = deleteAtGap(at("host:x (host:a OR path:b)", [], 1), 1)!; // "(" goes: the group runs from the start
+        expect(fromStart.expr.items[0]).toMatchObject({ unopened: true });
+        expect(fromStart.at).toEqual({ path: [0], index: 1, text: "" });
+        expect(deleteAtGap(at("host:a host:b", [], 1), -1)).toBeNull(); // a chip: removed as before
+    });
+    it("at the end: a lone ) closes everything so far; Backspace takes a group's ) back", () => {
+        expect(typeStructure(toBasic(parseQuery("host:a OR path:b").ast), ")")!.expr.items[0]).toMatchObject({ unopened: true });
+        const b = backspaceStructure(toBasic(parseQuery("host:c (host:a OR path:b)").ast))!;
+        expect(openPath(b.expr)).toEqual([1]);
     });
 });
 

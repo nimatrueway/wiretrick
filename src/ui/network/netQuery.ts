@@ -451,8 +451,11 @@ export interface BasicExpr {
     items: BasicItem[];
     conns: Conn[];
 }
-/** `open`: a group typed with "(" whose ")" hasn't been typed yet — new items go inside it */
-export type BasicItem = { k: "chip"; chip: Chip } | { k: "group"; negate: boolean; expr: BasicExpr; open?: boolean };
+/**
+ * `open`: a group whose ")" hasn't been typed yet — it runs to the end of its level (new items typed at the end go inside it).
+ * `unopened`: a ")" typed with no "(" yet — the group runs from the start of its level.
+ */
+export type BasicItem = { k: "chip"; chip: Chip } | { k: "group"; negate: boolean; expr: BasicExpr; open?: boolean; unopened?: boolean };
 export interface BasicFilter {
     /** free text, AND'ed with the chips: bare words (URL contains; "-word" excludes) */
     text: string;
@@ -578,7 +581,7 @@ export function addExpr(b: BasicFilter, e: BasicExpr): BasicFilter {
 
 /** a group left with one item collapses to it (a NOT moves onto the item); an empty one disappears. An open group stays as it is. */
 function tidyGroup(g: Extract<BasicItem, { k: "group" }>): BasicItem | null {
-    if (g.open) return g;
+    if (g.open || g.unopened) return g;
     if (g.expr.items.length !== 1) return g.expr.items.length ? g : null;
     const only = g.expr.items[0];
     if (!g.negate) return only;
@@ -594,7 +597,7 @@ export function editItem(e: BasicExpr, path: number[], fn: (it: BasicItem) => Ba
     const items = e.items.filter((_, j) => j !== i);
     const conns = e.conns.filter((_, j) => j !== (i ? i - 1 : 0));
     // a lone plain group at the top is just parentheses
-    return items.length === 1 && items[0].k === "group" && !items[0].negate && !items[0].open ? items[0].expr : { items, conns };
+    return items.length === 1 && items[0].k === "group" && !items[0].negate && !items[0].open && !items[0].unopened ? items[0].expr : { items, conns };
 }
 /** Every chip in visual order (into groups) — Basic's text-like selection runs over these. */
 export function leafChips(e: BasicExpr): Chip[] {
@@ -615,7 +618,7 @@ export function removeChips(e: BasicExpr, drop: Set<Chip>, top = true, keepLeft 
         left = undefined;
         items.push(next);
     });
-    return top && items.length === 1 && items[0].k === "group" && !items[0].negate && !items[0].open ? items[0].expr : { items, conns };
+    return top && items.length === 1 && items[0].k === "group" && !items[0].negate && !items[0].open && !items[0].unopened ? items[0].expr : { items, conns };
 }
 
 // ── typing structure: AND / OR / ( / ) become chips as they're typed ──
@@ -676,6 +679,8 @@ export function typeStructure(b: BasicFilter, text: string): BasicFilter | null 
         const path = openPath(before.expr);
         return { ...before, conn: undefined, expr: editItem(before.expr, path, (g) => (g.k === "group" ? tidyGroup({ ...g, open: false }) : g)) };
     }
+    // ")" with nothing open: a group from the start, its "(" to be typed (among the chips) later
+    if (text.trim() === ")" && !b.conn && b.expr.items.length) return { ...b, text: "", expr: { items: [{ k: "group", negate: false, unopened: true, expr: b.expr }], conns: [] } };
     return null;
 }
 /** Enter: commit the text box. Inside a group or after a typed connector everything becomes chips; else plain words stay as text. */
@@ -686,7 +691,7 @@ export function commitTyped(b: BasicFilter): BasicFilter | null {
     const t = toBasic(p.ast);
     return leafChips(t.expr).length ? addExpr({ ...b, text: t.text }, t.expr) : null;
 }
-/** Backspace at the start of the text box: the typed connector, then an empty open group, then the last chip. */
+/** Backspace at the start of the text box: the typed connector, then an empty open group, then a group's ")", then the last chip. */
 export function backspaceStructure(b: BasicFilter): BasicFilter | null {
     if (b.conn) return { ...b, conn: undefined };
     const path = openPath(b.expr);
@@ -696,6 +701,10 @@ export function backspaceStructure(b: BasicFilter): BasicFilter | null {
         const i = path[path.length - 1];
         return { ...b, conn: i ? parent.conns[i - 1] : undefined, expr: editItem(b.expr, path, () => null) };
     }
+    // like deleting ")": the group opens again (one with no "(" goes)
+    const level = exprAt(b.expr, path);
+    const lastIt = level.items[level.items.length - 1];
+    if (lastIt?.k === "group") return { ...b, expr: deleteParen(b.expr, path, level.items.length - 1, ")").expr };
     const leaves = leafChips(b.expr);
     return leaves.length ? { ...b, expr: removeChips(b.expr, new Set([leaves[leaves.length - 1]])) } : null;
 }
@@ -748,18 +757,21 @@ export function closeGap(b: BasicFilter): BasicFilter {
     const text = g.edit || !g.text.trim() ? b.text : [b.text.trim(), g.text.trim()].filter(Boolean).join(" ");
     return { ...b, at: undefined, text };
 }
-/** Where ←/→ stop, in order: the gap before each item (and at the end of each closed group), each chip, the end. */
+/** Where ←/→ stop, in order: the gap before each item (and at the end of each closed group), each chip, the end. Gaps that look the same as one inside a group (no "(" / no ")") are left out. */
 export type BasicStop = { k: "gap"; path: number[]; index: number } | { k: "chip"; leaf: number } | { k: "end" };
 export function basicStops(e: BasicExpr): BasicStop[] {
     const out: BasicStop[] = [];
     let leaf = 0;
     const walk = (x: BasicExpr, path: number[], endGap: boolean) => {
         x.items.forEach((it, i) => {
-            out.push({ k: "gap", path, index: i });
+            // before a group with no "(", the caret is already inside it
+            if (!(it.k === "group" && it.unopened)) out.push({ k: "gap", path, index: i });
             if (it.k === "chip") out.push({ k: "chip", leaf: leaf++ });
-            else walk(it.expr, [...path, i], !it.open);
+            else walk(it.expr, [...path, i], it.open ? endGap : true);
         });
-        if (endGap) out.push({ k: "gap", path, index: x.items.length });
+        // after a group with no ")", the caret is still inside it
+        const last = x.items[x.items.length - 1];
+        if (endGap && !(last?.k === "group" && last.open)) out.push({ k: "gap", path, index: x.items.length });
     };
     walk(e, [], false);
     out.push({ k: "end" });
@@ -783,6 +795,121 @@ export function leafPath(e: BasicExpr, leaf: number): number[] | null {
         return null;
     };
     return find(e, []);
+}
+
+// ── parentheses typed / deleted among the chips, as in text ──
+
+type Group = Extract<BasicItem, { k: "group" }>;
+const groupAt = (e: BasicExpr, path: number[]): Group | null => {
+    if (!path.length) return null;
+    const it = exprAt(e, path.slice(0, -1)).items[path[path.length - 1]];
+    return it?.k === "group" ? it : null;
+};
+/** the group's items take its place */
+function unwrap(x: BasicExpr, g: number): BasicExpr {
+    const inner = (x.items[g] as Group).expr;
+    const items = [...x.items.slice(0, g), ...inner.items, ...x.items.slice(g + 1)];
+    if (!inner.items.length) return { items, conns: g ? [...x.conns.slice(0, g - 1), ...x.conns.slice(g)] : x.conns.slice(1) };
+    return { items, conns: [...x.conns.slice(0, g), ...inner.conns, ...x.conns.slice(g)] };
+}
+/** The new structure with the caret gap; a lone plain group left at the top is just parentheses, and a caret that isn't a stop goes to the end. */
+function settleParens(expr: BasicExpr, caret: { path: number[]; index: number }): { expr: BasicExpr; at?: BasicGap } {
+    let at: { path: number[]; index: number } | undefined = caret;
+    const only = expr.items[0];
+    if (expr.items.length === 1 && only.k === "group" && !only.negate && !only.open && !only.unopened) {
+        expr = only.expr;
+        at = caret.path.length ? { path: caret.path.slice(1), index: caret.index } : caret.index ? undefined : { path: [], index: 0 };
+    }
+    return { expr, at: at && basicStops(expr).some((s) => isGap(s, at!.path, at!.index)) ? { ...at, text: "" } : undefined };
+}
+/** "(" / "-(" / ")" typed at the caret gap (`b.at`, its text already committed). Null when it means nothing there. */
+export function parenAtGap(b: BasicFilter, ch: "(" | "-(" | ")"): BasicFilter | null {
+    const g = b.at;
+    if (!g || g.edit) return null;
+    const L = g.path;
+    const i = g.index;
+    const P = L.slice(0, -1);
+    const gi = L[L.length - 1];
+    const here = groupAt(b.expr, L);
+    let r: { expr: BasicExpr; at?: BasicGap };
+    if (ch === ")") {
+        if (here?.open) {
+            // closes the open group here; what follows it moves out
+            r = settleParens(
+                editAt(b.expr, P, (x) => {
+                    const inner = here.expr;
+                    if (!i) return unwrap(x, gi); // "()"
+                    const closed = tidyGroup({ ...here, open: false, expr: { items: inner.items.slice(0, i), conns: inner.conns.slice(0, i - 1) } })!;
+                    return { items: [...x.items.slice(0, gi), closed, ...inner.items.slice(i), ...x.items.slice(gi + 1)], conns: [...x.conns.slice(0, gi), ...inner.conns.slice(i - 1), ...x.conns.slice(gi)] };
+                }),
+                i ? { path: P, index: gi + 1 } : { path: P, index: gi },
+            );
+        } else {
+            if (!i) return null;
+            // nothing open: a group from the start of this level, waiting for its "("
+            r = settleParens(
+                editAt(b.expr, L, (x) => ({ items: [{ k: "group", negate: false, unopened: true, expr: { items: x.items.slice(0, i), conns: x.conns.slice(0, i - 1) } }, ...x.items.slice(i)], conns: x.conns.slice(i - 1) })),
+                { path: L, index: 1 },
+            );
+        }
+    } else {
+        const negate = ch === "-(";
+        if (here?.unopened) {
+            // the "(" of the group that has only its ")": what's before it moves out
+            const inner = here.expr;
+            if (i >= inner.items.length) return null;
+            const opened = tidyGroup({ ...here, unopened: false, negate, expr: { items: inner.items.slice(i), conns: inner.conns.slice(i) } })!;
+            r = settleParens(
+                editAt(b.expr, P, (x) => ({ items: [...x.items.slice(0, gi), ...inner.items.slice(0, i), opened, ...x.items.slice(gi + 1)], conns: [...x.conns.slice(0, gi), ...inner.conns.slice(0, i), ...x.conns.slice(gi)] })),
+                opened.k === "group" ? { path: [...P, gi + i], index: 0 } : { path: P, index: gi + i },
+            );
+        } else {
+            // a group from here to the end of this level, until its ")" is typed
+            r = settleParens(
+                editAt(b.expr, L, (x) => ({ items: [...x.items.slice(0, i), { k: "group", negate, open: true, expr: { items: x.items.slice(i), conns: x.conns.slice(i) } }], conns: x.conns.slice(0, i) })),
+                { path: [...L, i], index: 0 },
+            );
+        }
+    }
+    return { ...b, expr: r.expr, at: r.at };
+}
+/** Delete a group's "(" / ")" (its item at `path`[`g`]): the other one then reaches the start / end of the level, as in text; with the other one missing too, the parentheses are gone. */
+function deleteParen(e: BasicExpr, path: number[], g: number, which: "(" | ")"): { expr: BasicExpr; at?: BasicGap } {
+    const G = exprAt(e, path).items[g] as Group;
+    const n = G.expr.items.length;
+    if (which === ")") {
+        if (G.unopened) return settleParens(editAt(e, path, (x) => unwrap(x, g)), { path, index: g + n });
+        return settleParens(
+            editAt(e, path, (x) => ({ items: [...x.items.slice(0, g), { ...G, open: true, expr: { items: [...G.expr.items, ...x.items.slice(g + 1)], conns: [...G.expr.conns, ...x.conns.slice(g)] } }], conns: x.conns.slice(0, g) })),
+            { path: [...path, g], index: n },
+        );
+    }
+    if (G.open) return settleParens(editAt(e, path, (x) => unwrap(x, g)), { path, index: g });
+    return settleParens(
+        editAt(e, path, (x) => ({ items: [{ k: "group", negate: false, unopened: true, expr: { items: [...x.items.slice(0, g), ...G.expr.items], conns: [...x.conns.slice(0, g), ...G.expr.conns] } }, ...x.items.slice(g + 1)], conns: x.conns.slice(g) })),
+        { path: [...path, 0], index: g },
+    );
+}
+/** Backspace (-1) / Delete (1) at an empty caret gap next to a "(" or ")"; null when the neighbour is a chip (or nothing). */
+export function deleteAtGap(b: BasicFilter, dir: -1 | 1): BasicFilter | null {
+    const at = b.at;
+    if (!at || at.edit || at.text) return null;
+    const step = (L: number[], i: number): { expr: BasicExpr; at?: BasicGap } | null => {
+        const level = exprAt(b.expr, L);
+        const P = L.slice(0, -1);
+        const gi = L[L.length - 1];
+        const G = groupAt(b.expr, L);
+        if (dir < 0) {
+            if (i > 0) return level.items[i - 1].k === "group" ? deleteParen(b.expr, L, i - 1, ")") : null;
+            if (!G) return null;
+            return G.unopened ? step(P, gi) : deleteParen(b.expr, P, gi, "(");
+        }
+        if (i < level.items.length) return level.items[i].k === "group" ? deleteParen(b.expr, L, i, "(") : null;
+        if (!G) return null;
+        return G.open ? step(P, gi + 1) : deleteParen(b.expr, P, gi, ")");
+    };
+    const r = step(at.path, at.index);
+    return r && { ...b, expr: r.expr, at: r.at };
 }
 
 /** Flip AND ⇄ OR at `conns[ci]` of the group at `groupPath` ([] = top level). */

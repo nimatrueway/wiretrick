@@ -501,6 +501,31 @@ describe("NetworkPanel", () => {
             expect(caps()).toEqual(["POST", "OR", "cdn", "|"]);
         });
 
+        it("Basic: ( typed among the capsules, ) typed further on", () => {
+            const { container, getByText } = setup(rows3());
+            fireEvent.click(getByText("Advanced"));
+            fireEvent.input(q(container), { target: { value: "method:POST OR host:cdn status:500" } });
+            fireEvent.click(getByText("Basic"));
+            const qbox = container.querySelector(".net-qbox") as HTMLElement;
+            const input = () => container.querySelector(".net-qbox .net-filter") as HTMLInputElement;
+            const caps = () => [...qbox.querySelectorAll(".net-qchip-vals, .net-qconn, .net-qtext, .net-qgroup-op")].map((n) => (n.classList.contains("net-qtext") ? "|" : n.textContent));
+            expect(rowNames(container)).toEqual(["b.js"]);
+            input().focus();
+            fireEvent.keyDown(input(), { key: "Home" });
+            fireEvent.input(input(), { target: { value: "(" } });
+            expect(caps()).toEqual(["(", "|", "POST", "OR", "cdn", "AND", "500"]);
+            for (let i = 0; i < 4; i++) fireEvent.keyDown(document.activeElement!, { key: "ArrowRight" });
+            expect(caps()).toEqual(["(", "POST", "OR", "cdn", "AND", "|", "500"]);
+            fireEvent.input(input(), { target: { value: ")" } });
+            expect(caps()).toEqual(["(", "POST", "OR", "cdn", ")", "AND", "|", "500"]);
+            expect(rowNames(container)).toEqual(["b.js"]); // (POST OR cdn) AND 500
+            fireEvent.keyDown(input(), { key: "Backspace" }); // the ")" goes: the group runs to the end again
+            expect(caps()).toEqual(["(", "POST", "OR", "cdn", "AND", "|", "500"]);
+            fireEvent.keyDown(input(), { key: "End" });
+            fireEvent.input(input(), { target: { value: ")" } });
+            expect(caps()).toEqual(["(", "POST", "OR", "cdn", "AND", "500", ")", "|"]);
+        });
+
         it("Basic: Enter / Space on a capsule edits it in place", () => {
             const { container, getByText } = setup(rows3());
             fireEvent.click(getByText("Advanced"));

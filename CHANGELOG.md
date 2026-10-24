@@ -18,6 +18,10 @@ its section below.
   turns it back into text you edit in place. ←/→ stop on either side of
   each capsule, so you can type a filter before or between them, or
   Backspace/Delete the capsule next to the caret.
+- Network filter (Basic): `(` and `)` can be typed anywhere among the
+  capsules — open a group before one capsule, move to another and close
+  it (or type `)` first, then `(`). Backspace/Delete next to a parenthesis
+  removes just that one, so it can be moved.
 
 ### Changed
 

@@ -39,6 +39,8 @@ import {
     chipsBefore,
     closeGap,
     commitGap,
+    deleteAtGap,
+    parenAtGap,
     insertAtGap,
     isGap,
     leafPath,
@@ -416,8 +418,10 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
                 return goStop(key === "Home" ? basicStops(base.expr)[0] : { k: "end" }, base, true);
             }
             if (!el.value && !gap.edit && ((key === "Backspace" && atStart) || (key === "Delete" && atEnd))) {
-                // like a character: the chip before / after the caret goes, with the connector between them
+                // like a character: the "(" / ")" or chip before / after the caret goes (a chip with the connector between them)
                 ev.preventDefault();
+                const p = deleteAtGap(value, key === "Backspace" ? -1 : 1);
+                if (p) return (onInput(p), p.at ? toInput(0) : toInput(p.text.length));
                 const leaf = chipsBefore(value.expr, gap.path, gap.index) - (key === "Backspace" ? 1 : 0);
                 if (leaf >= 0 && leaf < n) removeLeaves({ ...value, at: undefined }, leaf, leaf, "", false, true);
                 return;
@@ -464,6 +468,13 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
         }
     };
 
+    /** "(" / "-(" / ")" typed among the chips: what was typed before it turns into chips, then the parenthesis goes in */
+    const parenTyped = (text: string): BasicFilter | null => {
+        const m = /^(.*?)(-?\(|\))$/s.exec(text);
+        if (!gap || gap.edit || !m || (m[2] !== ")" && m[1] && !/\s$/.test(m[1]))) return null;
+        const c = commitGap({ ...value, at: { ...gap, text: m[1] } });
+        return c?.at ? parenAtGap(c, m[2] as "(" | "-(" | ")") : null;
+    };
     const textBox = (
         <div class={"net-qtext" + (gap ? " gap" : "")}>
             <input
@@ -486,8 +497,8 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
                     setSel(null);
                     // AND / OR / ( / ) turn into capsules as they're typed at the end; among the chips they wait for Enter
                     const atEnd = (el.selectionStart ?? el.value.length) === el.value.length;
-                    const typed = atEnd && !gap ? typeStructure(value, el.value) : null;
-                    if (typed) return (setAc(null), onInput(typed), toInput(typed.text.length)); // its own undo step
+                    const typed = atEnd ? (gap ? parenTyped(el.value) : typeStructure(value, el.value)) : null;
+                    if (typed) return (setAc(null), onInput(typed), toInput(typed.at ? 0 : typed.text.length)); // its own undo step
                     history.typed();
                     onInput(withText(el.value));
                     suggest(el.value, el.selectionStart ?? el.value.length);
@@ -548,10 +559,12 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
                     <Fragment key={p.join(".")}>
                         {conn}
                         {here}
-                        <span class={"net-qgroup" + (it.negate ? " neg" : "") + (it.open ? " open" : "")} title={it.open ? "Type ) to close the group" : undefined}>
-                            <button class="net-qgroup-op" title={it.negate ? "Excluding the group — click to include" : "Group — click to exclude"} onClick={() => setExpr(editItem(value.expr, p, (g) => (g.k === "group" ? { ...g, negate: !g.negate } : g)))}>
-                                {it.negate ? "NOT (" : "("}
-                            </button>
+                        <span class={"net-qgroup" + (it.negate ? " neg" : "") + (it.open ? " open" : "") + (it.unopened ? " unopened" : "")} title={it.open ? "Type ) to close the group" : it.unopened ? "Type ( to open the group" : undefined}>
+                            {!it.unopened && (
+                                <button class="net-qgroup-op" title={it.negate ? "Excluding the group — click to include" : "Group — click to exclude"} onClick={() => setExpr(editItem(value.expr, p, (g) => (g.k === "group" ? { ...g, negate: !g.negate } : g)))}>
+                                    {it.negate ? "NOT (" : "("}
+                                </button>
+                            )}
                             {renderExpr(it.expr, p)}
                             {!it.open && <span class="net-qgroup-op">)</span>}
                             <button class="net-qchip-x" aria-label="Remove group" title="Remove group" onClick={() => removeItem(p)}>

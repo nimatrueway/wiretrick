@@ -228,6 +228,10 @@ The filter bar has two modes (the choice is remembered):
   the new filters in that spot, and Backspace/Delete remove the chip next
   to the caret. Enter, Space or a double-click on a selected chip turns it
   back into text to edit in place (Enter keeps the edit, Esc drops it).
+  `(` / `-(` and `)` work there too, as in text: type `(` before a chip
+  and the group runs to the end until you type `)` further on (or the
+  other way round); Backspace/Delete next to a parenthesis removes just
+  that one, so you can move it.
   Ctrl+Z undoes any change, chips included (Ctrl+Shift+Z or Ctrl+Y redoes).
 - **Advanced** — a query like a GitHub search, with autocomplete (Ctrl+Space,
   Tab/Enter to accept) and an inline error; while the query has an error the
