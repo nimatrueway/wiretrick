@@ -18,7 +18,7 @@ import { resolveConflict } from "./conflictDialog";
 import { watchTheme, saveTheme, type Theme, type ThemePref } from "./theme";
 import * as fsBridge from "./fsBridge";
 import { cleanScriptName, scriptNameProblem, scriptFileName, scriptFileKey, uniqueScriptName, dataFilePathProblem, folderPathProblem, MAX_PATH } from "../shared/scriptName";
-import { buildBundle, parseBundleText, bundleSettingsDoc, pickBundle, vscodeTargetPath } from "./bundle";
+import { buildBundle, parseBundleText, bundleSettingsDoc, pickBundle, vscodeTargetPath, editorLaunchUrl, launchAppName, type LaunchMode } from "./bundle";
 import { createQuickOpenPalette } from "./quickOpen";
 import { computeDirty } from "./dirtyState";
 import { parseSettings, SETTINGS_FILE, defaultStrategySetting, isStrategy, type SettingsDoc } from "../shared/settingsYaml";
@@ -1392,23 +1392,23 @@ function setEditorValue(code: string): void {
     status("");
 }
 
-/** Enable ↗ VS Code only while folder sync is active and a script is selected. */
+/** Settings → Open button (vscode | vscode-insiders | custom | off) and the custom URL template. */
+let launchMode: LaunchMode = "vscode";
+let launchTemplate = "";
+
+/** Enable ↗ only while folder sync is active and a script is selected (and a custom editor has a URL). */
 function updateOpenVscode(): void {
     const b = $("#btn-open-vscode") as HTMLButtonElement;
-    const off = ((window as any).__resLaunchMode || "vscode") === "off";
+    const off = launchMode === "off";
     b.style.display = off ? "none" : "";
-    const app = (window as any).__resLaunchMode === "vscode-insiders" ? "VS Code Insiders" : "VS Code";
-    b.classList.toggle("insiders", app !== "VS Code");
-    b.title = `Open this script's synced file in ${app} (requires a synced folder)`;
+    const app = launchAppName(launchMode);
+    b.classList.toggle("insiders", launchMode === "vscode-insiders");
+    b.classList.toggle("custom", launchMode === "custom");
+    const noUrl = launchMode === "custom" && !launchTemplate.trim();
+    b.title = noUrl ? "Set the editor URL in Settings → Open button" : `Open this script's synced file in ${app} (requires a synced folder)`;
     b.setAttribute("aria-label", `Open in ${app}`);
-    if (!off && (window as any).__resSyncActive && selectedId && !typingsShown) b.removeAttribute("disabled");
+    if (!off && !noUrl && (window as any).__resSyncActive && selectedId && !typingsShown) b.removeAttribute("disabled");
     else b.setAttribute("disabled", "");
-}
-
-/** Protocol scheme for the launch button (vscode | vscode-insiders | off). */
-function vscodeScheme(): string {
-    const mode = (window as any).__resLaunchMode || "vscode";
-    return mode === "vscode-insiders" ? "vscode-insiders://file" : "vscode://file";
 }
 
 function selectReal(id: string): void {
@@ -2512,17 +2512,28 @@ function setupDialogs(): void {
         chrome.storage.local.set({ resVscodePath: pathInput.value.trim() }, () => void refreshSyncPath());
     });
 
-    // launch target for the ↗ button (vscode | vscode-insiders | off)
+    // launch target for the ↗ button (vscode | vscode-insiders | custom | off)
     const launchSel = $("#settings-vscode-launch") as HTMLSelectElement;
-    chrome.storage.local.get("resVscodeLaunch", (d) => {
-        const mode = (d && d.resVscodeLaunch) || "vscode";
-        (window as any).__resLaunchMode = mode;
-        launchSel.value = mode;
+    const urlInput = $("#settings-editor-url") as HTMLInputElement;
+    const showUrl = () => void ($("#settings-editor-url-row").hidden = launchMode !== "custom");
+    chrome.storage.local.get(["resVscodeLaunch", "resEditorUrl"], (d) => {
+        launchMode = (d && d.resVscodeLaunch) || "vscode";
+        launchTemplate = (d && d.resEditorUrl) || "";
+        launchSel.value = launchMode;
+        urlInput.value = launchTemplate;
+        showUrl();
         updateOpenVscode();
     });
     launchSel.addEventListener("change", () => {
-        (window as any).__resLaunchMode = launchSel.value;
-        chrome.storage.local.set({ resVscodeLaunch: launchSel.value });
+        launchMode = launchSel.value as LaunchMode;
+        chrome.storage.local.set({ resVscodeLaunch: launchMode });
+        showUrl();
+        updateOpenVscode();
+        if (launchMode === "custom" && !urlInput.value.trim()) urlInput.focus();
+    });
+    urlInput.addEventListener("input", () => {
+        launchTemplate = urlInput.value.trim();
+        chrome.storage.local.set({ resEditorUrl: launchTemplate });
         updateOpenVscode();
     });
 
@@ -2945,14 +2956,16 @@ async function main(): Promise<void> {
         // target is <folder>/settings.yaml, written by folderSync
         const data = dataFiles.find((d) => d.id === selectedId);
         const file = data ? `${folder.replace(/\/+$/, "")}/${data.path}` : vscodeTargetPath(folder, selectedId, scripts.find((s) => s.id === selectedId)?.meta.name, SETTINGS_ID, SETTINGS_FILE);
-        const url = vscodeScheme() + file.split("/").map(encodeURIComponent).join("/");        // launch from THIS page (user gesture): external-protocol requests
+        const url = editorLaunchUrl(launchMode, launchTemplate, file, editor?.getPosition?.()?.lineNumber || 1);
+        if (!url) return;
+        // launch from THIS page (user gesture): external-protocol requests
         // from the background page are dropped by Chromium
         const a = document.createElement("a");
         a.href = url;
         document.body.appendChild(a);
         a.click();
         a.remove();
-        status(`opening ${file} in VS Code…`);
+        status(`opening ${file} in ${launchAppName(launchMode)}…`);
         const msg = `openInVscode → launching ${url}`;
         appendLog({ at: Date.now(), message: `[editor] ${msg}`, level: "info" });
         chrome.runtime.sendMessage({ type: "debugLog", entry: { at: Date.now(), src: "editor", msg, level: "info" } }, () => void chrome.runtime.lastError);

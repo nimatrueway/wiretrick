@@ -50,9 +50,13 @@ succession run one after another, so they never conflict with each other.
 The **Save** button shows the save state itself: **● Save** (unsaved
 changes), a spinner while saving, and a dimmed **✓ Saved** when there's
 nothing to save. Next to it, the folder button shows
-[folder sync](#synced-folder) at a glance, and the VS Code button opens the
-synced folder in VS Code (it shows the VS Code Insiders icon when
-**Settings → Open button** is VS Code Insiders).
+[folder sync](#synced-folder) at a glance, and the ↗ button opens the
+script's synced file in your editor. **Settings → Open button** picks the
+editor: VS Code, VS Code Insiders, **Custom editor (URL)**, or nothing (it
+hides the button). Like React DevTools' "Open in Editor URL", a custom
+editor is a URL template: `{path}` is the file's absolute path and `{line}`
+the cursor line, e.g. `cursor://file{path}:{line}`,
+`zed://file{path}:{line}` or `idea://open?file={path}&line={line}`.
 
 ## Explorer
 

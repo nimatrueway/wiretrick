@@ -63,6 +63,30 @@ export function vscodeTargetPath(folder: string, selectedId: string, scriptName:
     return folder.replace(/\/+$/, "") + "/" + syncFileNameFor(selectedId, scriptName, settingsId, settingsFile);
 }
 
+/** What the ↗ button launches: Settings → Open button. */
+export type LaunchMode = "vscode" | "vscode-insiders" | "custom" | "off";
+
+/** Display name of the ↗ button's target. */
+export function launchAppName(mode: string): string {
+    return mode === "vscode-insiders" ? "VS Code Insiders" : mode === "custom" ? "your editor" : "VS Code";
+}
+
+/**
+ * The URL the ↗ button opens for an absolute file path. "custom" fills a
+ * template like React DevTools' "Open in Editor URL" — `{path}` (absolute,
+ * starts with "/") and `{line}` (1-based), e.g. `cursor://file{path}:{line}`.
+ * null when there's nothing to launch (off, or an empty custom template).
+ */
+export function editorLaunchUrl(mode: string, template: string, file: string, line = 1): string | null {
+    const path = file.split("/").map(encodeURIComponent).join("/");
+    if (mode === "off") return null;
+    if (mode === "custom") {
+        const t = template.trim();
+        return t ? t.split("{path}").join(path).split("{line}").join(String(line)) : null;
+    }
+    return (mode === "vscode-insiders" ? "vscode-insiders://file" : "vscode://file") + path;
+}
+
 /**
  * Build the YAML export. `doc` is the parsed current settings.yaml (only
  * live/non-default values survive the parse, which is exactly what a bundle

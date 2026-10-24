@@ -36,7 +36,7 @@
                 <span id="editor-status"></span>
                 <button id="btn-save" disabled data-state="saved" title="Saved — no unsaved changes"><span class="save-ind" aria-hidden="true"></span><span class="save-label">Saved</span></button>
                 <button id="btn-folder-sync" data-state="off" title="Folder sync is off — click to set it up" aria-label="Folder sync: off"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M1.5 3.5h4.3l1.5 1.5h7.2v7.5h-13z" fill="none" stroke="currentColor" stroke-linejoin="round"/></svg><span class="sync-ind" aria-hidden="true"></span></button>
-                <button id="btn-open-vscode" disabled title="Open this script's synced file in VS Code (requires Scripts Folder sync)" aria-label="Open in VS Code"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="#007ACC" fill-rule="evenodd" d="M23.15 2.587 18.21.21a1.494 1.494 0 0 0-1.705.29l-9.46 8.63-4.12-3.128a.999.999 0 0 0-1.276.057L.327 7.261a1 1 0 0 0 .011 1.5L4.603 12 .338 15.24a1 1 0 0 0-.011 1.5l1.325 1.199a.999.999 0 0 0 1.276.057l4.129-3.129 9.45 8.628a1.492 1.492 0 0 0 1.704.29l4.942-2.377A1.5 1.5 0 0 0 24 20.06V3.939a1.5 1.5 0 0 0-.85-1.352zm-5.146 6.004L11.323 12l6.681 3.411z"/></svg></button>
+                <button id="btn-open-vscode" disabled title="Open this script's synced file in VS Code (requires Scripts Folder sync)" aria-label="Open in VS Code"><svg class="ico-custom" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg><svg class="ico-vscode" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="#007ACC" fill-rule="evenodd" d="M23.15 2.587 18.21.21a1.494 1.494 0 0 0-1.705.29l-9.46 8.63-4.12-3.128a.999.999 0 0 0-1.276.057L.327 7.261a1 1 0 0 0 .011 1.5L4.603 12 .338 15.24a1 1 0 0 0-.011 1.5l1.325 1.199a.999.999 0 0 0 1.276.057l4.129-3.129 9.45 8.628a1.492 1.492 0 0 0 1.704.29l4.942-2.377A1.5 1.5 0 0 0 24 20.06V3.939a1.5 1.5 0 0 0-.85-1.352zm-5.146 6.004L11.323 12l6.681 3.411z"/></svg></button>
                 <span id="layout-controls">
                     <button id="btn-toggle-sidebar" class="layout-btn" title="Toggle Explorer (⌘B)" aria-label="Toggle Explorer" aria-pressed="true"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1" fill="none" stroke="currentColor"/><path class="fill" d="M2 3h4v10H2z"/><path d="M6.5 3v10" stroke="currentColor"/></svg></button>
                     <button id="btn-toggle-panel" class="layout-btn" title="Toggle Panel (⌘J / ⌘`)" aria-label="Toggle Panel" aria-pressed="true"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1" fill="none" stroke="currentColor"/><path class="fill" d="M2 9h12v4H2z"/><path d="M2 8.5h12" stroke="currentColor"/></svg></button>
@@ -150,9 +150,17 @@
                                 <select id="settings-vscode-launch">
                                     <option value="vscode" selected>VS Code</option>
                                     <option value="vscode-insiders">VS Code Insiders</option>
+                                    <option value="custom">Custom editor (URL)</option>
                                     <option value="off">Nothing — hide the button</option>
                                 </select>
                                 <p class="setting-help">What the ↗ button in the editor toolbar launches.</p>
+                            </div>
+                        </div>
+                        <div class="setting" id="settings-editor-url-row" hidden>
+                            <label class="setting-label" for="settings-editor-url">Editor URL</label>
+                            <div class="setting-control">
+                                <input id="settings-editor-url" type="text" spellcheck="false" placeholder="cursor://file{path}:{line}" title="URL the ↗ button opens: {path} = absolute file path, {line} = cursor line">
+                                <p class="setting-help"><code>{path}</code> is the file's absolute path, <code>{line}</code> the cursor line. E.g. <code>cursor://file{path}:{line}</code>, <code>zed://file{path}:{line}</code>, <code>idea://open?file={path}&amp;line={line}</code>, <code>subl://open?url=file://{path}&amp;line={line}</code>.</p>
                             </div>
                         </div>
                     </section>

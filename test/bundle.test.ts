@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { parse as parseYaml } from "yaml";
-import { buildBundle, parseBundleText, bundleSettingsDoc, pickBundle, syncFileNameFor, vscodeTargetPath } from "../src/ui/bundle";
+import { buildBundle, parseBundleText, bundleSettingsDoc, pickBundle, syncFileNameFor, vscodeTargetPath, editorLaunchUrl, launchAppName } from "../src/ui/bundle";
 import { SETTINGS_FILE, type SettingsDoc } from "../src/shared/settingsYaml";
 
 const SETTINGS_ID = "__settings__"; // mirrors editor.ts's virtual entry id
@@ -145,5 +145,26 @@ describe("pickBundle (partial import)", () => {
     it("an export without settings omits the section", () => {
         const text = buildBundle({ settings: null, params: {} }, [{ name: "a", code: "1" }]);
         expect(parseYaml(text).settings).toBeUndefined();
+    });
+});
+
+describe("editorLaunchUrl", () => {
+    const file = "/Users/x/My scripts/Debug header.ts";
+    it("VS Code / Insiders: vscode://file<path>, segments encoded", () => {
+        expect(editorLaunchUrl("vscode", "", file)).toBe("vscode://file/Users/x/My%20scripts/Debug%20header.ts");
+        expect(editorLaunchUrl("vscode-insiders", "ignored", file, 9)).toBe("vscode-insiders://file/Users/x/My%20scripts/Debug%20header.ts");
+    });
+    it("custom: fills {path} and {line} (every occurrence)", () => {
+        expect(editorLaunchUrl("custom", " cursor://file{path}:{line} ", file, 12)).toBe("cursor://file/Users/x/My%20scripts/Debug%20header.ts:12");
+        expect(editorLaunchUrl("custom", "idea://open?file={path}&line={line}&l2={line}", "/a/b.ts", 3)).toBe("idea://open?file=/a/b.ts&line=3&l2=3");
+    });
+    it("nothing to launch: off, or an empty custom URL", () => {
+        expect(editorLaunchUrl("off", "", file)).toBeNull();
+        expect(editorLaunchUrl("custom", "  ", file)).toBeNull();
+    });
+    it("names the target", () => {
+        expect(launchAppName("vscode")).toBe("VS Code");
+        expect(launchAppName("vscode-insiders")).toBe("VS Code Insiders");
+        expect(launchAppName("custom")).toBe("your editor");
     });
 });

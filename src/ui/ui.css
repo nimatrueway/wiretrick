@@ -677,7 +677,10 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 #btn-open-vscode:disabled { opacity: 0.4; cursor: default; }
 #btn-open-vscode:disabled:hover { border-color: var(--border); background: var(--bg); }
 #btn-open-vscode svg { display: block; }
-#btn-open-vscode.insiders path { fill: #24bfa5; }
+#btn-open-vscode.insiders .ico-vscode path { fill: #24bfa5; }
+#btn-open-vscode .ico-custom, #btn-open-vscode.custom .ico-vscode { display: none; }
+#btn-open-vscode.custom .ico-custom { display: block; color: var(--fg); }
+#settings-editor-url-row[hidden] { display: none; }
 
 #monaco-host {
     flex: 1;
