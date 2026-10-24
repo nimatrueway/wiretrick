@@ -39,7 +39,9 @@ import {
     chipsBefore,
     closeGap,
     commitGap,
+    connAtGap,
     deleteAtGap,
+    unconnAtGap,
     parenAtGap,
     insertAtGap,
     isGap,
@@ -108,6 +110,23 @@ function useFit(ref: RefObject<HTMLElement | null>, open: boolean, cap = Infinit
     });
 }
 
+let measure: CanvasRenderingContext2D | null | undefined;
+/** Line a suggestion list up under the word it completes (`before`: the input's text up to that word; null: closed), kept inside the window. */
+function useUnderCaret(ref: RefObject<HTMLElement | null>, inputRef: RefObject<HTMLInputElement | null>, before: string | null) {
+    useLayoutEffect(() => {
+        const el = ref.current;
+        const inp = inputRef.current;
+        if (before === null || !el || !inp) return;
+        measure ??= document.createElement("canvas").getContext?.("2d") ?? null;
+        if (!measure) return;
+        const cs = getComputedStyle(inp);
+        measure.font = cs.font;
+        const x = inp.offsetLeft + (parseFloat(cs.paddingLeft) || 0) + measure.measureText(before).width - inp.scrollLeft;
+        const room = innerWidth - 8 - el.parentElement!.getBoundingClientRect().left - el.offsetWidth;
+        el.style.left = `${Math.max(0, Math.min(x, room))}px`;
+    });
+}
+
 export function FilterBar({ state, onChange, error, data }: { state: FilterState; onChange: (s: FilterState) => void; error: QueryError | null; data: SuggestData }) {
     const [warn, setWarn] = useState(false);
     const setMode = (mode: FilterMode) => {
@@ -171,7 +190,15 @@ interface AddRequest {
     value: string;
 }
 /** text-like selection over the chips (indices into leafChips); `withText` = Ctrl+A also took the text box */
-type Sel = { anchor: number; focus: number; withText?: boolean };
+/**
+ * Selected chips, as text: `anchor` / `focus` are caret spots between chips (b: before chip b), so chips lo..hi-1 are selected.
+ * `pin`: a chip picked by click / ←→ stays selected whichever way it's extended. `origin`: where the caret goes back to when the selection shrinks to nothing.
+ */
+type Sel = { anchor: number; focus: number; withText?: boolean; pin?: number; origin?: BasicStop };
+/** one chip (`pin`), extended to chip `t` */
+const pinTo = (pin: number, t = pin): Sel => (t >= pin ? { anchor: pin, focus: t + 1, pin } : { anchor: pin + 1, focus: t, pin });
+/** from the caret spot `anchor` to (and including) chip `t` */
+const towards = (anchor: number, t: number, origin?: BasicStop): Sel => ({ anchor, focus: t >= anchor ? t + 1 : t, origin });
 
 /** what a highlighted suggestion puts in the text box: query text, not its display label */
 const suggestionText = (s: BasicSuggestion) => (s.kind === "chip" ? chipToString(s.chip) : s.label);
@@ -223,6 +250,8 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
     const input = useRef<HTMLInputElement>(null);
     const listRef = useRef<HTMLUListElement>(null);
     const dragging = useRef(false);
+    /** the drag started in the text box: entering a chip selects from the caret */
+    const dragFromText = useRef(false);
     /** the text box selection to set after the render (the box may have moved) */
     const pendingCaret = useRef<[number, number] | null>(null);
     const [sel, setSel] = useState<Sel | null>(null);
@@ -231,6 +260,7 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
     const [request, setRequest] = useState<AddRequest | null>(null);
     useFit(listRef, !!ac, 260);
     const history = useBasicUndo(value, onInput);
+    useUnderCaret(listRef, input, ac ? (value.at ? value.at.text : value.text).slice(0, ac.from) : null);
     useLayoutEffect(() => {
         if (pendingCaret.current === null || !input.current) return;
         input.current.focus();
@@ -238,7 +268,7 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
         pendingCaret.current = null;
     });
     useEffect(() => {
-        const up = () => (dragging.current = false);
+        const up = () => (dragging.current = dragFromText.current = false);
         document.addEventListener("mouseup", up);
         return () => document.removeEventListener("mouseup", up);
     }, []);
@@ -255,7 +285,7 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
     const previewItem = ac?.kb && ac.active >= 0 ? ac.items[ac.active] : null;
     const shown = previewItem ? cur.slice(0, ac!.from) + suggestionText(previewItem) + cur.slice(ac!.to) : cur;
     const lo = sel ? Math.min(sel.anchor, sel.focus) : -1;
-    const hi = sel ? Math.max(sel.anchor, sel.focus) : -2;
+    const hi = sel ? Math.max(sel.anchor, sel.focus) - 1 : -2;
     const setExpr = (expr: BasicExpr) => onInput({ ...value, expr });
     const toInput = (caret: number) => {
         setSel(null);
@@ -263,10 +293,19 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
         input.current?.focus();
         input.current?.setSelectionRange(caret, caret);
     };
-    const selectChips = (anchor: number, focus: number) => {
+    const select = (s: Sel) => {
         setAc(null);
-        setSel({ anchor, focus });
+        setSel(s);
         box.current?.focus();
+    };
+    /** the caret as a selection end: its spot between chips (what was typed there turned into chips first) and the stop to come back to */
+    const caretEnd = (): { base: BasicFilter; b: number; origin: BasicStop; map: (i: number) => number } | null => {
+        if (!gap) return { base: value, b: leaves.length, origin: { k: "end" }, map: (i) => i };
+        const c = commitGap(value);
+        if (!c?.at) return null;
+        const before = chipsBefore(value.expr, gap.path, gap.index);
+        const d = leafChips(c.expr).length - leaves.length;
+        return { base: { ...c, at: undefined }, b: chipsBefore(c.expr, c.at.path, c.at.index), origin: { k: "gap", path: c.at.path, index: c.at.index }, map: (i) => (i < before ? i : i + d) };
     };
     /** the text box back at the end: what was typed among the chips becomes chips there; `map` follows a chip index across that */
     const settle = (): { base: BasicFilter; map: (i: number) => number } => {
@@ -283,7 +322,7 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
         setAc(null);
         if (s.k === "chip") {
             if (base !== value || value.at) onInput({ ...base, at: undefined });
-            return selectChips(s.leaf, s.leaf);
+            return select(pinTo(s.leaf));
         }
         onInput({ ...base, at: s.k === "gap" ? { path: s.path, index: s.index, text: "" } : undefined });
         toInput(s.k === "end" && caretAtEnd ? base.text.length : 0);
@@ -313,7 +352,7 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
         const { base } = settle();
         if (base !== value) onInput(base);
         setAc(null);
-        setSel({ anchor: 0, focus: leafChips(base.expr).length - 1, withText: true });
+        setSel({ anchor: 0, focus: leafChips(base.expr).length, withText: true });
         pendingCaret.current = [0, base.text.length];
         input.current?.focus();
         input.current?.select();
@@ -379,11 +418,20 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
             ev.preventDefault();
             editChip(lo);
         } else if (key === "ArrowLeft" || key === "ArrowRight" || key === "Home" || key === "End") {
+            // Shift: the moving end goes one chip over; back to where it started, the caret is there again
             ev.preventDefault();
-            const to = key === "Home" ? 0 : key === "End" ? n : key === "ArrowLeft" ? (ev.shiftKey ? sel!.focus - 1 : lo - 1) : ev.shiftKey ? sel!.focus + 1 : hi + 1;
-            if (ev.shiftKey) return selectChips(sel!.withText ? n - 1 : sel!.anchor, Math.max(0, Math.min(n - 1, to)));
-            if (to >= n) return toInput(key === "End" ? value.text.length : 0);
-            selectChips(Math.max(0, to), Math.max(0, to));
+            const s = sel!;
+            const step = key === "ArrowLeft" ? -1 : 1;
+            if (s.pin !== undefined) {
+                const f = s.focus > s.anchor ? s.focus - 1 : s.focus;
+                return select(pinTo(s.pin, key === "Home" ? 0 : key === "End" ? n - 1 : Math.max(0, Math.min(n - 1, f + step))));
+            }
+            const anchor = s.withText ? n : s.anchor;
+            const focus = key === "Home" ? 0 : key === "End" ? n : Math.max(0, Math.min(n, s.focus + step));
+            const origin = s.withText ? ({ k: "end" } as const) : s.origin;
+            if (focus !== anchor) return select({ anchor, focus, origin });
+            const st = basicStops(value.expr);
+            goStop(origin ?? (anchor >= n ? { k: "end" } : st[st.findIndex((x) => x.k === "chip" && x.leaf === anchor) - 1]), value);
         } else if (key === "Backspace" || key === "Delete") {
             ev.preventDefault();
             replaceSel();
@@ -409,6 +457,17 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
         const atEnd = el.selectionStart === el.value.length && el.selectionEnd === el.value.length;
         const mod = ev.ctrlKey || ev.metaKey;
         const plain = !mod && !ev.shiftKey && !ev.altKey;
+        if (gap && ev.shiftKey && !mod && !ev.altKey && ((atStart && (ev.key === "ArrowLeft" || ev.key === "Home")) || (atEnd && (ev.key === "ArrowRight" || ev.key === "End")))) {
+            // Shift+←/→ out of the text box among the chips: chips get selected from the caret
+            const ce = caretEnd();
+            if (!ce) return;
+            const m = leafChips(ce.base.expr).length;
+            const focus = ev.key === "Home" ? 0 : ev.key === "End" ? m : ce.b + (ev.key === "ArrowLeft" ? -1 : 1);
+            if (focus < 0 || focus > m || focus === ce.b) return;
+            ev.preventDefault();
+            onInput(ce.base);
+            return select({ anchor: ce.b, focus, origin: ce.origin });
+        }
         if (gap && plain) {
             const key = ev.key;
             if ((key === "ArrowLeft" && atStart) || (key === "ArrowRight" && atEnd)) return (ev.preventDefault(), leaveGap(key === "ArrowLeft" ? -1 : 1));
@@ -420,7 +479,7 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
             if (!el.value && !gap.edit && ((key === "Backspace" && atStart) || (key === "Delete" && atEnd))) {
                 // like a character: the "(" / ")" or chip before / after the caret goes (a chip with the connector between them)
                 ev.preventDefault();
-                const p = deleteAtGap(value, key === "Backspace" ? -1 : 1);
+                const p = (key === "Backspace" && unconnAtGap(value)) || deleteAtGap(value, key === "Backspace" ? -1 : 1);
                 if (p) return (onInput(p), p.at ? toInput(0) : toInput(p.text.length));
                 const leaf = chipsBefore(value.expr, gap.path, gap.index) - (key === "Backspace" ? 1 : 0);
                 if (leaf >= 0 && leaf < n) removeLeaves({ ...value, at: undefined }, leaf, leaf, "", false, true);
@@ -440,7 +499,7 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
         }
         if (!gap && n && atStart && (ev.key === "ArrowLeft" || ev.key === "Home")) {
             ev.preventDefault();
-            if (ev.shiftKey) return selectChips(ev.key === "Home" ? 0 : n - 1, n - 1);
+            if (ev.shiftKey) return select({ anchor: n, focus: ev.key === "Home" ? 0 : n - 1, origin: { k: "end" } });
             const st = basicStops(value.expr);
             return goStop(ev.key === "Home" ? st[0] : st[st.length - 2], value);
         }
@@ -468,8 +527,13 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
         }
     };
 
-    /** "(" / "-(" / ")" typed among the chips: what was typed before it turns into chips, then the parenthesis goes in */
-    const parenTyped = (text: string): BasicFilter | null => {
+    /** "(" / "-(" / ")" / "AND " / "OR " typed among the chips: what was typed before it turns into chips, then it goes in */
+    const gapTyped = (text: string): BasicFilter | null => {
+        const w = /^(.*?)(?:^|\s)(AND|OR)\s$/s.exec(text);
+        if (w && gap && !gap.edit) {
+            const c = commitGap({ ...value, at: { ...gap, text: w[1] } });
+            return c?.at ? connAtGap(c, w[2] as "AND" | "OR") : null;
+        }
         const m = /^(.*?)(-?\(|\))$/s.exec(text);
         if (!gap || gap.edit || !m || (m[2] !== ")" && m[1] && !/\s$/.test(m[1]))) return null;
         const c = commitGap({ ...value, at: { ...gap, text: m[1] } });
@@ -491,13 +555,16 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
                 aria-controls="net-bsuggest"
                 aria-activedescendant={ac && ac.active >= 0 ? `net-bopt-${ac.active}` : undefined}
                 value={shown}
-                onMouseDown={() => setSel(null)}
+                onMouseDown={() => {
+                    setSel(null);
+                    dragging.current = dragFromText.current = true;
+                }}
                 onInput={(e) => {
                     const el = e.currentTarget;
                     setSel(null);
                     // AND / OR / ( / ) turn into capsules as they're typed at the end; among the chips they wait for Enter
                     const atEnd = (el.selectionStart ?? el.value.length) === el.value.length;
-                    const typed = atEnd ? (gap ? parenTyped(el.value) : typeStructure(value, el.value)) : null;
+                    const typed = atEnd ? (gap ? gapTyped(el.value) : typeStructure(value, el.value)) : null;
                     if (typed) return (setAc(null), onInput(typed), toInput(typed.at ? 0 : typed.text.length)); // its own undo step
                     history.typed();
                     onInput(withText(el.value));
@@ -595,13 +662,23 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
                             if ((ev.target as HTMLElement).closest("button")) return;
                             ev.preventDefault();
                             dragging.current = true;
+                            dragFromText.current = false;
+                            if (ev.shiftKey && sel) return select(sel.pin !== undefined ? pinTo(sel.pin, idx) : towards(sel.withText ? 0 : sel.anchor, idx, sel.origin));
+                            // Shift+click with the caret in the text box: from the caret to here
+                            const ce = ev.shiftKey && document.activeElement === input.current ? caretEnd() : null;
+                            if (ce) return (ce.base !== value && onInput(ce.base), select(towards(ce.b, ce.map(idx), ce.origin)));
                             const { base, map } = settle();
                             if (base !== value) onInput(base);
-                            if (ev.shiftKey && sel) selectChips(sel.withText ? lo : sel.anchor, map(idx));
-                            else selectChips(map(idx), map(idx));
+                            select(pinTo(map(idx)));
                         }}
                         onDblClick={(ev) => !(ev.target as HTMLElement).closest("button") && !gap && editChip(idx)}
-                        onMouseEnter={(ev) => dragging.current && ev.buttons & 1 && sel && setSel({ anchor: sel.anchor, focus: idx })}
+                        onMouseEnter={(ev) => {
+                            if (!dragging.current || !(ev.buttons & 1)) return;
+                            if (sel) return setSel(sel.pin !== undefined ? pinTo(sel.pin, idx) : towards(sel.anchor, idx, sel.origin));
+                            // a drag from the text box reaching the chips: select from the caret
+                            const ce = dragFromText.current ? caretEnd() : null;
+                            if (ce) (ce.base !== value && onInput(ce.base), select(towards(ce.b, ce.map(idx), ce.origin)));
+                        }}
                     >
                         <button class="net-qchip-op" title={ch.negate ? "Excluding — click to include" : "Including — click to exclude"} onClick={() => setExpr(editItem(value.expr, p, (x) => (x.k === "chip" ? { k: "chip", chip: { ...x.chip, negate: !x.chip.negate } } : x)))}>
                             {name}
@@ -615,7 +692,16 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
                 </Fragment>
             );
         }),
-        gapHere(path, e.items.length) ? <Fragment key="gap-end">{textBox}</Fragment> : null,
+        gapHere(path, e.items.length) ? (
+            <Fragment key="gap-end">
+                {gap!.conn && (
+                    <button class={"net-qconn pending" + (gap!.conn === "OR" ? " or" : "")} title={`${gap!.conn} joins the next filter — click for ${gap!.conn === "OR" ? "AND" : "OR"}`} onMouseDown={(ev) => ev.preventDefault()} onClick={() => onInput({ ...value, at: { ...gap!, conn: gap!.conn === "OR" ? "AND" : "OR" } })}>
+                        {gap!.conn}
+                    </button>
+                )}
+                {textBox}
+            </Fragment>
+        ) : null,
         pendingConn(path),
     ].filter((x): x is JSX.Element => !!x);
 
@@ -858,6 +944,7 @@ function QueryInput({ value, onInput, error, data }: { value: string; onInput: (
     const pendingCaret = useRef<number | null>(null);
     const listRef = useRef<HTMLUListElement>(null);
     useFit(listRef, !!ac, 260);
+    useUnderCaret(listRef, input, ac ? value.slice(0, ac.from) : null);
     const syncScroll = () => {
         if (mirror.current && input.current) mirror.current.scrollLeft = input.current.scrollLeft;
     };

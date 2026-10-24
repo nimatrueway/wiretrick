@@ -985,7 +985,7 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 .net-qtext.gap { flex: 0 0 auto; min-width: 0; }
 .net-qbox .net-qtext.gap .net-filter { flex: 0 0 auto; min-width: 1ch; width: auto; padding: 2px 1px; }
 .net-qtext-idle { flex: 1; min-width: 40px; padding: 2px 4px; cursor: text; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.net-qtext .net-qsuggest { right: auto; min-width: 100%; width: max-content; max-width: 420px; }
+.net-qtext .net-qsuggest { min-width: 180px; }
 .net-qchip { display: inline-flex; align-items: center; max-width: 260px; height: 18px; border-radius: 3px; background: var(--tag-bg); color: var(--fg); }
 .net-qchip.neg { background: var(--lv-error-bg); }
 .net-toolbar .net-qchip button { border: none; color: inherit; padding: 0 3px 0 5px; height: 100%; }
@@ -1058,7 +1058,7 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 .net-qmirror { position: absolute; inset: 0; color: transparent; white-space: pre; overflow: hidden; pointer-events: none; }
 .net-qerr { text-decoration: underline wavy var(--err); text-decoration-skip-ink: none; text-underline-offset: 2px; }
 .net-qerr-msg { flex: 0 1 auto; max-width: 45%; padding: 0 6px; color: var(--err); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.net-qsuggest { right: 0; list-style: none; margin: 0; }
+.net-qsuggest { right: auto; min-width: 180px; width: max-content; max-width: 420px; list-style: none; margin: 0; }
 .net-qhelp-pop { left: auto; right: 0; width: 400px; padding: 8px; }
 .net-qhelp-table { border-collapse: collapse; width: 100%; }
 .net-qhelp-table td { padding: 2px 6px 2px 2px; vertical-align: top; }

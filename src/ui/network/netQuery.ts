@@ -471,6 +471,8 @@ export interface BasicGap {
     index: number;
     edit?: boolean;
     text: string;
+    /** a connector typed here with nothing after it in its group yet: it joins what's typed next */
+    conn?: Conn;
 }
 export const emptyBasic = (): BasicFilter => ({ text: "", expr: { items: [], conns: [] } });
 
@@ -724,7 +726,7 @@ function placeAt(b: BasicFilter, x: BasicExpr): { expr: BasicExpr; count: number
         count = add.items.length;
         if (g.edit) return { items: [...e.items.slice(0, i), ...add.items, ...e.items.slice(i + 1)], conns: [...e.conns.slice(0, i), ...add.conns, ...e.conns.slice(i)] };
         // the connector before the gap stays on the left; the right side joins with AND
-        const left = i === n && n ? [...e.conns, "AND" as const] : e.conns.slice(0, i);
+        const left = i === n && n ? [...e.conns, g.conn ?? "AND"] : e.conns.slice(0, i);
         const right = i < n ? ["AND" as const, ...e.conns.slice(i)] : [];
         return { items: [...e.items.slice(0, i), ...add.items, ...e.items.slice(i)], conns: [...left, ...add.conns, ...right] };
     });
@@ -795,6 +797,27 @@ export function leafPath(e: BasicExpr, leaf: number): number[] | null {
         return null;
     };
     return find(e, []);
+}
+
+/**
+ * "AND " / "OR " typed at the caret gap (its text already committed): it becomes the connector on the caret's left —
+ * or, with nothing after the caret in its group, the one that joins what's typed next. Null with nothing on the left.
+ */
+export function connAtGap(b: BasicFilter, conn: Conn): BasicFilter | null {
+    const g = b.at;
+    if (!g || g.edit || !g.index) return null;
+    const n = exprAt(b.expr, g.path).items.length;
+    if (g.index >= n) return { ...b, at: { ...g, conn } };
+    return { ...b, expr: editAt(b.expr, g.path, (x) => ({ ...x, conns: x.conns.map((c, j) => (j === g.index - 1 ? conn : c)) })) };
+}
+/** Backspace at an empty caret gap right after an OR / a pending connector: it goes (an OR becomes the plain AND). Null otherwise. */
+export function unconnAtGap(b: BasicFilter): BasicFilter | null {
+    const g = b.at;
+    if (!g || g.edit || g.text) return null;
+    if (g.conn) return { ...b, at: { ...g, conn: undefined } };
+    const x = exprAt(b.expr, g.path);
+    if (!g.index || g.index >= x.items.length || x.conns[g.index - 1] !== "OR") return null;
+    return { ...b, expr: editAt(b.expr, g.path, (e) => ({ ...e, conns: e.conns.map((c, j) => (j === g.index - 1 ? "AND" : c)) })) };
 }
 
 // ── parentheses typed / deleted among the chips, as in text ──
@@ -978,6 +1001,19 @@ export interface Completion {
     items: Suggestion[];
 }
 
+const STATUS_TEXT: Record<string, string> = {
+    100: "Continue", 101: "Switching Protocols", 103: "Early Hints",
+    200: "OK", 201: "Created", 202: "Accepted", 203: "Non-Authoritative Information", 204: "No Content", 205: "Reset Content", 206: "Partial Content", 207: "Multi-Status",
+    300: "Multiple Choices", 301: "Moved Permanently", 302: "Found", 303: "See Other", 304: "Not Modified", 307: "Temporary Redirect", 308: "Permanent Redirect",
+    400: "Bad Request", 401: "Unauthorized", 402: "Payment Required", 403: "Forbidden", 404: "Not Found", 405: "Method Not Allowed", 406: "Not Acceptable", 407: "Proxy Authentication Required", 408: "Request Timeout", 409: "Conflict", 410: "Gone", 411: "Length Required", 412: "Precondition Failed", 413: "Content Too Large", 414: "URI Too Long", 415: "Unsupported Media Type", 416: "Range Not Satisfiable", 417: "Expectation Failed", 418: "I'm a teapot", 421: "Misdirected Request", 422: "Unprocessable Content", 423: "Locked", 424: "Failed Dependency", 425: "Too Early", 426: "Upgrade Required", 428: "Precondition Required", 429: "Too Many Requests", 431: "Request Header Fields Too Large", 451: "Unavailable For Legal Reasons",
+    500: "Internal Server Error", 501: "Not Implemented", 502: "Bad Gateway", 503: "Service Unavailable", 504: "Gateway Timeout", 505: "HTTP Version Not Supported", 507: "Insufficient Storage", 508: "Loop Detected", 511: "Network Authentication Required",
+};
+const STATUS_RANGES: [string, string][] = [["1xx", "Informational"], ["2xx", "Success"], ["3xx", "Redirect"], ["4xx", "Client error"], ["5xx", "Server error"], [">=400", "Any error"]];
+/** "Not Found" for 404; the class name ("Client error") for codes without a standard reason phrase. */
+export function statusText(code: string): string | undefined {
+    return STATUS_TEXT[code] ?? STATUS_RANGES.find(([r]) => r[0] === code[0] && /^\d{3}$/.test(code))?.[1];
+}
+
 /** Value suggestions for one field (also used by the Basic "+ Filter" picker). */
 export function fieldValues(field: string, data: SuggestData): { value: string; detail?: string }[] {
     const plain = (xs: string[]) => xs.map((value) => ({ value }));
@@ -985,7 +1021,7 @@ export function fieldValues(field: string, data: SuggestData): { value: string; 
         case "method":
             return plain(data.methods);
         case "status":
-            return [...plain(data.statuses), ...["2xx", "3xx", "4xx", "5xx", ">=400"].map((value) => ({ value, detail: "range" }))];
+            return [...data.statuses.map((value) => ({ value, detail: statusText(value) })), ...STATUS_RANGES.map(([value, detail]) => ({ value, detail }))];
         case "type":
             return ALL_TYPES.map((value) => ({ value, detail: TYPE_FILTERS.find((t) => t.id === value)!.label }));
         case "is":

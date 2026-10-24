@@ -7,6 +7,24 @@ its section below.
 
 ## [Unreleased]
 
+### Added
+
+- Network filter (Basic): `OR ` / `AND ` typed between capsules set the
+  connector there; Backspace turns an OR back into AND.
+- Network filter: status suggestions say what each code means (404 Not
+  Found) and name the classes (2xx Success, 4xx Client error, 5xx Server
+  error) instead of "range".
+
+### Changed
+
+- Network filter: suggestions open under the word being completed instead
+  of spanning the whole box.
+
+### Fixed
+
+- Network filter (Basic): Shift+←/→ with the caret between capsules,
+  Shift+click, and dragging from the text onto capsules now select them.
+
 ## [0.9.7] - 2026-10-24
 
 ### Added

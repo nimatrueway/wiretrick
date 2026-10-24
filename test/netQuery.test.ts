@@ -1,6 +1,6 @@
 /** Network filter query language: parsing, errors, matching, Basic chips ⇄ query and autocomplete. */
 import { describe, it, expect } from "vitest";
-import { addChip, backspaceStructure, basicStops, basicSuggest, closeGap, commitGap, commitTyped, deleteAtGap, openPath, parenAtGap, compileQuery, complete, emptyBasic, fromBasic, leafChips, nodeToString, parseQuery, removeChips, suggestData, toBasic, toggleConn, typeStructure, type BasicFilter, type BasicGap, type QueryCtx, type SuggestData } from "../src/ui/network/netQuery";
+import { addChip, backspaceStructure, basicStops, basicSuggest, closeGap, commitGap, commitTyped, connAtGap, deleteAtGap, fieldValues, unconnAtGap, openPath, parenAtGap, compileQuery, complete, emptyBasic, fromBasic, leafChips, nodeToString, parseQuery, removeChips, suggestData, toBasic, toggleConn, typeStructure, type BasicFilter, type BasicGap, type QueryCtx, type SuggestData } from "../src/ui/network/netQuery";
 import type { NetEntry, NetOutcome } from "../src/shared/netTypes";
 
 const out = (scriptName: string, kind: NetOutcome["kind"]): NetOutcome => ({ scriptId: scriptName, scriptName, action: "x", level: "info", kind, at: 0 });
@@ -317,6 +317,23 @@ describe("Basic: parentheses among the chips, as in text", () => {
     });
 });
 
+describe("Basic: AND / OR typed among the chips", () => {
+    const at = (q: string, path: number[], index: number): BasicFilter => ({ ...toBasic(parseQuery(q).ast), at: { path, index, text: "" } });
+    it("sets the connector left of the caret; at a group's end it waits for the next filter", () => {
+        expect(fromBasic(connAtGap(at("host:a host:b", [], 1), "OR")!)).toBe("host:a OR host:b");
+        expect(connAtGap(at("host:a host:b", [], 0), "OR")).toBeNull();
+        const pending = connAtGap(at("(host:a OR path:b) host:c", [0], 2), "OR")!;
+        expect(pending.at).toEqual({ path: [0], index: 2, text: "", conn: "OR" });
+        expect(fromBasic(commitGap({ ...pending, at: { ...pending.at!, text: "method:GET" } })!)).toBe("(host:a OR path:b OR method:GET) host:c");
+        expect(fromBasic(commitGap({ ...pending, at: { ...pending.at!, conn: "AND", text: "method:GET" } })!)).toBe("(host:a OR path:b method:GET) host:c"); // AND binds tighter, as typed
+    });
+    it("Backspace takes it back: an OR becomes AND, a pending one goes", () => {
+        expect(fromBasic(unconnAtGap(at("host:a OR path:b", [], 1))!)).toBe("host:a path:b");
+        expect(unconnAtGap(at("host:a host:b", [], 1))).toBeNull();
+        expect(unconnAtGap({ ...at("host:a", [], 1), at: { path: [], index: 1, text: "", conn: "OR" } })!.at).toEqual({ path: [], index: 1, text: "", conn: undefined });
+    });
+});
+
 describe("Basic suggestions", () => {
     const data: SuggestData = { methods: ["GET", "POST"], statuses: ["200", "404"], hosts: ["api.test", "cdn.test"], mimes: [], scripts: ["Posty"], tabs: ["Home"], reqHeaders: [], resHeaders: ["content-type"] };
     const labels = (t: string) => basicSuggest(t, data).map((s) => s.label);
@@ -357,7 +374,13 @@ describe("autocomplete", () => {
         const d = complete("method:GET,", 11, data)!;
         expect(d.from).toBe(11);
         expect(d.items.map((i) => i.label)).toContain("POST");
-        expect(complete("status:", 7, data)!.items.map((i) => i.label)).toEqual(["200", "401", "500", "2xx", "3xx", "4xx", "5xx", ">=400"]);
+        const items = complete("status:", 7, data)!.items;
+        expect(items.map((i) => i.label)).toEqual(["200", "401", "500", "1xx", "2xx", "3xx", "4xx", "5xx", ">=400"]);
+        expect(items.map((i) => i.detail)).toEqual(["OK", "Unauthorized", "Internal Server Error", "Informational", "Success", "Redirect", "Client error", "Server error", "Any error"]);
+        expect(fieldValues("status", { ...data, statuses: ["299", "404"] }).slice(0, 2)).toEqual([
+            { value: "299", detail: "Success" },
+            { value: "404", detail: "Not Found" },
+        ]);
         expect(complete("is:mo", 5, data)!.items[0].insert).toBe("modified");
     });
 

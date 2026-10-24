@@ -231,7 +231,12 @@ The filter bar has two modes (the choice is remembered):
   `(` / `-(` and `)` work there too, as in text: type `(` before a chip
   and the group runs to the end until you type `)` further on (or the
   other way round); Backspace/Delete next to a parenthesis removes just
-  that one, so you can move it.
+  that one, so you can move it. `OR ` / `AND ` typed there set the
+  connector on the caret's left (or, at the end of a group, the one that
+  joins what you type next); Backspace turns an OR back into AND.
+  Shift+←/→, Shift+click and dragging out of the text box select from
+  wherever the caret is. Suggestions open under the word being completed;
+  status codes show their meaning (404 Not Found, 4xx Client error).
   Ctrl+Z undoes any change, chips included (Ctrl+Shift+Z or Ctrl+Y redoes).
 - **Advanced** — a query like a GitHub search, with autocomplete (Ctrl+Space,
   Tab/Enter to accept) and an inline error; while the query has an error the

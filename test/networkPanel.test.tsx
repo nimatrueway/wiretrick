@@ -526,6 +526,73 @@ describe("NetworkPanel", () => {
             expect(caps()).toEqual(["(", "POST", "OR", "cdn", "AND", "500", ")", "|"]);
         });
 
+        it("Basic: OR / AND typed among the capsules set the connector there", () => {
+            const { container, getByText } = setup(rows3());
+            fireEvent.click(getByText("Advanced"));
+            fireEvent.input(q(container), { target: { value: "method:POST host:cdn" } });
+            fireEvent.click(getByText("Basic"));
+            const qbox = container.querySelector(".net-qbox") as HTMLElement;
+            const input = () => container.querySelector(".net-qbox .net-filter") as HTMLInputElement;
+            const caps = () => [...qbox.querySelectorAll(".net-qchip-vals, .net-qconn, .net-qtext")].map((n) => (n.classList.contains("net-qtext") ? "|" : n.textContent));
+            input().focus();
+            fireEvent.keyDown(input(), { key: "ArrowLeft" });
+            fireEvent.keyDown(qbox, { key: "ArrowLeft" });
+            expect(caps()).toEqual(["POST", "AND", "|", "cdn"]);
+            fireEvent.input(input(), { target: { value: "OR " } });
+            expect(caps()).toEqual(["POST", "OR", "|", "cdn"]);
+            expect(input().value).toBe("");
+            expect(rowNames(container)).toEqual(["b.js", "c.js"]);
+            fireEvent.input(input(), { target: { value: "a.js AND " } }); // what came before it is committed first
+            expect(caps()).toEqual(["POST", "OR", "a.js", "AND", "|", "cdn"]);
+            fireEvent.keyDown(input(), { key: "Backspace" }); // an AND stays: the capsule goes
+            fireEvent.keyDown(input(), { key: "Backspace" }); // an OR goes back to AND
+            expect(caps()).toEqual(["POST", "AND", "|", "cdn"]);
+        });
+
+        it("Basic: Shift+arrows, Shift+click and dragging select from the caret", () => {
+            const { container, getByText } = setup(rows3());
+            fireEvent.click(getByText("Advanced"));
+            fireEvent.input(q(container), { target: { value: "method:POST host:cdn status:500" } });
+            fireEvent.click(getByText("Basic"));
+            const qbox = container.querySelector(".net-qbox") as HTMLElement;
+            const input = () => container.querySelector(".net-qbox .net-filter") as HTMLInputElement;
+            const chips = () => container.querySelectorAll(".net-qchip-vals");
+            const selected = () => [...container.querySelectorAll(".net-qchip.sel .net-qchip-vals")].map((n) => n.textContent);
+            input().focus();
+            fireEvent.keyDown(input(), { key: "Home" });
+            fireEvent.keyDown(input(), { key: "ArrowRight" });
+            fireEvent.keyDown(qbox, { key: "ArrowRight" }); // caret between POST and cdn
+            expect(container.querySelector(".net-qtext.gap")).not.toBeNull();
+            fireEvent.keyDown(input(), { key: "ArrowRight", shiftKey: true });
+            expect(selected()).toEqual(["cdn"]);
+            fireEvent.keyDown(qbox, { key: "ArrowRight", shiftKey: true });
+            expect(selected()).toEqual(["cdn", "500"]);
+            fireEvent.keyDown(qbox, { key: "ArrowLeft", shiftKey: true });
+            fireEvent.keyDown(qbox, { key: "ArrowLeft", shiftKey: true }); // back to nothing: the caret is where it was
+            expect(selected()).toEqual([]);
+            expect(container.querySelector(".net-qtext.gap")).not.toBeNull();
+            fireEvent.keyDown(input(), { key: "ArrowLeft", shiftKey: true });
+            expect(selected()).toEqual(["POST"]);
+            // from the end of the box
+            fireEvent.keyDown(qbox, { key: "End" });
+            input().focus();
+            fireEvent.keyDown(input(), { key: "ArrowLeft", shiftKey: true });
+            expect(selected()).toEqual(["500"]);
+            fireEvent.keyDown(qbox, { key: "ArrowRight", shiftKey: true });
+            expect(selected()).toEqual([]);
+            expect(container.querySelector(".net-qtext.gap")).toBeNull();
+            // Shift+click from the caret
+            input().focus();
+            fireEvent.mouseDown(chips()[1], { shiftKey: true });
+            expect(selected()).toEqual(["cdn", "500"]);
+            // drag from the text box over the capsules
+            fireEvent.keyDown(qbox, { key: "End" });
+            fireEvent.mouseDown(input());
+            fireEvent.mouseEnter(chips()[0].closest(".net-qchip")!, { buttons: 1 });
+            expect(selected()).toEqual(["POST", "cdn", "500"]);
+            fireEvent.mouseUp(document);
+        });
+
         it("Basic: Enter / Space on a capsule edits it in place", () => {
             const { container, getByText } = setup(rows3());
             fireEvent.click(getByText("Advanced"));
