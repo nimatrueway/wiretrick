@@ -216,7 +216,10 @@ The filter bar has two modes (the choice is remembered):
   chip's operator to negate it, × to remove it. Picking another value for
   method, status, type, is, tab or script merges into the existing chip
   (either value matches). Chips are joined by AND/OR connectors (click one to
-  switch it) and `( … )` groups, so any Advanced query shows here too. Chips
+  switch it) and `( … )` groups, so any Advanced query shows here too. Typing
+  `OR ` or `AND ` after a filter turns it into a connector, `(` (or `-(` for
+  NOT) opens a group that what you type next goes into, and `)` closes it;
+  Backspace at the start of the box takes them back one by one. Chips
   select like text: click, drag, Shift+click, Shift+←/→, Ctrl+A, then
   Backspace/Delete, copy or cut. Ctrl+Z undoes any change, chips included
   (Ctrl+Shift+Z or Ctrl+Y redoes).

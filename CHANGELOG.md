@@ -7,6 +7,12 @@ its section below.
 
 ## [Unreleased]
 
+### Added
+
+- Network filter (Basic): typing `OR ` or `AND ` turns into a connector
+  capsule, `(` / `-(` opens a group (NOT group) that the next filters go
+  into, and `)` closes it. Backspace takes them back one at a time.
+
 ### Changed
 
 - Network filter (Basic): ↑/↓ put the highlighted suggestion in the text

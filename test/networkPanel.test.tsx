@@ -512,6 +512,35 @@ describe("NetworkPanel", () => {
             expect(box.value).toBe("");
         });
 
+        it("Basic: typed OR / AND / ( / ) become capsules", () => {
+            const { container } = setup(rows3());
+            const box = container.querySelector(".net-qbox .net-filter") as HTMLInputElement;
+            const type = (t: string) => [...t].forEach((ch) => fireEvent.input(box, { target: { value: box.value + ch } }));
+            const caps = () => [...container.querySelectorAll(".net-qbox .net-qchip-vals, .net-qbox .net-qconn, .net-qbox .net-qgroup-op")].map((n) => n.textContent);
+            type("method:POST OR ");
+            expect(box.value).toBe("");
+            expect(caps()).toEqual(["POST", "OR"]);
+            expect(container.querySelector(".net-qconn.pending")).not.toBeNull();
+            expect(rowNames(container)).toEqual(["b.js"]);
+            type("(");
+            expect(container.querySelector(".net-qgroup.open")).not.toBeNull();
+            expect(caps()).toEqual(["POST", "OR", "("]);
+            type("cdn");
+            expect(rowNames(container)).toEqual(["b.js", "c.js"]); // live: counts inside the group already
+            type(")");
+            expect(box.value).toBe("");
+            expect(caps()).toEqual(["POST", "OR", "cdn"]); // a one-chip group needs no parentheses
+            expect(rowNames(container)).toEqual(["b.js", "c.js"]);
+            fireEvent.keyDown(box, { key: "z", ctrlKey: true }); // each capsule is its own undo step
+            expect(caps()).toEqual(["POST", "OR", "("]);
+            expect(box.value).toBe("cdn");
+            fireEvent.input(box, { target: { value: "" } });
+            fireEvent.keyDown(box, { key: "Backspace" }); // the empty group, then the OR
+            expect(caps()).toEqual(["POST", "OR"]);
+            fireEvent.keyDown(box, { key: "Backspace" });
+            expect(caps()).toEqual(["POST"]);
+        });
+
         it("Basic: Ctrl+Z / Ctrl+Shift+Z undo and redo chip and text changes", () => {
             const { container, getByText } = setup(rows3());
             fireEvent.click(getByText("Advanced"));

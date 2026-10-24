@@ -1,6 +1,6 @@
 /** Network filter query language: parsing, errors, matching, Basic chips ⇄ query and autocomplete. */
 import { describe, it, expect } from "vitest";
-import { addChip, basicSuggest, compileQuery, complete, emptyBasic, fromBasic, leafChips, nodeToString, parseQuery, removeChips, suggestData, toBasic, toggleConn, type QueryCtx, type SuggestData } from "../src/ui/network/netQuery";
+import { addChip, backspaceStructure, basicSuggest, commitTyped, compileQuery, complete, emptyBasic, fromBasic, leafChips, nodeToString, parseQuery, removeChips, suggestData, toBasic, toggleConn, typeStructure, type BasicFilter, type QueryCtx, type SuggestData } from "../src/ui/network/netQuery";
 import type { NetEntry, NetOutcome } from "../src/shared/netTypes";
 
 const out = (scriptName: string, kind: NetOutcome["kind"]): NetOutcome => ({ scriptId: scriptName, scriptName, action: "x", level: "info", kind, at: 0 });
@@ -199,6 +199,37 @@ describe("Basic chips ⇄ query", () => {
         expect(fromBasic({ ...b, expr: removeChips(b.expr, new Set([x])) })).toBe("is:modified (host:y status:2) method:GET");
         expect(fromBasic({ ...b, expr: removeChips(b.expr, new Set([x, st])) })).toBe("is:modified host:y method:GET");
         expect(removeChips(b.expr, new Set(leafChips(b.expr)))).toEqual({ items: [], conns: [] });
+    });
+
+    it("typing AND / OR / ( / ) turns them into chips as you go", () => {
+        /** type char by char into the text box (caret at the end), like the bar does */
+        const type = (b: BasicFilter, str: string) => [...str].reduce((x, ch) => typeStructure(x, x.text + ch) ?? { ...x, text: x.text + ch }, b);
+        let b = type(emptyBasic(), "method:GET OR ");
+        expect(b).toMatchObject({ text: "", conn: "OR" });
+        expect(fromBasic(b)).toBe("method:GET");
+        b = type(b, "(host:a AND status:5xx");
+        expect(b.text).toBe("status:5xx"); // the last word waits for the next keystroke
+        expect(fromBasic(b)).toBe("method:GET OR (host:a status:5xx)"); // live: the words being typed count where they go
+        b = type(b, ")");
+        expect(b).toMatchObject({ text: "" });
+        expect(fromBasic(b)).toBe("method:GET OR (host:a status:5xx)");
+        b = type(b, " -(api");
+        expect(fromBasic(commitTyped(b)!)).toBe("method:GET OR (host:a status:5xx) -(api)"); // still open: Enter keeps it open
+        // nothing to join yet: "OR " is just text; a word can contain "or"
+        expect(type(emptyBasic(), "OR ")).toEqual({ ...emptyBasic(), text: "OR " });
+        expect(type(emptyBasic(), "fooOR ").conn).toBeUndefined();
+        // Backspace: the typed connector, then an empty open group, then the last chip
+        b = type(emptyBasic(), "host:a OR (");
+        expect(b.expr.items).toHaveLength(2);
+        b = backspaceStructure(b)!;
+        expect(fromBasic(b)).toBe("host:a");
+        expect(b.conn).toBe("OR");
+        b = backspaceStructure(b)!;
+        expect(b.conn).toBeUndefined();
+        expect(fromBasic(backspaceStructure(b)!)).toBe("");
+        // a picked chip goes where you're typing
+        b = type(emptyBasic(), "host:a OR ");
+        expect(fromBasic(addChip(b, { field: "method", negate: false, values: ["GET"] }))).toBe("host:a OR method:GET");
     });
 
     it("prints an AST back with the needed parentheses", () => {

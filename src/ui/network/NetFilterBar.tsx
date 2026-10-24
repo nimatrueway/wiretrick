@@ -9,7 +9,10 @@ import type { RefObject } from "preact";
 import {
     FIELDS,
     addChip,
-    addExpr,
+    backspaceStructure,
+    commitTyped,
+    openPath,
+    typeStructure,
     basicSuggest,
     chipToString,
     editItem,
@@ -279,11 +282,10 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
         setRequest({ field: item.field, negate: item.negate, value: item.value });
     };
     /** Enter with nothing picked: what the text box holds besides plain words becomes chips */
+    /** Enter with nothing picked: what the text box holds besides plain words becomes chips */
     const chipify = () => {
-        const parsed = parseQuery(value.text);
-        if (parsed.error) return;
-        const b = toBasic(parsed.ast);
-        if (leafChips(b.expr).length) onInput(addExpr({ ...value, text: b.text }, b.expr));
+        const next = commitTyped(value);
+        if (next) (onInput(next), toInput(next.text.length));
     };
 
     const onChipKey = (ev: KeyboardEvent) => {
@@ -319,9 +321,10 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
         const n = leaves.length;
         const atStart = el.selectionStart === 0 && el.selectionEnd === 0;
         const mod = ev.ctrlKey || ev.metaKey;
-        if (n && atStart && ev.key === "Backspace") {
-            ev.preventDefault();
-            return setExpr(removeChips(value.expr, new Set([leaves[n - 1]])));
+        if (atStart && ev.key === "Backspace") {
+            const next = backspaceStructure(value);
+            if (next) (ev.preventDefault(), onInput(next));
+            return;
         }
         if (n && atStart && (ev.key === "ArrowLeft" || ev.key === "Home")) {
             ev.preventDefault();
@@ -351,8 +354,16 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
     };
 
     let leaf = 0;
-    const renderExpr = (e: BasicExpr, path: number[]): JSX.Element[] =>
-        e.items.map((it, i) => {
+    const insertAt = openPath(value.expr).join(".");
+    /** the connector typed for the next item, shown where that item will go */
+    const pendingConn = (path: number[]) =>
+        value.conn && path.join(".") === insertAt ? (
+            <button key="pending-conn" class={"net-qconn pending" + (value.conn === "OR" ? " or" : "")} title={`${value.conn} joins the next filter — click for ${value.conn === "OR" ? "AND" : "OR"}`} aria-label={`${value.conn}, joins the next filter, click to switch`} onClick={() => onInput({ ...value, conn: value.conn === "OR" ? "AND" : "OR" })}>
+                {value.conn}
+            </button>
+        ) : null;
+    const renderExpr = (e: BasicExpr, path: number[]): JSX.Element[] => [
+        ...e.items.map((it, i) => {
             const p = [...path, i];
             const c = e.conns[i - 1];
             const conn = i > 0 && (
@@ -364,12 +375,12 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
                 return (
                     <Fragment key={p.join(".")}>
                         {conn}
-                        <span class={"net-qgroup" + (it.negate ? " neg" : "")}>
+                        <span class={"net-qgroup" + (it.negate ? " neg" : "") + (it.open ? " open" : "")} title={it.open ? "Type ) to close the group" : undefined}>
                             <button class="net-qgroup-op" title={it.negate ? "Excluding the group — click to include" : "Group — click to exclude"} onClick={() => setExpr(editItem(value.expr, p, (g) => (g.k === "group" ? { ...g, negate: !g.negate } : g)))}>
                                 {it.negate ? "NOT (" : "("}
                             </button>
                             {renderExpr(it.expr, p)}
-                            <span class="net-qgroup-op">)</span>
+                            {!it.open && <span class="net-qgroup-op">)</span>}
                             <button class="net-qchip-x" aria-label="Remove group" title="Remove group" onClick={() => (setExpr(editItem(value.expr, p, () => null)), toInput(value.text.length))}>
                                 ×
                             </button>
@@ -406,7 +417,9 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
                     </span>
                 </Fragment>
             );
-        });
+        }),
+        pendingConn(path),
+    ].filter((x): x is JSX.Element => !!x);
 
     return (
         <div
@@ -449,6 +462,9 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
                     onInput={(e) => {
                         const el = e.currentTarget;
                         setSel(null);
+                        const atEnd = (el.selectionStart ?? el.value.length) === el.value.length;
+                        const typed = atEnd ? typeStructure(value, el.value) : null;
+                        if (typed) return (setAc(null), onInput(typed), toInput(typed.text.length)); // its own undo step
                         history.typed();
                         onInput({ ...value, text: el.value });
                         suggest(el.value, el.selectionStart ?? el.value.length);

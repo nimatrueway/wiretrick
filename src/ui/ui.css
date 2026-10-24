@@ -1021,6 +1021,8 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 .net-toolbar .net-qconn:hover { opacity: 1; text-decoration: underline; }
 .net-qgroup { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 3px; padding: 0 0 0 1px; border: 1px dashed var(--border); border-radius: 4px; }
 .net-qgroup.neg { border-color: var(--err); }
+.net-qgroup.open { border-right-color: transparent; border-top-right-radius: 0; border-bottom-right-radius: 0; padding-right: 3px; }
+.net-toolbar .net-qconn.pending { border: 1px dashed currentColor; border-radius: 3px; }
 .net-toolbar .net-qgroup-op, .net-qgroup > span.net-qgroup-op {
     border: none; background: transparent; padding: 0 2px; font: 600 11px var(--mono, ui-monospace, monospace); font-variant-ligatures: none; color: var(--fg-dim);
 }

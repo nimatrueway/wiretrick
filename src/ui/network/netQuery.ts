@@ -451,11 +451,14 @@ export interface BasicExpr {
     items: BasicItem[];
     conns: Conn[];
 }
-export type BasicItem = { k: "chip"; chip: Chip } | { k: "group"; negate: boolean; expr: BasicExpr };
+/** `open`: a group typed with "(" whose ")" hasn't been typed yet — new items go inside it */
+export type BasicItem = { k: "chip"; chip: Chip } | { k: "group"; negate: boolean; expr: BasicExpr; open?: boolean };
 export interface BasicFilter {
     /** free text, AND'ed with the chips: bare words (URL contains; "-word" excludes) */
     text: string;
     expr: BasicExpr;
+    /** a connector typed (AND / OR) that joins the next item */
+    conn?: Conn;
 }
 export const emptyBasic = (): BasicFilter => ({ text: "", expr: { items: [], conns: [] } });
 
@@ -463,9 +466,18 @@ export function chipToString(c: Chip): string {
     return `${c.negate ? "-" : ""}${c.field ? c.field + ":" : ""}${c.values.join(",")}`;
 }
 export function exprToString(e: BasicExpr): string {
-    return e.items.map((it, i) => (i ? (e.conns[i - 1] === "OR" ? " OR " : " ") : "") + (it.k === "chip" ? chipToString(it.chip) : `${it.negate ? "-" : ""}(${exprToString(it.expr)})`)).join("");
+    let out = "";
+    e.items.forEach((it, i) => {
+        const str = it.k === "chip" ? chipToString(it.chip) : it.expr.items.length ? `${it.negate ? "-" : ""}(${exprToString(it.expr)})` : "";
+        if (!str) return; // an open group still empty
+        out += (out ? (e.conns[i - 1] === "OR" ? " OR " : " ") : "") + str;
+    });
+    return out;
 }
 export function fromBasic(b: BasicFilter): string {
+    // after a typed connector or "(", the words being typed count where they'll go
+    const placed = b.text.trim() && (b.conn || openPath(b.expr).length) ? commitText(b, b.text) : null;
+    if (placed) return exprToString(placed.expr);
     const text = b.text.trim();
     const ex = exprToString(b.expr);
     if (!text || !ex) return text || ex;
@@ -538,6 +550,7 @@ function appendAnd(e: BasicExpr, item: BasicItem): BasicExpr {
 }
 /** Add a chip (AND); a repeated pick of a MERGE field ORs into its chip when the expression is all-AND. */
 export function addChip(b: BasicFilter, chip: Chip): BasicFilter {
+    if (b.conn || openPath(b.expr).length) return insertExpr(b, { items: [{ k: "chip", chip }], conns: [] });
     const e = b.expr;
     const i = !e.conns.includes("OR") && MERGE.has(chip.field) ? e.items.findIndex((it) => it.k === "chip" && it.chip.field === chip.field && it.chip.negate === chip.negate) : -1;
     if (i < 0) return { ...b, expr: appendAnd(e, { k: "chip", chip }) };
@@ -548,12 +561,14 @@ export function addChip(b: BasicFilter, chip: Chip): BasicFilter {
 /** Add a whole expression: chip by chip when all-AND, else as one group. */
 export function addExpr(b: BasicFilter, e: BasicExpr): BasicFilter {
     if (!e.items.length) return b;
+    if (b.conn || openPath(b.expr).length) return insertExpr(b, e);
     if (e.conns.includes("OR")) return { ...b, expr: appendAnd(b.expr, { k: "group", negate: false, expr: e }) };
     return e.items.reduce((acc, it) => (it.k === "chip" ? addChip(acc, it.chip) : { ...acc, expr: appendAnd(acc.expr, it) }), b);
 }
 
-/** a group left with one item collapses to it (a NOT moves onto the item); an empty one disappears */
+/** a group left with one item collapses to it (a NOT moves onto the item); an empty one disappears. An open group stays as it is. */
 function tidyGroup(g: Extract<BasicItem, { k: "group" }>): BasicItem | null {
+    if (g.open) return g;
     if (g.expr.items.length !== 1) return g.expr.items.length ? g : null;
     const only = g.expr.items[0];
     if (!g.negate) return only;
@@ -569,7 +584,7 @@ export function editItem(e: BasicExpr, path: number[], fn: (it: BasicItem) => Ba
     const items = e.items.filter((_, j) => j !== i);
     const conns = e.conns.filter((_, j) => j !== (i ? i - 1 : 0));
     // a lone plain group at the top is just parentheses
-    return items.length === 1 && items[0].k === "group" && !items[0].negate ? items[0].expr : { items, conns };
+    return items.length === 1 && items[0].k === "group" && !items[0].negate && !items[0].open ? items[0].expr : { items, conns };
 }
 /** Every chip in visual order (into groups) — Basic's text-like selection runs over these. */
 export function leafChips(e: BasicExpr): Chip[] {
@@ -585,7 +600,89 @@ export function removeChips(e: BasicExpr, drop: Set<Chip>, top = true): BasicExp
         if (items.length) conns.push(e.conns[i - 1] ?? "AND");
         items.push(next);
     });
-    return top && items.length === 1 && items[0].k === "group" && !items[0].negate ? items[0].expr : { items, conns };
+    return top && items.length === 1 && items[0].k === "group" && !items[0].negate && !items[0].open ? items[0].expr : { items, conns };
+}
+
+// ── typing structure: AND / OR / ( / ) become chips as they're typed ──
+
+/** where new items go: the path to the innermost open group ([] = top level) */
+export function openPath(e: BasicExpr): number[] {
+    const last = e.items[e.items.length - 1];
+    return last?.k === "group" && last.open ? [e.items.length - 1, ...openPath(last.expr)] : [];
+}
+function exprAt(e: BasicExpr, path: number[]): BasicExpr {
+    return path.reduce((x, i) => (x.items[i] as Extract<BasicItem, { k: "group" }>).expr, e);
+}
+function editAt(e: BasicExpr, path: number[], fn: (x: BasicExpr) => BasicExpr): BasicExpr {
+    if (!path.length) return fn(e);
+    return editItem(e, path, (g) => (g.k === "group" ? { ...g, expr: fn(g.expr) } : g));
+}
+/** Append `add` where new items go, joined by the typed connector (AND if none); precedence as in the query: AND binds tighter. */
+function insertExpr(b: BasicFilter, add: BasicExpr): BasicFilter {
+    const join = (t: BasicExpr): BasicExpr => (t.items.length ? { items: [...t.items, ...add.items], conns: [...t.conns, b.conn ?? "AND", ...add.conns] } : add);
+    return { ...b, conn: undefined, expr: editAt(b.expr, openPath(b.expr), join) };
+}
+/** The text box's words as items (bare words become URL chips); null when it doesn't parse. */
+function typedExpr(text: string): BasicExpr | null {
+    if (!text.trim()) return { items: [], conns: [] };
+    const p = parseQuery(text);
+    return p.error ? null : p.ast ? toExpr(p.ast) : { items: [], conns: [] };
+}
+/** Commit the text box into the structure; null when it doesn't parse. */
+function commitText(b: BasicFilter, text: string): BasicFilter | null {
+    const add = typedExpr(text);
+    if (!add) return null;
+    const base = { ...b, text: "" };
+    if (!add.items.length) return base;
+    // at the top level with nothing typed to join it, the text box's AND with everything else is kept
+    return base.conn || openPath(base.expr).length ? insertExpr(base, add) : addExpr(base, add);
+}
+/**
+ * What the Basic box becomes after this text was typed (caret at the end), or null when nothing
+ * structural was typed: "… OR " / "… AND " → a connector chip, "(" / "-(" → an open group,
+ * ")" → closes the innermost open group. What was typed before turns into chips.
+ */
+export function typeStructure(b: BasicFilter, text: string): BasicFilter | null {
+    let m = /^(.*?)(?:^|\s)(AND|OR)\s$/s.exec(text);
+    if (m) {
+        const before = commitText(b, m[1]);
+        if (!before || !exprAt(before.expr, openPath(before.expr)).items.length) return null; // nothing to join yet
+        return { ...before, conn: m[2] as Conn };
+    }
+    m = /^(.*?)(?:^|(?<=\s))(-?)\($/s.exec(text);
+    if (m) {
+        const before = commitText(b, m[1]);
+        if (!before) return null;
+        return insertExpr(before, { items: [{ k: "group", negate: m[2] === "-", expr: { items: [], conns: [] }, open: true }], conns: [] });
+    }
+    if (text.endsWith(")") && openPath(b.expr).length) {
+        const before = commitText(b, text.slice(0, -1));
+        if (!before) return null;
+        const path = openPath(before.expr);
+        return { ...before, conn: undefined, expr: editItem(before.expr, path, (g) => (g.k === "group" ? tidyGroup({ ...g, open: false }) : g)) };
+    }
+    return null;
+}
+/** Enter: commit the text box. Inside a group or after a typed connector everything becomes chips; else plain words stay as text. */
+export function commitTyped(b: BasicFilter): BasicFilter | null {
+    if (b.conn || openPath(b.expr).length) return commitText(b, b.text);
+    const p = parseQuery(b.text);
+    if (p.error) return null;
+    const t = toBasic(p.ast);
+    return leafChips(t.expr).length ? addExpr({ ...b, text: t.text }, t.expr) : null;
+}
+/** Backspace at the start of the text box: the typed connector, then an empty open group, then the last chip. */
+export function backspaceStructure(b: BasicFilter): BasicFilter | null {
+    if (b.conn) return { ...b, conn: undefined };
+    const path = openPath(b.expr);
+    if (path.length && !exprAt(b.expr, path).items.length) {
+        // like deleting "(": the connector typed before it comes back
+        const parent = exprAt(b.expr, path.slice(0, -1));
+        const i = path[path.length - 1];
+        return { ...b, conn: i ? parent.conns[i - 1] : undefined, expr: editItem(b.expr, path, () => null) };
+    }
+    const leaves = leafChips(b.expr);
+    return leaves.length ? { ...b, expr: removeChips(b.expr, new Set([leaves[leaves.length - 1]])) } : null;
 }
 
 /** Flip AND ⇄ OR at `conns[ci]` of the group at `groupPath` ([] = top level). */
