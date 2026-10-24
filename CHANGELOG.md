@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.9.7] - 2026-10-24
+
 ### Added
 
 - A problem that says where to fix it ("Settings → Local helper") links
@@ -341,7 +343,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.9.6...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.9.7...HEAD
+[0.9.7]: https://github.com/nimatrueway/wiretrick/compare/v0.9.6...v0.9.7
 [0.9.6]: https://github.com/nimatrueway/wiretrick/compare/v0.9.5...v0.9.6
 [0.9.5]: https://github.com/nimatrueway/wiretrick/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/nimatrueway/wiretrick/compare/v0.9.3...v0.9.4
