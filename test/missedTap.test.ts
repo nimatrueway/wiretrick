@@ -1,6 +1,6 @@
 /** "onResponseBody never ran": reason selection, throttle, and the tap registry. */
 import { describe, it, expect, beforeEach } from "vitest";
-import { frameHasHook, makeMissedThrottle, missedReason, missedWhat, routeProblem, MISSED_REASONS, type MissedCase } from "../src/shared/missedTap";
+import { frameHasHook, isLoopbackUrl, makeMissedThrottle, missedReason, missedWhat, routeProblem, MISSED_REASONS, type MissedCase } from "../src/shared/missedTap";
 import { outcomeKind, missedLine } from "../src/shared/netTypes";
 import { __resetTaps, bodyObservedSince, log, logObserved } from "../src/background/engine/logs";
 
@@ -30,6 +30,17 @@ describe("missedReason", () => {
     it("process with the helper down", () => {
         expect(reason({ strategy: "helper" })).toBe(MISSED_REASONS.helperDown);
         expect(reason({ strategy: "helper", helperActive: true })).toBe(MISSED_REASONS.fallback);
+    });
+
+    it("helper on a loopback URL: Chrome never proxies it, up or down", () => {
+        expect(reason({ strategy: "helper", helperActive: true, loopback: true })).toBe(MISSED_REASONS.helperLoopback);
+        expect(reason({ strategy: "helper", loopback: true })).toBe(MISSED_REASONS.helperLoopback);
+        expect(reason({ loopback: true })).toBe(MISSED_REASONS.fallback);
+    });
+
+    it("isLoopbackUrl", () => {
+        for (const u of ["http://localhost:8081/a.json", "http://app.localhost/", "http://127.0.0.1:3000/", "http://127.1.2.3/", "http://[::1]:8080/"]) expect(isLoopbackUrl(u)).toBe(true);
+        for (const u of ["https://example.com/", "http://localhost.example.com/", "http://10.0.0.1/", "not a url"]) expect(isLoopbackUrl(u)).toBe(false);
     });
 
     it("cache, the existing debugger warning, and the fallback", () => {

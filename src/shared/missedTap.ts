@@ -21,6 +21,8 @@ export interface MissedCase {
     cdpWarned: boolean;
     /** page strategy: false when the request's frame has no page hook (the tab was open before Wiretrick started) */
     hookLoaded?: boolean;
+    /** the request went to localhost / 127.x / [::1] (see isLoopbackUrl) */
+    loopback?: boolean;
 }
 
 export const MISSED_REASONS = {
@@ -28,6 +30,7 @@ export const MISSED_REASONS = {
     hookNotLoaded: `the page hook isn't loaded in this tab (it was open before Wiretrick started or updated) — reload the tab`,
     cache: "served from the browser cache — reload with cache disabled / hard reload",
     helperDown: "the local helper isn't running",
+    helperLoopback: `the helper can't see localhost — Chrome never sends loopback requests through a proxy; set strategy: "page" or "debugger" on the route for these URLs`,
     fallback: "no strategy observed it — check the Log view at debug level",
 } as const;
 
@@ -48,6 +51,7 @@ export function missedReason(c: MissedCase): string | null {
         // the hook reads fetch/XHR bodies lazily — the page may simply never read it
         return null;
     }
+    if (c.strategy === "helper" && c.loopback) return MISSED_REASONS.helperLoopback;
     if (c.strategy === "helper" && !c.helperActive) return MISSED_REASONS.helperDown;
     if (c.fromCache) return MISSED_REASONS.cache;
     if (c.strategy === "debugger" && c.cdpWarned) return null;
@@ -72,6 +76,17 @@ export function routeProblem(r: { kind: RouteKind; strategy: Strategy; resourceT
         return `strategy "page" only sees the page's fetch/XHR, but resourceTypes [${r.resourceTypes.join(", ")}] excludes "xmlhttprequest" — this handler never runs`;
     }
     return null;
+}
+
+/** localhost, *.localhost, 127.0.0.0/8 or [::1]: hosts Chrome never proxies */
+export function isLoopbackUrl(url: string): boolean {
+    let h: string;
+    try {
+        h = new URL(url).hostname.toLowerCase();
+    } catch {
+        return false;
+    }
+    return h === "localhost" || h.endsWith(".localhost") || h === "[::1]" || /^127\.\d+\.\d+\.\d+$/.test(h);
 }
 
 /** Display name of a request type in the warning: "(document)", "(script)"… */

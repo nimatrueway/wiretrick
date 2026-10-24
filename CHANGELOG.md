@@ -28,6 +28,10 @@ its section below.
 
 ### Fixed
 
+- Missed warning: a `helper` handler matching a localhost URL (e.g. after
+  redirecting to a local dev server) now says the helper can't see
+  loopback requests — Chrome never proxies them — and suggests `page` or
+  `debugger`, instead of "no strategy observed it".
 - Log: redirect lines read from → to (`onRequest → redirect <url> →
   <target>`) instead of putting the target before the request's URL.
 - Network filter (Basic): Shift+←/→ with the caret between capsules,

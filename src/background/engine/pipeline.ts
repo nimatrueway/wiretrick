@@ -22,7 +22,7 @@ import { isThenable, toRunnableJs } from "../../shared/compile";
 import "../../shared/transpile";
 import { log, getScriptErrors, getScriptTypeErrors, getScriptRuleErrors, getScriptRouteWarnings, setScriptRouteWarnings, bodyObservedSince } from "./logs";
 import { missedLine } from "../../shared/netTypes";
-import { frameHasHook as pingHook, makeMissedThrottle, missedReason, missedWhat, routeProblem, MISSED_SKIP_TYPES } from "../../shared/missedTap";
+import { frameHasHook as pingHook, isLoopbackUrl, makeMissedThrottle, missedReason, missedWhat, routeProblem, MISSED_SKIP_TYPES } from "../../shared/missedTap";
 import { resolveParamValues } from "../../shared/scriptDef";
 import type { ShippedLib } from "../../shared/scriptImports";
 import { effectiveStrategy, hookCanSee, routeLabel, routeMatches, setDefaultStrategy, type RouteMeta, type Strategy } from "../../shared/route";
@@ -176,6 +176,7 @@ export function createPipeline(
                     helperActive: helperActive(),
                     cdpWarned: cdpWarned.has(`${d.tabId}|${d.url}`),
                     hookLoaded,
+                    loopback: isLoopbackUrl(d.url),
                 });
                 if (!reason || !missedThrottle(`${w.id}|${d.url}`)) continue;
                 log(d.tabId, missedLine(w.name, routeLabel(w.route), d.url, missedWhat(d.type), reason), "warn", w.id, "missed", d.url);

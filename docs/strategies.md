@@ -290,6 +290,9 @@ The reason is picked from the situation:
 - the handler is on `page` and the tab has no page hook (it was open
   before Wiretrick started or updated, so its content scripts never
   loaded) → reload the tab;
+- on `helper` and the request went to localhost (127.x, `[::1]`) → Chrome
+  never sends loopback requests through a proxy, so the helper can't see
+  them; set `strategy: "page"` or `"debugger"` on the route;
 - on `helper` and the helper isn't running → start/install the helper;
 - served from the browser cache → reload with the cache disabled (hard
   reload);
