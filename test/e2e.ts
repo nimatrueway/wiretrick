@@ -407,12 +407,12 @@ check("replaceResponse [\"cdp\"]: handler ran once per load (one log line per lo
 
 // ---------- 10d. "never ran" warnings: a hook route hit by a page load (per request), and a webrequest onResponseBody on Chromium (up front) ----------
 const sbNet10d = await mgr.evaluate(() => ({
-    opened: !!document.querySelector("#network-view .net-toolbar"),
+    opened: !!document.querySelector("#net-filter-host .net-toolbar"),
     n: ["modified", "observed"].reduce((t, k) => t + Number(document.querySelector(`#sb-net .sb-n[data-k="${k}"]`)?.textContent || 0), 0),
 }));
 check("status bar counts script activity before the Network tab was ever opened", !sbNet10d.opened && sbNet10d.n > 0, JSON.stringify(sbNet10d));
 await mgr.click("#network-tab"); // the Network tab records from now on
-await mgr.waitForSelector("#network-view .net-toolbar", { timeout: 5000 });
+await mgr.waitForSelector("#net-filter-host .net-toolbar", { timeout: 5000 });
 await mgr.waitForTimeout(300);
 const early10d: { n: number }[] = await mgr.evaluate(() =>
     [...document.querySelectorAll("#network-view tbody tr.net-row")].map((tr) => ({ n: tr.querySelectorAll(".net-badge").length }))

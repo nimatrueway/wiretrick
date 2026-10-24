@@ -21,6 +21,7 @@ import {
 } from "./netFormat";
 import { compileQuery, parseQuery, suggestData, type QNode } from "./netQuery";
 import { FilterBar, effectiveQuery, initialFilterState, type FilterState } from "./NetFilterBar";
+import { formatKey } from "../shortcuts";
 
 export interface TabInfo {
     id: number;
@@ -230,7 +231,7 @@ export function NetworkPanel({ store, listTabs, toolsHost }: { store: NetStore; 
     const toolbar = (
         <div class="net-toolbar">
             <FilterBar state={fq} onChange={setFq} error={parsed.error} data={suggestions} />
-            <button class="net-clear icon-btn" title="Clear the network log" aria-label="Clear network log" onClick={() => (store.clear(), setSelectedId(null))}>
+            <button class="net-clear icon-btn" title={`Clear the network log (${formatKey("Alt+Shift+K", /Mac|iPhone|iPad/.test(navigator.platform))})`} aria-label="Clear network log" onClick={() => (store.clear(), setSelectedId(null))}>
                 <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
                 <path fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" d="M2.5 4h9M2.5 7.5h9M2.5 11h4.5M9.5 10l3.5 3.5M13 10l-3.5 3.5" />
             </svg>

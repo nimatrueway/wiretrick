@@ -7,6 +7,15 @@ its section below.
 
 ## [Unreleased]
 
+### Added
+
+- Shortcuts for the bottom panel: ⌥⇧P / ⌥⇧L / ⌥⇧N (Alt+Shift+P/L/N) show
+  Problems, Log or Network and focus its filter (again: close the panel);
+  ⌥⇧K clears the Log or Network view shown. Alt+Shift letters avoid the
+  Chrome, Firefox and OS shortcuts. ⌘⇧M now focuses the Problems filter too.
+- Settings → About: a Help… button opens the API reference, samples and
+  shortcuts (the same as the ? in the editor toolbar).
+
 ## [0.9.8] - 2026-10-24
 
 ### Added

@@ -380,7 +380,7 @@ try {
     await mgr.keyboard.press("Escape");
     // Network tab records from now on (listeners attach when it opens)
     await mgr.click("#network-tab");
-    await mgr.waitForSelector("#network-view .net-toolbar", { timeout: 5000 });
+    await mgr.waitForSelector("#net-filter-host .net-toolbar", { timeout: 5000 });
     const defaultChips = await mgr.evaluate(() => [...document.querySelectorAll("#network-view .net-qchip")].map((c) => (c.textContent || "").replace("×", "")));
     check("the Network view shows Touched requests by default", JSON.stringify(defaultChips) === '["is:touched"]', JSON.stringify(defaultChips));
     await mgr.click("#network-view .net-qchip-x"); // show all requests from here on
@@ -688,11 +688,33 @@ try {
     check("clicking a problem opens its script with the cursor on its line", jumped.file === "/Typed.ts" && jumped.pos?.lineNumber === 3 && jumped.pos?.column === 7 && jumped.focused, JSON.stringify(jumped));
     await mgr.keyboard.press("Control+Shift+KeyM");
     await mgr.waitForTimeout(200);
+    const pFocused = await mgr.evaluate(() => document.activeElement?.id);
+    await mgr.keyboard.press("Control+Shift+KeyM");
+    await mgr.waitForTimeout(200);
     const toggled = await mgr.evaluate(() => document.getElementById("app")!.classList.contains("panel-hidden"));
     await mgr.keyboard.press("Control+Shift+KeyM");
     await mgr.waitForTimeout(200);
     const reshown = await mgr.evaluate(() => !document.getElementById("app")!.classList.contains("panel-hidden") && document.getElementById("log-panel")!.dataset.tab);
-    check("⌘⇧M toggles the Problems view", toggled && reshown === "problems", JSON.stringify({ toggled, reshown }));
+    check("⌘⇧M focuses the Problems filter, then toggles the panel", pFocused === "problems-filter" && toggled && reshown === "problems", JSON.stringify({ pFocused, toggled, reshown }));
+    const viewKey = async (key: string) => {
+        await mgr.keyboard.press(key);
+        await mgr.waitForTimeout(250);
+        return mgr.evaluate(() => ({ tab: document.getElementById("log-panel")!.dataset.tab, focus: (document.activeElement as HTMLElement | null)?.id || (document.activeElement as HTMLElement | null)?.className }));
+    };
+    const viaL = await viewKey("Alt+Shift+KeyL");
+    const viaN = await viewKey("Alt+Shift+KeyN");
+    const viaP = await viewKey("Alt+Shift+KeyP");
+    check(
+        "⌥⇧L / ⌥⇧N / ⌥⇧P show Log / Network / Problems with the filter focused",
+        viaL.tab === "log" && viaL.focus === "log-find" && viaN.tab === "network" && /net-filter|net-query/.test(viaN.focus ?? "") && viaP.tab === "problems" && viaP.focus === "problems-filter",
+        JSON.stringify({ viaL, viaN, viaP }),
+    );
+    await viewKey("Alt+Shift+KeyL");
+    await mgr.evaluate(() => (window as any).monaco.editor.getEditors()[0].focus());
+    await mgr.keyboard.press("Alt+Shift+KeyK");
+    await mgr.waitForTimeout(200);
+    const logLeft = await mgr.evaluate(() => document.querySelectorAll("#log-entries > *").length);
+    check("⌥⇧K clears the Log (even from the editor)", logLeft === 0, JSON.stringify({ logLeft }));
     await mgr.locator("#log-header-title").click();
     // save conflict: the stored copy changes while the editor holds unsaved edits
     await mgr.bringToFront();

@@ -1798,10 +1798,13 @@ const netBadge = new NetBadge();
 const problemsBadge = new ProblemsBadge();
 let logBadgeEnabled = true;
 
+/** a shortcut as this platform writes it, for tooltips (isMac is declared later) */
+const keyHint = (key: string): string => formatKey(key, /Mac|iPhone|iPad/.test(navigator.platform));
+
 /** The status bar's count for a view: visible even with the panel closed. */
 function renderBadge(badge: TabBadge): void {
     document.body.classList.toggle("no-status", !logBadgeEnabled);
-    const [sel, label] = badge === logBadge ? ["#sb-log", "Log (⌘J)"] : badge === problemsBadge ? ["#sb-problems", "Problems (⌘⇧M)"] : ["#sb-net", "Network"];
+    const [sel, label] = badge === logBadge ? ["#sb-log", `Log (${keyHint("Alt+Shift+L")})`] : badge === problemsBadge ? ["#sb-problems", `Problems (${keyHint("Alt+Shift+P")})`] : ["#sb-net", `Network (${keyHint("Alt+Shift+N")})`];
     const el = $(sel);
     for (const [cls, n] of badge.counts) {
         const count = el.querySelector<HTMLElement>(`.sb-n[data-k="${cls}"]`)!;
@@ -2103,17 +2106,42 @@ function setupProblemsView(): void {
     });
 }
 
-/** ⌘⇧M: show the Problems view (and focus it), or close the panel when it's already showing it. */
-function toggleProblems(): void {
-    if (!$("#app").classList.contains("panel-hidden") && $("#log-panel").dataset.tab === "problems") {
+/** the filter box of a panel view (Network's lives in a portal, once mounted) */
+function panelFilter(which: PanelTab): HTMLInputElement | null {
+    if (which === "problems") return $input("#problems-filter");
+    if (which === "log") return $input("#log-find");
+    return document.querySelector<HTMLInputElement>("#net-filter-host input.net-filter, #net-filter-host input.net-query");
+}
+
+/** Show a panel view and focus its filter; again (already there, focus in the panel): close the panel. */
+function focusPanelView(which: PanelTab): void {
+    const panel = $("#log-panel");
+    if (!$("#app").classList.contains("panel-hidden") && panel.dataset.tab === which && panel.contains(document.activeElement)) {
         setPanelHidden(true);
         return;
     }
     setPanelHidden(false);
-    showPanelTab("problems");
-    const row = $("#problems-list").querySelector<HTMLElement>('.pb-row[tabindex="0"]');
-    if (row) row.focus();
-    else $input("#problems-filter").focus();
+    showPanelTab(which);
+    // Network mounts on first show and renders its filter a frame later
+    let tries = 10;
+    const focus = () => {
+        const f = panelFilter(which);
+        if (f) {
+            f.focus();
+            f.select();
+        } else if (tries-- > 0) requestAnimationFrame(focus);
+    };
+    focus();
+}
+
+const toggleProblems = () => focusPanelView("problems");
+
+/** Clear the view the panel shows (Log or Network; Problems clear themselves once fixed). */
+function clearPanelView(): void {
+    if ($("#app").classList.contains("panel-hidden")) return;
+    const tab = $("#log-panel").dataset.tab;
+    const btn = tab === "log" ? $("#btn-clear-log") : tab === "network" ? document.querySelector<HTMLElement>("#net-filter-host .net-clear") : null;
+    btn?.click();
 }
 
 /** All received entries — filtered ones stay here (re-renderable), just not in the DOM. */
@@ -2373,6 +2401,10 @@ async function runDiagnostics(): Promise<void> {
 function setupDialogs(): void {
     $("#btn-settings").addEventListener("click", () => openSettings());
     trackSettingsScroll();
+    $("#btn-about-help").addEventListener("click", () => {
+        closeDialog($("#settings-panel"));
+        $("#btn-help").click();
+    });
     $("#btn-about-copy").addEventListener("click", async (e) => {
         const b = e.currentTarget as HTMLElement;
         if (!aboutInfo.length) await renderAbout();
@@ -2885,6 +2917,10 @@ function showPanelTab(which: PanelTab): void {
 }
 
 function setupPanelTabs(): void {
+    $("#problems-tab").title += ` (${keyHint("Alt+Shift+P")})`;
+    $("#log-header-title").title += ` (${keyHint("Alt+Shift+L")})`;
+    $("#network-tab").title += ` (${keyHint("Alt+Shift+N")})`;
+    $("#btn-clear-log").title += ` (${keyHint("Alt+Shift+K")})`;
     for (const t of document.querySelectorAll<HTMLElement>(".panel-tab")) {
         t.addEventListener("click", () => showPanelTab(t.dataset.panel as PanelTab));
     }
@@ -2938,7 +2974,7 @@ async function main(): Promise<void> {
     for (const m of models.values()) m.onDidChangeContent(() => scheduleDependantRecheck(m));
     // VS Code shortcuts: ⌘P quick-open (scripts + settings.yaml), ⌘, opens
     // the Settings dialog, ⌘⇧E focuses the explorer, ⌘B / ⌘J toggle the
-    // explorer / panel, ⌘⇧M toggles the Problems view, ⌥Z toggles word wrap
+    // explorer / panel, ⌘⇧M or ⌥⇧P/L/N show a panel view (filter focused), ⌥⇧K clears it, ⌥Z toggles word wrap
     // (the last five are also editor actions, so they work while Monaco has
     // focus and show up in F1).
     // ⌘/ (comment), ⌘F (find), ⌘D (next occurrence) and Shift+Alt+A (block
@@ -3273,6 +3309,13 @@ function layoutShortcut(e: KeyboardEvent): (() => void) | null {
     if (mod && !e.shiftKey && !e.altKey && e.code === "KeyB") return toggleSidebar;
     if (mod && !e.shiftKey && !e.altKey && (e.code === "KeyJ" || e.code === "Backquote")) return togglePanel;
     if (mod && e.shiftKey && !e.altKey && e.code === "KeyM") return toggleProblems;
+    // ⌥⇧ + letter: free in Chrome, Firefox and the OSes (⌃⇧/⌘⇧ letters are nearly all taken)
+    if (e.altKey && e.shiftKey && !mod) {
+        if (e.code === "KeyP") return toggleProblems;
+        if (e.code === "KeyL") return () => focusPanelView("log");
+        if (e.code === "KeyN") return () => focusPanelView("network");
+        if (e.code === "KeyK") return clearPanelView;
+    }
     // ⌥Z types a character (Ω on macOS) in the log/network filter boxes
     const typing = (e.target as HTMLElement | null)?.matches?.("input, textarea, select");
     if (e.altKey && !mod && !e.shiftKey && e.code === "KeyZ" && !typing) return toggleWordWrap;
@@ -3301,7 +3344,10 @@ function registerLayoutActions(): void {
         ["wt.focusExplorer", "View: Focus on Explorer", [KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyE], focusExplorer],
         ["wt.toggleSidebar", "View: Toggle Explorer Visibility", [KeyMod.CtrlCmd | KeyCode.KeyB], toggleSidebar],
         ["wt.togglePanel", "View: Toggle Panel Visibility", [KeyMod.CtrlCmd | KeyCode.KeyJ, KeyMod.CtrlCmd | KeyCode.Backquote], togglePanel],
-        ["wt.toggleProblems", "View: Toggle Problems", [KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyM], toggleProblems],
+        ["wt.toggleProblems", "View: Show Problems", [KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyM, KeyMod.Alt | KeyMod.Shift | KeyCode.KeyP], toggleProblems],
+        ["wt.showLog", "View: Show Log", [KeyMod.Alt | KeyMod.Shift | KeyCode.KeyL], () => focusPanelView("log")],
+        ["wt.showNetwork", "View: Show Network", [KeyMod.Alt | KeyMod.Shift | KeyCode.KeyN], () => focusPanelView("network")],
+        ["wt.clearPanel", "View: Clear Log / Network", [KeyMod.Alt | KeyMod.Shift | KeyCode.KeyK], clearPanelView],
         ["wt.showShortcuts", "Help: Keyboard Shortcuts", [], showShortcutsHelp],
         ["wt.navigateBack", "Go Back", navKeybindings().back, navigateBack],
         ["wt.navigateForward", "Go Forward", navKeybindings().forward, navigateForward],

@@ -15,7 +15,10 @@ searchable list of all of them):
 | ⌘⇧E | Focus the explorer |
 | ⌘B | Show/hide the explorer |
 | ⌘J or ⌘` | Show/hide the Problems/Log/Network views |
-| ⌘⇧M | Show the Problems view (again: hide it) |
+| ⌥⇧P (or ⌘⇧M) | Show the Problems view and focus its filter (again: hide the panel) |
+| ⌥⇧L | Show the Log and focus its filter (again: hide the panel) |
+| ⌥⇧N | Show the Network view and focus its filter (again: hide the panel) |
+| ⌥⇧K | Clear the Log or Network view the panel shows |
 | ⌥Z | Toggle word wrap |
 | ⌘, | Open Settings |
 | ⌘/, ⌘F, ⌘D | Comment, find, select next occurrence (Monaco) |
@@ -145,7 +148,7 @@ at the right of the toolbar do the same.
   registered the handler it names — and is squiggled there in the editor
   like TypeScript errors (its hover comes before the API docs; F8 reaches it). Click an entry (or
   Enter) to open the file at that line; ↑/↓ move, ←/→ collapse/expand a file; the filter box in
-  the panel header filters by text. ⌘⇧M shows it. Its error/warning counts are at the far left of the
+  the panel header filters by text. ⌥⇧P (or ⌘⇧M) shows it. Its error/warning counts are at the far left of the
   status bar, and follow the scripts. Compile, TypeScript,
   rules errors and route warnings appear only here, not in the Log; a
   runtime error appears in both (the Log has every occurrence, with its URL).
@@ -343,6 +346,8 @@ available doesn't run — the script gets a ⚠ and the Problems view a warning.
 GitHub when About opens, with a download link when there's an update), commit and build time,
 the build (MV2/MV3), browser, OS, extension ID and the local helper's state.
 **Copy** puts that on the clipboard as text — paste it into bug reports.
+**Help…** opens the API reference, samples and keyboard shortcuts (the
+editor toolbar's **?**).
 
 **Collect diagnostics…** (also *Wiretrick: Collect Diagnostics…* in the
 Code view's F1 menu, and the diagnostics icon at the right of the panel
