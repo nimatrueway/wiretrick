@@ -982,6 +982,9 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 .net-qbox.error, .net-qbox.error:focus-within { border-color: var(--err); }
 .net-qbox .net-filter { flex: 1; min-width: 90px; width: auto; border: none; background: transparent; padding: 2px 4px; outline: none; }
 .net-qtext { position: relative; flex: 1; min-width: 90px; display: flex; }
+.net-qtext.gap { flex: 0 0 auto; min-width: 0; }
+.net-qbox .net-qtext.gap .net-filter { flex: 0 0 auto; min-width: 1ch; width: auto; padding: 2px 1px; }
+.net-qtext-idle { flex: 1; min-width: 40px; padding: 2px 4px; cursor: text; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .net-qtext .net-qsuggest { right: auto; min-width: 100%; width: max-content; max-width: 420px; }
 .net-qchip { display: inline-flex; align-items: center; max-width: 260px; height: 18px; border-radius: 3px; background: var(--tag-bg); color: var(--fg); }
 .net-qchip.neg { background: var(--lv-error-bg); }

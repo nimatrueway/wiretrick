@@ -35,6 +35,14 @@ import {
     type FieldKind,
     type QueryError,
     type SuggestData,
+    basicStops,
+    chipsBefore,
+    closeGap,
+    commitGap,
+    insertAtGap,
+    isGap,
+    leafPath,
+    type BasicStop,
 } from "./netQuery";
 
 export type FilterMode = "basic" | "advanced";
@@ -176,8 +184,10 @@ const UNDO_DEPTH = 100;
  * (Clear included); consecutive typing joins one step.
  */
 function useBasicUndo(value: BasicFilter, onInput: (b: BasicFilter) => void) {
-    const h = useRef({ past: [] as BasicFilter[], future: [] as BasicFilter[], cur: value, key: JSON.stringify(value), typedAt: 0, typing: false, nav: false }).current;
-    const key = JSON.stringify(value);
+    // where the caret sits isn't a change
+    const keyOf = (b: BasicFilter) => JSON.stringify(b.at && !b.at.text && !b.at.edit ? { ...b, at: undefined } : b);
+    const h = useRef({ past: [] as BasicFilter[], future: [] as BasicFilter[], cur: value, key: keyOf(value), typedAt: 0, typing: false, nav: false }).current;
+    const key = keyOf(value);
     if (key !== h.key) {
         const now = Date.now();
         if (!h.nav) {
@@ -186,9 +196,9 @@ function useBasicUndo(value: BasicFilter, onInput: (b: BasicFilter) => void) {
         }
         h.typedAt = h.typing && !h.nav ? now : 0;
         h.nav = false;
-        h.cur = value;
         h.key = key;
     }
+    h.cur = value;
     h.typing = false;
     const go = (from: BasicFilter[], to: BasicFilter[]) => {
         const v = from.pop();
@@ -211,7 +221,8 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
     const input = useRef<HTMLInputElement>(null);
     const listRef = useRef<HTMLUListElement>(null);
     const dragging = useRef(false);
-    const pendingCaret = useRef<number | null>(null);
+    /** the text box selection to set after the render (the box may have moved) */
+    const pendingCaret = useRef<[number, number] | null>(null);
     const [sel, setSel] = useState<Sel | null>(null);
     /** `kb`: the highlight came from ↑/↓, so the text box shows it (hover doesn't) */
     const [ac, setAc] = useState<{ from: number; to: number; items: BasicSuggestion[]; active: number; kb?: boolean } | null>(null);
@@ -221,7 +232,7 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
     useLayoutEffect(() => {
         if (pendingCaret.current === null || !input.current) return;
         input.current.focus();
-        input.current.setSelectionRange(pendingCaret.current, pendingCaret.current);
+        input.current.setSelectionRange(...pendingCaret.current);
         pendingCaret.current = null;
     });
     useEffect(() => {
@@ -234,14 +245,19 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
     }, [ac?.active]);
 
     const leaves = leafChips(value.expr);
+    /** the text box among the chips (null: at the end) */
+    const gap = value.at ?? null;
+    /** what the text box holds, wherever it is */
+    const cur = gap ? gap.text : value.text;
+    const withText = (text: string): BasicFilter => (gap ? { ...value, at: { ...gap, text } } : { ...value, text });
     const previewItem = ac?.kb && ac.active >= 0 ? ac.items[ac.active] : null;
-    const shown = previewItem ? value.text.slice(0, ac!.from) + suggestionText(previewItem) + value.text.slice(ac!.to) : value.text;
+    const shown = previewItem ? cur.slice(0, ac!.from) + suggestionText(previewItem) + cur.slice(ac!.to) : cur;
     const lo = sel ? Math.min(sel.anchor, sel.focus) : -1;
     const hi = sel ? Math.max(sel.anchor, sel.focus) : -2;
     const setExpr = (expr: BasicExpr) => onInput({ ...value, expr });
     const toInput = (caret: number) => {
         setSel(null);
-        pendingCaret.current = caret;
+        pendingCaret.current = [caret, caret];
         input.current?.focus();
         input.current?.setSelectionRange(caret, caret);
     };
@@ -250,20 +266,68 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
         setSel({ anchor, focus });
         box.current?.focus();
     };
-    const selectAll = () => {
+    /** the text box back at the end: what was typed among the chips becomes chips there; `map` follows a chip index across that */
+    const settle = (): { base: BasicFilter; map: (i: number) => number } => {
+        if (!gap) return { base: value, map: (i) => i };
+        const c = commitGap(value);
+        if (!c) return { base: closeGap(value), map: (i) => i };
+        const before = chipsBefore(value.expr, gap.path, gap.index);
+        const d = leafChips(c.expr).length - leaves.length;
+        return { base: { ...c, at: undefined }, map: (i) => (i < before ? i : i + d) };
+    };
+    /** put the caret at a stop: select a chip, or the text box in a gap / at the end */
+    const goStop = (s: BasicStop | undefined, base: BasicFilter, caretAtEnd = false) => {
+        if (!s) return;
         setAc(null);
-        setSel({ anchor: 0, focus: leaves.length - 1, withText: true });
+        if (s.k === "chip") {
+            if (base !== value || value.at) onInput({ ...base, at: undefined });
+            return selectChips(s.leaf, s.leaf);
+        }
+        onInput({ ...base, at: s.k === "gap" ? { path: s.path, index: s.index, text: "" } : undefined });
+        toInput(s.k === "end" && caretAtEnd ? base.text.length : 0);
+    };
+    /** ←/→ out of the gap: what was typed there becomes chips first (stays put while it doesn't parse) */
+    const leaveGap = (dir: -1 | 1) => {
+        const g = gap!;
+        const c = commitGap(value);
+        if (!c) return;
+        const st = basicStops(c.expr);
+        if (c.at) return goStop(st[st.findIndex((x) => isGap(x, g.path, dir < 0 ? g.index : c.at!.index)) + dir], c);
+        // the edited chip was emptied away
+        const before = chipsBefore(value.expr, g.path, g.index);
+        const n = leafChips(c.expr).length;
+        goStop(dir < 0 ? (before ? { k: "chip", leaf: before - 1 } : st[0]) : before < n ? { k: "chip", leaf: before } : { k: "end" }, c);
+    };
+    /** Enter / Space / double-click on a chip: it turns back into text, in place */
+    const editChip = (leaf: number) => {
+        const path = leafPath(value.expr, leaf);
+        if (!path) return;
+        const text = chipToString(leaves[leaf]);
+        setAc(null);
+        onInput({ ...value, at: { path: path.slice(0, -1), index: path[path.length - 1], edit: true, text } });
+        toInput(text.length);
+    };
+    const selectAll = () => {
+        const { base } = settle();
+        if (base !== value) onInput(base);
+        setAc(null);
+        setSel({ anchor: 0, focus: leafChips(base.expr).length - 1, withText: true });
+        pendingCaret.current = [0, base.text.length];
         input.current?.focus();
         input.current?.select();
     };
-    /** the selection removed; `typed` (a printed key) replaces it, as in a text box */
-    const replaceSel = (typed = "") => {
-        const drop = new Set(leaves.slice(lo, hi + 1));
-        const text = typed + (sel?.withText ? "" : value.text);
-        onInput({ text, expr: removeChips(value.expr, drop) });
+    /** chips lo..hi removed; the caret goes where they were. `typed` (a printed key) replaces them, as in a text box; `all`: the end text too */
+    const removeLeaves = (base: BasicFilter, lo: number, hi: number, typed = "", all = false, keepLeft = false) => {
+        const expr = removeChips(base.expr, new Set(leafChips(base.expr).slice(lo, hi + 1)), true, keepLeft);
+        const st = basicStops(expr);
+        const before = all ? undefined : st[st.findIndex((x) => x.k === "chip" && x.leaf === lo) - 1];
+        const next: BasicFilter =
+            before?.k === "gap" ? { ...base, expr, at: { path: before.path, index: before.index, text: typed } } : { ...base, expr, at: undefined, text: typed + (all ? "" : base.text) };
+        onInput(next);
         toInput(typed.length);
-        if (typed) suggest(text, typed.length);
+        if (typed) suggest(next.at ? typed : next.text, typed.length);
     };
+    const replaceSel = (typed = "") => removeLeaves(value, lo, hi, typed, !!sel?.withText);
     const selectedQuery = () => (sel?.withText ? fromBasic(value) : leaves.slice(lo, hi + 1).map(chipToString).join(" "));
 
     const suggest = (text: string, caret: number) => {
@@ -277,15 +341,22 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
     const accept = (i: number) => {
         if (!ac) return;
         const item = ac.items[i];
-        const text = (value.text.slice(0, ac.from) + value.text.slice(ac.to)).replace(/\s+/g, " ").trim();
+        const text = (cur.slice(0, ac.from) + cur.slice(ac.to)).replace(/\s+/g, " ").trim();
         setAc(null);
-        if (item.kind === "chip") return (onInput(addChip({ ...value, text }, item.chip)), toInput(text.length));
-        onInput({ ...value, text });
+        if (item.kind === "chip") {
+            const one: BasicExpr = { items: [{ k: "chip", chip: item.chip }], conns: [] };
+            return (onInput(gap ? insertAtGap(withText(text), one) : addChip({ ...value, text }, item.chip)), toInput(text.length));
+        }
+        onInput(withText(text));
         setRequest({ field: item.field, negate: item.negate, value: item.value });
     };
-    /** Enter with nothing picked: what the text box holds besides plain words becomes chips */
-    /** Enter with nothing picked: what the text box holds besides plain words becomes chips */
+    /** Enter with nothing picked: what the text box holds besides plain words becomes chips (among the chips: all of it) */
     const chipify = () => {
+        if (gap) {
+            const c = commitGap(value);
+            if (c) (onInput(c), toInput(c.at ? 0 : c.text.length));
+            return;
+        }
         const next = commitTyped(value);
         if (next) (onInput(next), toInput(next.text.length));
     };
@@ -294,7 +365,18 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
         const n = leaves.length;
         const mod = ev.ctrlKey || ev.metaKey;
         const key = ev.key;
-        if (key === "ArrowLeft" || key === "ArrowRight" || key === "Home" || key === "End") {
+        if (!ev.shiftKey && (key === "ArrowLeft" || key === "ArrowRight" || key === "Home" || key === "End")) {
+            // the caret stops on either side of each chip
+            ev.preventDefault();
+            const st = basicStops(value.expr);
+            if (key === "Home") return goStop(st[0], value);
+            if (key === "End") return goStop({ k: "end" }, value, true);
+            const left = key === "ArrowLeft";
+            return goStop(st[st.findIndex((x) => x.k === "chip" && x.leaf === (left ? lo : hi)) + (left ? -1 : 1)], value);
+        } else if ((key === "Enter" || key === " ") && lo === hi && !sel!.withText && !mod) {
+            ev.preventDefault();
+            editChip(lo);
+        } else if (key === "ArrowLeft" || key === "ArrowRight" || key === "Home" || key === "End") {
             ev.preventDefault();
             const to = key === "Home" ? 0 : key === "End" ? n : key === "ArrowLeft" ? (ev.shiftKey ? sel!.focus - 1 : lo - 1) : ev.shiftKey ? sel!.focus + 1 : hi + 1;
             if (ev.shiftKey) return selectChips(sel!.withText ? n - 1 : sel!.anchor, Math.max(0, Math.min(n - 1, to)));
@@ -322,17 +404,43 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
         const el = input.current!;
         const n = leaves.length;
         const atStart = el.selectionStart === 0 && el.selectionEnd === 0;
+        const atEnd = el.selectionStart === el.value.length && el.selectionEnd === el.value.length;
         const mod = ev.ctrlKey || ev.metaKey;
-        if (atStart && ev.key === "Backspace") {
+        const plain = !mod && !ev.shiftKey && !ev.altKey;
+        if (gap && plain) {
+            const key = ev.key;
+            if ((key === "ArrowLeft" && atStart) || (key === "ArrowRight" && atEnd)) return (ev.preventDefault(), leaveGap(key === "ArrowLeft" ? -1 : 1));
+            if ((key === "Home" && atStart) || (key === "End" && atEnd)) {
+                ev.preventDefault();
+                const { base } = settle();
+                return goStop(key === "Home" ? basicStops(base.expr)[0] : { k: "end" }, base, true);
+            }
+            if (!el.value && !gap.edit && ((key === "Backspace" && atStart) || (key === "Delete" && atEnd))) {
+                // like a character: the chip before / after the caret goes, with the connector between them
+                ev.preventDefault();
+                const leaf = chipsBefore(value.expr, gap.path, gap.index) - (key === "Backspace" ? 1 : 0);
+                if (leaf >= 0 && leaf < n) removeLeaves({ ...value, at: undefined }, leaf, leaf, "", false, true);
+                return;
+            }
+            if (key === "Escape" && !ac) {
+                // an edit is dropped; anything else typed here is kept
+                ev.stopPropagation();
+                const base = gap.edit ? { ...value, at: undefined } : settle().base;
+                return (onInput(base), toInput(base.text.length));
+            }
+        }
+        if (!gap && atStart && ev.key === "Backspace") {
             const next = backspaceStructure(value);
             if (next) (ev.preventDefault(), onInput(next));
             return;
         }
-        if (n && atStart && (ev.key === "ArrowLeft" || ev.key === "Home")) {
+        if (!gap && n && atStart && (ev.key === "ArrowLeft" || ev.key === "Home")) {
             ev.preventDefault();
-            return selectChips(ev.key === "Home" ? 0 : n - 1, ev.key === "Home" && ev.shiftKey ? n - 1 : ev.key === "Home" ? 0 : n - 1);
+            if (ev.shiftKey) return selectChips(ev.key === "Home" ? 0 : n - 1, n - 1);
+            const st = basicStops(value.expr);
+            return goStop(ev.key === "Home" ? st[0] : st[st.length - 2], value);
         }
-        if (n && mod && ev.key.toLowerCase() === "a" && (!value.text || (el.selectionStart === 0 && el.selectionEnd === value.text.length))) {
+        if (n && mod && ev.key.toLowerCase() === "a" && (!cur || (el.selectionStart === 0 && el.selectionEnd === cur.length))) {
             ev.preventDefault();
             return selectAll();
         }
@@ -342,7 +450,8 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
         if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
             ev.preventDefault();
             const active = ev.key === "ArrowDown" ? (ac.active + 1) % k : ac.active < 0 ? k - 1 : (ac.active + k - 1) % k;
-            pendingCaret.current = ac.from + suggestionText(ac.items[active]).length;
+            const caret = ac.from + suggestionText(ac.items[active]).length;
+            pendingCaret.current = [caret, caret];
             setAc({ ...ac, active, kb: true });
         } else if (ev.key === "Enter" || ev.key === "Tab") {
             ev.preventDefault();
@@ -350,9 +459,69 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
         } else if (ev.key === "Escape") {
             ev.stopPropagation();
             // first Esc puts back what was typed, the next one closes the list
-            if (previewItem) (setAc({ ...ac, active: -1, kb: false }), (pendingCaret.current = ac.to));
+            if (previewItem) (setAc({ ...ac, active: -1, kb: false }), (pendingCaret.current = [ac.to, ac.to]));
             else setAc(null);
         }
+    };
+
+    const textBox = (
+        <div class={"net-qtext" + (gap ? " gap" : "")}>
+            <input
+                ref={input}
+                class="net-filter"
+                type="text"
+                placeholder={gap ? "" : "Filter URL, or type a field or value (-word excludes)"}
+                size={gap ? Math.max(1, shown.length + 1) : undefined}
+                aria-label="Filter URL"
+                spellcheck={false}
+                autocomplete="off"
+                aria-autocomplete="list"
+                aria-expanded={!!ac}
+                aria-controls="net-bsuggest"
+                aria-activedescendant={ac && ac.active >= 0 ? `net-bopt-${ac.active}` : undefined}
+                value={shown}
+                onMouseDown={() => setSel(null)}
+                onInput={(e) => {
+                    const el = e.currentTarget;
+                    setSel(null);
+                    // AND / OR / ( / ) turn into capsules as they're typed at the end; among the chips they wait for Enter
+                    const atEnd = (el.selectionStart ?? el.value.length) === el.value.length;
+                    const typed = atEnd && !gap ? typeStructure(value, el.value) : null;
+                    if (typed) return (setAc(null), onInput(typed), toInput(typed.text.length)); // its own undo step
+                    history.typed();
+                    onInput(withText(el.value));
+                    suggest(el.value, el.selectionStart ?? el.value.length);
+                }}
+                onBlur={(ev) => {
+                    setAc(null);
+                    if (!box.current?.contains(ev.relatedTarget as Node)) setSel(null);
+                }}
+            />
+            {ac && (
+                <ul class="net-pop net-qsuggest" ref={listRef} id="net-bsuggest" role="listbox" aria-label="Suggestions">
+                    {ac.items.map((s, i) => (
+                        <li key={s.label} id={`net-bopt-${i}`} role="option" aria-selected={i === ac.active} class={i === ac.active ? "active" : ""} onMouseDown={(e) => (e.preventDefault(), accept(i))} onMouseEnter={() => !ac.kb && setAc({ ...ac, active: i })}>
+                            <span class="net-qlist-main">{s.label}</span>
+                            {s.detail && <span class="net-qlist-detail">{s.detail}</span>}
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </div>
+    );
+    /** × on a chip / group: the text box goes back to the end first (the structure stays as it is, so `path` holds) */
+    const removeItem = (path: number[]) => {
+        const base = closeGap(value);
+        onInput({ ...base, expr: editItem(value.expr, path, () => null) });
+        toInput(base.text.length);
+    };
+    const gapHere = (path: number[], i: number) => !!gap && gap.index === i && gap.path.join(".") === path.join(".");
+
+    /** back to the end of the box (a click on its background, or on the text left there) */
+    const toEnd = () => {
+        const { base } = settle();
+        if (base !== value) onInput(base);
+        toInput(base.text.length);
     };
 
     let leaf = 0;
@@ -373,17 +542,19 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
                     {c}
                 </button>
             );
+            const here = gapHere(path, i) && textBox;
             if (it.k === "group")
                 return (
                     <Fragment key={p.join(".")}>
                         {conn}
+                        {here}
                         <span class={"net-qgroup" + (it.negate ? " neg" : "") + (it.open ? " open" : "")} title={it.open ? "Type ) to close the group" : undefined}>
                             <button class="net-qgroup-op" title={it.negate ? "Excluding the group — click to include" : "Group — click to exclude"} onClick={() => setExpr(editItem(value.expr, p, (g) => (g.k === "group" ? { ...g, negate: !g.negate } : g)))}>
                                 {it.negate ? "NOT (" : "("}
                             </button>
                             {renderExpr(it.expr, p)}
                             {!it.open && <span class="net-qgroup-op">)</span>}
-                            <button class="net-qchip-x" aria-label="Remove group" title="Remove group" onClick={() => (setExpr(editItem(value.expr, p, () => null)), toInput(value.text.length))}>
+                            <button class="net-qchip-x" aria-label="Remove group" title="Remove group" onClick={() => removeItem(p)}>
                                 ×
                             </button>
                         </span>
@@ -392,9 +563,17 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
             const ch = it.chip;
             const idx = leaf++;
             const name = ch.field || "url";
+            if (here && gap!.edit)
+                return (
+                    <Fragment key={p.join(".")}>
+                        {conn}
+                        {here}
+                    </Fragment>
+                );
             return (
                 <Fragment key={p.join(".")}>
                     {conn}
+                    {here}
                     <span
                         class={"net-qchip" + (ch.negate ? " neg" : "") + (idx >= lo && idx <= hi ? " sel" : "")}
                         title={chipToString(ch)}
@@ -403,9 +582,12 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
                             if ((ev.target as HTMLElement).closest("button")) return;
                             ev.preventDefault();
                             dragging.current = true;
-                            if (ev.shiftKey && sel) selectChips(sel.withText ? lo : sel.anchor, idx);
-                            else selectChips(idx, idx);
+                            const { base, map } = settle();
+                            if (base !== value) onInput(base);
+                            if (ev.shiftKey && sel) selectChips(sel.withText ? lo : sel.anchor, map(idx));
+                            else selectChips(map(idx), map(idx));
                         }}
+                        onDblClick={(ev) => !(ev.target as HTMLElement).closest("button") && !gap && editChip(idx)}
                         onMouseEnter={(ev) => dragging.current && ev.buttons & 1 && sel && setSel({ anchor: sel.anchor, focus: idx })}
                     >
                         <button class="net-qchip-op" title={ch.negate ? "Excluding — click to include" : "Including — click to exclude"} onClick={() => setExpr(editItem(value.expr, p, (x) => (x.k === "chip" ? { k: "chip", chip: { ...x.chip, negate: !x.chip.negate } } : x)))}>
@@ -413,13 +595,14 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
                             {ch.negate ? " ≠" : ":"}
                         </button>
                         <span class="net-qchip-vals">{ch.values.map(unquote).join(", ")}</span>
-                        <button class="net-qchip-x" aria-label={`Remove ${name} filter`} title="Remove" onClick={() => (setExpr(editItem(value.expr, p, () => null)), toInput(value.text.length))}>
+                        <button class="net-qchip-x" aria-label={`Remove ${name} filter`} title="Remove" onClick={() => removeItem(p)}>
                             ×
                         </button>
                     </span>
                 </Fragment>
             );
         }),
+        gapHere(path, e.items.length) ? <Fragment key="gap-end">{textBox}</Fragment> : null,
         pendingConn(path),
     ].filter((x): x is JSX.Element => !!x);
 
@@ -435,59 +618,32 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
                 if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && (k === "z" || k === "y") && !ownField) {
                     ev.preventDefault();
                     const v = k === "y" || ev.shiftKey ? history.redo() : history.undo();
-                    if (v) (setAc(null), toInput(v.text.length));
+                    if (v) (setAc(null), toInput((v.at ? v.at.text : v.text).length));
                     return;
                 }
                 if (ev.target !== box.current && ev.target !== input.current) return;
                 if (sel && leaves.length) onChipKey(ev);
                 else if (ev.target === input.current) onInputKey(ev);
             }}
-            onMouseDown={(ev) => ev.target === box.current && (ev.preventDefault(), toInput(value.text.length))}
+            onMouseDown={(ev) => ev.target === box.current && (ev.preventDefault(), toEnd())}
             onBlur={(ev) => !box.current?.contains(ev.relatedTarget as Node) && setSel(null)}
         >
             {renderExpr(value.expr, [])}
-            <div class="net-qtext">
-                <input
-                    ref={input}
-                    class="net-filter"
-                    type="text"
-                    placeholder="Filter URL, or type a field or value (-word excludes)"
-                    aria-label="Filter URL"
-                    spellcheck={false}
-                    autocomplete="off"
-                    aria-autocomplete="list"
-                    aria-expanded={!!ac}
-                    aria-controls="net-bsuggest"
-                    aria-activedescendant={ac && ac.active >= 0 ? `net-bopt-${ac.active}` : undefined}
-                    value={shown}
-                    onMouseDown={() => setSel(null)}
-                    onInput={(e) => {
-                        const el = e.currentTarget;
-                        setSel(null);
-                        const atEnd = (el.selectionStart ?? el.value.length) === el.value.length;
-                        const typed = atEnd ? typeStructure(value, el.value) : null;
-                        if (typed) return (setAc(null), onInput(typed), toInput(typed.text.length)); // its own undo step
-                        history.typed();
-                        onInput({ ...value, text: el.value });
-                        suggest(el.value, el.selectionStart ?? el.value.length);
-                    }}
-                    onBlur={(ev) => {
-                        setAc(null);
-                        if (!box.current?.contains(ev.relatedTarget as Node)) setSel(null);
-                    }}
-                />
-                {ac && (
-                    <ul class="net-pop net-qsuggest" ref={listRef} id="net-bsuggest" role="listbox" aria-label="Suggestions">
-                        {ac.items.map((s, i) => (
-                            <li key={s.label} id={`net-bopt-${i}`} role="option" aria-selected={i === ac.active} class={i === ac.active ? "active" : ""} onMouseDown={(e) => (e.preventDefault(), accept(i))} onMouseEnter={() => !ac.kb && setAc({ ...ac, active: i })}>
-                                <span class="net-qlist-main">{s.label}</span>
-                                {s.detail && <span class="net-qlist-detail">{s.detail}</span>}
-                            </li>
-                        ))}
-                    </ul>
-                )}
-            </div>
-            <AddFilter data={data} onAdd={(chip) => (onInput(addChip(value, chip)), toInput(value.text.length))} request={request} onRequestDone={() => setRequest(null)} />
+            {gap ? (
+                value.text && (
+                    <span class="net-qtext-idle" title="Click to type here" onMouseDown={(ev) => (ev.preventDefault(), toEnd())}>
+                        {value.text}
+                    </span>
+                )
+            ) : (
+                textBox
+            )}
+            <AddFilter
+                data={data}
+                onAdd={(chip) => (gap ? (onInput(insertAtGap(value, { items: [{ k: "chip", chip }], conns: [] })), toInput(cur.length)) : (onInput(addChip(value, chip)), toInput(value.text.length)))}
+                request={request}
+                onRequestDone={() => setRequest(null)}
+            />
         </div>
     );
 }

@@ -223,8 +223,12 @@ The filter bar has two modes (the choice is remembered):
   NOT) opens a group that what you type next goes into, and `)` closes it;
   Backspace at the start of the box takes them back one by one. Chips
   select like text: click, drag, Shift+click, Shift+←/→, Ctrl+A, then
-  Backspace/Delete, copy or cut. Ctrl+Z undoes any change, chips included
-  (Ctrl+Shift+Z or Ctrl+Y redoes).
+  Backspace/Delete, copy or cut. ←/→ move the caret past each chip, so it
+  stops on either side of it: type there and Enter (or move away) puts
+  the new filters in that spot, and Backspace/Delete remove the chip next
+  to the caret. Enter, Space or a double-click on a selected chip turns it
+  back into text to edit in place (Enter keeps the edit, Esc drops it).
+  Ctrl+Z undoes any change, chips included (Ctrl+Shift+Z or Ctrl+Y redoes).
 - **Advanced** — a query like a GitHub search, with autocomplete (Ctrl+Space,
   Tab/Enter to accept) and an inline error; while the query has an error the
   last valid one keeps filtering. Switching to Basic asks first only if the

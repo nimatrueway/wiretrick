@@ -1,6 +1,6 @@
 /** Network filter query language: parsing, errors, matching, Basic chips ⇄ query and autocomplete. */
 import { describe, it, expect } from "vitest";
-import { addChip, backspaceStructure, basicSuggest, commitTyped, compileQuery, complete, emptyBasic, fromBasic, leafChips, nodeToString, parseQuery, removeChips, suggestData, toBasic, toggleConn, typeStructure, type BasicFilter, type QueryCtx, type SuggestData } from "../src/ui/network/netQuery";
+import { addChip, backspaceStructure, basicStops, basicSuggest, closeGap, commitGap, commitTyped, compileQuery, complete, emptyBasic, fromBasic, leafChips, nodeToString, parseQuery, removeChips, suggestData, toBasic, toggleConn, typeStructure, type BasicFilter, type BasicGap, type QueryCtx, type SuggestData } from "../src/ui/network/netQuery";
 import type { NetEntry, NetOutcome } from "../src/shared/netTypes";
 
 const out = (scriptName: string, kind: NetOutcome["kind"]): NetOutcome => ({ scriptId: scriptName, scriptName, action: "x", level: "info", kind, at: 0 });
@@ -235,6 +235,48 @@ describe("Basic chips ⇄ query", () => {
     it("prints an AST back with the needed parentheses", () => {
         expect(nodeToString(parseQuery("a (b OR c) -(d e)").ast!)).toBe("a (b OR c) -(d e)");
         expect(nodeToString(parseQuery("a b OR c").ast!)).toBe("(a b) OR c");
+    });
+});
+
+describe("Basic: the text box among the chips", () => {
+    const at = (q: string, gap: BasicGap): BasicFilter => ({ ...toBasic(parseQuery(q).ast), at: gap });
+    it("inserts where the caret is: the left connector stays, the right one is AND", () => {
+        const b = commitGap(at("method:POST OR host:cdn", { path: [], index: 1, text: "a.js" }))!;
+        expect(fromBasic(b)).toBe("method:POST OR a.js host:cdn");
+        expect(b.at).toEqual({ path: [], index: 2, text: "" });
+        expect(fromBasic(commitGap(at("a OR b", { path: [], index: 0, text: "x" }))!)).toBe("x a OR b");
+    });
+    it("an OR'ed insert is grouped; an edit replaces its chip; an emptied edit removes it", () => {
+        expect(fromBasic(commitGap(at("host:a host:b", { path: [], index: 1, text: "x OR y" }))!)).toBe("host:a (x OR y) host:b");
+        expect(fromBasic(commitGap(at("a OR b", { path: [], index: 1, edit: true, text: "-c" }))!)).toBe("a OR -c");
+        const gone = commitGap(at("a OR b", { path: [], index: 0, edit: true, text: "" }))!;
+        expect([fromBasic(gone), gone.at]).toEqual(["b", undefined]);
+        expect(commitGap(at("a", { path: [], index: 0, text: 'x"' }))).toBeNull(); // doesn't parse: stays put
+    });
+    it("counts live while typed; closing keeps the structure", () => {
+        expect(fromBasic(at("host:a host:b", { path: [], index: 1, text: "x" }))).toBe("host:a x host:b");
+        expect(closeGap({ ...at("host:a host:b", { path: [], index: 1, text: "x" }), text: "c" })).toMatchObject({ text: "c x", at: undefined });
+        expect(closeGap(at("host:a host:b", { path: [], index: 1, edit: true, text: "x" })).text).toBe("");
+    });
+    it("stops: a gap before each item and at the end of closed groups, then the end", () => {
+        const e = toBasic(parseQuery("host:a (host:b OR method:GET)").ast).expr;
+        expect(basicStops(e)).toEqual([
+            { k: "gap", path: [], index: 0 },
+            { k: "chip", leaf: 0 },
+            { k: "gap", path: [], index: 1 },
+            { k: "gap", path: [1], index: 0 },
+            { k: "chip", leaf: 1 },
+            { k: "gap", path: [1], index: 1 },
+            { k: "chip", leaf: 2 },
+            { k: "gap", path: [1], index: 2 },
+            { k: "end" },
+        ]);
+    });
+    it("removing a chip can keep the connector on its left", () => {
+        const b = toBasic(parseQuery("a OR x b").ast);
+        const x = leafChips(b.expr)[1];
+        expect(fromBasic({ ...b, expr: removeChips(b.expr, new Set([x])) })).toBe("a b");
+        expect(fromBasic({ ...b, expr: removeChips(b.expr, new Set([x]), true, true) })).toBe("a OR b");
     });
 });
 

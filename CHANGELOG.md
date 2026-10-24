@@ -14,6 +14,10 @@ its section below.
 - Network filter (Basic): typing `OR ` or `AND ` turns into a connector
   capsule, `(` / `-(` opens a group (NOT group) that the next filters go
   into, and `)` closes it. Backspace takes them back one at a time.
+- Network filter (Basic): Enter, Space or a double-click on a capsule
+  turns it back into text you edit in place. ←/→ stop on either side of
+  each capsule, so you can type a filter before or between them, or
+  Backspace/Delete the capsule next to the caret.
 
 ### Changed
 

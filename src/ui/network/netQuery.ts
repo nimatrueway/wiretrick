@@ -459,6 +459,15 @@ export interface BasicFilter {
     expr: BasicExpr;
     /** a connector typed (AND / OR) that joins the next item */
     conn?: Conn;
+    /** the text box moved in among the chips (←/→, or Enter on a chip to edit it); `text` stays at the end */
+    at?: BasicGap;
+}
+/** The text box sitting before `items[index]` of the group at `path` ([] = top level); `edit`: it stands in for that item, shown as its text. */
+export interface BasicGap {
+    path: number[];
+    index: number;
+    edit?: boolean;
+    text: string;
 }
 export const emptyBasic = (): BasicFilter => ({ text: "", expr: { items: [], conns: [] } });
 
@@ -475,6 +484,7 @@ export function exprToString(e: BasicExpr): string {
     return out;
 }
 export function fromBasic(b: BasicFilter): string {
+    if (b.at) return fromBasic({ ...b, at: undefined, expr: gapExpr(b) });
     // after a typed connector or "(", the words being typed count where they'll go
     const placed = b.text.trim() && (b.conn || openPath(b.expr).length) ? commitText(b, b.text) : null;
     if (placed) return exprToString(placed.expr);
@@ -590,14 +600,19 @@ export function editItem(e: BasicExpr, path: number[], fn: (it: BasicItem) => Ba
 export function leafChips(e: BasicExpr): Chip[] {
     return e.items.flatMap((it) => (it.k === "chip" ? [it.chip] : leafChips(it.expr)));
 }
-/** Drop the given chips (by identity); emptied groups vanish, one-item groups collapse. */
-export function removeChips(e: BasicExpr, drop: Set<Chip>, top = true): BasicExpr {
+/** Drop the given chips (by identity); emptied groups vanish, one-item groups collapse. `keepLeft`: a dropped run's connector on the left survives (else the one on its right). */
+export function removeChips(e: BasicExpr, drop: Set<Chip>, top = true, keepLeft = false): BasicExpr {
     const items: BasicItem[] = [];
     const conns: Conn[] = [];
+    let left: Conn | undefined;
     e.items.forEach((it, i) => {
-        const next = it.k === "chip" ? (drop.has(it.chip) ? null : it) : tidyGroup({ ...it, expr: removeChips(it.expr, drop, false) });
-        if (!next) return;
-        if (items.length) conns.push(e.conns[i - 1] ?? "AND");
+        const next = it.k === "chip" ? (drop.has(it.chip) ? null : it) : tidyGroup({ ...it, expr: removeChips(it.expr, drop, false, keepLeft) });
+        if (!next) {
+            if (keepLeft && items.length) left ??= e.conns[i - 1];
+            return;
+        }
+        if (items.length) conns.push(left ?? e.conns[i - 1] ?? "AND");
+        left = undefined;
         items.push(next);
     });
     return top && items.length === 1 && items[0].k === "group" && !items[0].negate && !items[0].open ? items[0].expr : { items, conns };
@@ -683,6 +698,91 @@ export function backspaceStructure(b: BasicFilter): BasicFilter | null {
     }
     const leaves = leafChips(b.expr);
     return leaves.length ? { ...b, expr: removeChips(b.expr, new Set([leaves[leaves.length - 1]])) } : null;
+}
+
+// ── the text box among the chips ──
+
+/** `x` put at the gap (in place of the edited item); `count`: the items it became (-1: the edited item was removed) */
+function placeAt(b: BasicFilter, x: BasicExpr): { expr: BasicExpr; count: number } {
+    const g = b.at!;
+    if (!x.items.length) return g.edit ? { expr: editItem(b.expr, [...g.path, g.index], () => null), count: -1 } : { expr: b.expr, count: 0 };
+    let count = 0;
+    const expr = editAt(b.expr, g.path, (e) => {
+        const n = e.items.length;
+        const i = g.index;
+        // an OR'ed insert among other items is grouped, so it keeps its meaning
+        const add: BasicExpr = x.conns.includes("OR") && n > (g.edit ? 1 : 0) ? { items: [{ k: "group", negate: false, expr: x }], conns: [] } : x;
+        count = add.items.length;
+        if (g.edit) return { items: [...e.items.slice(0, i), ...add.items, ...e.items.slice(i + 1)], conns: [...e.conns.slice(0, i), ...add.conns, ...e.conns.slice(i)] };
+        // the connector before the gap stays on the left; the right side joins with AND
+        const left = i === n && n ? [...e.conns, "AND" as const] : e.conns.slice(0, i);
+        const right = i < n ? ["AND" as const, ...e.conns.slice(i)] : [];
+        return { items: [...e.items.slice(0, i), ...add.items, ...e.items.slice(i)], conns: [...left, ...add.conns, ...right] };
+    });
+    return { expr, count };
+}
+/** The expression with what's typed at the gap counted in place (as it was, while it doesn't parse). */
+export function gapExpr(b: BasicFilter): BasicExpr {
+    const x = b.at && typedExpr(b.at.text);
+    return x ? placeAt(b, x).expr : b.expr;
+}
+/** Enter / leaving the gap: its text becomes chips there; the gap moves past them (gone if the edited item was emptied). Null when it doesn't parse. */
+export function commitGap(b: BasicFilter): BasicFilter | null {
+    const g = b.at;
+    if (!g) return b;
+    const x = typedExpr(g.text);
+    if (!x) return null;
+    const { expr, count } = placeAt(b, x);
+    return { ...b, expr, at: count < 0 ? undefined : { path: g.path, index: g.index + count, text: "" } };
+}
+/** A picked chip / expression goes in at the gap (replacing the edited item); the text box stays after it. */
+export function insertAtGap(b: BasicFilter, x: BasicExpr): BasicFilter {
+    const g = b.at!;
+    const { expr, count } = placeAt(b, x);
+    return { ...b, expr, at: { path: g.path, index: g.index + Math.max(0, count), text: g.text } };
+}
+/** Back to the end without changing the structure: an edit is dropped, text typed at the gap joins the end text. */
+export function closeGap(b: BasicFilter): BasicFilter {
+    const g = b.at;
+    if (!g) return b;
+    const text = g.edit || !g.text.trim() ? b.text : [b.text.trim(), g.text.trim()].filter(Boolean).join(" ");
+    return { ...b, at: undefined, text };
+}
+/** Where ←/→ stop, in order: the gap before each item (and at the end of each closed group), each chip, the end. */
+export type BasicStop = { k: "gap"; path: number[]; index: number } | { k: "chip"; leaf: number } | { k: "end" };
+export function basicStops(e: BasicExpr): BasicStop[] {
+    const out: BasicStop[] = [];
+    let leaf = 0;
+    const walk = (x: BasicExpr, path: number[], endGap: boolean) => {
+        x.items.forEach((it, i) => {
+            out.push({ k: "gap", path, index: i });
+            if (it.k === "chip") out.push({ k: "chip", leaf: leaf++ });
+            else walk(it.expr, [...path, i], !it.open);
+        });
+        if (endGap) out.push({ k: "gap", path, index: x.items.length });
+    };
+    walk(e, [], false);
+    out.push({ k: "end" });
+    return out;
+}
+export const isGap = (s: BasicStop | undefined, path: number[], index: number): boolean => s?.k === "gap" && s.index === index && s.path.join(".") === path.join(".");
+/** how many chips come before the gap */
+export function chipsBefore(e: BasicExpr, path: number[], index: number): number {
+    const st = basicStops(e);
+    return st.slice(0, st.findIndex((s) => isGap(s, path, index))).filter((s) => s.k === "chip").length;
+}
+/** The path (indices through groups) of the `leaf`-th chip. */
+export function leafPath(e: BasicExpr, leaf: number): number[] | null {
+    let n = leaf;
+    const find = (x: BasicExpr, path: number[]): number[] | null => {
+        for (let i = 0; i < x.items.length; i++) {
+            const it = x.items[i];
+            const r = it.k === "chip" ? (n-- === 0 ? [...path, i] : null) : find(it.expr, [...path, i]);
+            if (r) return r;
+        }
+        return null;
+    };
+    return find(e, []);
 }
 
 /** Flip AND ⇄ OR at `conns[ci]` of the group at `groupPath` ([] = top level). */
