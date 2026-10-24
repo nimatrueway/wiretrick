@@ -27,6 +27,15 @@ Load the extension from `dist/` ("Load unpacked", MV2), or any recent Firefox
 
 ## Releases
 
+Every user-facing change goes under `## [Unreleased]` in
+[CHANGELOG.md](../CHANGELOG.md). To release, rename that heading to
+`## [X.Y.Z] - YYYY-MM-DD`, add a fresh empty `## [Unreleased]` above it and a
+compare link at the bottom, and bump the version (`manifest.json`,
+`package.json`, `src/background/sandbox.ts`). A unit test fails while the
+current version has no changelog section. The release notes are that section
+(`scripts/release-notes.mjs`, relative links made absolute) plus a link to
+[install.md](install.md); install steps live there, not in the notes.
+
 Pushing a `vX.Y.Z` tag runs the GitHub Action (typecheck → tests → build →
 zips + signed `.crx` → helper binaries → GitHub release), so the artifacts
 always match the tagged `manifest.json` version. The Firefox `.xpi` is signed

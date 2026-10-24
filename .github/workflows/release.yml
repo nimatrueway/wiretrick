@@ -148,6 +148,12 @@ jobs:
           fi
           echo "version $MANIFEST ✓"
 
+      - name: Release notes (its CHANGELOG.md section)
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          node scripts/release-notes.mjs "${GITHUB_REF_NAME#v}" "$GITHUB_REPOSITORY" > release-notes.md
+          cat release-notes.md
+
       - name: Package zip
         run: |
           VERSION=$(node -p "require('./dist/manifest.json').version")
@@ -213,23 +219,7 @@ jobs:
             ${{ env.ZIP_MV3_NAME }}
             wiretrick-*.crx
             helper-dist/*
-          generate_release_notes: true
-          body: |
-            Current Chrome / Edge / Brave: unzip `wiretrick-mv3-v*.zip`, then chrome://extensions → Developer mode → Load unpacked → the unzipped folder.
-            Firefox: install `wiretrick-firefox-v*.xpi` — added to this release a few minutes after it's published, once Mozilla signs it (drag it onto Firefox; an unsigned one needs about:debugging → Load Temporary Add-on, or Developer Edition/Nightly with `xpinstall.signatures.required=false`).
-            MV2-capable Chromium: unzip `wiretrick-mv2-v*.zip` and load its `dist` folder.
-            Signed `.crx` packages (MV3 and MV2, extension id `jcoealmhehnajkglhfchcnjdpkhnkdei`) are for policy-managed installs or drag-and-drop on Linux; see the README.
-
-            Optional local helper for `strategy: ["helper"]` (Chrome). Settings → Local helper shows the command with your extension id filled in; it downloads the right `wiretrick-helper-*` binary below, checks it against `SHA256SUMS`, and installs it:
-
-            ```sh
-            # macOS / Linux
-            curl -fsSL https://raw.githubusercontent.com/nimatrueway/wiretrick/master/helper/install.sh | sh -s -- --extension-id <id> --trust-ca
-            ```
-            ```powershell
-            # Windows (PowerShell)
-            & ([scriptblock]::Create((irm https://raw.githubusercontent.com/nimatrueway/wiretrick/master/helper/install.ps1))) -ExtensionId <id> -TrustCa
-            ```
+          body_path: release-notes.md
 
   # AMO signing can take a long time: the release is published without the
   # Firefox package, which this job adds when it's ready.
