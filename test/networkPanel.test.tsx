@@ -295,6 +295,40 @@ describe("NetworkPanel", () => {
             expect(document.activeElement).toBe(container.querySelector(".net-qbox .net-filter")); // back in the filter box
         });
 
+        it("Basic: + Filter adds the ↑/↓-highlighted value with Add or Tab", () => {
+            for (const how of ["add", "tab"]) {
+                const { container, getByText, getByLabelText, unmount } = setup(rows3());
+                fireEvent.click(getByText("+ Filter"));
+                fireEvent.click([...container.querySelectorAll(".net-qadd-pop .net-qlist-main")].find((n) => n.textContent === "method")!);
+                const input = getByLabelText("Value") as HTMLInputElement;
+                fireEvent.keyDown(input, { key: "ArrowDown" });
+                const picked = input.value;
+                expect(picked).not.toBe("");
+                if (how === "add") fireEvent.click(getByText("Add"));
+                else fireEvent.keyDown(input, { key: "Tab" });
+                expect(container.querySelector(".net-qchip")!.textContent).toContain(`method:${picked}`);
+                unmount();
+            }
+        });
+
+        it("Basic: + Filter on a text field: ↑/↓ switch the operator, Tab adds", () => {
+            const { container, getByText, getByLabelText } = setup(rows3());
+            fireEvent.click(getByText("+ Filter"));
+            fireEvent.click([...container.querySelectorAll(".net-qadd-pop .net-qlist-main")].find((n) => n.textContent === "url")!);
+            const input = getByLabelText("Value") as HTMLInputElement;
+            const op = () => container.querySelector(".net-qadd-ops .on")!.textContent;
+            expect(op()).toBe("contains");
+            fireEvent.keyDown(input, { key: "ArrowUp" }); // wraps
+            expect(op()).toBe("matches regex");
+            fireEvent.keyDown(input, { key: "ArrowDown" });
+            fireEvent.keyDown(input, { key: "ArrowDown" });
+            expect(op()).toBe("does not contain");
+            fireEvent.input(input, { target: { value: "b.js" } });
+            fireEvent.keyDown(input, { key: "Tab" });
+            expect(container.querySelector(".net-qchip")!.textContent).toContain("url ≠b.js");
+            expect(rowNames(container)).toEqual(["a.js", "c.js"]);
+        });
+
         it("Basic: typed values are validated before adding", () => {
             const { container, getByText, getByLabelText } = setup(rows3());
             fireEvent.click(getByText("+ Filter"));

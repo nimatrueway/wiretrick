@@ -23,6 +23,12 @@ its section below.
   `is:touched` chip, so by default you still see what scripts touched.
 - Network filter (Basic): ↑/↓ put the highlighted suggestion in the text
   box, in the filter box and in **+ Filter**; Esc puts back what you typed.
+- **+ Filter**: on text fields (url, host, path, …) ↑/↓ switch the operator
+  (contains, is, matches…); Tab adds the filter, like **Add**.
+
+### Fixed
+
+- **+ Filter**: **Add** ignored a value picked with ↑/↓.
 
 ## [0.9.6] - 2026-10-24
 

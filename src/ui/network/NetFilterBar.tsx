@@ -576,14 +576,27 @@ function AddFilter({ data, onAdd, request, onRequestDone }: { data: SuggestData;
     useEffect(() => {
         document.getElementById(`net-qadd-opt-${active}`)?.scrollIntoView?.({ block: "nearest" });
     }, [active]);
+    /** what the box shows: the ↑/↓-highlighted suggestion, else what was typed */
+    const shown = preview ?? value;
     const onValueKey = (e: KeyboardEvent) => {
         const k = suggestions.length;
-        if (k && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+        const arrow = e.key === "ArrowDown" || e.key === "ArrowUp";
+        if (arrow && field?.kind === "text" && op) {
+            // text fields: ↑/↓ steps through the operators (contains, is, matches…)
+            e.preventDefault();
+            const i = opsFor.indexOf(op), n = opsFor.length;
+            setOp(opsFor[(i + (e.key === "ArrowDown" ? 1 : n - 1)) % n]);
+        } else if (k && arrow) {
             e.preventDefault();
             setActive(e.key === "ArrowDown" ? (active + 1) % k : active < 0 ? k - 1 : (active + k - 1) % k, true);
         } else if (e.key === "Enter") {
             if (active >= 0 && active < k) pick(suggestions[active].value);
             else if (op !== "has-value") commit();
+        } else if (e.key === "Tab" && !e.shiftKey && shown.trim()) {
+            // Tab = done: same as Add (for "value contains", it takes the name and moves on to the value)
+            if (op === "has-value") return preview !== null && (setValue(preview), setActive(-1));
+            e.preventDefault();
+            commit(shown);
         }
     };
     return (
@@ -631,16 +644,16 @@ function AddFilter({ data, onAdd, request, onRequestDone }: { data: SuggestData;
                                             spellcheck={false}
                                             aria-label={field.kind === "header" ? "Header name" : "Value"}
                                             placeholder={field.kind === "header" ? "header name" : field.kind === "number" ? (field.name === "size" ? "10kb" : "500ms") : op === "matches" ? "regex" : "value"}
-                                            value={preview ?? value}
+                                            value={shown}
                                             aria-controls="net-qadd-list"
                                             aria-activedescendant={active >= 0 ? `net-qadd-opt-${active}` : undefined}
                                             onInput={(e) => (setValue(e.currentTarget.value), setErr(null))}
                                             onKeyDown={onValueKey}
                                         />
                                         {op === "has-value" && (
-                                            <input type="text" spellcheck={false} aria-label="Header value" placeholder="value" value={headerValue} onInput={(e) => (setHeaderValue(e.currentTarget.value), setErr(null))} onKeyDown={(e) => e.key === "Enter" && commit()} />
+                                            <input type="text" spellcheck={false} aria-label="Header value" placeholder="value" value={headerValue} onInput={(e) => (setHeaderValue(e.currentTarget.value), setErr(null))} onKeyDown={(e) => (e.key === "Enter" || (e.key === "Tab" && !e.shiftKey && headerValue.trim())) && (e.preventDefault(), commit())} />
                                         )}
-                                        <button class="primary" onClick={() => commit()}>
+                                        <button class="primary" onClick={() => commit(shown)}>
                                             Add
                                         </button>
                                     </div>

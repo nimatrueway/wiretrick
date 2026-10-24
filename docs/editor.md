@@ -213,7 +213,8 @@ The filter bar has two modes (the choice is remembered):
   (↑/↓ show the highlighted one in the box, Esc puts back what you typed,
   Tab to accept); Enter turns typed `field:value` terms into chips.
   **+ Filter** walks field → operator → value (with suggestions, ↑/↓ and
-  Enter from the value box); click a
+  Enter from the value box; on text fields like url, ↑/↓ switch the
+  operator instead; Tab adds the filter, like **Add**); click a
   chip's operator to negate it, × to remove it. Picking another value for
   method, status, type, is, tab or script merges into the existing chip
   (either value matches). Chips are joined by AND/OR connectors (click one to
