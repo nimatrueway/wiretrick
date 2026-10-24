@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.9.6] - 2026-10-24
+
 ### Added
 
 - Network filter: Ctrl+Z / Ctrl+Shift+Z undo and redo Basic filter changes,
@@ -308,7 +310,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.9.5...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.9.6...HEAD
+[0.9.6]: https://github.com/nimatrueway/wiretrick/compare/v0.9.5...v0.9.6
 [0.9.5]: https://github.com/nimatrueway/wiretrick/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/nimatrueway/wiretrick/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/nimatrueway/wiretrick/compare/v0.9.2...v0.9.3
