@@ -35,7 +35,7 @@ import type { Script } from "../background/engine/scriptStore";
 import type { DataFile } from "../background/engine/dataFiles";
 import { setupPanelDock, currentSide, currentDock } from "./panelDock";
 import { badgeCount, LogBadge, NetBadge, type TabBadge } from "./logBadge";
-import { collectProblems, filterProblems, problemCounts, ProblemsBadge, type Problem, type ProblemGroup, type ProblemMarker } from "./problems";
+import { collectProblems, filterProblems, problemCounts, ProblemsBadge, settingsLink, type Problem, type ProblemGroup, type ProblemMarker } from "./problems";
 import { touchCounts } from "./network/netFormat";
 import { effect } from "@preact/signals";
 import { aboutRows, aboutText, checkLatestRelease, collectDiagnostics, describeLatest, diagnosticsFileName, downloadText, RELEASES_URL, type HelperStatus } from "./about";
@@ -1860,6 +1860,15 @@ function modelProblems(m: any): ProblemMarker[] {
         .map((mk: any) => ({ severity: mk.severity === MarkerSeverity.Error ? "error" : "warning", message: String(mk.message), line: mk.startLineNumber, column: mk.startColumn }));
 }
 
+/** command behind a problem hover's settings link (command:…?["settings-sec-helper"]) */
+const OPEN_SETTINGS_SECTION = "wt.openSettingsSection";
+let settingsCommandRegistered = false;
+function registerSettingsCommand(): void {
+    if (settingsCommandRegistered) return;
+    settingsCommandRegistered = true;
+    (window as any).monaco.editor.registerCommand(OPEN_SETTINGS_SECTION, (_accessor: unknown, section?: string) => openSettings(section));
+}
+
 /** the owner of the markers for Wiretrick's own problems (compile, rules, runtime, route) */
 const PROBLEM_OWNER = "wiretrick";
 /** model → the problems its markers show */
@@ -1898,7 +1907,10 @@ function markProblems(): void {
                 const endLine = Math.min(p.endLine ?? line, m.getLineCount());
                 const endColumn = p.endColumn ?? Math.max(m.getLineLastNonWhitespaceColumn(endLine), column + 1);
                 const severity = p.severity === "error" ? monaco.MarkerSeverity.Error : monaco.MarkerSeverity.Warning;
-                return { severity, message: p.message, source: "Wiretrick", code: p.kind, startLineNumber: line, startColumn: column, endLineNumber: endLine, endColumn };
+                // "(Settings → Local helper)" in the message: the hover links there
+                const link = settingsLink(p.message);
+                const code = link ? { value: ` · Open ${link.text}`, target: monaco.Uri.parse(`command:${OPEN_SETTINGS_SECTION}?${encodeURIComponent(JSON.stringify([link.section]))}`) } : p.kind;
+                return { severity, message: p.message, source: "Wiretrick", code, startLineNumber: line, startColumn: column, endLineNumber: endLine, endColumn };
             })
         );
     }
@@ -1952,6 +1964,26 @@ function pbSpan(cls: string, text = ""): HTMLSpanElement {
     return el;
 }
 
+/** a problem's message; a "Settings → Section" in it is a link that opens that section */
+function problemMessage(text: string): HTMLSpanElement {
+    const msg = pbSpan("pb-msg");
+    const link = settingsLink(text);
+    if (!link) return (msg.textContent = text), msg;
+    const a = document.createElement("a");
+    a.className = "pb-link";
+    a.href = "#";
+    a.tabIndex = -1;
+    a.textContent = link.text;
+    a.title = `Open ${link.text}`;
+    a.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openSettings(link.section);
+    });
+    msg.append(text.slice(0, link.at), a, text.slice(link.at + link.text.length));
+    return msg;
+}
+
 function renderProblems(): void {
     const list = $("#problems-list");
     const active = document.activeElement as HTMLElement | null;
@@ -1991,7 +2023,7 @@ function renderProblems(): void {
             ico.innerHTML = p.severity === "error" ? ERROR_ICON : WARN_ICON;
             ico.setAttribute("role", "img");
             ico.setAttribute("aria-label", p.severity);
-            el.append(ico, pbSpan("pb-msg", p.message.split("\n")[0]), pbSpan("pb-src", p.kind));
+            el.append(ico, problemMessage(p.message.split("\n")[0]), pbSpan("pb-src", p.kind));
             if (p.line) el.append(pbSpan("pb-pos", `[Ln ${p.line}${p.column ? `, Col ${p.column}` : ""}]`));
             if (p.dismissible) {
                 const x = document.createElement("button");
@@ -3272,6 +3304,7 @@ function registerLayoutActions(): void {
     ];
     for (const [id, label, keybindings, run] of actions) editor.addAction({ id, label, keybindings, run });
     editor.addAction({ id: "wt.openSettings", label: "Preferences: Open Settings", run: () => openSettings() });
+    registerSettingsCommand();
     editor.addAction({
         id: "wt.collectDiagnostics",
         label: "Wiretrick: Collect Diagnostics…",

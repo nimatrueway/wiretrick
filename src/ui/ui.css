@@ -939,6 +939,8 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 .pb-ico.warn { color: var(--warn); }
 .pb-msg { color: var(--fg); overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
 .pb-src, .pb-pos { color: var(--fg-dim); flex-shrink: 0; }
+.pb-link { color: var(--accent); text-decoration: none; cursor: pointer; }
+.pb-link:hover { text-decoration: underline; }
 .pb-dismiss {
     margin-left: auto; flex-shrink: 0; background: none; border: none; color: var(--fg-dim); cursor: pointer;
     font-size: 11px; padding: 0 4px; border-radius: 3px; visibility: hidden;

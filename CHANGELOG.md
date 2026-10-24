@@ -9,6 +9,8 @@ its section below.
 
 ### Added
 
+- A problem that says where to fix it ("Settings → Local helper") links
+  there, in the Problems view and the editor hover.
 - Network filter (Basic): typing `OR ` or `AND ` turns into a connector
   capsule, `(` / `-(` opens a group (NOT group) that the next filters go
   into, and `)` closes it. Backspace takes them back one at a time.

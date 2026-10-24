@@ -10,6 +10,27 @@ import type { TabBadge } from "./logBadge";
 export type ProblemSeverity = "error" | "warning";
 export type ProblemKind = "compile" | "rules" | "runtime" | "ts" | "route" | "settings" | "json";
 
+/** Settings dialog sections a message can point at ("… (Settings → Local helper)") → their element id */
+const SETTINGS_SECTIONS: Record<string, string> = {
+    Appearance: "settings-sec-appearance",
+    "Synced folder": "settings-sec-folder",
+    "Import / Export": "settings-sec-io",
+    Strategy: "settings-sec-strategy",
+    "Local helper": "settings-sec-helper",
+    Logging: "settings-sec-logging",
+    Advanced: "settings-sec-advanced",
+    About: "settings-sec-about",
+};
+/** The "Settings → Section" a message mentions, with where it is in the message, or null. */
+export function settingsLink(message: string): { text: string; label: string; section: string; at: number } | null {
+    for (const [label, section] of Object.entries(SETTINGS_SECTIONS)) {
+        const text = `Settings → ${label}`;
+        const at = message.indexOf(text);
+        if (at >= 0) return { text, label, section, at };
+    }
+    return null;
+}
+
 export interface Problem {
     severity: ProblemSeverity;
     kind: ProblemKind;

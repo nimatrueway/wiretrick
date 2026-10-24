@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { collectProblems, filterProblems, problemCounts, ProblemsBadge, SETTINGS_GROUP, type ProblemMarker, type ProblemScript } from "../src/ui/problems";
+import { collectProblems, filterProblems, problemCounts, ProblemsBadge, SETTINGS_GROUP, settingsLink, type ProblemMarker, type ProblemScript } from "../src/ui/problems";
 
 const script = (id: string, over: Partial<ProblemScript> = {}): ProblemScript => ({ id, label: `${id}.ts`, error: null, ...over });
 const none = new Map<string, ProblemMarker[]>();
@@ -194,5 +194,17 @@ describe("ProblemsBadge", () => {
         expect(b.title).toBe("3 warnings in Problems");
         b.set({ errors: 0, warnings: 0 });
         expect(b.empty).toBe(true);
+    });
+});
+
+describe("settingsLink", () => {
+    it("finds the settings section a message points at", () => {
+        const msg = `strategy "helper" — the local helper isn't connected (Settings → Local helper); these handlers don't run until it is`;
+        const link = settingsLink(msg)!;
+        expect(link).toMatchObject({ text: "Settings → Local helper", section: "settings-sec-helper" });
+        expect(msg.slice(link.at, link.at + link.text.length)).toBe(link.text);
+    });
+    it("is null when there is no settings reference", () => {
+        expect(settingsLink("Unexpected token")).toBeNull();
     });
 });
