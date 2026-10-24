@@ -350,6 +350,27 @@ describe("NetworkPanel", () => {
             expect(rowNames(container)).toEqual(["a.js", "b.js", "c.js"]);
         });
 
+        it("Basic: + Filter value suggestions follow Up/Down from the text box; Enter picks", () => {
+            const { container, getByText, getByLabelText } = setup(rows3());
+            fireEvent.click(getByText("+ Filter"));
+            fireEvent.click([...container.querySelectorAll(".net-qadd-pop .net-qlist-main")].find((n) => n.textContent === "method")!);
+            const input = getByLabelText("Value") as HTMLInputElement;
+            const opts = () => [...container.querySelectorAll('.net-qadd-pop [role="option"] .net-qlist-main')].map((n) => n.textContent);
+            const active = () => container.querySelector('.net-qadd-pop [role="option"].active .net-qlist-main')?.textContent;
+            expect(active()).toBeUndefined();
+            fireEvent.keyDown(input, { key: "ArrowDown" });
+            expect(active()).toBe(opts()[0]);
+            fireEvent.keyDown(input, { key: "ArrowUp" }); // wraps
+            expect(active()).toBe(opts()[opts().length - 1]);
+            fireEvent.keyDown(input, { key: "ArrowDown" });
+            fireEvent.keyDown(input, { key: "ArrowDown" });
+            const picked = active();
+            expect(input.getAttribute("aria-activedescendant")).toBe("net-qadd-opt-1");
+            fireEvent.keyDown(input, { key: "Enter" });
+            expect(container.querySelector(".net-qchip")!.textContent).toContain(`method:${picked}`);
+            expect(document.activeElement).toBe(container.querySelector(".net-qbox .net-filter")); // back in the filter box
+        });
+
         it("Basic: typed values are validated before adding", () => {
             const { container, getByText, getByLabelText } = setup(rows3());
             fireEvent.click(getByText("+ Filter"));
@@ -467,6 +488,38 @@ describe("NetworkPanel", () => {
             fireEvent.keyDown(box, { key: "Backspace" });
             expect(vals()).toEqual([]);
             expect(box.value).toBe("");
+        });
+
+        it("Basic: Ctrl+Z / Ctrl+Shift+Z undo and redo chip and text changes", () => {
+            const { container, getByText } = setup(rows3());
+            fireEvent.click(getByText("Advanced"));
+            fireEvent.input(q(container), { target: { value: "method:POST host:cdn" } });
+            fireEvent.click(getByText("Basic"));
+            const box = container.querySelector(".net-qbox .net-filter") as HTMLInputElement;
+            const vals = () => [...container.querySelectorAll(".net-qchip-vals")].map((n) => n.textContent);
+            fireEvent.click(container.querySelectorAll(".net-qchip-x")[0] as HTMLElement); // × on a chip
+            expect(vals()).toEqual(["cdn"]);
+            expect(document.activeElement).toBe(box); // focus stays in the bar, so Ctrl+Z reaches it
+            fireEvent.input(box, { target: { value: "j" } });
+            fireEvent.input(box, { target: { value: "js" } }); // typing joins one step
+            fireEvent.keyDown(box, { key: "z", ctrlKey: true });
+            expect(box.value).toBe("");
+            expect(vals()).toEqual(["cdn"]);
+            fireEvent.keyDown(box, { key: "z", ctrlKey: true });
+            expect(vals()).toEqual(["POST", "cdn"]);
+            fireEvent.keyDown(box, { key: "z", ctrlKey: true }); // nothing older: no-op
+            expect(vals()).toEqual(["POST", "cdn"]);
+            fireEvent.keyDown(box, { key: "z", ctrlKey: true, shiftKey: true });
+            expect(vals()).toEqual(["cdn"]);
+            fireEvent.keyDown(box, { key: "y", ctrlKey: true });
+            expect(box.value).toBe("js");
+            box.setSelectionRange(0, 2);
+            fireEvent.keyDown(box, { key: "a", ctrlKey: true });
+            fireEvent.keyDown(box, { key: "Backspace" });
+            expect(vals()).toEqual([]);
+            fireEvent.keyDown(box, { key: "z", metaKey: true });
+            expect(vals()).toEqual(["cdn"]);
+            expect(box.value).toBe("js");
         });
 
         it("Advanced: autocompletes fields then values with the keyboard", () => {

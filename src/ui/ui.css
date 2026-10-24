@@ -1046,7 +1046,7 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
     display: flex; justify-content: space-between; align-items: baseline; gap: 12px; width: 100%;
     padding: 3px 6px; text-align: left; border-radius: 3px; cursor: pointer;
 }
-.net-qsuggest li.active { background: var(--sel); }
+.net-qsuggest li.active, .net-toolbar .net-qlist li.active button { background: var(--sel); }
 .net-qlist-main { font-family: var(--mono, ui-monospace, monospace); font-variant-ligatures: none; white-space: nowrap; }
 .net-qlist-detail { color: var(--fg-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .net-qadd-pop { left: auto; right: 0; width: 340px; }

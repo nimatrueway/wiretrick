@@ -158,6 +158,46 @@ interface AddRequest {
 /** text-like selection over the chips (indices into leafChips); `withText` = Ctrl+A also took the text box */
 type Sel = { anchor: number; focus: number; withText?: boolean };
 
+/** typing within this long after the last keystroke joins the same undo step */
+const TYPING_JOIN_MS = 1000;
+const UNDO_DEPTH = 100;
+
+/**
+ * Undo/redo over the Basic filter: chips aren't text, so the input's native
+ * undo can't bring them back. Every change is a step, wherever it came from
+ * (Clear included); consecutive typing joins one step.
+ */
+function useBasicUndo(value: BasicFilter, onInput: (b: BasicFilter) => void) {
+    const h = useRef({ past: [] as BasicFilter[], future: [] as BasicFilter[], cur: value, key: JSON.stringify(value), typedAt: 0, typing: false, nav: false }).current;
+    const key = JSON.stringify(value);
+    if (key !== h.key) {
+        const now = Date.now();
+        if (!h.nav) {
+            if (!(h.typing && now - h.typedAt < TYPING_JOIN_MS)) h.past = [...h.past, h.cur].slice(-UNDO_DEPTH);
+            h.future = [];
+        }
+        h.typedAt = h.typing && !h.nav ? now : 0;
+        h.nav = false;
+        h.cur = value;
+        h.key = key;
+    }
+    h.typing = false;
+    const go = (from: BasicFilter[], to: BasicFilter[]) => {
+        const v = from.pop();
+        if (!v) return null;
+        to.push(h.cur);
+        h.nav = true;
+        onInput(v);
+        return v;
+    };
+    return {
+        /** the next change is a keystroke in the text box */
+        typed: () => void (h.typing = true),
+        undo: () => go(h.past, h.future),
+        redo: () => go(h.future, h.past),
+    };
+}
+
 function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInput: (b: BasicFilter) => void; error: QueryError | null; data: SuggestData }) {
     const box = useRef<HTMLDivElement>(null);
     const input = useRef<HTMLInputElement>(null);
@@ -168,6 +208,7 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
     const [ac, setAc] = useState<{ from: number; to: number; items: BasicSuggestion[]; active: number } | null>(null);
     const [request, setRequest] = useState<AddRequest | null>(null);
     useFit(listRef, !!ac, 260);
+    const history = useBasicUndo(value, onInput);
     useLayoutEffect(() => {
         if (pendingCaret.current === null || !input.current) return;
         input.current.focus();
@@ -227,7 +268,7 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
         const item = ac.items[i];
         const text = (value.text.slice(0, ac.from) + value.text.slice(ac.to)).replace(/\s+/g, " ").trim();
         setAc(null);
-        if (item.kind === "chip") return onInput(addChip({ ...value, text }, item.chip));
+        if (item.kind === "chip") return (onInput(addChip({ ...value, text }, item.chip)), toInput(text.length));
         onInput({ ...value, text });
         setRequest({ field: item.field, negate: item.negate, value: item.value });
     };
@@ -319,7 +360,7 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
                             </button>
                             {renderExpr(it.expr, p)}
                             <span class="net-qgroup-op">)</span>
-                            <button class="net-qchip-x" aria-label="Remove group" title="Remove group" onClick={() => (setSel(null), setExpr(editItem(value.expr, p, () => null)))}>
+                            <button class="net-qchip-x" aria-label="Remove group" title="Remove group" onClick={() => (setExpr(editItem(value.expr, p, () => null)), toInput(value.text.length))}>
                                 ×
                             </button>
                         </span>
@@ -349,7 +390,7 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
                             {ch.negate ? " ≠" : ":"}
                         </button>
                         <span class="net-qchip-vals">{ch.values.map(unquote).join(", ")}</span>
-                        <button class="net-qchip-x" aria-label={`Remove ${name} filter`} title="Remove" onClick={() => (setSel(null), setExpr(editItem(value.expr, p, () => null)))}>
+                        <button class="net-qchip-x" aria-label={`Remove ${name} filter`} title="Remove" onClick={() => (setExpr(editItem(value.expr, p, () => null)), toInput(value.text.length))}>
                             ×
                         </button>
                     </span>
@@ -364,6 +405,14 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
             class={"net-qbox" + (error ? " error" : "")}
             title={error ? error.message : undefined}
             onKeyDown={(ev) => {
+                const k = ev.key.toLowerCase();
+                const ownField = ev.target instanceof HTMLInputElement && ev.target !== input.current;
+                if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && (k === "z" || k === "y") && !ownField) {
+                    ev.preventDefault();
+                    const v = k === "y" || ev.shiftKey ? history.redo() : history.undo();
+                    if (v) (setAc(null), toInput(v.text.length));
+                    return;
+                }
                 if (ev.target !== box.current && ev.target !== input.current) return;
                 if (sel && leaves.length) onChipKey(ev);
                 else if (ev.target === input.current) onInputKey(ev);
@@ -390,6 +439,7 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
                     onInput={(e) => {
                         const el = e.currentTarget;
                         setSel(null);
+                        history.typed();
                         onInput({ ...value, text: el.value });
                         suggest(el.value, el.selectionStart ?? el.value.length);
                     }}
@@ -409,7 +459,7 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
                     </ul>
                 )}
             </div>
-            <AddFilter data={data} onAdd={(chip) => onInput(addChip(value, chip))} request={request} onRequestDone={() => setRequest(null)} />
+            <AddFilter data={data} onAdd={(chip) => (onInput(addChip(value, chip)), toInput(value.text.length))} request={request} onRequestDone={() => setRequest(null)} />
         </div>
     );
 }
@@ -457,8 +507,10 @@ function AddFilter({ data, onAdd, request, onRequestDone }: { data: SuggestData;
     const [value, setValue] = useState("");
     const [headerValue, setHeaderValue] = useState("");
     const [err, setErr] = useState<string | null>(null);
+    /** the highlighted value suggestion (-1: none), moved with Up/Down from the text box */
+    const [active, setActive] = useState(-1);
     const ref = useRef<HTMLDivElement>(null);
-    const reset = () => (setField(null), setOp(null), setValue(""), setHeaderValue(""), setErr(null));
+    const reset = () => (setField(null), setOp(null), setValue(""), setHeaderValue(""), setErr(null), setActive(-1));
     const close = () => (setOpen(false), reset());
     useDismiss(ref, open, close);
     const popRef = useRef<HTMLDivElement>(null);
@@ -485,7 +537,22 @@ function AddFilter({ data, onAdd, request, onRequestDone }: { data: SuggestData;
     };
     const opsFor = field ? OPS[field.kind] : [];
     const needsList = field && op && op !== "matches" && op !== "gt" && op !== "lt";
-    const suggestions = needsList ? fieldValues(field!.name, data).filter((s) => !/^[<>]/.test(s.value) && s.value.toLowerCase().includes(value.toLowerCase())) : [];
+    const suggestions = needsList ? fieldValues(field!.name, data).filter((s) => !/^[<>]/.test(s.value) && s.value.toLowerCase().includes(value.toLowerCase())).slice(0, 50) : [];
+    const pick = (v: string) => (op === "has-value" ? (setValue(v), setActive(-1)) : commit(v));
+    useEffect(() => setActive(-1), [field, op, value]);
+    useEffect(() => {
+        document.getElementById(`net-qadd-opt-${active}`)?.scrollIntoView?.({ block: "nearest" });
+    }, [active]);
+    const onValueKey = (e: KeyboardEvent) => {
+        const k = suggestions.length;
+        if (k && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+            e.preventDefault();
+            setActive(e.key === "ArrowDown" ? (active + 1) % k : (active < 0 ? k - 1 : (active + k - 1) % k));
+        } else if (e.key === "Enter") {
+            if (active >= 0 && active < k) pick(suggestions[active].value);
+            else if (op !== "has-value") commit();
+        }
+    };
     return (
         <div class="net-qadd" ref={ref}>
             <button class="net-qadd-btn" aria-haspopup="dialog" aria-expanded={open} title="Add a filter" onClick={() => (open ? close() : setOpen(true))}>
@@ -532,8 +599,10 @@ function AddFilter({ data, onAdd, request, onRequestDone }: { data: SuggestData;
                                             aria-label={field.kind === "header" ? "Header name" : "Value"}
                                             placeholder={field.kind === "header" ? "header name" : field.kind === "number" ? (field.name === "size" ? "10kb" : "500ms") : op === "matches" ? "regex" : "value"}
                                             value={value}
+                                            aria-controls="net-qadd-list"
+                                            aria-activedescendant={active >= 0 ? `net-qadd-opt-${active}` : undefined}
                                             onInput={(e) => (setValue(e.currentTarget.value), setErr(null))}
-                                            onKeyDown={(e) => e.key === "Enter" && op !== "has-value" && commit()}
+                                            onKeyDown={onValueKey}
                                         />
                                         {op === "has-value" && (
                                             <input type="text" spellcheck={false} aria-label="Header value" placeholder="value" value={headerValue} onInput={(e) => (setHeaderValue(e.currentTarget.value), setErr(null))} onKeyDown={(e) => e.key === "Enter" && commit()} />
@@ -544,10 +613,10 @@ function AddFilter({ data, onAdd, request, onRequestDone }: { data: SuggestData;
                                     </div>
                                     {err && <div class="net-qadd-err">{err}</div>}
                                     {suggestions.length > 0 && (
-                                        <ul class="net-qlist" aria-label="Suggestions">
-                                            {suggestions.slice(0, 50).map((s) => (
-                                                <li key={s.value}>
-                                                    <button onClick={() => (op === "has-value" ? setValue(s.value) : commit(s.value))}>
+                                        <ul class="net-qlist" id="net-qadd-list" role="listbox" aria-label="Suggestions">
+                                            {suggestions.map((s, i) => (
+                                                <li key={s.value} id={`net-qadd-opt-${i}`} role="option" aria-selected={i === active} class={i === active ? "active" : ""} onMouseEnter={() => setActive(i)}>
+                                                    <button onClick={() => pick(s.value)}>
                                                         <span class="net-qlist-main">{s.value}</span>
                                                         {s.detail && <span class="net-qlist-detail">{s.detail}</span>}
                                                     </button>
