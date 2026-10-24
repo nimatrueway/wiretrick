@@ -958,38 +958,16 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 }
 .net-toolbar button:hover, .net-details-tabs button:hover { color: var(--fg); background: var(--bg-hover); }
 .net-clear { font-size: 13px !important; }
-.net-filter, .net-tab, .net-script, .net-toolbar .net-touch-button {
+.net-filter {
     background: var(--bg); border: 1px solid var(--border); color: var(--fg);
     border-radius: 3px; padding: 2px 6px; font-size: 11px;
 }
 .net-filter { width: 180px; }
-.net-tab, .net-script { max-width: 180px; }
-.net-script.active { border-color: var(--accent); }
-.net-tab.closed, .net-tab option.closed { color: var(--fg-dim); font-style: italic; }
-.net-tab option:not(.closed) { color: var(--fg); font-style: normal; }
-.net-filter:focus, .net-tab:focus, .net-script:focus, .net-toolbar .net-touch-button:focus-visible { border-color: var(--accent); outline: none; }
-/* script-activity filter: a listbox whose items carry the row markers */
-.net-touch { position: relative; display: inline-flex; }
-.net-toolbar .net-touch-button { display: inline-flex; align-items: center; gap: 5px; padding: 2px 6px; }
-.net-toolbar .net-touch-button:hover { background: var(--bg-hover); }
-.net-toolbar .net-touch-button.active { border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); }
-.net-touch-caret { color: var(--fg-dim); font-size: 9px; }
-.net-touch-menu {
-    position: absolute; top: calc(100% + 2px); left: 0; z-index: 1000; list-style: none; margin: 0; padding: 4px 0;
-    min-width: 100%; white-space: nowrap; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 4px;
-    box-shadow: 0 4px 14px rgba(0,0,0,0.5); font-size: 11px; outline: none;
-}
-.net-touch-option { display: flex; align-items: center; gap: 6px; padding: 3px 12px 3px 6px; cursor: pointer; color: var(--fg); }
-.net-touch-option.active { background: var(--bg-hover); }
-.net-touch-option.selected { font-weight: 600; }
-.net-touch-menu:focus-visible .net-touch-option.active { box-shadow: inset 0 0 0 1px var(--accent); }
-.net-marks { display: inline-flex; gap: 2px; width: 8px; height: 13px; flex: none; }
-.net-mark { width: 2px; height: 100%; }
-.net-chips { display: flex; gap: 2px; flex-wrap: wrap; }
+.net-filter:focus { border-color: var(--accent); outline: none; }
 .net-chip.active { background: var(--bg-active) !important; color: var(--fg) !important; }
 
 /* filter bar: Basic|Advanced toggle, chips / query box, "+ Filter", "?" help */
-.net-qbar { display: flex; align-items: center; gap: 6px; flex: 1 1 380px; min-width: 260px; max-width: 760px; }
+.net-qbar { display: flex; align-items: center; gap: 6px; flex: 1 1 380px; min-width: 260px; }
 .net-qmode { position: relative; display: inline-flex; flex: none; border: 1px solid var(--border); border-radius: 3px; }
 .net-toolbar .net-qmode > button { border: none; border-radius: 0; padding: 2px 7px; }
 .net-toolbar .net-qmode > button + button { border-left: 1px solid var(--border); }
@@ -1131,11 +1109,6 @@ body.net-dragging { user-select: none; }
 .net-row.modified td.c-name { background-image: linear-gradient(var(--accent), var(--accent)); }
 .net-row.observed td.c-name {
     background-image: repeating-linear-gradient(color-mix(in srgb, var(--accent) 70%, transparent) 0 3px, transparent 3px 5px);
-}
-.net-mark.modified { background: var(--accent); }
-.net-mark.observed {
-    background-image: linear-gradient(color-mix(in srgb, var(--accent) 70%, transparent) 60%, transparent 0);
-    background-size: 2px 5px; background-repeat: repeat-y; background-position: left top;
 }
 .c-name { width: auto; }
 .c-status { width: 70px; }

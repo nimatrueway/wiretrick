@@ -16,11 +16,12 @@ if (typeof (globalThis as any).localStorage === "undefined") {
 
 const base = Date.now();
 
-/** open the script-activity menu and click an option */
-function pickActivity(container: Element, label: string): void {
-    fireEvent.click(container.querySelector(".net-touch-button")!);
-    const opt = [...container.querySelectorAll('[role="option"]')].find((o) => o.textContent === label)!;
-    fireEvent.click(opt);
+/** replace the Basic filter with this query (typed, then Enter) */
+function filterBy(container: Element, query: string): void {
+    for (const x of [...container.querySelectorAll(".net-qbox .net-qchip-x")].reverse()) fireEvent.click(x);
+    const box = container.querySelector(".net-qbox .net-filter") as HTMLInputElement;
+    fireEvent.input(box, { target: { value: query } });
+    fireEvent.keyDown(box, { key: "Enter" });
 }
 function entry(id: string, over: Partial<NetEntry> = {}): NetEntry {
     return {
@@ -47,12 +48,12 @@ const rowNames = (c: Element) => [...c.querySelectorAll("tbody .net-name")].map(
 describe("NetworkPanel", () => {
     afterEach(cleanup);
 
-    /** rendered with the script-activity filter on All (the default is Touched) */
+    /** rendered with no filter (the default is is:touched) */
     function setup(list: NetEntry[]) {
         const store = createNetStore();
         store.apply({ type: "netSnapshot", entries: list });
         const r = render(<NetworkPanel store={store} />);
-        pickActivity(r.container, "All");
+        filterBy(r.container, "");
         return { store, ...r };
     }
 
@@ -61,8 +62,10 @@ describe("NetworkPanel", () => {
         const store = createNetStore();
         store.apply({ type: "netSnapshot", entries: [entry("plain"), entry("watched", { startedAt: base + 1, outcomes: [observed] })] });
         const { container } = render(<NetworkPanel store={store} />);
-        expect(container.querySelector(".net-touch-button")!.getAttribute("aria-label")).toBe("Script activity: Touched");
+        expect([...container.querySelectorAll(".net-qchip")].map((c) => c.textContent?.replace("×", ""))).toEqual(["is:touched"]);
         expect(rowNames(container)).toEqual(["watched.js"]);
+        fireEvent.click(container.querySelector(".net-qchip-x")!); // removing the chip shows everything
+        expect(rowNames(container)).toEqual(["plain.js", "watched.js"]);
     });
 
     it("renders rows devtools-style, with status, size and time", () => {
@@ -125,31 +128,17 @@ describe("NetworkPanel", () => {
         expect(container.querySelector("tbody .c-status")!.textContent).toBe("200");
     });
 
-    it("filters by text, type chip and script activity (all / observed / modified)", async () => {
+    it("filters by text, type and script activity", () => {
         const hit = entry("api", { type: "xmlhttprequest", outcomes: [{ scriptId: "s", scriptName: "Mocker", action: "onRequest → replaceResponse 200", level: "info", kind: "modified", at: base }] });
-        const { container, getByText, getByPlaceholderText } = setup([entry("a"), hit]);
-        // independent toggles: switching off JS keeps Fetch/XHR on
-        fireEvent.click(getByText("JS"));
+        const { container, getByPlaceholderText } = setup([entry("a"), hit]);
+        // only the filter bar sits in the toolbar now: no type toggles, script/tab dropdowns or activity menu
+        expect(container.querySelectorAll(".net-toolbar select, .net-chips, .net-touch")).toHaveLength(0);
+        filterBy(container, "type:fetch");
         expect(rowNames(container)).toEqual(["api.js"]);
-        expect(getByText("All", { selector: "button" }).getAttribute("aria-pressed")).toBe("false");
-        expect(getByText("Fetch/XHR").getAttribute("aria-pressed")).toBe("true");
-        // All (not all on) → everything on
-        fireEvent.click(getByText("All", { selector: "button" }));
-        expect(rowNames(container)).toEqual(["a.js", "api.js"]);
-        // All (all on) → everything off
-        fireEvent.click(getByText("All", { selector: "button" }));
-        expect(rowNames(container)).toEqual([]);
-        expect(container.querySelector(".net-empty")!.textContent).toContain("No request types selected");
-        fireEvent.click(getByText("Fetch/XHR"));
-        fireEvent.click(getByText("JS"));
-        expect(rowNames(container)).toEqual(["a.js", "api.js"]);
-        expect(getByText("All", { selector: "button" }).getAttribute("aria-pressed")).toBe("false");
-        fireEvent.click(getByText("All", { selector: "button" }));
-        expect(getByText("All", { selector: "button" }).getAttribute("aria-pressed")).toBe("true");
+        filterBy(container, "");
         fireEvent.input(getByPlaceholderText(/Filter/), { target: { value: "-api" } });
         expect(rowNames(container)).toEqual(["a.js"]);
-        fireEvent.input(getByPlaceholderText(/Filter/), { target: { value: "" } });
-        pickActivity(container, "Modified");
+        filterBy(container, "is:modified");
         expect(rowNames(container)).toEqual(["api.js"]);
         expect(container.querySelector(".net-badge")!.textContent).toBe("Mocker");
         expect(container.querySelector("tbody tr")!.classList.contains("modified")).toBe(true);
@@ -169,61 +158,16 @@ describe("NetworkPanel", () => {
         expect(container.querySelector(".net-status .net-hl")!.textContent).toBe("1 modified");
         // per-script badges: hollow for a script that only looked
         expect([...rows[2].querySelectorAll(".net-badge")].map((b) => b.className)).toEqual(["net-badge observed", "net-badge modified"]);
-        pickActivity(container, "Observed");
+        filterBy(container, "is:observed");
         expect(rowNames(container)).toEqual(["watched.js"]);
-        pickActivity(container, "Touched");
+        filterBy(container, "is:touched");
         expect(rowNames(container)).toEqual(["watched.js", "changed.js"]);
-        pickActivity(container, "Modified");
+        filterBy(container, "is:modified");
         expect(rowNames(container)).toEqual(["changed.js"]);
         // details list: observed entries muted
         fireEvent.click(container.querySelector("tbody tr")!);
         const actions = [...container.querySelectorAll(".net-action")];
         expect(actions.map((a) => a.classList.contains("observed"))).toEqual([true, false]);
-    });
-
-    it("script-activity menu: listbox with row markers, keyboard + outside click", () => {
-        const { container } = setup([entry("plain")]);
-        const button = container.querySelector<HTMLButtonElement>(".net-touch-button")!;
-        expect(button.getAttribute("aria-label")).toBe("Script activity: All");
-        expect(button.getAttribute("aria-expanded")).toBe("false");
-        fireEvent.click(button);
-        const list = container.querySelector('[role="listbox"]')!;
-        expect(button.getAttribute("aria-expanded")).toBe("true");
-        const opts = [...list.querySelectorAll('[role="option"]')];
-        expect(opts.map((o) => o.textContent)).toEqual(["All", "Observed", "Modified", "Touched"]);
-        expect(opts.map((o) => [...o.querySelectorAll(".net-mark")].map((m) => m.className))).toEqual([
-            [],
-            ["net-mark observed"],
-            ["net-mark modified"],
-            ["net-mark observed", "net-mark modified"],
-        ]);
-        expect(opts.map((o) => o.getAttribute("aria-selected"))).toEqual(["true", "false", "false", "false"]);
-        expect(document.activeElement).toBe(list);
-        // arrows move the active option, Enter picks it
-        fireEvent.keyDown(list, { key: "ArrowDown" });
-        fireEvent.keyDown(list, { key: "ArrowDown" });
-        expect(list.getAttribute("aria-activedescendant")).toBe("net-touch-opt-modified");
-        fireEvent.keyDown(list, { key: "Enter" });
-        expect(container.querySelector('[role="listbox"]')).toBeNull();
-        expect(button.getAttribute("aria-label")).toBe("Script activity: Modified");
-        expect(button.querySelectorAll(".net-mark.modified")).toHaveLength(1);
-        expect(document.activeElement).toBe(button);
-        // ArrowUp on the button opens at the previous option; Space picks; wraps around
-        fireEvent.keyDown(button, { key: "ArrowUp" });
-        const list2 = container.querySelector('[role="listbox"]')!;
-        expect(list2.getAttribute("aria-activedescendant")).toBe("net-touch-opt-observed");
-        fireEvent.keyDown(list2, { key: "End" });
-        fireEvent.keyDown(list2, { key: " " });
-        expect(button.getAttribute("aria-label")).toBe("Script activity: Touched");
-        // Escape closes without changing; outside click closes
-        fireEvent.click(button);
-        fireEvent.keyDown(container.querySelector('[role="listbox"]')!, { key: "Home" });
-        fireEvent.keyDown(container.querySelector('[role="listbox"]')!, { key: "Escape" });
-        expect(container.querySelector('[role="listbox"]')).toBeNull();
-        expect(button.getAttribute("aria-label")).toBe("Script activity: Touched");
-        fireEvent.click(button);
-        fireEvent.mouseDown(document.body);
-        expect(container.querySelector('[role="listbox"]')).toBeNull();
     });
 
     it("sorts by a column header, toggling direction", () => {
@@ -285,34 +229,12 @@ describe("NetworkPanel", () => {
         expect(container.querySelector(".net-empty")!.textContent).toContain("Recording");
     });
 
-    it("lists tabs that closed but still have requests as closed, until cleared", async () => {
+    it("filters by tab title, also for a tab seen earlier", async () => {
         const store = createNetStore();
-        store.apply({
-            type: "netSnapshot",
-            entries: [entry("a", { tabId: 1 }), entry("doc", { tabId: 7, type: "main_frame", url: "https://gone.test/" }), entry("b", { tabId: 9 })],
-        });
-        let live = [
-            { id: 1, title: "Live tab" },
-            { id: 9, title: "Soon closed" },
-        ];
-        const { container } = render(<NetworkPanel store={store} listTabs={async () => live} />);
-        pickActivity(container, "All");
-        const sel = container.querySelector("select.net-tab") as HTMLSelectElement;
-        const closedLabels = () => [...sel.querySelectorAll("optgroup option")].map((o) => o.textContent);
-        await waitFor(() => expect(closedLabels()).toEqual(["✕ https://gone.test/"]));
-        expect([...sel.querySelectorAll(":scope > option")].map((o) => o.textContent)).toEqual(["All tabs", "Live tab", "Soon closed"]);
-
-        live = [{ id: 1, title: "Live tab" }];
-        fireEvent.focus(sel);
-        await waitFor(() => expect(closedLabels()).toEqual(["✕ https://gone.test/", "✕ Soon closed"]));
-        fireEvent.change(sel, { target: { value: "9" } });
+        store.apply({ type: "netSnapshot", entries: [entry("a", { tabId: 1 }), entry("b", { tabId: 9, startedAt: base + 1 })] });
+        const { container } = render(<NetworkPanel store={store} listTabs={async () => [{ id: 1, title: "Live tab" }, { id: 9, title: "Other tab" }]} />);
+        filterBy(container, 'tab:"Other tab"');
         await waitFor(() => expect(rowNames(container)).toEqual(["b.js"]));
-        expect(sel.classList.contains("closed")).toBe(true);
-
-        fireEvent.click(container.querySelector(".net-clear")!);
-        await waitFor(() => expect(closedLabels()).toEqual(["✕ Soon closed"])); // still selected
-        fireEvent.change(sel, { target: { value: "" } });
-        await waitFor(() => expect(sel.querySelector("optgroup")).toBeNull());
     });
 
     describe("filter bar", () => {

@@ -15,6 +15,10 @@ its section below.
 
 ### Changed
 
+- Network: the type toggles, the script and tab dropdowns and the
+  script-activity menu are gone — the filter bar does it all (`type:`,
+  `script:`, `tab:`, `is:observed` / `is:modified`). It starts with an
+  `is:touched` chip, so by default you still see what scripts touched.
 - Network filter (Basic): ↑/↓ put the highlighted suggestion in the text
   box, in the filter box and in **+ Filter**; Esc puts back what you typed.
 

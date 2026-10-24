@@ -181,9 +181,10 @@ at the right of the toolbar do the same.
     redirect/block or a synthetic response. Solid accent marker and a
     green waterfall bar; the action is logged at INFO as before.
 
-  The filter menu shows each choice with the row marker it selects:
-  **All**, **Observed** (ran but changed nothing — observed only), **Modified**,
-  and **Touched** (anything a script observed or modified — the default). The footer counts
+  The filter starts as an `is:touched` chip (anything a script observed or
+  modified); remove it to see every request, or use `is:observed` (ran but
+  changed nothing), `is:modified`, `type:`, `script:` or `tab:` instead —
+  the filter bar is the only filter. The footer counts
   the same two groups ("N observed · M modified", observed = observed only). The
   recorded modified / observed requests are also counted in a solid /
   outlined badge on its title (a request that goes from observed to modified

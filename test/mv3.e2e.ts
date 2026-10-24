@@ -381,10 +381,16 @@ try {
     // Network tab records from now on (listeners attach when it opens)
     await mgr.click("#network-tab");
     await mgr.waitForSelector("#network-view .net-toolbar", { timeout: 5000 });
-    const touchLabel = await mgr.getAttribute("#network-view .net-touch-button", "aria-label");
-    check("the Network view shows Touched requests by default", touchLabel === "Script activity: Touched", String(touchLabel));
-    await mgr.click("#network-view .net-touch-button"); // show all requests from here on
-    await mgr.click('#network-view [role="option"]:has-text("All")');
+    const defaultChips = await mgr.evaluate(() => [...document.querySelectorAll("#network-view .net-qchip")].map((c) => (c.textContent || "").replace("×", "")));
+    check("the Network view shows Touched requests by default", JSON.stringify(defaultChips) === '["is:touched"]', JSON.stringify(defaultChips));
+    await mgr.click("#network-view .net-qchip-x"); // show all requests from here on
+    /** replace the Network filter with a query (typed in the Basic box, Enter) */
+    const netFilter = async (query: string) => {
+        await mgr.evaluate(() => [...document.querySelectorAll("#network-view .net-qchip-x")].reverse().forEach((x) => (x as HTMLElement).click()));
+        await mgr.fill("#network-view .net-qbox .net-filter", query);
+        await mgr.press("#network-view .net-qbox .net-filter", "Enter");
+        await mgr.waitForTimeout(300);
+    };
     const xoPage = await ctx.newPage();
     await xoPage.goto(`${ORIGIN}/page-xo`);
     await xoPage.waitForFunction(() => (window as any).__lazy !== undefined, null, { timeout: 15000 }).catch(() => {});
@@ -437,21 +443,17 @@ try {
     await mgr.evaluate(() => (document.querySelector("#network-view .net-details-close") as HTMLElement | null)?.click());
     // tab filter: the page's tab keeps its (intercepted) requests
     const xoTabId = await mgr.evaluate((u: string) => new Promise<number>((r) => chrome.tabs.query({}, (ts) => r(ts.find((t) => t.url === u)?.id ?? -1))), `${ORIGIN}/page-xo`);
-    await mgr.focus("#network-view .net-tab");
-    await mgr.waitForTimeout(300);
-    await mgr.selectOption("#network-view .net-tab", String(xoTabId));
-    await mgr.waitForTimeout(300);
+    await netFilter(`tab:${xoTabId}`);
     const inTab: string[] = await mgr.evaluate(() => [...document.querySelectorAll("#network-view tbody .net-name")].map((n) => n.textContent || ""));
     check("Network tab filter keeps the tab's intercepted requests", inTab.some((n) => n.startsWith("gz.js")) && inTab.some((n) => n.startsWith("page-xo")), JSON.stringify(inTab));
-    await mgr.selectOption("#network-view .net-tab", "");
+    await netFilter("");
     // script filter: only rows the picked script ran on (the Wiretrick column)
-    const scriptOpts: string[] = await mgr.evaluate(() => [...document.querySelectorAll("#network-view .net-script option")].map((o) => (o as HTMLOptionElement).value).filter(Boolean));
+    const scriptOpts: string[] = await mgr.evaluate(() => [...new Set([...document.querySelectorAll("#network-view tbody .c-script .net-badge")].map((b) => b.textContent || ""))].filter(Boolean));
     const pick = scriptOpts[0] ?? "";
-    await mgr.selectOption("#network-view .net-script", pick);
-    await mgr.waitForTimeout(300);
+    await netFilter(`script:="${pick}"`);
     const byScript: string[][] = await mgr.evaluate(() => [...document.querySelectorAll("#network-view tbody tr")].filter((t) => t.querySelector(".net-name")).map((t) => [...t.querySelectorAll(".c-script .net-badge")].map((b) => b.textContent || "")));
     check("Network script filter keeps only the picked script's requests", !!pick && byScript.length > 0 && byScript.every((names) => names.includes(pick)), JSON.stringify({ scriptOpts, byScript }));
-    await mgr.selectOption("#network-view .net-script", "");
+    await netFilter("");
     const netTools = await mgr.evaluate(() => ({ net: !(document.querySelector("#net-tools") as HTMLElement).hidden, log: !(document.querySelector("#log-tools") as HTMLElement).hidden, label: document.querySelector("#btn-net-diagnostics")?.textContent }));
     check("the Network tab shows the diagnostics collector in the panel header (not the Log tools)", netTools.net && !netTools.log && netTools.label === "collect diagnostics…", JSON.stringify(netTools));
     await mgr.click("#log-header-title");

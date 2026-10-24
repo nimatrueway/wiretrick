@@ -418,10 +418,9 @@ const early10d: { n: number }[] = await mgr.evaluate(() =>
     [...document.querySelectorAll("#network-view tbody tr.net-row")].map((tr) => ({ n: tr.querySelectorAll(".net-badge").length }))
 );
 check("network: script activity from before the tab was opened is listed", early10d.length > 0 && early10d.every((r) => r.n > 0), `rows=${early10d.length}`);
-const touchLabel10d = await mgr.getAttribute("#network-view .net-touch-button", "aria-label");
-check("the Network view shows Touched requests by default", touchLabel10d === "Script activity: Touched", String(touchLabel10d));
-await mgr.click("#network-view .net-touch-button"); // show all requests from here on
-await mgr.click('#network-view [role="option"]:has-text("All")');
+const chips10d = await mgr.evaluate(() => [...document.querySelectorAll("#network-view .net-qchip")].map((c) => (c.textContent || "").replace("×", "")));
+check("the Network view shows Touched requests by default", JSON.stringify(chips10d) === '["is:touched"]', JSON.stringify(chips10d));
+await mgr.click("#network-view .net-qchip-x"); // show all requests from here on
 await saveScript("s_missed", `wt.onResponseBody({ url: "${ORIGIN}/html-missed", strategy: "page" }, (ctx, body) => body.replace("MISSED-ORIGINAL", "NEVER"));`, "missed probe");
 await saveScript("s_missed_wr", `wt.onResponseBody({ url: "${ORIGIN}/html-missed-wr", strategy: "extension" }, (ctx, body) => body);`, "webrequest body probe");
 await new Promise((r) => setTimeout(r, 600));

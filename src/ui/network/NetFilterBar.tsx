@@ -50,7 +50,9 @@ export function initialFilterState(): FilterState {
     try {
         if (localStorage.getItem(MODE_KEY) === "advanced") mode = "advanced";
     } catch {}
-    return { mode, basic: emptyBasic(), query: "" };
+    // by default only what scripts touched — a chip, so removing it shows everything
+    const query = "is:touched";
+    return { mode, basic: toBasic(parseQuery(query).ast), query };
 }
 export function effectiveQuery(s: FilterState): string {
     return s.mode === "basic" ? fromBasic(s.basic) : s.query;

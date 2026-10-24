@@ -16,7 +16,7 @@ export const TYPE_FILTERS: { id: TypeFilter; label: string }[] = [
 ];
 
 export type TypeCategory = Exclude<TypeFilter, "all">;
-/** every category, i.e. the "All" state of the type toggles */
+/** every request category */
 export const ALL_TYPES: TypeCategory[] = TYPE_FILTERS.filter((t) => t.id !== "all").map((t) => t.id as TypeCategory);
 
 /** webRequest resource type → devtools-style category */
@@ -123,40 +123,6 @@ export function touchCounts(rows: NetEntry[]): { observed: number; modified: num
         else if (t === "modified") modified++;
     }
     return { observed, modified };
-}
-
-/** Script-activity filter: observed-only, modified, or any row a script touched (either) */
-export type TouchFilter = "all" | "observed" | "modified" | "any";
-
-export interface NetFilter {
-    text: string;
-    /** categories toggled on (independent toggles; ALL_TYPES = everything) */
-    types: TypeCategory[];
-    touched: TouchFilter;
-    tabId: number | null;
-    /** only rows this script (by name) ran on; the activity filter then judges that script alone */
-    script: string | null;
-}
-
-export function matches(e: NetEntry, f: NetFilter): boolean {
-    if (!f.types.includes(category(e))) return false;
-    if (f.script !== null) {
-        const mine = e.outcomes.filter((i) => i.scriptName === f.script);
-        if (!mine.length) return false;
-        e = { ...e, outcomes: mine };
-    }
-    if (f.touched !== "all") {
-        const t = touchState(e);
-        if (t === "none" || (f.touched !== "any" && t !== f.touched)) return false;
-    }
-    if (f.tabId !== null && e.tabId !== f.tabId) return false;
-    const q = f.text.trim();
-    if (!q) return true;
-    const negate = q.startsWith("-");
-    const needle = (negate ? q.slice(1) : q).toLowerCase();
-    if (!needle) return true;
-    const hay = `${e.url} ${e.method} ${e.status ?? ""} ${e.mime} ${e.outcomes.map((i) => i.scriptName).join(" ")}`.toLowerCase();
-    return hay.includes(needle) !== negate;
 }
 
 export type SortKey = "start" | "name" | "status" | "method" | "type" | "script" | "size" | "time";

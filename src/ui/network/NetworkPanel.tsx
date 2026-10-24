@@ -1,28 +1,22 @@
 /**
  * Network tab of the manager's bottom panel — a devtools-style request
- * table (filter, type chips, sortable columns, waterfall) with a details
+ * table (query filter, sortable columns, waterfall) with a details
  * pane showing headers and what Wiretrick scripts did to the request.
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { NetBody, NetEntry, NetOutcome } from "../../shared/netTypes";
 import type { NetStore } from "./netStore";
 import {
-    TYPE_FILTERS,
     compare,
     displayName,
     duration,
     formatBytes,
     formatMs,
-    matches,
     statusText,
     touchCounts,
     touchState,
     typeLabel,
-    type NetFilter,
     type SortKey,
-    type TouchFilter,
-    ALL_TYPES,
-    type TypeCategory,
 } from "./netFormat";
 import { compileQuery, parseQuery, suggestData, type QNode } from "./netQuery";
 import { FilterBar, effectiveQuery, initialFilterState, type FilterState } from "./NetFilterBar";
@@ -81,7 +75,6 @@ function dragX(down: MouseEvent, onMove: (dx: number) => void, cursor: string): 
 }
 
 export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: () => Promise<TabInfo[]> }) {
-    const [filter, setFilter] = useState<NetFilter>({ text: "", types: ALL_TYPES, touched: "any", tabId: null, script: null });
     const [tabs, setTabs] = useState<TabInfo[]>([]);
     const [fq, setFq] = useState<FilterState>(initialFilterState);
     const parsed = useMemo(() => parseQuery(effectiveQuery(fq)), [fq]);
@@ -174,11 +167,11 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
     };
 
     const rows = useMemo(() => {
-        const out = all.filter((e) => matches(e, filter) && pred(e));
+        const out = all.filter(pred);
         const cmp = compare(sort.key);
         out.sort((a, b) => cmp(a, b) * sort.dir || a.startedAt - b.startedAt);
         return out;
-    }, [all, filter, sort, pred]);
+    }, [all, sort, pred]);
 
     const span = useMemo(() => {
         if (!rows.length) return { t0: 0, total: 1 };
@@ -227,32 +220,7 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
             api.onUpdated?.removeListener(onUpdated);
         };
     }, []);
-    // tabs that still have logged requests but no longer exist — listed
-    // (as closed) until the log is cleared
-    const closedTabs = useMemo(() => {
-        const live = new Set(tabs.map((t) => t.id));
-        const out = new Map<number, string>();
-        for (const e of all) {
-            if (e.tabId < 0 || live.has(e.tabId)) continue;
-            const prev = out.get(e.tabId);
-            if (prev && !prev.startsWith("Tab ")) continue;
-            const title = tabTitles.current.get(e.tabId) ?? (e.type === "main_frame" ? e.url : undefined);
-            out.set(e.tabId, title ?? prev ?? `Tab ${e.tabId}`);
-        }
-        if (filter.tabId !== null && !live.has(filter.tabId) && !out.has(filter.tabId)) {
-            out.set(filter.tabId, tabTitles.current.get(filter.tabId) ?? `Tab ${filter.tabId}`);
-        }
-        return [...out].map(([id, title]) => ({ id, title }));
-    }, [all, tabs, filter.tabId]);
-    const scripts = useMemo(() => {
-        const out = new Set<string>();
-        for (const e of all) for (const i of e.outcomes) out.add(i.scriptName);
-        if (filter.script !== null) out.add(filter.script);
-        return [...out].sort((a, b) => a.localeCompare(b));
-    }, [all, filter.script]);
     const suggestions = useMemo(() => suggestData(all, tabTitle), [all, tabs]);
-    const selectedClosed = filter.tabId !== null && closedTabs.some((t) => t.id === filter.tabId);
-    const short = (s: string) => (s.length > 40 ? s.slice(0, 40) + "…" : s);
 
     const touched = touchCounts(rows);
     const bytes = rows.reduce((n, e) => n + (e.size ?? 0), 0);
@@ -264,68 +232,6 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
                     ⊘
                 </button>
                 <FilterBar state={fq} onChange={setFq} error={parsed.error} data={suggestions} />
-                <TouchMenu value={filter.touched} onChange={(touched) => setFilter({ ...filter, touched })} />
-                <select
-                    class={"net-script" + (filter.script !== null ? " active" : "")}
-                    title="Show requests one script ran on (the Wiretrick column)"
-                    aria-label="Script"
-                    value={filter.script ?? ""}
-                    onChange={(e) => setFilter({ ...filter, script: e.currentTarget.value === "" ? null : e.currentTarget.value })}
-                >
-                    <option value="">All scripts</option>
-                    {scripts.map((n) => (
-                        <option key={n} value={n}>
-                            {short(n)}
-                        </option>
-                    ))}
-                </select>
-                {listTabs && (
-                    <select
-                        class={"net-tab" + (selectedClosed ? " closed" : "")}
-                        title={selectedClosed ? "This tab was closed — its requests stay until the log is cleared" : "Show requests from one tab"}
-                        value={filter.tabId === null ? "" : String(filter.tabId)}
-                        onFocus={refreshTabs}
-                        onChange={(e) => setFilter({ ...filter, tabId: e.currentTarget.value === "" ? null : Number(e.currentTarget.value) })}
-                    >
-                        <option value="">All tabs</option>
-                        {tabs.map((t) => (
-                            <option key={t.id} value={String(t.id)}>
-                                {short(t.title)}
-                            </option>
-                        ))}
-                        {closedTabs.length > 0 && (
-                            <optgroup label="Closed tabs">
-                                {closedTabs.map((t) => (
-                                    <option key={t.id} value={String(t.id)} class="closed" title={t.title}>
-                                        {"✕ " + short(t.title)}
-                                    </option>
-                                ))}
-                            </optgroup>
-                        )}
-                    </select>
-                )}
-                <div class="net-chips" role="group" aria-label="Request types">
-                    {TYPE_FILTERS.map((t) => {
-                        const allOn = filter.types.length === ALL_TYPES.length;
-                        const on = t.id === "all" ? allOn : filter.types.includes(t.id as TypeCategory);
-                        const toggle = () => {
-                            if (t.id === "all") return setFilter({ ...filter, types: allOn ? [] : ALL_TYPES });
-                            const id = t.id as TypeCategory;
-                            setFilter({ ...filter, types: on ? filter.types.filter((x) => x !== id) : ALL_TYPES.filter((x) => x === id || filter.types.includes(x)) });
-                        };
-                        return (
-                            <button
-                                key={t.id}
-                                aria-pressed={on}
-                                class={on ? "net-chip active" : "net-chip"}
-                                title={t.id === "all" ? (allOn ? "Hide all request types" : "Show all request types") : `Toggle ${t.label} requests`}
-                                onClick={toggle}
-                            >
-                                {t.label}
-                            </button>
-                        );
-                    })}
-                </div>
             </div>
             <div class={selected ? "net-body with-details" : "net-body"} ref={bodyRef}>
                 <div
@@ -393,9 +299,7 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
                         <div class="net-empty">
                             {all.length === 0
                                 ? "Recording network activity… reload a page to see its requests."
-                                : filter.types.length === 0
-                                  ? "No request types selected — click All or a type above."
-                                  : "No requests match the filter."}
+                                : "No requests match the filter."}
                         </div>
                     )}
                 </div>
@@ -441,127 +345,6 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
                 </span>
             </div>
         </div>
-    );
-}
-
-const TOUCH_OPTIONS: { value: TouchFilter; label: string; marks: ("observed" | "modified")[]; title: string }[] = [
-    { value: "all", label: "All", marks: [], title: "All requests" },
-    { value: "observed", label: "Observed", marks: ["observed"], title: "A script handler ran on the request without changing it" },
-    { value: "modified", label: "Modified", marks: ["modified"], title: "A script handler changed the request" },
-    { value: "any", label: "Touched", marks: ["observed", "modified"], title: "Any request a script handler ran on" },
-];
-
-/** the row markers (dashed = observed, solid = modified) as swatches */
-function Marks({ marks }: { marks: ("observed" | "modified")[] }) {
-    return (
-        <span class="net-marks" aria-hidden="true">
-            {marks.map((m) => (
-                <span key={m} class={`net-mark ${m}`} />
-            ))}
-        </span>
-    );
-}
-
-/**
- * Script-activity filter. A custom listbox rather than a <select>: native
- * options can't show the row markers.
- */
-function TouchMenu({ value, onChange }: { value: TouchFilter; onChange: (v: TouchFilter) => void }) {
-    const [open, setOpen] = useState(false);
-    const [active, setActive] = useState(0);
-    const rootRef = useRef<HTMLSpanElement>(null);
-    const buttonRef = useRef<HTMLButtonElement>(null);
-    const listRef = useRef<HTMLUListElement>(null);
-    const index = Math.max(0, TOUCH_OPTIONS.findIndex((o) => o.value === value));
-    const current = TOUCH_OPTIONS[index];
-
-    useEffect(() => {
-        if (!open) return;
-        listRef.current?.focus();
-        const down = (ev: MouseEvent) => {
-            if (!rootRef.current?.contains(ev.target as Node)) setOpen(false);
-        };
-        document.addEventListener("mousedown", down);
-        return () => document.removeEventListener("mousedown", down);
-    }, [open]);
-
-    const show = (at = index) => {
-        setActive(at);
-        setOpen(true);
-    };
-    const close = (focusButton = true) => {
-        setOpen(false);
-        if (focusButton) buttonRef.current?.focus();
-    };
-    const choose = (i: number) => {
-        onChange(TOUCH_OPTIONS[i].value);
-        close();
-    };
-    const n = TOUCH_OPTIONS.length;
-
-    return (
-        <span class="net-touch" ref={rootRef}>
-            <button
-                ref={buttonRef}
-                type="button"
-                class={"net-touch-button" + (value !== "all" ? " active" : "")}
-                aria-haspopup="listbox"
-                aria-expanded={open}
-                aria-label={`Script activity: ${current.label}`}
-                title={"Filter by script activity\nObserved: a handler ran without changing the request\nModified: a handler changed it"}
-                onClick={() => (open ? close() : show())}
-                onKeyDown={(ev) => {
-                    if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
-                        ev.preventDefault();
-                        show(ev.key === "ArrowDown" ? (index + 1) % n : (index + n - 1) % n);
-                    }
-                }}
-            >
-                <Marks marks={current.marks} />
-                <span class="net-touch-label">{current.label}</span>
-                <span class="net-touch-caret" aria-hidden="true">
-                    ▾
-                </span>
-            </button>
-            {open && (
-                <ul
-                    ref={listRef}
-                    class="net-touch-menu"
-                    role="listbox"
-                    aria-label="Script activity"
-                    tabIndex={-1}
-                    aria-activedescendant={`net-touch-opt-${TOUCH_OPTIONS[active].value}`}
-                    onKeyDown={(ev) => {
-                        const k = ev.key;
-                        if (k === "ArrowDown") setActive((active + 1) % n);
-                        else if (k === "ArrowUp") setActive((active + n - 1) % n);
-                        else if (k === "Home") setActive(0);
-                        else if (k === "End") setActive(n - 1);
-                        else if (k === "Enter" || k === " ") choose(active);
-                        else if (k === "Escape") close();
-                        else if (k === "Tab") close(false);
-                        else return;
-                        if (k !== "Tab") ev.preventDefault();
-                    }}
-                >
-                    {TOUCH_OPTIONS.map((o, i) => (
-                        <li
-                            key={o.value}
-                            id={`net-touch-opt-${o.value}`}
-                            role="option"
-                            aria-selected={o.value === value}
-                            class={"net-touch-option" + (i === active ? " active" : "") + (o.value === value ? " selected" : "")}
-                            title={o.title}
-                            onMouseEnter={() => setActive(i)}
-                            onClick={() => choose(i)}
-                        >
-                            <Marks marks={o.marks} />
-                            {o.label}
-                        </li>
-                    ))}
-                </ul>
-            )}
-        </span>
     );
 }
 

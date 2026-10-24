@@ -3,7 +3,8 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { setDefaultStrategy } from "../src/shared/route";
 import { outcomeKind, observedLine } from "../src/shared/netTypes";
 import { addUiPort, allLogs, clearTab, log, logObserved, type LogEntry } from "../src/background/engine/logs";
-import { matches, touchCounts, touchState, ALL_TYPES, type NetFilter } from "../src/ui/network/netFormat";
+import { touchCounts, touchState } from "../src/ui/network/netFormat";
+import { compileQuery, parseQuery } from "../src/ui/network/netQuery";
 import type { NetEntry, NetOutcome } from "../src/shared/netTypes";
 
 // these suites exercise the extension strategy: make it the settings default
@@ -58,25 +59,22 @@ describe("Network filter and counts", () => {
         ({ id, tabId: 1, url: `https://a/${id}`, method: "GET", type: "script", status: 200, statusText: "", mime: "", size: 1, fromCache: false, startedAt: 0, endedAt: 1, state: "done", outcomes }) as NetEntry;
     const missed: NetOutcome = { scriptId: "s", scriptName: "S", action: "onResponseBody never ran", level: "warn", kind: "missed", at: 0 };
     const rows = [e("none", []), e("observed", [iv("observed")]), e("both", [iv("observed"), iv("modified")]), e("missed", [missed])];
-    const f = (touched: NetFilter["touched"]): NetFilter => ({ text: "", types: ALL_TYPES, touched, tabId: null, script: null });
+    const ids = (q: string, list = rows) => list.filter((r) => compileQuery(parseQuery(q).ast, { tabTitle: () => undefined })(r)).map((r) => r.id);
 
-    it("classifies rows and filters all / observed-only / modified / any; a missed warning is not a tap", () => {
+    it("classifies rows and filters all / observed-only / modified / touched; a missed warning is not a tap", () => {
         expect(rows.map(touchState)).toEqual(["none", "observed", "modified", "none"]);
-        expect(rows.filter((r) => matches(r, f("all"))).map((r) => r.id)).toEqual(["none", "observed", "both", "missed"]);
-        expect(rows.filter((r) => matches(r, f("observed"))).map((r) => r.id)).toEqual(["observed"]);
-        expect(rows.filter((r) => matches(r, f("modified"))).map((r) => r.id)).toEqual(["both"]);
-        expect(rows.filter((r) => matches(r, f("any"))).map((r) => r.id)).toEqual(["observed", "both"]);
+        expect(ids("")).toEqual(["none", "observed", "both", "missed"]);
+        expect(ids("is:observed")).toEqual(["observed"]);
+        expect(ids("is:modified")).toEqual(["both"]);
+        expect(ids("is:touched")).toEqual(["observed", "both"]);
     });
 
-    it("filters by script, judging activity by that script alone", () => {
+    it("filters by script", () => {
         const t = (name: string, kind: "observed" | "modified"): NetOutcome => ({ ...iv(kind), scriptName: name });
         const mixed = [e("a-mod", [t("A", "modified")]), e("a-obs-b-mod", [t("A", "observed"), t("B", "modified")]), e("b", [t("B", "observed")]), e("none", [])];
-        const by = (script: string, touched: NetFilter["touched"]) => mixed.filter((r) => matches(r, { ...f(touched), script })).map((r) => r.id);
-        expect(by("A", "all")).toEqual(["a-mod", "a-obs-b-mod"]);
-        expect(by("A", "modified")).toEqual(["a-mod"]);
-        expect(by("A", "observed")).toEqual(["a-obs-b-mod"]);
-        expect(by("B", "any")).toEqual(["a-obs-b-mod", "b"]);
-        expect(by("C", "all")).toEqual([]);
+        expect(ids("script:=A", mixed)).toEqual(["a-mod", "a-obs-b-mod"]);
+        expect(ids("script:=B is:touched", mixed)).toEqual(["a-obs-b-mod", "b"]);
+        expect(ids("script:=C", mixed)).toEqual([]);
     });
 
     it("counts observed-only and modified rows", () => {
