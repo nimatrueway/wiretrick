@@ -181,7 +181,7 @@ export class ExtensionStrategy implements InterceptionStrategy {
             return d.kind === "allow" && !pendingFirefoxReplace.has(details.requestId) ? null : final(d, "replace");
         }
         if (result && (result.redirect || result.block)) {
-            log(details.tabId, `[${entry.name}] onRequest → ${result.block ? "block" : `redirect → ${result.redirect}`} ${details.url}`, "info", entry.id);
+            log(details.tabId, `[${entry.name}] onRequest → ${result.block ? `block ${details.url}` : `redirect ${details.url} → ${result.redirect}`}`, "info", entry.id);
             return final(normalize(result), result.block ? "block" : "redirect", result.block ? undefined : result.redirect);
         }
         trace(details, `[${entry.name}] onRequest returned ${describeResult(result)} (no redirect/block/replaceResponse) for ${details.url}`);

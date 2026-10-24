@@ -22,6 +22,8 @@ its section below.
 
 ### Fixed
 
+- Log: redirect lines read from → to (`onRequest → redirect <url> →
+  <target>`) instead of putting the target before the request's URL.
 - Network filter (Basic): Shift+←/→ with the caret between capsules,
   Shift+click, and dragging from the text onto capsules now select them.
 

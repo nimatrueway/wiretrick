@@ -19,7 +19,7 @@ describe("outcomeKind", () => {
 
     it("infers: engine INFO action lines → modified; observed marks, debug, errors, script console → observed", () => {
         expect(outcomeKind("info", "[S] onResponseBody applied (1b → 2b) https://a/")).toBe("modified");
-        expect(outcomeKind("info", "[S] onRequest → redirect → https://b/ https://a/")).toBe("modified");
+        expect(outcomeKind("info", "[S] onRequest → redirect https://a/ → https://b/")).toBe("modified");
         expect(outcomeKind("info", observedLine("S", "onRequest", "https://a/"))).toBe("observed");
         expect(outcomeKind("debug", "[S] whatever https://a/")).toBe("observed");
         expect(outcomeKind("error", "[S] onRequest threw: x https://a/")).toBe("observed");

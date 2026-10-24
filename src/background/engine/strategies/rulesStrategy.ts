@@ -263,11 +263,11 @@ export class RulesStrategy {
         if (!hits.length) return;
         const final = hits.find((r) => r.spec.final);
         for (const r of final ? [final] : hits) {
-            let what = r.spec.summary;
+            const what = r.spec.summary;
             const sub = r.spec.action.redirect?.regexSubstitution;
             const to = sub ? substitute(r.spec.condition.regexFilter, sub, d.url) : r.spec.action.redirect?.url;
-            if (to) what = `redirect → ${to}`;
-            log(d.tabId ?? -1, `[rules] [${r.name}] ${routeLabel(r.route).replace(/ #\d+$/, "")} → ${what} ${d.url}`, "info", r.scriptId, "modified", d.url);
+            const label = `[rules] [${r.name}] ${routeLabel(r.route).replace(/ #\d+$/, "")}`;
+            log(d.tabId ?? -1, to ? `${label} → redirect ${d.url} → ${to}` : `${label} → ${what} ${d.url}`, "info", r.scriptId, "modified", d.url);
             if (r === final) {
                 const block = r.spec.action.type === "block";
                 reportSkipped(d.tabId ?? -1, { url: d.url, method: d.method, type: d.type }, { scriptId: r.scriptId, scriptName: r.name, kind: r.route.kind as NetKind, index: r.route.index, strategy: "rules", outcome: block ? "block" : "redirect", target: block ? undefined : to });
