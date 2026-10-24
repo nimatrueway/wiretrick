@@ -1,6 +1,6 @@
 /** Network filter query language: parsing, errors, matching, Basic chips ⇄ query and autocomplete. */
 import { describe, it, expect } from "vitest";
-import { compileQuery, complete, fromBasic, nodeToString, parseQuery, suggestData, toBasic, type QueryCtx } from "../src/ui/network/netQuery";
+import { addChip, basicSuggest, compileQuery, complete, emptyBasic, fromBasic, leafChips, nodeToString, parseQuery, removeChips, suggestData, toBasic, toggleConn, type QueryCtx, type SuggestData } from "../src/ui/network/netQuery";
 import type { NetEntry, NetOutcome } from "../src/shared/netTypes";
 
 const out = (scriptName: string, kind: NetOutcome["kind"]): NetOutcome => ({ scriptId: scriptName, scriptName, action: "x", level: "info", kind, at: 0 });
@@ -156,29 +156,75 @@ describe("netQuery errors point at the problem", () => {
 });
 
 describe("Basic chips ⇄ query", () => {
+    const chip = (field: string, values: string[], negate = false) => ({ k: "chip", chip: { field, negate, values } });
+    const round = (q: string) => fromBasic(toBasic(parseQuery(q).ast));
+
     it("splits a flat AND into text and chips (OR of one field = one chip)", () => {
         const b = toBasic(parseQuery('api -cdn method:GET,POST -status:4xx (type:js OR type:css) tab:"My tab"').ast);
         expect(b).toEqual({
             text: "api -cdn",
-            chips: [
-                { field: "method", negate: false, values: ["GET", "POST"] },
-                { field: "status", negate: true, values: ["4xx"] },
-                { field: "type", negate: false, values: ["js", "css"] },
-                { field: "tab", negate: false, values: ['"My tab"'] },
-            ],
+            expr: {
+                items: [chip("method", ["GET", "POST"]), chip("status", ["4xx"], true), chip("type", ["js", "css"]), chip("tab", ['"My tab"'])],
+                conns: ["AND", "AND", "AND"],
+            },
         });
-        expect(fromBasic(b!)).toBe('api -cdn method:GET,POST -status:4xx type:js,css tab:"My tab"');
+        expect(fromBasic(b)).toBe('api -cdn method:GET,POST -status:4xx type:js,css tab:"My tab"');
     });
 
-    it("returns null when the query needs Advanced", () => {
-        expect(toBasic(parseQuery("method:GET OR status:500").ast)).toBeNull();
-        expect(toBasic(parseQuery("-(a b)").ast)).toBeNull();
-        expect(toBasic(parseQuery("").ast)).toEqual({ text: "", chips: [] });
+    it("keeps any AND / OR / NOT / group: Basic ⇄ Advanced round-trips to the same meaning", () => {
+        const b = toBasic(parseQuery("method:GET OR status:500").ast);
+        expect(b).toEqual({ text: "", expr: { items: [chip("method", ["GET"]), chip("status", ["500"])], conns: ["OR"] } });
+        expect(round("method:GET OR status:500")).toBe("method:GET OR status:500");
+        expect(round("api b OR c")).toBe("api b OR c");
+        expect(round("a (b OR host:c) -(d e)")).toBe("a (b OR host:c) -(d e)");
+        expect(round("x (host:a OR status:5xx) is:modified")).toBe("x (host:a OR status:5xx) is:modified");
+        expect(toBasic(parseQuery("-(a b)").ast).expr.items[0]).toMatchObject({ k: "group", negate: true });
+        expect(toBasic(parseQuery("").ast)).toEqual(emptyBasic());
+        // text and an OR'ed expression are each kept together
+        expect(fromBasic({ text: "api", expr: toBasic(parseQuery("host:a OR host:b x").ast).expr })).toBe("api (host:a OR host:b x)");
+    });
+
+    it("adding a chip to an OR'ed expression groups it first; same-field picks merge only when all-AND", () => {
+        const or = toBasic(parseQuery("host:a OR status:500").ast);
+        expect(fromBasic(addChip(or, { field: "method", negate: false, values: ["GET"] }))).toBe("(host:a OR status:500) method:GET");
+        const and = addChip(addChip(emptyBasic(), { field: "method", negate: false, values: ["GET"] }), { field: "method", negate: false, values: ["POST"] });
+        expect(fromBasic(and)).toBe("method:GET,POST");
+    });
+
+    it("connectors toggle; removing chips collapses groups", () => {
+        const b = toBasic(parseQuery("is:modified (host:x OR host:y status:2) method:GET").ast);
+        expect(fromBasic({ ...b, expr: toggleConn(b.expr, [], 0) })).toBe("is:modified OR (host:x OR host:y status:2) method:GET");
+        expect(fromBasic({ ...b, expr: toggleConn(b.expr, [1], 0) })).toBe("is:modified (host:x host:y status:2) method:GET");
+        const [, x, , st] = leafChips(b.expr);
+        expect(fromBasic({ ...b, expr: removeChips(b.expr, new Set([x])) })).toBe("is:modified (host:y status:2) method:GET");
+        expect(fromBasic({ ...b, expr: removeChips(b.expr, new Set([x, st])) })).toBe("is:modified host:y method:GET");
+        expect(removeChips(b.expr, new Set(leafChips(b.expr)))).toEqual({ items: [], conns: [] });
     });
 
     it("prints an AST back with the needed parentheses", () => {
         expect(nodeToString(parseQuery("a (b OR c) -(d e)").ast!)).toBe("a (b OR c) -(d e)");
         expect(nodeToString(parseQuery("a b OR c").ast!)).toBe("(a b) OR c");
+    });
+});
+
+describe("Basic suggestions", () => {
+    const data: SuggestData = { methods: ["GET", "POST"], statuses: ["200", "404"], hosts: ["api.test", "cdn.test"], mimes: [], scripts: ["Posty"], tabs: ["Home"], reqHeaders: [], resHeaders: ["content-type"] };
+    const labels = (t: string) => basicSuggest(t, data).map((s) => s.label);
+
+    it("matches fields by prefix, then known values as ready chips", () => {
+        expect(labels("sta")).toEqual(["status:"]);
+        expect(labels("po")).toEqual(["method: POST", "script: Posty"]);
+        expect(labels("4")).toContain("status: 404");
+        expect(labels("4")).toContain("status: 4xx");
+        expect(basicSuggest("po", data)[0]).toMatchObject({ kind: "chip", chip: { field: "method", negate: false, values: ["POST"] } });
+    });
+
+    it("'-word' negates; 'field:' narrows to that field; URLs suggest nothing", () => {
+        expect(basicSuggest("-get", data)[0]).toMatchObject({ kind: "chip", label: "method ≠ GET", chip: { negate: true } });
+        expect(labels("host:cd")).toEqual(["host:cd", "host: cdn.test"]);
+        expect(basicSuggest("res-header:", data)[0]).toMatchObject({ kind: "field", field: { name: "res-header" } });
+        expect(labels("http://x")).toEqual([]);
+        expect(labels("")).toEqual([]);
     });
 });
 

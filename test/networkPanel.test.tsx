@@ -377,18 +377,96 @@ describe("NetworkPanel", () => {
             expect(rowNames(container)).toEqual(["b.js", "c.js"]);
         });
 
-        it("Advanced → Basic warns when the query can't be chips", () => {
-            const { container, getByText } = setup(rows3());
+        it("AND / OR / groups carry over between Advanced and Basic; connectors toggle in Basic", () => {
+            const { container, getByText, getAllByLabelText } = setup(rows3());
+            const box = () => container.querySelector(".net-qbox .net-filter") as HTMLInputElement;
             fireEvent.click(getByText("Advanced"));
             fireEvent.input(q(container), { target: { value: "status:5xx OR host:cdn" } });
             fireEvent.click(getByText("Basic"));
+            expect(container.querySelector(".net-qwarn")).toBeNull();
+            expect([...container.querySelectorAll(".net-qchip-vals")].map((n) => n.textContent)).toEqual(["5xx", "cdn"]);
+            expect(container.querySelector(".net-qconn")!.textContent).toBe("OR");
+            expect(rowNames(container)).toEqual(["b.js", "c.js"]);
+            fireEvent.click(getAllByLabelText("OR, click to switch")[0]);
+            expect(rowNames(container)).toEqual([]);
+            fireEvent.click(getByText("Advanced"));
+            expect(q(container).value).toBe("status:5xx host:cdn");
+            fireEvent.input(q(container), { target: { value: "cdn (method:POST OR host:cdn)" } });
+            fireEvent.click(getByText("Basic"));
+            expect(box().value).toBe("cdn");
+            expect(container.querySelector(".net-qgroup")).not.toBeNull();
+            expect(rowNames(container)).toEqual(["c.js"]);
+            // only a broken query can't be shown
+            fireEvent.click(getByText("Advanced"));
+            fireEvent.input(q(container), { target: { value: "(host:x" } });
+            fireEvent.click(getByText("Basic"));
             expect(container.querySelector(".net-qwarn")).not.toBeNull();
             fireEvent.click(getByText("Stay in Advanced"));
-            expect(q(container).value).toBe("status:5xx OR host:cdn");
-            fireEvent.input(q(container), { target: { value: "cdn method:GET,POST" } });
+            expect(q(container).value).toBe("(host:x");
+        });
+
+        it("Basic: typing suggests fields and values like + Filter", () => {
+            const { container, getByLabelText } = setup(rows3());
+            const box = container.querySelector(".net-qbox .net-filter") as HTMLInputElement;
+            const type = (v: string) => {
+                box.value = v;
+                box.setSelectionRange(v.length, v.length);
+                fireEvent.input(box);
+            };
+            type("api pos");
+            const opts = () => [...container.querySelectorAll("#net-bsuggest li")].map((n) => n.querySelector(".net-qlist-main")!.textContent);
+            expect(opts()).toContain("method: POST");
+            fireEvent.keyDown(box, { key: "Tab" });
+            expect(box.value).toBe("api");
+            expect(container.querySelector(".net-qchip")!.textContent).toContain("method:POST");
+            type("api sta");
+            expect(opts()[0]).toBe("status:");
+            fireEvent.keyDown(box, { key: "Enter" }); // nothing highlighted: Enter just commits text
+            expect(container.querySelector(".net-qadd-pop")).toBeNull();
+            type("api sta");
+            fireEvent.keyDown(box, { key: "ArrowDown" });
+            fireEvent.keyDown(box, { key: "Enter" });
+            expect(box.value).toBe("api");
+            expect(container.querySelector(".net-qadd-pop b")!.textContent).toBe("status"); // + Filter opened at the field
+            expect((getByLabelText("Value") as HTMLInputElement).value).toBe("");
+            // typed field terms turn into chips on Enter
+            fireEvent.keyDown(document, { key: "Escape" });
+            type("host:cdn");
+            fireEvent.keyDown(box, { key: "Escape" });
+            fireEvent.keyDown(box, { key: "Enter" });
+            expect(box.value).toBe("");
+            expect([...container.querySelectorAll(".net-qchip-vals")].map((n) => n.textContent)).toEqual(["POST", "cdn"]);
+        });
+
+        it("Basic: chips select and delete like text", () => {
+            const { container, getByText } = setup(rows3());
+            fireEvent.click(getByText("Advanced"));
+            fireEvent.input(q(container), { target: { value: "method:POST host:cdn status:5xx" } });
             fireEvent.click(getByText("Basic"));
-            expect((container.querySelector(".net-qbox .net-filter") as HTMLInputElement).value).toBe("cdn");
-            expect(container.querySelector(".net-qchip-vals")!.textContent).toBe("GET, POST");
+            const box = container.querySelector(".net-qbox .net-filter") as HTMLInputElement;
+            const qbox = container.querySelector(".net-qbox") as HTMLElement;
+            const vals = () => [...container.querySelectorAll(".net-qchip-vals")].map((n) => n.textContent);
+            const selected = () => [...container.querySelectorAll(".net-qchip.sel .net-qchip-vals")].map((n) => n.textContent);
+            box.focus();
+            fireEvent.keyDown(box, { key: "Backspace" }); // at the start: removes the chip before, like a character
+            expect(vals()).toEqual(["POST", "cdn"]);
+            fireEvent.keyDown(box, { key: "ArrowLeft" });
+            expect(selected()).toEqual(["cdn"]);
+            fireEvent.keyDown(qbox, { key: "ArrowLeft", shiftKey: true });
+            expect(selected()).toEqual(["POST", "cdn"]);
+            fireEvent.keyDown(qbox, { key: "ArrowRight" });
+            expect(selected()).toEqual([]);
+            fireEvent.mouseDown(container.querySelectorAll(".net-qchip-vals")[0]);
+            expect(selected()).toEqual(["POST"]);
+            fireEvent.keyDown(qbox, { key: "Delete" });
+            expect(vals()).toEqual(["cdn"]);
+            fireEvent.input(box, { target: { value: "js" } });
+            box.setSelectionRange(0, 2);
+            fireEvent.keyDown(box, { key: "a", ctrlKey: true }); // text all selected: Ctrl+A takes the chips too
+            expect(selected()).toEqual(["cdn"]);
+            fireEvent.keyDown(box, { key: "Backspace" });
+            expect(vals()).toEqual([]);
+            expect(box.value).toBe("");
         });
 
         it("Advanced: autocompletes fields then values with the keyboard", () => {

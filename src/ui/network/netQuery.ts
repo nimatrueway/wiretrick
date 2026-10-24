@@ -439,24 +439,38 @@ function buildTest(term: TermNode, starts: number[]): Test {
 
 // ── Basic chips ⇄ query ──────────────────────────────────────────────
 
-/** One Basic-mode chip: `field:v1,v2` (values OR'd); `values` are raw value syntax (">=400", "\"a b\"", "/re/"). */
+/** One Basic-mode chip: `field:v1,v2` (values OR'd); `values` are raw value syntax (">=400", "\"a b\"", "/re/"). `field: ""` is a bare word (URL contains). */
 export interface Chip {
     field: string;
     negate: boolean;
     values: string[];
 }
-export interface BasicFilter {
-    /** free text: bare words (URL contains; "-word" excludes) */
-    text: string;
-    chips: Chip[];
+export type Conn = "AND" | "OR";
+/** chips and groups; `conns[i]` joins `items[i]` and `items[i + 1]` (AND binds tighter than OR, as in the query) */
+export interface BasicExpr {
+    items: BasicItem[];
+    conns: Conn[];
 }
+export type BasicItem = { k: "chip"; chip: Chip } | { k: "group"; negate: boolean; expr: BasicExpr };
+export interface BasicFilter {
+    /** free text, AND'ed with the chips: bare words (URL contains; "-word" excludes) */
+    text: string;
+    expr: BasicExpr;
+}
+export const emptyBasic = (): BasicFilter => ({ text: "", expr: { items: [], conns: [] } });
 
 export function chipToString(c: Chip): string {
-    return `${c.negate ? "-" : ""}${c.field}:${c.values.join(",")}`;
+    return `${c.negate ? "-" : ""}${c.field ? c.field + ":" : ""}${c.values.join(",")}`;
 }
-
+export function exprToString(e: BasicExpr): string {
+    return e.items.map((it, i) => (i ? (e.conns[i - 1] === "OR" ? " OR " : " ") : "") + (it.k === "chip" ? chipToString(it.chip) : `${it.negate ? "-" : ""}(${exprToString(it.expr)})`)).join("");
+}
 export function fromBasic(b: BasicFilter): string {
-    return [b.text.trim(), ...b.chips.map(chipToString)].filter(Boolean).join(" ");
+    const text = b.text.trim();
+    const ex = exprToString(b.expr);
+    if (!text || !ex) return text || ex;
+    const textOr = parseQuery(text).ast?.k === "or";
+    return `${textOr ? `(${text})` : text} ${b.expr.conns.includes("OR") ? `(${ex})` : ex}`;
 }
 
 export function nodeToString(n: QNode): string {
@@ -472,27 +486,114 @@ export function nodeToString(n: QNode): string {
     }
 }
 
-/** The query as Basic text + chips, or null when it needs Advanced (OR across fields, groups, NOT of groups…). */
-export function toBasic(ast: QNode | null): BasicFilter | null {
-    const items = !ast ? [] : ast.k === "and" ? ast.items : [ast];
-    const text: string[] = [];
-    const chips: Chip[] = [];
-    for (const n of items) {
-        const neg = n.k === "not";
-        const inner = n.k === "not" ? n.item : n;
-        if (inner.k === "term") {
-            if (inner.field === null) text.push((neg ? "-" : "") + inner.raw);
-            else chips.push({ field: inner.field, negate: neg, values: inner.values.map((v) => v.raw) });
-            continue;
-        }
-        const field = inner.k === "or" && inner.items[0].k === "term" ? inner.items[0].field : null;
-        if (inner.k !== "or" || field === null || !inner.items.every((i) => i.k === "term" && i.field === field)) return null;
-        chips.push({ field, negate: neg, values: inner.items.flatMap((i) => (i as TermNode).values.map((v) => v.raw)) });
+/** `a:x OR a:y` (one field, none negated) → one chip `a:x,y` */
+function sameFieldChip(n: QNode): Chip | null {
+    if (n.k !== "or") return null;
+    const field = n.items[0].k === "term" ? n.items[0].field : null;
+    if (!field || !n.items.every((i) => i.k === "term" && i.field === field)) return null;
+    return { field, negate: false, values: n.items.flatMap((i) => (i as TermNode).values.map((v) => v.raw)) };
+}
+const termChip = (t: TermNode, negate: boolean): Chip => (t.field === null ? { field: "", negate, values: [t.raw] } : { field: t.field, negate, values: t.values.map((v) => v.raw) });
+function toItem(n: QNode): BasicItem {
+    if (n.k === "term") return { k: "chip", chip: termChip(n, false) };
+    if (n.k === "not") {
+        if (n.item.k === "term") return { k: "chip", chip: termChip(n.item, true) };
+        const m = sameFieldChip(n.item);
+        return m ? { k: "chip", chip: { ...m, negate: true } } : { k: "group", negate: true, expr: toExpr(n.item) };
     }
-    return { text: text.join(" "), chips };
+    const m = sameFieldChip(n);
+    return m ? { k: "chip", chip: m } : { k: "group", negate: false, expr: toExpr(n) };
+}
+function toExpr(n: QNode): BasicExpr {
+    if (n.k === "or" && !sameFieldChip(n)) {
+        const items: BasicItem[] = [];
+        const conns: Conn[] = [];
+        for (const branch of n.items)
+            (branch.k === "and" ? branch.items : [branch]).forEach((x, j) => {
+                if (items.length) conns.push(j ? "AND" : "OR");
+                items.push(toItem(x));
+            });
+        return { items, conns };
+    }
+    if (n.k === "and") return { items: n.items.map(toItem), conns: n.items.slice(1).map(() => "AND" as const) };
+    return { items: [toItem(n)], conns: [] };
+}
+/** Any query as Basic text + chips/groups; bare words of a top-level AND go to the text box. */
+export function toBasic(ast: QNode | null): BasicFilter {
+    const e = ast ? toExpr(ast) : { items: [], conns: [] };
+    if (e.conns.includes("OR")) return { text: "", expr: e };
+    const word = (it: BasicItem) => it.k === "chip" && !it.chip.field;
+    const rest = e.items.filter((it) => !word(it));
+    return { text: e.items.filter(word).map((it) => chipToString((it as { chip: Chip }).chip)).join(" "), expr: { items: rest, conns: rest.slice(1).map(() => "AND") } };
 }
 
-/** Quote a suggested/typed text value when it would not survive as a plain word (operator values like ">=400" pass through). */
+/** fields whose repeated picks OR into one chip (a request has one method / status / type…) */
+const MERGE = new Set(["method", "status", "type", "is", "tab", "script"]);
+
+/** AND `item` onto the expression; an OR'ed expression is grouped first so it keeps its meaning. */
+function appendAnd(e: BasicExpr, item: BasicItem): BasicExpr {
+    if (!e.items.length) return { items: [item], conns: [] };
+    const base: BasicExpr = e.conns.includes("OR") ? { items: [{ k: "group", negate: false, expr: e }], conns: [] } : e;
+    return { items: [...base.items, item], conns: [...base.conns, "AND"] };
+}
+/** Add a chip (AND); a repeated pick of a MERGE field ORs into its chip when the expression is all-AND. */
+export function addChip(b: BasicFilter, chip: Chip): BasicFilter {
+    const e = b.expr;
+    const i = !e.conns.includes("OR") && MERGE.has(chip.field) ? e.items.findIndex((it) => it.k === "chip" && it.chip.field === chip.field && it.chip.negate === chip.negate) : -1;
+    if (i < 0) return { ...b, expr: appendAnd(e, { k: "chip", chip }) };
+    const old = (e.items[i] as { chip: Chip }).chip;
+    const merged: BasicItem = { k: "chip", chip: { ...old, values: [...new Set([...old.values, ...chip.values])] } };
+    return { ...b, expr: { ...e, items: e.items.map((it, j) => (j === i ? merged : it)) } };
+}
+/** Add a whole expression: chip by chip when all-AND, else as one group. */
+export function addExpr(b: BasicFilter, e: BasicExpr): BasicFilter {
+    if (!e.items.length) return b;
+    if (e.conns.includes("OR")) return { ...b, expr: appendAnd(b.expr, { k: "group", negate: false, expr: e }) };
+    return e.items.reduce((acc, it) => (it.k === "chip" ? addChip(acc, it.chip) : { ...acc, expr: appendAnd(acc.expr, it) }), b);
+}
+
+/** a group left with one item collapses to it (a NOT moves onto the item); an empty one disappears */
+function tidyGroup(g: Extract<BasicItem, { k: "group" }>): BasicItem | null {
+    if (g.expr.items.length !== 1) return g.expr.items.length ? g : null;
+    const only = g.expr.items[0];
+    if (!g.negate) return only;
+    return only.k === "chip" ? { k: "chip", chip: { ...only.chip, negate: !only.chip.negate } } : { ...only, negate: !only.negate };
+}
+/** Replace (or, when `fn` returns null, remove) the item at `path` (indices through groups). */
+export function editItem(e: BasicExpr, path: number[], fn: (it: BasicItem) => BasicItem | null): BasicExpr {
+    const [i, ...rest] = path;
+    const it = e.items[i];
+    if (!it) return e;
+    const next = rest.length ? (it.k === "group" ? tidyGroup({ ...it, expr: editItem(it.expr, rest, fn) }) : it) : fn(it);
+    if (next) return { ...e, items: e.items.map((x, j) => (j === i ? next : x)) };
+    const items = e.items.filter((_, j) => j !== i);
+    const conns = e.conns.filter((_, j) => j !== (i ? i - 1 : 0));
+    // a lone plain group at the top is just parentheses
+    return items.length === 1 && items[0].k === "group" && !items[0].negate ? items[0].expr : { items, conns };
+}
+/** Every chip in visual order (into groups) — Basic's text-like selection runs over these. */
+export function leafChips(e: BasicExpr): Chip[] {
+    return e.items.flatMap((it) => (it.k === "chip" ? [it.chip] : leafChips(it.expr)));
+}
+/** Drop the given chips (by identity); emptied groups vanish, one-item groups collapse. */
+export function removeChips(e: BasicExpr, drop: Set<Chip>, top = true): BasicExpr {
+    const items: BasicItem[] = [];
+    const conns: Conn[] = [];
+    e.items.forEach((it, i) => {
+        const next = it.k === "chip" ? (drop.has(it.chip) ? null : it) : tidyGroup({ ...it, expr: removeChips(it.expr, drop, false) });
+        if (!next) return;
+        if (items.length) conns.push(e.conns[i - 1] ?? "AND");
+        items.push(next);
+    });
+    return top && items.length === 1 && items[0].k === "group" && !items[0].negate ? items[0].expr : { items, conns };
+}
+
+/** Flip AND ⇄ OR at `conns[ci]` of the group at `groupPath` ([] = top level). */
+export function toggleConn(e: BasicExpr, groupPath: number[], ci: number): BasicExpr {
+    if (!groupPath.length) return { ...e, conns: e.conns.map((c, j) => (j === ci ? (c === "OR" ? "AND" : "OR") : c)) };
+    return editItem(e, groupPath, (g) => (g.k === "group" ? { ...g, expr: toggleConn(g.expr, [], ci) } : g));
+}
+
 export function quoteValue(s: string, field = "url"): string {
     const kind = FIELD_MAP.get(field)?.kind;
     if (kind === "status" || kind === "number" || kind === "is") return s;
@@ -592,6 +693,47 @@ function rank<T>(items: T[], key: (t: T) => string, prefix: string): T[] {
     const starts = items.filter((i) => key(i).toLowerCase().startsWith(p));
     const has = items.filter((i) => !key(i).toLowerCase().startsWith(p) && key(i).toLowerCase().includes(p));
     return [...starts, ...has];
+}
+
+export type BasicSuggestion =
+    /** open "+ Filter" at this field (value prefilled) */
+    | { kind: "field"; field: FieldDef; negate: boolean; value: string; label: string; detail?: string }
+    /** add this chip directly */
+    | { kind: "chip"; chip: Chip; label: string; detail?: string };
+
+/** fields whose known values Basic offers for a bare word */
+const QUICK_FIELDS = ["method", "status", "type", "is", "host", "script", "tab"];
+
+/** Basic's suggestions for the word being typed: matching fields, then field values as ready chips; `-word` negates, `field:val` narrows to that field. */
+export function basicSuggest(token: string, data: SuggestData, limit = 8): BasicSuggestion[] {
+    const negate = token.length > 1 && token.startsWith("-");
+    const t = negate ? token.slice(1) : token;
+    if (!t) return [];
+    const fieldItem = (f: FieldDef, value = ""): BasicSuggestion => ({ kind: "field", field: f, negate, value, label: `${negate ? "-" : ""}${f.name}:${value}`, detail: value ? "choose operator…" : f.help });
+    const chipItems = (f: FieldDef, vals: { value: string; detail?: string }[]): BasicSuggestion[] =>
+        vals
+            .map((v) => ({ kind: "chip" as const, chip: { field: f.name, negate, values: [quoteValue(v.value, f.name)] }, label: `${f.name}${negate ? " ≠ " : ": "}${v.value}`, detail: v.detail }))
+            .filter((s) => !parseQuery(chipToString(s.chip)).error);
+    const colon = t.indexOf(":");
+    if (colon > 0) {
+        const f = FIELD_MAP.get(t.slice(0, colon).toLowerCase());
+        if (!f) return [];
+        const v = t.slice(colon + 1);
+        return [fieldItem(f, v), ...chipItems(f, rank(fieldValues(f.name, data), (x) => x.value, v).slice(0, limit))];
+    }
+    const lower = t.toLowerCase();
+    const fields = FIELDS.filter((f) => f.name.startsWith(lower)).map((f) => fieldItem(f));
+    const starts: BasicSuggestion[] = [];
+    const has: BasicSuggestion[] = [];
+    for (const name of QUICK_FIELDS) {
+        const f = FIELD_MAP.get(name)!;
+        for (const v of fieldValues(name, data)) {
+            const l = v.value.toLowerCase();
+            if (l.startsWith(lower)) starts.push(...chipItems(f, [v]));
+            else if (l.includes(lower)) has.push(...chipItems(f, [v]));
+        }
+    }
+    return [...fields, ...[...starts, ...has].slice(0, limit)];
 }
 
 /** Suggestions for the word at `cursor`: field names, then values after `field:`. */

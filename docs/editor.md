@@ -208,14 +208,19 @@ at the right of the toolbar do the same.
 
 The filter bar has two modes (the choice is remembered):
 
-- **Basic** — a URL text box plus chips. **+ Filter** walks field → operator
-  → value (with suggestions); click a chip's operator to negate it, × to
-  remove it. Picking another value for method, status, type, is, tab or script
-  merges into the existing chip (either value matches).
+- **Basic** — a URL text box plus chips. Typing suggests fields and values
+  (↑/↓, Tab to accept); Enter turns typed `field:value` terms into chips.
+  **+ Filter** walks field → operator → value (with suggestions); click a
+  chip's operator to negate it, × to remove it. Picking another value for
+  method, status, type, is, tab or script merges into the existing chip
+  (either value matches). Chips are joined by AND/OR connectors (click one to
+  switch it) and `( … )` groups, so any Advanced query shows here too. Chips
+  select like text: click, drag, Shift+click, Shift+←/→, Ctrl+A, then
+  Backspace/Delete, copy or cut.
 - **Advanced** — a query like a GitHub search, with autocomplete (Ctrl+Space,
   Tab/Enter to accept) and an inline error; while the query has an error the
-  last valid one keeps filtering. Switching back to Basic asks first if the
-  query can't be shown as chips.
+  last valid one keeps filtering. Switching to Basic asks first only if the
+  query has an error.
 
 | Syntax | Meaning |
 | --- | --- |

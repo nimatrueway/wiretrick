@@ -3,18 +3,29 @@
  * box and chips ("+ Filter": field → operator → value); Advanced edits the
  * query directly with autocomplete, error underlines and a "?" syntax help.
  */
+import { Fragment, type JSX } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { RefObject } from "preact";
 import {
     FIELDS,
+    addChip,
+    addExpr,
+    basicSuggest,
     chipToString,
+    editItem,
+    emptyBasic,
+    leafChips,
+    removeChips,
+    toggleConn,
     complete,
     fieldValues,
     fromBasic,
     parseQuery,
     quoteValue,
     toBasic,
+    type BasicExpr,
     type BasicFilter,
+    type BasicSuggestion,
     type Chip,
     type Completion,
     type FieldDef,
@@ -36,7 +47,7 @@ export function initialFilterState(): FilterState {
     try {
         if (localStorage.getItem(MODE_KEY) === "advanced") mode = "advanced";
     } catch {}
-    return { mode, basic: { text: "", chips: [] }, query: "" };
+    return { mode, basic: emptyBasic(), query: "" };
 }
 export function effectiveQuery(s: FilterState): string {
     return s.mode === "basic" ? fromBasic(s.basic) : s.query;
@@ -91,9 +102,8 @@ export function FilterBar({ state, onChange, error, data }: { state: FilterState
         } catch {}
         if (mode === "advanced") return onChange({ ...state, mode, query: fromBasic(state.basic) });
         const parsed = parseQuery(state.query);
-        const basic = parsed.error ? null : toBasic(parsed.ast);
-        if (!basic) return setWarn(true);
-        onChange({ ...state, mode, basic });
+        if (parsed.error) return setWarn(true);
+        onChange({ ...state, mode, basic: toBasic(parsed.ast) });
     };
     const warnRef = useRef<HTMLDivElement>(null);
     useDismiss(warnRef, warn, () => setWarn(false));
@@ -108,8 +118,8 @@ export function FilterBar({ state, onChange, error, data }: { state: FilterState
                     Advanced
                 </button>
                 {warn && (
-                    <div class="net-pop net-qwarn" role="alertdialog" aria-label="Query too complex for Basic">
-                        <p>{parseQuery(state.query).error ? "This query has an error." : "This query uses OR or groups across fields, which Basic can't show as chips."}</p>
+                    <div class="net-pop net-qwarn" role="alertdialog" aria-label="Query has an error">
+                        <p>This query has an error, so Basic can't show it.</p>
                         <div class="net-pop-actions">
                             <button class="primary" onClick={() => setWarn(false)}>
                                 Stay in Advanced
@@ -117,7 +127,7 @@ export function FilterBar({ state, onChange, error, data }: { state: FilterState
                             <button
                                 onClick={() => {
                                     setWarn(false);
-                                    onChange({ ...state, mode: "basic", basic: { text: "", chips: [] } });
+                                    onChange({ ...state, mode: "basic", basic: emptyBasic() });
                                 }}
                             >
                                 Clear and switch
@@ -139,33 +149,267 @@ export function FilterBar({ state, onChange, error, data }: { state: FilterState
 // ── Basic ────────────────────────────────────────────────────────────
 
 const unquote = (raw: string) => (/^".*"$/.test(raw) ? raw.slice(1, -1).replace(/\\(.)/g, "$1") : raw);
-/** fields whose repeated picks OR into one chip (a request has one method / status / type…) */
-const MERGE = new Set(["method", "status", "type", "is", "tab", "script"]);
+/** "+ Filter" opened from a typed suggestion, at this field */
+interface AddRequest {
+    field: FieldDef;
+    negate: boolean;
+    value: string;
+}
+/** text-like selection over the chips (indices into leafChips); `withText` = Ctrl+A also took the text box */
+type Sel = { anchor: number; focus: number; withText?: boolean };
 
 function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInput: (b: BasicFilter) => void; error: QueryError | null; data: SuggestData }) {
-    const set = (chips: Chip[]) => onInput({ ...value, chips });
-    const add = (chip: Chip) => {
-        const i = MERGE.has(chip.field) ? value.chips.findIndex((c) => c.field === chip.field && c.negate === chip.negate) : -1;
-        if (i < 0) return set([...value.chips, chip]);
-        const merged = { ...value.chips[i], values: [...new Set([...value.chips[i].values, ...chip.values])] };
-        set(value.chips.map((c, j) => (j === i ? merged : c)));
+    const box = useRef<HTMLDivElement>(null);
+    const input = useRef<HTMLInputElement>(null);
+    const listRef = useRef<HTMLUListElement>(null);
+    const dragging = useRef(false);
+    const pendingCaret = useRef<number | null>(null);
+    const [sel, setSel] = useState<Sel | null>(null);
+    const [ac, setAc] = useState<{ from: number; to: number; items: BasicSuggestion[]; active: number } | null>(null);
+    const [request, setRequest] = useState<AddRequest | null>(null);
+    useFit(listRef, !!ac, 260);
+    useLayoutEffect(() => {
+        if (pendingCaret.current === null || !input.current) return;
+        input.current.focus();
+        input.current.setSelectionRange(pendingCaret.current, pendingCaret.current);
+        pendingCaret.current = null;
+    });
+    useEffect(() => {
+        const up = () => (dragging.current = false);
+        document.addEventListener("mouseup", up);
+        return () => document.removeEventListener("mouseup", up);
+    }, []);
+    useEffect(() => {
+        document.getElementById(`net-bopt-${ac?.active}`)?.scrollIntoView?.({ block: "nearest" });
+    }, [ac?.active]);
+
+    const leaves = leafChips(value.expr);
+    const lo = sel ? Math.min(sel.anchor, sel.focus) : -1;
+    const hi = sel ? Math.max(sel.anchor, sel.focus) : -2;
+    const setExpr = (expr: BasicExpr) => onInput({ ...value, expr });
+    const toInput = (caret: number) => {
+        setSel(null);
+        pendingCaret.current = caret;
+        input.current?.focus();
+        input.current?.setSelectionRange(caret, caret);
     };
+    const selectChips = (anchor: number, focus: number) => {
+        setAc(null);
+        setSel({ anchor, focus });
+        box.current?.focus();
+    };
+    const selectAll = () => {
+        setAc(null);
+        setSel({ anchor: 0, focus: leaves.length - 1, withText: true });
+        input.current?.focus();
+        input.current?.select();
+    };
+    /** the selection removed; `typed` (a printed key) replaces it, as in a text box */
+    const replaceSel = (typed = "") => {
+        const drop = new Set(leaves.slice(lo, hi + 1));
+        const text = typed + (sel?.withText ? "" : value.text);
+        onInput({ text, expr: removeChips(value.expr, drop) });
+        toInput(typed.length);
+        if (typed) suggest(text, typed.length);
+    };
+    const selectedQuery = () => (sel?.withText ? fromBasic(value) : leaves.slice(lo, hi + 1).map(chipToString).join(" "));
+
+    const suggest = (text: string, caret: number) => {
+        let from = caret;
+        while (from > 0 && !/\s/.test(text[from - 1])) from--;
+        let to = caret;
+        while (to < text.length && !/\s/.test(text[to])) to++;
+        const items = basicSuggest(text.slice(from, to), data);
+        setAc(items.length ? { from, to, items, active: -1 } : null);
+    };
+    const accept = (i: number) => {
+        if (!ac) return;
+        const item = ac.items[i];
+        const text = (value.text.slice(0, ac.from) + value.text.slice(ac.to)).replace(/\s+/g, " ").trim();
+        setAc(null);
+        if (item.kind === "chip") return onInput(addChip({ ...value, text }, item.chip));
+        onInput({ ...value, text });
+        setRequest({ field: item.field, negate: item.negate, value: item.value });
+    };
+    /** Enter with nothing picked: what the text box holds besides plain words becomes chips */
+    const chipify = () => {
+        const parsed = parseQuery(value.text);
+        if (parsed.error) return;
+        const b = toBasic(parsed.ast);
+        if (leafChips(b.expr).length) onInput(addExpr({ ...value, text: b.text }, b.expr));
+    };
+
+    const onChipKey = (ev: KeyboardEvent) => {
+        const n = leaves.length;
+        const mod = ev.ctrlKey || ev.metaKey;
+        const key = ev.key;
+        if (key === "ArrowLeft" || key === "ArrowRight" || key === "Home" || key === "End") {
+            ev.preventDefault();
+            const to = key === "Home" ? 0 : key === "End" ? n : key === "ArrowLeft" ? (ev.shiftKey ? sel!.focus - 1 : lo - 1) : ev.shiftKey ? sel!.focus + 1 : hi + 1;
+            if (ev.shiftKey) return selectChips(sel!.withText ? n - 1 : sel!.anchor, Math.max(0, Math.min(n - 1, to)));
+            if (to >= n) return toInput(key === "End" ? value.text.length : 0);
+            selectChips(Math.max(0, to), Math.max(0, to));
+        } else if (key === "Backspace" || key === "Delete") {
+            ev.preventDefault();
+            replaceSel();
+        } else if (mod && key.toLowerCase() === "a") {
+            ev.preventDefault();
+            selectAll();
+        } else if (mod && (key.toLowerCase() === "c" || key.toLowerCase() === "x")) {
+            ev.preventDefault();
+            void navigator.clipboard?.writeText(selectedQuery()).catch(() => {});
+            if (key.toLowerCase() === "x") replaceSel();
+        } else if (key === "Escape") {
+            ev.stopPropagation();
+            toInput(0);
+        } else if (key.length === 1 && !mod && !ev.altKey) {
+            ev.preventDefault();
+            replaceSel(key);
+        }
+    };
+    const onInputKey = (ev: KeyboardEvent) => {
+        const el = input.current!;
+        const n = leaves.length;
+        const atStart = el.selectionStart === 0 && el.selectionEnd === 0;
+        const mod = ev.ctrlKey || ev.metaKey;
+        if (n && atStart && ev.key === "Backspace") {
+            ev.preventDefault();
+            return setExpr(removeChips(value.expr, new Set([leaves[n - 1]])));
+        }
+        if (n && atStart && (ev.key === "ArrowLeft" || ev.key === "Home")) {
+            ev.preventDefault();
+            return selectChips(ev.key === "Home" ? 0 : n - 1, ev.key === "Home" && ev.shiftKey ? n - 1 : ev.key === "Home" ? 0 : n - 1);
+        }
+        if (n && mod && ev.key.toLowerCase() === "a" && (!value.text || (el.selectionStart === 0 && el.selectionEnd === value.text.length))) {
+            ev.preventDefault();
+            return selectAll();
+        }
+        if (ev.key === "Enter" && (!ac || ac.active < 0)) return (setAc(null), chipify());
+        if (!ac) return;
+        const k = ac.items.length;
+        if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+            ev.preventDefault();
+            setAc({ ...ac, active: ev.key === "ArrowDown" ? (ac.active + 1) % k : (ac.active + k - 1) % k });
+        } else if (ev.key === "Enter" || ev.key === "Tab") {
+            ev.preventDefault();
+            accept(Math.max(0, ac.active));
+        } else if (ev.key === "Escape") {
+            ev.stopPropagation();
+            setAc(null);
+        }
+    };
+
+    let leaf = 0;
+    const renderExpr = (e: BasicExpr, path: number[]): JSX.Element[] =>
+        e.items.map((it, i) => {
+            const p = [...path, i];
+            const c = e.conns[i - 1];
+            const conn = i > 0 && (
+                <button class={"net-qconn" + (c === "OR" ? " or" : "")} title={`${c} — click for ${c === "OR" ? "AND" : "OR"}`} aria-label={`${c}, click to switch`} onClick={() => setExpr(toggleConn(value.expr, path, i - 1))}>
+                    {c}
+                </button>
+            );
+            if (it.k === "group")
+                return (
+                    <Fragment key={p.join(".")}>
+                        {conn}
+                        <span class={"net-qgroup" + (it.negate ? " neg" : "")}>
+                            <button class="net-qgroup-op" title={it.negate ? "Excluding the group — click to include" : "Group — click to exclude"} onClick={() => setExpr(editItem(value.expr, p, (g) => (g.k === "group" ? { ...g, negate: !g.negate } : g)))}>
+                                {it.negate ? "NOT (" : "("}
+                            </button>
+                            {renderExpr(it.expr, p)}
+                            <span class="net-qgroup-op">)</span>
+                            <button class="net-qchip-x" aria-label="Remove group" title="Remove group" onClick={() => (setSel(null), setExpr(editItem(value.expr, p, () => null)))}>
+                                ×
+                            </button>
+                        </span>
+                    </Fragment>
+                );
+            const ch = it.chip;
+            const idx = leaf++;
+            const name = ch.field || "url";
+            return (
+                <Fragment key={p.join(".")}>
+                    {conn}
+                    <span
+                        class={"net-qchip" + (ch.negate ? " neg" : "") + (idx >= lo && idx <= hi ? " sel" : "")}
+                        title={chipToString(ch)}
+                        aria-selected={idx >= lo && idx <= hi}
+                        onMouseDown={(ev) => {
+                            if ((ev.target as HTMLElement).closest("button")) return;
+                            ev.preventDefault();
+                            dragging.current = true;
+                            if (ev.shiftKey && sel) selectChips(sel.withText ? lo : sel.anchor, idx);
+                            else selectChips(idx, idx);
+                        }}
+                        onMouseEnter={(ev) => dragging.current && ev.buttons & 1 && sel && setSel({ anchor: sel.anchor, focus: idx })}
+                    >
+                        <button class="net-qchip-op" title={ch.negate ? "Excluding — click to include" : "Including — click to exclude"} onClick={() => setExpr(editItem(value.expr, p, (x) => (x.k === "chip" ? { k: "chip", chip: { ...x.chip, negate: !x.chip.negate } } : x)))}>
+                            {name}
+                            {ch.negate ? " ≠" : ":"}
+                        </button>
+                        <span class="net-qchip-vals">{ch.values.map(unquote).join(", ")}</span>
+                        <button class="net-qchip-x" aria-label={`Remove ${name} filter`} title="Remove" onClick={() => (setSel(null), setExpr(editItem(value.expr, p, () => null)))}>
+                            ×
+                        </button>
+                    </span>
+                </Fragment>
+            );
+        });
+
     return (
-        <div class={"net-qbox" + (error ? " error" : "")} title={error ? error.message : undefined}>
-            {value.chips.map((c, i) => (
-                <span key={i} class={"net-qchip" + (c.negate ? " neg" : "")} title={chipToString(c)}>
-                    <button class="net-qchip-op" title={c.negate ? "Excluding — click to include" : "Including — click to exclude"} onClick={() => set(value.chips.map((x, j) => (j === i ? { ...x, negate: !x.negate } : x)))}>
-                        {c.field}
-                        {c.negate ? " ≠" : ":"}
-                    </button>
-                    <span class="net-qchip-vals">{c.values.map(unquote).join(", ")}</span>
-                    <button class="net-qchip-x" aria-label={`Remove ${c.field} filter`} title="Remove" onClick={() => set(value.chips.filter((_, j) => j !== i))}>
-                        ×
-                    </button>
-                </span>
-            ))}
-            <input class="net-filter" type="text" placeholder="Filter URL (-word excludes)" aria-label="Filter URL" spellcheck={false} value={value.text} onInput={(e) => onInput({ ...value, text: e.currentTarget.value })} />
-            <AddFilter data={data} onAdd={add} />
+        <div
+            ref={box}
+            tabIndex={-1}
+            class={"net-qbox" + (error ? " error" : "")}
+            title={error ? error.message : undefined}
+            onKeyDown={(ev) => {
+                if (ev.target !== box.current && ev.target !== input.current) return;
+                if (sel && leaves.length) onChipKey(ev);
+                else if (ev.target === input.current) onInputKey(ev);
+            }}
+            onMouseDown={(ev) => ev.target === box.current && (ev.preventDefault(), toInput(value.text.length))}
+            onBlur={(ev) => !box.current?.contains(ev.relatedTarget as Node) && setSel(null)}
+        >
+            {renderExpr(value.expr, [])}
+            <div class="net-qtext">
+                <input
+                    ref={input}
+                    class="net-filter"
+                    type="text"
+                    placeholder="Filter URL, or type a field or value (-word excludes)"
+                    aria-label="Filter URL"
+                    spellcheck={false}
+                    autocomplete="off"
+                    aria-autocomplete="list"
+                    aria-expanded={!!ac}
+                    aria-controls="net-bsuggest"
+                    aria-activedescendant={ac && ac.active >= 0 ? `net-bopt-${ac.active}` : undefined}
+                    value={value.text}
+                    onMouseDown={() => setSel(null)}
+                    onInput={(e) => {
+                        const el = e.currentTarget;
+                        setSel(null);
+                        onInput({ ...value, text: el.value });
+                        suggest(el.value, el.selectionStart ?? el.value.length);
+                    }}
+                    onBlur={(ev) => {
+                        setAc(null);
+                        if (!box.current?.contains(ev.relatedTarget as Node)) setSel(null);
+                    }}
+                />
+                {ac && (
+                    <ul class="net-pop net-qsuggest" ref={listRef} id="net-bsuggest" role="listbox" aria-label="Suggestions">
+                        {ac.items.map((s, i) => (
+                            <li key={s.label} id={`net-bopt-${i}`} role="option" aria-selected={i === ac.active} class={i === ac.active ? "active" : ""} onMouseDown={(e) => (e.preventDefault(), accept(i))} onMouseEnter={() => setAc({ ...ac, active: i })}>
+                                <span class="net-qlist-main">{s.label}</span>
+                                {s.detail && <span class="net-qlist-detail">{s.detail}</span>}
+                            </li>
+                        ))}
+                    </ul>
+                )}
+            </div>
+            <AddFilter data={data} onAdd={(chip) => onInput(addChip(value, chip))} request={request} onRequestDone={() => setRequest(null)} />
         </div>
     );
 }
@@ -203,7 +447,10 @@ function buildChip(f: FieldDef, op: OpId, value: string, headerValue: string): C
     return { field: f.name, negate, values: [raw] };
 }
 
-function AddFilter({ data, onAdd }: { data: SuggestData; onAdd: (c: Chip) => void }) {
+/** the operator a "-word" suggestion starts with */
+const NEG_OP: Record<FieldKind, OpId> = { text: "not-contains", enum: "is-not", is: "is-not", status: "is-not", number: "gt", header: "missing" };
+
+function AddFilter({ data, onAdd, request, onRequestDone }: { data: SuggestData; onAdd: (c: Chip) => void; request?: AddRequest | null; onRequestDone?: () => void }) {
     const [open, setOpen] = useState(false);
     const [field, setField] = useState<FieldDef | null>(null);
     const [op, setOp] = useState<OpId | null>(null);
@@ -217,7 +464,16 @@ function AddFilter({ data, onAdd }: { data: SuggestData; onAdd: (c: Chip) => voi
     const popRef = useRef<HTMLDivElement>(null);
     useFit(popRef, open, 360);
     const valueInput = useRef<HTMLInputElement>(null);
-    useEffect(() => valueInput.current?.focus(), [field, op]);
+    useEffect(() => valueInput.current?.focus(), [field, op, open]);
+    useEffect(() => {
+        if (!request) return;
+        reset();
+        setField(request.field);
+        setOp(request.negate ? NEG_OP[request.field.kind] : OPS[request.field.kind][0]);
+        setValue(request.value);
+        setOpen(true);
+        onRequestDone?.();
+    }, [request]);
     const commit = (v = value) => {
         if (!field || !op) return;
         if (!v.trim() || (op === "has-value" && !headerValue.trim())) return setErr("Enter a value");
