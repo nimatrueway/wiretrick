@@ -329,6 +329,25 @@ describe("NetworkPanel", () => {
             expect(rowNames(container)).toEqual(["a.js", "c.js"]);
         });
 
+        it("Basic: + Filter on a text field with suggestions: ↑/↓ move through them, Alt+↑/↓ switch the operator", async () => {
+            const store = createNetStore();
+            store.apply({ type: "netSnapshot", entries: [entry("a", { tabId: 1 }), entry("b", { tabId: 9, startedAt: base + 1 })] });
+            const { container, getByText, getByLabelText } = render(<NetworkPanel store={store} listTabs={async () => [{ id: 1, title: "Live tab" }, { id: 9, title: "Other tab" }]} />);
+            fireEvent.click(getByText("+ Filter"));
+            fireEvent.click([...container.querySelectorAll(".net-qadd-pop .net-qlist-main")].find((n) => n.textContent === "tab")!);
+            const input = getByLabelText("Value") as HTMLInputElement;
+            const op = () => container.querySelector(".net-qadd-ops .on")!.textContent;
+            const active = () => container.querySelector('.net-qadd-pop [role="option"].active .net-qlist-main')?.textContent;
+            await waitFor(() => expect(container.querySelectorAll('.net-qadd-pop [role="option"]').length).toBeGreaterThan(1));
+            fireEvent.keyDown(input, { key: "ArrowDown" });
+            fireEvent.keyDown(input, { key: "ArrowDown" });
+            expect(op()).toBe("contains");
+            expect(active()).toBeTruthy();
+            expect(input.value).toBe(active());
+            fireEvent.keyDown(input, { key: "ArrowDown", altKey: true });
+            expect(op()).toBe("does not contain");
+        });
+
         it("Basic: typed values are validated before adding", () => {
             const { container, getByText, getByLabelText } = setup(rows3());
             fireEvent.click(getByText("+ Filter"));

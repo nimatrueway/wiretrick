@@ -844,12 +844,13 @@ function AddFilter({ data, onAdd, request, onRequestDone }: { data: SuggestData;
     const onValueKey = (e: KeyboardEvent) => {
         const k = suggestions.length;
         const arrow = e.key === "ArrowDown" || e.key === "ArrowUp";
-        if (arrow && field?.kind === "text" && op) {
-            // text fields: ↑/↓ steps through the operators (contains, is, matches…)
+        if (arrow && field?.kind === "text" && op && (e.altKey || !k)) {
+            // text fields: ↑/↓ step through the operators (contains, is, matches…) — with
+            // a suggestion list (tab, script…) they move through it, and Alt+↑/↓ switches
             e.preventDefault();
             const i = opsFor.indexOf(op), n = opsFor.length;
             setOp(opsFor[(i + (e.key === "ArrowDown" ? 1 : n - 1)) % n]);
-        } else if (k && arrow) {
+        } else if (k && arrow && !e.altKey) {
             e.preventDefault();
             setActive(e.key === "ArrowDown" ? (active + 1) % k : active < 0 ? k - 1 : (active + k - 1) % k, true);
         } else if (e.key === "Enter") {

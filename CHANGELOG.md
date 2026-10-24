@@ -7,6 +7,13 @@ its section below.
 
 ## [Unreleased]
 
+### Fixed
+
+- Network filter (Basic), + Filter on a text field with suggestions (tab,
+  script…): ↑/↓ now move through the suggestion list instead of switching
+  the operator; Alt+↑/↓ switches the operator (plain ↑/↓ still does when
+  there's no list, as on url).
+
 ### Added
 
 - Shortcuts for the bottom panel: ⌥⇧P / ⌥⇧L / ⌥⇧N (Alt+Shift+P/L/N) show

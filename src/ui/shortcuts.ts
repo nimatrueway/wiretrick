@@ -28,6 +28,7 @@ export const SHORTCUTS: Shortcut[] = [
     { keys: ["F2"], action: "Rename (a / in the name moves it into a folder)", where: "Explorer" },
     { keys: ["Delete", "Mod+Backspace"], action: "Delete (asks first; a folder with its contents)", where: "Explorer" },
     { keys: ["↑", "↓", "Enter"], action: "Move through suggestions (+ Filter values too) / pick one", where: "Network filter" },
+    { keys: ["Alt+↑", "Alt+↓"], action: "+ Filter on a text field: switch the operator (↑/↓ too when there are no suggestions)", where: "Network filter" },
     { keys: ["Mod+Z"], action: "Undo a Basic filter change (chips too)", where: "Network filter" },
     { keys: ["Mod+Shift+Z", "Mod+Y"], action: "Redo", where: "Network filter" },
     { keys: ["Mod+/"], action: "Toggle line comment", where: "Editor" },
