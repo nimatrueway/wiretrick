@@ -164,7 +164,7 @@ at the right of the toolbar do the same.
   and rules errors, which go to the Problems view instead of the Log. The download button (↓) saves the
   full debug log — every engine decision with timestamps; attach it when
   reporting issues.
-- **Network view** — a devtools-style request table: filter text, per-type
+- **Network view** — a devtools-style request table: a [filter bar](#network-filter), per-type
   toggles, a tab picker (closed tabs stay listed, dimmed under *Closed tabs*,
   until the log is cleared), a script-activity filter, a script picker
   (only requests one script ran on — the *Wiretrick* column; the activity
@@ -203,6 +203,42 @@ at the right of the toolbar do the same.
     [Missed warning](strategies.md#missed-warning)). It is logged as
     a WARN line and shown as a yellow *missed* entry in the request's
     details; it does not mark the row observed or modified.
+
+### Network filter
+
+The filter bar has two modes (the choice is remembered):
+
+- **Basic** — a URL text box plus chips. **+ Filter** walks field → operator
+  → value (with suggestions); click a chip's operator to negate it, × to
+  remove it. Picking another value for method, status, type, is, tab or script
+  merges into the existing chip (either value matches).
+- **Advanced** — a query like a GitHub search, with autocomplete (Ctrl+Space,
+  Tab/Enter to accept) and an inline error; while the query has an error the
+  last valid one keeps filtering. Switching back to Basic asks first if the
+  query can't be shown as chips.
+
+| Syntax | Meaning |
+| --- | --- |
+| `word` | URL contains word (case-insensitive); space = AND |
+| `field:value` | field contains (or, for method/type, equals) value |
+| `field:a,b` | either value |
+| `-term`, `NOT term` | exclude |
+| `a OR b`, `( … )` | either side; group |
+| `"two words"` | quote spaces, commas, parentheses |
+| `=value`, `val*`, `/re/` | exact, whole-value wildcard, regex |
+| `>`, `>=`, `<`, `<=` | compare status, size (`kb`, `mb`), time (`ms`, `s`) |
+| `4xx`, `400..499` | status class or range |
+
+Fields: `url`, `host`, `path`, `method`, `status`, `type`, `mime`,
+`req-header`/`res-header` (`name` present, `name=value` contains,
+`name=/re/`), `req-body`/`res-body` (only recorded bodies are searched),
+`tab` (title or id), `script`, `size`, `time`, and
+`is:` `touched`/`observed`/`modified`/`missed`/`failed`/`pending`/`cached`. The **?**
+button lists them with clickable examples, e.g.
+`status:>=400`, `is:modified -type:img`, `method:POST,PUT host:api`,
+`res-header:content-type=json`, `size:>100kb OR time:>1s`.
+
+The tab and script pickers and type toggles still work alongside the query.
 
 ## Synced folder
 

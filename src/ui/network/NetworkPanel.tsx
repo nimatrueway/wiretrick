@@ -24,6 +24,8 @@ import {
     ALL_TYPES,
     type TypeCategory,
 } from "./netFormat";
+import { compileQuery, parseQuery, suggestData, type QNode } from "./netQuery";
+import { FilterBar, effectiveQuery, initialFilterState, type FilterState } from "./NetFilterBar";
 
 export interface TabInfo {
     id: number;
@@ -80,9 +82,19 @@ function dragX(down: MouseEvent, onMove: (dx: number) => void, cursor: string): 
 
 export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: () => Promise<TabInfo[]> }) {
     const [filter, setFilter] = useState<NetFilter>({ text: "", types: ALL_TYPES, touched: "any", tabId: null, script: null });
+    const [tabs, setTabs] = useState<TabInfo[]>([]);
+    const [fq, setFq] = useState<FilterState>(initialFilterState);
+    const parsed = useMemo(() => parseQuery(effectiveQuery(fq)), [fq]);
+    // while the query has an error, keep filtering by the last valid one
+    const lastGood = useRef<QNode | null>(null);
+    if (!parsed.error) lastGood.current = parsed.ast;
+    const ast = lastGood.current;
+    // titles of every tab seen live, so a closed tab keeps its name
+    const tabTitles = useRef(new Map<number, string>());
+    const tabTitle = (id: number) => tabs.find((t) => t.id === id)?.title ?? tabTitles.current.get(id);
+    const pred = useMemo(() => compileQuery(ast, { tabTitle }), [ast, tabs]);
     const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "start", dir: 1 });
     const [selectedId, setSelectedId] = useState<string | null>(null);
-    const [tabs, setTabs] = useState<TabInfo[]>([]);
     const [layout, setLayoutState] = useState<Layout>(loadLayout);
     const [colMenu, setColMenu] = useState<{ x: number; y: number } | null>(null);
     const colMenuRef = useRef<HTMLUListElement>(null);
@@ -162,11 +174,11 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
     };
 
     const rows = useMemo(() => {
-        const out = all.filter((e) => matches(e, filter));
+        const out = all.filter((e) => matches(e, filter) && pred(e));
         const cmp = compare(sort.key);
         out.sort((a, b) => cmp(a, b) * sort.dir || a.startedAt - b.startedAt);
         return out;
-    }, [all, filter, sort]);
+    }, [all, filter, sort, pred]);
 
     const span = useMemo(() => {
         if (!rows.length) return { t0: 0, total: 1 };
@@ -193,8 +205,6 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
 
     // refresh on focus only: replacing <option>s while the native dropdown
     // is open (mousedown) closes it / drops the pick in Chromium
-    // titles of every tab seen live, so a closed tab keeps its name
-    const tabTitles = useRef(new Map<number, string>());
     const refreshTabs = () =>
         void listTabs?.().then((next) => {
             for (const t of next) tabTitles.current.set(t.id, t.title);
@@ -240,6 +250,7 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
         if (filter.script !== null) out.add(filter.script);
         return [...out].sort((a, b) => a.localeCompare(b));
     }, [all, filter.script]);
+    const suggestions = useMemo(() => suggestData(all, tabTitle), [all, tabs]);
     const selectedClosed = filter.tabId !== null && closedTabs.some((t) => t.id === filter.tabId);
     const short = (s: string) => (s.length > 40 ? s.slice(0, 40) + "…" : s);
 
@@ -252,13 +263,7 @@ export function NetworkPanel({ store, listTabs }: { store: NetStore; listTabs?: 
                 <button class="net-clear" title="Clear network log" aria-label="Clear network log" onClick={() => (store.clear(), setSelectedId(null))}>
                     ⊘
                 </button>
-                <input
-                    class="net-filter"
-                    type="text"
-                    placeholder="Filter (prefix - to exclude)"
-                    value={filter.text}
-                    onInput={(e) => setFilter({ ...filter, text: e.currentTarget.value })}
-                />
+                <FilterBar state={fq} onChange={setFq} error={parsed.error} data={suggestions} />
                 <TouchMenu value={filter.touched} onChange={(touched) => setFilter({ ...filter, touched })} />
                 <select
                     class={"net-script" + (filter.script !== null ? " active" : "")}

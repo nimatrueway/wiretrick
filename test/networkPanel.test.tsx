@@ -314,4 +314,107 @@ describe("NetworkPanel", () => {
         fireEvent.change(sel, { target: { value: "" } });
         await waitFor(() => expect(sel.querySelector("optgroup")).toBeNull());
     });
+
+    describe("filter bar", () => {
+        const rows3 = () => [entry("a"), entry("b", { method: "POST", status: 500, startedAt: base + 1 }), entry("c", { url: "https://cdn.test/c.js", startedAt: base + 2 })];
+        const q = (c: Element) => c.querySelector(".net-query") as HTMLInputElement;
+        afterEach(() => localStorage.removeItem("wt.network.filterMode"));
+
+        it("Basic: the text box filters by URL, '-' excludes", () => {
+            const { container } = setup(rows3());
+            const box = container.querySelector(".net-qbox .net-filter") as HTMLInputElement;
+            fireEvent.input(box, { target: { value: "cdn" } });
+            expect(rowNames(container)).toEqual(["c.js"]);
+            fireEvent.input(box, { target: { value: "-cdn" } });
+            expect(rowNames(container)).toEqual(["a.js", "b.js"]);
+        });
+
+        it("Basic: + Filter adds a chip (field → operator → value); repeated picks OR; × removes", () => {
+            const { container, getByText, getByLabelText } = setup(rows3());
+            const add = (field: string, value: string) => {
+                fireEvent.click(getByText("+ Filter"));
+                fireEvent.click([...container.querySelectorAll(".net-qadd-pop .net-qlist-main")].find((n) => n.textContent === field)!);
+                fireEvent.click([...container.querySelectorAll(".net-qadd-pop .net-qlist-main")].find((n) => n.textContent === value)!);
+            };
+            add("method", "POST");
+            expect(container.querySelector(".net-qchip")!.textContent).toContain("method:POST");
+            expect(rowNames(container)).toEqual(["b.js"]);
+            add("method", "GET");
+            expect(container.querySelectorAll(".net-qchip").length).toBe(1);
+            expect(container.querySelector(".net-qchip-vals")!.textContent).toBe("POST, GET");
+            expect(rowNames(container)).toEqual(["a.js", "b.js", "c.js"]);
+            fireEvent.click(container.querySelector(".net-qchip-op")!); // negate
+            expect(rowNames(container)).toEqual([]);
+            fireEvent.click(getByLabelText("Remove method filter"));
+            expect(container.querySelector(".net-qchip")).toBeNull();
+            expect(rowNames(container)).toEqual(["a.js", "b.js", "c.js"]);
+        });
+
+        it("Basic: typed values are validated before adding", () => {
+            const { container, getByText, getByLabelText } = setup(rows3());
+            fireEvent.click(getByText("+ Filter"));
+            fireEvent.click([...container.querySelectorAll(".net-qadd-pop .net-qlist-main")].find((n) => n.textContent === "size")!);
+            fireEvent.input(getByLabelText("Value"), { target: { value: "lots" } });
+            fireEvent.click(getByText("Add"));
+            expect(container.querySelector(".net-qadd-err")!.textContent).toContain("size:");
+            fireEvent.input(getByLabelText("Value"), { target: { value: "1kb" } });
+            fireEvent.click(getByText("Add"));
+            expect(container.querySelector(".net-qchip")!.textContent).toContain("size:>1kb");
+        });
+
+        it("Advanced: carries the Basic query over, filters as you type, keeps the last valid filter on errors", () => {
+            const { container, getByText } = setup(rows3());
+            fireEvent.input(container.querySelector(".net-qbox .net-filter")!, { target: { value: "site" } });
+            fireEvent.click(getByText("Advanced"));
+            expect(localStorage.getItem("wt.network.filterMode")).toBe("advanced");
+            expect(q(container).value).toBe("site");
+            fireEvent.input(q(container), { target: { value: "status:5xx OR host:cdn" } });
+            expect(rowNames(container)).toEqual(["b.js", "c.js"]);
+            fireEvent.input(q(container), { target: { value: "status:5xx OR (host:x" } });
+            expect(container.querySelector(".net-qbox")!.classList.contains("error")).toBe(true);
+            expect(container.querySelector(".net-qerr-msg")!.textContent).toBe("Missing )");
+            expect(container.querySelector(".net-qerr")).not.toBeNull();
+            expect(rowNames(container)).toEqual(["b.js", "c.js"]);
+        });
+
+        it("Advanced → Basic warns when the query can't be chips", () => {
+            const { container, getByText } = setup(rows3());
+            fireEvent.click(getByText("Advanced"));
+            fireEvent.input(q(container), { target: { value: "status:5xx OR host:cdn" } });
+            fireEvent.click(getByText("Basic"));
+            expect(container.querySelector(".net-qwarn")).not.toBeNull();
+            fireEvent.click(getByText("Stay in Advanced"));
+            expect(q(container).value).toBe("status:5xx OR host:cdn");
+            fireEvent.input(q(container), { target: { value: "cdn method:GET,POST" } });
+            fireEvent.click(getByText("Basic"));
+            expect((container.querySelector(".net-qbox .net-filter") as HTMLInputElement).value).toBe("cdn");
+            expect(container.querySelector(".net-qchip-vals")!.textContent).toBe("GET, POST");
+        });
+
+        it("Advanced: autocompletes fields then values with the keyboard", () => {
+            const { container, getByText } = setup(rows3());
+            fireEvent.click(getByText("Advanced"));
+            const input = q(container);
+            input.value = "meth";
+            input.setSelectionRange(4, 4);
+            fireEvent.input(input);
+            expect(container.querySelector(".net-qsuggest li.active")!.textContent).toContain("method:");
+            fireEvent.keyDown(input, { key: "Tab" });
+            expect(input.value).toBe("method:");
+            expect(container.querySelector(".net-qsuggest")).not.toBeNull(); // straight on to values
+            fireEvent.keyDown(input, { key: "ArrowDown" });
+            fireEvent.keyDown(input, { key: "Enter" });
+            expect(input.value).toBe("method:POST ");
+            expect(container.querySelector(".net-qsuggest")).toBeNull();
+            expect(rowNames(container)).toEqual(["b.js"]);
+        });
+
+        it("? lists the syntax and clicking an example uses it", () => {
+            const { container, getByLabelText, getByText } = setup(rows3());
+            fireEvent.click(getByLabelText("Filter syntax"));
+            fireEvent.click(getByText("status:>=400"));
+            expect(q(container).value).toBe("status:>=400");
+            expect(rowNames(container)).toEqual(["b.js"]);
+        });
+    });
 });

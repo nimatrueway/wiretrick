@@ -988,6 +988,84 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 .net-chips { display: flex; gap: 2px; flex-wrap: wrap; }
 .net-chip.active { background: var(--bg-active) !important; color: var(--fg) !important; }
 
+/* filter bar: Basic|Advanced toggle, chips / query box, "+ Filter", "?" help */
+.net-qbar { display: flex; align-items: center; gap: 6px; flex: 1 1 380px; min-width: 260px; max-width: 760px; }
+.net-qmode { position: relative; display: inline-flex; flex: none; border: 1px solid var(--border); border-radius: 3px; }
+.net-toolbar .net-qmode > button { border: none; border-radius: 0; padding: 2px 7px; }
+.net-toolbar .net-qmode > button + button { border-left: 1px solid var(--border); }
+.net-toolbar .net-qmode > button.on { background: var(--bg-active); color: var(--fg); }
+.net-qbox {
+    position: relative; flex: 1; min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 3px;
+    min-height: 22px; padding: 1px 2px; background: var(--bg); border: 1px solid var(--border); border-radius: 3px;
+}
+.net-qbox:focus-within { border-color: var(--accent); }
+.net-qbox.error, .net-qbox.error:focus-within { border-color: var(--err); }
+.net-qbox .net-filter { flex: 1; min-width: 90px; width: auto; border: none; background: transparent; padding: 2px 4px; outline: none; }
+.net-qchip { display: inline-flex; align-items: center; max-width: 260px; height: 18px; border-radius: 3px; background: var(--tag-bg); color: var(--fg); }
+.net-qchip.neg { background: var(--lv-error-bg); }
+.net-toolbar .net-qchip button { border: none; color: inherit; padding: 0 3px 0 5px; height: 100%; }
+.net-toolbar .net-qchip button:hover { background: rgba(127, 127, 127, 0.2); color: var(--fg); }
+.net-qchip-op { font-weight: 600; font-family: var(--mono, ui-monospace, monospace); font-variant-ligatures: none; }
+.net-qchip-vals { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 2px; }
+.net-toolbar .net-qchip .net-qchip-x { padding: 0 5px; opacity: 0.7; }
+.net-toolbar .net-qchip .net-qchip-x:hover { opacity: 1; }
+.net-qadd, .net-qhelp { position: relative; display: inline-flex; }
+.net-qadd { margin-left: auto; }
+.net-toolbar .net-qadd-btn { white-space: nowrap; padding: 1px 6px; }
+.net-toolbar .net-qhelp-btn {
+    width: 18px; height: 18px; padding: 0; border-radius: 50%; border-color: var(--border); font-weight: 600;
+}
+.net-pop {
+    position: absolute; top: calc(100% + 4px); left: 0; z-index: 1000; padding: 4px; font-size: 11px; color: var(--fg);
+    background: var(--bg-panel); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+}
+.net-toolbar .net-pop button { color: var(--fg); }
+.net-toolbar .net-pop button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.net-pop-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.net-qwarn { width: 270px; padding: 8px; }
+.net-qwarn p { margin: 0 0 8px; }
+.net-qlist { list-style: none; margin: 0; padding: 0; }
+.net-toolbar .net-qlist button, .net-qsuggest li {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 12px; width: 100%;
+    padding: 3px 6px; text-align: left; border-radius: 3px; cursor: pointer;
+}
+.net-qsuggest li.active { background: var(--sel); }
+.net-qlist-main { font-family: var(--mono, ui-monospace, monospace); font-variant-ligatures: none; white-space: nowrap; }
+.net-qlist-detail { color: var(--fg-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.net-qadd-pop { left: auto; right: 0; width: 340px; }
+.net-qadd-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 2px 2px 6px; }
+.net-qadd-head b { font-family: var(--mono, ui-monospace, monospace); }
+.net-toolbar .net-qadd-back { padding: 0 5px; font-size: 13px; }
+.net-qadd-ops { display: inline-flex; flex-wrap: wrap; gap: 2px; }
+.net-toolbar .net-qadd-ops button { border-color: var(--border); }
+.net-toolbar .net-qadd-ops button.on { background: var(--bg-active); border-color: var(--accent); }
+.net-qadd-row { display: flex; gap: 4px; margin: 0 2px 4px; }
+.net-qadd-row input {
+    flex: 1; min-width: 0; padding: 2px 6px; font-size: 11px; color: var(--fg);
+    background: var(--bg); border: 1px solid var(--border); border-radius: 3px;
+}
+.net-qadd-row input:focus { border-color: var(--accent); outline: none; }
+.net-qadd-err { color: var(--err); margin: 0 4px 4px; }
+/* Advanced: a transparent-text mirror behind the input draws the error underline */
+.net-qadv { flex-wrap: nowrap; height: 22px; padding: 0; }
+.net-query, .net-qmirror {
+    font: 11px/20px var(--mono, ui-monospace, monospace); font-variant-ligatures: none; letter-spacing: normal; padding: 0 6px; margin: 0;
+}
+.net-query { position: relative; z-index: 1; flex: 1; min-width: 0; height: 20px; color: var(--fg); background: transparent; border: none; outline: none; }
+.net-qmirror { position: absolute; inset: 0; color: transparent; white-space: pre; overflow: hidden; pointer-events: none; }
+.net-qerr { text-decoration: underline wavy var(--err); text-decoration-skip-ink: none; text-underline-offset: 2px; }
+.net-qerr-msg { flex: 0 1 auto; max-width: 45%; padding: 0 6px; color: var(--err); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.net-qsuggest { right: 0; list-style: none; margin: 0; }
+.net-qhelp-pop { left: auto; right: 0; width: 400px; padding: 8px; }
+.net-qhelp-table { border-collapse: collapse; width: 100%; }
+.net-qhelp-table td { padding: 2px 6px 2px 2px; vertical-align: top; }
+.net-qhelp-table td:first-child { white-space: nowrap; }
+.net-qhelp-pop code { font-family: var(--mono, ui-monospace, monospace); font-variant-ligatures: none; color: var(--key); }
+.net-qhelp-h { margin: 10px 2px 4px; color: var(--fg-dim); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+.net-qhelp-fields { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 2px; }
+.net-qhelp-fields code { padding: 0 4px; border-radius: 3px; background: var(--bg); }
+.net-qhelp-note { margin: 8px 2px 0; color: var(--fg-dim); }
+
 .net-body { display: flex; flex: 1; min-height: 0; }
 .net-table-wrap { flex: 1; overflow: auto; min-width: 0; }
 .net-details { flex: 0 0 62%; }
