@@ -54,7 +54,7 @@ export function effectiveQuery(s: FilterState): string {
 }
 
 /** Close a popup on outside mousedown or Escape. */
-function useDismiss(ref: RefObject<HTMLElement | null>, open: boolean, close: () => void) {
+function useDismiss(ref: RefObject<HTMLElement | null>, open: boolean, close: () => void, escape: () => void = close) {
     useEffect(() => {
         if (!open) return;
         const onDown = (ev: MouseEvent) => {
@@ -63,7 +63,7 @@ function useDismiss(ref: RefObject<HTMLElement | null>, open: boolean, close: ()
         const onKey = (ev: KeyboardEvent) => {
             if (ev.key === "Escape") {
                 ev.stopPropagation();
-                close();
+                escape();
             }
         };
         document.addEventListener("mousedown", onDown);
@@ -158,6 +158,9 @@ interface AddRequest {
 /** text-like selection over the chips (indices into leafChips); `withText` = Ctrl+A also took the text box */
 type Sel = { anchor: number; focus: number; withText?: boolean };
 
+/** what a highlighted suggestion puts in the text box: query text, not its display label */
+const suggestionText = (s: BasicSuggestion) => (s.kind === "chip" ? chipToString(s.chip) : s.label);
+
 /** typing within this long after the last keystroke joins the same undo step */
 const TYPING_JOIN_MS = 1000;
 const UNDO_DEPTH = 100;
@@ -205,7 +208,8 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
     const dragging = useRef(false);
     const pendingCaret = useRef<number | null>(null);
     const [sel, setSel] = useState<Sel | null>(null);
-    const [ac, setAc] = useState<{ from: number; to: number; items: BasicSuggestion[]; active: number } | null>(null);
+    /** `kb`: the highlight came from ↑/↓, so the text box shows it (hover doesn't) */
+    const [ac, setAc] = useState<{ from: number; to: number; items: BasicSuggestion[]; active: number; kb?: boolean } | null>(null);
     const [request, setRequest] = useState<AddRequest | null>(null);
     useFit(listRef, !!ac, 260);
     const history = useBasicUndo(value, onInput);
@@ -225,6 +229,8 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
     }, [ac?.active]);
 
     const leaves = leafChips(value.expr);
+    const previewItem = ac?.kb && ac.active >= 0 ? ac.items[ac.active] : null;
+    const shown = previewItem ? value.text.slice(0, ac!.from) + suggestionText(previewItem) + value.text.slice(ac!.to) : value.text;
     const lo = sel ? Math.min(sel.anchor, sel.focus) : -1;
     const hi = sel ? Math.max(sel.anchor, sel.focus) : -2;
     const setExpr = (expr: BasicExpr) => onInput({ ...value, expr });
@@ -330,13 +336,17 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
         const k = ac.items.length;
         if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
             ev.preventDefault();
-            setAc({ ...ac, active: ev.key === "ArrowDown" ? (ac.active + 1) % k : (ac.active + k - 1) % k });
+            const active = ev.key === "ArrowDown" ? (ac.active + 1) % k : ac.active < 0 ? k - 1 : (ac.active + k - 1) % k;
+            pendingCaret.current = ac.from + suggestionText(ac.items[active]).length;
+            setAc({ ...ac, active, kb: true });
         } else if (ev.key === "Enter" || ev.key === "Tab") {
             ev.preventDefault();
             accept(Math.max(0, ac.active));
         } else if (ev.key === "Escape") {
             ev.stopPropagation();
-            setAc(null);
+            // first Esc puts back what was typed, the next one closes the list
+            if (previewItem) (setAc({ ...ac, active: -1, kb: false }), (pendingCaret.current = ac.to));
+            else setAc(null);
         }
     };
 
@@ -434,7 +444,7 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
                     aria-expanded={!!ac}
                     aria-controls="net-bsuggest"
                     aria-activedescendant={ac && ac.active >= 0 ? `net-bopt-${ac.active}` : undefined}
-                    value={value.text}
+                    value={shown}
                     onMouseDown={() => setSel(null)}
                     onInput={(e) => {
                         const el = e.currentTarget;
@@ -451,7 +461,7 @@ function BasicInput({ value, onInput, error, data }: { value: BasicFilter; onInp
                 {ac && (
                     <ul class="net-pop net-qsuggest" ref={listRef} id="net-bsuggest" role="listbox" aria-label="Suggestions">
                         {ac.items.map((s, i) => (
-                            <li key={s.label} id={`net-bopt-${i}`} role="option" aria-selected={i === ac.active} class={i === ac.active ? "active" : ""} onMouseDown={(e) => (e.preventDefault(), accept(i))} onMouseEnter={() => setAc({ ...ac, active: i })}>
+                            <li key={s.label} id={`net-bopt-${i}`} role="option" aria-selected={i === ac.active} class={i === ac.active ? "active" : ""} onMouseDown={(e) => (e.preventDefault(), accept(i))} onMouseEnter={() => !ac.kb && setAc({ ...ac, active: i })}>
                                 <span class="net-qlist-main">{s.label}</span>
                                 {s.detail && <span class="net-qlist-detail">{s.detail}</span>}
                             </li>
@@ -507,12 +517,15 @@ function AddFilter({ data, onAdd, request, onRequestDone }: { data: SuggestData;
     const [value, setValue] = useState("");
     const [headerValue, setHeaderValue] = useState("");
     const [err, setErr] = useState<string | null>(null);
-    /** the highlighted value suggestion (-1: none), moved with Up/Down from the text box */
-    const [active, setActive] = useState(-1);
+    /** the highlighted value suggestion (-1: none); `kb`: moved with ↑/↓, so the text box shows it */
+    const [hl, setHl] = useState({ i: -1, kb: false });
+    const active = hl.i;
+    const setActive = (i: number, kb = false) => setHl({ i, kb });
+    const previewing = useRef(false);
     const ref = useRef<HTMLDivElement>(null);
     const reset = () => (setField(null), setOp(null), setValue(""), setHeaderValue(""), setErr(null), setActive(-1));
     const close = () => (setOpen(false), reset());
-    useDismiss(ref, open, close);
+    useDismiss(ref, open, close, () => (previewing.current ? setActive(-1) : close()));
     const popRef = useRef<HTMLDivElement>(null);
     useFit(popRef, open, 360);
     const valueInput = useRef<HTMLInputElement>(null);
@@ -538,6 +551,8 @@ function AddFilter({ data, onAdd, request, onRequestDone }: { data: SuggestData;
     const opsFor = field ? OPS[field.kind] : [];
     const needsList = field && op && op !== "matches" && op !== "gt" && op !== "lt";
     const suggestions = needsList ? fieldValues(field!.name, data).filter((s) => !/^[<>]/.test(s.value) && s.value.toLowerCase().includes(value.toLowerCase())).slice(0, 50) : [];
+    const preview = hl.kb && active >= 0 && active < suggestions.length ? suggestions[active].value : null;
+    previewing.current = preview !== null;
     const pick = (v: string) => (op === "has-value" ? (setValue(v), setActive(-1)) : commit(v));
     useEffect(() => setActive(-1), [field, op, value]);
     useEffect(() => {
@@ -547,7 +562,7 @@ function AddFilter({ data, onAdd, request, onRequestDone }: { data: SuggestData;
         const k = suggestions.length;
         if (k && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
             e.preventDefault();
-            setActive(e.key === "ArrowDown" ? (active + 1) % k : (active < 0 ? k - 1 : (active + k - 1) % k));
+            setActive(e.key === "ArrowDown" ? (active + 1) % k : active < 0 ? k - 1 : (active + k - 1) % k, true);
         } else if (e.key === "Enter") {
             if (active >= 0 && active < k) pick(suggestions[active].value);
             else if (op !== "has-value") commit();
@@ -598,7 +613,7 @@ function AddFilter({ data, onAdd, request, onRequestDone }: { data: SuggestData;
                                             spellcheck={false}
                                             aria-label={field.kind === "header" ? "Header name" : "Value"}
                                             placeholder={field.kind === "header" ? "header name" : field.kind === "number" ? (field.name === "size" ? "10kb" : "500ms") : op === "matches" ? "regex" : "value"}
-                                            value={value}
+                                            value={preview ?? value}
                                             aria-controls="net-qadd-list"
                                             aria-activedescendant={active >= 0 ? `net-qadd-opt-${active}` : undefined}
                                             onInput={(e) => (setValue(e.currentTarget.value), setErr(null))}
@@ -615,7 +630,7 @@ function AddFilter({ data, onAdd, request, onRequestDone }: { data: SuggestData;
                                     {suggestions.length > 0 && (
                                         <ul class="net-qlist" id="net-qadd-list" role="listbox" aria-label="Suggestions">
                                             {suggestions.map((s, i) => (
-                                                <li key={s.value} id={`net-qadd-opt-${i}`} role="option" aria-selected={i === active} class={i === active ? "active" : ""} onMouseEnter={() => setActive(i)}>
+                                                <li key={s.value} id={`net-qadd-opt-${i}`} role="option" aria-selected={i === active} class={i === active ? "active" : ""} onMouseEnter={() => !hl.kb && setActive(i)}>
                                                     <button onClick={() => pick(s.value)}>
                                                         <span class="net-qlist-main">{s.value}</span>
                                                         {s.detail && <span class="net-qlist-detail">{s.detail}</span>}

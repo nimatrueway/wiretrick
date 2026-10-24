@@ -365,6 +365,8 @@ describe("NetworkPanel", () => {
             fireEvent.keyDown(input, { key: "ArrowDown" });
             fireEvent.keyDown(input, { key: "ArrowDown" });
             const picked = active();
+            expect(input.value).toBe(picked); // the text box shows the highlighted value
+            expect(opts().length).toBeGreaterThan(1);
             expect(input.getAttribute("aria-activedescendant")).toBe("net-qadd-opt-1");
             fireEvent.keyDown(input, { key: "Enter" });
             expect(container.querySelector(".net-qchip")!.textContent).toContain(`method:${picked}`);
@@ -424,6 +426,26 @@ describe("NetworkPanel", () => {
             expect(container.querySelector(".net-qwarn")).not.toBeNull();
             fireEvent.click(getByText("Stay in Advanced"));
             expect(q(container).value).toBe("(host:x");
+        });
+
+        it("Basic: ↑/↓ show the highlighted suggestion in the text box; Esc puts back what was typed", () => {
+            const { container } = setup(rows3());
+            const box = container.querySelector(".net-qbox .net-filter") as HTMLInputElement;
+            box.value = "api pos";
+            box.setSelectionRange(7, 7);
+            fireEvent.input(box);
+            const first = container.querySelector("#net-bsuggest li .net-qlist-main")!.textContent;
+            expect(first).toBe("method: POST");
+            fireEvent.mouseEnter(container.querySelector("#net-bsuggest li")!);
+            expect(box.value).toBe("api pos"); // hover highlights without touching the text
+            fireEvent.keyDown(box, { key: "ArrowUp" });
+            fireEvent.keyDown(box, { key: "ArrowDown" });
+            expect(box.value).toBe("api method:POST");
+            fireEvent.keyDown(box, { key: "Escape" });
+            expect(box.value).toBe("api pos");
+            expect(container.querySelector("#net-bsuggest")).not.toBeNull();
+            fireEvent.keyDown(box, { key: "Escape" });
+            expect(container.querySelector("#net-bsuggest")).toBeNull();
         });
 
         it("Basic: typing suggests fields and values like + Filter", () => {

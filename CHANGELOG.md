@@ -7,6 +7,11 @@ its section below.
 
 ## [Unreleased]
 
+### Changed
+
+- Network filter (Basic): ↑/↓ put the highlighted suggestion in the text
+  box, in the filter box and in **+ Filter**; Esc puts back what you typed.
+
 ## [0.9.6] - 2026-10-24
 
 ### Added

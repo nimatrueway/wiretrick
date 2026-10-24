@@ -209,7 +209,8 @@ at the right of the toolbar do the same.
 The filter bar has two modes (the choice is remembered):
 
 - **Basic** — a URL text box plus chips. Typing suggests fields and values
-  (↑/↓, Tab to accept); Enter turns typed `field:value` terms into chips.
+  (↑/↓ show the highlighted one in the box, Esc puts back what you typed,
+  Tab to accept); Enter turns typed `field:value` terms into chips.
   **+ Filter** walks field → operator → value (with suggestions, ↑/↓ and
   Enter from the value box); click a
   chip's operator to negate it, × to remove it. Picking another value for
