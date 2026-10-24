@@ -28,6 +28,8 @@ import type { ShippedLib } from "../../shared/scriptImports";
 import { effectiveStrategy, hookCanSee, routeLabel, routeMatches, setDefaultStrategy, type RouteMeta, type Strategy } from "../../shared/route";
 import { analyzeScripts, runBodyOp, type Analyzed } from "../compileHost";
 import { recordNetBody } from "../network";
+import { reportSkipped, setSkipRoutes } from "./skipped";
+import { winnerOf } from "../../shared/precedence";
 import { STRATEGY_KEY } from "../settingsFile";
 
 const FILTER: chrome.webRequest.RequestFilter = { urls: ["<all_urls>"] };
@@ -714,6 +716,7 @@ export function createPipeline(
             const tabId = sender?.tab?.id ?? -1;
             const method = msg.method || "GET";
             pageStrategy.runRequestDecision(msg.url, method, tabId).then((r) => {
+                reportSkipped(tabId, { url: msg.url, method, type: "xmlhttprequest" }, winnerOf(r, "page"));
                 if (r?.kind === "respond") recordNetBody({ tabId, url: msg.url, method, modified: r.content, mime: r.mime, status: r.status || 200 });
                 sendResponse(r || null);
             });
@@ -732,6 +735,7 @@ export function createPipeline(
             const tabId = sender?.tab?.id ?? -1;
             const method = msg.method || "GET";
             pageStrategy.runReplace(msg.url, method, tabId).then((r) => {
+                reportSkipped(tabId, { url: msg.url, method, type: "xmlhttprequest" }, winnerOf(r, "page"));
                 if (r) recordNetBody({ tabId, url: msg.url, method, modified: r.content, mime: r.mime, status: 200 });
                 sendResponse(r || { content: null });
             });
@@ -767,6 +771,7 @@ export function createPipeline(
         helperStrategy.reload(scripts, paramValues);
         void rulesStrategy.reload(scripts, paramValues);
         refreshBodyWatch(scripts);
+        setSkipRoutes(scripts);
         warnRoutes(scripts);
 
         // HOT RELOAD: push the new bundle to every open tab's hook so

@@ -17,6 +17,8 @@ import { log } from "../logs";
 import { dlog, dlogLevel } from "../../../shared/debugLog";
 import { debuggerAttach, debuggerSend, debuggerDetach, debuggerGetTargets, type Debuggee } from "../../../shared/chromeApi";
 import { runBodyOp } from "../../compileHost";
+import { winnerOf } from "../../../shared/precedence";
+import { reportSkipped } from "../skipped";
 import { recordNetBody } from "../../network";
 import { compileMv2, ownedRoutes, ownsAny, type OwnedRoute } from "./strategyScripts";
 
@@ -39,8 +41,8 @@ export function webRequestTypeOf(cdpType: string | undefined): string {
 
 type FetchPattern = { urlPattern: string; resourceType?: string; requestStage: "Request" | "Response" };
 
-const REQUEST_KINDS: RouteKind[] = ["onRequest"];
-const RESPONSE_KINDS: RouteKind[] = ["onResponseHeaders", "replaceResponse", "onResponseBody"];
+/** request stage: the request can end here (a replacement is served without the network) */
+const REQUEST_KINDS: RouteKind[] = ["onRequest", "replaceResponse"];
 
 /** Fetch.enable patterns for the owned routes (a coarse glob; handlers re-filter exactly) */
 export function fetchPatternsOf(owned: OwnedRoute[]): FetchPattern[] {
@@ -374,38 +376,33 @@ export class DebuggerStrategy {
         const base = { url, method, resourceType, requestHeaders };
         try {
             if (isRequestStage) {
-                if (!this.wants(url, method, resourceType, REQUEST_KINDS)) return void (await cont());
-                const decision = await this.run("requestDecision", base, tabId);
+                const wantsDecision = this.wants(url, method, resourceType, ["onRequest"]);
+                const wantsReplace = this.wants(url, method, resourceType, ["replaceResponse"]);
+                if (!wantsDecision && !wantsReplace) return void (await cont());
+                const req = { url, method, type: resourceType };
+                const decision = wantsDecision ? await this.run("requestDecision", base, tabId) : null;
                 dlogLevel("debugger", "debug", "request decision", { url, resourceType, kind: decision?.kind ?? "none" });
-                if (!decision) return void (await cont());
-                if (decision.kind === "respond") {
-                    recordNetBody({ tabId, url, method, modified: decision.content ?? "", mime: decision.mime, status: decision.status || 200 });
-                    const headers = [
-                        { name: "content-type", value: decision.mime || "application/octet-stream" },
-                        ...Object.entries(decision.headers || {}).map(([name, value]) => ({ name, value: String(value) })),
-                    ];
-                    try {
-                        await debuggerSend(d, "Fetch.fulfillRequest", {
-                            requestId,
-                            responseCode: decision.status || 200,
-                            responseHeaders: headers,
-                            body: bytesToBase64(new TextEncoder().encode(decision.content ?? "")),
-                        });
-                    } catch (e: any) {
-                        log(tabId, `[${decision.scriptName}] onRequest → replaceResponse ${decision.status || 200} failed: ${e?.message || e} — the request continues UNMODIFIED ${url}`, "error", decision.scriptId);
-                        await cont();
-                    }
-                    return;
+                if (decision?.kind === "respond") {
+                    reportSkipped(tabId, req, winnerOf(decision, "debugger"));
+                    return void (await this.fulfill(d, requestId, tabId, url, method, decision.status || 200, decision.mime, decision.content ?? "", decision.headers, cont, `[${decision.scriptName}] onRequest → replaceResponse ${decision.status || 200}`, decision.scriptId));
                 }
-                if (decision.kind === "cancel") {
+                if (decision?.kind === "cancel") {
+                    reportSkipped(tabId, req, winnerOf(decision, "debugger"));
                     await debuggerSend(d, "Fetch.failRequest", { requestId, errorReason: "BlockedByClient" });
                     return;
                 }
-                if (decision.kind === "redirect") {
+                if (decision?.kind === "redirect") {
+                    reportSkipped(tabId, req, winnerOf(decision, "debugger"));
                     await debuggerSend(d, "Fetch.continueRequest", { requestId, url: decision.url });
                     return;
                 }
-                if (decision.kind === "headers") {
+                // replaceResponse: after onRequest, before the network — the request is never sent
+                const replaced = wantsReplace ? await this.run("replace", base, tabId) : null;
+                if (replaced) {
+                    reportSkipped(tabId, req, winnerOf(replaced, "debugger"));
+                    return void (await this.fulfill(d, requestId, tabId, url, method, 200, replaced.mime, replaced.content, undefined, cont, `[${replaced.who?.scriptName ?? "?"}] replaceResponse`, replaced.who?.scriptId ?? null));
+                }
+                if (decision?.kind === "headers") {
                     const set: Record<string, string> = decision.changes?.set || {};
                     const remove = new Set<string>([...(decision.changes?.remove || []), ...Object.keys(set)].map((n: string) => n.toLowerCase()));
                     const headers = Object.entries(requestHeaders)
@@ -422,7 +419,7 @@ export class DebuggerStrategy {
             const status: number = params.responseStatusCode ?? 0;
             if (params.responseErrorReason || (status >= 300 && status < 400)) return void (await cont());
             const wantsHeaders = this.wants(url, method, resourceType, ["onResponseHeaders"]);
-            const wantsBody = this.wants(url, method, resourceType, ["replaceResponse", "onResponseBody"]);
+            const wantsBody = this.wants(url, method, resourceType, ["onResponseBody"]);
             if (!wantsHeaders && !wantsBody) return void (await cont());
             const originalHeaders: { name: string; value: string }[] = params.responseHeaders || [];
             const headerMods = wantsHeaders
@@ -440,36 +437,26 @@ export class DebuggerStrategy {
             if (!wantsBody) return void (await continueWithHeaders());
             const contentType = headerContentType(baseHeaders);
             let body: string | Uint8Array | null = null;
-            let mime: string | undefined;
-            const replaced = this.wants(url, method, resourceType, ["replaceResponse"]) ? await this.run("replace", base, tabId) : null;
-            if (replaced) {
-                body = replaced.content;
-                mime = replaced.mime;
-            }
-            let input: string | Uint8Array | null = body;
-            if (input === null) {
-                const got: any = await debuggerSend(d, "Fetch.getResponseBody", { requestId });
-                const bytes = got.base64Encoded ? base64ToBytes(got.body) : new TextEncoder().encode(got.body);
-                // textual bodies are handed to transforms as strings; binary
-                // stays bytes on MV2 (the MV3 sandbox gets text only)
-                if (looksTextual(bytes)) input = new TextDecoder().decode(bytes);
-                else if (!__MV3__) input = bytes;
-                else dlogLevel("debugger", "debug", "binary body — onResponseBody skipped", { url, len: bytes.length });
-            }
-            if (input !== null && this.wants(url, method, resourceType, ["onResponseBody"])) {
+            let input: string | Uint8Array | null = null;
+            const got: any = await debuggerSend(d, "Fetch.getResponseBody", { requestId });
+            const bytes = got.base64Encoded ? base64ToBytes(got.body) : new TextEncoder().encode(got.body);
+            // textual bodies are handed to transforms as strings; binary
+            // stays bytes on MV2 (the MV3 sandbox gets text only)
+            if (looksTextual(bytes)) input = new TextDecoder().decode(bytes);
+            else if (!__MV3__) input = bytes;
+            else dlogLevel("debugger", "debug", "binary body — onResponseBody skipped", { url, len: bytes.length });
+            body = input;
+            if (input !== null) {
                 const out = await this.run("transform", { ...base, body: input, contentType, status, raw: typeof input !== "string" }, tabId);
                 if (out !== null && out !== undefined) body = out;
             }
-            recordNetBody({ tabId, url, method, original: replaced ? null : input, modified: body === input && !replaced ? null : body, mime });
-            if (body === null || (body === input && !replaced)) {
+            recordNetBody({ tabId, url, method, original: input, modified: body === input ? null : body });
+            if (body === null || body === input) {
                 dlogLevel("debugger", "debug", "no handler changed the body → continue", { url });
                 return void (await continueWithHeaders());
             }
             // the body handed back is decoded — drop the original encoding/length
-            const responseHeaders = baseHeaders.filter(
-                (h: any) => !/^(content-encoding|content-length)$/i.test(h.name) && !(mime && /^content-type$/i.test(h.name))
-            );
-            if (mime) responseHeaders.push({ name: "content-type", value: mime });
+            const responseHeaders = baseHeaders.filter((h: any) => !/^(content-encoding|content-length)$/i.test(h.name));
             const outBytes = typeof body === "string" ? new TextEncoder().encode(body) : body;
             await debuggerSend(d, "Fetch.fulfillRequest", {
                 requestId,
@@ -480,6 +467,21 @@ export class DebuggerStrategy {
             dlogLevel("debugger", "info", "served modified body", { url, resourceType, len: outBytes.length });
         } catch (e: any) {
             log(tabId, `[debugger] debugger interception failed for ${url}: ${e?.message || e} — the load continues UNMODIFIED`, "error");
+            await cont();
+        }
+    }
+
+    /** serve a response without the network; on failure the request continues unmodified */
+    private async fulfill(d: any, requestId: string, tabId: number, url: string, method: string, status: number, mime: string | undefined, content: string, headers: Record<string, any> | undefined, cont: () => Promise<unknown>, what: string, scriptId: string | null): Promise<void> {
+        recordNetBody({ tabId, url, method, modified: content, mime, status });
+        const responseHeaders = [
+            { name: "content-type", value: mime || "application/octet-stream" },
+            ...Object.entries(headers || {}).map(([name, value]) => ({ name, value: String(value) })),
+        ];
+        try {
+            await debuggerSend(d, "Fetch.fulfillRequest", { requestId, responseCode: status, responseHeaders, body: bytesToBase64(new TextEncoder().encode(content)) });
+        } catch (e: any) {
+            log(tabId, `${what} failed: ${e?.message || e} — the request continues UNMODIFIED ${url}`, "error", scriptId);
             await cont();
         }
     }

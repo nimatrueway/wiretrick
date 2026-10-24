@@ -29,7 +29,7 @@ describe("replaceResponse { file }", () => {
     it("the replace op serves the decoded file", async () => {
         const scripts = [{ id: "s", name: "S", handlers: routed({ replaceResponse: [() => ({ file: "data:text/plain;base64," + btoa("from file") })] }) }];
         const out = await runOp(scripts as any, "replace", { url: "https://x.test/robots.txt", method: "GET" }, { log: () => {} } as any);
-        expect(out).toEqual({ mime: "text/plain", content: "from file" });
+        expect(out).toMatchObject({ mime: "text/plain", content: "from file", who: { scriptId: "s", kind: "replaceResponse", index: 0 } });
     });
 });
 
@@ -60,5 +60,24 @@ describe("observed vs modified logging", () => {
         expect(lines).toEqual([{ level: "info", msg: `[S] onResponseBody applied (3b → 4b) ${url}`, kind: undefined }]);
         const hdr = await run("requestDecision", { onRequest: [() => ({ headers: { set: { "x-a": "1" } } })] });
         expect(hdr.lines.map((l) => l.level)).toEqual(["info"]);
+    });
+});
+
+describe("precedence in runOp", () => {
+    it("request headers: the later handler wins per header, with a warning", async () => {
+        const logs: string[] = [];
+        const scripts = [
+            { id: "a", name: "A", handlers: routed({ onRequest: [() => ({ headers: { set: { "X-Who": "a" } } })] }) },
+            { id: "b", name: "B", handlers: routed({ onRequest: [() => ({ headers: { remove: ["x-who"] } })] }) },
+        ];
+        const out = await runOp(scripts as any, "requestDecision", { url: "https://x.test/prec", method: "GET" }, { log: (_id: string, level: string, msg: string) => level === "warn" && logs.push(msg) } as any);
+        expect(out).toEqual({ kind: "headers", changes: { set: {}, remove: ["x-who"] } });
+        expect(logs).toEqual([`[B] onRequest #1 overrides request header "x-who" from [A] onRequest #1 (the later one in the list wins) https://x.test/prec`]);
+    });
+
+    it("a final decision names the handler that made it", async () => {
+        const scripts = [{ id: "a", name: "A", handlers: routed({ onRequest: [() => null, () => ({ block: true })] }) }];
+        const out = await runOp(scripts as any, "requestDecision", { url: "https://x.test/y", method: "GET" }, { log: () => {} } as any);
+        expect(out).toEqual({ kind: "cancel", who: { scriptId: "a", scriptName: "A", kind: "onRequest", index: 1 } });
     });
 });

@@ -4,15 +4,21 @@
  * so chain semantics are identical everywhere:
  *
  *   requestDecision — onRequest handlers in order; the first terminal result
- *                     (replaceResponse / redirect / block) wins, header edits merge
+ *                     (replaceResponse / redirect / block) wins, header edits
+ *                     stack (the later handler wins per header)
  *   replace         — replaceResponse handlers; first non-null result wins
  *   transform       — onResponseBody handlers compose in order
- *   responseHeaders — onResponseHeaders handlers; header edits merge
+ *   responseHeaders — onResponseHeaders handlers; header edits stack
+ *
+ * Final results carry `who` — the handler that decided — so the caller can
+ * report the handlers it kept from running (see precedence.ts).
  */
 import { formatScriptError } from "./scriptError";
 import { effectiveStrategy, routeGroups, routeMatches, type Strategy } from "./route";
 import type { Routed, ScriptHandlers } from "./compile";
 import { observedLine, type NetKind } from "./netTypes";
+import { HeaderStack, overrideLine, type Who } from "./precedence";
+import { makeMissedThrottle } from "./missedTap";
 
 export type BodyOp = "requestDecision" | "transform" | "replace" | "responseHeaders";
 
@@ -104,8 +110,14 @@ function matching(scripts: OpScript[], op: BodyOp, f: OpFilter, env: OpEnv): { s
     return out;
 }
 
-function mergeHeaderMods(prev: any, next: any): any {
-    return { set: { ...(prev?.set || {}), ...(next.set || {}) }, remove: [...(prev?.remove || []), ...(next.remove || [])] };
+const overrideThrottle = makeMissedThrottle();
+
+/** stack one handler's header edits; warn (throttled) when it overrides an earlier handler's */
+function stackHeaders(stack: HeaderStack, edits: any, by: Who, which: "request" | "response", url: string, env: OpEnv): void {
+    for (const o of stack.add(edits, by)) {
+        const key = `${which}|${o.header}|${o.by.scriptId}|${o.by.kind}|${o.by.index}|${o.over.scriptId}|${o.over.kind}|${o.over.index}`;
+        if (overrideThrottle(key)) env.log(o.by.scriptId, "warn", overrideLine(o, which, url));
+    }
 }
 
 function hasHeaderMods(h: any): boolean {
@@ -130,9 +142,10 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
     const observed = (s: OpScript, handler: string, why?: string) => env.log(s.id, "debug", observedLine(s.name, handler, url, why), "observed");
 
     if (op === "requestDecision") {
-        let headerMods: any = null;
+        const stack = new HeaderStack();
         for (const { s, handlers } of list) {
             for (const h of handlers) {
+                const who: Who = { scriptId: s.id, scriptName: s.name, kind: "onRequest", index: h.route.index };
                 try {
                     const result = await h.fn(base(h));
                     if (!result) {
@@ -144,47 +157,48 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
                         const mime = r.mime || guessMimeFromUrl(url);
                         const content = serializeRespondBody(r.body);
                         env.log(s.id, "info", `[${s.name}] onRequest → replaceResponse ${r.status || 200} ${mime} (${content.length}b) ${url}`);
-                        return { kind: "respond", mime, content, status: r.status, headers: r.headers?.set, scriptId: s.id, scriptName: s.name };
+                        return { kind: "respond", mime, content, status: r.status, headers: r.headers?.set, scriptId: s.id, scriptName: s.name, who };
                     }
                     if (result.redirect) {
                         env.log(s.id, "info", `[${s.name}] onRequest → redirect → ${result.redirect} ${url}`);
-                        return { kind: "redirect", url: result.redirect };
+                        return { kind: "redirect", url: result.redirect, who };
                     }
                     if (result.block) {
                         env.log(s.id, "info", `[${s.name}] onRequest → block ${url}`);
-                        return { kind: "cancel" };
+                        return { kind: "cancel", who };
                     }
                     if (hasHeaderMods(result.headers)) {
                         const parts: string[] = [];
                         if (result.headers.set && Object.keys(result.headers.set).length) parts.push(`set ${Object.keys(result.headers.set).join(", ")}`);
                         if (result.headers.remove && result.headers.remove.length) parts.push(`remove ${result.headers.remove.join(", ")}`);
                         env.log(s.id, "info", `[${s.name}] onRequest → request headers (${parts.join("; ")}) ${url}`);
-                        headerMods = mergeHeaderMods(headerMods, result.headers);
+                        stackHeaders(stack, result.headers, who, "request", url, env);
                     } else observed(s, "onRequest");
                 } catch (e: any) {
                     env.log(s.id, "error", formatScriptError(s.name, e, "onRequest"));
                 }
             }
         }
-        return headerMods ? { kind: "headers", changes: headerMods } : null;
+        return stack.empty ? null : { kind: "headers", changes: stack.result() };
     }
 
     if (op === "responseHeaders") {
-        let mods: any = null;
+        const stack = new HeaderStack();
         for (const { s, handlers } of list) {
             for (const h of handlers) {
+                const who: Who = { scriptId: s.id, scriptName: s.name, kind: "onResponseHeaders", index: h.route.index };
                 try {
                     const result = await h.fn({ ...base(h), status: args.status, statusLine: args.statusLine || "", responseHeaders: args.responseHeaders || [] });
                     if (hasHeaderMods(result?.headers)) {
                         env.log(s.id, "info", `[${s.name}] onResponseHeaders → ${Object.keys(result.headers.set || {}).length} set, ${(result.headers.remove || []).length} removed ${url}`);
-                        mods = mergeHeaderMods(mods, result.headers);
+                        stackHeaders(stack, result.headers, who, "response", url, env);
                     } else observed(s, "onResponseHeaders");
                 } catch (e: any) {
                     env.log(s.id, "error", formatScriptError(s.name, e, "onResponseHeaders"));
                 }
             }
         }
-        return mods;
+        return stack.empty ? null : stack.result();
     }
 
     if (op === "transform") {
@@ -222,7 +236,7 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
                         const isFile = out && typeof out === "object" && typeof out.file === "string";
                         const { mime, content: body } = isFile ? resolveFileRef(out.file, url) : { mime: guessMimeFromUrl(url, TYPE_MIME[resourceType]), content: typeof out === "string" ? out : typeof out === "object" ? JSON.stringify(out) : String(out) };
                         env.log(s.id, "info", `[${s.name}] replaceResponse → ${mime} (${body.length}b) ${url}`);
-                        return { mime, content: body };
+                        return { mime, content: body, who: { scriptId: s.id, scriptName: s.name, kind: "replaceResponse", index: h.route.index } satisfies Who };
                     }
                     observed(s, "replaceResponse");
                 } catch (e: any) {

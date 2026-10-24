@@ -17,6 +17,8 @@ import { dlogLevel } from "../../../shared/debugLog";
 import { helperInstallCommand, helperInstallShell, isHelperOutdated, MIN_HELPER_VERSION } from "../../../shared/helperInstall";
 import type { Script } from "../scriptStore";
 import { log } from "../logs";
+import { reportSkipped } from "../skipped";
+import { winnerOf } from "../../../shared/precedence";
 import { evalProxyDecision, runBodyOp } from "../../compileHost";
 import { recordNetBody } from "../../network";
 import { HelperRouting } from "../../helperRouting";
@@ -493,6 +495,8 @@ export class HelperStrategy {
         }
         const args = { url: m.url, method: m.method, tabId: c.tabId, resourceType: c.type, tabUrl: c.tabUrl, requestHeaders: pairsToObject(m.headers) };
         const dec = await this.run("requestDecision", args);
+        const req = { url: m.url, method: m.method, type: c.type };
+        reportSkipped(c.tabId, req, winnerOf(dec, "helper"));
         if (dec?.kind === "respond") {
             recordNetBody({ tabId: c.tabId, url: m.url, method: m.method, modified: dec.content, mime: dec.mime, status: dec.status || 200 });
             const headers: Pairs = [["content-type", dec.mime]];
@@ -511,6 +515,7 @@ export class HelperStrategy {
         // replaceResponse runs here: no upstream round-trip for a replaced body
         const rep = await this.run("replace", { ...args });
         if (rep) {
+            reportSkipped(c.tabId, req, winnerOf(rep, "helper"));
             recordNetBody({ tabId: c.tabId, url: m.url, method: m.method, modified: rep.content, mime: rep.mime, status: 200 });
             this.send({ t: "fulfill", id: m.id, status: 200, headers: withNoStore([["content-type", rep.mime]]), body: bytesToBase64(new TextEncoder().encode(rep.content)) });
             return;

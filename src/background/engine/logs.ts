@@ -2,6 +2,7 @@
  * Rolling per-tab request log, pushed to the manager UI over a port.
  */
 import { annotateFromLog, URL_AT_END } from "../network";
+import { SKIPPED_MARK } from "../../shared/precedence";
 import { outcomeKind, observedLine, type OutcomeKind, type NetKind } from "../../shared/netTypes";
 
 export interface LogEntry {
@@ -62,7 +63,8 @@ export function addUiPort(port: chrome.runtime.Port): void {
  */
 export function log(tabId: number, message: string, level: LogEntry["level"] = "info", scriptId: string | null = null, kind?: OutcomeKind, url?: string): void {
     const netKind = scriptId ? outcomeKind(level, message, kind) : undefined;
-    if (scriptId && netKind !== "missed") noteTap(scriptId, level, message);
+    // a skipped handler isn't "missed" twice (the onCompleted check)
+    if (scriptId && (netKind !== "missed" || message.includes(SKIPPED_MARK))) noteTap(scriptId, level, message);
     const observedOnly = kind === "observed" && level === "debug";
     const entry: LogEntry = { tabId, scriptId, level, message, at: Date.now(), ...(observedOnly ? { kind: "observed" as const } : {}) };
     if (observedOnly) pushCapped(observedLogs, entry, MAX_OBSERVED_PER_TAB);
@@ -87,7 +89,7 @@ const MAX_TAPS = 2000;
 const bodyTaps = new Map<string, number>();
 const lastScriptError = new Map<string, number>();
 /** lines that mean the body handlers ran — or legitimately never will */
-const BODY_TAP = /\b(onResponseBody|replaceResponse)\b|onRequest → (block|redirect)\b/;
+const BODY_TAP = /\b(onResponseBody|replaceResponse)\b|onRequest → (block|redirect)\b| → skipped: /;
 
 function noteTap(scriptId: string, level: LogEntry["level"], message: string): void {
     const now = Date.now();

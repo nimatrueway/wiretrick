@@ -256,6 +256,9 @@ error).
 ## How each strategy serves a replacement
 
 `replaceResponse` (handler or `onRequest` result) produces a whole new response.
+It is final: nothing runs after it — no later handler, no `onResponseHeaders`
+or `onResponseBody` (see
+[how handlers stack](scripting.md#multiple-handlers--how-they-stack)).
 Whether the page keeps its URL depends on the strategy that serves it:
 
 | strategy | how | URL | status | reaches |
@@ -263,8 +266,8 @@ Whether the page keeps its URL depends on the strategy that serves it:
 | `page` | a `Response` / XHR result is synthesized in the page; the network is never contacted | unchanged (`response.url` / `responseURL` is the request URL) | any | page `fetch` / XHR only |
 | `extension`, **Chromium MV2** | **redirect**: page loads (main frame) go to the extension's `serve.html`, so the address bar shows a `chrome-extension://…` URL and the page loses its origin (cookies, relative URLs, same-origin calls); other requests get a `data:` URL | **changes** | 200 only | everything — but response bodies can't be read, so no `onResponseBody` |
 | `extension`, **Firefox** | in place: the request goes out, then `filterResponseData` discards the real body and writes the replacement (Content-Type set, Content-Length/Encoding dropped) | unchanged | the server's (Firefox can't change it; a non-200 replacement is skipped with a warning) | everything; the request still reaches the server, and a network failure means no replacement |
-| `debugger` | the debugger fulfills the paused request | unchanged | any | everything (banner shown) |
-| `helper` | the local helper answers the proxied request | unchanged | any | everything, no banner |
+| `debugger` | the debugger fulfills the request at the Request stage; the network is never contacted | unchanged | any | everything (banner shown) |
+| `helper` | the local helper answers the proxied request; upstream is never contacted | unchanged | any | everything, no banner |
 
 To keep the URL on Chromium, use `helper` or `debugger` for that handler.
 
@@ -299,10 +302,25 @@ handlers are errors at load), handlers that can never run where they are
 (already warned at load, see [above](#when-a-strategy-isnt-available)), page fetch/XHR on
 `page` in a tab with the hook (it reads bodies lazily — the page may simply never read one),
 websocket, ping/beacon, CSP reports, the extension's own requests, and
-requests a script already ended in `onRequest` (block/redirect/replaceResponse).
+requests a handler already ended (block/redirect/replacement) — those get
+the skipped warning below instead.
 Each script + URL warns at most once a minute, and at most 20 warnings a
 minute overall. In the Network view it shows as a yellow *missed* entry;
 the row is not marked observed.
+
+### Skipped warning
+
+When a final result (block, redirect, replacement) ends a request, every
+other enabled handler that matched it and now won't run gets a WARN line
+naming who took priority and why:
+
+```text
+[Logger] onResponseBody #1 → skipped: [Blocklist] onRequest #1 → block took priority (strategy "rules" comes before "helper", so the request never got there) https://cdn.example.com/a.js
+```
+
+It shows as *missed* in the Network view (`is:missed`), with the same
+once-a-minute limit. The rules are in
+[how handlers stack](scripting.md#multiple-handlers--how-they-stack).
 
 ## First page load with `debugger`
 

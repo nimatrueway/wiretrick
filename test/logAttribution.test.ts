@@ -208,7 +208,7 @@ describe("CDP tier: request-stage respond fulfillment", () => {
         ]);
     });
 
-    it("sync replaceResponse runs once, in the debugger tier", async () => {
+    it("sync replaceResponse runs once, in the debugger tier, at the request stage (no network)", async () => {
         const code = `wt.replaceResponse({ url: "*", strategy: "debugger" }, () => "<h1>replaced</h1>");`;
         const w = new ExtensionStrategy();
         const c = new DebuggerStrategy();
@@ -216,10 +216,12 @@ describe("CDP tier: request-stage respond fulfillment", () => {
         c.reload([storedScript("a", "Page mock", code)]);
         expect((w.handleBeforeRequest(details({ type: "main_frame" }), null) as any).kind).toBe("allow");
         expect(entries.filter((e) => e.scriptId === "a")).toEqual([]);
-        await c.handlePaused("tab:1", paused({ resourceType: "Document", responseStatusCode: 200, responseHeaders: [{ name: "content-type", value: "text/html" }] }));
+        await c.handlePaused("tab:1", paused({ resourceType: "Document" }));
         const fulfill = debuggerCalls.find((x) => x.command === "Fetch.fulfillRequest");
         expect(fulfill, "the debugger tier fulfills the replacement in place").toBeTruthy();
         expect(atob(fulfill!.params.body)).toBe("<h1>replaced</h1>");
+        expect(fulfill!.params.responseCode).toBe(200);
+        expect(debuggerCalls.some((x) => x.command === "Fetch.getResponseBody")).toBe(false);
         expect(entries.filter((e) => e.scriptId === "a" && e.message.includes("replaceResponse"))).toHaveLength(1);
     });
 

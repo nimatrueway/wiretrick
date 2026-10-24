@@ -382,21 +382,32 @@ title/DOM changes on SPAs.
 
 ## Multiple handlers — how they stack
 
-When several handlers match the same request, they run in **list order**:
-scripts top to bottom in the Editor's explorer, then registration order
-within a script. With folders, the explorer order is depth-first: in each
-folder, its subfolders first (alphabetically, each with its whole content),
-then its scripts in their own order. Per kind:
+The same rules apply on every strategy. When several handlers match a
+request, two things decide what happens: **list order** and **stage**.
 
-**`wt.onRequest`** — the first handler that returns a *final* result
-(`replaceResponse`, `redirect`, or `block`) wins and stops the chain; later
-handlers don't run for that request. Handlers that return nothing (or only
-`headers`) don't stop the chain — their header changes merge (later `set`
-wins per key, `remove` accumulates) and apply even when a later handler
-returns a final result.
+**List order** — scripts top to bottom in the Editor's explorer, then
+registration order within a script. With folders, the explorer order is
+depth-first: in each folder, its subfolders first (alphabetically, each with
+its whole content), then its scripts in their own order.
 
-**`replaceResponse`** — a final result that synthesizes the response immediately,
-**without the network request ever happening**:
+**Stages** — a request goes through the stages in this order. Each stage runs
+its handlers from every script in list order before the next stage starts:
+
+```text
+onRequest → replaceResponse → (network) → onResponseHeaders → onResponseBody
+```
+
+So a `wt.onRequest` block in the last script still wins over a
+`wt.replaceResponse` in the first one.
+
+### Final results end the request
+
+A **final result** is an `onRequest` `block`, `redirect` or
+`replaceResponse`, or a body returned by `wt.replaceResponse`. The first
+one wins. Nothing runs on that request after it: no later handler of the
+same stage, and no later stage. A replaced response never reaches the
+network, `onResponseHeaders` or `onResponseBody`. A redirect starts a new
+request to the target, and the handlers matching the target run on it.
 
 ```ts
 wt.onRequest("*://api.example.com/me", () => ({
@@ -409,31 +420,67 @@ wt.onRequest("*://api.example.com/me", () => ({
 }));
 ```
 
-It stacks like every final result: first handler to return `replaceResponse` wins. On
-`page`, `debugger` and `helper` the response is fulfilled in place with any
-status and headers, URL kept. `extension` serves status 200 only (another
-status is skipped with a warning): in place on Firefox, and on Chromium MV2
-by redirect (a `data:` URL, or the extension's `serve.html` for page loads),
-so the URL changes. See
+On `page`, `debugger` and `helper` a replacement is served with any status
+and headers, URL kept, and the request is never sent. `extension` serves
+status 200 only (another status isn't served, with a warning): in place on
+Firefox, where the request is sent and its body discarded, and on Chromium
+MV2 by redirect (a `data:` URL, or the extension's `serve.html` for page
+loads), so the URL changes. See
 [how each strategy serves a replacement](strategies.md#how-each-strategy-serves-a-replacement).
 
-**`wt.onResponseHeaders`** — all matching handlers run and their changes
-**merge**: `set` keys are applied in order (a later handler's `set` of the
-same header overwrites earlier ones), `remove` lists accumulate.
+### Results that stack
 
-**`wt.onResponseBody`** — transforms **compose** like a pipeline: handler
-A's output becomes handler B's input, in list order.
+- **Header edits** (`onRequest` `headers`, `wt.onResponseHeaders`): every
+  handler runs. For each header (case-insensitive) the **later handler in
+  the list wins**, whether it sets or removes it. A later `remove` deletes an
+  earlier `set`, and a later `set` undoes an earlier `remove`. Request
+  header edits still apply when a later `onRequest` handler redirects.
+- **`wt.onResponseBody`**: transforms **compose** like a pipeline. Handler
+  A's output becomes handler B's input, in list order.
 
 ```text
 body → [transform 1] → [transform 2] → … → page
 ```
 
-**`wt.replaceResponse`** — the first handler that returns a body wins;
-later ones are skipped.
+### Across strategies
 
-**Across strategies**: a handler's `strategy` only decides *which mechanism* runs
-it — stacking order is unchanged regardless of which strategy each handler
-uses.
+A handler's `strategy` decides which mechanism runs it, and the mechanisms
+sit at different points on the request's way out. Each one is a layer:
+
+```text
+page → rules → extension → debugger → helper → server
+```
+
+Inside a layer the rules above apply. Across layers, the request reaches a
+layer only if the layers in front of it let it through:
+
+- A final result in one layer means the layers **behind** it never see the
+  request (a `rules` block means the `helper` gets nothing).
+- Layers **in front** see a replacement or a redirect as an ordinary
+  response, so their `onResponseHeaders` and `onResponseBody` still run on
+  it. A `helper` replacement still goes through a `page` `onResponseBody`.
+- After a block there is no response, so the response handlers of the layers
+  in front don't run either.
+
+### Warnings when a handler is skipped
+
+When a handler matches a request but doesn't run because of the rules above,
+the Log shows a warning naming both handlers and the reason. In the Network
+view the request is marked **missed** (filter: `is:missed`):
+
+```text
+[Cache buster] onResponseBody #1 → skipped: [API mocks] onRequest #1 → replaceResponse took priority (a replaced response is final) https://api.example.com/me
+[Tracker] onRequest #1 → skipped: [Ad blocker] onRequest #2 → block took priority (it comes earlier in the list) https://ads.example.com/x.js
+[Logger] onResponseBody #1 → skipped: [Blocklist] onRequest #1 → block took priority (strategy "rules" comes before "helper", so the request never got there) https://cdn.example.com/a.js
+```
+
+A header edit replaced by a later handler is a warning too:
+
+```text
+[B] onRequest #1 overrides request header "authorization" from [A] onRequest #1 (the later one in the list wins) https://api.example.com/me
+```
+
+Each warning is logged at most once a minute per handler and URL.
 
 ## Async handlers
 
@@ -443,9 +490,9 @@ result depends on the handler's strategy:
 | handler | `page` (page fetch/XHR) | `extension`, Chromium MV2 | `extension`, Firefox | `debugger` | `helper` |
 |---|---|---|---|---|---|
 | `onRequest` redirect/block/replaceResponse | ✅ awaited | ⚠ result ignored, error logged — blocking webRequest can't await | ✅ awaited natively | ✅ awaited at the Request stage | ✅ awaited |
-| `onRequest` headers | ✅ awaited | ⚠ ignored + error | ✅ awaited | ✅ awaited, applied at the Response stage | ✅ awaited, sent upstream |
+| `onRequest` headers | ✅ awaited | ⚠ ignored + error | ✅ awaited | ✅ awaited, applied at the Request stage | ✅ awaited, sent upstream |
 | `onResponseHeaders` | — (not on `page`) | ⚠ ignored + error | ✅ awaited | ✅ awaited, merged into the fulfilled headers | ✅ awaited |
-| `replaceResponse` | ✅ awaited — the page's `fetch`/XHR promise simply takes as long as the handler needs | ⚠ result ignored + error (a sync redirect can't be built late) | ✅ awaited, written in place (URL kept) | ✅ awaited, fulfills the body | ✅ awaited, upstream never contacted |
+| `replaceResponse` | ✅ awaited — the page's `fetch`/XHR promise simply takes as long as the handler needs | ⚠ result ignored + error (a sync redirect can't be built late) | ✅ awaited, written in place (URL kept) | ✅ awaited at the Request stage, upstream never contacted | ✅ awaited, upstream never contacted |
 | `onResponseBody` | ✅ awaited (chained between handlers) | — (can't read bodies) | ✅ awaited | ✅ awaited | ✅ awaited (served `no-store`) |
 | `onDocument` | runs in the page on every strategy; not awaited (fire-and-forget) | | | | |
 

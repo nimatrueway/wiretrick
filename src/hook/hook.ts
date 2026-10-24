@@ -298,12 +298,28 @@ import { makePageShim, domHandlersFor, scheduleDocument } from "../shared/pageSh
             const abortP = abortRace(signal);
 
             try {
-                // 1. replaceResponse (onRequest final result) — no network at all
-                const resp0 = abortP ? await Promise.race([viaBridge({ op: "respond", url, method }), abortP]) : await viaBridge({ op: "respond", url, method });
-                if (resp0 && resp0.content !== null && resp0.content !== undefined) {
-                    const hdrs = new Headers({ "content-type": resp0.mime || "text/plain" });
-                    for (const [k, v] of Object.entries(resp0.headers || {})) hdrs.set(k, String(v));
-                    return withUrl(new Response(resp0.content, { status: resp0.status || 200, headers: hdrs }), url);
+                // 1. onRequest: replaceResponse (no network), block, redirect or header edits
+                const dec = abortP ? await Promise.race([viaBridge({ op: "respond", url, method }), abortP]) : await viaBridge({ op: "respond", url, method });
+                if (dec && dec.content !== null && dec.content !== undefined) {
+                    const hdrs = new Headers({ "content-type": dec.mime || "text/plain" });
+                    for (const [k, v] of Object.entries(dec.headers || {})) hdrs.set(k, String(v));
+                    return withUrl(new Response(dec.content, { status: dec.status || 200, headers: hdrs }), url);
+                }
+                // a blocked request fails like a network error (as the browser's own block does)
+                if (dec?.kind === "cancel") throw new PassthroughError(new TypeError("Failed to fetch"));
+                if (dec?.kind === "redirect" && typeof dec.url === "string") {
+                    const hops: number = (init as any)?.__wtHops ?? 0;
+                    if (hops >= 20) throw new PassthroughError(new TypeError("Failed to fetch"));
+                    // the target goes through the hook again (its own handlers run)
+                    const next = input instanceof Request ? new Request(dec.url, input) : dec.url;
+                    return w.fetch(next, { ...(init || {}), __wtHops: hops + 1 });
+                }
+                if (dec?.kind === "headers" && dec.changes) {
+                    const hdrs = new Headers(input instanceof Request ? input.headers : undefined);
+                    if (init?.headers) new Headers(init.headers).forEach((v, k) => hdrs.set(k, v));
+                    for (const n of dec.changes.remove || []) hdrs.delete(n);
+                    for (const [k, v] of Object.entries(dec.changes.set || {})) hdrs.set(k, String(v));
+                    init = { ...(init || {}), headers: hdrs };
                 }
 
                 // 2. replaceResponse? (background runs the handler)
@@ -312,7 +328,7 @@ import { makePageShim, domHandlersFor, scheduleDocument } from "../shared/pageSh
                     return withUrl(new Response(repl.content, { status: 200, headers: { "content-type": repl.mime || "text/plain" } }), url);
                 }
 
-                // 2. real request (abort propagates natively). A failure here
+                // 3. real request (abort propagates natively). A failure here
                 // is the PAGE's own request failing (network, or an invalid
                 // call the unpatched fetch would reject identically) —
                 // propagate natively, don't log as our pipeline error
@@ -324,7 +340,7 @@ import { makePageShim, domHandlersFor, scheduleDocument } from "../shared/pageSh
                     throw new PassthroughError(e);
                 }
 
-                // 3. transform? only for readable, non-null-body responses
+                // 4. transform? only for readable, non-null-body responses
                 if (response.status === 204 || response.status === 304) return response;
                 const contentType = response.headers.get("content-type") || "";
                 const isText = /text\/|json|javascript|xml|x-www-form-urlencoded/i.test(contentType);
@@ -425,42 +441,26 @@ import { makePageShim, domHandlersFor, scheduleDocument } from "../shared/pageSh
                     // send(body) on a GET would throw natively too) — drop it
                     const safeBody = method === "GET" || method === "HEAD" ? null : body;
 
-                    // 1. replace short-circuit
-                    const repl = await viaBridge({ op: "replace", url: absUrl, method });
-                    let status = 200;
-                    let statusText = "OK";
-                    let respHeaders = new Headers({ "content-type": repl?.mime || "text/plain" });
-                    let text: string;
-
-                    if (repl && repl.content !== null && repl.content !== undefined) {
-                        text = String(repl.content);
-                    } else {
-                        // 2. real request via patched fetch (transform applies; abort wired)
-                        let resp: Response;
-                        try {
-                            resp = await w.fetch(absUrl, { method, headers, body: safeBody, signal: abortCtl.signal, credentials: xhr.withCredentials ? "include" : "same-origin" });
-                        } catch (e) {
-                            wentOut = true;
-                            if (!isAbort(e)) netFailed = true;
-                            throw e;
-                        }
+                    // the patched fetch runs onRequest → replaceResponse → network → onResponseBody,
+                    // exactly as for the page's own fetch (abort wired)
+                    let resp: Response;
+                    try {
+                        resp = await w.fetch(absUrl, { method, headers, body: safeBody, signal: abortCtl.signal, credentials: xhr.withCredentials ? "include" : "same-origin" });
+                    } catch (e) {
                         wentOut = true;
-                        status = resp.status;
-                        statusText = resp.statusText;
-                        respHeaders = resp.headers;
-                        text = await resp.text();
-                        // 3. transform round-trip (raced against abort)
-                        const out = await Promise.race([
-                            viaBridge({ op: "transform", url: absUrl, method, body: text, status }),
-                            new Promise<null>((_, rej) => abortCtl.signal.addEventListener("abort", () => rej(abortCtl.signal.reason || new DOMException("aborted", "AbortError")), { once: true })),
-                        ]);
-                        if (out && typeof out.body === "string" && out.body !== text) text = out.body;
+                        if (!isAbort(e)) netFailed = true;
+                        throw e;
                     }
+                    wentOut = true;
+                    const status = resp.status;
+                    const statusText = resp.statusText;
+                    const respHeaders = resp.headers;
+                    const text = await resp.text();
 
                     Object.defineProperty(xhr, "readyState", { get: () => 4, configurable: true });
                     Object.defineProperty(xhr, "status", { get: () => status, configurable: true });
                     Object.defineProperty(xhr, "statusText", { get: () => statusText, configurable: true });
-                    Object.defineProperty(xhr, "responseURL", { get: () => absUrl, configurable: true });
+                    Object.defineProperty(xhr, "responseURL", { get: () => resp.url || absUrl, configurable: true });
                     redefineBody(xhr, text);
                     const headerLines = [...respHeaders.entries()].map(([k, v]) => `${k}: ${v}`).join("\r\n");
                     Object.defineProperty(xhr, "getAllResponseHeaders", {
@@ -492,7 +492,7 @@ import { makePageShim, domHandlersFor, scheduleDocument } from "../shared/pageSh
                         xhr.dispatchEvent(new ProgressEvent("loadend"));
                         return;
                     }
-                    // failed BEFORE the network (replace round-trip) — the
+                    // failed before the shim's fetch was called — the
                     // native path never ran; use it
                     OrigSend.apply(xhr, args as any);
                 }

@@ -4,6 +4,8 @@ import { ExtensionStrategy } from "../src/background/engine/strategies/extension
 import { PageStrategy } from "../src/background/engine/strategies/pageStrategy";
 import type { Script } from "../src/background/engine/scriptStore";
 import { compileScript } from "../src/shared/compile";
+import { allLogs } from "../src/background/engine/logs";
+import { setSkipRoutes } from "../src/background/engine/skipped";
 
 // ---- chrome mock ----
 const storageData: Record<string, any> = {};
@@ -47,6 +49,12 @@ function mockChrome() {
 beforeEach(() => {
     mockChrome();
 });
+
+function named(id: string, code: string): Script {
+    const s = makeScript(id, code);
+    s.meta = { ...s.meta, name: id };
+    return s;
+}
 
 function makeScript(id: string, code: string, enabled = true): Script {
     return {
@@ -135,6 +143,44 @@ describe("ExtensionStrategy", () => {
         s.handleBeforeRequest(details(), null);
         const changes = s.handleBeforeSendHeaders(details(), null) as any;
         expect(changes!.set).toEqual({ authorization: "Bearer x" });
+    });
+
+    it("same order as every strategy: every onRequest before any replaceResponse", () => {
+        const s = new ExtensionStrategy();
+        s.reload([
+            makeScript("a", `wt.replaceResponse("*://api.example.com/*", () => "mocked");`),
+            makeScript("b", `wt.onRequest("*://api.example.com/*", () => ({ block: true }));`),
+        ]);
+        expect((s.handleBeforeRequest(details(), null) as any).kind).toBe("cancel");
+    });
+
+    it("the later handler wins per header, and the override is a warning", () => {
+        const s = new ExtensionStrategy();
+        s.reload([
+            named("a", `wt.onRequest("*://api.example.com/*", () => ({ headers: { set: { "X-Mode": "a" }, remove: ["cookie"] } }));`),
+            named("b", `wt.onRequest("*://api.example.com/*", () => ({ headers: { remove: ["x-mode"], set: { Cookie: "b=1" } } }));`),
+        ]);
+        s.handleBeforeRequest(details({ requestId: "hdr" }), null);
+        const changes = s.handleBeforeSendHeaders(details({ requestId: "hdr" }), null) as any;
+        expect(changes).toEqual({ set: { Cookie: "b=1" }, remove: ["x-mode"] });
+        const warns = allLogs().filter((e) => e.level === "warn" && e.message.includes("overrides request header"));
+        expect(warns.map((e) => e.message.split(" from ")[0])).toEqual(expect.arrayContaining([`[b] onRequest #1 overrides request header "x-mode"`, `[b] onRequest #1 overrides request header "cookie"`]));
+    });
+
+    it("a final result warns for each handler it kept from running", () => {
+        const scripts = [
+            named("a", `wt.onRequest("*://api.example.com/*", () => ({ block: true }));`),
+            named("b", `wt.onRequest("*://api.example.com/*", () => ({ headers: { set: { x: "1" } } })); wt.onResponseHeaders("*://api.example.com/*", () => null);`),
+        ];
+        setSkipRoutes(scripts);
+        const s = new ExtensionStrategy();
+        s.reload(scripts);
+        expect((s.handleBeforeRequest(details({ url: "https://api.example.com/skip" }), null) as any).kind).toBe("cancel");
+        const lines = allLogs().filter((e) => e.message.includes("→ skipped: ") && e.message.endsWith("https://api.example.com/skip")).map((e) => e.message);
+        expect(lines).toHaveLength(2);
+        expect(lines[0]).toMatch(/^\[b\] onRequest #1 → skipped: \[a\] onRequest #1 → block took priority \(it comes earlier in the list\)/);
+        expect(lines[1]).toMatch(/^\[b\] onResponseHeaders #1 → skipped: \[a\] onRequest #1 → block took priority \(the request ended there\)/);
+        setSkipRoutes([]);
     });
 
     it("script throwing does not break the pipeline", () => {

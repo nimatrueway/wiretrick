@@ -182,14 +182,17 @@ Full status/headers support on the page, debugger and helper strategies. The ext
     },
     {
         title: "Multiple handlers — stacking order",
-        body: `Handlers run in list order when several match one request: scripts top to bottom in the Editor, then registration order within a script.
+        body: `Same rules on every strategy. List order = scripts top to bottom in the Editor, then registration order within a script. Stages run in this order, each over every script before the next:
 
-onRequest — first FINAL result (replaceResponse/redirect/block) wins and stops the chain; headers-only/void results don't stop it.
-onResponseHeaders — ALL matching handlers run; set applied in order (later overwrites), remove accumulates.
+onRequest → replaceResponse → (network) → onResponseHeaders → onResponseBody
+
+FINAL results (onRequest block/redirect/replaceResponse, a wt.replaceResponse body) — the first one wins and ends the request: no later handler, no later stage. A replaced response never hits the network, onResponseHeaders or onResponseBody.
+Header edits (onRequest headers, onResponseHeaders) — all run; per header the LATER handler wins (set or remove).
 onResponseBody — transforms COMPOSE: each output feeds the next handler.
-replaceResponse — first handler returning a body wins.
 
-A handler's strategy decides how it is intercepted, not the stacking order.`,
+Across strategies the layers are page → rules → extension → debugger → helper: a final result hides the request from the layers behind it.
+
+A handler that matched but was skipped logs a warning naming who took priority and why (Network: is:missed). So does a header edit overridden by a later handler.`,
     },
     {
         title: "Async handlers",

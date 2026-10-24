@@ -13,7 +13,8 @@
  * Requests matched by an active rule are marked Modified in the Network
  * view (our own matcher on observed requests; no feedback permission).
  */
-import { getDefaultStrategy, routeLabel, routeMatches, type RouteMeta } from "../../../shared/route";
+import { getDefaultStrategy, routeLabel, routeMatches, type NetKind, type RouteMeta } from "../../../shared/route";
+import { reportSkipped } from "../skipped";
 import { regexCost, ruleErrorLine, substitute, type RuleSpec } from "../../../shared/dnrRules";
 import { probeScriptRules, type ScriptRules } from "../../../shared/rulesProbe";
 import { strategyUnsupported } from "../../../shared/strategyInfo";
@@ -267,6 +268,10 @@ export class RulesStrategy {
             const to = sub ? substitute(r.spec.condition.regexFilter, sub, d.url) : r.spec.action.redirect?.url;
             if (to) what = `redirect → ${to}`;
             log(d.tabId ?? -1, `[rules] [${r.name}] ${routeLabel(r.route).replace(/ #\d+$/, "")} → ${what} ${d.url}`, "info", r.scriptId, "modified", d.url);
+            if (r === final) {
+                const block = r.spec.action.type === "block";
+                reportSkipped(d.tabId ?? -1, { url: d.url, method: d.method, type: d.type }, { scriptId: r.scriptId, scriptName: r.name, kind: r.route.kind as NetKind, index: r.route.index, strategy: "rules", outcome: block ? "block" : "redirect", target: block ? undefined : to });
+            }
         }
     }
 }
