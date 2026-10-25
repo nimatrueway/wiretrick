@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.9.15] - 2026-10-25
+
 ### Fixed
 
 - A binary body served with a text `Content-Type` (x.com's `jf.x.com/onboarding/web/landing` is `text/plain`) was decoded as UTF-8 and re-encoded, corrupting it even when the handler returned it unchanged; x.com stopped loading under an `onResponseBody` on `*`. A text body that isn't valid UTF-8 is now binary (`binary: true` routes only), and a body handed back unchanged keeps its original bytes on every strategy.
@@ -486,7 +488,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.9.14...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.9.15...HEAD
+[0.9.15]: https://github.com/nimatrueway/wiretrick/compare/v0.9.14...v0.9.15
 [0.9.14]: https://github.com/nimatrueway/wiretrick/compare/v0.9.13...v0.9.14
 [0.9.13]: https://github.com/nimatrueway/wiretrick/compare/v0.9.12...v0.9.13
 [0.9.12]: https://github.com/nimatrueway/wiretrick/compare/v0.9.11...v0.9.12
