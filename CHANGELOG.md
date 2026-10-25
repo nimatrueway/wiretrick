@@ -7,6 +7,13 @@ its section below.
 
 ## [Unreleased]
 
+### Fixed
+
+- The helper no longer treats text `application/vnd.*` responses as binary:
+  `+json` / `+xml` types (e.g. `application/vnd.api+json`) and HLS playlists
+  (`application/vnd.apple.mpegurl`, `.m3u8`) now reach `onResponseBody`.
+  Needs the updated helper.
+
 ## [0.9.10] - 2026-10-24
 
 ### Changed

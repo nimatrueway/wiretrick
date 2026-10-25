@@ -43,7 +43,7 @@ export function helperSkipReason(s: { why: string; contentType: string }): strin
         case "empty":
             return null;
         case "binary":
-            return `the helper doesn't pass binary bodies${ct} to onResponseBody — images, video, audio, fonts, wasm, PDFs, archives and application/vnd.* are left untouched`;
+            return `the helper doesn't pass binary bodies${ct} to onResponseBody — images, video, audio, fonts, wasm, PDFs, archives and binary application/vnd.* are left untouched`;
         case "too-large":
             return `the body is over the helper's 64 MB limit${ct}, so it was passed through untouched`;
         case "stream":

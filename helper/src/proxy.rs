@@ -468,7 +468,10 @@ fn header_str<'a>(h: &'a HeaderMap, k: &str) -> &'a str {
 /// decoded bytes with looksTextual anyway).
 fn skip_body_reason(ct: &str) -> Option<&'static str> {
     let ct = ct.to_ascii_lowercase();
-    if ct.contains("svg") {
+    // text despite their prefix: SVG, structured-syntax suffixes
+    // (vnd.api+json, atom+xml, …) and HLS playlists (vnd.apple.mpegurl)
+    let essence = ct.split(';').next().unwrap_or("").trim();
+    if ct.contains("svg") || essence.ends_with("+json") || essence.ends_with("+xml") || essence.ends_with("mpegurl") {
         return None;
     }
     if ct.starts_with("text/event-stream") {
@@ -852,3 +855,30 @@ async fn upgrade(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod skip_body_reason_tests {
+    use super::skip_body_reason;
+
+    #[test]
+    fn text_vnd_types_are_not_binary() {
+        for ct in [
+            "application/vnd.apple.mpegurl",
+            "application/vnd.api+json; charset=utf-8",
+            "application/vnd.github+json",
+            "application/vnd.ms-sstr+xml",
+            "audio/mpegurl",
+            "image/svg+xml",
+        ] {
+            assert_eq!(skip_body_reason(ct), None, "{ct}");
+        }
+    }
+
+    #[test]
+    fn binary_types_are_skipped() {
+        for ct in ["application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "video/mp2t", "image/jpeg", "application/octet-stream"] {
+            assert_eq!(skip_body_reason(ct), Some("binary"), "{ct}");
+        }
+        assert_eq!(skip_body_reason("text/event-stream"), Some("stream"));
+    }
+}
