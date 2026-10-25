@@ -9,7 +9,8 @@ import { isHelperOutdated, MIN_HELPER_VERSION } from "../src/shared/helperInstal
 import { clearDebugBuffer, getDebugBuffer } from "../src/shared/debugLog";
 import type { Script } from "../src/background/engine/scriptStore";
 import { DEFAULT_TEXT_TYPES } from "../src/shared/bodyKind";
-import { __resetTaps, helperSkipSince } from "../src/background/engine/logs";
+import { __resetTaps, allLogs, helperSkipSince } from "../src/background/engine/logs";
+import { correlator } from "../src/background/engine/requestCorrelator";
 
 function makeScript(id: string, code: string): Script {
     return { id, code, enabled: true, createdAt: 0, updatedAt: 0, error: null, meta: compileScript(code).meta };
@@ -318,6 +319,48 @@ wt.onResponseBody({ url: "https://x.com/*", strategy: "helper" }, (c, body) => (
         await settle(40);
         expect(reply(1).t).toBe("continue");
         expect(helperSkipSince("https://x.com/b.png", 0)).toMatchObject({ why: "binary", contentType: "image/png" });
+    });
+
+    it("same URL twice, one served from the cache: the skip and log lines belong to the request the helper saw", async () => {
+        __resetTaps();
+        correlator.reset();
+        const url = "https://x.com/playlist.m3u8";
+        correlator.noteRequest({ requestId: "r1", url, method: "GET", tabId: 5, type: "xmlhttprequest" });
+        correlator.noteRequest({ requestId: "r2", url, method: "GET", tabId: 5, type: "xmlhttprequest" });
+        correlator.noteDone("r2", true);
+        const p = new HelperStrategy();
+        await ready(p, [makeScript("a", `wt.onRequest({ url: "https://x.com/*", strategy: "helper" }, () => ({ headers: { set: { "X-A": "1" } } })); wt.onResponseBody({ url: "https://x.com/*", strategy: "helper" }, (c, body) => "changed");`)]);
+        // the helper gives each stage its own message id
+        fake.deliver({ t: "req", id: 1, url, method: "GET", headers: [["Host", "x.com"]] });
+        await settle(40);
+        fake.deliver({ t: "chunk", id: 2, data: bytesToBase64(new Uint8Array([0, 1, 2, 3])) });
+        fake.deliver({ t: "res", id: 2, url, method: "GET", status: 200, headers: [["content-type", "application/octet-stream"]], body: "chunks" });
+        await settle(40);
+        expect(helperSkipSince(url, 0, "r1")).toMatchObject({ why: "binary" });
+        expect(helperSkipSince(url, 0, "r2")).toBeUndefined();
+        const lines = allLogs().filter((l) => l.scriptId === "a" && l.message.includes(url));
+        expect(lines.length).toBeGreaterThan(0);
+        expect(lines.every((l) => l.requestId === "r1")).toBe(true);
+        correlator.reset();
+    });
+
+    it("concurrent same-URL requests claim their webRequest ids in order, once per helper message", async () => {
+        __resetTaps();
+        correlator.reset();
+        const url = "https://x.com/data.json";
+        correlator.noteRequest({ requestId: "r1", url, method: "GET", tabId: 5, type: "xmlhttprequest" });
+        correlator.noteRequest({ requestId: "r2", url, method: "GET", tabId: 5, type: "xmlhttprequest" });
+        const p = new HelperStrategy();
+        await ready(p, [makeScript("a", `wt.onResponseBody({ url: "https://x.com/*", strategy: "helper" }, (c, body) => body + "!");`)]);
+        for (const id of [1, 2]) {
+            fake.deliver({ t: "chunk", id, data: enc("x" + id) });
+            fake.deliver({ t: "res", id, url, method: "GET", status: 200, headers: [["content-type", "application/json"]], body: "chunks" });
+        }
+        await settle(60);
+        expect(dec(reply(1).body)).toBe("x1!");
+        const ids = allLogs().filter((l) => l.scriptId === "a" && l.message.includes(url)).map((l) => l.requestId);
+        expect(ids).toEqual(["r1", "r2"]);
+        correlator.reset();
     });
 
     it("helper missing → state missing, no retry loop; Retry reconnects", async () => {

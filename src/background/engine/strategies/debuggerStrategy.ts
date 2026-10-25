@@ -22,6 +22,7 @@ import { runBodyOp } from "../../compileHost";
 import { winnerOf } from "../../../shared/precedence";
 import { reportSkipped } from "../skipped";
 import { recordNetBody } from "../../network";
+import { ClaimCache, correlator } from "../requestCorrelator";
 import { compileMv2, ownedRoutes, ownsAny, type OwnedRoute } from "./strategyScripts";
 
 /** webRequest resource type → CDP Fetch resource types */
@@ -91,6 +92,9 @@ export class DebuggerStrategy {
     private summary = "";
     /** "<tabId>|<url>" of recently paused loads (race-warning bookkeeping) */
     private recentlyPaused = new Set<string>();
+    /** paused request → its webRequest request, claimed per stage (request, response) */
+    private reqClaims = new ClaimCache<string>(correlator, "debugger:req");
+    private resClaims = new ClaimCache<string>(correlator, "debugger:res");
 
     reload(scripts: Script[], paramValues?: { [scriptId: string]: Record<string, any> }): void {
         const owned = ownedRoutes(scripts, "debugger");
@@ -352,7 +356,7 @@ export class DebuggerStrategy {
         const a = { ...args, tabId, tier: "debugger" };
         if (__MV3__) return runBodyOp(this.mv3Plain as any, this.mv3Params, op, a);
         return runOp(this.ops, op, a, {
-            log: (scriptId, level, msg, kind) => log(tabId, msg, level, scriptId, kind),
+            log: (scriptId, level, msg, kind) => log(tabId, msg, level, scriptId, kind, undefined, args.requestId),
             debug: (msg) => dlogLevel("debugger", "debug", msg),
         });
     }
@@ -375,7 +379,13 @@ export class DebuggerStrategy {
         const cont = () => debuggerSend(d, "Fetch.continueRequest", { requestId }).catch(() => {});
         await this.ready;
         const isRequestStage = params.responseStatusCode === undefined && params.responseErrorReason === undefined;
-        const base = { url, method, resourceType, requestHeaders };
+        // Fetch's requestId isn't webRequest's: claim the oldest pending same-request of this tab
+        const claims = isRequestStage ? this.reqClaims : this.resClaims;
+        const claimKey = `${key}|${requestId}`;
+        const wrId = tabId >= 0 ? claims.claim(claimKey, method, url, { tabId, pendingOnly: true })?.requestId : undefined;
+        const base = { url, method, resourceType, requestHeaders, requestId: wrId };
+        // answered at the request stage: no response pause will come for it
+        const answered = () => void (wrId && correlator.mark(wrId, "debugger:res"));
         try {
             if (isRequestStage) {
                 const wantsDecision = this.wants(url, method, resourceType, ["onRequest"]);
@@ -384,25 +394,27 @@ export class DebuggerStrategy {
                 const req = { url, method, type: resourceType };
                 const decision = wantsDecision ? await this.run("requestDecision", base, tabId) : null;
                 dlogLevel("debugger", "debug", "request decision", { url, resourceType, kind: decision?.kind ?? "none" });
+                if (decision?.kind === "respond" || decision?.kind === "cancel" || decision?.kind === "redirect") answered();
                 if (decision?.kind === "respond") {
-                    reportSkipped(tabId, req, winnerOf(decision, "debugger"));
-                    return void (await this.fulfill(d, requestId, tabId, url, method, decision.status || 200, decision.mime, decision.content ?? "", decision.headers, cont, `[${decision.scriptName}] onRequest → replaceResponse ${decision.status || 200}`, decision.scriptId));
+                    reportSkipped(tabId, req, winnerOf(decision, "debugger"), wrId);
+                    return void (await this.fulfill(d, requestId, tabId, url, method, decision.status || 200, decision.mime, decision.content ?? "", decision.headers, cont, `[${decision.scriptName}] onRequest → replaceResponse ${decision.status || 200}`, decision.scriptId, wrId));
                 }
                 if (decision?.kind === "cancel") {
-                    reportSkipped(tabId, req, winnerOf(decision, "debugger"));
+                    reportSkipped(tabId, req, winnerOf(decision, "debugger"), wrId);
                     await debuggerSend(d, "Fetch.failRequest", { requestId, errorReason: "BlockedByClient" });
                     return;
                 }
                 if (decision?.kind === "redirect") {
-                    reportSkipped(tabId, req, winnerOf(decision, "debugger"));
+                    reportSkipped(tabId, req, winnerOf(decision, "debugger"), wrId);
                     await debuggerSend(d, "Fetch.continueRequest", { requestId, url: decision.url });
                     return;
                 }
                 // replaceResponse: after onRequest, before the network — the request is never sent
                 const replaced = wantsReplace ? await this.run("replace", base, tabId) : null;
                 if (replaced) {
-                    reportSkipped(tabId, req, winnerOf(replaced, "debugger"));
-                    return void (await this.fulfill(d, requestId, tabId, url, method, 200, replaced.mime, replaced.content, undefined, cont, `[${replaced.who?.scriptName ?? "?"}] replaceResponse`, replaced.who?.scriptId ?? null));
+                    answered();
+                    reportSkipped(tabId, req, winnerOf(replaced, "debugger"), wrId);
+                    return void (await this.fulfill(d, requestId, tabId, url, method, 200, replaced.mime, replaced.content, undefined, cont, `[${replaced.who?.scriptName ?? "?"}] replaceResponse`, replaced.who?.scriptId ?? null, wrId));
                 }
                 if (decision?.kind === "headers") {
                     const set: Record<string, string> = decision.changes?.set || {};
@@ -443,7 +455,7 @@ export class DebuggerStrategy {
             // fetching the body when it can be
             const wantsBinary = this.wants(url, method, resourceType, ["onResponseBody"], true);
             const skipBinary = () => {
-                noteBodySkip("debugger", url, "binary", contentType || "");
+                noteBodySkip("debugger", url, "binary", contentType || "", wrId);
                 dlogLevel("debugger", "debug", "binary body, no binary: true route — onResponseBody skipped", { url, contentType });
             };
             if (bodyKind(contentType, null) === "binary" && !wantsBinary) {
@@ -463,7 +475,7 @@ export class DebuggerStrategy {
                 const out = await this.run("transform", { ...base, body: input, contentType, status, raw: typeof input !== "string" }, tabId);
                 if (out !== null && out !== undefined) body = out;
             }
-            recordNetBody({ tabId, url, method, original: input, modified: body === input ? null : body });
+            recordNetBody({ tabId, url, method, original: input, modified: body === input ? null : body, requestId: wrId });
             if (body === null || body === input) {
                 dlogLevel("debugger", "debug", "no handler changed the body → continue", { url });
                 return void (await continueWithHeaders());
@@ -481,12 +493,14 @@ export class DebuggerStrategy {
         } catch (e: any) {
             log(tabId, `[debugger] debugger interception failed for ${url}: ${e?.message || e} — the load continues UNMODIFIED`, "error");
             await cont();
+        } finally {
+            claims.forget(claimKey);
         }
     }
 
     /** serve a response without the network; on failure the request continues unmodified */
-    private async fulfill(d: any, requestId: string, tabId: number, url: string, method: string, status: number, mime: string | undefined, content: string, headers: Record<string, any> | undefined, cont: () => Promise<unknown>, what: string, scriptId: string | null): Promise<void> {
-        recordNetBody({ tabId, url, method, modified: content, mime, status });
+    private async fulfill(d: any, requestId: string, tabId: number, url: string, method: string, status: number, mime: string | undefined, content: string, headers: Record<string, any> | undefined, cont: () => Promise<unknown>, what: string, scriptId: string | null, webRequestId?: string): Promise<void> {
+        recordNetBody({ tabId, url, method, modified: content, mime, status, requestId: webRequestId });
         const responseHeaders = [
             { name: "content-type", value: mime || "application/octet-stream" },
             ...Object.entries(headers || {}).map(([name, value]) => ({ name, value: String(value) })),
@@ -494,7 +508,7 @@ export class DebuggerStrategy {
         try {
             await debuggerSend(d, "Fetch.fulfillRequest", { requestId, responseCode: status, responseHeaders, body: bytesToBase64(new TextEncoder().encode(content)) });
         } catch (e: any) {
-            log(tabId, `${what} failed: ${e?.message || e} — the request continues UNMODIFIED ${url}`, "error", scriptId);
+            log(tabId, `${what} failed: ${e?.message || e} — the request continues UNMODIFIED ${url}`, "error", scriptId, undefined, undefined, webRequestId);
             await cont();
         }
     }

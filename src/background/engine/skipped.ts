@@ -25,9 +25,9 @@ export function setSkipRoutes(scripts: Script[]): void {
 }
 
 /** warn for every handler `w` kept from running on this request */
-export function reportSkipped(tabId: number, req: SkipRequest, w: Winner | null | undefined): void {
+export function reportSkipped(tabId: number, req: SkipRequest, w: Winner | null | undefined, requestId?: string): void {
     if (!w || !routes.length) return;
-    for (const r of skippedBy(routes, req, w)) log(tabId, skippedLine(r, w, req.url), "warn", r.scriptId, "missed", req.url);
+    for (const r of skippedBy(routes, req, w)) log(tabId, skippedLine(r, w, req.url), "warn", r.scriptId, "missed", req.url, requestId);
 }
 
 /** test seam */

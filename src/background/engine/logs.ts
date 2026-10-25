@@ -14,6 +14,8 @@ export interface LogEntry {
     at: number;
     /** set on "observed (no change)" lines — the UI caps how many it keeps */
     kind?: NetKind;
+    /** the webRequest requestId the line is about, when the strategy knew it */
+    requestId?: string;
 }
 
 const MAX_PER_TAB = 200;
@@ -62,18 +64,18 @@ export function addUiPort(port: chrome.runtime.Port): void {
  * URL) as "observed" (handler ran, no change) or "modified"; omitted, it is
  * inferred (see outcomeKind).
  */
-export function log(tabId: number, message: string, level: LogEntry["level"] = "info", scriptId: string | null = null, kind?: OutcomeKind, url?: string): void {
+export function log(tabId: number, message: string, level: LogEntry["level"] = "info", scriptId: string | null = null, kind?: OutcomeKind, url?: string, requestId?: string): void {
     const netKind = scriptId ? outcomeKind(level, message, kind) : undefined;
     // a skipped handler isn't "missed" twice (the onCompleted check)
-    if (scriptId && (netKind !== "missed" || message.includes(SKIPPED_MARK))) noteTap(scriptId, level, message);
+    if (scriptId && (netKind !== "missed" || message.includes(SKIPPED_MARK))) noteTap(scriptId, level, message, requestId);
     const observedOnly = kind === "observed" && level === "debug";
-    const entry: LogEntry = { tabId, scriptId, level, message, at: Date.now(), ...(observedOnly ? { kind: "observed" as const } : {}) };
+    const entry: LogEntry = { tabId, scriptId, level, message, at: Date.now(), ...(observedOnly ? { kind: "observed" as const } : {}), ...(requestId ? { requestId } : {}) };
     if (observedOnly) pushCapped(observedLogs, entry, MAX_OBSERVED_PER_TAB);
     else pushCapped(tabLogs, entry, MAX_PER_TAB);
     for (const port of uiPorts) {
         port.postMessage({ type: "log", entry });
     }
-    if (scriptId) annotateFromLog(tabId, scriptId, message, level, netKind, url);
+    if (scriptId) annotateFromLog(tabId, scriptId, message, level, netKind, url, requestId);
     if (scriptId && level === "error" && !/^\[[^\]]*\] console\.error/.test(message)) recordScriptError(scriptId, message);
     if (level === "error") {
         console.error("[Wiretrick]", message);
@@ -83,70 +85,91 @@ export function log(tabId: number, message: string, level: LogEntry["level"] = "
 // ---- tap registry: did a script's handler run for a URL? ----
 // Recorded whether or not a manager is open (annotateFromLog needs a port),
 // keyed without the tab — the helper strategy logs with tabId -1. Feeds the
-// "onResponseBody never ran" warning (pipeline.ts).
+// "onResponseBody never ran" warning (pipeline.ts). A line that knows its
+// webRequest requestId is recorded for that request only (two same-URL
+// requests each get their own answer); the URL maps hold the rest.
 
 const MAX_TAPS = 2000;
 /** `${scriptId}|${url}` → when a body handler last ran (or onRequest ended the request) */
 const bodyTaps = new Map<string, number>();
+/** `${scriptId}|${requestId}` → same, for lines that know their request */
+const tapsById = new Map<string, number>();
+
+function setCapped<V>(map: Map<string, V>, key: string, value: V): void {
+    map.delete(key);
+    map.set(key, value);
+    if (map.size > MAX_TAPS) map.delete(map.keys().next().value!);
+}
 const lastScriptError = new Map<string, number>();
 /** lines that mean the body handlers ran — or legitimately never will */
 const BODY_TAP = /\b(onResponseBody|replaceResponse)\b|onRequest → (block|redirect)\b| → skipped: /;
 
-function noteTap(scriptId: string, level: LogEntry["level"], message: string): void {
+function noteTap(scriptId: string, level: LogEntry["level"], message: string, requestId?: string): void {
     const now = Date.now();
     if (level === "error" && !/^\[[^\]]*\] console\.error/.test(message)) lastScriptError.set(scriptId, now);
     if (!BODY_TAP.test(message)) return;
     const m = URL_AT_END.exec(message);
     if (!m) return;
-    const key = `${scriptId}|${m[1]}`;
-    bodyTaps.delete(key);
-    bodyTaps.set(key, now);
-    if (bodyTaps.size > MAX_TAPS) bodyTaps.delete(bodyTaps.keys().next().value!);
+    if (requestId) setCapped(tapsById, `${scriptId}|${requestId}`, now);
+    else setCapped(bodyTaps, `${scriptId}|${m[1]}`, now);
 }
 
-/** Did a body handler of scriptId run for url (or the script throw anywhere) at or after `since` (ms epoch)? */
-export function bodyObservedSince(scriptId: string, url: string, since: number): boolean {
+/**
+ * Did a body handler of scriptId run for url (or the script throw anywhere) at
+ * or after `since` (ms epoch)? With a requestId: for that request, or a line
+ * that didn't know its request.
+ */
+export function bodyObservedSince(scriptId: string, url: string, since: number, requestId?: string): boolean {
+    const byId = requestId ? tapsById.get(`${scriptId}|${requestId}`) : undefined;
+    if (byId !== undefined && byId >= since) return true;
     const t = bodyTaps.get(`${scriptId}|${url}`);
     if (t !== undefined && t >= since) return true;
     const e = lastScriptError.get(scriptId);
     return e !== undefined && e >= since;
 }
 
+type BodySkip = { at: number; strategy: Strategy; why: string; contentType: string };
 /** url → the latest body a strategy didn't hand to onResponseBody, and why ("binary", "empty"…) */
-const bodySkips = new Map<string, { at: number; strategy: Strategy; why: string; contentType: string }>();
+const bodySkips = new Map<string, BodySkip>();
+/** requestId → same, when the strategy knew the request */
+const skipsById = new Map<string, BodySkip>();
 
-export function noteBodySkip(strategy: Strategy, url: string, why: string, contentType: string): void {
-    bodySkips.delete(url);
-    bodySkips.set(url, { at: Date.now(), strategy, why, contentType });
-    if (bodySkips.size > MAX_TAPS) bodySkips.delete(bodySkips.keys().next().value!);
+export function noteBodySkip(strategy: Strategy, url: string, why: string, contentType: string, requestId?: string): void {
+    const s = { at: Date.now(), strategy, why, contentType };
+    if (requestId) setCapped(skipsById, requestId, s);
+    else setCapped(bodySkips, url, s);
 }
 
-/** Did a strategy skip the body of url at or after `since`? */
-export function bodySkipSince(url: string, since: number): { strategy: Strategy; why: string; contentType: string } | undefined {
+/** Did a strategy skip the body of url (of that request, when requestId is given) at or after `since`? */
+export function bodySkipSince(url: string, since: number, requestId?: string): { strategy: Strategy; why: string; contentType: string } | undefined {
+    const byId = requestId ? skipsById.get(requestId) : undefined;
+    if (byId && byId.at >= since) return byId;
     const s = bodySkips.get(url);
     return s && s.at >= since ? s : undefined;
 }
 
-export function noteHelperSkip(url: string, why: string, contentType: string): void {
-    noteBodySkip("helper", url, why, contentType);
+export function noteHelperSkip(url: string, why: string, contentType: string, requestId?: string): void {
+    noteBodySkip("helper", url, why, contentType, requestId);
 }
 
 /** Did the helper skip the body of url at or after `since`? */
-export function helperSkipSince(url: string, since: number): { why: string; contentType: string } | undefined {
-    const s = bodySkipSince(url, since);
+export function helperSkipSince(url: string, since: number, requestId?: string): { why: string; contentType: string } | undefined {
+    const s = bodySkipSince(url, since, requestId);
     return s?.strategy === "helper" ? s : undefined;
 }
 
 /** test seam */
 export function __resetTaps(): void {
     bodyTaps.clear();
+    tapsById.clear();
     lastScriptError.clear();
     bodySkips.clear();
+    skipsById.clear();
 }
 
 /** A handler ran for `url` but changed nothing: a DEBUG line that marks the request "observed". */
-export function logObserved(tabId: number, scriptName: string, handler: string, url: string, scriptId: string): void {
-    log(tabId, observedLine(scriptName, handler, url), "debug", scriptId, "observed");
+export function logObserved(tabId: number, scriptName: string, handler: string, url: string, scriptId: string, requestId?: string): void {
+    log(tabId, observedLine(scriptName, handler, url), "debug", scriptId, "observed", undefined, requestId);
 }
 
 /** every tab's retained LOG lines, oldest first (diagnostic report) */

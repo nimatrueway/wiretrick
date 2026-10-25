@@ -51,7 +51,7 @@ export class PageStrategy implements InterceptionStrategy {
         const a = { ...args, tabId, tier: "page", resourceType: "xmlhttprequest" };
         if (__MV3__) return runBodyOp(this.mv3Scripts, this.mv3Params, op, a);
         return runOp(this.ops, op, a, {
-            log: (scriptId, level, msg, kind) => log(tabId, msg, level, scriptId, kind),
+            log: (scriptId, level, msg, kind) => log(tabId, msg, level, scriptId, kind, undefined, args.requestId),
             debug: (msg) => dlogLevel("page", "debug", msg),
         });
     }
@@ -61,9 +61,9 @@ export class PageStrategy implements InterceptionStrategy {
         return this.run("requestDecision", { url, method }, tabId);
     }
 
-    /** chained onResponseBody over the body (async handlers awaited) */
-    runTransform(url: string, method: string, body: string | Uint8Array, extra?: { status?: number; contentType?: string }, tabId = -1): Promise<string | Uint8Array | null> {
-        return this.run("transform", { url, method, body, status: extra?.status, contentType: extra?.contentType }, tabId);
+    /** chained onResponseBody over the body (async handlers awaited); requestId: its webRequest request, when known */
+    runTransform(url: string, method: string, body: string | Uint8Array, extra?: { status?: number; contentType?: string; requestId?: string }, tabId = -1): Promise<string | Uint8Array | null> {
+        return this.run("transform", { url, method, body, status: extra?.status, contentType: extra?.contentType, requestId: extra?.requestId }, tabId);
     }
 
     /** first replaceResponse handler's result, or null */

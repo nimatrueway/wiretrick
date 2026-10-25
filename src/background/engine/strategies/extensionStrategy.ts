@@ -155,13 +155,13 @@ export class ExtensionStrategy implements InterceptionStrategy {
         const final = (d: HookDisposition, outcome: Winner["outcome"], target?: string): HookDisposition => {
             // not served (e.g. a non-200 replacement on webRequest): nothing took priority
             if (d.kind !== "allow" || pendingFirefoxReplace.has(details.requestId)) {
-                reportSkipped(details.tabId, { url: details.url, method: details.method, type: details.type }, { ...who, strategy: "extension", outcome, target });
+                reportSkipped(details.tabId, { url: details.url, method: details.method, type: details.type }, { ...who, strategy: "extension", outcome, target }, details.requestId);
             }
             return d;
         };
         if (step.kind === "replaceResponse") {
             if (result === undefined || result === null) {
-                logObserved(details.tabId, entry.name, "replaceResponse", details.url, entry.id);
+                logObserved(details.tabId, entry.name, "replaceResponse", details.url, entry.id, details.requestId);
                 return null;
             }
             const d = this.replace(details, result, entry.id, entry.name);
@@ -169,11 +169,11 @@ export class ExtensionStrategy implements InterceptionStrategy {
         }
         const hasHeaders = !!(result && result.headers && (result.headers.set || result.headers.remove));
         if (hasHeaders) {
-            log(details.tabId, `[${entry.name}] onRequest → request headers (${describeHeaderMods(result.headers)}) ${details.url}`, "info", entry.id);
+            log(details.tabId, `[${entry.name}] onRequest → request headers (${describeHeaderMods(result.headers)}) ${details.url}`, "info", entry.id, undefined, undefined, details.requestId);
             // cached so onBeforeSendHeaders doesn't re-run the handler; the later handler wins per header
             const stack = pendingRequestHeaderMods.get(details.requestId) ?? new HeaderStack();
             for (const o of stack.add(result.headers, who)) {
-                if (overrideThrottle(`${o.header}|${o.by.scriptId}|${o.by.index}|${o.over.scriptId}|${o.over.index}`)) log(details.tabId, overrideLine(o, "request", details.url), "warn", entry.id);
+                if (overrideThrottle(`${o.header}|${o.by.scriptId}|${o.by.index}|${o.over.scriptId}|${o.over.index}`)) log(details.tabId, overrideLine(o, "request", details.url), "warn", entry.id, undefined, undefined, details.requestId);
             }
             pendingRequestHeaderMods.set(details.requestId, stack);
         }
@@ -182,11 +182,11 @@ export class ExtensionStrategy implements InterceptionStrategy {
             return d.kind === "allow" && !pendingFirefoxReplace.has(details.requestId) ? null : final(d, "replace");
         }
         if (result && (result.redirect || result.block)) {
-            log(details.tabId, `[${entry.name}] onRequest → ${result.block ? `block ${details.url}` : `redirect ${details.url} → ${result.redirect}`}`, "info", entry.id);
+            log(details.tabId, `[${entry.name}] onRequest → ${result.block ? `block ${details.url}` : `redirect ${details.url} → ${result.redirect}`}`, "info", entry.id, undefined, undefined, details.requestId);
             return final(normalize(result), result.block ? "block" : "redirect", result.block ? undefined : result.redirect);
         }
         trace(details, `[${entry.name}] onRequest returned ${describeResult(result)} (no redirect/block/replaceResponse) for ${details.url}`);
-        if (!hasHeaders) logObserved(details.tabId, entry.name, "onRequest", details.url, entry.id);
+        if (!hasHeaders) logObserved(details.tabId, entry.name, "onRequest", details.url, entry.id, details.requestId);
         return null;
     }
 
@@ -215,7 +215,7 @@ export class ExtensionStrategy implements InterceptionStrategy {
             const ct = contentTypeOf(details.responseHeaders) || "";
             const binaryOk = pending.list.some((e) => e.handlers.some((h) => h.route.binary));
             if (bodyKind(ct, null) === "binary" && !binaryOk) {
-                noteBodySkip("extension", details.url, "binary", ct);
+                noteBodySkip("extension", details.url, "binary", ct, details.requestId);
                 trace(details, `binary body (${ct}), no binary: true route — onResponseBody skipped ${details.url}`);
             } else this.wireFirefoxStream(details, pending.list, pending.tabUrl ?? tabUrl);
         }
@@ -232,11 +232,11 @@ export class ExtensionStrategy implements InterceptionStrategy {
         const mime = rep.mime || guessMime(null, details.url, "application/json");
         const status = rep.status ?? 200;
         if (status !== 200) {
-            log(details.tabId, `[${entry.name}] onRequest → replaceResponse ${status} not served: webRequest can't set a response status (only 200) — set strategy: "debugger" or "helper" on this route ${details.url}`, "warn", entry.id);
+            log(details.tabId, `[${entry.name}] onRequest → replaceResponse ${status} not served: webRequest can't set a response status (only 200) — set strategy: "debugger" or "helper" on this route ${details.url}`, "warn", entry.id, undefined, undefined, details.requestId);
             return { kind: "allow" };
         }
         if (IS_FIREFOX) return this.firefoxReplaceLater(details, body, mime, entry.id, entry.name, "onRequest");
-        log(details.tabId, `[${entry.name}] onRequest → replaceResponse 200 ${mime} (${body.length}b) ${details.url}`, "info", entry.id);
+        log(details.tabId, `[${entry.name}] onRequest → replaceResponse 200 ${mime} (${body.length}b) ${details.url}`, "info", entry.id, undefined, undefined, details.requestId);
         return this.redirectServe(details, body, mime);
     }
 
@@ -245,7 +245,7 @@ export class ExtensionStrategy implements InterceptionStrategy {
         const r = replacementContent(details, replacement);
         if (!r) return { kind: "allow" };
         if (IS_FIREFOX) return this.firefoxReplaceLater(details, r.content, r.mime, scriptId, scriptName, "replaceResponse");
-        log(details.tabId, `[${scriptName}] replaceResponse → ${r.mime} (${r.content.length} bytes) ${details.url}`, "info", scriptId);
+        log(details.tabId, `[${scriptName}] replaceResponse → ${r.mime} (${r.content.length} bytes) ${details.url}`, "info", scriptId, undefined, undefined, details.requestId);
         return this.redirectServe(details, r.content, r.mime);
     }
 
@@ -254,7 +254,7 @@ export class ExtensionStrategy implements InterceptionStrategy {
      * served by redirecting — the URL changes (see the header comment).
      */
     private redirectServe(details: WebRequestDetailsLike, content: string | Uint8Array, mime: string): HookDisposition {
-        recordNetBody({ tabId: details.tabId, url: details.url, method: details.method, modified: content, mime, status: 200 });
+        recordNetBody({ tabId: details.tabId, url: details.url, method: details.method, modified: content, mime, status: 200, requestId: details.requestId });
         // Chrome blocks top-level data: navigations — serve main frames from an extension page instead
         if (details.type === "main_frame") {
             const rid = "serve_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -284,8 +284,8 @@ export class ExtensionStrategy implements InterceptionStrategy {
                 filter.write(bytes);
                 filter.close();
             };
-            log(details.tabId, `[${rep.scriptName}] ${what} ${details.url}`, "info", rep.scriptId);
-            recordNetBody({ tabId: details.tabId, url: details.url, method: details.method, modified: rep.content, mime: rep.mime, status: 200 });
+            log(details.tabId, `[${rep.scriptName}] ${what} ${details.url}`, "info", rep.scriptId, undefined, undefined, details.requestId);
+            recordNetBody({ tabId: details.tabId, url: details.url, method: details.method, modified: rep.content, mime: rep.mime, status: 200, requestId: details.requestId });
         } catch (e: any) {
             scriptError(rep.scriptId, formatScriptError(rep.scriptName, e, "filterResponseData"));
         }
@@ -299,10 +299,10 @@ export class ExtensionStrategy implements InterceptionStrategy {
         const stack = new HeaderStack();
         const apply = ({ entry, h }: { entry: Entry; h: Routed }, result: any) => {
             const mods = result?.headers;
-            if (!(mods && (mods.set || mods.remove))) return logObserved(details.tabId, entry.name, "onResponseHeaders", details.url, entry.id);
-            log(details.tabId, `[${entry.name}] onResponseHeaders → ${describeHeaderMods(mods)} ${details.url}`, "info", entry.id);
+            if (!(mods && (mods.set || mods.remove))) return logObserved(details.tabId, entry.name, "onResponseHeaders", details.url, entry.id, details.requestId);
+            log(details.tabId, `[${entry.name}] onResponseHeaders → ${describeHeaderMods(mods)} ${details.url}`, "info", entry.id, undefined, undefined, details.requestId);
             for (const o of stack.add(mods, { scriptId: entry.id, scriptName: entry.name, kind: "onResponseHeaders", index: h.route.index })) {
-                if (overrideThrottle(`r|${o.header}|${o.by.scriptId}|${o.by.index}|${o.over.scriptId}|${o.over.index}`)) log(details.tabId, overrideLine(o, "response", details.url), "warn", entry.id);
+                if (overrideThrottle(`r|${o.header}|${o.by.scriptId}|${o.by.index}|${o.over.scriptId}|${o.over.index}`)) log(details.tabId, overrideLine(o, "response", details.url), "warn", entry.id, undefined, undefined, details.requestId);
             }
         };
         const done = (): HeaderChanges | null => (stack.empty ? null : stack.result());
@@ -360,7 +360,7 @@ export class ExtensionStrategy implements InterceptionStrategy {
                 const binary = bodyKind(contentType, bytes) === "binary";
                 let body: string | Uint8Array = binary ? bytes : decoder.decode(bytes);
                 const original = body;
-                if (binary && !list.some((e) => e.handlers.some((h) => h.route.binary))) noteBodySkip("extension", details.url, "binary", contentType || "");
+                if (binary && !list.some((e) => e.handlers.some((h) => h.route.binary))) noteBodySkip("extension", details.url, "binary", contentType || "", details.requestId);
                 for (const { id: scriptId, name: scriptName, handlers } of list) for (const h of handlers) {
                     if (binary && !h.route.binary) continue;
                     const ctx = { ...ctxFor(details, tabUrl, h.route), contentType };
@@ -370,15 +370,15 @@ export class ExtensionStrategy implements InterceptionStrategy {
                         const out = await h.fn(ctx, body);
                         if (out !== undefined && out !== null && out !== body) {
                             const size = (b: any) => (typeof b === "string" ? b.length : (b?.byteLength ?? 0));
-                            log(details.tabId, `[${scriptName}] onResponseBody applied (${size(body)}b → ${size(out)}b) ${details.url}`, "info", scriptId);
+                            log(details.tabId, `[${scriptName}] onResponseBody applied (${size(body)}b → ${size(out)}b) ${details.url}`, "info", scriptId, undefined, undefined, details.requestId);
                             body = out;
-                        } else logObserved(details.tabId, scriptName, "onResponseBody", details.url, scriptId);
+                        } else logObserved(details.tabId, scriptName, "onResponseBody", details.url, scriptId, details.requestId);
                     } catch (e: any) {
                         scriptError(scriptId, formatScriptError(scriptName, e, "onResponseBody"));
                     }
                 }
                 const outBytes = typeof body === "string" ? encoder.encode(body) : body;
-                recordNetBody({ tabId: details.tabId, url: details.url, method: details.method, original, modified: body === original ? null : body });
+                recordNetBody({ tabId: details.tabId, url: details.url, method: details.method, original, modified: body === original ? null : body, requestId: details.requestId });
                 filter.write(outBytes);
                 filter.close();
             };

@@ -356,14 +356,14 @@ import { bodyKind, setTextTypes } from "../shared/bodyKind";
                 const contentType = response.headers.get("content-type") || "";
                 const binaryOk = wantsBinary(url, method);
                 let kind = bodyKind(contentType, null);
-                if (kind === "binary" && !binaryOk) return skipBinary(response, url, contentType);
+                if (kind === "binary" && !binaryOk) return skipBinary(response, url, method, contentType);
                 let bodyIn: string | Uint8Array;
                 if (kind === "text") bodyIn = await response.clone().text();
                 else {
                     // binary, or no content-type: sniff the bytes
                     const buf = new Uint8Array(await response.clone().arrayBuffer());
                     kind = bodyKind(contentType, buf);
-                    if (kind === "binary" && !binaryOk) return skipBinary(response, url, contentType);
+                    if (kind === "binary" && !binaryOk) return skipBinary(response, url, method, contentType);
                     bodyIn = kind === "binary" ? buf : new TextDecoder().decode(buf);
                 }
 
@@ -388,9 +388,9 @@ import { bodyKind, setTextTypes } from "../shared/bodyKind";
     }
 
     /** a binary body no route takes: pass it through, and say why (the "never ran" warning) */
-    function skipBinary(response: Response, url: string, contentType: string): Response {
+    function skipBinary(response: Response, url: string, method: string, contentType: string): Response {
         try {
-            window.postMessage({ source: HOOK_SOURCE, kind: "bodySkip", url, why: "binary", contentType }, window.location.origin);
+            window.postMessage({ source: HOOK_SOURCE, kind: "bodySkip", url, method, why: "binary", contentType }, window.location.origin);
         } catch {}
         return response;
     }

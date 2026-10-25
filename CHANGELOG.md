@@ -7,6 +7,14 @@ its section below.
 
 ## [Unreleased]
 
+### Fixed
+
+- Two requests to the same URL (e.g. a playlist fetched twice, once from
+  the browser cache) now each show their own script results in the Network
+  view and their own "onResponseBody never ran" reason. Before, both
+  landed on the latest row and shared one reason — e.g. "the body is
+  binary" for a request that never reached the helper.
+
 ## [0.9.11] - 2026-10-24
 
 ### Added

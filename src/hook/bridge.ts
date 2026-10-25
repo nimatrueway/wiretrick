@@ -127,7 +127,7 @@ import { packBytes, unpackBytes } from "../shared/bytesPack";
             return;
         }
         if (data.kind === "bodySkip") {
-            safeSend({ type: "bodySkip", url: data.url, why: data.why, contentType: data.contentType || "" });
+            safeSend({ type: "bodySkip", url: data.url, method: typeof data.method === "string" ? data.method : "GET", why: data.why, contentType: data.contentType || "" });
             return;
         }
         if (data.kind === "log") {

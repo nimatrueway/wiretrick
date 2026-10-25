@@ -29,6 +29,7 @@ import { effectiveStrategy, hookCanSee, routeLabel, routeMatches, setDefaultStra
 import { analyzeScripts, runBodyOp, type Analyzed } from "../compileHost";
 import { recordNetBody } from "../network";
 import { reportSkipped, setSkipRoutes } from "./skipped";
+import { correlator } from "./requestCorrelator";
 import { winnerOf } from "../../shared/precedence";
 import { STRATEGY_KEY, TEXT_TYPES_KEY } from "../settingsFile";
 import { getTextTypes, setTextTypes } from "../../shared/bodyKind";
@@ -141,6 +142,8 @@ export function createPipeline(
     const extOrigin = chrome.runtime.getURL("");
     const watchedFor = (url: string, method?: string, type?: string) => bodyWatch.filter((w) => routeMatches(w.route, url, method, type));
     const ownRequest = (d: any) => d.url.startsWith(extOrigin) || (d.initiator || d.originUrl || "").startsWith(extOrigin.replace(/\/$/, ""));
+    // webRequest requestIds for the strategies' log lines, Network rows and the check below
+    correlator.attach(chrome.webRequest);
     if (chrome.webRequest?.onBeforeRequest) {
         chrome.webRequest.onBeforeRequest.addListener(
             (d) => {
@@ -161,7 +164,8 @@ export function createPipeline(
         const routes = watchedFor(d.url, (d as any).method, d.type).filter((w) => w.route.kind !== "onRequest" || d.type === "xmlhttprequest");
         if (!routes.length) return;
         setTimeout(async () => {
-            const bodySkip = bodySkipSince(d.url, start - 250);
+            // per request: a same-URL request's skip/tap isn't this one's
+            const bodySkip = bodySkipSince(d.url, start - 250, d.requestId);
             // the hook took it: the page may simply never read the body (unless it skipped a binary one)
             if (pageStrategy.isClaimed(d.url) && bodySkip?.strategy !== "page") return;
             const hookLoaded = d.type === "xmlhttprequest" && routes.some((w) => w.strategy === "page") ? await frameHasHook(d.tabId, d.frameId) : undefined;
@@ -169,7 +173,7 @@ export function createPipeline(
             for (const w of routes) {
                 if (done.has(w.id)) continue;
                 done.add(w.id);
-                if (bodyObservedSince(w.id, d.url, start - 250)) continue;
+                if (bodyObservedSince(w.id, d.url, start - 250, d.requestId)) continue;
                 const reason = missedReason({
                     strategy: w.strategy,
                     type: d.type,
@@ -183,7 +187,7 @@ export function createPipeline(
                     bodySkip,
                 });
                 if (!reason) continue;
-                log(d.tabId, missedLine(w.name, routeLabel(w.route), d.url, missedWhat(d.type), reason), "warn", w.id, "missed", d.url);
+                log(d.tabId, missedLine(w.name, routeLabel(w.route), d.url, missedWhat(d.type), reason), "warn", w.id, "missed", d.url, d.requestId);
             }
         }, MISSED_DELAY_MS);
     }
@@ -732,14 +736,17 @@ export function createPipeline(
             const method = msg.method || "GET";
             // the bridge packs binary bodies (runtime messaging is JSON)
             const original = unpackBytes(msg.body);
-            pageStrategy.runTransform(msg.url, method, original || "", { status: msg.status, contentType: msg.contentType }, tabId).then((body) => {
-                recordNetBody({ tabId, url: msg.url, method, original: original ?? "", modified: body });
+            // the response is in: its webRequest request has started (onRequest/replace ran before it, by URL)
+            const requestId = correlator.claim("page", method, msg.url, { tabId })?.requestId;
+            pageStrategy.runTransform(msg.url, method, original || "", { status: msg.status, contentType: msg.contentType, requestId }, tabId).then((body) => {
+                recordNetBody({ tabId, url: msg.url, method, original: original ?? "", modified: body, requestId });
                 sendResponse(packBytes({ body }));
             });
             return true;
         }
         if (msg && msg.type === "bodySkip") {
-            noteBodySkip("page", msg.url, msg.why || "binary", msg.contentType || "");
+            const requestId = correlator.claim("page", msg.method || "GET", msg.url, { tabId: sender?.tab?.id ?? -1 })?.requestId;
+            noteBodySkip("page", msg.url, msg.why || "binary", msg.contentType || "", requestId);
             sendResponse({});
             return false;
         }

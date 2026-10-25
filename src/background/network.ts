@@ -14,6 +14,8 @@
  * annotateFromLog (every script-attributed engine log line that ends in
  * the request URL); bodies via recordNetBody from the strategies that
  * handle them (the browser exposes no response bodies to webRequest).
+ * Both go to the row of the line's webRequest requestId when the strategy
+ * knew it (engine/requestCorrelator.ts), else to the newest same-URL row.
  */
 import { outcomeKind, type OutcomeKind, type NetBody, type NetEntry, type NetPortMsg } from "../shared/netTypes";
 
@@ -162,7 +164,8 @@ function adoptSynthetic(e: NetEntry): void {
     const now = Date.now();
     for (const s of [...entries.values()].reverse()) {
         if (now - s.startedAt > 2000) break;
-        if (!s.synthetic || s.url !== e.url) continue;
+        // a row keyed by another request's id waits for that request
+        if (!s.synthetic || s.url !== e.url || !s.id.startsWith("syn:")) continue;
         if (s.tabId >= 0 && e.tabId >= 0 && s.tabId !== e.tabId) continue;
         e.outcomes.push(...s.outcomes);
         if (s.responseBody) {
@@ -197,7 +200,14 @@ const L = {
             requestBody: requestBodyOf(d.requestBody),
             outcomes: [],
         };
-        adoptSynthetic(e);
+        const early = entries.get(d.requestId);
+        if (early?.synthetic) {
+            // annotated by its requestId before this listener ran
+            e.outcomes.push(...early.outcomes);
+            e.responseBody = early.responseBody;
+            e.originalResponseBody = early.originalResponseBody;
+            entries.delete(early.id);
+        } else adoptSynthetic(e);
         add(e);
     },
     sendHeaders(d: chrome.webRequest.WebRequestHeadersDetails): void {
@@ -349,15 +359,25 @@ export const URL_AT_END = /\s((?:https?|wss?):\/\/\S+)\s*$/;
 /** optional strategy tag ("[helper] [Name] …") then the script name */
 const NAME_PREFIX = /^(?:\[(helper|debugger|extension|page|sandbox|rules)\]\s+(?=\[))?\[([^\]]+)\]\s*/;
 
+const sameUrl = (a: string, b: string): boolean => a === b || a.split("#")[0] === b.split("#")[0];
+
 /**
- * The recorded request a script action/body belongs to: the newest same-URL
- * entry (any tab when the caller doesn't know it), else a synthetic entry —
- * e.g. the hook answered a fetch itself so nothing hit the network. An
- * entry learns its tab from whichever caller knows it.
+ * The recorded request a script action/body belongs to: the row of its
+ * webRequest requestId when known (a synthetic row with that id until the
+ * request is recorded), else the newest same-URL entry (any tab when the
+ * caller doesn't know it), else a synthetic entry — e.g. the hook answered a
+ * fetch itself so nothing hit the network. An entry learns its tab from
+ * whichever caller knows it.
  */
-function entryFor(tabId: number, url: string, method?: string): NetEntry {
+function entryFor(tabId: number, url: string, method?: string, requestId?: string): NetEntry {
     const now = Date.now();
     let target: NetEntry | undefined;
+    if (requestId) {
+        const e = entries.get(requestId);
+        if (!e) target = syntheticEntry(requestId, tabId, url, method, now);
+        else if (sameUrl(e.url, url)) target = e;
+    }
+    if (target) return learn(target, tabId, method);
     const window = ports.size ? MATCH_WINDOW_MS : IDLE_MATCH_WINDOW_MS;
     for (const e of [...entries.values()].reverse()) {
         if (now - e.startedAt > window) break;
@@ -367,26 +387,32 @@ function entryFor(tabId: number, url: string, method?: string): NetEntry {
         target = e;
         break;
     }
-    if (!target) {
-        target = {
-            id: `syn:${syntheticSeq++}`,
-            tabId,
-            url,
-            method: method || "GET",
-            type: "other",
-            status: null,
-            statusText: "",
-            mime: "",
-            size: null,
-            fromCache: false,
-            startedAt: now,
-            endedAt: now,
-            state: "done",
-            synthetic: true,
-            outcomes: [],
-        };
-        add(target);
-    }
+    return learn(target || syntheticEntry(`syn:${syntheticSeq++}`, tabId, url, method, now), tabId, method);
+}
+
+function syntheticEntry(id: string, tabId: number, url: string, method: string | undefined, now: number): NetEntry {
+    const e: NetEntry = {
+        id,
+        tabId,
+        url,
+        method: method || "GET",
+        type: "other",
+        status: null,
+        statusText: "",
+        mime: "",
+        size: null,
+        fromCache: false,
+        startedAt: now,
+        endedAt: now,
+        state: "done",
+        synthetic: true,
+        outcomes: [],
+    };
+    add(e);
+    return e;
+}
+
+function learn(target: NetEntry, tabId: number, method?: string): NetEntry {
     if (target.tabId < 0 && tabId >= 0) target.tabId = tabId;
     if (target.synthetic && method) target.method = method;
     return target;
@@ -404,13 +430,15 @@ export interface NetBodyRecord {
     /** content type of a script-served body */
     mime?: string;
     status?: number;
+    /** webRequest requestId, when the strategy knew it */
+    requestId?: string;
 }
 
 /** Attach a body Wiretrick handled to its request (no-op unless recording). */
 export function recordNetBody(r: NetBodyRecord): void {
     if (!ports.size) return;
     try {
-        const e = entryFor(r.tabId, r.url, r.method);
+        const e = entryFor(r.tabId, r.url, r.method, r.requestId);
         if (r.modified !== undefined && r.modified !== null) {
             e.responseBody = toNetBody(r.modified);
             e.originalResponseBody = toNetBody(r.original);
@@ -436,7 +464,7 @@ export function recordNetBody(r: NetBodyRecord): void {
  * recorded request becomes a synthetic entry (see entryFor). Runs while
  * idle too (see MAX_IDLE).
  */
-export function annotateFromLog(tabId: number, scriptId: string, message: string, level: NetEntry["outcomes"][number]["level"], kind?: OutcomeKind, explicitUrl?: string): void {
+export function annotateFromLog(tabId: number, scriptId: string, message: string, level: NetEntry["outcomes"][number]["level"], kind?: OutcomeKind, explicitUrl?: string, requestId?: string): void {
     const m = explicitUrl ? null : URL_AT_END.exec(message);
     if (!explicitUrl && !m) return;
     const url = explicitUrl || m![1];
@@ -445,7 +473,7 @@ export function annotateFromLog(tabId: number, scriptId: string, message: string
     let action = message.slice(nameMatch ? nameMatch[0].length : 0, m ? m.index : message.length).trim();
     if (nameMatch?.[1]) action += ` (${nameMatch[1]})`;
     const now = Date.now();
-    const target = entryFor(tabId, url);
+    const target = entryFor(tabId, url, undefined, requestId);
     target.outcomes.push({ scriptId, scriptName, action, level, kind: outcomeKind(level, message, kind), at: now });
     touch(target.id);
 }

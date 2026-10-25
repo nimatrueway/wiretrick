@@ -23,6 +23,7 @@ import { reportSkipped } from "../skipped";
 import { winnerOf } from "../../../shared/precedence";
 import { evalProxyDecision, runBodyOp } from "../../compileHost";
 import { recordNetBody } from "../../network";
+import { ClaimCache, correlator } from "../requestCorrelator";
 import { HelperRouting } from "../../helperRouting";
 import { IS_FIREFOX, setHelperActive } from "./helperState";
 import { compileMv2, ownedRoutes, ownsAny, type OwnedRoute } from "./strategyScripts";
@@ -129,50 +130,13 @@ export function filterUrlsFor(patterns: string[]): string[] {
     return [...out];
 }
 
-/**
- * Request context (tabId / resourceType / tabUrl) for helper pauses:
- * an observe-only webRequest listener, registered for the routed hosts
- * only, correlated by method + url.
- */
-class RequestContext {
-    private recent = new Map<string, { tabId: number; type: string; tabUrl: string; at: number }>();
-    private tabUrls = new Map<number, string>();
-    private listener: ((d: any) => void) | null = null;
-    private urls = "";
-
-    watch(patterns: string[]): void {
-        const urls = patterns.length ? filterUrlsFor(patterns) : [];
-        const key = JSON.stringify(urls);
-        if (key === this.urls) return;
-        this.urls = key;
-        if (this.listener) chrome.webRequest.onBeforeRequest.removeListener(this.listener);
-        this.listener = null;
-        if (!urls.length) return;
-        this.listener = (d: any) => {
-            if (d.type === "main_frame") this.tabUrls.set(d.tabId, d.url);
-            const tabUrl = d.type === "main_frame" ? d.url : this.tabUrls.get(d.tabId) || d.documentUrl || d.initiator || "";
-            this.recent.set(`${d.method} ${d.url}`, { tabId: d.tabId, type: d.type, tabUrl, at: Date.now() });
-            if (this.recent.size > 2000) {
-                const cutoff = Date.now() - 60_000;
-                for (const [k, v] of this.recent) if (v.at < cutoff) this.recent.delete(k);
-            }
-        };
-        try {
-            chrome.webRequest.onBeforeRequest.addListener(this.listener, { urls });
-        } catch (e: any) {
-            dlogLevel("helper", "warn", `request-context listener failed: ${e?.message || e}`);
-        }
-    }
-
-    lookup(method: string, url: string): { tabId: number; type: string; tabUrl: string } {
-        const hit = this.recent.get(`${method} ${url}`);
-        // type "" = unknown: route `resourceTypes` aren't checked (bodyOps)
-        return hit ? { tabId: hit.tabId, type: hit.type, tabUrl: hit.tabUrl } : { tabId: -1, type: "", tabUrl: "" };
-    }
-
-    forgetTab(tabId: number): void {
-        this.tabUrls.delete(tabId);
-    }
+/** a helper pause's request: webRequest context + requestId (engine/requestCorrelator.ts) */
+interface PauseContext {
+    tabId: number;
+    /** "" = unknown: route `resourceTypes` aren't checked (bodyOps) */
+    type: string;
+    tabUrl: string;
+    requestId?: string;
 }
 
 export class HelperStrategy {
@@ -180,7 +144,13 @@ export class HelperStrategy {
     onStatus: (s: ProcessStatus) => void = () => {};
 
     private routing = new HelperRouting();
-    private ctx = new RequestContext();
+    /**
+     * helper message id → its webRequest request, claimed once per message.
+     * The helper numbers a request's request and response pauses separately,
+     * so each stage claims from its own FIFO.
+     */
+    private reqClaims = new ClaimCache<number>(correlator, "helper:req");
+    private resClaims = new ClaimCache<number>(correlator, "helper:res");
     private port: chrome.runtime.Port | null = null;
     private helper: HelperReady | null = null;
     private system: SystemProxyInfo | null = null;
@@ -230,7 +200,6 @@ export class HelperStrategy {
             this.mv2Ops = compileMv2(scripts, paramValues, (s) => ownsAny(s, "helper")).map((c) => ({ id: c.id, name: c.name, handlers: c.compiled.handlers }));
         }
         this.owned = owned;
-        this.ctx.watch(owned.flatMap((o) => o.route.url));
         if (!owned.length) {
             this.disconnect();
             return;
@@ -362,7 +331,7 @@ export class HelperStrategy {
     }
 
     forgetTab(tabId: number): void {
-        this.ctx.forgetTab(tabId);
+        correlator.forgetTab(tabId);
     }
 
     status(): ProcessStatus {
@@ -430,10 +399,14 @@ export class HelperStrategy {
                 return;
             }
             case "req":
-                void this.onReq(m).catch((e) => this.fallback(m.id, "request", e));
+                void this.onReq(m)
+                    .catch((e) => this.fallback(m.id, "request", e))
+                    .finally(() => this.reqClaims.forget(m.id));
                 return;
             case "res":
-                void this.onRes(m).catch((e) => this.fallback(m.id, "response", e));
+                void this.onRes(m)
+                    .catch((e) => this.fallback(m.id, "response", e))
+                    .finally(() => this.resClaims.forget(m.id));
                 return;
             case "needUpstream":
                 void evalProxyDecision(this.decisionSource, m.url, m.host)
@@ -463,7 +436,7 @@ export class HelperStrategy {
         args.tier = "helper";
         if (__MV3__) return runBodyOp(this.mv3Plain, this.mv3Params, op, args);
         return runOp(this.mv2Ops, op, args, {
-            log: (scriptId, level, msg, kind) => log(args.tabId ?? -1, `[helper] ${msg}`, level, scriptId, kind),
+            log: (scriptId, level, msg, kind) => log(args.tabId ?? -1, `[helper] ${msg}`, level, scriptId, kind, undefined, args.requestId),
             debug: (msg) => dlogLevel("helper", "debug", msg),
         });
     }
@@ -473,19 +446,33 @@ export class HelperStrategy {
         return this.owned.some((o) => helperRouteOf(o.route)[flag] && routeMatches(o.route, url, method, type || undefined));
     }
 
+    /**
+     * The webRequest request behind helper message `id`: the oldest pending
+     * same method + URL request this stage hasn't claimed (a cache hit never
+     * reaches the helper); unclaimed, the newest one's context only.
+     */
+    private context(m: { id: number; url: string; method: string }, stage: "req" | "res"): PauseContext {
+        const r = (stage === "req" ? this.reqClaims : this.resClaims).claim(m.id, m.method, m.url, { pendingOnly: true });
+        if (r) return { tabId: r.tabId, type: r.type, tabUrl: r.tabUrl, requestId: r.requestId };
+        const hit = correlator.latest(m.method, m.url);
+        return hit ? { tabId: hit.tabId, type: hit.type, tabUrl: hit.tabUrl } : { tabId: -1, type: "", tabUrl: "" };
+    }
+
     private async onReq(m: { id: number; url: string; method: string; headers: Pairs }): Promise<void> {
         await this.loaded;
-        const c = this.ctx.lookup(m.method, m.url);
+        const c = this.context(m, "req");
         if (!this.matching(m.url, m.method, c.type, "req")) {
             this.send({ t: "continue", id: m.id });
             return;
         }
-        const args = { url: m.url, method: m.method, tabId: c.tabId, resourceType: c.type, tabUrl: c.tabUrl, requestHeaders: pairsToObject(m.headers) };
+        const args = { url: m.url, method: m.method, tabId: c.tabId, resourceType: c.type, tabUrl: c.tabUrl, requestHeaders: pairsToObject(m.headers), requestId: c.requestId };
         const dec = await this.run("requestDecision", args);
         const req = { url: m.url, method: m.method, type: c.type };
-        reportSkipped(c.tabId, req, winnerOf(dec, "helper"));
+        reportSkipped(c.tabId, req, winnerOf(dec, "helper"), c.requestId);
+        // answered here: no response pause will come for it
+        if (c.requestId && (dec?.kind === "respond" || dec?.kind === "redirect" || dec?.kind === "cancel")) correlator.mark(c.requestId, "helper:res");
         if (dec?.kind === "respond") {
-            recordNetBody({ tabId: c.tabId, url: m.url, method: m.method, modified: dec.content, mime: dec.mime, status: dec.status || 200 });
+            recordNetBody({ tabId: c.tabId, url: m.url, method: m.method, modified: dec.content, mime: dec.mime, status: dec.status || 200, requestId: c.requestId });
             const headers: Pairs = [["content-type", dec.mime]];
             for (const [k, v] of Object.entries(dec.headers || {})) headers.push([k, String(v)]);
             this.send({ t: "fulfill", id: m.id, status: dec.status || 200, headers: withNoStore(headers), body: bytesToBase64(new TextEncoder().encode(dec.content)) });
@@ -502,8 +489,9 @@ export class HelperStrategy {
         // replaceResponse runs here: no upstream round-trip for a replaced body
         const rep = await this.run("replace", { ...args });
         if (rep) {
-            reportSkipped(c.tabId, req, winnerOf(rep, "helper"));
-            recordNetBody({ tabId: c.tabId, url: m.url, method: m.method, modified: rep.content, mime: rep.mime, status: 200 });
+            if (c.requestId) correlator.mark(c.requestId, "helper:res");
+            reportSkipped(c.tabId, req, winnerOf(rep, "helper"), c.requestId);
+            recordNetBody({ tabId: c.tabId, url: m.url, method: m.method, modified: rep.content, mime: rep.mime, status: 200, requestId: c.requestId });
             this.send({ t: "fulfill", id: m.id, status: 200, headers: withNoStore([["content-type", rep.mime]]), body: bytesToBase64(new TextEncoder().encode(rep.content)) });
             return;
         }
@@ -518,9 +506,9 @@ export class HelperStrategy {
         const parts = this.chunks.get(m.id) || [];
         this.chunks.delete(m.id);
         await this.loaded;
-        const c = this.ctx.lookup(m.method, m.url);
+        const c = this.context(m, "res");
         const reqHeaders = {};
-        const base = { url: m.url, method: m.method, tabId: c.tabId, resourceType: c.type, tabUrl: c.tabUrl, requestHeaders: reqHeaders, status: m.status };
+        const base = { url: m.url, method: m.method, tabId: c.tabId, resourceType: c.type, tabUrl: c.tabUrl, requestHeaders: reqHeaders, status: m.status, requestId: c.requestId };
         let headers = m.headers;
         let headersChanged = false;
         if (this.matching(m.url, m.method, c.type, "resHeaders")) {
@@ -541,16 +529,16 @@ export class HelperStrategy {
                 out = await this.run("transform", { ...base, body, contentType });
             } else {
                 dlogLevel("helper", "debug", `binary body (${contentType || "sniffed"}) skipped: no onResponseBody route with binary: true: ${m.url}`);
-                noteHelperSkip(m.url, "binary", contentType);
+                noteHelperSkip(m.url, "binary", contentType, c.requestId);
             }
-            recordNetBody({ tabId: c.tabId, url: m.url, method: m.method, original: bytes, modified: out });
+            recordNetBody({ tabId: c.tabId, url: m.url, method: m.method, original: bytes, modified: out, requestId: c.requestId });
             if (out !== null && out !== undefined) {
                 this.send({ t: "fulfill", id: m.id, status: m.status, headers: withNoStore(headers), body: bytesToBase64(typeof out === "string" ? new TextEncoder().encode(out) : out) });
                 return;
             }
         } else if (m.body.startsWith("skipped:") && this.matching(m.url, m.method, c.type, "body")) {
             dlogLevel("helper", "debug", `onResponseBody not run (${m.body.slice(8)}): ${m.url}`);
-            noteHelperSkip(m.url, m.body.slice(8), pairsToObject(m.headers)["content-type"] || "");
+            noteHelperSkip(m.url, m.body.slice(8), pairsToObject(m.headers)["content-type"] || "", c.requestId);
         }
         this.send(headersChanged ? { t: "continue", id: m.id, headers } : { t: "continue", id: m.id });
     }
