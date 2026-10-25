@@ -13,6 +13,8 @@ export interface WebRequestDetailsLike {
     responseHeaders?: { name: string; value?: string }[];
     statusCode?: number;
     statusLine?: string;
+    /** onBeforeRequest with the "requestBody" extraInfoSpec */
+    requestBody?: { raw?: { bytes?: ArrayBuffer; file?: string }[]; formData?: { [name: string]: string[] }; error?: string } | null;
 }
 
 export interface HeaderChanges {

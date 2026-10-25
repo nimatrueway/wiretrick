@@ -19,6 +19,7 @@ import type { Routed, ScriptHandlers } from "./compile";
 import { kindSkipLine, observedLine, type NetKind } from "./netTypes";
 import { HeaderStack, mixedResultLine, overrideLine, singleRequestResult, type Who } from "./precedence";
 import { makeMissedThrottle } from "./missedTap";
+import { requestBodyCtx } from "./requestBody";
 
 export type BodyOp = "requestDecision" | "transform" | "replace" | "responseHeaders";
 
@@ -136,6 +137,7 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
     // "" = unknown (helper strategy, uncorrelated request): ctx says "other", route `resourceTypes` aren't checked
     const known: string | undefined = args.resourceType === undefined ? "xmlhttprequest" : args.resourceType || undefined;
     const resourceType: string = known ?? "other";
+    const reqBody = requestBodyCtx(args.requestBody);
     const base = (h: Routed) => ({
         url,
         method,
@@ -143,6 +145,7 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
         resourceType,
         requestHeaders: args.requestHeaders || {},
         groups: routeGroups(h.route, url),
+        ...reqBody,
     });
     const binaryBody = op === "transform" && args.body instanceof Uint8Array;
     const filter: OpFilter = { url, method, resourceType: known, tier: args.tier, defaultStrategy: args.defaultStrategy, onlyIds: args.onlyIds };

@@ -33,6 +33,7 @@ import { compileMv2, ownsAny } from "./strategyScripts";
 import { HeaderStack, mergeHeaderEdits, mixedResultLine, overrideLine, singleRequestResult, type Who, type Winner } from "../../../shared/precedence";
 import { makeMissedThrottle } from "../../../shared/missedTap";
 import { reportSkipped } from "../skipped";
+import { requestBodyCtx, requestBodyFromWebRequest, type RequestBody } from "../../../shared/requestBody";
 
 type Kind = "onRequest" | "onResponseHeaders" | "replaceResponse" | "onResponseBody";
 
@@ -75,6 +76,7 @@ export class ExtensionStrategy implements InterceptionStrategy {
         pendingFirefoxStreams.delete(requestId);
         pendingFirefoxReplace.delete(requestId);
         pendingRequestHeaderMods.delete(requestId);
+        pendingRequestBodies.delete(requestId);
     }
 
     supportsBodyModification(): boolean {
@@ -94,6 +96,7 @@ export class ExtensionStrategy implements InterceptionStrategy {
     handleBeforeRequest(details: WebRequestDetailsLike, tabUrl: string | null): MaybePromise<HookDisposition> {
         const matched = this.entries.filter((e) => KINDS.some((k) => this.hits(e, k, details).length));
         if (!matched.length) return { kind: "allow" };
+        rememberRequestBody(details);
         trace(details, `onBeforeRequest ${details.type} ${details.method} ${details.url} (tab url: ${tabUrl ?? "unknown"}) → scripts: ${matched.map((m) => `"${m.name}"`).join(", ")}`);
         const steps: { entry: Entry; h: Routed; kind: "onRequest" | "replaceResponse" }[] = [];
         for (const kind of ["onRequest", "replaceResponse"] as const) {
@@ -345,6 +348,8 @@ export class ExtensionStrategy implements InterceptionStrategy {
 
     private wireFirefoxStream(details: WebRequestDetailsLike, list: StreamEntry[], tabUrl: string | null): void {
         const first = list[0];
+        // onstop may come after onCompleted pruned the cache
+        const requestBody = pendingRequestBodies.get(details.requestId);
         try {
             const filter = ((globalThis as any).browser?.webRequest ?? chrome.webRequest).filterResponseData(details.requestId);
             const decoder = new TextDecoder("utf-8");
@@ -372,7 +377,7 @@ export class ExtensionStrategy implements InterceptionStrategy {
                     // every route opted out of this kind of body: say so (no "never ran" warning)
                     if (!runs.length && handlers.every((h) => h.route.binary !== undefined)) log(details.tabId, kindSkipLine(scriptName, details.url, binary), "debug", scriptId, "observed", undefined, details.requestId);
                     for (const h of runs) {
-                        const ctx = { ...ctxFor(details, tabUrl, h.route), contentType };
+                        const ctx = { ...ctxFor(details, tabUrl, h.route, requestBody), contentType };
                         // a text body an earlier binary route returned as bytes is still text here
                         if (typeof body !== "string" && !takesBinary(h.route)) body = decoder.decode(body);
                         try {
@@ -438,8 +443,16 @@ export function makeCtx(details: WebRequestDetailsLike, tabUrl: string | null): 
 }
 
 /** ctx for a matched route: + `groups` (named URL-pattern captures) */
-function ctxFor(details: WebRequestDetailsLike, tabUrl: string | null, route: RouteMeta): any {
-    return { ...makeCtx(details, tabUrl), groups: routeGroups(route, details.url) };
+function ctxFor(details: WebRequestDetailsLike, tabUrl: string | null, route: RouteMeta, requestBody = pendingRequestBodies.get(details.requestId)): any {
+    return { ...makeCtx(details, tabUrl), groups: routeGroups(route, details.url), ...requestBodyCtx(requestBody) };
+}
+
+/** only onBeforeRequest carries the body: keep it for the later stages */
+function rememberRequestBody(details: WebRequestDetailsLike): void {
+    const body = requestBodyFromWebRequest(details.requestBody);
+    if (body === undefined) return;
+    pendingRequestBodies.set(details.requestId, body);
+    if (pendingRequestBodies.size > 200) pendingRequestBodies.delete(pendingRequestBodies.keys().next().value!);
 }
 
 export function normalize(result: any): HookDisposition {
@@ -574,3 +587,6 @@ const pendingFirefoxStreams = new Map<string, { list: StreamEntry[]; tabUrl: str
 
 /** requestId → request header mods already computed by onRequest (issue: run once) */
 const pendingRequestHeaderMods = new Map<string, HeaderStack>();
+
+/** requestId → ctx.requestBody, from onBeforeRequest */
+const pendingRequestBodies = new Map<string, RequestBody>();

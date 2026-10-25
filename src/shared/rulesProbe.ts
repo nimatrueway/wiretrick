@@ -18,7 +18,7 @@ import type { HandlerFn, ScriptHandlers } from "./compile";
 const PROBE_TIMEOUT_MS = 2000;
 
 /** ctx fields a rules handler may not read, with harmless stand-ins */
-const REQUEST_FIELDS: Record<string, unknown> = { method: "GET", tabUrl: "", resourceType: "other", requestHeaders: {} };
+const REQUEST_FIELDS: Record<string, unknown> = { method: "GET", tabUrl: "", resourceType: "other", requestHeaders: {}, requestBody: undefined, json: () => undefined };
 const RESPONSE_FIELDS: Record<string, unknown> = { ...REQUEST_FIELDS, statusLine: "", responseHeaders: [] };
 
 interface Trip {

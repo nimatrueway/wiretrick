@@ -68,6 +68,9 @@ pub enum In {
         /// settings.textTypes (Content-Type globs sent as text); absent → defaults
         #[serde(default, rename = "textTypes")]
         text_types: Option<Vec<String>>,
+        /// the extension reads request bodies (ctx.requestBody); older ones don't
+        #[serde(default, rename = "reqBody")]
+        req_body: bool,
     },
     Continue {
         id: u64,
@@ -145,6 +148,9 @@ pub enum Out {
         url: String,
         method: String,
         headers: Headers,
+        /// id of the `chunk` frames holding the request body (sent before this frame)
+        #[serde(rename = "reqBody", skip_serializing_if = "Option::is_none")]
+        req_body: Option<u64>,
     },
     Chunk {
         id: u64,
@@ -158,6 +164,11 @@ pub enum Out {
         headers: Headers,
         /// "none" (not requested), "skipped:<why>", or "chunks" (sent before this frame)
         body: String,
+        /// as in `Req`, plus the request's Content-Type
+        #[serde(rename = "reqBody", skip_serializing_if = "Option::is_none")]
+        req_body: Option<u64>,
+        #[serde(rename = "reqType", skip_serializing_if = "Option::is_none")]
+        req_type: Option<String>,
     },
     NeedUpstream {
         id: u64,
@@ -352,8 +363,13 @@ mod tests {
                 routes,
                 upstream,
                 text_types,
+                req_body,
             } => {
                 assert_eq!(upstream, UpstreamMode::Ask);
+                assert!(
+                    !req_body,
+                    "missing reqBody (older extension) → no request bodies"
+                );
                 assert!(routes[0].req && routes[0].body && !routes[0].res_headers);
                 assert!(routes[0].exclude.is_empty() && routes[0].methods.is_empty());
                 assert!(!routes[0].binary, "missing binary → false");
@@ -377,5 +393,33 @@ mod tests {
             text_types,
             Some(vec!["text/*".to_string(), "*json".to_string()])
         );
+    }
+
+    #[test]
+    fn parses_req_body_opt_in_and_omits_absent_req_body() {
+        let m: In = serde_json::from_str(r#"{"t":"config","routes":[],"reqBody":true}"#).unwrap();
+        assert!(matches!(m, In::Config { req_body: true, .. }));
+        let out = serde_json::to_value(Out::Req {
+            id: 1,
+            url: "u".into(),
+            method: "GET".into(),
+            headers: vec![],
+            req_body: None,
+        })
+        .unwrap();
+        assert!(out.get("reqBody").is_none());
+        let out = serde_json::to_value(Out::Res {
+            id: 1,
+            url: "u".into(),
+            method: "POST".into(),
+            status: 200,
+            headers: vec![],
+            body: "none".into(),
+            req_body: Some(7),
+            req_type: Some("application/json".into()),
+        })
+        .unwrap();
+        assert_eq!(out["reqBody"], 7);
+        assert_eq!(out["reqType"], "application/json");
     }
 }

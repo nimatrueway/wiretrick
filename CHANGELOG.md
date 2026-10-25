@@ -7,6 +7,10 @@ its section below.
 
 ## [Unreleased]
 
+### Added
+
+- `ctx.requestBody` and `ctx.json()`: every handler can read the request payload (read-only), as a string or a `Uint8Array` decided by `Content-Type` and `textTypes` like response bodies. Works on `page`, `debugger`, `helper` (helper 0.4.1+, bodies up to 8 MB) and `extension`; not on `rules`. See [Request body](docs/scripting.md#request-body).
+
 ### Changed
 
 - An `onRequest` result is now exactly one of `replaceResponse`, `redirect`, `block` or `headers`. Returning several is a type error in the editor. At runtime only the first in that order applies, the same on every strategy, and a warning names what was ignored. Previously `headers` were silently dropped next to a `redirect` on most strategies but applied on `extension`. To change a redirected request's headers, add an `onRequest` handler for the target URL.

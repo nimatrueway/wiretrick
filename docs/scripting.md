@@ -244,6 +244,35 @@ handlers never see it: add the type to `textTypes`, or use `binary: true`
   intercepted (text XHRs are).
 - `textTypes` is one global setting: it changes what every script sees.
 
+## Request body
+
+Every handler's `ctx` has the request payload, **read-only**:
+`ctx.requestBody` is a string for text and a `Uint8Array` for binary,
+decided by the request's `Content-Type` exactly like
+[response bodies](#binary-bodies) (`textTypes` included). `ctx.json()`
+parses it as JSON — the *request* body, not the response.
+
+```ts
+wt.onRequest({ url: "*://app.example.com/api/*", methods: ["POST"] }, (ctx) => {
+    const q = ctx.json(); // undefined without a body; throws on invalid JSON
+    if (q?.operationName === "GetFlags") return { replaceResponse: { body: { beta: true } } };
+});
+```
+
+It is `undefined` when there is no body (GET, HEAD), it is over 8 MB, or
+the strategy can't get it:
+
+| strategy | what it gets | `undefined` for |
+| --- | --- | --- |
+| `page` | the page's fetch/XHR body (a copy; the page's own is never read) | `ReadableStream` bodies |
+| `debugger` | the paused request's post data | uploads with a file part |
+| `helper` | the body, buffered only for requests a handler pauses (helper 0.4.1+) | uploads that stall for 2 s (passed on untouched), older helpers |
+| `extension` | webRequest's copy; a form post arrives URL-encoded, the kind is sniffed (no `Content-Type` yet) | file and very large uploads (Chromium omits them) |
+| `rules` | — the handler runs once, without a request; reading it is an error | |
+
+It is the same in `onRequest`, `replaceResponse`, `onResponseHeaders` and
+`onResponseBody`. Changing it has no effect on what is sent.
+
 ## Description and parameters
 
 `wt.about("…")` sets a one-line description, shown as the script's

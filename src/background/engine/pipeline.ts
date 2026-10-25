@@ -34,6 +34,7 @@ import { winnerOf } from "../../shared/precedence";
 import { STRATEGY_KEY, TEXT_TYPES_KEY } from "../settingsFile";
 import { getTextTypes, setTextTypes } from "../../shared/bodyKind";
 import { packBytes, unpackBytes } from "../../shared/bytesPack";
+import type { RequestBody } from "../../shared/requestBody";
 
 const FILTER: chrome.webRequest.RequestFilter = { urls: ["<all_urls>"] };
 
@@ -47,6 +48,12 @@ interface BodyWatch {
 const MISSED_DELAY_MS = 1500;
 /** the helper usually connects within this after a (service-worker) start */
 const HELPER_GRACE_MS = 5000;
+
+/** the page strategy's ctx.requestBody (the bridge packs bytes; anything else → undefined) */
+function pageRequestBody(msg: any): RequestBody | undefined {
+    const b = unpackBytes(msg?.requestBody);
+    return typeof b === "string" || b instanceof Uint8Array ? b : undefined;
+}
 
 /** settings.defaultStrategy → route.ts default, settings.textTypes → bodyKind.ts (every reload and hook bundle) */
 function loadDefaultStrategy(): Promise<void> {
@@ -466,9 +473,10 @@ export function createPipeline(
                     // Chrome hides Cookie/Referer/Accept-Language/Set-Cookie from header listeners without it
                     (chrome.webRequest as any)[event].addListener(fn, FILTER, extra);
                 } catch (e) {
-                    // Firefox rejects "extraHeaders"
-                    if (!extra.includes("extraHeaders")) throw e;
-                    extra = extra.filter((s) => s !== "extraHeaders");
+                    // Firefox rejects "extraHeaders"; "requestBody" (ctx.requestBody) is optional too
+                    const optional = ["extraHeaders", "requestBody"];
+                    if (!extra.some((s) => optional.includes(s))) throw e;
+                    extra = extra.filter((s) => !optional.includes(s));
                     (chrome.webRequest as any)[event].addListener(fn, FILTER, extra);
                 }
                 dlogLevel("extension", "debug", `${event} listener registered (${extra.join(", ")})`);
@@ -477,7 +485,7 @@ export function createPipeline(
                 log(-1, `[extension] cannot register blocking ${event} listener — the "extension" strategy is inactive in this browser: ${e?.message || e}`, "error");
             }
         };
-        addBlocking("onBeforeRequest", onBeforeRequest, ["blocking"]);
+        addBlocking("onBeforeRequest", onBeforeRequest, ["blocking", "requestBody"]);
         addBlocking("onBeforeSendHeaders", onBeforeSendHeaders, ["requestHeaders", "blocking", "extraHeaders"]);
         addBlocking("onHeadersReceived", onHeadersReceived, ["responseHeaders", "blocking", "extraHeaders"]);
 
@@ -733,7 +741,7 @@ export function createPipeline(
             dlogLevel("pipeline", "debug", `runRequestDecision ${msg.url}`);
             const tabId = sender?.tab?.id ?? -1;
             const method = msg.method || "GET";
-            pageStrategy.runRequestDecision(msg.url, method, tabId).then((r) => {
+            pageStrategy.runRequestDecision(msg.url, method, tabId, pageRequestBody(msg)).then((r) => {
                 reportSkipped(tabId, { url: msg.url, method, type: "xmlhttprequest" }, winnerOf(r, "page"));
                 if (r?.kind === "respond") recordNetBody({ tabId, url: msg.url, method, modified: r.content, mime: r.mime, status: r.status || 200 });
                 sendResponse(r || null);
@@ -747,7 +755,7 @@ export function createPipeline(
             const original = unpackBytes(msg.body);
             // the response is in: its webRequest request has started (onRequest/replace ran before it, by URL)
             const requestId = correlator.claim("page", method, msg.url, { tabId })?.requestId;
-            pageStrategy.runTransform(msg.url, method, original || "", { status: msg.status, contentType: msg.contentType, requestId }, tabId).then((body) => {
+            pageStrategy.runTransform(msg.url, method, original || "", { status: msg.status, contentType: msg.contentType, requestId, requestBody: pageRequestBody(msg) }, tabId).then((body) => {
                 recordNetBody({ tabId, url: msg.url, method, original: original ?? "", modified: body, requestId });
                 sendResponse(packBytes({ body }));
             });
@@ -762,7 +770,7 @@ export function createPipeline(
         if (msg && msg.type === "runReplace") {
             const tabId = sender?.tab?.id ?? -1;
             const method = msg.method || "GET";
-            pageStrategy.runReplace(msg.url, method, tabId).then((r) => {
+            pageStrategy.runReplace(msg.url, method, tabId, pageRequestBody(msg)).then((r) => {
                 reportSkipped(tabId, { url: msg.url, method, type: "xmlhttprequest" }, winnerOf(r, "page"));
                 if (r) recordNetBody({ tabId, url: msg.url, method, modified: r.content, mime: r.mime, status: 200 });
                 sendResponse(r || { content: null });

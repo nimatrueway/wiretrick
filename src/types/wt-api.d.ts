@@ -40,6 +40,43 @@ declare namespace Wiretrick {
          * });
          */
         groups: { [name: string]: string };
+        /**
+         * The request payload, read-only (changing it has no effect).
+         * Text or binary is decided like response bodies: by the request's
+         * `Content-Type` against `settings.textTypes` — text arrives as a
+         * UTF-8 string, binary (incl. multipart `FormData`) as a `Uint8Array`.
+         * `undefined` when there is no body (GET…), it is over 8 MB, or the
+         * strategy can't get it:
+         *
+         * - `page`: fetch/XHR bodies; a `ReadableStream` body → `undefined`.
+         * - `debugger`: the paused request's post data; uploads with a file
+         *   part → `undefined`.
+         * - `helper`: needs helper 0.4.1+; a streaming upload that stalls
+         *   for 2 s → `undefined` (it is passed on untouched).
+         * - `extension`: from webRequest; the kind is sniffed (no
+         *   `Content-Type` that early), a form post arrives URL-encoded, and
+         *   Chromium omits file and very large uploads → `undefined`.
+         * - `rules`: no request — reading it is an error.
+         *
+         * @example
+         * wt.onRequest({ url: "https://api.example.com/*", methods: ["POST"] }, (ctx) => {
+         *     if (typeof ctx.requestBody === "string" && ctx.requestBody.includes("debug=1")) return { block: true };
+         * });
+         */
+        requestBody?: string | Uint8Array;
+        /**
+         * Parses the **request** body (`ctx.requestBody`, bytes decoded as
+         * UTF-8) as JSON. `undefined` when there is no body; throws when it
+         * isn't valid JSON. Not the response — `onResponseBody` gets that as
+         * its second argument.
+         *
+         * @example
+         * wt.replaceResponse("https://api.example.com/graphql", (ctx) => {
+         *     const q = ctx.json<{ operationName?: string }>();
+         *     if (q?.operationName === "GetFlags") return { flags: { beta: true } };
+         * });
+         */
+        json<T = any>(): T | undefined;
     }
 
     /**

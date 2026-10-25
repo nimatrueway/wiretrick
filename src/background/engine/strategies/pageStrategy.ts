@@ -15,6 +15,7 @@ import { log } from "../logs";
 import { runBodyOp } from "../../compileHost";
 import { dlogLevel } from "../../../shared/debugLog";
 import { compileMv2, ownsAny } from "./strategyScripts";
+import type { RequestBody } from "../../../shared/requestBody";
 
 type Decision = { kind: "respond"; mime: string; content: string; status?: number; headers?: any; scriptId?: string; scriptName?: string } | { kind: "redirect"; url: string } | { kind: "cancel" } | { kind: "headers"; changes: any } | null;
 
@@ -57,18 +58,18 @@ export class PageStrategy implements InterceptionStrategy {
     }
 
     /** onRequest handlers ONCE: the first final decision (replaceResponse | redirect | block) or merged headers; null = none. */
-    runRequestDecision(url: string, method: string, tabId = -1): Promise<Decision> {
-        return this.run("requestDecision", { url, method }, tabId);
+    runRequestDecision(url: string, method: string, tabId = -1, requestBody?: RequestBody): Promise<Decision> {
+        return this.run("requestDecision", { url, method, requestBody }, tabId);
     }
 
     /** chained onResponseBody over the body (async handlers awaited); requestId: its webRequest request, when known */
-    runTransform(url: string, method: string, body: string | Uint8Array, extra?: { status?: number; contentType?: string; requestId?: string }, tabId = -1): Promise<string | Uint8Array | null> {
-        return this.run("transform", { url, method, body, status: extra?.status, contentType: extra?.contentType, requestId: extra?.requestId }, tabId);
+    runTransform(url: string, method: string, body: string | Uint8Array, extra?: { status?: number; contentType?: string; requestId?: string; requestBody?: RequestBody }, tabId = -1): Promise<string | Uint8Array | null> {
+        return this.run("transform", { url, method, body, status: extra?.status, contentType: extra?.contentType, requestId: extra?.requestId, requestBody: extra?.requestBody }, tabId);
     }
 
     /** first replaceResponse handler's result, or null */
-    runReplace(url: string, method: string, tabId = -1): Promise<{ mime: string; content: string } | null> {
-        return this.run("replace", { url, method }, tabId);
+    runReplace(url: string, method: string, tabId = -1, requestBody?: RequestBody): Promise<{ mime: string; content: string } | null> {
+        return this.run("replace", { url, method, requestBody }, tabId);
     }
 
     supportsBodyModification(): boolean {

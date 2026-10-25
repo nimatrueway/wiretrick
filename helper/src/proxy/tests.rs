@@ -28,6 +28,7 @@ struct Env {
     seen: Arc<Mutex<Vec<Value>>>,
     reply: Arc<Mutex<Reply>>,
     client_roots: rustls::RootCertStore,
+    st: Arc<State>,
 }
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
@@ -56,6 +57,10 @@ async fn upstream_handler(
         .iter()
         .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
         .collect();
+    if path == "/upload" {
+        let b = req.into_body().collect().await.unwrap().to_bytes();
+        return Ok(Response::new(Full::new(b)));
+    }
     let mut r = Response::builder().header("content-type", "text/plain");
     let b: Vec<u8> = match path.as_str() {
         "/text" => b"hello world".to_vec(),
@@ -167,7 +172,9 @@ async fn setup(routes: Vec<Route>) -> Env {
     let up = Arc::new(Upstream::new(nm.clone(), ccfg));
     up.set_mode(UpstreamMode::Direct);
     let st = State::new(nm.clone(), ca.clone(), up);
+    let st2 = st.clone();
     st.set_routes(routes);
+    st.set_req_body(true);
 
     let seen = Arc::new(Mutex::new(Vec::new()));
     let reply: Arc<Mutex<Reply>> = Arc::new(Mutex::new(Box::new(|_, _| None)));
@@ -192,6 +199,11 @@ async fn setup(routes: Vec<Route>) -> Env {
                     _ => continue,
                 }
                 let body = chunks.remove(&id).unwrap_or_default();
+                let mut v = v;
+                if let Some(rid) = v["reqBody"].as_u64() {
+                    let rb = chunks.remove(&rid).unwrap_or_default();
+                    v["reqBodyData"] = json!(String::from_utf8_lossy(&rb));
+                }
                 seen.lock().unwrap().push(v.clone());
                 let out =
                     (reply.lock().unwrap())(&v, &body).unwrap_or_else(|| json!({"t": "continue"}));
@@ -205,7 +217,7 @@ async fn setup(routes: Vec<Route>) -> Env {
 
     let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = l.local_addr().unwrap().port();
-    tokio::spawn(serve(l, st));
+    tokio::spawn(serve(l, st2));
 
     let mut client_roots = rustls::RootCertStore::empty();
     client_roots
@@ -221,6 +233,7 @@ async fn setup(routes: Vec<Route>) -> Env {
         seen,
         reply,
         client_roots,
+        st,
     }
 }
 
@@ -259,6 +272,17 @@ impl Env {
 
     /// CONNECT localhost:<up_port>, TLS (h1 or h2 via ALPN), one request.
     async fn get(&self, path: &str, h2: bool, extra: &[(&str, &str)]) -> Result<Got, String> {
+        self.send("GET", path, h2, extra, Vec::new()).await
+    }
+
+    async fn send(
+        &self,
+        method: &str,
+        path: &str,
+        h2: bool,
+        extra: &[(&str, &str)],
+        body: Vec<u8>,
+    ) -> Result<Got, String> {
         let mut s = TcpStream::connect(("127.0.0.1", self.proxy_port))
             .await
             .unwrap();
@@ -299,16 +323,19 @@ impl Env {
             .map_err(|e| e.to_string())?;
         let peer_cert = tls.get_ref().1.peer_certificates().unwrap()[0].to_vec();
         let alpn_h2 = tls.get_ref().1.alpn_protocol() == Some(b"h2");
-        let mut b = Request::builder().uri(format!("https://localhost:{}{path}", self.up_port));
+        let mut b = Request::builder()
+            .method(method)
+            .uri(format!("https://localhost:{}{path}", self.up_port));
         if !alpn_h2 {
             b = Request::builder()
+                .method(method)
                 .uri(path)
                 .header("host", format!("localhost:{}", self.up_port));
         }
         for (k, v) in extra {
             b = b.header(*k, *v);
         }
-        let req = b.body(Empty::<Bytes>::new()).unwrap();
+        let req = b.body(Full::new(Bytes::from(body))).unwrap();
         let resp = if alpn_h2 {
             let (mut send, conn) =
                 hyper::client::conn::http2::handshake(TokioExecutor::new(), TokioIo::new(tls))
@@ -605,4 +632,134 @@ async fn probe_host_answers_locally() {
     let g = env.get_plain(PROBE_HOST, "/").await.unwrap();
     assert_eq!(g.status, 200);
     assert_eq!(g.headers["access-control-allow-origin"], "*");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn request_body_reaches_every_paused_stage_and_upstream_intact() {
+    let env = setup(vec![route("https://localhost:*/upload", true, true, false)]).await;
+    let payload = r#"{"user":"ada","n":1}"#;
+    for h2 in [false, true] {
+        let g = env
+            .send(
+                "POST",
+                "/upload",
+                h2,
+                &[("content-type", "application/json")],
+                payload.into(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(g.body, payload.as_bytes(), "upstream got the body, h2={h2}");
+    }
+    for t in ["req", "res"] {
+        let seen = env.seen(t);
+        assert_eq!(seen.len(), 2);
+        for v in seen {
+            assert_eq!(v["reqBodyData"], payload, "{t}");
+        }
+    }
+    assert_eq!(env.seen("res")[0]["reqType"], "application/json");
+    assert!(env.seen("req")[0].get("reqType").is_none());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn request_body_is_not_sent_without_a_body_opt_in_or_pause() {
+    let env = setup(vec![route("https://localhost:*/*", true, false, false)]).await;
+    env.get("/text", false, &[]).await.unwrap();
+    assert!(env.seen("req")[0].get("reqBody").is_none(), "GET: no body");
+    env.st.set_req_body(false);
+    let g = env
+        .send("POST", "/upload", false, &[], b"older extension".to_vec())
+        .await
+        .unwrap();
+    assert_eq!(g.body, b"older extension");
+    assert!(env.seen("req")[1].get("reqBody").is_none());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn over_cap_request_body_passes_through_unread() {
+    let env = setup(vec![route(
+        "https://localhost:*/upload",
+        true,
+        false,
+        false,
+    )])
+    .await;
+    let big = vec![b'x'; MAX_REQ_BODY + 1];
+    let g = env
+        .send("POST", "/upload", true, &[], big.clone())
+        .await
+        .unwrap();
+    assert!(g.body == big);
+    assert!(env.seen("req")[0].get("reqBody").is_none());
+}
+
+/// a body fed by hand: `None` from the channel ends it
+struct Chan(tokio::sync::mpsc::UnboundedReceiver<Bytes>);
+
+impl hyper::body::Body for Chan {
+    type Data = Bytes;
+    type Error = BoxErr;
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Bytes>, BoxErr>>> {
+        self.0.poll_recv(cx).map(|b| b.map(|b| Ok(Frame::data(b))))
+    }
+}
+
+async fn drain(b: Body) -> Vec<u8> {
+    b.collect().await.unwrap().to_bytes().to_vec()
+}
+
+#[tokio::test]
+async fn buffered_request_body_replays_in_full() {
+    let (b, bytes) = buffer_request_body(full("abc"), &HeaderMap::new()).await;
+    assert_eq!(bytes.as_deref(), Some(&b"abc"[..]));
+    assert_eq!(b.size_hint().exact(), Some(3));
+    assert_eq!(drain(b).await, b"abc");
+
+    let (b, bytes) = buffer_request_body(empty(), &HeaderMap::new()).await;
+    assert!(bytes.is_none() && b.is_end_stream());
+}
+
+#[tokio::test]
+async fn declared_over_cap_request_body_is_not_read() {
+    let mut h = HeaderMap::new();
+    h.insert("content-length", HeaderValue::from(MAX_REQ_BODY + 1));
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    tx.send(Bytes::from_static(b"never read")).unwrap();
+    drop(tx);
+    let (b, bytes) = buffer_request_body(BoxBody::new(Chan(rx)), &h).await;
+    assert!(bytes.is_none());
+    assert_eq!(drain(b).await, b"never read");
+}
+
+#[tokio::test]
+async fn undeclared_over_cap_request_body_chains_what_was_read() {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let part = Bytes::from(vec![7u8; 1024 * 1024]);
+    for _ in 0..9 {
+        tx.send(part.clone()).unwrap();
+    }
+    tx.send(Bytes::from_static(b"tail")).unwrap();
+    drop(tx);
+    let (b, bytes) = buffer_request_body(BoxBody::new(Chan(rx)), &HeaderMap::new()).await;
+    assert!(bytes.is_none());
+    let all = drain(b).await;
+    assert_eq!(all.len(), 9 * 1024 * 1024 + 4);
+    assert!(all.ends_with(b"tail"));
+}
+
+#[tokio::test]
+async fn stalled_request_body_is_passed_on_after_the_idle_timeout() {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    tx.send(Bytes::from_static(b"first ")).unwrap();
+    let t = std::time::Instant::now();
+    let (b, bytes) = buffer_request_body(BoxBody::new(Chan(rx)), &HeaderMap::new()).await;
+    assert!(bytes.is_none());
+    assert!(t.elapsed() >= REQ_BODY_IDLE);
+    tx.send(Bytes::from_static(b"second")).unwrap();
+    drop(tx);
+    assert_eq!(drain(b).await, b"first second");
 }

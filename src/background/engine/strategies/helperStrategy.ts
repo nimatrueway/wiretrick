@@ -13,6 +13,7 @@
 import { runOp, type BodyOp, type OpScript } from "../../../shared/bodyOps";
 import { bodyKind, getTextTypes } from "../../../shared/bodyKind";
 import { bytesToBase64, base64ToBytes } from "../../../shared/bytesPack";
+import { headerValue, requestBodyFrom } from "../../../shared/requestBody";
 import { hostPatternOf, type SystemProxyInfo } from "../../../shared/pac";
 import { routeMatches, takesBinary, type RouteMeta } from "../../../shared/route";
 import { dlogLevel } from "../../../shared/debugLog";
@@ -297,7 +298,7 @@ export class HelperStrategy {
             const routes = this.owned.map((o) => helperRouteOf(o.route));
             const d = await this.routing.decision(this.system);
             if (!d.ok) {
-                this.send({ t: "config", routes: [], upstream: "direct", textTypes: getTextTypes() });
+                this.send({ t: "config", routes: [], upstream: "direct", textTypes: getTextTypes(), reqBody: true });
                 await this.routing.clear();
                 this.routing.status = { active: false, reason: d.reason };
                 setHelperActive(false);
@@ -307,7 +308,7 @@ export class HelperStrategy {
             }
             this.decisionSource = d.decision.source;
             // routes first: the helper must know them before traffic arrives
-            this.send({ t: "config", routes, upstream: d.decision.upstream, textTypes: getTextTypes() });
+            this.send({ t: "config", routes, upstream: d.decision.upstream, textTypes: getTextTypes(), reqBody: true });
             const applied = await this.routing.apply(helper.port, this.owned.flatMap((o) => o.route.url), this.system);
             setHelperActive(applied.ok);
             if (applied.ok && applied.decision.note) dlogLevel("helper", "warn", applied.decision.note);
@@ -426,6 +427,14 @@ export class HelperStrategy {
         }
     }
 
+    /** the `chunk` frames sent under `id`, joined (and forgotten) */
+    private takeChunks(id: number | undefined): Uint8Array | null {
+        if (typeof id !== "number") return null;
+        const parts = this.chunks.get(id);
+        this.chunks.delete(id);
+        return parts ? concat(parts.map(base64ToBytes)) : null;
+    }
+
     private fallback(id: number, stage: string, e: any): void {
         dlogLevel("helper", "error", `process ${stage} handling failed: ${e?.message || e}`);
         this.chunks.delete(id);
@@ -458,14 +467,16 @@ export class HelperStrategy {
         return hit ? { tabId: hit.tabId, type: hit.type, tabUrl: hit.tabUrl } : { tabId: -1, type: "", tabUrl: "" };
     }
 
-    private async onReq(m: { id: number; url: string; method: string; headers: Pairs }): Promise<void> {
+    private async onReq(m: { id: number; url: string; method: string; headers: Pairs; reqBody?: number }): Promise<void> {
+        // helpers before 0.4.1 send no reqBody: ctx.requestBody stays undefined
+        const requestBody = requestBodyFrom(this.takeChunks(m.reqBody), headerValue(m.headers, "content-type"));
         await this.loaded;
         const c = this.context(m, "req");
         if (!this.matching(m.url, m.method, c.type, "req")) {
             this.send({ t: "continue", id: m.id });
             return;
         }
-        const args = { url: m.url, method: m.method, tabId: c.tabId, resourceType: c.type, tabUrl: c.tabUrl, requestHeaders: pairsToObject(m.headers), requestId: c.requestId };
+        const args = { url: m.url, method: m.method, tabId: c.tabId, resourceType: c.type, tabUrl: c.tabUrl, requestHeaders: pairsToObject(m.headers), requestId: c.requestId, requestBody };
         const dec = await this.run("requestDecision", args);
         const req = { url: m.url, method: m.method, type: c.type };
         reportSkipped(c.tabId, req, winnerOf(dec, "helper"), c.requestId);
@@ -502,13 +513,14 @@ export class HelperStrategy {
         this.send({ t: "continue", id: m.id });
     }
 
-    private async onRes(m: { id: number; url: string; method: string; status: number; headers: Pairs; body: string }): Promise<void> {
+    private async onRes(m: { id: number; url: string; method: string; status: number; headers: Pairs; body: string; reqBody?: number; reqType?: string }): Promise<void> {
         const parts = this.chunks.get(m.id) || [];
         this.chunks.delete(m.id);
+        const requestBody = requestBodyFrom(this.takeChunks(m.reqBody), m.reqType);
         await this.loaded;
         const c = this.context(m, "res");
         const reqHeaders = {};
-        const base = { url: m.url, method: m.method, tabId: c.tabId, resourceType: c.type, tabUrl: c.tabUrl, requestHeaders: reqHeaders, status: m.status, requestId: c.requestId };
+        const base = { url: m.url, method: m.method, tabId: c.tabId, resourceType: c.type, tabUrl: c.tabUrl, requestHeaders: reqHeaders, status: m.status, requestId: c.requestId, requestBody };
         let headers = m.headers;
         let headersChanged = false;
         if (this.matching(m.url, m.method, c.type, "resHeaders")) {

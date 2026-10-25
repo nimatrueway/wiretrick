@@ -203,8 +203,10 @@ fn native() {
                     routes,
                     upstream,
                     text_types,
+                    req_body,
                 }) => {
                     st.set_text_types(text_types);
+                    st.set_req_body(req_body);
                     st.set_routes(routes);
                     up.set_mode(upstream);
                 }

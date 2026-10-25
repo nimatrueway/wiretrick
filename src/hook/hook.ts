@@ -13,6 +13,7 @@ import { makeLibRequire, type ShippedLib } from "../shared/scriptImports";
 import { routeMatches, takesBinary, type DocumentWhen, type RouteMeta } from "../shared/route";
 import { makePageShim, domHandlersFor, scheduleDocument } from "../shared/pageShim";
 import { bodyKind, setTextTypes } from "../shared/bodyKind";
+import { readFetchBody } from "../shared/requestBody";
 
 (() => {
     const w = window as any;
@@ -308,8 +309,9 @@ import { bodyKind, setTextTypes } from "../shared/bodyKind";
             const abortP = abortRace(signal);
 
             try {
+                const requestBody = await readFetchBody(input, init, url, method);
                 // 1. onRequest: replaceResponse (no network), block, redirect or header edits
-                const dec = abortP ? await Promise.race([viaBridge({ op: "respond", url, method }), abortP]) : await viaBridge({ op: "respond", url, method });
+                const dec = abortP ? await Promise.race([viaBridge({ op: "respond", url, method, requestBody }), abortP]) : await viaBridge({ op: "respond", url, method, requestBody });
                 if (dec && dec.content !== null && dec.content !== undefined) {
                     const hdrs = new Headers({ "content-type": dec.mime || "text/plain" });
                     for (const [k, v] of Object.entries(dec.headers || {})) hdrs.set(k, String(v));
@@ -333,7 +335,7 @@ import { bodyKind, setTextTypes } from "../shared/bodyKind";
                 }
 
                 // 2. replaceResponse? (background runs the handler)
-                const repl = abortP ? await Promise.race([viaBridge({ op: "replace", url, method }), abortP]) : await viaBridge({ op: "replace", url, method });
+                const repl = abortP ? await Promise.race([viaBridge({ op: "replace", url, method, requestBody }), abortP]) : await viaBridge({ op: "replace", url, method, requestBody });
                 if (repl && repl.content !== null && repl.content !== undefined) {
                     return withUrl(new Response(repl.content, { status: 200, headers: { "content-type": repl.mime || "text/plain" } }), url);
                 }
@@ -368,8 +370,8 @@ import { bodyKind, setTextTypes } from "../shared/bodyKind";
                 }
 
                 const out = abortP
-                    ? await Promise.race([viaBridge({ op: "transform", url, method, body: bodyIn, status: response.status, contentType }), abortP])
-                    : await viaBridge({ op: "transform", url, method, body: bodyIn, status: response.status, contentType });
+                    ? await Promise.race([viaBridge({ op: "transform", url, method, body: bodyIn, status: response.status, contentType, requestBody }), abortP])
+                    : await viaBridge({ op: "transform", url, method, body: bodyIn, status: response.status, contentType, requestBody });
                 if (!out || !(typeof out.body === "string" || out.body instanceof Uint8Array) || sameBody(out.body, bodyIn)) return response;
 
                 return withUrl(new Response(out.body, {

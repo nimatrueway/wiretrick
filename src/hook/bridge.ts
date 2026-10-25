@@ -116,7 +116,7 @@ import { packBytes, unpackBytes } from "../shared/bytesPack";
             const bgType = data.op === "replace" ? "runReplace" : data.op === "respond" ? "runRequestDecision" : "runTransform";
             // runtime messaging is JSON: binary bodies travel as base64 both ways
             safeSend(
-                packBytes({ type: bgType, url: data.url, method: data.method, body: data.body, status: data.status, contentType: data.contentType }),
+                packBytes({ type: bgType, url: data.url, method: data.method, body: data.body, status: data.status, contentType: data.contentType, requestBody: data.requestBody }),
                 (resp: any) => {
                     window.postMessage(
                         { source: MAIN_SOURCE, kind: "callResult", reqId: data.reqId, result: unpackBytes(resp) || null },

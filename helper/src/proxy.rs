@@ -11,17 +11,21 @@
 //! for (CDP Fetch-domain style): `req` before the upstream request, `res`
 //! after the response head (with the decoded body when a body transform
 //! exists). Unmatched requests and unpaused phases stream straight through.
+//! A paused request's body (ctx.requestBody) is read first when the
+//! extension asks for it — see `buffer_request_body`.
 
+use std::collections::VecDeque;
 use std::convert::Infallible;
 use std::io::Read;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use http_body_util::{BodyExt, Empty, Full, Limited, combinators::BoxBody};
-use hyper::body::Incoming;
+use hyper::body::{Body as _, Frame, Incoming, SizeHint};
 use hyper::header::{HeaderMap, HeaderName, HeaderValue};
 use hyper::{Request, Response, StatusCode};
 use hyper_util::client::legacy::Client;
@@ -44,6 +48,12 @@ pub const PROBE_HOST: &str = "wiretrick-helper.probe";
 const MAX_BODY: usize = 64 * 1024 * 1024;
 const REQ_TIMEOUT: Duration = Duration::from_secs(30);
 const RES_TIMEOUT: Duration = Duration::from_secs(60);
+/// largest request body read for ctx.requestBody (src/shared/requestBody.ts
+/// REQUEST_BODY_CAP); bigger ones stream through unread
+const MAX_REQ_BODY: usize = 8 * 1024 * 1024;
+/// a request body that stalls this long mid-read (a streaming upload) is
+/// passed on unread
+const REQ_BODY_IDLE: Duration = Duration::from_secs(2);
 
 const CANCELLED: &str = "cancelled by script";
 
@@ -64,6 +74,8 @@ pub struct State {
     routes: RwLock<Arc<Vec<Compiled>>>,
     /// settings.textTypes, lowercased (see `skip_body_reason`)
     text_types: RwLock<Arc<Vec<String>>>,
+    /// the extension wants request bodies (config `reqBody`)
+    req_body: AtomicBool,
 }
 
 /// A route with its `match`/`exclude` strings parsed once (invalid ones dropped).
@@ -85,7 +97,12 @@ impl State {
             client,
             routes: RwLock::new(Arc::new(Vec::new())),
             text_types: RwLock::new(Arc::new(default_text_types())),
+            req_body: AtomicBool::new(false),
         })
+    }
+
+    pub fn set_req_body(&self, on: bool) {
+        self.req_body.store(on, Ordering::Relaxed);
     }
 
     /// settings.textTypes; None/empty → DEFAULT_TEXT_TYPES
@@ -586,7 +603,7 @@ fn respond(status: u16, headers: &Headers, body: Vec<u8>) -> Response<Body> {
 }
 
 async fn handle(
-    mut req: Request<Incoming>,
+    req: Request<Incoming>,
     st: Arc<State>,
     base: Option<(&'static str, String)>,
 ) -> Result<Response<Body>, BoxErr> {
@@ -622,6 +639,19 @@ async fn handle(
     let flags = st.flags(&url, &method);
     let is_upgrade = req.headers().contains_key("upgrade");
 
+    let (parts, body) = req.into_parts();
+    let mut body = incoming(body);
+    let mut req_bytes = None;
+    if !is_upgrade
+        && (flags.req || flags.res_headers || flags.body)
+        && st.req_body.load(Ordering::Relaxed)
+    {
+        (body, req_bytes) = buffer_request_body(body, &parts.headers).await;
+    }
+    let req_type = Some(header_str(&parts.headers, "content-type").to_string())
+        .filter(|ct| req_bytes.is_some() && !ct.is_empty());
+    let mut req = Request::from_parts(parts, body);
+
     // ---- request stage ----
     if flags.req {
         let id = st.nm.next_id();
@@ -630,6 +660,7 @@ async fn handle(
             url: url.clone(),
             method: method.clone(),
             headers: headers_to_vec(req.headers()),
+            req_body: send_req_body(&st, &req_bytes),
         };
         match st.nm.ask(id, msg, REQ_TIMEOUT).await {
             Some(In::Continue {
@@ -698,7 +729,7 @@ async fn handle(
     }
     parts.uri = uri.clone();
     parts.version = hyper::Version::HTTP_11;
-    let up_req = Request::from_parts(parts, incoming(body));
+    let up_req = Request::from_parts(parts, body);
     let resp = match st.client.request(up_req).await {
         Ok(r) => r,
         Err(e) => {
@@ -719,6 +750,12 @@ async fn handle(
     }
 
     // ---- response stage ----
+    let req = Paused {
+        url: url.clone(),
+        method: method.clone(),
+        req_body: req_bytes,
+        req_type,
+    };
     let (mut rp, rb) = resp.into_parts();
     let status = rp.status.as_u16();
     let mut body_state = String::from("none");
@@ -750,8 +787,7 @@ async fn handle(
                         rp.headers.remove("transfer-encoding");
                         rp.headers
                             .insert("content-length", HeaderValue::from(dec.len()));
-                        return finish_response(st, url, method, status, rp, dec, "chunks".into())
-                            .await;
+                        return finish_response(st, req, status, rp, dec, "chunks".into()).await;
                     }
                     None => {
                         // unknown encoding: pass the raw bytes through untouched
@@ -765,27 +801,143 @@ async fn handle(
         }
     }
     // headers-only pause, or a skipped body: the body keeps streaming
-    finish_streaming(st, url, method, status, rp, rb, body_state).await
+    finish_streaming(st, req, status, rp, rb, body_state).await
+}
+
+/// the request a response-stage pause is for (with ctx.requestBody's bytes)
+struct Paused {
+    url: String,
+    method: String,
+    req_body: Option<Bytes>,
+    req_type: Option<String>,
+}
+
+/// the request body as `chunk` frames under their own id, once per paused stage
+fn send_req_body(st: &State, bytes: &Option<Bytes>) -> Option<u64> {
+    let b = bytes.as_ref()?;
+    let id = st.nm.next_id();
+    st.nm.send_chunks(id, b);
+    Some(id)
+}
+
+/// Read the request body for ctx.requestBody without losing or stalling any
+/// of it: the returned body replays every frame read, then the rest of the
+/// stream. The bytes are `None` (and the body passes through unread or half
+/// read) when it is empty, declared or found over MAX_REQ_BODY, stalls for
+/// REQ_BODY_IDLE, or fails (the error is replayed to the upstream request).
+async fn buffer_request_body(mut body: Body, headers: &HeaderMap) -> (Body, Option<Bytes>) {
+    let declared: Option<u64> = header_str(headers, "content-length").parse().ok();
+    let cap = MAX_REQ_BODY as u64;
+    if body.is_end_stream() || declared.is_some_and(|l| l > cap) || body.size_hint().lower() > cap {
+        return (body, None);
+    }
+    let mut pre = VecDeque::new();
+    let mut size = 0;
+    loop {
+        // a dropped (timed-out) frame() future has taken nothing from the body
+        let (rest, err) = match tokio::time::timeout(REQ_BODY_IDLE, body.frame()).await {
+            Ok(Some(Ok(f))) => {
+                size += f.data_ref().map_or(0, |d| d.len());
+                pre.push_back(f);
+                if size <= MAX_REQ_BODY {
+                    continue;
+                }
+                (Some(body), None)
+            }
+            Ok(Some(Err(e))) => (None, Some(e)),
+            Ok(None) => {
+                let mut all = BytesMut::with_capacity(size);
+                for d in pre.iter().filter_map(|f| f.data_ref()) {
+                    all.extend_from_slice(d);
+                }
+                let bytes = (size > 0).then(|| all.freeze());
+                return (Replay::boxed(pre, None, None), bytes);
+            }
+            Err(_) => (Some(body), None),
+        };
+        return (Replay::boxed(pre, rest, err), None);
+    }
+}
+
+/// frames already read, then an error or the rest of the body
+struct Replay {
+    pre: VecDeque<Frame<Bytes>>,
+    rest: Option<Body>,
+    err: Option<BoxErr>,
+}
+
+impl Replay {
+    fn boxed(pre: VecDeque<Frame<Bytes>>, rest: Option<Body>, err: Option<BoxErr>) -> Body {
+        BoxBody::new(Replay { pre, rest, err })
+    }
+}
+
+impl hyper::body::Body for Replay {
+    type Data = Bytes;
+    type Error = BoxErr;
+
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Bytes>, BoxErr>>> {
+        if let Some(f) = self.pre.pop_front() {
+            return Poll::Ready(Some(Ok(f)));
+        }
+        if let Some(e) = self.err.take() {
+            return Poll::Ready(Some(Err(e)));
+        }
+        match self.rest.as_mut() {
+            Some(b) => Pin::new(b).poll_frame(cx),
+            None => Poll::Ready(None),
+        }
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.pre.is_empty()
+            && self.err.is_none()
+            && self.rest.as_ref().is_none_or(|b| b.is_end_stream())
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        let n: u64 = self
+            .pre
+            .iter()
+            .filter_map(|f| f.data_ref())
+            .map(|d| d.len() as u64)
+            .sum();
+        let rest = self
+            .rest
+            .as_ref()
+            .map_or_else(|| SizeHint::with_exact(0), |b| b.size_hint());
+        let mut h = SizeHint::new();
+        h.set_lower(rest.lower() + n);
+        if let Some(u) = rest.upper() {
+            h.set_upper(u + n);
+        }
+        h
+    }
 }
 
 async fn finish_response(
     st: Arc<State>,
-    url: String,
-    method: String,
+    req: Paused,
     status: u16,
     rp: hyper::http::response::Parts,
     body: Vec<u8>,
     body_state: String,
 ) -> Result<Response<Body>, BoxErr> {
+    let req_chunks = send_req_body(&st, &req.req_body);
     let id = st.nm.next_id();
     st.nm.send_chunks(id, &body);
     let msg = Out::Res {
         id,
-        url,
-        method,
+        url: req.url,
+        method: req.method,
         status,
         headers: headers_to_vec(&rp.headers),
         body: body_state,
+        req_body: req_chunks,
+        req_type: req.req_type,
     };
     match st.nm.ask(id, msg, RES_TIMEOUT).await {
         Some(In::Fulfill {
@@ -808,21 +960,23 @@ async fn finish_response(
 
 async fn finish_streaming(
     st: Arc<State>,
-    url: String,
-    method: String,
+    req: Paused,
     status: u16,
     mut rp: hyper::http::response::Parts,
     rb: Incoming,
     body_state: String,
 ) -> Result<Response<Body>, BoxErr> {
+    let req_chunks = send_req_body(&st, &req.req_body);
     let id = st.nm.next_id();
     let msg = Out::Res {
         id,
-        url,
-        method,
+        url: req.url,
+        method: req.method,
         status,
         headers: headers_to_vec(&rp.headers),
         body: body_state,
+        req_body: req_chunks,
+        req_type: req.req_type,
     };
     match st.nm.ask(id, msg, RES_TIMEOUT).await {
         Some(In::Fulfill {
@@ -854,7 +1008,7 @@ async fn finish_streaming(
 /// WebSocket (or any HTTP/1.1 Upgrade): relay the handshake on a dedicated
 /// upstream connection, then splice the two upgraded streams.
 async fn upgrade(
-    mut req: Request<Incoming>,
+    mut req: Request<Body>,
     st: Arc<State>,
     uri: &hyper::Uri,
     host: &str,

@@ -23,6 +23,7 @@ import { winnerOf } from "../../../shared/precedence";
 import { reportSkipped } from "../skipped";
 import { recordNetBody } from "../../network";
 import { ClaimCache, correlator } from "../requestCorrelator";
+import { concatBytes, headerValue, requestBodyFrom, requestBodyFromText, type RequestBody } from "../../../shared/requestBody";
 import { compileMv2, ownedRoutes, ownsAny, type OwnedRoute } from "./strategyScripts";
 
 /** webRequest resource type → CDP Fetch resource types */
@@ -361,6 +362,23 @@ export class DebuggerStrategy {
         });
     }
 
+    /** ctx.requestBody: postDataEntries (bytes) or postData; with neither, Network.getRequestPostData (best effort) */
+    private async requestBodyOf(d: Debuggee, params: any): Promise<RequestBody | undefined> {
+        const request = params.request || {};
+        const contentType = headerValue(request.headers, "content-type");
+        try {
+            const entries: any[] = Array.isArray(request.postDataEntries) ? request.postDataEntries : [];
+            // an entry without bytes is a file part: the body would be incomplete
+            if (entries.length) return entries.every((e) => typeof e?.bytes === "string") ? requestBodyFrom(concatBytes(entries.map((e) => base64ToBytes(e.bytes))), contentType) : undefined;
+            if (typeof request.postData === "string") return requestBodyFromText(request.postData, contentType);
+            if (request.hasPostData && params.networkId) {
+                const got: any = await debuggerSend(d, "Network.getRequestPostData", { requestId: params.networkId });
+                if (typeof got?.postData === "string") return got.base64Encoded ? requestBodyFrom(base64ToBytes(got.postData), contentType) : requestBodyFromText(got.postData, contentType);
+            }
+        } catch {}
+        return undefined;
+    }
+
     /**
      * A paused request: run the cdp-owned handlers for its stage. Any
      * failure continues the request unmodified — and says so in the log.
@@ -383,7 +401,7 @@ export class DebuggerStrategy {
         const claims = isRequestStage ? this.reqClaims : this.resClaims;
         const claimKey = `${key}|${requestId}`;
         const wrId = tabId >= 0 ? claims.claim(claimKey, method, url, { tabId, pendingOnly: true })?.requestId : undefined;
-        const base = { url, method, resourceType, requestHeaders, requestId: wrId };
+        const base: Record<string, any> = { url, method, resourceType, requestHeaders, requestId: wrId };
         // answered at the request stage: no response pause will come for it
         const answered = () => void (wrId && correlator.mark(wrId, "debugger:res"));
         try {
@@ -391,6 +409,7 @@ export class DebuggerStrategy {
                 const wantsDecision = this.wants(url, method, resourceType, ["onRequest"]);
                 const wantsReplace = this.wants(url, method, resourceType, ["replaceResponse"]);
                 if (!wantsDecision && !wantsReplace) return void (await cont());
+                base.requestBody = await this.requestBodyOf(d, params);
                 const req = { url, method, type: resourceType };
                 const decision = wantsDecision ? await this.run("requestDecision", base, tabId) : null;
                 dlogLevel("debugger", "debug", "request decision", { url, resourceType, kind: decision?.kind ?? "none" });
@@ -435,6 +454,7 @@ export class DebuggerStrategy {
             const wantsHeaders = this.wants(url, method, resourceType, ["onResponseHeaders"]);
             const wantsBody = this.wants(url, method, resourceType, ["onResponseBody"]);
             if (!wantsHeaders && !wantsBody) return void (await cont());
+            base.requestBody = await this.requestBodyOf(d, params);
             const originalHeaders: { name: string; value: string }[] = params.responseHeaders || [];
             const headerMods = wantsHeaders
                 ? await this.run("responseHeaders", { ...base, status, responseHeaders: originalHeaders }, tabId)

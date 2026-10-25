@@ -373,6 +373,7 @@ What reaches what on Chrome:
 | sites pinning certs / mTLS | ❌ leave them out of `helper` routes | ✅ | ✅ | ✅ |
 | `onResponseHeaders` | ✅ | ❌ | ✅ | ✅ fixed headers only |
 | bodies (`onResponseBody`, `replaceResponse`) | ✅ | ✅ | ✅ | ❌ |
+| request body (`ctx.requestBody`, [limits](scripting.md#request-body)) | ✅ up to 8 MB | ✅ not streams | ✅ not file uploads | ❌ |
 
 The local helper ships for these platforms (each release attaches the
 binaries and a `SHA256SUMS`; the [installer](local-helper.md)
