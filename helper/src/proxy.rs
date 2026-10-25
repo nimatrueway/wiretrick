@@ -502,7 +502,11 @@ fn default_text_types() -> Vec<String> {
 
 /// lowercased MIME essence: "Text/HTML; charset=utf-8" → "text/html"
 fn mime_essence(ct: &str) -> String {
-    ct.split(';').next().unwrap_or("").trim().to_ascii_lowercase()
+    ct.split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase()
 }
 
 /// Whole-string glob; `*` matches any run of characters (`/` included).
@@ -916,13 +920,19 @@ mod skip_body_reason_tests {
     fn glob_star_matches_any_run() {
         assert!(glob_match("text/*", "text/html"));
         assert!(glob_match("*json", "application/vnd.api+json"));
-        assert!(glob_match("*/x-www-form-urlencoded", "application/x-www-form-urlencoded"));
+        assert!(glob_match(
+            "*/x-www-form-urlencoded",
+            "application/x-www-form-urlencoded"
+        ));
         assert!(glob_match("*xml", "application/xml+foo+xml"));
         assert!(glob_match("a*b*c", "abc"));
         assert!(glob_match("*", ""));
         assert!(glob_match("image/png", "image/png"));
         assert!(!glob_match("image/png", "image/png2"));
-        assert!(!glob_match("*xml", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));
+        assert!(!glob_match(
+            "*xml",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ));
         assert!(!glob_match("text/*", "application/text"));
         assert!(!glob_match("ab*ba", "aba"));
     }
@@ -949,17 +959,38 @@ mod skip_body_reason_tests {
 
     #[test]
     fn binary_types_are_skipped_without_a_binary_route() {
-        for ct in ["application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "video/mp2t", "image/jpeg", "application/octet-stream", "font/woff2"] {
+        for ct in [
+            "application/vnd.ms-excel",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "video/mp2t",
+            "image/jpeg",
+            "application/octet-stream",
+            "font/woff2",
+        ] {
             assert_eq!(skip(ct), Some("binary"), "{ct}");
-            assert_eq!(skip_body_reason(ct, &default_text_types(), true), None, "{ct} with a binary route");
+            assert_eq!(
+                skip_body_reason(ct, &default_text_types(), true),
+                None,
+                "{ct} with a binary route"
+            );
         }
     }
 
     #[test]
     fn streams_are_always_skipped_and_no_content_type_is_sent() {
         for binary_route in [false, true] {
-            assert_eq!(skip_body_reason("text/event-stream", &default_text_types(), binary_route), Some("stream"));
-            assert_eq!(skip_body_reason("multipart/x-mixed-replace; boundary=x", &default_text_types(), binary_route), Some("stream"));
+            assert_eq!(
+                skip_body_reason("text/event-stream", &default_text_types(), binary_route),
+                Some("stream")
+            );
+            assert_eq!(
+                skip_body_reason(
+                    "multipart/x-mixed-replace; boundary=x",
+                    &default_text_types(),
+                    binary_route
+                ),
+                Some("stream")
+            );
         }
         assert_eq!(skip(""), None);
         assert_eq!(skip("  ; charset=utf-8"), None);

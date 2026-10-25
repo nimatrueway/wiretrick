@@ -348,7 +348,11 @@ mod tests {
     fn parses_config() {
         let m: In = serde_json::from_str(r#"{"t":"config","routes":[{"match":["*://a/*"],"req":true,"body":true}],"upstream":"ask"}"#).unwrap();
         match m {
-            In::Config { routes, upstream, text_types } => {
+            In::Config {
+                routes,
+                upstream,
+                text_types,
+            } => {
                 assert_eq!(upstream, UpstreamMode::Ask);
                 assert!(routes[0].req && routes[0].body && !routes[0].res_headers);
                 assert!(routes[0].exclude.is_empty() && routes[0].methods.is_empty());
@@ -362,10 +366,16 @@ mod tests {
     #[test]
     fn parses_binary_route_and_text_types() {
         let m: In = serde_json::from_str(r#"{"t":"config","routes":[{"match":["*://a/*"],"body":true,"binary":true}],"textTypes":["text/*","*json"]}"#).unwrap();
-        let In::Config { routes, text_types, .. } = m else {
+        let In::Config {
+            routes, text_types, ..
+        } = m
+        else {
             panic!()
         };
         assert!(routes[0].body && routes[0].binary);
-        assert_eq!(text_types, Some(vec!["text/*".to_string(), "*json".to_string()]));
+        assert_eq!(
+            text_types,
+            Some(vec!["text/*".to_string(), "*json".to_string()])
+        );
     }
 }

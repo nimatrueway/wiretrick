@@ -199,7 +199,11 @@ fn native() {
                 }
             };
             match nm.dispatch(msg) {
-                Some(In::Config { routes, upstream, text_types }) => {
+                Some(In::Config {
+                    routes,
+                    upstream,
+                    text_types,
+                }) => {
                     st.set_text_types(text_types);
                     st.set_routes(routes);
                     up.set_mode(upstream);
