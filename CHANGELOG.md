@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.9.11] - 2026-10-24
+
 ### Added
 
 - `onResponseBody` can tap binary bodies (images, video, fonts, wasm,
@@ -432,7 +434,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.9.10...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.9.11...HEAD
+[0.9.11]: https://github.com/nimatrueway/wiretrick/compare/v0.9.10...v0.9.11
 [0.9.10]: https://github.com/nimatrueway/wiretrick/compare/v0.9.9...v0.9.10
 [0.9.9]: https://github.com/nimatrueway/wiretrick/compare/v0.9.8...v0.9.9
 [0.9.8]: https://github.com/nimatrueway/wiretrick/compare/v0.9.7...v0.9.8
