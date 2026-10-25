@@ -1210,7 +1210,7 @@ async function start(opts: { fresh?: boolean }): Promise<boolean> {
             if (dirHandle) void serial(() => renameSettingsOnDisk(oldName, newName));
         });
         chrome.storage.onChanged.addListener((c) => {
-            if (c.resLogLevel || c.resLogCap || c.resStrategy) scheduleReconcile();
+            if (c.resLogLevel || c.resLogCap || c.resStrategy || c.resTextTypes) scheduleReconcile();
         });
     }
     settingsSig = null;

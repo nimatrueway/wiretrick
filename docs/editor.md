@@ -413,6 +413,10 @@ settings:
   # …one pros/cons line per strategy…
   # helper | page | extension | debugger | rules
   # defaultStrategy: helper
+  # Content-Types onResponseBody gets as text (globs; `*` = anything). …
+  # textTypes:
+  #   - text/*
+  #   - …
 
 params:
   Debug header:
@@ -422,3 +426,7 @@ params:
     # default: warn
     level: trace
 ```
+
+`textTypes` has no control in Settings: edit it here. It lists the
+Content-Types `onResponseBody` gets as text and replaces the defaults
+([binary bodies](scripting.md#binary-bodies)).

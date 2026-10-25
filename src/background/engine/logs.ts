@@ -4,6 +4,7 @@
 import { annotateFromLog, URL_AT_END } from "../network";
 import { SKIPPED_MARK } from "../../shared/precedence";
 import { outcomeKind, observedLine, type OutcomeKind, type NetKind } from "../../shared/netTypes";
+import type { Strategy } from "../../shared/route";
 
 export interface LogEntry {
     tabId: number;
@@ -111,26 +112,36 @@ export function bodyObservedSince(scriptId: string, url: string, since: number):
     return e !== undefined && e >= since;
 }
 
-/** url → the latest body the helper didn't hand to onResponseBody, and why ("binary", "empty"…) */
-const helperSkips = new Map<string, { at: number; why: string; contentType: string }>();
+/** url → the latest body a strategy didn't hand to onResponseBody, and why ("binary", "empty"…) */
+const bodySkips = new Map<string, { at: number; strategy: Strategy; why: string; contentType: string }>();
+
+export function noteBodySkip(strategy: Strategy, url: string, why: string, contentType: string): void {
+    bodySkips.delete(url);
+    bodySkips.set(url, { at: Date.now(), strategy, why, contentType });
+    if (bodySkips.size > MAX_TAPS) bodySkips.delete(bodySkips.keys().next().value!);
+}
+
+/** Did a strategy skip the body of url at or after `since`? */
+export function bodySkipSince(url: string, since: number): { strategy: Strategy; why: string; contentType: string } | undefined {
+    const s = bodySkips.get(url);
+    return s && s.at >= since ? s : undefined;
+}
 
 export function noteHelperSkip(url: string, why: string, contentType: string): void {
-    helperSkips.delete(url);
-    helperSkips.set(url, { at: Date.now(), why, contentType });
-    if (helperSkips.size > MAX_TAPS) helperSkips.delete(helperSkips.keys().next().value!);
+    noteBodySkip("helper", url, why, contentType);
 }
 
 /** Did the helper skip the body of url at or after `since`? */
 export function helperSkipSince(url: string, since: number): { why: string; contentType: string } | undefined {
-    const s = helperSkips.get(url);
-    return s && s.at >= since ? s : undefined;
+    const s = bodySkipSince(url, since);
+    return s?.strategy === "helper" ? s : undefined;
 }
 
 /** test seam */
 export function __resetTaps(): void {
     bodyTaps.clear();
     lastScriptError.clear();
-    helperSkips.clear();
+    bodySkips.clear();
 }
 
 /** A handler ran for `url` but changed nothing: a DEBUG line that marks the request "observed". */

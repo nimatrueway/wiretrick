@@ -4,8 +4,12 @@
  *
  *   SW ⇄ chrome.runtime ⇄ HERE ⇄ window.postMessage ⇄ sandbox iframe
  *
- * Pure transport — no logic. All payloads are structured-cloneable JSON.
+ * Pure transport — no logic. chrome.runtime messaging is JSON, so body
+ * bytes arrive packed ({ __wtBytes }) and are unpacked for postMessage
+ * (structured clone keeps Uint8Array); results are packed on the way back.
  */
+import { packBytes, unpackBytes } from "../shared/bytesPack";
+
 const pending = new Map<string, Pending>();
 let seq = 0;
 const RPC_TIMEOUT = 20000;
@@ -81,11 +85,12 @@ chrome.runtime.onMessage.addListener((msg: any, _sender, sendResponse) => {
         resolve: (result) => {
             clearTimeout(timer);
             pending.delete(reqId);
-            sendResponse(result);
+            sendResponse(packBytes(result));
         },
         timer,
     });
-    forward(reqId, msg.payload);
+    const payload = msg.payload?.args ? { ...msg.payload, args: unpackBytes(msg.payload.args) } : msg.payload;
+    forward(reqId, payload);
     return true; // async sendResponse
 });
 

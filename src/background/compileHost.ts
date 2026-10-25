@@ -22,6 +22,7 @@ import type { ParamDef } from "../shared/scriptDef";
 import { dlogLevel } from "../shared/debugLog";
 import { compileDecision } from "../shared/pac";
 import { getDefaultStrategy } from "../shared/route";
+import { packBytes, unpackBytes } from "../shared/bytesPack";
 import type { ScriptRules } from "../shared/rulesProbe";
 import { dataFilesSig, ensureDataFiles } from "./engine/dataFiles";
 
@@ -334,8 +335,9 @@ export async function runBodyOp(
     args: Record<string, any>
 ): Promise<any | null> {
     await ensureOffscreen();
-    // the sandbox has no settings: the default strategy rides along
-    const out = await sandboxCallWithData({ op: "run", runOp: op, scripts, paramValues, args: { defaultStrategy: getDefaultStrategy(), ...args } });
+    // the sandbox has no settings: the default strategy rides along; bytes
+    // are packed for JSON messaging (offscreen.ts unpacks them)
+    const out = unpackBytes(await sandboxCallWithData({ op: "run", runOp: op, scripts, paramValues, args: packBytes({ defaultStrategy: getDefaultStrategy(), ...args }) }));
     dlogLevel("compile", "debug", `runBodyOp ${op} → ${JSON.stringify(out)?.slice(0, 120)}`);
     return out;
 }

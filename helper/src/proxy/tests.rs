@@ -563,6 +563,22 @@ async fn binary_bodies_are_skipped_but_headers_still_editable() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn binary_route_receives_and_replaces_binary_bodies() {
+    let env = setup(vec![Route {
+        binary: true,
+        ..route("https://localhost:*/image", false, false, true)
+    }])
+    .await;
+    env.on(|v, body| {
+        assert_eq!(v["body"], "chunks");
+        assert_eq!(body, [0x89, b'P', b'N', b'G', 0, 1, 2, 3]);
+        Some(json!({"t": "fulfill", "status": 200, "headers": v["headers"], "body": b64([9u8, 0, 9])}))
+    });
+    let g = env.get("/image", true, &[]).await.unwrap();
+    assert_eq!(g.body, [9, 0, 9]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn plain_http_absolute_form() {
     let env = setup(vec![route("http://localhost:*/*", true, true, false)]).await;
     env.on(|v, _| match v["t"].as_str().unwrap() {

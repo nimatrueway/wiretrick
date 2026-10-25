@@ -42,10 +42,13 @@ export interface OpFilter {
     defaultStrategy?: Strategy;
     /** restrict to these script ids */
     onlyIds?: string[];
+    /** the body is binary: only `binary: true` onResponseBody routes run */
+    binary?: boolean;
 }
 
 export function handlerRuns(h: Routed, f: OpFilter): boolean {
     if (f.tier && effectiveStrategy(h.route, f.defaultStrategy) !== f.tier) return false;
+    if (f.binary && !h.route.binary) return false;
     return routeMatches(h.route, f.url, f.method, f.resourceType);
 }
 
@@ -138,7 +141,8 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
         requestHeaders: args.requestHeaders || {},
         groups: routeGroups(h.route, url),
     });
-    const list = matching(scripts, op, { url, method, resourceType: known, tier: args.tier, defaultStrategy: args.defaultStrategy, onlyIds: args.onlyIds }, env);
+    const binaryBody = op === "transform" && args.body instanceof Uint8Array;
+    const list = matching(scripts, op, { url, method, resourceType: known, tier: args.tier, defaultStrategy: args.defaultStrategy, onlyIds: args.onlyIds, binary: binaryBody }, env);
     const observed = (s: OpScript, handler: string, why?: string) => env.log(s.id, "debug", observedLine(s.name, handler, url, why), "observed");
 
     if (op === "requestDecision") {
@@ -207,6 +211,8 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
         for (const { s, handlers } of list) {
             for (const h of handlers) {
                 try {
+                    // a handler without `binary: true` only ever sees text
+                    if (out instanceof Uint8Array && !h.route.binary) out = new TextDecoder().decode(out);
                     const result: any = await h.fn({ ...base(h), contentType: args.contentType, status: args.status }, out);
                     if (result !== undefined && result !== null) {
                         const before = typeof out === "string" ? out.length : out.byteLength;
@@ -223,8 +229,8 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
                 }
             }
         }
-        // raw: binary in, binary out (cdp on MV2)
-        return touched ? (typeof out === "string" || args.raw ? out : new TextDecoder().decode(out)) : null;
+        // raw / binary body: bytes stay bytes
+        return touched ? (typeof out === "string" || args.raw || binaryBody ? out : new TextDecoder().decode(out)) : null;
     }
 
     if (op === "replace") {

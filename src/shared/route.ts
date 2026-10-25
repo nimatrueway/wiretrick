@@ -2,7 +2,7 @@
  * Handler routes: the first argument of every wt.onXxx registration.
  *
  *   wt.onRequest("*://api.example.com/*", fn)
- *   wt.onResponseBody({ url: [...], exclude, methods, resourceTypes, strategy }, fn)
+ *   wt.onResponseBody({ url: [...], exclude, methods, resourceTypes, strategy, binary }, fn)
  *   wt.onDocument({ url, exclude, when }, fn)
  *
  * Each route is owned by exactly one strategy: its own `strategy`,
@@ -43,6 +43,8 @@ export interface RouteMeta {
     strategy?: Strategy;
     /** onDocument only */
     when?: DocumentWhen;
+    /** onResponseBody only: also receive binary bodies (Uint8Array) */
+    binary?: boolean;
 }
 
 const IS_FIREFOX_RT = typeof (globalThis as any).browser !== "undefined" && typeof (globalThis as any).browser?.webRequest?.filterResponseData === "function";
@@ -105,7 +107,7 @@ export function normalizeRoute(kind: RouteKind, raw: unknown, index: number): Ro
     checkPatterns(exclude, "exclude", where);
     const route: RouteMeta = { kind, index, url, exclude };
     if (kind === "onDocument") {
-        for (const k of ["methods", "resourceTypes", "strategy"]) {
+        for (const k of ["methods", "resourceTypes", "strategy", "binary"]) {
             if (obj[k] !== undefined) throw new Error(`${where}: "${k}" doesn't apply to onDocument (it runs in the page, not on requests)`);
         }
         if (obj.when !== undefined) {
@@ -115,6 +117,11 @@ export function normalizeRoute(kind: RouteKind, raw: unknown, index: number): Ro
         return route;
     }
     if (obj.when !== undefined) throw new Error(`${where}: "when" applies to onDocument only`);
+    if (obj.binary !== undefined) {
+        if (kind !== "onResponseBody") throw new Error(`${where}: "binary" applies to onResponseBody only`);
+        if (typeof obj.binary !== "boolean") throw new Error(`${where}: binary must be true or false, got ${typeof obj.binary}`);
+        if (obj.binary) route.binary = true;
+    }
     if (obj.methods !== undefined) {
         const m = list(obj.methods, "methods", where).map((x) => x.toUpperCase());
         route.methods = m;

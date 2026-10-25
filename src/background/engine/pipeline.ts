@@ -20,7 +20,7 @@ import { serveStore } from "./strategies/extensionStrategy";
 import { dlog, dlogLevel } from "../../shared/debugLog";
 import { isThenable, toRunnableJs } from "../../shared/compile";
 import "../../shared/transpile";
-import { log, getScriptErrors, getScriptTypeErrors, getScriptRuleErrors, getScriptRouteWarnings, setScriptRouteWarnings, bodyObservedSince, helperSkipSince } from "./logs";
+import { log, getScriptErrors, getScriptTypeErrors, getScriptRuleErrors, getScriptRouteWarnings, setScriptRouteWarnings, bodyObservedSince, bodySkipSince, noteBodySkip } from "./logs";
 import { missedLine } from "../../shared/netTypes";
 import { frameHasHook as pingHook, isLoopbackUrl, missedReason, missedWhat, routeProblem, MISSED_SKIP_TYPES } from "../../shared/missedTap";
 import { resolveParamValues } from "../../shared/scriptDef";
@@ -30,7 +30,9 @@ import { analyzeScripts, runBodyOp, type Analyzed } from "../compileHost";
 import { recordNetBody } from "../network";
 import { reportSkipped, setSkipRoutes } from "./skipped";
 import { winnerOf } from "../../shared/precedence";
-import { STRATEGY_KEY } from "../settingsFile";
+import { STRATEGY_KEY, TEXT_TYPES_KEY } from "../settingsFile";
+import { getTextTypes, setTextTypes } from "../../shared/bodyKind";
+import { packBytes, unpackBytes } from "../../shared/bytesPack";
 
 const FILTER: chrome.webRequest.RequestFilter = { urls: ["<all_urls>"] };
 
@@ -45,13 +47,14 @@ const MISSED_DELAY_MS = 1500;
 /** the helper usually connects within this after a (service-worker) start */
 const HELPER_GRACE_MS = 5000;
 
-/** settings.defaultStrategy → route.ts default (every reload and hook bundle) */
+/** settings.defaultStrategy → route.ts default, settings.textTypes → bodyKind.ts (every reload and hook bundle) */
 function loadDefaultStrategy(): Promise<void> {
     return new Promise((resolve) => {
         try {
-            chrome.storage.local.get([STRATEGY_KEY], (g: any) => {
+            chrome.storage.local.get([STRATEGY_KEY, TEXT_TYPES_KEY], (g: any) => {
                 void (chrome.runtime as any).lastError;
                 setDefaultStrategy(g?.[STRATEGY_KEY]);
+                setTextTypes(g?.[TEXT_TYPES_KEY]);
                 resolve();
             });
         } catch {
@@ -158,8 +161,9 @@ export function createPipeline(
         const routes = watchedFor(d.url, (d as any).method, d.type).filter((w) => w.route.kind !== "onRequest" || d.type === "xmlhttprequest");
         if (!routes.length) return;
         setTimeout(async () => {
-            // the hook took it: the page may simply never read the body
-            if (pageStrategy.isClaimed(d.url)) return;
+            const bodySkip = bodySkipSince(d.url, start - 250);
+            // the hook took it: the page may simply never read the body (unless it skipped a binary one)
+            if (pageStrategy.isClaimed(d.url) && bodySkip?.strategy !== "page") return;
             const hookLoaded = d.type === "xmlhttprequest" && routes.some((w) => w.strategy === "page") ? await frameHasHook(d.tabId, d.frameId) : undefined;
             const done = new Set<string>();
             for (const w of routes) {
@@ -176,7 +180,7 @@ export function createPipeline(
                     cdpWarned: cdpWarned.has(`${d.tabId}|${d.url}`),
                     hookLoaded,
                     loopback: isLoopbackUrl(d.url),
-                    helperSkip: helperSkipSince(d.url, start - 250),
+                    bodySkip,
                 });
                 if (!reason) continue;
                 log(d.tabId, missedLine(w.name, routeLabel(w.route), d.url, missedWhat(d.type), reason), "warn", w.id, "missed", d.url);
@@ -667,7 +671,7 @@ export function createPipeline(
                     libs.set(lib.meta.name, { name: lib.meta.name, src: toRunnableJs(lib.code), params: resolveParamValues(defs, paramValues[lib.id]) });
                 }
                 dlogLevel("pipeline", "debug", "getHookBundle responding", { routes: routes.length, dom: domHandlers.length, url });
-                sendResponse({ count: routes.length, routes, domHandlers, libs: [...libs.values()] });
+                sendResponse({ count: routes.length, routes, textTypes: getTextTypes(), domHandlers, libs: [...libs.values()] });
             })();
             return true; // async sendResponse above
         }
@@ -726,11 +730,18 @@ export function createPipeline(
         if (msg && msg.type === "runTransform") {
             const tabId = sender?.tab?.id ?? -1;
             const method = msg.method || "GET";
-            pageStrategy.runTransform(msg.url, method, msg.body || "", { status: msg.status, contentType: msg.contentType }, tabId).then((body) => {
-                recordNetBody({ tabId, url: msg.url, method, original: msg.body ?? "", modified: body });
-                sendResponse({ body });
+            // the bridge packs binary bodies (runtime messaging is JSON)
+            const original = unpackBytes(msg.body);
+            pageStrategy.runTransform(msg.url, method, original || "", { status: msg.status, contentType: msg.contentType }, tabId).then((body) => {
+                recordNetBody({ tabId, url: msg.url, method, original: original ?? "", modified: body });
+                sendResponse(packBytes({ body }));
             });
             return true;
+        }
+        if (msg && msg.type === "bodySkip") {
+            noteBodySkip("page", msg.url, msg.why || "binary", msg.contentType || "");
+            sendResponse({});
+            return false;
         }
         if (msg && msg.type === "runReplace") {
             const tabId = sender?.tab?.id ?? -1;
@@ -792,7 +803,7 @@ export function createPipeline(
     const offProcess = onHelperActiveChange(() => void reload());
     // settings.defaultStrategy moves ownership between strategies
     const onStorage = (changes: Record<string, unknown>, area: string) => {
-        if (area === "local" && changes[STRATEGY_KEY]) void reload();
+        if (area === "local" && (changes[STRATEGY_KEY] || changes[TEXT_TYPES_KEY])) void reload();
     };
     chrome.storage.onChanged.addListener(onStorage);
     void reload();

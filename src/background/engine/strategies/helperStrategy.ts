@@ -11,6 +11,8 @@
  * strategies: MV2 compiles in the background page, MV3 runs in the sandbox.
  */
 import { runOp, type BodyOp, type OpScript } from "../../../shared/bodyOps";
+import { bodyKind, getTextTypes } from "../../../shared/bodyKind";
+import { bytesToBase64, base64ToBytes } from "../../../shared/bytesPack";
 import { hostPatternOf, type SystemProxyInfo } from "../../../shared/pac";
 import { routeMatches, type RouteMeta } from "../../../shared/route";
 import { dlogLevel } from "../../../shared/debugLog";
@@ -38,9 +40,11 @@ export interface HelperRoute {
     req: boolean;
     resHeaders: boolean;
     body: boolean;
+    /** onResponseBody with `binary: true`: the helper sends binary bodies too */
+    binary: boolean;
 }
 
-type Flag = "req" | "resHeaders" | "body";
+type Flag = "req" | "resHeaders" | "body" | "binary";
 
 /** what a route needs the helper to pause */
 export function helperRouteOf(route: RouteMeta): HelperRoute {
@@ -51,6 +55,7 @@ export function helperRouteOf(route: RouteMeta): HelperRoute {
         req: route.kind === "onRequest" || route.kind === "replaceResponse",
         resHeaders: route.kind === "onResponseHeaders",
         body: route.kind === "onResponseBody",
+        binary: route.kind === "onResponseBody" && !!route.binary,
     };
 }
 
@@ -82,25 +87,7 @@ export interface ProcessStatus {
 
 // ---- small helpers (exported for tests) ----
 
-export function bytesToBase64(bytes: Uint8Array): string {
-    let s = "";
-    for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000) as any);
-    return btoa(s);
-}
-
-export function base64ToBytes(b64: string): Uint8Array {
-    const bin = atob(b64);
-    const out = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-    return out;
-}
-
-/** no NUL in the first 512 bytes → treat as text */
-export function looksTextual(b: Uint8Array): boolean {
-    const n = Math.min(b.length, 512);
-    for (let i = 0; i < n; i++) if (b[i] === 0) return false;
-    return true;
-}
+export { bytesToBase64, base64ToBytes };
 
 /** lowercased name → value (duplicates joined like fetch's Headers) */
 export function pairsToObject(pairs: Pairs): Record<string, string> {
@@ -341,7 +328,7 @@ export class HelperStrategy {
             const routes = this.owned.map((o) => helperRouteOf(o.route));
             const d = await this.routing.decision(this.system);
             if (!d.ok) {
-                this.send({ t: "config", routes: [], upstream: "direct" });
+                this.send({ t: "config", routes: [], upstream: "direct", textTypes: getTextTypes() });
                 await this.routing.clear();
                 this.routing.status = { active: false, reason: d.reason };
                 setHelperActive(false);
@@ -351,7 +338,7 @@ export class HelperStrategy {
             }
             this.decisionSource = d.decision.source;
             // routes first: the helper must know them before traffic arrives
-            this.send({ t: "config", routes, upstream: d.decision.upstream });
+            this.send({ t: "config", routes, upstream: d.decision.upstream, textTypes: getTextTypes() });
             const applied = await this.routing.apply(helper.port, this.owned.flatMap((o) => o.route.url), this.system);
             setHelperActive(applied.ok);
             if (applied.ok && applied.decision.note) dlogLevel("helper", "warn", applied.decision.note);
@@ -545,18 +532,20 @@ export class HelperStrategy {
         }
         if (m.body === "chunks" && this.matching(m.url, m.method, c.type, "body")) {
             const bytes = parts.length === 1 ? base64ToBytes(parts[0]) : concat(parts.map(base64ToBytes));
-            const textual = looksTextual(bytes);
-            let out: string | null = null;
-            if (textual || !__MV3__) {
-                const body: string | Uint8Array = textual ? new TextDecoder().decode(bytes) : bytes;
-                out = await this.run("transform", { ...base, body, contentType: pairsToObject(headers)["content-type"] || "" });
+            const contentType = pairsToObject(headers)["content-type"] || "";
+            const binary = bodyKind(contentType, bytes) === "binary";
+            let out: string | Uint8Array | null = null;
+            if (!binary || this.matching(m.url, m.method, c.type, "binary")) {
+                // binary bodies reach `binary: true` routes only (bodyOps filters)
+                const body: string | Uint8Array = binary ? bytes : new TextDecoder().decode(bytes);
+                out = await this.run("transform", { ...base, body, contentType });
             } else {
-                dlogLevel("helper", "debug", `binary body skipped for onResponseBody (MV3 passes text only): ${m.url}`);
-                noteHelperSkip(m.url, "binary", pairsToObject(headers)["content-type"] || "");
+                dlogLevel("helper", "debug", `binary body (${contentType || "sniffed"}) skipped: no onResponseBody route with binary: true: ${m.url}`);
+                noteHelperSkip(m.url, "binary", contentType);
             }
             recordNetBody({ tabId: c.tabId, url: m.url, method: m.method, original: bytes, modified: out });
             if (out !== null && out !== undefined) {
-                this.send({ t: "fulfill", id: m.id, status: m.status, headers: withNoStore(headers), body: bytesToBase64(new TextEncoder().encode(out)) });
+                this.send({ t: "fulfill", id: m.id, status: m.status, headers: withNoStore(headers), body: bytesToBase64(typeof out === "string" ? new TextEncoder().encode(out) : out) });
                 return;
             }
         } else if (m.body.startsWith("skipped:") && this.matching(m.url, m.method, c.type, "body")) {

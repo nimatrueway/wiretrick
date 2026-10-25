@@ -37,6 +37,7 @@ import { parse, stringify, Document, isScalar, Scalar } from "yaml";
 import { resolveParamValues, isValidParamValue, paramDefault, type ParamDef } from "./scriptDef";
 import { builtinStrategy, STRATEGIES } from "./route";
 import { STRATEGY_DOC_URL, STRATEGY_INFO } from "./strategyInfo";
+import { DEFAULT_TEXT_TYPES } from "./bodyKind";
 
 export const SETTINGS_FILE = "settings.yaml";
 export const SCHEMA_FILE = "settings.schema.json";
@@ -51,12 +52,19 @@ export interface GlobalSettings {
     logCap: number;
     /** default interception strategy (route.strategy overrides per handler) */
     defaultStrategy: string;
+    /** Content-Type globs onResponseBody gets as text; undefined = DEFAULT_TEXT_TYPES */
+    textTypes?: string[];
 }
 
 /** the strategy settings.yaml falls back to when `defaultStrategy` is absent */
 export const defaultStrategySetting = (): string => builtinStrategy();
 
 export const isStrategy = (v: unknown): boolean => typeof v === "string" && (STRATEGIES as string[]).includes(v);
+
+/** a valid settings.textTypes value: a non-empty list of non-empty strings */
+export const isTextTypes = (v: unknown): v is string[] => Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === "string" && x.trim() !== "");
+
+export const TEXT_TYPES_DESC = "Content-Types onResponseBody gets as text (globs; `*` = anything). Other bodies are binary and reach only handlers with `binary: true`.";
 
 export interface ScriptSettingsState {
     name: string;
@@ -137,7 +145,7 @@ export function commentedDefaultLines(key: string, d: ParamDef | undefined): str
     return out;
 }
 
-export const GLOBAL_KEYS = ["logLevel", "logCap", "defaultStrategy"] as const;
+export const GLOBAL_KEYS = ["logLevel", "logCap", "defaultStrategy", "textTypes"] as const;
 
 /**
  * One global setting's documented lines at indent 0 (description comments
@@ -148,6 +156,7 @@ export function globalOptionLines(key: (typeof GLOBAL_KEYS)[number], g: GlobalSe
     const out: string[] = [];
     if (key === "logLevel") option(out, 0, "logLevel", `Minimum log level shown in the panel: ${LOG_LEVELS.join(" | ")}`, g.logLevel, DEFAULT_LOG_LEVEL);
     else if (key === "logCap") option(out, 0, "logCap", "Log lines kept in the panel (100..10000)", g.logCap, DEFAULT_LOG_CAP);
+    else if (key === "textTypes") option(out, 0, "textTypes", TEXT_TYPES_DESC, g.textTypes ?? [...DEFAULT_TEXT_TYPES], [...DEFAULT_TEXT_TYPES]);
     else {
         out.push("# Interception strategy for every handler whose route doesn't set `strategy`.");
         out.push("# An unavailable strategy means the handler doesn't run (warned) — no fallback.");
@@ -241,6 +250,8 @@ export function planSettings(doc: SettingsDoc, current: GlobalSettings, scripts:
         if (typeof cap === "number" && Number.isInteger(cap) && cap >= 100 && cap <= 10000 && cap !== current.logCap) globals.logCap = cap;
         const st = doc.settings.defaultStrategy === undefined ? defaultStrategySetting() : doc.settings.defaultStrategy;
         if (isStrategy(st) && st !== current.defaultStrategy) globals.defaultStrategy = st as string;
+        const tt = doc.settings.textTypes === undefined ? [...DEFAULT_TEXT_TYPES] : doc.settings.textTypes;
+        if (isTextTypes(tt) && !same(tt, current.textTypes ?? DEFAULT_TEXT_TYPES)) globals.textTypes = tt;
     }
     const plans: SettingsPlan["scripts"] = [];
     for (const s of scripts) {

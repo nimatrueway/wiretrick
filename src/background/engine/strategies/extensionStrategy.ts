@@ -24,7 +24,8 @@ import { effectiveStrategy, routeGroups, routeLabel, routeMatches, type RouteMet
 import { formatScriptError } from "../../../shared/scriptError";
 import type { HeaderChanges, HookDisposition, InterceptionStrategy, MaybePromise, WebRequestDetailsLike } from "./types";
 import type { Script } from "../scriptStore";
-import { log, logObserved, scriptError } from "../logs";
+import { log, logObserved, noteBodySkip, scriptError } from "../logs";
+import { bodyKind } from "../../../shared/bodyKind";
 import { dlogLevel } from "../../../shared/debugLog";
 import { IS_FIREFOX } from "./helperState";
 import { compileMv2, ownsAny } from "./strategyScripts";
@@ -210,7 +211,13 @@ export class ExtensionStrategy implements InterceptionStrategy {
         const pending = pendingFirefoxStreams.get(details.requestId);
         if (pending && IS_FIREFOX && !isRedirectStatus(details.statusCode)) {
             pendingFirefoxStreams.delete(details.requestId);
-            this.wireFirefoxStream(details, pending.list, pending.tabUrl ?? tabUrl);
+            // a binary Content-Type with no `binary: true` route: don't buffer it at all
+            const ct = contentTypeOf(details.responseHeaders) || "";
+            const binaryOk = pending.list.some((e) => e.handlers.some((h) => h.route.binary));
+            if (bodyKind(ct, null) === "binary" && !binaryOk) {
+                noteBodySkip("extension", details.url, "binary", ct);
+                trace(details, `binary body (${ct}), no binary: true route — onResponseBody skipped ${details.url}`);
+            } else this.wireFirefoxStream(details, pending.list, pending.tabUrl ?? tabUrl);
         }
         return changes;
     }
@@ -348,10 +355,17 @@ export class ExtensionStrategy implements InterceptionStrategy {
                     bytes.set(c, off);
                     off += c.length;
                 }
-                let body: string | Uint8Array = looksBinary(bytes) ? bytes : decoder.decode(bytes);
+                // text → string; binary → bytes, to `binary: true` routes only
+                const contentType = contentTypeOf(details.responseHeaders);
+                const binary = bodyKind(contentType, bytes) === "binary";
+                let body: string | Uint8Array = binary ? bytes : decoder.decode(bytes);
                 const original = body;
+                if (binary && !list.some((e) => e.handlers.some((h) => h.route.binary))) noteBodySkip("extension", details.url, "binary", contentType || "");
                 for (const { id: scriptId, name: scriptName, handlers } of list) for (const h of handlers) {
-                    const ctx = { ...ctxFor(details, tabUrl, h.route), contentType: contentTypeOf(details.responseHeaders) };
+                    if (binary && !h.route.binary) continue;
+                    const ctx = { ...ctxFor(details, tabUrl, h.route), contentType };
+                    // a text body an earlier binary route returned as bytes is still text here
+                    if (typeof body !== "string" && !h.route.binary) body = decoder.decode(body);
                     try {
                         const out = await h.fn(ctx, body);
                         if (out !== undefined && out !== null && out !== body) {
@@ -465,14 +479,6 @@ function readFileSyncValue(fileRef: string): string {
 function contentTypeOf(headers: { name: string; value?: string }[] | undefined): string | undefined {
     const h = headers?.find((x) => x.name.toLowerCase() === "content-type");
     return h?.value;
-}
-
-function looksBinary(bytes: Uint8Array): boolean {
-    const n = Math.min(bytes.length, 512);
-    for (let i = 0; i < n; i++) {
-        if (bytes[i] === 0) return true;
-    }
-    return false;
 }
 
 /** in-memory store for main-frame served replacements */

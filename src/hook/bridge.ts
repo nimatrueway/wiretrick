@@ -15,6 +15,7 @@ import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } 
 import { scriptFunction } from "../shared/scriptFn";
 import { makeLibRequire, type ShippedLib } from "../shared/scriptImports";
 import { makePageShim, domHandlersFor, scheduleDocument, type PageDocumentHandler } from "../shared/pageShim";
+import { packBytes, unpackBytes } from "../shared/bytesPack";
 
 (() => {
     const MAIN_SOURCE = "res-override-bridge";
@@ -88,7 +89,7 @@ import { makePageShim, domHandlersFor, scheduleDocument, type PageDocumentHandle
             safeSend({ type: "getHookBundle", url: location.href }, (resp: any) => {
                 const active = !!(resp && (resp.count > 0 || (resp.domHandlers || []).length));
                 window.postMessage(
-                    { source: MAIN_SOURCE, kind: "status", active, routes: (resp && resp.routes) || [], domHandlers: (resp && resp.domHandlers) || [], libs: (resp && resp.libs) || [] },
+                    { source: MAIN_SOURCE, kind: "status", active, routes: (resp && resp.routes) || [], textTypes: resp?.textTypes, domHandlers: (resp && resp.domHandlers) || [], libs: (resp && resp.libs) || [] },
                     window.location.origin
                 );
             });
@@ -113,15 +114,20 @@ import { makePageShim, domHandlersFor, scheduleDocument, type PageDocumentHandle
         }
         if (data.kind === "call") {
             const bgType = data.op === "replace" ? "runReplace" : data.op === "respond" ? "runRequestDecision" : "runTransform";
+            // runtime messaging is JSON: binary bodies travel as base64 both ways
             safeSend(
-                { type: bgType, url: data.url, method: data.method, body: data.body, status: data.status, contentType: data.contentType },
+                packBytes({ type: bgType, url: data.url, method: data.method, body: data.body, status: data.status, contentType: data.contentType }),
                 (resp: any) => {
                     window.postMessage(
-                        { source: MAIN_SOURCE, kind: "callResult", reqId: data.reqId, result: resp || null },
+                        { source: MAIN_SOURCE, kind: "callResult", reqId: data.reqId, result: unpackBytes(resp) || null },
                         window.location.origin
                     );
                 }
             );
+            return;
+        }
+        if (data.kind === "bodySkip") {
+            safeSend({ type: "bodySkip", url: data.url, why: data.why, contentType: data.contentType || "" });
             return;
         }
         if (data.kind === "log") {
@@ -210,7 +216,7 @@ import { makePageShim, domHandlersFor, scheduleDocument, type PageDocumentHandle
                 safeSend({ type: "getHookBundle", url: location.href }, (resp: any) => {
                     const active = !!(resp && (resp.count > 0 || (resp.domHandlers || []).length));
                     window.postMessage(
-                        { source: MAIN_SOURCE, kind: "status", active, routes: (resp && resp.routes) || [], domHandlers: (resp && resp.domHandlers) || [], libs: (resp && resp.libs) || [], hot: true },
+                        { source: MAIN_SOURCE, kind: "status", active, routes: (resp && resp.routes) || [], textTypes: resp?.textTypes, domHandlers: (resp && resp.domHandlers) || [], libs: (resp && resp.libs) || [], hot: true },
                         window.location.origin
                     );
                 });

@@ -25,6 +25,7 @@ import {
     DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL, defaultStrategySetting,
     type GlobalSettings, type ScriptSettingsState,
 } from "./settingsYaml";
+import { DEFAULT_TEXT_TYPES } from "./bodyKind";
 
 const isMulti = (d: any): boolean => d?.type === "string" && !!d.multiline;
 const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -132,7 +133,9 @@ function commentOutEdit(src: string, pair: any, eol: string, why = "no longer de
 
 /** render a value as it would appear after `key: ` (one element per line) */
 function renderValue(value: any, flow: boolean): string[] {
-    const text = stringify({ v: value }, { lineWidth: 0, ...(flow ? { collectionStyle: "flow" as const, flowCollectionPadding: false } : {}) }).trimEnd();
+    // flow: render the value alone (a flow wrapper map would read "{v: [...]}")
+    if (flow) return [stringify(value, { lineWidth: 0, collectionStyle: "flow", flowCollectionPadding: false }).trimEnd()];
+    const text = stringify({ v: value }, { lineWidth: 0 }).trimEnd();
     const lines = text.split("\n");
     lines[0] = lines[0].startsWith("v: ") ? lines[0].slice(3) : "";
     return lines;
@@ -317,6 +320,7 @@ export function patchSettings(existing: string, g: GlobalSettings, scripts: Scri
         ["logLevel", g.logLevel, DEFAULT_LOG_LEVEL],
         ["logCap", g.logCap, DEFAULT_LOG_CAP],
         ["defaultStrategy", g.defaultStrategy, defaultStrategySetting()],
+        ["textTypes", g.textTypes ?? [...DEFAULT_TEXT_TYPES], [...DEFAULT_TEXT_TYPES]],
     ];
     const settingsTarget = classify(root, "settings");
     if (settingsTarget === null) return null;
@@ -464,7 +468,7 @@ export function patchSettings(existing: string, g: GlobalSettings, scripts: Scri
     // safety net: the result must parse and express exactly the target state
     try {
         const plan = planSettings(parseSettings(out), g, scripts);
-        if (plan.globals.logLevel !== undefined || plan.globals.logCap !== undefined || plan.globals.defaultStrategy !== undefined || plan.scripts.length) return null;
+        if (plan.globals.logLevel !== undefined || plan.globals.logCap !== undefined || plan.globals.defaultStrategy !== undefined || plan.globals.textTypes !== undefined || plan.scripts.length) return null;
     } catch {
         return null;
     }

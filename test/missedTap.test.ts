@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { frameHasHook, helperSkipReason, isLoopbackUrl, makeMissedThrottle, missedReason, missedWhat, routeProblem, MISSED_REASONS, type MissedCase } from "../src/shared/missedTap";
 import { outcomeKind, missedLine } from "../src/shared/netTypes";
-import { __resetTaps, bodyObservedSince, helperSkipSince, log, logObserved, noteHelperSkip } from "../src/background/engine/logs";
+import { __resetTaps, bodyObservedSince, bodySkipSince, helperSkipSince, log, logObserved, noteBodySkip, noteHelperSkip } from "../src/background/engine/logs";
 
 const base: MissedCase = { strategy: "debugger", type: "main_frame", firefox: false, mv3: false, fromCache: false, helperActive: false, cdpWarned: false };
 const reason = (over: Partial<MissedCase>) => missedReason({ ...base, ...over });
@@ -42,12 +42,30 @@ describe("missedReason", () => {
         const on = { strategy: "helper" as const, helperActive: true };
         expect(reason({ ...on, helperSkip: { why: "empty", contentType: "" } })).toBeNull();
         const bin = reason({ ...on, helperSkip: { why: "binary", contentType: "video/mp4; codecs=avc1" } })!;
-        expect(bin).toContain("binary bodies (video/mp4)");
+        expect(bin).toContain("binary (video/mp4)");
+        expect(bin).toContain("binary: true");
+        expect(bin).toContain("settings.textTypes");
         expect(reason({ ...on, helperSkip: { why: "too-large", contentType: "" } })).toContain("64 MB");
         expect(reason({ ...on, helperSkip: { why: "stream", contentType: "text/event-stream" } })).toContain("streamed");
         expect(helperSkipReason({ why: "weird", contentType: "" })).toContain("(weird)");
         // only the helper's own skips count
         expect(reason({ strategy: "debugger", helperSkip: { why: "binary", contentType: "" } })).toBe(MISSED_REASONS.fallback);
+    });
+
+    it("debugger/page/extension binary skips explain themselves — only for their own strategy", () => {
+        const skip = (strategy: any) => ({ strategy, why: "binary", contentType: "image/png" });
+        expect(reason({ strategy: "debugger", bodySkip: skip("debugger") })).toContain("binary (image/png)");
+        expect(reason({ strategy: "debugger", bodySkip: skip("page") })).toBe(MISSED_REASONS.fallback);
+        expect(reason({ strategy: "page", type: "xmlhttprequest", bodySkip: skip("page") })).toContain("binary: true");
+        expect(reason({ strategy: "extension", firefox: true, bodySkip: skip("extension") })).toContain("binary (image/png)");
+        expect(reason({ strategy: "helper", helperActive: true, bodySkip: skip("helper") })).toContain("binary (image/png)");
+    });
+
+    it("body skip registry keeps the strategy; helperSkipSince sees the helper's only", () => {
+        __resetTaps();
+        noteBodySkip("debugger", "https://x.example/a.png", "binary", "image/png");
+        expect(bodySkipSince("https://x.example/a.png", 0)).toMatchObject({ strategy: "debugger", why: "binary" });
+        expect(helperSkipSince("https://x.example/a.png", 0)).toBeUndefined();
     });
 
     it("helper skip registry: per URL, since the request started", () => {

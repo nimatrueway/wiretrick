@@ -62,6 +62,8 @@ pub struct State {
     pub up: Arc<Upstream>,
     client: Client<Connector, Body>,
     routes: RwLock<Arc<Vec<Compiled>>>,
+    /// settings.textTypes, lowercased (see `skip_body_reason`)
+    text_types: RwLock<Arc<Vec<String>>>,
 }
 
 /// A route with its `match`/`exclude` strings parsed once (invalid ones dropped).
@@ -82,7 +84,21 @@ impl State {
             up,
             client,
             routes: RwLock::new(Arc::new(Vec::new())),
+            text_types: RwLock::new(Arc::new(default_text_types())),
         })
+    }
+
+    /// settings.textTypes; None/empty → DEFAULT_TEXT_TYPES
+    pub fn set_text_types(&self, types: Option<Vec<String>>) {
+        let types = match types {
+            Some(t) if !t.is_empty() => t.iter().map(|p| p.to_ascii_lowercase()).collect(),
+            _ => default_text_types(),
+        };
+        *self.text_types.write().unwrap() = Arc::new(types);
+    }
+
+    fn text_types(&self) -> Arc<Vec<String>> {
+        self.text_types.read().unwrap().clone()
     }
 
     pub fn set_routes(&self, routes: Vec<Route>) {
@@ -132,6 +148,7 @@ impl State {
                 f.req |= r.flags.req;
                 f.res_headers |= r.flags.res_headers;
                 f.body |= r.flags.body;
+                f.binary |= r.flags.body && r.flags.binary;
             }
         }
         f
@@ -464,36 +481,67 @@ fn header_str<'a>(h: &'a HeaderMap, k: &str) -> &'a str {
     h.get(k).and_then(|v| v.to_str().ok()).unwrap_or("")
 }
 
-/// Content types never handed to body transforms (the extension re-checks
-/// decoded bytes with looksTextual anyway).
-fn skip_body_reason(ct: &str) -> Option<&'static str> {
-    let ct = ct.to_ascii_lowercase();
-    // text despite their prefix: SVG, structured-syntax suffixes
-    // (vnd.api+json, atom+xml, …) and HLS playlists (vnd.apple.mpegurl)
-    let essence = ct.split(';').next().unwrap_or("").trim();
-    if ct.contains("svg") || essence.ends_with("+json") || essence.ends_with("+xml") || essence.ends_with("mpegurl") {
-        return None;
+/// Content-Type globs sent to body transforms as text — mirrors
+/// DEFAULT_TEXT_TYPES in src/shared/bodyKind.ts (keep in sync).
+pub const DEFAULT_TEXT_TYPES: &[&str] = &[
+    "text/*",
+    "*json",
+    "*xml",
+    "*javascript",
+    "*ecmascript",
+    "*mpegurl",
+    "*yaml",
+    "*toml",
+    "*graphql",
+    "*/x-www-form-urlencoded",
+];
+
+fn default_text_types() -> Vec<String> {
+    DEFAULT_TEXT_TYPES.iter().map(|s| s.to_string()).collect()
+}
+
+/// lowercased MIME essence: "Text/HTML; charset=utf-8" → "text/html"
+fn mime_essence(ct: &str) -> String {
+    ct.split(';').next().unwrap_or("").trim().to_ascii_lowercase()
+}
+
+/// Whole-string glob; `*` matches any run of characters (`/` included).
+fn glob_match(pattern: &str, input: &str) -> bool {
+    let parts: Vec<&str> = pattern.split('*').collect();
+    if parts.len() == 1 {
+        return pattern == input;
     }
-    if ct.starts_with("text/event-stream") {
-        return Some("stream");
+    let (first, last) = (parts[0], parts[parts.len() - 1]);
+    if !input.starts_with(first) {
+        return false;
     }
-    for p in [
-        "image/",
-        "video/",
-        "audio/",
-        "font/",
-        "application/octet-stream",
-        "application/zip",
-        "application/pdf",
-        "application/wasm",
-        "application/vnd.",
-        "multipart/x-mixed-replace",
-    ] {
-        if ct.starts_with(p) {
-            return Some("binary");
+    let mut at = first.len();
+    for mid in &parts[1..parts.len() - 1] {
+        match input[at..].find(mid) {
+            Some(i) => at += i + mid.len(),
+            None => return false,
         }
     }
-    None
+    input.len() >= at + last.len() && input.ends_with(last)
+}
+
+fn is_text_type(essence: &str, text_types: &[String]) -> bool {
+    !essence.is_empty() && text_types.iter().any(|p| glob_match(p, essence))
+}
+
+/// Why a body isn't handed to the extension (None = send it). Streams never
+/// are; a missing Content-Type is sent (the extension sniffs the bytes);
+/// otherwise text types are, and binary ones only when a matching
+/// onResponseBody route has `binary: true` (`binary_route`).
+fn skip_body_reason(ct: &str, text_types: &[String], binary_route: bool) -> Option<&'static str> {
+    let essence = mime_essence(ct);
+    if essence == "text/event-stream" || essence == "multipart/x-mixed-replace" {
+        return Some("stream");
+    }
+    if essence.is_empty() || binary_route || is_text_type(&essence, text_types) {
+        return None;
+    }
+    Some("binary")
 }
 
 /// Decode a content-encoding (gzip / deflate / br / identity). None = unknown/corrupt.
@@ -679,7 +727,7 @@ async fn handle(
             } else if len.is_some_and(|l| l > MAX_BODY) {
                 Some("too-large")
             } else {
-                skip_body_reason(&ct)
+                skip_body_reason(&ct, &st.text_types(), flags.binary)
             };
         match skip {
             Some(why) => body_state = format!("skipped:{why}"),
@@ -858,27 +906,70 @@ mod tests;
 
 #[cfg(test)]
 mod skip_body_reason_tests {
-    use super::skip_body_reason;
+    use super::{default_text_types, glob_match, skip_body_reason};
+
+    fn skip(ct: &str) -> Option<&'static str> {
+        skip_body_reason(ct, &default_text_types(), false)
+    }
 
     #[test]
-    fn text_vnd_types_are_not_binary() {
+    fn glob_star_matches_any_run() {
+        assert!(glob_match("text/*", "text/html"));
+        assert!(glob_match("*json", "application/vnd.api+json"));
+        assert!(glob_match("*/x-www-form-urlencoded", "application/x-www-form-urlencoded"));
+        assert!(glob_match("*xml", "application/xml+foo+xml"));
+        assert!(glob_match("a*b*c", "abc"));
+        assert!(glob_match("*", ""));
+        assert!(glob_match("image/png", "image/png"));
+        assert!(!glob_match("image/png", "image/png2"));
+        assert!(!glob_match("*xml", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));
+        assert!(!glob_match("text/*", "application/text"));
+        assert!(!glob_match("ab*ba", "aba"));
+    }
+
+    #[test]
+    fn text_types_are_sent() {
         for ct in [
+            "text/html; charset=utf-8",
+            "Application/JSON",
             "application/vnd.apple.mpegurl",
             "application/vnd.api+json; charset=utf-8",
             "application/vnd.github+json",
             "application/vnd.ms-sstr+xml",
             "audio/mpegurl",
             "image/svg+xml",
+            "application/javascript",
+            "application/x-www-form-urlencoded",
+            "application/yaml",
+            "application/graphql",
         ] {
-            assert_eq!(skip_body_reason(ct), None, "{ct}");
+            assert_eq!(skip(ct), None, "{ct}");
         }
     }
 
     #[test]
-    fn binary_types_are_skipped() {
-        for ct in ["application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "video/mp2t", "image/jpeg", "application/octet-stream"] {
-            assert_eq!(skip_body_reason(ct), Some("binary"), "{ct}");
+    fn binary_types_are_skipped_without_a_binary_route() {
+        for ct in ["application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "video/mp2t", "image/jpeg", "application/octet-stream", "font/woff2"] {
+            assert_eq!(skip(ct), Some("binary"), "{ct}");
+            assert_eq!(skip_body_reason(ct, &default_text_types(), true), None, "{ct} with a binary route");
         }
-        assert_eq!(skip_body_reason("text/event-stream"), Some("stream"));
+    }
+
+    #[test]
+    fn streams_are_always_skipped_and_no_content_type_is_sent() {
+        for binary_route in [false, true] {
+            assert_eq!(skip_body_reason("text/event-stream", &default_text_types(), binary_route), Some("stream"));
+            assert_eq!(skip_body_reason("multipart/x-mixed-replace; boundary=x", &default_text_types(), binary_route), Some("stream"));
+        }
+        assert_eq!(skip(""), None);
+        assert_eq!(skip("  ; charset=utf-8"), None);
+    }
+
+    #[test]
+    fn custom_text_types_replace_the_defaults() {
+        let only = vec!["application/x-custom".to_string(), "image/*".to_string()];
+        assert_eq!(skip_body_reason("application/x-custom", &only, false), None);
+        assert_eq!(skip_body_reason("image/png", &only, false), None);
+        assert_eq!(skip_body_reason("text/html", &only, false), Some("binary"));
     }
 }

@@ -159,6 +159,22 @@ declare namespace Wiretrick {
     /** Where a network handler applies: URL pattern(s) or the full {@link RouteOptions} form. */
     type Route = UrlPatterns | RouteOptions;
 
+    /** Full route form for `wt.onResponseBody`. */
+    interface BodyRouteOptions extends RouteOptions {
+        /**
+         * Also receive binary bodies (images, video, …) as a `Uint8Array`.
+         * Without it the handler gets text bodies only. Which Content-Types
+         * are text is set by `settings.textTypes`.
+         *
+         * Binary bodies are buffered whole and the response waits for the
+         * handler — keep these routes narrow.
+         *
+         * @example { url: "*://cdn.example.com/*.png", binary: true }
+         * @see https://github.com/nimatrueway/wiretrick/blob/main/docs/scripting.md#binary-bodies
+         */
+        binary?: boolean;
+    }
+
     /** Full route form for `wt.onDocument`. */
     interface DocumentRouteOptions extends DocumentOptions {
         /** Frame URLs (top page and iframes) to run in. See {@link UrlPatterns}. */
@@ -601,8 +617,12 @@ declare const wt: {
     ): void;
 
     /**
-     * Transform the response body: receives the original body (string or
-     * bytes) and returns the new one. Matching transforms compose in order.
+     * Transform the response body: receives the original body and returns
+     * the new one. Matching transforms compose in order.
+     *
+     * The handler gets text bodies (a string) only, unless its route sets
+     * `binary: true` — then binary bodies (images, video, …) arrive too,
+     * as a `Uint8Array`. Which Content-Types are text: `settings.textTypes`.
      *
      * Needs a strategy that reads bodies: `"helper"`, `"debugger"`, `"page"`
      * (page fetch/XHR only) or `"extension"` on Firefox. Chromium's
@@ -615,12 +635,21 @@ declare const wt: {
      *
      * @example
      * wt.onResponseBody({ url: "*://example.com/app/*.js", resourceTypes: ["script"] }, (ctx, body) => {
-     *     const text = typeof body === "string" ? body : new TextDecoder().decode(body);
-     *     return text.replace("DEBUG=false", "DEBUG=true");
+     *     return body.replace("DEBUG=false", "DEBUG=true");
+     * });
+     * @example
+     * // binary: true — swap an image
+     * wt.onResponseBody({ url: "*://example.com/logo.png", binary: true }, async (ctx, body) => {
+     *     const res = await fetch("https://example.org/other.png");
+     *     return new Uint8Array(await res.arrayBuffer());
      * });
      */
     onResponseBody(
-        route: Wiretrick.Route,
+        route: Wiretrick.UrlPatterns | (Wiretrick.BodyRouteOptions & { binary?: false }),
+        transform: (ctx: Wiretrick.BodyCtx, body: string) => Wiretrick.Awaitable<string | Uint8Array>
+    ): void;
+    onResponseBody(
+        route: Wiretrick.BodyRouteOptions,
         transform: (ctx: Wiretrick.BodyCtx, body: string | Uint8Array) => Wiretrick.Awaitable<string | Uint8Array>
     ): void;
 

@@ -41,6 +41,9 @@ pub struct Route {
     /// onResponseBody handlers → pause at the response stage with the body
     #[serde(default)]
     pub body: bool,
+    /// an onResponseBody handler with `binary: true` → send binary bodies too
+    #[serde(default)]
+    pub binary: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -62,6 +65,9 @@ pub enum In {
         routes: Vec<Route>,
         #[serde(default = "default_upstream")]
         upstream: UpstreamMode,
+        /// settings.textTypes (Content-Type globs sent as text); absent → defaults
+        #[serde(default, rename = "textTypes")]
+        text_types: Option<Vec<String>>,
     },
     Continue {
         id: u64,
@@ -342,12 +348,24 @@ mod tests {
     fn parses_config() {
         let m: In = serde_json::from_str(r#"{"t":"config","routes":[{"match":["*://a/*"],"req":true,"body":true}],"upstream":"ask"}"#).unwrap();
         match m {
-            In::Config { routes, upstream } => {
+            In::Config { routes, upstream, text_types } => {
                 assert_eq!(upstream, UpstreamMode::Ask);
                 assert!(routes[0].req && routes[0].body && !routes[0].res_headers);
                 assert!(routes[0].exclude.is_empty() && routes[0].methods.is_empty());
+                assert!(!routes[0].binary, "missing binary → false");
+                assert_eq!(text_types, None, "missing textTypes → defaults");
             }
             _ => panic!(),
         }
+    }
+
+    #[test]
+    fn parses_binary_route_and_text_types() {
+        let m: In = serde_json::from_str(r#"{"t":"config","routes":[{"match":["*://a/*"],"body":true,"binary":true}],"textTypes":["text/*","*json"]}"#).unwrap();
+        let In::Config { routes, text_types, .. } = m else {
+            panic!()
+        };
+        assert!(routes[0].body && routes[0].binary);
+        assert_eq!(text_types, Some(vec!["text/*".to_string(), "*json".to_string()]));
     }
 }

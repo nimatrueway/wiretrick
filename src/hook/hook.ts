@@ -12,6 +12,7 @@ import { scriptFunction } from "../shared/scriptFn";
 import { makeLibRequire, type ShippedLib } from "../shared/scriptImports";
 import { routeMatches, type DocumentWhen, type RouteMeta } from "../shared/route";
 import { makePageShim, domHandlersFor, scheduleDocument } from "../shared/pageShim";
+import { bodyKind, setTextTypes } from "../shared/bodyKind";
 
 (() => {
     const w = window as any;
@@ -30,6 +31,14 @@ import { makePageShim, domHandlersFor, scheduleDocument } from "../shared/pageSh
     const wants = (url: string, method: string): boolean => {
         try {
             return routes.some((r) => routeMatches(r, url, method));
+        } catch {
+            return false;
+        }
+    };
+    /** does an onResponseBody route with `binary: true` match? (binary bodies go only to those) */
+    const wantsBinary = (url: string, method: string): boolean => {
+        try {
+            return routes.some((r) => r.kind === "onResponseBody" && r.binary && routeMatches(r, url, method));
         } catch {
             return false;
         }
@@ -98,6 +107,7 @@ import { makePageShim, domHandlersFor, scheduleDocument } from "../shared/pageSh
             const wasActive = active;
             active = !!data.active;
             routes = data.routes || [];
+            setTextTypes(data.textTypes);
             domHandlers = data.domHandlers || [];
             libSources = data.libs || [];
             logUp(`status: ${active ? "active" : "inactive"}, dom=${domHandlers.length}${data.hot ? " (hot)" : ""}`, "debug");
@@ -342,21 +352,25 @@ import { makePageShim, domHandlersFor, scheduleDocument } from "../shared/pageSh
 
                 // 4. transform? only for readable, non-null-body responses
                 if (response.status === 204 || response.status === 304) return response;
+                // text → string; binary → bytes, only when a `binary: true` route wants them
                 const contentType = response.headers.get("content-type") || "";
-                const isText = /text\/|json|javascript|xml|x-www-form-urlencoded/i.test(contentType);
-                if (!isText) {
-                    // sniff when the content-type is missing
-                    if (contentType !== "") return response;
+                const binaryOk = wantsBinary(url, method);
+                let kind = bodyKind(contentType, null);
+                if (kind === "binary" && !binaryOk) return skipBinary(response, url, contentType);
+                let bodyIn: string | Uint8Array;
+                if (kind === "text") bodyIn = await response.clone().text();
+                else {
+                    // binary, or no content-type: sniff the bytes
                     const buf = new Uint8Array(await response.clone().arrayBuffer());
-                    const n = Math.min(buf.length, 512);
-                    for (let i = 0; i < n; i++) if (buf[i] === 0) return response;
+                    kind = bodyKind(contentType, buf);
+                    if (kind === "binary" && !binaryOk) return skipBinary(response, url, contentType);
+                    bodyIn = kind === "binary" ? buf : new TextDecoder().decode(buf);
                 }
 
-                const text = await response.clone().text();
                 const out = abortP
-                    ? await Promise.race([viaBridge({ op: "transform", url, method, body: text, status: response.status, contentType }), abortP])
-                    : await viaBridge({ op: "transform", url, method, body: text, status: response.status, contentType });
-                if (!out || typeof out.body !== "string" || out.body === text) return response;
+                    ? await Promise.race([viaBridge({ op: "transform", url, method, body: bodyIn, status: response.status, contentType }), abortP])
+                    : await viaBridge({ op: "transform", url, method, body: bodyIn, status: response.status, contentType });
+                if (!out || !(typeof out.body === "string" || out.body instanceof Uint8Array) || sameBody(out.body, bodyIn)) return response;
 
                 return withUrl(new Response(out.body, {
                     status: response.status,
@@ -371,6 +385,21 @@ import { makePageShim, domHandlersFor, scheduleDocument } from "../shared/pageSh
                 return origFetch(input, init);
             }
         };
+    }
+
+    /** a binary body no route takes: pass it through, and say why (the "never ran" warning) */
+    function skipBinary(response: Response, url: string, contentType: string): Response {
+        try {
+            window.postMessage({ source: HOOK_SOURCE, kind: "bodySkip", url, why: "binary", contentType }, window.location.origin);
+        } catch {}
+        return response;
+    }
+
+    function sameBody(a: string | Uint8Array, b: string | Uint8Array): boolean {
+        if (typeof a === "string" || typeof b === "string") return a === b;
+        if (a.length !== b.length) return false;
+        for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+        return true;
     }
 
     // ---- XHR patch ----

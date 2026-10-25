@@ -13,7 +13,9 @@ import { urlGlobOf } from "../../../shared/matcher";
 import { runOp, type BodyOp, type OpScript } from "../../../shared/bodyOps";
 import { routeMatches, type RouteKind } from "../../../shared/route";
 import type { Script } from "../scriptStore";
-import { log } from "../logs";
+import { log, noteBodySkip } from "../logs";
+import { bodyKind } from "../../../shared/bodyKind";
+import { base64ToBytes, bytesToBase64 } from "../../../shared/bytesPack";
 import { dlog, dlogLevel } from "../../../shared/debugLog";
 import { debuggerAttach, debuggerSend, debuggerDetach, debuggerGetTargets, type Debuggee } from "../../../shared/chromeApi";
 import { runBodyOp } from "../../compileHost";
@@ -200,8 +202,8 @@ export class DebuggerStrategy {
         return this.owned.some((o) => routeMatches(o.route, details.url, details.method, details.type));
     }
 
-    private wants(url: string, method: string, type: string, kinds: RouteKind[]): boolean {
-        return this.owned.some((o) => kinds.includes(o.route.kind) && routeMatches(o.route, url, method, type));
+    private wants(url: string, method: string, type: string, kinds: RouteKind[], binary = false): boolean {
+        return this.owned.some((o) => kinds.includes(o.route.kind) && (!binary || o.route.binary) && routeMatches(o.route, url, method, type));
     }
 
     /** Forget per-tab state on tab close. */
@@ -436,15 +438,26 @@ export class DebuggerStrategy {
             };
             if (!wantsBody) return void (await continueWithHeaders());
             const contentType = headerContentType(baseHeaders);
+            // text bodies go to transforms as strings, binary ones as bytes to
+            // `binary: true` routes only — decided from the Content-Type before
+            // fetching the body when it can be
+            const wantsBinary = this.wants(url, method, resourceType, ["onResponseBody"], true);
+            const skipBinary = () => {
+                noteBodySkip("debugger", url, "binary", contentType || "");
+                dlogLevel("debugger", "debug", "binary body, no binary: true route — onResponseBody skipped", { url, contentType });
+            };
+            if (bodyKind(contentType, null) === "binary" && !wantsBinary) {
+                skipBinary();
+                return void (await continueWithHeaders());
+            }
             let body: string | Uint8Array | null = null;
             let input: string | Uint8Array | null = null;
             const got: any = await debuggerSend(d, "Fetch.getResponseBody", { requestId });
             const bytes = got.base64Encoded ? base64ToBytes(got.body) : new TextEncoder().encode(got.body);
-            // textual bodies are handed to transforms as strings; binary
-            // stays bytes on MV2 (the MV3 sandbox gets text only)
-            if (looksTextual(bytes)) input = new TextDecoder().decode(bytes);
-            else if (!__MV3__) input = bytes;
-            else dlogLevel("debugger", "debug", "binary body — onResponseBody skipped", { url, len: bytes.length });
+            const kind = bodyKind(contentType, bytes);
+            if (kind !== "binary") input = new TextDecoder().decode(bytes);
+            else if (wantsBinary) input = bytes;
+            else skipBinary();
             body = input;
             if (input !== null) {
                 const out = await this.run("transform", { ...base, body: input, contentType, status, raw: typeof input !== "string" }, tabId);
@@ -531,25 +544,4 @@ function mergeHeaderChanges(
     }
     for (const repl of setMap.values()) out.push(repl);
     return out;
-}
-
-function looksTextual(bytes: Uint8Array): boolean {
-    const n = Math.min(bytes.length, 512);
-    for (let i = 0; i < n; i++) {
-        if (bytes[i] === 0) return false;
-    }
-    return true;
-}
-
-function base64ToBytes(b64: string): Uint8Array {
-    const bin = atob(b64);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    return bytes;
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-    let bin = "";
-    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000) as any);
-    return btoa(bin);
 }

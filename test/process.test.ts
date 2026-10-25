@@ -8,6 +8,8 @@ import { compileScript } from "../src/shared/compile";
 import { isHelperOutdated, MIN_HELPER_VERSION } from "../src/shared/helperInstall";
 import { clearDebugBuffer, getDebugBuffer } from "../src/shared/debugLog";
 import type { Script } from "../src/background/engine/scriptStore";
+import { DEFAULT_TEXT_TYPES } from "../src/shared/bodyKind";
+import { __resetTaps, helperSkipSince } from "../src/background/engine/logs";
 
 function makeScript(id: string, code: string): Script {
     return { id, code, enabled: true, createdAt: 0, updatedAt: 0, error: null, meta: compileScript(code).meta };
@@ -148,7 +150,8 @@ describe("helpers", () => {
         expect(r("onRequest", "*")).toMatchObject({ match: ["*"], req: true, resHeaders: false, body: false });
         expect(r("replaceResponse", "*")).toMatchObject({ req: true, body: false });
         expect(r("onResponseHeaders", "*")).toMatchObject({ req: false, resHeaders: true });
-        expect(r("onResponseBody", "*")).toMatchObject({ req: false, body: true });
+        expect(r("onResponseBody", "*")).toMatchObject({ req: false, body: true, binary: false });
+        expect(r("onResponseBody", { url: "*", binary: true })).toMatchObject({ body: true, binary: true });
         expect(r("onRequest", { url: "https://x.com/*", exclude: "https://x.com/a", methods: ["post"] })).toEqual({
             match: ["https://x.com/*"],
             exclude: ["https://x.com/a"],
@@ -156,6 +159,7 @@ describe("helpers", () => {
             req: true,
             resHeaders: false,
             body: false,
+            binary: false,
         });
     });
     it("header mods are case-insensitive and support multi-values", () => {
@@ -199,7 +203,8 @@ describe("HelperStrategy ⇄ helper protocol", () => {
         const p = new HelperStrategy();
         await ready(p, [makeScript("a", `wt.onResponseBody({ url: "https://api.x.com/*", strategy: "helper" }, (c, b) => b + "!");`)]);
         const cfg = fake.sent.find((m) => m.t === "config");
-        expect(cfg.routes).toEqual([{ match: ["https://api.x.com/*"], exclude: [], methods: [], req: false, resHeaders: false, body: true }]);
+        expect(cfg.routes).toEqual([{ match: ["https://api.x.com/*"], exclude: [], methods: [], req: false, resHeaders: false, body: true, binary: false }]);
+        expect(cfg.textTypes).toEqual([...DEFAULT_TEXT_TYPES]);
         expect(cfg.upstream).toBe("ask");
         expect(fake.proxyValue.mode).toBe("pac_script");
         expect(fake.proxyValue.pacScript.data).toContain("127.0.0.1:41234");
@@ -290,13 +295,29 @@ wt.onResponseBody({ url: "https://x.com/*", strategy: "helper" }, (c, body) => (
         expect(r2.headers).toContainEqual(["x-seen", "404"]);
     });
 
-    it("binary bodies reach onResponseBody as bytes (MV2)", async () => {
+    it("binary bodies reach binary: true onResponseBody routes as bytes", async () => {
         const p = new HelperStrategy();
-        await ready(p, [makeScript("a", `wt.onResponseBody({ url: "https://x.com/*", strategy: "helper" }, (c, body) => typeof body === "string" ? "text" : "bytes:" + body.length);`)]);
+        await ready(p, [makeScript("a", `wt.onResponseBody({ url: "https://x.com/*", strategy: "helper", binary: true }, (c, body) => typeof body === "string" ? "text:" + body : "bytes:" + body.length);`)]);
+        expect(fake.sent.find((m) => m.t === "config").routes[0].binary).toBe(true);
+        fake.deliver({ t: "chunk", id: 1, data: bytesToBase64(new Uint8Array([0, 1, 2, 3])) });
+        fake.deliver({ t: "res", id: 1, url: "https://x.com/b.png", method: "GET", status: 200, headers: [["content-type", "image/png"]], body: "chunks" });
+        // text still arrives as a string on a binary route
+        fake.deliver({ t: "chunk", id: 2, data: bytesToBase64(new TextEncoder().encode("hi")) });
+        fake.deliver({ t: "res", id: 2, url: "https://x.com/a.svg", method: "GET", status: 200, headers: [["content-type", "image/svg+xml"]], body: "chunks" });
+        await settle(40);
+        expect(dec(reply(1).body)).toBe("bytes:4");
+        expect(dec(reply(2).body)).toBe("text:hi");
+    });
+
+    it("binary bodies skip routes without binary: true (and say why)", async () => {
+        __resetTaps();
+        const p = new HelperStrategy();
+        await ready(p, [makeScript("a", `wt.onResponseBody({ url: "https://x.com/*", strategy: "helper" }, (c, body) => "changed");`)]);
         fake.deliver({ t: "chunk", id: 1, data: bytesToBase64(new Uint8Array([0, 1, 2, 3])) });
         fake.deliver({ t: "res", id: 1, url: "https://x.com/b.png", method: "GET", status: 200, headers: [["content-type", "image/png"]], body: "chunks" });
         await settle(40);
-        expect(dec(reply(1).body)).toBe("bytes:4");
+        expect(reply(1).t).toBe("continue");
+        expect(helperSkipSince("https://x.com/b.png", 0)).toMatchObject({ why: "binary", contentType: "image/png" });
     });
 
     it("helper missing → state missing, no retry loop; Retry reconnects", async () => {

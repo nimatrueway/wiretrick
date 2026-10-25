@@ -25,6 +25,8 @@ export interface MissedCase {
     loopback?: boolean;
     /** the helper saw the response but didn't hand its body to handlers (proxy.rs skip_body_reason) */
     helperSkip?: { why: string; contentType: string };
+    /** a strategy saw the response but didn't hand its body to handlers (e.g. binary, no `binary: true` route); counts only for its own strategy */
+    bodySkip?: { strategy: Strategy; why: string; contentType: string };
 }
 
 export const MISSED_REASONS = {
@@ -36,14 +38,14 @@ export const MISSED_REASONS = {
     fallback: "no strategy observed it — check the Log view at debug level",
 } as const;
 
-/** why the helper didn't pass a body on; null: nothing to say (no body at all) */
-export function helperSkipReason(s: { why: string; contentType: string }): string | null {
+/** why a strategy (mostly the helper) didn't pass a body on; null: nothing to say (no body at all) */
+export function bodySkipReason(s: { why: string; contentType: string }): string | null {
     const ct = s.contentType ? ` (${s.contentType.split(";")[0].trim()})` : "";
     switch (s.why) {
         case "empty":
             return null;
         case "binary":
-            return `the helper doesn't pass binary bodies${ct} to onResponseBody — images, video, audio, fonts, wasm, PDFs, archives and binary application/vnd.* are left untouched`;
+            return `the body is binary${ct}, and binary bodies only reach onResponseBody handlers with \`binary: true\` — add that to the route, or add the type to settings.textTypes if it is really text`;
         case "too-large":
             return `the body is over the helper's 64 MB limit${ct}, so it was passed through untouched`;
         case "stream":
@@ -52,6 +54,8 @@ export function helperSkipReason(s: { why: string; contentType: string }): strin
             return `the helper didn't pass the body on (${s.why})${ct}`;
     }
 }
+
+export const helperSkipReason = bodySkipReason;
 
 /** Types never checked: sockets and fire-and-forget pings. */
 export const MISSED_SKIP_TYPES = new Set(["websocket", "ping", "beacon", "csp_report", "webbundle", "webtransport"]);
@@ -64,6 +68,7 @@ export function missedReason(c: MissedCase): string | null {
     // can never run here: routeProblem already warned once at load
     if (strategyUnsupported(c.strategy, c)) return null;
     if (c.strategy === "extension" && !c.firefox) return null;
+    if (c.bodySkip && c.bodySkip.strategy === c.strategy && c.strategy !== "helper") return bodySkipReason(c.bodySkip);
     if (c.strategy === "page") {
         if (c.type !== "xmlhttprequest") return MISSED_REASONS.hookNotFetch;
         if (c.hookLoaded === false) return MISSED_REASONS.hookNotLoaded;
@@ -71,7 +76,8 @@ export function missedReason(c: MissedCase): string | null {
         return null;
     }
     if (c.strategy === "helper" && c.loopback) return MISSED_REASONS.helperLoopback;
-    if (c.strategy === "helper" && c.helperSkip) return helperSkipReason(c.helperSkip);
+    const helperSkip = c.helperSkip ?? (c.bodySkip?.strategy === "helper" ? c.bodySkip : undefined);
+    if (c.strategy === "helper" && helperSkip) return bodySkipReason(helperSkip);
     if (c.strategy === "helper" && !c.helperActive) return MISSED_REASONS.helperDown;
     if (c.fromCache) return MISSED_REASONS.cache;
     if (c.strategy === "debugger" && c.cdpWarned) return null;

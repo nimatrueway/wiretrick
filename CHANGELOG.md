@@ -7,12 +7,29 @@ its section below.
 
 ## [Unreleased]
 
+### Added
+
+- `onResponseBody` can tap binary bodies (images, video, fonts, wasm,
+  PDFs…): add `binary: true` to the route and the handler also gets binary
+  bodies as a `Uint8Array` (and may return new bytes). Handlers without it
+  still get text bodies only. Works on every strategy that sees bodies —
+  `helper`, `debugger`, `page` (fetch only) and Firefox `extension` — and
+  on the MV3 build, which used to pass text bodies only. Buffering a large
+  binary body holds the response until handlers finish; see
+  [Binary bodies](docs/scripting.md#binary-bodies) for the limitations.
+- `textTypes:` in `settings.yaml` sets which Content-Types are text (globs,
+  `*` = anything; replaces the defaults). Every strategy now uses this one
+  list, so a body is text or binary the same way everywhere.
+
 ### Fixed
 
-- The helper no longer treats text `application/vnd.*` responses as binary:
+- Text `application/vnd.*` responses are no longer treated as binary:
   `+json` / `+xml` types (e.g. `application/vnd.api+json`) and HLS playlists
-  (`application/vnd.apple.mpegurl`, `.m3u8`) now reach `onResponseBody`.
-  Needs the updated helper.
+  (`application/vnd.apple.mpegurl`, `.m3u8`) now reach `onResponseBody` on
+  every strategy. Needs the updated helper.
+- "onResponseBody never ran" now says when `debugger`, `page` or
+  `extension` skipped a binary body, and how to get it (`binary: true` or
+  `settings.textTypes`).
 
 ## [0.9.10] - 2026-10-24
 

@@ -62,7 +62,7 @@ export class PageStrategy implements InterceptionStrategy {
     }
 
     /** chained onResponseBody over the body (async handlers awaited) */
-    runTransform(url: string, method: string, body: string, extra?: { status?: number; contentType?: string }, tabId = -1): Promise<string | null> {
+    runTransform(url: string, method: string, body: string | Uint8Array, extra?: { status?: number; contentType?: string }, tabId = -1): Promise<string | Uint8Array | null> {
         return this.run("transform", { url, method, body, status: extra?.status, contentType: extra?.contentType }, tabId);
     }
 
