@@ -7,6 +7,10 @@ its section below.
 
 ## [Unreleased]
 
+### Changed
+
+- An `onRequest` result is now exactly one of `replaceResponse`, `redirect`, `block` or `headers`. Returning several is a type error in the editor. At runtime only the first in that order applies, the same on every strategy, and a warning names what was ignored. Previously `headers` were silently dropped next to a `redirect` on most strategies but applied on `extension`. To change a redirected request's headers, add an `onRequest` handler for the target URL.
+
 ### Fixed
 
 - Scripts saved under an older version kept that version's parsed routes until edited (e.g. `binary: false` stayed "unset" and still warned). Stored script meta is now recompiled once after every extension update.

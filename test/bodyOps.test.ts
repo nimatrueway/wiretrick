@@ -75,6 +75,20 @@ describe("precedence in runOp", () => {
         expect(logs).toEqual([`[B] onRequest #1 overrides request header "x-who" from [A] onRequest #1 (the later one in the list wins) https://x.test/prec`]);
     });
 
+    it("an onRequest result is one thing: a combination keeps the first (replaceResponse > redirect > block > headers) and warns once", async () => {
+        const logs: string[] = [];
+        const env = { log: (_id: string, level: string, msg: string) => level === "warn" && logs.push(msg) } as any;
+        const scripts = [{ id: "m", name: "M", handlers: routed({ onRequest: [() => ({ redirect: "https://x.test/to", headers: { set: { a: "1" } }, block: false })] }) }];
+        const req = { url: "https://x.test/mixed", method: "GET" };
+        expect(await runOp(scripts as any, "requestDecision", req, env)).toMatchObject({ kind: "redirect", url: "https://x.test/to" });
+        expect(await runOp(scripts as any, "requestDecision", req, env)).toMatchObject({ kind: "redirect" });
+        expect(logs).toEqual([
+            "[M] onRequest #1 returned `redirect` and `headers` — an onRequest result is one of replaceResponse, redirect, block or headers, so only `redirect` applied (to change the redirected request's headers, add an onRequest handler for the target URL) https://x.test/mixed",
+        ]);
+        const both = [{ id: "n", name: "N", handlers: routed({ onRequest: [() => ({ block: true, redirect: "https://x.test/to" })] }) }];
+        expect(await runOp(both as any, "requestDecision", req, env)).toMatchObject({ kind: "redirect" });
+    });
+
     it("a final decision names the handler that made it", async () => {
         const scripts = [{ id: "a", name: "A", handlers: routed({ onRequest: [() => null, () => ({ block: true })] }) }];
         const out = await runOp(scripts as any, "requestDecision", { url: "https://x.test/y", method: "GET" }, { log: () => {} } as any);

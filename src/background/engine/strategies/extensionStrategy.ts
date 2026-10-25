@@ -30,7 +30,7 @@ import { kindSkipLine } from "../../../shared/netTypes";
 import { dlogLevel } from "../../../shared/debugLog";
 import { IS_FIREFOX } from "./helperState";
 import { compileMv2, ownsAny } from "./strategyScripts";
-import { HeaderStack, mergeHeaderEdits, overrideLine, type Who, type Winner } from "../../../shared/precedence";
+import { HeaderStack, mergeHeaderEdits, mixedResultLine, overrideLine, singleRequestResult, type Who, type Winner } from "../../../shared/precedence";
 import { makeMissedThrottle } from "../../../shared/missedTap";
 import { reportSkipped } from "../skipped";
 
@@ -168,6 +168,11 @@ export class ExtensionStrategy implements InterceptionStrategy {
             const d = this.replace(details, result, entry.id, entry.name);
             return d.kind === "allow" && !pendingFirefoxReplace.has(details.requestId) ? null : final(d, "replace");
         }
+        const single = singleRequestResult(result);
+        if (single.dropped.length && overrideThrottle(`mixed|${entry.id}|${h.route.index}`)) {
+            log(details.tabId, mixedResultLine(entry.name, routeLabel(h.route), single.kept!, single.dropped, details.url), "warn", entry.id, undefined, undefined, details.requestId);
+        }
+        result = single.result;
         const hasHeaders = !!(result && result.headers && (result.headers.set || result.headers.remove));
         if (hasHeaders) {
             log(details.tabId, `[${entry.name}] onRequest → request headers (${describeHeaderMods(result.headers)}) ${details.url}`, "info", entry.id, undefined, undefined, details.requestId);

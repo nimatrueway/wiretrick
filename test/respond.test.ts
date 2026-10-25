@@ -96,12 +96,11 @@ describe("onRequest respond", () => {
         expect((await s2.runRequestDecision("https://x.com/", "GET"))!.kind).toBe("cancel");
     });
 
-    it("extension strategy: respond + headers in one result apply the headers", () => {
+    it("extension strategy: a result is one thing — replaceResponse + headers drops the headers (like every strategy)", () => {
         const s = new ExtensionStrategy();
         s.reload([makeScript("a", `wt.onRequest("*", () => ({ replaceResponse: { body: "x" }, headers: { set: { "x-m": "1" } } }));`)]);
         s.handleBeforeRequest(details(), null);
-        const c = s.handleBeforeSendHeaders(details(), null) as any;
-        expect(c.set).toEqual({ "x-m": "1" });
+        expect(s.handleBeforeSendHeaders(details(), null)).toBeNull();
     });
 });
 

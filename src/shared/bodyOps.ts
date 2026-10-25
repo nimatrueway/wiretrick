@@ -14,10 +14,10 @@
  * report the handlers it kept from running (see precedence.ts).
  */
 import { formatScriptError } from "./scriptError";
-import { effectiveStrategy, routeGroups, routeMatches, takesBinary, takesText, type Strategy } from "./route";
+import { effectiveStrategy, routeGroups, routeLabel, routeMatches, takesBinary, takesText, type Strategy } from "./route";
 import type { Routed, ScriptHandlers } from "./compile";
 import { kindSkipLine, observedLine, type NetKind } from "./netTypes";
-import { HeaderStack, overrideLine, type Who } from "./precedence";
+import { HeaderStack, mixedResultLine, overrideLine, singleRequestResult, type Who } from "./precedence";
 import { makeMissedThrottle } from "./missedTap";
 
 export type BodyOp = "requestDecision" | "transform" | "replace" | "responseHeaders";
@@ -123,6 +123,9 @@ function stackHeaders(stack: HeaderStack, edits: any, by: Who, which: "request" 
     }
 }
 
+/** one "returned several results" warning per handler per minute */
+const mixedThrottle = makeMissedThrottle();
+
 function hasHeaderMods(h: any): boolean {
     return !!h && ((h.set && Object.keys(h.set).length > 0) || (h.remove && h.remove.length > 0));
 }
@@ -159,10 +162,14 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
             for (const h of handlers) {
                 const who: Who = { scriptId: s.id, scriptName: s.name, kind: "onRequest", index: h.route.index };
                 try {
-                    const result = await h.fn(base(h));
+                    const single = singleRequestResult(await h.fn(base(h)));
+                    const result: any = single.result;
                     if (!result) {
                         observed(s, "onRequest");
                         continue;
+                    }
+                    if (single.dropped.length && mixedThrottle(`${s.id}|${h.route.index}`)) {
+                        env.log(s.id, "warn", mixedResultLine(s.name, routeLabel(h.route), single.kept!, single.dropped, url));
                     }
                     if (result.replaceResponse) {
                         const r = result.replaceResponse;

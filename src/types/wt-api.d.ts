@@ -227,19 +227,34 @@ declare namespace Wiretrick {
     }
 
     /**
-     * What `onRequest` may return. `replaceResponse`, `redirect` and `block` are
-     * **final** (first script wins); `headers` is not.
+     * What `onRequest` may return: **exactly one** of `replaceResponse`,
+     * `redirect`, `block` or `headers` (or nothing, to leave the request alone).
+     * The first three are **final** (the first handler to return one wins);
+     * `headers` is not. To change a redirected request's headers, add an
+     * `onRequest` handler for the redirect target — on most strategies the
+     * redirected request runs through `onRequest` again.
      */
-    interface RequestResult {
-        /** Serve this replacement without contacting the network (final). */
-        replaceResponse?: ReplacementOptions;
-        /** Redirect the request to this URL (final). */
-        redirect?: string;
-        /** Block the request entirely (final). */
-        block?: boolean;
-        /** Modify request headers on the way out (not final). */
-        headers?: HeaderMod;
-    }
+    type RequestResult =
+        | OnlyOne<"replaceResponse", {
+              /** Serve this replacement without contacting the network (final). */
+              replaceResponse: ReplacementOptions;
+          }>
+        | OnlyOne<"redirect", {
+              /** Redirect the request to this URL (final). */
+              redirect: string;
+          }>
+        | OnlyOne<"block", {
+              /** Block the request entirely (final). `false` leaves it alone. */
+              block: boolean;
+          }>
+        | OnlyOne<"headers", {
+              /** Modify request headers on the way out (not final). */
+              headers: HeaderMod;
+          }>;
+
+    /** `T`, with every other `onRequest` result key forbidden */
+    type OnlyOne<K extends RequestResultKey, T> = T & { [O in Exclude<RequestResultKey, K>]?: never };
+    type RequestResultKey = "replaceResponse" | "redirect" | "block" | "headers";
 
     /** `onResponseHeaders` context: the request plus the response head. */
     interface ResponseHeaderCtx extends RequestCtx {
@@ -547,8 +562,10 @@ declare namespace Wiretrick {
  */
 declare const wt: {
     /**
-     * Intercept a request before it is sent. Return `{ replaceResponse }`,
-     * `{ redirect }`, `{ block }`, `{ headers }` or a combination.
+     * Intercept a request before it is sent. Return **one** of
+     * `{ replaceResponse }`, `{ redirect }`, `{ block }` or `{ headers }`
+     * (a combination is a type error; at runtime only the first, in that
+     * order, applies and a warning is logged).
      *
      * **Final** results — the first one wins and stops the chain:
      * - `replaceResponse` — synthesize the response; the network is never contacted.

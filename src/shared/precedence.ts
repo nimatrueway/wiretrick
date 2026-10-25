@@ -194,3 +194,32 @@ export function mergeHeaderEdits(base: HeaderEdits | null | undefined, add: Head
 export function overrideLine(o: HeaderOverride, which: "request" | "response", url: string): string {
     return `[${o.by.scriptName}] ${o.by.kind} #${o.by.index + 1} overrides ${which} header "${o.header}" from [${o.over.scriptName}] ${o.over.kind} #${o.over.index + 1} (the later one in the list wins) ${url}`;
 }
+
+const REQUEST_RESULTS = ["replaceResponse", "redirect", "block", "headers"] as const;
+type RequestResultKey = (typeof REQUEST_RESULTS)[number];
+
+function usesKey(result: any, k: RequestResultKey): boolean {
+    if (k === "headers") return !!result.headers && ((result.headers.set && Object.keys(result.headers.set).length > 0) || (result.headers.remove && result.headers.remove.length > 0));
+    return k === "block" ? result.block === true : !!result[k];
+}
+
+/**
+ * An onRequest result is exactly one of replaceResponse / redirect / block /
+ * headers. One with several keeps the first in that order and drops the rest
+ * (`dropped`, for the warning) — the same on every strategy.
+ */
+export function singleRequestResult<T>(result: T): { result: T; kept?: RequestResultKey; dropped: RequestResultKey[] } {
+    if (!result || typeof result !== "object") return { result, dropped: [] };
+    const used = REQUEST_RESULTS.filter((k) => usesKey(result, k));
+    if (used.length < 2) return { result, kept: used[0], dropped: [] };
+    const [kept, ...dropped] = used;
+    const out: any = { ...result };
+    for (const k of dropped) delete out[k];
+    return { result: out, kept, dropped };
+}
+
+/** "[S] onRequest #1 returned redirect and headers — only redirect applied; …" */
+export function mixedResultLine(scriptName: string, handler: string, kept: string, dropped: string[], url: string): string {
+    const ignored = dropped.map((k) => `\`${k}\``).join(", ");
+    return `[${scriptName}] ${handler} returned \`${kept}\` and ${ignored} — an onRequest result is one of replaceResponse, redirect, block or headers, so only \`${kept}\` applied${kept === "redirect" && dropped.includes("headers") ? " (to change the redirected request's headers, add an onRequest handler for the target URL)" : ""} ${url}`;
+}
