@@ -41,6 +41,7 @@ import { folderPathProblem, isConfigJsonPath, scriptFileName, scriptNameFromFile
 import { ancestorFolders, isInFolder } from "../shared/folders";
 import { migrateSettingsText } from "../shared/migration";
 import { PENDING_DISK_KEY, type PendingDisk } from "./migration";
+import { PACKAGE_TYPINGS_KEY, TYPINGS_ROOT, type StoredTypings } from "../shared/packageImports";
 const POLL_MS = 1000;
 export const BACKUP_DIR = ".wiretrick-backup";
 
@@ -1018,6 +1019,58 @@ async function ensureSupportFiles(): Promise<void> {
     }
     await ensureFile(TSCONFIG_FILE, tsconfigText());
     await ensureSchemaFile();
+    await ensurePackageTypingsFiles();
+}
+
+/** what ensurePackageTypingsFiles last wrote or found in this folder (path → text) */
+let typingsOnDisk: { dir: any; files: Map<string, string> } = { dir: null, files: new Map() };
+
+/**
+ * The package imports' typings under .wiretrick/types/ (the tsconfig maps
+ * package URLs there), as stored; files no script needs any more go.
+ * Dot folders aren't scanned, so these never come back as scripts or data.
+ */
+async function ensurePackageTypingsFiles(): Promise<void> {
+    const area = storageLocal();
+    if (!dirHandle || !area) return;
+    if (typingsOnDisk.dir !== dirHandle) typingsOnDisk = { dir: dirHandle, files: new Map() };
+    const seen = typingsOnDisk.files;
+    const stored: StoredTypings | undefined = (await new Promise<any>((r) => area.get(PACKAGE_TYPINGS_KEY, r)))?.[PACKAGE_TYPINGS_KEY];
+    const want = new Map(Object.entries(stored?.files ?? {}).map(([p, text]) => [`${TYPINGS_ROOT}/${p}`, text]));
+    try {
+        for (const [path, text] of want) {
+            if (seen.get(path) === text) continue;
+            if ((await readTextOrNull(path)) === text || (await writeFile(path, text))) seen.set(path, text);
+        }
+        let root: any;
+        try {
+            root = await parentDir(`${TYPINGS_ROOT}/x`);
+        } catch {
+            return;
+        }
+        const prune = async (dir: any, prefix: string): Promise<boolean> => {
+            const entries: any[] = [];
+            for await (const e of dir.values()) entries.push(e);
+            let kept = false;
+            for (const e of entries) {
+                const path = prefix + e.name;
+                if (e.kind === "directory" ? await prune(await dir.getDirectoryHandle(e.name), path + "/") : want.has(path)) kept = true;
+                else {
+                    await dir.removeEntry(e.name, e.kind === "directory" ? { recursive: true } : undefined);
+                    seen.delete(path);
+                    signal(writeKind);
+                }
+            }
+            return kept;
+        };
+        if (await prune(root, `${TYPINGS_ROOT}/`)) return;
+        // no typings left: drop the folder, and .wiretrick too when that empties it
+        const owner = await parentDir(TYPINGS_ROOT);
+        await owner.removeEntry(baseName(TYPINGS_ROOT), { recursive: true });
+        if (owner !== dirHandle && (await owner.values().next()).done) await (await parentDir(TYPINGS_ROOT.slice(0, TYPINGS_ROOT.lastIndexOf("/")))).removeEntry(owner.name);
+    } catch (e: any) {
+        dlogLevel("sync", "warn", `Folder sync: could not update the package typings in ${TYPINGS_ROOT}/: ${e?.message || e}`);
+    }
 }
 
 /** settings.yaml was saved in the manager: write that text out as-is */
@@ -1211,6 +1264,7 @@ async function start(opts: { fresh?: boolean }): Promise<boolean> {
         });
         chrome.storage.onChanged.addListener((c) => {
             if (c.resLogLevel || c.resLogCap || c.resStrategy || c.resTextTypes) scheduleReconcile();
+            if (c[PACKAGE_TYPINGS_KEY] && dirHandle) void serial(ensurePackageTypingsFiles);
         });
     }
     settingsSig = null;

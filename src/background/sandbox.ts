@@ -27,10 +27,11 @@
  * Reverse calls (wt.storage.* and script logging) travel the other way
  * with the same reqId pattern.
  */
-import { compileScript, compileWithLibs, isDataFileImportError, makeModuleResolver, makeStubModule, type CompiledScript, type DataFileSource } from "../shared/compile";
+import { compileScript, compileWithLibs, isFatalImportError, makeModuleResolver, makeStubModule, type CompiledScript, type DataFileSource } from "../shared/compile";
 import { runOp, type BodyOp, type OpScript } from "../shared/bodyOps";
 import { compileDecision } from "../shared/pac";
 import "../shared/transpile";
+import type { PackageModules } from "../shared/packageImports";
 import { scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
 import { probeScriptRules, type ScriptRules } from "../shared/rulesProbe";
 import type { Strategy } from "../shared/route";
@@ -129,8 +130,9 @@ function sandboxLog(msg: string, level: "debug" | "info" | "warn" | "error" = "d
 const cache = new Map<string, { s: PlainScript; compiled: CompiledScript; result: AnalyzeResult }>();
 let cacheSig = "";
 
-/** the data files scripts import, as last sent by the SW (only when its signature changes) */
+/** the data files and package modules scripts import, as last sent by the SW (only when their signature changes) */
 let dataFiles: DataFileSource[] = [];
+let packages: PackageModules = { aliases: {}, modules: {} };
 let dataSig = "";
 
 /** signature over the script set (incl. name, code hash) + param values + data files */
@@ -167,12 +169,12 @@ function ensureCompiled(scripts: PlainScript[], paramValues: Record<string, any>
     const resolver = makeModuleResolver(
         scripts.map((s) => ({ id: s.id, name: s.name, code: s.code })),
         (lib) => overridesForScript(lib.id),
-        { dataFiles }
+        { dataFiles, packages }
     );
     // unknown/missing imports resolve to silent stubs — a script whose
     // import fails must still run its body so its handlers register
     // (otherwise it silently stores as a utility: 𝑓 icon, never matches).
-    // A data file that fails to import is the importer's compile error.
+    // A data file or package that fails to import is the importer's compile error.
     let currentDeps: Set<string> | null = null;
     const resolveImport = (importer: string) => (spec: string): any => {
         const before = new Set(resolver.deps);
@@ -181,7 +183,7 @@ function ensureCompiled(scripts: PlainScript[], paramValues: Record<string, any>
             sandboxLog(`import "${spec}" → module resolved`, "debug");
             return out;
         } catch (e) {
-            if (isDataFileImportError(e)) throw e;
+            if (isFatalImportError(e)) throw e;
             sandboxLog(`import "${spec}" → STUB (no script with that name; its exports are inert in meta-only compiles)`, "debug");
             return makeStubModule();
         } finally {
@@ -237,7 +239,7 @@ function compileOne(
     scripts: { id: string; name: string; code: string }[],
     paramValues: Record<string, any>
 ): { result: AnalyzeResult } {
-    const c = compileWithLibs(target, scripts || [], paramValues || {}, dataFiles);
+    const c = compileWithLibs(target, scripts || [], paramValues || {}, dataFiles, packages);
     const summary = `compileOne "${target.name}" → active=${c.meta.active} params=[${Object.keys(c.paramDefs || {}).join(", ")}] deps=[${c.deps.join(", ")}]`;
     sandboxLog(c.error ? `${summary} ERROR ${c.error.split("\n")[0]}` : summary, c.error ? "error" : "debug");
     return { result: { meta: c.meta, paramDefs: c.paramDefs || {}, error: c.error, deps: c.deps } };
@@ -305,6 +307,7 @@ window.addEventListener("message", async (event) => {
         let result: any;
         if (Array.isArray(data.payload.dataFiles)) {
             dataFiles = data.payload.dataFiles;
+            packages = data.payload.packages || { aliases: {}, modules: {} };
             dataSig = data.payload.dataSig;
         }
         if (typeof data.payload.dataSig === "string" && data.payload.dataSig !== dataSig) result = { needDataFiles: true };

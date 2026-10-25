@@ -25,6 +25,7 @@ import { getDefaultStrategy } from "../shared/route";
 import { packBytes, unpackBytes } from "../shared/bytesPack";
 import type { ScriptRules } from "../shared/rulesProbe";
 import { dataFilesSig, ensureDataFiles } from "./engine/dataFiles";
+import { ensurePackages, loadPackages, packagesSig, packagesSnapshot } from "./engine/packageImports";
 
 interface PlainScript {
     id: string;
@@ -69,15 +70,16 @@ function sandboxCall(payload: any): Promise<any> {
 }
 
 /**
- * RPC that compiles against the data files: the sandbox keeps the last
- * set it got and answers `needDataFiles` when its signature differs —
- * then (only) the files ride along.
+ * RPC that compiles against the data files and package modules: the
+ * sandbox keeps the last set it got and answers `needDataFiles` when its
+ * signature differs — then (only) the files ride along.
  */
 async function sandboxCallWithData(payload: any): Promise<any | null> {
     const dataFiles = await ensureDataFiles();
-    const dataSig = dataFilesSig();
+    await loadPackages();
+    const dataSig = dataFilesSig() + "." + packagesSig();
     const out = await sandboxCallSafe({ ...payload, dataSig });
-    return out?.needDataFiles ? sandboxCallSafe({ ...payload, dataSig, dataFiles }) : out;
+    return out?.needDataFiles ? sandboxCallSafe({ ...payload, dataSig, dataFiles, packages: packagesSnapshot() }) : out;
 }
 
 /**
@@ -202,6 +204,7 @@ export interface StorageCompileContext {
  * definition imported from a utility is captured with its real type);
  * imports with no matching (or a broken) library resolve to inert stubs —
  * routes built from those come out empty until the reload-time analyze.
+ * Package URLs it imports are downloaded first.
  */
 export async function compileForStorage(
     code: string,
@@ -214,8 +217,11 @@ export async function compileForStorage(
     const target = { id, name: label, code };
     const scripts = (ctx?.scripts ?? []).filter((s) => s.id !== id);
     const values: ParamValues = { ...(ctx?.paramValues ?? {}), [id]: paramValues ?? {} };
+    // a save retries the script's own failed package downloads
+    await ensurePackages([code], { retry: true });
+    await ensurePackages(scripts.map((s) => s.code));
     if (!__MV3__) {
-        const c = compileWithLibs(target, scripts, values, await ensureDataFiles());
+        const c = compileWithLibs(target, scripts, values, await ensureDataFiles(), packagesSnapshot());
         dlogLevel(
             "compile", "debug",
             `compiled "${label}" → active=${c.meta.active} match=${JSON.stringify(c.meta.match)} params=[${Object.keys(c.paramDefs || {}).join(", ")}] deps=[${c.deps.join(", ")}]${c.error ? " — compile error (in the Problems view)" : ""}`
@@ -245,7 +251,8 @@ export async function analyzeScripts(scripts: { id: string; name: string; code: 
     if (!scripts.length) return out;
     // imports resolve by name (relative paths) and into the data files
     await ensureDataFiles();
-    const sig = paramSig(paramValues) + "." + dataFilesSig();
+    await ensurePackages(scripts.map((s) => s.code));
+    const sig = paramSig(paramValues) + "." + dataFilesSig() + "." + packagesSig();
     if (__MV3__) {
         // FAST PATH: chrome.storage.session-cached analyses, valid while no
         // script's updatedAt changed. A freshly-woken SW serves a page's
@@ -264,7 +271,7 @@ export async function analyzeScripts(scripts: { id: string; name: string; code: 
         const resolver = makeModuleResolver(
             scripts.map((s) => ({ id: s.id, name: s.name, code: s.code })),
             (lib) => ({ paramValues: paramValues?.[lib.id] }),
-            { dataFiles: await ensureDataFiles() }
+            { dataFiles: await ensureDataFiles(), packages: packagesSnapshot() }
         );
         for (const s of scripts) {
             const c = compileScript(s.code, { importModule: resolver.resolveFrom(s.name), paramValues: paramValues?.[s.id] });

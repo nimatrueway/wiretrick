@@ -4,6 +4,7 @@
 import { dependantsOf, folderOf } from "../../shared/scriptImports";
 import type { ResMeta } from "../../shared/metaParser";
 import { compileForStorage, SANDBOX_COMPILE_FAILED } from "../compileHost";
+import { ensurePackages, packageUrlsIn, prunePackages } from "./packageImports";
 import { dlogLevel } from "../../shared/debugLog";
 import { clearScriptErrors, clearScriptTypeErrors } from "./logs";
 import { DATA_FILES_KEY, FOLDERS_KEY, MAX_DATA_FILE, setDataFilesSnapshot, type DataFile } from "./dataFiles";
@@ -100,6 +101,8 @@ export async function saveScript(partial: Pick<Script, "id" | "code"> & Partial<
     // reload-time analyze). MV3: compiles in the sandbox page (the SW
     // cannot eval) — see compileHost.
     const allValues = await loadAllParamValues();
+    // download the package URLs it imports (a save retries failed ones)
+    const downloaded = await ensurePackages([partial.code], { retry: true });
     const compiled = await compileForStorage(partial.code, name, allValues[partial.id], { id: partial.id, scripts: plain(byId), paramValues: allValues });
     // MV3 sandbox RPC failure (host unavailable): keep the previous
     // meta/paramDefs rather than corrupting an active script into a
@@ -126,11 +129,20 @@ export async function saveScript(partial: Pick<Script, "id" | "code"> & Partial<
     }
     // new code/name → the scripts importing it see different exports (or,
     // for a library saved after its importers, see it at all)
+    const importers: string[] = [];
     if (!prev || prev.code !== script.code || prev.meta.name !== script.meta.name) {
-        const importers = dependantsOf(script.meta.name, plain(byId)).filter((id) => id !== script.id);
+        importers.push(...dependantsOf(script.meta.name, plain(byId)).filter((id) => id !== script.id));
         if (prev && prev.meta.name !== script.meta.name) importers.push(...dependantsOf(prev.meta.name, plain(byId)).filter((id) => id !== script.id && !importers.includes(id)));
-        await recompileMeta(byId, importers, allValues);
     }
+    // a package download (or failure) changes what the other scripts importing it compile to
+    if (downloaded) {
+        const urls = packageUrlsIn([script.code]);
+        for (const x of Object.values(byId)) {
+            if (x.id === script.id || ![...packageUrlsIn([x.code])].some((u) => urls.has(u))) continue;
+            for (const id of [x.id, ...dependantsOf(x.meta.name, plain(byId))]) if (id !== script.id && !importers.includes(id)) importers.push(id);
+        }
+    }
+    if (importers.length) await recompileMeta(byId, importers, allValues);
     const items: Record<string, any> = { [STORE_KEY]: byId, [ORDER_KEY]: order };
     // moved out of a folder: the folder stays (as on disk)
     if (prev && folderOf(prev.meta.name) !== folderOf(script.meta.name)) {
@@ -138,6 +150,7 @@ export async function saveScript(partial: Pick<Script, "id" | "code"> & Partial<
         if (folders) items[FOLDERS_KEY] = folders;
     }
     await storageSet(items);
+    if (prev && prev.code !== script.code) void prunePackages(Object.values(byId).map((x) => x.code));
     if (prev && prev.meta.name !== script.meta.name) {
         for (const fn of renameListeners) await fn(prev.meta.name, script.meta.name);
     }
@@ -219,6 +232,7 @@ export async function deleteScript(id: string): Promise<void> {
         [ORDER_KEY]: order.filter((x) => x !== id),
         ...(folders ? { [FOLDERS_KEY]: folders } : {}),
     });
+    void prunePackages(Object.values(byId).map((x) => x.code));
     notify();
 }
 
@@ -452,6 +466,7 @@ export async function deleteFolder(path: string): Promise<{ scripts: number; dat
         [DATA_FILES_KEY]: data,
         [FOLDERS_KEY]: folders,
     });
+    if (goneScripts.length) void prunePackages(Object.values(byId).map((x) => x.code));
     notify();
     return { scripts: goneScripts.length, dataFiles: goneData.length, folders: subfolders.length };
 }

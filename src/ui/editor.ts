@@ -2,7 +2,8 @@
  * Manager page: script list + Monaco editor + logs + VS Code bridge.
  */
 
-import { loadMonaco, STARTER_TEMPLATE, apiTypingsText, setDataFileTypings } from "./monacoSetup";
+import { loadMonaco, STARTER_TEMPLATE, apiTypingsText, setDataFileTypings, setPackageTypings } from "./monacoSetup";
+import { PACKAGE_TYPINGS_KEY, type StoredTypings } from "../shared/packageImports";
 import { API_TYPINGS_URI } from "./apiLinks";
 import { NavHistory } from "./navHistory";
 import { API_REFERENCE } from "./apiReference";
@@ -1367,6 +1368,15 @@ function updateDataTypings(): void {
         const stale = (window as any).monaco.editor.getModel((window as any).monaco.Uri.parse(uri));
         if (stale && stale !== shown) stale.dispose();
     }
+}
+
+/** package imports' typings (downloaded when a script importing them is saved), kept live */
+function watchPackageTypings(): void {
+    const apply = (t: StoredTypings | undefined) => setPackageTypings(t?.files ?? {});
+    chrome.storage.local.get(PACKAGE_TYPINGS_KEY, (d) => apply(d?.[PACKAGE_TYPINGS_KEY]));
+    chrome.storage.onChanged.addListener((c, area) => {
+        if (area === "local" && c[PACKAGE_TYPINGS_KEY]) apply(c[PACKAGE_TYPINGS_KEY].newValue);
+    });
 }
 
 async function renderEditorEmpty(): Promise<void> {
@@ -2941,6 +2951,7 @@ function setupPanelTabs(): void {
 // ---- wiring ----
 async function main(): Promise<void> {
     await loadMonaco();
+    watchPackageTypings();
     // test/e2e seam: adopt an arbitrary directory handle (e.g. OPFS) for watching
     (window as any).__resAdoptFolder = (h: any) => fsBridge.adoptForWatch(h);
     editor = (window as any).monaco.editor.create($("#monaco-host"), {

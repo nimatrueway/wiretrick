@@ -12,6 +12,7 @@ import { callerLine } from "./scriptError";
 import { normalizeRoute, type RouteKind, type RouteMeta } from "./route";
 import { scriptEnv } from "./scriptEnv";
 import { importLine, importPath, importResolver, isDataSpec } from "./scriptImports";
+import { isUrlSpec, makePackageLoader, type PackageModules } from "./packageImports";
 
 export type { DocumentWhen } from "./route";
 
@@ -190,11 +191,12 @@ export interface DataFileSource {
  * line (`(line N)`, rewritten at each level as it propagates).
  */
 class DataFileImportError extends Error {
-    dataFileImport = true;
+    fatalImport = true;
 }
 
-export function isDataFileImportError(e: unknown): boolean {
-    return !!(e && (e as any).dataFileImport === true);
+/** a data file or package import error: never stubbed (see PackageImportError) */
+export function isFatalImportError(e: unknown): boolean {
+    return !!(e && (e as any).fatalImport === true);
 }
 
 function at(e: any, code: string | undefined, spec: string): any {
@@ -295,13 +297,14 @@ function parseDataFile(spec: string, d: DataFileSource): any {
  * match the script named "x", "./a.json" the data file). Libs compile
  * lazily and memoize; circular imports get the partially-initialized
  * exports. `resolveFrom(name)` is the `require` of the script named
- * `name`; `resolve` resolves from the root. `deps` collects the imported
- * script names and data file paths.
+ * `name`; `resolve` resolves from the root. A URL imports a downloaded
+ * package (shared/packageImports). `deps` collects the imported script
+ * names, data file paths and package URLs.
  */
 export function makeModuleResolver(
     scripts: { id: string; name: string; code: string }[],
     overridesFor: (s: { id: string; name: string; code: string }) => ResApiOverrides,
-    opts?: { stubUnresolved?: boolean; dataFiles?: DataFileSource[] }
+    opts?: { stubUnresolved?: boolean; dataFiles?: DataFileSource[]; packages?: PackageModules }
 ): { resolve: (spec: string) => any; resolveFrom: (importer: string) => (spec: string) => any; deps: Set<string> } {
     const cache = new Map<string, any>();
     const compiling = new Set<string>();
@@ -313,6 +316,7 @@ export function makeModuleResolver(
     );
     const byName = new Map<string, { id: string; name: string; code: string }>();
     for (const s of scripts) if (!byName.has(s.name)) byName.set(s.name, s);
+    const loadPackage = makePackageLoader(opts?.packages);
     const requires = new Map<string, (spec: string) => any>();
     const resolveFrom = (importer: string): ((spec: string) => any) => {
         let r = requires.get(importer);
@@ -320,12 +324,16 @@ export function makeModuleResolver(
             try {
                 return load(importer, spec);
             } catch (e) {
-                throw isDataFileImportError(e) ? at(e, byName.get(importer)?.code, spec) : e;
+                throw isFatalImportError(e) ? at(e, byName.get(importer)?.code, spec) : e;
             }
         }));
         return r;
     };
     const load = (importer: string, spec: string): any => {
+        if (isUrlSpec(spec)) {
+            deps.add(spec);
+            return loadPackage(spec);
+        }
         const found = lookup(importer, spec);
         if (!found) {
             if (isDataSpec(spec)) {
@@ -365,7 +373,7 @@ export function makeModuleResolver(
             );
         } catch (e) {
             compiling.delete(key);
-            if (isDataFileImportError(e)) {
+            if (isFatalImportError(e)) {
                 cache.delete(key);
                 throw e;
             }
@@ -393,12 +401,13 @@ export function compileWithLibs(
     target: { id: string; name: string; code: string },
     scripts: { id: string; name: string; code: string }[],
     paramValues?: { [scriptId: string]: Record<string, any> | undefined },
-    dataFiles?: DataFileSource[]
+    dataFiles?: DataFileSource[],
+    packages?: PackageModules
 ): CompiledScript & { deps: string[] } {
     const resolver = makeModuleResolver(
         [target, ...scripts.filter((s) => s.id !== target.id)],
         (lib) => ({ paramValues: paramValues?.[lib.id] }),
-        { stubUnresolved: true, dataFiles }
+        { stubUnresolved: true, dataFiles, packages }
     );
     const c = compileScript(target.code, { importModule: resolver.resolveFrom(target.name), paramValues: paramValues?.[target.id] });
     return { ...c, deps: [...resolver.deps] };
@@ -410,14 +419,14 @@ export function compileWithLibs(
  * anywhere meta capture must not depend on the import graph): a script
  * whose `import` fails must still run its body so its registrations
  * and params are captured — otherwise it silently stores as a utility.
- * A data file that fails to import is still the importer's error.
+ * A data file or package that fails to import is still the importer's error.
  */
 export function resolveWithStubFallback(resolve: (spec: string) => any): (spec: string) => any {
     return (spec) => {
         try {
             return resolve(spec);
         } catch (e) {
-            if (isDataFileImportError(e)) throw e;
+            if (isFatalImportError(e)) throw e;
             return makeStubModule();
         }
     };

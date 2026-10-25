@@ -25,12 +25,43 @@ import {
     type Span,
 } from "./apiLinks";
 import { JSON_FALLBACK_DTS, jsonDeclPath, jsonModuleDts } from "./jsonTypes";
+import { packagePaths, TYPINGS_ROOT } from "../shared/packageImports";
 
 let monacoApi: any = null;
 let wtApiDts = "";
 
 /** wt-api.d.ts as loaded into IntelliSense (for the read-only Code view) */
 export const apiTypingsText = (): string => wtApiDts;
+
+/** the TS worker's compiler options (`ts`: Monaco's typescript namespace or the typescript package) */
+export function editorCompilerOptions(ts: { ScriptTarget: any; ModuleKind: any; ModuleResolutionKind: any }): Record<string, any> {
+    return {
+        // scripts run in current browsers: offer the newest JS/DOM APIs
+        // (wt-api.d.ts adds web APIs newer than the bundled TypeScript)
+        target: ts.ScriptTarget.ESNext,
+        // Monaco passes options straight to the TS API (no tsconfig parsing),
+        // so libs must be file names — "dom" alone silently loads nothing
+        lib: ["lib.esnext.d.ts", "lib.dom.d.ts", "lib.dom.iterable.d.ts"],
+        allowNonTsExtensions: true,
+        // scripts import each other by relative path ("./utilities")
+        module: ts.ModuleKind.ESNext,
+        moduleResolution: ts.ModuleResolutionKind.Bundler ?? 100,
+        allowImportingTsExtensions: true,
+        // data files: `import x from "./mock/a.json"` resolves to the
+        // declaration setDataFileTypings puts next to it (a.d.json.ts)
+        resolveJsonModule: true,
+        // without it TypeScript ignores a .d.json.ts it resolved to (and falls back to "*.json")
+        allowArbitraryExtensions: true,
+        // each script is its own module: top-level names in different
+        // scripts (e.g. two \`const cfg\`) must not collide as globals
+        moduleDetection: 3, // ts.ModuleDetectionKind.Force
+        noEmit: true,
+        // package imports (`https://unpkg.com/x@1.2.3`) → their typings
+        // (setPackageTypings). Monaco passes options raw, so the target is an
+        // absolute file:/// path rather than one relative to a baseUrl
+        paths: packagePaths(`file:///${TYPINGS_ROOT}`),
+    };
+}
 
 export async function loadMonaco(): Promise<any> {
     if (monacoApi) return monacoApi;
@@ -58,29 +89,7 @@ export async function loadMonaco(): Promise<any> {
         },
         { content: JSON_FALLBACK_DTS, filePath: "file:///__wt__/json-modules.d.ts" },
     ]);
-    const ts = monacoApi.languages.typescript;
-    monacoApi.languages.typescript.typescriptDefaults.setCompilerOptions({
-        // scripts run in current browsers: offer the newest JS/DOM APIs
-        // (wt-api.d.ts adds web APIs newer than the bundled TypeScript)
-        target: ts.ScriptTarget.ESNext,
-        // Monaco passes options straight to the TS API (no tsconfig parsing),
-        // so libs must be file names — "dom" alone silently loads nothing
-        lib: ["lib.esnext.d.ts", "lib.dom.d.ts", "lib.dom.iterable.d.ts"],
-        allowNonTsExtensions: true,
-        // scripts import each other by relative path ("./utilities")
-        module: ts.ModuleKind.ESNext,
-        moduleResolution: ts.ModuleResolutionKind.Bundler ?? 100,
-        allowImportingTsExtensions: true,
-        // data files: `import x from "./mock/a.json"` resolves to the
-        // declaration setDataFileTypings puts next to it (a.d.json.ts)
-        resolveJsonModule: true,
-        // without it TypeScript ignores a .d.json.ts it resolved to (and falls back to "*.json")
-        allowArbitraryExtensions: true,
-        // each script is its own module: top-level names in different
-        // scripts (e.g. two \`const cfg\`) must not collide as globals
-        moduleDetection: 3, // ts.ModuleDetectionKind.Force
-        noEmit: true,
-    });
+    monacoApi.languages.typescript.typescriptDefaults.setCompilerOptions(editorCompilerOptions(monacoApi.languages.typescript));
     registerTsHover(monacoApi);
 
     return monacoApi;
@@ -113,6 +122,25 @@ export function setDataFileTypings(files: { path: string; text: string }[]): str
     }
     for (const [uri, content] of want) if (!dataFileLibs.has(uri)) dataFileLibs.set(uri, { content, lib: ts.addExtraLib(content, uri) });
     return changed;
+}
+
+const packageLibs = new Map<string, { content: string; lib: { dispose(): void } }>();
+
+/**
+ * Type package imports: the stored package typings (path → text, see
+ * background/engine/packageImports) as extra libs under
+ * `file:///.wiretrick/types/`, where the `paths` compiler option maps
+ * package URLs. Monaco re-checks open models when they change.
+ */
+export function setPackageTypings(files: Record<string, string>): void {
+    const ts = monacoApi.languages.typescript.typescriptDefaults;
+    const want = new Map(Object.entries(files).map(([p, text]) => [`file:///${TYPINGS_ROOT}/${p}`, text]));
+    for (const [uri, cur] of packageLibs) {
+        if (want.get(uri) === cur.content) continue;
+        cur.lib.dispose();
+        packageLibs.delete(uri);
+    }
+    for (const [uri, content] of want) if (!packageLibs.has(uri)) packageLibs.set(uri, { content, lib: ts.addExtraLib(content, uri) });
 }
 
 // TS ScriptElementKind → Monaco CompletionItemKind name (as tsMode.js maps it)

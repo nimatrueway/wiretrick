@@ -16,6 +16,8 @@ import {
     listDataFiles, getDataFile, saveDataFile, deleteDataFile, listFolders, createFolder, renameFolder, deleteFolder,
 } from "./scriptStore";
 import { loadDataFiles } from "./dataFiles";
+import { loadPackages, packagesSnapshot } from "./packageImports";
+import { isUrlSpec, packageClosure } from "../../shared/packageImports";
 import { serveStore } from "./strategies/extensionStrategy";
 import { dlog, dlogLevel } from "../../shared/debugLog";
 import { isThenable, toRunnableJs } from "../../shared/compile";
@@ -681,9 +683,14 @@ export function createPipeline(
                     for (const d of a.deps) depNames.add(d);
                     domHandlers.push({ scriptId: s.id, name: s.meta.name, src: toRunnableJs(s.code), params: resolveParamValues(a.paramDefs || {}, paramValues[s.id]) });
                 }
-                // ship the transitively imported library sources (and data files) once
+                // ship the transitively imported library sources (and data files, package modules) once
                 const dataFiles = depNames.size ? await listDataFiles() : [];
+                const pkgs = packagesSnapshot();
+                const urls = [...depNames].filter(isUrlSpec);
+                for (const u of urls) if (pkgs.aliases[u]) libs.set(u, { name: u, alias: pkgs.aliases[u] });
+                for (const u of packageClosure(pkgs, urls)) libs.set(u, { name: u, pkg: pkgs.modules[u] });
                 for (const depName of depNames) {
+                    if (isUrlSpec(depName)) continue;
                     const lib = pageScripts.find((x) => x.meta.name === depName);
                     const data = !lib && dataFiles.find((d) => d.path === depName);
                     if (data && !libs.has(data.path)) libs.set(data.path, { name: data.path, json: data.text });
@@ -787,6 +794,7 @@ export function createPipeline(
         await ready;
         await loadDefaultStrategy();
         await loadDataFiles();
+        await loadPackages();
         const stored = await listScripts();
         const paramValues = await loadAllParamValues();
         // routes come from running each script's top level with its real

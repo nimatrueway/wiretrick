@@ -1,9 +1,11 @@
 /**
  * Support files folder sync keeps in the scripts folder for VS Code:
- * wt-api.d.ts (typings), tsconfig.json and settings.schema.json. Wiretrick
- * owns them: they are rewritten whenever sync starts (every browser start
- * and extension update) if their content differs, so edits don't stick.
+ * wt-api.d.ts (typings), tsconfig.json and settings.schema.json, plus the
+ * package imports' typings under .wiretrick/types/. Wiretrick owns them:
+ * they are rewritten whenever sync starts (every browser start and
+ * extension update) if their content differs, so edits don't stick.
  */
+import { packagePaths, TYPINGS_ROOT } from "./packageImports";
 
 export const API_DTS_FILE = "wt-api.d.ts";
 export const TSCONFIG_FILE = "tsconfig.json";
@@ -28,6 +30,8 @@ export function tsconfigText(): string {
             // `import x from "./mock/data.json"` (data files)
             resolveJsonModule: true,
             noEmit: true,
+            // package imports (`https://unpkg.com/x@1.2.3`) → their downloaded typings
+            paths: packagePaths(`./${TYPINGS_ROOT}`),
         },
         include: ["**/*.ts"],
     };

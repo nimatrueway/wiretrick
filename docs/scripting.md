@@ -438,6 +438,77 @@ properties) and F12 on it opens the data file. Renaming or
 moving a script, data file or folder doesn't rewrite the import specifiers
 pointing at it.
 
+### Packages from unpkg
+
+A **package import** pulls an npm package into a script by its
+[unpkg.com](https://unpkg.com) URL, pinned to an exact version:
+
+```ts
+import dayjs from "https://unpkg.com/dayjs@1.11.13";
+import { addDays } from "https://unpkg.com/date-fns@4.1.0/addDays.js"; // a file inside the package
+import { chunk } from "https://unpkg.com/lodash-es@4.17.21";
+
+wt.onRequest("*://api.example.com/*", () => ({
+    headers: { set: { "x-tomorrow": dayjs(addDays(new Date(), 1)).format("YYYY-MM-DD") } },
+}));
+```
+
+The URL is `https://unpkg.com/<package>@<version>[/<path>]`. Scoped names
+(`@scope/name`) and prerelease versions (`1.0.0-beta.1`) work. The version
+must be exact: `dayjs`, `dayjs@1`, `dayjs@^1.11.0` or `dayjs@latest` are a
+compile error on the import line (`pin an exact version, e.g.
+https://unpkg.com/dayjs@1.2.3`), because a range could change what the
+script runs. Other hosts, `http://` URLs and query strings aren't allowed.
+
+**How it works.** Saving a script downloads the package (or the file you
+named) and everything it imports: relative files, and the package's own
+dependencies at the versions its `package.json` asks for. ES modules are
+converted to CommonJS, and CommonJS/UMD files run as they are, like in
+Node.js (`process.env.NODE_ENV` is `"production"`). The download is kept in
+the extension's storage, so the script also runs offline and after a
+restart. A pinned npm version never changes, so it isn't downloaded again.
+Downloads no script imports any more are deleted when you save or delete
+scripts. If the download fails (offline, a typo, a missing file), the import
+line gets a compile error such as `cannot import "https://unpkg.com/…":
+download failed (HTTP 404 — no such package, version or file)`; save again to retry. A dependency of the
+package that fails to download isn't an error until the package `require`s
+it at runtime, so optional dependencies don't break anything. Node.js
+built-ins (`fs`, `path`, `crypto`, …) aren't available: `require("fs")`
+throws `"fs" is a Node.js built-in — not available in Wiretrick scripts`.
+Packages work on every strategy and in `wt.onDocument` handlers (the
+downloaded code is sent to the page along with the script).
+
+**Types.** Wiretrick also downloads the package's TypeScript declarations:
+its own (`types`, `typings`, `exports` or a `.d.ts` next to the file), else
+the matching `@types/<package>` major version. Packages with neither are
+typed `any`. In the Code view, hovers, completions and errors work as soon as
+the save that downloads them finishes. In the [synced
+folder](editor.md#synced-folder) they're written to `.wiretrick/types/`, and
+the generated `tsconfig.json` maps `https://unpkg.com/*` there (`paths`), so
+VS Code and `tsc` type-check the same imports.
+
+**Limits.**
+
+- Only unpkg.com URLs can be imported. Packages that need Node.js built-ins,
+  native code, WebAssembly fetched at runtime, or a bundler (CSS imports,
+  `import.meta.url` assets) don't work.
+- Top-level `await` in a package isn't supported. A script's `import()` of a
+  package URL must be a string literal so the save finds and downloads it.
+- Per import: at most 1000 files, 5 MB per file and 20 MB in total; typings
+  stop at 500 files or 10 MB. A download times out after 15 s.
+- `typesVersions` in a package's `package.json` is ignored.
+- In the Code view, global declarations from downloaded typings are visible
+  in every script (the synced folder's `tsconfig.json` doesn't include them).
+
+**Security.** A package is third-party code that runs with the same powers as
+your script: it sees and can change the requests and pages your handlers
+touch. Import only packages you trust. Pinning means the code can't change
+after you review it: npm versions are immutable, and the copy Wiretrick
+stored is the one that runs. Downloads come straight from unpkg.com over
+HTTPS, so you trust unpkg to serve npm's files unaltered. Only the extension
+background downloads them (when scripts are saved, imported or compiled);
+pages never fetch them.
+
 ## DOM changes — `wt.onDocument`
 
 `wt.onDocument` is not a network strategy — it registers a **DOM-ready callback

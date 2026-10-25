@@ -53,6 +53,7 @@ describe("folder sync support files", () => {
         const ts = files.get("tsconfig.json")!.text;
         expect(ts.startsWith(`// ${GENERATED_NOTE}\n`)).toBe(true);
         expect(JSON.parse(ts.slice(ts.indexOf("\n") + 1)).include).toEqual(["**/*.ts"]);
+        expect(JSON.parse(ts.slice(ts.indexOf("\n") + 1)).compilerOptions.paths).toEqual({ "https://unpkg.com/*": ["./.wiretrick/types/unpkg.com/*"] });
         expect(JSON.parse(files.get("settings.schema.json")!.text).$comment).toBe(GENERATED_NOTE);
         const stamps = ["wt-api.d.ts", "tsconfig.json", "settings.schema.json"].map((f) => files.get(f)!.t);
 

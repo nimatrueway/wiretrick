@@ -10,6 +10,7 @@ import { scriptLogLine } from "../../../shared/scriptLog";
 import { log } from "../logs";
 import { scriptStorageGet, scriptStorageSet } from "../scriptStore";
 import { dataFilesSnapshot } from "../dataFiles";
+import { packagesSnapshot } from "../packageImports";
 
 export interface ScriptLike {
     id: string;
@@ -55,7 +56,7 @@ export function compileMv2(scripts: ScriptLike[], paramValues: { [scriptId: stri
     resolveFrom = makeModuleResolver(
         scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code })),
         overridesFor,
-        { dataFiles: dataFilesSnapshot() }
+        { dataFiles: dataFilesSnapshot(), packages: packagesSnapshot() }
     ).resolveFrom;
     const out: CompiledEntry[] = [];
     for (const s of scripts) {

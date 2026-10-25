@@ -18,6 +18,10 @@ _Avoid_: utility, lib, helper
 A JSON file (`.json`) in the explorer that scripts import; it never runs.
 _Avoid_: fixture, asset, JSON script
 
+**Package import**:
+An import of an npm package by its pinned unpkg.com URL (`https://unpkg.com/dayjs@1.11.13`); Wiretrick downloads the package, its dependencies and its typings when the script is saved.
+_Avoid_: CDN import, remote import, URL import, external library
+
 **Folder**:
 A folder in the explorer grouping scripts and data files; folders nest, can be empty, and mirror subfolders of the synced folder.
 _Avoid_: directory, group, namespace

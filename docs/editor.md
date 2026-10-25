@@ -293,7 +293,10 @@ A slow drive (network share, cloud folder) that reports an earlier Wiretrick
 write back late isn't mistaken for an outside edit; the newer text is
 written again.
 `wt-api.d.ts`, `tsconfig.json` and `settings.schema.json` are written alongside. Edit in VS Code (or any editor) with full
-TypeScript completions; saves hot apply instantly.
+TypeScript completions; saves hot apply instantly. The typings of
+[package imports](scripting.md#packages-from-unpkg) go to
+`.wiretrick/types/`, which Wiretrick owns: it rewrites and prunes them as
+scripts change.
 
 Those three are managed files: they're refreshed on every browser start
 and extension update, so new APIs and settings reach an already-synced folder.

@@ -6,8 +6,10 @@
  * data file (its path, case-insensitive); anything else a script: the path
  * with an optional `.ts`/`.js`, matched case-insensitively against script
  * names (paths) or their legacy key (each segment's other characters → `_`,
- * so `./My_Utils` finds "My Utils").
+ * so `./My_Utils` finds "My Utils"). A URL (`https://unpkg.com/x@1.2.3`)
+ * is a package import (shared/packageImports), never a script path.
  */
+import { isUrlSpec, makePackageLoader, type PackageModule, type PackageModules } from "./packageImports";
 
 const IMPORT_RE = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["']([^"'\n]+)["']/g;
 
@@ -78,6 +80,7 @@ export function importResolver(scriptNames: Iterable<string>, dataPaths: Iterabl
     const data = new Map<string, string>();
     for (const p of dataPaths) if (!data.has(p.toLowerCase())) data.set(p.toLowerCase(), p);
     return (importer, spec) => {
+        if (isUrlSpec(spec)) return undefined;
         const path = importPath(importer, spec);
         if (path === null) return undefined;
         if (isDataSpec(path)) {
@@ -149,7 +152,7 @@ export function missingImports<T extends { name: string; code: string; data?: bo
     return [...missing].sort((a, b) => a - b);
 }
 
-/** a library source or data file shipped to the page (getHookBundle `libs`) */
+/** a library source, data file or package module shipped to the page (getHookBundle `libs`) */
 export interface ShippedLib {
     name: string;
     /** a library's runnable JS */
@@ -157,27 +160,40 @@ export interface ShippedLib {
     /** a data file's text (`name` is its path) */
     json?: string;
     params?: Record<string, any>;
+    /** a package module (`name` is its final URL) */
+    pkg?: PackageModule;
+    /** a package URL a script imports (`name`) → its module's final URL */
+    alias?: string;
 }
 
 /**
- * Page-side `require` over the shipped libraries and data files (hook and
- * bridge): `requireFrom(importer)` resolves like the background does.
- * Libraries run once (`run`); data files parse fresh per import.
+ * Page-side `require` over the shipped libraries, data files and package
+ * modules (hook and bridge): `requireFrom(importer)` resolves like the
+ * background does. Libraries and package modules run once (`run`); data
+ * files parse fresh per import.
  */
 export function makeLibRequire<L extends ShippedLib>(libs: L[], run: (lib: L, require: (spec: string) => any, module: { exports: any }) => void): (importer: string) => (spec: string) => any {
+    const pkgs: PackageModules = { aliases: {}, modules: {} };
+    for (const l of libs) {
+        if (l.pkg) pkgs.modules[l.name] = l.pkg;
+        else if (l.alias !== undefined) pkgs.aliases[l.name] = l.alias;
+    }
+    const loadPackage = makePackageLoader(pkgs);
+    const scriptLibs = libs.filter((l) => !l.pkg && l.alias === undefined);
     const resolve = importResolver(
-        libs.filter((l) => l.json === undefined).map((l) => l.name),
-        libs.filter((l) => l.json !== undefined).map((l) => l.name)
+        scriptLibs.filter((l) => l.json === undefined).map((l) => l.name),
+        scriptLibs.filter((l) => l.json !== undefined).map((l) => l.name)
     );
     const modules = new Map<string, any>();
     const requireFrom =
         (importer: string) =>
         (spec: string): any => {
+            if (isUrlSpec(spec)) return loadPackage(spec);
             const r = resolve(importer, spec);
             if (!r) throw new Error(`cannot import "${spec}" — is the ${isDataSpec(spec) ? "data file" : "library script"} saved?`);
-            if (r.kind === "data") return JSON.parse(libs.find((l) => l.json !== undefined && l.name === r.path)!.json!);
+            if (r.kind === "data") return JSON.parse(scriptLibs.find((l) => l.json !== undefined && l.name === r.path)!.json!);
             if (modules.has(r.name)) return modules.get(r.name);
-            const lib = libs.find((l) => l.json === undefined && l.name === r.name)!;
+            const lib = scriptLibs.find((l) => l.json === undefined && l.name === r.name)!;
             const moduleObj = { exports: {} as any };
             modules.set(r.name, moduleObj.exports); // early: cycle protection
             run(lib, requireFrom(lib.name), moduleObj);
