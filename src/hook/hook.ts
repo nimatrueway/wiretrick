@@ -359,15 +359,11 @@ import { readFetchBody } from "../shared/requestBody";
                 const binaryOk = wantsBinary(url, method);
                 let kind = bodyKind(contentType, null);
                 if (kind === "binary" && !binaryOk) return skipBinary(response, url, method, contentType);
-                let bodyIn: string | Uint8Array;
-                if (kind === "text") bodyIn = await response.clone().text();
-                else {
-                    // binary, or no content-type: sniff the bytes
-                    const buf = new Uint8Array(await response.clone().arrayBuffer());
-                    kind = bodyKind(contentType, buf);
-                    if (kind === "binary" && !binaryOk) return skipBinary(response, url, method, contentType);
-                    bodyIn = kind === "binary" ? buf : new TextDecoder().decode(buf);
-                }
+                // the bytes decide too: text that isn't valid UTF-8 is binary
+                const buf = new Uint8Array(await response.clone().arrayBuffer());
+                kind = bodyKind(contentType, buf);
+                if (kind === "binary" && !binaryOk) return skipBinary(response, url, method, contentType);
+                const bodyIn: string | Uint8Array = kind === "binary" ? buf : new TextDecoder().decode(buf);
 
                 const out = abortP
                     ? await Promise.race([viaBridge({ op: "transform", url, method, body: bodyIn, status: response.status, contentType, requestBody }), abortP])

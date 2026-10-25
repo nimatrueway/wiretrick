@@ -111,19 +111,28 @@ function useFit(ref: RefObject<HTMLElement | null>, open: boolean, cap = Infinit
 }
 
 let measure: CanvasRenderingContext2D | null | undefined;
+/** Where `before` (the input's text up to a spot) ends in the input, in window x; null: can't measure. */
+function textX(inp: HTMLInputElement, before: string): number | null {
+    measure ??= document.createElement("canvas").getContext?.("2d") ?? null;
+    if (!measure) return null;
+    const cs = getComputedStyle(inp);
+    measure.font = cs.font;
+    return inp.getBoundingClientRect().left + (parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.paddingLeft) || 0) + measure.measureText(before).width - inp.scrollLeft;
+}
+/** Put a popup's left edge at window x `x`, kept inside the window. */
+function placeAt(el: HTMLElement, x: number) {
+    const parent = el.parentElement!.getBoundingClientRect().left;
+    el.style.right = "auto";
+    el.style.left = `${Math.max(8, Math.min(x, innerWidth - 8 - el.offsetWidth)) - parent}px`;
+}
 /** Line a suggestion list up under the word it completes (`before`: the input's text up to that word; null: closed), kept inside the window. */
 function useUnderCaret(ref: RefObject<HTMLElement | null>, inputRef: RefObject<HTMLInputElement | null>, before: string | null) {
     useLayoutEffect(() => {
         const el = ref.current;
         const inp = inputRef.current;
         if (before === null || !el || !inp) return;
-        measure ??= document.createElement("canvas").getContext?.("2d") ?? null;
-        if (!measure) return;
-        const cs = getComputedStyle(inp);
-        measure.font = cs.font;
-        const x = inp.offsetLeft + (parseFloat(cs.paddingLeft) || 0) + measure.measureText(before).width - inp.scrollLeft;
-        const room = innerWidth - 8 - el.parentElement!.getBoundingClientRect().left - el.offsetWidth;
-        el.style.left = `${Math.max(0, Math.min(x, room))}px`;
+        const x = textX(inp, before);
+        if (x !== null) placeAt(el, x);
     });
 }
 
@@ -193,6 +202,8 @@ interface AddRequest {
     field: FieldDef;
     negate: boolean;
     value: string;
+    /** window x of the word it came from: the popup opens there, not at the button */
+    x?: number | null;
 }
 /** text-like selection over the chips (indices into leafChips); `withText` = Ctrl+A also took the text box */
 /**
@@ -393,8 +404,9 @@ function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter;
             const one: BasicExpr = { items: [{ k: "chip", chip: item.chip }], conns: [] };
             return (onInput(gap ? insertAtGap(withText(text), one) : addChip({ ...value, text }, item.chip)), toInput(text.length));
         }
+        const x = input.current ? textX(input.current, cur.slice(0, ac.from)) : null;
         onInput(withText(text));
-        setRequest({ field: item.field, negate: item.negate, value: item.value });
+        setRequest({ field: item.field, negate: item.negate, value: item.value, x });
     };
     /** Enter with nothing picked: what the text box holds besides plain words becomes chips (among the chips: all of it) */
     const chipify = () => {
@@ -809,6 +821,14 @@ function AddFilter({ data, onAdd, request, onRequestDone }: { data: SuggestData;
     useDismiss(ref, open, close, () => (previewing.current ? setActive(-1) : close()));
     const popRef = useRef<HTMLDivElement>(null);
     useFit(popRef, open, 360);
+    /** opened from a typed word: the popup sits under it */
+    const [at, setAt] = useState<number | null>(null);
+    useLayoutEffect(() => {
+        const el = popRef.current;
+        if (!open || !el) return;
+        if (at === null) el.style.left = el.style.right = "";
+        else placeAt(el, at);
+    });
     const valueInput = useRef<HTMLInputElement>(null);
     useEffect(() => valueInput.current?.focus(), [field, op, open]);
     useEffect(() => {
@@ -817,6 +837,7 @@ function AddFilter({ data, onAdd, request, onRequestDone }: { data: SuggestData;
         setField(request.field);
         setOp(request.negate ? NEG_OP[request.field.kind] : OPS[request.field.kind][0]);
         setValue(request.value);
+        setAt(request.x ?? null);
         setOpen(true);
         onRequestDone?.();
     }, [request]);
@@ -865,7 +886,7 @@ function AddFilter({ data, onAdd, request, onRequestDone }: { data: SuggestData;
     };
     return (
         <div class="net-qadd" ref={ref}>
-            <button class="net-qadd-btn" aria-haspopup="dialog" aria-expanded={open} title="Add a filter" onClick={() => (open ? close() : setOpen(true))}>
+            <button class="net-qadd-btn" aria-haspopup="dialog" aria-expanded={open} title="Add a filter" onClick={() => (open ? close() : (setAt(null), setOpen(true)))}>
                 + Filter
             </button>
             {open && (

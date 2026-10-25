@@ -7,6 +7,11 @@ its section below.
 
 ## [Unreleased]
 
+### Fixed
+
+- A binary body served with a text `Content-Type` (x.com's `jf.x.com/onboarding/web/landing` is `text/plain`) was decoded as UTF-8 and re-encoded, corrupting it even when the handler returned it unchanged; x.com stopped loading under an `onResponseBody` on `*`. A text body that isn't valid UTF-8 is now binary (`binary: true` routes only), and a body handed back unchanged keeps its original bytes on every strategy.
+- Picking a field suggestion (e.g. `script:`) with Tab opened the "+ Filter" popup at the far right of the filter bar; it now opens under the word it came from.
+
 ## [0.9.14] - 2026-10-25
 
 ### Added

@@ -47,11 +47,31 @@ export function sniffBinary(bytes: Uint8Array): boolean {
     return false;
 }
 
-/** the Content-Type is trusted when present; bytes are sniffed only without one */
+const strictUtf8 = new TextDecoder("utf-8", { fatal: true });
+
+/** do the bytes decode as UTF-8 without loss? */
+export function isUtf8(bytes: Uint8Array): boolean {
+    try {
+        strictUtf8.decode(bytes);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * The Content-Type is trusted when present; bytes are sniffed only without
+ * one. A text Content-Type over bytes that aren't valid UTF-8 (a binary
+ * payload served as text/plain, a Latin-1 page) is binary: decoding it to a
+ * string would corrupt it, even if a handler returned it unchanged.
+ */
 export function bodyKind(contentType: string | null | undefined, bytes: Uint8Array | null, patterns: readonly string[] = textTypes): BodyKind {
-    if (mimeEssence(contentType)) return isTextType(contentType, patterns) ? "text" : "binary";
+    if (mimeEssence(contentType)) {
+        if (!isTextType(contentType, patterns)) return "binary";
+        return bytes && !isUtf8(bytes) ? "binary" : "text";
+    }
     if (!bytes) return "unknown";
-    return sniffBinary(bytes) ? "binary" : "text";
+    return sniffBinary(bytes) || !isUtf8(bytes) ? "binary" : "text";
 }
 
 let textTypes: readonly string[] = DEFAULT_TEXT_TYPES;

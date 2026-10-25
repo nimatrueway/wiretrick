@@ -212,10 +212,12 @@ settings:
     - application/x-ndjson-custom
 ```
 
-The header is trusted. The body is only sniffed when `Content-Type` is
-missing (a zero byte in the first 512 bytes → binary). A binary body
-labeled `text/*` is therefore decoded as UTF-8, and if a handler rewrites
-it the bytes are corrupted — fix it by narrowing `textTypes`. A text body
+A non-text `Content-Type` is trusted. A text one is checked against the
+bytes: a body that isn't valid UTF-8 (a binary payload served as
+`text/plain`, a Latin-1 page) is binary, so it's never handed out as a
+string that would corrupt it. Without a `Content-Type` the body is
+sniffed (a zero byte in the first 512 bytes, or invalid UTF-8 → binary).
+A body a handler returns unchanged is passed on as the original bytes. A text body
 with an unlisted type (say `application/x-subrip`) is binary, so plain
 handlers never see it: add the type to `textTypes`, or use `binary: true`
 (or `"both"`) and decode it with `new TextDecoder().decode(body)`.

@@ -247,8 +247,10 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
                 }
             }
         }
+        // handed back unchanged: the strategy keeps the original bytes
+        if (!touched || sameBody(out, args.body)) return null;
         // raw / binary body: bytes stay bytes
-        return touched ? (typeof out === "string" || args.raw || binaryBody ? out : new TextDecoder().decode(out)) : null;
+        return typeof out === "string" || args.raw || binaryBody ? out : new TextDecoder().decode(out);
     }
 
     if (op === "replace") {
@@ -272,4 +274,11 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
     }
 
     return null;
+}
+
+function sameBody(a: string | Uint8Array, b: unknown): boolean {
+    if (typeof a === "string" || typeof b === "string") return a === b;
+    if (!(b instanceof Uint8Array) || a.byteLength !== b.byteLength) return false;
+    for (let i = 0; i < a.byteLength; i++) if (a[i] !== b[i]) return false;
+    return true;
 }

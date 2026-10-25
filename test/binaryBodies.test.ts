@@ -31,6 +31,16 @@ describe("bodyKind / isTextType", () => {
         for (const ct of binary) expect(isTextType(ct), ct).toBe(false);
     });
 
+    it("text that isn't valid UTF-8 is binary (decoding it would corrupt it)", () => {
+        // x.com's onboarding payload: binary served as text/plain
+        const blob = new Uint8Array([0xe9, 0x16, 0x00, 0x72, 0xff, 0xfe, 0x03]);
+        expect(bodyKind("text/plain", blob)).toBe("binary");
+        expect(bodyKind("", blob)).toBe("binary");
+        expect(bodyKind("text/html; charset=utf-8", new TextEncoder().encode("héllo ✓"))).toBe("text");
+        // decided from the header alone until the bytes are known
+        expect(bodyKind("text/plain", null)).toBe("text");
+    });
+
     it("a Content-Type is trusted; bytes are sniffed only without one", () => {
         const nul = new Uint8Array([1, 0, 2]);
         expect(bodyKind("text/plain", nul)).toBe("text");
@@ -118,6 +128,12 @@ describe("transform op: binary bodies reach binary routes only", () => {
         expect(seen).toEqual(["bin:3"]);
         expect(out).toBeInstanceOf(Uint8Array);
         expect([...(out as Uint8Array)]).toEqual([7, 7]);
+    });
+
+    it("a body handed back unchanged is no change (the original bytes are kept)", async () => {
+        expect(await run({ onResponseBody: [{ fn: (_c: any, b: string) => b }] }, "\uFEFFsame")).toBeNull();
+        expect(await run({ onResponseBody: [{ fn: (_c: any, b: string) => b + "!" }, { fn: (_c: any, b: string) => b.slice(0, -1) }] }, "same")).toBeNull();
+        expect(await run({ onResponseBody: [{ fn: (_c: any, b: Uint8Array) => new Uint8Array(b), binary: true }] }, new Uint8Array([1, 0, 2]))).toBeNull();
     });
 
     it("no binary route: a binary body is left alone", async () => {

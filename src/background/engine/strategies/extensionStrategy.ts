@@ -392,7 +392,8 @@ export class ExtensionStrategy implements InterceptionStrategy {
                         }
                     }
                 }
-                const outBytes = typeof body === "string" ? encoder.encode(body) : body;
+                // unchanged: the original bytes (a decode/encode round trip drops a BOM)
+                const outBytes = body === original ? bytes : typeof body === "string" ? encoder.encode(body) : body;
                 recordNetBody({ tabId: details.tabId, url: details.url, method: details.method, original, modified: body === original ? null : body, requestId: details.requestId });
                 filter.write(outBytes);
                 filter.close();
