@@ -31,6 +31,11 @@ block, edit headers, transform or replace bodies, or patch the DOM.
 - **Built-in devtools** — the Problems view lists what's wrong with your scripts
   right now (gone once fixed); the Log and Network views show what every script did,
   including original vs. modified bodies.
+- **LLM-ready diagnostics** — when a script doesn't do what you expect,
+  [Collect diagnostics](docs/editor.md#about-and-diagnostics) and hand the
+  report to an LLM with "why isn't this working?". It carries your scripts,
+  settings, the recent log and the requests the Network view recorded, with what each script did to them,
+  so the model can pinpoint the cause. Cookies and authorization headers are redacted.
 - **Folder sync** — keep scripts, JSON data files and their folders as plain files in a synced folder of your choice.
 - **Chrome (MV3), MV2 Chromium and Firefox.**
 
