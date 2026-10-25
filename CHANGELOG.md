@@ -7,6 +7,11 @@ its section below.
 
 ## [Unreleased]
 
+### Fixed
+
+- Scripts saved under an older version kept that version's parsed routes until edited (e.g. `binary: false` stayed "unset" and still warned). Stored script meta is now recompiled once after every extension update.
+- The "body is binary" warning no longer tells you to add `binary: true` when the script already has such a route. It names that route and says what dropped the body — usually an outdated helper (reinstall it).
+
 ## [0.9.12] - 2026-10-24
 
 ### Added

@@ -24,6 +24,8 @@ export interface Script {
 
 const STORE_KEY = "resScripts";
 const ORDER_KEY = "resScriptOrder";
+/** the extension version that compiled the stored meta */
+const META_VERSION_KEY = "resMetaVersion";
 
 // MV2 browsers don't support promise-based chrome.storage — wrap callbacks.
 function storageGet(keys: string | string[] | null): Promise<Record<string, any>> {
@@ -178,14 +180,20 @@ async function recompileMeta(byId: { [id: string]: Script }, ids: string[], allV
 }
 
 /**
- * Meta stored before routes recorded their registration line (Problems
- * view positions): recompile it once, at startup.
+ * Meta stored by another extension version (route parsing may have
+ * changed since — e.g. `binary: false` used to be dropped) or before
+ * routes recorded their registration line: recompile it once, at startup.
  */
 export async function refreshStaleMeta(): Promise<void> {
-    const byId: { [id: string]: Script } = (await storageGet(STORE_KEY))[STORE_KEY] || {};
-    const stale = Object.values(byId).filter((s) => s.meta.routes?.some((r) => r.line === undefined)).map((s) => s.id);
-    if (!stale.length) return;
-    const changed = await recompileMeta(byId, stale, await loadAllParamValues());
+    const obj = await storageGet([STORE_KEY, META_VERSION_KEY]);
+    const byId: { [id: string]: Script } = obj[STORE_KEY] || {};
+    const version = chrome.runtime.getManifest().version;
+    const otherVersion = obj[META_VERSION_KEY] !== version;
+    const stale = Object.values(byId)
+        .filter((s) => otherVersion || s.meta.routes?.some((r) => r.line === undefined))
+        .map((s) => s.id);
+    const changed = stale.length ? await recompileMeta(byId, stale, await loadAllParamValues()) : [];
+    if (otherVersion) await storageSet({ [META_VERSION_KEY]: version });
     if (!changed.length) return;
     // re-read: a save may have landed while compiling (MV3: sandbox RPC)
     const fresh: { [id: string]: Script } = (await storageGet(STORE_KEY))[STORE_KEY] || {};

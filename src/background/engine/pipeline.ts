@@ -25,7 +25,7 @@ import { missedLine } from "../../shared/netTypes";
 import { binaryOptedOut, frameHasHook as pingHook, isLoopbackUrl, missedReason, missedWhat, routeProblem, MISSED_SKIP_TYPES } from "../../shared/missedTap";
 import { resolveParamValues } from "../../shared/scriptDef";
 import type { ShippedLib } from "../../shared/scriptImports";
-import { effectiveStrategy, hookCanSee, routeLabel, routeMatches, setDefaultStrategy, type RouteMeta, type Strategy } from "../../shared/route";
+import { effectiveStrategy, hookCanSee, routeLabel, routeMatches, setDefaultStrategy, takesBinary, type RouteMeta, type Strategy } from "../../shared/route";
 import { analyzeScripts, runBodyOp, type Analyzed } from "../compileHost";
 import { recordNetBody } from "../network";
 import { reportSkipped, setSkipRoutes } from "./skipped";
@@ -170,13 +170,20 @@ export function createPipeline(
             if (pageStrategy.isClaimed(d.url) && bodySkip?.strategy !== "page") return;
             const hookLoaded = d.type === "xmlhttprequest" && routes.some((w) => w.strategy === "page") ? await frameHasHook(d.tabId, d.frameId) : undefined;
             const done = new Set<string>();
-            for (const w of routes) {
-                if (done.has(w.id)) continue;
-                done.add(w.id);
-                if (bodyObservedSince(w.id, d.url, start - 250, d.requestId)) continue;
+            const helperStatus = helperStrategy.status();
+            for (const first of routes) {
+                if (done.has(first.id)) continue;
+                done.add(first.id);
+                if (bodyObservedSince(first.id, d.url, start - 250, d.requestId)) continue;
+                const own = routes.filter((r) => r.id === first.id);
                 // `binary: false` on every matching route: text only, by choice
-                if (binaryOptedOut(bodySkip, w.strategy, routes.filter((r) => r.id === w.id).map((r) => r.route.binary))) continue;
+                if (binaryOptedOut(bodySkip, first.strategy, own.map((r) => r.route.binary))) continue;
+                // a skipped binary body: name the route that wanted it
+                const binaryRoute = bodySkip?.why === "binary" ? own.find((r) => r.strategy === bodySkip.strategy && takesBinary(r.route)) : undefined;
+                const w = binaryRoute ?? first;
                 const reason = missedReason({
+                    takesBinary: !!binaryRoute,
+                    helperOutdated: helperStatus.outdated ? helperStatus.version : undefined,
                     strategy: w.strategy,
                     type: d.type,
                     firefox: IS_FIREFOX,

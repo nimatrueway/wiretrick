@@ -66,6 +66,17 @@ describe("missedReason", () => {
         expect(bodySkipReason(skip)).toContain('`binary: "both"`');
     });
 
+    it("a binary route the strategy didn't serve blames the strategy (an outdated helper), not the route", () => {
+        const on = { strategy: "helper" as const, helperActive: true };
+        const helperSkip = { why: "binary", contentType: "image/png" };
+        const outdated = reason({ ...on, helperSkip, takesBinary: true, helperOutdated: "0.3.0" })!;
+        expect(outdated).toContain("helper (0.3.0) is older than");
+        expect(outdated).toContain("reinstall");
+        expect(outdated).not.toContain("set `binary: false`");
+        expect(reason({ ...on, helperSkip, takesBinary: true })).toContain("the helper strategy didn't pass it on");
+        expect(reason({ strategy: "debugger", bodySkip: { strategy: "debugger", ...helperSkip }, takesBinary: true, helperOutdated: "0.3.0" })).toContain("the debugger strategy didn't pass it on");
+        expect(reason({ ...on, helperSkip, helperOutdated: "0.3.0" })).toContain("set `binary: false`");
+    });
     it("debugger/page/extension binary skips explain themselves — only for their own strategy", () => {
         const skip = (strategy: any) => ({ strategy, why: "binary", contentType: "image/png" });
         expect(reason({ strategy: "debugger", bodySkip: skip("debugger") })).toContain("binary (image/png)");

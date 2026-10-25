@@ -6,6 +6,7 @@
  */
 import type { BinaryOption, RouteKind, Strategy } from "./route";
 import { strategyUnsupported } from "./strategyInfo";
+import { MIN_HELPER_VERSION } from "./helperInstall";
 
 export interface MissedCase {
     /** the handler route's effective strategy */
@@ -27,6 +28,10 @@ export interface MissedCase {
     helperSkip?: { why: string; contentType: string };
     /** a strategy saw the response but didn't hand its body to handlers (e.g. binary, no binary route); counts only for its own strategy */
     bodySkip?: { strategy: Strategy; why: string; contentType: string };
+    /** a matching route of the script takes binary bodies (`binary: true` / "both") */
+    takesBinary?: boolean;
+    /** the connected helper's version when it's older than MIN_HELPER_VERSION */
+    helperOutdated?: string;
 }
 
 export const MISSED_REASONS = {
@@ -39,12 +44,17 @@ export const MISSED_REASONS = {
 } as const;
 
 /** why a strategy (mostly the helper) didn't pass a body on; null: nothing to say (no body at all) */
-export function bodySkipReason(s: { why: string; contentType: string }): string | null {
+export function bodySkipReason(s: { why: string; contentType: string; strategy?: Strategy }, c: Pick<MissedCase, "takesBinary" | "helperOutdated"> = {}): string | null {
     const ct = s.contentType ? ` (${s.contentType.split(";")[0].trim()})` : "";
     switch (s.why) {
         case "empty":
             return null;
         case "binary":
+            // the route asked for it: the strategy is what dropped it
+            if (c.takesBinary && c.helperOutdated && (s.strategy ?? "helper") === "helper") {
+                return `the body is binary${ct} and the route takes binary bodies, but the helper (${c.helperOutdated}) is older than ${MIN_HELPER_VERSION} and never passes them on — reinstall it (Settings → Helper)`;
+            }
+            if (c.takesBinary) return `the body is binary${ct} and the route takes binary bodies, but the ${s.strategy ?? "helper"} strategy didn't pass it on`;
             return `the body is binary${ct}, and binary bodies only reach onResponseBody handlers with \`binary: true\` (binary only) or \`binary: "both"\` — add one to the route, add the type to settings.textTypes if it is really text, or set \`binary: false\` to silence this warning`;
         case "too-large":
             return `the body is over the helper's 64 MB limit${ct}, so it was passed through untouched`;
@@ -73,7 +83,7 @@ export function missedReason(c: MissedCase): string | null {
     // can never run here: routeProblem already warned once at load
     if (strategyUnsupported(c.strategy, c)) return null;
     if (c.strategy === "extension" && !c.firefox) return null;
-    if (c.bodySkip && c.bodySkip.strategy === c.strategy && c.strategy !== "helper") return bodySkipReason(c.bodySkip);
+    if (c.bodySkip && c.bodySkip.strategy === c.strategy && c.strategy !== "helper") return bodySkipReason(c.bodySkip, c);
     if (c.strategy === "page") {
         if (c.type !== "xmlhttprequest") return MISSED_REASONS.hookNotFetch;
         if (c.hookLoaded === false) return MISSED_REASONS.hookNotLoaded;
@@ -82,7 +92,7 @@ export function missedReason(c: MissedCase): string | null {
     }
     if (c.strategy === "helper" && c.loopback) return MISSED_REASONS.helperLoopback;
     const helperSkip = c.helperSkip ?? (c.bodySkip?.strategy === "helper" ? c.bodySkip : undefined);
-    if (c.strategy === "helper" && helperSkip) return bodySkipReason(helperSkip);
+    if (c.strategy === "helper" && helperSkip) return bodySkipReason({ strategy: "helper", ...helperSkip }, c);
     if (c.strategy === "helper" && !c.helperActive) return MISSED_REASONS.helperDown;
     if (c.fromCache) return MISSED_REASONS.cache;
     if (c.strategy === "debugger" && c.cdpWarned) return null;
