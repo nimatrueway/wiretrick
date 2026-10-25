@@ -371,6 +371,8 @@ export class ExtensionStrategy implements InterceptionStrategy {
                 const binary = bodyKind(contentType, bytes) === "binary";
                 let body: string | Uint8Array = binary ? bytes : decoder.decode(bytes);
                 const original = body;
+                /** a handler returned something (void / null: no change) */
+                let modified = false;
                 if (binary && !list.some((e) => e.handlers.some((h) => takesBinary(h.route)))) noteBodySkip("extension", details.url, "binary", contentType || "", details.requestId);
                 for (const { id: scriptId, name: scriptName, handlers } of list) {
                     const runs = handlers.filter((h) => (binary ? takesBinary(h.route) : takesText(h.route)));
@@ -382,19 +384,20 @@ export class ExtensionStrategy implements InterceptionStrategy {
                         if (typeof body !== "string" && !takesBinary(h.route)) body = decoder.decode(body);
                         try {
                             const out = await h.fn(ctx, body);
-                            if (out !== undefined && out !== null && out !== body) {
+                            if (out !== undefined && out !== null) {
                                 const size = (b: any) => (typeof b === "string" ? b.length : (b?.byteLength ?? 0));
                                 log(details.tabId, `[${scriptName}] onResponseBody applied (${size(body)}b → ${size(out)}b) ${details.url}`, "info", scriptId, undefined, undefined, details.requestId);
                                 body = out;
+                                modified = true;
                             } else logObserved(details.tabId, scriptName, "onResponseBody", details.url, scriptId, details.requestId);
                         } catch (e: any) {
                             scriptError(scriptId, formatScriptError(scriptName, e, "onResponseBody"));
                         }
                     }
                 }
-                // unchanged: the original bytes (a decode/encode round trip drops a BOM)
-                const outBytes = body === original ? bytes : typeof body === "string" ? encoder.encode(body) : body;
-                recordNetBody({ tabId: details.tabId, url: details.url, method: details.method, original, modified: body === original ? null : body, requestId: details.requestId });
+                // no change: the original bytes (a decode/encode round trip drops a BOM)
+                const outBytes = !modified ? bytes : typeof body === "string" ? encoder.encode(body) : body;
+                recordNetBody({ tabId: details.tabId, url: details.url, method: details.method, original, modified: modified ? body : null, requestId: details.requestId });
                 filter.write(outBytes);
                 filter.close();
             };

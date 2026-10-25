@@ -7,6 +7,10 @@ its section below.
 
 ## [Unreleased]
 
+### Changed
+
+- `onResponseBody` handlers may return nothing (`void` / `undefined` / `null`) to leave the body as it is — now in the typings too, like every other handler. Any body returned counts as modified, even the one the handler received: bodies are no longer compared, so `(ctx, body) => body` re-encodes and serves the body (use a handler that returns nothing to only read it).
+
 ## [0.9.15] - 2026-10-25
 
 ### Fixed

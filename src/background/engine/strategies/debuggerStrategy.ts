@@ -490,13 +490,12 @@ export class DebuggerStrategy {
             if (kind !== "binary") input = new TextDecoder().decode(bytes);
             else if (wantsBinary) input = bytes;
             else skipBinary();
-            body = input;
             if (input !== null) {
                 const out = await this.run("transform", { ...base, body: input, contentType, status, raw: typeof input !== "string" }, tabId);
                 if (out !== null && out !== undefined) body = out;
             }
-            recordNetBody({ tabId, url, method, original: input, modified: body === input ? null : body, requestId: wrId });
-            if (body === null || body === input) {
+            recordNetBody({ tabId, url, method, original: input, modified: body, requestId: wrId });
+            if (body === null) {
                 dlogLevel("debugger", "debug", "no handler changed the body → continue", { url });
                 return void (await continueWithHeaders());
             }

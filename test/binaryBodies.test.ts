@@ -130,10 +130,10 @@ describe("transform op: binary bodies reach binary routes only", () => {
         expect([...(out as Uint8Array)]).toEqual([7, 7]);
     });
 
-    it("a body handed back unchanged is no change (the original bytes are kept)", async () => {
-        expect(await run({ onResponseBody: [{ fn: (_c: any, b: string) => b }] }, "\uFEFFsame")).toBeNull();
-        expect(await run({ onResponseBody: [{ fn: (_c: any, b: string) => b + "!" }, { fn: (_c: any, b: string) => b.slice(0, -1) }] }, "same")).toBeNull();
-        expect(await run({ onResponseBody: [{ fn: (_c: any, b: Uint8Array) => new Uint8Array(b), binary: true }] }, new Uint8Array([1, 0, 2]))).toBeNull();
+    it("returning nothing is no change; any returned body is one", async () => {
+        expect(await run({ onResponseBody: [{ fn: () => undefined }, { fn: () => null }] }, "same")).toBeNull();
+        expect(await run({ onResponseBody: [{ fn: (_c: any, b: string) => b }] }, "same")).toBe("same");
+        expect([...((await run({ onResponseBody: [{ fn: (_c: any, b: Uint8Array) => b, binary: true }] }, new Uint8Array([1, 0, 2]))) as Uint8Array)]).toEqual([1, 0, 2]);
     });
 
     it("no binary route: a binary body is left alone", async () => {

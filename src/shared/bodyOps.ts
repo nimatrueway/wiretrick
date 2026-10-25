@@ -234,12 +234,10 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
                     const result: any = await h.fn({ ...base(h), contentType: args.contentType, status: args.status }, out);
                     if (result !== undefined && result !== null) {
                         const before = typeof out === "string" ? out.length : out.byteLength;
-                        const prevOut = out;
                         const next = typeof result === "string" ? result : result instanceof Uint8Array ? result : JSON.stringify(result);
                         const after = typeof next === "string" ? next.length : next.byteLength;
                         out = next;
-                        if (next !== prevOut) env.log(s.id, "info", `[${s.name}] onResponseBody applied (${before}b → ${after}b) ${url}`);
-                        else observed(s, "onResponseBody", "it returned the same body it received");
+                        env.log(s.id, "info", `[${s.name}] onResponseBody applied (${before}b → ${after}b) ${url}`);
                         touched = true;
                     } else observed(s, "onResponseBody");
                 } catch (e: any) {
@@ -247,8 +245,8 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
                 }
             }
         }
-        // handed back unchanged: the strategy keeps the original bytes
-        if (!touched || sameBody(out, args.body)) return null;
+        // every handler returned nothing (void / null): no change, the strategy keeps the original bytes
+        if (!touched) return null;
         // raw / binary body: bytes stay bytes
         return typeof out === "string" || args.raw || binaryBody ? out : new TextDecoder().decode(out);
     }
@@ -274,11 +272,4 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
     }
 
     return null;
-}
-
-function sameBody(a: string | Uint8Array, b: unknown): boolean {
-    if (typeof a === "string" || typeof b === "string") return a === b;
-    if (!(b instanceof Uint8Array) || a.byteLength !== b.byteLength) return false;
-    for (let i = 0; i < a.byteLength; i++) if (a[i] !== b[i]) return false;
-    return true;
 }

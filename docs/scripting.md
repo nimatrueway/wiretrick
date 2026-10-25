@@ -128,7 +128,7 @@ wt.onResponseBody(
   MV3 is the `dist-mv3/` build):
 
   ```ts
-  wt.onResponseBody({ url: "*://example.com/app.js", strategy: wt.isFirefox ? "extension" : "helper" }, (ctx, body) => body);
+  wt.onResponseBody({ url: "*://example.com/app.js", strategy: wt.isFirefox ? "extension" : "helper" }, (ctx, body) => body.replace("DEBUG=false", "DEBUG=true"));
   wt.onRequest({ url: "*://api.example.com/*", strategy: wt.isMV3 ? "debugger" : "extension" }, fn);
   wt.onRequest({ url: "*://ads.example.com/*", strategy: wt.isMV3 ? "rules" : "extension" }, () => ({ block: true }));
   ```
@@ -175,12 +175,14 @@ wt.onResponseBody({ url: "*://cdn.example.com/*", binary: "both" }, (ctx, body) 
 });
 
 // text only, and no warning for the images it skips
-wt.onResponseBody({ url: "*://example.com/*", binary: false }, (ctx, body) => body);
+wt.onResponseBody({ url: "*://example.com/*", binary: false }, (ctx, body) => console.log(ctx.url, body.length));
 ```
 
 A `"both"` handler gets either, so check `typeof body`. Return values
 work as for text: a string, a `Uint8Array` or an object (JSON) replaces
-the body; `undefined` or the same body leaves it unchanged. Handlers
+the body; returning nothing (`undefined` / `null`) leaves it unchanged.
+Any returned body counts as a change, even the one the handler received:
+it's re-encoded and served (a text body loses a BOM). Handlers
 whose `binary` option excludes a body are skipped; when that leaves none
 of a script's handlers for a body, the "onResponseBody never ran" warning
 explains it — unless every one of them set `binary` explicitly (`false`,
@@ -217,7 +219,7 @@ bytes: a body that isn't valid UTF-8 (a binary payload served as
 `text/plain`, a Latin-1 page) is binary, so it's never handed out as a
 string that would corrupt it. Without a `Content-Type` the body is
 sniffed (a zero byte in the first 512 bytes, or invalid UTF-8 → binary).
-A body a handler returns unchanged is passed on as the original bytes. A text body
+A text body
 with an unlisted type (say `application/x-subrip`) is binary, so plain
 handlers never see it: add the type to `textTypes`, or use `binary: true`
 (or `"both"`) and decode it with `new TextDecoder().decode(body)`.

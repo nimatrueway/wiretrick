@@ -368,7 +368,7 @@ import { readFetchBody } from "../shared/requestBody";
                 const out = abortP
                     ? await Promise.race([viaBridge({ op: "transform", url, method, body: bodyIn, status: response.status, contentType, requestBody }), abortP])
                     : await viaBridge({ op: "transform", url, method, body: bodyIn, status: response.status, contentType, requestBody });
-                if (!out || !(typeof out.body === "string" || out.body instanceof Uint8Array) || sameBody(out.body, bodyIn)) return response;
+                if (!out || !(typeof out.body === "string" || out.body instanceof Uint8Array)) return response;
 
                 return withUrl(new Response(out.body, {
                     status: response.status,
@@ -391,13 +391,6 @@ import { readFetchBody } from "../shared/requestBody";
             window.postMessage({ source: HOOK_SOURCE, kind: "bodySkip", url, method, why: "binary", contentType }, window.location.origin);
         } catch {}
         return response;
-    }
-
-    function sameBody(a: string | Uint8Array, b: string | Uint8Array): boolean {
-        if (typeof a === "string" || typeof b === "string") return a === b;
-        if (a.length !== b.length) return false;
-        for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
-        return true;
     }
 
     // ---- XHR patch ----

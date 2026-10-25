@@ -46,12 +46,15 @@ describe("observed vs modified logging", () => {
         expect((await run("requestDecision", { onRequest: [() => undefined, () => ({})] })).lines).toEqual([observed("onRequest"), observed("onRequest")]);
         expect((await run("responseHeaders", { onResponseHeaders: [() => ({ headers: { set: {} } })] })).lines).toEqual([observed("onResponseHeaders")]);
         expect((await run("replace", { replaceResponse: [() => null] })).lines).toEqual([observed("replaceResponse")]);
-        // returning the identical body is no change
-        const same = await run("transform", { onResponseBody: [(_c: any, b: string) => b, () => undefined] }, { body: "abc" });
-        expect(same.lines).toEqual([
-            { ...observed("onResponseBody"), msg: `[S] onResponseBody → observed (no change) — it returned the same body it received ${url}` },
-            observed("onResponseBody"),
-        ]);
+        const none = await run("transform", { onResponseBody: [() => undefined, () => null] }, { body: "abc" });
+        expect(none.out).toBeNull();
+        expect(none.lines).toEqual([observed("onResponseBody"), observed("onResponseBody")]);
+    });
+
+    it("any body returned is a change, even the one received (bodies aren't compared)", async () => {
+        const { out, lines } = await run("transform", { onResponseBody: [(_c: any, b: string) => b] }, { body: "abc" });
+        expect(out).toBe("abc");
+        expect(lines).toEqual([{ level: "info", msg: `[S] onResponseBody applied (3b → 3b) ${url}`, kind: undefined }]);
     });
 
     it("changes keep their INFO lines (no observed line)", async () => {

@@ -691,7 +691,9 @@ declare const wt: {
      *
      * @param route Where it applies — see {@link Wiretrick.Route}.
      * @param transform Receives the context and the original body; returns
-     * the new body.
+     * the new body, or nothing (`undefined` / `null`) to leave it as it is.
+     * Any body returned counts as a change — even the same one: it's
+     * re-encoded and served in place of the original.
      *
      * @example
      * wt.onResponseBody({ url: "*://example.com/app/*.js", resourceTypes: ["script"] }, (ctx, body) => {
@@ -706,15 +708,15 @@ declare const wt: {
      */
     onResponseBody(
         route: Wiretrick.UrlPatterns | (Wiretrick.BodyRouteOptions & { binary?: false }),
-        transform: (ctx: Wiretrick.BodyCtx, body: string) => Wiretrick.Awaitable<string | Uint8Array>
+        transform: (ctx: Wiretrick.BodyCtx, body: string) => Wiretrick.Awaitable<string | Uint8Array | void>
     ): void;
     onResponseBody(
         route: Wiretrick.BodyRouteOptions & { binary: true },
-        transform: (ctx: Wiretrick.BodyCtx, body: Uint8Array) => Wiretrick.Awaitable<string | Uint8Array>
+        transform: (ctx: Wiretrick.BodyCtx, body: Uint8Array) => Wiretrick.Awaitable<string | Uint8Array | void>
     ): void;
     onResponseBody(
         route: Wiretrick.BodyRouteOptions,
-        transform: (ctx: Wiretrick.BodyCtx, body: string | Uint8Array) => Wiretrick.Awaitable<string | Uint8Array>
+        transform: (ctx: Wiretrick.BodyCtx, body: string | Uint8Array) => Wiretrick.Awaitable<string | Uint8Array | void>
     ): void;
 
     /**
@@ -831,7 +833,7 @@ declare const wt: {
      * Always the opposite of {@link isFirefox}.
      *
      * @example
-     * wt.onResponseBody({ url: "*://example.com/app.js", strategy: wt.isFirefox ? "extension" : "helper" }, (ctx, body) => body);
+     * wt.onResponseBody({ url: "*://example.com/app.js", strategy: wt.isFirefox ? "extension" : "helper" }, (ctx, body) => body.replace("DEBUG=false", "DEBUG=true"));
      */
     readonly isChrome: boolean;
 
