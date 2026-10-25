@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.9.13] - 2026-10-25
+
 ### Added
 
 - `ctx.requestBody` and `ctx.json()`: every handler can read the request payload (read-only), as a string or a `Uint8Array` decided by `Content-Type` and `textTypes` like response bodies. Works on `page`, `debugger`, `helper` (helper 0.4.1+, bodies up to 8 MB) and `extension`; not on `rules`. See [Request body](docs/scripting.md#request-body).
@@ -473,7 +475,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.9.12...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.9.13...HEAD
+[0.9.13]: https://github.com/nimatrueway/wiretrick/compare/v0.9.12...v0.9.13
 [0.9.12]: https://github.com/nimatrueway/wiretrick/compare/v0.9.11...v0.9.12
 [0.9.11]: https://github.com/nimatrueway/wiretrick/compare/v0.9.10...v0.9.11
 [0.9.10]: https://github.com/nimatrueway/wiretrick/compare/v0.9.9...v0.9.10
