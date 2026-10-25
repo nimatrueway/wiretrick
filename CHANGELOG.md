@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.9.12] - 2026-10-24
+
 ### Added
 
 - `binary: "both"` on an `onResponseBody` route: the handler gets text
@@ -458,7 +460,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.9.11...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.9.12...HEAD
+[0.9.12]: https://github.com/nimatrueway/wiretrick/compare/v0.9.11...v0.9.12
 [0.9.11]: https://github.com/nimatrueway/wiretrick/compare/v0.9.10...v0.9.11
 [0.9.10]: https://github.com/nimatrueway/wiretrick/compare/v0.9.9...v0.9.10
 [0.9.9]: https://github.com/nimatrueway/wiretrick/compare/v0.9.8...v0.9.9
