@@ -7,6 +7,14 @@ its section below.
 
 ## [Unreleased]
 
+### Changed
+
+- "onResponseBody never ran" and "→ skipped" warnings are no longer rate
+  limited (once a minute per script + URL, 20 a minute overall): every
+  request gets its own Log line and *missed* entry on its Network row, in
+  every tab. Before, a burst like a video's segments stopped being flagged
+  after the first 20.
+
 ## [0.9.9] - 2026-10-24
 
 ### Fixed

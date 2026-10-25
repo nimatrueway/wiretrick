@@ -22,7 +22,7 @@ import { isThenable, toRunnableJs } from "../../shared/compile";
 import "../../shared/transpile";
 import { log, getScriptErrors, getScriptTypeErrors, getScriptRuleErrors, getScriptRouteWarnings, setScriptRouteWarnings, bodyObservedSince, helperSkipSince } from "./logs";
 import { missedLine } from "../../shared/netTypes";
-import { frameHasHook as pingHook, isLoopbackUrl, makeMissedThrottle, missedReason, missedWhat, routeProblem, MISSED_SKIP_TYPES } from "../../shared/missedTap";
+import { frameHasHook as pingHook, isLoopbackUrl, missedReason, missedWhat, routeProblem, MISSED_SKIP_TYPES } from "../../shared/missedTap";
 import { resolveParamValues } from "../../shared/scriptDef";
 import type { ShippedLib } from "../../shared/scriptImports";
 import { effectiveStrategy, hookCanSee, routeLabel, routeMatches, setDefaultStrategy, type RouteMeta, type Strategy } from "../../shared/route";
@@ -134,7 +134,6 @@ export function createPipeline(
     const watchedStarts = new Map<string, number>();
     /** `${tabId}|${url}` loads the debugger strategy warning below already reported */
     const cdpWarned = new Set<string>();
-    const missedThrottle = makeMissedThrottle();
     const frameHasHook = (tabId: number, frameId?: number) => pingHook(chrome.tabs, () => chrome.runtime.lastError, tabId, frameId);
     const extOrigin = chrome.runtime.getURL("");
     const watchedFor = (url: string, method?: string, type?: string) => bodyWatch.filter((w) => routeMatches(w.route, url, method, type));
@@ -179,7 +178,7 @@ export function createPipeline(
                     loopback: isLoopbackUrl(d.url),
                     helperSkip: helperSkipSince(d.url, start - 250),
                 });
-                if (!reason || !missedThrottle(`${w.id}|${d.url}`)) continue;
+                if (!reason) continue;
                 log(d.tabId, missedLine(w.name, routeLabel(w.route), d.url, missedWhat(d.type), reason), "warn", w.id, "missed", d.url);
             }
         }, MISSED_DELAY_MS);

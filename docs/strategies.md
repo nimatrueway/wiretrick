@@ -312,8 +312,8 @@ handlers are errors at load), handlers that can never run where they are
 websocket, ping/beacon, CSP reports, the extension's own requests, and
 requests a handler already ended (block/redirect/replacement) — those get
 the skipped warning below instead.
-Each script + URL warns at most once a minute, and at most 20 warnings a
-minute overall. In the Network view it shows as a yellow *missed* entry;
+Every request gets its own warning (no rate limit), in the Log and on its
+Network row. In the Network view it shows as a yellow *missed* entry;
 the row is not marked observed.
 
 ### Skipped warning
@@ -326,8 +326,8 @@ naming who took priority and why:
 [Logger] onResponseBody #1 → skipped: [Blocklist] onRequest #1 → block took priority (strategy "rules" comes before "helper", so the request never got there) https://cdn.example.com/a.js
 ```
 
-It shows as *missed* in the Network view (`is:missed`), with the same
-once-a-minute limit. The rules are in
+It shows as *missed* in the Network view (`is:missed`), one per request
+like the warning above. The rules are in
 [how handlers stack](scripting.md#multiple-handlers--how-they-stack).
 
 ## First page load with `debugger`
