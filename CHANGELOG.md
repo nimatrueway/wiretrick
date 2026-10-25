@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.9.14] - 2026-10-25
+
 ### Added
 
 - Package imports: a script can import an npm package by its pinned unpkg.com URL, e.g. `import dayjs from "https://unpkg.com/dayjs@1.11.13"`. Saving downloads the package and its dependencies once and stores them, so scripts also run offline, on every strategy and in `wt.onDocument`. Its TypeScript declarations (or `@types`) type-check the import in the Code view and, through `.wiretrick/types/` and `tsconfig.json` `paths`, in the synced folder. Unpinned versions and other hosts are compile errors. See [Packages from unpkg](docs/scripting.md#packages-from-unpkg).
@@ -479,7 +481,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.9.13...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.9.14...HEAD
+[0.9.14]: https://github.com/nimatrueway/wiretrick/compare/v0.9.13...v0.9.14
 [0.9.13]: https://github.com/nimatrueway/wiretrick/compare/v0.9.12...v0.9.13
 [0.9.12]: https://github.com/nimatrueway/wiretrick/compare/v0.9.11...v0.9.12
 [0.9.11]: https://github.com/nimatrueway/wiretrick/compare/v0.9.10...v0.9.11
