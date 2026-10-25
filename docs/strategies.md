@@ -294,6 +294,11 @@ The reason is picked from the situation:
   never sends loopback requests through a proxy, so the helper can't see
   them; set `strategy: "page"` or `"debugger"` on the route;
 - on `helper` and the helper isn't running → start/install the helper;
+- on `helper` and the helper skipped the body on purpose → says why: a
+  binary body (images, video, audio, fonts, wasm, PDFs, archives,
+  `application/vnd.*` — with its Content-Type), one over 64 MB, or a
+  stream (server-sent events). A response with no body (204, 304, HEAD)
+  isn't warned about at all;
 - served from the browser cache → reload with the cache disabled (hard
   reload);
 - on `debugger` but the debugger wasn't attached in time → the existing

@@ -9,6 +9,11 @@ its section below.
 
 ### Fixed
 
+- "onResponseBody never ran" on the helper strategy said "no strategy
+  observed it" for bodies the helper skips on purpose (e.g. YouTube's
+  `/videoplayback` video, `.wasm`). It now says why — a binary body (with
+  its Content-Type), one over 64 MB, or a stream — and no longer warns for
+  responses without a body (204, 304, HEAD).
 - Network filter (Basic), + Filter on a text field with suggestions (tab,
   script…): ↑/↓ now move through the suggestion list instead of switching
   the operator; Alt+↑/↓ switches the operator (plain ↑/↓ still does when

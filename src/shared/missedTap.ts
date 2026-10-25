@@ -23,6 +23,8 @@ export interface MissedCase {
     hookLoaded?: boolean;
     /** the request went to localhost / 127.x / [::1] (see isLoopbackUrl) */
     loopback?: boolean;
+    /** the helper saw the response but didn't hand its body to handlers (proxy.rs skip_body_reason) */
+    helperSkip?: { why: string; contentType: string };
 }
 
 export const MISSED_REASONS = {
@@ -33,6 +35,23 @@ export const MISSED_REASONS = {
     helperLoopback: `the helper can't see localhost — Chrome never sends loopback requests through a proxy; set strategy: "page" or "debugger" on the route for these URLs`,
     fallback: "no strategy observed it — check the Log view at debug level",
 } as const;
+
+/** why the helper didn't pass a body on; null: nothing to say (no body at all) */
+export function helperSkipReason(s: { why: string; contentType: string }): string | null {
+    const ct = s.contentType ? ` (${s.contentType.split(";")[0].trim()})` : "";
+    switch (s.why) {
+        case "empty":
+            return null;
+        case "binary":
+            return `the helper doesn't pass binary bodies${ct} to onResponseBody — images, video, audio, fonts, wasm, PDFs, archives and application/vnd.* are left untouched`;
+        case "too-large":
+            return `the body is over the helper's 64 MB limit${ct}, so it was passed through untouched`;
+        case "stream":
+            return `the helper doesn't buffer streamed bodies${ct} (server-sent events), so it was passed through untouched`;
+        default:
+            return `the helper didn't pass the body on (${s.why})${ct}`;
+    }
+}
 
 /** Types never checked: sockets and fire-and-forget pings. */
 export const MISSED_SKIP_TYPES = new Set(["websocket", "ping", "beacon", "csp_report", "webbundle", "webtransport"]);
@@ -52,6 +71,7 @@ export function missedReason(c: MissedCase): string | null {
         return null;
     }
     if (c.strategy === "helper" && c.loopback) return MISSED_REASONS.helperLoopback;
+    if (c.strategy === "helper" && c.helperSkip) return helperSkipReason(c.helperSkip);
     if (c.strategy === "helper" && !c.helperActive) return MISSED_REASONS.helperDown;
     if (c.fromCache) return MISSED_REASONS.cache;
     if (c.strategy === "debugger" && c.cdpWarned) return null;

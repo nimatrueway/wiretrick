@@ -16,7 +16,7 @@ import { routeMatches, type RouteMeta } from "../../../shared/route";
 import { dlogLevel } from "../../../shared/debugLog";
 import { helperInstallCommand, helperInstallShell, isHelperOutdated, MIN_HELPER_VERSION } from "../../../shared/helperInstall";
 import type { Script } from "../scriptStore";
-import { log } from "../logs";
+import { log, noteHelperSkip } from "../logs";
 import { reportSkipped } from "../skipped";
 import { winnerOf } from "../../../shared/precedence";
 import { evalProxyDecision, runBodyOp } from "../../compileHost";
@@ -552,6 +552,7 @@ export class HelperStrategy {
                 out = await this.run("transform", { ...base, body, contentType: pairsToObject(headers)["content-type"] || "" });
             } else {
                 dlogLevel("helper", "debug", `binary body skipped for onResponseBody (MV3 passes text only): ${m.url}`);
+                noteHelperSkip(m.url, "binary", pairsToObject(headers)["content-type"] || "");
             }
             recordNetBody({ tabId: c.tabId, url: m.url, method: m.method, original: bytes, modified: out });
             if (out !== null && out !== undefined) {
@@ -560,6 +561,7 @@ export class HelperStrategy {
             }
         } else if (m.body.startsWith("skipped:") && this.matching(m.url, m.method, c.type, "body")) {
             dlogLevel("helper", "debug", `onResponseBody not run (${m.body.slice(8)}): ${m.url}`);
+            noteHelperSkip(m.url, m.body.slice(8), pairsToObject(m.headers)["content-type"] || "");
         }
         this.send(headersChanged ? { t: "continue", id: m.id, headers } : { t: "continue", id: m.id });
     }

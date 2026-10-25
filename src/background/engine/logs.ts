@@ -111,10 +111,26 @@ export function bodyObservedSince(scriptId: string, url: string, since: number):
     return e !== undefined && e >= since;
 }
 
+/** url → the latest body the helper didn't hand to onResponseBody, and why ("binary", "empty"…) */
+const helperSkips = new Map<string, { at: number; why: string; contentType: string }>();
+
+export function noteHelperSkip(url: string, why: string, contentType: string): void {
+    helperSkips.delete(url);
+    helperSkips.set(url, { at: Date.now(), why, contentType });
+    if (helperSkips.size > MAX_TAPS) helperSkips.delete(helperSkips.keys().next().value!);
+}
+
+/** Did the helper skip the body of url at or after `since`? */
+export function helperSkipSince(url: string, since: number): { why: string; contentType: string } | undefined {
+    const s = helperSkips.get(url);
+    return s && s.at >= since ? s : undefined;
+}
+
 /** test seam */
 export function __resetTaps(): void {
     bodyTaps.clear();
     lastScriptError.clear();
+    helperSkips.clear();
 }
 
 /** A handler ran for `url` but changed nothing: a DEBUG line that marks the request "observed". */

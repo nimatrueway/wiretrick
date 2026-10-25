@@ -1,8 +1,8 @@
 /** "onResponseBody never ran": reason selection, throttle, and the tap registry. */
 import { describe, it, expect, beforeEach } from "vitest";
-import { frameHasHook, isLoopbackUrl, makeMissedThrottle, missedReason, missedWhat, routeProblem, MISSED_REASONS, type MissedCase } from "../src/shared/missedTap";
+import { frameHasHook, helperSkipReason, isLoopbackUrl, makeMissedThrottle, missedReason, missedWhat, routeProblem, MISSED_REASONS, type MissedCase } from "../src/shared/missedTap";
 import { outcomeKind, missedLine } from "../src/shared/netTypes";
-import { __resetTaps, bodyObservedSince, log, logObserved } from "../src/background/engine/logs";
+import { __resetTaps, bodyObservedSince, helperSkipSince, log, logObserved, noteHelperSkip } from "../src/background/engine/logs";
 
 const base: MissedCase = { strategy: "debugger", type: "main_frame", firefox: false, mv3: false, fromCache: false, helperActive: false, cdpWarned: false };
 const reason = (over: Partial<MissedCase>) => missedReason({ ...base, ...over });
@@ -36,6 +36,26 @@ describe("missedReason", () => {
         expect(reason({ strategy: "helper", helperActive: true, loopback: true })).toBe(MISSED_REASONS.helperLoopback);
         expect(reason({ strategy: "helper", loopback: true })).toBe(MISSED_REASONS.helperLoopback);
         expect(reason({ loopback: true })).toBe(MISSED_REASONS.fallback);
+    });
+
+    it("helper skipped the body on purpose: says why; an empty body (204/304/HEAD) isn't a miss", () => {
+        const on = { strategy: "helper" as const, helperActive: true };
+        expect(reason({ ...on, helperSkip: { why: "empty", contentType: "" } })).toBeNull();
+        const bin = reason({ ...on, helperSkip: { why: "binary", contentType: "video/mp4; codecs=avc1" } })!;
+        expect(bin).toContain("binary bodies (video/mp4)");
+        expect(reason({ ...on, helperSkip: { why: "too-large", contentType: "" } })).toContain("64 MB");
+        expect(reason({ ...on, helperSkip: { why: "stream", contentType: "text/event-stream" } })).toContain("streamed");
+        expect(helperSkipReason({ why: "weird", contentType: "" })).toContain("(weird)");
+        // only the helper's own skips count
+        expect(reason({ strategy: "debugger", helperSkip: { why: "binary", contentType: "" } })).toBe(MISSED_REASONS.fallback);
+    });
+
+    it("helper skip registry: per URL, since the request started", () => {
+        __resetTaps();
+        noteHelperSkip("https://v.example/videoplayback?a=1", "binary", "video/mp4");
+        expect(helperSkipSince("https://v.example/videoplayback?a=1", Date.now() - 1000)).toMatchObject({ why: "binary", contentType: "video/mp4" });
+        expect(helperSkipSince("https://v.example/videoplayback?a=1", Date.now() + 1000)).toBeUndefined();
+        expect(helperSkipSince("https://v.example/other", 0)).toBeUndefined();
     });
 
     it("isLoopbackUrl", () => {
