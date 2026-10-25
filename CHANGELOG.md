@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.9.16] - 2026-10-25
+
 ### Changed
 
 - `onResponseBody` handlers may return nothing (`void` / `undefined` / `null`) to leave the body as it is — now in the typings too, like every other handler. Any body returned counts as modified, even the one the handler received: bodies are no longer compared, so `(ctx, body) => body` re-encodes and serves the body (use a handler that returns nothing to only read it).
@@ -492,7 +494,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.9.15...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.9.16...HEAD
+[0.9.16]: https://github.com/nimatrueway/wiretrick/compare/v0.9.15...v0.9.16
 [0.9.15]: https://github.com/nimatrueway/wiretrick/compare/v0.9.14...v0.9.15
 [0.9.14]: https://github.com/nimatrueway/wiretrick/compare/v0.9.13...v0.9.14
 [0.9.13]: https://github.com/nimatrueway/wiretrick/compare/v0.9.12...v0.9.13
