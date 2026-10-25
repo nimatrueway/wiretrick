@@ -14,9 +14,9 @@
  * report the handlers it kept from running (see precedence.ts).
  */
 import { formatScriptError } from "./scriptError";
-import { effectiveStrategy, routeGroups, routeMatches, type Strategy } from "./route";
+import { effectiveStrategy, routeGroups, routeMatches, takesBinary, takesText, type Strategy } from "./route";
 import type { Routed, ScriptHandlers } from "./compile";
-import { observedLine, type NetKind } from "./netTypes";
+import { kindSkipLine, observedLine, type NetKind } from "./netTypes";
 import { HeaderStack, overrideLine, type Who } from "./precedence";
 import { makeMissedThrottle } from "./missedTap";
 
@@ -42,13 +42,13 @@ export interface OpFilter {
     defaultStrategy?: Strategy;
     /** restrict to these script ids */
     onlyIds?: string[];
-    /** the body is binary: only `binary: true` onResponseBody routes run */
+    /** onResponseBody: the body is binary (true) or text (false); routes run per their `binary` option. undefined: no check */
     binary?: boolean;
 }
 
 export function handlerRuns(h: Routed, f: OpFilter): boolean {
     if (f.tier && effectiveStrategy(h.route, f.defaultStrategy) !== f.tier) return false;
-    if (f.binary && !h.route.binary) return false;
+    if (f.binary !== undefined && !(f.binary ? takesBinary(h.route) : takesText(h.route))) return false;
     return routeMatches(h.route, f.url, f.method, f.resourceType);
 }
 
@@ -142,7 +142,15 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
         groups: routeGroups(h.route, url),
     });
     const binaryBody = op === "transform" && args.body instanceof Uint8Array;
-    const list = matching(scripts, op, { url, method, resourceType: known, tier: args.tier, defaultStrategy: args.defaultStrategy, onlyIds: args.onlyIds, binary: binaryBody }, env);
+    const filter: OpFilter = { url, method, resourceType: known, tier: args.tier, defaultStrategy: args.defaultStrategy, onlyIds: args.onlyIds };
+    const list = matching(scripts, op, op === "transform" ? { ...filter, binary: binaryBody } : filter, env);
+    if (op === "transform") {
+        // a script whose every matching route opted out of this kind of body: say so (no "never ran" warning)
+        const ran = new Set(list.map((m) => m.s.id));
+        for (const { s, handlers } of matching(scripts, op, filter, { log: env.log })) {
+            if (!ran.has(s.id) && handlers.every((h) => h.route.binary !== undefined)) env.log(s.id, "debug", kindSkipLine(s.name, url, binaryBody), "observed");
+        }
+    }
     const observed = (s: OpScript, handler: string, why?: string) => env.log(s.id, "debug", observedLine(s.name, handler, url, why), "observed");
 
     if (op === "requestDecision") {
@@ -211,8 +219,8 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
         for (const { s, handlers } of list) {
             for (const h of handlers) {
                 try {
-                    // a handler without `binary: true` only ever sees text
-                    if (out instanceof Uint8Array && !h.route.binary) out = new TextDecoder().decode(out);
+                    // a text-only handler only ever sees text
+                    if (out instanceof Uint8Array && !takesBinary(h.route)) out = new TextDecoder().decode(out);
                     const result: any = await h.fn({ ...base(h), contentType: args.contentType, status: args.status }, out);
                     if (result !== undefined && result !== null) {
                         const before = typeof out === "string" ? out.length : out.byteLength;

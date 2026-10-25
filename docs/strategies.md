@@ -296,12 +296,13 @@ The reason is picked from the situation:
 - on `helper` and the helper isn't running → start/install the helper;
 - on `helper` and the helper skipped the body on purpose → says why: a
   binary body (with its Content-Type) and no handler with `binary: true`
-  — add it to the route, or add the type to `settings.textTypes` if it's
-  really text ([binary bodies](scripting.md#binary-bodies)) — one over
+  or `"both"` — add one to the route, add the type to
+  `settings.textTypes` if it's really text, or set `binary: false` to
+  silence it ([binary bodies](scripting.md#binary-bodies)) — one over
   64 MB, or a stream (server-sent events, `multipart/x-mixed-replace`). A
   response with no body (204, 304, HEAD) isn't warned about at all;
 - on `debugger`, `page` or `extension` and the body is binary with no
-  `binary: true` handler → the same binary message;
+  `binary: true` / `"both"` handler → the same binary message;
 - served from the browser cache → reload with the cache disabled (hard
   reload);
 - on `debugger` but the debugger wasn't attached in time → the existing

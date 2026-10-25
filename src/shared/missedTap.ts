@@ -4,7 +4,7 @@
  * handler route that can never run where it is. Pure, so it is
  * unit-tested; the pipeline gathers the inputs (see pipeline.ts).
  */
-import type { RouteKind, Strategy } from "./route";
+import type { BinaryOption, RouteKind, Strategy } from "./route";
 import { strategyUnsupported } from "./strategyInfo";
 
 export interface MissedCase {
@@ -25,7 +25,7 @@ export interface MissedCase {
     loopback?: boolean;
     /** the helper saw the response but didn't hand its body to handlers (proxy.rs skip_body_reason) */
     helperSkip?: { why: string; contentType: string };
-    /** a strategy saw the response but didn't hand its body to handlers (e.g. binary, no `binary: true` route); counts only for its own strategy */
+    /** a strategy saw the response but didn't hand its body to handlers (e.g. binary, no binary route); counts only for its own strategy */
     bodySkip?: { strategy: Strategy; why: string; contentType: string };
 }
 
@@ -45,7 +45,7 @@ export function bodySkipReason(s: { why: string; contentType: string }): string 
         case "empty":
             return null;
         case "binary":
-            return `the body is binary${ct}, and binary bodies only reach onResponseBody handlers with \`binary: true\` — add that to the route, or add the type to settings.textTypes if it is really text`;
+            return `the body is binary${ct}, and binary bodies only reach onResponseBody handlers with \`binary: true\` (binary only) or \`binary: "both"\` — add one to the route, add the type to settings.textTypes if it is really text, or set \`binary: false\` to silence this warning`;
         case "too-large":
             return `the body is over the helper's 64 MB limit${ct}, so it was passed through untouched`;
         case "stream":
@@ -56,6 +56,11 @@ export function bodySkipReason(s: { why: string; contentType: string }): string 
 }
 
 export const helperSkipReason = bodySkipReason;
+
+/** a strategy skipped a binary body and every one of the script's matching routes said `binary: false`: text only by choice, no warning */
+export function binaryOptedOut(skip: MissedCase["bodySkip"], strategy: Strategy, binaryOptions: (BinaryOption | undefined)[]): boolean {
+    return skip?.why === "binary" && skip.strategy === strategy && binaryOptions.length > 0 && binaryOptions.every((b) => b === false);
+}
 
 /** Types never checked: sockets and fire-and-forget pings. */
 export const MISSED_SKIP_TYPES = new Set(["websocket", "ping", "beacon", "csp_report", "webbundle", "webtransport"]);

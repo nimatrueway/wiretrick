@@ -22,7 +22,7 @@ import { isThenable, toRunnableJs } from "../../shared/compile";
 import "../../shared/transpile";
 import { log, getScriptErrors, getScriptTypeErrors, getScriptRuleErrors, getScriptRouteWarnings, setScriptRouteWarnings, bodyObservedSince, bodySkipSince, noteBodySkip } from "./logs";
 import { missedLine } from "../../shared/netTypes";
-import { frameHasHook as pingHook, isLoopbackUrl, missedReason, missedWhat, routeProblem, MISSED_SKIP_TYPES } from "../../shared/missedTap";
+import { binaryOptedOut, frameHasHook as pingHook, isLoopbackUrl, missedReason, missedWhat, routeProblem, MISSED_SKIP_TYPES } from "../../shared/missedTap";
 import { resolveParamValues } from "../../shared/scriptDef";
 import type { ShippedLib } from "../../shared/scriptImports";
 import { effectiveStrategy, hookCanSee, routeLabel, routeMatches, setDefaultStrategy, type RouteMeta, type Strategy } from "../../shared/route";
@@ -174,6 +174,8 @@ export function createPipeline(
                 if (done.has(w.id)) continue;
                 done.add(w.id);
                 if (bodyObservedSince(w.id, d.url, start - 250, d.requestId)) continue;
+                // `binary: false` on every matching route: text only, by choice
+                if (binaryOptedOut(bodySkip, w.strategy, routes.filter((r) => r.id === w.id).map((r) => r.route.binary))) continue;
                 const reason = missedReason({
                     strategy: w.strategy,
                     type: d.type,

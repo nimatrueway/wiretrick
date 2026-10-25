@@ -162,9 +162,13 @@ declare namespace Wiretrick {
     /** Full route form for `wt.onResponseBody`. */
     interface BodyRouteOptions extends RouteOptions {
         /**
-         * Also receive binary bodies (images, video, …) as a `Uint8Array`.
-         * Without it the handler gets text bodies only. Which Content-Types
-         * are text is set by `settings.textTypes`.
+         * Which bodies the handler gets. Which Content-Types are text is set
+         * by `settings.textTypes`.
+         * - unset: text only (a string); a binary body it misses is warned
+         *   about in the Log view
+         * - `false`: text only, without that warning
+         * - `true`: binary only (images, video, …), as a `Uint8Array`
+         * - `"both"`: text as a string and binary as a `Uint8Array`
          *
          * Binary bodies are buffered whole and the response waits for the
          * handler — keep these routes narrow.
@@ -172,7 +176,7 @@ declare namespace Wiretrick {
          * @example { url: "*://cdn.example.com/*.png", binary: true }
          * @see https://github.com/nimatrueway/wiretrick/blob/main/docs/scripting.md#binary-bodies
          */
-        binary?: boolean;
+        binary?: boolean | "both";
     }
 
     /** Full route form for `wt.onDocument`. */
@@ -621,8 +625,10 @@ declare const wt: {
      * the new one. Matching transforms compose in order.
      *
      * The handler gets text bodies (a string) only, unless its route sets
-     * `binary: true` — then binary bodies (images, video, …) arrive too,
-     * as a `Uint8Array`. Which Content-Types are text: `settings.textTypes`.
+     * `binary: true` — binary bodies (images, video, …) only, as a
+     * `Uint8Array` — or `binary: "both"`. `binary: false` keeps text only
+     * and silences the "body is binary" warning. Which Content-Types are
+     * text: `settings.textTypes`.
      *
      * Needs a strategy that reads bodies: `"helper"`, `"debugger"`, `"page"`
      * (page fetch/XHR only) or `"extension"` on Firefox. Chromium's
@@ -647,6 +653,10 @@ declare const wt: {
     onResponseBody(
         route: Wiretrick.UrlPatterns | (Wiretrick.BodyRouteOptions & { binary?: false }),
         transform: (ctx: Wiretrick.BodyCtx, body: string) => Wiretrick.Awaitable<string | Uint8Array>
+    ): void;
+    onResponseBody(
+        route: Wiretrick.BodyRouteOptions & { binary: true },
+        transform: (ctx: Wiretrick.BodyCtx, body: Uint8Array) => Wiretrick.Awaitable<string | Uint8Array>
     ): void;
     onResponseBody(
         route: Wiretrick.BodyRouteOptions,

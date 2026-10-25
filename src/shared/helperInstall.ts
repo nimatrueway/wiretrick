@@ -17,7 +17,7 @@ export const helperInstallShell = (windows = isWindows()): string => (windows ? 
  * independently (helper/Cargo.toml) — bump this only when the extension
  * starts relying on new helper behavior, so users reinstall the helper only
  * when they actually have to. */
-export const MIN_HELPER_VERSION = "0.3.0";
+export const MIN_HELPER_VERSION = "0.4.0";
 
 /** True when the helper's `x.y.z` version is below `required`. */
 export function isHelperOutdated(helperVersion: string | undefined, required: string = MIN_HELPER_VERSION): boolean {

@@ -1,6 +1,6 @@
 /** "onResponseBody never ran": reason selection, throttle, and the tap registry. */
 import { describe, it, expect, beforeEach } from "vitest";
-import { frameHasHook, helperSkipReason, isLoopbackUrl, makeMissedThrottle, missedReason, missedWhat, routeProblem, MISSED_REASONS, type MissedCase } from "../src/shared/missedTap";
+import { binaryOptedOut, bodySkipReason, frameHasHook, helperSkipReason, isLoopbackUrl, makeMissedThrottle, missedReason, missedWhat, routeProblem, MISSED_REASONS, type MissedCase } from "../src/shared/missedTap";
 import { outcomeKind, missedLine } from "../src/shared/netTypes";
 import { __resetTaps, bodyObservedSince, bodySkipSince, helperSkipSince, log, logObserved, noteBodySkip, noteHelperSkip } from "../src/background/engine/logs";
 
@@ -50,6 +50,20 @@ describe("missedReason", () => {
         expect(helperSkipReason({ why: "weird", contentType: "" })).toContain("(weird)");
         // only the helper's own skips count
         expect(reason({ strategy: "debugger", helperSkip: { why: "binary", contentType: "" } })).toBe(MISSED_REASONS.fallback);
+    });
+
+    it("binary: false on every matching route opts out of the binary warning (and the warning says so)", () => {
+        const skip = { strategy: "helper" as const, why: "binary", contentType: "image/png" };
+        expect(binaryOptedOut(skip, "helper", [false])).toBe(true);
+        expect(binaryOptedOut(skip, "helper", [false, false])).toBe(true);
+        expect(binaryOptedOut(skip, "helper", [false, undefined])).toBe(false);
+        expect(binaryOptedOut(skip, "helper", [undefined])).toBe(false);
+        expect(binaryOptedOut(skip, "helper", [])).toBe(false);
+        expect(binaryOptedOut(skip, "debugger", [false])).toBe(false);
+        expect(binaryOptedOut({ ...skip, why: "too-large" }, "helper", [false])).toBe(false);
+        expect(binaryOptedOut(undefined, "helper", [false])).toBe(false);
+        expect(bodySkipReason(skip)).toContain("set `binary: false` to silence this warning");
+        expect(bodySkipReason(skip)).toContain('`binary: "both"`');
     });
 
     it("debugger/page/extension binary skips explain themselves — only for their own strategy", () => {

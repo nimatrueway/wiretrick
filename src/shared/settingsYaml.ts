@@ -64,7 +64,7 @@ export const isStrategy = (v: unknown): boolean => typeof v === "string" && (STR
 /** a valid settings.textTypes value: a non-empty list of non-empty strings */
 export const isTextTypes = (v: unknown): v is string[] => Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === "string" && x.trim() !== "");
 
-export const TEXT_TYPES_DESC = "Content-Types onResponseBody gets as text (globs; `*` = anything). Other bodies are binary and reach only handlers with `binary: true`.";
+export const TEXT_TYPES_DESC = "Content-Types onResponseBody gets as text (globs; `*` = anything). Other bodies are binary and reach only handlers with `binary: true` or `binary: both`.";
 
 export interface ScriptSettingsState {
     name: string;

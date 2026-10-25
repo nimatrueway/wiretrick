@@ -296,19 +296,21 @@ wt.onResponseBody({ url: "https://x.com/*", strategy: "helper" }, (c, body) => (
         expect(r2.headers).toContainEqual(["x-seen", "404"]);
     });
 
-    it("binary bodies reach binary: true onResponseBody routes as bytes", async () => {
-        const p = new HelperStrategy();
-        await ready(p, [makeScript("a", `wt.onResponseBody({ url: "https://x.com/*", strategy: "helper", binary: true }, (c, body) => typeof body === "string" ? "text:" + body : "bytes:" + body.length);`)]);
-        expect(fake.sent.find((m) => m.t === "config").routes[0].binary).toBe(true);
-        fake.deliver({ t: "chunk", id: 1, data: bytesToBase64(new Uint8Array([0, 1, 2, 3])) });
-        fake.deliver({ t: "res", id: 1, url: "https://x.com/b.png", method: "GET", status: 200, headers: [["content-type", "image/png"]], body: "chunks" });
-        // text still arrives as a string on a binary route
-        fake.deliver({ t: "chunk", id: 2, data: bytesToBase64(new TextEncoder().encode("hi")) });
-        fake.deliver({ t: "res", id: 2, url: "https://x.com/a.svg", method: "GET", status: 200, headers: [["content-type", "image/svg+xml"]], body: "chunks" });
-        await settle(40);
-        expect(dec(reply(1).body)).toBe("bytes:4");
-        expect(dec(reply(2).body)).toBe("text:hi");
-    });
+    for (const binary of ["true", '"both"']) {
+        it(`binary bodies reach binary: ${binary} onResponseBody routes as bytes; text only "both"`, async () => {
+            const p = new HelperStrategy();
+            await ready(p, [makeScript("a", `wt.onResponseBody({ url: "https://x.com/*", strategy: "helper", binary: ${binary} }, (c, body) => typeof body === "string" ? "text:" + body : "bytes:" + body.length);`)]);
+            expect(fake.sent.find((m) => m.t === "config").routes[0].binary).toBe(true);
+            fake.deliver({ t: "chunk", id: 1, data: bytesToBase64(new Uint8Array([0, 1, 2, 3])) });
+            fake.deliver({ t: "res", id: 1, url: "https://x.com/b.png", method: "GET", status: 200, headers: [["content-type", "image/png"]], body: "chunks" });
+            fake.deliver({ t: "chunk", id: 2, data: bytesToBase64(new TextEncoder().encode("hi")) });
+            fake.deliver({ t: "res", id: 2, url: "https://x.com/a.svg", method: "GET", status: 200, headers: [["content-type", "image/svg+xml"]], body: "chunks" });
+            await settle(40);
+            expect(dec(reply(1).body)).toBe("bytes:4");
+            if (binary === "true") expect(reply(2).t).toBe("continue");
+            else expect(dec(reply(2).body)).toBe("text:hi");
+        });
+    }
 
     it("binary bodies skip routes without binary: true (and say why)", async () => {
         __resetTaps();

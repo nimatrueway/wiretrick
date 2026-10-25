@@ -11,7 +11,7 @@
  */
 import { urlGlobOf } from "../../../shared/matcher";
 import { runOp, type BodyOp, type OpScript } from "../../../shared/bodyOps";
-import { routeMatches, type RouteKind } from "../../../shared/route";
+import { routeMatches, takesBinary, type RouteKind } from "../../../shared/route";
 import type { Script } from "../scriptStore";
 import { log, noteBodySkip } from "../logs";
 import { bodyKind } from "../../../shared/bodyKind";
@@ -207,7 +207,7 @@ export class DebuggerStrategy {
     }
 
     private wants(url: string, method: string, type: string, kinds: RouteKind[], binary = false): boolean {
-        return this.owned.some((o) => kinds.includes(o.route.kind) && (!binary || o.route.binary) && routeMatches(o.route, url, method, type));
+        return this.owned.some((o) => kinds.includes(o.route.kind) && (!binary || takesBinary(o.route)) && routeMatches(o.route, url, method, type));
     }
 
     /** Forget per-tab state on tab close. */

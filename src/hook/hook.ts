@@ -10,7 +10,7 @@ import { formatScriptError } from "../shared/scriptError";
 import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
 import { scriptFunction } from "../shared/scriptFn";
 import { makeLibRequire, type ShippedLib } from "../shared/scriptImports";
-import { routeMatches, type DocumentWhen, type RouteMeta } from "../shared/route";
+import { routeMatches, takesBinary, type DocumentWhen, type RouteMeta } from "../shared/route";
 import { makePageShim, domHandlersFor, scheduleDocument } from "../shared/pageShim";
 import { bodyKind, setTextTypes } from "../shared/bodyKind";
 
@@ -38,7 +38,7 @@ import { bodyKind, setTextTypes } from "../shared/bodyKind";
     /** does an onResponseBody route with `binary: true` match? (binary bodies go only to those) */
     const wantsBinary = (url: string, method: string): boolean => {
         try {
-            return routes.some((r) => r.kind === "onResponseBody" && r.binary && routeMatches(r, url, method));
+            return routes.some((r) => r.kind === "onResponseBody" && takesBinary(r) && routeMatches(r, url, method));
         } catch {
             return false;
         }

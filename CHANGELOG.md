@@ -7,6 +7,22 @@ its section below.
 
 ## [Unreleased]
 
+### Added
+
+- `binary: "both"` on an `onResponseBody` route: the handler gets text
+  bodies as a string and binary ones as a `Uint8Array`.
+- `binary: false` keeps a handler text-only and silences the "the body is
+  binary" warning for it; the warning now mentions this.
+
+### Changed
+
+- `binary: true` now means binary bodies **only** — text bodies skip the
+  handler. Use `binary: "both"` for the old behavior.
+- The local helper is now v0.4.0 and the extension requires it: helpers
+  from before v0.9.11 don't know about binary routes or
+  `settings.textTypes` (they still treated HLS playlists as binary), so
+  the extension now asks you to reinstall.
+
 ### Fixed
 
 - Two requests to the same URL (e.g. a playlist fetched twice, once from

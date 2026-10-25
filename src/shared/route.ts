@@ -43,9 +43,15 @@ export interface RouteMeta {
     strategy?: Strategy;
     /** onDocument only */
     when?: DocumentWhen;
-    /** onResponseBody only: also receive binary bodies (Uint8Array) */
-    binary?: boolean;
+    /** onResponseBody only: which bodies the handler gets (see takesBinary / takesText) */
+    binary?: BinaryOption;
 }
+
+/** onResponseBody `binary`: unset/false = text only (false also silences the "body is binary" warning), true = binary only, "both" */
+export type BinaryOption = boolean | "both";
+
+export const takesBinary = (r: { binary?: BinaryOption }): boolean => r.binary === true || r.binary === "both";
+export const takesText = (r: { binary?: BinaryOption }): boolean => r.binary !== true;
 
 const IS_FIREFOX_RT = typeof (globalThis as any).browser !== "undefined" && typeof (globalThis as any).browser?.webRequest?.filterResponseData === "function";
 
@@ -119,8 +125,8 @@ export function normalizeRoute(kind: RouteKind, raw: unknown, index: number): Ro
     if (obj.when !== undefined) throw new Error(`${where}: "when" applies to onDocument only`);
     if (obj.binary !== undefined) {
         if (kind !== "onResponseBody") throw new Error(`${where}: "binary" applies to onResponseBody only`);
-        if (typeof obj.binary !== "boolean") throw new Error(`${where}: binary must be true or false, got ${typeof obj.binary}`);
-        if (obj.binary) route.binary = true;
+        if (typeof obj.binary !== "boolean" && obj.binary !== "both") throw new Error(`${where}: binary must be true, false or "both", got ${JSON.stringify(obj.binary)}`);
+        route.binary = obj.binary;
     }
     if (obj.methods !== undefined) {
         const m = list(obj.methods, "methods", where).map((x) => x.toUpperCase());

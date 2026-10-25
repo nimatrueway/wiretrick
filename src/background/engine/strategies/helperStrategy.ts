@@ -14,7 +14,7 @@ import { runOp, type BodyOp, type OpScript } from "../../../shared/bodyOps";
 import { bodyKind, getTextTypes } from "../../../shared/bodyKind";
 import { bytesToBase64, base64ToBytes } from "../../../shared/bytesPack";
 import { hostPatternOf, type SystemProxyInfo } from "../../../shared/pac";
-import { routeMatches, type RouteMeta } from "../../../shared/route";
+import { routeMatches, takesBinary, type RouteMeta } from "../../../shared/route";
 import { dlogLevel } from "../../../shared/debugLog";
 import { helperInstallCommand, helperInstallShell, isHelperOutdated, MIN_HELPER_VERSION } from "../../../shared/helperInstall";
 import type { Script } from "../scriptStore";
@@ -41,7 +41,7 @@ export interface HelperRoute {
     req: boolean;
     resHeaders: boolean;
     body: boolean;
-    /** onResponseBody with `binary: true`: the helper sends binary bodies too */
+    /** onResponseBody with `binary: true` / "both": the helper sends binary bodies too */
     binary: boolean;
 }
 
@@ -56,7 +56,7 @@ export function helperRouteOf(route: RouteMeta): HelperRoute {
         req: route.kind === "onRequest" || route.kind === "replaceResponse",
         resHeaders: route.kind === "onResponseHeaders",
         body: route.kind === "onResponseBody",
-        binary: route.kind === "onResponseBody" && !!route.binary,
+        binary: route.kind === "onResponseBody" && takesBinary(route),
     };
 }
 

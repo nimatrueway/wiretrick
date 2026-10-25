@@ -149,32 +149,43 @@ wt.onResponseBody(
 
 ### Binary bodies
 
-`onResponseBody` handlers get **text** bodies only, as a string. Add
-`binary: true` to the route (only `onResponseBody` routes accept it) to
-also get **binary** bodies — images, video, audio, fonts, wasm, PDFs,
-archives — as a `Uint8Array`:
+`onResponseBody` handlers get **text** bodies only, as a string. The
+route's `binary` option (only `onResponseBody` routes accept it) picks
+which bodies the handler gets — **binary** ones are images, video, audio,
+fonts, wasm, PDFs, archives, as a `Uint8Array`:
+
+| `binary`   | text bodies | binary bodies | a binary body it misses           |
+| ---------- | ----------- | ------------- | --------------------------------- |
+| unset      | ✓ string    | —             | "never ran" warning in the Log    |
+| `false`    | ✓ string    | —             | silent (a debug line says why)    |
+| `true`     | —           | ✓ `Uint8Array`| —                                 |
+| `"both"`   | ✓ string    | ✓ `Uint8Array`| —                                 |
 
 ```ts
 // swap a logo for another image
 wt.onResponseBody({ url: "*://example.com/img/logo*.png", binary: true }, async (ctx, body) => {
-    if (typeof body === "string") return; // a text body: leave it alone
     const res = await fetch("https://example.org/other.png");
     return new Uint8Array(await res.arrayBuffer());
 });
 
-// look into HLS video segments without changing them
-wt.onResponseBody({ url: "*://cdn.example.com/*.ts", binary: true }, (ctx, body) => {
-    if (body instanceof Uint8Array) console.log(ctx.url, body.length, "bytes, sync byte", body[0] === 0x47);
+// look into everything on a CDN without changing it: playlists and segments
+wt.onResponseBody({ url: "*://cdn.example.com/*", binary: "both" }, (ctx, body) => {
+    if (typeof body === "string") console.log(ctx.url, "text", body.length, "chars");
+    else console.log(ctx.url, body.length, "bytes, sync byte", body[0] === 0x47);
 });
+
+// text only, and no warning for the images it skips
+wt.onResponseBody({ url: "*://example.com/*", binary: false }, (ctx, body) => body);
 ```
 
-A `binary: true` handler still gets text bodies as a string, so check
-`typeof body`. Return values work as for text: a string, a `Uint8Array`
-or an object (JSON) replaces the body; `undefined` or the same body
-leaves it unchanged. When a body is binary only the `binary: true`
-handlers run; the others are skipped silently (the
-"onResponseBody never ran" warning explains it when *no* handler could
-take the body).
+A `"both"` handler gets either, so check `typeof body`. Return values
+work as for text: a string, a `Uint8Array` or an object (JSON) replaces
+the body; `undefined` or the same body leaves it unchanged. Handlers
+whose `binary` option excludes a body are skipped; when that leaves none
+of a script's handlers for a body, the "onResponseBody never ran" warning
+explains it — unless every one of them set `binary` explicitly (`false`,
+or `true` on a text body), which counts as a choice: only a DEBUG line
+records it.
 
 **Text or binary** is decided once per response, the same way on every
 strategy, from the `Content-Type` header (lowercased, parameters after
@@ -207,14 +218,15 @@ labeled `text/*` is therefore decoded as UTF-8, and if a handler rewrites
 it the bytes are corrupted — fix it by narrowing `textTypes`. A text body
 with an unlisted type (say `application/x-subrip`) is binary, so plain
 handlers never see it: add the type to `textTypes`, or use `binary: true`
-and decode it with `new TextDecoder().decode(body)`.
+(or `"both"`) and decode it with `new TextDecoder().decode(body)`.
 
 **Limitations and implications:**
 
 - The whole body is buffered and the response is held until every handler
   finishes — for binary bodies too. A tapped video segment or large
   download costs memory and latency, and video playback can stall. Keep
-  `binary: true` routes narrow (`url`, `resourceTypes`, `methods`).
+  `binary: true` / `"both"` routes narrow (`url`, `resourceTypes`,
+  `methods`).
 - `helper` passes bodies up to 64 MB; larger ones are skipped (and the
   warning says so).
 - On the MV3 build (every strategy) and on `page`, bodies cross extension

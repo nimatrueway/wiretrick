@@ -20,12 +20,13 @@
  */
 import { recordNetBody } from "../../network";
 import { isThenable, type Routed } from "../../../shared/compile";
-import { effectiveStrategy, routeGroups, routeLabel, routeMatches, type RouteMeta } from "../../../shared/route";
+import { effectiveStrategy, routeGroups, routeLabel, routeMatches, takesBinary, takesText, type RouteMeta } from "../../../shared/route";
 import { formatScriptError } from "../../../shared/scriptError";
 import type { HeaderChanges, HookDisposition, InterceptionStrategy, MaybePromise, WebRequestDetailsLike } from "./types";
 import type { Script } from "../scriptStore";
 import { log, logObserved, noteBodySkip, scriptError } from "../logs";
 import { bodyKind } from "../../../shared/bodyKind";
+import { kindSkipLine } from "../../../shared/netTypes";
 import { dlogLevel } from "../../../shared/debugLog";
 import { IS_FIREFOX } from "./helperState";
 import { compileMv2, ownsAny } from "./strategyScripts";
@@ -213,7 +214,7 @@ export class ExtensionStrategy implements InterceptionStrategy {
             pendingFirefoxStreams.delete(details.requestId);
             // a binary Content-Type with no `binary: true` route: don't buffer it at all
             const ct = contentTypeOf(details.responseHeaders) || "";
-            const binaryOk = pending.list.some((e) => e.handlers.some((h) => h.route.binary));
+            const binaryOk = pending.list.some((e) => e.handlers.some((h) => takesBinary(h.route)));
             if (bodyKind(ct, null) === "binary" && !binaryOk) {
                 noteBodySkip("extension", details.url, "binary", ct, details.requestId);
                 trace(details, `binary body (${ct}), no binary: true route — onResponseBody skipped ${details.url}`);
@@ -360,21 +361,25 @@ export class ExtensionStrategy implements InterceptionStrategy {
                 const binary = bodyKind(contentType, bytes) === "binary";
                 let body: string | Uint8Array = binary ? bytes : decoder.decode(bytes);
                 const original = body;
-                if (binary && !list.some((e) => e.handlers.some((h) => h.route.binary))) noteBodySkip("extension", details.url, "binary", contentType || "", details.requestId);
-                for (const { id: scriptId, name: scriptName, handlers } of list) for (const h of handlers) {
-                    if (binary && !h.route.binary) continue;
-                    const ctx = { ...ctxFor(details, tabUrl, h.route), contentType };
-                    // a text body an earlier binary route returned as bytes is still text here
-                    if (typeof body !== "string" && !h.route.binary) body = decoder.decode(body);
-                    try {
-                        const out = await h.fn(ctx, body);
-                        if (out !== undefined && out !== null && out !== body) {
-                            const size = (b: any) => (typeof b === "string" ? b.length : (b?.byteLength ?? 0));
-                            log(details.tabId, `[${scriptName}] onResponseBody applied (${size(body)}b → ${size(out)}b) ${details.url}`, "info", scriptId, undefined, undefined, details.requestId);
-                            body = out;
-                        } else logObserved(details.tabId, scriptName, "onResponseBody", details.url, scriptId, details.requestId);
-                    } catch (e: any) {
-                        scriptError(scriptId, formatScriptError(scriptName, e, "onResponseBody"));
+                if (binary && !list.some((e) => e.handlers.some((h) => takesBinary(h.route)))) noteBodySkip("extension", details.url, "binary", contentType || "", details.requestId);
+                for (const { id: scriptId, name: scriptName, handlers } of list) {
+                    const runs = handlers.filter((h) => (binary ? takesBinary(h.route) : takesText(h.route)));
+                    // every route opted out of this kind of body: say so (no "never ran" warning)
+                    if (!runs.length && handlers.every((h) => h.route.binary !== undefined)) log(details.tabId, kindSkipLine(scriptName, details.url, binary), "debug", scriptId, "observed", undefined, details.requestId);
+                    for (const h of runs) {
+                        const ctx = { ...ctxFor(details, tabUrl, h.route), contentType };
+                        // a text body an earlier binary route returned as bytes is still text here
+                        if (typeof body !== "string" && !takesBinary(h.route)) body = decoder.decode(body);
+                        try {
+                            const out = await h.fn(ctx, body);
+                            if (out !== undefined && out !== null && out !== body) {
+                                const size = (b: any) => (typeof b === "string" ? b.length : (b?.byteLength ?? 0));
+                                log(details.tabId, `[${scriptName}] onResponseBody applied (${size(body)}b → ${size(out)}b) ${details.url}`, "info", scriptId, undefined, undefined, details.requestId);
+                                body = out;
+                            } else logObserved(details.tabId, scriptName, "onResponseBody", details.url, scriptId, details.requestId);
+                        } catch (e: any) {
+                            scriptError(scriptId, formatScriptError(scriptName, e, "onResponseBody"));
+                        }
                     }
                 }
                 const outBytes = typeof body === "string" ? encoder.encode(body) : body;

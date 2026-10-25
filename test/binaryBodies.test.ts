@@ -82,11 +82,12 @@ describe("packBytes / unpackBytes", () => {
 });
 
 describe("route binary option", () => {
-    it("onResponseBody only, boolean only", () => {
+    it("onResponseBody only: true, false or \"both\" (false is kept: it silences the warning)", () => {
         expect(normalizeRoute("onResponseBody", { url: "*", binary: true }, 0).binary).toBe(true);
-        expect(normalizeRoute("onResponseBody", { url: "*", binary: false }, 0).binary).toBeUndefined();
+        expect(normalizeRoute("onResponseBody", { url: "*", binary: false }, 0).binary).toBe(false);
+        expect(normalizeRoute("onResponseBody", { url: "*", binary: "both" }, 0).binary).toBe("both");
         expect(normalizeRoute("onResponseBody", "*", 0).binary).toBeUndefined();
-        expect(() => normalizeRoute("onResponseBody", { url: "*", binary: "yes" }, 0)).toThrow(/binary must be true or false, got string/);
+        expect(() => normalizeRoute("onResponseBody", { url: "*", binary: "yes" }, 0)).toThrow(/binary must be true, false or "both", got "yes"/);
         for (const k of ["onRequest", "onResponseHeaders", "replaceResponse"] as const) {
             expect(() => normalizeRoute(k, { url: "*", binary: true }, 0)).toThrow(/onResponseBody only/);
         }
@@ -95,10 +96,13 @@ describe("route binary option", () => {
 });
 
 describe("transform op: binary bodies reach binary routes only", () => {
-    const handlers = (h: Record<string, { fn: Function; binary?: boolean }[]>): any =>
-        Object.fromEntries([...NET_KINDS, "onDocument"].map((k) => [k, (h[k] ?? []).map(({ fn, binary }, i) => ({ fn, route: normalizeRoute(k as any, binary ? { url: "*://x.test/*", binary } : "*://x.test/*", i) }))]));
-    const run = (h: any, body: string | Uint8Array) =>
-        runOp([{ id: "s", name: "S", handlers: handlers(h) }] as any, "transform", { url: "https://x.test/a", method: "GET", body }, { log: () => {} } as any);
+    const handlers = (h: Record<string, { fn: Function; binary?: boolean | "both" }[]>): any =>
+        Object.fromEntries([...NET_KINDS, "onDocument"].map((k) => [k, (h[k] ?? []).map(({ fn, binary }, i) => ({ fn, route: normalizeRoute(k as any, binary !== undefined ? { url: "*://x.test/*", binary } : "*://x.test/*", i) }))]));
+    let logs: string[] = [];
+    const run = (h: any, body: string | Uint8Array) => {
+        logs = [];
+        return runOp([{ id: "s", name: "S", handlers: handlers(h) }] as any, "transform", { url: "https://x.test/a", method: "GET", body }, { log: (_id: string, level: string, msg: string) => void logs.push(`${level} ${msg}`) } as any);
+    };
 
     it("bytes skip text handlers and go to binary ones, staying bytes", async () => {
         const seen: string[] = [];
@@ -120,11 +124,37 @@ describe("transform op: binary bodies reach binary routes only", () => {
         expect(await run({ onResponseBody: [{ fn: () => "changed" }] }, new Uint8Array([1, 0]))).toBeNull();
     });
 
-    it("text reaches both; bytes a binary route returns are decoded for the next text handler", async () => {
+    it("binary: true is binary only: a text body skips it", async () => {
+        const seen: string[] = [];
+        const out = await run({ onResponseBody: [{ fn: () => void seen.push("bin"), binary: true }, { fn: (_c: any, b: string) => b + "!" }] }, "hi");
+        expect(seen).toEqual([]);
+        expect(out).toBe("hi!");
+    });
+
+    it('"both" gets text and bytes', async () => {
+        const seen: string[] = [];
+        const h = { onResponseBody: [{ fn: (_c: any, b: unknown) => void seen.push(typeof b === "string" ? "text" : "bytes"), binary: "both" as const }] };
+        await run(h, "hi");
+        await run(h, new Uint8Array([1, 0]));
+        expect(seen).toEqual(["text", "bytes"]);
+    });
+
+    it("every route opted out by an explicit binary option: a DEBUG line (counts as handled); unset: nothing", async () => {
+        await run({ onResponseBody: [{ fn: () => "x", binary: false }] }, new Uint8Array([1, 0]));
+        expect(logs).toEqual(["debug [S] onResponseBody → not run — the body is binary and the route has binary: false https://x.test/a"]);
+        await run({ onResponseBody: [{ fn: () => "x", binary: true }] }, "hi");
+        expect(logs).toEqual(["debug [S] onResponseBody → not run — the body is text and the route has binary: true (binary only) https://x.test/a"]);
+        await run({ onResponseBody: [{ fn: () => "x" }] }, new Uint8Array([1, 0]));
+        expect(logs).toEqual([]);
+        await run({ onResponseBody: [{ fn: () => "x" }, { fn: () => "x", binary: false }] }, new Uint8Array([1, 0]));
+        expect(logs).toEqual([]);
+    });
+
+    it('"both" gets text; bytes it returns are decoded for the next text handler', async () => {
         const out = await run(
             {
                 onResponseBody: [
-                    { fn: (_c: any, b: string) => new TextEncoder().encode(b + "!"), binary: true },
+                    { fn: (_c: any, b: string) => new TextEncoder().encode(b + "!"), binary: "both" },
                     { fn: (_c: any, b: unknown) => (typeof b === "string" ? b + "?" : "not text") },
                 ],
             },

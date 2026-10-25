@@ -27,6 +27,12 @@ export function missedLine(scriptName: string, handler: string, url: string, wha
     return `[${scriptName}] ${handler}${MISSED_MARK}${url} (${what}) — ${reason}`;
 }
 
+/** DEBUG log line: a script's onResponseBody handlers didn't run because their `binary` option excludes this body (counts as handled) */
+export function kindSkipLine(scriptName: string, url: string, binaryBody: boolean): string {
+    const why = binaryBody ? "the body is binary and the route has binary: false" : "the body is text and the route has binary: true (binary only)";
+    return `[${scriptName}] onResponseBody → not run — ${why} ${url}`;
+}
+
 /** DEBUG log line for a handler that ran without changing anything (ends with the URL, so it annotates the request). */
 export function observedLine(scriptName: string, handler: string, url: string, why?: string): string {
     return `[${scriptName}] ${handler} ${OBSERVED_MARK}${why ? ` — ${why}` : ""} ${url}`;
