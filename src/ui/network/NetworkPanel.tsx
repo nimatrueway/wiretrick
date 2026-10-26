@@ -247,16 +247,72 @@ export function NetworkPanel({ store, listTabs, toolsHost }: { store: NetStore; 
         if (targets.length > 10 && !confirm(`Open ${targets.length} requests in new tabs?`)) return;
         for (const e of targets) (globalThis as any).chrome?.tabs?.create({ url: e.url, active: targets.length === 1 }, () => void chrome.runtime.lastError);
     };
-    const onRowClick = (e: NetEntry, ev: MouseEvent) =>
+    // the row keyboard navigation moves from (the last clicked/moved-to row)
+    const cursor = useRef<string | null>(null);
+    const onRowClick = (e: NetEntry, ev: MouseEvent) => {
+        cursor.current = e.id;
+        // Shift/Ctrl-click suppresses mousedown focus: keep the keys on the table
+        scroller.current?.focus({ preventScroll: true });
         setSel(pickRows(sel, rows.map((r) => r.id), e.id, { shift: ev.shiftKey, toggle: ev.ctrlKey || ev.metaKey }));
+    };
+    /** rows that fit in the table viewport (PageUp/PageDown step) */
+    const pageRows = (): number => {
+        const el = scroller.current;
+        const row = el?.querySelector("tbody tr") as HTMLElement | null;
+        const head = el?.querySelector("thead") as HTMLElement | null;
+        if (!el || !row || !row.offsetHeight) return 10;
+        return Math.max(1, Math.floor((el.clientHeight - (head?.offsetHeight ?? 0)) / row.offsetHeight) - 1);
+    };
+    const moveTo = (i: number, extend: boolean) => {
+        const order = rows.map((r) => r.id);
+        const id = order[Math.max(0, Math.min(order.length - 1, i))];
+        cursor.current = id;
+        // the details pane, when open, follows the moved-to row
+        setSel(extend ? { ...pickRows(sel, order, id, { shift: true, toggle: false }), primary: selected ? id : null } : { ids: new Set([id]), anchor: id, primary: selected ? id : null });
+        const el = scroller.current;
+        const tr = el?.querySelectorAll("tbody tr")[order.indexOf(id)] as HTMLElement | undefined;
+        // keep the row clear of the sticky header
+        if (el) el.style.scrollPaddingTop = `${(el.querySelector("thead") as HTMLElement | null)?.offsetHeight ?? 0}px`;
+        tr?.scrollIntoView?.({ block: "nearest" });
+    };
     const onRowMenu = (e: NetEntry, ev: MouseEvent) => {
         ev.preventDefault();
         // right-click outside the selection picks that row (switching the details pane, if open)
-        if (!sel.ids.has(e.id)) setSel({ ids: new Set([e.id]), anchor: e.id, primary: selected ? e.id : null });
+        if (!sel.ids.has(e.id)) {
+            cursor.current = e.id;
+            setSel({ ids: new Set([e.id]), anchor: e.id, primary: selected ? e.id : null });
+        }
         setColMenu(null);
         setRowMenu({ x: ev.clientX, y: ev.clientY });
     };
     const onTableKey = (ev: KeyboardEvent) => {
+        const nav = ["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"].includes(ev.key);
+        if (nav && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
+            ev.preventDefault();
+            if (!rows.length) return;
+            const order = rows.map((r) => r.id);
+            const at = cursor.current && sel.ids.has(cursor.current) ? order.indexOf(cursor.current) : -1;
+            const last = order.length - 1;
+            const step = pageRows();
+            const next =
+                ev.key === "Home" ? 0
+                : ev.key === "End" ? last
+                : at < 0 ? (ev.key === "ArrowUp" || ev.key === "PageUp" ? last : 0)
+                : ev.key === "ArrowUp" ? at - 1
+                : ev.key === "ArrowDown" ? at + 1
+                : ev.key === "PageUp" ? at - step
+                : at + step;
+            moveTo(next, ev.shiftKey && at >= 0);
+            return;
+        }
+        if (ev.key === "Enter" && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !ev.shiftKey) {
+            const id = cursor.current && sel.ids.has(cursor.current) ? cursor.current : null;
+            if (id) {
+                ev.preventDefault();
+                setSel({ ...sel, primary: id });
+            }
+            return;
+        }
         if (!(ev.ctrlKey || ev.metaKey) || ev.altKey || ev.shiftKey) return;
         if (ev.key === "a") {
             ev.preventDefault();

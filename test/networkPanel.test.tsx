@@ -220,6 +220,42 @@ describe("NetworkPanel", () => {
         expect(container.querySelector(".net-details-body")!.textContent).toContain("not available");
     });
 
+    it("arrow keys, PageUp/PageDown and Home/End move the selection; Shift extends; Enter opens details", () => {
+        const { container } = setup(["a", "b", "c", "d", "e"].map((n, i) => entry(n, { startedAt: base + i })));
+        const wrap = container.querySelector(".net-table-wrap")!;
+        const picked = () => [...container.querySelectorAll("tbody tr")].map((r) => (r.classList.contains("selected") ? 1 : 0)).join("");
+        const key = (k: string, o: object = {}) => fireEvent.keyDown(wrap, { key: k, ...o });
+        key("ArrowDown");
+        expect(picked()).toBe("10000");
+        expect(container.querySelector(".net-details")).toBeNull();
+        key("ArrowDown");
+        key("ArrowDown");
+        expect(picked()).toBe("00100");
+        key("ArrowUp");
+        expect(picked()).toBe("01000");
+        key("ArrowDown", { shiftKey: true });
+        key("ArrowDown", { shiftKey: true });
+        expect(picked()).toBe("01110");
+        key("End");
+        expect(picked()).toBe("00001");
+        key("Home");
+        expect(picked()).toBe("10000");
+        key("PageDown");
+        expect(picked()).toBe("00001"); // no layout in happy-dom: a page is 10 rows
+        key("PageUp");
+        expect(picked()).toBe("10000");
+        key("Enter");
+        expect(container.querySelector(".net-details")).not.toBeNull();
+        // the details pane follows the moved-to row
+        key("ArrowDown");
+        expect(picked()).toBe("01000");
+        expect(container.querySelector(".net-details")).not.toBeNull();
+        // from a clicked row
+        fireEvent.click(container.querySelectorAll("tbody tr")[3]);
+        key("ArrowUp");
+        expect(picked()).toBe("00100");
+    });
+
     it("copies the shown body; a cut body points to the Settings cap", async () => {
         const hit = entry("todo", {
             mime: "application/json",

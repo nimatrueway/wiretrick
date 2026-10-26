@@ -7,6 +7,10 @@ its section below.
 
 ## [Unreleased]
 
+### Fixed
+
+- Network: ↑/↓, PageUp/PageDown and Home/End did nothing in the request table. They now move the selection (Shift extends it) and scroll it into view; an open details pane follows the selected request, and Enter opens it.
+
 ### Changed
 
 - Network view: each request/response body is now kept up to 2 MB by default (was 256 kB). `bodyCap:` / Settings → Network → Body capture still changes it.

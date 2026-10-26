@@ -221,7 +221,9 @@ at the right of the toolbar do the same.
   Ctrl/⌘+A, and right-click for **Open in new tab** and **Copy** → **Copy
   URL**, **Copy as cURL** (bash) or **Copy as fetch**, devtools-style; with
   several rows selected these act on all of them. Ctrl/⌘+C copies the
-  selected URLs.
+  selected URLs. With the table focused, ↑/↓, PageUp/PageDown and Home/End
+  move the selection (Shift extends it); the details pane, when open,
+  follows it, and Enter opens it.
 
   Full recording (every request, headers, timing, bodies) starts the first
   time the Network view is shown and stops when that Editor closes. Before
