@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.9.17] - 2026-10-26
+
 ### Added
 
 - URIs in the Log are clickable, any scheme: `https:`, `chrome:`, `file:`, `data:`… open in a new tab (⌘/Ctrl- or middle-click: in the background); `vscode:`, `mailto:` and other app schemes open their app. Punctuation right after a URI isn't taken into it. A link wrapped over several lines stays hovered across the gaps between them.
@@ -514,7 +516,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.9.16...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.9.17...HEAD
+[0.9.17]: https://github.com/nimatrueway/wiretrick/compare/v0.9.16...v0.9.17
 [0.9.16]: https://github.com/nimatrueway/wiretrick/compare/v0.9.15...v0.9.16
 [0.9.15]: https://github.com/nimatrueway/wiretrick/compare/v0.9.14...v0.9.15
 [0.9.14]: https://github.com/nimatrueway/wiretrick/compare/v0.9.13...v0.9.14
