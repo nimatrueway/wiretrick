@@ -7,7 +7,7 @@
 import { parseDocument, parse, isMap, isPair, isScalar, type Node } from "yaml";
 import type { ParamDef } from "./scriptDef";
 import { isValidParamValue, paramDefault } from "./scriptDef";
-import { LOG_LEVELS, DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL, yamlKey, isStrategy, isTextTypes, defaultStrategySetting } from "./settingsYaml";
+import { LOG_LEVELS, DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL, yamlKey, isStrategy, isTextTypes, isBodyCap, DEFAULT_BODY_CAP, BODY_CAP_MIN, BODY_CAP_MAX, defaultStrategySetting } from "./settingsYaml";
 import { DEFAULT_TEXT_TYPES } from "./bodyKind";
 import { STRATEGIES } from "./route";
 import { strategyMarkdown } from "./strategyInfo";
@@ -47,6 +47,7 @@ function globalValueError(key: string, v: any): string | null {
     if (key === "logLevel") return typeof v === "string" && (LOG_LEVELS as readonly string[]).includes(v) ? null : `Expected one of ${LOG_LEVELS.join(" | ")}`;
     if (key === "logCap") return typeof v === "number" && Number.isInteger(v) && v >= 100 && v <= 10000 ? null : "Expected an integer between 100 and 10000";
     if (key === "defaultStrategy") return isStrategy(v) ? null : `Expected one of ${STRATEGIES.join(" | ")}`;
+    if (key === "bodyCap") return isBodyCap(v) ? null : `Expected an integer between ${BODY_CAP_MIN} and ${BODY_CAP_MAX} (kB)`;
     if (key === "textTypes") return isTextTypes(v) ? null : "Expected a non-empty list of Content-Type globs, e.g. [text/*, \"*json\"]";
     return null;
 }
@@ -275,7 +276,7 @@ export function settingsHover(text: string, offset: number, scripts: AssistScrip
     } else if (c.path.length === 1 && a === "settings" && GLOBAL_PROPS[k]) {
         const d = GLOBAL_PROPS[k];
         const range = d.enum ? d.enum.join(" | ") : d.minimum !== undefined ? `${d.type} ${d.minimum}…${d.maximum}` : d.type === "array" ? "list of strings" : d.type;
-        const def = k === "logLevel" ? DEFAULT_LOG_LEVEL : k === "defaultStrategy" ? defaultStrategySetting() : k === "textTypes" ? DEFAULT_TEXT_TYPES : DEFAULT_LOG_CAP;
+        const def = k === "logLevel" ? DEFAULT_LOG_LEVEL : k === "defaultStrategy" ? defaultStrategySetting() : k === "textTypes" ? DEFAULT_TEXT_TYPES : k === "bodyCap" ? DEFAULT_BODY_CAP : DEFAULT_LOG_CAP;
         md = k === "defaultStrategy" ? `**defaultStrategy** — ${strategyMarkdown()}` : `**${k}** — ${d.description}\n\n\`${range}\` · default \`${JSON.stringify(def)}\``;
     } else if (c.path.length === 1 && a === "params") {
         const s = scripts.find((x) => x.name === k);

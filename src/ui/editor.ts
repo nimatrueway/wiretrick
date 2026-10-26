@@ -23,7 +23,7 @@ import { cleanScriptName, scriptNameProblem, scriptFileName, scriptFileKey, uniq
 import { buildBundle, parseBundleText, bundleSettingsDoc, pickBundle, vscodeTargetPath, editorLaunchUrl, launchAppName, copyPathHint, hostOs, cleanFolderPath, type LaunchMode } from "./bundle";
 import { createQuickOpenPalette } from "./quickOpen";
 import { computeDirty } from "./dirtyState";
-import { parseSettings, SETTINGS_FILE, defaultStrategySetting, isStrategy, type SettingsDoc } from "../shared/settingsYaml";
+import { parseSettings, SETTINGS_FILE, defaultStrategySetting, isStrategy, isBodyCap, BODY_CAP_KEY, DEFAULT_BODY_CAP, BODY_CAP_MIN, BODY_CAP_MAX, type SettingsDoc } from "../shared/settingsYaml";
 import { STRATEGIES, type Strategy } from "../shared/route";
 import { STRATEGY_DOC_URL, STRATEGY_INFO, strategyUnsupported } from "../shared/strategyInfo";
 import { dlogLevel } from "../shared/debugLog";
@@ -2604,8 +2604,23 @@ function setupDialogs(): void {
         refilterLog();
     });
 
+    // Network body capture cap (kB)
+    const bodyCapInput = $("#settings-body-cap") as HTMLInputElement;
+    const showBodyCap = (v: unknown): void => {
+        bodyCapInput.value = String(isBodyCap(v) ? v : DEFAULT_BODY_CAP);
+    };
+    showBodyCap(undefined);
+    chrome.storage.local.get(BODY_CAP_KEY, (d) => showBodyCap(d?.[BODY_CAP_KEY]));
+    bodyCapInput.addEventListener("change", () => {
+        const n = Math.max(BODY_CAP_MIN, Math.min(BODY_CAP_MAX, Math.round(Number(bodyCapInput.value)) || DEFAULT_BODY_CAP));
+        bodyCapInput.value = String(n);
+        if (n === DEFAULT_BODY_CAP) chrome.storage.local.remove(BODY_CAP_KEY);
+        else chrome.storage.local.set({ [BODY_CAP_KEY]: n });
+    });
+
     // settings.yaml edits land in storage — reflect them live
     chrome.storage.onChanged.addListener((c) => {
+        if (c[BODY_CAP_KEY]) showBodyCap(c[BODY_CAP_KEY].newValue);
         if (c.resLogLevel?.newValue) {
             sel.value = c.resLogLevel.newValue;
             applyLogLevel(c.resLogLevel.newValue);
@@ -2616,7 +2631,7 @@ function setupDialogs(): void {
             capInput.value = String(logCap);
             refilterLog();
         }
-        if (c.resScripts || c.resParams || c.resLogLevel || c.resLogCap || c.resStrategy || c.resSettingsText || c.resDataFiles || c.resFolders) {
+        if (c.resScripts || c.resParams || c.resLogLevel || c.resLogCap || c.resStrategy || c[BODY_CAP_KEY] || c.resSettingsText || c.resDataFiles || c.resFolders) {
             void (async () => {
                 if (selectedId === SETTINGS_ID) await loadSettingsModel();
                 // data files / folders change the script order (folders) or importers' errors

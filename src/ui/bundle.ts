@@ -48,7 +48,7 @@ export interface ParsedBundle {
     dataFiles?: BundleDataFile[];
     folders?: string[];
     /** structured globals */
-    settings?: { logLevel?: string; logCap?: number; textTypes?: string[] };
+    settings?: { logLevel?: string; logCap?: number; textTypes?: string[]; bodyCap?: number };
 }
 
 export const BUNDLE_FORMAT = "wiretrick-bundle";
@@ -171,9 +171,10 @@ export function parseBundleText(text: string): ParsedBundle | null {
         if (folders.length) out.folders = folders;
     }
     if (parsed.settings && typeof parsed.settings === "object" && !Array.isArray(parsed.settings)) {
-        const settings: { logLevel?: string; logCap?: number; textTypes?: string[] } = {};
+        const settings: { logLevel?: string; logCap?: number; textTypes?: string[]; bodyCap?: number } = {};
         if (typeof parsed.settings.logLevel === "string") settings.logLevel = parsed.settings.logLevel;
         if (typeof parsed.settings.logCap === "number") settings.logCap = parsed.settings.logCap;
+        if (typeof parsed.settings.bodyCap === "number") settings.bodyCap = parsed.settings.bodyCap;
         if (Array.isArray(parsed.settings.textTypes) && parsed.settings.textTypes.every((t: any) => typeof t === "string")) settings.textTypes = parsed.settings.textTypes;
         if (Object.keys(settings).length) out.settings = settings;
     }

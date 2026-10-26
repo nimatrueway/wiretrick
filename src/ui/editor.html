@@ -106,6 +106,7 @@
                     <button data-settings-nav="settings-sec-strategy">Strategy</button>
                     <button data-settings-nav="settings-sec-helper">Local helper</button>
                     <button data-settings-nav="settings-sec-logging">Logging</button>
+                    <button data-settings-nav="settings-sec-network">Network</button>
                     <button data-settings-nav="settings-sec-advanced">Advanced</button>
                     <button data-settings-nav="settings-sec-about">About</button>
                 </nav>
@@ -237,6 +238,20 @@
                             <div class="setting-control">
                                 <label class="setting-check"><input id="settings-log-badge" type="checkbox" checked> Count current problems in the Problems view, errors/warnings in the Log view and observed/modified requests in the Network view, in the status bar</label>
                                 <p class="setting-help">Problems counts follow the scripts — they drop as problems are fixed. Log and Network counts stay until the view is cleared. Network counts start once the Network view has been opened (that starts recording). Observed: a script handler ran on the request without changing it; modified: a handler changed it.</p>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section id="settings-sec-network" class="settings-section">
+                        <h3>Network</h3>
+                        <div class="setting">
+                            <label class="setting-label" for="settings-body-cap">Body capture</label>
+                            <div class="setting-control">
+                                <div class="setting-inline">
+                                    <input id="settings-body-cap" type="number" min="16" max="16384" step="64" title="Max kB of each body kept in the Network view">
+                                    <span class="muted">kB per body</span>
+                                </div>
+                                <p class="setting-help">How much of each request/response body the Network view keeps (16–16384 kB); longer bodies are cut. Applies to requests captured afterwards. Large values use more memory.</p>
                             </div>
                         </div>
                     </section>

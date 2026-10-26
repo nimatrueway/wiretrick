@@ -13,6 +13,8 @@ its section below.
 - Network: select several requests (Shift-click, Ctrl/⌘-click, Ctrl/⌘+A) and right-click them for Open in new tab and Copy → Copy URL / Copy as cURL / Copy as fetch, devtools-style (all selected at once). Ctrl/⌘+C copies the selected URLs. The full-URL tooltip on rows is gone (Copy URL replaces it).
 - Log filter bar like Network's: Basic chips or an Advanced query with autocomplete and **?** help, over `message` (bare words, `"phrases"`, `/regex/`), `source`, `level` (`level:>=warn`) and `is:observed` / `is:link`. It replaces the Log's text and source boxes; the level menu stays.
 - Filter bars (Network and Log): Ctrl+Space in Basic shows suggestions for the word at the caret, or opens the + Filter field list there. The + Filter field list works from the keyboard: ↑/↓ (or a letter) to move, Enter or Tab to pick, Esc back to the filter box.
+- Network: a **Copy** button on the Payload and Response bodies (copies the body as shown, JSON pretty-printed).
+- Settings → Network → Body capture (`bodyCap:` in `settings.yaml`, kB): how much of each request/response body the Network view keeps, 16–16384 kB (default 256). A cut body's notice points there.
 - Log scroll lock, as in VS Code: a 🔒 button in the Log toolbar stops new lines from scrolling the view until clicked again. Scrolling up also pauses auto-scrolling (the button shows it), and scrolling back to the end resumes it.
 
 ### Fixed

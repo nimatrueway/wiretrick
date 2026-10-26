@@ -212,7 +212,11 @@ at the right of the toolbar do the same.
   moves to the modified count); they stay until the Network log is cleared, and
   are live before the Network view is first opened. Selecting a request shows its headers, request payload, the response
   body (modified and original, when Wiretrick handled it) and what each
-  script did (observed entries muted).
+  script did (observed entries muted). **Copy** above a payload or response
+  body puts it on the clipboard (pretty-printed JSON, as shown). Each body is
+  kept up to 256 kB by default; a longer one is cut and says so — raise the
+  cap in **Settings → Network → Body capture** (16–16384 kB, `bodyCap:` in
+  `settings.yaml`). It applies to requests captured afterwards.
   Select several rows with Shift-click (a range), Ctrl/⌘-click (one more) or
   Ctrl/⌘+A, and right-click for **Open in new tab** and **Copy** → **Copy
   URL**, **Copy as cURL** (bash) or **Copy as fetch**, devtools-style; with
@@ -362,7 +366,7 @@ script whose file was deleted) is part of the **▼**. Clicking it reconnects wh
 
 Settings (⚙ in the explorer header, or ⌘,) is split into Appearance,
 Synced folder, Import / Export, Strategy, Local helper, Logging,
-Advanced and About — pick one on the left to jump to it.
+Network, Advanced and About — pick one on the left to jump to it.
 
 **Settings → Appearance → Theme** picks *System* (follows the OS), *Dark*
 or *Light*. It applies to the Editor (Code view included) and the popup.
@@ -457,6 +461,8 @@ settings:
   # textTypes:
   #   - text/*
   #   - …
+  # Network view: kB of each request/response body kept (16..16384)
+  # bodyCap: 256
 
 params:
   Debug header:

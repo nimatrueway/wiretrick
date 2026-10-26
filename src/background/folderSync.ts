@@ -1263,7 +1263,7 @@ async function start(opts: { fresh?: boolean }): Promise<boolean> {
             if (dirHandle) void serial(() => renameSettingsOnDisk(oldName, newName));
         });
         chrome.storage.onChanged.addListener((c) => {
-            if (c.resLogLevel || c.resLogCap || c.resStrategy || c.resTextTypes) scheduleReconcile();
+            if (c.resLogLevel || c.resLogCap || c.resStrategy || c.resTextTypes || c.resBodyCap) scheduleReconcile();
             if (c[PACKAGE_TYPINGS_KEY] && dirHandle) void serial(ensurePackageTypingsFiles);
         });
     }

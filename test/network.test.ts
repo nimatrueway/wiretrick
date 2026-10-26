@@ -18,7 +18,7 @@ const ev = (name: string) => ({
     },
 };
 
-const { addNetworkCountsPort, addNetworkPort, annotateFromLog, recordNetBody, toNetBody, MAX_BODY, MAX_IDLE, __test } = await import("../src/background/network");
+const { addNetworkCountsPort, addNetworkPort, annotateFromLog, recordNetBody, toNetBody, setBodyCap, MAX_BODY, MAX_IDLE, __test } = await import("../src/background/network");
 const { L, entries } = __test;
 
 function fakePort() {
@@ -326,5 +326,16 @@ describe("network recorder", () => {
         expect(big.size).toBe(MAX_BODY + 10);
         expect(toNetBody(new Uint8Array([1, 0, 2]))).toMatchObject({ binary: true, size: 3 });
         expect(toNetBody(null)).toBeUndefined();
+    });
+
+    it("settings.bodyCap (kB) changes the cap; invalid falls back to the default", () => {
+        setBodyCap(16);
+        expect(toNetBody("x".repeat(20 * 1024))!.text.length).toBe(16 * 1024);
+        expect(toNetBody(new TextEncoder().encode("y".repeat(20 * 1024)))!).toMatchObject({ truncated: true, size: 20 * 1024 });
+        setBodyCap(1024);
+        expect(toNetBody("x".repeat(MAX_BODY + 10))!.truncated).toBe(false);
+        setBodyCap(3);
+        expect(toNetBody("x".repeat(MAX_BODY + 10))!.text.length).toBe(MAX_BODY);
+        setBodyCap(undefined);
     });
 });

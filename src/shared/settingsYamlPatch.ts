@@ -22,7 +22,7 @@ import { parseDocument, isMap, isScalar, Scalar, stringify, type YAMLMap } from 
 import { resolveParamValues, paramDefault } from "./scriptDef";
 import {
     parseSettings, planSettings, scriptKeys, scriptBlock, entryLines, commentedDefaultLines, renderedKeyText, globalOptionLines,
-    DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL, defaultStrategySetting,
+    DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL, DEFAULT_BODY_CAP, defaultStrategySetting,
     type GlobalSettings, type ScriptSettingsState,
 } from "./settingsYaml";
 import { DEFAULT_TEXT_TYPES } from "./bodyKind";
@@ -321,6 +321,7 @@ export function patchSettings(existing: string, g: GlobalSettings, scripts: Scri
         ["logCap", g.logCap, DEFAULT_LOG_CAP],
         ["defaultStrategy", g.defaultStrategy, defaultStrategySetting()],
         ["textTypes", g.textTypes ?? [...DEFAULT_TEXT_TYPES], [...DEFAULT_TEXT_TYPES]],
+        ["bodyCap", g.bodyCap ?? DEFAULT_BODY_CAP, DEFAULT_BODY_CAP],
     ];
     const settingsTarget = classify(root, "settings");
     if (settingsTarget === null) return null;
@@ -468,7 +469,7 @@ export function patchSettings(existing: string, g: GlobalSettings, scripts: Scri
     // safety net: the result must parse and express exactly the target state
     try {
         const plan = planSettings(parseSettings(out), g, scripts);
-        if (plan.globals.logLevel !== undefined || plan.globals.logCap !== undefined || plan.globals.defaultStrategy !== undefined || plan.globals.textTypes !== undefined || plan.scripts.length) return null;
+        if (plan.globals.logLevel !== undefined || plan.globals.logCap !== undefined || plan.globals.defaultStrategy !== undefined || plan.globals.textTypes !== undefined || plan.globals.bodyCap !== undefined || plan.scripts.length) return null;
     } catch {
         return null;
     }

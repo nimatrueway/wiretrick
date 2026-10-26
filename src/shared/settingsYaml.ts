@@ -46,6 +46,14 @@ export const SCHEMA_MODELINE = `# yaml-language-server: $schema=./${SCHEMA_FILE}
 export const LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
 export const DEFAULT_LOG_LEVEL = "info";
 export const DEFAULT_LOG_CAP = 500;
+/** Network body capture cap in kB (settings.bodyCap) */
+export const DEFAULT_BODY_CAP = 256;
+export const BODY_CAP_MIN = 16;
+export const BODY_CAP_MAX = 16384;
+/** chrome.storage key of settings.bodyCap (absent: DEFAULT_BODY_CAP) */
+export const BODY_CAP_KEY = "resBodyCap";
+export const isBodyCap = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= BODY_CAP_MIN && v <= BODY_CAP_MAX;
+export const BODY_CAP_DESC = `Network view: kB of each request/response body kept (${BODY_CAP_MIN}..${BODY_CAP_MAX})`;
 
 export interface GlobalSettings {
     logLevel: string;
@@ -54,6 +62,8 @@ export interface GlobalSettings {
     defaultStrategy: string;
     /** Content-Type globs onResponseBody gets as text; undefined = DEFAULT_TEXT_TYPES */
     textTypes?: string[];
+    /** Network body capture cap in kB; undefined = DEFAULT_BODY_CAP */
+    bodyCap?: number;
 }
 
 /** the strategy settings.yaml falls back to when `defaultStrategy` is absent */
@@ -145,7 +155,7 @@ export function commentedDefaultLines(key: string, d: ParamDef | undefined): str
     return out;
 }
 
-export const GLOBAL_KEYS = ["logLevel", "logCap", "defaultStrategy", "textTypes"] as const;
+export const GLOBAL_KEYS = ["logLevel", "logCap", "defaultStrategy", "textTypes", "bodyCap"] as const;
 
 /**
  * One global setting's documented lines at indent 0 (description comments
@@ -156,6 +166,7 @@ export function globalOptionLines(key: (typeof GLOBAL_KEYS)[number], g: GlobalSe
     const out: string[] = [];
     if (key === "logLevel") option(out, 0, "logLevel", `Minimum log level shown in the panel: ${LOG_LEVELS.join(" | ")}`, g.logLevel, DEFAULT_LOG_LEVEL);
     else if (key === "logCap") option(out, 0, "logCap", "Log lines kept in the panel (100..10000)", g.logCap, DEFAULT_LOG_CAP);
+    else if (key === "bodyCap") option(out, 0, "bodyCap", BODY_CAP_DESC, g.bodyCap ?? DEFAULT_BODY_CAP, DEFAULT_BODY_CAP);
     else if (key === "textTypes") option(out, 0, "textTypes", TEXT_TYPES_DESC, g.textTypes ?? [...DEFAULT_TEXT_TYPES], [...DEFAULT_TEXT_TYPES]);
     else {
         out.push("# Interception strategy for every handler whose route doesn't set `strategy`.");
@@ -252,6 +263,8 @@ export function planSettings(doc: SettingsDoc, current: GlobalSettings, scripts:
         if (isStrategy(st) && st !== current.defaultStrategy) globals.defaultStrategy = st as string;
         const tt = doc.settings.textTypes === undefined ? [...DEFAULT_TEXT_TYPES] : doc.settings.textTypes;
         if (isTextTypes(tt) && !same(tt, current.textTypes ?? DEFAULT_TEXT_TYPES)) globals.textTypes = tt;
+        const bc = doc.settings.bodyCap === undefined ? DEFAULT_BODY_CAP : doc.settings.bodyCap;
+        if (isBodyCap(bc) && bc !== (current.bodyCap ?? DEFAULT_BODY_CAP)) globals.bodyCap = bc;
     }
     const plans: SettingsPlan["scripts"] = [];
     for (const s of scripts) {

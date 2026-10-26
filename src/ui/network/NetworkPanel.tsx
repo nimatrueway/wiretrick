@@ -661,14 +661,22 @@ export function prettyBody(text: string, mime: string): string {
 function BodyView({ body, mime }: { body?: NetBody; mime: string }) {
     if (!body) return <div class="net-empty">No body captured.</div>;
     if (body.binary) return <div class="net-empty">{body.text || `(binary, ${formatBytes(body.size)})`}</div>;
+    const text = prettyBody(body.text, mime);
     return (
         <>
-            {body.truncated && (
-                <div class="net-note">
-                    Showing the first {formatBytes(body.text.length)} of {formatBytes(body.size)}.
-                </div>
-            )}
-            <pre class="net-payload">{prettyBody(body.text, mime)}</pre>
+            <div class="net-body-bar">
+                {body.truncated ? (
+                    <span class="net-note">
+                        Showing the first {formatBytes(body.text.length)} of {formatBytes(body.size)} — raise the cap in Settings › Network.
+                    </span>
+                ) : (
+                    <span class="net-body-size">{formatBytes(body.size)}</span>
+                )}
+                <button class="net-copy" title={body.truncated ? "Copy the captured part to the clipboard" : "Copy to the clipboard"} onClick={() => void copyWithToast(text)}>
+                    Copy
+                </button>
+            </div>
+            <pre class="net-payload">{text}</pre>
         </>
     );
 }

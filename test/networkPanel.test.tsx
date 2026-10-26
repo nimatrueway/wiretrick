@@ -220,6 +220,21 @@ describe("NetworkPanel", () => {
         expect(container.querySelector(".net-details-body")!.textContent).toContain("not available");
     });
 
+    it("copies the shown body; a cut body points to the Settings cap", async () => {
+        const hit = entry("todo", {
+            mime: "application/json",
+            responseBody: { text: '{"a":1}', size: 4096, truncated: true, binary: false },
+        });
+        const { container, getByText } = setup([hit]);
+        fireEvent.click(container.querySelector("tbody tr")!);
+        fireEvent.click(getByText("Response"));
+        expect(container.querySelector(".net-body-bar")!.textContent).toContain("Settings › Network");
+        let copied = "";
+        Object.defineProperty(navigator, "clipboard", { value: { writeText: async (t: string) => void (copied = t) }, configurable: true });
+        fireEvent.click(container.querySelector(".net-copy")!);
+        await waitFor(() => expect(copied).toBe('{\n  "a": 1\n}'));
+    });
+
     it("clear empties the table", async () => {
         const { container } = setup([entry("a")]);
         fireEvent.click(container.querySelector(".net-clear")!);
@@ -434,7 +449,7 @@ describe("NetworkPanel", () => {
             const list = container.querySelector(".net-qfields") as HTMLElement;
             await waitFor(() => expect(document.activeElement).toBe(list));
             fireEvent.keyDown(list, { key: "ArrowUp" }); // wraps
-            expect(active()).toBe(fields().at(-1)!.querySelector(".net-qlist-main")!.textContent);
+            expect(active()).toBe(fields()[fields().length - 1].querySelector(".net-qlist-main")!.textContent);
             fireEvent.keyDown(list, { key: "Home" });
             fireEvent.keyDown(list, { key: "ArrowDown" });
             expect(active()).toBe("host");

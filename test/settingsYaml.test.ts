@@ -114,6 +114,18 @@ describe("settings.yaml apply", () => {
         expect(planSettings(parseSettings("# only a comment\n"), { logLevel: "warn", logCap: 900, defaultStrategy: "helper" }, [script({ enabled: false })])).toEqual({ globals: {}, scripts: [] });
     });
 
+    it("plans bodyCap (kB): valid integers in range; missing = default", () => {
+        const plan = (t: string, cur: any = G) => planSettings(parseSettings(t), cur, []).globals;
+        expect(plan("settings:\n  bodyCap: 1024\n")).toEqual({ bodyCap: 1024 });
+        expect(plan("settings:\n  bodyCap: 8\n")).toEqual({});
+        expect(plan("settings:\n  bodyCap: 20000\n")).toEqual({});
+        expect(plan("settings:\n  bodyCap: 64.5\n")).toEqual({});
+        expect(plan("settings:\n  bodyCap: 256\n")).toEqual({});
+        expect(plan("settings:\n  logLevel: info\n", { ...G, bodyCap: 1024 })).toEqual({ bodyCap: 256 });
+        expect(renderSettings({ ...G, bodyCap: 1024 }, [])).toMatch(/\n  # Network view: kB.*\n  # default: 256\n  bodyCap: 1024\n/);
+        expect(patchSettings("settings:\n  # bodyCap: 256\n", { ...G, bodyCap: 64 }, [])).toMatch(/^settings:\n  # bodyCap: 256\n  bodyCap: 64\n/);
+    });
+
     it("a present-but-all-commented section resets it to defaults", () => {
         const doc = parseSettings("settings:\n  # logLevel: info\nparams:\n  My Script:\n    # n: 1\n");
         expect(doc).toEqual({ settings: {}, params: { "My Script": {} } });

@@ -1194,6 +1194,11 @@ body.net-dragging { user-select: none; }
 .net-payload { margin: 6px 0; font: 12px/1.45 var(--mono, ui-monospace, monospace); white-space: pre-wrap; word-break: break-all; user-select: text; }
 .net-note { color: var(--fg-dim); font-size: 11px; margin: 6px 0 0; }
 .net-body-switch { display: flex; gap: 4px; margin: 6px 0 0; }
+.net-body-bar { display: flex; align-items: center; gap: 8px; margin: 6px 0 0; }
+.net-body-bar .net-note { margin: 0; flex: 1; }
+.net-body-size { flex: 1; color: var(--fg-dim); font-size: 11px; }
+.net-copy { background: transparent; color: var(--fg-dim); border: 1px solid var(--border); border-radius: 3px; padding: 1px 8px; font-size: 11px; cursor: pointer; }
+.net-copy:hover { background: var(--bg-hover); color: inherit; }
 .net-hsec h4 { margin: 6px 0 2px; font-size: 11px; font-weight: 600; cursor: pointer; user-select: none; }
 .net-count { color: var(--fg-dim); font-weight: normal; }
 .net-hsec dl { margin: 0 0 0 14px; font: 11px/1.6 "SF Mono", Menlo, Consolas, monospace; }

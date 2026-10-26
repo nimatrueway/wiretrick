@@ -18,14 +18,24 @@
  * knew it (engine/requestCorrelator.ts), else to the newest same-URL row.
  */
 import { outcomeKind, type OutcomeKind, type NetBody, type NetEntry, type NetPortMsg } from "../shared/netTypes";
+import { BODY_CAP_KEY, DEFAULT_BODY_CAP, isBodyCap } from "../shared/settingsYaml";
 
 const MAX_ENTRIES = 1000;
 /** rows kept while no Network tab is open (script-touched only) */
 export const MAX_IDLE = 500;
 /** while idle every row is synthetic: one request's log lines arrive within this */
 const IDLE_MATCH_WINDOW_MS = 10_000;
-/** per-body capture cap (chars of text) */
-export const MAX_BODY = 256 * 1024;
+/** default per-body capture cap (chars of text); settings.bodyCap (kB) overrides */
+export const MAX_BODY = DEFAULT_BODY_CAP * 1024;
+let maxBody = MAX_BODY;
+/** settings.bodyCap in kB (invalid/absent → default) */
+export function setBodyCap(kb: unknown): void {
+    maxBody = (isBodyCap(kb) ? kb : DEFAULT_BODY_CAP) * 1024;
+}
+globalThis.chrome?.storage?.local?.get(BODY_CAP_KEY, (d) => setBodyCap(d?.[BODY_CAP_KEY]));
+globalThis.chrome?.storage?.onChanged?.addListener((c, area) => {
+    if (area === "local" && c[BODY_CAP_KEY]) setBodyCap(c[BODY_CAP_KEY].newValue);
+});
 const FLUSH_MS = 120;
 const MATCH_WINDOW_MS = 120_000;
 
@@ -98,11 +108,11 @@ export function toNetBody(v: string | Uint8Array | ArrayBuffer | null | undefine
     if (typeof v !== "string") {
         const bytes = v instanceof Uint8Array ? v : new Uint8Array(v);
         if (looksBinaryBytes(bytes)) return { text: "", size: bytes.byteLength, truncated: false, binary: true };
-        const text = new TextDecoder().decode(bytes.byteLength > MAX_BODY * 4 ? bytes.subarray(0, MAX_BODY * 4) : bytes);
-        return { text: text.slice(0, MAX_BODY), size: bytes.byteLength, truncated: text.length > MAX_BODY || bytes.byteLength > MAX_BODY * 4, binary: false };
+        const text = new TextDecoder().decode(bytes.byteLength > maxBody * 4 ? bytes.subarray(0, maxBody * 4) : bytes);
+        return { text: text.slice(0, maxBody), size: bytes.byteLength, truncated: text.length > maxBody || bytes.byteLength > maxBody * 4, binary: false };
     }
     const size = new TextEncoder().encode(v).byteLength;
-    return { text: v.slice(0, MAX_BODY), size, truncated: v.length > MAX_BODY, binary: false };
+    return { text: v.slice(0, maxBody), size, truncated: v.length > maxBody, binary: false };
 }
 
 function requestBodyOf(rb: chrome.webRequest.WebRequestBody | null | undefined): NetBody | undefined {

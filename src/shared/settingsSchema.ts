@@ -10,7 +10,7 @@
  * (parseSettings shape checks + planSettings value validation) — keep both
  * in sync when the settings shape changes.
  */
-import { LOG_LEVELS, DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL, TEXT_TYPES_DESC, type ScriptSettingsState } from "./settingsYaml";
+import { LOG_LEVELS, DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL, TEXT_TYPES_DESC, DEFAULT_BODY_CAP, BODY_CAP_MIN, BODY_CAP_MAX, type ScriptSettingsState } from "./settingsYaml";
 import { DEFAULT_TEXT_TYPES } from "./bodyKind";
 import { paramDefault, type ParamDef } from "./scriptDef";
 import { builtinStrategy, STRATEGIES } from "./route";
@@ -57,6 +57,13 @@ export const SETTINGS_SCHEMA = {
                     minItems: 1,
                     default: [...DEFAULT_TEXT_TYPES],
                     description: `${TEXT_TYPES_DESC} Replaces the defaults (see docs/scripting.md#binary-bodies)`,
+                },
+                bodyCap: {
+                    type: "integer",
+                    minimum: BODY_CAP_MIN,
+                    maximum: BODY_CAP_MAX,
+                    default: DEFAULT_BODY_CAP,
+                    description: "Network view: kB of each request/response body kept; longer bodies are cut",
                 },
             },
         },

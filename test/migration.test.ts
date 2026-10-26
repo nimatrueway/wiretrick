@@ -98,8 +98,11 @@ let o: Wiretrick.DocumentRouteOptions, p: Wiretrick.DocumentRoute, q: Wiretrick.
 });
 
 describe("migrateSettingsText", () => {
-    // pre-textTypes files: migration leaves the newer options for the settings patch to document
-    const renderSettings = (...a: Parameters<typeof render>) => render(...a).replace(/  # Content-Types onResponseBody.*\n  # textTypes:\n(  # {3}- .*\n)*/, "");
+    // pre-textTypes/bodyCap files: migration leaves the newer options for the settings patch to document
+    const renderSettings = (...a: Parameters<typeof render>) =>
+        render(...a)
+            .replace(/  # Content-Types onResponseBody.*\n  # textTypes:\n(  # {3}- .*\n)*/, "")
+            .replace(/  # Network view: kB.*\n  # bodyCap: .*\n/, "");
     it("regenerates the old generated block with the mapped value", () => {
         const out = migrateSettingsText(OLD_LIVE);
         expect(out).toBe(renderSettings({ logLevel: "info", logCap: 500, defaultStrategy: "page" }, [

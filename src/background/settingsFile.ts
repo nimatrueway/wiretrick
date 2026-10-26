@@ -7,7 +7,7 @@ import { listScripts, loadAllParamValues, setParamValue, setEnabled, onScriptRen
 import { patchSettings, renameSettingsSection } from "../shared/settingsYamlPatch";
 import {
     renderSettings, parseSettings, planSettings,
-    DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL, defaultStrategySetting, isStrategy, isTextTypes,
+    DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL, DEFAULT_BODY_CAP, BODY_CAP_KEY, defaultStrategySetting, isStrategy, isTextTypes, isBodyCap,
     type GlobalSettings, type ScriptSettingsState, type SettingsDoc, type SettingsPlan,
 } from "../shared/settingsYaml";
 import { DEFAULT_TEXT_TYPES } from "../shared/bodyKind";
@@ -21,7 +21,7 @@ function storageSet(items: Record<string, any>): Promise<void> {
 }
 
 export async function currentSettingsState(): Promise<{ globals: GlobalSettings; scripts: ScriptSettingsState[] }> {
-    const g = await storageGet(["resLogLevel", "resLogCap", STRATEGY_KEY, TEXT_TYPES_KEY]);
+    const g = await storageGet(["resLogLevel", "resLogCap", STRATEGY_KEY, TEXT_TYPES_KEY, BODY_CAP_KEY]);
     const stored = await loadAllParamValues();
     const scripts = (await listScripts()).map((s) => ({
         name: s.meta.name,
@@ -33,6 +33,7 @@ export async function currentSettingsState(): Promise<{ globals: GlobalSettings;
     const defaultStrategy = isStrategy(g[STRATEGY_KEY]) ? g[STRATEGY_KEY] : defaultStrategySetting();
     const globals: GlobalSettings = { logLevel: g.resLogLevel ?? DEFAULT_LOG_LEVEL, logCap: g.resLogCap ?? DEFAULT_LOG_CAP, defaultStrategy };
     if (isTextTypes(g[TEXT_TYPES_KEY])) globals.textTypes = g[TEXT_TYPES_KEY];
+    if (isBodyCap(g[BODY_CAP_KEY])) globals.bodyCap = g[BODY_CAP_KEY];
     return { globals, scripts };
 }
 
@@ -97,6 +98,10 @@ async function applyPlan(plan: SettingsPlan): Promise<void> {
         // back at the defaults: forget the list, so a future default change applies
         if (JSON.stringify(plan.globals.textTypes) === JSON.stringify(DEFAULT_TEXT_TYPES)) await new Promise<void>((r) => chrome.storage.local.remove(TEXT_TYPES_KEY, () => r()));
         else await storageSet({ [TEXT_TYPES_KEY]: plan.globals.textTypes });
+    }
+    if (plan.globals.bodyCap) {
+        if (plan.globals.bodyCap === DEFAULT_BODY_CAP) await new Promise<void>((r) => chrome.storage.local.remove(BODY_CAP_KEY, () => r()));
+        else await storageSet({ [BODY_CAP_KEY]: plan.globals.bodyCap });
     }
 }
 
