@@ -167,6 +167,9 @@ at the right of the toolbar do the same.
   `file:` or `data:` ones open in a new tab (⌘/Ctrl- or middle-click: in the
   background), and others such as `vscode:` or `mailto:` go to the app that
   handles them.
+  New lines scroll into view; like VS Code, scrolling up pauses that until
+  you scroll back to the end, and the 🔒 scroll-lock button stops it
+  outright until clicked again.
   The errors and warnings it holds are counted in the status bar; they stay
   until the log is cleared (clear icon), whether or not you've looked.
   A VS Code-style status bar along the bottom holds the counts for all

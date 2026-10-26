@@ -2177,6 +2177,46 @@ const logEntries: { text: string; level: string; source: string; observed?: bool
 const MAX_OBSERVED_ENTRIES = 300;
 let observedEntries = 0;
 
+/**
+ * Log auto-scroll, VS Code style: "follow" keeps the newest line in view;
+ * scrolling up pauses it ("paused", resumes at the end); the lock button
+ * stops it until clicked again ("locked").
+ */
+let logScroll: "follow" | "paused" | "locked" = "follow";
+/** where we last put the scroll, so our own scrolling isn't mistaken for the user's */
+let logOwnTop = 0;
+
+const logAtEnd = (box: HTMLElement): boolean => box.scrollTop + box.clientHeight >= box.scrollHeight - 4;
+
+function followLog(box: HTMLElement): void {
+    if (logScroll === "follow") box.scrollTop = box.scrollHeight;
+    logOwnTop = box.scrollTop;
+}
+
+function setLogScroll(state: typeof logScroll): void {
+    logScroll = state;
+    const b = $("#btn-scroll-lock");
+    b.setAttribute("aria-pressed", String(state !== "follow"));
+    b.dataset.lock = state;
+    b.title = state === "follow" ? "Turn Auto Scrolling Off" : state === "locked" ? "Turn Auto Scrolling On" : "Auto scrolling paused while you're scrolled up — scroll to the end or click to resume";
+    if (state === "follow") followLog($("#log-entries"));
+}
+
+function wireLogScroll(): void {
+    const box = $("#log-entries");
+    $("#btn-scroll-lock").addEventListener("click", () => setLogScroll(logScroll === "follow" ? "locked" : "follow"));
+    // react before the next line yanks the view back down
+    box.addEventListener("wheel", (e) => {
+        if (e.deltaY < 0 && logScroll === "follow" && box.scrollTop > 0) setLogScroll("paused");
+    }, { passive: true });
+    box.addEventListener("scroll", () => {
+        if (logScroll === "locked" || Math.abs(box.scrollTop - logOwnTop) < 2) return;
+        logOwnTop = box.scrollTop;
+        const end = logAtEnd(box);
+        if (end !== (logScroll === "follow")) setLogScroll(end ? "follow" : "paused");
+    });
+}
+
 function appendLog(entry: any): void {
     const time = new Date(entry.at).toLocaleTimeString();
     const source = sourceOf(entry.message || "");
@@ -2209,11 +2249,12 @@ function appendLog(entry: any): void {
     renderLogLine(line, text, level, source);
     box.appendChild(line);
     while (box.children.length > logCap) box.removeChild(box.firstChild as Node);
-    box.scrollTop = box.scrollHeight;
+    followLog(box);
 }
 
 function refilterLog(): void {
     const box = $("#log-entries");
+    const top = box.scrollTop;
     box.innerHTML = "";
     for (const { text, level, source } of logEntries) {
         if (!linePassesFilters(text, level, source)) continue;
@@ -2223,7 +2264,8 @@ function refilterLog(): void {
         box.appendChild(line);
     }
     while (box.children.length > logCap) box.removeChild(box.firstChild as Node);
-    box.scrollTop = box.scrollHeight;
+    if (logScroll !== "follow") box.scrollTop = top;
+    followLog(box);
 }
 
 function makeLogFilters(): void {
@@ -3107,10 +3149,13 @@ async function main(): Promise<void> {
         appendLog({ at: Date.now(), message: `[editor] ${msg}`, level: "info" });
         chrome.runtime.sendMessage({ type: "debugLog", entry: { at: Date.now(), src: "editor", msg, level: "info" } }, () => void chrome.runtime.lastError);
     });
+    wireLogScroll();
     $("#log-entries").addEventListener("click", openLogLink);
     $("#log-entries").addEventListener("auxclick", openLogLink);
     $("#btn-clear-log").addEventListener("click", () => {
         $("#log-entries").innerHTML = "";
+        logOwnTop = 0;
+        if (logScroll === "paused") setLogScroll("follow");
         logEntries.length = 0;
         observedEntries = 0;
         logBadge.reset();

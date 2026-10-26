@@ -444,6 +444,10 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 #log-header button.icon-btn[data-state="ok"] { color: var(--ok, #3fb950); }
 #log-header button.icon-btn[data-state="error"] { color: var(--err); }
 @keyframes pulse { to { opacity: 0.35; } }
+#btn-scroll-lock .shackle-shut, #btn-scroll-lock[aria-pressed="true"] .shackle-open { display: none; }
+#btn-scroll-lock[aria-pressed="true"] .shackle-shut { display: inline; }
+#log-header button.icon-btn[aria-pressed="true"] { color: var(--fg); background: var(--bg-active); border-color: var(--border); }
+#log-header button.icon-btn[data-lock="paused"] { border-style: dashed; }
 
 /* each view's filter: the same box, same place (first in the view's tools) */
 .panel-filter, .panel-tools .net-qbar { flex: 1 1 120px; min-width: 100px; }
