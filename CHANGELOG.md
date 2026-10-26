@@ -7,6 +7,10 @@ its section below.
 
 ## [Unreleased]
 
+### Fixed
+
+- Settings → Strategy scrolled sideways on Chrome MV3: the unavailable `extension` option spelled out its whole reason, stretching the picker. It now says "(unavailable)" (the table below gives the reason), and the picker never outgrows the pane.
+
 ## [0.9.16] - 2026-10-25
 
 ### Changed

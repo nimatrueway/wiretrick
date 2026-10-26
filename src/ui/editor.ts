@@ -2505,8 +2505,10 @@ function setupDialogs(): void {
     };
     for (const s of STRATEGIES) {
         const why = strategyUnsupported(s as Strategy, strategyEnv);
-        const opt = new Option(STRATEGY_INFO[s].label + (s === defaultStrategySetting() ? " (default)" : "") + (why ? ` — ${why}` : ""), s);
+        // the reason is in the table below; in the option it would stretch the select
+        const opt = new Option(STRATEGY_INFO[s].label + (s === defaultStrategySetting() ? " (default)" : "") + (why ? " (unavailable)" : ""), s);
         opt.disabled = !!why;
+        if (why) opt.title = why;
         strategySel.add(opt);
     }
     renderStrategy(defaultStrategySetting());

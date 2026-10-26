@@ -789,6 +789,7 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 .setting { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 4px 16px; align-items: start; margin-bottom: 14px; }
 .setting-label { font-size: 13px; color: var(--fg); padding-top: 4px; }
 .setting-control { min-width: 0; }
+.setting-control select { max-width: 100%; }
 .setting-inline { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-height: 26px; }
 .setting-help { margin: 4px 0 0; color: var(--fg-dim); font-size: 12px; line-height: 1.45; }
 .setting-check { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; padding-top: 4px; cursor: pointer; }
