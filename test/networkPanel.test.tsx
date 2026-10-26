@@ -423,6 +423,58 @@ describe("NetworkPanel", () => {
             expect(container.querySelector("#net-bsuggest")).toBeNull();
         });
 
+        it("Ctrl+Space: suggestions for the word, else the field list; ↑/↓ + Enter/Tab pick a field", async () => {
+            const { container } = setup(rows3());
+            const box = container.querySelector(".net-qbox .net-filter") as HTMLInputElement;
+            const fields = () => [...container.querySelectorAll(".net-qadd-pop .net-qfields [role=option]")];
+            const active = () => container.querySelector(".net-qfields [role=option].active .net-qlist-main")?.textContent;
+            fireEvent.keyDown(box, { key: " ", code: "Space", ctrlKey: true });
+            expect(fields().length).toBeGreaterThan(3);
+            expect(active()).toBe("url");
+            const list = container.querySelector(".net-qfields") as HTMLElement;
+            await waitFor(() => expect(document.activeElement).toBe(list));
+            fireEvent.keyDown(list, { key: "ArrowUp" }); // wraps
+            expect(active()).toBe(fields().at(-1)!.querySelector(".net-qlist-main")!.textContent);
+            fireEvent.keyDown(list, { key: "Home" });
+            fireEvent.keyDown(list, { key: "ArrowDown" });
+            expect(active()).toBe("host");
+            fireEvent.keyDown(list, { key: "m" }); // type-ahead
+            expect(active()).toBe("method");
+            fireEvent.keyDown(list, { key: "Enter" });
+            expect(container.querySelector(".net-qadd-pop b")!.textContent).toBe("method");
+            fireEvent.keyDown(document, { key: "Escape" });
+            expect(container.querySelector(".net-qadd-pop")).toBeNull();
+            await waitFor(() => expect(document.activeElement).toBe(box)); // Esc: back to the filter box
+            fireEvent.click(container.querySelector(".net-qadd-btn")!); // the button's list takes keys too
+            fireEvent.keyDown(container.querySelector(".net-qfields")!, { key: "ArrowDown" });
+            fireEvent.keyDown(container.querySelector(".net-qfields")!, { key: "Tab" });
+            expect(container.querySelector(".net-qadd-pop b")!.textContent).toBe("host");
+            fireEvent.keyDown(document, { key: "Escape" });
+            box.value = "pos";
+            box.setSelectionRange(3, 3);
+            fireEvent.input(box);
+            fireEvent.keyDown(box, { key: "Escape" });
+            expect(container.querySelector("#net-bsuggest")).toBeNull();
+            fireEvent.keyDown(box, { key: " ", ctrlKey: true }); // a word with suggestions: those, first one highlighted
+            expect(container.querySelector("#net-bsuggest li.active .net-qlist-main")!.textContent).toBe("method: POST");
+            expect(container.querySelector(".net-qadd-pop")).toBeNull();
+            fireEvent.keyDown(box, { key: "Enter" });
+            expect(container.querySelector(".net-qchip")!.textContent).toContain("method:POST");
+        });
+
+        it("Advanced: Ctrl+Space lists the fields on an empty query", () => {
+            const { container } = setup(rows3());
+            for (const x of [...container.querySelectorAll(".net-qbox .net-qchip-x")]) fireEvent.click(x);
+            fireEvent.click(container.querySelector('[aria-label="Advanced query"]')!);
+            const input = q(container);
+            expect(input.value).toBe("");
+            fireEvent.keyDown(input, { key: " ", code: "Space", ctrlKey: true });
+            expect(container.querySelector("#net-qsuggest li.active .net-qlist-main")!.textContent).toBe("url:");
+            fireEvent.keyDown(input, { key: "ArrowDown" });
+            fireEvent.keyDown(input, { key: "Tab" });
+            expect(input.value).toBe("host:");
+        });
+
         it("Basic: typing suggests fields and values like + Filter", () => {
             const { container, getByLabelText } = setup(rows3());
             const box = container.querySelector(".net-qbox .net-filter") as HTMLInputElement;

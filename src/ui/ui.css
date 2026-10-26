@@ -1062,6 +1062,7 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 .net-qwarn { width: 270px; padding: 8px; }
 .net-qwarn p { margin: 0 0 8px; }
 .net-qlist { list-style: none; margin: 0; padding: 0; }
+.net-qfields:focus { outline: none; }
 .net-toolbar .net-qlist button, .net-qsuggest li {
     display: flex; justify-content: space-between; align-items: baseline; gap: 12px; width: 100%;
     padding: 3px 6px; text-align: left; border-radius: 3px; cursor: pointer;

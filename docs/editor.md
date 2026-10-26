@@ -239,7 +239,10 @@ the `{ }` button inside it (the choice is remembered):
 - **Basic** — a URL text box plus chips. Typing suggests fields and values
   (↑/↓ show the highlighted one in the box, Esc puts back what you typed,
   Tab to accept); Enter turns typed `field:value` terms into chips.
-  **+ Filter** walks field → operator → value (with suggestions, ↑/↓ and
+  Ctrl+Space shows the suggestions for the word at the caret, or, with
+  nothing to suggest, opens the **+ Filter** field list right there.
+  **+ Filter** walks field → operator → value (the field list takes ↑/↓,
+  a letter to jump, Enter or Tab to pick; then suggestions, ↑/↓ and
   Enter from the value box; on text fields like url, Alt+↑/↓ switch the
   operator — plain ↑/↓ too when there's no suggestion list; Tab adds the filter, like **Add**); click a
   chip's operator to negate it, × to remove it. Picking another value for

@@ -200,11 +200,11 @@ export function FilterBar({ state, onChange, error, data, dialect: d = NET }: { 
 // ── Basic ────────────────────────────────────────────────────────────
 
 const unquote = (raw: string) => (/^".*"$/.test(raw) ? raw.slice(1, -1).replace(/\\(.)/g, "$1") : raw);
-/** "+ Filter" opened from a typed suggestion, at this field */
+/** "+ Filter" opened from a typed suggestion, at this field (none: Ctrl+Space, at the field list) */
 interface AddRequest {
-    field: FieldDef;
-    negate: boolean;
-    value: string;
+    field?: FieldDef;
+    negate?: boolean;
+    value?: string;
     /** window x of the word it came from: the popup opens there, not at the button */
     x?: number | null;
 }
@@ -471,8 +471,22 @@ function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter;
             replaceSel(key);
         }
     };
+    /** Ctrl+Space: suggestions for the word at the caret, else the + Filter field list under it */
+    const forceSuggest = () => {
+        const el = input.current!;
+        const caret = el.selectionStart ?? cur.length;
+        let from = caret;
+        while (from > 0 && !/\s/.test(cur[from - 1])) from--;
+        let to = caret;
+        while (to < cur.length && !/\s/.test(cur[to])) to++;
+        const items = from < to ? basicSuggest(cur.slice(from, to), data, d) : [];
+        if (items.length) return setAc({ from, to, items, active: 0 });
+        setAc(null);
+        setRequest({ x: textX(el, cur.slice(0, caret)) });
+    };
     const onInputKey = (ev: KeyboardEvent) => {
         const el = input.current!;
+        if (ev.ctrlKey && !ev.metaKey && !ev.altKey && (ev.key === " " || ev.code === "Space")) return (ev.preventDefault(), forceSuggest());
         const n = leaves.length;
         const atStart = el.selectionStart === 0 && el.selectionEnd === 0;
         const atEnd = el.selectionStart === el.value.length && el.selectionEnd === el.value.length;
@@ -764,6 +778,7 @@ function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter;
                     onAdd={(chip) => (gap ? (onInput(insertAtGap(value, { items: [{ k: "chip", chip }], conns: [] })), toInput(cur.length)) : (onInput(addChip(value, chip, d)), toInput(value.text.length)))}
                     request={request}
                     onRequestDone={() => setRequest(null)}
+                    onEscape={() => input.current?.focus()}
                 />
                 {tail}
             </span>
@@ -807,7 +822,7 @@ function buildChip(f: FieldDef, op: OpId, value: string, headerValue: string, d:
 /** the operator a "-word" suggestion starts with */
 const NEG_OP: Record<FieldKind, OpId> = { text: "not-contains", enum: "is-not", is: "is-not", status: "is-not", number: "gt", header: "missing" };
 
-function AddFilter({ data, onAdd, request, onRequestDone }: { data: unknown; onAdd: (c: Chip) => void; request?: AddRequest | null; onRequestDone?: () => void }) {
+function AddFilter({ data, onAdd, request, onRequestDone, onEscape }: { data: unknown; onAdd: (c: Chip) => void; request?: AddRequest | null; onRequestDone?: () => void; onEscape?: () => void }) {
     const d = useContext(DialectCtx);
     const [open, setOpen] = useState(false);
     const [field, setField] = useState<FieldDef | null>(null);
@@ -823,7 +838,30 @@ function AddFilter({ data, onAdd, request, onRequestDone }: { data: unknown; onA
     const ref = useRef<HTMLDivElement>(null);
     const reset = () => (setField(null), setOp(null), setValue(""), setHeaderValue(""), setErr(null), setActive(-1));
     const close = () => (setOpen(false), reset());
-    useDismiss(ref, open, close, () => (previewing.current ? setActive(-1) : close()));
+    useDismiss(ref, open, close, () => (previewing.current ? setActive(-1) : (close(), onEscape?.())));
+    /** the highlighted field in the field list (↑/↓, Enter/Tab picks) */
+    const [fieldHl, setFieldHl] = useState(0);
+    const fieldList = useRef<HTMLUListElement>(null);
+    const chooseField = (f: FieldDef) => (setField(f), setOp(OPS[f.kind][0]));
+    const onFieldKey = (e: KeyboardEvent) => {
+        const n = d.fields.length;
+        const key = e.key;
+        let i: number | null = null;
+        if (key === "ArrowDown" || key === "ArrowUp") i = (fieldHl + (key === "ArrowDown" ? 1 : n - 1)) % n;
+        else if (key === "Home" || key === "End") i = key === "Home" ? 0 : n - 1;
+        else if ((key === "Enter" || (key === "Tab" && !e.shiftKey)) && !e.ctrlKey && !e.metaKey && !e.altKey) return (e.preventDefault(), chooseField(d.fields[fieldHl]));
+        else if (key.length === 1 && /\w/.test(key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            // type-ahead: the next field starting with that letter
+            const k = key.toLowerCase();
+            for (let j = 1; j <= n && i === null; j++) if (d.fields[(fieldHl + j) % n].name.startsWith(k)) i = (fieldHl + j) % n;
+        }
+        if (i === null) return;
+        e.preventDefault();
+        setFieldHl(i);
+    };
+    useEffect(() => {
+        if (open && !field) document.getElementById(`net-qadd-field-${fieldHl}`)?.scrollIntoView?.({ block: "nearest" });
+    }, [fieldHl, open, field]);
     const popRef = useRef<HTMLDivElement>(null);
     useFit(popRef, open, 360);
     /** opened from a typed word: the popup sits under it */
@@ -835,13 +873,16 @@ function AddFilter({ data, onAdd, request, onRequestDone }: { data: unknown; onA
         else placeAt(el, at);
     });
     const valueInput = useRef<HTMLInputElement>(null);
-    useEffect(() => valueInput.current?.focus(), [field, op, open]);
+    useEffect(() => (field ? valueInput.current?.focus() : fieldList.current?.focus()), [field, op, open]);
     useEffect(() => {
         if (!request) return;
         reset();
-        setField(request.field);
-        setOp(request.negate ? NEG_OP[request.field.kind] : OPS[request.field.kind][0]);
-        setValue(request.value);
+        setFieldHl(0);
+        if (request.field) {
+            setField(request.field);
+            setOp(request.negate ? NEG_OP[request.field.kind] : OPS[request.field.kind][0]);
+            setValue(request.value ?? "");
+        }
         setAt(request.x ?? null);
         setOpen(true);
         onRequestDone?.();
@@ -891,18 +932,16 @@ function AddFilter({ data, onAdd, request, onRequestDone }: { data: unknown; onA
     };
     return (
         <div class="net-qadd" ref={ref}>
-            <button class="net-qadd-btn" aria-haspopup="dialog" aria-expanded={open} title="Add a filter" onClick={() => (open ? close() : (setAt(null), setOpen(true)))}>
+            <button class="net-qadd-btn" aria-haspopup="dialog" aria-expanded={open} title="Add a filter" onClick={() => (open ? close() : (setAt(null), setFieldHl(0), setOpen(true)))}>
                 + Filter
             </button>
             {open && (
                 <div class="net-pop net-qadd-pop" ref={popRef} role="dialog" aria-label="Add filter">
                     {!field && (
-                        <ul class="net-qlist" aria-label="Field">
-                            {d.fields.map((f) => (
-                                <li key={f.name}>
-                                    <button
-                                        onClick={() => (setField(f), setOp(OPS[f.kind][0]))}
-                                    >
+                        <ul class="net-qlist net-qfields" ref={fieldList} tabIndex={-1} role="listbox" aria-label="Field" aria-activedescendant={`net-qadd-field-${fieldHl}`} onKeyDown={onFieldKey}>
+                            {d.fields.map((f, i) => (
+                                <li key={f.name} id={`net-qadd-field-${i}`} role="option" aria-selected={i === fieldHl} class={i === fieldHl ? "active" : ""} onMouseEnter={() => setFieldHl(i)}>
+                                    <button tabIndex={-1} onClick={() => chooseField(f)}>
                                         <span class="net-qlist-main">{f.name}</span>
                                         <span class="net-qlist-detail">{f.help}</span>
                                     </button>
@@ -1010,7 +1049,7 @@ function QueryInput({ value, onInput, error, data, tail }: { value: string; onIn
         else setAc(null);
     };
     const onKeyDown = (ev: KeyboardEvent) => {
-        if (ev.key === " " && ev.ctrlKey) {
+        if (ev.ctrlKey && !ev.metaKey && !ev.altKey && (ev.key === " " || ev.code === "Space")) {
             ev.preventDefault();
             return suggest(value, input.current!.selectionStart ?? value.length, true);
         }

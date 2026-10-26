@@ -12,6 +12,7 @@ its section below.
 - URIs in the Log are clickable, any scheme: `https:`, `chrome:`, `file:`, `data:`… open in a new tab (⌘/Ctrl- or middle-click: in the background); `vscode:`, `mailto:` and other app schemes open their app. Punctuation right after a URI isn't taken into it. A link wrapped over several lines stays hovered across the gaps between them.
 - Network: select several requests (Shift-click, Ctrl/⌘-click, Ctrl/⌘+A) and right-click them for Open in new tab and Copy → Copy URL / Copy as cURL / Copy as fetch, devtools-style (all selected at once). Ctrl/⌘+C copies the selected URLs. The full-URL tooltip on rows is gone (Copy URL replaces it).
 - Log filter bar like Network's: Basic chips or an Advanced query with autocomplete and **?** help, over `message` (bare words, `"phrases"`, `/regex/`), `source`, `level` (`level:>=warn`) and `is:observed` / `is:link`. It replaces the Log's text and source boxes; the level menu stays.
+- Filter bars (Network and Log): Ctrl+Space in Basic shows suggestions for the word at the caret, or opens the + Filter field list there. The + Filter field list works from the keyboard: ↑/↓ (or a letter) to move, Enter or Tab to pick, Esc back to the filter box.
 - Log scroll lock, as in VS Code: a 🔒 button in the Log toolbar stops new lines from scrolling the view until clicked again. Scrolling up also pauses auto-scrolling (the button shows it), and scrolling back to the end resumes it.
 
 ### Fixed
