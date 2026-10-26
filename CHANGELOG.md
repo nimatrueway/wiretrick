@@ -9,7 +9,11 @@ its section below.
 
 ### Fixed
 
-- Settings → Strategy scrolled sideways on Chrome MV3: the unavailable `extension` option spelled out its whole reason, stretching the picker. It now says "(unavailable)" (the table below gives the reason), and the picker never outgrows the pane.
+- Settings → Strategy scrolled sideways on Chrome MV3: the unavailable `extension` option in the picker spelled out its whole reason, stretching it past the pane.
+
+### Changed
+
+- Settings → Strategy: the pros/cons table is the picker now (click a row, or its radio button) instead of a separate dropdown above it listing the same strategies. Unavailable ones are greyed out with the reason.
 
 ## [0.9.16] - 2026-10-25
 

@@ -813,6 +813,12 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 .strategy-table th { color: var(--fg-dim); font-weight: 600; }
 .strategy-table tr.current td:first-child { color: var(--accent); font-weight: 600; }
 .strategy-table tr.unavailable td { color: var(--fg-faint); }
+.strategy-table tr:not(.unavailable):not(:first-child) { cursor: pointer; }
+.strategy-table tr:not(.unavailable):not(.current):not(:first-child):hover td { background: var(--bg-hover); }
+.strategy-table tr.current td { background: var(--bg-active); }
+.strategy-table label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; cursor: inherit; }
+.strategy-table input[type="radio"] { margin: 0; accent-color: var(--accent); }
+.strategy-why { margin-top: 2px; font-size: 11px; }
 #about-info {
     display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 6px 16px;
     margin: 0 0 14px; font-size: 13px;

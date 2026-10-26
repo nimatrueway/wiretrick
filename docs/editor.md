@@ -336,8 +336,9 @@ or *Light*. It applies to the Editor (Code view included) and the popup.
 **Settings → Strategy → Default strategy** picks the
 [strategy](strategies.md) every handler uses unless its route sets
 `strategy` — `helper` on Chromium and `extension` on Firefox out of the
-box. Strategies the current browser can't use are disabled in the picker,
-and a table lists each one's pros and cons; **Compatibility** links to
+box. The picker is a table of every strategy with its pros and cons: click a
+row to pick it. Strategies the current browser can't use are greyed out with
+the reason; **Compatibility** links to
 [the full table](strategies.md#compatibility). It is the `defaultStrategy:` entry
 in `settings.yaml`. There is no fallback: a handler whose strategy isn't
 available doesn't run — the script gets a ⚠ and the Problems view a warning.

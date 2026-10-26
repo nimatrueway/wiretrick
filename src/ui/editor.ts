@@ -2484,12 +2484,15 @@ function setupDialogs(): void {
     });
 
     // settings: default interception strategy
-    const strategySel = $("#settings-strategy") as HTMLSelectElement;
     const strategyTable = $("#settings-strategy-table") as HTMLTableElement;
     ($("#settings-strategy-doc") as HTMLAnchorElement).href = STRATEGY_DOC_URL;
     const strategyEnv = { firefox: typeof (globalThis as any).browser?.webRequest?.filterResponseData === "function", mv3: __MV3__ };
+    const pickStrategy = (s: Strategy): void => {
+        chrome.storage.local.set({ resStrategy: s });
+        renderStrategy(s);
+    };
+    // the table is the picker: one radio per row; an unavailable strategy can't be picked
     const renderStrategy = (cur: string): void => {
-        strategySel.value = cur;
         strategyTable.replaceChildren();
         const head = strategyTable.insertRow();
         for (const t of ["Strategy", "Pros", "Cons"]) head.appendChild(Object.assign(document.createElement("th"), { textContent: t }));
@@ -2498,25 +2501,20 @@ function setupDialogs(): void {
             const why = strategyUnsupported(s, strategyEnv);
             row.classList.toggle("current", s === cur);
             row.classList.toggle("unavailable", !!why);
-            row.insertCell().textContent = s + (why ? ` (${why})` : "");
+            const label = document.createElement("label");
+            const radio = Object.assign(document.createElement("input"), { type: "radio", name: "settings-strategy", value: s, checked: s === cur, disabled: !!why });
+            radio.addEventListener("change", () => pickStrategy(s));
+            label.append(radio, s + (s === defaultStrategySetting() ? " (default)" : ""));
+            const cell = row.insertCell();
+            cell.append(label);
+            if (why) cell.append(Object.assign(document.createElement("div"), { className: "strategy-why", textContent: why }));
+            else row.addEventListener("click", (e) => (e.target as Element).closest("label") || (s !== cur && pickStrategy(s)));
             row.insertCell().textContent = STRATEGY_INFO[s].pros;
             row.insertCell().textContent = STRATEGY_INFO[s].cons;
         }
     };
-    for (const s of STRATEGIES) {
-        const why = strategyUnsupported(s as Strategy, strategyEnv);
-        // the reason is in the table below; in the option it would stretch the select
-        const opt = new Option(STRATEGY_INFO[s].label + (s === defaultStrategySetting() ? " (default)" : "") + (why ? " (unavailable)" : ""), s);
-        opt.disabled = !!why;
-        if (why) opt.title = why;
-        strategySel.add(opt);
-    }
     renderStrategy(defaultStrategySetting());
     chrome.storage.local.get("resStrategy", (d) => renderStrategy(isStrategy(d?.resStrategy) ? d.resStrategy : defaultStrategySetting()));
-    strategySel.addEventListener("change", () => {
-        chrome.storage.local.set({ resStrategy: strategySel.value });
-        renderStrategy(strategySel.value);
-    });
 
     // verbose Monaco/navigation diagnostics
     const verboseBox = $("#settings-monaco-verbose") as HTMLInputElement;
