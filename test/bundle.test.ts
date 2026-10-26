@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { parse as parseYaml } from "yaml";
-import { buildBundle, parseBundleText, bundleSettingsDoc, pickBundle, syncFileNameFor, vscodeTargetPath, editorLaunchUrl, launchAppName } from "../src/ui/bundle";
+import { buildBundle, parseBundleText, bundleSettingsDoc, pickBundle, syncFileNameFor, vscodeTargetPath, editorLaunchUrl, launchAppName, cleanFolderPath, copyPathHint, hostOs } from "../src/ui/bundle";
 import { SETTINGS_FILE, type SettingsDoc } from "../src/shared/settingsYaml";
 
 const SETTINGS_ID = "__settings__"; // mirrors editor.ts's virtual entry id
@@ -166,5 +166,25 @@ describe("editorLaunchUrl", () => {
         expect(launchAppName("vscode")).toBe("VS Code");
         expect(launchAppName("vscode-insiders")).toBe("VS Code Insiders");
         expect(launchAppName("custom")).toBe("your editor");
+    });
+});
+
+describe("synced folder path (pasted in Settings)", () => {
+    it("cleans what the OS copy-path commands produce", () => {
+        expect(cleanFolderPath('  "C:\\Users\\me\\Wiretrick"  ')).toBe("C:\\Users\\me\\Wiretrick");
+        expect(cleanFolderPath("file:///home/me/My%20Scripts/")).toBe("/home/me/My Scripts");
+        expect(cleanFolderPath("file:///C:/Users/me/Wiretrick")).toBe("C:/Users/me/Wiretrick");
+        expect(cleanFolderPath("/Users/me/Wiretrick/")).toBe("/Users/me/Wiretrick");
+        expect(cleanFolderPath("/")).toBe("/");
+        expect(cleanFolderPath("C:\\")).toBe("C:\\");
+        expect(cleanFolderPath("")).toBe("");
+    });
+
+    it("gives the hint for the user's OS", () => {
+        expect(hostOs("MacIntel")).toBe("mac");
+        expect(hostOs("Win32")).toBe("windows");
+        expect(hostOs("Linux x86_64")).toBe("linux");
+        expect(copyPathHint("mac").hint).toContain("⌥⌘C");
+        expect(copyPathHint("windows").example).toBe("C:\\Users\\you\\Wiretrick");
     });
 });

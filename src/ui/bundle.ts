@@ -63,6 +63,27 @@ export function vscodeTargetPath(folder: string, selectedId: string, scriptName:
     return folder.replace(/\/+$/, "") + "/" + syncFileNameFor(selectedId, scriptName, settingsId, settingsFile);
 }
 
+export type HostOs = "mac" | "windows" | "linux";
+export const hostOs = (platform: string): HostOs => (/Mac|iPhone|iPad/.test(platform) ? "mac" : /^Win/.test(platform) ? "windows" : "linux");
+
+/** How to copy a folder's absolute path on this OS (the browser can't read it), and an example path. */
+export function copyPathHint(os: HostOs): { hint: string; example: string } {
+    if (os === "mac") return { hint: "In Finder, select the folder and press ⌥⌘C (Copy as Pathname), then paste it here.", example: "/Users/you/Wiretrick" };
+    if (os === "windows") return { hint: "In File Explorer, select the folder and press Ctrl+Shift+C (or Shift+right-click → Copy as path), then paste it here.", example: "C:\\Users\\you\\Wiretrick" };
+    return { hint: "In your file manager, open the folder and press Ctrl+L to show its path, or run pwd in a terminal there, then paste it here.", example: "/home/you/Wiretrick" };
+}
+
+/** A pasted folder path, cleaned up: quotes from Windows' Copy as path, a file:// URI some file managers copy, a trailing slash. */
+export function cleanFolderPath(raw: string): string {
+    let p = raw.trim().replace(/^(["'])(.*)\1$/, "$2").trim();
+    if (/^file:\/\//i.test(p)) {
+        try {
+            p = decodeURIComponent(new URL(p).pathname).replace(/^\/([A-Za-z]:)/, "$1");
+        } catch {}
+    }
+    return p.replace(/(?<=[^/\\:])[/\\]+$/, "");
+}
+
 /** What the ↗ button launches: Settings → Open button. */
 export type LaunchMode = "vscode" | "vscode-insiders" | "custom" | "off";
 

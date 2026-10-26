@@ -60,6 +60,11 @@ hides the button). Like React DevTools' "Open in Editor URL", a custom
 editor is a URL template: `{path}` is the file's absolute path and `{line}`
 the cursor line, e.g. `cursor://file{path}:{line}`,
 `zed://file{path}:{line}` or `idea://open?file={path}&line={line}`.
+The button needs the synced folder's absolute path in **Settings → Synced
+folder → Folder path**: the browser's folder picker never reveals it, so
+paste it in. The setting says how to copy it on your OS (Finder: ⌥⌘C;
+File Explorer: Ctrl+Shift+C; Linux file managers: Ctrl+L), and quotes or a
+`file://` URI in what you paste are cleaned up.
 
 ## Explorer
 

@@ -19,7 +19,7 @@ import { resolveConflict } from "./conflictDialog";
 import { watchTheme, saveTheme, type Theme, type ThemePref } from "./theme";
 import * as fsBridge from "./fsBridge";
 import { cleanScriptName, scriptNameProblem, scriptFileName, scriptFileKey, uniqueScriptName, dataFilePathProblem, folderPathProblem, MAX_PATH } from "../shared/scriptName";
-import { buildBundle, parseBundleText, bundleSettingsDoc, pickBundle, vscodeTargetPath, editorLaunchUrl, launchAppName, type LaunchMode } from "./bundle";
+import { buildBundle, parseBundleText, bundleSettingsDoc, pickBundle, vscodeTargetPath, editorLaunchUrl, launchAppName, copyPathHint, hostOs, cleanFolderPath, type LaunchMode } from "./bundle";
 import { createQuickOpenPalette } from "./quickOpen";
 import { computeDirty } from "./dirtyState";
 import { parseSettings, SETTINGS_FILE, defaultStrategySetting, isStrategy, type SettingsDoc } from "../shared/settingsYaml";
@@ -2585,8 +2585,12 @@ function setupDialogs(): void {
     chrome.storage.local.get("resVscodePath", (d) => {
         if (d && d.resVscodePath) pathInput.value = d.resVscodePath;
     });
+    const pathHelp = copyPathHint(hostOs(navigator.platform));
+    pathInput.placeholder = pathHelp.example;
+    $("#settings-vscode-path-hint").textContent = pathHelp.hint;
     pathInput.addEventListener("change", () => {
-        chrome.storage.local.set({ resVscodePath: pathInput.value.trim() }, () => void refreshSyncPath());
+        pathInput.value = cleanFolderPath(pathInput.value);
+        chrome.storage.local.set({ resVscodePath: pathInput.value }, () => void refreshSyncPath());
     });
 
     // launch target for the ↗ button (vscode | vscode-insiders | custom | off)
