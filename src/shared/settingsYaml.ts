@@ -47,7 +47,7 @@ export const LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
 export const DEFAULT_LOG_LEVEL = "info";
 export const DEFAULT_LOG_CAP = 500;
 /** Network body capture cap in kB (settings.bodyCap) */
-export const DEFAULT_BODY_CAP = 256;
+export const DEFAULT_BODY_CAP = 2048;
 export const BODY_CAP_MIN = 16;
 export const BODY_CAP_MAX = 16384;
 /** chrome.storage key of settings.bodyCap (absent: DEFAULT_BODY_CAP) */

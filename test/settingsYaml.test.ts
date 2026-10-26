@@ -120,10 +120,10 @@ describe("settings.yaml apply", () => {
         expect(plan("settings:\n  bodyCap: 8\n")).toEqual({});
         expect(plan("settings:\n  bodyCap: 20000\n")).toEqual({});
         expect(plan("settings:\n  bodyCap: 64.5\n")).toEqual({});
-        expect(plan("settings:\n  bodyCap: 256\n")).toEqual({});
-        expect(plan("settings:\n  logLevel: info\n", { ...G, bodyCap: 1024 })).toEqual({ bodyCap: 256 });
-        expect(renderSettings({ ...G, bodyCap: 1024 }, [])).toMatch(/\n  # Network view: kB.*\n  # default: 256\n  bodyCap: 1024\n/);
-        expect(patchSettings("settings:\n  # bodyCap: 256\n", { ...G, bodyCap: 64 }, [])).toMatch(/^settings:\n  # bodyCap: 256\n  bodyCap: 64\n/);
+        expect(plan("settings:\n  bodyCap: 2048\n")).toEqual({});
+        expect(plan("settings:\n  logLevel: info\n", { ...G, bodyCap: 1024 })).toEqual({ bodyCap: 2048 });
+        expect(renderSettings({ ...G, bodyCap: 1024 }, [])).toMatch(/\n  # Network view: kB.*\n  # default: 2048\n  bodyCap: 1024\n/);
+        expect(patchSettings("settings:\n  # bodyCap: 2048\n", { ...G, bodyCap: 64 }, [])).toMatch(/^settings:\n  # bodyCap: 2048\n  bodyCap: 64\n/);
     });
 
     it("a present-but-all-commented section resets it to defaults", () => {

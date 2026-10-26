@@ -332,7 +332,7 @@ describe("network recorder", () => {
         setBodyCap(16);
         expect(toNetBody("x".repeat(20 * 1024))!.text.length).toBe(16 * 1024);
         expect(toNetBody(new TextEncoder().encode("y".repeat(20 * 1024)))!).toMatchObject({ truncated: true, size: 20 * 1024 });
-        setBodyCap(1024);
+        setBodyCap(4096);
         expect(toNetBody("x".repeat(MAX_BODY + 10))!.truncated).toBe(false);
         setBodyCap(3);
         expect(toNetBody("x".repeat(MAX_BODY + 10))!.text.length).toBe(MAX_BODY);

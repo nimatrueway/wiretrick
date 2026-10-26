@@ -214,7 +214,7 @@ at the right of the toolbar do the same.
   body (modified and original, when Wiretrick handled it) and what each
   script did (observed entries muted). **Copy** above a payload or response
   body puts it on the clipboard (pretty-printed JSON, as shown). Each body is
-  kept up to 256 kB by default; a longer one is cut and says so — raise the
+  kept up to 2 MB (2048 kB) by default; a longer one is cut and says so — raise the
   cap in **Settings → Network → Body capture** (16–16384 kB, `bodyCap:` in
   `settings.yaml`). It applies to requests captured afterwards.
   Select several rows with Shift-click (a range), Ctrl/⌘-click (one more) or
@@ -462,7 +462,7 @@ settings:
   #   - text/*
   #   - …
   # Network view: kB of each request/response body kept (16..16384)
-  # bodyCap: 256
+  # bodyCap: 2048
 
 params:
   Debug header:
