@@ -39,7 +39,6 @@ export const FIELDS: FieldDef[] = [
     { name: "time", kind: "number", help: "Duration: >500ms, <2s" },
     { name: "is", kind: "is", help: "touched, modified, failed…" },
 ];
-const FIELD_MAP = new Map(FIELDS.map((f) => [f.name, f]));
 
 export const IS_VALUES: { name: string; help: string }[] = [
     { name: "touched", help: "A script observed or modified it" },
@@ -70,7 +69,36 @@ export interface QueryCtx {
     tabTitle(id: number): string | undefined;
 }
 
-type Test = (e: NetEntry, ctx: QueryCtx) => boolean;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type Test = (e: any, ctx: any) => boolean;
+
+/** A filter language: its fields and how they match. Network's (`NET`) is the default; the Log has its own (logQuery.ts). */
+export interface Dialect {
+    fields: FieldDef[];
+    /** the field a bare word searches, and what to call it in messages */
+    bare: string;
+    bareNoun: string;
+    /** a test for one value of a field; throw `valueError` for a bad value */
+    valueTest(field: string, v: QValue): Test;
+    /** known values of a field (Basic picker, autocomplete), from the panel's suggestion data */
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    fieldValues(field: string, data: any): { value: string; detail?: string }[];
+    /** fields whose known values Basic offers for a bare word */
+    quick: string[];
+    /** fields whose repeated picks OR into one chip (an entry has one method / status / level…) */
+    merge: Set<string>;
+    /** where Basic / Advanced is remembered; the filter a fresh panel starts with */
+    modeKey: string;
+    initial: string;
+    /** the Advanced box's placeholder query */
+    sample: string;
+    /** "?" help: syntax rows, clickable examples, a closing note (`code` in backticks) */
+    syntax: [string, string][];
+    examples: [string, string][];
+    note?: string;
+    map: Map<string, FieldDef>;
+}
+export const dialect = (spec: Omit<Dialect, "map">): Dialect => ({ ...spec, map: new Map(spec.fields.map((f) => [f.name, f])) });
 
 export interface TermNode {
     k: "term";
@@ -84,6 +112,9 @@ export interface TermNode {
     test: Test;
 }
 export type QNode = TermNode | { k: "and"; items: QNode[] } | { k: "or"; items: QNode[] } | { k: "not"; item: QNode };
+
+/** A bad value: thrown from a dialect's `valueTest`, reported at that value. */
+export const valueError = (message: string): Error => new QErr(message, 0, 0);
 
 class QErr extends Error {
     constructor(
@@ -129,7 +160,7 @@ function readValue(src: string, i: number, list: boolean): { v: QValue; end: num
     return { v: { raw: src.slice(start, i), text, quoted, regex: false }, end: i };
 }
 
-function scan(src: string): Tok[] {
+function scan(src: string, d: Dialect): Tok[] {
     const toks: Tok[] = [];
     let i = 0;
     while (i < src.length) {
@@ -157,11 +188,11 @@ function scan(src: string): Tok[] {
         const m = /^([A-Za-z][\w-]*):/.exec(src.slice(i));
         if (m) {
             const name = m[1].toLowerCase();
-            if (FIELD_MAP.has(name)) {
+            if (d.map.has(name)) {
                 field = name;
                 i += m[0].length;
             } else if (!/^(\/\/|\d)/.test(src.slice(i + m[0].length))) {
-                throw new QErr(`Unknown field "${m[1]}" — quote it to search the URL`, i, i + m[1].length);
+                throw new QErr(`Unknown field "${m[1]}" — quote it to search the ${d.bareNoun}`, i, i + m[1].length);
             }
         }
         const values: QValue[] = [];
@@ -188,7 +219,7 @@ function scan(src: string): Tok[] {
             }
         }
         const term: TermNode = { k: "term", field, values, raw: src.slice(body, i), start, end: i, test: () => true };
-        term.test = buildTest(term, starts);
+        term.test = buildTest(term, starts, d);
         toks.push({ t: "term", start, end: i, term, neg });
     }
     return toks;
@@ -244,17 +275,17 @@ function parseTokens(toks: Tok[], srcLen: number): QNode | null {
 }
 
 /** Parse (and validate) a query; an empty query parses to `null` (match everything). */
-export function parseQuery(src: string): { ast: QNode | null; error: QueryError | null } {
+export function parseQuery(src: string, d: Dialect = NET): { ast: QNode | null; error: QueryError | null } {
     try {
-        return { ast: parseTokens(scan(src), src.length), error: null };
+        return { ast: parseTokens(scan(src, d), src.length), error: null };
     } catch (err) {
         if (err instanceof QErr) return { ast: null, error: { message: err.message, start: err.start, end: Math.max(err.end, err.start + 1) } };
         throw err;
     }
 }
 
-export function compileQuery(ast: QNode | null, ctx: QueryCtx): (e: NetEntry) => boolean {
-    const build = (n: QNode): ((e: NetEntry) => boolean) => {
+export function compileQuery<E = NetEntry, C = QueryCtx>(ast: QNode | null, ctx: C): (e: E) => boolean {
+    const build = (n: QNode): ((e: E) => boolean) => {
         switch (n.k) {
             case "term":
                 return (e) => n.test(e, ctx);
@@ -279,7 +310,7 @@ export function compileQuery(ast: QNode | null, ctx: QueryCtx): (e: NetEntry) =>
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-function regex(pattern: string): RegExp {
+export function regex(pattern: string): RegExp {
     try {
         return new RegExp(pattern, "i");
     } catch {
@@ -288,7 +319,7 @@ function regex(pattern: string): RegExp {
 }
 
 /** contains (default) / =exact / * wildcard (whole value) / /regex/ */
-function strTest(v: QValue, exactByDefault: boolean): (s: string) => boolean {
+export function strTest(v: QValue, exactByDefault: boolean): (s: string) => boolean {
     if (v.regex) {
         const re = regex(v.text);
         return (s) => re.test(s);
@@ -307,8 +338,8 @@ function strTest(v: QValue, exactByDefault: boolean): (s: string) => boolean {
     return exact ? (s) => s.toLowerCase() === needle : (s) => s.toLowerCase().includes(needle);
 }
 
-const CMP = /^(>=|<=|>|<|=)?(\d+(?:\.\d+)?)([a-z]*)$/i;
-function cmpTest(op: string, n: number): (x: number) => boolean {
+export const CMP = /^(>=|<=|>|<|=)?(\d+(?:\.\d+)?)([a-z]*)$/i;
+export function cmpTest(op: string, n: number): (x: number) => boolean {
     switch (op) {
         case ">":
             return (x) => x > n;
@@ -335,7 +366,7 @@ function urlPart(url: string, part: "host" | "path"): string {
     }
 }
 
-function headerTest(v: QValue, which: "req" | "res"): Test {
+function headerTest(v: QValue, which: "req" | "res"): (e: NetEntry) => boolean {
     if (v.regex) throw new QErr("Use name=/regex/ to match a header value", 0, 0);
     const eq = v.text.indexOf("=");
     const name = (eq < 0 ? v.text : v.text.slice(0, eq)).trim();
@@ -350,8 +381,8 @@ function headerTest(v: QValue, which: "req" | "res"): Test {
     return (e) => ((which === "req" ? e.requestHeaders : e.responseHeaders) ?? []).some(([n, val]) => nameOk(n) && (!valueOk || valueOk(val)));
 }
 
-function valueTest(field: string, v: QValue): Test {
-    const def = FIELD_MAP.get(field)!;
+function netValueTest(field: string, v: QValue): Test {
+    const def = NET.map.get(field)!;
     const anyStr = (get: (e: NetEntry, ctx: QueryCtx) => (string | undefined)[], exact = false): Test => {
         const ok = strTest(v, exact);
         return (e, ctx) => get(e, ctx).some((s) => s !== undefined && ok(s));
@@ -424,10 +455,10 @@ function valueTest(field: string, v: QValue): Test {
     }
 }
 
-function buildTest(term: TermNode, starts: number[]): Test {
+function buildTest(term: TermNode, starts: number[], d: Dialect): Test {
     const tests = term.values.map((v, i) => {
         try {
-            return valueTest(term.field ?? "url", v);
+            return d.valueTest(term.field ?? d.bare, v);
         } catch (err) {
             // value errors are raised position-less; point them at the value
             if (err instanceof QErr && err.start === 0 && err.end === 0) throw new QErr(err.message, starts[i], starts[i] + v.raw.length);
@@ -488,15 +519,15 @@ export function exprToString(e: BasicExpr): string {
     });
     return out;
 }
-export function fromBasic(b: BasicFilter): string {
-    if (b.at) return fromBasic({ ...b, at: undefined, expr: gapExpr(b) });
+export function fromBasic(b: BasicFilter, d: Dialect = NET): string {
+    if (b.at) return fromBasic({ ...b, at: undefined, expr: gapExpr(b, d) }, d);
     // after a typed connector or "(", the words being typed count where they'll go
-    const placed = b.text.trim() && (b.conn || openPath(b.expr).length) ? commitText(b, b.text) : null;
+    const placed = b.text.trim() && (b.conn || openPath(b.expr).length) ? commitText(b, b.text, d) : null;
     if (placed) return exprToString(placed.expr);
     const text = b.text.trim();
     const ex = exprToString(b.expr);
     if (!text || !ex) return text || ex;
-    const textOr = parseQuery(text).ast?.k === "or";
+    const textOr = parseQuery(text, d).ast?.k === "or";
     return `${textOr ? `(${text})` : text} ${b.expr.conns.includes("OR") ? `(${ex})` : ex}`;
 }
 
@@ -554,9 +585,6 @@ export function toBasic(ast: QNode | null): BasicFilter {
     return { text: e.items.filter(word).map((it) => chipToString((it as { chip: Chip }).chip)).join(" "), expr: { items: rest, conns: rest.slice(1).map(() => "AND") } };
 }
 
-/** fields whose repeated picks OR into one chip (a request has one method / status / type…) */
-const MERGE = new Set(["method", "status", "type", "is", "tab", "script"]);
-
 /** AND `item` onto the expression; an OR'ed expression is grouped first so it keeps its meaning. */
 function appendAnd(e: BasicExpr, item: BasicItem): BasicExpr {
     if (!e.items.length) return { items: [item], conns: [] };
@@ -564,21 +592,21 @@ function appendAnd(e: BasicExpr, item: BasicItem): BasicExpr {
     return { items: [...base.items, item], conns: [...base.conns, "AND"] };
 }
 /** Add a chip (AND); a repeated pick of a MERGE field ORs into its chip when the expression is all-AND. */
-export function addChip(b: BasicFilter, chip: Chip): BasicFilter {
+export function addChip(b: BasicFilter, chip: Chip, d: Dialect = NET): BasicFilter {
     if (b.conn || openPath(b.expr).length) return insertExpr(b, { items: [{ k: "chip", chip }], conns: [] });
     const e = b.expr;
-    const i = !e.conns.includes("OR") && MERGE.has(chip.field) ? e.items.findIndex((it) => it.k === "chip" && it.chip.field === chip.field && it.chip.negate === chip.negate) : -1;
+    const i = !e.conns.includes("OR") && d.merge.has(chip.field) ? e.items.findIndex((it) => it.k === "chip" && it.chip.field === chip.field && it.chip.negate === chip.negate) : -1;
     if (i < 0) return { ...b, expr: appendAnd(e, { k: "chip", chip }) };
     const old = (e.items[i] as { chip: Chip }).chip;
     const merged: BasicItem = { k: "chip", chip: { ...old, values: [...new Set([...old.values, ...chip.values])] } };
     return { ...b, expr: { ...e, items: e.items.map((it, j) => (j === i ? merged : it)) } };
 }
 /** Add a whole expression: chip by chip when all-AND, else as one group. */
-export function addExpr(b: BasicFilter, e: BasicExpr): BasicFilter {
+export function addExpr(b: BasicFilter, e: BasicExpr, d: Dialect = NET): BasicFilter {
     if (!e.items.length) return b;
     if (b.conn || openPath(b.expr).length) return insertExpr(b, e);
     if (e.conns.includes("OR")) return { ...b, expr: appendAnd(b.expr, { k: "group", negate: false, expr: e }) };
-    return e.items.reduce((acc, it) => (it.k === "chip" ? addChip(acc, it.chip) : { ...acc, expr: appendAnd(acc.expr, it) }), b);
+    return e.items.reduce((acc, it) => (it.k === "chip" ? addChip(acc, it.chip, d) : { ...acc, expr: appendAnd(acc.expr, it) }), b);
 }
 
 /** a group left with one item collapses to it (a NOT moves onto the item); an empty one disappears. An open group stays as it is. */
@@ -643,40 +671,40 @@ function insertExpr(b: BasicFilter, add: BasicExpr): BasicFilter {
     return { ...b, conn: undefined, expr: editAt(b.expr, openPath(b.expr), join) };
 }
 /** The text box's words as items (bare words become URL chips); null when it doesn't parse. */
-function typedExpr(text: string): BasicExpr | null {
+function typedExpr(text: string, d: Dialect): BasicExpr | null {
     if (!text.trim()) return { items: [], conns: [] };
-    const p = parseQuery(text);
+    const p = parseQuery(text, d);
     return p.error ? null : p.ast ? toExpr(p.ast) : { items: [], conns: [] };
 }
 /** Commit the text box into the structure; null when it doesn't parse. */
-function commitText(b: BasicFilter, text: string): BasicFilter | null {
-    const add = typedExpr(text);
+function commitText(b: BasicFilter, text: string, d: Dialect): BasicFilter | null {
+    const add = typedExpr(text, d);
     if (!add) return null;
     const base = { ...b, text: "" };
     if (!add.items.length) return base;
     // at the top level with nothing typed to join it, the text box's AND with everything else is kept
-    return base.conn || openPath(base.expr).length ? insertExpr(base, add) : addExpr(base, add);
+    return base.conn || openPath(base.expr).length ? insertExpr(base, add) : addExpr(base, add, d);
 }
 /**
  * What the Basic box becomes after this text was typed (caret at the end), or null when nothing
  * structural was typed: "… OR " / "… AND " → a connector chip, "(" / "-(" → an open group,
  * ")" → closes the innermost open group. What was typed before turns into chips.
  */
-export function typeStructure(b: BasicFilter, text: string): BasicFilter | null {
+export function typeStructure(b: BasicFilter, text: string, d: Dialect = NET): BasicFilter | null {
     let m = /^(.*?)(?:^|\s)(AND|OR)\s$/s.exec(text);
     if (m) {
-        const before = commitText(b, m[1]);
+        const before = commitText(b, m[1], d);
         if (!before || !exprAt(before.expr, openPath(before.expr)).items.length) return null; // nothing to join yet
         return { ...before, conn: m[2] as Conn };
     }
     m = /^(.*?)(?:^|(?<=\s))(-?)\($/s.exec(text);
     if (m) {
-        const before = commitText(b, m[1]);
+        const before = commitText(b, m[1], d);
         if (!before) return null;
         return insertExpr(before, { items: [{ k: "group", negate: m[2] === "-", expr: { items: [], conns: [] }, open: true }], conns: [] });
     }
     if (text.endsWith(")") && openPath(b.expr).length) {
-        const before = commitText(b, text.slice(0, -1));
+        const before = commitText(b, text.slice(0, -1), d);
         if (!before) return null;
         const path = openPath(before.expr);
         return { ...before, conn: undefined, expr: editItem(before.expr, path, (g) => (g.k === "group" ? tidyGroup({ ...g, open: false }) : g)) };
@@ -686,12 +714,12 @@ export function typeStructure(b: BasicFilter, text: string): BasicFilter | null 
     return null;
 }
 /** Enter: commit the text box. Inside a group or after a typed connector everything becomes chips; else plain words stay as text. */
-export function commitTyped(b: BasicFilter): BasicFilter | null {
-    if (b.conn || openPath(b.expr).length) return commitText(b, b.text);
-    const p = parseQuery(b.text);
+export function commitTyped(b: BasicFilter, d: Dialect = NET): BasicFilter | null {
+    if (b.conn || openPath(b.expr).length) return commitText(b, b.text, d);
+    const p = parseQuery(b.text, d);
     if (p.error) return null;
     const t = toBasic(p.ast);
-    return leafChips(t.expr).length ? addExpr({ ...b, text: t.text }, t.expr) : null;
+    return leafChips(t.expr).length ? addExpr({ ...b, text: t.text }, t.expr, d) : null;
 }
 /** Backspace at the start of the text box: the typed connector, then an empty open group, then a group's ")", then the last chip. */
 export function backspaceStructure(b: BasicFilter): BasicFilter | null {
@@ -733,15 +761,15 @@ function placeAt(b: BasicFilter, x: BasicExpr): { expr: BasicExpr; count: number
     return { expr, count };
 }
 /** The expression with what's typed at the gap counted in place (as it was, while it doesn't parse). */
-export function gapExpr(b: BasicFilter): BasicExpr {
-    const x = b.at && typedExpr(b.at.text);
+export function gapExpr(b: BasicFilter, d: Dialect = NET): BasicExpr {
+    const x = b.at && typedExpr(b.at.text, d);
     return x ? placeAt(b, x).expr : b.expr;
 }
 /** Enter / leaving the gap: its text becomes chips there; the gap moves past them (gone if the edited item was emptied). Null when it doesn't parse. */
-export function commitGap(b: BasicFilter): BasicFilter | null {
+export function commitGap(b: BasicFilter, d: Dialect = NET): BasicFilter | null {
     const g = b.at;
     if (!g) return b;
-    const x = typedExpr(g.text);
+    const x = typedExpr(g.text, d);
     if (!x) return null;
     const { expr, count } = placeAt(b, x);
     return { ...b, expr, at: count < 0 ? undefined : { path: g.path, index: g.index + count, text: "" } };
@@ -941,8 +969,8 @@ export function toggleConn(e: BasicExpr, groupPath: number[], ci: number): Basic
     return editItem(e, groupPath, (g) => (g.k === "group" ? { ...g, expr: toggleConn(g.expr, [], ci) } : g));
 }
 
-export function quoteValue(s: string, field = "url"): string {
-    const kind = FIELD_MAP.get(field)?.kind;
+export function quoteValue(s: string, field = "url", d: Dialect = NET): string {
+    const kind = d.map.get(field)?.kind;
     if (kind === "status" || kind === "number" || kind === "is") return s;
     return s && !/[\s(),"\\]/.test(s) && !/^[=/]/.test(s) ? s : `"${s.replace(/["\\]/g, "\\$&")}"`;
 }
@@ -1015,7 +1043,10 @@ export function statusText(code: string): string | undefined {
 }
 
 /** Value suggestions for one field (also used by the Basic "+ Filter" picker). */
-export function fieldValues(field: string, data: SuggestData): { value: string; detail?: string }[] {
+export function fieldValues(field: string, data: unknown, d: Dialect = NET): { value: string; detail?: string }[] {
+    return d.fieldValues(field, data);
+}
+function netFieldValues(field: string, data: SuggestData): { value: string; detail?: string }[] {
     const plain = (xs: string[]) => xs.map((value) => ({ value }));
     switch (field) {
         case "method":
@@ -1061,33 +1092,30 @@ export type BasicSuggestion =
     /** add this chip directly */
     | { kind: "chip"; chip: Chip; label: string; detail?: string };
 
-/** fields whose known values Basic offers for a bare word */
-const QUICK_FIELDS = ["method", "status", "type", "is", "host", "script", "tab"];
-
 /** Basic's suggestions for the word being typed: matching fields, then field values as ready chips; `-word` negates, `field:val` narrows to that field. */
-export function basicSuggest(token: string, data: SuggestData, limit = 8): BasicSuggestion[] {
+export function basicSuggest(token: string, data: unknown, d: Dialect = NET, limit = 8): BasicSuggestion[] {
     const negate = token.length > 1 && token.startsWith("-");
     const t = negate ? token.slice(1) : token;
     if (!t) return [];
     const fieldItem = (f: FieldDef, value = ""): BasicSuggestion => ({ kind: "field", field: f, negate, value, label: `${negate ? "-" : ""}${f.name}:${value}`, detail: value ? "choose operator…" : f.help });
     const chipItems = (f: FieldDef, vals: { value: string; detail?: string }[]): BasicSuggestion[] =>
         vals
-            .map((v) => ({ kind: "chip" as const, chip: { field: f.name, negate, values: [quoteValue(v.value, f.name)] }, label: `${f.name}${negate ? " ≠ " : ": "}${v.value}`, detail: v.detail }))
-            .filter((s) => !parseQuery(chipToString(s.chip)).error);
+            .map((v) => ({ kind: "chip" as const, chip: { field: f.name, negate, values: [quoteValue(v.value, f.name, d)] }, label: `${f.name}${negate ? " ≠ " : ": "}${v.value}`, detail: v.detail }))
+            .filter((s) => !parseQuery(chipToString(s.chip), d).error);
     const colon = t.indexOf(":");
     if (colon > 0) {
-        const f = FIELD_MAP.get(t.slice(0, colon).toLowerCase());
+        const f = d.map.get(t.slice(0, colon).toLowerCase());
         if (!f) return [];
         const v = t.slice(colon + 1);
-        return [fieldItem(f, v), ...chipItems(f, rank(fieldValues(f.name, data), (x) => x.value, v).slice(0, limit))];
+        return [fieldItem(f, v), ...chipItems(f, rank(d.fieldValues(f.name, data), (x) => x.value, v).slice(0, limit))];
     }
     const lower = t.toLowerCase();
-    const fields = FIELDS.filter((f) => f.name.startsWith(lower)).map((f) => fieldItem(f));
+    const fields = d.fields.filter((f) => f.name.startsWith(lower)).map((f) => fieldItem(f));
     const starts: BasicSuggestion[] = [];
     const has: BasicSuggestion[] = [];
-    for (const name of QUICK_FIELDS) {
-        const f = FIELD_MAP.get(name)!;
-        for (const v of fieldValues(name, data)) {
+    for (const name of d.quick) {
+        const f = d.map.get(name)!;
+        for (const v of d.fieldValues(name, data)) {
             const l = v.value.toLowerCase();
             if (l.startsWith(lower)) starts.push(...chipItems(f, [v]));
             else if (l.includes(lower)) has.push(...chipItems(f, [v]));
@@ -1097,7 +1125,7 @@ export function basicSuggest(token: string, data: SuggestData, limit = 8): Basic
 }
 
 /** Suggestions for the word at `cursor`: field names, then values after `field:`. */
-export function complete(src: string, cursor: number, data: SuggestData): Completion | null {
+export function complete(src: string, cursor: number, data: unknown, d: Dialect = NET): Completion | null {
     if ((src.slice(0, cursor).match(/"/g)?.length ?? 0) % 2) return null; // inside a quoted value
     let from = cursor;
     while (from > 0 && !isSpace(src[from - 1]) && src[from - 1] !== "(") from--;
@@ -1110,19 +1138,57 @@ export function complete(src: string, cursor: number, data: SuggestData): Comple
     }
     const colon = word.indexOf(":");
     if (colon < 0) {
-        const items = rank(FIELDS, (f) => f.name, word).map((f) => ({ label: f.name + ":", insert: f.name + ":", detail: f.help }));
+        const items = rank(d.fields, (f) => f.name, word).map((f) => ({ label: f.name + ":", insert: f.name + ":", detail: f.help }));
         return items.length ? { from, to, items } : null;
     }
     const field = word.slice(0, colon).toLowerCase();
-    if (!FIELD_MAP.has(field)) return null;
+    if (!d.map.has(field)) return null;
     const valueStart = from + colon + 1 + word.slice(colon + 1).lastIndexOf(",") + 1;
     const prefix = src.slice(valueStart, cursor);
-    if (FIELD_MAP.get(field)!.kind === "header" && prefix.includes("=")) return null;
+    if (d.map.get(field)!.kind === "header" && prefix.includes("=")) return null;
     let valueEnd = cursor;
     while (valueEnd < to && src[valueEnd] !== ",") valueEnd++;
-    const items = rank(fieldValues(field, data), (x) => x.value, prefix)
+    const items = rank(d.fieldValues(field, data), (x) => x.value, prefix)
         .filter((x) => x.value !== prefix)
         .slice(0, 50)
-        .map((x) => ({ label: x.value, insert: quoteValue(x.value, field), detail: x.detail }));
+        .map((x) => ({ label: x.value, insert: quoteValue(x.value, field, d), detail: x.detail }));
     return items.length ? { from: valueStart, to: valueEnd, items } : null;
 }
+
+// ── the Network dialect ──────────────────────────────────────────────
+
+export const NET: Dialect = dialect({
+    fields: FIELDS,
+    bare: "url",
+    bareNoun: "URL",
+    valueTest: netValueTest,
+    fieldValues: netFieldValues,
+    quick: ["method", "status", "type", "is", "host", "script", "tab"],
+    merge: new Set(["method", "status", "type", "is", "tab", "script"]),
+    modeKey: "wt.network.filterMode",
+    // by default only what scripts touched — a chip, so removing it shows everything
+    initial: "is:touched",
+    sample: "method:POST status:>=400 -host:cdn",
+    syntax: [
+        ["word", "URL contains word (space = AND)"],
+        ["field:value", "Field contains / equals value"],
+        ["field:a,b", "Either value"],
+        ["-term   NOT term", "Exclude"],
+        ["a OR b   ( … )", "Either side; group with parentheses"],
+        ['"two words"', "Quote spaces, commas, parentheses"],
+        ["=value   val*   /re/", "Exact, wildcard (whole value), regex"],
+        [">  >=  <  <=", "Compare status, size (kb, mb), time (ms, s)"],
+        ["4xx   400..499", "Status class or range"],
+    ],
+    examples: [
+        ["status:>=400", "Errors"],
+        ["is:modified -type:img", "Changed by a script, no images"],
+        ["method:POST,PUT host:api", "Writes to an API host"],
+        ["res-header:content-type=json", "JSON responses"],
+        ["req-header:authorization", "Authenticated requests"],
+        ['res-body:"error"', "Recorded response body mentions error"],
+        ["size:>100kb OR time:>1s", "Heavy or slow"],
+        ["(type:fetch OR type:doc) -is:cached", "Fresh XHR/fetch and documents"],
+    ],
+    note: "`req-body`/`res-body` search only bodies Wiretrick recorded. Script, tab and activity menus to the right also apply.",
+});

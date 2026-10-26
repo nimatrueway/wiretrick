@@ -160,9 +160,10 @@ at the right of the toolbar do the same.
   status bar, and follow the scripts. Compile, TypeScript,
   rules errors and route warnings appear only here, not in the Log; a
   runtime error appears in both (the Log has every occurrence, with its URL).
-- **Log view** — engine and script log lines with text (or regex), source
-  and level filters. Each view's filter sits in the same place, the panel
-  header next to the tabs, with its clear icon after it.
+- **Log view** — engine and script log lines with a [filter bar](#log-filter)
+  like the Network view's and a minimum-level menu. Each view's filter sits
+  in the same place, the panel header next to the tabs, with its clear icon
+  after it.
   URIs in log lines are links, whatever the scheme: `https:`, `chrome:`,
   `file:` or `data:` ones open in a new tab (⌘/Ctrl- or middle-click: in the
   background), and others such as `vscode:` or `mailto:` go to the app that
@@ -291,6 +292,18 @@ button lists them with clickable examples, e.g.
 `res-header:content-type=json`, `size:>100kb OR time:>1s`.
 
 The tab and script pickers and type toggles still work alongside the query.
+
+### Log filter
+
+The Log's filter bar works the same way — Basic chips or an Advanced query,
+same syntax and **?** help — over log lines. A bare word (or `"phrase"`,
+`/re/`) searches the message, and matches are highlighted. Fields: `message`,
+`source` (script name or component, e.g. `pipeline`, `page`), `level`
+(`debug`, `info`, `warn`, `error`, or a comparison like `>=warn`), and
+`is:` `observed` (a handler ran without changing the request) / `link`
+(has a link). E.g. `level:>=warn -source:page`, `/timeout|refused/`,
+`is:observed source:myScript`. The level menu beside it still applies, so
+pick **Debug+** there to see `level:debug` lines.
 
 ## Synced folder
 

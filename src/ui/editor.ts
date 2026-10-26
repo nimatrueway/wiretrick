@@ -29,6 +29,8 @@ import { STRATEGY_DOC_URL, STRATEGY_INFO, strategyUnsupported } from "../shared/
 import { dlogLevel } from "../shared/debugLog";
 import { helperInstallCommand, helperInstallShell } from "../shared/helperInstall";
 import { mountNetworkPanel } from "./network/mount";
+import { mountLogFilter, type LogFilter } from "./logFilter";
+import type { LogLine } from "./logQuery";
 import { createNetStore } from "./network/netStore";
 import { installTooltips } from "./tooltip";
 import { scriptHealth, type ScriptHealthInput } from "../shared/scriptHealth";
@@ -1734,11 +1736,11 @@ function connectLogs(): void {
     });
 }
 
-let logFindRe: RegExp | null = null;
+/** the filter bar's query (all lines until it mounts) */
+let logFilter: LogFilter = { test: () => true, mark: null };
 const LEVEL_ORDER: Record<string, number> = { debug: 0, info: 1, warn: 2, error: 3 };
 let minLevel = 1; // info+
 let logCap = 500; // rendered lines kept in the DOM
-let logSource = ""; // source-tag filter text, "" = all
 
 /** Extract the source tag of a message: "[pipeline] …" → "pipeline"; "console.log: …" → "console.log". */
 function sourceOf(message: string): string {
@@ -1748,31 +1750,22 @@ function sourceOf(message: string): string {
     return dot ? dot[1] : "(untagged)";
 }
 
-/** Sources seen in the buffer — drives the autocomplete datalist. */
+/** Sources seen in the buffer — the filter's `source:` suggestions. */
 const logSources = new Set<string>();
 
-function rememberSource(src: string): void {
-    if (logSources.has(src)) return;
-    logSources.add(src);
-    const list = $("#log-source-options") as HTMLDataListElement;
-    const o = document.createElement("option");
-    o.value = src;
-    list.appendChild(o);
+type LogItem = LogLine & { text: string };
+
+function linePassesFilters(e: LogItem): boolean {
+    return (LEVEL_ORDER[e.level] ?? 1) >= minLevel && logFilter.test(e);
 }
 
-function linePassesFilters(text: string, level: string, source: string): boolean {
-    if ((LEVEL_ORDER[level] ?? 1) < minLevel) return false;
-    if (logSource && !source.toLowerCase().includes(logSource.toLowerCase())) return false;
-    if (logFindRe && !logFindRe.test(text)) return false;
-    return true;
-}
-
-function renderLogLine(line: HTMLElement, text: string, level: string, source: string): void {
+function renderLogLine(line: HTMLElement, e: LogItem): void {
+    const { text, level, source } = e;
     line.dataset.text = text;
     line.dataset.level = level;
     line.dataset.source = source;
     line.innerHTML = "";
-    if (!linePassesFilters(text, level, source)) {
+    if (!linePassesFilters(e)) {
         line.style.display = "none";
         return;
     }
@@ -1787,9 +1780,10 @@ function renderLogLine(line: HTMLElement, text: string, level: string, source: s
     badge.textContent = level;
     line.appendChild(badge);
     void rest;
-    const m = logFindRe ? text.match(logFindRe) : null;
-    const idx = m ? text.indexOf(m[0]) : -1;
-    for (const seg of logSegments(text, m ? [idx, idx + m[0].length] : undefined)) {
+    // highlight within the message, not the time prefix
+    const m = logFilter.mark?.exec(e.message);
+    const at = m ? text.length - e.message.length + m.index : -1;
+    for (const seg of logSegments(text, m?.[0] ? [at, at + m[0].length] : undefined)) {
         let node: Node = document.createTextNode(seg.text);
         if (seg.mark) node = Object.assign(document.createElement("mark"), { textContent: seg.text });
         if (seg.uri) {
@@ -2136,7 +2130,7 @@ function setupProblemsView(): void {
 /** the filter box of a panel view (Network's lives in a portal, once mounted) */
 function panelFilter(which: PanelTab): HTMLInputElement | null {
     if (which === "problems") return $input("#problems-filter");
-    if (which === "log") return $input("#log-find");
+    if (which === "log") return document.querySelector<HTMLInputElement>("#log-filter-host input.net-filter, #log-filter-host input.net-query");
     return document.querySelector<HTMLInputElement>("#net-filter-host input.net-filter, #net-filter-host input.net-query");
 }
 
@@ -2172,7 +2166,7 @@ function clearPanelView(): void {
 }
 
 /** All received entries — filtered ones stay here (re-renderable), just not in the DOM. */
-const logEntries: { text: string; level: string; source: string; observed?: boolean }[] = [];
+const logEntries: LogItem[] = [];
 /** "observed (no change)" DEBUG lines (one per handler run) may fill at most this much of the buffer */
 const MAX_OBSERVED_ENTRIES = 300;
 let observedEntries = 0;
@@ -2221,7 +2215,9 @@ function appendLog(entry: any): void {
     const time = new Date(entry.at).toLocaleTimeString();
     const source = sourceOf(entry.message || "");
     const observed = entry.kind === "observed";
-    logEntries.push({ text: `[${time}] ${entry.message}`, level: entry.level || "info", source, ...(observed ? { observed } : {}) });
+    const message = String(entry.message ?? "");
+    const item: LogItem = { text: `[${time}] ${message}`, message, level: entry.level || "info", source, ...(observed ? { observed } : {}) };
+    logEntries.push(item);
     logBadge.note(entry.level || "info");
     let counted = entry.level === "error" || entry.level === "warn";
     if (observed && ++observedEntries > MAX_OBSERVED_ENTRIES) {
@@ -2237,16 +2233,14 @@ function appendLog(entry: any): void {
         }
     }
     if (counted) renderTabBadges();
-    rememberSource(source);
+    logSources.add(source);
 
-    const text = logEntries[logEntries.length - 1].text;
-    const level = logEntries[logEntries.length - 1].level;
-    if (!linePassesFilters(text, level, source)) return; // don't let hidden entries churn the DOM ring
+    if (!linePassesFilters(item)) return; // don't let hidden entries churn the DOM ring
 
     const box = $("#log-entries");
     const line = document.createElement("div");
-    line.className = "log-line " + level;
-    renderLogLine(line, text, level, source);
+    line.className = "log-line " + item.level;
+    renderLogLine(line, item);
     box.appendChild(line);
     while (box.children.length > logCap) box.removeChild(box.firstChild as Node);
     followLog(box);
@@ -2256,11 +2250,11 @@ function refilterLog(): void {
     const box = $("#log-entries");
     const top = box.scrollTop;
     box.innerHTML = "";
-    for (const { text, level, source } of logEntries) {
-        if (!linePassesFilters(text, level, source)) continue;
+    for (const e of logEntries) {
+        if (!linePassesFilters(e)) continue;
         const line = document.createElement("div");
-        line.className = "log-line " + level;
-        renderLogLine(line, text, level, source);
+        line.className = "log-line " + e.level;
+        renderLogLine(line, e);
         box.appendChild(line);
     }
     while (box.children.length > logCap) box.removeChild(box.firstChild as Node);
@@ -2269,25 +2263,17 @@ function refilterLog(): void {
 }
 
 function makeLogFilters(): void {
-    const input = $("#log-find") as HTMLInputElement;
-    input.addEventListener("input", () => {
-        const q = input.value.trim();
-        try {
-            logFindRe = q ? new RegExp(q, "i") : null;
-        } catch {
-            // fall back to plain substring on invalid regex
-            logFindRe = q ? new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") : null;
-        }
-        refilterLog();
-    });
+    mountLogFilter(
+        $("#log-filter-host"),
+        () => ({ sources: [...logSources].sort((a, b) => a.localeCompare(b)) }),
+        (f) => {
+            logFilter = f;
+            refilterLog();
+        },
+    );
     const levelSel = $("#log-level") as HTMLSelectElement;
     levelSel.addEventListener("change", () => {
         minLevel = LEVEL_ORDER[levelSel.value] ?? 1;
-        refilterLog();
-    });
-    const sourceSel = $("#log-source") as HTMLInputElement;
-    sourceSel.addEventListener("input", () => {
-        logSource = sourceSel.value.trim();
         refilterLog();
     });
 }

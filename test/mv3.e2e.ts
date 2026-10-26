@@ -706,7 +706,7 @@ try {
     const viaP = await viewKey("Alt+Shift+KeyP");
     check(
         "⌥⇧L / ⌥⇧N / ⌥⇧P show Log / Network / Problems with the filter focused",
-        viaL.tab === "log" && viaL.focus === "log-find" && viaN.tab === "network" && /net-filter|net-query/.test(viaN.focus ?? "") && viaP.tab === "problems" && viaP.focus === "problems-filter",
+        viaL.tab === "log" && /net-filter|net-query/.test(viaL.focus ?? "") && viaN.tab === "network" && /net-filter|net-query/.test(viaN.focus ?? "") && viaP.tab === "problems" && viaP.focus === "problems-filter",
         JSON.stringify({ viaL, viaN, viaP }),
     );
     await viewKey("Alt+Shift+KeyL");

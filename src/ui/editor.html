@@ -56,9 +56,7 @@
                         <input id="problems-filter" class="panel-filter" type="text" placeholder="Filter (e.g. text, script name)" title="Show only problems whose message or script name contains this text" autocomplete="off" spellcheck="false">
                         </span>
                         <span id="log-tools" class="panel-tools">
-                        <input id="log-find" class="panel-filter" type="text" placeholder="Filter (text or regex)" title="Show only log lines matching this text (regex ok)" autocomplete="off" spellcheck="false">
-                        <input id="log-source" type="text" list="log-source-options" placeholder="source…" title="Filter by source — script name or engine component (e.g. pipeline, page). Substring match; empty = all">
-                        <datalist id="log-source-options"></datalist>
+                        <span id="log-filter-host"></span>
                         <select id="log-level" title="Minimum log level">
                             <option value="debug">Debug+</option>
                             <option value="info" selected>Info+</option>

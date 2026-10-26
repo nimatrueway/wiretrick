@@ -464,7 +464,7 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 }
 .panel-filter:focus { border-color: var(--accent); outline: none; }
 
-#log-level, #log-source {
+#log-level {
     height: 22px; box-sizing: border-box;
     background: var(--bg);
     border: 1px solid var(--border);
@@ -475,9 +475,8 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
     text-transform: none;
     letter-spacing: normal;
 }
-#log-source { flex: 0 1 110px; width: 0; min-width: 64px; }
+#log-filter-host, #log-filter-host > .net-toolbar { display: contents; }
 #log-level, .panel-tools .icon-btn { flex: none; }
-#log-source:focus { border-color: var(--accent); outline: none; }
 
 .log-line .lv {
     font-size: 9px;

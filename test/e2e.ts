@@ -631,14 +631,14 @@ check("panels: script list back to the left (persisted)", backLeft.side === "lef
 
 // find box filters log lines (E2E-CONSOLE-MARKER arrived via the port
 // from test 11's script console)
-await mgr.locator("#log-find").fill("E2E-CONSOLE");
+await mgr.locator("#log-filter-host input.net-filter").fill("E2E-CONSOLE");
 await new Promise((r) => setTimeout(r, 300));
 const visible = await mgr.evaluate(() =>
     Array.from(document.querySelectorAll("#log-entries .log-line")).filter((l) => (l as HTMLElement).style.display !== "none").length
 );
 const findable = await mgr.evaluate(() => document.querySelector("#log-entries")?.textContent?.includes("E2E-CONSOLE-MARKER"));
 check("logs: find box filters lines", visible > 0 && !!findable, `visible=${visible}`);
-await mgr.locator("#log-find").fill("");
+await mgr.locator("#log-filter-host input.net-filter").fill("");
 
 // ---------- hover type links + read-only API typings + Go Back ----------
 await checkApiTypingsNav(mgr, check);

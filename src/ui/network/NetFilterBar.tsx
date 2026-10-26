@@ -1,13 +1,13 @@
 /**
- * Network filter bar: one query, two editors. Basic builds it from a text
+ * Filter bar (Network, Log): one query, two editors. Basic builds it from a text
  * box and chips ("+ Filter": field → operator → value); Advanced edits the
  * query directly with autocomplete, error underlines and a "?" syntax help.
  */
-import { Fragment, type ComponentChildren, type JSX } from "preact";
-import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { Fragment, createContext, type ComponentChildren, type JSX } from "preact";
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { RefObject } from "preact";
 import {
-    FIELDS,
+    NET,
     addChip,
     backspaceStructure,
     commitTyped,
@@ -33,8 +33,8 @@ import {
     type Completion,
     type FieldDef,
     type FieldKind,
+    type Dialect,
     type QueryError,
-    type SuggestData,
     basicStops,
     chipsBefore,
     closeGap,
@@ -56,19 +56,19 @@ export interface FilterState {
     query: string;
 }
 
-const MODE_KEY = "wt.network.filterMode";
-export function initialFilterState(): FilterState {
+export function initialFilterState(d: Dialect = NET): FilterState {
     let mode: FilterMode = "basic";
     try {
-        if (localStorage.getItem(MODE_KEY) === "advanced") mode = "advanced";
+        if (localStorage.getItem(d.modeKey) === "advanced") mode = "advanced";
     } catch {}
-    // by default only what scripts touched — a chip, so removing it shows everything
-    const query = "is:touched";
-    return { mode, basic: toBasic(parseQuery(query).ast), query };
+    return { mode, basic: toBasic(parseQuery(d.initial, d).ast), query: d.initial };
 }
-export function effectiveQuery(s: FilterState): string {
-    return s.mode === "basic" ? fromBasic(s.basic) : s.query;
+export function effectiveQuery(s: FilterState, d: Dialect = NET): string {
+    return s.mode === "basic" ? fromBasic(s.basic, d) : s.query;
 }
+
+/** the filter language of the bar being rendered */
+const DialectCtx = createContext<Dialect>(NET);
 
 /** Close a popup on outside mousedown or Escape. */
 function useDismiss(ref: RefObject<HTMLElement | null>, open: boolean, close: () => void, escape: () => void = close) {
@@ -136,15 +136,16 @@ function useUnderCaret(ref: RefObject<HTMLElement | null>, inputRef: RefObject<H
     });
 }
 
-export function FilterBar({ state, onChange, error, data }: { state: FilterState; onChange: (s: FilterState) => void; error: QueryError | null; data: SuggestData }) {
+/** `data`: the dialect's suggestion data (Network: `SuggestData`) */
+export function FilterBar({ state, onChange, error, data, dialect: d = NET }: { state: FilterState; onChange: (s: FilterState) => void; error: QueryError | null; data: unknown; dialect?: Dialect }) {
     const [warn, setWarn] = useState(false);
     const setMode = (mode: FilterMode) => {
         if (mode === state.mode) return;
         try {
-            localStorage.setItem(MODE_KEY, mode);
+            localStorage.setItem(d.modeKey, mode);
         } catch {}
-        if (mode === "advanced") return onChange({ ...state, mode, query: fromBasic(state.basic) });
-        const parsed = parseQuery(state.query);
+        if (mode === "advanced") return onChange({ ...state, mode, query: fromBasic(state.basic, d) });
+        const parsed = parseQuery(state.query, d);
         if (parsed.error) return setWarn(true);
         onChange({ ...state, mode, basic: toBasic(parsed.ast) });
     };
@@ -188,9 +189,11 @@ export function FilterBar({ state, onChange, error, data }: { state: FilterState
         </>
     );
     return (
-        <div class="net-qbar no-dock">
-            {advanced ? <QueryInput value={state.query} onInput={(query) => onChange({ ...state, query })} error={error} data={data} tail={tail} /> : <BasicInput value={state.basic} onInput={(basic) => onChange({ ...state, basic })} error={error} data={data} tail={tail} />}
-        </div>
+        <DialectCtx.Provider value={d}>
+            <div class="net-qbar no-dock">
+                {advanced ? <QueryInput value={state.query} onInput={(query) => onChange({ ...state, query })} error={error} data={data} tail={tail} /> : <BasicInput value={state.basic} onInput={(basic) => onChange({ ...state, basic })} error={error} data={data} tail={tail} />}
+            </div>
+        </DialectCtx.Provider>
     );
 }
 
@@ -261,7 +264,8 @@ function useBasicUndo(value: BasicFilter, onInput: (b: BasicFilter) => void) {
     };
 }
 
-function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter; onInput: (b: BasicFilter) => void; error: QueryError | null; data: SuggestData; tail?: ComponentChildren }) {
+function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter; onInput: (b: BasicFilter) => void; error: QueryError | null; data: unknown; tail?: ComponentChildren }) {
+    const d = useContext(DialectCtx);
     const box = useRef<HTMLDivElement>(null);
     const input = useRef<HTMLInputElement>(null);
     const listRef = useRef<HTMLUListElement>(null);
@@ -317,20 +321,20 @@ function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter;
     /** the caret as a selection end: its spot between chips (what was typed there turned into chips first) and the stop to come back to */
     const caretEnd = (): { base: BasicFilter; b: number; origin: BasicStop; map: (i: number) => number } | null => {
         if (!gap) return { base: value, b: leaves.length, origin: { k: "end" }, map: (i) => i };
-        const c = commitGap(value);
+        const c = commitGap(value, d);
         if (!c?.at) return null;
         const before = chipsBefore(value.expr, gap.path, gap.index);
-        const d = leafChips(c.expr).length - leaves.length;
-        return { base: { ...c, at: undefined }, b: chipsBefore(c.expr, c.at.path, c.at.index), origin: { k: "gap", path: c.at.path, index: c.at.index }, map: (i) => (i < before ? i : i + d) };
+        const delta = leafChips(c.expr).length - leaves.length;
+        return { base: { ...c, at: undefined }, b: chipsBefore(c.expr, c.at.path, c.at.index), origin: { k: "gap", path: c.at.path, index: c.at.index }, map: (i) => (i < before ? i : i + delta) };
     };
     /** the text box back at the end: what was typed among the chips becomes chips there; `map` follows a chip index across that */
     const settle = (): { base: BasicFilter; map: (i: number) => number } => {
         if (!gap) return { base: value, map: (i) => i };
-        const c = commitGap(value);
+        const c = commitGap(value, d);
         if (!c) return { base: closeGap(value), map: (i) => i };
         const before = chipsBefore(value.expr, gap.path, gap.index);
-        const d = leafChips(c.expr).length - leaves.length;
-        return { base: { ...c, at: undefined }, map: (i) => (i < before ? i : i + d) };
+        const delta = leafChips(c.expr).length - leaves.length;
+        return { base: { ...c, at: undefined }, map: (i) => (i < before ? i : i + delta) };
     };
     /** put the caret at a stop: select a chip, or the text box in a gap / at the end */
     const goStop = (s: BasicStop | undefined, base: BasicFilter, caretAtEnd = false) => {
@@ -346,7 +350,7 @@ function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter;
     /** ←/→ out of the gap: what was typed there becomes chips first (stays put while it doesn't parse) */
     const leaveGap = (dir: -1 | 1) => {
         const g = gap!;
-        const c = commitGap(value);
+        const c = commitGap(value, d);
         if (!c) return;
         const st = basicStops(c.expr);
         if (c.at) return goStop(st[st.findIndex((x) => isGap(x, g.path, dir < 0 ? g.index : c.at!.index)) + dir], c);
@@ -385,14 +389,14 @@ function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter;
         if (typed) suggest(next.at ? typed : next.text, typed.length);
     };
     const replaceSel = (typed = "") => removeLeaves(value, lo, hi, typed, !!sel?.withText);
-    const selectedQuery = () => (sel?.withText ? fromBasic(value) : leaves.slice(lo, hi + 1).map(chipToString).join(" "));
+    const selectedQuery = () => (sel?.withText ? fromBasic(value, d) : leaves.slice(lo, hi + 1).map(chipToString).join(" "));
 
     const suggest = (text: string, caret: number) => {
         let from = caret;
         while (from > 0 && !/\s/.test(text[from - 1])) from--;
         let to = caret;
         while (to < text.length && !/\s/.test(text[to])) to++;
-        const items = basicSuggest(text.slice(from, to), data);
+        const items = basicSuggest(text.slice(from, to), data, d);
         setAc(items.length ? { from, to, items, active: -1 } : null);
     };
     const accept = (i: number) => {
@@ -402,7 +406,7 @@ function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter;
         setAc(null);
         if (item.kind === "chip") {
             const one: BasicExpr = { items: [{ k: "chip", chip: item.chip }], conns: [] };
-            return (onInput(gap ? insertAtGap(withText(text), one) : addChip({ ...value, text }, item.chip)), toInput(text.length));
+            return (onInput(gap ? insertAtGap(withText(text), one) : addChip({ ...value, text }, item.chip, d)), toInput(text.length));
         }
         const x = input.current ? textX(input.current, cur.slice(0, ac.from)) : null;
         onInput(withText(text));
@@ -411,11 +415,11 @@ function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter;
     /** Enter with nothing picked: what the text box holds besides plain words becomes chips (among the chips: all of it) */
     const chipify = () => {
         if (gap) {
-            const c = commitGap(value);
+            const c = commitGap(value, d);
             if (c) (onInput(c), toInput(c.at ? 0 : c.text.length));
             return;
         }
-        const next = commitTyped(value);
+        const next = commitTyped(value, d);
         if (next) (onInput(next), toInput(next.text.length));
     };
 
@@ -548,12 +552,12 @@ function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter;
     const gapTyped = (text: string): BasicFilter | null => {
         const w = /^(.*?)(?:^|\s)(AND|OR)\s$/s.exec(text);
         if (w && gap && !gap.edit) {
-            const c = commitGap({ ...value, at: { ...gap, text: w[1] } });
+            const c = commitGap({ ...value, at: { ...gap, text: w[1] } }, d);
             return c?.at ? connAtGap(c, w[2] as "AND" | "OR") : null;
         }
         const m = /^(.*?)(-?\(|\))$/s.exec(text);
         if (!gap || gap.edit || !m || (m[2] !== ")" && m[1] && !/\s$/.test(m[1]))) return null;
-        const c = commitGap({ ...value, at: { ...gap, text: m[1] } });
+        const c = commitGap({ ...value, at: { ...gap, text: m[1] } }, d);
         return c?.at ? parenAtGap(c, m[2] as "(" | "-(" | ")") : null;
     };
     const textBox = (
@@ -562,9 +566,9 @@ function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter;
                 ref={input}
                 class="net-filter"
                 type="text"
-                placeholder={gap ? "" : "Filter URL, or type a field or value (-word excludes)"}
+                placeholder={gap ? "" : `Filter ${d.bareNoun}, or type a field or value (-word excludes)`}
                 size={gap ? Math.max(1, shown.length + 1) : undefined}
-                aria-label="Filter URL"
+                aria-label={`Filter ${d.bareNoun}`}
                 spellcheck={false}
                 autocomplete="off"
                 aria-autocomplete="list"
@@ -581,7 +585,7 @@ function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter;
                     setSel(null);
                     // AND / OR / ( / ) turn into capsules as they're typed at the end; among the chips they wait for Enter
                     const atEnd = (el.selectionStart ?? el.value.length) === el.value.length;
-                    const typed = atEnd ? (gap ? gapTyped(el.value) : typeStructure(value, el.value)) : null;
+                    const typed = atEnd ? (gap ? gapTyped(el.value) : typeStructure(value, el.value, d)) : null;
                     if (typed) return (setAc(null), onInput(typed), toInput(typed.at ? 0 : typed.text.length)); // its own undo step
                     history.typed();
                     onInput(withText(el.value));
@@ -659,7 +663,7 @@ function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter;
                 );
             const ch = it.chip;
             const idx = leaf++;
-            const name = ch.field || "url";
+            const name = ch.field || d.bare;
             if (here && gap!.edit)
                 return (
                     <Fragment key={p.join(".")}>
@@ -757,7 +761,7 @@ function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter;
             <span class="net-qtail">
                 <AddFilter
                     data={data}
-                    onAdd={(chip) => (gap ? (onInput(insertAtGap(value, { items: [{ k: "chip", chip }], conns: [] })), toInput(cur.length)) : (onInput(addChip(value, chip)), toInput(value.text.length)))}
+                    onAdd={(chip) => (gap ? (onInput(insertAtGap(value, { items: [{ k: "chip", chip }], conns: [] })), toInput(cur.length)) : (onInput(addChip(value, chip, d)), toInput(value.text.length)))}
                     request={request}
                     onRequestDone={() => setRequest(null)}
                 />
@@ -789,21 +793,22 @@ const OPS: Record<FieldKind, OpId[]> = {
     header: ["exists", "missing", "has-value"],
 };
 
-function buildChip(f: FieldDef, op: OpId, value: string, headerValue: string): Chip {
+function buildChip(f: FieldDef, op: OpId, value: string, headerValue: string, d: Dialect): Chip {
     const negate = op === "not-contains" || op === "is-not" || op === "missing";
     let raw: string;
-    if (f.kind === "header") raw = quoteValue(op === "has-value" ? `${value}=${headerValue}` : value, f.name);
+    if (f.kind === "header") raw = quoteValue(op === "has-value" ? `${value}=${headerValue}` : value, f.name, d);
     else if (op === "matches") raw = `/${value}/`;
     else if (op === "gt" || op === "lt") raw = (op === "gt" ? ">" : "<") + value.replace(/\s+/g, "");
-    else if ((op === "is" || op === "is-not") && f.kind === "text") raw = "=" + quoteValue(value, f.name);
-    else raw = quoteValue(value, f.name);
+    else if ((op === "is" || op === "is-not") && f.kind === "text") raw = "=" + quoteValue(value, f.name, d);
+    else raw = quoteValue(value, f.name, d);
     return { field: f.name, negate, values: [raw] };
 }
 
 /** the operator a "-word" suggestion starts with */
 const NEG_OP: Record<FieldKind, OpId> = { text: "not-contains", enum: "is-not", is: "is-not", status: "is-not", number: "gt", header: "missing" };
 
-function AddFilter({ data, onAdd, request, onRequestDone }: { data: SuggestData; onAdd: (c: Chip) => void; request?: AddRequest | null; onRequestDone?: () => void }) {
+function AddFilter({ data, onAdd, request, onRequestDone }: { data: unknown; onAdd: (c: Chip) => void; request?: AddRequest | null; onRequestDone?: () => void }) {
+    const d = useContext(DialectCtx);
     const [open, setOpen] = useState(false);
     const [field, setField] = useState<FieldDef | null>(null);
     const [op, setOp] = useState<OpId | null>(null);
@@ -844,15 +849,15 @@ function AddFilter({ data, onAdd, request, onRequestDone }: { data: SuggestData;
     const commit = (v = value) => {
         if (!field || !op) return;
         if (!v.trim() || (op === "has-value" && !headerValue.trim())) return setErr("Enter a value");
-        const chip = buildChip(field, op, v.trim(), headerValue.trim());
-        const e = parseQuery(chipToString(chip)).error;
+        const chip = buildChip(field, op, v.trim(), headerValue.trim(), d);
+        const e = parseQuery(chipToString(chip), d).error;
         if (e) return setErr(e.message);
         onAdd(chip);
         close();
     };
     const opsFor = field ? OPS[field.kind] : [];
     const needsList = field && op && op !== "matches" && op !== "gt" && op !== "lt";
-    const suggestions = needsList ? fieldValues(field!.name, data).filter((s) => !/^[<>]/.test(s.value) && s.value.toLowerCase().includes(value.toLowerCase())).slice(0, 50) : [];
+    const suggestions = needsList ? fieldValues(field!.name, data, d).filter((s) => !/^[<>]/.test(s.value) && s.value.toLowerCase().includes(value.toLowerCase())).slice(0, 50) : [];
     const preview = hl.kb && active >= 0 && active < suggestions.length ? suggestions[active].value : null;
     previewing.current = preview !== null;
     const pick = (v: string) => (op === "has-value" ? (setValue(v), setActive(-1)) : commit(v));
@@ -893,7 +898,7 @@ function AddFilter({ data, onAdd, request, onRequestDone }: { data: SuggestData;
                 <div class="net-pop net-qadd-pop" ref={popRef} role="dialog" aria-label="Add filter">
                     {!field && (
                         <ul class="net-qlist" aria-label="Field">
-                            {FIELDS.map((f) => (
+                            {d.fields.map((f) => (
                                 <li key={f.name}>
                                     <button
                                         onClick={() => (setField(f), setOp(OPS[f.kind][0]))}
@@ -967,7 +972,8 @@ function AddFilter({ data, onAdd, request, onRequestDone }: { data: SuggestData;
 
 // ── Advanced ─────────────────────────────────────────────────────────
 
-function QueryInput({ value, onInput, error, data, tail }: { value: string; onInput: (q: string) => void; error: QueryError | null; data: SuggestData; tail?: ComponentChildren }) {
+function QueryInput({ value, onInput, error, data, tail }: { value: string; onInput: (q: string) => void; error: QueryError | null; data: unknown; tail?: ComponentChildren }) {
+    const d = useContext(DialectCtx);
     const input = useRef<HTMLInputElement>(null);
     const mirror = useRef<HTMLDivElement>(null);
     const [ac, setAc] = useState<(Completion & { active: number }) | null>(null);
@@ -988,7 +994,7 @@ function QueryInput({ value, onInput, error, data, tail }: { value: string; onIn
     const suggest = (text: string, caret: number, force = false) => {
         let from = caret;
         while (from > 0 && !/[\s(]/.test(text[from - 1])) from--;
-        const c = force || caret > from ? complete(text, caret, data) : null;
+        const c = force || caret > from ? complete(text, caret, data, d) : null;
         setAc(c ? { ...c, active: 0 } : null);
     };
     const accept = (i: number) => {
@@ -1045,7 +1051,7 @@ function QueryInput({ value, onInput, error, data, tail }: { value: string; onIn
                 type="text"
                 spellcheck={false}
                 autocomplete="off"
-                placeholder="method:POST status:>=400 -host:cdn   (Ctrl+Space for suggestions)"
+                placeholder={`${d.sample}   (Ctrl+Space for suggestions)`}
                 aria-label="Filter query"
                 aria-invalid={!!error}
                 aria-autocomplete="list"
@@ -1086,29 +1092,11 @@ function QueryInput({ value, onInput, error, data, tail }: { value: string; onIn
 
 // ── "?" syntax help ──────────────────────────────────────────────────
 
-const SYNTAX: [string, string][] = [
-    ["word", "URL contains word (space = AND)"],
-    ["field:value", "Field contains / equals value"],
-    ["field:a,b", "Either value"],
-    ["-term   NOT term", "Exclude"],
-    ["a OR b   ( … )", "Either side; group with parentheses"],
-    ['"two words"', "Quote spaces, commas, parentheses"],
-    ["=value   val*   /re/", "Exact, wildcard (whole value), regex"],
-    [">  >=  <  <=", "Compare status, size (kb, mb), time (ms, s)"],
-    ["4xx   400..499", "Status class or range"],
-];
-const EXAMPLES: [string, string][] = [
-    ["status:>=400", "Errors"],
-    ["is:modified -type:img", "Changed by a script, no images"],
-    ["method:POST,PUT host:api", "Writes to an API host"],
-    ["res-header:content-type=json", "JSON responses"],
-    ["req-header:authorization", "Authenticated requests"],
-    ['res-body:"error"', "Recorded response body mentions error"],
-    ["size:>100kb OR time:>1s", "Heavy or slow"],
-    ["(type:fetch OR type:doc) -is:cached", "Fresh XHR/fetch and documents"],
-];
+/** "a `b` c" → text with <code> for the backticked parts */
+const withCode = (s: string) => s.split("`").map((part, i) => (i % 2 ? <code key={i}>{part}</code> : part));
 
 function SyntaxHelp({ onPick }: { onPick: (q: string) => void }) {
+    const d = useContext(DialectCtx);
     const [open, setOpen] = useState(false);
     const ref = useRef<HTMLDivElement>(null);
     useDismiss(ref, open, () => setOpen(false));
@@ -1123,7 +1111,7 @@ function SyntaxHelp({ onPick }: { onPick: (q: string) => void }) {
                 <div class="net-pop net-qhelp-pop" ref={popRef} role="dialog" aria-label="Filter syntax">
                     <table class="net-qhelp-table">
                         <tbody>
-                            {SYNTAX.map(([k, v]) => (
+                            {d.syntax.map(([k, v]) => (
                                 <tr key={k}>
                                     <td>
                                         <code>{k}</code>
@@ -1135,7 +1123,7 @@ function SyntaxHelp({ onPick }: { onPick: (q: string) => void }) {
                     </table>
                     <div class="net-qhelp-h">Fields</div>
                     <div class="net-qhelp-fields">
-                        {FIELDS.map((f) => (
+                        {d.fields.map((f) => (
                             <code key={f.name} title={f.help}>
                                 {f.name}
                             </code>
@@ -1143,7 +1131,7 @@ function SyntaxHelp({ onPick }: { onPick: (q: string) => void }) {
                     </div>
                     <div class="net-qhelp-h">Examples — click to use</div>
                     <ul class="net-qlist">
-                        {EXAMPLES.map(([q, d]) => (
+                        {d.examples.map(([q, d]) => (
                             <li key={q}>
                                 <button onClick={() => (setOpen(false), onPick(q))}>
                                     <code class="net-qlist-main">{q}</code>
@@ -1152,9 +1140,7 @@ function SyntaxHelp({ onPick }: { onPick: (q: string) => void }) {
                             </li>
                         ))}
                     </ul>
-                    <p class="net-qhelp-note">
-                        <code>req-body</code>/<code>res-body</code> search only bodies Wiretrick recorded. Script, tab and activity menus to the right also apply.
-                    </p>
+                    {d.note && <p class="net-qhelp-note">{withCode(d.note)}</p>}
                 </div>
             )}
         </div>
