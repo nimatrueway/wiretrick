@@ -856,7 +856,7 @@ describe("NetworkPanel", () => {
             expect(container.querySelector(".net-status")!.textContent).toContain("3 selected");
             fireEvent.contextMenu(rows()[1]);
             const items = () => [...container.querySelectorAll(".net-rowmenu li[role=menuitem]")].map((li) => li.firstChild!.textContent);
-            expect(items()).toEqual(["Open 3 in new tabs", "Copy", "Copy 3 URLs", "Copy all as cURL", "Copy all as fetch"]);
+            expect(items()).toEqual(["Open 3 in new tabs", "Copy", "Copy 3 URLs", "Copy all as cURL", "Copy all as fetch", "Copy all as HAR"]);
             let copied = "";
             Object.defineProperty(navigator, "clipboard", { value: { writeText: async (t: string) => void (copied = t) }, configurable: true });
             fireEvent.click([...container.querySelectorAll(".net-submenu li")][0]);

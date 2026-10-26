@@ -490,6 +490,9 @@ export function NetworkPanel({ store, listTabs, toolsHost }: { store: NetStore; 
                             <li role="menuitem" onClick={() => copy("fetch")}>
                                 {targets.length === 1 ? "Copy as fetch" : "Copy all as fetch"}
                             </li>
+                            <li role="menuitem" onClick={() => copy("har")}>
+                                {targets.length === 1 ? "Copy as HAR" : "Copy all as HAR"}
+                            </li>
                         </ul>
                     </li>
                 </ul>

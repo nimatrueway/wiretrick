@@ -7,6 +7,10 @@ its section below.
 
 ## [Unreleased]
 
+### Added
+
+- Network: Copy → **Copy as HAR** (**Copy all as HAR** with several rows selected) puts a HAR 1.2 log on the clipboard: headers, cookies, query string, timings, server IP, and the request/response bodies as recorded (a comment marks bodies that were cut or not captured). Opens in devtools' Network panel or any HAR viewer.
+
 ### Fixed
 
 - Network: ↑/↓, PageUp/PageDown and Home/End did nothing in the request table. They now move the selection (Shift extends it) and scroll it into view; an open details pane follows the selected request, and Enter opens it.

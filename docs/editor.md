@@ -219,8 +219,10 @@ at the right of the toolbar do the same.
   `settings.yaml`). It applies to requests captured afterwards.
   Select several rows with Shift-click (a range), Ctrl/⌘-click (one more) or
   Ctrl/⌘+A, and right-click for **Open in new tab** and **Copy** → **Copy
-  URL**, **Copy as cURL** (bash) or **Copy as fetch**, devtools-style; with
-  several rows selected these act on all of them. Ctrl/⌘+C copies the
+  URL**, **Copy as cURL** (bash), **Copy as fetch** or **Copy as HAR**,
+  devtools-style; with several rows selected these act on all of them (HAR:
+  one HAR 1.2 log with headers, cookies, timings and the recorded bodies;
+  like the cURL and fetch copies it isn't sanitized). Ctrl/⌘+C copies the
   selected URLs. With the table focused, ↑/↓, PageUp/PageDown and Home/End
   move the selection (Shift extends it); the details pane, when open,
   follows it, and Enter opens it.
