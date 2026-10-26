@@ -22,6 +22,8 @@ import {
 import { compileQuery, parseQuery, suggestData, type QNode } from "./netQuery";
 import { FilterBar, effectiveQuery, initialFilterState, type FilterState } from "./NetFilterBar";
 import { formatKey } from "../shortcuts";
+import { copyWithToast } from "../toast";
+import { copyRequests, type CopyKind } from "./netCopy";
 
 export interface TabInfo {
     id: number;
@@ -57,6 +59,45 @@ function loadLayout(): Layout {
     return DEFAULT_LAYOUT;
 }
 
+/** Rows picked in the table: `primary` (the last one clicked) is the one the details pane shows, if any. */
+interface Selection {
+    ids: ReadonlySet<string>;
+    anchor: string | null;
+    primary: string | null;
+}
+const NO_SELECTION: Selection = { ids: new Set(), anchor: null, primary: null };
+
+/** Explorer-style picking: click selects one (again: deselects), Ctrl/⌘ toggles, Shift extends from the anchor. */
+export function pickRows(sel: Selection, order: string[], id: string, mods: { shift: boolean; toggle: boolean }): Selection {
+    if (mods.shift) {
+        const anchor = sel.anchor && order.includes(sel.anchor) ? sel.anchor : id;
+        const [i, j] = [order.indexOf(anchor), order.indexOf(id)].sort((a, b) => a - b);
+        const range = order.slice(i, j + 1);
+        return { ids: new Set(mods.toggle ? [...sel.ids, ...range] : range), anchor, primary: id };
+    }
+    if (mods.toggle) {
+        const ids = new Set(sel.ids);
+        if (!ids.delete(id)) return { ids: ids.add(id), anchor: id, primary: id };
+        return { ids, anchor: id, primary: sel.primary === id ? null : sel.primary };
+    }
+    if (sel.ids.size === 1 && sel.ids.has(id)) return NO_SELECTION;
+    return { ids: new Set([id]), anchor: id, primary: id };
+}
+
+/** keep a context menu on-screen (flip up/left near the edges), and its submenus too */
+function useMenuPlacement(ref: { current: HTMLElement | null }, at: { x: number; y: number } | null): void {
+    useLayoutEffect(() => {
+        const el = ref.current;
+        if (!el || !at) return;
+        const r = el.getBoundingClientRect();
+        const x = r.right > innerWidth ? Math.max(0, at.x - r.width) : at.x;
+        const y = r.bottom > innerHeight ? Math.max(0, at.y - r.height) : at.y;
+        el.style.left = `${x}px`;
+        el.style.top = `${y}px`;
+        el.classList.toggle("sub-left", x + r.width * 2 > innerWidth);
+    }, [at]);
+}
+
 /** Track a pointer drag from `down`, reporting the x delta; cleans itself up. */
 function dragX(down: MouseEvent, onMove: (dx: number) => void, cursor: string): void {
     down.preventDefault();
@@ -90,20 +131,14 @@ export function NetworkPanel({ store, listTabs, toolsHost }: { store: NetStore; 
     const tabTitle = (id: number) => tabs.find((t) => t.id === id)?.title ?? tabTitles.current.get(id);
     const pred = useMemo(() => compileQuery(ast, { tabTitle }), [ast, tabs]);
     const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "start", dir: 1 });
-    const [selectedId, setSelectedId] = useState<string | null>(null);
+    const [sel, setSel] = useState<Selection>(NO_SELECTION);
     const [layout, setLayoutState] = useState<Layout>(loadLayout);
     const [colMenu, setColMenu] = useState<{ x: number; y: number } | null>(null);
     const colMenuRef = useRef<HTMLUListElement>(null);
-    // keep the context menu on-screen (flip up/left near the edges)
-    useLayoutEffect(() => {
-        const el = colMenuRef.current;
-        if (!el || !colMenu) return;
-        const r = el.getBoundingClientRect();
-        const x = r.right > innerWidth ? Math.max(0, colMenu.x - r.width) : colMenu.x;
-        const y = r.bottom > innerHeight ? Math.max(0, colMenu.y - r.height) : colMenu.y;
-        el.style.left = `${x}px`;
-        el.style.top = `${y}px`;
-    }, [colMenu]);
+    useMenuPlacement(colMenuRef, colMenu);
+    const [rowMenu, setRowMenu] = useState<{ x: number; y: number } | null>(null);
+    const rowMenuRef = useRef<HTMLUListElement>(null);
+    useMenuPlacement(rowMenuRef, rowMenu);
     const bodyRef = useRef<HTMLDivElement>(null);
     const setLayout = (next: Layout) => {
         setLayoutState(next);
@@ -112,7 +147,7 @@ export function NetworkPanel({ store, listTabs, toolsHost }: { store: NetStore; 
         } catch {}
     };
     const all = store.entries.value;
-    const selected = selectedId ? all.find((e) => e.id === selectedId) || null : null;
+    const selected = sel.primary && sel.ids.has(sel.primary) ? all.find((e) => e.id === sel.primary) || null : null;
     // Name is always shown; with the details pane open only Name is (like
     // devtools) so the narrow table never squeezes it out
     const visible = selected ? COLUMNS.slice(0, 1) : COLUMNS.filter((c) => c.key === "name" || !layout.hidden.includes(c.key));
@@ -122,11 +157,12 @@ export function NetworkPanel({ store, listTabs, toolsHost }: { store: NetStore; 
     const minTable = visible.reduce((n, c) => n + (colWidth(c.key) ?? 60), 0);
 
     useEffect(() => {
-        if (!colMenu) return;
+        if (!colMenu && !rowMenu) return;
         const close = (ev: Event) => {
             if (ev instanceof KeyboardEvent && ev.key !== "Escape") return;
             if (ev.type === "mousedown" && (ev.target as Element)?.closest?.(".net-colmenu")) return;
             setColMenu(null);
+            setRowMenu(null);
         };
         document.addEventListener("mousedown", close);
         document.addEventListener("keydown", close);
@@ -136,7 +172,7 @@ export function NetworkPanel({ store, listTabs, toolsHost }: { store: NetStore; 
             document.removeEventListener("keydown", close);
             window.removeEventListener("blur", close);
         };
-    }, [colMenu]);
+    }, [colMenu, rowMenu]);
 
     const startColResize = (ev: MouseEvent, key: SortKey) => {
         const th = (ev.currentTarget as HTMLElement).parentElement!;
@@ -193,11 +229,43 @@ export function NetworkPanel({ store, listTabs, toolsHost }: { store: NetStore; 
 
     useEffect(() => {
         const onKey = (ev: KeyboardEvent) => {
-            if (ev.key === "Escape" && selectedId) setSelectedId(null);
+            // Esc with a menu open closes just the menu
+            if (ev.key === "Escape" && sel.ids.size && !colMenu && !rowMenu) setSel(NO_SELECTION);
         };
         document.addEventListener("keydown", onKey);
         return () => document.removeEventListener("keydown", onKey);
-    }, [selectedId]);
+    }, [sel, colMenu, rowMenu]);
+
+    /** the selected requests the row menu acts on, in table order */
+    const targets = rows.filter((e) => sel.ids.has(e.id));
+    const copy = (kind: CopyKind) => {
+        setRowMenu(null);
+        if (targets.length) void copyWithToast(copyRequests(targets, kind));
+    };
+    const openInTabs = () => {
+        setRowMenu(null);
+        if (targets.length > 10 && !confirm(`Open ${targets.length} requests in new tabs?`)) return;
+        for (const e of targets) (globalThis as any).chrome?.tabs?.create({ url: e.url, active: targets.length === 1 }, () => void chrome.runtime.lastError);
+    };
+    const onRowClick = (e: NetEntry, ev: MouseEvent) =>
+        setSel(pickRows(sel, rows.map((r) => r.id), e.id, { shift: ev.shiftKey, toggle: ev.ctrlKey || ev.metaKey }));
+    const onRowMenu = (e: NetEntry, ev: MouseEvent) => {
+        ev.preventDefault();
+        // right-click outside the selection picks that row (switching the details pane, if open)
+        if (!sel.ids.has(e.id)) setSel({ ids: new Set([e.id]), anchor: e.id, primary: selected ? e.id : null });
+        setColMenu(null);
+        setRowMenu({ x: ev.clientX, y: ev.clientY });
+    };
+    const onTableKey = (ev: KeyboardEvent) => {
+        if (!(ev.ctrlKey || ev.metaKey) || ev.altKey || ev.shiftKey) return;
+        if (ev.key === "a") {
+            ev.preventDefault();
+            setSel({ ids: new Set(rows.map((r) => r.id)), anchor: rows[0]?.id ?? null, primary: selected?.id ?? null });
+        } else if (ev.key === "c" && targets.length && !getSelection()?.toString()) {
+            ev.preventDefault();
+            copy("url");
+        }
+    };
 
     // refresh on focus only: replacing <option>s while the native dropdown
     // is open (mousedown) closes it / drops the pick in Chromium
@@ -231,7 +299,7 @@ export function NetworkPanel({ store, listTabs, toolsHost }: { store: NetStore; 
     const toolbar = (
         <div class="net-toolbar">
             <FilterBar state={fq} onChange={setFq} error={parsed.error} data={suggestions} />
-            <button class="net-clear icon-btn" title={`Clear the network log (${formatKey("Alt+Shift+K", /Mac|iPhone|iPad/.test(navigator.platform))})`} aria-label="Clear network log" onClick={() => (store.clear(), setSelectedId(null))}>
+            <button class="net-clear icon-btn" title={`Clear the network log (${formatKey("Alt+Shift+K", /Mac|iPhone|iPad/.test(navigator.platform))})`} aria-label="Clear network log" onClick={() => (store.clear(), setSel(NO_SELECTION))}>
                 <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
                 <path fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" d="M2.5 4h9M2.5 7.5h9M2.5 11h4.5M9.5 10l3.5 3.5M13 10l-3.5 3.5" />
             </svg>
@@ -246,6 +314,8 @@ export function NetworkPanel({ store, listTabs, toolsHost }: { store: NetStore; 
                 <div
                     class="net-table-wrap"
                     ref={scroller}
+                    tabIndex={-1}
+                    onKeyDown={onTableKey}
                     onScroll={(e) => {
                         const el = e.currentTarget;
                         atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
@@ -298,8 +368,9 @@ export function NetworkPanel({ store, listTabs, toolsHost }: { store: NetStore; 
                                     e={e}
                                     span={span}
                                     cols={visible.map((c) => c.key)}
-                                    selected={e.id === selectedId}
-                                    onSelect={() => setSelectedId(e.id === selectedId ? null : e.id)}
+                                    selected={sel.ids.has(e.id)}
+                                    onSelect={(ev) => onRowClick(e, ev)}
+                                    onMenu={(ev) => onRowMenu(e, ev)}
                                 />
                             ))}
                         </tbody>
@@ -313,7 +384,7 @@ export function NetworkPanel({ store, listTabs, toolsHost }: { store: NetStore; 
                     )}
                 </div>
                 {selected && <div class="net-splitter" role="separator" aria-orientation="vertical" title="Drag to resize" onMouseDown={startDetailsResize} />}
-                {selected && <Details e={selected} width={layout.detailsWidth} onClose={() => setSelectedId(null)} />}
+                {selected && <Details e={selected} width={layout.detailsWidth} onClose={() => setSel(NO_SELECTION)} />}
             </div>
             {colMenu && (
                 <ul class="net-colmenu" role="menu" ref={colMenuRef} style={{ left: `${colMenu.x}px`, top: `${colMenu.y}px` }}>
@@ -344,10 +415,34 @@ export function NetworkPanel({ store, listTabs, toolsHost }: { store: NetStore; 
                     </li>
                 </ul>
             )}
+            {rowMenu && targets.length > 0 && (
+                <ul class="net-colmenu net-rowmenu" role="menu" ref={rowMenuRef} style={{ left: `${rowMenu.x}px`, top: `${rowMenu.y}px` }}>
+                    <li role="menuitem" onClick={openInTabs}>
+                        {targets.length === 1 ? "Open in new tab" : `Open ${targets.length} in new tabs`}
+                    </li>
+                    <li class="sep" role="separator" />
+                    <li class="has-sub" role="menuitem" aria-haspopup="menu">
+                        Copy
+                        <span class="net-sub-arrow" aria-hidden="true">›</span>
+                        <ul class="net-colmenu net-submenu" role="menu">
+                            <li role="menuitem" onClick={() => copy("url")}>
+                                {targets.length === 1 ? "Copy URL" : `Copy ${targets.length} URLs`}
+                            </li>
+                            <li role="menuitem" onClick={() => copy("curl")}>
+                                {targets.length === 1 ? "Copy as cURL" : "Copy all as cURL"}
+                            </li>
+                            <li role="menuitem" onClick={() => copy("fetch")}>
+                                {targets.length === 1 ? "Copy as fetch" : "Copy all as fetch"}
+                            </li>
+                        </ul>
+                    </li>
+                </ul>
+            )}
             <div class="net-status">
                 {rows.length === all.length ? `${all.length} requests` : `${rows.length} / ${all.length} requests`}
                 {" · "}
                 {formatBytes(bytes)} transferred
+                {sel.ids.size > 1 ? ` · ${targets.length} selected` : ""}
                 {" · "}
                 <span class="net-touch-count" title="Observed: a script handler ran on the request without changing it · Modified: a handler changed it">
                     {touched.observed} observed · <span class={touched.modified ? "net-hl" : ""}>{touched.modified} modified</span>
@@ -383,19 +478,27 @@ function Row({
     cols,
     selected,
     onSelect,
+    onMenu,
 }: {
     e: NetEntry;
     span: { t0: number; total: number };
     cols: SortKey[];
     selected: boolean;
-    onSelect: () => void;
+    onSelect: (ev: MouseEvent) => void;
+    onMenu: (ev: MouseEvent) => void;
 }) {
     const { name, host } = displayName(e.url);
     const ms = duration(e);
     const left = ((e.startedAt - span.t0) / span.total) * 100;
     const width = Math.max(0.5, (((e.endedAt ?? span.t0 + span.total) - e.startedAt) / span.total) * 100);
     return (
-        <tr class={rowClass(e, selected)} onClick={onSelect} title={e.url}>
+        <tr
+            class={rowClass(e, selected)}
+            onClick={onSelect}
+            onContextMenu={onMenu}
+            // Shift/Ctrl/⌘-click picks rows; don't let it select text
+            onMouseDown={(ev) => (ev.shiftKey || ev.ctrlKey || ev.metaKey) && ev.preventDefault()}
+        >
             {cols.map((k) => cell(k))}
         </tr>
     );

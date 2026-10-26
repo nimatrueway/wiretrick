@@ -1122,6 +1122,14 @@ body.net-dragging { user-select: none; }
 .net-colmenu li:hover { background: var(--accent); color: #fff; }
 .net-colmenu li.sep { height: 1px; padding: 0; margin: 4px 0; background: var(--border); cursor: default; }
 .net-colmenu-check { width: 12px; text-align: center; }
+.net-rowmenu > li { padding-left: 12px; }
+.net-colmenu li.has-sub { position: relative; justify-content: space-between; }
+.net-sub-arrow { margin-left: 16px; }
+.net-submenu { display: none; position: absolute; top: -5px; left: 100%; color: var(--fg); }
+.net-rowmenu.sub-left .net-submenu { left: auto; right: 100%; }
+.net-colmenu li.has-sub:hover > .net-submenu { display: block; }
+.net-submenu li { padding-left: 12px; }
+.net-table-wrap:focus { outline: none; }
 .net-table { width: 100%; border-collapse: collapse; table-layout: fixed; font: 11px/1.5 "SF Mono", Menlo, Consolas, monospace; }
 .net-table th {
     position: sticky; top: 0; z-index: 1; background: var(--bg-panel);

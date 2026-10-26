@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { render, fireEvent, cleanup, waitFor } from "@testing-library/preact";
-import { NetworkPanel } from "../src/ui/network/NetworkPanel";
+import { NetworkPanel, pickRows } from "../src/ui/network/NetworkPanel";
 import { createNetStore } from "../src/ui/network/netStore";
 import type { NetEntry } from "../src/shared/netTypes";
 
@@ -723,6 +723,48 @@ describe("NetworkPanel", () => {
             fireEvent.click(getByText("status:>=400"));
             expect(q(container).value).toBe("status:>=400");
             expect(rowNames(container)).toEqual(["b.js"]);
+        });
+    });
+
+    describe("row selection and menu", () => {
+        it("picks rows explorer-style", () => {
+            const order = ["a", "b", "c", "d"];
+            const none = { ids: new Set<string>(), anchor: null, primary: null };
+            const ids = (s: { ids: ReadonlySet<string> }) => [...s.ids].sort();
+            let s = pickRows(none, order, "b", { shift: false, toggle: false });
+            expect([ids(s), s.primary]).toEqual([["b"], "b"]);
+            s = pickRows(s, order, "d", { shift: true, toggle: false });
+            expect([ids(s), s.anchor, s.primary]).toEqual([["b", "c", "d"], "b", "d"]);
+            s = pickRows(s, order, "c", { shift: false, toggle: true });
+            expect([ids(s), s.primary]).toEqual([["b", "d"], "d"]);
+            s = pickRows(s, order, "a", { shift: false, toggle: true });
+            expect(ids(s)).toEqual(["a", "b", "d"]);
+            s = pickRows(s, order, "c", { shift: false, toggle: false });
+            expect(ids(s)).toEqual(["c"]);
+            expect(ids(pickRows(s, order, "c", { shift: false, toggle: false }))).toEqual([]); // again: deselects
+        });
+
+        it("right-click offers open and copy for the selection", async () => {
+            const { container } = setup([entry("a"), entry("b", { startedAt: base + 1 }), entry("c", { startedAt: base + 2 })]);
+            const rows = () => [...container.querySelectorAll("tbody tr")];
+            fireEvent.click(rows()[0]);
+            fireEvent.click(rows()[2], { shiftKey: true });
+            expect(rows().map((r) => r.classList.contains("selected"))).toEqual([true, true, true]);
+            expect(container.querySelector(".net-status")!.textContent).toContain("3 selected");
+            fireEvent.contextMenu(rows()[1]);
+            const items = () => [...container.querySelectorAll(".net-rowmenu li[role=menuitem]")].map((li) => li.firstChild!.textContent);
+            expect(items()).toEqual(["Open 3 in new tabs", "Copy", "Copy 3 URLs", "Copy all as cURL", "Copy all as fetch"]);
+            let copied = "";
+            Object.defineProperty(navigator, "clipboard", { value: { writeText: async (t: string) => void (copied = t) }, configurable: true });
+            fireEvent.click([...container.querySelectorAll(".net-submenu li")][0]);
+            await waitFor(() => expect(copied).toBe("https://site.test/a.js\nhttps://site.test/b.js\nhttps://site.test/c.js"));
+            expect(container.querySelector(".net-rowmenu")).toBeNull();
+            // right-click outside the selection picks just that row
+            fireEvent.click(rows()[0], { ctrlKey: true });
+            fireEvent.contextMenu(rows()[0]);
+            expect(rows().map((r) => r.classList.contains("selected"))).toEqual([true, false, false]);
+            expect(items()[0]).toBe("Open in new tab");
+            expect(rows()[0].getAttribute("title")).toBeNull();
         });
     });
 });

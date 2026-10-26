@@ -212,6 +212,11 @@ at the right of the toolbar do the same.
   are live before the Network view is first opened. Selecting a request shows its headers, request payload, the response
   body (modified and original, when Wiretrick handled it) and what each
   script did (observed entries muted).
+  Select several rows with Shift-click (a range), Ctrl/⌘-click (one more) or
+  Ctrl/⌘+A, and right-click for **Open in new tab** and **Copy** → **Copy
+  URL**, **Copy as cURL** (bash) or **Copy as fetch**, devtools-style; with
+  several rows selected these act on all of them. Ctrl/⌘+C copies the
+  selected URLs.
 
   Full recording (every request, headers, timing, bodies) starts the first
   time the Network view is shown and stops when that Editor closes. Before
