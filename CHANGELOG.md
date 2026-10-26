@@ -15,6 +15,7 @@ its section below.
 
 - Settings → Strategy: the pros/cons table is the picker now (click a row, or its radio button) instead of a separate dropdown above it listing the same strategies. Unavailable ones are greyed out with the reason.
 - Settings → Synced folder → Folder path says how to copy a folder's path on your OS (the browser's folder picker can't reveal it), shows an example path for it, and cleans up what's pasted: the quotes Windows' Copy as path adds, a `file://` URI, a trailing slash.
+- After you pick a synced folder, Settings → Folder path flashes and shows a ⚠ while the path is empty or doesn't end in that folder's name (likely another folder's). Pressing the ↗ button without a path takes you there too.
 
 ## [0.9.16] - 2026-10-25
 

@@ -790,6 +790,11 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 .setting-label { font-size: 13px; color: var(--fg); padding-top: 4px; }
 .setting-control { min-width: 0; }
 .setting-control select { max-width: 100%; }
+.setting-warn { margin: 6px 0 0; padding: 5px 8px; font-size: 12px; color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, transparent); border-left: 2px solid var(--warn); border-radius: 2px; }
+#settings-folder-path { margin-left: -8px; margin-right: -8px; padding: 6px 8px; border-radius: 4px; }
+#settings-folder-path.needs-path input { border-color: var(--warn); }
+#settings-folder-path.flash { animation: wt-attention 0.6s ease-in-out 3; }
+@keyframes wt-attention { 50% { background: color-mix(in srgb, var(--warn) 22%, transparent); box-shadow: 0 0 0 2px var(--warn); } }
 .setting-inline { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-height: 26px; }
 .setting-help { margin: 4px 0 0; color: var(--fg-dim); font-size: 12px; line-height: 1.45; }
 .setting-check { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; padding-top: 4px; cursor: pointer; }

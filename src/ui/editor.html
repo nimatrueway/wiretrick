@@ -138,11 +138,12 @@
                                 <p class="setting-help">Scripts are written there as .ts files; every edit, from either side, syncs instantly.</p>
                             </div>
                         </div>
-                        <div class="setting">
+                        <div class="setting" id="settings-folder-path">
                             <label class="setting-label" for="settings-vscode-path">Folder path</label>
                             <div class="setting-control">
                                 <input id="settings-vscode-path" type="text" spellcheck="false" placeholder="/Users/you/Wiretrick" title="Absolute path of the synced folder, for the Open in VS Code button">
                                 <p class="setting-help">Absolute path of that folder, used by the ↗ VS Code button — the browser can't read it, so paste it in. <span id="settings-vscode-path-hint"></span></p>
+                                <p id="settings-vscode-path-warn" class="setting-warn" role="alert" hidden></p>
                             </div>
                         </div>
                         <div class="setting">

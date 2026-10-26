@@ -64,7 +64,10 @@ The button needs the synced folder's absolute path in **Settings → Synced
 folder → Folder path**: the browser's folder picker never reveals it, so
 paste it in. The setting says how to copy it on your OS (Finder: ⌥⌘C;
 File Explorer: Ctrl+Shift+C; Linux file managers: Ctrl+L), and quotes or a
-`file://` URI in what you paste are cleaned up.
+`file://` URI in what you paste are cleaned up. Right after you pick a
+folder (or press the button without a path), Settings opens at Folder path,
+flashes it and shows a ⚠ until the path is filled in and ends in the picked
+folder's name.
 
 ## Explorer
 

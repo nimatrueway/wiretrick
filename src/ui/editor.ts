@@ -2591,6 +2591,7 @@ function setupDialogs(): void {
     pathInput.addEventListener("change", () => {
         pathInput.value = cleanFolderPath(pathInput.value);
         chrome.storage.local.set({ resVscodePath: pathInput.value }, () => void refreshSyncPath());
+        void checkFolderPath();
     });
 
     // launch target for the ↗ button (vscode | vscode-insiders | custom | off)
@@ -2774,6 +2775,7 @@ async function markFolderSynced(): Promise<void> {
     renderFolderSync(st);
     $("#folder-state").textContent = st.path || "(syncing)";
     await refreshSyncPath();
+    await checkFolderPath();
 }
 
 /** Absolute path used by the ↗ VS Code button. The sync-reported path is
@@ -2788,6 +2790,32 @@ async function refreshSyncPath(): Promise<void> {
     chrome.storage.local.get("resVscodePath", (d) => {
         (window as any).__resSyncPath = (d && d.resVscodePath) || "";
     });
+}
+
+/**
+ * Flag Settings → Folder path while it's missing, or doesn't end in the name of
+ * the folder that's synced (likely another folder's). `flash`: just picked —
+ * draw the eye to it.
+ */
+async function checkFolderPath(flash = false): Promise<boolean> {
+    const row = $("#settings-folder-path");
+    const input = $("#settings-vscode-path") as HTMLInputElement;
+    const warn = $("#settings-vscode-path-warn");
+    const st = await fsBridge.queryStatus();
+    const typed = input.value.trim();
+    const name = st.path && !st.path.startsWith("/") ? st.path : "";
+    const need = !!st.active && !st.path?.startsWith("/") && (!typed || (!!name && baseName(typed.replace(/\\/g, "/")).toLowerCase() !== name.toLowerCase()));
+    row.classList.toggle("needs-path", need);
+    warn.hidden = !need;
+    warn.textContent = !need ? "" : !typed ? `⚠ Paste the absolute path of${name ? ` "${name}"` : " the synced folder"} here — the ↗ button can't open files without it.` : `⚠ This path doesn't end in "${name}", the synced folder — update it so ↗ opens the right files.`;
+    if (need && flash) {
+        row.classList.remove("flash");
+        void row.offsetWidth; // restart the animation
+        row.classList.add("flash");
+        row.scrollIntoView({ block: "center", behavior: "smooth" });
+        input.focus({ preventScroll: true });
+    }
+    return need;
 }
 
 function newId(): string {
@@ -3038,7 +3066,12 @@ async function main(): Promise<void> {
     $("#btn-save").addEventListener("click", () => void saveCurrent());
     $("#btn-open-vscode").addEventListener("click", () => {
         const folder = (window as any).__resSyncPath as string;
-        if (!folder || !selectedId || typingsShown) return;
+        if (!folder) {
+            openSettings("settings-sec-folder");
+            void checkFolderPath(true);
+            return;
+        }
+        if (!selectedId || typingsShown) return;
         // the ⚙ settings.yaml entry is virtual (not in `scripts`) — its
         // target is <folder>/settings.yaml, written by folderSync
         const data = dataFiles.find((d) => d.id === selectedId);
@@ -3107,6 +3140,7 @@ async function main(): Promise<void> {
                 folderNeedsGrant = false;
                 renderFolderSync({ active: false });
                 updateOpenVscode();
+                void checkFolderPath();
                 return;
             }
             try {
@@ -3119,6 +3153,7 @@ async function main(): Promise<void> {
                 throw e;
             }
             await markFolderSynced();
+            await checkFolderPath(true);
         });
     } else {
         btn.setAttribute("disabled", "");
