@@ -12,6 +12,7 @@ import { SAMPLES } from "./samples";
 import { settingsDiagnostics, settingsCompletions, settingsHover, type AssistScript } from "../shared/settingsAssist";
 import { dependantsOf, folderOf, missingImports } from "../shared/scriptImports";
 import { allFolders, ancestorFolders, isInFolder, movedPath } from "../shared/folders";
+import { logSegments, opensInTab } from "./logLinks";
 import { baseName, dropPlan, explorerTree, folderPathOfRowId, folderRowId, idRange, isFolderRowId, joinPath, movedCollapsed, targetFolder, topLevelRows, type TreeRow } from "./explorerTree";
 import { dataPathOfDecl } from "./jsonTypes";
 import { pickRows } from "./bundlePicker";
@@ -1786,19 +1787,35 @@ function renderLogLine(line: HTMLElement, text: string, level: string, source: s
     badge.textContent = level;
     line.appendChild(badge);
     void rest;
-    if (logFindRe) {
-        const m = text.match(logFindRe);
-        if (m) {
-            const idx = text.indexOf(m[0]);
-            line.append(
-                document.createTextNode(text.slice(0, idx)),
-                Object.assign(document.createElement("mark"), { textContent: m[0] }),
-                document.createTextNode(text.slice(idx + m[0].length))
-            );
-            return;
+    const m = logFindRe ? text.match(logFindRe) : null;
+    const idx = m ? text.indexOf(m[0]) : -1;
+    for (const seg of logSegments(text, m ? [idx, idx + m[0].length] : undefined)) {
+        let node: Node = document.createTextNode(seg.text);
+        if (seg.mark) node = Object.assign(document.createElement("mark"), { textContent: seg.text });
+        if (seg.uri) {
+            const a = Object.assign(document.createElement("a"), { className: "log-link", href: seg.uri, title: `${seg.uri}\nClick to open · ${/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl"}-click: in the background` });
+            a.appendChild(node);
+            node = a;
         }
+        line.appendChild(node);
     }
-    line.appendChild(document.createTextNode(text));
+}
+
+/** Log links: browser-viewable URIs open in a tab, other schemes (vscode:, mailto:…) go to the OS. */
+function openLogLink(e: MouseEvent): void {
+    const a = (e.target as Element).closest?.("a.log-link") as HTMLAnchorElement | null;
+    if (!a || e.button > 1) return;
+    e.preventDefault();
+    const uri = a.getAttribute("href")!;
+    if (opensInTab(uri)) {
+        chrome.tabs.create({ url: uri, active: !(e.metaKey || e.ctrlKey || e.button === 1) }, () => void chrome.runtime.lastError);
+        return;
+    }
+    // external protocols launch only from a user gesture on a page, never chrome.tabs
+    const launch = Object.assign(document.createElement("a"), { href: uri });
+    document.body.appendChild(launch);
+    launch.click();
+    launch.remove();
 }
 
 // ---- Panel counts: Log errors/warnings and Network observed/modified
@@ -3090,6 +3107,8 @@ async function main(): Promise<void> {
         appendLog({ at: Date.now(), message: `[editor] ${msg}`, level: "info" });
         chrome.runtime.sendMessage({ type: "debugLog", entry: { at: Date.now(), src: "editor", msg, level: "info" } }, () => void chrome.runtime.lastError);
     });
+    $("#log-entries").addEventListener("click", openLogLink);
+    $("#log-entries").addEventListener("auxclick", openLogLink);
     $("#btn-clear-log").addEventListener("click", () => {
         $("#log-entries").innerHTML = "";
         logEntries.length = 0;

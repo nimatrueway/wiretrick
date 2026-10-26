@@ -7,6 +7,10 @@ its section below.
 
 ## [Unreleased]
 
+### Added
+
+- URIs in the Log are clickable, any scheme: `https:`, `chrome:`, `file:`, `data:`… open in a new tab (⌘/Ctrl- or middle-click: in the background); `vscode:`, `mailto:` and other app schemes open their app. Punctuation right after a URI isn't taken into it.
+
 ### Fixed
 
 - Settings → Strategy scrolled sideways on Chrome MV3: the unavailable `extension` option in the picker spelled out its whole reason, stretching it past the pane.

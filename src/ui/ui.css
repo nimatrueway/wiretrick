@@ -509,6 +509,8 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
     word-break: break-all;
 }
 .log-line:last-child { border-bottom: none; }
+.log-line a.log-link { color: inherit; text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); text-underline-offset: 2px; cursor: pointer; }
+.log-line a.log-link:hover { color: var(--accent); text-decoration-color: currentColor; }
 .log-line time { color: var(--fg-faint); margin-right: 6px; }
 .log-line.warn { color: var(--warn); background: var(--warn-tint); }
 .log-line.error { color: var(--err); background: var(--err-tint); }

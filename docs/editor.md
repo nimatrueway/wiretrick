@@ -163,6 +163,10 @@ at the right of the toolbar do the same.
 - **Log view** — engine and script log lines with text (or regex), source
   and level filters. Each view's filter sits in the same place, the panel
   header next to the tabs, with its clear icon after it.
+  URIs in log lines are links, whatever the scheme: `https:`, `chrome:`,
+  `file:` or `data:` ones open in a new tab (⌘/Ctrl- or middle-click: in the
+  background), and others such as `vscode:` or `mailto:` go to the app that
+  handles them.
   The errors and warnings it holds are counted in the status bar; they stay
   until the log is cleared (clear icon), whether or not you've looked.
   A VS Code-style status bar along the bottom holds the counts for all
