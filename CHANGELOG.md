@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.9.18] - 2026-10-31
+
 ### Added
 
 - Network: Copy → **Copy as HAR** (**Copy all as HAR** with several rows selected) puts a HAR 1.2 log on the clipboard: headers, cookies, query string, timings, server IP, and the request/response bodies as recorded (a comment marks bodies that were cut or not captured). Opens in devtools' Network panel or any HAR viewer.
@@ -532,7 +534,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.9.17...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.9.18...HEAD
+[0.9.18]: https://github.com/nimatrueway/wiretrick/compare/v0.9.17...v0.9.18
 [0.9.17]: https://github.com/nimatrueway/wiretrick/compare/v0.9.16...v0.9.17
 [0.9.16]: https://github.com/nimatrueway/wiretrick/compare/v0.9.15...v0.9.16
 [0.9.15]: https://github.com/nimatrueway/wiretrick/compare/v0.9.14...v0.9.15
