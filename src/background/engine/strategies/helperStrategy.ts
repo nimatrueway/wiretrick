@@ -22,6 +22,7 @@ import type { Script } from "../scriptStore";
 import { log, noteHelperSkip } from "../logs";
 import { reportSkipped } from "../skipped";
 import { winnerOf } from "../../../shared/precedence";
+import { wsNotApplied } from "../../../shared/websocketLimits";
 import { evalProxyDecision, runBodyOp } from "../../compileHost";
 import { recordNetBody } from "../../network";
 import { ClaimCache, correlator } from "../requestCorrelator";
@@ -477,8 +478,14 @@ export class HelperStrategy {
             return;
         }
         const args = { url: m.url, method: m.method, tabId: c.tabId, resourceType: c.type, tabUrl: c.tabUrl, requestHeaders: pairsToObject(m.headers), requestId: c.requestId, requestBody };
-        const dec = await this.run("requestDecision", args);
+        let dec = await this.run("requestDecision", args);
         const req = { url: m.url, method: m.method, type: c.type };
+        const ws = c.type === "websocket" || /websocket/i.test(headerValue(m.headers, "upgrade") || "");
+        const wsWarn = (d: any, what: "redirect" | "replaceResponse") => log(c.tabId, `[helper] [${d.who?.scriptName ?? d.scriptName}] ${what === "redirect" ? "onRequest" : d.who?.kind ?? "replaceResponse"} → ${wsNotApplied(what, "helper", m.url, d.url)}`, "warn", d.who?.scriptId ?? d.scriptId, undefined, undefined, c.requestId);
+        if (ws && (dec?.kind === "redirect" || dec?.kind === "respond")) {
+            wsWarn(dec, dec.kind === "redirect" ? "redirect" : "replaceResponse");
+            dec = null;
+        }
         reportSkipped(c.tabId, req, winnerOf(dec, "helper"), c.requestId);
         // answered here: no response pause will come for it
         if (c.requestId && (dec?.kind === "respond" || dec?.kind === "redirect" || dec?.kind === "cancel")) correlator.mark(c.requestId, "helper:res");
@@ -499,7 +506,8 @@ export class HelperStrategy {
         }
         // replaceResponse runs here: no upstream round-trip for a replaced body
         const rep = await this.run("replace", { ...args });
-        if (rep) {
+        if (rep && ws) wsWarn(rep, "replaceResponse");
+        else if (rep) {
             if (c.requestId) correlator.mark(c.requestId, "helper:res");
             reportSkipped(c.tabId, req, winnerOf(rep, "helper"), c.requestId);
             recordNetBody({ tabId: c.tabId, url: m.url, method: m.method, modified: rep.content, mime: rep.mime, status: 200, requestId: c.requestId });

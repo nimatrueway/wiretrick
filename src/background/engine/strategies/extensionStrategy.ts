@@ -29,6 +29,7 @@ import { bodyKind } from "../../../shared/bodyKind";
 import { kindSkipLine } from "../../../shared/netTypes";
 import { dlogLevel } from "../../../shared/debugLog";
 import { IS_FIREFOX } from "./helperState";
+import { wsNotApplied } from "../../../shared/websocketLimits";
 import { compileMv2, ownsAny } from "./strategyScripts";
 import { HeaderStack, mergeHeaderEdits, mixedResultLine, overrideLine, singleRequestResult, type Who, type Winner } from "../../../shared/precedence";
 import { makeMissedThrottle } from "../../../shared/missedTap";
@@ -190,6 +191,10 @@ export class ExtensionStrategy implements InterceptionStrategy {
             const d = this.replaceFromRequest(details, result.replaceResponse, entry);
             return d.kind === "allow" && !pendingFirefoxReplace.has(details.requestId) ? null : final(d, "replace");
         }
+        if (result && result.redirect && !result.block && details.type === "websocket" && !IS_FIREFOX) {
+            log(details.tabId, `[${entry.name}] onRequest → ${wsNotApplied("redirect", "extension", details.url, result.redirect)}`, "warn", entry.id, undefined, undefined, details.requestId);
+            return null;
+        }
         if (result && (result.redirect || result.block)) {
             log(details.tabId, `[${entry.name}] onRequest → ${result.block ? `block ${details.url}` : `redirect ${details.url} → ${result.redirect}`}`, "info", entry.id, undefined, undefined, details.requestId);
             return final(normalize(result), result.block ? "block" : "redirect", result.block ? undefined : result.redirect);
@@ -245,6 +250,7 @@ export class ExtensionStrategy implements InterceptionStrategy {
             return { kind: "allow" };
         }
         if (IS_FIREFOX) return this.firefoxReplaceLater(details, body, mime, entry.id, entry.name, "onRequest");
+        if (details.type === "websocket") return this.wsNoReplace(details, entry.id, entry.name, "onRequest → ");
         log(details.tabId, `[${entry.name}] onRequest → replaceResponse 200 ${mime} (${body.length}b) ${details.url}`, "info", entry.id, undefined, undefined, details.requestId);
         return this.redirectServe(details, body, mime);
     }
@@ -254,8 +260,14 @@ export class ExtensionStrategy implements InterceptionStrategy {
         const r = replacementContent(details, replacement);
         if (!r) return { kind: "allow" };
         if (IS_FIREFOX) return this.firefoxReplaceLater(details, r.content, r.mime, scriptId, scriptName, "replaceResponse");
+        if (details.type === "websocket") return this.wsNoReplace(details, scriptId, scriptName, "");
         log(details.tabId, `[${scriptName}] replaceResponse → ${r.mime} (${r.content.length} bytes) ${details.url}`, "info", scriptId, undefined, undefined, details.requestId);
         return this.redirectServe(details, r.content, r.mime);
+    }
+
+    private wsNoReplace(details: WebRequestDetailsLike, scriptId: string, scriptName: string, via: string): HookDisposition {
+        log(details.tabId, `[${scriptName}] ${via}${wsNotApplied("replaceResponse", "extension", details.url)}`, "warn", scriptId, undefined, undefined, details.requestId);
+        return { kind: "allow" };
     }
 
     /**

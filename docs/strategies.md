@@ -71,6 +71,17 @@ The same text is shown under the strategy picker in Settings → Strategy.
 > or `debugger` on that handler (`wt.onDocument` for DOM/title tweaks). Firefox's
 > `extension` doesn't have this limit.
 
+> **WebSockets (`ws:`/`wss:`).** On a WebSocket handshake only **block** and
+> **request-header changes** work, with `rules`, `extension` or `helper`.
+> No strategy can redirect a socket or replace its response: Chrome ignores
+> redirects on WebSocket handshakes (even from its own `declarativeNetRequest`),
+> and browsers never follow a redirect response there. `debugger` and `page`
+> never see the handshake at all. Wiretrick logs a warning when a script tries
+> any of these, and flags routes aimed only at WebSockets with
+> `replaceResponse`/`onResponseBody` in Problems. To point a socket elsewhere,
+> change the URL the page opens it with (e.g. rewrite the `new WebSocket(…)`
+> call with `onResponseBody`).
+
 ## Which strategy for which job?
 
 - **Most things on Chromium** → the default `helper`, with the

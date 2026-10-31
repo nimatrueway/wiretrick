@@ -93,6 +93,22 @@ describe("ExtensionStrategy", () => {
         expect(d).toEqual({ kind: "redirect", url: "https://mocked.example.com/data" });
     });
 
+    it("a redirect or replacement of a WebSocket isn't applied, with a warning (Chrome ignores it)", () => {
+        const s = new ExtensionStrategy();
+        s.reload([
+            named("Socky", `wt.onRequest("wss://ws.example.com/*", () => ({ redirect: "wss://other.example.com/ws" }));
+wt.replaceResponse("wss://ws.example.com/*", () => "nope");`),
+            named("Hdr", `wt.onRequest("wss://ws.example.com/*", () => ({ headers: { set: { "x-a": "1" } } }));`),
+        ]);
+        const ws = details({ url: "wss://ws.example.com/ws", type: "websocket", requestId: "ws1" });
+        expect((s.handleBeforeRequest(ws, null) as any).kind).toBe("allow");
+        const warns = allLogs().filter((e) => e.level === "warn" && e.message.includes("wss://ws.example.com/ws") && e.message.includes("NOT applied")).map((e) => e.message);
+        expect(warns.some((m) => m.startsWith("[Socky] onRequest → redirect wss://ws.example.com/ws → wss://other.example.com/ws NOT applied") && m.includes("Chrome ignores redirects on WebSocket handshakes"))).toBe(true);
+        expect(warns.some((m) => m.startsWith("[Socky] replaceResponse wss://ws.example.com/ws NOT applied"))).toBe(true);
+        // request headers still apply
+        expect(JSON.stringify(s.handleBeforeSendHeaders(ws, null))).toContain('"x-a"');
+    });
+
     it("non-matching url → allow", () => {
         const s = new ExtensionStrategy();
         s.reload([

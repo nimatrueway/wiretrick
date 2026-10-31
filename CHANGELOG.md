@@ -10,6 +10,7 @@ its section below.
 ### Added
 
 - Network: Copy → **Copy as HAR** (**Copy all as HAR** with several rows selected) puts a HAR 1.2 log on the clipboard: headers, cookies, query string, timings, server IP, and the request/response bodies as recorded (a comment marks bodies that were cut or not captured). Opens in devtools' Network panel or any HAR viewer.
+- WebSocket warnings: a redirect or `replaceResponse` aimed at a WebSocket (`ws:`/`wss:`) now logs a clear warning that it isn't applied (Chrome ignores redirects on WebSocket handshakes, so the socket still connects to the original URL), instead of an "info: redirect" that looked like it worked. `debugger`/`page` routes that match a WebSocket warn that they never see it, and routes aimed only at WebSockets with `replaceResponse`/`onResponseBody` show up in Problems. Only block and request-header changes work on a WebSocket ([details](docs/strategies.md)).
 
 ### Fixed
 

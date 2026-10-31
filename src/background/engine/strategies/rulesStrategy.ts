@@ -26,6 +26,7 @@ import { packagesSig } from "../packageImports";
 import type { Script } from "../scriptStore";
 import { compileMv2, ownsAny } from "./strategyScripts";
 import { IS_FIREFOX } from "./helperState";
+import { wsNotApplied } from "../../../shared/websocketLimits";
 
 type ParamValues = { [scriptId: string]: Record<string, any> };
 
@@ -268,6 +269,10 @@ export class RulesStrategy {
             const sub = r.spec.action.redirect?.regexSubstitution;
             const to = sub ? substitute(r.spec.condition.regexFilter, sub, d.url) : r.spec.action.redirect?.url;
             const label = `[rules] [${r.name}] ${routeLabel(r.route).replace(/ #\d+$/, "")}`;
+            if (d.type === "websocket" && r.spec.action.type === "redirect" && !IS_FIREFOX) {
+                log(d.tabId ?? -1, `${label} → ${wsNotApplied(what === "redirect" ? "redirect" : "replaceResponse", "rules", d.url, to)}`, "warn", r.scriptId, undefined, d.url);
+                continue;
+            }
             log(d.tabId ?? -1, to ? `${label} → redirect ${d.url} → ${to}` : `${label} → ${what} ${d.url}`, "info", r.scriptId, "modified", d.url);
             if (r === final) {
                 const block = r.spec.action.type === "block";

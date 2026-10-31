@@ -33,6 +33,7 @@ import { recordNetBody } from "../network";
 import { reportSkipped, setSkipRoutes } from "./skipped";
 import { correlator } from "./requestCorrelator";
 import { winnerOf } from "../../shared/precedence";
+import { targetsWebSocket, WS_BLIND, wsUnseen } from "../../shared/websocketLimits";
 import { STRATEGY_KEY, TEXT_TYPES_KEY } from "../settingsFile";
 import { getTextTypes, setTextTypes } from "../../shared/bodyKind";
 import { packBytes, unpackBytes } from "../../shared/bytesPack";
@@ -143,6 +144,9 @@ export function createPipeline(
     // debugger, the helper is down… Once a matching request completes, warn
     // (attributed to the script) when none of its body handlers ran for it.
     let bodyWatch: BodyWatch[] = [];
+    /** debugger/page routes aimed at WebSockets: those strategies never see the handshake */
+    let wsBlind: BodyWatch[] = [];
+    const wsWarned = new Set<string>();
     /** requestId → start time, only for requests a watched script matches */
     const watchedStarts = new Map<string, number>();
     /** `${tabId}|${url}` loads the debugger strategy warning below already reported */
@@ -156,6 +160,15 @@ export function createPipeline(
     if (chrome.webRequest?.onBeforeRequest) {
         chrome.webRequest.onBeforeRequest.addListener(
             (d) => {
+                if (d.type === "websocket" && wsBlind.length) {
+                    for (const w of wsBlind) {
+                        const key = `${w.id}|${w.route.kind}|${w.route.index}|${d.url}`;
+                        if (wsWarned.has(key) || !routeMatches(w.route, d.url, d.method, d.type)) continue;
+                        wsWarned.add(key);
+                        if (wsWarned.size > 200) wsWarned.delete(wsWarned.values().next().value!);
+                        log(d.tabId, wsUnseen(w.name, routeLabel(w.route), w.strategy, d.url), "warn", w.id, "missed", d.url, d.requestId);
+                    }
+                }
                 if (d.tabId < 0 || MISSED_SKIP_TYPES.has(d.type) || !bodyWatch.length || !watchedFor(d.url, d.method, d.type).length) return;
                 watchedStarts.set(d.requestId, d.timeStamp);
                 if (watchedStarts.size > 500) watchedStarts.delete(watchedStarts.keys().next().value!);
@@ -264,15 +277,18 @@ export function createPipeline(
 
     function refreshBodyWatch(scripts: Script[]): void {
         const next: BodyWatch[] = [];
+        const blind: BodyWatch[] = [];
         for (const s of scripts) {
             if (!s.enabled || !s.meta.active) continue;
             for (const r of s.meta.routes || []) {
                 const strategy = effectiveStrategy(r);
+                if (r.kind !== "onDocument" && WS_BLIND.has(strategy) && targetsWebSocket(r)) blind.push({ id: s.id, name: s.meta.name, route: r, strategy });
                 // onRequest: only "page" routes — the hook claims every request it handles, so an unclaimed one in a hook-less tab was missed
                 if (r.kind === "onResponseBody" || r.kind === "replaceResponse" || (r.kind === "onRequest" && strategy === "page")) next.push({ id: s.id, name: s.meta.name, route: r, strategy });
             }
         }
         bodyWatch = next;
+        wsBlind = blind;
     }
 
     if (chrome.webRequest?.onCompleted) {
