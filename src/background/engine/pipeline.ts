@@ -570,6 +570,11 @@ export function createPipeline(
             });
             return true;
         }
+        // the Editor's welcome page: wait until a just-saved script runs before opening its page
+        if (msg && msg.type === "settleScripts") {
+            void settle().then(() => sendResponse({}), () => sendResponse({}));
+            return true;
+        }
         if (msg && msg.type === "saveScript") {
             void (async () => {
                 // optimistic concurrency: the editor sends the text it loaded;
@@ -801,6 +806,19 @@ export function createPipeline(
 
     // ---- reload plumbing ----
     let reloadSeq = 0;
+    /** the last full reload's browser rules (installed asynchronously) */
+    let rulesApplied: Promise<unknown> = Promise.resolve();
+    /** the reloadSeq of the last reload that applied the scripts */
+    let settledSeq = 0;
+    /** reload and wait until the current scripts are fully applied, rules included */
+    async function settle(): Promise<void> {
+        for (let i = 0; i < 5; i++) {
+            await reload();
+            // a newer reload superseded ours and hasn't applied yet: go again
+            if (settledSeq === reloadSeq) break;
+        }
+        await rulesApplied.catch(() => {});
+    }
     async function reload(): Promise<void> {
         const seq = ++reloadSeq;
         await ready;
@@ -825,7 +843,8 @@ export function createPipeline(
         pageStrategy.reload(scripts, paramValues);
         cdp.reload(scripts, paramValues);
         helperStrategy.reload(scripts, paramValues);
-        void rulesStrategy.reload(scripts, paramValues);
+        rulesApplied = rulesStrategy.reload(scripts, paramValues);
+        settledSeq = seq;
         refreshBodyWatch(scripts);
         setSkipRoutes(scripts);
         warnRoutes(scripts);

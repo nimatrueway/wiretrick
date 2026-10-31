@@ -401,6 +401,12 @@ the build (MV2/MV3), browser, OS, extension ID and the local helper's state.
 **Help…** opens the API reference, samples and keyboard shortcuts (the
 editor toolbar's **?**).
 
+**Welcome page.** With no scripts yet, the Editor opens on a welcome page
+that lists every sample. **Try it** adds the sample (turned on), waits until
+it's running and opens its page in a new tab, already changed; **Open** just
+adds it. None of the samples need the local helper. Reopen the page any time
+from **?** → **Welcome** (top right of the Help dialog); ✕ closes it.
+
 **Collect diagnostics…** (also *Wiretrick: Collect Diagnostics…* in the
 Code view's F1 menu, and **Download diagnostics** at the right of the
 Log and Network panel header) downloads a Markdown report meant to be handed to a person

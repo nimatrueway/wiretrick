@@ -405,6 +405,61 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
     min-height: 0;
 }
 #monaco-host { flex: 1; min-height: 0; }
+#monaco-host[hidden] { display: none; }
+
+/* ---- welcome page (onboarding): in place of the code view while there are no scripts ---- */
+#welcome { flex: 1; min-height: 0; overflow-y: auto; background: var(--bg); }
+#welcome[hidden] { display: none; }
+.welcome-inner { position: relative; max-width: 940px; margin: 0 auto; padding: 32px 28px 24px; }
+#welcome-close { position: absolute; top: 14px; right: 14px; font-size: 14px; }
+#welcome-close[hidden] { display: none; }
+#welcome h1 { margin: 0 0 10px; font-size: 22px; font-weight: 600; color: var(--fg); }
+.welcome-lead { margin: 0 0 6px; max-width: 72ch; color: var(--fg-dim); }
+.welcome-lead b { color: var(--fg); font-weight: 600; }
+#welcome-samples {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 10px;
+    margin: 22px 0 18px;
+}
+.welcome-card {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-panel);
+}
+.welcome-card:hover, .welcome-card:focus-within { border-color: var(--accent); }
+.welcome-card-name { font-weight: 600; color: var(--fg); }
+.welcome-card-blurb { flex: 1; font-size: 12px; color: var(--fg-dim); }
+.welcome-card-foot { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.welcome-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-right: auto; }
+.welcome-chip {
+    padding: 1px 6px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    font: 11px/1.4 ui-monospace, Menlo, Consolas, monospace;
+    color: var(--fg-dim);
+}
+.welcome-card button, .welcome-foot button {
+    padding: 3px 10px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--bg);
+    color: var(--fg);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+}
+.welcome-card button:hover, .welcome-foot button:hover { background: var(--bg-hover); }
+.welcome-card button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.welcome-card button.primary:hover { filter: brightness(1.1); }
+.welcome-card button:disabled { opacity: 0.6; cursor: default; }
+.welcome-card button:focus-visible, .welcome-foot button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.welcome-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+.welcome-foot .muted { color: var(--fg-dim); margin-left: 4px; }
 
 #log-panel {
     border-top: 1px solid var(--border);
@@ -756,6 +811,9 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
     cursor: pointer;
 }
 .btn-close:hover { color: var(--err); }
+.dialog-head-actions { display: flex; align-items: center; gap: 10px; }
+.btn-link { background: none; border: none; padding: 0; color: var(--accent); font: inherit; font-size: 12px; cursor: pointer; }
+.btn-link:hover { text-decoration: underline; }
 
 .dialog-body {
     padding: 14px 16px;

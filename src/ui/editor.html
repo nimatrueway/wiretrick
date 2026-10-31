@@ -43,6 +43,20 @@
                 </span>
             </div>
             <div id="editor-area">
+                <section id="welcome" hidden aria-labelledby="welcome-title">
+                    <div class="welcome-inner">
+                        <button id="welcome-close" class="btn-close" title="Close the welcome page" aria-label="Close the welcome page" hidden>✕</button>
+                        <h1 id="welcome-title">Welcome to Wiretrick</h1>
+                        <p class="welcome-lead">Redirect, block or rewrite the requests your browser makes — headers, API responses, whole pages — with a few lines of TypeScript.</p>
+                        <p class="welcome-lead">Pick a sample to start. <b>Try it</b> adds it to your scripts, turns it on and opens its page in a new tab. They all use built-in strategies: nothing to install.</p>
+                        <div id="welcome-samples"></div>
+                        <div class="welcome-foot">
+                            <button id="welcome-new">New empty script</button>
+                            <button id="welcome-reference">API reference</button>
+                            <span class="muted">Reopen this page from Help (?) → Welcome.</span>
+                        </div>
+                    </div>
+                </section>
                 <div id="monaco-host"></div>
                 <div id="split-h" title="Drag to resize"></div>
                 <div id="log-panel">
@@ -293,7 +307,10 @@
                     <button role="tab" data-help-tab="samples">Samples</button>
                     <button role="tab" data-help-tab="shortcuts">Shortcuts</button>
                 </div>
-                <button class="btn-close" data-close>✕</button>
+                <span class="dialog-head-actions">
+                    <button id="btn-help-welcome" class="btn-link" title="Show the welcome page: try a sample in one click">Welcome</button>
+                    <button class="btn-close" data-close>✕</button>
+                </span>
             </div>
             <div class="dialog-body" id="help-body" data-pane="reference">
                 <input id="help-filter" class="help-filter" type="search" placeholder="Type to search the API reference (e.g. replaceResponse, onDocument, strategy)" autocomplete="off" spellcheck="false">

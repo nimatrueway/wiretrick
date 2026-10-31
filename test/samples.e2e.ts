@@ -116,6 +116,23 @@ try {
     for (const s of SAMPLES) check(`"${s.name}" names a URL to try`, /Try it: .*https:\/\//.test(s.code));
     for (const s of SAMPLES) check(`"${s.name}" needs no local helper`, !/strategy:[^,}]*"helper"/.test(s.code));
 
+    // onboarding: the welcome page lists every sample on a fresh profile, and
+    // Try it adds the sample, waits until it runs and opens its page already changed
+    await mgr.waitForSelector("#welcome:not([hidden]) .welcome-card", { timeout: 15000 }).catch(() => {});
+    check("welcome page shows every sample", (await mgr.locator(".welcome-card").count()) === SAMPLES.length);
+    try {
+        const opened = ctx.waitForEvent("page", { timeout: 20000 });
+        await mgr.click('.welcome-card[data-sample="Redirect a URL"] .welcome-try');
+        const tab = await opened;
+        await tab.waitForLoadState("domcontentloaded");
+        const h1 = await tab.evaluate(() => document.querySelector("h1")?.textContent || "");
+        check("welcome: Try it opens the page with the sample running", h1 === "Dog" && (await mgr.locator("#welcome").isHidden()), h1);
+        await tab.close();
+    } catch (e) {
+        check("welcome: Try it opens the page with the sample running", false, String(e).split("\n")[0]);
+    }
+    for (const s of await send({ type: "listScripts" })) await send({ type: "deleteScript", id: s.id });
+
     for (const sample of SAMPLES) {
         const verify = VERIFY[sample.name];
         if (!verify) continue;

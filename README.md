@@ -67,7 +67,9 @@ wt.onResponseBody({ url: "*://dummyjson.com/todos/*", strategy: "helper" }, (ctx
 });
 ```
 
-Or click **?** → **Samples** for one-click starters against real public sites.
+Or start from a sample: on first run the Editor opens a welcome page where
+**Try it** adds a sample, turns it on and opens a real public site with it
+running (later: **?** → **Welcome** or **?** → **Samples**).
 
 ![Wiretrick samples dialog](docs/shots/samples.png)
 

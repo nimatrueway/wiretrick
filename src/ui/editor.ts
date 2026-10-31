@@ -8,7 +8,7 @@ import { API_TYPINGS_URI } from "./apiLinks";
 import { NavHistory } from "./navHistory";
 import { API_REFERENCE } from "./apiReference";
 import { SHORTCUTS, filterShortcuts, formatKey, keysFor } from "./shortcuts";
-import { SAMPLES } from "./samples";
+import { SAMPLES, sampleStrategies, sampleSummary, sampleTryUrl, type SampleScript } from "./samples";
 import { settingsDiagnostics, settingsCompletions, settingsHover, type AssistScript } from "../shared/settingsAssist";
 import { dependantsOf, folderOf, missingImports } from "../shared/scriptImports";
 import { allFolders, ancestorFolders, isInFolder, movedPath } from "../shared/folders";
@@ -226,6 +226,7 @@ async function selectSettings(): Promise<void> {
     leaveTypings();
     selectedId = SETTINGS_ID;
     focusedId = null;
+    showWelcome(false);
     renderList();
     $("#btn-save").removeAttribute("disabled");
     await loadSettingsModel(!back);
@@ -291,6 +292,7 @@ async function refresh(): Promise<void> {
         selectReal(scripts[0].id);
     } else if (!selectedId) {
         renderEditorEmpty();
+        if (!scripts.length) showWelcome(true);
     }
 }
 
@@ -1452,6 +1454,7 @@ function selectReal(id: string): void {
     const script = scripts.find((s) => s.id === id);
     const data = script ? undefined : dataFiles.find((d) => d.id === id);
     if (!script && !data) return;
+    showWelcome(false);
     $("#btn-save").removeAttribute("disabled");
     if (script) syncModels();
     else syncDataModels();
@@ -2778,12 +2781,8 @@ function renderSamples(): void {
         use.className = "btn-use";
         use.textContent = "Use this";
         use.addEventListener("click", async () => {
-            const id = newId();
-            await send({ type: "saveScript", id, code: sample.code, name: sample.name });
-            await refresh();
-            selectReal(id);
+            await addSample(sample);
             document.getElementById("help-panel")?.classList.add("hidden");
-            status(`sample "${sample.name}" added ✓`);
         });
         head.append(name, use);
         const blurb = document.createElement("div");
@@ -2795,6 +2794,103 @@ function renderSamples(): void {
         body.appendChild(card);
     }
     filterHelpList("samples");
+}
+
+/** a script name not taken yet: `base`, else `base 2`, `base 3`… */
+function freeScriptName(base: string): string {
+    const taken = new Set(scripts.map((s) => s.meta.name));
+    if (!taken.has(base)) return base;
+    let n = 2;
+    while (taken.has(`${base} ${n}`)) n++;
+    return `${base} ${n}`;
+}
+
+/** add a sample as a new (enabled) script and open it; returns its id */
+async function addSample(sample: SampleScript): Promise<string> {
+    const id = newId();
+    const name = freeScriptName(sample.name);
+    await send({ type: "saveScript", id, code: sample.code, name, enabled: true });
+    await refresh();
+    selectReal(id);
+    status(`sample "${name}" added ✓`);
+    return id;
+}
+
+// ---- welcome page (onboarding): replaces the code view while there are no scripts; Help → Welcome reopens it ----
+function showWelcome(open: boolean): void {
+    const w = $("#welcome");
+    if (open === !w.hidden) return;
+    if (open && !$("#welcome-samples").childElementCount) renderWelcome();
+    w.hidden = !open;
+    $("#monaco-host").hidden = open;
+    // nothing to go back to without scripts: no close button then
+    $("#welcome-close").hidden = !open || !scripts.length;
+}
+
+function renderWelcome(): void {
+    const list = $("#welcome-samples");
+    list.innerHTML = "";
+    for (const sample of SAMPLES) {
+        const card = document.createElement("article");
+        card.className = "welcome-card";
+        card.dataset.sample = sample.name;
+        const name = document.createElement("div");
+        name.className = "welcome-card-name";
+        name.textContent = sample.name;
+        const blurb = document.createElement("div");
+        blurb.className = "welcome-card-blurb";
+        blurb.textContent = sampleSummary(sample.blurb);
+        const foot = document.createElement("div");
+        foot.className = "welcome-card-foot";
+        const chips = document.createElement("span");
+        chips.className = "welcome-chips";
+        for (const s of sampleStrategies(sample.code)) {
+            const chip = document.createElement("span");
+            chip.className = "welcome-chip";
+            chip.textContent = s;
+            chip.title = s === "onDocument" ? "Runs in the page at DOM-ready — no network strategy" : `strategy: "${s}"`;
+            chips.append(chip);
+        }
+        const url = sampleTryUrl(sample.code);
+        const view = document.createElement("button");
+        view.textContent = "Open";
+        view.title = "Add it to your scripts and open its code";
+        view.addEventListener("click", () => void addSample(sample));
+        const tryIt = document.createElement("button");
+        tryIt.className = "primary welcome-try";
+        tryIt.textContent = "Try it";
+        tryIt.title = url ? `Add it, turn it on and open ${url} in a new tab` : "Add it and turn it on";
+        tryIt.addEventListener("click", async () => {
+            tryIt.disabled = true;
+            try {
+                await addSample(sample);
+                // wait until the script runs (browser rules included) so the page loads with it
+                await send({ type: "settleScripts" });
+                if (url) chrome.tabs.create({ url, active: true }, () => void chrome.runtime.lastError);
+            } finally {
+                tryIt.disabled = false;
+            }
+        });
+        foot.append(chips, view, tryIt);
+        card.append(name, blurb, foot);
+        list.append(card);
+    }
+}
+
+function setupWelcome(): void {
+    $("#welcome-close").addEventListener("click", () => {
+        showWelcome(false);
+        if (!selectedId && scripts.length) selectReal(scripts[0].id);
+    });
+    $("#welcome-new").addEventListener("click", () => startCreate("script"));
+    $("#welcome-reference").addEventListener("click", () => {
+        openDialog("help-panel");
+        showHelpTab("reference");
+    });
+    $("#btn-help-welcome").addEventListener("click", () => {
+        closeDialog($("#help-panel"));
+        showWelcome(true);
+    });
 }
 
 // ---- toolbar folder sync button: off / disconnected / connected / sending / receiving ----
@@ -3382,6 +3478,7 @@ async function main(): Promise<void> {
     watchNetCounts();
     startKeepAlive();
     setupDialogs();
+    setupWelcome();
     
 
     void autoReconnectFolder();
