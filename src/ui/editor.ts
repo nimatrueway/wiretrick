@@ -1160,21 +1160,33 @@ function scheduleDiagnostics(): void {
     }, 600);
 }
 
-// ---- re-check importers when a utility changes ----
+// ---- re-check importers when a utility changes, moves or goes ----
 const changedModels = new Set<any>();
+/** scripts moved (re-checked themselves: they may have been checked mid-batch, before the files they import moved) */
+const movedModels = new Set<any>();
+/** paths scripts left (moved or deleted): their importers now point at nothing */
+const leftNames = new Set<string>();
 let recheckTimer: ReturnType<typeof setTimeout> | null = null;
 
-function scheduleDependantRecheck(m: any): void {
-    changedModels.add(m);
+function scheduleDependantRecheck(m: any, left?: string): void {
+    if (m) changedModels.add(m);
+    if (left !== undefined) {
+        leftNames.add(left);
+        if (m) movedModels.add(m);
+    }
     if (recheckTimer) clearTimeout(recheckTimer);
     recheckTimer = setTimeout(() => {
         recheckTimer = null;
         const changed = [...changedModels];
+        const left = [...leftNames];
+        const targets = new Set<any>([...movedModels].filter((x) => !x.isDisposed?.()));
         changedModels.clear();
+        leftNames.clear();
+        movedModels.clear();
         const live = [...models.entries()]
             .filter(([, x]) => !x.isDisposed?.())
             .map(([id, x]) => ({ id, model: x, name: scripts.find((s) => s.id === id)?.meta.name ?? "", code: x.getValue() }));
-        const targets = new Set<any>();
+        for (const name of left) for (const id of dependantsOf(name, live)) targets.add(live.find((x) => x.id === id)!.model);
         for (const c of changed) {
             const src = live.find((x) => x.model === c);
             if (!src) continue;
@@ -1223,6 +1235,8 @@ async function revalidateModel(m: any): Promise<void> {
 /** One Monaco model per script so `import "./utilities"` resolves across
  * the editor's virtual workspace (file:///<name>.ts per script). */
 const models = new Map<string, any>();
+/** script id → the name its model was created under (to know where a moved script came from) */
+const modelNames = new Map<string, string>();
 
 /** Per-file cursor/scroll memory: view state is captured when a model is
  * switched away from and restored when the user comes back (VS Code-style,
@@ -1272,8 +1286,9 @@ function syncModels(): void {
             viewStates.delete(oldUri);
             baselines.delete(oldUri);
             old.dispose();
-            scheduleDependantRecheck(m);
+            scheduleDependantRecheck(m, modelNames.get(s.id));
         }
+        modelNames.set(s.id, s.meta.name);
         if (!m) {
             m = monaco.editor.getModel(uri) || monaco.editor.createModel(s.code, "typescript", uri);
             models.set(s.id, m);
@@ -1294,6 +1309,9 @@ function syncModels(): void {
             baselines.delete(m.uri.toString());
             m.dispose();
             models.delete(id);
+            const name = modelNames.get(id);
+            modelNames.delete(id);
+            if (name !== undefined) scheduleDependantRecheck(null, name);
         }
     }
 }

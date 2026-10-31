@@ -116,7 +116,10 @@ moves it into a folder (`mock/api mock` → `mock/api mock.ts`; renaming a
 folder moves everything in it). Each segment may hold anything
 except `< > : " \ | ? *`, a trailing dot or space, and Windows device names
 like `CON`; a name that clashes with another script (data file, folder) is refused.
-Moving a file doesn't rewrite the import specifiers that point at it.
+Moving a file doesn't rewrite the import specifiers that point at it, but
+after a move (or a delete) the moved scripts and every script importing them,
+directly or through other scripts, are type-checked again, so a broken import
+shows up in Problems right away.
 Reverting an edit back to the saved text clears the unsaved-changes state —
 no discard prompt on a no-op edit.
 
