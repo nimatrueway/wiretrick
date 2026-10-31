@@ -96,7 +96,7 @@ export function createPipeline(
     helperStrategy: HelperStrategy,
     rulesStrategy: RulesStrategy,
     updateTabBadge?: (tabId: number, url: string | undefined) => Promise<void>,
-    noteRequestForBadge?: (tabId: number, url: string) => number,
+    noteRequestForBadge?: (tabId: number, url: string, newPage?: boolean) => number,
     /** resolves once startup migrations ran — scripts aren't loaded before */
     ready: Promise<unknown> = Promise.resolve()
 ): Pipeline {
@@ -160,6 +160,12 @@ export function createPipeline(
     if (chrome.webRequest?.onBeforeRequest) {
         chrome.webRequest.onBeforeRequest.addListener(
             (d) => {
+                // badge: a main-frame navigation starts the tab's active-script set
+                // over, then every request (page + resources) accumulates matches
+                if (d.tabId >= 0 && d.type === "main_frame") {
+                    noteRequestForBadge?.(d.tabId, d.url, true);
+                    void updateTabBadge?.(d.tabId, d.url);
+                } else if (d.tabId >= 0 && (noteRequestForBadge?.(d.tabId, d.url) ?? 0) > 0) void updateTabBadge?.(d.tabId, d.url);
                 if (d.type === "websocket" && wsBlind.length) {
                     for (const w of wsBlind) {
                         const key = `${w.id}|${w.route.kind}|${w.route.index}|${d.url}`;
@@ -392,19 +398,10 @@ export function createPipeline(
         if (details.type === "main_frame" && tabUrl !== null) {
             void cdp.ensureAttached(details.tabId, details.url);
         }
-        // badge: main-frame navigation resets the tab's active-script set,
-        // then every request (page + resources) accumulates matches
-        if (details.type === "main_frame") {
-            noteRequestForBadge?.(details.tabId, details.url);
-            void updateTabBadge?.(details.tabId, details.url);
-            // workers/service-workers can't host the hook — sweep their
-            // targets so respond-with-status works for worker fetches too
-            if (cdp.hasOwners()) {
-                void cdp.ensureWorkerAttached(details.url);
-            }
-        } else {
-            const n = noteRequestForBadge?.(details.tabId, details.url);
-            if (n !== undefined && n > 0) void updateTabBadge?.(details.tabId, details.url);
+        // workers/service-workers can't host the hook — sweep their
+        // targets so respond-with-status works for worker fetches too
+        if (details.type === "main_frame" && cdp.hasOwners()) {
+            void cdp.ensureWorkerAttached(details.url);
         }
 
         const disposition = extensionStrategy.handleBeforeRequest(details, tabUrl);

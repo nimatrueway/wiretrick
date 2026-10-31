@@ -16,7 +16,7 @@ import { addNetworkCountsPort, addNetworkPort } from "./network";
 import { collectDiagnostics } from "./diagnostics";
 import { getSettingsText, applySettingsText, applySettingsDoc } from "./settingsFile";
 import { badgeSetText, badgeSetColor, tabsQueryAll, tabsGet } from "../shared/chromeApi";
-import { matchAny } from "../shared/matcher";
+import { createBadgeCounter } from "./badgeCounter";
 
 const IS_FIREFOX =
     typeof (globalThis as any).browser !== "undefined" &&
@@ -193,7 +193,7 @@ if (chrome.debugger) {
 // ---- tab lifecycle logging ----
 chrome.tabs.onRemoved.addListener((tabId) => {
     clearTab(tabId);
-    tabActiveScripts.delete(tabId);
+    badge.forget(tabId);
 });
 
 // ---- reopen the manager after an extension reload (Chrome kills the
@@ -218,8 +218,8 @@ chrome.runtime.onInstalled.addListener(() => {
 
 // ---- badge: per-tab count of enabled scripts active on the tab
 // (matching the page URL or any underlying resource request) ----
-const tabActiveScripts = new Map<number, Set<string>>();
 let cachedScripts: import("./engine/scriptStore").Script[] = [];
+const badge = createBadgeCounter(() => cachedScripts);
 
 async function refreshCache(): Promise<void> {
     cachedScripts = await listScripts();
@@ -227,34 +227,13 @@ async function refreshCache(): Promise<void> {
 onScriptsChanged(() => void refreshCache());
 void refreshStaleMeta().catch((e) => dlogLevel("bg", "warn", `refreshing stored script meta failed: ${e?.message || e}`));
 
-/** Record scripts matching a request from a tab; returns the active count. */
-function noteRequestForBadge(tabId: number, url: string): number {
-    if (!/^https?:/i.test(url)) return 0;
-    let set = tabActiveScripts.get(tabId);
-    if (!set) {
-        set = new Set();
-        tabActiveScripts.set(tabId, set);
-    }
-    for (const s of cachedScripts) {
-        if (s.enabled && matchAny(s.meta.match, url)) set.add(s.id);
-    }
-    return set.size;
+/** Record scripts matching a request from a tab (a page load starts over); returns the active count. */
+function noteRequestForBadge(tabId: number, url: string, newPage = false): number {
+    return badge.note(tabId, url, newPage);
 }
 
-function activeCountForTab(tabId: number, tabUrl: string | undefined): number {
-    if (!tabUrl || !/^https?:/i.test(tabUrl)) return 0;
-    let set = tabActiveScripts.get(tabId);
-    if (!set) {
-        set = new Set();
-        tabActiveScripts.set(tabId, set);
-    }
-    for (const s of cachedScripts) {
-        if (s.enabled && matchAny(s.meta.match, tabUrl)) set.add(s.id);
-    }
-    return set.size;
-}
 async function updateTabBadge(tabId: number, url: string | undefined): Promise<void> {
-    const n = activeCountForTab(tabId, url);
+    const n = url && /^https?:/i.test(url) ? badge.note(tabId, url) : 0;
     await badgeSetColor("#4ec9b0", tabId);
     await badgeSetText(n > 0 ? String(n) : "", tabId);
 }

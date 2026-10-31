@@ -15,6 +15,7 @@ its section below.
 ### Fixed
 
 - Network: ↑/↓, PageUp/PageDown and Home/End did nothing in the request table. They now move the selection (Shift extends it) and scroll it into view; an open details pane follows the selected request, and Enter opens it.
+- The toolbar badge kept counting scripts after they were disabled (or deleted), and never reset when the tab moved to another site. It now drops them right away and starts over on each page load. On Chrome (MV3) it also counts scripts that match only the page's requests (an API host, a CDN) rather than the page URL, as it already did on MV2/Firefox.
 
 ### Changed
 
