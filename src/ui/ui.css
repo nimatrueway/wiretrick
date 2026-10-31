@@ -454,8 +454,13 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 .panel-tools { margin-left: 12px; }
 /* narrow (docked beside): tabs and close on one row, the view's tools on their own row below */
 #log-header { container-type: inline-size; flex-wrap: wrap; row-gap: 4px; }
+#panel-actions { display: flex; flex: none; gap: 6px; align-items: center; }
+/* the same two actions, in the same place, on Log and Network (Problems has nothing to clear) */
+#log-panel[data-tab="problems"] #panel-actions { visibility: hidden; }
 @container (max-width: 480px) {
+    #panel-actions { order: 1; margin-left: auto; }
     #btn-close-panel { order: 1; margin-left: auto; }
+    #panel-actions + #btn-close-panel { margin-left: 0; }
     #log-header .panel-tools { order: 2; flex-basis: 100%; margin-left: 0; }
 }
 .panel-filter {
@@ -983,7 +988,6 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 /* in the panel header (beside the other views' tools) */
 #net-filter-host { display: contents; }
 #net-filter-host > .net-toolbar { display: contents; }
-.net-toolbar .net-clear.icon-btn { padding: 3px; line-height: 0; }
 .net-filter {
     background: var(--bg); border: 1px solid var(--border); color: var(--fg);
     border-radius: 3px; padding: 2px 6px; font-size: 11px;

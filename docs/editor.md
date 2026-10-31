@@ -18,7 +18,7 @@ searchable list of all of them):
 | ⌥⇧P (or ⌘⇧M) | Show the Problems view and focus its filter (again: hide the panel) |
 | ⌥⇧L | Show the Log and focus its filter (again: hide the panel) |
 | ⌥⇧N | Show the Network view and focus its filter (again: hide the panel) |
-| ⌥⇧K | Clear the Log or Network view the panel shows |
+| ⌥⇧K | Clear the Log and Network |
 | ⌥Z | Toggle word wrap |
 | ⌘, | Open Settings |
 | ⌘/, ⌘F, ⌘D | Comment, find, select next occurrence (Monaco) |
@@ -182,8 +182,11 @@ at the right of the toolbar do the same.
   **Settings → Logging → Panel counts**. Script
   exceptions in handlers are logged at ERROR, and the script gets a ⚠
   indicator in the list and the popup — as it does for compile, TypeScript
-  and rules errors, which go to the Problems view instead of the Log. The download button (↓) saves the
-  full debug log — every engine decision with timestamps; attach it when
+  and rules errors, which go to the Problems view instead of the Log. The
+  panel header's two actions sit in the same place on Log and Network:
+  **Clear** empties both the Log and Network, and **Download diagnostics**
+  saves the [diagnostics report](#about-and-diagnostics) (the log, the full
+  debug log, network requests, scripts and settings) — attach it when
   reporting issues.
 - **Network view** — a devtools-style request table: a [filter bar](#network-filter), per-type
   toggles, a tab picker (closed tabs stay listed, dimmed under *Closed tabs*,
@@ -398,8 +401,8 @@ the build (MV2/MV3), browser, OS, extension ID and the local helper's state.
 editor toolbar's **?**).
 
 **Collect diagnostics…** (also *Wiretrick: Collect Diagnostics…* in the
-Code view's F1 menu, and the diagnostics icon at the right of the panel
-header while the Network view is open) downloads a Markdown report meant to be handed to a person
+Code view's F1 menu, and **Download diagnostics** at the right of the
+Log and Network panel header) downloads a Markdown report meant to be handed to a person
 or an LLM: environment, scripts, settings.yaml, recent log and network
 entries, and Editor state (theme, layout). It first asks for the optional
 *management* permission to list your other extensions (they can interfere

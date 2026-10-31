@@ -31,7 +31,7 @@ import { helperInstallCommand, helperInstallShell } from "../shared/helperInstal
 import { mountNetworkPanel } from "./network/mount";
 import { mountLogFilter, type LogFilter } from "./logFilter";
 import type { LogLine } from "./logQuery";
-import { createNetStore } from "./network/netStore";
+import { createNetStore, type NetStore } from "./network/netStore";
 import { installTooltips } from "./tooltip";
 import { scriptHealth, type ScriptHealthInput } from "../shared/scriptHealth";
 import type { Uri, IPosition, IRange, IKeyboardEvent, editor as MonacoEditor } from "monaco-editor";
@@ -1851,6 +1851,7 @@ function renderTabBadges(): void {
 /** Network counts from a passive connection: live before the Network tab is ever opened. */
 function watchNetCounts(): void {
     const store = createNetStore();
+    netCounts = store;
     effect(() => {
         netBadge.set(touchCounts(store.entries.value));
         renderBadge(netBadge);
@@ -2157,12 +2158,11 @@ function focusPanelView(which: PanelTab): void {
 
 const toggleProblems = () => focusPanelView("problems");
 
-/** Clear the view the panel shows (Log or Network; Problems clear themselves once fixed). */
+/** Clear the Log and Network (Problems clear themselves once fixed). */
 function clearPanelView(): void {
     if ($("#app").classList.contains("panel-hidden")) return;
     const tab = $("#log-panel").dataset.tab;
-    const btn = tab === "log" ? $("#btn-clear-log") : tab === "network" ? document.querySelector<HTMLElement>("#net-filter-host .net-clear") : null;
-    btn?.click();
+    if (tab === "log" || tab === "network") $("#btn-clear-panel").click();
 }
 
 /** All received entries — filtered ones stay here (re-renderable), just not in the DOM. */
@@ -2427,7 +2427,7 @@ async function runDiagnostics(): Promise<void> {
     const btn = $("#btn-diagnostics") as HTMLButtonElement;
     const state = $("#diagnostics-state");
     const copy = $("#btn-diagnostics-copy");
-    const net = $("#btn-net-diagnostics") as HTMLButtonElement;
+    const net = $("#btn-panel-diagnostics") as HTMLButtonElement;
     const netTitle = net.title;
     const netState = (k: string, title: string) => ((net.dataset.state = k), (net.title = title));
     btn.disabled = net.disabled = true;
@@ -2466,7 +2466,7 @@ function setupDialogs(): void {
         await navigator.clipboard.writeText(aboutText(aboutInfo)).then(() => flash(b, "Copied ✓"), () => flash(b, "Copy failed"));
     });
     $("#btn-diagnostics").addEventListener("click", () => void runDiagnostics());
-    $("#btn-net-diagnostics").addEventListener("click", () => void runDiagnostics());
+    $("#btn-panel-diagnostics").addEventListener("click", () => void runDiagnostics());
     $("#btn-diagnostics-copy").addEventListener("click", (e) => {
         const b = e.currentTarget as HTMLElement;
         void navigator.clipboard.writeText(diagnosticsReport).then(() => flash(b, "Copied ✓"), () => flash(b, "Copy failed"));
@@ -2991,6 +2991,9 @@ function makeSplitV(): void {
 }
 
 let networkMounted = false;
+/** the Network view's store once it is opened; before that, the passive counts one */
+let netStore: NetStore | null = null;
+let netCounts: NetStore | null = null;
 type PanelTab = "problems" | "log" | "network";
 
 /** VS Code–style bottom panel tabs: PROBLEMS | LOG | NETWORK */
@@ -3011,7 +3014,7 @@ function showPanelTab(which: PanelTab): void {
     // recording starts the first time the tab is shown (zero cost before)
     if (which === "network" && !networkMounted) {
         networkMounted = true;
-        mountNetworkPanel($("#network-view"));
+        netStore = mountNetworkPanel($("#network-view"));
     }
     const l = loadLayout();
     l.panelTab = which;
@@ -3022,7 +3025,7 @@ function setupPanelTabs(): void {
     $("#problems-tab").title += ` (${keyHint("Alt+Shift+P")})`;
     $("#log-header-title").title += ` (${keyHint("Alt+Shift+L")})`;
     $("#network-tab").title += ` (${keyHint("Alt+Shift+N")})`;
-    $("#btn-clear-log").title += ` (${keyHint("Alt+Shift+K")})`;
+    $("#btn-clear-panel").title += ` (${keyHint("Alt+Shift+K")})`;
     for (const t of document.querySelectorAll<HTMLElement>(".panel-tab")) {
         t.addEventListener("click", () => showPanelTab(t.dataset.panel as PanelTab));
     }
@@ -3153,7 +3156,9 @@ async function main(): Promise<void> {
     wireLogScroll();
     $("#log-entries").addEventListener("click", openLogLink);
     $("#log-entries").addEventListener("auxclick", openLogLink);
-    $("#btn-clear-log").addEventListener("click", () => {
+    $("#btn-clear-panel").addEventListener("click", () => {
+        // the recording too, whether or not the Network view was ever opened
+        (netStore ?? netCounts)?.clear();
         $("#log-entries").innerHTML = "";
         logOwnTop = 0;
         if (logScroll === "paused") setLogScroll("follow");
@@ -3162,24 +3167,6 @@ async function main(): Promise<void> {
         logBadge.reset();
         renderTabBadges();
         void send({ type: "clearDebugLogs" });
-    });
-    $("#btn-logs").addEventListener("click", async () => {
-        const bg = await send({ type: "getDebugLogs" });
-        const lines: string[] = [
-            `Wiretrick debug log — ${new Date().toISOString()}`,
-            `UA: ${bg.ua} | extension v${bg.ver}`,
-            `entries: ${bg.entries ? bg.entries.length : 0}`,
-            "",
-            ...(bg.entries || []).map((e: any) => `${new Date(e.at).toISOString()} [${e.src}] ${e.msg}`),
-        ];
-        const blob = new Blob([lines.join("\n")], { type: "text/plain" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `wiretrick-debug-${Date.now()}.log`;
-        a.click();
-        URL.revokeObjectURL(url);
-        status("debug log downloaded");
     });
     $("#editor-status").addEventListener("click", () => statusClick?.());
     // delegated: a click on another script re-renders the list

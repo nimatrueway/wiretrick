@@ -17,6 +17,7 @@ its section below.
 
 ### Changed
 
+- Log and Network share the panel header's actions, in the same place on both: **Clear** empties the Log and the Network recording together (also ⌥⇧K), and **Download diagnostics** saves the diagnostics report. The Log's separate debug-log download is gone (the report includes the debug log), as is the Network view's own Clear.
 - Network view: each request/response body is now kept up to 2 MB by default (was 256 kB). `bodyCap:` / Settings → Network → Body capture still changes it.
 
 ## [0.9.17] - 2026-10-26

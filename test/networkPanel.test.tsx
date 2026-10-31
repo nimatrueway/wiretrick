@@ -271,9 +271,11 @@ describe("NetworkPanel", () => {
         await waitFor(() => expect(copied).toBe('{\n  "a": 1\n}'));
     });
 
-    it("clear empties the table", async () => {
-        const { container } = setup([entry("a")]);
-        fireEvent.click(container.querySelector(".net-clear")!);
+    it("clearing the store empties the table and the selection", async () => {
+        const { container, store } = setup([entry("a")]);
+        fireEvent.click(container.querySelector("tbody tr")!);
+        expect(container.querySelector("tr.selected")).toBeTruthy();
+        store.clear();
         await waitFor(() => {
             if (container.querySelectorAll("tbody tr").length) throw new Error("not yet");
         });

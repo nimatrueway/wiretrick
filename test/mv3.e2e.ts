@@ -454,8 +454,8 @@ try {
     const byScript: string[][] = await mgr.evaluate(() => [...document.querySelectorAll("#network-view tbody tr")].filter((t) => t.querySelector(".net-name")).map((t) => [...t.querySelectorAll(".c-script .net-badge")].map((b) => b.textContent || "")));
     check("Network script filter keeps only the picked script's requests", !!pick && byScript.length > 0 && byScript.every((names) => names.includes(pick)), JSON.stringify({ scriptOpts, byScript }));
     await netFilter("");
-    const netTools = await mgr.evaluate(() => ({ net: !(document.querySelector("#net-tools") as HTMLElement).hidden, log: !(document.querySelector("#log-tools") as HTMLElement).hidden, label: document.querySelector("#btn-net-diagnostics")?.getAttribute("aria-label"), filter: !!document.querySelector("#net-tools .net-qbox") }));
-    check("the Network tab shows its filter and the diagnostics collector in the panel header (not the Log tools)", netTools.net && !netTools.log && netTools.label === "Collect diagnostics" && netTools.filter, JSON.stringify(netTools));
+    const netTools = await mgr.evaluate(() => ({ net: !(document.querySelector("#net-tools") as HTMLElement).hidden, log: !(document.querySelector("#log-tools") as HTMLElement).hidden, label: document.querySelector("#panel-actions #btn-panel-diagnostics")?.getAttribute("aria-label"), filter: !!document.querySelector("#net-tools .net-qbox") }));
+    check("the Network tab shows its filter, and the shared diagnostics action in the panel header (not the Log tools)", netTools.net && !netTools.log && netTools.label === "Download diagnostics" && netTools.filter, JSON.stringify(netTools));
     await mgr.click("#log-header-title");
     // Network panel count: recorded observed/modified requests, until cleared
     // fresh (cache-busted) script tags: gz.js → modified (Cdp transform), auto.js → observed (Watcher)
@@ -499,7 +499,7 @@ try {
         modified: document.querySelector('#sb-net .sb-n[data-k="modified"]')?.textContent,
     }));
     check("clicking the status bar item opens the panel on Network (count stays)", opened.panel && opened.tab === "network" && Number(opened.modified) >= 1, JSON.stringify(opened));
-    await mgr.click("#network-view .net-clear");
+    await mgr.click("#btn-clear-panel");
     await mgr.waitForTimeout(500);
     const cleared = await mgr.evaluate(() => ({
         modified: document.querySelector('#sb-net .sb-n[data-k="modified"]')?.textContent,

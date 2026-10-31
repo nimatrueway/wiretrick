@@ -21,7 +21,6 @@ import {
 } from "./netFormat";
 import { compileQuery, parseQuery, suggestData, type QNode } from "./netQuery";
 import { FilterBar, effectiveQuery, initialFilterState, type FilterState } from "./NetFilterBar";
-import { formatKey } from "../shortcuts";
 import { copyWithToast } from "../toast";
 import { copyRequests, type CopyKind } from "./netCopy";
 
@@ -155,6 +154,10 @@ export function NetworkPanel({ store, listTabs, toolsHost }: { store: NetStore; 
     const flexKey = visible[visible.length - 1].key;
     const colWidth = (k: SortKey) => (k === flexKey ? undefined : layout.widths[k]);
     const minTable = visible.reduce((n, c) => n + (colWidth(c.key) ?? 60), 0);
+    // cleared (the panel's Clear, or another window's): nothing left to select
+    useEffect(() => {
+        if (!all.length && sel.ids.size) setSel(NO_SELECTION);
+    }, [all.length]);
 
     useEffect(() => {
         if (!colMenu && !rowMenu) return;
@@ -355,11 +358,6 @@ export function NetworkPanel({ store, listTabs, toolsHost }: { store: NetStore; 
     const toolbar = (
         <div class="net-toolbar">
             <FilterBar state={fq} onChange={setFq} error={parsed.error} data={suggestions} />
-            <button class="net-clear icon-btn" title={`Clear the network log (${formatKey("Alt+Shift+K", /Mac|iPhone|iPad/.test(navigator.platform))})`} aria-label="Clear network log" onClick={() => (store.clear(), setSel(NO_SELECTION))}>
-                <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-                <path fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" d="M2.5 4h9M2.5 7.5h9M2.5 11h4.5M9.5 10l3.5 3.5M13 10l-3.5 3.5" />
-            </svg>
-            </button>
         </div>
     );
 

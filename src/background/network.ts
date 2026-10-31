@@ -354,6 +354,10 @@ export function addNetworkPort(port: chrome.runtime.Port): void {
 export function addNetworkCountsPort(port: chrome.runtime.Port): void {
     watchers.add(port);
     postTo([port], { type: "netSnapshot", entries: [...entries.values()] });
+    // the panel's Clear before the Network view was ever opened
+    port.onMessage.addListener((m: any) => {
+        if (m?.type === "netClear") clearNetwork();
+    });
     port.onDisconnect.addListener(() => watchers.delete(port));
 }
 
