@@ -219,8 +219,9 @@ import { readFetchBody } from "../shared/requestBody";
             params,
             log: (...args: any[]) => scriptLogUp(scriptId, "info", scriptLogLine(name, "wt.log", formatLogArgs(args))),
             storage: {
-                get: (key: string) => viaBridge({ op: "storageGet", scriptId, key }),
-                set: (key: string, value: any) => viaBridge({ op: "storageSet", scriptId, key, value }),
+                // the background answers { value } (same as the isolated-world shim unwraps)
+                get: (key: string) => viaBridge({ op: "storageGet", scriptId, key }).then((r) => r?.value),
+                set: (key: string, value: any) => viaBridge({ op: "storageSet", scriptId, key, value }).then(() => null),
             },
         });
     }

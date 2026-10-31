@@ -43,7 +43,7 @@ The same text is shown in Settings → Strategies.
 |---|---|---|
 | `helper` | Sees everything: documents, `<script src>`, CSS, images, workers, the first navigation. No banner. Async handlers, any status code, URL unchanged. | Chromium only. One-time install of the local helper and trust in the helper certificate. Matched hosts go through a local proxy (PAC); cert-pinned / mTLS sites break. Small per-request latency; bodies are buffered for `onResponseBody`. |
 | `page` | No setup, no banner, no permissions, lightest. Works in every browser. | Only the page's own fetch/XHR. Misses documents, `<script src>`, images, workers and requests made before the page patch loads. |
-| `extension` *(default, Firefox)* | No banner, no setup. On Firefox it reaches everything, bodies included. | Not on Chrome (MV3). Chromium MV2: no `onResponseBody`, no async handlers, replacements are served by redirect (URL changes, status always 200) — a replaced page shows a `chrome-extension://` URL. Firefox: can't change a replaced response's status. |
+| `extension` | No banner, no setup. On Firefox it reaches everything, bodies included. | Not on Chrome (MV3). Chromium MV2: no `onResponseBody`, no async handlers, replacements are served by redirect (URL changes, status always 200) — a replaced page shows a `chrome-extension://` URL. Firefox: can't change a replaced response's status. |
 | `debugger` | Sees everything with nothing to install. | Chromium only. Chrome shows a "being debugged" banner while attached. May miss the first navigation in a fresh tab ([details](#first-page-load-with-debugger)). |
 | `rules` | No banner, no setup, nothing runs per request: the browser itself applies the rules to every request, the first navigation included. Works in Chrome (MV3 and MV2) and Firefox. | Fixed results only: block, redirect (captures inserted as-is), set/remove request or response headers. No replaceResponse (handler or result) or onResponseBody, no exclude. The handler runs once when scripts load and can't read the request (method, headers…). |
 
@@ -78,17 +78,19 @@ The same text is shown in Settings → Strategies.
 
 ## Which strategy for which job?
 
-- **Most things on Chromium** → the default `helper`, with the
-  [local helper](local-helper.md) installed: every resource type, async
-  handlers, no banner.
-- **Firefox** → the default `extension`: everything is network-level, no
-  banner, ever.
-- **Nothing to install on Chrome** → `debugger` (sees everything, shows the
-  banner) or `page` (no banner, fetch/XHR only).
+Start with the built-in strategies — nothing to install. The bundled
+samples (Help → Samples) only use those.
+
 - **Block, redirect or set headers the same way every time** → `rules`:
   the browser applies them itself — every resource type, no banner,
   nothing to install, in Chrome and Firefox
   ([what `rules` can do](#what-rules-can-do)).
+- **Firefox** → `extension`: everything is network-level, no banner, ever.
+- **Nothing to install on Chrome** → `page` (no banner, the page's own
+  fetch/XHR) or `debugger` (sees everything, shows the banner).
+- **Everything on Chromium without the banner** → `helper`, with the
+  [local helper](local-helper.md) installed: every resource type, async
+  handlers, no banner.
 - **Replace/transform JSON APIs only, lightest path** →
   `{ url, resourceTypes: ["xmlhttprequest"], strategy: "page" }`.
 - **Rewrite page HTML / `<script src>` bodies** → `helper` or `debugger` on
@@ -362,9 +364,9 @@ strategy picker disables the ones the current browser can't use.
 
 | | `helper` (local helper) | `page` (page fetch/XHR) | `extension` (blocking webRequest) | `debugger` (chrome.debugger) | `rules` (browser-native rules) | `wt.onDocument` |
 |---|---|---|---|---|---|---|
-| **Chrome / Edge / Brave / Vivaldi, current** — `dist-mv3/` | ✅ no banner — **default** | ✅ | ❌ | ✅ banner shown | ✅ | ✅ |
-| **Chromium with MV2** (ungoogled-chromium, Brave, Arc… — any Chromium that still loads MV2 extensions) — `dist/` | ✅ no banner — **default** | ✅ | ✅ no banner — redirect, block, headers, sync replaceResponse; no body streaming or async (see [async](scripting.md#async-handlers)) | ✅ banner shown | ✅ | ✅ |
-| **Firefox** — `dist/` | ❌ (not needed: `extension` reaches everything) | ✅ | ✅ no banner — **default** | ❌ | ✅ 113+ | ✅ |
+| **Chrome / Edge / Brave / Vivaldi, current** — `dist-mv3/` | ✅ no banner | ✅ | ❌ | ✅ banner shown | ✅ | ✅ |
+| **Chromium with MV2** (ungoogled-chromium, Brave, Arc… — any Chromium that still loads MV2 extensions) — `dist/` | ✅ no banner | ✅ | ✅ no banner — redirect, block, headers, sync replaceResponse; no body streaming or async (see [async](scripting.md#async-handlers)) | ✅ banner shown | ✅ | ✅ |
+| **Firefox** — `dist/` | ❌ (not needed: `extension` reaches everything) | ✅ | ✅ no banner | ❌ | ✅ 113+ | ✅ |
 
 What reaches what on Chrome:
 

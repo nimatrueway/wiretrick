@@ -29,8 +29,6 @@ const open = async (p: Page, url: string) => {
 // sample name → how to see its effect (opens the page itself)
 const VERIFY: Record<string, (p: Page) => Promise<[boolean, string]>> = {
     "Redirect a URL": async (p) => {
-        // on the debugger strategy the request is rewritten in place — the
-        // Dog article is served while the address bar keeps /wiki/Cat
         await open(p, "https://en.wikipedia.org/wiki/Cat");
         const h1 = await p.evaluate(() => document.querySelector("h1")?.textContent || "");
         return [h1 === "Dog", h1];
@@ -51,14 +49,14 @@ const VERIFY: Record<string, (p: Page) => Promise<[boolean, string]>> = {
         return [r.includes("Example Domain"), r.slice(0, 80)];
     },
     "Replace a fetch/XHR response": async (p) => {
-        await open(p, "https://dummyjson.com/users/1");
-        const t = await text(p);
-        return [t.includes("Mocked User"), t.slice(0, 80)];
+        await open(p, "https://dummyjson.com/");
+        const t = await p.waitForFunction(() => /\/users\/1"\) → \{/.test(document.body?.innerText || "") && document.body.innerText, null, { timeout: 15000 }).then((h) => h.jsonValue() as Promise<string>);
+        return [t.includes("Mocked User"), t.slice(0, 120)];
     },
     "Transform an API response": async (p) => {
-        await open(p, "https://dummyjson.com/todos/1");
-        const t = await text(p);
-        return [t.includes("Transformed by Wiretrick") && t.includes("true"), t.slice(0, 120)];
+        await open(p, "https://dummyjson.com/");
+        const t = await p.waitForFunction(() => /\/todos\/1"\) → \{/.test(document.body?.innerText || "") && document.body.innerText, null, { timeout: 15000 }).then((h) => h.jsonValue() as Promise<string>);
+        return [t.includes("Transformed by Wiretrick") && t.includes('"completed":true'), t.slice(0, 160)];
     },
     "Rewrite page HTML": async (p) => {
         await open(p, "https://example.com/");
@@ -77,17 +75,17 @@ const VERIFY: Record<string, (p: Page) => Promise<[boolean, string]>> = {
         return [t.includes("Served by Wiretrick"), t.slice(0, 80)];
     },
     "Per-script storage": async (p) => {
-        const hits = async () => Number((await text(p)).match(/"x-hits":\s*"(\d+)"/i)?.[1] || 0);
-        await open(p, "https://postman-echo.com/headers");
+        const hits = async () => Number(((await p.waitForSelector("#wt-visits", { timeout: 15000 }).then((e) => e?.textContent())) || "").match(/(\d+)$/)?.[1] || 0);
+        await open(p, "https://en.wikipedia.org/wiki/Cat");
         const a = await hits();
         await p.reload();
         const b = await hits();
         return [a > 0 && b === a + 1, `${a} → ${b}`];
     },
     "Parameters (wt.params)": async (p) => {
-        await open(p, "https://dummyjson.com/posts/1");
+        await open(p, "https://postman-echo.com/headers");
         const t = await text(p);
-        return [t.includes("forced failure"), t.slice(0, 80)];
+        return [/"x-mode":\s*"dev"/.test(t) && /"x-retries":\s*"3"/.test(t) && /"x-tags":\s*"wiretrick"/.test(t), t.slice(0, 200)];
     },
 };
 
@@ -113,16 +111,16 @@ try {
     const mgr = await ctx.newPage();
     await mgr.goto(`chrome-extension://${EXT_ID}/editor.html`);
     const send = (msg: any) => mgr.evaluate((m: any) => new Promise<any>((r) => chrome.runtime.sendMessage(m, r)), msg);
-    // no local helper here: run the samples on the debugger strategy instead of their helper one
 
     for (const n of SAMPLES.map((s) => s.name)) check(`"${n}" has a verifier`, n in VERIFY);
     for (const s of SAMPLES) check(`"${s.name}" names a URL to try`, /Try it: .*https:\/\//.test(s.code));
+    for (const s of SAMPLES) check(`"${s.name}" needs no local helper`, !/strategy:[^,}]*"helper"/.test(s.code));
 
     for (const sample of SAMPLES) {
         const verify = VERIFY[sample.name];
         if (!verify) continue;
         const id = "sample_" + sample.name.replace(/\W+/g, "_");
-        const saved = await send({ type: "saveScript", id, code: sample.code.split('strategy: "helper"').join('strategy: "debugger"'), name: sample.name });
+        const saved = await send({ type: "saveScript", id, code: sample.code, name: sample.name });
         await new Promise((r) => setTimeout(r, 1500)); // pipeline reload → tiers armed
         const page = await ctx.newPage();
         try {

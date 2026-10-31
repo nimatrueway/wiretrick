@@ -11,6 +11,11 @@ its section below.
 
 - **Breaking:** there is no default strategy any more. Every network handler names its own: `wt.onRequest({ url: "*://example.com/*", strategy: "helper" }, fn)` (the same for `onResponseHeaders`, `replaceResponse` and `onResponseBody`). A bare URL pattern (`wt.onRequest("*://example.com/*", fn)`) or a route without `strategy` now stops the script from loading, with the error shown in Problems at that line. Existing scripts are not rewritten: add `strategy` to their routes. `onDocument` is unchanged and still takes a bare pattern.
 - The `defaultStrategy` setting is gone. The update removes it (and its comment block) from `settings.yaml`; if it's typed back in, the editor flags it as having no effect. Settings → **Strategies** is now a reference table of what each strategy can do in this browser.
+- The bundled samples (Help → Samples) no longer need the local helper. Redirect, block, request headers, CORS and parameters use `rules` (no banner, Chrome and Firefox). The fetch/XHR replace and transform samples use `page` and show their result in a box on dummyjson.com. Storage now counts Wikipedia visits from `onDocument`. Only **Rewrite page HTML** and **Serve a local file**, which must change the page itself, use `debugger` on Chrome (with its banner) and `extension` on Firefox.
+
+### Fixed
+
+- `wt.storage.get` in an `onDocument` handler returned `{ value }` instead of the stored value (unless the page's CSP had moved the handler to the isolated world).
 
 ## [0.9.18] - 2026-10-31
 
