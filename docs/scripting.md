@@ -8,7 +8,7 @@ A script registers **handlers** at top level. Each handler takes its own
 ```ts
 wt.about("Debug the user API");
 
-const API = "*://app.example.com/api/*";
+const API = { url: "*://app.example.com/api/*", strategy: "helper" } as const;
 
 // Redirect / block / request headers / replaceResponse:
 wt.onRequest(API, (ctx) => {
@@ -23,10 +23,10 @@ wt.onResponseHeaders(API, () => ({
 }));
 
 // Replace the whole body:
-// wt.replaceResponse("*://app.example.com/api/flags", () => ({ beta: true }));
+// wt.replaceResponse({ ...API, url: "*://app.example.com/api/flags" }, () => ({ beta: true }));
 
 // Stream-modify the body:
-wt.onResponseBody("*://app.example.com/api/user*", (ctx, body) => String(body).replace('"role":"user"', '"role":"admin"'));
+wt.onResponseBody({ url: "*://app.example.com/api/user*", strategy: "helper" }, (ctx, body) => String(body).replace('"role":"user"', '"role":"admin"'));
 
 // Patch the page itself:
 wt.onDocument("*://app.example.com/*", () => {
@@ -40,14 +40,17 @@ registers no handlers is a [library](#libraries-and-recipes).
 
 ## Routes
 
-The first argument of every handler says where it applies:
+The first argument of every handler says where it applies. A network
+handler's route is an object with `url` and a required `strategy` — there
+is no default strategy, and a bare URL pattern isn't accepted (the script
+fails to load and the Problems view points at the call):
 
 | form | example |
 |---|---|
-| one URL pattern | `wt.onRequest("*://example.com/*", fn)` |
-| a list | `wt.onRequest(["*://a.example.com/*", "*://b.example.com/*"], fn)` |
-| route object | `wt.onRequest({ url, exclude, methods, resourceTypes, strategy }, fn)` |
-| `onDocument` route object | `wt.onDocument({ url, exclude, when }, fn)` |
+| one URL pattern | `wt.onRequest({ url: "*://example.com/*", strategy: "helper" }, fn)` |
+| a list | `wt.onRequest({ url: ["*://a.example.com/*", "*://b.example.com/*"], strategy: "helper" }, fn)` |
+| all options | `wt.onRequest({ url, exclude, methods, resourceTypes, strategy }, fn)` |
+| `onDocument` (no strategy) | `wt.onDocument("*://example.com/*", fn)` or `wt.onDocument({ url, exclude, when }, fn)` |
 
 An empty list matches **nothing**, never everything.
 
@@ -73,7 +76,7 @@ registration throw. The error shows on the script.
 Named groups land in `ctx.groups` (`*` wildcards as `"0"`, `"1"`, …):
 
 ```ts
-wt.onRequest("https://api.example.com/users/:id", (ctx) => {
+wt.onRequest({ url: "https://api.example.com/users/:id", strategy: "helper" }, (ctx) => {
     if (ctx.groups.id === "42") return { replaceResponse: { body: { id: 42, name: "Mock" } } };
 });
 ```
@@ -119,9 +122,10 @@ wt.onResponseBody(
   | `rules` | Part of the browser-native rule: other types never match. |
 
   `onDocument` routes have no `resourceTypes` or `methods`.
-- **`strategy`** — run this handler on one [strategy](strategies.md):
-  `"helper"`, `"page"`, `"extension"`, `"debugger"` or `"rules"`. Omit to use the default
-  from Settings → Strategy. There is no fallback: when the strategy
+- **`strategy`** — **required**: the [strategy](strategies.md) that runs
+  this handler: `"helper"`, `"page"`, `"extension"`, `"debugger"` or
+  `"rules"`. There is no default — a route without one (or a bare URL
+  pattern) makes the script fail to load. There is no fallback: when the strategy
   isn't available, the handler doesn't run and the Log view says why.
   To pick per browser or build, use `wt.isChrome`, `wt.isFirefox`,
   `wt.isMV2` and `wt.isMV3` (Chromium-based browsers count as Chrome;
@@ -163,19 +167,19 @@ fonts, wasm, PDFs, archives, as a `Uint8Array`:
 
 ```ts
 // swap a logo for another image
-wt.onResponseBody({ url: "*://example.com/img/logo*.png", binary: true }, async (ctx, body) => {
+wt.onResponseBody({ url: "*://example.com/img/logo*.png", binary: true, strategy: "helper" }, async (ctx, body) => {
     const res = await fetch("https://example.org/other.png");
     return new Uint8Array(await res.arrayBuffer());
 });
 
 // look into everything on a CDN without changing it: playlists and segments
-wt.onResponseBody({ url: "*://cdn.example.com/*", binary: "both" }, (ctx, body) => {
+wt.onResponseBody({ url: "*://cdn.example.com/*", binary: "both", strategy: "helper" }, (ctx, body) => {
     if (typeof body === "string") console.log(ctx.url, "text", body.length, "chars");
     else console.log(ctx.url, body.length, "bytes, sync byte", body[0] === 0x47);
 });
 
 // text only, and no warning for the images it skips
-wt.onResponseBody({ url: "*://example.com/*", binary: false }, (ctx, body) => console.log(ctx.url, body.length));
+wt.onResponseBody({ url: "*://example.com/*", binary: false, strategy: "helper" }, (ctx, body) => console.log(ctx.url, body.length));
 ```
 
 A `"both"` handler gets either, so check `typeof body`. Return values
@@ -257,7 +261,7 @@ decided by the request's `Content-Type` exactly like
 parses it as JSON — the *request* body, not the response.
 
 ```ts
-wt.onRequest({ url: "*://app.example.com/api/*", methods: ["POST"] }, (ctx) => {
+wt.onRequest({ url: "*://app.example.com/api/*", methods: ["POST"], strategy: "helper" }, (ctx) => {
     const q = ctx.json(); // undefined without a body; throws on invalid JSON
     if (q?.operationName === "GetFlags") return { replaceResponse: { body: { beta: true } } };
 });
@@ -296,7 +300,7 @@ const cfg = wt.params({
 });
 // cfg.enabled: boolean · cfg.status: "500" | "503" · cfg.note: string · cfg.tags: string[]
 
-wt.onRequest("*://app.example.com/posts/*", () => {
+wt.onRequest({ url: "*://app.example.com/posts/*", strategy: "helper" }, () => {
     if (!cfg.enabled) return;
     return { replaceResponse: { status: Number(cfg.status), body: { error: cfg.note, tags: cfg.tags } } };
 });
@@ -317,7 +321,7 @@ re-arms its routes:
 const cfg = wt.params({
     hosts: { type: "stringList", default: ["staging.example.com"], description: "Hosts to unlock" },
 });
-wt.onResponseHeaders(cfg.hosts.map((h) => `*://${h}/*`), () => ({
+wt.onResponseHeaders({ url: cfg.hosts.map((h) => `*://${h}/*`), strategy: "helper" }, () => ({
     headers: { set: { "access-control-allow-origin": "*" } },
 }));
 ```
@@ -371,7 +375,7 @@ entry and params):
 ```ts
 // library "mocks":
 export function mockJson(url: string, body: object) {
-    wt.onRequest(url, () => ({ replaceResponse: { body } }));
+    wt.onRequest({ url, strategy: "helper" }, () => ({ replaceResponse: { body } }));
 }
 
 // script:
@@ -388,7 +392,7 @@ for some value becomes a script when you change it (and back):
 ```ts
 // library "gate": a library until "on" is switched on
 const p = wt.params({ on: { type: "boolean", default: false } });
-if (p.on) wt.onRequest("*://api.example.com/*", () => ({ block: true }));
+if (p.on) wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, () => ({ block: true }));
 ```
 
 Param definitions can be shared too — export them from a library and pass
@@ -429,7 +433,7 @@ scripts import it by its path:
 import limits from "./mock/rate-limits.json"; // the whole object
 import { max } from "./mock/rate-limits.json"; // one property
 
-wt.onRequest("*://api.example.com/*", () => ({ headers: { set: { "x-limit": String(max) } } }));
+wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, () => ({ headers: { set: { "x-limit": String(max) } } }));
 ```
 
 Each import gets a freshly parsed copy, so a handler changing it doesn't
@@ -452,7 +456,7 @@ import dayjs from "https://unpkg.com/dayjs@1.11.13";
 import { addDays } from "https://unpkg.com/date-fns@4.1.0/addDays.js"; // a file inside the package
 import { chunk } from "https://unpkg.com/lodash-es@4.17.21";
 
-wt.onRequest("*://api.example.com/*", () => ({
+wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, () => ({
     headers: { set: { "x-tomorrow": dayjs(addDays(new Date(), 1)).format("YYYY-MM-DD") } },
 }));
 ```
@@ -611,7 +615,7 @@ network, `onResponseHeaders` or `onResponseBody`. A redirect starts a new
 request to the target, and the handlers matching the target run on it.
 
 ```ts
-wt.onRequest("*://api.example.com/me", () => ({
+wt.onRequest({ url: "*://api.example.com/me", strategy: "helper" }, () => ({
     replaceResponse: {
         body: { id: 1, name: "Mocked User" },  // object → JSON; strings/bytes pass through
         status: 200,                            // default 200
@@ -702,9 +706,9 @@ Practical rules of thumb:
 - **Mocking/transforming APIs (fetch/XHR)?** Async just works — write
   `wt.onResponseBody(API, async (ctx, body) => { const j = await translate(body); return …; })`.
 - **Redirect/block or header changes decided asynchronously** on Chromium?
-  Use `helper` or `debugger` (the default `helper` already awaits). Only
+  Use `helper` or `debugger` (both await). Only
   the `extension` strategy on Chromium can't: there an async result logs an error and the
   request proceeds unmodified — set `strategy: "helper"` or `"debugger"` on the
   route.
 - **Static replacement from an async source** (file read, fetch): async
-  `replaceResponse` on the default strategy is all you need.
+  `replaceResponse` on `helper`, `debugger` or `page` is all you need.

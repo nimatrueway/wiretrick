@@ -432,9 +432,10 @@ const cfg = wt.params({
     debug: { type: "boolean", default: true, description: "Log every request" },
 });
 
-// Each handler takes its own URL pattern (string, string[] or a route object).
+// Each handler takes a route: its URL pattern(s) and the strategy that runs it
+// (helper | page | extension | debugger | rules — see Settings → Strategies).
 // Modify request headers / redirect / cancel:
-wt.onRequest(\`*://\${cfg.host}/*\`, (ctx) => {
+wt.onRequest({ url: \`*://\${cfg.host}/*\`, strategy: "helper" }, (ctx) => {
     if (cfg.debug) wt.log("request to", ctx.url);
     // return { redirect: "https://example.com/other" };
     // return { block: true };
@@ -442,11 +443,11 @@ wt.onRequest(\`*://\${cfg.host}/*\`, (ctx) => {
 });
 
 // Modify response headers:
-// wt.onResponseHeaders(\`*://\${cfg.host}/*\`, (ctx) => ({ headers: { set: { "access-control-allow-origin": "*" } } }));
+// wt.onResponseHeaders({ url: \`*://\${cfg.host}/*\`, strategy: "helper" }, (ctx) => ({ headers: { set: { "access-control-allow-origin": "*" } } }));
 
 // Replace the whole response body:
-// wt.replaceResponse(\`*://\${cfg.host}/api/*\`, (ctx) => ({ mocked: true }));
+// wt.replaceResponse({ url: \`*://\${cfg.host}/api/*\`, strategy: "helper" }, (ctx) => ({ mocked: true }));
 
-// Modify the response body (route object: exclude / methods / types / strategy):
+// Modify the response body (more route options: exclude / methods / resourceTypes):
 // wt.onResponseBody({ url: \`*://\${cfg.host}/*\`, exclude: "*://*/*.png", strategy: "page" }, (ctx, body) => body.replace("foo", "bar"));
 `;

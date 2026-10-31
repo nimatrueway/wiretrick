@@ -41,7 +41,7 @@ describe("import paths", () => {
 const LIMIT_SCRIPT = `import limits from "./mock/rate-limits.json";
 import { max } from "./mock/rate-limits.json";
 export const both = [limits.max, max];
-wt.onRequest("*://a.test/*", () => {});`;
+wt.onRequest({ url: "*://a.test/*", strategy: "helper" }, () => {});`;
 
 describe("JSON data file imports", () => {
     const data = [{ path: "mock/rate-limits.json", text: '{ "max": 7 }' }];
@@ -185,7 +185,7 @@ describe("names are paths", () => {
 
 describe("settings.yaml keys with /", () => {
     const s: ScriptSettingsState = { name: "mock/helpers", declared: true, enabled: true, defs: { n: { type: "number", default: 1 } } as any, values: {} };
-    const G = { logLevel: "info", logCap: 500, defaultStrategy: "helper" } as any;
+    const G = { logLevel: "info", logCap: 500 } as any;
     it("renders, parses and plans a path-named section", () => {
         const t = renderSettings(G, [{ ...s, enabled: false, values: { n: 3 } }]);
         expect(t).toContain("  mock/helpers:\n");

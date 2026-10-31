@@ -29,7 +29,7 @@ const open = async (p: Page, url: string) => {
 // sample name → how to see its effect (opens the page itself)
 const VERIFY: Record<string, (p: Page) => Promise<[boolean, string]>> = {
     "Redirect a URL": async (p) => {
-        // settings.defaultStrategy = cdp: the request is rewritten in place — the
+        // on the debugger strategy the request is rewritten in place — the
         // Dog article is served while the address bar keeps /wiki/Cat
         await open(p, "https://en.wikipedia.org/wiki/Cat");
         const h1 = await p.evaluate(() => document.querySelector("h1")?.textContent || "");
@@ -113,8 +113,7 @@ try {
     const mgr = await ctx.newPage();
     await mgr.goto(`chrome-extension://${EXT_ID}/editor.html`);
     const send = (msg: any) => mgr.evaluate((m: any) => new Promise<any>((r) => chrome.runtime.sendMessage(m, r)), msg);
-    // no local helper here: run the samples on the debugger tier (settings.defaultStrategy)
-    await mgr.evaluate(() => new Promise<void>((r) => chrome.storage.local.set({ resStrategy: "debugger" }, () => r())));
+    // no local helper here: run the samples on the debugger strategy instead of their helper one
 
     for (const n of SAMPLES.map((s) => s.name)) check(`"${n}" has a verifier`, n in VERIFY);
     for (const s of SAMPLES) check(`"${s.name}" names a URL to try`, /Try it: .*https:\/\//.test(s.code));
@@ -123,7 +122,7 @@ try {
         const verify = VERIFY[sample.name];
         if (!verify) continue;
         const id = "sample_" + sample.name.replace(/\W+/g, "_");
-        const saved = await send({ type: "saveScript", id, code: sample.code, name: sample.name });
+        const saved = await send({ type: "saveScript", id, code: sample.code.split('strategy: "helper"').join('strategy: "debugger"'), name: sample.name });
         await new Promise((r) => setTimeout(r, 1500)); // pipeline reload → tiers armed
         const page = await ctx.newPage();
         try {

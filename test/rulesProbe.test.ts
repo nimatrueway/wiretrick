@@ -6,10 +6,10 @@ import { scriptHealth } from "../src/shared/scriptHealth";
 import { missedReason } from "../src/shared/missedTap";
 import { strategyUnsupported } from "../src/shared/strategyInfo";
 
-async function rulesOf(code: string, defaultStrategy: any = "helper") {
+async function rulesOf(code: string) {
     const c = compileScript(code);
     expect(c.error).toBeNull();
-    return probeScriptRules(c.handlers, defaultStrategy);
+    return probeScriptRules(c.handlers);
 }
 
 describe("rules probe (tripwire ctx)", () => {
@@ -23,8 +23,8 @@ describe("rules probe (tripwire ctx)", () => {
         expect(r.rules.map((x) => x.specs[0].action.type)).toEqual(["block", "modifyHeaders"]);
     });
 
-    it("the default strategy can be rules", async () => {
-        const r = await rulesOf(`wt.onRequest("*://a.com/*", async () => ({ headers: { set: { a: 1 } } }));`, "rules");
+    it("an async handler on rules", async () => {
+        const r = await rulesOf(`wt.onRequest({ url: "*://a.com/*", strategy: "rules" }, async () => ({ headers: { set: { a: 1 } } }));`);
         expect(r.rules[0].specs[0].action.requestHeaders).toEqual([{ header: "a", operation: "set", value: "1" }]);
     });
 

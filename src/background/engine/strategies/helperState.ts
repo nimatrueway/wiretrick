@@ -1,6 +1,6 @@
 /**
  * Strategy availability. Every handler route is owned by exactly one strategy
- * (route.strategy, else settings.defaultStrategy — see shared/route.ts); a strategy
+ * (its required route.strategy — see shared/route.ts); a strategy
  * runs only the handlers it owns, so nothing runs twice. When the owning
  * strategy can't run here (helper down, debugger missing in Firefox, blocking
  * webRequest on MV3) the handler doesn't run — the pipeline warns once.

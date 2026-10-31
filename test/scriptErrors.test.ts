@@ -167,7 +167,7 @@ describe("CDP tier: error logs carry name + user line:col", () => {
 
 describe("compile: positions for the Problems view", () => {
     it("each route records the line of its registration (also in a loop / helper)", () => {
-        const c = compileScript(["// a", 'wt.onRequest("*://a.test/*", () => {});', "", "function reg(u) {", "    wt.onResponseBody(u, (ctx, b) => b);", "}", 'reg("*://b.test/*");', 'wt.onRequest("*://c.test/*", () => {});'].join("\n"));
+        const c = compileScript(["// a", 'wt.onRequest({ url: "*://a.test/*", strategy: "helper" }, () => {});', "", "function reg(u) {", "    wt.onResponseBody({ url: u, strategy: \"helper\" }, (ctx, b) => b);", "}", 'reg("*://b.test/*");', 'wt.onRequest({ url: "*://c.test/*", strategy: "helper" }, () => {});'].join("\n"));
         expect(c.error).toBeNull();
         expect(c.meta.routes.map((r) => [r.kind, r.index, r.line])).toEqual([
             ["onRequest", 0, 2],
@@ -178,7 +178,7 @@ describe("compile: positions for the Problems view", () => {
 
     it("a syntax error names the line the transpiler found", async () => {
         await import("../src/shared/transpile");
-        const c = compileScript(["const a: number = 1;", 'wt.onRequest("*://a.test/*", () => {});', "foo(", "const b = 2;"].join("\n"));
+        const c = compileScript(["const a: number = 1;", 'wt.onRequest({ url: "*://a.test/*", strategy: "helper" }, () => {});', "foo(", "const b = 2;"].join("\n"));
         expect(c.error).toMatch(/^SyntaxError: .* \(line 4\)$/);
     });
 });

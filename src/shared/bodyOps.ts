@@ -31,8 +31,7 @@ export interface OpScript {
 
 /**
  * Which handlers an op runs: routes matching (url, method, type) and —
- * when `tier` is given — owned by that strategy (route.strategy, else
- * `defaultStrategy`). Each route has exactly one owner, so no handler runs
+ * when `tier` is given — owned by that strategy (route.strategy). Each route has exactly one owner, so no handler runs
  * on two strategies.
  */
 export interface OpFilter {
@@ -40,7 +39,6 @@ export interface OpFilter {
     method?: string;
     resourceType?: string;
     tier?: Strategy;
-    defaultStrategy?: Strategy;
     /** restrict to these script ids */
     onlyIds?: string[];
     /** onResponseBody: the body is binary (true) or text (false); routes run per their `binary` option. undefined: no check */
@@ -48,7 +46,7 @@ export interface OpFilter {
 }
 
 export function handlerRuns(h: Routed, f: OpFilter): boolean {
-    if (f.tier && effectiveStrategy(h.route, f.defaultStrategy) !== f.tier) return false;
+    if (f.tier && effectiveStrategy(h.route) !== f.tier) return false;
     if (f.binary !== undefined && !(f.binary ? takesBinary(h.route) : takesText(h.route))) return false;
     return routeMatches(h.route, f.url, f.method, f.resourceType);
 }
@@ -148,7 +146,7 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
         ...reqBody,
     });
     const binaryBody = op === "transform" && args.body instanceof Uint8Array;
-    const filter: OpFilter = { url, method, resourceType: known, tier: args.tier, defaultStrategy: args.defaultStrategy, onlyIds: args.onlyIds };
+    const filter: OpFilter = { url, method, resourceType: known, tier: args.tier, onlyIds: args.onlyIds };
     const list = matching(scripts, op, op === "transform" ? { ...filter, binary: binaryBody } : filter, env);
     if (op === "transform") {
         // a script whose every matching route opted out of this kind of body: say so (no "never ran" warning)

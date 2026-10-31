@@ -3,7 +3,7 @@
  * schema (VS Code hovers), settings.yaml comments, the Editor's strategy
  * picker and the hover help. Keep in sync with docs/strategies.md.
  */
-import { builtinStrategy, STRATEGIES, type Strategy } from "./route";
+import { STRATEGIES, type Strategy } from "./route";
 
 export const STRATEGY_DOC_URL = "https://github.com/nimatrueway/wiretrick/blob/master/docs/strategies.md#compatibility";
 
@@ -58,8 +58,8 @@ export function strategyUnsupported(s: Strategy, env: { firefox: boolean; mv3: b
 export function strategyMarkdown(): string {
     const rows = STRATEGIES.map((s) => `| \`${s}\` | ${STRATEGY_INFO[s].pros} | ${STRATEGY_INFO[s].cons} |`);
     return [
-        "Interception strategy for every handler whose route doesn't set its own `strategy`.",
-        `Default: \`${builtinStrategy(false)}\` on Chromium, \`${builtinStrategy(true)}\` on Firefox. A handler whose strategy isn't available doesn't run (⚠ in the popup/Editor, warning in the Log view) — there is no fallback.`,
+        "The interception strategy that runs this handler — required on every network handler, there is no default.",
+        "A handler whose strategy isn't available doesn't run (⚠ in the popup/Editor, warning in the Log view) — there is no fallback.",
         "",
         `[Compatibility](${STRATEGY_DOC_URL})`,
         "",

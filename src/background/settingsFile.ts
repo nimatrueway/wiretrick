@@ -7,7 +7,7 @@ import { listScripts, loadAllParamValues, setParamValue, setEnabled, onScriptRen
 import { patchSettings, renameSettingsSection } from "../shared/settingsYamlPatch";
 import {
     renderSettings, parseSettings, planSettings,
-    DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL, DEFAULT_BODY_CAP, BODY_CAP_KEY, defaultStrategySetting, isStrategy, isTextTypes, isBodyCap,
+    DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL, DEFAULT_BODY_CAP, BODY_CAP_KEY, isTextTypes, isBodyCap,
     type GlobalSettings, type ScriptSettingsState, type SettingsDoc, type SettingsPlan,
 } from "../shared/settingsYaml";
 import { DEFAULT_TEXT_TYPES } from "../shared/bodyKind";
@@ -21,7 +21,7 @@ function storageSet(items: Record<string, any>): Promise<void> {
 }
 
 export async function currentSettingsState(): Promise<{ globals: GlobalSettings; scripts: ScriptSettingsState[] }> {
-    const g = await storageGet(["resLogLevel", "resLogCap", STRATEGY_KEY, TEXT_TYPES_KEY, BODY_CAP_KEY]);
+    const g = await storageGet(["resLogLevel", "resLogCap", TEXT_TYPES_KEY, BODY_CAP_KEY]);
     const stored = await loadAllParamValues();
     const scripts = (await listScripts()).map((s) => ({
         name: s.meta.name,
@@ -30,14 +30,13 @@ export async function currentSettingsState(): Promise<{ globals: GlobalSettings;
         defs: s.paramDefs ?? {},
         values: stored[s.id] ?? {},
     }));
-    const defaultStrategy = isStrategy(g[STRATEGY_KEY]) ? g[STRATEGY_KEY] : defaultStrategySetting();
-    const globals: GlobalSettings = { logLevel: g.resLogLevel ?? DEFAULT_LOG_LEVEL, logCap: g.resLogCap ?? DEFAULT_LOG_CAP, defaultStrategy };
+    const globals: GlobalSettings = { logLevel: g.resLogLevel ?? DEFAULT_LOG_LEVEL, logCap: g.resLogCap ?? DEFAULT_LOG_CAP };
     if (isTextTypes(g[TEXT_TYPES_KEY])) globals.textTypes = g[TEXT_TYPES_KEY];
     if (isBodyCap(g[BODY_CAP_KEY])) globals.bodyCap = g[BODY_CAP_KEY];
     return { globals, scripts };
 }
 
-/** chrome.storage key of settings.defaultStrategy (absent: per-browser default) */
+/** chrome.storage key of the removed settings.defaultStrategy (migration v3 deletes it) */
 export const STRATEGY_KEY = "resStrategy";
 
 /** chrome.storage key of settings.textTypes (absent: DEFAULT_TEXT_TYPES) */
@@ -92,7 +91,6 @@ async function applyPlan(plan: SettingsPlan): Promise<void> {
     const patch: Record<string, any> = {};
     if (plan.globals.logLevel) patch.resLogLevel = plan.globals.logLevel;
     if (plan.globals.logCap) patch.resLogCap = plan.globals.logCap;
-    if (plan.globals.defaultStrategy) patch[STRATEGY_KEY] = plan.globals.defaultStrategy;
     if (Object.keys(patch).length) await storageSet(patch);
     if (plan.globals.textTypes) {
         // back at the defaults: forget the list, so a future default change applies

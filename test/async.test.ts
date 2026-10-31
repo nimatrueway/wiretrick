@@ -1,13 +1,10 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { setDefaultStrategy } from "../src/shared/route";
 import { ExtensionStrategy } from "../src/background/engine/strategies/extensionStrategy";
 import { DebuggerStrategy } from "../src/background/engine/strategies/debuggerStrategy";
 import { compileScript } from "../src/shared/compile";
 import type { Script } from "../src/background/engine/scriptStore";
 
 // these suites exercise the extension strategy: make it the settings default
-beforeEach(() => setDefaultStrategy("extension"));
-afterEach(() => setDefaultStrategy(null));
 
 beforeEach(() => {
     (globalThis as any).chrome = {
@@ -50,8 +47,8 @@ describe("handler stacking", () => {
     it("onRequest: first matching script's redirect wins (later scripts skipped)", () => {
         const s = new ExtensionStrategy();
         s.reload([
-            makeScript("first", `wt.onRequest("*", () => ({ redirect: "https://first.com" }));`),
-            makeScript("second", `wt.onRequest("*", () => ({ redirect: "https://second.com" }));`),
+            makeScript("first", `wt.onRequest({ url: "*", strategy: "extension" }, () => ({ redirect: "https://first.com" }));`),
+            makeScript("second", `wt.onRequest({ url: "*", strategy: "extension" }, () => ({ redirect: "https://second.com" }));`),
         ]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d).toEqual({ kind: "redirect", url: "https://first.com" });
@@ -60,8 +57,8 @@ describe("handler stacking", () => {
     it("onRequest: non-terminal results don't stop later scripts", () => {
         const s = new ExtensionStrategy();
         s.reload([
-            makeScript("logger", `wt.onRequest("*", () => { wt.log("just logging"); });`),
-            makeScript("redirector", `wt.onRequest("*", () => ({ redirect: "https://second.com" }));`),
+            makeScript("logger", `wt.onRequest({ url: "*", strategy: "extension" }, () => { wt.log("just logging"); });`),
+            makeScript("redirector", `wt.onRequest({ url: "*", strategy: "extension" }, () => ({ redirect: "https://second.com" }));`),
         ]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d).toEqual({ kind: "redirect", url: "https://second.com" });
@@ -70,8 +67,8 @@ describe("handler stacking", () => {
     it("onRequest: header changes from MULTIPLE scripts merge (later set wins, removes accumulate)", () => {
         const s = new ExtensionStrategy();
         s.reload([
-            makeScript("a", `wt.onRequest("*", () => ({ headers: { set: { "x-a": "1", "x-b": "old" }, remove: ["x-r1"] } }));`),
-            makeScript("b", `wt.onRequest("*", () => ({ headers: { set: { "x-b": "new", "x-c": "3" }, remove: ["x-r2"] } }));`),
+            makeScript("a", `wt.onRequest({ url: "*", strategy: "extension" }, () => ({ headers: { set: { "x-a": "1", "x-b": "old" }, remove: ["x-r1"] } }));`),
+            makeScript("b", `wt.onRequest({ url: "*", strategy: "extension" }, () => ({ headers: { set: { "x-b": "new", "x-c": "3" }, remove: ["x-r2"] } }));`),
         ]);
         s.handleBeforeRequest(details(), null); // runs both, caches merged mods
         const c = s.handleBeforeSendHeaders(details(), null) as any;
@@ -82,8 +79,8 @@ describe("handler stacking", () => {
     it("onRequest: headers from an earlier non-terminal script APPLY even when a later script redirects", () => {
         const s = new ExtensionStrategy();
         s.reload([
-            makeScript("a", `wt.onRequest("*", () => ({ headers: { set: { "x-keep": "yes" } } }));`),
-            makeScript("b", `wt.onRequest("*", () => ({ redirect: "https://win.com" }));`),
+            makeScript("a", `wt.onRequest({ url: "*", strategy: "extension" }, () => ({ headers: { set: { "x-keep": "yes" } } }));`),
+            makeScript("b", `wt.onRequest({ url: "*", strategy: "extension" }, () => ({ redirect: "https://win.com" }));`),
         ]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("redirect");
@@ -94,8 +91,8 @@ describe("handler stacking", () => {
     it("onResponseHeaders: multiple scripts MERGE — set overwritten by later, removes accumulate", () => {
         const s = new ExtensionStrategy();
         s.reload([
-            makeScript("a", `wt.onResponseHeaders("*", () => ({ headers: { set: { "x-a": "1", "x-b": "old" }, remove: ["x-r1"] } }));`),
-            makeScript("b", `wt.onResponseHeaders("*", () => ({ headers: { set: { "x-b": "new", "x-c": "3" }, remove: ["x-r2"] } }));`),
+            makeScript("a", `wt.onResponseHeaders({ url: "*", strategy: "extension" }, () => ({ headers: { set: { "x-a": "1", "x-b": "old" }, remove: ["x-r1"] } }));`),
+            makeScript("b", `wt.onResponseHeaders({ url: "*", strategy: "extension" }, () => ({ headers: { set: { "x-b": "new", "x-c": "3" }, remove: ["x-r2"] } }));`),
         ]);
         const c = s.handleHeadersReceived(details(), null) as any;
         expect(c.set).toEqual({ "x-a": "1", "x-b": "new", "x-c": "3" });
@@ -105,8 +102,8 @@ describe("handler stacking", () => {
     it("onResponseBody: transforms COMPOSE in script order (chained)", async () => {
         const { compileScript } = await import("../src/shared/compile");
         const chain = [
-            makeScript("a", `wt.onResponseBody("*", (ctx, body) => body + "-A");`),
-            makeScript("b", `wt.onResponseBody("*", (ctx, body) => body + "-B");`),
+            makeScript("a", `wt.onResponseBody({ url: "*", strategy: "extension" }, (ctx, body) => body + "-A");`),
+            makeScript("b", `wt.onResponseBody({ url: "*", strategy: "extension" }, (ctx, body) => body + "-B");`),
         ];
         let out: string | Uint8Array = "base";
         for (const sc of chain) {
@@ -121,8 +118,8 @@ describe("handler stacking", () => {
     it("async onResponseBody: promises compose in script order", async () => {
         const { compileScript } = await import("../src/shared/compile");
         const chain = [
-            makeScript("a", `wt.onResponseBody("*", async (ctx, body) => body + "-A");`),
-            makeScript("b", `wt.onResponseBody("*", async (ctx, body) => body + "-B");`),
+            makeScript("a", `wt.onResponseBody({ url: "*", strategy: "extension" }, async (ctx, body) => body + "-A");`),
+            makeScript("b", `wt.onResponseBody({ url: "*", strategy: "extension" }, async (ctx, body) => body + "-B");`),
         ];
         let out: string | Uint8Array = "base";
         for (const sc of chain) {
@@ -140,7 +137,7 @@ describe("handler stacking", () => {
 describe("async handlers (Chrome extension strategy)", () => {
     it("async onRequest redirect → skipped with allow (needs sync or cdp)", async () => {
         const s = new ExtensionStrategy();
-        s.reload([makeScript("a", `wt.onRequest("*", async (ctx) => ({ redirect: "https://async.com" }));`)]);
+        s.reload([makeScript("a", `wt.onRequest({ url: "*", strategy: "extension" }, async (ctx) => ({ redirect: "https://async.com" }));`)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         // not a promise (Chrome path) and not a redirect — allow
         expect(d.then).toBeUndefined();
@@ -149,14 +146,14 @@ describe("async handlers (Chrome extension strategy)", () => {
 
     it("async replaceResponse → not served (no fallback; the error says to pick cdp/process)", () => {
         const s = new ExtensionStrategy();
-        s.reload([makeScript("a", `wt.replaceResponse("*", async () => JSON.stringify({ async: true }));`)]);
+        s.reload([makeScript("a", `wt.replaceResponse({ url: "*", strategy: "extension" }, async () => JSON.stringify({ async: true }));`)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("allow");
     });
 
     it("sync replaceResponse still redirects synchronously", () => {
         const s = new ExtensionStrategy();
-        s.reload([makeScript("a", `wt.replaceResponse("*", () => "static body");`)]);
+        s.reload([makeScript("a", `wt.replaceResponse({ url: "*", strategy: "extension" }, () => "static body");`)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("redirect");
         expect(d.url).toContain("data:");
@@ -166,7 +163,7 @@ describe("async handlers (Chrome extension strategy)", () => {
 describe("async handlers (CDP tier loading)", () => {
     it("routes on other strategies are not loaded", () => {
         const c = new DebuggerStrategy();
-        c.reload([makeScript("a", `wt.replaceResponse("*", async () => "x");`)]);
+        c.reload([makeScript("a", `wt.replaceResponse({ url: "*", strategy: "extension" }, async () => "x");`)]);
         expect(c.hasOwners()).toBe(false);
         expect(c.needs({ url: "https://x.com/", method: "GET", type: "main_frame" })).toBe(false);
     });

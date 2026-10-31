@@ -104,7 +104,7 @@
                     <button data-settings-nav="settings-sec-appearance" class="active">Appearance</button>
                     <button data-settings-nav="settings-sec-folder">Synced folder</button>
                     <button data-settings-nav="settings-sec-io">Import / Export</button>
-                    <button data-settings-nav="settings-sec-strategy">Strategy</button>
+                    <button data-settings-nav="settings-sec-strategy">Strategies</button>
                     <button data-settings-nav="settings-sec-helper">Local helper</button>
                     <button data-settings-nav="settings-sec-logging">Logging</button>
                     <button data-settings-nav="settings-sec-network">Network</button>
@@ -183,12 +183,12 @@
                     </section>
 
                     <section id="settings-sec-strategy" class="settings-section">
-                        <h3>Strategy</h3>
+                        <h3>Strategies</h3>
                         <div class="setting">
-                            <span class="setting-label" id="settings-strategy-label">Default strategy</span>
+                            <span class="setting-label" id="settings-strategy-label">Reference</span>
                             <div class="setting-control">
-                                <p class="setting-help">Pick a row. How handlers intercept traffic unless their route sets <code>strategy</code>. A handler whose strategy isn't available doesn't run — it gets a ⚠ and a Log view warning; there is no fallback. <a id="settings-strategy-doc" target="_blank" rel="noopener">Compatibility</a></p>
-                                <table id="settings-strategy-table" class="strategy-table" role="radiogroup" aria-labelledby="settings-strategy-label"></table>
+                                <p class="setting-help">Every handler names the strategy that runs it: <code>wt.onRequest({ url, strategy: "helper" }, …)</code>. There is no default. A handler whose strategy isn't available here doesn't run — it gets a ⚠ and a Log view warning; there is no fallback. <a id="settings-strategy-doc" target="_blank" rel="noopener">Compatibility</a></p>
+                                <table id="settings-strategy-table" class="strategy-table" aria-labelledby="settings-strategy-label"></table>
                             </div>
                         </div>
                     </section>

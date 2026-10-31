@@ -29,7 +29,7 @@ const { currentSettingsState, applySettingsText } = await import("../src/backgro
 const GATE = `
 const p = wt.params({ on: { type: "boolean", default: false, description: "intercept" } });
 export const helper = () => p.on;
-if (p.on) wt.onRequest("*://example.com/*", () => ({ block: true }));
+if (p.on) wt.onRequest({ url: "*://example.com/*", strategy: "helper" }, () => ({ block: true }));
 `;
 
 const get = async (id: string) => (await listScripts()).find((s) => s.id === id)!;
@@ -86,7 +86,7 @@ describe("library scripts with params", () => {
 
     it("importers keep working when a library flips (its exports stay importable)", async () => {
         await saveScript({ id: "g", name: "gate", code: GATE });
-        const m = await saveScript({ id: "m", name: "main", code: `import { helper } from "./gate";\nwt.onRequest("*://a.test/*", () => { helper(); });` });
+        const m = await saveScript({ id: "m", name: "main", code: `import { helper } from "./gate";\nwt.onRequest({ url: "*://a.test/*", strategy: "helper" }, () => { helper(); });` });
         expect(m.error).toBeNull();
         expect(m.meta.active).toBe(true);
         await setParamValue("g", "on", true);

@@ -1,12 +1,12 @@
 /**
  * Handler routes: the first argument of every wt.onXxx registration.
  *
- *   wt.onRequest("*://api.example.com/*", fn)
+ *   wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, fn)
  *   wt.onResponseBody({ url: [...], exclude, methods, resourceTypes, strategy, binary }, fn)
- *   wt.onDocument({ url, exclude, when }, fn)
+ *   wt.onDocument("*://example.com/*", fn) or wt.onDocument({ url, exclude, when }, fn)
  *
- * Each route is owned by exactly one strategy: its own `strategy`,
- * else settings.defaultStrategy, else the per-browser default.
+ * Each network route is owned by exactly one strategy: its own, required,
+ * `strategy` — there is no default.
  */
 import { matchAny, matchGroups, matchPatternError } from "./matcher";
 
@@ -39,7 +39,7 @@ export interface RouteMeta {
     methods?: string[];
     /** webRequest resource types; undefined = any */
     resourceTypes?: string[];
-    /** explicit per-handler strategy; undefined = settings default */
+    /** the strategy that runs the handler; required on network routes, absent on onDocument */
     strategy?: Strategy;
     /** onDocument only */
     when?: DocumentWhen;
@@ -53,27 +53,9 @@ export type BinaryOption = boolean | "both";
 export const takesBinary = (r: { binary?: BinaryOption }): boolean => r.binary === true || r.binary === "both";
 export const takesText = (r: { binary?: BinaryOption }): boolean => r.binary !== true;
 
-const IS_FIREFOX_RT = typeof (globalThis as any).browser !== "undefined" && typeof (globalThis as any).browser?.webRequest?.filterResponseData === "function";
-
-/** built-in default when settings.defaultStrategy is unset */
-export function builtinStrategy(firefox = IS_FIREFOX_RT): Strategy {
-    return firefox ? "extension" : "helper";
-}
-
-let defaultStrategy: Strategy = builtinStrategy();
-
-/** settings.defaultStrategy (background: set on every reload) */
-export function setDefaultStrategy(s: Strategy | undefined | null): void {
-    defaultStrategy = s && STRATEGIES.includes(s) ? s : builtinStrategy();
-}
-
-export function getDefaultStrategy(): Strategy {
-    return defaultStrategy;
-}
-
-/** the strategy that owns a route */
-export function effectiveStrategy(route: Pick<RouteMeta, "strategy">, fallback: Strategy = defaultStrategy): Strategy {
-    return route.strategy || fallback;
+/** the strategy that owns a network route (onDocument routes have none) */
+export function effectiveStrategy(route: Pick<RouteMeta, "strategy">): Strategy {
+    return route.strategy!;
 }
 
 function list(v: unknown, what: string, where: string): string[] {
@@ -98,13 +80,16 @@ function checkPatterns(ps: string[], what: string, where: string): void {
  */
 export function normalizeRoute(kind: RouteKind, raw: unknown, index: number): RouteMeta {
     const where = `wt.${kind}`;
-    if (typeof raw === "function" || raw === undefined || raw === null) {
-        throw new Error(`${where}: first argument must be a URL pattern (string, string[] or { url }) — e.g. wt.${kind}("*://example.com/*", handler)`);
-    }
+    const doc = kind === "onDocument";
+    const example = doc ? `wt.onDocument("*://example.com/*", handler)` : `wt.${kind}({ url: "*://example.com/*", strategy: "helper" }, handler)`;
+    const shape = doc ? "a URL pattern (string, string[] or { url })" : "a route { url, strategy }";
+    if (typeof raw === "function" || raw === undefined || raw === null) throw new Error(`${where}: first argument must be ${shape} — e.g. ${example}`);
     let obj: any;
-    if (typeof raw === "string" || Array.isArray(raw)) obj = { url: raw };
-    else if (typeof raw === "object") obj = raw;
-    else throw new Error(`${where}: first argument must be a URL pattern (string, string[] or { url }), got ${typeof raw}`);
+    if (typeof raw === "string" || Array.isArray(raw)) {
+        if (!doc) throw new Error(`${where}: a bare URL pattern has no strategy — pass { url, strategy } instead, e.g. ${example}. Strategies: ${STRATEGIES.join(", ")}`);
+        obj = { url: raw };
+    } else if (typeof raw === "object") obj = raw;
+    else throw new Error(`${where}: first argument must be ${shape}, got ${typeof raw}`);
     if (obj.url === undefined && obj.match !== undefined) throw new Error(`${where}: the route field is "url", not "match"`);
     if (obj.url === undefined) throw new Error(`${where}: route is missing "url"`);
     const url = list(obj.url, "url", where);
@@ -138,11 +123,10 @@ export function normalizeRoute(kind: RouteKind, raw: unknown, index: number): Ro
         if (bad) throw new Error(`${where}: unknown resource type "${bad}" — one of ${RESOURCE_TYPES.join(", ")}`);
         route.resourceTypes = t;
     }
-    if (obj.strategy !== undefined) {
-        if (Array.isArray(obj.strategy)) throw new Error(`${where}: strategy is a single value now (one of ${STRATEGIES.join(", ")}), not a priority list`);
-        if (!STRATEGIES.includes(obj.strategy)) throw new Error(`${where}: unknown strategy "${obj.strategy}" — one of ${STRATEGIES.join(", ")}`);
-        route.strategy = obj.strategy;
-    }
+    if (obj.strategy === undefined) throw new Error(`${where}: route is missing "strategy" — every handler names the strategy that runs it, e.g. ${example}. Strategies: ${STRATEGIES.join(", ")}`);
+    if (Array.isArray(obj.strategy)) throw new Error(`${where}: strategy is a single value (one of ${STRATEGIES.join(", ")}), not a priority list`);
+    if (!STRATEGIES.includes(obj.strategy)) throw new Error(`${where}: unknown strategy "${obj.strategy}" — one of ${STRATEGIES.join(", ")}`);
+    route.strategy = obj.strategy;
     return route;
 }
 

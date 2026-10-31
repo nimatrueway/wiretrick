@@ -39,13 +39,13 @@ export const choices = ["x", "y"];
 const IMPORTER = `
 import { envParam } from "./utils";
 const p = wt.params({ intercept_environments: envParam });
-wt.onRequest("*://*/*", () => { void p.intercept_environments; });
+wt.onRequest({ url: "*://*/*", strategy: "helper" }, () => { void p.intercept_environments; });
 `;
 
 const SPREAD = `
 import { defs, choices } from "./utils";
 const p = wt.params({ ...defs, pick: { type: "enum", choices, default: "y" } });
-wt.onRequest("*://*/*", () => { void p.mode; });
+wt.onRequest({ url: "*://*/*", strategy: "helper" }, () => { void p.mode; });
 `;
 
 describe("imported param definitions", () => {
@@ -53,9 +53,9 @@ describe("imported param definitions", () => {
         for (const code of [
             IMPORTER,
             SPREAD,
-            `import { envParam } from "./utils"; wt.defineParam("e", envParam); wt.onRequest("*://*/*", () => {});`,
-            `import { defs } from "./utils"; wt.params(defs); wt.onRequest("*://*/*", () => {});`,
-            `import { t } from "./utils"; wt.params({ x: { type: t, default: 1 } }); wt.onRequest("*://*/*", () => {});`,
+            `import { envParam } from "./utils"; wt.defineParam("e", envParam); wt.onRequest({ url: "*://*/*", strategy: "helper" }, () => {});`,
+            `import { defs } from "./utils"; wt.params(defs); wt.onRequest({ url: "*://*/*", strategy: "helper" }, () => {});`,
+            `import { t } from "./utils"; wt.params({ x: { type: t, default: 1 } }); wt.onRequest({ url: "*://*/*", strategy: "helper" }, () => {});`,
         ]) {
             const c = compileScript(code, { importModule: () => makeStubModule() });
             expect(c.error, code).toBeNull();
@@ -64,7 +64,7 @@ describe("imported param definitions", () => {
     });
 
     it("a genuinely invalid inline def still errors", () => {
-        const c = compileScript(`wt.params({ x: { default: 1 } }); wt.onRequest("*://*/*", () => {});`, { importModule: () => makeStubModule() });
+        const c = compileScript(`wt.params({ x: { default: 1 } }); wt.onRequest({ url: "*://*/*", strategy: "helper" }, () => {});`, { importModule: () => makeStubModule() });
         expect(c.error).toMatch(/parameter "x" needs a type/);
     });
 
@@ -128,7 +128,7 @@ describe("saveScript with imported params", () => {
 
     it("param values of the importer apply to imported defs", async () => {
         await saveScript({ id: "u", name: "utils", code: UTILS });
-        await saveScript({ id: "m", name: "main", code: `import { envParam } from "./utils";\nconst p = wt.params({ e: envParam });\nif (p.e.includes("prod")) wt.onRequest("*://*/*", () => {});` });
+        await saveScript({ id: "m", name: "main", code: `import { envParam } from "./utils";\nconst p = wt.params({ e: envParam });\nif (p.e.includes("prod")) wt.onRequest({ url: "*://*/*", strategy: "helper" }, () => {});` });
         await setParamValue("m", "e", ["prod"]);
         const main = (await listScripts()).find((x) => x.id === "m")!;
         expect(main.meta.active).toBe(true);

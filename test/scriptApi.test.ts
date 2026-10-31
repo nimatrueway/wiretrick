@@ -17,7 +17,7 @@ const cfg = wt.params({
 const hosts = wt.defineParam("hosts", { type: "stringList", default: ["x"] });
 wt.log("flag", cfg.flag, hosts.join());
 wt.onRequest({ url: ["*://a.com/*", "*://b.com/*"], strategy: "page" }, () => (cfg.flag ? { block: true } : undefined));
-wt.onResponseBody("*://b.com/*", (c, b) => b);
+wt.onResponseBody({ url: "*://b.com/*", strategy: "helper" }, (c, b) => b);
 `;
 
 describe("script API", () => {
@@ -30,7 +30,7 @@ describe("script API", () => {
         expect(c.meta.match).toEqual(["*://a.com/*", "*://b.com/*"]);
         expect(c.meta.routes.map((r) => [r.kind, r.strategy])).toEqual([
             ["onRequest", "page"],
-            ["onResponseBody", undefined],
+            ["onResponseBody", "helper"],
         ]);
         expect(c.handlers.onRequest).toHaveLength(1);
         expect(c.handlers.onRequest[0].route.url).toEqual(["*://a.com/*", "*://b.com/*"]);
@@ -58,7 +58,7 @@ describe("script API", () => {
     });
 
     it("params can feed routes", () => {
-        const c = compileScript(`const p = wt.params({ host: { type: "string", default: "a.com" } });\nwt.onRequest(\`*://\${p.host}/*\`, () => {});`, { paramValues: { host: "z.org" } });
+        const c = compileScript(`const p = wt.params({ host: { type: "string", default: "a.com" } });\nwt.onRequest({ url: \`*://\${p.host}/*\`, strategy: "helper" }, () => {});`, { paramValues: { host: "z.org" } });
         expect(c.error).toBeNull();
         expect(c.meta.match).toEqual(["*://z.org/*"]);
     });
@@ -78,13 +78,16 @@ describe("script API", () => {
     });
 
     it("route errors surface as script errors", () => {
-        expect(compileScript(`wt.onRequest(() => {});`).error).toMatch(/first argument must be a URL pattern/);
-        expect(compileScript(`wt.onRequest({ match: "*" }, () => {});`).error).toMatch(/"url", not "match"/);
+        expect(compileScript(`wt.onRequest(() => {});`).error).toMatch(/first argument must be a route \{ url, strategy \}/);
+        expect(compileScript(`wt.onRequest("*", () => {});`).error).toMatch(/bare URL pattern has no strategy/);
+        expect(compileScript(`wt.onRequest({ url: "*" }, () => {});`).error).toMatch(/missing "strategy"/);
+        expect(compileScript(`wt.onDocument("*", () => {});`).error).toBeNull();
+        expect(compileScript(`wt.onRequest({ match: "*", strategy: "helper" }, () => {});`).error).toMatch(/"url", not "match"/);
         expect(compileScript(`wt.onRequest({ url: "*", strategy: ["page", "debugger"] }, () => {});`).error).toMatch(/single value/);
         expect(compileScript(`wt.onRequest({ url: "*", strategy: "auto" }, () => {});`).error).toMatch(/unknown strategy/);
-        expect(compileScript(`wt.onRequest({ url: "*", resourceTypes: ["nope"] }, () => {});`).error).toMatch(/unknown resource type/);
+        expect(compileScript(`wt.onRequest({ url: "*", resourceTypes: ["nope"], strategy: "helper" }, () => {});`).error).toMatch(/unknown resource type/);
         expect(compileScript(`wt.onDocument({ url: "*", strategy: "page" }, () => {});`).error).toMatch(/doesn't apply to onDocument/);
-        expect(compileScript(`wt.onRequest("*", 1);`).error).toMatch(/second argument/);
+        expect(compileScript(`wt.onRequest({ url: "*", strategy: "helper" }, 1);`).error).toMatch(/second argument/);
     });
 
     it("exports are importable via the module resolver", async () => {
@@ -93,7 +96,7 @@ describe("script API", () => {
         const user = {
             id: "s1",
             name: "user",
-            code: `import { double } from "./utils";\nwt.onRequest("*", () => double(21) === 42 ? { block: true } : undefined);`,
+            code: `import { double } from "./utils";\nwt.onRequest({ url: "*", strategy: "helper" }, () => double(21) === 42 ? { block: true } : undefined);`,
         };
         const resolver = makeModuleResolver([lib, user], () => ({}));
         const c = compileScript(user.code, { importModule: resolver.resolve });
@@ -146,7 +149,7 @@ describe("saveScript name handling", () => {
             },
         };
         const { saveScript, setEnabled, getScript } = await import("../src/background/engine/scriptStore");
-        await saveScript({ id: "s1", code: `wt.onRequest("*", () => {});`, name: "redwood" });
+        await saveScript({ id: "s1", code: `wt.onRequest({ url: "*", strategy: "helper" }, () => {});`, name: "redwood" });
         expect((await getScript("s1"))!.meta.name).toBe("redwood");
         await setEnabled("s1", false);
         expect((await getScript("s1"))!.meta.name).toBe("redwood");

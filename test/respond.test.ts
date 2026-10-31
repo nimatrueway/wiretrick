@@ -1,13 +1,10 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { setDefaultStrategy } from "../src/shared/route";
 import { ExtensionStrategy } from "../src/background/engine/strategies/extensionStrategy";
 import { PageStrategy } from "../src/background/engine/strategies/pageStrategy";
 import { compileScript } from "../src/shared/compile";
 import type { Script } from "../src/background/engine/scriptStore";
 
 // these suites exercise the extension strategy: make it the settings default
-beforeEach(() => setDefaultStrategy("extension"));
-afterEach(() => setDefaultStrategy(null));
 
 beforeEach(() => {
     (globalThis as any).chrome = {
@@ -42,7 +39,7 @@ const details = () => ({
 describe("onRequest respond", () => {
     it("extension strategy: object body → JSON data-url redirect", () => {
         const s = new ExtensionStrategy();
-        s.reload([makeScript("a", `wt.onRequest("*", () => ({ replaceResponse: { body: { mocked: true } } }));`)]);
+        s.reload([makeScript("a", `wt.onRequest({ url: "*", strategy: "extension" }, () => ({ replaceResponse: { body: { mocked: true } } }));`)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("redirect");
         expect(decodeURIComponent(d.url)).toContain('"mocked"');
@@ -51,7 +48,7 @@ describe("onRequest respond", () => {
 
     it("extension strategy: string body + explicit mime", () => {
         const s = new ExtensionStrategy();
-        s.reload([makeScript("a", `wt.onRequest("*", () => ({ replaceResponse: { body: "<h1>hi</h1>", mime: "text/html" } }));`)]);
+        s.reload([makeScript("a", `wt.onRequest({ url: "*", strategy: "extension" }, () => ({ replaceResponse: { body: "<h1>hi</h1>", mime: "text/html" } }));`)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("redirect");
         expect(d.url).toContain("text/html");
@@ -60,8 +57,8 @@ describe("onRequest respond", () => {
     it("respond is terminal: later scripts don't run", () => {
         const s = new ExtensionStrategy();
         s.reload([
-            makeScript("a", `wt.onRequest("*", () => ({ replaceResponse: { body: "first" } }));`),
-            makeScript("b", `wt.onRequest("*", () => ({ redirect: "https://second.com" }));`),
+            makeScript("a", `wt.onRequest({ url: "*", strategy: "extension" }, () => ({ replaceResponse: { body: "first" } }));`),
+            makeScript("b", `wt.onRequest({ url: "*", strategy: "extension" }, () => ({ redirect: "https://second.com" }));`),
         ]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("redirect");
@@ -98,7 +95,7 @@ describe("onRequest respond", () => {
 
     it("extension strategy: a result is one thing — replaceResponse + headers drops the headers (like every strategy)", () => {
         const s = new ExtensionStrategy();
-        s.reload([makeScript("a", `wt.onRequest("*", () => ({ replaceResponse: { body: "x" }, headers: { set: { "x-m": "1" } } }));`)]);
+        s.reload([makeScript("a", `wt.onRequest({ url: "*", strategy: "extension" }, () => ({ replaceResponse: { body: "x" }, headers: { set: { "x-m": "1" } } }));`)]);
         s.handleBeforeRequest(details(), null);
         expect(s.handleBeforeSendHeaders(details(), null)).toBeNull();
     });

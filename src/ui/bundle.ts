@@ -14,7 +14,7 @@
  *       params:          # only non-default param values
  *         level: trace
  *       code: |-
- *         wt.onRequest("*://example.com/*", …
+ *         wt.onRequest({ url: "*://example.com/*", strategy: "helper" }, …
  *   dataFiles:           # JSON data files, by path
  *     - path: mock/rate-limits.json
  *       text: |-

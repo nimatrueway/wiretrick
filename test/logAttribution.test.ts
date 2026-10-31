@@ -9,7 +9,6 @@
  * script-attributed error when fulfillment fails.
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { setDefaultStrategy } from "../src/shared/route";
 import { ExtensionStrategy } from "../src/background/engine/strategies/extensionStrategy";
 import { DebuggerStrategy } from "../src/background/engine/strategies/debuggerStrategy";
 import { addUiPort, type LogEntry } from "../src/background/engine/logs";
@@ -17,8 +16,6 @@ import { compileScript } from "../src/shared/compile";
 import type { Script } from "../src/background/engine/scriptStore";
 
 // these suites exercise the extension strategy: make it the settings default
-beforeEach(() => setDefaultStrategy("extension"));
-afterEach(() => setDefaultStrategy(null));
 
 // ---- log capture via a fake UI port ----
 const entries: LogEntry[] = [];
@@ -91,7 +88,7 @@ const details = (over: Record<string, any> = {}) => ({
     ...over,
 });
 
-const RESPOND_500 = `wt.onRequest("*://api.example.com/*", (ctx) => {
+const RESPOND_500 = `wt.onRequest({ url: "*://api.example.com/*", strategy: "extension" }, (ctx) => {
     if (ctx.url.includes("/v1/")) return { replaceResponse: { status: 500, body: { error: "boom" }, mime: "application/json" } };
 });`;
 
@@ -109,7 +106,7 @@ describe("extension strategy: log lines use the stored script name", () => {
 
     it("sync respond 200 → served + named serve log", () => {
         const s = new ExtensionStrategy();
-        s.reload([storedScript("a", "API mocker", `wt.onRequest("*", () => ({ replaceResponse: { body: "ok", mime: "text/plain" } }));`)]);
+        s.reload([storedScript("a", "API mocker", `wt.onRequest({ url: "*", strategy: "extension" }, () => ({ replaceResponse: { body: "ok", mime: "text/plain" } }));`)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("redirect");
         const line = entries.find((e) => e.message.includes("replaceResponse 200"));
@@ -119,7 +116,7 @@ describe("extension strategy: log lines use the stored script name", () => {
 
     it("redirect/cancel log uses the stored name", () => {
         const s = new ExtensionStrategy();
-        s.reload([storedScript("a", "API mocker", `wt.onRequest("*", () => ({ redirect: "https://mocked.example.com/x" }));`)]);
+        s.reload([storedScript("a", "API mocker", `wt.onRequest({ url: "*", strategy: "extension" }, () => ({ redirect: "https://mocked.example.com/x" }));`)]);
         s.handleBeforeRequest(details(), null);
         const line = entries.find((e) => e.message.includes("onRequest →"));
         expect(line, "a redirect log line must exist").toBeTruthy();
@@ -128,7 +125,7 @@ describe("extension strategy: log lines use the stored script name", () => {
 
     it("replaceResponse log uses the stored name", () => {
         const s = new ExtensionStrategy();
-        s.reload([storedScript("a", "API mocker", `wt.replaceResponse("*", () => '{"mocked":true}');`)]);
+        s.reload([storedScript("a", "API mocker", `wt.replaceResponse({ url: "*", strategy: "extension" }, () => '{"mocked":true}');`)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("redirect");
         const line = entries.find((e) => e.message.includes("replaceResponse →"));
@@ -139,7 +136,7 @@ describe("extension strategy: log lines use the stored script name", () => {
 
     it("no-match (handler returns undefined) logs only a DEBUG 'observed (no change)' line", () => {
         const s = new ExtensionStrategy();
-        s.reload([storedScript("a", "API mocker", `wt.onRequest("*", () => undefined);`)]);
+        s.reload([storedScript("a", "API mocker", `wt.onRequest({ url: "*", strategy: "extension" }, () => undefined);`)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("allow");
         const lines = entries.filter((e) => e.message.includes("onRequest →"));
@@ -150,9 +147,9 @@ describe("extension strategy: log lines use the stored script name", () => {
     it("replaceResponse → null and no-op onResponseHeaders are observed; header changes stay INFO", () => {
         const s = new ExtensionStrategy();
         s.reload([
-            storedScript("a", "Looker", `wt.replaceResponse("*", () => null);
-wt.onResponseHeaders("*", () => undefined);`),
-            storedScript("b", "Hdr", `wt.onResponseHeaders("*", () => ({ headers: { set: { "x-a": "1" } } }));`),
+            storedScript("a", "Looker", `wt.replaceResponse({ url: "*", strategy: "extension" }, () => null);
+wt.onResponseHeaders({ url: "*", strategy: "extension" }, () => undefined);`),
+            storedScript("b", "Hdr", `wt.onResponseHeaders({ url: "*", strategy: "extension" }, () => ({ headers: { set: { "x-a": "1" } } }));`),
         ]);
         s.handleBeforeRequest(details(), null);
         s.handleHeadersReceived(details(), null);
@@ -171,7 +168,7 @@ describe("CDP tier: request-stage respond fulfillment", () => {
         resourceType: "xmlhttprequest",
         ...over,
     });
-    const CDP_500 = RESPOND_500.replace(`"*://api.example.com/*"`, `{ url: "*://api.example.com/*", strategy: "debugger" }`);
+    const CDP_500 = RESPOND_500.replace(`strategy: "extension"`, `strategy: "debugger"`);
 
     it("SYNC onRequest respond-500 is fulfilled + named success log", async () => {
         const c = new DebuggerStrategy();
@@ -228,8 +225,8 @@ describe("CDP tier: request-stage respond fulfillment", () => {
     it("routes on another strategy are not run by the debugger tier", async () => {
         const c = new DebuggerStrategy();
         c.reload([
-            storedScript("a", "API mocker", `wt.onRequest("*", () => ({ redirect: "https://mocked.example.com/x" }));`),
-            storedScript("b", "Responder", `wt.onRequest("*", () => ({ replaceResponse: { body: "ok" } }));`),
+            storedScript("a", "API mocker", `wt.onRequest({ url: "*", strategy: "extension" }, () => ({ redirect: "https://mocked.example.com/x" }));`),
+            storedScript("b", "Responder", `wt.onRequest({ url: "*", strategy: "extension" }, () => ({ replaceResponse: { body: "ok" } }));`),
         ]);
         await c.handlePaused("tab:1", paused());
         expect(debuggerCalls.filter((x) => x.command === "Fetch.fulfillRequest")).toEqual([]);
@@ -298,7 +295,7 @@ describe("per-script TypeScript error tracking", () => {
 });
 
 describe("Chromium extension strategy: how it serves replacements (redirect)", () => {
-    const REPLACE = `wt.replaceResponse("*", () => "<h1>x</h1>");`;
+    const REPLACE = `wt.replaceResponse({ url: "*", strategy: "extension" }, () => "<h1>x</h1>");`;
     it("a page load is served via serve.html", () => {
         const s = new ExtensionStrategy();
         s.reload([storedScript("a", "Wr page", REPLACE)]);

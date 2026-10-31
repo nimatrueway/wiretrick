@@ -99,7 +99,7 @@ describe("collectProblems", () => {
 
     it("with the source: ranges on the URL pattern, the registration, the thrown-at token", () => {
         const pat = "https://a.test/:p+/:name";
-        const code = ["// x", "wt.onRequest({", `    url: ${JSON.stringify(pat)},`, '    strategy: "rules",', "}, () => ({ block: true }));", "", '  wt.onResponseBody("*://b.test/*", (c, b) => b);', "const v = boom();"].join("\n");
+        const code = ["// x", "wt.onRequest({", `    url: ${JSON.stringify(pat)},`, '    strategy: "rules",', "}, () => ({ block: true }));", "", '  wt.onResponseBody({ url: "*://b.test/*", strategy: "helper" }, (c, b) => b);', "const v = boom();"].join("\n");
         const routes = [
             { kind: "onRequest", index: 0, line: 2, url: [pat] },
             { kind: "onResponseBody", index: 0, line: 7, url: ["*://b.test/*"] },
@@ -124,7 +124,7 @@ describe("collectProblems", () => {
         const [stale] = collectProblems([script("b", { code, routes: routes.map(({ line, ...r }) => r), routeWarnings: ["onResponseBody #1: never runs"] })], none);
         expect(stale.problems[0]).toMatchObject({ line: 7, column: 3 });
         // a pattern held in a constant above the registration
-        const code2 = [`const P = ${JSON.stringify(pat)};`, "wt.onRequest(P, () => ({ block: true }));"].join("\n");
+        const code2 = [`const P = ${JSON.stringify(pat)};`, "wt.onRequest({ url: P, strategy: \"rules\" }, () => ({ block: true }));"].join("\n");
         const [c] = collectProblems([script("c", { code: code2, routes: [{ kind: "onRequest", index: 0, line: 2, url: [pat] }], ruleErrors: [`onRequest #1: url pattern "${pat}" is too complex`] })], none);
         expect(c.problems[0]).toMatchObject({ line: 1, column: 12, endColumn: 12 + pat.length });
     });

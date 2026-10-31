@@ -223,7 +223,7 @@ describe("package imports in scripts", () => {
 import { shout } from "https://unpkg.com/cjs-lib@2.0.0";
 export const run = () => shout(String(twice(21)) + "x");
 wt.params({ n: { type: "number", default: twice(2) } });
-wt.onRequest("*://a.test/*", () => {});`;
+wt.onRequest({ url: "*://a.test/*", strategy: "helper" }, () => {});`;
 
     it("compile and run through the background resolver", async () => {
         const p = await bg();
@@ -254,7 +254,7 @@ wt.onRequest("*://a.test/*", () => {});`;
             const c = compileWithLibs({ id: "m", name: "main", code }, [], {}, [], pkgs);
             return { error: c.error, line: c.error ? errorPosition(c.error)?.line : undefined };
         };
-        const unpinned = at(`// x\n\nimport d from "https://unpkg.com/dayjs";\nwt.onRequest("*://a/*", () => d());`);
+        const unpinned = at(`// x\n\nimport d from "https://unpkg.com/dayjs";\nwt.onRequest({ url: "*://a/*", strategy: "helper" }, () => d());`);
         expect(unpinned.error).toMatch(/cannot import "https:\/\/unpkg\.com\/dayjs": pin an exact version, e\.g\. https:\/\/unpkg\.com\/dayjs@1\.2\.3/);
         expect(unpinned.line).toBe(3);
         expect(at(`import d from "https://example.com/x.js";\nd();`).error).toMatch(/only pinned https:\/\/unpkg\.com/);
@@ -263,7 +263,7 @@ wt.onRequest("*://a.test/*", () => {});`;
             line: 2,
         });
 
-        const missing = `\nimport x from "https://unpkg.com/nope@1.0.0";\nwt.onRequest("*://a/*", () => x());`;
+        const missing = `\nimport x from "https://unpkg.com/nope@1.0.0";\nwt.onRequest({ url: "*://a/*", strategy: "helper" }, () => x());`;
         await p.ensurePackages([missing], { retry: true });
         expect(at(missing)).toEqual({ error: expect.stringMatching(/cannot import "https:\/\/unpkg\.com\/nope@1\.0\.0": download failed \(HTTP 404 — no such package, version or file\)/), line: 2 });
 

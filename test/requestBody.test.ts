@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { readFetchBody, REQUEST_BODY_CAP, requestBodyCtx, requestBodyFrom, requestBodyFromText, requestBodyFromWebRequest } from "../src/shared/requestBody";
 import { setTextTypes } from "../src/shared/bodyKind";
 import { runOp } from "../src/shared/bodyOps";
-import { normalizeRoute, NET_KINDS, setDefaultStrategy } from "../src/shared/route";
+import { normalizeRoute, NET_KINDS } from "../src/shared/route";
 import { compileScript } from "../src/shared/compile";
 import { probeScriptRules } from "../src/shared/rulesProbe";
 import { PageStrategy } from "../src/background/engine/strategies/pageStrategy";
@@ -72,7 +72,7 @@ describe("ctx.json()", () => {
         const got: Record<string, any> = {};
         const spy = (k: string) => (c: any) => void (got[k] = { body: c.requestBody, json: c.json() });
         const handlers: any = Object.fromEntries(
-            [...NET_KINDS, "onDocument"].map((k) => [k, k === "onDocument" ? [] : [{ fn: spy(k), route: normalizeRoute(k as any, "*://x.test/*", 0) }]])
+            [...NET_KINDS, "onDocument"].map((k) => [k, k === "onDocument" ? [] : [{ fn: spy(k), route: normalizeRoute(k as any, { url: "*://x.test/*", strategy: "helper" }, 0) }]])
         );
         const scripts = [{ id: "s", name: "S", handlers }];
         const args = { url: "https://x.test/a", method: "POST", requestBody: '{"n":1}' };
@@ -119,23 +119,20 @@ describe("page strategy: fetch / XHR bodies", () => {
     });
 
     it("the page strategy hands it to onRequest, replaceResponse and onResponseBody", async () => {
-        setDefaultStrategy("page");
-        try {
+        {
             const s = new PageStrategy();
             s.reload([
                 makeScript(
                     "a",
-                    `wt.onRequest("*://x.test/*", (c) => ${SEEN});
-wt.onResponseBody("*://x.test/*", (c, body) => body + ":" + c.json().n);`
+                    `wt.onRequest({ url: "*://x.test/*", strategy: "page" }, (c) => ${SEEN});
+wt.onResponseBody({ url: "*://x.test/*", strategy: "page" }, (c, body) => body + ":" + c.json().n);`
                 ),
-                makeScript("b", `wt.replaceResponse("*://x.test/*", (c) => "replaced " + c.requestBody);`),
+                makeScript("b", `wt.replaceResponse({ url: "*://x.test/*", strategy: "page" }, (c) => "replaced " + c.requestBody);`),
             ]);
             const d: any = await s.runRequestDecision(url, "POST", -1, '{"n":7}');
             expect(seen(d.url)).toEqual({ kind: "text", body: '{"n":7}', json: { n: 7 } });
             expect((await s.runReplace(url, "POST", -1, "abc"))?.content).toBe("replaced abc");
             expect(await s.runTransform(url, "POST", "resp", { requestBody: '{"n":3}' })).toBe("resp:3");
-        } finally {
-            setDefaultStrategy(null);
         }
     });
 });
@@ -209,7 +206,6 @@ wt.onResponseBody({ url: "*://x.test/*", strategy: "debugger" }, (c, body) => bo
 
 describe("extension strategy: webRequest requestBody", () => {
     beforeEach(() => {
-        setDefaultStrategy("extension");
         (globalThis as any).chrome = {
             runtime: { getURL: (p: string) => `chrome-extension://t/${p}`, sendMessage: async () => ({}) },
             storage: { local: { get: async () => ({}), set: async () => {} } },
@@ -218,7 +214,6 @@ describe("extension strategy: webRequest requestBody", () => {
         delete (globalThis as any).browser;
         new ExtensionStrategy().pruneRequest("r1");
     });
-    afterEach(() => setDefaultStrategy(null));
 
     it("formData → urlencoded; raw → bytes (sniffed); files / errors → undefined", () => {
         expect(requestBodyFromWebRequest({ formData: { q: ["a b"], tag: ["x", "y"] } })).toBe("q=a%20b&tag=x&tag=y");
@@ -234,8 +229,8 @@ describe("extension strategy: webRequest requestBody", () => {
         s.reload([
             makeScript(
                 "a",
-                `wt.onRequest("*://x.test/*", (c) => (c.json() ? ${SEEN} : undefined));
-wt.onResponseHeaders("*://x.test/*", (c) => ({ headers: { set: { "x-req": c.requestBody ?? "none" } } }));`
+                `wt.onRequest({ url: "*://x.test/*", strategy: "extension" }, (c) => (c.json() ? ${SEEN} : undefined));
+wt.onResponseHeaders({ url: "*://x.test/*", strategy: "extension" }, (c) => ({ headers: { set: { "x-req": c.requestBody ?? "none" } } }));`
             ),
         ]);
         const details = { url: "https://x.test/a", method: "POST", tabId: 1, type: "xmlhttprequest", requestId: "r1", requestHeaders: [], responseHeaders: [], statusCode: 200, statusLine: "HTTP/1.1 200 OK" };
@@ -320,7 +315,7 @@ wt.onResponseBody({ url: "https://x.test/*", strategy: "helper" }, (c, body) => 
 describe("rules strategy", () => {
     it("reading ctx.requestBody / ctx.json() is an error (no real request)", async () => {
         const c = compileScript(`wt.onRequest({ url: "*://a.test/*", strategy: "rules" }, (ctx) => (ctx.json()?.x ? { block: true } : undefined));`);
-        const r = await probeScriptRules(c.handlers, "helper");
+        const r = await probeScriptRules(c.handlers);
         expect(r.errors[0]).toMatch(/ctx\.json/);
     });
 });

@@ -14,10 +14,10 @@
 import { saveScript, type Script } from "./engine/scriptStore";
 import { log } from "./engine/logs";
 import { STRATEGY_KEY, SETTINGS_TEXT_KEY } from "./settingsFile";
-import { storageGet, storageSet } from "../shared/chromeApi";
+import { storageGet, storageSet, storageRemove } from "../shared/chromeApi";
 import { loadSavedHandle } from "../shared/folderSync";
 import { dlogLevel } from "../shared/debugLog";
-import { MIGRATION_VERSION, OLD_STRATEGIES, migrateScriptSource, migrateSettingsText } from "../shared/migration";
+import { MIGRATION_VERSION, migrateScriptSource, migrateSettingsText } from "../shared/migration";
 
 export const MIGRATION_KEY = "resMigrationVersion";
 /** original sources of migrated scripts: { at, scripts: [{ id, name, code }] } (v1's key) */
@@ -50,11 +50,8 @@ export async function runMigrations(): Promise<void> {
         log(-1, `[${s.meta.name}] migrated to the renamed script API: ${changes.join(", ")}`, "info", s.id);
     }
     const patch: Record<string, unknown> = { [MIGRATION_KEY]: MIGRATION_VERSION };
-    const st = g[STRATEGY_KEY];
-    if (typeof st === "string" && OLD_STRATEGIES[st]) {
-        patch[STRATEGY_KEY] = OLD_STRATEGIES[st];
-        log(-1, `settings: default strategy "${st}" → "${OLD_STRATEGIES[st]}"`, "info");
-    }
+    // v3: settings.defaultStrategy is gone — every handler names its strategy
+    if (g[STRATEGY_KEY] !== undefined) await storageRemove(STRATEGY_KEY);
     const text = g[SETTINGS_TEXT_KEY];
     if (typeof text === "string") {
         const next = migrateSettingsText(text);

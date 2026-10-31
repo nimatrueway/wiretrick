@@ -52,7 +52,7 @@ export async function checkApiTypingsNav(mgr: any, check: Check, label = ""): Pr
     await cdp?.send("Emulation.setDeviceMetricsOverride", { width: 1400, height: 800, deviceScaleFactor: 1, mobile: false });
     await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_api_nav", name: "api nav",
-        code: 'wt.onRequest("*://api-nav.invalid/*", (ctx) => {\n    console.log(ctx.url);\n});\n',
+        code: 'wt.onRequest({ url: "*://api-nav.invalid/*", strategy: "helper" }, (ctx) => {\n    console.log(ctx.url);\n});\n',
     }, r)));
     await mgr.keyboard.press("Escape"); // close a hover left by an earlier check
     // an earlier check may leave the current script dirty: discard it
@@ -112,7 +112,7 @@ export async function checkApiTypingsNav(mgr: any, check: Check, label = ""): Pr
         });
         if (r) await mgr.mouse.move(r.x, r.y);
     };
-    const isRoute = (h: any): boolean => /type (Wiretrick\.)?Route = /.test(h.sig);
+    const isRoute = (h: any): boolean => /interface (Wiretrick\.)?RouteOptions/.test(h.sig);
     const setTheme = async (pref: string): Promise<string> => {
         const old = await mgr.evaluate((p: string) => {
             const sel = document.getElementById("settings-theme") as HTMLSelectElement;
@@ -130,8 +130,8 @@ export async function checkApiTypingsNav(mgr: any, check: Check, label = ""): Pr
     const root = await showHover();
     const linkNames = root.links.map((l: string[]) => l[0]);
     check("api typings: hover signature on wt.onRequest is highlighted, its API types are links",
-        root.visible && linkNames.includes("Route") && linkNames.includes("RequestCtx") && root.links.every((l: string[]) => l[1].startsWith("command:wt.hoverShowType?")) &&
-            root.colors.length >= 3 && /mono/i.test(root.preFont) && root.sig.includes("\n    route: Wiretrick.Route,"),
+        root.visible && linkNames.includes("RouteOptions") && linkNames.includes("RequestCtx") && root.links.every((l: string[]) => l[1].startsWith("command:wt.hoverShowType?")) &&
+            root.colors.length >= 3 && /mono/i.test(root.preFont) && root.sig.includes("\n    route: Wiretrick.RouteOptions,"),
         JSON.stringify({ ...root, text: undefined }).slice(0, 400) + ` uri=${opened.uri}`);
     check("api typings: no separate Go to definition / Types line", !/Go to definition|Types:/.test(root.text), root.text.slice(0, 200));
     await mgr.waitForTimeout(300); // fade-in
@@ -141,26 +141,26 @@ export async function checkApiTypingsNav(mgr: any, check: Check, label = ""): Pr
         const h = [...document.querySelectorAll(".monaco-hover")].find((el) => (el as HTMLElement).offsetHeight > 0) as HTMLElement | undefined;
         if (h) h.dataset.e2eMark = "1";
     });
-    await sigLink("Route").click();
+    await sigLink("RouteOptions").click();
     const drilled = await waitHover((h) => isRoute(h));
     const here = await state();
-    check("api typings: clicking Route swaps the same hover for Route's, no navigation",
-        drilled.visible && isRoute(drilled) && drilled.text.includes("Where a network handler applies") && drilled.back === "← Back to onRequest" &&
+    check("api typings: clicking RouteOptions swaps the same hover for RouteOptions', no navigation",
+        drilled.visible && isRoute(drilled) && drilled.text.includes("applies and which") && drilled.back === "← Back to onRequest" &&
             drilled.marked && drilled.count === 1 && here.uri === "file:///api%20nav.ts" && !here.note,
         JSON.stringify({ ...drilled, text: drilled.text.slice(0, 160), uri: here.uri }));
     await parkMouse(); // no hover-underline in the screenshot
     await shot("hover-drilled");
 
     // a {@link} in the docs drills in too
-    await mgr.locator(".monaco-hover-content .hover-contents:not(:has(pre)) a:visible", { hasText: /^RouteOptions$/ }).first().click();
-    const deeper = await waitHover((h) => /interface (Wiretrick\.)?RouteOptions/.test(h.sig));
-    check("api typings: a {@link RouteOptions} in the docs drills in, Back names Route",
-        /interface (Wiretrick\.)?RouteOptions/.test(deeper.sig) && deeper.back === "← Back to Route", JSON.stringify({ sig: deeper.sig.slice(0, 80), back: deeper.back }));
+    await mgr.locator(".monaco-hover-content .hover-contents:not(:has(pre)) a:visible", { hasText: /^Strategy$/ }).first().click();
+    const deeper = await waitHover((h) => /type (Wiretrick\.)?Strategy = /.test(h.sig));
+    check("api typings: a {@link Strategy} in the docs drills in, Back names RouteOptions",
+        /type (Wiretrick\.)?Strategy = /.test(deeper.sig) && deeper.back === "← Back to RouteOptions", JSON.stringify({ sig: deeper.sig.slice(0, 80), back: deeper.back }));
     await backLink().click();
     const up1 = await waitHover((h) => isRoute(h));
     await backLink().click();
     const up2 = await waitHover((h) => /onRequest\(/.test(h.sig));
-    check("api typings: Back walks up to Route, then to the onRequest hover",
+    check("api typings: Back walks up to RouteOptions, then to the onRequest hover",
         isRoute(up1) && up1.back === "← Back to onRequest" && /onRequest\(/.test(up2.sig) && up2.back === "" && up2.links.length === root.links.length && up2.visible,
         JSON.stringify([up1.sig.slice(0, 40), up1.back, up2.sig.slice(0, 40), up2.back]));
 
@@ -175,14 +175,14 @@ export async function checkApiTypingsNav(mgr: any, check: Check, label = ""): Pr
     await mgr.mouse.move(at.x - 30, at.y + 40);
     await mgr.mouse.move(at.x, at.y, { steps: 3 });
     const mouseRoot = await waitHover((h) => h.visible && /onRequest\(/.test(h.sig) && !h.back, 8000);
-    await sigLink("Route").click();
+    await sigLink("RouteOptions").click();
     const mouseDrilled = await waitHover((h) => isRoute(h));
     await backLink().click();
     const mouseUp = await waitHover((h) => /onRequest\(/.test(h.sig));
-    check("api typings: mouse hover drills into Route and Back returns",
+    check("api typings: mouse hover drills into RouteOptions and Back returns",
         mouseRoot.visible && isRoute(mouseDrilled) && mouseDrilled.visible && /onRequest\(/.test(mouseUp.sig) && !mouseUp.back,
         JSON.stringify([mouseRoot.sig.slice(0, 40), mouseDrilled.sig.slice(0, 40), mouseUp.sig.slice(0, 40)]));
-    await sigLink("Route").click();
+    await sigLink("RouteOptions").click();
     await waitHover((h) => isRoute(h));
     await mgr.keyboard.press("Escape");
     await mgr.mouse.move(5, 5);
@@ -194,7 +194,7 @@ export async function checkApiTypingsNav(mgr: any, check: Check, label = ""): Pr
     await mgr.keyboard.press("Escape");
     await setTheme("dark");
     const darkRoot = await showHover();
-    await sigLink("Route").click();
+    await sigLink("RouteOptions").click();
     const dark = await waitHover((h) => isRoute(h));
     check("api typings: dark theme hover drills in with dark token colors",
         isRoute(dark) && dark.colors.length >= 2 && darkRoot.colors.join() !== root.colors.join(), JSON.stringify([root.colors, darkRoot.colors]));
@@ -227,7 +227,7 @@ export async function checkApiTypingsNav(mgr: any, check: Check, label = ""): Pr
     const fwd = await waitFor((s) => s.uri === "file:///wt-api.d.ts");
     check(`api typings: ${forward} goes forward to the declaration`, fwd.uri === "file:///wt-api.d.ts" && fwd.line.includes("onRequest(route") && fwd.text === f12.text, JSON.stringify({ ...fwd, text: undefined }));
 
-    // keep digging: F12 inside the typings on `Route` moves within the file
+    // keep digging: F12 inside the typings on `RouteOptions` moves within the file
     await mgr.evaluate(() => {
         const ed = (window as any).monaco.editor.getEditors()[0];
         const line = ed.getPosition().lineNumber;
@@ -236,11 +236,11 @@ export async function checkApiTypingsNav(mgr: any, check: Check, label = ""): Pr
         ed.focus();
     });
     let inner = await state();
-    const atRoute = (s: any): boolean => /type Route =/.test(s.line);
+    const atRoute = (s: any): boolean => /interface RouteOptions \{/.test(s.line);
     for (const end = Date.now() + 10000; !atRoute(inner) && Date.now() < end; inner = await waitFor(atRoute, 1000)) {
         await mgr.keyboard.press("F12");
     }
-    check("api typings: F12 inside wt-api.d.ts jumps to Route", inner.uri === "file:///wt-api.d.ts" && atRoute(inner), JSON.stringify({ ...inner, text: undefined, line: undefined }));
+    check("api typings: F12 inside wt-api.d.ts jumps to RouteOptions", inner.uri === "file:///wt-api.d.ts" && atRoute(inner), JSON.stringify({ ...inner, text: undefined, line: undefined }));
     await mgr.keyboard.press(back);
     const back1 = await waitFor((s) => !atRoute(s));
     await mgr.keyboard.press(back);

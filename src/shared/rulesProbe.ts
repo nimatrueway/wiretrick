@@ -140,11 +140,11 @@ export interface ScriptRules {
 }
 
 /** probe + translate every handler of a script that runs on `rules` */
-export async function probeScriptRules(handlers: ScriptHandlers, defaultStrategy: Strategy): Promise<ScriptRules> {
+export async function probeScriptRules(handlers: ScriptHandlers): Promise<ScriptRules> {
     const out: ScriptRules = { rules: [], errors: [] };
     for (const kind of NET_KINDS) {
         for (const h of handlers[kind]) {
-            if (effectiveStrategy(h.route, defaultStrategy) !== "rules") continue;
+            if (effectiveStrategy(h.route) !== "rules") continue;
             const r = rulesForProbe(await probeHandler(h.fn, h.route));
             if ("error" in r) out.errors.push(ruleErrorLine(h.route, r.error));
             else out.rules.push({ route: h.route, specs: r.rules });

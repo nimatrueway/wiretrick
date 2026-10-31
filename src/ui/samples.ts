@@ -7,8 +7,7 @@ export interface SampleScript {
 }
 
 // Every sample targets a long-lived public site and names a URL to open so
-// the effect is visible right away. None pins a strategy: they run on the
-// default from Settings → Strategy.
+// the effect is visible right away. Each handler names its strategy ("helper").
 export const SAMPLES: SampleScript[] = [
     {
         name: "Redirect a URL",
@@ -16,7 +15,7 @@ export const SAMPLES: SampleScript[] = [
         code: `// Try it: open https://en.wikipedia.org/wiki/Cat
 wt.about("Cat → Dog on Wikipedia");
 
-wt.onRequest("*://en.wikipedia.org/wiki/Cat", () => ({
+wt.onRequest({ url: "*://en.wikipedia.org/wiki/Cat", strategy: "helper" }, () => ({
     redirect: "https://en.wikipedia.org/wiki/Dog",
 }));`,
     },
@@ -26,7 +25,7 @@ wt.onRequest("*://en.wikipedia.org/wiki/Cat", () => ({
         code: `// Try it: open https://en.wikipedia.org/wiki/Cat
 wt.about("Block Wikipedia images");
 
-wt.onRequest({ url: "*://upload.wikimedia.org/*", resourceTypes: ["image"] }, () => ({ block: true }));`,
+wt.onRequest({ url: "*://upload.wikimedia.org/*", resourceTypes: ["image"], strategy: "helper" }, () => ({ block: true }));`,
     },
     {
         name: "Modify request headers",
@@ -34,7 +33,7 @@ wt.onRequest({ url: "*://upload.wikimedia.org/*", resourceTypes: ["image"] }, ()
         code: `// Try it: open https://postman-echo.com/headers
 wt.about("Add debug headers, drop Accept-Language");
 
-wt.onRequest("*://postman-echo.com/*", () => ({
+wt.onRequest({ url: "*://postman-echo.com/*", strategy: "helper" }, () => ({
     headers: {
         set: { "x-debug": "1", "x-greeting": "hello from Wiretrick" },
         remove: ["accept-language"],
@@ -49,7 +48,7 @@ wt.onRequest("*://postman-echo.com/*", () => ({
 // handler, save and reload to see the browser block it with a CORS error.
 wt.about("Let any origin read example.com");
 
-wt.onResponseHeaders("*://example.com/*", () => ({
+wt.onResponseHeaders({ url: "*://example.com/*", strategy: "helper" }, () => ({
     headers: {
         set: {
             "access-control-allow-origin": "*",
@@ -93,7 +92,7 @@ wt.onDocument("*://example.org/*", () => {
         code: `// Try it: open https://dummyjson.com/users/1
 wt.about("Replace the users API response");
 
-wt.replaceResponse("*://dummyjson.com/users/:id", (ctx) => ({
+wt.replaceResponse({ url: "*://dummyjson.com/users/:id", strategy: "helper" }, (ctx) => ({
     id: Number(ctx.groups.id),
     name: "Mocked User",
     role: "admin",
@@ -105,7 +104,7 @@ wt.replaceResponse("*://dummyjson.com/users/:id", (ctx) => ({
         code: `// Try it: open https://dummyjson.com/todos/1
 wt.about("Mark every todo completed");
 
-wt.onResponseBody("*://dummyjson.com/todos/*", (ctx, body) => {
+wt.onResponseBody({ url: "*://dummyjson.com/todos/*", strategy: "helper" }, (ctx, body) => {
     const json = JSON.parse(typeof body === "string" ? body : new TextDecoder().decode(body));
     json.completed = true;
     json.todo = "Transformed by Wiretrick";
@@ -118,7 +117,7 @@ wt.onResponseBody("*://dummyjson.com/todos/*", (ctx, body) => {
         code: `// Try it: open https://example.com/
 wt.about("Rewrite example.com's HTML");
 
-wt.onResponseBody({ url: "*://example.com/*", resourceTypes: ["main_frame"] }, (ctx, body) => {
+wt.onResponseBody({ url: "*://example.com/*", resourceTypes: ["main_frame"], strategy: "helper" }, (ctx, body) => {
     const html = typeof body === "string" ? body : new TextDecoder().decode(body);
     return html
         .replace("<title>Example Domain", "<title>Rewritten Domain")
@@ -143,7 +142,7 @@ wt.onDocument("*://en.wikipedia.org/wiki/*", () => {
         code: `// Try it: open https://en.wikipedia.org/robots.txt
 wt.about("Serve our own robots.txt");
 
-wt.replaceResponse("*://en.wikipedia.org/robots.txt", () => ({
+wt.replaceResponse({ url: "*://en.wikipedia.org/robots.txt", strategy: "helper" }, () => ({
     file: "data:text/plain;base64," + btoa("Served by Wiretrick instead of the real robots.txt"),
 }));`,
     },
@@ -153,7 +152,7 @@ wt.replaceResponse("*://en.wikipedia.org/robots.txt", () => ({
         code: `// Try it: open https://postman-echo.com/headers and reload a few times
 wt.about("Count requests in X-Hits");
 
-wt.onRequest("*://postman-echo.com/headers", async (ctx) => {
+wt.onRequest({ url: "*://postman-echo.com/headers", strategy: "helper" }, async (ctx) => {
     const hits = ((await wt.storage.get("hits")) || 0) + 1;
     await wt.storage.set("hits", hits);
     wt.log("request #" + hits, ctx.url);
@@ -175,7 +174,7 @@ const cfg = wt.params({
     extraHeaders: { type: "stringList", default: [], description: "Extra x-tag values" },
 });
 
-wt.onRequest("*://dummyjson.com/posts/*", () => {
+wt.onRequest({ url: "*://dummyjson.com/posts/*", strategy: "helper" }, () => {
     if (!cfg.enabled) return;
     return {
         replaceResponse: {

@@ -1,14 +1,12 @@
-/** Per-handler routes: normalization, matching, default strategy, and the page-side shim. */
-import { afterEach, describe, expect, it } from "vitest";
-import { builtinStrategy, effectiveStrategy, getDefaultStrategy, hookCanSee, normalizeRoute, routeGroups, routeLabel, routeMatches, scriptUrls, setDefaultStrategy } from "../src/shared/route";
+/** Per-handler routes: normalization, matching, required strategy, and the page-side shim. */
+import { describe, expect, it } from "vitest";
+import { effectiveStrategy, hookCanSee, normalizeRoute, routeGroups, routeLabel, routeMatches, scriptUrls } from "../src/shared/route";
 import { domHandlersFor, makePageShim } from "../src/shared/pageShim";
 
-afterEach(() => setDefaultStrategy(null));
-
 describe("normalizeRoute", () => {
-    it("accepts a string, a list, or { url, … }", () => {
-        expect(normalizeRoute("onRequest", "*://a.com/*", 0)).toEqual({ kind: "onRequest", index: 0, url: ["*://a.com/*"], exclude: [] });
-        expect(normalizeRoute("onRequest", ["*://a.com/*", "*://b.com/*"], 1).url).toEqual(["*://a.com/*", "*://b.com/*"]);
+    it("accepts { url, strategy } with a string or a list", () => {
+        expect(normalizeRoute("onRequest", { url: "*://a.com/*", strategy: "helper" }, 0)).toEqual({ kind: "onRequest", index: 0, url: ["*://a.com/*"], exclude: [], strategy: "helper" });
+        expect(normalizeRoute("onRequest", { url: ["*://a.com/*", "*://b.com/*"], strategy: "page" }, 1).url).toEqual(["*://a.com/*", "*://b.com/*"]);
         expect(normalizeRoute("onResponseBody", { url: "*", exclude: "*://a.com/*", methods: ["get", "Post"], resourceTypes: ["script"], strategy: "debugger" }, 2)).toEqual({
             kind: "onResponseBody",
             index: 2,
@@ -29,18 +27,28 @@ describe("normalizeRoute", () => {
         expect(() => normalizeRoute("onRequest", { url: "*", when: "document_idle" }, 0)).toThrow(/onDocument only/);
     });
 
+    it("network handlers require a strategy: bare patterns and strategy-less objects throw", () => {
+        for (const kind of ["onRequest", "onResponseHeaders", "replaceResponse", "onResponseBody"] as const) {
+            expect(() => normalizeRoute(kind, "*://a.com/*", 0)).toThrow(/bare URL pattern has no strategy — pass \{ url, strategy \}/);
+            expect(() => normalizeRoute(kind, ["*://a.com/*"], 0)).toThrow(/bare URL pattern/);
+            expect(() => normalizeRoute(kind, { url: "*://a.com/*" }, 0)).toThrow(/missing "strategy"/);
+        }
+        expect(normalizeRoute("onDocument", "*://a.com/*", 0).url).toEqual(["*://a.com/*"]);
+        expect(normalizeRoute("onDocument", ["*://a.com/*"], 0).url).toEqual(["*://a.com/*"]);
+    });
+
     it("rejects missing / malformed routes", () => {
-        expect(() => normalizeRoute("onRequest", () => {}, 0)).toThrow(/first argument must be a URL pattern/);
+        expect(() => normalizeRoute("onRequest", () => {}, 0)).toThrow(/first argument must be a route \{ url, strategy \}/);
         expect(() => normalizeRoute("onRequest", 42, 0)).toThrow(/first argument/);
         expect(() => normalizeRoute("onRequest", {}, 0)).toThrow(/missing "url"/);
-        expect(() => normalizeRoute("onRequest", { url: [1] }, 0)).toThrow(/must be strings/);
+        expect(() => normalizeRoute("onRequest", { url: [1], strategy: "helper" }, 0)).toThrow(/must be strings/);
         expect(() => normalizeRoute("onRequest", { url: "*", strategy: "auto" }, 0)).toThrow(/unknown strategy/);
         expect(() => normalizeRoute("onRequest", { url: "*", strategy: ["page"] }, 0)).toThrow(/single value/);
     });
 });
 
 describe("routeMatches", () => {
-    const r = (raw: unknown) => normalizeRoute("onRequest", raw, 0);
+    const r = (raw: unknown) => normalizeRoute("onRequest", typeof raw === "object" && !Array.isArray(raw) ? { strategy: "helper", ...raw } : { url: raw, strategy: "helper" }, 0);
 
     it("url ∧ ¬exclude", () => {
         const route = r({ url: "https://x.com/api/*", exclude: ["https://x.com/api/health", "https://x.com/api/metrics*"] });
@@ -76,24 +84,18 @@ describe("routeMatches", () => {
 });
 
 describe("strategy", () => {
-    it("route.strategy wins; otherwise settings.defaultStrategy; built-in default per browser", () => {
-        expect(builtinStrategy(false)).toBe("helper");
-        expect(builtinStrategy(true)).toBe("extension");
-        expect(getDefaultStrategy()).toBe("helper");
-        setDefaultStrategy("page");
-        expect(effectiveStrategy({})).toBe("page");
+    it("effectiveStrategy is the route's own strategy", () => {
         expect(effectiveStrategy({ strategy: "debugger" })).toBe("debugger");
-        setDefaultStrategy(null);
-        expect(effectiveStrategy({})).toBe("helper");
+        expect(effectiveStrategy(normalizeRoute("onRequest", { url: "*", strategy: "page" }, 0))).toBe("page");
     });
 
     it("hookCanSee: only fetch/XHR", () => {
-        expect(hookCanSee(normalizeRoute("onRequest", "*", 0))).toBe(true);
-        expect(hookCanSee(normalizeRoute("onRequest", { url: "*", resourceTypes: ["script"] }, 0))).toBe(false);
+        expect(hookCanSee(normalizeRoute("onRequest", { url: "*", strategy: "page" }, 0))).toBe(true);
+        expect(hookCanSee(normalizeRoute("onRequest", { url: "*", resourceTypes: ["script"], strategy: "page" }, 0))).toBe(false);
     });
 
     it("labels and url union", () => {
-        const a = normalizeRoute("onResponseBody", ["*://a.com/*", "*://b.com/*"], 1);
+        const a = normalizeRoute("onResponseBody", { url: ["*://a.com/*", "*://b.com/*"], strategy: "helper" }, 1);
         const b = normalizeRoute("onDocument", "*://a.com/*", 0);
         expect(routeLabel(a)).toBe("onResponseBody #2");
         expect(scriptUrls([a, b])).toEqual(["*://a.com/*", "*://b.com/*"]);
@@ -105,7 +107,7 @@ describe("page shim (onDocument in the page)", () => {
 
     it("collects several onDocument handlers with routes; network handlers are inert", () => {
         const { wt, dom } = shim();
-        wt.onRequest("*", () => {});
+        wt.onRequest({ url: "*", strategy: "helper" }, () => {});
         wt.onDocument({ url: "*://a.com/*", when: "document_idle" }, () => 1);
         wt.onDocument("*://b.com/*", () => 2);
         expect(dom.map((d) => [d.when, d.route.index])).toEqual([

@@ -110,7 +110,7 @@ describe("patternToRegex agrees with URLPattern", () => {
 });
 
 function probe(kind: NetKind, route: unknown, result: RuleProbe["result"], extra: Partial<RuleProbe> = {}): RuleProbe {
-    return { kind, route: normalizeRoute(kind, route, 0), captures: [], urlRead: false, result, ...extra };
+    return { kind, route: normalizeRoute(kind, typeof route === "object" && !Array.isArray(route) ? { strategy: "rules", ...route } : { url: route, strategy: "rules" }, 0), captures: [], urlRead: false, result, ...extra };
 }
 
 function ok(p: RuleProbe) {

@@ -268,13 +268,13 @@ function run(scripts: PlainScript[], paramValues: Record<string, any>, op: BodyO
 
 // ---- rules strategy: run each rules handler once (src/shared/rulesProbe.ts) ----
 
-async function rules(scripts: PlainScript[], paramValues: Record<string, any>, defaultStrategy: Strategy): Promise<{ results: Record<string, ScriptRules> }> {
+async function rules(scripts: PlainScript[], paramValues: Record<string, any>): Promise<{ results: Record<string, ScriptRules> }> {
     ensureCompiled(scripts, paramValues ?? {});
     const results: Record<string, ScriptRules> = {};
     for (const [id, c] of cache) {
         const s = scripts.find((x) => x.id === id);
         if (!s || !s.enabled || !c.result.meta.active || c.compiled.error) continue;
-        const r = await probeScriptRules(c.compiled.handlers, defaultStrategy);
+        const r = await probeScriptRules(c.compiled.handlers);
         if (r.rules.length || r.errors.length) results[id] = r;
     }
     return { results };
@@ -315,7 +315,7 @@ window.addEventListener("message", async (event) => {
         else if (op === "analyze") result = analyze(scripts, paramValues);
         else if (op === "compileOne") result = compileOne(data.payload.target, scripts, paramValues);
         else if (op === "run") result = await run(scripts, paramValues, bodyOp, args);
-        else if (op === "rules") result = await rules(scripts, paramValues, data.payload.defaultStrategy);
+        else if (op === "rules") result = await rules(scripts, paramValues);
         else if (op === "pac") result = { result: pacDecision(data.payload.source)(args.url, args.host) };
         else result = { error: `unknown op ${op}` };
         post({ kind: "sandboxResult", reqId: data.reqId, result });

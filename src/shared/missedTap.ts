@@ -107,7 +107,7 @@ export function missedReason(c: MissedCase): string | null {
  */
 export function routeProblem(r: { kind: RouteKind; strategy: Strategy; resourceTypes?: string[] }, env: { firefox: boolean; mv3: boolean }): string | null {
     const why = strategyUnsupported(r.strategy, env);
-    if (why) return `strategy "${r.strategy}" is ${why} — this handler doesn't run. Set another strategy in Settings → Strategy or on the route`;
+    if (why) return `strategy "${r.strategy}" is ${why} — this handler doesn't run. Set another strategy on the route`;
     const ws = wsRouteProblem(r);
     if (ws) return ws;
     if (r.strategy === "extension" && r.kind === "onResponseBody" && !env.firefox) {

@@ -97,12 +97,10 @@ _Avoid_: issue, diagnostic, error log
 ## Interception
 
 **Strategy**:
-The browser mechanism a handler intercepts through: `helper`, `page`, `extension` (the extension handles each request), `debugger` or `rules`. Each handler uses exactly one.
+The browser mechanism a handler intercepts through: `helper`, `page`, `extension` (the extension handles each request), `debugger` or `rules`. Each network handler names exactly one in its route.
 _Avoid_: tier, mode, backend, method, interception (as a section name), `process`, `hook`, `webrequest`, `webRequest`, `cdp`, `dnr`, `declarative`
 
-**Default strategy**:
-The strategy a handler uses when its route doesn't name one, chosen in Settings (`defaultStrategy` in `settings.yaml`).
-_Avoid_: global strategy, fallback
+There is no **default strategy**: every network handler's route names its own (required `strategy`).
 
 **Available**:
 Said of a strategy that can run in the current browser and build right now; a handler on an unavailable strategy doesn't run.

@@ -54,7 +54,7 @@ const openManager = async (): Promise<any> => {
 const seed = await openManager();
 const save = (id: string, name: string, code: string) =>
     seed.evaluate(({ id, name, code }: any) => new Promise((r) => chrome.runtime.sendMessage({ type: "saveScript", id, name, code }, r)), { id, name, code });
-await save("s_main", "main script", 'import { helper } from "./utilities";\nwt.onRequest("*://example.invalid/*", () => {});\nfunction local() {}\nhelper(1);\nlocal();\n');
+await save("s_main", "main script", 'import { helper } from "./utilities";\nwt.onRequest({ url: "*://example.invalid/*", strategy: "page" }, () => {});\nfunction local() {}\nhelper(1);\nlocal();\n');
 await save("u_util", "utilities", "export function helper(x: number) {\n    return x + 1;\n}\n");
 await seed.close();
 
@@ -258,7 +258,7 @@ check("dependant: importer cleared when the library is fixed", (await usesLibMar
 // error proves diagnostics are live.
 await clickScript("main script");
 await mgr.evaluate((c: string) => (window as any).monaco.editor.getEditors()[0].setValue(c), [
-    'wt.onRequest("*://example.invalid/*", () => {});',
+    'wt.onRequest({ url: "*://example.invalid/*", strategy: "helper" }, () => {});',
     'const p = new URLPattern("https://example.com/users/:id");',
     'const id: string | undefined = p.exec("https://example.com/users/42")?.pathname.groups.id;',
     "const last = [1, 2, 3].findLast((n) => n > 1);",

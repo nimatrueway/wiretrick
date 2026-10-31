@@ -59,7 +59,7 @@ Open the Editor (popup → **Open Editor**), click **+ New** and paste:
 
 ```ts
 // Try it: open https://dummyjson.com/todos/1
-wt.onResponseBody("*://dummyjson.com/todos/*", (ctx, body) => {
+wt.onResponseBody({ url: "*://dummyjson.com/todos/*", strategy: "helper" }, (ctx, body) => {
     const text = typeof body === "string" ? body : new TextDecoder().decode(body);
     const json = JSON.parse(text);
     json.todo = "Transformed by Wiretrick";

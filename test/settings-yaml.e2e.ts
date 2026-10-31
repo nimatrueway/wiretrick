@@ -35,11 +35,11 @@ try {
     await seed.goto(`chrome-extension://${extId}/editor.html`);
     await seed.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_dbg", name: "Debug header",
-        code: 'wt.params({ level: { type: "string", default: "warn", description: "Value of the x-debug header" } });\nwt.onRequest("*://example.invalid/*", () => {});\n',
+        code: 'wt.params({ level: { type: "string", default: "warn", description: "Value of the x-debug header" } });\nwt.onRequest({ url: "*://example.invalid/*", strategy: "page" }, () => {});\n',
     }, r)));
     await seed.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_note", name: "Notes",
-        code: 'wt.params({ body: { type: "string", multiline: true, default: "", description: "Free text" } });\nwt.onRequest("*://example.invalid/*", () => {});\n',
+        code: 'wt.params({ body: { type: "string", multiline: true, default: "", description: "Free text" } });\nwt.onRequest({ url: "*://example.invalid/*", strategy: "page" }, () => {});\n',
     }, r)));
     await seed.close();
 
@@ -173,7 +173,7 @@ try {
     await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "saveScript", id: "s_lib", name: "lib", code: "export const x = 1;\n" }, r)));
     await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_imp", name: "Importer",
-        code: 'import { x } from "./lib";\nwt.params({ p: { type: "string", default: String(x) } });\nwt.onRequest("*://example.invalid/*", () => {});\n',
+        code: 'import { x } from "./lib";\nwt.params({ p: { type: "string", default: String(x) } });\nwt.onRequest({ url: "*://example.invalid/*", strategy: "page" }, () => {});\n',
     }, r)));
     const gp: any = await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "getScriptParams", scriptId: "s_imp" }, r)));
     check("getScriptParams resolves imported library", gp?.defs?.p?.default === "1", JSON.stringify(gp));

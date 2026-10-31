@@ -9,8 +9,6 @@
  *   settings:
  *     # Minimum log level shown in the panel: debug | info | warn | error
  *     # logLevel: info
- *     # …strategy help (link + pros/cons)…
- *     # defaultStrategy: helper
  *
  *   params:
  *     My Script:
@@ -35,8 +33,6 @@
  */
 import { parse, stringify, Document, isScalar, Scalar } from "yaml";
 import { resolveParamValues, isValidParamValue, paramDefault, type ParamDef } from "./scriptDef";
-import { builtinStrategy, STRATEGIES } from "./route";
-import { STRATEGY_DOC_URL, STRATEGY_INFO } from "./strategyInfo";
 import { DEFAULT_TEXT_TYPES } from "./bodyKind";
 
 export const SETTINGS_FILE = "settings.yaml";
@@ -58,18 +54,11 @@ export const BODY_CAP_DESC = `Network view: kB of each request/response body kep
 export interface GlobalSettings {
     logLevel: string;
     logCap: number;
-    /** default interception strategy (route.strategy overrides per handler) */
-    defaultStrategy: string;
     /** Content-Type globs onResponseBody gets as text; undefined = DEFAULT_TEXT_TYPES */
     textTypes?: string[];
     /** Network body capture cap in kB; undefined = DEFAULT_BODY_CAP */
     bodyCap?: number;
 }
-
-/** the strategy settings.yaml falls back to when `defaultStrategy` is absent */
-export const defaultStrategySetting = (): string => builtinStrategy();
-
-export const isStrategy = (v: unknown): boolean => typeof v === "string" && (STRATEGIES as string[]).includes(v);
 
 /** a valid settings.textTypes value: a non-empty list of non-empty strings */
 export const isTextTypes = (v: unknown): v is string[] => Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === "string" && x.trim() !== "");
@@ -155,7 +144,7 @@ export function commentedDefaultLines(key: string, d: ParamDef | undefined): str
     return out;
 }
 
-export const GLOBAL_KEYS = ["logLevel", "logCap", "defaultStrategy", "textTypes", "bodyCap"] as const;
+export const GLOBAL_KEYS = ["logLevel", "logCap", "textTypes", "bodyCap"] as const;
 
 /**
  * One global setting's documented lines at indent 0 (description comments
@@ -167,14 +156,7 @@ export function globalOptionLines(key: (typeof GLOBAL_KEYS)[number], g: GlobalSe
     if (key === "logLevel") option(out, 0, "logLevel", `Minimum log level shown in the panel: ${LOG_LEVELS.join(" | ")}`, g.logLevel, DEFAULT_LOG_LEVEL);
     else if (key === "logCap") option(out, 0, "logCap", "Log lines kept in the panel (100..10000)", g.logCap, DEFAULT_LOG_CAP);
     else if (key === "bodyCap") option(out, 0, "bodyCap", BODY_CAP_DESC, g.bodyCap ?? DEFAULT_BODY_CAP, DEFAULT_BODY_CAP);
-    else if (key === "textTypes") option(out, 0, "textTypes", TEXT_TYPES_DESC, g.textTypes ?? [...DEFAULT_TEXT_TYPES], [...DEFAULT_TEXT_TYPES]);
-    else {
-        out.push("# Interception strategy for every handler whose route doesn't set `strategy`.");
-        out.push("# An unavailable strategy means the handler doesn't run (warned) — no fallback.");
-        out.push(`# Compatibility: ${STRATEGY_DOC_URL}`);
-        for (const s of STRATEGIES) out.push(`#   ${s}: + ${clean(STRATEGY_INFO[s].pros)} − ${clean(STRATEGY_INFO[s].cons)}`);
-        option(out, 0, "defaultStrategy", `${STRATEGIES.join(" | ")}`, g.defaultStrategy, defaultStrategySetting());
-    }
+    else option(out, 0, "textTypes", TEXT_TYPES_DESC, g.textTypes ?? [...DEFAULT_TEXT_TYPES], [...DEFAULT_TEXT_TYPES]);
     return out;
 }
 
@@ -259,8 +241,6 @@ export function planSettings(doc: SettingsDoc, current: GlobalSettings, scripts:
         if (typeof lv === "string" && (LOG_LEVELS as readonly string[]).includes(lv) && lv !== current.logLevel) globals.logLevel = lv;
         const cap = doc.settings.logCap === undefined ? DEFAULT_LOG_CAP : doc.settings.logCap;
         if (typeof cap === "number" && Number.isInteger(cap) && cap >= 100 && cap <= 10000 && cap !== current.logCap) globals.logCap = cap;
-        const st = doc.settings.defaultStrategy === undefined ? defaultStrategySetting() : doc.settings.defaultStrategy;
-        if (isStrategy(st) && st !== current.defaultStrategy) globals.defaultStrategy = st as string;
         const tt = doc.settings.textTypes === undefined ? [...DEFAULT_TEXT_TYPES] : doc.settings.textTypes;
         if (isTextTypes(tt) && !same(tt, current.textTypes ?? DEFAULT_TEXT_TYPES)) globals.textTypes = tt;
         const bc = doc.settings.bodyCap === undefined ? DEFAULT_BODY_CAP : doc.settings.bodyCap;

@@ -23,7 +23,7 @@ import { cleanScriptName, scriptNameProblem, scriptFileName, scriptFileKey, uniq
 import { buildBundle, parseBundleText, bundleSettingsDoc, pickBundle, vscodeTargetPath, editorLaunchUrl, launchAppName, copyPathHint, hostOs, cleanFolderPath, type LaunchMode } from "./bundle";
 import { createQuickOpenPalette } from "./quickOpen";
 import { computeDirty } from "./dirtyState";
-import { parseSettings, SETTINGS_FILE, defaultStrategySetting, isStrategy, isBodyCap, BODY_CAP_KEY, DEFAULT_BODY_CAP, BODY_CAP_MIN, BODY_CAP_MAX, type SettingsDoc } from "../shared/settingsYaml";
+import { parseSettings, SETTINGS_FILE, isBodyCap, BODY_CAP_KEY, DEFAULT_BODY_CAP, BODY_CAP_MIN, BODY_CAP_MAX, type SettingsDoc } from "../shared/settingsYaml";
 import { STRATEGIES, type Strategy } from "../shared/route";
 import { STRATEGY_DOC_URL, STRATEGY_INFO, strategyUnsupported } from "../shared/strategyInfo";
 import { dlogLevel } from "../shared/debugLog";
@@ -459,7 +459,7 @@ function renderList(): void {
         label.title = [
             r.depth ? scriptFileName(script.meta.name) : "",
             script.meta.description ?? "",
-            isLib ? "Library — registers no handlers with its current params, importable by other scripts. Register a handler (e.g. wt.onRequest(url, fn)) to make it a script" : script.meta.match.join(", "),
+            isLib ? "Library — registers no handlers with its current params, importable by other scripts. Register a handler (e.g. wt.onRequest({ url, strategy }, fn)) to make it a script" : script.meta.match.join(", "),
             off ? "Disabled — enable it from the toolbar or the right-click menu" : "",
             "Double-click or F2 to rename",
         ].filter(Boolean).join("\n");
@@ -2546,38 +2546,24 @@ function setupDialogs(): void {
         applyLogLevel(sel.value);
     });
 
-    // settings: default interception strategy
+    // settings: strategy reference (every handler names its own strategy)
     const strategyTable = $("#settings-strategy-table") as HTMLTableElement;
     ($("#settings-strategy-doc") as HTMLAnchorElement).href = STRATEGY_DOC_URL;
     const strategyEnv = { firefox: typeof (globalThis as any).browser?.webRequest?.filterResponseData === "function", mv3: __MV3__ };
-    const pickStrategy = (s: Strategy): void => {
-        chrome.storage.local.set({ resStrategy: s });
-        renderStrategy(s);
-    };
-    // the table is the picker: one radio per row; an unavailable strategy can't be picked
-    const renderStrategy = (cur: string): void => {
-        strategyTable.replaceChildren();
+    {
         const head = strategyTable.insertRow();
         for (const t of ["Strategy", "Pros", "Cons"]) head.appendChild(Object.assign(document.createElement("th"), { textContent: t }));
         for (const s of STRATEGIES) {
             const row = strategyTable.insertRow();
             const why = strategyUnsupported(s, strategyEnv);
-            row.classList.toggle("current", s === cur);
             row.classList.toggle("unavailable", !!why);
-            const label = document.createElement("label");
-            const radio = Object.assign(document.createElement("input"), { type: "radio", name: "settings-strategy", value: s, checked: s === cur, disabled: !!why });
-            radio.addEventListener("change", () => pickStrategy(s));
-            label.append(radio, s + (s === defaultStrategySetting() ? " (default)" : ""));
             const cell = row.insertCell();
-            cell.append(label);
+            cell.append(Object.assign(document.createElement("code"), { textContent: s }));
             if (why) cell.append(Object.assign(document.createElement("div"), { className: "strategy-why", textContent: why }));
-            else row.addEventListener("click", (e) => (e.target as Element).closest("label") || (s !== cur && pickStrategy(s)));
             row.insertCell().textContent = STRATEGY_INFO[s].pros;
             row.insertCell().textContent = STRATEGY_INFO[s].cons;
         }
-    };
-    renderStrategy(defaultStrategySetting());
-    chrome.storage.local.get("resStrategy", (d) => renderStrategy(isStrategy(d?.resStrategy) ? d.resStrategy : defaultStrategySetting()));
+    }
 
     // verbose Monaco/navigation diagnostics
     const verboseBox = $("#settings-monaco-verbose") as HTMLInputElement;
@@ -2643,13 +2629,12 @@ function setupDialogs(): void {
             sel.value = c.resLogLevel.newValue;
             applyLogLevel(c.resLogLevel.newValue);
         }
-        if (c.resStrategy) renderStrategy(isStrategy(c.resStrategy.newValue) ? c.resStrategy.newValue : defaultStrategySetting());
         if (c.resLogCap?.newValue) {
             logCap = c.resLogCap.newValue;
             capInput.value = String(logCap);
             refilterLog();
         }
-        if (c.resScripts || c.resParams || c.resLogLevel || c.resLogCap || c.resStrategy || c[BODY_CAP_KEY] || c.resSettingsText || c.resDataFiles || c.resFolders) {
+        if (c.resScripts || c.resParams || c.resLogLevel || c.resLogCap || c[BODY_CAP_KEY] || c.resSettingsText || c.resDataFiles || c.resFolders) {
             void (async () => {
                 if (selectedId === SETTINGS_ID) await loadSettingsModel();
                 // data files / folders change the script order (folders) or importers' errors

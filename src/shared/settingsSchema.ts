@@ -13,8 +13,6 @@
 import { LOG_LEVELS, DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL, TEXT_TYPES_DESC, DEFAULT_BODY_CAP, BODY_CAP_MIN, BODY_CAP_MAX, type ScriptSettingsState } from "./settingsYaml";
 import { DEFAULT_TEXT_TYPES } from "./bodyKind";
 import { paramDefault, type ParamDef } from "./scriptDef";
-import { builtinStrategy, STRATEGIES } from "./route";
-import { strategyMarkdown, strategyEnumMarkdown } from "./strategyInfo";
 import { GENERATED_NOTE } from "./generatedFiles";
 
 export const SETTINGS_SCHEMA = {
@@ -42,14 +40,6 @@ export const SETTINGS_SCHEMA = {
                     maximum: 10000,
                     default: DEFAULT_LOG_CAP,
                     description: "Log lines kept in the panel",
-                },
-                defaultStrategy: {
-                    type: "string",
-                    enum: [...STRATEGIES],
-                    default: builtinStrategy(),
-                    description: "Default interception strategy for handlers whose route doesn't set `strategy` (see docs/strategies.md#compatibility)",
-                    markdownDescription: strategyMarkdown(),
-                    markdownEnumDescriptions: strategyEnumMarkdown(),
                 },
                 textTypes: {
                     type: "array",

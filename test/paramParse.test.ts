@@ -23,7 +23,7 @@ const cfg = wt.params({
 const hosts = wt.defineParam("hosts", { type: "stringList", default: ["a.com"], parse: (l) => new Set(l) });
 const mode = wt.defineParam("mode", { type: "enum", choices: ["x", "y"], parse: (c) => c.toUpperCase() });
 wt.log(cfg.origin.host, cfg.n, cfg.plain, [...hosts].join("+"), mode);
-wt.onRequest(\`*://\${cfg.origin.host}/*\`, () => {});
+wt.onRequest({ url: \`*://\${cfg.origin.host}/*\`, strategy: "helper" }, () => {});
 `;
 
 function logged(code: string, paramValues?: Record<string, any>) {
@@ -95,7 +95,7 @@ describe("param parse (settings keep raw values)", () => {
     it("settings.yaml export/import and the schema see raw values only", () => {
         const { c } = logged(CODE, { origin: "https://b.org" });
         const state = { name: "s", declared: true, enabled: true, defs: c.paramDefs!, values: { origin: "https://b.org", hosts: ["p"] } };
-        const G = { logLevel: "info", logCap: 500, defaultStrategy: "helper" } as const;
+        const G = { logLevel: "info", logCap: 500 } as const;
         const yaml = renderSettings(G, [state]);
         expect(yaml).toContain("origin: https://b.org");
         expect(yaml).not.toMatch(/parse|=>/);

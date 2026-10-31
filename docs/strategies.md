@@ -4,24 +4,18 @@
 
 Chrome and Firefox have fundamentally different extension APIs, and Chrome
 itself can only reach some resources through some paths. Wiretrick therefore
-has five **interception strategies**. Every handler runs on exactly
-**one** of them:
-
-1. its route's `strategy`, if set;
-2. else the default from **Settings → Strategy** (`defaultStrategy:` in
-   `settings.yaml`);
-3. else the built-in default: `helper` on Chromium, `extension` on
-   Firefox.
-
-```yaml
-settings:
-  defaultStrategy: helper
-```
+has five **interception strategies**. Every network handler names exactly
+**one** of them in its route's `strategy` — it is required, and there is
+no default:
 
 ```ts
-wt.onRequest("*://api.example.com/*", fn);                                  // settings default
-wt.onResponseBody({ url: "https://example.com/app/*.js", strategy: "debugger" }, fn); // this handler only
+wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, fn);
+wt.onResponseBody({ url: "https://example.com/app/*.js", strategy: "debugger" }, fn);
 ```
+
+A route without `strategy` (or a bare URL pattern such as
+`wt.onRequest("*://example.com/*", fn)`) makes the script fail to load: the
+Problems view shows the error at that line until the route names one.
 
 `strategy` is a single value — there are no priority lists and no `auto`.
 **There is no fallback:** when the chosen strategy isn't available, the
@@ -43,11 +37,11 @@ setting ([details](scripting.md#dom-changes--wtondocument)).
 
 ## Pros and cons
 
-The same text is shown under the strategy picker in Settings → Strategy.
+The same text is shown in Settings → Strategies.
 
 | strategy | pros | cons |
 |---|---|---|
-| `helper` *(default, Chromium)* | Sees everything: documents, `<script src>`, CSS, images, workers, the first navigation. No banner. Async handlers, any status code, URL unchanged. | Chromium only. One-time install of the local helper and trust in the helper certificate. Matched hosts go through a local proxy (PAC); cert-pinned / mTLS sites break. Small per-request latency; bodies are buffered for `onResponseBody`. |
+| `helper` | Sees everything: documents, `<script src>`, CSS, images, workers, the first navigation. No banner. Async handlers, any status code, URL unchanged. | Chromium only. One-time install of the local helper and trust in the helper certificate. Matched hosts go through a local proxy (PAC); cert-pinned / mTLS sites break. Small per-request latency; bodies are buffered for `onResponseBody`. |
 | `page` | No setup, no banner, no permissions, lightest. Works in every browser. | Only the page's own fetch/XHR. Misses documents, `<script src>`, images, workers and requests made before the page patch loads. |
 | `extension` *(default, Firefox)* | No banner, no setup. On Firefox it reaches everything, bodies included. | Not on Chrome (MV3). Chromium MV2: no `onResponseBody`, no async handlers, replacements are served by redirect (URL changes, status always 200) — a replaced page shows a `chrome-extension://` URL. Firefox: can't change a replaced response's status. |
 | `debugger` | Sees everything with nothing to install. | Chromium only. Chrome shows a "being debugged" banner while attached. May miss the first navigation in a fresh tab ([details](#first-page-load-with-debugger)). |

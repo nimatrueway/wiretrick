@@ -10,7 +10,7 @@ import { getDebugBuffer } from "../shared/debugLog";
 import { isRecording, networkSnapshot } from "./network";
 import { getSettingsText } from "./settingsFile";
 import type { NetBody, NetEntry } from "../shared/netTypes";
-import { getDefaultStrategy, routeLabel } from "../shared/route";
+import { routeLabel } from "../shared/route";
 
 const SECRET_HEADERS = /^(cookie|set-cookie|authorization|proxy-authorization|x-api-key|x-auth-token|x-csrf-token|x-xsrf-token)$/i;
 const BODY_CAP = 4000;
@@ -120,7 +120,7 @@ export async function collectDiagnostics(extra: DiagnosticsExtra = {}): Promise<
     out.push("");
     out.push(
         [
-            "Wiretrick is a browser extension that runs user TypeScript scripts (`wt.onRequest(url, fn)`, `wt.onResponseBody(url, fn)`, …) to intercept requests.",
+            "Wiretrick is a browser extension that runs user TypeScript scripts (`wt.onRequest({ url, strategy }, fn)`, `wt.onResponseBody({ url, strategy }, fn)`, …) to intercept requests.",
             "Interception strategies: `page` (page fetch/XHR patch), `debugger` (chrome.debugger), `extension` (MV2 blocking webRequest), `helper` (local helper proxy).",
             "Log view lines are per-tab (`tab=-1` = background/global); `[extension]` lines trace the extension strategy (onBeforeRequest → script decision → redirect/complete/FAILED/IGNORED).",
             "If a URL never appears in the Log view/debug log, the extension never saw that request. Debug-level lines are only produced when `logLevel: debug`.",
@@ -155,7 +155,7 @@ export async function collectDiagnostics(extra: DiagnosticsExtra = {}): Promise<
         out.push(
             fence(
                 "json",
-                JSON.stringify({ id: s.id, active: s.meta.active, description: s.meta.description, routes: (s.meta.routes || []).map((r) => ({ handler: routeLabel(r), ...r, kind: undefined, index: undefined, strategy: r.strategy ?? `(default: ${getDefaultStrategy()})` })), error: s.error, params: params[s.id] || {}, updatedAt: iso(s.updatedAt) }, null, 2)
+                JSON.stringify({ id: s.id, active: s.meta.active, description: s.meta.description, routes: (s.meta.routes || []).map((r) => ({ handler: routeLabel(r), ...r, kind: undefined, index: undefined })), error: s.error, params: params[s.id] || {}, updatedAt: iso(s.updatedAt) }, null, 2)
             )
         );
         out.push("");

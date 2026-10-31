@@ -2,7 +2,7 @@ import { renameSettingsSection } from "../src/shared/settingsYamlPatch";
 import { uniqueScriptName } from "../src/shared/scriptName";
 import { describe, it, expect } from "vitest";
 import {
-    parseSettings, renderSettings, planSettings, yamlKey, SCHEMA_MODELINE, SETTINGS_FILE, defaultStrategySetting,
+    parseSettings, renderSettings, planSettings, yamlKey, SCHEMA_MODELINE, SETTINGS_FILE,
     type ScriptSettingsState,
 } from "../src/shared/settingsYaml";
 import { patchSettings } from "../src/shared/settingsYamlPatch";
@@ -20,7 +20,7 @@ const script = (over: Partial<ScriptSettingsState> = {}): ScriptSettingsState =>
     values: {},
     ...over,
 });
-const G = { logLevel: "info", logCap: 500, defaultStrategy: "helper" };
+const G = { logLevel: "info", logCap: 500 };
 
 describe("settings.yaml render", () => {
     it("starts with the schema modeline and comments out defaults, with descriptions", () => {
@@ -36,7 +36,7 @@ describe("settings.yaml render", () => {
     });
 
     it("emits only user-set values as live entries", () => {
-        const t = renderSettings({ logLevel: "warn", logCap: 500, defaultStrategy: "helper" }, [script({ enabled: false, values: { level: "warn", tags: ["a"] } })]);
+        const t = renderSettings({ logLevel: "warn", logCap: 500 }, [script({ enabled: false, values: { level: "warn", tags: ["a"] } })]);
         expect(t).toContain("  # default: info\n  logLevel: warn");
         expect(t).toContain("    # default: true\n    enabled: false");
         expect(t).toContain("    # default: info\n    level: warn");
@@ -53,8 +53,8 @@ describe("settings.yaml render", () => {
 
     it("render → parse → plan is a fixpoint", () => {
         const s = script({ enabled: false, values: { n: 3 } });
-        const t = renderSettings({ logLevel: "debug", logCap: 900, defaultStrategy: "helper" }, [s]);
-        expect(planSettings(parseSettings(t), { logLevel: "debug", logCap: 900, defaultStrategy: "helper" }, [s])).toEqual({ globals: {}, scripts: [] });
+        const t = renderSettings({ logLevel: "debug", logCap: 900 }, [s]);
+        expect(planSettings(parseSettings(t), { logLevel: "debug", logCap: 900 }, [s])).toEqual({ globals: {}, scripts: [] });
     });
 
     it("separates script sections with a blank line", () => {
@@ -110,8 +110,8 @@ describe("settings.yaml apply", () => {
     });
 
     it("leaves scripts / globals without a section alone", () => {
-        expect(planSettings(parseSettings(""), { logLevel: "warn", logCap: 900, defaultStrategy: "helper" }, [script({ enabled: false })])).toEqual({ globals: {}, scripts: [] });
-        expect(planSettings(parseSettings("# only a comment\n"), { logLevel: "warn", logCap: 900, defaultStrategy: "helper" }, [script({ enabled: false })])).toEqual({ globals: {}, scripts: [] });
+        expect(planSettings(parseSettings(""), { logLevel: "warn", logCap: 900 }, [script({ enabled: false })])).toEqual({ globals: {}, scripts: [] });
+        expect(planSettings(parseSettings("# only a comment\n"), { logLevel: "warn", logCap: 900 }, [script({ enabled: false })])).toEqual({ globals: {}, scripts: [] });
     });
 
     it("plans bodyCap (kB): valid integers in range; missing = default", () => {
@@ -129,7 +129,7 @@ describe("settings.yaml apply", () => {
     it("a present-but-all-commented section resets it to defaults", () => {
         const doc = parseSettings("settings:\n  # logLevel: info\nparams:\n  My Script:\n    # n: 1\n");
         expect(doc).toEqual({ settings: {}, params: { "My Script": {} } });
-        const plan = planSettings(doc, { logLevel: "warn", logCap: 500, defaultStrategy: "helper" }, [script({ values: { n: 9 } })]);
+        const plan = planSettings(doc, { logLevel: "warn", logCap: 500 }, [script({ values: { n: 9 } })]);
         expect(plan).toEqual({ globals: { logLevel: "info" }, scripts: [{ name: "My Script", params: { n: 1 } }] });
     });
 
@@ -161,11 +161,11 @@ describe("settings.yaml patching", () => {
     ].join("\n");
 
     it("is a no-op when state matches (byte-for-byte)", () => {
-        expect(patchSettings(hand, { logLevel: "warn", logCap: 500, defaultStrategy: "helper" }, [script({ values: { level: "warn" } })])).toBe(hand);
+        expect(patchSettings(hand, { logLevel: "warn", logCap: 500 }, [script({ values: { level: "warn" } })])).toBe(hand);
     });
 
     it("rewrites only the changed values, byte-for-byte elsewhere", () => {
-        const out = patchSettings(hand, { logLevel: "error", logCap: 500, defaultStrategy: "helper" }, [script({ values: { level: "info" } })])!;
+        const out = patchSettings(hand, { logLevel: "error", logCap: 500 }, [script({ values: { level: "info" } })])!;
         expect(out).toBe(hand.replace('"warn"   # keep', '"error"   # keep').replace('level: "warn"  # trailing', 'level: "info"  # trailing'));
     });
 
@@ -177,12 +177,12 @@ describe("settings.yaml patching", () => {
     });
 
     it("inserts a missing live entry under its commented default", () => {
-        const out = patchSettings(hand, { logLevel: "warn", logCap: 500, defaultStrategy: "helper" }, [script({ enabled: false, values: { level: "warn" } })])!;
+        const out = patchSettings(hand, { logLevel: "warn", logCap: 500 }, [script({ enabled: false, values: { level: "warn" } })])!;
         expect(out).toBe(hand.replace("    # enabled: true\n", "    # enabled: true\n    enabled: false\n"));
     });
 
     it("inserts new entries and appends missing script sections", () => {
-        const out = patchSettings(hand, { logLevel: "warn", logCap: 500, defaultStrategy: "helper" }, [
+        const out = patchSettings(hand, { logLevel: "warn", logCap: 500 }, [
             script({ values: { level: "warn", n: 4 } }),
             script({ name: "Other", values: { n: 2 } }),
         ])!;
@@ -199,7 +199,7 @@ describe("settings.yaml patching", () => {
     it("documents a newly declared param (even at its default) in a documented section", () => {
         // `hand` documents level/n/tags/enabled; a new `extra` param appears
         const withExtra = script({ values: { level: "warn" }, defs: { ...defs, extra: { type: "string", default: "x", description: "Extra knob" } } });
-        const out = patchSettings(hand, { logLevel: "warn", logCap: 500, defaultStrategy: "helper" }, [withExtra])!;
+        const out = patchSettings(hand, { logLevel: "warn", logCap: 500 }, [withExtra])!;
         expect(out).toContain('    level: "warn"  # trailing\n    # Extra knob\n    # extra: x\n');
         expect(parseSettings(out).params["My Script"]).toEqual({ level: "warn" }); // commented → not live
     });
@@ -230,19 +230,19 @@ describe("settings.yaml patching", () => {
 
     it("appends a missing params section at the document end", () => {
         const doc = "# yaml-language-server: $schema=./settings.schema.json\nsettings:\n  logLevel: warn\n";
-        const out = patchSettings(doc, { logLevel: "warn", logCap: 500, defaultStrategy: "helper" }, [script({ name: "New", values: { n: 3 } })])!;
+        const out = patchSettings(doc, { logLevel: "warn", logCap: 500 }, [script({ name: "New", values: { n: 3 } })])!;
         expect(out).toBe(doc + "\nparams:\n  New:\n    # Run this script\n    # enabled: true\n    # Value of the x-debug header (info | warn)\n    # level: info\n    # n\n    # default: 1\n    n: 3\n    # tags\n    # tags: []\n");
     });
 
     it("appends a missing settings section at the document end", () => {
         const doc = "params:\n  My Script:\n    n: 1\n";
-        const out = patchSettings(doc, { logLevel: "error", logCap: 500, defaultStrategy: "helper" }, [script({ values: { n: 1 } })])!;
+        const out = patchSettings(doc, { logLevel: "error", logCap: 500 }, [script({ values: { n: 1 } })])!;
         expect(out).toBe(doc + "\nsettings:\n  logLevel: error\n");
     });
 
     it("inserts live entries into an all-commented (null) section", () => {
         const doc = "settings:\n  # logLevel: info\n\nparams:\n  My Script:\n    # enabled: true\n    # level: info\n";
-        const out = patchSettings(doc, { logLevel: "warn", logCap: 500, defaultStrategy: "helper" }, [script({ enabled: false })] )!;
+        const out = patchSettings(doc, { logLevel: "warn", logCap: 500 }, [script({ enabled: false })] )!;
         expect(out).toContain("settings:\n  # logLevel: info\n  logLevel: warn\n");
         // the live entry lands under its commented default…
         expect(out).toContain("  My Script:\n    # enabled: true\n    enabled: false\n    # level: info\n");
@@ -260,8 +260,8 @@ describe("settings.yaml patching", () => {
 
     it("render of a patched file stays parse-equivalent to canonical state", () => {
         const st = [script({ enabled: false, values: { level: "warn", n: 9 } })];
-        const out = patchSettings(hand, { logLevel: "debug", logCap: 700, defaultStrategy: "helper" }, st)!;
-        expect(planSettings(parseSettings(out), { logLevel: "debug", logCap: 700, defaultStrategy: "helper" }, st)).toEqual({ globals: {}, scripts: [] });
+        const out = patchSettings(hand, { logLevel: "debug", logCap: 700 }, st)!;
+        expect(planSettings(parseSettings(out), { logLevel: "debug", logCap: 700 }, st)).toEqual({ globals: {}, scripts: [] });
     });
 
     it("returns null for unparsable text, wrong-shaped sections and empty input", () => {
@@ -333,10 +333,10 @@ describe("script name helpers", () => {
 
 describe("settings added by an update", () => {
     it("documents a global setting an existing file doesn't mention, leaving the rest byte-for-byte", () => {
-        const G = { logLevel: "info", logCap: 500, defaultStrategy: defaultStrategySetting() } as any;
+        const G = { logLevel: "info", logCap: 500 } as any;
         const full = renderSettings(G, []);
-        // an older file: no strategy documentation at all
-        const old = full.slice(0, full.indexOf("  # Interception strategy"));
+        // an older file: no textTypes / bodyCap documentation at all
+        const old = full.slice(0, full.indexOf("  # Content-Types onResponseBody"));
         const patched = patchSettings(old, G, [])!;
         expect(patched).toBe(full);
         expect(patchSettings(full, G, [])).toBe(full);
@@ -344,6 +344,6 @@ describe("settings added by an update", () => {
 
     it("doesn't add documentation to a settings section the user stripped of comments", () => {
         const text = "settings:\n  logLevel: warn\n";
-        expect(patchSettings(text, { logLevel: "warn", logCap: 500, defaultStrategy: defaultStrategySetting() } as any, [])).toBe(text);
+        expect(patchSettings(text, { logLevel: "warn", logCap: 500 } as any, [])).toBe(text);
     });
 });

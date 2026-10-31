@@ -106,3 +106,12 @@ export function storageSet(items: Record<string, any>): Promise<void> {
         });
     });
 }
+
+export function storageRemove(keys: string | string[]): Promise<void> {
+    return new Promise((resolve) => {
+        chrome.storage.local.remove(keys, () => {
+            void (chrome.runtime as any).lastError;
+            resolve();
+        });
+    });
+}

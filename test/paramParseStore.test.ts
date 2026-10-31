@@ -31,7 +31,7 @@ addUiPort({ postMessage: (m: any) => m?.type === "log" && logs.push(m.entry), on
 
 const CODE = `
 const cfg = wt.params({ origin: { type: "string", default: "https://a.com", parse: (s) => new URL(s) } });
-wt.onRequest(\`*://\${cfg.origin.host}/*\`, () => {});
+wt.onRequest({ url: \`*://\${cfg.origin.host}/*\`, strategy: "helper" }, () => {});
 `;
 const get = async (id: string) => (await listScripts()).find((s) => s.id === id)!;
 

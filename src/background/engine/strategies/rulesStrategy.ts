@@ -13,7 +13,7 @@
  * Requests matched by an active rule are marked Modified in the Network
  * view (our own matcher on observed requests; no feedback permission).
  */
-import { getDefaultStrategy, routeLabel, routeMatches, type NetKind, type RouteMeta } from "../../../shared/route";
+import { routeLabel, routeMatches, type NetKind, type RouteMeta } from "../../../shared/route";
 import { reportSkipped } from "../skipped";
 import { regexCost, ruleErrorLine, substitute, type RuleSpec } from "../../../shared/dnrRules";
 import { probeScriptRules, type ScriptRules } from "../../../shared/rulesProbe";
@@ -114,7 +114,7 @@ export class RulesStrategy {
             return;
         }
         const enabled = scripts.filter((s) => s.enabled);
-        const sig = JSON.stringify([enabled.map((s) => [s.id, s.updatedAt, s.meta.name]), paramValues, getDefaultStrategy(), dataFilesSig(), packagesSig()]);
+        const sig = JSON.stringify([enabled.map((s) => [s.id, s.updatedAt, s.meta.name]), paramValues, dataFilesSig(), packagesSig()]);
         if (__MV3__ && (await this.restoreCache(sig))) return;
 
         const probed = await this.probe(scripts, owners, paramValues);
@@ -197,7 +197,7 @@ export class RulesStrategy {
         const ownerIds = new Set(owners.map((s) => s.id));
         for (const c of compileMv2(scripts, paramValues, (s) => ownerIds.has(s.id))) {
             if (c.compiled.error) continue;
-            out.set(c.id, await probeScriptRules(c.compiled.handlers, getDefaultStrategy()));
+            out.set(c.id, await probeScriptRules(c.compiled.handlers));
         }
         return out;
     }

@@ -1,6 +1,5 @@
 /** Observed vs modified: log-line classification, the separate "observed" log ring, and the Network filter/counts. */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { setDefaultStrategy } from "../src/shared/route";
 import { outcomeKind, observedLine } from "../src/shared/netTypes";
 import { addUiPort, allLogs, clearTab, log, logObserved, type LogEntry } from "../src/background/engine/logs";
 import { touchCounts, touchState } from "../src/ui/network/netFormat";
@@ -8,8 +7,6 @@ import { compileQuery, parseQuery } from "../src/ui/network/netQuery";
 import type { NetEntry, NetOutcome } from "../src/shared/netTypes";
 
 // these suites exercise the extension strategy: make it the settings default
-beforeEach(() => setDefaultStrategy("extension"));
-afterEach(() => setDefaultStrategy(null));
 
 describe("outcomeKind", () => {
     it("an explicit kind wins", () => {

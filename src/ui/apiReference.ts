@@ -11,12 +11,12 @@ const ADV_SHORT = `"page" is the lightest strategy, but it only sees the page's 
 export const API_REFERENCE: ApiSection[] = [
     {
         title: "Script structure — routes",
-        body: `Every handler takes its own route first, then the function. A script is active when its top level registers at least one handler; a file that registers none is a library (importable, never runs on its own).
+        body: `Every handler takes its own route first, then the function. A network handler's route is an object with url and strategy — there is no default strategy. A script is active when its top level registers at least one handler; a file that registers none is a library (importable, never runs on its own).
 
-wt.onRequest("*://example.com/*", (ctx) => ({ headers: { set: { "x-debug": "1" } } }));
-wt.onResponseBody(["*://api.example.com/v1/*", "*://cdn.example.com/*.json"], (ctx, body) => body);
+wt.onRequest({ url: "*://example.com/*", strategy: "helper" }, (ctx) => ({ headers: { set: { "x-debug": "1" } } }));
+wt.onResponseBody({ url: ["*://api.example.com/v1/*", "*://cdn.example.com/*.json"], strategy: "helper" }, (ctx, body) => body);
 
-A route is a URLPattern string, a list of them, or an object (next section). URL patterns follow ${MDN}: * is a wildcard within a URL part, :name a named segment (→ ctx.groups.name), an omitted query/hash matches any, and "<all_urls>" matches everything. An empty list matches nothing.
+url is a URLPattern string or a list of them (more route options in the next section; wt.onDocument also takes a bare pattern). URL patterns follow ${MDN}: * is a wildcard within a URL part, :name a named segment (→ ctx.groups.name), an omitted query/hash matches any, and "<all_urls>" matches everything. An empty list matches nothing.
     "*://example.com/*"                     any scheme, any path on example.com
     "https://*.example.com/api/*"           every subdomain (not example.com itself)
     "https://cdn.example.com/static/*.js"   only .js files under /static/
@@ -28,14 +28,14 @@ Tip: ${ADV_SHORT}`,
     },
     {
         title: "Route object — exclude, methods, resourceTypes, strategy",
-        body: `The full form narrows a route and picks its strategy:
+        body: `Every network route names its strategy; the other options narrow it:
 
 wt.onRequest({
     url: "*://app.example.com/*",              // URL pattern(s), as above
     exclude: ["*://app.example.com/health"],  // skip these even when url matches
     methods: ["POST", "PUT"],                 // HTTP methods, case-insensitive; omit = any
     resourceTypes: ["xmlhttprequest"],        // resource types (ctx.resourceType); omit = any
-    strategy: "page",                         // one of helper | page | extension | debugger | rules
+    strategy: "page",                         // required: helper | page | extension | debugger | rules
 }, (ctx) => { … });
 
 exclude and methods are cheap: an extra check on requests that already matched url, on every strategy (the local helper checks them itself too). The rules strategy doesn't support exclude.
@@ -47,7 +47,7 @@ resourceTypes — webRequest names: main_frame, sub_frame, stylesheet, script, i
 - page — only sees page fetch/XHR ("xmlhttprequest"); a list without it means the handler never runs (the Log view warns)
 - rules — part of the rule: the browser checks it
 
-strategy — a single value overriding the default from Settings → Strategy. No fallback: when it isn't available here, the handler doesn't run and the Log view says why.`,
+strategy — required, a single value; there is no default. No fallback: when it isn't available here, the handler doesn't run and the Log view says why.`,
     },
     {
         title: "wt.about / wt.params / wt.defineParam",
@@ -73,7 +73,7 @@ const p = wt.params({ origin: { type: "string", default: "https://app.example.co
 const ids = wt.defineParam("ids", { type: "stringList", parse: (l) => new Set(l) }); // Set<string>
 
 Routes may be built from params — a change re-runs the script:
-wt.onResponseHeaders(cfg.hosts.map((h) => \`*://\${h}/*\`), () => ({ headers: { set: { "access-control-allow-origin": "*" } } }));
+wt.onResponseHeaders({ url: cfg.hosts.map((h) => \`*://\${h}/*\`), strategy: "helper" }, () => ({ headers: { set: { "access-control-allow-origin": "*" } } }));
 
 Scripts sync to the synced folder as plain <name>.ts files.`,
     },
@@ -86,13 +86,13 @@ export function double(n: number) { return n * 2; }
 
 // in your script:
 import { double } from "./utils";
-wt.onRequest("*://example.com/*", () => { wt.log(double(21)); }); // 42
+wt.onRequest({ url: "*://example.com/*", strategy: "helper" }, () => { wt.log(double(21)); }); // 42
 
 Libraries can export recipes — functions that register handlers. The handler belongs to the script that calls it:
 
 // library "mocks":
 export function mockJson(url: string, body: object) {
-    wt.onRequest(url, () => ({ replaceResponse: { body } }));
+    wt.onRequest({ url, strategy: "helper" }, () => ({ replaceResponse: { body } }));
 }
 // script:
 import { mockJson } from "./mocks";
@@ -104,7 +104,7 @@ Libraries may declare params (shared config, editable in the popup, the Editor a
         title: "wt.onRequest — redirect, block, request headers",
         body: `Runs before the request leaves the browser.
 
-wt.onRequest("https://api.example.com/users/:id", (ctx) => {
+wt.onRequest({ url: "https://api.example.com/users/:id", strategy: "helper" }, (ctx) => {
     // ctx: { url, method, tabUrl, resourceType, requestHeaders, groups }
     if (ctx.groups.id === "42") return { redirect: "https://other.com/x" };  // or…
     return { block: true };                                                 // or…
@@ -115,7 +115,7 @@ wt.onRequest("https://api.example.com/users/:id", (ctx) => {
         title: "wt.onResponseHeaders — modify response headers",
         body: `Runs when response headers arrive. Not available on the "page" strategy.
 
-wt.onResponseHeaders("*://api.example.com/*", (ctx) => {
+wt.onResponseHeaders({ url: "*://api.example.com/*", strategy: "helper" }, (ctx) => {
     // ctx adds: statusLine, responseHeaders
     return { headers: { set: { "access-control-allow-origin": "*" } } };
 });`,
@@ -124,16 +124,16 @@ wt.onResponseHeaders("*://api.example.com/*", (ctx) => {
         title: "wt.replaceResponse — replace the body",
         body: `Return a string, bytes, an object (sent as JSON) or { file }. The response is fully replaced.
 
-wt.replaceResponse("*://api.example.com/flags", (ctx) => ({ beta: true }));
+wt.replaceResponse({ url: "*://api.example.com/flags", strategy: "helper" }, (ctx) => ({ beta: true }));
 
 // or serve file content:
-wt.replaceResponse("*://example.com/logo.svg", () => ({ file: "data:image/svg+xml;base64,…" }));`,
+wt.replaceResponse({ url: "*://example.com/logo.svg", strategy: "helper" }, () => ({ file: "data:image/svg+xml;base64,…" }));`,
     },
     {
         title: "wt.onResponseBody — transform the body",
         body: `Transform the body. Return the new body (string or bytes); async is fine.
 
-wt.onResponseBody({ url: "*://example.com/app/*.js", resourceTypes: ["script"] }, (ctx, body) => {
+wt.onResponseBody({ url: "*://example.com/app/*.js", resourceTypes: ["script"], strategy: "helper" }, (ctx, body) => {
     const text = typeof body === "string" ? body : new TextDecoder().decode(body);
     return text.replace("old", "new");
 });
@@ -169,7 +169,7 @@ Runs once per document per matching frame. SPA navigations and re-renders don't 
         title: "onRequest → replaceResponse — mock without the network",
         body: `A final result that synthesizes the response immediately — the request never leaves the browser. First handler to return one wins (stacking).
 
-wt.onRequest("*://api.example.com/me", (ctx) => ({
+wt.onRequest({ url: "*://api.example.com/me", strategy: "helper" }, (ctx) => ({
     replaceResponse: {
         body: { id: 1, name: "Mocked User" },  // object → JSON
         status: 200,
@@ -201,7 +201,7 @@ A handler that matched but was skipped logs a warning naming who took priority a
 onRequest/onResponseHeaders async results are awaited on every strategy except "extension" on Chromium (blocking webRequest can't await — an error is logged and the result ignored). Use "helper" or "debugger" there.
 
 // async mock:
-wt.replaceResponse("*://api.example.com/user", async () => {
+wt.replaceResponse({ url: "*://api.example.com/user", strategy: "helper" }, async () => {
     const data = await fetch("https://myserver/fixture").then(r => r.json());
     return data;
 });
@@ -216,7 +216,7 @@ wt.onRequest({ url: "*://example.com/*", strategy: "debugger" }, async (ctx) => 
         title: "wt.storage / wt.log",
         body: `Per-script key/value storage (async), and logging into the Log view.
 
-wt.onRequest("*://example.com/*", async (ctx) => {
+wt.onRequest({ url: "*://example.com/*", strategy: "helper" }, async (ctx) => {
     const hits = ((await wt.storage.get("hits")) || 0) + 1;
     await wt.storage.set("hits", hits);
     wt.log("hit #" + hits, ctx.url);
@@ -224,7 +224,7 @@ wt.onRequest("*://example.com/*", async (ctx) => {
     },
     {
         title: "Strategies — one per handler",
-        body: `Each handler runs on exactly one strategy: its route's strategy, else the default from Settings → Strategy ("helper" on Chromium, "extension" on Firefox).
+        body: `Each network handler runs on exactly one strategy: the one its route names (required — there is no default; a route without one makes the script fail to load).
 
 helper — Chrome: a tiny local helper (wiretrick-helper) proxies ONLY matched hosts. Sees everything (documents, script tags, images, workers, async handlers, body rewrites) with no banner. Install the helper and trust its helper certificate from Settings → Local helper.
 page — page-level fetch/XHR override. No banner, no setup, every browser. Misses <script src>, <img>, documents, and requests made before the page patch loads; no onResponseHeaders.
@@ -232,14 +232,14 @@ extension — the extension handles each request (blocking webRequest): Firefox 
 debugger — chrome.debugger + Fetch domain. Sees everything, but Chrome shows a "debugging" banner while attached.
 rules — browser-native rules (declarativeNetRequest): the browser blocks, redirects or sets/removes headers itself, on every request, with no banner or helper. The handler runs once when scripts load and must return a fixed result — ctx.groups.* / ctx.url only as-is in a redirect URL; no replaceResponse, onResponseBody or exclude. A handler that can't be a rule doesn't run and its script shows an error.
 
-wt.onRequest({ url: "*://example.com/*", strategy: "debugger" }, fn);   // this handler only
+wt.onRequest({ url: "*://example.com/*", strategy: "debugger" }, fn);
 
 Pick per browser/build with wt.isChrome / wt.isFirefox / wt.isMV2 / wt.isMV3:
 
 wt.onResponseBody({ url: "*://example.com/app.js", strategy: wt.isFirefox ? "extension" : "helper" }, fn);
 wt.onRequest({ url: "*://ads.example.com/*", strategy: wt.isMV3 ? "rules" : "extension" }, () => ({ block: true }));
 
-No fallback: when the strategy isn't available (helper not running, wrong browser, a kind it can't do), the handler doesn't run and the Log view warns. Hover "strategy" in the Code view or see Settings → Strategy for pros/cons.
+No fallback: when the strategy isn't available (helper not running, wrong browser, a kind it can't do), the handler doesn't run and the Log view warns. Hover "strategy" in the Code view or see Settings → Strategies for pros/cons.
 
 Tip: ${ADV_SHORT}`,
     },

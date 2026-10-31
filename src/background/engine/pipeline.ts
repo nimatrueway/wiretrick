@@ -27,14 +27,14 @@ import { missedLine } from "../../shared/netTypes";
 import { binaryOptedOut, frameHasHook as pingHook, isLoopbackUrl, missedReason, missedWhat, routeProblem, MISSED_SKIP_TYPES } from "../../shared/missedTap";
 import { resolveParamValues } from "../../shared/scriptDef";
 import type { ShippedLib } from "../../shared/scriptImports";
-import { effectiveStrategy, hookCanSee, routeLabel, routeMatches, setDefaultStrategy, takesBinary, type RouteMeta, type Strategy } from "../../shared/route";
+import { effectiveStrategy, hookCanSee, routeLabel, routeMatches, takesBinary, type RouteMeta, type Strategy } from "../../shared/route";
 import { analyzeScripts, runBodyOp, type Analyzed } from "../compileHost";
 import { recordNetBody } from "../network";
 import { reportSkipped, setSkipRoutes } from "./skipped";
 import { correlator } from "./requestCorrelator";
 import { winnerOf } from "../../shared/precedence";
 import { targetsWebSocket, WS_BLIND, wsUnseen } from "../../shared/websocketLimits";
-import { STRATEGY_KEY, TEXT_TYPES_KEY } from "../settingsFile";
+import { TEXT_TYPES_KEY } from "../settingsFile";
 import { getTextTypes, setTextTypes } from "../../shared/bodyKind";
 import { packBytes, unpackBytes } from "../../shared/bytesPack";
 import type { RequestBody } from "../../shared/requestBody";
@@ -58,13 +58,12 @@ function pageRequestBody(msg: any): RequestBody | undefined {
     return typeof b === "string" || b instanceof Uint8Array ? b : undefined;
 }
 
-/** settings.defaultStrategy → route.ts default, settings.textTypes → bodyKind.ts (every reload and hook bundle) */
-function loadDefaultStrategy(): Promise<void> {
+/** settings.textTypes → bodyKind.ts (every reload and hook bundle) */
+function loadTextTypes(): Promise<void> {
     return new Promise((resolve) => {
         try {
-            chrome.storage.local.get([STRATEGY_KEY, TEXT_TYPES_KEY], (g: any) => {
+            chrome.storage.local.get([TEXT_TYPES_KEY], (g: any) => {
                 void (chrome.runtime as any).lastError;
-                setDefaultStrategy(g?.[STRATEGY_KEY]);
                 setTextTypes(g?.[TEXT_TYPES_KEY]);
                 resolve();
             });
@@ -677,7 +676,7 @@ export function createPipeline(
                 const libs = new Map<string, ShippedLib>();
                 const routes: RouteMeta[] = [];
                 await ready;
-                await loadDefaultStrategy();
+                await loadTextTypes();
                 const pageScripts = await listScripts();
                 const paramValues = await loadAllParamValues();
                 // MV3: analyzed in the sandbox page (the SW can't eval),
@@ -805,7 +804,7 @@ export function createPipeline(
     async function reload(): Promise<void> {
         const seq = ++reloadSeq;
         await ready;
-        await loadDefaultStrategy();
+        await loadTextTypes();
         await loadDataFiles();
         await loadPackages();
         const stored = await listScripts();
@@ -846,9 +845,8 @@ export function createPipeline(
     const off = onScriptsChanged(() => void reload());
     // ownership moves between the helper strategy and the other strategies
     const offProcess = onHelperActiveChange(() => void reload());
-    // settings.defaultStrategy moves ownership between strategies
     const onStorage = (changes: Record<string, unknown>, area: string) => {
-        if (area === "local" && (changes[STRATEGY_KEY] || changes[TEXT_TYPES_KEY])) void reload();
+        if (area === "local" && changes[TEXT_TYPES_KEY]) void reload();
     };
     chrome.storage.onChanged.addListener(onStorage);
     void reload();

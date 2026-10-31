@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { DebuggerStrategy } from "../src/background/engine/strategies/debuggerStrategy";
-import { setDefaultStrategy } from "../src/shared/route";
 import { compileScript } from "../src/shared/compile";
 import type { Script } from "../src/background/engine/scriptStore";
 
@@ -35,21 +34,6 @@ describe("tier C participation gate (route ownership)", () => {
         c.reload([makeScript("a", `wt.onResponseBody({ url: "*", strategy: "debugger" }, (c, b) => b);`)]);
         expect(c.hasOwners()).toBe(true);
         expect(needsAny(c)).toBe(true);
-    });
-
-    it("routes without a strategy follow settings.defaultStrategy", () => {
-        const c = new DebuggerStrategy();
-        const scripts = [makeScript("a", `wt.onResponseBody("*", (c, b) => b);`)];
-        try {
-            setDefaultStrategy("debugger");
-            c.reload(scripts);
-            expect(needsAny(c)).toBe(true);
-            setDefaultStrategy("helper");
-            c.reload(scripts);
-            expect(needsAny(c)).toBe(false);
-        } finally {
-            setDefaultStrategy(null);
-        }
     });
 
     it("only matching url / method / type are needed", () => {

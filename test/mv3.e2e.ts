@@ -127,8 +127,6 @@ try {
     await mgr.goto(`chrome-extension://${extId}/editor.html`);
     await mgr.waitForFunction(() => (window as any).monaco?.editor.getEditors().length === 1, null, { timeout: 20000 }).catch((e: any) => console.log("waitForFunction editor failed:", e.message.slice(0, 100)));
     check("manager opens", true);
-    // no local helper in this run: routes without their own strategy use the hook
-    await mgr.evaluate(() => new Promise<void>((r) => chrome.storage.local.set({ resStrategy: "page" }, () => r())));
     const contexts = await mgr.evaluate(() => new Promise<any>((r) => (chrome.runtime as any).getContexts({}, (cs: any[]) => r(cs?.map((c: any) => c.contextType) ?? []))));
     // this chromium reports the MV3 background SW as "BACKGROUND"
     check("extension service worker registered", contexts.includes("BACKGROUND") || contexts.includes("SERVICE_WORKER"), JSON.stringify(contexts));
@@ -138,7 +136,7 @@ try {
         type: "saveScript",
         id: "s_mv3",
         name: "MV3 hook",
-        code: `wt.onResponseBody("*://*:*/*", (ctx, body) => body.replace("ORIGINAL", "MV3"));`,
+        code: `wt.onResponseBody({ url: "*://*:*/*", strategy: "page" }, (ctx, body) => body.replace("ORIGINAL", "MV3"));`,
     }, r)));
     check("saveScript round-trips through the sandbox (meta extracted)", saveResult?.meta?.active === true, JSON.stringify(saveResult?.meta));
     const listResult = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "listScripts" }, r)));
@@ -157,7 +155,7 @@ try {
         type: "saveScript",
         id: "s_importer",
         name: "api-interceptor",
-        code: `import { tag } from "./api-lib";\nwt.params({ label: { type: "string", default: "x" } });\nwt.onResponseBody("*://*:*/*", (ctx, body) => tag(body));`,
+        code: `import { tag } from "./api-lib";\nwt.params({ label: { type: "string", default: "x" } });\nwt.onResponseBody({ url: "*://*:*/*", strategy: "page" }, (ctx, body) => tag(body));`,
     }, r)));
     check("importing script captures its routes (not a library)",
         importSave?.meta?.active === true && importSave?.meta?.match?.includes("*://*:*/*") && !importSave.error,
@@ -170,8 +168,8 @@ try {
     // a param-gated library turns into a script when its param flips
     {
         const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
-        await send({ type: "saveScript", id: "s_plib", name: "param-lib", code: `export const envParam = { type: "stringList", default: ["dev"] } as const;\nconst p = wt.params({ on: { type: "boolean", default: false } });\nif (p.on) wt.onRequest("*://never.invalid/*", () => {});` });
-        const user = await send({ type: "saveScript", id: "s_puser", name: "param-user", code: `import { envParam } from "./param-lib";\nwt.params({ intercept_environments: envParam });\nwt.onRequest("*://never.invalid/*", () => {});` });
+        await send({ type: "saveScript", id: "s_plib", name: "param-lib", code: `export const envParam = { type: "stringList", default: ["dev"] } as const;\nconst p = wt.params({ on: { type: "boolean", default: false } });\nif (p.on) wt.onRequest({ url: "*://never.invalid/*", strategy: "page" }, () => {});` });
+        const user = await send({ type: "saveScript", id: "s_puser", name: "param-user", code: `import { envParam } from "./param-lib";\nwt.params({ intercept_environments: envParam });\nwt.onRequest({ url: "*://never.invalid/*", strategy: "page" }, () => {});` });
         check("imported param def: no bogus compile error, def captured", !user?.error && user?.paramDefs?.intercept_environments?.type === "stringList", JSON.stringify({ error: user?.error?.split("\n")[0], defs: user?.paramDefs }));
         const lib = (await send({ type: "listScripts" })).find((s: any) => s.id === "s_plib");
         check("param-gated library stored as a library with params", lib?.meta?.active === false && lib?.paramDefs?.on?.type === "boolean", JSON.stringify(lib?.meta));
@@ -185,7 +183,7 @@ try {
     // 3. settings.yaml round-trip
     const settings = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "getSettingsYaml" }, r)));
     check("settings.yaml generated (SW storage path)", typeof settings?.text === "string" && settings.text.includes("MV3 hook"));
-    const applyResult = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "applySettingsYaml", text: "settings:\n  logLevel: warn\n  defaultStrategy: page\n" }, r)));
+    const applyResult = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "applySettingsYaml", text: "settings:\n  logLevel: warn\n" }, r)));
     check("applySettingsYaml applies", !applyResult?.error, JSON.stringify(applyResult));
 
     // 4. hook tier intercepts a page fetch (transform runs in the sandbox)
@@ -322,7 +320,7 @@ try {
     // (with `parse`: the sandbox runs the parsers; the defs it posts back are stripped of them)
     const pgSaved: any = await mgr.evaluate((origin: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_pg", name: "Param gated",
-        code: `const cfg = wt.params({ intercept: { type: "boolean", default: false, description: "Intercept", parse: (on) => (on ? "PARAM-GATED" : null) } });\nconst tags = wt.defineParam("tags", { type: "stringList", default: ["a", "b"], parse: (l) => new Set(l) });\nwt.onRequest("${origin}/*", (ctx) => { if (cfg.intercept) return { replaceResponse: { status: 200, body: { value: cfg.intercept, tags: tags.size } } }; });`,
+        code: `const cfg = wt.params({ intercept: { type: "boolean", default: false, description: "Intercept", parse: (on) => (on ? "PARAM-GATED" : null) } });\nconst tags = wt.defineParam("tags", { type: "stringList", default: ["a", "b"], parse: (l) => new Set(l) });\nwt.onRequest({ url: "${origin}/*", strategy: "page" }, (ctx) => { if (cfg.intercept) return { replaceResponse: { status: 200, body: { value: cfg.intercept, tags: tags.size } } }; });`,
     }, r)), ORIGIN);
     check("param parse: saved without error, defs stored raw (no parse)", !pgSaved?.error && pgSaved?.paramDefs?.tags?.type === "stringList" && !JSON.stringify(pgSaved?.paramDefs).includes("parse"), JSON.stringify({ error: pgSaved?.error, defs: pgSaved?.paramDefs }));
     await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "setScriptParam", scriptId: "s_pg", key: "intercept", value: true }, r)));
@@ -348,7 +346,7 @@ try {
     }, r)), CDN);
     await mgr.evaluate((cdn: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_auto", name: "Auto script",
-        code: `wt.onResponseBody("${cdn}/auto.js", (ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
+        code: `wt.onResponseBody({ url: "${cdn}/auto.js", strategy: "page" }, (ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
     }, r)), CDN);
     // a handler that runs but changes nothing: the request is "observed", not "modified"
     await mgr.evaluate((cdn: string) => new Promise((r) => chrome.runtime.sendMessage({
@@ -381,14 +379,14 @@ try {
     // Network tab records from now on (listeners attach when it opens)
     await mgr.click("#network-tab");
     await mgr.waitForSelector("#net-filter-host .net-toolbar", { timeout: 5000 });
-    const defaultChips = await mgr.evaluate(() => [...document.querySelectorAll("#network-view .net-qchip")].map((c) => (c.textContent || "").replace("×", "")));
+    const defaultChips = await mgr.evaluate(() => [...document.querySelectorAll("#net-filter-host .net-qchip")].map((c) => (c.textContent || "").replace("×", "")));
     check("the Network view shows Touched requests by default", JSON.stringify(defaultChips) === '["is:touched"]', JSON.stringify(defaultChips));
-    await mgr.click("#network-view .net-qchip-x"); // show all requests from here on
+    await mgr.click("#net-filter-host .net-qchip-x"); // show all requests from here on
     /** replace the Network filter with a query (typed in the Basic box, Enter) */
     const netFilter = async (query: string) => {
-        await mgr.evaluate(() => [...document.querySelectorAll("#network-view .net-qchip-x")].reverse().forEach((x) => (x as HTMLElement).click()));
-        await mgr.fill("#network-view .net-qbox .net-filter", query);
-        await mgr.press("#network-view .net-qbox .net-filter", "Enter");
+        await mgr.evaluate(() => [...document.querySelectorAll("#net-filter-host .net-qchip-x")].reverse().forEach((x) => (x as HTMLElement).click()));
+        await mgr.fill("#net-filter-host .net-qbox .net-filter", query);
+        await mgr.press("#net-filter-host .net-qbox .net-filter", "Enter");
         await mgr.waitForTimeout(300);
     };
     const xoPage = await ctx.newPage();
@@ -511,7 +509,7 @@ try {
     // ---- script error indicators: compile error + runtime error ----
     await mgr.evaluate((origin: string) => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_throws", name: "Thrower",
-        code: `wt.onRequest("${origin}/kaboom*", () => { throw new Error("kaboom"); });`,
+        code: `wt.onRequest({ url: "${origin}/kaboom*", strategy: "page" }, () => { throw new Error("kaboom"); });`,
     }, r)), "http://localhost:8909");
     await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "saveScript", id: "s_broken", name: "Broken", code: "wt.onRequest([ ;" }, r)));
     await mgr.waitForTimeout(1200);
@@ -548,8 +546,8 @@ try {
     // TypeScript errors (editor squiggles) → a Problem + "types" badge, not a Log line; two
     // scripts declaring the same top-level name must not collide
     for (const [id, name, code] of [
-        ["s_typed", "Typed", `wt.onRequest("*://typed.invalid/*", () => {});\nconst cfg = 1;\nconst n: number = "not a number";`],
-        ["s_typed2", "Typed2", `wt.onRequest("*://typed2.invalid/*", () => {});\nconst cfg = 2;\nexport function never() { console.log(new TextDecoder().decode(new Uint8Array()), new URL("x"), fetch, cfg); }`],
+        ["s_typed", "Typed", `wt.onRequest({ url: "*://typed.invalid/*", strategy: "page" }, () => {});\nconst cfg = 1;\nconst n: number = "not a number";`],
+        ["s_typed2", "Typed2", `wt.onRequest({ url: "*://typed2.invalid/*", strategy: "page" }, () => {});\nconst cfg = 2;\nexport function never() { console.log(new TextDecoder().decode(new Uint8Array()), new URL("x"), fetch, cfg); }`],
     ]) await mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage({ type: "saveScript", ...m }, r)), { id, name, code });
     await mgr.waitForSelector('#script-list li[data-id="s_typed"] .err-ind.types', { timeout: 15000 }).catch(() => {});
     const typed = await mgr.evaluate(() => ({
@@ -1030,7 +1028,7 @@ try {
     // GUI change → settings.yaml must appear in the folder (commented default)
     await fPage.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_sync", name: "Sync guinea",
-        code: 'wt.params({ token: { type: "string", default: "abc", description: "Sync token" } });\nwt.onRequest("*://sync.invalid/*", () => {});\n',
+        code: 'wt.params({ token: { type: "string", default: "abc", description: "Sync token" } });\nwt.onRequest({ url: "*://sync.invalid/*", strategy: "page" }, () => {});\n',
     }, r)));
     await fPage.waitForTimeout(2500); // export debounce + SW poller cadence
     const yaml1 = await opfsText("settings.yaml");
@@ -1064,7 +1062,7 @@ try {
     check("MV3 folder sync: manager settings.yaml save written to disk as a whole", (await opfsText("settings.yaml")) === savedText);
 
     // a new .ts file in the folder inserts a script
-    await opfsWrite("imported-sync.ts", 'wt.onRequest("*://imported.invalid/*", () => {});\n');
+    await opfsWrite("imported-sync.ts", 'wt.onRequest({ url: "*://imported.invalid/*", strategy: "page" }, () => {});\n');
     await fPage.waitForTimeout(2500);
     const flist = await fPage.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "listScripts" }, r)));
     check("MV3 folder sync: external .ts file became a script", (flist as any[]).some((s) => s.meta?.name === "imported-sync"), JSON.stringify((flist as any[]).map((s) => s.meta?.name)));
@@ -1075,7 +1073,7 @@ try {
     await swCdp.send("ServiceWorker.enable");
     await swCdp.send("ServiceWorker.stopAllWorkers");
     await fPage.waitForTimeout(500);
-    await opfsWrite("while-asleep.ts", 'wt.onRequest("*://asleep.invalid/*", () => {});\n');
+    await opfsWrite("while-asleep.ts", 'wt.onRequest({ url: "*://asleep.invalid/*", strategy: "page" }, () => {});\n');
     await fPage.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "folderSyncStatus" }, r))); // wakes the SW
     await fPage.waitForTimeout(2500);
     const flist2 = await fPage.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "listScripts" }, r)));
@@ -1085,7 +1083,7 @@ try {
     // importer saved before its library re-checks once the library appears
     const saveMsg = (id: string, name: string, code: string) =>
         fPage.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, r)), { type: "saveScript", id, name, code });
-    await saveMsg("s_late_user", "late-user", 'import { late } from "./late-lib";\nwt.onRequest("*://late.invalid/*", () => {});\nlate();\n');
+    await saveMsg("s_late_user", "late-user", 'import { late } from "./late-lib";\nwt.onRequest({ url: "*://late.invalid/*", strategy: "page" }, () => {});\nlate();\n');
     await fPage.waitForTimeout(2500);
     await saveMsg("s_late_lib", "late-lib", "export function late(): void {}\n");
     await fPage.waitForTimeout(3500);

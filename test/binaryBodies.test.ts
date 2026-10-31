@@ -93,13 +93,13 @@ describe("packBytes / unpackBytes", () => {
 
 describe("route binary option", () => {
     it("onResponseBody only: true, false or \"both\" (false is kept: it silences the warning)", () => {
-        expect(normalizeRoute("onResponseBody", { url: "*", binary: true }, 0).binary).toBe(true);
-        expect(normalizeRoute("onResponseBody", { url: "*", binary: false }, 0).binary).toBe(false);
-        expect(normalizeRoute("onResponseBody", { url: "*", binary: "both" }, 0).binary).toBe("both");
-        expect(normalizeRoute("onResponseBody", "*", 0).binary).toBeUndefined();
-        expect(() => normalizeRoute("onResponseBody", { url: "*", binary: "yes" }, 0)).toThrow(/binary must be true, false or "both", got "yes"/);
+        expect(normalizeRoute("onResponseBody", { url: "*", binary: true, strategy: "helper" }, 0).binary).toBe(true);
+        expect(normalizeRoute("onResponseBody", { url: "*", binary: false, strategy: "helper" }, 0).binary).toBe(false);
+        expect(normalizeRoute("onResponseBody", { url: "*", binary: "both", strategy: "helper" }, 0).binary).toBe("both");
+        expect(normalizeRoute("onResponseBody", { url: "*", strategy: "helper" }, 0).binary).toBeUndefined();
+        expect(() => normalizeRoute("onResponseBody", { url: "*", binary: "yes", strategy: "helper" }, 0)).toThrow(/binary must be true, false or "both", got "yes"/);
         for (const k of ["onRequest", "onResponseHeaders", "replaceResponse"] as const) {
-            expect(() => normalizeRoute(k, { url: "*", binary: true }, 0)).toThrow(/onResponseBody only/);
+            expect(() => normalizeRoute(k, { url: "*", binary: true, strategy: "helper" }, 0)).toThrow(/onResponseBody only/);
         }
         expect(() => normalizeRoute("onDocument", { url: "*", binary: true }, 0)).toThrow();
     });
@@ -107,7 +107,7 @@ describe("route binary option", () => {
 
 describe("transform op: binary bodies reach binary routes only", () => {
     const handlers = (h: Record<string, { fn: Function; binary?: boolean | "both" }[]>): any =>
-        Object.fromEntries([...NET_KINDS, "onDocument"].map((k) => [k, (h[k] ?? []).map(({ fn, binary }, i) => ({ fn, route: normalizeRoute(k as any, binary !== undefined ? { url: "*://x.test/*", binary } : "*://x.test/*", i) }))]));
+        Object.fromEntries([...NET_KINDS, "onDocument"].map((k) => [k, (h[k] ?? []).map(({ fn, binary }, i) => ({ fn, route: normalizeRoute(k as any, k === "onDocument" ? "*://x.test/*" : { url: "*://x.test/*", strategy: "helper", ...(binary !== undefined && { binary }) }, i) }))]));
     let logs: string[] = [];
     const run = (h: any, body: string | Uint8Array) => {
         logs = [];
@@ -181,7 +181,7 @@ describe("transform op: binary bodies reach binary routes only", () => {
 });
 
 describe("settings.textTypes", () => {
-    const G: GlobalSettings = { logLevel: "info", logCap: 500, defaultStrategy: "helper" };
+    const G: GlobalSettings = { logLevel: "info", logCap: 500 };
 
     it("renders the defaults commented, a custom list live", () => {
         const def = renderSettings(G, []);

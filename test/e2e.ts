@@ -157,8 +157,8 @@ for (const s of Object.values(SCRIPTS)) await saveScript(s.id, s.code, s.name);
 // ---------- 0. imported param definitions + param-gated library ----------
 {
     const send = (msg: any): Promise<any> => mgr.evaluate((m) => new Promise((r) => chrome.runtime.sendMessage(m, (x) => r(x ?? null))), msg);
-    await saveScript("s_plib", `export const envParam = { type: "stringList", default: ["dev"] } as const;\nconst p = wt.params({ on: { type: "boolean", default: false } });\nif (p.on) wt.onRequest("*://never.invalid/*", () => {});`, "param-lib");
-    const user = await saveScript("s_puser", `import { envParam } from "./param-lib";\nwt.params({ intercept_environments: envParam });\nwt.onRequest("*://never.invalid/*", () => {});`, "param-user");
+    await saveScript("s_plib", `export const envParam = { type: "stringList", default: ["dev"] } as const;\nconst p = wt.params({ on: { type: "boolean", default: false } });\nif (p.on) wt.onRequest({ url: "*://never.invalid/*", strategy: "extension" }, () => {});`, "param-lib");
+    const user = await saveScript("s_puser", `import { envParam } from "./param-lib";\nwt.params({ intercept_environments: envParam });\nwt.onRequest({ url: "*://never.invalid/*", strategy: "extension" }, () => {});`, "param-user");
     check("imported param def: no bogus compile error, def captured", !user?.error && user?.paramDefs?.intercept_environments?.type === "stringList", JSON.stringify({ error: user?.error?.split("\n")[0], defs: user?.paramDefs }));
     const lib = (await send({ type: "listScripts" })).find((s: any) => s.id === "s_plib");
     check("param-gated library stored as a library with params", lib?.meta?.active === false && lib?.paramDefs?.on?.type === "boolean", JSON.stringify(lib?.meta));
@@ -169,7 +169,7 @@ for (const s of Object.values(SCRIPTS)) await saveScript(s.id, s.code, s.name);
     await send({ type: "deleteScript", id: "s_plib" });
 
     // param `parse`: the script gets the parsed value, defs are stored without the function
-    const pp = await saveScript("s_pparse", 'const c = wt.params({ origin: { type: "string", default: "https://a.com", parse: (s) => new URL(s) } });\nwt.onRequest(`*://${c.origin.host}/never/*`, () => {});', "param-parse");
+    const pp = await saveScript("s_pparse", 'const c = wt.params({ origin: { type: "string", default: "https://a.com", parse: (s) => new URL(s) } });\nwt.onRequest({ url: `*://${c.origin.host}/never/*`, strategy: "extension" }, () => {});', "param-parse");
     check("param parse: parsed value feeds the route, def stored without parse", !pp?.error && pp?.meta?.match?.[0] === "*://a.com/never/*" && pp?.paramDefs?.origin?.type === "string" && !("parse" in pp.paramDefs.origin), JSON.stringify({ error: pp?.error?.split("\n")[0], match: pp?.meta?.match, defs: pp?.paramDefs }));
     await send({ type: "setScriptParam", scriptId: "s_pparse", key: "origin", value: "xyz" });
     const ppBroken = (await send({ type: "listScripts" })).find((s: any) => s.id === "s_pparse");
@@ -418,9 +418,9 @@ const early10d: { n: number }[] = await mgr.evaluate(() =>
     [...document.querySelectorAll("#network-view tbody tr.net-row")].map((tr) => ({ n: tr.querySelectorAll(".net-badge").length }))
 );
 check("network: script activity from before the tab was opened is listed", early10d.length > 0 && early10d.every((r) => r.n > 0), `rows=${early10d.length}`);
-const chips10d = await mgr.evaluate(() => [...document.querySelectorAll("#network-view .net-qchip")].map((c) => (c.textContent || "").replace("×", "")));
+const chips10d = await mgr.evaluate(() => [...document.querySelectorAll("#net-filter-host .net-qchip")].map((c) => (c.textContent || "").replace("×", "")));
 check("the Network view shows Touched requests by default", JSON.stringify(chips10d) === '["is:touched"]', JSON.stringify(chips10d));
-await mgr.click("#network-view .net-qchip-x"); // show all requests from here on
+await mgr.click("#net-filter-host .net-qchip-x"); // show all requests from here on
 await saveScript("s_missed", `wt.onResponseBody({ url: "${ORIGIN}/html-missed", strategy: "page" }, (ctx, body) => body.replace("MISSED-ORIGINAL", "NEVER"));`, "missed probe");
 await saveScript("s_missed_wr", `wt.onResponseBody({ url: "${ORIGIN}/html-missed-wr", strategy: "extension" }, (ctx, body) => body);`, "webrequest body probe");
 await new Promise((r) => setTimeout(r, 600));

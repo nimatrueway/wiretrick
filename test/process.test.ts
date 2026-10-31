@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { HelperStrategy, applyHeaderMods, base64ToBytes, bytesToBase64, filterUrlsFor, helperRouteOf, pairsToObject } from "../src/background/engine/strategies/helperStrategy";
 import { helperActive, setHelperActive, strategyUnavailable } from "../src/background/engine/strategies/helperState";
 import { ownedRoutes } from "../src/background/engine/strategies/strategyScripts";
-import { normalizeRoute, setDefaultStrategy } from "../src/shared/route";
+import { normalizeRoute } from "../src/shared/route";
 import { DebuggerStrategy } from "../src/background/engine/strategies/debuggerStrategy";
 import { compileScript } from "../src/shared/compile";
 import { isHelperOutdated, MIN_HELPER_VERSION } from "../src/shared/helperInstall";
@@ -126,18 +126,6 @@ describe("process ownership (single strategy, no fallback)", () => {
         c.reload(scripts);
         expect(c.hasOwners()).toBe(false);
     });
-    it("routes without a strategy follow settings.defaultStrategy", () => {
-        const scripts = [makeScript("a", `wt.onRequest("*", () => {});`)];
-        try {
-            setDefaultStrategy("helper");
-            expect(ownedRoutes(scripts, "helper")).toHaveLength(1);
-            setDefaultStrategy("page");
-            expect(ownedRoutes(scripts, "helper")).toEqual([]);
-            expect(ownedRoutes(scripts, "page")).toHaveLength(1);
-        } finally {
-            setDefaultStrategy(null);
-        }
-    });
     it("strategyUnavailable: process needs a connected helper", () => {
         expect(strategyUnavailable("helper")).toMatch(/helper/);
         setHelperActive(true);
@@ -147,7 +135,7 @@ describe("process ownership (single strategy, no fallback)", () => {
 
 describe("helpers", () => {
     it("helperRouteOf: pause flags follow the handler kind; exclude/methods go to the helper", () => {
-        const r = (kind: any, raw: unknown) => helperRouteOf(normalizeRoute(kind, raw, 0));
+        const r = (kind: any, raw: unknown) => helperRouteOf(normalizeRoute(kind, typeof raw === "object" && !Array.isArray(raw) ? { strategy: "helper", ...raw } : { url: raw, strategy: "helper" }, 0));
         expect(r("onRequest", "*")).toMatchObject({ match: ["*"], req: true, resHeaders: false, body: false });
         expect(r("replaceResponse", "*")).toMatchObject({ req: true, body: false });
         expect(r("onResponseHeaders", "*")).toMatchObject({ req: false, resHeaders: true });

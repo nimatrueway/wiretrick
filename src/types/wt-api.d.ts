@@ -35,7 +35,7 @@ declare namespace Wiretrick {
          * `"0"`, `"1"`… for `*` wildcards). `{}` when nothing was captured.
          *
          * @example
-         * wt.onRequest("https://api.example.com/users/:id", (ctx) => {
+         * wt.onRequest({ url: "https://api.example.com/users/:id", strategy: "helper" }, (ctx) => {
          *     if (ctx.groups.id === "42") return { replaceResponse: { body: { id: 42 } } };
          * });
          */
@@ -59,7 +59,7 @@ declare namespace Wiretrick {
          * - `rules`: no request — reading it is an error.
          *
          * @example
-         * wt.onRequest({ url: "https://api.example.com/*", methods: ["POST"] }, (ctx) => {
+         * wt.onRequest({ url: "https://api.example.com/*", methods: ["POST"], strategy: "helper" }, (ctx) => {
          *     if (typeof ctx.requestBody === "string" && ctx.requestBody.includes("debug=1")) return { block: true };
          * });
          */
@@ -71,7 +71,7 @@ declare namespace Wiretrick {
          * its second argument.
          *
          * @example
-         * wt.replaceResponse("https://api.example.com/graphql", (ctx) => {
+         * wt.replaceResponse({ url: "https://api.example.com/graphql", strategy: "helper" }, (ctx) => {
          *     const q = ctx.json<{ operationName?: string }>();
          *     if (q?.operationName === "GetFlags") return { flags: { beta: true } };
          * });
@@ -80,11 +80,10 @@ declare namespace Wiretrick {
     }
 
     /**
-     * Interception strategy that runs a handler. Every handler runs
-     * on exactly **one** strategy: its route's `strategy`, else
-     * `settings.defaultStrategy` (Settings → Strategy; default `"helper"` on
-     * Chromium, `"extension"` on Firefox). There is no fallback: when the
-     * strategy isn't available, the handler doesn't run and the Log view says why.
+     * Interception strategy that runs a handler. Every network handler
+     * names exactly **one** in its route's required `strategy` — there is no
+     * default and no fallback: when the strategy isn't available, the
+     * handler doesn't run and the Log view says why.
      *
      * - `"helper"` — the local wiretrick-helper (a proxy). Sees every
      *   request incl. documents, scripts and service workers; no banner.
@@ -144,7 +143,10 @@ declare namespace Wiretrick {
      */
     type UrlPatterns = string | string[];
 
-    /** Full route form for network handlers (`onRequest`, `onResponseHeaders`, `replaceResponse`, `onResponseBody`). */
+    /**
+     * Where a network handler (`onRequest`, `onResponseHeaders`, `replaceResponse`, `onResponseBody`)
+     * applies and which {@link Strategy} runs it. A bare URL pattern isn't accepted — it names no strategy.
+     */
     interface RouteOptions {
         /** URLs this handler applies to. See {@link UrlPatterns}. */
         url: UrlPatterns;
@@ -184,17 +186,17 @@ declare namespace Wiretrick {
          */
         resourceTypes?: ResourceType[];
         /**
-         * Run this handler on this strategy instead of `settings.defaultStrategy`.
-         * A single value — there is no fallback. See {@link Strategy}.
+         * The strategy that runs this handler — required, there is no
+         * default. A single value, no fallback. See {@link Strategy}.
          *
          * @example { url: "*://example.com/app/*.js", resourceTypes: ["script"], strategy: "debugger" }
          * @example { url: "*://ads.example.com/*", strategy: wt.isMV3 ? "rules" : "extension" }
          */
-        strategy?: Strategy;
+        strategy: Strategy;
     }
 
-    /** Where a network handler applies: URL pattern(s) or the full {@link RouteOptions} form. */
-    type Route = UrlPatterns | RouteOptions;
+    /** @deprecated Use {@link RouteOptions} — a network route is always the object form now. */
+    type Route = RouteOptions;
 
     /** Full route form for `wt.onResponseBody`. */
     interface BodyRouteOptions extends RouteOptions {
@@ -573,7 +575,7 @@ declare namespace Wiretrick {
  * (`url`, `exclude`, `methods`, `resourceTypes`, `strategy`) — then the handler:
  *
  * ```ts
- * wt.onRequest("*://api.example.com/*", (ctx) => ({ headers: { set: { "x-debug": "1" } } }));
+ * wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, (ctx) => ({ headers: { set: { "x-debug": "1" } } }));
  * ```
  *
  * A file that registers **no** handlers is a *library*: other scripts
@@ -613,12 +615,12 @@ declare const wt: {
      *
      * **Not final:** `{ headers }` — applied, and later handlers still run.
      *
-     * @param route Where it applies — see {@link Wiretrick.Route}.
+     * @param route Where it applies — see {@link Wiretrick.RouteOptions}.
      * @param handler Called once per matching request with its context.
      *
      * @example
      * // answer an endpoint without the network
-     * wt.onRequest("https://api.example.com/users/:id", (ctx) => ({
+     * wt.onRequest({ url: "https://api.example.com/users/:id", strategy: "helper" }, (ctx) => ({
      *     replaceResponse: { body: { id: Number(ctx.groups.id), name: "Mock" } },
      * }));
      *
@@ -628,18 +630,18 @@ declare const wt: {
      *     headers: { set: { "x-debug": "1" } },
      * }));
      */
-    onRequest(route: Wiretrick.Route, handler: (ctx: Wiretrick.RequestCtx) => Wiretrick.Awaitable<Wiretrick.RequestResult | void>): void;
+    onRequest(route: Wiretrick.RouteOptions, handler: (ctx: Wiretrick.RequestCtx) => Wiretrick.Awaitable<Wiretrick.RequestResult | void>): void;
 
     /**
      * Inspect / modify response headers. **All** matching handlers run.
      * Not available on the `"page"` strategy (the page can't change headers
      * before the browser enforces them).
      *
-     * @param route Where it applies — see {@link Wiretrick.Route}.
+     * @param route Where it applies — see {@link Wiretrick.RouteOptions}.
      * @param handler Called when the response headers arrive.
      *
      * @example
-     * wt.onResponseHeaders("*://api.example.com/*", () => ({
+     * wt.onResponseHeaders({ url: "*://api.example.com/*", strategy: "helper" }, () => ({
      *     headers: {
      *         set: { "access-control-allow-origin": "*" },
      *         remove: ["content-security-policy"],
@@ -647,7 +649,7 @@ declare const wt: {
      * }));
      */
     onResponseHeaders(
-        route: Wiretrick.Route,
+        route: Wiretrick.RouteOptions,
         handler: (ctx: Wiretrick.ResponseHeaderCtx) => Wiretrick.Awaitable<Wiretrick.ResponseHeaderResult | void>
     ): void;
 
@@ -656,21 +658,21 @@ declare const wt: {
      * an object (sent as JSON), or `{ file: "<path or data url>" }`; return
      * nothing to leave the response alone.
      *
-     * @param route Where it applies — see {@link Wiretrick.Route}.
+     * @param route Where it applies — see {@link Wiretrick.RouteOptions}.
      * @param handler Called per matching response; its result becomes the body.
      *
      * @example
-     * wt.replaceResponse("*://api.example.com/flags", () => ({ beta: true }));
+     * wt.replaceResponse({ url: "*://api.example.com/flags", strategy: "helper" }, () => ({ beta: true }));
      *
      * @example
      * // serve a fixture fetched elsewhere
-     * wt.replaceResponse("*://api.example.com/user", async () => {
+     * wt.replaceResponse({ url: "*://api.example.com/user", strategy: "helper" }, async () => {
      *     const res = await fetch("https://fixtures.local/user.json");
      *     return await res.text();
      * });
      */
     replaceResponse(
-        route: Wiretrick.Route,
+        route: Wiretrick.RouteOptions,
         handler: (ctx: Wiretrick.ReplaceCtx) => Wiretrick.Awaitable<string | Uint8Array | object | { file: string } | null | void>
     ): void;
 
@@ -689,25 +691,25 @@ declare const wt: {
      * `"extension"` strategy can't read bodies — the handler doesn't run there and
      * the Log view says so.
      *
-     * @param route Where it applies — see {@link Wiretrick.Route}.
+     * @param route Where it applies — see {@link Wiretrick.RouteOptions}.
      * @param transform Receives the context and the original body; returns
      * the new body, or nothing (`undefined` / `null`) to leave it as it is.
      * Any body returned counts as a change — even the same one: it's
      * re-encoded and served in place of the original.
      *
      * @example
-     * wt.onResponseBody({ url: "*://example.com/app/*.js", resourceTypes: ["script"] }, (ctx, body) => {
+     * wt.onResponseBody({ url: "*://example.com/app/*.js", resourceTypes: ["script"], strategy: "helper" }, (ctx, body) => {
      *     return body.replace("DEBUG=false", "DEBUG=true");
      * });
      * @example
      * // binary: true — swap an image
-     * wt.onResponseBody({ url: "*://example.com/logo.png", binary: true }, async (ctx, body) => {
+     * wt.onResponseBody({ url: "*://example.com/logo.png", binary: true, strategy: "helper" }, async (ctx, body) => {
      *     const res = await fetch("https://example.org/other.png");
      *     return new Uint8Array(await res.arrayBuffer());
      * });
      */
     onResponseBody(
-        route: Wiretrick.UrlPatterns | (Wiretrick.BodyRouteOptions & { binary?: false }),
+        route: Wiretrick.BodyRouteOptions & { binary?: false },
         transform: (ctx: Wiretrick.BodyCtx, body: string) => Wiretrick.Awaitable<string | Uint8Array | void>
     ): void;
     onResponseBody(
@@ -780,7 +782,7 @@ declare const wt: {
      *     hosts: { type: "stringList", default: ["staging.example.com"] },
      * });
      *
-     * wt.onRequest(cfg.hosts.map((h) => `*://${h}/api/*`), () => {
+     * wt.onRequest({ url: cfg.hosts.map((h) => `*://${h}/api/*`), strategy: "helper" }, () => {
      *     if (cfg.enabled) return { replaceResponse: { status: Number(cfg.status), body: { error: "forced" } } };
      * });
      *
@@ -789,7 +791,7 @@ declare const wt: {
      * const cfg = wt.params({
      *     origin: { type: "string", default: "https://app.example.com", parse: (s) => new URL(s) },
      * });
-     * wt.onResponseHeaders("*://api.example.com/*", () => ({
+     * wt.onResponseHeaders({ url: "*://api.example.com/*", strategy: "helper" }, () => ({
      *     headers: { set: { "access-control-allow-origin": cfg.origin.origin } },
      * }));
      */
@@ -801,7 +803,7 @@ declare const wt: {
      *
      * @example
      * const host = wt.defineParam("host", { type: "string", default: "api.example.com" });
-     * wt.onRequest(`*://${host}/*`, () => ({ headers: { set: { "x-debug": "1" } } }));
+     * wt.onRequest({ url: `*://${host}/*`, strategy: "helper" }, () => ({ headers: { set: { "x-debug": "1" } } }));
      *
      * @example
      * // parse: hosts is a Set<string>; the stored value stays a list
@@ -813,7 +815,7 @@ declare const wt: {
      * Per-script key/value storage (async, persistent).
      *
      * @example
-     * wt.onRequest("*://example.com/*", async () => {
+     * wt.onRequest({ url: "*://example.com/*", strategy: "helper" }, async () => {
      *     const hits = ((await wt.storage.get("hits")) ?? 0) + 1;
      *     await wt.storage.set("hits", hits);
      * });
@@ -900,7 +902,7 @@ interface URLPatternResult {
 
 /**
  * Matches URLs against a pattern, e.g. `new URLPattern("https://*.example.com/users/:id")`.
- * The same syntax as handler routes (`wt.onRequest(pattern, fn)`).
+ * The same syntax as handler routes (`wt.onRequest({ url: pattern, strategy }, fn)`).
  *
  * @see https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API
  */

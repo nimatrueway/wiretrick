@@ -31,12 +31,11 @@ try {
     await mgr.setViewportSize({ width: 1280, height: 720 });
     await mgr.goto(`chrome-extension://${EXT_ID}/editor.html`);
     const send = (msg: any) => mgr.evaluate((m: any) => new Promise<any>((r) => chrome.runtime.sendMessage(m, r)), msg);
-    // no local helper here: use the debugger strategy so the log shows real activity
-    await mgr.evaluate(() => new Promise<void>((r) => chrome.storage.local.set({ resStrategy: "debugger" }, () => r())));
+    // no local helper here: run the samples on the debugger strategy so the log shows real activity
 
     for (const name of SHOWN) {
         const s = SAMPLES.find((x) => x.name === name)!;
-        await send({ type: "saveScript", id: "shot_" + name.replace(/\W+/g, "_"), code: s.code, name });
+        await send({ type: "saveScript", id: "shot_" + name.replace(/\W+/g, "_"), code: s.code.split('strategy: "helper"').join('strategy: "debugger"'), name });
     }
     await sleep(1500);
 

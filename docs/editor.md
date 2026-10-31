@@ -26,7 +26,7 @@ searchable list of all of them):
 | F12 | Go to definition — also into the `wt` API typings; on a JSON import it opens the data file |
 | Alt+← / Alt+→ (⌃- / ⌃⇧- on macOS) | Go back / forward after a definition jump or a hover type link |
 
-In a hover, the `wt` API types in the signature (`Route`, `RequestCtx`, …,
+In a hover, the `wt` API types in the signature (`RouteOptions`, `RequestCtx`, …,
 dotted underline) and `{@link}`s in its docs are clickable: a click swaps the
 same hover for that type's signature and docs, so you can drill down type by
 type without leaving your script; **← Back to …** at the top walks back up.
@@ -381,17 +381,15 @@ Network, Advanced and About — pick one on the left to jump to it.
 **Settings → Appearance → Theme** picks *System* (follows the OS), *Dark*
 or *Light*. It applies to the Editor (Code view included) and the popup.
 
-## Strategy
+## Strategies
 
-**Settings → Strategy → Default strategy** picks the
-[strategy](strategies.md) every handler uses unless its route sets
-`strategy` — `helper` on Chromium and `extension` on Firefox out of the
-box. The picker is a table of every strategy with its pros and cons: click a
-row to pick it. Strategies the current browser can't use are greyed out with
-the reason; **Compatibility** links to
-[the full table](strategies.md#compatibility). It is the `defaultStrategy:` entry
-in `settings.yaml`. There is no fallback: a handler whose strategy isn't
-available doesn't run — the script gets a ⚠ and the Problems view a warning.
+**Settings → Strategies** is a reference table of every
+[strategy](strategies.md) with its pros and cons. Strategies the current
+browser can't use are greyed out with the reason; **Compatibility** links to
+[the full table](strategies.md#compatibility). There is no default strategy:
+every network handler names its own (`wt.onRequest({ url, strategy: "helper" }, fn)`).
+There is no fallback either: a handler whose strategy isn't available
+doesn't run — the script gets a ⚠ and the Problems view a warning.
 
 ## About and diagnostics
 
@@ -463,10 +461,6 @@ settings:
   # Minimum log level shown in the panel: debug | info | warn | error
   # logLevel: info
   # …
-  # Interception strategy for every handler whose route doesn't set `strategy`.
-  # …one pros/cons line per strategy…
-  # helper | page | extension | debugger | rules
-  # defaultStrategy: helper
   # Content-Types onResponseBody gets as text (globs; `*` = anything). …
   # textTypes:
   #   - text/*

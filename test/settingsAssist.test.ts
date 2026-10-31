@@ -34,6 +34,14 @@ describe("settings.yaml diagnostics", () => {
         expect(m.some((x) => x.includes("is a library"))).toBe(true);
         expect(m.some((x) => x.startsWith('warning:Unknown top-level key "extra"'))).toBe(true);
     });
+    it("the removed defaultStrategy is a warning on its key, naming the per-handler strategy", () => {
+        const t = `settings:\n  defaultStrategy: page\n`;
+        const [d, ...rest] = settingsDiagnostics(t, scripts);
+        expect(rest).toEqual([]);
+        expect(d.severity).toBe("warning");
+        expect(d.message).toMatch(/"defaultStrategy" was removed — it has no effect\. Every handler sets its own strategy: wt\.onRequest\(\{ url, strategy: "helper" \}/);
+        expect(t.slice(d.start, d.end)).toBe("defaultStrategy");
+    });
     it("ranges point at the offending node", () => {
         const t = `settings:\n  logLevel: loud\n`;
         const [d] = settingsDiagnostics(t, scripts);
@@ -47,9 +55,8 @@ describe("settings.yaml completion", () => {
         expect(labels(`settings:\n  logCap: 500\n|`)).toEqual(["params"]);
     });
     it("global keys and values", () => {
-        expect(labels(`settings:\n  |`)).toEqual(["logLevel", "logCap", "defaultStrategy", "textTypes", "bodyCap"]);
-        expect(labels(`settings:\n  logCap: 500\n  |`)).toEqual(["logLevel", "defaultStrategy", "textTypes", "bodyCap"]);
-        expect(labels(`settings:\n  defaultStrategy: |`)).toEqual(["helper", "page", "extension", "debugger", "rules"]);
+        expect(labels(`settings:\n  |`)).toEqual(["logLevel", "logCap", "textTypes", "bodyCap"]);
+        expect(labels(`settings:\n  logCap: 500\n  |`)).toEqual(["logLevel", "textTypes", "bodyCap"]);
         expect(labels(`settings:\n  logLevel: |`)).toEqual(["debug", "info", "warn", "error"]);
         expect(labels(`settings:\n  logLevel: in|`)).toEqual(["debug", "info", "warn", "error"]);
     });
