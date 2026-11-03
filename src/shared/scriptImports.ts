@@ -9,7 +9,7 @@
  * so `./My_Utils` finds "My Utils"). A URL (`https://unpkg.com/x@1.2.3`)
  * is a package import (shared/packageImports), never a script path.
  */
-import { isUrlSpec, makePackageLoader, type PackageModule, type PackageModules } from "./packageImports";
+import { isUrlSpec, makePackageLoader, PACKAGE_ORIGIN, parsePackageUrl, type PackageModule, type PackageModules } from "./packageImports";
 
 const IMPORT_RE = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["']([^"'\n]+)["']/g;
 
@@ -28,6 +28,32 @@ export function importKeys(code: string): Set<string> {
 export function importSpecs(code: string): Set<string> {
     const out = new Set<string>();
     for (const m of code.matchAll(IMPORT_RE)) out.add(m[1]);
+    return out;
+}
+
+/** a URL import that can't load: where its specifier is (inside the quotes) and why */
+export interface BadPackageImport {
+    offset: number;
+    length: number;
+    spec: string;
+    message: string;
+    /** unpkg package and requested range/tag ("latest" when none) when pinning the version fixes it */
+    pin?: { name: string; range: string; sub: string };
+}
+
+/** URL imports in code that can't load (unpinned, not unpkg, …) */
+export function badPackageImports(code: string): BadPackageImport[] {
+    const out: BadPackageImport[] = [];
+    for (const m of code.matchAll(IMPORT_RE)) {
+        const spec = m[1];
+        if (!isUrlSpec(spec)) continue;
+        const message = parsePackageUrl(spec);
+        if (typeof message !== "string") continue;
+        const offset = m.index! + m[0].length - 1 - spec.length;
+        const p = spec.startsWith(PACKAGE_ORIGIN) && !/[?#]/.test(spec) ? /^((?:@[^/@]+\/)?[^/@]+)(?:@([^/]*))?(?:\/(.*))?$/.exec(spec.slice(PACKAGE_ORIGIN.length)) : null;
+        const pin = p && message.includes("pin an exact version") ? { name: p[1], range: p[2] || "latest", sub: p[3] ?? "" } : undefined;
+        out.push({ offset, length: spec.length, spec, message, pin });
+    }
     return out;
 }
 

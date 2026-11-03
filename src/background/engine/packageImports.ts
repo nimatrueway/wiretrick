@@ -205,7 +205,7 @@ function packageJson(name: string, version: string): Promise<any> {
 }
 
 /** the exact version a dependency range resolves to (unpkg redirects to it) */
-async function resolveVersion(name: string, range: string): Promise<string> {
+export async function resolveVersion(name: string, range: string): Promise<string> {
     const url = rangeUrl(name, range, "package.json");
     if (!url) throw new HttpError(`unsupported dependency range "${range}"`, 400);
     const r = await fetchText(url);

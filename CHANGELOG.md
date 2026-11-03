@@ -9,6 +9,7 @@ its section below.
 
 ### Added
 
+- An import from an unpinned unpkg URL (`import { sleep } from "https://unpkg.com/asyncbox"`, or `@latest`, `@^1`) is now underlined in the Editor as you type, before saving, with a **Pin to asyncbox@6.5.0** quick fix (Ctrl+. / ⌘.) that fills in the version unpkg resolves it to. After saving, the error points at the URL rather than the start of the line, and the Problems view lists it once.
 - A welcome page for first-time users: with no scripts yet, the Editor opens on a gallery of the samples. **Try it** adds one (turned on), waits until it's running and opens its page in a new tab with the change already visible; **Open** just adds it. Reopen it from Help (**?**) → **Welcome**.
 
 ### Changed

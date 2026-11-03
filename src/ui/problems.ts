@@ -219,6 +219,9 @@ export function collectProblems(scripts: ProblemScript[], liveMarkers: Map<strin
         // error, else the top of the file
         const lines = s.code?.split("\n");
         const at = (raw: string, fallback?: number): Position | Range => {
+            const imp = /\bcannot import "([^"]+)"/.exec(raw);
+            const spec = imp && lines ? s.code!.search(new RegExp(`["']${imp[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`)) : -1;
+            if (spec >= 0) return rangeAt(lines!, spec + 1, imp![1].length);
             const pos = errorPosition(raw);
             if (pos) return lines ? tokenRange(lines, pos) : pos;
             const h = handlerRange(raw, s);
@@ -229,7 +232,8 @@ export function collectProblems(scripts: ProblemScript[], liveMarkers: Map<strin
         if (s.error) problems.push({ severity: "error", kind: "compile", message: userFrames(s.error), ...at(s.error, live?.find((m) => m.severity === "error")?.line) });
         for (const r of s.ruleErrors || []) problems.push({ severity: "error", kind: "rules", message: r, ...handler(r) });
         if (s.runtimeError) problems.push({ severity: "error", kind: "runtime", message: runtimeMessage(s.runtimeError), dismissible: true, ...at(s.runtimeError.message) });
-        if (live) problems.push(...fromMarkers(live, "ts"));
+        // (a live marker that repeats the saved code's compile error — an import that can't load — is listed once)
+        if (live) problems.push(...fromMarkers(s.error ? live.filter((m) => !s.error!.includes(m.message)) : live, "ts"));
         // (the saved code's type errors aren't checked while it fails to compile)
         else if (!s.error) problems.push(...(s.typeErrors || []).map(storedTypeError));
         for (const w of s.routeWarnings || []) problems.push({ severity: "warning", kind: "route", message: w, ...handler(w) });

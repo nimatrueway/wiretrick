@@ -463,10 +463,13 @@ wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, () => ({
 
 The URL is `https://unpkg.com/<package>@<version>[/<path>]`. Scoped names
 (`@scope/name`) and prerelease versions (`1.0.0-beta.1`) work. The version
-must be exact: `dayjs`, `dayjs@1`, `dayjs@^1.11.0` or `dayjs@latest` are a
-compile error on the import line (`pin an exact version, e.g.
-https://unpkg.com/dayjs@1.2.3`), because a range could change what the
-script runs. Other hosts, `http://` URLs and query strings aren't allowed.
+must be exact: `dayjs`, `dayjs@1`, `dayjs@^1.11.0` or `dayjs@latest` are an
+error, because a range could change what the script runs. The Editor
+underlines such a URL as you type (`pin an exact version, e.g.
+https://unpkg.com/dayjs@1.2.3`), and its quick fix (**Ctrl+.** / **⌘.**,
+or the light bulb) rewrites it to the version unpkg serves now, e.g.
+`https://unpkg.com/dayjs` → `https://unpkg.com/dayjs@1.11.13`. Other
+hosts, `http://` URLs and query strings aren't allowed.
 
 **How it works.** Saving a script downloads the package (or the file you
 named) and everything it imports: relative files, and the package's own

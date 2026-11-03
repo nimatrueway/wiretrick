@@ -10,7 +10,8 @@ import { API_REFERENCE } from "./apiReference";
 import { SHORTCUTS, filterShortcuts, formatKey, keysFor } from "./shortcuts";
 import { SAMPLES, sampleStrategies, sampleSummary, sampleTryUrl, type SampleScript } from "./samples";
 import { settingsDiagnostics, settingsCompletions, settingsHover, type AssistScript } from "../shared/settingsAssist";
-import { dependantsOf, folderOf, missingImports } from "../shared/scriptImports";
+import { badPackageImports, dependantsOf, folderOf, missingImports } from "../shared/scriptImports";
+import { PACKAGE_ORIGIN } from "../shared/packageImports";
 import { allFolders, ancestorFolders, isInFolder, movedPath } from "../shared/folders";
 import { logSegments, opensInTab } from "./logLinks";
 import { baseName, dropPlan, explorerTree, folderPathOfRowId, folderRowId, idRange, isFolderRowId, joinPath, movedCollapsed, targetFolder, topLevelRows, type TreeRow } from "./explorerTree";
@@ -1233,6 +1234,84 @@ async function revalidateModel(m: any): Promise<void> {
     }
 }
 
+// ---- package imports that can't load (unpinned unpkg URLs, other hosts) ----
+// Marked on the URL as you type, before a save would fail to compile; an
+// unpinned one gets a quick fix that pins the version unpkg resolves now.
+const IMPORT_OWNER = "wt-imports";
+const UNPINNED = "unpinned-import";
+const importMarkerTimers = new WeakMap<any, number>();
+function updateImportMarkers(m: any): void {
+    const monaco = (window as any).monaco;
+    if (m.isDisposed() || m.getLanguageId() !== "typescript") return;
+    const bad = badPackageImports(m.getValue());
+    if (!bad.length && !monaco.editor.getModelMarkers({ resource: m.uri, owner: IMPORT_OWNER }).length) return;
+    ownMarkerWrites.add(m.uri.toString());
+    monaco.editor.setModelMarkers(
+        m,
+        IMPORT_OWNER,
+        bad.map((b) => {
+            const a = m.getPositionAt(b.offset);
+            const e = m.getPositionAt(b.offset + b.length);
+            return {
+                severity: monaco.MarkerSeverity.Error,
+                source: "wiretrick",
+                code: b.pin ? UNPINNED : "package-import",
+                message: b.message,
+                startLineNumber: a.lineNumber,
+                startColumn: a.column,
+                endLineNumber: e.lineNumber,
+                endColumn: e.column,
+            };
+        })
+    );
+}
+function scheduleImportMarkers(m: any): void {
+    clearTimeout(importMarkerTimers.get(m));
+    importMarkerTimers.set(m, window.setTimeout(() => updateImportMarkers(m), 250));
+}
+
+/** "<name>@<range>" → the exact version unpkg resolves it to */
+const resolvedVersions = new Map<string, Promise<string>>();
+function resolvePackageVersion(name: string, range: string): Promise<string> {
+    const key = `${name}@${range}`;
+    let v = resolvedVersions.get(key);
+    if (!v) {
+        v = send<{ version?: string; error?: string }>({ type: "resolvePackageVersion", name, range }).then((r) => (r?.version ? r.version : Promise.reject(new Error(r?.error || "no version"))));
+        resolvedVersions.set(key, v);
+        v.catch(() => resolvedVersions.delete(key));
+    }
+    return v;
+}
+
+function registerPinImportFix(): void {
+    const monaco = (window as any).monaco;
+    monaco.languages.registerCodeActionProvider("typescript", {
+        async provideCodeActions(model: any, _range: unknown, context: { markers: any[] }) {
+            const actions: any[] = [];
+            for (const mk of context.markers) {
+                if ((typeof mk.code === "object" ? mk.code?.value : mk.code) !== UNPINNED) continue;
+                const pin = badPackageImports(`import "${model.getValueInRange(mk)}"`)[0]?.pin;
+                if (!pin) continue;
+                let version: string;
+                try {
+                    version = await resolvePackageVersion(pin.name, pin.range);
+                } catch {
+                    continue;
+                }
+                if (model.isDisposed()) break;
+                actions.push({
+                    title: `Pin to ${pin.name}@${version}${pin.range === "latest" ? " (latest)" : ` (${pin.range})`}`,
+                    kind: "quickfix",
+                    isPreferred: true,
+                    diagnostics: [mk],
+                    edit: { edits: [{ resource: model.uri, versionId: model.getVersionId(), textEdit: { range: mk, text: `${PACKAGE_ORIGIN}${pin.name}@${version}${pin.sub ? `/${pin.sub}` : ""}` } }] },
+                });
+            }
+            return { actions, dispose() {} };
+        },
+    });
+}
+
 // ---- editor ----
 /** One Monaco model per script so `import "./utilities"` resolves across
  * the editor's virtual workspace (file:///<name>.ts per script). */
@@ -1941,7 +2020,9 @@ function markProblems(): void {
     for (const s of scripts) {
         const m = models.get(s.id);
         if (!m || m.isDisposed() || m.getValue() !== s.code) continue;
-        const own = (byId.get(s.id) || []).filter((p) => p.kind !== "ts" && p.kind !== "settings" && p.line);
+        // an import that can't load is already marked live (with its quick fix)
+        const live = monaco.editor.getModelMarkers({ resource: m.uri, owner: IMPORT_OWNER }).map((x: any) => String(x.message));
+        const own = (byId.get(s.id) || []).filter((p) => p.kind !== "ts" && p.kind !== "settings" && p.line && !(p.kind === "compile" && live.some((t: string) => p.message.includes(t))));
         const key = JSON.stringify(own.map((p) => [p.severity, p.message, p.line, p.column, p.endLine, p.endColumn]));
         if ((problemMarkerKeys.get(m) ?? "[]") === key) continue;
         problemMarkerKeys.set(m, key);
@@ -3174,9 +3255,18 @@ async function main(): Promise<void> {
     registerSettingsAssist();
     // Monaco re-checks only the edited file; its importers keep stale errors
     (window as any).monaco.editor.onDidCreateModel((m: any) => {
-        if (m.getLanguageId() === "typescript") m.onDidChangeContent(() => scheduleDependantRecheck(m));
+        if (m.getLanguageId() !== "typescript") return;
+        m.onDidChangeContent(() => scheduleDependantRecheck(m));
+        m.onDidChangeContent(() => scheduleImportMarkers(m));
+        scheduleImportMarkers(m);
     });
-    for (const m of models.values()) m.onDidChangeContent(() => scheduleDependantRecheck(m));
+    for (const m of models.values()) {
+        m.onDidChangeContent(() => scheduleDependantRecheck(m));
+        if (m.getLanguageId() !== "typescript") continue;
+        m.onDidChangeContent(() => scheduleImportMarkers(m));
+        scheduleImportMarkers(m);
+    }
+    registerPinImportFix();
     // VS Code shortcuts: ⌘P quick-open (scripts + settings.yaml), ⌘, opens
     // the Settings dialog, ⌘⇧E focuses the explorer, ⌘B / ⌘J toggle the
     // explorer / panel, ⌘⇧M or ⌥⇧P/L/N show a panel view (filter focused), ⌥⇧K clears it, ⌥Z toggles word wrap

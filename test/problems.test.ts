@@ -5,6 +5,14 @@ const script = (id: string, over: Partial<ProblemScript> = {}): ProblemScript =>
 const none = new Map<string, ProblemMarker[]>();
 
 describe("collectProblems", () => {
+    it("an import that can't load points at its URL and isn't listed twice with its live marker", () => {
+        const code = `// x\nimport { sleep } from 'https://unpkg.com/asyncbox';\n`;
+        const msg = `cannot import "https://unpkg.com/asyncbox": pin an exact version`;
+        const live = new Map([["a", [{ severity: "error" as const, message: msg, line: 2, column: 24 }]]]);
+        const [g] = collectProblems([script("a", { code, error: `Error: ${msg} (line 1)` })], live);
+        expect(g.problems).toHaveLength(1);
+        expect(g.problems[0]).toMatchObject({ kind: "compile", line: 2, column: 24, endColumn: 24 + "https://unpkg.com/asyncbox".length });
+    });
     it("no problems → no groups", () => {
         expect(collectProblems([script("a"), script("b", { typeErrors: [], ruleErrors: [], routeWarnings: [], runtimeError: null })], none)).toEqual([]);
         expect(collectProblems([], none, [])).toEqual([]);

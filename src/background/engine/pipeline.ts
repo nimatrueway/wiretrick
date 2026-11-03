@@ -16,7 +16,7 @@ import {
     listDataFiles, getDataFile, saveDataFile, deleteDataFile, listFolders, createFolder, renameFolder, deleteFolder,
 } from "./scriptStore";
 import { loadDataFiles } from "./dataFiles";
-import { loadPackages, packagesSnapshot } from "./packageImports";
+import { loadPackages, packagesSnapshot, resolveVersion } from "./packageImports";
 import { isUrlSpec, packageClosure } from "../../shared/packageImports";
 import { serveStore } from "./strategies/extensionStrategy";
 import { dlog, dlogLevel } from "../../shared/debugLog";
@@ -568,6 +568,14 @@ export function createPipeline(
                     }))
                 );
             });
+            return true;
+        }
+        // the Editor's "pin the version" quick fix: the exact version a range/tag resolves to on unpkg
+        if (msg && msg.type === "resolvePackageVersion") {
+            resolveVersion(String(msg.name), String(msg.range || "latest")).then(
+                (version) => sendResponse({ version }),
+                (e) => sendResponse({ error: String(e?.message ?? e) })
+            );
             return true;
         }
         // the Editor's welcome page: wait until a just-saved script runs before opening its page
