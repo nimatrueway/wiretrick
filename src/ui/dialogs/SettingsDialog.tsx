@@ -71,7 +71,7 @@ export function SettingsDialog() {
                             <div className="setting">
                                 <span className="setting-label">Bundle</span>
                                 <div className="setting-control">
-                                    <div id="settings-io-row" className="setting-inline"><button id="btn-export">Export…</button>{" "}<button id="btn-import">Import…</button></div>
+                                    <div id="settings-io-row" className="setting-inline"><button id="btn-export" onClick={() => actions.exportBundle()}>Export…</button>{" "}<button id="btn-import" onClick={() => actions.importBundle()}>Import…</button></div>
                                     <p className="setting-help">Export any subset of scripts (and the global settings) to a YAML bundle. Import a bundle (.yaml/.yml), picking which of its items to take, or a single .ts/.js file.</p>
                                 </div>
                             </div>

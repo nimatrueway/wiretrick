@@ -13,6 +13,7 @@ import type { SampleScript } from "../samples";
 export const actions = {
     showPanelTab(_which: PanelTab): void {},
     setPanelHidden(_hidden: boolean): void {},
+    setSidebarHidden(_hidden: boolean): void {},
     /** clear the Log and the Network recording */
     clearPanel(): void {},
     runDiagnostics(): void {},
@@ -22,6 +23,14 @@ export const actions = {
     focusEditor(): void {},
     /** status-bar message (`cls`: "error") */
     status(_text: string, _cls?: string): void {},
+    // ---- the Code view's toolbar ----
+    save(): void {},
+    /** turn the open script on / off */
+    toggleEnabled(): void {},
+    /** reconnects a saved folder, else opens Settings → Synced folder */
+    folderSyncButton(): void {},
+    /** ↗: open the file in VS Code (or the custom editor) */
+    openInEditor(): void {},
     // ---- explorer ----
     /** open a file (asks to discard unsaved changes) */
     select(_id: string): void {},
@@ -63,4 +72,8 @@ export const actions = {
     setLaunchMode(_mode: LaunchMode): void {},
     setEditorUrl(_url: string): void {},
     setMonacoVerbose(_on: boolean): void {},
+    /** pick what to export, then download the YAML bundle */
+    exportBundle(): void {},
+    /** pick a bundle / script file, then what of it to import */
+    importBundle(): void {},
 };

@@ -12,7 +12,6 @@ import { settingsDiagnostics, settingsCompletions, settingsHover, type AssistScr
 import { badPackageImports, dependantsOf, missingImports } from "../shared/scriptImports";
 import { PACKAGE_ORIGIN } from "../shared/packageImports";
 import { isInFolder, movedPath } from "../shared/folders";
-import { logSegments, opensInTab } from "./logLinks";
 import { baseName, folderPathOfRowId, folderRowId, isFolderRowId, movedCollapsed, type TreeRow } from "./explorerTree";
 import { dataPathOfDecl } from "./jsonTypes";
 import { dialogs, openHelp, openSettings, pickRows, resolveConflict } from "./state/dialogs";
@@ -23,10 +22,9 @@ import { cleanScriptName, scriptNameProblem, scriptFileName, scriptFileKey, uniq
 import { buildBundle, parseBundleText, bundleSettingsDoc, pickBundle, vscodeTargetPath, editorLaunchUrl, launchAppName, type LaunchMode } from "./bundle";
 import { computeDirty } from "./dirtyState";
 import { parseSettings, SETTINGS_FILE, isBodyCap, BODY_CAP_KEY, DEFAULT_BODY_CAP, type SettingsDoc } from "../shared/settingsYaml";
-import { dlogLevel } from "../shared/debugLog";
 import { createNetStore, type NetStore } from "./network/netStore";
 import { installTooltips } from "./tooltip";
-import { scriptHealth, type ScriptHealthInput } from "../shared/scriptHealth";
+import type { ScriptHealthInput } from "../shared/scriptHealth";
 import type { Uri, IPosition, IRange, IKeyboardEvent, editor as MonacoEditor } from "monaco-editor";
 import type { Script } from "../background/engine/scriptStore";
 import type { DataFile } from "../background/engine/dataFiles";
@@ -41,6 +39,7 @@ import { badges, badgesChanged, panel, setNetStore, setProblems } from "./state/
 import { actions } from "./shell/actions";
 import { clearSel, everyFolder, explorer, explorerIds, moveFocus, pruneCollapsed, revealInExplorer, setCollapsed, setSel, SETTINGS_ID, startCreate as startCreateRow, syncExplorer, treeRow, treeRows, visibleRows, type NewKind } from "./state/explorer";
 import { createCodeEditor } from "./shell/codeEditor";
+import { toolbar, type SaveState } from "./state/toolbar";
 import { collectDiagnostics, diagnosticsFileName, downloadText } from "./about";
 
 // ---- state ----
@@ -63,14 +62,9 @@ function setDirty(v: boolean): void {
 }
 
 /** The Save button is the save indicator: ● unsaved, spinner while saving, ✓ saved. */
-function setSaveState(state: "saved" | "unsaved" | "saving"): void {
-    const btn = $("#btn-save");
-    btn.dataset.state = state;
+function setSaveState(state: SaveState): void {
     const can = state === "unsaved" && !typingsShown;
-    btn.toggleAttribute("disabled", !can);
-    btn.classList.toggle("dim", !can);
-    btn.querySelector(".save-label")!.textContent = state === "saved" ? "Saved" : state === "saving" ? "Saving…" : "Save";
-    btn.title = state === "saved" ? "Saved — no unsaved changes" : state === "saving" ? "Saving…" : "Unsaved changes — Save (⌘S)";
+    flushSync(() => void Object.assign(toolbar.save, { state, disabled: !can, dim: !can }));
 }
 let applyingExternal = false;
 
@@ -94,9 +88,8 @@ function updateDirty(): void {
     status("");
 }
 
-// ---- elements ----
-const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => document.querySelector(sel) as T;
-const $input = (sel: string): HTMLInputElement => document.querySelector(sel) as HTMLInputElement;
+/** an element React rendered (for focus) */
+const byId = (id: string): HTMLElement => document.getElementById(id)!;
 
 // ---- helpers ----
 function sendRaw<T = any>(msg: any): Promise<T> {
@@ -113,14 +106,9 @@ function uuid(): string {
     return "s_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
 }
 
-let statusClick: (() => void) | null = null;
-
 /** Toolbar status line; with onClick it renders as a link-like action. */
 function status(text: string, cls = "", onClick?: () => void): void {
-    const el = $("#editor-status");
-    el.textContent = text;
-    el.className = cls + (onClick ? " clickable" : "");
-    statusClick = onClick ?? null;
+    toolbar.status = { text, cls, onClick: onClick ?? null };
 }
 
 // ---- script list ----
@@ -226,7 +214,6 @@ async function selectSettings(): Promise<void> {
     explorer.focusedId = null;
     showWelcome(false);
     renderList();
-    $("#btn-save").removeAttribute("disabled");
     await loadSettingsModel(!back);
     if (editor.getModel() !== settingsModel) {
         captureViewState();
@@ -351,19 +338,15 @@ async function deleteRows(rows: TreeRow[]): Promise<void> {
 
 /** Editor toolbar switch: enable/disable the open script (hidden for settings.yaml, data files and libraries). */
 function updateEnabledToggle(): void {
-    const label = $("#script-enabled");
     const script = typingsShown ? undefined : scripts.find((s) => s.id === selectedId);
-    label.hidden = !script || script.meta.active === false;
-    if (!script) return;
-    label.querySelector(".switch")!.classList.toggle("on", !!script.enabled);
-    label.setAttribute("aria-checked", String(!!script.enabled));
+    toolbar.enabled = !script || script.meta.active === false ? null : !!script.enabled;
 }
 
 /** ⇧⌘E: show the explorer and put the focus in it */
 function focusExplorer(): void {
     if (layout.sidebarHidden) setSidebarHidden(false);
     flushSync(() => void (explorer.sectionOpen = true));
-    $("#script-list").focus();
+    byId("script-list").focus();
     flushSync(() => moveFocus(explorer.focusedId ?? selectedId ?? SETTINGS_ID));
 }
 
@@ -455,7 +438,7 @@ async function createItem(kind: NewKind, path: string): Promise<void> {
         }
         explorer.focusedId = folderRowId(path);
         await refresh();
-        $("#script-list").focus();
+        byId("script-list").focus();
     }
 }
 
@@ -812,7 +795,7 @@ function watchPackageTypings(): void {
 
 async function renderEditorEmpty(): Promise<void> {
     leaveTypings();
-    $("#btn-save").setAttribute("disabled", "");
+    toolbar.save.disabled = true;
     if (editor) {
         editor.setModel(null);
     }
@@ -833,20 +816,9 @@ function setEditorValue(code: string): void {
     status("");
 }
 
-/** Enable ↗ only while folder sync is active and a script is selected (and a custom editor has a URL). */
+/** ↗ opens a file only while folder sync is active and one is open (the toolbar also needs a launch target). */
 function updateOpenVscode(): void {
-    const b = $("#btn-open-vscode") as HTMLButtonElement;
-    const { launchMode, editorUrl: launchTemplate } = settings;
-    const off = launchMode === "off";
-    b.style.display = off ? "none" : "";
-    const app = launchAppName(launchMode);
-    b.classList.toggle("insiders", launchMode === "vscode-insiders");
-    b.classList.toggle("custom", launchMode === "custom");
-    const noUrl = launchMode === "custom" && !launchTemplate.trim();
-    b.title = noUrl ? "Set the editor URL in Settings → Open button" : `Open this script's synced file in ${app} (requires a synced folder)`;
-    b.setAttribute("aria-label", `Open in ${app}`);
-    if (!off && !noUrl && (window as any).__resSyncActive && selectedId && !typingsShown) b.removeAttribute("disabled");
-    else b.setAttribute("disabled", "");
+    toolbar.canOpen = syncActive && !!selectedId && !typingsShown;
 }
 
 function selectReal(id: string): void {
@@ -860,7 +832,6 @@ function selectReal(id: string): void {
     const data = script ? undefined : dataFiles.find((d) => d.id === id);
     if (!script && !data) return;
     showWelcome(false);
-    $("#btn-save").removeAttribute("disabled");
     if (script) syncModels();
     else syncDataModels();
     const m = script ? models.get(id) : dataModels.get(id);
@@ -894,9 +865,8 @@ function showTypings(): void {
     editor.setModel(m);
     editor.updateOptions({ readOnly: true, readOnlyMessage: { value: "wt-api.d.ts is the Wiretrick API typings — read-only" } });
     restoreViewState(m);
-    $("#typings-note").hidden = false;
-    $("#btn-save").setAttribute("disabled", "");
-    $("#btn-save").classList.add("dim");
+    toolbar.typings = true;
+    Object.assign(toolbar.save, { disabled: true, dim: true });
     renderList();
     updateOpenVscode();
 }
@@ -907,7 +877,7 @@ function leaveTypings(): void {
     captureViewState();
     typingsShown = false;
     editor.updateOptions({ readOnly: false });
-    $("#typings-note").hidden = true;
+    toolbar.typings = false;
 }
 
 /** a place in the Code view: a script id / SETTINGS_ID / TYPINGS_ID + cursor and scroll */
@@ -1106,7 +1076,7 @@ function connectLogs(): void {
         }
         if (msg.type === "sync") {
             renderFolderSync(msg.status);
-            (window as any).__resSyncActive = msg.status.active;
+            syncActive = msg.status.active;
             fsBridge.setCachedActive(msg.status.active);
             if (msg.status.active) {
                 markFolderSynced();
@@ -1269,14 +1239,14 @@ async function openProblem(id: string, p: Problem): Promise<void> {
 
 /** the filter box of a panel view (Network's lives in a portal, once mounted) */
 function panelFilter(which: PanelTab): HTMLInputElement | null {
-    if (which === "problems") return $input("#problems-filter");
+    if (which === "problems") return byId("problems-filter") as HTMLInputElement;
     if (which === "log") return document.querySelector<HTMLInputElement>("#log-filter-host input.net-filter, #log-filter-host input.net-query");
     return document.querySelector<HTMLInputElement>("#net-filter-host input.net-filter, #net-filter-host input.net-query");
 }
 
 /** Show a panel view and focus its filter; again (already there, focus in the panel): close the panel. */
 function focusPanelView(which: PanelTab): void {
-    if (!layout.panelHidden && panelTabOf(layout) === which && $("#log-panel").contains(document.activeElement)) {
+    if (!layout.panelHidden && panelTabOf(layout) === which && byId("log-panel").contains(document.activeElement)) {
         setPanelHidden(true);
         return;
     }
@@ -1460,26 +1430,18 @@ function showWelcome(open: boolean): void {
 
 // ---- toolbar folder sync button: off / disconnected / connected / sending / receiving ----
 let folderNeedsGrant = false; // a saved folder waits for a permission click
+/** folder sync is on; syncPath: the synced folder's absolute path, for ↗ */
+let syncActive = false;
+let syncPath = "";
 function renderFolderSync(st: { active: boolean; path?: string; paused?: boolean; activity?: string }): void {
-    const btn = $("#btn-folder-sync");
     if (st.active) folderNeedsGrant = false;
     else if (st.paused) folderNeedsGrant = true;
     const state = st.active ? (st.activity === "sending" || st.activity === "receiving" ? st.activity : "connected") : folderNeedsGrant ? "disconnected" : "off";
-    btn.dataset.state = state;
-    const where = st.path ? ` "${st.path}"` : "";
-    const text: Record<string, string> = {
-        off: "Folder sync is off — click to set it up",
-        disconnected: "Folder sync disconnected — click to reconnect",
-        connected: `Synced with${where || " the folder"} — click for folder sync settings`,
-        sending: `Writing changes to${where || " the folder"}…`,
-        receiving: `Reading changes from${where || " the folder"}…`,
-    };
-    btn.title = text[state];
-    btn.setAttribute("aria-label", `Folder sync: ${state}`);
+    toolbar.sync = { state, path: st.path ?? "" };
 }
 
 async function folderSyncButtonClicked(): Promise<void> {
-    if ($("#btn-folder-sync").dataset.state === "disconnected" && (await fsBridge.reconnectClicked())) {
+    if (toolbar.sync.state === "disconnected" && (await fsBridge.reconnectClicked())) {
         await markFolderSynced();
         status("synced folder reconnected ✓");
         return;
@@ -1490,7 +1452,7 @@ async function folderSyncButtonClicked(): Promise<void> {
 // ---- dedicated scripts folder: pick once, edits sync both ways ----
 async function markFolderSynced(): Promise<void> {
     settings.folder.mode = "synced";
-    (window as any).__resSyncActive = true;
+    syncActive = true;
     fsBridge.setCachedActive(true);
     updateOpenVscode();
     const st = await fsBridge.queryStatus();
@@ -1506,10 +1468,10 @@ async function markFolderSynced(): Promise<void> {
 async function refreshSyncPath(): Promise<void> {
     const st = await fsBridge.queryStatus();
     if (st.path && st.path.startsWith("/")) {
-        (window as any).__resSyncPath = st.path;
+        syncPath = st.path;
         return;
     }
-    (window as any).__resSyncPath = settings.vscodePath;
+    syncPath = settings.vscodePath;
 }
 
 /**
@@ -1538,7 +1500,7 @@ let folderReconnect: (() => Promise<void>) | null = null;
 async function folderButtonClicked(): Promise<void> {
     if (fsBridge.isSyncing()) {
         await fsBridge.stopSync();
-        (window as any).__resSyncActive = false;
+        syncActive = false;
         fsBridge.setCachedActive(false);
         settings.folder.mode = "off";
         folderNeedsGrant = false;
@@ -1586,14 +1548,14 @@ async function autoReconnectFolder(): Promise<void> {
 // ---- movable panels ----
 /** ⌘B: show/hide the explorer (VS Code's primary side bar). */
 function setSidebarHidden(hidden: boolean): void {
-    if (hidden && $("#sidebar").contains(document.activeElement)) editor?.focus();
+    if (hidden && byId("sidebar").contains(document.activeElement)) editor?.focus();
     flushSync(() => void (layout.sidebarHidden = hidden));
     window.dispatchEvent(new Event("resize"));
 }
 
 /** ⌘J: show/hide the Log/Network panel wherever it is docked. */
 function setPanelHidden(hidden: boolean): void {
-    if (hidden && $("#log-panel").contains(document.activeElement)) editor?.focus();
+    if (hidden && byId("log-panel").contains(document.activeElement)) editor?.focus();
     flushSync(() => void (layout.panelHidden = hidden));
     window.dispatchEvent(new Event("resize"));
 }
@@ -1606,27 +1568,6 @@ function toggleWordWrap(): void {
     const on = !layout.wordWrap;
     layout.wordWrap = on;
     editor?.updateOptions({ wordWrap: on ? "on" : "off" });
-}
-
-function makeSplitV(): void {
-    const handle = $("#split-v");
-    handle.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        handle.classList.add("dragging");
-        const move = (ev: MouseEvent) => {
-            const x = currentSide() === "right" ? window.innerWidth - ev.clientX : ev.clientX;
-            const w = Math.min(620, Math.max(200, x));
-            $("#sidebar").style.width = `${w}px`;
-        };
-        const up = () => {
-            handle.classList.remove("dragging");
-            document.removeEventListener("mousemove", move);
-            document.removeEventListener("mouseup", up);
-            flushSync(() => void (layout.sidebarW = $("#sidebar").offsetWidth));
-        };
-        document.addEventListener("mousemove", move);
-        document.addEventListener("mouseup", up);
-    });
 }
 
 /** the passive Network counts' store (the Network view records in its own once shown) */
@@ -1652,11 +1593,193 @@ function clearPanel(): void {
     void send({ type: "clearDebugLogs" });
 }
 
+/** ↗: open the file in VS Code (or the custom editor) */
+function openInEditor(): void {
+    const folder = syncPath;
+    if (!folder) {
+        openSettings("settings-sec-folder");
+        void checkFolderPath(true);
+        return;
+    }
+    if (!selectedId || typingsShown) return;
+    // the ⚙ settings.yaml entry is virtual (not in `scripts`) — its
+    // target is <folder>/settings.yaml, written by folderSync
+    const data = dataFiles.find((d) => d.id === selectedId);
+    const file = data ? `${folder.replace(/\/+$/, "")}/${data.path}` : vscodeTargetPath(folder, selectedId, scripts.find((s) => s.id === selectedId)?.meta.name, SETTINGS_ID, SETTINGS_FILE);
+    const url = editorLaunchUrl(settings.launchMode, settings.editorUrl, file, editor?.getPosition?.()?.lineNumber || 1);
+    if (!url) return;
+    // launch from THIS page (user gesture): external-protocol requests
+    // from the background page are dropped by Chromium
+    const a = document.createElement("a");
+    a.href = url;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    status(`opening ${file} in ${launchAppName(settings.launchMode)}…`);
+    const msg = `openInVscode → launching ${url}`;
+    appendLog({ at: Date.now(), message: `[editor] ${msg}`, level: "info" });
+    chrome.runtime.sendMessage({ type: "debugLog", entry: { at: Date.now(), src: "editor", msg, level: "info" } }, () => void chrome.runtime.lastError);
+}
+
+// ---- import / export: both open a checklist so any subset can travel ----
+const settingsRow = (g: Record<string, any>) => ({
+    label: "Settings (globals)",
+    detail: Object.entries(g).map(([k, v]) => `${k}: ${v}`).join(", "),
+});
+// rows after the settings row: scripts, then data files (`data`, name = path)
+const importsWarning = (names: { name: string; code: string; data?: boolean }[], offset: number) => (checked: number[]) => {
+    const picked = checked.filter((i) => i >= offset).map((i) => i - offset);
+    const missing = missingImports(picked, names);
+    if (!missing.length) return null;
+    return {
+        text: `selected scripts import ${missing.map((i) => `"${names[i].name}"`).join(", ")}, which ${missing.length > 1 ? "aren't" : "isn't"} selected`,
+        fix: missing.map((i) => i + offset),
+    };
+};
+/** Export…: pick what goes into the YAML bundle, then download it */
+async function exportBundle(): Promise<void> {
+    // scripts + settings travel together in one YAML document; the
+    // parsed settings.yaml carries globals AND per-script param values
+    const { text } = await send({ type: "getSettingsYaml", text: settingsModel?.getValue() });
+    let doc: SettingsDoc = { settings: null, params: {} };
+    try {
+        doc = parseSettings(text);
+    } catch {
+        /* unreachable: getSettingsYaml always returns parsable text */
+    }
+    const globals = doc.settings && Object.keys(doc.settings).length ? doc.settings : null;
+    const offset = globals ? 1 : 0;
+    const dataFiles: { path: string; text: string }[] = (await send({ type: "listDataFiles" })) || [];
+    const folders: string[] = (await send({ type: "listFolders" })) || [];
+    const list = [
+        ...scripts.map((s) => ({ name: s.meta.name, code: s.code, enabled: s.enabled as boolean | undefined, data: false })),
+        ...dataFiles.map((d) => ({ name: d.path, code: d.text, enabled: undefined, data: true })),
+    ];
+    const chosen = await pickRows({
+        title: "Export",
+        intro: "Pick what goes into the YAML bundle. Each script carries its code, enabled state and non-default params; each data file its path and text.",
+        rows: [
+            ...(globals ? [settingsRow(globals)] : []),
+            ...list.map((s) => ({ label: s.name, badge: s.data ? "data file" : s.enabled ? undefined : "disabled" })),
+        ],
+        confirm: "Export",
+        warn: importsWarning(list, offset),
+    });
+    if (!chosen) return;
+    const rows = chosen.filter((i) => i >= offset).map((i) => list[i - offset]);
+    const picked = rows.filter((r) => !r.data).map(({ name, code, enabled }) => ({ name, code, enabled }));
+    const pickedData = rows.filter((r) => r.data).map((r) => ({ path: r.name, text: r.code }));
+    // empty folders travel too (the others come with their contents)
+    const paths = list.map((r) => r.name.toLowerCase());
+    const empty = folders.filter((f) => !paths.some((p) => p.startsWith(f.toLowerCase() + "/")));
+    const payload = buildBundle({ ...doc, settings: globals && chosen.includes(0) ? globals : null }, picked, pickedData, empty);
+    const blob = new Blob([payload], { type: "text/yaml" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = picked.length === 1 && chosen.length === 1 ? `${picked[0].name.replace(/.*\//, "")}.wiretrick.yaml` : "wiretrick-export.yaml";
+    a.click();
+    URL.revokeObjectURL(url);
+    status(`exported ${picked.length} script(s)${pickedData.length ? ` + ${pickedData.length} data file(s)` : ""}${offset && chosen.includes(0) ? " + settings" : ""} ✓`);
+}
+// an imported script replaces the existing script of the same name
+const saveImported = async (item: { code: string; name?: string; enabled?: boolean }) => {
+    // file names are case-insensitive on Windows/macOS: "Foo" replaces "foo"
+    const existing = item.name ? scripts.find((s) => scriptFileKey(s.meta.name) === scriptFileKey(item.name!)) : undefined;
+    await send({ type: "saveScript", id: existing?.id ?? uuid(), code: item.code, name: item.name, enabled: item.enabled });
+};
+const existsBadge = (name?: string) => (name && scripts.some((s) => scriptFileKey(s.meta.name) === scriptFileKey(name)) ? "replaces existing" : "new");
+/** Import…: a bundle (pick what of it to import) or a single script file */
+function importBundle(): void {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".yaml,.yml,.ts,.js";
+    input.onchange = async () => {
+        const file = input.files?.[0];
+        if (!file) return;
+        const text = await file.text();
+        if (/\.ya?ml$/i.test(file.name)) {
+            const full = parseBundleText(text);
+            if (full) {
+                const offset = full.settings ? 1 : 0;
+                const fullData = full.dataFiles ?? [];
+                const existingData: { id: string; path: string }[] = fullData.length ? (await send({ type: "listDataFiles" })) || [] : [];
+                const dataFileIn = (path: string) => existingData.find((d) => d.path.toLowerCase() === path.toLowerCase());
+                const named = [
+                    ...full.scripts.map((s, i) => ({ name: s.name ?? `script ${i + 1}`, code: s.code, data: false })),
+                    ...fullData.map((d) => ({ name: d.path, code: d.text, data: true })),
+                ];
+                const chosen = await pickRows({
+                    title: `Import ${file.name}`,
+                    intro: "Pick what to import. A script (data file) replaces the existing script (data file) of the same name (path).",
+                    rows: [
+                        ...(full.settings ? [settingsRow(full.settings)] : []),
+                        ...full.scripts.map((s, i) => ({
+                            label: named[i].name,
+                            badge: existsBadge(s.name),
+                            detail: s.params ? `params: ${Object.keys(s.params!).join(", ")}` : undefined,
+                        })),
+                        ...fullData.map((d) => ({ label: d.path, badge: dataFileIn(d.path) ? "replaces existing" : "new data file" })),
+                    ],
+                    confirm: "Import",
+                    warn: importsWarning(named, offset),
+                });
+                if (!chosen) return;
+                const rows = chosen.filter((i) => i >= offset).map((i) => i - offset);
+                const bundle = pickBundle(
+                    full,
+                    offset > 0 && chosen.includes(0),
+                    rows.filter((i) => i < full.scripts.length),
+                    rows.filter((i) => i >= full.scripts.length).map((i) => i - full.scripts.length)
+                );
+                // folders and data files first: the scripts compile against them
+                const failed: string[] = [];
+                for (const f of bundle.folders ?? []) {
+                    const r = await send({ type: "createFolder", path: f });
+                    if (r?.error) failed.push(r.error);
+                }
+                for (const d of bundle.dataFiles ?? []) {
+                    const r = await send({ type: "saveDataFile", id: dataFileIn(d.path)?.id, path: d.path, text: d.text });
+                    if (r?.error) failed.push(r.error);
+                }
+                for (const item of bundle.scripts) await saveImported(item);
+                await refresh();
+                // settings apply through the real path (params +
+                // globals); storage.onChanged refreshes the settings UI
+                const doc = bundleSettingsDoc(bundle);
+                if (doc) {
+                    const res = await send({ type: "applySettingsDoc", doc });
+                    if (res && res.error) {
+                        status(`imported ${bundle.scripts.length} script(s); settings: ${res.error}`, "error");
+                        return;
+                    }
+                }
+                if (failed.length) {
+                    status(`imported ${bundle.scripts.length} script(s); ${failed.join("; ")}`, "error");
+                    return;
+                }
+                const nData = bundle.dataFiles?.length ?? 0;
+                status(`imported ${bundle.scripts.length} script(s)${nData ? ` + ${nData} data file(s)` : ""}${bundle.settings ? " + settings" : ""} ✓`);
+                return;
+            }
+            status('not a Wiretrick export (missing "format: wiretrick-bundle")', "error");
+            return;
+        }
+        const base = cleanScriptName(file.name.replace(/\.ts$/i, "")) || "Imported script";
+        const name = uniqueScriptName(base, scripts.map((s) => s.meta.name));
+        await send({ type: "saveScript", id: uuid(), code: text, name });
+        status("imported script ✓");
+        await refresh();
+    };
+    input.click();
+}
+
 // ---- wiring ----
 async function main(): Promise<void> {
     Object.assign(actions, {
         showPanelTab,
         setPanelHidden,
+        setSidebarHidden,
         clearPanel,
         runDiagnostics: () => void runDiagnostics(),
         openProblem: (id: string, p: Problem) => void openProblem(id, p),
@@ -1669,6 +1792,15 @@ async function main(): Promise<void> {
         itemPathProblem,
         createItem: (kind: NewKind, path: string) => void createItem(kind, path),
         startCreate,
+        save: () => void saveCurrent(),
+        toggleEnabled: () => {
+            const script = scripts.find((s) => s.id === selectedId);
+            if (script) void setScriptEnabled(script, !script.enabled);
+        },
+        folderSyncButton: () => void folderSyncButtonClicked(),
+        openInEditor,
+        exportBundle: () => void exportBundle(),
+        importBundle,
         setScriptEnabled: (id: string, enabled: boolean) => {
             const script = scripts.find((s) => s.id === id);
             if (script) void setScriptEnabled(script, enabled);
@@ -1773,13 +1905,6 @@ async function main(): Promise<void> {
             }
         }
     });
-    $("#btn-toggle-sidebar").addEventListener("click", toggleSidebar);
-    $("#btn-toggle-panel").addEventListener("click", togglePanel);
-    $("#script-enabled").addEventListener("click", (e) => {
-        e.preventDefault();
-        const script = scripts.find((s) => s.id === selectedId);
-        if (script) void setScriptEnabled(script, !script.enabled);
-    });
     const opener: MonacoEditor.ICodeEditorOpener = {
         openCodeEditor: (_source, resource, selection) => openScriptAt(resource, selection),
     };
@@ -1792,202 +1917,11 @@ async function main(): Promise<void> {
         updateDirty();
     });
 
-    $("#btn-save").addEventListener("click", () => void saveCurrent());
-    $("#btn-open-vscode").addEventListener("click", () => {
-        const folder = (window as any).__resSyncPath as string;
-        if (!folder) {
-            openSettings("settings-sec-folder");
-            void checkFolderPath(true);
-            return;
-        }
-        if (!selectedId || typingsShown) return;
-        // the ⚙ settings.yaml entry is virtual (not in `scripts`) — its
-        // target is <folder>/settings.yaml, written by folderSync
-        const data = dataFiles.find((d) => d.id === selectedId);
-        const file = data ? `${folder.replace(/\/+$/, "")}/${data.path}` : vscodeTargetPath(folder, selectedId, scripts.find((s) => s.id === selectedId)?.meta.name, SETTINGS_ID, SETTINGS_FILE);
-        const url = editorLaunchUrl(settings.launchMode, settings.editorUrl, file, editor?.getPosition?.()?.lineNumber || 1);
-        if (!url) return;
-        // launch from THIS page (user gesture): external-protocol requests
-        // from the background page are dropped by Chromium
-        const a = document.createElement("a");
-        a.href = url;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        status(`opening ${file} in ${launchAppName(settings.launchMode)}…`);
-        const msg = `openInVscode → launching ${url}`;
-        appendLog({ at: Date.now(), message: `[editor] ${msg}`, level: "info" });
-        chrome.runtime.sendMessage({ type: "debugLog", entry: { at: Date.now(), src: "editor", msg, level: "info" } }, () => void chrome.runtime.lastError);
-    });
-    $("#editor-status").addEventListener("click", () => statusClick?.());
 
-    // VS Code folder sync
-    const syncBtn = $("#btn-folder-sync");
-    if (fsBridge.isSupported()) syncBtn.addEventListener("click", () => void folderSyncButtonClicked());
-    else {
-        syncBtn.setAttribute("disabled", "");
-        syncBtn.title = "Folder sync needs the File System Access API (not in Firefox) — use Import/Export";
-    }
-
-    // import / export
-    // import / export — both open a checklist so any subset can travel
-    const settingsRow = (g: Record<string, any>) => ({
-        label: "Settings (globals)",
-        detail: Object.entries(g).map(([k, v]) => `${k}: ${v}`).join(", "),
-    });
-    // rows after the settings row: scripts, then data files (`data`, name = path)
-    const importsWarning = (names: { name: string; code: string; data?: boolean }[], offset: number) => (checked: number[]) => {
-        const picked = checked.filter((i) => i >= offset).map((i) => i - offset);
-        const missing = missingImports(picked, names);
-        if (!missing.length) return null;
-        return {
-            text: `selected scripts import ${missing.map((i) => `"${names[i].name}"`).join(", ")}, which ${missing.length > 1 ? "aren't" : "isn't"} selected`,
-            fix: missing.map((i) => i + offset),
-        };
-    };
-    $("#btn-export").addEventListener("click", async () => {
-        // scripts + settings travel together in one YAML document; the
-        // parsed settings.yaml carries globals AND per-script param values
-        const { text } = await send({ type: "getSettingsYaml", text: settingsModel?.getValue() });
-        let doc: SettingsDoc = { settings: null, params: {} };
-        try {
-            doc = parseSettings(text);
-        } catch {
-            /* unreachable: getSettingsYaml always returns parsable text */
-        }
-        const globals = doc.settings && Object.keys(doc.settings).length ? doc.settings : null;
-        const offset = globals ? 1 : 0;
-        const dataFiles: { path: string; text: string }[] = (await send({ type: "listDataFiles" })) || [];
-        const folders: string[] = (await send({ type: "listFolders" })) || [];
-        const list = [
-            ...scripts.map((s) => ({ name: s.meta.name, code: s.code, enabled: s.enabled as boolean | undefined, data: false })),
-            ...dataFiles.map((d) => ({ name: d.path, code: d.text, enabled: undefined, data: true })),
-        ];
-        const chosen = await pickRows({
-            title: "Export",
-            intro: "Pick what goes into the YAML bundle. Each script carries its code, enabled state and non-default params; each data file its path and text.",
-            rows: [
-                ...(globals ? [settingsRow(globals)] : []),
-                ...list.map((s) => ({ label: s.name, badge: s.data ? "data file" : s.enabled ? undefined : "disabled" })),
-            ],
-            confirm: "Export",
-            warn: importsWarning(list, offset),
-        });
-        if (!chosen) return;
-        const rows = chosen.filter((i) => i >= offset).map((i) => list[i - offset]);
-        const picked = rows.filter((r) => !r.data).map(({ name, code, enabled }) => ({ name, code, enabled }));
-        const pickedData = rows.filter((r) => r.data).map((r) => ({ path: r.name, text: r.code }));
-        // empty folders travel too (the others come with their contents)
-        const paths = list.map((r) => r.name.toLowerCase());
-        const empty = folders.filter((f) => !paths.some((p) => p.startsWith(f.toLowerCase() + "/")));
-        const payload = buildBundle({ ...doc, settings: globals && chosen.includes(0) ? globals : null }, picked, pickedData, empty);
-        const blob = new Blob([payload], { type: "text/yaml" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = picked.length === 1 && chosen.length === 1 ? `${picked[0].name.replace(/.*\//, "")}.wiretrick.yaml` : "wiretrick-export.yaml";
-        a.click();
-        URL.revokeObjectURL(url);
-        status(`exported ${picked.length} script(s)${pickedData.length ? ` + ${pickedData.length} data file(s)` : ""}${offset && chosen.includes(0) ? " + settings" : ""} ✓`);
-    });
-    // an imported script replaces the existing script of the same name
-    const saveImported = async (item: { code: string; name?: string; enabled?: boolean }) => {
-        // file names are case-insensitive on Windows/macOS: "Foo" replaces "foo"
-        const existing = item.name ? scripts.find((s) => scriptFileKey(s.meta.name) === scriptFileKey(item.name!)) : undefined;
-        await send({ type: "saveScript", id: existing?.id ?? uuid(), code: item.code, name: item.name, enabled: item.enabled });
-    };
-    const existsBadge = (name?: string) => (name && scripts.some((s) => scriptFileKey(s.meta.name) === scriptFileKey(name)) ? "replaces existing" : "new");
-    $("#btn-import").addEventListener("click", () => {
-        const input = document.createElement("input");
-        input.type = "file";
-        input.accept = ".yaml,.yml,.ts,.js";
-        input.onchange = async () => {
-            const file = input.files?.[0];
-            if (!file) return;
-            const text = await file.text();
-            if (/\.ya?ml$/i.test(file.name)) {
-                const full = parseBundleText(text);
-                if (full) {
-                    const offset = full.settings ? 1 : 0;
-                    const fullData = full.dataFiles ?? [];
-                    const existingData: { id: string; path: string }[] = fullData.length ? (await send({ type: "listDataFiles" })) || [] : [];
-                    const dataFileIn = (path: string) => existingData.find((d) => d.path.toLowerCase() === path.toLowerCase());
-                    const named = [
-                        ...full.scripts.map((s, i) => ({ name: s.name ?? `script ${i + 1}`, code: s.code, data: false })),
-                        ...fullData.map((d) => ({ name: d.path, code: d.text, data: true })),
-                    ];
-                    const chosen = await pickRows({
-                        title: `Import ${file.name}`,
-                        intro: "Pick what to import. A script (data file) replaces the existing script (data file) of the same name (path).",
-                        rows: [
-                            ...(full.settings ? [settingsRow(full.settings)] : []),
-                            ...full.scripts.map((s, i) => ({
-                                label: named[i].name,
-                                badge: existsBadge(s.name),
-                                detail: s.params ? `params: ${Object.keys(s.params!).join(", ")}` : undefined,
-                            })),
-                            ...fullData.map((d) => ({ label: d.path, badge: dataFileIn(d.path) ? "replaces existing" : "new data file" })),
-                        ],
-                        confirm: "Import",
-                        warn: importsWarning(named, offset),
-                    });
-                    if (!chosen) return;
-                    const rows = chosen.filter((i) => i >= offset).map((i) => i - offset);
-                    const bundle = pickBundle(
-                        full,
-                        offset > 0 && chosen.includes(0),
-                        rows.filter((i) => i < full.scripts.length),
-                        rows.filter((i) => i >= full.scripts.length).map((i) => i - full.scripts.length)
-                    );
-                    // folders and data files first: the scripts compile against them
-                    const failed: string[] = [];
-                    for (const f of bundle.folders ?? []) {
-                        const r = await send({ type: "createFolder", path: f });
-                        if (r?.error) failed.push(r.error);
-                    }
-                    for (const d of bundle.dataFiles ?? []) {
-                        const r = await send({ type: "saveDataFile", id: dataFileIn(d.path)?.id, path: d.path, text: d.text });
-                        if (r?.error) failed.push(r.error);
-                    }
-                    for (const item of bundle.scripts) await saveImported(item);
-                    await refresh();
-                    // settings apply through the real path (params +
-                    // globals); storage.onChanged refreshes the settings UI
-                    const doc = bundleSettingsDoc(bundle);
-                    if (doc) {
-                        const res = await send({ type: "applySettingsDoc", doc });
-                        if (res && res.error) {
-                            status(`imported ${bundle.scripts.length} script(s); settings: ${res.error}`, "error");
-                            return;
-                        }
-                    }
-                    if (failed.length) {
-                        status(`imported ${bundle.scripts.length} script(s); ${failed.join("; ")}`, "error");
-                        return;
-                    }
-                    const nData = bundle.dataFiles?.length ?? 0;
-                    status(`imported ${bundle.scripts.length} script(s)${nData ? ` + ${nData} data file(s)` : ""}${bundle.settings ? " + settings" : ""} ✓`);
-                    return;
-                }
-                status('not a Wiretrick export (missing "format: wiretrick-bundle")', "error");
-                return;
-            }
-            const base = cleanScriptName(file.name.replace(/\.ts$/i, "")) || "Imported script";
-            const name = uniqueScriptName(base, scripts.map((s) => s.meta.name));
-            await send({ type: "saveScript", id: uuid(), code: text, name });
-            status("imported script ✓");
-            await refresh();
-        };
-        input.click();
-    });
-
-    makeSplitV();
     showPanelTab(panelTabOf(layout));
     watchNetCounts();
     startKeepAlive();
     setupSettings();
-    
-
     void autoReconnectFolder();
 
     // remember the manager is open → the background reopens it after an
@@ -2008,8 +1942,6 @@ async function main(): Promise<void> {
         selectReal(wanted);
     }
 }
-
-void renderEditorEmpty;
 
 /** Layout shortcuts outside the editor (the editor's own copies are below). */
 function layoutShortcut(e: KeyboardEvent): (() => void) | null {

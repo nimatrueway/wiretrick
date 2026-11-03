@@ -66,8 +66,9 @@ into a store. The build is not minified, so the bundles stay readable.
 
 The Editor (`editor.html`) is a single `#root` that
 `src/ui/shell/mount.tsx` renders synchronously, before the rest of
-`editor.ts` runs, so code that still finds its elements by id keeps working
-while the Editor moves to components. Its layout (explorer and panel shown,
+`editor.ts` runs. `editor.ts` holds no markup: it owns Monaco, the scripts and
+the background connection, and drives the UI only through the stores below
+(and moves focus). Its layout (explorer and panel shown,
 explorer width, panel tab, word wrap) is the `layout` store
 (`src/ui/state/layout.ts`), saved to `localStorage` as it changes. Monaco
 draws into `<MonacoHost>`; `createCodeEditor()` (`src/ui/shell/codeEditor.ts`)
@@ -107,6 +108,14 @@ controls listen with native listeners (`useControl` in
 dispatched by a script, which the e2e tests do. The toast and the tooltip
 (`toast.ts`, `tooltip.ts`) stay small DOM helpers: they are shown from
 anywhere, including Monaco's callbacks, and hold no state worth rendering.
+
+The Code view's toolbar (`shell/EditorToolbar.tsx`: the Enabled switch, the
+status line, Save, folder sync, ↗ and the layout toggles) renders the
+`toolbar` store (`state/toolbar.ts`), which `editor.ts` sets. Save's state is
+set inside `flushSync` and read with a `{ sync: true }` snapshot, so every
+state (`unsaved` → `saving` → `saved`) reaches the DOM, as the e2e tests
+expect. The explorer's resize handle (`SplitV`) sizes `#sidebar` directly
+while dragging and saves the width to the `layout` store once let go.
 
 An effect's arrow function must not return a value by accident:
 `useLayoutEffect(() => el.scrollIntoView())` breaks in Chromium, where
