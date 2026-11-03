@@ -65,6 +65,9 @@ export function formatKey(key: string, mac: boolean): string {
         .join("");
 }
 
+/** a shortcut as this platform writes it, for tooltips */
+export const keyHint = (key: string): string => formatKey(key, /Mac|iPhone|iPad/.test(navigator.platform));
+
 /** the keys of a shortcut on this platform */
 export const keysFor = (s: Shortcut, mac: boolean): string[] => (mac && s.macKeys) || s.keys;
 

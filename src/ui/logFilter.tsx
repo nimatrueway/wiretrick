@@ -1,6 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createRoot } from "react-dom/client";
-import { flushSync } from "react-dom";
 import { FilterBar, effectiveQuery, initialFilterState } from "./network/NetFilterBar";
 import { compileQuery, parseQuery, type QNode } from "./network/netQuery";
 import { LOG, logHighlight, type LogLine, type LogSuggest } from "./logQuery";
@@ -11,7 +9,8 @@ export interface LogFilter {
     mark: RegExp | null;
 }
 
-function LogFilterBar({ data, onFilter }: { data: () => LogSuggest; onFilter: (f: LogFilter) => void }) {
+/** The Log's filter bar (Basic chips / Advanced query, as in Network); `onFilter` gets every new filter. */
+export function LogFilterBar({ data, onFilter }: { data: () => LogSuggest; onFilter: (f: LogFilter) => void }) {
     const [fq, setFq] = useState(() => initialFilterState(LOG));
     const query = effectiveQuery(fq, LOG);
     const parsed = useMemo(() => parseQuery(query, LOG), [query]);
@@ -25,9 +24,4 @@ function LogFilterBar({ data, onFilter }: { data: () => LogSuggest; onFilter: (f
             <FilterBar dialect={LOG} state={fq} onChange={setFq} error={parsed.error} data={data()} />
         </div>
     );
-}
-
-/** The Log's filter bar (Basic chips / Advanced query, as in Network), in `host`; `onFilter` gets every new filter. */
-export function mountLogFilter(host: HTMLElement, data: () => LogSuggest, onFilter: (f: LogFilter) => void): void {
-    flushSync(() => createRoot(host).render(<LogFilterBar data={data} onFilter={onFilter} />));
 }

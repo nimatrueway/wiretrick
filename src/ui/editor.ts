@@ -8,7 +8,7 @@ import { PACKAGE_TYPINGS_KEY, type StoredTypings } from "../shared/packageImport
 import { API_TYPINGS_URI } from "./apiLinks";
 import { NavHistory } from "./navHistory";
 import { API_REFERENCE } from "./apiReference";
-import { SHORTCUTS, filterShortcuts, formatKey, keysFor } from "./shortcuts";
+import { SHORTCUTS, filterShortcuts, formatKey, keyHint, keysFor } from "./shortcuts";
 import { SAMPLES, sampleStrategies, sampleSummary, sampleTryUrl, type SampleScript } from "./samples";
 import { settingsDiagnostics, settingsCompletions, settingsHover, type AssistScript } from "../shared/settingsAssist";
 import { badPackageImports, dependantsOf, folderOf, missingImports } from "../shared/scriptImports";
@@ -30,22 +30,21 @@ import { STRATEGIES, type Strategy } from "../shared/route";
 import { STRATEGY_DOC_URL, STRATEGY_INFO, strategyUnsupported } from "../shared/strategyInfo";
 import { dlogLevel } from "../shared/debugLog";
 import { helperInstallCommand, helperInstallShell } from "../shared/helperInstall";
-import { mountNetworkPanel } from "./network/mount";
-import { mountLogFilter, type LogFilter } from "./logFilter";
-import type { LogLine } from "./logQuery";
 import { createNetStore, type NetStore } from "./network/netStore";
 import { installTooltips } from "./tooltip";
 import { scriptHealth, type ScriptHealthInput } from "../shared/scriptHealth";
 import type { Uri, IPosition, IRange, IKeyboardEvent, editor as MonacoEditor } from "monaco-editor";
 import type { Script } from "../background/engine/scriptStore";
 import type { DataFile } from "../background/engine/dataFiles";
-import { setupPanelDock, currentSide, currentDock } from "./panelDock";
-import { badgeCount, LogBadge, NetBadge, type TabBadge } from "./logBadge";
-import { collectProblems, filterProblems, problemCounts, ProblemsBadge, settingsLink, type Problem, type ProblemGroup, type ProblemMarker } from "./problems";
+import { currentSide, currentDock } from "./panelDock";
+import { collectProblems, settingsLink, type Problem, type ProblemGroup, type ProblemMarker } from "./problems";
 import { touchCounts } from "./network/netFormat";
 import { subscribe } from "valtio";
 import { flushSync } from "react-dom";
-import { layout, type PanelTab } from "./state/layout";
+import { layout, panelTabOf, type PanelTab } from "./state/layout";
+import { appendLog, clearLog, logState } from "./state/log";
+import { badges, badgesChanged, panel, setNetStore, setProblems } from "./state/panel";
+import { actions } from "./shell/actions";
 import { createCodeEditor } from "./shell/codeEditor";
 import { aboutRows, aboutText, checkLatestRelease, collectDiagnostics, describeLatest, diagnosticsFileName, downloadText, RELEASES_URL, type HelperStatus } from "./about";
 
@@ -500,6 +499,9 @@ function renderList(): void {
 }
 
 /** indent guides (one per level) and the twistie: a chevron on folders (`open` = expanded) */
+/** the explorer twistie (VS Code's chevron-right) */
+const CHEVRON = `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
 function treeIndent(depth: number, open?: boolean): HTMLElement[] {
     const out: HTMLElement[] = [];
     for (let i = 0; i < depth; i++) {
@@ -1840,125 +1842,16 @@ function connectLogs(): void {
     });
 }
 
-/** the filter bar's query (all lines until it mounts) */
-let logFilter: LogFilter = { test: () => true, mark: null };
-const LEVEL_ORDER: Record<string, number> = { debug: 0, info: 1, warn: 2, error: 3 };
-let minLevel = 1; // info+
-let logCap = 500; // rendered lines kept in the DOM
-
-/** Extract the source tag of a message: "[pipeline] …" → "pipeline"; "console.log: …" → "console.log". */
-function sourceOf(message: string): string {
-    const bracket = message.match(/^\s*\[([^\]]*)\]/);
-    if (bracket) return bracket[1];
-    const dot = message.match(/^\s*([a-zA-Z0-9_.-]+):/);
-    return dot ? dot[1] : "(untagged)";
-}
-
-/** Sources seen in the buffer — the filter's `source:` suggestions. */
-const logSources = new Set<string>();
-
-type LogItem = LogLine & { text: string };
-
-function linePassesFilters(e: LogItem): boolean {
-    return (LEVEL_ORDER[e.level] ?? 1) >= minLevel && logFilter.test(e);
-}
-
-function renderLogLine(line: HTMLElement, e: LogItem): void {
-    const { text, level, source } = e;
-    line.dataset.text = text;
-    line.dataset.level = level;
-    line.dataset.source = source;
-    line.innerHTML = "";
-    if (!linePassesFilters(e)) {
-        line.style.display = "none";
-        return;
-    }
-    line.style.display = "";
-    const timeEl = document.createElement("time");
-    timeEl.textContent = text.match(/^\[[^\]]*\]/)?.[0] || "";
-    line.appendChild(timeEl);
-    const rest = text.replace(/^\[[^\]]*\]\s*/, "");
-    line.dataset.body = rest;
-    const badge = document.createElement("span");
-    badge.className = "lv " + level;
-    badge.textContent = level;
-    line.appendChild(badge);
-    void rest;
-    // highlight within the message, not the time prefix
-    const m = logFilter.mark?.exec(e.message);
-    const at = m ? text.length - e.message.length + m.index : -1;
-    for (const seg of logSegments(text, m?.[0] ? [at, at + m[0].length] : undefined)) {
-        let node: Node = document.createTextNode(seg.text);
-        if (seg.mark) node = Object.assign(document.createElement("mark"), { textContent: seg.text });
-        if (seg.uri) {
-            const a = Object.assign(document.createElement("a"), { className: "log-link", href: seg.uri, title: `${seg.uri}\nClick to open · ${/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl"}-click: in the background` });
-            a.appendChild(node);
-            node = a;
-        }
-        line.appendChild(node);
-    }
-}
-
-/** Log links: browser-viewable URIs open in a tab, other schemes (vscode:, mailto:…) go to the OS. */
-function openLogLink(e: MouseEvent): void {
-    const a = (e.target as Element).closest?.("a.log-link") as HTMLAnchorElement | null;
-    if (!a || e.button > 1) return;
-    e.preventDefault();
-    const uri = a.getAttribute("href")!;
-    if (opensInTab(uri)) {
-        chrome.tabs.create({ url: uri, active: !(e.metaKey || e.ctrlKey || e.button === 1) }, () => void chrome.runtime.lastError);
-        return;
-    }
-    // external protocols launch only from a user gesture on a page, never chrome.tabs
-    const launch = Object.assign(document.createElement("a"), { href: uri });
-    document.body.appendChild(launch);
-    launch.click();
-    launch.remove();
-}
-
-// ---- Panel counts: Log errors/warnings and Network observed/modified
-// requests, shown until that view is cleared ----
-const logBadge = new LogBadge();
-const netBadge = new NetBadge();
-const problemsBadge = new ProblemsBadge();
-let logBadgeEnabled = true;
-
-/** a shortcut as this platform writes it, for tooltips (isMac is declared later) */
-const keyHint = (key: string): string => formatKey(key, /Mac|iPhone|iPad/.test(navigator.platform));
-
-/** The status bar's count for a view: visible even with the panel closed. */
-function renderBadge(badge: TabBadge): void {
-    document.body.classList.toggle("no-status", !logBadgeEnabled);
-    const [sel, label] = badge === logBadge ? ["#sb-log", `Log (${keyHint("Alt+Shift+L")})`] : badge === problemsBadge ? ["#sb-problems", `Problems (${keyHint("Alt+Shift+P")})`] : ["#sb-net", `Network (${keyHint("Alt+Shift+N")})`];
-    const el = $(sel);
-    for (const [cls, n] of badge.counts) {
-        const count = el.querySelector<HTMLElement>(`.sb-n[data-k="${cls}"]`)!;
-        count.textContent = badgeCount(n);
-        count.parentElement!.classList.toggle("on", n > 0);
-    }
-    el.title = badge.empty ? label : `${label} — ${badge.title}`;
-}
-
-/** the status bar: every view's counts, and which view the panel shows */
-function renderTabBadges(): void {
-    renderBadge(problemsBadge);
-    renderBadge(logBadge);
-    renderBadge(netBadge);
-    const open = !layout.panelHidden && $("#log-panel").dataset.tab;
-    for (const item of document.querySelectorAll<HTMLElement>("#status-bar .sb-item")) {
-        const on = item.dataset.panel === open;
-        item.classList.toggle("active", on);
-        item.setAttribute("aria-pressed", String(on));
-    }
-}
+// ---- Panel counts: Log errors/warnings, Network observed/modified requests
+// and Problems, shown in the status bar until that view is cleared (state/panel) ----
 
 /** Network counts from a passive connection: live before the Network tab is ever opened. */
 function watchNetCounts(): void {
     const store = createNetStore();
     netCounts = store;
     const update = () => {
-        netBadge.set(touchCounts(store.state.entries));
-        renderBadge(netBadge);
+        badges.network.set(touchCounts(store.state.entries));
+        badgesChanged();
     };
     update();
     subscribe(store.state, update);
@@ -1969,7 +1862,6 @@ function watchNetCounts(): void {
 // Problems). Entries go away by themselves once fixed; the Log keeps history. ----
 let problemGroups: ProblemGroup[] = [];
 let problemsTimer: ReturnType<typeof setTimeout> | null = null;
-const collapsedProblems = new Set<string>();
 /** models Monaco has published markers for: until then a script's stored (saved-code) type errors stand in */
 const checkedUris = new Set<string>();
 
@@ -2081,120 +1973,7 @@ function updateProblems(): void {
         renderList();
     }
     markProblems();
-    problemsBadge.set(problemCounts(problemGroups));
-    renderBadge(problemsBadge);
-    renderProblems();
-}
-
-const ERROR_ICON = `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.8 5.8l4.4 4.4M10.2 5.8l-4.4 4.4" stroke="currentColor" stroke-width="1.3"/></svg>`;
-const WARN_ICON = `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 2 14.5 13.5h-13z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 6.5v3.5M8 11.5v.6" stroke="currentColor" stroke-width="1.3"/></svg>`;
-const CHEVRON = `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-
-function pbSpan(cls: string, text = ""): HTMLSpanElement {
-    const el = document.createElement("span");
-    el.className = cls;
-    el.textContent = text;
-    return el;
-}
-
-/** a problem's message; a "Settings → Section" in it is a link that opens that section */
-function problemMessage(text: string): HTMLSpanElement {
-    const msg = pbSpan("pb-msg");
-    const link = settingsLink(text);
-    if (!link) return (msg.textContent = text), msg;
-    const a = document.createElement("a");
-    a.className = "pb-link";
-    a.href = "#";
-    a.tabIndex = -1;
-    a.textContent = link.text;
-    a.title = `Open ${link.text}`;
-    a.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        openSettings(link.section);
-    });
-    msg.append(text.slice(0, link.at), a, text.slice(link.at + link.text.length));
-    return msg;
-}
-
-function renderProblems(): void {
-    const list = $("#problems-list");
-    const active = document.activeElement as HTMLElement | null;
-    const focusKey = active && list.contains(active) ? active.dataset.key : undefined;
-    list.innerHTML = "";
-    const groups = filterProblems(problemGroups, $input("#problems-filter").value);
-    if (!groups.length) {
-        list.append(pbSpan("problems-empty", problemGroups.length ? "No results found with the provided filter." : "No problems have been detected in the scripts."));
-        return;
-    }
-    const row = (key: string, cls: string, level: number): HTMLDivElement => {
-        const el = document.createElement("div");
-        el.className = `pb-row ${cls}`;
-        el.dataset.key = key;
-        el.tabIndex = -1;
-        el.setAttribute("role", "treeitem");
-        el.setAttribute("aria-level", String(level));
-        list.append(el);
-        return el;
-    };
-    for (const g of groups) {
-        const open = !collapsedProblems.has(g.id);
-        const head = row(`g:${g.id}`, "pb-head" + (open ? " open" : ""), 1);
-        head.dataset.group = g.id;
-        head.setAttribute("aria-expanded", String(open));
-        const chev = pbSpan("pb-chev");
-        chev.innerHTML = CHEVRON;
-        const counts = problemCounts([g]);
-        head.append(chev, pbSpan(`file-icon ${g.file}`, g.file === "ts" ? "TS" : g.file === "json" ? "{}" : "⚙"), pbSpan("pb-file", g.label), pbSpan("pb-count", badgeCount(g.problems.length)));
-        head.title = `${g.label}: ${[counts.errors && `${counts.errors} error${counts.errors > 1 ? "s" : ""}`, counts.warnings && `${counts.warnings} warning${counts.warnings > 1 ? "s" : ""}`].filter(Boolean).join(", ")}`;
-        head.addEventListener("click", () => toggleProblemGroup(g.id));
-        if (!open) continue;
-        g.problems.forEach((p, i) => {
-            const el = row(`p:${g.id}:${i}`, `pb-item ${p.severity === "error" ? "error" : "warn"}`, 2);
-            el.dataset.group = g.id;
-            const ico = pbSpan(`pb-ico ${p.severity === "error" ? "error" : "warn"}`);
-            ico.innerHTML = p.severity === "error" ? ERROR_ICON : WARN_ICON;
-            ico.setAttribute("role", "img");
-            ico.setAttribute("aria-label", p.severity);
-            el.append(ico, problemMessage(p.message.split("\n")[0]), pbSpan("pb-src", p.kind));
-            if (p.line) el.append(pbSpan("pb-pos", `[Ln ${p.line}${p.column ? `, Col ${p.column}` : ""}]`));
-            if (p.dismissible) {
-                const x = document.createElement("button");
-                x.className = "pb-dismiss";
-                x.textContent = "✕";
-                x.title = "Dismiss this runtime error (saving the script clears it too)";
-                x.setAttribute("aria-label", "Dismiss");
-                x.tabIndex = -1;
-                x.addEventListener("click", (e) => {
-                    e.stopPropagation();
-                    void send({ type: "clearScriptError", scriptId: g.id });
-                });
-                el.append(x);
-            }
-            el.title = `${p.message}\n\n${g.label}${p.line ? ` [Ln ${p.line}${p.column ? `, Col ${p.column}` : ""}]` : ""} · ${p.kind}`;
-            el.addEventListener("click", () => void openProblem(g.id, p));
-            el.addEventListener("dblclick", () => editor?.focus());
-        });
-    }
-    const rows = [...list.querySelectorAll<HTMLElement>(".pb-row")];
-    const target = (focusKey && rows.find((r) => r.dataset.key === focusKey)) || rows[0];
-    target.tabIndex = 0;
-    if (focusKey) target.focus();
-}
-
-function toggleProblemGroup(id: string, open?: boolean): void {
-    const want = open ?? collapsedProblems.has(id);
-    if (want) collapsedProblems.delete(id);
-    else collapsedProblems.add(id);
-    renderProblems();
-    const head = [...$("#problems-list").querySelectorAll<HTMLElement>(".pb-head")].find((h) => h.dataset.group === id);
-    if (head) focusProblemRow(head);
-}
-
-function focusProblemRow(el: HTMLElement): void {
-    for (const r of $("#problems-list").querySelectorAll<HTMLElement>(".pb-row")) r.tabIndex = -1;
-    el.tabIndex = 0;
-    el.focus();
+    setProblems(problemGroups);
 }
 
 /** Open the problem's file (like an explorer click) and put the cursor on it. */
@@ -2213,29 +1992,6 @@ async function openProblem(id: string, p: Problem): Promise<void> {
     editor.focus();
 }
 
-function setupProblemsView(): void {
-    const list = $("#problems-list");
-    $input("#problems-filter").addEventListener("input", () => renderProblems());
-    list.addEventListener("keydown", (e) => {
-        const rows = [...list.querySelectorAll<HTMLElement>(".pb-row")];
-        const cur = (e.target as HTMLElement).closest<HTMLElement>(".pb-row");
-        if (!cur || !rows.length) return;
-        const i = rows.indexOf(cur);
-        const head = cur.classList.contains("pb-head");
-        let next: HTMLElement | undefined;
-        if (e.key === "ArrowDown") next = rows[Math.min(rows.length - 1, i + 1)];
-        else if (e.key === "ArrowUp") next = rows[Math.max(0, i - 1)];
-        else if (e.key === "Home") next = rows[0];
-        else if (e.key === "End") next = rows[rows.length - 1];
-        else if (head && (e.key === "ArrowLeft" || e.key === "ArrowRight")) toggleProblemGroup(cur.dataset.group!, e.key === "ArrowRight");
-        else if (!head && e.key === "ArrowLeft") next = rows.slice(0, i).reverse().find((r) => r.classList.contains("pb-head"));
-        else if (e.key === "Enter" || e.key === " ") cur.click();
-        else return;
-        e.preventDefault();
-        if (next) focusProblemRow(next);
-    });
-}
-
 /** the filter box of a panel view (Network's lives in a portal, once mounted) */
 function panelFilter(which: PanelTab): HTMLInputElement | null {
     if (which === "problems") return $input("#problems-filter");
@@ -2245,8 +2001,7 @@ function panelFilter(which: PanelTab): HTMLInputElement | null {
 
 /** Show a panel view and focus its filter; again (already there, focus in the panel): close the panel. */
 function focusPanelView(which: PanelTab): void {
-    const panel = $("#log-panel");
-    if (!layout.panelHidden && panel.dataset.tab === which && panel.contains(document.activeElement)) {
+    if (!layout.panelHidden && panelTabOf(layout) === which && $("#log-panel").contains(document.activeElement)) {
         setPanelHidden(true);
         return;
     }
@@ -2269,121 +2024,8 @@ const toggleProblems = () => focusPanelView("problems");
 /** Clear the Log and Network (Problems clear themselves once fixed). */
 function clearPanelView(): void {
     if (layout.panelHidden) return;
-    const tab = $("#log-panel").dataset.tab;
-    if (tab === "log" || tab === "network") $("#btn-clear-panel").click();
-}
-
-/** All received entries — filtered ones stay here (re-renderable), just not in the DOM. */
-const logEntries: LogItem[] = [];
-/** "observed (no change)" DEBUG lines (one per handler run) may fill at most this much of the buffer */
-const MAX_OBSERVED_ENTRIES = 300;
-let observedEntries = 0;
-
-/**
- * Log auto-scroll, VS Code style: "follow" keeps the newest line in view;
- * scrolling up pauses it ("paused", resumes at the end); the lock button
- * stops it until clicked again ("locked").
- */
-let logScroll: "follow" | "paused" | "locked" = "follow";
-/** where we last put the scroll, so our own scrolling isn't mistaken for the user's */
-let logOwnTop = 0;
-
-const logAtEnd = (box: HTMLElement): boolean => box.scrollTop + box.clientHeight >= box.scrollHeight - 4;
-
-function followLog(box: HTMLElement): void {
-    if (logScroll === "follow") box.scrollTop = box.scrollHeight;
-    logOwnTop = box.scrollTop;
-}
-
-function setLogScroll(state: typeof logScroll): void {
-    logScroll = state;
-    const b = $("#btn-scroll-lock");
-    b.setAttribute("aria-pressed", String(state !== "follow"));
-    b.dataset.lock = state;
-    b.title = state === "follow" ? "Turn Auto Scrolling Off" : state === "locked" ? "Turn Auto Scrolling On" : "Auto scrolling paused while you're scrolled up — scroll to the end or click to resume";
-    if (state === "follow") followLog($("#log-entries"));
-}
-
-function wireLogScroll(): void {
-    const box = $("#log-entries");
-    $("#btn-scroll-lock").addEventListener("click", () => setLogScroll(logScroll === "follow" ? "locked" : "follow"));
-    // react before the next line yanks the view back down
-    box.addEventListener("wheel", (e) => {
-        if (e.deltaY < 0 && logScroll === "follow" && box.scrollTop > 0) setLogScroll("paused");
-    }, { passive: true });
-    box.addEventListener("scroll", () => {
-        if (logScroll === "locked" || Math.abs(box.scrollTop - logOwnTop) < 2) return;
-        logOwnTop = box.scrollTop;
-        const end = logAtEnd(box);
-        if (end !== (logScroll === "follow")) setLogScroll(end ? "follow" : "paused");
-    });
-}
-
-function appendLog(entry: any): void {
-    const time = new Date(entry.at).toLocaleTimeString();
-    const source = sourceOf(entry.message || "");
-    const observed = entry.kind === "observed";
-    const message = String(entry.message ?? "");
-    const item: LogItem = { text: `[${time}] ${message}`, message, level: entry.level || "info", source, ...(observed ? { observed } : {}) };
-    logEntries.push(item);
-    logBadge.note(entry.level || "info");
-    let counted = entry.level === "error" || entry.level === "warn";
-    if (observed && ++observedEntries > MAX_OBSERVED_ENTRIES) {
-        logEntries.splice(logEntries.findIndex((e) => e.observed), 1);
-        observedEntries--;
-    }
-    if (logEntries.length > 2000) {
-        // absolute buffer cap
-        for (const e of logEntries.splice(0, logEntries.length - 2000)) {
-            if (e.observed) observedEntries--;
-            logBadge.drop(e.level);
-            counted ||= e.level === "error" || e.level === "warn";
-        }
-    }
-    if (counted) renderTabBadges();
-    logSources.add(source);
-
-    if (!linePassesFilters(item)) return; // don't let hidden entries churn the DOM ring
-
-    const box = $("#log-entries");
-    const line = document.createElement("div");
-    line.className = "log-line " + item.level;
-    renderLogLine(line, item);
-    box.appendChild(line);
-    while (box.children.length > logCap) box.removeChild(box.firstChild as Node);
-    followLog(box);
-}
-
-function refilterLog(): void {
-    const box = $("#log-entries");
-    const top = box.scrollTop;
-    box.innerHTML = "";
-    for (const e of logEntries) {
-        if (!linePassesFilters(e)) continue;
-        const line = document.createElement("div");
-        line.className = "log-line " + e.level;
-        renderLogLine(line, e);
-        box.appendChild(line);
-    }
-    while (box.children.length > logCap) box.removeChild(box.firstChild as Node);
-    if (logScroll !== "follow") box.scrollTop = top;
-    followLog(box);
-}
-
-function makeLogFilters(): void {
-    mountLogFilter(
-        $("#log-filter-host"),
-        () => ({ sources: [...logSources].sort((a, b) => a.localeCompare(b)) }),
-        (f) => {
-            logFilter = f;
-            refilterLog();
-        },
-    );
-    const levelSel = $("#log-level") as HTMLSelectElement;
-    levelSel.addEventListener("change", () => {
-        minLevel = LEVEL_ORDER[levelSel.value] ?? 1;
-        refilterLog();
-    });
+    const tab = panelTabOf(layout);
+    if (tab === "log" || tab === "network") clearPanel();
 }
 
 // ---- survive extension reloads ----
@@ -2522,9 +2164,9 @@ function managerUiState(): Record<string, unknown> {
         panelDock: currentDock(),
         sidebarSide: currentSide(),
         logLevel: ($("#settings-log-level") as HTMLSelectElement).value,
-        logCap,
+        logCap: logState.cap,
         monacoVerbose,
-        logBadge: logBadgeEnabled,
+        logBadge: panel.statusBar,
         scriptsFolder: $("#folder-state").textContent || null,
     };
 }
@@ -2535,10 +2177,8 @@ async function runDiagnostics(): Promise<void> {
     const btn = $("#btn-diagnostics") as HTMLButtonElement;
     const state = $("#diagnostics-state");
     const copy = $("#btn-diagnostics-copy");
-    const net = $("#btn-panel-diagnostics") as HTMLButtonElement;
-    const netTitle = net.title;
-    const netState = (k: string, title: string) => ((net.dataset.state = k), (net.title = title));
-    btn.disabled = net.disabled = true;
+    const netState = (state: "busy" | "ok" | "error", title: string) => void (panel.diagnostics = { state, title });
+    btn.disabled = true;
     copy.hidden = true;
     state.textContent = "collecting…";
     netState("busy", "Collecting diagnostics…");
@@ -2556,8 +2196,9 @@ async function runDiagnostics(): Promise<void> {
         netState("error", `Diagnostics failed: ${e?.message || e}`);
         status(`diagnostics failed: ${e?.message || e}`, "error");
     } finally {
-        btn.disabled = net.disabled = false;
-        setTimeout(() => (delete net.dataset.state, (net.title = netTitle)), 2500);
+        btn.disabled = false;
+        const shown = panel.diagnostics;
+        setTimeout(() => panel.diagnostics === shown && (panel.diagnostics = null), 2500);
     }
 }
 
@@ -2574,7 +2215,6 @@ function setupDialogs(): void {
         await navigator.clipboard.writeText(aboutText(aboutInfo)).then(() => flash(b, "Copied ✓"), () => flash(b, "Copy failed"));
     });
     $("#btn-diagnostics").addEventListener("click", () => void runDiagnostics());
-    $("#btn-panel-diagnostics").addEventListener("click", () => void runDiagnostics());
     $("#btn-diagnostics-copy").addEventListener("click", (e) => {
         const b = e.currentTarget as HTMLElement;
         void navigator.clipboard.writeText(diagnosticsReport).then(() => flash(b, "Copied ✓"), () => flash(b, "Copy failed"));
@@ -2671,31 +2311,28 @@ function setupDialogs(): void {
     // Tab badges (Log + Network), one toggle
     const badgeBox = $("#settings-log-badge") as HTMLInputElement;
     chrome.storage.local.get("resLogBadge", (d) => {
-        logBadgeEnabled = d?.resLogBadge !== false;
-        badgeBox.checked = logBadgeEnabled;
-        renderTabBadges();
+        panel.statusBar = d?.resLogBadge !== false;
+        badgeBox.checked = panel.statusBar;
     });
     badgeBox.addEventListener("change", () => {
-        logBadgeEnabled = badgeBox.checked;
-        chrome.storage.local.set({ resLogBadge: logBadgeEnabled });
-        renderTabBadges();
+        panel.statusBar = badgeBox.checked;
+        chrome.storage.local.set({ resLogBadge: panel.statusBar });
     });
 
     // panel history size
     const capInput = $("#settings-log-cap") as HTMLInputElement;
-    capInput.value = String(logCap);
+    capInput.value = String(logState.cap);
     chrome.storage.local.get("resLogCap", (d) => {
         if (d && d.resLogCap) {
-            logCap = d.resLogCap;
-            capInput.value = String(logCap);
+            logState.cap = d.resLogCap;
+            capInput.value = String(logState.cap);
         }
     });
     capInput.addEventListener("change", () => {
         const n = Math.max(100, Math.min(10000, Number(capInput.value) || 500));
         capInput.value = String(n);
-        logCap = n;
+        logState.cap = n;
         chrome.storage.local.set({ resLogCap: n });
-        refilterLog();
     });
 
     // Network body capture cap (kB)
@@ -2720,9 +2357,8 @@ function setupDialogs(): void {
             applyLogLevel(c.resLogLevel.newValue);
         }
         if (c.resLogCap?.newValue) {
-            logCap = c.resLogCap.newValue;
-            capInput.value = String(logCap);
-            refilterLog();
+            logState.cap = c.resLogCap.newValue;
+            capInput.value = String(logState.cap);
         }
         if (c.resScripts || c.resParams || c.resLogLevel || c.resLogCap || c[BODY_CAP_KEY] || c.resSettingsText || c.resDataFiles || c.resFolders) {
             void (async () => {
@@ -2776,9 +2412,7 @@ function setupDialogs(): void {
 }
 
 function applyLogLevel(level: string): void {
-    const sel = $("#log-level") as HTMLSelectElement;
-    sel.value = level;
-    sel.dispatchEvent(new Event("change"));
+    logState.level = level;
 }
 
 function showHelpTab(name: string): void {
@@ -3105,7 +2739,6 @@ function setSidebarHidden(hidden: boolean): void {
 function setPanelHidden(hidden: boolean): void {
     if (hidden && $("#log-panel").contains(document.activeElement)) editor?.focus();
     flushSync(() => void (layout.panelHidden = hidden));
-    renderTabBadges();
     window.dispatchEvent(new Event("resize"));
 }
 
@@ -3140,58 +2773,41 @@ function makeSplitV(): void {
     });
 }
 
-let networkMounted = false;
-/** the Network view's store once it is opened; before that, the passive counts one */
-let netStore: NetStore | null = null;
+/** the passive Network counts' store (the Network view records in its own once shown) */
 let netCounts: NetStore | null = null;
 
-/** VS Code–style bottom panel tabs: PROBLEMS | LOG | NETWORK */
+/** VS Code–style panel views: PROBLEMS | LOG | NETWORK */
 function showPanelTab(which: PanelTab): void {
-    for (const t of document.querySelectorAll<HTMLElement>(".panel-tab")) {
-        const on = t.dataset.panel === which;
-        t.classList.toggle("active", on);
-        t.setAttribute("aria-selected", String(on));
-    }
-    $("#log-entries").hidden = which !== "log";
-    $("#problems-tools").hidden = which !== "problems";
-    $("#log-tools").hidden = which !== "log";
-    $("#net-tools").hidden = which !== "network";
-    $("#network-view").hidden = which !== "network";
-    $("#problems-view").hidden = which !== "problems";
-    $("#log-panel").dataset.tab = which;
-    renderTabBadges();
-    // recording starts the first time the tab is shown (zero cost before)
-    if (which === "network" && !networkMounted) {
-        networkMounted = true;
-        netStore = mountNetworkPanel($("#network-view"));
-    }
-    layout.panelTab = which;
+    flushSync(() => {
+        layout.panelTab = which;
+        // recording starts the first time the view is shown (zero cost before)
+        if (which === "network" && !panel.net) {
+            const store = createNetStore();
+            store.connect();
+            setNetStore(store);
+        }
+    });
 }
 
-function setupPanelTabs(): void {
-    $("#problems-tab").title += ` (${keyHint("Alt+Shift+P")})`;
-    $("#log-header-title").title += ` (${keyHint("Alt+Shift+L")})`;
-    $("#network-tab").title += ` (${keyHint("Alt+Shift+N")})`;
-    $("#btn-clear-panel").title += ` (${keyHint("Alt+Shift+K")})`;
-    for (const t of document.querySelectorAll<HTMLElement>(".panel-tab")) {
-        t.addEventListener("click", () => showPanelTab(t.dataset.panel as PanelTab));
-    }
-    // status bar: open the panel on that view (VS Code: clicking the open one closes the panel)
-    for (const item of document.querySelectorAll<HTMLElement>("#status-bar .sb-item")) {
-        item.addEventListener("click", () => {
-            const which = item.dataset.panel as PanelTab;
-            const hidden = !!layout.panelHidden;
-            if (!hidden && $("#log-panel").dataset.tab === which) return setPanelHidden(true);
-            if (hidden) setPanelHidden(false);
-            showPanelTab(which);
-        });
-    }
-    const saved = layout.panelTab;
-    showPanelTab(saved === "network" || saved === "problems" ? saved : "log");
+/** Clear the Log and Network: the recording too, whether or not the Network view was ever opened. */
+function clearPanel(): void {
+    (panel.net ?? netCounts)?.clear();
+    clearLog();
+    void send({ type: "clearDebugLogs" });
 }
 
 // ---- wiring ----
 async function main(): Promise<void> {
+    Object.assign(actions, {
+        showPanelTab,
+        setPanelHidden,
+        clearPanel,
+        runDiagnostics: () => void runDiagnostics(),
+        openProblem: (id: string, p: Problem) => void openProblem(id, p),
+        openSettings: (section?: string) => openSettings(section),
+        dismissError: (id: string) => void send({ type: "clearScriptError", scriptId: id }),
+        focusEditor: () => editor?.focus(),
+    } satisfies typeof actions);
     await loadMonaco();
     watchPackageTypings();
     // test/e2e seam: adopt an arbitrary directory handle (e.g. OPFS) for watching
@@ -3268,7 +2884,6 @@ async function main(): Promise<void> {
     });
     $("#btn-toggle-sidebar").addEventListener("click", toggleSidebar);
     $("#btn-toggle-panel").addEventListener("click", togglePanel);
-    $("#btn-close-panel").addEventListener("click", () => setPanelHidden(true));
     setupExplorer();
     const opener: MonacoEditor.ICodeEditorOpener = {
         openCodeEditor: (_source, resource, selection) => openScriptAt(resource, selection),
@@ -3308,21 +2923,6 @@ async function main(): Promise<void> {
         const msg = `openInVscode → launching ${url}`;
         appendLog({ at: Date.now(), message: `[editor] ${msg}`, level: "info" });
         chrome.runtime.sendMessage({ type: "debugLog", entry: { at: Date.now(), src: "editor", msg, level: "info" } }, () => void chrome.runtime.lastError);
-    });
-    wireLogScroll();
-    $("#log-entries").addEventListener("click", openLogLink);
-    $("#log-entries").addEventListener("auxclick", openLogLink);
-    $("#btn-clear-panel").addEventListener("click", () => {
-        // the recording too, whether or not the Network view was ever opened
-        (netStore ?? netCounts)?.clear();
-        $("#log-entries").innerHTML = "";
-        logOwnTop = 0;
-        if (logScroll === "paused") setLogScroll("follow");
-        logEntries.length = 0;
-        observedEntries = 0;
-        logBadge.reset();
-        renderTabBadges();
-        void send({ type: "clearDebugLogs" });
     });
     $("#editor-status").addEventListener("click", () => statusClick?.());
     // delegated: a click on another script re-renders the list
@@ -3527,10 +3127,7 @@ async function main(): Promise<void> {
     });
 
     makeSplitV();
-    setupPanelDock();
-    makeLogFilters();
-    setupPanelTabs();
-    setupProblemsView();
+    showPanelTab(panelTabOf(layout));
     watchNetCounts();
     startKeepAlive();
     setupDialogs();

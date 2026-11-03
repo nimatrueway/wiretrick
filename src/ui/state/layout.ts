@@ -1,4 +1,4 @@
-import { proxy, subscribe } from "valtio";
+import { persistedProxy } from "./persist";
 
 export type PanelTab = "problems" | "log" | "network";
 
@@ -11,30 +11,7 @@ export interface PanelLayout {
     wordWrap?: boolean;
 }
 
-const KEY = "resPanelLayout";
+export const layout = persistedProxy<PanelLayout>("resPanelLayout");
 
-function load(): PanelLayout {
-    try {
-        const l = JSON.parse(localStorage.getItem(KEY) || "{}");
-        return l && typeof l === "object" ? l : {};
-    } catch {
-        return {};
-    }
-}
-
-export const layout = proxy<PanelLayout>(load());
-
-// write only what changed over what is stored: another Editor tab may have saved other keys since
-let last: PanelLayout = { ...layout };
-subscribe(
-    layout,
-    () => {
-        const l = load() as Record<string, unknown>;
-        for (const k of Object.keys(layout) as (keyof PanelLayout)[]) if (layout[k] !== last[k]) l[k] = layout[k];
-        last = { ...layout };
-        try {
-            localStorage.setItem(KEY, JSON.stringify(l));
-        } catch {}
-    },
-    true
-);
+/** The view the panel shows (the Log unless Network or Problems was picked). */
+export const panelTabOf = (l: PanelLayout): PanelTab => (l.panelTab === "network" || l.panelTab === "problems" ? l.panelTab : "log");

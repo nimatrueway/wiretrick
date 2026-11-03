@@ -9,49 +9,19 @@
  * The script list (sidebar) itself docks to the left or right edge: drag
  * its header. A panel docked "left" lives inside the sidebar, so it follows.
  */
+import { flushSync } from "react-dom";
+import { dockLayout, dockOf, sideOf, type Dock, type Side } from "./state/dock";
 
-export type Dock = "bottom" | "right" | "left";
-export type Side = "left" | "right";
-
-interface DockLayout {
-    dock?: Dock;
-    /** which window edge the script list sits on */
-    side?: Side;
-    /** panel size per dock: height for bottom/left, width for right */
-    size?: Partial<Record<Dock, number>>;
-}
-
-const KEY = "resPanelDock";
 const MIN = 80;
 
 const el = (id: string): HTMLElement => document.getElementById(id) as HTMLElement;
 
-function load(): DockLayout {
-    try {
-        const l = JSON.parse(localStorage.getItem(KEY) || "{}");
-        if (l && typeof l === "object") return l;
-    } catch {}
-    return {};
-}
-
-function save(l: DockLayout): void {
-    try {
-        localStorage.setItem(KEY, JSON.stringify(l));
-    } catch {}
-}
-
-export function currentDock(): Dock {
-    return (el("app").dataset.dock as Dock) || "bottom";
-}
-
-export function currentSide(): Side {
-    return (el("app").dataset.side as Side) || "left";
-}
+export const currentDock = (): Dock => dockOf(dockLayout);
+export const currentSide = (): Side => sideOf(dockLayout);
 
 /** Put the script list on the `side` edge (CSS order on #app's children). */
-export function dockSidebar(side: Side, persist = true): void {
-    el("app").dataset.side = side;
-    if (persist) save({ ...load(), side });
+export function dockSidebar(side: Side): void {
+    flushSync(() => void (dockLayout.side = side));
     window.dispatchEvent(new Event("resize"));
 }
 
@@ -113,31 +83,29 @@ export function sidebarTargetAt(x: number): { side: Side; preview: Target["previ
     return { side, preview: { left: side === "left" ? 0 : window.innerWidth - w, top: 0, width: w, height: window.innerHeight } };
 }
 
-function makeSidebarDraggable(): void {
-    const header = el("brand");
-    header.addEventListener("mousedown", (e) => {
-        if (e.button !== 0) return;
-        if ((e.target as HTMLElement).closest("button, input, select, option, textarea, .no-dock")) return;
-        e.preventDefault();
-        const preview = makePreview();
-        let target: Side | null = null;
-        trackDrag(
-            e,
-            (ev) => {
-                const t = sidebarTargetAt(ev.clientX);
-                target = t.side;
-                preview.show(t.preview, t.side === "left" ? "Dock script list left" : "Dock script list right");
-            },
-            (apply) => {
-                preview.remove();
-                if (apply && target && target !== currentSide()) dockSidebar(target);
-            }
-        );
-    });
+/** Drag the explorer by its header to the other edge. */
+export function startSidebarDrag(e: MouseEvent): void {
+    if (e.button !== 0) return;
+    if ((e.target as HTMLElement).closest("button, input, select, option, textarea, .no-dock")) return;
+    e.preventDefault();
+    const preview = makePreview();
+    let target: Side | null = null;
+    trackDrag(
+        e,
+        (ev) => {
+            const t = sidebarTargetAt(ev.clientX);
+            target = t.side;
+            preview.show(t.preview, t.side === "left" ? "Dock script list left" : "Dock script list right");
+        },
+        (apply) => {
+            preview.remove();
+            if (apply && target && target !== currentSide()) dockSidebar(target);
+        }
+    );
 }
 
-function applySize(dock: Dock, size: number | undefined): void {
-    const panel = el("log-panel");
+/** The panel's size style for `dock`: its own size there, or the stylesheet's. */
+export function applySize(panel: HTMLElement, dock: Dock, size: number | undefined): void {
     panel.style.width = "";
     panel.style.height = "";
     if (size) {
@@ -146,17 +114,9 @@ function applySize(dock: Dock, size: number | undefined): void {
     }
 }
 
-/** Move the panel (and its splitter) into the container for `dock`. */
-export function dockPanel(dock: Dock, persist = true): void {
-    const panel = el("log-panel");
-    const split = el("split-h");
-    if (dock === "right") el("app").append(split, panel);
-    else if (dock === "left") el("sidebar").append(split, panel);
-    else el("editor-area").append(split, panel);
-    el("app").dataset.dock = dock;
-    const l = load();
-    applySize(dock, l.size?.[dock]);
-    if (persist) save({ ...l, dock });
+/** Dock the panel (PanelDock moves it into that dock's container). */
+export function dockPanel(dock: Dock): void {
+    flushSync(() => void (dockLayout.dock = dock));
     window.dispatchEvent(new Event("resize")); // nudge layout-dependent widgets
 }
 
@@ -166,31 +126,29 @@ function clampSize(dock: Dock, size: number): number {
     return Math.min(el("editor-area").clientHeight - 100, Math.max(MIN, size));
 }
 
-function makeSplitter(): void {
-    const handle = el("split-h");
-    handle.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        const dock = currentDock();
-        const panel = el("log-panel");
-        const rect = panel.getBoundingClientRect();
-        handle.classList.add("dragging");
-        document.body.classList.add(dock === "right" ? "resizing-x" : "resizing-y");
-        const move = (ev: MouseEvent) => {
-            const raw = dock === "right" ? rect.right - ev.clientX : rect.bottom - ev.clientY;
-            applySize(dock, clampSize(dock, raw));
-        };
-        const up = () => {
-            handle.classList.remove("dragging");
-            document.body.classList.remove("resizing-x", "resizing-y");
-            document.removeEventListener("mousemove", move);
-            document.removeEventListener("mouseup", up);
-            const l = load();
-            const size = dock === "right" ? panel.offsetWidth : panel.offsetHeight;
-            save({ ...l, size: { ...l.size, [dock]: size } });
-        };
-        document.addEventListener("mousemove", move);
-        document.addEventListener("mouseup", up);
-    });
+/** Resize the panel from its splitter. */
+export function startPanelResize(e: MouseEvent): void {
+    e.preventDefault();
+    const handle = e.currentTarget as HTMLElement;
+    const dock = currentDock();
+    const panel = el("log-panel");
+    const rect = panel.getBoundingClientRect();
+    handle.classList.add("dragging");
+    document.body.classList.add(dock === "right" ? "resizing-x" : "resizing-y");
+    const move = (ev: MouseEvent) => {
+        const raw = dock === "right" ? rect.right - ev.clientX : rect.bottom - ev.clientY;
+        applySize(panel, dock, clampSize(dock, raw));
+    };
+    const up = () => {
+        handle.classList.remove("dragging");
+        document.body.classList.remove("resizing-x", "resizing-y");
+        document.removeEventListener("mousemove", move);
+        document.removeEventListener("mouseup", up);
+        const size = dock === "right" ? panel.offsetWidth : panel.offsetHeight;
+        dockLayout.size = { ...dockLayout.size, [dock]: size };
+    };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
 }
 
 interface Target {
@@ -224,34 +182,23 @@ export function dockTargetAt(x: number, y: number): Target | null {
     return null;
 }
 
-function makeDraggable(): void {
-    const header = el("log-header");
-    header.addEventListener("mousedown", (e) => {
-        if (e.button !== 0) return;
-        // controls in the header (filters, buttons) keep their own behavior
-        if ((e.target as HTMLElement).closest("button, input, select, option, textarea, .no-dock")) return;
-        e.preventDefault();
-        const preview = makePreview();
-        let target: Target | null = null;
-        trackDrag(
-            e,
-            (ev) => {
-                target = dockTargetAt(ev.clientX, ev.clientY);
-                preview.show(target?.preview ?? null, target ? { bottom: "Dock below the editor", right: "Dock beside the editor", left: "Dock under the script list" }[target.dock] : "");
-            },
-            (apply) => {
-                preview.remove();
-                if (apply && target && target.dock !== currentDock()) dockPanel(target.dock);
-            }
-        );
-    });
-}
-
-export function setupPanelDock(): void {
-    const l = load();
-    dockSidebar(l.side === "right" ? "right" : "left", false);
-    dockPanel(l.dock || "bottom", false);
-    makeSplitter();
-    makeDraggable();
-    makeSidebarDraggable();
+/** Drag the panel by its header onto a dock. */
+export function startPanelDrag(e: MouseEvent): void {
+    if (e.button !== 0) return;
+    // controls in the header (filters, buttons) keep their own behavior
+    if ((e.target as HTMLElement).closest("button, input, select, option, textarea, .no-dock")) return;
+    e.preventDefault();
+    const preview = makePreview();
+    let target: Target | null = null;
+    trackDrag(
+        e,
+        (ev) => {
+            target = dockTargetAt(ev.clientX, ev.clientY);
+            preview.show(target?.preview ?? null, target ? { bottom: "Dock below the editor", right: "Dock beside the editor", left: "Dock under the script list" }[target.dock] : "");
+        },
+        (apply) => {
+            preview.remove();
+            if (apply && target && target.dock !== currentDock()) dockPanel(target.dock);
+        }
+    );
 }

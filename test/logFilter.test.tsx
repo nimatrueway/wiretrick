@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { fireEvent, waitFor } from "@testing-library/react";
-import { mountLogFilter, type LogFilter } from "../src/ui/logFilter";
+import { fireEvent, render, waitFor } from "@testing-library/react";
+import { LogFilterBar, type LogFilter } from "../src/ui/logFilter";
 
 if (typeof (globalThis as any).localStorage === "undefined") {
     const m = new Map<string, string>();
@@ -15,10 +15,8 @@ if (typeof (globalThis as any).localStorage === "undefined") {
 describe("Log filter bar", () => {
     it("filters lines from typed Basic text and placeholders name the message", async () => {
         localStorage.clear();
-        const host = document.createElement("div");
-        document.body.append(host);
         let f: LogFilter | null = null;
-        mountLogFilter(host, () => ({ sources: ["pipeline"] }), (x) => (f = x));
+        const host = render(<LogFilterBar data={() => ({ sources: ["pipeline"] })} onFilter={(x) => (f = x)} />).container;
         await waitFor(() => expect(f).not.toBeNull());
         expect(f!.test({ message: "anything", level: "info", source: "page" })).toBe(true);
         const box = host.querySelector("input.net-filter") as HTMLInputElement;

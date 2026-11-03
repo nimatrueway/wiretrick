@@ -73,6 +73,22 @@ explorer width, panel tab, word wrap) is the `layout` store
 draws into `<MonacoHost>`; `createCodeEditor()` (`src/ui/shell/codeEditor.ts`)
 creates the editor in it once Monaco has loaded.
 
+The panel (`src/ui/panel/`) reads its own stores: `logState` and the log
+buffer (`state/log.ts`; `appendLog` adds a line), `panel` (`state/panel.ts`:
+the Problems, the Network view's recording and the status bar's counts, kept
+in `badges` and announced with `badgesChanged()`) and `dockLayout`
+(`state/dock.ts`: which edge the panel and explorer are docked to, and the
+panel's size per edge). `PanelDock` keeps one `#log-panel` element and moves
+it into `#editor-area`, `#app` or `#sidebar` as it is docked, rendering into
+it through a portal; those containers' own React children don't change, so
+the extra element doesn't upset React. Components call into `editor.ts`
+through the `actions` object (`src/ui/shell/actions.ts`), which `main()`
+fills in.
+
+Valtio's `useSnapshot` re-renders a component only for the properties it
+read, and in a microtask unless `{ sync: true }`: views that must be up to
+date right after a `flushSync()` (panel tab, docking) use `sync`.
+
 Two React habits to keep in mind: `onChange` on a text input fires on every
 keystroke (use a native `change` listener for "commit on blur/Enter"), and a
 document listener added by an effect in response to a click or key may see

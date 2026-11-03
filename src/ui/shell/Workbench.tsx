@@ -1,16 +1,19 @@
 import { useSnapshot } from "valtio";
+import { startSidebarDrag } from "../panelDock";
+import { dockLayout, dockOf, sideOf } from "../state/dock";
 import { layout } from "../state/layout";
 import { MonacoHost } from "./MonacoHost";
 
 const cls = (...names: (string | false | undefined)[]): string | undefined => names.filter(Boolean).join(" ") || undefined;
 
-/** The explorer, the Code view and the panel (#app). Sections not yet in React are filled in by editor.ts through their ids. */
+/** The explorer and the Code view (#app); PanelDock puts the panel in. Sections not yet in React are filled in by editor.ts through their ids. */
 export function Workbench() {
     const snap = useSnapshot(layout, { sync: true });
+    const dock = useSnapshot(dockLayout, { sync: true });
     return (
-        <div id="app" className={cls(snap.sidebarHidden && "sidebar-hidden", snap.panelHidden && "panel-hidden")}>
+        <div id="app" className={cls(snap.sidebarHidden && "sidebar-hidden", snap.panelHidden && "panel-hidden")} data-dock={dockOf(dock)} data-side={sideOf(dock)}>
             <aside id="sidebar" style={snap.sidebarW ? { width: `${snap.sidebarW}px` } : undefined}>
-                <div id="brand" title="Drag to move the explorer to the left or right edge">
+                <div id="brand" title="Drag to move the explorer to the left or right edge" onMouseDown={(e) => startSidebarDrag(e.nativeEvent)}>
                     <h1>Explorer</h1>
                     <div id="toolbar"><button id="btn-help" title="API reference and sample scripts" aria-label="Help">?</button>{" "}<button id="btn-settings" title="Settings (⌘,)" aria-label="Settings">⚙</button></div>
                 </div>
@@ -94,58 +97,6 @@ export function Workbench() {
                         </div>
                     </section>
                     <MonacoHost />
-                    <div id="split-h" title="Drag to resize" />
-                    <div id="log-panel">
-                        <div id="log-header">
-                            <span id="panel-tabs" role="tablist" title="Drag to dock: below the Code view, beside it, or under the script list">
-                                <span id="problems-tab" className="panel-tab" role="tab" data-panel="problems" title="Problems — what is wrong with your scripts right now; each one goes away once fixed">Problems</span>
-                                {" "}
-                                <span id="log-header-title" className="panel-tab active" role="tab" data-panel="log" title="Extension and script log">Log</span>
-                                {" "}
-                                <span id="network-tab" className="panel-tab" role="tab" data-panel="network" title="Network activity, with what Wiretrick scripts did to each request">Network</span>
-                            </span>
-                            {" "}
-                            <span id="problems-tools" className="panel-tools" hidden><input id="problems-filter" className="panel-filter" type="text" placeholder="Filter (e.g. text, script name)" title="Show only problems whose message or script name contains this text" autoComplete="off" spellCheck={false} /></span>
-                            {" "}
-                            <span id="log-tools" className="panel-tools">
-                                <span id="log-filter-host" />
-                                {" "}
-                                <select id="log-level" title="Minimum log level" defaultValue="info">
-                                    <option value="debug">Debug+</option>
-                                    <option value="info">Info+</option>
-                                    <option value="warn">Warn+</option>
-                                    <option value="error">Error only</option>
-                                </select>
-                                {" "}
-                                <button id="btn-scroll-lock" className="icon-btn" aria-pressed="false" title="Turn Auto Scrolling Off" aria-label="Scroll lock">
-                                    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-                                        <rect x="3.5" y="7" width="9" height="6.5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.3" />
-                                        <path className="shackle-open" fill="none" stroke="currentColor" strokeWidth="1.3" d="M5.5 7V4.8a2.5 2.5 0 0 1 5-.3" />
-                                        <path className="shackle-shut" fill="none" stroke="currentColor" strokeWidth="1.3" d="M5.5 7V4.8a2.5 2.5 0 0 1 5 0V7" />
-                                    </svg>
-                                </button>
-                            </span>
-                            {" "}
-                            <span id="net-tools" className="panel-tools" hidden><span id="net-filter-host" /></span>
-                            {" "}
-                            <span id="panel-actions">
-                                <button id="btn-clear-panel" className="icon-btn" title="Clear the Log and Network" aria-label="Clear the Log and Network">
-                                    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" d="M2.5 4h9M2.5 7.5h9M2.5 11h4.5M9.5 10l3.5 3.5M13 10l-3.5 3.5" /></svg>
-                                </button>
-                                {" "}
-                                <button id="btn-panel-diagnostics" className="icon-btn" title="Download diagnostics — a report with the log, the recorded network requests, scripts and settings. Review before sharing; cookies/authorization headers are redacted." aria-label="Download diagnostics">
-                                    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" strokeLinecap="round" d="M3.5 1.5h6l3 3v10h-9zM9.5 1.5v3h3M5 9.5h1.5l1-2 1.5 4 1-2H11" /></svg>
-                                </button>
-                            </span>
-                            {" "}
-                            <button id="btn-close-panel" className="icon-btn" title="Close Panel (⌘J)" aria-label="Close Panel">
-                                <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" /></svg>
-                            </button>
-                        </div>
-                        <div id="log-entries" />
-                        <div id="network-view" hidden />
-                        <div id="problems-view" hidden><div id="problems-list" role="tree" aria-label="Problems" /></div>
-                    </div>
                 </div>
             </main>
         </div>
