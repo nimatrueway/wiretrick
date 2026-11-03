@@ -3,6 +3,8 @@
 export interface ApiSection {
     title: string;
     body: string;
+    /** a table rendered under the body: "strategies" = every strategy's pros/cons and whether this browser can run it */
+    table?: "strategies";
 }
 
 const MDN = "https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API";
@@ -239,8 +241,9 @@ Pick per browser/build with wt.isChrome / wt.isFirefox / wt.isMV2 / wt.isMV3:
 wt.onResponseBody({ url: "*://example.com/app.js", strategy: wt.isFirefox ? "extension" : "helper" }, fn);
 wt.onRequest({ url: "*://ads.example.com/*", strategy: wt.isMV3 ? "rules" : "extension" }, () => ({ block: true }));
 
-No fallback: when the strategy isn't available (helper not running, wrong browser, a kind it can't do), the handler doesn't run and the Log view warns. Hover "strategy" in the Code view or see Settings → Strategies for pros/cons.
+No fallback: when the strategy isn't available (helper not running, wrong browser, a kind it can't do), the handler doesn't run and the Log view warns. Hover "strategy" in the Code view, or see the table below for each one's pros and cons (greyed out: not available in this browser).
 
 Tip: ${ADV_SHORT}`,
+        table: "strategies",
     },
 ];

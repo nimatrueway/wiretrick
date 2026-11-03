@@ -9,15 +9,12 @@ import { saveTheme, type ThemePref } from "../theme";
 import { aboutText } from "../about";
 import { cleanFolderPath, copyPathHint, hostOs, type LaunchMode } from "../bundle";
 import { BODY_CAP_KEY, BODY_CAP_MAX, BODY_CAP_MIN, DEFAULT_BODY_CAP } from "../../shared/settingsYaml";
-import { STRATEGIES } from "../../shared/route";
-import { STRATEGY_DOC_URL, STRATEGY_INFO, strategyUnsupported } from "../../shared/strategyInfo";
 import { Overlay, useControl, useFlash } from "./controls";
 
 const SECTIONS: [string, string][] = [
     ["settings-sec-appearance", "Appearance"],
     ["settings-sec-folder", "Synced folder"],
     ["settings-sec-io", "Import / Export"],
-    ["settings-sec-strategy", "Strategies"],
     ["settings-sec-helper", "Local helper"],
     ["settings-sec-logging", "Logging"],
     ["settings-sec-network", "Network"],
@@ -76,7 +73,6 @@ export function SettingsDialog() {
                                 </div>
                             </div>
                         </section>
-                        <Strategies />
                         <LocalHelper />
                         <Logging />
                         <Network />
@@ -203,44 +199,6 @@ function SyncedFolder() {
                         <code>{"subl://open?url=file://{path}&line={line}"}</code>
                         .
                     </p>
-                </div>
-            </div>
-        </section>
-    );
-}
-
-const strategyEnv = { firefox: typeof (globalThis as any).browser?.webRequest?.filterResponseData === "function", mv3: __MV3__ };
-
-function Strategies() {
-    return (
-        <section id="settings-sec-strategy" className="settings-section">
-            <h3>Strategies</h3>
-            <div className="setting">
-                <span className="setting-label" id="settings-strategy-label">Reference</span>
-                <div className="setting-control">
-                    <p className="setting-help">Every handler names the strategy that runs it: <code>{"wt.onRequest({ url, strategy: \"helper\" }, …)"}</code>. There is no default. A handler whose strategy isn't available here doesn't run — it gets a ⚠ and a Log view warning; there is no fallback. <a id="settings-strategy-doc" href={STRATEGY_DOC_URL} target="_blank" rel="noopener">Compatibility</a></p>
-                    <table id="settings-strategy-table" className="strategy-table" aria-labelledby="settings-strategy-label">
-                        <tbody>
-                            <tr>
-                                <th>Strategy</th>
-                                <th>Pros</th>
-                                <th>Cons</th>
-                            </tr>
-                            {STRATEGIES.map((s) => {
-                                const why = strategyUnsupported(s, strategyEnv);
-                                return (
-                                    <tr key={s} className={why ? "unavailable" : undefined}>
-                                        <td>
-                                            <code>{s}</code>
-                                            {why && <div className="strategy-why">{why}</div>}
-                                        </td>
-                                        <td>{STRATEGY_INFO[s].pros}</td>
-                                        <td>{STRATEGY_INFO[s].cons}</td>
-                                    </tr>
-                                );
-                            })}
-                        </tbody>
-                    </table>
                 </div>
             </div>
         </section>

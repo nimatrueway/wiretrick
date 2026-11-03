@@ -383,13 +383,14 @@ or *Light*. It applies to the Editor (Code view included) and the popup.
 
 ## Strategies
 
-**Settings → Strategies** is a reference table of every
-[strategy](strategies.md) with its pros and cons. Strategies the current
-browser can't use are greyed out with the reason; **Compatibility** links to
-[the full table](strategies.md#compatibility). There is no default strategy:
-every network handler names its own (`wt.onRequest({ url, strategy: "helper" }, fn)`).
-There is no fallback either: a handler whose strategy isn't available
-doesn't run — the script gets a ⚠ and the Problems view a warning.
+Help (**?**) → Reference → *Strategies* explains every
+[strategy](strategies.md) and has a table of their pros and cons. Strategies
+the current browser can't use are greyed out with the reason; **Compatibility**
+links to [the full table](strategies.md#compatibility). There is no default
+strategy: every network handler names its own
+(`wt.onRequest({ url, strategy: "helper" }, fn)`). There is no fallback
+either: a handler whose strategy isn't available doesn't run — the script
+gets a ⚠ and the Problems view a warning.
 
 ## About and diagnostics
 

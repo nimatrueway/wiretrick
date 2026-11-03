@@ -15,7 +15,6 @@ const SETTINGS_SECTIONS: Record<string, string> = {
     Appearance: "settings-sec-appearance",
     "Synced folder": "settings-sec-folder",
     "Import / Export": "settings-sec-io",
-    Strategy: "settings-sec-strategy",
     "Local helper": "settings-sec-helper",
     Logging: "settings-sec-logging",
     Advanced: "settings-sec-advanced",

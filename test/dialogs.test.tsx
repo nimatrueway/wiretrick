@@ -176,6 +176,31 @@ describe("help dialog", () => {
         await act(tick);
         expect($("#help-panel").classList.contains("hidden")).toBe(true);
     });
+
+    it("has the strategy pros/cons table in the reference, found by searching its text", async () => {
+        const { HelpDialog } = await import("../src/ui/dialogs/HelpDialog");
+        const { openHelp } = await import("../src/ui/state/dialogs");
+        const { STRATEGIES } = await import("../src/shared/route");
+        render(<HelpDialog />);
+        await act(async () => openHelp("reference"));
+        const rows = $$("#help-strategy-table tr").slice(1);
+        expect(rows.map((r) => r.querySelector("code")!.textContent)).toEqual([...STRATEGIES]);
+        expect($("#help-strategy-doc").getAttribute("href")).toContain("strategies.md#compatibility");
+        fireEvent.change($("#help-filter"), { target: { value: "No banner" } });
+        const shown = $$("#help-list .api-section:not([hidden])");
+        expect(shown).toHaveLength(1);
+        expect(shown[0].querySelector("#help-strategy-table")).not.toBeNull();
+    });
+});
+
+describe("settings dialog", () => {
+    it("has no Strategies section", async () => {
+        const { SettingsDialog } = await import("../src/ui/dialogs/SettingsDialog");
+        render(<SettingsDialog />);
+        expect(document.querySelector("#settings-sec-strategy")).toBeNull();
+        expect(document.querySelector(".strategy-table")).toBeNull();
+        expect(document.body.textContent).not.toContain("Strategies");
+    });
 });
 
 describe("quick open", () => {

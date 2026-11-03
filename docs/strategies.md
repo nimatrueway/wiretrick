@@ -37,7 +37,7 @@ setting ([details](scripting.md#dom-changes--wtondocument)).
 
 ## Pros and cons
 
-The same text is shown in Settings → Strategies.
+The same text is shown in the Editor under Help (**?**) → Reference → *Strategies*.
 
 | strategy | pros | cons |
 |---|---|---|

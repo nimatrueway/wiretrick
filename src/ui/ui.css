@@ -888,8 +888,10 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 .strategy-table th, .strategy-table td { text-align: left; vertical-align: top; padding: 4px 6px; border-bottom: 1px solid var(--border); line-height: 1.4; }
 .strategy-table th { color: var(--fg-dim); font-weight: 600; }
 .strategy-table tr.unavailable td { color: var(--fg-faint); }
-.strategy-table td:first-child { white-space: nowrap; }
+.strategy-table td:first-child { width: 22%; }
 .strategy-why { margin-top: 2px; font-size: 11px; }
+.strategy-table code { font: 11px "SF Mono", Menlo, Consolas, monospace; }
+.strategy-doc { margin: 6px 0 0; font-size: 12px; }
 #about-info {
     display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 6px 16px;
     margin: 0 0 14px; font-size: 13px;

@@ -433,7 +433,7 @@ const cfg = wt.params({
 });
 
 // Each handler takes a route: its URL pattern(s) and the strategy that runs it
-// (helper | page | extension | debugger | rules — see Settings → Strategies).
+// (helper | page | extension | debugger | rules — see Help → Reference → Strategies).
 // Modify request headers / redirect / cancel:
 wt.onRequest({ url: \`*://\${cfg.host}/*\`, strategy: "helper" }, (ctx) => {
     if (cfg.debug) wt.log("request to", ctx.url);
