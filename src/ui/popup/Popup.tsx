@@ -3,7 +3,7 @@
  * inline, open the full manager on a specific script.
  */
 import { scriptHealth } from "../../shared/scriptHealth";
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useState, type MouseEvent } from "react";
 import { Switch } from "../components/Switch";
 import { ParamField } from "../components/ParamField";
 import { IconPen } from "../components/icons";
@@ -74,10 +74,10 @@ function ScriptRow({ script, api, onChanged, version }: { script: ScriptInfo; ap
     const health = scriptHealth(script);
     return (
         <>
-            <li class={isLib ? "script-item utility" : "script-item"}>
+            <li className={isLib ? "script-item utility" : "script-item"}>
                 {isLib ? (
                     // utilities have no enabled switch (same as the manager / settings.yaml)
-                    <span class="util-ind" role="img" aria-label="library" title="Library — registers no handlers with its current params; importable by other scripts">
+                    <span className="util-ind" role="img" aria-label="library" title="Library — registers no handlers with its current params; importable by other scripts">
                         𝑓
                     </span>
                 ) : (
@@ -90,12 +90,12 @@ function ScriptRow({ script, api, onChanged, version }: { script: ScriptInfo; ap
                         }}
                     />
                 )}
-                <span class={health ? "script-name error" : "script-name"} title={script.meta.description}>
+                <span className={health ? "script-name error" : "script-name"} title={script.meta.description}>
                     {script.meta.name}
                 </span>
                 {health && (
                     <span
-                        class={`err-ind ${health.kind}`}
+                        className={`err-ind ${health.kind}`}
                         role="img"
                         aria-label={`${health.kind === "types" ? "type" : health.kind} error`}
                         title={health.tooltip}
@@ -111,12 +111,12 @@ function ScriptRow({ script, api, onChanged, version }: { script: ScriptInfo; ap
                         ⚠
                     </span>
                 )}
-                <button class="btn-icon" title="Open in the Editor" aria-label="Edit" onClick={() => api.openManager(script.id)}>
+                <button className="btn-icon" title="Open in the Editor" aria-label="Edit" onClick={() => api.openManager(script.id)}>
                     <IconPen />
                 </button>
                 {hasParams(script) && (
                     <button
-                        class="btn-fold"
+                        className="btn-fold"
                         title={open ? "Hide parameters" : "Show parameters"}
                         aria-label="Toggle parameters"
                         aria-expanded={open}
@@ -139,10 +139,10 @@ function ParamFold({ scriptId, api, version }: { scriptId: string; api: PopupApi
         return () => void (live = false);
     }, [scriptId, version]);
 
-    if (!params) return <li class="param-fold">Loading…</li>;
+    if (!params) return <li className="param-fold">Loading…</li>;
     const entries = Object.entries(params.defs);
     return (
-        <li class="param-fold">
+        <li className="param-fold">
             {entries.length === 0
                 ? "This script declares no parameters."
                 : entries.map(([key, def]) => (
@@ -186,8 +186,8 @@ function ResizeGrip({ api }: { api: PopupApi }) {
         const body = document.body;
         body.classList.add("resizing");
         const [x0, y0, w0, h0] = [e.clientX, e.clientY, body.offsetWidth, body.offsetHeight];
-        const move = (ev: MouseEvent) => applySize(w0 + ev.clientX - x0, h0 + ev.clientY - y0);
-        const up = (ev: MouseEvent) => {
+        const move = (ev: globalThis.MouseEvent) => applySize(w0 + ev.clientX - x0, h0 + ev.clientY - y0);
+        const up = (ev: globalThis.MouseEvent) => {
             body.classList.remove("resizing");
             document.removeEventListener("mousemove", move);
             document.removeEventListener("mouseup", up);

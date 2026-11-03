@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { render, fireEvent, cleanup, waitFor } from "@testing-library/preact";
+import { render, fireEvent, cleanup, waitFor } from "@testing-library/react";
 import { NetworkPanel, pickRows } from "../src/ui/network/NetworkPanel";
 import { createNetStore } from "../src/ui/network/netStore";
 import type { NetEntry } from "../src/shared/netTypes";
@@ -15,6 +15,14 @@ if (typeof (globalThis as any).localStorage === "undefined") {
 }
 
 const base = Date.now();
+
+/** what typing leaves in a text box: its text and the caret at `caret` (React only sees a value set behind its back) */
+function typeInto(el: HTMLInputElement, value: string, caret = value.length): void {
+    el.value = value === "" ? " " : ""; // goes through React's value tracker, so the next set reads as a change
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(el, value);
+    el.setSelectionRange(caret, caret);
+    fireEvent.input(el);
+}
 
 /** replace the Basic filter with this query (typed, then Enter) */
 function filterBy(container: Element, query: string): void {
@@ -459,9 +467,7 @@ describe("NetworkPanel", () => {
         it("Basic: ↑/↓ show the highlighted suggestion in the text box; Esc puts back what was typed", () => {
             const { container } = setup(rows3());
             const box = container.querySelector(".net-qbox .net-filter") as HTMLInputElement;
-            box.value = "api pos";
-            box.setSelectionRange(7, 7);
-            fireEvent.input(box);
+            typeInto(box, "api pos", 7);
             const first = container.querySelector("#net-bsuggest li .net-qlist-main")!.textContent;
             expect(first).toBe("method: POST");
             fireEvent.mouseEnter(container.querySelector("#net-bsuggest li")!);
@@ -503,9 +509,7 @@ describe("NetworkPanel", () => {
             fireEvent.keyDown(container.querySelector(".net-qfields")!, { key: "Tab" });
             expect(container.querySelector(".net-qadd-pop b")!.textContent).toBe("host");
             fireEvent.keyDown(document, { key: "Escape" });
-            box.value = "pos";
-            box.setSelectionRange(3, 3);
-            fireEvent.input(box);
+            typeInto(box, "pos", 3);
             fireEvent.keyDown(box, { key: "Escape" });
             expect(container.querySelector("#net-bsuggest")).toBeNull();
             fireEvent.keyDown(box, { key: " ", ctrlKey: true }); // a word with suggestions: those, first one highlighted
@@ -532,9 +536,7 @@ describe("NetworkPanel", () => {
             const { container, getByLabelText } = setup(rows3());
             const box = container.querySelector(".net-qbox .net-filter") as HTMLInputElement;
             const type = (v: string) => {
-                box.value = v;
-                box.setSelectionRange(v.length, v.length);
-                fireEvent.input(box);
+                typeInto(box, v, v.length);
             };
             type("api pos");
             const opts = () => [...container.querySelectorAll("#net-bsuggest li")].map((n) => n.querySelector(".net-qlist-main")!.textContent);
@@ -808,9 +810,7 @@ describe("NetworkPanel", () => {
             const { container, getByText } = setup(rows3());
             fireEvent.click(container.querySelector("[aria-label=\"Advanced query\"]")!);
             const input = q(container);
-            input.value = "meth";
-            input.setSelectionRange(4, 4);
-            fireEvent.input(input);
+            typeInto(input, "meth", 4);
             expect(container.querySelector(".net-qsuggest li.active")!.textContent).toContain("method:");
             fireEvent.keyDown(input, { key: "Tab" });
             expect(input.value).toBe("method:");

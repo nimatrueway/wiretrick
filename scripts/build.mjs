@@ -80,8 +80,8 @@ function entriesFor(dist, mv3) {
     }
     for (const e of list) {
         e.transform = {
-            define: { __MV3__: mv3 ? "true" : "false", __COMMIT__: JSON.stringify(gitCommit()), __BUILD_TIME__: JSON.stringify(new Date().toISOString()) },
-            jsx: { runtime: "automatic", importSource: "preact" },
+            define: { __MV3__: mv3 ? "true" : "false", __COMMIT__: JSON.stringify(gitCommit()), __BUILD_TIME__: JSON.stringify(new Date().toISOString()), "process.env.NODE_ENV": JSON.stringify("production") },
+            jsx: { runtime: "automatic", importSource: "react" },
         };
     }
     return list;

@@ -1,14 +1,12 @@
-import { signal, computed } from "@preact/signals";
+import { proxy, ref } from "valtio";
 import type { NetEntry, NetPortMsg } from "../../shared/netTypes";
 
 /** Network-tab state: entries from the background recorder, keyed by id. */
 export function createNetStore() {
     const byId = new Map<string, NetEntry>();
-    const version = signal(0);
-    const entries = computed(() => {
-        void version.value;
-        return [...byId.values()];
-    });
+    /** `entries`: a fresh array on every change, kept out of the proxy (up to 1500 entries) */
+    const state = proxy({ entries: ref([] as NetEntry[]) });
+    const changed = () => void (state.entries = ref([...byId.values()]));
     let send: ((m: any) => void) | null = null;
 
     function apply(msg: NetPortMsg): void {
@@ -20,15 +18,15 @@ export function createNetStore() {
             // the recorder drops its oldest entries; mirror its cap
             if (byId.size > 1500) for (const k of [...byId.keys()].slice(0, byId.size - 1000)) byId.delete(k);
         }
-        version.value++;
+        changed();
     }
 
     return {
-        entries,
+        state,
         apply,
         clear(): void {
             byId.clear();
-            version.value++;
+            changed();
             send?.({ type: "netClear" });
         },
         /** wire to the background "network" port, or the passive "network-counts" one

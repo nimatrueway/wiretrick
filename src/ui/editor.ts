@@ -42,7 +42,7 @@ import { setupPanelDock, currentSide, currentDock } from "./panelDock";
 import { badgeCount, LogBadge, NetBadge, type TabBadge } from "./logBadge";
 import { collectProblems, filterProblems, problemCounts, ProblemsBadge, settingsLink, type Problem, type ProblemGroup, type ProblemMarker } from "./problems";
 import { touchCounts } from "./network/netFormat";
-import { effect } from "@preact/signals";
+import { subscribe } from "valtio";
 import { aboutRows, aboutText, checkLatestRelease, collectDiagnostics, describeLatest, diagnosticsFileName, downloadText, RELEASES_URL, type HelperStatus } from "./about";
 
 // ---- state ----
@@ -1952,10 +1952,12 @@ function renderTabBadges(): void {
 function watchNetCounts(): void {
     const store = createNetStore();
     netCounts = store;
-    effect(() => {
-        netBadge.set(touchCounts(store.entries.value));
+    const update = () => {
+        netBadge.set(touchCounts(store.state.entries));
         renderBadge(netBadge);
-    });
+    };
+    update();
+    subscribe(store.state, update);
     store.connect(undefined, "network-counts");
 }
 

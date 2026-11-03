@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { fireEvent, waitFor } from "@testing-library/preact";
+import { fireEvent, waitFor } from "@testing-library/react";
 import { mountLogFilter, type LogFilter } from "../src/ui/logFilter";
 
 if (typeof (globalThis as any).localStorage === "undefined") {

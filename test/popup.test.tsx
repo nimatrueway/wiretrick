@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/preact";
+import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { Popup } from "../src/ui/popup/Popup";
 import type { PopupApi, ScriptInfo, ScriptParams } from "../src/ui/popup/api";
 

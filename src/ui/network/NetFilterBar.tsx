@@ -3,9 +3,8 @@
  * box and chips ("+ Filter": field → operator → value); Advanced edits the
  * query directly with autocomplete, error underlines and a "?" syntax help.
  */
-import { Fragment, createContext, type ComponentChildren, type JSX } from "preact";
-import { useContext, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import type { RefObject } from "preact";
+import { Fragment, createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type JSX, type KeyboardEvent as RKeyboardEvent, type ReactNode, type RefObject } from "react";
+import { openedBy } from "../lib/events";
 import {
     NET,
     addChip,
@@ -74,8 +73,9 @@ const DialectCtx = createContext<Dialect>(NET);
 function useDismiss(ref: RefObject<HTMLElement | null>, open: boolean, close: () => void, escape: () => void = close) {
     useEffect(() => {
         if (!open) return;
+        const opening = openedBy();
         const onDown = (ev: MouseEvent) => {
-            if (!ref.current?.contains(ev.target as Node)) close();
+            if (ev !== opening && !ref.current?.contains(ev.target as Node)) close();
         };
         const onKey = (ev: KeyboardEvent) => {
             if (ev.key === "Escape") {
@@ -155,9 +155,9 @@ export function FilterBar({ state, onChange, error, data, dialect: d = NET }: { 
     // inside the filter box, at its end: the Basic ⇄ Advanced toggle and the syntax help
     const tail = (
         <>
-            <span class="net-qmode" ref={warnRef}>
+            <span className="net-qmode" ref={warnRef}>
                 <button
-                    class={"net-qmode-btn" + (advanced ? " on" : "")}
+                    className={"net-qmode-btn" + (advanced ? " on" : "")}
                     aria-pressed={advanced}
                     aria-label="Advanced query"
                     title={advanced ? "Advanced: typing the query as text (field:value, OR, NOT, ( )) — click for Basic capsules" : "Basic: capsules — click to type the query as text (Advanced)"}
@@ -167,10 +167,10 @@ export function FilterBar({ state, onChange, error, data, dialect: d = NET }: { 
                     {"{ }"}
                 </button>
                 {warn && (
-                    <div class="net-pop net-qwarn" role="alertdialog" aria-label="Query has an error">
+                    <div className="net-pop net-qwarn" role="alertdialog" aria-label="Query has an error">
                         <p>This query has an error, so Basic can't show it.</p>
-                        <div class="net-pop-actions">
-                            <button class="primary" onClick={() => setWarn(false)}>
+                        <div className="net-pop-actions">
+                            <button className="primary" onClick={() => setWarn(false)}>
                                 Stay in Advanced
                             </button>
                             <button
@@ -190,7 +190,7 @@ export function FilterBar({ state, onChange, error, data, dialect: d = NET }: { 
     );
     return (
         <DialectCtx.Provider value={d}>
-            <div class="net-qbar no-dock">
+            <div className="net-qbar no-dock">
                 {advanced ? <QueryInput value={state.query} onInput={(query) => onChange({ ...state, query })} error={error} data={data} tail={tail} /> : <BasicInput value={state.basic} onInput={(basic) => onChange({ ...state, basic })} error={error} data={data} tail={tail} />}
             </div>
         </DialectCtx.Provider>
@@ -264,7 +264,7 @@ function useBasicUndo(value: BasicFilter, onInput: (b: BasicFilter) => void) {
     };
 }
 
-function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter; onInput: (b: BasicFilter) => void; error: QueryError | null; data: unknown; tail?: ComponentChildren }) {
+function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter; onInput: (b: BasicFilter) => void; error: QueryError | null; data: unknown; tail?: ReactNode }) {
     const d = useContext(DialectCtx);
     const box = useRef<HTMLDivElement>(null);
     const input = useRef<HTMLInputElement>(null);
@@ -423,7 +423,7 @@ function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter;
         if (next) (onInput(next), toInput(next.text.length));
     };
 
-    const onChipKey = (ev: KeyboardEvent) => {
+    const onChipKey = (ev: RKeyboardEvent) => {
         const n = leaves.length;
         const mod = ev.ctrlKey || ev.metaKey;
         const key = ev.key;
@@ -484,7 +484,7 @@ function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter;
         setAc(null);
         setRequest({ x: textX(el, cur.slice(0, caret)) });
     };
-    const onInputKey = (ev: KeyboardEvent) => {
+    const onInputKey = (ev: RKeyboardEvent) => {
         const el = input.current!;
         if (ev.ctrlKey && !ev.metaKey && !ev.altKey && (ev.key === " " || ev.code === "Space")) return (ev.preventDefault(), forceSuggest());
         const n = leaves.length;
@@ -575,17 +575,17 @@ function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter;
         return c?.at ? parenAtGap(c, m[2] as "(" | "-(" | ")") : null;
     };
     const textBox = (
-        <div class={"net-qtext" + (gap ? " gap" : "")}>
+        <div className={"net-qtext" + (gap ? " gap" : "")}>
             <input
                 ref={input}
-                class="net-filter"
+                className="net-filter"
                 type="text"
                 placeholder={gap ? "" : `Filter ${d.bareNoun}, or type a field or value (-word excludes)`}
                 size={gap ? Math.max(1, shown.length + 1) : undefined}
                 aria-label={`Filter ${d.bareNoun}`}
-                spellcheck={false}
-                autocomplete="off"
-                aria-autocomplete="list"
+                spellCheck={false}
+                autoComplete="off"
+                aria-autoComplete="list"
                 aria-expanded={!!ac}
                 aria-controls="net-bsuggest"
                 aria-activedescendant={ac && ac.active >= 0 ? `net-bopt-${ac.active}` : undefined}
@@ -594,7 +594,7 @@ function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter;
                     setSel(null);
                     dragging.current = dragFromText.current = true;
                 }}
-                onInput={(e) => {
+                onChange={(e) => {
                     const el = e.currentTarget;
                     setSel(null);
                     // AND / OR / ( / ) turn into capsules as they're typed at the end; among the chips they wait for Enter
@@ -611,11 +611,11 @@ function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter;
                 }}
             />
             {ac && (
-                <ul class="net-pop net-qsuggest" ref={listRef} id="net-bsuggest" role="listbox" aria-label="Suggestions">
+                <ul className="net-pop net-qsuggest" ref={listRef} id="net-bsuggest" role="listbox" aria-label="Suggestions">
                     {ac.items.map((s, i) => (
-                        <li key={s.label} id={`net-bopt-${i}`} role="option" aria-selected={i === ac.active} class={i === ac.active ? "active" : ""} onMouseDown={(e) => (e.preventDefault(), accept(i))} onMouseEnter={() => !ac.kb && setAc({ ...ac, active: i })}>
-                            <span class="net-qlist-main">{s.label}</span>
-                            {s.detail && <span class="net-qlist-detail">{s.detail}</span>}
+                        <li key={s.label} id={`net-bopt-${i}`} role="option" aria-selected={i === ac.active} className={i === ac.active ? "active" : ""} onMouseDown={(e) => (e.preventDefault(), accept(i))} onMouseEnter={() => !ac.kb && setAc({ ...ac, active: i })}>
+                            <span className="net-qlist-main">{s.label}</span>
+                            {s.detail && <span className="net-qlist-detail">{s.detail}</span>}
                         </li>
                     ))}
                 </ul>
@@ -642,7 +642,7 @@ function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter;
     /** the connector typed for the next item, shown where that item will go */
     const pendingConn = (path: number[]) =>
         value.conn && path.join(".") === insertAt ? (
-            <button key="pending-conn" class={"net-qconn pending" + (value.conn === "OR" ? " or" : "")} title={`${value.conn} joins the next filter — click for ${value.conn === "OR" ? "AND" : "OR"}`} aria-label={`${value.conn}, joins the next filter, click to switch`} onClick={() => onInput({ ...value, conn: value.conn === "OR" ? "AND" : "OR" })}>
+            <button key="pending-conn" className={"net-qconn pending" + (value.conn === "OR" ? " or" : "")} title={`${value.conn} joins the next filter — click for ${value.conn === "OR" ? "AND" : "OR"}`} aria-label={`${value.conn}, joins the next filter, click to switch`} onClick={() => onInput({ ...value, conn: value.conn === "OR" ? "AND" : "OR" })}>
                 {value.conn}
             </button>
         ) : null;
@@ -651,7 +651,7 @@ function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter;
             const p = [...path, i];
             const c = e.conns[i - 1];
             const conn = i > 0 && (
-                <button class={"net-qconn" + (c === "OR" ? " or" : "")} title={`${c} — click for ${c === "OR" ? "AND" : "OR"}`} aria-label={`${c}, click to switch`} onClick={() => setExpr(toggleConn(value.expr, path, i - 1))}>
+                <button className={"net-qconn" + (c === "OR" ? " or" : "")} title={`${c} — click for ${c === "OR" ? "AND" : "OR"}`} aria-label={`${c}, click to switch`} onClick={() => setExpr(toggleConn(value.expr, path, i - 1))}>
                     {c}
                 </button>
             );
@@ -661,15 +661,15 @@ function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter;
                     <Fragment key={p.join(".")}>
                         {conn}
                         {here}
-                        <span class={"net-qgroup" + (it.negate ? " neg" : "") + (it.open ? " open" : "") + (it.unopened ? " unopened" : "")} title={it.open ? "Type ) to close the group" : it.unopened ? "Type ( to open the group" : undefined}>
+                        <span className={"net-qgroup" + (it.negate ? " neg" : "") + (it.open ? " open" : "") + (it.unopened ? " unopened" : "")} title={it.open ? "Type ) to close the group" : it.unopened ? "Type ( to open the group" : undefined}>
                             {!it.unopened && (
-                                <button class="net-qgroup-op" title={it.negate ? "Excluding the group — click to include" : "Group — click to exclude"} onClick={() => setExpr(editItem(value.expr, p, (g) => (g.k === "group" ? { ...g, negate: !g.negate } : g)))}>
+                                <button className="net-qgroup-op" title={it.negate ? "Excluding the group — click to include" : "Group — click to exclude"} onClick={() => setExpr(editItem(value.expr, p, (g) => (g.k === "group" ? { ...g, negate: !g.negate } : g)))}>
                                     {it.negate ? "NOT (" : "("}
                                 </button>
                             )}
                             {renderExpr(it.expr, p)}
-                            {!it.open && <span class="net-qgroup-op">)</span>}
-                            <button class="net-qchip-x" aria-label="Remove group" title="Remove group" onClick={() => removeItem(p)}>
+                            {!it.open && <span className="net-qgroup-op">)</span>}
+                            <button className="net-qchip-x" aria-label="Remove group" title="Remove group" onClick={() => removeItem(p)}>
                                 ×
                             </button>
                         </span>
@@ -690,7 +690,7 @@ function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter;
                     {conn}
                     {here}
                     <span
-                        class={"net-qchip" + (ch.negate ? " neg" : "") + (idx >= lo && idx <= hi ? " sel" : "")}
+                        className={"net-qchip" + (ch.negate ? " neg" : "") + (idx >= lo && idx <= hi ? " sel" : "")}
                         title={chipToString(ch)}
                         aria-selected={idx >= lo && idx <= hi}
                         onMouseDown={(ev) => {
@@ -706,7 +706,7 @@ function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter;
                             if (base !== value) onInput(base);
                             select(pinTo(map(idx)));
                         }}
-                        onDblClick={(ev) => !(ev.target as HTMLElement).closest("button") && !gap && editChip(idx)}
+                        onDoubleClick={(ev) => !(ev.target as HTMLElement).closest("button") && !gap && editChip(idx)}
                         onMouseEnter={(ev) => {
                             if (!dragging.current || !(ev.buttons & 1)) return;
                             if (sel) return setSel(sel.pin !== undefined ? pinTo(sel.pin, idx) : towards(sel.anchor, idx, sel.origin));
@@ -715,12 +715,12 @@ function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter;
                             if (ce) (ce.base !== value && onInput(ce.base), select(towards(ce.b, ce.map(idx), ce.origin)));
                         }}
                     >
-                        <button class="net-qchip-op" title={ch.negate ? "Excluding — click to include" : "Including — click to exclude"} onClick={() => setExpr(editItem(value.expr, p, (x) => (x.k === "chip" ? { k: "chip", chip: { ...x.chip, negate: !x.chip.negate } } : x)))}>
+                        <button className="net-qchip-op" title={ch.negate ? "Excluding — click to include" : "Including — click to exclude"} onClick={() => setExpr(editItem(value.expr, p, (x) => (x.k === "chip" ? { k: "chip", chip: { ...x.chip, negate: !x.chip.negate } } : x)))}>
                             {name}
                             {ch.negate ? " ≠" : ":"}
                         </button>
-                        <span class="net-qchip-vals">{ch.values.map(unquote).join(", ")}</span>
-                        <button class="net-qchip-x" aria-label={`Remove ${name} filter`} title="Remove" onClick={() => removeItem(p)}>
+                        <span className="net-qchip-vals">{ch.values.map(unquote).join(", ")}</span>
+                        <button className="net-qchip-x" aria-label={`Remove ${name} filter`} title="Remove" onClick={() => removeItem(p)}>
                             ×
                         </button>
                     </span>
@@ -730,7 +730,7 @@ function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter;
         gapHere(path, e.items.length) ? (
             <Fragment key="gap-end">
                 {gap!.conn && (
-                    <button class={"net-qconn pending" + (gap!.conn === "OR" ? " or" : "")} title={`${gap!.conn} joins the next filter — click for ${gap!.conn === "OR" ? "AND" : "OR"}`} onMouseDown={(ev) => ev.preventDefault()} onClick={() => onInput({ ...value, at: { ...gap!, conn: gap!.conn === "OR" ? "AND" : "OR" } })}>
+                    <button className={"net-qconn pending" + (gap!.conn === "OR" ? " or" : "")} title={`${gap!.conn} joins the next filter — click for ${gap!.conn === "OR" ? "AND" : "OR"}`} onMouseDown={(ev) => ev.preventDefault()} onClick={() => onInput({ ...value, at: { ...gap!, conn: gap!.conn === "OR" ? "AND" : "OR" } })}>
                         {gap!.conn}
                     </button>
                 )}
@@ -744,7 +744,7 @@ function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter;
         <div
             ref={box}
             tabIndex={-1}
-            class={"net-qbox" + (error ? " error" : "")}
+            className={"net-qbox" + (error ? " error" : "")}
             title={error ? error.message : undefined}
             onKeyDown={(ev) => {
                 const k = ev.key.toLowerCase();
@@ -765,14 +765,14 @@ function BasicInput({ value, onInput, error, data, tail }: { value: BasicFilter;
             {renderExpr(value.expr, [])}
             {gap ? (
                 value.text && (
-                    <span class="net-qtext-idle" title="Click to type here" onMouseDown={(ev) => (ev.preventDefault(), toEnd())}>
+                    <span className="net-qtext-idle" title="Click to type here" onMouseDown={(ev) => (ev.preventDefault(), toEnd())}>
                         {value.text}
                     </span>
                 )
             ) : (
                 textBox
             )}
-            <span class="net-qtail">
+            <span className="net-qtail">
                 <AddFilter
                     data={data}
                     onAdd={(chip) => (gap ? (onInput(insertAtGap(value, { items: [{ k: "chip", chip }], conns: [] })), toInput(cur.length)) : (onInput(addChip(value, chip, d)), toInput(value.text.length)))}
@@ -843,7 +843,7 @@ function AddFilter({ data, onAdd, request, onRequestDone, onEscape }: { data: un
     const [fieldHl, setFieldHl] = useState(0);
     const fieldList = useRef<HTMLUListElement>(null);
     const chooseField = (f: FieldDef) => (setField(f), setOp(OPS[f.kind][0]));
-    const onFieldKey = (e: KeyboardEvent) => {
+    const onFieldKey = (e: RKeyboardEvent) => {
         const n = d.fields.length;
         const key = e.key;
         let i: number | null = null;
@@ -873,7 +873,7 @@ function AddFilter({ data, onAdd, request, onRequestDone, onEscape }: { data: un
         else placeAt(el, at);
     });
     const valueInput = useRef<HTMLInputElement>(null);
-    useEffect(() => (field ? valueInput.current?.focus() : fieldList.current?.focus()), [field, op, open]);
+    useEffect(() => void (field ? valueInput.current?.focus() : fieldList.current?.focus()), [field, op, open]);
     useEffect(() => {
         if (!request) return;
         reset();
@@ -902,13 +902,13 @@ function AddFilter({ data, onAdd, request, onRequestDone, onEscape }: { data: un
     const preview = hl.kb && active >= 0 && active < suggestions.length ? suggestions[active].value : null;
     previewing.current = preview !== null;
     const pick = (v: string) => (op === "has-value" ? (setValue(v), setActive(-1)) : commit(v));
-    useEffect(() => setActive(-1), [field, op, value]);
+    useEffect(() => void setActive(-1), [field, op, value]);
     useEffect(() => {
         document.getElementById(`net-qadd-opt-${active}`)?.scrollIntoView?.({ block: "nearest" });
     }, [active]);
     /** what the box shows: the ↑/↓-highlighted suggestion, else what was typed */
     const shown = preview ?? value;
-    const onValueKey = (e: KeyboardEvent) => {
+    const onValueKey = (e: RKeyboardEvent) => {
         const k = suggestions.length;
         const arrow = e.key === "ArrowDown" || e.key === "ArrowUp";
         if (arrow && field?.kind === "text" && op && (e.altKey || !k)) {
@@ -931,34 +931,34 @@ function AddFilter({ data, onAdd, request, onRequestDone, onEscape }: { data: un
         }
     };
     return (
-        <div class="net-qadd" ref={ref}>
-            <button class="net-qadd-btn" aria-haspopup="dialog" aria-expanded={open} title="Add a filter" onClick={() => (open ? close() : (setAt(null), setFieldHl(0), setOpen(true)))}>
+        <div className="net-qadd" ref={ref}>
+            <button className="net-qadd-btn" aria-haspopup="dialog" aria-expanded={open} title="Add a filter" onClick={() => (open ? close() : (setAt(null), setFieldHl(0), setOpen(true)))}>
                 + Filter
             </button>
             {open && (
-                <div class="net-pop net-qadd-pop" ref={popRef} role="dialog" aria-label="Add filter">
+                <div className="net-pop net-qadd-pop" ref={popRef} role="dialog" aria-label="Add filter">
                     {!field && (
-                        <ul class="net-qlist net-qfields" ref={fieldList} tabIndex={-1} role="listbox" aria-label="Field" aria-activedescendant={`net-qadd-field-${fieldHl}`} onKeyDown={onFieldKey}>
+                        <ul className="net-qlist net-qfields" ref={fieldList} tabIndex={-1} role="listbox" aria-label="Field" aria-activedescendant={`net-qadd-field-${fieldHl}`} onKeyDown={onFieldKey}>
                             {d.fields.map((f, i) => (
-                                <li key={f.name} id={`net-qadd-field-${i}`} role="option" aria-selected={i === fieldHl} class={i === fieldHl ? "active" : ""} onMouseEnter={() => setFieldHl(i)}>
+                                <li key={f.name} id={`net-qadd-field-${i}`} role="option" aria-selected={i === fieldHl} className={i === fieldHl ? "active" : ""} onMouseEnter={() => setFieldHl(i)}>
                                     <button tabIndex={-1} onClick={() => chooseField(f)}>
-                                        <span class="net-qlist-main">{f.name}</span>
-                                        <span class="net-qlist-detail">{f.help}</span>
+                                        <span className="net-qlist-main">{f.name}</span>
+                                        <span className="net-qlist-detail">{f.help}</span>
                                     </button>
                                 </li>
                             ))}
                         </ul>
                     )}
                     {field && (
-                        <div class="net-qadd-form">
-                            <div class="net-qadd-head">
-                                <button class="net-qadd-back" title="Pick another field" aria-label="Back" onClick={reset}>
+                        <div className="net-qadd-form">
+                            <div className="net-qadd-head">
+                                <button className="net-qadd-back" title="Pick another field" aria-label="Back" onClick={reset}>
                                     ‹
                                 </button>
                                 <b>{field.name}</b>
-                                <span class="net-qadd-ops" role="group" aria-label="Operator">
+                                <span className="net-qadd-ops" role="group" aria-label="Operator">
                                     {opsFor.map((o) => (
-                                        <button key={o} class={o === op ? "on" : ""} aria-pressed={o === op} onClick={() => setOp(o)}>
+                                        <button key={o} className={o === op ? "on" : ""} aria-pressed={o === op} onClick={() => setOp(o)}>
                                             {OP_LABEL[o]}
                                         </button>
                                     ))}
@@ -966,34 +966,34 @@ function AddFilter({ data, onAdd, request, onRequestDone, onEscape }: { data: un
                             </div>
                             {op && (
                                 <>
-                                    <div class="net-qadd-row">
+                                    <div className="net-qadd-row">
                                         <input
                                             ref={valueInput}
                                             type="text"
-                                            spellcheck={false}
+                                            spellCheck={false}
                                             aria-label={field.kind === "header" ? "Header name" : "Value"}
                                             placeholder={field.kind === "header" ? "header name" : field.kind === "number" ? (field.name === "size" ? "10kb" : "500ms") : op === "matches" ? "regex" : "value"}
                                             value={shown}
                                             aria-controls="net-qadd-list"
                                             aria-activedescendant={active >= 0 ? `net-qadd-opt-${active}` : undefined}
-                                            onInput={(e) => (setValue(e.currentTarget.value), setErr(null))}
+                                            onChange={(e) => (setValue(e.currentTarget.value), setErr(null))}
                                             onKeyDown={onValueKey}
                                         />
                                         {op === "has-value" && (
-                                            <input type="text" spellcheck={false} aria-label="Header value" placeholder="value" value={headerValue} onInput={(e) => (setHeaderValue(e.currentTarget.value), setErr(null))} onKeyDown={(e) => (e.key === "Enter" || (e.key === "Tab" && !e.shiftKey && headerValue.trim())) && (e.preventDefault(), commit())} />
+                                            <input type="text" spellCheck={false} aria-label="Header value" placeholder="value" value={headerValue} onChange={(e) => (setHeaderValue(e.currentTarget.value), setErr(null))} onKeyDown={(e) => (e.key === "Enter" || (e.key === "Tab" && !e.shiftKey && headerValue.trim())) && (e.preventDefault(), commit())} />
                                         )}
-                                        <button class="primary" onClick={() => commit(shown)}>
+                                        <button className="primary" onClick={() => commit(shown)}>
                                             Add
                                         </button>
                                     </div>
-                                    {err && <div class="net-qadd-err">{err}</div>}
+                                    {err && <div className="net-qadd-err">{err}</div>}
                                     {suggestions.length > 0 && (
-                                        <ul class="net-qlist" id="net-qadd-list" role="listbox" aria-label="Suggestions">
+                                        <ul className="net-qlist" id="net-qadd-list" role="listbox" aria-label="Suggestions">
                                             {suggestions.map((s, i) => (
-                                                <li key={s.value} id={`net-qadd-opt-${i}`} role="option" aria-selected={i === active} class={i === active ? "active" : ""} onMouseEnter={() => !hl.kb && setActive(i)}>
+                                                <li key={s.value} id={`net-qadd-opt-${i}`} role="option" aria-selected={i === active} className={i === active ? "active" : ""} onMouseEnter={() => !hl.kb && setActive(i)}>
                                                     <button onClick={() => pick(s.value)}>
-                                                        <span class="net-qlist-main">{s.value}</span>
-                                                        {s.detail && <span class="net-qlist-detail">{s.detail}</span>}
+                                                        <span className="net-qlist-main">{s.value}</span>
+                                                        {s.detail && <span className="net-qlist-detail">{s.detail}</span>}
                                                     </button>
                                                 </li>
                                             ))}
@@ -1011,7 +1011,7 @@ function AddFilter({ data, onAdd, request, onRequestDone, onEscape }: { data: un
 
 // ── Advanced ─────────────────────────────────────────────────────────
 
-function QueryInput({ value, onInput, error, data, tail }: { value: string; onInput: (q: string) => void; error: QueryError | null; data: unknown; tail?: ComponentChildren }) {
+function QueryInput({ value, onInput, error, data, tail }: { value: string; onInput: (q: string) => void; error: QueryError | null; data: unknown; tail?: ReactNode }) {
     const d = useContext(DialectCtx);
     const input = useRef<HTMLInputElement>(null);
     const mirror = useRef<HTMLDivElement>(null);
@@ -1048,7 +1048,7 @@ function QueryInput({ value, onInput, error, data, tail }: { value: string; onIn
         if (field) suggest(next, caret, true);
         else setAc(null);
     };
-    const onKeyDown = (ev: KeyboardEvent) => {
+    const onKeyDown = (ev: RKeyboardEvent) => {
         if (ev.ctrlKey && !ev.metaKey && !ev.altKey && (ev.key === " " || ev.code === "Space")) {
             ev.preventDefault();
             return suggest(value, input.current!.selectionStart ?? value.length, true);
@@ -1072,12 +1072,12 @@ function QueryInput({ value, onInput, error, data, tail }: { value: string; onIn
     }, [ac?.active]);
     const errEnd = error ? Math.min(error.end, value.length) : 0;
     return (
-        <div class={"net-qbox net-qadv" + (error ? " error" : "")}>
-            <div class="net-qmirror" ref={mirror} aria-hidden="true">
+        <div className={"net-qbox net-qadv" + (error ? " error" : "")}>
+            <div className="net-qmirror" ref={mirror} aria-hidden="true">
                 {error ? (
                     <>
                         {value.slice(0, error.start)}
-                        <span class="net-qerr">{error.start < value.length ? value.slice(error.start, errEnd) : "\u00a0"}</span>
+                        <span className="net-qerr">{error.start < value.length ? value.slice(error.start, errEnd) : "\u00a0"}</span>
                         {value.slice(errEnd)}
                     </>
                 ) : (
@@ -1086,20 +1086,20 @@ function QueryInput({ value, onInput, error, data, tail }: { value: string; onIn
             </div>
             <input
                 ref={input}
-                class="net-query"
+                className="net-query"
                 type="text"
-                spellcheck={false}
-                autocomplete="off"
+                spellCheck={false}
+                autoComplete="off"
                 placeholder={`${d.sample}   (Ctrl+Space for suggestions)`}
                 aria-label="Filter query"
                 aria-invalid={!!error}
-                aria-autocomplete="list"
+                aria-autoComplete="list"
                 aria-expanded={!!ac}
                 aria-controls="net-qsuggest"
                 aria-activedescendant={ac ? `net-qopt-${ac.active}` : undefined}
                 title={error ? error.message : undefined}
                 value={value}
-                onInput={(e) => {
+                onChange={(e) => {
                     const el = e.currentTarget;
                     onInput(el.value);
                     suggest(el.value, el.selectionStart ?? el.value.length);
@@ -1110,16 +1110,16 @@ function QueryInput({ value, onInput, error, data, tail }: { value: string; onIn
                 onBlur={() => setAc(null)}
             />
             {error && (
-                <span class="net-qerr-msg" role="status">
+                <span className="net-qerr-msg" role="status">
                     {error.message}
                 </span>
             )}
             {ac && (
-                <ul class="net-pop net-qsuggest" ref={listRef} id="net-qsuggest" role="listbox" aria-label="Suggestions">
+                <ul className="net-pop net-qsuggest" ref={listRef} id="net-qsuggest" role="listbox" aria-label="Suggestions">
                     {ac.items.map((s, i) => (
-                        <li key={s.label} id={`net-qopt-${i}`} role="option" aria-selected={i === ac.active} class={i === ac.active ? "active" : ""} onMouseDown={(e) => (e.preventDefault(), accept(i))} onMouseEnter={() => setAc({ ...ac, active: i })}>
-                            <span class="net-qlist-main">{s.label}</span>
-                            {s.detail && <span class="net-qlist-detail">{s.detail}</span>}
+                        <li key={s.label} id={`net-qopt-${i}`} role="option" aria-selected={i === ac.active} className={i === ac.active ? "active" : ""} onMouseDown={(e) => (e.preventDefault(), accept(i))} onMouseEnter={() => setAc({ ...ac, active: i })}>
+                            <span className="net-qlist-main">{s.label}</span>
+                            {s.detail && <span className="net-qlist-detail">{s.detail}</span>}
                         </li>
                     ))}
                 </ul>
@@ -1142,13 +1142,13 @@ function SyntaxHelp({ onPick }: { onPick: (q: string) => void }) {
     const popRef = useRef<HTMLDivElement>(null);
     useFit(popRef, open);
     return (
-        <div class="net-qhelp" ref={ref}>
-            <button class="net-qhelp-btn" aria-label="Filter syntax" aria-expanded={open} title="Filter syntax" onClick={() => setOpen(!open)}>
+        <div className="net-qhelp" ref={ref}>
+            <button className="net-qhelp-btn" aria-label="Filter syntax" aria-expanded={open} title="Filter syntax" onClick={() => setOpen(!open)}>
                 ?
             </button>
             {open && (
-                <div class="net-pop net-qhelp-pop" ref={popRef} role="dialog" aria-label="Filter syntax">
-                    <table class="net-qhelp-table">
+                <div className="net-pop net-qhelp-pop" ref={popRef} role="dialog" aria-label="Filter syntax">
+                    <table className="net-qhelp-table">
                         <tbody>
                             {d.syntax.map(([k, v]) => (
                                 <tr key={k}>
@@ -1160,26 +1160,26 @@ function SyntaxHelp({ onPick }: { onPick: (q: string) => void }) {
                             ))}
                         </tbody>
                     </table>
-                    <div class="net-qhelp-h">Fields</div>
-                    <div class="net-qhelp-fields">
+                    <div className="net-qhelp-h">Fields</div>
+                    <div className="net-qhelp-fields">
                         {d.fields.map((f) => (
                             <code key={f.name} title={f.help}>
                                 {f.name}
                             </code>
                         ))}
                     </div>
-                    <div class="net-qhelp-h">Examples — click to use</div>
-                    <ul class="net-qlist">
+                    <div className="net-qhelp-h">Examples — click to use</div>
+                    <ul className="net-qlist">
                         {d.examples.map(([q, d]) => (
                             <li key={q}>
                                 <button onClick={() => (setOpen(false), onPick(q))}>
-                                    <code class="net-qlist-main">{q}</code>
-                                    <span class="net-qlist-detail">{d}</span>
+                                    <code className="net-qlist-main">{q}</code>
+                                    <span className="net-qlist-detail">{d}</span>
                                 </button>
                             </li>
                         ))}
                     </ul>
-                    {d.note && <p class="net-qhelp-note">{withCode(d.note)}</p>}
+                    {d.note && <p className="net-qhelp-note">{withCode(d.note)}</p>}
                 </div>
             )}
         </div>

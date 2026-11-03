@@ -3,8 +3,10 @@
  * table (query filter, sortable columns, waterfall) with a details
  * pane showing headers and what Wiretrick scripts did to the request.
  */
-import { createPortal } from "preact";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { createPortal } from "react-dom";
+import { useSnapshot } from "valtio";
+import { openedBy } from "../lib/events";
 import type { NetBody, NetEntry, NetOutcome } from "../../shared/netTypes";
 import type { NetStore } from "./netStore";
 import {
@@ -105,7 +107,7 @@ function dragX(down: MouseEvent, onMove: (dx: number) => void, cursor: string): 
     const prev = document.body.style.cursor;
     document.body.style.cursor = cursor;
     document.body.classList.add("net-dragging");
-    const move = (ev: MouseEvent) => onMove(ev.clientX - x0);
+    const move = (ev: globalThis.MouseEvent) => onMove(ev.clientX - x0);
     const up = () => {
         document.removeEventListener("mousemove", move);
         document.removeEventListener("mouseup", up);
@@ -145,7 +147,7 @@ export function NetworkPanel({ store, listTabs, toolsHost }: { store: NetStore; 
             localStorage.setItem(LAYOUT_KEY, JSON.stringify(next));
         } catch {}
     };
-    const all = store.entries.value;
+    const { entries: all } = useSnapshot(store.state);
     const selected = sel.primary && sel.ids.has(sel.primary) ? all.find((e) => e.id === sel.primary) || null : null;
     // Name is always shown; with the details pane open only Name is (like
     // devtools) so the narrow table never squeezes it out
@@ -161,8 +163,10 @@ export function NetworkPanel({ store, listTabs, toolsHost }: { store: NetStore; 
 
     useEffect(() => {
         if (!colMenu && !rowMenu) return;
+        const opening = openedBy();
         const close = (ev: Event) => {
-            if (ev instanceof KeyboardEvent && ev.key !== "Escape") return;
+            if (ev === opening) return;
+            if (ev instanceof globalThis.KeyboardEvent && ev.key !== "Escape") return;
             if (ev.type === "mousedown" && (ev.target as Element)?.closest?.(".net-colmenu")) return;
             setColMenu(null);
             setRowMenu(null);
@@ -231,9 +235,10 @@ export function NetworkPanel({ store, listTabs, toolsHost }: { store: NetStore; 
     }, [rows]);
 
     useEffect(() => {
-        const onKey = (ev: KeyboardEvent) => {
+        const opening = openedBy();
+        const onKey = (ev: globalThis.KeyboardEvent) => {
             // Esc with a menu open closes just the menu
-            if (ev.key === "Escape" && sel.ids.size && !colMenu && !rowMenu) setSel(NO_SELECTION);
+            if (ev !== opening && ev.key === "Escape" && sel.ids.size && !colMenu && !rowMenu) setSel(NO_SELECTION);
         };
         document.addEventListener("keydown", onKey);
         return () => document.removeEventListener("keydown", onKey);
@@ -356,17 +361,17 @@ export function NetworkPanel({ store, listTabs, toolsHost }: { store: NetStore; 
     const bytes = rows.reduce((n, e) => n + (e.size ?? 0), 0);
 
     const toolbar = (
-        <div class="net-toolbar">
+        <div className="net-toolbar">
             <FilterBar state={fq} onChange={setFq} error={parsed.error} data={suggestions} />
         </div>
     );
 
     return (
-        <div class="net">
+        <div className="net">
             {toolsHost ? createPortal(toolbar, toolsHost) : toolbar}
-            <div class={selected ? "net-body with-details" : "net-body"} ref={bodyRef}>
+            <div className={selected ? "net-body with-details" : "net-body"} ref={bodyRef}>
                 <div
-                    class="net-table-wrap"
+                    className="net-table-wrap"
                     ref={scroller}
                     tabIndex={-1}
                     onKeyDown={onTableKey}
@@ -375,7 +380,7 @@ export function NetworkPanel({ store, listTabs, toolsHost }: { store: NetStore; 
                         atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
                     }}
                 >
-                    <table class="net-table" style={{ minWidth: `${minTable}px` }}>
+                    <table className="net-table" style={{ minWidth: `${minTable}px` }}>
                         <thead
                             onContextMenu={(ev) => {
                                 ev.preventDefault();
@@ -388,21 +393,21 @@ export function NetworkPanel({ store, listTabs, toolsHost }: { store: NetStore; 
                                     return (
                                         <th
                                             key={c.key}
-                                            class={c.cls}
+                                            className={c.cls}
                                             style={w !== undefined ? { width: `${w}px` } : c.key === flexKey ? { width: "auto" } : undefined}
                                             aria-sort={sort.key === c.key ? (sort.dir === 1 ? "ascending" : "descending") : undefined}
                                             title="Click to sort · right-click to choose columns"
                                             onClick={() => setSort(sort.key === c.key ? { key: c.key, dir: sort.dir === 1 ? -1 : 1 } : { key: c.key, dir: 1 })}
                                         >
                                             {c.label}
-                                            {sort.key === c.key && <span class="net-sort">{sort.dir === 1 ? "▲" : "▼"}</span>}
+                                            {sort.key === c.key && <span className="net-sort">{sort.dir === 1 ? "▲" : "▼"}</span>}
                                             {c.key !== flexKey && (
                                                 <span
-                                                    class="net-col-resize"
+                                                    className="net-col-resize"
                                                     aria-hidden="true"
                                                     onMouseDown={(ev) => startColResize(ev, c.key)}
                                                     onClick={(ev) => ev.stopPropagation()}
-                                                    onDblClick={(ev) => {
+                                                    onDoubleClick={(ev) => {
                                                         ev.stopPropagation();
                                                         const widths = { ...layout.widths };
                                                         delete widths[c.key];
@@ -430,18 +435,18 @@ export function NetworkPanel({ store, listTabs, toolsHost }: { store: NetStore; 
                         </tbody>
                     </table>
                     {rows.length === 0 && (
-                        <div class="net-empty">
+                        <div className="net-empty">
                             {all.length === 0
                                 ? "Recording network activity… reload a page to see its requests."
                                 : "No requests match the filter."}
                         </div>
                     )}
                 </div>
-                {selected && <div class="net-splitter" role="separator" aria-orientation="vertical" title="Drag to resize" onMouseDown={startDetailsResize} />}
+                {selected && <div className="net-splitter" role="separator" aria-orientation="vertical" title="Drag to resize" onMouseDown={startDetailsResize} />}
                 {selected && <Details e={selected} width={layout.detailsWidth} onClose={() => setSel(NO_SELECTION)} />}
             </div>
             {colMenu && (
-                <ul class="net-colmenu" role="menu" ref={colMenuRef} style={{ left: `${colMenu.x}px`, top: `${colMenu.y}px` }}>
+                <ul className="net-colmenu" role="menu" ref={colMenuRef} style={{ left: `${colMenu.x}px`, top: `${colMenu.y}px` }}>
                     {COLUMNS.filter((c) => c.key !== "name").map((c) => {
                         const on = !layout.hidden.includes(c.key);
                         return (
@@ -451,12 +456,12 @@ export function NetworkPanel({ store, listTabs, toolsHost }: { store: NetStore; 
                                 aria-checked={on}
                                 onClick={() => setLayout({ ...layout, hidden: on ? [...layout.hidden, c.key] : layout.hidden.filter((k) => k !== c.key) })}
                             >
-                                <span class="net-colmenu-check">{on ? "✓" : ""}</span>
+                                <span className="net-colmenu-check">{on ? "✓" : ""}</span>
                                 {c.label}
                             </li>
                         );
                     })}
-                    <li class="sep" role="separator" />
+                    <li className="sep" role="separator" />
                     <li
                         role="menuitem"
                         onClick={() => {
@@ -464,21 +469,21 @@ export function NetworkPanel({ store, listTabs, toolsHost }: { store: NetStore; 
                             setColMenu(null);
                         }}
                     >
-                        <span class="net-colmenu-check" />
+                        <span className="net-colmenu-check" />
                         Reset columns
                     </li>
                 </ul>
             )}
             {rowMenu && targets.length > 0 && (
-                <ul class="net-colmenu net-rowmenu" role="menu" ref={rowMenuRef} style={{ left: `${rowMenu.x}px`, top: `${rowMenu.y}px` }}>
+                <ul className="net-colmenu net-rowmenu" role="menu" ref={rowMenuRef} style={{ left: `${rowMenu.x}px`, top: `${rowMenu.y}px` }}>
                     <li role="menuitem" onClick={openInTabs}>
                         {targets.length === 1 ? "Open in new tab" : `Open ${targets.length} in new tabs`}
                     </li>
-                    <li class="sep" role="separator" />
-                    <li class="has-sub" role="menuitem" aria-haspopup="menu">
+                    <li className="sep" role="separator" />
+                    <li className="has-sub" role="menuitem" aria-haspopup="menu">
                         Copy
-                        <span class="net-sub-arrow" aria-hidden="true">›</span>
-                        <ul class="net-colmenu net-submenu" role="menu">
+                        <span className="net-sub-arrow" aria-hidden="true">›</span>
+                        <ul className="net-colmenu net-submenu" role="menu">
                             <li role="menuitem" onClick={() => copy("url")}>
                                 {targets.length === 1 ? "Copy URL" : `Copy ${targets.length} URLs`}
                             </li>
@@ -495,14 +500,14 @@ export function NetworkPanel({ store, listTabs, toolsHost }: { store: NetStore; 
                     </li>
                 </ul>
             )}
-            <div class="net-status">
+            <div className="net-status">
                 {rows.length === all.length ? `${all.length} requests` : `${rows.length} / ${all.length} requests`}
                 {" · "}
                 {formatBytes(bytes)} transferred
                 {sel.ids.size > 1 ? ` · ${targets.length} selected` : ""}
                 {" · "}
-                <span class="net-touch-count" title="Observed: a script handler ran on the request without changing it · Modified: a handler changed it">
-                    {touched.observed} observed · <span class={touched.modified ? "net-hl" : ""}>{touched.modified} modified</span>
+                <span className="net-touch-count" title="Observed: a script handler ran on the request without changing it · Modified: a handler changed it">
+                    {touched.observed} observed · <span className={touched.modified ? "net-hl" : ""}>{touched.modified} modified</span>
                 </span>
             </div>
         </div>
@@ -550,7 +555,7 @@ function Row({
     const width = Math.max(0.5, (((e.endedAt ?? span.t0 + span.total) - e.startedAt) / span.total) * 100);
     return (
         <tr
-            class={rowClass(e, selected)}
+            className={rowClass(e, selected)}
             onClick={onSelect}
             onContextMenu={onMenu}
             // Shift/Ctrl/⌘-click picks rows; don't let it select text
@@ -563,38 +568,38 @@ function Row({
         switch (k) {
             case "name":
                 return (
-                    <td key={k} class="c-name">
-                        <span class="net-name">{name}</span>
-                        <span class="net-host">{host}</span>
+                    <td key={k} className="c-name">
+                        <span className="net-name">{name}</span>
+                        <span className="net-host">{host}</span>
                     </td>
                 );
             case "status":
                 return (
-                    <td key={k} class="c-status">
+                    <td key={k} className="c-status">
                         {statusText(e)}
                     </td>
                 );
             case "method":
                 return (
-                    <td key={k} class="c-method">
+                    <td key={k} className="c-method">
                         {e.method}
                     </td>
                 );
             case "type":
                 return (
-                    <td key={k} class="c-type">
+                    <td key={k} className="c-type">
                         {typeLabel(e)}
                     </td>
                 );
             case "script":
                 return (
-                    <td key={k} class="c-script">
+                    <td key={k} className="c-script">
                         {scriptNames(e).map((n) => {
                             const mine = e.outcomes.filter((i) => i.scriptName === n);
                             return (
                                 <span
                                     key={n}
-                                    class={`net-badge ${mine.some((i) => i.kind === "modified") ? "modified" : mine.some((i) => i.kind === "observed") ? "observed" : "missed"}`}
+                                    className={`net-badge ${mine.some((i) => i.kind === "modified") ? "modified" : mine.some((i) => i.kind === "observed") ? "observed" : "missed"}`}
                                     title={mine.map((i) => i.action).join("\n")}
                                 >
                                     {n}
@@ -605,22 +610,22 @@ function Row({
                 );
             case "size":
                 return (
-                    <td key={k} class="c-size">
+                    <td key={k} className="c-size">
                         {e.fromCache ? "(cache)" : formatBytes(e.size)}
                     </td>
                 );
             case "time":
                 return (
-                    <td key={k} class="c-time">
+                    <td key={k} className="c-time">
                         {e.synthetic ? "—" : formatMs(ms)}
                     </td>
                 );
             default:
                 return (
-                    <td key={k} class="c-wf">
-                        <div class="net-wf">
+                    <td key={k} className="c-wf">
+                        <div className="net-wf">
                             <div
-                                class={e.state === "pending" ? "net-wf-bar pending" : "net-wf-bar"}
+                                className={e.state === "pending" ? "net-wf-bar pending" : "net-wf-bar"}
                                 style={{ left: `${left}%`, width: `${Math.min(width, 100 - left)}%` }}
                             />
                         </div>
@@ -650,28 +655,28 @@ function Details({ e, width, onClose }: { e: NetEntry; width: number | null; onC
         ["Duration", e.synthetic ? undefined : formatMs(duration(e))],
     ];
     return (
-        <div class="net-details" style={width ? { flex: `0 0 ${width}px` } : undefined}>
-            <div class="net-details-tabs">
-                <button class="net-details-close" title="Close (Esc)" aria-label="Close details" onClick={onClose}>
+        <div className="net-details" style={width ? { flex: `0 0 ${width}px` } : undefined}>
+            <div className="net-details-tabs">
+                <button className="net-details-close" title="Close (Esc)" aria-label="Close details" onClick={onClose}>
                     ✕
                 </button>
-                <button class={tab === "headers" ? "active" : ""} onClick={() => setTab("headers")}>
+                <button className={tab === "headers" ? "active" : ""} onClick={() => setTab("headers")}>
                     Headers
                 </button>
                 {e.requestBody && (
-                    <button class={tab === "payload" ? "active" : ""} onClick={() => setTab("payload")}>
+                    <button className={tab === "payload" ? "active" : ""} onClick={() => setTab("payload")}>
                         Payload
                     </button>
                 )}
-                <button class={tab === "response" ? "active" : ""} onClick={() => setTab("response")}>
+                <button className={tab === "response" ? "active" : ""} onClick={() => setTab("response")}>
                     Response
                 </button>
-                <button class={tab === "wiretrick" ? "active" : ""} onClick={() => setTab("wiretrick")}>
+                <button className={tab === "wiretrick" ? "active" : ""} onClick={() => setTab("wiretrick")}>
                     Wiretrick
                     {e.outcomes.length ? ` (${e.outcomes.length})` : ""}
                 </button>
             </div>
-            <div class="net-details-body">
+            <div className="net-details-body">
                 {tab === "headers" ? (
                     <>
                         <HeaderSection title="General" rows={general.filter((r): r is [string, string] => !!r[1])} />
@@ -683,17 +688,17 @@ function Details({ e, width, onClose }: { e: NetEntry; width: number | null; onC
                 ) : tab === "response" ? (
                     <ResponseView e={e} />
                 ) : e.outcomes.length ? (
-                    <ul class="net-actions">
+                    <ul className="net-actions">
                         {e.outcomes.map((i, n) => (
-                            <li key={n} class={`net-action ${i.level} ${i.kind}`} title={KIND_TITLE[i.kind]}>
+                            <li key={n} className={`net-action ${i.level} ${i.kind}`} title={KIND_TITLE[i.kind]}>
                                 <time>{new Date(i.at).toLocaleTimeString()}</time>
-                                <span class={`net-badge ${i.kind}`}>{i.scriptName}</span>
+                                <span className={`net-badge ${i.kind}`}>{i.scriptName}</span>
                                 <span>{i.action}</span>
                             </li>
                         ))}
                     </ul>
                 ) : (
-                    <div class="net-empty">No Wiretrick script handler ran on this request.</div>
+                    <div className="net-empty">No Wiretrick script handler ran on this request.</div>
                 )}
             </div>
         </div>
@@ -716,24 +721,24 @@ export function prettyBody(text: string, mime: string): string {
 }
 
 function BodyView({ body, mime }: { body?: NetBody; mime: string }) {
-    if (!body) return <div class="net-empty">No body captured.</div>;
-    if (body.binary) return <div class="net-empty">{body.text || `(binary, ${formatBytes(body.size)})`}</div>;
+    if (!body) return <div className="net-empty">No body captured.</div>;
+    if (body.binary) return <div className="net-empty">{body.text || `(binary, ${formatBytes(body.size)})`}</div>;
     const text = prettyBody(body.text, mime);
     return (
         <>
-            <div class="net-body-bar">
+            <div className="net-body-bar">
                 {body.truncated ? (
-                    <span class="net-note">
+                    <span className="net-note">
                         Showing the first {formatBytes(body.text.length)} of {formatBytes(body.size)} — raise the cap in Settings › Network.
                     </span>
                 ) : (
-                    <span class="net-body-size">{formatBytes(body.size)}</span>
+                    <span className="net-body-size">{formatBytes(body.size)}</span>
                 )}
-                <button class="net-copy" title={body.truncated ? "Copy the captured part to the clipboard" : "Copy to the clipboard"} onClick={() => void copyWithToast(text)}>
+                <button className="net-copy" title={body.truncated ? "Copy the captured part to the clipboard" : "Copy to the clipboard"} onClick={() => void copyWithToast(text)}>
                     Copy
                 </button>
             </div>
-            <pre class="net-payload">{text}</pre>
+            <pre className="net-payload">{text}</pre>
         </>
     );
 }
@@ -742,7 +747,7 @@ function ResponseView({ e }: { e: NetEntry }) {
     const [which, setWhich] = useState<"modified" | "original">("modified");
     if (!e.responseBody)
         return (
-            <div class="net-empty">
+            <div className="net-empty">
                 Response body not available — browsers don't expose response bodies to extensions, so it is captured only for responses a Wiretrick script
                 handled.
             </div>
@@ -751,11 +756,11 @@ function ResponseView({ e }: { e: NetEntry }) {
     if (!e.originalResponseBody) return <BodyView body={e.responseBody} mime={mime} />;
     return (
         <>
-            <div class="net-body-switch" role="tablist">
-                <button class={which === "modified" ? "net-chip active" : "net-chip"} onClick={() => setWhich("modified")}>
+            <div className="net-body-switch" role="tablist">
+                <button className={which === "modified" ? "net-chip active" : "net-chip"} onClick={() => setWhich("modified")}>
                     Modified (served)
                 </button>
-                <button class={which === "original" ? "net-chip active" : "net-chip"} onClick={() => setWhich("original")}>
+                <button className={which === "original" ? "net-chip active" : "net-chip"} onClick={() => setWhich("original")}>
                     Original
                 </button>
             </div>
@@ -767,23 +772,23 @@ function ResponseView({ e }: { e: NetEntry }) {
 function HeaderSection({ title, rows }: { title: string; rows?: [string, string][] }) {
     const [open, setOpen] = useState(true);
     return (
-        <section class="net-hsec">
+        <section className="net-hsec">
             <h4 onClick={() => setOpen(!open)}>
                 {open ? "▾" : "▸"} {title}
-                {rows && title !== "General" ? <span class="net-count"> ({rows.length})</span> : null}
+                {rows && title !== "General" ? <span className="net-count"> ({rows.length})</span> : null}
             </h4>
             {open &&
                 (rows && rows.length ? (
                     <dl>
                         {rows.map(([k, v], n) => (
-                            <div key={n} class="net-hrow">
+                            <div key={n} className="net-hrow">
                                 <dt>{k}</dt>
                                 <dd>{v}</dd>
                             </div>
                         ))}
                     </dl>
                 ) : (
-                    <div class="net-empty small">Not captured.</div>
+                    <div className="net-empty small">Not captured.</div>
                 ))}
         </section>
     );

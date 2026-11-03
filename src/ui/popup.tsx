@@ -1,4 +1,4 @@
-import { render } from "preact";
+import { createRoot } from "react-dom/client";
 import { Popup } from "./popup/Popup";
 import { chromePopupApi } from "./popup/api";
 import { watchTheme } from "./theme";
@@ -6,4 +6,4 @@ import { installTooltips } from "./tooltip";
 
 watchTheme();
 installTooltips();
-render(<Popup api={chromePopupApi} />, document.getElementById("root")!);
+createRoot(document.getElementById("root")!).render(<Popup api={chromePopupApi} />);

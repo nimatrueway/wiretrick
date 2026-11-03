@@ -1,4 +1,5 @@
-import { render } from "preact";
+import { createRoot } from "react-dom/client";
+import { flushSync } from "react-dom";
 import { createNetStore, type NetStore } from "./netStore";
 import { NetworkPanel, type TabInfo } from "./NetworkPanel";
 
@@ -12,6 +13,6 @@ async function listTabs(): Promise<TabInfo[]> {
 export function mountNetworkPanel(el: HTMLElement): NetStore {
     const store = createNetStore();
     store.connect();
-    render(<NetworkPanel store={store} listTabs={listTabs} toolsHost={document.getElementById("net-filter-host")} />, el);
+    flushSync(() => createRoot(el).render(<NetworkPanel store={store} listTabs={listTabs} toolsHost={document.getElementById("net-filter-host")} />));
     return store;
 }

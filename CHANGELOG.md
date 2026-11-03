@@ -18,6 +18,8 @@ its section below.
 - The `defaultStrategy` setting is gone. The update removes it (and its comment block) from `settings.yaml`; if it's typed back in, the editor flags it as having no effect. Settings → **Strategies** is now a reference table of what each strategy can do in this browser.
 - The bundled samples (Help → Samples) no longer need the local helper. Redirect, block, request headers, CORS and parameters use `rules` (no banner, Chrome and Firefox). The fetch/XHR replace and transform samples use `page` and show their result in a box on dummyjson.com. Storage now counts Wikipedia visits from `onDocument`. Only **Rewrite page HTML** and **Serve a local file**, which must change the page itself, use `debugger` on Chrome (with its banner) and `extension` on Firefox. Adding a sample now turns it on and gives it a unique name ("Redirect a URL 2") if one is taken.
 
+- The popup and the Network view are now built with React and Valtio instead of Preact. They look and behave the same; the extension's download is larger.
+
 ### Fixed
 
 - `wt.storage.get` in an `onDocument` handler returned `{ value }` instead of the stored value (unless the page's CSP had moved the handler to the isolated world).

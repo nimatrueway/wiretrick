@@ -1,3 +1,4 @@
+import { useEffect, useRef, type InputHTMLAttributes, type TextareaHTMLAttributes } from "react";
 import { Switch } from "./Switch";
 
 export interface ParamDef {
@@ -23,6 +24,29 @@ export function parseStringList(text: string): string[] {
     return text.split("\n").map((x) => x.trim()).filter(Boolean);
 }
 
+type CommitProps = { value: string; onCommit: (el: HTMLInputElement | HTMLTextAreaElement) => void };
+
+/**
+ * A text box that reports its value on the native `change` event (blur / Enter / a
+ * number spinner), not on every keystroke as React's onChange does; `value`
+ * replaces what it shows whenever it changes.
+ */
+function CommitInput({ value, onCommit, multiline, ...rest }: CommitProps & { multiline?: boolean } & Omit<InputHTMLAttributes<HTMLInputElement> & TextareaHTMLAttributes<HTMLTextAreaElement>, "value" | "defaultValue" | "onChange">) {
+    const el = useRef<HTMLInputElement & HTMLTextAreaElement>(null);
+    const commit = useRef(onCommit);
+    commit.current = onCommit;
+    useEffect(() => {
+        if (el.current && el.current.value !== value) el.current.value = value;
+    }, [value]);
+    useEffect(() => {
+        const node = el.current!;
+        const on = () => commit.current(node);
+        node.addEventListener("change", on);
+        return () => node.removeEventListener("change", on);
+    }, []);
+    return multiline ? <textarea ref={el} defaultValue={value} {...rest} /> : <input ref={el} defaultValue={value} {...rest} />;
+}
+
 /** One script parameter: label, description and a type-appropriate input.
  * Controlled by `value`; text-like inputs commit on change (blur/enter),
  * switches immediately. */
@@ -32,21 +56,21 @@ export function ParamField(props: { name: string; def: ParamDef; value: any; onC
     let control = null;
     if (def.type === "string") {
         control = def.multiline ? (
-            <textarea spellcheck={false} value={props.value ?? ""} onChange={(e) => onChange(e.currentTarget.value)} />
+            <CommitInput multiline spellCheck={false} value={props.value ?? ""} onCommit={(el) => onChange(el.value)} />
         ) : (
-            <input type="text" value={props.value ?? ""} onChange={(e) => onChange(e.currentTarget.value)} />
+            <CommitInput type="text" value={props.value ?? ""} onCommit={(el) => onChange(el.value)} />
         );
     } else if (def.type === "number") {
         control = (
-            <input
+            <CommitInput
                 type="number"
                 value={String(props.value ?? 0)}
                 min={def.min}
                 max={def.max}
                 step={def.step}
-                onChange={(e) => {
-                    const n = clampNumber(e.currentTarget.value, def);
-                    e.currentTarget.value = String(n);
+                onCommit={(el) => {
+                    const n = clampNumber(el.value, def);
+                    el.value = String(n);
                     onChange(n);
                 }}
             />
@@ -61,24 +85,25 @@ export function ParamField(props: { name: string; def: ParamDef; value: any; onC
         );
     } else if (def.type === "stringList") {
         control = (
-            <textarea
-                spellcheck={false}
+            <CommitInput
+                multiline
+                spellCheck={false}
                 placeholder="one value per line"
                 value={(Array.isArray(props.value) ? props.value : []).join("\n")}
-                onChange={(e) => onChange(parseStringList(e.currentTarget.value))}
+                onCommit={(el) => onChange(parseStringList(el.value))}
             />
         );
     }
 
     return (
-        <div class="param-row">
-            <div class="param-label">
+        <div className="param-row">
+            <div className="param-label">
                 <span>{name}</span>
                 {def.type === "boolean" && (
                     <Switch on={!!props.value} onToggle={onChange} />
                 )}
             </div>
-            {def.description && <div class="param-desc">{def.description}</div>}
+            {def.description && <div className="param-desc">{def.description}</div>}
             {control}
         </div>
     );

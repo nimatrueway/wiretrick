@@ -54,6 +54,21 @@ copies that release's binaries (checked against its `SHA256SUMS`) instead of
 rebuilding them; run the workflow by hand with **rebuild_helper** to force a
 rebuild.
 
+## UI
+
+The extension's pages (popup, Editor, Network view) are React components
+(`src/ui/`, `.tsx`) with [Valtio](https://valtio.dev) proxy stores for
+shared state: components read a store with `useSnapshot`, plain code
+mutates it or `subscribe`s to it. Large lists (network entries) sit in a
+`ref()` and are replaced as a whole on change, so Valtio doesn't proxy each
+item. Monaco is loaded separately (`lib/monaco`) and its objects never go
+into a store. The build is not minified, so the bundles stay readable.
+
+Two React habits to keep in mind: `onChange` on a text input fires on every
+keystroke (use a native `change` listener for "commit on blur/Enter"), and a
+document listener added by an effect in response to a click or key may see
+that same event; skip it with `openedBy()` from `src/ui/lib/events.ts`.
+
 ## How the MV3 build works
 
 `npm run build` produces both bundles:
