@@ -9,6 +9,9 @@ html, body {
     font: 13px/1.4 -apple-system, "Segoe UI", sans-serif;
 }
 
+/* React's mount point: lays out as if its children were the body's */
+#root { display: contents; }
+
 #app {
     display: flex;
     height: calc(100vh - var(--status-h));

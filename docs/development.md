@@ -64,6 +64,15 @@ mutates it or `subscribe`s to it. Large lists (network entries) sit in a
 item. Monaco is loaded separately (`lib/monaco`) and its objects never go
 into a store. The build is not minified, so the bundles stay readable.
 
+The Editor (`editor.html`) is a single `#root` that
+`src/ui/shell/mount.tsx` renders synchronously, before the rest of
+`editor.ts` runs, so code that still finds its elements by id keeps working
+while the Editor moves to components. Its layout (explorer and panel shown,
+explorer width, panel tab, word wrap) is the `layout` store
+(`src/ui/state/layout.ts`), saved to `localStorage` as it changes. Monaco
+draws into `<MonacoHost>`; `createCodeEditor()` (`src/ui/shell/codeEditor.ts`)
+creates the editor in it once Monaco has loaded.
+
 Two React habits to keep in mind: `onChange` on a text input fires on every
 keystroke (use a native `change` listener for "commit on blur/Enter"), and a
 document listener added by an effect in response to a click or key may see

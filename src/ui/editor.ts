@@ -2,6 +2,7 @@
  * Manager page: script list + Monaco editor + logs + VS Code bridge.
  */
 
+import "./shell/mount";
 import { loadMonaco, STARTER_TEMPLATE, apiTypingsText, setDataFileTypings, setPackageTypings } from "./monacoSetup";
 import { PACKAGE_TYPINGS_KEY, type StoredTypings } from "../shared/packageImports";
 import { API_TYPINGS_URI } from "./apiLinks";
@@ -43,6 +44,9 @@ import { badgeCount, LogBadge, NetBadge, type TabBadge } from "./logBadge";
 import { collectProblems, filterProblems, problemCounts, ProblemsBadge, settingsLink, type Problem, type ProblemGroup, type ProblemMarker } from "./problems";
 import { touchCounts } from "./network/netFormat";
 import { subscribe } from "valtio";
+import { flushSync } from "react-dom";
+import { layout, type PanelTab } from "./state/layout";
+import { createCodeEditor } from "./shell/codeEditor";
 import { aboutRows, aboutText, checkLatestRelease, collectDiagnostics, describeLatest, diagnosticsFileName, downloadText, RELEASES_URL, type HelperStatus } from "./about";
 
 // ---- state ----
@@ -583,7 +587,7 @@ function updateEnabledToggle(): void {
 const explorerIds = (): string[] => [SETTINGS_ID, ...visibleRows.map((r) => r.id)];
 
 function focusExplorer(): void {
-    if ($("#app").classList.contains("sidebar-hidden")) setSidebarHidden(false);
+    if (layout.sidebarHidden) setSidebarHidden(false);
     const list = $("#script-list");
     const section = $("#explorer-section");
     if (section.getAttribute("aria-expanded") === "false") toggleExplorerSection();
@@ -1058,7 +1062,7 @@ async function moveRows(plan: { item: TreeRow; to: string }[]): Promise<void> {
  */
 function startCreate(kind: NewKind, folder = targetFolder(treeRow(focusedId ?? selectedId))): void {
     if (renaming) return;
-    if ($("#app").classList.contains("sidebar-hidden")) setSidebarHidden(false);
+    if (layout.sidebarHidden) setSidebarHidden(false);
     const section = $("#explorer-section");
     if (section.getAttribute("aria-expanded") === "false") toggleExplorerSection();
     if (folder) {
@@ -1940,7 +1944,7 @@ function renderTabBadges(): void {
     renderBadge(problemsBadge);
     renderBadge(logBadge);
     renderBadge(netBadge);
-    const open = !$("#app").classList.contains("panel-hidden") && $("#log-panel").dataset.tab;
+    const open = !layout.panelHidden && $("#log-panel").dataset.tab;
     for (const item of document.querySelectorAll<HTMLElement>("#status-bar .sb-item")) {
         const on = item.dataset.panel === open;
         item.classList.toggle("active", on);
@@ -2242,7 +2246,7 @@ function panelFilter(which: PanelTab): HTMLInputElement | null {
 /** Show a panel view and focus its filter; again (already there, focus in the panel): close the panel. */
 function focusPanelView(which: PanelTab): void {
     const panel = $("#log-panel");
-    if (!$("#app").classList.contains("panel-hidden") && panel.dataset.tab === which && panel.contains(document.activeElement)) {
+    if (!layout.panelHidden && panel.dataset.tab === which && panel.contains(document.activeElement)) {
         setPanelHidden(true);
         return;
     }
@@ -2264,7 +2268,7 @@ const toggleProblems = () => focusPanelView("problems");
 
 /** Clear the Log and Network (Problems clear themselves once fixed). */
 function clearPanelView(): void {
-    if ($("#app").classList.contains("panel-hidden")) return;
+    if (layout.panelHidden) return;
     const tab = $("#log-panel").dataset.tab;
     if (tab === "log" || tab === "network") $("#btn-clear-panel").click();
 }
@@ -2508,7 +2512,7 @@ function flash(b: HTMLElement, text: string): void {
 
 /** Manager-side context for the diagnostics report. */
 function managerUiState(): Record<string, unknown> {
-    const l = loadLayout();
+    const l = layout;
     return {
         theme: currentTheme,
         themePref: ($("#settings-theme") as HTMLSelectElement).value,
@@ -3090,62 +3094,28 @@ async function autoReconnectFolder(): Promise<void> {
 }
 
 // ---- movable panels ----
-interface PanelLayout {
-    sidebarW?: number;
-    panelTab?: "problems" | "log" | "network";
-    sidebarHidden?: boolean;
-    panelHidden?: boolean;
-    wordWrap?: boolean;
-}
-const LAYOUT_KEY = "resPanelLayout";
-
-function loadLayout(): PanelLayout {
-    try {
-        return JSON.parse(localStorage.getItem(LAYOUT_KEY) || "{}");
-    } catch {
-        return {};
-    }
-}
-
-function saveLayout(l: PanelLayout): void {
-    localStorage.setItem(LAYOUT_KEY, JSON.stringify(l));
-}
-
-function applyLayout(): void {
-    const l = loadLayout();
-    if (l.sidebarW) $("#sidebar").style.width = `${l.sidebarW}px`;
-    setSidebarHidden(!!l.sidebarHidden, false);
-    setPanelHidden(!!l.panelHidden, false);
-}
-
 /** ⌘B: show/hide the explorer (VS Code's primary side bar). */
-function setSidebarHidden(hidden: boolean, persist = true): void {
-    const app = $("#app");
-    if (hidden && app.querySelector("#sidebar")!.contains(document.activeElement)) editor?.focus();
-    app.classList.toggle("sidebar-hidden", hidden);
-    $("#btn-toggle-sidebar").setAttribute("aria-pressed", String(!hidden));
-    if (persist) saveLayout({ ...loadLayout(), sidebarHidden: hidden });
+function setSidebarHidden(hidden: boolean): void {
+    if (hidden && $("#sidebar").contains(document.activeElement)) editor?.focus();
+    flushSync(() => void (layout.sidebarHidden = hidden));
     window.dispatchEvent(new Event("resize"));
 }
 
 /** ⌘J: show/hide the Log/Network panel wherever it is docked. */
-function setPanelHidden(hidden: boolean, persist = true): void {
-    const app = $("#app");
+function setPanelHidden(hidden: boolean): void {
     if (hidden && $("#log-panel").contains(document.activeElement)) editor?.focus();
-    app.classList.toggle("panel-hidden", hidden);
-    $("#btn-toggle-panel").setAttribute("aria-pressed", String(!hidden));
-    if (persist) saveLayout({ ...loadLayout(), panelHidden: hidden });
+    flushSync(() => void (layout.panelHidden = hidden));
     renderTabBadges();
     window.dispatchEvent(new Event("resize"));
 }
 
-const toggleSidebar = (): void => setSidebarHidden(!$("#app").classList.contains("sidebar-hidden"));
-const togglePanel = (): void => setPanelHidden(!$("#app").classList.contains("panel-hidden"));
+const toggleSidebar = (): void => setSidebarHidden(!layout.sidebarHidden);
+const togglePanel = (): void => setPanelHidden(!layout.panelHidden);
 
 /** ⌥Z: soft-wrap long lines (remembered across sessions). */
 function toggleWordWrap(): void {
-    const on = !loadLayout().wordWrap;
-    saveLayout({ ...loadLayout(), wordWrap: on });
+    const on = !layout.wordWrap;
+    layout.wordWrap = on;
     editor?.updateOptions({ wordWrap: on ? "on" : "off" });
 }
 
@@ -3163,9 +3133,7 @@ function makeSplitV(): void {
             handle.classList.remove("dragging");
             document.removeEventListener("mousemove", move);
             document.removeEventListener("mouseup", up);
-            const l = loadLayout();
-            l.sidebarW = $("#sidebar").offsetWidth;
-            saveLayout(l);
+            flushSync(() => void (layout.sidebarW = $("#sidebar").offsetWidth));
         };
         document.addEventListener("mousemove", move);
         document.addEventListener("mouseup", up);
@@ -3176,7 +3144,6 @@ let networkMounted = false;
 /** the Network view's store once it is opened; before that, the passive counts one */
 let netStore: NetStore | null = null;
 let netCounts: NetStore | null = null;
-type PanelTab = "problems" | "log" | "network";
 
 /** VS Code–style bottom panel tabs: PROBLEMS | LOG | NETWORK */
 function showPanelTab(which: PanelTab): void {
@@ -3198,9 +3165,7 @@ function showPanelTab(which: PanelTab): void {
         networkMounted = true;
         netStore = mountNetworkPanel($("#network-view"));
     }
-    const l = loadLayout();
-    l.panelTab = which;
-    saveLayout(l);
+    layout.panelTab = which;
 }
 
 function setupPanelTabs(): void {
@@ -3215,13 +3180,13 @@ function setupPanelTabs(): void {
     for (const item of document.querySelectorAll<HTMLElement>("#status-bar .sb-item")) {
         item.addEventListener("click", () => {
             const which = item.dataset.panel as PanelTab;
-            const hidden = $("#app").classList.contains("panel-hidden");
+            const hidden = !!layout.panelHidden;
             if (!hidden && $("#log-panel").dataset.tab === which) return setPanelHidden(true);
             if (hidden) setPanelHidden(false);
             showPanelTab(which);
         });
     }
-    const saved = loadLayout().panelTab;
+    const saved = layout.panelTab;
     showPanelTab(saved === "network" || saved === "problems" ? saved : "log");
 }
 
@@ -3231,7 +3196,7 @@ async function main(): Promise<void> {
     watchPackageTypings();
     // test/e2e seam: adopt an arbitrary directory handle (e.g. OPFS) for watching
     (window as any).__resAdoptFolder = (h: any) => fsBridge.adoptForWatch(h);
-    editor = (window as any).monaco.editor.create($("#monaco-host"), {
+    editor = createCodeEditor({
         value: "",
         language: "typescript",
         theme: monacoTheme(),
@@ -3239,7 +3204,7 @@ async function main(): Promise<void> {
         automaticLayout: true,
         fontSize: 13,
         scrollBeyondLastLine: false,
-        wordWrap: loadLayout().wordWrap ? "on" : "off",
+        wordWrap: layout.wordWrap ? "on" : "off",
         hover: { sticky: true }, // reachable, so tooltip.ts can copy it on click
     });
     editor.addCommand((window as any).monaco.KeyMod.CtrlCmd | (window as any).monaco.KeyCode.KeyS, () => void saveCurrent());
@@ -3561,7 +3526,6 @@ async function main(): Promise<void> {
         input.click();
     });
 
-    applyLayout();
     makeSplitV();
     setupPanelDock();
     makeLogFilters();
