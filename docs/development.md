@@ -85,6 +85,21 @@ the extra element doesn't upset React. Components call into `editor.ts`
 through the `actions` object (`src/ui/shell/actions.ts`), which `main()`
 fills in.
 
+The explorer (`src/ui/explorer/`) renders the `explorer` store
+(`state/explorer.ts`): the scripts, data files and folders, the open file,
+the cursor row and multi-selection, the collapsed folders (saved to
+`localStorage`) and the inline name input being edited (`editing`).
+`editor.ts` still owns the file lists and copies them in with
+`renderList()` → `syncExplorer()` whenever they change. The right-click menu
+(`ContextMenu`) is a portal into `document.body`, rendered by `App` outside
+the tree: React bubbles a portal's events through its React parents, so a
+menu inside the tree would see its clicks and keys as the tree's.
+
+An effect's arrow function must not return a value by accident:
+`useLayoutEffect(() => el.scrollIntoView())` breaks in Chromium, where
+`scrollIntoView()` returns a promise that React then calls as the cleanup.
+Write `() => void el.scrollIntoView()`.
+
 Valtio's `useSnapshot` re-renders a component only for the properties it
 read, and in a microtask unless `{ sync: true }`: views that must be up to
 date right after a `flushSync()` (panel tab, docking) use `sync`.

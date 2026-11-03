@@ -2,6 +2,7 @@ import { useSnapshot } from "valtio";
 import { startSidebarDrag } from "../panelDock";
 import { dockLayout, dockOf, sideOf } from "../state/dock";
 import { layout } from "../state/layout";
+import { ExplorerSection } from "../explorer/Explorer";
 import { MonacoHost } from "./MonacoHost";
 
 const cls = (...names: (string | false | undefined)[]): string | undefined => names.filter(Boolean).join(" ") || undefined;
@@ -17,28 +18,7 @@ export function Workbench() {
                     <h1>Explorer</h1>
                     <div id="toolbar"><button id="btn-help" title="API reference and sample scripts" aria-label="Help">?</button>{" "}<button id="btn-settings" title="Settings (⌘,)" aria-label="Settings">⚙</button></div>
                 </div>
-                <div id="explorer-section" role="button" tabIndex={-1} aria-expanded="true" title="Wiretrick scripts, data files and folders">
-                    <span className="chevron" aria-hidden="true" />
-                    <span className="section-title">Wiretrick</span>
-                    <div className="section-actions">
-                        <button id="btn-new" title="New Script…" aria-label="New Script">
-                            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" strokeWidth="1.1" d="M9.5 1.5h-6v13h5M9.5 1.5l3 3v4M9.5 1.5v3h3M12.5 10.5v5M10 13h5" /></svg>
-                        </button>
-                        {" "}
-                        <button id="btn-new-json" title="New JSON File… (a data file)" aria-label="New JSON File">
-                            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" strokeWidth="1.1" d="M5 2.5c-1.5 0-1.5 1-1.5 2.2s0 2-1.5 2.3c1.5.3 1.5 1.1 1.5 2.3s0 2.2 1.5 2.2M10 13.5v-5M7.5 11h5" /><path fill="none" stroke="currentColor" strokeWidth="1.1" d="M11 2.5c1.5 0 1.5 1 1.5 2.2v1.3" /></svg>
-                        </button>
-                        {" "}
-                        <button id="btn-new-folder" title="New Folder…" aria-label="New Folder">
-                            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" d="M8.5 13.5h-7v-10h4.3l1.5 1.5h7.2v3.5M12 9.5v5M9.5 12h5" /></svg>
-                        </button>
-                        {" "}
-                        <button id="btn-collapse-all" title="Collapse Folders in Explorer" aria-label="Collapse Folders in Explorer">
-                            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" strokeWidth="1.1" d="M4.5 3.5h9v9M2.5 5.5h9v9h-9zM4.5 10h5" /></svg>
-                        </button>
-                    </div>
-                </div>
-                <ul id="script-list" role="tree" tabIndex={0} aria-label="Scripts, data files and folders" />
+                <ExplorerSection />
             </aside>
             <div id="split-v" title="Drag to resize" />
             <main id="editor-pane">

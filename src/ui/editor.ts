@@ -11,17 +11,17 @@ import { API_REFERENCE } from "./apiReference";
 import { SHORTCUTS, filterShortcuts, formatKey, keyHint, keysFor } from "./shortcuts";
 import { SAMPLES, sampleStrategies, sampleSummary, sampleTryUrl, type SampleScript } from "./samples";
 import { settingsDiagnostics, settingsCompletions, settingsHover, type AssistScript } from "../shared/settingsAssist";
-import { badPackageImports, dependantsOf, folderOf, missingImports } from "../shared/scriptImports";
+import { badPackageImports, dependantsOf, missingImports } from "../shared/scriptImports";
 import { PACKAGE_ORIGIN } from "../shared/packageImports";
-import { allFolders, ancestorFolders, isInFolder, movedPath } from "../shared/folders";
+import { isInFolder, movedPath } from "../shared/folders";
 import { logSegments, opensInTab } from "./logLinks";
-import { baseName, dropPlan, explorerTree, folderPathOfRowId, folderRowId, idRange, isFolderRowId, joinPath, movedCollapsed, targetFolder, topLevelRows, type TreeRow } from "./explorerTree";
+import { baseName, folderPathOfRowId, folderRowId, isFolderRowId, movedCollapsed, type TreeRow } from "./explorerTree";
 import { dataPathOfDecl } from "./jsonTypes";
 import { pickRows } from "./bundlePicker";
 import { resolveConflict } from "./conflictDialog";
 import { watchTheme, saveTheme, type Theme, type ThemePref } from "./theme";
 import * as fsBridge from "./fsBridge";
-import { cleanScriptName, scriptNameProblem, scriptFileName, scriptFileKey, uniqueScriptName, dataFilePathProblem, folderPathProblem, MAX_PATH } from "../shared/scriptName";
+import { cleanScriptName, scriptNameProblem, scriptFileName, scriptFileKey, uniqueScriptName, dataFilePathProblem, folderPathProblem } from "../shared/scriptName";
 import { buildBundle, parseBundleText, bundleSettingsDoc, pickBundle, vscodeTargetPath, editorLaunchUrl, launchAppName, copyPathHint, hostOs, cleanFolderPath, type LaunchMode } from "./bundle";
 import { createQuickOpenPalette } from "./quickOpen";
 import { computeDirty } from "./dirtyState";
@@ -39,12 +39,13 @@ import type { DataFile } from "../background/engine/dataFiles";
 import { currentSide, currentDock } from "./panelDock";
 import { collectProblems, settingsLink, type Problem, type ProblemGroup, type ProblemMarker } from "./problems";
 import { touchCounts } from "./network/netFormat";
-import { subscribe } from "valtio";
+import { ref, subscribe } from "valtio";
 import { flushSync } from "react-dom";
 import { layout, panelTabOf, type PanelTab } from "./state/layout";
 import { appendLog, clearLog, logState } from "./state/log";
 import { badges, badgesChanged, panel, setNetStore, setProblems } from "./state/panel";
 import { actions } from "./shell/actions";
+import { clearSel, everyFolder, explorer, explorerIds, moveFocus, pruneCollapsed, revealInExplorer, setCollapsed, setSel, SETTINGS_ID, startCreate as startCreateRow, syncExplorer, treeRow, treeRows, visibleRows, type NewKind } from "./state/explorer";
 import { createCodeEditor } from "./shell/codeEditor";
 import { aboutRows, aboutText, checkLatestRelease, collectDiagnostics, describeLatest, diagnosticsFileName, downloadText, RELEASES_URL, type HelperStatus } from "./about";
 
@@ -63,7 +64,7 @@ let typingsShown = false;
 /** Central dirty-state toggle: dims/undims Save. */
 function setDirty(v: boolean): void {
     dirty = v;
-    if (selectedId) document.querySelector(`#script-list li[data-id="${CSS.escape(selectedId)}"]`)?.classList.toggle("dirty", v);
+    flushSync(() => void (explorer.dirty = v));
     setSaveState(v ? "unsaved" : "saved");
 }
 
@@ -129,7 +130,6 @@ function status(text: string, cls = "", onClick?: () => void): void {
 }
 
 // ---- script list ----
-const SETTINGS_ID = "__settings__";
 let settingsModel: any = null;
 
 async function loadSettingsModel(force = false): Promise<void> {
@@ -229,7 +229,7 @@ async function selectSettings(): Promise<void> {
     const back = typingsShown && selectedId === SETTINGS_ID;
     leaveTypings();
     selectedId = SETTINGS_ID;
-    focusedId = null;
+    explorer.focusedId = null;
     showWelcome(false);
     renderList();
     $("#btn-save").removeAttribute("disabled");
@@ -282,8 +282,8 @@ async function refresh(): Promise<void> {
             status(`"${orphanData.path}" was deleted elsewhere — save to recreate it`, "error");
         }
     }
-    pruneCollapsed();
     renderList();
+    pruneCollapsed();
     syncModels();
     syncDataModels();
     scheduleDiagnostics();
@@ -300,231 +300,11 @@ async function refresh(): Promise<void> {
     }
 }
 
-let renaming = false;
-/** keyboard cursor in the explorer (VS Code "focused" row); null = follow the open file */
-let focusedId: string | null = null;
-/** the explorer's multi-selection (⌘/Ctrl-click, Shift-click, Shift+↑/↓); fewer than 2 = just the cursor row */
-let explorerSel = new Set<string>();
-/** where a Shift range starts (null: the cursor) */
-let selAnchor: string | null = null;
-/** the tree rows renderList showed (not the contents of collapsed folders) */
-let visibleRows: TreeRow[] = [];
-/** data files whose JSON has errors (their name shows red, like a script's) */
-let jsonErrorIds = new Set<string>();
-
-// ---- explorer tree: folder collapse state (persisted, like VS Code's) ----
-const COLLAPSED_KEY = "wtExplorerCollapsed";
-let collapsed = new Set<string>(loadCollapsed());
-
-function loadCollapsed(): string[] {
-    try {
-        const v = JSON.parse(localStorage.getItem(COLLAPSED_KEY) || "[]");
-        return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
-    } catch {
-        return [];
-    }
-}
-
-function setCollapsed(next: Set<string>): void {
-    collapsed = next;
-    localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsed]));
-}
-
-const everyFolder = (): string[] => allFolders(folders, [...scripts.map((s) => s.meta.name), ...dataFiles.map((d) => d.path)]);
-
-/** forget the state of folders that are gone */
-function pruneCollapsed(): void {
-    const all = new Set(everyFolder());
-    if ([...collapsed].some((f) => !all.has(f))) setCollapsed(new Set([...collapsed].filter((f) => all.has(f))));
-}
-
-const treeRows = (all = false): TreeRow[] =>
-    explorerTree({ scripts: scripts.map((s) => ({ id: s.id, name: s.meta.name })), dataFiles, folders, collapsed, all });
-
-/** a row by id, shown or inside a collapsed folder */
-const treeRow = (id: string | null): TreeRow | undefined =>
-    id ? (visibleRows.find((r) => r.id === id) ?? treeRows(true).find((r) => r.id === id)) : undefined;
-
-function setFolderExpanded(path: string, expanded: boolean): void {
-    if (expanded === !collapsed.has(path)) return;
-    const next = new Set(collapsed);
-    if (expanded) next.delete(path);
-    else next.add(path);
-    setCollapsed(next);
-    renderList();
-}
-
-/** expand the folders `path` is in (VS Code reveals the file it opens) */
-function revealInExplorer(path: string): void {
-    const shut = ancestorFolders(path).filter((f) => collapsed.has(f));
-    if (shut.length) setCollapsed(new Set([...collapsed].filter((f) => !shut.includes(f))));
-}
-
-function collapseAll(): void {
-    setCollapsed(new Set(everyFolder()));
-    const cur = treeRow(focusedId);
-    // the cursor goes to the top-level folder that now hides it
-    if (cur && cur.path.includes("/")) focusedId = folderRowId(cur.path.slice(0, cur.path.indexOf("/")));
-    renderList();
-}
-
-const FOLDER_ICON = `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M1.5 3.5h4.3l1.5 1.5h7.2v8h-13z" fill="none" stroke="currentColor" stroke-linejoin="round"/></svg>`;
-const FOLDER_OPEN_ICON = `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M1.5 12.5v-9h4.3l1.5 1.5h5.2v2M1.5 12.5l2-5.5h11l-2 5.5z" fill="none" stroke="currentColor" stroke-linejoin="round"/></svg>`;
-
+/** editor.ts's state → the explorer tree (rendered now) */
 function renderList(): void {
     updateEnabledToggle();
     scheduleProblems();
-    if (renaming) return; // a rebuild would drop the inline rename input
-    const list = $("#script-list");
-    list.innerHTML = "";
-    visibleRows = treeRows();
-    if (explorerSel.size) {
-        const all = new Set(treeRows(true).map((r) => r.id));
-        explorerSel = new Set([...explorerSel].filter((id) => all.has(id)));
-    }
-    const multi = explorerSel.size > 1;
-    const cursor = focusedId ?? selectedId;
-    // while wt-api.d.ts is shown no row is the open file (● still marks unsaved edits)
-    const shown = typingsShown ? null : selectedId;
-    const row = (id: string, cls: string, depth = 0, folder?: boolean): HTMLLIElement => {
-        const li = document.createElement("li");
-        li.className = "script-item" + cls + (id === shown ? " selected" : "") + (id === cursor ? " focused" : "") + (id === selectedId && dirty ? " dirty" : "") + (multi && explorerSel.has(id) ? " multi" : "");
-        li.dataset.id = id;
-        li.id = `explorer-${encodeURIComponent(id)}`;
-        li.setAttribute("role", "treeitem");
-        li.setAttribute("aria-selected", String(id === shown || (multi && explorerSel.has(id))));
-        li.setAttribute("aria-level", String(depth + 1));
-        li.style.setProperty("--depth", String(depth));
-        if (id === cursor) list.setAttribute("aria-activedescendant", li.id);
-        li.append(...treeIndent(depth, folder));
-        return li;
-    };
-    const name = (text: string, cls = ""): HTMLSpanElement => {
-        const el = document.createElement("span");
-        el.className = "script-name" + cls;
-        el.textContent = text;
-        return el;
-    };
-    const delButton = (r: TreeRow, title: string): HTMLButtonElement => {
-        const del = document.createElement("button");
-        del.className = "btn-del";
-        del.textContent = "✕";
-        del.title = title;
-        del.tabIndex = -1;
-        del.addEventListener("click", (e) => {
-            e.stopPropagation();
-            void deleteRows([r]);
-        });
-        return del;
-    };
-    const sli = row(SETTINGS_ID, " utility");
-    sli.title = "Settings file — global settings and per-script params & enabled state";
-    sli.append(fileIcon("yaml"), name("settings.yaml"));
-    sli.addEventListener("click", () => {
-        moveExplorerFocus(SETTINGS_ID);
-        select(SETTINGS_ID);
-    });
-    list.appendChild(sli);
-    for (const r of visibleRows) {
-        if (r.kind === "folder") {
-            const li = row(r.id, " folder", r.depth, r.expanded);
-            li.setAttribute("aria-expanded", String(!!r.expanded));
-            li.draggable = true;
-            const label = name(r.name);
-            label.title = `${r.path}\nF2 to rename · drag to move`;
-            li.append(fileIcon(r.expanded ? "folder-open" : "folder"), label);
-            li.addEventListener("click", () => {
-                moveExplorerFocus(r.id);
-                setFolderExpanded(r.path, !r.expanded);
-            });
-            list.appendChild(li);
-            continue;
-        }
-        if (r.kind === "data") {
-            const bad = jsonErrorIds.has(r.id);
-            const li = row(r.id, " data" + (bad ? " has-error" : ""), r.depth);
-            li.draggable = true;
-            const label = name(r.name, bad ? " error" : "");
-            label.title = [r.path, `Data file — import it from a script (import data from "./${baseName(r.path)}")`, bad ? "Its JSON has errors — see the Problems view" : "", "Double-click or F2 to rename · drag to move"].filter(Boolean).join("\n");
-            li.append(fileIcon("json"), label, delButton(r, "Delete data file (Delete)"));
-            li.addEventListener("click", () => {
-                moveExplorerFocus(r.id);
-                if (r.id !== selectedId || typingsShown) select(r.id);
-            });
-            list.appendChild(li);
-            continue;
-        }
-        const script = scripts.find((s) => s.id === r.id)!;
-        const isLib = script.meta.active === false;
-        const off = !isLib && !script.enabled;
-        const li = row(script.id, (isLib ? " utility" : "") + (off ? " disabled" : ""), r.depth);
-        li.draggable = true;
-
-        const health = scriptHealth(script);
-        const label = name(baseName(scriptFileName(script.meta.name)), health ? " error" : "");
-        label.title = [
-            r.depth ? scriptFileName(script.meta.name) : "",
-            script.meta.description ?? "",
-            isLib ? "Library — registers no handlers with its current params, importable by other scripts. Register a handler (e.g. wt.onRequest({ url, strategy }, fn)) to make it a script" : script.meta.match.join(", "),
-            off ? "Disabled — enable it from the toolbar or the right-click menu" : "",
-            "Double-click or F2 to rename",
-        ].filter(Boolean).join("\n");
-
-        if (health) li.classList.add("has-error");
-
-        li.append(fileIcon("ts"), label);
-        if (health) {
-            const ind = document.createElement("span");
-            ind.className = `err-ind ${health.kind}`;
-            ind.textContent = "⚠";
-            ind.title = health.tooltip;
-            ind.setAttribute("role", "img");
-            ind.setAttribute("aria-label", `${health.kind === "types" ? "type" : health.kind} error`);
-            if (health.kind === "runtime") {
-                ind.addEventListener("click", async (e) => {
-                    e.stopPropagation();
-                    await send({ type: "clearScriptError", scriptId: script.id });
-                });
-            }
-            li.append(ind);
-        }
-        li.append(delButton(r, "Delete script (Delete)"));
-        // re-selecting would rebuild the list and swallow a double-click
-        li.addEventListener("click", () => {
-            moveExplorerFocus(script.id);
-            if (script.id !== selectedId || typingsShown) select(script.id);
-        });
-        list.appendChild(li);
-    }
-}
-
-/** indent guides (one per level) and the twistie: a chevron on folders (`open` = expanded) */
-/** the explorer twistie (VS Code's chevron-right) */
-const CHEVRON = `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-
-function treeIndent(depth: number, open?: boolean): HTMLElement[] {
-    const out: HTMLElement[] = [];
-    for (let i = 0; i < depth; i++) {
-        const g = document.createElement("span");
-        g.className = "indent-guide";
-        g.style.setProperty("--level", String(i));
-        out.push(g);
-    }
-    const tw = document.createElement("span");
-    tw.className = "twistie" + (open === undefined ? "" : open ? " collapsible open" : " collapsible");
-    tw.setAttribute("aria-hidden", "true");
-    if (open !== undefined) tw.innerHTML = CHEVRON;
-    out.push(tw);
-    return out;
-}
-
-function fileIcon(kind: "ts" | "yaml" | "json" | "folder" | "folder-open"): HTMLElement {
-    const el = document.createElement("span");
-    el.className = `file-icon ${kind.startsWith("folder") ? "folder" : kind}`;
-    if (kind === "folder" || kind === "folder-open") el.innerHTML = kind === "folder" ? FOLDER_ICON : FOLDER_OPEN_ICON;
-    else el.textContent = kind === "ts" ? "TS" : kind === "json" ? "{}" : "⚙";
-    el.setAttribute("aria-hidden", "true");
-    return el;
+    flushSync(() => syncExplorer({ scripts, dataFiles, folders, selectedId, typingsShown, dirty }));
 }
 
 async function setScriptEnabled(script: Script, enabled: boolean): Promise<void> {
@@ -554,15 +334,15 @@ async function deleteRows(rows: TreeRow[]): Promise<void> {
         question = c.length ? `Delete the folder "${one.path}" and everything in it (${c.join(", ")})?` : `Delete the folder "${one.path}"?`;
     }
     if (!confirm(question)) return;
-    const cur = focusedId ?? selectedId;
+    const cur = explorer.focusedId ?? selectedId;
     const gone = (id: string, path: string): boolean => chosen.has(id) || inside(path);
     if (cur && treeRow(cur) && gone(cur, treeRow(cur)!.path)) {
-        const goneIds = new Set(visibleRows.filter((r) => gone(r.id, r.path)).map((r) => r.id));
+        const goneIds = new Set(visibleRows().filter((r) => gone(r.id, r.path)).map((r) => r.id));
         const ids = explorerIds();
         const i = ids.indexOf(cur);
-        focusedId = ids.slice(i + 1).find((id) => !goneIds.has(id)) ?? ids.slice(0, Math.max(i, 0)).reverse().find((id) => !goneIds.has(id)) ?? null;
+        explorer.focusedId = ids.slice(i + 1).find((id) => !goneIds.has(id)) ?? ids.slice(0, Math.max(i, 0)).reverse().find((id) => !goneIds.has(id)) ?? null;
     }
-    clearExplorerSel();
+    clearSel();
     for (const row of rows) {
         const r =
             row.kind === "script"
@@ -585,397 +365,12 @@ function updateEnabledToggle(): void {
     label.setAttribute("aria-checked", String(!!script.enabled));
 }
 
-// ---- explorer: keyboard navigation + context menu (VS Code style) ----
-const explorerIds = (): string[] => [SETTINGS_ID, ...visibleRows.map((r) => r.id)];
-
+/** ⇧⌘E: show the explorer and put the focus in it */
 function focusExplorer(): void {
     if (layout.sidebarHidden) setSidebarHidden(false);
-    const list = $("#script-list");
-    const section = $("#explorer-section");
-    if (section.getAttribute("aria-expanded") === "false") toggleExplorerSection();
-    list.focus();
-    moveExplorerFocus(focusedId ?? selectedId ?? SETTINGS_ID);
-}
-
-/** Move the keyboard cursor in place — a list rebuild would swallow a double-click. */
-function moveExplorerFocus(id: string): void {
-    focusedId = id;
-    const list = $("#script-list");
-    const multi = explorerSel.size > 1;
-    for (const li of list.querySelectorAll<HTMLElement>("li.script-item")) {
-        const on = li.dataset.id === id;
-        li.classList.toggle("focused", on);
-        const sel = multi && explorerSel.has(li.dataset.id!);
-        li.classList.toggle("multi", sel);
-        li.setAttribute("aria-selected", String(sel || li.classList.contains("selected")));
-        if (on) {
-            list.setAttribute("aria-activedescendant", li.id);
-            li.scrollIntoView({ block: "nearest" });
-        }
-    }
-}
-
-/** the ids a multi-selection can hold (settings.yaml isn't one) */
-const selectableIds = (): string[] => visibleRows.map((r) => r.id);
-
-function clearExplorerSel(): void {
-    explorerSel = new Set();
-    selAnchor = null;
-}
-
-/** Shift-click / Shift+↑↓: select from the anchor (default: the cursor) to `id`; `add` keeps what was selected */
-function selectExplorerRange(id: string, add = false): void {
-    const cur = focusedId ?? selectedId;
-    const anchor = selAnchor ?? (cur && cur !== SETTINGS_ID ? cur : id);
-    explorerSel = new Set([...(add ? explorerSel : []), ...idRange(selectableIds(), anchor, id)]);
-    selAnchor = anchor;
-    moveExplorerFocus(id);
-}
-
-/** ⌘/Ctrl-click: add `id` to the selection (with the cursor row, when starting one) or take it out */
-function toggleExplorerSel(id: string): void {
-    const cur = focusedId ?? selectedId;
-    if (explorerSel.size < 2) explorerSel = new Set(cur && cur !== SETTINGS_ID && treeRow(cur) ? [cur] : []);
-    if (explorerSel.has(id)) explorerSel.delete(id);
-    else explorerSel.add(id);
-    selAnchor = id;
-    moveExplorerFocus(id);
-}
-
-/** what an action on row `id` applies to: the multi-selection when `id` is in it (not what's inside its selected folders), else that row */
-function actionRows(id: string): TreeRow[] {
-    if (explorerSel.size > 1 && explorerSel.has(id)) return topLevelRows(treeRows(true).filter((r) => explorerSel.has(r.id)));
-    const row = treeRow(id);
-    return row ? [row] : [];
-}
-
-function renameInExplorer(id: string): void {
-    const row = treeRow(id);
-    const label = row && $("#script-list").querySelector<HTMLElement>(`li[data-id="${CSS.escape(id)}"] .script-name`);
-    if (label) startRename(label, row!, true);
-}
-
-/** the path the explorer's Copy Path copies (a script's is its file's) */
-const rowFilePath = (row: TreeRow): string => (row.kind === "script" ? scriptFileName(row.path) : row.path);
-
-type NewKind = "script" | "data" | "folder";
-
-function newItemsMenu(folder: string): MenuItem[] {
-    return [
-        { label: "New Script…", run: () => startCreate("script", folder) },
-        { label: "New JSON File…", run: () => startCreate("data", folder) },
-        { label: "New Folder…", run: () => startCreate("folder", folder) },
-    ];
-}
-
-function setupExplorer(): void {
-    const list = $("#script-list");
-    list.addEventListener("keydown", (e) => {
-        if (e.target !== list) return; // the inline rename input handles its own keys
-        const ids = explorerIds();
-        const cur = focusedId ?? selectedId ?? ids[0];
-        const i = Math.max(0, ids.indexOf(cur));
-        const row = cur === SETTINGS_ID ? undefined : visibleRows.find((r) => r.id === cur);
-        const mod = e.metaKey || e.ctrlKey;
-        const plain = !mod && !e.altKey && !e.shiftKey;
-        let handled = true;
-        const nav: Record<string, string> = { ArrowDown: ids[Math.min(i + 1, ids.length - 1)], ArrowUp: ids[Math.max(i - 1, 0)], Home: ids[0], PageUp: ids[0], End: ids[ids.length - 1], PageDown: ids[ids.length - 1] };
-        if (e.key in nav && e.shiftKey && !mod && nav[e.key] !== SETTINGS_ID) selectExplorerRange(nav[e.key]);
-        else if (e.key in nav) {
-            clearExplorerSel();
-            moveExplorerFocus(nav[e.key]);
-        } else if (e.key.toLowerCase() === "a" && mod && !e.shiftKey && !e.altKey) {
-            explorerSel = new Set(selectableIds());
-            moveExplorerFocus(cur);
-        } else if (e.key === "ArrowRight" && plain) {
-            // expand, or (expanded) go to the first child
-            if (row?.kind === "folder" && !row.expanded) setFolderExpanded(row.path, true);
-            else if (row?.kind === "folder" && (visibleRows.find((r) => r.id === ids[i + 1])?.depth ?? -1) > row.depth) moveExplorerFocus(ids[i + 1]);
-        } else if (e.key === "ArrowLeft" && plain) {
-            // collapse, or go to the parent folder
-            if (row?.kind === "folder" && row.expanded) setFolderExpanded(row.path, false);
-            else if (row && folderOf(row.path)) moveExplorerFocus(folderRowId(folderOf(row.path)));
-        } else if ((e.key === "Enter" || e.key === " ") && !mod) {
-            if (row?.kind === "folder") setFolderExpanded(row.path, !row.expanded);
-            else {
-                if (cur !== selectedId || typingsShown) select(cur);
-                if (e.key === "Enter") editor?.focus(); // Enter opens and focuses, Space just opens (preview)
-            }
-        } else if (e.key === "F2" && row) renameInExplorer(cur);
-        else if ((e.key === "Delete" || (e.key === "Backspace" && e.metaKey)) && row) void deleteRows(actionRows(cur));
-        else if (e.key === "Escape" && explorerSel.size > 1) {
-            clearExplorerSel();
-            moveExplorerFocus(cur);
-        } else if (e.key === "Escape") editor?.focus();
-        else handled = false;
-        if (handled) {
-            e.preventDefault();
-            e.stopPropagation();
-        }
-    });
-    // explorer rows aren't focusable themselves: a click focuses the tree
-    list.addEventListener("mousedown", (e) => {
-        if (!(e.target as HTMLElement).closest("input")) setTimeout(() => list.focus());
-    });
-    // ⌘/Ctrl-click and Shift-click select (without opening); a plain click selects just its row
-    list.addEventListener(
-        "click",
-        (e) => {
-            const target = e.target as HTMLElement;
-            if (target.closest("input, .btn-del, .err-ind")) return;
-            const id = target.closest<HTMLElement>("li.script-item:not(.creating)")?.dataset.id;
-            if (!id) return;
-            const mod = e.metaKey || e.ctrlKey;
-            if (id !== SETTINGS_ID && (mod || e.shiftKey)) {
-                e.stopPropagation();
-                e.preventDefault();
-                if (e.shiftKey) selectExplorerRange(id, mod);
-                else toggleExplorerSel(id);
-                return;
-            }
-            explorerSel = new Set(id === SETTINGS_ID ? [] : [id]);
-            selAnchor = null;
-        },
-        true,
-    );
-    list.addEventListener("contextmenu", (e) => {
-        if ((e.target as HTMLElement).closest("input")) return;
-        e.preventDefault();
-        const li = (e.target as HTMLElement).closest<HTMLElement>("li.script-item");
-        const id = li?.dataset.id;
-        if (!(id && explorerSel.size > 1 && explorerSel.has(id))) clearExplorerSel();
-        if (id && explorerSel.size > 1) {
-            // on a multi-selection: what applies to all of it
-            moveExplorerFocus(id);
-            const rows = actionRows(id);
-            const paths = rows.map(rowFilePath).join("\n");
-            showContextMenu(e.clientX, e.clientY, [
-                { label: "Copy Paths", run: () => void navigator.clipboard?.writeText(paths).then(() => status(`copied ${plural(rows.length, "path")}`)) },
-                null,
-                { label: `Delete ${rows.length} Items`, key: "Delete", run: () => void deleteRows(rows) },
-            ]);
-            return;
-        }
-        if (!id || id === SETTINGS_ID) {
-            // settings.yaml and the empty space below the tree: the root
-            if (id) moveExplorerFocus(id);
-            showContextMenu(e.clientX, e.clientY, [...(id ? [{ label: "Open", key: "Enter", run: () => (id !== selectedId || typingsShown) && select(id) }, null] : []), ...newItemsMenu("")]);
-            return;
-        }
-        const row = treeRow(id);
-        if (!row) return;
-        moveExplorerFocus(id);
-        const script = row.kind === "script" ? scripts.find((s) => s.id === id) : undefined;
-        const isLib = script?.meta.active === false;
-        showContextMenu(e.clientX, e.clientY, [
-            ...(row.kind === "folder" ? [] : [{ label: "Open", key: "Enter", run: () => (id !== selectedId || typingsShown) && select(id) }, null]),
-            ...(script && !isLib ? [{ label: script.enabled ? "Disable" : "Enable", run: () => void setScriptEnabled(script, !script.enabled) }, null] : []),
-            ...newItemsMenu(targetFolder(row)),
-            null,
-            { label: "Copy Path", run: () => void navigator.clipboard?.writeText(rowFilePath(row)).then(() => status(`copied ${rowFilePath(row)}`)) },
-            null,
-            { label: "Rename…", key: "F2", run: () => renameInExplorer(id) },
-            { label: "Delete", key: "Delete", run: () => void deleteRows([row]) },
-        ]);
-    });
-    setupExplorerDnd(list);
-    const action = (sel: string, run: () => void): void =>
-        $(sel).addEventListener("click", (e) => {
-            e.stopPropagation(); // not a click on the section header
-            run();
-        });
-    action("#btn-new", () => startCreate("script"));
-    action("#btn-new-json", () => startCreate("data"));
-    action("#btn-new-folder", () => startCreate("folder"));
-    action("#btn-collapse-all", collapseAll);
-    $("#explorer-section").addEventListener("click", toggleExplorerSection);
-    $("#script-enabled").addEventListener("click", (e) => {
-        e.preventDefault();
-        const script = scripts.find((s) => s.id === selectedId);
-        if (script) void setScriptEnabled(script, !script.enabled);
-    });
-}
-
-/** Drag rows (a multi-selection: all of it) onto a folder (or a file in it), or below the tree for the root, to move them. */
-function setupExplorerDnd(list: HTMLElement): void {
-    let dragged: TreeRow[] = [];
-    let hoverTimer: ReturnType<typeof setTimeout> | null = null;
-    let hoverId = "";
-    const rowAt = (e: DragEvent): TreeRow | undefined => {
-        const id = (e.target as HTMLElement).closest?.<HTMLElement>("li.script-item")?.dataset.id;
-        return id && id !== SETTINGS_ID ? visibleRows.find((r) => r.id === id) : undefined;
-    };
-    /** the folder the drop lands in, or null when it can't go there */
-    const dropFolder = (e: DragEvent): string | null => {
-        if (!dragged.length) return null;
-        const folder = targetFolder(rowAt(e));
-        return dropPlan(dragged, folder) ? folder : null;
-    };
-    const mark = (folder: string | null): void => {
-        list.classList.toggle("drop-root", folder === "");
-        for (const li of list.querySelectorAll<HTMLElement>("li.script-item")) {
-            const r = visibleRows.find((x) => x.id === li.dataset.id);
-            li.classList.toggle("drop-target", !!folder && !!r && ((r.kind === "folder" && r.path === folder) || isInFolder(r.path, folder)));
-        }
-    };
-    const stopHover = (): void => {
-        if (hoverTimer) clearTimeout(hoverTimer);
-        hoverTimer = null;
-        hoverId = "";
-    };
-    list.addEventListener("dragstart", (e) => {
-        const id = (e.target as HTMLElement).closest?.<HTMLElement>("li.script-item")?.dataset.id;
-        const r = id ? visibleRows.find((x) => x.id === id) : undefined;
-        if (!r || renaming) {
-            e.preventDefault();
-            return;
-        }
-        dragged = actionRows(r.id);
-        e.dataTransfer!.effectAllowed = "move";
-        e.dataTransfer!.setData("text/plain", dragged.map(rowFilePath).join("\n"));
-        if (dragged.length > 1) {
-            const ghost = Object.assign(document.createElement("div"), { className: "drag-ghost", textContent: `${dragged.length} items` });
-            document.body.append(ghost);
-            e.dataTransfer!.setDragImage(ghost, -8, -8);
-            setTimeout(() => ghost.remove());
-        }
-    });
-    list.addEventListener("dragover", (e) => {
-        const folder = dropFolder(e);
-        mark(folder);
-        // hovering a collapsed folder opens it
-        const r = rowAt(e);
-        if (r?.kind === "folder" && !r.expanded && dragged.length) {
-            if (hoverId !== r.id) {
-                stopHover();
-                hoverId = r.id;
-                hoverTimer = setTimeout(() => setFolderExpanded(r.path, true), 600);
-            }
-        } else stopHover();
-        if (folder === null) return;
-        e.preventDefault();
-        e.dataTransfer!.dropEffect = "move";
-    });
-    list.addEventListener("dragleave", (e) => {
-        if (!list.contains(e.relatedTarget as Node)) {
-            mark(null);
-            stopHover();
-        }
-    });
-    list.addEventListener("drop", (e) => {
-        const folder = dropFolder(e);
-        const plan = folder === null ? null : dropPlan(dragged, folder);
-        dragged = [];
-        mark(null);
-        stopHover();
-        if (!plan) return;
-        e.preventDefault();
-        void moveRows(plan);
-    });
-    list.addEventListener("dragend", () => {
-        dragged = [];
-        mark(null);
-        stopHover();
-    });
-}
-
-function toggleExplorerSection(): void {
-    const section = $("#explorer-section");
-    section.setAttribute("aria-expanded", String(section.getAttribute("aria-expanded") === "false"));
-}
-
-type MenuItem = { label: string; key?: string; run: () => void } | null;
-
-function showContextMenu(x: number, y: number, items: MenuItem[]): void {
-    document.querySelector(".ctx-menu")?.remove();
-    const menu = document.createElement("ul");
-    menu.className = "ctx-menu";
-    menu.setAttribute("role", "menu");
-    const close = (): void => {
-        menu.remove();
-        document.removeEventListener("mousedown", outside, true);
-        document.removeEventListener("keydown", key, true);
-        window.removeEventListener("blur", close);
-    };
-    const outside = (e: MouseEvent): void => {
-        if (!menu.contains(e.target as Node)) close();
-    };
-    const key = (e: KeyboardEvent): void => {
-        if (e.key === "Escape") {
-            e.stopPropagation();
-            close();
-            $("#script-list").focus();
-        }
-    };
-    for (const item of items) {
-        const li = document.createElement("li");
-        if (!item) li.className = "sep";
-        else {
-            li.setAttribute("role", "menuitem");
-            const label = document.createElement("span");
-            label.textContent = item.label;
-            li.append(label);
-            if (item.key) li.append(Object.assign(document.createElement("span"), { className: "key", textContent: item.key }));
-            li.addEventListener("click", () => {
-                close();
-                item.run();
-            });
-        }
-        menu.appendChild(li);
-    }
-    document.body.appendChild(menu);
-    menu.style.left = `${Math.min(x, window.innerWidth - menu.offsetWidth - 4)}px`;
-    menu.style.top = `${Math.min(y, window.innerHeight - menu.offsetHeight - 4)}px`;
-    document.addEventListener("mousedown", outside, true);
-    document.addEventListener("keydown", key, true);
-    window.addEventListener("blur", close);
-}
-
-const KIND_TITLE: Record<NewKind, string> = {
-    script: 'The name is also the file name: any characters except < > : " \\ | ? * — a / puts the script in a folder (e.g. mock/helpers)',
-    data: "A .json data file — a / puts it in a folder (e.g. mock/users.json)",
-    folder: "A folder — a / makes nested folders (e.g. mock/api)",
-};
-
-/** an inline name input (rename / new item) that strips forbidden characters as you type */
-function nameInput(kind: NewKind, value: string): HTMLInputElement {
-    const input = document.createElement("input");
-    input.className = "script-rename";
-    input.value = value;
-    input.maxLength = MAX_PATH;
-    input.title = KIND_TITLE[kind];
-    input.spellcheck = false;
-    input.addEventListener("input", () => {
-        const clean = cleanScriptName(input.value);
-        if (clean === input.value) return;
-        const pos = Math.max(0, (input.selectionStart ?? clean.length) - (input.value.length - clean.length));
-        input.value = clean;
-        input.setSelectionRange(pos, pos);
-        input.classList.add("rejected");
-        setTimeout(() => input.classList.remove("rejected"), 300);
-    });
-    input.addEventListener("click", (e) => e.stopPropagation());
-    input.addEventListener("dblclick", (e) => e.stopPropagation());
-    input.addEventListener("mousedown", (e) => e.stopPropagation());
-    return input;
-}
-
-/** Enter/blur commits, Escape cancels — `finish` runs once */
-function onInputDone(input: HTMLInputElement, finish: (commit: boolean) => void): void {
-    let done = false;
-    const end = (commit: boolean): void => {
-        if (done) return;
-        done = true;
-        finish(commit);
-    };
-    input.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") end(true);
-        else if (e.key === "Escape") end(false);
-        else return;
-        e.preventDefault();
-        e.stopPropagation();
-    });
-    input.addEventListener("blur", () => end(true));
+    flushSync(() => void (explorer.sectionOpen = true));
+    $("#script-list").focus();
+    flushSync(() => moveFocus(explorer.focusedId ?? selectedId ?? SETTINGS_ID));
 }
 
 /** why `path` can't be the new path of a `kind` item (other than `selfId`), or "" */
@@ -994,41 +389,7 @@ function itemPathProblem(kind: NewKind, path: string, selfId?: string): string {
     return folderPathProblem(path) || (everyFolder().some((f) => f.toLowerCase() === path.toLowerCase()) ? `the folder "${path}" already exists` : "");
 }
 
-const withJson = (path: string): string => (/\.json$/i.test(path) ? path : path + ".json");
-
-/** Inline rename in the explorer (double-click a name, or F2); a / in the new name moves the item. */
-function startRename(label: HTMLElement, row: TreeRow, refocusList = false): void {
-    const kind: NewKind = row.kind;
-    const current = row.kind === "script" ? cleanScriptName(row.path) + ".ts" : row.path;
-    const input = nameInput(kind, current);
-    label.replaceWith(input);
-    renaming = true;
-    input.focus();
-    // select the name, not its folder or extension (as VS Code does)
-    const start = current.lastIndexOf("/") + 1;
-    const ext = kind === "script" ? 3 : kind === "data" && /\.json$/i.test(current) ? 5 : 0;
-    input.setSelectionRange(start, current.length - ext);
-    onInputDone(input, (commit) => {
-        renaming = false;
-        if (refocusList) $("#script-list").focus();
-        let next = cleanScriptName(input.value).trim();
-        if (kind === "script") next = next.replace(/\.ts$/i, "");
-        if (kind === "data" && next) next = withJson(next);
-        let problem = commit && next && next !== row.path ? itemPathProblem(kind, next, row.kind === "folder" ? undefined : row.id) : "";
-        if (!problem && kind === "folder" && commit && isInFolder(next, row.path)) problem = "a folder can't move into itself";
-        if (problem) status(`can't rename: ${problem}`, "error");
-        if (!commit || !next || next === row.path || problem) {
-            input.replaceWith(label);
-            renderList(); // catch up on updates skipped while renaming
-            return;
-        }
-        void moveRow(row, next);
-    });
-}
-
-/** Rename or move a script, data file or folder (with its contents) to `to`. */
-const moveRow = (row: TreeRow, to: string): Promise<void> => moveRows([{ item: row, to }]);
-
+/** Rename or move scripts, data files or folders (with their contents) to their new paths. */
 async function moveRows(plan: { item: TreeRow; to: string }[]): Promise<void> {
     for (const { item: row, to } of plan) {
         let r: any;
@@ -1046,10 +407,11 @@ async function moveRows(plan: { item: TreeRow; to: string }[]): Promise<void> {
         } else {
             r = await send({ type: "renameFolder", from: row.path, to });
             if (!r?.error) {
-                setCollapsed(movedCollapsed(collapsed, row.path, to));
-                if (focusedId === row.id) focusedId = folderRowId(to);
-                else if (focusedId && isFolderRowId(focusedId) && isInFolder(folderPathOfRowId(focusedId), row.path)) focusedId = folderRowId(movedPath(folderPathOfRowId(focusedId), row.path, to));
-                if (explorerSel.delete(row.id)) explorerSel.add(folderRowId(to));
+                setCollapsed(movedCollapsed(explorer.collapsed, row.path, to));
+                const f = explorer.focusedId;
+                if (f === row.id) explorer.focusedId = folderRowId(to);
+                else if (f && isFolderRowId(f) && isInFolder(folderPathOfRowId(f), row.path)) explorer.focusedId = folderRowId(movedPath(folderPathOfRowId(f), row.path, to));
+                if (explorer.sel.has(row.id)) setSel([...explorer.sel].map((id) => (id === row.id ? folderRowId(to) : id)));
             }
         }
         if (r?.error) status(`can't move "${row.path}": ${r.error}`, "error");
@@ -1059,46 +421,13 @@ async function moveRows(plan: { item: TreeRow; to: string }[]): Promise<void> {
 }
 
 /**
- * New Script / New JSON File / New Folder: an inline name input in `folder`
- * (default: the focused folder, or the focused file's folder), as in VS Code.
+ * New Script / New JSON File / New Folder: shows the explorer, then an inline
+ * name input in `folder` (default: the focused folder, or the focused file's folder).
  */
-function startCreate(kind: NewKind, folder = targetFolder(treeRow(focusedId ?? selectedId))): void {
-    if (renaming) return;
+function startCreate(kind: NewKind, folder?: string): void {
+    if (explorer.editing) return;
     if (layout.sidebarHidden) setSidebarHidden(false);
-    const section = $("#explorer-section");
-    if (section.getAttribute("aria-expanded") === "false") toggleExplorerSection();
-    if (folder) {
-        revealInExplorer(folder + "/");
-    }
-    renderList();
-    const list = $("#script-list");
-    const parent = list.querySelector<HTMLElement>(`li[data-id="${CSS.escape(folder ? folderRowId(folder) : SETTINGS_ID)}"]`);
-    const depth = folder ? folder.split("/").length : 0;
-    const li = document.createElement("li");
-    li.className = "script-item creating";
-    li.style.setProperty("--depth", String(depth));
-    li.append(...treeIndent(depth, kind === "folder" ? false : undefined), fileIcon(kind === "script" ? "ts" : kind === "data" ? "json" : "folder"));
-    const input = nameInput(kind, "");
-    input.placeholder = kind === "script" ? "script name" : kind === "data" ? "name.json" : "folder name";
-    li.append(input);
-    if (parent) parent.after(li);
-    else list.prepend(li);
-    renaming = true;
-    input.focus();
-    li.scrollIntoView({ block: "nearest" });
-    onInputDone(input, (commit) => {
-        renaming = false;
-        li.remove();
-        let name = cleanScriptName(input.value).trim();
-        if (kind === "script") name = name.replace(/\.ts$/i, "");
-        if (kind === "data" && name) name = withJson(name);
-        if (!commit || !name) {
-            renderList();
-            list.focus();
-            return;
-        }
-        void createItem(kind, joinPath(folder, name));
-    });
+    flushSync(() => startCreateRow(kind, folder));
 }
 
 async function createItem(kind: NewKind, path: string): Promise<void> {
@@ -1130,7 +459,7 @@ async function createItem(kind: NewKind, path: string): Promise<void> {
             status(`can't create "${path}": ${r.error}`, "error");
             return;
         }
-        focusedId = folderRowId(path);
+        explorer.focusedId = folderRowId(path);
         await refresh();
         $("#script-list").focus();
     }
@@ -1534,7 +863,7 @@ function selectReal(id: string): void {
     const back = typingsShown && id === selectedId;
     leaveTypings();
     selectedId = id;
-    focusedId = null;
+    explorer.focusedId = null;
     renderList();
     const script = scripts.find((s) => s.id === id);
     const data = script ? undefined : dataFiles.find((d) => d.id === id);
@@ -1968,8 +1297,8 @@ function updateProblems(): void {
         data
     ).sort((a, b) => (order.get(a.id) ?? -1) - (order.get(b.id) ?? -1));
     const bad = new Set(problemGroups.filter((g) => g.file === "json" && g.problems.some((p) => p.severity === "error")).map((g) => g.id));
-    if ([...bad].join() !== [...jsonErrorIds].join()) {
-        jsonErrorIds = bad;
+    if ([...bad].join() !== [...explorer.jsonErrorIds].join()) {
+        explorer.jsonErrorIds = ref(bad);
         renderList();
     }
     markProblems();
@@ -2807,6 +2136,17 @@ async function main(): Promise<void> {
         openSettings: (section?: string) => openSettings(section),
         dismissError: (id: string) => void send({ type: "clearScriptError", scriptId: id }),
         focusEditor: () => editor?.focus(),
+        status: (text: string, cls?: string) => status(text, cls),
+        select: (id: string) => void select(id),
+        deleteRows: (rows: TreeRow[]) => void deleteRows(rows),
+        moveRows,
+        itemPathProblem,
+        createItem: (kind: NewKind, path: string) => void createItem(kind, path),
+        startCreate,
+        setScriptEnabled: (id: string, enabled: boolean) => {
+            const script = scripts.find((s) => s.id === id);
+            if (script) void setScriptEnabled(script, enabled);
+        },
     } satisfies typeof actions);
     await loadMonaco();
     watchPackageTypings();
@@ -2884,7 +2224,11 @@ async function main(): Promise<void> {
     });
     $("#btn-toggle-sidebar").addEventListener("click", toggleSidebar);
     $("#btn-toggle-panel").addEventListener("click", togglePanel);
-    setupExplorer();
+    $("#script-enabled").addEventListener("click", (e) => {
+        e.preventDefault();
+        const script = scripts.find((s) => s.id === selectedId);
+        if (script) void setScriptEnabled(script, !script.enabled);
+    });
     const opener: MonacoEditor.ICodeEditorOpener = {
         openCodeEditor: (_source, resource, selection) => openScriptAt(resource, selection),
     };
@@ -2925,14 +2269,6 @@ async function main(): Promise<void> {
         chrome.runtime.sendMessage({ type: "debugLog", entry: { at: Date.now(), src: "editor", msg, level: "info" } }, () => void chrome.runtime.lastError);
     });
     $("#editor-status").addEventListener("click", () => statusClick?.());
-    // delegated: a click on another script re-renders the list
-    $("#script-list").addEventListener("dblclick", (e) => {
-        const li = (e.target as HTMLElement).closest<HTMLElement>("li.script-item");
-        // a folder's clicks toggle it (rename it with F2)
-        const row = li && li.dataset.id !== SETTINGS_ID && !isFolderRowId(li.dataset.id!) ? treeRow(li.dataset.id!) : undefined;
-        const label = row && li!.querySelector<HTMLElement>(".script-name");
-        if (label) startRename(label, row!);
-    });
 
     // VS Code folder sync
     const btn = $("#btn-vscode");
