@@ -95,6 +95,19 @@ the cursor row and multi-selection, the collapsed folders (saved to
 the tree: React bubbles a portal's events through its React parents, so a
 menu inside the tree would see its clicks and keys as the tree's.
 
+The dialogs (`src/ui/dialogs/`: Settings, Help, Welcome, Quick Open, the
+save-conflict diff and the import/export checklist) open and close through
+the `dialogs` store (`state/dialogs.ts`). `resolveConflict()` and
+`pickRows()` put their options in the store and return a promise the dialog
+settles. Settings' values (theme, synced folder, launch target, helper
+status, About, diagnostics) are the `settings` store (`state/settings.ts`),
+which `editor.ts` loads from `chrome.storage` and keeps in sync. Form
+controls listen with native listeners (`useControl` in
+`dialogs/controls.tsx`) because React's `onChange` ignores a `change` event
+dispatched by a script, which the e2e tests do. The toast and the tooltip
+(`toast.ts`, `tooltip.ts`) stay small DOM helpers: they are shown from
+anywhere, including Monaco's callbacks, and hold no state worth rendering.
+
 An effect's arrow function must not return a value by accident:
 `useLayoutEffect(() => el.scrollIntoView())` breaks in Chromium, where
 `scrollIntoView()` returns a promise that React then calls as the cleanup.

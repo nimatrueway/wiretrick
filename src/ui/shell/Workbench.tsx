@@ -4,6 +4,8 @@ import { dockLayout, dockOf, sideOf } from "../state/dock";
 import { layout } from "../state/layout";
 import { ExplorerSection } from "../explorer/Explorer";
 import { MonacoHost } from "./MonacoHost";
+import { Welcome } from "../dialogs/Welcome";
+import { openHelp, openSettings } from "../state/dialogs";
 
 const cls = (...names: (string | false | undefined)[]): string | undefined => names.filter(Boolean).join(" ") || undefined;
 
@@ -16,7 +18,7 @@ export function Workbench() {
             <aside id="sidebar" style={snap.sidebarW ? { width: `${snap.sidebarW}px` } : undefined}>
                 <div id="brand" title="Drag to move the explorer to the left or right edge" onMouseDown={(e) => startSidebarDrag(e.nativeEvent)}>
                     <h1>Explorer</h1>
-                    <div id="toolbar"><button id="btn-help" title="API reference and sample scripts" aria-label="Help">?</button>{" "}<button id="btn-settings" title="Settings (⌘,)" aria-label="Settings">⚙</button></div>
+                    <div id="toolbar"><button id="btn-help" title="API reference and sample scripts" aria-label="Help" onClick={() => openHelp()}>?</button>{" "}<button id="btn-settings" title="Settings (⌘,)" aria-label="Settings" onClick={() => openSettings()}>⚙</button></div>
                 </div>
                 <ExplorerSection />
             </aside>
@@ -60,22 +62,7 @@ export function Workbench() {
                     </span>
                 </div>
                 <div id="editor-area">
-                    <section id="welcome" hidden aria-labelledby="welcome-title">
-                        <div className="welcome-inner">
-                            <button id="welcome-close" className="btn-close" title="Close the welcome page" aria-label="Close the welcome page" hidden>✕</button>
-                            <h1 id="welcome-title">Welcome to Wiretrick</h1>
-                            <p className="welcome-lead">Redirect, block or rewrite the requests your browser makes — headers, API responses, whole pages — with a few lines of TypeScript.</p>
-                            <p className="welcome-lead">Pick a sample to start. <b>Try it</b> adds it to your scripts, turns it on and opens its page in a new tab. They all use built-in strategies: nothing to install.</p>
-                            <div id="welcome-samples" />
-                            <div className="welcome-foot">
-                                <button id="welcome-new">New empty script</button>
-                                {" "}
-                                <button id="welcome-reference">API reference</button>
-                                {" "}
-                                <span className="muted">Reopen this page from Help (?) → Welcome.</span>
-                            </div>
-                        </div>
-                    </section>
+                    <Welcome />
                     <MonacoHost />
                 </div>
             </main>

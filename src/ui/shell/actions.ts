@@ -2,6 +2,9 @@ import type { PanelTab } from "../state/layout";
 import type { Problem } from "../problems";
 import type { TreeRow } from "../explorerTree";
 import type { NewKind } from "../state/explorer";
+import type { LaunchMode } from "../bundle";
+import type { QuickOpenItem } from "../quickOpen";
+import type { SampleScript } from "../samples";
 
 /**
  * Editor commands the components call; editor.ts fills them in at startup
@@ -14,7 +17,6 @@ export const actions = {
     clearPanel(): void {},
     runDiagnostics(): void {},
     openProblem(_id: string, _p: Problem): void {},
-    openSettings(_section?: string): void {},
     /** dismiss a script's runtime error */
     dismissError(_id: string): void {},
     focusEditor(): void {},
@@ -37,4 +39,28 @@ export const actions = {
     /** shows the explorer, then the inline name input */
     startCreate(_kind: NewKind, _folder?: string): void {},
     setScriptEnabled(_id: string, _enabled: boolean): void {},
+    // ---- dialogs ----
+    /** ⌘P's list: settings.yaml, the scripts, the data files */
+    quickOpenItems(): QuickOpenItem[] {
+        return [];
+    },
+    /** a ⌘P pick: open it and focus the editor */
+    openQuick(_id: string): void {},
+    /** add a sample as a new (enabled) script and open it; resolves with its id */
+    addSample(_sample: SampleScript): Promise<string> {
+        return Promise.resolve("");
+    },
+    /** add a sample, wait until it runs, then open its page (`url`) in a new tab */
+    trySample(_sample: SampleScript, _url: string | null): Promise<void> {
+        return Promise.resolve();
+    },
+    /** back from the welcome page to the scripts */
+    closeWelcome(): void {},
+    // ---- settings ----
+    /** Settings → Scripts Folder…: start / stop syncing, or reconnect */
+    folderButton(): void {},
+    setVscodePath(_path: string): void {},
+    setLaunchMode(_mode: LaunchMode): void {},
+    setEditorUrl(_url: string): void {},
+    setMonacoVerbose(_on: boolean): void {},
 };

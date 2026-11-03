@@ -7,9 +7,7 @@ import { loadMonaco, STARTER_TEMPLATE, apiTypingsText, setDataFileTypings, setPa
 import { PACKAGE_TYPINGS_KEY, type StoredTypings } from "../shared/packageImports";
 import { API_TYPINGS_URI } from "./apiLinks";
 import { NavHistory } from "./navHistory";
-import { API_REFERENCE } from "./apiReference";
-import { SHORTCUTS, filterShortcuts, formatKey, keyHint, keysFor } from "./shortcuts";
-import { SAMPLES, sampleStrategies, sampleSummary, sampleTryUrl, type SampleScript } from "./samples";
+import type { SampleScript } from "./samples";
 import { settingsDiagnostics, settingsCompletions, settingsHover, type AssistScript } from "../shared/settingsAssist";
 import { badPackageImports, dependantsOf, missingImports } from "../shared/scriptImports";
 import { PACKAGE_ORIGIN } from "../shared/packageImports";
@@ -17,19 +15,15 @@ import { isInFolder, movedPath } from "../shared/folders";
 import { logSegments, opensInTab } from "./logLinks";
 import { baseName, folderPathOfRowId, folderRowId, isFolderRowId, movedCollapsed, type TreeRow } from "./explorerTree";
 import { dataPathOfDecl } from "./jsonTypes";
-import { pickRows } from "./bundlePicker";
-import { resolveConflict } from "./conflictDialog";
-import { watchTheme, saveTheme, type Theme, type ThemePref } from "./theme";
+import { dialogs, openHelp, openSettings, pickRows, resolveConflict } from "./state/dialogs";
+import { folderStateText, setHelperStatus, settings } from "./state/settings";
+import { watchTheme, type Theme } from "./theme";
 import * as fsBridge from "./fsBridge";
 import { cleanScriptName, scriptNameProblem, scriptFileName, scriptFileKey, uniqueScriptName, dataFilePathProblem, folderPathProblem } from "../shared/scriptName";
-import { buildBundle, parseBundleText, bundleSettingsDoc, pickBundle, vscodeTargetPath, editorLaunchUrl, launchAppName, copyPathHint, hostOs, cleanFolderPath, type LaunchMode } from "./bundle";
-import { createQuickOpenPalette } from "./quickOpen";
+import { buildBundle, parseBundleText, bundleSettingsDoc, pickBundle, vscodeTargetPath, editorLaunchUrl, launchAppName, type LaunchMode } from "./bundle";
 import { computeDirty } from "./dirtyState";
-import { parseSettings, SETTINGS_FILE, isBodyCap, BODY_CAP_KEY, DEFAULT_BODY_CAP, BODY_CAP_MIN, BODY_CAP_MAX, type SettingsDoc } from "../shared/settingsYaml";
-import { STRATEGIES, type Strategy } from "../shared/route";
-import { STRATEGY_DOC_URL, STRATEGY_INFO, strategyUnsupported } from "../shared/strategyInfo";
+import { parseSettings, SETTINGS_FILE, isBodyCap, BODY_CAP_KEY, DEFAULT_BODY_CAP, type SettingsDoc } from "../shared/settingsYaml";
 import { dlogLevel } from "../shared/debugLog";
-import { helperInstallCommand, helperInstallShell } from "../shared/helperInstall";
 import { createNetStore, type NetStore } from "./network/netStore";
 import { installTooltips } from "./tooltip";
 import { scriptHealth, type ScriptHealthInput } from "../shared/scriptHealth";
@@ -47,7 +41,7 @@ import { badges, badgesChanged, panel, setNetStore, setProblems } from "./state/
 import { actions } from "./shell/actions";
 import { clearSel, everyFolder, explorer, explorerIds, moveFocus, pruneCollapsed, revealInExplorer, setCollapsed, setSel, SETTINGS_ID, startCreate as startCreateRow, syncExplorer, treeRow, treeRows, visibleRows, type NewKind } from "./state/explorer";
 import { createCodeEditor } from "./shell/codeEditor";
-import { aboutRows, aboutText, checkLatestRelease, collectDiagnostics, describeLatest, diagnosticsFileName, downloadText, RELEASES_URL, type HelperStatus } from "./about";
+import { collectDiagnostics, diagnosticsFileName, downloadText } from "./about";
 
 // ---- state ----
 let scripts: (Script & { runtimeError?: ScriptHealthInput["runtimeError"]; typeErrors?: string[]; ruleErrors?: string[]; routeWarnings?: string[] })[] = [];
@@ -839,13 +833,10 @@ function setEditorValue(code: string): void {
     status("");
 }
 
-/** Settings → Open button (vscode | vscode-insiders | custom | off) and the custom URL template. */
-let launchMode: LaunchMode = "vscode";
-let launchTemplate = "";
-
 /** Enable ↗ only while folder sync is active and a script is selected (and a custom editor has a URL). */
 function updateOpenVscode(): void {
     const b = $("#btn-open-vscode") as HTMLButtonElement;
+    const { launchMode, editorUrl: launchTemplate } = settings;
     const off = launchMode === "off";
     b.style.display = off ? "none" : "";
     const app = launchAppName(launchMode);
@@ -1085,54 +1076,12 @@ async function saveDataFileNow(id: string): Promise<void> {
     await refresh();
 }
 
-// ---- helper strategy (local helper) ----
-let helperStatus: HelperStatus | null = null;
-function renderProcessStatus(st: any): void {
-    helperStatus = st;
-    if (!$("#settings-panel").classList.contains("hidden")) void renderAbout();
-    const labels: Record<string, string> = {
-        idle: "not needed — no enabled handler uses the \"helper\" strategy",
-        unsupported: "unavailable in this browser (Chrome only) — handlers using \"helper\" don't run",
-        connecting: "connecting…",
-        ready: `running${st.version ? ` (v${st.version})` : ""}${st.port ? ` on 127.0.0.1:${st.port}` : ""}`,
-        missing: "not installed",
-        error: `error: ${st.error || "unknown"}`,
-    };
-    $("#process-state").textContent = labels[st.state] || st.state;
-    const lines: string[] = [];
-    if (st.scripts?.length) lines.push(`Scripts: ${st.scripts.join(", ")}`);
-    if (st.state === "missing") {
-        lines.push(`Install the helper: paste this into ${helperInstallShell()}, then click Retry:`);
-        lines.push(`  ${helperInstallCommand(st.extensionId)}`);
-    }
-    if (st.state === "ready") {
-        if (st.outdated) {
-            lines.push(`⚠ The helper (v${st.version}) is older than this extension needs — upgrade it: paste this into ${helperInstallShell()}, then click Retry:`);
-            lines.push(`  ${helperInstallCommand(st.extensionId)}`);
-        }
-        if (st.routing && !st.routing.active && st.routing.reason) lines.push(`Routing inactive: ${st.routing.reason}`);
-        if (st.routing?.active) lines.push(`Other traffic: your proxy setting (${st.routing.mode})`);
-        if (st.routing?.note) lines.push(st.routing.note);
-        if (st.caTrusted === false) lines.push("Chrome does not trust the helper certificate yet — click Trust certificate (or run: wiretrick-helper trust-ca).");
-        if (st.caTrusted === true) lines.push("Helper certificate trusted ✓");
-        if (st.caFingerprint) lines.push(`Helper certificate: ${st.caPath} (SHA-256 ${st.caFingerprint})`);
-    }
-    if (st.trust) lines.push(`Trust certificate: ${st.trust.msg}`);
-    $("#process-detail").textContent = lines.join("\n");
-    ($("#btn-process-trust") as HTMLButtonElement).hidden = !(st.state === "ready" && st.caTrusted !== true);
-    const copy = $("#btn-process-copy") as HTMLButtonElement;
-    const needsInstall = st.state === "missing" || !!st.outdated;
-    copy.hidden = !needsInstall;
-    copy.dataset.cmd = needsInstall ? helperInstallCommand(st.extensionId) : "";
-    ($("#btn-process-retry") as HTMLButtonElement).hidden = (st.state === "ready" && !st.outdated) || st.state === "idle" || st.state === "unsupported";
-}
-
 // ---- logs ----
 function connectLogs(): void {
     const port = chrome.runtime.connect({ name: "logs" });
     port.onMessage.addListener((msg: any) => {
         if (msg.type === "log") appendLog(msg.entry);
-        if (msg.type === "processStatus") renderProcessStatus(msg.status);
+        if (msg.type === "processStatus") setHelperStatus(msg.status);
         if (msg.type === "scriptErrors") {
             for (const s of scripts) {
                 s.runtimeError = msg.errors[s.id] ?? null;
@@ -1162,10 +1111,7 @@ function connectLogs(): void {
             if (msg.status.active) {
                 markFolderSynced();
             } else {
-                const btn = $("#btn-vscode");
-                btn.classList.remove("active");
-                btn.textContent = "Scripts Folder…";
-                $("#folder-state").textContent = "";
+                settings.folder.mode = "off";
             }
         }
     });
@@ -1392,303 +1338,84 @@ function send<T = any>(msg: any): Promise<T> {
     });
 }
 
-// ---- dialogs: settings / help / samples ----
+const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+
+// ---- dialogs: settings / help / samples (components in dialogs/, state in state/dialogs + state/settings) ----
 let currentTheme: Theme = document.documentElement.dataset.theme === "light" ? "light" : "dark";
 const monacoTheme = () => (currentTheme === "light" ? "vs" : "vs-dark");
-
-function openDialog(id: string): void {
-    document.getElementById(id)?.classList.remove("hidden");
-}
-function closeDialog(el: Element): void {
-    el.classList.add("hidden");
-}
-
-/** Settings dialog; `section` scrolls to e.g. "settings-sec-about". */
-function openSettings(section?: string): void {
-    openDialog("settings-panel");
-    if (section) showSettingsSection(section);
-    void renderAbout();
-    chrome.runtime.sendMessage({ type: "processStatus" }, (st) => {
-        void chrome.runtime.lastError;
-        if (st) renderProcessStatus(st);
-    });
-}
-
-function showSettingsSection(id: string): void {
-    document.getElementById(id)?.scrollIntoView({ block: "start" });
-    markSettingsNav(id);
-}
-
-function markSettingsNav(id: string): void {
-    for (const b of document.querySelectorAll<HTMLElement>("[data-settings-nav]")) b.classList.toggle("active", b.dataset.settingsNav === id);
-}
-
-/** Highlight the nav entry of the section at the top of the scrolled body. */
-function trackSettingsScroll(): void {
-    const body = $(".settings-body");
-    body.addEventListener("scroll", () => {
-        const sections = [...body.querySelectorAll<HTMLElement>(".settings-section")];
-        const atEnd = body.scrollTop + body.clientHeight >= body.scrollHeight - 2;
-        const top = body.getBoundingClientRect().top + 24;
-        const current = atEnd ? sections[sections.length - 1] : sections.filter((sec) => sec.getBoundingClientRect().top <= top).pop() ?? sections[0];
-        if (current) markSettingsNav(current.id);
-    });
-    for (const b of document.querySelectorAll<HTMLElement>("[data-settings-nav]")) {
-        b.addEventListener("click", () => showSettingsSection(b.dataset.settingsNav!));
-    }
-}
-
-let aboutInfo: [string, string][] = [];
-let aboutGen = 0;
-async function renderAbout(): Promise<void> {
-    const gen = ++aboutGen;
-    const rows = await aboutRows(helperStatus);
-    if (gen !== aboutGen) return;
-    const current = chrome.runtime.getManifest().version;
-    const draw = (latest: { text: string; url?: string; update?: boolean }): void => {
-        aboutInfo = [rows[0], ["Latest", latest.text], ...rows.slice(1)];
-        $("#about-info").replaceChildren(
-            ...aboutInfo.flatMap(([k, v]) => {
-                const dt = document.createElement("dt");
-                dt.textContent = k;
-                const dd = document.createElement("dd");
-                dd.textContent = v;
-                if (k === "Commit" || k === "Extension ID") dd.className = "mono";
-                if (k === "Latest" && latest.url) {
-                    if (latest.update) dd.className = "about-update";
-                    const a = document.createElement("a");
-                    a.href = latest.url;
-                    a.target = "_blank";
-                    a.rel = "noopener";
-                    a.textContent = latest.update ? "download" : "releases";
-                    dd.append(" · ", a);
-                }
-                return [dt, dd];
-            })
-        );
-    };
-    draw({ text: "checking…" });
-    const latest = await checkLatestRelease().then(
-        (r) => describeLatest(r, current),
-        (e) => ({ text: `couldn't check (${e?.message || e})`, url: RELEASES_URL })
-    );
-    if (gen === aboutGen) draw(latest);
-}
-
-function flash(b: HTMLElement, text: string): void {
-    const was = b.textContent;
-    b.textContent = text;
-    setTimeout(() => (b.textContent = was), 1500);
-}
 
 /** Manager-side context for the diagnostics report. */
 function managerUiState(): Record<string, unknown> {
     const l = layout;
     return {
         theme: currentTheme,
-        themePref: ($("#settings-theme") as HTMLSelectElement).value,
+        themePref: settings.themePref,
         wordWrap: !!l.wordWrap,
         sidebarHidden: !!l.sidebarHidden,
         panelHidden: !!l.panelHidden,
         panelDock: currentDock(),
         sidebarSide: currentSide(),
-        logLevel: ($("#settings-log-level") as HTMLSelectElement).value,
+        logLevel: logState.level,
         logCap: logState.cap,
-        monacoVerbose,
+        monacoVerbose: settings.monacoVerbose,
         logBadge: panel.statusBar,
-        scriptsFolder: $("#folder-state").textContent || null,
+        scriptsFolder: folderStateText(settings.folder) || null,
     };
 }
 
-let diagnosticsReport = "";
 /** Runs from a click or editor command: the permission prompt needs that gesture. */
 async function runDiagnostics(): Promise<void> {
-    const btn = $("#btn-diagnostics") as HTMLButtonElement;
-    const state = $("#diagnostics-state");
-    const copy = $("#btn-diagnostics-copy");
+    const d = settings.diagnostics;
     const netState = (state: "busy" | "ok" | "error", title: string) => void (panel.diagnostics = { state, title });
-    btn.disabled = true;
-    copy.hidden = true;
-    state.textContent = "collecting…";
+    Object.assign(d, { busy: true, report: "", text: "collecting…" });
     netState("busy", "Collecting diagnostics…");
     try {
         const name = diagnosticsFileName();
-        diagnosticsReport = await collectDiagnostics(managerUiState());
-        downloadText(name, diagnosticsReport, "text/markdown");
-        state.textContent = `downloaded (${Math.ceil(diagnosticsReport.length / 1024)} KB)`;
-        state.title = name;
-        copy.hidden = false;
+        const report = await collectDiagnostics(managerUiState());
+        downloadText(name, report, "text/markdown");
+        Object.assign(d, { report, text: `downloaded (${Math.ceil(report.length / 1024)} KB)`, title: name });
         netState("ok", `Diagnostics downloaded: ${name}`);
         status(`diagnostics downloaded: ${name}`);
     } catch (e: any) {
-        state.textContent = `failed: ${e?.message || e}`;
+        d.text = `failed: ${e?.message || e}`;
         netState("error", `Diagnostics failed: ${e?.message || e}`);
         status(`diagnostics failed: ${e?.message || e}`, "error");
     } finally {
-        btn.disabled = false;
+        d.busy = false;
         const shown = panel.diagnostics;
         setTimeout(() => panel.diagnostics === shown && (panel.diagnostics = null), 2500);
     }
 }
 
-function setupDialogs(): void {
-    $("#btn-settings").addEventListener("click", () => openSettings());
-    trackSettingsScroll();
-    $("#btn-about-help").addEventListener("click", () => {
-        closeDialog($("#settings-panel"));
-        $("#btn-help").click();
-    });
-    $("#btn-about-copy").addEventListener("click", async (e) => {
-        const b = e.currentTarget as HTMLElement;
-        if (!aboutInfo.length) await renderAbout();
-        await navigator.clipboard.writeText(aboutText(aboutInfo)).then(() => flash(b, "Copied ✓"), () => flash(b, "Copy failed"));
-    });
-    $("#btn-diagnostics").addEventListener("click", () => void runDiagnostics());
-    $("#btn-diagnostics-copy").addEventListener("click", (e) => {
-        const b = e.currentTarget as HTMLElement;
-        void navigator.clipboard.writeText(diagnosticsReport).then(() => flash(b, "Copied ✓"), () => flash(b, "Copy failed"));
-    });
-    $("#btn-process-retry").addEventListener("click", () =>
-        chrome.runtime.sendMessage({ type: "processRetry" }, (st) => {
-            void chrome.runtime.lastError;
-            if (st) renderProcessStatus(st);
-        })
-    );
-    $("#btn-process-copy").addEventListener("click", async (e) => {
-        const b = e.currentTarget as HTMLButtonElement;
-        await navigator.clipboard.writeText(b.dataset.cmd || "").catch(() => {});
-        b.textContent = "Copied ✓";
-        setTimeout(() => (b.textContent = "Copy install command"), 1500);
-    });
-    $("#btn-process-trust").addEventListener("click", () => chrome.runtime.sendMessage({ type: "processTrustCa" }, () => void chrome.runtime.lastError));
-    $("#btn-help").addEventListener("click", () => {
-        openDialog("help-panel");
-        showHelpTab(document.querySelector<HTMLElement>("[data-help-tab].active")?.dataset.helpTab || "reference");
-    });
-    for (const tab of document.querySelectorAll<HTMLElement>("[data-help-tab]")) {
-        tab.addEventListener("click", () => showHelpTab(tab.dataset.helpTab!));
-    }
-    $input("#shortcuts-filter").addEventListener("input", renderShortcuts);
-    $input("#help-filter").addEventListener("input", () => filterHelpList("help"));
-    $input("#samples-filter").addEventListener("input", () => filterHelpList("samples"));
-    for (const overlay of document.querySelectorAll(".overlay")) {
-        overlay.addEventListener("mousedown", (e) => {
-            if (e.target === overlay) closeDialog(overlay);
-        });
-        for (const btn of overlay.querySelectorAll("[data-close]")) {
-            btn.addEventListener("click", () => closeDialog(overlay));
-        }
-    }
-    document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape") document.querySelectorAll(".overlay:not(.hidden)").forEach(closeDialog);
-    });
+function setMonacoVerbose(on: boolean, level?: string): void {
+    settings.monacoVerbose = on;
+    navLog(`verbose logging ${on ? "on" : "off"}`, level);
+}
 
-    // settings: theme
-    const themeSel = $("#settings-theme") as HTMLSelectElement;
-    themeSel.addEventListener("change", () => saveTheme(themeSel.value as ThemePref));
+/** Load the stored settings into the stores, and follow later changes (settings.yaml edits land in storage). */
+function setupSettings(): void {
     watchTheme((t, pref) => {
         currentTheme = t;
-        themeSel.value = pref;
+        settings.themePref = pref;
         (window as any).monaco?.editor.setTheme(monacoTheme());
     });
-
-    // settings: default log level
-    const sel = $("#settings-log-level") as HTMLSelectElement;
-    chrome.storage.local.get("resLogLevel", (d) => {
-        if (d && d.resLogLevel) {
-            sel.value = d.resLogLevel;
-            applyLogLevel(d.resLogLevel);
-        }
-    });
-    sel.addEventListener("change", () => {
-        chrome.storage.local.set({ resLogLevel: sel.value });
-        applyLogLevel(sel.value);
-    });
-
-    // settings: strategy reference (every handler names its own strategy)
-    const strategyTable = $("#settings-strategy-table") as HTMLTableElement;
-    ($("#settings-strategy-doc") as HTMLAnchorElement).href = STRATEGY_DOC_URL;
-    const strategyEnv = { firefox: typeof (globalThis as any).browser?.webRequest?.filterResponseData === "function", mv3: __MV3__ };
-    {
-        const head = strategyTable.insertRow();
-        for (const t of ["Strategy", "Pros", "Cons"]) head.appendChild(Object.assign(document.createElement("th"), { textContent: t }));
-        for (const s of STRATEGIES) {
-            const row = strategyTable.insertRow();
-            const why = strategyUnsupported(s, strategyEnv);
-            row.classList.toggle("unavailable", !!why);
-            const cell = row.insertCell();
-            cell.append(Object.assign(document.createElement("code"), { textContent: s }));
-            if (why) cell.append(Object.assign(document.createElement("div"), { className: "strategy-why", textContent: why }));
-            row.insertCell().textContent = STRATEGY_INFO[s].pros;
-            row.insertCell().textContent = STRATEGY_INFO[s].cons;
-        }
-    }
-
-    // verbose Monaco/navigation diagnostics
-    const verboseBox = $("#settings-monaco-verbose") as HTMLInputElement;
-    chrome.storage.local.get("resMonacoVerbose", (d) => {
-        monacoVerbose = !!(d && d.resMonacoVerbose);
-        verboseBox.checked = monacoVerbose;
-        navLog(`verbose logging ${monacoVerbose ? "on" : "off"}`);
-    });
-    verboseBox.addEventListener("change", () => {
-        monacoVerbose = verboseBox.checked;
-        chrome.storage.local.set({ resMonacoVerbose: monacoVerbose });
-        navLog(`verbose logging ${monacoVerbose ? "on" : "off"}`, "warn");
-    });
-
-    // Tab badges (Log + Network), one toggle
-    const badgeBox = $("#settings-log-badge") as HTMLInputElement;
-    chrome.storage.local.get("resLogBadge", (d) => {
+    settings.folder.supported = fsBridge.isSupported();
+    const bodyCap = (v: unknown): number => (isBodyCap(v) ? v : DEFAULT_BODY_CAP);
+    chrome.storage.local.get(["resLogLevel", "resMonacoVerbose", "resLogBadge", "resLogCap", BODY_CAP_KEY, "resVscodePath", "resVscodeLaunch", "resEditorUrl"], (d) => {
+        if (d?.resLogLevel) logState.level = d.resLogLevel;
+        setMonacoVerbose(!!d?.resMonacoVerbose);
         panel.statusBar = d?.resLogBadge !== false;
-        badgeBox.checked = panel.statusBar;
+        if (d?.resLogCap) logState.cap = d.resLogCap;
+        settings.bodyCap = bodyCap(d?.[BODY_CAP_KEY]);
+        if (d?.resVscodePath) settings.vscodePath = d.resVscodePath;
+        settings.launchMode = d?.resVscodeLaunch || "vscode";
+        settings.editorUrl = d?.resEditorUrl || "";
+        updateOpenVscode();
     });
-    badgeBox.addEventListener("change", () => {
-        panel.statusBar = badgeBox.checked;
-        chrome.storage.local.set({ resLogBadge: panel.statusBar });
-    });
-
-    // panel history size
-    const capInput = $("#settings-log-cap") as HTMLInputElement;
-    capInput.value = String(logState.cap);
-    chrome.storage.local.get("resLogCap", (d) => {
-        if (d && d.resLogCap) {
-            logState.cap = d.resLogCap;
-            capInput.value = String(logState.cap);
-        }
-    });
-    capInput.addEventListener("change", () => {
-        const n = Math.max(100, Math.min(10000, Number(capInput.value) || 500));
-        capInput.value = String(n);
-        logState.cap = n;
-        chrome.storage.local.set({ resLogCap: n });
-    });
-
-    // Network body capture cap (kB)
-    const bodyCapInput = $("#settings-body-cap") as HTMLInputElement;
-    const showBodyCap = (v: unknown): void => {
-        bodyCapInput.value = String(isBodyCap(v) ? v : DEFAULT_BODY_CAP);
-    };
-    showBodyCap(undefined);
-    chrome.storage.local.get(BODY_CAP_KEY, (d) => showBodyCap(d?.[BODY_CAP_KEY]));
-    bodyCapInput.addEventListener("change", () => {
-        const n = Math.max(BODY_CAP_MIN, Math.min(BODY_CAP_MAX, Math.round(Number(bodyCapInput.value)) || DEFAULT_BODY_CAP));
-        bodyCapInput.value = String(n);
-        if (n === DEFAULT_BODY_CAP) chrome.storage.local.remove(BODY_CAP_KEY);
-        else chrome.storage.local.set({ [BODY_CAP_KEY]: n });
-    });
-
-    // settings.yaml edits land in storage — reflect them live
     chrome.storage.onChanged.addListener((c) => {
-        if (c[BODY_CAP_KEY]) showBodyCap(c[BODY_CAP_KEY].newValue);
-        if (c.resLogLevel?.newValue) {
-            sel.value = c.resLogLevel.newValue;
-            applyLogLevel(c.resLogLevel.newValue);
-        }
-        if (c.resLogCap?.newValue) {
-            logState.cap = c.resLogCap.newValue;
-            capInput.value = String(logState.cap);
-        }
+        if (c[BODY_CAP_KEY]) settings.bodyCap = bodyCap(c[BODY_CAP_KEY].newValue);
+        if (c.resLogLevel?.newValue) logState.level = c.resLogLevel.newValue;
+        if (c.resLogCap?.newValue) logState.cap = c.resLogCap.newValue;
         if (c.resScripts || c.resParams || c.resLogLevel || c.resLogCap || c[BODY_CAP_KEY] || c.resSettingsText || c.resDataFiles || c.resFolders) {
             void (async () => {
                 if (selectedId === SETTINGS_ID) await loadSettingsModel();
@@ -1697,153 +1424,6 @@ function setupDialogs(): void {
             })();
         }
     });
-
-    // absolute folder path for the ↗ VS Code button
-    const pathInput = $("#settings-vscode-path") as HTMLInputElement;
-    chrome.storage.local.get("resVscodePath", (d) => {
-        if (d && d.resVscodePath) pathInput.value = d.resVscodePath;
-    });
-    const pathHelp = copyPathHint(hostOs(navigator.platform));
-    pathInput.placeholder = pathHelp.example;
-    $("#settings-vscode-path-hint").textContent = pathHelp.hint;
-    pathInput.addEventListener("change", () => {
-        pathInput.value = cleanFolderPath(pathInput.value);
-        chrome.storage.local.set({ resVscodePath: pathInput.value }, () => void refreshSyncPath());
-        void checkFolderPath();
-    });
-
-    // launch target for the ↗ button (vscode | vscode-insiders | custom | off)
-    const launchSel = $("#settings-vscode-launch") as HTMLSelectElement;
-    const urlInput = $("#settings-editor-url") as HTMLInputElement;
-    const showUrl = () => void ($("#settings-editor-url-row").hidden = launchMode !== "custom");
-    chrome.storage.local.get(["resVscodeLaunch", "resEditorUrl"], (d) => {
-        launchMode = (d && d.resVscodeLaunch) || "vscode";
-        launchTemplate = (d && d.resEditorUrl) || "";
-        launchSel.value = launchMode;
-        urlInput.value = launchTemplate;
-        showUrl();
-        updateOpenVscode();
-    });
-    launchSel.addEventListener("change", () => {
-        launchMode = launchSel.value as LaunchMode;
-        chrome.storage.local.set({ resVscodeLaunch: launchMode });
-        showUrl();
-        updateOpenVscode();
-        if (launchMode === "custom" && !urlInput.value.trim()) urlInput.focus();
-    });
-    urlInput.addEventListener("input", () => {
-        launchTemplate = urlInput.value.trim();
-        chrome.storage.local.set({ resEditorUrl: launchTemplate });
-        updateOpenVscode();
-    });
-
-    renderHelp();
-}
-
-function applyLogLevel(level: string): void {
-    logState.level = level;
-}
-
-function showHelpTab(name: string): void {
-    if (name === "samples" && !$("#samples-list").childElementCount) renderSamples();
-    if (name === "shortcuts") renderShortcuts();
-    const filter = { reference: "#help-filter", samples: "#samples-filter", shortcuts: "#shortcuts-filter" }[name];
-    if (filter) setTimeout(() => $input(filter).focus());
-    for (const tab of document.querySelectorAll<HTMLElement>("[data-help-tab]")) {
-        tab.classList.toggle("active", tab.dataset.helpTab === name);
-        tab.setAttribute("aria-selected", String(tab.dataset.helpTab === name));
-    }
-    for (const pane of document.querySelectorAll<HTMLElement>("#help-panel [data-pane]")) pane.hidden = pane.dataset.pane !== name;
-}
-
-const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
-
-function showShortcutsHelp(): void {
-    openDialog("help-panel");
-    showHelpTab("shortcuts");
-}
-
-function renderShortcuts(): void {
-    const rows = filterShortcuts(SHORTCUTS, $input("#shortcuts-filter").value, isMac);
-    const tbody = $("#shortcuts-table tbody");
-    tbody.replaceChildren(
-        ...rows.map((s) => {
-            const tr = document.createElement("tr");
-            const action = document.createElement("td");
-            action.textContent = s.action;
-            const keys = document.createElement("td");
-            keysFor(s, isMac).forEach((k, i) => {
-                if (i) keys.append(" / ");
-                const kbd = document.createElement("kbd");
-                kbd.textContent = formatKey(k, isMac);
-                keys.append(kbd);
-            });
-            const where = document.createElement("td");
-            where.className = "muted";
-            where.textContent = s.where;
-            tr.append(action, keys, where);
-            return tr;
-        })
-    );
-    $("#shortcuts-empty").hidden = rows.length > 0;
-}
-
-/** Hides Reference sections / Samples cards that don't contain every typed word. */
-function filterHelpList(pane: "help" | "samples"): void {
-    const words = $input(`#${pane}-filter`).value.toLowerCase().split(/\s+/).filter(Boolean);
-    let shown = 0;
-    for (const el of Array.from($(`#${pane}-list`).children) as HTMLElement[]) {
-        const text = (el.textContent || "").toLowerCase();
-        el.hidden = !words.every((w) => text.includes(w));
-        if (!el.hidden) shown++;
-    }
-    $(`#${pane}-empty`).hidden = shown > 0;
-}
-
-function renderHelp(): void {
-    const body = $("#help-list");
-    body.innerHTML = "";
-    for (const section of API_REFERENCE) {
-        const div = document.createElement("div");
-        div.className = "api-section";
-        const title = document.createElement("div");
-        title.className = "api-title";
-        title.textContent = section.title;
-        const pre = document.createElement("pre");
-        pre.textContent = section.body;
-        div.append(title, pre);
-        body.appendChild(div);
-    }
-}
-
-function renderSamples(): void {
-    const body = $("#samples-list");
-    body.innerHTML = "";
-    for (const sample of SAMPLES) {
-        const card = document.createElement("div");
-        card.className = "sample";
-        const head = document.createElement("div");
-        head.className = "sample-head";
-        const name = document.createElement("span");
-        name.className = "sample-name";
-        name.textContent = sample.name;
-        const use = document.createElement("button");
-        use.className = "btn-use";
-        use.textContent = "Use this";
-        use.addEventListener("click", async () => {
-            await addSample(sample);
-            document.getElementById("help-panel")?.classList.add("hidden");
-        });
-        head.append(name, use);
-        const blurb = document.createElement("div");
-        blurb.className = "sample-blurb";
-        blurb.textContent = sample.blurb;
-        const pre = document.createElement("pre");
-        pre.textContent = sample.code;
-        card.append(head, blurb, pre);
-        body.appendChild(card);
-    }
-    filterHelpList("samples");
 }
 
 /** a script name not taken yet: `base`, else `base 2`, `base 3`… */
@@ -1866,81 +1446,16 @@ async function addSample(sample: SampleScript): Promise<string> {
     return id;
 }
 
+/** Welcome → Try it: add the sample, wait until it runs (browser rules included) so the page loads with it, open the page. */
+async function trySample(sample: SampleScript, url: string | null): Promise<void> {
+    await addSample(sample);
+    await send({ type: "settleScripts" });
+    if (url) chrome.tabs.create({ url, active: true }, () => void chrome.runtime.lastError);
+}
+
 // ---- welcome page (onboarding): replaces the code view while there are no scripts; Help → Welcome reopens it ----
 function showWelcome(open: boolean): void {
-    const w = $("#welcome");
-    if (open === !w.hidden) return;
-    if (open && !$("#welcome-samples").childElementCount) renderWelcome();
-    w.hidden = !open;
-    $("#monaco-host").hidden = open;
-    // nothing to go back to without scripts: no close button then
-    $("#welcome-close").hidden = !open || !scripts.length;
-}
-
-function renderWelcome(): void {
-    const list = $("#welcome-samples");
-    list.innerHTML = "";
-    for (const sample of SAMPLES) {
-        const card = document.createElement("article");
-        card.className = "welcome-card";
-        card.dataset.sample = sample.name;
-        const name = document.createElement("div");
-        name.className = "welcome-card-name";
-        name.textContent = sample.name;
-        const blurb = document.createElement("div");
-        blurb.className = "welcome-card-blurb";
-        blurb.textContent = sampleSummary(sample.blurb);
-        const foot = document.createElement("div");
-        foot.className = "welcome-card-foot";
-        const chips = document.createElement("span");
-        chips.className = "welcome-chips";
-        for (const s of sampleStrategies(sample.code)) {
-            const chip = document.createElement("span");
-            chip.className = "welcome-chip";
-            chip.textContent = s;
-            chip.title = s === "onDocument" ? "Runs in the page at DOM-ready — no network strategy" : `strategy: "${s}"`;
-            chips.append(chip);
-        }
-        const url = sampleTryUrl(sample.code);
-        const view = document.createElement("button");
-        view.textContent = "Open";
-        view.title = "Add it to your scripts and open its code";
-        view.addEventListener("click", () => void addSample(sample));
-        const tryIt = document.createElement("button");
-        tryIt.className = "primary welcome-try";
-        tryIt.textContent = "Try it";
-        tryIt.title = url ? `Add it, turn it on and open ${url} in a new tab` : "Add it and turn it on";
-        tryIt.addEventListener("click", async () => {
-            tryIt.disabled = true;
-            try {
-                await addSample(sample);
-                // wait until the script runs (browser rules included) so the page loads with it
-                await send({ type: "settleScripts" });
-                if (url) chrome.tabs.create({ url, active: true }, () => void chrome.runtime.lastError);
-            } finally {
-                tryIt.disabled = false;
-            }
-        });
-        foot.append(chips, view, tryIt);
-        card.append(name, blurb, foot);
-        list.append(card);
-    }
-}
-
-function setupWelcome(): void {
-    $("#welcome-close").addEventListener("click", () => {
-        showWelcome(false);
-        if (!selectedId && scripts.length) selectReal(scripts[0].id);
-    });
-    $("#welcome-new").addEventListener("click", () => startCreate("script"));
-    $("#welcome-reference").addEventListener("click", () => {
-        openDialog("help-panel");
-        showHelpTab("reference");
-    });
-    $("#btn-help-welcome").addEventListener("click", () => {
-        closeDialog($("#help-panel"));
-        showWelcome(true);
-    });
+    dialogs.welcome = open;
 }
 
 // ---- toolbar folder sync button: off / disconnected / connected / sending / receiving ----
@@ -1974,15 +1489,13 @@ async function folderSyncButtonClicked(): Promise<void> {
 
 // ---- dedicated scripts folder: pick once, edits sync both ways ----
 async function markFolderSynced(): Promise<void> {
-    const btn = $("#btn-vscode");
-    btn.classList.add("active");
-    btn.textContent = "Scripts Folder ✓";
+    settings.folder.mode = "synced";
     (window as any).__resSyncActive = true;
     fsBridge.setCachedActive(true);
     updateOpenVscode();
     const st = await fsBridge.queryStatus();
     renderFolderSync(st);
-    $("#folder-state").textContent = st.path || "(syncing)";
+    settings.folder.path = st.path || "";
     await refreshSyncPath();
     await checkFolderPath();
 }
@@ -1996,9 +1509,7 @@ async function refreshSyncPath(): Promise<void> {
         (window as any).__resSyncPath = st.path;
         return;
     }
-    chrome.storage.local.get("resVscodePath", (d) => {
-        (window as any).__resSyncPath = (d && d.resVscodePath) || "";
-    });
+    (window as any).__resSyncPath = settings.vscodePath;
 }
 
 /**
@@ -2007,23 +1518,12 @@ async function refreshSyncPath(): Promise<void> {
  * draw the eye to it.
  */
 async function checkFolderPath(flash = false): Promise<boolean> {
-    const row = $("#settings-folder-path");
-    const input = $("#settings-vscode-path") as HTMLInputElement;
-    const warn = $("#settings-vscode-path-warn");
     const st = await fsBridge.queryStatus();
-    const typed = input.value.trim();
+    const typed = settings.vscodePath.trim();
     const name = st.path && !st.path.startsWith("/") ? st.path : "";
     const need = !!st.active && !st.path?.startsWith("/") && (!typed || (!!name && baseName(typed.replace(/\\/g, "/")).toLowerCase() !== name.toLowerCase()));
-    row.classList.toggle("needs-path", need);
-    warn.hidden = !need;
-    warn.textContent = !need ? "" : !typed ? `⚠ Paste the absolute path of${name ? ` "${name}"` : " the synced folder"} here — the ↗ button can't open files without it.` : `⚠ This path doesn't end in "${name}", the synced folder — update it so ↗ opens the right files.`;
-    if (need && flash) {
-        row.classList.remove("flash");
-        void row.offsetWidth; // restart the animation
-        row.classList.add("flash");
-        row.scrollIntoView({ block: "center", behavior: "smooth" });
-        input.focus({ preventScroll: true });
-    }
+    settings.folder.pathWarning = !need ? "" : !typed ? `⚠ Paste the absolute path of${name ? ` "${name}"` : " the synced folder"} here — the ↗ button can't open files without it.` : `⚠ This path doesn't end in "${name}", the synced folder — update it so ↗ opens the right files.`;
+    if (need && flash) settings.folder.flash++;
     return need;
 }
 
@@ -2031,19 +1531,46 @@ function newId(): string {
     return "s_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
 }
 
+/** Settings → Scripts Folder… while a saved folder waits for its permission click: that click (also) reconnects */
+let folderReconnect: (() => Promise<void>) | null = null;
+
+/** Settings → Scripts Folder…: stop syncing, or pick a folder to sync */
+async function folderButtonClicked(): Promise<void> {
+    if (fsBridge.isSyncing()) {
+        await fsBridge.stopSync();
+        (window as any).__resSyncActive = false;
+        fsBridge.setCachedActive(false);
+        settings.folder.mode = "off";
+        folderNeedsGrant = false;
+        renderFolderSync({ active: false });
+        updateOpenVscode();
+        void checkFolderPath();
+        return;
+    }
+    try {
+        await fsBridge.openFolder();
+    } catch (e: any) {
+        if (e?.name === "AbortError") {
+            managerLog("folder pick cancelled", "warn");
+            return;
+        }
+        throw e;
+    }
+    await markFolderSynced();
+    await checkFolderPath(true);
+}
+
 async function autoReconnectFolder(): Promise<void> {
     if (!fsBridge.isSupported()) return;
     const st = await fsBridge.autoReconnect();
-    const btn = $("#btn-vscode");
     if (st === "synced") {
         await markFolderSynced();
     } else if (st === "prompt") {
         // one click re-grants (Chrome drops FS grants between restarts)
-        btn.textContent = "Scripts Folder… (reconnect)";
-        $("#folder-state").textContent = "reconnect needed";
+        settings.folder.mode = "reconnect";
         renderFolderSync({ active: false, paused: true });
         const reconnect = async (): Promise<void> => {
-            btn.removeEventListener("click", reconnect);
+            if (folderReconnect === reconnect) folderReconnect = null;
             if (fsBridge.isSyncing()) return;
             const ok = await fsBridge.reconnectClicked();
             if (ok) {
@@ -2051,7 +1578,7 @@ async function autoReconnectFolder(): Promise<void> {
                 status("synced folder reconnected ✓");
             }
         };
-        btn.addEventListener("click", reconnect);
+        folderReconnect = reconnect;
         status("synced folder needs reconnect — click to reconnect", "dirty", () => void reconnect());
     }
 }
@@ -2133,7 +1660,6 @@ async function main(): Promise<void> {
         clearPanel,
         runDiagnostics: () => void runDiagnostics(),
         openProblem: (id: string, p: Problem) => void openProblem(id, p),
-        openSettings: (section?: string) => openSettings(section),
         dismissError: (id: string) => void send({ type: "clearScriptError", scriptId: id }),
         focusEditor: () => editor?.focus(),
         status: (text: string, cls?: string) => status(text, cls),
@@ -2146,6 +1672,41 @@ async function main(): Promise<void> {
         setScriptEnabled: (id: string, enabled: boolean) => {
             const script = scripts.find((s) => s.id === id);
             if (script) void setScriptEnabled(script, enabled);
+        },
+        quickOpenItems: () => [{ id: SETTINGS_ID, name: "settings.yaml" }, ...scripts.map((s) => ({ id: s.id, name: s.meta.name })), ...dataFiles.map((d) => ({ id: d.id, name: d.path }))],
+        openQuick: (id: string) => {
+            void select(id);
+            editor.focus(); // VS Code behavior: a ⌘P jump focuses the editor
+        },
+        addSample,
+        trySample,
+        closeWelcome: () => {
+            showWelcome(false);
+            if (!selectedId && scripts.length) selectReal(scripts[0].id);
+        },
+        folderButton: () => {
+            void folderButtonClicked();
+            // reconnect mode: the same click also re-grants the saved folder
+            void folderReconnect?.();
+        },
+        setVscodePath: (path: string) => {
+            settings.vscodePath = path;
+            chrome.storage.local.set({ resVscodePath: path }, () => void refreshSyncPath());
+            void checkFolderPath();
+        },
+        setLaunchMode: (mode: LaunchMode) => {
+            settings.launchMode = mode;
+            chrome.storage.local.set({ resVscodeLaunch: mode });
+            updateOpenVscode();
+        },
+        setEditorUrl: (url: string) => {
+            settings.editorUrl = url;
+            chrome.storage.local.set({ resEditorUrl: url });
+            updateOpenVscode();
+        },
+        setMonacoVerbose: (on: boolean) => {
+            chrome.storage.local.set({ resMonacoVerbose: on });
+            setMonacoVerbose(on, "warn");
         },
     } satisfies typeof actions);
     await loadMonaco();
@@ -2197,20 +1758,10 @@ async function main(): Promise<void> {
     // focus and show up in F1).
     // ⌘/ (comment), ⌘F (find), ⌘D (next occurrence) and Shift+Alt+A (block
     // comment) are Monaco built-ins.
-    const palette = createQuickOpenPalette(
-        $("#quick-open"),
-        $input("#qo-input"),
-        $("#qo-list"),
-        () => [{ id: SETTINGS_ID, name: "settings.yaml" }, ...scripts.map((s) => ({ id: s.id, name: s.meta.name })), ...dataFiles.map((d) => ({ id: d.id, name: d.path }))],
-        (id) => {
-            select(id);
-            editor.focus(); // VS Code behavior: a ⌘P jump focuses the editor
-        }
-    );
     document.addEventListener("keydown", (e) => {
         if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "p") {
             e.preventDefault();
-            palette.toggle();
+            dialogs.quickOpen = !dialogs.quickOpen;
         } else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === ",") {
             e.preventDefault();
             openSettings();
@@ -2254,7 +1805,7 @@ async function main(): Promise<void> {
         // target is <folder>/settings.yaml, written by folderSync
         const data = dataFiles.find((d) => d.id === selectedId);
         const file = data ? `${folder.replace(/\/+$/, "")}/${data.path}` : vscodeTargetPath(folder, selectedId, scripts.find((s) => s.id === selectedId)?.meta.name, SETTINGS_ID, SETTINGS_FILE);
-        const url = editorLaunchUrl(launchMode, launchTemplate, file, editor?.getPosition?.()?.lineNumber || 1);
+        const url = editorLaunchUrl(settings.launchMode, settings.editorUrl, file, editor?.getPosition?.()?.lineNumber || 1);
         if (!url) return;
         // launch from THIS page (user gesture): external-protocol requests
         // from the background page are dropped by Chromium
@@ -2263,7 +1814,7 @@ async function main(): Promise<void> {
         document.body.appendChild(a);
         a.click();
         a.remove();
-        status(`opening ${file} in ${launchAppName(launchMode)}…`);
+        status(`opening ${file} in ${launchAppName(settings.launchMode)}…`);
         const msg = `openInVscode → launching ${url}`;
         appendLog({ at: Date.now(), message: `[editor] ${msg}`, level: "info" });
         chrome.runtime.sendMessage({ type: "debugLog", entry: { at: Date.now(), src: "editor", msg, level: "info" } }, () => void chrome.runtime.lastError);
@@ -2271,38 +1822,6 @@ async function main(): Promise<void> {
     $("#editor-status").addEventListener("click", () => statusClick?.());
 
     // VS Code folder sync
-    const btn = $("#btn-vscode");
-    if (fsBridge.isSupported()) {
-        btn.addEventListener("click", async () => {
-            if (fsBridge.isSyncing()) {
-                await fsBridge.stopSync();
-                (window as any).__resSyncActive = false;
-                fsBridge.setCachedActive(false);
-                btn.classList.remove("active");
-                btn.textContent = "Scripts Folder…";
-                $("#folder-state").textContent = "";
-                folderNeedsGrant = false;
-                renderFolderSync({ active: false });
-                updateOpenVscode();
-                void checkFolderPath();
-                return;
-            }
-            try {
-                await fsBridge.openFolder();
-            } catch (e: any) {
-                if (e?.name === "AbortError") {
-                    managerLog("folder pick cancelled", "warn");
-                    return;
-                }
-                throw e;
-            }
-            await markFolderSynced();
-            await checkFolderPath(true);
-        });
-    } else {
-        btn.setAttribute("disabled", "");
-        btn.title = "File System Access API unavailable (Firefox) — use Import/Export";
-    }
     const syncBtn = $("#btn-folder-sync");
     if (fsBridge.isSupported()) syncBtn.addEventListener("click", () => void folderSyncButtonClicked());
     else {
@@ -2466,8 +1985,7 @@ async function main(): Promise<void> {
     showPanelTab(panelTabOf(layout));
     watchNetCounts();
     startKeepAlive();
-    setupDialogs();
-    setupWelcome();
+    setupSettings();
     
 
     void autoReconnectFolder();
@@ -2539,7 +2057,7 @@ function registerLayoutActions(): void {
         ["wt.showLog", "View: Show Log", [KeyMod.Alt | KeyMod.Shift | KeyCode.KeyL], () => focusPanelView("log")],
         ["wt.showNetwork", "View: Show Network", [KeyMod.Alt | KeyMod.Shift | KeyCode.KeyN], () => focusPanelView("network")],
         ["wt.clearPanel", "View: Clear Log / Network", [KeyMod.Alt | KeyMod.Shift | KeyCode.KeyK], clearPanelView],
-        ["wt.showShortcuts", "Help: Keyboard Shortcuts", [], showShortcutsHelp],
+        ["wt.showShortcuts", "Help: Keyboard Shortcuts", [], () => openHelp("shortcuts")],
         ["wt.navigateBack", "Go Back", navKeybindings().back, navigateBack],
         ["wt.navigateForward", "Go Forward", navKeybindings().forward, navigateForward],
     ];
@@ -2569,8 +2087,6 @@ function select(id: string): Promise<void> {
     return Promise.resolve();
 }
 
-let monacoVerbose = false;
-
 /** Navigation diagnostics. Warnings/errors always log; the rest only with the
  * "Verbose Monaco logging" setting. Verbose lines use "warn" so the panel's
  * level filter never hides them. */
@@ -2582,7 +2098,7 @@ function managerLog(msg: string, level: string): void {
 
 function navLog(msg: string, level = "info"): void {
     if (level === "info") {
-        if (!monacoVerbose) return;
+        if (!settings.monacoVerbose) return;
         level = "warn";
     }
     const text = `[editor] nav: ${msg}`;
@@ -2623,7 +2139,7 @@ function installMonacoTrace(): void {
 }
 
 async function traceDefinition(trigger: string, pos?: IPosition): Promise<void> {
-    if (!monacoVerbose) return;
+    if (!settings.monacoVerbose) return;
     try {
         const m = (window as any).monaco;
         const model = editor.getModel();

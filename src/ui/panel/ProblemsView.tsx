@@ -3,6 +3,7 @@ import { useSnapshot } from "valtio";
 import { badgeCount } from "../logBadge";
 import { filterProblems, problemCounts, settingsLink, type Problem, type ProblemGroup } from "../problems";
 import { actions } from "../shell/actions";
+import { openSettings } from "../state/dialogs";
 import { panel } from "../state/panel";
 
 const ERROR_ICON = (
@@ -40,7 +41,7 @@ function ProblemMessage({ text }: { text: string }) {
                 onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    actions.openSettings(link.section);
+                    openSettings(link.section);
                 }}
             >
                 {link.text}
