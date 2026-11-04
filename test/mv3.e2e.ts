@@ -28,7 +28,7 @@ import { resolveBrowser } from "./browserSetup";
 import { checkApiTypingsNav } from "./apiTypingsNav";
 import { checkRulesStrategy, rulesServerRoute } from "./rulesE2e";
 import { checkFoldersAndDataFiles, foldersServerRoute } from "./foldersE2e";
-import { checkOverlayPreview, checkOverlays, checkOverlayShortcuts, checkPageStores, overlayServerRoute } from "./overlayE2e";
+import { checkOverlayPreview, checkOverlays, checkEarlyRequests, checkOverlayShortcuts, checkPageStores, overlayServerRoute } from "./overlayE2e";
 
 const EXT_ROOT = path.join(new URL("..", import.meta.url).pathname, "dist-mv3");
 // unpacked extension id = sha256 of the absolute path (hex digits → a-p)
@@ -104,7 +104,8 @@ await new Promise((r) => server.listen(PORT, "127.0.0.1", r as () => void));
 const profile = mkdtempSync(path.join(tmpdir(), "reso-mv3-"));
 // chrome.userScripts (isolated onPage code) needs Developer mode before Chrome
 // 138 — on in the profile up front; the optional permission is granted by the
-// overlay check through the Editor's banner
+// overlay check through the Editor's banner, and (138+) its "Allow User
+// Scripts" switch on chrome://extensions
 mkdirSync(path.join(profile, "Default"), { recursive: true });
 writeFileSync(path.join(profile, "Default", "Preferences"), JSON.stringify({ extensions: { ui: { developer_mode: true } } }));
 const proc = spawn(await resolveBrowser(), [
@@ -324,10 +325,20 @@ try {
                 async grant() {
                     await mgr.bringToFront();
                     await mgr.click("#userscripts-grant", { timeout: 5000 });
+                    // Chrome 138+: also the per-extension "Allow User Scripts" switch, flipped like a user would
+                    const details = await ctx.newPage();
+                    await details.goto(`chrome://extensions/?id=${extId}`);
+                    const toggle = details.locator("extensions-toggle-row#allow-user-scripts");
+                    if ((await toggle.count()) && !(await toggle.evaluate((el: any) => el.checked))) await toggle.click();
+                    await details.close();
+                    // back in the Editor: focus re-checks (headless fires no focus event on its own)
+                    await mgr.bringToFront();
+                    await mgr.evaluate(() => window.dispatchEvent(new Event("focus")));
                 },
             },
         });
         await checkPageStores(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
+        await checkEarlyRequests(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
         await checkOverlayShortcuts(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
         await checkOverlayPreview(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
         for (const id of on) await send({ type: "setEnabled", id, enabled: true });

@@ -148,7 +148,14 @@ function mv3Manifest(mv2) {
 }
 
 async function buildOnce(dist, mv3) {
-    for (const entry of entriesFor(dist, mv3)) {
+    const entries = entriesFor(dist, mv3);
+    // the page hook first: MV2 Chromium's bridge injects its source inline
+    const isHook = (e) => e.output.file === path.join(dist, "hook.js");
+    const hook = entries.find(isHook);
+    for (const entry of [hook, ...entries.filter((e) => !isHook(e))]) {
+        if (entry !== hook) {
+            entry.transform.define.__HOOK_SRC__ = JSON.stringify(await readFile(hook.output.file, "utf8"));
+        }
         const bundle = await rolldown(entry);
         await bundle.write({ file: entry.output.file, format: entry.output.format });
         await bundle.close();

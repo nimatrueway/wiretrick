@@ -21,6 +21,8 @@ type Check = (name: string, ok: boolean, extra?: string) => void;
 
 const hits: string[] = [];
 let lastCookie = "";
+/** CSP violation reports the /early?csp page sent */
+let cspReports = 0;
 
 const PAGE = (body: string) =>
     `<!doctype html><html><head><title>OV</title></head><body style="margin:0;height:100vh">
@@ -54,6 +56,33 @@ window.addEventListener("keydown", (e) => { if (e.altKey && e.code === "KeyP") e
     if (url.pathname === "/ov-two") {
         res.writeHead(200, { "content-type": "text/html" });
         res.end(PAGE(""));
+        return true;
+    }
+    if (url.pathname === "/early-csp-report") {
+        cspReports++;
+        res.writeHead(204);
+        res.end();
+        return true;
+    }
+    if (url.pathname === "/early") {
+        // ?csp: a strict page CSP (nonced scripts only) that reports violations
+        const csp = url.searchParams.has("csp");
+        res.writeHead(200, { "content-type": "text/html", ...(csp ? { "content-security-policy": "script-src 'nonce-e4rly'; report-uri /early-csp-report" } : {}) });
+        // the page's own requests while it's still parsing: before the hook got the page's scripts
+        res.end(`<!doctype html><html><head><script nonce="e4rly">
+window.__early = { hooked: !/native code/.test(String(window.fetch)) };
+fetch("/early-data?via=fetch").then((r) => r.text()).then((t) => (window.__early.fetch = t), (e) => (window.__early.fetch = "error: " + e));
+const x = new XMLHttpRequest();
+x.open("GET", "/early-data?via=xhr");
+x.onload = () => (window.__early.xhr = x.responseText);
+x.onerror = () => (window.__early.xhr = "error");
+x.send();
+</script></head><body>early</body></html>`);
+        return true;
+    }
+    if (url.pathname === "/early-data") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("REAL");
         return true;
     }
     if (url.pathname === "/ov-ps") {
@@ -531,8 +560,6 @@ export async function checkPageStores(ctx: any, mgr: any, origin: string, check:
     const open = async (q: string) => {
         const p = await ctx.newPage();
         await p.goto(`${origin}/ov-two?t=${q}`, { waitUntil: "load", timeout: 15000 });
-        // the page's script bundle has arrived (the hook misses requests before that)
-        await overlayFrame(p, "#two");
         return p;
     };
     const a = await open("A");
@@ -566,7 +593,6 @@ export async function checkPageStores(ctx: any, mgr: any, origin: string, check:
     const spa = await hit(a);
     check(t("a pushState keeps the page's copy"), spa === "3", spa);
     await a.reload({ waitUntil: "load", timeout: 15000 });
-    await overlayFrame(a, "#two");
     const fresh = [await hit(a), await hit(b)];
     check(t("a reload starts the page's copy over (the other tab keeps its own)"), fresh.join() === "1,2", fresh.join());
     const wa2 = await asked(a, (v) => v?.n === 1);
@@ -574,4 +600,39 @@ export async function checkPageStores(ctx: any, mgr: any, origin: string, check:
     await a.close();
     await b.close();
     await send({ type: "deleteScript", id: "s_two" });
+}
+
+/**
+ * The page's first requests — fetch and XHR from an inline script while
+ * the HTML still parses, and a fetch the moment `load` fires — reach a
+ * page-strategy handler: the hook holds them until it knows the page's
+ * scripts instead of letting them through unmodified.
+ */
+export async function checkEarlyRequests(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
+    const t = (s: string) => `early requests${opts.label ?? ""}: ${s}`;
+    const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
+    const code = `wt.replaceResponse({ url: "${origin}/early-data*", strategy: "page" }, (ctx) => "MOD:" + new URL(ctx.url).searchParams.get("via"));\n`;
+    const saved = await send({ type: "saveScript", id: "s_early", code, name: "early" });
+    check(t("the script saves"), !saved?.error, saved?.error);
+    await mgr.waitForTimeout(800);
+    const p = await ctx.newPage();
+    const seen = async () => {
+        const atLoad = await p.evaluate(() => fetch("/early-data?via=load").then((r) => r.text())).catch((e: any) => String(e));
+        const parse = await waitFor<any>(() => p.evaluate(() => (window as any).__early), (v) => v?.fetch && v?.xhr, 8000);
+        return { ...parse, load: atLoad };
+    };
+    const want = (v: any) => v?.fetch === "MOD:fetch" && v?.xhr === "MOD:xhr" && v?.load === "MOD:load";
+    await p.goto(`${origin}/early`, { waitUntil: "load", timeout: 15000 });
+    const first = await seen();
+    check(t("a fresh page's first fetch/XHR (while parsing, and at load) are handled"), want(first), JSON.stringify(first));
+    await p.reload({ waitUntil: "load", timeout: 15000 });
+    const again = await seen();
+    check(t("after a reload too"), want(again), JSON.stringify(again));
+    cspReports = 0;
+    await p.goto(`${origin}/early?csp`, { waitUntil: "load", timeout: 15000 });
+    const strict = await seen();
+    await p.waitForTimeout(500);
+    check(t("on a page whose CSP forbids inline scripts — without a CSP violation report"), want(strict) && cspReports === 0, JSON.stringify({ ...strict, cspReports }));
+    await p.close();
+    await send({ type: "deleteScript", id: "s_early" });
 }

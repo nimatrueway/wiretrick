@@ -6,6 +6,7 @@ export default defineConfig({
     define: {
         __MV3__: "false",
         __COMMIT__: JSON.stringify("test"),
+        __HOOK_SRC__: JSON.stringify(""),
         __BUILD_TIME__: JSON.stringify("1970-01-01T00:00:00.000Z"),
     },
     esbuild: { jsx: "automatic", jsxImportSource: "react" },

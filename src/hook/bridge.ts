@@ -99,6 +99,16 @@ import { ShortcutRegistry, watchShortcuts } from "../shared/shortcut";
         }
     }
 
+    function askBundle(): Promise<any> {
+        return new Promise((resolve) => safeSend({ type: "getHookBundle", url: location.href }, resolve));
+    }
+    /**
+     * asked for as the bridge starts — the hook's first `status?` is answered
+     * from it, so the hook (which holds the page's requests until then)
+     * waits as little as possible
+     */
+    let earlyBundle: Promise<any> | null = null;
+
     window.addEventListener("message", (event: MessageEvent) => {
         if (event.source !== window) return;
         const data = event.data;
@@ -106,10 +116,12 @@ import { ShortcutRegistry, watchShortcuts } from "../shared/shortcut";
         void guard(() => {
 
         if (data.kind === "status?") {
-            safeSend({ type: "getHookBundle", url: location.href }, (resp: any) => {
+            const bundle = earlyBundle ?? askBundle();
+            earlyBundle = null;
+            void bundle.then((resp) => guard(() => {
                 noteBundle(resp, false);
                 postStatus(resp, false);
-            });
+            }));
             return;
         }
         if (data.kind === "claim") {
@@ -749,6 +761,23 @@ import { ShortcutRegistry, watchShortcuts } from "../shared/shortcut";
     // initial: inject the hook + register dom handlers
     function injectHook(): void {
         if (document.querySelector("script[data-res-override-hook]")) return;
+        // MV2 Chromium: inline, so it runs now — before the page's own
+        // scripts make their first requests (a src script runs later). MV2
+        // content scripts' inline scripts aren't bound by the page CSP; if
+        // one ever blocks it (Trusted Types…), src still works
+        // (Firefox runs the hook as a MAIN-world content script already)
+        if (!__MV3__ && !chrome.runtime.getURL("").startsWith("moz-extension:")) {
+            const inline = document.createElement("script");
+            inline.setAttribute("data-res-override-hook", "1");
+            try {
+                inline.textContent = __HOOK_SRC__;
+                (document.head || document.documentElement).appendChild(inline);
+            } catch {}
+            const ran = inline.hasAttribute("data-res-ran");
+            inline.remove();
+            if (ran) return;
+            dlog("debug", "the inline page hook didn't run (page CSP) — injecting it by src");
+        }
         const script = document.createElement("script");
         script.src = chrome.runtime.getURL("hook.js");
         script.setAttribute("data-res-override-hook", "1");
@@ -758,6 +787,7 @@ import { ShortcutRegistry, watchShortcuts } from "../shared/shortcut";
 
     async function init(): Promise<void> {
         dlog("debug", "bridge ready", { href: location.href, readyState: document.readyState });
+        earlyBundle = askBundle();
         injectHook();
         // isolated handlers must not depend on the page hook asking for its status
         setTimeout(() => {

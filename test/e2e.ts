@@ -32,7 +32,7 @@ import { resolveBrowser } from "./browserSetup";
 import { checkApiTypingsNav } from "./apiTypingsNav";
 import { checkRulesStrategy, rulesServerRoute } from "./rulesE2e";
 import { checkFoldersAndDataFiles, foldersServerRoute } from "./foldersE2e";
-import { checkOverlayPreview, checkOverlays, checkOverlayShortcuts, checkPageStores, overlayServerRoute } from "./overlayE2e";
+import { checkOverlayPreview, checkOverlays, checkEarlyRequests, checkOverlayShortcuts, checkPageStores, overlayServerRoute } from "./overlayE2e";
 
 const EXT_ROOT = path.join(new URL("..", import.meta.url).pathname, "dist");
 
@@ -494,11 +494,12 @@ await p10e.waitForSelector("body[data-done]", { timeout: 10000 }).catch(() => {}
 await mgr.waitForTimeout(800);
 const rows10e: { name: string; cls: string; badges: string[]; bgImg: string; bgSize: string }[] = await mgr.evaluate(() =>
     [...document.querySelectorAll("#network-view tbody tr.net-row")]
-        .filter((t) => (t.getAttribute("title") || "").includes("/tap-api/"))
+        // /tap-api/{m1,t1,t2,m2,t3}: rows show the last path segment
+        .filter((t) => /^[mt]\d$/.test(t.querySelector(".net-name")?.textContent || ""))
         .map((tr) => {
             const td = tr.querySelector("td.c-name") as HTMLElement;
             const cs = getComputedStyle(td);
-            return { name: tr.getAttribute("title") || "", cls: tr.className, badges: [...tr.querySelectorAll(".net-badge")].map((b) => b.className), bgImg: cs.backgroundImage, bgSize: cs.backgroundSize };
+            return { name: tr.querySelector(".net-name")?.textContent || "", cls: tr.className, badges: [...tr.querySelectorAll(".net-badge")].map((b) => b.className), bgImg: cs.backgroundImage, bgSize: cs.backgroundSize };
         })
 );
 const observedOnly10e = rows10e.filter((r) => r.badges.length > 0 && r.badges.every((b) => /\bobserved\b/.test(b)));
@@ -561,6 +562,7 @@ await checkFoldersAndDataFiles(ctx, mgr, ORIGIN, check);
 // ---------- 10i. overlays (wt.onOverlay) and calls between the overlay and the page ----------
 await checkOverlays(ctx, mgr, ORIGIN, check, { isolated: true });
 await checkPageStores(ctx, mgr, ORIGIN, check);
+await checkEarlyRequests(ctx, mgr, ORIGIN, check);
 await checkOverlayShortcuts(ctx, mgr, ORIGIN, check);
 await checkOverlayPreview(ctx, mgr, ORIGIN, check);
 

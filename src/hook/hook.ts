@@ -17,6 +17,10 @@ import { bodyKind, setTextTypes } from "../shared/bodyKind";
 import { readFetchBody } from "../shared/requestBody";
 
 (() => {
+    // tells the MV2 bridge its inline copy ran (a page CSP may block it)
+    try {
+        document.currentScript?.setAttribute("data-res-ran", "1");
+    } catch {}
     const w = window as any;
     // only the page's own world: as an isolated content script (a browser
     // that ignores the manifest's `world: "MAIN"`) the bridge injects us instead
@@ -46,6 +50,21 @@ import { readFetchBody } from "../shared/requestBody";
         }
     };
     let patched = false;
+    /**
+     * Until the first status, the hook doesn't know the page's scripts:
+     * fetch/XHR are patched from the start and wait for it (at most
+     * STATUS_WAIT_MS) — else a page's first requests, the ones an inline
+     * script makes while the HTML parses, would go out unmodified.
+     */
+    let known = false;
+    const STATUS_WAIT_MS = 3000;
+    let release: () => void = () => {};
+    const statusKnown = new Promise<void>((r) => (release = r));
+    function markKnown(): void {
+        if (known) return;
+        known = true;
+        release();
+    }
     /** the bridge reported the extension context dead (extension reload) */
     let dead = false;
     let domHandlers: { scriptId: string; name: string; src: string; params?: Record<string, any> }[] = [];
@@ -126,6 +145,8 @@ import { readFetchBody } from "../shared/requestBody";
         }
         if (data.kind === "status") {
             const wasActive = active;
+            const first = !known;
+            markKnown();
             active = !!data.active;
             routes = data.routes || [];
             setTextTypes(data.textTypes);
@@ -134,6 +155,8 @@ import { readFetchBody } from "../shared/requestBody";
             logUp(`status: ${active ? "active" : "inactive"}, dom=${domHandlers.length}${data.hot ? " (hot)" : ""}`, "debug");
             if (active) install();
             else if (wasActive) goDormant();
+            // nothing here for the hook: the page keeps its own fetch/XHR
+            else if (first) unpatch();
             compileAndScheduleDocument(!!data.hot);
         }
     });
@@ -144,17 +167,13 @@ import { readFetchBody } from "../shared/requestBody";
         // in-flight relays resolve immediately — no 15s watchdog stalls
         for (const [, resolve] of pending) resolve(null);
         pending.clear();
+        markKnown();
         if (!active && !patched) return;
         active = false;
         routes = [];
         domHandlers = [];
         libSources = [];
-        if (patched) {
-            w.fetch = w.__resOrigFetch;
-            w.XMLHttpRequest.prototype.open = w.__resOrigOpen;
-            w.XMLHttpRequest.prototype.send = w.__resOrigSend;
-            patched = false;
-        }
+        unpatch();
         logUp("extension reloaded — hook dormant until the next page load");
     }
 
@@ -296,6 +315,17 @@ import { readFetchBody } from "../shared/requestBody";
         } catch {}
     }
 
+    /** restore the page's own fetch/XHR */
+    function unpatch(): void {
+        if (!patched) return;
+        w.fetch = w.__resOrigFetch;
+        w.XMLHttpRequest.prototype.open = w.__resOrigOpen;
+        w.XMLHttpRequest.prototype.send = w.__resOrigSend;
+        w.XMLHttpRequest.prototype.setRequestHeader = w.__resOrigSetReqHeader;
+        w.XMLHttpRequest.prototype.abort = w.__resOrigAbort;
+        patched = false;
+    }
+
     function install(): void {
         if (patched) return;
         patched = true;
@@ -363,6 +393,7 @@ import { readFetchBody } from "../shared/requestBody";
                 url = rawUrl;
             }
 
+            if (!known) await statusKnown;
             if (!active || !wants(url, method)) return origFetch(input, init);
 
             claim(url);
@@ -470,9 +501,18 @@ import { readFetchBody } from "../shared/requestBody";
             this.__resMethod = args[0] || "GET";
             this.__resSync = args[2] === false;
             this.__resHeaders = {};
+            this.__resSendSeq = (this.__resSendSeq || 0) + 1;
             return OrigOpen.apply(this, args as any);
         };
         const OrigSetReqHeader = XMLHttpRequest.prototype.setRequestHeader;
+        w.__resOrigSetReqHeader = OrigSetReqHeader;
+        const OrigAbort = XMLHttpRequest.prototype.abort;
+        w.__resOrigAbort = OrigAbort;
+        (window.XMLHttpRequest.prototype as any).abort = function () {
+            // a send still waiting for the status is dropped
+            this.__resSendSeq = (this.__resSendSeq || 0) + 1;
+            return OrigAbort.call(this);
+        };
         (window.XMLHttpRequest.prototype as any).setRequestHeader = function (k: string, v: string) {
             (this.__resHeaders ||= {})[k] = v;
             return OrigSetReqHeader.call(this, k, v);
@@ -480,6 +520,17 @@ import { readFetchBody } from "../shared/requestBody";
 
         (window.XMLHttpRequest.prototype as any).send = function (...args: any[]) {
             const xhr = this as any;
+            if (!known && xhr.__resSync !== true) {
+                // sent again once the status is in (the native send, if the page has nothing for us);
+                // dropped if the page aborted or reopened it meanwhile
+                const seq = xhr.__resSendSeq;
+                void statusKnown.then(() => {
+                    try {
+                        if (xhr.__resSendSeq === seq && xhr.readyState === 1) xhr.send(...args);
+                    } catch {}
+                });
+                return;
+            }
             if (!active || !xhr.__resUrl) {
                 return OrigSend.apply(this, args as any);
             }
@@ -598,5 +649,12 @@ import { readFetchBody } from "../shared/requestBody";
     (w as any).__resHookState = () => ({ active, patched, domFired, domHandlers: domHandlers.length });
     (w as any).__resViaBridge = viaBridge;
 
+    // patched before the page's own scripts run; the first status says whether to stay
+    install();
+    setTimeout(() => {
+        if (known) return;
+        logUp(`no status from the extension after ${STATUS_WAIT_MS / 1000}s — the page's waiting requests go out unmodified`, "warn");
+        markKnown();
+    }, STATUS_WAIT_MS);
     requestStatus();
 })();

@@ -18,6 +18,8 @@ its section below.
 ### Fixed
 
 - Chrome: an overlay's calls into isolated-world `onPage` code, and back, are matched to the overlay's own document, so a call made while the tab navigates can't reach the next page.
+- `strategy: "page"` handlers now see a page's first requests too: the `fetch`/`XHR` calls its inline scripts make while it loads used to go out before the hook knew the page's handlers. They now wait for that (at most 3 s); pages with no page-strategy handlers get their native `fetch`/`XHR` back untouched. Chrome MV2 injects the hook inline so it runs before the page's own scripts (strict-CSP pages too).
+- Chrome MV3: after turning on "Allow User Scripts" on chrome://extensions, coming back to the Editor clears the "user scripts are off" banner and Problems error and registers the isolated `onPage` code right away (it used to wait for the next script change).
 
 ## [0.10.0] - 2026-11-03
 

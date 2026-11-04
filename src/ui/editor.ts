@@ -1973,6 +1973,9 @@ async function main(): Promise<void> {
 
     connectLogs();
     refreshUserScripts();
+    // back from chrome://extensions (Allow User Scripts flipped): the background re-checks and re-registers
+    window.addEventListener("focus", refreshUserScripts);
+    document.addEventListener("visibilitychange", () => !document.hidden && refreshUserScripts());
     await refresh();
 
     // deep link from the popup: editor.html?script=<id>

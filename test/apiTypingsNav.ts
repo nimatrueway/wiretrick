@@ -47,9 +47,11 @@ export async function checkApiTypingsNav(mgr: any, check: Check, label = ""): Pr
     const forward = process.platform === "darwin" ? "Control+Shift+Minus" : "Alt+ArrowRight";
 
     await mgr.bringToFront();
-    // roomier screenshots; the window size is put back afterwards
-    const cdp = shotDir ? await mgr.context().newCDPSession(mgr) : null;
-    await cdp?.send("Emulation.setDeviceMetricsOverride", { width: 1400, height: 800, deviceScaleFactor: 1, mobile: false });
+    // room for the hover (and roomier screenshots): in an editor narrower than
+    // the hover it overflows the sidebar, and a swap that moves it out from
+    // under the pointer closes it. The window size is put back afterwards.
+    const cdp = await mgr.context().newCDPSession(mgr);
+    await cdp.send("Emulation.setDeviceMetricsOverride", { width: 1400, height: 800, deviceScaleFactor: 1, mobile: false });
     await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_api_nav", name: "api nav",
         code: 'wt.onRequest({ url: "*://api-nav.invalid/*", strategy: "helper" }, (ctx) => {\n    console.log(ctx.url);\n});\n',
@@ -250,8 +252,8 @@ export async function checkApiTypingsNav(mgr: any, check: Check, label = ""): Pr
         JSON.stringify([back1.sel, back2.uri]));
 
     check("api typings: no discard-changes prompt along the way", dialogs.length === 0, JSON.stringify(dialogs));
-    await cdp?.send("Emulation.clearDeviceMetricsOverride");
-    await cdp?.detach();
+    await cdp.send("Emulation.clearDeviceMetricsOverride");
+    await cdp.detach();
     mgr.off("dialog", onDialog);
 
     // clean up: drop the unsaved edit and the script
