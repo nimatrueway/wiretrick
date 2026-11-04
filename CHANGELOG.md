@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-04
+
 ### Changed
 
 - The bottom panel in a narrow window: the view's filter moves to its own row below the tabs (panel narrower than 720 px), and the Problems / Log / Network / Preview tabs become icons (narrower than 520 px; the name is in the tooltip).
@@ -590,7 +592,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/nimatrueway/wiretrick/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/nimatrueway/wiretrick/compare/v0.9.18...v0.10.0
 [0.9.18]: https://github.com/nimatrueway/wiretrick/compare/v0.9.17...v0.9.18
 [0.9.17]: https://github.com/nimatrueway/wiretrick/compare/v0.9.16...v0.9.17
