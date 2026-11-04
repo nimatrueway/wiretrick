@@ -26,11 +26,15 @@ export function createBadgeCounter(scripts: () => readonly Script[]) {
         },
         /** Active count without recording anything. */
         count(tabId: number): number {
+            return this.ids(tabId).length;
+        },
+        /** Ids of the scripts the count is made of (the popup marks them). */
+        ids(tabId: number): string[] {
             const set = tabs.get(tabId);
-            if (!set) return 0;
+            if (!set) return [];
             const live = new Set(scripts().filter((s) => s.enabled && s.meta.active).map((s) => s.id));
             for (const id of set) if (!live.has(id)) set.delete(id);
-            return set.size;
+            return [...set];
         },
         forget(tabId: number): void {
             tabs.delete(tabId);

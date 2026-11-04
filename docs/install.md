@@ -10,7 +10,7 @@
    Firefox uses the `.xpi` instead — see [Firefox](#firefox).
 2. Open `chrome://extensions`.
 3. Enable **Developer mode** (top-right), click **Load unpacked**, and select the unzipped folder.
-4. Pin the 🧩 icon — the badge shows how many enabled scripts match the current tab.
+4. Pin the 🧩 icon — the badge shows how many enabled scripts match the current tab; the popup marks them with a green dot. While a saved script is compiled and hot-reloaded, the icon fades and shows a spinner.
 
 ## Firefox
 

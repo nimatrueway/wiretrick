@@ -1,6 +1,7 @@
 /**
  * chrome.storage.local backed script store.
  */
+import { whileBusy } from "./busy";
 import { dependantsOf, folderOf } from "../../shared/scriptImports";
 import type { ResMeta } from "../../shared/metaParser";
 import { compileForStorage, SANDBOX_COMPILE_FAILED } from "../compileHost";
@@ -84,7 +85,11 @@ export async function getScript(id: string): Promise<Script | undefined> {
     return (obj[STORE_KEY] || {})[id];
 }
 
-export async function saveScript(partial: Pick<Script, "id" | "code"> & Partial<Script> & { name?: string }): Promise<Script> {
+export function saveScript(partial: Pick<Script, "id" | "code"> & Partial<Script> & { name?: string }): Promise<Script> {
+    return whileBusy(() => saveScriptNow(partial));
+}
+
+async function saveScriptNow(partial: Pick<Script, "id" | "code"> & Partial<Script> & { name?: string }): Promise<Script> {
     const obj = await storageGet([STORE_KEY, ORDER_KEY]);
     const byId: { [id: string]: Script } = obj[STORE_KEY] || {};
     const order: string[] = obj[ORDER_KEY] || Object.keys(byId);

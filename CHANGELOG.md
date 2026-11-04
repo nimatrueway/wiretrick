@@ -11,6 +11,8 @@ its section below.
 
 - An import from an unpinned unpkg URL (`import { sleep } from "https://unpkg.com/asyncbox"`, or `@latest`, `@^1`) is now underlined in the Editor as you type, before saving, with a **Pin to asyncbox@6.5.0** quick fix (Ctrl+. / ⌘.) that fills in the version unpkg resolves it to. After saving, the error points at the URL rather than the start of the line, and the Problems view lists it once.
 - A welcome page for first-time users: with no scripts yet, the Editor opens on a gallery of the samples. **Try it** adds one (turned on), waits until it's running and opens its page in a new tab with the change already visible; **Open** just adds it. Reopen it from Help (**?**) → **Welcome**.
+- The popup marks the scripts behind the toolbar badge number with a green dot, and its header says how many are active on the current tab (enabled, and matched the page or one of its requests since it loaded). It updates while the popup is open.
+- The toolbar icon shows when script changes are being applied: from saving (compiling) until every strategy has reloaded and open tabs got the hot-reload, it fades with a spinning arc in the corner and its tooltip says "applying script changes…". Changes that finish within 150 ms don't show it.
 
 ### Changed
 

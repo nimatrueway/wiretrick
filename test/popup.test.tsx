@@ -5,12 +5,13 @@ import type { PopupApi, ScriptInfo, ScriptParams } from "../src/ui/popup/api";
 
 afterEach(cleanup);
 
-function fakeApi(scripts: ScriptInfo[], params: Record<string, ScriptParams> = {}): PopupApi & { calls: any[] } {
+function fakeApi(scripts: ScriptInfo[], params: Record<string, ScriptParams> = {}, active: string[] = []): PopupApi & { calls: any[] } {
     const calls: any[] = [];
     let list = scripts.map((s) => ({ ...s }));
     return {
         calls,
         listScripts: vi.fn(async () => list.map((s) => ({ ...s }))),
+        activeOnTab: vi.fn(async () => [...active]),
         setEnabled: vi.fn(async (id: string, enabled: boolean) => {
             calls.push(["setEnabled", id, enabled]);
             list = list.map((s) => (s.id === id ? { ...s, enabled } : s));
@@ -71,6 +72,21 @@ describe("Popup", () => {
         await waitFor(() => expect(row().classList.contains("utility")).toBe(false));
         expect(row().querySelector(".switch.on")).not.toBeNull();
         expect(container.querySelector(".param-fold .switch.on")).not.toBeNull(); // fold stays open
+    });
+
+    it("marks the scripts counted in the badge for this tab", async () => {
+        const { container } = render(<Popup api={fakeApi([script("a", "Alpha"), script("b", "Beta"), script("c", "Gamma")], {}, ["a", "c", "gone"])} />);
+        await screen.findByText("2 active on this tab");
+        const rows = [...container.querySelectorAll(".script-item")];
+        expect(rows.map((r) => r.classList.contains("active-here"))).toEqual([true, false, true]);
+        expect(rows[0].querySelector('.active-ind[aria-label="active on this tab"]')).not.toBeNull();
+        expect(rows[1].querySelector(".active-ind")!.getAttribute("aria-label")).toBeNull();
+    });
+
+    it("shows no summary when nothing is active on the tab", async () => {
+        const { container } = render(<Popup api={fakeApi([script("a", "Alpha")])} />);
+        await screen.findByText("Alpha");
+        expect(container.querySelector("#active-summary")).toBeNull();
     });
 
     it("shows the empty state", async () => {

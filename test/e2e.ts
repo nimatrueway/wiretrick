@@ -227,8 +227,12 @@ const badge: any = await mgr.evaluate((): Promise<any> => new Promise((r) => {
         if (!tabs.length) { chrome.tabs.query({}, (all) => { const t = all.find((t) => t.url && t.url.includes("/page-fetch")); r({ tabId: t && t.id }); }); return; }
         r({ tabId: tabs[0].id });
     });
-})).then(({ tabId }) => tabId ? mgr.evaluate((tabId) => new Promise((r) => chrome.browserAction.getBadgeText({ tabId }, (t) => r(t))), tabId) : "?");
-check("badge: per-tab active scripts (page + resources)", badge === "3", `badge=${JSON.stringify(badge)}`);
+})).then(async ({ tabId }) => tabId ? {
+    text: await mgr.evaluate((tabId) => new Promise((r) => chrome.browserAction.getBadgeText({ tabId }, (t) => r(t))), tabId),
+    ids: await mgr.evaluate((tabId) => new Promise((r) => chrome.runtime.sendMessage({ type: "activeScripts", tabId }, r)), tabId),
+} : { text: "?", ids: [] });
+check("badge: per-tab active scripts (page + resources)", badge.text === "3", `badge=${JSON.stringify(badge.text)}`);
+check("popup: activeScripts lists the scripts behind the badge", badge.ids.length === 3 && badge.ids.includes("s_badge"), JSON.stringify(badge.ids));
 await p3.close();
 
 // ---------- 4. onResponseBody via Tier-A hook (XHR) ----------

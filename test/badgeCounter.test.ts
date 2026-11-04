@@ -29,6 +29,17 @@ describe("badge counter", () => {
         expect(b.count(1)).toBe(0);
     });
 
+    it("lists the ids it counts", () => {
+        const scripts = [script("a", ["*://site.test/*"]), script("b", ["*://api.test/*"]), script("c", ["*://other.test/*"])];
+        const b = createBadgeCounter(() => scripts);
+        b.note(1, "https://site.test/", true);
+        b.note(1, "https://api.test/x");
+        expect(b.ids(1).sort()).toEqual(["a", "b"]);
+        scripts[0].enabled = false;
+        expect(b.ids(1)).toEqual(["b"]);
+        expect(b.ids(9)).toEqual([]);
+    });
+
     it("starts over on a new page load and forgets closed tabs", () => {
         const b = createBadgeCounter(() => [script("a", ["*://one.test/*"]), script("b", ["*://two.test/*"])]);
         b.note(1, "https://one.test/", true);

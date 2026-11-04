@@ -17,6 +17,8 @@ import { collectDiagnostics } from "./diagnostics";
 import { getSettingsText, applySettingsText, applySettingsDoc } from "./settingsFile";
 import { badgeSetText, badgeSetColor, tabsQueryAll, tabsGet } from "../shared/chromeApi";
 import { createBadgeCounter } from "./badgeCounter";
+import { actionIconView, createBusyIndicator } from "./busyIcon";
+import { onBusyChange } from "./engine/busy";
 
 const IS_FIREFOX =
     typeof (globalThis as any).browser !== "undefined" &&
@@ -231,6 +233,16 @@ void refreshStaleMeta().catch((e) => dlogLevel("bg", "warn", `refreshing stored 
 function noteRequestForBadge(tabId: number, url: string, newPage = false): number {
     return badge.note(tabId, url, newPage);
 }
+
+// toolbar icon while a script change is compiled and hot-reloaded
+onBusyChange(createBusyIndicator(actionIconView()));
+
+// the popup asks which scripts make up the badge number on its tab
+chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
+    if (msg?.type !== "activeScripts" || typeof msg.tabId !== "number") return false;
+    sendResponse(badge.ids(msg.tabId));
+    return false;
+});
 
 async function updateTabBadge(tabId: number, url: string | undefined): Promise<void> {
     const n = url && /^https?:/i.test(url) ? badge.note(tabId, url) : 0;

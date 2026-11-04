@@ -21,6 +21,8 @@ export interface ScriptParams {
 /** Everything the popup needs from the extension — swapped for a fake in tests. */
 export interface PopupApi {
     listScripts(): Promise<ScriptInfo[]>;
+    /** ids of the scripts counted in the badge for the current tab (matched the page or one of its requests) */
+    activeOnTab(): Promise<string[]>;
     setEnabled(id: string, enabled: boolean): Promise<void>;
     clearError(id: string): Promise<void>;
     getParams(scriptId: string): Promise<ScriptParams>;
@@ -35,6 +37,11 @@ export interface PopupApi {
 export const chromePopupApi: PopupApi = {
     // sendWake: the first message may race the SW's wake-up (MV3)
     listScripts: async () => (await sendWake<ScriptInfo[]>({ type: "listScripts" })) || [],
+    activeOnTab: async () => {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tab?.id === undefined) return [];
+        return (await send<string[]>({ type: "activeScripts", tabId: tab.id })) || [];
+    },
     setEnabled: async (id, enabled) => void (await send({ type: "setEnabled", id, enabled })),
     clearError: async (id) => void (await send({ type: "clearScriptError", scriptId: id })),
     getParams: (scriptId) => send({ type: "getScriptParams", scriptId }),

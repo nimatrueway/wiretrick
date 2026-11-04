@@ -3,6 +3,7 @@
  * This is the single place that touches MV2 webRequest APIs; everything
  * browser-specific below it lives in strategies/.
  */
+import { beginBusy } from "./busy";
 import type { InterceptionStrategy } from "./strategies/types";
 import type { PageStrategy } from "./strategies/pageStrategy";
 import type { DebuggerStrategy } from "./strategies/debuggerStrategy";
@@ -827,7 +828,16 @@ export function createPipeline(
         }
         await rulesApplied.catch(() => {});
     }
+    /** reload, showing the busy icon until the rules are in and the open tabs were told */
     async function reload(): Promise<void> {
+        const end = beginBusy();
+        try {
+            await reloadNow();
+        } finally {
+            void rulesApplied.catch(() => {}).then(end);
+        }
+    }
+    async function reloadNow(): Promise<void> {
         const seq = ++reloadSeq;
         await ready;
         await loadTextTypes();

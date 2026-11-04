@@ -13,8 +13,16 @@ type Load = { state: "loading" } | { state: "ready"; scripts: ScriptInfo[] } | {
 
 export function Popup({ api }: { api: PopupApi }) {
     const [load, setLoad] = useState<Load>({ state: "loading" });
+    // scripts counted in the toolbar badge for the current tab
+    const [active, setActive] = useState<ReadonlySet<string>>(new Set());
+    const refreshActive = () =>
+        api.activeOnTab().then(
+            (ids) => setActive((prev) => (sameIds(prev, ids) ? prev : new Set(ids))),
+            () => {}
+        );
 
     const refresh = async () => {
+        void refreshActive();
         try {
             setLoad({ state: "ready", scripts: await api.listScripts() });
         } catch {
@@ -33,8 +41,11 @@ export function Popup({ api }: { api: PopupApi }) {
                 setVersion((v) => v + 1);
             }, 150);
         });
+        // the page keeps making requests while the popup is open
+        const poll = setInterval(refreshActive, 1500);
         return () => {
             clearTimeout(t);
+            clearInterval(poll);
             off?.();
         };
     }, []);
@@ -43,18 +54,25 @@ export function Popup({ api }: { api: PopupApi }) {
     // param value may turn one into a script (handlers registered under
     // `if (p.on)`), and imported helpers may read them
     const visible = load.state === "ready" ? load.scripts.filter((s) => s.meta.active !== false || hasParams(s)) : [];
+    const nActive = visible.filter((s) => active.has(s.id)).length;
 
     return (
         <>
             <div id="header">
                 <span id="title">Wiretrick</span>
+                {nActive > 0 && (
+                    <span id="active-summary" title="Scripts counted in the toolbar badge: enabled, and matched this tab's page or one of its requests since it loaded">
+                        <span className="active-dot" />
+                        {nActive} active on this tab
+                    </span>
+                )}
                 <button id="btn-manager" title="Open the Editor" onClick={() => api.openManager()}>
                     Open Editor
                 </button>
             </div>
             <ul id="script-list">
                 {visible.map((s) => (
-                    <ScriptRow key={s.id} script={s} api={api} onChanged={refresh} version={version} />
+                    <ScriptRow key={s.id} script={s} api={api} onChanged={refresh} version={version} activeHere={active.has(s.id)} />
                 ))}
             </ul>
             {load.state === "error" && <div id="empty">Could not reach the extension — close and reopen the popup.</div>}
@@ -66,15 +84,17 @@ export function Popup({ api }: { api: PopupApi }) {
     );
 }
 
+const sameIds = (a: ReadonlySet<string>, b: string[]) => a.size === b.length && b.every((id) => a.has(id));
+
 const hasParams = (s: ScriptInfo) => !!s.paramDefs && Object.keys(s.paramDefs).length > 0;
 
-function ScriptRow({ script, api, onChanged, version }: { script: ScriptInfo; api: PopupApi; onChanged: () => void; version: number }) {
+function ScriptRow({ script, api, onChanged, version, activeHere }: { script: ScriptInfo; api: PopupApi; onChanged: () => void; version: number; activeHere: boolean }) {
     const [open, setOpen] = useState(false);
     const isLib = script.meta.active === false;
     const health = scriptHealth(script);
     return (
         <>
-            <li className={isLib ? "script-item utility" : "script-item"}>
+            <li className={"script-item" + (isLib ? " utility" : "") + (activeHere ? " active-here" : "")}>
                 {isLib ? (
                     // utilities have no enabled switch (same as the manager / settings.yaml)
                     <span className="util-ind" role="img" aria-label="library" title="Library — registers no handlers with its current params; importable by other scripts">
@@ -90,6 +110,12 @@ function ScriptRow({ script, api, onChanged, version }: { script: ScriptInfo; ap
                         }}
                     />
                 )}
+                <span
+                    className="active-ind"
+                    role={activeHere ? "img" : undefined}
+                    aria-label={activeHere ? "active on this tab" : undefined}
+                    title={activeHere ? "Active on this tab — matched the page or one of its requests (counted in the badge)" : undefined}
+                />
                 <span className={health ? "script-name error" : "script-name"} title={script.meta.description}>
                     {script.meta.name}
                 </span>

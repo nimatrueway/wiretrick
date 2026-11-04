@@ -48,7 +48,9 @@ block, edit headers, transform or replace bodies, or patch the DOM.
 2. Chromium: unzip, open `chrome://extensions`, enable **Developer mode** and
    **Load unpacked** the folder. Firefox: drag the `.xpi` onto Firefox (see
    [docs/install.md](docs/install.md#firefox) if it's unsigned).
-3. Pin the icon — its badge counts the enabled scripts matching the current tab.
+3. Pin the icon — its badge counts the enabled scripts matching the current
+   tab (the popup marks which ones with a green dot). While a saved script is
+   compiled and hot-reloaded, the icon fades and shows a spinner.
 
 Signed `.crx` packages, building from source and the optional helper:
 see [docs/install.md](docs/install.md).
