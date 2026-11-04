@@ -14,10 +14,11 @@ searchable list of all of them):
 | ⌘P | Quick-open a script, data file or settings.yaml by path (cursor position is remembered per file) |
 | ⌘⇧E | Focus the explorer |
 | ⌘B | Show/hide the explorer |
-| ⌘J or ⌘` | Show/hide the Problems/Log/Network views |
+| ⌘J or ⌘` | Show/hide the Problems/Log/Network/Preview views |
 | ⌥⇧P (or ⌘⇧M) | Show the Problems view and focus its filter (again: hide the panel) |
 | ⌥⇧L | Show the Log and focus its filter (again: hide the panel) |
 | ⌥⇧N | Show the Network view and focus its filter (again: hide the panel) |
+| ⌥⇧V | Show the [Preview](#preview) of the open script's overlay and focus its URL (again: hide the panel) |
 | ⌥⇧K | Clear the Log and Network |
 | ⌥Z | Toggle word wrap |
 | ⌘, | Open Settings |
@@ -134,9 +135,9 @@ script, `import limits from "./mock/rate-limits.json"` (relative to the
 script's folder) is typed from the data file's current text — hovers and
 completions show its properties — and F12 on the import opens the data file.
 
-## Problems, Log and Network views
+## Problems, Log, Network and Preview views
 
-The bottom panel holds three views. Drag its header (or a view title) to dock it — a
+The bottom panel holds four views. Drag its header (or a view title) to dock it — a
 highlighted preview shows where it lands: **below the Code view**, **full height
 beside the Code view**, or **under the explorer**. Drag its edge to resize; each
 dock remembers its own size, and Esc cancels a drag.
@@ -257,6 +258,38 @@ at the right of the toolbar do the same.
     [Missed warning](strategies.md#missed-warning)). It is logged as
     a WARN line and shown as a yellow *missed* entry in the request's
     details; it does not mark the row observed or modified.
+- **Preview view** — the open script's [overlay](scripting.md#overlays--wtonoverlay),
+  live, over a placeholder page; see [Preview](#preview).
+
+### Preview
+
+The **Preview** tab (⌥⇧V) runs the overlay (`wt.onOverlay`) of the script
+open in the Code view in a frame inside the Editor, without opening its
+page, so you can work on the GUI before going to the site; a script that's
+turned off previews too. It runs the saved script and reloads on every save.
+
+- **Real stores.** The preview's `wt.store`s are live copies of the
+  background's, like a page's overlay: flipping a switch in the preview
+  turns a mock on or off for the pages in your tabs, and their overlays
+  follow.
+- **URL.** The field in the panel header is the URL the overlay gets as
+  `ctx.url`, and the base for its relative `fetch` URLs. It starts at a URL
+  made from the script's first `onOverlay` route (`*://app.example.com/*`
+  → `https://app.example.com/`) and is remembered per script; Enter applies
+  it, Esc puts back the current one. Only the handlers whose route matches
+  it run, as on a page; **no handler matches** shows when none does.
+- **Fetches.** There's no page behind the preview, so the overlay's `fetch`
+  (and `wt.fetch`, `from: "page"`) goes from the extension background
+  instead — host permissions, no CORS, the browser's cookies — and the
+  header shows **fetch runs from the background** once it has. Your
+  scripts' handlers see these requests like `wt.fetch`'s.
+- **No page.** `onPage` code doesn't run in the preview: the overlay's calls
+  into it reject with `there's no page in the Editor preview`.
+- **Viewport.** The menu next to the URL sizes the frame: the panel's size
+  (*Fit*), or a laptop, tablet or phone size. ↻ reloads the preview.
+- Logs and errors go to the script's Log with `overlay › preview`.
+- On Firefox, the Editor must be open in a tab (not a popup window) for
+  the preview to connect.
 
 ### Network filter
 

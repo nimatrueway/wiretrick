@@ -12,12 +12,14 @@ import { layout, panelTabOf, type PanelTab } from "../state/layout";
 import { logSources, logState } from "../state/log";
 import { panel } from "../state/panel";
 import { LogView } from "./LogView";
+import { OverlayPreview, PreviewTools } from "./OverlayPreview";
 import { ProblemsView } from "./ProblemsView";
 
 const TABS: { tab: PanelTab; id: string; label: string; title: string; key: string }[] = [
     { tab: "problems", id: "problems-tab", label: "Problems", title: "Problems — what is wrong with your scripts right now; each one goes away once fixed", key: "Alt+Shift+P" },
     { tab: "log", id: "log-header-title", label: "Log", title: "Extension and script log", key: "Alt+Shift+L" },
     { tab: "network", id: "network-tab", label: "Network", title: "Network activity, with what Wiretrick scripts did to each request", key: "Alt+Shift+N" },
+    { tab: "preview", id: "preview-tab", label: "Preview", title: "Preview — the open script's overlay (wt.onOverlay), live, over a placeholder page", key: "Alt+Shift+V" },
 ];
 
 const SCROLL_TITLE = {
@@ -115,6 +117,8 @@ function Panel() {
                 {" "}
                 <span id="net-tools" className="panel-tools" hidden={tab !== "network"}><span id="net-filter-host" ref={setNetHost} /></span>
                 {" "}
+                <span id="preview-tools" className="panel-tools" hidden={tab !== "preview"}><PreviewTools /></span>
+                {" "}
                 <span id="panel-actions">
                     <button id="btn-clear-panel" className="icon-btn" title={`Clear the Log and Network (${keyHint("Alt+Shift+K")})`} aria-label="Clear the Log and Network" onClick={() => actions.clearPanel()}>
                         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" d="M2.5 4h9M2.5 7.5h9M2.5 11h4.5M9.5 10l3.5 3.5M13 10l-3.5 3.5" /></svg>
@@ -142,6 +146,7 @@ function Panel() {
                 {net ? <NetworkPanel store={net} listTabs={listTabs} toolsHost={netHost} /> : null}
             </div>
             <ProblemsView hidden={tab !== "problems"} />
+            {tab === "preview" ? <OverlayPreview hidden={false} /> : null}
         </>
     );
 }

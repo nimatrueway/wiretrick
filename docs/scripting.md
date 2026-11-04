@@ -736,6 +736,9 @@ it right away, and the value survives restarts.
   With several scripts' overlays, the one last clicked is on top.
 - **Saving and disabling.** Saving the script reloads its overlay (store
   values stay); disabling it removes the overlay.
+- **Preview in the Editor.** The Editor's **Preview** tab (⌥⇧V) runs the
+  open script's overlay without its page, with the real stores, and reloads
+  it on save; see [Preview](editor.md#preview).
 - **`ctx`.** `ctx.url` is the page's URL. `ctx.onNavigate(fn)` runs `fn(url)`
   whenever the page navigates in place (`pushState`, back/forward,
   `#hash`), as single-page apps do; the overlay stays. It returns a

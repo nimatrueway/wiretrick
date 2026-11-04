@@ -175,6 +175,34 @@ export function scriptUrls(routes: RouteMeta[] | undefined): string[] {
     return [...out];
 }
 
+/**
+ * A URL the routes name (the Editor preview's default page URL): the first
+ * pattern made concrete — `*://` → `https://`, a `*.` host prefix and other
+ * `*`s dropped, a `*` host → example.com — that its route matches; else
+ * the first that parses; else https://example.com/.
+ */
+export function sampleUrl(routes: RouteMeta[]): string {
+    const concrete = (p: string) =>
+        p
+            .replace(/^\*:\/\//, "https://")
+            .replace(/:\/\/\*\./, "://")
+            .replace(/:\/\/\*(?=[/:]|$)/, "://example.com")
+            .replace(/\*/g, "");
+    let parsed = "";
+    for (const r of routes)
+        for (const p of r.url) {
+            const u = concrete(p);
+            try {
+                new URL(u);
+            } catch {
+                continue;
+            }
+            if (routeMatches(r, u)) return u;
+            parsed ||= u;
+        }
+    return parsed || "https://example.com/";
+}
+
 /** label for logs: `onResponseBody #2` (an onPage route is labeled onPage, not its kind) */
 export function routeLabel(route: RouteMeta): string {
     return `${route.api || route.kind} #${route.index + 1}`;

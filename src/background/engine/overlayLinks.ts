@@ -17,6 +17,10 @@
  * overlay, relayed through that tab's top-frame bridge (L2 `iso.call` /
  * `iso.result`). Each side only reaches the same tab's top frame and the
  * same script; anything else is dropped.
+ *
+ * L5: the Editor's Preview tab (`wt-preview`, the Editor page only) runs
+ * one script's overlay in a frame of its own: the same grant as a page's
+ * overlay, for whichever script the Editor names, at a URL it picks.
  */
 import { onBridgeConnect, type BridgeLink } from "./bridgePorts";
 import { endpointPair, portEndpoint, type Endpoint, type IsoInit, type OverlayInit } from "../../shared/wire";
@@ -24,7 +28,7 @@ import { isRpcCall, isRpcResult, NOT_RUNNING, RPC_TIMEOUT_MS, type RpcCall, type
 import { USER_SCRIPTS_OFF } from "../../shared/userScriptsStatus";
 import { contextTag, type ScriptLogLevel } from "../../shared/scriptLog";
 import { dlogLevel } from "../../shared/debugLog";
-import type { RouteMeta } from "../../shared/route";
+import { routeMatches, sampleUrl, type RouteMeta } from "../../shared/route";
 import type { ShippedLib } from "../../shared/scriptImports";
 import { fetchFor, storeOwner } from "./stores";
 import { addBypass, addBypassRule } from "./bypass";
@@ -66,6 +70,8 @@ export interface OverlayLinkDeps {
     storageGet?(s: string, key: string): Promise<any>;
     storageSet?(s: string, key: string, value: any): Promise<void>;
     log?(tabId: number, s: string, level: ScriptLogLevel, msg: string, ctx: string): void;
+    /** the Editor preview: script `s`'s overlay with every onOverlay route, whether or not it matches (throws why there's none) */
+    previewRun?(s: string): Promise<OverlayRun>;
 }
 
 let overlayRuns: (url: string) => Promise<Map<string, OverlayRun>> = async () => new Map();
@@ -154,18 +160,17 @@ export function setupOverlayLinks(d: OverlayLinkDeps): void {
     });
 }
 
-/** Firefox overlay frames (not sandboxed) ask: is this nonce one a bridge in my tab just opened? One use. */
+/** Firefox overlay frames (not sandboxed) ask: is this nonce one a bridge (or the Editor preview) in my tab just opened? One use. */
 export function confirmNonce(sender: chrome.runtime.MessageSender, nonce: unknown): boolean {
     const tabId = sender.tab?.id;
     if (typeof nonce !== "string" || typeof tabId !== "number" || !sender.url?.startsWith(chrome.runtime.getURL("overlay.html"))) return false;
-    for (const [link, mine] of grants) {
-        if (link.tabId !== tabId) continue;
-        for (const g of mine.values())
-            if (g.nonce === nonce && !g.seen && g.expires > Date.now()) {
-                g.seen = true;
-                return true;
-            }
-    }
+    const mineByTab = [...grants].filter(([link]) => link.tabId === tabId).flatMap(([, mine]) => [...mine.values()]);
+    const previewByTab = [...previews].filter((p) => p.tabId === tabId && p.grant).map((p) => p.grant!);
+    for (const g of [...mineByTab, ...previewByTab])
+        if (g.nonce === nonce && !g.seen && g.expires > Date.now()) {
+            g.seen = true;
+            return true;
+        }
     return false;
 }
 
@@ -361,6 +366,116 @@ export function serveIsoLink(link: IsoLink): void {
     });
 }
 
+// ---- L5: the Editor preview ----
+
+export const PREVIEW_PORT = "wt-preview";
+
+interface PreviewLink {
+    ep: Endpoint;
+    /** the Editor's tab (Firefox: the frame's nonce check) */
+    tabId?: number;
+    grant: (Grant & { s: string }) | null;
+}
+const previews = new Set<PreviewLink>();
+
+/** the Editor page's preview port (runtime.onConnect); false if the port isn't one */
+export function addPreviewPort(port: chrome.runtime.Port): boolean {
+    if (port.name !== PREVIEW_PORT) return false;
+    // the Editor page only: content scripts (and Firefox's unsandboxed overlay frames) have other URLs
+    const page = (port.sender?.url ?? "").split(/[?#]/)[0];
+    if (port.sender?.id !== chrome.runtime.id || page !== chrome.runtime.getURL("editor.html")) {
+        port.disconnect();
+        return true;
+    }
+    const ep = portEndpoint(port, { batchMs: 16, debug: (m) => dlogLevel("wire", "debug", `preview: ${m}`) });
+    servePreviewLink(ep, port.sender?.tab?.id);
+    return true;
+}
+
+export function servePreviewLink(ep: Endpoint, tabId?: number): void {
+    const link: PreviewLink = { ep, tabId, grant: null };
+    previews.add(link);
+    const drop = (why: string) => {
+        link.grant?.store?.close(why);
+        link.grant = null;
+    };
+    ep.onClose(() => {
+        drop("the preview closed");
+        previews.delete(link);
+    });
+    const granted = (op: string, s: string | undefined): Grant & { s: string } => {
+        const g = link.grant;
+        if (!g || s === undefined || g.s !== s) throw new Error(`${op}: this script isn't previewed`);
+        return g;
+    };
+    const runOf = async (op: string, s: string): Promise<OverlayRun> => {
+        try {
+            if (deps.previewRun) return await deps.previewRun(s);
+        } catch (e) {
+            throw new Error(`${op}: ${(e as Error)?.message ?? e}`);
+        }
+        throw new Error(`${op}: no preview here`);
+    };
+    const storeOf = (g: Grant & { s: string }): Endpoint => {
+        if (g.store && !g.store.closed) return g.store;
+        const [replicaSide, ownerSide] = endpointPair();
+        storeOwner.attach(ownerSide, { all: false });
+        replicaSide.on("store.patch", (a) => ep.push("store.patch", a, g.s));
+        replicaSide.on("store.reject", (a) => ep.push("store.reject", a, g.s));
+        return (g.store = replicaSide);
+    };
+
+    ep.handle("preview.open", async ({ nonce, url }, s) => {
+        if (typeof s !== "string" || typeof nonce !== "string" || nonce.length < 16 || typeof url !== "string") throw new Error("preview.open: refused");
+        const run = await runOf("preview.open", s);
+        const at = url || sampleUrl(run.routes);
+        try {
+            new URL(at);
+        } catch {
+            throw new Error(`preview.open: "${at}" isn't a URL`);
+        }
+        const old = link.grant;
+        if (old && old.s !== s) drop("the preview moved to another script");
+        link.grant = { s, url: at, name: run.name, nonce, seen: false, expires: Date.now() + NONCE_TTL_MS, store: old?.s === s ? old.store : null };
+        return { url: at, name: run.name, handlers: run.routes.length, matching: run.routes.filter((r) => routeMatches(r, at)).length };
+    });
+    ep.handle("overlay.init", async (_a, s): Promise<OverlayInit> => {
+        const g = granted("overlay.init", s);
+        const run = await runOf("overlay.init", g.s);
+        const stores = (await storeOwner.init([g.s]))[g.s] ?? {};
+        return { s: g.s, name: run.name, code: run.code, codeHash: run.codeHash, routes: run.routes, url: g.url, params: run.params, stores, libs: run.libs, react: run.react };
+    });
+    ep.on("store.declare", (a, s) => {
+        if (link.grant && link.grant.s === s) storeOf(link.grant).push("store.declare", a, s);
+    });
+    ep.on("store.set", (a, s) => {
+        if (link.grant && link.grant.s === s) storeOf(link.grant).push("store.set", a, s);
+    });
+    ep.handle("store.sub", (a, s) => storeOf(granted("store.sub", s)).call("store.sub", a, s));
+    ep.handle("fetch", (a, s) => fetchFor(granted("fetch", s).s, a.request, !!a.bypass));
+    ep.handle("storage.get", async ({ key }, s) => {
+        const g = granted("storage.get", s);
+        if (typeof key !== "string") throw new Error("storage.get: refused");
+        return { value: await deps.storageGet?.(g.s, key) };
+    });
+    ep.handle("storage.set", async ({ key, value }, s) => {
+        const g = granted("storage.set", s);
+        if (typeof key !== "string") throw new Error("storage.set: refused");
+        await deps.storageSet?.(g.s, key, value);
+        return {};
+    });
+    ep.on("log", (a, s) => {
+        const g = link.grant;
+        if (!g || g.s !== s || !["debug", "info", "warn", "error"].includes(a?.level)) return;
+        deps.log?.(-1, g.s, a.level, String(a.msg ?? "").slice(0, 8000), "overlay › preview");
+    });
+}
+
+/** scripts changed: open previews check whether theirs did */
+export function pushPreviewUpdate(scripts: { s: string; codeHash: string }[]): void {
+    for (const p of previews) p.ep.push("bundle.update", { scripts });
+}
+
 /** scripts changed: every isolated runtime loads again (re-runs when its code changed) */
 export function pushIsoUpdate(): void {
     for (const l of isoLinks.values()) l.ep.push("iso.update", {}, l.s!);
@@ -374,5 +489,6 @@ export function resetOverlayLinks(): void {
     for (const r of relayed.values()) clearTimeout(r.timer);
     relayed.clear();
     linkWaiters.clear();
+    previews.clear();
     deps = { overlayRuns };
 }

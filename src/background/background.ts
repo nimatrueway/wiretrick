@@ -20,7 +20,7 @@ import { createBadgeCounter } from "./badgeCounter";
 import { actionIconView, createBusyIndicator } from "./busyIcon";
 import { onBusyChange } from "./engine/busy";
 import { addBridgePort } from "./engine/bridgePorts";
-import { addUserScriptPort } from "./engine/overlayLinks";
+import { addPreviewPort, addUserScriptPort } from "./engine/overlayLinks";
 import { contextTag, SCRIPT_CONTEXTS } from "../shared/scriptLog";
 
 const IS_FIREFOX =
@@ -118,6 +118,7 @@ chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
 (chrome.runtime as any).onUserScriptConnect?.addListener((port: chrome.runtime.Port) => addUserScriptPort(port));
 chrome.runtime.onConnect.addListener((port) => {
     if (addBridgePort(port)) return; // L2: a content-script bridge
+    if (addPreviewPort(port)) return; // L5: the Editor's Preview tab
     if (port.name === "logs") {
         addUiPort(port);
     }

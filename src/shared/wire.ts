@@ -120,6 +120,15 @@ export interface WireOps {
     "iso.call": { push: RpcCall };
     /** L2: its answer */
     "iso.result": { push: RpcResult };
+
+    // ---- the Editor preview (L5: the Editor ⇄ owner, one script at a time; L3 as above between the Editor and its frame) ----
+    /**
+     * L5: preview script `s`'s overlay as if on `url` ("": the first URL its
+     * onOverlay routes name) in a frame with this one-time nonce. Then
+     * `overlay.init`, `store.*`, `fetch`, `storage.*` and `log` work for `s`
+     * on this link; scripts changing come as `bundle.update`.
+     */
+    "preview.open": { req: { nonce: string; url: string }; res: { url: string; name: string; handlers: number; matching: number } };
 }
 
 /** what a user-script world needs to run a script's `world: "isolated"` onPage code */

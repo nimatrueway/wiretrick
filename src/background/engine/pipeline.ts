@@ -43,7 +43,7 @@ import { getTextTypes, setTextTypes } from "../../shared/bodyKind";
 import { packBytes, unpackBytes } from "../../shared/bytesPack";
 import type { RequestBody } from "../../shared/requestBody";
 import { pushBundleUpdate } from "./bridgePorts";
-import { pushIsoUpdate, revalidateOverlayLinks, setupOverlayLinks, type IsoRun, type OverlayRun } from "./overlayLinks";
+import { pushIsoUpdate, pushPreviewUpdate, revalidateOverlayLinks, setupOverlayLinks, type IsoRun, type OverlayRun } from "./overlayLinks";
 import { onUserScriptsStatus, syncUserScripts, userScriptsStatus, type IsoScript } from "../userScripts";
 import { USER_SCRIPTS_OFF, userScriptsProblem, type UserScriptsStatus } from "../../shared/userScriptsStatus";
 import { contentHash } from "../../shared/folderSync";
@@ -573,8 +573,11 @@ export function createPipeline(
      * the page CSP allows, else in the bridge. Overlays (top frame only)
      * ship as routes and a code hash; their code goes to the overlay frame
      * over the bridge's port (`overlayRuns`, overlayLinks.ts).
+     *
+     * `preview` (the Editor's Preview tab): only that script's overlay,
+     * with every onOverlay route — matching `url` or not, enabled or not.
      */
-    async function hookBundle(url: string, top: boolean) {
+    async function hookBundle(url: string, top: boolean, preview?: string) {
         // main-world onPage scripts (hook.ts; the bridge when CSP blocks eval)
         const domHandlers: { scriptId: string; name: string; src: string; params: Record<string, any> }[] = [];
         // `world: "isolated"` onPage scripts: never shipped to the page's own world.
@@ -598,9 +601,14 @@ export function createPipeline(
         const mainDeps = new Set<string>();
         const isoDeps = new Set<string>();
         const isoScriptDeps = new Map<string, Set<string>>();
+        let previewWhy = "no such script";
         for (const s of pageScripts) {
             const a = analyzed.get(s.id);
-            if (!s.enabled || !a || a.error || !a.meta.active) continue;
+            if (preview !== undefined) {
+                if (s.id !== preview) continue;
+                previewWhy = !a || a.error ? "the script doesn't compile" : "the script has no wt.onOverlay handler";
+            } else if (!s.enabled) continue;
+            if (!a || a.error || !a.meta.active) continue;
             let main = false;
             let iso = false;
             const over: RouteMeta[] = [];
@@ -610,7 +618,7 @@ export function createPipeline(
                     if (pageWorld(r) === "isolated") iso = true;
                     else main = true;
                 } else if (r.kind === "onOverlay") {
-                    if (top && routeMatches(r, url)) over.push(r);
+                    if (top && (preview !== undefined || routeMatches(r, url))) over.push(r);
                 } else if (r.kind !== "onResponseHeaders" && effectiveStrategy(r) === "page" && hookCanSee(r)) routes.push(r);
             }
             if (over.length) {
@@ -618,7 +626,7 @@ export function createPipeline(
                 overlayRuns.set(s.id, { name: s.meta.name, code: toRunnableJs(s.code), routes: over, params: resolveParamValues(a.paramDefs || {}, paramValues[s.id]), libs: [], react: false, codeHash: "" });
                 overlayDeps.set(s.id, new Set(a.deps));
             }
-            if (!main && !iso) continue;
+            if (!main && !iso || preview !== undefined) continue;
             const h = { scriptId: s.id, name: s.meta.name, src: toRunnableJs(s.code), params: resolveParamValues(a.paramDefs || {}, paramValues[s.id]) };
             if (main) domHandlers.push(h);
             if (iso && __MV3__) {
@@ -665,7 +673,7 @@ export function createPipeline(
         }
         // MV3 without user scripts: the overlay's calls into isolated code say why at once
         const isoOff = isoRuns.size && (await userScriptsStatus()) !== "ok" ? USER_SCRIPTS_OFF : undefined;
-        return { bundle: { count: routes.length, routes, textTypes: getTextTypes(), domHandlers, isoHandlers, overlays, libs, isoLibs, ...(isoOff ? { isoOff } : {}) }, overlayRuns, isoRuns };
+        return { bundle: { count: routes.length, routes, textTypes: getTextTypes(), domHandlers, isoHandlers, overlays, libs, isoLibs, ...(isoOff ? { isoOff } : {}) }, overlayRuns, isoRuns, previewWhy };
     }
     setupOverlayLinks({
         overlayRuns: async (url) => (await hookBundle(url, true)).overlayRuns,
@@ -674,6 +682,12 @@ export function createPipeline(
         storageGet: (s, key) => scriptStorageGet(s, key),
         storageSet: async (s, key, value) => void (await scriptStorageSet(s, key, value)),
         log: (tabId, s, level, msg, ctx) => log(tabId, msg, level, s, undefined, undefined, undefined, ctx),
+        previewRun: async (s) => {
+            const { overlayRuns, previewWhy } = await hookBundle("", true, s);
+            const run = overlayRuns.get(s);
+            if (!run) throw new Error(previewWhy);
+            return run;
+        },
     });
 
     chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
@@ -976,6 +990,7 @@ export function createPipeline(
         // open L2 port get `bundle.update` and ignore the one-shot message.
         pushBundleUpdate(scripts.filter((x) => x.enabled).map((x) => ({ s: x.id, codeHash: contentHash(x.code) })));
         revalidateOverlayLinks();
+        pushPreviewUpdate(scripts.map((x) => ({ s: x.id, codeHash: contentHash(x.code) })));
         chrome.tabs.query({}, (tabs) => {
             for (const t of tabs) {
                 if (t.id === undefined) continue;

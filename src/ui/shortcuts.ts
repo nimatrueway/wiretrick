@@ -18,6 +18,7 @@ export const SHORTCUTS: Shortcut[] = [
     { keys: ["Alt+Shift+P", "Mod+Shift+M"], action: "Show the Problems view and focus its filter (again: close the panel)", where: "Global" },
     { keys: ["Alt+Shift+L"], action: "Show the Log and focus its filter (again: close the panel)", where: "Global" },
     { keys: ["Alt+Shift+N"], action: "Show the Network view and focus its filter (again: close the panel)", where: "Global" },
+    { keys: ["Alt+Shift+V"], action: "Show the Preview of the open script's overlay and focus its URL (again: close the panel)", where: "Global" },
     { keys: ["Alt+Shift+K"], action: "Clear the Log or Network view the panel shows", where: "Global" },
     { keys: ["Alt+Z"], action: "Toggle word wrap", where: "Global" },
     { keys: ["Esc"], action: "Close dialog / return to the editor", where: "Global" },

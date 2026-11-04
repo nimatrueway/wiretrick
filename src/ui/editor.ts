@@ -1277,6 +1277,7 @@ async function openProblem(id: string, p: Problem): Promise<void> {
 function panelFilter(which: PanelTab): HTMLInputElement | null {
     if (which === "problems") return byId("problems-filter") as HTMLInputElement;
     if (which === "log") return document.querySelector<HTMLInputElement>("#log-filter-host input.net-filter, #log-filter-host input.net-query");
+    if (which === "preview") return byId("preview-url") as HTMLInputElement | null;
     return document.querySelector<HTMLInputElement>("#net-filter-host input.net-filter, #net-filter-host input.net-query");
 }
 
@@ -1993,6 +1994,7 @@ function layoutShortcut(e: KeyboardEvent): (() => void) | null {
         if (e.code === "KeyP") return toggleProblems;
         if (e.code === "KeyL") return () => focusPanelView("log");
         if (e.code === "KeyN") return () => focusPanelView("network");
+        if (e.code === "KeyV") return () => focusPanelView("preview");
         if (e.code === "KeyK") return clearPanelView;
     }
     // ⌥Z types a character (Ω on macOS) in the log/network filter boxes
@@ -2026,6 +2028,7 @@ function registerLayoutActions(): void {
         ["wt.toggleProblems", "View: Show Problems", [KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyM, KeyMod.Alt | KeyMod.Shift | KeyCode.KeyP], toggleProblems],
         ["wt.showLog", "View: Show Log", [KeyMod.Alt | KeyMod.Shift | KeyCode.KeyL], () => focusPanelView("log")],
         ["wt.showNetwork", "View: Show Network", [KeyMod.Alt | KeyMod.Shift | KeyCode.KeyN], () => focusPanelView("network")],
+        ["wt.showPreview", "View: Show Preview", [KeyMod.Alt | KeyMod.Shift | KeyCode.KeyV], () => focusPanelView("preview")],
         ["wt.clearPanel", "View: Clear Log / Network", [KeyMod.Alt | KeyMod.Shift | KeyCode.KeyK], clearPanelView],
         ["wt.showShortcuts", "Help: Keyboard Shortcuts", [], () => openHelp("shortcuts")],
         ["wt.navigateBack", "Go Back", navKeybindings().back, navigateBack],

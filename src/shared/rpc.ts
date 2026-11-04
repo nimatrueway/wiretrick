@@ -28,6 +28,7 @@ export const RPC_MAX_BYTES = 1024 * 1024;
 export const NOT_RUNNING = "not running on this page";
 export const NO_SUCH_FUNCTION = "no such function";
 export const TOP_FRAME_ONLY = "only the top frame can call the overlay";
+export const NO_PAGE_IN_PREVIEW = "there's no page in the Editor preview: onPage code doesn't run there";
 
 /** the callee didn't answer in time */
 export class WtTimeoutError extends Error {

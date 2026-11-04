@@ -1,6 +1,6 @@
 /** Per-handler routes: normalization, matching, required strategy, and the page-side shim. */
 import { describe, expect, it } from "vitest";
-import { effectiveStrategy, hookCanSee, normalizeRoute, routeGroups, routeLabel, routeMatches, scriptUrls } from "../src/shared/route";
+import { effectiveStrategy, hookCanSee, normalizeRoute, routeGroups, routeLabel, routeMatches, sampleUrl, scriptUrls } from "../src/shared/route";
 import { domHandlersFor, makePageShim } from "../src/shared/pageShim";
 
 describe("normalizeRoute", () => {
@@ -123,5 +123,21 @@ describe("page shim (onDocument in the page)", () => {
         expect(wt.params({ host: { type: "string" } })).toEqual({ host: "a.com" });
         expect(wt.defineParam("n", { type: "number" })).toBe(3);
         expect(() => wt.onDocument("*")).toThrow(/second argument/);
+    });
+});
+
+describe("sampleUrl (the Editor preview's default page URL)", () => {
+    const r = (url: string[], exclude: string[] = []) => normalizeRoute("onOverlay", { url, exclude }, 0);
+    it("makes the first pattern concrete, one its route matches", () => {
+        expect(sampleUrl([r(["https://app.example.com/dash/*"])])).toBe("https://app.example.com/dash/");
+        expect(sampleUrl([r(["*://*.example.com/*"])])).toBe("https://example.com/");
+        expect(sampleUrl([r(["*://*/*"])])).toBe("https://example.com/");
+        expect(sampleUrl([r(["https://a.example/x"]), r(["https://b.example/"])])).toBe("https://a.example/x");
+    });
+    it("skips what the route excludes or what doesn't parse, and falls back to example.com", () => {
+        expect(sampleUrl([r(["https://a.example/*"], ["https://a.example/*"]), r(["https://b.example/y"])])).toBe("https://b.example/y");
+        expect(sampleUrl([r(["https://a.example/*"], ["https://a.example/*"])])).toBe("https://a.example/");
+        expect(sampleUrl([r(["*"])])).toBe("https://example.com/");
+        expect(sampleUrl([])).toBe("https://example.com/");
     });
 });

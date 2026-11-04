@@ -429,3 +429,51 @@ export async function checkOverlayShortcuts(ctx: any, mgr: any, origin: string, 
     await send({ type: "deleteScript", id: "s_ov_keys" });
     await send({ type: "deleteScript", id: "s_ov_keys2" });
 }
+
+/**
+ * The Editor's Preview tab: the open script's overlay runs in a frame in
+ * the Editor, with real store replicas — its switch flips the mock for a
+ * page in a tab — and reloads on save.
+ */
+export async function checkOverlayPreview(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
+    const t = (s: string) => `overlay preview${opts.label ?? ""}: ${s}`;
+    const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
+    const saved = await send({ type: "saveScript", id: "s_ov_prev", code: switchCode(origin, "Preview switch"), name: "overlay preview" });
+    check(t("the script saves"), !saved?.error, saved?.error);
+    await mgr.bringToFront();
+    await mgr.waitForSelector('#script-list li[data-id="s_ov_prev"]', { timeout: 8000 });
+    await mgr.evaluate(() => (document.querySelector('#script-list li[data-id="s_ov_prev"]') as HTMLElement).click());
+    if (await mgr.evaluate(() => !document.getElementById("preview-tab")?.offsetParent)) await mgr.click("#sb-log");
+    await mgr.click("#preview-tab");
+
+    const frame = await overlayFrame(mgr, "#box");
+    const url = await mgr.evaluate(() => (document.getElementById("preview-url") as HTMLInputElement | null)?.value ?? "");
+    check(t("the Preview tab shows the open script's overlay at its route's URL"), !!frame && url === `${origin}/ov-`, JSON.stringify({ frame: !!frame, url }));
+
+    const page = await ctx.newPage();
+    await page.goto(`${origin}/ov-app`, { waitUntil: "load", timeout: 15000 });
+    const fetchMe = (): Promise<string> => page.evaluate(() => fetch("/ov-me").then((r) => r.text()));
+    const before = await fetchMe();
+    await mgr.bringToFront();
+    if (frame) await frame.click("#box", { timeout: 5000 }).catch(() => {});
+    const checked = frame ? await waitFor<boolean>(() => frame.evaluate(() => (document.getElementById("box") as HTMLInputElement).checked).catch(() => false), (v) => v, 5000) : false;
+    const after = await waitFor<string>(fetchMe, (v) => v.includes("MOCKED"), 5000);
+    const pageFrame = await overlayFrame(page, "#box");
+    const onPage = pageFrame ? await waitFor<boolean>(() => pageFrame.evaluate(() => (document.getElementById("box") as HTMLInputElement).checked).catch(() => false), (v) => v, 5000) : false;
+    check(t("its switch flips the store: a request in a tab gets mocked, the page's overlay follows"), before.includes("REAL") && checked && after.includes("MOCKED") && onPage, JSON.stringify({ before, checked, after, onPage }));
+
+    await send({ type: "saveScript", id: "s_ov_prev", code: switchCode(origin, "Preview v2"), name: "overlay preview" });
+    const v2 = await waitFor(
+        async () => {
+            const f = await overlayFrame(mgr, "#sw");
+            return f ? await f.evaluate(() => ({ text: document.getElementById("sw")!.textContent || "", on: (document.getElementById("box") as HTMLInputElement).checked })).catch(() => null) : null;
+        },
+        (v) => !!v?.text.includes("Preview v2"),
+        8000
+    );
+    check(t("it reloads on save, the store kept"), !!v2?.text.includes("Preview v2") && !!v2?.on, JSON.stringify(v2));
+
+    await page.close();
+    await mgr.click("#log-header-title");
+    await send({ type: "deleteScript", id: "s_ov_prev" });
+}
