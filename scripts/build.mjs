@@ -85,6 +85,11 @@ function entriesFor(dist, mv3) {
                 // sandbox page: the only MV3 context where eval is allowed
                 input: path.join(root, "src/background/sandbox.ts"),
                 output: { file: path.join(dist, "sandbox.js"), format: "iife" },
+            },
+            {
+                // world: "isolated" onPage code, in a chrome.userScripts world (src/background/userScripts.ts)
+                input: path.join(root, "src/hook/isolated.ts"),
+                output: { file: path.join(dist, "isolated.js"), format: "iife" },
             }
         );
     }
@@ -130,7 +135,8 @@ function mv3Manifest(mv2) {
         content_scripts: [HOOK_MAIN, ...mv2.content_scripts],
         permissions: ["storage", "unlimitedStorage", "tabs", "debugger", "offscreen", "webNavigation", "webRequest", "alarms", "proxy", "nativeMessaging", "browsingData", "declarativeNetRequestWithHostAccess"],
         host_permissions: ["<all_urls>"],
-        optional_permissions: mv2.optional_permissions,
+        // userScripts: world: "isolated" onPage code (src/background/userScripts.ts), asked for from the Editor
+        optional_permissions: [...mv2.optional_permissions, "userScripts"],
         web_accessible_resources: [{ resources: mv2.web_accessible_resources, matches: ["<all_urls>"] }],
         // sandbox pages are exempt from the extension CSP — sandbox.html hosts
         // the script compiler/runner (see src/background/sandbox.ts), overlay.html

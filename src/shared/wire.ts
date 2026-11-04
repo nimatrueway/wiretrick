@@ -105,6 +105,29 @@ export interface WireOps {
     "rpc.call": { push: RpcCall };
     /** its answer */
     "rpc.result": { push: RpcResult };
+
+    // ---- MV3 isolated-world onPage code (L6: chrome.userScripts world ⇄ owner; L2 for the relay) ----
+    /** L6: what script `s` runs in this frame's user-script world (refused unless it has isolated onPage code here) */
+    "iso.load": { req: { url: string }; res: IsoInit };
+    /** L6: scripts changed: load again, re-run when the code hash moved */
+    "iso.update": { push: {} };
+    /** L2: a call between script `s`'s overlay (via the top-frame bridge) and its isolated-world code (via the owner) */
+    "iso.call": { push: RpcCall };
+    /** L2: its answer */
+    "iso.result": { push: RpcResult };
+}
+
+/** what a user-script world needs to run a script's `world: "isolated"` onPage code */
+export interface IsoInit {
+    s: string;
+    name: string;
+    /** the script's runnable JS */
+    src: string;
+    codeHash: string;
+    params: Record<string, any>;
+    libs: ShippedLib[];
+    /** the script has an overlay on this page (top frame) */
+    overlay: boolean;
 }
 
 /** what an overlay frame needs to run its script */

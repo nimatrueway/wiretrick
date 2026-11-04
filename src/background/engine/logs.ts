@@ -16,6 +16,8 @@ export interface LogEntry {
     kind?: NetKind;
     /** the webRequest requestId the line is about, when the strategy knew it */
     requestId?: string;
+    /** where a script's GUI code wrote it: "page › host", "isolated › host", "overlay › host" (scriptLog.ts contextTag) */
+    ctx?: string;
 }
 
 const MAX_PER_TAB = 200;
@@ -64,19 +66,19 @@ export function addUiPort(port: chrome.runtime.Port): void {
  * URL) as "observed" (handler ran, no change) or "modified"; omitted, it is
  * inferred (see outcomeKind).
  */
-export function log(tabId: number, message: string, level: LogEntry["level"] = "info", scriptId: string | null = null, kind?: OutcomeKind, url?: string, requestId?: string): void {
+export function log(tabId: number, message: string, level: LogEntry["level"] = "info", scriptId: string | null = null, kind?: OutcomeKind, url?: string, requestId?: string, ctx?: string): void {
     const netKind = scriptId ? outcomeKind(level, message, kind) : undefined;
     // a skipped handler isn't "missed" twice (the onCompleted check)
     if (scriptId && (netKind !== "missed" || message.includes(SKIPPED_MARK))) noteTap(scriptId, level, message, requestId);
     const observedOnly = kind === "observed" && level === "debug";
-    const entry: LogEntry = { tabId, scriptId, level, message, at: Date.now(), ...(observedOnly ? { kind: "observed" as const } : {}), ...(requestId ? { requestId } : {}) };
+    const entry: LogEntry = { tabId, scriptId, level, message, at: Date.now(), ...(observedOnly ? { kind: "observed" as const } : {}), ...(requestId ? { requestId } : {}), ...(ctx ? { ctx } : {}) };
     if (observedOnly) pushCapped(observedLogs, entry, MAX_OBSERVED_PER_TAB);
     else pushCapped(tabLogs, entry, MAX_PER_TAB);
     for (const port of uiPorts) {
         port.postMessage({ type: "log", entry });
     }
     if (scriptId) annotateFromLog(tabId, scriptId, message, level, netKind, url, requestId);
-    if (scriptId && level === "error" && !/^\[[^\]]*\] console\.error/.test(message)) recordScriptError(scriptId, message);
+    if (scriptId && level === "error" && !/^\[[^\]]*\] console\.error/.test(message)) recordScriptError(scriptId, message, ctx);
     if (level === "error") {
         console.error("[Wiretrick]", message);
     }
@@ -206,6 +208,8 @@ export interface ScriptRuntimeError {
     message: string;
     at: number;
     count: number;
+    /** where it was thrown, for GUI code (LogEntry.ctx) */
+    ctx?: string;
 }
 
 const ERR_KEY = "wtScriptErrors";
@@ -272,10 +276,10 @@ function errorsChanged(): void {
     }, 150);
 }
 
-export function recordScriptError(scriptId: string, message: string): void {
+export function recordScriptError(scriptId: string, message: string, ctx?: string): void {
     void loadErrors().then(() => {
         const prev = runtimeErrors.get(scriptId);
-        runtimeErrors.set(scriptId, { message: message.slice(0, 2000), at: Date.now(), count: (prev?.count ?? 0) + 1 });
+        runtimeErrors.set(scriptId, { message: message.slice(0, 2000), at: Date.now(), count: (prev?.count ?? 0) + 1, ...(ctx ? { ctx } : {}) });
         errorsChanged();
     });
 }

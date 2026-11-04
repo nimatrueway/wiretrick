@@ -5,6 +5,7 @@
  */
 import { EVAL_WRAPPER_LINES } from "../shared/scriptError";
 import { userFrames } from "../shared/scriptHealth";
+import { USER_SCRIPTS_PROBLEM } from "../shared/userScriptsStatus";
 import type { TabBadge } from "./logBadge";
 
 export type ProblemSeverity = "error" | "warning";
@@ -20,6 +21,12 @@ const SETTINGS_SECTIONS: Record<string, string> = {
     Advanced: "settings-sec-advanced",
     About: "settings-sec-about",
 };
+/** The browser's settings page for this extension a message mentions ("chrome://extensions/?id=…"), or null. */
+export function extensionsLink(message: string): { text: string; at: number } | null {
+    const m = /\b(?:chrome|edge|brave):\/\/extensions\/\?id=[a-p]{32}/.exec(message);
+    return m ? { text: m[0], at: m.index } : null;
+}
+
 /** The "Settings → Section" a message mentions, with where it is in the message, or null. */
 export function settingsLink(message: string): { text: string; label: string; section: string; at: number } | null {
     for (const [label, section] of Object.entries(SETTINGS_SECTIONS)) {
@@ -41,6 +48,8 @@ export interface Problem {
     endColumn?: number;
     /** runtime errors can be dismissed (×) */
     dismissible?: boolean;
+    /** where a script's GUI code ran: "overlay › example.com" (onPage: "page" / "isolated") */
+    context?: string;
 }
 
 export interface ProblemGroup {
@@ -66,7 +75,7 @@ export interface ProblemScript {
     label: string;
     error?: string | null;
     ruleErrors?: string[];
-    runtimeError?: { message: string; at: number; count: number } | null;
+    runtimeError?: { message: string; at: number; count: number; ctx?: string } | null;
     /** saved-code TypeScript errors, "line N: message" */
     typeErrors?: string[];
     routeWarnings?: string[];
@@ -86,10 +95,10 @@ export interface ProblemDataFile {
 
 export const SETTINGS_GROUP = { id: "__settings__", label: "settings.yaml" };
 
-function runtimeMessage(r: { message: string; at: number; count: number }): string {
+function runtimeMessage(r: { message: string; at: number; count: number; ctx?: string }): string {
     const when = new Date(r.at).toLocaleTimeString();
     const times = r.count > 1 ? `${r.count}×, last at ${when}` : `at ${when}`;
-    return `Runtime error (${times}): ${userFrames(r.message)}`;
+    return `Runtime error (${times}): ${r.ctx ? `${r.ctx} › ` : ""}${userFrames(r.message)}`;
 }
 
 function storedTypeError(e: string): Problem {
@@ -232,12 +241,13 @@ export function collectProblems(scripts: ProblemScript[], liveMarkers: Map<strin
         const handler = (raw: string): Position | Range => handlerRange(raw, s) ?? (lines ? lineRange(lines, 1) : { line: 1 });
         if (s.error) problems.push({ severity: "error", kind: "compile", message: userFrames(s.error), ...at(s.error, live?.find((m) => m.severity === "error")?.line) });
         for (const r of s.ruleErrors || []) problems.push({ severity: "error", kind: "rules", message: r, ...handler(r) });
-        if (s.runtimeError) problems.push({ severity: "error", kind: "runtime", message: runtimeMessage(s.runtimeError), dismissible: true, ...at(s.runtimeError.message) });
+        if (s.runtimeError) problems.push({ severity: "error", kind: "runtime", message: runtimeMessage(s.runtimeError), dismissible: true, ...(s.runtimeError.ctx ? { context: s.runtimeError.ctx } : {}), ...at(s.runtimeError.message) });
         // (a live marker that repeats the saved code's compile error — an import that can't load — is listed once)
         if (live) problems.push(...fromMarkers(s.error ? live.filter((m) => !s.error!.includes(m.message)) : live, "ts"));
         // (the saved code's type errors aren't checked while it fails to compile)
         else if (!s.error) problems.push(...(s.typeErrors || []).map(storedTypeError));
-        for (const w of s.routeWarnings || []) problems.push({ severity: "warning", kind: "route", message: w, ...handler(w) });
+        // (isolated onPage code that can't run is an error: user scripts are off)
+        for (const w of s.routeWarnings || []) problems.push({ severity: w.includes(USER_SCRIPTS_PROBLEM) ? "error" : "warning", kind: "route", message: w, ...handler(w) });
         if (problems.length) groups.push({ id: s.id, label: s.label, file: "ts", problems: problems.sort(byPosition) });
     }
     for (const d of dataFiles) if (d.markers.length) groups.push({ id: d.id, label: d.label, file: "json", problems: fromMarkers(d.markers, "json").sort(byPosition) });

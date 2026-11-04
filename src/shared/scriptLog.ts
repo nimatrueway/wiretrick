@@ -55,3 +55,16 @@ export function makeScriptConsole(emit: (level: ScriptLogLevel, source: string, 
     }
     return new Proxy(shim, { get: (t, k) => (k in t ? t[k as any] : (console as any)[k]) }) as Console;
 }
+
+/** where a script's GUI code runs: the page's main world, the isolated world, the overlay frame */
+export type ScriptContext = "page" | "isolated" | "overlay";
+export const SCRIPT_CONTEXTS: readonly ScriptContext[] = ["page", "isolated", "overlay"];
+
+/** the Log / Problems tag for a line from GUI code: "overlay › example.com" */
+export function contextTag(ctx: ScriptContext, url?: string): string {
+    let host = "";
+    try {
+        host = url ? new URL(url).host : "";
+    } catch {}
+    return host ? `${ctx} › ${host}` : ctx;
+}

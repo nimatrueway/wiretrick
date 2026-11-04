@@ -33,6 +33,11 @@ const LogLineView = memo(function LogLineView({ e, mark }: { e: LogItem; mark: R
         <div className={`log-line ${level}`} data-text={text} data-level={level} data-source={e.source} data-body={text.replace(/^\[[^\]]*\]\s*/, "")}>
             <time>{text.match(/^\[[^\]]*\]/)?.[0] || ""}</time>
             <span className={`lv ${level}`}>{level}</span>
+            {e.ctx ? (
+                <span className="log-ctx" data-ctx={e.ctx} title={`ran in: ${e.ctx}`}>
+                    {e.ctx} ›
+                </span>
+            ) : null}
             {logSegments(text, m?.[0] ? [at, at + m[0].length] : undefined).map((seg, i) => {
                 const node = seg.mark ? <mark key={i}>{seg.text}</mark> : seg.text;
                 if (!seg.uri) return node;

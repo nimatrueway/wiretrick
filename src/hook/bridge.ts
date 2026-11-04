@@ -6,8 +6,10 @@
  *   hook (MAIN, no eval) ← postMessage → bridge (isolated) ⇄ background
  *
  * Also runs wt.onPage code in the isolated world: `world: "isolated"`
- * handlers (MV2; MV3 has no eval in content scripts), and main-world ones
- * when the page CSP blocks eval there. The background sends the scripts'
+ * handlers (MV2; MV3 has no eval in content scripts, so they run in
+ * chrome.userScripts worlds — src/hook/isolated.ts — and the bridge relays
+ * the overlay's calls to them through the background, L2), and main-world
+ * ones when the page CSP blocks eval there. The background sends the scripts'
  * SOURCES, the bridge compiles them and runs them at the requested DOM
  * moment — the isolated world shares the page's DOM, not its JS world.
  *
@@ -19,7 +21,7 @@
  * (isolated world here; main world through the hook, L4).
  */
 import { formatScriptError } from "../shared/scriptError";
-import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
+import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptContext, type ScriptLogLevel } from "../shared/scriptLog";
 import { scriptFunction } from "../shared/scriptFn";
 import { makeLibRequire, type ShippedLib } from "../shared/scriptImports";
 import { makePageShim, domHandlersFor, scheduleDocument, firePageHandler, type PageDocumentHandler } from "../shared/pageShim";
@@ -39,9 +41,9 @@ import { fromWireRequest, toWireResponse } from "../shared/wtFetch";
         safeSend({ type: "debugLog", entry: { at: Date.now(), src: "bridge", msg: formatLogArgs(args), level } });
     }
 
-    /** a user script's own output → extension LOG, attributed to the script */
-    function scriptLog(scriptId: string | null, level: ScriptLogLevel, msg: string): void {
-        safeSend({ type: "scriptLog", scriptId, level, msg });
+    /** a user script's own output → extension LOG, attributed to the script (and tagged with where it ran) */
+    function scriptLog(scriptId: string | null, level: ScriptLogLevel, msg: string, ctx?: ScriptContext): void {
+        safeSend({ type: "scriptLog", scriptId, level, msg, ...(ctx ? { ctx } : {}) });
     }
 
     // ---- MAIN-world hook relaying ----
@@ -156,7 +158,7 @@ import { fromWireRequest, toWireResponse } from "../shared/wtFetch";
             );
         }
         if (data.kind === "scriptLog") {
-            safeSend({ type: "scriptLog", scriptId: data.scriptId ?? null, level: data.level, msg: data.msg });
+            safeSend({ type: "scriptLog", scriptId: data.scriptId ?? null, level: data.level, msg: data.msg, ctx: "page" });
         }
         // the hook's answer to an overlay's call (L4). The page can post this
         // too: only a cid we sent and are still waiting for is accepted, and
@@ -198,30 +200,36 @@ import { fromWireRequest, toWireResponse } from "../shared/wtFetch";
         if (resp.count > 0 || (resp.domHandlers || []).length || (resp.isoHandlers || []).length || (resp.overlays || []).length) openPort();
         pageScriptIds = new Set(((resp.domHandlers || []) as DocumentHandler[]).map((h) => h.scriptId));
         syncOverlays(window === top ? resp.overlays || [] : [], hot);
+        if (__MV3__) {
+            // MV3 content scripts can't eval: isolated code runs in user-script worlds; this frame only relays the overlay's calls
+            isoHandles = new Map(((resp.isoHandlers || []) as { scriptId: string; handles?: string[] }[]).map((h) => [h.scriptId, new Set(h.handles || [])]));
+            isoOff = typeof resp.isoOff === "string" ? resp.isoOff : null;
+            return;
+        }
         const iso: DocumentHandler[] = resp.isoHandlers || [];
         if (isoFired && !hot) return;
         isoFired = true;
-        if (__MV3__) {
-            // MV3 content scripts can't eval: isolated code needs chrome.userScripts (Phase 2b)
-            isoUnsupported = new Set(iso.map((h) => h.scriptId));
-            for (const h of iso) scriptLog(h.scriptId, "warn", scriptLogLine(h.name, "onPage", ISO_MV3));
-            return;
-        }
         runPageScripts(iso, resp.isoLibs || [], "isolated", hot);
     }
 
-    const ISO_MV3 = 'world: "isolated" onPage code doesn\'t run on this build yet';
-    /** MV3: scripts whose isolated onPage code was skipped (the overlay's calls into it say why) */
-    let isoUnsupported = new Set<string>();
-    /** per script, what answers the overlay's calls into onPage code run here: isolated world, and the main-world CSP fallback */
+    /** MV3: per script, the handles of its isolated onPage code (run by chrome.userScripts) */
+    let isoHandles = new Map<string, Set<string>>();
+    /** MV3: why that code doesn't run (user scripts are off), if it doesn't */
+    let isoOff: string | null = null;
+    /** per script, what answers the overlay's calls into onPage code run here: isolated world (MV2), and the main-world CSP fallback */
     const isoExposers = new Map<string, Exposer>();
     const fallbackExposers = new Map<string, Exposer>();
+
+    /** scripts whose main-world fallback code already reported calling the overlay */
+    const mainWorldCallers = new Set<string | null>();
 
     function runPageScripts(handlers: DocumentHandler[], libSources: ShippedLib[], world: "main" | "isolated", hot: boolean): void {
         if (dead) return;
         const what = world === "isolated" ? "onPage (isolated world)" : "onPage (isolated-world fallback)";
         dlog("debug", `${what}: running ${handlers.length} script(s)${hot ? " (hot refire)" : ""}`);
         const exposers = world === "isolated" ? isoExposers : fallbackExposers;
+        // the main-world fallback is still page code
+        const ctx: ScriptContext = world === "isolated" ? "isolated" : "page";
         for (const id of [...exposers.keys()]) if (!handlers.some((h) => h.scriptId === id)) exposers.delete(id);
         const shimFor = (scriptId: string | null, name: string, params: Record<string, any>, exposer?: Exposer) =>
             makePageShim({
@@ -230,7 +238,13 @@ import { fromWireRequest, toWireResponse } from "../shared/wtFetch";
                 exposer,
                 // isolated code in the top frame may call its overlay; elsewhere the handle explains why not
                 overlay: world === "isolated" && scriptId && window === top ? (h) => overlayClient(scriptId).remote(h) : undefined,
-                log: (...args: any[]) => scriptLog(scriptId, "info", scriptLogLine(name, "wt.log", formatLogArgs(args))),
+                // the main-world fallback reports a call into the overlay like the hook does (once per script)
+                onMainWorldCall: (e) => {
+                    if (world !== "main" || mainWorldCallers.has(scriptId)) return;
+                    mainWorldCallers.add(scriptId);
+                    scriptLog(scriptId, "error", formatScriptError(name, e, "onPage"), ctx);
+                },
+                log: (...args: any[]) => scriptLog(scriptId, "info", scriptLogLine(name, "wt.log", formatLogArgs(args)), ctx),
                 storage: {
                     get: (key: string) => new Promise((r) => safeSend({ type: "scriptStorageGet", scriptId, key }, (x: any) => r(x && x.value))),
                     set: (key: string, value: any) => new Promise((r) => safeSend({ type: "scriptStorageSet", scriptId, key, value }, () => r(null))),
@@ -242,7 +256,7 @@ import { fromWireRequest, toWireResponse } from "../shared/wtFetch";
             else exposer.reset();
             // shadow console like the MAIN-world path: script console.*
             // calls go to the extension LOG, not the page console
-            const consoleProxy = makeScriptConsole((level, source, text) => scriptLog(h.scriptId, level, scriptLogLine(h.name, source, text)));
+            const consoleProxy = makeScriptConsole((level, source, text) => scriptLog(h.scriptId, level, scriptLogLine(h.name, source, text), ctx));
             let dom: PageDocumentHandler[];
             try {
                 // page-side require over the shipped library sources and data files
@@ -256,7 +270,7 @@ import { fromWireRequest, toWireResponse } from "../shared/wtFetch";
             } catch (e: any) {
                 exposer.reset();
                 exposer.done();
-                scriptLog(h.scriptId, "error", formatScriptError(h.name, e, `${what} compile`));
+                scriptLog(h.scriptId, "error", formatScriptError(h.name, e, `${what} compile`), ctx);
                 continue;
             }
             const matching = domHandlersFor(dom, location.href, exposer);
@@ -266,7 +280,7 @@ import { fromWireRequest, toWireResponse } from "../shared/wtFetch";
                     try {
                         firePageHandler(d, { url: location.href, method: "GET", tabUrl: location.href, resourceType: "main_frame", requestHeaders: {}, groups: {} }, exposer);
                     } catch (e: any) {
-                        scriptLog(h.scriptId, "error", formatScriptError(h.name, e, d.route.api || "onDocument"));
+                        scriptLog(h.scriptId, "error", formatScriptError(h.name, e, d.route.api || "onDocument"), ctx);
                     }
                 };
                 scheduleDocument(d.when, run, hot);
@@ -317,6 +331,15 @@ import { fromWireRequest, toWireResponse } from "../shared/wtFetch";
         // an overlay's store updates (the background only sends those of scripts with an overlay here)
         ep.on("store.patch", (a, s) => s !== undefined && overlays.get(s)?.ep?.push("store.patch", a, s));
         ep.on("store.reject", (a, s) => s !== undefined && overlays.get(s)?.ep?.push("store.reject", a, s));
+        // MV3: the overlay ⇄ isolated-world relay (the background checks tab, frame and script)
+        ep.on("iso.result", (r, s) => {
+            const p = isRpcResult(r) ? isoPending.get(r.cid) : undefined;
+            if (!p || p.s !== s) return;
+            isoPending.delete(r.cid);
+            clearTimeout(p.timer);
+            p.reply(r);
+        });
+        ep.on("iso.call", (c, s) => guard(() => s !== undefined && isRpcCall(c) && callOverlayFromIso(s, c)));
         // a new link (after a drop, or a new service worker): re-grant each
         // overlay (a fresh nonce), then its replicas re-declare and re-subscribe
         if (l2Opened++)
@@ -329,6 +352,12 @@ import { fromWireRequest, toWireResponse } from "../shared/wtFetch";
         for (const w of l2Waiters.splice(0)) w();
         ep.onClose(() => {
             if (l2 === ep) l2 = null;
+            for (const [cid, p] of [...isoPending])
+                if (p.ep === ep) {
+                    isoPending.delete(cid);
+                    clearTimeout(p.timer);
+                    p.reply({ cid, ok: false, error: { name: "DisconnectedError", message: "the link to the extension dropped" } });
+                }
             if (dead || !l2Holders || l2Timer) return;
             l2Timer = setTimeout(() => {
                 l2Timer = null;
@@ -342,8 +371,8 @@ import { fromWireRequest, toWireResponse } from "../shared/wtFetch";
         }, 2000);
     }
 
-    /** an L2 call, (re)opening the port first; it waits up to 5 s for a reconnect */
-    async function l2call<K extends ReqOps>(op: K, a: ReqOf<K>, s: string): Promise<ResOf<K>> {
+    /** the L2 link, (re)opening the port first; it waits up to 5 s for a reconnect */
+    async function l2up(op: string): Promise<Endpoint> {
         if (!l2 && !l2Timer) openPort();
         if (!l2)
             await new Promise<void>((resolve, reject) => {
@@ -353,7 +382,12 @@ import { fromWireRequest, toWireResponse } from "../shared/wtFetch";
                     resolve();
                 });
             });
-        return l2!.call(op, a, s);
+        return l2!;
+    }
+
+    /** an L2 call, (re)opening the port first */
+    async function l2call<K extends ReqOps>(op: K, a: ReqOf<K>, s: string): Promise<ResOf<K>> {
+        return (await l2up(op)).call(op, a, s);
     }
 
     /** scripts changed: refresh hook status; onDocument refires in the MAIN world (hook) when healthy, else here (isolated) */
@@ -396,6 +430,10 @@ import { fromWireRequest, toWireResponse } from "../shared/wtFetch";
     const overlays = new Map<string, Overlay>();
     /** isolated-world `overlay.fn()` callers, per script */
     const overlayClients = new Map<string, RpcClient>();
+    /** MV3: overlay → isolated-world calls waiting for the background's answer (L2), by cid */
+    const isoPending = new Map<string, { s: string; reply: (r: RpcResult) => void; timer: ReturnType<typeof setTimeout>; ep?: Endpoint }>();
+    /** MV3: isolated-world → overlay calls the overlay hasn't answered yet, by cid */
+    const isoRelayed = new Map<string, { s: string; timer: ReturnType<typeof setTimeout> }>();
     /** overlay → main-world calls waiting for the hook (L4), by cid */
     const l4Pending = new Map<string, { s: string; reply: (r: RpcResult) => void; timer: ReturnType<typeof setTimeout> }>();
     let host: HTMLElement | null = null;
@@ -506,7 +544,7 @@ import { fromWireRequest, toWireResponse } from "../shared/wtFetch";
         ep.handle("pagefetch", mine((a: ReqOf<"pagefetch">) => pageFetch(s, a.request, !!a.bypass)));
         ep.handle("storage.get", mine((a: ReqOf<"storage.get">) => new Promise((r) => safeSend({ type: "scriptStorageGet", scriptId: s, key: a.key }, (x: any) => r({ value: x?.value })))));
         ep.handle("storage.set", mine((a: ReqOf<"storage.set">) => new Promise((r) => safeSend({ type: "scriptStorageSet", scriptId: s, key: a.key, value: a.value }, () => r({})))));
-        ep.on("log", (a) => proven && log(["debug", "info", "warn", "error"].includes(a?.level) ? a.level : "info", String(a?.msg ?? "")));
+        ep.on("log", (a) => proven && scriptLog(s, ["debug", "info", "warn", "error"].includes(a?.level) ? a.level : "info", String(a?.msg ?? ""), "overlay"));
         ep.on("rects", (a) => {
             if (proven && o.frame && Array.isArray(a?.rects)) o.frame.style.clipPath = clipPathFor(normalizeRects(a.rects, window.innerWidth, window.innerHeight));
         });
@@ -514,7 +552,14 @@ import { fromWireRequest, toWireResponse } from "../shared/wtFetch";
             if (proven && o.frame && o.frame.style.zIndex !== String(zTop)) o.frame.style.zIndex = String(++zTop);
         });
         ep.on("rpc.call", (c) => proven && isRpcCall(c) && routeOverlayCall(s, c, (r) => ep.push("rpc.result", r)));
-        ep.on("rpc.result", (r) => proven && overlayClients.get(s)?.receive(r));
+        ep.on("rpc.result", (r) => {
+            if (!proven) return;
+            const rel = isRpcResult(r) ? isoRelayed.get(r.cid) : undefined;
+            if (!rel || rel.s !== s) return void overlayClients.get(s)?.receive(r);
+            isoRelayed.delete(r.cid);
+            clearTimeout(rel.timer);
+            l2?.push("iso.result", r, s);
+        });
         ep.onClose(() => {
             if (o.ep === ep) removeOverlay(s, "closed");
         });
@@ -537,6 +582,12 @@ import { fromWireRequest, toWireResponse } from "../shared/wtFetch";
         o.frame?.remove();
         o.ep?.close(why);
         for (const call of o.queue.splice(0)) overlayClients.get(s)?.receive(callError(call.cid, NOT_RUNNING));
+        // MV3: the isolated side's calls end with the `overlay.closed` below
+        for (const [cid, r] of [...isoRelayed])
+            if (r.s === s) {
+                clearTimeout(r.timer);
+                isoRelayed.delete(cid);
+            }
         overlayClients.get(s)?.disconnect(`the overlay ${why}`);
         l2?.push("overlay.closed", {}, s);
         l2Holders = overlays.size;
@@ -557,8 +608,40 @@ import { fromWireRequest, toWireResponse } from "../shared/wtFetch";
         return c;
     }
 
-    /** an overlay's call into its script's onPage code: the isolated world (here), the CSP fallback (here), else the main world (hook) */
+    /** MV3: isolated code calls script `s`'s overlay (relayed by the background) */
+    function callOverlayFromIso(s: string, call: RpcCall): void {
+        const o = window === top ? overlays.get(s) : undefined;
+        const fail = (message: string) => l2?.push("iso.result", callError(call.cid, message), s);
+        if (!o || o.closed) return void fail(NOT_RUNNING);
+        if (!o.ep && o.queue.length >= RPC_QUEUE_MAX) return void fail(`${call.fn}(): too many calls waiting for the overlay`);
+        isoRelayed.set(call.cid, { s, timer: setTimeout(() => isoRelayed.delete(call.cid), RPC_TIMEOUT_MS + 1000) });
+        if (o.ep) o.ep.push("rpc.call", call);
+        else o.queue.push(call);
+    }
+
+    /** MV3: the overlay calls isolated code, in a user-script world (through the background) */
+    function callIso(s: string, call: RpcCall, reply: (r: RpcResult) => void): void {
+        if (isoOff) return reply(callError(call.cid, isoOff));
+        const p: { s: string; reply: (r: RpcResult) => void; timer: ReturnType<typeof setTimeout>; ep?: Endpoint } = { s, reply, timer: setTimeout(() => isoPending.delete(call.cid), RPC_TIMEOUT_MS + 1000) };
+        isoPending.set(call.cid, p);
+        l2up("iso.call").then(
+            (ep) => {
+                if (isoPending.get(call.cid) !== p) return;
+                p.ep = ep;
+                ep.push("iso.call", call, s);
+            },
+            (e: any) => {
+                if (isoPending.get(call.cid) !== p) return;
+                isoPending.delete(call.cid);
+                clearTimeout(p.timer);
+                reply({ cid: call.cid, ok: false, error: { name: "DisconnectedError", message: String(e?.message || e) } });
+            }
+        );
+    }
+
+    /** an overlay's call into its script's onPage code: the isolated world (here, or a user-script world on MV3), the CSP fallback (here), else the main world (hook) */
     function routeOverlayCall(s: string, call: RpcCall, reply: (r: RpcResult) => void): void {
+        if (__MV3__ && isoHandles.get(s)?.has(call.h)) return callIso(s, call, reply);
         const iso = isoExposers.get(s);
         const fb = fallbackExposers.get(s);
         if (iso?.has(call.h) && !iso.isElsewhere(call.h)) return iso.answer(call, reply);
@@ -569,7 +652,6 @@ import { fromWireRequest, toWireResponse } from "../shared/wtFetch";
             window.postMessage({ source: MAIN_SOURCE, kind: "rpc.call", s, call }, window.location.origin);
             return;
         }
-        if (isoUnsupported.has(s)) return reply(callError(call.cid, ISO_MV3));
         (iso ?? fb)?.answer(call, reply) ?? reply(callError(call.cid, NOT_RUNNING));
     }
 

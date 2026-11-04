@@ -7,13 +7,17 @@
  */
 import { WtCallError } from "./rpc";
 
-/** a handle whose every method rejects with `reason` */
-export function inertRemote(reason: string): any {
+/** a handle whose every method rejects with `reason` (`onCall` sees each error, thrown at the call site) */
+export function inertRemote(reason: string, onCall?: (e: WtCallError) => void): any {
     return new Proxy(Object.create(null), {
         get(_t, prop) {
             // not a thenable (`await handle` must not hang), no symbol methods
             if (typeof prop !== "string" || prop === "then" || prop === "toJSON") return undefined;
-            return () => Promise.reject(new WtCallError(reason));
+            return () => {
+                const e = new WtCallError(reason);
+                onCall?.(e);
+                return Promise.reject(e);
+            };
         },
         set() {
             return false;

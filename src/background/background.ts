@@ -20,6 +20,8 @@ import { createBadgeCounter } from "./badgeCounter";
 import { actionIconView, createBusyIndicator } from "./busyIcon";
 import { onBusyChange } from "./engine/busy";
 import { addBridgePort } from "./engine/bridgePorts";
+import { addUserScriptPort } from "./engine/overlayLinks";
+import { contextTag, SCRIPT_CONTEXTS } from "../shared/scriptLog";
 
 const IS_FIREFOX =
     typeof (globalThis as any).browser !== "undefined" &&
@@ -112,6 +114,8 @@ chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
 });
 
 // ---- manager UI port: logs stream over it ----
+// L6: a script's isolated-world onPage code (MV3 chrome.userScripts world)
+(chrome.runtime as any).onUserScriptConnect?.addListener((port: chrome.runtime.Port) => addUserScriptPort(port));
 chrome.runtime.onConnect.addListener((port) => {
     if (addBridgePort(port)) return; // L2: a content-script bridge
     if (port.name === "logs") {
@@ -130,7 +134,9 @@ chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
     if (msg && msg.type === "scriptLog" && typeof msg.msg === "string") {
         // script output relayed from a page (hook/bridge): into the tab's LOG
         const level = ["debug", "info", "warn", "error"].includes(msg.level) ? msg.level : "info";
-        log(sender.tab?.id ?? -1, msg.msg.slice(0, 8000), level, typeof msg.scriptId === "string" ? msg.scriptId : null);
+        // GUI code's lines say where they came from (onPage main/isolated world, the overlay)
+        const ctx = SCRIPT_CONTEXTS.includes(msg.ctx) ? contextTag(msg.ctx, sender.url || sender.tab?.url) : undefined;
+        log(sender.tab?.id ?? -1, msg.msg.slice(0, 8000), level, typeof msg.scriptId === "string" ? msg.scriptId : null, undefined, undefined, undefined, ctx);
         sendResponse({});
         return false;
     }

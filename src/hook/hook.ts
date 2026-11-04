@@ -267,12 +267,20 @@ import { readFetchBody } from "../shared/requestBody";
         return makeScriptConsole((level, source, text) => scriptLogUp(scriptId, level, scriptLogLine(name, source, text)));
     }
 
+    /** scripts whose main-world code already reported calling the overlay (once per page) */
+    const mainWorldCallers = new Set<string | null>();
+
     /** shim for compiled dom scripts: log → extension LOG (script-tagged), storage → bridge relay */
     function makeDocumentShim(scriptId: string | null, name: string, params: Record<string, any>, exposer?: Exposer) {
         return makePageShim({
             params,
             exposer,
-            otherWorld: __MV3__ ? 'world: "isolated" onPage code doesn\'t run on this build yet' : NOT_RUNNING,
+            // a main-world `overlay.fn()` call: a runtime Problem at the call (with a quick fix: `world: "isolated"`)
+            onMainWorldCall: (e) => {
+                if (mainWorldCallers.has(scriptId)) return;
+                mainWorldCallers.add(scriptId);
+                scriptLogUp(scriptId, "error", formatScriptError(name, e, "onPage"));
+            },
             log: (...args: any[]) => scriptLogUp(scriptId, "info", scriptLogLine(name, "wt.log", formatLogArgs(args))),
             storage: {
                 // the background answers { value } (same as the isolated-world shim unwraps)

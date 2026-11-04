@@ -8,9 +8,22 @@
  * checks that the frame is a tab's top frame and that the script has an
  * overlay matching the page (a URL on the frame's own origin). Other
  * scripts' code and stores stay out of reach.
+ *
+ * L6 (Chrome MV3): a script's `world: "isolated"` onPage code runs in a
+ * `chrome.userScripts` world (background/userScripts.ts, hook/isolated.ts)
+ * whose port comes here. It gets its code (`iso.load`, only where the
+ * script has isolated onPage code for the frame's URL), its Log lines and
+ * `wt.storage`, and — top frame only — the calls to and from the script's
+ * overlay, relayed through that tab's top-frame bridge (L2 `iso.call` /
+ * `iso.result`). Each side only reaches the same tab's top frame and the
+ * same script; anything else is dropped.
  */
 import { onBridgeConnect, type BridgeLink } from "./bridgePorts";
-import { endpointPair, type Endpoint, type OverlayInit } from "../../shared/wire";
+import { endpointPair, portEndpoint, type Endpoint, type IsoInit, type OverlayInit } from "../../shared/wire";
+import { isRpcCall, isRpcResult, NOT_RUNNING, RPC_TIMEOUT_MS, type RpcCall, type RpcResult } from "../../shared/rpc";
+import { USER_SCRIPTS_OFF } from "../../shared/userScriptsStatus";
+import { contextTag, type ScriptLogLevel } from "../../shared/scriptLog";
+import { dlogLevel } from "../../shared/debugLog";
 import type { RouteMeta } from "../../shared/route";
 import type { ShippedLib } from "../../shared/scriptImports";
 import { fetchFor, storeOwner } from "./stores";
@@ -41,9 +54,82 @@ interface Grant {
 const NONCE_TTL_MS = 60_000;
 const BYPASS_TTL_MS = 10_000;
 
+/** a script's isolated onPage code as its user-script world runs it (pipeline.ts `hookBundle`) */
+export type IsoRun = Omit<IsoInit, "s">;
+
+export interface OverlayLinkDeps {
+    overlayRuns(url: string): Promise<Map<string, OverlayRun>>;
+    /** the scripts with isolated onPage code for a frame's URL */
+    isoRuns?(url: string, top: boolean): Promise<Map<string, IsoRun>>;
+    /** chrome.userScripts can't run (the overlay's calls into isolated code say so) */
+    userScriptsOff?(): Promise<boolean>;
+    storageGet?(s: string, key: string): Promise<any>;
+    storageSet?(s: string, key: string, value: any): Promise<void>;
+    log?(tabId: number, s: string, level: ScriptLogLevel, msg: string, ctx: string): void;
+}
+
 let overlayRuns: (url: string) => Promise<Map<string, OverlayRun>> = async () => new Map();
+let deps: OverlayLinkDeps = { overlayRuns };
 const grants = new Map<BridgeLink, Map<string, Grant>>();
 let installed = false;
+
+export const USER_SCRIPT_PORT = "wt-user-script";
+/** how long a relayed call waits for the other side's link (a page still loading) */
+const LINK_WAIT_MS = 5000;
+
+/** an isolated runtime's L6 link; bound to one script by its first `iso.load` */
+interface IsoLink {
+    tabId: number;
+    frameId: number;
+    ep: Endpoint;
+    port: chrome.runtime.Port;
+    s: string | null;
+}
+/** each tab's top-frame bridge (the overlay's side of the relay) */
+const topBridges = new Map<number, BridgeLink>();
+/** bound links: `${tabId}:${frameId}:${scriptId}` */
+const isoLinks = new Map<string, IsoLink>();
+/** relayed calls by cid: `toIso` = the overlay called isolated code, `toOverlay` = the other way */
+const relayed = new Map<string, { dir: "toIso" | "toOverlay"; s: string; iso: IsoLink; bridge: BridgeLink; timer: ReturnType<typeof setTimeout> }>();
+/** woken whenever a bridge or isolated link comes up */
+const linkWaiters = new Set<() => void>();
+const isoKey = (tabId: number, frameId: number, s: string) => `${tabId}:${frameId}:${s}`;
+const callError = (cid: string, message: string, name = "WtCallError"): RpcResult => ({ cid, ok: false, error: { name, message } });
+
+function linksChanged(): void {
+    for (const w of [...linkWaiters]) w();
+}
+
+/** `find()`, now or once a link comes up within LINK_WAIT_MS */
+function whenLinked<T>(find: () => T | undefined): Promise<T | undefined> {
+    const now = find();
+    if (now) return Promise.resolve(now);
+    return new Promise((resolve) => {
+        const check = () => {
+            const v = find();
+            if (!v) return;
+            done(v);
+        };
+        const done = (v: T | undefined) => {
+            linkWaiters.delete(check);
+            clearTimeout(timer);
+            resolve(v);
+        };
+        const timer = setTimeout(() => done(undefined), LINK_WAIT_MS);
+        linkWaiters.add(check);
+    });
+}
+
+function track(cid: string, entry: { dir: "toIso" | "toOverlay"; s: string; iso: IsoLink; bridge: BridgeLink }): void {
+    const timer = setTimeout(() => relayed.delete(cid), RPC_TIMEOUT_MS + 1000);
+    relayed.set(cid, { ...entry, timer });
+}
+function untrack(cid: string): void {
+    const r = relayed.get(cid);
+    if (!r) return;
+    clearTimeout(r.timer);
+    relayed.delete(cid);
+}
 
 const sameOrigin = (a: string, b: string | undefined): boolean => {
     try {
@@ -55,8 +141,9 @@ const sameOrigin = (a: string, b: string | undefined): boolean => {
 };
 
 /** serve overlays on every bridge link; `runs(url)` → the overlays matching a top-frame page */
-export function setupOverlayLinks(deps: { overlayRuns(url: string): Promise<Map<string, OverlayRun>> }): void {
-    overlayRuns = deps.overlayRuns;
+export function setupOverlayLinks(d: OverlayLinkDeps): void {
+    deps = d;
+    overlayRuns = d.overlayRuns;
     if (installed) return;
     installed = true;
     onBridgeConnect(serveLink);
@@ -164,9 +251,128 @@ export function serveLink(link: BridgeLink): void {
         setTimeout(remove, BYPASS_TTL_MS);
         return {};
     });
+
+    // ---- the overlay ⇄ isolated-world relay (top frame) ----
+    if (link.frameId === 0) topBridges.set(link.tabId, link);
+    link.ep.onClose(() => {
+        if (topBridges.get(link.tabId) === link) topBridges.delete(link.tabId);
+        for (const [cid, r] of [...relayed]) {
+            if (r.bridge !== link) continue;
+            untrack(cid);
+            if (r.dir === "toOverlay") r.iso.ep.push("rpc.result", callError(cid, "the page's bridge went away", "DisconnectedError"), r.s);
+        }
+    });
+    // the overlay calls its script's isolated code
+    link.ep.on("iso.call", (call, s) => {
+        if (s === undefined || link.frameId !== 0 || !mine.has(s) || !isRpcCall(call)) return;
+        void whenLinked(() => isoLinks.get(isoKey(link.tabId, 0, s))).then(async (iso) => {
+            if (link.ep.closed) return;
+            if (!iso) return link.ep.push("iso.result", callError(call.cid, (await deps.userScriptsOff?.()) ? USER_SCRIPTS_OFF : NOT_RUNNING), s);
+            track(call.cid, { dir: "toIso", s, iso, bridge: link });
+            iso.ep.push("rpc.call", call, s);
+        });
+    });
+    // the overlay's answer to a call from isolated code
+    link.ep.on("iso.result", (r, s) => {
+        const p = isRpcResult(r) ? relayed.get(r.cid) : undefined;
+        if (!p || p.dir !== "toOverlay" || p.bridge !== link || p.s !== s) return;
+        untrack(r.cid);
+        p.iso.ep.push("rpc.result", r, s);
+    });
+    link.ep.on("overlay.closed", (_a, s) => {
+        if (s !== undefined && link.frameId === 0) isoLinks.get(isoKey(link.tabId, 0, s))?.ep.push("overlay.closed", {}, s);
+    });
+    linksChanged();
+}
+
+/** L6: a user-script world's port (`runtime.onUserScriptConnect`); false if it isn't one of ours */
+export function addUserScriptPort(port: chrome.runtime.Port): boolean {
+    if (port.name !== USER_SCRIPT_PORT) return false;
+    const tabId = port.sender?.tab?.id;
+    const frameId = port.sender?.frameId;
+    if (typeof tabId !== "number" || tabId < 0 || typeof frameId !== "number" || port.sender?.id !== chrome.runtime.id) {
+        port.disconnect();
+        return true;
+    }
+    const ep = portEndpoint(port, { debug: (m) => dlogLevel("wire", "debug", `user script tab ${tabId} frame ${frameId}: ${m}`) });
+    serveIsoLink({ tabId, frameId, ep, port, s: null });
+    return true;
+}
+
+export function serveIsoLink(link: IsoLink): void {
+    const { tabId, frameId, ep } = link;
+    const bound = (s: string | undefined): s is string => s !== undefined && s === link.s;
+    ep.onClose(() => {
+        if (link.s !== null && isoLinks.get(isoKey(tabId, frameId, link.s)) === link) isoLinks.delete(isoKey(tabId, frameId, link.s));
+        for (const [cid, r] of [...relayed]) {
+            if (r.iso !== link) continue;
+            untrack(cid);
+            if (r.dir === "toIso") r.bridge.ep.push("iso.result", callError(cid, "the isolated-world code went away", "DisconnectedError"), r.s);
+        }
+    });
+    ep.handle("iso.load", async ({ url }, s) => {
+        if (typeof s !== "string" || typeof url !== "string" || !sameOrigin(url, link.port.sender?.url) || (link.s !== null && link.s !== s)) throw new Error("iso.load: refused");
+        // Chrome may one day say which world the port came from
+        const world = (link.port.sender as any)?.userScriptWorldId;
+        if (typeof world === "string" && world && world !== s) throw new Error("iso.load: refused");
+        const run = (await deps.isoRuns?.(url, frameId === 0))?.get(s);
+        if (!run) throw new Error("iso.load: this script has no isolated onPage code here");
+        if (ep.closed) throw new Error("iso.load: closed");
+        if (link.s === null) {
+            link.s = s;
+            const key = isoKey(tabId, frameId, s);
+            const old = isoLinks.get(key);
+            isoLinks.set(key, link);
+            if (old && old !== link) old.ep.close("replaced by a new link");
+            linksChanged();
+        }
+        return { s, ...run };
+    });
+    ep.on("log", (a, s) => {
+        if (!bound(s) || !["debug", "info", "warn", "error"].includes(a?.level)) return;
+        deps.log?.(tabId, s, a.level, String(a.msg ?? "").slice(0, 8000), contextTag("isolated", link.port.sender?.url));
+    });
+    ep.handle("storage.get", async ({ key }, s) => {
+        if (!bound(s) || typeof key !== "string") throw new Error("storage.get: refused");
+        return { value: await deps.storageGet?.(s, key) };
+    });
+    ep.handle("storage.set", async ({ key, value }, s) => {
+        if (!bound(s) || typeof key !== "string") throw new Error("storage.set: refused");
+        await deps.storageSet?.(s, key, value);
+        return {};
+    });
+    // isolated code calls its overlay (top frame only)
+    ep.on("rpc.call", (call, s) => {
+        if (!bound(s) || !isRpcCall(call)) return;
+        if (frameId !== 0) return ep.push("rpc.result", callError(call.cid, NOT_RUNNING), s);
+        void whenLinked(() => topBridges.get(tabId)).then((bridge) => {
+            if (ep.closed) return;
+            if (!bridge) return ep.push("rpc.result", callError(call.cid, NOT_RUNNING), s);
+            track(call.cid, { dir: "toOverlay", s, iso: link, bridge });
+            bridge.ep.push("iso.call", call, s);
+        });
+    });
+    // its answer to the overlay's call
+    ep.on("rpc.result", (r, s) => {
+        const p = isRpcResult(r) ? relayed.get(r.cid) : undefined;
+        if (!p || p.dir !== "toIso" || p.iso !== link || p.s !== s) return;
+        untrack(r.cid);
+        p.bridge.ep.push("iso.result", r, s);
+    });
+}
+
+/** scripts changed: every isolated runtime loads again (re-runs when its code changed) */
+export function pushIsoUpdate(): void {
+    for (const l of isoLinks.values()) l.ep.push("iso.update", {}, l.s!);
 }
 
 /** tests: forget every link */
 export function resetOverlayLinks(): void {
     grants.clear();
+    isoLinks.clear();
+    topBridges.clear();
+    for (const r of relayed.values()) clearTimeout(r.timer);
+    relayed.clear();
+    linkWaiters.clear();
+    deps = { overlayRuns };
 }

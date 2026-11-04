@@ -578,6 +578,7 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 .log-line a.log-link { color: inherit; text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); text-underline-offset: 2px; cursor: pointer; padding-block: 0.4em; }
 .log-line a.log-link:hover { color: var(--accent); text-decoration-color: currentColor; }
 .log-line time { color: var(--fg-faint); margin-right: 6px; }
+.log-line .log-ctx { color: var(--fg-dim); margin-right: 4px; flex-shrink: 0; }
 .log-line.warn { color: var(--warn); background: var(--warn-tint); }
 .log-line.error { color: var(--err); background: var(--err-tint); }
 
@@ -594,6 +595,21 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
     flex-direction: column;
     min-width: 0;
 }
+
+/* Chrome MV3: "user scripts are off" (UserScriptsBanner.tsx) */
+.wt-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    font-size: 12px;
+    color: var(--fg);
+    background: color-mix(in srgb, var(--warn) 14%, transparent);
+    border-bottom: 1px solid var(--border);
+}
+.wt-banner-text { flex: 1; min-width: 0; }
+.wt-banner button { flex: none; }
+.wt-banner-close { background: none; border: none; color: var(--fg-dim); cursor: pointer; }
 
 #editor-toolbar {
     display: flex;

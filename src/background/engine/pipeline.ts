@@ -43,7 +43,9 @@ import { getTextTypes, setTextTypes } from "../../shared/bodyKind";
 import { packBytes, unpackBytes } from "../../shared/bytesPack";
 import type { RequestBody } from "../../shared/requestBody";
 import { pushBundleUpdate } from "./bridgePorts";
-import { revalidateOverlayLinks, setupOverlayLinks, type OverlayRun } from "./overlayLinks";
+import { pushIsoUpdate, revalidateOverlayLinks, setupOverlayLinks, type IsoRun, type OverlayRun } from "./overlayLinks";
+import { onUserScriptsStatus, syncUserScripts, userScriptsStatus, type IsoScript } from "../userScripts";
+import { USER_SCRIPTS_OFF, userScriptsProblem, type UserScriptsStatus } from "../../shared/userScriptsStatus";
 import { contentHash } from "../../shared/folderSync";
 
 const FILTER: chrome.webRequest.RequestFilter = { urls: ["<all_urls>"] };
@@ -247,7 +249,7 @@ export function createPipeline(
         for (const [id, w] of helperNow) all.set(id, [...(all.get(id) || []), ...w]);
         void setScriptRouteWarnings(all);
     }
-    function warnRoutes(scripts: Script[]): void {
+    function warnRoutes(scripts: Script[], userScripts: UserScriptsStatus = "ok"): void {
         const problems: { id: string; msg: string }[] = [];
         const helperDown: { id: string; name: string; labels: string[] }[] = [];
         for (const s of scripts) {
@@ -258,6 +260,8 @@ export function createPipeline(
             if (!s.meta.active) continue;
             const down: string[] = [];
             for (const r of s.meta.routes || []) {
+                // Chrome MV3: isolated onPage code needs chrome.userScripts (an error, see problems.ts)
+                if (userScripts !== "ok" && r.kind === "onDocument" && pageWorld(r) === "isolated") problems.push({ id: s.id, msg: userScriptsProblem(routeLabel(r), userScripts, chrome.runtime.id) });
                 if (!isNetKind(r.kind)) continue;
                 const strategy = effectiveStrategy(r);
                 const msg = routeProblem({ kind: r.kind, strategy, resourceTypes: r.resourceTypes }, { firefox: IS_FIREFOX, mv3: __MV3__ });
@@ -573,8 +577,12 @@ export function createPipeline(
     async function hookBundle(url: string, top: boolean) {
         // main-world onPage scripts (hook.ts; the bridge when CSP blocks eval)
         const domHandlers: { scriptId: string; name: string; src: string; params: Record<string, any> }[] = [];
-        // `world: "isolated"` onPage scripts: never shipped to the page's own world
-        const isoHandlers: typeof domHandlers = [];
+        // `world: "isolated"` onPage scripts: never shipped to the page's own world.
+        // MV3 runs them in chrome.userScripts worlds that load the code from
+        // the owner (`isoRuns`): the bridge only learns their handles, to
+        // relay the overlay's calls
+        const isoHandlers: (typeof domHandlers[number] | { scriptId: string; name: string; handles: string[] })[] = [];
+        const isoRuns = new Map<string, IsoRun>();
         // onOverlay routes only — overlay code never goes through the page
         const overlays: { scriptId: string; name: string; routes: RouteMeta[]; codeHash: string }[] = [];
         const overlayRuns = new Map<string, OverlayRun>();
@@ -589,6 +597,7 @@ export function createPipeline(
         const analyzed = await analyzeScripts(pageScripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt })), paramValues);
         const mainDeps = new Set<string>();
         const isoDeps = new Set<string>();
+        const isoScriptDeps = new Map<string, Set<string>>();
         for (const s of pageScripts) {
             const a = analyzed.get(s.id);
             if (!s.enabled || !a || a.error || !a.meta.active) continue;
@@ -612,12 +621,17 @@ export function createPipeline(
             if (!main && !iso) continue;
             const h = { scriptId: s.id, name: s.meta.name, src: toRunnableJs(s.code), params: resolveParamValues(a.paramDefs || {}, paramValues[s.id]) };
             if (main) domHandlers.push(h);
-            if (iso) isoHandlers.push(h);
-            for (const d of a.deps) (main ? mainDeps : isoDeps).add(d);
-            if (main && iso) for (const d of a.deps) isoDeps.add(d);
+            if (iso && __MV3__) {
+                const handles = a.meta.routes.filter((r) => r.kind === "onDocument" && pageWorld(r) === "isolated").map((r) => `page:${r.index}`);
+                isoHandlers.push({ scriptId: s.id, name: s.meta.name, handles });
+                isoRuns.set(s.id, { name: s.meta.name, src: h.src, params: h.params, libs: [], codeHash: "", overlay: !!over.length });
+                isoScriptDeps.set(s.id, new Set(a.deps));
+            } else if (iso) isoHandlers.push(h);
+            if (main) for (const d of a.deps) mainDeps.add(d);
+            if (iso && !__MV3__) for (const d of a.deps) isoDeps.add(d);
         }
         // ship the transitively imported library sources (and data files, package modules) once per world
-        const dataFiles = mainDeps.size || isoDeps.size || overlayDeps.size ? await listDataFiles() : [];
+        const dataFiles = mainDeps.size || isoDeps.size || overlayDeps.size || isoScriptDeps.size ? await listDataFiles() : [];
         const pkgs = packagesSnapshot();
         const libsOf = (depNames: Set<string>): ShippedLib[] => {
             const libs = new Map<string, ShippedLib>();
@@ -644,9 +658,23 @@ export function createPipeline(
             run.react = needsReact([pageScripts.find((x) => x.id === o.scriptId)?.code ?? "", run.code, ...run.libs.map((l) => l.src ?? "")], pkgs);
             run.codeHash = o.codeHash = contentHash(JSON.stringify([run.code, run.params, run.libs.map((l) => [l.name, l.src ?? l.json ?? l.alias ?? ""])]));
         }
-        return { bundle: { count: routes.length, routes, textTypes: getTextTypes(), domHandlers, isoHandlers, overlays, libs, isoLibs }, overlayRuns };
+        // a user-script world re-runs when its code, params or imports change
+        for (const [id, run] of isoRuns) {
+            run.libs = libsOf(isoScriptDeps.get(id)!);
+            run.codeHash = contentHash(JSON.stringify([run.src, run.params, run.libs.map((l) => [l.name, l.src ?? l.json ?? l.alias ?? ""])]));
+        }
+        // MV3 without user scripts: the overlay's calls into isolated code say why at once
+        const isoOff = isoRuns.size && (await userScriptsStatus()) !== "ok" ? USER_SCRIPTS_OFF : undefined;
+        return { bundle: { count: routes.length, routes, textTypes: getTextTypes(), domHandlers, isoHandlers, overlays, libs, isoLibs, ...(isoOff ? { isoOff } : {}) }, overlayRuns, isoRuns };
     }
-    setupOverlayLinks({ overlayRuns: async (url) => (await hookBundle(url, true)).overlayRuns });
+    setupOverlayLinks({
+        overlayRuns: async (url) => (await hookBundle(url, true)).overlayRuns,
+        isoRuns: async (url, top) => (await hookBundle(url, top)).isoRuns,
+        userScriptsOff: async () => (await userScriptsStatus()) !== "ok",
+        storageGet: (s, key) => scriptStorageGet(s, key),
+        storageSet: async (s, key, value) => void (await scriptStorageSet(s, key, value)),
+        log: (tabId, s, level, msg, ctx) => log(tabId, msg, level, s, undefined, undefined, undefined, ctx),
+    });
 
     chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
         if (msg && msg.type === "listScripts") {
@@ -679,6 +707,11 @@ export function createPipeline(
                 (version) => sendResponse({ version }),
                 (e) => sendResponse({ error: String(e?.message ?? e) })
             );
+            return true;
+        }
+        // the Editor's "user scripts are off" banner (Chrome MV3)
+        if (msg && msg.type === "userScriptsStatus") {
+            void userScriptsStatus(true).then((status) => sendResponse({ status, scripts: isoScriptCount, id: chrome.runtime.id }));
             return true;
         }
         // the Editor's welcome page: wait until a just-saved script runs before opening its page
@@ -877,6 +910,8 @@ export function createPipeline(
     let rulesApplied: Promise<unknown> = Promise.resolve();
     /** the reloadSeq of the last reload that applied the scripts */
     let settledSeq = 0;
+    /** enabled scripts with `world: "isolated"` onPage code (the Editor's "user scripts are off" banner) */
+    let isoScriptCount = 0;
     /** reload and wait until the current scripts are fully applied, rules included */
     async function settle(): Promise<void> {
         for (let i = 0; i < 5; i++) {
@@ -916,6 +951,11 @@ export function createPipeline(
         } catch (e: any) {
             dlogLevel("pipeline", "warn", `script analysis failed, using saved routes: ${e?.message || e}`);
         }
+        const isoScripts: IsoScript[] = scripts
+            .filter((x) => x.enabled && x.meta.active)
+            .map((x) => ({ id: x.id, routes: (x.meta.routes || []).filter((r) => r.kind === "onDocument" && pageWorld(r) === "isolated") }))
+            .filter((x) => x.routes.length);
+        const usStatus = isoScripts.length ? await userScriptsStatus(true) : "ok";
         if (seq !== reloadSeq) return; // superseded by a newer reload
         dlog("pipeline", "reload", { total: scripts.length, enabled: scripts.filter((x) => x.enabled).map((x) => x.meta.name) });
         extensionStrategy.reload(scripts, paramValues);
@@ -926,7 +966,10 @@ export function createPipeline(
         settledSeq = seq;
         refreshBodyWatch(scripts);
         setSkipRoutes(scripts);
-        warnRoutes(scripts);
+        warnRoutes(scripts, usStatus);
+        isoScriptCount = isoScripts.length;
+        // MV3 isolated onPage code: (un)register the user-script worlds; open ones load again
+        void syncUserScripts(isoScripts).then(() => pushIsoUpdate());
 
         // HOT RELOAD: push the new bundle to every open tab's hook so
         // changes apply without reloading the target tab. Bridges with an
@@ -944,6 +987,13 @@ export function createPipeline(
     }
 
     const off = onScriptsChanged(() => void reload());
+    // the user granted the permission or allowed user scripts (or took it back): register, update Problems and pages
+    onUserScriptsStatus(() => void reload());
+    if (__MV3__) {
+        const recheck = (p: chrome.permissions.Permissions) => p.permissions?.includes("userScripts" as any) && void userScriptsStatus(true);
+        chrome.permissions?.onAdded?.addListener(recheck);
+        chrome.permissions?.onRemoved?.addListener(recheck);
+    }
     // rules handlers may read a store: a change re-probes
     const offStores = storeOwner.onChange((s) => rulesStrategy.storeChanged(s));
     // ownership moves between the helper strategy and the other strategies

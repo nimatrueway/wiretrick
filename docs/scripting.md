@@ -668,9 +668,9 @@ timing:
    - **`world: "isolated"`** runs the handler in the extension's isolated
      world on purpose: same DOM and timing, none of the page's JavaScript,
      and the page can't see or tamper with it, so it may also call the
-     script's overlay ([the isolated world](#the-isolated-world)). Firefox
-     and the Chromium MV2 build only for now; the Chrome (MV3) build logs a
-     warning and skips it.
+     script's overlay ([the isolated world](#the-isolated-world)). On
+     Chrome (MV3) it needs user scripts turned on
+     ([how](#user-scripts-on-chrome)).
 
      ```ts
      wt.onPage({ url: "*://example.com/*", world: "isolated" }, () => { ... });
@@ -808,7 +808,9 @@ wt.onOverlay("*://app.example.com/*", async () => {
   code in the main world (the default) can only answer: it shares its world
   with the site, which could fake its calls, so `overlay.fn()` there
   rejects with `main-world onPage code can't call the overlay; use world:
-  "isolated"`. Network handlers have no tab: their calls reject.
+  "isolated"`, and Problems shows that error with a quick fix (Ctrl+. / ⌘.)
+  that moves the handler to `world: "isolated"`. Network handlers have no
+  tab: their calls reject.
 
 ### The isolated world
 
@@ -839,9 +841,35 @@ const overlay = wt.onOverlay("*://app.example.com/*", () => {
 });
 ```
 
-Firefox and the Chromium MV2 build run isolated code; the Chrome (MV3)
-build doesn't yet (the handler is skipped with a warning, and the
-overlay's calls into it reject).
+Isolated code gets `wt.storage`, `wt.log`, `wt.params` and `console`
+(lines go to the Log tagged `isolated › host`, as the overlay's are
+`overlay › host` and main-world code's `page › host`); `wt.store` and
+`wt.fetch` are the overlay's.
+
+#### User scripts on Chrome
+
+Firefox and the Chromium MV2 build run isolated code in the extension's
+content-script world. The Chrome (MV3) build runs it through Chrome's
+user scripts API, which is off until you turn it on:
+
+1. **Grant the permission.** When a script has `world: "isolated"` code,
+   the Editor shows a banner: click **Grant permission** (the optional
+   "user scripts" permission).
+2. **Allow user scripts.** Chrome 138 and later: turn on **Allow User
+   Scripts** on Wiretrick's details page (`chrome://extensions/?id=…`; the
+   banner's **Open extension details** button and the Problems error link
+   there). Chrome 120–137: turn on **Developer mode** at the top right of
+   `chrome://extensions` instead.
+
+Until then the handler doesn't run, Problems shows an error on its
+`wt.onPage` line saying how to turn user scripts on, and the overlay's
+calls into it reject with `not running on this page (user scripts are
+off)`. Once they're on, pages loaded from then on run it (reload open
+ones); after that, saving the script updates open pages in place.
+
+Chrome 133 and later give each script's isolated code a world of its
+own; before that, scripts share one user-script world (each still in its
+own scope, apart from the site's JavaScript).
 
 ### Main-world results are page data
 

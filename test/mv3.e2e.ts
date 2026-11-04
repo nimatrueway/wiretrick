@@ -17,7 +17,7 @@
  * Usage: npm run build && npx tsx test/mv3.e2e.ts
  */
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import http from "node:http";
@@ -102,6 +102,11 @@ const server = http.createServer((req: http.IncomingMessage, res: http.ServerRes
 await new Promise((r) => server.listen(PORT, "127.0.0.1", r as () => void));
 
 const profile = mkdtempSync(path.join(tmpdir(), "reso-mv3-"));
+// chrome.userScripts (isolated onPage code) needs Developer mode before Chrome
+// 138 — on in the profile up front; the optional permission is granted by the
+// overlay check through the Editor's banner
+mkdirSync(path.join(profile, "Default"), { recursive: true });
+writeFileSync(path.join(profile, "Default", "Preferences"), JSON.stringify({ extensions: { ui: { developer_mode: true } } }));
 const proc = spawn(await resolveBrowser(), [
     "--headless=new", `--user-data-dir=${profile}`, `--load-extension=${EXT_ROOT}`,
     "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check", "about:blank",
@@ -312,7 +317,16 @@ try {
         for (const id of on) await send({ type: "setEnabled", id, enabled: false });
         await checkRulesStrategy(ctx, mgr, ORIGIN, check, " (MV3)");
         await checkFoldersAndDataFiles(ctx, mgr, ORIGIN, check, " (MV3)");
-        await checkOverlays(ctx, mgr, ORIGIN, check, { label: " (MV3)", isolated: false });
+        await checkOverlays(ctx, mgr, ORIGIN, check, {
+            label: " (MV3)",
+            isolated: false,
+            userScripts: {
+                async grant() {
+                    await mgr.bringToFront();
+                    await mgr.click("#userscripts-grant", { timeout: 5000 });
+                },
+            },
+        });
         for (const id of on) await send({ type: "setEnabled", id, enabled: true });
     }
 

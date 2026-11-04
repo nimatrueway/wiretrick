@@ -40,6 +40,8 @@ export interface PageShimOptions {
     otherWorld?: string;
     /** the isolated world in the top frame: `"overlay:N"` → a live handle */
     overlay?: (h: string) => any;
+    /** main world: a call into the overlay (rejected; its error has the caller's stack) */
+    onMainWorldCall?: (e: Error) => void;
 }
 
 const NO_STORE = "wt.store isn't available in page code — pass the data to an onPage function from the overlay instead";
@@ -68,7 +70,7 @@ export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDocumentHa
     let overlayIndex = 0;
     const onOverlay = (_route: unknown, fn: unknown) => {
         const h = `overlay:${typeof fn === "function" ? overlayIndex++ : -1}`;
-        if (world === "main") return inertRemote(REMOTE_MAIN_WORLD);
+        if (world === "main") return inertRemote(REMOTE_MAIN_WORLD, o.onMainWorldCall);
         return o.overlay ? o.overlay(h) : inertRemote(TOP_FRAME_ONLY);
     };
     const parsed = (key: string, def: ParamDef | undefined) => (def && typeof def === "object" ? parseParamValue(key, def, o.params[key]) : o.params[key]);

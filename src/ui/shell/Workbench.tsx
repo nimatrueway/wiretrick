@@ -6,6 +6,7 @@ import { ExplorerSection } from "../explorer/Explorer";
 import { MonacoHost } from "./MonacoHost";
 import { EditorToolbar, SplitV } from "./EditorToolbar";
 import { Welcome } from "../dialogs/Welcome";
+import { UserScriptsBanner } from "./UserScriptsBanner";
 import { openHelp, openSettings } from "../state/dialogs";
 
 const cls = (...names: (string | false | undefined)[]): string | undefined => names.filter(Boolean).join(" ") || undefined;
@@ -26,6 +27,7 @@ export function Workbench() {
             <SplitV />
             <main id="editor-pane">
                 <EditorToolbar />
+                <UserScriptsBanner />
                 <div id="editor-area">
                     <Welcome />
                     <MonacoHost />

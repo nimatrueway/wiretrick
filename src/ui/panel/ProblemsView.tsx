@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useSnapshot } from "valtio";
 import { badgeCount } from "../logBadge";
-import { filterProblems, problemCounts, settingsLink, type Problem, type ProblemGroup } from "../problems";
+import { extensionsLink, filterProblems, problemCounts, settingsLink, type Problem, type ProblemGroup } from "../problems";
 import { actions } from "../shell/actions";
 import { openSettings } from "../state/dialogs";
 import { panel } from "../state/panel";
@@ -26,8 +26,30 @@ const CHEVRON = (
 
 const pos = (p: Problem): string => (p.line ? `[Ln ${p.line}${p.column ? `, Col ${p.column}` : ""}]` : "");
 
-/** a problem's message; a "Settings → Section" in it is a link that opens that section */
+/** a problem's message; a "Settings → Section" in it is a link that opens that section, a chrome://extensions URL one that opens the page */
 function ProblemMessage({ text }: { text: string }) {
+    const ext = extensionsLink(text);
+    if (ext)
+        return (
+            <span className="pb-msg">
+                {text.slice(0, ext.at)}
+                <a
+                    className="pb-link"
+                    href="#"
+                    tabIndex={-1}
+                    title={`Open ${ext.text}`}
+                    onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        // (a page can't link to chrome:// URLs; the extension can open them)
+                        chrome.tabs.create({ url: ext.text }, () => void chrome.runtime.lastError);
+                    }}
+                >
+                    {ext.text}
+                </a>
+                {text.slice(ext.at + ext.text.length)}
+            </span>
+        );
     const link = settingsLink(text);
     if (!link) return <span className="pb-msg">{text}</span>;
     return (
@@ -144,6 +166,7 @@ export function ProblemsView({ hidden }: { hidden: boolean }) {
                                         {...rowProps(`p:${g.id}:${i}`, 2)}
                                         className={`pb-row pb-item ${sev}`}
                                         data-group={g.id}
+                                        data-ctx={p.context}
                                         title={`${p.message}\n\n${g.label}${p.line ? ` ${pos(p)}` : ""} · ${p.kind}`}
                                         onClick={() => actions.openProblem(g.id, p)}
                                         onDoubleClick={() => actions.focusEditor()}

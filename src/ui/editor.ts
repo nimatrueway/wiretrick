@@ -41,6 +41,9 @@ import { actions } from "./shell/actions";
 import { clearSel, everyFolder, explorer, explorerIds, moveFocus, pruneCollapsed, revealInExplorer, setCollapsed, setSel, SETTINGS_ID, startCreate as startCreateRow, syncExplorer, treeRow, treeRows, visibleRows, type NewKind } from "./state/explorer";
 import { createCodeEditor } from "./shell/codeEditor";
 import { toolbar, type SaveState } from "./state/toolbar";
+import { refreshUserScripts } from "./state/userScripts";
+import { REMOTE_MAIN_WORLD } from "../shared/remote";
+import { isolatedRouteEdit } from "./isolatedFix";
 import { collectDiagnostics, diagnosticsFileName, downloadText } from "./about";
 
 // ---- state ----
@@ -628,6 +631,31 @@ function registerPinImportFix(): void {
     });
 }
 
+/** a main-world `overlay.fn()` call (a runtime Problem): quick fix `world: "isolated"` on the onPage route around it */
+function registerIsolatedWorldFix(): void {
+    const monaco = (window as any).monaco;
+    monaco.languages.registerCodeActionProvider("typescript", {
+        provideCodeActions(model: any, _range: unknown, context: { markers: any[] }) {
+            const actions: any[] = [];
+            for (const mk of context.markers) {
+                if (!String(mk.message).includes(REMOTE_MAIN_WORLD)) continue;
+                const fix = isolatedRouteEdit(model.getValue(), model.getOffsetAt({ lineNumber: mk.startLineNumber, column: mk.startColumn }));
+                if (!fix) continue;
+                const a = model.getPositionAt(fix.start);
+                const b = model.getPositionAt(fix.end);
+                actions.push({
+                    title: 'Run this onPage handler in the isolated world (world: "isolated")',
+                    kind: "quickfix",
+                    isPreferred: true,
+                    diagnostics: [mk],
+                    edit: { edits: [{ resource: model.uri, versionId: model.getVersionId(), textEdit: { range: { startLineNumber: a.lineNumber, startColumn: a.column, endLineNumber: b.lineNumber, endColumn: b.column }, text: fix.text } }] },
+                });
+            }
+            return { actions, dispose() {} };
+        },
+    });
+}
+
 // ---- editor ----
 /** One Monaco model per script so `import "./utilities"` resolves across
  * the editor's virtual workspace (file:///<name>.ts per script). */
@@ -1066,6 +1094,8 @@ function connectLogs(): void {
                 s.routeWarnings = msg.routeWarnings?.[s.id] ?? [];
             }
             renderList();
+            // scripts or their routes changed: is isolated code waiting for user scripts?
+            refreshUserScripts();
         }
         // background applied an external folder change (or any script
         // change) — refresh list + editor if untouched
@@ -1889,6 +1919,7 @@ async function main(): Promise<void> {
         scheduleImportMarkers(m);
     }
     registerPinImportFix();
+    registerIsolatedWorldFix();
     // VS Code shortcuts: ⌘P quick-open (scripts + settings.yaml), ⌘, opens
     // the Settings dialog, ⌘⇧E focuses the explorer, ⌘B / ⌘J toggle the
     // explorer / panel, ⌘⇧M or ⌥⇧P/L/N show a panel view (filter focused), ⌥⇧K clears it, ⌥Z toggles word wrap
@@ -1940,6 +1971,7 @@ async function main(): Promise<void> {
     });
 
     connectLogs();
+    refreshUserScripts();
     await refresh();
 
     // deep link from the popup: editor.html?script=<id>

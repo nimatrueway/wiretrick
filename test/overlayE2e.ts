@@ -8,6 +8,10 @@
  * `overlay.fn()` rejects; on save the overlay reloads with its store kept;
  * disabling removes it. With `isolated` (the MV2 builds): an Alt+click in
  * isolated onPage code calls the overlay, which calls back to highlight.
+ * With `userScripts` (MV3): while user scripts are off, isolated handlers
+ * don't run, the overlay's calls into them reject with the hint, and the
+ * Problems error and the Editor's banner say how to turn them on; then
+ * `grant()` turns them on and the same round trip runs through them.
  *
  * `overlayServerRoute` serves the pages; call it in the suite's test server.
  */
@@ -88,6 +92,10 @@ const rpcCode = (origin: string) => `const overlay = wt.onOverlay("${origin}/ov-
     nav.style.cssText = "position:fixed;left:16px;bottom:60px;background:white;padding:8px";
     nav.value = ctx.url;
     ctx.onNavigate((u) => (nav.value = u));
+    const probe = document.body.appendChild(document.createElement("output"));
+    probe.id = "isoprobe";
+    probe.value = "pending";
+    iso.highlight("#none").then((n) => (probe.value = "ok:" + n), (e) => (probe.value = "rejected: " + e.message));
     return {
         picked(tag: string) {
             out.value = tag;
@@ -146,7 +154,7 @@ const centerOf = (frame: any, sel: string): Promise<{ x: number; y: number }> =>
         return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
     }, sel);
 
-export async function checkOverlays(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string; isolated: boolean }): Promise<void> {
+export async function checkOverlays(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string; isolated: boolean; userScripts?: { grant(): Promise<void> } }): Promise<void> {
     const t = (s: string) => `overlay${opts.label ?? ""}: ${s}`;
     const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
     const save = (id: string, code: string, name: string) => send({ type: "saveScript", id, code, name });
@@ -219,6 +227,12 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
 
     const mainCall = await waitFor<string>(() => page.evaluate(() => document.body.dataset.mainCall || ""), (v) => !!v, 5000);
     check(t("main-world overlay.fn() rejects"), /^rejected: .*main-world onPage code can't call the overlay/.test(mainCall), mainCall);
+    const mainProblem = await waitFor<any>(async () => ((await send({ type: "listScripts" })) || []).find((s: any) => s.id === "s_ov_rpc")?.runtimeError, (e) => !!e?.ctx, 5000);
+    check(
+        t("main-world overlay.fn() is a Problems error tagged page › host"),
+        !!mainProblem?.message.includes("main-world onPage code can't call the overlay") && mainProblem.ctx === `page › ${new URL(origin).host}`,
+        JSON.stringify(mainProblem)
+    );
 
     await page.evaluate((s: string) => {
         const call = { cid: "page-forged-1", h: "overlay:0", fn: "hit", args: [] };
@@ -230,12 +244,13 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
     await page.waitForTimeout(1500);
     check(t("a page-posted call never reaches the overlay"), !hits.some((h) => h.includes("l4=1")), JSON.stringify(hits));
 
-    const navFrame = await overlayFrame(page, "#nav");
+    let navFrame = await overlayFrame(page, "#nav");
     await page.evaluate(() => history.pushState({}, "", "/ov-app?nav=1"));
     const navUrl = navFrame ? await waitFor<string>(() => navFrame.evaluate(() => (document.getElementById("nav") as HTMLOutputElement).value), (v) => v.includes("nav=1"), 5000) : "";
     check(t("ctx.onNavigate sees history.pushState"), navUrl.endsWith("/ov-app?nav=1"), navUrl);
 
-    if (opts.isolated) {
+    const probeOf = (f: any) => (f ? waitFor<string>(() => f.evaluate(() => (document.getElementById("isoprobe") as HTMLOutputElement).value).catch(() => "pending"), (v) => v !== "pending", 8000) : Promise.resolve(""));
+    const altClickTarget = async () => {
         const target = await page.evaluate(() => {
             const r = document.getElementById("target")!.getBoundingClientRect();
             return { x: r.x + 30, y: r.y + r.height / 2 };
@@ -243,6 +258,45 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
         await page.keyboard.down("Alt");
         await page.mouse.click(target.x, target.y);
         await page.keyboard.up("Alt");
+    };
+    if (opts.userScripts) {
+        const probe = await probeOf(navFrame);
+        check(t("user scripts off: the overlay's call into isolated code rejects with the hint"), probe.startsWith("rejected:") && probe.includes("user scripts are off"), probe);
+        await altClickTarget();
+        await page.waitForTimeout(1500);
+        const picked = navFrame ? await navFrame.evaluate(() => (document.getElementById("picked") as HTMLOutputElement).value) : "";
+        const outline = await page.evaluate(() => document.getElementById("target")!.style.outline);
+        check(t("user scripts off: isolated onPage handlers don't run"), picked === "none" && !outline, JSON.stringify({ picked, outline }));
+        const warnings: string[] = ((await send({ type: "listScripts" })) || []).find((s: any) => s.id === "s_ov_rpc")?.routeWarnings ?? [];
+        check(
+            t("user scripts off: a Problems error says how to turn them on"),
+            warnings.some((w) => w.includes(`world: "isolated" code doesn't run: user scripts are off`) && /chrome:\/\/extensions\/\?id=[a-p]{32}/.test(w)),
+            JSON.stringify(warnings)
+        );
+        const banner = await mgr.waitForSelector("#userscripts-banner[data-status=no-permission] #userscripts-grant", { timeout: 8000 }).then(
+            () => true,
+            () => false
+        );
+        check(t("user scripts off: the Editor's banner offers the permission"), banner);
+        await opts.userScripts.grant();
+        const gone = await mgr.waitForSelector("#userscripts-banner", { state: "detached", timeout: 8000 }).then(
+            () => true,
+            () => false
+        );
+        const listed: string[] = await waitFor<string[]>(
+            async () => ((await send({ type: "listScripts" })) || []).find((s: any) => s.id === "s_ov_rpc")?.routeWarnings ?? [],
+            (w) => !w.some((x) => x.includes("user scripts are off")),
+            8000
+        );
+        check(t("granting user scripts clears the banner and the Problems error"), gone && !listed.some((x) => x.includes("user scripts are off")), JSON.stringify({ gone, listed }));
+        // a newly registered user script runs from the next page load
+        await page.reload({ waitUntil: "load", timeout: 15000 });
+        navFrame = await overlayFrame(page, "#nav");
+    }
+    if (opts.isolated || opts.userScripts) {
+        const probe = await probeOf(navFrame);
+        check(t("the overlay calls isolated code"), probe === "ok:0", probe);
+        await altClickTarget();
         const picked = navFrame ? await waitFor<string>(() => navFrame.evaluate(() => (document.getElementById("picked") as HTMLOutputElement).value), (v) => v.startsWith("P:"), 5000) : "";
         const outline = await page.evaluate(() => document.getElementById("target")!.style.outline);
         await waitFor(async () => hits.includes("?picked=1"), (v) => v, 3000);

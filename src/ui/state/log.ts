@@ -3,7 +3,8 @@ import type { LogFilter } from "../logFilter";
 import type { LogLine } from "../logQuery";
 import { badges, badgesChanged } from "./panel";
 
-export type LogItem = LogLine & { text: string; seq: number };
+/** `ctx`: where a script's GUI code ran ("overlay › example.com", see shared/scriptLog.ts contextTag) */
+export type LogItem = LogLine & { text: string; seq: number; ctx?: string };
 
 /**
  * Log auto-scroll, VS Code style: "follow" keeps the newest line in view;
@@ -44,13 +45,14 @@ export function sourceOf(message: string): string {
     return dot ? dot[1] : "(untagged)";
 }
 
-export function appendLog(entry: { at: number; message?: unknown; level?: string; kind?: string }): void {
+export function appendLog(entry: { at: number; message?: unknown; level?: string; kind?: string; ctx?: unknown }): void {
     const time = new Date(entry.at).toLocaleTimeString();
     const message = String(entry.message ?? "");
     const source = sourceOf(message);
     const observed = entry.kind === "observed";
     const level = entry.level || "info";
-    entries.push({ text: `[${time}] ${message}`, message, level, source, seq: seq++, ...(observed ? { observed } : {}) });
+    const ctx = typeof entry.ctx === "string" && entry.ctx ? entry.ctx : undefined;
+    entries.push({ text: `[${time}] ${message}`, message, level, source, seq: seq++, ...(observed ? { observed } : {}), ...(ctx ? { ctx } : {}) });
     badges.log.note(level);
     let counted = level === "error" || level === "warn";
     if (observed && ++observedEntries > MAX_OBSERVED_ENTRIES) {
