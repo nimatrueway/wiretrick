@@ -20,7 +20,7 @@
  *  - when both sides changed, the newer one wins and the other copy is kept
  *    in .wiretrick-backup/ (nothing is silently lost).
  *  - the folder is scanned recursively: subfolders are Folders, `.ts` files
- *    scripts (named by their path), `.json` files data files (`ownedData`
+ *    scripts (named by their path), `.json`/`.svg` files data files (`ownedData`
  *    is their `owned`). Dot-entries, node_modules and tooling config JSON
  *    are skipped. `known` keys are relative paths; a folder's ends in "/".
  */
@@ -50,8 +50,8 @@ function canonicalFileName(name: string): string {
     return scriptFileName(name);
 }
 
-const isScriptFile = (name: string) => name.endsWith(".ts") && !name.endsWith(".d.ts");
-const isDataFile = (path: string) => /\.json$/i.test(path) && !isConfigJsonPath(path) && !baseName(path).startsWith(".");
+const isScriptFile = (name: string) => (name.endsWith(".ts") && !name.endsWith(".d.ts")) || name.endsWith(".tsx");
+const isDataFile = (path: string) => /\.(json|svg)$/i.test(path) && !isConfigJsonPath(path) && !baseName(path).startsWith(".");
 const isSyncedFile = (path: string) => isScriptFile(path) || isDataFile(path);
 const baseName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 /** `known` signature of a folder (they only appear and vanish) */
@@ -807,11 +807,19 @@ async function initialSync(opts: { dry?: boolean; handle?: any; base?: Map<strin
     const byFile = new Map(scripts.map((s) => [canonicalFileName(s.meta.name), s]));
     const out: FolderPreview = { imported: [], written: [], conflicts: [] };
     const readFrom = async (name: string) => (await (await fileHandleAt(name, false, handle)).getFile()).text();
+    /** files of scripts renamed while the folder wasn't watched (unchanged on disk since): script id → old file */
+    const movedFrom = new Map<string, string>();
     for (const [fileName, sig] of seen) {
         const text = await readFrom(fileName);
         const s = byFile.get(fileName);
         byFile.delete(fileName);
         if (!s) {
+            const hd = contentHash(text);
+            const renamed = [...(opts.base ?? owned)].find(([id, r]) => r.file === fileName && r.hash === hd && scripts.some((x) => x.id === id && canonicalFileName(x.meta.name) !== fileName));
+            if (renamed) {
+                movedFrom.set(renamed[0], fileName);
+                continue;
+            }
             const name = displayNameFromFile(fileName);
             const clash = caseClash(canonicalFileName(name), scripts);
             if (clash) {
@@ -858,8 +866,14 @@ async function initialSync(opts: { dry?: boolean; handle?: any; base?: Map<strin
         if (caseClash(fileName, scripts, s.id) && [...seen.keys()].some((f) => f.toLowerCase() === fileName.toLowerCase())) continue;
         out.written.push(fileName);
         if (dry) continue;
-        await writeFile(fileName, s.code);
+        if (!(await writeFile(fileName, s.code))) continue;
         owned.set(s.id, { file: fileName, hash: contentHash(s.code) });
+        const old = movedFrom.get(s.id);
+        if (old && old.toLowerCase() !== fileName.toLowerCase()) {
+            await removeFile(old);
+            known.delete(old);
+            dlogLevel("sync", "info", `Folder sync: "${old}" → "${fileName}" (script renamed while the folder wasn't watched)`);
+        }
     }
     await initialSyncData(all, readFrom, out, dry, opts.base ? new Map() : ownedData);
     if (dry) return out;
@@ -1310,7 +1324,8 @@ async function applyPendingMigration(): Promise<void> {
     for (const s of pending.scripts || []) await backup(canonicalFileName(s.name), s.code, `"${s.name}" was migrated to the renamed script API`, "the original");
     const f = pending.settings ? await readSettingsFile() : null;
     if (f) {
-        const next = migrateSettingsText(f.text);
+        let next = migrateSettingsText(f.text);
+        for (const [from, to] of pending.renames ?? []) next = renameSettingsSection(next, from, to);
         if (next !== f.text) {
             await backup(SETTINGS_FILE, f.text, `${SETTINGS_FILE} was migrated to the renamed settings`, "the original");
             await writeFile(SETTINGS_FILE, next);

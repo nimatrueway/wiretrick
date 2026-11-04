@@ -12,7 +12,7 @@ import { callerLine } from "./scriptError";
 import { normalizeRoute, pageWorld, routeLabel, type RouteKind, type RouteMeta } from "./route";
 import { inertRemote, MAIN_WORLD_DISALLOWED, REMOTE_FROM_BACKGROUND } from "./remote";
 import { scriptEnv } from "./scriptEnv";
-import { importLine, importPath, importResolver, isDataSpec } from "./scriptImports";
+import { dataFileValue, importLine, importPath, importResolver, isDataSpec } from "./scriptImports";
 import { isUrlSpec, makePackageLoader, PackageImportError, type PackageModules } from "./packageImports";
 import { builtinModule } from "./builtins";
 import { builtinSpec } from "./builtinSpecs";
@@ -201,7 +201,7 @@ export function makeStubModule(): any {
     return stub;
 }
 
-/** a data file as the compilers see it: its path (with `.json`) and text */
+/** a data file as the compilers see it: its path (with `.json`/`.svg`) and text */
 export interface DataFileSource {
     path: string;
     text: string;
@@ -306,7 +306,7 @@ function jsonError(path: string, text: string, e: any): string {
 /** parse a data file's text (fresh each import: handlers mutating it don't leak across scripts) */
 function parseDataFile(spec: string, d: DataFileSource): any {
     try {
-        return JSON.parse(d.text);
+        return dataFileValue(d.path, d.text);
     } catch (e) {
         throw new DataFileImportError(`cannot import "${spec}": ${jsonError(d.path, d.text, e)}`);
     }

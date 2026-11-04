@@ -156,10 +156,11 @@ describe("folder sync: folders and data files", () => {
         put("mock/tsconfig.json", "{}");
         put("mock/api/types.d.ts", "// no");
         put("mock/api/deep.json", "[1]");
+        put("icons/logo.svg", "<svg/>");
         const sync = await setup();
         expect((await scripts()).sort()).toEqual(["main", "mock/helpers"]);
-        expect(await dataPaths()).toEqual(["mock/api/deep.json", "mock/rate-limits.json"]);
-        expect(await folders()).toEqual(["empty", "mock", "mock/api"]);
+        expect(await dataPaths()).toEqual(["icons/logo.svg", "mock/api/deep.json", "mock/rate-limits.json"]);
+        expect(await folders()).toEqual(["empty", "icons", "mock", "mock/api"]);
         const main = (await (await ss()).listScripts()).find((s) => s.meta.name === "main")!;
         expect(main.error).toBeNull();
         expect(main.paramDefs?.max.default).toBe(5);

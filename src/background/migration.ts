@@ -18,6 +18,10 @@ import { storageGet, storageSet, storageRemove } from "../shared/chromeApi";
 import { loadSavedHandle } from "../shared/folderSync";
 import { dlogLevel } from "../shared/debugLog";
 import { MIGRATION_VERSION, migrateScriptSource, migrateSettingsText } from "../shared/migration";
+import { isTsxName, scriptFileKey } from "../shared/scriptName";
+import { usesJsx } from "../shared/builtinSpecs";
+import { transform, type Transform } from "sucrase";
+import { renameSettingsSection } from "../shared/settingsYamlPatch";
 
 export const MIGRATION_KEY = "resMigrationVersion";
 /** original sources of migrated scripts: { at, scripts: [{ id, name, code }] } (v1's key) */
@@ -30,6 +34,22 @@ export const PENDING_DISK_KEY = "resMigrationPendingDisk";
 export interface PendingDisk {
     settings: boolean;
     scripts: { name: string; code: string }[];
+    /** scripts renamed (old name → new): their settings.yaml sections follow (the files follow by folder sync's reconcile) */
+    renames?: [string, string][];
+}
+
+/** code with JSX: it parses as TSX and not as plain TypeScript (not just a `<T>` cast or a pragma) */
+function hasJsx(code: string): boolean {
+    if (!usesJsx(code)) return false;
+    const parses = (transforms: Transform[]): boolean => {
+        try {
+            transform(code, { transforms });
+            return true;
+        } catch {
+            return false;
+        }
+    };
+    return parses(["typescript", "jsx"]) && !parses(["typescript"]);
 }
 
 export async function runMigrations(): Promise<void> {
@@ -49,12 +69,26 @@ export async function runMigrations(): Promise<void> {
         await saveScript({ id: s.id, code });
         log(-1, `[${s.meta.name}] migrated to the renamed script API: ${changes.join(", ")}`, "info", s.id);
     }
+    // v4: a script is .tsx by its name — the ones with JSX get the .tsx (TypeScript parses JSX only there)
+    const renames: [string, string][] = [];
+    const taken = new Set(Object.values(byId).map((s) => scriptFileKey(s.meta.name)));
+    for (const s of Object.values(byId)) {
+        const code = todo.find((t) => t.s.id === s.id)?.code ?? s.code;
+        const to = s.meta.name + ".tsx";
+        if (isTsxName(s.meta.name) || !hasJsx(code) || taken.has(scriptFileKey(to))) continue;
+        taken.add(scriptFileKey(to));
+        await saveScript({ id: s.id, code, name: to });
+        renames.push([s.meta.name, to]);
+        log(-1, `[${to}] renamed from "${s.meta.name}": a script with JSX is a .tsx file`, "info", s.id);
+    }
     const patch: Record<string, unknown> = { [MIGRATION_KEY]: MIGRATION_VERSION };
     // v3: settings.defaultStrategy is gone — every handler names its strategy
     if (g[STRATEGY_KEY] !== undefined) await storageRemove(STRATEGY_KEY);
     const text = g[SETTINGS_TEXT_KEY];
     if (typeof text === "string") {
-        const next = migrateSettingsText(text);
+        // (the renames' sections too: this write replaces the one onScriptRenamed made)
+        let next = migrateSettingsText(text);
+        for (const [a, b] of renames) next = renameSettingsSection(next, a, b);
         if (next !== text) patch[SETTINGS_TEXT_KEY] = next;
     }
     if (synced) {
@@ -62,8 +96,8 @@ export async function runMigrations(): Promise<void> {
         const prev: PendingDisk | undefined = g[PENDING_DISK_KEY];
         const scripts = [...(prev?.scripts ?? [])];
         for (const { s } of todo) if (!scripts.some((x) => x.name === s.meta.name)) scripts.push({ name: s.meta.name, code: s.code });
-        patch[PENDING_DISK_KEY] = { settings: true, scripts } satisfies PendingDisk;
+        patch[PENDING_DISK_KEY] = { settings: true, scripts, renames: [...(prev?.renames ?? []), ...renames] } satisfies PendingDisk;
     }
     await storageSet(patch);
-    if (todo.length) dlogLevel("bg", "info", `migration v${from} → v${MIGRATION_VERSION}: ${todo.length} script(s) rewritten`);
+    if (todo.length || renames.length) dlogLevel("bg", "info", `migration v${from} → v${MIGRATION_VERSION}: ${todo.length} script(s) rewritten, ${renames.length} renamed to .tsx`);
 }

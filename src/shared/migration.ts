@@ -28,7 +28,7 @@
  * `{ respond }` result isn't recognized.
  */
 /** bumped when a new rewrite is added */
-export const MIGRATION_VERSION = 3;
+export const MIGRATION_VERSION = 4;
 
 /** old strategy value → current one */
 export const OLD_STRATEGIES: Record<string, string> = { process: "helper", cdp: "debugger", hook: "page", webrequest: "extension", webRequest: "extension" };

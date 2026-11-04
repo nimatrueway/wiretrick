@@ -57,7 +57,7 @@ export interface ProblemGroup {
     id: string;
     /** file path shown in the group header */
     label: string;
-    file: "ts" | "yaml" | "json";
+    file: "ts" | "tsx" | "yaml" | "json";
     problems: Problem[];
 }
 
@@ -248,7 +248,7 @@ export function collectProblems(scripts: ProblemScript[], liveMarkers: Map<strin
         else if (!s.error) problems.push(...(s.typeErrors || []).map(storedTypeError));
         // (isolated onPage code that can't run is an error: user scripts are off)
         for (const w of s.routeWarnings || []) problems.push({ severity: w.includes(USER_SCRIPTS_PROBLEM) ? "error" : "warning", kind: "route", message: w, ...handler(w) });
-        if (problems.length) groups.push({ id: s.id, label: s.label, file: "ts", problems: problems.sort(byPosition) });
+        if (problems.length) groups.push({ id: s.id, label: s.label, file: s.label.endsWith(".tsx") ? "tsx" : "ts", problems: problems.sort(byPosition) });
     }
     for (const d of dataFiles) if (d.markers.length) groups.push({ id: d.id, label: d.label, file: "json", problems: fromMarkers(d.markers, "json").sort(byPosition) });
     return groups;

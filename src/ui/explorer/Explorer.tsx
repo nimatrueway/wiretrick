@@ -2,8 +2,8 @@ import { useLayoutEffect, useRef, useState, type DragEvent, type KeyboardEvent, 
 import { useSnapshot } from "valtio";
 import { isInFolder } from "../../shared/folders";
 import { scriptHealth } from "../../shared/scriptHealth";
-import { folderOf } from "../../shared/scriptImports";
-import { cleanScriptName, scriptFileName } from "../../shared/scriptName";
+import { folderOf, isSvgPath } from "../../shared/scriptImports";
+import { cleanScriptName, isTsxName, scriptFileName, scriptNameFromInput } from "../../shared/scriptName";
 import { baseName, dropPlan, explorerTree, folderRowId, isFolderRowId, joinPath, targetFolder, type TreeRow } from "../explorerTree";
 import { actions } from "../shell/actions";
 import {
@@ -34,7 +34,7 @@ const FOLDER_OPEN_ICON = `<svg viewBox="0 0 16 16" width="16" height="16" aria-h
 /** the explorer twistie (VS Code's chevron-right) */
 const CHEVRON = `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
-type Icon = "ts" | "yaml" | "json" | "folder" | "folder-open";
+type Icon = "ts" | "tsx" | "yaml" | "json" | "svg" | "folder" | "folder-open";
 
 function FileIcon({ kind }: { kind: Icon }) {
     const folder = kind === "folder" || kind === "folder-open";
@@ -42,7 +42,7 @@ function FileIcon({ kind }: { kind: Icon }) {
         <span className="file-icon folder" aria-hidden="true" dangerouslySetInnerHTML={{ __html: kind === "folder" ? FOLDER_ICON : FOLDER_OPEN_ICON }} />
     ) : (
         <span className={`file-icon ${kind}`} aria-hidden="true">
-            {kind === "ts" ? "TS" : kind === "json" ? "{}" : "⚙"}
+            {kind === "ts" ? "TS" : kind === "tsx" ? "⚛" : kind === "json" ? "{}" : kind === "svg" ? "◈" : "⚙"}
         </span>
     );
 }
@@ -61,7 +61,8 @@ const rowFilePath = (row: TreeRow): string => (row.kind === "script" ? scriptFil
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-const withJson = (path: string): string => (/\.json$/i.test(path) ? path : path + ".json");
+/** a new data file's path: `.json` unless it names an `.svg` */
+const withJson = (path: string): string => (/\.(json|svg)$/i.test(path) ? path : path + ".json");
 
 const copy = (text: string, done: string): void => void navigator.clipboard?.writeText(text).then(() => actions.status(done));
 
@@ -397,14 +398,15 @@ export function ExplorerTree() {
             );
         } else if (r.kind === "data") {
             const bad = snap.jsonErrorIds.has(r.id);
-            const title = [r.path, `Data file — import it from a script (import data from "./${baseName(r.path)}")`, bad ? "Its JSON has errors — see the Problems view" : "", "Double-click or F2 to rename · drag to move"].filter(Boolean).join("\n");
+            const svg = isSvgPath(r.path);
+            const title = [r.path, `Data file — import it from a script (import ${svg ? "markup" : "data"} from "./${baseName(r.path)}"${svg ? ": the SVG markup, a string" : ""})`, bad ? "Its JSON has errors — see the Problems view" : "", "Double-click or F2 to rename · drag to move"].filter(Boolean).join("\n");
             items.push(
                 li(
                     r.id,
                     " data" + (bad ? " has-error" : ""),
                     r.depth,
                     <>
-                        <FileIcon kind="json" />
+                        <FileIcon kind={svg ? "svg" : "json"} />
                         {name(r, r.name, title, bad ? " error" : "")}
                         {del(r, "Delete data file (Delete)")}
                     </>,
@@ -431,7 +433,7 @@ export function ExplorerTree() {
                     (isLib ? " utility" : "") + (off ? " disabled" : ""),
                     r.depth,
                     <>
-                        <FileIcon kind="ts" />
+                        <FileIcon kind={isTsxName(script.meta.name) ? "tsx" : "ts"} />
                         {name(r, baseName(scriptFileName(script.meta.name)), title, health ? " error" : "")}
                         {health && (
                             <span
@@ -493,9 +495,9 @@ export function ExplorerTree() {
 /** Inline rename (double-click a name, or F2); a / in the new name moves the item. */
 function RenameInput({ row, refocusList, list }: { row: TreeRow; refocusList: boolean; list: { current: HTMLUListElement | null } }) {
     const kind: NewKind = row.kind;
-    const current = row.kind === "script" ? cleanScriptName(row.path) + ".ts" : row.path;
+    const current = row.kind === "script" ? scriptFileName(cleanScriptName(row.path)) : row.path;
     // select the name, not its folder or extension (as VS Code does)
-    const ext = kind === "script" ? 3 : kind === "data" && /\.json$/i.test(current) ? 5 : 0;
+    const ext = kind === "script" ? (isTsxName(current) ? 4 : 3) : kind === "data" ? (/\.(json|svg)$/i.exec(current)?.[0].length ?? 0) : 0;
     const range: [number, number] = [current.lastIndexOf("/") + 1, current.length - ext];
     return (
         <NameInput
@@ -506,7 +508,7 @@ function RenameInput({ row, refocusList, list }: { row: TreeRow; refocusList: bo
                 const editing = explorer.editing;
                 if (refocusList) list.current?.focus();
                 let next = cleanScriptName(value).trim();
-                if (kind === "script") next = next.replace(/\.ts$/i, "");
+                if (kind === "script") next = scriptNameFromInput(next);
                 if (kind === "data" && next) next = withJson(next);
                 let problem = commit && next && next !== row.path ? actions.itemPathProblem(kind, next, row.kind === "folder" ? undefined : row.id) : "";
                 if (!problem && kind === "folder" && commit && isInFolder(next, row.path)) problem = "a folder can't move into itself";
@@ -534,11 +536,11 @@ function CreateRow({ kind, folder, list }: { kind: NewKind; folder: string; list
             <NameInput
                 kind={kind}
                 value=""
-                placeholder={kind === "script" ? "script name" : kind === "data" ? "name.json" : "folder name"}
+                placeholder={kind === "script" ? "script name" : kind === "data" ? "name.json or name.svg" : "folder name"}
                 onDone={(commit, value) => {
                     explorer.editing = null;
                     let name = cleanScriptName(value).trim();
-                    if (kind === "script") name = name.replace(/\.ts$/i, "");
+                    if (kind === "script") name = scriptNameFromInput(name);
                     if (kind === "data" && name) name = withJson(name);
                     if (!commit || !name) {
                         list.current?.focus();

@@ -427,12 +427,13 @@ import { envParam } from "../utils";         // the script "utils" at the root
 import { mockJson } from "utils";            // bare: resolved from the root
 ```
 
-The `.ts`/`.js` extension is optional and matching is case-insensitive. A
+The `.ts`/`.tsx`/`.js` extension is optional (with both `x.ts` and `x.tsx`,
+`./x` is the `.ts` one) and matching is case-insensitive. A
 segment may also be written with every character other than letters,
 digits, `_` and `-` replaced by `_` (`./My_Utils` finds "My Utils").
 
-A **data file** is a JSON file in the explorer (`.json`); it never runs,
-scripts import it by its path:
+A **data file** is a JSON or SVG file in the explorer (`.json`, `.svg`); it
+never runs, scripts import it by its path:
 
 ```ts
 // data file "mock/rate-limits.json": { "max": 5, "window": 60 }
@@ -442,7 +443,11 @@ import { max } from "./mock/rate-limits.json"; // one property
 wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, () => ({ headers: { set: { "x-limit": String(max) } } }));
 ```
 
-Each import gets a freshly parsed copy, so a handler changing it doesn't
+An `.svg` imports as its markup, a string (`import logo from
+"./icons/logo.svg"` → `'<svg …>…</svg>'`), e.g. for an overlay's
+`innerHTML` or a mocked response body.
+
+Each JSON import gets a freshly parsed copy, so a handler changing it doesn't
 affect other scripts. Saving, renaming or deleting a data file hot-applies
 every script that imports it (directly or through a library). A missing
 data file or invalid JSON is a compile error on the importing script,
@@ -665,8 +670,12 @@ wt.replaceResponse({ url: "*://api.example.com/user", strategy: "helper" }, asyn
 (`react`, `react-dom`, `react-dom/client`, `react/jsx-runtime`) come with the
 extension: import them by name, or by any `https://esm.sh/` URL of those
 packages, with no download. They load only in scripts that import them.
-A script with JSX (`<div />`) compiles as `.tsx` with React's automatic
-runtime, so components need no `import React`. In `wt.onPage` code the
+JSX (`<div />`) goes in a `.tsx` script — one whose name ends in `.tsx`,
+like `ui/Panel.tsx` (create or rename it with the extension; a plain
+script's `.ts` is implied). It compiles with React's automatic runtime, so
+components need no `import React`. JSX in a `.ts` script is an error with a
+**Rename to Name.tsx** quick fix; scripts saved with JSX before `.tsx`
+existed were renamed once, settings included. In `wt.onPage` code the
 built-ins aren't available: using one there throws.
 
 ```ts
@@ -991,8 +1000,8 @@ overlay can't be reached by the site.
 
 ### Frameworks and CSS
 
-- **React and valtio** are [built in](#built-in-valtio-and-react). A script
-  with JSX compiles with the automatic runtime against the built-in React.
+- **React and valtio** are [built in](#built-in-valtio-and-react). A `.tsx`
+  script's JSX compiles with the automatic runtime against the built-in React.
 - **Another JSX runtime:** a `/** @jsxImportSource <url> */` comment at the
   top switches the file to it, e.g. Preact from unpkg
   (`/** @jsxImportSource https://unpkg.com/preact@10.26.4 */`, with hooks

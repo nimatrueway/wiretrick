@@ -2,11 +2,12 @@
  * Import resolution, shared by the compilers, the page hook, dependency
  * tracking and the Editor. Like TypeScript, a specifier resolves relative
  * to the importing script's folder (`./x`, `../lib/x`); a bare one
- * (`utils`) resolves from the root. A specifier ending in `.json` names a
- * data file (its path, case-insensitive); anything else a script: the path
+ * (`utils`) resolves from the root. A specifier ending in `.json` or `.svg`
+ * names a data file (its path, case-insensitive); anything else a script: the path
  * with an optional `.ts`/`.js`, matched case-insensitively against script
  * names (paths) or their legacy key (each segment's other characters → `_`,
- * so `./My_Utils` finds "My Utils"). A URL (`https://unpkg.com/x@1.2.3`)
+ * so `./My_Utils` finds "My Utils"), else (as TypeScript) the .tsx script
+ * of that path (`./Panel` and `./Panel.tsx` find "Panel.tsx"). A URL (`https://unpkg.com/x@1.2.3`)
  * is a package import (shared/packageImports), never a script path.
  */
 import { builtinSpec, jsxImportSource, usesJsx } from "./builtinSpecs";
@@ -65,9 +66,19 @@ export function importLine(code: string, spec: string): number | undefined {
     return undefined;
 }
 
-/** does the specifier (or path) name a data file? */
+/** does the specifier (or path) name a data file (`.json`, or `.svg`)? */
 export function isDataSpec(spec: string): boolean {
-    return /\.json$/i.test(spec);
+    return /\.(json|svg)$/i.test(spec);
+}
+
+/** an `.svg` data file: importing it gives its markup, a string */
+export function isSvgPath(path: string): boolean {
+    return /\.svg$/i.test(path);
+}
+
+/** what importing a data file gives: an `.svg`'s markup, a `.json`'s parsed value */
+export function dataFileValue(path: string, text: string): any {
+    return isSvgPath(path) ? text : JSON.parse(text);
 }
 
 /** folder part of a path ("" at the root) */
@@ -104,7 +115,13 @@ export type ResolvedImport = { kind: "script"; name: string } | { kind: "data"; 
  */
 export function importResolver(scriptNames: Iterable<string>, dataPaths: Iterable<string> = []): (importer: string, spec: string) => ResolvedImport | undefined {
     const scripts = new Map<string, string>();
-    for (const n of scriptNames) for (const k of [legacyKey(n), n.toLowerCase()]) if (!scripts.has(k)) scripts.set(k, n);
+    for (const n of scriptNames) {
+        // a .tsx script's keys keep the .tsx (`./My_Panel` → "my_panel" + ".tsx" finds "My Panel.tsx")
+        const tsx = /\.tsx$/i.test(n);
+        const stem = tsx ? n.slice(0, -4) : n;
+        const ext = tsx ? ".tsx" : "";
+        for (const k of [legacyKey(stem) + ext, n.toLowerCase()]) if (!scripts.has(k)) scripts.set(k, n);
+    }
     const data = new Map<string, string>();
     for (const p of dataPaths) if (!data.has(p.toLowerCase())) data.set(p.toLowerCase(), p);
     return (importer, spec) => {
@@ -115,7 +132,8 @@ export function importResolver(scriptNames: Iterable<string>, dataPaths: Iterabl
             const p = data.get(path.toLowerCase());
             return p === undefined ? undefined : { kind: "data", path: p };
         }
-        const name = scripts.get(path.replace(/\.(ts|js)$/, "").toLowerCase());
+        const key = path.replace(/\.(ts|js)$/, "").toLowerCase();
+        const name = scripts.get(key) ?? (/\.tsx$/.test(key) ? undefined : scripts.get(key + ".tsx"));
         return name === undefined ? undefined : { kind: "script", name };
     };
 }
@@ -248,7 +266,7 @@ export function makeLibRequire<L extends ShippedLib>(libs: L[], run: (lib: L, re
             if (!r && builtinSpec(spec)) return builtin ? builtin(spec, importer, loadPackage) : pageBuiltin(spec);
             if (isUrlSpec(spec)) return loadPackage(spec);
             if (!r) throw new Error(`cannot import "${spec}" — is the ${isDataSpec(spec) ? "data file" : "library script"} saved?`);
-            if (r.kind === "data") return JSON.parse(scriptLibs.find((l) => l.json !== undefined && l.name === r.path)!.json!);
+            if (r.kind === "data") return dataFileValue(r.path, scriptLibs.find((l) => l.json !== undefined && l.name === r.path)!.json!);
             if (modules.has(r.name)) return modules.get(r.name);
             const lib = scriptLibs.find((l) => l.json === undefined && l.name === r.name)!;
             const moduleObj = { exports: {} as any };

@@ -26,7 +26,7 @@ import {
 } from "./apiLinks";
 import { JSON_FALLBACK_DTS, jsonDeclPath, jsonModuleDts } from "./jsonTypes";
 import { packagePaths, TYPINGS_ROOT } from "../shared/packageImports";
-import { importSpecs } from "../shared/scriptImports";
+import { importSpecs, isSvgPath } from "../shared/scriptImports";
 import { builtinPaths, builtinSpec } from "../shared/builtinSpecs";
 
 let monacoApi: any = null;
@@ -137,6 +137,8 @@ export function setDataFileTypings(files: { path: string; text: string }[]): str
     const want = new Map<string, string>();
     const changed: string[] = [];
     for (const f of files) {
+        // an .svg is typed by wt-api.d.ts's `declare module "*.svg"`
+        if (isSvgPath(f.path)) continue;
         const decl = jsonDeclPath(f.path);
         const content = jsonModuleDts(f.text);
         want.set("file:///" + decl, content);

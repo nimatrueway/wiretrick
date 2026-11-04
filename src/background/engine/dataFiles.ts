@@ -6,10 +6,10 @@
  */
 import type { DataFileSource } from "../../shared/compile";
 
-/** a JSON file scripts import (`import limits from "./mock/rate-limits.json"`); it never runs */
+/** a JSON or SVG file scripts import (`import limits from "./mock/rate-limits.json"`, an .svg as its markup); it never runs */
 export interface DataFile {
     id: string;
-    /** path with `.json`, `/`-separated (`mock/rate-limits.json`) */
+    /** path with `.json`/`.svg`, `/`-separated (`mock/rate-limits.json`) */
     path: string;
     text: string;
     savedAt: number;

@@ -1,7 +1,8 @@
 /**
  * A script's name is its file path in the scripts folder (minus ".ts"),
  * segments separated by `/` (`mock/helpers` is helpers.ts in the mock
- * folder); a data file's path keeps its `.json`. Anything a file name may
+ * folder); a .tsx script's keeps its `.tsx` (`ui/Panel.tsx`), as a data
+ * file's path keeps its `.json` or `.svg`. Anything a file name may
  * hold on every OS is allowed in a segment; only what Windows, macOS or
  * Linux reject is excluded.
  */
@@ -65,11 +66,11 @@ export function isConfigJsonPath(path: string): boolean {
     return /^(package\.json|package-lock\.json|tsconfig.*\.json|jsconfig\.json)$/i.test(base) || /^settings\.schema\.json$/i.test(path);
 }
 
-/** why a data file path (`mock/rate-limits.json`) can't be used, or "" */
+/** why a data file path (`mock/rate-limits.json`, `icons/logo.svg`) can't be used, or "" */
 export function dataFilePathProblem(path: string): string {
     if (!path) return "path is empty";
-    if (!/\.json$/i.test(path)) return "data files are .json files";
-    if (/(^|\/)\.json$/i.test(path)) return "data file names can't be just .json";
+    if (!/\.(json|svg)$/i.test(path)) return "data files are .json or .svg files";
+    if (/(^|\/)\.(json|svg)$/i.test(path)) return `data file names can't be just ${path.slice(-5).replace(/^\//, "")}`;
     if (/(^|\/)\./.test(path)) return "data file names can't start with a dot";
     if (isConfigJsonPath(path)) return "that name is reserved for tooling config (package.json, tsconfig.json…)";
     return pathProblem(path, false);
@@ -90,7 +91,17 @@ export function scriptFileName(name: string): string {
         if (RESERVED.test(base)) base += "_";
         return base;
     });
-    return out.join("/") + ".ts";
+    return out.join("/") + (isTsxName(name) ? "" : ".ts");
+}
+
+/** a .tsx script's name (its file is the name itself; TypeScript parses JSX only there) */
+export function isTsxName(name: string): boolean {
+    return /[^/]\.tsx$/.test(name);
+}
+
+/** the name as typed in a file name box: "x.ts" → "x"; "x.tsx" stays */
+export function scriptNameFromInput(value: string): string {
+    return value.replace(/\.ts$/i, "");
 }
 
 /**
@@ -105,8 +116,10 @@ export function scriptFileKey(name: string): string {
 export function uniqueScriptName(base: string, taken: string[]): string {
     const keys = new Set(taken.map(scriptFileKey));
     if (!keys.has(scriptFileKey(base))) return base;
+    const ext = isTsxName(base) ? ".tsx" : "";
+    const stem = base.slice(0, base.length - ext.length);
     for (let i = 2; ; i++) {
-        const next = `${base} (${i})`;
+        const next = `${stem} (${i})${ext}`;
         if (!keys.has(scriptFileKey(next))) return next;
     }
 }

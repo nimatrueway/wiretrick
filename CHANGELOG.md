@@ -7,9 +7,21 @@ its section below.
 
 ## [Unreleased]
 
+### Added
+
+- `.tsx` scripts: a script whose name ends in `.tsx` (`ui/Panel.tsx`) is a `.tsx` file everywhere — explorer (⚛ icon), tabs, the synced folder and imports (`./Panel` finds it). Create or rename a script with the `.tsx` extension; renaming keeps the extension unselected. JSX in a `.ts` script is now an error with a **Rename to Name.tsx** quick fix.
+
+- `.svg` data files: `import logo from "./icons/logo.svg"` gives the SVG's markup as a string (typed `string`, in the Editor and the synced folder). Create one by typing `.svg` in New JSON File…, or put `.svg` files in the synced folder; they open as XML.
+
+### Changed
+
+- Scripts saved with JSX are renamed once to `Name.tsx` (their `settings.yaml` section follows, also in the synced folder), since TypeScript parses JSX only in `.tsx` files.
+
 ### Fixed
 
 - In the synced folder, VS Code and `tsc` couldn't find `valtio`, `react` or `react-dom` ("Cannot find module"): their typings are now written to `.wiretrick/types/builtin/` and mapped in the generated `tsconfig.json`, which also covers `.tsx` files and no longer sets an option `tsc` rejects.
+
+- A script renamed while its synced folder wasn't connected came back as a duplicate (the old file re-imported) on reconnect; its file is now moved instead.
 
 ## [0.11.1] - 2026-11-04
 

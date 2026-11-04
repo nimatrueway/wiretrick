@@ -74,10 +74,10 @@ folder's name.
 
 The explorer on the left looks and works like VS Code's explorer: a tree of
 [folders](scripting.md#imports-folders-and-data-files) (chevron, indent
-guides), one `Name.ts` row per script ([libraries](scripting.md#libraries-and-recipes) in italics, disabled scripts dimmed and
+guides), one `Name.ts` (or `Name.tsx`, ⚛ icon) row per script ([libraries](scripting.md#libraries-and-recipes) in italics, disabled scripts dimmed and
 struck through, ● for unsaved changes, ⚠ for errors) and one `name.json` row
 per [data file](scripting.md#imports-folders-and-data-files) (`{}` icon,
-red when its JSON is invalid). Each folder lists its subfolders
+red when its JSON is invalid; ◈ for an `.svg`). Each folder lists its subfolders
 (alphabetical), then its scripts (in stacking order), then its data files
 (alphabetical); ⚙ **settings.yaml** stays at the top. Scripts without a
 folder sit at the root, as before. Which folders are collapsed is remembered.
@@ -87,7 +87,8 @@ Hovering the explorer shows the header buttons: **New Script…**, **New JSON
 File…**, **New Folder…** and **Collapse Folders in Explorer**. A new item
 goes into the selected folder (or the selected file's folder) and is named in
 an inline box, like VS Code (Enter creates, Esc cancels). A new data file
-starts as `{}` and opens in the Code view.
+is `.json` (starting as `{}`) unless you type `.svg` (an empty `<svg>`) and
+opens in the Code view.
 
 With the tree focused (⌘⇧E or a click): ↑/↓, Home/End move, ← collapses a
 folder (or goes to its parent folder), → expands it (or goes to its first
@@ -112,7 +113,7 @@ offers **Copy Paths**. Items inside a selected folder go with it. The
 Double-click a file (or F2 on a file or folder) to rename it (Enter saves, Esc cancels).
 The box shows the full file name, extension included (`My script.ts`,
 `users.json`), with only the name before it selected; the `.ts` of a script is
-optional when you type. The name is the path in the synced folder; a `/`
+optional when you type, while `.tsx` makes it a [`.tsx` script](scripting.md#built-in-valtio-and-react). The name is the path in the synced folder; a `/`
 moves it into a folder (`mock/api mock` → `mock/api mock.ts`; renaming a
 folder moves everything in it). Each segment may hold anything
 except `< > : " \ | ? *`, a trailing dot or space, and Windows device names
@@ -134,6 +135,7 @@ tab work like a script's); its importers are recompiled and hot-applied. In a
 script, `import limits from "./mock/rate-limits.json"` (relative to the
 script's folder) is typed from the data file's current text — hovers and
 completions show its properties — and F12 on the import opens the data file.
+An `.svg` data file opens as XML; importing it gives its markup, typed `string`.
 
 ## Problems, Log, Network and Preview views
 
@@ -376,7 +378,7 @@ pick **Debug+** there to see `level:debug` lines.
 
 Click **Folder…** and pick a folder (e.g. `~/Wiretricks`) — that becomes your
 synced folder. Its subfolders mirror the explorer's folders (empty ones too),
-`.ts` files are scripts and `.json` files are
+`.ts` and `.tsx` files are scripts and `.json` and `.svg` files are
 [data files](scripting.md#imports-folders-and-data-files), at their relative
 paths. Dot entries (`.git`, `.vscode`, `.wiretrick-backup`, …),
 `node_modules`, `.d.ts` files and config JSON (`package.json`,
@@ -405,9 +407,9 @@ Don't edit them; your changes are overwritten. `settings.yaml` is yours: an
 update only adds documentation for settings it doesn't mention yet.
 
 Sync is two-way and watches the folder for **creates, renames/moves and
-deletes** too: a new `.ts` file becomes a script, deleting a file removes its
+deletes** too: a new `.ts`/`.tsx` file becomes a script, deleting a file removes its
 script, renaming or moving a file renames the script (its `settings.yaml`
-section moves with it); the same goes for `.json` files and data files, and
+section moves with it); the same goes for `.json`/`.svg` files and data files, and
 for subfolders and folders. If a file and its script both change before a sync, the file wins
 and the script's version goes to `.wiretrick-backup/`. Saving in the Editor
 over a script that changed elsewhere shows a diff to overwrite or take theirs. The folder choice is remembered —
@@ -482,7 +484,7 @@ it's **new** or **replaces existing** (a script of the same name is
 overwritten rather than duplicated). If a picked script imports a library
 or data file that isn't picked, the dialog warns and **Add them** ticks the
 missing ones.
-A plain `.ts`/`.js` file imports as a single script.
+A plain `.ts`/`.tsx`/`.js` file imports as a single script.
 
 ## `settings.yaml`
 

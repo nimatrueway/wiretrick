@@ -100,7 +100,7 @@ export function mockJson(url: string, body: object) {
 import { mockJson } from "./mocks";
 mockJson("*://api.example.com/me", { id: 1, role: "admin" });
 
-Libraries may declare params (shared config, editable in the popup, the Editor and settings.yaml); a library that registers handlers only for some param value becomes a script when it's set. Exported param definitions can be passed to wt.params ({ env: envParam } or { ...defs }). Imports work everywhere (background, onPage and onOverlay code). "./utils", "utils", "utils.ts" all resolve.`,
+Libraries may declare params (shared config, editable in the popup, the Editor and settings.yaml); a library that registers handlers only for some param value becomes a script when it's set. Exported param definitions can be passed to wt.params ({ env: envParam } or { ...defs }). Imports work everywhere (background, onPage and onOverlay code). "./utils", "utils", "utils.ts" all resolve. Data files import by path: a .json as its parsed value, an .svg as its markup (a string): import logo from "./icons/logo.svg".`,
     },
     {
         title: "wt.onRequest — redirect, block, request headers",
@@ -182,7 +182,7 @@ wt.onOverlay("*://example.com/*", (ctx) => {
     b.onclick = () => wt.log("clicked on", ctx.url);
 });
 
-React and valtio are built in: a script with JSX compiles as .tsx with React's automatic runtime (another runtime: a /** @jsxImportSource <url> */ comment).
+React and valtio are built in: JSX goes in .tsx scripts (name ending in .tsx) and compiles with React's automatic runtime (another runtime: a /** @jsxImportSource <url> */ comment).
 
 import { createRoot } from "react-dom/client";
 import { useSnapshot } from "valtio";

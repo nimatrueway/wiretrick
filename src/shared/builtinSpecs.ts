@@ -66,8 +66,13 @@ export const jsxImportSource = (code: string): string => jsxPragma(code) ?? "rea
  * an element/fragment opening in expression position plus a closing tag.
  */
 export function usesJsx(code: string): boolean {
-    if (jsxPragma(code)) return true;
-    return /(?:^|[=(,:?&|{}[;]|\breturn|=>)\s*<(?:[A-Za-z][\w.:-]*|>)/m.test(code) && /<\/[\w.:-]*>|\/>/.test(code);
+    return !!jsxPragma(code) || jsxElementAt(code) >= 0;
+}
+
+/** offset of the first (likely) JSX element's `<`, or -1 */
+export function jsxElementAt(code: string): number {
+    const m = /(?:^|[=(,:?&|{}[;]|\breturn|=>)\s*(<)(?:[A-Za-z][\w.:-]*|>)/m.exec(code);
+    return m && /<\/[\w.:-]*>|\/>/.test(code) ? m.index + m[0].lastIndexOf("<", m[0].length - 1) : -1;
 }
 
 /** what a Preact file's React built-in maps to */

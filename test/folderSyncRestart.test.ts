@@ -145,6 +145,56 @@ describe("scripts folder sync", () => {
         await sync.stop();
     });
 
+    it("a .tsx file is a script named with its .tsx, written back to the same file", async () => {
+        put("Panel.tsx", "export const P = () => <div />;");
+        put("Panel.ts", "// a .ts of the same stem is another script");
+        const sync = await import("../src/background/folderSync");
+        await sync.startFromStoredHandle({ fresh: true });
+        expect(await names()).toEqual(["Panel", "Panel.tsx"]);
+        const ss = await import("../src/background/engine/scriptStore");
+        const s = (await ss.listScripts()).find((x) => x.meta.name === "Panel.tsx")!;
+        await ss.saveScript({ id: s.id, code: "export const P = () => <span />;" });
+        await sleep(1200);
+        expect(files.get("Panel.tsx")?.text).toBe("export const P = () => <span />;");
+        expect([...files.keys()].filter((f) => /\.tsx?$/.test(f) && !f.endsWith(".d.ts")).sort()).toEqual(["Panel.ts", "Panel.tsx"]);
+        await sync.stop();
+    });
+
+    it("a script renamed while the folder wasn't watched moves its file (no copy under the old name)", async () => {
+        put("Panel.ts", "export const P = () => <div />;");
+        let sync = await import("../src/background/folderSync");
+        await sync.startFromStoredHandle({ fresh: true });
+        const ss = await import("../src/background/engine/scriptStore");
+        const s = (await ss.listScripts())[0];
+        sync.halt();
+        await ss.saveScript({ id: s.id, code: s.code, name: "Panel.tsx" }); // e.g. the .tsx migration
+        vi.resetModules();
+        sync = await import("../src/background/folderSync");
+        await sync.startFromStoredHandle(); // resume
+        expect(await names()).toEqual(["Panel.tsx"]);
+        expect([...files.keys()].filter((f) => /\.tsx?$/.test(f) && !f.endsWith(".d.ts"))).toEqual(["Panel.tsx"]);
+        expect(files.get("Panel.tsx")?.text).toBe("export const P = () => <div />;");
+        await sync.stop();
+    });
+
+    it("…keeping an edit made to the file meanwhile (both changes apply)", async () => {
+        put("a.ts", "// a");
+        let sync = await import("../src/background/folderSync");
+        await sync.startFromStoredHandle({ fresh: true });
+        const ss = await import("../src/background/engine/scriptStore");
+        const s = (await ss.listScripts())[0];
+        sync.halt();
+        await ss.saveScript({ id: s.id, code: s.code, name: "b" });
+        put("a.ts", "// a, edited");
+        vi.resetModules();
+        sync = await import("../src/background/folderSync");
+        await sync.startFromStoredHandle();
+        expect(await names()).toEqual(["b"]);
+        expect(files.has("a.ts")).toBe(false);
+        expect(files.get("b.ts")?.text).toBe("// a, edited");
+        await sync.stop();
+    });
+
     it("every .ts file is a script named exactly after it (no renaming)", async () => {
         put("Redirect_a_URL.ts", "// a");
         put("x.script.ts", "// b");

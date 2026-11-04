@@ -225,7 +225,7 @@ describe("explorer tree", () => {
         const ids = [...list.querySelectorAll(":scope > li")].map((l) => l.id || l.className);
         expect(ids.slice(2, 4)).toEqual(["explorer-dir%3Amock", "script-item creating"]);
         const input = list.querySelector("li.creating input") as HTMLInputElement;
-        expect(input.placeholder).toBe("name.json");
+        expect(input.placeholder).toBe("name.json or name.svg");
         input.value = "users";
         act(() => void fireEvent.keyDown(input, { key: "Enter" }));
         expect(create).toHaveBeenCalledWith("data", "mock/users.json");

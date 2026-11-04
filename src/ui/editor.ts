@@ -9,7 +9,7 @@ import { API_TYPINGS_URI } from "./apiLinks";
 import { NavHistory } from "./navHistory";
 import type { SampleScript } from "./samples";
 import { settingsDiagnostics, settingsCompletions, settingsHover, type AssistScript } from "../shared/settingsAssist";
-import { badPackageImports, dependantsOf, missingImports } from "../shared/scriptImports";
+import { badPackageImports, dependantsOf, isSvgPath, missingImports } from "../shared/scriptImports";
 import { PACKAGE_ORIGIN } from "../shared/packageImports";
 import { isInFolder, movedPath } from "../shared/folders";
 import { baseName, folderPathOfRowId, folderRowId, isFolderRowId, movedCollapsed, type TreeRow } from "./explorerTree";
@@ -18,8 +18,8 @@ import { dialogs, openHelp, openSettings, pickRows, resolveConflict } from "./st
 import { folderStateText, setHelperStatus, settings } from "./state/settings";
 import { watchTheme, type Theme } from "./theme";
 import * as fsBridge from "./fsBridge";
-import { usesJsx } from "../shared/builtinSpecs";
-import { cleanScriptName, scriptNameProblem, scriptFileName, scriptFileKey, uniqueScriptName, dataFilePathProblem, folderPathProblem } from "../shared/scriptName";
+import { cleanScriptName, isTsxName, scriptNameProblem, scriptFileName, scriptFileKey, uniqueScriptName, dataFilePathProblem, folderPathProblem } from "../shared/scriptName";
+import { jsxElementAt } from "../shared/builtinSpecs";
 import { buildBundle, parseBundleText, bundleSettingsDoc, pickBundle, vscodeTargetPath, editorLaunchUrl, launchAppName, type LaunchMode } from "./bundle";
 import { computeDirty } from "./dirtyState";
 import { parseSettings, SETTINGS_FILE, isBodyCap, BODY_CAP_KEY, DEFAULT_BODY_CAP, type SettingsDoc } from "../shared/settingsYaml";
@@ -426,7 +426,7 @@ async function createItem(kind: NewKind, path: string): Promise<void> {
         select(id);
         editor?.focus();
     } else if (kind === "data") {
-        const r = await send({ type: "saveDataFile", path, text: "{}\n" });
+        const r = await send({ type: "saveDataFile", path, text: isSvgPath(path) ? '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">\n</svg>\n' : "{}\n" });
         if (r?.error || !r?.id) {
             status(`can't create "${path}": ${r?.error ?? "unknown error"}`, "error");
             return;
@@ -586,7 +586,67 @@ function scheduleImportMarkers(m: any): void {
     importMarkerTimers.set(m, window.setTimeout(() => {
         if (!m.isDisposed()) ensureBuiltinTypings(m.getValue());
         updateImportMarkers(m);
+        updateJsxMarker(m);
     }, 250));
+}
+
+// ---- JSX in a .ts script ----
+// TypeScript parses JSX only in .tsx files: a .ts script's JSX gets a
+// marker naming the fix, with a quick fix that renames the script.
+const JSX_OWNER = "wt-jsx";
+const JSX_IN_TS = "jsx-in-ts";
+const RENAME_TO_TSX = "wt.renameToTsx";
+const scriptIdOfModel = (m: any): string | undefined => [...models].find(([, x]) => x === m)?.[0];
+function updateJsxMarker(m: any): void {
+    const monaco = (window as any).monaco;
+    if (m.isDisposed() || m.getLanguageId() !== "typescript") return;
+    const s = scripts.find((x) => x.id === scriptIdOfModel(m));
+    const at = s && !isTsxName(s.meta.name) ? jsxElementAt(m.getValue()) : -1;
+    if (at < 0 && !monaco.editor.getModelMarkers({ resource: m.uri, owner: JSX_OWNER }).length) return;
+    const a = m.getPositionAt(at);
+    ownMarkerWrites.add(m.uri.toString());
+    monaco.editor.setModelMarkers(
+        m,
+        JSX_OWNER,
+        at < 0
+            ? []
+            : [
+                  {
+                      severity: monaco.MarkerSeverity.Error,
+                      source: "wiretrick",
+                      code: JSX_IN_TS,
+                      message: `JSX needs a .tsx file — rename this script to "${baseName(s!.meta.name)}.tsx"`,
+                      startLineNumber: a.lineNumber,
+                      startColumn: a.column,
+                      endLineNumber: a.lineNumber,
+                      endColumn: a.column + 1,
+                  },
+              ]
+    );
+}
+
+async function renameToTsx(id: string): Promise<void> {
+    const s = scripts.find((x) => x.id === id);
+    if (!s || isTsxName(s.meta.name)) return;
+    const to = s.meta.name + ".tsx";
+    const problem = itemPathProblem("script", to, id);
+    if (problem) return void status(`can't rename to "${to}": ${problem}`, "error");
+    await moveRows([{ item: { kind: "script", id, path: s.meta.name } as TreeRow, to }]);
+}
+
+function registerTsxFix(): void {
+    const monaco = (window as any).monaco;
+    monaco.editor.registerCommand(RENAME_TO_TSX, (_accessor: unknown, id: string) => void renameToTsx(id));
+    monaco.languages.registerCodeActionProvider("typescript", {
+        provideCodeActions(model: any, _range: unknown, context: { markers: any[] }) {
+            const mk = context.markers.find((x) => (typeof x.code === "object" ? x.code?.value : x.code) === JSX_IN_TS);
+            const id = mk && scriptIdOfModel(model);
+            const s = id && scripts.find((x) => x.id === id);
+            if (!s) return { actions: [], dispose() {} };
+            const title = `Rename to ${baseName(s.meta.name)}.tsx`;
+            return { actions: [{ title, kind: "quickfix", isPreferred: true, diagnostics: [mk], command: { id: RENAME_TO_TSX, title, arguments: [s.id] } }], dispose() {} };
+        },
+    });
 }
 
 /** "<name>@<range>" → the exact version unpkg resolves it to */
@@ -681,10 +741,9 @@ function restoreViewState(m: any): void {
     if (vs) editor.restoreViewState(vs);
 }
 
-/** a script with JSX is a .tsx model (TypeScript parses JSX only there); it moves when saved code gains or loses JSX */
-function scriptUri(name: string, code: string): any {
-    const file = scriptFileName(name);
-    return (window as any).monaco.Uri.file("/" + (usesJsx(code) ? file + "x" : file));
+/** the model's path is the script's file: a .tsx script's (TypeScript parses JSX only there) is .tsx */
+function scriptUri(name: string): any {
+    return (window as any).monaco.Uri.file("/" + scriptFileName(name));
 }
 
 function syncModels(): void {
@@ -693,7 +752,7 @@ function syncModels(): void {
     const seen = new Set<string>();
     for (const s of scripts) {
         seen.add(s.id);
-        const uri = scriptUri(s.meta.name, s.code);
+        const uri = scriptUri(s.meta.name);
         let m = models.get(s.id);
         if (m && m.uri.toString() !== uri.toString()) {
             // renamed: move to a model at the new path, keeping any unsaved
@@ -753,6 +812,9 @@ const dataUri = (path: string): any => (window as any).monaco.Uri.file("/" + pat
 const isDataId = (id: string | null): boolean => !!id && dataFiles.some((d) => d.id === id);
 
 /** syncModels for data files: renamed ones move, clean ones follow external changes, deleted ones go */
+/** a data file's Monaco language: an .svg is XML */
+const dataLanguage = (path: string): string => (isSvgPath(path) ? "xml" : "json");
+
 function syncDataModels(): void {
     if (!editor) return;
     const monaco = (window as any).monaco;
@@ -764,7 +826,7 @@ function syncDataModels(): void {
         if (m && m.uri.toString() !== uri.toString()) {
             const old = m;
             const oldUri = old.uri.toString();
-            m = monaco.editor.getModel(uri) || monaco.editor.createModel(old.getValue(), "json", uri);
+            m = monaco.editor.getModel(uri) || monaco.editor.createModel(old.getValue(), dataLanguage(d.path), uri);
             dataModels.set(d.id, m);
             setBaseline(m, d.text);
             const vs = viewStates.get(oldUri);
@@ -780,7 +842,7 @@ function syncDataModels(): void {
             m.onDidChangeContent(scheduleDataTypings);
         }
         if (!m) {
-            m = monaco.editor.getModel(uri) || monaco.editor.createModel(d.text, "json", uri);
+            m = monaco.editor.getModel(uri) || monaco.editor.createModel(d.text, dataLanguage(d.path), uri);
             dataModels.set(d.id, m);
             setBaseline(m, d.text);
             m.onDidChangeContent(scheduleDataTypings);
@@ -1054,7 +1116,7 @@ async function saveDataFileNow(id: string): Promise<void> {
     let result = await send({ type: "saveDataFile", id, text, base });
     if (result?.conflict) {
         const deleted = result.conflict === "deleted";
-        const choice = await resolveConflict({ name: data.path, theirs: deleted ? null : result.text, mine: text, kind: "data file", language: "json" });
+        const choice = await resolveConflict({ name: data.path, theirs: deleted ? null : result.text, mine: text, kind: "data file", language: dataLanguage(data.path) });
         if (choice === "cancel") {
             updateDirty();
             return;
@@ -1436,18 +1498,18 @@ function setupSettings(): void {
 }
 
 /** a script name not taken yet: `base`, else `base 2`, `base 3`… */
-function freeScriptName(base: string): string {
+function freeScriptName(base: string, ext = ""): string {
     const taken = new Set(scripts.map((s) => s.meta.name));
-    if (!taken.has(base)) return base;
+    if (!taken.has(base + ext)) return base + ext;
     let n = 2;
-    while (taken.has(`${base} ${n}`)) n++;
-    return `${base} ${n}`;
+    while (taken.has(`${base} ${n}${ext}`)) n++;
+    return `${base} ${n}${ext}`;
 }
 
 /** add a sample as a new (enabled) script and open it; returns its id */
 async function addSample(sample: SampleScript): Promise<string> {
     const id = newId();
-    const name = freeScriptName(sample.name);
+    const name = freeScriptName(sample.name, jsxElementAt(sample.code) >= 0 ? ".tsx" : "");
     await send({ type: "saveScript", id, code: sample.code, name, enabled: true });
     await refresh();
     selectReal(id);
@@ -1732,7 +1794,7 @@ const existsBadge = (name?: string) => (name && scripts.some((s) => scriptFileKe
 function importBundle(): void {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".yaml,.yml,.ts,.js";
+    input.accept = ".yaml,.yml,.ts,.tsx,.js";
     input.onchange = async () => {
         const file = input.files?.[0];
         if (!file) return;
@@ -1923,6 +1985,7 @@ async function main(): Promise<void> {
     }
     registerPinImportFix();
     registerIsolatedWorldFix();
+    registerTsxFix();
     // VS Code shortcuts: ⌘P quick-open (scripts + settings.yaml), ⌘, opens
     // the Settings dialog, ⌘⇧E focuses the explorer, ⌘B / ⌘J toggle the
     // explorer / panel, ⌘⇧M or ⌥⇧P/L/N show a panel view (filter focused), ⌥⇧K clears it, ⌥Z toggles word wrap

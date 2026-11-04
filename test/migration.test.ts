@@ -141,6 +141,6 @@ describe("migrateSettingsText", () => {
 describe("mapStrategy", () => {
     it("maps old names and passes others through", () => {
         expect(["process", "cdp", "hook", "webrequest", "webRequest", "helper", "x"].map(mapStrategy)).toEqual(["helper", "debugger", "page", "extension", "extension", "helper", "x"]);
-        expect(MIGRATION_VERSION).toBe(3);
+        expect(MIGRATION_VERSION).toBe(4);
     });
 });

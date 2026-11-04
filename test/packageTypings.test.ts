@@ -169,6 +169,24 @@ const bad: string = useSnapshot(s).n;
         }
     });
 
+    it("an .svg import is its markup, a string, in the synced folder (wt-api.d.ts; real tsc)", () => {
+        const dir = mkdtempSync(join(process.cwd(), ".tmp-svg-typings-"));
+        try {
+            writeFileSync(join(dir, "tsconfig.json"), tsconfigText());
+            writeFileSync(join(dir, "wt-api.d.ts"), readFileSync("src/types/wt-api.d.ts", "utf8"));
+            mkdirSync(join(dir, "icons"));
+            writeFileSync(join(dir, "icons", "logo.svg"), "<svg/>");
+            writeFileSync(join(dir, "c.ts"), `import logo from "./icons/logo.svg";\nexport const s: string = logo;\nexport const n: number = logo;\n`);
+            const cfg = ts.readConfigFile(join(dir, "tsconfig.json"), ts.sys.readFile);
+            const parsed = ts.parseJsonConfigFileContent(cfg.config, ts.sys, dir);
+            const program = ts.createProgram({ rootNames: parsed.fileNames, options: { ...parsed.options, types: [] } });
+            const diags = ts.getPreEmitDiagnostics(program);
+            expect(diags.map((d) => `${d.file ? d.file.fileName.slice(dir.length + 1) : ""}:${d.start && d.file ? d.file.getLineAndCharacterOfPosition(d.start).line + 1 : ""}:${d.code}`)).toEqual(["c.ts:3:2322"]);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
     it("resolve in the synced folder with the generated tsconfig (real tsc)", () => {
         const dir = mkdtempSync(join(process.cwd(), ".tmp-package-typings-"));
         try {

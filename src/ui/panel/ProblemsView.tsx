@@ -150,7 +150,7 @@ export function ProblemsView({ hidden }: { hidden: boolean }) {
                         const head = (
                             <div key={`g:${g.id}`} {...rowProps(`g:${g.id}`, 1)} className={`pb-row pb-head${open ? " open" : ""}`} data-group={g.id} aria-expanded={open} title={groupTitle(g)} onClick={() => toggle(g.id)}>
                                 <span className="pb-chev">{CHEVRON}</span>
-                                <span className={`file-icon ${g.file}`}>{g.file === "ts" ? "TS" : g.file === "json" ? "{}" : "⚙"}</span>
+                                <span className={`file-icon ${g.file}`}>{g.file === "ts" ? "TS" : g.file === "tsx" ? "⚛" : g.file === "json" ? "{}" : "⚙"}</span>
                                 <span className="pb-file">{g.label}</span>
                                 <span className="pb-count">{badgeCount(g.problems.length)}</span>
                             </div>

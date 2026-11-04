@@ -247,6 +247,37 @@ async function checkExplorerUi(ctx: any, mgr: any, check: Check, t: (s: string) 
     const shown = await mgr.evaluate(() => (window as any).monaco.editor.getEditors()[0].getModel()?.uri.path);
     check(t("explorer: F2 rename with a / moves the item"), before === "ui-folder/ui-data.json" && moved && movedData?.path === "moved/ui-data.json" && shown === "/moved/ui-data.json", JSON.stringify({ before, moved, movedData, shown }));
 
+    // an .svg data file: New JSON File… named x.svg, opens as XML, imports as its markup (typed string)
+    await mgr.click(`${row("dir:ui-folder")} .script-name`, { button: "right" });
+    await mgr.click('.ctx-menu li:has-text("New JSON File…")');
+    await mgr.fill("#script-list li.creating input.script-rename", "icon.svg");
+    await mgr.press("#script-list li.creating input.script-rename", "Enter");
+    const svgLang = await mgr
+        .waitForFunction(() => (window as any).monaco.editor.getEditors()[0].getModel()?.uri.path === "/ui-folder/icon.svg" && (window as any).monaco.editor.getEditors()[0].getModel().getLanguageId(), null, { timeout: 5000 })
+        .then((h: any) => h.jsonValue(), () => null);
+    const svg = (await send({ type: "listDataFiles" })).find((d: any) => d.path === "ui-folder/icon.svg");
+    const svgIcon = await mgr.evaluate((id: string) => document.querySelector(`#script-list li[data-id="${id}"] .file-icon`)?.className, svg?.id);
+    check(t("explorer: a new .svg data file opens as XML with its own icon"), svgLang === "xml" && /^<svg /.test(svg?.text || "") && /\bsvg\b/.test(svgIcon || ""), JSON.stringify({ svgLang, svg, svgIcon }));
+    const svgUser = await send({ type: "saveScript", id: "s_folders_svg", name: "ui-folder/uses svg", code: `import logo from "./icon.svg";\nconst markup: string = logo;\nwt.params({ markup: { type: "string", default: markup } });\n` });
+    const svgDefault = (await send({ type: "listScripts" })).find((s: any) => s.id === "s_folders_svg")?.paramDefs?.markup?.default;
+    const svgTs = await mgr.evaluate(async () => {
+        const monaco = (window as any).monaco;
+        let out: any = null;
+        for (let i = 0; i < 40; i++) {
+            const m = monaco.editor.getModels().find((x: any) => x.uri.path === "/ui-folder/uses svg.ts");
+            if (m) {
+                const w = await (await monaco.languages.typescript.getTypeScriptWorker())(m.uri);
+                const all = [...(await w.getSyntacticDiagnostics(m.uri.toString())), ...(await w.getSemanticDiagnostics(m.uri.toString()))];
+                const info = await w.getQuickInfoAtPosition(m.uri.toString(), m.getValue().indexOf("logo;") + 1);
+                out = { diags: all.map((d: any) => (typeof d.messageText === "string" ? d.messageText : d.messageText.messageText)), type: (info?.displayParts || []).map((p: any) => p.text).join("") };
+                if (!out.diags.length && /string/.test(out.type)) break;
+            }
+            await new Promise((r) => setTimeout(r, 250));
+        }
+        return out;
+    });
+    check(t("a script imports the .svg as its markup (a string, no TS errors)"), !svgUser?.error && svgDefault === svg?.text && !svgTs?.diags.length && /: string/.test(svgTs?.type || ""), JSON.stringify({ error: svgUser?.error, svgDefault, svgTs }));
+
     // optional: a picture of the tree (E2E_EXPLORER_SHOT=<png path>)
     if (process.env.E2E_EXPLORER_SHOT) {
         await mgr.bringToFront();

@@ -1132,3 +1132,12 @@ declare var URLPattern: {
     new (input: URLPatternInput, baseURL: string, options?: URLPatternOptions): URLPattern;
     new (input?: URLPatternInput, options?: URLPatternOptions): URLPattern;
 };
+
+/**
+ * An `.svg` data file imports as its markup, a string:
+ * `import logo from "./icons/logo.svg"; el.innerHTML = logo;`
+ */
+declare module "*.svg" {
+    const markup: string;
+    export default markup;
+}
