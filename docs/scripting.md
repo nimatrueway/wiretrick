@@ -602,8 +602,39 @@ wt.onOverlay("https://example.com/*", () => {
   JSON rules as `wt.globalStore`.
 - **Names.** One name space with `wt.globalStore`: a script can't have a
   global and a page store with the same name.
-- Not available in `onPage` code, nor in `rules` handlers (their rules
-  are built once for every page).
+- Available in isolated-world `onPage` code (`world: "isolated"`, the copy
+  of its page) and the overlay; not in main-world `onPage` code (see
+  below), nor in `rules` handlers (their rules are built once for every
+  page).
+
+### Stores in `onPage` code
+
+Isolated-world `onPage` code (`wt.onPage({ url, world: "isolated" }, fn)`)
+gets live copies of the script's stores, like the overlay: reads are
+synchronous, writes reach the background, the overlay and other tabs
+(`wt.pageStore`: this page's copy only), and their changes come back.
+
+Main-world `onPage` code runs in the page's own JavaScript, so the page
+could read the stores and forge writes to them. There, `wt.globalStore`
+and `wt.pageStore` throw, and calls to an `onOverlay` handle do nothing —
+there's no privileged escape hatch, since anything main-world code can
+call, the page can call too. The Problems view warns about a main-world
+`onPage` handler that uses a store or an `onOverlay` handle ("…which the
+API explicitly disallows in the main world"); its quick fix moves the
+handler to `world: "isolated"`.
+
+```ts
+const page = wt.pageStore("page", { hits: 0 });
+
+wt.replaceResponse({ url: "https://example.com/api/*", strategy: "page" }, () => {
+    page.hits++;
+});
+
+wt.onPage({ url: "https://example.com/*", world: "isolated" }, () => {
+    const badge = document.body.appendChild(document.createElement("output"));
+    setInterval(() => (badge.value = `${page.hits} API calls`), 500);
+});
+```
 
 ### `wt.fetch`
 
@@ -919,8 +950,10 @@ const overlay = wt.onOverlay("*://app.example.com/*", () => {
 
 Isolated code gets `wt.storage`, `wt.log`, `wt.params` and `console`
 (lines go to the Log tagged `isolated › host`, as the overlay's are
-`overlay › host` and main-world code's `page › host`); `wt.globalStore`,
-`wt.pageStore` and `wt.fetch` are the overlay's.
+`overlay › host` and main-world code's `page › host`); `wt.globalStore`
+and `wt.pageStore` are live copies, as in the overlay (see
+[Stores in `onPage` code](#stores-in-onpage-code)), and `wt.fetch` is the
+overlay's.
 
 #### User scripts on Chrome
 

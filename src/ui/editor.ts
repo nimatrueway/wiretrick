@@ -42,7 +42,7 @@ import { clearSel, everyFolder, explorer, explorerIds, moveFocus, pruneCollapsed
 import { createCodeEditor } from "./shell/codeEditor";
 import { toolbar, type SaveState } from "./state/toolbar";
 import { refreshUserScripts } from "./state/userScripts";
-import { REMOTE_MAIN_WORLD } from "../shared/remote";
+import { MAIN_WORLD_DISALLOWED, REMOTE_MAIN_WORLD } from "../shared/remote";
 import { isolatedRouteEdit } from "./isolatedFix";
 import { collectDiagnostics, diagnosticsFileName, downloadText } from "./about";
 
@@ -631,15 +631,17 @@ function registerPinImportFix(): void {
     });
 }
 
-/** a main-world `overlay.fn()` call (a runtime Problem): quick fix `world: "isolated"` on the onPage route around it */
+/** a main-world `overlay.fn()` call (a runtime Problem) or a main-world onPage handler using a store / overlay handle (a route warning): quick fix `world: "isolated"` on the onPage route around it */
 function registerIsolatedWorldFix(): void {
     const monaco = (window as any).monaco;
     monaco.languages.registerCodeActionProvider("typescript", {
         provideCodeActions(model: any, _range: unknown, context: { markers: any[] }) {
             const actions: any[] = [];
             for (const mk of context.markers) {
-                if (!String(mk.message).includes(REMOTE_MAIN_WORLD)) continue;
-                const fix = isolatedRouteEdit(model.getValue(), model.getOffsetAt({ lineNumber: mk.startLineNumber, column: mk.startColumn }));
+                const msg = String(mk.message);
+                if (!msg.includes(REMOTE_MAIN_WORLD) && !msg.includes(MAIN_WORLD_DISALLOWED)) continue;
+                // the marker's end: inside the call, or (a route warning, on the registration line) past `wt.onPage(`
+                const fix = isolatedRouteEdit(model.getValue(), model.getOffsetAt({ lineNumber: mk.endLineNumber, column: mk.endColumn }));
                 if (!fix) continue;
                 const a = model.getPositionAt(fix.start);
                 const b = model.getPositionAt(fix.end);

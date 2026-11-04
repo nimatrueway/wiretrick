@@ -32,7 +32,7 @@ import { resolveBrowser } from "./browserSetup";
 import { checkApiTypingsNav } from "./apiTypingsNav";
 import { checkRulesStrategy, rulesServerRoute } from "./rulesE2e";
 import { checkFoldersAndDataFiles, foldersServerRoute } from "./foldersE2e";
-import { checkOverlayPreview, checkOverlays, checkEarlyRequests, checkOverlayShortcuts, checkPageStores, overlayServerRoute } from "./overlayE2e";
+import { checkOverlayPreview, checkOverlays, checkEarlyRequests, checkOverlayShortcuts, checkPageStores, checkIsoStores, overlayServerRoute } from "./overlayE2e";
 
 const EXT_ROOT = path.join(new URL("..", import.meta.url).pathname, "dist");
 
@@ -562,6 +562,7 @@ await checkFoldersAndDataFiles(ctx, mgr, ORIGIN, check);
 // ---------- 10i. overlays (wt.onOverlay) and calls between the overlay and the page ----------
 await checkOverlays(ctx, mgr, ORIGIN, check, { isolated: true });
 await checkPageStores(ctx, mgr, ORIGIN, check);
+await checkIsoStores(ctx, mgr, ORIGIN, check);
 await checkEarlyRequests(ctx, mgr, ORIGIN, check);
 await checkOverlayShortcuts(ctx, mgr, ORIGIN, check);
 await checkOverlayPreview(ctx, mgr, ORIGIN, check);

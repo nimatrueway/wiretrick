@@ -7,6 +7,12 @@ its section below.
 
 ## [Unreleased]
 
+### Added
+
+- `wt.globalStore` and `wt.pageStore` in isolated-world `onPage` code (`world: "isolated"`): live copies like the overlay's — synchronous reads, writes that reach the background, the overlay and (global stores) other tabs, `wt.pageStore` being the copy of the code's page.
+
+- Problems view warnings for a main-world `onPage` handler that uses a store or an `onOverlay` handle (both disallowed there: the page could read and forge them), with a quick fix that moves the handler to `world: "isolated"`. In main-world code the stores' error now says to use the isolated world.
+
 ## [0.11.0] - 2026-11-04
 
 ### Changed

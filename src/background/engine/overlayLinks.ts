@@ -23,7 +23,7 @@
  * overlay, for whichever script the Editor names, at a URL it picks.
  */
 import { onBridgeConnect, type BridgeLink } from "./bridgePorts";
-import { endpointPair, portEndpoint, type Endpoint, type IsoInit, type OverlayInit } from "../../shared/wire";
+import { endpointPair, portEndpoint, ISO_STORE_TAG, type Endpoint, type IsoInit, type OverlayInit, type WireOps } from "../../shared/wire";
 import { isRpcCall, isRpcResult, NOT_RUNNING, RPC_TIMEOUT_MS, type RpcCall, type RpcResult } from "../../shared/rpc";
 import { USER_SCRIPTS_OFF } from "../../shared/userScriptsStatus";
 import { contextTag, type ScriptLogLevel } from "../../shared/scriptLog";
@@ -31,7 +31,7 @@ import { dlogLevel } from "../../shared/debugLog";
 import { routeMatches, sampleUrl, type RouteMeta } from "../../shared/route";
 import type { ShippedLib } from "../../shared/scriptImports";
 import { fetchFor, storeOwner } from "./stores";
-import { pages } from "./pages";
+import { pages, pagesReady } from "./pages";
 import { addBypass, addBypassRule } from "./bypass";
 
 /** a script's overlay as its frame runs it (pipeline.ts `hookBundle`) */
@@ -67,18 +67,52 @@ const sameDoc = (a: chrome.runtime.Port | undefined, b: chrome.runtime.Port | un
     return !x || !y || x === y;
 };
 /** a store op's page is the grant's (or none: a global store) */
-const pageOk = (a: { page?: unknown } | undefined, g: Grant): boolean => a?.page === undefined || a.page === g.page;
+const pageOk = (a: { page?: unknown } | undefined, g: { page: string }): boolean => a?.page === undefined || a.page === g.page;
+
+/** the page a frame is part of: its tab's top document's */
+async function pageOfFrame(tabId: number, frameId: number, port: chrome.runtime.Port): Promise<string> {
+    await pagesReady;
+    return (frameId === 0 ? pages.forRequest({ tabId, frameId: 0, documentId: docOf(port) }) : pages.current(tabId)) ?? "";
+}
+
+/** a link to the store owner for one context of script `s`: the patches of the stores it subscribed to go out on `out`, tagged `tag` */
+function ownerLink(out: Endpoint, tag: string): Endpoint {
+    const [replicaSide, ownerSide] = endpointPair();
+    storeOwner.attach(ownerSide, { all: false });
+    for (const op of ["store.patch", "store.reject", "store.drop"] as const) replicaSide.on(op, (a: any) => !out.closed && out.push(op, a, tag));
+    return replicaSide;
+}
+
+/** a context's store ops (`store.declare`, `store.set`, `store.sub`) on `ep`, for whichever script/grant `target` names */
+function serveStoreOps(ep: Endpoint, target: (s: string | undefined) => { s: string; page: string; link(): Endpoint } | undefined): void {
+    ep.on("store.declare", (a, s) => {
+        const t = target(s);
+        if (t) t.link().push("store.declare", a, t.s);
+    });
+    ep.on("store.set", (a, s) => {
+        const t = target(s);
+        if (t && pageOk(a, t)) t.link().push("store.set", a, t.s);
+    });
+    ep.handle("store.sub", (a, s): Promise<WireOps["store.sub"]["res"]> => {
+        const t = target(s);
+        if (!t) throw new Error("store.sub: this script's stores aren't reachable here");
+        if (!pageOk(a, t)) throw new Error("store.sub: not this frame's page");
+        return t.link().call("store.sub", a, t.s);
+    });
+}
 
 const NONCE_TTL_MS = 60_000;
 const BYPASS_TTL_MS = 10_000;
 
 /** a script's isolated onPage code as its user-script world runs it (pipeline.ts `hookBundle`) */
-export type IsoRun = Omit<IsoInit, "s">;
+export type IsoRun = Omit<IsoInit, "s" | "stores" | "page">;
 
 export interface OverlayLinkDeps {
     overlayRuns(url: string): Promise<Map<string, OverlayRun>>;
-    /** the scripts with isolated onPage code for a frame's URL */
+    /** MV3: the scripts with isolated onPage code for a frame's URL */
     isoRuns?(url: string, top: boolean): Promise<Map<string, IsoRun>>;
+    /** MV2: the scripts with isolated onPage code for a frame's URL (the bridge runs it) */
+    isoScripts?(url: string, top: boolean): Promise<Set<string>>;
     /** chrome.userScripts can't run (the overlay's calls into isolated code say so) */
     userScriptsOff?(): Promise<boolean>;
     storageGet?(s: string, key: string): Promise<any>;
@@ -106,6 +140,10 @@ interface IsoLink {
     ep: Endpoint;
     port: chrome.runtime.Port;
     s: string | null;
+    /** the page its frame is part of (set by `iso.load`) */
+    page?: string;
+    /** its link to the store owner (created on first use) */
+    store?: Endpoint | null;
 }
 /** each tab's top-frame bridge (the overlay's side of the relay) */
 const topBridges = new Map<number, BridgeLink>();
@@ -216,16 +254,31 @@ export function serveLink(link: BridgeLink): void {
         if (!g) throw new Error(`${op}: this script has no overlay here`);
         return g;
     };
-    /** the overlay's store link: patches for the stores it subscribed to go back to the bridge, tagged with `s` */
-    const storeOf = (s: string, g: Grant): Endpoint => {
-        if (g.store && !g.store.closed) return g.store;
-        const [replicaSide, ownerSide] = endpointPair();
-        storeOwner.attach(ownerSide, { all: false });
-        replicaSide.on("store.patch", (a) => link.ep.push("store.patch", a, s));
-        replicaSide.on("store.reject", (a) => link.ep.push("store.reject", a, s));
-        replicaSide.on("store.drop", (a) => link.ep.push("store.drop", a, s));
-        return (g.store = replicaSide);
-    };
+    /** MV2: the scripts whose isolated onPage code (run by this bridge) may use their stores */
+    const isoGrants = new Map<string, { page: string; store: Endpoint | null }>();
+    link.ep.onClose(() => {
+        for (const g of isoGrants.values()) g.store?.close("the bridge went away");
+        isoGrants.clear();
+    });
+    // the overlay's ops come tagged `s`, isolated code's `ISO_STORE_TAG + s`; patches go back tagged the same
+    serveStoreOps(link.ep, (tag) => {
+        if (tag === undefined) return undefined;
+        const iso = tag.startsWith(ISO_STORE_TAG);
+        const s = iso ? tag.slice(ISO_STORE_TAG.length) : tag;
+        const g = iso ? isoGrants.get(s) : mine.get(s);
+        return g && { s, page: g.page, link: () => (g.store && !g.store.closed ? g.store : (g.store = ownerLink(link.ep, tag))) };
+    });
+    link.ep.handle("iso.stores", async ({ url }, s) => {
+        if (__MV3__ || s === undefined || typeof url !== "string" || !sameOrigin(url, link.port.sender?.url)) throw new Error("iso.stores: refused");
+        if (!(await deps.isoScripts?.(url, link.frameId === 0))?.has(s)) throw new Error("iso.stores: this script has no isolated onPage code here");
+        const page = await pageOfFrame(link.tabId, link.frameId, link.port);
+        if (link.ep.closed) throw new Error("iso.stores: closed");
+        const old = isoGrants.get(s);
+        if (old?.page === page) return {};
+        old?.store?.close("the page changed");
+        isoGrants.set(s, { page, store: null });
+        return {};
+    });
 
     link.ep.handle("overlay.open", async ({ nonce, url }, s) => {
         if (s === undefined || link.frameId !== 0) throw new Error("overlay.open: overlays are top-frame only");
@@ -250,20 +303,6 @@ export function serveLink(link: BridgeLink): void {
         if (!g) return;
         g.store?.close("the overlay closed");
         mine.delete(s!);
-    });
-
-    link.ep.on("store.declare", (a, s) => {
-        const g = s === undefined ? undefined : mine.get(s);
-        if (g) storeOf(s!, g).push("store.declare", a, s);
-    });
-    link.ep.on("store.set", (a, s) => {
-        const g = s === undefined ? undefined : mine.get(s);
-        if (g && pageOk(a, g)) storeOf(s!, g).push("store.set", a, s);
-    });
-    link.ep.handle("store.sub", (a, s) => {
-        const g = granted("store.sub", s);
-        if (!pageOk(a, g)) throw new Error("store.sub: not this overlay's page");
-        return storeOf(s!, g).call("store.sub", a, s);
     });
 
     link.ep.handle("fetch", (a, s) => {
@@ -336,6 +375,7 @@ export function serveIsoLink(link: IsoLink): void {
     const { tabId, frameId, ep } = link;
     const bound = (s: string | undefined): s is string => s !== undefined && s === link.s;
     ep.onClose(() => {
+        link.store?.close("the isolated-world code went away");
         if (link.s !== null && isoLinks.get(isoKey(tabId, frameId, link.s)) === link) isoLinks.delete(isoKey(tabId, frameId, link.s));
         for (const [cid, r] of [...relayed]) {
             if (r.iso !== link) continue;
@@ -350,7 +390,10 @@ export function serveIsoLink(link: IsoLink): void {
         if (typeof world === "string" && world && world !== s) throw new Error("iso.load: refused");
         const run = (await deps.isoRuns?.(url, frameId === 0))?.get(s);
         if (!run) throw new Error("iso.load: this script has no isolated onPage code here");
+        const page = link.page ?? (await pageOfFrame(tabId, frameId, link.port));
+        const stores = (await storeOwner.init([s], { page }))[s] ?? {};
         if (ep.closed) throw new Error("iso.load: closed");
+        link.page = page;
         if (link.s === null) {
             link.s = s;
             const key = isoKey(tabId, frameId, s);
@@ -359,8 +402,9 @@ export function serveIsoLink(link: IsoLink): void {
             if (old && old !== link) old.ep.close("replaced by a new link");
             linksChanged();
         }
-        return { s, ...run };
+        return { s, ...run, stores, page };
     });
+    serveStoreOps(ep, (s) => (bound(s) && link.page !== undefined ? { s, page: link.page, link: () => (link.store && !link.store.closed ? link.store : (link.store = ownerLink(ep, s))) } : undefined));
     ep.on("log", (a, s) => {
         if (!bound(s) || !["debug", "info", "warn", "error"].includes(a?.level)) return;
         deps.log?.(tabId, s, a.level, String(a.msg ?? "").slice(0, 8000), contextTag("isolated", link.port.sender?.url));
@@ -453,12 +497,7 @@ export function servePreviewLink(ep: Endpoint, tabId?: number): void {
     };
     const storeOf = (g: Grant & { s: string }): Endpoint => {
         if (g.store && !g.store.closed) return g.store;
-        const [replicaSide, ownerSide] = endpointPair();
-        storeOwner.attach(ownerSide, { all: false });
-        replicaSide.on("store.patch", (a) => ep.push("store.patch", a, g.s));
-        replicaSide.on("store.reject", (a) => ep.push("store.reject", a, g.s));
-        replicaSide.on("store.drop", (a) => ep.push("store.drop", a, g.s));
-        return (g.store = replicaSide);
+        return (g.store = ownerLink(ep, g.s));
     };
 
     ep.handle("preview.open", async ({ nonce, url }, s) => {

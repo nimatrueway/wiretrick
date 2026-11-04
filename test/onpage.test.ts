@@ -88,6 +88,23 @@ describe("page shim worlds", () => {
         expect(() => s.n).toThrow(/wt\.globalStore/);
         await expect(shim().wt.fetch("/")).rejects.toThrow(/wt\.fetch/);
     });
+
+    it("isolated code gets the stores it's given; main-world code never does", () => {
+        const made: string[] = [];
+        const stores = {
+            store: (name: string, initial: object, persist: boolean | string[]) => (made.push(`g:${name}:${JSON.stringify(persist)}`), { ...initial }),
+            pageStore: (name: string, initial: object) => (made.push(`p:${name}`), { ...initial }),
+        };
+        const iso = makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined }, world: "isolated", stores });
+        expect(iso.wt.globalStore("a", { n: 1 }, { persist: ["n"] }).n).toBe(1);
+        expect(iso.wt.pageStore("b", { m: 2 }).m).toBe(2);
+        expect(made).toEqual(['g:a:["n"]', "p:b"]);
+        expect(() => iso.wt.pageStore("a", {})).toThrow(/already has a store named "a"/);
+        expect(() => iso.wt.globalStore("c", [])).toThrow(/initial must be an object/);
+        const main = makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined }, world: "main", stores });
+        expect(() => main.wt.pageStore("b", { m: 2 }).m).toThrow(/main-world page code.*world: "isolated"/);
+        expect(made.length).toBe(2);
+    });
 });
 
 describe("inertRemote", () => {

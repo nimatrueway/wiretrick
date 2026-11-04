@@ -9,8 +9,8 @@ import { parseParamValue, resolveParamValues, serializableParamDef, type ParamDe
 import { formatLogArgs, makeScriptConsole, type ScriptLogLevel } from "./scriptLog";
 import { scriptFunction } from "./scriptFn";
 import { callerLine } from "./scriptError";
-import { normalizeRoute, type RouteKind, type RouteMeta } from "./route";
-import { inertRemote, REMOTE_FROM_BACKGROUND } from "./remote";
+import { normalizeRoute, pageWorld, routeLabel, type RouteKind, type RouteMeta } from "./route";
+import { inertRemote, MAIN_WORLD_DISALLOWED, REMOTE_FROM_BACKGROUND } from "./remote";
 import { scriptEnv } from "./scriptEnv";
 import { importLine, importPath, importResolver, isDataSpec } from "./scriptImports";
 import { isUrlSpec, makePackageLoader, PackageImportError, type PackageModules } from "./packageImports";
@@ -18,7 +18,7 @@ import { builtinModule } from "./builtins";
 import { builtinSpec } from "./builtinSpecs";
 import { proxy } from "valtio/vanilla";
 import { ReplicaHub } from "./storeReplica";
-import { STORE_RENAMED } from "./storeOps";
+import { STORE_RENAMED, claimStoreName, storePersist } from "./storeOps";
 import type { StorePersist, WireRequest, WireResponse } from "./wire";
 import { fromWireResponse, splitFetchInit, toWireRequest, type WtFetchInit } from "./wtFetch";
 
@@ -552,32 +552,15 @@ function createOwner(meta: ResMeta, storedValues?: Record<string, any>) {
     };
 }
 
-/** `wt.globalStore`'s `persist` option, checked */
-function storePersist(name: string, opts: unknown): StorePersist {
-    if (opts === undefined || opts === null) return true;
-    if (typeof opts !== "object") throw new TypeError(`wt.globalStore("${name}"): the third argument must be an options object`);
-    const p = (opts as { persist?: unknown }).persist;
-    if (p === undefined) return true;
-    if (typeof p === "boolean") return p;
-    if (Array.isArray(p) && p.every((k) => typeof k === "string")) return [...p];
-    throw new TypeError(`wt.globalStore("${name}"): persist must be true, false or a list of top-level field names`);
-}
-
 /** `wt.globalStore` and `wt.pageStore` for one compiled instance: each name once, across both */
 function makeStores(overrides?: ResApiOverrides): { globalStore: (name: string, initial: object, opts?: unknown) => object; pageStore: (name: string, initial: object) => object } {
     const names = new Map<string, string>();
     let local: ReplicaHub | null = null;
-    const claim = (api: string, name: unknown, initial: unknown) => {
-        if (typeof name !== "string" || !name) throw new TypeError(`${api}: the first argument must be the store's name (a non-empty string)`);
-        const had = names.get(name);
-        if (had) throw new Error(`${api}("${name}"): this script already has a store named "${name}" (${had}) — a name may be used once per script (call ${api} at top level and share the result)`);
-        if (!initial || typeof initial !== "object" || Array.isArray(initial)) throw new TypeError(`${api}("${name}"): initial must be an object`);
-    };
     return {
         globalStore: (name, initial, opts) => {
             // save-time compile: arguments built from a stubbed import aren't known yet
             if (isStub(name) || isStub(initial) || isStub(opts)) return makeStubModule();
-            claim("wt.globalStore", name, initial);
+            claimStoreName(names, "wt.globalStore", name, initial);
             const persist = storePersist(name, opts);
             const out = overrides?.store ? overrides.store(name, initial, persist) : proxy(initial);
             names.set(name, "wt.globalStore");
@@ -585,7 +568,7 @@ function makeStores(overrides?: ResApiOverrides): { globalStore: (name: string, 
         },
         pageStore: (name, initial) => {
             if (isStub(name) || isStub(initial)) return makeStubModule();
-            claim("wt.pageStore", name, initial);
+            claimStoreName(names, "wt.pageStore", name, initial);
             const out = overrides?.pageStore ? overrides.pageStore(name, initial) : (local ??= new ReplicaHub({ ctx: "local" })).pageStore("local", name, initial);
             names.set(name, "wt.pageStore");
             return out;
@@ -797,6 +780,157 @@ export function registrationProblems(code: string): RegistrationProblem[] {
         else if (depth === 1 && (c === "(" || c === "[" || c === "{")) stmt += c;
         if (!/\s/.test(c)) prev = c;
         i++;
+    }
+    return out;
+}
+
+/**
+ * `code` with comments and string/regex literal contents blanked to spaces
+ * (same length, newlines kept); a template's `${…}` code is kept.
+ */
+function codeOnly(code: string): string {
+    const out = code.split("");
+    const blank = (from: number, to: number) => {
+        for (let j = from; j < to; j++) if (out[j] !== "\n") out[j] = " ";
+    };
+    const n = code.length;
+    let prev = "";
+    let i = 0;
+    /** brace depth inside each open template's `${…}` */
+    const tpl: number[] = [];
+    const string = (quote: string) => {
+        // from just past the opening quote; returns where the literal (or the template chunk) ends
+        let cls = false;
+        let j = i;
+        while (j < n) {
+            const d = code[j];
+            if (d === "\\") {
+                j += 2;
+                continue;
+            }
+            if (d === "\n" && quote !== "`") break;
+            if (quote === "/") {
+                if (d === "[") cls = true;
+                else if (d === "]") cls = false;
+                else if (d === "/" && !cls) break;
+            }
+            if (quote === "`" && d === "$" && code[j + 1] === "{") {
+                blank(i, j);
+                tpl.push(0);
+                return j + 2;
+            }
+            if (d === quote) break;
+            j++;
+        }
+        blank(i, Math.min(j, n));
+        return j + 1;
+    };
+    while (i < n) {
+        const c = code[i];
+        if (c === "/" && code[i + 1] === "/") {
+            const end = code.indexOf("\n", i);
+            blank(i, end < 0 ? n : end);
+            i = end < 0 ? n : end;
+            continue;
+        }
+        if (c === "/" && code[i + 1] === "*") {
+            const end = code.indexOf("*/", i + 2);
+            const stop = end < 0 ? n : end + 2;
+            blank(i, stop);
+            i = stop;
+            continue;
+        }
+        if (tpl.length && c === "}" && tpl[tpl.length - 1] === 0) {
+            // back in the template's text
+            tpl.pop();
+            i++;
+            i = string("`");
+            prev = "a";
+            continue;
+        }
+        if (tpl.length && c === "{") tpl[tpl.length - 1]++;
+        else if (tpl.length && c === "}") tpl[tpl.length - 1]--;
+        if (c === '"' || c === "'" || c === "`" || (c === "/" && (prev === "" || /[(,=:[!&|?{};+\-*%<>~^]/.test(prev)))) {
+            i++;
+            i = string(c);
+            prev = "a";
+            continue;
+        }
+        if (!/\s/.test(c)) prev = c;
+        i++;
+    }
+    return out.join("");
+}
+
+/** what a main-world onPage handler touches that only isolated-world code may */
+export interface MainWorldUse {
+    /** 0-based: which `wt.onPage(` call of the source it is (counts onDocument too) */
+    nth: number;
+    /** the stores it uses: the variable names (or `wt.pageStore` / `wt.globalStore`), by kind */
+    pageStore: string[];
+    globalStore: string[];
+    /** the onOverlay handles it uses */
+    overlay: string[];
+}
+
+/**
+ * Per `wt.onPage(` call, the stores (`wt.pageStore` / `wt.globalStore`)
+ * and overlay handles (`wt.onOverlay`) its arguments use — by the
+ * top-level variables they're bound to, or the calls themselves. Only
+ * calls that use any. A lightweight scan, not a parser: a local that
+ * shadows a store's name counts too.
+ */
+export function onPageUses(code: string): MainWorldUse[] {
+    const src = codeOnly(code);
+    const bound = new Map<string, "pageStore" | "globalStore" | "overlay">();
+    for (const m of src.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;]+)?=\s*wt\s*\.\s*(pageStore|globalStore|onOverlay)\b/g))
+        bound.set(m[1], m[2] === "onOverlay" ? "overlay" : (m[2] as "pageStore" | "globalStore"));
+    const out: MainWorldUse[] = [];
+    let nth = 0;
+    for (const m of src.matchAll(/(?<![\w$.])wt\s*\.\s*on(?:Page|Document)\s*(?:<[^()]*>\s*)?\(/g)) {
+        const from = m.index! + m[0].length;
+        let depth = 1;
+        let to = from;
+        while (to < src.length && depth) {
+            const c = src[to++];
+            if (c === "(" || c === "[" || c === "{") depth++;
+            else if (c === ")" || c === "]" || c === "}") depth--;
+        }
+        const args = src.slice(from, to - 1);
+        const use: MainWorldUse = { nth: nth++, pageStore: [], globalStore: [], overlay: [] };
+        for (const [name, kind] of bound) if (new RegExp(`(?<![\\w$.])${name.replace(/\$/g, "\\$")}(?![\\w$]|\\s*:(?!:))`).test(args)) use[kind].push(name);
+        for (const d of args.matchAll(/(?<![\w$.])wt\s*\.\s*(pageStore|globalStore)\b/g)) {
+            const kind = d[1] as "pageStore" | "globalStore";
+            if (!use[kind].includes(`wt.${kind}`)) use[kind].push(`wt.${kind}`);
+        }
+        if (use.pageStore.length || use.globalStore.length || use.overlay.length) out.push(use);
+    }
+    return out;
+}
+
+/**
+ * Warnings ("onPage #N: …", Problems view) for main-world onPage handlers
+ * that use a store or an overlay handle: there they throw (stores) or do
+ * nothing (overlay calls) — only isolated-world code may.
+ */
+export function mainWorldProblems(code: string, routes: RouteMeta[]): string[] {
+    if (!/\bwt\s*\.\s*(?:pageStore|globalStore|onOverlay)\b/.test(code)) return [];
+    const uses = onPageUses(code);
+    if (!uses.length) return [];
+    const fix = 'use onPage({ url, world: "isolated" }, …)';
+    const names = (n: string[]) => n.map((x) => `\`${x}\``).join(", ");
+    const out: string[] = [];
+    for (const r of routes) {
+        if (r.kind !== "onDocument" || pageWorld(r) !== "main") continue;
+        const u = uses.find((u) => u.nth === r.index);
+        if (!u) continue;
+        const at = `${routeLabel(r)}: `;
+        if (u.pageStore.length)
+            out.push(
+                `${at}your script also accesses pageStore (${names(u.pageStore)}) inside onPage, ${MAIN_WORLD_DISALLOWED} (the page could read and forge it). Changing the request strategy alone won't resolve those accesses. Switching to globalStore would lose per-page isolation and still wouldn't make a one-time rules callback track requests — ${fix}`
+            );
+        if (u.globalStore.length) out.push(`${at}your script also accesses globalStore (${names(u.globalStore)}) inside onPage, ${MAIN_WORLD_DISALLOWED} (the page could read and forge it) — ${fix}`);
+        if (u.overlay.length) out.push(`${at}accessing onOverlay (${names(u.overlay)}) inside onPage, ${MAIN_WORLD_DISALLOWED} (the page could call the overlay too) — ${fix}`);
     }
     return out;
 }

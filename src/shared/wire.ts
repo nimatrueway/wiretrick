@@ -121,6 +121,12 @@ export interface WireOps {
     // ---- MV3 isolated-world onPage code (L6: chrome.userScripts world ⇄ owner; L2 for the relay) ----
     /** L6: what script `s` runs in this frame's user-script world (refused unless it has isolated onPage code here) */
     "iso.load": { req: { url: string }; res: IsoInit };
+    /**
+     * L2 (MV2/Firefox, where the bridge runs isolated onPage code): let
+     * script `s`'s isolated code at `url` use its stores. Its store ops then
+     * go over L2 tagged `ISO_STORE_TAG + s` (the overlay's are tagged `s`).
+     */
+    "iso.stores": { req: { url: string }; res: {} };
     /** L6: this world's onPage code ran on its document (tags the document's Network row) */
     ran: { push: { api: "onPage" | "onDocument"; name: string } };
     /** L6: scripts changed: load again, re-run when the code hash moved */
@@ -151,7 +157,14 @@ export interface IsoInit {
     libs: ShippedLib[];
     /** the script has an overlay on this page (top frame) */
     overlay: boolean;
+    /** the script's stores now (its `wt.pageStore` copies: this page's), keyed like `store.init` */
+    stores: { [name: string]: StoreSnapshot };
+    /** the page the frame is part of (its top frame's document): the only one whose `wt.pageStore` copies it reaches */
+    page: string;
 }
+
+/** L2: the tag prefix of isolated onPage code's store ops (MV2/Firefox) */
+export const ISO_STORE_TAG = "iso\u0000";
 
 /** what an overlay frame needs to run its script */
 export interface OverlayInit {

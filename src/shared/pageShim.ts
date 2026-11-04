@@ -18,7 +18,7 @@ import { inertRemote, REMOTE_MAIN_WORLD } from "./remote";
 import { NOT_RUNNING, TOP_FRAME_ONLY, type Exposer } from "./rpc";
 import { parseParamValue, type ParamDef } from "./scriptDef";
 import { scriptEnv } from "./scriptEnv";
-import { STORE_RENAMED } from "./storeOps";
+import { STORE_RENAMED, claimStoreName, storePersist } from "./storeOps";
 
 export interface PageDocumentHandler {
     /** its RPC handle id (`"page:N"`) */
@@ -43,9 +43,16 @@ export interface PageShimOptions {
     overlay?: (h: string) => any;
     /** main world: a call into the overlay (rejected; its error has the caller's stack) */
     onMainWorldCall?: (e: Error) => void;
+    /** the isolated world: the script's store replicas (`wt.pageStore`: this page's copy); main world: never (the page could read and forge them) */
+    stores?: PageStores;
 }
 
-const NO_STORE = "wt.globalStore and wt.pageStore aren't available in page code — pass the data to an onPage function from the overlay instead";
+export interface PageStores {
+    store(name: string, initial: object, persist: boolean | string[]): object;
+    pageStore(name: string, initial: object): object;
+}
+
+export const NO_STORE = 'wt.globalStore and wt.pageStore aren\'t available in main-world page code (the page could read and forge them) — use them in onPage({ world: "isolated" }) code or the overlay';
 const fail = (): never => {
     throw new Error(NO_STORE);
 };
@@ -74,6 +81,9 @@ export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDocumentHa
         if (world === "main") return inertRemote(REMOTE_MAIN_WORLD, o.onMainWorldCall);
         return o.overlay ? o.overlay(h) : inertRemote(TOP_FRAME_ONLY);
     };
+    // the isolated world only: page code must never get a store
+    const stores = world === "isolated" ? o.stores : undefined;
+    const names = new Map<string, string>();
     const parsed = (key: string, def: ParamDef | undefined) => (def && typeof def === "object" ? parseParamValue(key, def, o.params[key]) : o.params[key]);
     const wt = {
         onRequest: inert,
@@ -83,9 +93,19 @@ export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDocumentHa
         onPage: onPage("onPage"),
         onDocument: onPage("onDocument"),
         onOverlay,
-        // declaring a store at top level is fine (that code runs here too); using it isn't
-        globalStore: () => noStore,
-        pageStore: () => noStore,
+        // without stores, declaring one at top level is fine (that code runs here too); using it isn't
+        globalStore: (name: string, initial: object, opts?: unknown) => {
+            if (!stores) return noStore;
+            claimStoreName(names, "wt.globalStore", name, initial);
+            names.set(name, "wt.globalStore");
+            return stores.store(name, initial, storePersist(name, opts));
+        },
+        pageStore: (name: string, initial: object) => {
+            if (!stores) return noStore;
+            claimStoreName(names, "wt.pageStore", name, initial);
+            names.set(name, "wt.pageStore");
+            return stores.pageStore(name, initial);
+        },
         store: () => {
             throw new Error(STORE_RENAMED);
         },

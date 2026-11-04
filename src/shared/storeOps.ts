@@ -3,7 +3,7 @@
  * replicas (every context running the script): applying ops, checking
  * paths and values, merging an `initial` into existing data.
  */
-import type { Json, StoreOp } from "./wire";
+import type { Json, StoreOp, StorePersist } from "./wire";
 
 /** a store's JSON size cap */
 export const STORE_MAX_BYTES = 1024 * 1024;
@@ -168,3 +168,22 @@ export function splitStoreKey(key: string): { name: string; page?: string } {
 }
 
 export const STORE_RENAMED = "wt.store was renamed: use wt.globalStore (one copy shared by every tab) or wt.pageStore (one copy per page)";
+
+/** `wt.globalStore`'s `persist` option, checked */
+export function storePersist(name: string, opts: unknown): StorePersist {
+    if (opts === undefined || opts === null) return true;
+    if (typeof opts !== "object") throw new TypeError(`wt.globalStore("${name}"): the third argument must be an options object`);
+    const p = (opts as { persist?: unknown }).persist;
+    if (p === undefined) return true;
+    if (typeof p === "boolean") return p;
+    if (Array.isArray(p) && p.every((k) => typeof k === "string")) return [...p];
+    throw new TypeError(`wt.globalStore("${name}"): persist must be true, false or a list of top-level field names`);
+}
+
+/** a store's name and initial value, checked; `names` (name → the API that took it) holds each name once per script */
+export function claimStoreName(names: Map<string, string>, api: string, name: unknown, initial: unknown): asserts name is string {
+    if (typeof name !== "string" || !name) throw new TypeError(`${api}: the first argument must be the store's name (a non-empty string)`);
+    const had = names.get(name);
+    if (had) throw new Error(`${api}("${name}"): this script already has a store named "${name}" (${had}) — a name may be used once per script (call ${api} at top level and share the result)`);
+    if (!initial || typeof initial !== "object" || Array.isArray(initial)) throw new TypeError(`${api}("${name}"): initial must be an object`);
+}

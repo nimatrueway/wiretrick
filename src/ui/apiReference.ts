@@ -247,7 +247,8 @@ wt.onRequest({ url: "https://api.example.com/*", strategy: "helper" }, (ctx) => 
 
 - read it before the handler's first await (after it, the handler no longer knows its page and it throws)
 - a navigation's own requests belong to the page being left; requests from no page get a throwaway copy of initial
-- not kept across browser restarts; not in onPage code or rules handlers
+- not kept across browser restarts; not in rules handlers
+- both stores: live in isolated-world onPage code (world: "isolated"), like the overlay; main-world onPage code can't use them (the page could read and forge them) — the Problems view warns, with a quick fix
 - wt.store was renamed wt.globalStore; calling it throws
 
 wt.fetch(url, init) — fetch for scripts. In handlers it runs in the background with the extension's host permissions (no CORS) and the browser's cookies; in an overlay it fetches as the page by default (from: "background" to switch). bypass: true keeps every script's handlers — this one's too — off the request, e.g. to get the real response a mock replaces:

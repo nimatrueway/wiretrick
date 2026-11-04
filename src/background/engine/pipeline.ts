@@ -21,7 +21,7 @@ import { loadPackages, packagesSnapshot, resolveVersion } from "./packageImports
 import { isUrlSpec, packageClosure } from "../../shared/packageImports";
 import { serveStore } from "./strategies/extensionStrategy";
 import { dlog, dlogLevel } from "../../shared/debugLog";
-import { isThenable, registrationProblems, toRunnableJs } from "../../shared/compile";
+import { isThenable, mainWorldProblems, registrationProblems, toRunnableJs } from "../../shared/compile";
 import "../../shared/transpile";
 import { log, noteRan, getScriptErrors, getScriptTypeErrors, getScriptRuleErrors, getScriptRouteWarnings, setScriptRouteWarnings, bodyObservedSince, bodySkipSince, noteBodySkip } from "./logs";
 import { bypassed } from "./bypass";
@@ -43,7 +43,7 @@ import { getTextTypes, setTextTypes } from "../../shared/bodyKind";
 import { packBytes, unpackBytes } from "../../shared/bytesPack";
 import type { RequestBody } from "../../shared/requestBody";
 import { pushBundleUpdate } from "./bridgePorts";
-import { installPages } from "./pages";
+import { installPages, pages, pagesReady } from "./pages";
 import { pushIsoUpdate, pushPreviewUpdate, revalidateOverlayLinks, setupOverlayLinks, type IsoRun, type OverlayRun } from "./overlayLinks";
 import { onUserScriptsStatus, syncUserScripts, userScriptsStatus, type IsoScript } from "../userScripts";
 import { USER_SCRIPTS_OFF, userScriptsProblem, type UserScriptsStatus } from "../../shared/userScriptsStatus";
@@ -260,6 +260,7 @@ export function createPipeline(
                     problems.push({ id: s.id, msg: `${p.api} #${p.nth + 1}: call wt.${p.api}() at the top level of the script, not inside a function, block or condition — the page and the overlay pair up handlers by the order they're registered in` });
             if (!s.meta.active) continue;
             const down: string[] = [];
+            for (const msg of mainWorldProblems(s.code, s.meta.routes || [])) problems.push({ id: s.id, msg });
             for (const r of s.meta.routes || []) {
                 // Chrome MV3: isolated onPage code needs chrome.userScripts (an error, see problems.ts)
                 if (userScripts !== "ok" && r.kind === "onDocument" && pageWorld(r) === "isolated") problems.push({ id: s.id, msg: userScriptsProblem(routeLabel(r), userScripts, chrome.runtime.id) });
@@ -680,6 +681,7 @@ export function createPipeline(
     setupOverlayLinks({
         overlayRuns: async (url) => (await hookBundle(url, true)).overlayRuns,
         isoRuns: async (url, top) => (await hookBundle(url, top)).isoRuns,
+        isoScripts: async (url, top) => new Set((await hookBundle(url, top)).bundle.isoHandlers.map((h) => h.scriptId)),
         userScriptsOff: async () => (await userScriptsStatus()) !== "ok",
         storageGet: (s, key) => scriptStorageGet(s, key),
         storageSet: async (s, key, value) => void (await scriptStorageSet(s, key, value)),
@@ -832,6 +834,15 @@ export function createPipeline(
             void (async () => {
                 const url = msg.url || "";
                 const { bundle } = await hookBundle(url, sender.frameId === 0 || sender.frameId === undefined);
+                // MV2: the bridge runs isolated onPage code — its stores' current state (this page's wt.pageStore copies), so they read synchronously
+                const tabId = sender.tab?.id;
+                if (!__MV3__ && bundle.isoHandlers.length && typeof tabId === "number" && tabId >= 0) {
+                    await pagesReady;
+                    // the top frame's page by its document (as its requests' and its bridge's): `current` may still be the pre-commit key
+                    const top = sender.frameId === 0 || sender.frameId === undefined;
+                    const isoPage = (top ? pages.forRequest({ tabId, frameId: 0, documentId: (sender as any).documentId }) : pages.current(tabId)) ?? "";
+                    Object.assign(bundle, { isoPage, isoStores: await storeOwner.init(bundle.isoHandlers.map((h) => h.scriptId), { page: isoPage }) });
+                }
                 dlogLevel("pipeline", "debug", "getHookBundle responding", { routes: bundle.count, dom: bundle.domHandlers.length, iso: bundle.isoHandlers.length, overlays: bundle.overlays.length, url });
                 sendResponse(bundle);
             })();

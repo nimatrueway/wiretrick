@@ -10,8 +10,10 @@
  * (`runPageScripts`) and runs the handlers at their `when`. Over L6 go the
  * script's Log lines and `wt.storage`, and — in the top frame — the calls
  * between this code and the script's overlay, which the owner relays
- * through the page's bridge (L2) to the overlay frame (L3). A save arrives
- * as `iso.update`: load again, re-run if the code changed.
+ * through the page's bridge (L2) to the overlay frame (L3). Its stores
+ * (`wt.globalStore`, this page's `wt.pageStore` copies) are replicas
+ * primed by `iso.load` and synced over L6. A save arrives as
+ * `iso.update`: load again, re-run if the code changed.
  */
 import { formatScriptError } from "../shared/scriptError";
 import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
@@ -21,6 +23,7 @@ import { makePageShim, domHandlersFor, scheduleDocument, firePageHandler, type P
 import { portEndpoint, type Endpoint, type IsoInit } from "../shared/wire";
 import { Exposer, RpcClient, isRpcCall, type RpcResult } from "../shared/rpc";
 import { routeMatches, type RouteMeta } from "../shared/route";
+import { ReplicaHub } from "../shared/storeReplica";
 
 (() => {
     const me = ((globalThis as any).__wtIsoQ as { s: string; routes: RouteMeta[] }[] | undefined)?.shift();
@@ -38,6 +41,10 @@ import { routeMatches, type RouteMeta } from "../shared/route";
     let timer: ReturnType<typeof setTimeout> | null = null;
     let codeHash: string | null = null;
     let tries = 0;
+
+    /** the script's store replicas (made when its code first uses one) */
+    let hub: ReplicaHub | null = null;
+    let page = "";
 
     const exposer = new Exposer();
     const client = new RpcClient((call) => {
@@ -62,8 +69,8 @@ import { routeMatches, type RouteMeta } from "../shared/route";
                 if (current === ep) current = null;
                 if (link === p) link = null;
                 client.disconnect("the link to the extension closed");
-                // reconnect while the first load is pending, and while an overlay may call
-                if ((eager || (codeHash === null && ++tries < 10)) && !stopped && !timer)
+                // reconnect while the first load is pending, while an overlay may call, and while stores are in use
+                if ((eager || hub || (codeHash === null && ++tries < 10)) && !stopped && !timer)
                     timer = setTimeout(() => {
                         timer = null;
                         linkUp().catch(() => {});
@@ -72,6 +79,8 @@ import { routeMatches, type RouteMeta } from "../shared/route";
             });
             await load(ep);
             current = ep;
+            // after load: ops need the link bound to the script
+            hub?.attach(ep);
             setTimeout(() => {
                 if (current === ep) backoff = 50;
             }, 2000);
@@ -100,7 +109,21 @@ import { routeMatches, type RouteMeta } from "../shared/route";
             throw e;
         }
         eager = top && init.overlay;
+        page = init.page;
+        hub?.prime({ [s]: init.stores });
+        primed = init.stores;
         if (init.codeHash !== codeHash) run(init, codeHash !== null);
+    }
+
+    let primed: IsoInit["stores"] = {};
+    function stores(): ReplicaHub {
+        if (hub) return hub;
+        const h = (hub = new ReplicaHub({ ctx: "isolated", log: (_s, msg, level) => log(level, msg) }));
+        h.prime({ [s]: primed });
+        // the first use is while the code runs (inside `load`): attach once the link is bound
+        if (current) h.attach(current);
+        else linkUp().catch(() => {});
+        return h;
     }
 
     function log(level: ScriptLogLevel, msg: string): void {
@@ -131,6 +154,7 @@ import { routeMatches, type RouteMeta } from "../shared/route";
             makePageShim({
                 params,
                 world: "isolated",
+                stores: { store: (n, initial, persist) => stores().store(s, n, initial, persist), pageStore: (n, initial) => stores().pageStore(s, n, initial, page) },
                 exposer: mine ? exposer : undefined,
                 overlay: mine && top ? (h) => client.remote(h) : undefined,
                 log: (...args: any[]) => log("info", scriptLogLine(name, "wt.log", formatLogArgs(args))),

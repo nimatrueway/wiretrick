@@ -969,7 +969,9 @@ declare const wt: {
      * change it like a plain object; `import { subscribe } from "valtio"`
      * to watch it. `name` is its key (one store per name per script, shared
      * with {@link pageStore}); values must be JSON (at most 1 MB). Call it
-     * at top level.
+     * at top level. Isolated-world `onPage` code (`world: "isolated"`) gets
+     * a live copy too; main-world `onPage` code can't use it (the page
+     * could read and forge it).
      *
      * @example
      * const state = wt.globalStore("state", { mocking: true, hits: 0 });
@@ -993,9 +995,11 @@ declare const wt: {
      * synchronous part: after an `await` the handler no longer knows its
      * page, so it throws — read what you need first, or keep a nested
      * object. Requests that aren't from a page (service workers, other
-     * apps through the helper) see a throwaway copy of `initial`. Not
-     * available in `onPage` code or `rules` handlers (their rules serve
-     * every page); kept until the page ends (not across browser restarts).
+     * apps through the helper) see a throwaway copy of `initial`.
+     * Isolated-world `onPage` code (`world: "isolated"`) sees its page's
+     * copy; not available in main-world `onPage` code (the page could
+     * read and forge it) or `rules` handlers (their rules serve every
+     * page); kept until the page ends (not across browser restarts).
      *
      * @example
      * const page = wt.pageStore("page", { staging: false });

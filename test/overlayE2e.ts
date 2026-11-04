@@ -53,7 +53,7 @@ window.addEventListener("keydown", (e) => { if (e.altKey && e.code === "KeyP") e
         );
         return true;
     }
-    if (url.pathname === "/ov-two") {
+    if (url.pathname === "/ov-two" || url.pathname === "/ov-isost") {
         res.writeHead(200, { "content-type": "text/html" });
         res.end(PAGE(""));
         return true;
@@ -620,6 +620,90 @@ export async function checkPageStores(ctx: any, mgr: any, origin: string, check:
     await a.close();
     await b.close();
     await send({ type: "deleteScript", id: "s_two" });
+}
+
+const isoStoreCode = (origin: string) => `const g = wt.globalStore("isog", { n: 0 }, { persist: false });
+const ps = wt.pageStore("isops", { hits: 0 });
+
+wt.replaceResponse({ url: "${origin}/ov-isops", strategy: "page" }, () => String(++ps.hits));
+
+wt.onOverlay("${origin}/ov-isost*", () => {
+    const out = document.body.appendChild(document.createElement("output"));
+    out.id = "isost-ov";
+    out.value = "overlay";
+    (window as any).readG = () => g.n;
+    (window as any).bump = () => ++g.n;
+});
+
+wt.onPage({ url: "${origin}/ov-isost*", world: "isolated" }, () => {
+    const out = document.body.appendChild(document.createElement("output"));
+    out.id = "isost";
+    const show = () => (out.value = JSON.stringify({ g: g.n, ps: ps.hits }));
+    show();
+    setInterval(show, 50);
+    const add = document.body.appendChild(document.createElement("button"));
+    add.id = "isost-add";
+    add.onclick = () => {
+        g.n += 10;
+        ps.hits += 100;
+    };
+});
+
+wt.onPage("${origin}/ov-isost*", () => {
+    try {
+        document.body.dataset.mainStore = "read " + ps.hits;
+    } catch (e) {
+        document.body.dataset.mainStore = (e as Error).message;
+    }
+});
+`;
+
+/**
+ * Stores in isolated-world onPage code: primed, live both ways with the
+ * overlay and the background, this page's wt.pageStore copy only; main-world
+ * onPage code can't use them.
+ */
+export async function checkIsoStores(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
+    const t = (s: string) => `isolated stores${opts.label ?? ""}: ${s}`;
+    const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
+    const saved = await send({ type: "saveScript", id: "s_isost", code: isoStoreCode(origin), name: "iso stores" });
+    check(t("the script saves"), !saved?.error, saved?.error);
+    await mgr.waitForTimeout(800);
+    const open = async (q: string) => {
+        const p = await ctx.newPage();
+        await p.goto(`${origin}/ov-isost?t=${q}`, { waitUntil: "load", timeout: 15000 });
+        return p;
+    };
+    const read = (p: any) => p.evaluate(() => JSON.parse((document.getElementById("isost") as HTMLOutputElement | null)?.value || "null")).catch(() => null);
+    const until = (p: any, ok: (v: any) => boolean) => waitFor<any>(() => read(p), (v) => !!v && ok(v), 8000);
+    const hit = (p: any): Promise<string> => p.evaluate(() => fetch("/ov-isops").then((r) => r.text())).catch((e: any) => String(e));
+
+    const a = await open("A");
+    const v0 = await until(a, () => true);
+    check(t("isolated code reads its stores (primed)"), v0?.ps === 0 && typeof v0?.g === "number", JSON.stringify(v0));
+    const g0 = v0?.g ?? 0;
+    const mainErr = await waitFor<string>(() => a.evaluate(() => document.body.dataset.mainStore || ""), (v) => !!v, 8000);
+    check(t("main-world onPage code can't use them, and is told to use the isolated world"), /main-world page code/.test(mainErr) && mainErr.includes('world: "isolated"'), mainErr);
+    const first = await hit(a);
+    const v1 = await until(a, (v) => v.ps === 1);
+    check(t("a background handler's write to the page's copy shows up live"), first === "1" && v1?.ps === 1, JSON.stringify({ first, v1 }));
+    await a.evaluate(() => (document.getElementById("isost-add") as HTMLButtonElement).click());
+    const f = await overlayFrame(a, "#isost-ov");
+    const seenByOverlay = f ? await waitFor<any>(() => f.evaluate(() => (window as any).readG()).catch(() => null), (n) => n === g0 + 10, 8000) : null;
+    const next = await hit(a);
+    check(t("isolated code's writes reach the overlay and the background"), seenByOverlay === g0 + 10 && next === "102", JSON.stringify({ seenByOverlay, next }));
+    await f?.evaluate(() => (window as any).bump()).catch(() => null);
+    const v2 = await until(a, (v) => v.g === g0 + 11);
+    check(t("the overlay's writes show up live"), v2?.g === g0 + 11, JSON.stringify(v2));
+    const b = await open("B");
+    const vb = await until(b, () => true);
+    check(t("another tab: the same global store, its own page copy"), vb?.g === g0 + 11 && vb?.ps === 0, JSON.stringify(vb));
+    await a.reload({ waitUntil: "load", timeout: 15000 });
+    const va = await until(a, () => true);
+    check(t("a reload starts the page's copy over"), va?.ps === 0 && va?.g === g0 + 11, JSON.stringify(va));
+    await a.close();
+    await b.close();
+    await send({ type: "deleteScript", id: "s_isost" });
 }
 
 /**

@@ -22,7 +22,7 @@ vi.mock("../src/background/engine/bypass", () => ({
 import { serveLink, serveIsoLink, pushIsoUpdate, confirmNonce, setupOverlayLinks, revalidateOverlayLinks, resetOverlayLinks, type IsoRun, type OverlayRun } from "../src/background/engine/overlayLinks";
 import { NOT_RUNNING, type RpcCall, type RpcResult } from "../src/shared/rpc";
 import { USER_SCRIPTS_OFF } from "../src/shared/userScriptsStatus";
-import { endpointPair, type Endpoint } from "../src/shared/wire";
+import { endpointPair, ISO_STORE_TAG, type Endpoint } from "../src/shared/wire";
 
 const run = (name: string): OverlayRun => ({ name, code: "code", codeHash: "h", routes: [], params: {}, libs: [], react: false });
 let runs: Record<string, string[]> = {};
@@ -66,7 +66,7 @@ describe("overlay links (L2 per-script grants)", () => {
 
     it("store, fetch and bypass ops are refused without a grant", async () => {
         const b = bridge();
-        await expect(b.call("store.sub", { name: "n" } as any, "s1")).rejects.toThrow(/no overlay here/);
+        await expect(b.call("store.sub", { name: "n" } as any, "s1")).rejects.toThrow(/no overlay here|stores aren.t reachable/);
         await expect(b.call("fetch", { request: { method: "GET", url: "https://x/" } } as any, "s1")).rejects.toThrow(/no overlay here/);
         await expect(b.call("bypass.add", { method: "GET", url: "https://x/" } as any, "s1")).rejects.toThrow(/no overlay here/);
         b.push("store.set", { name: "n", ops: [] } as any, "s1");
@@ -89,6 +89,22 @@ describe("overlay links (L2 per-script grants)", () => {
         expect(bypasses[0]).toMatchObject({ method: "GET", url: "https://x/", tabId: 11, scriptId: "s1", scriptName: "Script s1" });
         expect(rules).toEqual([["GET", "https://x/", 11]]);
         await expect(b.call("bypass.add", { method: 1 } as any, "s1")).rejects.toThrow(/malformed/);
+    });
+
+    it("MV2: isolated onPage code's stores (tagged ops) need an iso.stores grant for a script with isolated code here", async () => {
+        const iso = new Set(["s2"]);
+        setupOverlayLinks({ overlayRuns: async () => new Map(), isoScripts: async (url) => (url === PAGE ? iso : new Set()) });
+        const b = bridge();
+        const tag = ISO_STORE_TAG + "s2";
+        await expect(b.call("store.sub", { name: "n" } as any, tag)).rejects.toThrow(/aren.t reachable/);
+        await expect(b.call("iso.stores", { url: "https://evil.example/" }, "s2")).rejects.toThrow(/refused/);
+        await expect(b.call("iso.stores", { url: PAGE }, "s1")).rejects.toThrow(/no isolated onPage code/);
+        await b.call("iso.stores", { url: PAGE }, "s2");
+        expect(await b.call("store.sub", { name: "n" } as any, tag)).toEqual({ sub: { name: "n" }, s: "s2" });
+        await expect(b.call("store.sub", { name: "n", page: "another" } as any, tag)).rejects.toThrow(/page/);
+        // the grant isn't the overlay's
+        await expect(b.call("store.sub", { name: "n" } as any, "s2")).rejects.toThrow(/aren.t reachable/);
+        expect(attached).toEqual([{ all: false }]);
     });
 
     it("overlay.closed and a closed link drop the grant", async () => {
@@ -181,6 +197,21 @@ describe("the L6 ⇄ L2 relay (MV3 isolated world ⇄ overlay)", () => {
         l.push("log", { level: "info", msg: "not mine" }, "s2");
         await tick();
         expect(logs).toEqual([{ tabId: 4, s: "s1", level: "info", msg: "hi", ctx: "isolated › a.example" }]);
+    });
+
+    it("stores: iso.load hands over the script's stores and its frame's page; store ops need the bound link and that page", async () => {
+        attached.length = 0;
+        const l = iso();
+        await expect(l.call("store.sub", { name: "n" } as any, "s1")).rejects.toThrow(/aren.t reachable/);
+        const init = await l.call("iso.load", { url: PAGE }, "s1");
+        expect(init.stores).toEqual({ n: { value: 1, persist: false } });
+        expect(init.page).toMatch(/^4\./);
+        expect(await l.call("store.sub", { name: "n" } as any, "s1")).toEqual({ sub: { name: "n" }, s: "s1" });
+        await expect(l.call("store.sub", { name: "n", page: "4.other" } as any, "s1")).rejects.toThrow(/page/);
+        await expect(l.call("store.sub", { name: "n" } as any, "s2")).rejects.toThrow(/aren.t reachable/);
+        expect(attached).toEqual([{ all: false }]);
+        // a subframe's code shares its top page's copies
+        expect((await iso({ frameId: 3 }).call("iso.load", { url: PAGE }, "s1")).page).toBe(init.page);
     });
 
     it("an unbound link can't log, store or call", async () => {

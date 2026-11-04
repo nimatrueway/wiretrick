@@ -3,7 +3,7 @@
 // what page code gets for built-in imports.
 import { describe, it, expect } from "vitest";
 import "../src/shared/transpile";
-import { compileScript, registrationProblems, toRunnableJs } from "../src/shared/compile";
+import { compileScript, mainWorldProblems, onPageUses, registrationProblems, toRunnableJs } from "../src/shared/compile";
 import { jsxImportSource, usesJsx } from "../src/shared/builtinSpecs";
 import { importSpecs, makeLibRequire } from "../src/shared/scriptImports";
 import { tsconfigText } from "../src/shared/generatedFiles";
@@ -60,6 +60,45 @@ describe("registration check (wt.onPage / wt.onOverlay at the top level)", () =>
 
     it("isn't fooled by regex literals or division", () => {
         expect(registrationProblems(`const r = /{/;\nconst d = a / b;\nwt.onPage("*", f);`)).toEqual([]);
+    });
+});
+
+describe("main-world onPage handlers using stores or overlay handles (route warnings)", () => {
+    const code = [
+        `const g = wt.globalStore("g", { n: 0 });`,
+        `const ps: { hits: number } = wt.pageStore("ps", { hits: 0 });`,
+        `const ov = wt.onOverlay("*", () => ({ ping: () => 1 }));`,
+        `wt.onPage("*", () => { document.title = String(ps.hits); });`, // #1 main: pageStore
+        `wt.onPage({ url: "*", world: "isolated" }, () => { g.n++; ps.hits++; ov.ping(); });`, // #2 isolated: fine
+        `wt.onPage("*", async () => { await ov.ping(); g.n = wt.pageStore("x", {}).y; });`, // #3 main: all three
+        `wt.onPage("*", () => { const o = { g: 1, ps: 2 }; console.log("g ps ov", o.g, /ov/); /* ps */ });`, // #4 keys, strings, comments: nothing
+        "wt.onDocument(\"*\", () => { document.title = `${g.n}`; });", // #5 template code counts
+    ].join("\n");
+
+    it("finds, per onPage call, the stores and overlay handles its handler uses", () => {
+        expect(onPageUses(code)).toEqual([
+            { nth: 0, pageStore: ["ps"], globalStore: [], overlay: [] },
+            { nth: 1, pageStore: ["ps"], globalStore: ["g"], overlay: ["ov"] },
+            { nth: 2, pageStore: ["wt.pageStore"], globalStore: ["g"], overlay: ["ov"] },
+            { nth: 4, pageStore: [], globalStore: ["g"], overlay: [] },
+        ]);
+    });
+
+    it("warns for main-world handlers only, in the API's words, with the isolated-world fix", () => {
+        const c = compileScript(code);
+        expect(c.error).toBeNull();
+        const routes = c.handlers.onDocument.map((h) => h.route);
+        const w = mainWorldProblems(code, routes);
+        expect(w.map((m) => m.slice(0, m.indexOf(":")))).toEqual(["onPage #1", "onPage #3", "onPage #3", "onPage #3", "onDocument #5"]);
+        expect(w[0]).toContain("your script also accesses pageStore (`ps`) inside onPage, which the API explicitly disallows in the main world");
+        expect(w[0]).toContain("Changing the request strategy alone won't resolve those accesses. Switching to globalStore would lose per-page isolation and still wouldn't make a one-time rules callback track requests");
+        expect(w[2]).toContain("your script also accesses globalStore (`g`) inside onPage, which the API explicitly disallows in the main world");
+        expect(w[3]).toContain("accessing onOverlay (`ov`) inside onPage, which the API explicitly disallows in the main world");
+        for (const m of w) expect(m).toContain('world: "isolated"');
+    });
+
+    it("says nothing for scripts without stores or overlays", () => {
+        expect(mainWorldProblems(`wt.onPage("*", () => {});`, compileScript(`wt.onPage("*", () => {});`).handlers.onDocument.map((h) => h.route))).toEqual([]);
     });
 });
 

@@ -27,7 +27,8 @@ import { scriptFunction } from "../shared/scriptFn";
 import { makeLibRequire, type ShippedLib } from "../shared/scriptImports";
 import { makePageShim, domHandlersFor, scheduleDocument, firePageHandler, type PageDocumentHandler } from "../shared/pageShim";
 import { packBytes, unpackBytes } from "../shared/bytesPack";
-import { messagePortEndpoint, portEndpoint, type Endpoint, type ReqOf, type ReqOps, type ResOf } from "../shared/wire";
+import { endpointPair, messagePortEndpoint, portEndpoint, ISO_STORE_TAG, type Endpoint, type ReqOf, type ReqOps, type ResOf } from "../shared/wire";
+import { ReplicaHub, type StoreSnapshots } from "../shared/storeReplica";
 import { Exposer, RpcClient, isRpcCall, isRpcResult, NOT_RUNNING, RPC_QUEUE_MAX, RPC_TIMEOUT_MS, type RpcCall, type RpcResult } from "../shared/rpc";
 import type { DocumentWhen, RouteMeta } from "../shared/route";
 import { clipPathFor, normalizeRects } from "../shared/overlayRects";
@@ -237,6 +238,11 @@ import type { RanApi } from "../shared/netTypes";
             return;
         }
         const iso: DocumentHandler[] = resp.isoHandlers || [];
+        if (resp.isoStores) {
+            isoPrimed = resp.isoStores;
+            isoPage = typeof resp.isoPage === "string" ? resp.isoPage : "";
+            isoHub?.prime(isoPrimed);
+        }
         if (isoFired && !hot) return;
         isoFired = true;
         runPageScripts(iso, resp.isoLibs || [], "isolated", hot);
@@ -250,6 +256,58 @@ import type { RanApi } from "../shared/netTypes";
     const isoExposers = new Map<string, Exposer>();
     const fallbackExposers = new Map<string, Exposer>();
 
+    // ---- isolated onPage code's stores (MV2: it runs here) ----
+    //
+    // Replicas, primed by the bundle (`isoStores`, this page's wt.pageStore
+    // copies). Their ops go over L2 tagged `ISO_STORE_TAG + s`, once the
+    // background granted the script (`iso.stores`) on that link. Main-world
+    // code (and its CSP fallback here) never gets a store.
+    let isoHub: ReplicaHub | null = null;
+    /** the hub's side of the relay to L2 */
+    let isoOut: Endpoint | null = null;
+    let isoPrimed: StoreSnapshots = {};
+    let isoPage = "";
+    /** per script: L2 granted (null: refused), for the current L2 link */
+    let isoGrants = new Map<string, Promise<Endpoint | null>>();
+    function isoGranted(s: string): Promise<Endpoint | null> {
+        let p = isoGrants.get(s);
+        if (!p) {
+            const grants = isoGrants;
+            p = l2up("iso.stores").then(
+                (ep) => ep.call("iso.stores", { url: location.href }, s).then(() => ep),
+                (e: any) => {
+                    if (grants.get(s) === p) grants.delete(s);
+                    throw e;
+                }
+            );
+            p = p.catch((e: any) => {
+                if (e?.name === "DisconnectedError") {
+                    if (grants.get(s) === p) grants.delete(s);
+                } else dlog("warn", `isolated onPage stores of ${s}: refused: ${e?.message || e}`);
+                return null;
+            });
+            grants.set(s, p);
+        }
+        return p;
+    }
+    function isoStores(): ReplicaHub {
+        if (isoHub) return isoHub;
+        const [hubSide, out] = endpointPair();
+        isoOut = out;
+        // in order: each op waits for its script's grant
+        out.on("store.declare", (a, s) => s !== undefined && void isoGranted(s).then((ep) => ep && !ep.closed && ep.push("store.declare", a, ISO_STORE_TAG + s)));
+        out.on("store.set", (a, s) => s !== undefined && void isoGranted(s).then((ep) => ep && !ep.closed && ep.push("store.set", a, ISO_STORE_TAG + s)));
+        out.handle("store.sub", async (a, s) => {
+            const ep = s === undefined ? null : await isoGranted(s);
+            if (!ep) throw Object.assign(new Error("store.sub: no link to the extension"), { name: "DisconnectedError" });
+            return ep.call("store.sub", a, ISO_STORE_TAG + s);
+        });
+        isoHub = new ReplicaHub({ ctx: "isolated", log: (s, msg, level) => scriptLog(s, level, msg, "isolated") });
+        isoHub.prime(isoPrimed);
+        isoHub.attach(hubSide);
+        return isoHub;
+    }
+
     /** scripts whose main-world fallback code already reported calling the overlay */
     const mainWorldCallers = new Set<string | null>();
 
@@ -261,11 +319,16 @@ import type { RanApi } from "../shared/netTypes";
         // the main-world fallback is still page code
         const ctx: ScriptContext = world === "isolated" ? "isolated" : "page";
         for (const id of [...exposers.keys()]) if (!handlers.some((h) => h.scriptId === id)) exposers.delete(id);
-        const shimFor = (scriptId: string | null, name: string, params: Record<string, any>, exposer?: Exposer) =>
+        const shimFor = (scriptId: string | null, name: string, params: Record<string, any>, exposer?: Exposer, storesOf?: string) =>
             makePageShim({
                 params,
                 world,
                 exposer,
+                // isolated code only (the shim ignores them for the main-world fallback)
+                stores:
+                    world === "isolated" && storesOf
+                        ? { store: (n, initial, persist) => isoStores().store(storesOf, n, initial, persist), pageStore: (n, initial) => isoStores().pageStore(storesOf, n, initial, isoPage) }
+                        : undefined,
                 // isolated code in the top frame may call its overlay; elsewhere the handle explains why not
                 overlay: world === "isolated" && scriptId && window === top ? (h) => overlayClient(scriptId).remote(h) : undefined,
                 // the main-world fallback reports a call into the overlay like the hook does (once per script)
@@ -291,10 +354,10 @@ import type { RanApi } from "../shared/netTypes";
             try {
                 // page-side require over the shipped library sources and data files
                 const requireFrom = makeLibRequire(libSources, (lib, require, moduleObj) =>
-                    scriptFunction(lib.src!)(shimFor(null, lib.name, lib.params || {}).wt, consoleProxy, require, moduleObj, moduleObj.exports)
+                    scriptFunction(lib.src!)(shimFor(null, lib.name, lib.params || {}, undefined, h.scriptId).wt, consoleProxy, require, moduleObj, moduleObj.exports)
                 );
                 const moduleObj = { exports: {} as any };
-                const shim = shimFor(h.scriptId, h.name, h.params || {}, exposer);
+                const shim = shimFor(h.scriptId, h.name, h.params || {}, exposer, h.scriptId);
                 scriptFunction(h.src)(shim.wt, consoleProxy, requireFrom(h.name), moduleObj, moduleObj.exports);
                 dom = shim.dom;
             } catch (e: any) {
@@ -360,9 +423,13 @@ import type { RanApi } from "../shared/netTypes";
         l2 = ep;
         ep.on("bundle.update", () => guard(() => onBundleUpdate()));
         // an overlay's store updates (the background only sends those of scripts with an overlay here)
-        ep.on("store.patch", (a, s) => s !== undefined && overlays.get(s)?.ep?.push("store.patch", a, s));
-        ep.on("store.reject", (a, s) => s !== undefined && overlays.get(s)?.ep?.push("store.reject", a, s));
-        ep.on("store.drop", (a, s) => s !== undefined && overlays.get(s)?.ep?.push("store.drop", a, s));
+        // (and isolated onPage code's, tagged ISO_STORE_TAG + s)
+        for (const op of ["store.patch", "store.reject", "store.drop"] as const)
+            ep.on(op, (a: any, s) => {
+                if (s === undefined) return;
+                if (s.startsWith(ISO_STORE_TAG)) isoOut?.push(op, a, s.slice(ISO_STORE_TAG.length));
+                else overlays.get(s)?.ep?.push(op, a, s);
+            });
         // MV3: the overlay ⇄ isolated-world relay (the background checks tab, frame and script)
         ep.on("iso.result", (r, s) => {
             const p = isRpcResult(r) ? isoPending.get(r.cid) : undefined;
@@ -382,6 +449,9 @@ import type { RanApi } from "../shared/netTypes";
                         (e: any) => dlog("warn", `overlay ${o.info.name}: no longer granted: ${e?.message || e}`)
                     );
         for (const w of l2Waiters.splice(0)) w();
+        // isolated code's replicas re-grant (on first use) and re-subscribe
+        isoGrants = new Map();
+        isoHub?.reconnect();
         ep.onClose(() => {
             if (l2 === ep) l2 = null;
             for (const [cid, p] of [...isoPending])
@@ -390,7 +460,7 @@ import type { RanApi } from "../shared/netTypes";
                     clearTimeout(p.timer);
                     p.reply({ cid, ok: false, error: { name: "DisconnectedError", message: "the link to the extension dropped" } });
                 }
-            if (dead || !l2Holders || l2Timer) return;
+            if (dead || (!l2Holders && !isoHub) || l2Timer) return;
             l2Timer = setTimeout(() => {
                 l2Timer = null;
                 openPort();

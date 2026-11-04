@@ -3,7 +3,9 @@ import { collectProblems, extensionsLink, type ProblemMarker, type ProblemScript
 import { addUiPort, log } from "../src/background/engine/logs";
 import { appendLog, shownLines } from "../src/ui/state/log";
 import { contextTag } from "../src/shared/scriptLog";
-import { inertRemote, REMOTE_MAIN_WORLD } from "../src/shared/remote";
+import { inertRemote, MAIN_WORLD_DISALLOWED, REMOTE_MAIN_WORLD } from "../src/shared/remote";
+import "../src/shared/transpile";
+import { compileScript, mainWorldProblems } from "../src/shared/compile";
 import { userScriptsProblem } from "../src/shared/userScriptsStatus";
 import { isolatedRouteEdit } from "../src/ui/isolatedFix";
 
@@ -80,5 +82,17 @@ describe("main-world overlay.fn()", () => {
         expect(isolatedRouteEdit(`x.overlay.pick()`, 2)).toBeNull();
         expect(isolatedRouteEdit(`wt.onPage({ url: "https://a/*", world: w }, (x) => x.overlay.pick());`, 50)).toBeNull();
         expect(isolatedRouteEdit(`wt.onPage("https://a/*`, 20)).toBeNull();
+    });
+
+    it("a main-world store/overlay route warning points at its registration line, and the fix applies from the marker's end", () => {
+        const code = `const ps = wt.pageStore("ps", { n: 0 });\nwt.onPage("https://a/*", () => {\n    ps.n++;\n});`;
+        const msg = mainWorldProblems(code, compileScript(code).handlers.onDocument.map((h) => h.route))[0];
+        expect(msg).toContain(MAIN_WORLD_DISALLOWED);
+        const [g] = collectProblems([script("a", { code, routeWarnings: [msg], routes: compileScript(code).handlers.onDocument.map((h) => h.route) })], none);
+        const p = g.problems[0] as any;
+        expect(p.line).toBe(2);
+        const lines = code.split("\n");
+        const end = lines.slice(0, p.endLine - 1).reduce((n, l) => n + l.length + 1, 0) + p.endColumn - 1;
+        expect(fix(code, end)).toBe(`const ps = wt.pageStore("ps", { n: 0 });\nwt.onPage({ url: "https://a/*", world: "isolated" }, () => {\n    ps.n++;\n});`);
     });
 });
