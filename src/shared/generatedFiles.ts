@@ -1,11 +1,16 @@
 /**
  * Support files folder sync keeps in the scripts folder for VS Code:
  * wt-api.d.ts (typings), tsconfig.json and settings.schema.json, plus the
- * package imports' typings under .wiretrick/types/. Wiretrick owns them:
+ * package imports' and the built-in modules' (valtio, React) typings under
+ * .wiretrick/types/. Wiretrick owns them:
  * they are rewritten whenever sync starts (every browser start and
  * extension update) if their content differs, so edits don't stick.
  */
+import { builtinPaths } from "./builtinSpecs";
 import { packagePaths, TYPINGS_ROOT } from "./packageImports";
+
+/** the built-in modules' typings in the scripts folder (lib/builtin-types.json keys go under it) */
+export const BUILTIN_TYPINGS_ROOT = `${TYPINGS_ROOT}/builtin`;
 
 export const API_DTS_FILE = "wt-api.d.ts";
 export const TSCONFIG_FILE = "tsconfig.json";
@@ -26,16 +31,16 @@ export function tsconfigText(): string {
             module: "esnext",
             moduleResolution: "bundler",
             allowImportingTsExtensions: true,
-            allowNonTsExtensions: true,
             // `import x from "./mock/data.json"` (data files)
             resolveJsonModule: true,
             // .tsx scripts: the automatic runtime, the built-in React by default
             jsx: "react-jsx",
             noEmit: true,
             // package imports (`https://unpkg.com/x@1.2.3`) → their downloaded typings
-            paths: packagePaths(`./${TYPINGS_ROOT}`),
+            // and the built-ins (`valtio`, `react`, `react-dom/client`…) → the extension's typings of them
+            paths: { ...packagePaths(`./${TYPINGS_ROOT}`), ...builtinPaths(`./${BUILTIN_TYPINGS_ROOT}`) },
         },
-        include: ["**/*.ts"],
+        include: ["**/*.ts", "**/*.tsx"],
     };
     return `// ${GENERATED_NOTE}\n${JSON.stringify(config, null, 2)}\n`;
 }

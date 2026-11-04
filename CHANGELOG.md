@@ -7,6 +7,10 @@ its section below.
 
 ## [Unreleased]
 
+### Fixed
+
+- In the synced folder, VS Code and `tsc` couldn't find `valtio`, `react` or `react-dom` ("Cannot find module"): their typings are now written to `.wiretrick/types/builtin/` and mapped in the generated `tsconfig.json`, which also covers `.tsx` files and no longer sets an option `tsc` rejects.
+
 ## [0.11.1] - 2026-11-04
 
 ### Added

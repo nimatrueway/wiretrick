@@ -169,6 +169,26 @@ describe("folder sync: folders and data files", () => {
         await sync.stop();
     });
 
+    it("writes the built-ins' typings (valtio, React) under .wiretrick/types/builtin/ for external editors", async () => {
+        const rt = (globalThis as any).chrome.runtime;
+        rt.getURL = (p: string) => `chrome-extension://t/${p}`;
+        vi.stubGlobal("fetch", async (url: string) => {
+            expect(url).toBe("chrome-extension://t/lib/builtin-types.json");
+            return new Response(JSON.stringify({ "valtio/esm/index.d.mts": "export declare const v: 1;", "@types/react/index.d.ts": "export = React;" }));
+        });
+        try {
+            const sync = await setup();
+            expect(read(".wiretrick/types/builtin/valtio/esm/index.d.mts")).toBe("export declare const v: 1;");
+            expect(read(".wiretrick/types/builtin/@types/react/index.d.ts")).toBe("export = React;");
+            // not scripts
+            expect((await scripts()).sort()).toEqual(["main", "mock/helpers"]);
+            await sync.stop();
+        } finally {
+            delete rt.getURL;
+            vi.unstubAllGlobals();
+        }
+    });
+
     it("an edited data file on disk recompiles its importers; invalid JSON is their compile error", async () => {
         const sync = await setup();
         put("mock/rate-limits.json", '{ "max": 9 }');

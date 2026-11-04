@@ -8,6 +8,19 @@ export const REACT_BUILTINS = ["react", "react-dom", "react-dom/client", "react/
 export const VALTIO_BUILTINS = ["valtio", "valtio/vanilla", "valtio/utils", "valtio/vanilla/utils", "valtio/react", "valtio/react/utils"] as const;
 const ALL = new Set<string>([...REACT_BUILTINS, ...VALTIO_BUILTINS]);
 
+/** where the built-ins' typings (lib/builtin-types.json, keyed like node_modules) go under `root`, by tsconfig `paths` */
+export function builtinPaths(root: string): Record<string, string[]> {
+    return {
+        valtio: [`${root}/valtio/esm/index.d.mts`],
+        "valtio/*": [`${root}/valtio/esm/*.d.mts`],
+        react: [`${root}/@types/react/index.d.ts`],
+        "react/*": [`${root}/@types/react/*.d.ts`],
+        "react-dom": [`${root}/@types/react-dom/index.d.ts`],
+        "react-dom/*": [`${root}/@types/react-dom/*.d.ts`],
+        csstype: [`${root}/csstype/index.d.ts`],
+    };
+}
+
 const ESM_SH = /^https:\/\/esm\.sh\/(?:v\d+\/)?(react|react-dom|valtio)(?:@[^/?#]*)?((?:\/[^?#]*)?)(?:[?#].*)?$/;
 
 /** the built-in a specifier names — bare (`valtio/react`) or an esm.sh URL of any version — or null */

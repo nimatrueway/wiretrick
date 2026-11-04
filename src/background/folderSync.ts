@@ -34,7 +34,7 @@ import { getSettingsText, applySettingsText, rememberSettingsText, currentSettin
 import { SETTINGS_FILE, SCHEMA_FILE } from "../shared/settingsYaml";
 import { renameSettingsSection } from "../shared/settingsYamlPatch";
 import { settingsSchemaJson } from "../shared/settingsSchema";
-import { API_DTS_FILE, TSCONFIG_FILE, apiDtsText, tsconfigText } from "../shared/generatedFiles";
+import { API_DTS_FILE, BUILTIN_TYPINGS_ROOT, TSCONFIG_FILE, apiDtsText, tsconfigText } from "../shared/generatedFiles";
 import { broadcastToUi } from "./engine/logs";
 import { dlogLevel } from "../shared/debugLog";
 import { folderPathProblem, isConfigJsonPath, scriptFileName, scriptNameFromFile } from "../shared/scriptName";
@@ -1025,9 +1025,27 @@ async function ensureSupportFiles(): Promise<void> {
 /** what ensurePackageTypingsFiles last wrote or found in this folder (path → text) */
 let typingsOnDisk: { dir: any; files: Map<string, string> } = { dir: null, files: new Map() };
 
+/** the built-in modules' typings (lib/builtin-types.json), read once */
+let builtinTypings: Promise<Record<string, string>> | null = null;
+function builtinTypingFiles(): Promise<Record<string, string>> {
+    builtinTypings ??= Promise.resolve()
+        .then(() => fetch(chrome.runtime.getURL("lib/builtin-types.json")))
+        .then((r) => {
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.json();
+        })
+        .catch((e: any) => {
+            builtinTypings = null;
+            dlogLevel("sync", "warn", `Folder sync: could not read the built-in modules' typings: ${e?.message || e}`);
+            return {};
+        });
+    return builtinTypings;
+}
+
 /**
  * The package imports' typings under .wiretrick/types/ (the tsconfig maps
- * package URLs there), as stored; files no script needs any more go.
+ * package URLs there), as stored, and the built-ins' (valtio, React) under
+ * .wiretrick/types/builtin/; package typings no script needs any more go.
  * Dot folders aren't scanned, so these never come back as scripts or data.
  */
 async function ensurePackageTypingsFiles(): Promise<void> {
@@ -1037,6 +1055,7 @@ async function ensurePackageTypingsFiles(): Promise<void> {
     const seen = typingsOnDisk.files;
     const stored: StoredTypings | undefined = (await new Promise<any>((r) => area.get(PACKAGE_TYPINGS_KEY, r)))?.[PACKAGE_TYPINGS_KEY];
     const want = new Map(Object.entries(stored?.files ?? {}).map(([p, text]) => [`${TYPINGS_ROOT}/${p}`, text]));
+    for (const [p, text] of Object.entries(await builtinTypingFiles())) want.set(`${BUILTIN_TYPINGS_ROOT}/${p}`, text);
     try {
         for (const [path, text] of want) {
             if (seen.get(path) === text) continue;

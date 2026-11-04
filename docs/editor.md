@@ -396,7 +396,8 @@ written again.
 TypeScript completions; saves hot apply instantly. The typings of
 [package imports](scripting.md#packages-from-unpkg) go to
 `.wiretrick/types/`, which Wiretrick owns: it rewrites and prunes them as
-scripts change.
+scripts change. The built-ins' (`valtio`, `react`, `react-dom`) go to
+`.wiretrick/types/builtin/`, so their imports resolve there too.
 
 Those three are managed files: they're refreshed on every browser start
 and extension update, so new APIs and settings reach an already-synced folder.

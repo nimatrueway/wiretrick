@@ -27,7 +27,7 @@ import {
 import { JSON_FALLBACK_DTS, jsonDeclPath, jsonModuleDts } from "./jsonTypes";
 import { packagePaths, TYPINGS_ROOT } from "../shared/packageImports";
 import { importSpecs } from "../shared/scriptImports";
-import { builtinSpec } from "../shared/builtinSpecs";
+import { builtinPaths, builtinSpec } from "../shared/builtinSpecs";
 
 let monacoApi: any = null;
 let wtApiDts = "";
@@ -69,15 +69,7 @@ export function editorCompilerOptions(ts: { ScriptTarget: any; ModuleKind: any; 
 
 /** where the built-in modules' typings go (ensureBuiltinTypings), and the bare specifiers that map to them */
 const BUILTIN_ROOT = "file:///node_modules";
-const BUILTIN_PATHS: Record<string, string[]> = {
-    valtio: [`${BUILTIN_ROOT}/valtio/esm/index.d.mts`],
-    "valtio/*": [`${BUILTIN_ROOT}/valtio/esm/*.d.mts`],
-    react: [`${BUILTIN_ROOT}/@types/react/index.d.ts`],
-    "react/*": [`${BUILTIN_ROOT}/@types/react/*.d.ts`],
-    "react-dom": [`${BUILTIN_ROOT}/@types/react-dom/index.d.ts`],
-    "react-dom/*": [`${BUILTIN_ROOT}/@types/react-dom/*.d.ts`],
-    csstype: [`${BUILTIN_ROOT}/csstype/index.d.ts`],
-};
+const BUILTIN_PATHS = builtinPaths(BUILTIN_ROOT);
 
 let builtinTypings: Promise<void> | null = null;
 
