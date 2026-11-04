@@ -18,7 +18,8 @@
  * a MessagePort (L3). The bridge relays what each overlay may do to the
  * background over the `wt-bridge` port (L2), fetches as the page for it,
  * and routes calls between the overlay and that script's onPage code
- * (isolated world here; main world through the hook, L4).
+ * (isolated world here; main world through the hook, L4). It also listens
+ * for the overlays' `ctx.shortcut` keys in the page.
  */
 import { formatScriptError } from "../shared/scriptError";
 import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptContext, type ScriptLogLevel } from "../shared/scriptLog";
@@ -31,6 +32,7 @@ import { Exposer, RpcClient, isRpcCall, isRpcResult, NOT_RUNNING, RPC_QUEUE_MAX,
 import type { DocumentWhen, RouteMeta } from "../shared/route";
 import { clipPathFor, normalizeRects } from "../shared/overlayRects";
 import { fromWireRequest, toWireResponse } from "../shared/wtFetch";
+import { ShortcutRegistry, watchShortcuts } from "../shared/shortcut";
 
 (() => {
     const MAIN_SOURCE = "res-override-bridge";
@@ -446,6 +448,26 @@ import { fromWireRequest, toWireResponse } from "../shared/wtFetch";
     const phaseNow = (): DocumentWhen => (document.readyState === "complete" ? "document_idle" : document.readyState === "interactive" ? "document_end" : "document_start");
     const callError = (cid: string, message: string): RpcResult => ({ cid, ok: false, error: { name: "WtCallError", message } });
 
+    // ctx.shortcut: keys pressed in the page. Listening from the start puts
+    // the capture listener ahead of the page's own; only trusted events count,
+    // and the page sees nothing but the default prevented on a match.
+    const shortcuts = new ShortcutRegistry(undefined, (s) => {
+        const i = lastOverlays.findIndex((o) => o.scriptId === s);
+        return i < 0 ? Infinity : i;
+    });
+    if (window === top)
+        watchShortcuts(
+            window,
+            (e) => (shortcuts.size ? shortcuts.find(e) : []),
+            (hits) =>
+                guard(() => {
+                    const o = overlays.get(hits[0].s);
+                    if (!o?.ep) return;
+                    if (o.frame && o.frame.style.zIndex !== String(zTop)) o.frame.style.zIndex = String(++zTop);
+                    for (const h of hits) o.ep.push("shortcut.fire", { id: h.id });
+                })
+        );
+
     /** the bundle's overlays for this page: start new ones, reload changed ones (code hash), drop the rest */
     function syncOverlays(list: OverlayInfo[], hot: boolean): void {
         if (dead) return;
@@ -551,6 +573,20 @@ import { fromWireRequest, toWireResponse } from "../shared/wtFetch";
         ep.on("focus", () => {
             if (proven && o.frame && o.frame.style.zIndex !== String(zTop)) o.frame.style.zIndex = String(++zTop);
         });
+        ep.on("shortcut.add", (a) => {
+            if (!proven || o.closed || typeof a?.id !== "string" || typeof a.keys !== "string" || a.id.length > 32 || a.keys.length > 64) return;
+            let r: ReturnType<ShortcutRegistry["add"]>;
+            try {
+                r = shortcuts.add(s, a.id, a.keys, a.priority === "after-page" ? "after-page" : "before-page");
+            } catch {
+                return;
+            }
+            // the warning goes to the script that lost the keys
+            const nameOf = (x: string) => overlays.get(x)?.info.name ?? x;
+            if (r.taken) log("warn", scriptLogLine(o.info.name, "overlay", `shortcut ${a.keys}: "${nameOf(r.taken)}" (earlier in the list) uses these keys too and keeps them`));
+            if (r.displaced) scriptLog(r.displaced, "warn", scriptLogLine(nameOf(r.displaced), "overlay", `shortcut ${a.keys}: "${o.info.name}" (earlier in the list) uses these keys too and keeps them`));
+        });
+        ep.on("shortcut.remove", (a) => proven && typeof a?.id === "string" && shortcuts.remove(s, a.id));
         ep.on("rpc.call", (c) => proven && isRpcCall(c) && routeOverlayCall(s, c, (r) => ep.push("rpc.result", r)));
         ep.on("rpc.result", (r) => {
             if (!proven) return;
@@ -579,6 +615,7 @@ import { fromWireRequest, toWireResponse } from "../shared/wtFetch";
         if (!o) return;
         overlays.delete(s);
         o.closed = true;
+        shortcuts.removeScript(s);
         o.frame?.remove();
         o.ep?.close(why);
         for (const call of o.queue.splice(0)) overlayClients.get(s)?.receive(callError(call.cid, NOT_RUNNING));

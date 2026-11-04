@@ -286,6 +286,22 @@ declare namespace Wiretrick {
          * });
          */
         onNavigate(fn: (url: string) => void): () => void;
+        /**
+         * Run `fn` when the user presses `keys` on the page: "Alt+Shift+M",
+         * "Mod+K" (Mod = Cmd on macOS, Ctrl elsewhere), "Shift+F2", "Esc".
+         * Ignored while typing in a text field. By default the shortcut
+         * beats the page (which never sees the key); `"after-page"` fires
+         * only if the page didn't handle it. Keys pressed while the overlay
+         * has focus work too. If another script has the same keys, the
+         * one higher in the script list wins (a Log warning). Returns a function that removes it.
+         *
+         * @example
+         * wt.onOverlay("*://example.com/*", (ctx) => {
+         *     ctx.shortcut("Alt+Shift+H", () => (box.hidden = !box.hidden));
+         *     ctx.shortcut("Mod+K", openSearch, { priority: "after-page" });
+         * });
+         */
+        shortcut(keys: string, fn: () => void, opts?: { priority?: "before-page" | "after-page" }): () => void;
     }
 
     /** Header edits. */

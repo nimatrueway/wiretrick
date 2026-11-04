@@ -751,6 +751,36 @@ it right away, and the value survives restarts.
   });
   ```
 
+### Keyboard shortcuts
+
+`ctx.shortcut(keys, fn)` runs `fn` when the keys are pressed on the page:
+
+```ts
+wt.onOverlay("*://app.example.com/*", (ctx) => {
+    const box = document.body.appendChild(document.createElement("div"));
+    box.textContent = "Hello";
+    box.hidden = true;
+    ctx.shortcut("Alt+Shift+H", () => (box.hidden = !box.hidden));   // beats the page's own shortcuts
+    // ctx.shortcut("Mod+K", fn, { priority: "after-page" })          // only if the page didn't handle it
+});
+```
+
+- **Keys.** Modifiers (`Mod`, `Ctrl`, `Alt`, `Shift`, `Meta`, in any
+  order) then one key: a character (`K`, `1`, `/`) or a name (`Esc`,
+  `Enter`, `Space`, `Up`, `F2`, `Plus`). `Mod` is ⌘ on macOS and Ctrl
+  elsewhere. Modifiers must match exactly; `Alt+L` works with Option on
+  macOS too.
+- **Before or after the page.** By default the shortcut wins: the page
+  never sees the key. With `{ priority: "after-page" }` it runs only if
+  the page didn't handle the key (didn't call `preventDefault` or stop it).
+- **Where.** On the page (its top frame) and while the overlay has focus.
+  Keys typed into a text field, `<select>` or editable area are left
+  alone, and events the page makes up itself don't count.
+- **Several scripts.** If two scripts' overlays use the same keys, the
+  one higher in the script list gets them; the other's Log says so.
+- `ctx.shortcut` returns a function that removes the shortcut. Shortcuts
+  go away with the overlay (save, disable).
+
 ### Fetching from the overlay
 
 The overlay's own `fetch` is the page's: the page's content script makes

@@ -38,6 +38,8 @@ interface Harness {
     calls: RpcCall[];
     rects: Rect[][];
     storage: Map<string, any>;
+    /** shortcut.add / shortcut.remove as the bridge got them */
+    keys: string[];
 }
 
 let running: OverlayRuntime[] = [];
@@ -52,7 +54,7 @@ afterEach(() => {
 async function start(code: string, over: Partial<OverlayInit> = {}): Promise<Harness> {
     const [frame, bridge] = endpointPair();
     const owner = new StoreOwner(memDeps());
-    const h: Omit<Harness, "rt"> = { bridge, owner, logs: [], pageFetches: [], bgFetches: [], calls: [], rects: [], storage: new Map() };
+    const h: Omit<Harness, "rt"> = { bridge, owner, logs: [], pageFetches: [], bgFetches: [], calls: [], rects: [], storage: new Map(), keys: [] };
     // the store ops go to the owner, as the bridge relays them over L2
     owner.attach(bridge, { all: false });
     bridge.handle("pagefetch", async ({ request, bypass }) => {
@@ -68,8 +70,10 @@ async function start(code: string, over: Partial<OverlayInit> = {}): Promise<Har
     bridge.on("log", (a) => h.logs.push(a));
     bridge.on("rpc.call", (c) => h.calls.push(c));
     bridge.on("rects", (a) => h.rects.push(a.rects));
+    bridge.on("shortcut.add", (a) => h.keys.push(`add ${a.id} ${a.keys} ${a.priority}`));
+    bridge.on("shortcut.remove", (a) => h.keys.push(`remove ${a.id}`));
     const init: OverlayInit = { s: "s1", name: "demo", code, codeHash: "h", routes: [], url: "https://x.com/app/page", params: {}, stores: {}, libs: [], react: false, phase: "document_end", ...over };
-    const rt = await startOverlay(frame, init, { win: window as any, doc: document, watchRects: false });
+    const rt = await startOverlay(frame, init, { win: window as any, doc: document, watchRects: false, trustedKey: () => true });
     running.push(rt);
     return { ...h, rt };
 }
@@ -210,6 +214,38 @@ describe("overlay runtime", () => {
         h.bridge.close("the bridge went away");
         expect(await p).toBeInstanceOf(DisconnectedError);
         void asked;
+    });
+
+    it("ctx.shortcut registers with the bridge, runs on shortcut.fire and on keys pressed in the frame, and unregisters", async () => {
+        const h = await start(`wt.onOverlay("*", (ctx) => {
+            const seen = [];
+            const off = ctx.shortcut("Alt+Shift+H", () => seen.push("h"));
+            ctx.shortcut("Mod+K", async () => { seen.push("k"); throw new Error("boom"); }, { priority: "after-page" });
+            return { seen: () => seen, off: () => off(), bad: (k, p) => { try { ctx.shortcut(k, () => {}, p && { priority: p }); return "ok"; } catch (e) { return e.message; } } };
+        });`);
+        await settle();
+        expect(h.keys).toEqual(["add 1 Alt+Shift+H before-page", "add 2 Mod+K after-page"]);
+        h.bridge.push("shortcut.fire", { id: "2" });
+        await settle();
+        expect((await callOverlay(h, { h: "overlay:0", fn: "seen", args: [] })).value).toEqual(["k"]);
+        expect(h.logs.some((l) => l.level === "error" && l.msg.includes("ctx.shortcut") && l.msg.includes("boom"))).toBe(true);
+        // focus in the frame: it matches its own keys (not in its text fields)
+        const e = new KeyboardEvent("keydown", { key: "H", code: "KeyH", altKey: true, shiftKey: true, bubbles: true, cancelable: true });
+        document.body.dispatchEvent(e);
+        expect(e.defaultPrevented).toBe(true);
+        const input = document.body.appendChild(document.createElement("input"));
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "H", code: "KeyH", altKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+        expect((await callOverlay(h, { h: "overlay:0", fn: "seen", args: [] })).value).toEqual(["k", "h"]);
+        await callOverlay(h, { h: "overlay:0", fn: "off", args: [] });
+        await settle();
+        expect(h.keys[h.keys.length - 1]).toBe("remove 1");
+        h.bridge.push("shortcut.fire", { id: "1" });
+        document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "H", code: "KeyH", altKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+        await settle();
+        expect((await callOverlay(h, { h: "overlay:0", fn: "seen", args: [] })).value).toEqual(["k", "h"]);
+        expect((await callOverlay(h, { h: "overlay:0", fn: "bad", args: ["Hyper+K"] })).value).toMatch(/unknown modifier/);
+        expect((await callOverlay(h, { h: "overlay:0", fn: "bad", args: ["Alt+K", "first"] })).value).toMatch(/priority/);
+        expect(h.keys).toHaveLength(3);
     });
 
     it("reports its visible areas", async () => {

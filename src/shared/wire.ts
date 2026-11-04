@@ -99,6 +99,11 @@ export interface WireOps {
     /** L3: the overlay's `wt.storage` (the bridge relays it for this script) */
     "storage.get": { req: { key: string }; res: { value: any } };
     "storage.set": { req: { key: string; value: any }; res: {} };
+    /** L3: `ctx.shortcut` registered keys (`id` is the overlay's); the bridge listens for them in the page */
+    "shortcut.add": { push: { id: string; keys: string; priority: "before-page" | "after-page" } };
+    "shortcut.remove": { push: { id: string } };
+    /** L3: a shortcut's keys were pressed in the page */
+    "shortcut.fire": { push: { id: string } };
     /** L3: the page's L2 link came back: replicas re-subscribe */
     "store.resync": { push: {} };
     /** a call between the overlay and onPage code (shared/rpc.ts) */

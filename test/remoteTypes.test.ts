@@ -22,6 +22,10 @@ function typings() {
     const overlay = wt.onOverlay("*://example.com/*", (ctx) => {
         expectTypeOf(ctx.url).toBeString();
         expectTypeOf(ctx.onNavigate).toEqualTypeOf<(fn: (url: string) => void) => () => void>();
+        const off: () => void = ctx.shortcut("Mod+K", async () => {}, { priority: "after-page" });
+        off();
+        // @ts-expect-error an unknown priority
+        ctx.shortcut("Alt+K", () => {}, { priority: "first" });
         return { picked: (tag: string, at: { x: number; y: number }) => tag.length + at.x };
     });
     expectTypeOf(overlay.picked).toEqualTypeOf<(tag: string, at: { x: number; y: number }) => Promise<number>>();
@@ -82,8 +86,9 @@ wt.onOverlay("*", async () => { const n: number = await page.count("a"); return 
         expect(errorsOf(`wt.onDocument("*", () => {});\nwt.onDocument("*", () => "x");\nwt.onDocument("*", () => document.body);\nwt.onDocument("*", async () => {});`)).toEqual([]);
     });
 
-    it("ctx.onNavigate is the overlay's only", () => {
+    it("ctx.onNavigate and ctx.shortcut are the overlay's only", () => {
         expect(errorsOf(`wt.onOverlay("*", (ctx) => { const off: () => void = ctx.onNavigate((u: string) => {}); off(); });`)).toEqual([]);
         expect(errorsOf(`wt.onPage("*", (ctx) => { ctx.onNavigate(() => {}); });`)).toHaveLength(1);
+        expect(errorsOf(`wt.onPage("*", (ctx) => { ctx.shortcut("Alt+K", () => {}); });`)).toHaveLength(1);
     });
 });

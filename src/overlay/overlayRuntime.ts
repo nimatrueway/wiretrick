@@ -25,6 +25,7 @@ import { fromWireResponse, toWireRequest } from "../shared/wtFetch";
 import { formatScriptError } from "../shared/scriptError";
 import { formatLogArgs, scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
 import { normalizeRects, type Rect } from "../shared/overlayRects";
+import { ShortcutRegistry, watchShortcuts, type ShortcutPriority } from "../shared/shortcut";
 
 const PHASES: DocumentWhen[] = ["document_start", "document_end", "document_idle"];
 const rank = (p: DocumentWhen | undefined) => PHASES.indexOf(p ?? "document_end");
@@ -48,6 +49,8 @@ export interface OverlayEnv {
     patchFetch?: boolean;
     /** watch the DOM and report rects (default true) */
     watchRects?: boolean;
+    /** which key events count as the user's (default: `isTrusted`) */
+    trustedKey?: (e: KeyboardEvent) => boolean;
 }
 
 /** run `init`'s script in this frame, talking to the bridge over `ep` */
@@ -92,6 +95,38 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
                 log("error", errorLine(e, "ctx.onNavigate"));
             }
     });
+
+    // ctx.shortcut: the bridge matches keys pressed in the page and says which
+    // fired; keys pressed in this frame are matched here
+    const keys = new ShortcutRegistry();
+    const keyFns = new Map<string, () => void>();
+    let keyIds = 0;
+    const fireKey = (id: string) => {
+        const fn = keyFns.get(id);
+        if (!fn) return;
+        try {
+            const out: any = fn();
+            if (out && typeof out.then === "function") out.then(undefined, (e: any) => log("error", errorLine(e, "ctx.shortcut")));
+        } catch (e) {
+            log("error", errorLine(e, "ctx.shortcut"));
+        }
+    };
+    ep.on("shortcut.fire", ({ id }) => fireKey(id));
+    const stopKeys = watchShortcuts(win, (e) => keys.find(e), (hits) => hits.forEach((h) => fireKey(h.id)), { trusted: env.trustedKey });
+    const shortcut = (combo: string, fn: () => void, opts?: { priority?: ShortcutPriority }) => {
+        if (typeof fn !== "function") throw new TypeError("ctx.shortcut: the second argument must be a function");
+        const priority = opts?.priority ?? "before-page";
+        if (priority !== "before-page" && priority !== "after-page") throw new TypeError(`ctx.shortcut: priority must be "before-page" or "after-page"`);
+        const id = String(++keyIds);
+        keys.add(s, id, combo, priority);
+        keyFns.set(id, fn);
+        ep.push("shortcut.add", { id, keys: combo, priority });
+        return () => {
+            if (!keyFns.delete(id)) return;
+            keys.remove(s, id);
+            if (!ep.closed) ep.push("shortcut.remove", { id });
+        };
+    };
 
     const pkgs: PackageModules = { aliases: {}, modules: {} };
     for (const l of init.libs) {
@@ -170,6 +205,7 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
             navFns.add(fn);
             return () => void navFns.delete(fn);
         },
+        shortcut,
     });
     runDue = () => {
         for (const { fn, route } of handlers) {
@@ -209,12 +245,14 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
     measure();
     const stop = () => {
         stopRects();
+        stopKeys();
         win.removeEventListener("error", onError);
         win.removeEventListener("unhandledrejection", onRejection);
         win.removeEventListener("pointerdown", onPointer, true);
         ep.close("stopped");
     };
     ep.onClose(stopRects);
+    ep.onClose(stopKeys);
     return { client, exposer, ran, measure, stop };
 }
 

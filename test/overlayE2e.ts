@@ -39,6 +39,18 @@ export function overlayServerRoute(req: http.IncomingMessage, res: http.ServerRe
         res.end(PAGE(""));
         return true;
     }
+    if (url.pathname === "/ov-keys") {
+        res.writeHead(200, { "content-type": "text/html" });
+        // the page's own shortcuts: it records every key it sees and handles Alt+P itself
+        res.end(
+            PAGE(`<input id="field" style="position:absolute;left:20px;top:160px"><script>
+window.__keys = [];
+window.addEventListener("keydown", (e) => window.__keys.push(e.code), true);
+window.addEventListener("keydown", (e) => { if (e.altKey && e.code === "KeyP") e.preventDefault(); });
+</script>`)
+        );
+        return true;
+    }
     if (url.pathname === "/ov-me") {
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({ name: "REAL" }));
@@ -336,4 +348,84 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
     await page.close();
     await send({ type: "deleteScript", id: "s_ov_switch" });
     await send({ type: "deleteScript", id: "s_ov_rpc" });
+}
+
+const keysCode = (origin: string, id: string) => `wt.onOverlay("${origin}/ov-keys", (ctx) => {
+    const box = document.body.appendChild(document.createElement("div"));
+    box.id = "${id}";
+    box.textContent = "Hello";
+    box.style.cssText = "position:fixed;right:16px;top:16px;background:white;padding:8px";
+    box.hidden = true;
+    ctx.shortcut("Alt+Shift+H", () => (box.hidden = !box.hidden));
+    const log = document.body.appendChild(document.createElement("output"));
+    log.id = "${id}-log";
+    ctx.shortcut("Alt+P", () => (log.value += "P"), { priority: "after-page" });
+    ctx.shortcut("Alt+O", () => (log.value += "O"), { priority: "after-page" });
+});
+`;
+
+/**
+ * `ctx.shortcut`: a shortcut toggles the GUI and the page never sees a
+ * `before-page` key; `after-page` yields to a page that handles the key;
+ * keys typed in a page field and page-made key events don't count; the
+ * same keys in a script later in the list stay with the first (a Log warning).
+ */
+export async function checkOverlayShortcuts(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
+    const t = (s: string) => `overlay shortcuts${opts.label ?? ""}: ${s}`;
+    const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
+    const a = await send({ type: "saveScript", id: "s_ov_keys", code: keysCode(origin, "kbox"), name: "keys first" });
+    await mgr.waitForTimeout(300);
+    const b = await send({ type: "saveScript", id: "s_ov_keys2", code: keysCode(origin, "kbox2"), name: "keys second" });
+    check(t("scripts save without errors"), !a?.error && !b?.error, JSON.stringify({ a: a?.error, b: b?.error }));
+    await mgr.waitForTimeout(800);
+
+    const page = await ctx.newPage();
+    await page.goto(`${origin}/ov-keys`, { waitUntil: "load", timeout: 15000 });
+    const f1 = await overlayFrame(page, "#kbox");
+    const f2 = await overlayFrame(page, "#kbox2");
+    const state = async () => ({
+        shown: f1 ? await f1.evaluate(() => !document.getElementById("kbox")!.hidden) : null,
+        shown2: f2 ? await f2.evaluate(() => !document.getElementById("kbox2")!.hidden) : null,
+        log: f1 ? await f1.evaluate(() => (document.getElementById("kbox-log") as HTMLOutputElement).value) : null,
+        pageKeys: (await page.evaluate(() => (window as any).__keys)) as string[],
+    });
+    // the overlays register their shortcuts once their handlers ran
+    await page.waitForTimeout(500);
+    await page.bringToFront();
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.());
+
+    await page.keyboard.press("Alt+Shift+KeyH");
+    const on = await waitFor(state, (v) => !!v.shown, 3000);
+    check(t("a shortcut toggles the GUI"), !!on.shown, JSON.stringify(on));
+    check(t("the page doesn't see a before-page key"), !on.pageKeys.includes("KeyH"), JSON.stringify(on.pageKeys));
+    check(t("the same keys in a second script stay with the first"), on.shown2 === false, JSON.stringify(on));
+    await page.keyboard.press("Alt+Shift+KeyH");
+    const off = await waitFor(state, (v) => !v.shown, 3000);
+    check(t("pressing it again toggles back"), off.shown === false, JSON.stringify(off));
+
+    await page.keyboard.press("Alt+KeyP");
+    await page.keyboard.press("Alt+KeyO");
+    const after = await waitFor(state, (v) => !!v.log?.includes("O"), 3000);
+    check(t("after-page yields to a page that handles the key, fires otherwise"), after.log === "O" && after.pageKeys.includes("KeyP") && after.pageKeys.includes("KeyO"), JSON.stringify(after));
+
+    await page.focus("#field");
+    await page.keyboard.press("Alt+Shift+KeyH");
+    await page.evaluate(() => {
+        (document.activeElement as HTMLElement).blur();
+        document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "H", code: "KeyH", altKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+    });
+    await page.waitForTimeout(500);
+    const typed = await state();
+    check(t("keys typed in a page field and page-made key events don't trigger it"), typed.shown === false, JSON.stringify(typed));
+
+    const lines: string[] = await mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line")].map((l) => (l as HTMLElement).dataset.text || ""));
+    check(
+        t("a Log warning names the script that keeps the keys"),
+        lines.some((l) => l.includes("[keys second]") && l.includes("Alt+Shift+H") && l.includes('"keys first" (earlier in the list) uses these keys too')),
+        lines.filter((l) => l.includes("keys")).join(" | ").slice(0, 300)
+    );
+
+    await page.close();
+    await send({ type: "deleteScript", id: "s_ov_keys" });
+    await send({ type: "deleteScript", id: "s_ov_keys2" });
 }
