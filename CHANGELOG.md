@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-11-04
+
 ### Added
 
 - `wt.globalStore` and `wt.pageStore` in isolated-world `onPage` code (`world: "isolated"`): live copies like the overlay's — synchronous reads, writes that reach the background, the overlay and (global stores) other tabs, `wt.pageStore` being the copy of the code's page.
@@ -598,7 +600,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/nimatrueway/wiretrick/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/nimatrueway/wiretrick/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/nimatrueway/wiretrick/compare/v0.9.18...v0.10.0
 [0.9.18]: https://github.com/nimatrueway/wiretrick/compare/v0.9.17...v0.9.18
