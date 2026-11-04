@@ -29,6 +29,8 @@ export function tsconfigText(): string {
             allowNonTsExtensions: true,
             // `import x from "./mock/data.json"` (data files)
             resolveJsonModule: true,
+            // .tsx scripts: the automatic runtime, the built-in React by default
+            jsx: "react-jsx",
             noEmit: true,
             // package imports (`https://unpkg.com/x@1.2.3`) → their downloaded typings
             paths: packagePaths(`./${TYPINGS_ROOT}`),

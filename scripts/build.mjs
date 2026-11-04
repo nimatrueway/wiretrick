@@ -61,6 +61,11 @@ function entriesFor(dist, mv3) {
             input: path.join(root, "src/builtins/react.ts"),
             output: { file: path.join(dist, "builtins-react.js"), format: "iife" },
         },
+        {
+            // a script's overlay frame (wt.onOverlay), framed into pages by the bridge
+            input: path.join(root, "src/overlay/overlayRuntime.ts"),
+            output: { file: path.join(dist, "overlay.js"), format: "iife" },
+        },
     ];
     if (!mv3) {
         list.push(
@@ -103,7 +108,9 @@ const HOOK_MAIN = { matches: ["*://*/*"], js: ["hook.js"], all_frames: true, run
 
 /** manifest.json → Firefox manifest object */
 function firefoxManifest(mv2) {
-    return { ...mv2, content_scripts: [HOOK_MAIN, ...mv2.content_scripts] };
+    // Firefox has no manifest sandbox: overlay.html is a normal extension page there (overlayRuntime.ts checks its nonce with the background)
+    const { sandbox: _sandbox, ...rest } = mv2;
+    return { ...rest, content_scripts: [HOOK_MAIN, ...mv2.content_scripts] };
 }
 
 /** manifest.json → MV3 manifest object */
@@ -124,10 +131,11 @@ function mv3Manifest(mv2) {
         permissions: ["storage", "unlimitedStorage", "tabs", "debugger", "offscreen", "webNavigation", "webRequest", "alarms", "proxy", "nativeMessaging", "browsingData", "declarativeNetRequestWithHostAccess"],
         host_permissions: ["<all_urls>"],
         optional_permissions: mv2.optional_permissions,
-        web_accessible_resources: [{ resources: ["hook.js"], matches: ["<all_urls>"] }],
-        // the sandbox page is exempt from the extension CSP — it hosts the
-        // script compiler/runner (see src/background/sandbox.ts)
-        sandbox: { pages: ["sandbox.html"] },
+        web_accessible_resources: [{ resources: mv2.web_accessible_resources, matches: ["<all_urls>"] }],
+        // sandbox pages are exempt from the extension CSP — sandbox.html hosts
+        // the script compiler/runner (see src/background/sandbox.ts), overlay.html
+        // a script's overlay (src/overlay/overlayRuntime.ts)
+        sandbox: { pages: ["sandbox.html", ...mv2.sandbox.pages] },
         minimum_chrome_version: "116",
         manifest_version: 3,
     };
@@ -192,6 +200,7 @@ async function copyStatic(dist, mv3) {
         await copyFile(path.join(root, "src/ui/serve.html"), path.join(dist, "serve.html"));
     }
     await copyFile(path.join(root, "src/ui/editor.html"), path.join(dist, "editor.html"));
+    await copyFile(path.join(root, "src/overlay/overlay.html"), path.join(dist, "overlay.html"));
     await copyFile(path.join(root, "src/ui/ui.css"), path.join(dist, "ui.css"));
     await copyFile(path.join(root, "src/ui/popup.html"), path.join(dist, "popup.html"));
     await copyFile(path.join(root, "src/ui/popup.css"), path.join(dist, "popup.css"));

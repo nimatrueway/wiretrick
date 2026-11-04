@@ -1,0 +1,330 @@
+/**
+ * The overlay frame (overlay.html): one script's GUI over one tab's top
+ * page. The bridge frames it (inside a closed shadow root) and hands it a
+ * MessagePort (L3); everything the frame needs comes over that port —
+ * the script's code comes from the background through the bridge's
+ * extension port, never through the page.
+ *
+ * Here the script's module graph evaluates with network and onPage
+ * registrations inert; its onOverlay handlers run at their `when`. Stores
+ * are replicas (shared/storeReplica.ts), `fetch` and `wt.fetch` fetch as
+ * the page (the bridge does it, with the page's cookies), calls into
+ * onPage code and back go through shared/rpc.ts, and the frame reports
+ * its visible areas so the bridge lets clicks through everywhere else.
+ */
+import { compileScript, type ResApiOverrides } from "../shared/compile";
+import { messagePortEndpoint, type Endpoint, type OverlayInit } from "../shared/wire";
+import { ReplicaHub } from "../shared/storeReplica";
+import { builtinModule, ensureBuiltins } from "../shared/builtins";
+import { makeLibRequire } from "../shared/scriptImports";
+import type { PackageModules } from "../shared/packageImports";
+import { Exposer, RpcClient, isRpcCall } from "../shared/rpc";
+import { inertRemote, REMOTE_OVERLAY_SELF } from "../shared/remote";
+import { routeMatches, type DocumentWhen } from "../shared/route";
+import { fromWireResponse, toWireRequest } from "../shared/wtFetch";
+import { formatScriptError } from "../shared/scriptError";
+import { formatLogArgs, scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
+import { normalizeRects, type Rect } from "../shared/overlayRects";
+
+const PHASES: DocumentWhen[] = ["document_start", "document_end", "document_idle"];
+const rank = (p: DocumentWhen | undefined) => PHASES.indexOf(p ?? "document_end");
+
+const LIB_REMOTE = "onPage / onOverlay handles from an imported library don't connect; register them in the script itself";
+
+export interface OverlayRuntime {
+    client: RpcClient;
+    exposer: Exposer;
+    /** the handlers that ran so far (their route indexes) */
+    ran: Set<number>;
+    /** measure the visible areas now and report them when they changed */
+    measure(): void;
+    stop(): void;
+}
+
+export interface OverlayEnv {
+    win: Window & typeof globalThis;
+    doc: Document;
+    /** replace the frame's global `fetch` (default true) */
+    patchFetch?: boolean;
+    /** watch the DOM and report rects (default true) */
+    watchRects?: boolean;
+}
+
+/** run `init`'s script in this frame, talking to the bridge over `ep` */
+export async function startOverlay(ep: Endpoint, init: OverlayInit, env: OverlayEnv = { win: window as any, doc: document }): Promise<OverlayRuntime> {
+    const { win, doc } = env;
+    const s = init.s;
+    const log = (level: ScriptLogLevel, msg: string) => ep.push("log", { level, msg });
+    const errorLine = (e: any, context: string) => formatScriptError(init.name, e, context);
+
+    const hub = new ReplicaHub({ ctx: "overlay", log: (_s, msg, level) => log(level, msg) });
+    hub.prime({ [s]: init.stores });
+    hub.attach(ep);
+    ep.on("store.resync", () => hub.reconnect());
+
+    const client = new RpcClient((call) => {
+        if (ep.closed) throw new Error("the overlay was closed");
+        ep.push("rpc.call", call);
+    });
+    const exposer = new Exposer();
+    ep.on("rpc.result", (r) => void client.receive(r));
+    ep.on("rpc.call", (c) => {
+        if (isRpcCall(c)) exposer.answer(c, (r) => ep.push("rpc.result", r));
+    });
+    ep.onClose((why) => client.disconnect(`the overlay was closed (${why})`));
+
+    // the bridge's `when` and `nav` can come while React loads: keep the latest
+    const ran = new Set<number>();
+    const navFns = new Set<(url: string) => void>();
+    let phase = init.phase ?? "document_start";
+    let runDue = () => {};
+    const page = { url: init.url, fetch: (request: any, bypass: boolean) => ep.call("pagefetch", { request, bypass }) };
+    ep.on("when", (a) => {
+        if (rank(a.phase) > rank(phase)) phase = a.phase;
+        runDue();
+    });
+    ep.on("nav", ({ url }) => {
+        page.url = url;
+        for (const fn of [...navFns])
+            try {
+                fn(url);
+            } catch (e) {
+                log("error", errorLine(e, "ctx.onNavigate"));
+            }
+    });
+
+    const pkgs: PackageModules = { aliases: {}, modules: {} };
+    for (const l of init.libs) {
+        if (l.pkg) pkgs.modules[l.name] = l.pkg;
+        else if (l.alias !== undefined) pkgs.aliases[l.name] = l.alias;
+    }
+    if (init.react)
+        await ensureBuiltins([init.code, ...init.libs.map((l) => l.src ?? "")], pkgs).catch((e: any) => log("error", scriptLogLine(init.name, "overlay", `the built-in React failed to load: ${e?.message || e}`)));
+
+    const common: ResApiOverrides = {
+        storage: {
+            get: async (key) => (await ep.call("storage.get", { key })).value,
+            set: async (key, value) => void (await ep.call("storage.set", { key, value })),
+        },
+        logSink: (level, source, text) => log(level, scriptLogLine(init.name, `overlay ${source}`, text)),
+        store: (name, initial, persist) => hub.store(s, name, initial, persist),
+        fetch: (request, bypass) => ep.call("fetch", { request, bypass }),
+        pageFetch: page,
+    };
+    if (env.patchFetch !== false) {
+        // the GUI's own fetch is the page's: same origin, cookies and interception
+        win.fetch = async (input: RequestInfo | URL, rinit?: RequestInit) => fromWireResponse(await page.fetch(await toWireRequest(input, rinit ?? {}, page.url), false));
+    }
+
+    const codeOf = (importer: string) => (importer === init.name ? init.code : (init.libs.find((l) => l.name === importer)?.src ?? ""));
+    const requireFrom = makeLibRequire(
+        init.libs,
+        (lib, require, moduleObj) => {
+            const c = compileScript(lib.src!, { ...common, paramValues: lib.params, importModule: require, remote: () => inertRemote(LIB_REMOTE) });
+            if (c.error) throw new Error(`${lib.name}: ${c.error}`);
+            moduleObj.exports = c.exports;
+        },
+        {
+            builtin: (spec, importer, loadUrl) => builtinModule(spec, codeOf(importer), loadUrl),
+            style: (css) => {
+                const el = doc.createElement("style");
+                el.textContent = css;
+                (doc.head || doc.documentElement).appendChild(el);
+            },
+        }
+    );
+
+    const compiled = compileScript(init.code, {
+        ...common,
+        paramValues: init.params,
+        importModule: requireFrom(init.name),
+        remote: (kind, index) => {
+            if (kind === "onDocument") return client.remote(`page:${index}`);
+            exposer.register(`overlay:${index}`);
+            return inertRemote(REMOTE_OVERLAY_SELF);
+        },
+    });
+
+    let handlers = compiled.handlers.onOverlay;
+    if (compiled.error) {
+        log("error", `[${init.name}] overlay compile: ${compiled.error}`);
+        exposer.reset();
+        handlers = [];
+    }
+    handlers = handlers.filter(({ route }) => {
+        const on = routeMatches(route, init.url);
+        if (!on) exposer.fail(`overlay:${route.index}`);
+        return on;
+    });
+    exposer.done();
+
+    const ctx = () => ({
+        url: page.url,
+        method: "GET",
+        tabUrl: page.url,
+        resourceType: "main_frame",
+        requestHeaders: {},
+        groups: {},
+        onNavigate(fn: (url: string) => void) {
+            if (typeof fn !== "function") throw new TypeError("ctx.onNavigate: the argument must be a function");
+            navFns.add(fn);
+            return () => void navFns.delete(fn);
+        },
+    });
+    runDue = () => {
+        for (const { fn, route } of handlers) {
+            if (ran.has(route.index) || rank(route.when) > rank(phase)) continue;
+            ran.add(route.index);
+            const h = `overlay:${route.index}`;
+            let out: any;
+            try {
+                out = fn(ctx() as any);
+            } catch (e) {
+                exposer.fail(h);
+                log("error", errorLine(e, "onOverlay"));
+                continue;
+            }
+            exposer.expose(h, out);
+            if (out && typeof out.then === "function") out.then(undefined, (e: any) => log("error", errorLine(e, "onOverlay")));
+        }
+    };
+    const onError = (ev: ErrorEvent) => log("error", ev.error ? errorLine(ev.error, "overlay") : scriptLogLine(init.name, "overlay", ev.message));
+    const onRejection = (ev: PromiseRejectionEvent) => log("error", ev.reason instanceof Error ? errorLine(ev.reason, "overlay (unhandled rejection)") : scriptLogLine(init.name, "overlay (unhandled rejection)", formatLogArgs([ev.reason])));
+    const onPointer = () => ep.push("focus", {});
+    win.addEventListener("error", onError);
+    win.addEventListener("unhandledrejection", onRejection);
+    win.addEventListener("pointerdown", onPointer, true);
+
+    let lastRects = "";
+    const measure = () => {
+        const rects = normalizeRects(collectRects(doc, win) ?? [[0, 0, win.innerWidth, win.innerHeight]], win.innerWidth, win.innerHeight);
+        const key = JSON.stringify(rects);
+        if (key === lastRects) return;
+        lastRects = key;
+        ep.push("rects", { rects });
+    };
+    const stopRects = env.watchRects === false ? () => {} : watchRects(doc, win, measure);
+
+    runDue();
+    measure();
+    const stop = () => {
+        stopRects();
+        win.removeEventListener("error", onError);
+        win.removeEventListener("unhandledrejection", onRejection);
+        win.removeEventListener("pointerdown", onPointer, true);
+        ep.close("stopped");
+    };
+    ep.onClose(stopRects);
+    return { client, exposer, ran, measure, stop };
+}
+
+// ---- visible areas ----
+
+const PAINTS_TAGS = new Set(["IMG", "VIDEO", "CANVAS", "SVG", "INPUT", "TEXTAREA", "SELECT", "BUTTON", "IFRAME", "OBJECT", "EMBED", "PROGRESS", "METER", "DIALOG", "LABEL", "A"]);
+const MAX_ELEMENTS = 5000;
+
+const transparent = (c: string) => !c || c === "transparent" || /^rgba\(.*,\s*0(?:\.0+)?\)$/.test(c);
+
+/** does the element's own box show (background, border, shadow, a control), beyond its text and children? */
+function paints(el: Element, cs: CSSStyleDeclaration): boolean {
+    if (PAINTS_TAGS.has(el.tagName.toUpperCase())) return true;
+    if (cs.backgroundImage && cs.backgroundImage !== "none") return true;
+    if (!transparent(cs.backgroundColor)) return true;
+    if (cs.boxShadow && cs.boxShadow !== "none") return true;
+    if (cs.cursor === "pointer") return true;
+    for (const side of ["Top", "Right", "Bottom", "Left"]) if (parseFloat((cs as any)[`border${side}Width`]) > 0 && !transparent((cs as any)[`border${side}Color`])) return true;
+    return /auto|scroll/.test(cs.overflowY) && el.scrollHeight > el.clientHeight;
+}
+
+/**
+ * The boxes of everything visible: painted elements whole, text by its
+ * line boxes. Null when there's too much to walk (the whole viewport).
+ */
+export function collectRects(doc: Document, win: Window): Rect[] | null {
+    const out: Rect[] = [];
+    let count = 0;
+    const range = doc.createRange();
+    const add = (r: DOMRect) => {
+        if (r.width > 0 && r.height > 0) out.push([r.left, r.top, r.width, r.height]);
+    };
+    const walk = (el: Element): boolean => {
+        if (++count > MAX_ELEMENTS) return false;
+        const cs = win.getComputedStyle(el);
+        if (cs.display === "none") return true;
+        const visible = cs.visibility !== "hidden" && cs.visibility !== "collapse";
+        const root = el === doc.documentElement || el === doc.body;
+        if (visible && (root ? !transparent(cs.backgroundColor) || cs.backgroundImage !== "none" : paints(el, cs))) {
+            // the whole box: its contents are inside (or overflow visibly — measured below)
+            add(el.getBoundingClientRect());
+        }
+        const kids = (el as any).shadowRoot ? [...((el as any).shadowRoot as ShadowRoot).childNodes, ...el.childNodes] : [...el.childNodes];
+        for (const n of kids) {
+            if (n.nodeType === 1) {
+                if (!walk(n as Element)) return false;
+            } else if (visible && n.nodeType === 3 && n.nodeValue && n.nodeValue.trim()) {
+                range.selectNodeContents(n);
+                for (const r of Array.from(range.getClientRects?.() ?? [])) add(r as DOMRect);
+            }
+        }
+        return true;
+    };
+    if (!doc.documentElement) return [];
+    return walk(doc.documentElement) ? out : null;
+}
+
+/** call `measure` (debounced) whenever the overlay's layout may have changed */
+function watchRects(doc: Document, win: Window, measure: () => void): () => void {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    // timers, not requestAnimationFrame: a clipped-away frame may not get frames
+    const schedule = () => {
+        timer ??= setTimeout(() => {
+            timer = null;
+            measure();
+        }, 30);
+    };
+    const mo = new MutationObserver(schedule);
+    mo.observe(doc, { subtree: true, childList: true, attributes: true, characterData: true });
+    const events = ["resize", "scroll", "transitionend", "animationend", "load", "input", "pointerup", "keyup"];
+    for (const e of events) win.addEventListener(e, schedule, true);
+    // animations and media move things without any event
+    const poll = setInterval(measure, 500);
+    return () => {
+        mo.disconnect();
+        for (const e of events) win.removeEventListener(e, schedule, true);
+        clearInterval(poll);
+        if (timer) clearTimeout(timer);
+    };
+}
+
+// ---- boot (only in overlay.html) ----
+
+/**
+ * The bridge posts `{ wtOverlay: true }` with the port; this frame proves
+ * itself by saying hello with the nonce from its URL hash, which the page
+ * can't read (a frame the page navigated elsewhere can't). Where this frame has
+ * extension APIs (Firefox: no manifest sandbox), the background confirms
+ * the nonce belongs to this tab, so a page framing overlay.html itself
+ * gets nothing.
+ */
+function boot(): void {
+    const nonce = location.hash.slice(1);
+    if (!nonce) return;
+    const onMessage = async (ev: MessageEvent) => {
+        if (ev.source !== window.parent || ev.data?.wtOverlay !== true || !ev.ports?.[0]) return;
+        window.removeEventListener("message", onMessage);
+        const rt = (globalThis as any).chrome?.runtime;
+        if (rt?.id && typeof rt.sendMessage === "function") {
+            const ok = await rt.sendMessage({ type: "wtOverlayNonce", nonce }).catch(() => false);
+            if (ok !== true) return;
+        }
+        const ep = messagePortEndpoint(ev.ports[0]);
+        try {
+            await startOverlay(ep, await ep.call("hello", { nonce }));
+        } catch (e: any) {
+            ep.push("log", { level: "error", msg: `overlay failed to start: ${e?.message || e}` });
+        }
+    };
+    window.addEventListener("message", onMessage);
+}
+
+if (typeof document !== "undefined" && document.documentElement?.dataset.wtOverlay === "1") boot();

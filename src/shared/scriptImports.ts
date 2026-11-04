@@ -9,7 +9,7 @@
  * so `./My_Utils` finds "My Utils"). A URL (`https://unpkg.com/x@1.2.3`)
  * is a package import (shared/packageImports), never a script path.
  */
-import { builtinSpec } from "./builtinSpecs";
+import { builtinSpec, jsxImportSource, usesJsx } from "./builtinSpecs";
 import { isUrlSpec, makePackageLoader, PACKAGE_ORIGIN, parsePackageUrl, type PackageModule, type PackageModules } from "./packageImports";
 
 const IMPORT_RE = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["']([^"'\n]+)["']/g;
@@ -25,10 +25,11 @@ export function importKeys(code: string): Set<string> {
     return out;
 }
 
-/** import specifiers in code, as written */
+/** import specifiers in code, as written (plus the JSX runtime a file with JSX imports when compiled) */
 export function importSpecs(code: string): Set<string> {
     const out = new Set<string>();
     for (const m of code.matchAll(IMPORT_RE)) out.add(m[1]);
+    if (usesJsx(code)) out.add(`${jsxImportSource(code)}/jsx-runtime`);
     return out;
 }
 
@@ -193,19 +194,47 @@ export interface ShippedLib {
     alias?: string;
 }
 
+/** what page code gets for a built-in import: the module graph still loads, using it throws */
+function pageBuiltin(spec: string): any {
+    const fail = (): never => {
+        throw new Error(`cannot use "${spec}": the built-in modules aren't available in page code (only in the overlay and the background)`);
+    };
+    return new Proxy(Object.create(null), {
+        // the CommonJS interop reads __esModule at import; anything else is a use
+        get: (_t, p) => (p === "__esModule" ? true : p === "then" || typeof p === "symbol" ? undefined : fail()),
+        set: fail,
+        has: () => false,
+        ownKeys: () => [],
+        apply: fail,
+    });
+}
+
+export interface LibRequireOptions {
+    /** a built-in import (`react`, `valtio`…) from `importer` (default: a module that throws when used) */
+    builtin?: (spec: string, importer: string, loadUrl: (url: string) => any) => any;
+    /** a `.css` package import's text (the overlay adds a <style>; default: ignored) */
+    style?: (css: string, url: string) => void;
+}
+
 /**
  * Page-side `require` over the shipped libraries, data files and package
- * modules (hook and bridge): `requireFrom(importer)` resolves like the
- * background does. Libraries and package modules run once (`run`); data
- * files parse fresh per import.
+ * modules (hook, bridge and overlay): `requireFrom(importer)` resolves like
+ * the background does. Libraries and package modules run once (`run`);
+ * data files parse fresh per import.
  */
-export function makeLibRequire<L extends ShippedLib>(libs: L[], run: (lib: L, require: (spec: string) => any, module: { exports: any }) => void): (importer: string) => (spec: string) => any {
+export function makeLibRequire<L extends ShippedLib>(libs: L[], run: (lib: L, require: (spec: string) => any, module: { exports: any }) => void, opts: LibRequireOptions = {}): (importer: string) => (spec: string) => any {
     const pkgs: PackageModules = { aliases: {}, modules: {} };
     for (const l of libs) {
         if (l.pkg) pkgs.modules[l.name] = l.pkg;
         else if (l.alias !== undefined) pkgs.aliases[l.name] = l.alias;
     }
-    const loadPackage = makePackageLoader(pkgs);
+    const builtin = opts.builtin;
+    // a downloaded package's own `require("react")` gets the built-in too (one React copy), unless it's React itself
+    const loadPackage = makePackageLoader(
+        pkgs,
+        builtin ? (spec, from) => (builtinSpec(spec) && !/^https:\/\/unpkg\.com\/(react|react-dom|scheduler|valtio)@/.test(from) ? { module: builtin(spec, from, (u) => loadPackage(u)) } : undefined) : undefined,
+        { style: opts.style }
+    );
     const scriptLibs = libs.filter((l) => !l.pkg && l.alias === undefined);
     const resolve = importResolver(
         scriptLibs.filter((l) => l.json === undefined).map((l) => l.name),
@@ -216,7 +245,7 @@ export function makeLibRequire<L extends ShippedLib>(libs: L[], run: (lib: L, re
         (importer: string) =>
         (spec: string): any => {
             const r = isUrlSpec(spec) ? null : resolve(importer, spec);
-            if (!r && builtinSpec(spec)) throw new Error(`cannot import "${spec}": the built-in modules aren't available in page code`);
+            if (!r && builtinSpec(spec)) return builtin ? builtin(spec, importer, loadPackage) : pageBuiltin(spec);
             if (isUrlSpec(spec)) return loadPackage(spec);
             if (!r) throw new Error(`cannot import "${spec}" — is the ${isDataSpec(spec) ? "data file" : "library script"} saved?`);
             if (r.kind === "data") return JSON.parse(scriptLibs.find((l) => l.json !== undefined && l.name === r.path)!.json!);

@@ -10,14 +10,25 @@
  * when the page CSP blocks eval there. The background sends the scripts'
  * SOURCES, the bridge compiles them and runs them at the requested DOM
  * moment — the isolated world shares the page's DOM, not its JS world.
+ *
+ * In the top frame it also hosts the scripts' overlays (wt.onOverlay): one
+ * iframe per script inside a closed shadow root, linked to this bridge by
+ * a MessagePort (L3). The bridge relays what each overlay may do to the
+ * background over the `wt-bridge` port (L2), fetches as the page for it,
+ * and routes calls between the overlay and that script's onPage code
+ * (isolated world here; main world through the hook, L4).
  */
 import { formatScriptError } from "../shared/scriptError";
 import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
 import { scriptFunction } from "../shared/scriptFn";
 import { makeLibRequire, type ShippedLib } from "../shared/scriptImports";
-import { makePageShim, domHandlersFor, scheduleDocument, type PageDocumentHandler } from "../shared/pageShim";
+import { makePageShim, domHandlersFor, scheduleDocument, firePageHandler, type PageDocumentHandler } from "../shared/pageShim";
 import { packBytes, unpackBytes } from "../shared/bytesPack";
-import { portEndpoint, type Endpoint } from "../shared/wire";
+import { messagePortEndpoint, portEndpoint, type Endpoint, type ReqOf, type ReqOps, type ResOf } from "../shared/wire";
+import { Exposer, RpcClient, isRpcCall, isRpcResult, NOT_RUNNING, RPC_QUEUE_MAX, RPC_TIMEOUT_MS, type RpcCall, type RpcResult } from "../shared/rpc";
+import type { DocumentWhen, RouteMeta } from "../shared/route";
+import { clipPathFor, normalizeRects } from "../shared/overlayRects";
+import { fromWireRequest, toWireResponse } from "../shared/wtFetch";
 
 (() => {
     const MAIN_SOURCE = "res-override-bridge";
@@ -49,6 +60,9 @@ import { portEndpoint, type Endpoint } from "../shared/wire";
         dead = true;
         try {
             window.postMessage({ source: MAIN_SOURCE, kind: "extensionDead" }, window.location.origin);
+        } catch {}
+        try {
+            for (const s of [...overlays.keys()]) removeOverlay(s, "the extension reloaded");
         } catch {}
     }
     function safeSend(msg: any, onResp?: (resp: any) => void): void {
@@ -144,6 +158,19 @@ import { portEndpoint, type Endpoint } from "../shared/wire";
         if (data.kind === "scriptLog") {
             safeSend({ type: "scriptLog", scriptId: data.scriptId ?? null, level: data.level, msg: data.msg });
         }
+        // the hook's answer to an overlay's call (L4). The page can post this
+        // too: only a cid we sent and are still waiting for is accepted, and
+        // the value is page data either way. A `rpc.call` from the page is
+        // never forwarded to an overlay.
+        if (data.kind === "rpc.result") {
+            const p = typeof data.result?.cid === "string" ? l4Pending.get(data.result.cid) : undefined;
+            if (!p || p.s !== data.s || !isRpcResult(data.result)) return;
+            l4Pending.delete(data.result.cid);
+            clearTimeout(p.timer);
+            p.reply(data.result);
+            return;
+        }
+        if (data.kind === "nav") noteNav();
         });
     });
 
@@ -168,28 +195,41 @@ import { portEndpoint, type Endpoint } from "../shared/wire";
     /** a fresh bundle: refresh the storage allow-list, run isolated handlers (once per load; again on a hot update) */
     function noteBundle(resp: any, hot: boolean): void {
         if (!resp) return;
-        if (resp.count > 0 || (resp.domHandlers || []).length || (resp.isoHandlers || []).length) openPort();
+        if (resp.count > 0 || (resp.domHandlers || []).length || (resp.isoHandlers || []).length || (resp.overlays || []).length) openPort();
         pageScriptIds = new Set(((resp.domHandlers || []) as DocumentHandler[]).map((h) => h.scriptId));
+        syncOverlays(window === top ? resp.overlays || [] : [], hot);
         const iso: DocumentHandler[] = resp.isoHandlers || [];
         if (isoFired && !hot) return;
         isoFired = true;
-        if (!iso.length) return;
         if (__MV3__) {
-            // MV3 content scripts can't eval: isolated code needs chrome.userScripts
-            for (const h of iso) scriptLog(h.scriptId, "warn", scriptLogLine(h.name, "onPage", 'world: "isolated" handlers don\'t run on this build yet'));
+            // MV3 content scripts can't eval: isolated code needs chrome.userScripts (Phase 2b)
+            isoUnsupported = new Set(iso.map((h) => h.scriptId));
+            for (const h of iso) scriptLog(h.scriptId, "warn", scriptLogLine(h.name, "onPage", ISO_MV3));
             return;
         }
         runPageScripts(iso, resp.isoLibs || [], "isolated", hot);
     }
 
+    const ISO_MV3 = 'world: "isolated" onPage code doesn\'t run on this build yet';
+    /** MV3: scripts whose isolated onPage code was skipped (the overlay's calls into it say why) */
+    let isoUnsupported = new Set<string>();
+    /** per script, what answers the overlay's calls into onPage code run here: isolated world, and the main-world CSP fallback */
+    const isoExposers = new Map<string, Exposer>();
+    const fallbackExposers = new Map<string, Exposer>();
+
     function runPageScripts(handlers: DocumentHandler[], libSources: ShippedLib[], world: "main" | "isolated", hot: boolean): void {
         if (dead) return;
         const what = world === "isolated" ? "onPage (isolated world)" : "onPage (isolated-world fallback)";
         dlog("debug", `${what}: running ${handlers.length} script(s)${hot ? " (hot refire)" : ""}`);
-        const shimFor = (scriptId: string | null, name: string, params: Record<string, any>) =>
+        const exposers = world === "isolated" ? isoExposers : fallbackExposers;
+        for (const id of [...exposers.keys()]) if (!handlers.some((h) => h.scriptId === id)) exposers.delete(id);
+        const shimFor = (scriptId: string | null, name: string, params: Record<string, any>, exposer?: Exposer) =>
             makePageShim({
                 params,
                 world,
+                exposer,
+                // isolated code in the top frame may call its overlay; elsewhere the handle explains why not
+                overlay: world === "isolated" && scriptId && window === top ? (h) => overlayClient(scriptId).remote(h) : undefined,
                 log: (...args: any[]) => scriptLog(scriptId, "info", scriptLogLine(name, "wt.log", formatLogArgs(args))),
                 storage: {
                     get: (key: string) => new Promise((r) => safeSend({ type: "scriptStorageGet", scriptId, key }, (x: any) => r(x && x.value))),
@@ -197,6 +237,9 @@ import { portEndpoint, type Endpoint } from "../shared/wire";
                 },
             });
         for (const h of handlers) {
+            let exposer = exposers.get(h.scriptId);
+            if (!exposer) exposers.set(h.scriptId, (exposer = new Exposer()));
+            else exposer.reset();
             // shadow console like the MAIN-world path: script console.*
             // calls go to the extension LOG, not the page console
             const consoleProxy = makeScriptConsole((level, source, text) => scriptLog(h.scriptId, level, scriptLogLine(h.name, source, text)));
@@ -207,17 +250,21 @@ import { portEndpoint, type Endpoint } from "../shared/wire";
                     scriptFunction(lib.src!)(shimFor(null, lib.name, lib.params || {}).wt, consoleProxy, require, moduleObj, moduleObj.exports)
                 );
                 const moduleObj = { exports: {} as any };
-                const shim = shimFor(h.scriptId, h.name, h.params || {});
+                const shim = shimFor(h.scriptId, h.name, h.params || {}, exposer);
                 scriptFunction(h.src)(shim.wt, consoleProxy, requireFrom(h.name), moduleObj, moduleObj.exports);
                 dom = shim.dom;
             } catch (e: any) {
+                exposer.reset();
+                exposer.done();
                 scriptLog(h.scriptId, "error", formatScriptError(h.name, e, `${what} compile`));
                 continue;
             }
-            for (const d of domHandlersFor(dom, location.href)) {
+            const matching = domHandlersFor(dom, location.href, exposer);
+            exposer.done();
+            for (const d of matching) {
                 const run = () => {
                     try {
-                        d.fn({ url: location.href, method: "GET", tabUrl: location.href });
+                        firePageHandler(d, { url: location.href, method: "GET", tabUrl: location.href, resourceType: "main_frame", requestHeaders: {}, groups: {} }, exposer);
                     } catch (e: any) {
                         scriptLog(h.scriptId, "error", formatScriptError(h.name, e, d.route.api || "onDocument"));
                     }
@@ -253,6 +300,8 @@ import { portEndpoint, type Endpoint } from "../shared/wire";
     let l2Holders = 0;
     let l2Backoff = 50;
     let l2Timer: ReturnType<typeof setTimeout> | null = null;
+    let l2Opened = 0;
+    const l2Waiters: (() => void)[] = [];
     function openPort(): void {
         if (dead || l2) return;
         let port: chrome.runtime.Port;
@@ -265,6 +314,19 @@ import { portEndpoint, type Endpoint } from "../shared/wire";
         const ep = portEndpoint(port, { debug: (m) => dlog("debug", "wt-bridge:", m) });
         l2 = ep;
         ep.on("bundle.update", () => guard(() => onBundleUpdate()));
+        // an overlay's store updates (the background only sends those of scripts with an overlay here)
+        ep.on("store.patch", (a, s) => s !== undefined && overlays.get(s)?.ep?.push("store.patch", a, s));
+        ep.on("store.reject", (a, s) => s !== undefined && overlays.get(s)?.ep?.push("store.reject", a, s));
+        // a new link (after a drop, or a new service worker): re-grant each
+        // overlay (a fresh nonce), then its replicas re-declare and re-subscribe
+        if (l2Opened++)
+            for (const o of overlays.values())
+                if (o.ep)
+                    ep.call("overlay.open", { nonce: newNonce(), url: o.url }, o.info.scriptId).then(
+                        () => o.ep?.push("store.resync", {}),
+                        (e: any) => dlog("warn", `overlay ${o.info.name}: no longer granted: ${e?.message || e}`)
+                    );
+        for (const w of l2Waiters.splice(0)) w();
         ep.onClose(() => {
             if (l2 === ep) l2 = null;
             if (dead || !l2Holders || l2Timer) return;
@@ -280,6 +342,20 @@ import { portEndpoint, type Endpoint } from "../shared/wire";
         }, 2000);
     }
 
+    /** an L2 call, (re)opening the port first; it waits up to 5 s for a reconnect */
+    async function l2call<K extends ReqOps>(op: K, a: ReqOf<K>, s: string): Promise<ResOf<K>> {
+        if (!l2 && !l2Timer) openPort();
+        if (!l2)
+            await new Promise<void>((resolve, reject) => {
+                const t = setTimeout(() => reject(Object.assign(new Error(`${op}: no link to the extension`), { name: "DisconnectedError" })), 5000);
+                l2Waiters.push(() => {
+                    clearTimeout(t);
+                    resolve();
+                });
+            });
+        return l2!.call(op, a, s);
+    }
+
     /** scripts changed: refresh hook status; onDocument refires in the MAIN world (hook) when healthy, else here (isolated) */
     function onBundleUpdate(): void {
         if (hookBroken) void runDocumentHandlers(true);
@@ -288,6 +364,251 @@ import { portEndpoint, type Endpoint } from "../shared/wire";
             postStatus(resp, true);
         });
     }
+
+    // ---- the overlay host (top frame) ----
+    //
+    // One iframe per script (overlay.html, a web-accessible extension page)
+    // in a closed shadow root: the page can't find the frames or read their
+    // URLs. Each frame's URL hash is a one-time nonce; on load the bridge
+    // posts it a MessagePort, and the frame proves itself by sending the
+    // nonce back (`hello`) — a page that navigated the frame away gets a
+    // port it can't use. The frame covers the viewport and is clipped to
+    // what it draws, so clicks elsewhere reach the page.
+
+    interface OverlayInfo {
+        scriptId: string;
+        name: string;
+        routes: RouteMeta[];
+        codeHash: string;
+    }
+    interface Overlay {
+        info: OverlayInfo;
+        /** the page it was opened for */
+        url: string;
+        nonce: string;
+        frame: HTMLIFrameElement | null;
+        /** the L3 link, once the frame proved itself */
+        ep: Endpoint | null;
+        /** isolated-world calls waiting for the frame */
+        queue: RpcCall[];
+        closed: boolean;
+    }
+    const overlays = new Map<string, Overlay>();
+    /** isolated-world `overlay.fn()` callers, per script */
+    const overlayClients = new Map<string, RpcClient>();
+    /** overlay → main-world calls waiting for the hook (L4), by cid */
+    const l4Pending = new Map<string, { s: string; reply: (r: RpcResult) => void; timer: ReturnType<typeof setTimeout> }>();
+    let host: HTMLElement | null = null;
+    let shadow: ShadowRoot | null = null;
+    let zTop = 0;
+    let lastOverlays: OverlayInfo[] = [];
+
+    const newNonce = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
+    const PHASES: DocumentWhen[] = ["document_start", "document_end", "document_idle"];
+    const phaseNow = (): DocumentWhen => (document.readyState === "complete" ? "document_idle" : document.readyState === "interactive" ? "document_end" : "document_start");
+    const callError = (cid: string, message: string): RpcResult => ({ cid, ok: false, error: { name: "WtCallError", message } });
+
+    /** the bundle's overlays for this page: start new ones, reload changed ones (code hash), drop the rest */
+    function syncOverlays(list: OverlayInfo[], hot: boolean): void {
+        if (dead) return;
+        lastOverlays = list;
+        const want = new Map(list.map((o) => [o.scriptId, o]));
+        for (const s of [...overlays.keys()]) if (!want.has(s)) removeOverlay(s, "was disabled or no longer matches this page");
+        for (const info of list) {
+            const old = overlays.get(info.scriptId);
+            if (old && old.info.codeHash === info.codeHash) {
+                old.info = info;
+                continue;
+            }
+            if (old) removeOverlay(info.scriptId, "reloaded");
+            createOverlay(info, hot || !!old);
+        }
+        l2Holders = overlays.size;
+        if (overlays.size) watchNavigation();
+    }
+
+    function createOverlay(info: OverlayInfo, now: boolean): void {
+        const o: Overlay = { info, url: location.href, nonce: newNonce(), frame: null, ep: null, queue: [], closed: false };
+        overlays.set(info.scriptId, o);
+        const first = PHASES[Math.min(...info.routes.map((r) => PHASES.indexOf(r.when || "document_end")))] || "document_end";
+        scheduleDocument(first, () => guard(() => void mountOverlay(o)), now);
+    }
+
+    function ensureHost(): ShadowRoot {
+        if (host && shadow && host.isConnected) return shadow;
+        if (!host || !shadow) {
+            host = document.createElement("wiretrick-ui");
+            shadow = host.attachShadow({ mode: "closed" });
+            host.style.cssText = "all:initial!important;display:block!important;position:fixed!important;inset:0!important;width:auto!important;height:auto!important;z-index:2147483647!important;pointer-events:none!important;visibility:visible!important;opacity:1!important;transform:none!important;contain:strict!important";
+            // a page that rewrites its <html> drops the host: put it back (its frames reload)
+            new MutationObserver(() => {
+                if (host && !host.isConnected && overlays.size && !dead) {
+                    document.documentElement.appendChild(host);
+                    for (const s of [...overlays.keys()]) removeOverlay(s, "reloaded");
+                    syncOverlays(lastOverlays, true);
+                }
+            }).observe(document, { childList: true, subtree: true });
+        }
+        document.documentElement.appendChild(host);
+        return shadow;
+    }
+
+    async function mountOverlay(o: Overlay): Promise<void> {
+        if (o.closed || dead || o.frame) return;
+        const s = o.info.scriptId;
+        try {
+            await l2call("overlay.open", { nonce: o.nonce, url: o.url }, s);
+        } catch (e: any) {
+            scriptLog(s, "error", scriptLogLine(o.info.name, "overlay", `couldn't start: ${e?.message || e}`));
+            return;
+        }
+        if (o.closed || dead) return;
+        const frame = document.createElement("iframe");
+        o.frame = frame;
+        frame.src = chrome.runtime.getURL("overlay.html") + "#" + o.nonce;
+        frame.setAttribute("allowtransparency", "true");
+        frame.setAttribute("aria-label", `${o.info.name} (Wiretrick)`);
+        // same color-scheme inside and out, or Chromium paints the frame opaque
+        frame.style.cssText = `all:initial;position:fixed;inset:0;width:100%;height:100%;border:0;margin:0;padding:0;background:transparent;color-scheme:normal;pointer-events:auto;z-index:${++zTop};clip-path:${clipPathFor([])}`;
+        frame.addEventListener("load", () => guard(() => connectOverlay(o)), { once: true });
+        ensureHost().appendChild(frame);
+    }
+
+    function connectOverlay(o: Overlay): void {
+        if (o.closed || !o.frame?.contentWindow) return;
+        const s = o.info.scriptId;
+        const { port1, port2 } = new MessageChannel();
+        const ep = messagePortEndpoint(port1, { debug: (m) => dlog("debug", `overlay ${o.info.name}:`, m) });
+        let proven = false;
+        const log = (level: ScriptLogLevel, msg: string) => scriptLog(s, level, msg);
+        ep.handle("hello", async ({ nonce }) => {
+            if (proven || nonce !== o.nonce) {
+                ep.close("refused");
+                throw new Error("refused");
+            }
+            proven = true;
+            o.ep = ep;
+            const init = await l2call("overlay.init", {}, s);
+            queueMicrotask(() => {
+                for (const call of o.queue.splice(0)) ep.push("rpc.call", call);
+            });
+            return { ...init, phase: phaseNow() };
+        });
+        const mine = <T>(fn: (a: T) => any) => (a: T) => {
+            if (proven && !o.closed) return fn(a);
+            throw new Error("refused");
+        };
+        // the frame's script: its stores, fetches and storage, for script `s` only
+        ep.on("store.declare", (a) => proven && l2?.push("store.declare", a, s));
+        ep.on("store.set", (a) => proven && l2?.push("store.set", a, s));
+        ep.handle("store.sub", mine((a: ReqOf<"store.sub">) => l2call("store.sub", a, s)));
+        ep.handle("fetch", mine((a: ReqOf<"fetch">) => l2call("fetch", { request: a.request, bypass: !!a.bypass }, s)));
+        ep.handle("pagefetch", mine((a: ReqOf<"pagefetch">) => pageFetch(s, a.request, !!a.bypass)));
+        ep.handle("storage.get", mine((a: ReqOf<"storage.get">) => new Promise((r) => safeSend({ type: "scriptStorageGet", scriptId: s, key: a.key }, (x: any) => r({ value: x?.value })))));
+        ep.handle("storage.set", mine((a: ReqOf<"storage.set">) => new Promise((r) => safeSend({ type: "scriptStorageSet", scriptId: s, key: a.key, value: a.value }, () => r({})))));
+        ep.on("log", (a) => proven && log(["debug", "info", "warn", "error"].includes(a?.level) ? a.level : "info", String(a?.msg ?? "")));
+        ep.on("rects", (a) => {
+            if (proven && o.frame && Array.isArray(a?.rects)) o.frame.style.clipPath = clipPathFor(normalizeRects(a.rects, window.innerWidth, window.innerHeight));
+        });
+        ep.on("focus", () => {
+            if (proven && o.frame && o.frame.style.zIndex !== String(zTop)) o.frame.style.zIndex = String(++zTop);
+        });
+        ep.on("rpc.call", (c) => proven && isRpcCall(c) && routeOverlayCall(s, c, (r) => ep.push("rpc.result", r)));
+        ep.on("rpc.result", (r) => proven && overlayClients.get(s)?.receive(r));
+        ep.onClose(() => {
+            if (o.ep === ep) removeOverlay(s, "closed");
+        });
+        // not the nonce: the frame has to know it
+        o.frame.contentWindow.postMessage({ wtOverlay: true }, "*", [port2]);
+        // a frame that never says hello (navigated away, blocked) is dropped
+        setTimeout(() => {
+            if (!proven && !o.closed) {
+                ep.close("no hello");
+                log("warn", scriptLogLine(o.info.name, "overlay", "the overlay frame didn't start"));
+            }
+        }, 15000);
+    }
+
+    function removeOverlay(s: string, why: string): void {
+        const o = overlays.get(s);
+        if (!o) return;
+        overlays.delete(s);
+        o.closed = true;
+        o.frame?.remove();
+        o.ep?.close(why);
+        for (const call of o.queue.splice(0)) overlayClients.get(s)?.receive(callError(call.cid, NOT_RUNNING));
+        overlayClients.get(s)?.disconnect(`the overlay ${why}`);
+        l2?.push("overlay.closed", {}, s);
+        l2Holders = overlays.size;
+    }
+
+    /** the isolated world's caller into script `s`'s overlay */
+    function overlayClient(s: string): RpcClient {
+        let c = overlayClients.get(s);
+        if (c) return c;
+        c = new RpcClient((call) => {
+            const o = overlays.get(s);
+            if (!o) return void queueMicrotask(() => c!.receive(callError(call.cid, NOT_RUNNING)));
+            if (o.ep) return o.ep.push("rpc.call", call);
+            if (o.queue.length >= RPC_QUEUE_MAX) return void queueMicrotask(() => c!.receive(callError(call.cid, `${call.fn}(): too many calls waiting for the overlay`)));
+            o.queue.push(call);
+        });
+        overlayClients.set(s, c);
+        return c;
+    }
+
+    /** an overlay's call into its script's onPage code: the isolated world (here), the CSP fallback (here), else the main world (hook) */
+    function routeOverlayCall(s: string, call: RpcCall, reply: (r: RpcResult) => void): void {
+        const iso = isoExposers.get(s);
+        const fb = fallbackExposers.get(s);
+        if (iso?.has(call.h) && !iso.isElsewhere(call.h)) return iso.answer(call, reply);
+        if (fb?.has(call.h) && !fb.isElsewhere(call.h)) return fb.answer(call, reply);
+        if (pageScriptIds.has(s) && !hookBroken) {
+            const timer = setTimeout(() => l4Pending.delete(call.cid), RPC_TIMEOUT_MS + 1000);
+            l4Pending.set(call.cid, { s, reply, timer });
+            window.postMessage({ source: MAIN_SOURCE, kind: "rpc.call", s, call }, window.location.origin);
+            return;
+        }
+        if (isoUnsupported.has(s)) return reply(callError(call.cid, ISO_MV3));
+        (iso ?? fb)?.answer(call, reply) ?? reply(callError(call.cid, NOT_RUNNING));
+    }
+
+    /** `wt.fetch(…, { from: "page" })` and the overlay's `fetch`: this frame fetches, as the page (Firefox: the page's own fetch) */
+    async function pageFetch(s: string, request: ReqOf<"pagefetch">["request"], bypass: boolean): Promise<ResOf<"pagefetch">> {
+        const [url, init] = fromWireRequest(request, { credentials: "include" });
+        const abs = new URL(url, location.href).href;
+        if (bypass) await l2call("bypass.add", { tabId: -1, method: (init.method || "GET").toUpperCase(), url: abs }, s);
+        const content = (globalThis as any).content;
+        const f: typeof fetch = typeof content?.fetch === "function" ? (u, i) => content.fetch(u, i) : fetch;
+        return toWireResponse(await f(abs, init));
+    }
+
+    // ---- in-place navigation (ctx.onNavigate) ----
+    let navWatching = false;
+    let lastHref = location.href;
+    function watchNavigation(): void {
+        if (navWatching) return;
+        navWatching = true;
+        // the isolated world can't see history.pushState: the hook nudges (`nav`)
+        window.postMessage({ source: MAIN_SOURCE, kind: "watchNav" }, window.location.origin);
+        window.addEventListener("popstate", () => noteNav());
+        window.addEventListener("hashchange", () => noteNav());
+        // pages whose hook is missing or broken: poll while overlays exist
+        setInterval(() => overlays.size && noteNav(), 1000);
+    }
+    function noteNav(): void {
+        if (location.href === lastHref) return;
+        lastHref = location.href;
+        for (const o of overlays.values()) o.ep?.push("nav", { url: lastHref });
+    }
+
+    // the overlays' `when`
+    document.addEventListener("DOMContentLoaded", () => {
+        for (const o of overlays.values()) o.ep?.push("when", { phase: "document_end" });
+    });
+    window.addEventListener("load", () => {
+        for (const o of overlays.values()) o.ep?.push("when", { phase: "document_idle" });
+    });
 
     chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (r: any) => void) => {
         // the background asks whether this frame has a live hook (see pipeline.ts checkMissed)

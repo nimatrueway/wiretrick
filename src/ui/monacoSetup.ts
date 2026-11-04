@@ -52,6 +52,8 @@ export function editorCompilerOptions(ts: { ScriptTarget: any; ModuleKind: any; 
         // data files: `import x from "./mock/a.json"` resolves to the
         // declaration setDataFileTypings puts next to it (a.d.json.ts)
         resolveJsonModule: true,
+        // .tsx scripts: the automatic runtime against the built-in React (BUILTIN_PATHS)
+        jsx: 4, // ts.JsxEmit.ReactJSX
         // without it TypeScript ignores a .d.json.ts it resolved to (and falls back to "*.json")
         allowArbitraryExtensions: true,
         // each script is its own module: top-level names in different

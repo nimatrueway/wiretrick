@@ -88,13 +88,13 @@ let nextRuleId = BYPASS_RULE_BASE;
 
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/** the declarativeNetRequest rule that lets one request past every other session rule */
-export function bypassRule(id: number, method: string, url: string): any {
+/** the declarativeNetRequest rule that lets one request past every other session rule (-1: the background's own requests) */
+export function bypassRule(id: number, method: string, url: string, tabId = -1): any {
     return {
         id,
         priority: 2 ** 31 - 1,
         action: { type: "allow" },
-        condition: { regexFilter: `^${escapeRe(norm(url))}(#.*)?$`, requestMethods: [method.toLowerCase()], tabIds: [-1] },
+        condition: { regexFilter: `^${escapeRe(norm(url))}(#.*)?$`, requestMethods: [method.toLowerCase()], tabIds: [tabId] },
     };
 }
 
@@ -119,12 +119,20 @@ function updateSessionRules(opts: any): Promise<boolean> {
  * regex too long) doesn't stop the fetch.
  */
 export async function withBypassRule<T>(method: string, url: string, run: () => Promise<T>): Promise<T> {
-    const id = nextRuleId++;
-    if (nextRuleId > BYPASS_RULE_BASE + 99_999) nextRuleId = BYPASS_RULE_BASE;
-    const added = await updateSessionRules({ removeRuleIds: [id], addRules: [bypassRule(id, method, url)] });
+    const remove = await addBypassRule(method, url);
     try {
         return await run();
     } finally {
-        if (added) void updateSessionRules({ removeRuleIds: [id] });
+        remove();
     }
+}
+
+/** add a bypass allow rule (for one tab's requests, or the background's); returns its removal */
+export async function addBypassRule(method: string, url: string, tabId = -1): Promise<() => void> {
+    const id = nextRuleId++;
+    if (nextRuleId > BYPASS_RULE_BASE + 99_999) nextRuleId = BYPASS_RULE_BASE;
+    const added = await updateSessionRules({ removeRuleIds: [id], addRules: [bypassRule(id, method, url, tabId)] });
+    return () => {
+        if (added) void updateSessionRules({ removeRuleIds: [id] });
+    };
 }

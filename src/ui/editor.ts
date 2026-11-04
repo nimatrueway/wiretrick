@@ -18,6 +18,7 @@ import { dialogs, openHelp, openSettings, pickRows, resolveConflict } from "./st
 import { folderStateText, setHelperStatus, settings } from "./state/settings";
 import { watchTheme, type Theme } from "./theme";
 import * as fsBridge from "./fsBridge";
+import { usesJsx } from "../shared/builtinSpecs";
 import { cleanScriptName, scriptNameProblem, scriptFileName, scriptFileKey, uniqueScriptName, dataFilePathProblem, folderPathProblem } from "../shared/scriptName";
 import { buildBundle, parseBundleText, bundleSettingsDoc, pickBundle, vscodeTargetPath, editorLaunchUrl, launchAppName, type LaunchMode } from "./bundle";
 import { computeDirty } from "./dirtyState";
@@ -650,8 +651,10 @@ function restoreViewState(m: any): void {
     if (vs) editor.restoreViewState(vs);
 }
 
-function scriptUri(name: string): any {
-    return (window as any).monaco.Uri.file("/" + scriptFileName(name));
+/** a script with JSX is a .tsx model (TypeScript parses JSX only there); it moves when saved code gains or loses JSX */
+function scriptUri(name: string, code: string): any {
+    const file = scriptFileName(name);
+    return (window as any).monaco.Uri.file("/" + (usesJsx(code) ? file + "x" : file));
 }
 
 function syncModels(): void {
@@ -660,7 +663,7 @@ function syncModels(): void {
     const seen = new Set<string>();
     for (const s of scripts) {
         seen.add(s.id);
-        const uri = scriptUri(s.meta.name);
+        const uri = scriptUri(s.meta.name, s.code);
         let m = models.get(s.id);
         if (m && m.uri.toString() !== uri.toString()) {
             // renamed: move to a model at the new path, keeping any unsaved

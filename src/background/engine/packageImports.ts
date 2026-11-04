@@ -222,10 +222,13 @@ export async function resolveVersion(name: string, range: string): Promise<strin
 
 /** library code → CommonJS run by makePackageLoader */
 function toCommonJs(url: string, text: string): string {
-    if (/\.json$/i.test(new URL(url).pathname)) {
+    const path = new URL(url).pathname;
+    if (/\.json$/i.test(path)) {
         JSON.parse(text);
         return `module.exports = ${text};`;
     }
+    // a stylesheet: the overlay adds it as a <style> (elsewhere it's ignored)
+    if (/\.css$/i.test(path)) return `__wtStyle(${JSON.stringify(text)}, ${JSON.stringify(url)});`;
     if (!isEsModule(text)) return text;
     const meta = text.replace(/\bimport\.meta\.url\b/g, JSON.stringify(url)).replace(/\bimport\.meta\b/g, `({ url: ${JSON.stringify(url)} })`);
     return transform(meta, { transforms: ["imports"], filePath: url }).code;

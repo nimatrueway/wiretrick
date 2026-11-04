@@ -11,7 +11,8 @@ import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } 
 import { scriptFunction } from "../shared/scriptFn";
 import { makeLibRequire, type ShippedLib } from "../shared/scriptImports";
 import { routeMatches, takesBinary, type DocumentWhen, type RouteMeta } from "../shared/route";
-import { makePageShim, domHandlersFor, scheduleDocument } from "../shared/pageShim";
+import { makePageShim, domHandlersFor, scheduleDocument, firePageHandler, type PageDocumentHandler } from "../shared/pageShim";
+import { Exposer, isRpcCall, NOT_RUNNING, type RpcResult } from "../shared/rpc";
 import { bodyKind, setTextTypes } from "../shared/bodyKind";
 import { readFetchBody } from "../shared/requestBody";
 
@@ -50,6 +51,8 @@ import { readFetchBody } from "../shared/requestBody";
     let domHandlers: { scriptId: string; name: string; src: string; params?: Record<string, any> }[] = [];
     let libSources: ShippedLib[] = [];
     let domFired = false;
+    /** per script: answers the overlay's calls into its main-world onPage handles (via the bridge) */
+    const exposers = new Map<string, Exposer>();
     let reqSeq = 0;
     const pending = new Map<number, (v: any) => void>();
 
@@ -96,6 +99,23 @@ import { readFetchBody } from "../shared/requestBody";
             // the extension was reloaded — restore the page's own fetch/XHR
             // and stop intercepting (the stale content script can't relay)
             goDormant();
+            return;
+        }
+        if (data.kind === "rpc.call" && typeof data.s === "string" && isRpcCall(data.call)) {
+            // the overlay calls this script's onPage handle; the page can post
+            // this too, but only reaches what the page could call itself
+            const reply = (result: RpcResult) => {
+                try {
+                    window.postMessage({ source: HOOK_SOURCE, kind: "rpc.result", s: data.s, result }, window.location.origin);
+                } catch {}
+            };
+            const ex = exposers.get(data.s);
+            if (ex) ex.answer(data.call, reply);
+            else reply({ cid: data.call.cid, ok: false, error: { name: "WtCallError", message: NOT_RUNNING } });
+            return;
+        }
+        if (data.kind === "watchNav") {
+            watchNav();
             return;
         }
         if (data.kind === "callResult" && pending.has(data.reqId)) {
@@ -153,25 +173,35 @@ import { readFetchBody } from "../shared/requestBody";
         const requireFrom = makeLibRequire(libSources, (lib, require, moduleObj) =>
             scriptFunction(lib.src!)(makeDocumentShim(null, lib.name, lib.params || {}).wt, scriptConsole(null, lib.name), require, moduleObj, moduleObj.exports)
         );
-        const compiledDocument: { scriptId: string; name: string; when: DocumentWhen; fn: (ctx: any) => any }[] = [];
+        const compiledDocument: { scriptId: string; name: string; when: DocumentWhen; d: PageDocumentHandler; exposer: Exposer }[] = [];
         let cspBlocked = false;
+        // a repeated status after the handlers fired recompiles but fires nothing: the exposers stay
+        const refire = hot || !domFired;
+        if (refire) for (const id of [...exposers.keys()]) if (!domHandlers.some((d) => d.scriptId === id)) exposers.delete(id);
         for (const d of domHandlers) {
+            let exposer = exposers.get(d.scriptId);
+            if (!exposer) exposers.set(d.scriptId, (exposer = new Exposer()));
+            else if (refire) exposer.reset();
+            const ex = refire ? exposer : undefined;
             try {
                 // shadow `console` inside the script so its console.* calls
                 // land in the extension LOG (not the page console);
                 // require resolves the shipped libs
                 const fn = scriptFunction(d.src);
                 const moduleObj = { exports: {} as any };
-                const { wt, dom } = makeDocumentShim(d.scriptId, d.name, d.params || {});
+                const { wt, dom } = makeDocumentShim(d.scriptId, d.name, d.params || {}, ex);
                 fn(wt, scriptConsole(d.scriptId, d.name), requireFrom(d.name), moduleObj, moduleObj.exports);
-                for (const h of domHandlersFor(dom, location.href)) compiledDocument.push({ scriptId: d.scriptId, name: d.name, when: h.when, fn: h.fn });
+                for (const h of domHandlersFor(dom, location.href, ex)) compiledDocument.push({ scriptId: d.scriptId, name: d.name, when: h.when, d: h, exposer });
             } catch (e: any) {
+                // nothing registered here answers: the overlay's calls get `not running`
+                ex?.reset();
                 if (/Evaluating a string as JavaScript|unsafe-eval/i.test(e.message || "")) {
                     cspBlocked = true;
                 } else {
                     scriptLogUp(d.scriptId, "error", formatScriptError(d.name, e, "onDocument compile"));
                 }
             }
+            ex?.done();
         }
         if (cspBlocked) {
             logUp("page CSP blocks eval in the page world — running onDocument handlers in the isolated world instead", "info");
@@ -184,10 +214,10 @@ import { readFetchBody } from "../shared/requestBody";
         const injected = (document.currentScript as HTMLScriptElement | null)
             ? "document.currentScript"
             : (document.querySelector("script[data-res-override-hook]") ? "script tag (already in DOM)" : "bundle message");
-        const fire = ({ scriptId, name, when, fn }: (typeof compiledDocument)[number]) => {
+        const fire = ({ scriptId, name, when, d, exposer }: (typeof compiledDocument)[number]) => {
             try {
                 scriptLogUp(scriptId, "debug", scriptLogLine(name, "onDocument", `running (${when}) on ${location.href} [${document.readyState}], hook injected via ${injected}`));
-                fn(makeCtx(location.href, "GET"));
+                firePageHandler(d, makeCtx(location.href, "GET"), exposer);
             } catch (e: any) {
                 scriptLogUp(scriptId, "error", formatScriptError(name, e, "onDocument"));
             }
@@ -202,6 +232,30 @@ import { readFetchBody } from "../shared/requestBody";
         for (const h of compiledDocument) scheduleDocument(h.when, () => fire(h));
     }
 
+    /**
+     * In-place navigations for `ctx.onNavigate` (the bridge asks once this
+     * frame shows an overlay): the isolated world can't see history calls.
+     * The bridge reads the URL itself — this is only a nudge.
+     */
+    let navWatched = false;
+    function watchNav(): void {
+        if (navWatched) return;
+        navWatched = true;
+        const nudge = () => {
+            try {
+                window.postMessage({ source: HOOK_SOURCE, kind: "nav" }, window.location.origin);
+            } catch {}
+        };
+        for (const m of ["pushState", "replaceState"] as const) {
+            const orig = history[m];
+            history[m] = function (this: History, ...args: any[]) {
+                const r = (orig as any).apply(this, args);
+                nudge();
+                return r;
+            } as any;
+        }
+    }
+
     function requestStatus(): void {
         try {
             window.postMessage({ source: HOOK_SOURCE, kind: "status?" }, window.location.origin);
@@ -214,9 +268,11 @@ import { readFetchBody } from "../shared/requestBody";
     }
 
     /** shim for compiled dom scripts: log → extension LOG (script-tagged), storage → bridge relay */
-    function makeDocumentShim(scriptId: string | null, name: string, params: Record<string, any>) {
+    function makeDocumentShim(scriptId: string | null, name: string, params: Record<string, any>, exposer?: Exposer) {
         return makePageShim({
             params,
+            exposer,
+            otherWorld: __MV3__ ? 'world: "isolated" onPage code doesn\'t run on this build yet' : NOT_RUNNING,
             log: (...args: any[]) => scriptLogUp(scriptId, "info", scriptLogLine(name, "wt.log", formatLogArgs(args))),
             storage: {
                 // the background answers { value } (same as the isolated-world shim unwraps)

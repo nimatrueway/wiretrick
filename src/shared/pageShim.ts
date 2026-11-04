@@ -7,13 +7,21 @@
  * are collected with their routes (the other world's are skipped), and params resolve
  * to the raw values the background shipped in the bundle (each def's
  * `parse` runs here, in the page).
+ *
+ * With an `exposer`, each onPage registration is a handle the overlay can
+ * call (`"page:N"`, shared/rpc.ts): this world's handlers expose what they
+ * return (`firePageHandler`), the other world's are marked elsewhere. With
+ * `overlay`, `wt.onOverlay` returns a live handle (isolated world, top frame).
  */
 import { normalizeRoute, pageWorld, routeMatches, type DocumentWhen, type PageWorld, type RouteMeta } from "./route";
 import { inertRemote, REMOTE_MAIN_WORLD } from "./remote";
+import { NOT_RUNNING, TOP_FRAME_ONLY, type Exposer } from "./rpc";
 import { parseParamValue, type ParamDef } from "./scriptDef";
 import { scriptEnv } from "./scriptEnv";
 
 export interface PageDocumentHandler {
+    /** its RPC handle id (`"page:N"`) */
+    h: string;
     route: RouteMeta;
     when: DocumentWhen;
     fn: (ctx: any) => any;
@@ -26,6 +34,12 @@ export interface PageShimOptions {
     storage: { get(key: string): any; set(key: string, value: any): any };
     /** which onPage handlers this shim collects (default "main") */
     world?: PageWorld;
+    /** answers the overlay's calls into this script's onPage handles */
+    exposer?: Exposer;
+    /** why the other world's handles don't answer here (default: not running) */
+    otherWorld?: string;
+    /** the isolated world in the top frame: `"overlay:N"` → a live handle */
+    overlay?: (h: string) => any;
 }
 
 const NO_STORE = "wt.store isn't available in page code — pass the data to an onPage function from the overlay instead";
@@ -44,10 +58,19 @@ export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDocumentHa
     const onPage = (api: "onPage" | "onDocument") => (route: unknown, fn: unknown) => {
         if (typeof fn !== "function") throw new Error(`wt.${api}: second argument must be the handler function`);
         const r = normalizeRoute("onDocument", route, pageIndex++, api === "onPage" ? "onPage" : undefined);
-        if (pageWorld(r) === world) dom.push({ route: r, when: r.when || "document_end", fn: fn as any });
+        const h = `page:${r.index}`;
+        if (pageWorld(r) === world) {
+            o.exposer?.register(h);
+            dom.push({ h, route: r, when: r.when || "document_end", fn: fn as any });
+        } else o.exposer?.elsewhere(h, o.otherWorld ?? NOT_RUNNING);
         return inertRemote("page functions are called from this script's overlay, not from page code");
     };
-    const overlayHandle = inertRemote(world === "main" ? REMOTE_MAIN_WORLD : "the overlay isn't running on this page");
+    let overlayIndex = 0;
+    const onOverlay = (_route: unknown, fn: unknown) => {
+        const h = `overlay:${typeof fn === "function" ? overlayIndex++ : -1}`;
+        if (world === "main") return inertRemote(REMOTE_MAIN_WORLD);
+        return o.overlay ? o.overlay(h) : inertRemote(TOP_FRAME_ONLY);
+    };
     const parsed = (key: string, def: ParamDef | undefined) => (def && typeof def === "object" ? parseParamValue(key, def, o.params[key]) : o.params[key]);
     const wt = {
         onRequest: inert,
@@ -56,7 +79,7 @@ export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDocumentHa
         onResponseBody: inert,
         onPage: onPage("onPage"),
         onDocument: onPage("onDocument"),
-        onOverlay: () => overlayHandle,
+        onOverlay,
         // declaring a store at top level is fine (that code runs here too); using it isn't
         store: () => noStore,
         fetch: () => Promise.reject(new Error(NO_FETCH)),
@@ -70,9 +93,25 @@ export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDocumentHa
     return { wt, dom };
 }
 
-/** the handlers whose route matches this frame's URL */
-export function domHandlersFor(dom: PageDocumentHandler[], url: string): PageDocumentHandler[] {
-    return dom.filter((h) => routeMatches(h.route, url));
+/** the handlers whose route matches this frame's URL (the others' handles answer `not running`) */
+export function domHandlersFor(dom: PageDocumentHandler[], url: string, exposer?: Exposer): PageDocumentHandler[] {
+    return dom.filter((h) => {
+        const on = routeMatches(h.route, url);
+        if (!on) exposer?.fail(h.h);
+        return on;
+    });
+}
+
+/** run a handler; what it returns is what its handle exposes (a throw: `not running`, rethrown) */
+export function firePageHandler(d: PageDocumentHandler, ctx: any, exposer?: Exposer): void {
+    let out: unknown;
+    try {
+        out = d.fn(ctx);
+    } catch (e) {
+        exposer?.fail(d.h);
+        throw e;
+    }
+    exposer?.expose(d.h, out);
 }
 
 /** run `run` at the handler's `when` (immediately when `now`) */

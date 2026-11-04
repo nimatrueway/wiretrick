@@ -11,6 +11,9 @@
  * clone) and an in-process pair (tests, the MV2 background page).
  */
 import { packBytes, unpackBytes } from "./bytesPack";
+import type { RouteMeta } from "./route";
+import type { ShippedLib } from "./scriptImports";
+import type { RpcCall, RpcResult } from "./rpc";
 
 export type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
 
@@ -71,6 +74,57 @@ export interface WireOps {
     "bypass.add": { req: { tabId: number; method: string; url: string }; res: {} };
     /** scripts changed: a bridge reloads what depends on them */
     "bundle.update": { push: { scripts: { s: string; codeHash: string }[] } };
+
+    // ---- the overlay (L3: overlay ⇄ bridge; L2 for what the bridge relays) ----
+    /** L3: the overlay frame starts (its nonce proves it's the frame the bridge made) */
+    hello: { req: { nonce: string }; res: OverlayInit };
+    /** L2: the bridge is about to frame script `s`'s overlay for the page at `url` with this one-time nonce (also: re-grant after a reconnect) */
+    "overlay.open": { req: { nonce: string; url: string }; res: {} };
+    /** L2: what script `s`'s overlay runs in this frame (refused unless it has one here) */
+    "overlay.init": { req: {}; res: OverlayInit };
+    /** L2: script `s`'s overlay closed or reloaded */
+    "overlay.closed": { push: {} };
+    /** L3: `wt.fetch(…, { from: "page" })` — the bridge fetches, with the page's cookies */
+    pagefetch: { req: { request: WireRequest; bypass: boolean }; res: WireResponse };
+    /** L3: the page reached a `when` phase */
+    when: { push: { phase: "document_start" | "document_end" | "document_idle" } };
+    /** L3: the overlay's visible areas, `[x, y, width, height]` in CSS pixels (empty: nothing to show) */
+    rects: { push: { rects: [number, number, number, number][] } };
+    /** L3: the user pressed in the overlay: bring it to the front */
+    focus: { push: {} };
+    /** L3: the overlay's errors and console output, for the script's Log */
+    log: { push: { level: "debug" | "info" | "warn" | "error"; msg: string } };
+    /** L3: the page navigated in place (history API, hash) */
+    nav: { push: { url: string } };
+    /** L3: the overlay's `wt.storage` (the bridge relays it for this script) */
+    "storage.get": { req: { key: string }; res: { value: any } };
+    "storage.set": { req: { key: string; value: any }; res: {} };
+    /** L3: the page's L2 link came back: replicas re-subscribe */
+    "store.resync": { push: {} };
+    /** a call between the overlay and onPage code (shared/rpc.ts) */
+    "rpc.call": { push: RpcCall };
+    /** its answer */
+    "rpc.result": { push: RpcResult };
+}
+
+/** what an overlay frame needs to run its script */
+export interface OverlayInit {
+    s: string;
+    name: string;
+    /** the script's runnable JS (never sent through the page) */
+    code: string;
+    codeHash: string;
+    /** its onOverlay routes matching the page */
+    routes: RouteMeta[];
+    /** the page's URL */
+    url: string;
+    params: Record<string, any>;
+    stores: { [name: string]: StoreSnapshot };
+    libs: ShippedLib[];
+    /** load the built-in React first */
+    react: boolean;
+    /** the page's current `when` phase */
+    phase?: "document_start" | "document_end" | "document_idle";
 }
 
 type ReqOps = { [K in keyof WireOps]: WireOps[K] extends { req: any } ? K : never }[keyof WireOps];

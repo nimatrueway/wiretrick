@@ -64,6 +64,9 @@ const pj = (o: object) => JSON.stringify(o);
 
 /** test packages: ESM, CJS with a dependency range, UMD, built-ins, failures, cycles, JSON, `exports`, @types */
 export const REGISTRY: Registry = {
+    "css-lib": {
+        "1.0.0": { "package.json": pj({ name: "css-lib", version: "1.0.0" }), "dist/theme.css": `.btn { color: red; }\n` },
+    },
     "esm-lib": {
         "1.0.0": {
             "package.json": pj({ name: "esm-lib", version: "1.0.0", main: "index.js", types: "index.d.ts" }),

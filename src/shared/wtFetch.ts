@@ -20,16 +20,18 @@ export function splitFetchInit(init: WtFetchInit | undefined): { init: RequestIn
 }
 
 /**
- * Serialize a request for the link. The URL must be absolute: a
+ * Serialize a request for the link. The URL must be absolute, unless a
+ * `base` (the page's URL, for an overlay's page fetch) resolves it: a
  * background fetch has no page to resolve it against.
  */
-export async function toWireRequest(input: RequestInfo | URL, init: RequestInit): Promise<WireRequest> {
-    const raw = typeof input === "string" || input instanceof URL ? String(input) : (input as Request).url;
+export async function toWireRequest(input: RequestInfo | URL, init: RequestInit, base?: string): Promise<WireRequest> {
+    let raw = typeof input === "string" || input instanceof URL ? String(input) : (input as Request).url;
     try {
-        new URL(raw);
+        raw = new URL(raw, base).href;
     } catch {
         throw new TypeError(`wt.fetch: "${raw}" isn't an absolute URL — a background fetch has no page to resolve it against`);
     }
+    if (typeof input === "string") input = raw;
     // a signal can't cross the link; drop it rather than fail
     const { signal: _signal, ...rest } = init;
     const req = new Request(input instanceof URL ? input.href : input, rest);

@@ -79,6 +79,10 @@ export interface ResApiOverrides {
     store?: (name: string, initial: object, persist: StorePersist) => object;
     /** `wt.fetch(…, { from: "background" })` (default: this context's own fetch, no bypass) */
     fetch?: (request: WireRequest, bypass: boolean) => Promise<WireResponse>;
+    /** `wt.fetch(…, { from: "page" })`, then the default `from` (the overlay); `url` resolves relative URLs */
+    pageFetch?: { url: string; fetch: (request: WireRequest, bypass: boolean) => Promise<WireResponse> };
+    /** what `wt.onPage` / `wt.onOverlay` registration number `index` returns (default: an inert handle) */
+    remote?: (kind: "onDocument" | "onOverlay", index: number) => any;
 }
 
 /** Standard overrides for a stored script: storage wired by id, log → sink. */
@@ -571,10 +575,12 @@ function makeStore(overrides?: ResApiOverrides): (name: string, initial: object,
     };
 }
 
-/** `wt.fetch` in background code */
+/** `wt.fetch`: background code, or the overlay (with `pageFetch`) */
 function makeFetch(overrides?: ResApiOverrides): (input: RequestInfo | URL, init?: WtFetchInit) => Promise<Response> {
     return async (input, init) => {
         const { init: rest, from, bypass } = splitFetchInit(init);
+        const page = overrides?.pageFetch;
+        if (page && from !== "background") return fromWireResponse(await page.fetch(await toWireRequest(input, rest, page.url), bypass));
         if (from === "page") throw new Error('wt.fetch: from: "page" fetches as the page, which only an overlay (wt.onOverlay) can do — background code uses from: "background"');
         if (!overrides?.fetch) return fetch(input, { credentials: "include", ...rest });
         return fromWireResponse(await overrides.fetch(await toWireRequest(input, rest), bypass));
@@ -601,12 +607,12 @@ function makeShim(owner: ReturnType<typeof createOwner>, overrides?: ResApiOverr
         const name = api || kind;
         const top = collectors[collectors.length - 1];
         // page/overlay registrations hand back an RPC handle; in the background it's inert
-        const handle = kind === "onDocument" || kind === "onOverlay" ? inertRemote(REMOTE_FROM_BACKGROUND) : undefined;
+        const remote = (index: number) => (kind !== "onDocument" && kind !== "onOverlay" ? undefined : index >= 0 && overrides?.remote ? overrides.remote(kind, index) : inertRemote(REMOTE_FROM_BACKGROUND));
         if (!top) {
             const msg = `wt.${name} called after the script's top level finished — handlers must be registered synchronously at top level (not after await / in callbacks); ignored`;
             if (overrides?.logSink) overrides.logSink("error", "wt", msg);
             else console.error("[Wiretrick]", msg);
-            return handle;
+            return remote(-1);
         }
         if (typeof route === "function" && fn === undefined && !mentionsStub(route)) normalizeRoute(kind, route, 0, api); // throws the "first argument" error
         if (typeof fn !== "function") throw new Error(`wt.${name}: second argument must be the handler function`);
@@ -616,7 +622,7 @@ function makeShim(owner: ReturnType<typeof createOwner>, overrides?: ResApiOverr
         const line = callerLine();
         if (line) r.line = line;
         list.push({ fn: fn as HandlerFn, route: r });
-        return handle;
+        return remote(r.index);
     };
     return {
         onRequest: register("onRequest"),
@@ -644,4 +650,132 @@ function makeShim(owner: ReturnType<typeof createOwner>, overrides?: ResApiOverr
         log: (...args: any[]) => (overrides?.logSink ? overrides.logSink("info", "wt.log", formatLogArgs(args)) : console.log("[Wiretrick] wt.log:", ...args)),
         ...scriptEnv(),
     };
+}
+
+/** a `wt.onPage` / `wt.onOverlay` call that isn't at the script's top level */
+export interface RegistrationProblem {
+    api: "onPage" | "onOverlay";
+    /** the call's 1-based line */
+    line: number;
+    /** 0-based: which `wt.<api>(` call of the source it is (onPage counts onDocument too) */
+    nth: number;
+}
+
+const NESTING = /\b(?:if|else|for|while|do|switch|try|catch|finally)\b|=>|&&|\|\||\?/;
+
+/**
+ * `wt.onPage` / `wt.onOverlay` calls that aren't plain top-level
+ * statements (inside a function, block, condition or loop): the page and
+ * the overlay match handles by registration order, so a registration that
+ * runs in one context and not the other would mix them up. A lightweight
+ * scan (comments, strings and templates skipped), not a parser.
+ */
+export function registrationProblems(code: string): RegistrationProblem[] {
+    const out: RegistrationProblem[] = [];
+    const counts = { onPage: 0, onOverlay: 0 };
+    let depth = 0;
+    let line = 1;
+    /** depth-0 text since the last statement boundary */
+    let stmt = "";
+    let prev = ""; // the last significant character (regex vs division)
+    const n = code.length;
+    let i = 0;
+    const boundary = () => {
+        stmt = "";
+    };
+    while (i < n) {
+        const c = code[i];
+        if (c === "\n") {
+            line++;
+            // a newline ends a depth-0 statement unless the next line continues it
+            if (depth === 0 && !/(?:^\s*(?:if|for|while)\s*\(.*\)|^\s*(?:else|do)|[=(,:?&|+\-*/%<>!~^[{.])\s*$/.test(stmt) && !/^\s*[.?:&|+\-*/,]/.test(code.slice(i + 1, i + 40))) boundary();
+            else if (depth === 0) stmt += c;
+            i++;
+            continue;
+        }
+        if (c === "/" && code[i + 1] === "/") {
+            while (i < n && code[i] !== "\n") i++;
+            continue;
+        }
+        if (c === "/" && code[i + 1] === "*") {
+            const end = code.indexOf("*/", i + 2);
+            const stop = end < 0 ? n : end + 2;
+            for (let j = i; j < stop; j++) if (code[j] === "\n") line++;
+            i = stop;
+            continue;
+        }
+        if (c === '"' || c === "'" || c === "`" || (c === "/" && (prev === "" || /[(,=:[!&|?{};+\-*%<>~^]/.test(prev)))) {
+            // a string, template or regex literal: skip it (a template's ${…} counts as nested code)
+            const quote = c;
+            let cls = false;
+            i++;
+            while (i < n) {
+                const d = code[i];
+                if (d === "\\") {
+                    i += 2;
+                    continue;
+                }
+                if (d === "\n") {
+                    line++;
+                    if (quote !== "`") break;
+                }
+                if (quote === "/") {
+                    if (d === "[") cls = true;
+                    else if (d === "]") cls = false;
+                    else if (d === "/" && !cls) break;
+                }
+                if (quote === "`" && d === "$" && code[i + 1] === "{") {
+                    // nested code: scan it for calls (all nested) by brace depth
+                    let k = i + 2;
+                    let inner = 1;
+                    while (k < n && inner) {
+                        if (code[k] === "{") inner++;
+                        else if (code[k] === "}") inner--;
+                        else if (code[k] === "\n") line++;
+                        k++;
+                    }
+                    const sub = code.slice(i + 2, k - 1);
+                    for (const m of sub.matchAll(/\bwt\s*\.\s*(onPage|onDocument|onOverlay)\s*(?:<[^()]*>\s*)?\(/g)) {
+                        const api = m[1] === "onOverlay" ? "onOverlay" : "onPage";
+                        if (m[1] !== "onDocument") out.push({ api, line, nth: counts[api] });
+                        counts[api]++;
+                    }
+                    i = k;
+                    continue;
+                }
+                if (d === quote) break;
+                i++;
+            }
+            i++;
+            prev = "a";
+            if (depth === 0) stmt += "0";
+            continue;
+        }
+        const call = c === "w" && /^wt\s*\.\s*(onPage|onDocument|onOverlay)\s*(?:<[^()]*>\s*)?\(/.exec(code.slice(i, i + 40));
+        if (call && !/[\w$.]/.test(code[i - 1] || "")) {
+            const api = call[1] === "onOverlay" ? "onOverlay" : "onPage";
+            if (call[1] !== "onDocument" && (depth > 0 || NESTING.test(stmt))) out.push({ api, line, nth: counts[api] });
+            counts[api]++;
+        }
+        if (c === "{" || c === "(" || c === "[") depth++;
+        else if (c === "}" || c === ")" || c === "]") {
+            depth = Math.max(0, depth - 1);
+            if (depth === 0 && c === "}") {
+                boundary();
+                prev = "}";
+                i++;
+                continue;
+            }
+        } else if (c === ";" && depth === 0) {
+            boundary();
+            prev = ";";
+            i++;
+            continue;
+        }
+        if (depth === 0 && !(c === "{" || c === "(" || c === "[")) stmt += c;
+        else if (depth === 1 && (c === "(" || c === "[" || c === "{")) stmt += c;
+        if (!/\s/.test(c)) prev = c;
+        i++;
+    }
+    return out;
 }

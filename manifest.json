@@ -46,7 +46,8 @@
         "<all_urls>"
     ],
     "optional_permissions": ["management"],
-    "web_accessible_resources": ["hook.js"],
+    "web_accessible_resources": ["hook.js", "overlay.html", "overlay.js", "builtins-react.js"],
+    "sandbox": { "pages": ["overlay.html"] },
     "content_security_policy": "script-src 'self' 'unsafe-eval' blob:; worker-src 'self' blob:; object-src 'self'",
     "manifest_version": 2,
     "browser_specific_settings": {

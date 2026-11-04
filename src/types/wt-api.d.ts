@@ -239,7 +239,8 @@ declare namespace Wiretrick {
          *   can't call the overlay.
          * - `"isolated"`: a private world with none of the site's JavaScript.
          *   The site can't see or impersonate it, so it may call this
-         *   script's overlay. Runs on the Manifest V2 builds.
+         *   script's overlay (top frame). Runs on the Manifest V2 builds
+         *   (Chrome MV3: not yet — the handler is skipped with a warning).
          *
          * @example wt.onPage({ url: "*://example.com/*", world: "isolated" }, (ctx) => { … })
          */
@@ -271,7 +272,21 @@ declare namespace Wiretrick {
     interface PageCtx extends RequestCtx {}
 
     /** The context an `onOverlay` handler gets (`url` is the page's URL). */
-    interface OverlayCtx extends RequestCtx {}
+    interface OverlayCtx extends RequestCtx {
+        /**
+         * Run `fn` with the page's new URL whenever it navigates in place
+         * (history API, back/forward, `#hash` changes), as single-page apps
+         * do. The overlay stays; returns a function that stops listening.
+         *
+         * @example
+         * wt.onOverlay("*://example.com/*", (ctx) => {
+         *     const show = (url: string) => (badge.hidden = !url.includes("/cart"));
+         *     show(ctx.url);
+         *     ctx.onNavigate(show);
+         * });
+         */
+        onNavigate(fn: (url: string) => void): () => void;
+    }
 
     /** Header edits. */
     interface HeaderMod {
@@ -399,9 +414,11 @@ declare namespace Wiretrick {
     /** `wt.fetch` options: `RequestInit` plus where the request comes from. */
     interface FetchInit extends RequestInit {
         /**
-         * `"background"` (default): the extension fetches, with its host
-         * permissions (no CORS) and the browser's cookies. `"page"`: the
-         * page's own `fetch` (its origin and cookies) — from an overlay only.
+         * `"background"`: the extension fetches, with its host permissions
+         * (no CORS) and the browser's cookies. `"page"`: the page fetches (its
+         * origin, cookies and CORS) — from an overlay only. Default:
+         * `"page"` in an overlay, `"background"` elsewhere. An overlay's own
+         * `fetch()` is the page's too.
          */
         from?: "page" | "background";
         /** Skip every script's handlers (this script's too) for this request; the Log shows it as `bypass`. */

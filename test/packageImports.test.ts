@@ -157,6 +157,20 @@ describe("downloading a package's module graph", () => {
         expect(load("https://unpkg.com/json-lib@1.0.0")).toBe(5);
     });
 
+    it("a .css module adds a <style> through the loader's `style` (elsewhere it's ignored)", async () => {
+        const p = await bg();
+        const url = "https://unpkg.com/css-lib@1.0.0/dist/theme.css";
+        await p.ensurePackages([`import "${url}";`]);
+        const styles: [string, string][] = [];
+        expect(() => makePackageLoader(p.packagesSnapshot())(url)).not.toThrow();
+        makePackageLoader(p.packagesSnapshot(), undefined, { style: (css, from) => styles.push([css, from]) })(url);
+        expect(styles).toEqual([[".btn { color: red; }\n", url]]);
+        const shipped = Object.entries(p.packagesSnapshot().modules).map(([name, pkg]) => ({ name, pkg }));
+        const seen: string[] = [];
+        makeLibRequire(shipped, () => {}, { style: (css) => seen.push(css) })("main")(url);
+        expect(seen).toEqual([".btn { color: red; }\n"]);
+    });
+
     it("is cached: a second ensure (and a fresh background) fetches nothing", async () => {
         let p = await bg();
         const code = `import x from "https://unpkg.com/cjs-lib@2.0.0";`;

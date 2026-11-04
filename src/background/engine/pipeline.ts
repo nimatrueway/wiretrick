@@ -21,12 +21,12 @@ import { loadPackages, packagesSnapshot, resolveVersion } from "./packageImports
 import { isUrlSpec, packageClosure } from "../../shared/packageImports";
 import { serveStore } from "./strategies/extensionStrategy";
 import { dlog, dlogLevel } from "../../shared/debugLog";
-import { isThenable, toRunnableJs } from "../../shared/compile";
+import { isThenable, registrationProblems, toRunnableJs } from "../../shared/compile";
 import "../../shared/transpile";
 import { log, getScriptErrors, getScriptTypeErrors, getScriptRuleErrors, getScriptRouteWarnings, setScriptRouteWarnings, bodyObservedSince, bodySkipSince, noteBodySkip } from "./logs";
 import { bypassed } from "./bypass";
 import { prepareStores, storeOwner } from "./stores";
-import { ensureBuiltins } from "../../shared/builtins";
+import { ensureBuiltins, needsReact } from "../../shared/builtins";
 import { missedLine } from "../../shared/netTypes";
 import { binaryOptedOut, frameHasHook as pingHook, isLoopbackUrl, missedReason, missedWhat, routeProblem, MISSED_SKIP_TYPES } from "../../shared/missedTap";
 import { resolveParamValues } from "../../shared/scriptDef";
@@ -43,6 +43,7 @@ import { getTextTypes, setTextTypes } from "../../shared/bodyKind";
 import { packBytes, unpackBytes } from "../../shared/bytesPack";
 import type { RequestBody } from "../../shared/requestBody";
 import { pushBundleUpdate } from "./bridgePorts";
+import { revalidateOverlayLinks, setupOverlayLinks, type OverlayRun } from "./overlayLinks";
 import { contentHash } from "../../shared/folderSync";
 
 const FILTER: chrome.webRequest.RequestFilter = { urls: ["<all_urls>"] };
@@ -250,7 +251,11 @@ export function createPipeline(
         const problems: { id: string; msg: string }[] = [];
         const helperDown: { id: string; name: string; labels: string[] }[] = [];
         for (const s of scripts) {
-            if (!s.enabled || !s.meta.active) continue;
+            if (!s.enabled) continue;
+            if (/\bwt\s*\.\s*on(?:Page|Overlay)\b/.test(s.code))
+                for (const p of registrationProblems(s.code))
+                    problems.push({ id: s.id, msg: `${p.api} #${p.nth + 1}: call wt.${p.api}() at the top level of the script, not inside a function, block or condition — the page and the overlay pair up handlers by the order they're registered in` });
+            if (!s.meta.active) continue;
             const down: string[] = [];
             for (const r of s.meta.routes || []) {
                 if (!isNetKind(r.kind)) continue;
@@ -554,6 +559,95 @@ export function createPipeline(
     }
 
     // ---- manager protocol ----
+    /**
+     * What a page's hook and bridge get (getHookBundle), for `url`. Network
+     * handlers run in the background (the hook is eval-free and immune to
+     * page CSP): the page gets only the ROUTES of hook-owned handlers, so it
+     * touches fetch/XHR to those and leaves everything else native. onPage
+     * handlers need the page's window: their scripts' FULL sources ship
+     * (top-level helpers/closures survive), compiled in the MAIN world when
+     * the page CSP allows, else in the bridge. Overlays (top frame only)
+     * ship as routes and a code hash; their code goes to the overlay frame
+     * over the bridge's port (`overlayRuns`, overlayLinks.ts).
+     */
+    async function hookBundle(url: string, top: boolean) {
+        // main-world onPage scripts (hook.ts; the bridge when CSP blocks eval)
+        const domHandlers: { scriptId: string; name: string; src: string; params: Record<string, any> }[] = [];
+        // `world: "isolated"` onPage scripts: never shipped to the page's own world
+        const isoHandlers: typeof domHandlers = [];
+        // onOverlay routes only — overlay code never goes through the page
+        const overlays: { scriptId: string; name: string; routes: RouteMeta[]; codeHash: string }[] = [];
+        const overlayRuns = new Map<string, OverlayRun>();
+        const overlayDeps = new Map<string, Set<string>>();
+        const routes: RouteMeta[] = [];
+        await ready;
+        await loadTextTypes();
+        const pageScripts = await listScripts();
+        const paramValues = await loadAllParamValues();
+        // MV3: analyzed in the sandbox page (the SW can't eval),
+        // cached; MV2 compiles right here
+        const analyzed = await analyzeScripts(pageScripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt })), paramValues);
+        const mainDeps = new Set<string>();
+        const isoDeps = new Set<string>();
+        for (const s of pageScripts) {
+            const a = analyzed.get(s.id);
+            if (!s.enabled || !a || a.error || !a.meta.active) continue;
+            let main = false;
+            let iso = false;
+            const over: RouteMeta[] = [];
+            for (const r of a.meta.routes) {
+                if (r.kind === "onDocument") {
+                    if (!routeMatches(r, url)) continue;
+                    if (pageWorld(r) === "isolated") iso = true;
+                    else main = true;
+                } else if (r.kind === "onOverlay") {
+                    if (top && routeMatches(r, url)) over.push(r);
+                } else if (r.kind !== "onResponseHeaders" && effectiveStrategy(r) === "page" && hookCanSee(r)) routes.push(r);
+            }
+            if (over.length) {
+                overlays.push({ scriptId: s.id, name: s.meta.name, routes: over, codeHash: "" });
+                overlayRuns.set(s.id, { name: s.meta.name, code: toRunnableJs(s.code), routes: over, params: resolveParamValues(a.paramDefs || {}, paramValues[s.id]), libs: [], react: false, codeHash: "" });
+                overlayDeps.set(s.id, new Set(a.deps));
+            }
+            if (!main && !iso) continue;
+            const h = { scriptId: s.id, name: s.meta.name, src: toRunnableJs(s.code), params: resolveParamValues(a.paramDefs || {}, paramValues[s.id]) };
+            if (main) domHandlers.push(h);
+            if (iso) isoHandlers.push(h);
+            for (const d of a.deps) (main ? mainDeps : isoDeps).add(d);
+            if (main && iso) for (const d of a.deps) isoDeps.add(d);
+        }
+        // ship the transitively imported library sources (and data files, package modules) once per world
+        const dataFiles = mainDeps.size || isoDeps.size || overlayDeps.size ? await listDataFiles() : [];
+        const pkgs = packagesSnapshot();
+        const libsOf = (depNames: Set<string>): ShippedLib[] => {
+            const libs = new Map<string, ShippedLib>();
+            const urls = [...depNames].filter(isUrlSpec);
+            for (const u of urls) if (pkgs.aliases[u]) libs.set(u, { name: u, alias: pkgs.aliases[u] });
+            for (const u of packageClosure(pkgs, urls)) libs.set(u, { name: u, pkg: pkgs.modules[u] });
+            for (const depName of depNames) {
+                if (isUrlSpec(depName)) continue;
+                const lib = pageScripts.find((x) => x.meta.name === depName);
+                const data = !lib && dataFiles.find((d) => d.path === depName);
+                if (data && !libs.has(data.path)) libs.set(data.path, { name: data.path, json: data.text });
+                if (!lib || libs.has(lib.meta.name)) continue;
+                const defs = analyzed.get(lib.id)?.paramDefs || {};
+                libs.set(lib.meta.name, { name: lib.meta.name, src: toRunnableJs(lib.code), params: resolveParamValues(defs, paramValues[lib.id]) });
+            }
+            return [...libs.values()];
+        };
+        const libs = libsOf(mainDeps);
+        const isoLibs = isoDeps.size ? libsOf(isoDeps) : [];
+        // an overlay reloads when its code, params or imports change
+        for (const o of overlays) {
+            const run = overlayRuns.get(o.scriptId)!;
+            run.libs = libsOf(overlayDeps.get(o.scriptId)!);
+            run.react = needsReact([pageScripts.find((x) => x.id === o.scriptId)?.code ?? "", run.code, ...run.libs.map((l) => l.src ?? "")], pkgs);
+            run.codeHash = o.codeHash = contentHash(JSON.stringify([run.code, run.params, run.libs.map((l) => [l.name, l.src ?? l.json ?? l.alias ?? ""])]));
+        }
+        return { bundle: { count: routes.length, routes, textTypes: getTextTypes(), domHandlers, isoHandlers, overlays, libs, isoLibs }, overlayRuns };
+    }
+    setupOverlayLinks({ overlayRuns: async (url) => (await hookBundle(url, true)).overlayRuns });
+
     chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
         if (msg && msg.type === "listScripts") {
             listScripts().then(async (scripts) => {
@@ -686,76 +780,10 @@ export function createPipeline(
         }
         if (msg && msg.type === "getHookBundle") {
             void (async () => {
-                // Network handlers run in the background (the hook is
-                // eval-free and immune to page CSP): the page gets only the
-                // ROUTES of hook-owned handlers, so it touches fetch/XHR to
-                // those and leaves everything else native. onDocument handlers
-                // need the page's window: their scripts' FULL sources ship
-                // (top-level helpers/closures survive), compiled in the MAIN
-                // world when the page CSP allows, else in the bridge.
                 const url = msg.url || "";
-                // main-world onPage scripts (hook.ts; the bridge when CSP blocks eval)
-                const domHandlers: { scriptId: string; name: string; src: string; params: Record<string, any> }[] = [];
-                // `world: "isolated"` onPage scripts: never shipped to the page's own world
-                const isoHandlers: typeof domHandlers = [];
-                // onOverlay routes only — overlay code never goes through the page
-                const overlays: { scriptId: string; name: string; routes: RouteMeta[] }[] = [];
-                const routes: RouteMeta[] = [];
-                await ready;
-                await loadTextTypes();
-                const pageScripts = await listScripts();
-                const paramValues = await loadAllParamValues();
-                // MV3: analyzed in the sandbox page (the SW can't eval),
-                // cached; MV2 compiles right here
-                const analyzed = await analyzeScripts(pageScripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt })), paramValues);
-                const mainDeps = new Set<string>();
-                const isoDeps = new Set<string>();
-                for (const s of pageScripts) {
-                    const a = analyzed.get(s.id);
-                    if (!s.enabled || !a || a.error || !a.meta.active) continue;
-                    let main = false;
-                    let iso = false;
-                    const over: RouteMeta[] = [];
-                    for (const r of a.meta.routes) {
-                        if (r.kind === "onDocument") {
-                            if (!routeMatches(r, url)) continue;
-                            if (pageWorld(r) === "isolated") iso = true;
-                            else main = true;
-                        } else if (r.kind === "onOverlay") {
-                            if (routeMatches(r, url)) over.push(r);
-                        } else if (r.kind !== "onResponseHeaders" && effectiveStrategy(r) === "page" && hookCanSee(r)) routes.push(r);
-                    }
-                    if (over.length) overlays.push({ scriptId: s.id, name: s.meta.name, routes: over });
-                    if (!main && !iso) continue;
-                    const h = { scriptId: s.id, name: s.meta.name, src: toRunnableJs(s.code), params: resolveParamValues(a.paramDefs || {}, paramValues[s.id]) };
-                    if (main) domHandlers.push(h);
-                    if (iso) isoHandlers.push(h);
-                    for (const d of a.deps) (main ? mainDeps : isoDeps).add(d);
-                    if (main && iso) for (const d of a.deps) isoDeps.add(d);
-                }
-                // ship the transitively imported library sources (and data files, package modules) once per world
-                const dataFiles = mainDeps.size || isoDeps.size ? await listDataFiles() : [];
-                const pkgs = packagesSnapshot();
-                const libsOf = (depNames: Set<string>): ShippedLib[] => {
-                    const libs = new Map<string, ShippedLib>();
-                    const urls = [...depNames].filter(isUrlSpec);
-                    for (const u of urls) if (pkgs.aliases[u]) libs.set(u, { name: u, alias: pkgs.aliases[u] });
-                    for (const u of packageClosure(pkgs, urls)) libs.set(u, { name: u, pkg: pkgs.modules[u] });
-                    for (const depName of depNames) {
-                        if (isUrlSpec(depName)) continue;
-                        const lib = pageScripts.find((x) => x.meta.name === depName);
-                        const data = !lib && dataFiles.find((d) => d.path === depName);
-                        if (data && !libs.has(data.path)) libs.set(data.path, { name: data.path, json: data.text });
-                        if (!lib || libs.has(lib.meta.name)) continue;
-                        const defs = analyzed.get(lib.id)?.paramDefs || {};
-                        libs.set(lib.meta.name, { name: lib.meta.name, src: toRunnableJs(lib.code), params: resolveParamValues(defs, paramValues[lib.id]) });
-                    }
-                    return [...libs.values()];
-                };
-                const libs = libsOf(mainDeps);
-                const isoLibs = isoDeps.size ? libsOf(isoDeps) : [];
-                dlogLevel("pipeline", "debug", "getHookBundle responding", { routes: routes.length, dom: domHandlers.length, iso: isoHandlers.length, overlays: overlays.length, url });
-                sendResponse({ count: routes.length, routes, textTypes: getTextTypes(), domHandlers, isoHandlers, overlays, libs, isoLibs });
+                const { bundle } = await hookBundle(url, sender.frameId === 0 || sender.frameId === undefined);
+                dlogLevel("pipeline", "debug", "getHookBundle responding", { routes: bundle.count, dom: bundle.domHandlers.length, iso: bundle.isoHandlers.length, overlays: bundle.overlays.length, url });
+                sendResponse(bundle);
             })();
             return true; // async sendResponse above
         }
@@ -904,6 +932,7 @@ export function createPipeline(
         // changes apply without reloading the target tab. Bridges with an
         // open L2 port get `bundle.update` and ignore the one-shot message.
         pushBundleUpdate(scripts.filter((x) => x.enabled).map((x) => ({ s: x.id, codeHash: contentHash(x.code) })));
+        revalidateOverlayLinks();
         chrome.tabs.query({}, (tabs) => {
             for (const t of tabs) {
                 if (t.id === undefined) continue;

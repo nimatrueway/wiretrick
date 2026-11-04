@@ -342,9 +342,11 @@ const PROCESS = { env: { NODE_ENV: "production" }, browser: true, versions: {}, 
  * failed nested require throws a plain Error when it runs (so optional
  * `try { require("x") } catch {}` works); a script's import that can't
  * load throws a PackageImportError. `builtin` may answer a nested require
- * first (a package's `require("react")` → the built-in React).
+ * first (a package's `require("react")` → the built-in React). A `.css`
+ * module calls `style(text, url)` (the overlay adds a <style>).
  */
-export function makePackageLoader(pkgs: PackageModules | undefined, builtin?: (spec: string, from: string) => { module: any } | undefined): (url: string) => any {
+export function makePackageLoader(pkgs: PackageModules | undefined, builtin?: (spec: string, from: string) => { module: any } | undefined, opts?: { style?: (css: string, url: string) => void }): (url: string) => any {
+    const style = opts?.style ?? (() => {});
     const cache = new Map<string, { exports: any }>();
     const run = (url: string): any => {
         const hit = cache.get(url);
@@ -363,8 +365,8 @@ export function makePackageLoader(pkgs: PackageModules | undefined, builtin?: (s
         };
         try {
             // eslint-disable-next-line no-new-func
-            const fn = new Function("require", "module", "exports", "process", "global", `${mod.js}\n//# sourceURL=${url}`);
-            fn.call(module.exports, require, module, module.exports, PROCESS, globalThis);
+            const fn = new Function("require", "module", "exports", "process", "global", "__wtStyle", `${mod.js}\n//# sourceURL=${url}`);
+            fn.call(module.exports, require, module, module.exports, PROCESS, globalThis, style);
         } catch (e) {
             cache.delete(url);
             throw e;

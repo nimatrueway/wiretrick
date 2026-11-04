@@ -38,6 +38,25 @@ export function preactRoot(code: string): string | null {
     return m ? m[1] : null;
 }
 
+/** the file's `/** @jsxImportSource <url or name> *\/` pragma, or null */
+export function jsxPragma(code: string): string | null {
+    const m = /@jsxImportSource\s+([^\s*]+)/.exec(code);
+    return m ? m[1] : null;
+}
+
+/** where a file's JSX runtime comes from: its pragma, else the built-in React */
+export const jsxImportSource = (code: string): string => jsxPragma(code) ?? "react";
+
+/**
+ * Does the file (likely) contain JSX? A heuristic for the import scan and
+ * the Editor's language mode (the compiler tries JSX anyway): a pragma, or
+ * an element/fragment opening in expression position plus a closing tag.
+ */
+export function usesJsx(code: string): boolean {
+    if (jsxPragma(code)) return true;
+    return /(?:^|[=(,:?&|{}[;]|\breturn|=>)\s*<(?:[A-Za-z][\w.:-]*|>)/m.test(code) && /<\/[\w.:-]*>|\/>/.test(code);
+}
+
 /** what a Preact file's React built-in maps to */
 export function preactTarget(root: string, name: string): string | null {
     if (name === "react" || name === "react-dom") return `${root}/compat`;
