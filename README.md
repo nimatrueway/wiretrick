@@ -9,7 +9,8 @@ inspired by [Inssman](https://github.com/vvmgev/Inssman) and
 [Tampermonkey](https://www.tampermonkey.net/) — userscripts, but built for
 modifying requests and responses. The whole interface is a **script editor**:
 each handler in a script names the URLs it handles and what to do — redirect,
-block, edit headers, transform or replace bodies, or patch the DOM.
+block, edit headers, transform or replace bodies, patch the DOM, or draw its
+own GUI over the page.
 
 ![Wiretrick Editor](docs/shots/editor.png)
 
@@ -21,11 +22,15 @@ block, edit headers, transform or replace bodies, or patch the DOM.
   immediately: no extension reload, no browser restart. Edits made in your own
   editor apply the same way through folder sync.
 - **Every kind of interception** — page fetch/XHR, documents, `<script>`,
-  images and workers, through five [strategies](docs/strategies.md): one
-  default in Settings, overridable per handler. `page` is the lightest but
+  images and workers, through five [strategies](docs/strategies.md), named
+  per handler. `page` is the lightest but
   only sees fetch/XHR (REST) calls; use `helper`, `extension` or `debugger` for
   robust interception; `rules` turns fixed blocks, redirects and header
   changes into browser-native rules.
+- **Your own GUI on the page** — `wt.onOverlay` draws a script's panel in an
+  overlay the page can't see or restyle (React and valtio built in);
+  `wt.store` shares live state between it and the handlers, and `wt.onPage`
+  code answers its calls ([overlays](docs/scripting.md#overlays--wtonoverlay)).
 - **No debugger banner needed** — the optional [local helper](docs/local-helper.md)
   intercepts at network level on Chrome without the "being debugged" bar.
 - **Built-in devtools** — the Problems view lists what's wrong with your scripts
@@ -80,7 +85,7 @@ running (later: **?** → **Welcome** or **?** → **Samples**).
 | | |
 |---|---|
 | [Installing](docs/install.md) | release zips, signed crx, building from source |
-| [Writing scripts](docs/scripting.md) | the `wt` API, routes, parameters, libraries, imports and data files, `onDocument`, stacking, async handlers |
+| [Writing scripts](docs/scripting.md) | the `wt` API, routes, parameters, libraries, imports and data files, `wt.store`/`wt.fetch`, `onPage`, overlays (`onOverlay`), stacking, async handlers |
 | [Interception strategies](docs/strategies.md) | `page` / `debugger` / `extension` / `helper` / `rules`, the default and per-handler choice, [which strategies keep the URL when replacing a response](docs/strategies.md#how-each-strategy-serves-a-replacement), the Missed warning, browser compatibility |
 | [Local helper](docs/local-helper.md) | the `helper` strategy: install, how it works, security notes |
 | [The Editor](docs/editor.md) | Code view, Problems, Log & Network views, folder sync, `settings.yaml` |

@@ -218,7 +218,7 @@ declare namespace Wiretrick {
         binary?: boolean | "both";
     }
 
-    /** Full route form for `wt.onDocument`. */
+    /** Full route form for `wt.onPage` and `wt.onOverlay`. */
     interface DocumentRouteOptions extends DocumentOptions {
         /** Frame URLs (top page and iframes) to run in. See {@link UrlPatterns}. */
         url: UrlPatterns;
@@ -233,14 +233,13 @@ declare namespace Wiretrick {
     interface PageRouteOptions extends DocumentRouteOptions {
         /**
          * Which JavaScript world the handler runs in. Both see the same DOM.
-         * - `"main"` (default): the site's own world, as `onDocument` always
-         *   did. It can read the site's globals (`window.myApp`), and the site
-         *   can see and tamper with it. It can answer the overlay's calls but
-         *   can't call the overlay.
+         * - `"main"` (default): the site's own world. It can read the site's
+         *   globals (`window.myApp`), and the site can see and tamper with
+         *   it. It can answer the overlay's calls but can't call the overlay.
          * - `"isolated"`: a private world with none of the site's JavaScript.
          *   The site can't see or impersonate it, so it may call this
-         *   script's overlay (top frame). Runs on the Manifest V2 builds
-         *   (Chrome MV3: not yet — the handler is skipped with a warning).
+         *   script's overlay (top frame). On Chrome (MV3) it runs through
+         *   user scripts, which must be turned on (the Editor shows how).
          *
          * @example wt.onPage({ url: "*://example.com/*", world: "isolated" }, (ctx) => { … })
          */
@@ -441,15 +440,15 @@ declare namespace Wiretrick {
         bypass?: boolean;
     }
 
-    /** Timing for `wt.onDocument` (part of its route object). */
+    /** Timing for `wt.onPage` and `wt.onOverlay` (part of their route object). */
     interface DocumentOptions {
         /**
-         * **When** the `onDocument` handler runs, relative to the page's own loading.
+         * **When** the `onPage` handler runs, relative to the page's own loading.
          * Default: `"document_end"`.
          *
          * **How it gets there:** in every frame (top page *and* iframes) the
          * extension injects a small hook at `document_start`. The hook asks
-         * the background for the scripts with an `onDocument` route covering *that
+         * the background for the scripts with an `onPage` route covering *that
          * frame's* URL, compiles them, and schedules each matching handler
          * according to its own `when`.
          *
@@ -493,7 +492,7 @@ declare namespace Wiretrick {
          * - Saving the script while the page is open re-runs the handler
          *   **immediately**, regardless of `when` (live update) — make
          *   handlers idempotent.
-         * - A script may register several `onDocument` handlers, each with its
+         * - A script may register several `onPage` handlers, each with its
          *   own route and `when`. Handlers with the same `when` run in
          *   script-list order, then registration order.
          * - Async handlers are not awaited; `when` controls only when they
@@ -505,13 +504,13 @@ declare namespace Wiretrick {
          *
          * @example
          * // default: document_end (DOMContentLoaded)
-         * wt.onDocument("*://example.com/*", () => {
+         * wt.onPage("*://example.com/*", () => {
          *     document.title = "🎯 " + document.title;
          * });
          *
          * @example
          * // before page scripts (best effort, see race caveat)
-         * wt.onDocument({ url: "*://example.com/*", when: "document_start" }, () => {
+         * wt.onPage({ url: "*://example.com/*", when: "document_start" }, () => {
          *     Object.defineProperty(navigator, "webdriver", {
          *         get: () => false,
          *     });
@@ -519,7 +518,7 @@ declare namespace Wiretrick {
          *
          * @example
          * // after everything loaded, then keep it applied across re-renders
-         * wt.onDocument({ url: "*://example.com/*", when: "document_idle" }, () => {
+         * wt.onPage({ url: "*://example.com/*", when: "document_idle" }, () => {
          *     const apply = () => {
          *         for (const ad of document.querySelectorAll(".ad")) ad.remove();
          *     };

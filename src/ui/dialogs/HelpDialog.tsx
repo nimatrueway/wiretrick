@@ -113,7 +113,7 @@ export function HelpDialog() {
                     </span>
                 </div>
                 <div className="dialog-body" id="help-body" data-pane="reference" hidden={tab !== "reference"}>
-                    {filterBox("reference", "help-filter", "Type to search the API reference (e.g. replaceResponse, onDocument, strategy)")}
+                    {filterBox("reference", "help-filter", "Type to search the API reference (e.g. replaceResponse, onPage, strategy)")}
                     <div id="help-list">
                         {reference.map(({ s, shown }) => (
                             <div key={s.title} className="api-section" hidden={!shown}>

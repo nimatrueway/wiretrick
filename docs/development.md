@@ -211,14 +211,14 @@ pages, and drops blocking `webRequest`):
   keep-alive ping (any extension API call resets the SW's ~30s idle
   timer) holds the worker open while a folder is connected, with a 30s
   `chrome.alarms` poll as the fallback if the worker is reaped anyway.
-- onDocument runs in the page (MAIN world when the page CSP allows, isolated
+- onPage runs in the page (MAIN world when the page CSP allows, isolated
   fallback otherwise). **`document_start` timing caveat:** in MV2 the
-  always-alive background answers the bundle in ~1ms, so onDocument handlers
+  always-alive background answers the bundle in ~1ms, so onPage handlers
   reliably beat the page's own scripts. In MV3 the service worker must
   wake first — analyses are cached in `chrome.storage.session` (and
   refreshed on every script change), so the bundle is served from storage
   without waking the sandbox, but a cold SW still costs ~50-100ms; inline
-  page scripts may run before an onDocument handler does. Fetch/XHR
+  page scripts may run before an onPage handler does. Fetch/XHR
   interception is unaffected.
 
 Verify the MV3 bundle: `npx tsx test/mv3.e2e.ts` (SW registration, Editor,

@@ -29,8 +29,13 @@ wt.onResponseHeaders(API, () => ({
 wt.onResponseBody({ url: "*://app.example.com/api/user*", strategy: "helper" }, (ctx, body) => String(body).replace('"role":"user"', '"role":"admin"'));
 
 // Patch the page itself:
-wt.onDocument("*://app.example.com/*", () => {
+wt.onPage("*://app.example.com/*", () => {
     document.title = "🎯 " + document.title;
+});
+
+// Draw the script's own GUI over the page:
+wt.onOverlay("*://app.example.com/*", () => {
+    document.body.append("Hello from the overlay");
 });
 ```
 
@@ -50,7 +55,8 @@ fails to load and the Problems view points at the call):
 | one URL pattern | `wt.onRequest({ url: "*://example.com/*", strategy: "helper" }, fn)` |
 | a list | `wt.onRequest({ url: ["*://a.example.com/*", "*://b.example.com/*"], strategy: "helper" }, fn)` |
 | all options | `wt.onRequest({ url, exclude, methods, resourceTypes, strategy }, fn)` |
-| `onDocument` (no strategy) | `wt.onDocument("*://example.com/*", fn)` or `wt.onDocument({ url, exclude, when }, fn)` |
+| `onPage` (no strategy) | `wt.onPage("*://example.com/*", fn)` or `wt.onPage({ url, exclude, when, world }, fn)` |
+| `onOverlay` (no strategy) | `wt.onOverlay("*://example.com/*", fn)` or `wt.onOverlay({ url, exclude, when }, fn)` |
 
 An empty list matches **nothing**, never everything.
 
@@ -121,7 +127,7 @@ wt.onResponseBody(
   | `page` | Only sees page fetch/XHR (`xmlhttprequest`). A list without `xmlhttprequest` means the handler never runs, and the Problems view warns. |
   | `rules` | Part of the browser-native rule: other types never match. |
 
-  `onDocument` routes have no `resourceTypes` or `methods`.
+  `onPage` and `onOverlay` routes have no `resourceTypes` or `methods`.
 - **`strategy`** — **required**: the [strategy](strategies.md) that runs
   this handler: `"helper"`, `"page"`, `"extension"`, `"debugger"` or
   `"rules"`. There is no default — a route without one (or a bare URL
@@ -486,8 +492,8 @@ package that fails to download isn't an error until the package `require`s
 it at runtime, so optional dependencies don't break anything. Node.js
 built-ins (`fs`, `path`, `crypto`, …) aren't available: `require("fs")`
 throws `"fs" is a Node.js built-in — not available in Wiretrick scripts`.
-Packages work on every strategy and in `wt.onDocument` handlers (the
-downloaded code is sent to the page along with the script).
+Packages work on every strategy and in `wt.onPage` and `wt.onOverlay`
+handlers (the downloaded code is sent to the page along with the script).
 
 **Types.** Wiretrick also downloads the package's TypeScript declarations:
 its own (`types`, `typings`, `exports` or a `.d.ts` next to the file), else
@@ -602,20 +608,17 @@ subscribe(state, () => wt.log("mocking is now", state.mocking));
 
 ## DOM changes — `wt.onPage`
 
-> `wt.onPage` was called `wt.onDocument`. The old name still works, with
-> the same arguments and behavior; the editor marks it deprecated.
-
 `wt.onPage` is not a network strategy — it registers a **DOM-ready callback
 that runs inside the page's MAIN world** (the same world as the page's own
-JS). Its route is frame URL pattern(s), or `{ url, exclude, when }`. A
-script may register several, each with its own route and `when`. Exact
+JS). Its route is frame URL pattern(s), or `{ url, exclude, when, world }`.
+A script may register several, each with its own route, `when` and `world`. Exact
 timing:
 
 1. **Injection**: our bridge content script (`document_start`, isolated
    world) injects `hook.js` into the page via a script tag before any page
    script runs. The hook asks the background for the scripts with an
-   `onDocument` route matching this frame's URL and compiles them.
-2. **Registration**: while compiling, the `wt.onDocument(route, handler)` calls
+   `onPage` route matching this frame's URL and compiles them.
+2. **Registration**: while compiling, the `wt.onPage(route, handler)` calls
    whose route matches the frame are captured (the handler is stored, not
    yet run).
 3. **Execution**: by default (`when: "document_end"`) the captured handlers
@@ -633,10 +636,10 @@ timing:
    the same `when` run in script-list order, then registration order.
 
    ```ts
-   wt.onDocument("*://example.com/*", () => { ... });                                       // default: document_end
-   wt.onDocument({ url: "*://example.com/*", when: "document_start" }, () => { ... });      // while HTML is still parsing
-   wt.onDocument({ url: "*://example.com/*", when: "document_end" }, () => { ... });        // DOMContentLoaded (DOM parsed)
-   wt.onDocument({ url: "*://example.com/*", when: "document_idle" }, () => { ... });       // after the page's load event
+   wt.onPage("*://example.com/*", () => { ... });                                       // default: document_end
+   wt.onPage({ url: "*://example.com/*", when: "document_start" }, () => { ... });      // while HTML is still parsing
+   wt.onPage({ url: "*://example.com/*", when: "document_end" }, () => { ... });        // DOMContentLoaded (DOM parsed)
+   wt.onPage({ url: "*://example.com/*", when: "document_idle" }, () => { ... });       // after the page's load event
    ```
 
    | `when` | Runs | DOM state | Use for |
@@ -1090,7 +1093,7 @@ result depends on the handler's strategy:
 | `onResponseHeaders` | — (not on `page`) | ⚠ ignored + error | ✅ awaited | ✅ awaited, merged into the fulfilled headers | ✅ awaited |
 | `replaceResponse` | ✅ awaited — the page's `fetch`/XHR promise simply takes as long as the handler needs | ⚠ result ignored + error (a sync redirect can't be built late) | ✅ awaited, written in place (URL kept) | ✅ awaited at the Request stage, upstream never contacted | ✅ awaited, upstream never contacted |
 | `onResponseBody` | ✅ awaited (chained between handlers) | — (can't read bodies) | ✅ awaited | ✅ awaited | ✅ awaited (served `no-store`) |
-| `onDocument` | runs in the page on every strategy; not awaited (fire-and-forget) | | | | |
+| `onPage`, `onOverlay` | run in the page / overlay on every strategy; not awaited (fire-and-forget) | | | | |
 
 Practical rules of thumb:
 

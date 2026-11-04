@@ -32,8 +32,9 @@ most once.
 | `debugger` | `chrome.debugger` + CDP Fetch domain: pause → run handlers → continue or fulfill | **everything**: documents, script tags, images, fonts, XHR — even requests the page didn't initiate | **yes** — Chrome shows a yellow "being debugged" bar while attached | Chromium-only; attach/detach is lazy and automatic |
 | `rules` | each handler runs **once** when scripts load; its result becomes a browser-native rule (`declarativeNetRequest`) that the browser applies itself | **everything**, the first navigation included | **never** | block, redirect and request/response headers only, with a fixed result ([what `rules` can do](#what-rules-can-do)); Chrome MV3, Chromium MV2 and Firefox 113+ |
 
-`wt.onDocument` isn't a network strategy: it runs in the page whatever the
-setting ([details](scripting.md#dom-changes--wtonpage)).
+`wt.onPage` and `wt.onOverlay` aren't network strategies: they run in the
+page whatever the setting ([onPage](scripting.md#dom-changes--wtonpage),
+[overlays](scripting.md#overlays--wtonoverlay)).
 
 **Requests from an overlay.** An
 [overlay](scripting.md#overlays--wtonoverlay)'s `fetch` (and its
@@ -69,7 +70,7 @@ The same text is shown in the Editor under Help (**?**) → Reference → *Strat
 > extension's `serve.html` — the address bar shows a `chrome-extension://…`
 > URL and the page loses its origin (cookies, relative links, same-origin
 > calls). To rewrite or replace the page itself on Chromium, use `helper`
-> or `debugger` on that handler (`wt.onDocument` for DOM/title tweaks). Firefox's
+> or `debugger` on that handler (`wt.onPage` for DOM/title tweaks). Firefox's
 > `extension` doesn't have this limit.
 
 > **WebSockets (`ws:`/`wss:`).** On a WebSocket handshake only **block** and
@@ -102,7 +103,7 @@ samples (Help → Samples) only use those.
   `{ url, resourceTypes: ["xmlhttprequest"], strategy: "page" }`.
 - **Rewrite page HTML / `<script src>` bodies** → `helper` or `debugger` on
   Chromium, `extension` on Firefox — not `page`.
-- **Change title/DOM after render** → `wt.onDocument` — no network interception
+- **Change title/DOM after render** → `wt.onPage` — no network interception
   at all, works even when the HTML is service-worker served or hydration
   re-renders it (the resilient choice for SPA title/DOM tweaks).
 - **Keep a route off assets** → set `resourceTypes`. On `debugger` other types are never
@@ -249,7 +250,7 @@ it is info level.
   settles — the banner clears while you keep browsing; MV3 keeps matching
   tabs attached.
 - **Strict**: only handlers on `debugger` ever attach the debugger. Avoid the
-  banner by picking `helper`, `page` or `extension` and use `wt.onDocument` for
+  banner by picking `helper`, `page` or `extension` and use `wt.onPage` for
   page changes.
 - **Narrow with `resourceTypes`**: a `debugger` route only pauses its `resourceTypes`, so
   `resourceTypes: ["main_frame"]` leaves the page's assets and API calls alone.
@@ -369,7 +370,7 @@ Which strategies each browser and build gives you
 ([strategies](#interception-strategies) explained above). The Settings
 strategy picker disables the ones the current browser can't use.
 
-| | `helper` (local helper) | `page` (page fetch/XHR) | `extension` (blocking webRequest) | `debugger` (chrome.debugger) | `rules` (browser-native rules) | `wt.onDocument` |
+| | `helper` (local helper) | `page` (page fetch/XHR) | `extension` (blocking webRequest) | `debugger` (chrome.debugger) | `rules` (browser-native rules) | `wt.onPage` |
 |---|---|---|---|---|---|---|
 | **Chrome / Edge / Brave / Vivaldi, current** — `dist-mv3/` | ✅ no banner | ✅ | ❌ | ✅ banner shown | ✅ | ✅ |
 | **Chromium with MV2** (ungoogled-chromium, Brave, Arc… — any Chromium that still loads MV2 extensions) — `dist/` | ✅ no banner | ✅ | ✅ no banner — redirect, block, headers, sync replaceResponse; no body streaming or async (see [async](scripting.md#async-handlers)) | ✅ banner shown | ✅ | ✅ |

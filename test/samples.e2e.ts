@@ -26,8 +26,53 @@ const open = async (p: Page, url: string) => {
     await p.goto(url);
 };
 
+/** poll `get` until `ok` (or the timeout), returning the last value */
+async function until<T>(get: () => Promise<T>, ok: (v: T) => boolean, ms = 15000): Promise<T> {
+    const end = Date.now() + ms;
+    let v = await get().catch(() => undefined as T);
+    while (!ok(v) && Date.now() < end) {
+        await new Promise((r) => setTimeout(r, 200));
+        v = await get().catch(() => undefined as T);
+    }
+    return v;
+}
+
+/** the script's overlay frame, once it holds `sel` */
+const overlayFrame = (p: Page, sel: string) =>
+    until(
+        async () => {
+            for (const f of p.frames().filter((f) => f.url().includes("/overlay.html"))) if (await f.evaluate((s) => !!document.querySelector(s), sel).catch(() => false)) return f;
+            return null;
+        },
+        (f) => !!f
+    );
+
 // sample name → how to see its effect (opens the page itself)
 const VERIFY: Record<string, (p: Page) => Promise<[boolean, string]>> = {
+    "Overlay panel (React + wt.store)": async (p) => {
+        await open(p, "https://dummyjson.com/");
+        const f = await overlayFrame(p, "#wt-fetch");
+        if (!f) return [false, "no overlay panel"];
+        const fetchUser = async (prev: string) => {
+            await f.evaluate(() => (document.getElementById("wt-fetch") as HTMLButtonElement).click());
+            return until(() => f.evaluate(() => document.getElementById("wt-user")?.textContent || ""), (v) => !!v && v !== prev);
+        };
+        const mocked = await fetchUser("");
+        await f.evaluate(() => (document.getElementById("wt-mock") as HTMLInputElement).click());
+        const real = await fetchUser(mocked);
+        return [mocked === "Mocked User" && !!real && real !== "Mocked User", `${mocked} → ${real}`];
+    },
+    "Overlay outline (calls + shortcut)": async (p) => {
+        await open(p, "https://en.wikipedia.org/wiki/Cat");
+        const f = await overlayFrame(p, "#wt-outline a");
+        if (!f) return [false, "no outline"];
+        const links = await f.evaluate(() => document.querySelectorAll("#wt-outline a").length);
+        await f.evaluate(() => (document.querySelectorAll("#wt-outline a")[3] as HTMLElement).click());
+        const scrolled = await until(() => p.evaluate(() => scrollY), (y) => y > 500);
+        await p.keyboard.press("Alt+Shift+O");
+        const hidden = await until(() => f.evaluate(() => (document.getElementById("wt-outline") as HTMLElement).hidden), (h) => h);
+        return [links > 3 && scrolled > 500 && hidden, JSON.stringify({ links, scrolled, hidden })];
+    },
     "Redirect a URL": async (p) => {
         await open(p, "https://en.wikipedia.org/wiki/Cat");
         const h1 = await p.evaluate(() => document.querySelector("h1")?.textContent || "");

@@ -11,12 +11,14 @@ export function sampleTryUrl(code: string): string | null {
     return code.match(/\/\/ Try it: open (https:\/\/\S+)/)?.[1] ?? null;
 }
 
-/** the strategies a sample's routes name ("onDocument" when it has only DOM handlers) */
+/** the strategies a sample's routes name, then "onOverlay" when it draws an overlay ("onPage" when it has only page handlers) */
 export function sampleStrategies(code: string): string[] {
     const out = new Set<string>();
     for (const route of code.matchAll(/strategy:([^}\n]*)/g)) for (const name of route[1].matchAll(/"(\w+)"/g)) out.add(name[1]);
-    if (!out.size && code.includes("wt.onDocument(")) out.add("onDocument");
-    return [...out].sort();
+    const list = [...out].sort();
+    if (code.includes("wt.onOverlay(")) list.push("onOverlay");
+    if (!list.length && code.includes("wt.onPage(")) list.push("onPage");
+    return list;
 }
 
 /** a sample's blurb without its "Try it: …" sentence */
@@ -99,8 +101,8 @@ function demo() {
         });
 }
 
-wt.onDocument("*://example.org/*", () => {
-    // run in the page itself (an onDocument handler runs beside it, in the extension)
+wt.onPage("*://example.org/*", () => {
+    // add it as the page's own <script>
     const s = document.createElement("script");
     s.textContent = \`(\${demo})()\`;
     document.head.append(s);
@@ -121,7 +123,7 @@ wt.replaceResponse({ url: "*://dummyjson.com/users/:id", strategy: "page" }, (ct
 }));
 
 // the demo: a fetch made from dummyjson.com's own page
-wt.onDocument("https://dummyjson.com/", async () => {
+wt.onPage("https://dummyjson.com/", async () => {
     const out = document.createElement("pre");
     out.style.cssText = "margin: 0; padding: 8px; font: 14px monospace; color: #fff; background: #2a7";
     document.body.prepend(out);
@@ -144,7 +146,7 @@ wt.onResponseBody({ url: "*://dummyjson.com/todos/*", strategy: "page" }, (ctx, 
 });
 
 // the demo: a fetch made from dummyjson.com's own page
-wt.onDocument("https://dummyjson.com/", async () => {
+wt.onPage("https://dummyjson.com/", async () => {
     const out = document.createElement("pre");
     out.style.cssText = "margin: 0; padding: 8px; font: 14px monospace; color: #fff; background: #27a";
     document.body.prepend(out);
@@ -154,7 +156,7 @@ wt.onDocument("https://dummyjson.com/", async () => {
     },
     {
         name: "Rewrite page HTML",
-        blurb: "Transform the document itself. Needs a strategy that reads page bodies: debugger on Chrome (shows Chrome's \"being debugged\" bar), extension on Firefox — not page. For title/DOM tweaks, onDocument needs neither. Try it: open example.com — a red banner appears.",
+        blurb: "Transform the document itself. Needs a strategy that reads page bodies: debugger on Chrome (shows Chrome's \"being debugged\" bar), extension on Firefox — not page. For title/DOM tweaks, onPage needs neither. Try it: open example.com — a red banner appears.",
         code: `// Try it: open https://example.com/
 wt.about("Rewrite example.com's HTML");
 
@@ -172,7 +174,7 @@ wt.onResponseBody({ url: "*://example.com/*", resourceTypes: ["main_frame"], str
         code: `// Try it: open https://en.wikipedia.org/wiki/Cat
 wt.about("Retitle Wikipedia articles");
 
-wt.onDocument("*://en.wikipedia.org/wiki/*", () => {
+wt.onPage("*://en.wikipedia.org/wiki/*", () => {
     document.title = "🎯 " + document.title;
     const el = document.querySelector("h1");
     if (el) el.textContent = "Hello from Wiretrick";
@@ -190,12 +192,94 @@ wt.replaceResponse({ url: "*://en.wikipedia.org/robots.txt", strategy: wt.isFire
 }));`,
     },
     {
+        name: "Overlay panel (React + wt.store)",
+        blurb: "Give a script its own GUI on the page: a React panel in an overlay that flips a mock on and off through a shared wt.store, and asks the page to fetch through it. Try it: open dummyjson.com — use the panel at the bottom right.",
+        code: `// Try it: open https://dummyjson.com/ — tick and untick "Mock /users/1" in
+// the panel at the bottom right, then click Fetch
+import { useState } from "react";
+import { createRoot } from "react-dom/client";
+import { useSnapshot } from "valtio";
+
+wt.about("A panel that turns a mock on and off");
+
+// one live object for the handler and the panel; it survives restarts
+const mock = wt.store("mock", { enabled: true });
+
+wt.replaceResponse({ url: "*://dummyjson.com/users/:id", strategy: "page" }, (ctx) =>
+    mock.enabled ? { id: Number(ctx.groups.id), firstName: "Mocked", lastName: "User" } : undefined
+);
+
+// functions the panel calls in the page ("page" sees only the page's own fetches)
+const page = wt.onPage("https://dummyjson.com/*", () => ({
+    user: () => fetch("/users/1").then((r) => r.json()),
+}));
+
+// the panel, drawn in this script's overlay: the page can't see or restyle it
+wt.onOverlay("https://dummyjson.com/*", () => {
+    function Panel() {
+        const snap = useSnapshot(mock);
+        const [user, setUser] = useState("");
+        const fetchUser = async () => {
+            const u = await page.user();
+            setUser(u.firstName + " " + u.lastName);
+        };
+        return (
+            <div style={{ position: "fixed", right: 16, bottom: 16, display: "grid", gap: 8, padding: 12, font: "14px system-ui", background: "#fff", border: "1px solid #ccc", borderRadius: 8, boxShadow: "0 2px 8px #0003" }}>
+                <label>
+                    <input id="wt-mock" type="checkbox" checked={snap.enabled} onChange={() => (mock.enabled = !mock.enabled)} /> Mock /users/1
+                </label>
+                <button id="wt-fetch" onClick={fetchUser}>Fetch /users/1</button>
+                <output id="wt-user">{user}</output>
+            </div>
+        );
+    }
+    createRoot(document.body.appendChild(document.createElement("div"))).render(<Panel />);
+});`,
+    },
+    {
+        name: "Overlay outline (calls + shortcut)",
+        blurb: "An overlay that asks the page for its headings and scrolls it on click — onPage returns functions, the overlay awaits them — with a keyboard shortcut to hide it. Try it: open any Wikipedia article and press Alt+Shift+O.",
+        code: `// Try it: open https://en.wikipedia.org/wiki/Cat — press Alt+Shift+O to hide
+// or show the outline
+wt.about("Floating outline for Wikipedia articles");
+
+// runs in the page; returns the functions the overlay calls
+const page = wt.onPage("*://en.wikipedia.org/wiki/*", () => {
+    const headings = () => document.querySelectorAll("#mw-content-text h2");
+    return {
+        titles: () => [...headings()].map((h) => h.textContent ?? ""),
+        scrollTo: (i: number) => {
+            headings()[i]?.scrollIntoView({ behavior: "smooth" });
+        },
+    };
+});
+
+// runs in this script's overlay (plain DOM here; React works too)
+wt.onOverlay("*://en.wikipedia.org/wiki/*", async (ctx) => {
+    const nav = document.body.appendChild(document.createElement("nav"));
+    nav.id = "wt-outline";
+    nav.style.cssText = "position: fixed; right: 16px; top: 80px; max-height: 70vh; overflow: auto; padding: 8px 12px; font: 13px system-ui; background: #fff; border: 1px solid #ccc; border-radius: 8px; box-shadow: 0 2px 8px #0003";
+    const titles = await page.titles(); // string[], typed from the onPage handler
+    titles.forEach((title, i) => {
+        const a = nav.appendChild(document.createElement("a"));
+        a.href = "#";
+        a.textContent = title;
+        a.style.cssText = "display: block; padding: 2px 0; color: #36c; text-decoration: none";
+        a.onclick = (e) => {
+            e.preventDefault();
+            void page.scrollTo(i);
+        };
+    });
+    ctx.shortcut("Alt+Shift+O", () => (nav.hidden = !nav.hidden));
+});`,
+    },
+    {
         name: "Per-script storage",
         blurb: "Keep state between page loads with wt.storage. Try it: open any Wikipedia article and reload — the counter at the top goes up.",
         code: `// Try it: open https://en.wikipedia.org/wiki/Cat and reload a few times
 wt.about("Count Wikipedia article visits");
 
-wt.onDocument("*://en.wikipedia.org/wiki/*", async (ctx) => {
+wt.onPage("*://en.wikipedia.org/wiki/*", async (ctx) => {
     const visits = ((await wt.storage.get("visits")) || 0) + 1;
     await wt.storage.set("visits", visits);
     wt.log("visit #" + visits, ctx.url);

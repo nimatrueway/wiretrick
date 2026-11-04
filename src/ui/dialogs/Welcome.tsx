@@ -44,7 +44,7 @@ function WelcomeCard({ sample }: { sample: SampleScript }) {
             <div className="welcome-card-foot">
                 <span className="welcome-chips">
                     {sampleStrategies(sample.code).map((s) => (
-                        <span key={s} className="welcome-chip" title={s === "onDocument" ? "Runs in the page at DOM-ready — no network strategy" : `strategy: "${s}"`}>{s}</span>
+                        <span key={s} className="welcome-chip" title={s === "onPage" ? "Runs in the page at DOM-ready — no network strategy" : s === "onOverlay" ? "Draws its own GUI over the page" : `strategy: "${s}"`}>{s}</span>
                     ))}
                 </span>
                 <button title="Add it to your scripts and open its code" onClick={() => void actions.addSample(sample)}>Open</button>

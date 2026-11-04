@@ -18,7 +18,7 @@ export const API_REFERENCE: ApiSection[] = [
 wt.onRequest({ url: "*://example.com/*", strategy: "helper" }, (ctx) => ({ headers: { set: { "x-debug": "1" } } }));
 wt.onResponseBody({ url: ["*://api.example.com/v1/*", "*://cdn.example.com/*.json"], strategy: "helper" }, (ctx, body) => body);
 
-url is a URLPattern string or a list of them (more route options in the next section; wt.onDocument also takes a bare pattern). URL patterns follow ${MDN}: * is a wildcard within a URL part, :name a named segment (→ ctx.groups.name), an omitted query/hash matches any, and "<all_urls>" matches everything. An empty list matches nothing.
+url is a URLPattern string or a list of them (more route options in the next section; wt.onPage and wt.onOverlay also take a bare pattern). URL patterns follow ${MDN}: * is a wildcard within a URL part, :name a named segment (→ ctx.groups.name), an omitted query/hash matches any, and "<all_urls>" matches everything. An empty list matches nothing.
     "*://example.com/*"                     any scheme, any path on example.com
     "https://*.example.com/api/*"           every subdomain (not example.com itself)
     "https://cdn.example.com/static/*.js"   only .js files under /static/
@@ -100,7 +100,7 @@ export function mockJson(url: string, body: object) {
 import { mockJson } from "./mocks";
 mockJson("*://api.example.com/me", { id: 1, role: "admin" });
 
-Libraries may declare params (shared config, editable in the popup, the Editor and settings.yaml); a library that registers handlers only for some param value becomes a script when it's set. Exported param definitions can be passed to wt.params ({ env: envParam } or { ...defs }). Imports work everywhere (background and the page-side onDocument hook). "./utils", "utils", "utils.ts" all resolve.`,
+Libraries may declare params (shared config, editable in the popup, the Editor and settings.yaml); a library that registers handlers only for some param value becomes a script when it's set. Exported param definitions can be passed to wt.params ({ env: envParam } or { ...defs }). Imports work everywhere (background, onPage and onOverlay code). "./utils", "utils", "utils.ts" all resolve.`,
     },
     {
         title: "wt.onRequest — redirect, block, request headers",
@@ -143,18 +143,18 @@ wt.onResponseBody({ url: "*://example.com/app/*.js", resourceTypes: ["script"], 
 Needs a strategy that reads bodies: "helper" or "debugger" (any resource), "page" (page fetch/XHR only) or "extension" on Firefox. Chromium's webRequest can't read bodies — the handler doesn't run there and the Log view says so.`,
     },
     {
-        title: "wt.onDocument — DOM & title changes",
-        body: `Runs in the page (MAIN world) in every frame whose own URL matches the route — by default at document_end, once DOMContentLoaded fires (DOM parsed; hydration not finished). If the bundle arrives after that, it runs immediately. Works even when the HTML is service-worker served or hydration re-renders it. Strategies don't apply.
+        title: "wt.onPage — DOM & title changes",
+        body: `Runs in the page in every frame whose own URL matches the route — by default at document_end, once DOMContentLoaded fires (DOM parsed; hydration not finished). If the bundle arrives after that, it runs immediately. Works even when the HTML is service-worker served or hydration re-renders it. Strategies don't apply.
 
-wt.onDocument("*://example.com/*", () => {
+wt.onPage("*://example.com/*", () => {
     document.title = "🎯 " + document.title;
     const h = document.querySelector("h1");
     if (h) h.textContent = "Hello!";
 });
 
-The route object takes url, exclude and when:
+The route object takes url, exclude, when and world:
 
-wt.onDocument({ url: "*://example.com/*", when: "document_idle" }, () => {
+wt.onPage({ url: "*://example.com/*", when: "document_idle" }, () => {
     const el = document.querySelector("h1");
     if (el) el.textContent = "Intercepted";
 });
@@ -165,7 +165,85 @@ Timing: when: "document_end" (default) | "document_start" | "document_idle"
 - document_idle — after the page's load event (always waits for it, unlike Chrome's run_at document_idle; a slow image delays it)
 Already past the moment? Runs immediately.
 
-Runs once per document per matching frame. SPA navigations and re-renders don't re-run it (use a MutationObserver inside). Saving the script with the page open re-runs it immediately — keep it idempotent. A script may register several onDocument handlers, each with its own route and when. Hover "when" in the Code view for the full reference.`,
+World: world: "main" (default) | "isolated"
+- main — the site's own JavaScript world: it sees the site's globals (window.myApp), and the site can see and tamper with it. It can answer the overlay's calls but not call it
+- isolated — a private world with the same DOM and none of the site's JavaScript; it may call the script's overlay. Chrome (MV3) needs user scripts turned on — the Editor shows how
+
+Runs once per document per matching frame. SPA navigations and re-renders don't re-run it (use a MutationObserver inside). Saving the script with the page open re-runs it immediately — keep it idempotent. A script may register several onPage handlers, each with its own route, when and world. The built-in react and valtio aren't available here. Hover "when" or "world" in the Code view for the full reference.`,
+    },
+    {
+        title: "wt.onOverlay — the script's own GUI on the page",
+        body: `Runs in the script's overlay: a transparent frame over the tab (top frame only) with its own document. What it draws is visible and clickable; clicks on empty areas go through to the page. The page can't see or restyle it, and strict page CSPs don't stop it. Route and when work as for onPage.
+
+wt.onOverlay("*://example.com/*", (ctx) => {
+    const b = document.body.appendChild(document.createElement("button"));
+    b.textContent = "Hi";
+    b.style.cssText = "position: fixed; right: 16px; bottom: 16px";
+    b.onclick = () => wt.log("clicked on", ctx.url);
+});
+
+React and valtio are built in: a script with JSX compiles as .tsx with React's automatic runtime (another runtime: a /** @jsxImportSource <url> */ comment).
+
+import { createRoot } from "react-dom/client";
+import { useSnapshot } from "valtio";
+const mock = wt.store("mock", { enabled: false });
+wt.onOverlay("*://example.com/*", () => {
+    function Panel() {
+        const snap = useSnapshot(mock);
+        return <label><input type="checkbox" checked={snap.enabled} onChange={() => (mock.enabled = !mock.enabled)} /> Mock</label>;
+    }
+    createRoot(document.body.appendChild(document.createElement("div"))).render(<Panel />);
+});
+
+ctx.onNavigate(fn) — runs fn(url) when the page navigates in place (pushState, back/forward, #hash); the overlay stays. Returns a function that stops listening.
+ctx.shortcut(keys, fn, { priority }) — runs fn on "Alt+Shift+H", "Mod+K" (Mod = ⌘ on macOS, Ctrl elsewhere), "Shift+F2", "Esc"… Ignored while typing in a field. By default it beats the page (which never sees the key); priority: "after-page" fires only if the page didn't handle it. Returns a function that removes it.
+
+wt.onOverlay("*://app.example.com/*", (ctx) => {
+    ctx.shortcut("Alt+Shift+H", () => (box.hidden = !box.hidden));
+    ctx.onNavigate((url) => (badge.hidden = !url.includes("/cart")));
+});
+
+One overlay per script per tab: every matching onOverlay handler runs in it, sharing the script's top-level variables. Saving the script reloads it (store values stay); disabling removes it. The overlay's own fetch() is the page's (its origin, cookies and CORS; your handlers see it on every strategy but page). The Editor's Preview tab (⌥⇧V) runs it without the page.`,
+    },
+    {
+        title: "Calls between the overlay and the page",
+        body: `wt.onPage and wt.onOverlay return a handle to the functions their handler returns. Call them from the other side with await — argument and result types are inferred:
+
+const page = wt.onPage("*://example.com/*", () => ({
+    count: (selector: string) => document.querySelectorAll(selector).length,
+}));
+
+wt.onOverlay("*://example.com/*", async () => {
+    const n = await page.count("a");   // number
+});
+
+- A handler that returns a plain object of functions exposes them; any other return value exposes nothing.
+- Arguments and results are JSON (≤ 1 MB). A call made before the other side's handler returned waits for it. Errors: WtTimeoutError (10 s), WtCallError (the function threw or doesn't exist, not JSON, the handler isn't running here), DisconnectedError (the overlay closed, the script reloaded, the page navigated).
+- The overlay may call any onPage code (top frame). Main-world onPage code can only answer — the site could fake its calls — so calling the overlay needs world: "isolated" (Problems offers that quick fix).
+- Register both at the top level of the script (not in a function, if or loop); Problems flags a call elsewhere.
+- Main-world results are page data: the site could have changed them. Check them before they decide what your network handlers do.`,
+    },
+    {
+        title: "wt.store / wt.fetch — shared state and fetching",
+        body: `wt.store(name, initial) — a live object shared by everywhere the script runs: its handlers on every strategy and its overlay. It's a valtio proxy: read and assign like a plain object; import { subscribe } from "valtio" to watch it. Call it at top level, once per name.
+
+const state = wt.store("state", { mocking: true, hits: 0 });
+wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, () => {
+    state.hits++;
+    if (state.mocking) return { replaceResponse: { body: { mocked: true } } };
+});
+
+- initial is used the first time; later the saved values win and initial only adds missing fields
+- persist: true (default) survives browser restarts; false only while the browser runs; ["mocking"] only those fields
+- values are JSON, ≤ 1 MB per store; a change that breaks that is undone and logged
+- a rules handler that reads a store is rebuilt when the store changes
+
+wt.fetch(url, init) — fetch for scripts. In handlers it runs in the background with the extension's host permissions (no CORS) and the browser's cookies; in an overlay it fetches as the page by default (from: "background" to switch). bypass: true keeps every script's handlers — this one's too — off the request, e.g. to get the real response a mock replaces:
+
+wt.replaceResponse({ url: "*://api.example.com/user", strategy: "helper" }, async () => {
+    const real = await (await wt.fetch("https://api.example.com/user", { bypass: true })).json();
+    return { ...real, role: "admin" };
+});`,
     },
     {
         title: "onRequest → replaceResponse — mock without the network",
@@ -198,7 +276,7 @@ A handler that matched but was skipped logs a warning naming who took priority a
     },
     {
         title: "Async handlers",
-        body: `Every handler may be async. replaceResponse/onResponseBody/onDocument async works everywhere.
+        body: `Every handler may be async. replaceResponse/onResponseBody/onPage/onOverlay async works everywhere (onPage and onOverlay handlers aren't awaited).
 
 onRequest/onResponseHeaders async results are awaited on every strategy except "extension" on Chromium (blocking webRequest can't await — an error is logged and the result ignored). Use "helper" or "debugger" there.
 

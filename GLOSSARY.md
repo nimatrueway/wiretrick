@@ -31,7 +31,7 @@ A function exported by a library that registers handlers on behalf of the script
 _Avoid_: macro, preset
 
 **Handler**:
-One registration in a script (`wt.onRequest`, `wt.onResponseHeaders`, `wt.onResponseBody`, `wt.replaceResponse` or `wt.onDocument`) pairing a route with a function.
+One registration in a script (`wt.onRequest`, `wt.onResponseHeaders`, `wt.onResponseBody`, `wt.replaceResponse`, `wt.onPage` or `wt.onOverlay`) pairing a route with a function.
 _Avoid_: hook, rule, interceptor, listener, onDom
 
 **Body handler**:
