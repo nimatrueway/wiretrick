@@ -5,10 +5,11 @@
  *
  *   hook (MAIN, no eval) ← postMessage → bridge (isolated) ⇄ background
  *
- * Also owns wt.onDocument: the background sends compiled handler SOURCES, the
- * bridge re-compiles them (isolated world allows eval in MV2) and runs
- * them at the requested DOM moment — the isolated world shares the page's
- * DOM, so title/text changes work without touching the page's JS world.
+ * Also runs wt.onPage code in the isolated world: `world: "isolated"`
+ * handlers (MV2; MV3 has no eval in content scripts), and main-world ones
+ * when the page CSP blocks eval there. The background sends the scripts'
+ * SOURCES, the bridge compiles them and runs them at the requested DOM
+ * moment — the isolated world shares the page's DOM, not its JS world.
  */
 import { formatScriptError } from "../shared/scriptError";
 import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
@@ -87,11 +88,8 @@ import { packBytes, unpackBytes } from "../shared/bytesPack";
 
         if (data.kind === "status?") {
             safeSend({ type: "getHookBundle", url: location.href }, (resp: any) => {
-                const active = !!(resp && (resp.count > 0 || (resp.domHandlers || []).length));
-                window.postMessage(
-                    { source: MAIN_SOURCE, kind: "status", active, routes: (resp && resp.routes) || [], textTypes: resp?.textTypes, domHandlers: (resp && resp.domHandlers) || [], libs: (resp && resp.libs) || [] },
-                    window.location.origin
-                );
+                noteBundle(resp, false);
+                postStatus(resp, false);
             });
             return;
         }
@@ -100,6 +98,13 @@ import { packBytes, unpackBytes } from "../shared/bytesPack";
             return;
         }
         if (data.kind === "call" && (data.op === "storageGet" || data.op === "storageSet")) {
+            // the page can forge this message: only scripts whose main-world
+            // onPage code was shipped to this frame may use its storage
+            if (typeof data.scriptId !== "string" || !pageScriptIds.has(data.scriptId)) {
+                dlog("warn", `refused a page storage ${data.op} for a script not running in this frame's page world`);
+                window.postMessage({ source: MAIN_SOURCE, kind: "callResult", reqId: data.reqId, result: null }, window.location.origin);
+                return;
+            }
             const storageType = data.op === "storageGet" ? "scriptStorageGet" : "scriptStorageSet";
             safeSend(
                 { type: storageType, scriptId: data.scriptId, key: data.key, value: data.value },
@@ -141,25 +146,48 @@ import { packBytes, unpackBytes } from "../shared/bytesPack";
         });
     });
 
-    // ---- wt.onDocument fallback (isolated world): compiles the FULL script
-    // source with a shim so top-level helpers/closures survive; the DOM is
-    // shared with the page, window (page JS globals) is not ----
+    // ---- onPage code in the isolated world: compiles the FULL script source
+    // with a shim so top-level helpers/closures survive; the DOM is shared
+    // with the page, window (page JS globals) is not ----
     interface DocumentHandler { scriptId: string; name: string; src: string; params?: Record<string, any> }
 
-    async function runDocumentHandlers(hot: boolean): Promise<void> {
+    /** script ids whose main-world onPage code this frame got (storage relay allow-list) */
+    let pageScriptIds = new Set<string>();
+    let isoFired = false;
+
+    function postStatus(resp: any, hot: boolean): void {
+        const active = !!(resp && (resp.count > 0 || (resp.domHandlers || []).length));
+        // main-world handlers and libraries only: isolated code never reaches the page
+        window.postMessage(
+            { source: MAIN_SOURCE, kind: "status", active, routes: (resp && resp.routes) || [], textTypes: resp?.textTypes, domHandlers: (resp && resp.domHandlers) || [], libs: (resp && resp.libs) || [], ...(hot ? { hot: true } : {}) },
+            window.location.origin
+        );
+    }
+
+    /** a fresh bundle: refresh the storage allow-list, run isolated handlers (once per load; again on a hot update) */
+    function noteBundle(resp: any, hot: boolean): void {
+        if (!resp) return;
+        pageScriptIds = new Set(((resp.domHandlers || []) as DocumentHandler[]).map((h) => h.scriptId));
+        const iso: DocumentHandler[] = resp.isoHandlers || [];
+        if (isoFired && !hot) return;
+        isoFired = true;
+        if (!iso.length) return;
+        if (__MV3__) {
+            // MV3 content scripts can't eval: isolated code needs chrome.userScripts
+            for (const h of iso) scriptLog(h.scriptId, "warn", scriptLogLine(h.name, "onPage", 'world: "isolated" handlers don\'t run on this build yet'));
+            return;
+        }
+        runPageScripts(iso, resp.isoLibs || [], "isolated", hot);
+    }
+
+    function runPageScripts(handlers: DocumentHandler[], libSources: ShippedLib[], world: "main" | "isolated", hot: boolean): void {
         if (dead) return;
-        // handlers come embedded in the hook bundle (getHookBundle)
-        const bundle = await new Promise<any>((resolve) => {
-            safeSend({ type: "getHookBundle", url: location.href }, (r: any) => resolve(r || { domHandlers: [] }));
-            // dead bridge: safeSend never answers — resolve empty after a beat
-            setTimeout(() => resolve({ domHandlers: [] }), 1000);
-        });
-        const handlers: DocumentHandler[] = bundle.domHandlers || [];
-        const libSources: ShippedLib[] = bundle.libs || [];
-        dlog("debug", `onDocument (isolated world): running ${handlers.length} script(s)${hot ? " (hot refire)" : ""}`);
+        const what = world === "isolated" ? "onPage (isolated world)" : "onPage (isolated-world fallback)";
+        dlog("debug", `${what}: running ${handlers.length} script(s)${hot ? " (hot refire)" : ""}`);
         const shimFor = (scriptId: string | null, name: string, params: Record<string, any>) =>
             makePageShim({
                 params,
+                world,
                 log: (...args: any[]) => scriptLog(scriptId, "info", scriptLogLine(name, "wt.log", formatLogArgs(args))),
                 storage: {
                     get: (key: string) => new Promise((r) => safeSend({ type: "scriptStorageGet", scriptId, key }, (x: any) => r(x && x.value))),
@@ -181,7 +209,7 @@ import { packBytes, unpackBytes } from "../shared/bytesPack";
                 scriptFunction(h.src)(shim.wt, consoleProxy, requireFrom(h.name), moduleObj, moduleObj.exports);
                 dom = shim.dom;
             } catch (e: any) {
-                scriptLog(h.scriptId, "error", formatScriptError(h.name, e, "onDocument compile (isolated world)"));
+                scriptLog(h.scriptId, "error", formatScriptError(h.name, e, `${what} compile`));
                 continue;
             }
             for (const d of domHandlersFor(dom, location.href)) {
@@ -189,12 +217,24 @@ import { packBytes, unpackBytes } from "../shared/bytesPack";
                     try {
                         d.fn({ url: location.href, method: "GET", tabUrl: location.href });
                     } catch (e: any) {
-                        scriptLog(h.scriptId, "error", formatScriptError(h.name, e, "onDocument"));
+                        scriptLog(h.scriptId, "error", formatScriptError(h.name, e, d.route.api || "onDocument"));
                     }
                 };
                 scheduleDocument(d.when, run, hot);
             }
         }
+    }
+
+    /** main-world handlers, here because the page CSP blocks eval in the page */
+    async function runDocumentHandlers(hot: boolean): Promise<void> {
+        if (dead) return;
+        // handlers come embedded in the hook bundle (getHookBundle)
+        const bundle = await new Promise<any>((resolve) => {
+            safeSend({ type: "getHookBundle", url: location.href }, (r: any) => resolve(r || { domHandlers: [] }));
+            // dead bridge: safeSend never answers — resolve empty after a beat
+            setTimeout(() => resolve({ domHandlers: [] }), 1000);
+        });
+        runPageScripts(bundle.domHandlers || [], bundle.libs || [], "main", hot);
     }
 
     let hookBroken = false;
@@ -214,11 +254,8 @@ import { packBytes, unpackBytes } from "../shared/bytesPack";
                 // MAIN world (hook) when healthy, else here (isolated)
                 if (hookBroken) void runDocumentHandlers(true);
                 safeSend({ type: "getHookBundle", url: location.href }, (resp: any) => {
-                    const active = !!(resp && (resp.count > 0 || (resp.domHandlers || []).length));
-                    window.postMessage(
-                        { source: MAIN_SOURCE, kind: "status", active, routes: (resp && resp.routes) || [], textTypes: resp?.textTypes, domHandlers: (resp && resp.domHandlers) || [], libs: (resp && resp.libs) || [], hot: true },
-                        window.location.origin
-                    );
+                    noteBundle(resp, true);
+                    postStatus(resp, true);
                 });
             }
         });
@@ -238,6 +275,10 @@ import { packBytes, unpackBytes } from "../shared/bytesPack";
     async function init(): Promise<void> {
         dlog("debug", "bridge ready", { href: location.href, readyState: document.readyState });
         injectHook();
+        // isolated handlers must not depend on the page hook asking for its status
+        setTimeout(() => {
+            if (!isoFired && !dead) safeSend({ type: "getHookBundle", url: location.href }, (resp: any) => noteBundle(resp, false));
+        }, 1500);
     }
 
     void init();

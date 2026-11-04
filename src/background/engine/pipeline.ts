@@ -28,7 +28,7 @@ import { missedLine } from "../../shared/netTypes";
 import { binaryOptedOut, frameHasHook as pingHook, isLoopbackUrl, missedReason, missedWhat, routeProblem, MISSED_SKIP_TYPES } from "../../shared/missedTap";
 import { resolveParamValues } from "../../shared/scriptDef";
 import type { ShippedLib } from "../../shared/scriptImports";
-import { effectiveStrategy, hookCanSee, routeLabel, routeMatches, takesBinary, type RouteMeta, type Strategy } from "../../shared/route";
+import { effectiveStrategy, hookCanSee, isNetKind, pageWorld, routeLabel, routeMatches, takesBinary, type RouteMeta, type Strategy } from "../../shared/route";
 import { analyzeScripts, runBodyOp, type Analyzed } from "../compileHost";
 import { recordNetBody } from "../network";
 import { reportSkipped, setSkipRoutes } from "./skipped";
@@ -248,7 +248,7 @@ export function createPipeline(
             if (!s.enabled || !s.meta.active) continue;
             const down: string[] = [];
             for (const r of s.meta.routes || []) {
-                if (r.kind === "onDocument") continue;
+                if (!isNetKind(r.kind)) continue;
                 const strategy = effectiveStrategy(r);
                 const msg = routeProblem({ kind: r.kind, strategy, resourceTypes: r.resourceTypes }, { firefox: IS_FIREFOX, mv3: __MV3__ });
                 // one warning per handler: each points at its own line
@@ -288,7 +288,7 @@ export function createPipeline(
             if (!s.enabled || !s.meta.active) continue;
             for (const r of s.meta.routes || []) {
                 const strategy = effectiveStrategy(r);
-                if (r.kind !== "onDocument" && WS_BLIND.has(strategy) && targetsWebSocket(r)) blind.push({ id: s.id, name: s.meta.name, route: r, strategy });
+                if (isNetKind(r.kind) && WS_BLIND.has(strategy) && targetsWebSocket(r)) blind.push({ id: s.id, name: s.meta.name, route: r, strategy });
                 // onRequest: only "page" routes — the hook claims every request it handles, so an unclaimed one in a hook-less tab was missed
                 if (r.kind === "onResponseBody" || r.kind === "replaceResponse" || (r.kind === "onRequest" && strategy === "page")) next.push({ id: s.id, name: s.meta.name, route: r, strategy });
             }
@@ -686,8 +686,12 @@ export function createPipeline(
                 // (top-level helpers/closures survive), compiled in the MAIN
                 // world when the page CSP allows, else in the bridge.
                 const url = msg.url || "";
+                // main-world onPage scripts (hook.ts; the bridge when CSP blocks eval)
                 const domHandlers: { scriptId: string; name: string; src: string; params: Record<string, any> }[] = [];
-                const libs = new Map<string, ShippedLib>();
+                // `world: "isolated"` onPage scripts: never shipped to the page's own world
+                const isoHandlers: typeof domHandlers = [];
+                // onOverlay routes only — overlay code never goes through the page
+                const overlays: { scriptId: string; name: string; routes: RouteMeta[] }[] = [];
                 const routes: RouteMeta[] = [];
                 await ready;
                 await loadTextTypes();
@@ -696,36 +700,54 @@ export function createPipeline(
                 // MV3: analyzed in the sandbox page (the SW can't eval),
                 // cached; MV2 compiles right here
                 const analyzed = await analyzeScripts(pageScripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt })), paramValues);
-                const depNames = new Set<string>();
+                const mainDeps = new Set<string>();
+                const isoDeps = new Set<string>();
                 for (const s of pageScripts) {
                     const a = analyzed.get(s.id);
                     if (!s.enabled || !a || a.error || !a.meta.active) continue;
-                    let dom = false;
+                    let main = false;
+                    let iso = false;
+                    const over: RouteMeta[] = [];
                     for (const r of a.meta.routes) {
-                        if (r.kind === "onDocument") dom ||= routeMatches(r, url);
-                        else if (r.kind !== "onResponseHeaders" && effectiveStrategy(r) === "page" && hookCanSee(r)) routes.push(r);
+                        if (r.kind === "onDocument") {
+                            if (!routeMatches(r, url)) continue;
+                            if (pageWorld(r) === "isolated") iso = true;
+                            else main = true;
+                        } else if (r.kind === "onOverlay") {
+                            if (routeMatches(r, url)) over.push(r);
+                        } else if (r.kind !== "onResponseHeaders" && effectiveStrategy(r) === "page" && hookCanSee(r)) routes.push(r);
                     }
-                    if (!dom) continue;
-                    for (const d of a.deps) depNames.add(d);
-                    domHandlers.push({ scriptId: s.id, name: s.meta.name, src: toRunnableJs(s.code), params: resolveParamValues(a.paramDefs || {}, paramValues[s.id]) });
+                    if (over.length) overlays.push({ scriptId: s.id, name: s.meta.name, routes: over });
+                    if (!main && !iso) continue;
+                    const h = { scriptId: s.id, name: s.meta.name, src: toRunnableJs(s.code), params: resolveParamValues(a.paramDefs || {}, paramValues[s.id]) };
+                    if (main) domHandlers.push(h);
+                    if (iso) isoHandlers.push(h);
+                    for (const d of a.deps) (main ? mainDeps : isoDeps).add(d);
+                    if (main && iso) for (const d of a.deps) isoDeps.add(d);
                 }
-                // ship the transitively imported library sources (and data files, package modules) once
-                const dataFiles = depNames.size ? await listDataFiles() : [];
+                // ship the transitively imported library sources (and data files, package modules) once per world
+                const dataFiles = mainDeps.size || isoDeps.size ? await listDataFiles() : [];
                 const pkgs = packagesSnapshot();
-                const urls = [...depNames].filter(isUrlSpec);
-                for (const u of urls) if (pkgs.aliases[u]) libs.set(u, { name: u, alias: pkgs.aliases[u] });
-                for (const u of packageClosure(pkgs, urls)) libs.set(u, { name: u, pkg: pkgs.modules[u] });
-                for (const depName of depNames) {
-                    if (isUrlSpec(depName)) continue;
-                    const lib = pageScripts.find((x) => x.meta.name === depName);
-                    const data = !lib && dataFiles.find((d) => d.path === depName);
-                    if (data && !libs.has(data.path)) libs.set(data.path, { name: data.path, json: data.text });
-                    if (!lib || libs.has(lib.meta.name)) continue;
-                    const defs = analyzed.get(lib.id)?.paramDefs || {};
-                    libs.set(lib.meta.name, { name: lib.meta.name, src: toRunnableJs(lib.code), params: resolveParamValues(defs, paramValues[lib.id]) });
-                }
-                dlogLevel("pipeline", "debug", "getHookBundle responding", { routes: routes.length, dom: domHandlers.length, url });
-                sendResponse({ count: routes.length, routes, textTypes: getTextTypes(), domHandlers, libs: [...libs.values()] });
+                const libsOf = (depNames: Set<string>): ShippedLib[] => {
+                    const libs = new Map<string, ShippedLib>();
+                    const urls = [...depNames].filter(isUrlSpec);
+                    for (const u of urls) if (pkgs.aliases[u]) libs.set(u, { name: u, alias: pkgs.aliases[u] });
+                    for (const u of packageClosure(pkgs, urls)) libs.set(u, { name: u, pkg: pkgs.modules[u] });
+                    for (const depName of depNames) {
+                        if (isUrlSpec(depName)) continue;
+                        const lib = pageScripts.find((x) => x.meta.name === depName);
+                        const data = !lib && dataFiles.find((d) => d.path === depName);
+                        if (data && !libs.has(data.path)) libs.set(data.path, { name: data.path, json: data.text });
+                        if (!lib || libs.has(lib.meta.name)) continue;
+                        const defs = analyzed.get(lib.id)?.paramDefs || {};
+                        libs.set(lib.meta.name, { name: lib.meta.name, src: toRunnableJs(lib.code), params: resolveParamValues(defs, paramValues[lib.id]) });
+                    }
+                    return [...libs.values()];
+                };
+                const libs = libsOf(mainDeps);
+                const isoLibs = isoDeps.size ? libsOf(isoDeps) : [];
+                dlogLevel("pipeline", "debug", "getHookBundle responding", { routes: routes.length, dom: domHandlers.length, iso: isoHandlers.length, overlays: overlays.length, url });
+                sendResponse({ count: routes.length, routes, textTypes: getTextTypes(), domHandlers, isoHandlers, overlays, libs, isoLibs });
             })();
             return true; // async sendResponse above
         }

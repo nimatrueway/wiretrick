@@ -14,7 +14,7 @@
  * replaceResponse body) ends the request in its layer: later handlers of
  * the layer and every handler of the layers behind it never see it.
  */
-import { routeLabel, routeMatches, type NetKind, type RouteMeta, type Strategy } from "./route";
+import { isNetKind, routeLabel, routeMatches, type NetKind, type RouteMeta, type Strategy } from "./route";
 
 /** the layers a request passes, page side first */
 export const LAYERS: Strategy[] = ["page", "rules", "extension", "debugger", "helper"];
@@ -76,7 +76,7 @@ export function skippedBy(routes: RouteRef[], req: SkipRequest, w: Winner): Rout
     const type = req.type || undefined;
     return routes.filter((r) => {
         const kind = r.route.kind;
-        if (kind === "onDocument") return false;
+        if (!isNetKind(kind)) return false;
         if (r.scriptId === w.scriptId && kind === w.kind && r.route.index === w.index) return false;
         // page handlers only ever see the page's own fetch/XHR
         if (r.strategy === "page" && type !== "xmlhttprequest") return false;

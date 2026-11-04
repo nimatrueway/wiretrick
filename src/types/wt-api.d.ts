@@ -226,8 +226,52 @@ declare namespace Wiretrick {
         exclude?: UrlPatterns;
     }
 
-    /** Where an `onDocument` handler runs: URL pattern(s) or the full {@link DocumentRouteOptions} form. */
+    /** Where an `onOverlay` handler runs: URL pattern(s) or the full {@link DocumentRouteOptions} form. */
     type DocumentRoute = UrlPatterns | DocumentRouteOptions;
+
+    /** Full route form for `wt.onPage`. */
+    interface PageRouteOptions extends DocumentRouteOptions {
+        /**
+         * Which JavaScript world the handler runs in. Both see the same DOM.
+         * - `"main"` (default): the site's own world, as `onDocument` always
+         *   did. It can read the site's globals (`window.myApp`), and the site
+         *   can see and tamper with it. It can answer the overlay's calls but
+         *   can't call the overlay.
+         * - `"isolated"`: a private world with none of the site's JavaScript.
+         *   The site can't see or impersonate it, so it may call this
+         *   script's overlay. Runs on the Manifest V2 builds.
+         *
+         * @example wt.onPage({ url: "*://example.com/*", world: "isolated" }, (ctx) => { … })
+         */
+        world?: "main" | "isolated";
+    }
+
+    /** Where an `onPage` handler runs: URL pattern(s) or the full {@link PageRouteOptions} form. */
+    type PageRoute = UrlPatterns | PageRouteOptions;
+
+    /** Any function. */
+    type Fn = (...args: any[]) => unknown;
+
+    /**
+     * The other side's functions, made async: what `wt.onPage` and
+     * `wt.onOverlay` return. A handler that returns a plain object of
+     * functions exposes them; any other return value (nothing, a string, an
+     * element) exposes nothing. Arguments and results are JSON (≤ 1 MB);
+     * calls time out after 10 s.
+     *
+     * @example
+     * const page = wt.onPage("*://example.com/*", () => ({ count: (sel: string) => document.querySelectorAll(sel).length }));
+     * // in the overlay: const n = await page.count("a"); // n: number
+     */
+    type Remote<T> = [T] extends [Record<string, Fn>]
+        ? { readonly [K in keyof T]: T[K] extends (...a: infer A) => infer R ? (...a: A) => Promise<Awaited<R>> : never }
+        : {};
+
+    /** The context an `onPage` handler gets (`url` is the frame's URL). */
+    interface PageCtx extends RequestCtx {}
+
+    /** The context an `onOverlay` handler gets (`url` is the page's URL). */
+    interface OverlayCtx extends RequestCtx {}
 
     /** Header edits. */
     interface HeaderMod {
@@ -722,34 +766,73 @@ declare const wt: {
     ): void;
 
     /**
-     * Run a handler in the page (MAIN world) — the resilient way to change
-     * titles, text and DOM content. Works no matter how the response arrived
+     * Run a handler in the page — the resilient way to change titles, text
+     * and DOM content. Works no matter how the response arrived
      * (service-worker-served HTML, cached pages, hydration). Strategies
      * don't apply.
      *
      * Runs once per document load in every frame whose URL matches the
-     * route — by default at `DOMContentLoaded` (`when: "document_end"`). A script may register
-     * several, each with its own route and `when`.
+     * route — by default at `DOMContentLoaded` (`when: "document_end"`), in
+     * the site's own JavaScript world (`world: "main"`). A script may
+     * register several, each with its own route, `when` and `world`.
      *
-     * @param route Frame URL pattern(s), or `{ url, exclude, when }`. See
+     * The handler may return an object of functions: the returned handle
+     * lets this script's overlay call them (`await page.fn(…)`, top frame
+     * only). See {@link Wiretrick.Remote}.
+     *
+     * @param route Frame URL pattern(s), or `{ url, exclude, when, world }`. See
      * {@link Wiretrick.DocumentOptions.when} for exact timing, the MV3
-     * `document_start` race, SPA/re-render behavior and live-update re-runs.
+     * `document_start` race, SPA/re-render behavior and live-update re-runs,
+     * and {@link Wiretrick.PageRouteOptions.world} for the two worlds.
      * @param handler Receives the same `ctx` shape as `onRequest` (`url` is
      * the frame's URL). May be async (not awaited).
      *
      * @example
-     * wt.onDocument("*://example.com/*", () => {
+     * wt.onPage("*://example.com/*", () => {
      *     document.title = "🎯 " + document.title;
      * });
      *
      * @example
      * // after the page's load event
-     * wt.onDocument({ url: "*://example.com/*", when: "document_idle" }, () => {
+     * wt.onPage({ url: "*://example.com/*", when: "document_idle" }, () => {
      *     const el = document.querySelector("h1");
      *     if (el) el.textContent = "Intercepted";
      * });
+     *
+     * @example
+     * // functions for the overlay to call
+     * const page = wt.onPage("*://example.com/*", () => ({
+     *     count: (selector: string) => document.querySelectorAll(selector).length,
+     * }));
      */
-    onDocument(route: Wiretrick.DocumentRoute, handler: (ctx: Wiretrick.RequestCtx) => Wiretrick.Awaitable<void>): void;
+    onPage<T = void>(route: Wiretrick.PageRoute, handler: (ctx: Wiretrick.PageCtx) => Wiretrick.Awaitable<T>): Wiretrick.Remote<T>;
+
+    /**
+     * @deprecated Renamed to {@link wt.onPage} — same arguments and behavior.
+     */
+    onDocument<T = void>(route: Wiretrick.PageRoute, handler: (ctx: Wiretrick.PageCtx) => Wiretrick.Awaitable<T>): Wiretrick.Remote<T>;
+
+    /**
+     * Run a handler in this script's **overlay**: a transparent frame over
+     * the page (top frame only), with its own `document` and `window`. What
+     * the script draws there is visible and clickable; everywhere else,
+     * clicks go through to the page. The page can't see or reach it.
+     *
+     * One overlay per script per tab: all of the script's matching
+     * `onOverlay` handlers run in it, sharing top-level variables. Timing
+     * follows `when`, as for `onPage`.
+     *
+     * The handler may return an object of functions for this script's
+     * `world: "isolated"` onPage code to call.
+     *
+     * @example
+     * wt.onOverlay("*://example.com/*", () => {
+     *     const b = document.body.appendChild(document.createElement("button"));
+     *     b.textContent = "Hi";
+     *     b.style.cssText = "position:fixed;right:16px;bottom:16px";
+     * });
+     */
+    onOverlay<T = void>(route: Wiretrick.DocumentRoute, handler: (ctx: Wiretrick.OverlayCtx) => Wiretrick.Awaitable<T>): Wiretrick.Remote<T>;
 
     /**
      * One-line description: shown as a tooltip in the Editor and the

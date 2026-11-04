@@ -283,8 +283,8 @@ try {
             details = document.querySelector(".suggest-details")?.innerHTML ?? "";
         }
         ed.trigger("t", "hideSuggestWidget", {});
-        model.setValue('wt.onDocument("*", ');
-        ed.setPosition({ lineNumber: 1, column: 20 }); // on the handler argument
+        model.setValue('wt.onPage("*", ');
+        ed.setPosition({ lineNumber: 1, column: 16 }); // on the handler argument
         let hints = "";
         for (let i = 0; i < 40 && !hints.includes("Receives the same"); i++) {
             ed.trigger("t", "editor.action.triggerParameterHints", {});

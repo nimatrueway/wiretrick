@@ -5,7 +5,7 @@
  * (refreshed by pipeline.reload) and logs one WARN line per request that the
  * Network view shows as "missed" (`is:missed`).
  */
-import { effectiveStrategy } from "../../shared/route";
+import { effectiveStrategy, isNetKind } from "../../shared/route";
 import { skippedBy, skippedLine, type RouteRef, type SkipRequest, type Winner } from "../../shared/precedence";
 import { log } from "./logs";
 import type { Script } from "./scriptStore";
@@ -18,7 +18,7 @@ export function setSkipRoutes(scripts: Script[]): void {
     scripts.forEach((s, order) => {
         if (!s.enabled || !s.meta.active) return;
         for (const route of s.meta.routes || []) {
-            if (route.kind !== "onDocument") next.push({ scriptId: s.id, scriptName: s.meta.name, order, route, strategy: effectiveStrategy(route) });
+            if (isNetKind(route.kind)) next.push({ scriptId: s.id, scriptName: s.meta.name, order, route, strategy: effectiveStrategy(route) });
         }
     });
     routes = next;

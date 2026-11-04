@@ -10,6 +10,7 @@ import { formatLogArgs, makeScriptConsole, type ScriptLogLevel } from "./scriptL
 import { scriptFunction } from "./scriptFn";
 import { callerLine } from "./scriptError";
 import { normalizeRoute, type RouteKind, type RouteMeta } from "./route";
+import { inertRemote, REMOTE_FROM_BACKGROUND } from "./remote";
 import { scriptEnv } from "./scriptEnv";
 import { importLine, importPath, importResolver, isDataSpec } from "./scriptImports";
 import { isUrlSpec, makePackageLoader, type PackageModules } from "./packageImports";
@@ -33,8 +34,10 @@ export interface ScriptHandlers {
     onResponseHeaders: Routed[];
     replaceResponse: Routed[];
     onResponseBody: Routed[];
-    /** run in the page — DOM/title manipulation (route.when = timing) */
+    /** wt.onPage / wt.onDocument: run in the page — DOM/title manipulation (route.when = timing, route.world) */
     onDocument: Routed[];
+    /** wt.onOverlay: run in the script's overlay frame above the page */
+    onOverlay: Routed[];
 }
 
 export interface CompiledScript {
@@ -443,6 +446,7 @@ function createCollector(): ScriptHandlers {
         replaceResponse: [],
         onResponseBody: [],
         onDocument: [],
+        onOverlay: [],
     };
 }
 
@@ -468,7 +472,7 @@ function withCollector<T>(c: ScriptHandlers, run: () => T): T {
 }
 
 function routesOf(h: ScriptHandlers): RouteMeta[] {
-    return [...h.onRequest, ...h.onResponseHeaders, ...h.replaceResponse, ...h.onResponseBody, ...h.onDocument].map((x) => x.route);
+    return [...h.onRequest, ...h.onResponseHeaders, ...h.replaceResponse, ...h.onResponseBody, ...h.onDocument, ...h.onOverlay].map((x) => x.route);
 }
 
 const PARAM_TYPES = ["boolean", "number", "string", "enum", "stringList"];
@@ -514,29 +518,35 @@ function createOwner(meta: ResMeta, storedValues?: Record<string, any>) {
 }
 
 function makeShim(owner: ReturnType<typeof createOwner>, overrides?: ResApiOverrides): any {
-    const register = (kind: RouteKind) => (route: unknown, fn: unknown) => {
+    const register = (kind: RouteKind, api?: "onPage") => (route: unknown, fn: unknown) => {
+        const name = api || kind;
         const top = collectors[collectors.length - 1];
+        // page/overlay registrations hand back an RPC handle; in the background it's inert
+        const handle = kind === "onDocument" || kind === "onOverlay" ? inertRemote(REMOTE_FROM_BACKGROUND) : undefined;
         if (!top) {
-            const msg = `wt.${kind} called after the script's top level finished — handlers must be registered synchronously at top level (not after await / in callbacks); ignored`;
+            const msg = `wt.${name} called after the script's top level finished — handlers must be registered synchronously at top level (not after await / in callbacks); ignored`;
             if (overrides?.logSink) overrides.logSink("error", "wt", msg);
             else console.error("[Wiretrick]", msg);
-            return;
+            return handle;
         }
-        if (typeof route === "function" && fn === undefined && !mentionsStub(route)) normalizeRoute(kind, route, 0); // throws the "first argument" error
-        if (typeof fn !== "function") throw new Error(`wt.${kind}: second argument must be the handler function`);
+        if (typeof route === "function" && fn === undefined && !mentionsStub(route)) normalizeRoute(kind, route, 0, api); // throws the "first argument" error
+        if (typeof fn !== "function") throw new Error(`wt.${name}: second argument must be the handler function`);
         const list = top[kind];
         // save-time compile with stubbed imports: route unknown until analyzed
-        const r: RouteMeta = mentionsStub(route) ? { kind, index: list.length, url: [], exclude: [] } : normalizeRoute(kind, route, list.length);
+        const r: RouteMeta = mentionsStub(route) ? { kind, index: list.length, url: [], exclude: [], ...(api ? { api } : {}) } : normalizeRoute(kind, route, list.length, api);
         const line = callerLine();
         if (line) r.line = line;
         list.push({ fn: fn as HandlerFn, route: r });
+        return handle;
     };
     return {
         onRequest: register("onRequest"),
         onResponseHeaders: register("onResponseHeaders"),
         replaceResponse: register("replaceResponse"),
         onResponseBody: register("onResponseBody"),
+        onPage: register("onDocument", "onPage"),
         onDocument: register("onDocument"),
+        onOverlay: register("onOverlay"),
         about: (text: unknown) => owner.about(text),
         params: (defs: Record<string, ParamDef>) => {
             const values = owner.add(defs, "wt.params");

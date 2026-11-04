@@ -520,9 +520,12 @@ HTTPS, so you trust unpkg to serve npm's files unaltered. Only the extension
 background downloads them (when scripts are saved, imported or compiled);
 pages never fetch them.
 
-## DOM changes — `wt.onDocument`
+## DOM changes — `wt.onPage`
 
-`wt.onDocument` is not a network strategy — it registers a **DOM-ready callback
+> `wt.onPage` was called `wt.onDocument`. The old name still works, with
+> the same arguments and behavior; the editor marks it deprecated.
+
+`wt.onPage` is not a network strategy — it registers a **DOM-ready callback
 that runs inside the page's MAIN world** (the same world as the page's own
 JS). Its route is frame URL pattern(s), or `{ url, exclude, when }`. A
 script may register several, each with its own route and `when`. Exact
@@ -582,8 +585,16 @@ timing:
    - **CSP fallback:** if the page forbids `eval`, handlers run in the
      extension's isolated world — same DOM and timing, but page globals
      (`window.myApp`) aren't visible.
+   - **`world: "isolated"`** runs the handler in the extension's isolated
+     world on purpose: same DOM and timing, none of the page's JavaScript,
+     and the page can't see or tamper with it. Firefox and the Chromium MV2
+     build only for now; the Chrome (MV3) build logs a warning and skips it.
 
-Because it runs as page JS, `wt.onDocument` works regardless of how the response
+     ```ts
+     wt.onPage({ url: "*://example.com/*", world: "isolated" }, () => { ... });
+     ```
+
+Because it runs as page JS, `wt.onPage` works regardless of how the response
 arrived — service-worker-served HTML, cached pages, or hydration overwriting
 a body transform — which is exactly why it's the resilient choice for
 title/DOM changes on SPAs.

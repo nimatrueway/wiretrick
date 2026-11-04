@@ -10,6 +10,7 @@ its section below.
 ### Added
 
 - An import from an unpinned unpkg URL (`import { sleep } from "https://unpkg.com/asyncbox"`, or `@latest`, `@^1`) is now underlined in the Editor as you type, before saving, with a **Pin to asyncbox@6.5.0** quick fix (Ctrl+. / ⌘.) that fills in the version unpkg resolves it to. After saving, the error points at the URL rather than the start of the line, and the Problems view lists it once.
+- `wt.onPage({ url, world: "isolated" }, fn)` runs page code in the extension's isolated world: same DOM, none of the site's JavaScript, and the site can't see or tamper with it. Firefox and the Chromium MV2 build only for now; the Chrome build logs a warning and skips it.
 - A welcome page for first-time users: with no scripts yet, the Editor opens on a gallery of the samples. **Try it** adds one (turned on), waits until it's running and opens its page in a new tab with the change already visible; **Open** just adds it. Reopen it from Help (**?**) → **Welcome**.
 - The popup marks the scripts behind the toolbar badge number with a green dot, and its header says how many are active on the current tab (enabled, and matched the page or one of its requests since it loaded). It updates while the popup is open.
 - The toolbar icon shows when script changes are being applied: from saving (compiling) until every strategy has reloaded and open tabs got the hot-reload, it fades with a spinning arc in the corner and its tooltip says "applying script changes…". Changes that finish within 150 ms don't show it.
@@ -20,6 +21,8 @@ its section below.
 - The `defaultStrategy` setting is gone. The update removes it (and its comment block) from `settings.yaml`; if it's typed back in, the editor flags it as having no effect. Settings no longer has a **Strategies** section: each strategy's pros and cons, and which ones this browser can't run, are now a table in Help (**?**) → Reference → *Strategies*, under the strategy docs.
 - The bundled samples (Help → Samples) no longer need the local helper. Redirect, block, request headers, CORS and parameters use `rules` (no banner, Chrome and Firefox). The fetch/XHR replace and transform samples use `page` and show their result in a box on dummyjson.com. Storage now counts Wikipedia visits from `onDocument`. Only **Rewrite page HTML** and **Serve a local file**, which must change the page itself, use `debugger` on Chrome (with its banner) and `extension` on Firefox. Adding a sample now turns it on and gives it a unique name ("Redirect a URL 2") if one is taken.
 
+- `wt.onDocument` is renamed `wt.onPage`. The old name keeps working, unchanged; the editor marks it deprecated.
+- The page can no longer read or write a script's `wt.storage` unless that script's `onPage` code runs in the page.
 - The extension's pages are now built with React and Valtio: the popup and the Network view (before: Preact) and the whole Editor (before: hand-written DOM code), from its page layout, explorer tree, toolbar, panel and status bar to its dialogs. They look and behave the same; the extension's download is larger.
 
 ### Fixed

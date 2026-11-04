@@ -3,7 +3,9 @@
  *
  *   wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, fn)
  *   wt.onResponseBody({ url: [...], exclude, methods, resourceTypes, strategy, binary }, fn)
- *   wt.onDocument("*://example.com/*", fn) or wt.onDocument({ url, exclude, when }, fn)
+ *   wt.onPage("*://example.com/*", fn) or wt.onPage({ url, exclude, when, world }, fn)
+ *   (wt.onDocument is its deprecated alias; both register kind "onDocument")
+ *   wt.onOverlay("*://example.com/*", fn) or wt.onOverlay({ url, exclude, when }, fn)
  *
  * Each network route is owned by exactly one strategy: its own, required,
  * `strategy` — there is no default.
@@ -14,8 +16,17 @@ export type Strategy = "page" | "extension" | "debugger" | "helper" | "rules";
 export const STRATEGIES: Strategy[] = ["helper", "page", "extension", "debugger", "rules"];
 
 export type NetKind = "onRequest" | "onResponseHeaders" | "replaceResponse" | "onResponseBody";
-export type RouteKind = NetKind | "onDocument";
+/** page handlers (wt.onPage / wt.onDocument) and overlay handlers (wt.onOverlay) */
+export type DocKind = "onDocument" | "onOverlay";
+export type RouteKind = NetKind | DocKind;
 export const NET_KINDS: NetKind[] = ["onRequest", "onResponseHeaders", "replaceResponse", "onResponseBody"];
+
+/** a network handler's kind (one that a strategy runs), not a page/overlay one */
+export const isNetKind = (kind: RouteKind): kind is NetKind => kind !== "onDocument" && kind !== "onOverlay";
+
+/** where an onPage handler runs: the site's own JS world, or a private world sharing its DOM */
+export type PageWorld = "main" | "isolated";
+const PAGE_WORLDS: PageWorld[] = ["main", "isolated"];
 
 export type DocumentWhen = "document_start" | "document_end" | "document_idle";
 const DOCUMENT_WHENS: DocumentWhen[] = ["document_start", "document_end", "document_idle"];
@@ -41,8 +52,12 @@ export interface RouteMeta {
     resourceTypes?: string[];
     /** the strategy that runs the handler; required on network routes, absent on onDocument */
     strategy?: Strategy;
-    /** onDocument only */
+    /** onDocument / onOverlay only */
     when?: DocumentWhen;
+    /** onDocument only: set when "isolated" (absent = the page's main world) */
+    world?: "isolated";
+    /** the API name it was registered with, when it differs from `kind` (wt.onPage → kind "onDocument") */
+    api?: "onPage";
     /** onResponseBody only: which bodies the handler gets (see takesBinary / takesText) */
     binary?: BinaryOption;
 }
@@ -53,7 +68,7 @@ export type BinaryOption = boolean | "both";
 export const takesBinary = (r: { binary?: BinaryOption }): boolean => r.binary === true || r.binary === "both";
 export const takesText = (r: { binary?: BinaryOption }): boolean => r.binary !== true;
 
-/** the strategy that owns a network route (onDocument routes have none) */
+/** the strategy that owns a network route (onDocument/onOverlay routes have none) */
 export function effectiveStrategy(route: Pick<RouteMeta, "strategy">): Strategy {
     return route.strategy!;
 }
@@ -78,10 +93,11 @@ function checkPatterns(ps: string[], what: string, where: string): void {
  * Validate and normalize a registration's route argument. Throws a
  * script error on anything unusable (it surfaces like a syntax error).
  */
-export function normalizeRoute(kind: RouteKind, raw: unknown, index: number): RouteMeta {
-    const where = `wt.${kind}`;
-    const doc = kind === "onDocument";
-    const example = doc ? `wt.onDocument("*://example.com/*", handler)` : `wt.${kind}({ url: "*://example.com/*", strategy: "helper" }, handler)`;
+export function normalizeRoute(kind: RouteKind, raw: unknown, index: number, api?: "onPage"): RouteMeta {
+    const name = api || kind;
+    const where = `wt.${name}`;
+    const doc = !isNetKind(kind);
+    const example = doc ? `wt.${name}("*://example.com/*", handler)` : `wt.${kind}({ url: "*://example.com/*", strategy: "helper" }, handler)`;
     const shape = doc ? "a URL pattern (string, string[] or { url })" : "a route { url, strategy }";
     if (typeof raw === "function" || raw === undefined || raw === null) throw new Error(`${where}: first argument must be ${shape} — e.g. ${example}`);
     let obj: any;
@@ -97,17 +113,25 @@ export function normalizeRoute(kind: RouteKind, raw: unknown, index: number): Ro
     checkPatterns(url, "url", where);
     checkPatterns(exclude, "exclude", where);
     const route: RouteMeta = { kind, index, url, exclude };
-    if (kind === "onDocument") {
+    if (api) route.api = api;
+    if (doc) {
+        const runs = kind === "onOverlay" ? "in the overlay" : "in the page";
         for (const k of ["methods", "resourceTypes", "strategy", "binary"]) {
-            if (obj[k] !== undefined) throw new Error(`${where}: "${k}" doesn't apply to onDocument (it runs in the page, not on requests)`);
+            if (obj[k] !== undefined) throw new Error(`${where}: "${k}" doesn't apply to ${name} (it runs ${runs}, not on requests)`);
         }
         if (obj.when !== undefined) {
             if (!DOCUMENT_WHENS.includes(obj.when)) throw new Error(`${where}: when must be one of ${DOCUMENT_WHENS.join(", ")}`);
             route.when = obj.when;
         } else route.when = "document_end";
+        if (obj.world !== undefined) {
+            if (kind === "onOverlay") throw new Error(`${where}: "world" applies to wt.onPage only (an overlay is always its own frame)`);
+            if (!PAGE_WORLDS.includes(obj.world)) throw new Error(`${where}: world must be "main" or "isolated", got ${JSON.stringify(obj.world)}`);
+            if (obj.world === "isolated") route.world = "isolated";
+        }
         return route;
     }
-    if (obj.when !== undefined) throw new Error(`${where}: "when" applies to onDocument only`);
+    if (obj.when !== undefined) throw new Error(`${where}: "when" applies to onPage/onOverlay only`);
+    if (obj.world !== undefined) throw new Error(`${where}: "world" applies to onPage only`);
     if (obj.binary !== undefined) {
         if (kind !== "onResponseBody") throw new Error(`${where}: "binary" applies to onResponseBody only`);
         if (typeof obj.binary !== "boolean" && obj.binary !== "both") throw new Error(`${where}: binary must be true, false or "both", got ${JSON.stringify(obj.binary)}`);
@@ -151,10 +175,13 @@ export function scriptUrls(routes: RouteMeta[] | undefined): string[] {
     return [...out];
 }
 
-/** label for logs: `onResponseBody #2` */
+/** label for logs: `onResponseBody #2` (an onPage route is labeled onPage, not its kind) */
 export function routeLabel(route: RouteMeta): string {
-    return `${route.kind} #${route.index + 1}`;
+    return `${route.api || route.kind} #${route.index + 1}`;
 }
+
+/** the world an onPage/onDocument route runs in */
+export const pageWorld = (route: Pick<RouteMeta, "world">): PageWorld => route.world || "main";
 
 /** can this route ever fire on the hook (page fetch/XHR only)? */
 export function hookCanSee(route: RouteMeta): boolean {

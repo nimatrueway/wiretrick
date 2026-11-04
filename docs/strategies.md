@@ -33,7 +33,7 @@ most once.
 | `rules` | each handler runs **once** when scripts load; its result becomes a browser-native rule (`declarativeNetRequest`) that the browser applies itself | **everything**, the first navigation included | **never** | block, redirect and request/response headers only, with a fixed result ([what `rules` can do](#what-rules-can-do)); Chrome MV3, Chromium MV2 and Firefox 113+ |
 
 `wt.onDocument` isn't a network strategy: it runs in the page whatever the
-setting ([details](scripting.md#dom-changes--wtondocument)).
+setting ([details](scripting.md#dom-changes--wtonpage)).
 
 ## Pros and cons
 
