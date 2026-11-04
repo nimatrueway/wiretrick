@@ -501,8 +501,11 @@ VS Code and `tsc` type-check the same imports.
 **Limits.**
 
 - Only unpkg.com URLs can be imported. Packages that need Node.js built-ins,
-  native code, WebAssembly fetched at runtime, or a bundler (CSS imports,
-  `import.meta.url` assets) don't work.
+  native code, WebAssembly fetched at runtime, or a bundler (`import.meta.url`
+  assets, CSS imported from inside a package's JavaScript) don't work.
+- A `.css` file (`import "https://unpkg.com/daisyui@5.0.43/daisyui.css"`)
+  becomes a `<style>` in the script's [overlay](#overlays--wtonoverlay);
+  everywhere else it's ignored.
 - Top-level `await` in a package isn't supported. A script's `import()` of a
   package URL must be a string literal so the save finds and downloads it.
 - Per import: at most 1000 files, 5 MB per file and 20 MB in total; typings
@@ -575,9 +578,10 @@ wt.replaceResponse({ url: "*://api.example.com/user", strategy: "helper" }, asyn
   that request. The Log lists it as a `bypass`.
 - The URL must be absolute. Bodies are capped at 10 MB each way.
   `signal` (abort) isn't supported.
-- `from: "background"` is the default. `from: "page"` (fetch as the page,
-  with its origin and cookies) is only for overlays, which come later; in
-  handlers it rejects.
+- `from: "background"` is the default in handlers. `from: "page"` fetches
+  as the page — its origin, cookies and CORS rules — and works only in
+  [overlays](#overlays--wtonoverlay), where it's the default (relative URLs
+  resolve against the page); in handlers it rejects.
 
 ### Built-in valtio and React
 
@@ -585,6 +589,9 @@ wt.replaceResponse({ url: "*://api.example.com/user", strategy: "helper" }, asyn
 (`react`, `react-dom`, `react-dom/client`, `react/jsx-runtime`) come with the
 extension: import them by name, or by any `https://esm.sh/` URL of those
 packages, with no download. They load only in scripts that import them.
+A script with JSX (`<div />`) compiles as `.tsx` with React's automatic
+runtime, so components need no `import React`. In `wt.onPage` code the
+built-ins aren't available: using one there throws.
 
 ```ts
 import { subscribe } from "valtio";
@@ -660,8 +667,10 @@ timing:
      (`window.myApp`) aren't visible.
    - **`world: "isolated"`** runs the handler in the extension's isolated
      world on purpose: same DOM and timing, none of the page's JavaScript,
-     and the page can't see or tamper with it. Firefox and the Chromium MV2
-     build only for now; the Chrome (MV3) build logs a warning and skips it.
+     and the page can't see or tamper with it, so it may also call the
+     script's overlay ([the isolated world](#the-isolated-world)). Firefox
+     and the Chromium MV2 build only for now; the Chrome (MV3) build logs a
+     warning and skips it.
 
      ```ts
      wt.onPage({ url: "*://example.com/*", world: "isolated" }, () => { ... });
@@ -671,6 +680,240 @@ Because it runs as page JS, `wt.onPage` works regardless of how the response
 arrived — service-worker-served HTML, cached pages, or hydration overwriting
 a body transform — which is exactly why it's the resilient choice for
 title/DOM changes on SPAs.
+
+## Overlays — `wt.onOverlay`
+
+`wt.onOverlay(route, fn)` gives a script its own GUI on a page: `fn` runs
+in a transparent frame laid over the tab, and whatever it draws in that
+frame's `document` shows on top of the page. Clicks on empty areas go
+through to the page.
+
+```tsx
+import { createRoot } from "react-dom/client";
+import { useSnapshot } from "valtio";
+
+const mock = wt.store("mock", { enabled: false });
+
+wt.replaceResponse({ url: "*://app.example.com/api/me", strategy: "helper" }, () =>
+    mock.enabled ? { name: "Test user", plan: "pro" } : undefined);
+
+wt.onOverlay("*://app.example.com/*", () => {
+    function Panel() {
+        const snap = useSnapshot(mock);
+        return (
+            <label style={{ position: "fixed", right: 16, bottom: 16 }}>
+                <input type="checkbox" checked={snap.enabled}
+                       onChange={() => (mock.enabled = !mock.enabled)} /> Mock /api/me
+            </label>
+        );
+    }
+    createRoot(document.body.appendChild(document.createElement("div"))).render(<Panel />);
+});
+```
+
+Clicking the box changes `mock.enabled`; the next `/api/me` request sees
+it right away, and the value survives restarts.
+
+- **Route.** The same as `wt.onPage` (URL pattern(s), or `{ url, exclude,
+  when }`), matched against the tab's top page. Overlays exist in the top
+  frame only.
+- **One overlay per script per tab.** Every matching `onOverlay` handler of
+  the script runs in the same frame, in registration order, sharing the
+  script's top-level variables. The frame is created at the earliest
+  matching `when`; a script whose routes don't match gets none.
+- **What runs there.** The whole script evaluates in the frame, but only
+  its `onOverlay` handlers run: network handlers and `onPage` handlers
+  register nothing there. Stores (`wt.store`) are live copies of the
+  background's, so the GUI and the handlers see the same values. `wt.log`,
+  `console.*`, errors and unhandled rejections go to the script's Log.
+- **Isolation.** The page's CSS can't reach the GUI and the GUI's CSS
+  can't leak into the page. The page can't find the frame (it sits in a
+  closed shadow root) or read the script's code, which comes from the
+  extension, never through the page. Strict page CSPs don't stop it.
+- **Clicks and stacking.** The frame covers the viewport; the parts with
+  visible elements take clicks and everything else lets them through to
+  the page. A full-viewport element (a modal backdrop) takes every click.
+  With several scripts' overlays, the one last clicked is on top.
+- **Saving and disabling.** Saving the script reloads its overlay (store
+  values stay); disabling it removes the overlay.
+- **`ctx`.** `ctx.url` is the page's URL. `ctx.onNavigate(fn)` runs `fn(url)`
+  whenever the page navigates in place (`pushState`, back/forward,
+  `#hash`), as single-page apps do; the overlay stays. It returns a
+  function that stops listening.
+
+  ```ts
+  wt.onOverlay("*://app.example.com/*", (ctx) => {
+      const badge = document.body.appendChild(document.createElement("div"));
+      badge.textContent = "In the cart";
+      const show = (url: string) => (badge.hidden = !url.includes("/cart"));
+      show(ctx.url);
+      ctx.onNavigate(show);
+  });
+  ```
+
+### Fetching from the overlay
+
+The overlay's own `fetch` is the page's: the page's content script makes
+the request, with the page's origin, cookies and CORS rules, and relative
+URLs resolve against the page. Your scripts' handlers see it like any
+request — on every strategy except `page`, which only sees the page's own
+JavaScript. `wt.fetch` defaults to the same in an overlay; `bypass: true`
+keeps every script's handlers off the request, and `from: "background"`
+fetches from the extension instead (host permissions, no CORS).
+
+```ts
+wt.onOverlay("*://app.example.com/*", async () => {
+    const me = await (await fetch("/api/me")).json();                            // as the page, through your handlers
+    const real = await (await wt.fetch("/api/me", { bypass: true })).json();     // as the page, skipping all handlers
+    const other = await wt.fetch("https://other.site/x", { from: "background" }); // from the extension, no CORS
+});
+```
+
+### Calls between the overlay and the page
+
+`wt.onPage` and `wt.onOverlay` return a handle to the functions their
+handler returns. Call them from the other side with `await`:
+
+```ts
+const app = wt.onPage("*://app.example.com/*", () => ({
+    flags: () => Object.keys((window as any).__APP_FLAGS__ ?? {}),
+}));
+
+wt.onOverlay("*://app.example.com/*", async () => {
+    const names = await app.flags();   // string[], inferred
+    const list = document.body.appendChild(document.createElement("pre"));
+    list.textContent = names.join("\n");
+});
+```
+
+- **Exposing.** A handler that returns a plain object of functions exposes
+  them; any other return value exposes nothing. Types follow: `app.flags`
+  is `() => Promise<string[]>`, and a wrong argument is a compile error.
+- **Calls are async.** Arguments and results are JSON, at most 1 MB each.
+  A call made before the other side's handler has returned waits for it.
+  A call fails with:
+  - `WtTimeoutError` after 10 s without an answer;
+  - `WtCallError` when the function threw (its message only), doesn't
+    exist, the value isn't JSON or is too big, or the handler isn't
+    running on this page (its route didn't match, or it threw);
+  - `DisconnectedError` when the other side went away (the overlay
+    closed, the script reloaded, the page navigated).
+- **Top frame only.** The overlay talks to the script's `onPage` code in
+  the top frame.
+- **Register at top level.** `wt.onPage` and `wt.onOverlay` must be called
+  at the top level of the script (not inside a function, `if` or loop), so
+  both sides number their handlers the same way; Problems flags a call
+  elsewhere. Handles from an imported library don't connect.
+- **Who can call whom.** The overlay can call any `onPage` code. `onPage`
+  code in the main world (the default) can only answer: it shares its world
+  with the site, which could fake its calls, so `overlay.fn()` there
+  rejects with `main-world onPage code can't call the overlay; use world:
+  "isolated"`. Network handlers have no tab: their calls reject.
+
+### The isolated world
+
+`world: "isolated"` runs `onPage` code where the site's JavaScript can't
+see or imitate it: same DOM, none of the site's globals. That code can
+call the overlay:
+
+```ts
+const page = wt.onPage({ url: "*://app.example.com/*", world: "isolated" }, () => {
+    document.addEventListener("click", (e) => {
+        if (e.altKey) overlay.picked((e.target as Element).tagName);   // calls the GUI
+    }, true);
+    return {
+        highlight(sel: string) {
+            const els = [...document.querySelectorAll<HTMLElement>(sel)];
+            els.forEach((el) => (el.style.outline = "2px solid red"));
+            return els.length;
+        },
+    };
+});
+
+const overlay = wt.onOverlay("*://app.example.com/*", () => {
+    const input = document.body.appendChild(document.createElement("input"));
+    input.onchange = async () => (input.title = `${await page.highlight(input.value)} matches`);
+    return {
+        picked(tag: string) { input.value = tag.toLowerCase(); },
+    };
+});
+```
+
+Firefox and the Chromium MV2 build run isolated code; the Chrome (MV3)
+build doesn't yet (the handler is skipped with a warning, and the
+overlay's calls into it reject).
+
+### Main-world results are page data
+
+Main-world `onPage` code runs among the site's own scripts, which can
+replace `Object.keys`, patch your functions or answer in their place. Its
+results are fine to show, but treat them like anything else the site
+sends: check them before they decide what your network handlers do (which
+URLs to redirect, which headers to set). The isolated world and the
+overlay can't be reached by the site.
+
+### Frameworks and CSS
+
+- **React and valtio** are [built in](#built-in-valtio-and-react). A script
+  with JSX compiles with the automatic runtime against the built-in React.
+- **Another JSX runtime:** a `/** @jsxImportSource <url> */` comment at the
+  top switches the file to it, e.g. Preact from unpkg
+  (`/** @jsxImportSource https://unpkg.com/preact@10.26.4 */`, with hooks
+  from `https://unpkg.com/preact@10.26.4/hooks`). Lit, Solid or plain DOM by
+  [package import](#packages-from-unpkg) work too. Pin one version so
+  everything shares a single copy.
+- **CSS:** a `.css` [package import](#packages-from-unpkg) becomes a
+  `<style>` in the overlay; inline styles and `<style>` elements you add
+  work as usual.
+- **Tailwind 4 + daisyUI:** Tailwind's browser build generates CSS from the
+  classes it finds in the overlay's document. Load it with a dynamic
+  `import()` inside the handler so it only runs in the overlay:
+
+  ```tsx
+  import "https://unpkg.com/daisyui@5.0.43/daisyui.css";
+  import { createRoot } from "react-dom/client";
+  import { useState } from "react";
+
+  wt.onOverlay("*://app.example.com/*", async () => {
+      await import("https://unpkg.com/@tailwindcss/browser@4.1.11");
+      function Modal() {
+          const [open, setOpen] = useState(true);
+          return open ? (
+              <div className="modal modal-open">
+                  <div className="modal-box">
+                      <h3 className="text-lg font-bold">Debug tools</h3>
+                      <button className="btn" onClick={() => setOpen(false)}>Close</button>
+                  </div>
+              </div>
+          ) : null;
+      }
+      createRoot(document.body.appendChild(document.createElement("div"))).render(<Modal />);
+  });
+  ```
+
+### Recipes
+
+- **Edit a handler's setting live:** keep it in a store and bind an input
+  to it.
+
+  ```ts
+  const redirect = wt.store("redirect", { target: "" });
+
+  wt.onRequest({ url: "*://cdn.example.com/app.js", strategy: "helper" }, () =>
+      redirect.target ? { redirect: redirect.target } : undefined);
+
+  wt.onOverlay("*://app.example.com/*", () => {
+      const input = document.body.appendChild(document.createElement("input"));
+      input.value = redirect.target;
+      input.onchange = () => (redirect.target = input.value);   // the next app.js load is redirected
+  });
+  ```
+
+- **Modal:** a full-viewport backdrop `<div>` (`position: fixed; inset: 0`)
+  takes every click until it's closed.
+- **Toast:** a fixed element plus `setTimeout` to remove it.
+- **Remember open/closed:** a store field (`ui.open`), so it survives
+  reloads and is the same in every tab.
 
 ## Multiple handlers — how they stack
 

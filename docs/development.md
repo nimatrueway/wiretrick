@@ -131,6 +131,30 @@ keystroke (use a native `change` listener for "commit on blur/Enter"), and a
 document listener added by an effect in response to a click or key may see
 that same event; skip it with `openedBy()` from `src/ui/lib/events.ts`.
 
+## Built-in modules and overlays
+
+Scripts can import the extension's own valtio and React 19 by name
+(`src/shared/builtinSpecs.ts` lists the specifiers, `src/shared/builtins.ts`
+resolves them). valtio's vanilla parts are bundled with the compiler;
+React is a separate chunk, `builtins-react.js` (`src/builtins/react.ts`),
+loaded with a `<script>` tag only when a script imports it. Bumping
+`react` in `package.json` changes what scripts get: note it in the
+changelog. `.tsx` scripts compile with the automatic JSX runtime
+(`"jsx": "react-jsx"` in the generated `tsconfig.json`).
+
+A script's `wt.onOverlay` GUI runs in `overlay.html` + `overlay.js`
+(`src/overlay/overlayRuntime.ts`), a web-accessible page the bridge
+(`src/hook/bridge.ts`) frames into the top page inside a closed shadow
+root, one frame per script. The bridge hands the frame a `MessagePort`;
+the frame's code, stores and `from: "page"` fetches go through the
+bridge's extension port (`src/background/engine/overlayLinks.ts`
+authorizes each script on it). Calls between the overlay and `onPage`
+code use `src/shared/rpc.ts`. On Chromium (MV2 and MV3) the manifest lists
+`overlay.html` as a sandbox page, so it runs scripts without the extension
+CSP and has an opaque origin; Firefox has no manifest sandbox, so there it's
+a normal extension page that checks a one-time nonce with the background
+before it accepts a port.
+
 ## How the MV3 build works
 
 `npm run build` produces both bundles:

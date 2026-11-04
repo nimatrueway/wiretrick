@@ -35,6 +35,13 @@ most once.
 `wt.onDocument` isn't a network strategy: it runs in the page whatever the
 setting ([details](scripting.md#dom-changes--wtonpage)).
 
+**Requests from an overlay.** An
+[overlay](scripting.md#overlays--wtonoverlay)'s `fetch` (and its
+`wt.fetch`, which fetches as the page by default) goes through your
+handlers like any request the tab makes, on every strategy except `page`,
+which only sees the page's own JavaScript. `{ bypass: true }` keeps every
+handler off one.
+
 ## Pros and cons
 
 The same text is shown in the Editor under Help (**?**) → Reference → *Strategies*.
