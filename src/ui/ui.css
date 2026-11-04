@@ -515,11 +515,19 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 #panel-actions { display: flex; flex: none; gap: 6px; align-items: center; }
 /* the same two actions, in the same place, on Log and Network (Problems has nothing to clear) */
 #log-panel[data-tab="problems"] #panel-actions, #log-panel[data-tab="preview"] #panel-actions { visibility: hidden; }
-@container (max-width: 480px) {
+@container (max-width: 720px) {
     #panel-actions { order: 1; margin-left: auto; }
     #btn-close-panel { order: 1; margin-left: auto; }
     #panel-actions + #btn-close-panel { margin-left: 0; }
     #log-header .panel-tools { order: 2; flex-basis: 100%; margin-left: 0; }
+}
+/* narrower still: the tabs are icons (name in the tooltip) */
+.panel-tab-ico { display: none; vertical-align: middle; }
+@container (max-width: 520px) {
+    .panel-tab-ico { display: inline-block; }
+    .panel-tab-label { display: none; }
+    #panel-tabs { gap: 10px; }
+    #panel-tabs .panel-tab { display: inline-flex; padding: 3px 2px; }
 }
 .panel-filter {
     height: 22px; box-sizing: border-box; padding: 2px 6px; font-size: 11px;

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactElement } from "react";
 import { createPortal } from "react-dom";
 import { ref, useSnapshot } from "valtio";
 import { LogFilterBar, type LogFilter } from "../logFilter";
@@ -14,6 +14,19 @@ import { panel } from "../state/panel";
 import { LogView } from "./LogView";
 import { OverlayPreview, PreviewTools } from "./OverlayPreview";
 import { ProblemsView } from "./ProblemsView";
+
+const ico = (d: string) => (
+    <svg className="panel-tab-ico" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+        <path d={d} fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+);
+/** shown instead of the labels in a narrow panel (same shapes as the status bar's) */
+const ICONS: Record<PanelTab, ReactElement> = {
+    problems: ico("M8 2 14.5 13.5h-13zM8 6.5v3.5M8 11.5v.1"),
+    log: ico("M2.5 4h11M2.5 8h11M2.5 12h7"),
+    network: ico("M5 13V3M2.5 5.5 5 3l2.5 2.5M11 3v10M8.5 10.5 11 13l2.5-2.5"),
+    preview: ico("M2 3.5h12v9H2zM2 6h12M6.5 8.3v2.4l2-1.2z"),
+};
 
 const TABS: { tab: PanelTab; id: string; label: string; title: string; key: string }[] = [
     { tab: "problems", id: "problems-tab", label: "Problems", title: "Problems — what is wrong with your scripts right now; each one goes away once fixed", key: "Alt+Shift+P" },
@@ -98,8 +111,9 @@ function Panel() {
                     {TABS.map((t, i) => (
                         <Fragment key={t.tab}>
                             {i ? " " : null}
-                            <span id={t.id} className={tab === t.tab ? "panel-tab active" : "panel-tab"} role="tab" data-panel={t.tab} aria-selected={tab === t.tab} title={`${t.title} (${keyHint(t.key)})`} onClick={() => actions.showPanelTab(t.tab)}>
-                                {t.label}
+                            <span id={t.id} className={tab === t.tab ? "panel-tab active" : "panel-tab"} role="tab" data-panel={t.tab} aria-selected={tab === t.tab} title={`${t.title} (${keyHint(t.key)})`} aria-label={t.label} onClick={() => actions.showPanelTab(t.tab)}>
+                                {ICONS[t.tab]}
+                                <span className="panel-tab-label">{t.label}</span>
                             </span>
                         </Fragment>
                     ))}

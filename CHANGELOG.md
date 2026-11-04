@@ -9,6 +9,8 @@ its section below.
 
 ### Changed
 
+- The bottom panel in a narrow window: the view's filter moves to its own row below the tabs (panel narrower than 720 px), and the Problems / Log / Network / Preview tabs become icons (narrower than 520 px; the name is in the tooltip).
+
 - **Breaking:** `wt.store` is now `wt.globalStore` (same behavior); calling `wt.store` throws with the new name.
 
 ### Added
