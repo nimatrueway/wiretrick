@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-03
+
 ### Added
 
 - `wt.onOverlay(route, fn)` gives a script its own GUI on a page: `fn` runs in a transparent frame over the tab (top frame, one per script), so the page's CSS and JavaScript can't reach it and clicks on its empty areas go through to the page. It shares the script's `wt.store`s with the network handlers, so a switch in the GUI can turn a mock on or off live. Its `fetch` (and `wt.fetch`, `from: "page"`) fetches as the page, with its cookies. `ctx.onNavigate(fn)` follows single-page-app navigations. Saving the script reloads its overlay; disabling it removes it.
@@ -570,7 +572,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.9.18...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/nimatrueway/wiretrick/compare/v0.9.18...v0.10.0
 [0.9.18]: https://github.com/nimatrueway/wiretrick/compare/v0.9.17...v0.9.18
 [0.9.17]: https://github.com/nimatrueway/wiretrick/compare/v0.9.16...v0.9.17
 [0.9.16]: https://github.com/nimatrueway/wiretrick/compare/v0.9.15...v0.9.16
