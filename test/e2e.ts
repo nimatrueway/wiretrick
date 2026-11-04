@@ -32,6 +32,7 @@ import { resolveBrowser } from "./browserSetup";
 import { checkApiTypingsNav } from "./apiTypingsNav";
 import { checkRulesStrategy, rulesServerRoute } from "./rulesE2e";
 import { checkFoldersAndDataFiles, foldersServerRoute } from "./foldersE2e";
+import { checkOverlays, overlayServerRoute } from "./overlayE2e";
 
 const EXT_ROOT = path.join(new URL("..", import.meta.url).pathname, "dist");
 
@@ -52,6 +53,7 @@ const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 const server = http.createServer((req: http.IncomingMessage, res: http.ServerResponse) => {
     if (rulesServerRoute(req, res, ORIGIN)) return;
     if (foldersServerRoute(req, res, ORIGIN)) return;
+    if (overlayServerRoute(req, res, ORIGIN)) return;
     const url = new URL(req.url || "/", ORIGIN);
     const send = (ct: string, body: string | Buffer) => { res.writeHead(200, { "content-type": ct }); res.end(body); };
     if (url.pathname === "/html") return send("text/html", "<html><body><h1 id='t'>ORIGINAL TITLE</h1></body></html>");
@@ -555,6 +557,9 @@ await checkRulesStrategy(ctx, mgr, ORIGIN, check);
 
 // ---------- 10h. folders and JSON data files ----------
 await checkFoldersAndDataFiles(ctx, mgr, ORIGIN, check);
+
+// ---------- 10i. overlays (wt.onOverlay) and calls between the overlay and the page ----------
+await checkOverlays(ctx, mgr, ORIGIN, check, { isolated: true });
 
 // ---------- 11. logs: script output tunnelled to the Log view, page console not captured ----------
 await saveScript(
