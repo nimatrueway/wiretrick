@@ -9,6 +9,7 @@
  * so `./My_Utils` finds "My Utils"). A URL (`https://unpkg.com/x@1.2.3`)
  * is a package import (shared/packageImports), never a script path.
  */
+import { builtinSpec } from "./builtinSpecs";
 import { isUrlSpec, makePackageLoader, PACKAGE_ORIGIN, parsePackageUrl, type PackageModule, type PackageModules } from "./packageImports";
 
 const IMPORT_RE = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["']([^"'\n]+)["']/g;
@@ -46,7 +47,7 @@ export function badPackageImports(code: string): BadPackageImport[] {
     const out: BadPackageImport[] = [];
     for (const m of code.matchAll(IMPORT_RE)) {
         const spec = m[1];
-        if (!isUrlSpec(spec)) continue;
+        if (!isUrlSpec(spec) || builtinSpec(spec)) continue;
         const message = parsePackageUrl(spec);
         if (typeof message !== "string") continue;
         const offset = m.index! + m[0].length - 1 - spec.length;
@@ -214,8 +215,9 @@ export function makeLibRequire<L extends ShippedLib>(libs: L[], run: (lib: L, re
     const requireFrom =
         (importer: string) =>
         (spec: string): any => {
+            const r = isUrlSpec(spec) ? null : resolve(importer, spec);
+            if (!r && builtinSpec(spec)) throw new Error(`cannot import "${spec}": the built-in modules aren't available in page code`);
             if (isUrlSpec(spec)) return loadPackage(spec);
-            const r = resolve(importer, spec);
             if (!r) throw new Error(`cannot import "${spec}" — is the ${isDataSpec(spec) ? "data file" : "library script"} saved?`);
             if (r.kind === "data") return JSON.parse(scriptLibs.find((l) => l.json !== undefined && l.name === r.path)!.json!);
             if (modules.has(r.name)) return modules.get(r.name);

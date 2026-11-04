@@ -13,7 +13,12 @@ import { normalizeRoute, type RouteKind, type RouteMeta } from "./route";
 import { inertRemote, REMOTE_FROM_BACKGROUND } from "./remote";
 import { scriptEnv } from "./scriptEnv";
 import { importLine, importPath, importResolver, isDataSpec } from "./scriptImports";
-import { isUrlSpec, makePackageLoader, type PackageModules } from "./packageImports";
+import { isUrlSpec, makePackageLoader, PackageImportError, type PackageModules } from "./packageImports";
+import { builtinModule } from "./builtins";
+import { builtinSpec } from "./builtinSpecs";
+import { proxy } from "valtio/vanilla";
+import type { StorePersist, WireRequest, WireResponse } from "./wire";
+import { fromWireResponse, splitFetchInit, toWireRequest, type WtFetchInit } from "./wtFetch";
 
 export type { DocumentWhen } from "./route";
 
@@ -70,6 +75,10 @@ export interface ResApiOverrides {
     paramValues?: Record<string, any>;
     /** resolves ES import specifiers ("./utils", "utils") to module exports */
     importModule?: (spec: string) => any;
+    /** `wt.store`: the script's replicated store (default: a plain local valtio proxy) */
+    store?: (name: string, initial: object, persist: StorePersist) => object;
+    /** `wt.fetch(…, { from: "background" })` (default: this context's own fetch, no bypass) */
+    fetch?: (request: WireRequest, bypass: boolean) => Promise<WireResponse>;
 }
 
 /** Standard overrides for a stored script: storage wired by id, log → sink. */
@@ -78,9 +87,11 @@ export function makeScriptOverrides(
     storage: { get(scriptId: string, key: string): Promise<any>; set(scriptId: string, key: string, v: any): Promise<void> },
     logSink: (scriptId: string, level: ScriptLogLevel, source: string, text: string) => void,
     paramValues?: Record<string, any>,
-    importModule?: (spec: string) => any
+    importModule?: (spec: string) => any,
+    extra?: Pick<ResApiOverrides, "store" | "fetch">
 ): ResApiOverrides {
     return {
+        ...extra,
         storage: {
             get: (key: string) => storage.get(scriptId, key),
             set: (key: string, value: any) => storage.set(scriptId, key, value),
@@ -319,7 +330,11 @@ export function makeModuleResolver(
     );
     const byName = new Map<string, { id: string; name: string; code: string }>();
     for (const s of scripts) if (!byName.has(s.name)) byName.set(s.name, s);
-    const loadPackage = makePackageLoader(opts?.packages);
+    // a downloaded package's own `require("react")` gets the built-in too (one React copy), unless it's React itself
+    const loadPackage = makePackageLoader(opts?.packages, (spec, from) => {
+        if (!builtinSpec(spec) || /^https:\/\/unpkg\.com\/(react|react-dom|scheduler|valtio)@/.test(from)) return undefined;
+        return { module: builtinModule(spec) };
+    });
     const requires = new Map<string, (spec: string) => any>();
     const resolveFrom = (importer: string): ((spec: string) => any) => {
         let r = requires.get(importer);
@@ -333,6 +348,18 @@ export function makeModuleResolver(
         return r;
     };
     const load = (importer: string, spec: string): any => {
+        if (builtinSpec(spec) && (isUrlSpec(spec) || !lookup(importer, spec))) {
+            try {
+                return builtinModule(spec, byName.get(importer)?.code, (url) => {
+                    deps.add(url);
+                    return loadPackage(url);
+                });
+            } catch (e: any) {
+                if (isFatalImportError(e)) throw e;
+                if (opts?.stubUnresolved) return makeStubModule(); // meta-only, React not loaded
+                throw new PackageImportError(e?.message ?? String(e));
+            }
+        }
         if (isUrlSpec(spec)) {
             deps.add(spec);
             return loadPackage(spec);
@@ -517,6 +544,58 @@ function createOwner(meta: ResMeta, storedValues?: Record<string, any>) {
     };
 }
 
+/** `wt.store`'s `persist` option, checked */
+function storePersist(name: string, opts: unknown): StorePersist {
+    if (opts === undefined || opts === null) return true;
+    if (typeof opts !== "object") throw new TypeError(`wt.store("${name}"): the third argument must be an options object`);
+    const p = (opts as { persist?: unknown }).persist;
+    if (p === undefined) return true;
+    if (typeof p === "boolean") return p;
+    if (Array.isArray(p) && p.every((k) => typeof k === "string")) return [...p];
+    throw new TypeError(`wt.store("${name}"): persist must be true, false or a list of top-level field names`);
+}
+
+/** `wt.store` for one compiled instance: each name once */
+function makeStore(overrides?: ResApiOverrides): (name: string, initial: object, opts?: unknown) => object {
+    const names = new Set<string>();
+    return (name, initial, opts) => {
+        // save-time compile: arguments built from a stubbed import aren't known yet
+        if (isStub(name) || isStub(initial) || isStub(opts)) return makeStubModule();
+        if (typeof name !== "string" || !name) throw new TypeError("wt.store: the first argument must be the store's name (a non-empty string)");
+        if (names.has(name)) throw new Error(`wt.store("${name}"): this script already has a store named "${name}" — a name may be used once per script (call wt.store at top level and share the result)`);
+        const persist = storePersist(name, opts);
+        if (!initial || typeof initial !== "object" || Array.isArray(initial)) throw new TypeError(`wt.store("${name}"): initial must be an object`);
+        const out = overrides?.store ? overrides.store(name, initial, persist) : proxy(initial);
+        names.add(name);
+        return out;
+    };
+}
+
+/** `wt.fetch` in background code */
+function makeFetch(overrides?: ResApiOverrides): (input: RequestInfo | URL, init?: WtFetchInit) => Promise<Response> {
+    return async (input, init) => {
+        const { init: rest, from, bypass } = splitFetchInit(init);
+        if (from === "page") throw new Error('wt.fetch: from: "page" fetches as the page, which only an overlay (wt.onOverlay) can do — background code uses from: "background"');
+        if (!overrides?.fetch) return fetch(input, { credentials: "include", ...rest });
+        return fromWireResponse(await overrides.fetch(await toWireRequest(input, rest), bypass));
+    };
+}
+
+/** `wt.storage.set("$store:…")` writes behind a store's back: warn (the store owns the key) */
+function guardStoreKeys(storage: { get(key: string): any; set(key: string, value: any): any }, overrides?: ResApiOverrides) {
+    return {
+        get: (key: string) => storage.get(key),
+        set: (key: string, value: any) => {
+            if (typeof key === "string" && key.startsWith("$store:")) {
+                const msg = `wt.storage.set("${key}"): that key is the persisted copy of wt.store("${key.slice(7)}") — change the store instead (the store overwrites this on its next save)`;
+                if (overrides?.logSink) overrides.logSink("warn", "wt", msg);
+                else console.warn("[Wiretrick]", msg);
+            }
+            return storage.set(key, value);
+        },
+    };
+}
+
 function makeShim(owner: ReturnType<typeof createOwner>, overrides?: ResApiOverrides): any {
     const register = (kind: RouteKind, api?: "onPage") => (route: unknown, fn: unknown) => {
         const name = api || kind;
@@ -556,10 +635,12 @@ function makeShim(owner: ReturnType<typeof createOwner>, overrides?: ResApiOverr
             if (typeof name !== "string" || !name) throw new Error("wt.defineParam: first argument must be the parameter name");
             return owner.add({ [name]: def }, "wt.defineParam")[name];
         },
-        storage: overrides?.storage || {
+        storage: guardStoreKeys(overrides?.storage || {
             get: () => undefined,
             set: () => undefined,
-        },
+        }, overrides),
+        store: makeStore(overrides),
+        fetch: makeFetch(overrides),
         log: (...args: any[]) => (overrides?.logSink ? overrides.logSink("info", "wt.log", formatLogArgs(args)) : console.log("[Wiretrick] wt.log:", ...args)),
         ...scriptEnv(),
     };

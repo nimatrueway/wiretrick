@@ -20,6 +20,7 @@ import { dlogLevel } from "../../../shared/debugLog";
 import { helperInstallCommand, helperInstallShell, isHelperOutdated, MIN_HELPER_VERSION } from "../../../shared/helperInstall";
 import type { Script } from "../scriptStore";
 import { log, noteHelperSkip } from "../logs";
+import { bypassed } from "../bypass";
 import { reportSkipped } from "../skipped";
 import { winnerOf } from "../../../shared/precedence";
 import { wsNotApplied } from "../../../shared/websocketLimits";
@@ -472,6 +473,7 @@ export class HelperStrategy {
         // helpers before 0.4.1 send no reqBody: ctx.requestBody stays undefined
         const requestBody = requestBodyFrom(this.takeChunks(m.reqBody), headerValue(m.headers, "content-type"));
         await this.loaded;
+        if (bypassed(m, `helper:${m.id}`)) return void this.send({ t: "continue", id: m.id });
         const c = this.context(m, "req");
         if (!this.matching(m.url, m.method, c.type, "req")) {
             this.send({ t: "continue", id: m.id });
@@ -526,6 +528,7 @@ export class HelperStrategy {
         this.chunks.delete(m.id);
         const requestBody = requestBodyFrom(this.takeChunks(m.reqBody), m.reqType);
         await this.loaded;
+        if (bypassed(m, `helper:${m.id}`)) return void this.send({ t: "continue", id: m.id });
         const c = this.context(m, "res");
         const reqHeaders = {};
         const base = { url: m.url, method: m.method, tabId: c.tabId, resourceType: c.type, tabUrl: c.tabUrl, requestHeaders: reqHeaders, status: m.status, requestId: c.requestId, requestBody };

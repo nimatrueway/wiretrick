@@ -27,6 +27,8 @@ import type { Script } from "../scriptStore";
 import { compileMv2, ownsAny } from "./strategyScripts";
 import { IS_FIREFOX } from "./helperState";
 import { wsNotApplied } from "../../../shared/websocketLimits";
+import { BYPASS_RULE_BASE } from "../bypass";
+import { storeOwner } from "../stores";
 
 type ParamValues = { [scriptId: string]: Record<string, any> };
 
@@ -39,6 +41,8 @@ interface ActiveRule {
 }
 
 const CACHE_KEY = "wtRulesState";
+/** a store change re-probes after this quiet time */
+const REPROBE_MS = 300;
 
 function dnrApi(): any {
     const g = globalThis as any;
@@ -94,17 +98,46 @@ export class RulesStrategy {
     private observing = false;
     private seen = new Set<string>();
     private readonly onEvent = (d: any): void => this.observe(d);
+    private last: { scripts: Script[]; paramValues: ParamValues } | null = null;
+    /** scripts that own rules: their stores feed the probe */
+    private owners = new Set<string>();
+    private probing = false;
+    private quietUntil = 0;
+    private reprobeTimer: ReturnType<typeof setTimeout> | null = null;
 
     reload(scripts: Script[], paramValues?: ParamValues): Promise<void> {
+        this.last = { scripts, paramValues: paramValues || {} };
         this.chain = this.chain
             .then(() => this.apply(scripts, paramValues || {}))
             .catch((e: any) => dlogLevel("rules", "error", `rules reload failed: ${e?.message || e}`));
         return this.chain;
     }
 
+    /**
+     * A store of `scriptId` changed: if the script owns rules, re-probe
+     * (debounced) — its rules handlers may read the store. Writes made by
+     * the probe itself don't trigger another one.
+     */
+    storeChanged(scriptId: string): void {
+        if (!this.owners.has(scriptId) || this.probing || Date.now() < this.quietUntil || this.reprobeTimer) return;
+        this.reprobeTimer = setTimeout(() => {
+            this.reprobeTimer = null;
+            if (this.last) void this.reload(this.last.scripts, this.last.paramValues);
+        }, REPROBE_MS);
+    }
+
+    /** every store's rev of the rules scripts (part of the probe signature) */
+    private async storeRevs(ids: string[]): Promise<Record<string, Record<string, number>>> {
+        const snaps = await storeOwner.init(ids);
+        const out: Record<string, Record<string, number>> = {};
+        for (const [s, stores] of Object.entries(snaps)) out[s] = Object.fromEntries(Object.entries(stores).map(([n, v]) => [n, v.rev]));
+        return out;
+    }
+
     private async apply(scripts: Script[], paramValues: ParamValues): Promise<void> {
         if (strategyUnsupported("rules", { firefox: IS_FIREFOX, mv3: __MV3__ })) return; // routeProblem warns
         const owners = scripts.filter((s) => s.enabled && s.meta.active && ownsAny(s, "rules"));
+        this.owners = new Set(owners.map((s) => s.id));
         const names = new Map(scripts.map((s) => [s.id, s.meta.name]));
         if (!owners.length) {
             await this.replace([]);
@@ -114,10 +147,17 @@ export class RulesStrategy {
             return;
         }
         const enabled = scripts.filter((s) => s.enabled);
-        const sig = JSON.stringify([enabled.map((s) => [s.id, s.updatedAt, s.meta.name]), paramValues, dataFilesSig(), packagesSig()]);
+        const sig = JSON.stringify([enabled.map((s) => [s.id, s.updatedAt, s.meta.name]), paramValues, dataFilesSig(), packagesSig(), await this.storeRevs([...this.owners])]);
         if (__MV3__ && (await this.restoreCache(sig))) return;
 
-        const probed = await this.probe(scripts, owners, paramValues);
+        let probed: Map<string, ScriptRules>;
+        this.probing = true;
+        try {
+            probed = await this.probe(scripts, owners, paramValues);
+        } finally {
+            this.probing = false;
+            this.quietUntil = Date.now() + REPROBE_MS;
+        }
         const errors = new Map<string, string[]>();
         const addError = (id: string, line: string) => errors.set(id, [...(errors.get(id) || []), line]);
         // group rule specs per handler, in script order (= runtime order)
@@ -202,9 +242,9 @@ export class RulesStrategy {
         return out;
     }
 
-    /** remove every session rule (the extension owns them all), then add `rules` */
+    /** remove every session rule (the extension owns them all, `wt.fetch` bypass rules aside), then add `rules` */
     private async replace(rules: any[]): Promise<void> {
-        const existing: any[] = (await dnrCall("getSessionRules")) || [];
+        const existing: any[] = ((await dnrCall("getSessionRules")) || []).filter((r: any) => r.id < BYPASS_RULE_BASE);
         if (!existing.length && !rules.length) return;
         await dnrCall("updateSessionRules", { removeRuleIds: existing.map((r) => r.id), addRules: rules });
     }
@@ -216,7 +256,7 @@ export class RulesStrategy {
             const d = await chrome.storage.session.get(CACHE_KEY);
             const c = d?.[CACHE_KEY];
             if (!c || c.sig !== sig) return false;
-            const live: any[] = (await dnrCall("getSessionRules")) || [];
+            const live: any[] = ((await dnrCall("getSessionRules")) || []).filter((r: any) => r.id < BYPASS_RULE_BASE);
             const ids = new Set(live.map((r) => r.id));
             if (live.length !== c.active.length || !c.active.every((r: ActiveRule) => ids.has(r.id))) return false;
             await setScriptRuleErrors(new Map(Object.entries(c.errors || {})), new Map(Object.entries(c.names || {})));

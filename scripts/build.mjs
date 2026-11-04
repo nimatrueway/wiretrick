@@ -13,7 +13,7 @@
  * The MV3 and Firefox manifests are derived from manifest.json at build time.
  */
 import { rolldown } from "rolldown";
-import { cp, mkdir, rm, writeFile, copyFile, readFile } from "node:fs/promises";
+import { cp, mkdir, rm, writeFile, copyFile, readFile, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { execSync } from "node:child_process";
 import path from "node:path";
@@ -55,6 +55,11 @@ function entriesFor(dist, mv3) {
         {
             input: path.join(root, "src/ui/popup.tsx"),
             output: { file: path.join(dist, "popup.js"), format: "iife" },
+        },
+        {
+            // the built-in React for scripts, loaded only when one imports it (src/shared/builtins.ts)
+            input: path.join(root, "src/builtins/react.ts"),
+            output: { file: path.join(dist, "builtins-react.js"), format: "iife" },
         },
     ];
     if (!mv3) {
@@ -156,6 +161,21 @@ function keepMonacoFile(rel) {
     return true;
 }
 
+/** node_modules-relative path → text of every .d.ts the built-in valtio and React need */
+async function builtinTypes() {
+    const out = {};
+    const add = async (dir, test) => {
+        for (const f of await readdir(path.join(root, "node_modules", dir), { recursive: true })) {
+            if (test(f)) out[`${dir}/${f.split(path.sep).join("/")}`] = await readFile(path.join(root, "node_modules", dir, f), "utf8");
+        }
+    };
+    await add("valtio/esm", (f) => f.endsWith(".d.mts"));
+    await add("@types/react", (f) => ["index.d.ts", "global.d.ts", "jsx-runtime.d.ts", "jsx-dev-runtime.d.ts"].includes(f));
+    await add("@types/react-dom", (f) => ["index.d.ts", "client.d.ts"].includes(f));
+    await add("csstype", (f) => f === "index.d.ts");
+    return out;
+}
+
 async function copyStatic(dist, mv3) {
     await mkdir(path.join(dist, "lib", "monaco"), { recursive: true });
 
@@ -192,6 +212,9 @@ async function copyStatic(dist, mv3) {
         path.join(root, "src/types/wt-api.d.ts"),
         path.join(dist, "lib/wt-api.d.ts")
     );
+
+    // typings of the built-in modules (src/shared/builtins.ts), which the Editor loads when a script imports one
+    await writeFile(path.join(dist, "lib/builtin-types.json"), JSON.stringify(await builtinTypes()));
 
     console.log("static assets copied →", path.relative(root, dist));
 }

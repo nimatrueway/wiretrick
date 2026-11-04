@@ -19,6 +19,7 @@ import { badgeSetText, badgeSetColor, tabsQueryAll, tabsGet } from "../shared/ch
 import { createBadgeCounter } from "./badgeCounter";
 import { actionIconView, createBusyIndicator } from "./busyIcon";
 import { onBusyChange } from "./engine/busy";
+import { addBridgePort } from "./engine/bridgePorts";
 
 const IS_FIREFOX =
     typeof (globalThis as any).browser !== "undefined" &&
@@ -112,6 +113,7 @@ chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
 
 // ---- manager UI port: logs stream over it ----
 chrome.runtime.onConnect.addListener((port) => {
+    if (addBridgePort(port)) return; // L2: a content-script bridge
     if (port.name === "logs") {
         addUiPort(port);
     }

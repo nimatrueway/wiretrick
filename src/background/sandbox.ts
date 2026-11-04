@@ -27,7 +27,7 @@
  * Reverse calls (wt.storage.* and script logging) travel the other way
  * with the same reqId pattern.
  */
-import { compileScript, compileWithLibs, isFatalImportError, makeModuleResolver, makeStubModule, type CompiledScript, type DataFileSource } from "../shared/compile";
+import { compileScript, compileWithLibs, isFatalImportError, makeModuleResolver, makeStubModule, type CompiledScript, type DataFileSource, type ResApiOverrides } from "../shared/compile";
 import { runOp, type BodyOp, type OpScript } from "../shared/bodyOps";
 import { compileDecision } from "../shared/pac";
 import "../shared/transpile";
@@ -35,6 +35,9 @@ import type { PackageModules } from "../shared/packageImports";
 import { scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
 import { probeScriptRules, type ScriptRules } from "../shared/rulesProbe";
 import type { Strategy } from "../shared/route";
+import { Endpoint } from "../shared/wire";
+import { ReplicaHub } from "../shared/storeReplica";
+import { ensureBuiltins } from "../shared/builtins";
 
 /**
  * Environment parity with the MV2 background page: sandboxed pages get NO
@@ -125,6 +128,37 @@ function sandboxLog(msg: string, level: "debug" | "info" | "warn" | "error" = "d
     void reverseCall({ op: "log", scriptId: null, level, msg: `[sandbox] ${msg}` });
 }
 
+// ---- the L1 link to the service worker: wt.store replicas, wt.fetch ----
+
+/** wire messages ride the same postMessage channel, relayed by the offscreen document */
+const link = new Endpoint((msg) => post({ kind: "wire", msg }));
+const hub = new ReplicaHub({ ctx: "sandbox", log: (s, msg, level) => scriptLog(s, level, msg) });
+hub.attach(link);
+/** the SW start the hub last synced with (a new one may have lost unsaved store state) */
+let epoch = "";
+
+function noteEpoch(e: unknown): void {
+    if (typeof e !== "string" || e === epoch) return;
+    const restarted = epoch !== "";
+    epoch = e;
+    if (restarted) {
+        sandboxLog("the service worker restarted — re-syncing stores");
+        hub.reconnect();
+    }
+}
+
+/** load the owner's state of scripts this hub hasn't seen, so their wt.store calls return it synchronously */
+async function primeStores(scripts: PlainScript[]): Promise<void> {
+    hub.retain(scripts.map((s) => s.id));
+    const missing = scripts.filter((s) => !hub.isPrimed(s.id)).map((s) => s.id);
+    if (!missing.length) return;
+    try {
+        hub.prime(await link.call("store.init", { scripts: missing }));
+    } catch (e: any) {
+        sandboxLog(`couldn't load the stores (${e?.message || e}) — wt.store starts from initial values until the owner answers`, "warn");
+    }
+}
+
 // ---- compile cache: metadata + live handlers, invalidated on any change ----
 
 const cache = new Map<string, { s: PlainScript; compiled: CompiledScript; result: AnalyzeResult }>();
@@ -152,6 +186,14 @@ function compileSignature(scripts: PlainScript[], paramValues: Record<string, an
  * a reverse-channel storage/log. Recompiles only when the script set or
  * the param values change (runs are per-request — reuse the handlers).
  */
+/** a script's wt.store (a hub replica) and wt.fetch (run by the SW) */
+function liveApis(sid: string): Pick<ResApiOverrides, "store" | "fetch"> {
+    return {
+        store: (name, initial, persist) => hub.store(sid, name, initial, persist),
+        fetch: (request, bypass) => link.call("fetch", { request, bypass }, sid),
+    };
+}
+
 function ensureCompiled(scripts: PlainScript[], paramValues: Record<string, any>): void {
     const sig = compileSignature(scripts, paramValues);
     if (sig === cacheSig && cache.size) return; // unchanged: keep the compiled handlers
@@ -165,6 +207,7 @@ function ensureCompiled(scripts: PlainScript[], paramValues: Record<string, any>
             set: (key: string, value: any) => reverseCall({ op: "storageSet", scriptId: sid, key, value }).then(() => undefined),
         },
         paramValues: paramValues?.[sid],
+        ...liveApis(sid),
     });
     const resolver = makeModuleResolver(
         scripts.map((s) => ({ id: s.id, name: s.name, code: s.code })),
@@ -201,6 +244,7 @@ function ensureCompiled(scripts: PlainScript[], paramValues: Record<string, any>
                 set: (key: string, value: any) => reverseCall({ op: "storageSet", scriptId: s.id, key, value }).then(() => undefined),
             },
             logSink: (level, source, text) => scriptLog(s.id, level, scriptLogLine(s.name, source, text)),
+            ...liveApis(s.id),
         });
         currentDeps = null;
         cache.set(s.id, {
@@ -289,12 +333,27 @@ function pacDecision(source: string): (url: string, host: string) => string {
     return pacCache.fn;
 }
 
+/** the built-in React, if these scripts import it (compiles are synchronous) */
+async function builtins(scripts: { code: string }[]): Promise<void> {
+    await ensureBuiltins(scripts.map((s) => s.code), packages).catch((e: any) => sandboxLog(`built-in React failed to load: ${e?.message || e}`, "error"));
+}
+
+/** before scripts compile for real: their stores and built-ins */
+async function prepare(scripts: PlainScript[], paramValues: Record<string, any>): Promise<void> {
+    if (compileSignature(scripts, paramValues ?? {}) === cacheSig && cache.size) return; // compiled already
+    await Promise.all([primeStores(scripts), builtins(scripts)]);
+}
+
 // ---- message pump ----
 
 window.addEventListener("message", async (event) => {
     const data = event.data;
     // only the host page (the offscreen document embedding this iframe) talks to us
     if (!data || event.source !== window.parent) return;
+    if (data.kind === "wire") {
+        link.receive(data.msg);
+        return;
+    }
     if (data.kind === "reverseResult") {
         pendingReverse.get(data.reqId)?.(data.result);
         pendingReverse.delete(data.reqId);
@@ -310,12 +369,18 @@ window.addEventListener("message", async (event) => {
             packages = data.payload.packages || { aliases: {}, modules: {} };
             dataSig = data.payload.dataSig;
         }
+        noteEpoch(data.payload.epoch);
         if (typeof data.payload.dataSig === "string" && data.payload.dataSig !== dataSig) result = { needDataFiles: true };
         else if (op === "ping") result = { pong: true };
-        else if (op === "analyze") result = analyze(scripts, paramValues);
-        else if (op === "compileOne") result = compileOne(data.payload.target, scripts, paramValues);
-        else if (op === "run") result = await run(scripts, paramValues, bodyOp, args);
-        else if (op === "rules") result = await rules(scripts, paramValues);
+        else if (op === "analyze" || op === "run" || op === "rules") {
+            await prepare(scripts, paramValues);
+            if (op === "analyze") result = analyze(scripts, paramValues);
+            else if (op === "run") result = await run(scripts, paramValues, bodyOp, args);
+            else result = await rules(scripts, paramValues);
+        } else if (op === "compileOne") {
+            await builtins([data.payload.target, ...(scripts || [])]);
+            result = compileOne(data.payload.target, scripts, paramValues);
+        }
         else if (op === "pac") result = { result: pacDecision(data.payload.source)(args.url, args.host) };
         else result = { error: `unknown op ${op}` };
         post({ kind: "sandboxResult", reqId: data.reqId, result });

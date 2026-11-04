@@ -25,6 +25,8 @@ import { packBytes, unpackBytes } from "../shared/bytesPack";
 import type { ScriptRules } from "../shared/rulesProbe";
 import { dataFilesSig, ensureDataFiles } from "./engine/dataFiles";
 import { ensurePackages, loadPackages, packagesSig, packagesSnapshot } from "./engine/packageImports";
+import { ensureBuiltins } from "../shared/builtins";
+import { SW_EPOCH } from "./engine/stores";
 
 interface PlainScript {
     id: string;
@@ -59,7 +61,8 @@ function sandboxCall(payload: any): Promise<any> {
     return new Promise((resolve, reject) => {
         const reqId = "sw_" + ++seq;
         const timer = setTimeout(() => reject(new Error("sandbox RPC timeout")), 20000);
-        chrome.runtime.sendMessage({ type: "__resSandbox", reqId, extId: chrome.runtime.id, payload }, (resp: any) => {
+        // the epoch tells the sandbox when the SW (the store owner) restarted
+        chrome.runtime.sendMessage({ type: "__resSandbox", reqId, extId: chrome.runtime.id, payload: { ...payload, epoch: SW_EPOCH } }, (resp: any) => {
             clearTimeout(timer);
             if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
             if (resp?.error) return reject(new Error(resp.error));
@@ -220,6 +223,7 @@ export async function compileForStorage(
     await ensurePackages([code], { retry: true });
     await ensurePackages(scripts.map((s) => s.code));
     if (!__MV3__) {
+        await ensureBuiltins([code, ...scripts.map((s) => s.code)], packagesSnapshot()).catch(() => {}); // unloaded: React imports stub
         const c = compileWithLibs(target, scripts, values, await ensureDataFiles(), packagesSnapshot());
         dlogLevel(
             "compile", "debug",
@@ -267,6 +271,7 @@ export async function analyzeScripts(scripts: { id: string; name: string; code: 
     }
     if (!__MV3__) {
         // MV2: in-page compile, same as before
+        await ensureBuiltins(scripts.map((s) => s.code), packagesSnapshot()).catch(() => {});
         const resolver = makeModuleResolver(
             scripts.map((s) => ({ id: s.id, name: s.name, code: s.code })),
             (lib) => ({ paramValues: paramValues?.[lib.id] }),

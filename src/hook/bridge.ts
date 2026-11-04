@@ -17,6 +17,7 @@ import { scriptFunction } from "../shared/scriptFn";
 import { makeLibRequire, type ShippedLib } from "../shared/scriptImports";
 import { makePageShim, domHandlersFor, scheduleDocument, type PageDocumentHandler } from "../shared/pageShim";
 import { packBytes, unpackBytes } from "../shared/bytesPack";
+import { portEndpoint, type Endpoint } from "../shared/wire";
 
 (() => {
     const MAIN_SOURCE = "res-override-bridge";
@@ -167,6 +168,7 @@ import { packBytes, unpackBytes } from "../shared/bytesPack";
     /** a fresh bundle: refresh the storage allow-list, run isolated handlers (once per load; again on a hot update) */
     function noteBundle(resp: any, hot: boolean): void {
         if (!resp) return;
+        if (resp.count > 0 || (resp.domHandlers || []).length || (resp.isoHandlers || []).length) openPort();
         pageScriptIds = new Set(((resp.domHandlers || []) as DocumentHandler[]).map((h) => h.scriptId));
         const iso: DocumentHandler[] = resp.isoHandlers || [];
         if (isoFired && !hot) return;
@@ -239,6 +241,54 @@ import { packBytes, unpackBytes } from "../shared/bytesPack";
 
     let hookBroken = false;
 
+    // ---- L2: the `wt-bridge` port to the background ----
+    //
+    // Opened once this frame has scripts, so bundle updates come over it;
+    // frames without one keep getting the one-shot `bundleUpdate`. A drop
+    // (an MV3 service worker stopping) is not redialled while nothing
+    // holds the port — a reconnect would wake the worker again — the next
+    // bundle reopens it. Holders (the overlay, Phase 2) get a backoff
+    // reconnect, 50 ms doubling to 2 s.
+    let l2: Endpoint | null = null;
+    let l2Holders = 0;
+    let l2Backoff = 50;
+    let l2Timer: ReturnType<typeof setTimeout> | null = null;
+    function openPort(): void {
+        if (dead || l2) return;
+        let port: chrome.runtime.Port;
+        try {
+            port = chrome.runtime.connect({ name: "wt-bridge" });
+        } catch (e: any) {
+            if (CONTEXT_DEAD.test(e?.message || "")) markDead();
+            return;
+        }
+        const ep = portEndpoint(port, { debug: (m) => dlog("debug", "wt-bridge:", m) });
+        l2 = ep;
+        ep.on("bundle.update", () => guard(() => onBundleUpdate()));
+        ep.onClose(() => {
+            if (l2 === ep) l2 = null;
+            if (dead || !l2Holders || l2Timer) return;
+            l2Timer = setTimeout(() => {
+                l2Timer = null;
+                openPort();
+            }, l2Backoff);
+            l2Backoff = Math.min(l2Backoff * 2, 2000);
+        });
+        // a port that lasts a moment is healthy again: reset the backoff
+        setTimeout(() => {
+            if (l2 === ep) l2Backoff = 50;
+        }, 2000);
+    }
+
+    /** scripts changed: refresh hook status; onDocument refires in the MAIN world (hook) when healthy, else here (isolated) */
+    function onBundleUpdate(): void {
+        if (hookBroken) void runDocumentHandlers(true);
+        safeSend({ type: "getHookBundle", url: location.href }, (resp: any) => {
+            noteBundle(resp, true);
+            postStatus(resp, true);
+        });
+    }
+
     chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (r: any) => void) => {
         // the background asks whether this frame has a live hook (see pipeline.ts checkMissed)
         if (msg && msg.type === "hookPing") {
@@ -249,15 +299,8 @@ import { packBytes, unpackBytes } from "../shared/bytesPack";
             if (msg && msg.type === "hookCspBlocked") {
                 hookBroken = true;
             }
-            if (msg && msg.type === "bundleUpdate") {
-                // scripts changed: refresh hook status; onDocument refires in the
-                // MAIN world (hook) when healthy, else here (isolated)
-                if (hookBroken) void runDocumentHandlers(true);
-                safeSend({ type: "getHookBundle", url: location.href }, (resp: any) => {
-                    noteBundle(resp, true);
-                    postStatus(resp, true);
-                });
-            }
+            // with an open port the same update arrives as `bundle.update`
+            if (msg && msg.type === "bundleUpdate" && !l2) onBundleUpdate();
         });
         return false;
     });

@@ -1,0 +1,306 @@
+/**
+ * The message protocol every Wiretrick link speaks (owner ⇄ script
+ * instance, owner ⇄ bridge, later bridge ⇄ overlay and the Editor
+ * preview): one envelope shape, typed ops, `req`/`res` with timeouts and
+ * one-way `push`es.
+ *
+ * An Endpoint is one side of one link. It only needs a `send` function;
+ * whatever carries the messages calls `receive` with what arrives. The
+ * adapters below wire the usual carriers: a `chrome.runtime` port (JSON,
+ * so bytes are packed as `{ __wtBytes }`), a `MessagePort` (structured
+ * clone) and an in-process pair (tests, the MV2 background page).
+ */
+import { packBytes, unpackBytes } from "./bytesPack";
+
+export type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
+
+/** a store mutation: a path of keys/indexes, set to a value or deleted */
+export type StoreOp = ["set", (string | number)[], Json] | ["del", (string | number)[]];
+
+/** which top-level fields of a store persist across browser restarts */
+export type StorePersist = boolean | string[];
+
+/** `wt.fetch` request as it crosses a link (the body as bytes) */
+export interface WireRequest {
+    url: string;
+    method: string;
+    headers: [string, string][];
+    body?: Uint8Array;
+    credentials?: RequestCredentials;
+    redirect?: RequestRedirect;
+    cache?: RequestCache;
+    referrer?: string;
+    referrerPolicy?: ReferrerPolicy;
+}
+
+/** `wt.fetch` response as it crosses a link */
+export interface WireResponse {
+    status: number;
+    statusText: string;
+    url: string;
+    headers: [string, string][];
+    body: Uint8Array;
+}
+
+/** a store's replicated state */
+export interface StoreSnapshot {
+    rev: number;
+    data: Json;
+}
+
+/**
+ * Every op, declared once: `req`/`res` for calls, `push` for one-way
+ * messages. `call`, `push`, `handle` and `on` are typed over it.
+ */
+export interface WireOps {
+    /** a context ran `wt.store(name, initial)` */
+    "store.declare": { push: { name: string; initial: Json; persist: StorePersist } };
+    /** the owner's snapshot when `rev` is stale or missing; `ops` = recently applied op ids */
+    "store.sub": { req: { name: string; rev?: number }; res: { rev: number; data?: Json; ops: string[] } };
+    /** one context's mutations within one microtask */
+    "store.set": { push: { name: string; op: string; ops: StoreOp[] } };
+    /** the owner applied a `store.set` (or merged a declare): every replica of the script gets it */
+    "store.patch": { push: { name: string; rev: number; ops: StoreOp[]; op?: string } };
+    /** the owner refused a `store.set` */
+    "store.reject": { push: { name: string; op: string; reason: string } };
+    /** the current stores of some scripts (primes a context before its scripts compile) */
+    "store.init": { req: { scripts: string[] }; res: { [scriptId: string]: { [name: string]: StoreSnapshot } } };
+    /** `wt.fetch(..., { from: "background" })` */
+    fetch: { req: { request: WireRequest; bypass: boolean; tabId?: number }; res: WireResponse };
+    /** register a one-shot bypass (§3.5): the next matching request skips every script */
+    "bypass.add": { req: { tabId: number; method: string; url: string }; res: {} };
+    /** scripts changed: a bridge reloads what depends on them */
+    "bundle.update": { push: { scripts: { s: string; codeHash: string }[] } };
+}
+
+type ReqOps = { [K in keyof WireOps]: WireOps[K] extends { req: any } ? K : never }[keyof WireOps];
+type PushOps = { [K in keyof WireOps]: WireOps[K] extends { push: any } ? K : never }[keyof WireOps];
+export type ReqOf<K extends ReqOps> = WireOps[K] extends { req: infer R } ? R : never;
+export type ResOf<K extends ReqOps> = WireOps[K] extends { res: infer R } ? R : never;
+export type PushOf<K extends PushOps> = WireOps[K] extends { push: infer P } ? P : never;
+export type { ReqOps, PushOps };
+
+export type Envelope =
+    | { v: 1; t: "req"; id: number; op: string; s?: string; a: unknown }
+    | { v: 1; t: "res"; id: number; ok: true; r: unknown }
+    | { v: 1; t: "res"; id: number; ok: false; e: { name: string; message: string } }
+    | { v: 1; t: "push"; op: string; s?: string; a: unknown };
+
+/** a link's carrier delivers one envelope, or a batch of them, per message */
+export type WireMessage = Envelope | Envelope[];
+
+export const WIRE_TIMEOUT_MS = 30000;
+/** largest message on a link (fetch bodies excepted) */
+export const WIRE_MAX_BYTES = 1024 * 1024;
+/** largest `wt.fetch` body */
+export const FETCH_MAX_BYTES = 10 * 1024 * 1024;
+
+function namedError(name: string, message: string): Error {
+    const e = new Error(message);
+    e.name = name;
+    return e;
+}
+
+export interface EndpointOptions {
+    /** `req` timeout (default 30 s) */
+    timeoutMs?: number;
+    /** coalesce outgoing pushes for this many ms into one batch message (0: send each now) */
+    batchMs?: number;
+    /** diagnostics for dropped or malformed messages */
+    debug?: (msg: string) => void;
+}
+
+type ReqHandler = (a: any, s: string | undefined, ep: Endpoint) => unknown;
+type PushHandler = (a: any, s: string | undefined, ep: Endpoint) => void;
+
+export class Endpoint {
+    private seq = 0;
+    private readonly pending = new Map<number, { resolve: (r: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
+    private readonly reqHandlers = new Map<string, ReqHandler>();
+    private readonly pushHandlers = new Map<string, PushHandler[]>();
+    private readonly closeHandlers: ((reason: string) => void)[] = [];
+    private queue: Envelope[] = [];
+    private flushTimer: ReturnType<typeof setTimeout> | null = null;
+    closed = false;
+
+    constructor(
+        private readonly sendRaw: (msg: WireMessage) => void,
+        private readonly opts: EndpointOptions = {}
+    ) {}
+
+    /** send a request; rejects with TimeoutError, DisconnectedError or the remote error */
+    call<K extends ReqOps>(op: K, a: ReqOf<K>, s?: string): Promise<ResOf<K>> {
+        if (this.closed) return Promise.reject(namedError("DisconnectedError", `${op}: the link is closed`));
+        const id = ++this.seq;
+        return new Promise<ResOf<K>>((resolve, reject) => {
+            const timer = setTimeout(() => {
+                this.pending.delete(id);
+                reject(namedError("TimeoutError", `${op}: no answer within ${Math.round((this.opts.timeoutMs ?? WIRE_TIMEOUT_MS) / 1000)} s`));
+            }, this.opts.timeoutMs ?? WIRE_TIMEOUT_MS);
+            this.pending.set(id, { resolve, reject, timer });
+            this.send({ v: 1, t: "req", id, op, ...(s !== undefined ? { s } : {}), a });
+        });
+    }
+
+    /** send a one-way message */
+    push<K extends PushOps>(op: K, a: PushOf<K>, s?: string): void {
+        if (this.closed) return;
+        const env: Envelope = { v: 1, t: "push", op, ...(s !== undefined ? { s } : {}), a };
+        if (!this.opts.batchMs) return this.send(env);
+        this.queue.push(env);
+        this.flushTimer ??= setTimeout(() => this.flush(), this.opts.batchMs);
+    }
+
+    /** answer requests for `op` (one handler per op; a throw or rejection answers with the error) */
+    handle<K extends ReqOps>(op: K, fn: (a: ReqOf<K>, s: string | undefined, ep: Endpoint) => ResOf<K> | Promise<ResOf<K>>): void {
+        this.reqHandlers.set(op, fn as ReqHandler);
+    }
+
+    /** listen for pushes of `op` */
+    on<K extends PushOps>(op: K, fn: (a: PushOf<K>, s: string | undefined, ep: Endpoint) => void): void {
+        const list = this.pushHandlers.get(op) ?? [];
+        list.push(fn as PushHandler);
+        this.pushHandlers.set(op, list);
+    }
+
+    onClose(fn: (reason: string) => void): void {
+        if (this.closed) fn("closed");
+        else this.closeHandlers.push(fn);
+    }
+
+    /** a message from the other side */
+    receive(msg: unknown): void {
+        if (this.closed) return;
+        if (Array.isArray(msg)) {
+            for (const m of msg) this.receiveOne(m);
+            return;
+        }
+        this.receiveOne(msg);
+    }
+
+    /** reject every pending call with DisconnectedError and stop */
+    close(reason = "disconnected"): void {
+        if (this.closed) return;
+        this.flush();
+        this.closed = true;
+        for (const [, p] of this.pending) {
+            clearTimeout(p.timer);
+            p.reject(namedError("DisconnectedError", reason));
+        }
+        this.pending.clear();
+        for (const fn of this.closeHandlers.splice(0)) {
+            try {
+                fn(reason);
+            } catch {}
+        }
+    }
+
+    /** send queued pushes now */
+    flush(): void {
+        if (this.flushTimer) clearTimeout(this.flushTimer);
+        this.flushTimer = null;
+        const q = this.queue;
+        this.queue = [];
+        if (q.length === 1) this.sendSafe(q[0]);
+        else if (q.length) this.sendSafe(q);
+    }
+
+    private send(env: Envelope): void {
+        // keep order: queued pushes go first
+        if (this.queue.length) this.flush();
+        this.sendSafe(env);
+    }
+
+    private sendSafe(msg: WireMessage): void {
+        try {
+            this.sendRaw(msg);
+        } catch (e: any) {
+            this.opts.debug?.(`send failed: ${e?.message || e}`);
+            this.close(`send failed: ${e?.message || e}`);
+        }
+    }
+
+    private receiveOne(env: any): void {
+        if (!env || typeof env !== "object" || typeof env.t !== "string") return this.opts.debug?.("dropped a malformed message");
+        if (env.v !== 1) {
+            // a newer protocol: say so to a caller, drop anything else
+            if (env.t === "req" && typeof env.id === "number") this.answerError(env.id, namedError("VersionError", `unsupported protocol version ${env.v}`));
+            return;
+        }
+        if (env.t === "res") {
+            const p = this.pending.get(env.id);
+            if (!p) return;
+            this.pending.delete(env.id);
+            clearTimeout(p.timer);
+            if (env.ok) p.resolve(env.r);
+            else p.reject(namedError(String(env.e?.name || "Error"), String(env.e?.message || "error")));
+            return;
+        }
+        if (env.t === "push") {
+            const list = this.pushHandlers.get(env.op);
+            if (!list) return this.opts.debug?.(`ignored unknown push "${env.op}"`);
+            for (const fn of list) {
+                try {
+                    fn(env.a, env.s, this);
+                } catch (e: any) {
+                    this.opts.debug?.(`push "${env.op}" handler threw: ${e?.message || e}`);
+                }
+            }
+            return;
+        }
+        if (env.t === "req") {
+            const fn = this.reqHandlers.get(env.op);
+            if (!fn) return this.answerError(env.id, namedError("UnknownOpError", `unknown op "${env.op}"`));
+            let out: unknown;
+            try {
+                out = fn(env.a, env.s, this);
+            } catch (e: any) {
+                return this.answerError(env.id, e);
+            }
+            Promise.resolve(out).then(
+                (r) => this.send({ v: 1, t: "res", id: env.id, ok: true, r: r === undefined ? null : r }),
+                (e) => this.answerError(env.id, e)
+            );
+        }
+    }
+
+    private answerError(id: number, e: any): void {
+        this.send({ v: 1, t: "res", id, ok: false, e: { name: String(e?.name || "Error"), message: String(e?.message ?? e) } });
+    }
+}
+
+// ---- adapters ----
+
+/** a `chrome.runtime` port: JSON, so bytes travel packed */
+export function portEndpoint(port: chrome.runtime.Port, opts?: EndpointOptions): Endpoint {
+    const ep = new Endpoint((msg) => port.postMessage(packBytes(msg)), opts);
+    port.onMessage.addListener((m: any) => ep.receive(unpackBytes(m)));
+    port.onDisconnect.addListener(() => {
+        void (globalThis as any).chrome?.runtime?.lastError;
+        ep.close("the port disconnected");
+    });
+    return ep;
+}
+
+/** a `MessagePort` (structured clone: bytes as they are) */
+export function messagePortEndpoint(mp: MessagePort, opts?: EndpointOptions): Endpoint {
+    const ep = new Endpoint((msg) => mp.postMessage(msg), opts);
+    mp.onmessage = (ev) => ep.receive(ev.data);
+    return ep;
+}
+
+/** two connected endpoints in one context; delivery is async (a microtask) and cloned, like a real link */
+export function endpointPair(opts?: EndpointOptions): [Endpoint, Endpoint] {
+    const clone: (v: any) => any = typeof structuredClone === "function" ? structuredClone : (v) => JSON.parse(JSON.stringify(v));
+    let a!: Endpoint;
+    let b!: Endpoint;
+    const deliver = (to: () => Endpoint) => (msg: WireMessage) => {
+        const copy = clone(msg);
+        queueMicrotask(() => to().receive(copy));
+    };
+    a = new Endpoint(deliver(() => b), opts);
+    b = new Endpoint(deliver(() => a), opts);
+    a.onClose((r) => b.close(r));
+    b.onClose((r) => a.close(r));
+    return [a, b];
+}

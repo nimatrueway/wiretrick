@@ -520,6 +520,79 @@ HTTPS, so you trust unpkg to serve npm's files unaltered. Only the extension
 background downloads them (when scripts are saved, imported or compiled);
 pages never fetch them.
 
+## Shared state and fetching — `wt.store`, `wt.fetch`
+
+### `wt.store`
+
+`wt.store(name, initial)` returns a live object that every copy of the
+script shares: its handlers on every strategy see the same values, and
+changes survive a browser restart. It's a [valtio](https://valtio.dev)
+proxy — read and assign like a plain object.
+
+```ts
+const state = wt.store("state", { mocking: true, hits: 0, seen: [] as string[] });
+
+wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, (ctx) => {
+    state.hits++;
+    state.seen.push(ctx.url);
+    if (state.mocking) return { replaceResponse: { body: { mocked: true } } };
+});
+```
+
+- **Name.** The first argument is the store's key: one store per name per
+  script. A script with two stores uses two names. Call `wt.store` at top
+  level and share the result; a second call with the same name throws.
+- **Initial.** Used the first time. Later, the saved values win and
+  `initial` only adds fields that are missing, so you can add fields
+  without losing data.
+- **Persist.** `{ persist: true }` (default) keeps the whole store across
+  browser restarts; `{ persist: false }` keeps it only while the browser
+  runs; `{ persist: ["mocking"] }` keeps only those top-level fields.
+- **Values.** JSON only — objects, arrays, strings, numbers, booleans,
+  `null` — at most 1 MB per store. A change that breaks this is undone and
+  logged. Functions and getters on the object stay local and aren't shared.
+- **Watching.** `import { subscribe } from "valtio"` runs code when the
+  store changes. A `rules` handler that reads a store is re-run (and its
+  rules rebuilt) when the store changes.
+- The saved copy lives in `wt.storage` as `"$store:<name>"`; change the
+  store, not that key (writing it logs a warning).
+
+### `wt.fetch`
+
+`wt.fetch(url, init)` is `fetch` for scripts. It runs in the background,
+with the extension's host permissions (no CORS) and the browser's cookies,
+and returns a normal `Response`.
+
+```ts
+// the real response, even though this script mocks the same URL
+wt.replaceResponse({ url: "*://api.example.com/user", strategy: "helper" }, async () => {
+    const real = await (await wt.fetch("https://api.example.com/user", { bypass: true })).json();
+    return { ...real, role: "admin" };
+});
+```
+
+- `bypass: true` keeps every script's handlers — this one's too — off
+  that request. The Log lists it as a `bypass`.
+- The URL must be absolute. Bodies are capped at 10 MB each way.
+  `signal` (abort) isn't supported.
+- `from: "background"` is the default. `from: "page"` (fetch as the page,
+  with its origin and cookies) is only for overlays, which come later; in
+  handlers it rejects.
+
+### Built-in valtio and React
+
+`valtio` (and `valtio/vanilla`, `valtio/utils`, `valtio/react`) and React 19
+(`react`, `react-dom`, `react-dom/client`, `react/jsx-runtime`) come with the
+extension: import them by name, or by any `https://esm.sh/` URL of those
+packages, with no download. They load only in scripts that import them.
+
+```ts
+import { subscribe } from "valtio";
+
+const state = wt.store("state", { mocking: false });
+subscribe(state, () => wt.log("mocking is now", state.mocking));
+```
+
 ## DOM changes — `wt.onPage`
 
 > `wt.onPage` was called `wt.onDocument`. The old name still works, with

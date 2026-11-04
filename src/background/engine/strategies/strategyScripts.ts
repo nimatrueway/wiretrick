@@ -11,6 +11,8 @@ import { log } from "../logs";
 import { scriptStorageGet, scriptStorageSet } from "../scriptStore";
 import { dataFilesSnapshot } from "../dataFiles";
 import { packagesSnapshot } from "../packageImports";
+import { backgroundHub } from "../stores";
+import { backgroundFetch } from "../wtFetch";
 
 export interface ScriptLike {
     id: string;
@@ -44,15 +46,20 @@ export interface CompiledEntry {
 }
 
 /**
- * MV2: compile the enabled scripts `want` selects, with real params and
- * imports. `name` is the STORED script name (log attribution).
+ * MV2: compile the enabled scripts `want` selects, with real params,
+ * imports and stores (call `prepareStores` and `ensureBuiltins` first).
+ * `name` is the STORED script name (log attribution).
  */
 export function compileMv2(scripts: ScriptLike[], paramValues: { [scriptId: string]: Record<string, any> } | undefined, want: (s: ScriptLike) => boolean): CompiledEntry[] {
     let resolveFrom: (importer: string) => (spec: string) => any = () => (spec) => {
         throw new Error(`cannot import "${spec}" before the module registry is ready`);
     };
     const overridesFor = (s: { id: string; name: string; code: string }) =>
-        makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, level, source, text) => log(-1, scriptLogLine(s.name, source, text), level, id), paramValues?.[s.id], (spec) => resolveFrom(s.name)(spec));
+        makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, level, source, text) => log(-1, scriptLogLine(s.name, source, text), level, id), paramValues?.[s.id], (spec) => resolveFrom(s.name)(spec), {
+            // one hub: every strategy's instance of the script shares its stores
+            store: (name, initial, persist) => backgroundHub().store(s.id, name, initial, persist),
+            fetch: (request, bypass) => backgroundFetch(request, { bypass, scriptId: s.id, scriptName: s.name }),
+        });
     resolveFrom = makeModuleResolver(
         scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code })),
         overridesFor,

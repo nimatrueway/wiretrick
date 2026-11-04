@@ -14,6 +14,7 @@ import { runOp, type BodyOp, type OpScript } from "../../../shared/bodyOps";
 import { routeMatches, takesBinary, type RouteKind } from "../../../shared/route";
 import type { Script } from "../scriptStore";
 import { log, noteBodySkip } from "../logs";
+import { bypassed } from "../bypass";
 import { bodyKind } from "../../../shared/bodyKind";
 import { base64ToBytes, bytesToBase64 } from "../../../shared/bytesPack";
 import { dlog, dlogLevel } from "../../../shared/debugLog";
@@ -395,6 +396,7 @@ export class DebuggerStrategy {
         const resourceType = webRequestTypeOf(params.resourceType);
         const requestHeaders: Record<string, string> = request.headers || {};
         const cont = () => debuggerSend(d, "Fetch.continueRequest", { requestId }).catch(() => {});
+        if (bypassed({ method, url, tabId }, `cdp:${key}|${requestId}`)) return void (await cont());
         await this.ready;
         const isRequestStage = params.responseStatusCode === undefined && params.responseErrorReason === undefined;
         // Fetch's requestId isn't webRequest's: claim the oldest pending same-request of this tab

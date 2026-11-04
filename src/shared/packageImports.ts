@@ -341,9 +341,10 @@ const PROCESS = { env: { NODE_ENV: "production" }, browser: true, versions: {}, 
  * sloppy mode); cyclic requires get the partial exports. A library's
  * failed nested require throws a plain Error when it runs (so optional
  * `try { require("x") } catch {}` works); a script's import that can't
- * load throws a PackageImportError.
+ * load throws a PackageImportError. `builtin` may answer a nested require
+ * first (a package's `require("react")` → the built-in React).
  */
-export function makePackageLoader(pkgs: PackageModules | undefined): (url: string) => any {
+export function makePackageLoader(pkgs: PackageModules | undefined, builtin?: (spec: string, from: string) => { module: any } | undefined): (url: string) => any {
     const cache = new Map<string, { exports: any }>();
     const run = (url: string): any => {
         const hit = cache.get(url);
@@ -353,6 +354,8 @@ export function makePackageLoader(pkgs: PackageModules | undefined): (url: strin
         const module = { exports: {} as any };
         cache.set(url, module);
         const require = (spec: string): any => {
+            const b = builtin?.(spec, url);
+            if (b) return b.module;
             const to = mod.requires[spec];
             if (to === undefined) throw new Error(`cannot find module "${spec}" (required by ${url})`);
             if (to.startsWith("!")) throw new Error(to.slice(1));

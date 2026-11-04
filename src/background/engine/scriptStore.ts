@@ -484,6 +484,12 @@ export async function scriptStorageGet(scriptId: string, key: string): Promise<a
     return (obj[SCRIPT_STORE_PREFIX + scriptId] || {})[key];
 }
 
+/** every key of a script's storage (wt.storage and the `$store:` persistence) */
+export async function scriptStorageAll(scriptId: string): Promise<Record<string, any>> {
+    const obj = await storageGet(SCRIPT_STORE_PREFIX + scriptId);
+    return obj[SCRIPT_STORE_PREFIX + scriptId] || {};
+}
+
 export async function scriptStorageSet(scriptId: string, key: string, value: any): Promise<void> {
     const storeKey = SCRIPT_STORE_PREFIX + scriptId;
     const obj = await storageGet(storeKey);

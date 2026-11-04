@@ -85,6 +85,7 @@ const server = http.createServer((req: http.IncomingMessage, res: http.ServerRes
         return send("text/html", `<html><body><h1>SITE-TITLE-PLACEHOLDER</h1><script>setTimeout(()=>{fetch('/report',{method:'POST',body:document.querySelector('h1').textContent});},300)</script></body></html>`);
     if (url.pathname === "/page-with-script")
         return send("text/html", `<html><body><script>setTimeout(()=>{const s=document.createElement('script');s.src='/app.js';s.onload=()=>{setTimeout(()=>{fetch('/report',{method:'POST',body:window.__marker});},200);};document.head.appendChild(s);},900)</script></body></html>`);
+    if (url.pathname === "/byp") return send("text/plain", "BYP-REAL");
     if (url.pathname === "/page-img")
         return send("text/html", `<html><body><img id='i' src='/img'></body></html>`);
     res.writeHead(404); res.end();
@@ -251,6 +252,37 @@ await p5.waitForTimeout(1500);
 const r5 = await p5.evaluate(async () => (await (await fetch("/api-replace")).json()).value);
 check("replaceResponse: fetch short-circuit (hook)", r5 === "REPLACED-BY-HOOK", r5);
 await p5.close();
+
+// ---------- 5b. wt.store shared across strategies + wt.fetch bypass ----------
+// the extension handler mocks /byp (redirect) and counts in the store; the
+// page handler fetches /byp twice from the background — with bypass it gets
+// the real body and the mock doesn't run
+await saveScript(
+    "s_storefetch",
+    `const st = wt.store("st", { n: 0 }, { persist: false });
+wt.onRequest({ url: "${ORIGIN}/byp", strategy: "extension" }, () => { st.n++; return { redirect: "${ORIGIN}/redirected" }; });
+wt.replaceResponse({ url: "${ORIGIN}/byp-data", strategy: "page" }, async () => {
+    const real = await (await wt.fetch("${ORIGIN}/byp", { bypass: true })).text();
+    const mocked = await (await wt.fetch("${ORIGIN}/byp")).text();
+    return JSON.stringify({ real, mocked: mocked.includes("REDIRECTED-OK"), n: st.n });
+});`,
+    "store + fetch"
+);
+await new Promise((r) => setTimeout(r, 600));
+{
+    const p = await ctx.newPage();
+    await p.goto(`${ORIGIN}/html`, { waitUntil: "domcontentloaded" });
+    await p.reload({ waitUntil: "domcontentloaded" });
+    await p.waitForTimeout(1500);
+    const r = await p.evaluate(async () => (await fetch("/byp-data")).text()).catch((e: any) => String(e));
+    let j: any = {};
+    try { j = JSON.parse(r); } catch {}
+    check("wt.fetch bypass: the script's own mock skips the request", j.real === "BYP-REAL", r);
+    check("wt.fetch without bypass: the mock applies", j.mocked === true, r);
+    check("wt.store: one store across the extension and page handlers", j.n === 1, r);
+    await p.close();
+}
+await setEnabled("s_storefetch", false);
 
 // ---------- 6. request headers ----------
 const p6 = await ctx.newPage();

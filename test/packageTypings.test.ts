@@ -2,8 +2,8 @@
 // are extra libs keyed file:///…, no directoryExists, every lib a root
 // file) and in the synced folder (real tsc with the generated tsconfig).
 import { describe, it, expect, beforeAll } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join, sep } from "node:path";
 import ts from "typescript";
 import { editorCompilerOptions } from "../src/ui/monacoSetup";
 import { tsconfigText } from "../src/shared/generatedFiles";
@@ -90,6 +90,52 @@ describe("package import typings", () => {
         expect(resolve("https://unpkg.com/cjs-lib@2.0.0")).toBe(at("@types/cjs-lib@2.0.1/index.d.ts"));
         expect(resolve("https://unpkg.com/esm-lib@1.0.0/math.js")).toBe(at("esm-lib@1.0.0/math.d.ts"));
         expect(resolve("https://unpkg.com/umd-lib@1.0.0")).toMatch(/^file:\/\/\/.*umd-lib@1\.0\.0\/.*\.d\.ts$/);
+    });
+
+    it("the built-in valtio and React typings resolve in the editor (what build.mjs ships in builtin-types.json)", () => {
+        const files = new Map<string, string>();
+        const add = (dir: string, test: (f: string) => boolean) => {
+            for (const f of readdirSync(join("node_modules", dir), { recursive: true }) as string[])
+                if (test(f)) files.set(`file:///node_modules/${dir}/${f.split(sep).join("/")}`, readFileSync(join("node_modules", dir, f), "utf8"));
+        };
+        add("valtio/esm", (f) => f.endsWith(".d.mts"));
+        add("@types/react", (f) => ["index.d.ts", "global.d.ts", "jsx-runtime.d.ts", "jsx-dev-runtime.d.ts"].includes(f));
+        add("@types/react-dom", (f) => ["index.d.ts", "client.d.ts"].includes(f));
+        add("csstype", (f) => f === "index.d.ts");
+        const main = "file:///main.ts";
+        files.set(
+            main,
+            `import { proxy, useSnapshot, subscribe } from "valtio";
+import { subscribeKey } from "valtio/utils";
+import { useSnapshot as use2 } from "valtio/react";
+import { useState } from "react";
+import { createRoot } from "react-dom/client";
+const s = proxy({ n: 1 });
+subscribe(s, () => {});
+subscribeKey(s, "n", (v: number) => v);
+export function App() { const snap = useSnapshot(s); const [x] = useState(0); return snap.n + x + use2(s).n; }
+createRoot(document.body);
+const bad: string = useSnapshot(s).n;
+`
+        );
+        const libDir = dirname(ts.getDefaultLibFilePath({}));
+        const read = (path: string) => files.get(path) ?? (path.startsWith(libDir) ? ts.sys.readFile(path) : undefined);
+        const ls = ts.createLanguageService({
+            getCompilationSettings: () => editorCompilerOptions(ts) as ts.CompilerOptions,
+            getScriptFileNames: () => [...files.keys()],
+            getScriptVersion: () => "1",
+            getScriptSnapshot: (f) => {
+                const t = read(f);
+                return t === undefined ? undefined : ts.ScriptSnapshot.fromString(t);
+            },
+            getScriptKind: () => ts.ScriptKind.TS,
+            getCurrentDirectory: () => "",
+            getDefaultLibFileName: (o) => ts.getDefaultLibFilePath(o),
+            readFile: read,
+            fileExists: (f) => read(f) !== undefined,
+        });
+        const errors = errorsOf([...ls.getSyntacticDiagnostics(main), ...ls.getSemanticDiagnostics(main)]);
+        expect(errors.map(({ line, code }) => ({ line, code }))).toEqual([{ line: 11, code: 2322 }]);
     });
 
     it("resolve in the synced folder with the generated tsconfig (real tsc)", () => {

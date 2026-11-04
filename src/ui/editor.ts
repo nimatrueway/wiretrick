@@ -3,7 +3,7 @@
  */
 
 import "./shell/mount";
-import { loadMonaco, STARTER_TEMPLATE, apiTypingsText, setDataFileTypings, setPackageTypings } from "./monacoSetup";
+import { loadMonaco, STARTER_TEMPLATE, apiTypingsText, ensureBuiltinTypings, setDataFileTypings, setPackageTypings } from "./monacoSetup";
 import { PACKAGE_TYPINGS_KEY, type StoredTypings } from "../shared/packageImports";
 import { API_TYPINGS_URI } from "./apiLinks";
 import { NavHistory } from "./navHistory";
@@ -579,7 +579,10 @@ function updateImportMarkers(m: any): void {
 }
 function scheduleImportMarkers(m: any): void {
     clearTimeout(importMarkerTimers.get(m));
-    importMarkerTimers.set(m, window.setTimeout(() => updateImportMarkers(m), 250));
+    importMarkerTimers.set(m, window.setTimeout(() => {
+        if (!m.isDisposed()) ensureBuiltinTypings(m.getValue());
+        updateImportMarkers(m);
+    }, 250));
 }
 
 /** "<name>@<range>" → the exact version unpkg resolves it to */

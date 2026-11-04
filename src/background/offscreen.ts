@@ -4,7 +4,8 @@
  *
  *   SW ⇄ chrome.runtime ⇄ HERE ⇄ window.postMessage ⇄ sandbox iframe
  *
- * Pure transport — no logic. chrome.runtime messaging is JSON, so body
+ * Pure transport — no logic. Besides the request/response ops it relays
+ * the L1 wire link (`wire` messages: wt.store, wt.fetch) both ways. chrome.runtime messaging is JSON, so body
  * bytes arrive packed ({ __wtBytes }) and are unpacked for postMessage
  * (structured clone keeps Uint8Array); results are packed on the way back.
  */
@@ -69,6 +70,11 @@ function reqIdOf(msg: any): string {
 }
 
 chrome.runtime.onMessage.addListener((msg: any, _sender, sendResponse) => {
+    if (msg?.type === "__resSandboxWire") {
+        // the SW's side of the L1 wire link (store patches, call results)
+        document.querySelector<HTMLIFrameElement>("#sb")?.contentWindow?.postMessage({ kind: "wire", msg: unpackBytes(msg.msg) }, "*");
+        return false;
+    }
     if (!msg || msg.type !== "__resSandbox") return false;
     // the SW tags every call with its runtime.id — the first one teaches us
     // the id the sandbox's chrome shim should present (iframe reloads once)
@@ -96,6 +102,11 @@ chrome.runtime.onMessage.addListener((msg: any, _sender, sendResponse) => {
 
 window.addEventListener("message", (event) => {
     const data = event.data;
+    if (data?.kind === "wire") {
+        if (event.source !== document.querySelector<HTMLIFrameElement>("#sb")?.contentWindow) return;
+        chrome.runtime.sendMessage({ type: "__resWire", msg: packBytes(data.msg) }, () => void chrome.runtime.lastError);
+        return;
+    }
     if (!data || (data.kind !== "sandboxResult" && data.kind !== "reverse")) return;
     if (data.kind === "sandboxResult") {
         pending.get(data.reqId)?.resolve(data.result);

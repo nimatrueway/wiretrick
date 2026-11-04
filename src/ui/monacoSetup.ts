@@ -26,6 +26,8 @@ import {
 } from "./apiLinks";
 import { JSON_FALLBACK_DTS, jsonDeclPath, jsonModuleDts } from "./jsonTypes";
 import { packagePaths, TYPINGS_ROOT } from "../shared/packageImports";
+import { importSpecs } from "../shared/scriptImports";
+import { builtinSpec } from "../shared/builtinSpecs";
 
 let monacoApi: any = null;
 let wtApiDts = "";
@@ -59,8 +61,40 @@ export function editorCompilerOptions(ts: { ScriptTarget: any; ModuleKind: any; 
         // package imports (`https://unpkg.com/x@1.2.3`) → their typings
         // (setPackageTypings). Monaco passes options raw, so the target is an
         // absolute file:/// path rather than one relative to a baseUrl
-        paths: packagePaths(`file:///${TYPINGS_ROOT}`),
+        paths: { ...packagePaths(`file:///${TYPINGS_ROOT}`), ...BUILTIN_PATHS },
     };
+}
+
+/** where the built-in modules' typings go (ensureBuiltinTypings), and the bare specifiers that map to them */
+const BUILTIN_ROOT = "file:///node_modules";
+const BUILTIN_PATHS: Record<string, string[]> = {
+    valtio: [`${BUILTIN_ROOT}/valtio/esm/index.d.mts`],
+    "valtio/*": [`${BUILTIN_ROOT}/valtio/esm/*.d.mts`],
+    react: [`${BUILTIN_ROOT}/@types/react/index.d.ts`],
+    "react/*": [`${BUILTIN_ROOT}/@types/react/*.d.ts`],
+    "react-dom": [`${BUILTIN_ROOT}/@types/react-dom/index.d.ts`],
+    "react-dom/*": [`${BUILTIN_ROOT}/@types/react-dom/*.d.ts`],
+    csstype: [`${BUILTIN_ROOT}/csstype/index.d.ts`],
+};
+
+let builtinTypings: Promise<void> | null = null;
+
+/**
+ * Load the built-in valtio/React typings (lib/builtin-types.json, ~1.3 MB)
+ * the first time a script imports a built-in by its bare name.
+ */
+export function ensureBuiltinTypings(code: string): void {
+    if (builtinTypings || !monacoApi) return;
+    if (![...importSpecs(code)].some((s) => builtinSpec(s) === s)) return;
+    const ts = monacoApi.languages.typescript.typescriptDefaults;
+    builtinTypings = fetch(chrome.runtime.getURL("lib/builtin-types.json"))
+        .then((r) => r.json())
+        .then((files: Record<string, string>) => {
+            for (const [p, text] of Object.entries(files)) ts.addExtraLib(text, `${BUILTIN_ROOT}/${p}`);
+        })
+        .catch(() => {
+            builtinTypings = null;
+        });
 }
 
 export async function loadMonaco(): Promise<any> {

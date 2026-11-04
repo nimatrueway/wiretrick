@@ -383,6 +383,31 @@ declare namespace Wiretrick {
         set(key: string, value: any): Promise<void>;
     }
 
+    /** A JSON value: what a {@link wt.store} may hold. */
+    type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
+
+    /** Options for {@link wt.store}. */
+    interface StoreOptions<T> {
+        /**
+         * What survives a browser restart: `true` (default) the whole store,
+         * `false` nothing (it still survives an MV3 service-worker restart),
+         * or a list of top-level fields.
+         */
+        persist?: boolean | (keyof T & string)[];
+    }
+
+    /** `wt.fetch` options: `RequestInit` plus where the request comes from. */
+    interface FetchInit extends RequestInit {
+        /**
+         * `"background"` (default): the extension fetches, with its host
+         * permissions (no CORS) and the browser's cookies. `"page"`: the
+         * page's own `fetch` (its origin and cookies) — from an overlay only.
+         */
+        from?: "page" | "background";
+        /** Skip every script's handlers (this script's too) for this request; the Log shows it as `bypass`. */
+        bypass?: boolean;
+    }
+
     /** Timing for `wt.onDocument` (part of its route object). */
     interface DocumentOptions {
         /**
@@ -904,6 +929,34 @@ declare const wt: {
      * });
      */
     storage: Wiretrick.Storage;
+
+    /**
+     * A live object shared by every place the script runs — its handlers
+     * in every strategy (and, later, its overlays). It's a
+     * [valtio](https://valtio.dev) proxy: read and change it like a plain
+     * object; `import { subscribe } from "valtio"` to watch it. `name` is
+     * its key (one store per name per script); values must be JSON (at
+     * most 1 MB). Call it at top level.
+     *
+     * @example
+     * const state = wt.store("state", { mocking: true, hits: 0 });
+     * wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, () => {
+     *     state.hits++;
+     *     if (state.mocking) return { replaceResponse: { body: { mocked: true } } };
+     * });
+     */
+    store<T extends object>(name: string, initial: T, opts?: Wiretrick.StoreOptions<T>): T;
+
+    /**
+     * `fetch` for scripts. By default it runs in the background with the
+     * extension's host permissions (no CORS) and the browser's cookies.
+     * `bypass: true` keeps every script's handlers — this one's too — off
+     * the request, e.g. to get the real response a mock replaces.
+     *
+     * @example
+     * const real = await (await wt.fetch("https://api.example.com/user", { bypass: true })).json();
+     */
+    fetch(input: string | URL | Request, init?: Wiretrick.FetchInit): Promise<Response>;
 
     /**
      * Log to the Editor's Log view for the current tab.

@@ -24,6 +24,9 @@ import { dlog, dlogLevel } from "../../shared/debugLog";
 import { isThenable, toRunnableJs } from "../../shared/compile";
 import "../../shared/transpile";
 import { log, getScriptErrors, getScriptTypeErrors, getScriptRuleErrors, getScriptRouteWarnings, setScriptRouteWarnings, bodyObservedSince, bodySkipSince, noteBodySkip } from "./logs";
+import { bypassed } from "./bypass";
+import { prepareStores, storeOwner } from "./stores";
+import { ensureBuiltins } from "../../shared/builtins";
 import { missedLine } from "../../shared/netTypes";
 import { binaryOptedOut, frameHasHook as pingHook, isLoopbackUrl, missedReason, missedWhat, routeProblem, MISSED_SKIP_TYPES } from "../../shared/missedTap";
 import { resolveParamValues } from "../../shared/scriptDef";
@@ -39,6 +42,8 @@ import { TEXT_TYPES_KEY } from "../settingsFile";
 import { getTextTypes, setTextTypes } from "../../shared/bodyKind";
 import { packBytes, unpackBytes } from "../../shared/bytesPack";
 import type { RequestBody } from "../../shared/requestBody";
+import { pushBundleUpdate } from "./bridgePorts";
+import { contentHash } from "../../shared/folderSync";
 
 const FILTER: chrome.webRequest.RequestFilter = { urls: ["<all_urls>"] };
 
@@ -391,6 +396,7 @@ export function createPipeline(
     /** requestId → first URL of requests a extension-strategy script matched (diagnostics) */
     const traced = new Map<string, { url: string; tabId: number; at: number }>();
     const onBeforeRequest = (details: any) => {
+        if (bypassed(details, `wr:${details.requestId}`)) return {};
         const tabUrl = tabUrlFor(details.tabId, details.url);
         dlogLevel("pipeline", "debug", "onBeforeRequest", { url: details.url, type: details.type, tabId: details.tabId });
 
@@ -456,6 +462,7 @@ export function createPipeline(
     }
 
     const onBeforeSendHeaders = (details: any) => {
+        if (bypassed(details, `wr:${details.requestId}`)) return {};
         const tabUrl = tabUrlFor(details.tabId, details.url);
         const changes =
             extensionStrategy.handleBeforeSendHeaders(details, tabUrl) ||
@@ -468,6 +475,7 @@ export function createPipeline(
     };
 
     const onHeadersReceived = (details: any) => {
+        if (bypassed(details, `wr:${details.requestId}`)) return {};
         const tabUrl = tabUrlFor(details.tabId, details.url);
         const changes =
             extensionStrategy.handleHeadersReceived(details, tabUrl) ||
@@ -867,6 +875,9 @@ export function createPipeline(
         await loadPackages();
         const stored = await listScripts();
         const paramValues = await loadAllParamValues();
+        await prepareStores(stored.map((s) => s.id));
+        // MV2 compiles right here (synchronously): load the built-in React first if a script imports it
+        if (!__MV3__) await ensureBuiltins(stored.map((s) => s.code), packagesSnapshot()).catch((e: any) => dlogLevel("pipeline", "warn", `built-in React failed to load: ${e?.message || e}`));
         // routes come from running each script's top level with its real
         // params and imports (stored meta had imports stubbed). MV3: this
         // also warms the analyze cache so the next getHookBundle is served
@@ -890,7 +901,9 @@ export function createPipeline(
         warnRoutes(scripts);
 
         // HOT RELOAD: push the new bundle to every open tab's hook so
-        // changes apply without reloading the target tab
+        // changes apply without reloading the target tab. Bridges with an
+        // open L2 port get `bundle.update` and ignore the one-shot message.
+        pushBundleUpdate(scripts.filter((x) => x.enabled).map((x) => ({ s: x.id, codeHash: contentHash(x.code) })));
         chrome.tabs.query({}, (tabs) => {
             for (const t of tabs) {
                 if (t.id === undefined) continue;
@@ -902,6 +915,8 @@ export function createPipeline(
     }
 
     const off = onScriptsChanged(() => void reload());
+    // rules handlers may read a store: a change re-probes
+    const offStores = storeOwner.onChange((s) => rulesStrategy.storeChanged(s));
     // ownership moves between the helper strategy and the other strategies
     const offProcess = onHelperActiveChange(() => void reload());
     const onStorage = (changes: Record<string, unknown>, area: string) => {
@@ -916,6 +931,7 @@ export function createPipeline(
         cdp,
         dispose() {
             off();
+            offStores();
             offProcess();
             chrome.storage.onChanged.removeListener(onStorage);
             if (!__MV3__) {

@@ -15,6 +15,7 @@
  */
 import { transform } from "sucrase";
 import { importSpecs } from "../../shared/scriptImports";
+import { builtinDownloads, builtinSpec } from "../../shared/builtinSpecs";
 import { dlogLevel } from "../../shared/debugLog";
 import {
     PACKAGE_MODULES_KEY,
@@ -130,10 +131,14 @@ export function packagesSig(): string {
     return sig;
 }
 
-/** the package URLs the code imports (valid or not) */
+/** the package URLs the code imports (valid or not; built-ins aside, plus a Preact file's compat layer for them) */
 export function packageUrlsIn(codes: Iterable<string>): Set<string> {
     const out = new Set<string>();
-    for (const code of codes) for (const s of importSpecs(code)) if (isUrlSpec(s)) out.add(s);
+    for (const code of codes) {
+        const specs = importSpecs(code);
+        for (const s of specs) if (isUrlSpec(s) && !builtinSpec(s)) out.add(s);
+        for (const u of builtinDownloads(code, specs)) out.add(u);
+    }
     return out;
 }
 
