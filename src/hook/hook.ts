@@ -237,6 +237,7 @@ import { readFetchBody } from "../shared/requestBody";
             try {
                 scriptLogUp(scriptId, "debug", scriptLogLine(name, "onDocument", `running (${when}) on ${location.href} [${document.readyState}], hook injected via ${injected}`));
                 firePageHandler(d, makeCtx(location.href, "GET"), exposer);
+                window.postMessage({ source: HOOK_SOURCE, kind: "scriptRan", scriptId, name, api: d.route.api === "onPage" ? "onPage" : "onDocument" }, window.location.origin);
             } catch (e: any) {
                 scriptLogUp(scriptId, "error", formatScriptError(name, e, "onDocument"));
             }

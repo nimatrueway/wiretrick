@@ -3,7 +3,7 @@
  */
 import { annotateFromLog, URL_AT_END } from "../network";
 import { SKIPPED_MARK } from "../../shared/precedence";
-import { outcomeKind, observedLine, type OutcomeKind, type NetKind } from "../../shared/netTypes";
+import { outcomeKind, observedLine, RAN_ACTIONS, isRanApi, type OutcomeKind, type NetKind } from "../../shared/netTypes";
 import type { Strategy } from "../../shared/route";
 
 export interface LogEntry {
@@ -82,6 +82,15 @@ export function log(tabId: number, message: string, level: LogEntry["level"] = "
     if (level === "error") {
         console.error("[Wiretrick]", message);
     }
+}
+
+/**
+ * Page-side code ran (onPage, onOverlay) on the document at `url`, or the
+ * overlay fetched `url` as the page: tag that Network row with the script.
+ */
+export function noteRan(tabId: number, scriptId: string, name: string, api: unknown, url: unknown): void {
+    if (!isRanApi(api) || typeof url !== "string" || !/^https?:/.test(url)) return;
+    log(tabId, `[${String(name).replace(/[\[\]]/g, "") || scriptId}] ${RAN_ACTIONS[api]}`, "debug", scriptId, "observed", url.split("#")[0]);
 }
 
 // ---- tap registry: did a script's handler run for a URL? ----

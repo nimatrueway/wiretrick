@@ -17,6 +17,8 @@ its section below.
 
 - `wt.pageStore(name, initial)`: a store with one copy per page — a navigation or reload starts it over, a single-page app's route change doesn't, and other tabs have their own. A network handler sees the copy of its request's page (until its first `await`) and an overlay its own page's, so a switch in the overlay can change what the handlers do for that tab only. Not available in `onPage` code or `rules` handlers.
 
+- Network: a page's document request names the scripts whose `onPage` ran or whose `onOverlay` was shown on it, and the overlay's fetches name their script (both as observed).
+
 ### Fixed
 
 - Chrome: an overlay's calls into isolated-world `onPage` code, and back, are matched to the overlay's own document, so a call made while the tab navigates can't reach the next page.

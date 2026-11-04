@@ -200,6 +200,26 @@ describe("network recorder", () => {
         p.disconnect();
     });
 
+    it("tags the document with the onPage/onOverlay scripts that ran on it, and overlay fetches", async () => {
+        const { noteRan } = await import("../src/background/engine/logs");
+        const p = fakePort();
+        addNetworkPort(p.port);
+        req("1", "https://a.test/app", { type: "main_frame" });
+        req("2", "https://a.test/api", { method: "POST" });
+        noteRan(7, "s1", "Page [x]", "onPage", "https://a.test/app#top");
+        noteRan(7, "s2", "Panel", "onOverlay", "https://a.test/app");
+        noteRan(7, "s2", "Panel", "pageFetch", "https://a.test/api");
+        noteRan(7, "s3", "Bad", "fetch", "https://a.test/app");
+        noteRan(7, "s3", "Bad", "onPage", "chrome://settings");
+        expect(entries.get("1")!.outcomes).toMatchObject([
+            { scriptId: "s1", scriptName: "Page x", action: "onPage ran", kind: "observed" },
+            { scriptId: "s2", scriptName: "Panel", action: "onOverlay shown", kind: "observed" },
+        ]);
+        expect(entries.get("2")!.outcomes).toMatchObject([{ scriptId: "s2", action: "fetched by its overlay", kind: "observed" }]);
+        expect(entries.size).toBe(2);
+        p.disconnect();
+    });
+
     it("records each annotation as observed or modified", () => {
         const p = fakePort();
         addNetworkPort(p.port);

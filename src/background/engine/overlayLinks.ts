@@ -84,6 +84,8 @@ export interface OverlayLinkDeps {
     storageGet?(s: string, key: string): Promise<any>;
     storageSet?(s: string, key: string, value: any): Promise<void>;
     log?(tabId: number, s: string, level: ScriptLogLevel, msg: string, ctx: string): void;
+    /** isolated onPage code ran on the frame's document */
+    ran?(tabId: number, s: string, name: string, api: string, url: string): void;
     /** the Editor preview: script `s`'s overlay with every onOverlay route, whether or not it matches (throws why there's none) */
     previewRun?(s: string): Promise<OverlayRun>;
 }
@@ -362,6 +364,9 @@ export function serveIsoLink(link: IsoLink): void {
     ep.on("log", (a, s) => {
         if (!bound(s) || !["debug", "info", "warn", "error"].includes(a?.level)) return;
         deps.log?.(tabId, s, a.level, String(a.msg ?? "").slice(0, 8000), contextTag("isolated", link.port.sender?.url));
+    });
+    ep.on("ran", (a, s) => {
+        if (bound(s) && link.port.sender?.url) deps.ran?.(tabId, s, String(a?.name ?? ""), a?.api, link.port.sender.url);
     });
     ep.handle("storage.get", async ({ key }, s) => {
         if (!bound(s) || typeof key !== "string") throw new Error("storage.get: refused");

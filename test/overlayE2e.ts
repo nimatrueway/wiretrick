@@ -226,6 +226,7 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
             } catch {}
         }, true);
     });
+    const loadedAt = Date.now();
     await page.goto(`${origin}/ov-app`, { waitUntil: "load", timeout: 15000 });
 
     const swFrame = await overlayFrame(page, "#box");
@@ -241,6 +242,25 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
     const checked = swFrame ? await waitFor<boolean>(() => swFrame.evaluate(() => (document.getElementById("box") as HTMLInputElement).checked), (v) => v, 5000) : false;
     const after = await waitFor<string>(fetchMe, (v) => v.includes("MOCKED"), 5000);
     check(t("clicking the switch toggles the mock live"), before.includes("REAL") && checked && after.includes("MOCKED"), JSON.stringify({ before, checked, after }));
+
+    // Network: the document row names the scripts whose onPage/onOverlay ran on it; the overlay's fetch names its script
+    // (no Network tab recording: rows are synthetic)
+    type NetRow = { url: string; type: string; synthetic?: boolean; startedAt: number; outcomes: { scriptName: string; action: string; kind: string }[] };
+    const netRows = (): Promise<NetRow[]> =>
+        mgr.evaluate(() => new Promise((resolve) => {
+            const port = chrome.runtime.connect({ name: "network" });
+            port.onMessage.addListener((m: any) => { if (m.type === "netSnapshot") { port.disconnect(); resolve(m.entries); } });
+        }));
+    const tagsOf = (rows: NetRow[], path: string) => rows.filter((e) => e.url === origin + path && e.startedAt >= loadedAt - 50).flatMap((e) => e.outcomes.map((o) => `${o.scriptName}: ${o.action}`));
+    const net = await waitFor<NetRow[]>(netRows, (rows) => tagsOf(rows, "/ov-app").length >= 3 && tagsOf(rows, "/ov-cookie").length >= 1, 5000);
+    const docTags = tagsOf(net, "/ov-app");
+    const docRow = net.find((e) => e.url === `${origin}/ov-app` && e.startedAt >= loadedAt - 50 && e.outcomes.length);
+    check(
+        t("Network: the page's document row names the scripts whose onPage/onOverlay ran on it"),
+        (docRow?.type === "main_frame" || !!docRow?.synthetic) && ["overlay switch: onOverlay shown", "overlay rpc: onOverlay shown", "overlay rpc: onPage ran"].every((x) => docTags.includes(x)) && docRow.outcomes.every((o) => o.kind === "observed"),
+        JSON.stringify({ type: docRow?.type, synthetic: docRow?.synthetic, docTags })
+    );
+    check(t("Network: the overlay's fetch names its script"), tagsOf(net, "/ov-cookie").includes("overlay switch: fetched by its overlay"), JSON.stringify(tagsOf(net, "/ov-cookie")));
 
     const pass = await page.evaluate(() => {
         const r = document.getElementById("pass")!.getBoundingClientRect();

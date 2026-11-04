@@ -8,7 +8,7 @@ import { HelperStrategy } from "./engine/strategies/helperStrategy";
 import { RulesStrategy } from "./engine/strategies/rulesStrategy";
 import { createPipeline } from "./engine/pipeline";
 import { runMigrations } from "./migration";
-import { addUiPort, clearTab, clearLogHistory, log, broadcastEntry, broadcastToUi, clearScriptErrors, setScriptTypeErrors } from "./engine/logs";
+import { addUiPort, clearTab, clearLogHistory, log, noteRan, broadcastEntry, broadcastToUi, clearScriptErrors, setScriptTypeErrors } from "./engine/logs";
 import { onScriptsChanged, listScripts, refreshStaleMeta } from "./engine/scriptStore";
 import { dlog, dlogLevel, getDebugBuffer, pushEntry, clearDebugBuffer, setSink } from "../shared/debugLog";
 import * as folderSync from "./folderSync";
@@ -138,6 +138,12 @@ chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
         // GUI code's lines say where they came from (onPage main/isolated world, the overlay)
         const ctx = SCRIPT_CONTEXTS.includes(msg.ctx) ? contextTag(msg.ctx, sender.url || sender.tab?.url) : undefined;
         log(sender.tab?.id ?? -1, msg.msg.slice(0, 8000), level, typeof msg.scriptId === "string" ? msg.scriptId : null, undefined, undefined, undefined, ctx);
+        sendResponse({});
+        return false;
+    }
+    if (msg && msg.type === "scriptRan" && typeof msg.scriptId === "string") {
+        // onPage/onOverlay ran here, or the overlay fetched as the page: the Network row says which script
+        noteRan(sender.tab?.id ?? -1, msg.scriptId, String(msg.name ?? ""), msg.api, msg.url);
         sendResponse({});
         return false;
     }

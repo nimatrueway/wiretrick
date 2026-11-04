@@ -33,6 +33,11 @@ export function kindSkipLine(scriptName: string, url: string, binaryBody: boolea
     return `[${scriptName}] onResponseBody → not run — ${why} ${url}`;
 }
 
+/** page-side script code that ran for a document or fetched as it: the action its Network row shows */
+export const RAN_ACTIONS = { onPage: "onPage ran", onDocument: "onDocument ran", onOverlay: "onOverlay shown", pageFetch: "fetched by its overlay" } as const;
+export type RanApi = keyof typeof RAN_ACTIONS;
+export const isRanApi = (x: unknown): x is RanApi => typeof x === "string" && Object.prototype.hasOwnProperty.call(RAN_ACTIONS, x);
+
 /** DEBUG log line for a handler that ran without changing anything (ends with the URL, so it annotates the request). */
 export function observedLine(scriptName: string, handler: string, url: string, why?: string): string {
     return `[${scriptName}] ${handler} ${OBSERVED_MARK}${why ? ` — ${why}` : ""} ${url}`;

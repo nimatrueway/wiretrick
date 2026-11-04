@@ -121,6 +121,8 @@ export interface WireOps {
     // ---- MV3 isolated-world onPage code (L6: chrome.userScripts world ⇄ owner; L2 for the relay) ----
     /** L6: what script `s` runs in this frame's user-script world (refused unless it has isolated onPage code here) */
     "iso.load": { req: { url: string }; res: IsoInit };
+    /** L6: this world's onPage code ran on its document (tags the document's Network row) */
+    ran: { push: { api: "onPage" | "onDocument"; name: string } };
     /** L6: scripts changed: load again, re-run when the code hash moved */
     "iso.update": { push: {} };
     /** L2: a call between script `s`'s overlay (via the top-frame bridge) and its isolated-world code (via the owner) */

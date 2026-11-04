@@ -110,6 +110,17 @@ import { routeMatches, type RouteMeta } from "../shared/route";
         );
     }
 
+    /** once per document: tags its Network row with this script */
+    const ran = new Set<string>();
+    function noteRan(api: "onPage" | "onDocument", name: string): void {
+        if (ran.has(api)) return;
+        ran.add(api);
+        linkUp().then(
+            (ep) => ep.push("ran", { api, name }, s),
+            () => {}
+        );
+    }
+
     function run(init: IsoInit, hot: boolean): void {
         if (codeHash !== null) {
             exposer.reset();
@@ -152,6 +163,7 @@ import { routeMatches, type RouteMeta } from "../shared/route";
                 () => {
                     try {
                         firePageHandler(d, { url: location.href, method: "GET", tabUrl: location.href, resourceType: "main_frame", requestHeaders: {}, groups: {} }, exposer);
+                        noteRan(d.route.api === "onPage" ? "onPage" : "onDocument", init.name);
                     } catch (e: any) {
                         log("error", formatScriptError(init.name, e, d.route.api || "onDocument"));
                     }

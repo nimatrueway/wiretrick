@@ -33,6 +33,7 @@ import type { DocumentWhen, RouteMeta } from "../shared/route";
 import { clipPathFor, normalizeRects } from "../shared/overlayRects";
 import { fromWireRequest, toWireResponse } from "../shared/wtFetch";
 import { ShortcutRegistry, watchShortcuts } from "../shared/shortcut";
+import type { RanApi } from "../shared/netTypes";
 
 (() => {
     const MAIN_SOURCE = "res-override-bridge";
@@ -46,6 +47,18 @@ import { ShortcutRegistry, watchShortcuts } from "../shared/shortcut";
     /** a user script's own output → extension LOG, attributed to the script (and tagged with where it ran) */
     function scriptLog(scriptId: string | null, level: ScriptLogLevel, msg: string, ctx?: ScriptContext): void {
         safeSend({ type: "scriptLog", scriptId, level, msg, ...(ctx ? { ctx } : {}) });
+    }
+
+    /** onPage/onOverlay ran on this document (once per script), or an overlay fetched `url`: tag that Network row */
+    const ranHere = new Set<string>();
+    function scriptRan(scriptId: unknown, name: unknown, api: RanApi, url = location.href): void {
+        if (typeof scriptId !== "string") return;
+        if (api !== "pageFetch") {
+            const key = `${scriptId}|${api}`;
+            if (ranHere.has(key) || ranHere.size > 200) return;
+            ranHere.add(key);
+        }
+        safeSend({ type: "scriptRan", scriptId, name: String(name ?? ""), api, url });
     }
 
     // ---- MAIN-world hook relaying ----
@@ -174,6 +187,9 @@ import { ShortcutRegistry, watchShortcuts } from "../shared/shortcut";
         if (data.kind === "scriptLog") {
             safeSend({ type: "scriptLog", scriptId: data.scriptId ?? null, level: data.level, msg: data.msg, ctx: "page" });
         }
+        if (data.kind === "scriptRan" && (data.api === "onPage" || data.api === "onDocument")) {
+            scriptRan(data.scriptId, data.name, data.api);
+        }
         // the hook's answer to an overlay's call (L4). The page can post this
         // too: only a cid we sent and are still waiting for is accepted, and
         // the value is page data either way. A `rpc.call` from the page is
@@ -293,6 +309,7 @@ import { ShortcutRegistry, watchShortcuts } from "../shared/shortcut";
                 const run = () => {
                     try {
                         firePageHandler(d, { url: location.href, method: "GET", tabUrl: location.href, resourceType: "main_frame", requestHeaders: {}, groups: {} }, exposer);
+                        scriptRan(h.scriptId, h.name, d.route.api === "onPage" ? "onPage" : "onDocument");
                     } catch (e: any) {
                         scriptLog(h.scriptId, "error", formatScriptError(h.name, e, d.route.api || "onDocument"), ctx);
                     }
@@ -561,6 +578,7 @@ import { ShortcutRegistry, watchShortcuts } from "../shared/shortcut";
             }
             proven = true;
             o.ep = ep;
+            scriptRan(s, o.info.name, "onOverlay");
             const init = await l2call("overlay.init", {}, s);
             queueMicrotask(() => {
                 for (const call of o.queue.splice(0)) ep.push("rpc.call", call);
@@ -712,7 +730,10 @@ import { ShortcutRegistry, watchShortcuts } from "../shared/shortcut";
         if (bypass) await l2call("bypass.add", { tabId: -1, method: (init.method || "GET").toUpperCase(), url: abs }, s);
         const content = (globalThis as any).content;
         const f: typeof fetch = typeof content?.fetch === "function" ? (u, i) => content.fetch(u, i) : fetch;
-        return toWireResponse(await f(abs, init));
+        const res = await f(abs, init);
+        const o = overlays.get(s);
+        if (o) scriptRan(s, o.info.name, "pageFetch", abs);
+        return toWireResponse(res);
     }
 
     // ---- in-place navigation (ctx.onNavigate) ----

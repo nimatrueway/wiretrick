@@ -218,6 +218,10 @@ at the right of the toolbar do the same.
     logs a DEBUG line like `[Foo] onRequest → observed (no change) https://…`.
     An `onResponseBody` that returns a body — even the one it received —
     counts as modified.
+    Page-side code counts as observed too: a page's document request names
+    each script whose `onPage` ran or whose `onOverlay` was shown on it
+    (`onPage ran`, `onOverlay shown`), and a fetch the overlay made as the
+    page names its script (`fetched by its overlay`).
   - **Modified** — a handler changed it: body, headers, status, a
     redirect/block or a synthetic response. Solid accent marker and a
     green waterfall bar; the action is logged at INFO as before.

@@ -23,7 +23,7 @@ import { serveStore } from "./strategies/extensionStrategy";
 import { dlog, dlogLevel } from "../../shared/debugLog";
 import { isThenable, registrationProblems, toRunnableJs } from "../../shared/compile";
 import "../../shared/transpile";
-import { log, getScriptErrors, getScriptTypeErrors, getScriptRuleErrors, getScriptRouteWarnings, setScriptRouteWarnings, bodyObservedSince, bodySkipSince, noteBodySkip } from "./logs";
+import { log, noteRan, getScriptErrors, getScriptTypeErrors, getScriptRuleErrors, getScriptRouteWarnings, setScriptRouteWarnings, bodyObservedSince, bodySkipSince, noteBodySkip } from "./logs";
 import { bypassed } from "./bypass";
 import { prepareStores, storeOwner } from "./stores";
 import { ensureBuiltins, needsReact } from "../../shared/builtins";
@@ -684,6 +684,7 @@ export function createPipeline(
         storageGet: (s, key) => scriptStorageGet(s, key),
         storageSet: async (s, key, value) => void (await scriptStorageSet(s, key, value)),
         log: (tabId, s, level, msg, ctx) => log(tabId, msg, level, s, undefined, undefined, undefined, ctx),
+        ran: (tabId, s, name, api, url) => noteRan(tabId, s, name, api, url),
         previewRun: async (s) => {
             const { overlayRuns, previewWhy } = await hookBundle("", true, s);
             const run = overlayRuns.get(s);
