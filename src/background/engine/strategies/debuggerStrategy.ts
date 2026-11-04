@@ -9,6 +9,7 @@
  * Handlers run through the shared body ops (bodyOps.runOp) — locally on
  * MV2, in the sandbox page on MV3 — so chain semantics match every strategy.
  */
+import { withOpPage } from "../pages";
 import { urlGlobOf } from "../../../shared/matcher";
 import { runOp, type BodyOp, type OpScript } from "../../../shared/bodyOps";
 import { routeMatches, takesBinary, type RouteKind } from "../../../shared/route";
@@ -354,8 +355,8 @@ export class DebuggerStrategy {
     }
 
     /** run a body op over the cdp-owned handlers (locally on MV2, in the sandbox on MV3) */
-    private run(op: BodyOp, args: Record<string, any>, tabId: number): Promise<any> {
-        const a = { ...args, tabId, tier: "debugger" };
+    private async run(op: BodyOp, args: Record<string, any>, tabId: number): Promise<any> {
+        const a = await withOpPage({ ...args, tabId, tier: "debugger" }, tabId);
         if (__MV3__) return runBodyOp(this.mv3Plain as any, this.mv3Params, op, a);
         return runOp(this.ops, op, a, {
             log: (scriptId, level, msg, kind) => log(tabId, msg, level, scriptId, kind, undefined, args.requestId),

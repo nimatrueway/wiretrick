@@ -23,6 +23,12 @@ describe("rules probe (tripwire ctx)", () => {
         expect(r.rules.map((x) => x.specs[0].action.type)).toEqual(["block", "modifyHeaders"]);
     });
 
+    it("wt.pageStore in a rules handler is an error (rules serve every page)", async () => {
+        const r = await rulesOf(`const ps = wt.pageStore("p", { on: true });
+            wt.onRequest({ url: "*://a.com/*", strategy: "rules" }, () => (ps.on ? { block: true } : undefined));`);
+        expect(r.errors.join("\n")).toMatch(/strategy "rules" handler/);
+    });
+
     it("an async handler on rules", async () => {
         const r = await rulesOf(`wt.onRequest({ url: "*://a.com/*", strategy: "rules" }, async () => ({ headers: { set: { a: 1 } } }));`);
         expect(r.rules[0].specs[0].action.requestHeaders).toEqual([{ header: "a", operation: "set", value: "1" }]);

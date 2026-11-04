@@ -47,25 +47,25 @@ describe("wt.fetch wire helpers", () => {
     });
 });
 
-describe("wt.store / wt.fetch in the background shim", () => {
+describe("wt.globalStore / wt.fetch in the background shim", () => {
     it("a store without an owner is a local valtio proxy; options are checked", () => {
-        const c = compileScript(`export const s = wt.store("ui", { n: 1 }); s.n++;`);
+        const c = compileScript(`export const s = wt.globalStore("ui", { n: 1 }); s.n++;`);
         expect(c.error).toBeNull();
         expect(c.exports.s.n).toBe(2);
-        expect(compileScript(`wt.store("ui", { n: 1 }, { persist: ["n"] });`).error).toBeNull();
-        expect(compileScript(`wt.store("ui", { n: 1 }, { persist: 3 });`).error).toMatch(/persist must be/);
-        expect(compileScript(`wt.store("", {});`).error).toMatch(/name/);
-        expect(compileScript(`wt.store("a", [1]);`).error).toMatch(/initial must be an object/);
+        expect(compileScript(`wt.globalStore("ui", { n: 1 }, { persist: ["n"] });`).error).toBeNull();
+        expect(compileScript(`wt.globalStore("ui", { n: 1 }, { persist: 3 });`).error).toMatch(/persist must be/);
+        expect(compileScript(`wt.globalStore("", {});`).error).toMatch(/name/);
+        expect(compileScript(`wt.globalStore("a", [1]);`).error).toMatch(/initial must be an object/);
     });
 
     it("a name may be used once per script", () => {
-        expect(compileScript(`wt.store("a", {}); wt.store("a", {});`).error).toMatch(/already has a store named "a"/);
-        expect(compileScript(`wt.store("a", {}); wt.store("b", {});`).error).toBeNull();
+        expect(compileScript(`wt.globalStore("a", {}); wt.globalStore("a", {});`).error).toMatch(/already has a store named "a"/);
+        expect(compileScript(`wt.globalStore("a", {}); wt.globalStore("b", {});`).error).toBeNull();
     });
 
     it("the store override gets name, initial and persist", () => {
         const seen: any[] = [];
-        const c = compileScript(`export const s = wt.store("ui", { n: 1 }, { persist: false });`, {
+        const c = compileScript(`export const s = wt.globalStore("ui", { n: 1 }, { persist: false });`, {
             store: (name, initial, persist) => (seen.push([name, initial, persist]), { from: "owner" }),
         });
         expect(c.error).toBeNull();
@@ -76,7 +76,7 @@ describe("wt.store / wt.fetch in the background shim", () => {
     it("wt.storage.set on a store's key warns", () => {
         const seen: string[] = [];
         compileScript(`wt.storage.set("$store:ui", 1);`, { logSink: (_l, _s, text) => seen.push(text) });
-        expect(seen.join("\n")).toMatch(/persisted copy of wt\.store\("ui"\)/);
+        expect(seen.join("\n")).toMatch(/persisted copy of wt\.globalStore\("ui"\)/);
     });
 
     it('from: "page" rejects in background code', async () => {

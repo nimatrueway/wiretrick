@@ -72,7 +72,7 @@ async function start(code: string, over: Partial<OverlayInit> = {}): Promise<Har
     bridge.on("rects", (a) => h.rects.push(a.rects));
     bridge.on("shortcut.add", (a) => h.keys.push(`add ${a.id} ${a.keys} ${a.priority}`));
     bridge.on("shortcut.remove", (a) => h.keys.push(`remove ${a.id}`));
-    const init: OverlayInit = { s: "s1", name: "demo", code, codeHash: "h", routes: [], url: "https://x.com/app/page", params: {}, stores: {}, libs: [], react: false, phase: "document_end", ...over };
+    const init: OverlayInit = { s: "s1", name: "demo", code, codeHash: "h", routes: [], url: "https://x.com/app/page", params: {}, stores: {}, page: "p1", libs: [], react: false, phase: "document_end", ...over } as OverlayInit;
     const rt = await startOverlay(frame, init, { win: window as any, doc: document, watchRects: false, trustedKey: () => true });
     running.push(rt);
     return { ...h, rt };
@@ -136,7 +136,7 @@ describe("overlay runtime", () => {
     });
 
     it("stores are replicas of the background's, live both ways", async () => {
-        const h = await start(`const st = wt.store("ui", { on: false, n: 0 });\nwt.onOverlay("*", () => ({ flip: () => { st.on = !st.on; return st.on; }, read: () => ({ ...st }) }));`);
+        const h = await start(`const st = wt.globalStore("ui", { on: false, n: 0 });\nwt.onOverlay("*", () => ({ flip: () => { st.on = !st.on; return st.on; }, read: () => ({ ...st }) }));`);
         await settle();
         expect((await callOverlay(h, { h: "overlay:0", fn: "flip", args: [] })).value).toBe(true);
         await settle();
@@ -154,7 +154,7 @@ describe("overlay runtime", () => {
     });
 
     it("its first render sees the snapshot from hello", async () => {
-        const h = await start(`const st = wt.store("ui", { on: false });\nwt.onOverlay("*", () => { document.body.dataset.on = String(st.on); });`, { stores: { ui: { rev: 3, data: { on: true } } as any } });
+        const h = await start(`const st = wt.globalStore("ui", { on: false });\nwt.onOverlay("*", () => { document.body.dataset.on = String(st.on); });`, { stores: { ui: { rev: 3, data: { on: true } } as any } });
         expect(document.body.dataset.on).toBe("true");
         void h;
     });

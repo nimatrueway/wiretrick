@@ -10,6 +10,7 @@
  * Handler chains share src/shared/bodyOps.ts with the page and debugger
  * strategies: MV2 compiles in the background page, MV3 runs in the sandbox.
  */
+import { withOpPage } from "../pages";
 import { runOp, type BodyOp, type OpScript } from "../../../shared/bodyOps";
 import { bodyKind, getTextTypes } from "../../../shared/bodyKind";
 import { bytesToBase64, base64ToBytes } from "../../../shared/bytesPack";
@@ -443,8 +444,9 @@ export class HelperStrategy {
         this.send({ t: "continue", id });
     }
 
-    private run(op: BodyOp, args: any): Promise<any> {
+    private async run(op: BodyOp, args: any): Promise<any> {
         args.tier = "helper";
+        await withOpPage(args, args.tabId);
         if (__MV3__) return runBodyOp(this.mv3Plain, this.mv3Params, op, args);
         return runOp(this.mv2Ops, op, args, {
             log: (scriptId, level, msg, kind) => log(args.tabId ?? -1, `[helper] ${msg}`, level, scriptId, kind, undefined, args.requestId),

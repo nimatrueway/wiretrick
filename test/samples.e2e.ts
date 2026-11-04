@@ -49,7 +49,7 @@ const overlayFrame = (p: Page, sel: string) =>
 
 // sample name → how to see its effect (opens the page itself)
 const VERIFY: Record<string, (p: Page) => Promise<[boolean, string]>> = {
-    "Overlay panel (React + wt.store)": async (p) => {
+    "Overlay panel (React + wt.globalStore)": async (p) => {
         await open(p, "https://dummyjson.com/");
         const f = await overlayFrame(p, "#wt-fetch");
         if (!f) return [false, "no overlay panel"];

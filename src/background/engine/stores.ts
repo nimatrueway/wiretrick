@@ -1,5 +1,5 @@
 /**
- * The background's `wt.store` owner and the links to it:
+ * The background's `wt.globalStore` owner and the links to it:
  *
  *   MV2 — scripts compile right here: one in-process replica hub, joined
  *         to the owner by an endpoint pair, shared by every strategy's
@@ -15,6 +15,7 @@ import { StoreOwner } from "./storeOwner";
 import { log } from "./logs";
 import { scriptStorageAll, scriptStorageSet, getScript } from "./scriptStore";
 import { backgroundFetch } from "./wtFetch";
+import { pages, pagesReady } from "./pages";
 
 const ownerLog = (s: string, msg: string, level: "info" | "warn" | "error") => log(-1, msg, level, s);
 
@@ -29,7 +30,11 @@ export const storeOwner = new StoreOwner({
           }
         : {}),
     log: ownerLog,
+    pageAlive: (p) => pages.isAlive(p),
+    ready: () => pagesReady,
 });
+// a page ended: its wt.pageStore copies go
+pages.onEnd((key) => storeOwner.dropPage(key));
 
 /** a script's name for log lines (its id if it's gone) */
 async function nameOf(scriptId: string): Promise<string> {
@@ -58,7 +63,7 @@ export function backgroundHub(): ReplicaHub {
 
 /**
  * Before scripts compile (reload): drop the stores of deleted scripts and,
- * in MV2, load the others' current state into the hub so `wt.store`
+ * in MV2, load the others' current state into the hub so `wt.globalStore`
  * returns real data synchronously.
  */
 export async function prepareStores(scriptIds: string[]): Promise<void> {

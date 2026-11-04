@@ -32,7 +32,7 @@ import { resolveBrowser } from "./browserSetup";
 import { checkApiTypingsNav } from "./apiTypingsNav";
 import { checkRulesStrategy, rulesServerRoute } from "./rulesE2e";
 import { checkFoldersAndDataFiles, foldersServerRoute } from "./foldersE2e";
-import { checkOverlayPreview, checkOverlays, checkOverlayShortcuts, overlayServerRoute } from "./overlayE2e";
+import { checkOverlayPreview, checkOverlays, checkOverlayShortcuts, checkPageStores, overlayServerRoute } from "./overlayE2e";
 
 const EXT_ROOT = path.join(new URL("..", import.meta.url).pathname, "dist");
 
@@ -255,13 +255,13 @@ const r5 = await p5.evaluate(async () => (await (await fetch("/api-replace")).js
 check("replaceResponse: fetch short-circuit (hook)", r5 === "REPLACED-BY-HOOK", r5);
 await p5.close();
 
-// ---------- 5b. wt.store shared across strategies + wt.fetch bypass ----------
+// ---------- 5b. wt.globalStore shared across strategies + wt.fetch bypass ----------
 // the extension handler mocks /byp (redirect) and counts in the store; the
 // page handler fetches /byp twice from the background — with bypass it gets
 // the real body and the mock doesn't run
 await saveScript(
     "s_storefetch",
-    `const st = wt.store("st", { n: 0 }, { persist: false });
+    `const st = wt.globalStore("st", { n: 0 }, { persist: false });
 wt.onRequest({ url: "${ORIGIN}/byp", strategy: "extension" }, () => { st.n++; return { redirect: "${ORIGIN}/redirected" }; });
 wt.replaceResponse({ url: "${ORIGIN}/byp-data", strategy: "page" }, async () => {
     const real = await (await wt.fetch("${ORIGIN}/byp", { bypass: true })).text();
@@ -281,7 +281,7 @@ await new Promise((r) => setTimeout(r, 600));
     try { j = JSON.parse(r); } catch {}
     check("wt.fetch bypass: the script's own mock skips the request", j.real === "BYP-REAL", r);
     check("wt.fetch without bypass: the mock applies", j.mocked === true, r);
-    check("wt.store: one store across the extension and page handlers", j.n === 1, r);
+    check("wt.globalStore: one store across the extension and page handlers", j.n === 1, r);
     await p.close();
 }
 await setEnabled("s_storefetch", false);
@@ -560,6 +560,7 @@ await checkFoldersAndDataFiles(ctx, mgr, ORIGIN, check);
 
 // ---------- 10i. overlays (wt.onOverlay) and calls between the overlay and the page ----------
 await checkOverlays(ctx, mgr, ORIGIN, check, { isolated: true });
+await checkPageStores(ctx, mgr, ORIGIN, check);
 await checkOverlayShortcuts(ctx, mgr, ORIGIN, check);
 await checkOverlayPreview(ctx, mgr, ORIGIN, check);
 

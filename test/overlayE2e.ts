@@ -51,6 +51,16 @@ window.addEventListener("keydown", (e) => { if (e.altKey && e.code === "KeyP") e
         );
         return true;
     }
+    if (url.pathname === "/ov-two") {
+        res.writeHead(200, { "content-type": "text/html" });
+        res.end(PAGE(""));
+        return true;
+    }
+    if (url.pathname === "/ov-ps") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("REAL");
+        return true;
+    }
     if (url.pathname === "/ov-me") {
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({ name: "REAL" }));
@@ -74,7 +84,7 @@ window.addEventListener("keydown", (e) => { if (e.altKey && e.code === "KeyP") e
 const switchCode = (origin: string, label: string) => `import { createRoot } from "react-dom/client";
 import { useSnapshot } from "valtio";
 
-const mock = wt.store("ovmock", { enabled: false });
+const mock = wt.globalStore("ovmock", { enabled: false });
 
 wt.replaceResponse({ url: "${origin}/ov-me", strategy: "page" }, () =>
     mock.enabled ? JSON.stringify({ name: "MOCKED" }) : undefined);
@@ -476,4 +486,92 @@ export async function checkOverlayPreview(ctx: any, mgr: any, origin: string, ch
     await page.close();
     await mgr.click("#log-header-title");
     await send({ type: "deleteScript", id: "s_ov_prev" });
+}
+
+const twoTabCode = (origin: string) => `const ps = wt.pageStore("ps", { n: 0 });
+
+wt.replaceResponse({ url: "${origin}/ov-ps", strategy: "page" }, () => {
+    try {
+        ps.n++;
+        return String(ps.n);
+    } catch (e) {
+        return "ERR: " + (e as Error).message;
+    }
+});
+
+wt.onOverlay("${origin}/ov-two*", () => {
+    const out = document.body.appendChild(document.createElement("output"));
+    out.id = "two";
+    out.value = "pending";
+    const ask = () =>
+        pg.whoami().then(
+            (w) => (out.value = JSON.stringify({ ...w, n: ps.n })),
+            (e) => (out.value = "rejected: " + e.message)
+        );
+    (window as any).ask = ask;
+    void ask();
+});
+
+const pg = wt.onPage("${origin}/ov-two*", () => ({
+    whoami: () => ({ q: location.search }),
+}));
+`;
+
+/**
+ * Two tabs, one overlay + onPage script: each overlay's calls reach
+ * its own tab's page, and each page has its own wt.pageStore copy (a
+ * reload starts over; a pushState doesn't).
+ */
+export async function checkPageStores(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
+    const t = (s: string) => `pageStore${opts.label ?? ""}: ${s}`;
+    const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
+    const saved = await send({ type: "saveScript", id: "s_two", code: twoTabCode(origin), name: "two tabs" });
+    check(t("the script saves"), !saved?.error, saved?.error);
+    await mgr.waitForTimeout(800);
+    const open = async (q: string) => {
+        const p = await ctx.newPage();
+        await p.goto(`${origin}/ov-two?t=${q}`, { waitUntil: "load", timeout: 15000 });
+        // the page's script bundle has arrived (the hook misses requests before that)
+        await overlayFrame(p, "#two");
+        return p;
+    };
+    const a = await open("A");
+    const b = await open("B");
+    const hit = (p: any): Promise<string> => p.evaluate(() => fetch("/ov-ps").then((r) => r.text())).catch((e: any) => String(e));
+    const asked = async (p: any, want: (v: any) => boolean) => {
+        const f = await overlayFrame(p, "#two");
+        if (!f) return null;
+        return waitFor<any>(
+            async () => {
+                const v = await f.evaluate(async () => {
+                    await (window as any).ask();
+                    return (document.getElementById("two") as HTMLOutputElement).value;
+                }).catch(() => "");
+                try {
+                    return JSON.parse(v);
+                } catch {
+                    return v;
+                }
+            },
+            want,
+            8000
+        );
+    };
+    const counts = [await hit(a), await hit(a), await hit(b)];
+    check(t("each page counts its own requests"), counts.join() === "1,2,1", counts.join());
+    const wa = await asked(a, (v) => v?.n === 2);
+    const wb = await asked(b, (v) => v?.n === 1);
+    check(t("each tab's overlay reaches its own page (onPage + its page's store)"), wa?.q === "?t=A" && wa?.n === 2 && wb?.q === "?t=B" && wb?.n === 1, JSON.stringify({ wa, wb }));
+    await a.evaluate(() => history.pushState({}, "", "/ov-two?t=A2"));
+    const spa = await hit(a);
+    check(t("a pushState keeps the page's copy"), spa === "3", spa);
+    await a.reload({ waitUntil: "load", timeout: 15000 });
+    await overlayFrame(a, "#two");
+    const fresh = [await hit(a), await hit(b)];
+    check(t("a reload starts the page's copy over (the other tab keeps its own)"), fresh.join() === "1,2", fresh.join());
+    const wa2 = await asked(a, (v) => v?.n === 1);
+    check(t("after a reload the overlay reaches the new page"), wa2?.q === "?t=A2" && wa2?.n === 1, JSON.stringify(wa2));
+    await a.close();
+    await b.close();
+    await send({ type: "deleteScript", id: "s_two" });
 }

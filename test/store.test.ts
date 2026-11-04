@@ -6,6 +6,7 @@ import { StoreOwner, type StoreOwnerDeps } from "../src/background/engine/storeO
 import { applyOps, missingOps } from "../src/shared/storeOps";
 import "../src/shared/transpile";
 import { compileScript } from "../src/shared/compile";
+import { withPage } from "../src/shared/currentPage";
 
 const settle = async () => {
     for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
@@ -64,7 +65,7 @@ describe("store ops", () => {
     });
 });
 
-describe("wt.store replica + owner", () => {
+describe("wt.globalStore replica + owner", () => {
     it("syncs a set, a nested set and a delete to another context", async () => {
         const t = setup();
         const A = t.hub("a");
@@ -330,15 +331,15 @@ describe("wt.store replica + owner", () => {
         await settle();
         a.n = 1;
         await settle();
-        expect(fn).toHaveBeenCalledWith("s1", "x");
+        expect(fn).toHaveBeenCalledWith("s1", "x", undefined);
     });
 });
 
-describe("wt.store across compiled instances", () => {
+describe("wt.globalStore across compiled instances", () => {
     it("two compiles of a script (MV2 strategy tiers) share one store object", async () => {
         const t = setup();
         const A = t.hub("bg");
-        const code = `export const s = wt.store("ui", { hits: 0 }); export const hit = () => s.hits++;`;
+        const code = `export const s = wt.globalStore("ui", { hits: 0 }); export const hit = () => s.hits++;`;
         const compile = () => compileScript(code, { store: (name, initial, persist) => A.hub.store("s1", name, initial, persist) });
         const one = compile();
         const two = compile();
@@ -352,7 +353,7 @@ describe("wt.store across compiled instances", () => {
     });
 });
 
-describe("wt.store convergence", () => {
+describe("wt.globalStore convergence", () => {
     it("converges with concurrent nested edits on both sides", async () => {
         const t = setup();
         const A = t.hub("a");
@@ -427,5 +428,80 @@ describe("wt.store convergence", () => {
         await settle();
         expect(left).toHaveBeenCalled();
         expect(right).not.toHaveBeenCalled();
+    });
+});
+
+describe("wt.pageStore", () => {
+    it("keeps one copy per page and syncs a page's copy to an overlay of that page", async () => {
+        const t = setup();
+        const A = t.hub("bg");
+        const O = t.hub("overlay", false);
+        const a = A.hub.pageStore("s1", "ps", { n: 0 });
+        withPage("p1", () => (a.n = 1));
+        withPage("p2", () => (a.n = 2));
+        await settle();
+        expect(t.owner.get("s1", "ps", "p1")!.data).toEqual({ n: 1 });
+        expect(t.owner.get("s1", "ps", "p2")!.data).toEqual({ n: 2 });
+        expect(t.owner.pagesOf("s1")).toEqual(new Set(["p1", "p2"]));
+        const o = O.hub.pageStore("s1", "ps", { n: 0 }, "p1");
+        await settle();
+        expect(o.n).toBe(1);
+        o.n = 10;
+        await settle();
+        expect(withPage("p1", () => a.n)).toBe(10);
+        expect(withPage("p2", () => a.n)).toBe(2);
+        // page copies are never saved to the script's storage
+        await t.owner.flush();
+        expect(JSON.stringify([...t.storage.values()])).not.toContain("ps");
+    });
+
+    it("throws outside a handler and after its first await; a page-less call gets a throwaway copy", async () => {
+        const t = setup();
+        const A = t.hub("bg");
+        const a = A.hub.pageStore("s1", "ps", { n: 0 });
+        expect(() => a.n).toThrow(/no page here/);
+        expect((a as any).then).toBeUndefined();
+        let after: unknown;
+        await withPage("p1", async () => {
+            a.n = 1;
+            await null;
+            try {
+                a.n;
+            } catch (e) {
+                after = e;
+            }
+        });
+        expect(String(after)).toMatch(/until the handler's first await/);
+        withPage(null, () => (a.n = 5));
+        expect(withPage(null, () => a.n)).toBe(0);
+    });
+
+    it("a page ending drops its copies; the next use starts from initial", async () => {
+        const alive = new Set(["p1"]);
+        const t = setup({ pageAlive: (p) => alive.has(p) });
+        const A = t.hub("bg");
+        const O = t.hub("overlay", false);
+        const a = A.hub.pageStore("s1", "ps", { n: 0 });
+        const o = O.hub.pageStore("s1", "ps", { n: 0 }, "p1");
+        withPage("p1", () => (a.n = 3));
+        await settle();
+        expect(o.n).toBe(3);
+        alive.delete("p1");
+        t.owner.dropPage("p1");
+        await settle();
+        expect(t.owner.get("s1", "ps", "p1")).toBeUndefined();
+        expect(withPage("p1", () => a.n)).toBe(0);
+        // a dead page's set is ignored
+        withPage("p1", () => (a.n = 4));
+        await settle();
+        expect(t.owner.get("s1", "ps", "p1")).toBeUndefined();
+    });
+
+    it("wt.store is renamed; one name can't be both a global and a page store", () => {
+        const logs: string[] = [];
+        const c = compileScript(`wt.store("x", { n: 1 });`, { logSink: (_l, _s, m) => logs.push(m) });
+        expect(c.error ?? logs.join("\n")).toMatch(/wt\.globalStore/);
+        const d = compileScript(`wt.globalStore("x", { n: 1 }); wt.pageStore("x", { n: 1 });`);
+        expect(String(d.error)).toMatch(/already has a store named/);
     });
 });

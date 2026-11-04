@@ -333,6 +333,7 @@ import { ShortcutRegistry, watchShortcuts } from "../shared/shortcut";
         // an overlay's store updates (the background only sends those of scripts with an overlay here)
         ep.on("store.patch", (a, s) => s !== undefined && overlays.get(s)?.ep?.push("store.patch", a, s));
         ep.on("store.reject", (a, s) => s !== undefined && overlays.get(s)?.ep?.push("store.reject", a, s));
+        ep.on("store.drop", (a, s) => s !== undefined && overlays.get(s)?.ep?.push("store.drop", a, s));
         // MV3: the overlay ⇄ isolated-world relay (the background checks tab, frame and script)
         ep.on("iso.result", (r, s) => {
             const p = isRpcResult(r) ? isoPending.get(r.cid) : undefined;

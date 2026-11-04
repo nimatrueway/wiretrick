@@ -43,6 +43,7 @@ import { getTextTypes, setTextTypes } from "../../shared/bodyKind";
 import { packBytes, unpackBytes } from "../../shared/bytesPack";
 import type { RequestBody } from "../../shared/requestBody";
 import { pushBundleUpdate } from "./bridgePorts";
+import { installPages } from "./pages";
 import { pushIsoUpdate, pushPreviewUpdate, revalidateOverlayLinks, setupOverlayLinks, type IsoRun, type OverlayRun } from "./overlayLinks";
 import { onUserScriptsStatus, syncUserScripts, userScriptsStatus, type IsoScript } from "../userScripts";
 import { USER_SCRIPTS_OFF, userScriptsProblem, type UserScriptsStatus } from "../../shared/userScriptsStatus";
@@ -675,6 +676,7 @@ export function createPipeline(
         const isoOff = isoRuns.size && (await userScriptsStatus()) !== "ok" ? USER_SCRIPTS_OFF : undefined;
         return { bundle: { count: routes.length, routes, textTypes: getTextTypes(), domHandlers, isoHandlers, overlays, libs, isoLibs, ...(isoOff ? { isoOff } : {}) }, overlayRuns, isoRuns, previewWhy };
     }
+    installPages();
     setupOverlayLinks({
         overlayRuns: async (url) => (await hookBundle(url, true)).overlayRuns,
         isoRuns: async (url, top) => (await hookBundle(url, top)).isoRuns,
@@ -1010,7 +1012,7 @@ export function createPipeline(
         chrome.permissions?.onRemoved?.addListener(recheck);
     }
     // rules handlers may read a store: a change re-probes
-    const offStores = storeOwner.onChange((s) => rulesStrategy.storeChanged(s));
+    const offStores = storeOwner.onChange((s, _name, page) => page === undefined && rulesStrategy.storeChanged(s));
     // ownership moves between the helper strategy and the other strategies
     const offProcess = onHelperActiveChange(() => void reload());
     const onStorage = (changes: Record<string, unknown>, area: string) => {

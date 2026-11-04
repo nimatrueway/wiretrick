@@ -18,6 +18,7 @@ import { inertRemote, REMOTE_MAIN_WORLD } from "./remote";
 import { NOT_RUNNING, TOP_FRAME_ONLY, type Exposer } from "./rpc";
 import { parseParamValue, type ParamDef } from "./scriptDef";
 import { scriptEnv } from "./scriptEnv";
+import { STORE_RENAMED } from "./storeOps";
 
 export interface PageDocumentHandler {
     /** its RPC handle id (`"page:N"`) */
@@ -44,7 +45,7 @@ export interface PageShimOptions {
     onMainWorldCall?: (e: Error) => void;
 }
 
-const NO_STORE = "wt.store isn't available in page code — pass the data to an onPage function from the overlay instead";
+const NO_STORE = "wt.globalStore and wt.pageStore aren't available in page code — pass the data to an onPage function from the overlay instead";
 const fail = (): never => {
     throw new Error(NO_STORE);
 };
@@ -83,7 +84,11 @@ export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDocumentHa
         onDocument: onPage("onDocument"),
         onOverlay,
         // declaring a store at top level is fine (that code runs here too); using it isn't
-        store: () => noStore,
+        globalStore: () => noStore,
+        pageStore: () => noStore,
+        store: () => {
+            throw new Error(STORE_RENAMED);
+        },
         fetch: () => Promise.reject(new Error(NO_FETCH)),
         about: inert,
         params: (defs: Record<string, ParamDef>) => Object.freeze(Object.fromEntries(Object.entries(defs || {}).map(([k, d]) => [k, parsed(k, d)]))),

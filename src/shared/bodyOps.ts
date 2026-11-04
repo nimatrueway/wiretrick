@@ -13,6 +13,7 @@
  * Final results carry `who` — the handler that decided — so the caller can
  * report the handlers it kept from running (see precedence.ts).
  */
+import { withPage } from "./currentPage";
 import { formatScriptError } from "./scriptError";
 import { effectiveStrategy, routeGroups, routeLabel, routeMatches, takesBinary, takesText, type Strategy } from "./route";
 import type { Routed, ScriptHandlers } from "./compile";
@@ -163,7 +164,7 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
             for (const h of handlers) {
                 const who: Who = { scriptId: s.id, scriptName: s.name, kind: "onRequest", index: h.route.index };
                 try {
-                    const single = singleRequestResult(await h.fn(base(h)));
+                    const single = singleRequestResult(await withPage(args.page, () => h.fn(base(h))));
                     const result: any = single.result;
                     if (!result) {
                         observed(s, "onRequest");
@@ -208,7 +209,7 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
             for (const h of handlers) {
                 const who: Who = { scriptId: s.id, scriptName: s.name, kind: "onResponseHeaders", index: h.route.index };
                 try {
-                    const result = await h.fn({ ...base(h), status: args.status, statusLine: args.statusLine || "", responseHeaders: args.responseHeaders || [] });
+                    const result = await withPage(args.page, () => h.fn({ ...base(h), status: args.status, statusLine: args.statusLine || "", responseHeaders: args.responseHeaders || [] }));
                     if (hasHeaderMods(result?.headers)) {
                         env.log(s.id, "info", `[${s.name}] onResponseHeaders → ${Object.keys(result.headers.set || {}).length} set, ${(result.headers.remove || []).length} removed ${url}`);
                         stackHeaders(stack, result.headers, who, "response", url, env);
@@ -229,7 +230,7 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
                 try {
                     // a text-only handler only ever sees text
                     if (out instanceof Uint8Array && !takesBinary(h.route)) out = new TextDecoder().decode(out);
-                    const result: any = await h.fn({ ...base(h), contentType: args.contentType, status: args.status }, out);
+                    const result: any = await withPage(args.page, () => h.fn({ ...base(h), contentType: args.contentType, status: args.status }, out));
                     if (result !== undefined && result !== null) {
                         const before = typeof out === "string" ? out.length : out.byteLength;
                         const next = typeof result === "string" ? result : result instanceof Uint8Array ? result : JSON.stringify(result);
@@ -253,7 +254,7 @@ export async function runOp(scripts: OpScript[], op: BodyOp, args: any, env: OpE
         for (const { s, handlers } of list) {
             for (const h of handlers) {
                 try {
-                    const out = await h.fn(base(h));
+                    const out = await withPage(args.page, () => h.fn(base(h)));
                     if (out !== undefined && out !== null) {
                         const isFile = out && typeof out === "object" && typeof out.file === "string";
                         const { mime, content: body } = isFile ? resolveFileRef(out.file, url) : { mime: guessMimeFromUrl(url, TYPE_MIME[resourceType]), content: typeof out === "string" ? out : typeof out === "object" ? JSON.stringify(out) : String(out) };

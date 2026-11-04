@@ -7,6 +7,18 @@ its section below.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `wt.store` is now `wt.globalStore` (same behavior); calling `wt.store` throws with the new name.
+
+### Added
+
+- `wt.pageStore(name, initial)`: a store with one copy per page — a navigation or reload starts it over, a single-page app's route change doesn't, and other tabs have their own. A network handler sees the copy of its request's page (until its first `await`) and an overlay its own page's, so a switch in the overlay can change what the handlers do for that tab only. Not available in `onPage` code or `rules` handlers.
+
+### Fixed
+
+- Chrome: an overlay's calls into isolated-world `onPage` code, and back, are matched to the overlay's own document, so a call made while the tab navigates can't reach the next page.
+
 ## [0.10.0] - 2026-11-03
 
 ### Added

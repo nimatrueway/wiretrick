@@ -14,6 +14,7 @@
 import { captureToken, patternGroups, rulesForProbe, ruleErrorLine, URL_TOKEN, type ProbeResult, type RuleProbe, type RuleSpec } from "./dnrRules";
 import { effectiveStrategy, NET_KINDS, type RouteMeta, type Strategy } from "./route";
 import type { HandlerFn, ScriptHandlers } from "./compile";
+import { RULES_PAGE, withPage } from "./currentPage";
 
 const PROBE_TIMEOUT_MS = 2000;
 
@@ -82,7 +83,7 @@ async function runOnce(fn: HandlerFn, ctx: any): Promise<{ result?: ProbeResult 
     let timer: any;
     try {
         const r = await Promise.race([
-            Promise.resolve().then(() => fn(ctx)),
+            Promise.resolve().then(() => withPage(RULES_PAGE, () => fn(ctx))),
             new Promise((_, reject) => {
                 timer = setTimeout(() => reject(new Error(`timed out after ${PROBE_TIMEOUT_MS / 1000} s (rules run the handler once, at load)`)), PROBE_TIMEOUT_MS);
             }),

@@ -143,6 +143,8 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
         },
         logSink: (level, source, text) => log(level, scriptLogLine(init.name, `overlay ${source}`, text)),
         store: (name, initial, persist) => hub.store(s, name, initial, persist),
+        // the overlay's own page's copy
+        pageStore: (name, initial) => hub.pageStore(s, name, initial, init.page),
         fetch: (request, bypass) => ep.call("fetch", { request, bypass }),
         pageFetch: page,
     };

@@ -128,7 +128,7 @@ function sandboxLog(msg: string, level: "debug" | "info" | "warn" | "error" = "d
     void reverseCall({ op: "log", scriptId: null, level, msg: `[sandbox] ${msg}` });
 }
 
-// ---- the L1 link to the service worker: wt.store replicas, wt.fetch ----
+// ---- the L1 link to the service worker: wt.globalStore replicas, wt.fetch ----
 
 /** wire messages ride the same postMessage channel, relayed by the offscreen document */
 const link = new Endpoint((msg) => post({ kind: "wire", msg }));
@@ -147,7 +147,7 @@ function noteEpoch(e: unknown): void {
     }
 }
 
-/** load the owner's state of scripts this hub hasn't seen, so their wt.store calls return it synchronously */
+/** load the owner's state of scripts this hub hasn't seen, so their wt.globalStore calls return it synchronously */
 async function primeStores(scripts: PlainScript[]): Promise<void> {
     hub.retain(scripts.map((s) => s.id));
     const missing = scripts.filter((s) => !hub.isPrimed(s.id)).map((s) => s.id);
@@ -155,7 +155,7 @@ async function primeStores(scripts: PlainScript[]): Promise<void> {
     try {
         hub.prime(await link.call("store.init", { scripts: missing }));
     } catch (e: any) {
-        sandboxLog(`couldn't load the stores (${e?.message || e}) — wt.store starts from initial values until the owner answers`, "warn");
+        sandboxLog(`couldn't load the stores (${e?.message || e}) — wt.globalStore starts from initial values until the owner answers`, "warn");
     }
 }
 
@@ -186,10 +186,11 @@ function compileSignature(scripts: PlainScript[], paramValues: Record<string, an
  * a reverse-channel storage/log. Recompiles only when the script set or
  * the param values change (runs are per-request — reuse the handlers).
  */
-/** a script's wt.store (a hub replica) and wt.fetch (run by the SW) */
-function liveApis(sid: string): Pick<ResApiOverrides, "store" | "fetch"> {
+/** a script's wt.globalStore / wt.pageStore (hub replicas) and wt.fetch (run by the SW) */
+function liveApis(sid: string): Pick<ResApiOverrides, "store" | "pageStore" | "fetch"> {
     return {
         store: (name, initial, persist) => hub.store(sid, name, initial, persist),
+        pageStore: (name, initial) => hub.pageStore(sid, name, initial),
         fetch: (request, bypass) => link.call("fetch", { request, bypass }, sid),
     };
 }

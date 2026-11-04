@@ -529,17 +529,17 @@ HTTPS, so you trust unpkg to serve npm's files unaltered. Only the extension
 background downloads them (when scripts are saved, imported or compiled);
 pages never fetch them.
 
-## Shared state and fetching — `wt.store`, `wt.fetch`
+## Shared state and fetching — `wt.globalStore`, `wt.pageStore`, `wt.fetch`
 
-### `wt.store`
+### `wt.globalStore`
 
-`wt.store(name, initial)` returns a live object that every copy of the
+`wt.globalStore(name, initial)` returns a live object that every copy of the
 script shares: its handlers on every strategy see the same values, and
 changes survive a browser restart. It's a [valtio](https://valtio.dev)
 proxy — read and assign like a plain object.
 
 ```ts
-const state = wt.store("state", { mocking: true, hits: 0, seen: [] as string[] });
+const state = wt.globalStore("state", { mocking: true, hits: 0, seen: [] as string[] });
 
 wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, (ctx) => {
     state.hits++;
@@ -549,7 +549,7 @@ wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, (ctx) => {
 ```
 
 - **Name.** The first argument is the store's key: one store per name per
-  script. A script with two stores uses two names. Call `wt.store` at top
+  script. A script with two stores uses two names. Call `wt.globalStore` at top
   level and share the result; a second call with the same name throws.
 - **Initial.** Used the first time. Later, the saved values win and
   `initial` only adds fields that are missing, so you can add fields
@@ -565,6 +565,45 @@ wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, (ctx) => {
   rules rebuilt) when the store changes.
 - The saved copy lives in `wt.storage` as `"$store:<name>"`; change the
   store, not that key (writing it logs a warning).
+- `wt.store` was renamed `wt.globalStore` (0.11); calling it throws.
+
+### `wt.pageStore`
+
+`wt.pageStore(name, initial)` is a store with one copy per page. Each
+tab's page starts from `initial`; a navigation or a reload starts a new
+page, so its copy starts over (a single-page app's route change doesn't).
+A network handler sees the copy of the page its request comes from, and an
+overlay sees its own page's — so the overlay and the handlers of that
+page's requests share state, and other tabs aren't affected.
+
+```ts
+const page = wt.pageStore("page", { staging: false });
+
+wt.onRequest({ url: "https://api.example.com/*", strategy: "helper" }, (ctx) => {
+    if (page.staging) return { redirect: ctx.url.replace("api.", "staging-api.") };
+});
+
+wt.onOverlay("https://example.com/*", () => {
+    const box = document.body.appendChild(document.createElement("input"));
+    box.type = "checkbox";
+    box.onchange = () => (page.staging = box.checked); // this tab only
+});
+```
+
+- **Read it before the first `await`.** The handler knows its page only in
+  its synchronous part; after an `await` the store throws. Read what you
+  need first.
+- **Which page.** A navigation's own requests (the document, a redirect of
+  it) belong to the page being left. Requests that aren't from a page
+  (service workers, other apps through the helper) get a throwaway copy of
+  `initial` for that call.
+- **Lifetime.** A page's copy goes when the page ends (navigation, reload
+  or closing the tab); it's never saved to disk. Values follow the same
+  JSON rules as `wt.globalStore`.
+- **Names.** One name space with `wt.globalStore`: a script can't have a
+  global and a page store with the same name.
+- Not available in `onPage` code, nor in `rules` handlers (their rules
+  are built once for every page).
 
 ### `wt.fetch`
 
@@ -602,7 +641,7 @@ built-ins aren't available: using one there throws.
 ```ts
 import { subscribe } from "valtio";
 
-const state = wt.store("state", { mocking: false });
+const state = wt.globalStore("state", { mocking: false });
 subscribe(state, () => wt.log("mocking is now", state.mocking));
 ```
 
@@ -695,7 +734,7 @@ through to the page.
 import { createRoot } from "react-dom/client";
 import { useSnapshot } from "valtio";
 
-const mock = wt.store("mock", { enabled: false });
+const mock = wt.globalStore("mock", { enabled: false });
 
 wt.replaceResponse({ url: "*://app.example.com/api/me", strategy: "helper" }, () =>
     mock.enabled ? { name: "Test user", plan: "pro" } : undefined);
@@ -726,8 +765,9 @@ it right away, and the value survives restarts.
   matching `when`; a script whose routes don't match gets none.
 - **What runs there.** The whole script evaluates in the frame, but only
   its `onOverlay` handlers run: network handlers and `onPage` handlers
-  register nothing there. Stores (`wt.store`) are live copies of the
-  background's, so the GUI and the handlers see the same values. `wt.log`,
+  register nothing there. Stores (`wt.globalStore`) are live copies of the
+  background's, so the GUI and the handlers see the same values; a
+  `wt.pageStore` is the copy of the overlay's page. `wt.log`,
   `console.*`, errors and unhandled rejections go to the script's Log.
 - **Isolation.** The page's CSS can't reach the GUI and the GUI's CSS
   can't leak into the page. The page can't find the frame (it sits in a
@@ -879,8 +919,8 @@ const overlay = wt.onOverlay("*://app.example.com/*", () => {
 
 Isolated code gets `wt.storage`, `wt.log`, `wt.params` and `console`
 (lines go to the Log tagged `isolated › host`, as the overlay's are
-`overlay › host` and main-world code's `page › host`); `wt.store` and
-`wt.fetch` are the overlay's.
+`overlay › host` and main-world code's `page › host`); `wt.globalStore`,
+`wt.pageStore` and `wt.fetch` are the overlay's.
 
 #### User scripts on Chrome
 
@@ -961,7 +1001,7 @@ overlay can't be reached by the site.
   to it.
 
   ```ts
-  const redirect = wt.store("redirect", { target: "" });
+  const redirect = wt.globalStore("redirect", { target: "" });
 
   wt.onRequest({ url: "*://cdn.example.com/app.js", strategy: "helper" }, () =>
       redirect.target ? { redirect: redirect.target } : undefined);
@@ -978,6 +1018,8 @@ overlay can't be reached by the site.
 - **Toast:** a fixed element plus `setTimeout` to remove it.
 - **Remember open/closed:** a store field (`ui.open`), so it survives
   reloads and is the same in every tab.
+- **Per-tab switch:** a `wt.pageStore` field, so turning it on in one tab
+  leaves the others alone and a reload turns it off again.
 
 ## Multiple handlers — how they stack
 

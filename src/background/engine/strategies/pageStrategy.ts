@@ -8,6 +8,7 @@
  * Only routes whose strategy is "page" run here; navigations, subresources,
  * workers and anything the page didn't fetch itself never reach this strategy.
  */
+import { withOpPage } from "../pages";
 import { runOp, type OpScript } from "../../../shared/bodyOps";
 import type { HeaderChanges, HookDisposition, InterceptionStrategy, MaybePromise, WebRequestDetailsLike } from "./types";
 import type { Script } from "../scriptStore";
@@ -48,8 +49,8 @@ export class PageStrategy implements InterceptionStrategy {
         return this.hookOwners > 0;
     }
 
-    private run(op: "requestDecision" | "transform" | "replace", args: Record<string, any>, tabId: number): Promise<any> {
-        const a = { ...args, tabId, tier: "page", resourceType: "xmlhttprequest" };
+    private async run(op: "requestDecision" | "transform" | "replace", args: Record<string, any>, tabId: number): Promise<any> {
+        const a = await withOpPage({ ...args, tabId, tier: "page", resourceType: "xmlhttprequest" }, tabId);
         if (__MV3__) return runBodyOp(this.mv3Scripts, this.mv3Params, op, a);
         return runOp(this.ops, op, a, {
             log: (scriptId, level, msg, kind) => log(tabId, msg, level, scriptId, kind, undefined, args.requestId),

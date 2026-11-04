@@ -128,7 +128,8 @@ export class RulesStrategy {
 
     /** every store's rev of the rules scripts (part of the probe signature) */
     private async storeRevs(ids: string[]): Promise<Record<string, Record<string, number>>> {
-        const snaps = await storeOwner.init(ids);
+        // rules can't read page stores: their page copies don't count
+        const snaps = await storeOwner.init(ids, { page: null });
         const out: Record<string, Record<string, number>> = {};
         for (const [s, stores] of Object.entries(snaps)) out[s] = Object.fromEntries(Object.entries(stores).map(([n, v]) => [n, v.rev]));
         return out;

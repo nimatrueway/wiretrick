@@ -192,8 +192,8 @@ wt.replaceResponse({ url: "*://en.wikipedia.org/robots.txt", strategy: wt.isFire
 }));`,
     },
     {
-        name: "Overlay panel (React + wt.store)",
-        blurb: "Give a script its own GUI on the page: a React panel in an overlay that flips a mock on and off through a shared wt.store, and asks the page to fetch through it. Try it: open dummyjson.com — use the panel at the bottom right.",
+        name: "Overlay panel (React + wt.globalStore)",
+        blurb: "Give a script its own GUI on the page: a React panel in an overlay that flips a mock on and off through a shared wt.globalStore, and asks the page to fetch through it. Try it: open dummyjson.com — use the panel at the bottom right.",
         code: `// Try it: open https://dummyjson.com/ — tick and untick "Mock /users/1" in
 // the panel at the bottom right, then click Fetch
 import { useState } from "react";
@@ -203,7 +203,7 @@ import { useSnapshot } from "valtio";
 wt.about("A panel that turns a mock on and off");
 
 // one live object for the handler and the panel; it survives restarts
-const mock = wt.store("mock", { enabled: true });
+const mock = wt.globalStore("mock", { enabled: true });
 
 wt.replaceResponse({ url: "*://dummyjson.com/users/:id", strategy: "page" }, (ctx) =>
     mock.enabled ? { id: Number(ctx.groups.id), firstName: "Mocked", lastName: "User" } : undefined

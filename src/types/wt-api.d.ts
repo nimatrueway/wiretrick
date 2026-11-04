@@ -413,10 +413,10 @@ declare namespace Wiretrick {
         set(key: string, value: any): Promise<void>;
     }
 
-    /** A JSON value: what a {@link wt.store} may hold. */
+    /** A JSON value: what a {@link wt.globalStore} may hold. */
     type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
 
-    /** Options for {@link wt.store}. */
+    /** Options for {@link wt.globalStore}. */
     interface StoreOptions<T> {
         /**
          * What survives a browser restart: `true` (default) the whole store,
@@ -964,20 +964,52 @@ declare const wt: {
 
     /**
      * A live object shared by every place the script runs — its handlers
-     * in every strategy (and, later, its overlays). It's a
-     * [valtio](https://valtio.dev) proxy: read and change it like a plain
-     * object; `import { subscribe } from "valtio"` to watch it. `name` is
-     * its key (one store per name per script); values must be JSON (at
-     * most 1 MB). Call it at top level.
+     * in every strategy, in every tab, and its overlays — kept across
+     * browser restarts. It's a [valtio](https://valtio.dev) proxy: read and
+     * change it like a plain object; `import { subscribe } from "valtio"`
+     * to watch it. `name` is its key (one store per name per script, shared
+     * with {@link pageStore}); values must be JSON (at most 1 MB). Call it
+     * at top level.
      *
      * @example
-     * const state = wt.store("state", { mocking: true, hits: 0 });
+     * const state = wt.globalStore("state", { mocking: true, hits: 0 });
      * wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, () => {
      *     state.hits++;
      *     if (state.mocking) return { replaceResponse: { body: { mocked: true } } };
      * });
      */
-    store<T extends object>(name: string, initial: T, opts?: Wiretrick.StoreOptions<T>): T;
+    globalStore<T extends object>(name: string, initial: T, opts?: Wiretrick.StoreOptions<T>): T;
+
+    /**
+     * Like {@link globalStore}, but one copy per page: each tab's page
+     * starts from `initial`, and a navigation or reload starts a new page
+     * (single-page-app route changes don't). Use it so a page's overlay and
+     * the handlers of that page's requests share state — e.g. a switch in
+     * the overlay that turns a redirect on for this page only.
+     *
+     * A network handler sees the page of the request it handles (requests
+     * of a navigation, like a redirect of it, still belong to the page being
+     * left); an overlay sees its own page. Read it in the handler's
+     * synchronous part: after an `await` the handler no longer knows its
+     * page, so it throws — read what you need first, or keep a nested
+     * object. Requests that aren't from a page (service workers, other
+     * apps through the helper) see a throwaway copy of `initial`. Not
+     * available in `onPage` code or `rules` handlers (their rules serve
+     * every page); kept until the page ends (not across browser restarts).
+     *
+     * @example
+     * const page = wt.pageStore("page", { staging: false });
+     * wt.onRequest({ url: "https://api.example.com/*", strategy: "helper" }, (ctx) => {
+     *     if (page.staging) return { redirect: ctx.url.replace("api.", "staging-api.") };
+     * });
+     * wt.onOverlay({ url: "https://example.com/*" }, () => {
+     *     // a checkbox bound to page.staging (useSnapshot(page) from "valtio")
+     * });
+     */
+    pageStore<T extends object>(name: string, initial: T): T;
+
+    /** @deprecated Renamed: use {@link globalStore} (or {@link pageStore} for one copy per page). Calling it throws. */
+    store(name: string, initial: object, opts?: unknown): never;
 
     /**
      * `fetch` for scripts. By default it runs in the background with the

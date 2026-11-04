@@ -126,6 +126,10 @@ _Avoid_: proxy settings, system proxy (unless it really is the system one)
 The "being debugged" bar Chrome shows while the `debugger` strategy is attached to a tab.
 _Avoid_: yellow bar, infobar
 
+**Page**:
+One document shown in a tab, from the navigation or reload that commits it until the next one or the tab closing; a single-page app's route change stays on the same page. Each page has its own copy of a `wt.pageStore`.
+_Avoid_: tab (a tab shows many pages over time)
+
 **Page load**:
 The request for a tab's top-level document (resource type `main_frame`).
 _Avoid_: main page, main URL, navigation

@@ -56,17 +56,24 @@ export interface StoreSnapshot {
  * messages. `call`, `push`, `handle` and `on` are typed over it.
  */
 export interface WireOps {
-    /** a context ran `wt.store(name, initial)` */
-    "store.declare": { push: { name: string; initial: Json; persist: StorePersist } };
-    /** the owner's snapshot when `rev` is stale or missing; `ops` = recently applied op ids */
-    "store.sub": { req: { name: string; rev?: number }; res: { rev: number; data?: Json; ops: string[] } };
+    /** a context ran `wt.globalStore(name, initial)` (or `wt.pageStore`: `scope: "page"`, the template of every page's copy) */
+    "store.declare": { push: { name: string; initial: Json; persist: StorePersist; scope?: "page" } };
+    /**
+     * The owner's snapshot when `rev` is stale or missing; `ops` = recently
+     * applied op ids. `page`: that page's copy of a `wt.pageStore` (the
+     * same on every store op).
+     */
+    "store.sub": { req: { name: string; rev?: number; page?: string }; res: { rev: number; data?: Json; ops: string[] } };
     /** one context's mutations within one microtask */
-    "store.set": { push: { name: string; op: string; ops: StoreOp[] } };
+    "store.set": { push: { name: string; op: string; ops: StoreOp[]; page?: string } };
     /** the owner applied a `store.set` (or merged a declare): every replica of the script gets it */
-    "store.patch": { push: { name: string; rev: number; ops: StoreOp[]; op?: string } };
+    "store.patch": { push: { name: string; rev: number; ops: StoreOp[]; op?: string; page?: string } };
     /** the owner refused a `store.set` */
-    "store.reject": { push: { name: string; op: string; reason: string } };
+    "store.reject": { push: { name: string; op: string; reason: string; page?: string } };
+    /** a page ended (navigation, tab closed): its `wt.pageStore` copies are gone */
+    "store.drop": { push: { page: string } };
     /** the current stores of some scripts (primes a context before its scripts compile) */
+    /** (page copies are keyed `name + "\u0000" + page`, see `storeKey`) */
     "store.init": { req: { scripts: string[] }; res: { [scriptId: string]: { [name: string]: StoreSnapshot } } };
     /** `wt.fetch(..., { from: "background" })` */
     fetch: { req: { request: WireRequest; bypass: boolean; tabId?: number }; res: WireResponse };
@@ -156,7 +163,10 @@ export interface OverlayInit {
     /** the page's URL */
     url: string;
     params: Record<string, any>;
+    /** global stores, and this page's copies of page stores (`storeKey`) */
     stores: { [name: string]: StoreSnapshot };
+    /** the page the overlay is on (src/background/engine/pages.ts): its `wt.pageStore` copies */
+    page: string;
     libs: ShippedLib[];
     /** load the built-in React first */
     react: boolean;

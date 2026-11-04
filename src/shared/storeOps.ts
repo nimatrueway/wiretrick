@@ -1,5 +1,5 @@
 /**
- * `wt.store` data helpers shared by the owner (background) and the
+ * `wt.globalStore` data helpers shared by the owner (background) and the
  * replicas (every context running the script): applying ops, checking
  * paths and values, merging an `initial` into existing data.
  */
@@ -157,3 +157,14 @@ export const jsonBytes = (v: unknown): number => {
         return Infinity;
     }
 };
+
+/** a store's key among its script's stores: `name`, or `name␀page` for a page's copy of a `wt.pageStore` */
+export const storeKey = (name: string, page?: string): string => (page ? `${name}\u0000${page}` : name);
+
+/** `storeKey`'s parts */
+export function splitStoreKey(key: string): { name: string; page?: string } {
+    const i = key.indexOf("\u0000");
+    return i < 0 ? { name: key } : { name: key.slice(0, i), page: key.slice(i + 1) };
+}
+
+export const STORE_RENAMED = "wt.store was renamed: use wt.globalStore (one copy shared by every tab) or wt.pageStore (one copy per page)";

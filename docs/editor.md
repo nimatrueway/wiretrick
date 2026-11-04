@@ -268,7 +268,7 @@ open in the Code view in a frame inside the Editor, without opening its
 page, so you can work on the GUI before going to the site; a script that's
 turned off previews too. It runs the saved script and reloads on every save.
 
-- **Real stores.** The preview's `wt.store`s are live copies of the
+- **Real stores.** The preview's `wt.globalStore`s are live copies of the
   background's, like a page's overlay: flipping a switch in the preview
   turns a mock on or off for the pages in your tabs, and their overlays
   follow.

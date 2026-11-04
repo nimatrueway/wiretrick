@@ -18,6 +18,8 @@
  * awaiting async handlers are Firefox-only. MV3 has no blocking webRequest
  * at all.
  */
+import { withPage } from "../../../shared/currentPage";
+import { pages } from "../pages";
 import { recordNetBody } from "../../network";
 import { isThenable, type Routed } from "../../../shared/compile";
 import { effectiveStrategy, routeGroups, routeLabel, routeMatches, takesBinary, takesText, type RouteMeta } from "../../../shared/route";
@@ -35,6 +37,9 @@ import { HeaderStack, mergeHeaderEdits, mixedResultLine, overrideLine, singleReq
 import { makeMissedThrottle } from "../../../shared/missedTap";
 import { reportSkipped } from "../skipped";
 import { requestBodyCtx, requestBodyFromWebRequest, type RequestBody } from "../../../shared/requestBody";
+
+/** the page a webRequest event is for (`wt.pageStore`) */
+const pageOf = (d: { tabId: number; type?: string; requestId: string; frameId?: number }) => pages.forRequest({ tabId: d.tabId, type: d.type, requestId: d.requestId, frameId: d.frameId, documentId: (d as any).documentId, documentLifecycle: (d as any).documentLifecycle });
 
 type Kind = "onRequest" | "onResponseHeaders" | "replaceResponse" | "onResponseBody";
 
@@ -124,7 +129,7 @@ export class ExtensionStrategy implements InterceptionStrategy {
                 const step = steps[i];
                 let result: any;
                 try {
-                    result = step.h.fn(ctxFor(details, tabUrl, step.h.route));
+                    result = withPage(pageOf(details), () => step.h.fn(ctxFor(details, tabUrl, step.h.route)));
                 } catch (e: any) {
                     scriptError(step.entry.id, formatScriptError(step.entry.name, e, step.kind));
                     continue;
@@ -335,7 +340,7 @@ export class ExtensionStrategy implements InterceptionStrategy {
                     const ctx = ctxFor(details, tabUrl, step.h.route);
                     (ctx as any).statusLine = details.statusLine || "";
                     (ctx as any).responseHeaders = details.responseHeaders || [];
-                    result = step.h.fn(ctx);
+                    result = withPage(pageOf(details), () => step.h.fn(ctx));
                 } catch (e: any) {
                     scriptError(step.entry.id, formatScriptError(step.entry.name, e, "onResponseHeaders"));
                     continue;
@@ -362,6 +367,7 @@ export class ExtensionStrategy implements InterceptionStrategy {
         const first = list[0];
         // onstop may come after onCompleted pruned the cache
         const requestBody = pendingRequestBodies.get(details.requestId);
+        const page = pageOf(details);
         try {
             const filter = ((globalThis as any).browser?.webRequest ?? chrome.webRequest).filterResponseData(details.requestId);
             const decoder = new TextDecoder("utf-8");
@@ -395,7 +401,7 @@ export class ExtensionStrategy implements InterceptionStrategy {
                         // a text body an earlier binary route returned as bytes is still text here
                         if (typeof body !== "string" && !takesBinary(h.route)) body = decoder.decode(body);
                         try {
-                            const out = await h.fn(ctx, body);
+                            const out = await withPage(page, () => h.fn(ctx, body));
                             if (out !== undefined && out !== null) {
                                 const size = (b: any) => (typeof b === "string" ? b.length : (b?.byteLength ?? 0));
                                 log(details.tabId, `[${scriptName}] onResponseBody applied (${size(body)}b → ${size(out)}b) ${details.url}`, "info", scriptId, undefined, undefined, details.requestId);

@@ -83,9 +83,9 @@ describe("page shim worlds", () => {
     });
 
     it("store can be declared at top level but not used; fetch rejects", async () => {
-        const s = shim().wt.store("x", { n: 1 });
+        const s = shim().wt.globalStore("x", { n: 1 });
         expect(s.then).toBeUndefined();
-        expect(() => s.n).toThrow(/wt\.store/);
+        expect(() => s.n).toThrow(/wt\.globalStore/);
         await expect(shim().wt.fetch("/")).rejects.toThrow(/wt\.fetch/);
     });
 });

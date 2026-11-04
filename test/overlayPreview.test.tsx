@@ -34,7 +34,7 @@ function background() {
             if (failOpen) throw new Error(`preview.open: ${failOpen}`);
             return { url: a.url || "https://app.example/", name: "Switch", handlers: 2, matching: a.url.includes("nowhere") ? 0 : 1 };
         });
-        bg.handle("overlay.init", (_a, s) => ({ s: s!, name: "Switch", code: "", codeHash: hash, routes: [], url: "https://app.example/", params: {}, stores: {}, libs: [], react: false }));
+        bg.handle("overlay.init", (_a, s) => ({ s: s!, name: "Switch", code: "", codeHash: hash, routes: [], url: "https://app.example/", params: {}, stores: {}, page: "p1", libs: [], react: false }));
         bg.handle("store.sub", (a, s) => (calls.push({ op: "store.sub", a, s }), { rev: 1, data: { on: false }, ops: [] }));
         bg.handle("fetch", (a, s) => (calls.push({ op: "fetch", a, s }), { status: 200, statusText: "", headers: [], body: "ok", url: a.request.url }) as any);
         bg.on("store.set", (a, s) => calls.push({ op: "store.set", a, s }));

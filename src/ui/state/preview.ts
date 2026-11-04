@@ -70,6 +70,7 @@ function link(): Endpoint {
     l5 = ep;
     ep.on("store.patch", (a, s) => s === preview.scriptId && frame?.push("store.patch", a));
     ep.on("store.reject", (a, s) => s === preview.scriptId && frame?.push("store.reject", a));
+    ep.on("store.drop", (a, s) => s === preview.scriptId && frame?.push("store.drop", a));
     ep.on("bundle.update", () => void scriptsChanged());
     ep.onClose(() => {
         if (l5 !== ep) return;

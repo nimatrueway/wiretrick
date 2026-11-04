@@ -58,6 +58,7 @@ export function compileMv2(scripts: ScriptLike[], paramValues: { [scriptId: stri
         makeScriptOverrides(s.id, { get: scriptStorageGet, set: scriptStorageSet }, (id, level, source, text) => log(-1, scriptLogLine(s.name, source, text), level, id), paramValues?.[s.id], (spec) => resolveFrom(s.name)(spec), {
             // one hub: every strategy's instance of the script shares its stores
             store: (name, initial, persist) => backgroundHub().store(s.id, name, initial, persist),
+            pageStore: (name, initial) => backgroundHub().pageStore(s.id, name, initial),
             fetch: (request, bypass) => backgroundFetch(request, { bypass, scriptId: s.id, scriptName: s.name }),
         });
     resolveFrom = makeModuleResolver(

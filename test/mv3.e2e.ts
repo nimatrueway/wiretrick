@@ -28,7 +28,7 @@ import { resolveBrowser } from "./browserSetup";
 import { checkApiTypingsNav } from "./apiTypingsNav";
 import { checkRulesStrategy, rulesServerRoute } from "./rulesE2e";
 import { checkFoldersAndDataFiles, foldersServerRoute } from "./foldersE2e";
-import { checkOverlayPreview, checkOverlays, checkOverlayShortcuts, overlayServerRoute } from "./overlayE2e";
+import { checkOverlayPreview, checkOverlays, checkOverlayShortcuts, checkPageStores, overlayServerRoute } from "./overlayE2e";
 
 const EXT_ROOT = path.join(new URL("..", import.meta.url).pathname, "dist-mv3");
 // unpacked extension id = sha256 of the absolute path (hex digits → a-p)
@@ -327,6 +327,7 @@ try {
                 },
             },
         });
+        await checkPageStores(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
         await checkOverlayShortcuts(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
         await checkOverlayPreview(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
         for (const id of on) await send({ type: "setEnabled", id, enabled: true });
@@ -349,14 +350,14 @@ try {
     const gated = await gatedPage.evaluate((origin: string) => fetch(`${origin}/data`).then((r: any) => r.json()), ORIGIN);
     check("param-gated onRequest honored (real stored params, not defaults; parsed)", gated.value === "PARAM-GATED" && gated.tags === 2, JSON.stringify(gated));
 
-    // ---- wt.store + wt.fetch from the sandbox: the store survives
+    // ---- wt.globalStore + wt.fetch from the sandbox: the store survives
     // recompiles (one replica per script), the fetch runs in the SW over L1 ----
     {
         const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
         await send({ type: "setEnabled", id: "s_pg", enabled: false });
         await send({
             type: "saveScript", id: "s_sf", name: "Store fetch",
-            code: `const st = wt.store("st", { n: 0 });
+            code: `const st = wt.globalStore("st", { n: 0 });
 wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
     st.n++;
     const real = await (await wt.fetch("${ORIGIN}/data", { bypass: true })).json();
@@ -372,7 +373,7 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
         let a: any = {}, b: any = {};
         try { a = JSON.parse(first); b = JSON.parse(second); } catch {}
         check("wt.fetch from the sandbox runs in the service worker (MV3)", a.real === "ORIGINAL", first);
-        check("wt.store keeps its value across requests (MV3 sandbox)", a.n >= 1 && b.n === a.n + 1, `${first} ${second}`);
+        check("wt.globalStore keeps its value across requests (MV3 sandbox)", a.n >= 1 && b.n === a.n + 1, `${first} ${second}`);
         await sfPage.close();
         // deleted: later checks count and lay out the script list
         await send({ type: "deleteScript", id: "s_sf" });

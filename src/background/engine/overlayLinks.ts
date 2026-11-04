@@ -31,6 +31,7 @@ import { dlogLevel } from "../../shared/debugLog";
 import { routeMatches, sampleUrl, type RouteMeta } from "../../shared/route";
 import type { ShippedLib } from "../../shared/scriptImports";
 import { fetchFor, storeOwner } from "./stores";
+import { pages } from "./pages";
 import { addBypass, addBypassRule } from "./bypass";
 
 /** a script's overlay as its frame runs it (pipeline.ts `hookBundle`) */
@@ -53,7 +54,20 @@ interface Grant {
     expires: number;
     /** the overlay's link to the store owner (created on first use) */
     store: Endpoint | null;
+    /** the page the overlay is on: the only one whose `wt.pageStore` copies it reaches */
+    page: string;
 }
+
+/** Chrome's documentId of a port's frame (undefined: Firefox) */
+const docOf = (port: chrome.runtime.Port | undefined): string | undefined => (port?.sender as any)?.documentId;
+/** two ports in the same document (or the browser can't tell) */
+const sameDoc = (a: chrome.runtime.Port | undefined, b: chrome.runtime.Port | undefined): boolean => {
+    const x = docOf(a);
+    const y = docOf(b);
+    return !x || !y || x === y;
+};
+/** a store op's page is the grant's (or none: a global store) */
+const pageOk = (a: { page?: unknown } | undefined, g: Grant): boolean => a?.page === undefined || a.page === g.page;
 
 const NONCE_TTL_MS = 60_000;
 const BYPASS_TTL_MS = 10_000;
@@ -207,6 +221,7 @@ export function serveLink(link: BridgeLink): void {
         storeOwner.attach(ownerSide, { all: false });
         replicaSide.on("store.patch", (a) => link.ep.push("store.patch", a, s));
         replicaSide.on("store.reject", (a) => link.ep.push("store.reject", a, s));
+        replicaSide.on("store.drop", (a) => link.ep.push("store.drop", a, s));
         return (g.store = replicaSide);
     };
 
@@ -216,15 +231,17 @@ export function serveLink(link: BridgeLink): void {
         const run = (await overlayRuns(url)).get(s);
         if (!run) throw new Error("overlay.open: this script has no overlay on this page");
         const old = mine.get(s);
-        mine.set(s, { url, name: run.name, nonce, seen: false, expires: Date.now() + NONCE_TTL_MS, store: old?.store ?? null });
+        const page = pages.forRequest({ tabId: link.tabId, frameId: 0, documentId: docOf(link.port) }) ?? "";
+        mine.set(s, { url, name: run.name, nonce, seen: false, expires: Date.now() + NONCE_TTL_MS, store: old?.page === page ? old.store : null, page });
+        if (old?.store && old.page !== page) old.store.close("the page changed");
         return {};
     });
     link.ep.handle("overlay.init", async (_a, s): Promise<OverlayInit> => {
         const g = granted("overlay.init", s);
         const run = (await overlayRuns(g.url)).get(s!);
         if (!run) throw new Error("overlay.init: this script has no overlay on this page");
-        const stores = (await storeOwner.init([s!]))[s!] ?? {};
-        return { s: s!, name: run.name, code: run.code, codeHash: run.codeHash, routes: run.routes, url: g.url, params: run.params, stores, libs: run.libs, react: run.react };
+        const stores = (await storeOwner.init([s!], { page: g.page }))[s!] ?? {};
+        return { s: s!, name: run.name, code: run.code, codeHash: run.codeHash, routes: run.routes, url: g.url, params: run.params, stores, page: g.page, libs: run.libs, react: run.react };
     });
     link.ep.on("overlay.closed", (_a, s) => {
         const g = s === undefined ? undefined : mine.get(s);
@@ -239,9 +256,13 @@ export function serveLink(link: BridgeLink): void {
     });
     link.ep.on("store.set", (a, s) => {
         const g = s === undefined ? undefined : mine.get(s);
-        if (g) storeOf(s!, g).push("store.set", a, s);
+        if (g && pageOk(a, g)) storeOf(s!, g).push("store.set", a, s);
     });
-    link.ep.handle("store.sub", (a, s) => storeOf(s!, granted("store.sub", s)).call("store.sub", a, s));
+    link.ep.handle("store.sub", (a, s) => {
+        const g = granted("store.sub", s);
+        if (!pageOk(a, g)) throw new Error("store.sub: not this overlay's page");
+        return storeOf(s!, g).call("store.sub", a, s);
+    });
 
     link.ep.handle("fetch", (a, s) => {
         granted("fetch", s);
@@ -270,7 +291,11 @@ export function serveLink(link: BridgeLink): void {
     // the overlay calls its script's isolated code
     link.ep.on("iso.call", (call, s) => {
         if (s === undefined || link.frameId !== 0 || !mine.has(s) || !isRpcCall(call)) return;
-        void whenLinked(() => isoLinks.get(isoKey(link.tabId, 0, s))).then(async (iso) => {
+        // the isolated code of this bridge's document (a newer page's link isn't up yet: wait for it)
+        void whenLinked(() => {
+            const iso = isoLinks.get(isoKey(link.tabId, 0, s));
+            return iso && sameDoc(iso.port, link.port) ? iso : undefined;
+        }).then(async (iso) => {
             if (link.ep.closed) return;
             if (!iso) return link.ep.push("iso.result", callError(call.cid, (await deps.userScriptsOff?.()) ? USER_SCRIPTS_OFF : NOT_RUNNING), s);
             track(call.cid, { dir: "toIso", s, iso, bridge: link });
@@ -285,7 +310,8 @@ export function serveLink(link: BridgeLink): void {
         p.iso.ep.push("rpc.result", r, s);
     });
     link.ep.on("overlay.closed", (_a, s) => {
-        if (s !== undefined && link.frameId === 0) isoLinks.get(isoKey(link.tabId, 0, s))?.ep.push("overlay.closed", {}, s);
+        const iso = s !== undefined && link.frameId === 0 ? isoLinks.get(isoKey(link.tabId, 0, s)) : undefined;
+        if (iso && sameDoc(iso.port, link.port)) iso.ep.push("overlay.closed", {}, s);
     });
     linksChanged();
 }
@@ -350,7 +376,10 @@ export function serveIsoLink(link: IsoLink): void {
     ep.on("rpc.call", (call, s) => {
         if (!bound(s) || !isRpcCall(call)) return;
         if (frameId !== 0) return ep.push("rpc.result", callError(call.cid, NOT_RUNNING), s);
-        void whenLinked(() => topBridges.get(tabId)).then((bridge) => {
+        void whenLinked(() => {
+            const bridge = topBridges.get(tabId);
+            return bridge && sameDoc(bridge.port, link.port) ? bridge : undefined;
+        }).then((bridge) => {
             if (ep.closed) return;
             if (!bridge) return ep.push("rpc.result", callError(call.cid, NOT_RUNNING), s);
             track(call.cid, { dir: "toOverlay", s, iso: link, bridge });
@@ -397,6 +426,7 @@ export function servePreviewLink(ep: Endpoint, tabId?: number): void {
     previews.add(link);
     const drop = (why: string) => {
         link.grant?.store?.close(why);
+        if (link.grant) pages.endVirtual(link.grant.page);
         link.grant = null;
     };
     ep.onClose(() => {
@@ -422,6 +452,7 @@ export function servePreviewLink(ep: Endpoint, tabId?: number): void {
         storeOwner.attach(ownerSide, { all: false });
         replicaSide.on("store.patch", (a) => ep.push("store.patch", a, g.s));
         replicaSide.on("store.reject", (a) => ep.push("store.reject", a, g.s));
+        replicaSide.on("store.drop", (a) => ep.push("store.drop", a, g.s));
         return (g.store = replicaSide);
     };
 
@@ -436,22 +467,28 @@ export function servePreviewLink(ep: Endpoint, tabId?: number): void {
         }
         const old = link.grant;
         if (old && old.s !== s) drop("the preview moved to another script");
-        link.grant = { s, url: at, name: run.name, nonce, seen: false, expires: Date.now() + NONCE_TTL_MS, store: old?.s === s ? old.store : null };
+        // the preview is a page of its own
+        const keep = old?.s === s ? old : null;
+        link.grant = { s, url: at, name: run.name, nonce, seen: false, expires: Date.now() + NONCE_TTL_MS, store: keep?.store ?? null, page: keep?.page ?? pages.openVirtual() };
         return { url: at, name: run.name, handlers: run.routes.length, matching: run.routes.filter((r) => routeMatches(r, at)).length };
     });
     ep.handle("overlay.init", async (_a, s): Promise<OverlayInit> => {
         const g = granted("overlay.init", s);
         const run = await runOf("overlay.init", g.s);
-        const stores = (await storeOwner.init([g.s]))[g.s] ?? {};
-        return { s: g.s, name: run.name, code: run.code, codeHash: run.codeHash, routes: run.routes, url: g.url, params: run.params, stores, libs: run.libs, react: run.react };
+        const stores = (await storeOwner.init([g.s], { page: g.page }))[g.s] ?? {};
+        return { s: g.s, name: run.name, code: run.code, codeHash: run.codeHash, routes: run.routes, url: g.url, params: run.params, stores, page: g.page, libs: run.libs, react: run.react };
     });
     ep.on("store.declare", (a, s) => {
         if (link.grant && link.grant.s === s) storeOf(link.grant).push("store.declare", a, s);
     });
     ep.on("store.set", (a, s) => {
-        if (link.grant && link.grant.s === s) storeOf(link.grant).push("store.set", a, s);
+        if (link.grant && link.grant.s === s && pageOk(a, link.grant)) storeOf(link.grant).push("store.set", a, s);
     });
-    ep.handle("store.sub", (a, s) => storeOf(granted("store.sub", s)).call("store.sub", a, s));
+    ep.handle("store.sub", (a, s) => {
+        const g = granted("store.sub", s);
+        if (!pageOk(a, g)) throw new Error("store.sub: not the preview's page");
+        return storeOf(g).call("store.sub", a, s);
+    });
     ep.handle("fetch", (a, s) => fetchFor(granted("fetch", s).s, a.request, !!a.bypass));
     ep.handle("storage.get", async ({ key }, s) => {
         const g = granted("storage.get", s);

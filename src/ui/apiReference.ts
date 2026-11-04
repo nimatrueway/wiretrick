@@ -186,7 +186,7 @@ React and valtio are built in: a script with JSX compiles as .tsx with React's a
 
 import { createRoot } from "react-dom/client";
 import { useSnapshot } from "valtio";
-const mock = wt.store("mock", { enabled: false });
+const mock = wt.globalStore("mock", { enabled: false });
 wt.onOverlay("*://example.com/*", () => {
     function Panel() {
         const snap = useSnapshot(mock);
@@ -224,10 +224,10 @@ wt.onOverlay("*://example.com/*", async () => {
 - Main-world results are page data: the site could have changed them. Check them before they decide what your network handlers do.`,
     },
     {
-        title: "wt.store / wt.fetch — shared state and fetching",
-        body: `wt.store(name, initial) — a live object shared by everywhere the script runs: its handlers on every strategy and its overlay. It's a valtio proxy: read and assign like a plain object; import { subscribe } from "valtio" to watch it. Call it at top level, once per name.
+        title: "wt.globalStore / wt.pageStore / wt.fetch — shared state and fetching",
+        body: `wt.globalStore(name, initial) — a live object shared by everywhere the script runs: its handlers on every strategy and its overlay. It's a valtio proxy: read and assign like a plain object; import { subscribe } from "valtio" to watch it. Call it at top level, once per name.
 
-const state = wt.store("state", { mocking: true, hits: 0 });
+const state = wt.globalStore("state", { mocking: true, hits: 0 });
 wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, () => {
     state.hits++;
     if (state.mocking) return { replaceResponse: { body: { mocked: true } } };
@@ -237,6 +237,18 @@ wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, () => {
 - persist: true (default) survives browser restarts; false only while the browser runs; ["mocking"] only those fields
 - values are JSON, ≤ 1 MB per store; a change that breaks that is undone and logged
 - a rules handler that reads a store is rebuilt when the store changes
+
+wt.pageStore(name, initial) — the same, but one copy per page: each tab's page starts from initial, and a navigation or reload starts over (a single-page app's route change doesn't). A handler sees the copy of its request's page, an overlay its own page's — so a switch in the overlay can change what the handlers do for that page only.
+
+const page = wt.pageStore("page", { staging: false });
+wt.onRequest({ url: "https://api.example.com/*", strategy: "helper" }, (ctx) => {
+    if (page.staging) return { redirect: ctx.url.replace("api.", "staging-api.") };
+});
+
+- read it before the handler's first await (after it, the handler no longer knows its page and it throws)
+- a navigation's own requests belong to the page being left; requests from no page get a throwaway copy of initial
+- not kept across browser restarts; not in onPage code or rules handlers
+- wt.store was renamed wt.globalStore; calling it throws
 
 wt.fetch(url, init) — fetch for scripts. In handlers it runs in the background with the extension's host permissions (no CORS) and the browser's cookies; in an overlay it fetches as the page by default (from: "background" to switch). bypass: true keeps every script's handlers — this one's too — off the request, e.g. to get the real response a mock replaces:
 

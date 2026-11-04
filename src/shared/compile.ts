@@ -17,6 +17,8 @@ import { isUrlSpec, makePackageLoader, PackageImportError, type PackageModules }
 import { builtinModule } from "./builtins";
 import { builtinSpec } from "./builtinSpecs";
 import { proxy } from "valtio/vanilla";
+import { ReplicaHub } from "./storeReplica";
+import { STORE_RENAMED } from "./storeOps";
 import type { StorePersist, WireRequest, WireResponse } from "./wire";
 import { fromWireResponse, splitFetchInit, toWireRequest, type WtFetchInit } from "./wtFetch";
 
@@ -75,8 +77,10 @@ export interface ResApiOverrides {
     paramValues?: Record<string, any>;
     /** resolves ES import specifiers ("./utils", "utils") to module exports */
     importModule?: (spec: string) => any;
-    /** `wt.store`: the script's replicated store (default: a plain local valtio proxy) */
+    /** `wt.globalStore`: the script's replicated store (default: a plain local valtio proxy) */
     store?: (name: string, initial: object, persist: StorePersist) => object;
+    /** `wt.pageStore`: the script's per-page store (default: per-page copies local to this instance) */
+    pageStore?: (name: string, initial: object) => object;
     /** `wt.fetch(…, { from: "background" })` (default: this context's own fetch, no bypass) */
     fetch?: (request: WireRequest, bypass: boolean) => Promise<WireResponse>;
     /** `wt.fetch(…, { from: "page" })`, then the default `from` (the overlay); `url` resolves relative URLs */
@@ -92,7 +96,7 @@ export function makeScriptOverrides(
     logSink: (scriptId: string, level: ScriptLogLevel, source: string, text: string) => void,
     paramValues?: Record<string, any>,
     importModule?: (spec: string) => any,
-    extra?: Pick<ResApiOverrides, "store" | "fetch">
+    extra?: Pick<ResApiOverrides, "store" | "pageStore" | "fetch">
 ): ResApiOverrides {
     return {
         ...extra,
@@ -548,30 +552,44 @@ function createOwner(meta: ResMeta, storedValues?: Record<string, any>) {
     };
 }
 
-/** `wt.store`'s `persist` option, checked */
+/** `wt.globalStore`'s `persist` option, checked */
 function storePersist(name: string, opts: unknown): StorePersist {
     if (opts === undefined || opts === null) return true;
-    if (typeof opts !== "object") throw new TypeError(`wt.store("${name}"): the third argument must be an options object`);
+    if (typeof opts !== "object") throw new TypeError(`wt.globalStore("${name}"): the third argument must be an options object`);
     const p = (opts as { persist?: unknown }).persist;
     if (p === undefined) return true;
     if (typeof p === "boolean") return p;
     if (Array.isArray(p) && p.every((k) => typeof k === "string")) return [...p];
-    throw new TypeError(`wt.store("${name}"): persist must be true, false or a list of top-level field names`);
+    throw new TypeError(`wt.globalStore("${name}"): persist must be true, false or a list of top-level field names`);
 }
 
-/** `wt.store` for one compiled instance: each name once */
-function makeStore(overrides?: ResApiOverrides): (name: string, initial: object, opts?: unknown) => object {
-    const names = new Set<string>();
-    return (name, initial, opts) => {
-        // save-time compile: arguments built from a stubbed import aren't known yet
-        if (isStub(name) || isStub(initial) || isStub(opts)) return makeStubModule();
-        if (typeof name !== "string" || !name) throw new TypeError("wt.store: the first argument must be the store's name (a non-empty string)");
-        if (names.has(name)) throw new Error(`wt.store("${name}"): this script already has a store named "${name}" — a name may be used once per script (call wt.store at top level and share the result)`);
-        const persist = storePersist(name, opts);
-        if (!initial || typeof initial !== "object" || Array.isArray(initial)) throw new TypeError(`wt.store("${name}"): initial must be an object`);
-        const out = overrides?.store ? overrides.store(name, initial, persist) : proxy(initial);
-        names.add(name);
-        return out;
+/** `wt.globalStore` and `wt.pageStore` for one compiled instance: each name once, across both */
+function makeStores(overrides?: ResApiOverrides): { globalStore: (name: string, initial: object, opts?: unknown) => object; pageStore: (name: string, initial: object) => object } {
+    const names = new Map<string, string>();
+    let local: ReplicaHub | null = null;
+    const claim = (api: string, name: unknown, initial: unknown) => {
+        if (typeof name !== "string" || !name) throw new TypeError(`${api}: the first argument must be the store's name (a non-empty string)`);
+        const had = names.get(name);
+        if (had) throw new Error(`${api}("${name}"): this script already has a store named "${name}" (${had}) — a name may be used once per script (call ${api} at top level and share the result)`);
+        if (!initial || typeof initial !== "object" || Array.isArray(initial)) throw new TypeError(`${api}("${name}"): initial must be an object`);
+    };
+    return {
+        globalStore: (name, initial, opts) => {
+            // save-time compile: arguments built from a stubbed import aren't known yet
+            if (isStub(name) || isStub(initial) || isStub(opts)) return makeStubModule();
+            claim("wt.globalStore", name, initial);
+            const persist = storePersist(name, opts);
+            const out = overrides?.store ? overrides.store(name, initial, persist) : proxy(initial);
+            names.set(name, "wt.globalStore");
+            return out;
+        },
+        pageStore: (name, initial) => {
+            if (isStub(name) || isStub(initial)) return makeStubModule();
+            claim("wt.pageStore", name, initial);
+            const out = overrides?.pageStore ? overrides.pageStore(name, initial) : (local ??= new ReplicaHub({ ctx: "local" })).pageStore("local", name, initial);
+            names.set(name, "wt.pageStore");
+            return out;
+        },
     };
 }
 
@@ -593,7 +611,7 @@ function guardStoreKeys(storage: { get(key: string): any; set(key: string, value
         get: (key: string) => storage.get(key),
         set: (key: string, value: any) => {
             if (typeof key === "string" && key.startsWith("$store:")) {
-                const msg = `wt.storage.set("${key}"): that key is the persisted copy of wt.store("${key.slice(7)}") — change the store instead (the store overwrites this on its next save)`;
+                const msg = `wt.storage.set("${key}"): that key is the persisted copy of wt.globalStore("${key.slice(7)}") — change the store instead (the store overwrites this on its next save)`;
                 if (overrides?.logSink) overrides.logSink("warn", "wt", msg);
                 else console.warn("[Wiretrick]", msg);
             }
@@ -645,7 +663,10 @@ function makeShim(owner: ReturnType<typeof createOwner>, overrides?: ResApiOverr
             get: () => undefined,
             set: () => undefined,
         }, overrides),
-        store: makeStore(overrides),
+        ...makeStores(overrides),
+        store: () => {
+            throw new Error(STORE_RENAMED);
+        },
         fetch: makeFetch(overrides),
         log: (...args: any[]) => (overrides?.logSink ? overrides.logSink("info", "wt.log", formatLogArgs(args)) : console.log("[Wiretrick] wt.log:", ...args)),
         ...scriptEnv(),
