@@ -25,7 +25,7 @@ const { saveScript, listScripts, refreshStaleMeta } = await import("../src/backg
 
 describe("refreshStaleMeta", () => {
     it("records the missing registration lines of stored routes", async () => {
-        await saveScript({ id: "a", name: "a", code: '// x\nwt.onRequest({ url: "*://a.test/*", strategy: "helper" }, () => {});' } as any);
+        await saveScript({ id: "a", name: "a.wiretrick", code: '// x\nwt.onRequest({ url: "*://a.test/*", strategy: "helper" }, () => {});' } as any);
         const key = Object.keys(store).find((k) => store[k]?.a)!;
         expect(store[key].a.meta.routes[0].line).toBe(2);
         delete store[key].a.meta.routes[0].line; // as stored by an older version
@@ -34,7 +34,7 @@ describe("refreshStaleMeta", () => {
     });
 
     it("recompiles meta stored by another extension version (once)", async () => {
-        await saveScript({ id: "b", name: "b", code: 'wt.onResponseBody({ url: "*://b.test/*", binary: false, strategy: "helper" }, (c, b) => b);' } as any);
+        await saveScript({ id: "b", name: "b.wiretrick", code: 'wt.onResponseBody({ url: "*://b.test/*", binary: false, strategy: "helper" }, (c, b) => b);' } as any);
         const key = Object.keys(store).find((k) => store[k]?.b)!;
         const binary = async () => (await listScripts()).find((s) => s.id === "b")!.meta.routes[0].binary;
         await refreshStaleMeta(); // records this version

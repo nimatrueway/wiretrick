@@ -62,7 +62,7 @@ try {
     const seed = await ctx.newPage();
     await seed.goto(`chrome-extension://${extId}/editor.html`);
     await seed.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
-        type: "saveScript", id: "s_shim", name: "Shim probe",
+        type: "saveScript", id: "s_shim", name: "Shim probe.wiretrick",
         code: `wt.onResponseBody({ url: "*://*:*/*", strategy: "page" }, (ctx, body) => body);`, // pass-through shim
     }, r)));
     await seed.close();

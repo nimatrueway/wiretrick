@@ -143,12 +143,12 @@ try {
     const saveResult = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({
         type: "saveScript",
         id: "s_mv3",
-        name: "MV3 hook",
+        name: "MV3 hook.wiretrick",
         code: `wt.onResponseBody({ url: "*://*:*/*", strategy: "page" }, (ctx, body) => body.replace("ORIGINAL", "MV3"));`,
     }, r)));
     check("saveScript round-trips through the sandbox (meta extracted)", saveResult?.meta?.active === true, JSON.stringify(saveResult?.meta));
     const listResult = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "listScripts" }, r)));
-    check("script listed with stored name + paramDefs", listResult?.length === 1 && listResult[0].meta.name === "MV3 hook" && !!listResult[0].paramDefs, JSON.stringify(listResult?.map((s: any) => s.meta.name)));
+    check("script listed with stored name + paramDefs", listResult?.length === 1 && listResult[0].meta.name === "MV3 hook.wiretrick" && !!listResult[0].paramDefs, JSON.stringify(listResult?.map((s: any) => s.meta.name)));
 
     // regression (𝑓-icon bug): a script that IMPORTS another script must
     // still capture its routes at save time — a failed import resolves
@@ -162,14 +162,14 @@ try {
     const importSave = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({
         type: "saveScript",
         id: "s_importer",
-        name: "api-interceptor",
+        name: "api-interceptor.wiretrick",
         code: `import { tag } from "./api-lib";\nwt.params({ label: { type: "string", default: "x" } });\nwt.onResponseBody({ url: "*://*:*/*", strategy: "page" }, (ctx, body) => tag(body));`,
     }, r)));
     check("importing script captures its routes (not a library)",
         importSave?.meta?.active === true && importSave?.meta?.match?.includes("*://*:*/*") && !importSave.error,
         JSON.stringify(importSave?.meta));
     const list2 = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "listScripts" }, r)));
-    const importer = list2.find((s: any) => s.meta.name === "api-interceptor");
+    const importer = list2.find((s: any) => s.meta.name === "api-interceptor.wiretrick");
     check("importing script listed as active with params", importer?.meta?.active === true && !!importer?.paramDefs?.label, JSON.stringify(list2?.map((s: any) => [s.meta.name, s.meta.active])));
 
     // imported param definitions resolve at save time (sandbox compileOne);
@@ -177,20 +177,20 @@ try {
     {
         const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
         await send({ type: "saveScript", id: "s_plib", name: "param-lib", code: `export const envParam = { type: "stringList", default: ["dev"] } as const;\nconst p = wt.params({ on: { type: "boolean", default: false } });\nif (p.on) wt.onRequest({ url: "*://never.invalid/*", strategy: "page" }, () => {});` });
-        const user = await send({ type: "saveScript", id: "s_puser", name: "param-user", code: `import { envParam } from "./param-lib";\nwt.params({ intercept_environments: envParam });\nwt.onRequest({ url: "*://never.invalid/*", strategy: "page" }, () => {});` });
+        const user = await send({ type: "saveScript", id: "s_puser", name: "param-user.wiretrick", code: `import { envParam } from "./param-lib";\nwt.params({ intercept_environments: envParam });\nwt.onRequest({ url: "*://never.invalid/*", strategy: "page" }, () => {});` });
         check("imported param def: no bogus compile error, def captured", !user?.error && user?.paramDefs?.intercept_environments?.type === "stringList", JSON.stringify({ error: user?.error?.split("\n")[0], defs: user?.paramDefs }));
         const lib = (await send({ type: "listScripts" })).find((s: any) => s.id === "s_plib");
         check("param-gated library stored as a library with params", lib?.meta?.active === false && lib?.paramDefs?.on?.type === "boolean", JSON.stringify(lib?.meta));
         await send({ type: "setScriptParam", scriptId: "s_plib", key: "on", value: true });
         const flipped = (await send({ type: "listScripts" })).find((s: any) => s.id === "s_plib");
-        check("library param on → it becomes a script", flipped?.meta?.active === true, JSON.stringify(flipped?.meta));
+        check("library param on → still a library: only *.wiretrick.ts files run", flipped?.meta?.active === false && flipped?.meta?.inert === 1, JSON.stringify(flipped?.meta));
         await send({ type: "deleteScript", id: "s_puser" });
         await send({ type: "deleteScript", id: "s_plib" });
     }
 
     // 3. settings.yaml round-trip
     const settings = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "getSettingsYaml" }, r)));
-    check("settings.yaml generated (SW storage path)", typeof settings?.text === "string" && settings.text.includes("MV3 hook"));
+    check("settings.yaml generated (SW storage path)", typeof settings?.text === "string" && settings.text.includes("MV3 hook.wiretrick"));
     const applyResult = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "applySettingsYaml", text: "settings:\n  logLevel: warn\n" }, r)));
     check("applySettingsYaml applies", !applyResult?.error, JSON.stringify(applyResult));
 
@@ -217,13 +217,13 @@ try {
 
     // popup lists the declared scripts (libraries filtered)
     const popupItems = await popup.evaluate(() => [...document.querySelectorAll("#script-list .script-name")].map((e) => e.textContent));
-    check("popup lists declared scripts (libraries filtered)", popupItems.includes("MV3 hook") && !popupItems.includes("api-lib"), JSON.stringify(popupItems));
+    check("popup lists declared scripts (libraries filtered)", popupItems.includes("MV3 hook.wiretrick") && !popupItems.includes("api-lib"), JSON.stringify(popupItems));
 
     // the compile/run diagnostics surface in the Editor's Log view —
     // success-path lines are debug-level: set the panel filter to Debug+.
     // (Save is dim/disabled while clean — dirty the editor to enable it.)
     await mgr.evaluate(() => {
-        const item = [...document.querySelectorAll(".script-item")].find((e) => e.textContent?.includes("api-interceptor")) as HTMLElement;
+        const item = [...document.querySelectorAll(".script-item")].find((e) => e.textContent?.includes("api-interceptor.wiretrick")) as HTMLElement;
         item?.click();
         const sel = document.querySelector("#log-level") as HTMLSelectElement;
         sel.value = "debug";
@@ -352,7 +352,7 @@ try {
     // its decision must be honored by the hook tier ----
     // (with `parse`: the sandbox runs the parsers; the defs it posts back are stripped of them)
     const pgSaved: any = await mgr.evaluate((origin: string) => new Promise((r) => chrome.runtime.sendMessage({
-        type: "saveScript", id: "s_pg", name: "Param gated",
+        type: "saveScript", id: "s_pg", name: "Param gated.wiretrick",
         code: `const cfg = wt.params({ intercept: { type: "boolean", default: false, description: "Intercept", parse: (on) => (on ? "PARAM-GATED" : null) } });\nconst tags = wt.defineParam("tags", { type: "stringList", default: ["a", "b"], parse: (l) => new Set(l) });\nwt.onRequest({ url: "${origin}/*", strategy: "page" }, (ctx) => { if (cfg.intercept) return { replaceResponse: { status: 200, body: { value: cfg.intercept, tags: tags.size } } }; });`,
     }, r)), ORIGIN);
     check("param parse: saved without error, defs stored raw (no parse)", !pgSaved?.error && pgSaved?.paramDefs?.tags?.type === "stringList" && !JSON.stringify(pgSaved?.paramDefs).includes("parse"), JSON.stringify({ error: pgSaved?.error, defs: pgSaved?.paramDefs }));
@@ -369,7 +369,7 @@ try {
         const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
         await send({ type: "setEnabled", id: "s_pg", enabled: false });
         await send({
-            type: "saveScript", id: "s_sf", name: "Store fetch",
+            type: "saveScript", id: "s_sf", name: "Store fetch.wiretrick",
             code: `const st = wt.globalStore("st", { n: 0 });
 wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
     st.n++;
@@ -400,24 +400,24 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
     const CDN = `http://localhost:${PORT}`;
     if (process.env.DBG) await mgr.evaluate(() => { const sel = document.querySelector("#log-level") as HTMLSelectElement; sel.value = "debug"; sel.dispatchEvent(new Event("change")); });
     await mgr.evaluate((cdn: string) => new Promise((r) => chrome.runtime.sendMessage({
-        type: "saveScript", id: "s_respond", name: "Respond script",
+        type: "saveScript", id: "s_respond", name: "Respond script.wiretrick",
         code: `wt.onRequest({ url: "${cdn}/app.js*", strategy: "debugger" }, (ctx) => ({ replaceResponse: { status: 200, mime: "text/javascript", body: 'window.__marker = "RESPONDED:' + ctx.resourceType + '";' } }));`,
     }, r)), CDN);
     await mgr.evaluate((cdn: string) => new Promise((r) => chrome.runtime.sendMessage({
-        type: "saveScript", id: "s_cdpx", name: "Cdp transform",
+        type: "saveScript", id: "s_cdpx", name: "Cdp transform.wiretrick",
         code: `wt.onResponseBody({ url: ["${cdn}/gz.js", "${cdn}/lazy.js"], strategy: "debugger" }, (ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
     }, r)), CDN);
     await mgr.evaluate((cdn: string) => new Promise((r) => chrome.runtime.sendMessage({
-        type: "saveScript", id: "s_auto", name: "Auto script",
+        type: "saveScript", id: "s_auto", name: "Auto script.wiretrick",
         code: `wt.onResponseBody({ url: "${cdn}/auto.js", strategy: "page" }, (ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
     }, r)), CDN);
     // a handler that runs but changes nothing: the request is "observed", not "modified"
     await mgr.evaluate((cdn: string) => new Promise((r) => chrome.runtime.sendMessage({
-        type: "saveScript", id: "s_watch", name: "Watcher",
+        type: "saveScript", id: "s_watch", name: "Watcher.wiretrick",
         code: `wt.onRequest({ url: "${cdn}/auto.js", strategy: "debugger" }, () => undefined);`,
     }, r)), CDN);
     await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
-        type: "saveScript", id: "s_procx", name: "Process listed",
+        type: "saveScript", id: "s_procx", name: "Process listed.wiretrick",
         code: `wt.onResponseBody({ url: "*://process-listed.invalid/*", strategy: "helper" }, (ctx, body) => body);`,
     }, r)));
     await mgr.waitForTimeout(1500); // pipeline reload → debugger tier armed
@@ -469,7 +469,7 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
         })),
     );
     check("Network tab lists the page's requests", net.some((r) => r.name.startsWith("page-xo") && r.status === "200") && net.some((r) => r.name.startsWith("auto.js")), JSON.stringify(net.map((r) => r.name)));
-    check("Network tab shows which script modified a request", net.some((r) => r.name.startsWith("gz.js") && r.scripts.includes("Cdp transform")), JSON.stringify(net.filter((r) => r.scripts.length)));
+    check("Network tab shows which script modified a request", net.some((r) => r.name.startsWith("gz.js") && r.scripts.includes("Cdp transform.wiretrick")), JSON.stringify(net.filter((r) => r.scripts.length)));
     const marks: Record<string, string> = await mgr.evaluate(() =>
         Object.fromEntries([...document.querySelectorAll("#network-view tbody tr")].map((tr) => [tr.querySelector(".net-name")?.textContent || "", tr.classList.contains("modified") ? "modified" : tr.classList.contains("observed") ? "observed" : "none"])),
     );
@@ -484,8 +484,8 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
         sel.dispatchEvent(new Event("change"));
         return prev;
     });
-    const observedLog = await mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line.debug")].map((l) => l.textContent || "").find((t) => t.includes("[Watcher] onRequest → observed (no change)")) || "");
-    check("observed handler logs a DEBUG 'observed (no change)' line ending with the URL", /\[Watcher\] onRequest → observed \(no change\) http:\/\/localhost:\d+\/auto\.js$/.test(observedLog), observedLog || "(none)");
+    const observedLog = await mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line.debug")].map((l) => l.textContent || "").find((t) => t.includes("[Watcher.wiretrick] onRequest → observed (no change)")) || "");
+    check("observed handler logs a DEBUG 'observed (no change)' line ending with the URL", /\[Watcher\.wiretrick\] onRequest → observed \(no change\) http:\/\/localhost:\d+\/auto\.js$/.test(observedLog), observedLog || "(none)");
     await mgr.evaluate((prev: string) => {
         const sel = document.querySelector("#log-level") as HTMLSelectElement;
         sel.value = prev;
@@ -571,7 +571,7 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
 
     // ---- script error indicators: compile error + runtime error ----
     await mgr.evaluate((origin: string) => new Promise((r) => chrome.runtime.sendMessage({
-        type: "saveScript", id: "s_throws", name: "Thrower",
+        type: "saveScript", id: "s_throws", name: "Thrower.wiretrick",
         code: `wt.onRequest({ url: "${origin}/kaboom*", strategy: "page" }, () => { throw new Error("kaboom"); });`,
     }, r)), "http://localhost:8909");
     await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "saveScript", id: "s_broken", name: "Broken", code: "wt.onRequest([ ;" }, r)));
@@ -601,7 +601,7 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
     await errPopup.goto(`chrome-extension://${extId}/popup.html`);
     await errPopup.waitForSelector("#script-list li.script-item", { timeout: 8000 });
     const popupInd = await errPopup.evaluate(() => [...document.querySelectorAll("li.script-item")].filter((li) => li.querySelector(".err-ind")).map((li) => li.querySelector(".script-name")?.textContent));
-    check("popup shows error indicators", popupInd.includes("Thrower"), JSON.stringify(popupInd));
+    check("popup shows error indicators", popupInd.includes("Thrower.wiretrick"), JSON.stringify(popupInd));
     await mgr.click('#script-list li[data-id="s_throws"] .err-ind.runtime');
     await mgr.waitForTimeout(500);
     check("clicking the runtime indicator dismisses it", !(await mgr.$('#script-list li[data-id="s_throws"] .err-ind')));
@@ -609,14 +609,14 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
     // TypeScript errors (editor squiggles) → a Problem + "types" badge, not a Log line; two
     // scripts declaring the same top-level name must not collide
     for (const [id, name, code] of [
-        ["s_typed", "Typed", `wt.onRequest({ url: "*://typed.invalid/*", strategy: "page" }, () => {});\nconst cfg = 1;\nconst n: number = "not a number";`],
-        ["s_typed2", "Typed2", `wt.onRequest({ url: "*://typed2.invalid/*", strategy: "page" }, () => {});\nconst cfg = 2;\nexport function never() { console.log(new TextDecoder().decode(new Uint8Array()), new URL("x"), fetch, cfg); }`],
+        ["s_typed", "Typed.wiretrick", `wt.onRequest({ url: "*://typed.invalid/*", strategy: "page" }, () => {});\nconst cfg = 1;\nconst n: number = "not a number";`],
+        ["s_typed2", "Typed2.wiretrick", `wt.onRequest({ url: "*://typed2.invalid/*", strategy: "page" }, () => {});\nconst cfg = 2;\nexport function never() { console.log(new TextDecoder().decode(new Uint8Array()), new URL("x"), fetch, cfg); }`],
     ]) await mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage({ type: "saveScript", ...m }, r)), { id, name, code });
     await mgr.waitForSelector('#script-list li[data-id="s_typed"] .err-ind.types', { timeout: 15000 }).catch(() => {});
     const typed = await mgr.evaluate(() => ({
         badge: document.querySelector('#script-list li[data-id="s_typed"] .err-ind.types')?.getAttribute("title") || "",
         clean: !document.querySelector('#script-list li[data-id="s_typed2"] .err-ind'),
-        logged: [...document.querySelectorAll("#log-entries .log-line")].map((l) => (l as HTMLElement).dataset.text || l.textContent || "").filter((t) => t.includes("Typed")),
+        logged: [...document.querySelectorAll("#log-entries .log-line")].map((l) => (l as HTMLElement).dataset.text || l.textContent || "").filter((t) => t.includes("Typed.wiretrick")),
         problem: [...document.querySelectorAll("#problems-list .pb-item.error")].map((l) => l.textContent || "").filter((t) => t.includes("not assignable")),
     }));
     check("TypeScript error → types indicator in the manager list", typed.badge.includes("line 3:") && !typed.badge.includes("cfg"), JSON.stringify(typed));
@@ -705,7 +705,7 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
     await typedPopup.goto(`chrome-extension://${extId}/popup.html`);
     await typedPopup.waitForSelector("#script-list li.script-item", { timeout: 8000 });
     const typedInd = await typedPopup.evaluate(() => [...document.querySelectorAll("li.script-item")].filter((li) => li.querySelector(".err-ind.types")).map((li) => li.querySelector(".script-name")?.textContent));
-    check("popup shows the TypeScript error indicator", typedInd.includes("Typed"), JSON.stringify(typedInd));
+    check("popup shows the TypeScript error indicator", typedInd.includes("Typed.wiretrick"), JSON.stringify(typedInd));
     await tipFlow(typedPopup, "li.script-item .err-ind.types", "popup", { x: 600, y: 400 });
     await typedPopup.close();
     // Problems view: current problems (live TS markers), gone once fixed; a click jumps to the line
@@ -726,7 +726,7 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
         typed: [...document.querySelectorAll("#problems-list .pb-item")].map((e) => e.textContent || "").filter((t: string) => /not assignable/.test(t)),
     }));
     const before = await sbProblems();
-    check("Problems view lists the TypeScript error with its line; counts at the far left of the status bar", pb0.tab === "problems" && pb0.heads.includes("Typed.ts") && pb0.typed.some((t: string) => /\bts\b/.test(t) && t.includes("Ln 3")) && before.errors >= 1 && (await mgr.evaluate(() => document.querySelector("#status-bar .sb-item")?.id)) === "sb-problems", JSON.stringify({ pb0, before }));
+    check("Problems view lists the TypeScript error with its line; counts at the far left of the status bar", pb0.tab === "problems" && pb0.heads.includes("Typed.wiretrick.ts") && pb0.typed.some((t: string) => /\bts\b/.test(t) && t.includes("Ln 3")) && before.errors >= 1 && (await mgr.evaluate(() => document.querySelector("#status-bar .sb-item")?.id)) === "sb-problems", JSON.stringify({ pb0, before }));
     const typedCode = await mgr.evaluate(() => (window as any).monaco.editor.getEditors()[0].getValue());
     await mgr.evaluate(() => {
         const m = (window as any).monaco.editor.getEditors()[0].getModel();
@@ -739,14 +739,14 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
     const gone = await mgr.waitForFunction((n: number) => Number(document.querySelector('#sb-problems .sb-n[data-k="error"]')?.textContent) === n, before.errors, { timeout: 8000 }).then(() => true, () => false);
     check("fixing it removes the problem (no clearing needed)", gone, JSON.stringify({ before, now: await sbProblems() }));
     await mgr.evaluate(() => (document.querySelector('#script-list li[data-id="s_typed2"]') as HTMLElement).click());
-    await mgr.waitForFunction(() => (window as any).monaco.editor.getEditors()[0].getModel()?.uri.path === "/Typed2.ts", null, { timeout: 8000 }).catch(() => {});
+    await mgr.waitForFunction(() => (window as any).monaco.editor.getEditors()[0].getModel()?.uri.path === "/Typed2.wiretrick.ts", null, { timeout: 8000 }).catch(() => {});
     await mgr.locator("#problems-list .pb-item", { hasText: "Type 'string' is not assignable to type 'number'" }).first().click();
     await mgr.waitForTimeout(300);
     const jumped = await mgr.evaluate(() => {
         const ed = (window as any).monaco.editor.getEditors()[0];
         return { file: ed.getModel()?.uri.path, pos: ed.getPosition(), focused: ed.hasTextFocus() };
     });
-    check("clicking a problem opens its script with the cursor on its line", jumped.file === "/Typed.ts" && jumped.pos?.lineNumber === 3 && jumped.pos?.column === 7 && jumped.focused, JSON.stringify(jumped));
+    check("clicking a problem opens its script with the cursor on its line", jumped.file === "/Typed.wiretrick.ts" && jumped.pos?.lineNumber === 3 && jumped.pos?.column === 7 && jumped.focused, JSON.stringify(jumped));
     await mgr.keyboard.press("Control+Shift+KeyM");
     await mgr.waitForTimeout(200);
     const pFocused = await mgr.evaluate(() => document.activeElement?.id);
@@ -836,7 +836,7 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
     check("reload in an attached tab intercepted too", (await xoPage.evaluate(() => (window as any).__marker)) === "RESPONDED:script");
     // same-origin script on the debugger tier
     await mgr.evaluate((origin: string) => new Promise((r) => chrome.runtime.sendMessage({
-        type: "saveScript", id: "s_proxy2", name: "Proxy same-origin",
+        type: "saveScript", id: "s_proxy2", name: "Proxy same-origin.wiretrick",
         code: `wt.onResponseBody({ url: "${origin}/app.js", strategy: "debugger" }, (ctx, body) => body.replace("ORIGINAL-MARKER", "PROXY-MARKER"));`,
     }, r)), ORIGIN);
     await mgr.waitForTimeout(1500);
@@ -847,7 +847,7 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
     // zero-latency first navigation: may beat the attach — must then be
     // WARNED (never silent), and a reload must intercept
     await mgr.evaluate((origin: string) => new Promise((r) => chrome.runtime.sendMessage({
-        type: "saveScript", id: "s_race", name: "Race script",
+        type: "saveScript", id: "s_race", name: "Race script.wiretrick",
         code: `wt.onResponseBody({ url: "${origin}/race.js", strategy: "debugger" }, (ctx, body) => body.replace("ORIGINAL", "MODIFIED"));`,
     }, r)), ORIGIN);
     await mgr.waitForTimeout(1500);
@@ -866,7 +866,7 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
     // a page whose own html is rewritten: a cold first load that beats the
     // attach is re-issued through the debugger, so it IS intercepted
     await mgr.evaluate((origin: string) => new Promise((r) => chrome.runtime.sendMessage({
-        type: "saveScript", id: "s_doccold", name: "Doc cold",
+        type: "saveScript", id: "s_doccold", name: "Doc cold.wiretrick",
         code: `wt.onResponseBody({ url: "${origin}/doc-cold*", strategy: "debugger" }, (ctx, body) => body.replaceAll("DOC-ORIGINAL", "DOC-MODIFIED"));`,
     }, r)), ORIGIN);
     await mgr.waitForTimeout(1500);
@@ -933,11 +933,11 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
     await mgr.evaluate(() => { (document.querySelector("#btn-export") as HTMLElement).click(); });
     await mgr.waitForSelector("#bundle-picker .picker-row", { timeout: 5000 });
     const exportRows = await mgr.evaluate(() => [...document.querySelectorAll("#bundle-picker .picker-label")].map((e) => e.textContent));
-    check("export picker lists every script", exportRows.includes("MV3 hook") && exportRows.includes("api-interceptor") && exportRows.includes("api-lib"), JSON.stringify(exportRows));
+    check("export picker lists every script", exportRows.includes("MV3 hook.wiretrick") && exportRows.includes("api-interceptor.wiretrick") && exportRows.includes("api-lib"), JSON.stringify(exportRows));
     const pickerWarn = await mgr.evaluate(() => {
         const rows = [...document.querySelectorAll<HTMLElement>("#bundle-picker .picker-row")];
         const boxes = new Map(rows.map((r) => [r.querySelector(".picker-label")?.textContent, r.querySelector("input")!]));
-        boxes.get("MV3 hook")!.click();
+        boxes.get("MV3 hook.wiretrick")!.click();
         boxes.get("api-lib")!.click();
         const warn = document.querySelector<HTMLElement>("#bundle-picker .picker-warn")!;
         const shown = !warn.hidden && (warn.textContent || "").includes("api-lib");
@@ -948,14 +948,14 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
     await mgr.evaluate(() => (document.querySelector('#bundle-picker [data-act="ok"]') as HTMLElement).click());
     await mgr.waitForTimeout(800);
     const partialText: string = await mgr.evaluate(() => (window as any).__captured);
-    check("partial export leaves out the unticked script", typeof partialText === "string" && partialText.includes("api-interceptor") && !partialText.includes("name: MV3 hook"));
+    check("partial export leaves out the unticked script", typeof partialText === "string" && partialText.includes("api-interceptor.wiretrick") && !partialText.includes("name: MV3 hook.wiretrick"));
     await mgr.evaluate(() => { (window as any).__captured = null; (document.querySelector("#btn-export") as HTMLElement).click(); });
     await mgr.waitForSelector("#bundle-picker .picker-row", { timeout: 5000 });
     await mgr.evaluate(() => (document.querySelector('#bundle-picker [data-act="ok"]') as HTMLElement).click());
     await mgr.waitForTimeout(800); // the blob promise resolves async
     const bundleText = await mgr.evaluate(() => (window as any).__captured);
-    check("export produces a bundle (settings + scripts)", typeof bundleText === "string" && bundleText.includes("wiretrick-bundle") && bundleText.includes("api-interceptor") && bundleText.includes("name: MV3 hook"));
-    const skipName = exportRows.find((n: string | null) => n && !["MV3 hook", "api-interceptor", "api-lib", "Settings (globals)"].includes(n));
+    check("export produces a bundle (settings + scripts)", typeof bundleText === "string" && bundleText.includes("wiretrick-bundle") && bundleText.includes("api-interceptor.wiretrick") && bundleText.includes("name: MV3 hook.wiretrick"));
+    const skipName = exportRows.find((n: string | null) => n && !["MV3 hook.wiretrick", "api-interceptor.wiretrick", "api-lib", "Settings (globals)"].includes(n));
     await mgr.evaluate(() => new Promise((r) => chrome.storage.local.clear(() => r(null))));
     await mgr.reload();
     await mgr.waitForFunction(() => (window as any).monaco?.editor.getEditors().length === 1, null, { timeout: 20000 });
@@ -991,10 +991,10 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
     await mgr.waitForFunction(() => (document.querySelector("#editor-status")?.textContent ?? "").includes("imported"), null, { timeout: 20000 }).catch(() => {});
     const imported = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "listScripts" }, r)));
     const byName = new Map<string, any>((imported || []).map((s: any) => [s.meta.name, s]));
-    check("import re-detects routes (MV3 hook + api-interceptor active)", byName.get("MV3 hook")?.meta?.active === true && byName.get("api-interceptor")?.meta?.active === true, JSON.stringify((imported || []).map((s: any) => [s.meta.name, s.meta.active])));
-    check("import restores params (api-interceptor.label)", !!byName.get("api-interceptor")?.paramDefs?.label);
+    check("import re-detects routes (MV3 hook + api-interceptor active)", byName.get("MV3 hook.wiretrick")?.meta?.active === true && byName.get("api-interceptor.wiretrick")?.meta?.active === true, JSON.stringify((imported || []).map((s: any) => [s.meta.name, s.meta.active])));
+    check("import restores params (api-interceptor.label)", !!byName.get("api-interceptor.wiretrick")?.paramDefs?.label);
     check("import keeps libraries as libraries (api-lib)", byName.get("api-lib")?.meta?.active === false);
-    check("import restores enabled state", byName.get("MV3 hook")?.enabled === true && byName.get("api-interceptor")?.enabled === true);
+    check("import restores enabled state", byName.get("MV3 hook.wiretrick")?.enabled === true && byName.get("api-interceptor.wiretrick")?.enabled === true);
     check("partial import skips the unticked script", !!skipName && !byName.has(skipName), String(skipName));
     check("import status shows success", (await mgr.evaluate(() => document.querySelector("#editor-status")?.textContent ?? "")).includes("imported"));
 
@@ -1010,9 +1010,9 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
     const coldErrors: string[] = [];
     coldPopup.on("pageerror", (e: Error) => coldErrors.push(String(e?.message || e)));
     await coldPopup.goto(`chrome-extension://${extId}/popup.html`);
-    await coldPopup.waitForFunction(() => [...document.querySelectorAll("#script-list .script-name")].some((e) => e.textContent === "MV3 hook"), null, { timeout: 15000 }).catch(() => {});
+    await coldPopup.waitForFunction(() => [...document.querySelectorAll("#script-list .script-name")].some((e) => e.textContent === "MV3 hook.wiretrick"), null, { timeout: 15000 }).catch(() => {});
     const coldItems = await coldPopup.evaluate(() => [...document.querySelectorAll("#script-list .script-name")].map((e) => e.textContent));
-    check("popup lists scripts on a COLD SW wake (idle restart)", coldItems.includes("MV3 hook"), `swWasUp=${wasSwUp} items=${JSON.stringify(coldItems)} errors=${JSON.stringify(coldErrors.slice(0, 2))}`);
+    check("popup lists scripts on a COLD SW wake (idle restart)", coldItems.includes("MV3 hook.wiretrick"), `swWasUp=${wasSwUp} items=${JSON.stringify(coldItems)} errors=${JSON.stringify(coldErrors.slice(0, 2))}`);
     check("cold popup has no page errors", coldErrors.length === 0, JSON.stringify(coldErrors.slice(0, 3)));
 
     // ---- MV3 onDocument: document_start handlers run from the cached bundle ----
@@ -1030,12 +1030,12 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
         sel.dispatchEvent(new Event("change"));
     });
     await warm.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
-        type: "saveScript", id: "s_dom", name: "Early dom",
+        type: "saveScript", id: "s_dom", name: "Early dom.wiretrick",
         code: `wt.onDocument({ url: "*://*:*/*", when: "document_start", world: "page" }, (ctx) => { document.title = "DOM-RAN:" + document.readyState; });`,
     }, r)));
     // a second script with its own `when` must not inherit the first's
     await warm.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
-        type: "saveScript", id: "s_idle", name: "Idle dom",
+        type: "saveScript", id: "s_idle", name: "Idle dom.wiretrick",
         code: `wt.onDocument({ url: "*://*:*/*", when: "document_idle", world: "page" }, () => { document.documentElement.dataset.idle = document.readyState; });`,
     }, r)));
     await warm.waitForTimeout(1500); // cache refresh (pipeline reload warm)
@@ -1090,16 +1090,16 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
 
     // GUI change → settings.yaml must appear in the folder (commented default)
     await fPage.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
-        type: "saveScript", id: "s_sync", name: "Sync guinea",
+        type: "saveScript", id: "s_sync", name: "Sync guinea.wiretrick",
         code: 'wt.params({ token: { type: "string", default: "abc", description: "Sync token" } });\nwt.onRequest({ url: "*://sync.invalid/*", strategy: "page" }, () => {});\n',
     }, r)));
     await fPage.waitForTimeout(2500); // export debounce + SW poller cadence
     const yaml1 = await opfsText("settings.yaml");
-    check("MV3 folder sync: settings.yaml exported to the folder", !!yaml1 && yaml1.includes("Sync guinea") && yaml1.includes("# token: abc"), (yaml1 || "MISSING").slice(0, 160));
+    check("MV3 folder sync: settings.yaml exported to the folder", !!yaml1 && yaml1.includes("Sync guinea.wiretrick") && yaml1.includes("# token: abc"), (yaml1 || "MISSING").slice(0, 160));
 
     const schema1 = JSON.parse((await opfsText("settings.schema.json")) || "{}");
     check("MV3 folder sync: settings.schema.json types each script's params (VS Code completion)",
-        schema1?.properties?.params?.properties?.["Sync guinea"]?.properties?.token?.default === "abc", JSON.stringify(schema1?.properties?.params?.properties ?? {}).slice(0, 160));
+        schema1?.properties?.params?.properties?.["Sync guinea.wiretrick"]?.properties?.token?.default === "abc", JSON.stringify(schema1?.properties?.params?.properties ?? {}).slice(0, 160));
 
     // external whole-file edit applies to storage
     await opfsWrite("settings.yaml", (yaml1 || "").replace("# token: abc", 'token: "xyz"'));
@@ -1160,7 +1160,7 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
     await fPage.waitForTimeout(2500);
     const yamlDel = (await opfsText("settings.yaml")) || "";
     check("MV3 folder sync: a deleted script's settings.yaml section is commented out",
-        /# script "Sync guinea" no longer exists/.test(yamlDel) && !/^  Sync guinea:/m.test(yamlDel), yamlDel.slice(0, 400));
+        /# script "Sync guinea.wiretrick" no longer exists/.test(yamlDel) && !/^  Sync guinea.wiretrick:/m.test(yamlDel), yamlDel.slice(0, 400));
     await fPage.close();
 } catch (e) {
     failed++;

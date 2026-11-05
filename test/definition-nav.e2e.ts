@@ -225,7 +225,7 @@ check("rename: reserved name refused", (await listScripts()).find((s: any) => s.
 
 // an import by the exact (spaced) name resolves in the editor
 await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "saveScript", id: "u_sp", name: "my lib (v2)", code: "export const answer = 42;\n" }, r)));
-await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "saveScript", id: "s_sp", name: "uses lib", code: 'import { answer } from "./my lib (v2)";\nexport const n: number = answer;\n' }, r)));
+await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "saveScript", id: "s_sp", name: "uses lib.wiretrick", code: 'import { answer } from "./my lib (v2)";\nexport const n: number = answer;\n' }, r)));
 answer = true;
 await mgr.reload();
 await mgr.waitForFunction(() => (window as any).monaco?.editor?.getEditors?.().length);

@@ -14,6 +14,9 @@ its section below.
 
 ### Changed
 
+- **Breaking:** only files named `*.wiretrick.ts` (or `*.wiretrick.tsx`) run; every other `.ts` file is a library others import. A file that registers handlers without the name gets a Problems warning with a **Rename to x.wiretrick.ts** quick fix. New scripts and samples get the name; typing `name.ts` in the New Script box makes a library.
+- A script's description falls back to its header's `@description` (the leading `/** … */` block) when it has no `wt.about`.
+- Renaming a file leaves the whole `.wiretrick.ts` unselected.
 - Welcome sample chips and Network tags say "overlay" ("overlay shown") instead of "onOverlay".
 
 ### Deprecated

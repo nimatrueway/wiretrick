@@ -40,8 +40,13 @@ wt.onPage({ url: "*://app.example.com/*", dom: "overlay" }, () => {
 ```
 
 Register handlers synchronously at top level. A registration after an
-`await` or inside a callback logs an error and is ignored. A file that
-registers no handlers is a [library](#libraries-and-recipes).
+`await` or inside a callback logs an error and is ignored.
+
+Only files named **`*.wiretrick.ts`** (or `*.wiretrick.tsx`) run. Every
+other `.ts` file is a [library](#libraries-and-recipes) that scripts import:
+its handlers never register, and a Problems warning offers to rename it.
+New files you name without an extension (`dark mode`) become
+`dark mode.wiretrick.ts`; name one `utils.ts` for a library.
 
 ## Routes
 
@@ -361,12 +366,13 @@ error. For `enum`, `parse` receives the choice typed as `string`.
 
 ## Libraries and recipes
 
-A file that registers no handlers is a **library**: it never runs on its
+A file not named `*.wiretrick.ts` is a **library**: it never runs on its
 own (the popup lists it only when it declares params) but other scripts
-import it:
+import it. A `*.wiretrick.ts` file that registers no handlers counts as one
+too.
 
 ```ts
-// saved script named "utils" (utils.ts in the synced folder):
+// utils.ts:
 export function double(n: number) { return n * 2; }
 
 // in your script:
@@ -378,7 +384,7 @@ handler belongs to the script that calls the recipe (its badge, log, popup
 entry and params):
 
 ```ts
-// library "mocks":
+// mocks.ts:
 export function mockJson(url: string, body: object) {
     wt.onRequest({ url, strategy: "helper" }, () => ({ replaceResponse: { body } }));
 }
@@ -390,12 +396,12 @@ mockJson("*://api.example.com/me", { id: 1, role: "admin" });
 
 Libraries may declare params too, as shared config. They're editable in the
 popup (marked 𝑓, no enabled switch), the Editor and `settings.yaml`, and
-importers see the library's values. Whether a file is a library is decided
-with its current param values, so a library that registers handlers only
-for some value becomes a script when you change it (and back):
+importers see the library's values. Whether a `*.wiretrick.ts` file runs is
+decided with its current param values, so one that registers handlers only
+for some value becomes a library when you change it (and back):
 
 ```ts
-// library "gate": a library until "on" is switched on
+// gate.wiretrick.ts: a library until "on" is switched on
 const p = wt.params({ on: { type: "boolean", default: false } });
 if (p.on) wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, () => ({ block: true }));
 ```
@@ -404,7 +410,7 @@ Param definitions can be shared too — export them from a library and pass
 them to `wt.params` (directly or spread); the importer gets its own values:
 
 ```ts
-// library "utils":
+// utils.ts:
 export const envParam = { type: "stringList", default: ["dev"] } as const;
 
 // script:

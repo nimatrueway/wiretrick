@@ -98,7 +98,9 @@ collapse), Space opens it and keeps focus in the tree, F2 renames, Delete
 its contents, with counts — and Esc returns to the Code view. Right-click a
 row for **Open**, **Enable/Disable** (scripts), **New Script…**, **New JSON
 File…**, **New Folder…** (in that folder), **Copy Path**, **Rename…** and
-**Delete**; right-click the empty area for the New items at the root. Drag a
+**Delete**; right-click the empty area for the New items at the root. **New
+Script…** makes a `*.wiretrick.ts` file, which runs, unless you type `.ts`
+(`utils.ts`): then it's a [library](scripting.md#libraries-and-recipes). Drag a
 script, data file or folder onto a folder to move it there (onto the empty
 area: to the root); hovering a collapsed folder while dragging expands it.
 
@@ -111,8 +113,8 @@ offers **Copy Paths**. Items inside a selected folder go with it. The
 **Enabled** switch in the toolbar turns the open script on or off.
 
 Double-click a file (or F2 on a file or folder) to rename it (Enter saves, Esc cancels).
-The box shows the full file name, extension included (`My script.ts`,
-`users.json`), with only the name before it selected; the `.ts` of a script is
+The box shows the full file name, extension included (`My script.wiretrick.ts`,
+`users.json`), with only the name before it selected (`.wiretrick.ts` too); the `.ts` of a script is
 optional when you type, while `.tsx` makes it a [`.tsx` script](scripting.md#built-in-valtio-and-react). The name is the path in the synced folder; a `/`
 moves it into a folder (`mock/api mock` → `mock/api mock.ts`; renaming a
 folder moves everything in it). Each segment may hold anything

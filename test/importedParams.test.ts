@@ -70,27 +70,27 @@ describe("imported param definitions", () => {
 
     it("compileWithLibs resolves imports against the stored scripts (real defs)", () => {
         const scripts = [{ id: "u", name: "utils", code: UTILS }];
-        const c = compileWithLibs({ id: "m", name: "main", code: IMPORTER }, scripts, {});
+        const c = compileWithLibs({ id: "m", name: "main.wiretrick", code: IMPORTER }, scripts, {});
         expect(c.error).toBeNull();
         expect(c.paramDefs?.intercept_environments).toEqual({ type: "stringList", default: ["dev", "staging"], description: "environments" });
         expect(c.deps).toEqual(["utils"]);
-        const s = compileWithLibs({ id: "m", name: "main", code: SPREAD }, scripts, { m: { mode: "a" } });
+        const s = compileWithLibs({ id: "m", name: "main.wiretrick", code: SPREAD }, scripts, { m: { mode: "a" } });
         expect(s.error).toBeNull();
         expect(Object.keys(s.paramDefs || {})).toEqual(["verbose", "mode", "pick"]);
         expect(s.paramDefs?.pick).toEqual({ type: "enum", choices: ["x", "y"], default: "y" });
     });
 
     it("compileWithLibs stubs imports that don't resolve (missing / broken library)", () => {
-        const missing = compileWithLibs({ id: "m", name: "main", code: IMPORTER }, [], {});
+        const missing = compileWithLibs({ id: "m", name: "main.wiretrick", code: IMPORTER }, [], {});
         expect(missing.error).toBeNull();
         expect(missing.meta.active).toBe(true);
-        const broken = compileWithLibs({ id: "m", name: "main", code: IMPORTER }, [{ id: "u", name: "utils", code: "throw new Error('boom')" }], {});
+        const broken = compileWithLibs({ id: "m", name: "main.wiretrick", code: IMPORTER }, [{ id: "u", name: "utils", code: "throw new Error('boom')" }], {});
         expect(broken.error).toBeNull();
         expect(broken.meta.active).toBe(true);
     });
 
     it("compileForStorage (MV2) captures imported defs when given the stored scripts", async () => {
-        const c = await compileForStorage(IMPORTER, "main", undefined, { id: "m", scripts: [{ id: "u", name: "utils", code: UTILS }] });
+        const c = await compileForStorage(IMPORTER, "main.wiretrick", undefined, { id: "m", scripts: [{ id: "u", name: "utils", code: UTILS }] });
         expect(c.error).toBeNull();
         expect(c.paramDefs.intercept_environments?.type).toBe("stringList");
     });
@@ -103,7 +103,7 @@ describe("saveScript with imported params", () => {
 
     it("stores paramDefs from the imported def and no compile error", async () => {
         await saveScript({ id: "u", name: "utils", code: UTILS });
-        const s = await saveScript({ id: "m", name: "main", code: IMPORTER });
+        const s = await saveScript({ id: "m", name: "main.wiretrick", code: IMPORTER });
         expect(s.error).toBeNull();
         expect(s.meta.active).toBe(true);
         expect(s.paramDefs?.intercept_environments).toMatchObject({ type: "stringList" });
@@ -111,7 +111,7 @@ describe("saveScript with imported params", () => {
 
     it("saving the library refreshes the importers' paramDefs", async () => {
         await saveScript({ id: "u", name: "utils", code: `export const envParam = { type: "boolean", default: true };` });
-        await saveScript({ id: "m", name: "main", code: IMPORTER });
+        await saveScript({ id: "m", name: "main.wiretrick", code: IMPORTER });
         await saveScript({ id: "u", code: UTILS });
         const main = (await listScripts()).find((x) => x.id === "m")!;
         expect(main.paramDefs?.intercept_environments).toMatchObject({ type: "stringList" });
@@ -119,7 +119,7 @@ describe("saveScript with imported params", () => {
     });
 
     it("a script saved before its library exists is fixed once the library is saved", async () => {
-        const first = await saveScript({ id: "m", name: "main", code: IMPORTER });
+        const first = await saveScript({ id: "m", name: "main.wiretrick", code: IMPORTER });
         expect(first.error).toBeNull();
         await saveScript({ id: "u", name: "utils", code: UTILS });
         const main = (await listScripts()).find((x) => x.id === "m")!;
@@ -128,7 +128,7 @@ describe("saveScript with imported params", () => {
 
     it("param values of the importer apply to imported defs", async () => {
         await saveScript({ id: "u", name: "utils", code: UTILS });
-        await saveScript({ id: "m", name: "main", code: `import { envParam } from "./utils";\nconst p = wt.params({ e: envParam });\nif (p.e.includes("prod")) wt.onRequest({ url: "*://*/*", strategy: "helper" }, () => {});` });
+        await saveScript({ id: "m", name: "main.wiretrick", code: `import { envParam } from "./utils";\nconst p = wt.params({ e: envParam });\nif (p.e.includes("prod")) wt.onRequest({ url: "*://*/*", strategy: "helper" }, () => {});` });
         await setParamValue("m", "e", ["prod"]);
         const main = (await listScripts()).find((x) => x.id === "m")!;
         expect(main.meta.active).toBe(true);

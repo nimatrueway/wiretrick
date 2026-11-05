@@ -34,11 +34,11 @@ try {
     const seed = await ctx.newPage();
     await seed.goto(`chrome-extension://${extId}/editor.html`);
     await seed.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
-        type: "saveScript", id: "s_dbg", name: "Debug header",
+        type: "saveScript", id: "s_dbg", name: "Debug header.wiretrick",
         code: 'wt.params({ level: { type: "string", default: "warn", description: "Value of the x-debug header" } });\nwt.onRequest({ url: "*://example.invalid/*", strategy: "page" }, () => {});\n',
     }, r)));
     await seed.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
-        type: "saveScript", id: "s_note", name: "Notes",
+        type: "saveScript", id: "s_note", name: "Notes.wiretrick",
         code: 'wt.params({ body: { type: "string", multiline: true, default: "", description: "Free text" } });\nwt.onRequest({ url: "*://example.invalid/*", strategy: "page" }, () => {});\n',
     }, r)));
     await seed.close();
@@ -77,7 +77,7 @@ try {
     check("YAML edit applied to params", st.resParams?.s_dbg?.level === "debug");
     check("YAML edit toggled script off", st.resScripts?.s_dbg?.enabled === false, JSON.stringify(st.resScripts?.s_dbg && { enabled: st.resScripts.s_dbg.enabled }));
     const listOff = await mgr.waitForFunction(() => {
-        const li = [...document.querySelectorAll(".script-item")].find((e) => e.textContent?.includes("Debug header"));
+        const li = [...document.querySelectorAll(".script-item")].find((e) => e.textContent?.includes("Debug header.wiretrick"));
         return !!li?.classList.contains("disabled") && !li.querySelector(".switch");
     }, null, { timeout: 5000 }).then(() => true, () => false);
     check("list reflects disabled script", listOff);
@@ -172,7 +172,7 @@ try {
     // popup's getScriptParams must resolve imports of other scripts (MV2 compiled the one script alone → no defs)
     await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "saveScript", id: "s_lib", name: "lib", code: "export const x = 1;\n" }, r)));
     await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
-        type: "saveScript", id: "s_imp", name: "Importer",
+        type: "saveScript", id: "s_imp", name: "Importer.wiretrick",
         code: 'import { x } from "./lib";\nwt.params({ p: { type: "string", default: String(x) } });\nwt.onRequest({ url: "*://example.invalid/*", strategy: "page" }, () => {});\n',
     }, r)));
     const gp: any = await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "getScriptParams", scriptId: "s_imp" }, r)));

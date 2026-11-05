@@ -40,21 +40,21 @@ describe("library scripts with params", () => {
     });
 
     it("stores a param-gated library as a library with its paramDefs", async () => {
-        const s = await saveScript({ id: "g", name: "gate", code: GATE });
+        const s = await saveScript({ id: "g", name: "gate.wiretrick", code: GATE });
         expect(s.error).toBeNull();
         expect(s.meta.active).toBe(false);
         expect(s.paramDefs?.on).toMatchObject({ type: "boolean" });
     });
 
     it("changing the param turns it into a script and back (stored meta)", async () => {
-        await saveScript({ id: "g", name: "gate", code: GATE });
+        await saveScript({ id: "g", name: "gate.wiretrick", code: GATE });
         let notified = 0;
         const off = onScriptsChanged(() => notified++);
         await setParamValue("g", "on", true);
         let s = await get("g");
         expect(s.meta.active).toBe(true);
         expect(s.meta.match).toEqual(["*://example.com/*"]);
-        expect(s.meta.name).toBe("gate");
+        expect(s.meta.name).toBe("gate.wiretrick");
         expect(notified).toBeGreaterThan(0);
         // a later save (e.g. setEnabled) compiles with the stored values too
         s = await saveScript({ id: "g", code: GATE });
@@ -67,26 +67,26 @@ describe("library scripts with params", () => {
     });
 
     it("the reload-time analyze uses the param values", async () => {
-        await saveScript({ id: "g", name: "gate", code: GATE });
-        const scripts = [{ id: "g", name: "gate", code: GATE, updatedAt: 1 }];
+        await saveScript({ id: "g", name: "gate.wiretrick", code: GATE });
+        const scripts = [{ id: "g", name: "gate.wiretrick", code: GATE, updatedAt: 1 }];
         expect((await analyzeScripts(scripts, {})).get("g")!.meta.active).toBe(false);
         expect((await analyzeScripts(scripts, { g: { on: true } })).get("g")!.meta.active).toBe(true);
     });
 
     it("settings.yaml lists the library's params and gains `enabled` once it's a script", async () => {
-        await saveScript({ id: "g", name: "gate", code: GATE });
+        await saveScript({ id: "g", name: "gate.wiretrick", code: GATE });
         let st = await currentSettingsState();
-        expect(st.scripts.find((x) => x.name === "gate")).toMatchObject({ declared: false, defs: { on: { type: "boolean" } } });
-        expect((await applySettingsText("params:\n  gate:\n    on: true\n")).error).toBeUndefined();
+        expect(st.scripts.find((x) => x.name === "gate.wiretrick")).toMatchObject({ declared: false, defs: { on: { type: "boolean" } } });
+        expect((await applySettingsText("params:\n  gate.wiretrick:\n    on: true\n")).error).toBeUndefined();
         expect((await loadAllParamValues()).g).toEqual({ on: true });
         expect((await get("g")).meta.active).toBe(true);
         st = await currentSettingsState();
-        expect(st.scripts.find((x) => x.name === "gate")?.declared).toBe(true);
+        expect(st.scripts.find((x) => x.name === "gate.wiretrick")?.declared).toBe(true);
     });
 
     it("importers keep working when a library flips (its exports stay importable)", async () => {
-        await saveScript({ id: "g", name: "gate", code: GATE });
-        const m = await saveScript({ id: "m", name: "main", code: `import { helper } from "./gate";\nwt.onRequest({ url: "*://a.test/*", strategy: "helper" }, () => { helper(); });` });
+        await saveScript({ id: "g", name: "gate.wiretrick", code: GATE });
+        const m = await saveScript({ id: "m", name: "main.wiretrick", code: `import { helper } from "./gate.wiretrick";\nwt.onRequest({ url: "*://a.test/*", strategy: "helper" }, () => { helper(); });` });
         expect(m.error).toBeNull();
         expect(m.meta.active).toBe(true);
         await setParamValue("g", "on", true);

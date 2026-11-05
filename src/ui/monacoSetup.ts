@@ -454,6 +454,14 @@ function registerTsHover(monaco: any): void {
     });
 }
 
+/** a new library (a .ts file that isn't *.wiretrick.ts): only its exports matter */
+export const LIBRARY_TEMPLATE = `// A library: entry scripts (*.wiretrick.ts) import what it exports, e.g.
+// import { greet } from "./${"$"}{name}";
+export function greet(who: string): string {
+    return \`hello \${who}\`;
+}
+`;
+
 export const STARTER_TEMPLATE = `wt.about("What this script does");
 
 // Adjustable parameters (editable in settings.yaml / the popup ⚙ dialog):

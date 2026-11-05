@@ -47,7 +47,7 @@ describe("JSON data file imports", () => {
     const data = [{ path: "mock/rate-limits.json", text: '{ "max": 7 }' }];
 
     it("default import is the whole object, a named import a property", () => {
-        const c = compileWithLibs({ id: "m", name: "main", code: LIMIT_SCRIPT }, [], {}, data);
+        const c = compileWithLibs({ id: "m", name: "main.wiretrick", code: LIMIT_SCRIPT }, [], {}, data);
         expect(c.error).toBeNull();
         expect(c.deps).toEqual(["mock/rate-limits.json"]);
         expect(c.meta.routes).toHaveLength(1);
@@ -70,13 +70,13 @@ describe("JSON data file imports", () => {
 
     it("invalid JSON is the importer's compile error, naming the file and position, at the import line", () => {
         const bad = [{ path: "mock/rate-limits.json", text: '{\n  "max": 7,\n}' }];
-        const c = compileWithLibs({ id: "m", name: "main", code: "// x\n" + LIMIT_SCRIPT }, [], {}, bad);
+        const c = compileWithLibs({ id: "m", name: "main.wiretrick", code: "// x\n" + LIMIT_SCRIPT }, [], {}, bad);
         expect(c.error).toMatch(/cannot import "\.\/mock\/rate-limits\.json": mock\/rate-limits\.json:3:1 is not valid JSON/);
         expect(errorPosition(c.error!)?.line).toBe(2);
     });
 
     it("a missing data file is a compile error too (never a stub)", () => {
-        const c = compileWithLibs({ id: "m", name: "main", code: LIMIT_SCRIPT }, [], {}, []);
+        const c = compileWithLibs({ id: "m", name: "main.wiretrick", code: LIMIT_SCRIPT }, [], {}, []);
         expect(c.error).toMatch(/no data file "mock\/rate-limits\.json"/);
         expect(errorPosition(c.error!)?.line).toBe(1);
     });

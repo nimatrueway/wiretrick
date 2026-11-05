@@ -42,22 +42,22 @@ describe("param parse — store and settings", () => {
     });
 
     it("stores defs without parse; values and settings.yaml stay raw", async () => {
-        const s = await saveScript({ id: "p", name: "parsed", code: CODE });
+        const s = await saveScript({ id: "p", name: "parsed.wiretrick", code: CODE });
         expect(s.error).toBeNull();
         expect(s.meta.match).toEqual(["*://a.com/*"]);
         expect(s.paramDefs).toEqual({ origin: { type: "string", default: "https://a.com" } });
         expect(JSON.stringify(store.resScripts.p.paramDefs)).not.toContain("parse");
 
-        expect((await applySettingsText("params:\n  parsed:\n    origin: https://b.org\n")).error).toBeUndefined();
+        expect((await applySettingsText("params:\n  parsed.wiretrick:\n    origin: https://b.org\n")).error).toBeUndefined();
         expect((await loadAllParamValues()).p).toEqual({ origin: "https://b.org" });
         expect((await get("p")).meta.match).toEqual(["*://b.org/*"]);
         const st = await currentSettingsState();
-        expect(st.scripts.find((x) => x.name === "parsed")?.defs.origin).toEqual({ type: "string", default: "https://a.com" });
+        expect(st.scripts.find((x) => x.name === "parsed.wiretrick")?.defs.origin).toEqual({ type: "string", default: "https://a.com" });
         expect(await getSettingsText()).toContain("origin: https://b.org");
     });
 
     it("a value the parser rejects: a compile error naming the param, not logged", async () => {
-        await saveScript({ id: "p", name: "parsed", code: CODE });
+        await saveScript({ id: "p", name: "parsed.wiretrick", code: CODE });
         await setParamValue("p", "origin", "xyz");
         const s = await get("p");
         expect(s.error).toMatch(/param "origin": parse failed for value "xyz": Invalid URL/);

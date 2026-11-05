@@ -215,8 +215,8 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
     const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
     const save = (id: string, code: string, name: string) => send({ type: "saveScript", id, code, name });
 
-    const sw = await save("s_ov_switch", switchCode(origin, "Mock /api/me"), "overlay switch");
-    const rpc = await save("s_ov_rpc", rpcCode(origin), "overlay rpc");
+    const sw = await save("s_ov_switch", switchCode(origin, "Mock /api/me"), "overlay switch.wiretrick");
+    const rpc = await save("s_ov_rpc", rpcCode(origin), "overlay rpc.wiretrick");
     check(t("tsx overlay + RPC scripts save without errors"), !sw?.error && !rpc?.error, JSON.stringify({ sw: sw?.error?.split("\n")[0], rpc: rpc?.error?.split("\n")[0] }));
     await mgr.waitForTimeout(800);
 
@@ -262,10 +262,10 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
     const docRow = net.find((e) => e.url === `${origin}/ov-app` && e.startedAt >= loadedAt - 50 && e.outcomes.length);
     check(
         t("Network: the page's document row names the scripts whose onPage/onOverlay ran on it"),
-        (docRow?.type === "main_frame" || !!docRow?.synthetic) && ["overlay switch: overlay shown", "overlay rpc: overlay shown", "overlay rpc: onPage ran"].every((x) => docTags.includes(x)) && docRow.outcomes.every((o) => o.kind === "observed"),
+        (docRow?.type === "main_frame" || !!docRow?.synthetic) && ["overlay switch.wiretrick: overlay shown", "overlay rpc.wiretrick: overlay shown", "overlay rpc.wiretrick: onPage ran"].every((x) => docTags.includes(x)) && docRow.outcomes.every((o) => o.kind === "observed"),
         JSON.stringify({ type: docRow?.type, synthetic: docRow?.synthetic, docTags })
     );
-    check(t("Network: the overlay's fetch names its script"), tagsOf(net, "/ov-cookie").includes("overlay switch: fetched by its overlay"), JSON.stringify(tagsOf(net, "/ov-cookie")));
+    check(t("Network: the overlay's fetch names its script"), tagsOf(net, "/ov-cookie").includes("overlay switch.wiretrick: fetched by its overlay"), JSON.stringify(tagsOf(net, "/ov-cookie")));
 
     const pass = await page.evaluate(() => {
         const r = document.getElementById("pass")!.getBoundingClientRect();
@@ -380,7 +380,7 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
     }
 
     // save: the overlay reloads with the new code; the store keeps its value
-    await save("s_ov_switch", switchCode(origin, "Mock v2"), "overlay switch");
+    await save("s_ov_switch", switchCode(origin, "Mock v2"), "overlay switch.wiretrick");
     const v2 = await waitFor(
         async () => {
             const f = await overlayFrame(page, "#sw");
@@ -437,9 +437,9 @@ const keysCode = (origin: string, id: string) => `wt.onOverlay("${origin}/ov-key
 export async function checkOverlayShortcuts(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
     const t = (s: string) => `overlay shortcuts${opts.label ?? ""}: ${s}`;
     const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
-    const a = await send({ type: "saveScript", id: "s_ov_keys", code: keysCode(origin, "kbox"), name: "keys first" });
+    const a = await send({ type: "saveScript", id: "s_ov_keys", code: keysCode(origin, "kbox"), name: "keys first.wiretrick" });
     await mgr.waitForTimeout(300);
-    const b = await send({ type: "saveScript", id: "s_ov_keys2", code: keysCode(origin, "kbox2"), name: "keys second" });
+    const b = await send({ type: "saveScript", id: "s_ov_keys2", code: keysCode(origin, "kbox2"), name: "keys second.wiretrick" });
     check(t("scripts save without errors"), !a?.error && !b?.error, JSON.stringify({ a: a?.error, b: b?.error }));
     await mgr.waitForTimeout(800);
 
@@ -485,7 +485,7 @@ export async function checkOverlayShortcuts(ctx: any, mgr: any, origin: string, 
     const lines: string[] = await mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line")].map((l) => (l as HTMLElement).dataset.text || ""));
     check(
         t("a Log warning names the script that keeps the keys"),
-        lines.some((l) => l.includes("[keys second]") && l.includes("Alt+Shift+H") && l.includes('"keys first" (earlier in the list) uses these keys too')),
+        lines.some((l) => l.includes("[keys second.wiretrick]") && l.includes("Alt+Shift+H") && l.includes('"keys first.wiretrick" (earlier in the list) uses these keys too')),
         lines.filter((l) => l.includes("keys")).join(" | ").slice(0, 300)
     );
 
@@ -502,7 +502,7 @@ export async function checkOverlayShortcuts(ctx: any, mgr: any, origin: string, 
 export async function checkOverlayPreview(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
     const t = (s: string) => `overlay preview${opts.label ?? ""}: ${s}`;
     const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
-    const saved = await send({ type: "saveScript", id: "s_ov_prev", code: switchCode(origin, "Preview switch"), name: "overlay preview" });
+    const saved = await send({ type: "saveScript", id: "s_ov_prev", code: switchCode(origin, "Preview switch"), name: "overlay preview.wiretrick" });
     check(t("the script saves"), !saved?.error, saved?.error);
     await mgr.bringToFront();
     await mgr.waitForSelector('#script-list li[data-id="s_ov_prev"]', { timeout: 8000 });
@@ -526,7 +526,7 @@ export async function checkOverlayPreview(ctx: any, mgr: any, origin: string, ch
     const onPage = pageFrame ? await waitFor<boolean>(() => pageFrame.evaluate(() => (document.getElementById("box") as HTMLInputElement).checked).catch(() => false), (v) => v, 5000) : false;
     check(t("its switch flips the store: a request in a tab gets mocked, the page's overlay follows"), before.includes("REAL") && checked && after.includes("MOCKED") && onPage, JSON.stringify({ before, checked, after, onPage }));
 
-    await send({ type: "saveScript", id: "s_ov_prev", code: switchCode(origin, "Preview v2"), name: "overlay preview" });
+    await send({ type: "saveScript", id: "s_ov_prev", code: switchCode(origin, "Preview v2"), name: "overlay preview.wiretrick" });
     const v2 = await waitFor(
         async () => {
             const f = await overlayFrame(mgr, "#sw");
@@ -579,7 +579,7 @@ const pg = wt.onPage({ url: "${origin}/ov-two*", world: "page" }, () => ({
 export async function checkPageStores(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
     const t = (s: string) => `pageStore${opts.label ?? ""}: ${s}`;
     const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
-    const saved = await send({ type: "saveScript", id: "s_two", code: twoTabCode(origin), name: "two tabs" });
+    const saved = await send({ type: "saveScript", id: "s_two", code: twoTabCode(origin), name: "two tabs.wiretrick" });
     check(t("the script saves"), !saved?.error, saved?.error);
     await mgr.waitForTimeout(800);
     const open = async (q: string) => {
@@ -651,10 +651,10 @@ wt.onPage({ url: "${origin}/ov-layer*", js: "page", dom: "overlay", unsafe: true
 export async function checkOnPageDom(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
     const t = (s: string) => `onPage dom${opts.label ?? ""}: ${s}`;
     const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
-    const bad = await send({ type: "saveScript", id: "s_layer_bad", code: `wt.onPage({ url: "${origin}/nope", js: "page", dom: "overlay" }, () => {});`, name: "layer no unsafe" });
+    const bad = await send({ type: "saveScript", id: "s_layer_bad", code: `wt.onPage({ url: "${origin}/nope", js: "page", dom: "overlay" }, () => {});`, name: "layer no unsafe.wiretrick" });
     check(t('js: "page" + dom: "overlay" without unsafe: true fails to compile'), /unsafe: true/.test(bad?.error ?? ""), bad?.error);
     await send({ type: "deleteScript", id: "s_layer_bad" });
-    const saved = await send({ type: "saveScript", id: "s_layer", code: layerCode(origin), name: "layers" });
+    const saved = await send({ type: "saveScript", id: "s_layer", code: layerCode(origin), name: "layers.wiretrick" });
     check(t("the script saves"), !saved?.error, saved?.error);
     await mgr.waitForTimeout(800);
     const page = await ctx.newPage();
@@ -755,7 +755,7 @@ wt.onPage({ url: "${origin}/ov-isost*", world: "page" }, () => {
 export async function checkIsoStores(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
     const t = (s: string) => `isolated stores${opts.label ?? ""}: ${s}`;
     const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
-    const saved = await send({ type: "saveScript", id: "s_isost", code: isoStoreCode(origin), name: "iso stores" });
+    const saved = await send({ type: "saveScript", id: "s_isost", code: isoStoreCode(origin), name: "iso stores.wiretrick" });
     check(t("the script saves"), !saved?.error, saved?.error);
     await mgr.waitForTimeout(800);
     const open = async (q: string) => {
@@ -814,7 +814,7 @@ export async function checkEarlyRequests(ctx: any, mgr: any, origin: string, che
     const t = (s: string) => `early requests${opts.label ?? ""}: ${s}`;
     const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
     const code = `wt.replaceResponse({ url: "${origin}/early-data*", strategy: "page" }, (ctx) => "MOD:" + new URL(ctx.url).searchParams.get("via"));\n`;
-    const saved = await send({ type: "saveScript", id: "s_early", code, name: "early" });
+    const saved = await send({ type: "saveScript", id: "s_early", code, name: "early.wiretrick" });
     check(t("the script saves"), !saved?.error, saved?.error);
     await mgr.waitForTimeout(800);
     const p = await ctx.newPage();

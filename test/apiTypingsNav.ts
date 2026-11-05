@@ -53,7 +53,7 @@ export async function checkApiTypingsNav(mgr: any, check: Check, label = ""): Pr
     const cdp = await mgr.context().newCDPSession(mgr);
     await cdp.send("Emulation.setDeviceMetricsOverride", { width: 1400, height: 800, deviceScaleFactor: 1, mobile: false });
     await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
-        type: "saveScript", id: "s_api_nav", name: "api nav",
+        type: "saveScript", id: "s_api_nav", name: "api nav.wiretrick",
         code: 'wt.onRequest({ url: "*://api-nav.invalid/*", strategy: "helper" }, (ctx) => {\n    console.log(ctx.url);\n});\n',
     }, r)));
     await mgr.keyboard.press("Escape"); // close a hover left by an earlier check
@@ -63,7 +63,7 @@ export async function checkApiTypingsNav(mgr: any, check: Check, label = ""): Pr
     const onDialog = (d: any): void => { dialogs.push(d.message()); void (accept ? d.accept() : d.dismiss()); };
     mgr.on("dialog", onDialog);
     await mgr.locator(".script-item", { hasText: "api nav" }).click();
-    const opened = await waitFor((s) => s.uri === "file:///api%20nav.ts");
+    const opened = await waitFor((s) => s.uri === "file:///api%20nav.wiretrick.ts");
     accept = false;
     dialogs.length = 0;
     await setCursor(3, 1);
@@ -148,7 +148,7 @@ export async function checkApiTypingsNav(mgr: any, check: Check, label = ""): Pr
     const here = await state();
     check("api typings: clicking RouteOptions swaps the same hover for RouteOptions', no navigation",
         drilled.visible && isRoute(drilled) && drilled.text.includes("applies and which") && drilled.back === "← Back to onRequest" &&
-            drilled.marked && drilled.count === 1 && here.uri === "file:///api%20nav.ts" && !here.note,
+            drilled.marked && drilled.count === 1 && here.uri === "file:///api%20nav.wiretrick.ts" && !here.note,
         JSON.stringify({ ...drilled, text: drilled.text.slice(0, 160), uri: here.uri }));
     await parkMouse(); // no hover-underline in the screenshot
     await shot("hover-drilled");
@@ -205,7 +205,7 @@ export async function checkApiTypingsNav(mgr: any, check: Check, label = ""): Pr
     await mgr.keyboard.press("Escape");
     await setTheme(themeWas);
     const still = await state();
-    check("api typings: still in the script after all the hover clicks", still.uri === "file:///api%20nav.ts" && still.text.includes("// unsaved") && !still.note, still.uri);
+    check("api typings: still in the script after all the hover clicks", still.uri === "file:///api%20nav.wiretrick.ts" && still.text.includes("// unsaved") && !still.note, still.uri);
 
     await setCursor(1, 6);
     let f12 = await state();
@@ -220,9 +220,9 @@ export async function checkApiTypingsNav(mgr: any, check: Check, label = ""): Pr
 
     await mgr.keyboard.type("x"); // read-only: ignored
     await mgr.keyboard.press(back);
-    const ret = await waitFor((s) => s.uri === "file:///api%20nav.ts");
+    const ret = await waitFor((s) => s.uri === "file:///api%20nav.wiretrick.ts");
     check(`api typings: ${back} returns to the script, cursor restored, unsaved edit kept`,
-        ret.uri === "file:///api%20nav.ts" && JSON.stringify(ret.sel) === "[1,6,1,6]" && ret.text.includes("// unsaved") && !ret.readOnly && !ret.note && ret.selected.includes("api nav") && !ret.saveDisabled,
+        ret.uri === "file:///api%20nav.wiretrick.ts" && JSON.stringify(ret.sel) === "[1,6,1,6]" && ret.text.includes("// unsaved") && !ret.readOnly && !ret.note && ret.selected.includes("api nav.wiretrick") && !ret.saveDisabled,
         JSON.stringify({ ...ret, text: ret.text.slice(0, 80) }));
 
     await mgr.keyboard.press(forward);
@@ -246,9 +246,9 @@ export async function checkApiTypingsNav(mgr: any, check: Check, label = ""): Pr
     await mgr.keyboard.press(back);
     const back1 = await waitFor((s) => !atRoute(s));
     await mgr.keyboard.press(back);
-    const back2 = await waitFor((s) => s.uri === "file:///api%20nav.ts");
+    const back2 = await waitFor((s) => s.uri === "file:///api%20nav.wiretrick.ts");
     check("api typings: back twice → onRequest declaration, then the script",
-        back1.uri === "file:///wt-api.d.ts" && back1.line.includes("onRequest(route") && back2.uri === "file:///api%20nav.ts" && back2.text.includes("// unsaved"),
+        back1.uri === "file:///wt-api.d.ts" && back1.line.includes("onRequest(route") && back2.uri === "file:///api%20nav.wiretrick.ts" && back2.text.includes("// unsaved"),
         JSON.stringify([back1.sel, back2.uri]));
 
     check("api typings: no discard-changes prompt along the way", dialogs.length === 0, JSON.stringify(dialogs));

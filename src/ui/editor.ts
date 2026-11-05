@@ -3,7 +3,7 @@
  */
 
 import "./shell/mount";
-import { loadMonaco, STARTER_TEMPLATE, apiTypingsText, ensureBuiltinTypings, setDataFileTypings, setPackageTypings } from "./monacoSetup";
+import { loadMonaco, LIBRARY_TEMPLATE, STARTER_TEMPLATE, apiTypingsText, ensureBuiltinTypings, setDataFileTypings, setPackageTypings } from "./monacoSetup";
 import { PACKAGE_TYPINGS_KEY, type StoredTypings } from "../shared/packageImports";
 import { API_TYPINGS_URI } from "./apiLinks";
 import { NavHistory } from "./navHistory";
@@ -18,7 +18,7 @@ import { dialogs, openHelp, openSettings, pickRows, resolveConflict } from "./st
 import { folderStateText, setHelperStatus, settings } from "./state/settings";
 import { watchTheme, type Theme } from "./theme";
 import * as fsBridge from "./fsBridge";
-import { cleanScriptName, isTsxName, scriptNameProblem, scriptFileName, scriptFileKey, uniqueScriptName, dataFilePathProblem, folderPathProblem } from "../shared/scriptName";
+import { cleanScriptName, entryNameOf, isEntryName, isTsxName, NOT_AN_ENTRY, scriptNameProblem, scriptFileName, scriptFileKey, uniqueScriptName, dataFilePathProblem, folderPathProblem } from "../shared/scriptName";
 import { jsxElementAt } from "../shared/builtinSpecs";
 import { buildBundle, parseBundleText, bundleSettingsDoc, pickBundle, vscodeTargetPath, editorLaunchUrl, launchAppName, type LaunchMode } from "./bundle";
 import { computeDirty } from "./dirtyState";
@@ -421,7 +421,8 @@ async function createItem(kind: NewKind, path: string): Promise<void> {
     revealInExplorer(path);
     if (kind === "script") {
         const id = uuid();
-        await send({ type: "saveScript", id, code: STARTER_TEMPLATE, name: path });
+        const code = isEntryName(path) ? STARTER_TEMPLATE : LIBRARY_TEMPLATE.replace("${name}", baseName(path));
+        await send({ type: "saveScript", id, code, name: path });
         await refresh();
         select(id);
         editor?.focus();
@@ -634,9 +635,31 @@ async function renameToTsx(id: string): Promise<void> {
     await moveRows([{ item: { kind: "script", id, path: s.meta.name } as TreeRow, to }]);
 }
 
+const RENAME_TO_ENTRY = "wt.renameToEntry";
+
+async function renameToEntry(id: string): Promise<void> {
+    const s = scripts.find((x) => x.id === id);
+    if (!s || isEntryName(s.meta.name)) return;
+    const to = entryNameOf(s.meta.name);
+    const problem = itemPathProblem("script", to, id);
+    if (problem) return void status(`can't rename to "${to}": ${problem}`, "error");
+    await moveRows([{ item: { kind: "script", id, path: s.meta.name } as TreeRow, to }]);
+}
+
 function registerTsxFix(): void {
     const monaco = (window as any).monaco;
     monaco.editor.registerCommand(RENAME_TO_TSX, (_accessor: unknown, id: string) => void renameToTsx(id));
+    monaco.editor.registerCommand(RENAME_TO_ENTRY, (_accessor: unknown, id: string) => void renameToEntry(id));
+    monaco.languages.registerCodeActionProvider("typescript", {
+        provideCodeActions(model: any, _range: unknown, context: { markers: any[] }) {
+            const mk = context.markers.find((x) => String(x.message).includes(NOT_AN_ENTRY));
+            const id = mk && scriptIdOfModel(model);
+            const s = id && scripts.find((x) => x.id === id);
+            if (!s || isEntryName(s.meta.name)) return { actions: [], dispose() {} };
+            const title = `Rename to ${baseName(scriptFileName(entryNameOf(s.meta.name)))}`;
+            return { actions: [{ title, kind: "quickfix", isPreferred: true, diagnostics: [mk], command: { id: RENAME_TO_ENTRY, title, arguments: [s.id] } }], dispose() {} };
+        },
+    });
     monaco.languages.registerCodeActionProvider("typescript", {
         provideCodeActions(model: any, _range: unknown, context: { markers: any[] }) {
             const mk = context.markers.find((x) => (typeof x.code === "object" ? x.code?.value : x.code) === JSX_IN_TS);
@@ -1509,7 +1532,7 @@ function freeScriptName(base: string, ext = ""): string {
 /** add a sample as a new (enabled) script and open it; returns its id */
 async function addSample(sample: SampleScript): Promise<string> {
     const id = newId();
-    const name = freeScriptName(sample.name, jsxElementAt(sample.code) >= 0 ? ".tsx" : "");
+    const name = freeScriptName(sample.name, jsxElementAt(sample.code) >= 0 ? ".wiretrick.tsx" : ".wiretrick");
     await send({ type: "saveScript", id, code: sample.code, name, enabled: true });
     await refresh();
     selectReal(id);

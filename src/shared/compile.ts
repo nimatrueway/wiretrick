@@ -5,6 +5,7 @@
  * handler sources with `new Function`.
  */
 import { defaultMeta, finishMeta, type ResMeta } from "./metaParser";
+import { parseHeader } from "./packageHeader";
 import { parseParamValue, resolveParamValues, serializableParamDef, type ParamDef } from "./scriptDef";
 import { formatLogArgs, makeScriptConsole, type ScriptLogLevel } from "./scriptLog";
 import { scriptFunction } from "./scriptFn";
@@ -87,6 +88,8 @@ export interface ResApiOverrides {
     pageFetch?: { url: string; fetch: (request: WireRequest, bypass: boolean) => Promise<WireResponse> };
     /** what `wt.onPage` / `wt.onOverlay` registration number `index` returns (default: an inert handle) */
     remote?: (kind: "onDocument" | "onOverlay", index: number) => any;
+    /** the script's name: a file that isn't an entry (`*.wiretrick.ts`) registers nothing that runs */
+    name?: string;
 }
 
 /** Standard overrides for a stored script: storage wired by id, log → sink. */
@@ -160,7 +163,12 @@ export function compileScript(code: string, overrides?: ResApiOverrides): Compil
               };
         withCollector(store, () => fn(shim, makeForwardingConsole(overrides?.logSink), requireShim, moduleObj, moduleObj.exports));
         meta.routes = routesOf(store);
-        finishMeta(meta);
+        finishMeta(meta, overrides?.name);
+        // no wt.about: the package header's @description
+        if (!meta.description) {
+            const d = parseHeader(code).description;
+            if (d) meta.description = d;
+        }
         return { meta, handlers: store, error: null, code, paramDefs: owner.defs, exports: moduleObj.exports };
     } catch (e: any) {
         meta.routes = [];
@@ -447,7 +455,7 @@ export function compileWithLibs(
         (lib) => ({ paramValues: paramValues?.[lib.id] }),
         { stubUnresolved: true, dataFiles, packages }
     );
-    const c = compileScript(target.code, { importModule: resolver.resolveFrom(target.name), paramValues: paramValues?.[target.id] });
+    const c = compileScript(target.code, { importModule: resolver.resolveFrom(target.name), paramValues: paramValues?.[target.id], name: target.name });
     return { ...c, deps: [...resolver.deps] };
 }
 

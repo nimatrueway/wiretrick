@@ -3,7 +3,7 @@ import { useSnapshot } from "valtio";
 import { isInFolder } from "../../shared/folders";
 import { scriptHealth } from "../../shared/scriptHealth";
 import { folderOf, isSvgPath } from "../../shared/scriptImports";
-import { cleanScriptName, isTsxName, scriptFileName, scriptNameFromInput } from "../../shared/scriptName";
+import { cleanScriptName, entryNameOf, fileExtension, isTsxName, scriptFileName, scriptNameFromInput } from "../../shared/scriptName";
 import { baseName, dropPlan, explorerTree, folderRowId, isFolderRowId, joinPath, targetFolder, type TreeRow } from "../explorerTree";
 import { actions } from "../shell/actions";
 import {
@@ -496,8 +496,8 @@ export function ExplorerTree() {
 function RenameInput({ row, refocusList, list }: { row: TreeRow; refocusList: boolean; list: { current: HTMLUListElement | null } }) {
     const kind: NewKind = row.kind;
     const current = row.kind === "script" ? scriptFileName(cleanScriptName(row.path)) : row.path;
-    // select the name, not its folder or extension (as VS Code does)
-    const ext = kind === "script" ? (isTsxName(current) ? 4 : 3) : kind === "data" ? (/\.(json|svg)$/i.exec(current)?.[0].length ?? 0) : 0;
+    // select the name, not its folder or extension (`.wiretrick.ts` included — as VS Code does)
+    const ext = kind === "folder" ? 0 : fileExtension(current).length;
     const range: [number, number] = [current.lastIndexOf("/") + 1, current.length - ext];
     return (
         <NameInput
@@ -536,11 +536,12 @@ function CreateRow({ kind, folder, list }: { kind: NewKind; folder: string; list
             <NameInput
                 kind={kind}
                 value=""
-                placeholder={kind === "script" ? "script name" : kind === "data" ? "name.json or name.svg" : "folder name"}
+                placeholder={kind === "script" ? "name (runs) or name.ts (library)" : kind === "data" ? "name.json or name.svg" : "folder name"}
                 onDone={(commit, value) => {
                     explorer.editing = null;
                     let name = cleanScriptName(value).trim();
-                    if (kind === "script") name = scriptNameFromInput(name);
+                    // a new script with no extension is an entry (it runs); "x.ts" is a library
+                    if (kind === "script") name = /\.tsx?$/i.test(name) ? scriptNameFromInput(name) : name && entryNameOf(name);
                     if (kind === "data" && name) name = withJson(name);
                     if (!commit || !name) {
                         list.current?.focus();

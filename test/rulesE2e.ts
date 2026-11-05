@@ -43,7 +43,7 @@ export async function checkRulesStrategy(ctx: any, mgr: any, origin: string, che
         `wt.onResponseHeaders({ url: ${O} + "/rules-api", strategy: "rules" }, () => ({ headers: { set: { "x-wt-rules-res": "res" } } }));`,
         `wt.onRequest({ url: ${O} + "/rr{/v:ver}?/:name", strategy: "rules" }, (ctx) => ({ redirect: ${O} + "/rules-echo?name=" + ctx.groups.name + "&ver=" + (ctx.groups.ver ?? "") }));`,
     ].join("\n");
-    const saved = await send({ type: "saveScript", id: "s_rules", name: "rules probe", code });
+    const saved = await send({ type: "saveScript", id: "s_rules", name: "rules probe.wiretrick", code });
     check(t("script saves (one handler is not a rule, the script still loads)"), !!saved && !saved.error && saved.meta?.active === true, JSON.stringify({ error: saved?.error?.split("\n")[0], active: saved?.meta?.active }));
 
     const hasDnr: boolean = await mgr.evaluate(() => !!(chrome as any).declarativeNetRequest);
@@ -71,7 +71,7 @@ export async function checkRulesStrategy(ctx: any, mgr: any, origin: string, che
     // a URL pattern too complex for a rule: the problem points at the pattern
     // itself (line 3, where the string starts), and the editor squiggles it
     const cx = `https://cx{-(dev)}.example.test/{mms/}?static/:path+/:a/:b/:c/:d/:e/:f/:g/:h/:i/:j/:k/:name{.:hash([0-9a-f]{20,})}?{.min}?.:ext(js|css|json)`;
-    await send({ type: "saveScript", id: "s_rules_cx", name: "rules complex", code: ["// too complex", "wt.onRequest({", `    url: ${JSON.stringify(cx)},`, '    strategy: "rules",', `}, (ctx) => ({ redirect: ${O} + "/rules-echo?" + ctx.groups.k + ctx.groups.name + ctx.groups.ext }));`].join("\n") });
+    await send({ type: "saveScript", id: "s_rules_cx", name: "rules complex.wiretrick", code: ["// too complex", "wt.onRequest({", `    url: ${JSON.stringify(cx)},`, '    strategy: "rules",', `}, (ctx) => ({ redirect: ${O} + "/rules-echo?" + ctx.groups.k + ctx.groups.name + ctx.groups.ext }));`].join("\n") });
     const cxProblem = await mgr.waitForFunction(() => [...document.querySelectorAll("#problems-list .pb-item.error")].map((l) => l.textContent || "").find((t) => t.includes("too complex for a rule")), null, { timeout: 10000 }).then((h: any) => h.jsonValue(), () => null);
     check(t("a too-complex pattern → a problem at the pattern's line and column"), !!cxProblem && /\[Ln 3, Col 11\]/.test(cxProblem), String(cxProblem).slice(-80));
     await mgr.evaluate(() => (document.querySelector('#script-list li[data-id="s_rules_cx"]') as HTMLElement).click());
@@ -137,7 +137,7 @@ export async function checkRulesStrategy(ctx: any, mgr: any, origin: string, che
     check(t("Network: a blocked request is marked Modified (rules: block)"), marked.length > 0, JSON.stringify(net.filter((e) => e.url?.includes("/rules-")).map((e) => [e.url.replace(origin, ""), e.outcomes?.map((i: any) => [i.kind, i.action])])).slice(0, 400));
 
     // saving a fixed script clears the error
-    await send({ type: "saveScript", id: "s_rules", name: "rules probe", code: code.replace(`(ctx) => (ctx.method === "POST" ? { block: true } : undefined)`, `() => ({ block: true })`) });
+    await send({ type: "saveScript", id: "s_rules", name: "rules probe.wiretrick", code: code.replace(`(ctx) => (ctx.method === "POST" ? { block: true } : undefined)`, `() => ({ block: true })`) });
     const cleared = await mgr.waitForFunction(() => !document.querySelector('#script-list li[data-id="s_rules"] .err-ind'), null, { timeout: 8000 }).then(() => true, () => false);
     check(t("saving the fixed script clears the ⚠"), cleared);
 
@@ -162,7 +162,7 @@ export async function checkRulesStrategy(ctx: any, mgr: any, origin: string, che
         `wt.onRequest({ url: ${O} + "/huge/:a/:b/:c/:d/:e/:f/:g/:h/:i/:j/:k/:l/:m/:n/:o/:p/:q/:r", strategy: "rules" }, () => ({ block: true }));`,
         `wt.onRequest({ url: ${O} + "/cap/:a/:b/:c/:d/:e/:f/:g/:h/:i/:j/:k", strategy: "rules" }, (ctx) => ({ redirect: ${O} + "/rules-echo?v=" + ctx.groups.a + ctx.groups.b + ctx.groups.c + ctx.groups.d + ctx.groups.e + ctx.groups.f + ctx.groups.g + ctx.groups.h + ctx.groups.i }));`,
     ].join("\n");
-    await send({ type: "saveScript", id: "s_rules_deep", name: "rules deep", code: deep });
+    await send({ type: "saveScript", id: "s_rules_deep", name: "rules deep.wiretrick", code: deep });
     const page3 = await ctx.newPage();
     await page3.goto(`${origin}/rules-page`, { waitUntil: "domcontentloaded" });
     let q: any = {};

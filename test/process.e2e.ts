@@ -137,7 +137,7 @@ try {
     await send({
         type: "saveScript",
         id: "p_local",
-        name: "Proc local",
+        name: "Proc local.wiretrick",
         code: `wt.onRequest({ url: "${ORIGIN}/*", strategy: "helper" }, (c) => {
     if (c.url.endsWith("/redir")) return { redirect: "${ORIGIN}/target" };
     if (c.url.endsWith("/mock")) return { replaceResponse: { body: { mocked: true, type: c.resourceType }, mime: "application/json" } };
@@ -148,7 +148,7 @@ wt.onResponseBody({ url: "${ORIGIN}/*", strategy: "helper" }, (c, body) => (c.ur
     await send({
         type: "saveScript",
         id: "p_https",
-        name: "Proc https",
+        name: "Proc https.wiretrick",
         code: `wt.onResponseBody({ url: "https://example.com/*", strategy: "helper" }, (c, body) => body.replace("<title>Example Domain", "<title>Process Domain"));`,
     });
 

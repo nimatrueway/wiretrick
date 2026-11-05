@@ -47,17 +47,17 @@ export async function checkFoldersAndDataFiles(ctx: any, mgr: any, origin: strin
     const root = await send({
         type: "saveScript",
         id: "s_folders_root",
-        name: "rate limiter",
+        name: "rate limiter.wiretrick",
         code: [`import limits from "./mock/rate-limits.json";`, `wt.onRequest({ url: ${O} + "/folders-echo*", strategy: "rules" }, () => ({ headers: { set: { "x-wt-limit": String(limits.max) } } }));`].join("\n"),
     });
     check(t("a root script importing ./mock/rate-limits.json saves"), !!root && !root.error && root.meta?.active === true, JSON.stringify({ error: root?.error, active: root?.meta?.active }));
     const inner = await send({
         type: "saveScript",
         id: "s_folders_inner",
-        name: "mock/api mock",
+        name: "mock/api mock.wiretrick",
         code: [`import { max } from "./rate-limits.json";`, `wt.onRequest({ url: ${O} + "/folders-api", strategy: "page" }, () => ({ replaceResponse: { body: { max, from: "mock/api mock" } } }));`].join("\n"),
     });
-    check(t("a script inside the folder saves under its path"), !!inner && !inner.error && inner.meta?.name === "mock/api mock", JSON.stringify({ error: inner?.error, name: inner?.meta?.name }));
+    check(t("a script inside the folder saves under its path"), !!inner && !inner.error && inner.meta?.name === "mock/api mock.wiretrick", JSON.stringify({ error: inner?.error, name: inner?.meta?.name }));
 
     const probe = async (want: number): Promise<any> => {
         let r: any = {};
@@ -89,7 +89,7 @@ export async function checkFoldersAndDataFiles(ctx: any, mgr: any, origin: strin
     await send({ type: "saveDataFile", id: data.id, text: '{ "max": }' });
     const problem = await mgr
         .waitForFunction(
-            () => [...document.querySelectorAll<HTMLElement>("#problems-list .pb-item.error")].filter((l) => /\brate limiter\.ts \[Ln 1\b/.test(l.title)).map((l) => l.textContent || "").find((x) => /mock\/rate-limits\.json:1:\d+ is not valid JSON/.test(x)),
+            () => [...document.querySelectorAll<HTMLElement>("#problems-list .pb-item.error")].filter((l) => /\brate limiter\.wiretrick\.ts \[Ln 1\b/.test(l.title)).map((l) => l.textContent || "").find((x) => /mock\/rate-limits\.json:1:\d+ is not valid JSON/.test(x)),
             null,
             { timeout: 10000 }
         )
@@ -109,7 +109,7 @@ export async function checkFoldersAndDataFiles(ctx: any, mgr: any, origin: strin
     const renamed = await send({ type: "renameFolder", from: "mock", to: "fixtures" });
     const names = (await send({ type: "listScripts" })).map((s: any) => s.meta.name);
     const paths = (await send({ type: "listDataFiles" })).map((d: any) => d.path);
-    check(t("renaming the folder moves its scripts and data files"), !renamed?.error && names.includes("fixtures/api mock") && paths.includes("fixtures/rate-limits.json") && !paths.includes("mock/rate-limits.json"), JSON.stringify({ renamed, names, paths }));
+    check(t("renaming the folder moves its scripts and data files"), !renamed?.error && names.includes("fixtures/api mock.wiretrick") && paths.includes("fixtures/rate-limits.json") && !paths.includes("mock/rate-limits.json"), JSON.stringify({ renamed, names, paths }));
     const unresolved = (await send({ type: "listScripts" })).find((s: any) => s.id === "s_folders_root");
     check(t("an import specifier isn't rewritten: the root importer now fails"), /no data file "mock\/rate-limits\.json"/.test(unresolved?.error || ""), String(unresolved?.error));
 
@@ -143,7 +143,7 @@ async function checkExplorerUi(ctx: any, mgr: any, check: Check, t: (s: string) 
     const [dir, inner, json, root] = ["dir:mock", "s_folders_inner", dataId, "s_folders_root"].map(at);
     check(
         t("explorer: folder, then its script, then its data file, then root scripts"),
-        dir >= 0 && dir < inner && inner < json && json < root && rows[inner].level === "2" && rows[json].level === "2" && rows[root].level === "1" && rows[inner].name === "api mock.ts" && rows[json].name === "rate-limits.json",
+        dir >= 0 && dir < inner && inner < json && json < root && rows[inner].level === "2" && rows[json].level === "2" && rows[root].level === "1" && rows[inner].name === "api mock.wiretrick.ts" && rows[json].name === "rate-limits.json",
         JSON.stringify(rows)
     );
 
@@ -153,8 +153,8 @@ async function checkExplorerUi(ctx: any, mgr: any, check: Check, t: (s: string) 
         const monaco = (window as any).monaco;
         const out: any = {};
         for (let i = 0; i < 40; i++) {
-            const m = monaco.editor.getModels().find((x: any) => x.uri.path === "/rate limiter.ts");
-            const mi = monaco.editor.getModels().find((x: any) => x.uri.path === "/mock/api mock.ts");
+            const m = monaco.editor.getModels().find((x: any) => x.uri.path === "/rate limiter.wiretrick.ts");
+            const mi = monaco.editor.getModels().find((x: any) => x.uri.path === "/mock/api mock.wiretrick.ts");
             if (m && mi) {
                 const w = await (await monaco.languages.typescript.getTypeScriptWorker())(m.uri);
                 // (no named helpers in here: tsx would wrap them in __name)
@@ -258,13 +258,13 @@ async function checkExplorerUi(ctx: any, mgr: any, check: Check, t: (s: string) 
     const svg = (await send({ type: "listDataFiles" })).find((d: any) => d.path === "ui-folder/icon.svg");
     const svgIcon = await mgr.evaluate((id: string) => document.querySelector(`#script-list li[data-id="${id}"] .file-icon`)?.className, svg?.id);
     check(t("explorer: a new .svg data file opens as XML with its own icon"), svgLang === "xml" && /^<svg /.test(svg?.text || "") && /\bsvg\b/.test(svgIcon || ""), JSON.stringify({ svgLang, svg, svgIcon }));
-    const svgUser = await send({ type: "saveScript", id: "s_folders_svg", name: "ui-folder/uses svg", code: `import logo from "./icon.svg";\nconst markup: string = logo;\nwt.params({ markup: { type: "string", default: markup } });\n` });
+    const svgUser = await send({ type: "saveScript", id: "s_folders_svg", name: "ui-folder/uses svg.wiretrick", code: `import logo from "./icon.svg";\nconst markup: string = logo;\nwt.params({ markup: { type: "string", default: markup } });\n` });
     const svgDefault = (await send({ type: "listScripts" })).find((s: any) => s.id === "s_folders_svg")?.paramDefs?.markup?.default;
     const svgTs = await mgr.evaluate(async () => {
         const monaco = (window as any).monaco;
         let out: any = null;
         for (let i = 0; i < 40; i++) {
-            const m = monaco.editor.getModels().find((x: any) => x.uri.path === "/ui-folder/uses svg.ts");
+            const m = monaco.editor.getModels().find((x: any) => x.uri.path === "/ui-folder/uses svg.wiretrick.ts");
             if (m) {
                 const w = await (await monaco.languages.typescript.getTypeScriptWorker())(m.uri);
                 const all = [...(await w.getSyntacticDiagnostics(m.uri.toString())), ...(await w.getSemanticDiagnostics(m.uri.toString()))];
