@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-04
+
 ### Added
 
 - `.tsx` scripts: a script whose name ends in `.tsx` (`ui/Panel.tsx`) is a `.tsx` file everywhere — explorer (⚛ icon), tabs, the synced folder and imports (`./Panel` finds it). Create or rename a script with the `.tsx` extension; renaming keeps the extension unselected. JSX in a `.ts` script is now an error with a **Rename to Name.tsx** quick fix.
@@ -620,7 +622,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/nimatrueway/wiretrick/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/nimatrueway/wiretrick/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/nimatrueway/wiretrick/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/nimatrueway/wiretrick/compare/v0.9.18...v0.10.0
