@@ -125,7 +125,7 @@ export async function aboutRows(helper: HelperStatus | null): Promise<[string, s
     const manifest = chrome.runtime.getManifest();
     const [ua, platform, firefox] = await Promise.all([uaHighEntropy(), platformInfo(), firefoxInfo()]);
     return [
-        ["Version", manifest.version],
+        ["Version", manifest.version_name ?? manifest.version],
         ["Commit", __COMMIT__],
         ["Built", formatBuildTime(__BUILD_TIME__)],
         ["Build", `${__MV3__ ? "MV3" : "MV2"} (manifest_version ${manifest.manifest_version})`],

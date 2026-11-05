@@ -12,6 +12,12 @@ each handler in a script names the URLs it handles and what to do — redirect,
 block, edit headers, transform or replace bodies, patch the DOM, or draw its
 own GUI over the page.
 
+> [!WARNING]
+> **Wiretrick is experimental.** I'm constantly experimenting with its
+> scripting API, so it changes — sometimes in breaking ways — from release to
+> release, and scripts written for one version may need updating for the next.
+> Check the [changelog](CHANGELOG.md) before you update.
+
 ![Wiretrick Editor](docs/shots/editor.png)
 
 ## Features

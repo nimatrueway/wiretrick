@@ -7,6 +7,10 @@ its section below.
 
 ## [Unreleased]
 
+## [0.13.0-alpha] - 2026-11-05
+
+Wiretrick is experimental: its scripting API keeps changing, and releases may break scripts.
+
 ### Added
 
 - One `wt.onPage` for all page code, with its isolation set by two route options: `js: "isolated" | "page"` (which JavaScript world it runs in) and `dom: "page" | "overlay"` (whether it changes the site's document or draws the script's own GUI). `wt.onPage({ url, dom: "overlay" }, fn)` is the overlay.
@@ -664,7 +668,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.12.2...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.13.0-alpha...HEAD
+[0.13.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.12.2...v0.13.0-alpha
 [0.12.2]: https://github.com/nimatrueway/wiretrick/compare/v0.12.1...v0.12.2
 [0.12.1]: https://github.com/nimatrueway/wiretrick/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/nimatrueway/wiretrick/compare/v0.11.1...v0.12.0

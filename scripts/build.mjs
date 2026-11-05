@@ -119,7 +119,8 @@ const HOOK_MAIN = { matches: ["*://*/*"], js: ["hook.js"], all_frames: true, run
 /** manifest.json → Firefox manifest object */
 function firefoxManifest(mv2) {
     // Firefox has no manifest sandbox: overlay.html is a normal extension page there (overlayRuntime.ts checks its nonce with the background)
-    const { sandbox: _sandbox, ...rest } = mv2;
+    // and no version_name (the xpi is named after the release tag instead)
+    const { sandbox: _sandbox, version_name: _versionName, ...rest } = mv2;
     return { ...rest, content_scripts: [HOOK_MAIN, ...mv2.content_scripts] };
 }
 
@@ -128,6 +129,7 @@ function mv3Manifest(mv2) {
     return {
         name: mv2.name,
         version: mv2.version,
+        version_name: mv2.version_name,
         description: mv2.description,
         icons: mv2.icons,
         action: {

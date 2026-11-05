@@ -120,7 +120,7 @@ export async function refreshAbout(): Promise<void> {
     if (gen !== aboutGen) return;
     settings.about = ref({ rows, latest: { text: "checking…" } });
     const latest = await checkLatestRelease().then(
-        (r) => describeLatest(r, chrome.runtime.getManifest().version),
+        (r) => describeLatest(r, chrome.runtime.getManifest().version_name ?? chrome.runtime.getManifest().version),
         (e) => ({ text: `couldn't check (${e?.message || e})`, url: RELEASES_URL })
     );
     if (gen === aboutGen) settings.about = ref({ rows, latest });
