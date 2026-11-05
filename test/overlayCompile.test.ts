@@ -58,6 +58,12 @@ describe("registration check (wt.onPage / wt.onOverlay at the top level)", () =>
         expect(registrationProblems("const t = `${wt.onPage(\"*\", f)}`;")).toEqual([{ api: "onPage", line: 1, nth: 0 }]);
     });
 
+    it("isn't fooled by JSX's `/>` after an attribute's `}`", () => {
+        const code = `wt.onPage("*", () => {\n    f(() => <A port={cfg.port} />);\n});\nwt.onPage("*", f);`;
+        expect(registrationProblems(code)).toEqual([]);
+        expect(registrationProblems(`${code}\nif (x) wt.onPage("*", f);`)).toEqual([{ api: "onPage", line: 5, nth: 2 }]);
+    });
+
     it("isn't fooled by regex literals or division", () => {
         expect(registrationProblems(`const r = /{/;\nconst d = a / b;\nwt.onPage("*", f);`)).toEqual([]);
     });

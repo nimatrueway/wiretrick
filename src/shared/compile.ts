@@ -711,6 +711,8 @@ export function registrationProblems(code: string): RegistrationProblem[] {
         if (c === '"' || c === "'" || c === "`" || (c === "/" && (prev === "" || /[(,=:[!&|?{};+\-*%<>~^]/.test(prev)))) {
             // a string, template or regex literal: skip it (a template's ${…} counts as nested code)
             const quote = c;
+            const start = i;
+            const startLine = line;
             let cls = false;
             i++;
             while (i < n) {
@@ -720,6 +722,7 @@ export function registrationProblems(code: string): RegistrationProblem[] {
                     continue;
                 }
                 if (d === "\n") {
+                    if (quote === "/") break;
                     line++;
                     if (quote !== "`") break;
                 }
@@ -749,6 +752,14 @@ export function registrationProblems(code: string): RegistrationProblem[] {
                 }
                 if (d === quote) break;
                 i++;
+            }
+            if (quote === "/" && code[i] !== "/") {
+                // an unclosed "regex" is a division or JSX's `/>`: leave the line be
+                i = start + 1;
+                line = startLine;
+                prev = "/";
+                if (depth === 0) stmt += "/";
+                continue;
             }
             i++;
             prev = "a";

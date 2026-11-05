@@ -15,7 +15,7 @@ its section below.
 
 ### Fixed
 
-- In `.tsx` scripts, JSX like `<A x={y} />` could hide later onPage handlers from the Problems view's onPage checks (`/>` was read as the start of a regex).
+- In `.tsx` scripts, JSX like `<A x={y} />` could hide later onPage handlers from the Problems view's onPage checks, and wrongly flag the next top-level `wt.onPage` with "call wt.onPage() at the top level" (`/>` was read as the start of a regex).
 
 ## [0.12.1] - 2026-11-04
 
