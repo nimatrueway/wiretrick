@@ -11,6 +11,7 @@ import { isRecording, networkSnapshot } from "./network";
 import { getSettingsText } from "./settingsFile";
 import type { NetBody, NetEntry } from "../shared/netTypes";
 import { routeLabel } from "../shared/route";
+import type { ProblemGroup } from "../ui/problems";
 
 const SECRET_HEADERS = /^(cookie|set-cookie|authorization|proxy-authorization|x-api-key|x-auth-token|x-csrf-token|x-xsrf-token)$/i;
 const BODY_CAP = 4000;
@@ -23,6 +24,27 @@ export interface DiagnosticsExtra {
     ui?: Record<string, unknown>;
     /** engine state the caller owns (process helper, folder sync…) */
     state?: Record<string, unknown>;
+    /** the Editor's Problems view as shown (live type errors included) */
+    problems?: ProblemGroup[];
+}
+
+/** the Problems view as text: per file, `severity line:col [kind] message` */
+export function problemsSection(groups: ProblemGroup[] | undefined): string[] {
+    if (!Array.isArray(groups)) return [`## Problems`, "", `_not collected: open the Editor and collect from there_`];
+    let errors = 0;
+    let warnings = 0;
+    const lines: string[] = [];
+    for (const g of groups) {
+        lines.push(g.label);
+        for (const p of g.problems) {
+            p.severity === "error" ? errors++ : warnings++;
+            const at = p.line ? `${p.line}${p.column ? `:${p.column}` : ""}` : "-";
+            lines.push(`  ${p.severity.padEnd(7)} ${at.padEnd(7)} [${p.kind}] ${p.message.replace(/\n/g, "\n            ")}`);
+            if (p.context) lines.push(`            context: ${p.context}`);
+        }
+    }
+    const title = `## Problems (${errors} error${errors === 1 ? "" : "s"}, ${warnings} warning${warnings === 1 ? "" : "s"})`;
+    return lines.length ? [title, "", fence("text", lines.join("\n"))] : [title, "", "_none_"];
 }
 
 const iso = (t: number) => new Date(t).toISOString();
@@ -142,6 +164,8 @@ export async function collectDiagnostics(extra: DiagnosticsExtra = {}): Promise<
     out.push(`## Engine state`);
     out.push("");
     out.push(fence("json", JSON.stringify({ ...extra.state, networkRecording: isRecording(), openTabs: tabs }, null, 2)));
+    out.push("");
+    out.push(...problemsSection(extra.problems));
     out.push("");
     out.push(`## settings.yaml`);
     out.push("");

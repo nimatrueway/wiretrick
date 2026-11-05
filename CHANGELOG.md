@@ -7,6 +7,16 @@ its section below.
 
 ## [Unreleased]
 
+### Added
+
+- `ctx.evaluate` callbacks can also sit inside plain objects and arrays (`ctx.evaluate((cb) => …, { onOpen: () => …, onClose: () => … })`); before, passing one threw "arguments must be plain data".
+- The diagnostics report includes the Problems view's current problems (errors and warnings per file, with line and column).
+- A Problems warning when a `ctx.evaluate` function uses the script's own variables (like `cfg`), which aren't defined in the page world; at run time the error now names the variable and says to pass it as an argument.
+
+### Fixed
+
+- In `.tsx` scripts, JSX like `<A x={y} />` could hide later onPage handlers from the Problems view's onPage checks (`/>` was read as the start of a regex).
+
 ## [0.12.1] - 2026-11-04
 
 ### Added

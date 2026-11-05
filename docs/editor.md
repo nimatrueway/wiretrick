@@ -464,7 +464,8 @@ from **?** → **Welcome** (top right of the Help dialog); ✕ closes it.
 **Collect diagnostics…** (also *Wiretrick: Collect Diagnostics…* in the
 Code view's F1 menu, and **Download diagnostics** at the right of the
 Log and Network panel header) downloads a Markdown report meant to be handed to a person
-or an LLM: environment, scripts, settings.yaml, recent log and network
+or an LLM: environment, the Problems view's current problems, scripts,
+settings.yaml, recent log and network
 entries, and Editor state (theme, layout). It first asks for the optional
 *management* permission to list your other extensions (they can interfere
 with request interception); declining just leaves them out. Set Log level to

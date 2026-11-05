@@ -783,8 +783,8 @@ wt.onPage("*://app.example.com/*", async (ctx) => {
 - `fn` is sent as source and runs on its own: it can't use the script's
   variables, imports or `wt` — pass what it needs as `args`. Arguments and
   the result are plain data (structured-clonable); anything else rejects.
-- A function argument is a **callback**: `fn` gets a stand-in that calls it
-  back in isolated code, where stores and the overlay are — also later, from
+- A function argument (also one inside a plain object or array) is a
+  **callback**: `fn` gets a stand-in that calls it back in isolated code, where stores and the overlay are — also later, from
   the site's own events, for as long as the document lives. Its arguments
   are copied plain data the site could fake; it returns nothing to `fn`.
 
@@ -806,7 +806,9 @@ wt.onPage("*://app.example.com/*", async (ctx) => {
   treat the result as [page data](#page-world-results-are-page-data) and
   never pass secrets (store values, tokens) in.
 - It rejects with what `fn` threw, when the page's CSP forbids `eval`, and
-  when Wiretrick's page hook isn't running in the frame.
+  when Wiretrick's page hook isn't running in the frame. A script variable
+  used in `fn` rejects with "isn't defined in the page world", and the
+  Problems view warns about it as you save.
 - A `fetch` made in `fn` is the page's own, so the `page` strategy sees
   it; a `fetch` made in isolated code isn't.
 

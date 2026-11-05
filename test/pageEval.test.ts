@@ -33,7 +33,7 @@ describe("ctx.evaluate", () => {
     it("runs the function's source, not a closure: outer variables aren't there", async () => {
         const { evaluate } = setup();
         const secret = 42;
-        await expect(evaluate(() => secret)).rejects.toThrow(/secret is not defined/);
+        await expect(evaluate(() => secret)).rejects.toThrow(/`secret` isn.t defined in the page world/);
     });
 
     it("rejects with what the function threw", async () => {
@@ -87,6 +87,22 @@ describe("ctx.evaluate", () => {
         } finally {
             delete (globalThis as any).__pageApp;
         }
+    });
+
+    it("callbacks inside plain objects and arrays work too; the caller's objects are left alone", async () => {
+        const { evaluate } = setup();
+        const got: unknown[] = [];
+        const cb = { set: (c: boolean) => got.push(c), log: () => got.push("log"), n: 1 };
+        const list = [(x: number) => got.push(x)];
+        expect(await evaluate((o: typeof cb, l: typeof list) => (o.set(true), o.log(), l[0](o.n), typeof o.set), cb, list)).toBe("function");
+        await new Promise((r) => setTimeout(r, 10));
+        expect(got).toEqual([true, "log", 1]);
+        expect(typeof cb.set).toBe("function");
+    });
+
+    it("an undefined name says to pass it as an argument", async () => {
+        const { evaluate } = setup();
+        await expect(evaluate(() => (globalThis as any).eval("cfgMissing.env"))).rejects.toThrow(/`cfgMissing` isn't defined in the page world .* ctx\.evaluate\(\(cfgMissing\) => …, cfgMissing\)/);
     });
 
     it("a callback's arguments must be plain data", async () => {

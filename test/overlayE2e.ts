@@ -646,11 +646,11 @@ wt.onPage("${origin}/ov-isost*", async (ctx) => {
         const poll = () => ((window as any)[k] || Date.now() - t0 > 2000 ? r((window as any)[k] + "|" + location.pathname) : setTimeout(poll, 20));
         poll();
     }), "__isoSecret").then(String, (e) => "rejected: " + e.message);
-    await ctx.evaluate((set) => {
-        addEventListener("wt-e2e-ping", (e: any) => set(e.detail + ":" + (window as any).__isoSecret));
-    }, (v: string) => {
+    await ctx.evaluate((on) => {
+        addEventListener("wt-e2e-ping", (e: any) => on.ping(e.detail + ":" + (window as any).__isoSecret));
+    }, { ping: (v: string) => {
         document.body.dataset.pinged = v + ":" + typeof (window as any).__isoSecret + ":" + g.n;
-    });
+    } });
     document.body.dataset.subscribed = "1";
 })
 

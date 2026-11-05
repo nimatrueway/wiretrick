@@ -179,11 +179,12 @@ async function installedExtensions(): Promise<unknown> {
     }
 }
 
-/** Ask the background for the Markdown report; `ui` adds manager-side context. */
-export async function collectDiagnostics(ui: Record<string, unknown>): Promise<string> {
+/** Ask the background for the Markdown report; `ui` adds manager-side context, `problems` the Problems view. */
+export async function collectDiagnostics(ui: Record<string, unknown>, problems?: unknown[]): Promise<string> {
     const extensions = await installedExtensions();
     const extra = {
         extensions,
+        problems,
         ui: {
             userAgentData: await uaHighEntropy(),
             screen: { width: screen.width, height: screen.height, availWidth: screen.availWidth, availHeight: screen.availHeight, devicePixelRatio },

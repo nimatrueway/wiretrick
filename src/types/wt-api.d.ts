@@ -279,7 +279,7 @@ declare namespace Wiretrick {
          * this script's variables (pass what it needs as `args`). Arguments
          * and the result are copied (plain data; a promise is awaited).
          *
-         * A function argument is a callback: `fn` gets a stand-in that calls
+         * A function argument (also inside a plain object or array) is a callback: `fn` gets a stand-in that calls
          * it back here (where stores and the overlay are), also later — from
          * the site's events — for as long as the document lives. Its
          * arguments are copied page data; it returns nothing to `fn`.

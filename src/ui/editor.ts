@@ -1442,7 +1442,7 @@ async function runDiagnostics(): Promise<void> {
     netState("busy", "Collecting diagnostics…");
     try {
         const name = diagnosticsFileName();
-        const report = await collectDiagnostics(managerUiState());
+        const report = await collectDiagnostics(managerUiState(), problemGroups);
         downloadText(name, report, "text/markdown");
         Object.assign(d, { report, text: `downloaded (${Math.ceil(report.length / 1024)} KB)`, title: name });
         netState("ok", `Diagnostics downloaded: ${name}`);
