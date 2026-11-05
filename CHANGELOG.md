@@ -31,7 +31,7 @@ Wiretrick is experimental: its scripting API keeps changing, and releases may br
 
 - `world` (now `js`) and `wt.onOverlay(route, fn)` (now `wt.onPage({ …route, dom: "overlay" }, fn)`). Both still work; the samples and docs use the new forms.
 
-## [0.12.2] - 2026-11-04
+## [0.12.2-alpha] - 2026-11-04
 
 ### Added
 
@@ -43,7 +43,7 @@ Wiretrick is experimental: its scripting API keeps changing, and releases may br
 
 - In `.tsx` scripts, JSX like `<A x={y} />` could hide later onPage handlers from the Problems view's onPage checks, and wrongly flag the next top-level `wt.onPage` with "call wt.onPage() at the top level" (`/>` was read as the start of a regex).
 
-## [0.12.1] - 2026-11-04
+## [0.12.1-alpha] - 2026-11-04
 
 ### Added
 
@@ -53,7 +53,7 @@ Wiretrick is experimental: its scripting API keeps changing, and releases may br
 
 - The built-in `react`, `react-dom` and `valtio` threw "aren't available in page code" in `onPage` code, which now runs in the isolated world by default: they work there now (React loads on first use). `world: "page"` code still can't use them, and its error says so.
 
-## [0.12.0] - 2026-11-04
+## [0.12.0-alpha] - 2026-11-04
 
 ### Added
 
@@ -75,7 +75,7 @@ Wiretrick is experimental: its scripting API keeps changing, and releases may br
 
 - A script renamed while its synced folder wasn't connected came back as a duplicate (the old file re-imported) on reconnect; its file is now moved instead.
 
-## [0.11.1] - 2026-11-04
+## [0.11.1-alpha] - 2026-11-04
 
 ### Added
 
@@ -83,7 +83,7 @@ Wiretrick is experimental: its scripting API keeps changing, and releases may br
 
 - Problems view warnings for a main-world `onPage` handler that uses a store or an `onOverlay` handle (both disallowed there: the page could read and forge them), with a quick fix that moves the handler to `world: "isolated"`. In main-world code the stores' error now says to use the isolated world.
 
-## [0.11.0] - 2026-11-04
+## [0.11.0-alpha] - 2026-11-04
 
 ### Changed
 
@@ -103,7 +103,7 @@ Wiretrick is experimental: its scripting API keeps changing, and releases may br
 - `strategy: "page"` handlers now see a page's first requests too: the `fetch`/`XHR` calls its inline scripts make while it loads used to go out before the hook knew the page's handlers. They now wait for that (at most 3 s); pages with no page-strategy handlers get their native `fetch`/`XHR` back untouched. Chrome MV2 injects the hook inline so it runs before the page's own scripts (strict-CSP pages too).
 - Chrome MV3: after turning on "Allow User Scripts" on chrome://extensions, coming back to the Editor clears the "user scripts are off" banner and Problems error and registers the isolated `onPage` code right away (it used to wait for the next script change).
 
-## [0.10.0] - 2026-11-03
+## [0.10.0-alpha] - 2026-11-03
 
 ### Added
 
@@ -141,7 +141,7 @@ Wiretrick is experimental: its scripting API keeps changing, and releases may br
 - Settings → Logging → **Default level** showed "Debug+" until a level had been chosen, though the Log panel showed Info+ (the actual default).
 - `wt.storage.get` in an `onDocument` handler returned `{ value }` instead of the stored value (unless the page's CSP had moved the handler to the isolated world).
 
-## [0.9.18] - 2026-10-31
+## [0.9.18-alpha] - 2026-10-31
 
 ### Added
 
@@ -159,7 +159,7 @@ Wiretrick is experimental: its scripting API keeps changing, and releases may br
 - Log and Network share the panel header's actions, in the same place on both: **Clear** empties the Log and the Network recording together (also ⌥⇧K), and **Download diagnostics** saves the diagnostics report. The Log's separate debug-log download is gone (the report includes the debug log), as is the Network view's own Clear.
 - Network view: each request/response body is now kept up to 2 MB by default (was 256 kB). `bodyCap:` / Settings → Network → Body capture still changes it.
 
-## [0.9.17] - 2026-10-26
+## [0.9.17-alpha] - 2026-10-26
 
 ### Added
 
@@ -181,26 +181,26 @@ Wiretrick is experimental: its scripting API keeps changing, and releases may br
 - Settings → Synced folder → Folder path says how to copy a folder's path on your OS (the browser's folder picker can't reveal it), shows an example path for it, and cleans up what's pasted: the quotes Windows' Copy as path adds, a `file://` URI, a trailing slash.
 - After you pick a synced folder, Settings → Folder path flashes and shows a ⚠ while the path is empty or doesn't end in that folder's name (likely another folder's). Pressing the ↗ button without a path takes you there too.
 
-## [0.9.16] - 2026-10-25
+## [0.9.16-alpha] - 2026-10-25
 
 ### Changed
 
 - `onResponseBody` handlers may return nothing (`void` / `undefined` / `null`) to leave the body as it is — now in the typings too, like every other handler. Any body returned counts as modified, even the one the handler received: bodies are no longer compared, so `(ctx, body) => body` re-encodes and serves the body (use a handler that returns nothing to only read it).
 
-## [0.9.15] - 2026-10-25
+## [0.9.15-alpha] - 2026-10-25
 
 ### Fixed
 
 - A binary body served with a text `Content-Type` (x.com's `jf.x.com/onboarding/web/landing` is `text/plain`) was decoded as UTF-8 and re-encoded, corrupting it even when the handler returned it unchanged; x.com stopped loading under an `onResponseBody` on `*`. A text body that isn't valid UTF-8 is now binary (`binary: true` routes only), and a body handed back unchanged keeps its original bytes on every strategy.
 - Picking a field suggestion (e.g. `script:`) with Tab opened the "+ Filter" popup at the far right of the filter bar; it now opens under the word it came from.
 
-## [0.9.14] - 2026-10-25
+## [0.9.14-alpha] - 2026-10-25
 
 ### Added
 
 - Package imports: a script can import an npm package by its pinned unpkg.com URL, e.g. `import dayjs from "https://unpkg.com/dayjs@1.11.13"`. Saving downloads the package and its dependencies once and stores them, so scripts also run offline, on every strategy and in `wt.onDocument`. Its TypeScript declarations (or `@types`) type-check the import in the Code view and, through `.wiretrick/types/` and `tsconfig.json` `paths`, in the synced folder. Unpinned versions and other hosts are compile errors. See [Packages from unpkg](docs/scripting.md#packages-from-unpkg).
 
-## [0.9.13] - 2026-10-25
+## [0.9.13-alpha] - 2026-10-25
 
 ### Added
 
@@ -215,7 +215,7 @@ Wiretrick is experimental: its scripting API keeps changing, and releases may br
 - Scripts saved under an older version kept that version's parsed routes until edited (e.g. `binary: false` stayed "unset" and still warned). Stored script meta is now recompiled once after every extension update.
 - The "body is binary" warning no longer tells you to add `binary: true` when the script already has such a route. It names that route and says what dropped the body — usually an outdated helper (reinstall it).
 
-## [0.9.12] - 2026-10-24
+## [0.9.12-alpha] - 2026-10-24
 
 ### Added
 
@@ -228,8 +228,8 @@ Wiretrick is experimental: its scripting API keeps changing, and releases may br
 
 - `binary: true` now means binary bodies **only** — text bodies skip the
   handler. Use `binary: "both"` for the old behavior.
-- The local helper is now v0.4.0 and the extension requires it: helpers
-  from before v0.9.11 don't know about binary routes or
+- The local helper is now v0.4.0-alpha and the extension requires it: helpers
+  from before v0.9.11-alpha don't know about binary routes or
   `settings.textTypes` (they still treated HLS playlists as binary), so
   the extension now asks you to reinstall.
 
@@ -241,7 +241,7 @@ Wiretrick is experimental: its scripting API keeps changing, and releases may br
   landed on the latest row and shared one reason — e.g. "the body is
   binary" for a request that never reached the helper.
 
-## [0.9.11] - 2026-10-24
+## [0.9.11-alpha] - 2026-10-24
 
 ### Added
 
@@ -267,7 +267,7 @@ Wiretrick is experimental: its scripting API keeps changing, and releases may br
   `extension` skipped a binary body, and how to get it (`binary: true` or
   `settings.textTypes`).
 
-## [0.9.10] - 2026-10-24
+## [0.9.10-alpha] - 2026-10-24
 
 ### Changed
 
@@ -277,7 +277,7 @@ Wiretrick is experimental: its scripting API keeps changing, and releases may br
   every tab. Before, a burst like a video's segments stopped being flagged
   after the first 20.
 
-## [0.9.9] - 2026-10-24
+## [0.9.9-alpha] - 2026-10-24
 
 ### Fixed
 
@@ -300,7 +300,7 @@ Wiretrick is experimental: its scripting API keeps changing, and releases may br
 - Settings → About: a Help… button opens the API reference, samples and
   shortcuts (the same as the ? in the editor toolbar).
 
-## [0.9.8] - 2026-10-24
+## [0.9.8-alpha] - 2026-10-24
 
 ### Added
 
@@ -332,7 +332,7 @@ Wiretrick is experimental: its scripting API keeps changing, and releases may br
 - Network filter (Basic): Shift+←/→ with the caret between capsules,
   Shift+click, and dragging from the text onto capsules now select them.
 
-## [0.9.7] - 2026-10-24
+## [0.9.7-alpha] - 2026-10-24
 
 ### Added
 
@@ -365,7 +365,7 @@ Wiretrick is experimental: its scripting API keeps changing, and releases may br
 
 - **+ Filter**: **Add** ignored a value picked with ↑/↓.
 
-## [0.9.6] - 2026-10-24
+## [0.9.6-alpha] - 2026-10-24
 
 ### Added
 
@@ -380,7 +380,7 @@ Wiretrick is experimental: its scripting API keeps changing, and releases may br
 - Release notes are the version's CHANGELOG.md section, with install steps
   in [docs/install.md](docs/install.md).
 
-## [0.9.5] - 2026-10-24
+## [0.9.5-alpha] - 2026-10-24
 
 ### Changed
 
@@ -411,28 +411,28 @@ Wiretrick is experimental: its scripting API keeps changing, and releases may br
 - Network filter: autocomplete in Basic mode, AND/OR groups that round-trip
   with Advanced mode, and chips that select like text.
 
-## [0.9.4] - 2026-10-24
+## [0.9.4-alpha] - 2026-10-24
 
 ### Added
 
 - Network view: a Basic/Advanced filter bar with a query syntax,
   autocomplete and help.
 
-## [0.9.3] - 2026-10-23
+## [0.9.3-alpha] - 2026-10-23
 
 ### Added
 
 - Open button: a custom editor URL (with `{path}` and `{line}`) next to
   VS Code and VS Code Insiders.
 
-## [0.9.2] - 2026-10-23
+## [0.9.2-alpha] - 2026-10-23
 
 ### Added
 
 - A warning when a `page`-strategy request runs in a tab that has no page
   hook (reload the tab).
 
-## [0.9.1] - 2026-10-23
+## [0.9.1-alpha] - 2026-10-23
 
 ### Added
 
@@ -444,7 +444,7 @@ Wiretrick is experimental: its scripting API keeps changing, and releases may br
 - The status bar shows the Problems, Log and Network counts; the bottom
   panel tabs no longer have badges.
 
-## [0.9.0] - 2026-10-23
+## [0.9.0-alpha] - 2026-10-23
 
 ### Added
 
@@ -462,14 +462,14 @@ Wiretrick is experimental: its scripting API keeps changing, and releases may br
 - Releases are published right away; the signed Firefox `.xpi` is added
   when Mozilla finishes signing it.
 
-## [0.8.3] - 2026-10-23
+## [0.8.3-alpha] - 2026-10-23
 
 ### Changed
 
 - Problems show in the editor as markers: their hover comes before the API
   docs, and F8 reaches them.
 
-## [0.8.2] - 2026-10-23
+## [0.8.2-alpha] - 2026-10-23
 
 ### Added
 
@@ -482,7 +482,7 @@ Wiretrick is experimental: its scripting API keeps changing, and releases may br
 - Chromium MV2: dropped the MAIN-world hook entry it rejects.
 - Folder sync no longer echoes a received change back as sending.
 
-## [0.8.1] - 2026-10-22
+## [0.8.1-alpha] - 2026-10-22
 
 ### Changed
 
@@ -494,7 +494,7 @@ Wiretrick is experimental: its scripting API keeps changing, and releases may br
 
 - No native tooltip stacks on top of Wiretrick's tooltips.
 
-## [0.8.0] - 2026-10-22
+## [0.8.0-alpha] - 2026-10-22
 
 ### Changed
 
@@ -510,7 +510,7 @@ Wiretrick is experimental: its scripting API keeps changing, and releases may br
 - `rules`: smaller regexes, and a too-complex error that shows the regex,
   its size and the limit.
 
-## [0.7.0] - 2026-10-22
+## [0.7.0-alpha] - 2026-10-22
 
 ### Added
 
@@ -522,7 +522,7 @@ Wiretrick is experimental: its scripting API keeps changing, and releases may br
 
 - Panel counts stay until the Log or Network view is cleared.
 
-## [0.6.0] - 2026-10-22
+## [0.6.0-alpha] - 2026-10-22
 
 ### Added
 
@@ -536,7 +536,7 @@ Wiretrick is experimental: its scripting API keeps changing, and releases may br
 - Quick saves and slow-drive echoes no longer cause conflicts; the
   conflict dialog takes focus and has key shortcuts.
 
-## [0.5.0] - 2026-10-22
+## [0.5.0-alpha] - 2026-10-22
 
 ### Changed
 
@@ -551,7 +551,7 @@ Wiretrick is experimental: its scripting API keeps changing, and releases may br
   popup.
 - Folder sync refreshes typings, `tsconfig` and the schema on every start.
 
-## [0.4.0] - 2026-10-22
+## [0.4.0-alpha] - 2026-10-22
 
 ### Changed
 
@@ -564,7 +564,7 @@ Wiretrick is experimental: its scripting API keeps changing, and releases may br
 - Network keeps script-touched requests while the view isn't open.
 - Help dialog: type-to-search in Reference and Samples.
 
-## [0.3.9] - 2026-10-21
+## [0.3.9-alpha] - 2026-10-21
 
 ### Added
 
@@ -577,27 +577,27 @@ Wiretrick is experimental: its scripting API keeps changing, and releases may br
 - `extension` strategy header changes (`extraHeaders`), and the final
   headers shown in Network.
 
-## [0.3.8] - 2026-10-21
+## [0.3.8-alpha] - 2026-10-21
 
 ### Changed
 
 - Scripts match URLs with URLPattern.
 - Ship only the Monaco files the editor loads.
 
-## [0.3.7] - 2026-10-21
+## [0.3.7-alpha] - 2026-10-21
 
 ### Added
 
 - A VS Code-like Editor, diagnostics, a Shortcuts tab in the help dialog;
   Ctrl+` toggles the bottom panel.
 
-## [0.3.6] - 2026-10-21
+## [0.3.6-alpha] - 2026-10-21
 
 ### Fixed
 
 - MV2 popup params resolve imports.
 
-## [0.3.5] - 2026-10-21
+## [0.3.5-alpha] - 2026-10-21
 
 ### Fixed
 
@@ -605,30 +605,30 @@ Wiretrick is experimental: its scripting API keeps changing, and releases may br
   outside the Editor are written to the folder.
 - `tsWorker.js` stays under AMO's 5 MB file limit.
 
-## [0.3.4] - 2026-10-20
+## [0.3.4-alpha] - 2026-10-20
 
 ### Fixed
 
 - Release: whitespace in the AMO keys.
 
-## [0.3.3] - 2026-10-20
+## [0.3.3-alpha] - 2026-10-20
 
 Release-only rebuild.
 
-## [0.3.2] - 2026-10-20
+## [0.3.2-alpha] - 2026-10-20
 
 ### Added
 
 - A Firefox `.xpi` (signed by Mozilla when the keys are set);
   `wiretrick-mv2-*` release names.
 
-## [0.3.1] - 2026-10-20
+## [0.3.1-alpha] - 2026-10-20
 
 ### Added
 
 - A new icon, with a 32 px size for HiDPI toolbars.
 
-## [0.3.0] - 2026-10-20
+## [0.3.0-alpha] - 2026-10-20
 
 ### Added
 
@@ -638,7 +638,7 @@ Release-only rebuild.
   and whole-file folder sync.
 - VS Code-style completion details, parameter hints and hovers.
 
-## [0.2.0] - 2026-10-20
+## [0.2.0-alpha] - 2026-10-20
 
 ### Added
 
@@ -651,7 +651,7 @@ Release-only rebuild.
 
 - A script's name is its file name.
 
-## [0.1.0] - 2026-10-20
+## [0.1.0-alpha] - 2026-10-20
 
 ### Added
 
@@ -662,57 +662,57 @@ Release-only rebuild.
 
 - The script API is `wt.*` (was `res.*`).
 
-## [0.0.1] - 2026-10-19
+## [0.0.1-alpha] - 2026-10-19
 
 First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
 [Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.13.0-alpha...HEAD
-[0.13.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.12.2...v0.13.0-alpha
-[0.12.2]: https://github.com/nimatrueway/wiretrick/compare/v0.12.1...v0.12.2
-[0.12.1]: https://github.com/nimatrueway/wiretrick/compare/v0.12.0...v0.12.1
-[0.12.0]: https://github.com/nimatrueway/wiretrick/compare/v0.11.1...v0.12.0
-[0.11.1]: https://github.com/nimatrueway/wiretrick/compare/v0.11.0...v0.11.1
-[0.11.0]: https://github.com/nimatrueway/wiretrick/compare/v0.10.0...v0.11.0
-[0.10.0]: https://github.com/nimatrueway/wiretrick/compare/v0.9.18...v0.10.0
-[0.9.18]: https://github.com/nimatrueway/wiretrick/compare/v0.9.17...v0.9.18
-[0.9.17]: https://github.com/nimatrueway/wiretrick/compare/v0.9.16...v0.9.17
-[0.9.16]: https://github.com/nimatrueway/wiretrick/compare/v0.9.15...v0.9.16
-[0.9.15]: https://github.com/nimatrueway/wiretrick/compare/v0.9.14...v0.9.15
-[0.9.14]: https://github.com/nimatrueway/wiretrick/compare/v0.9.13...v0.9.14
-[0.9.13]: https://github.com/nimatrueway/wiretrick/compare/v0.9.12...v0.9.13
-[0.9.12]: https://github.com/nimatrueway/wiretrick/compare/v0.9.11...v0.9.12
-[0.9.11]: https://github.com/nimatrueway/wiretrick/compare/v0.9.10...v0.9.11
-[0.9.10]: https://github.com/nimatrueway/wiretrick/compare/v0.9.9...v0.9.10
-[0.9.9]: https://github.com/nimatrueway/wiretrick/compare/v0.9.8...v0.9.9
-[0.9.8]: https://github.com/nimatrueway/wiretrick/compare/v0.9.7...v0.9.8
-[0.9.7]: https://github.com/nimatrueway/wiretrick/compare/v0.9.6...v0.9.7
-[0.9.6]: https://github.com/nimatrueway/wiretrick/compare/v0.9.5...v0.9.6
-[0.9.5]: https://github.com/nimatrueway/wiretrick/compare/v0.9.4...v0.9.5
-[0.9.4]: https://github.com/nimatrueway/wiretrick/compare/v0.9.3...v0.9.4
-[0.9.3]: https://github.com/nimatrueway/wiretrick/compare/v0.9.2...v0.9.3
-[0.9.2]: https://github.com/nimatrueway/wiretrick/compare/v0.9.1...v0.9.2
-[0.9.1]: https://github.com/nimatrueway/wiretrick/compare/v0.9.0...v0.9.1
-[0.9.0]: https://github.com/nimatrueway/wiretrick/compare/v0.8.3...v0.9.0
-[0.8.3]: https://github.com/nimatrueway/wiretrick/compare/v0.8.2...v0.8.3
-[0.8.2]: https://github.com/nimatrueway/wiretrick/compare/v0.8.1...v0.8.2
-[0.8.1]: https://github.com/nimatrueway/wiretrick/compare/v0.8.0...v0.8.1
-[0.8.0]: https://github.com/nimatrueway/wiretrick/compare/v0.7.0...v0.8.0
-[0.7.0]: https://github.com/nimatrueway/wiretrick/compare/v0.6.0...v0.7.0
-[0.6.0]: https://github.com/nimatrueway/wiretrick/compare/v0.5.0...v0.6.0
-[0.5.0]: https://github.com/nimatrueway/wiretrick/compare/v0.4.0...v0.5.0
-[0.4.0]: https://github.com/nimatrueway/wiretrick/compare/v0.3.9...v0.4.0
-[0.3.9]: https://github.com/nimatrueway/wiretrick/compare/v0.3.8...v0.3.9
-[0.3.8]: https://github.com/nimatrueway/wiretrick/compare/v0.3.7...v0.3.8
-[0.3.7]: https://github.com/nimatrueway/wiretrick/compare/v0.3.6...v0.3.7
-[0.3.6]: https://github.com/nimatrueway/wiretrick/compare/v0.3.5...v0.3.6
-[0.3.5]: https://github.com/nimatrueway/wiretrick/compare/v0.3.4...v0.3.5
-[0.3.4]: https://github.com/nimatrueway/wiretrick/compare/v0.3.3...v0.3.4
-[0.3.3]: https://github.com/nimatrueway/wiretrick/compare/v0.3.2...v0.3.3
-[0.3.2]: https://github.com/nimatrueway/wiretrick/compare/v0.3.1...v0.3.2
-[0.3.1]: https://github.com/nimatrueway/wiretrick/compare/v0.3.0...v0.3.1
-[0.3.0]: https://github.com/nimatrueway/wiretrick/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/nimatrueway/wiretrick/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/nimatrueway/wiretrick/compare/v0.0.1...v0.1.0
-[0.0.1]: https://github.com/nimatrueway/wiretrick/releases/tag/v0.0.1
+[0.13.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.12.2-alpha...v0.13.0-alpha
+[0.12.2-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.12.1-alpha...v0.12.2-alpha
+[0.12.1-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.12.0-alpha...v0.12.1-alpha
+[0.12.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.11.1-alpha...v0.12.0-alpha
+[0.11.1-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.11.0-alpha...v0.11.1-alpha
+[0.11.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.10.0-alpha...v0.11.0-alpha
+[0.10.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.18-alpha...v0.10.0-alpha
+[0.9.18-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.17-alpha...v0.9.18-alpha
+[0.9.17-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.16-alpha...v0.9.17-alpha
+[0.9.16-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.15-alpha...v0.9.16-alpha
+[0.9.15-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.14-alpha...v0.9.15-alpha
+[0.9.14-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.13-alpha...v0.9.14-alpha
+[0.9.13-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.12-alpha...v0.9.13-alpha
+[0.9.12-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.11-alpha...v0.9.12-alpha
+[0.9.11-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.10-alpha...v0.9.11-alpha
+[0.9.10-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.9-alpha...v0.9.10-alpha
+[0.9.9-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.8-alpha...v0.9.9-alpha
+[0.9.8-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.7-alpha...v0.9.8-alpha
+[0.9.7-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.6-alpha...v0.9.7-alpha
+[0.9.6-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.5-alpha...v0.9.6-alpha
+[0.9.5-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.4-alpha...v0.9.5-alpha
+[0.9.4-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.3-alpha...v0.9.4-alpha
+[0.9.3-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.2-alpha...v0.9.3-alpha
+[0.9.2-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.1-alpha...v0.9.2-alpha
+[0.9.1-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.0-alpha...v0.9.1-alpha
+[0.9.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.8.3-alpha...v0.9.0-alpha
+[0.8.3-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.8.2-alpha...v0.8.3-alpha
+[0.8.2-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.8.1-alpha...v0.8.2-alpha
+[0.8.1-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.8.0-alpha...v0.8.1-alpha
+[0.8.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.7.0-alpha...v0.8.0-alpha
+[0.7.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.6.0-alpha...v0.7.0-alpha
+[0.6.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.5.0-alpha...v0.6.0-alpha
+[0.5.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.4.0-alpha...v0.5.0-alpha
+[0.4.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.3.9-alpha...v0.4.0-alpha
+[0.3.9-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.3.8-alpha...v0.3.9-alpha
+[0.3.8-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.3.7-alpha...v0.3.8-alpha
+[0.3.7-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.3.6-alpha...v0.3.7-alpha
+[0.3.6-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.3.5-alpha...v0.3.6-alpha
+[0.3.5-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.3.4-alpha...v0.3.5-alpha
+[0.3.4-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.3.3-alpha...v0.3.4-alpha
+[0.3.3-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.3.2-alpha...v0.3.3-alpha
+[0.3.2-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.3.1-alpha...v0.3.2-alpha
+[0.3.1-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.3.0-alpha...v0.3.1-alpha
+[0.3.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.2.0-alpha...v0.3.0-alpha
+[0.2.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.1.0-alpha...v0.2.0-alpha
+[0.1.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.0.1-alpha...v0.1.0-alpha
+[0.0.1-alpha]: https://github.com/nimatrueway/wiretrick/releases/tag/v0.0.1-alpha
