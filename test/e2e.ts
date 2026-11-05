@@ -601,6 +601,8 @@ check("logs: page's own console is not captured", !logText.includes("E2E-PAGE-NO
 check("debug logs: hook/bridge/cdp entries present", srcs.has("page") && srcs.has("bridge") && srcs.has("debugger"), `sources: ${[...srcs].join(",")}`);
 
 // ---------- 12. movable panels ----------
+// a tooltip left up where the pointer last rested (tooltip.ts) can sit over the splitter
+await mgr.keyboard.press("Escape");
 const before = await mgr.evaluate(() => document.getElementById("sidebar")!.offsetWidth);
 const sb = (await mgr.locator("#split-v").boundingBox()) || { x: 320, y: 0 };
 await mgr.mouse.move(sb.x + 2, sb.y + 150);

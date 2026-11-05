@@ -29,17 +29,21 @@ import {
 import { showContextMenu } from "./ContextMenu";
 import { NameInput } from "./NameInput";
 import { badgeRowOf, openInstallPage, packageOf, packages, packageTitle } from "../state/packages";
+import { packageFolders } from "../../shared/makePackage";
 import { packagesApi } from "../install/api";
 import type { InstalledPackage } from "../../shared/packageModel";
 
 const FOLDER_ICON = `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M1.5 3.5h4.3l1.5 1.5h7.2v8h-13z" fill="none" stroke="currentColor" stroke-linejoin="round"/></svg>`;
 const FOLDER_OPEN_ICON = `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M1.5 12.5v-9h4.3l1.5 1.5h5.2v2M1.5 12.5l2-5.5h11l-2 5.5z" fill="none" stroke="currentColor" stroke-linejoin="round"/></svg>`;
+/** a package's folder: a box */
+const PACKAGE_ICON = `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M8 1.5l6 3.25v6.5L8 14.5l-6-3.25v-6.5zM2 4.75L8 8l6-3.25M8 8v6.5M5 3.1l6 3.3" fill="none" stroke="currentColor" stroke-linejoin="round"/></svg>`;
 /** the explorer twistie (VS Code's chevron-right) */
 const CHEVRON = `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
-type Icon = "ts" | "tsx" | "yaml" | "json" | "svg" | "folder" | "folder-open";
+type Icon = "ts" | "tsx" | "yaml" | "json" | "svg" | "folder" | "folder-open" | "package";
 
 function FileIcon({ kind }: { kind: Icon }) {
+    if (kind === "package") return <span className="file-icon folder package" aria-hidden="true" dangerouslySetInnerHTML={{ __html: PACKAGE_ICON }} />;
     const folder = kind === "folder" || kind === "folder-open";
     return folder ? (
         <span className="file-icon folder" aria-hidden="true" dangerouslySetInnerHTML={{ __html: kind === "folder" ? FOLDER_ICON : FOLDER_OPEN_ICON }} />
@@ -120,6 +124,14 @@ function installMenu(): MenuItem[] {
 }
 
 /** open `id` unless it's already the open file */
+/** the entry script of the package a folder is (installed, or laid out like one — shared/makePackage), else undefined */
+function packageEntryOf(folder: string): string | undefined {
+    const p = Object.values(packages.byId).find((x) => x.folder === folder);
+    if (p) return p.entryId;
+    const name = packageFolders(explorer.scripts.map((s) => ({ name: s.meta.name, code: s.code }))).get(folder);
+    return name === undefined ? undefined : explorer.scripts.find((s) => s.meta.name === name)?.id;
+}
+
 const open = (id: string): void => {
     if (id !== explorer.selectedId || explorer.typingsShown) actions.select(id);
 };
@@ -251,11 +263,16 @@ function onContextMenu(e: MouseEvent<HTMLUListElement>): void {
     const script = row.kind === "script" ? explorer.scripts.find((s) => s.id === id) : undefined;
     const isLib = script?.meta.active === false;
     const pkg = packageOf(row);
+    const entry = script && isEntryName(script.meta.name) ? script : undefined;
+    const exportId = row.kind === "folder" ? packageEntryOf(row.path) : entry?.id;
+    const inPackageFolder = !!entry && folderOf(entry.meta.name) !== "" && packageEntryOf(folderOf(entry.meta.name)) === entry.id;
     showContextMenu(e.clientX, e.clientY, [
         ...(row.kind === "folder" ? [] : [{ label: "Open", key: "Enter", run: () => open(id) }, null]),
         ...(pkg ? packageMenu(pkg) : []),
         ...(script && !isLib ? [{ label: script.enabled ? "Disable" : "Enable", run: () => actions.setScriptEnabled(script.id, !script.enabled) }, null] : []),
-        ...(script && isEntryName(script.meta.name) && !pkg ? [{ label: "Make Package…", run: () => actions.makePackage(script.id) }, null] : []),
+        ...(entry && !pkg && !inPackageFolder ? [{ label: "Make Package…", run: () => actions.makePackage(entry.id) }] : []),
+        ...(exportId ? [{ label: "Export Package…", run: () => actions.exportPackage(exportId) }] : []),
+        ...((entry && !pkg && !inPackageFolder) || exportId ? [null] : []),
         ...newItemsMenu(targetFolder(row)),
         null,
         { label: "Copy Path", run: () => copy(rowFilePath(row), `copied ${rowFilePath(row)}`) },
@@ -365,9 +382,11 @@ export function ExplorerTree() {
         const at = badgeRowOf(p);
         pkgByRow.set("folder" in at ? folderRowId(at.folder) : at.id, p);
     }
+    const localPkgs = packageFolders(snap.scripts.map((s) => ({ name: s.meta.name, code: s.code })));
     const pkgBadge = (id: string) => {
         const p = pkgByRow.get(id);
-        if (!p) return null;
+        // a package folder's icon says it's a package: its badge is for news only
+        if (!p || (isFolderRowId(id) && !p.pending && !p.lastError)) return null;
         return (
             <span
                 className={"pkg-ind" + (p.pending ? " pending" : p.lastError ? " failed" : "")}
@@ -469,8 +488,8 @@ export function ExplorerTree() {
                     " folder",
                     r.depth,
                     <>
-                        <FileIcon kind={r.expanded ? "folder-open" : "folder"} />
-                        {name(r, r.name, `${r.path}\nF2 to rename · drag to move`)}
+                        <FileIcon kind={pkgByRow.get(r.id) || localPkgs.has(r.path) ? "package" : r.expanded ? "folder-open" : "folder"} />
+                        {name(r, r.name, [r.path, pkgByRow.get(r.id) ? packageTitle(pkgByRow.get(r.id)!) : localPkgs.has(r.path) ? "A package — right-click → Export Package… to share it" : "", "F2 to rename · drag to move"].filter(Boolean).join("\n"))}
                         {pkgBadge(r.id)}
                     </>,
                     { "aria-expanded": !!r.expanded, draggable: true, ...click(r.id, () => setFolderExpanded(r.path, !r.expanded)) },

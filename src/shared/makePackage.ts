@@ -9,6 +9,7 @@ import { builtinSpec } from "./builtinSpecs";
 import { parseHeader } from "./packageHeader";
 import { isUrlSpec } from "./packageImports";
 import { candidates, ENTRY_FILE_RE } from "./packageSource";
+import { isEntryName } from "./scriptName";
 import { folderOf, importPath, importSpecs, isDataSpec, rewriteImports } from "./scriptImports";
 
 export interface PackagePlan {
@@ -171,4 +172,21 @@ export function makePackagePlan(entry: string, files: Record<string, string>, fo
             if (text !== files[p]) edits.push({ path: p, text });
         }
     return { folder, inPlace, files: out, edits, addsHeader, bare, missing };
+}
+
+/**
+ * Folders the Explorer shows as packages: each holds one entry (in it,
+ * not a subfolder) with a header `@name`, and no other entry below it.
+ * Folder → the entry's script name.
+ */
+export function packageFolders(scripts: { name: string; code: string }[]): Map<string, string> {
+    const entries = scripts.filter((s) => isEntryName(s.name));
+    const out = new Map<string, string>();
+    for (const e of entries) {
+        const dir = folderOf(e.name);
+        if (!dir || !parseHeader(e.code).name) continue;
+        if (entries.some((o) => o !== e && o.name.startsWith(dir + "/"))) continue;
+        out.set(dir, e.name);
+    }
+    return out;
 }

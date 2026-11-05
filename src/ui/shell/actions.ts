@@ -38,6 +38,8 @@ export const actions = {
     deleteRows(_rows: TreeRow[]): void {},
     /** Make Package…: put the entry script and what it imports in a folder of their own, with a header */
     makePackage(_id: string): void {},
+    /** Export Package…: download the entry and what it imports (one file as is, more as a .zip) */
+    exportPackage(_id: string): void {},
     /** rename / move rows */
     moveRows(_plan: { item: TreeRow; to: string }[]): Promise<void> {
         return Promise.resolve();

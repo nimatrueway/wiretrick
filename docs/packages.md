@@ -66,8 +66,9 @@ dark/
 ```
 
 They are ordinary scripts and data files: open, edit, enable, rename and move
-them as usual. The Explorer marks the package's folder (or a one-file
-package's entry) with 📦; hover it for the source, version and update state.
+them as usual. The Explorer shows the package's folder with a box icon (a
+one-file package's entry with 📦); hover it for the source, version and
+update state.
 
 Imports that don't start with `./` or `../` (bare imports like `"utils"`)
 aren't part of the package: they resolve against your own scripts from the
@@ -157,7 +158,13 @@ the imports for the new places and adds a header (`@name`, `@version 1.0.0`,
 literal URL). The confirmation lists every move and copy, and warns about
 imports by bare name (they resolve from the installer's root, not the
 package) and imports that point at no file. An entry already alone in its
-folder with everything it imports only gets the header.
+folder with everything it imports only gets the header. A folder holding one
+entry with a header `@name` shows as a package (a box icon).
+
+**Export Package…** (right-click a package's folder or an entry script)
+downloads the entry and every file it imports by a relative path, as saved: a
+one-file package as its `.wiretrick.ts`, more as a `.zip` of a folder named
+after the entry — either installs with **Install Script…**.
 
 A [synced folder](editor.md#synced-folder) holds your scripts as files, so a
 package folder there can be committed to a repository as is.

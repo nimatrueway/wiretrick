@@ -9,6 +9,7 @@
  * `packagesServerRoute` serves the package; call it in the suite's test server.
  */
 import type http from "node:http";
+import { readZip } from "../src/shared/zip";
 
 type Check = (name: string, ok: boolean, extra?: string) => void;
 
@@ -89,8 +90,8 @@ export async function checkPackages(ctx: any, mgr: any, origin: string, check: C
     check(t("the installed entry runs with its library and JSON"), out === "PKG-OK!", out);
 
     await mgr.bringToFront();
-    const badge = await mgr.waitForSelector("#script-list .pkg-ind", { timeout: 8000 }).then(() => true, () => false);
-    check(t("the Explorer marks the package"), badge);
+    const badge = await mgr.waitForSelector('#script-list li.script-item[data-id="dir:demo"] .file-icon.package', { timeout: 8000 }).then(() => true, () => false);
+    check(t("the Explorer shows the package's folder with the package icon"), badge);
 
     // an update that adds a route waits for review
     version = 2;
@@ -152,6 +153,32 @@ export async function checkPackages(ctx: any, mgr: any, origin: string, check: C
             mkNames.includes("mklib") &&
             !made.data.some((d) => d.path === "mkcfg.json"),
         JSON.stringify({ dialog: dialogs[0], mkNames, entry: entry?.code.slice(0, 200), data: made.data.map((d) => d.path) }),
+    );
+
+    // the folder is a package now: its icon, and Export Package… downloads a zip of it
+    const pkgRow = '#script-list li.script-item[data-id="dir:mkpkg"]';
+    const icon = await mgr.waitForSelector(`${pkgRow} .file-icon.package`, { timeout: 8000 }).then(() => true, () => false);
+    await mgr.evaluate(() => {
+        const w = window as any;
+        w.__wtDownload = null;
+        w.__wtClick = HTMLAnchorElement.prototype.click;
+        HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+            if (!this.download) return w.__wtClick.call(this);
+            const name = this.download;
+            void fetch(this.href)
+                .then((r) => r.arrayBuffer())
+                .then((b) => (w.__wtDownload = { name, bytes: Array.from(new Uint8Array(b)) }));
+        };
+    });
+    await mgr.click(`${pkgRow} .script-name`, { button: "right" });
+    await mgr.click('.ctx-menu li:has-text("Export Package…")');
+    const dl = await waitFor(() => mgr.evaluate(() => (window as any).__wtDownload), (v: any) => !!v, 8000);
+    await mgr.evaluate(() => void (HTMLAnchorElement.prototype.click = (window as any).__wtClick));
+    const zipped = dl ? await readZip(new Uint8Array(dl.bytes).buffer) : {};
+    check(
+        t("a package folder has the package icon, and Export Package… downloads its files as a zip"),
+        icon && dl?.name === "mkpkg.zip" && Object.keys(zipped).sort().join() === "mkpkg/mkcfg.json,mkpkg/mklib.ts,mkpkg/mkpkg.wiretrick.ts",
+        JSON.stringify({ icon, name: dl?.name, files: Object.keys(zipped) })
     );
     await send({ type: "deleteFolder", path: "mkpkg" });
     for (const id of ["mkpkg-lib", "mkpkg-user"]) await send({ type: "deleteScript", id });

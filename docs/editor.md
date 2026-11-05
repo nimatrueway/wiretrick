@@ -97,16 +97,19 @@ item), Enter opens the file and focuses the Code view (on a folder: expand /
 collapse), Space opens it and keeps focus in the tree, F2 renames, Delete
 (⌘⌫ on macOS) deletes after a confirmation — a folder's warns that it deletes
 its contents, with counts — and Esc returns to the Code view. Right-click a
-row for **Open**, **Enable/Disable** (scripts), **Make Package…** (entry
-scripts — see [Sharing a script](packages.md#sharing-a-script)), **New Script…**, **New JSON
+row for **Open**, **Enable/Disable** (scripts), **Make Package…** and
+**Export Package…** (entry scripts and package folders — see [Sharing a
+script](packages.md#sharing-a-script)), **New Script…**, **New JSON
 File…**, **New Folder…** (in that folder), **Copy Path**, **Rename…** and
 **Delete**; right-click the empty area for the New items at the root. **New
 Script…** makes a `*.wiretrick.ts` file, which runs, unless you type `.ts`
 (`utils.ts`): then it's a [library](scripting.md#libraries-and-recipes). Drag a
 script, data file or folder onto a folder to move it there (onto the empty
 area: to the root); hovering a collapsed folder while dragging expands it.
-An [installed package](packages.md)'s folder (or a one-file package's entry)
-shows 📦, or ⬆ when an update waits for review (click it to review); its
+A package's folder — [installed](packages.md), or one holding a single entry
+with a header `@name`, as **Make Package…** leaves it — has a box icon instead
+of a folder. An installed one-file package's entry shows 📦; an installed
+package shows ⬆ when an update waits for review (click it to review); its
 right-click menu adds **Review Update…**, **Check for Updates**, **Turn
 Auto-Update On/Off**, **Roll Back to …**, **Open Source Page** and **Forget
 Package (Keep Files)**.

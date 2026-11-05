@@ -11,6 +11,8 @@ import type { SampleScript } from "./samples";
 import { settingsDiagnostics, settingsCompletions, settingsHover, type AssistScript } from "../shared/settingsAssist";
 import { badPackageImports, dependantsOf, isSvgPath, missingImports } from "../shared/scriptImports";
 import { makePackagePlan } from "../shared/makePackage";
+import { localPackage } from "../shared/localPackage";
+import { writeZip } from "../shared/zip";
 import { PACKAGE_ORIGIN } from "../shared/packageImports";
 import { isInFolder, movedPath } from "../shared/folders";
 import { baseName, folderPathOfRowId, folderRowId, isFolderRowId, movedCollapsed, type TreeRow } from "./explorerTree";
@@ -403,14 +405,8 @@ async function moveRows(plan: { item: TreeRow; to: string }[]): Promise<void> {
     await refresh();
 }
 
-/**
- * Explorer → Make Package…: move the entry and the files it imports into a
- * folder named after it (copying those other scripts use too), rewrite
- * their imports, and give the entry a header (shared/makePackage).
- */
-async function makePackage(id: string): Promise<void> {
-    const s = scripts.find((x) => x.id === id);
-    if (!s) return;
+/** every file of the scripts as saved (path → text), and what each path is */
+function userFiles(): { files: Record<string, string>; owner: Map<string, { script?: Script; data?: DataFile }> } {
     const files: Record<string, string> = {};
     const owner = new Map<string, { script?: Script; data?: DataFile }>();
     for (const x of scripts) {
@@ -421,6 +417,54 @@ async function makePackage(id: string): Promise<void> {
         files[d.path] = d.text;
         owner.set(d.path, { data: d });
     }
+    return { files, owner };
+}
+
+function download(name: string, data: BlobPart, type: string): void {
+    const url = URL.createObjectURL(new Blob([data], { type }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/**
+ * Explorer → Export Package…: the entry and every file it imports by a
+ * relative path, as saved — one file as itself, more as a .zip of a folder
+ * named after the entry (Install Script… takes either).
+ */
+async function exportPackage(id: string): Promise<void> {
+    const s = scripts.find((x) => x.id === id);
+    if (!s) return;
+    const { files } = userFiles();
+    let pkg;
+    try {
+        pkg = await localPackage(files, scriptFileName(s.meta.name));
+    } catch (e: any) {
+        return void status(`can't export "${s.meta.name}": ${e?.message || e}`, "error");
+    }
+    const stem = baseName(pkg.entry).replace(/\.wiretrick\.tsx?$/i, "") || "package";
+    const paths = Object.keys(pkg.files);
+    if (paths.length === 1) download(baseName(pkg.entry), pkg.files[pkg.entry], "text/plain");
+    else download(`${stem}.zip`, writeZip(Object.fromEntries(paths.map((p) => [`${stem}/${p}`, pkg.files[p]]))) as BlobPart, "application/zip");
+    const warn = [
+        pkg.bare.length ? `imports by bare name stay behind: ${[...new Set(pkg.bare.map((b) => `"${b.spec}"`))].join(", ")}` : "",
+        pkg.missing.length ? `imports that point at no file: ${pkg.missing.map((m) => `"${m.spec}"`).join(", ")}` : "",
+    ].filter(Boolean);
+    const dirtyNote = dirty ? " (as saved)" : "";
+    status(`exported "${stem}" — ${paths.length === 1 ? baseName(pkg.entry) : `${stem}.zip, ${paths.length} files`}${dirtyNote}${warn.length ? ` · ${warn.join(" · ")}` : ""}`, warn.length ? "dirty" : undefined);
+}
+
+/**
+ * Explorer → Make Package…: move the entry and the files it imports into a
+ * folder named after it (copying those other scripts use too), rewrite
+ * their imports, and give the entry a header (shared/makePackage).
+ */
+async function makePackage(id: string): Promise<void> {
+    const s = scripts.find((x) => x.id === id);
+    if (!s) return;
+    const { files, owner } = userFiles();
     const plan = makePackagePlan(scriptFileName(s.meta.name), files, everyFolder());
     const changed = [...plan.files.filter((f) => !f.copy && (f.to !== f.from || f.text !== files[f.from])).map((f) => f.from), ...plan.edits.map((e) => e.path)];
     const open = changed.map((p) => owner.get(p)?.script?.id ?? owner.get(p)?.data?.id).find((x) => x === selectedId);
@@ -1973,6 +2017,7 @@ async function main(): Promise<void> {
         deleteRows: (rows: TreeRow[]) => void deleteRows(rows),
         moveRows,
         makePackage: (id: string) => void makePackage(id),
+        exportPackage: (id: string) => void exportPackage(id),
         itemPathProblem,
         createItem: (kind: NewKind, path: string) => void createItem(kind, path),
         startCreate,

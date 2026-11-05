@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { fetchHosts, makePackagePlan, relativeSpec, withHeader } from "../src/shared/makePackage";
+import { fetchHosts, makePackagePlan, packageFolders, relativeSpec, withHeader } from "../src/shared/makePackage";
+import { readZip, writeZip } from "../src/shared/zip";
 import { parseHeader } from "../src/shared/packageHeader";
 
 const byFrom = (plan: ReturnType<typeof makePackagePlan>) => Object.fromEntries(plan.files.map((f) => [f.from, f]));
@@ -117,5 +118,36 @@ describe("relativeSpec", () => {
 describe("fetchHosts", () => {
     it("reads literal wt.fetch URLs", () => {
         expect(fetchHosts(['wt.fetch("https://A.example.com:8080/x"); wt.fetch(`https://b.io/${x}`); wt.fetch(url);'])).toEqual(["a.example.com", "b.io"]);
+    });
+});
+
+describe("packageFolders", () => {
+    it("finds folders whose one entry has a header", () => {
+        const h = "/** @name x */\n";
+        const out = packageFolders([
+            { name: "a/a.wiretrick", code: h },
+            { name: "a/lib", code: "" },
+            { name: "b/b.wiretrick", code: "" },
+            { name: "c/c.wiretrick", code: h },
+            { name: "c/sub/d.wiretrick", code: "" },
+            { name: "root.wiretrick", code: h },
+            { name: "e/f/g.wiretrick", code: h },
+        ]);
+        expect([...out]).toEqual([
+            ["a", "a/a.wiretrick"],
+            ["e/f", "e/f/g.wiretrick"],
+        ]);
+    });
+});
+
+describe("writeZip", () => {
+    it("writes what readZip reads", async () => {
+        const zip = writeZip({ "p/p.wiretrick.ts": "export {};\n", "p/ü.json": '{"a":1}', "p/b.bin": new Uint8Array([0, 255, 7]) });
+        const back = await readZip(zip.buffer as ArrayBuffer);
+        const text = (b: Uint8Array) => new TextDecoder().decode(b);
+        expect(Object.keys(back)).toEqual(["p/p.wiretrick.ts", "p/ü.json", "p/b.bin"]);
+        expect(text(back["p/p.wiretrick.ts"])).toBe("export {};\n");
+        expect(text(back["p/ü.json"])).toBe('{"a":1}');
+        expect([...back["p/b.bin"]]).toEqual([0, 255, 7]);
     });
 });
