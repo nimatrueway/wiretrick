@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.14.0-alpha] - 2026-11-05
+
 ### Removed
 
 - **Breaking:** the deprecated `wt.onDocument` (use `wt.onPage`), `wt.onOverlay` (use `wt.onPage({ …, dom: "overlay" })`), the `world` route option (use `js`), `wt.store` (use `wt.globalStore` / `wt.pageStore`) and the `Wiretrick.Route` type (use `Wiretrick.RouteOptions`).
@@ -674,7 +676,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.13.0-alpha...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.14.0-alpha...HEAD
+[0.14.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.13.0-alpha...v0.14.0-alpha
 [0.13.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.12.2-alpha...v0.13.0-alpha
 [0.12.2-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.12.1-alpha...v0.12.2-alpha
 [0.12.1-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.12.0-alpha...v0.12.1-alpha
