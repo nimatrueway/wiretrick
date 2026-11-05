@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-11-04
+
 ### Added
 
 - `ctx.evaluate` callbacks: a function passed as an argument is a callback the page-world `fn` can call — also later, from the site's own events — to run code back in isolated code, where stores and the overlay are. E.g. `ctx.evaluate((set) => app.on("login", (u) => set(u.name)), (name) => { state.user = name; })`.
@@ -630,7 +632,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/nimatrueway/wiretrick/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/nimatrueway/wiretrick/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/nimatrueway/wiretrick/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/nimatrueway/wiretrick/compare/v0.10.0...v0.11.0
