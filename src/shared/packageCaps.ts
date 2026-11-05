@@ -1,10 +1,9 @@
 /**
- * What a package can do, read off its entry's compiled routes and header:
+ * What a package can do, read off its entries' compiled routes and metadata:
  * the install page shows it, and an update that can do more than the
  * installed version waits for approval instead of applying itself.
  */
 import type { ResMeta } from "./metaParser";
-import type { PackageHeader } from "./packageHeader";
 import { isUrlSpec, parsePackageUrl } from "./packageImports";
 import { importSpecs } from "./scriptImports";
 
@@ -19,7 +18,7 @@ export interface Capabilities {
     overlay: boolean;
     /** an overlay whose code runs in the site's world (`unsafe: true`) */
     unsafe: boolean;
-    /** hosts its wt.fetch reaches, as the header declares (`@connect`) */
+    /** hosts its wt.fetch reaches, as its metadata declares (`connect`) */
     connect: string[];
     /** unpkg packages it imports (names) */
     packages: string[];
@@ -27,8 +26,7 @@ export interface Capabilities {
 
 const sorted = (xs: Iterable<string>) => [...new Set(xs)].sort();
 
-export function capabilitiesOf(meta: Pick<ResMeta, "routes"> | undefined, header: Pick<PackageHeader, "connect">, codes: string[]): Capabilities {
-    const routes = meta?.routes ?? [];
+export function capabilitiesOf(routes: ResMeta["routes"], connect: string[], codes: string[]): Capabilities {
     const packages: string[] = [];
     for (const code of codes)
         for (const spec of importSpecs(code)) {
@@ -42,7 +40,7 @@ export function capabilitiesOf(meta: Pick<ResMeta, "routes"> | undefined, header
         pageJs: routes.some((r) => r.kind === "onDocument" && r.world !== "isolated"),
         overlay: routes.some((r) => r.kind === "onOverlay"),
         unsafe: routes.some((r) => r.kind === "onOverlay" && r.world === "page"),
-        connect: sorted(header.connect),
+        connect: sorted(connect),
         packages: sorted(packages),
     };
 }

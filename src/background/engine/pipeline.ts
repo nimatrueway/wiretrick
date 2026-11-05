@@ -31,7 +31,6 @@ import { ensureBuiltins, needsReact } from "../../shared/builtins";
 import { missedLine } from "../../shared/netTypes";
 import { binaryOptedOut, frameHasHook as pingHook, isLoopbackUrl, missedReason, missedWhat, routeProblem, MISSED_SKIP_TYPES } from "../../shared/missedTap";
 import { resolveParamValues } from "../../shared/scriptDef";
-import { notAnEntryProblem } from "../../shared/scriptName";
 import type { ShippedLib } from "../../shared/scriptImports";
 import { effectiveStrategy, hookCanSee, isNetKind, isPageLayer, pageWorld, routeLabel, routeMatches, takesBinary, type RouteMeta, type Strategy } from "../../shared/route";
 import { analyzeScripts, runBodyOp, type Analyzed } from "../compileHost";
@@ -261,7 +260,6 @@ export function createPipeline(
             if (/\bwt\s*\.\s*on(?:Page|Overlay)\b/.test(s.code))
                 for (const p of registrationProblems(s.code))
                     problems.push({ id: s.id, msg: `${p.api} #${p.nth + 1}: call wt.${p.api}() at the top level of the script, not inside a function, block or condition — the page and the overlay pair up handlers by the order they're registered in` });
-            if (s.meta.inert) problems.push({ id: s.id, msg: notAnEntryProblem(s.meta.name, s.meta.inert) });
             if (!s.meta.active) continue;
             const down: string[] = [];
             for (const msg of mainWorldProblems(s.code, s.meta.routes || [])) problems.push({ id: s.id, msg });

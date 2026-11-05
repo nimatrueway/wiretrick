@@ -5,7 +5,7 @@
  * handler sources with `new Function`.
  */
 import { defaultMeta, finishMeta, type ResMeta } from "./metaParser";
-import { parseHeader } from "./packageHeader";
+import { readMetadata } from "./packageMetadata";
 import { parseParamValue, resolveParamValues, serializableParamDef, type ParamDef } from "./scriptDef";
 import { formatLogArgs, makeScriptConsole, type ScriptLogLevel } from "./scriptLog";
 import { scriptFunction } from "./scriptFn";
@@ -88,8 +88,6 @@ export interface ResApiOverrides {
     pageFetch?: { url: string; fetch: (request: WireRequest, bypass: boolean) => Promise<WireResponse> };
     /** what `wt.onPage` / `wt.onOverlay` registration number `index` returns (default: an inert handle) */
     remote?: (kind: "onDocument" | "onOverlay", index: number) => any;
-    /** the script's name: a file that isn't an entry (`*.wiretrick.ts`) registers nothing that runs */
-    name?: string;
 }
 
 /** Standard overrides for a stored script: storage wired by id, log → sink. */
@@ -163,12 +161,7 @@ export function compileScript(code: string, overrides?: ResApiOverrides): Compil
               };
         withCollector(store, () => fn(shim, makeForwardingConsole(overrides?.logSink), requireShim, moduleObj, moduleObj.exports));
         meta.routes = routesOf(store);
-        finishMeta(meta, overrides?.name);
-        // no wt.about: the package header's @description
-        if (!meta.description) {
-            const d = parseHeader(code).description;
-            if (d) meta.description = d;
-        }
+        finishMeta(meta);
         return { meta, handlers: store, error: null, code, paramDefs: owner.defs, exports: moduleObj.exports };
     } catch (e: any) {
         meta.routes = [];
@@ -462,7 +455,7 @@ export function compileWithLibs(
         (lib) => ({ paramValues: paramValues?.[lib.id] }),
         { stubUnresolved: true, dataFiles, packages }
     );
-    const c = compileScript(target.code, { importModule: resolver.resolveFrom(target.name), paramValues: paramValues?.[target.id], name: target.name });
+    const c = compileScript(target.code, { importModule: resolver.resolveFrom(target.name), paramValues: paramValues?.[target.id] });
     return { ...c, deps: [...resolver.deps] };
 }
 
@@ -527,12 +520,17 @@ function routesOf(h: ScriptHandlers): RouteMeta[] {
 
 const PARAM_TYPES = ["boolean", "number", "string", "enum", "stringList"];
 
-/** per-script state behind wt.about / wt.params / wt.defineParam */
+/** per-script state behind wt.metadata / wt.params / wt.defineParam */
 function createOwner(meta: ResMeta, storedValues?: Record<string, any>) {
     let defs: Record<string, ParamDef> | undefined;
     return {
-        about(text: unknown) {
-            meta.description = String(text ?? "");
+        metadata(raw: unknown) {
+            if (meta.metadata) throw new Error("wt.metadata: call it once");
+            if (isStub(raw)) return;
+            // fields from a stubbed import (meta-only compiles) are unknown here
+            const known = raw && typeof raw === "object" && !Array.isArray(raw) ? Object.fromEntries(Object.entries(raw).filter(([, v]) => !isStub(v))) : raw;
+            meta.metadata = readMetadata(known, "wt.metadata");
+            if (meta.metadata.description) meta.description = meta.metadata.description;
         },
         add(next: Record<string, ParamDef>, where: string): Record<string, any> {
             // defs that come from a stubbed import (meta-only compiles) are
@@ -658,7 +656,7 @@ function makeShim(owner: ReturnType<typeof createOwner>, overrides?: ResApiOverr
         onPage: registerPage("onPage"),
         onDocument: registerPage("onDocument"),
         onOverlay: register("onOverlay", undefined, "overlay"),
-        about: (text: unknown) => owner.about(text),
+        metadata: (m: unknown) => owner.metadata(m),
         params: (defs: Record<string, ParamDef>) => {
             const values = owner.add(defs, "wt.params");
             return isStub(values) ? values : Object.freeze(values); // a stub proxy can't be frozen

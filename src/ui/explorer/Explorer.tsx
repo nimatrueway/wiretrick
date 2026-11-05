@@ -3,7 +3,7 @@ import { useSnapshot } from "valtio";
 import { isInFolder } from "../../shared/folders";
 import { scriptHealth } from "../../shared/scriptHealth";
 import { folderOf, isSvgPath } from "../../shared/scriptImports";
-import { cleanScriptName, entryNameOf, fileExtension, isEntryName, isTsxName, scriptFileName, scriptNameFromInput } from "../../shared/scriptName";
+import { cleanScriptName, fileExtension, isTsxName, scriptFileName, scriptNameFromInput } from "../../shared/scriptName";
 import { baseName, dropPlan, explorerTree, folderRowId, isFolderRowId, joinPath, targetFolder, type TreeRow } from "../explorerTree";
 import { actions } from "../shell/actions";
 import {
@@ -31,7 +31,8 @@ import { NameInput } from "./NameInput";
 import { badgeRowOf, openInstallPage, packageOf, packages, packageTitle } from "../state/packages";
 import { packageFolders } from "../../shared/makePackage";
 import { packagesApi } from "../install/api";
-import type { InstalledPackage } from "../../shared/packageModel";
+import { packageName, type InstalledPackage } from "../../shared/packageModel";
+import { MANIFEST_FILE } from "../../shared/packageMetadata";
 
 const FOLDER_ICON = `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M1.5 3.5h4.3l1.5 1.5h7.2v8h-13z" fill="none" stroke="currentColor" stroke-linejoin="round"/></svg>`;
 const FOLDER_OPEN_ICON = `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M1.5 12.5v-9h4.3l1.5 1.5h5.2v2M1.5 12.5l2-5.5h11l-2 5.5z" fill="none" stroke="currentColor" stroke-linejoin="round"/></svg>`;
@@ -73,7 +74,7 @@ const withJson = (path: string): string => (/\.(json|svg)$/i.test(path) ? path :
 
 const copy = (text: string, done: string): void => void navigator.clipboard?.writeText(text).then(() => actions.status(done));
 
-const pkgLabel = (p: InstalledPackage): string => `“${p.header.name || p.entry.replace(/^.*\//, "")}”`;
+const pkgLabel = (p: InstalledPackage): string => `“${packageName(p)}”`;
 
 /** run a package action; its failure shows in the status bar */
 function pkgAction(fn: () => Promise<unknown>, done?: string): void {
@@ -101,7 +102,7 @@ function packageMenu(p: InstalledPackage): MenuItem[] {
         ...(p.pending ? [{ label: "Review Update…", run: () => openInstallPage(`?update=${encodeURIComponent(p.id)}`) }] : []),
         ...(p.source ? [{ label: "Check for Updates", run: () => pkgAction(() => checkUpdates(p)) }] : []),
         ...(p.source ? [{ label: p.autoUpdate ? "Turn Auto-Update Off" : "Turn Auto-Update On", run: () => pkgAction(() => packagesApi.setAutoUpdate(p.id, !p.autoUpdate), `auto-update ${p.autoUpdate ? "off" : "on"} for ${pkgLabel(p)}`) }] : []),
-        ...(p.previous ? [{ label: `Roll Back to ${p.previous.header.version || "the Previous Version"}`, run: () => pkgAction(() => packagesApi.rollback(p.id), `rolled ${pkgLabel(p)} back (auto-update is off now)`) }] : []),
+        ...(p.previous ? [{ label: `Roll Back to ${p.previous.metadata.version || "the Previous Version"}`, run: () => pkgAction(() => packagesApi.rollback(p.id), `rolled ${pkgLabel(p)} back (auto-update is off now)`) }] : []),
         ...(src ? [{ label: "Open Source Page", run: () => void chrome.tabs.create({ url: src }) }] : []),
         { label: "Forget Package (Keep Files)", run: () => pkgAction(() => packagesApi.forget(p.id), `${pkgLabel(p)} won't update anymore`) },
         null,
@@ -124,13 +125,20 @@ function installMenu(): MenuItem[] {
 }
 
 /** open `id` unless it's already the open file */
-/** the entry script of the package a folder is (installed, or laid out like one — shared/makePackage), else undefined */
-function packageEntryOf(folder: string): string | undefined {
+/** folders holding a metadata.json: bundles (shared/makePackage) */
+const localPackageFolders = (dataFiles: readonly { path: string }[]): Map<string, string> => packageFolders(dataFiles.map((d) => d.path));
+
+/** what Export Package… on a folder starts from: its metadata.json, or an installed package's script; else undefined */
+function packageStartOf(folder: string): string | undefined {
+    const manifest = localPackageFolders(explorer.dataFiles).get(folder);
+    if (manifest) return manifest;
     const p = Object.values(packages.byId).find((x) => x.folder === folder);
-    if (p) return p.entryId;
-    const name = packageFolders(explorer.scripts.map((s) => ({ name: s.meta.name, code: s.code }))).get(folder);
-    return name === undefined ? undefined : explorer.scripts.find((s) => s.meta.name === name)?.id;
+    return p ? `${folder}/${p.files[MANIFEST_FILE] ? MANIFEST_FILE : p.entries[0]}` : undefined;
 }
+
+/** `path` is in a package's folder (a bundle's, or an installed package's) */
+const inPackageFolder = (path: string): boolean =>
+    [...localPackageFolders(explorer.dataFiles).keys(), ...Object.values(packages.byId).flatMap((p) => (p.folder ? [p.folder] : []))].some((f) => path.startsWith(f + "/"));
 
 const open = (id: string): void => {
     if (id !== explorer.selectedId || explorer.typingsShown) actions.select(id);
@@ -263,16 +271,16 @@ function onContextMenu(e: MouseEvent<HTMLUListElement>): void {
     const script = row.kind === "script" ? explorer.scripts.find((s) => s.id === id) : undefined;
     const isLib = script?.meta.active === false;
     const pkg = packageOf(row);
-    const entry = script && isEntryName(script.meta.name) ? script : undefined;
-    const exportId = row.kind === "folder" ? packageEntryOf(row.path) : entry?.id;
-    const inPackageFolder = !!entry && folderOf(entry.meta.name) !== "" && packageEntryOf(folderOf(entry.meta.name)) === entry.id;
+    const inPkg = !!pkg || inPackageFolder(row.path);
+    const exportStart = row.kind === "folder" ? packageStartOf(row.path) : script && !inPkg ? scriptFileName(script.meta.name) : undefined;
+    const make = inPkg || exportStart?.endsWith(MANIFEST_FILE) ? undefined : script ? () => actions.makePackage(script.id) : row.kind === "folder" ? () => actions.makeFolderPackage(row.path) : undefined;
     showContextMenu(e.clientX, e.clientY, [
         ...(row.kind === "folder" ? [] : [{ label: "Open", key: "Enter", run: () => open(id) }, null]),
         ...(pkg ? packageMenu(pkg) : []),
         ...(script && !isLib ? [{ label: script.enabled ? "Disable" : "Enable", run: () => actions.setScriptEnabled(script.id, !script.enabled) }, null] : []),
-        ...(entry && !pkg && !inPackageFolder ? [{ label: "Make Package…", run: () => actions.makePackage(entry.id) }] : []),
-        ...(exportId ? [{ label: "Export Package…", run: () => actions.exportPackage(exportId) }] : []),
-        ...((entry && !pkg && !inPackageFolder) || exportId ? [null] : []),
+        ...(make ? [{ label: "Make Package…", run: make }] : []),
+        ...(exportStart ? [{ label: "Export Package…", run: () => actions.exportPackage(exportStart) }] : []),
+        ...(make || exportStart ? [null] : []),
         ...newItemsMenu(targetFolder(row)),
         null,
         { label: "Copy Path", run: () => copy(rowFilePath(row), `copied ${rowFilePath(row)}`) },
@@ -382,7 +390,7 @@ export function ExplorerTree() {
         const at = badgeRowOf(p);
         pkgByRow.set("folder" in at ? folderRowId(at.folder) : at.id, p);
     }
-    const localPkgs = packageFolders(snap.scripts.map((s) => ({ name: s.meta.name, code: s.code })));
+    const localPkgs = localPackageFolders(snap.dataFiles);
     const pkgBadge = (id: string) => {
         const p = pkgByRow.get(id);
         // a package folder's icon says it's a package: its badge is for news only
@@ -489,7 +497,7 @@ export function ExplorerTree() {
                     r.depth,
                     <>
                         <FileIcon kind={pkgByRow.get(r.id) || localPkgs.has(r.path) ? "package" : r.expanded ? "folder-open" : "folder"} />
-                        {name(r, r.name, [r.path, pkgByRow.get(r.id) ? packageTitle(pkgByRow.get(r.id)!) : localPkgs.has(r.path) ? "A package — right-click → Export Package… to share it" : "", "F2 to rename · drag to move"].filter(Boolean).join("\n"))}
+                        {name(r, r.name, [r.path, pkgByRow.get(r.id) ? packageTitle(pkgByRow.get(r.id)!) : localPkgs.has(r.path) ? `A package (${MANIFEST_FILE}) — right-click → Export Package… to share it` : "", "F2 to rename · drag to move"].filter(Boolean).join("\n"))}
                         {pkgBadge(r.id)}
                     </>,
                     { "aria-expanded": !!r.expanded, draggable: true, ...click(r.id, () => setFolderExpanded(r.path, !r.expanded)) },
@@ -637,12 +645,11 @@ function CreateRow({ kind, folder, list }: { kind: NewKind; folder: string; list
             <NameInput
                 kind={kind}
                 value=""
-                placeholder={kind === "script" ? "name (runs) or name.ts (library)" : kind === "data" ? "name.json or name.svg" : "folder name"}
+                placeholder={kind === "script" ? "script name" : kind === "data" ? "name.json or name.svg" : "folder name"}
                 onDone={(commit, value) => {
                     explorer.editing = null;
                     let name = cleanScriptName(value).trim();
-                    // a new script with no extension is an entry (it runs); "x.ts" is a library
-                    if (kind === "script") name = /\.tsx?$/i.test(name) ? scriptNameFromInput(name) : name && entryNameOf(name);
+                    if (kind === "script") name = scriptNameFromInput(name);
                     if (kind === "data" && name) name = withJson(name);
                     if (!commit || !name) {
                         list.current?.focus();

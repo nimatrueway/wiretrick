@@ -185,7 +185,7 @@ try {
         check("param-gated library stored as a library with params", lib?.meta?.active === false && lib?.paramDefs?.on?.type === "boolean", JSON.stringify(lib?.meta));
         await send({ type: "setScriptParam", scriptId: "s_plib", key: "on", value: true });
         const flipped = (await send({ type: "listScripts" })).find((s: any) => s.id === "s_plib");
-        check("library param on → still a library: only *.wiretrick.ts files run", flipped?.meta?.active === false && flipped?.meta?.inert === 1, JSON.stringify(flipped?.meta));
+        check("library param on → it becomes a script", flipped?.meta?.active === true, JSON.stringify(flipped?.meta));
         await send({ type: "deleteScript", id: "s_puser" });
         await send({ type: "deleteScript", id: "s_plib" });
     }

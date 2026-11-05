@@ -52,8 +52,9 @@ resourceTypes — webRequest names: main_frame, sub_frame, stylesheet, script, i
 strategy — required, a single value; there is no default. No fallback: when it isn't available here, the handler doesn't run and the Log view says why.`,
     },
     {
-        title: "wt.about / wt.params / wt.defineParam",
-        body: `wt.about("Force failures on the posts API");  // Editor tooltip, popup, settings.yaml comment
+        title: "wt.metadata / wt.params / wt.defineParam",
+        body: `wt.metadata({ description: "Force failures on the posts API" });  // Editor tooltip, popup, settings.yaml comment
+// as a package: name, version, homepage, author, license, connect: ["api.example.com"] (hosts wt.fetch reaches)
 
 Params are knobs adjustable from the popup's ⚙ dialog, the Editor and settings.yaml without editing the script. They come back typed:
 

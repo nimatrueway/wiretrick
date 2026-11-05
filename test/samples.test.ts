@@ -54,8 +54,8 @@ describe("sample helpers", () => {
         expect(typeErrors(`import { useState } from "react";\nconst [n] = useState(0);\nconst el = <div>{n}</div>;`)).toEqual([]);
     });
     it("reads the Try it URL", () => {
-        expect(sampleTryUrl(`// Try it: open https://example.com/a?b=1 and reload\nwt.about("x");`)).toBe("https://example.com/a?b=1");
-        expect(sampleTryUrl(`wt.about("x");`)).toBeNull();
+        expect(sampleTryUrl(`// Try it: open https://example.com/a?b=1 and reload\nwt.metadata({ description: "x" });`)).toBe("https://example.com/a?b=1");
+        expect(sampleTryUrl(`wt.metadata({ description: "x" });`)).toBeNull();
     });
     it("lists the strategies routes name, both branches of a ternary", () => {
         expect(sampleStrategies(`wt.onRequest({ url: "*://a/*", strategy: "rules" }, f);`)).toEqual(["rules"]);

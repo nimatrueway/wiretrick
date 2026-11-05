@@ -3,7 +3,7 @@ import { cleanScriptName, MAX_PATH } from "../../shared/scriptName";
 import type { NewKind } from "../state/explorer";
 
 const KIND_TITLE: Record<NewKind, string> = {
-    script: 'The name is also the file name: any characters except < > : " \\ | ? * — a / puts the script in a folder (e.g. mock/helpers). Only *.wiretrick.ts files run; any other .ts file is a library',
+    script: 'The name is also the file name: any characters except < > : " \\ | ? * — a / puts the script in a folder (e.g. mock/helpers)',
     data: "A .json data file — a / puts it in a folder (e.g. mock/users.json)",
     folder: "A folder — a / makes nested folders (e.g. mock/api)",
 };

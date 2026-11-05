@@ -24,11 +24,12 @@ await import("../src/shared/transpile");
 const ss = await import("../src/background/engine/scriptStore");
 const pk = await import("../src/background/engine/packages");
 const { filesHash } = await import("../src/shared/packageSource");
+const { entryIds } = await import("../src/shared/packageModel");
 
 const SRC = "https://example.com/dark.wiretrick.ts";
-const entry = (url: string, extra = "") => `/**\n * @name Dark\n * @version 1.0.0\n */\nimport { tint } from "./lib";\nimport cfg from "./cfg.json";\n${extra}wt.onRequest({ url: "${url}", strategy: "page" }, async (req) => { tint(cfg.n); return req; });\n`;
+const entry = (url: string, extra = "") => `import { tint } from "./lib";\nimport cfg from "./cfg.json";\nwt.metadata({ name: "Dark", version: "1.0.0" });\n${extra}wt.onRequest({ url: "${url}", strategy: "page" }, async (req) => { tint(cfg.n); return req; });\n`;
 const files = (e: string, lib = "export const tint = (n: number) => n;\n") => ({ "dark.wiretrick.ts": e, "lib.ts": lib, "cfg.json": '{"n": 1}' });
-const fetched = async (f: Record<string, string>, source = SRC) => ({ source, entry: "dark.wiretrick.ts", files: f, revision: await filesHash(f) });
+const fetched = async (f: Record<string, string>, source = SRC) => ({ source, entries: ["dark.wiretrick.ts"], files: f, revision: await filesHash(f) });
 
 beforeEach(() => {
     for (const k of Object.keys(store)) delete store[k];
@@ -50,14 +51,14 @@ describe("installed packages", () => {
         const v2 = await fetched(files(entry("*://a.com/*").replace("1.0.0", "1.1.0"), "export const tint = (n: number) => n * 2;\n"));
         const after = await pk.offerPackage(pkg.id, v2, false);
         expect(after!.pending).toBeUndefined();
-        expect(after!.header.version).toBe("1.1.0");
-        expect(after!.previous?.header.version).toBe("1.0.0");
+        expect(after!.metadata.version).toBe("1.1.0");
+        expect(after!.previous?.metadata.version).toBe("1.0.0");
         expect((await ss.listScripts()).find((s) => s.meta.name === "dark/lib")!.code).toContain("n * 2");
         // same ids: the entry kept its store id
-        expect(after!.entryId).toBe(pkg.entryId);
+        expect(entryIds(after!)).toEqual(entryIds(pkg));
 
         const back = await pk.rollbackPackage(pkg.id);
-        expect(back.header.version).toBe("1.0.0");
+        expect(back.metadata.version).toBe("1.0.0");
         expect(back.autoUpdate).toBe(false);
         expect((await ss.listScripts()).find((s) => s.meta.name === "dark/lib")!.code).not.toContain("n * 2");
     });
@@ -90,20 +91,45 @@ describe("installed packages", () => {
 
     it("refuses an update that doesn't compile and keeps a single file at the root", async () => {
         const single = { "solo.wiretrick.ts": 'wt.onRequest({ url: "*://a.com/*", strategy: "page" }, async (r) => r);\n' };
-        const f = { source: "https://example.com/solo.wiretrick.ts", entry: "solo.wiretrick.ts", files: single, revision: await filesHash(single) };
+        const f = { source: "https://example.com/solo.wiretrick.ts", entries: ["solo.wiretrick.ts"], files: single, revision: await filesHash(single) };
         const pkg = await pk.installPackage(f, { enabled: false, autoUpdate: true });
         expect(pkg.folder).toBe("");
-        const s = (await ss.listScripts()).find((x) => x.id === pkg.entryId)!;
+        const s = (await ss.listScripts()).find((x) => x.id === entryIds(pkg)[0])!;
         expect(s.meta.name).toBe("solo.wiretrick");
         expect(s.enabled).toBe(false);
         // a second install of the same name stays an entry
         const pkg2 = await pk.installPackage(f, { enabled: true, autoUpdate: true });
-        expect((await ss.listScripts()).find((x) => x.id === pkg2.entryId)!.meta.name).toBe("solo (2).wiretrick");
+        expect((await ss.listScripts()).find((x) => x.id === entryIds(pkg2)[0])!.meta.name).toBe("solo (2).wiretrick");
 
         const broken = { "solo.wiretrick.ts": "wt.onRequest({ url: \"*://a.com/*\", strategy: \"page\" }, async (r) => r;\n" };
         const out = await pk.offerPackage(pkg.id, { ...f, files: broken, revision: await filesHash(broken) }, false);
         expect(out!.lastError).toMatch(/doesn't compile/);
         expect(out!.revision).toBe(pkg.revision);
+    });
+
+    it("installs a bundle: its scripts together, metadata from metadata.json", async () => {
+        const run = (u: string) => `import { k } from "./shared";\nwt.onRequest({ url: "${u}", strategy: "page" }, async (r) => (k, r));\n`;
+        const b = {
+            "metadata.json": JSON.stringify({ name: "Kit", version: "2.0.0", connect: ["api.x.com"], scripts: ["a.ts", "tools/b.ts"] }),
+            "a.ts": run("*://a.com/*"),
+            "tools/b.ts": run("*://b.com/*").replace("./shared", "../shared"),
+            "shared.ts": "export const k = 1;\n",
+        };
+        const f = { source: "https://example.com/kit/metadata.json", entries: ["a.ts", "tools/b.ts"], files: b, revision: await filesHash(b) };
+        const a = await pk.analyzePackage(f);
+        expect(a.error).toBeNull();
+        expect(a.bundle).toBe(true);
+        expect(a.name).toBe("Kit");
+        expect(a.folder).toBe("Kit");
+        expect(a.caps.urls).toEqual(["*://a.com/*", "*://b.com/*"]);
+        expect(a.caps.connect).toEqual(["api.x.com"]);
+        const pkg = await pk.installPackage(f, { enabled: true, autoUpdate: true });
+        expect(pkg.metadata.version).toBe("2.0.0");
+        expect(entryIds(pkg)).toHaveLength(2);
+        const names = (await ss.listScripts()).map((s) => s.meta.name).sort();
+        expect(names).toEqual(["Kit/a", "Kit/shared", "Kit/tools/b"]);
+        expect((await ss.listScripts()).filter((s) => s.meta.active).map((s) => s.meta.name).sort()).toEqual(["Kit/a", "Kit/tools/b"]);
+        expect((await ss.listDataFiles()).map((d) => d.path)).toEqual(["Kit/metadata.json"]);
     });
 
     it("forgets a package whose entry is deleted", async () => {

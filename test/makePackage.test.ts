@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { fetchHosts, makePackagePlan, packageFolders, relativeSpec, withHeader } from "../src/shared/makePackage";
+import { fetchHosts, makeFolderPackagePlan, makePackagePlan, packageFolders, relativeSpec, withMetadata } from "../src/shared/makePackage";
 import { readZip, writeZip } from "../src/shared/zip";
-import { parseHeader } from "../src/shared/packageHeader";
+import { parseManifest } from "../src/shared/packageMetadata";
 
 const byFrom = (plan: ReturnType<typeof makePackagePlan>) => Object.fromEntries(plan.files.map((f) => [f.from, f]));
 
 describe("makePackagePlan", () => {
-    it("moves a root entry and what only it uses into a folder named after it, with a header", () => {
+    it("moves a root script and what only it uses into a folder named after it, with a metadata.json", () => {
         const plan = makePackagePlan("dark.wiretrick.ts", {
             "dark.wiretrick.ts": 'import { a } from "./lib";\nimport cfg from "./cfg.json";\nwt.fetch("https://api.example.com/x");\n',
             "lib.ts": "export const a = 1;\n",
@@ -23,8 +23,8 @@ describe("makePackagePlan", () => {
         const entry = plan.files[0].text;
         expect(entry).toContain('from "./lib"');
         expect(entry).toContain('from "./cfg.json"');
-        expect(plan.addsHeader).toBe(true);
-        expect(parseHeader(entry)).toMatchObject({ name: "dark", version: "1.0.0", connect: ["api.example.com"] });
+        expect(plan.manifest!.path).toBe("dark/metadata.json");
+        expect(parseManifest(plan.manifest!.text)).toMatchObject({ name: "dark", version: "1.0.0", connect: ["api.example.com"], scripts: ["dark.wiretrick.ts"] });
         expect(plan.edits).toEqual([]);
     });
 
@@ -59,22 +59,22 @@ describe("makePackagePlan", () => {
     });
 
     it("rewrites other files that import the entry", () => {
-        const plan = makePackagePlan("e.wiretrick.ts", { "e.wiretrick.ts": "export const k = 1;\n", "lib.ts": 'export { k } from "./e.wiretrick";\n' });
+        const plan = makePackagePlan("e.wiretrick.ts", { "e.wiretrick.ts": 'import "./c.json";\nexport const k = 1;\n', "c.json": "{}", "lib.ts": 'export { k } from "./e.wiretrick";\n' });
         expect(plan.edits).toEqual([{ path: "lib.ts", text: 'export { k } from "./e/e.wiretrick";\n' }]);
     });
 
-    it("leaves an entry that's alone in its folder in place: only the header changes", () => {
+    it("leaves a script that's alone in its folder in place: only a metadata.json is added", () => {
         const files = { "pkg/main.wiretrick.ts": 'import "./lib";\n', "pkg/lib.ts": "export {};\n" };
         const plan = makePackagePlan("pkg/main.wiretrick.ts", files);
         expect(plan.inPlace).toBe(true);
         expect(plan.folder).toBe("pkg");
         expect(plan.files.map((f) => f.to)).toEqual(["pkg/main.wiretrick.ts", "pkg/lib.ts"]);
-        expect(plan.files[1].text).toBe(files["pkg/lib.ts"]);
-        expect(parseHeader(plan.files[0].text).name).toBe("main");
+        expect(plan.files.map((f) => f.text)).toEqual(Object.values(files));
+        expect(parseManifest(plan.manifest!.text)).toMatchObject({ name: "main", scripts: ["main.wiretrick.ts"] });
     });
 
-    it("isn't in place when its folder has another entry, and picks a free folder name", () => {
-        const plan = makePackagePlan("pkg/a.wiretrick.ts", { "pkg/a.wiretrick.ts": "", "pkg/b.wiretrick.ts": "", "pkg/a/x.ts": "" }, ["pkg/a 2"]);
+    it("isn't in place when its folder holds other files, and picks a free folder name", () => {
+        const plan = makePackagePlan("pkg/a.wiretrick.ts", { "pkg/a.wiretrick.ts": 'import "./u";', "pkg/u.ts": "", "pkg/b.ts": "", "pkg/a/x.ts": "" }, ["pkg/a 2"]);
         expect(plan.inPlace).toBe(false);
         expect(plan.folder).toBe("pkg/a 3");
     });
@@ -85,23 +85,46 @@ describe("makePackagePlan", () => {
         expect(plan.missing).toEqual([{ from: "e.wiretrick.ts", spec: "./gone" }]);
     });
 
-    it("keeps a header that has a name", () => {
-        const code = "/**\n * @name Mine\n */\nexport {};\n";
-        const plan = makePackagePlan("p/e.wiretrick.ts", { "p/e.wiretrick.ts": code });
-        expect(plan.addsHeader).toBe(false);
-        expect(plan.files[0].text).toBe(code);
+    it("names a script that imports nothing in place, with wt.metadata", () => {
+        const plan = makePackagePlan("p/e.ts", { "p/e.ts": 'wt.fetch("https://x.io/a");\n', "p/o.ts": "" });
+        expect(plan.inPlace).toBe(true);
+        expect(plan.manifest).toBeUndefined();
+        expect(plan.files).toEqual([{ from: "p/e.ts", to: "p/e.ts", copy: false, text: 'wt.metadata({ name: "e", version: "1.0.0", connect: ["x.io"] });\n\nwt.fetch("https://x.io/a");\n' }]);
     });
 });
 
-describe("withHeader", () => {
-    it("adds to a doc block at the top", () => {
-        const out = withHeader("// hi\n/**\n * Does things\n * @version 2.0.0\n */\ncode();\n", "x");
-        expect(out).toBe("// hi\n/**\n * @name x\n * @description\n * Does things\n * @version 2.0.0\n */\ncode();\n");
-        expect(parseHeader(out)).toMatchObject({ name: "x", version: "2.0.0", description: "Does things" });
+describe("withMetadata", () => {
+    it("adds what's missing to an existing call", () => {
+        expect(withMetadata('wt.metadata({ description: "Hi {x}" });\n', "x")).toBe('wt.metadata({ name: "x", version: "1.0.0", description: "Hi {x}" });\n');
+        expect(withMetadata("wt.metadata({});", "x")).toBe('wt.metadata({ name: "x", version: "1.0.0" });');
+        expect(withMetadata('wt.metadata({\n    version: "2.0.0",\n});', "x")).toBe('wt.metadata({\n    name: "x",\n    version: "2.0.0",\n});');
     });
 
-    it("puts a new block above a one-line comment", () => {
-        expect(withHeader("/** one */\ncode();\n", "x")).toBe("/**\n * @name x\n * @version 1.0.0\n * @description\n */\n/** one */\ncode();\n");
+    it("keeps a call that names the script", () => {
+        const code = 'wt.metadata({ name: "Mine", version: "3" });';
+        expect(withMetadata(code, "x", ["a.com"])).toBe(code);
+    });
+
+    it("adds a call after the imports", () => {
+        expect(withMetadata('import { a,\n  b } from "./lib";\nimport "./c";\n\nrun();\n', "x")).toBe('import { a,\n  b } from "./lib";\nimport "./c";\n\nwt.metadata({ name: "x", version: "1.0.0" });\n\nrun();\n');
+        expect(withMetadata("run();\n", "x")).toBe('wt.metadata({ name: "x", version: "1.0.0" });\n\nrun();\n');
+    });
+});
+
+describe("makeFolderPackagePlan", () => {
+    it("lists the scripts no other file in the folder imports", () => {
+        const plan = makeFolderPackagePlan("kit", {
+            "kit/a.ts": 'import "./lib";\nimport "../out";\nimport "utils";',
+            "kit/sub/b.tsx": 'import "../lib";',
+            "kit/lib.ts": "",
+            "kit/c.json": "{}",
+            "out.ts": "",
+        });
+        expect(plan.scripts).toEqual(["kit/a.ts", "kit/sub/b.tsx"]);
+        expect(plan.outside).toEqual([{ from: "kit/a.ts", spec: "../out" }]);
+        expect(plan.bare).toEqual([{ from: "kit/a.ts", spec: "utils" }]);
+        expect(plan.manifest.path).toBe("kit/metadata.json");
+        expect(parseManifest(plan.manifest.text)).toMatchObject({ name: "kit", version: "1.0.0", scripts: ["a.ts", "sub/b.tsx"] });
     });
 });
 
@@ -122,20 +145,10 @@ describe("fetchHosts", () => {
 });
 
 describe("packageFolders", () => {
-    it("finds folders whose one entry has a header", () => {
-        const h = "/** @name x */\n";
-        const out = packageFolders([
-            { name: "a/a.wiretrick", code: h },
-            { name: "a/lib", code: "" },
-            { name: "b/b.wiretrick", code: "" },
-            { name: "c/c.wiretrick", code: h },
-            { name: "c/sub/d.wiretrick", code: "" },
-            { name: "root.wiretrick", code: h },
-            { name: "e/f/g.wiretrick", code: h },
-        ]);
-        expect([...out]).toEqual([
-            ["a", "a/a.wiretrick"],
-            ["e/f", "e/f/g.wiretrick"],
+    it("finds folders holding a metadata.json", () => {
+        expect([...packageFolders(["a/metadata.json", "a/x.json", "metadata.json", "b/c/metadata.json", "d/meta.json"])]).toEqual([
+            ["a", "a/metadata.json"],
+            ["b/c", "b/c/metadata.json"],
         ]);
     });
 });

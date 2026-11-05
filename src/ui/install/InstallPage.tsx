@@ -1,14 +1,15 @@
 /**
  * The install page: opened for a *.wiretrick.ts URL (the background sends
- * such tabs here), from the Explorer's "Install from URL / folder / zip",
+ * such tabs here, like GreaseMonkey's .user.js), from the Explorer's "Install from URL / folder / zip",
  * and to review a held update (`?update=<package id>`).
  */
 import { useEffect, useMemo, useState } from "react";
 import type { Analysis } from "../../background/engine/packages";
 import { describeCapabilities } from "../../shared/packageCaps";
-import type { InstalledPackage, PackageVersion } from "../../shared/packageModel";
+import { entryIds, packageName, type InstalledPackage, type PackageVersion } from "../../shared/packageModel";
+import { isManifestPath, MANIFEST_FILE } from "../../shared/packageMetadata";
 import { parseSource, sourceLabel } from "../../shared/packageSource";
-import { entriesIn, isPackageFile, localPackage } from "../../shared/localPackage";
+import { isPackageFile, localPackage, startsIn } from "../../shared/localPackage";
 import { diffHunks, lineDiff } from "../../shared/lineDiff";
 import { readZip } from "../../shared/zip";
 import { fetchFrom, installedTexts, packagesApi, type Fetched } from "./api";
@@ -59,7 +60,7 @@ export function InstallPage() {
             const pkg = (await packagesApi.list())[id];
             if (!pkg) throw new Error("That package isn't installed anymore.");
             if (!pkg.pending) return setState({ phase: "nothing", pkg });
-            const fetched: Fetched = { source: pkg.source, entry: pkg.pending.entry, files: pkg.pending.files, revision: pkg.pending.revision, missing: [], bare: [] };
+            const fetched: Fetched = { source: pkg.source, entries: pkg.pending.entries, files: pkg.pending.files, revision: pkg.pending.revision, missing: [], bare: [] };
             const analysis = await packagesApi.analyze(fetched, id);
             setState({ phase: "pending", pkg, pending: pkg.pending, before: await installedTexts(pkg), analysis });
         } catch (e) {
@@ -76,17 +77,19 @@ export function InstallPage() {
     }, []);
 
     async function pickLocal(label: string, files: Record<string, string>) {
-        const entries = entriesIn(Object.keys(files));
-        if (!entries.length) return setState({ phase: "pick", error: `${label} has no *.wiretrick.ts file to install.` });
+        const entries = startsIn(Object.keys(files));
+        if (!entries.length) return setState({ phase: "pick", error: `${label} has no script or ${MANIFEST_FILE} to install.` });
         const top = entries.filter((e) => e.split("/").length === entries[0].split("/").length);
-        if (top.length > 1) return setState({ phase: "pick", local: { label, files, entries } });
-        await installLocal(files, entries[0]);
+        // a metadata.json at the top is the bundle to install
+        const bundle = top.find(isManifestPath);
+        if (top.length > 1 && !bundle) return setState({ phase: "pick", local: { label, files, entries } });
+        await installLocal(files, bundle ?? entries[0]);
     }
 
-    async function installLocal(files: Record<string, string>, entry: string) {
+    async function installLocal(files: Record<string, string>, start: string) {
         try {
-            const p = await localPackage(files, entry);
-            await review({ source: "", entry: p.entry, files: p.files, revision: p.revision, missing: p.missing, bare: p.bare });
+            const p = await localPackage(files, start);
+            await review({ source: "", entries: p.entries, files: p.files, revision: p.revision, missing: p.missing, bare: p.bare });
         } catch (e) {
             setState({ phase: "pick", error: errText(e) });
         }
@@ -151,7 +154,7 @@ export function InstallPage() {
         case "nothing":
             return (
                 <main>
-                    <Header name={state.pkg.header.name || state.pkg.entry} header={state.pkg.header} source={state.pkg.source} />
+                    <Header name={packageName(state.pkg)} metadata={state.pkg.metadata} scripts={state.pkg.entries} source={state.pkg.source} />
                     <p>{state.note ?? "No update is waiting for review."}</p>
                     <div className="actions">
                         {state.pkg.source && (
@@ -180,11 +183,11 @@ export function InstallPage() {
             return (
                 <main>
                     <h1>
-                        {state.verb} “{state.pkg.header.name || state.pkg.entry.replace(/^.*\//, "")}”{versionOf(state.pkg.header)}
+                        {state.verb} “{packageName(state.pkg)}”{versionOf(state.pkg.metadata)}
                     </h1>
                     <p className="dim">{state.pkg.folder ? <>Its files are in the Explorer's <b>{state.pkg.folder}</b> folder.</> : <>It's in the Explorer's root.</>}</p>
                     <div className="actions">
-                        <button className="primary" onClick={() => openEditor(state.pkg.entryId)}>
+                        <button className="primary" onClick={() => openEditor(entryIds(state.pkg)[0])}>
                             Open in the Editor
                         </button>
                         <button onClick={closeTab}>Close</button>
@@ -211,7 +214,7 @@ function Picker(props: {
         <main>
             <h1>Install a script</h1>
             <p className="dim">
-                A <code>*.wiretrick.ts</code> URL, a GitHub repository or folder, or a gist. It installs with the files it imports and can keep itself up to date.
+                A script's URL (<code>.ts</code>), a bundle's <code>{MANIFEST_FILE}</code>, a GitHub repository or folder, or a gist. It installs with the files it imports and can keep itself up to date.
             </p>
             <form
                 className="row"
@@ -239,7 +242,7 @@ function Picker(props: {
             {error && <p className="err">{error}</p>}
             {local && (
                 <div>
-                    <p>{local.label} has more than one script to run — which one?</p>
+                    <p>{local.label} has more than one script (and no {MANIFEST_FILE} listing them) — which one?</p>
                     <ul className="entries">
                         {local.entries.map((e) => (
                             <li key={e}>
@@ -255,8 +258,8 @@ function Picker(props: {
     );
 }
 
-function Header(props: { name: string; header: Analysis["header"]; source: string }) {
-    const { header } = props;
+function Header(props: { name: string; metadata: Analysis["metadata"]; scripts: string[]; source: string }) {
+    const { metadata: header } = props;
     return (
         <header>
             <h1>
@@ -264,6 +267,11 @@ function Header(props: { name: string; header: Analysis["header"]; source: strin
                 {header.version && <span className="version">{header.version}</span>}
             </h1>
             {header.description && <p className="desc">{header.description}</p>}
+            {props.scripts.length > 1 && (
+                <p className="meta">
+                    A bundle of {props.scripts.length} scripts: {props.scripts.join(", ")}
+                </p>
+            )}
             <p className="meta dim">
                 {props.source ? <>From {label(props.source)}</> : <>From local files</>}
                 {header.author && <> · by {header.author}</>}
@@ -406,10 +414,10 @@ function Review(props: { state: Extract<State, { phase: "review" }>; setState: (
         });
     return (
         <main>
-            <Header name={analysis.name} header={analysis.header} source={fetched.source} />
+            <Header name={analysis.name} metadata={analysis.metadata} scripts={fetched.entries} source={fetched.source} />
             {existing && (
                 <p className="note">
-                    {same ? "This version is already installed." : <>Installed: {existing.header.version || existing.revision.slice(0, 8)} — installing this updates it in place (its settings stay).</>}
+                    {same ? "This version is already installed." : <>Installed: {existing.metadata.version || existing.revision.slice(0, 8)} — installing this updates it in place (its settings stay).</>}
                 </p>
             )}
             <Capabilities analysis={analysis} added={analysis.added} />
@@ -458,9 +466,9 @@ function PendingReview(props: { state: Extract<State, { phase: "pending" }>; set
     }
     return (
         <main>
-            <Header name={analysis.name} header={pending.header} source={pkg.source} />
+            <Header name={analysis.name} metadata={pending.metadata} scripts={pending.entries} source={pkg.source} />
             <p className="note">
-                An update from {pkg.header.version || pkg.revision.slice(0, 8)} to {pending.header.version || pending.revision.slice(0, 8)} waits for your review
+                An update from {pkg.metadata.version || pkg.revision.slice(0, 8)} to {pending.metadata.version || pending.revision.slice(0, 8)} waits for your review
                 {pending.reasons.length ? <>: {pending.reasons.join("; ")}.</> : "."}
             </p>
             <Capabilities analysis={analysis} added={analysis.added} />

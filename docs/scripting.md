@@ -6,7 +6,7 @@ A script registers **handlers** at top level. Each handler takes its own
 [route](#routes) first, then the function:
 
 ```ts
-wt.about("Debug the user API");
+wt.metadata({ description: "Debug the user API" });
 
 const API = { url: "*://app.example.com/api/*", strategy: "helper" } as const;
 
@@ -40,15 +40,10 @@ wt.onPage({ url: "*://app.example.com/*", dom: "overlay" }, () => {
 ```
 
 Register handlers synchronously at top level. A registration after an
-`await` or inside a callback logs an error and is ignored.
-
-Only files named **`*.wiretrick.ts`** (or `*.wiretrick.tsx`) run. Every
-other `.ts` file is a [library](#libraries-and-recipes) that scripts import:
-its handlers never register, and a Problems warning offers to rename it.
-New files you name without an extension (`dark mode`) become
-`dark mode.wiretrick.ts`; name one `utils.ts` for a library. To share a
-script, publish its `*.wiretrick.ts` file (and the files it imports) at a
-URL; opening that URL [installs it](packages.md).
+`await` or inside a callback logs an error and is ignored. A file that
+registers no handlers is a [library](#libraries-and-recipes). To share a
+script, publish it at a URL ending in `.wiretrick.ts`; opening that URL
+[installs it](packages.md).
 
 ## Routes
 
@@ -295,14 +290,16 @@ It is the same in `onRequest`, `replaceResponse`, `onResponseHeaders` and
 
 ## Description and parameters
 
-`wt.about("…")` sets a one-line description, shown as the script's
-tooltip in the Editor and in the popup.
+`wt.metadata({ description: "…" })` sets a one-line description, shown as
+the script's tooltip in the Editor and in the popup. Its other fields —
+`name`, `version`, `homepage`, `author`, `license` and `connect` — describe
+the script as a shared package (see [Packages](packages.md)). Call it once.
 
 `wt.params` declares typed knobs the user changes from the popup's ⚙
 dialog, the Editor or `settings.yaml` without touching the script:
 
 ```ts
-wt.about("Force failures on the posts API");
+wt.metadata({ description: "Force failures on the posts API" });
 
 const cfg = wt.params({
     enabled: { type: "boolean", default: true, description: "Master switch" },
@@ -368,10 +365,9 @@ error. For `enum`, `parse` receives the choice typed as `string`.
 
 ## Libraries and recipes
 
-A file not named `*.wiretrick.ts` is a **library**: it never runs on its
+A file that registers no handlers is a **library**: it never runs on its
 own (the popup lists it only when it declares params) but other scripts
-import it. A `*.wiretrick.ts` file that registers no handlers counts as one
-too.
+import it.
 
 ```ts
 // utils.ts:
@@ -398,12 +394,12 @@ mockJson("*://api.example.com/me", { id: 1, role: "admin" });
 
 Libraries may declare params too, as shared config. They're editable in the
 popup (marked 𝑓, no enabled switch), the Editor and `settings.yaml`, and
-importers see the library's values. Whether a `*.wiretrick.ts` file runs is
-decided with its current param values, so one that registers handlers only
-for some value becomes a library when you change it (and back):
+importers see the library's values. Whether a file is a library is decided
+with its current param values, so a library that registers handlers only
+for some value becomes a script when you change it (and back):
 
 ```ts
-// gate.wiretrick.ts: a library until "on" is switched on
+// gate.ts: a library until "on" is switched on
 const p = wt.params({ on: { type: "boolean", default: false } });
 if (p.on) wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, () => ({ block: true }));
 ```

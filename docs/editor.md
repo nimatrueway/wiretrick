@@ -98,17 +98,15 @@ collapse), Space opens it and keeps focus in the tree, F2 renames, Delete
 (⌘⌫ on macOS) deletes after a confirmation — a folder's warns that it deletes
 its contents, with counts — and Esc returns to the Code view. Right-click a
 row for **Open**, **Enable/Disable** (scripts), **Make Package…** and
-**Export Package…** (entry scripts and package folders — see [Sharing a
-script](packages.md#sharing-a-script)), **New Script…**, **New JSON
+**Export Package…** (scripts, folders and package folders — see [Sharing
+scripts](packages.md#sharing-scripts)), **New Script…**, **New JSON
 File…**, **New Folder…** (in that folder), **Copy Path**, **Rename…** and
-**Delete**; right-click the empty area for the New items at the root. **New
-Script…** makes a `*.wiretrick.ts` file, which runs, unless you type `.ts`
-(`utils.ts`): then it's a [library](scripting.md#libraries-and-recipes). Drag a
+**Delete**; right-click the empty area for the New items at the root. Drag a
 script, data file or folder onto a folder to move it there (onto the empty
 area: to the root); hovering a collapsed folder while dragging expands it.
-A package's folder — [installed](packages.md), or one holding a single entry
-with a header `@name`, as **Make Package…** leaves it — has a box icon instead
-of a folder. An installed one-file package's entry shows 📦; an installed
+A package's folder — [installed](packages.md), or one holding a
+`metadata.json`, as **Make Package…** leaves it — has a box icon instead
+of a folder. An installed one-file package's script shows 📦; an installed
 package shows ⬆ when an update waits for review (click it to review); its
 right-click menu adds **Review Update…**, **Check for Updates**, **Turn
 Auto-Update On/Off**, **Roll Back to …**, **Open Source Page** and **Forget
@@ -123,7 +121,7 @@ offers **Copy Paths**. Items inside a selected folder go with it. The
 **Enabled** switch in the toolbar turns the open script on or off.
 
 Double-click a file (or F2 on a file or folder) to rename it (Enter saves, Esc cancels).
-The box shows the full file name, extension included (`My script.wiretrick.ts`,
+The box shows the full file name, extension included (`My script.ts`,
 `users.json`), with only the name before it selected (`.wiretrick.ts` too); the `.ts` of a script is
 optional when you type, while `.tsx` makes it a [`.tsx` script](scripting.md#built-in-valtio-and-react). The name is the path in the synced folder; a `/`
 moves it into a folder (`mock/api mock` → `mock/api mock.ts`; renaming a

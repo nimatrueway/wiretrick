@@ -4,7 +4,9 @@
  * the package can do; installing writes the entry, its library and its
  * JSON file into the package's folder and the entry runs. An update that
  * adds a route waits for review (the Explorer marks it), the review page
- * applies it, and rolling back restores the first version.
+ * applies it, and rolling back restores the first version. A bundle (a
+ * metadata.json listing two scripts) installs both together. Make Package…
+ * and Export Package… in the Explorer.
  *
  * `packagesServerRoute` serves the package; call it in the suite's test server.
  */
@@ -15,12 +17,9 @@ type Check = (name: string, ok: boolean, extra?: string) => void;
 
 let version = 1;
 
-const entry = (origin: string) => `/**
- * @name Demo package
- * @version 1.${version - 1}.0
- */
-import { shout } from "./lib";
+const entry = (origin: string) => `import { shout } from "./lib";
 import cfg from "./cfg.json";
+wt.metadata({ name: "Demo package", version: "1.${version - 1}.0" });
 wt.replaceResponse({ url: "${origin}/pkg-api", strategy: "page" }, () => shout(cfg.word));
 ${version > 1 ? `wt.replaceResponse({ url: "${origin}/pkg-other", strategy: "page" }, () => "OTHER");\n` : ""}`;
 
@@ -33,6 +32,10 @@ export function packagesServerRoute(req: http.IncomingMessage, res: http.ServerR
     if (url.pathname === "/pkg/demo.wiretrick.ts") return send("text/plain", entry(origin)), true;
     if (url.pathname === "/pkg/lib.ts") return send("text/plain", 'export const shout = (s: string) => s.toUpperCase() + "!";\n'), true;
     if (url.pathname === "/pkg/cfg.json") return send("application/json", '{ "word": "pkg-ok" }'), true;
+    if (url.pathname === "/kit/metadata.json") return send("application/json", JSON.stringify({ name: "Kit", version: "3.0.0", description: "Two scripts", scripts: ["a.ts", "tools/b.ts"] })), true;
+    if (url.pathname === "/kit/a.ts") return send("text/plain", `import { tag } from "./shared";\nwt.replaceResponse({ url: "${origin}/kit-a", strategy: "page" }, () => tag("A"));\n`), true;
+    if (url.pathname === "/kit/tools/b.ts") return send("text/plain", `import { tag } from "../shared";\nwt.replaceResponse({ url: "${origin}/kit-b", strategy: "page" }, () => tag("B"));\n`), true;
+    if (url.pathname === "/kit/shared.ts") return send("text/plain", 'export const tag = (s: string) => "KIT-" + s;\n'), true;
     if (url.pathname === "/pkg-page") return send("text/html", "<html><body>PKG</body></html>"), true;
     if (url.pathname === "/pkg-api") return send("text/plain", "REAL"), true;
     return false;
@@ -115,17 +118,45 @@ export async function checkPackages(ctx: any, mgr: any, origin: string, check: C
     await rv.close();
     const updated = (await send({ type: "listPackages" }))?.[pkg.id];
     const other = await waitFor(() => page.evaluate(() => fetch("/pkg-other").then((r) => r.text())).catch(() => ""), (v) => v === "OTHER", 10000);
-    check(t("applying the update installs it"), updated?.header?.version === "1.1.0" && !updated.pending && other === "OTHER", JSON.stringify({ version: updated?.header?.version, other }));
+    check(t("applying the update installs it"), updated?.metadata?.version === "1.1.0" && !updated.pending && other === "OTHER", JSON.stringify({ version: updated?.metadata?.version, other }));
 
     const back = await send({ type: "packageRollback", id: pkg.id });
-    check(t("rolling back restores the previous version and turns auto-update off"), back?.header?.version === "1.0.0" && back.autoUpdate === false, JSON.stringify({ version: back?.header?.version, autoUpdate: back?.autoUpdate, error: back?.error }));
+    check(t("rolling back restores the previous version and turns auto-update off"), back?.metadata?.version === "1.0.0" && back.autoUpdate === false, JSON.stringify({ version: back?.metadata?.version, autoUpdate: back?.autoUpdate, error: back?.error }));
     await page.close();
 
     for (const s of (await send({ type: "listScripts" })) || []) if (s.meta.name.startsWith("demo/")) await send({ type: "deleteScript", id: s.id });
     for (const d of (await send({ type: "listDataFiles" })) || []) if (d.path.startsWith("demo/")) await send({ type: "deleteDataFile", id: d.id });
     await send({ type: "packageForget", id: pkg.id });
 
-    // Explorer → Make Package…: the entry and what it imports move into a folder (a file another script uses is copied)
+    // a bundle: metadata.json lists two scripts; they install (and run) together
+    const kitSrc = `${origin}/kit/metadata.json`;
+    const kt = await ctx.newPage();
+    await kt.goto(`chrome-extension://${new URL(mgr.url()).host}/install.html?url=${encodeURIComponent(kitSrc)}`, { timeout: 15000 });
+    const kitConfirm = await kt.waitForSelector("#install-confirm:not([disabled])", { timeout: 15000 }).then(() => true, () => false);
+    const kitReview = await kt.evaluate(() => document.body.innerText);
+    check(
+        t("a bundle's review shows its name, version and scripts"),
+        kitConfirm && kitReview.includes("Kit") && kitReview.includes("3.0.0") && kitReview.includes("A bundle of 2 scripts") && kitReview.includes(`${origin}/kit-a`) && kitReview.includes(`${origin}/kit-b`),
+        kitReview.slice(0, 400)
+    );
+    if (kitConfirm) await kt.click("#install-confirm");
+    await kt.waitForSelector("text=Open in the Editor", { timeout: 15000 }).catch(() => {});
+    await kt.close();
+    const kit: any = Object.values((await send({ type: "listPackages" })) || {}).find((p: any) => p.source === kitSrc);
+    const kitNames = (((await send({ type: "listScripts" })) || []) as any[]).filter((s) => s.meta.name.startsWith("Kit/")).map((s) => s.meta.name).sort();
+    const kp = await ctx.newPage();
+    await kp.goto(`${origin}/pkg-page`, { waitUntil: "load", timeout: 15000 });
+    const kitOut = await waitFor(() => kp.evaluate(() => Promise.all(["/kit-a", "/kit-b"].map((u) => fetch(u).then((r) => r.text()))).then((x) => x.join())).catch(() => ""), (v) => v === "KIT-A,KIT-B", 10000);
+    await kp.close();
+    check(
+        t("installing a bundle writes and runs all its scripts"),
+        !!kit && kit.entries?.length === 2 && kit.metadata?.version === "3.0.0" && JSON.stringify(kitNames) === '["Kit/a","Kit/shared","Kit/tools/b"]' && kitOut === "KIT-A,KIT-B",
+        JSON.stringify({ kit: kit && { folder: kit.folder, entries: kit.entries }, kitNames, kitOut })
+    );
+    await send({ type: "deleteFolder", path: "Kit" });
+    if (kit) await send({ type: "packageForget", id: kit.id });
+
+    // Explorer → Make Package…: the script and what it imports move into a folder with a metadata.json (a file another script uses is copied)
     await send({ type: "saveScript", id: "mkpkg-lib", code: "export const v = 1;\n", name: "mklib" });
     await send({ type: "saveScript", id: "mkpkg-user", code: 'import { v } from "./mklib";\nexport const w = v;\n', name: "mkuser" });
     await send({ type: "saveDataFile", path: "mkcfg.json", text: '{ "a": 1 }\n' });
@@ -139,20 +170,22 @@ export async function checkPackages(ctx: any, mgr: any, origin: string, check: C
     await mgr.click('.ctx-menu li:has-text("Make Package…")');
     const made = await waitFor(
         async () => ({ scripts: ((await send({ type: "listScripts" })) || []) as any[], data: ((await send({ type: "listDataFiles" })) || []) as any[] }),
-        ({ scripts, data }) => scripts.some((x) => x.id === "mkpkg-entry" && x.meta.name === "mkpkg/mkpkg.wiretrick") && data.some((d) => d.path === "mkpkg/mkcfg.json"),
+        ({ scripts, data }) => scripts.some((x) => x.id === "mkpkg-entry" && x.meta.name === "mkpkg/mkpkg.wiretrick") && data.some((d) => d.path === "mkpkg/mkcfg.json") && data.some((d) => d.path === "mkpkg/metadata.json"),
     );
     mgr.off("dialog", onDialog);
     const entry = made.scripts.find((x) => x.id === "mkpkg-entry");
     const mkNames = made.scripts.map((x) => x.meta.name);
+    const manifest = JSON.parse(made.data.find((d) => d.path === "mkpkg/metadata.json")?.text || "{}");
     check(
-        t("Make Package… moves the entry and what it imports into a folder, copying what others use, and adds a header"),
+        t("Make Package… moves the script and what it imports into a folder, copying what others use, and adds a metadata.json"),
         /Copies[\s\S]*mklib\.ts → mkpkg\/mklib\.ts/.test(dialogs[0] || "") &&
-            entry?.code.includes("@name mkpkg") &&
+            manifest.name === "mkpkg" &&
+            JSON.stringify(manifest.scripts) === '["mkpkg.wiretrick.ts"]' &&
             entry?.code.includes('from "./mklib"') &&
             mkNames.includes("mkpkg/mklib") &&
             mkNames.includes("mklib") &&
             !made.data.some((d) => d.path === "mkcfg.json"),
-        JSON.stringify({ dialog: dialogs[0], mkNames, entry: entry?.code.slice(0, 200), data: made.data.map((d) => d.path) }),
+        JSON.stringify({ dialog: dialogs[0], mkNames, manifest, entry: entry?.code.slice(0, 200), data: made.data.map((d) => d.path) }),
     );
 
     // the folder is a package now: its icon, and Export Package… downloads a zip of it
@@ -177,7 +210,7 @@ export async function checkPackages(ctx: any, mgr: any, origin: string, check: C
     const zipped = dl ? await readZip(new Uint8Array(dl.bytes).buffer) : {};
     check(
         t("a package folder has the package icon, and Export Package… downloads its files as a zip"),
-        icon && dl?.name === "mkpkg.zip" && Object.keys(zipped).sort().join() === "mkpkg/mkcfg.json,mkpkg/mklib.ts,mkpkg/mkpkg.wiretrick.ts",
+        icon && dl?.name === "mkpkg.zip" && Object.keys(zipped).sort().join() === "mkpkg/metadata.json,mkpkg/mkcfg.json,mkpkg/mklib.ts,mkpkg/mkpkg.wiretrick.ts",
         JSON.stringify({ icon, name: dl?.name, files: Object.keys(zipped) })
     );
     await send({ type: "deleteFolder", path: "mkpkg" });

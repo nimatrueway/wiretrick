@@ -128,7 +128,7 @@ export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDocumentHa
             throw new Error(STORE_RENAMED);
         },
         fetch: () => Promise.reject(new Error(NO_FETCH)),
-        about: inert,
+        metadata: inert,
         params: (defs: Record<string, ParamDef>) => Object.freeze(Object.fromEntries(Object.entries(defs || {}).map(([k, d]) => [k, parsed(k, d)]))),
         defineParam: (name: string, def: ParamDef) => parsed(name, def),
         log: o.log,

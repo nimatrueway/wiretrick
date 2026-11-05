@@ -20,10 +20,10 @@ export async function fetchFrom(source: string): Promise<Fetched> {
     const src = parseSource(source);
     if (typeof src === "string") throw new Error(src);
     const p = await fetchPackage(src, webNet);
-    return { source, entry: p.entry, files: p.files, revision: p.revision, missing: p.missing, bare: p.bare };
+    return { source, entries: p.entries, files: p.files, revision: p.revision, missing: p.missing, bare: p.bare };
 }
 
-const plain = (f: Fetched): FetchedPackage => ({ source: f.source, entry: f.entry, files: f.files, revision: f.revision });
+const plain = (f: Fetched): FetchedPackage => ({ source: f.source, entries: f.entries, files: f.files, revision: f.revision });
 
 export const packagesApi = {
     list: () => send<Record<string, InstalledPackage>>({ type: "listPackages" }),

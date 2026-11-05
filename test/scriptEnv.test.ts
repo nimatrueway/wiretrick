@@ -17,7 +17,7 @@ describe("wt.isChrome / isFirefox / isMV2 / isMV3", () => {
     });
 
     it("scripts see them on wt (background compile and page shim)", () => {
-        const c = compileScript(`wt.about([wt.isChrome, wt.isFirefox, wt.isMV2, wt.isMV3].join(","));`);
+        const c = compileScript(`wt.metadata({ description: [wt.isChrome, wt.isFirefox, wt.isMV2, wt.isMV3].join(",") });`);
         expect(c.error).toBeFalsy();
         expect(c.meta.description).toBe("true,false,true,false"); // vitest: MV2 build, not Firefox
         const { wt } = makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined } });

@@ -28,6 +28,7 @@ import { JSON_FALLBACK_DTS, jsonDeclPath, jsonModuleDts } from "./jsonTypes";
 import { packagePaths, TYPINGS_ROOT } from "../shared/packageImports";
 import { importSpecs, isSvgPath } from "../shared/scriptImports";
 import { builtinPaths, builtinSpec } from "../shared/builtinSpecs";
+import { MANIFEST_FILE, MANIFEST_SCHEMA } from "../shared/packageMetadata";
 
 let monacoApi: any = null;
 let wtApiDts = "";
@@ -119,6 +120,10 @@ export async function loadMonaco(): Promise<any> {
     ]);
     monacoApi.languages.typescript.typescriptDefaults.setCompilerOptions(editorCompilerOptions(monacoApi.languages.typescript));
     registerTsHover(monacoApi);
+    monacoApi.languages.json?.jsonDefaults?.setDiagnosticsOptions({
+        validate: true,
+        schemas: [{ uri: "wiretrick://schema/metadata.json", fileMatch: ["**/" + MANIFEST_FILE], schema: MANIFEST_SCHEMA }],
+    });
 
     return monacoApi;
 }
@@ -454,15 +459,7 @@ function registerTsHover(monaco: any): void {
     });
 }
 
-/** a new library (a .ts file that isn't *.wiretrick.ts): only its exports matter */
-export const LIBRARY_TEMPLATE = `// A library: entry scripts (*.wiretrick.ts) import what it exports, e.g.
-// import { greet } from "./${"$"}{name}";
-export function greet(who: string): string {
-    return \`hello \${who}\`;
-}
-`;
-
-export const STARTER_TEMPLATE = `wt.about("What this script does");
+export const STARTER_TEMPLATE = `wt.metadata({ description: "What this script does" });
 
 // Adjustable parameters (editable in settings.yaml / the popup ⚙ dialog):
 const cfg = wt.params({

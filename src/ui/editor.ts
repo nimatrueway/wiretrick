@@ -3,14 +3,16 @@
  */
 
 import "./shell/mount";
-import { loadMonaco, LIBRARY_TEMPLATE, STARTER_TEMPLATE, apiTypingsText, ensureBuiltinTypings, setDataFileTypings, setPackageTypings } from "./monacoSetup";
+import { loadMonaco, STARTER_TEMPLATE, apiTypingsText, ensureBuiltinTypings, setDataFileTypings, setPackageTypings } from "./monacoSetup";
 import { PACKAGE_TYPINGS_KEY, type StoredTypings } from "../shared/packageImports";
 import { API_TYPINGS_URI } from "./apiLinks";
 import { NavHistory } from "./navHistory";
 import type { SampleScript } from "./samples";
 import { settingsDiagnostics, settingsCompletions, settingsHover, type AssistScript } from "../shared/settingsAssist";
-import { badPackageImports, dependantsOf, isSvgPath, missingImports } from "../shared/scriptImports";
-import { makePackagePlan } from "../shared/makePackage";
+import { badPackageImports, dependantsOf, folderOf, isSvgPath, missingImports } from "../shared/scriptImports";
+import { makeFolderPackagePlan, makePackagePlan } from "../shared/makePackage";
+import { MANIFEST_FILE } from "../shared/packageMetadata";
+import { entryStem } from "../shared/packageModel";
 import { localPackage } from "../shared/localPackage";
 import { writeZip } from "../shared/zip";
 import { PACKAGE_ORIGIN } from "../shared/packageImports";
@@ -21,7 +23,7 @@ import { dialogs, openHelp, openSettings, pickRows, resolveConflict } from "./st
 import { folderStateText, setHelperStatus, settings } from "./state/settings";
 import { watchTheme, type Theme } from "./theme";
 import * as fsBridge from "./fsBridge";
-import { cleanScriptName, entryNameOf, isEntryName, isTsxName, NOT_AN_ENTRY, scriptNameProblem, scriptFileName, scriptFileKey, scriptNameFromFile, uniqueScriptName, dataFilePathProblem, folderPathProblem } from "../shared/scriptName";
+import { cleanScriptName, isTsxName, scriptNameProblem, scriptFileName, scriptFileKey, scriptNameFromFile, uniqueScriptName, dataFilePathProblem, folderPathProblem } from "../shared/scriptName";
 import { jsxElementAt } from "../shared/builtinSpecs";
 import { buildBundle, parseBundleText, bundleSettingsDoc, pickBundle, vscodeTargetPath, editorLaunchUrl, launchAppName, type LaunchMode } from "./bundle";
 import { computeDirty } from "./dirtyState";
@@ -430,36 +432,47 @@ function download(name: string, data: BlobPart, type: string): void {
 }
 
 /**
- * Explorer → Export Package…: the entry and every file it imports by a
- * relative path, as saved — one file as itself, more as a .zip of a folder
- * named after the entry (Install Script… takes either).
+ * Explorer → Export Package…: a script (or a bundle's metadata.json, at
+ * `start`) and every file it brings, as saved — one file as itself, more as
+ * a .zip of a folder named after the package (Install Script… takes either).
  */
-async function exportPackage(id: string): Promise<void> {
-    const s = scripts.find((x) => x.id === id);
-    if (!s) return;
+async function exportPackage(start: string): Promise<void> {
     const { files } = userFiles();
     let pkg;
     try {
-        pkg = await localPackage(files, scriptFileName(s.meta.name));
+        pkg = await localPackage(files, start);
     } catch (e: any) {
-        return void status(`can't export "${s.meta.name}": ${e?.message || e}`, "error");
+        return void status(`can't export "${start}": ${e?.message || e}`, "error");
     }
-    const stem = baseName(pkg.entry).replace(/\.wiretrick\.tsx?$/i, "") || "package";
     const paths = Object.keys(pkg.files);
-    if (paths.length === 1) download(baseName(pkg.entry), pkg.files[pkg.entry], "text/plain");
+    const stem = (pkg.manifest ? baseName(folderOf(start)) : entryStem(pkg.entries[0])) || "package";
+    if (paths.length === 1) download(baseName(paths[0]), pkg.files[paths[0]], "text/plain");
     else download(`${stem}.zip`, writeZip(Object.fromEntries(paths.map((p) => [`${stem}/${p}`, pkg.files[p]]))) as BlobPart, "application/zip");
     const warn = [
         pkg.bare.length ? `imports by bare name stay behind: ${[...new Set(pkg.bare.map((b) => `"${b.spec}"`))].join(", ")}` : "",
         pkg.missing.length ? `imports that point at no file: ${pkg.missing.map((m) => `"${m.spec}"`).join(", ")}` : "",
     ].filter(Boolean);
     const dirtyNote = dirty ? " (as saved)" : "";
-    status(`exported "${stem}" — ${paths.length === 1 ? baseName(pkg.entry) : `${stem}.zip, ${paths.length} files`}${dirtyNote}${warn.length ? ` · ${warn.join(" · ")}` : ""}`, warn.length ? "dirty" : undefined);
+    status(`exported "${stem}" — ${paths.length === 1 ? baseName(paths[0]) : `${stem}.zip, ${paths.length} files`}${dirtyNote}${warn.length ? ` · ${warn.join(" · ")}` : ""}`, warn.length ? "dirty" : undefined);
+}
+
+const pathList = (paths: string[]): string => paths.map((p) => `  ${p}`).join("\n");
+const bareNote = (bare: { spec: string }[]): string =>
+    bare.length ? `\nImports by bare name resolve from the root of the installer's scripts, not the package: ${[...new Set(bare.map((b) => `"${b.spec}"`))].join(", ")} — use a relative path ("./…") to take the file along.` : "";
+const missingNote = (missing: { from: string; spec: string }[]): string => (missing.length ? `\nImports that point at no file: ${missing.map((m) => `"${m.spec}" in ${m.from}`).join(", ")}` : "");
+
+/** save through the background; false (and a status) when it failed — a compile error still saves */
+async function saveQuietly(msg: Record<string, unknown>, path: string): Promise<boolean> {
+    const r = await send(msg);
+    if (r?.error && !r.id) status(`can't write "${path}": ${r.error}`, "error");
+    return !(r?.error && !r.id);
 }
 
 /**
- * Explorer → Make Package…: move the entry and the files it imports into a
- * folder named after it (copying those other scripts use too), rewrite
- * their imports, and give the entry a header (shared/makePackage).
+ * Explorer → Make Package… on a script: name it with wt.metadata, or — when
+ * it imports files — move it and them into a folder of their own with a
+ * metadata.json (copying those other scripts use too) and rewrite their
+ * imports (shared/makePackage).
  */
 async function makePackage(id: string): Promise<void> {
     const s = scripts.find((x) => x.id === id);
@@ -469,39 +482,59 @@ async function makePackage(id: string): Promise<void> {
     const changed = [...plan.files.filter((f) => !f.copy && (f.to !== f.from || f.text !== files[f.from])).map((f) => f.from), ...plan.edits.map((e) => e.path)];
     const open = changed.map((p) => owner.get(p)?.script?.id ?? owner.get(p)?.data?.id).find((x) => x === selectedId);
     if (open && dirty) return void status(`save "${treeRow(open)?.path ?? ""}" first — making the package changes it`, "error");
-    if (!changed.length) return void status(`"${plan.folder}" is a package already — share its entry's URL (see Install Script… → docs)`);
-    const list = (paths: string[]) => paths.map((p) => `  ${p}`).join("\n");
+    if (!plan.manifest && !changed.length) return void status(`"${s.meta.name}" names itself (wt.metadata) already — share its URL, or Export Package…`);
     const moved = plan.files.filter((f) => !f.copy && f.to !== f.from);
     const copied = plan.files.filter((f) => f.copy);
     const lines = [
-        plan.inPlace ? `"${plan.folder}/" holds this entry and what it imports already: add a header to it?` : `Make "${scriptFileName(s.meta.name)}" a package in the folder "${plan.folder}/"?`,
-        moved.length ? `\nMoves:\n${list(moved.map((f) => `${f.from} → ${f.to}`))}` : "",
-        copied.length ? `\nCopies (other scripts use them too):\n${list(copied.map((f) => `${f.from} → ${f.to}`))}` : "",
-        plan.edits.length ? `\nUpdates the imports in:\n${list(plan.edits.map((e) => e.path))}` : "",
-        !plan.inPlace && plan.addsHeader ? "\nAdds a header (@name, @version…) to the entry." : "",
-        plan.bare.length ? `\nImports by bare name resolve from the root of the installer's scripts, not the package: ${[...new Set(plan.bare.map((b) => `"${b.spec}"`))].join(", ")} — use a relative path ("./…") to take the file along.` : "",
-        plan.missing.length ? `\nImports that point at no file: ${plan.missing.map((m) => `"${m.spec}" in ${m.from}`).join(", ")}` : "",
+        !plan.manifest
+            ? `Make "${scriptFileName(s.meta.name)}" a package? It gets a wt.metadata({ name, version… }) to fill in.`
+            : plan.inPlace
+              ? `"${plan.folder}/" holds this script and what it imports: make it a package with a ${MANIFEST_FILE}?`
+              : `Make "${scriptFileName(s.meta.name)}" a package in the folder "${plan.folder}/" (with a ${MANIFEST_FILE})?`,
+        moved.length ? `\nMoves:\n${pathList(moved.map((f) => `${f.from} → ${f.to}`))}` : "",
+        copied.length ? `\nCopies (other scripts use them too):\n${pathList(copied.map((f) => `${f.from} → ${f.to}`))}` : "",
+        plan.edits.length ? `\nUpdates the imports in:\n${pathList(plan.edits.map((e) => e.path))}` : "",
+        bareNote(plan.bare),
+        missingNote(plan.missing),
     ];
     if (!confirm(lines.filter(Boolean).join("\n"))) return;
-    const save = async (msg: Record<string, unknown>, path: string): Promise<boolean> => {
-        const r = await send(msg);
-        // an error with an id is a compile error: the script was still saved
-        if (r?.error && !r.id) status(`can't write "${path}": ${r.error}`, "error");
-        return !(r?.error && !r.id);
-    };
     let ok = true;
-    // what's imported first, the entry last: each compiles against files in their new places
+    // what's imported first, the script last: each compiles against files in their new places
     for (const f of [...plan.files].reverse()) {
         const o = owner.get(f.from)!;
-        if (o.data) ok = (f.copy ? await save({ type: "saveDataFile", path: f.to, text: f.text }, f.to) : f.to === f.from || (await save({ type: "renameDataFile", id: o.data.id, path: f.to }, f.to))) && ok;
-        else if (f.copy) ok = (await save({ type: "saveScript", id: uuid(), code: f.text, name: scriptNameFromFile(f.to) }, f.to)) && ok;
-        else if (f.to !== f.from || f.text !== files[f.from]) ok = (await save({ type: "saveScript", id: o.script!.id, code: f.text, ...(f.to !== f.from ? { name: scriptNameFromFile(f.to) } : {}) }, f.to)) && ok;
+        if (o.data) ok = (f.copy ? await saveQuietly({ type: "saveDataFile", path: f.to, text: f.text }, f.to) : f.to === f.from || (await saveQuietly({ type: "renameDataFile", id: o.data.id, path: f.to }, f.to))) && ok;
+        else if (f.copy) ok = (await saveQuietly({ type: "saveScript", id: uuid(), code: f.text, name: scriptNameFromFile(f.to) }, f.to)) && ok;
+        else if (f.to !== f.from || f.text !== files[f.from]) ok = (await saveQuietly({ type: "saveScript", id: o.script!.id, code: f.text, ...(f.to !== f.from ? { name: scriptNameFromFile(f.to) } : {}) }, f.to)) && ok;
     }
-    for (const e of plan.edits) ok = (await save({ type: "saveScript", id: owner.get(e.path)!.script!.id, code: e.text }, e.path)) && ok;
+    for (const e of plan.edits) ok = (await saveQuietly({ type: "saveScript", id: owner.get(e.path)!.script!.id, code: e.text }, e.path)) && ok;
+    if (plan.manifest) ok = (await saveQuietly({ type: "saveDataFile", path: plan.manifest.path, text: plan.manifest.text }, plan.manifest.path)) && ok;
     await refresh();
-    revealInExplorer(plan.files[0].to);
-    await select(id);
-    if (ok) status(`"${plan.folder}/" is a package — fill in its header, then share the entry's URL (or the folder)`);
+    revealInExplorer(plan.manifest?.path ?? plan.files[0].to);
+    if (plan.manifest) {
+        const m = dataFiles.find((d) => d.path === plan.manifest!.path);
+        await select(m?.id ?? id);
+    } else await select(id);
+    if (ok) status(plan.manifest ? `"${plan.folder}/" is a package — fill in its ${MANIFEST_FILE}, then share the folder (or Export Package…)` : `"${s.meta.name}" is a package — fill in its wt.metadata, then share its URL (or Export Package…)`);
+}
+
+/** Explorer → Make Package… on a folder: a metadata.json listing its scripts (shared/makePackage) */
+async function makeFolderPackage(folder: string): Promise<void> {
+    const { files } = userFiles();
+    const plan = makeFolderPackagePlan(folder, files);
+    if (!plan.scripts.length) return void status(`"${folder}/" holds no script to package`, "error");
+    const lines = [
+        `Make "${folder}/" a package? It gets a ${MANIFEST_FILE} listing its scripts:\n${pathList(plan.scripts)}`,
+        plan.outside.length ? `\nImports of files outside the folder can't come along — move those files in first: ${plan.outside.map((m) => `"${m.spec}" in ${m.from}`).join(", ")}` : "",
+        bareNote(plan.bare),
+        missingNote(plan.missing),
+    ];
+    if (!confirm(lines.filter(Boolean).join("\n"))) return;
+    const ok = await saveQuietly({ type: "saveDataFile", path: plan.manifest.path, text: plan.manifest.text }, plan.manifest.path);
+    await refresh();
+    revealInExplorer(plan.manifest.path);
+    const m = dataFiles.find((d) => d.path === plan.manifest.path);
+    if (m) await select(m.id);
+    if (ok) status(`"${folder}/" is a package — fill in its ${MANIFEST_FILE}, then share the folder (or Export Package…)`);
 }
 
 /**
@@ -524,8 +557,7 @@ async function createItem(kind: NewKind, path: string): Promise<void> {
     revealInExplorer(path);
     if (kind === "script") {
         const id = uuid();
-        const code = isEntryName(path) ? STARTER_TEMPLATE : LIBRARY_TEMPLATE.replace("${name}", baseName(path));
-        await send({ type: "saveScript", id, code, name: path });
+        await send({ type: "saveScript", id, code: STARTER_TEMPLATE, name: path });
         await refresh();
         select(id);
         editor?.focus();
@@ -738,31 +770,9 @@ async function renameToTsx(id: string): Promise<void> {
     await moveRows([{ item: { kind: "script", id, path: s.meta.name } as TreeRow, to }]);
 }
 
-const RENAME_TO_ENTRY = "wt.renameToEntry";
-
-async function renameToEntry(id: string): Promise<void> {
-    const s = scripts.find((x) => x.id === id);
-    if (!s || isEntryName(s.meta.name)) return;
-    const to = entryNameOf(s.meta.name);
-    const problem = itemPathProblem("script", to, id);
-    if (problem) return void status(`can't rename to "${to}": ${problem}`, "error");
-    await moveRows([{ item: { kind: "script", id, path: s.meta.name } as TreeRow, to }]);
-}
-
 function registerTsxFix(): void {
     const monaco = (window as any).monaco;
     monaco.editor.registerCommand(RENAME_TO_TSX, (_accessor: unknown, id: string) => void renameToTsx(id));
-    monaco.editor.registerCommand(RENAME_TO_ENTRY, (_accessor: unknown, id: string) => void renameToEntry(id));
-    monaco.languages.registerCodeActionProvider("typescript", {
-        provideCodeActions(model: any, _range: unknown, context: { markers: any[] }) {
-            const mk = context.markers.find((x) => String(x.message).includes(NOT_AN_ENTRY));
-            const id = mk && scriptIdOfModel(model);
-            const s = id && scripts.find((x) => x.id === id);
-            if (!s || isEntryName(s.meta.name)) return { actions: [], dispose() {} };
-            const title = `Rename to ${baseName(scriptFileName(entryNameOf(s.meta.name)))}`;
-            return { actions: [{ title, kind: "quickfix", isPreferred: true, diagnostics: [mk], command: { id: RENAME_TO_ENTRY, title, arguments: [s.id] } }], dispose() {} };
-        },
-    });
     monaco.languages.registerCodeActionProvider("typescript", {
         provideCodeActions(model: any, _range: unknown, context: { markers: any[] }) {
             const mk = context.markers.find((x) => (typeof x.code === "object" ? x.code?.value : x.code) === JSX_IN_TS);
@@ -1635,7 +1645,7 @@ function freeScriptName(base: string, ext = ""): string {
 /** add a sample as a new (enabled) script and open it; returns its id */
 async function addSample(sample: SampleScript): Promise<string> {
     const id = newId();
-    const name = freeScriptName(sample.name, jsxElementAt(sample.code) >= 0 ? ".wiretrick.tsx" : ".wiretrick");
+    const name = freeScriptName(sample.name, jsxElementAt(sample.code) >= 0 ? ".tsx" : "");
     await send({ type: "saveScript", id, code: sample.code, name, enabled: true });
     await refresh();
     selectReal(id);
@@ -2017,7 +2027,8 @@ async function main(): Promise<void> {
         deleteRows: (rows: TreeRow[]) => void deleteRows(rows),
         moveRows,
         makePackage: (id: string) => void makePackage(id),
-        exportPackage: (id: string) => void exportPackage(id),
+        makeFolderPackage: (folder: string) => void makeFolderPackage(folder),
+        exportPackage: (start: string) => void exportPackage(start),
         itemPathProblem,
         createItem: (kind: NewKind, path: string) => void createItem(kind, path),
         startCreate,

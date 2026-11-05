@@ -5,9 +5,10 @@
  */
 import { compileForStorage } from "../compileHost";
 import { addedCapabilities, capabilitiesOf, type Capabilities } from "../../shared/packageCaps";
-import { compareVersions, parseHeader, type PackageHeader } from "../../shared/packageHeader";
+import { compareVersions, MANIFEST_FILE, parseManifest, type PackageMetadata } from "../../shared/packageMetadata";
 import {
     PACKAGES_KEY,
+    entryIds,
     isDataPath,
     modifiedFiles,
     packageFolder,
@@ -19,7 +20,7 @@ import {
     type PackageVersion,
     type PendingUpdate,
 } from "../../shared/packageModel";
-import { fetchPackage, hashText, isRemote, parseSource, webNet } from "../../shared/packageSource";
+import { SCRIPT_FILE_RE, fetchPackage, hashText, isRemote, parseSource, webNet } from "../../shared/packageSource";
 import { allFolders } from "../../shared/folders";
 import { log } from "./logs";
 import {
@@ -40,16 +41,18 @@ import {
 export interface FetchedPackage {
     /** where it updates from; "" = a folder or zip (no updates) */
     source: string;
-    entry: string;
+    entries: string[];
     files: Record<string, string>;
     revision: string;
 }
 
 export interface Analysis {
     name: string;
-    header: PackageHeader;
+    metadata: PackageMetadata;
+    /** a bundle (a metadata.json lists its scripts) */
+    bundle: boolean;
     caps: Capabilities;
-    /** the entry's compile error */
+    /** an entry's compile error */
     error: string | null;
     /** where it would install ("" = the root) */
     folder: string;
@@ -70,7 +73,10 @@ function storageSet(items: Record<string, any>): Promise<void> {
 }
 
 export async function listPackages(): Promise<Record<string, InstalledPackage>> {
-    return (await storageGet(PACKAGES_KEY)) || {};
+    const all: Record<string, InstalledPackage> = (await storageGet(PACKAGES_KEY)) || {};
+    // records from before bundles (an unreleased shape) are dropped
+    for (const k of Object.keys(all)) if (!Array.isArray(all[k]?.entries)) delete all[k];
+    return all;
 }
 
 async function putPackage(pkg: InstalledPackage): Promise<void> {
@@ -87,35 +93,52 @@ function serial<T>(fn: () => Promise<T>): Promise<T> {
     return run;
 }
 
+/**
+ * The installed file a version's file replaces (it keeps that one's store
+ * id: its params, stores and enabled state): the one at the same path, or
+ * — a single-entry package whose entry was renamed — the old entry.
+ */
+function priorOf(pkg: InstalledPackage | undefined, version: Pick<PackageVersion, "entries" | "files">, rel: string): InstalledFile | undefined {
+    if (!pkg) return undefined;
+    const old = pkg.files[rel];
+    if (old) return old;
+    const [was] = pkg.entries;
+    if (pkg.entries.length === 1 && version.entries.length === 1 && rel === version.entries[0] && !(was in version.files)) return pkg.files[was];
+    return undefined;
+}
+
 /** the store names a package's files take, keeping the installed ones' names */
-function layout(files: Record<string, string>, entry: string, folder: string, pkg?: InstalledPackage, takenRoot: string[] = []): Analysis["items"] {
+function layout(version: Pick<PackageVersion, "entries" | "files">, folder: string, pkg?: InstalledPackage, takenRoot: string[] = []): Analysis["items"] {
     const items: Analysis["items"] = {};
-    for (const rel of Object.keys(files)) {
+    for (const rel of Object.keys(version.files)) {
         const kept = pkg?.files[rel];
+        // a renamed entry takes its new name
         items[rel] = kept ? { kind: kept.kind, name: kept.name } : storeItemOf(folder, rel);
     }
     // a root single-file entry steps around a same-named script
-    if (!pkg && !folder) items[entry] = { kind: "script", name: uniqueEntryName(items[entry].name, takenRoot) };
-    // the entry keeps its id through a rename: it keeps its old name only if its path didn't change
-    if (pkg && !pkg.files[entry]) items[entry] = storeItemOf(folder, entry);
+    const [only] = version.entries;
+    if (!pkg && !folder) items[only] = { kind: "script", name: uniqueEntryName(items[only].name, takenRoot) };
     return items;
 }
 
-/** compile the entry as it would install, against the package's own files and the stored ones */
-async function analyze(fetched: Pick<FetchedPackage, "entry" | "files">, pkg?: InstalledPackage): Promise<Analysis> {
-    const { entry, files } = fetched;
-    if (!files[entry]) throw new Error(`the package has no ${entry}`);
-    if (isDataPath(entry)) throw new Error("the entry must be a .wiretrick.ts file");
+/** compile the entries as they would install, against the package's own files and the stored ones */
+async function analyze(version: Pick<FetchedPackage, "entries" | "files">, pkg?: InstalledPackage): Promise<Analysis> {
+    const { entries, files } = version;
+    if (!entries.length) throw new Error("the package has no script to run");
+    for (const e of entries) {
+        if (files[e] === undefined) throw new Error(`the package has no ${e}`);
+        if (!SCRIPT_FILE_RE.test(e)) throw new Error(`${e}: a package's scripts are .ts or .tsx files`);
+    }
+    const manifest = files[MANIFEST_FILE] !== undefined ? parseManifest(files[MANIFEST_FILE]) : undefined;
     const [scripts, dataFiles, folders] = await Promise.all([listScripts(), listDataFiles(), listFolders()]);
     const taken = [...scripts.map((s) => s.meta.name), ...dataFiles.map((d) => d.path), ...allFolders(folders, [])];
-    const folder = pkg ? pkg.folder : packageFolder(entry, files, taken);
-    const items = layout(files, entry, folder, pkg, scripts.map((s) => s.meta.name));
-    const header = parseHeader(files[entry]);
+    const folder = pkg ? pkg.folder : packageFolder({ entries, files, bundleName: manifest?.name }, taken);
+    const items = layout(version, folder, pkg, scripts.map((s) => s.meta.name));
     const own = new Set(pkg ? Object.values(pkg.files).map((f) => f.id) : []);
-    const idOf = (rel: string) => (rel === entry && pkg ? pkg.entryId : pkg?.files[rel]?.id ?? `pkg:${rel}`);
+    const idOf = (rel: string) => priorOf(pkg, version, rel)?.id ?? `pkg:${rel}`;
     const pkgScripts = Object.keys(files)
-        .filter((rel) => items[rel].kind === "script" && rel !== entry)
-        .map((rel) => ({ id: idOf(rel), name: items[rel].name, code: files[rel] }));
+        .filter((rel) => items[rel].kind === "script")
+        .map((rel) => ({ rel, id: idOf(rel), name: items[rel].name, code: files[rel] }));
     const names = new Set(pkgScripts.map((s) => s.name.toLowerCase()));
     const others = scripts
         .filter((s) => !own.has(s.id) && !names.has(s.meta.name.toLowerCase()))
@@ -124,10 +147,26 @@ async function analyze(fetched: Pick<FetchedPackage, "entry" | "files">, pkg?: I
         .filter((rel) => items[rel].kind === "data")
         .map((rel) => ({ path: items[rel].name, text: files[rel] }));
     const values = await loadAllParamValues();
-    const id = idOf(entry);
-    const c = await compileForStorage(files[entry], items[entry].name, values[id], { id, scripts: [...pkgScripts, ...others], paramValues: values, data });
-    const caps = capabilitiesOf(c.meta, header, Object.keys(files).filter((rel) => !isDataPath(rel)).map((rel) => files[rel]));
-    return { name: packageName(entry, header), header, caps, error: c.error, folder, items };
+    const compiled = [];
+    for (const e of entries) {
+        const id = idOf(e);
+        const libs = pkgScripts.filter((s) => s.rel !== e).map(({ id, name, code }) => ({ id, name, code }));
+        compiled.push({ e, c: await compileForStorage(files[e], items[e].name, values[id], { id, scripts: [...libs, ...others], paramValues: values, data }) });
+    }
+    const declared = compiled.map(({ c }) => c.meta.metadata);
+    let metadata: PackageMetadata;
+    if (manifest) {
+        const { scripts: _, ...m } = manifest;
+        metadata = { ...m, connect: [...new Set([...m.connect, ...declared.flatMap((d) => d?.connect ?? [])])] };
+    } else metadata = declared[0] ?? { connect: [] };
+    const failed = compiled.find(({ c }) => c.error);
+    const error = failed ? (entries.length > 1 ? `${failed.e}: ${failed.c.error}` : failed.c.error) : null;
+    const caps = capabilitiesOf(
+        compiled.flatMap(({ c }) => c.meta.routes ?? []),
+        metadata.connect,
+        Object.keys(files).filter((rel) => !isDataPath(rel)).map((rel) => files[rel])
+    );
+    return { name: packageName({ entries, metadata }), metadata, bundle: !!manifest, caps, error, folder, items };
 }
 
 /** the install / update page's preview */
@@ -161,23 +200,24 @@ async function modifiedNow(pkg: InstalledPackage): Promise<string[]> {
 }
 
 /**
- * Write a version's files: data files, then libraries, then the entry
- * (its importers compile against what's there), then drop the files it
- * no longer has. Files keep their store ids.
+ * Write a version's files: data files, then libraries, then the entries
+ * (they compile against what's there), then drop the files it no longer
+ * has. Files keep their store ids; a new entry of an installed bundle
+ * starts turned on.
  */
-async function writeFiles(version: Pick<PackageVersion, "entry" | "files">, items: Analysis["items"], folder: string, pkg: InstalledPackage | undefined, enabled: boolean): Promise<{ files: Record<string, InstalledFile>; entryId: string }> {
-    const { entry, files } = version;
+async function writeFiles(version: Pick<PackageVersion, "entries" | "files">, items: Analysis["items"], folder: string, pkg: InstalledPackage | undefined, enabled: boolean): Promise<Record<string, InstalledFile>> {
+    const { entries, files } = version;
     if (folder) await createFolder(folder).catch(() => {}); // exists
     const out: Record<string, InstalledFile> = {};
     const rels = Object.keys(files).sort((a, b) => rank(a) - rank(b));
     function rank(rel: string) {
-        return rel === entry ? 2 : items[rel].kind === "data" ? 0 : 1;
+        return entries.includes(rel) ? 2 : items[rel].kind === "data" ? 0 : 1;
     }
     for (const rel of rels) {
         const { kind, name } = items[rel];
         const text = files[rel];
-        const old = pkg?.files[rel];
-        const prev = rel === entry && pkg ? { id: pkg.entryId } : old && old.kind === kind && old.id !== pkg?.entryId ? old : undefined;
+        const old = priorOf(pkg, version, rel);
+        const prev = old && old.kind === kind ? old : undefined;
         let id: string;
         if (kind === "data") id = (await saveDataFile({ id: prev?.id, path: name, text })).id;
         else id = (await saveScript({ id: prev?.id ?? newId(), name, code: text, ...(prev ? {} : { enabled }) })).id;
@@ -191,22 +231,21 @@ async function writeFiles(version: Pick<PackageVersion, "entry" | "files">, item
             else await deleteScript(f.id);
         }
     }
-    return { files: out, entryId: out[entry].id };
+    return out;
 }
 
 export function installPackage(fetched: FetchedPackage, opts: { enabled: boolean; autoUpdate: boolean }): Promise<InstalledPackage> {
     return serial(async () => {
         const a = await analyze(fetched);
-        const { files, entryId } = await writeFiles(fetched, a.items, a.folder, undefined, opts.enabled);
+        const files = await writeFiles(fetched, a.items, a.folder, undefined, opts.enabled);
         const now = Date.now();
         const pkg: InstalledPackage = {
             id: newId(),
             source: fetched.source,
             folder: a.folder,
-            entry: fetched.entry,
-            entryId,
+            entries: fetched.entries,
             revision: fetched.revision,
-            header: a.header,
+            metadata: a.metadata,
             caps: a.caps,
             files,
             autoUpdate: opts.autoUpdate && !!fetched.source,
@@ -215,7 +254,7 @@ export function installPackage(fetched: FetchedPackage, opts: { enabled: boolean
         };
         await putPackage(pkg);
         // not ending in the URL: the Network view would take it for the package's request
-        log(-1, `[packages] installed "${a.name}"${a.header.version ? ` ${a.header.version}` : ""}${fetched.source ? ` from ${fetched.source} (auto-update ${pkg.autoUpdate ? "on" : "off"})` : ""}`, "info", entryId);
+        log(-1, `[packages] installed "${a.name}"${a.metadata.version ? ` ${a.metadata.version}` : ""}${fetched.source ? ` from ${fetched.source} (auto-update ${pkg.autoUpdate ? "on" : "off"})` : ""}`, "info", entryIds(pkg)[0]);
         return pkg;
     });
 }
@@ -230,20 +269,19 @@ async function snapshot(pkg: InstalledPackage): Promise<PackageVersion> {
         const t = text.get(f.id);
         if (t !== undefined) files[rel] = t;
     }
-    return { revision: pkg.revision, entry: pkg.entry, files, header: pkg.header, caps: pkg.caps };
+    return { revision: pkg.revision, entries: pkg.entries, files, metadata: pkg.metadata, caps: pkg.caps };
 }
 
 /** replace the installed files with `next`; the current ones become `previous` (unless rolling back) */
 async function apply(pkg: InstalledPackage, next: PackageVersion, rollback = false): Promise<InstalledPackage> {
     const a = await analyze(next, pkg);
     const previous = rollback ? undefined : await snapshot(pkg);
-    const { files, entryId } = await writeFiles(next, a.items, pkg.folder, pkg, true);
+    const files = await writeFiles(next, a.items, pkg.folder, pkg, true);
     const out: InstalledPackage = {
         ...pkg,
-        entry: next.entry,
-        entryId,
+        entries: next.entries,
         revision: next.revision,
-        header: a.header,
+        metadata: a.metadata,
         caps: a.caps,
         files,
         updatedAt: Date.now(),
@@ -254,8 +292,8 @@ async function apply(pkg: InstalledPackage, next: PackageVersion, rollback = fal
         ...(rollback ? { autoUpdate: false } : {}),
     };
     await putPackage(out);
-    const v = a.header.version ? ` ${a.header.version}` : "";
-    log(-1, rollback ? `[packages] rolled "${a.name}" back to${v || " the previous version"} (auto-update is off now)` : `[packages] updated "${a.name}" to${v || ` revision ${next.revision.slice(0, 8)}`}`, "info", entryId);
+    const v = a.metadata.version ? ` ${a.metadata.version}` : "";
+    log(-1, rollback ? `[packages] rolled "${a.name}" back to${v || " the previous version"} (auto-update is off now)` : `[packages] updated "${a.name}" to${v || ` revision ${next.revision.slice(0, 8)}`}`, "info", entryIds(out)[0]);
     return out;
 }
 
@@ -277,7 +315,7 @@ async function offer(pkg: InstalledPackage, fetched: FetchedPackage, manual: boo
     }
     const a = await analyze(fetched, pkg);
     if (a.error) {
-        const failed = { ...checked, lastError: `the update (${a.header.version || fetched.revision.slice(0, 8)}) doesn't compile: ${a.error.split("\n")[0]}` };
+        const failed = { ...checked, lastError: `the update (${a.metadata.version || fetched.revision.slice(0, 8)}) doesn't compile: ${a.error.split("\n")[0]}` };
         await putPackage(failed);
         return failed;
     }
@@ -286,13 +324,13 @@ async function offer(pkg: InstalledPackage, fetched: FetchedPackage, manual: boo
     const reasons: string[] = [];
     if (added.length) reasons.push(`it can do more: ${added.join("; ")}`);
     if (modified.length) reasons.push(`changed here since installed: ${modified.join(", ")}`);
-    if (compareVersions(a.header.version, pkg.header.version) < 0) reasons.push(`the version goes down (${pkg.header.version} → ${a.header.version})`);
-    const next: PackageVersion = { revision: fetched.revision, entry: fetched.entry, files: fetched.files, header: a.header, caps: a.caps };
+    if (compareVersions(a.metadata.version, pkg.metadata.version) < 0) reasons.push(`the version goes down (${pkg.metadata.version} → ${a.metadata.version})`);
+    const next: PackageVersion = { revision: fetched.revision, entries: fetched.entries, files: fetched.files, metadata: a.metadata, caps: a.caps };
     if (reasons.length || !pkg.autoUpdate) {
         const pending: PendingUpdate = { ...next, reasons, added, at: Date.now() };
         const held = { ...checked, pending };
         await putPackage(held);
-        if (!manual) log(-1, `[packages] an update to "${a.name}" waits for review — ${reasons.join("; ")} (right-click it in the Explorer → Review Update…)`, "warn", pkg.entryId);
+        if (!manual) log(-1, `[packages] an update to "${a.name}" waits for review — ${reasons.join("; ")} (right-click it in the Explorer → Review Update…)`, "warn", entryIds(pkg)[0]);
         return held;
     }
     return apply(checked, next);
@@ -305,7 +343,7 @@ async function fetchSource(pkg: InstalledPackage): Promise<FetchedPackage | null
     if (typeof src === "string") throw new Error(src);
     if (!isRemote(src)) return null;
     const p = await fetchPackage(src, webNet);
-    return { source: pkg.source, entry: p.entry, files: p.files, revision: p.revision };
+    return { source: pkg.source, entries: p.entries, files: p.files, revision: p.revision };
 }
 
 /** check one (`id`, the Explorer's "Check for updates") or every auto-updating package */
@@ -375,12 +413,12 @@ export function forgetPackage(id: string): Promise<void> {
     });
 }
 
-/** a package whose entry script was deleted is gone */
+/** a package whose every entry script was deleted is gone */
 async function prune(): Promise<void> {
     const all = await listPackages();
     if (!Object.keys(all).length) return;
     const ids = new Set((await listScripts()).map((s) => s.id));
-    const gone = Object.keys(all).filter((k) => !ids.has(all[k].entryId));
+    const gone = Object.keys(all).filter((k) => !entryIds(all[k]).some((id) => ids.has(id)));
     if (!gone.length) return;
     for (const k of gone) delete all[k];
     await storageSet({ [PACKAGES_KEY]: all });

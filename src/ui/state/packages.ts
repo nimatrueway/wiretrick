@@ -1,6 +1,6 @@
 /** installed packages (see shared/packageModel), kept live for the Explorer */
 import { proxy, ref } from "valtio";
-import { PACKAGES_KEY, type InstalledPackage } from "../../shared/packageModel";
+import { entryIds, PACKAGES_KEY, packageName, type InstalledPackage } from "../../shared/packageModel";
 import { parseSource, sourceLabel } from "../../shared/packageSource";
 import { fetchFrom, packagesApi } from "../install/api";
 
@@ -14,12 +14,12 @@ export function packageOf(row: { kind: string; id: string; path: string }): Inst
 }
 
 /** the row that carries a package's badge: its folder, or (a single file) its entry */
-export const badgeRowOf = (p: InstalledPackage): { folder: string } | { id: string } => (p.folder ? { folder: p.folder } : { id: p.entryId });
+export const badgeRowOf = (p: InstalledPackage): { folder: string } | { id: string } => (p.folder ? { folder: p.folder } : { id: entryIds(p)[0] });
 
 export function packageTitle(p: InstalledPackage): string {
     const src = p.source ? parseSource(p.source) : null;
     return [
-        `Package “${p.header.name || p.entry.replace(/^.*\//, "")}”${p.header.version ? ` ${p.header.version}` : ""}`,
+        `Package “${packageName(p)}”${p.metadata.version ? ` ${p.metadata.version}` : ""}`,
         src ? `from ${typeof src === "string" ? p.source : sourceLabel(src)}` : "installed from local files",
         p.pending ? "An update waits for your review — right-click → Review Update…" : "",
         p.lastError ? `Last update check failed: ${p.lastError}` : "",

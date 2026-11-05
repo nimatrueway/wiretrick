@@ -1,13 +1,14 @@
 /**
- * Installed packages: a script (and the files it imports) installed from a
- * URL, a GitHub repository, a gist or a local folder — recorded so it can
- * update from where it came from. The files themselves are ordinary
+ * Installed packages: a script, or a bundle of scripts (a folder with a
+ * metadata.json listing them), with the files they import — installed from
+ * a URL, a GitHub repository, a gist or a local folder and recorded so it
+ * updates, all files together, from where it came from. The files themselves are ordinary
  * scripts and data files; the record maps each package file to the store
  * item it became (by id: params, stores and the enabled state survive an
  * update) and the hash it had, to tell when the user changed it.
  */
 import type { Capabilities } from "./packageCaps";
-import type { PackageHeader } from "./packageHeader";
+import type { PackageMetadata } from "./packageMetadata";
 import { ENTRY_FILE_RE } from "./packageSource";
 import { scriptFileKey } from "./scriptName";
 
@@ -16,10 +17,10 @@ export const PACKAGES_KEY = "wtPackages";
 /** what a package is at one revision: its files' texts */
 export interface PackageVersion {
     revision: string;
-    /** the entry's path among `files` */
-    entry: string;
+    /** its entries' paths among `files` (a bundle: its metadata.json's scripts) */
+    entries: string[];
     files: Record<string, string>;
-    header: PackageHeader;
+    metadata: PackageMetadata;
     caps: Capabilities;
 }
 
@@ -46,10 +47,9 @@ export interface InstalledPackage {
     source: string;
     /** the folder its files went into; "" = the root (a single file) */
     folder: string;
-    entry: string;
-    entryId: string;
+    entries: string[];
     revision: string;
-    header: PackageHeader;
+    metadata: PackageMetadata;
     caps: Capabilities;
     files: Record<string, InstalledFile>;
     autoUpdate: boolean;
@@ -74,19 +74,26 @@ export function storeItemOf(folder: string, rel: string): { kind: "script" | "da
     return { kind: "script", name: join(folder, rel).replace(/\.ts$/i, "") };
 }
 
-/** a package's display name: the header's @name, else the entry's file name without `.wiretrick.ts` */
-export function packageName(entry: string, header: Pick<PackageHeader, "name">): string {
-    return header.name || entry.replace(/^.*\//, "").replace(ENTRY_FILE_RE, "");
+/** an entry's file name without `.wiretrick.ts` */
+export const entryStem = (entry: string): string => entry.replace(/^.*\//, "").replace(ENTRY_FILE_RE, "").replace(/\.tsx?$/i, "");
+
+/** a package's display name: its metadata's name, else its (first) entry's file name without `.wiretrick.ts` */
+export function packageName(p: { entries: string[]; metadata: Pick<PackageMetadata, "name"> }): string {
+    return p.metadata.name || entryStem(p.entries[0] ?? "") || "package";
 }
+
+/** the store id of a package's entries */
+export const entryIds = (p: Pick<InstalledPackage, "entries" | "files">): string[] => p.entries.flatMap((e) => (p.files[e] ? [p.files[e].id] : []));
 
 /**
  * Where a package installs: a single file at the root, more in a folder
- * named after the entry (`dark.wiretrick.ts` → `dark/`, then `dark (2)/`…
- * past what's `taken` — script names, data paths and folders).
+ * named after the bundle (its metadata.json's name) or the entry
+ * (`dark.wiretrick.ts` → `dark/`), then `dark (2)/`… past what's `taken`
+ * — script names, data paths and folders.
  */
-export function packageFolder(entry: string, files: Record<string, string>, taken: string[]): string {
-    if (Object.keys(files).length === 1) return "";
-    const stem = entry.replace(/^.*\//, "").replace(ENTRY_FILE_RE, "").replace(/\.tsx?$/i, "") || "package";
+export function packageFolder(p: { entries: string[]; files: Record<string, string>; bundleName?: string }, taken: string[]): string {
+    if (Object.keys(p.files).length === 1) return "";
+    const stem = (p.bundleName || entryStem(p.entries[0] ?? "")).replace(/[\\/:*?"<>|]+/g, "-").replace(/^[\s.]+|[\s.]+$/g, "") || "package";
     const keys = new Set(taken.map((t) => scriptFileKey(t.split("/")[0])));
     if (!keys.has(scriptFileKey(stem))) return stem;
     for (let i = 2; ; i++) if (!keys.has(scriptFileKey(`${stem} (${i})`))) return `${stem} (${i})`;

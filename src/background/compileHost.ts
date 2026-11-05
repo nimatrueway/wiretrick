@@ -280,7 +280,7 @@ export async function analyzeScripts(scripts: { id: string; name: string; code: 
             { dataFiles: await ensureDataFiles(), packages: packagesSnapshot() }
         );
         for (const s of scripts) {
-            const c = compileScript(s.code, { importModule: resolver.resolveFrom(s.name), paramValues: paramValues?.[s.id], name: s.name });
+            const c = compileScript(s.code, { importModule: resolver.resolveFrom(s.name), paramValues: paramValues?.[s.id] });
             out.set(s.id, {
                 meta: c.meta,
                 paramDefs: c.paramDefs || {},

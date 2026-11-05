@@ -99,29 +99,7 @@ export function isTsxName(name: string): boolean {
     return /[^/]\.tsx$/.test(name);
 }
 
-/**
- * Entry files run: only a script named `*.wiretrick.ts` (name `x.wiretrick`)
- * or `*.wiretrick.tsx` registers handlers; every other file is a library.
- */
-export function isEntryName(name: string): boolean {
-    return /[^/]\.wiretrick(\.tsx)?$/i.test(name);
-}
-
-/** in the warning on a library that registers handlers (the Editor's quick fix renames it) */
-export const NOT_AN_ENTRY = "only *.wiretrick.ts files run";
-
-/** the warning on a non-entry file whose top level registers `n` handlers */
-export function notAnEntryProblem(name: string, n: number): string {
-    return `this file registers ${n === 1 ? "a handler" : `${n} handlers`}, but ${NOT_AN_ENTRY} — rename it to "${scriptFileName(entryNameOf(name)).replace(/^.*\//, "")}" to run it (else it's a library others import)`;
-}
-
-/** the entry name for a script name: "x" → "x.wiretrick", "Panel.tsx" → "Panel.wiretrick.tsx" */
-export function entryNameOf(name: string): string {
-    if (isEntryName(name)) return name;
-    return isTsxName(name) ? name.slice(0, -4) + ".wiretrick.tsx" : name + ".wiretrick";
-}
-
-/** a file name's extension as the Explorer leaves it unselected on rename: `.wiretrick.ts`, `.tsx`, `.json`… */
+/** a file name's extension as the Explorer leaves it unselected on rename: `.ts`, `.wiretrick.ts`, `.tsx`, `.json`… */
 export function fileExtension(fileName: string): string {
     return /(\.wiretrick)?\.tsx?$|\.(json|svg)$/i.exec(fileName.slice(fileName.lastIndexOf("/") + 1))?.[0] ?? "";
 }

@@ -630,6 +630,22 @@ declare namespace Wiretrick {
     // ---- wt.params / wt.defineParam: typed, user-adjustable parameters ----
 
     /** An on/off switch — a checkbox in the ⚙ dialog. */
+    /** {@link wt.metadata}'s argument (a bundle's metadata.json has the same fields, plus `scripts`) */
+    interface Metadata {
+        /** shown when installing and in the Explorer (default: the file name) */
+        name?: string;
+        /** dotted version ("1.2.0"); an update to a lower one waits for review */
+        version?: string;
+        /** one line about what it does: the Editor's and popup's tooltip */
+        description?: string;
+        /** a link shown when installing */
+        homepage?: string;
+        author?: string;
+        license?: string;
+        /** hosts this script's wt.fetch calls reach — an update that adds one waits for review */
+        connect?: string[];
+    }
+
     interface ParamDefBoolean {
         type: "boolean";
         /** Default `false`. */
@@ -1030,13 +1046,20 @@ declare const wt: {
     onOverlay<T = void>(route: Wiretrick.DocumentRoute, handler: (ctx: Wiretrick.OverlayCtx) => Wiretrick.Awaitable<T>): Wiretrick.Remote<T>;
 
     /**
-     * One-line description: shown as a tooltip in the Editor and the
-     * popup, and in diagnostics.
+     * The script's metadata. `description` is shown as a tooltip in the
+     * Editor and the popup, and in diagnostics; the rest describes it as a
+     * package — shown when someone installs it from a link, and `version`
+     * orders its updates. Call it once.
      *
      * @example
-     * wt.about("Force failures on the posts API");
+     * wt.metadata({
+     *     name: "GitHub dark mode",
+     *     version: "1.2.0",
+     *     description: "Darker GitHub, every page",
+     *     connect: ["api.github.com"],
+     * });
      */
-    about(text: string): void;
+    metadata(metadata: Wiretrick.Metadata): void;
 
     /**
      * Declare adjustable parameters, editable from the popup's ⚙ dialog,

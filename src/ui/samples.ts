@@ -35,7 +35,7 @@ export const SAMPLES: SampleScript[] = [
         name: "Redirect a URL",
         blurb: "Send any request to a different URL — a browser-native rule (strategy \"rules\"): no banner, nothing to install. Try it: open en.wikipedia.org/wiki/Cat — you land on Dog.",
         code: `// Try it: open https://en.wikipedia.org/wiki/Cat
-wt.about("Cat → Dog on Wikipedia");
+wt.metadata({ description: "Cat → Dog on Wikipedia" });
 
 wt.onRequest({ url: "*://en.wikipedia.org/wiki/Cat", strategy: "rules" }, () => ({
     redirect: "https://en.wikipedia.org/wiki/Dog",
@@ -45,7 +45,7 @@ wt.onRequest({ url: "*://en.wikipedia.org/wiki/Cat", strategy: "rules" }, () => 
         name: "Block requests",
         blurb: "Block matching requests — here only images, via the route's resourceTypes filter. Try it: open any Wikipedia article — every image is gone.",
         code: `// Try it: open https://en.wikipedia.org/wiki/Cat
-wt.about("Block Wikipedia images");
+wt.metadata({ description: "Block Wikipedia images" });
 
 wt.onRequest({ url: "*://upload.wikimedia.org/*", resourceTypes: ["image"], strategy: "rules" }, () => ({ block: true }));`,
     },
@@ -53,7 +53,7 @@ wt.onRequest({ url: "*://upload.wikimedia.org/*", resourceTypes: ["image"], stra
         name: "Modify request headers",
         blurb: "Set or remove request headers before they leave the browser. Try it: postman-echo.com/headers echoes them back.",
         code: `// Try it: open https://postman-echo.com/headers
-wt.about("Add debug headers, drop Accept-Language");
+wt.metadata({ description: "Add debug headers, drop Accept-Language" });
 
 wt.onRequest({ url: "*://postman-echo.com/*", strategy: "rules" }, () => ({
     headers: {
@@ -68,7 +68,7 @@ wt.onRequest({ url: "*://postman-echo.com/*", strategy: "rules" }, () => ({
         code: `// Try it: open https://example.org/ — a line at the top says whether the
 // page could read https://example.com/. Comment out the onResponseHeaders
 // handler, save and reload to see the browser block it with a CORS error.
-wt.about("Let any origin read example.com");
+wt.metadata({ description: "Let any origin read example.com" });
 
 wt.onResponseHeaders({ url: "*://example.com/*", strategy: "rules" }, () => ({
     headers: {
@@ -113,7 +113,7 @@ wt.onPage("*://example.org/*", () => {
         blurb: "Replace a JSON API response the page's own code fetches (strategy \"page\": no banner, nothing to install); :id in the route is read back as ctx.groups.id. Try it: open dummyjson.com — a box at the top shows what /users/1 returned.",
         code: `// Try it: open https://dummyjson.com/ — a box at the top shows what the
 // page got from /users/1. Disable the script and reload to see the real user.
-wt.about("Replace the users API response");
+wt.metadata({ description: "Replace the users API response" });
 
 // "page" sees the page's own fetch/XHR calls (not the URL typed in the address bar)
 wt.replaceResponse({ url: "*://dummyjson.com/users/:id", strategy: "page" }, (ctx) => ({
@@ -136,7 +136,7 @@ wt.onPage({ url: "https://dummyjson.com/", js: "page" }, async () => {
         blurb: "Modify a JSON body the page's own code fetches — flip fields, inject values (strategy \"page\"). Try it: open dummyjson.com — a box at the top shows what /todos/1 returned.",
         code: `// Try it: open https://dummyjson.com/ — a box at the top shows what the
 // page got from /todos/1. Disable the script and reload to see the real todo.
-wt.about("Mark every todo completed");
+wt.metadata({ description: "Mark every todo completed" });
 
 wt.onResponseBody({ url: "*://dummyjson.com/todos/*", strategy: "page" }, (ctx, body) => {
     const json = JSON.parse(typeof body === "string" ? body : new TextDecoder().decode(body));
@@ -158,7 +158,7 @@ wt.onPage({ url: "https://dummyjson.com/", js: "page" }, async () => {
         name: "Rewrite page HTML",
         blurb: "Transform the document itself. Needs a strategy that reads page bodies: debugger on Chrome (shows Chrome's \"being debugged\" bar), extension on Firefox — not page. For title/DOM tweaks, onPage needs neither. Try it: open example.com — a red banner appears.",
         code: `// Try it: open https://example.com/
-wt.about("Rewrite example.com's HTML");
+wt.metadata({ description: "Rewrite example.com's HTML" });
 
 // Chrome shows its "being debugged" bar while the debugger strategy is attached
 wt.onResponseBody({ url: "*://example.com/*", resourceTypes: ["main_frame"], strategy: wt.isFirefox ? "extension" : "debugger" }, (ctx, body) => {
@@ -172,7 +172,7 @@ wt.onResponseBody({ url: "*://example.com/*", resourceTypes: ["main_frame"], str
         name: "DOM / title changes",
         blurb: "Runs at DOM-ready in the page. Best for titles and DOM text — works even when the HTML is service-worker served or hydration re-renders it. Try it: open any Wikipedia article.",
         code: `// Try it: open https://en.wikipedia.org/wiki/Cat
-wt.about("Retitle Wikipedia articles");
+wt.metadata({ description: "Retitle Wikipedia articles" });
 
 wt.onPage("*://en.wikipedia.org/wiki/*", () => {
     document.title = "🎯 " + document.title;
@@ -184,7 +184,7 @@ wt.onPage("*://en.wikipedia.org/wiki/*", () => {
         name: "Serve a local file",
         blurb: "Replace a response with file content (path or data: URL). The page loads it itself, so this uses debugger on Chrome (shows Chrome's \"being debugged\" bar), extension on Firefox. Try it: open en.wikipedia.org/robots.txt.",
         code: `// Try it: open https://en.wikipedia.org/robots.txt
-wt.about("Serve our own robots.txt");
+wt.metadata({ description: "Serve our own robots.txt" });
 
 // Chrome shows its "being debugged" bar while the debugger strategy is attached
 wt.replaceResponse({ url: "*://en.wikipedia.org/robots.txt", strategy: wt.isFirefox ? "extension" : "debugger" }, () => ({
@@ -200,7 +200,7 @@ import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { useSnapshot } from "valtio";
 
-wt.about("A panel that turns a mock on and off");
+wt.metadata({ description: "A panel that turns a mock on and off" });
 
 // one live object for the handler and the panel; it survives restarts
 const mock = wt.globalStore("mock", { enabled: true });
@@ -241,7 +241,7 @@ wt.onPage({ url: "https://dummyjson.com/*", dom: "overlay" }, () => {
         blurb: "An overlay that asks the page for its headings and scrolls it on click — onPage returns functions, the overlay awaits them — with a keyboard shortcut to hide it. Try it: open any Wikipedia article and press Alt+Shift+O.",
         code: `// Try it: open https://en.wikipedia.org/wiki/Cat — press Alt+Shift+O to hide
 // or show the outline
-wt.about("Floating outline for Wikipedia articles");
+wt.metadata({ description: "Floating outline for Wikipedia articles" });
 
 // runs in the page; returns the functions the overlay calls
 const page = wt.onPage("*://en.wikipedia.org/wiki/*", () => {
@@ -277,7 +277,7 @@ wt.onPage({ url: "*://en.wikipedia.org/wiki/*", dom: "overlay" }, async (ctx) =>
         name: "Per-script storage",
         blurb: "Keep state between page loads with wt.storage. Try it: open any Wikipedia article and reload — the counter at the top goes up.",
         code: `// Try it: open https://en.wikipedia.org/wiki/Cat and reload a few times
-wt.about("Count Wikipedia article visits");
+wt.metadata({ description: "Count Wikipedia article visits" });
 
 wt.onPage("*://en.wikipedia.org/wiki/*", async (ctx) => {
     const visits = ((await wt.storage.get("visits")) || 0) + 1;
@@ -295,7 +295,7 @@ wt.onPage("*://en.wikipedia.org/wiki/*", async (ctx) => {
         blurb: "Adjustable knobs (wt.params) the user changes from the popup's ⚙ dialog — no code edits. Try it: open postman-echo.com/headers — the knobs come back as x-* headers.",
         code: `// Try it: open https://postman-echo.com/headers, then change
 // the knobs from the popup's ⚙ dialog and reload
-wt.about("Send the knobs as request headers");
+wt.metadata({ description: "Send the knobs as request headers" });
 
 const cfg = wt.params({
     greeting: { type: "string", default: "hello", description: "Sent as x-greeting" },

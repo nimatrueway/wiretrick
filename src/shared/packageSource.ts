@@ -2,18 +2,22 @@
  * Where a package comes from, and reading its files: the install page
  * (first install, local files) and the background (updates) share this.
  *
- * A package is an entry file (`*.wiretrick.ts`) plus every file it
- * imports by a relative path, followed transitively. Sources:
- *   - GitHub: a file (`github.com/o/r/blob/ref/x.wiretrick.ts`,
- *     `raw.githubusercontent.com/o/r/ref/…`) or a folder holding one entry
- *     (`github.com/o/r/tree/ref/dir`, `github.com/o/r`); pinned to the
- *     commit the ref points at
- *   - gist: `gist.github.com/user/id` (its one `*.wiretrick.ts` file),
- *     pinned to the gist's revision
- *   - any other http(s) or file:// URL of the entry; its imports are
- *     fetched next to it
+ * A package is a script, or a bundle — a metadata.json listing scripts
+ * (see packageMetadata) — plus every file they import by a relative path,
+ * followed transitively. Sources:
+ *   - GitHub: a file (`github.com/o/r/blob/ref/x.ts`, `…/metadata.json`,
+ *     `raw.githubusercontent.com/o/r/ref/…`) or a folder (`github.com/o/r/tree/ref/dir`,
+ *     `github.com/o/r`; see pickStart); pinned to the commit the ref points at
+ *   - gist: `gist.github.com/user/id` (see pickStart), pinned to the
+ *     gist's revision
+ *   - any other http(s) or file:// URL of the script or metadata.json; the
+ *     files are fetched next to it
+ *
+ * A `*.wiretrick.ts` URL opened in a tab installs (a share link, like
+ * GreaseMonkey's `.user.js`).
  */
 import { builtinSpec } from "./builtinSpecs";
+import { isManifestPath, MANIFEST_FILE, parseManifest, type Manifest } from "./packageMetadata";
 import { isUrlSpec } from "./packageImports";
 import { importPath, importSpecs, isDataSpec } from "./scriptImports";
 
@@ -25,8 +29,11 @@ export type PackageSource =
 /** a URL that installs as a package when opened in a tab */
 export const ENTRY_URL_RE = /^(https?|file):\/\/[^?#]*\.wiretrick\.tsx?([?#]|$)/i;
 
-/** an entry file's name */
+/** a share link's script name */
 export const ENTRY_FILE_RE = /\.wiretrick\.tsx?$/i;
+
+/** a script's file name */
+export const SCRIPT_FILE_RE = /\.tsx?$/i;
 
 /** the source a URL names, or why it can't be one */
 export function parseSource(input: string): PackageSource | string {
@@ -65,7 +72,7 @@ export function parseSource(input: string): PackageSource | string {
         return { kind: "gist", id, file: rest.length ? rest[rest.length - 1] : undefined };
     }
     if (u.protocol === "http:" || u.protocol === "https:" || u.protocol === "file:") {
-        if (!ENTRY_FILE_RE.test(u.pathname)) return "the URL must end in .wiretrick.ts (the package's entry file)";
+        if (!SCRIPT_FILE_RE.test(u.pathname) && !isManifestPath(u.pathname)) return "the URL must end in .ts (a script) or metadata.json (a bundle)";
         u.hash = "";
         return { kind: "url", url: u.href };
     }
@@ -88,10 +95,10 @@ export interface Net {
     json(url: string): Promise<any>;
 }
 
-/** a source, opened: where its entry is, how to read a path, and the revision it's pinned to */
+/** a source, opened: where its entry or metadata.json is, how to read a path, and the revision it's pinned to */
 export interface OpenedSource {
-    /** the entry's path, relative to the source's root */
-    entry: string;
+    /** the entry's or the bundle's metadata.json's path, relative to the source's root */
+    start: string;
     read(path: string): Promise<string | null>;
     /** commit / gist revision; undefined: the files' hash (crawl result) */
     revision?: string;
@@ -105,38 +112,26 @@ export async function openSource(src: PackageSource, net: Net): Promise<OpenedSo
         const commit = await net.json(`${base}/commits/${encodeURIComponent(src.ref)}`);
         const sha: string | undefined = commit?.sha;
         if (!sha) throw new Error(`no commit for "${src.ref}" in ${src.owner}/${src.repo}`);
-        let entry = src.path;
+        let start = src.path;
         if (src.tree) {
             const tree = await net.json(`${base}/git/trees/${sha}?recursive=1`);
             const dir = src.path.replace(/\/$/, "");
-            const entries = ((tree?.tree ?? []) as { path: string; type: string }[])
-                .filter((t) => t.type === "blob" && ENTRY_FILE_RE.test(t.path) && t.path.slice(0, t.path.lastIndexOf("/") + 1) === (dir ? dir + "/" : ""))
+            const here = ((tree?.tree ?? []) as { path: string; type: string }[])
+                .filter((t) => t.type === "blob" && t.path.slice(0, t.path.lastIndexOf("/") + 1) === (dir ? dir + "/" : ""))
                 .map((t) => t.path);
-            if (entries.length !== 1)
-                throw new Error(
-                    entries.length
-                        ? `${dir || "the repository"} holds ${entries.length} entry files (${entries.join(", ")}) — open the one to install`
-                        : `no *.wiretrick.ts file in ${dir || "the repository's root"}`
-                );
-            entry = entries[0];
+            start = pickStart(here, dir || "the repository", "open the one to install, or list them in a metadata.json");
         }
         const raw = `https://raw.githubusercontent.com/${src.owner}/${src.repo}/${sha}/`;
-        return { entry, revision: sha, read: (p) => net.text(raw + p.split("/").map(encodeURIComponent).join("/")) };
+        return { start, revision: sha, read: (p) => net.text(raw + p.split("/").map(encodeURIComponent).join("/")) };
     }
     if (src.kind === "gist") {
         const g = await net.json(`${GITHUB_API}/gists/${src.id}`);
         const files: Record<string, { content?: string; truncated?: boolean; raw_url?: string }> = g?.files ?? {};
         const names = Object.keys(files);
-        let entry = src.file;
-        if (!entry || !files[entry]) {
-            const entries = names.filter((n) => ENTRY_FILE_RE.test(n));
-            if (entries.length !== 1)
-                throw new Error(entries.length ? `the gist holds ${entries.length} entry files (${entries.join(", ")}) — open the raw URL of the one to install` : "the gist has no *.wiretrick.ts file");
-            entry = entries[0];
-        }
+        const start = src.file && files[src.file] && (SCRIPT_FILE_RE.test(src.file) || isManifestPath(src.file)) ? src.file : pickStart(names, "the gist", "open the raw URL of the one to install, or list them in a metadata.json");
         const revision: string | undefined = g?.history?.[0]?.version;
         return {
-            entry,
+            start,
             revision,
             read: async (p) => {
                 const f = files[p];
@@ -149,15 +144,28 @@ export async function openSource(src: PackageSource, net: Net): Promise<OpenedSo
     const u = new URL(src.url);
     const origin = u.protocol === "file:" ? "file://" : u.origin;
     return {
-        entry: decodeURIComponent(u.pathname.replace(/^\//, "")),
+        start: decodeURIComponent(u.pathname.replace(/^\//, "")),
         read: (p) => net.text(`${origin}/${p.split("/").map(encodeURIComponent).join("/")}`),
     };
 }
 
+/** what a folder's files install as: its metadata.json, else its one *.wiretrick.ts file, else its one script */
+export function pickStart(paths: string[], where: string, hint: string): string {
+    const manifest = paths.find(isManifestPath);
+    if (manifest) return manifest;
+    const marked = paths.filter((p) => ENTRY_FILE_RE.test(p));
+    if (marked.length === 1) return marked[0];
+    const scripts = marked.length ? marked : paths.filter((p) => SCRIPT_FILE_RE.test(p) && !/\.d\.ts$/i.test(p));
+    if (scripts.length === 1) return scripts[0];
+    throw new Error(scripts.length ? `${where} holds ${scripts.length} scripts (${scripts.join(", ")}) — ${hint}` : `no script or metadata.json in ${where}`);
+}
+
 /** a package's files as read, before they're laid out in the Explorer */
 export interface CrawledPackage {
-    /** the entry's path in `files` */
-    entry: string;
+    /** its entries' paths in `files` */
+    entries: string[];
+    /** a bundle's metadata.json (at `files["metadata.json"]`) */
+    manifest?: Manifest;
     /** path (relative to the package's root folder) → text */
     files: Record<string, string>;
     /** relative imports that point at no file */
@@ -176,8 +184,13 @@ export function candidates(path: string): string[] {
     return [path + ".ts", path + ".tsx"];
 }
 
-/** read the entry and everything it imports by relative path; paths come out relative to the files' common folder */
-export async function crawl(entry: string, read: (path: string) => Promise<string | null>): Promise<CrawledPackage> {
+/**
+ * Read an entry, or a bundle's metadata.json and its entries, and
+ * everything they import by relative path; paths come out relative to the
+ * files' common folder — a bundle's own folder (importing from outside it
+ * is an error).
+ */
+export async function crawl(start: string, read: (path: string) => Promise<string | null>): Promise<CrawledPackage> {
     const files: Record<string, string> = {};
     const cache = new Map<string, Promise<string | null>>();
     const get = (p: string) => {
@@ -186,13 +199,24 @@ export async function crawl(entry: string, read: (path: string) => Promise<strin
     };
     const missing: CrawledPackage["missing"] = [];
     const bare: CrawledPackage["bare"] = [];
-    // the entry's read error says why (no file access, rate limit…)
-    const text = await read(entry);
-    if (text === null) throw new Error(`can't read ${entry}`);
-    cache.set(entry, Promise.resolve(text));
-    files[entry] = text;
-    const queue = [entry];
-    let bytes = text.length;
+    // the first read's error says why (no file access, rate limit…)
+    const first = async (p: string, what: string) => {
+        const t = await read(p);
+        if (t === null) throw new Error(`can't read ${what}`);
+        cache.set(p, Promise.resolve(t));
+        files[p] = t;
+        return t;
+    };
+    let manifest: Manifest | undefined;
+    let entries = [start];
+    const dir = start.slice(0, start.lastIndexOf("/") + 1);
+    if (isManifestPath(start)) {
+        manifest = parseManifest(await first(start, start), start);
+        entries = manifest.scripts.map((s) => dir + s);
+        for (const e of entries) await first(e, `${e}, listed in ${start}`);
+    } else await first(start, start);
+    const queue = [...entries];
+    let bytes = Object.values(files).reduce((n, t) => n + t.length, 0);
     while (queue.length) {
         const from = queue.shift()!;
         if (isDataSpec(from)) continue;
@@ -232,8 +256,13 @@ export async function crawl(entry: string, read: (path: string) => Promise<strin
     }
     const cut = common.length ? common.join("/").length + 1 : 0;
     const rel = (p: string) => p.slice(cut);
+    if (manifest && cut !== dir.length) {
+        const outside = Object.keys(files).filter((p) => !p.startsWith(dir));
+        throw new Error(`${start}: the bundle's files must be in its folder — ${outside.join(", ")} ${outside.length > 1 ? "are" : "is"} outside it`);
+    }
     return {
-        entry: rel(entry),
+        entries: entries.map(rel),
+        ...(manifest ? { manifest } : {}),
         files: Object.fromEntries(Object.entries(files).map(([p, t]) => [rel(p), t])),
         missing: missing.map((m) => ({ ...m, from: rel(m.from) })),
         bare: bare.map((b) => ({ ...b, from: rel(b.from) })),
@@ -258,7 +287,7 @@ export async function filesHash(files: Record<string, string>): Promise<string> 
 /** read a source: its pinned files */
 export async function fetchPackage(src: PackageSource, net: Net): Promise<CrawledPackage & { revision: string }> {
     const o = await openSource(src, net);
-    const c = await crawl(o.entry, o.read);
+    const c = await crawl(o.start, o.read);
     return { ...c, revision: o.revision ?? (await filesHash(c.files)) };
 }
 

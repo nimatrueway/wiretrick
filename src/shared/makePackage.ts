@@ -1,28 +1,32 @@
 /**
- * Explorer → Make Package…: turn an entry script into a package — a folder
- * holding the entry and the files it imports by relative path, with a
- * header — that can be shared as is (docs/packages.md). Imports are
- * rewritten for the new places; a file that other scripts still use is
- * copied into the package instead of moved.
+ * Explorer → Make Package…: turn scripts into a package that can be shared
+ * as is (docs/packages.md).
+ *   - a script that imports no file of the user's: gets a `wt.metadata({…})`
+ *     naming it, and stays where it is
+ *   - a script that does: moves, with the files it imports by relative
+ *     path, into a folder of its own with a metadata.json (a bundle of one).
+ *     Imports are rewritten for the new places; a file that other scripts
+ *     still use is copied into the package instead of moved
+ *   - a folder: gets a metadata.json listing its scripts (a bundle)
  */
 import { builtinSpec } from "./builtinSpecs";
-import { parseHeader } from "./packageHeader";
+import { MANIFEST_FILE } from "./packageMetadata";
+import { entryStem } from "./packageModel";
 import { isUrlSpec } from "./packageImports";
-import { candidates, ENTRY_FILE_RE } from "./packageSource";
-import { isEntryName } from "./scriptName";
+import { candidates, SCRIPT_FILE_RE } from "./packageSource";
 import { folderOf, importPath, importSpecs, isDataSpec, rewriteImports } from "./scriptImports";
 
 export interface PackagePlan {
-    /** the package's folder */
+    /** the package's folder ("" for a script at the root) */
     folder: string;
-    /** the entry stays where it is: its folder is a package already */
+    /** the script stays where it is */
     inPlace: boolean;
-    /** the entry first, then what it imports; `text` is the file's content at `to` */
+    /** the script first, then what it imports; `text` is the file's content at `to` */
     files: { from: string; to: string; copy: boolean; text: string }[];
     /** other files whose imports follow a moved file */
     edits: { path: string; text: string }[];
-    /** the entry had no `@name`: the plan adds a header */
-    addsHeader: boolean;
+    /** a bundle: the metadata.json to write (the script's own wt.metadata is left alone) */
+    manifest?: { path: string; text: string };
     /** imports by bare name: they resolve from the root of the user's scripts, not the package */
     bare: { from: string; spec: string }[];
     /** relative imports that point at no file */
@@ -59,15 +63,56 @@ export function relativeSpec(from: string, target: string, was: string): string 
     return spec;
 }
 
-/** the entry's code with a header naming it (unchanged when it has a `@name`) */
-export function withHeader(code: string, name: string, connect: string[] = []): string {
-    const h = parseHeader(code);
-    if (h.name) return code;
-    const tags = [`@name ${name}`, ...(h.version ? [] : ["@version 1.0.0"]), ...(h.description ? [] : ["@description"]), ...(h.connect.length ? [] : connect.map((c) => `@connect ${c}`))];
-    // a JSDoc block at the top that isn't on one line: add to it
-    const m = /^((?:\s|\/\/[^\n]*\n)*\/\*\*[^\n]*\n)([\s\S]*?\*\/)/.exec(code);
-    if (m && !m[0].slice(m[1].length).startsWith("*/")) return m[1] + tags.map((t) => ` * ${t}\n`).join("") + code.slice(m[1].length);
-    return `/**\n${tags.map((t) => ` * ${t}\n`).join("")} */\n` + code;
+/** the object literal of the code's `wt.metadata({…})` call: [index of "{", index after "}"] */
+function metadataObject(code: string): [number, number] | undefined {
+    const m = /\bwt\s*\.\s*metadata\s*\(\s*\{/.exec(code);
+    if (!m) return undefined;
+    const start = m.index + m[0].length - 1;
+    let depth = 0;
+    let quote = "";
+    for (let i = start; i < code.length; i++) {
+        const c = code[i];
+        if (quote) {
+            if (c === "\\") i++;
+            else if (c === quote) quote = "";
+        } else if (c === '"' || c === "'" || c === "`") quote = c;
+        else if (c === "{") depth++;
+        else if (c === "}" && --depth === 0) return [start, i + 1];
+    }
+    return undefined;
+}
+
+/** the script's code with a `wt.metadata({…})` naming it (unchanged when it names itself) */
+export function withMetadata(code: string, name: string, connect: string[] = []): string {
+    const at = metadataObject(code);
+    const body = at ? code.slice(at[0] + 1, at[1] - 1) : "";
+    const has = (key: string) => new RegExp(`(^|[{,\\s])["']?${key}["']?\\s*:`).test(body);
+    if (has("name")) return code;
+    const keys = [
+        `name: ${JSON.stringify(name)}`,
+        ...(has("version") ? [] : [`version: "1.0.0"`]),
+        ...(has("connect") || !connect.length ? [] : [`connect: [${connect.map((c) => JSON.stringify(c)).join(", ")}]`]),
+    ];
+    if (!keys.length) return code;
+    if (!at) {
+        const call = `wt.metadata({ ${keys.join(", ")} });\n`;
+        // after the imports
+        let end = 0;
+        for (const m of code.matchAll(/^import\b[\s\S]*?["'][^"'\n]+["'][ \t]*;?[ \t]*$/gm)) end = m.index! + m[0].length;
+        return end ? `${code.slice(0, end)}\n\n${call}${code.slice(end).replace(/^\n+/, "\n")}` : `${call}\n${code}`;
+    }
+    let inner: string;
+    if (!body.trim()) inner = ` ${keys.join(", ")} `;
+    else if (/^[ \t]*\n/.test(body)) {
+        const indent = /\n([ \t]*)/.exec(body)![1];
+        inner = keys.map((k) => `\n${indent}${k},`).join("") + body;
+    } else inner = ` ${keys.join(", ")},${body.startsWith(" ") ? body : " " + body}`;
+    return code.slice(0, at[0] + 1) + inner + code.slice(at[1] - 1);
+}
+
+/** a new metadata.json's text */
+export function manifestText(name: string, scripts: string[], connect: string[] = []): string {
+    return JSON.stringify({ name, version: "1.0.0", description: "", ...(connect.length ? { connect } : {}), scripts }, null, 4) + "\n";
 }
 
 /** hosts the code's wt.fetch calls name in a literal URL */
@@ -78,7 +123,7 @@ export function fetchHosts(codes: string[]): string[] {
 }
 
 /**
- * How to make the entry at `entry` a package. `files` holds every file of
+ * How to make the script at `entry` a package. `files` holds every file of
  * the user's scripts (path → text: scripts with their .ts/.tsx, data
  * files); `folders` the folders that exist, empty ones included.
  */
@@ -118,8 +163,16 @@ export function makePackagePlan(entry: string, files: Record<string, string>, fo
     const inSet = new Set(set);
 
     const dir = folderOf(entry);
-    const otherEntry = Object.keys(files).some((p) => p !== entry && ENTRY_FILE_RE.test(p) && under(p, dir));
-    const inPlace = !!dir && !otherEntry && set.every((p) => under(p, dir));
+    const connect = fetchHosts(set.filter((p) => !isDataSpec(p)).map((p) => files[p]));
+    const name = entryStem(entry) || "package";
+    // nothing to take along: the script names itself
+    if (set.length === 1) {
+        const text = withMetadata(files[entry], name, connect);
+        return { folder: dir, inPlace: true, files: [{ from: entry, to: entry, copy: false, text }], edits: [], bare, missing };
+    }
+    // its folder holds nothing else (and is no bundle yet): it becomes the bundle
+    const others = Object.keys(files).some((p) => under(p, dir) && !set.includes(p));
+    const inPlace = !!dir && !others && set.every((p) => under(p, dir));
 
     // copied: a file something outside the package (or a copy's original, which stays) still imports
     const outside = Object.keys(files).filter((p) => !inSet.has(p));
@@ -138,9 +191,8 @@ export function makePackagePlan(entry: string, files: Record<string, string>, fo
     const to = new Map<string, string>();
     if (inPlace) for (const p of set) to.set(p, p);
     else {
-        const stem = base(entry).replace(ENTRY_FILE_RE, "") || "package";
         const takenFolders = new Set([...folders, ...Object.keys(files).flatMap((p) => p.split("/").slice(0, -1).map((_, i, segs) => segs.slice(0, i + 1).join("/")))].map((f) => f.toLowerCase()));
-        folder = unique(join(dir, stem), (f) => takenFolders.has(f.toLowerCase()) || lower.has(f.toLowerCase()), false);
+        folder = unique(join(dir, name), (f) => takenFolders.has(f.toLowerCase()) || lower.has(f.toLowerCase()), false);
         const used = new Set<string>();
         for (const p of set) {
             const want = join(folder, under(p, dir) ? p.slice(dir ? dir.length + 1 : 0) : base(p));
@@ -158,11 +210,8 @@ export function makePackagePlan(entry: string, files: Record<string, string>, fo
                   return t === undefined || !moved(t) ? undefined : relativeSpec(at, to.get(t)!, spec);
               });
 
-    const connect = fetchHosts(set.filter((p) => !isDataSpec(p)).map((p) => files[p]));
     const out = set.map((p) => ({ from: p, to: to.get(p)!, copy: copied.has(p), text: inPlace ? files[p] : rewritten(p, to.get(p)!, (t) => inSet.has(t)) }));
-    const header = withHeader(out[0].text, base(entry).replace(ENTRY_FILE_RE, "") || "package", connect);
-    const addsHeader = header !== out[0].text;
-    out[0].text = header;
+    const manifest = { path: join(folder, MANIFEST_FILE), text: manifestText(name, [out[0].to.slice(folder.length + 1)], connect) };
 
     // files that stay put but import one that moves (the entry, typically)
     const edits: PackagePlan["edits"] = [];
@@ -171,22 +220,52 @@ export function makePackagePlan(entry: string, files: Record<string, string>, fo
             const text = rewritten(p, p, (t) => inSet.has(t) && !copied.has(t));
             if (text !== files[p]) edits.push({ path: p, text });
         }
-    return { folder, inPlace, files: out, edits, addsHeader, bare, missing };
+    return { folder, inPlace, files: out, edits, manifest, bare, missing };
 }
 
-/**
- * Folders the Explorer shows as packages: each holds one entry (in it,
- * not a subfolder) with a header `@name`, and no other entry below it.
- * Folder → the entry's script name.
- */
-export function packageFolders(scripts: { name: string; code: string }[]): Map<string, string> {
-    const entries = scripts.filter((s) => isEntryName(s.name));
-    const out = new Map<string, string>();
-    for (const e of entries) {
-        const dir = folderOf(e.name);
-        if (!dir || !parseHeader(e.code).name) continue;
-        if (entries.some((o) => o !== e && o.name.startsWith(dir + "/"))) continue;
-        out.set(dir, e.name);
+export interface FolderPackagePlan {
+    /** the metadata.json to write */
+    manifest: { path: string; text: string };
+    /** the bundle's scripts: those under the folder no other file there imports */
+    scripts: string[];
+    /** relative imports of files outside the folder: a bundle can't take them */
+    outside: { from: string; spec: string }[];
+    bare: { from: string; spec: string }[];
+    missing: { from: string; spec: string }[];
+}
+
+/** How to make `folder` a bundle: a metadata.json listing its scripts. `files` as in makePackagePlan. */
+export function makeFolderPackagePlan(folder: string, files: Record<string, string>): FolderPackagePlan {
+    const lower = new Map(Object.keys(files).map((p) => [p.toLowerCase(), p]));
+    const inside = Object.keys(files).filter((p) => under(p, folder)).sort();
+    const imported = new Set<string>();
+    const outside: FolderPackagePlan["outside"] = [];
+    const bare: FolderPackagePlan["bare"] = [];
+    const missing: FolderPackagePlan["missing"] = [];
+    for (const from of inside) {
+        if (isDataSpec(from)) continue;
+        for (const spec of importSpecs(files[from])) {
+            if (isUrlSpec(spec) || builtinSpec(spec)) continue;
+            if (!isRelative(spec)) {
+                bare.push({ from, spec });
+                continue;
+            }
+            const path = importPath(from, spec);
+            const hit = (path === null ? [] : candidates(path)).map((c) => lower.get(c.toLowerCase())).find((p) => p !== undefined);
+            if (!hit) missing.push({ from, spec });
+            else if (!under(hit, folder)) outside.push({ from, spec });
+            else if (hit !== from) imported.add(hit);
+        }
     }
+    const scripts = inside.filter((p) => SCRIPT_FILE_RE.test(p) && !imported.has(p));
+    const connect = fetchHosts(inside.filter((p) => !isDataSpec(p)).map((p) => files[p]));
+    const name = base(folder) || "package";
+    return { manifest: { path: join(folder, MANIFEST_FILE), text: manifestText(name, scripts.map((p) => p.slice(folder.length + 1)), connect) }, scripts, outside, bare, missing };
+}
+
+/** Folders the Explorer shows as packages: those holding a metadata.json (folder → its path) */
+export function packageFolders(paths: string[]): Map<string, string> {
+    const out = new Map<string, string>();
+    for (const p of paths) if (p.toLowerCase().endsWith("/" + MANIFEST_FILE)) out.set(folderOf(p), p);
     return out;
 }

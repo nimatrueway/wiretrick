@@ -174,12 +174,12 @@ describe("explorer tree", () => {
         const enable = vi.spyOn(actions, "setScriptEnabled");
         act(() => void fireEvent.contextMenu(row("s_b"), { clientX: 10, clientY: 10 }));
         const items = () => [...document.querySelectorAll(".ctx-menu li")].map((l) => (l.classList.contains("sep") ? "-" : l.textContent));
-        expect(items()).toEqual(["OpenEnter", "-", "Disable", "-", "New Script…", "New JSON File…", "New Folder…", "-", "Copy Path", "-", "Rename…F2", "DeleteDelete"]);
+        expect(items()).toEqual(["OpenEnter", "-", "Disable", "-", "Make Package…", "Export Package…", "-", "New Script…", "New JSON File…", "New Folder…", "-", "Copy Path", "-", "Rename…F2", "DeleteDelete"]);
         act(() => void fireEvent.click([...document.querySelectorAll(".ctx-menu li")].find((l) => l.textContent === "Disable")!));
         expect(enable).toHaveBeenCalledWith("s_b", false);
         expect(document.querySelector(".ctx-menu")).toBeNull();
         act(() => void fireEvent.contextMenu(row("dir:mock")));
-        expect(items()[0]).toBe("New Script…");
+        expect(items().slice(0, 3)).toEqual(["Make Package…", "-", "New Script…"]);
         act(() => void fireEvent.keyDown(document, { key: "Escape" }));
         expect(document.querySelector(".ctx-menu")).toBeNull();
     });

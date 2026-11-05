@@ -1,5 +1,5 @@
 /**
- * Script API: per-handler routes, wt.about, wt.params / wt.defineParam,
+ * Script API: per-handler routes, wt.metadata, wt.params / wt.defineParam,
  * and utilities (no handlers).
  */
 import { describe, expect, it } from "vitest";
@@ -8,7 +8,7 @@ import { compileScript } from "../src/shared/compile";
 import { paramDefault, resolveParamValues, isValidParamValue } from "../src/shared/scriptDef";
 
 const CODE = `
-wt.about("Blocks things");
+wt.metadata({ description: "Blocks things" });
 const cfg = wt.params({
     flag: { type: "boolean", default: true },
     note: { type: "string", default: "hi" },

@@ -4,7 +4,7 @@ import { addedCapabilities, capabilitiesOf, describeCapabilities, isAllUrls, typ
 import { modifiedFiles, packageFolder, packageName, storeItemOf, uniqueEntryName } from "../src/shared/packageModel";
 import { diffHunks, lineDiff } from "../src/shared/lineDiff";
 import { readZip } from "../src/shared/zip";
-import { entriesIn, isPackageFile, localPackage } from "../src/shared/localPackage";
+import { isPackageFile, localPackage, startsIn } from "../src/shared/localPackage";
 
 const caps = (c: Partial<Capabilities> = {}): Capabilities => ({ urls: [], strategies: [], pageJs: false, overlay: false, unsafe: false, connect: [], packages: [], ...c });
 
@@ -16,7 +16,7 @@ describe("packageCaps", () => {
             { kind: "onDocument", url: ["*://c.com/*"], world: "isolated" },
             { kind: "onOverlay", url: ["*://a.com/*"], world: "page" },
         ];
-        const c = capabilitiesOf({ routes } as never, { connect: ["api.x.com"] }, ['import confetti from "https://unpkg.com/canvas-confetti@1.9.3";', 'import "./lib";']);
+        const c = capabilitiesOf(routes as never, ["api.x.com"], ['import confetti from "https://unpkg.com/canvas-confetti@1.9.3";', 'import "./lib";']);
         expect(c).toEqual({
             urls: ["*://a.com/*", "*://b.com/*", "*://c.com/*"],
             strategies: ["fetch"],
@@ -29,7 +29,7 @@ describe("packageCaps", () => {
     });
 
     it("an isolated onDocument doesn't touch the page's JavaScript", () => {
-        const c = capabilitiesOf({ routes: [{ kind: "onDocument", url: ["*://a.com/*"], world: "isolated" }] } as never, { connect: [] }, []);
+        const c = capabilitiesOf([{ kind: "onDocument", url: ["*://a.com/*"], world: "isolated" }] as never, [], []);
         expect(c.pageJs).toBe(false);
     });
 
@@ -71,16 +71,18 @@ describe("packageModel", () => {
         expect(storeItemOf("x", "data/c.json")).toEqual({ kind: "data", name: "x/data/c.json" });
     });
 
-    it("names a package by @name, else its entry", () => {
-        expect(packageName("a/dark.wiretrick.ts", { name: "" })).toBe("dark");
-        expect(packageName("dark.wiretrick.ts", { name: "Dark Mode" })).toBe("Dark Mode");
+    it("names a package by its metadata, else its first script", () => {
+        expect(packageName({ entries: ["a/dark.wiretrick.ts"], metadata: {} })).toBe("dark");
+        expect(packageName({ entries: ["dark.ts"], metadata: {} })).toBe("dark");
+        expect(packageName({ entries: ["dark.wiretrick.ts"], metadata: { name: "Dark Mode" } })).toBe("Dark Mode");
     });
 
     it("puts a single file at the root and more in a unique folder", () => {
-        expect(packageFolder("dark.wiretrick.ts", { "dark.wiretrick.ts": "" }, ["dark"])).toBe("");
+        expect(packageFolder({ entries: ["dark.wiretrick.ts"], files: { "dark.wiretrick.ts": "" } }, ["dark"])).toBe("");
         const files = { "dark.wiretrick.ts": "", "lib.ts": "" };
-        expect(packageFolder("dark.wiretrick.ts", files, [])).toBe("dark");
-        expect(packageFolder("dark.wiretrick.ts", files, ["Dark/x", "dark (2)/y.json"])).toBe("dark (3)");
+        expect(packageFolder({ entries: ["dark.wiretrick.ts"], files }, [])).toBe("dark");
+        expect(packageFolder({ entries: ["dark.wiretrick.ts"], files }, ["Dark/x", "dark (2)/y.json"])).toBe("dark (3)");
+        expect(packageFolder({ entries: ["a.ts", "b.ts"], files: { "a.ts": "", "b.ts": "" }, bundleName: "My/Kit" }, [])).toBe("My-Kit");
     });
 
     it("keeps a renamed root entry an entry", () => {
@@ -197,7 +199,9 @@ describe("localPackage", () => {
         expect(isPackageFile("a/b.svg")).toBe(true);
         expect(isPackageFile("node_modules/x/index.ts")).toBe(false);
         expect(isPackageFile("readme.md")).toBe(false);
-        expect(entriesIn(["sub/b.wiretrick.ts", "lib.ts", "a.wiretrick.tsx", "z.wiretrick.ts"])).toEqual(["a.wiretrick.tsx", "z.wiretrick.ts", "sub/b.wiretrick.ts"]);
+        expect(startsIn(["sub/b.ts", "lib.ts", "a.wiretrick.tsx", "t.d.ts", "c.json"])).toEqual(["a.wiretrick.tsx", "lib.ts", "sub/b.ts"]);
+        // a bundle's scripts install with it
+        expect(startsIn(["kit/metadata.json", "kit/a.ts", "kit/sub/b.ts", "x.ts"])).toEqual(["x.ts", "kit/metadata.json"]);
     });
 
     it("takes the entry and what it imports", async () => {
