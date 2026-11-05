@@ -97,7 +97,8 @@ item), Enter opens the file and focuses the Code view (on a folder: expand /
 collapse), Space opens it and keeps focus in the tree, F2 renames, Delete
 (⌘⌫ on macOS) deletes after a confirmation — a folder's warns that it deletes
 its contents, with counts — and Esc returns to the Code view. Right-click a
-row for **Open**, **Enable/Disable** (scripts), **New Script…**, **New JSON
+row for **Open**, **Enable/Disable** (scripts), **Make Package…** (entry
+scripts — see [Sharing a script](packages.md#sharing-a-script)), **New Script…**, **New JSON
 File…**, **New Folder…** (in that folder), **Copy Path**, **Rename…** and
 **Delete**; right-click the empty area for the New items at the root. **New
 Script…** makes a `*.wiretrick.ts` file, which runs, unless you type `.ts`

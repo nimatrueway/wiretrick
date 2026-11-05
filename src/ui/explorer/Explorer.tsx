@@ -3,7 +3,7 @@ import { useSnapshot } from "valtio";
 import { isInFolder } from "../../shared/folders";
 import { scriptHealth } from "../../shared/scriptHealth";
 import { folderOf, isSvgPath } from "../../shared/scriptImports";
-import { cleanScriptName, entryNameOf, fileExtension, isTsxName, scriptFileName, scriptNameFromInput } from "../../shared/scriptName";
+import { cleanScriptName, entryNameOf, fileExtension, isEntryName, isTsxName, scriptFileName, scriptNameFromInput } from "../../shared/scriptName";
 import { baseName, dropPlan, explorerTree, folderRowId, isFolderRowId, joinPath, targetFolder, type TreeRow } from "../explorerTree";
 import { actions } from "../shell/actions";
 import {
@@ -255,6 +255,7 @@ function onContextMenu(e: MouseEvent<HTMLUListElement>): void {
         ...(row.kind === "folder" ? [] : [{ label: "Open", key: "Enter", run: () => open(id) }, null]),
         ...(pkg ? packageMenu(pkg) : []),
         ...(script && !isLib ? [{ label: script.enabled ? "Disable" : "Enable", run: () => actions.setScriptEnabled(script.id, !script.enabled) }, null] : []),
+        ...(script && isEntryName(script.meta.name) && !pkg ? [{ label: "Make Package…", run: () => actions.makePackage(script.id) }, null] : []),
         ...newItemsMenu(targetFolder(row)),
         null,
         { label: "Copy Path", run: () => copy(rowFilePath(row), `copied ${rowFilePath(row)}`) },

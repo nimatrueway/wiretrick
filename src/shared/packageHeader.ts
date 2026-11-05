@@ -38,7 +38,7 @@ export function parseHeader(code: string): PackageHeader {
         const tag = /^@(\w+)\s*(.*)$/.exec(line);
         if (!tag) {
             // a description continues on the lines below its tag
-            if (last === "description" && line.trim()) out.description += " " + line.trim();
+            if (last === "description" && line.trim()) out.description = out.description ? `${out.description} ${line.trim()}` : line.trim();
             else last = null;
             continue;
         }

@@ -148,5 +148,16 @@ Right-click a package's folder or entry for:
   the entry's URL, or the folder's `github.com/…/tree/…` URL. A zip of the
   folder works for people installing from local files.
 
+**Make Package…** (right-click an entry script in the Explorer) lays one out
+for you: it moves the entry and every file it imports by a relative path into
+a folder named after the entry — keeping their layout under the entry's
+folder, copying a file other scripts still use instead of moving it — rewrites
+the imports for the new places and adds a header (`@name`, `@version 1.0.0`,
+`@description`, and `@connect` for the hosts of `wt.fetch` calls with a
+literal URL). The confirmation lists every move and copy, and warns about
+imports by bare name (they resolve from the installer's root, not the
+package) and imports that point at no file. An entry already alone in its
+folder with everything it imports only gets the header.
+
 A [synced folder](editor.md#synced-folder) holds your scripts as files, so a
 package folder there can be committed to a repository as is.

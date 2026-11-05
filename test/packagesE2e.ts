@@ -123,4 +123,36 @@ export async function checkPackages(ctx: any, mgr: any, origin: string, check: C
     for (const s of (await send({ type: "listScripts" })) || []) if (s.meta.name.startsWith("demo/")) await send({ type: "deleteScript", id: s.id });
     for (const d of (await send({ type: "listDataFiles" })) || []) if (d.path.startsWith("demo/")) await send({ type: "deleteDataFile", id: d.id });
     await send({ type: "packageForget", id: pkg.id });
+
+    // Explorer → Make Package…: the entry and what it imports move into a folder (a file another script uses is copied)
+    await send({ type: "saveScript", id: "mkpkg-lib", code: "export const v = 1;\n", name: "mklib" });
+    await send({ type: "saveScript", id: "mkpkg-user", code: 'import { v } from "./mklib";\nexport const w = v;\n', name: "mkuser" });
+    await send({ type: "saveDataFile", path: "mkcfg.json", text: '{ "a": 1 }\n' });
+    await send({ type: "saveScript", id: "mkpkg-entry", code: 'import { v } from "./mklib";\nimport cfg from "./mkcfg.json";\nconsole.log(v, cfg);\n', name: "mkpkg.wiretrick" });
+    const dialogs: string[] = [];
+    const onDialog = (d: any): void => void (dialogs.push(d.message()), d.accept());
+    mgr.on("dialog", onDialog);
+    const entryRow = '#script-list li.script-item[data-id="mkpkg-entry"] .script-name';
+    await mgr.waitForSelector(entryRow, { timeout: 8000 }).catch(() => {});
+    await mgr.click(entryRow, { button: "right" });
+    await mgr.click('.ctx-menu li:has-text("Make Package…")');
+    const made = await waitFor(
+        async () => ({ scripts: ((await send({ type: "listScripts" })) || []) as any[], data: ((await send({ type: "listDataFiles" })) || []) as any[] }),
+        ({ scripts, data }) => scripts.some((x) => x.id === "mkpkg-entry" && x.meta.name === "mkpkg/mkpkg.wiretrick") && data.some((d) => d.path === "mkpkg/mkcfg.json"),
+    );
+    mgr.off("dialog", onDialog);
+    const entry = made.scripts.find((x) => x.id === "mkpkg-entry");
+    const mkNames = made.scripts.map((x) => x.meta.name);
+    check(
+        t("Make Package… moves the entry and what it imports into a folder, copying what others use, and adds a header"),
+        /Copies[\s\S]*mklib\.ts → mkpkg\/mklib\.ts/.test(dialogs[0] || "") &&
+            entry?.code.includes("@name mkpkg") &&
+            entry?.code.includes('from "./mklib"') &&
+            mkNames.includes("mkpkg/mklib") &&
+            mkNames.includes("mklib") &&
+            !made.data.some((d) => d.path === "mkcfg.json"),
+        JSON.stringify({ dialog: dialogs[0], mkNames, entry: entry?.code.slice(0, 200), data: made.data.map((d) => d.path) }),
+    );
+    await send({ type: "deleteFolder", path: "mkpkg" });
+    for (const id of ["mkpkg-lib", "mkpkg-user"]) await send({ type: "deleteScript", id });
 }

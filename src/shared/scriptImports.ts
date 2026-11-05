@@ -60,6 +60,14 @@ export function badPackageImports(code: string): BadPackageImport[] {
     return out;
 }
 
+/** code with each import specifier replaced by what `to` returns for it (undefined: kept) */
+export function rewriteImports(code: string, to: (spec: string) => string | undefined): string {
+    return code.replace(IMPORT_RE, (m, spec: string) => {
+        const next = to(spec);
+        return next === undefined ? m : m.slice(0, m.length - spec.length - 1) + next + m.slice(-1);
+    });
+}
+
 /** 1-based line of the first import of `spec` in code */
 export function importLine(code: string, spec: string): number | undefined {
     for (const m of code.matchAll(IMPORT_RE)) if (m[1] === spec) return code.slice(0, m.index).split("\n").length;

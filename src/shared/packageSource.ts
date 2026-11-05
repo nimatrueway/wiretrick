@@ -170,7 +170,7 @@ export const MAX_FILES = 200;
 export const MAX_BYTES = 5 * 1024 * 1024;
 
 /** the paths a relative import may name, in TypeScript's order */
-function candidates(path: string): string[] {
+export function candidates(path: string): string[] {
     if (isDataSpec(path) || /\.tsx?$/i.test(path)) return [path];
     if (/\.js$/i.test(path)) return [path.slice(0, -3) + ".ts", path.slice(0, -3) + ".tsx"];
     return [path + ".ts", path + ".tsx"];

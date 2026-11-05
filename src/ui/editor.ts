@@ -10,6 +10,7 @@ import { NavHistory } from "./navHistory";
 import type { SampleScript } from "./samples";
 import { settingsDiagnostics, settingsCompletions, settingsHover, type AssistScript } from "../shared/settingsAssist";
 import { badPackageImports, dependantsOf, isSvgPath, missingImports } from "../shared/scriptImports";
+import { makePackagePlan } from "../shared/makePackage";
 import { PACKAGE_ORIGIN } from "../shared/packageImports";
 import { isInFolder, movedPath } from "../shared/folders";
 import { baseName, folderPathOfRowId, folderRowId, isFolderRowId, movedCollapsed, type TreeRow } from "./explorerTree";
@@ -18,7 +19,7 @@ import { dialogs, openHelp, openSettings, pickRows, resolveConflict } from "./st
 import { folderStateText, setHelperStatus, settings } from "./state/settings";
 import { watchTheme, type Theme } from "./theme";
 import * as fsBridge from "./fsBridge";
-import { cleanScriptName, entryNameOf, isEntryName, isTsxName, NOT_AN_ENTRY, scriptNameProblem, scriptFileName, scriptFileKey, uniqueScriptName, dataFilePathProblem, folderPathProblem } from "../shared/scriptName";
+import { cleanScriptName, entryNameOf, isEntryName, isTsxName, NOT_AN_ENTRY, scriptNameProblem, scriptFileName, scriptFileKey, scriptNameFromFile, uniqueScriptName, dataFilePathProblem, folderPathProblem } from "../shared/scriptName";
 import { jsxElementAt } from "../shared/builtinSpecs";
 import { buildBundle, parseBundleText, bundleSettingsDoc, pickBundle, vscodeTargetPath, editorLaunchUrl, launchAppName, type LaunchMode } from "./bundle";
 import { computeDirty } from "./dirtyState";
@@ -400,6 +401,63 @@ async function moveRows(plan: { item: TreeRow; to: string }[]): Promise<void> {
         else revealInExplorer(to);
     }
     await refresh();
+}
+
+/**
+ * Explorer → Make Package…: move the entry and the files it imports into a
+ * folder named after it (copying those other scripts use too), rewrite
+ * their imports, and give the entry a header (shared/makePackage).
+ */
+async function makePackage(id: string): Promise<void> {
+    const s = scripts.find((x) => x.id === id);
+    if (!s) return;
+    const files: Record<string, string> = {};
+    const owner = new Map<string, { script?: Script; data?: DataFile }>();
+    for (const x of scripts) {
+        files[scriptFileName(x.meta.name)] = x.code;
+        owner.set(scriptFileName(x.meta.name), { script: x });
+    }
+    for (const d of dataFiles) {
+        files[d.path] = d.text;
+        owner.set(d.path, { data: d });
+    }
+    const plan = makePackagePlan(scriptFileName(s.meta.name), files, everyFolder());
+    const changed = [...plan.files.filter((f) => !f.copy && (f.to !== f.from || f.text !== files[f.from])).map((f) => f.from), ...plan.edits.map((e) => e.path)];
+    const open = changed.map((p) => owner.get(p)?.script?.id ?? owner.get(p)?.data?.id).find((x) => x === selectedId);
+    if (open && dirty) return void status(`save "${treeRow(open)?.path ?? ""}" first — making the package changes it`, "error");
+    if (!changed.length) return void status(`"${plan.folder}" is a package already — share its entry's URL (see Install Script… → docs)`);
+    const list = (paths: string[]) => paths.map((p) => `  ${p}`).join("\n");
+    const moved = plan.files.filter((f) => !f.copy && f.to !== f.from);
+    const copied = plan.files.filter((f) => f.copy);
+    const lines = [
+        plan.inPlace ? `"${plan.folder}/" holds this entry and what it imports already: add a header to it?` : `Make "${scriptFileName(s.meta.name)}" a package in the folder "${plan.folder}/"?`,
+        moved.length ? `\nMoves:\n${list(moved.map((f) => `${f.from} → ${f.to}`))}` : "",
+        copied.length ? `\nCopies (other scripts use them too):\n${list(copied.map((f) => `${f.from} → ${f.to}`))}` : "",
+        plan.edits.length ? `\nUpdates the imports in:\n${list(plan.edits.map((e) => e.path))}` : "",
+        !plan.inPlace && plan.addsHeader ? "\nAdds a header (@name, @version…) to the entry." : "",
+        plan.bare.length ? `\nImports by bare name resolve from the root of the installer's scripts, not the package: ${[...new Set(plan.bare.map((b) => `"${b.spec}"`))].join(", ")} — use a relative path ("./…") to take the file along.` : "",
+        plan.missing.length ? `\nImports that point at no file: ${plan.missing.map((m) => `"${m.spec}" in ${m.from}`).join(", ")}` : "",
+    ];
+    if (!confirm(lines.filter(Boolean).join("\n"))) return;
+    const save = async (msg: Record<string, unknown>, path: string): Promise<boolean> => {
+        const r = await send(msg);
+        // an error with an id is a compile error: the script was still saved
+        if (r?.error && !r.id) status(`can't write "${path}": ${r.error}`, "error");
+        return !(r?.error && !r.id);
+    };
+    let ok = true;
+    // what's imported first, the entry last: each compiles against files in their new places
+    for (const f of [...plan.files].reverse()) {
+        const o = owner.get(f.from)!;
+        if (o.data) ok = (f.copy ? await save({ type: "saveDataFile", path: f.to, text: f.text }, f.to) : f.to === f.from || (await save({ type: "renameDataFile", id: o.data.id, path: f.to }, f.to))) && ok;
+        else if (f.copy) ok = (await save({ type: "saveScript", id: uuid(), code: f.text, name: scriptNameFromFile(f.to) }, f.to)) && ok;
+        else if (f.to !== f.from || f.text !== files[f.from]) ok = (await save({ type: "saveScript", id: o.script!.id, code: f.text, ...(f.to !== f.from ? { name: scriptNameFromFile(f.to) } : {}) }, f.to)) && ok;
+    }
+    for (const e of plan.edits) ok = (await save({ type: "saveScript", id: owner.get(e.path)!.script!.id, code: e.text }, e.path)) && ok;
+    await refresh();
+    revealInExplorer(plan.files[0].to);
+    await select(id);
+    if (ok) status(`"${plan.folder}/" is a package — fill in its header, then share the entry's URL (or the folder)`);
 }
 
 /**
@@ -1914,6 +1972,7 @@ async function main(): Promise<void> {
         select: (id: string) => void select(id),
         deleteRows: (rows: TreeRow[]) => void deleteRows(rows),
         moveRows,
+        makePackage: (id: string) => void makePackage(id),
         itemPathProblem,
         createItem: (kind: NewKind, path: string) => void createItem(kind, path),
         startCreate,
