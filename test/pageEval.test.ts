@@ -57,8 +57,41 @@ describe("ctx.evaluate", () => {
     it("wants a function, plain-data arguments and a plain-data result", async () => {
         const { evaluate } = setup();
         await expect(evaluate("document.title")).rejects.toThrow(/pass a function/);
-        await expect(evaluate((f: unknown) => f, () => 1)).rejects.toThrow(/arguments must be plain data/);
+        await expect(evaluate((f: unknown) => f, new WeakMap())).rejects.toThrow(/arguments must be plain data/);
         await expect(evaluate(() => () => 1)).rejects.toThrow(/result must be plain data/);
+    });
+
+    it("function arguments are callbacks: the page calls them, they run here — also after fn returned", async () => {
+        const { evaluate } = setup();
+        const page = new EventTarget();
+        (globalThis as any).__pageApp = page;
+        const got: unknown[] = [];
+        try {
+            const r = await evaluate(
+                (set: (name: string, n: number) => void, done: () => void) => {
+                    const app = (globalThis as any).__pageApp as EventTarget;
+                    set("first", 1);
+                    app.addEventListener("user", (e: any) => set(e.detail, 2));
+                    app.addEventListener("bye", () => done());
+                    return "subscribed";
+                },
+                (name: string, n: number) => got.push([name, n]),
+                () => got.push("done")
+            );
+            expect(r).toBe("subscribed");
+            expect(got).toEqual([["first", 1]]);
+            page.dispatchEvent(Object.assign(new Event("user"), { detail: "ada" }));
+            page.dispatchEvent(new Event("bye"));
+            await new Promise((r) => setTimeout(r, 10));
+            expect(got).toEqual([["first", 1], ["ada", 2], "done"]);
+        } finally {
+            delete (globalThis as any).__pageApp;
+        }
+    });
+
+    it("a callback's arguments must be plain data", async () => {
+        const { evaluate } = setup();
+        await expect(evaluate((cb: (x: unknown) => void) => cb(() => 1), () => {})).rejects.toThrow(/callback's arguments must be plain data/);
     });
 
     it("rejects when nothing in the page world answers", async () => {

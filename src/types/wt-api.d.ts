@@ -279,6 +279,11 @@ declare namespace Wiretrick {
          * this script's variables (pass what it needs as `args`). Arguments
          * and the result are copied (plain data; a promise is awaited).
          *
+         * A function argument is a callback: `fn` gets a stand-in that calls
+         * it back here (where stores and the overlay are), also later — from
+         * the site's events — for as long as the document lives. Its
+         * arguments are copied page data; it returns nothing to `fn`.
+         *
          * The page can see the call and fake its answer: treat the result
          * as untrusted input, and never pass secrets. Rejects when the
          * page's CSP forbids `eval` or the page world doesn't answer. In
@@ -290,6 +295,14 @@ declare namespace Wiretrick {
          *
          * @example
          * const n = await ctx.evaluate((sel: string) => document.querySelectorAll(sel).length, "a");
+         *
+         * @example
+         * // keep a store in sync with the site's own state
+         * ctx.evaluate((setUser) => {
+         *     (window as any).myApp.on("login", (u: any) => setUser(u?.name));
+         * }, (name: unknown) => {
+         *     if (typeof name === "string") state.user = name;
+         * });
          */
         evaluate<A extends unknown[], R>(fn: (...args: A) => R, ...args: A): Promise<Awaited<R>>;
     }

@@ -675,8 +675,10 @@ like `ui/Panel.tsx` (create or rename it with the extension; a plain
 script's `.ts` is implied). It compiles with React's automatic runtime, so
 components need no `import React`. JSX in a `.ts` script is an error with a
 **Rename to Name.tsx** quick fix; scripts saved with JSX before `.tsx`
-existed were renamed once, settings included. In `wt.onPage` code the
-built-ins aren't available: using one there throws.
+existed were renamed once, settings included. They work in `wt.onPage`
+code too (the default isolated world: React loads into it on first use,
+and handlers that import it start once it has), but not with
+`world: "page"`, where using one throws.
 
 ```ts
 import { subscribe } from "valtio";
@@ -781,6 +783,25 @@ wt.onPage("*://app.example.com/*", async (ctx) => {
 - `fn` is sent as source and runs on its own: it can't use the script's
   variables, imports or `wt` — pass what it needs as `args`. Arguments and
   the result are plain data (structured-clonable); anything else rejects.
+- A function argument is a **callback**: `fn` gets a stand-in that calls it
+  back in isolated code, where stores and the overlay are — also later, from
+  the site's own events, for as long as the document lives. Its arguments
+  are copied plain data the site could fake; it returns nothing to `fn`.
+
+  ```ts
+  const ps = wt.pageStore("app", { user: "" });
+
+  wt.onPage("*://app.example.com/*", (ctx) =>
+      ctx.evaluate((setUser) => {
+          const app = (window as any).app;
+          setUser(app.user?.name);
+          app.on("login", (u: any) => setUser(u?.name));
+      }, (name: unknown) => {
+          if (typeof name === "string") ps.user = name;
+      })
+  );
+  ```
+
 - It runs as page code: the page sees the call and can fake the answer, so
   treat the result as [page data](#page-world-results-are-page-data) and
   never pass secrets (store values, tokens) in.

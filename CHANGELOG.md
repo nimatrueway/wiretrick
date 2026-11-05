@@ -7,6 +7,14 @@ its section below.
 
 ## [Unreleased]
 
+### Added
+
+- `ctx.evaluate` callbacks: a function passed as an argument is a callback the page-world `fn` can call — also later, from the site's own events — to run code back in isolated code, where stores and the overlay are. E.g. `ctx.evaluate((set) => app.on("login", (u) => set(u.name)), (name) => { state.user = name; })`.
+
+### Fixed
+
+- The built-in `react`, `react-dom` and `valtio` threw "aren't available in page code" in `onPage` code, which now runs in the isolated world by default: they work there now (React loads on first use). `world: "page"` code still can't use them, and its error says so.
+
 ## [0.12.0] - 2026-11-04
 
 ### Added

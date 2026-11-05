@@ -31,6 +31,7 @@ import { dlogLevel } from "../../shared/debugLog";
 import { routeMatches, sampleUrl, type RouteMeta } from "../../shared/route";
 import type { ShippedLib } from "../../shared/scriptImports";
 import { fetchFor, storeOwner } from "./stores";
+import { reactChunkSource } from "../reactChunk";
 import { pages, pagesReady } from "./pages";
 import { addBypass, addBypassRule } from "./bypass";
 
@@ -383,6 +384,7 @@ export function serveIsoLink(link: IsoLink): void {
             if (r.dir === "toIso") r.bridge.ep.push("iso.result", callError(cid, "the isolated-world code went away", "DisconnectedError"), r.s);
         }
     });
+    ep.handle("builtin.react", () => reactChunkSource());
     ep.handle("iso.load", async ({ url }, s) => {
         if (typeof s !== "string" || typeof url !== "string" || !sameOrigin(url, link.port.sender?.url) || (link.s !== null && link.s !== s)) throw new Error("iso.load: refused");
         // Chrome may one day say which world the port came from

@@ -138,13 +138,13 @@ describe(".tsx scripts", () => {
     });
 });
 
-describe("built-in imports in page code", () => {
+describe("built-in imports in page-world code", () => {
     it("load (the module graph still evaluates) but throw when used", () => {
         const req = makeLibRequire([], () => {})("main");
         const React = req("react");
         expect(React.__esModule).toBe(true);
-        expect(() => React.useState).toThrow(/aren't available in page code/);
-        expect(() => req("valtio").proxy({})).toThrow(/aren't available in page code/);
+        expect(() => React.useState).toThrow(/aren't available in page-world code/);
+        expect(() => req("valtio").proxy({})).toThrow(/aren't available in page-world code/);
     });
 
     it("a page shim compiles an overlay script that imports React", () => {

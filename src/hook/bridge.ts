@@ -25,6 +25,7 @@ import { formatScriptError } from "../shared/scriptError";
 import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptContext, type ScriptLogLevel } from "../shared/scriptLog";
 import { scriptFunction } from "../shared/scriptFn";
 import { makeLibRequire, type ShippedLib } from "../shared/scriptImports";
+import { builtinModule, builtinsReady, ensureBuiltins, setBuiltinLoader, shippedSources, sourceLoader } from "../shared/builtins";
 import { makePageShim, domHandlersFor, scheduleDocument, firePageHandler, type PageDocumentHandler } from "../shared/pageShim";
 import { packBytes, unpackBytes } from "../shared/bytesPack";
 import { endpointPair, messagePortEndpoint, portEndpoint, ISO_STORE_TAG, type Endpoint, type ReqOf, type ReqOps, type ResOf } from "../shared/wire";
@@ -315,8 +316,25 @@ import { makePageEvaluate } from "../shared/pageEval";
     /** ctx.evaluate: asks the hook in the page's world (the CSP fallback's page code too: the page's CSP rejects it there) */
     const evaluate = makePageEvaluate();
 
-    function runPageScripts(handlers: DocumentHandler[], libSources: ShippedLib[], world: "page" | "isolated", hot: boolean): void {
+    // isolated code's built-in React: evaluated here from the background's copy (a <script> tag would put it in the page)
+    if (!__MV3__)
+        setBuiltinLoader(
+            sourceLoader(() => new Promise((resolve, reject) => safeSend({ type: "getBuiltinReact" }, (r: any) => (typeof r?.src === "string" ? resolve(r.src) : reject(new Error(r?.error || "no answer from the extension"))))))
+        );
+
+    function runPageScripts(handlers: DocumentHandler[], libSources: ShippedLib[], world: "page" | "isolated", hot: boolean, loaded = false): void {
         if (dead) return;
+        if (world === "isolated" && !loaded) {
+            const { codes, packages } = shippedSources(handlers.map((h) => h.src), libSources);
+            if (!builtinsReady(codes, packages)) {
+                ensureBuiltins(codes, packages)
+                    .catch((e: any) => {
+                        for (const h of handlers) scriptLog(h.scriptId, "error", formatScriptError(h.name, new Error(`the built-in React didn't load: ${e?.message || e}`), "onPage (isolated world)"), "isolated");
+                    })
+                    .then(() => runPageScripts(handlers, libSources, world, hot, true));
+                return;
+            }
+        }
         const what = world === "isolated" ? "onPage (isolated world)" : "onPage (isolated-world fallback)";
         dlog("debug", `${what}: running ${handlers.length} script(s)${hot ? " (hot refire)" : ""}`);
         const exposers = world === "isolated" ? isoExposers : fallbackExposers;
@@ -357,8 +375,12 @@ import { makePageEvaluate } from "../shared/pageEval";
             let dom: PageDocumentHandler[];
             try {
                 // page-side require over the shipped library sources and data files
-                const requireFrom = makeLibRequire(libSources, (lib, require, moduleObj) =>
-                    scriptFunction(lib.src!)(shimFor(null, lib.name, lib.params || {}, undefined, h.scriptId).wt, consoleProxy, require, moduleObj, moduleObj.exports)
+                const codeOf = (importer: string) => (importer === h.name ? h.src : (libSources.find((l) => l.name === importer)?.src ?? ""));
+                const requireFrom = makeLibRequire(
+                    libSources,
+                    (lib, require, moduleObj) => scriptFunction(lib.src!)(shimFor(null, lib.name, lib.params || {}, undefined, h.scriptId).wt, consoleProxy, require, moduleObj, moduleObj.exports),
+                    // the built-ins: isolated code only (page code gets modules that say why not)
+                    world === "isolated" ? { builtin: (spec, importer, loadUrl) => builtinModule(spec, codeOf(importer), loadUrl) } : {}
                 );
                 const moduleObj = { exports: {} as any };
                 const shim = shimFor(h.scriptId, h.name, h.params || {}, exposer, h.scriptId);

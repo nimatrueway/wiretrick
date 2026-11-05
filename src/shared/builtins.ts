@@ -15,7 +15,7 @@ import * as vanilla from "valtio/vanilla";
 import * as vanillaUtils from "valtio/vanilla/utils";
 import { createProxy, isChanged } from "proxy-compare";
 import { builtinNeedsReact, builtinSpec, preactRoot, preactTarget, REACT_BUILTINS } from "./builtinSpecs";
-import { importSpecs } from "./scriptImports";
+import { importSpecs, type ShippedLib } from "./scriptImports";
 import type { PackageModules } from "./packageImports";
 
 export const REACT_CHUNK = "builtins-react.js";
@@ -51,6 +51,32 @@ export function setBuiltinLoader(fn: () => Promise<ReactBuiltins>): void {
     loader = fn;
     react = null;
     loading = null;
+}
+
+/**
+ * Load the React chunk from its source text: isolated onPage code (a
+ * content-script or user-script world), where a <script> tag would run it
+ * in the page instead.
+ */
+export function sourceLoader(get: () => Promise<string>): () => Promise<ReactBuiltins> {
+    return async () => {
+        if (!(globalThis as any)[CHUNK_GLOBAL]) new Function(await get())();
+        const r = (globalThis as any)[CHUNK_GLOBAL];
+        if (!r) throw new Error(`${REACT_CHUNK} didn't load`);
+        return r;
+    };
+}
+
+/** a page runtime's sources: its scripts' code plus the shipped libraries and package modules */
+export function shippedSources(codes: string[], libs: ShippedLib[]): { codes: string[]; packages: PackageModules } {
+    const packages: PackageModules = { aliases: {}, modules: {} };
+    for (const l of libs) if (l.pkg) packages.modules[l.name] = l.pkg;
+    return { codes: [...codes, ...libs.flatMap((l) => (l.src ? [l.src] : []))], packages };
+}
+
+/** can these sources compile now (React loaded, or not needed)? */
+export function builtinsReady(codes: Iterable<string>, packages?: PackageModules): boolean {
+    return !!react || !needsReact(codes, packages);
 }
 
 /** do these sources (scripts, plus downloaded packages) import the built-in React? */

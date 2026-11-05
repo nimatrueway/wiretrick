@@ -48,6 +48,7 @@ import { pushIsoUpdate, pushPreviewUpdate, revalidateOverlayLinks, setupOverlayL
 import { onUserScriptsStatus, syncUserScripts, userScriptsStatus, type IsoScript } from "../userScripts";
 import { USER_SCRIPTS_OFF, userScriptsProblem, type UserScriptsStatus } from "../../shared/userScriptsStatus";
 import { contentHash } from "../../shared/folderSync";
+import { reactChunkSource } from "../reactChunk";
 
 const FILTER: chrome.webRequest.RequestFilter = { urls: ["<all_urls>"] };
 
@@ -829,6 +830,14 @@ export function createPipeline(
             pageStrategy.claimRequest(msg.url);
             sendResponse({});
             return false;
+        }
+        if (msg && msg.type === "getBuiltinReact") {
+            // MV2/Firefox: the bridge's isolated onPage code imports React
+            reactChunkSource().then(
+                (src) => sendResponse({ src }),
+                (e) => sendResponse({ error: String(e?.message || e) })
+            );
+            return true;
         }
         if (msg && msg.type === "getHookBundle") {
             void (async () => {

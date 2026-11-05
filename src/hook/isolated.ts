@@ -19,6 +19,7 @@ import { formatScriptError } from "../shared/scriptError";
 import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
 import { scriptFunction } from "../shared/scriptFn";
 import { makeLibRequire } from "../shared/scriptImports";
+import { builtinModule, builtinsReady, ensureBuiltins, setBuiltinLoader, shippedSources, sourceLoader } from "../shared/builtins";
 import { makePageShim, domHandlersFor, scheduleDocument, firePageHandler, type PageDocumentHandler } from "../shared/pageShim";
 import { portEndpoint, type Endpoint, type IsoInit } from "../shared/wire";
 import { Exposer, RpcClient, isRpcCall, type RpcResult } from "../shared/rpc";
@@ -147,12 +148,24 @@ import { makePageEvaluate } from "../shared/pageEval";
         );
     }
 
+    // the built-in React: evaluated in this world from the owner's copy (a <script> tag would put it in the page)
+    setBuiltinLoader(sourceLoader(() => linkUp().then((ep) => ep.call("builtin.react", {}, s))));
+
     function run(init: IsoInit, hot: boolean): void {
         if (codeHash !== null) {
             exposer.reset();
             client.disconnect("the script reloaded");
         }
         codeHash = init.codeHash;
+        const { codes, packages } = shippedSources([init.src], init.libs);
+        if (builtinsReady(codes, packages)) return exec(init, hot);
+        ensureBuiltins(codes, packages).then(
+            () => codeHash === init.codeHash && exec(init, hot),
+            (e: any) => log("error", formatScriptError(init.name, new Error(`the built-in React didn't load: ${e?.message || e}`), "onPage (isolated world)"))
+        );
+    }
+
+    function exec(init: IsoInit, hot: boolean): void {
         const shimFor = (name: string, params: Record<string, any>, mine: boolean) =>
             makePageShim({
                 params,
@@ -169,8 +182,11 @@ import { makePageEvaluate } from "../shared/pageEval";
         const consoleProxy = makeScriptConsole((level, source, text) => log(level, scriptLogLine(init.name, source, text)));
         let dom: PageDocumentHandler[];
         try {
-            const requireFrom = makeLibRequire(init.libs, (lib, require, moduleObj) =>
-                scriptFunction(lib.src!)(shimFor(lib.name, lib.params || {}, false).wt, consoleProxy, require, moduleObj, moduleObj.exports)
+            const codeOf = (importer: string) => (importer === init.name ? init.src : (init.libs.find((l) => l.name === importer)?.src ?? ""));
+            const requireFrom = makeLibRequire(
+                init.libs,
+                (lib, require, moduleObj) => scriptFunction(lib.src!)(shimFor(lib.name, lib.params || {}, false).wt, consoleProxy, require, moduleObj, moduleObj.exports),
+                { builtin: (spec, importer, loadUrl) => builtinModule(spec, codeOf(importer), loadUrl) }
             );
             const moduleObj = { exports: {} as any };
             const shim = shimFor(init.name, init.params || {}, true);

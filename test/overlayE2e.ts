@@ -622,7 +622,11 @@ export async function checkPageStores(ctx: any, mgr: any, origin: string, check:
     await send({ type: "deleteScript", id: "s_two" });
 }
 
-const isoStoreCode = (origin: string) => `const g = wt.globalStore("isog", { n: 0 }, { persist: false });
+const isoStoreCode = (origin: string) => `import { createElement } from "react";
+import { createRoot } from "react-dom/client";
+import { useSnapshot } from "valtio";
+
+const g = wt.globalStore("isog", { n: 0 }, { persist: false });
 const ps = wt.pageStore("isops", { hits: 0 });
 
 wt.replaceResponse({ url: "${origin}/ov-isops", strategy: "page" }, () => String(++ps.hits));
@@ -642,9 +646,17 @@ wt.onPage("${origin}/ov-isost*", async (ctx) => {
         const poll = () => ((window as any)[k] || Date.now() - t0 > 2000 ? r((window as any)[k] + "|" + location.pathname) : setTimeout(poll, 20));
         poll();
     }), "__isoSecret").then(String, (e) => "rejected: " + e.message);
+    await ctx.evaluate((set) => {
+        addEventListener("wt-e2e-ping", (e: any) => set(e.detail + ":" + (window as any).__isoSecret));
+    }, (v: string) => {
+        document.body.dataset.pinged = v + ":" + typeof (window as any).__isoSecret + ":" + g.n;
+    });
+    document.body.dataset.subscribed = "1";
 })
 
 wt.onPage("${origin}/ov-isost*", () => {
+    const Hits = () => createElement("b", null, "react:" + useSnapshot(ps).hits);
+    createRoot(document.body.appendChild(document.createElement("div"))).render(createElement(Hits));
     const out = document.body.appendChild(document.createElement("output"));
     out.id = "isost";
     const show = () => (out.value = JSON.stringify({ g: g.n, ps: ps.hits }));
@@ -697,8 +709,14 @@ export async function checkIsoStores(ctx: any, mgr: any, origin: string, check: 
     const evaluated = await waitFor<string>(() => a.evaluate(() => document.body.dataset.evaluated || ""), (v) => !!v, 8000);
     const isoGlobal = await a.evaluate(() => document.body.dataset.isoGlobal || "");
     check(t("default-world onPage code is isolated: no page globals, ctx.evaluate reads them (awaited)"), isoGlobal === "undefined" && evaluated === "PAGE-GLOBAL-42|/ov-isost", JSON.stringify({ isoGlobal, evaluated }));
+    await waitFor<string>(() => a.evaluate(() => document.body.dataset.subscribed || ""), (v) => !!v, 8000);
+    await a.evaluate(() => dispatchEvent(new CustomEvent("wt-e2e-ping", { detail: "hi" })));
+    const pinged = await waitFor<string>(() => a.evaluate(() => document.body.dataset.pinged || ""), (v) => !!v, 8000);
+    check(t("ctx.evaluate callbacks: a page event calls back into isolated code (page global there, store here)"), pinged === `hi:PAGE-GLOBAL-42:undefined:${g0}`, pinged);
     const first = await hit(a);
     const v1 = await until(a, (v) => v.ps === 1);
+    const reactText = await waitFor<string>(() => a.evaluate(() => [...document.querySelectorAll("b")].map((b) => b.textContent).join()), (v) => v === "react:1", 8000);
+    check(t("isolated code renders with the built-in React and valtio (live)"), reactText === "react:1", reactText);
     check(t("a background handler's write to the page's copy shows up live"), first === "1" && v1?.ps === 1, JSON.stringify({ first, v1 }));
     await a.evaluate(() => (document.getElementById("isost-add") as HTMLButtonElement).click());
     const f = await overlayFrame(a, "#isost-ov");

@@ -121,6 +121,8 @@ export interface WireOps {
     // ---- MV3 isolated-world onPage code (L6: chrome.userScripts world ⇄ owner; L2 for the relay) ----
     /** L6: what script `s` runs in this frame's user-script world (refused unless it has isolated onPage code here) */
     "iso.load": { req: { url: string }; res: IsoInit };
+    /** L6: the built-in React chunk's source, for isolated code that imports React (evaluated in its world) */
+    "builtin.react": { req: Record<string, never>; res: string };
     /**
      * L2 (MV2/Firefox, where the bridge runs isolated onPage code): let
      * script `s`'s isolated code at `url` use its stores. Its store ops then

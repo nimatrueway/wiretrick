@@ -212,10 +212,10 @@ export interface ShippedLib {
     alias?: string;
 }
 
-/** what page code gets for a built-in import: the module graph still loads, using it throws */
+/** what page-world code gets for a built-in import: the module graph still loads, using it throws */
 function pageBuiltin(spec: string): any {
     const fail = (): never => {
-        throw new Error(`cannot use "${spec}": the built-in modules aren't available in page code (only in the overlay and the background)`);
+        throw new Error(`cannot use "${spec}": the built-in modules aren't available in page-world code (world: "page") — use them in isolated onPage code (the default), the overlay or the background`);
     };
     return new Proxy(Object.create(null), {
         // the CommonJS interop reads __esModule at import; anything else is a use

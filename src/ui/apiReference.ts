@@ -169,14 +169,14 @@ World: world: "isolated" (default) | "page"
 - isolated — a private world with the same DOM and none of the site's JavaScript; the site can't see it, so it may use the script's stores and call its overlay. Chrome (MV3) needs user scripts turned on — the Editor shows how
 - page — the site's own JavaScript world ("main" is its old name): it sees the site's globals (window.myApp), and the site can see and tamper with it — no stores, and it can answer the overlay's calls but not call it
 
-ctx.evaluate(fn, ...args) — from isolated code, run fn in the site's own world and get its (awaited) result: read the site's globals without leaving the isolated world. fn is sent as source — it can't use the script's variables, so pass them as args; arguments and result are plain data. The site can see the call and fake the answer: check what comes back, never pass secrets. Rejects where the page's CSP forbids eval.
+ctx.evaluate(fn, ...args) — from isolated code, run fn in the site's own world and get its (awaited) result: read the site's globals without leaving the isolated world. fn is sent as source — it can't use the script's variables, so pass them as args; arguments and result are plain data, except function arguments: those are callbacks fn can call (also later, from the site's events) to run code back in isolated code, with copied arguments. The site can see the call and fake the answer: check what comes back, never pass secrets. Rejects where the page's CSP forbids eval.
 
 wt.onPage("*://example.com/*", async (ctx) => {
     const user = await ctx.evaluate(() => (window as any).myApp?.user?.name);
     if (typeof user === "string") wt.log("signed in as", user);
 });
 
-Runs once per document per matching frame. SPA navigations and re-renders don't re-run it (use a MutationObserver inside). Saving the script with the page open re-runs it immediately — keep it idempotent. A script may register several onPage handlers, each with its own route, when and world. The built-in react and valtio aren't available here. Hover "when" or "world" in the Code view for the full reference.`,
+Runs once per document per matching frame. SPA navigations and re-renders don't re-run it (use a MutationObserver inside). Saving the script with the page open re-runs it immediately — keep it idempotent. A script may register several onPage handlers, each with its own route, when and world. The built-in react and valtio work here, except with world: "page". Hover "when" or "world" in the Code view for the full reference.`,
     },
     {
         title: "wt.onOverlay — the script's own GUI on the page",
