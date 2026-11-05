@@ -26,7 +26,7 @@ export function inertRemote(reason: string, onCall?: (e: WtCallError) => void): 
 }
 
 export const REMOTE_FROM_BACKGROUND = "page/overlay functions can only be called from this script's overlay or isolated-world onPage code, not from network handlers";
-export const REMOTE_MAIN_WORLD = 'main-world onPage code can\'t call the overlay; use world: "isolated"';
-/** in every warning about main-world onPage code using what only the isolated world may (the editor offers the world: "isolated" quick fix) */
-export const MAIN_WORLD_DISALLOWED = "which the API explicitly disallows in the main world";
+export const REMOTE_MAIN_WORLD = 'page-world onPage code can\'t call the overlay; run it in the isolated world (the default: drop world: "page") and read the page with ctx.evaluate';
+/** in every warning about page-world onPage code using what only the isolated world may (the editor offers the isolated-world quick fix) */
+export const MAIN_WORLD_DISALLOWED = "which the API explicitly disallows in the page world";
 export const REMOTE_OVERLAY_SELF = "the overlay can't call its own onOverlay handles — call the functions directly";

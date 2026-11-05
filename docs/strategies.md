@@ -372,7 +372,7 @@ strategy picker disables the ones the current browser can't use.
 
 | | `helper` (local helper) | `page` (page fetch/XHR) | `extension` (blocking webRequest) | `debugger` (chrome.debugger) | `rules` (browser-native rules) | `wt.onPage` |
 |---|---|---|---|---|---|---|
-| **Chrome / Edge / Brave / Vivaldi, current** — `dist-mv3/` | ✅ no banner | ✅ | ❌ | ✅ banner shown | ✅ | ✅ |
+| **Chrome / Edge / Brave / Vivaldi, current** — `dist-mv3/` | ✅ no banner | ✅ | ❌ | ✅ banner shown | ✅ | ✅ (needs [user scripts](scripting.md#user-scripts-on-chrome) unless `world: "page"`) |
 | **Chromium with MV2** (ungoogled-chromium, Brave, Arc… — any Chromium that still loads MV2 extensions) — `dist/` | ✅ no banner | ✅ | ✅ no banner — redirect, block, headers, sync replaceResponse; no body streaming or async (see [async](scripting.md#async-handlers)) | ✅ banner shown | ✅ | ✅ |
 | **Firefox** — `dist/` | ❌ (not needed: `extension` reaches everything) | ✅ | ✅ no banner | ❌ | ✅ 113+ | ✅ |
 

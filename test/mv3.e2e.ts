@@ -1030,12 +1030,12 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
     });
     await warm.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_dom", name: "Early dom",
-        code: `wt.onDocument({ url: "*://*:*/*", when: "document_start" }, (ctx) => { document.title = "DOM-RAN:" + document.readyState; });`,
+        code: `wt.onDocument({ url: "*://*:*/*", when: "document_start", world: "page" }, (ctx) => { document.title = "DOM-RAN:" + document.readyState; });`,
     }, r)));
     // a second script with its own `when` must not inherit the first's
     await warm.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_idle", name: "Idle dom",
-        code: `wt.onDocument({ url: "*://*:*/*", when: "document_idle" }, () => { document.documentElement.dataset.idle = document.readyState; });`,
+        code: `wt.onDocument({ url: "*://*:*/*", when: "document_idle", world: "page" }, () => { document.documentElement.dataset.idle = document.readyState; });`,
     }, r)));
     await warm.waitForTimeout(1500); // cache refresh (pipeline reload warm)
     const domPage = await ctx.newPage();

@@ -1,7 +1,7 @@
 /**
  * The `wt` object a script sees when its onPage (alias onDocument) handlers
- * compile in the page (hook.ts, MAIN world) or the isolated world (bridge.ts:
- * `world: "isolated"` handlers, and the main-world CSP fallback).
+ * compile in the page (hook.ts, MAIN world: `world: "page"` handlers) or the isolated world
+ * (bridge.ts: default-world handlers, and the page-world CSP fallback).
  * Network and onOverlay registrations are inert here (they run in the
  * background / the overlay); onPage registrations for this shim's `world`
  * are collected with their routes (the other world's are skipped), and params resolve
@@ -33,7 +33,7 @@ export interface PageShimOptions {
     params: Record<string, any>;
     log: (...args: any[]) => void;
     storage: { get(key: string): any; set(key: string, value: any): any };
-    /** which onPage handlers this shim collects (default "main") */
+    /** which onPage handlers this shim collects (default "page") */
     world?: PageWorld;
     /** answers the overlay's calls into this script's onPage handles */
     exposer?: Exposer;
@@ -41,9 +41,9 @@ export interface PageShimOptions {
     otherWorld?: string;
     /** the isolated world in the top frame: `"overlay:N"` → a live handle */
     overlay?: (h: string) => any;
-    /** main world: a call into the overlay (rejected; its error has the caller's stack) */
+    /** page world: a call into the overlay (rejected; its error has the caller's stack) */
     onMainWorldCall?: (e: Error) => void;
-    /** the isolated world: the script's store replicas (`wt.pageStore`: this page's copy); main world: never (the page could read and forge them) */
+    /** the isolated world: the script's store replicas (`wt.pageStore`: this page's copy); page world: never (the page could read and forge them) */
     stores?: PageStores;
 }
 
@@ -52,7 +52,7 @@ export interface PageStores {
     pageStore(name: string, initial: object): object;
 }
 
-export const NO_STORE = 'wt.globalStore and wt.pageStore aren\'t available in main-world page code (the page could read and forge them) — use them in onPage({ world: "isolated" }) code or the overlay';
+export const NO_STORE = 'wt.globalStore and wt.pageStore aren\'t available in page-world code (the page could read and forge them) — use them in isolated onPage code (the default: drop world: "page"; read the page with ctx.evaluate) or the overlay';
 const fail = (): never => {
     throw new Error(NO_STORE);
 };
@@ -61,7 +61,7 @@ const NO_FETCH = "wt.fetch isn't available in page code — use the page's own f
 
 export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDocumentHandler[] } {
     const dom: PageDocumentHandler[] = [];
-    const world = o.world || "main";
+    const world = o.world || "page";
     const inert = () => {};
     // registrations always count, so indexes match the background's
     let pageIndex = 0;
@@ -78,7 +78,7 @@ export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDocumentHa
     let overlayIndex = 0;
     const onOverlay = (_route: unknown, fn: unknown) => {
         const h = `overlay:${typeof fn === "function" ? overlayIndex++ : -1}`;
-        if (world === "main") return inertRemote(REMOTE_MAIN_WORLD, o.onMainWorldCall);
+        if (world === "page") return inertRemote(REMOTE_MAIN_WORLD, o.onMainWorldCall);
         return o.overlay ? o.overlay(h) : inertRemote(TOP_FRAME_ONLY);
     };
     // the isolated world only: page code must never get a store

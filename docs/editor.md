@@ -169,9 +169,9 @@ at the right of the toolbar do the same.
   A runtime error from script code that runs on a page says where it ran first:
   `overlay › host` (its [overlay](scripting.md#overlays--wtonoverlay)),
   `isolated › host` or `page › host` (its `onPage` code in the isolated or
-  the main world). A main-world `overlay.fn()` call is such an error, with
-  a quick fix (Ctrl+. / ⌘.) that moves the handler to `world: "isolated"`.
-  On Chrome, `world: "isolated"` code while
+  the page world). A page-world `overlay.fn()` call is such an error, with
+  a quick fix (Ctrl+. / ⌘.) that drops `world: "page"`.
+  On Chrome, isolated `onPage` code (the default world) while
   [user scripts are off](scripting.md#user-scripts-on-chrome) is an error
   whose `chrome://extensions` link opens Wiretrick's details page; the
   Editor also shows a one-time banner with a **Grant permission** (or
@@ -179,7 +179,7 @@ at the right of the toolbar do the same.
 - **Log view** — engine and script log lines with a [filter bar](#log-filter)
   like the Network view's and a minimum-level menu. Lines from script code
   that runs on a page are tagged with where it ran (`overlay ›`,
-  `isolated ›` or `page ›` — the main world, which includes `page`-strategy
+  `isolated ›` or `page ›` — the page's own world, which includes `page`-strategy
   handlers — and the page's host). Each view's filter sits
   in the same place, the panel header next to the tabs, with its clear icon
   after it.

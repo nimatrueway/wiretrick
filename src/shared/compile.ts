@@ -862,7 +862,7 @@ function codeOnly(code: string): string {
     return out.join("");
 }
 
-/** what a main-world onPage handler touches that only isolated-world code may */
+/** what a page-world onPage handler touches that only isolated-world code may */
 export interface MainWorldUse {
     /** 0-based: which `wt.onPage(` call of the source it is (counts onDocument too) */
     nth: number;
@@ -909,7 +909,7 @@ export function onPageUses(code: string): MainWorldUse[] {
 }
 
 /**
- * Warnings ("onPage #N: …", Problems view) for main-world onPage handlers
+ * Warnings ("onPage #N: …", Problems view) for page-world onPage handlers
  * that use a store or an overlay handle: there they throw (stores) or do
  * nothing (overlay calls) — only isolated-world code may.
  */
@@ -917,20 +917,20 @@ export function mainWorldProblems(code: string, routes: RouteMeta[]): string[] {
     if (!/\bwt\s*\.\s*(?:pageStore|globalStore|onOverlay)\b/.test(code)) return [];
     const uses = onPageUses(code);
     if (!uses.length) return [];
-    const fix = 'use onPage({ url, world: "isolated" }, …)';
+    const fix = (r: RouteMeta) => `${r.api === "onPage" ? "" : "use wt.onPage and "}drop world: "page" (onPage runs in the isolated world by default; read the page with ctx.evaluate)`;
     const names = (n: string[]) => n.map((x) => `\`${x}\``).join(", ");
     const out: string[] = [];
     for (const r of routes) {
-        if (r.kind !== "onDocument" || pageWorld(r) !== "main") continue;
+        if (r.kind !== "onDocument" || pageWorld(r) !== "page") continue;
         const u = uses.find((u) => u.nth === r.index);
         if (!u) continue;
         const at = `${routeLabel(r)}: `;
         if (u.pageStore.length)
             out.push(
-                `${at}your script also accesses pageStore (${names(u.pageStore)}) inside onPage, ${MAIN_WORLD_DISALLOWED} (the page could read and forge it). Changing the request strategy alone won't resolve those accesses. Switching to globalStore would lose per-page isolation and still wouldn't make a one-time rules callback track requests — ${fix}`
+                `${at}your script also accesses pageStore (${names(u.pageStore)}) inside onPage, ${MAIN_WORLD_DISALLOWED} (the page could read and forge it). Changing the request strategy alone won't resolve those accesses. Switching to globalStore would lose per-page isolation and still wouldn't make a one-time rules callback track requests — ${fix(r)}`
             );
-        if (u.globalStore.length) out.push(`${at}your script also accesses globalStore (${names(u.globalStore)}) inside onPage, ${MAIN_WORLD_DISALLOWED} (the page could read and forge it) — ${fix}`);
-        if (u.overlay.length) out.push(`${at}accessing onOverlay (${names(u.overlay)}) inside onPage, ${MAIN_WORLD_DISALLOWED} (the page could call the overlay too) — ${fix}`);
+        if (u.globalStore.length) out.push(`${at}your script also accesses globalStore (${names(u.globalStore)}) inside onPage, ${MAIN_WORLD_DISALLOWED} (the page could read and forge it) — ${fix(r)}`);
+        if (u.overlay.length) out.push(`${at}accessing onOverlay (${names(u.overlay)}) inside onPage, ${MAIN_WORLD_DISALLOWED} (the page could call the overlay too) — ${fix(r)}`);
     }
     return out;
 }

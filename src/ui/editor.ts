@@ -691,7 +691,7 @@ function registerPinImportFix(): void {
     });
 }
 
-/** a main-world `overlay.fn()` call (a runtime Problem) or a main-world onPage handler using a store / overlay handle (a route warning): quick fix `world: "isolated"` on the onPage route around it */
+/** a page-world `overlay.fn()` call (a runtime Problem) or a page-world onPage handler using a store / overlay handle (a route warning): quick fix: the onPage route around it runs isolated */
 function registerIsolatedWorldFix(): void {
     const monaco = (window as any).monaco;
     monaco.languages.registerCodeActionProvider("typescript", {
@@ -706,7 +706,7 @@ function registerIsolatedWorldFix(): void {
                 const a = model.getPositionAt(fix.start);
                 const b = model.getPositionAt(fix.end);
                 actions.push({
-                    title: 'Run this onPage handler in the isolated world (world: "isolated")',
+                    title: "Run this onPage handler in the isolated world",
                     kind: "quickfix",
                     isPreferred: true,
                     diagnostics: [mk],

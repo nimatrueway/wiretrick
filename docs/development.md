@@ -211,8 +211,9 @@ pages, and drops blocking `webRequest`):
   keep-alive ping (any extension API call resets the SW's ~30s idle
   timer) holds the worker open while a folder is connected, with a 30s
   `chrome.alarms` poll as the fallback if the worker is reaped anyway.
-- onPage runs in the page (MAIN world when the page CSP allows, isolated
-  fallback otherwise). **`document_start` timing caveat:** in MV2 the
+- onPage runs in the isolated world by default (MV3: a `chrome.userScripts`
+  world); `world: "page"` runs it in the MAIN world when the page CSP allows,
+  isolated fallback otherwise. **`document_start` timing caveat:** in MV2 the
   always-alive background answers the bundle in ~1ms, so onPage handlers
   reliably beat the page's own scripts. In MV3 the service worker must
   wake first — analyses are cached in `chrome.storage.session` (and

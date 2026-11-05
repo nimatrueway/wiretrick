@@ -35,6 +35,7 @@ import { clipPathFor, normalizeRects } from "../shared/overlayRects";
 import { fromWireRequest, toWireResponse } from "../shared/wtFetch";
 import { ShortcutRegistry, watchShortcuts } from "../shared/shortcut";
 import type { RanApi } from "../shared/netTypes";
+import { makePageEvaluate } from "../shared/pageEval";
 
 (() => {
     const MAIN_SOURCE = "res-override-bridge";
@@ -311,7 +312,10 @@ import type { RanApi } from "../shared/netTypes";
     /** scripts whose main-world fallback code already reported calling the overlay */
     const mainWorldCallers = new Set<string | null>();
 
-    function runPageScripts(handlers: DocumentHandler[], libSources: ShippedLib[], world: "main" | "isolated", hot: boolean): void {
+    /** ctx.evaluate: asks the hook in the page's world (the CSP fallback's page code too: the page's CSP rejects it there) */
+    const evaluate = makePageEvaluate();
+
+    function runPageScripts(handlers: DocumentHandler[], libSources: ShippedLib[], world: "page" | "isolated", hot: boolean): void {
         if (dead) return;
         const what = world === "isolated" ? "onPage (isolated world)" : "onPage (isolated-world fallback)";
         dlog("debug", `${what}: running ${handlers.length} script(s)${hot ? " (hot refire)" : ""}`);
@@ -333,7 +337,7 @@ import type { RanApi } from "../shared/netTypes";
                 overlay: world === "isolated" && scriptId && window === top ? (h) => overlayClient(scriptId).remote(h) : undefined,
                 // the main-world fallback reports a call into the overlay like the hook does (once per script)
                 onMainWorldCall: (e) => {
-                    if (world !== "main" || mainWorldCallers.has(scriptId)) return;
+                    if (world !== "page" || mainWorldCallers.has(scriptId)) return;
                     mainWorldCallers.add(scriptId);
                     scriptLog(scriptId, "error", formatScriptError(name, e, "onPage"), ctx);
                 },
@@ -371,7 +375,7 @@ import type { RanApi } from "../shared/netTypes";
             for (const d of matching) {
                 const run = () => {
                     try {
-                        firePageHandler(d, { url: location.href, method: "GET", tabUrl: location.href, resourceType: "main_frame", requestHeaders: {}, groups: {} }, exposer);
+                        firePageHandler(d, { url: location.href, method: "GET", tabUrl: location.href, resourceType: "main_frame", requestHeaders: {}, groups: {}, evaluate }, exposer);
                         scriptRan(h.scriptId, h.name, d.route.api === "onPage" ? "onPage" : "onDocument");
                     } catch (e: any) {
                         scriptLog(h.scriptId, "error", formatScriptError(h.name, e, d.route.api || "onDocument"), ctx);
@@ -391,7 +395,7 @@ import type { RanApi } from "../shared/netTypes";
             // dead bridge: safeSend never answers — resolve empty after a beat
             setTimeout(() => resolve({ domHandlers: [] }), 1000);
         });
-        runPageScripts(bundle.domHandlers || [], bundle.libs || [], "main", hot);
+        runPageScripts(bundle.domHandlers || [], bundle.libs || [], "page", hot);
     }
 
     let hookBroken = false;

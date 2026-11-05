@@ -24,9 +24,10 @@ export const NET_KINDS: NetKind[] = ["onRequest", "onResponseHeaders", "replaceR
 /** a network handler's kind (one that a strategy runs), not a page/overlay one */
 export const isNetKind = (kind: RouteKind): kind is NetKind => kind !== "onDocument" && kind !== "onOverlay";
 
-/** where an onPage handler runs: the site's own JS world, or a private world sharing its DOM */
-export type PageWorld = "main" | "isolated";
-const PAGE_WORLDS: PageWorld[] = ["main", "isolated"];
+/** where an onPage handler runs: a private world sharing the page's DOM, or the site's own JS world */
+export type PageWorld = "isolated" | "page";
+/** "main": the old name of "page" */
+const PAGE_WORLDS = ["isolated", "page", "main"];
 
 export type DocumentWhen = "document_start" | "document_end" | "document_idle";
 const DOCUMENT_WHENS: DocumentWhen[] = ["document_start", "document_end", "document_idle"];
@@ -54,7 +55,7 @@ export interface RouteMeta {
     strategy?: Strategy;
     /** onDocument / onOverlay only */
     when?: DocumentWhen;
-    /** onDocument only: set when "isolated" (absent = the page's main world) */
+    /** onDocument only: set when "isolated" (absent = the page's own world). the default) */
     world?: "isolated";
     /** the API name it was registered with, when it differs from `kind` (wt.onPage → kind "onDocument") */
     api?: "onPage";
@@ -125,9 +126,9 @@ export function normalizeRoute(kind: RouteKind, raw: unknown, index: number, api
         } else route.when = "document_end";
         if (obj.world !== undefined) {
             if (kind === "onOverlay") throw new Error(`${where}: "world" applies to wt.onPage only (an overlay is always its own frame)`);
-            if (!PAGE_WORLDS.includes(obj.world)) throw new Error(`${where}: world must be "main" or "isolated", got ${JSON.stringify(obj.world)}`);
+            if (!PAGE_WORLDS.includes(obj.world)) throw new Error(`${where}: world must be "isolated" or "page", got ${JSON.stringify(obj.world)}`);
             if (obj.world === "isolated") route.world = "isolated";
-        }
+        } else if (kind === "onDocument") route.world = "isolated";
         return route;
     }
     if (obj.when !== undefined) throw new Error(`${where}: "when" applies to onPage/onOverlay only`);
@@ -209,7 +210,7 @@ export function routeLabel(route: RouteMeta): string {
 }
 
 /** the world an onPage/onDocument route runs in */
-export const pageWorld = (route: Pick<RouteMeta, "world">): PageWorld => route.world || "main";
+export const pageWorld = (route: Pick<RouteMeta, "world">): PageWorld => route.world || "page";
 
 /** can this route ever fire on the hook (page fetch/XHR only)? */
 export function hookCanSee(route: RouteMeta): boolean {

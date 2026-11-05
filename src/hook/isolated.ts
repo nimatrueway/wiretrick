@@ -24,12 +24,15 @@ import { portEndpoint, type Endpoint, type IsoInit } from "../shared/wire";
 import { Exposer, RpcClient, isRpcCall, type RpcResult } from "../shared/rpc";
 import { routeMatches, type RouteMeta } from "../shared/route";
 import { ReplicaHub } from "../shared/storeReplica";
+import { makePageEvaluate } from "../shared/pageEval";
 
 (() => {
     const me = ((globalThis as any).__wtIsoQ as { s: string; routes: RouteMeta[] }[] | undefined)?.shift();
     if (!me || !me.routes.some((r) => routeMatches(r, location.href))) return;
     const s = me.s;
     const top = window === window.top;
+    /** ctx.evaluate: the hook runs it in the page's world */
+    const evaluate = makePageEvaluate();
 
     let current: Endpoint | null = null;
     let link: Promise<Endpoint> | null = null;
@@ -186,7 +189,7 @@ import { ReplicaHub } from "../shared/storeReplica";
                 d.when,
                 () => {
                     try {
-                        firePageHandler(d, { url: location.href, method: "GET", tabUrl: location.href, resourceType: "main_frame", requestHeaders: {}, groups: {} }, exposer);
+                        firePageHandler(d, { url: location.href, method: "GET", tabUrl: location.href, resourceType: "main_frame", requestHeaders: {}, groups: {}, evaluate }, exposer);
                         noteRan(d.route.api === "onPage" ? "onPage" : "onDocument", init.name);
                     } catch (e: any) {
                         log("error", formatScriptError(init.name, e, d.route.api || "onDocument"));

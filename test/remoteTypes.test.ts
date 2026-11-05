@@ -79,7 +79,8 @@ wt.onOverlay("*", async () => { const n: number = await page.count("a"); return 
     it("world is accepted by onPage only", () => {
         expect(errorsOf(`wt.onPage({ url: "*", world: "isolated" }, () => {});`)).toEqual([]);
         expect(errorsOf(`wt.onOverlay({ url: "*", world: "isolated" }, () => {});`)).toHaveLength(1);
-        expect(errorsOf(`wt.onPage({ url: "*", world: "page" }, () => {});`)).toHaveLength(1);
+        expect(errorsOf(`wt.onPage({ url: "*", world: "page" }, () => {});`)).toEqual([]);
+        expect(errorsOf(`wt.onPage({ url: "*", world: "top" }, () => {});`)).toHaveLength(1);
     });
 
     it("onDocument handlers returning nothing, a string or an Element still compile", () => {

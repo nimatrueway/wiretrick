@@ -15,6 +15,7 @@ import { makePageShim, domHandlersFor, scheduleDocument, firePageHandler, type P
 import { Exposer, isRpcCall, NOT_RUNNING, type RpcResult } from "../shared/rpc";
 import { bodyKind, setTextTypes } from "../shared/bodyKind";
 import { readFetchBody } from "../shared/requestBody";
+import { directEvaluate, servePageEvaluate } from "../shared/pageEval";
 
 (() => {
     // tells the MV2 bridge its inline copy ran (a page CSP may block it)
@@ -27,6 +28,8 @@ import { readFetchBody } from "../shared/requestBody";
     if (w.chrome?.runtime?.id || w.browser?.runtime?.id) return;
     if (w.__resOverrideHooked) return;
     w.__resOverrideHooked = true;
+    // isolated onPage code's ctx.evaluate runs here
+    servePageEvaluate();
 
     const BRIDGE_SOURCE = "res-override-bridge";
     const HOOK_SOURCE = "res-override-hook";
@@ -236,7 +239,7 @@ import { readFetchBody } from "../shared/requestBody";
         const fire = ({ scriptId, name, when, d, exposer }: (typeof compiledDocument)[number]) => {
             try {
                 scriptLogUp(scriptId, "debug", scriptLogLine(name, "onDocument", `running (${when}) on ${location.href} [${document.readyState}], hook injected via ${injected}`));
-                firePageHandler(d, makeCtx(location.href, "GET"), exposer);
+                firePageHandler(d, makeCtx(location.href, "GET", { evaluate: directEvaluate }), exposer);
                 window.postMessage({ source: HOOK_SOURCE, kind: "scriptRan", scriptId, name, api: d.route.api === "onPage" ? "onPage" : "onDocument" }, window.location.origin);
             } catch (e: any) {
                 scriptLogUp(scriptId, "error", formatScriptError(name, e, "onDocument"));

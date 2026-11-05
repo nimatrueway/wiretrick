@@ -144,7 +144,7 @@ Needs a strategy that reads bodies: "helper" or "debugger" (any resource), "page
     },
     {
         title: "wt.onPage — DOM & title changes",
-        body: `Runs in the page in every frame whose own URL matches the route — by default at document_end, once DOMContentLoaded fires (DOM parsed; hydration not finished). If the bundle arrives after that, it runs immediately. Works even when the HTML is service-worker served or hydration re-renders it. Strategies don't apply.
+        body: `Runs in the page in every frame whose own URL matches the route, in a private world: same DOM, none of the site's JavaScript — by default at document_end, once DOMContentLoaded fires (DOM parsed; hydration not finished). If the bundle arrives after that, it runs immediately. Works even when the HTML is service-worker served or hydration re-renders it. Strategies don't apply.
 
 wt.onPage("*://example.com/*", () => {
     document.title = "🎯 " + document.title;
@@ -165,9 +165,16 @@ Timing: when: "document_end" (default) | "document_start" | "document_idle"
 - document_idle — after the page's load event (always waits for it, unlike Chrome's run_at document_idle; a slow image delays it)
 Already past the moment? Runs immediately.
 
-World: world: "main" (default) | "isolated"
-- main — the site's own JavaScript world: it sees the site's globals (window.myApp), and the site can see and tamper with it. It can answer the overlay's calls but not call it
-- isolated — a private world with the same DOM and none of the site's JavaScript; it may call the script's overlay. Chrome (MV3) needs user scripts turned on — the Editor shows how
+World: world: "isolated" (default) | "page"
+- isolated — a private world with the same DOM and none of the site's JavaScript; the site can't see it, so it may use the script's stores and call its overlay. Chrome (MV3) needs user scripts turned on — the Editor shows how
+- page — the site's own JavaScript world ("main" is its old name): it sees the site's globals (window.myApp), and the site can see and tamper with it — no stores, and it can answer the overlay's calls but not call it
+
+ctx.evaluate(fn, ...args) — from isolated code, run fn in the site's own world and get its (awaited) result: read the site's globals without leaving the isolated world. fn is sent as source — it can't use the script's variables, so pass them as args; arguments and result are plain data. The site can see the call and fake the answer: check what comes back, never pass secrets. Rejects where the page's CSP forbids eval.
+
+wt.onPage("*://example.com/*", async (ctx) => {
+    const user = await ctx.evaluate(() => (window as any).myApp?.user?.name);
+    if (typeof user === "string") wt.log("signed in as", user);
+});
 
 Runs once per document per matching frame. SPA navigations and re-renders don't re-run it (use a MutationObserver inside). Saving the script with the page open re-runs it immediately — keep it idempotent. A script may register several onPage handlers, each with its own route, when and world. The built-in react and valtio aren't available here. Hover "when" or "world" in the Code view for the full reference.`,
     },
@@ -219,9 +226,9 @@ wt.onOverlay("*://example.com/*", async () => {
 
 - A handler that returns a plain object of functions exposes them; any other return value exposes nothing.
 - Arguments and results are JSON (≤ 1 MB). A call made before the other side's handler returned waits for it. Errors: WtTimeoutError (10 s), WtCallError (the function threw or doesn't exist, not JSON, the handler isn't running here), DisconnectedError (the overlay closed, the script reloaded, the page navigated).
-- The overlay may call any onPage code (top frame). Main-world onPage code can only answer — the site could fake its calls — so calling the overlay needs world: "isolated" (Problems offers that quick fix).
+- The overlay may call any onPage code (top frame). Page-world onPage code (world: "page") can only answer — the site could fake its calls — so only isolated onPage code (the default) calls the overlay (Problems offers that quick fix).
 - Register both at the top level of the script (not in a function, if or loop); Problems flags a call elsewhere.
-- Main-world results are page data: the site could have changed them. Check them before they decide what your network handlers do.`,
+- Page-world results are page data: the site could have changed them. Check them before they decide what your network handlers do.`,
     },
     {
         title: "wt.globalStore / wt.pageStore / wt.fetch — shared state and fetching",
@@ -248,7 +255,7 @@ wt.onRequest({ url: "https://api.example.com/*", strategy: "helper" }, (ctx) => 
 - read it before the handler's first await (after it, the handler no longer knows its page and it throws)
 - a navigation's own requests belong to the page being left; requests from no page get a throwaway copy of initial
 - not kept across browser restarts; not in rules handlers
-- both stores: live in isolated-world onPage code (world: "isolated"), like the overlay; main-world onPage code can't use them (the page could read and forge them) — the Problems view warns, with a quick fix
+- both stores: live in onPage code, like the overlay — except world: "page" code (the page could read and forge them; the Problems view warns, with a quick fix)
 - wt.store was renamed wt.globalStore; calling it throws
 
 wt.fetch(url, init) — fetch for scripts. In handlers it runs in the background with the extension's host permissions (no CORS) and the browser's cookies; in an overlay it fetches as the page by default (from: "background" to switch). bypass: true keeps every script's handlers — this one's too — off the request, e.g. to get the real response a mock replaces:

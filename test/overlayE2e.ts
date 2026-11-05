@@ -4,7 +4,7 @@
  * clicks on empty areas reach the page; a strict-CSP page still shows the
  * overlay; the page can't find the frame or read the overlay's code; the
  * overlay's `fetch` carries the page's cookies; in-place navigation reaches
- * `ctx.onNavigate`; a page-posted call never reaches an overlay; main-world
+ * `ctx.onNavigate`; a page-posted call never reaches an overlay; page-world
  * `overlay.fn()` rejects; on save the overlay reloads with its store kept;
  * disabling removes it. With `isolated` (the MV2 builds): an Alt+click in
  * isolated onPage code calls the overlay, which calls back to highlight.
@@ -159,7 +159,7 @@ const rpcCode = (origin: string) => `const overlay = wt.onOverlay("${origin}/ov-
     };
 });
 
-wt.onPage("${origin}/ov-app*", () => {
+wt.onPage({ url: "${origin}/ov-app*", world: "page" }, () => {
     overlay.hit().then(() => (document.body.dataset.mainCall = "resolved"), (e) => (document.body.dataset.mainCall = "rejected: " + e.message));
 });
 
@@ -297,11 +297,11 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
     );
 
     const mainCall = await waitFor<string>(() => page.evaluate(() => document.body.dataset.mainCall || ""), (v) => !!v, 5000);
-    check(t("main-world overlay.fn() rejects"), /^rejected: .*main-world onPage code can't call the overlay/.test(mainCall), mainCall);
+    check(t("page-world overlay.fn() rejects"), /^rejected: .*page-world onPage code can't call the overlay/.test(mainCall), mainCall);
     const mainProblem = await waitFor<any>(async () => ((await send({ type: "listScripts" })) || []).find((s: any) => s.id === "s_ov_rpc")?.runtimeError, (e) => !!e?.ctx, 5000);
     check(
-        t("main-world overlay.fn() is a Problems error tagged page › host"),
-        !!mainProblem?.message.includes("main-world onPage code can't call the overlay") && mainProblem.ctx === `page › ${new URL(origin).host}`,
+        t("page-world overlay.fn() is a Problems error tagged page › host"),
+        !!mainProblem?.message.includes("page-world onPage code can't call the overlay") && mainProblem.ctx === `page › ${new URL(origin).host}`,
         JSON.stringify(mainProblem)
     );
 
@@ -341,7 +341,7 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
         const warnings: string[] = ((await send({ type: "listScripts" })) || []).find((s: any) => s.id === "s_ov_rpc")?.routeWarnings ?? [];
         check(
             t("user scripts off: a Problems error says how to turn them on"),
-            warnings.some((w) => w.includes(`world: "isolated" code doesn't run: user scripts are off`) && /chrome:\/\/extensions\/\?id=[a-p]{32}/.test(w)),
+            warnings.some((w) => w.includes(`isolated onPage code doesn't run: user scripts are off`) && /chrome:\/\/extensions\/\?id=[a-p]{32}/.test(w)),
             JSON.stringify(warnings)
         );
         const banner = await mgr.waitForSelector("#userscripts-banner[data-status=no-permission] #userscripts-grant", { timeout: 8000 }).then(
@@ -561,7 +561,7 @@ wt.onOverlay("${origin}/ov-two*", () => {
     void ask();
 });
 
-const pg = wt.onPage("${origin}/ov-two*", () => ({
+const pg = wt.onPage({ url: "${origin}/ov-two*", world: "page" }, () => ({
     whoami: () => ({ q: location.search }),
 }));
 `;
@@ -635,7 +635,16 @@ wt.onOverlay("${origin}/ov-isost*", () => {
     (window as any).bump = () => ++g.n;
 });
 
-wt.onPage({ url: "${origin}/ov-isost*", world: "isolated" }, () => {
+wt.onPage("${origin}/ov-isost*", async (ctx) => {
+    document.body.dataset.isoGlobal = String(typeof (window as any).__isoSecret);
+    document.body.dataset.evaluated = await ctx.evaluate((k: string) => new Promise((r) => {
+        const t0 = Date.now();
+        const poll = () => ((window as any)[k] || Date.now() - t0 > 2000 ? r((window as any)[k] + "|" + location.pathname) : setTimeout(poll, 20));
+        poll();
+    }), "__isoSecret").then(String, (e) => "rejected: " + e.message);
+})
+
+wt.onPage("${origin}/ov-isost*", () => {
     const out = document.body.appendChild(document.createElement("output"));
     out.id = "isost";
     const show = () => (out.value = JSON.stringify({ g: g.n, ps: ps.hits }));
@@ -649,7 +658,8 @@ wt.onPage({ url: "${origin}/ov-isost*", world: "isolated" }, () => {
     };
 });
 
-wt.onPage("${origin}/ov-isost*", () => {
+wt.onPage({ url: "${origin}/ov-isost*", world: "page" }, () => {
+    (window as any).__isoSecret = "PAGE-GLOBAL-42";
     try {
         document.body.dataset.mainStore = "read " + ps.hits;
     } catch (e) {
@@ -660,7 +670,7 @@ wt.onPage("${origin}/ov-isost*", () => {
 
 /**
  * Stores in isolated-world onPage code: primed, live both ways with the
- * overlay and the background, this page's wt.pageStore copy only; main-world
+ * overlay and the background, this page's wt.pageStore copy only; page-world
  * onPage code can't use them.
  */
 export async function checkIsoStores(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
@@ -683,7 +693,10 @@ export async function checkIsoStores(ctx: any, mgr: any, origin: string, check: 
     check(t("isolated code reads its stores (primed)"), v0?.ps === 0 && typeof v0?.g === "number", JSON.stringify(v0));
     const g0 = v0?.g ?? 0;
     const mainErr = await waitFor<string>(() => a.evaluate(() => document.body.dataset.mainStore || ""), (v) => !!v, 8000);
-    check(t("main-world onPage code can't use them, and is told to use the isolated world"), /main-world page code/.test(mainErr) && mainErr.includes('world: "isolated"'), mainErr);
+    check(t("page-world onPage code can't use them, and is told to drop world: \"page\""), /page-world code/.test(mainErr) && mainErr.includes('drop world: "page"'), mainErr);
+    const evaluated = await waitFor<string>(() => a.evaluate(() => document.body.dataset.evaluated || ""), (v) => !!v, 8000);
+    const isoGlobal = await a.evaluate(() => document.body.dataset.isoGlobal || "");
+    check(t("default-world onPage code is isolated: no page globals, ctx.evaluate reads them (awaited)"), isoGlobal === "undefined" && evaluated === "PAGE-GLOBAL-42|/ov-isost", JSON.stringify({ isoGlobal, evaluated }));
     const first = await hit(a);
     const v1 = await until(a, (v) => v.ps === 1);
     check(t("a background handler's write to the page's copy shows up live"), first === "1" && v1?.ps === 1, JSON.stringify({ first, v1 }));

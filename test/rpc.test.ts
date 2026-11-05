@@ -19,9 +19,9 @@ function link(exposer: Exposer, opts?: { timeoutMs?: number }) {
 }
 
 /** run a script's onPage code like a page runtime does, answering its handles */
-function runPage(src: string, opts: { world?: "main" | "isolated"; url?: string; overlay?: (h: string) => any } = {}) {
+function runPage(src: string, opts: { world?: "page" | "isolated"; url?: string; overlay?: (h: string) => any } = {}) {
     const exposer = new Exposer();
-    const shim = makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined }, world: opts.world, exposer, overlay: opts.overlay });
+    const shim = makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined }, world: opts.world ?? "isolated", exposer, overlay: opts.overlay });
     const moduleObj = { exports: {} as any };
     new Function("wt", "module", "exports", src)(shim.wt, moduleObj, moduleObj.exports);
     const dom = domHandlersFor(shim.dom, opts.url ?? "https://x.com/a", exposer);
@@ -95,7 +95,7 @@ describe("rpc: calls between the overlay and onPage code", () => {
     });
 
     it("answers `not running` for the other world's handles", async () => {
-        const p = runPage(`wt.onPage({ url: "*", world: "isolated" }, () => ({ f: () => 1 }));`, { world: "main" });
+        const p = runPage(`wt.onPage({ url: "*", world: "isolated" }, () => ({ f: () => 1 }));`, { world: "page" });
         p.fire();
         expect(p.exposer.isElsewhere("page:0")).toBe(true);
         const { client } = link(p.exposer);
@@ -219,7 +219,7 @@ describe("rpc: calls between the overlay and onPage code", () => {
 
 describe("rpc: which world may call the overlay", () => {
     it("a main-world `overlay.fn()` rejects with the main-world error", async () => {
-        const p = runPage(`module.exports.overlay = wt.onOverlay("*", () => ({ picked() {} }));`, { world: "main" });
+        const p = runPage(`module.exports.overlay = wt.onOverlay("*", () => ({ picked() {} }));`, { world: "page" });
         const e = await p.exports.overlay.picked("a").catch((x: any) => x);
         expect(e).toBeInstanceOf(WtCallError);
         expect(e.message).toBe(REMOTE_MAIN_WORLD);

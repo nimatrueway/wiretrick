@@ -1,5 +1,5 @@
 /**
- * Chrome MV3 runs `world: "isolated"` onPage code through the
+ * Chrome MV3 runs isolated onPage code (the default world) through the
  * `chrome.userScripts` API, which needs the optional `userScripts`
  * permission and the user's "Allow User Scripts" switch (Developer mode
  * before Chrome 138). These are the words every place that explains it uses.
@@ -12,7 +12,7 @@ export type UserScriptsStatus = "ok" | "no-permission" | "off";
 export const USER_SCRIPTS_OFF = "not running on this page (user scripts are off)";
 
 /** the core of the Problems error (the UI shows route problems containing it as errors, not warnings) */
-export const USER_SCRIPTS_PROBLEM = 'world: "isolated" code doesn\'t run: user scripts are off';
+export const USER_SCRIPTS_PROBLEM = 'isolated onPage code doesn\'t run: user scripts are off';
 
 /** how to turn them on (Chrome's own wording for the switch) */
 export function userScriptsHowTo(status: Exclude<UserScriptsStatus, "ok">, extensionId: string): string {

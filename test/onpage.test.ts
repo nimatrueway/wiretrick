@@ -4,7 +4,7 @@ import { makePageShim, domHandlersFor } from "../src/shared/pageShim";
 import { isNetKind, normalizeRoute, pageWorld, routeLabel } from "../src/shared/route";
 import { inertRemote } from "../src/shared/remote";
 
-const shim = (world?: "main" | "isolated") => makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined }, world });
+const shim = (world?: "page" | "isolated") => makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined }, world });
 
 describe("wt.onPage", () => {
     it("is onDocument under a new name, sharing its index sequence", () => {
@@ -19,17 +19,19 @@ describe("wt.onPage", () => {
         expect(routeLabel(b)).toContain("onDocument");
     });
 
-    it("keeps world only when isolated", () => {
-        const c = compileScript(`wt.onPage({ url: "*", world: "isolated" }, () => {});\nwt.onPage({ url: "*", world: "main" }, () => {});`);
-        const [iso, main] = c.handlers.onDocument.map((h) => h.route);
+    it("runs isolated by default; world \"page\" (or its old name \"main\") runs in the page", () => {
+        const c = compileScript(
+            `wt.onPage({ url: "*", world: "isolated" }, () => {});\nwt.onPage({ url: "*", world: "page" }, () => {});\nwt.onPage({ url: "*", world: "main" }, () => {});\nwt.onPage("*", () => {});\nwt.onDocument("*", () => {});`
+        );
+        expect(c.error).toBeNull();
+        const [iso, page, main, plain, legacy] = c.handlers.onDocument.map((h) => h.route);
         expect(iso.world).toBe("isolated");
-        expect("world" in main).toBe(false);
-        expect(pageWorld(iso)).toBe("isolated");
-        expect(pageWorld(main)).toBe("main");
+        expect("world" in page).toBe(false);
+        expect([iso, page, main, plain, legacy].map(pageWorld)).toEqual(["isolated", "page", "page", "isolated", "isolated"]);
     });
 
     it("rejects a bad world, and world on onOverlay/network routes", () => {
-        expect(() => normalizeRoute("onDocument", { url: "*", world: "page" }, 0, "onPage")).toThrow(/wt\.onPage/);
+        expect(() => normalizeRoute("onDocument", { url: "*", world: "MAIN" }, 0, "onPage")).toThrow(/wt\.onPage: world must be "isolated" or "page"/);
         expect(() => normalizeRoute("onOverlay", { url: "*", world: "isolated" }, 0)).toThrow(/world/);
         expect(() => normalizeRoute("onRequest", { url: "*", world: "isolated" }, 0)).toThrow(/world/);
     });
@@ -58,15 +60,15 @@ describe("wt.onOverlay", () => {
 
 describe("page shim worlds", () => {
     const src = (wt: any) => {
-        wt.onPage("*://a.com/*", () => "main");
-        wt.onPage({ url: "*://a.com/*", world: "isolated" }, () => "iso");
-        wt.onDocument("*://a.com/*", () => "legacy");
+        wt.onPage({ url: "*://a.com/*", world: "page" }, () => "page");
+        wt.onPage("*://a.com/*", () => "iso");
+        wt.onDocument({ url: "*://a.com/*", world: "main" }, () => "legacy");
     };
 
-    it("main collects only main-world handlers, with background-matching indexes", () => {
+    it("page collects only page-world handlers, with background-matching indexes", () => {
         const s = shim();
         src(s.wt);
-        expect(s.dom.map((d) => d.fn({}))).toEqual(["main", "legacy"]);
+        expect(s.dom.map((d) => d.fn({}))).toEqual(["page", "legacy"]);
         expect(s.dom.map((d) => d.route.index)).toEqual([0, 2]);
     });
 
@@ -77,7 +79,7 @@ describe("page shim worlds", () => {
         expect(domHandlersFor(s.dom, "https://b.com/").length).toBe(0);
     });
 
-    it("onOverlay handles reject; main world says why", async () => {
+    it("onOverlay handles reject; the page world says why", async () => {
         await expect(shim().wt.onOverlay("*", () => {}).ping()).rejects.toThrow(/isolated/);
         await expect(shim("isolated").wt.onOverlay("*", () => {}).ping()).rejects.toThrow(/overlay/);
     });
@@ -89,7 +91,7 @@ describe("page shim worlds", () => {
         await expect(shim().wt.fetch("/")).rejects.toThrow(/wt\.fetch/);
     });
 
-    it("isolated code gets the stores it's given; main-world code never does", () => {
+    it("isolated code gets the stores it's given; page-world code never does", () => {
         const made: string[] = [];
         const stores = {
             store: (name: string, initial: object, persist: boolean | string[]) => (made.push(`g:${name}:${JSON.stringify(persist)}`), { ...initial }),
@@ -101,8 +103,8 @@ describe("page shim worlds", () => {
         expect(made).toEqual(['g:a:["n"]', "p:b"]);
         expect(() => iso.wt.pageStore("a", {})).toThrow(/already has a store named "a"/);
         expect(() => iso.wt.globalStore("c", [])).toThrow(/initial must be an object/);
-        const main = makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined }, world: "main", stores });
-        expect(() => main.wt.pageStore("b", { m: 2 }).m).toThrow(/main-world page code.*world: "isolated"/);
+        const main = makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined }, world: "page", stores });
+        expect(() => main.wt.pageStore("b", { m: 2 }).m).toThrow(/page-world code.*drop world: "page"/);
         expect(made.length).toBe(2);
     });
 });

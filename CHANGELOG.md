@@ -11,9 +11,13 @@ its section below.
 
 - `.tsx` scripts: a script whose name ends in `.tsx` (`ui/Panel.tsx`) is a `.tsx` file everywhere — explorer (⚛ icon), tabs, the synced folder and imports (`./Panel` finds it). Create or rename a script with the `.tsx` extension; renaming keeps the extension unselected. JSX in a `.ts` script is now an error with a **Rename to Name.tsx** quick fix.
 
+- `ctx.evaluate(fn, ...args)` in `onPage` code: runs `fn` in the page's own JavaScript world and resolves with its (awaited) result, so isolated code can read the site's globals. `fn` can't use the script's variables (pass them as arguments); arguments and result are plain data, and the result is page data the site could fake.
+
 - `.svg` data files: `import logo from "./icons/logo.svg"` gives the SVG's markup as a string (typed `string`, in the Editor and the synced folder). Create one by typing `.svg` in New JSON File…, or put `.svg` files in the synced folder; they open as XML.
 
 ### Changed
+
+- **`onPage` code runs in the isolated world by default** (same DOM, none of the site's JavaScript), so it can use `wt.globalStore`/`wt.pageStore` and call the overlay. Code that needs the site's globals or the `page` strategy to see its `fetch` uses `world: "page"` — the new name of `world: "main"`, which still works — or `ctx.evaluate`. On Chrome (MV3) default-world code needs user scripts turned on (the Editor's banner says how); `world: "page"` code doesn't. `wt.onDocument` follows the same default.
 
 - Scripts saved with JSX are renamed once to `Name.tsx` (their `settings.yaml` section follows, also in the synced folder), since TypeScript parses JSX only in `.tsx` files.
 

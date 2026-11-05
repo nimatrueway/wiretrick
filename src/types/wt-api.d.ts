@@ -233,17 +233,20 @@ declare namespace Wiretrick {
     interface PageRouteOptions extends DocumentRouteOptions {
         /**
          * Which JavaScript world the handler runs in. Both see the same DOM.
-         * - `"main"` (default): the site's own world. It can read the site's
-         *   globals (`window.myApp`), and the site can see and tamper with
-         *   it. It can answer the overlay's calls but can't call the overlay.
-         * - `"isolated"`: a private world with none of the site's JavaScript.
-         *   The site can't see or impersonate it, so it may call this
-         *   script's overlay (top frame). On Chrome (MV3) it runs through
-         *   user scripts, which must be turned on (the Editor shows how).
+         * - `"isolated"` (default): a private world with none of the site's
+         *   JavaScript. The site can't see or impersonate it, so it may use
+         *   this script's stores and call its overlay (top frame). Read the
+         *   site's globals with {@link PageCtx.evaluate}. On Chrome (MV3) it
+         *   runs through user scripts, which must be turned on (the Editor
+         *   shows how).
+         * - `"page"`: the site's own world (`"main"` is its old name). It
+         *   reads the site's globals (`window.myApp`) directly, and the site
+         *   can see and tamper with it, so it gets no stores and can't call
+         *   the overlay. It can answer the overlay's calls.
          *
-         * @example wt.onPage({ url: "*://example.com/*", world: "isolated" }, (ctx) => { … })
+         * @example wt.onPage({ url: "*://example.com/*", world: "page" }, () => { … })
          */
-        world?: "main" | "isolated";
+        world?: "isolated" | "page" | "main";
     }
 
     /** Where an `onPage` handler runs: URL pattern(s) or the full {@link PageRouteOptions} form. */
@@ -268,7 +271,28 @@ declare namespace Wiretrick {
         : {};
 
     /** The context an `onPage` handler gets (`url` is the frame's URL). */
-    interface PageCtx extends RequestCtx {}
+    interface PageCtx extends RequestCtx {
+        /**
+         * Run `fn` in the page's own JavaScript world and get what it
+         * returns: how isolated code reads the site's globals
+         * (`window.myApp`). `fn` runs there as page code, so it can't see
+         * this script's variables (pass what it needs as `args`). Arguments
+         * and the result are copied (plain data; a promise is awaited).
+         *
+         * The page can see the call and fake its answer: treat the result
+         * as untrusted input, and never pass secrets. Rejects when the
+         * page's CSP forbids `eval` or the page world doesn't answer. In
+         * `world: "page"` code it just calls `fn`.
+         *
+         * @example
+         * const user = await ctx.evaluate(() => (window as any).myApp?.user?.name);
+         * if (typeof user === "string") state.user = user;
+         *
+         * @example
+         * const n = await ctx.evaluate((sel: string) => document.querySelectorAll(sel).length, "a");
+         */
+        evaluate<A extends unknown[], R>(fn: (...args: A) => R, ...args: A): Promise<Awaited<R>>;
+    }
 
     /** The context an `onOverlay` handler gets (`url` is the page's URL). */
     interface OverlayCtx extends RequestCtx {
@@ -497,10 +521,9 @@ declare namespace Wiretrick {
          *   script-list order, then registration order.
          * - Async handlers are not awaited; `when` controls only when they
          *   *start*.
-         * - The handler runs in the page's MAIN world (sees page globals). If
-         *   the page's CSP forbids `eval`, it falls back to the extension's
-         *   isolated world: same DOM and timing, but page-defined globals
-         *   (e.g. `window.myApp`) are not visible.
+         * - With `world: "page"`, if the page's CSP forbids `eval`, the
+         *   handler falls back to the isolated world: same DOM and timing,
+         *   but page-defined globals (e.g. `window.myApp`) are not visible.
          *
          * @example
          * // default: document_end (DOMContentLoaded)
@@ -830,8 +853,10 @@ declare const wt: {
      *
      * Runs once per document load in every frame whose URL matches the
      * route — by default at `DOMContentLoaded` (`when: "document_end"`), in
-     * the site's own JavaScript world (`world: "main"`). A script may
-     * register several, each with its own route, `when` and `world`.
+     * a private world that shares the page's DOM but not its JavaScript
+     * (`world: "isolated"`; read the site's globals with `ctx.evaluate`, or
+     * use `world: "page"`). A script may register several, each with its
+     * own route, `when` and `world`.
      *
      * The handler may return an object of functions: the returned handle
      * lets this script's overlay call them (`await page.fn(…)`, top frame
@@ -880,7 +905,7 @@ declare const wt: {
      * follows `when`, as for `onPage`.
      *
      * The handler may return an object of functions for this script's
-     * `world: "isolated"` onPage code to call.
+     * `onPage` code to call (not `world: "page"` code).
      *
      * @example
      * wt.onOverlay("*://example.com/*", () => {
@@ -969,9 +994,8 @@ declare const wt: {
      * change it like a plain object; `import { subscribe } from "valtio"`
      * to watch it. `name` is its key (one store per name per script, shared
      * with {@link pageStore}); values must be JSON (at most 1 MB). Call it
-     * at top level. Isolated-world `onPage` code (`world: "isolated"`) gets
-     * a live copy too; main-world `onPage` code can't use it (the page
-     * could read and forge it).
+     * at top level. `onPage` code gets a live copy too, except with
+     * `world: "page"` (the page could read and forge it).
      *
      * @example
      * const state = wt.globalStore("state", { mocking: true, hits: 0 });
@@ -996,10 +1020,10 @@ declare const wt: {
      * page, so it throws — read what you need first, or keep a nested
      * object. Requests that aren't from a page (service workers, other
      * apps through the helper) see a throwaway copy of `initial`.
-     * Isolated-world `onPage` code (`world: "isolated"`) sees its page's
-     * copy; not available in main-world `onPage` code (the page could
-     * read and forge it) or `rules` handlers (their rules serve every
-     * page); kept until the page ends (not across browser restarts).
+     * `onPage` code sees its page's copy; not available with
+     * `world: "page"` (the page could read and forge it) or in `rules`
+     * handlers (their rules serve every page); kept until the page ends
+     * (not across browser restarts).
      *
      * @example
      * const page = wt.pageStore("page", { staging: false });

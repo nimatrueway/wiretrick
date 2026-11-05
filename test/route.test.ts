@@ -103,7 +103,7 @@ describe("strategy", () => {
 });
 
 describe("page shim (onDocument in the page)", () => {
-    const shim = () => makePageShim({ params: { host: "a.com", n: 3 }, log: () => {}, storage: { get: () => undefined, set: () => undefined } });
+    const shim = () => makePageShim({ world: "isolated", params: { host: "a.com", n: 3 }, log: () => {}, storage: { get: () => undefined, set: () => undefined } });
 
     it("collects several onDocument handlers with routes; network handlers are inert", () => {
         const { wt, dom } = shim();

@@ -607,26 +607,26 @@ wt.onOverlay("https://example.com/*", () => {
   JSON rules as `wt.globalStore`.
 - **Names.** One name space with `wt.globalStore`: a script can't have a
   global and a page store with the same name.
-- Available in isolated-world `onPage` code (`world: "isolated"`, the copy
-  of its page) and the overlay; not in main-world `onPage` code (see
-  below), nor in `rules` handlers (their rules are built once for every
+- Available in `onPage` code (the copy of its page) and the overlay; not
+  in page-world `onPage` code (`world: "page"`, see below), nor in `rules` handlers (their rules are built once for every
   page).
 
 ### Stores in `onPage` code
 
-Isolated-world `onPage` code (`wt.onPage({ url, world: "isolated" }, fn)`)
-gets live copies of the script's stores, like the overlay: reads are
+`onPage` code (isolated, the default world) gets live copies of the script's stores, like the overlay: reads are
 synchronous, writes reach the background, the overlay and other tabs
 (`wt.pageStore`: this page's copy only), and their changes come back.
 
-Main-world `onPage` code runs in the page's own JavaScript, so the page
-could read the stores and forge writes to them. There, `wt.globalStore`
-and `wt.pageStore` throw, and calls to an `onOverlay` handle do nothing —
-there's no privileged escape hatch, since anything main-world code can
-call, the page can call too. The Problems view warns about a main-world
-`onPage` handler that uses a store or an `onOverlay` handle ("…which the
-API explicitly disallows in the main world"); its quick fix moves the
-handler to `world: "isolated"`.
+Page-world `onPage` code (`world: "page"`) runs in the page's own
+JavaScript, so the page could read the stores and forge writes to them.
+There, `wt.globalStore` and `wt.pageStore` throw, and calls to an
+`onOverlay` handle do nothing — there's no privileged escape hatch, since
+anything page-world code can call, the page can call too. Keep such code
+isolated and reach into the page with
+[`ctx.evaluate`](#reading-the-page--ctxevaluate) instead. The Problems view
+warns about a page-world `onPage` handler that uses a store or an
+`onOverlay` handle ("…which the API explicitly disallows in the page
+world"); its quick fix drops `world: "page"`.
 
 ```ts
 const page = wt.pageStore("page", { hits: 0 });
@@ -635,7 +635,7 @@ wt.replaceResponse({ url: "https://example.com/api/*", strategy: "page" }, () =>
     page.hits++;
 });
 
-wt.onPage({ url: "https://example.com/*", world: "isolated" }, () => {
+wt.onPage("https://example.com/*", () => {
     const badge = document.body.appendChild(document.createElement("output"));
     setInterval(() => (badge.value = `${page.hits} API calls`), 500);
 });
@@ -688,15 +688,17 @@ subscribe(state, () => wt.log("mocking is now", state.mocking));
 ## DOM changes — `wt.onPage`
 
 `wt.onPage` is not a network strategy — it registers a **DOM-ready callback
-that runs inside the page's MAIN world** (the same world as the page's own
-JS). Its route is frame URL pattern(s), or `{ url, exclude, when, world }`.
+that runs in the page**: by default in an isolated world (same DOM, none of
+the page's own JS), or with `world: "page"` in the page's own JavaScript
+world. Its route is frame URL pattern(s), or `{ url, exclude, when, world }`.
 A script may register several, each with its own route, `when` and `world`. Exact
 timing:
 
 1. **Injection**: our bridge content script (`document_start`, isolated
    world) injects `hook.js` into the page via a script tag before any page
-   script runs. The hook asks the background for the scripts with an
-   `onPage` route matching this frame's URL and compiles them.
+   script runs. The hook (page world) and the isolated runtime ask the
+   background for the scripts with an `onPage` route matching this frame's
+   URL and compile them.
 2. **Registration**: while compiling, the `wt.onPage(route, handler)` calls
    whose route matches the frame are captured (the handler is stored, not
    yet run).
@@ -707,8 +709,8 @@ timing:
    - If the hook's bundle arrives **after** `DOMContentLoaded` already fired
      (late bundle, bfcache restore), handlers run immediately at
      registration time.
-4. **Context**: handlers run as page JS — full DOM access, `document.title`
-   writes, observers, etc. They can be `async` (the engine doesn't await
+4. **Context**: handlers get full DOM access — `document.title` writes,
+   observers, etc. They can be `async` (the engine doesn't await
    them). `ctx` is the same request-context shape (`url`, `method`, …) with
    the frame URL.
 5. **Timing — `when`**: the route object picks the moment. Handlers with
@@ -744,21 +746,50 @@ timing:
    - **Live edits re-run immediately**, regardless of `when`, when you save
      the script with the page open — keep handlers idempotent.
    - **Async handlers** aren't awaited; `when` only sets when they start.
-   - **CSP fallback:** if the page forbids `eval`, handlers run in the
-     extension's isolated world — same DOM and timing, but page globals
-     (`window.myApp`) aren't visible.
-   - **`world: "isolated"`** runs the handler in the extension's isolated
-     world on purpose: same DOM and timing, none of the page's JavaScript,
-     and the page can't see or tamper with it, so it may also call the
-     script's overlay ([the isolated world](#the-isolated-world)). On
-     Chrome (MV3) it needs user scripts turned on
-     ([how](#user-scripts-on-chrome)).
+   - **`world`** — where the handler runs:
+
+     | `world` | Sees | The page | May use |
+     |---|---|---|---|
+     | `"isolated"` *(default)* | the DOM; no page globals (`window.myApp`) — read them with [`ctx.evaluate`](#reading-the-page--ctxevaluate) | can't see or tamper with it | stores, calling the overlay ([the isolated world](#the-isolated-world)) |
+     | `"page"` (old name: `"main"`) | the DOM and the page's globals; its `fetch`/XHR go through the `page` strategy | sees it, can tamper with it | neither (stores throw, overlay calls reject) |
+
+     On Chrome (MV3) isolated code needs user scripts turned on
+     ([how](#user-scripts-on-chrome)); `world: "page"` code doesn't.
 
      ```ts
-     wt.onPage({ url: "*://example.com/*", world: "isolated" }, () => { ... });
+     wt.onPage("*://example.com/*", () => { ... });                          // isolated
+     wt.onPage({ url: "*://example.com/*", world: "page" }, () => { ... });  // the page's own world
      ```
+   - **CSP fallback:** if the page forbids `eval`, `world: "page"` handlers
+     run in the extension's isolated world — same DOM and timing, but page
+     globals aren't visible.
 
-Because it runs as page JS, `wt.onPage` works regardless of how the response
+### Reading the page — `ctx.evaluate`
+
+`ctx.evaluate(fn, ...args)` runs `fn` in the page's own JavaScript world
+from isolated code and resolves with its result (awaited if it returns a
+promise) — so you can read the site's globals without moving the whole
+handler into the page:
+
+```ts
+wt.onPage("*://app.example.com/*", async (ctx) => {
+    const user = await ctx.evaluate((key: string) => (window as any).app?.[key], "user");
+    if (typeof user?.name === "string") panel.textContent = user.name;
+});
+```
+
+- `fn` is sent as source and runs on its own: it can't use the script's
+  variables, imports or `wt` — pass what it needs as `args`. Arguments and
+  the result are plain data (structured-clonable); anything else rejects.
+- It runs as page code: the page sees the call and can fake the answer, so
+  treat the result as [page data](#page-world-results-are-page-data) and
+  never pass secrets (store values, tokens) in.
+- It rejects with what `fn` threw, when the page's CSP forbids `eval`, and
+  when Wiretrick's page hook isn't running in the frame.
+- A `fetch` made in `fn` is the page's own, so the `page` strategy sees
+  it; a `fetch` made in isolated code isn't.
+
+Because it runs in the page, `wt.onPage` works regardless of how the response
 arrived — service-worker-served HTML, cached pages, or hydration overwriting
 a body transform — which is exactly why it's the resilient choice for
 title/DOM changes on SPAs.
@@ -920,22 +951,23 @@ wt.onOverlay("*://app.example.com/*", async () => {
   at the top level of the script (not inside a function, `if` or loop), so
   both sides number their handlers the same way; Problems flags a call
   elsewhere. Handles from an imported library don't connect.
-- **Who can call whom.** The overlay can call any `onPage` code. `onPage`
-  code in the main world (the default) can only answer: it shares its world
-  with the site, which could fake its calls, so `overlay.fn()` there
-  rejects with `main-world onPage code can't call the overlay; use world:
-  "isolated"`, and Problems shows that error with a quick fix (Ctrl+. / ⌘.)
-  that moves the handler to `world: "isolated"`. Network handlers have no
+- **Who can call whom.** The overlay can call any `onPage` code.
+  Page-world `onPage` code (`world: "page"`) can only answer: it shares its
+  world with the site, which could fake its calls, so `overlay.fn()` there
+  rejects with `page-world onPage code can't call the overlay; …`, and
+  Problems shows that error with a quick fix (Ctrl+. / ⌘.) that drops
+  `world: "page"`. Network handlers have no
   tab: their calls reject.
 
 ### The isolated world
 
-`world: "isolated"` runs `onPage` code where the site's JavaScript can't
-see or imitate it: same DOM, none of the site's globals. That code can
-call the overlay:
+`onPage` code runs, by default, where the site's JavaScript can't see or
+imitate it: same DOM, none of the site's globals (read them with
+[`ctx.evaluate`](#reading-the-page--ctxevaluate)). That code can call the
+overlay:
 
 ```ts
-const page = wt.onPage({ url: "*://app.example.com/*", world: "isolated" }, () => {
+const page = wt.onPage("*://app.example.com/*", () => {
     document.addEventListener("click", (e) => {
         if (e.altKey) overlay.picked((e.target as Element).tagName);   // calls the GUI
     }, true);
@@ -959,7 +991,7 @@ const overlay = wt.onOverlay("*://app.example.com/*", () => {
 
 Isolated code gets `wt.storage`, `wt.log`, `wt.params` and `console`
 (lines go to the Log tagged `isolated › host`, as the overlay's are
-`overlay › host` and main-world code's `page › host`); `wt.globalStore`
+`overlay › host` and page-world code's `page › host`); `wt.globalStore`
 and `wt.pageStore` are live copies, as in the overlay (see
 [Stores in `onPage` code](#stores-in-onpage-code)), and `wt.fetch` is the
 overlay's.
@@ -970,7 +1002,7 @@ Firefox and the Chromium MV2 build run isolated code in the extension's
 content-script world. The Chrome (MV3) build runs it through Chrome's
 user scripts API, which is off until you turn it on:
 
-1. **Grant the permission.** When a script has `world: "isolated"` code,
+1. **Grant the permission.** When a script has isolated `onPage` code,
    the Editor shows a banner: click **Grant permission** (the optional
    "user scripts" permission).
 2. **Allow user scripts.** Chrome 138 and later: turn on **Allow User
@@ -989,9 +1021,9 @@ Chrome 133 and later give each script's isolated code a world of its
 own; before that, scripts share one user-script world (each still in its
 own scope, apart from the site's JavaScript).
 
-### Main-world results are page data
+### Page-world results are page data
 
-Main-world `onPage` code runs among the site's own scripts, which can
+Page-world `onPage` code and `ctx.evaluate` run among the site's own scripts, which can
 replace `Object.keys`, patch your functions or answer in their place. Its
 results are fine to show, but treat them like anything else the site
 sends: check them before they decide what your network handlers do (which

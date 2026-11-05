@@ -1,10 +1,9 @@
 /**
- * The quick fix for a main-world `overlay.fn()` call: run the `wt.onPage`
- * handler it's in in the isolated world. Rewrites the route (the first
- * argument) of the nearest `wt.onPage(` / `wt.onDocument(` before the call:
- * a URL string or array becomes `{ url: …, world: "isolated" }`, an object
- * gets `world: "isolated"` (replacing `world: "main"`). The deprecated
- * `wt.onDocument` (no `world` option) becomes `wt.onPage` too.
+ * The quick fix for a page-world `overlay.fn()` call: run the `wt.onPage`
+ * handler it's in in the isolated world (onPage's default). Rewrites the
+ * nearest `wt.onPage(` / `wt.onDocument(` before the call: its route's
+ * `world: "page"` (or the old `"main"`) becomes `world: "isolated"`, and the
+ * deprecated `wt.onDocument` (always the page's world) becomes `wt.onPage`.
  */
 
 /** where the bracket/quote opened at `open` closes (exclusive), or -1 */
@@ -44,13 +43,10 @@ export function isolatedRouteEdit(code: string, offset: number): { start: number
     const end = skip(code, at);
     if (end < 0) return null;
     const route = code.slice(at, end);
-    let edit: { start: number; end: number; text: string } | null;
-    const world = /\bworld\s*:\s*(["'`])main\1/.exec(route);
-    if (route[0] !== "{") edit = { start: at, end, text: `{ url: ${route}, world: "isolated" }` };
-    else if (world) edit = { start: at + world.index, end: at + world.index + world[0].length, text: 'world: "isolated"' };
-    else if (/\bworld\s*:/.test(route)) edit = null;
-    else edit = { start: at + 1, end: at + 1, text: ' world: "isolated",' };
+    const world = route[0] === "{" ? /\bworld\s*:\s*(["'`])(?:main|page)\1/.exec(route) : null;
+    const edit = world ? { start: at + world.index, end: at + world.index + world[0].length, text: 'world: "isolated"' } : null;
+    if (rename < 0) return edit;
     // one contiguous edit: from the API name through the route
-    if (edit && rename >= 0) edit = { start: rename, end: edit.end, text: "onPage" + code.slice(rename + "onDocument".length, edit.start) + edit.text };
-    return edit;
+    const name = { start: rename, end: rename + "onDocument".length, text: "onPage" };
+    return edit ? { start: rename, end: edit.end, text: "onPage" + code.slice(name.end, edit.start) + edit.text } : name;
 }

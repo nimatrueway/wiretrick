@@ -122,8 +122,8 @@ wt.replaceResponse({ url: "*://dummyjson.com/users/:id", strategy: "page" }, (ct
     role: "admin",
 }));
 
-// the demo: a fetch made from dummyjson.com's own page
-wt.onPage("https://dummyjson.com/", async () => {
+// the demo: a fetch made from dummyjson.com's own page (world: "page", so the "page" strategy sees it)
+wt.onPage({ url: "https://dummyjson.com/", world: "page" }, async () => {
     const out = document.createElement("pre");
     out.style.cssText = "margin: 0; padding: 8px; font: 14px monospace; color: #fff; background: #2a7";
     document.body.prepend(out);
@@ -145,8 +145,8 @@ wt.onResponseBody({ url: "*://dummyjson.com/todos/*", strategy: "page" }, (ctx, 
     return JSON.stringify(json, null, 2);
 });
 
-// the demo: a fetch made from dummyjson.com's own page
-wt.onPage("https://dummyjson.com/", async () => {
+// the demo: a fetch made from dummyjson.com's own page (world: "page", so the "page" strategy sees it)
+wt.onPage({ url: "https://dummyjson.com/", world: "page" }, async () => {
     const out = document.createElement("pre");
     out.style.cssText = "margin: 0; padding: 8px; font: 14px monospace; color: #fff; background: #27a";
     document.body.prepend(out);
@@ -209,8 +209,8 @@ wt.replaceResponse({ url: "*://dummyjson.com/users/:id", strategy: "page" }, (ct
     mock.enabled ? { id: Number(ctx.groups.id), firstName: "Mocked", lastName: "User" } : undefined
 );
 
-// functions the panel calls in the page ("page" sees only the page's own fetches)
-const page = wt.onPage("https://dummyjson.com/*", () => ({
+// functions the panel calls in the page's own world (the "page" strategy sees only the page's own fetches)
+const page = wt.onPage({ url: "https://dummyjson.com/*", world: "page" }, () => ({
     user: () => fetch("/users/1").then((r) => r.json()),
 }));
 
