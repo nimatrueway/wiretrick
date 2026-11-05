@@ -193,6 +193,32 @@ function handlerRange(msg: string, s: ProblemScript): Range | { line: number } |
     return line ? lineRange(lines, line) : undefined;
 }
 
+/**
+ * A "ctx.evaluate's function uses `x`" warning → that use of `x`: the first
+ * one after an `.evaluate(` in the handler (one not already `taken` by an
+ * earlier warning, for a handler with several evaluate calls).
+ */
+function evaluateUseRange(msg: string, s: ProblemScript, taken: Set<number>): Range | undefined {
+    const name = /ctx\.evaluate's function uses `([\w$]+)`/.exec(msg)?.[1];
+    const h = name && s.code ? handlerRange(msg, s) : undefined;
+    if (!h) return undefined;
+    const code = s.code!;
+    const lines = code.split("\n");
+    const from = lineStart(lines, h.line);
+    const next = code.slice(from + 1).search(/\bwt\s*\.\s*on[A-Z]\w*\s*\(/);
+    const region = code.slice(0, next < 0 ? code.length : from + 1 + next);
+    const use = new RegExp(`(?<![\\w$.])${name!.replace(/\$/g, "\\$")}(?![\\w$])`, "g");
+    for (const e of region.slice(from).matchAll(/\.\s*evaluate\s*\(/g)) {
+        use.lastIndex = from + e.index! + e[0].length;
+        const m = use.exec(region);
+        if (m && !taken.has(m.index)) {
+            taken.add(m.index);
+            return rangeAt(lines, m.index, name!.length);
+        }
+    }
+    return undefined;
+}
+
 /** a stack position → the token there (or the rest of the line) */
 function tokenRange(lines: string[], p: Position): Range {
     if (!p.column) return lineRange(lines, p.line);
@@ -247,7 +273,9 @@ export function collectProblems(scripts: ProblemScript[], liveMarkers: Map<strin
         // (the saved code's type errors aren't checked while it fails to compile)
         else if (!s.error) problems.push(...(s.typeErrors || []).map(storedTypeError));
         // (isolated onPage code that can't run is an error: user scripts are off)
-        for (const w of s.routeWarnings || []) problems.push({ severity: w.includes(USER_SCRIPTS_PROBLEM) ? "error" : "warning", kind: "route", message: w, ...handler(w) });
+        const taken = new Set<number>();
+        for (const w of s.routeWarnings || [])
+            problems.push({ severity: w.includes(USER_SCRIPTS_PROBLEM) ? "error" : "warning", kind: "route", message: w, ...(evaluateUseRange(w, s, taken) ?? handler(w)) });
         if (problems.length) groups.push({ id: s.id, label: s.label, file: s.label.endsWith(".tsx") ? "tsx" : "ts", problems: problems.sort(byPosition) });
     }
     for (const d of dataFiles) if (d.markers.length) groups.push({ id: d.id, label: d.label, file: "json", problems: fromMarkers(d.markers, "json").sort(byPosition) });

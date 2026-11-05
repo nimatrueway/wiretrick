@@ -5,6 +5,24 @@ const script = (id: string, over: Partial<ProblemScript> = {}): ProblemScript =>
 const none = new Map<string, ProblemMarker[]>();
 
 describe("collectProblems", () => {
+    it("a ctx.evaluate script-variable warning points at the variable's use in each evaluate function", () => {
+        const code = [
+            "const cfg = { a: 1 };", //
+            'wt.onPage("*", (ctx) => {',
+            "    const cb = { cfg: 1 };",
+            "    ctx.evaluate((a) => {",
+            "        a.cfg = cfg.a;",
+            "    }, cb);",
+            "    ctx.evaluate(() => [cfg]);",
+            "});",
+        ].join("\n");
+        const w = "onPage #1: ctx.evaluate's function uses `cfg` from your script, but …";
+        const [g] = collectProblems([script("a", { code, routeWarnings: [w, w] })], none);
+        expect(g.problems.map((p) => [p.line, p.column, p.endColumn])).toEqual([
+            [5, 17, 20],
+            [7, 25, 28],
+        ]);
+    });
     it("an import that can't load points at its URL and isn't listed twice with its live marker", () => {
         const code = `// x\nimport { sleep } from 'https://unpkg.com/asyncbox';\n`;
         const msg = `cannot import "https://unpkg.com/asyncbox": pin an exact version`;

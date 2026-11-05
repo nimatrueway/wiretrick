@@ -7,11 +7,13 @@ its section below.
 
 ## [Unreleased]
 
+## [0.12.2] - 2026-11-04
+
 ### Added
 
 - `ctx.evaluate` callbacks can also sit inside plain objects and arrays (`ctx.evaluate((cb) => …, { onOpen: () => …, onClose: () => … })`); before, passing one threw "arguments must be plain data".
 - The diagnostics report includes the Problems view's current problems (errors and warnings per file, with line and column).
-- A Problems warning when a `ctx.evaluate` function uses the script's own variables (like `cfg`), which aren't defined in the page world; at run time the error now names the variable and says to pass it as an argument.
+- A Problems warning when a `ctx.evaluate` function uses the script's own variables (like `cfg`), which aren't defined in the page world; it points at the variable's use inside the function. At run time the error now names the variable and says to pass it as an argument.
 
 ### Fixed
 
@@ -642,7 +644,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.12.1...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.12.2...HEAD
+[0.12.2]: https://github.com/nimatrueway/wiretrick/compare/v0.12.1...v0.12.2
 [0.12.1]: https://github.com/nimatrueway/wiretrick/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/nimatrueway/wiretrick/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/nimatrueway/wiretrick/compare/v0.11.0...v0.11.1
