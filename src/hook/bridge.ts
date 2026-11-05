@@ -5,7 +5,7 @@
  *
  *   hook (MAIN, no eval) ← postMessage → bridge (isolated) ⇄ background
  *
- * Also runs wt.onPage code in the isolated world: `world: "isolated"`
+ * Also runs wt.onPage code in the isolated world: `js: "isolated"`
  * handlers (MV2; MV3 has no eval in content scripts, so they run in
  * chrome.userScripts worlds — src/hook/isolated.ts — and the bridge relays
  * the overlay's calls to them through the background, L2), and main-world
@@ -13,7 +13,7 @@
  * SOURCES, the bridge compiles them and runs them at the requested DOM
  * moment — the isolated world shares the page's DOM, not its JS world.
  *
- * In the top frame it also hosts the scripts' overlays (wt.onOverlay): one
+ * In the top frame it also hosts the scripts' overlays (`dom: "overlay"`): one
  * iframe per script inside a closed shadow root, linked to this bridge by
  * a MessagePort (L3). The bridge relays what each overlay may do to the
  * background over the `wt-bridge` port (L2), fetches as the page for it,
@@ -190,7 +190,7 @@ import { makePageEvaluate } from "../shared/pageEval";
         if (data.kind === "scriptLog") {
             safeSend({ type: "scriptLog", scriptId: data.scriptId ?? null, level: data.level, msg: data.msg, ctx: "page" });
         }
-        if (data.kind === "scriptRan" && (data.api === "onPage" || data.api === "onDocument" || data.api === "onOverlay")) {
+        if (data.kind === "scriptRan" && (data.api === "onPage" || data.api === "onOverlay")) {
             scriptRan(data.scriptId, data.name, data.api);
         }
         // the hook's answer to an overlay's call (L4). The page can post this
@@ -401,9 +401,9 @@ import { makePageEvaluate } from "../shared/pageEval";
                 const run = () => {
                     try {
                         firePageHandler(d, { url: location.href, method: "GET", tabUrl: location.href, resourceType: "main_frame", requestHeaders: {}, groups: {}, evaluate }, exposer);
-                        scriptRan(h.scriptId, h.name, d.route.api === "onPage" ? "onPage" : "onDocument");
+                        scriptRan(h.scriptId, h.name, "onPage");
                     } catch (e: any) {
-                        scriptLog(h.scriptId, "error", formatScriptError(h.name, e, d.route.api || "onDocument"), ctx);
+                        scriptLog(h.scriptId, "error", formatScriptError(h.name, e, "onPage"), ctx);
                     }
                 };
                 scheduleDocument(d.when, run, hot);
@@ -521,7 +521,7 @@ import { makePageEvaluate } from "../shared/pageEval";
         return (await l2up(op)).call(op, a, s);
     }
 
-    /** scripts changed: refresh hook status; onDocument refires in the MAIN world (hook) when healthy, else here (isolated) */
+    /** scripts changed: refresh hook status; onPage refires in the MAIN world (hook) when healthy, else here (isolated) */
     function onBundleUpdate(): void {
         if (hookBroken) void runDocumentHandlers(true);
         safeSend({ type: "getHookBundle", url: location.href }, (resp: any) => {

@@ -80,10 +80,6 @@ export function settingsDiagnostics(text: string, scripts: AssistScript[]): Assi
             }
             for (const p of val.items) {
                 const gk = isScalar(p.key) ? String(p.key.value) : "";
-                if (gk === "defaultStrategy") {
-                    at(p.key as Node, "warning", `"defaultStrategy" was removed — it has no effect. Every handler sets its own strategy: wt.onRequest({ url, strategy: "helper" }, …)`);
-                    continue;
-                }
                 if (!(gk in GLOBAL_PROPS)) {
                     at(p.key as Node, "warning", `Unknown setting "${gk}" (expected ${Object.keys(GLOBAL_PROPS).join(", ")})`);
                     continue;

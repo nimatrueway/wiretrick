@@ -155,7 +155,7 @@ const SCRIPTS: Record<string, SampleScript> = {
     modifyTierA: { id: "s_modifya", name: "modify response (hook tier).wiretrick", code: `wt.onResponseBody({ url: "${ORIGIN}/api", strategy: "page" }, (ctx, body) => body.replace("original-value", "TIERA-VALUE"));` },
     modifyCdp: { id: "s_modifycdp", name: "modify response (cdp tier).wiretrick", code: `wt.onResponseBody({ url: "${ORIGIN}/app.js", strategy: "debugger" }, (ctx, body) => body.replace("ORIGINAL-MARKER", "CDP-MARKER"));` },
     badgeProbe: { id: "s_badge", name: "badge probe.wiretrick", code: `wt.onRequest({ url: "${ORIGIN}/page-fetch*", strategy: "page" }, () => {});` },
-    modifyMain: { id: "s_modifymain", name: "modify main frame html.wiretrick", code: `wt.onResponseBody({ url: "${ORIGIN}/page-title", strategy: "debugger" }, (ctx, body) => (typeof body === "string" ? body : new TextDecoder().decode(body)).replace("SITE-TITLE-PLACEHOLDER", "CDP-HTML-MARKER"));\nwt.onDocument("${ORIGIN}/page-title", () => { document.title = "DOM-HOOK-TITLE"; });` },
+    modifyMain: { id: "s_modifymain", name: "modify main frame html.wiretrick", code: `wt.onResponseBody({ url: "${ORIGIN}/page-title", strategy: "debugger" }, (ctx, body) => (typeof body === "string" ? body : new TextDecoder().decode(body)).replace("SITE-TITLE-PLACEHOLDER", "CDP-HTML-MARKER"));\nwt.onPage("${ORIGIN}/page-title", () => { document.title = "DOM-HOOK-TITLE"; });` },
 };
 for (const s of Object.values(SCRIPTS)) await saveScript(s.id, s.code, s.name);
 
@@ -385,13 +385,13 @@ if (HEADLESS) {
 
 }
 
-// ---------- 9c. onDocument: DOM/title hook (works everywhere — it is page-level JS) ----------
+// ---------- 9c. onPage: DOM/title hook (works everywhere — it is page-level JS) ----------
 {
     const p9d = await ctx.newPage();
     await p9d.goto(`${ORIGIN}/page-title`, { waitUntil: "domcontentloaded" }).catch(() => {});
     await p9d.waitForTimeout(2500);
     const domState = await p9d.evaluate(() => ({ title: document.title, h1: document.querySelector("h1")?.textContent }));
-    check("onDocument: document.title rewritten in page", domState.title === "DOM-HOOK-TITLE", JSON.stringify(domState));
+    check("onPage: document.title rewritten in page", domState.title === "DOM-HOOK-TITLE", JSON.stringify(domState));
     await p9d.close();
     // that cold load reached the page before the debugger attached → warned
     await new Promise((r) => setTimeout(r, 600));
@@ -561,7 +561,7 @@ await checkRulesStrategy(ctx, mgr, ORIGIN, check);
 // ---------- 10h. folders and JSON data files ----------
 await checkFoldersAndDataFiles(ctx, mgr, ORIGIN, check);
 
-// ---------- 10i. overlays (wt.onOverlay) and calls between the overlay and the page ----------
+// ---------- 10i. overlays (wt.onPage({ dom: "overlay" })) and calls between the overlay and the page ----------
 await checkOverlays(ctx, mgr, ORIGIN, check, { isolated: true });
 await checkPageStores(ctx, mgr, ORIGIN, check);
 await checkIsoStores(ctx, mgr, ORIGIN, check);
@@ -574,7 +574,7 @@ await checkPackages(ctx, mgr, ORIGIN, check);
 // ---------- 11. logs: script output tunnelled to the Log view, page console not captured ----------
 await saveScript(
     "s_logtunnel",
-    `wt.onDocument("${ORIGIN}/html", () => { console.warn("E2E-CONSOLE-MARKER", { a: 1 }); wt.log("E2E-RESLOG-MARKER"); });`,
+    `wt.onPage("${ORIGIN}/html", () => { console.warn("E2E-CONSOLE-MARKER", { a: 1 }); wt.log("E2E-RESLOG-MARKER"); });`,
     "log tunnel.wiretrick"
 );
 await new Promise((r) => setTimeout(r, 800));

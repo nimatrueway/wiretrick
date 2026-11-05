@@ -7,6 +7,12 @@ its section below.
 
 ## [Unreleased]
 
+### Removed
+
+- **Breaking:** the deprecated `wt.onDocument` (use `wt.onPage`), `wt.onOverlay` (use `wt.onPage({ …, dom: "overlay" })`), the `world` route option (use `js`), `wt.store` (use `wt.globalStore` / `wt.pageStore`) and the `Wiretrick.Route` type (use `Wiretrick.RouteOptions`).
+- **Breaking:** the startup migration that rewrote scripts and settings written for older API names; scripts still using old names now fail to compile.
+- **Breaking:** imports by a script's underscored key (`./My_Utils` for "My Utils"); import scripts by their path.
+
 ## [0.13.0-alpha] - 2026-11-05
 
 Wiretrick is experimental: its scripting API keeps changing, and releases may break scripts.

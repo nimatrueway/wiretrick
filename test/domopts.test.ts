@@ -7,22 +7,22 @@ function makeHookScaffold() {
     let domHandler: any = null;
     let domOpts: any = null;
     const shim = {
-        onDocument: (fn: any, o: any) => { domHandler = fn; domOpts = o || {}; },
+        onPage: (fn: any, o: any) => { domHandler = fn; domOpts = o || {}; },
         log: () => {},
     };
     return { logUp, get domHandler() { return domHandler; }, get domOpts() { return domOpts; }, shim };
 }
 
-describe("wt.onDocument options", () => {
+describe("wt.onPage options", () => {
     it("captures handler + options", () => {
-        const c = compileScript(`wt.onDocument({ url: "*", when: "document_idle" }, () => {});\nwt.onDocument("*://x.com/*", () => {});`);
+        const c = compileScript(`wt.onPage({ url: "*", when: "document_idle" }, () => {});\nwt.onPage("*://x.com/*", () => {});`);
         expect(c.error).toBeNull();
         expect(c.handlers.onDocument.length).toBe(2);
         expect(c.handlers.onDocument[0].route.when).toBe("document_idle");
     });
 
     it("defaults: when = document_end", () => {
-        const c = compileScript(`wt.onDocument("*", () => {});`);
+        const c = compileScript(`wt.onPage("*", () => {});`);
         expect(c.handlers.onDocument[0]?.route.when).toBe("document_end");
     });
 });

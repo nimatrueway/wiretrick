@@ -69,34 +69,30 @@ describe("page-world overlay.fn()", () => {
         return e && code.slice(0, e.start) + e.text + code.slice(e.end);
     };
     it("the quick fix moves the handler to the isolated world", () => {
-        expect(fix(`wt.onPage({ url: "https://a/*", world: "page" }, (x) => x.overlay.pick());`)).toBe(`wt.onPage({ url: "https://a/*", world: "isolated" }, (x) => x.overlay.pick());`);
-        expect(fix(`wt.onPage({ url: "https://a/*", world: 'main' }, (x) => x.overlay.pick());`)).toBe(`wt.onPage({ url: "https://a/*", world: "isolated" }, (x) => x.overlay.pick());`);
-        // the deprecated wt.onDocument becomes wt.onPage
-        expect(fix(`wt.onDocument({ url: "https://a/*", world: "page" }, (x) => x.overlay.pick());`)).toBe(`wt.onPage({ url: "https://a/*", world: "isolated" }, (x) => x.overlay.pick());`);
-        expect(fix(`wt.onDocument("https://a/*", (x) => x.overlay.pick());`)).toBe(`wt.onPage("https://a/*", (x) => x.overlay.pick());`);
         expect(fix(`wt.onPage({ url: "https://a/*", js: "page" }, (x) => x.overlay.pick());`)).toBe(`wt.onPage({ url: "https://a/*", js: "isolated" }, (x) => x.overlay.pick());`);
+        expect(fix(`wt.onPage({ url: "https://a/*", js: 'page' }, (x) => x.overlay.pick());`)).toBe(`wt.onPage({ url: "https://a/*", js: "isolated" }, (x) => x.overlay.pick());`);
         expect(fix(`wt.onPage({ url: "https://a/*", js: "page", dom: "overlay", unsafe: true }, (x) => x.overlay.pick());`)).toBe(`wt.onPage({ url: "https://a/*", js: "isolated", dom: "overlay", unsafe: true }, (x) => x.overlay.pick());`);
     });
     it("picks the nearest handler and gives up on what it can't rewrite", () => {
-        const two = `wt.onPage({ url: "https://a/*", world: "page" }, () => {});\nwt.onPage({ url: "https://b/*", world: "page" }, (x) => x.overlay.pick());`;
-        expect(fix(two)).toBe(`wt.onPage({ url: "https://a/*", world: "page" }, () => {});\nwt.onPage({ url: "https://b/*", world: "isolated" }, (x) => x.overlay.pick());`);
+        const two = `wt.onPage({ url: "https://a/*", js: "page" }, () => {});\nwt.onPage({ url: "https://b/*", js: "page" }, (x) => x.overlay.pick());`;
+        expect(fix(two)).toBe(`wt.onPage({ url: "https://a/*", js: "page" }, () => {});\nwt.onPage({ url: "https://b/*", js: "isolated" }, (x) => x.overlay.pick());`);
         expect(isolatedRouteEdit(`x.overlay.pick()`, 2)).toBeNull();
-        expect(isolatedRouteEdit(`wt.onPage({ url: "https://a/*", world: w }, (x) => x.overlay.pick());`, 50)).toBeNull();
+        expect(isolatedRouteEdit(`wt.onPage({ url: "https://a/*", js: w }, (x) => x.overlay.pick());`, 50)).toBeNull();
         expect(isolatedRouteEdit(`wt.onPage("https://a/*", (x) => x.overlay.pick());`, 30)).toBeNull();
         expect(isolatedRouteEdit(`wt.onPage("https://a/*`, 20)).toBeNull();
     });
 
     it("a page-world store/overlay route warning points at its registration line, and the fix applies from the marker's end", () => {
-        const code = `const ps = wt.pageStore("ps", { n: 0 });\nwt.onPage({ url: "https://a/*", world: "page" }, () => {\n    ps.n++;\n});`;
+        const code = `const ps = wt.pageStore("ps", { n: 0 });\nwt.onPage({ url: "https://a/*", js: "page" }, () => {\n    ps.n++;\n});`;
         const msg = mainWorldProblems(code, compileScript(code).handlers.onDocument.map((h) => h.route))[0];
         expect(msg).toContain(MAIN_WORLD_DISALLOWED);
         expect(msg).toContain('drop js: "page"');
-        expect(mainWorldProblems(code.replace(', world: "page"', ""), compileScript(code.replace(', world: "page"', "")).handlers.onDocument.map((h) => h.route))).toEqual([]);
+        expect(mainWorldProblems(code.replace(', js: "page"', ""), compileScript(code.replace(', js: "page"', "")).handlers.onDocument.map((h) => h.route))).toEqual([]);
         const [g] = collectProblems([script("a", { code, routeWarnings: [msg], routes: compileScript(code).handlers.onDocument.map((h) => h.route) })], none);
         const p = g.problems[0] as any;
         expect(p.line).toBe(2);
         const lines = code.split("\n");
         const end = lines.slice(0, p.endLine - 1).reduce((n, l) => n + l.length + 1, 0) + p.endColumn - 1;
-        expect(fix(code, end)).toBe(`const ps = wt.pageStore("ps", { n: 0 });\nwt.onPage({ url: "https://a/*", world: "isolated" }, () => {\n    ps.n++;\n});`);
+        expect(fix(code, end)).toBe(`const ps = wt.pageStore("ps", { n: 0 });\nwt.onPage({ url: "https://a/*", js: "isolated" }, () => {\n    ps.n++;\n});`);
     });
 });

@@ -187,7 +187,7 @@ import { createPageLayer, type PageLayer } from "./pageLayer";
     }
 
     /**
-     * onDocument handlers compile in THIS world (MAIN) so the handler sees the
+     * page-world onPage handlers compile in THIS world (MAIN) so the handler sees the
      * page's window (window.PARAMS etc.). The FULL script source is
      * compiled with a shim, so top-level helpers/closures survive. If the
      * page CSP forbids eval, report it — the bridge then runs the whole
@@ -232,13 +232,13 @@ import { createPageLayer, type PageLayer } from "./pageLayer";
                 if (/Evaluating a string as JavaScript|unsafe-eval/i.test(e.message || "")) {
                     cspBlocked = true;
                 } else {
-                    scriptLogUp(d.scriptId, "error", formatScriptError(d.name, e, "onDocument compile"));
+                    scriptLogUp(d.scriptId, "error", formatScriptError(d.name, e, "onPage compile"));
                 }
             }
             ex?.done();
         }
         if (cspBlocked) {
-            logUp("page CSP blocks eval in the page world — running onDocument handlers in the isolated world instead", "info");
+            logUp("page CSP blocks eval in the page world — running onPage handlers in the isolated world instead", "info");
             try {
                 window.postMessage({ source: HOOK_SOURCE, kind: "cspBlocked" }, window.location.origin);
             } catch {}
@@ -251,11 +251,11 @@ import { createPageLayer, type PageLayer } from "./pageLayer";
             : (document.querySelector("script[data-res-override-hook]") ? "script tag (already in DOM)" : "bundle message");
         const fire = ({ scriptId, name, when, d, exposer }: (typeof compiledDocument)[number]) => {
             try {
-                scriptLogUp(scriptId, "debug", scriptLogLine(name, "onDocument", `running (${when}) on ${location.href} [${document.readyState}], hook injected via ${injected}`));
+                scriptLogUp(scriptId, "debug", scriptLogLine(name, "onPage", `running (${when}) on ${location.href} [${document.readyState}], hook injected via ${injected}`));
                 firePageHandler(d, makeCtx(location.href, "GET", { evaluate: directEvaluate }), exposer);
-                window.postMessage({ source: HOOK_SOURCE, kind: "scriptRan", scriptId, name, api: d.route.api === "onPage" ? "onPage" : "onDocument" }, window.location.origin);
+                window.postMessage({ source: HOOK_SOURCE, kind: "scriptRan", scriptId, name, api: "onPage" }, window.location.origin);
             } catch (e: any) {
-                scriptLogUp(scriptId, "error", formatScriptError(name, e, "onDocument"));
+                scriptLogUp(scriptId, "error", formatScriptError(name, e, "onPage"));
             }
         };
         if (hot) {
@@ -358,7 +358,7 @@ import { createPageLayer, type PageLayer } from "./pageLayer";
         return makePageShim({
             params,
             exposer,
-            // a main-world `overlay.fn()` call: a runtime Problem at the call (with a quick fix: `world: "isolated"`)
+            // a main-world `overlay.fn()` call: a runtime Problem at the call (with a quick fix: `js: "isolated"`)
             onMainWorldCall: (e) => {
                 if (mainWorldCallers.has(scriptId)) return;
                 mainWorldCallers.add(scriptId);

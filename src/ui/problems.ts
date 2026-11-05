@@ -134,7 +134,7 @@ export function errorPosition(msg: string): Position | undefined {
     return syntax ? { line: Number(syntax[1]) } : undefined;
 }
 
-const HANDLER = /\b(onRequest|onResponseHeaders|replaceResponse|onResponseBody|onDocument|onPage|onOverlay) #(\d+)\b/;
+const HANDLER = /\b(onRequest|onResponseHeaders|replaceResponse|onResponseBody|onPage) #(\d+)\b/;
 
 interface Range {
     line: number;
@@ -175,9 +175,7 @@ function handlerRange(msg: string, s: ProblemScript): Range | { line: number } |
     const lines = code.split("\n");
     let line = route?.line;
     if (!line) {
-        // onPage and its alias onDocument share one index
-        const api = m[1] === "onPage" || m[1] === "onDocument" ? "(?:onPage|onDocument)" : m[1];
-        const calls = [...code.matchAll(new RegExp(`\\bwt\\s*\\.\\s*${api}\\s*\\(`, "g"))];
+        const calls = [...code.matchAll(new RegExp(`\\bwt\\s*\\.\\s*${m[1]}\\s*\\(`, "g"))];
         const call = calls[Number(m[2]) - 1];
         if (call) line = code.slice(0, call.index).split("\n").length;
     }

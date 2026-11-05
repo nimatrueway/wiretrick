@@ -95,7 +95,7 @@ describe("rpc: calls between the overlay and onPage code", () => {
     });
 
     it("answers `not running` for the other world's handles", async () => {
-        const p = runPage(`wt.onPage({ url: "*", world: "isolated" }, () => ({ f: () => 1 }));`, { world: "page" });
+        const p = runPage(`wt.onPage({ url: "*", js: "isolated" }, () => ({ f: () => 1 }));`, { world: "page" });
         p.fire();
         expect(p.exposer.isElsewhere("page:0")).toBe(true);
         const { client } = link(p.exposer);
@@ -219,14 +219,14 @@ describe("rpc: calls between the overlay and onPage code", () => {
 
 describe("rpc: which world may call the overlay", () => {
     it("a main-world `overlay.fn()` rejects with the main-world error", async () => {
-        const p = runPage(`module.exports.overlay = wt.onOverlay("*", () => ({ picked() {} }));`, { world: "page" });
+        const p = runPage(`module.exports.overlay = wt.onPage({ url: "*", dom: "overlay" }, () => ({ picked() {} }));`, { world: "page" });
         const e = await p.exports.overlay.picked("a").catch((x: any) => x);
         expect(e).toBeInstanceOf(WtCallError);
         expect(e.message).toBe(REMOTE_MAIN_WORLD);
     });
 
     it("a subframe's isolated-world call into the overlay is refused", async () => {
-        const p = runPage(`module.exports.overlay = wt.onOverlay("*", () => ({ picked() {} }));`, { world: "isolated" });
+        const p = runPage(`module.exports.overlay = wt.onPage({ url: "*", dom: "overlay" }, () => ({ picked() {} }));`, { world: "isolated" });
         await expect(p.exports.overlay.picked("a")).rejects.toThrow(TOP_FRAME_ONLY);
     });
 
@@ -238,13 +238,13 @@ describe("rpc: which world may call the overlay", () => {
         overlay.expose("overlay:0", { first: () => 0 });
         overlay.expose("overlay:1", { picked: (t: string) => `picked ${t}` });
         const { client } = link(overlay);
-        const p = runPage(`wt.onOverlay("*", () => {});\nmodule.exports.overlay = wt.onOverlay("*", () => {});\nwt.onPage({ url: "*", world: "isolated" }, () => {});`, { world: "isolated", overlay: (h) => client.remote(h) });
+        const p = runPage(`wt.onPage({ url: "*", dom: "overlay" }, () => {});\nmodule.exports.overlay = wt.onPage({ url: "*", dom: "overlay" }, () => {});\nwt.onPage({ url: "*", js: "isolated" }, () => {});`, { world: "isolated", overlay: (h) => client.remote(h) });
         expect(await p.exports.overlay.picked("DIV")).toBe("picked DIV");
     });
 
-    it("the overlay sees page:N handles by onPage registration order, onDocument included", () => {
+    it("the overlay sees page:N handles by onPage registration order", () => {
         const handles: string[] = [];
-        const c = compileScript(`wt.onDocument("*", () => {});\nconst page = wt.onPage("*", () => ({}));\nwt.onOverlay("*", () => {});`, {
+        const c = compileScript(`wt.onPage("*", () => {});\nconst page = wt.onPage("*", () => ({}));\nwt.onPage({ url: "*", dom: "overlay" }, () => {});`, {
             remote: (kind: string, index: number) => (handles.push(`${kind}:${index}`), {}),
         } as any);
         expect(c.error).toBeNull();

@@ -195,9 +195,6 @@ declare namespace Wiretrick {
         strategy: Strategy;
     }
 
-    /** @deprecated Use {@link RouteOptions} — a network route is always the object form now. */
-    type Route = RouteOptions;
-
     /** Full route form for `wt.onResponseBody`. */
     interface BodyRouteOptions extends RouteOptions {
         /**
@@ -218,16 +215,13 @@ declare namespace Wiretrick {
         binary?: boolean | "both";
     }
 
-    /** Route fields shared by every `wt.onPage` form (and the deprecated `wt.onOverlay`). */
+    /** Route fields shared by every `wt.onPage` form. */
     interface DocumentRouteOptions extends DocumentOptions {
         /** Frame URLs (top page and iframes) to run in. See {@link UrlPatterns}. */
         url: UrlPatterns;
         /** Frame URLs to skip even when `url` matches. */
         exclude?: UrlPatterns;
     }
-
-    /** Where a deprecated `onOverlay` handler runs: URL pattern(s) or the full {@link DocumentRouteOptions} form. */
-    type DocumentRoute = UrlPatterns | DocumentRouteOptions;
 
     /**
      * Full route form for `wt.onPage` on the page's own DOM (`dom: "page"`,
@@ -261,11 +255,6 @@ declare namespace Wiretrick {
          * only). See {@link OverlayRouteOptions}.
          */
         dom?: "page";
-        /**
-         * @deprecated Renamed to {@link js} (`"main"` is `"page"`). Don't
-         * pass both.
-         */
-        world?: "isolated" | "page" | "main";
     }
 
     /** Where an `onPage` handler runs: URL pattern(s) or the full {@link PageRouteOptions} form. */
@@ -1016,36 +1005,6 @@ declare const wt: {
     onPage<T = void>(route: Wiretrick.PageOverlayRouteOptions, handler: (ctx: Wiretrick.OverlayCtx) => Wiretrick.Awaitable<T>): {};
 
     /**
-     * @deprecated Renamed to {@link wt.onPage} — same arguments and behavior.
-     */
-    onDocument<T = void>(route: Wiretrick.PageRoute, handler: (ctx: Wiretrick.PageCtx) => Wiretrick.Awaitable<T>): Wiretrick.Remote<T>;
-
-    /**
-     * @deprecated Use `wt.onPage({ url, dom: "overlay" }, handler)` — same
-     * behavior. See {@link Wiretrick.OverlayRouteOptions}.
-     *
-     * Run a handler in this script's **overlay**: a transparent frame over
-     * the page (top frame only), with its own `document` and `window`. What
-     * the script draws there is visible and clickable; everywhere else,
-     * clicks go through to the page. The page can't see or reach it.
-     *
-     * One overlay per script per tab: all of the script's matching
-     * `onOverlay` handlers run in it, sharing top-level variables. Timing
-     * follows `when`, as for `onPage`.
-     *
-     * The handler may return an object of functions for this script's
-     * `onPage` code to call (not `js: "page"` code).
-     *
-     * @example
-     * wt.onOverlay("*://example.com/*", () => {
-     *     const b = document.body.appendChild(document.createElement("button"));
-     *     b.textContent = "Hi";
-     *     b.style.cssText = "position:fixed;right:16px;bottom:16px";
-     * });
-     */
-    onOverlay<T = void>(route: Wiretrick.DocumentRoute, handler: (ctx: Wiretrick.OverlayCtx) => Wiretrick.Awaitable<T>): Wiretrick.Remote<T>;
-
-    /**
      * The script's metadata. `description` is shown as a tooltip in the
      * Editor and the popup, and in diagnostics; the rest describes it as a
      * package — shown when someone installs it from a link, and `version`
@@ -1171,9 +1130,6 @@ declare const wt: {
      * });
      */
     pageStore<T extends object>(name: string, initial: T): T;
-
-    /** @deprecated Renamed: use {@link globalStore} (or {@link pageStore} for one copy per page). Calling it throws. */
-    store(name: string, initial: object, opts?: unknown): never;
 
     /**
      * `fetch` for scripts. By default it runs in the background with the

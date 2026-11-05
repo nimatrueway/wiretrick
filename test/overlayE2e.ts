@@ -1,5 +1,5 @@
 /**
- * Shared E2E check (MV2 + MV3): overlays (wt.onOverlay). A `.tsx` switch
+ * Shared E2E check (MV2 + MV3): overlays (wt.onPage({ dom: "overlay" })). A `.tsx` switch
  * with the built-in React and valtio toggles a page-strategy mock live;
  * clicks on empty areas reach the page; a strict-CSP page still shows the
  * overlay; the page can't find the frame or read the overlay's code; the
@@ -123,7 +123,7 @@ const mock = wt.globalStore("ovmock", { enabled: false });
 wt.replaceResponse({ url: "${origin}/ov-me", strategy: "page" }, () =>
     mock.enabled ? JSON.stringify({ name: "MOCKED" }) : undefined);
 
-wt.onOverlay("${origin}/ov-*", () => {
+wt.onPage({ url: "${origin}/ov-*", dom: "overlay" }, () => {
     const secret = "OV-SECRET-MARKER";
     void fetch("/ov-cookie");
     function Panel() {
@@ -138,7 +138,7 @@ wt.onOverlay("${origin}/ov-*", () => {
 });
 `;
 
-const rpcCode = (origin: string) => `const overlay = wt.onOverlay("${origin}/ov-*", (ctx) => {
+const rpcCode = (origin: string) => `const overlay = wt.onPage({ url: "${origin}/ov-*", dom: "overlay" }, (ctx) => {
     const out = document.body.appendChild(document.createElement("output"));
     out.id = "picked";
     out.style.cssText = "position:fixed;left:16px;bottom:16px;background:white;padding:8px";
@@ -164,11 +164,11 @@ const rpcCode = (origin: string) => `const overlay = wt.onOverlay("${origin}/ov-
     };
 });
 
-wt.onPage({ url: "${origin}/ov-app*", world: "page" }, () => {
+wt.onPage({ url: "${origin}/ov-app*", js: "page" }, () => {
     overlay.hit().then(() => (document.body.dataset.mainCall = "resolved"), (e) => (document.body.dataset.mainCall = "rejected: " + e.message));
 });
 
-const iso = wt.onPage({ url: "${origin}/ov-*", world: "isolated" }, () => {
+const iso = wt.onPage({ url: "${origin}/ov-*", js: "isolated" }, () => {
     document.addEventListener("click", (e) => {
         if (e.altKey) void overlay.picked((e.target as Element).tagName);
     }, true);
@@ -248,7 +248,7 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
     const after = await waitFor<string>(fetchMe, (v) => v.includes("MOCKED"), 5000);
     check(t("clicking the switch toggles the mock live"), before.includes("REAL") && checked && after.includes("MOCKED"), JSON.stringify({ before, checked, after }));
 
-    // Network: the document row names the scripts whose onPage/onOverlay ran on it; the overlay's fetch names its script
+    // Network: the document row names the scripts whose onPage handlers ran on it; the overlay's fetch names its script
     // (no Network tab recording: rows are synthetic)
     type NetRow = { url: string; type: string; synthetic?: boolean; startedAt: number; outcomes: { scriptName: string; action: string; kind: string }[] };
     const netRows = (): Promise<NetRow[]> =>
@@ -261,7 +261,7 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
     const docTags = tagsOf(net, "/ov-app");
     const docRow = net.find((e) => e.url === `${origin}/ov-app` && e.startedAt >= loadedAt - 50 && e.outcomes.length);
     check(
-        t("Network: the page's document row names the scripts whose onPage/onOverlay ran on it"),
+        t("Network: the page's document row names the scripts whose onPage handlers ran on it"),
         (docRow?.type === "main_frame" || !!docRow?.synthetic) && ["overlay switch.wiretrick: overlay shown", "overlay rpc.wiretrick: overlay shown", "overlay rpc.wiretrick: onPage ran"].every((x) => docTags.includes(x)) && docRow.outcomes.every((o) => o.kind === "observed"),
         JSON.stringify({ type: docRow?.type, synthetic: docRow?.synthetic, docTags })
     );
@@ -414,7 +414,7 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
     await send({ type: "deleteScript", id: "s_ov_rpc" });
 }
 
-const keysCode = (origin: string, id: string) => `wt.onOverlay("${origin}/ov-keys", (ctx) => {
+const keysCode = (origin: string, id: string) => `wt.onPage({ url: "${origin}/ov-keys", dom: "overlay" }, (ctx) => {
     const box = document.body.appendChild(document.createElement("div"));
     box.id = "${id}";
     box.textContent = "Hello";
@@ -553,7 +553,7 @@ wt.replaceResponse({ url: "${origin}/ov-ps", strategy: "page" }, () => {
     }
 });
 
-wt.onOverlay("${origin}/ov-two*", () => {
+wt.onPage({ url: "${origin}/ov-two*", dom: "overlay" }, () => {
     const out = document.body.appendChild(document.createElement("output"));
     out.id = "two";
     out.value = "pending";
@@ -566,7 +566,7 @@ wt.onOverlay("${origin}/ov-two*", () => {
     void ask();
 });
 
-const pg = wt.onPage({ url: "${origin}/ov-two*", world: "page" }, () => ({
+const pg = wt.onPage({ url: "${origin}/ov-two*", js: "page" }, () => ({
     whoami: () => ({ q: location.search }),
 }));
 `;
@@ -698,7 +698,7 @@ const ps = wt.pageStore("isops", { hits: 0 });
 
 wt.replaceResponse({ url: "${origin}/ov-isops", strategy: "page" }, () => String(++ps.hits));
 
-wt.onOverlay("${origin}/ov-isost*", () => {
+wt.onPage({ url: "${origin}/ov-isost*", dom: "overlay" }, () => {
     const out = document.body.appendChild(document.createElement("output"));
     out.id = "isost-ov";
     out.value = "overlay";
@@ -737,7 +737,7 @@ wt.onPage("${origin}/ov-isost*", () => {
     };
 });
 
-wt.onPage({ url: "${origin}/ov-isost*", world: "page" }, () => {
+wt.onPage({ url: "${origin}/ov-isost*", js: "page" }, () => {
     (window as any).__isoSecret = "PAGE-GLOBAL-42";
     try {
         document.body.dataset.mainStore = "read " + ps.hits;

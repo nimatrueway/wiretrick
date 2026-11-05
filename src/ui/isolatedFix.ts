@@ -1,10 +1,8 @@
 /**
  * The quick fix for a page-world `overlay.fn()` call: run the `wt.onPage`
  * handler it's in in the isolated world (onPage's default). Rewrites the
- * nearest `wt.onPage(` / `wt.onDocument(` before the call: its route's
- * `js: "page"` becomes `js: "isolated"` (the old `world: "page"` / `"main"`:
- * `world: "isolated"`), and the
- * deprecated `wt.onDocument` (always the page's world) becomes `wt.onPage`.
+ * nearest `wt.onPage(` before the call: its route's `js: "page"` becomes
+ * `js: "isolated"`.
  */
 
 /** where the bracket/quote opened at `open` closes (exclusive), or -1 */
@@ -33,21 +31,13 @@ function skip(code: string, open: number): number {
 
 /** the edit, in code offsets, or null when the route isn't a literal */
 export function isolatedRouteEdit(code: string, offset: number): { start: number; end: number; text: string } | null {
-    const re = /\bwt\s*\.\s*(on(?:Page|Document))\s*\(\s*/g;
+    const re = /\bwt\s*\.\s*onPage\s*\(\s*/g;
     let at = -1;
-    let rename = -1;
-    for (let m = re.exec(code); m && m.index < offset; m = re.exec(code)) {
-        at = m.index + m[0].length;
-        rename = m[1] === "onDocument" ? m.index + m[0].indexOf("onDocument") : -1;
-    }
+    for (let m = re.exec(code); m && m.index < offset; m = re.exec(code)) at = m.index + m[0].length;
     if (at < 0) return null;
     const end = skip(code, at);
     if (end < 0) return null;
     const route = code.slice(at, end);
-    const world = route[0] === "{" ? /\b(js|world)\s*:\s*(["'`])(?:main|page)\2/.exec(route) : null;
-    const edit = world ? { start: at + world.index, end: at + world.index + world[0].length, text: `${world[1]}: "isolated"` } : null;
-    if (rename < 0) return edit;
-    // one contiguous edit: from the API name through the route
-    const name = { start: rename, end: rename + "onDocument".length, text: "onPage" };
-    return edit ? { start: rename, end: edit.end, text: "onPage" + code.slice(name.end, edit.start) + edit.text } : name;
+    const js = route[0] === "{" ? /\bjs\s*:\s*(["'`])page\1/.exec(route) : null;
+    return js ? { start: at + js.index, end: at + js.index + js[0].length, text: 'js: "isolated"' } : null;
 }

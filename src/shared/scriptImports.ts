@@ -5,9 +5,7 @@
  * (`utils`) resolves from the root. A specifier ending in `.json` or `.svg`
  * names a data file (its path, case-insensitive); anything else a script: the path
  * with an optional `.ts`/`.js`, matched case-insensitively against script
- * names (paths) or their legacy key (each segment's other characters → `_`,
- * so `./My_Utils` finds "My Utils"), else (as TypeScript) the .tsx script
- * of that path (`./Panel` and `./Panel.tsx` find "Panel.tsx"). A URL (`https://unpkg.com/x@1.2.3`)
+ * names (paths), else (as TypeScript) the .tsx script of that path (`./Panel` and `./Panel.tsx` find "Panel.tsx"). A URL (`https://unpkg.com/x@1.2.3`)
  * is a package import (shared/packageImports), never a script path.
  */
 import { builtinSpec, jsxImportSource, usesJsx } from "./builtinSpecs";
@@ -106,14 +104,6 @@ export function importPath(importer: string, spec: string): string | null {
     return out.length ? out.join("/") : null;
 }
 
-function legacyKey(path: string): string {
-    return path
-        .split("/")
-        .map((seg) => seg.replace(/[^a-zA-Z0-9_-]+/g, "_"))
-        .join("/")
-        .toLowerCase();
-}
-
 export type ResolvedImport = { kind: "script"; name: string } | { kind: "data"; path: string };
 
 /**
@@ -123,13 +113,7 @@ export type ResolvedImport = { kind: "script"; name: string } | { kind: "data"; 
  */
 export function importResolver(scriptNames: Iterable<string>, dataPaths: Iterable<string> = []): (importer: string, spec: string) => ResolvedImport | undefined {
     const scripts = new Map<string, string>();
-    for (const n of scriptNames) {
-        // a .tsx script's keys keep the .tsx (`./My_Panel` → "my_panel" + ".tsx" finds "My Panel.tsx")
-        const tsx = /\.tsx$/i.test(n);
-        const stem = tsx ? n.slice(0, -4) : n;
-        const ext = tsx ? ".tsx" : "";
-        for (const k of [legacyKey(stem) + ext, n.toLowerCase()]) if (!scripts.has(k)) scripts.set(k, n);
-    }
+    for (const n of scriptNames) if (!scripts.has(n.toLowerCase())) scripts.set(n.toLowerCase(), n);
     const data = new Map<string, string>();
     for (const p of dataPaths) if (!data.has(p.toLowerCase())) data.set(p.toLowerCase(), p);
     return (importer, spec) => {

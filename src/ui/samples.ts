@@ -16,7 +16,7 @@ export function sampleStrategies(code: string): string[] {
     const out = new Set<string>();
     for (const route of code.matchAll(/strategy:([^}\n]*)/g)) for (const name of route[1].matchAll(/"(\w+)"/g)) out.add(name[1]);
     const list = [...out].sort();
-    if (code.includes("wt.onOverlay(") || /\bdom:\s*"overlay"/.test(code)) list.push("overlay");
+    if (/\bdom:\s*"overlay"/.test(code)) list.push("overlay");
     if (!list.length && code.includes("wt.onPage(")) list.push("onPage");
     return list;
 }

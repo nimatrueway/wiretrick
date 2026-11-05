@@ -1,5 +1,5 @@
 /**
- * Chrome MV3: the runtime for one script's `world: "isolated"` onPage code,
+ * Chrome MV3: the runtime for one script's `js: "isolated"` onPage code,
  * in a `chrome.userScripts` USER_SCRIPT world (background/userScripts.ts
  * registers it after a one-line prelude naming the script). The world
  * shares the page's DOM, not its JavaScript, and the page can't reach it.
@@ -139,7 +139,7 @@ import { makePageEvaluate } from "../shared/pageEval";
 
     /** once per document: tags its Network row with this script */
     const ran = new Set<string>();
-    function noteRan(api: "onPage" | "onDocument", name: string): void {
+    function noteRan(api: "onPage", name: string): void {
         if (ran.has(api)) return;
         ran.add(api);
         linkUp().then(
@@ -206,9 +206,9 @@ import { makePageEvaluate } from "../shared/pageEval";
                 () => {
                     try {
                         firePageHandler(d, { url: location.href, method: "GET", tabUrl: location.href, resourceType: "main_frame", requestHeaders: {}, groups: {}, evaluate }, exposer);
-                        noteRan(d.route.api === "onPage" ? "onPage" : "onDocument", init.name);
+                        noteRan("onPage", init.name);
                     } catch (e: any) {
-                        log("error", formatScriptError(init.name, e, d.route.api || "onDocument"));
+                        log("error", formatScriptError(init.name, e, "onPage"));
                     }
                 },
                 hot

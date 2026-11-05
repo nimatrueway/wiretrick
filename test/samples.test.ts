@@ -6,7 +6,7 @@ import "../src/shared/transpile";
 import { compileScript } from "../src/shared/compile";
 import { SAMPLES, sampleStrategies, sampleSummary, sampleTryUrl } from "../src/ui/samples";
 
-// built-in imports (react, valtio) only run inside onOverlay handlers, which compiling doesn't call
+// built-in imports (react, valtio) only run inside overlay handlers, which compiling doesn't call
 const stubImports = { importModule: () => ({}) };
 
 /** type errors in a sample, checked like the Editor does (wt-api.d.ts, strict, the built-in React) */
@@ -50,7 +50,7 @@ describe("bundled samples", () => {
 
 describe("sample helpers", () => {
     it("the type check catches a wrong call", () => {
-        expect(typeErrors(`const p = wt.onPage("*://a/*", () => ({ n: () => 1 }));\nwt.onOverlay("*://a/*", async () => { const s: string = await p.n(); });`)).toHaveLength(1);
+        expect(typeErrors(`const p = wt.onPage("*://a/*", () => ({ n: () => 1 }));\nwt.onPage({ url: "*://a/*", dom: "overlay" }, async () => { const s: string = await p.n(); });`)).toHaveLength(1);
         expect(typeErrors(`import { useState } from "react";\nconst [n] = useState(0);\nconst el = <div>{n}</div>;`)).toEqual([]);
     });
     it("reads the Try it URL", () => {
@@ -61,7 +61,7 @@ describe("sample helpers", () => {
         expect(sampleStrategies(`wt.onRequest({ url: "*://a/*", strategy: "rules" }, f);`)).toEqual(["rules"]);
         expect(sampleStrategies(`wt.onResponseBody({ url: "*://a/*", strategy: wt.isFirefox ? "extension" : "debugger" }, f);`)).toEqual(["debugger", "extension"]);
         expect(sampleStrategies(`wt.onPage("*://a/*", () => {});`)).toEqual(["onPage"]);
-        expect(sampleStrategies(`wt.onRequest({ url: "*://a/*", strategy: "page" }, f);\nwt.onPage("*://a/*", f);\nwt.onOverlay("*://a/*", f);`)).toEqual(["page", "overlay"]);
+        expect(sampleStrategies(`wt.onRequest({ url: "*://a/*", strategy: "page" }, f);\nwt.onPage("*://a/*", f);\nwt.onPage({ url: "*://a/*", dom: "overlay" }, f);`)).toEqual(["page", "overlay"]);
         expect(sampleStrategies(`wt.onPage({ url: "*://a/*", dom: "overlay" }, f);`)).toEqual(["overlay"]);
     });
     it("drops the Try it sentence from the blurb", () => {

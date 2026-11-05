@@ -1,6 +1,6 @@
 /**
  * L2 for overlays: what a page's bridge may do for a script's overlay
- * (wt.onOverlay) over its `wt-bridge` port — get the script's code, use
+ * (`dom: "overlay"`) over its `wt-bridge` port — get the script's code, use
  * its stores, `wt.fetch` from the background, and bypass page fetches.
  *
  * A renderer may be compromised, so the bridge is only trusted as far as
@@ -9,7 +9,7 @@
  * overlay matching the page (a URL on the frame's own origin). Other
  * scripts' code and stores stay out of reach.
  *
- * L6 (Chrome MV3): a script's `world: "isolated"` onPage code runs in a
+ * L6 (Chrome MV3): a script's `js: "isolated"` onPage code runs in a
  * `chrome.userScripts` world (background/userScripts.ts, hook/isolated.ts)
  * whose port comes here. It gets its code (`iso.load`, only where the
  * script has isolated onPage code for the frame's URL), its Log lines and

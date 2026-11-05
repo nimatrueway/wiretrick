@@ -167,8 +167,6 @@ export function splitStoreKey(key: string): { name: string; page?: string } {
     return i < 0 ? { name: key } : { name: key.slice(0, i), page: key.slice(i + 1) };
 }
 
-export const STORE_RENAMED = "wt.store was renamed: use wt.globalStore (one copy shared by every tab) or wt.pageStore (one copy per page)";
-
 /** `wt.globalStore`'s `persist` option, checked */
 export function storePersist(name: string, opts: unknown): StorePersist {
     if (opts === undefined || opts === null) return true;

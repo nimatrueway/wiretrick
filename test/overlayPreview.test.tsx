@@ -161,10 +161,10 @@ describe("preview host (state/preview.ts)", () => {
     });
 
     it("says why there's nothing to preview, and opens again when the link drops", async () => {
-        bg.failOpen("the script has no wt.onOverlay handler");
+        bg.failOpen("the script has no overlay handler");
         mod.showPreview("s1");
         await tick();
-        expect(mod.preview).toMatchObject({ status: "error", message: "the script has no wt.onOverlay handler", nonce: "" });
+        expect(mod.preview).toMatchObject({ status: "error", message: "the script has no overlay handler", nonce: "" });
         bg.failOpen("");
         bg.links[0].close("service worker restarted");
         await tick(700);

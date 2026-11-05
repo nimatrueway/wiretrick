@@ -497,10 +497,7 @@ describe("wt.pageStore", () => {
         expect(t.owner.get("s1", "ps", "p1")).toBeUndefined();
     });
 
-    it("wt.store is renamed; one name can't be both a global and a page store", () => {
-        const logs: string[] = [];
-        const c = compileScript(`wt.store("x", { n: 1 });`, { logSink: (_l, _s, m) => logs.push(m) });
-        expect(c.error ?? logs.join("\n")).toMatch(/wt\.globalStore/);
+    it("one name can't be both a global and a page store", () => {
         const d = compileScript(`wt.globalStore("x", { n: 1 }); wt.pageStore("x", { n: 1 });`);
         expect(String(d.error)).toMatch(/already has a store named/);
     });

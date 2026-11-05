@@ -19,7 +19,7 @@ import { builtinModule } from "./builtins";
 import { builtinSpec } from "./builtinSpecs";
 import { proxy } from "valtio/vanilla";
 import { ReplicaHub } from "./storeReplica";
-import { STORE_RENAMED, claimStoreName, storePersist } from "./storeOps";
+import { claimStoreName, storePersist } from "./storeOps";
 import type { StorePersist, WireRequest, WireResponse } from "./wire";
 import { fromWireResponse, splitFetchInit, toWireRequest, type WtFetchInit } from "./wtFetch";
 
@@ -42,9 +42,9 @@ export interface ScriptHandlers {
     onResponseHeaders: Routed[];
     replaceResponse: Routed[];
     onResponseBody: Routed[];
-    /** wt.onPage / wt.onDocument: run in the page — DOM/title manipulation (route.when = timing, route.world) */
+    /** wt.onPage: run in the page — DOM/title manipulation (route.when = timing, route.world) */
     onDocument: Routed[];
-    /** wt.onOverlay: run in the script's overlay frame above the page */
+    /** wt.onPage({ dom: "overlay" }): run in the script's overlay frame above the page */
     onOverlay: Routed[];
 }
 
@@ -86,7 +86,7 @@ export interface ResApiOverrides {
     fetch?: (request: WireRequest, bypass: boolean) => Promise<WireResponse>;
     /** `wt.fetch(…, { from: "page" })`, then the default `from` (the overlay); `url` resolves relative URLs */
     pageFetch?: { url: string; fetch: (request: WireRequest, bypass: boolean) => Promise<WireResponse> };
-    /** what `wt.onPage` / `wt.onOverlay` registration number `index` returns (default: an inert handle) */
+    /** what `wt.onPage` registration number `index` (of its kind) returns (default: an inert handle) */
     remote?: (kind: "onDocument" | "onOverlay", index: number) => any;
 }
 
@@ -595,7 +595,7 @@ function makeFetch(overrides?: ResApiOverrides): (input: RequestInfo | URL, init
         const { init: rest, from, bypass } = splitFetchInit(init);
         const page = overrides?.pageFetch;
         if (page && from !== "background") return fromWireResponse(await page.fetch(await toWireRequest(input, rest, page.url), bypass));
-        if (from === "page") throw new Error('wt.fetch: from: "page" fetches as the page, which only an overlay (wt.onOverlay) can do — background code uses from: "background"');
+        if (from === "page") throw new Error('wt.fetch: from: "page" fetches as the page, which only an overlay (wt.onPage({ dom: "overlay" })) can do — background code uses from: "background"');
         if (!overrides?.fetch) return fetch(input, { credentials: "include", ...rest });
         return fromWireResponse(await overrides.fetch(await toWireRequest(input, rest), bypass));
     };
@@ -617,13 +617,10 @@ function guardStoreKeys(storage: { get(key: string): any; set(key: string, value
 }
 
 function makeShim(owner: ReturnType<typeof createOwner>, overrides?: ResApiOverrides): any {
-    // the labels' numbers: wt.onPage / wt.onDocument calls (either kind), wt.onOverlay calls
-    const calls = { page: 0, overlay: 0 };
-    const registerPage = (api: "onPage" | "onDocument") => (route: unknown, fn: unknown) => {
-        const kind = pageCallKind(route);
-        return register(kind, api === "onPage" || kind === "onOverlay" ? api : undefined, "page")(route, fn);
-    };
-    const register = (kind: RouteKind, api?: "onPage" | "onDocument", counter?: keyof typeof calls) => (route: unknown, fn: unknown) => {
+    // the labels' numbers: wt.onPage calls (either kind)
+    let pageCalls = 0;
+    const onPage = (route: unknown, fn: unknown) => register(pageCallKind(route), "onPage")(route, fn);
+    const register = (kind: RouteKind, api?: "onPage") => (route: unknown, fn: unknown) => {
         const name = api || kind;
         const top = collectors[collectors.length - 1];
         // page/overlay registrations hand back an RPC handle; in the background it's inert
@@ -641,8 +638,8 @@ function makeShim(owner: ReturnType<typeof createOwner>, overrides?: ResApiOverr
         const r: RouteMeta = mentionsStub(route) ? { kind, index: list.length, url: [], exclude: [], ...(api ? { api } : {}) } : normalizeRoute(kind, route, list.length, api);
         const line = callerLine();
         if (line) r.line = line;
-        if (counter) {
-            const n = calls[counter]++;
+        if (api) {
+            const n = pageCalls++;
             if (n !== r.index) r.n = n;
         }
         list.push({ fn: fn as HandlerFn, route: r });
@@ -653,9 +650,7 @@ function makeShim(owner: ReturnType<typeof createOwner>, overrides?: ResApiOverr
         onResponseHeaders: register("onResponseHeaders"),
         replaceResponse: register("replaceResponse"),
         onResponseBody: register("onResponseBody"),
-        onPage: registerPage("onPage"),
-        onDocument: registerPage("onDocument"),
-        onOverlay: register("onOverlay", undefined, "overlay"),
+        onPage,
         metadata: (m: unknown) => owner.metadata(m),
         params: (defs: Record<string, ParamDef>) => {
             const values = owner.add(defs, "wt.params");
@@ -670,28 +665,25 @@ function makeShim(owner: ReturnType<typeof createOwner>, overrides?: ResApiOverr
             set: () => undefined,
         }, overrides),
         ...makeStores(overrides),
-        store: () => {
-            throw new Error(STORE_RENAMED);
-        },
         fetch: makeFetch(overrides),
         log: (...args: any[]) => (overrides?.logSink ? overrides.logSink("info", "wt.log", formatLogArgs(args)) : console.log("[Wiretrick] wt.log:", ...args)),
         ...scriptEnv(),
     };
 }
 
-/** a `wt.onPage` / `wt.onOverlay` call that isn't at the script's top level */
+/** a `wt.onPage` call that isn't at the script's top level */
 export interface RegistrationProblem {
-    api: "onPage" | "onOverlay";
+    api: "onPage";
     /** the call's 1-based line */
     line: number;
-    /** 0-based: which `wt.<api>(` call of the source it is (onPage counts onDocument too) */
+    /** 0-based: which `wt.onPage(` call of the source it is */
     nth: number;
 }
 
 const NESTING = /\b(?:if|else|for|while|do|switch|try|catch|finally)\b|=>|&&|\|\||\?/;
 
 /**
- * `wt.onPage` / `wt.onOverlay` calls that aren't plain top-level
+ * `wt.onPage` calls that aren't plain top-level
  * statements (inside a function, block, condition or loop): the page and
  * the overlay match handles by registration order, so a registration that
  * runs in one context and not the other would mix them up. A lightweight
@@ -699,7 +691,7 @@ const NESTING = /\b(?:if|else|for|while|do|switch|try|catch|finally)\b|=>|&&|\|\
  */
 export function registrationProblems(code: string): RegistrationProblem[] {
     const out: RegistrationProblem[] = [];
-    const counts = { onPage: 0, onOverlay: 0 };
+    let count = 0;
     let depth = 0;
     let line = 1;
     /** depth-0 text since the last statement boundary */
@@ -765,11 +757,7 @@ export function registrationProblems(code: string): RegistrationProblem[] {
                         k++;
                     }
                     const sub = code.slice(i + 2, k - 1);
-                    for (const m of sub.matchAll(/\bwt\s*\.\s*(onPage|onDocument|onOverlay)\s*(?:<[^()]*>\s*)?\(/g)) {
-                        const api = m[1] === "onOverlay" ? "onOverlay" : "onPage";
-                        if (m[1] !== "onDocument") out.push({ api, line, nth: counts[api] });
-                        counts[api]++;
-                    }
+                    for (const _ of sub.matchAll(/\bwt\s*\.\s*onPage\s*(?:<[^()]*>\s*)?\(/g)) out.push({ api: "onPage", line, nth: count++ });
                     i = k;
                     continue;
                 }
@@ -789,11 +777,10 @@ export function registrationProblems(code: string): RegistrationProblem[] {
             if (depth === 0) stmt += "0";
             continue;
         }
-        const call = c === "w" && /^wt\s*\.\s*(onPage|onDocument|onOverlay)\s*(?:<[^()]*>\s*)?\(/.exec(code.slice(i, i + 40));
+        const call = c === "w" && /^wt\s*\.\s*onPage\s*(?:<[^()]*>\s*)?\(/.test(code.slice(i, i + 40));
         if (call && !/[\w$.]/.test(code[i - 1] || "")) {
-            const api = call[1] === "onOverlay" ? "onOverlay" : "onPage";
-            if (call[1] !== "onDocument" && (depth > 0 || NESTING.test(stmt))) out.push({ api, line, nth: counts[api] });
-            counts[api]++;
+            if (depth > 0 || NESTING.test(stmt)) out.push({ api: "onPage", line, nth: count });
+            count++;
         }
         if (c === "{" || c === "(" || c === "[") depth++;
         else if (c === "}" || c === ")" || c === "]") {
@@ -900,18 +887,18 @@ function codeOnly(code: string): string {
 
 /** what a page-world onPage handler touches that only isolated-world code may */
 export interface MainWorldUse {
-    /** 0-based: which `wt.onPage(` call of the source it is (counts onDocument too) */
+    /** 0-based: which `wt.onPage(` call of the source it is */
     nth: number;
     /** the stores it uses: the variable names (or `wt.pageStore` / `wt.globalStore`), by kind */
     pageStore: string[];
     globalStore: string[];
-    /** the onOverlay handles it uses */
+    /** the overlay handles (`wt.onPage({ dom: "overlay" })`) it uses */
     overlay: string[];
 }
 
 /**
  * Per `wt.onPage(` call, the stores (`wt.pageStore` / `wt.globalStore`)
- * and overlay handles (`wt.onOverlay`) its arguments use — by the
+ * and overlay handles (`wt.onPage({ dom: "overlay" })`) its arguments use — by the
  * top-level variables they're bound to, or the calls themselves. Only
  * calls that use any. A lightweight scan, not a parser: a local that
  * shadows a store's name counts too.
@@ -919,18 +906,18 @@ export interface MainWorldUse {
 export function onPageUses(code: string): MainWorldUse[] {
     const src = codeOnly(code);
     const bound = new Map<string, "pageStore" | "globalStore" | "overlay">();
-    for (const m of src.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;]+)?=\s*wt\s*\.\s*(pageStore|globalStore|onOverlay|onPage|onDocument)\b/g)) {
+    for (const m of src.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;]+)?=\s*wt\s*\.\s*(pageStore|globalStore|onPage)\b/g)) {
         // wt.onPage({ dom: "overlay" }, …): an overlay handle (its route: up to the handler)
-        if (m[2] === "onPage" || m[2] === "onDocument") {
+        if (m[2] === "onPage") {
             // (`src` blanks string contents; same offsets in `code` keep them)
             const from = m.index! + m[0].length;
             const route = code.slice(from, from + src.slice(from).split(/=>|\bfunction\b/)[0].length);
             if (/^\s*(?:<[^()]*>\s*)?\(\s*\{[^]*?\bdom\s*:\s*["'`]overlay["'`]/.test(route)) bound.set(m[1], "overlay");
-        } else bound.set(m[1], m[2] === "onOverlay" ? "overlay" : (m[2] as "pageStore" | "globalStore"));
+        } else bound.set(m[1], m[2] as "pageStore" | "globalStore");
     }
     const out: MainWorldUse[] = [];
     let nth = 0;
-    for (const m of src.matchAll(/(?<![\w$.])wt\s*\.\s*on(?:Page|Document)\s*(?:<[^()]*>\s*)?\(/g)) {
+    for (const m of src.matchAll(/(?<![\w$.])wt\s*\.\s*onPage\s*(?:<[^()]*>\s*)?\(/g)) {
         const from = m.index! + m[0].length;
         let depth = 1;
         let to = from;
@@ -996,7 +983,7 @@ export function evaluateProblems(code: string): string[] {
     const src = codeOnly(code);
     const out: string[] = [];
     let nth = 0;
-    for (const m of src.matchAll(/(?<![\w$.])wt\s*\.\s*on(?:Page|Document)\s*(?:<[^()]*>\s*)?\(/g)) {
+    for (const m of src.matchAll(/(?<![\w$.])wt\s*\.\s*onPage\s*(?:<[^()]*>\s*)?\(/g)) {
         nth++;
         const start = m.index! + m[0].length;
         const end = closeOf(src, start) - 1;
@@ -1044,13 +1031,13 @@ export function evaluateProblems(code: string): string[] {
  * nothing (overlay calls) — only isolated-world code may.
  */
 export function mainWorldProblems(code: string, routes: RouteMeta[]): string[] {
-    if (!/\bwt\s*\.\s*(?:pageStore|globalStore|onOverlay)\b|\bdom\s*:\s*["'`]overlay/.test(code)) return [];
+    if (!/\bwt\s*\.\s*(?:pageStore|globalStore)\b|\bdom\s*:\s*["'`]overlay/.test(code)) return [];
     const uses = onPageUses(code);
     if (!uses.length) return [];
     const fix = (r: RouteMeta) =>
         isPageLayer(r)
             ? 'drop js: "page" (the overlay then runs in its own frame, where stores and handles work)'
-            : `${r.api === "onPage" ? 'drop js: "page"' : 'use wt.onPage and drop world: "page"'} (onPage runs in the isolated world by default; read the page with ctx.evaluate)`;
+            : 'drop js: "page" (onPage runs in the isolated world by default; read the page with ctx.evaluate)';
     const names = (n: string[]) => n.map((x) => `\`${x}\``).join(", ");
     const out: string[] = [];
     for (const r of routes) {
@@ -1063,7 +1050,7 @@ export function mainWorldProblems(code: string, routes: RouteMeta[]): string[] {
                 `${at}your script also accesses pageStore (${names(u.pageStore)}) inside onPage, ${MAIN_WORLD_DISALLOWED} (the page could read and forge it). Changing the request strategy alone won't resolve those accesses. Switching to globalStore would lose per-page isolation and still wouldn't make a one-time rules callback track requests — ${fix(r)}`
             );
         if (u.globalStore.length) out.push(`${at}your script also accesses globalStore (${names(u.globalStore)}) inside onPage, ${MAIN_WORLD_DISALLOWED} (the page could read and forge it) — ${fix(r)}`);
-        if (u.overlay.length) out.push(`${at}accessing onOverlay (${names(u.overlay)}) inside onPage, ${MAIN_WORLD_DISALLOWED} (the page could call the overlay too) — ${fix(r)}`);
+        if (u.overlay.length) out.push(`${at}accessing the overlay (${names(u.overlay)}) inside onPage, ${MAIN_WORLD_DISALLOWED} (the page could call the overlay too) — ${fix(r)}`);
     }
     return out;
 }

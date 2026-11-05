@@ -25,12 +25,11 @@ describe("import paths", () => {
         expect(importPath("main", "../x")).toBeNull();
     });
 
-    it("matches scripts by path or legacy key, data files by path, case-insensitively", () => {
+    it("matches scripts and data files by path, case-insensitively", () => {
         const r = importResolver(["My Utils", "mock/Helpers", "lib/a b"], ["mock/Rate-Limits.json"]);
-        expect(r("main", "./My_Utils")).toEqual({ kind: "script", name: "My Utils" });
         expect(r("main", "./my utils.ts")).toEqual({ kind: "script", name: "My Utils" });
         expect(r("mock/x", "./helpers")).toEqual({ kind: "script", name: "mock/Helpers" });
-        expect(r("mock/x", "../lib/a_b.js")).toEqual({ kind: "script", name: "lib/a b" });
+        expect(r("mock/x", "../lib/a b.js")).toEqual({ kind: "script", name: "lib/a b" });
         expect(r("main", "./mock/rate-limits.json")).toEqual({ kind: "data", path: "mock/Rate-Limits.json" });
         expect(r("mock/x", "./rate-limits.json")).toEqual({ kind: "data", path: "mock/Rate-Limits.json" });
         expect(r("main", "./rate-limits.json")).toBeUndefined();

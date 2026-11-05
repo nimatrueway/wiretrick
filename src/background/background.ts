@@ -9,7 +9,6 @@ import { RulesStrategy } from "./engine/strategies/rulesStrategy";
 import { createPipeline } from "./engine/pipeline";
 import { startPackageUpdates } from "./engine/packages";
 import { ENTRY_URL_RE } from "../shared/packageSource";
-import { runMigrations } from "./migration";
 import { addUiPort, clearTab, clearLogHistory, log, noteRan, broadcastEntry, broadcastToUi, clearScriptErrors, setScriptTypeErrors } from "./engine/logs";
 import { onScriptsChanged, listScripts, refreshStaleMeta } from "./engine/scriptStore";
 import { dlog, dlogLevel, getDebugBuffer, pushEntry, clearDebugBuffer, setSink } from "../shared/debugLog";
@@ -42,11 +41,7 @@ const debuggerStrategy = new DebuggerStrategy();
 const helperStrategy = new HelperStrategy();
 helperStrategy.onStatus = (status) => broadcastToUi({ type: "processStatus", status });
 
-// one-time rewrite of stored scripts/settings to the renamed API; the
-// pipeline waits for it before loading scripts (listeners register now)
-const migrated = runMigrations().catch((e) => dlogLevel("bg", "error", `migration failed: ${e?.message || e}`));
-
-createPipeline(extensionStrategy, pageStrategy, debuggerStrategy, helperStrategy, new RulesStrategy(), updateTabBadge, noteRequestForBadge, migrated);
+createPipeline(extensionStrategy, pageStrategy, debuggerStrategy, helperStrategy, new RulesStrategy(), updateTabBadge, noteRequestForBadge);
 
 // ---- local helper controls for the Editor ----
 chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
@@ -68,10 +63,10 @@ chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
 });
 
 // ---- synced folder (watching runs here: persistent page, never throttled) ----
-void migrated.then(() => folderSync.initFromStorage());
+void folderSync.initFromStorage();
 chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
     if (msg && msg.type === "hookCspBlocked" && _s && _s.tab && _s.tab.id !== undefined) {
-        dlogLevel("bg", "info", "page CSP blocks compiling scripts in the page — onDocument runs in the isolated world in this tab", { tabId: _s.tab.id });
+        dlogLevel("bg", "info", "page CSP blocks compiling scripts in the page — page-world onPage code runs in the isolated world in this tab", { tabId: _s.tab.id });
         sendResponse({});
         return false;
     }

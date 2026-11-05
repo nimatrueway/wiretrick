@@ -42,8 +42,8 @@ describe("importing a .tsx script", () => {
         expect(name("main", "./ui/Panel.tsx")).toBe("ui/Panel.tsx");
         expect(name("main", "./ui/Panel.js")).toBe("ui/Panel.tsx");
         expect(name("ui/x", "./panel")).toBe("ui/Panel.tsx");
-        expect(name("main", "./My_Widget")).toBe("My Widget.tsx");
-        expect(name("main", "./My_Widget.tsx")).toBe("My Widget.tsx");
+        expect(name("main", "./My Widget")).toBe("My Widget.tsx");
+        expect(name("main", "./my widget.tsx")).toBe("My Widget.tsx");
     });
 
     it("the .ts script wins over the .tsx one of the same path; .tsx names the .tsx", () => {

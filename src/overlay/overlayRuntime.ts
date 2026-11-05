@@ -6,7 +6,7 @@
  * extension port, never through the page.
  *
  * Here the script's module graph evaluates with network and onPage
- * registrations inert; its onOverlay handlers run at their `when`. Stores
+ * registrations inert; its overlay handlers (`dom: "overlay"`) run at their `when`. Stores
  * are replicas (shared/storeReplica.ts), `fetch` and `wt.fetch` fetch as
  * the page (the bridge does it, with the page's cookies), calls into
  * onPage code and back go through shared/rpc.ts, and the frame reports

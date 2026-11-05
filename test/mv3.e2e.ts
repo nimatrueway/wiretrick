@@ -257,9 +257,9 @@ try {
         const m = (window as any).monaco;
         const ed = m.editor.getEditors()[0];
         const prev = ed.getModel();
-        const model = m.editor.createModel('wt.onDocument({ url: "*", when: "document_idle" }, () => {});\n', "typescript", m.Uri.parse("file:///hover-probe.ts"));
+        const model = m.editor.createModel('wt.onPage({ url: "*", when: "document_idle" }, () => {});\n', "typescript", m.Uri.parse("file:///hover-probe.ts"));
         ed.setModel(model);
-        ed.setPosition({ lineNumber: 1, column: 28 }); // on `when`
+        ed.setPosition({ lineNumber: 1, column: 24 }); // on `when`
         ed.focus();
         let html = "";
         for (let i = 0; i < 40 && !html.includes("<li"); i++) {
@@ -1018,7 +1018,7 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
     check("popup lists scripts on a COLD SW wake (idle restart)", coldItems.includes("MV3 hook.wiretrick"), `swWasUp=${wasSwUp} items=${JSON.stringify(coldItems)} errors=${JSON.stringify(coldErrors.slice(0, 2))}`);
     check("cold popup has no page errors", coldErrors.length === 0, JSON.stringify(coldErrors.slice(0, 3)));
 
-    // ---- MV3 onDocument: document_start handlers run from the cached bundle ----
+    // ---- MV3 onPage: document_start handlers run from the cached bundle ----
     // (MV3 limitation: the bundle answers at SW-wake time — the session
     // analyze cache removes the sandbox round-trip; the cache-hit line
     // proves the fast path)
@@ -1034,21 +1034,21 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
     });
     await warm.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_dom", name: "Early dom.wiretrick",
-        code: `wt.onDocument({ url: "*://*:*/*", when: "document_start", world: "page" }, (ctx) => { document.title = "DOM-RAN:" + document.readyState; });`,
+        code: `wt.onPage({ url: "*://*:*/*", when: "document_start", js: "page" }, (ctx) => { document.title = "DOM-RAN:" + document.readyState; });`,
     }, r)));
     // a second script with its own `when` must not inherit the first's
     await warm.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_idle", name: "Idle dom.wiretrick",
-        code: `wt.onDocument({ url: "*://*:*/*", when: "document_idle", world: "page" }, () => { document.documentElement.dataset.idle = document.readyState; });`,
+        code: `wt.onPage({ url: "*://*:*/*", when: "document_idle", js: "page" }, () => { document.documentElement.dataset.idle = document.readyState; });`,
     }, r)));
     await warm.waitForTimeout(1500); // cache refresh (pipeline reload warm)
     const domPage = await ctx.newPage();
     await domPage.goto(`${ORIGIN}/page`);
     await domPage.waitForFunction(() => document.title.startsWith("DOM-RAN"), null, { timeout: 15000 });
-    check("onDocument document_start runs in MV3", true, await domPage.title());
+    check("onPage document_start runs in MV3", true, await domPage.title());
     await domPage.waitForFunction(() => !!document.documentElement.dataset.idle, null, { timeout: 15000 }).catch(() => null);
     const idleState = await domPage.evaluate(() => document.documentElement.dataset.idle);
-    check("onDocument: each script keeps its own when (document_idle runs after load)", idleState === "complete", String(idleState));
+    check("onPage: each script keeps its own when (document_idle runs after load)", idleState === "complete", String(idleState));
     const cacheHit = await warm.evaluate(() =>
         [...document.querySelectorAll("#log-entries .log-line")].some((l) => (l.textContent || "").includes("analyze cache hit"))
     );

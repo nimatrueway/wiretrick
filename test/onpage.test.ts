@@ -7,33 +7,23 @@ import { inertRemote } from "../src/shared/remote";
 const shim = (world?: "page" | "isolated") => makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined }, world });
 
 describe("wt.onPage", () => {
-    it("is onDocument under a new name, sharing its index sequence", () => {
-        const c = compileScript(`wt.onPage("*://a.com/*", () => {});\nwt.onDocument("*://b.com/*", () => {});`);
+    it("registers kind onDocument, labelled onPage", () => {
+        const c = compileScript(`wt.onPage("*://a.com/*", () => {});\nwt.onPage("*://b.com/*", () => {});`);
         expect(c.error).toBeNull();
         const [a, b] = c.handlers.onDocument.map((h) => h.route);
         expect(a.kind).toBe("onDocument");
         expect(a.api).toBe("onPage");
-        expect(b.api).toBeUndefined();
         expect([a.index, b.index]).toEqual([0, 1]);
-        expect(routeLabel(a)).toContain("onPage");
-        expect(routeLabel(b)).toContain("onDocument");
+        expect([routeLabel(a), routeLabel(b)]).toEqual(["onPage #1", "onPage #2"]);
     });
 
-    it("runs isolated by default; world \"page\" (or its old name \"main\") runs in the page", () => {
-        const c = compileScript(
-            `wt.onPage({ url: "*", world: "isolated" }, () => {});\nwt.onPage({ url: "*", world: "page" }, () => {});\nwt.onPage({ url: "*", world: "main" }, () => {});\nwt.onPage("*", () => {});\nwt.onDocument("*", () => {});`
-        );
+    it("runs isolated by default; js \"page\" runs in the page", () => {
+        const c = compileScript(`wt.onPage({ url: "*", js: "isolated" }, () => {});\nwt.onPage({ url: "*", js: "page" }, () => {});\nwt.onPage("*", () => {});`);
         expect(c.error).toBeNull();
-        const [iso, page, main, plain, legacy] = c.handlers.onDocument.map((h) => h.route);
+        const [iso, page, plain] = c.handlers.onDocument.map((h) => h.route);
         expect(iso.world).toBe("isolated");
         expect("world" in page).toBe(false);
-        expect([iso, page, main, plain, legacy].map(pageWorld)).toEqual(["isolated", "page", "page", "isolated", "isolated"]);
-    });
-
-    it("rejects a bad world, and world on onOverlay/network routes", () => {
-        expect(() => normalizeRoute("onDocument", { url: "*", world: "MAIN" }, 0, "onPage")).toThrow(/wt\.onPage: world must be "isolated" or "page"/);
-        expect(() => normalizeRoute("onOverlay", { url: "*", world: "isolated" }, 0)).toThrow(/world/);
-        expect(() => normalizeRoute("onRequest", { url: "*", world: "isolated" }, 0)).toThrow(/world/);
+        expect([iso, page, plain].map(pageWorld)).toEqual(["isolated", "page", "isolated"]);
     });
 
     it("returns a handle whose calls reject in the background", async () => {
@@ -49,7 +39,7 @@ describe("wt.onPage js / dom / unsafe", () => {
     const code = [
         `wt.onPage({ url: "*", js: "page" }, () => {});`,
         `wt.onPage({ url: "*", dom: "overlay" }, () => {});`,
-        `wt.onOverlay("*", () => {});`,
+        `wt.onPage({ url: "*", dom: "overlay", when: "document_idle" }, () => {});`,
         `wt.onPage({ url: "*", js: "page", dom: "overlay", unsafe: true }, () => {});`,
         `wt.onPage({ url: "*", js: "isolated", dom: "page" }, () => {});`,
     ].join("\n");
@@ -60,32 +50,33 @@ describe("wt.onPage js / dom / unsafe", () => {
         const [page, iso] = c.handlers.onDocument.map((h) => h.route);
         expect(pageWorld(page)).toBe("page");
         expect(pageWorld(iso)).toBe("isolated");
-        const [frame, legacy, layer] = c.handlers.onOverlay.map((h) => h.route);
-        expect([frame.index, legacy.index, layer.index]).toEqual([0, 1, 2]);
-        expect(frame.api).toBe("onPage");
-        expect(legacy.api).toBeUndefined();
-        expect([frame, legacy, layer].map(isPageLayer)).toEqual([false, false, true]);
+        const [frame, idle, layer] = c.handlers.onOverlay.map((h) => h.route);
+        expect([frame.index, idle.index, layer.index]).toEqual([0, 1, 2]);
+        expect([frame.api, idle.api, layer.api]).toEqual(["onPage", "onPage", "onPage"]);
+        expect([frame.when, idle.when]).toEqual(["document_end", "document_idle"]);
+        expect([frame, idle, layer].map(isPageLayer)).toEqual([false, false, true]);
+        expect(isNetKind(frame.kind)).toBe(false);
+        expect(isNetKind("onDocument")).toBe(false);
+        expect(isNetKind("onRequest")).toBe(true);
     });
 
     it("labels number wt.onPage calls in source order, of either kind", () => {
         const c = compileScript(code);
         const labels = c.meta.routes.map((r) => `${routeLabel(r)}@${r.line}`);
-        expect(labels).toEqual(["onPage #1@1", "onPage #4@5", "onPage #2@2", "onOverlay #1@3", "onPage #3@4"]);
+        expect(labels).toEqual(["onPage #1@1", "onPage #5@5", "onPage #2@2", "onPage #3@3", "onPage #4@4"]);
     });
 
     it("js: \"page\" with dom: \"overlay\" needs unsafe: true; unsafe applies to nothing else", () => {
         expect(compileScript(`wt.onPage({ url: "*", js: "page", dom: "overlay" }, () => {});`).error).toMatch(/wt\.onPage: js: "page" with dom: "overlay" .*unsafe: true/);
-        expect(compileScript(`wt.onPage({ url: "*", world: "page", dom: "overlay" }, () => {});`).error).toMatch(/unsafe: true/);
         expect(compileScript(`wt.onPage({ url: "*", dom: "overlay", unsafe: true }, () => {});`).error).toBeNull();
         expect(compileScript(`wt.onPage({ url: "*", js: "page", unsafe: true }, () => {});`).error).toMatch(/"unsafe" applies only to js: "page" with dom: "overlay"/);
     });
 
-    it("rejects bad values, js with world, and the options on wt.onOverlay / network routes", () => {
+    it("rejects bad values, and the options on network routes", () => {
         expect(() => normalizeRoute("onDocument", { url: "*", js: "main" }, 0, "onPage")).toThrow(/js must be "isolated" or "page"/);
         expect(() => normalizeRoute("onDocument", { url: "*", dom: "layer" }, 0, "onPage")).toThrow(/dom must be "page" or "overlay"/);
-        expect(() => normalizeRoute("onDocument", { url: "*", js: "page", world: "page" }, 0, "onPage")).toThrow(/old name of "js"/);
         expect(() => normalizeRoute("onOverlay", { url: "*", unsafe: "yes" }, 0, "onPage")).toThrow(/unsafe must be true or false/);
-        expect(() => normalizeRoute("onOverlay", { url: "*", js: "page" }, 0)).toThrow(/"js" applies to wt\.onPage only/);
+        expect(() => normalizeRoute("onRequest", { url: "*", strategy: "page", js: "page" }, 0)).toThrow(/"js" applies to onPage only/);
         expect(() => normalizeRoute("onRequest", { url: "*", strategy: "page", dom: "overlay" }, 0)).toThrow(/"dom" applies to onPage only/);
     });
 
@@ -93,40 +84,27 @@ describe("wt.onPage js / dom / unsafe", () => {
         const s = shim();
         s.wt.onPage({ url: "*", js: "page" }, () => "page");
         s.wt.onPage({ url: "*", dom: "overlay" }, () => "frame");
-        s.wt.onOverlay("*", () => "legacy");
+        s.wt.onPage({ url: "*", dom: "overlay" }, () => "frame 2");
         s.wt.onPage({ url: "*", js: "page", dom: "overlay", unsafe: true }, () => "layer");
         expect(s.dom.map((d) => d.fn({}))).toEqual(["page"]);
-        expect(s.layers.map((d) => [d.h, d.fn({}), routeLabel(d.route)])).toEqual([["overlay:2", "layer", "onPage #3"]]);
+        expect(s.layers.map((d) => [d.h, d.fn({}), routeLabel(d.route)])).toEqual([["overlay:2", "layer", "onPage #4"]]);
         const iso = shim("isolated");
         iso.wt.onPage({ url: "*", js: "page", dom: "overlay", unsafe: true }, () => {});
         expect(iso.dom).toEqual([]);
     });
 });
 
-describe("wt.onOverlay", () => {
-    it("registers an onOverlay route that is not a network kind", () => {
-        const c = compileScript(`wt.onOverlay({ url: "*://x.com/*", when: "document_idle" }, () => {});`);
-        expect(c.error).toBeNull();
-        expect(c.handlers.onOverlay.length).toBe(1);
-        const r = c.meta.routes.find((x) => x.kind === "onOverlay")!;
-        expect(r.when).toBe("document_idle");
-        expect(isNetKind(r.kind)).toBe(false);
-        expect(isNetKind("onDocument")).toBe(false);
-        expect(isNetKind("onRequest")).toBe(true);
-    });
-});
-
 describe("page shim worlds", () => {
     const src = (wt: any) => {
-        wt.onPage({ url: "*://a.com/*", world: "page" }, () => "page");
+        wt.onPage({ url: "*://a.com/*", js: "page" }, () => "page");
         wt.onPage("*://a.com/*", () => "iso");
-        wt.onDocument({ url: "*://a.com/*", world: "main" }, () => "legacy");
+        wt.onPage({ url: "*://a.com/*", js: "page" }, () => "page 2");
     };
 
     it("page collects only page-world handlers, with background-matching indexes", () => {
         const s = shim();
         src(s.wt);
-        expect(s.dom.map((d) => d.fn({}))).toEqual(["page", "legacy"]);
+        expect(s.dom.map((d) => d.fn({}))).toEqual(["page", "page 2"]);
         expect(s.dom.map((d) => d.route.index)).toEqual([0, 2]);
     });
 
@@ -137,9 +115,9 @@ describe("page shim worlds", () => {
         expect(domHandlersFor(s.dom, "https://b.com/").length).toBe(0);
     });
 
-    it("onOverlay handles reject; the page world says why", async () => {
-        await expect(shim().wt.onOverlay("*", () => {}).ping()).rejects.toThrow(/isolated/);
-        await expect(shim("isolated").wt.onOverlay("*", () => {}).ping()).rejects.toThrow(/overlay/);
+    it("overlay handles reject; the page world says why", async () => {
+        await expect(shim().wt.onPage({ url: "*", dom: "overlay" }, () => {}).ping()).rejects.toThrow(/isolated/);
+        await expect(shim("isolated").wt.onPage({ url: "*", dom: "overlay" }, () => {}).ping()).rejects.toThrow(/overlay/);
     });
 
     it("store can be declared at top level but not used; fetch rejects", async () => {

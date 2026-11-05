@@ -24,7 +24,7 @@ describe("normalizeRoute", () => {
         expect(() => normalizeRoute("onDocument", { url: "*", when: "later" }, 0)).toThrow(/when must be one of/);
         expect(() => normalizeRoute("onDocument", { url: "*", when: "DOMContentLoaded" }, 0)).toThrow(/when must be one of document_start, document_end, document_idle$/);
         expect(() => normalizeRoute("onDocument", { url: "*", methods: ["GET"] }, 0)).toThrow(/doesn't apply to onDocument/);
-        expect(() => normalizeRoute("onRequest", { url: "*", when: "document_idle" }, 0)).toThrow(/onPage\/onOverlay only/);
+        expect(() => normalizeRoute("onRequest", { url: "*", when: "document_idle" }, 0)).toThrow(/"when" applies to onPage only/);
     });
 
     it("network handlers require a strategy: bare patterns and strategy-less objects throw", () => {
@@ -102,14 +102,14 @@ describe("strategy", () => {
     });
 });
 
-describe("page shim (onDocument in the page)", () => {
+describe("page shim (onPage in the page)", () => {
     const shim = () => makePageShim({ world: "isolated", params: { host: "a.com", n: 3 }, log: () => {}, storage: { get: () => undefined, set: () => undefined } });
 
-    it("collects several onDocument handlers with routes; network handlers are inert", () => {
+    it("collects several onPage handlers with routes; network handlers are inert", () => {
         const { wt, dom } = shim();
         wt.onRequest({ url: "*", strategy: "helper" }, () => {});
-        wt.onDocument({ url: "*://a.com/*", when: "document_idle" }, () => 1);
-        wt.onDocument("*://b.com/*", () => 2);
+        wt.onPage({ url: "*://a.com/*", when: "document_idle" }, () => 1);
+        wt.onPage("*://b.com/*", () => 2);
         expect(dom.map((d) => [d.when, d.route.index])).toEqual([
             ["document_idle", 0],
             ["document_end", 1],
@@ -122,7 +122,7 @@ describe("page shim (onDocument in the page)", () => {
         const { wt } = shim();
         expect(wt.params({ host: { type: "string" } })).toEqual({ host: "a.com" });
         expect(wt.defineParam("n", { type: "number" })).toBe(3);
-        expect(() => wt.onDocument("*")).toThrow(/second argument/);
+        expect(() => wt.onPage("*")).toThrow(/second argument/);
     });
 });
 

@@ -1,4 +1,4 @@
-// The onPage / onOverlay typings (wt-api.d.ts): handles infer the other
+// The onPage typings (wt-api.d.ts): handles infer the other
 // side's functions both ways. The expectTypeOf block is checked by
 // `npm run typecheck`; the negative cases compile snippets here.
 import { describe, it, expect, expectTypeOf } from "vitest";
@@ -19,7 +19,7 @@ function typings() {
     // @ts-expect-error no such function
     void page.nope();
 
-    const overlay = wt.onOverlay("*://example.com/*", (ctx) => {
+    const overlay = wt.onPage({ url: "*://example.com/*", dom: "overlay" }, (ctx) => {
         expectTypeOf(ctx.url).toBeString();
         expectTypeOf(ctx.onNavigate).toEqualTypeOf<(fn: (url: string) => void) => () => void>();
         const off: () => void = ctx.shortcut("Mod+K", async () => {}, { priority: "after-page" });
@@ -35,12 +35,8 @@ function typings() {
     expectTypeOf(none).toEqualTypeOf<{}>();
     const str = wt.onPage("*", () => "hi");
     expectTypeOf(str).toEqualTypeOf<{}>();
-    const el = wt.onDocument("*", () => document.body);
+    const el = wt.onPage("*", () => document.body);
     expectTypeOf(el).toEqualTypeOf<{}>();
-    // world is onPage's only
-    wt.onPage({ url: "*", world: "isolated" }, () => {});
-    // @ts-expect-error onOverlay has no world
-    wt.onOverlay({ url: "*", world: "isolated" }, () => {});
     // from: "page" fetch options type-check
     void wt.fetch("/api", { from: "page", bypass: true });
 }
@@ -60,12 +56,12 @@ function errorsOf(snippet: string): string[] {
     return ts.getPreEmitDiagnostics(program, program.getSourceFile("/snippet.ts")).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"));
 }
 
-describe("onPage / onOverlay typings", () => {
+describe("onPage typings", () => {
     it("infers argument and result types both ways", () => {
         expect(
             errorsOf(`
 const page = wt.onPage("*", () => ({ count: (sel: string) => 1 }));
-wt.onOverlay("*", async () => { const n: number = await page.count("a"); return { picked: (t: string) => t }; });
+wt.onPage({ url: "*", dom: "overlay" }, async () => { const n: number = await page.count("a"); return { picked: (t: string) => t }; });
 `)
         ).toEqual([]);
     });
@@ -74,13 +70,6 @@ wt.onOverlay("*", async () => { const n: number = await page.count("a"); return 
         expect(errorsOf(`const page = wt.onPage("*", () => ({ count: (sel: string) => 1 }));\nvoid page.count(1);`)).toHaveLength(1);
         expect(errorsOf(`const page = wt.onPage("*", () => ({ count: (sel: string) => 1 }));\nvoid page.nope();`)).toHaveLength(1);
         expect(errorsOf(`const page = wt.onPage("*", () => ({ count: (sel: string) => 1 }));\nasync function f() { const s: string = await page.count("a"); }`)).toHaveLength(1);
-    });
-
-    it("world is accepted by onPage only", () => {
-        expect(errorsOf(`wt.onPage({ url: "*", world: "isolated" }, () => {});`)).toEqual([]);
-        expect(errorsOf(`wt.onOverlay({ url: "*", world: "isolated" }, () => {});`)).toHaveLength(1);
-        expect(errorsOf(`wt.onPage({ url: "*", world: "page" }, () => {});`)).toEqual([]);
-        expect(errorsOf(`wt.onPage({ url: "*", world: "top" }, () => {});`)).toHaveLength(1);
     });
 
     it("js / dom / unsafe pick the route form and the ctx", () => {
@@ -95,14 +84,15 @@ wt.onOverlay("*", async () => { const n: number = await page.count("a"); return 
         expect(errorsOf(`wt.onPage({ url: "*", js: "page" }, (ctx) => void ctx.onNavigate(() => {}));`)).toHaveLength(1);
         expect(errorsOf(`wt.onPage({ url: "*", dom: "layer" }, () => {});`)).toHaveLength(1);
         expect(errorsOf(`wt.onPage({ url: "*", js: "main" }, () => {});`)).toHaveLength(1);
+        expect(errorsOf(`wt.onPage({ url: "*", world: "page" }, () => {});`)).toHaveLength(1);
     });
 
-    it("onDocument handlers returning nothing, a string or an Element still compile", () => {
-        expect(errorsOf(`wt.onDocument("*", () => {});\nwt.onDocument("*", () => "x");\nwt.onDocument("*", () => document.body);\nwt.onDocument("*", async () => {});`)).toEqual([]);
+    it("onPage handlers returning nothing, a string or an Element still compile", () => {
+        expect(errorsOf(`wt.onPage("*", () => {});\nwt.onPage("*", () => "x");\nwt.onPage("*", () => document.body);\nwt.onPage("*", async () => {});`)).toEqual([]);
     });
 
     it("ctx.onNavigate and ctx.shortcut are the overlay's only", () => {
-        expect(errorsOf(`wt.onOverlay("*", (ctx) => { const off: () => void = ctx.onNavigate((u: string) => {}); off(); });`)).toEqual([]);
+        expect(errorsOf(`wt.onPage({ url: "*", dom: "overlay" }, (ctx) => { const off: () => void = ctx.onNavigate((u: string) => {}); off(); });`)).toEqual([]);
         expect(errorsOf(`wt.onPage("*", (ctx) => { ctx.onNavigate(() => {}); });`)).toHaveLength(1);
         expect(errorsOf(`wt.onPage("*", (ctx) => { ctx.shortcut("Alt+K", () => {}); });`)).toHaveLength(1);
     });

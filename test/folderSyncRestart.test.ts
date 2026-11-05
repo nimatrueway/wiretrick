@@ -167,7 +167,7 @@ describe("scripts folder sync", () => {
         const ss = await import("../src/background/engine/scriptStore");
         const s = (await ss.listScripts())[0];
         sync.halt();
-        await ss.saveScript({ id: s.id, code: s.code, name: "Panel.tsx" }); // e.g. the .tsx migration
+        await ss.saveScript({ id: s.id, code: s.code, name: "Panel.tsx" });
         vi.resetModules();
         sync = await import("../src/background/folderSync");
         await sync.startFromStoredHandle(); // resume

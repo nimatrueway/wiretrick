@@ -1,5 +1,5 @@
 /**
- * Handles returned by `wt.onPage` / `wt.onOverlay`: the other side's
+ * Handles returned by `wt.onPage`: the other side's
  * functions as async calls (`await page.highlight("a")`). Where a call
  * can't go anywhere (background code, or a world that may not call), the
  * handle is inert: every method rejects with the reason. Live handles are

@@ -81,12 +81,12 @@ describe("script API", () => {
         expect(compileScript(`wt.onRequest(() => {});`).error).toMatch(/first argument must be a route \{ url, strategy \}/);
         expect(compileScript(`wt.onRequest("*", () => {});`).error).toMatch(/bare URL pattern has no strategy/);
         expect(compileScript(`wt.onRequest({ url: "*" }, () => {});`).error).toMatch(/missing "strategy"/);
-        expect(compileScript(`wt.onDocument("*", () => {});`).error).toBeNull();
+        expect(compileScript(`wt.onPage("*", () => {});`).error).toBeNull();
         expect(compileScript(`wt.onRequest({ match: "*", strategy: "helper" }, () => {});`).error).toMatch(/"url", not "match"/);
         expect(compileScript(`wt.onRequest({ url: "*", strategy: ["page", "debugger"] }, () => {});`).error).toMatch(/single value/);
         expect(compileScript(`wt.onRequest({ url: "*", strategy: "auto" }, () => {});`).error).toMatch(/unknown strategy/);
         expect(compileScript(`wt.onRequest({ url: "*", resourceTypes: ["nope"], strategy: "helper" }, () => {});`).error).toMatch(/unknown resource type/);
-        expect(compileScript(`wt.onDocument({ url: "*", strategy: "page" }, () => {});`).error).toMatch(/doesn't apply to onDocument/);
+        expect(compileScript(`wt.onPage({ url: "*", strategy: "page" }, () => {});`).error).toMatch(/doesn't apply to onPage/);
         expect(compileScript(`wt.onRequest({ url: "*", strategy: "helper" }, 1);`).error).toMatch(/second argument/);
     });
 

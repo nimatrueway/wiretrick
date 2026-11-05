@@ -36,9 +36,6 @@ export async function currentSettingsState(): Promise<{ globals: GlobalSettings;
     return { globals, scripts };
 }
 
-/** chrome.storage key of the removed settings.defaultStrategy (migration v3 deletes it) */
-export const STRATEGY_KEY = "resStrategy";
-
 /** chrome.storage key of settings.textTypes (absent: DEFAULT_TEXT_TYPES) */
 export const TEXT_TYPES_KEY = "resTextTypes";
 

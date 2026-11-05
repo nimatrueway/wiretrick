@@ -1,5 +1,5 @@
 /**
- * Chrome MV3: `world: "isolated"` onPage code runs in a `chrome.userScripts`
+ * Chrome MV3: `js: "isolated"` onPage code runs in a `chrome.userScripts`
  * USER_SCRIPT world — the only place an MV3 extension may run code from a
  * string. Each script with isolated onPage handlers is registered once
  * (`wt-iso-<scriptId>`, every frame, `document_start`): a one-line prelude
@@ -34,7 +34,7 @@ const STATUS_TTL_MS = 2000;
 /** a script with isolated onPage handlers */
 export interface IsoScript {
     id: string;
-    /** its `world: "isolated"` onPage routes (the runtime only connects where one matches) */
+    /** its `js: "isolated"` onPage routes (the runtime only connects where one matches) */
     routes: RouteMeta[];
 }
 

@@ -176,7 +176,7 @@ Isolation — two settings: js (which JavaScript the code shares) and dom (which
   isolated      default             the overlay (its own frame)
   page          the site's world    needs unsafe: true
 
-js: "page" with dom: "overlay" runs the overlay's code in the site's JavaScript world, drawing in its own document (a transparent frame in a closed shadow root over the page; document is that frame's, window the site's): the site's globals are at hand, but the site can see, call and tamper with it — no stores, no calls to or from it, and it doesn't run where the page's CSP forbids eval. The Preview tab runs it in its frame. world: "isolated" | "page" is js's old name; wt.onOverlay(route, fn) is the old name of dom: "overlay".
+js: "page" with dom: "overlay" runs the overlay's code in the site's JavaScript world, drawing in its own document (a transparent frame in a closed shadow root over the page; document is that frame's, window the site's): the site's globals are at hand, but the site can see, call and tamper with it — no stores, no calls to or from it, and it doesn't run where the page's CSP forbids eval. The Preview tab runs it in its frame.
 
 ctx.evaluate(fn, ...args) — from isolated code, run fn in the site's own world and get its (awaited) result: read the site's globals without leaving the isolated world. fn is sent as source — it can't use the script's variables, so pass them as args; arguments and result are plain data, except functions (also inside plain objects and arrays): those are callbacks fn can call (also later, from the site's events) to run code back in isolated code, with copied arguments. The site can see the call and fake the answer: check what comes back, never pass secrets. Rejects where the page's CSP forbids eval.
 
@@ -265,7 +265,6 @@ wt.onRequest({ url: "https://api.example.com/*", strategy: "helper" }, (ctx) => 
 - a navigation's own requests belong to the page being left; requests from no page get a throwaway copy of initial
 - not kept across browser restarts; not in rules handlers
 - both stores: live in onPage code, like the overlay — except js: "page" code (the page could read and forge them; the Problems view warns, with a quick fix)
-- wt.store was renamed wt.globalStore; calling it throws
 
 wt.fetch(url, init) — fetch for scripts. In handlers it runs in the background with the extension's host permissions (no CORS) and the browser's cookies; in an overlay it fetches as the page by default (from: "background" to switch). bypass: true keeps every script's handlers — this one's too — off the request, e.g. to get the real response a mock replaces:
 

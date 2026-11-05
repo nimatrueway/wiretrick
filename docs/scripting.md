@@ -431,9 +431,7 @@ import { mockJson } from "utils";            // bare: resolved from the root
 ```
 
 The `.ts`/`.tsx`/`.js` extension is optional (with both `x.ts` and `x.tsx`,
-`./x` is the `.ts` one) and matching is case-insensitive. A
-segment may also be written with every character other than letters,
-digits, `_` and `-` replaced by `_` (`./My_Utils` finds "My Utils").
+`./x` is the `.ts` one) and matching is case-insensitive.
 
 A **data file** is a JSON or SVG file in the explorer (`.json`, `.svg`); it
 never runs, scripts import it by its path:
@@ -573,7 +571,6 @@ wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, (ctx) => {
   rules rebuilt) when the store changes.
 - The saved copy lives in `wt.storage` as `"$store:<name>"`; change the
   store, not that key (writing it logs a warning).
-- `wt.store` was renamed `wt.globalStore` (0.11); calling it throws.
 
 ### `wt.pageStore`
 
@@ -677,8 +674,7 @@ JSX (`<div />`) goes in a `.tsx` script — one whose name ends in `.tsx`,
 like `ui/Panel.tsx` (create or rename it with the extension; a plain
 script's `.ts` is implied). It compiles with React's automatic runtime, so
 components need no `import React`. JSX in a `.ts` script is an error with a
-**Rename to Name.tsx** quick fix; scripts saved with JSX before `.tsx`
-existed were renamed once, settings included. They work in `wt.onPage`
+**Rename to Name.tsx** quick fix. The built-ins work in `wt.onPage`
 code too (the default isolated world: React loads into it on first use,
 and handlers that import it start once it has), but not with
 `js: "page"`, where using one throws.
@@ -752,8 +748,7 @@ timing:
    - **Live edits re-run immediately**, regardless of `when`, when you save
      the script with the page open — keep handlers idempotent.
    - **Async handlers** aren't awaited; `when` only sets when they start.
-   - **`js`** — which JavaScript world the handler runs in (`world` is
-     its old name, still accepted):
+   - **`js`** — which JavaScript world the handler runs in:
 
      | `js` | Sees | The page | May use |
      |---|---|---|---|
@@ -864,9 +859,8 @@ Clicking the box changes `mock.enabled`; the next `/api/me` request sees
 it right away, and the value survives restarts.
 
 - **Route.** The same as any `wt.onPage` (`{ url, exclude, when, dom:
-  "overlay" }`), matched against the tab's top page. `wt.onOverlay(route,
-  fn)` is its old name, still accepted. Overlays exist in the top
-  frame only.
+  "overlay" }`), matched against the tab's top page. Overlays exist in
+  the top frame only.
 - **One overlay per script per tab.** Every matching overlay handler of
   the script runs in the same frame, in registration order, sharing the
   script's top-level variables. The frame is created at the earliest
@@ -984,7 +978,7 @@ wt.onPage({ url: "*://app.example.com/*", dom: "overlay" }, async () => {
     closed, the script reloaded, the page navigated).
 - **Top frame only.** The overlay talks to the script's `onPage` code in
   the top frame.
-- **Register at top level.** `wt.onPage` (and `wt.onOverlay`) must be called
+- **Register at top level.** `wt.onPage` must be called
   at the top level of the script (not inside a function, `if` or loop), so
   both sides number their handlers the same way; Problems flags a call
   elsewhere. Handles from an imported library don't connect.

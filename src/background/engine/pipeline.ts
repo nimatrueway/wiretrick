@@ -107,9 +107,7 @@ export function createPipeline(
     helperStrategy: HelperStrategy,
     rulesStrategy: RulesStrategy,
     updateTabBadge?: (tabId: number, url: string | undefined) => Promise<void>,
-    noteRequestForBadge?: (tabId: number, url: string, newPage?: boolean) => number,
-    /** resolves once startup migrations ran — scripts aren't loaded before */
-    ready: Promise<unknown> = Promise.resolve()
+    noteRequestForBadge?: (tabId: number, url: string, newPage?: boolean) => number
 ): Pipeline {
     const tabUrls = new Map<number, string>();
 
@@ -585,7 +583,7 @@ export function createPipeline(
     async function hookBundle(url: string, top: boolean, preview?: string) {
         // main-world onPage scripts (hook.ts; the bridge when CSP blocks eval)
         const domHandlers: { scriptId: string; name: string; src: string; params: Record<string, any> }[] = [];
-        // `world: "isolated"` onPage scripts: never shipped to the page's own world.
+        // `js: "isolated"` onPage scripts: never shipped to the page's own world.
         // MV3 runs them in chrome.userScripts worlds that load the code from
         // the owner (`isoRuns`): the bridge only learns their handles, to
         // relay the overlay's calls
@@ -596,7 +594,6 @@ export function createPipeline(
         const overlayRuns = new Map<string, OverlayRun>();
         const overlayDeps = new Map<string, Set<string>>();
         const routes: RouteMeta[] = [];
-        await ready;
         await loadTextTypes();
         const pageScripts = await listScripts();
         const paramValues = await loadAllParamValues();
@@ -973,7 +970,7 @@ export function createPipeline(
     let rulesApplied: Promise<unknown> = Promise.resolve();
     /** the reloadSeq of the last reload that applied the scripts */
     let settledSeq = 0;
-    /** enabled scripts with `world: "isolated"` onPage code (the Editor's "user scripts are off" banner) */
+    /** enabled scripts with `js: "isolated"` onPage code (the Editor's "user scripts are off" banner) */
     let isoScriptCount = 0;
     /** reload and wait until the current scripts are fully applied, rules included */
     async function settle(): Promise<void> {
@@ -995,7 +992,6 @@ export function createPipeline(
     }
     async function reloadNow(): Promise<void> {
         const seq = ++reloadSeq;
-        await ready;
         await loadTextTypes();
         await loadDataFiles();
         await loadPackages();

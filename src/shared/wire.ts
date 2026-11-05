@@ -130,7 +130,7 @@ export interface WireOps {
      */
     "iso.stores": { req: { url: string }; res: {} };
     /** L6: this world's onPage code ran on its document (tags the document's Network row) */
-    ran: { push: { api: "onPage" | "onDocument"; name: string } };
+    ran: { push: { api: "onPage"; name: string } };
     /** L6: scripts changed: load again, re-run when the code hash moved */
     "iso.update": { push: {} };
     /** L2: a call between script `s`'s overlay (via the top-frame bridge) and its isolated-world code (via the owner) */
@@ -148,7 +148,7 @@ export interface WireOps {
     "preview.open": { req: { nonce: string; url: string }; res: { url: string; name: string; handlers: number; matching: number } };
 }
 
-/** what a user-script world needs to run a script's `world: "isolated"` onPage code */
+/** what a user-script world needs to run a script's `js: "isolated"` onPage code */
 export interface IsoInit {
     s: string;
     name: string;

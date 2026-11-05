@@ -8,19 +8,18 @@ import { jsxImportSource, usesJsx } from "../src/shared/builtinSpecs";
 import { importSpecs, makeLibRequire } from "../src/shared/scriptImports";
 import { tsconfigText } from "../src/shared/generatedFiles";
 
-describe("registration check (wt.onPage / wt.onOverlay at the top level)", () => {
+describe("registration check (wt.onPage at the top level)", () => {
     it("accepts top-level registrations, including assigned and exported ones", () => {
         const code = [
             `const page = wt.onPage("*", () => ({ a: () => 1 }));`,
-            `export const overlay = wt.onOverlay({ url: "*", when: "document_idle" }, (ctx) => {`,
+            `export const overlay = wt.onPage({ url: "*", dom: "overlay", when: "document_idle" }, (ctx) => {`,
             `    if (ctx.url) { return { f: () => 2 }; }`,
             `});`,
-            `wt.onDocument("*", () => {})`,
             `wt.onPage<{ x(): void }>(`,
             `    "*",`,
             `    () => ({ x() {} })`,
             `)`,
-            `const s = "wt.onPage(inside a string)"; // wt.onOverlay( in a comment`,
+            `const s = "wt.onPage(inside a string)"; // wt.onPage( in a comment`,
             `/* if (x) wt.onPage("*", f) */`,
         ].join("\n");
         expect(registrationProblems(code)).toEqual([]);
@@ -32,26 +31,22 @@ describe("registration check (wt.onPage / wt.onOverlay at the top level)", () =>
             `function later() {`,
             `    wt.onPage("*", () => {});`, // onPage #2
             `}`,
-            `if (location.host) wt.onOverlay("*", () => {});`, // onOverlay #1
+            `if (location.host) wt.onPage({ url: "*", dom: "overlay" }, () => {});`, // onPage #3
             `for (const u of ["a"]) {`,
-            `    wt.onPage(u, () => {});`, // onPage #3
+            `    wt.onPage(u, () => {});`, // onPage #4
             `}`,
-            `setTimeout(() => wt.onOverlay("*", () => {}));`, // onOverlay #2
-            `const h = cond ? wt.onPage("*", f) : null;`, // onPage #4
-            `ok && wt.onPage("*", f);`, // onPage #5
+            `setTimeout(() => wt.onPage({ url: "*", dom: "overlay" }, () => {}));`, // onPage #5
+            `const h = cond ? wt.onPage("*", f) : null;`, // onPage #6
+            `ok && wt.onPage("*", f);`, // onPage #7
         ].join("\n");
         expect(registrationProblems(code)).toEqual([
             { api: "onPage", line: 3, nth: 1 },
-            { api: "onOverlay", line: 5, nth: 0 },
-            { api: "onPage", line: 7, nth: 2 },
-            { api: "onOverlay", line: 9, nth: 1 },
-            { api: "onPage", line: 10, nth: 3 },
-            { api: "onPage", line: 11, nth: 4 },
+            { api: "onPage", line: 5, nth: 2 },
+            { api: "onPage", line: 7, nth: 3 },
+            { api: "onPage", line: 9, nth: 4 },
+            { api: "onPage", line: 10, nth: 5 },
+            { api: "onPage", line: 11, nth: 6 },
         ]);
-    });
-
-    it("counts onDocument calls in the onPage sequence without reporting them", () => {
-        expect(registrationProblems(`if (x) { wt.onDocument("*", f); }\nif (y) wt.onPage("*", f);`)).toEqual([{ api: "onPage", line: 2, nth: 1 }]);
     });
 
     it("scans template literal code", () => {
@@ -73,35 +68,33 @@ describe("page-world onPage handlers using stores or overlay handles (route warn
     const code = [
         `const g = wt.globalStore("g", { n: 0 });`,
         `const ps: { hits: number } = wt.pageStore("ps", { hits: 0 });`,
-        `const ov = wt.onOverlay("*", () => ({ ping: () => 1 }));`,
-        `wt.onPage({ url: "*", world: "page" }, () => { document.title = String(ps.hits); });`, // #1 page: pageStore
-        `wt.onPage("*", () => { g.n++; ps.hits++; ov.ping(); });`, // #2 isolated (the default): fine
-        `wt.onPage({ url: "*", world: "main" }, async () => { await ov.ping(); g.n = wt.pageStore("x", {}).y; });`, // #3 page ("main", the old name): all three
-        `wt.onPage({ url: "*", world: "page" }, () => { const o = { g: 1, ps: 2 }; console.log("g ps ov", o.g, /ov/); /* ps */ });`, // #4 keys, strings, comments: nothing
-        "wt.onDocument({ url: \"*\", world: \"page\" }, () => { document.title = `${g.n}`; });", // #5 template code counts
+        `const ov = wt.onPage({ url: "*", dom: "overlay" }, () => ({ ping: () => 1 }));`, // #1 the overlay
+        `wt.onPage({ url: "*", js: "page" }, () => { document.title = String(ps.hits); });`, // #2 page: pageStore
+        `wt.onPage("*", () => { g.n++; ps.hits++; ov.ping(); });`, // #3 isolated (the default): fine
+        `wt.onPage({ url: "*", js: "page" }, async () => { await ov.ping(); g.n = wt.pageStore("x", {}).y; });`, // #4 page: all three
+        `wt.onPage({ url: "*", js: "page" }, () => { const o = { g: 1, ps: 2 }; console.log("g ps ov", o.g, /ov/); /* ps */ });`, // #5 keys, strings, comments: nothing
+        "wt.onPage({ url: \"*\", js: \"page\" }, () => { document.title = `${g.n}`; });", // #6 template code counts
     ].join("\n");
 
     it("finds, per onPage call, the stores and overlay handles its handler uses", () => {
         expect(onPageUses(code)).toEqual([
-            { nth: 0, pageStore: ["ps"], globalStore: [], overlay: [] },
-            { nth: 1, pageStore: ["ps"], globalStore: ["g"], overlay: ["ov"] },
-            { nth: 2, pageStore: ["wt.pageStore"], globalStore: ["g"], overlay: ["ov"] },
-            { nth: 4, pageStore: [], globalStore: ["g"], overlay: [] },
+            { nth: 1, pageStore: ["ps"], globalStore: [], overlay: [] },
+            { nth: 2, pageStore: ["ps"], globalStore: ["g"], overlay: ["ov"] },
+            { nth: 3, pageStore: ["wt.pageStore"], globalStore: ["g"], overlay: ["ov"] },
+            { nth: 5, pageStore: [], globalStore: ["g"], overlay: [] },
         ]);
     });
 
     it("warns for page-world handlers only, in the API's words, with the isolated-world fix", () => {
         const c = compileScript(code);
         expect(c.error).toBeNull();
-        const routes = c.handlers.onDocument.map((h) => h.route);
-        const w = mainWorldProblems(code, routes);
-        expect(w.map((m) => m.slice(0, m.indexOf(":")))).toEqual(["onPage #1", "onPage #3", "onPage #3", "onPage #3", "onDocument #5"]);
+        const w = mainWorldProblems(code, c.meta.routes);
+        expect(w.map((m) => m.slice(0, m.indexOf(":")))).toEqual(["onPage #2", "onPage #4", "onPage #4", "onPage #4", "onPage #6"]);
         expect(w[0]).toContain("your script also accesses pageStore (`ps`) inside onPage, which the API explicitly disallows in the page world");
         expect(w[0]).toContain("Changing the request strategy alone won't resolve those accesses. Switching to globalStore would lose per-page isolation and still wouldn't make a one-time rules callback track requests");
         expect(w[2]).toContain("your script also accesses globalStore (`g`) inside onPage, which the API explicitly disallows in the page world");
-        expect(w[3]).toContain("accessing onOverlay (`ov`) inside onPage, which the API explicitly disallows in the page world");
-        for (const m of w.slice(0, 4)) expect(m).toContain('drop js: "page"');
-        expect(w[4]).toContain("use wt.onPage and drop world");
+        expect(w[3]).toContain("accessing the overlay (`ov`) inside onPage, which the API explicitly disallows in the page world");
+        for (const m of w) expect(m).toContain('drop js: "page"');
     });
 
     it("covers the page-world overlay, numbered among wt.onPage calls, and dom: \"overlay\" handles", () => {
@@ -116,7 +109,7 @@ describe("page-world onPage handlers using stores or overlay handles (route warn
         expect(c.error).toBeNull();
         const w = mainWorldProblems(src, c.meta.routes);
         expect(w.map((m) => m.slice(0, m.indexOf(":")))).toEqual(["onPage #2", "onPage #3"]);
-        expect(w[0]).toContain("accessing onOverlay (`ov`)");
+        expect(w[0]).toContain("accessing the overlay (`ov`)");
         expect(w[1]).toContain("pageStore (`ps`)");
         expect(w[1]).toContain("the overlay then runs in its own frame");
     });
@@ -128,7 +121,7 @@ describe("page-world onPage handlers using stores or overlay handles (route warn
 
 describe(".tsx scripts", () => {
     it("compile with the built-in React's automatic runtime", () => {
-        const code = `import { useState } from "react";\nwt.onOverlay("*", () => {});\nexport const App = ({ n }: { n: number }) => <div className="x">{n}<></></div>;`;
+        const code = `import { useState } from "react";\nwt.onPage({ url: "*", dom: "overlay" }, () => {});\nexport const App = ({ n }: { n: number }) => <div className="x">{n}<></></div>;`;
         expect(usesJsx(code)).toBe(true);
         expect(importSpecs(code).has("react/jsx-runtime")).toBe(true);
         const js = toRunnableJs(code);
