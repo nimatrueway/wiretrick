@@ -74,6 +74,8 @@ describe("page-world overlay.fn()", () => {
         // the deprecated wt.onDocument becomes wt.onPage
         expect(fix(`wt.onDocument({ url: "https://a/*", world: "page" }, (x) => x.overlay.pick());`)).toBe(`wt.onPage({ url: "https://a/*", world: "isolated" }, (x) => x.overlay.pick());`);
         expect(fix(`wt.onDocument("https://a/*", (x) => x.overlay.pick());`)).toBe(`wt.onPage("https://a/*", (x) => x.overlay.pick());`);
+        expect(fix(`wt.onPage({ url: "https://a/*", js: "page" }, (x) => x.overlay.pick());`)).toBe(`wt.onPage({ url: "https://a/*", js: "isolated" }, (x) => x.overlay.pick());`);
+        expect(fix(`wt.onPage({ url: "https://a/*", js: "page", dom: "overlay", unsafe: true }, (x) => x.overlay.pick());`)).toBe(`wt.onPage({ url: "https://a/*", js: "isolated", dom: "overlay", unsafe: true }, (x) => x.overlay.pick());`);
     });
     it("picks the nearest handler and gives up on what it can't rewrite", () => {
         const two = `wt.onPage({ url: "https://a/*", world: "page" }, () => {});\nwt.onPage({ url: "https://b/*", world: "page" }, (x) => x.overlay.pick());`;
@@ -88,7 +90,7 @@ describe("page-world overlay.fn()", () => {
         const code = `const ps = wt.pageStore("ps", { n: 0 });\nwt.onPage({ url: "https://a/*", world: "page" }, () => {\n    ps.n++;\n});`;
         const msg = mainWorldProblems(code, compileScript(code).handlers.onDocument.map((h) => h.route))[0];
         expect(msg).toContain(MAIN_WORLD_DISALLOWED);
-        expect(msg).toContain('drop world: "page"');
+        expect(msg).toContain('drop js: "page"');
         expect(mainWorldProblems(code.replace(', world: "page"', ""), compileScript(code.replace(', world: "page"', "")).handlers.onDocument.map((h) => h.route))).toEqual([]);
         const [g] = collectProblems([script("a", { code, routeWarnings: [msg], routes: compileScript(code).handlers.onDocument.map((h) => h.route) })], none);
         const p = g.problems[0] as any;

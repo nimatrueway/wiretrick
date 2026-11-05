@@ -28,7 +28,7 @@ import { resolveBrowser } from "./browserSetup";
 import { checkApiTypingsNav } from "./apiTypingsNav";
 import { checkRulesStrategy, rulesServerRoute } from "./rulesE2e";
 import { checkFoldersAndDataFiles, foldersServerRoute } from "./foldersE2e";
-import { checkOverlayPreview, checkOverlays, checkEarlyRequests, checkOverlayShortcuts, checkPageStores, checkIsoStores, overlayServerRoute } from "./overlayE2e";
+import { checkOnPageDom, checkOverlayPreview, checkOverlays, checkEarlyRequests, checkOverlayShortcuts, checkPageStores, checkIsoStores, overlayServerRoute } from "./overlayE2e";
 
 const EXT_ROOT = path.join(new URL("..", import.meta.url).pathname, "dist-mv3");
 // unpacked extension id = sha256 of the absolute path (hex digits → a-p)
@@ -339,6 +339,7 @@ try {
         });
         await checkPageStores(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
         await checkIsoStores(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
+        await checkOnPageDom(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
         await checkEarlyRequests(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
         await checkOverlayShortcuts(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
         await checkOverlayPreview(ctx, mgr, ORIGIN, check, { label: " (MV3)" });

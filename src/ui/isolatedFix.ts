@@ -2,7 +2,8 @@
  * The quick fix for a page-world `overlay.fn()` call: run the `wt.onPage`
  * handler it's in in the isolated world (onPage's default). Rewrites the
  * nearest `wt.onPage(` / `wt.onDocument(` before the call: its route's
- * `world: "page"` (or the old `"main"`) becomes `world: "isolated"`, and the
+ * `js: "page"` becomes `js: "isolated"` (the old `world: "page"` / `"main"`:
+ * `world: "isolated"`), and the
  * deprecated `wt.onDocument` (always the page's world) becomes `wt.onPage`.
  */
 
@@ -43,8 +44,8 @@ export function isolatedRouteEdit(code: string, offset: number): { start: number
     const end = skip(code, at);
     if (end < 0) return null;
     const route = code.slice(at, end);
-    const world = route[0] === "{" ? /\bworld\s*:\s*(["'`])(?:main|page)\1/.exec(route) : null;
-    const edit = world ? { start: at + world.index, end: at + world.index + world[0].length, text: 'world: "isolated"' } : null;
+    const world = route[0] === "{" ? /\b(js|world)\s*:\s*(["'`])(?:main|page)\2/.exec(route) : null;
+    const edit = world ? { start: at + world.index, end: at + world.index + world[0].length, text: `${world[1]}: "isolated"` } : null;
     if (rename < 0) return edit;
     // one contiguous edit: from the API name through the route
     const name = { start: rename, end: rename + "onDocument".length, text: "onPage" };

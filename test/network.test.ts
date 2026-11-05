@@ -213,7 +213,7 @@ describe("network recorder", () => {
         noteRan(7, "s3", "Bad", "onPage", "chrome://settings");
         expect(entries.get("1")!.outcomes).toMatchObject([
             { scriptId: "s1", scriptName: "Page x", action: "onPage ran", kind: "observed" },
-            { scriptId: "s2", scriptName: "Panel", action: "onOverlay shown", kind: "observed" },
+            { scriptId: "s2", scriptName: "Panel", action: "overlay shown", kind: "observed" },
         ]);
         expect(entries.get("2")!.outcomes).toMatchObject([{ scriptId: "s2", action: "fetched by its overlay", kind: "observed" }]);
         expect(entries.size).toBe(2);

@@ -100,8 +100,25 @@ describe("page-world onPage handlers using stores or overlay handles (route warn
         expect(w[0]).toContain("Changing the request strategy alone won't resolve those accesses. Switching to globalStore would lose per-page isolation and still wouldn't make a one-time rules callback track requests");
         expect(w[2]).toContain("your script also accesses globalStore (`g`) inside onPage, which the API explicitly disallows in the page world");
         expect(w[3]).toContain("accessing onOverlay (`ov`) inside onPage, which the API explicitly disallows in the page world");
-        for (const m of w) expect(m).toContain('drop world: "page"');
+        for (const m of w.slice(0, 4)) expect(m).toContain('drop js: "page"');
         expect(w[4]).toContain("use wt.onPage and drop world");
+    });
+
+    it("covers the page-world overlay, numbered among wt.onPage calls, and dom: \"overlay\" handles", () => {
+        const src = [
+            `const ps = wt.pageStore("ps", { n: 0 });`,
+            `const ov = wt.onPage({ url: "*", dom: "overlay" }, () => ({ pick: () => 1 }));`,
+            `wt.onPage({ url: "*", js: "page" }, () => { void ov.pick(); });`,
+            `wt.onPage({ url: "*", js: "page", dom: "overlay", unsafe: true }, () => { ps.n++; });`,
+            `wt.onPage({ url: "*", dom: "overlay" }, () => { ps.n++; });`,
+        ].join("\n");
+        const c = compileScript(src);
+        expect(c.error).toBeNull();
+        const w = mainWorldProblems(src, c.meta.routes);
+        expect(w.map((m) => m.slice(0, m.indexOf(":")))).toEqual(["onPage #2", "onPage #3"]);
+        expect(w[0]).toContain("accessing onOverlay (`ov`)");
+        expect(w[1]).toContain("pageStore (`ps`)");
+        expect(w[1]).toContain("the overlay then runs in its own frame");
     });
 
     it("says nothing for scripts without stores or overlays", () => {

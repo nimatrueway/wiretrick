@@ -11,12 +11,12 @@ export function sampleTryUrl(code: string): string | null {
     return code.match(/\/\/ Try it: open (https:\/\/\S+)/)?.[1] ?? null;
 }
 
-/** the strategies a sample's routes name, then "onOverlay" when it draws an overlay ("onPage" when it has only page handlers) */
+/** the strategies a sample's routes name, then "overlay" when it draws one ("onPage" when it has only page handlers) */
 export function sampleStrategies(code: string): string[] {
     const out = new Set<string>();
     for (const route of code.matchAll(/strategy:([^}\n]*)/g)) for (const name of route[1].matchAll(/"(\w+)"/g)) out.add(name[1]);
     const list = [...out].sort();
-    if (code.includes("wt.onOverlay(")) list.push("onOverlay");
+    if (code.includes("wt.onOverlay(") || /\bdom:\s*"overlay"/.test(code)) list.push("overlay");
     if (!list.length && code.includes("wt.onPage(")) list.push("onPage");
     return list;
 }
@@ -122,8 +122,8 @@ wt.replaceResponse({ url: "*://dummyjson.com/users/:id", strategy: "page" }, (ct
     role: "admin",
 }));
 
-// the demo: a fetch made from dummyjson.com's own page (world: "page", so the "page" strategy sees it)
-wt.onPage({ url: "https://dummyjson.com/", world: "page" }, async () => {
+// the demo: a fetch made from dummyjson.com's own page (js: "page", so the "page" strategy sees it)
+wt.onPage({ url: "https://dummyjson.com/", js: "page" }, async () => {
     const out = document.createElement("pre");
     out.style.cssText = "margin: 0; padding: 8px; font: 14px monospace; color: #fff; background: #2a7";
     document.body.prepend(out);
@@ -145,8 +145,8 @@ wt.onResponseBody({ url: "*://dummyjson.com/todos/*", strategy: "page" }, (ctx, 
     return JSON.stringify(json, null, 2);
 });
 
-// the demo: a fetch made from dummyjson.com's own page (world: "page", so the "page" strategy sees it)
-wt.onPage({ url: "https://dummyjson.com/", world: "page" }, async () => {
+// the demo: a fetch made from dummyjson.com's own page (js: "page", so the "page" strategy sees it)
+wt.onPage({ url: "https://dummyjson.com/", js: "page" }, async () => {
     const out = document.createElement("pre");
     out.style.cssText = "margin: 0; padding: 8px; font: 14px monospace; color: #fff; background: #27a";
     document.body.prepend(out);
@@ -210,12 +210,12 @@ wt.replaceResponse({ url: "*://dummyjson.com/users/:id", strategy: "page" }, (ct
 );
 
 // functions the panel calls in the page's own world (the "page" strategy sees only the page's own fetches)
-const page = wt.onPage({ url: "https://dummyjson.com/*", world: "page" }, () => ({
+const page = wt.onPage({ url: "https://dummyjson.com/*", js: "page" }, () => ({
     user: () => fetch("/users/1").then((r) => r.json()),
 }));
 
 // the panel, drawn in this script's overlay: the page can't see or restyle it
-wt.onOverlay("https://dummyjson.com/*", () => {
+wt.onPage({ url: "https://dummyjson.com/*", dom: "overlay" }, () => {
     function Panel() {
         const snap = useSnapshot(mock);
         const [user, setUser] = useState("");
@@ -255,7 +255,7 @@ const page = wt.onPage("*://en.wikipedia.org/wiki/*", () => {
 });
 
 // runs in this script's overlay (plain DOM here; React works too)
-wt.onOverlay("*://en.wikipedia.org/wiki/*", async (ctx) => {
+wt.onPage({ url: "*://en.wikipedia.org/wiki/*", dom: "overlay" }, async (ctx) => {
     const nav = document.body.appendChild(document.createElement("nav"));
     nav.id = "wt-outline";
     nav.style.cssText = "position: fixed; right: 16px; top: 80px; max-height: 70vh; overflow: auto; padding: 8px 12px; font: 13px system-ui; background: #fff; border: 1px solid #ccc; border-radius: 8px; box-shadow: 0 2px 8px #0003";

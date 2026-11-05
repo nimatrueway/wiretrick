@@ -1,5 +1,5 @@
 /**
- * The Editor's Preview tab: one script's overlay (wt.onOverlay) in an
+ * The Editor's Preview tab: one script's overlay (dom: "overlay") in an
  * `overlay.html` frame over a checkerboard "page", as if on a URL the
  * user picks. This module is the frame's host — what a page's bridge is
  * to a page's overlay (hook/bridge.ts) — over L5: a `wt-preview` port to
@@ -34,7 +34,7 @@ export const preview = proxy({
     name: "",
     /** what `ctx.url` is in the preview */
     url: "",
-    /** the script's onOverlay handlers, and how many match `url` */
+    /** the script's overlay handlers, and how many match `url` */
     handlers: 0,
     matching: 0,
     /** page fetches the overlay made, which ran from the background instead */

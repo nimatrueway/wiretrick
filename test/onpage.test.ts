@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { compileScript } from "../src/shared/compile";
 import { makePageShim, domHandlersFor } from "../src/shared/pageShim";
-import { isNetKind, normalizeRoute, pageWorld, routeLabel } from "../src/shared/route";
+import { isNetKind, isPageLayer, normalizeRoute, pageWorld, routeLabel } from "../src/shared/route";
 import { inertRemote } from "../src/shared/remote";
 
 const shim = (world?: "page" | "isolated") => makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined }, world });
@@ -42,6 +42,64 @@ describe("wt.onPage", () => {
         const h = c.exports.h;
         expect(h.then).toBeUndefined();
         await expect(h.f()).rejects.toThrow();
+    });
+});
+
+describe("wt.onPage js / dom / unsafe", () => {
+    const code = [
+        `wt.onPage({ url: "*", js: "page" }, () => {});`,
+        `wt.onPage({ url: "*", dom: "overlay" }, () => {});`,
+        `wt.onOverlay("*", () => {});`,
+        `wt.onPage({ url: "*", js: "page", dom: "overlay", unsafe: true }, () => {});`,
+        `wt.onPage({ url: "*", js: "isolated", dom: "page" }, () => {});`,
+    ].join("\n");
+
+    it("js picks the world, dom: \"overlay\" registers an overlay handler", () => {
+        const c = compileScript(code);
+        expect(c.error).toBeNull();
+        const [page, iso] = c.handlers.onDocument.map((h) => h.route);
+        expect(pageWorld(page)).toBe("page");
+        expect(pageWorld(iso)).toBe("isolated");
+        const [frame, legacy, layer] = c.handlers.onOverlay.map((h) => h.route);
+        expect([frame.index, legacy.index, layer.index]).toEqual([0, 1, 2]);
+        expect(frame.api).toBe("onPage");
+        expect(legacy.api).toBeUndefined();
+        expect([frame, legacy, layer].map(isPageLayer)).toEqual([false, false, true]);
+    });
+
+    it("labels number wt.onPage calls in source order, of either kind", () => {
+        const c = compileScript(code);
+        const labels = c.meta.routes.map((r) => `${routeLabel(r)}@${r.line}`);
+        expect(labels).toEqual(["onPage #1@1", "onPage #4@5", "onPage #2@2", "onOverlay #1@3", "onPage #3@4"]);
+    });
+
+    it("js: \"page\" with dom: \"overlay\" needs unsafe: true; unsafe applies to nothing else", () => {
+        expect(compileScript(`wt.onPage({ url: "*", js: "page", dom: "overlay" }, () => {});`).error).toMatch(/wt\.onPage: js: "page" with dom: "overlay" .*unsafe: true/);
+        expect(compileScript(`wt.onPage({ url: "*", world: "page", dom: "overlay" }, () => {});`).error).toMatch(/unsafe: true/);
+        expect(compileScript(`wt.onPage({ url: "*", dom: "overlay", unsafe: true }, () => {});`).error).toBeNull();
+        expect(compileScript(`wt.onPage({ url: "*", js: "page", unsafe: true }, () => {});`).error).toMatch(/"unsafe" applies only to js: "page" with dom: "overlay"/);
+    });
+
+    it("rejects bad values, js with world, and the options on wt.onOverlay / network routes", () => {
+        expect(() => normalizeRoute("onDocument", { url: "*", js: "main" }, 0, "onPage")).toThrow(/js must be "isolated" or "page"/);
+        expect(() => normalizeRoute("onDocument", { url: "*", dom: "layer" }, 0, "onPage")).toThrow(/dom must be "page" or "overlay"/);
+        expect(() => normalizeRoute("onDocument", { url: "*", js: "page", world: "page" }, 0, "onPage")).toThrow(/old name of "js"/);
+        expect(() => normalizeRoute("onOverlay", { url: "*", unsafe: "yes" }, 0, "onPage")).toThrow(/unsafe must be true or false/);
+        expect(() => normalizeRoute("onOverlay", { url: "*", js: "page" }, 0)).toThrow(/"js" applies to wt\.onPage only/);
+        expect(() => normalizeRoute("onRequest", { url: "*", strategy: "page", dom: "overlay" }, 0)).toThrow(/"dom" applies to onPage only/);
+    });
+
+    it("the page shim counts overlay calls like the background, and collects the page-world overlay apart", () => {
+        const s = shim();
+        s.wt.onPage({ url: "*", js: "page" }, () => "page");
+        s.wt.onPage({ url: "*", dom: "overlay" }, () => "frame");
+        s.wt.onOverlay("*", () => "legacy");
+        s.wt.onPage({ url: "*", js: "page", dom: "overlay", unsafe: true }, () => "layer");
+        expect(s.dom.map((d) => d.fn({}))).toEqual(["page"]);
+        expect(s.layers.map((d) => [d.h, d.fn({}), routeLabel(d.route)])).toEqual([["overlay:2", "layer", "onPage #3"]]);
+        const iso = shim("isolated");
+        iso.wt.onPage({ url: "*", js: "page", dom: "overlay", unsafe: true }, () => {});
+        expect(iso.dom).toEqual([]);
     });
 });
 
@@ -104,7 +162,7 @@ describe("page shim worlds", () => {
         expect(() => iso.wt.pageStore("a", {})).toThrow(/already has a store named "a"/);
         expect(() => iso.wt.globalStore("c", [])).toThrow(/initial must be an object/);
         const main = makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined }, world: "page", stores });
-        expect(() => main.wt.pageStore("b", { m: 2 }).m).toThrow(/page-world code.*drop world: "page"/);
+        expect(() => main.wt.pageStore("b", { m: 2 }).m).toThrow(/page-world code.*drop js: "page"/);
         expect(made.length).toBe(2);
     });
 });

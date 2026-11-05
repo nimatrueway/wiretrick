@@ -167,10 +167,10 @@ at the right of the toolbar do the same.
   rules errors and route warnings appear only here, not in the Log; a
   runtime error appears in both (the Log has every occurrence, with its URL).
   A runtime error from script code that runs on a page says where it ran first:
-  `overlay › host` (its [overlay](scripting.md#overlays--wtonoverlay)),
+  `overlay › host` (its [overlay](scripting.md#overlays--dom-overlay)),
   `isolated › host` or `page › host` (its `onPage` code in the isolated or
   the page world). A page-world `overlay.fn()` call is such an error, with
-  a quick fix (Ctrl+. / ⌘.) that drops `world: "page"`.
+  a quick fix (Ctrl+. / ⌘.) that drops `js: "page"`.
   On Chrome, isolated `onPage` code (the default world) while
   [user scripts are off](scripting.md#user-scripts-on-chrome) is an error
   whose `chrome://extensions` link opens Wiretrick's details page; the
@@ -221,8 +221,8 @@ at the right of the toolbar do the same.
     An `onResponseBody` that returns a body — even the one it received —
     counts as modified.
     Page-side code counts as observed too: a page's document request names
-    each script whose `onPage` ran or whose `onOverlay` was shown on it
-    (`onPage ran`, `onOverlay shown`), and a fetch the overlay made as the
+    each script whose `onPage` ran or whose overlay was shown on it
+    (`onPage ran`, `overlay shown`), and a fetch the overlay made as the
     page names its script (`fetched by its overlay`).
   - **Modified** — a handler changed it: body, headers, status, a
     redirect/block or a synthetic response. Solid accent marker and a
@@ -264,12 +264,12 @@ at the right of the toolbar do the same.
     [Missed warning](strategies.md#missed-warning)). It is logged as
     a WARN line and shown as a yellow *missed* entry in the request's
     details; it does not mark the row observed or modified.
-- **Preview view** — the open script's [overlay](scripting.md#overlays--wtonoverlay),
+- **Preview view** — the open script's [overlay](scripting.md#overlays--dom-overlay),
   live, over a placeholder page; see [Preview](#preview).
 
 ### Preview
 
-The **Preview** tab (⌥⇧V) runs the overlay (`wt.onOverlay`) of the script
+The **Preview** tab (⌥⇧V) runs the overlay (`dom: "overlay"`) of the script
 open in the Code view in a frame inside the Editor, without opening its
 page, so you can work on the GUI before going to the site; a script that's
 turned off previews too. It runs the saved script and reloads on every save.
@@ -280,7 +280,7 @@ turned off previews too. It runs the saved script and reloads on every save.
   follow.
 - **URL.** The field in the panel header is the URL the overlay gets as
   `ctx.url`, and the base for its relative `fetch` URLs. It starts at a URL
-  made from the script's first `onOverlay` route (`*://app.example.com/*`
+  made from the script's first overlay route (`*://app.example.com/*`
   → `https://app.example.com/`) and is remembered per script; Enter applies
   it, Esc puts back the current one. Only the handlers whose route matches
   it run, as on a page; **no handler matches** shows when none does.

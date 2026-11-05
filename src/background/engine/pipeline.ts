@@ -31,7 +31,7 @@ import { missedLine } from "../../shared/netTypes";
 import { binaryOptedOut, frameHasHook as pingHook, isLoopbackUrl, missedReason, missedWhat, routeProblem, MISSED_SKIP_TYPES } from "../../shared/missedTap";
 import { resolveParamValues } from "../../shared/scriptDef";
 import type { ShippedLib } from "../../shared/scriptImports";
-import { effectiveStrategy, hookCanSee, isNetKind, pageWorld, routeLabel, routeMatches, takesBinary, type RouteMeta, type Strategy } from "../../shared/route";
+import { effectiveStrategy, hookCanSee, isNetKind, isPageLayer, pageWorld, routeLabel, routeMatches, takesBinary, type RouteMeta, type Strategy } from "../../shared/route";
 import { analyzeScripts, runBodyOp, type Analyzed } from "../compileHost";
 import { recordNetBody } from "../network";
 import { reportSkipped, setSkipRoutes } from "./skipped";
@@ -610,7 +610,7 @@ export function createPipeline(
             const a = analyzed.get(s.id);
             if (preview !== undefined) {
                 if (s.id !== preview) continue;
-                previewWhy = !a || a.error ? "the script doesn't compile" : "the script has no wt.onOverlay handler";
+                previewWhy = !a || a.error ? "the script doesn't compile" : "the script has no overlay handler (wt.onPage with dom: \"overlay\")";
             } else if (!s.enabled) continue;
             if (!a || a.error || !a.meta.active) continue;
             let main = false;
@@ -622,7 +622,12 @@ export function createPipeline(
                     if (pageWorld(r) === "isolated") iso = true;
                     else main = true;
                 } else if (r.kind === "onOverlay") {
-                    if (top && (preview !== undefined || routeMatches(r, url))) over.push(r);
+                    // js: "page" overlays run in the page's world (the hook's layer); the Preview runs them in its overlay frame
+                    if (preview !== undefined) over.push(r);
+                    else if (top && routeMatches(r, url)) {
+                        if (isPageLayer(r)) main = true;
+                        else over.push(r);
+                    }
                 } else if (r.kind !== "onResponseHeaders" && effectiveStrategy(r) === "page" && hookCanSee(r)) routes.push(r);
             }
             if (over.length) {

@@ -12,9 +12,14 @@
  * call (`"page:N"`, shared/rpc.ts): this world's handlers expose what they
  * return (`firePageHandler`), the other world's are marked elsewhere. With
  * `overlay`, `wt.onOverlay` returns a live handle (isolated world, top frame).
+ *
+ * `wt.onPage({ dom: "overlay" })` registers an overlay handler (counted
+ * with `wt.onOverlay`'s). With `js: "page"` too, it's the page-world layer
+ * (`layers`): the hook runs it with its own `document`; everywhere else
+ * it's skipped and its handle is inert.
  */
-import { normalizeRoute, pageWorld, routeMatches, type DocumentWhen, type PageWorld, type RouteMeta } from "./route";
-import { inertRemote, REMOTE_MAIN_WORLD } from "./remote";
+import { isPageLayer, normalizeRoute, pageCallKind, pageWorld, routeMatches, type DocumentWhen, type PageWorld, type RouteMeta } from "./route";
+import { inertRemote, REMOTE_MAIN_WORLD, REMOTE_PAGE_LAYER } from "./remote";
 import { NOT_RUNNING, TOP_FRAME_ONLY, type Exposer } from "./rpc";
 import { parseParamValue, type ParamDef } from "./scriptDef";
 import { scriptEnv } from "./scriptEnv";
@@ -52,22 +57,36 @@ export interface PageStores {
     pageStore(name: string, initial: object): object;
 }
 
-export const NO_STORE = 'wt.globalStore and wt.pageStore aren\'t available in page-world code (the page could read and forge them) — use them in isolated onPage code (the default: drop world: "page"; read the page with ctx.evaluate) or the overlay';
+export const NO_STORE = 'wt.globalStore and wt.pageStore aren\'t available in page-world code (the page could read and forge them) — use them in isolated onPage code (the default: drop js: "page"; read the page with ctx.evaluate) or the overlay';
 const fail = (): never => {
     throw new Error(NO_STORE);
 };
 const noStore = new Proxy(Object.create(null), { get: (_t, p) => (p === "then" || typeof p === "symbol" ? undefined : fail()), set: fail, has: fail, ownKeys: fail, deleteProperty: fail });
 const NO_FETCH = "wt.fetch isn't available in page code — use the page's own fetch";
 
-export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDocumentHandler[] } {
+export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDocumentHandler[]; layers: PageDocumentHandler[] } {
     const dom: PageDocumentHandler[] = [];
+    const layers: PageDocumentHandler[] = [];
     const world = o.world || "page";
     const inert = () => {};
     // registrations always count, so indexes match the background's
     let pageIndex = 0;
+    let overlayIndex = 0;
+    let pageCalls = 0;
     const onPage = (api: "onPage" | "onDocument") => (route: unknown, fn: unknown) => {
         if (typeof fn !== "function") throw new Error(`wt.${api}: second argument must be the handler function`);
+        if (pageCallKind(route) === "onOverlay") {
+            const r = normalizeRoute("onOverlay", route, overlayIndex++, api);
+            if (pageCalls !== r.index) r.n = pageCalls;
+            pageCalls++;
+            const h = `overlay:${r.index}`;
+            if (!isPageLayer(r)) return overlayHandle(h);
+            layers.push({ h, route: r, when: r.when || "document_end", fn: fn as any });
+            return inertRemote(REMOTE_PAGE_LAYER);
+        }
         const r = normalizeRoute("onDocument", route, pageIndex++, api === "onPage" ? "onPage" : undefined);
+        if (pageCalls !== r.index) r.n = pageCalls;
+        pageCalls++;
         const h = `page:${r.index}`;
         if (pageWorld(r) === world) {
             o.exposer?.register(h);
@@ -75,12 +94,11 @@ export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDocumentHa
         } else o.exposer?.elsewhere(h, o.otherWorld ?? NOT_RUNNING);
         return inertRemote("page functions are called from this script's overlay, not from page code");
     };
-    let overlayIndex = 0;
-    const onOverlay = (_route: unknown, fn: unknown) => {
-        const h = `overlay:${typeof fn === "function" ? overlayIndex++ : -1}`;
+    const overlayHandle = (h: string) => {
         if (world === "page") return inertRemote(REMOTE_MAIN_WORLD, o.onMainWorldCall);
         return o.overlay ? o.overlay(h) : inertRemote(TOP_FRAME_ONLY);
     };
+    const onOverlay = (_route: unknown, fn: unknown) => overlayHandle(`overlay:${typeof fn === "function" ? overlayIndex++ : -1}`);
     // the isolated world only: page code must never get a store
     const stores = world === "isolated" ? o.stores : undefined;
     const names = new Map<string, string>();
@@ -117,7 +135,7 @@ export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDocumentHa
         storage: o.storage,
         ...scriptEnv(),
     };
-    return { wt, dom };
+    return { wt, dom, layers };
 }
 
 /** the handlers whose route matches this frame's URL (the others' handles answer `not running`) */

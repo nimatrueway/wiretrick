@@ -9,7 +9,7 @@ import { parseParamValue, resolveParamValues, serializableParamDef, type ParamDe
 import { formatLogArgs, makeScriptConsole, type ScriptLogLevel } from "./scriptLog";
 import { scriptFunction } from "./scriptFn";
 import { callerLine } from "./scriptError";
-import { normalizeRoute, pageWorld, routeLabel, type RouteKind, type RouteMeta } from "./route";
+import { isPageLayer, normalizeRoute, pageCallKind, pageWorld, routeLabel, type RouteKind, type RouteMeta } from "./route";
 import { inertRemote, MAIN_WORLD_DISALLOWED, REMOTE_FROM_BACKGROUND } from "./remote";
 import { scriptEnv } from "./scriptEnv";
 import { dataFileValue, importLine, importPath, importResolver, isDataSpec } from "./scriptImports";
@@ -604,7 +604,13 @@ function guardStoreKeys(storage: { get(key: string): any; set(key: string, value
 }
 
 function makeShim(owner: ReturnType<typeof createOwner>, overrides?: ResApiOverrides): any {
-    const register = (kind: RouteKind, api?: "onPage") => (route: unknown, fn: unknown) => {
+    // the labels' numbers: wt.onPage / wt.onDocument calls (either kind), wt.onOverlay calls
+    const calls = { page: 0, overlay: 0 };
+    const registerPage = (api: "onPage" | "onDocument") => (route: unknown, fn: unknown) => {
+        const kind = pageCallKind(route);
+        return register(kind, api === "onPage" || kind === "onOverlay" ? api : undefined, "page")(route, fn);
+    };
+    const register = (kind: RouteKind, api?: "onPage" | "onDocument", counter?: keyof typeof calls) => (route: unknown, fn: unknown) => {
         const name = api || kind;
         const top = collectors[collectors.length - 1];
         // page/overlay registrations hand back an RPC handle; in the background it's inert
@@ -622,6 +628,10 @@ function makeShim(owner: ReturnType<typeof createOwner>, overrides?: ResApiOverr
         const r: RouteMeta = mentionsStub(route) ? { kind, index: list.length, url: [], exclude: [], ...(api ? { api } : {}) } : normalizeRoute(kind, route, list.length, api);
         const line = callerLine();
         if (line) r.line = line;
+        if (counter) {
+            const n = calls[counter]++;
+            if (n !== r.index) r.n = n;
+        }
         list.push({ fn: fn as HandlerFn, route: r });
         return remote(r.index);
     };
@@ -630,9 +640,9 @@ function makeShim(owner: ReturnType<typeof createOwner>, overrides?: ResApiOverr
         onResponseHeaders: register("onResponseHeaders"),
         replaceResponse: register("replaceResponse"),
         onResponseBody: register("onResponseBody"),
-        onPage: register("onDocument", "onPage"),
-        onDocument: register("onDocument"),
-        onOverlay: register("onOverlay"),
+        onPage: registerPage("onPage"),
+        onDocument: registerPage("onDocument"),
+        onOverlay: register("onOverlay", undefined, "overlay"),
         about: (text: unknown) => owner.about(text),
         params: (defs: Record<string, ParamDef>) => {
             const values = owner.add(defs, "wt.params");
@@ -896,8 +906,15 @@ export interface MainWorldUse {
 export function onPageUses(code: string): MainWorldUse[] {
     const src = codeOnly(code);
     const bound = new Map<string, "pageStore" | "globalStore" | "overlay">();
-    for (const m of src.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;]+)?=\s*wt\s*\.\s*(pageStore|globalStore|onOverlay)\b/g))
-        bound.set(m[1], m[2] === "onOverlay" ? "overlay" : (m[2] as "pageStore" | "globalStore"));
+    for (const m of src.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;]+)?=\s*wt\s*\.\s*(pageStore|globalStore|onOverlay|onPage|onDocument)\b/g)) {
+        // wt.onPage({ dom: "overlay" }, …): an overlay handle (its route: up to the handler)
+        if (m[2] === "onPage" || m[2] === "onDocument") {
+            // (`src` blanks string contents; same offsets in `code` keep them)
+            const from = m.index! + m[0].length;
+            const route = code.slice(from, from + src.slice(from).split(/=>|\bfunction\b/)[0].length);
+            if (/^\s*(?:<[^()]*>\s*)?\(\s*\{[^]*?\bdom\s*:\s*["'`]overlay["'`]/.test(route)) bound.set(m[1], "overlay");
+        } else bound.set(m[1], m[2] === "onOverlay" ? "overlay" : (m[2] as "pageStore" | "globalStore"));
+    }
     const out: MainWorldUse[] = [];
     let nth = 0;
     for (const m of src.matchAll(/(?<![\w$.])wt\s*\.\s*on(?:Page|Document)\s*(?:<[^()]*>\s*)?\(/g)) {
@@ -1014,15 +1031,18 @@ export function evaluateProblems(code: string): string[] {
  * nothing (overlay calls) — only isolated-world code may.
  */
 export function mainWorldProblems(code: string, routes: RouteMeta[]): string[] {
-    if (!/\bwt\s*\.\s*(?:pageStore|globalStore|onOverlay)\b/.test(code)) return [];
+    if (!/\bwt\s*\.\s*(?:pageStore|globalStore|onOverlay)\b|\bdom\s*:\s*["'`]overlay/.test(code)) return [];
     const uses = onPageUses(code);
     if (!uses.length) return [];
-    const fix = (r: RouteMeta) => `${r.api === "onPage" ? "" : "use wt.onPage and "}drop world: "page" (onPage runs in the isolated world by default; read the page with ctx.evaluate)`;
+    const fix = (r: RouteMeta) =>
+        isPageLayer(r)
+            ? 'drop js: "page" (the overlay then runs in its own frame, where stores and handles work)'
+            : `${r.api === "onPage" ? 'drop js: "page"' : 'use wt.onPage and drop world: "page"'} (onPage runs in the isolated world by default; read the page with ctx.evaluate)`;
     const names = (n: string[]) => n.map((x) => `\`${x}\``).join(", ");
     const out: string[] = [];
     for (const r of routes) {
-        if (r.kind !== "onDocument" || pageWorld(r) !== "page") continue;
-        const u = uses.find((u) => u.nth === r.index);
+        if (!(r.kind === "onDocument" && pageWorld(r) === "page") && !isPageLayer(r)) continue;
+        const u = uses.find((u) => u.nth === (r.n ?? r.index));
         if (!u) continue;
         const at = `${routeLabel(r)}: `;
         if (u.pageStore.length)

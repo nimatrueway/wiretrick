@@ -190,7 +190,7 @@ import { makePageEvaluate } from "../shared/pageEval";
         if (data.kind === "scriptLog") {
             safeSend({ type: "scriptLog", scriptId: data.scriptId ?? null, level: data.level, msg: data.msg, ctx: "page" });
         }
-        if (data.kind === "scriptRan" && (data.api === "onPage" || data.api === "onDocument")) {
+        if (data.kind === "scriptRan" && (data.api === "onPage" || data.api === "onDocument" || data.api === "onOverlay")) {
             scriptRan(data.scriptId, data.name, data.api);
         }
         // the hook's answer to an overlay's call (L4). The page can post this
@@ -386,6 +386,9 @@ import { makePageEvaluate } from "../shared/pageEval";
                 const shim = shimFor(h.scriptId, h.name, h.params || {}, exposer, h.scriptId);
                 scriptFunction(h.src)(shim.wt, consoleProxy, requireFrom(h.name), moduleObj, moduleObj.exports);
                 dom = shim.dom;
+                // a js: "page" overlay needs eval in the page, which its CSP forbids
+                if (world === "page" && window === top && domHandlersFor(shim.layers, location.href).length)
+                    scriptLog(h.scriptId, "error", scriptLogLine(h.name, "onPage", `the page-world overlay (js: "page", dom: "overlay") can't run on this page: its CSP forbids eval in the page — drop js: "page" to run the overlay in its own frame`), ctx);
             } catch (e: any) {
                 exposer.reset();
                 exposer.done();

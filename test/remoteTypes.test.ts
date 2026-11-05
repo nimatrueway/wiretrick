@@ -83,6 +83,20 @@ wt.onOverlay("*", async () => { const n: number = await page.count("a"); return 
         expect(errorsOf(`wt.onPage({ url: "*", world: "top" }, () => {});`)).toHaveLength(1);
     });
 
+    it("js / dom / unsafe pick the route form and the ctx", () => {
+        expect(errorsOf(`wt.onPage({ url: "*", js: "page" }, (ctx) => void ctx.evaluate(() => 1));\nwt.onPage({ url: "*", js: "isolated", dom: "page" }, () => {});`)).toEqual([]);
+        expect(errorsOf(`const o = wt.onPage({ url: "*", dom: "overlay" }, (ctx) => { ctx.onNavigate(() => {}); return { ping: (n: number) => n }; });\nasync function f() { const n: number = await o.ping(1); }`)).toEqual([]);
+        expect(errorsOf(`const l = wt.onPage({ url: "*", js: "page", dom: "overlay", unsafe: true }, (ctx) => { ctx.shortcut("Alt+K", () => {}); return { x: () => 1 }; });\nconst e: {} = l;`)).toEqual([]);
+        // the page-world overlay exposes nothing, and needs unsafe
+        expect(errorsOf(`const l = wt.onPage({ url: "*", js: "page", dom: "overlay", unsafe: true }, () => ({ x: () => 1 }));\nvoid l.x();`)).toHaveLength(1);
+        expect(errorsOf(`wt.onPage({ url: "*", js: "page", dom: "overlay" }, () => {});`)).toHaveLength(1);
+        // an overlay has no ctx.evaluate; dom-page code has no ctx.onNavigate
+        expect(errorsOf(`wt.onPage({ url: "*", dom: "overlay" }, (ctx) => void ctx.evaluate(() => 1));`)).toHaveLength(1);
+        expect(errorsOf(`wt.onPage({ url: "*", js: "page" }, (ctx) => void ctx.onNavigate(() => {}));`)).toHaveLength(1);
+        expect(errorsOf(`wt.onPage({ url: "*", dom: "layer" }, () => {});`)).toHaveLength(1);
+        expect(errorsOf(`wt.onPage({ url: "*", js: "main" }, () => {});`)).toHaveLength(1);
+    });
+
     it("onDocument handlers returning nothing, a string or an Element still compile", () => {
         expect(errorsOf(`wt.onDocument("*", () => {});\nwt.onDocument("*", () => "x");\nwt.onDocument("*", () => document.body);\nwt.onDocument("*", async () => {});`)).toEqual([]);
     });

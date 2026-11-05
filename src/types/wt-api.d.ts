@@ -218,7 +218,7 @@ declare namespace Wiretrick {
         binary?: boolean | "both";
     }
 
-    /** Full route form for `wt.onPage` and `wt.onOverlay`. */
+    /** Route fields shared by every `wt.onPage` form (and the deprecated `wt.onOverlay`). */
     interface DocumentRouteOptions extends DocumentOptions {
         /** Frame URLs (top page and iframes) to run in. See {@link UrlPatterns}. */
         url: UrlPatterns;
@@ -226,25 +226,44 @@ declare namespace Wiretrick {
         exclude?: UrlPatterns;
     }
 
-    /** Where an `onOverlay` handler runs: URL pattern(s) or the full {@link DocumentRouteOptions} form. */
+    /** Where a deprecated `onOverlay` handler runs: URL pattern(s) or the full {@link DocumentRouteOptions} form. */
     type DocumentRoute = UrlPatterns | DocumentRouteOptions;
 
-    /** Full route form for `wt.onPage`. */
+    /**
+     * Full route form for `wt.onPage` on the page's own DOM (`dom: "page"`,
+     * the default). Two settings say where a handler runs:
+     *
+     * | | `dom: "page"` (default) | `dom: "overlay"` |
+     * |---|---|---|
+     * | `js: "isolated"` (default) | the site's DOM, private JS | its own layer, private JS |
+     * | `js: "page"` | the site's DOM and JS | its own layer, the site's JS (`unsafe: true`) |
+     */
     interface PageRouteOptions extends DocumentRouteOptions {
         /**
-         * Which JavaScript world the handler runs in. Both see the same DOM.
+         * Which JavaScript world the handler runs in.
          * - `"isolated"` (default): a private world with none of the site's
          *   JavaScript. The site can't see or impersonate it, so it may use
          *   this script's stores and call its overlay (top frame). Read the
          *   site's globals with {@link PageCtx.evaluate}. On Chrome (MV3) it
          *   runs through user scripts, which must be turned on (the Editor
          *   shows how).
-         * - `"page"`: the site's own world (`"main"` is its old name). It
-         *   reads the site's globals (`window.myApp`) directly, and the site
-         *   can see and tamper with it, so it gets no stores and can't call
-         *   the overlay. It can answer the overlay's calls.
+         * - `"page"`: the site's own world. It reads the site's globals
+         *   (`window.myApp`) directly, and the site can see and tamper with
+         *   it, so it gets no stores and can't call the overlay. It can
+         *   answer the overlay's calls.
          *
-         * @example wt.onPage({ url: "*://example.com/*", world: "page" }, () => { … })
+         * @example wt.onPage({ url: "*://example.com/*", js: "page" }, () => { … })
+         */
+        js?: "isolated" | "page";
+        /**
+         * Which DOM the handler works on: `"page"` (default), the site's
+         * own; `"overlay"`, a layer of its own over the page (top frame
+         * only). See {@link OverlayRouteOptions}.
+         */
+        dom?: "page";
+        /**
+         * @deprecated Renamed to {@link js} (`"main"` is `"page"`). Don't
+         * pass both.
          */
         world?: "isolated" | "page" | "main";
     }
@@ -252,12 +271,52 @@ declare namespace Wiretrick {
     /** Where an `onPage` handler runs: URL pattern(s) or the full {@link PageRouteOptions} form. */
     type PageRoute = UrlPatterns | PageRouteOptions;
 
+    /**
+     * `wt.onPage({ url, dom: "overlay" })`: the handler draws this script's
+     * **overlay**, a transparent layer of its own over the page (top frame
+     * only), with its own `document`. What it draws is visible and
+     * clickable; everywhere else, clicks go through to the page.
+     *
+     * By default (`js: "isolated"`) the overlay is a frame of its own,
+     * with its own `window`: the site can't see or reach it. It has the
+     * script's stores, `fetch`es as the page, can call the script's
+     * `onPage` code and be called by it, and the Editor's Preview shows it.
+     * All of the script's matching overlay handlers run in it, sharing
+     * top-level variables.
+     */
+    interface OverlayRouteOptions extends DocumentRouteOptions {
+        dom: "overlay";
+        /** `"isolated"` (default): the overlay's own frame. `"page"` needs `unsafe: true` ({@link PageOverlayRouteOptions}). */
+        js?: "isolated";
+    }
+
+    /**
+     * `wt.onPage({ url, js: "page", dom: "overlay", unsafe: true })`: the
+     * overlay's layer runs as the site's own code — `window` is the
+     * site's (its globals, directly), `document` is the layer's. Use it
+     * at your own risk: the site can see, read and change what it draws,
+     * and call into it. So it gets no stores, can't call or be called by
+     * the script's other code, and `wt.fetch` and the built-in React
+     * aren't available. It runs where the page allows `eval` (its CSP);
+     * the Preview runs it like a default overlay.
+     *
+     * The script runs once more for it, with that `document`: its
+     * top-level variables aren't shared with the script's other `onPage`
+     * code.
+     */
+    interface PageOverlayRouteOptions extends DocumentRouteOptions {
+        dom: "overlay";
+        js: "page";
+        /** Required: you accept that the site can see and tamper with this overlay. */
+        unsafe: true;
+    }
+
     /** Any function. */
     type Fn = (...args: any[]) => unknown;
 
     /**
      * The other side's functions, made async: what `wt.onPage` and
-     * `wt.onOverlay` return. A handler that returns a plain object of
+     * overlay handlers (`dom: "overlay"`) return. A handler that returns a plain object of
      * functions exposes them; any other return value (nothing, a string, an
      * element) exposes nothing. Arguments and results are JSON (≤ 1 MB);
      * calls time out after 10 s.
@@ -287,7 +346,7 @@ declare namespace Wiretrick {
          * The page can see the call and fake its answer: treat the result
          * as untrusted input, and never pass secrets. Rejects when the
          * page's CSP forbids `eval` or the page world doesn't answer. In
-         * `world: "page"` code it just calls `fn`.
+         * `js: "page"` code it just calls `fn`.
          *
          * @example
          * const user = await ctx.evaluate(() => (window as any).myApp?.user?.name);
@@ -307,7 +366,7 @@ declare namespace Wiretrick {
         evaluate<A extends unknown[], R>(fn: (...args: A) => R, ...args: A): Promise<Awaited<R>>;
     }
 
-    /** The context an `onOverlay` handler gets (`url` is the page's URL). */
+    /** The context an overlay handler (`dom: "overlay"`) gets (`url` is the page's URL). */
     interface OverlayCtx extends RequestCtx {
         /**
          * Run `fn` with the page's new URL whenever it navigates in place
@@ -315,7 +374,7 @@ declare namespace Wiretrick {
          * do. The overlay stays; returns a function that stops listening.
          *
          * @example
-         * wt.onOverlay("*://example.com/*", (ctx) => {
+         * wt.onPage({ url: "*://example.com/*", dom: "overlay" }, (ctx) => {
          *     const show = (url: string) => (badge.hidden = !url.includes("/cart"));
          *     show(ctx.url);
          *     ctx.onNavigate(show);
@@ -332,7 +391,7 @@ declare namespace Wiretrick {
          * one higher in the script list wins (a Log warning). Returns a function that removes it.
          *
          * @example
-         * wt.onOverlay("*://example.com/*", (ctx) => {
+         * wt.onPage({ url: "*://example.com/*", dom: "overlay" }, (ctx) => {
          *     ctx.shortcut("Alt+Shift+H", () => (box.hidden = !box.hidden));
          *     ctx.shortcut("Mod+K", openSearch, { priority: "after-page" });
          * });
@@ -477,7 +536,7 @@ declare namespace Wiretrick {
         bypass?: boolean;
     }
 
-    /** Timing for `wt.onPage` and `wt.onOverlay` (part of their route object). */
+    /** Timing for `wt.onPage` (part of its route object). */
     interface DocumentOptions {
         /**
          * **When** the `onPage` handler runs, relative to the page's own loading.
@@ -534,7 +593,7 @@ declare namespace Wiretrick {
          *   script-list order, then registration order.
          * - Async handlers are not awaited; `when` controls only when they
          *   *start*.
-         * - With `world: "page"`, if the page's CSP forbids `eval`, the
+         * - With `js: "page"`, if the page's CSP forbids `eval`, the
          *   handler falls back to the isolated world: same DOM and timing,
          *   but page-defined globals (e.g. `window.myApp`) are not visible.
          *
@@ -867,18 +926,22 @@ declare const wt: {
      * Runs once per document load in every frame whose URL matches the
      * route — by default at `DOMContentLoaded` (`when: "document_end"`), in
      * a private world that shares the page's DOM but not its JavaScript
-     * (`world: "isolated"`; read the site's globals with `ctx.evaluate`, or
-     * use `world: "page"`). A script may register several, each with its
-     * own route, `when` and `world`.
+     * (`js: "isolated"`; read the site's globals with `ctx.evaluate`, or
+     * use `js: "page"`). A script may register several, each with its
+     * own route, `when`, `js` and `dom`.
      *
      * The handler may return an object of functions: the returned handle
      * lets this script's overlay call them (`await page.fn(…)`, top frame
      * only). See {@link Wiretrick.Remote}.
      *
-     * @param route Frame URL pattern(s), or `{ url, exclude, when, world }`. See
+     * With `dom: "overlay"` the handler draws the script's overlay instead:
+     * a layer of its own over the page. See
+     * {@link Wiretrick.OverlayRouteOptions}.
+     *
+     * @param route Frame URL pattern(s), or `{ url, exclude, when, js, dom }`. See
      * {@link Wiretrick.DocumentOptions.when} for exact timing, the MV3
      * `document_start` race, SPA/re-render behavior and live-update re-runs,
-     * and {@link Wiretrick.PageRouteOptions.world} for the two worlds.
+     * and {@link Wiretrick.PageRouteOptions} for where it runs.
      * @param handler Receives the same `ctx` shape as `onRequest` (`url` is
      * the frame's URL). May be async (not awaited).
      *
@@ -899,8 +962,42 @@ declare const wt: {
      * const page = wt.onPage("*://example.com/*", () => ({
      *     count: (selector: string) => document.querySelectorAll(selector).length,
      * }));
+     *
+     * @example
+     * // the overlay: a button over the page
+     * wt.onPage({ url: "*://example.com/*", dom: "overlay" }, () => {
+     *     const b = document.body.appendChild(document.createElement("button"));
+     *     b.textContent = "Hi";
+     *     b.style.cssText = "position:fixed;right:16px;bottom:16px";
+     * });
      */
     onPage<T = void>(route: Wiretrick.PageRoute, handler: (ctx: Wiretrick.PageCtx) => Wiretrick.Awaitable<T>): Wiretrick.Remote<T>;
+    /**
+     * Draw this script's **overlay**: a transparent frame over the page
+     * (top frame only) with its own `document`, in an isolated world the
+     * page can't see or reach. See {@link Wiretrick.OverlayRouteOptions}.
+     *
+     * @param route `{ url, exclude, when, dom: "overlay" }`.
+     * @param handler Draws the GUI. May return functions for this script's
+     * isolated onPage code to call.
+     *
+     * @example
+     * wt.onPage({ url: "*://example.com/*", dom: "overlay" }, () => {
+     *     const b = document.body.appendChild(document.createElement("button"));
+     *     b.textContent = "Hi";
+     * });
+     */
+    onPage<T = void>(route: Wiretrick.OverlayRouteOptions, handler: (ctx: Wiretrick.OverlayCtx) => Wiretrick.Awaitable<T>): Wiretrick.Remote<T>;
+    /**
+     * Draw an overlay GUI whose code runs in the **site's** JavaScript
+     * world (`window` is the site's, `document` the overlay's). The site
+     * can see and tamper with it: no stores, no calls to or from it. See
+     * {@link Wiretrick.PageOverlayRouteOptions}.
+     *
+     * @param route `{ url, exclude, when, js: "page", dom: "overlay", unsafe: true }`.
+     * @param handler Draws the GUI. Its return value is ignored.
+     */
+    onPage<T = void>(route: Wiretrick.PageOverlayRouteOptions, handler: (ctx: Wiretrick.OverlayCtx) => Wiretrick.Awaitable<T>): {};
 
     /**
      * @deprecated Renamed to {@link wt.onPage} — same arguments and behavior.
@@ -908,6 +1005,9 @@ declare const wt: {
     onDocument<T = void>(route: Wiretrick.PageRoute, handler: (ctx: Wiretrick.PageCtx) => Wiretrick.Awaitable<T>): Wiretrick.Remote<T>;
 
     /**
+     * @deprecated Use `wt.onPage({ url, dom: "overlay" }, handler)` — same
+     * behavior. See {@link Wiretrick.OverlayRouteOptions}.
+     *
      * Run a handler in this script's **overlay**: a transparent frame over
      * the page (top frame only), with its own `document` and `window`. What
      * the script draws there is visible and clickable; everywhere else,
@@ -918,7 +1018,7 @@ declare const wt: {
      * follows `when`, as for `onPage`.
      *
      * The handler may return an object of functions for this script's
-     * `onPage` code to call (not `world: "page"` code).
+     * `onPage` code to call (not `js: "page"` code).
      *
      * @example
      * wt.onOverlay("*://example.com/*", () => {
@@ -1008,7 +1108,7 @@ declare const wt: {
      * to watch it. `name` is its key (one store per name per script, shared
      * with {@link pageStore}); values must be JSON (at most 1 MB). Call it
      * at top level. `onPage` code gets a live copy too, except with
-     * `world: "page"` (the page could read and forge it).
+     * `js: "page"` (the page could read and forge it).
      *
      * @example
      * const state = wt.globalStore("state", { mocking: true, hits: 0 });
@@ -1034,7 +1134,7 @@ declare const wt: {
      * object. Requests that aren't from a page (service workers, other
      * apps through the helper) see a throwaway copy of `initial`.
      * `onPage` code sees its page's copy; not available with
-     * `world: "page"` (the page could read and forge it) or in `rules`
+     * `js: "page"` (the page could read and forge it) or in `rules`
      * handlers (their rules serve every page); kept until the page ends
      * (not across browser restarts).
      *
@@ -1043,7 +1143,7 @@ declare const wt: {
      * wt.onRequest({ url: "https://api.example.com/*", strategy: "helper" }, (ctx) => {
      *     if (page.staging) return { redirect: ctx.url.replace("api.", "staging-api.") };
      * });
-     * wt.onOverlay({ url: "https://example.com/*" }, () => {
+     * wt.onPage({ url: "https://example.com/*", dom: "overlay" }, () => {
      *     // a checkbox bound to page.staging (useSnapshot(page) from "valtio")
      * });
      */

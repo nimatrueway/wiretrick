@@ -7,6 +7,19 @@ its section below.
 
 ## [Unreleased]
 
+### Added
+
+- One `wt.onPage` for all page code, with its isolation set by two route options: `js: "isolated" | "page"` (which JavaScript world it runs in) and `dom: "page" | "overlay"` (whether it changes the site's document or draws the script's own GUI). `wt.onPage({ url, dom: "overlay" }, fn)` is the overlay.
+- `js: "page"` with `dom: "overlay"`, opt-in with `unsafe: true`: an overlay GUI whose code runs in the site's JavaScript world (its globals at hand), drawing in its own click-through document over the page. The site can see and tamper with it, so it gets no stores and no calls to or from it; it doesn't run where the page's CSP forbids `eval`. Without `unsafe: true` the script fails to compile.
+
+### Changed
+
+- Welcome sample chips and Network tags say "overlay" ("overlay shown") instead of "onOverlay".
+
+### Deprecated
+
+- `world` (now `js`) and `wt.onOverlay(route, fn)` (now `wt.onPage({ …route, dom: "overlay" }, fn)`). Both still work; the samples and docs use the new forms.
+
 ## [0.12.2] - 2026-11-04
 
 ### Added

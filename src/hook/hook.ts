@@ -16,6 +16,7 @@ import { Exposer, isRpcCall, NOT_RUNNING, type RpcResult } from "../shared/rpc";
 import { bodyKind, setTextTypes } from "../shared/bodyKind";
 import { readFetchBody } from "../shared/requestBody";
 import { directEvaluate, servePageEvaluate } from "../shared/pageEval";
+import { createPageLayer, type PageLayer } from "./pageLayer";
 
 (() => {
     // tells the MV2 bridge its inline copy ran (a page CSP may block it)
@@ -73,6 +74,11 @@ import { directEvaluate, servePageEvaluate } from "../shared/pageEval";
     let domHandlers: { scriptId: string; name: string; src: string; params?: Record<string, any> }[] = [];
     let libSources: ShippedLib[] = [];
     let domFired = false;
+    // js: "page" overlays (pageLayer.ts), by script
+    const layers = new Map<string, PageLayer>();
+    /** bumped when the layers are rebuilt: a layer still loading for an older build is dropped */
+    let layerGen = 0;
+    let layersBuilt = false;
     /** per script: answers the overlay's calls into its main-world onPage handles (via the bridge) */
     const exposers = new Map<string, Exposer>();
     let reqSeq = 0;
@@ -188,6 +194,10 @@ import { directEvaluate, servePageEvaluate } from "../shared/pageEval";
      * script in the isolated world (shared DOM, no page window).
      */
     function compileAndScheduleDocument(hot: boolean): void {
+        // a hot update (or the first status) rebuilds the page-world overlays
+        const relayer = hot || !layersBuilt;
+        layersBuilt = true;
+        if (relayer) dropLayers();
         if (domHandlers.length === 0) return;
         // module registry over the shipped library sources and data files:
         // the page-side `require` backing ES imports ("./utils" → the script
@@ -196,6 +206,7 @@ import { directEvaluate, servePageEvaluate } from "../shared/pageEval";
             scriptFunction(lib.src!)(makeDocumentShim(null, lib.name, lib.params || {}).wt, scriptConsole(null, lib.name), require, moduleObj, moduleObj.exports)
         );
         const compiledDocument: { scriptId: string; name: string; when: DocumentWhen; d: PageDocumentHandler; exposer: Exposer }[] = [];
+        const layered: typeof domHandlers = [];
         let cspBlocked = false;
         // a repeated status after the handlers fired recompiles but fires nothing: the exposers stay
         const refire = hot || !domFired;
@@ -211,9 +222,10 @@ import { directEvaluate, servePageEvaluate } from "../shared/pageEval";
                 // require resolves the shipped libs
                 const fn = scriptFunction(d.src);
                 const moduleObj = { exports: {} as any };
-                const { wt, dom } = makeDocumentShim(d.scriptId, d.name, d.params || {}, ex);
+                const { wt, dom, layers } = makeDocumentShim(d.scriptId, d.name, d.params || {}, ex);
                 fn(wt, scriptConsole(d.scriptId, d.name), requireFrom(d.name), moduleObj, moduleObj.exports);
                 for (const h of domHandlersFor(dom, location.href, ex)) compiledDocument.push({ scriptId: d.scriptId, name: d.name, when: h.when, d: h, exposer });
+                if (relayer && window === window.top && domHandlersFor(layers, location.href).length) layered.push(d);
             } catch (e: any) {
                 // nothing registered here answers: the overlay's calls get `not running`
                 ex?.reset();
@@ -231,6 +243,7 @@ import { directEvaluate, servePageEvaluate } from "../shared/pageEval";
                 window.postMessage({ source: HOOK_SOURCE, kind: "cspBlocked" }, window.location.origin);
             } catch {}
         }
+        for (const d of layered) runLayer(d, hot);
         if (compiledDocument.length === 0) return;
 
         const injected = (document.currentScript as HTMLScriptElement | null)
@@ -255,6 +268,52 @@ import { directEvaluate, servePageEvaluate } from "../shared/pageEval";
         for (const h of compiledDocument) scheduleDocument(h.when, () => fire(h));
     }
 
+    // ---- js: "page" overlays (pageLayer.ts) ----
+    function dropLayers(): void {
+        layerGen++;
+        for (const l of layers.values()) l.remove();
+        layers.clear();
+    }
+
+    /** evaluate the script again with its own `document` (the layer's) and run its page-world overlay handlers there */
+    function runLayer(d: (typeof domHandlers)[number], hot: boolean): void {
+        const gen = layerGen;
+        const libs = libSources;
+        const report = (e: unknown, context: string) => scriptLogUp(d.scriptId, "error", formatScriptError(d.name, e, context));
+        createPageLayer(report).then((layer) => {
+            if (!layer) return;
+            if (gen !== layerGen) return layer.remove();
+            layers.get(d.scriptId)?.remove();
+            layers.set(d.scriptId, layer);
+            watchNav();
+            let handlers: PageDocumentHandler[];
+            try {
+                const requireFrom = makeLibRequire(libs, (lib, require, moduleObj) =>
+                    scriptFunction(lib.src!, true)(makeDocumentShim(null, lib.name, lib.params || {}).wt, scriptConsole(null, lib.name), require, moduleObj, moduleObj.exports, layer.doc)
+                );
+                const moduleObj = { exports: {} as any };
+                const shim = makeDocumentShim(d.scriptId, d.name, d.params || {});
+                scriptFunction(d.src, true)(shim.wt, scriptConsole(d.scriptId, d.name), requireFrom(d.name), moduleObj, moduleObj.exports, layer.doc);
+                handlers = domHandlersFor(shim.layers, location.href);
+            } catch (e) {
+                return report(e, "onPage (page-world overlay) compile");
+            }
+            for (const h of handlers) {
+                const run = () => {
+                    if (gen !== layerGen) return;
+                    try {
+                        const out = h.fn(layer.ctx());
+                        if (out && typeof out.then === "function") out.then(undefined, (e: unknown) => report(e, "onPage (page-world overlay)"));
+                        window.postMessage({ source: HOOK_SOURCE, kind: "scriptRan", scriptId: d.scriptId, name: d.name, api: "onOverlay" }, window.location.origin);
+                    } catch (e) {
+                        report(e, "onPage (page-world overlay)");
+                    }
+                };
+                scheduleDocument(h.when, run, hot);
+            }
+        });
+    }
+
     /**
      * In-place navigations for `ctx.onNavigate` (the bridge asks once this
      * frame shows an overlay): the isolated world can't see history calls.
@@ -265,6 +324,7 @@ import { directEvaluate, servePageEvaluate } from "../shared/pageEval";
         if (navWatched) return;
         navWatched = true;
         const nudge = () => {
+            for (const l of layers.values()) l.nav();
             try {
                 window.postMessage({ source: HOOK_SOURCE, kind: "nav" }, window.location.origin);
             } catch {}

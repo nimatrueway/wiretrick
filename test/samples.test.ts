@@ -61,7 +61,8 @@ describe("sample helpers", () => {
         expect(sampleStrategies(`wt.onRequest({ url: "*://a/*", strategy: "rules" }, f);`)).toEqual(["rules"]);
         expect(sampleStrategies(`wt.onResponseBody({ url: "*://a/*", strategy: wt.isFirefox ? "extension" : "debugger" }, f);`)).toEqual(["debugger", "extension"]);
         expect(sampleStrategies(`wt.onPage("*://a/*", () => {});`)).toEqual(["onPage"]);
-        expect(sampleStrategies(`wt.onRequest({ url: "*://a/*", strategy: "page" }, f);\nwt.onPage("*://a/*", f);\nwt.onOverlay("*://a/*", f);`)).toEqual(["page", "onOverlay"]);
+        expect(sampleStrategies(`wt.onRequest({ url: "*://a/*", strategy: "page" }, f);\nwt.onPage("*://a/*", f);\nwt.onOverlay("*://a/*", f);`)).toEqual(["page", "overlay"]);
+        expect(sampleStrategies(`wt.onPage({ url: "*://a/*", dom: "overlay" }, f);`)).toEqual(["overlay"]);
     });
     it("drops the Try it sentence from the blurb", () => {
         expect(sampleSummary("Send any request elsewhere. Try it: open a.com — b.")).toBe("Send any request elsewhere.");

@@ -80,7 +80,7 @@ export interface ProblemScript {
     typeErrors?: string[];
     routeWarnings?: string[];
     /** the script's handlers and their registration lines ("onRequest #2" → its line) */
-    routes?: { kind: string; api?: string; index: number; line?: number; url?: string[] }[];
+    routes?: { kind: string; api?: string; index: number; n?: number; line?: number; url?: string[] }[];
     /** the saved source: positions get a range (the token, the URL pattern) */
     code?: string;
 }
@@ -169,7 +169,7 @@ function lineRange(lines: string[], line: number): Range {
 function handlerRange(msg: string, s: ProblemScript): Range | { line: number } | undefined {
     const m = HANDLER.exec(msg);
     if (!m) return undefined;
-    const route = s.routes?.find((r) => (r.api || r.kind) === m[1] && r.index === Number(m[2]) - 1);
+    const route = s.routes?.find((r) => (r.api || r.kind) === m[1] && (r.n ?? r.index) === Number(m[2]) - 1);
     const code = s.code;
     if (!code) return route?.line ? { line: route.line } : undefined;
     const lines = code.split("\n");
