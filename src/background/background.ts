@@ -7,6 +7,8 @@ import { DebuggerStrategy } from "./engine/strategies/debuggerStrategy";
 import { HelperStrategy } from "./engine/strategies/helperStrategy";
 import { RulesStrategy } from "./engine/strategies/rulesStrategy";
 import { createPipeline } from "./engine/pipeline";
+import { startPackageUpdates } from "./engine/packages";
+import { ENTRY_URL_RE } from "../shared/packageSource";
 import { runMigrations } from "./migration";
 import { addUiPort, clearTab, clearLogHistory, log, noteRan, broadcastEntry, broadcastToUi, clearScriptErrors, setScriptTypeErrors } from "./engine/logs";
 import { onScriptsChanged, listScripts, refreshStaleMeta } from "./engine/scriptStore";
@@ -282,6 +284,16 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
 });
 onScriptsChanged(() => void updateAllTabs());
 void updateAllTabs();
+
+// opening a *.wiretrick.ts URL (a raw GitHub or gist file, any site, a
+// local file) offers to install it, like a userscript manager
+chrome.tabs.onUpdated.addListener((tabId, info) => {
+    const url = info.url;
+    if (!url || !ENTRY_URL_RE.test(url) || /#wt-raw$/.test(url)) return;
+    if (/^https?:\/\/(gist\.)?github\.com\//i.test(url)) return; // GitHub's own page for the file
+    chrome.tabs.update(tabId, { url: chrome.runtime.getURL(`install.html?url=${encodeURIComponent(url)}`) }, () => void chrome.runtime.lastError);
+});
+startPackageUpdates();
 
 // ---- MV3: warm the analyze cache at SW start so the first page's
 // getHookBundle is served from storage, not a cold sandbox round-trip ----

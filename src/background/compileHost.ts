@@ -16,7 +16,7 @@
  * scriptStore and the pipeline never call compileScript directly; they go
  * through this module.
  */
-import { compileScript, compileWithLibs, makeModuleResolver } from "../shared/compile";
+import { compileScript, compileWithLibs, makeModuleResolver, withData, type DataFileSource } from "../shared/compile";
 import { defaultMeta, type ResMeta } from "../shared/metaParser";
 import type { ParamDef } from "../shared/scriptDef";
 import { dlogLevel } from "../shared/debugLog";
@@ -198,6 +198,8 @@ export interface StorageCompileContext {
     scripts: { id: string; name: string; code: string }[];
     /** every script's stored param values (libraries compile with theirs) */
     paramValues?: ParamValues;
+    /** data files that aren't stored (yet) — a package being installed; they shadow stored ones at the same path */
+    data?: DataFileSource[];
 }
 
 /**
@@ -224,7 +226,7 @@ export async function compileForStorage(
     await ensurePackages(scripts.map((s) => s.code));
     if (!__MV3__) {
         await ensureBuiltins([code, ...scripts.map((s) => s.code)], packagesSnapshot()).catch(() => {}); // unloaded: React imports stub
-        const c = compileWithLibs(target, scripts, values, await ensureDataFiles(), packagesSnapshot());
+        const c = compileWithLibs(target, scripts, values, withData(await ensureDataFiles(), ctx?.data), packagesSnapshot());
         dlogLevel(
             "compile", "debug",
             `compiled "${label}" → active=${c.meta.active} match=${JSON.stringify(c.meta.match)} params=[${Object.keys(c.paramDefs || {}).join(", ")}] deps=[${c.deps.join(", ")}]${c.error ? " — compile error (in the Problems view)" : ""}`
@@ -232,7 +234,7 @@ export async function compileForStorage(
         return { meta: c.meta, paramDefs: c.paramDefs || {}, error: c.error };
     }
     await ensureOffscreen();
-    const resp = await sandboxCallWithData({ op: "compileOne", target, scripts, paramValues: values });
+    const resp = await sandboxCallWithData({ op: "compileOne", target, scripts, paramValues: values, extraData: ctx?.data });
     const r = resp?.result;
     if (!r) {
         dlogLevel("compile", "warn", `compileForStorage "${label}": sandbox compile returned nothing — script meta NOT updated`);

@@ -57,6 +57,11 @@ function entriesFor(dist, mv3) {
             output: { file: path.join(dist, "popup.js"), format: "iife" },
         },
         {
+            // installs a script from a URL, folder or zip; reviews updates (src/ui/install)
+            input: path.join(root, "src/ui/install.tsx"),
+            output: { file: path.join(dist, "install.js"), format: "iife" },
+        },
+        {
             // the built-in React for scripts, loaded only when one imports it (src/shared/builtins.ts)
             input: path.join(root, "src/builtins/react.ts"),
             output: { file: path.join(dist, "builtins-react.js"), format: "iife" },
@@ -217,6 +222,8 @@ async function copyStatic(dist, mv3) {
     await copyFile(path.join(root, "src/ui/ui.css"), path.join(dist, "ui.css"));
     await copyFile(path.join(root, "src/ui/popup.html"), path.join(dist, "popup.html"));
     await copyFile(path.join(root, "src/ui/popup.css"), path.join(dist, "popup.css"));
+    await copyFile(path.join(root, "src/ui/install.html"), path.join(dist, "install.html"));
+    await copyFile(path.join(root, "src/ui/install.css"), path.join(dist, "install.css"));
     await copyFile(path.join(root, "src/ui/theme.css"), path.join(dist, "theme.css"));
     await copyFile(path.join(root, "src/ui/theme-boot.js"), path.join(dist, "theme-boot.js"));
 

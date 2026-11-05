@@ -39,6 +39,7 @@ import { appendLog, clearLog, logState } from "./state/log";
 import { badges, badgesChanged, panel, setNetStore, setProblems } from "./state/panel";
 import { actions } from "./shell/actions";
 import { clearSel, everyFolder, explorer, explorerIds, moveFocus, pruneCollapsed, revealInExplorer, setCollapsed, setSel, SETTINGS_ID, startCreate as startCreateRow, syncExplorer, treeRow, treeRows, visibleRows, type NewKind } from "./state/explorer";
+import { watchPackages } from "./state/packages";
 import { createCodeEditor } from "./shell/codeEditor";
 import { toolbar, type SaveState } from "./state/toolbar";
 import { refreshUserScripts } from "./state/userScripts";
@@ -1967,6 +1968,7 @@ async function main(): Promise<void> {
     } satisfies typeof actions);
     await loadMonaco();
     watchPackageTypings();
+    watchPackages();
     // test/e2e seam: adopt an arbitrary directory handle (e.g. OPFS) for watching
     (window as any).__resAdoptFolder = (h: any) => fsBridge.adoptForWatch(h);
     editor = createCodeEditor({

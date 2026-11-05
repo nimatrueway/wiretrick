@@ -1330,6 +1330,9 @@ body.net-dragging { user-select: none; }
 .err-ind { color: var(--err); font-size: 12px; padding: 0 2px; cursor: help; flex-shrink: 0; }
 .err-ind.runtime { color: var(--warn); cursor: pointer; }
 .err-ind.runtime:hover { color: var(--err); }
+.pkg-ind { font-size: 11px; padding: 0 2px; flex-shrink: 0; opacity: .7; cursor: help; }
+.pkg-ind.pending { color: var(--accent, #3794ff); font-weight: 700; opacity: 1; cursor: pointer; }
+.pkg-ind.failed { filter: grayscale(1); }
 .script-item.has-error .script-name.error { color: var(--err); }
 
 /* partial import/export checklist */

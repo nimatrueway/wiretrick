@@ -29,6 +29,7 @@ import { checkApiTypingsNav } from "./apiTypingsNav";
 import { checkRulesStrategy, rulesServerRoute } from "./rulesE2e";
 import { checkFoldersAndDataFiles, foldersServerRoute } from "./foldersE2e";
 import { checkOnPageDom, checkOverlayPreview, checkOverlays, checkEarlyRequests, checkOverlayShortcuts, checkPageStores, checkIsoStores, overlayServerRoute } from "./overlayE2e";
+import { checkPackages, packagesServerRoute } from "./packagesE2e";
 
 const EXT_ROOT = path.join(new URL("..", import.meta.url).pathname, "dist-mv3");
 // unpacked extension id = sha256 of the absolute path (hex digits → a-p)
@@ -40,6 +41,7 @@ const server = http.createServer((req: http.IncomingMessage, res: http.ServerRes
     if (rulesServerRoute(req, res, ORIGIN)) return;
     if (foldersServerRoute(req, res, ORIGIN)) return;
     if (overlayServerRoute(req, res, ORIGIN)) return;
+    if (packagesServerRoute(req, res, ORIGIN)) return;
     if (req.url?.startsWith("/data")) {
         res.writeHead(200, { "content-type": "application/json" });
         return res.end(JSON.stringify({ value: "ORIGINAL" }));
@@ -345,6 +347,7 @@ try {
         await checkOverlayPreview(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
         for (const id of on) await send({ type: "setEnabled", id, enabled: true });
     }
+    await checkPackages(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
 
     // ---- regression (the user's "onRequest doesn't work in MV3"): a
     // param-gated onRequest must see the REAL stored param values (the

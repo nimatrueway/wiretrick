@@ -33,6 +33,7 @@ import { checkApiTypingsNav } from "./apiTypingsNav";
 import { checkRulesStrategy, rulesServerRoute } from "./rulesE2e";
 import { checkFoldersAndDataFiles, foldersServerRoute } from "./foldersE2e";
 import { checkOnPageDom, checkOverlayPreview, checkOverlays, checkEarlyRequests, checkOverlayShortcuts, checkPageStores, checkIsoStores, overlayServerRoute } from "./overlayE2e";
+import { checkPackages, packagesServerRoute } from "./packagesE2e";
 
 const EXT_ROOT = path.join(new URL("..", import.meta.url).pathname, "dist");
 
@@ -54,6 +55,7 @@ const server = http.createServer((req: http.IncomingMessage, res: http.ServerRes
     if (rulesServerRoute(req, res, ORIGIN)) return;
     if (foldersServerRoute(req, res, ORIGIN)) return;
     if (overlayServerRoute(req, res, ORIGIN)) return;
+    if (packagesServerRoute(req, res, ORIGIN)) return;
     const url = new URL(req.url || "/", ORIGIN);
     const send = (ct: string, body: string | Buffer) => { res.writeHead(200, { "content-type": ct }); res.end(body); };
     if (url.pathname === "/html") return send("text/html", "<html><body><h1 id='t'>ORIGINAL TITLE</h1></body></html>");
@@ -567,6 +569,7 @@ await checkOnPageDom(ctx, mgr, ORIGIN, check);
 await checkEarlyRequests(ctx, mgr, ORIGIN, check);
 await checkOverlayShortcuts(ctx, mgr, ORIGIN, check);
 await checkOverlayPreview(ctx, mgr, ORIGIN, check);
+await checkPackages(ctx, mgr, ORIGIN, check);
 
 // ---------- 11. logs: script output tunnelled to the Log view, page console not captured ----------
 await saveScript(

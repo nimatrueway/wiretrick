@@ -17,6 +17,7 @@ import {
     listDataFiles, getDataFile, saveDataFile, deleteDataFile, listFolders, createFolder, renameFolder, deleteFolder,
 } from "./scriptStore";
 import { loadDataFiles } from "./dataFiles";
+import { analyzePackage, applyPending, checkPackages, dismissPending, forgetPackage, installPackage, listPackages, offerPackage, rollbackPackage, setAutoUpdate } from "./packages";
 import { loadPackages, packagesSnapshot, resolveVersion } from "./packageImports";
 import { isUrlSpec, packageClosure } from "../../shared/packageImports";
 import { serveStore } from "./strategies/extensionStrategy";
@@ -814,6 +815,25 @@ export function createPipeline(
         }
         if (msg && msg.type === "setEnabled") {
             setEnabled(msg.id, msg.enabled).then(() => sendResponse({}));
+            return true;
+        }
+        // packages (install page, Explorer): every reply is the result or {error}
+        const pkgOp: Record<string, () => Promise<unknown>> = {
+            listPackages: () => listPackages(),
+            packageAnalyze: () => analyzePackage(msg.fetched, msg.updateOf),
+            packageInstall: () => installPackage(msg.fetched, { enabled: msg.enabled !== false, autoUpdate: msg.autoUpdate !== false }),
+            packageCheck: () => checkPackages(msg.id),
+            packageOffer: () => offerPackage(msg.id, msg.fetched, !!msg.manual),
+            packageApply: () => applyPending(msg.id),
+            packageDismiss: () => dismissPending(msg.id),
+            packageRollback: () => rollbackPackage(msg.id),
+            packageSetAutoUpdate: () => setAutoUpdate(msg.id, !!msg.on),
+            packageForget: () => forgetPackage(msg.id),
+        };
+        if (msg && Object.prototype.hasOwnProperty.call(pkgOp, msg.type)) {
+            pkgOp[msg.type]()
+                .then((r) => sendResponse(r ?? {}))
+                .catch((e) => sendResponse({ error: String(e?.message || e) }));
             return true;
         }
         if (msg && msg.type === "openTab") {

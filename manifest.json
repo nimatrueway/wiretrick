@@ -36,6 +36,7 @@
         "webRequest",
         "webRequestBlocking",
         "storage",
+        "alarms",
         "unlimitedStorage",
         "tabs",
         "debugger",

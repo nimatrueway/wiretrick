@@ -27,7 +27,7 @@
  * Reverse calls (wt.storage.* and script logging) travel the other way
  * with the same reqId pattern.
  */
-import { compileScript, compileWithLibs, isFatalImportError, makeModuleResolver, makeStubModule, type CompiledScript, type DataFileSource, type ResApiOverrides } from "../shared/compile";
+import { compileScript, compileWithLibs, withData, isFatalImportError, makeModuleResolver, makeStubModule, type CompiledScript, type DataFileSource, type ResApiOverrides } from "../shared/compile";
 import { runOp, type BodyOp, type OpScript } from "../shared/bodyOps";
 import { compileDecision } from "../shared/pac";
 import "../shared/transpile";
@@ -283,9 +283,10 @@ function analyze(scripts: PlainScript[], paramValues: Record<string, any>): { re
 function compileOne(
     target: { id: string; name: string; code: string },
     scripts: { id: string; name: string; code: string }[],
-    paramValues: Record<string, any>
+    paramValues: Record<string, any>,
+    extraData?: DataFileSource[]
 ): { result: AnalyzeResult } {
-    const c = compileWithLibs(target, scripts || [], paramValues || {}, dataFiles, packages);
+    const c = compileWithLibs(target, scripts || [], paramValues || {}, withData(dataFiles, extraData), packages);
     const summary = `compileOne "${target.name}" → active=${c.meta.active} params=[${Object.keys(c.paramDefs || {}).join(", ")}] deps=[${c.deps.join(", ")}]`;
     sandboxLog(c.error ? `${summary} ERROR ${c.error.split("\n")[0]}` : summary, c.error ? "error" : "debug");
     return { result: { meta: c.meta, paramDefs: c.paramDefs || {}, error: c.error, deps: c.deps } };
@@ -381,7 +382,7 @@ window.addEventListener("message", async (event) => {
             else result = await rules(scripts, paramValues);
         } else if (op === "compileOne") {
             await builtins([data.payload.target, ...(scripts || [])]);
-            result = compileOne(data.payload.target, scripts, paramValues);
+            result = compileOne(data.payload.target, scripts, paramValues, data.payload.extraData);
         }
         else if (op === "pac") result = { result: pacDecision(data.payload.source)(args.url, args.host) };
         else result = { error: `unknown op ${op}` };

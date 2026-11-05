@@ -41,6 +41,7 @@ own GUI over the page.
   report to an LLM with "why isn't this working?". It carries your scripts,
   settings, the recent log and the requests the Network view recorded, with what each script did to them,
   so the model can pinpoint the cause. Cookies and authorization headers are redacted.
+- **Install and share scripts** — open any URL ending in `.wiretrick.ts` (a gist, a GitHub file or folder, any site, a local file) to install it with the files it imports; the install page shows what it can do first. Installed scripts [update themselves](docs/packages.md#updates) unless an update can do more, which waits for your review.
 - **Folder sync** — keep scripts, JSON data files and their folders as plain files in a synced folder of your choice.
 - **Chrome (MV3), MV2 Chromium and Firefox.**
 
@@ -86,6 +87,7 @@ running (later: **?** → **Welcome** or **?** → **Samples**).
 |---|---|
 | [Installing](docs/install.md) | release zips, signed crx, building from source |
 | [Writing scripts](docs/scripting.md) | the `wt` API, routes, parameters, libraries, imports and data files, `wt.globalStore`/`wt.pageStore`/`wt.fetch`, `onPage`, overlays (`dom: "overlay"`), stacking, async handlers |
+| [Installing and sharing scripts](docs/packages.md) | install from a URL, GitHub, a gist, a folder or a zip; the header; where files go; updates and rollback |
 | [Interception strategies](docs/strategies.md) | `page` / `debugger` / `extension` / `helper` / `rules`, the default and per-handler choice, [which strategies keep the URL when replacing a response](docs/strategies.md#how-each-strategy-serves-a-replacement), the Missed warning, browser compatibility |
 | [Local helper](docs/local-helper.md) | the `helper` strategy: install, how it works, security notes |
 | [The Editor](docs/editor.md) | Code view, Problems, Log & Network views, folder sync, `settings.yaml` |

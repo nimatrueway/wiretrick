@@ -1,0 +1,61 @@
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 13px/1.5 -apple-system, "Segoe UI", sans-serif;
+}
+main {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 28px 24px 96px;
+}
+main.center { text-align: center; padding-top: 80px; }
+h1 { font-size: 20px; font-weight: 600; margin: 0 0 6px; }
+h2 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-dim); margin: 22px 0 8px; }
+.version { margin-left: 10px; font-size: 12px; font-weight: 500; color: var(--fg-dim); border: 1px solid var(--border); border-radius: 10px; padding: 1px 8px; vertical-align: middle; }
+.desc { margin: 4px 0; white-space: pre-wrap; }
+.dim { color: var(--fg-dim); }
+.small { font-size: 12px; }
+.err { color: var(--err); white-space: pre-wrap; }
+a { color: var(--bar); }
+code { font-family: ui-monospace, "Cascadia Code", Menlo, monospace; font-size: 12px; }
+.note { background: var(--bg-panel); border: 1px solid var(--border); border-left: 3px solid var(--bar); padding: 8px 12px; border-radius: 3px; }
+ul.caps, ul.warnings, ul.entries { list-style: none; margin: 0; padding: 0; }
+ul.caps li, ul.warnings li { padding: 5px 10px 5px 26px; position: relative; border-radius: 3px; margin-bottom: 3px; }
+ul.caps li::before { content: ""; position: absolute; left: 10px; top: 11px; width: 8px; height: 8px; border-radius: 50%; }
+.risk-high { background: var(--err-tint); }
+.risk-high::before { background: var(--err); }
+.risk-medium { background: var(--warn-tint); }
+.risk-medium::before { background: var(--warn); }
+.risk-low::before { background: var(--ok); }
+.risk-new { background: var(--err-tint); font-weight: 600; }
+.risk-new::before { background: var(--err); }
+ul.warnings li { background: var(--warn-tint); }
+ul.warnings li::before { content: "⚠"; position: absolute; left: 8px; color: var(--warn); }
+details.file, div.file { border: 1px solid var(--border); border-radius: 3px; margin-bottom: 4px; background: var(--bg-panel); }
+div.file { padding: 6px 10px; opacity: 0.7; }
+details.file summary { cursor: pointer; padding: 6px 10px; display: flex; gap: 10px; align-items: center; }
+details.file summary code { flex: 1; }
+details.file pre { margin: 0; padding: 10px 12px; max-height: 420px; overflow: auto; background: var(--bg-sunk); border-top: 1px solid var(--border); font: 12px/1.45 ui-monospace, "Cascadia Code", Menlo, monospace; }
+pre.diff div { white-space: pre; }
+pre.diff .add { background: rgba(78, 201, 176, 0.14); }
+pre.diff .del { background: rgba(244, 135, 113, 0.14); }
+pre.diff .gap { color: var(--fg-faint); }
+.tag { font-size: 11px; padding: 0 6px; border-radius: 8px; border: 1px solid var(--border); }
+.tag.added { color: var(--ok); }
+.tag.changed { color: var(--warn); }
+.tag.removed { color: var(--err); }
+footer { position: fixed; left: 0; right: 0; bottom: 0; background: var(--bg-panel); border-top: 1px solid var(--border); padding: 12px max(24px, calc((100% - 860px) / 2 + 24px)); display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.actions { display: flex; gap: 8px; margin-top: 12px; }
+footer .actions { margin: 0; }
+.row { display: flex; gap: 8px; margin: 12px 0; }
+.row input { flex: 1; }
+input:not([type]), input[type="text"] { background: var(--bg-sunk); color: var(--fg); border: 1px solid var(--border); border-radius: 3px; padding: 6px 8px; font: inherit; }
+input:focus { outline: 1px solid var(--accent); }
+button, label.button { background: var(--bg-active); color: var(--fg); border: 1px solid var(--border); border-radius: 3px; padding: 6px 14px; font: inherit; cursor: pointer; }
+button:hover:not(:disabled), label.button:hover { background: var(--bg-hover); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover:not(:disabled) { background: #1a8ad4; }
+button:disabled { opacity: 0.5; cursor: default; }
+button.link { background: none; border: none; color: var(--bar); padding: 2px 0; }
+label.check { display: flex; gap: 6px; align-items: center; }

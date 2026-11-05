@@ -84,7 +84,8 @@ folder sit at the root, as before. Which folders are collapsed is remembered.
 Click the **Wiretrick** header to collapse the whole tree.
 
 Hovering the explorer shows the header buttons: **New Script…**, **New JSON
-File…**, **New Folder…** and **Collapse Folders in Explorer**. A new item
+File…**, **New Folder…**, **Install Script…** (opens the [install
+page](packages.md#install-a-script)) and **Collapse Folders in Explorer**. A new item
 goes into the selected folder (or the selected file's folder) and is named in
 an inline box, like VS Code (Enter creates, Esc cancels). A new data file
 is `.json` (starting as `{}`) unless you type `.svg` (an empty `<svg>`) and
@@ -103,6 +104,11 @@ Script…** makes a `*.wiretrick.ts` file, which runs, unless you type `.ts`
 (`utils.ts`): then it's a [library](scripting.md#libraries-and-recipes). Drag a
 script, data file or folder onto a folder to move it there (onto the empty
 area: to the root); hovering a collapsed folder while dragging expands it.
+An [installed package](packages.md)'s folder (or a one-file package's entry)
+shows 📦, or ⬆ when an update waits for review (click it to review); its
+right-click menu adds **Review Update…**, **Check for Updates**, **Turn
+Auto-Update On/Off**, **Roll Back to …**, **Open Source Page** and **Forget
+Package (Keep Files)**.
 
 Select several items as in VS Code: ⌘-click (Ctrl-click) adds or removes a
 row, Shift-click (or Shift+↑/↓) selects a range, ⌘A (Ctrl+A) selects every

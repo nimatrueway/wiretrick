@@ -46,7 +46,9 @@ Only files named **`*.wiretrick.ts`** (or `*.wiretrick.tsx`) run. Every
 other `.ts` file is a [library](#libraries-and-recipes) that scripts import:
 its handlers never register, and a Problems warning offers to rename it.
 New files you name without an extension (`dark mode`) become
-`dark mode.wiretrick.ts`; name one `utils.ts` for a library.
+`dark mode.wiretrick.ts`; name one `utils.ts` for a library. To share a
+script, publish its `*.wiretrick.ts` file (and the files it imports) at a
+URL; opening that URL [installs it](packages.md).
 
 ## Routes
 

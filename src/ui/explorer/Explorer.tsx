@@ -28,6 +28,9 @@ import {
 } from "../state/explorer";
 import { showContextMenu } from "./ContextMenu";
 import { NameInput } from "./NameInput";
+import { badgeRowOf, openInstallPage, packageOf, packages, packageTitle } from "../state/packages";
+import { packagesApi } from "../install/api";
+import type { InstalledPackage } from "../../shared/packageModel";
 
 const FOLDER_ICON = `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M1.5 3.5h4.3l1.5 1.5h7.2v8h-13z" fill="none" stroke="currentColor" stroke-linejoin="round"/></svg>`;
 const FOLDER_OPEN_ICON = `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M1.5 12.5v-9h4.3l1.5 1.5h5.2v2M1.5 12.5l2-5.5h11l-2 5.5z" fill="none" stroke="currentColor" stroke-linejoin="round"/></svg>`;
@@ -66,11 +69,53 @@ const withJson = (path: string): string => (/\.(json|svg)$/i.test(path) ? path :
 
 const copy = (text: string, done: string): void => void navigator.clipboard?.writeText(text).then(() => actions.status(done));
 
+const pkgLabel = (p: InstalledPackage): string => `“${p.header.name || p.entry.replace(/^.*\//, "")}”`;
+
+/** run a package action; its failure shows in the status bar */
+function pkgAction(fn: () => Promise<unknown>, done?: string): void {
+    fn().then(
+        () => done && actions.status(done),
+        (e) => actions.status(String(e?.message || e), "error")
+    );
+}
+
+async function checkUpdates(p?: InstalledPackage): Promise<void> {
+    actions.status(p ? `checking ${pkgLabel(p)} for updates…` : "checking installed scripts for updates…");
+    const before = p ? packages.byId[p.id] : undefined;
+    const all = await packagesApi.check(p?.id);
+    const after = p ? all[p.id] : undefined;
+    if (p && after?.lastError) actions.status(`checking ${pkgLabel(p)} failed: ${after.lastError}`, "error");
+    else if (p && after?.pending) openInstallPage(`?update=${encodeURIComponent(p.id)}`);
+    else if (p) actions.status(after && before && after.updatedAt > before.updatedAt ? `updated ${pkgLabel(p)}` : `${pkgLabel(p)} is up to date`);
+    else actions.status("checked installed scripts for updates");
+}
+
+/** a package's items in a menu on one of its rows */
+function packageMenu(p: InstalledPackage): MenuItem[] {
+    const src = p.source && /^https?:/i.test(p.source) ? p.source : "";
+    return [
+        ...(p.pending ? [{ label: "Review Update…", run: () => openInstallPage(`?update=${encodeURIComponent(p.id)}`) }] : []),
+        ...(p.source ? [{ label: "Check for Updates", run: () => pkgAction(() => checkUpdates(p)) }] : []),
+        ...(p.source ? [{ label: p.autoUpdate ? "Turn Auto-Update Off" : "Turn Auto-Update On", run: () => pkgAction(() => packagesApi.setAutoUpdate(p.id, !p.autoUpdate), `auto-update ${p.autoUpdate ? "off" : "on"} for ${pkgLabel(p)}`) }] : []),
+        ...(p.previous ? [{ label: `Roll Back to ${p.previous.header.version || "the Previous Version"}`, run: () => pkgAction(() => packagesApi.rollback(p.id), `rolled ${pkgLabel(p)} back (auto-update is off now)`) }] : []),
+        ...(src ? [{ label: "Open Source Page", run: () => void chrome.tabs.create({ url: src }) }] : []),
+        { label: "Forget Package (Keep Files)", run: () => pkgAction(() => packagesApi.forget(p.id), `${pkgLabel(p)} won't update anymore`) },
+        null,
+    ];
+}
+
 function newItemsMenu(folder: string): MenuItem[] {
     return [
         { label: "New Script…", run: () => actions.startCreate("script", folder) },
         { label: "New JSON File…", run: () => actions.startCreate("data", folder) },
         { label: "New Folder…", run: () => actions.startCreate("folder", folder) },
+    ];
+}
+
+function installMenu(): MenuItem[] {
+    return [
+        { label: "Install Script…", run: () => openInstallPage() },
+        ...(Object.values(packages.byId).some((p) => p.source && p.autoUpdate) ? [{ label: "Check for Script Updates", run: () => pkgAction(() => checkUpdates()) }] : []),
     ];
 }
 
@@ -102,6 +147,10 @@ export function ExplorerSection() {
                     {" "}
                     <button id="btn-new-folder" title="New Folder…" aria-label="New Folder" onClick={button(() => actions.startCreate("folder"))}>
                         <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" d="M8.5 13.5h-7v-10h4.3l1.5 1.5h7.2v3.5M12 9.5v5M9.5 12h5" /></svg>
+                    </button>
+                    {" "}
+                    <button id="btn-install" title="Install Script… (from a URL, GitHub, a gist, a folder or a zip)" aria-label="Install Script" onClick={button(() => openInstallPage())}>
+                        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" d="M8 1.5v8M5 6.5l3 3 3-3M2.5 10.5v3h11v-3" /></svg>
                     </button>
                     {" "}
                     <button id="btn-collapse-all" title="Collapse Folders in Explorer" aria-label="Collapse Folders in Explorer" onClick={button(collapseAll)}>
@@ -163,7 +212,7 @@ function onKeyDown(e: KeyboardEvent<HTMLUListElement>): void {
 /** ⌘/Ctrl-click and Shift-click select (without opening); a plain click selects just its row */
 function onClickCapture(e: MouseEvent<HTMLUListElement>): void {
     const target = e.target as HTMLElement;
-    if (target.closest("input, .btn-del, .err-ind")) return;
+    if (target.closest("input, .btn-del, .err-ind, .pkg-ind.pending")) return;
     const id = target.closest<HTMLElement>("li.script-item:not(.creating)")?.dataset.id;
     if (!id) return;
     const mod = e.metaKey || e.ctrlKey;
@@ -193,7 +242,7 @@ function onContextMenu(e: MouseEvent<HTMLUListElement>): void {
     if (!id || id === SETTINGS_ID) {
         // settings.yaml and the empty space below the tree: the root
         if (id) moveFocus(id);
-        showContextMenu(e.clientX, e.clientY, [...(id ? [{ label: "Open", key: "Enter", run: () => open(id) }, null] : []), ...newItemsMenu("")]);
+        showContextMenu(e.clientX, e.clientY, [...(id ? [{ label: "Open", key: "Enter", run: () => open(id) }, null] : []), ...newItemsMenu(""), null, ...installMenu()]);
         return;
     }
     const row = treeRow(id);
@@ -201,8 +250,10 @@ function onContextMenu(e: MouseEvent<HTMLUListElement>): void {
     moveFocus(id);
     const script = row.kind === "script" ? explorer.scripts.find((s) => s.id === id) : undefined;
     const isLib = script?.meta.active === false;
+    const pkg = packageOf(row);
     showContextMenu(e.clientX, e.clientY, [
         ...(row.kind === "folder" ? [] : [{ label: "Open", key: "Enter", run: () => open(id) }, null]),
+        ...(pkg ? packageMenu(pkg) : []),
         ...(script && !isLib ? [{ label: script.enabled ? "Disable" : "Enable", run: () => actions.setScriptEnabled(script.id, !script.enabled) }, null] : []),
         ...newItemsMenu(targetFolder(row)),
         null,
@@ -307,6 +358,34 @@ export function ExplorerTree() {
     const snap = useSnapshot(explorer, { sync: true });
     const list = useRef<HTMLUListElement>(null);
     const { dropFolder, handlers } = useDnd();
+    const pkgSnap = useSnapshot(packages);
+    const pkgByRow = new Map<string, InstalledPackage>();
+    for (const p of Object.values(pkgSnap.byId) as InstalledPackage[]) {
+        const at = badgeRowOf(p);
+        pkgByRow.set("folder" in at ? folderRowId(at.folder) : at.id, p);
+    }
+    const pkgBadge = (id: string) => {
+        const p = pkgByRow.get(id);
+        if (!p) return null;
+        return (
+            <span
+                className={"pkg-ind" + (p.pending ? " pending" : p.lastError ? " failed" : "")}
+                title={packageTitle(p)}
+                role="img"
+                aria-label={p.pending ? "package update waiting" : "installed package"}
+                onClick={
+                    p.pending
+                        ? (e) => {
+                              e.stopPropagation();
+                              openInstallPage(`?update=${encodeURIComponent(p.id)}`);
+                          }
+                        : undefined
+                }
+            >
+                {p.pending ? "⬆" : "📦"}
+            </span>
+        );
+    };
     const rows = explorerTree({ scripts: snap.scripts.map((s) => ({ id: s.id, name: s.meta.name })), dataFiles: [...snap.dataFiles], folders: [...snap.folders], collapsed: snap.collapsed });
     const { selectedId, dirty, sel, editing } = snap;
     const multi = sel.size > 1;
@@ -391,6 +470,7 @@ export function ExplorerTree() {
                     <>
                         <FileIcon kind={r.expanded ? "folder-open" : "folder"} />
                         {name(r, r.name, `${r.path}\nF2 to rename · drag to move`)}
+                        {pkgBadge(r.id)}
                     </>,
                     { "aria-expanded": !!r.expanded, draggable: true, ...click(r.id, () => setFolderExpanded(r.path, !r.expanded)) },
                     r.expanded
@@ -435,6 +515,7 @@ export function ExplorerTree() {
                     <>
                         <FileIcon kind={isTsxName(script.meta.name) ? "tsx" : "ts"} />
                         {name(r, baseName(scriptFileName(script.meta.name)), title, health ? " error" : "")}
+                        {pkgBadge(r.id)}
                         {health && (
                             <span
                                 className={`err-ind ${health.kind}`}

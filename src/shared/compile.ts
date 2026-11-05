@@ -215,6 +215,13 @@ export interface DataFileSource {
     text: string;
 }
 
+/** `extra` over `stored`, by path */
+export function withData(stored: DataFileSource[], extra: DataFileSource[] | undefined): DataFileSource[] {
+    if (!extra?.length) return stored;
+    const paths = new Set(extra.map((d) => d.path.toLowerCase()));
+    return [...extra, ...stored.filter((d) => !paths.has(d.path.toLowerCase()))];
+}
+
 /**
  * Importing a data file failed (missing, invalid JSON). Never stubbed:
  * the importer (transitively) fails to compile, positioned at its import
