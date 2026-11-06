@@ -49,6 +49,11 @@ export interface PageShimOptions {
      * page-world code (absent in page world: calls are rejected)
      */
     overlay?: (h: string) => any;
+    /**
+     * isolated world: `"page:N"` (a `js: "page"` handler) → its handle; its
+     * answers are page data (absent: calls are rejected)
+     */
+    page?: (h: string) => any;
     /** page world without `overlay`: a call into the overlay (rejected; its error has the caller's stack) */
     onMainWorldCall?: (e: Error) => void;
     /**
@@ -98,7 +103,10 @@ export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDocumentHa
         if (pageWorld(r) === world) {
             o.exposer?.register(h);
             dom.push({ h, route: r, when: r.when || "document_end", fn: fn as any });
-        } else o.exposer?.elsewhere(h, o.otherWorld ?? NOT_RUNNING);
+        } else {
+            o.exposer?.elsewhere(h, o.otherWorld ?? NOT_RUNNING);
+            if (world === "isolated" && o.page) return o.page(h);
+        }
         return inertRemote(world === "isolated" ? REMOTE_PAGE_FROM_ISOLATED : REMOTE_PAGE_FROM_PAGE);
     };
     const overlayHandle = (h: string) => {

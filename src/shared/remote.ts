@@ -26,9 +26,9 @@ export function inertRemote(reason: string, onCall?: (e: WtCallError) => void): 
 }
 
 export const REMOTE_FROM_BACKGROUND = "onPage handles can't be called from network handlers: an onPage handler's functions are called from this script's overlay, an overlay's from its isolated-world onPage code";
-/** an onPage handle used in onPage code (only the overlay calls them) */
+/** an isolated onPage handle used in isolated onPage code (it may call js: "page" handles only) */
 export const REMOTE_PAGE_FROM_ISOLATED =
-    "an onPage handler's functions are called from this script's overlay, not from onPage code — to call page functions from isolated onPage code, return them from ctx.evaluate: const page = await ctx.evaluate(() => ({ read: () => … })); await page.read()";
+    "isolated onPage code can call js: \"page\" handlers' functions, not another isolated handler's (those are for the overlay) — share the functions in the script directly";
 export const REMOTE_PAGE_FROM_PAGE = "an onPage handler's functions are called from this script's overlay, not from onPage code — page-world code can call them directly";
 export const REMOTE_MAIN_WORLD =
     'page-world onPage code can\'t call the overlay; run it in the isolated world (the default: drop js: "page") and read the page with ctx.evaluate — or, accepting that the page can then call the overlay too, add unsafe: true to its js: "page" routes';

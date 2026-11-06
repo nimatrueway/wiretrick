@@ -284,6 +284,27 @@ wt.onPage("${ORIGIN}/page-fetch*", async (ctx) => {
     check("onPage: ctx.evaluate's function uses the script's imports and top-level helpers in the page world; functions it returns are callable", evcap?.page === "v1-ok-ret" && evcap?.iso === "v1-ok-ret", JSON.stringify(evcap));
     await send({ type: "deleteScript", id: "s_evcap" });
     await send({ type: "deleteScript", id: "s_evcaplib" });
+    // isolated code at document_start calls a js: "page" handler's functions (it answers once ready)
+    await saveScript(
+        "s_pagecall",
+        `const page = wt.onPage({ url: "${ORIGIN}/page-fetch*", js: "page", when: "document_start" }, async () => {
+    (window as any).__pagecallMark = 1;
+    await new Promise((r) => setTimeout(r, 50));
+    return { read: (k: string) => k + ":" + typeof (window as any).__pagecallMark };
+});
+wt.onPage({ url: "${ORIGIN}/page-fetch*", when: "document_start" }, async () => {
+    document.documentElement.dataset.pagecall = await page.read("main");
+});`,
+        "page call.wiretrick"
+    );
+    let pagecall: any = null;
+    for (let i = 0; i < 30 && !pagecall; i++) {
+        if (i % 10 === 0) await p3.reload();
+        await new Promise((r) => setTimeout(r, 300));
+        pagecall = await p3.evaluate(() => document.documentElement.dataset.pagecall).catch(() => null);
+    }
+    check("onPage: isolated code calls a js: \"page\" handler's functions at document_start", pagecall === "main:number", String(pagecall));
+    await send({ type: "deleteScript", id: "s_pagecall" });
 }
 await p3.close();
 

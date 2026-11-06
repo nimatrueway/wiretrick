@@ -1172,6 +1172,27 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
         }
         check("onPage: ctx.evaluate's function uses the script's imports and top-level helpers in the page world; functions it returns are callable", evcap?.page === "v1-ok-ret" && evcap?.iso === "v1-ok-ret", JSON.stringify(evcap));
         for (const id of ["s_evcap", "s_evcaplib"]) await warm.evaluate((id: string) => new Promise((r) => chrome.runtime.sendMessage({ type: "deleteScript", id }, r)), id);
+        // isolated code at document_start calls a js: "page" handler's functions (it answers once ready)
+        await save(
+            "s_pagecall",
+            "Page call.wiretrick",
+            `const page = wt.onPage({ url: "*://*:*/page-badge*", js: "page", when: "document_start" }, async () => {
+                (window as any).__pagecallMark = 1;
+                await new Promise((r) => setTimeout(r, 50));
+                return { read: (k: string) => k + ":" + typeof (window as any).__pagecallMark };
+            });
+            wt.onPage({ url: "*://*:*/page-badge*", when: "document_start" }, async () => {
+                document.documentElement.dataset.pagecall = await page.read("main");
+            });`
+        );
+        let pagecall: any = null;
+        for (let i = 0; i < 40 && !pagecall; i++) {
+            if (i % 8 === 0) await bp.reload();
+            await warm.waitForTimeout(250);
+            pagecall = await bp.evaluate(() => document.documentElement.dataset.pagecall).catch(() => null);
+        }
+        check("onPage: isolated code calls a js: \"page\" handler's functions at document_start", pagecall === "main:number", String(pagecall));
+        await warm.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "deleteScript", id: "s_pagecall" }, r)));
         await bp.close();
     }
 

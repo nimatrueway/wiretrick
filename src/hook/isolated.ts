@@ -62,6 +62,15 @@ import { evalModule, makePageEvaluate, type EvalModule } from "../shared/pageEva
         );
     });
 
+    // calls into the script's js: "page" handlers: straight to the hook (main
+    // world) over window messages. The page sees and can forge both ways, so
+    // the answers are page data — like ctx.evaluate's.
+    const pageClient = new RpcClient((call) => window.postMessage({ source: "res-override-bridge", kind: "rpc.call", s, call }, location.origin));
+    window.addEventListener("message", (e: MessageEvent) => {
+        const d = e.data;
+        if (e.source === window && d && d.source === "res-override-hook" && d.kind === "rpc.result" && d.s === s) pageClient.receive(d.result);
+    });
+
     /** the bound link (opened and loaded on demand); rejects when the owner is unreachable or refused */
     function linkUp(): Promise<Endpoint> {
         if (stopped) return Promise.reject(new Error("stopped"));
@@ -178,6 +187,7 @@ import { evalModule, makePageEvaluate, type EvalModule } from "../shared/pageEva
                 stores: { store: (n, initial, persist) => stores().store(s, n, initial, persist), pageStore: (n, initial) => stores().pageStore(s, n, initial, page) },
                 exposer: mine ? exposer : undefined,
                 overlay: mine && top ? (h) => client.remote(h) : undefined,
+                page: mine ? (h) => pageClient.remote(h) : undefined,
                 log: (...args: any[]) => log("info", scriptLogLine(name, "wt.log", formatLogArgs(args))),
                 storage: {
                     get: (key: string) => linkUp().then((ep) => ep.call("storage.get", { key }, s)).then((r) => r.value, () => undefined),

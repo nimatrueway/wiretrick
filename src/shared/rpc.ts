@@ -92,8 +92,10 @@ export function toJsonArgs(fn: string, args: unknown[]): Json[] {
     const out = args.map((a) => (a === undefined ? null : a)) as Json[];
     const bad = badValue(out);
     if (bad) throw new TypeError(`${fn}(): arguments must be JSON — ${bad}`);
-    if (jsonBytes(out) > RPC_MAX_BYTES) throw new TypeError(`${fn}(): arguments are larger than 1 MB`);
-    return out;
+    const json = JSON.stringify(out);
+    if (json.length > RPC_MAX_BYTES) throw new TypeError(`${fn}(): arguments are larger than 1 MB`);
+    // a plain copy: a store's object (a Proxy) can't be posted
+    return JSON.parse(json);
 }
 
 const callError = (message: string): RpcResult["error"] => ({ name: "WtCallError", message });
@@ -281,6 +283,7 @@ function okResult(c: RpcCall, v: unknown): RpcResult {
     if (v === undefined) return { cid: c.cid, ok: true };
     const bad = badValue(v);
     if (bad) return { cid: c.cid, ok: false, error: callError(`${c.fn}(): the result must be JSON — ${bad}`) };
-    if (jsonBytes(v) > RPC_MAX_BYTES) return { cid: c.cid, ok: false, error: callError(`${c.fn}(): the result is larger than 1 MB`) };
-    return { cid: c.cid, ok: true, value: v as Json };
+    const json = JSON.stringify(v);
+    if (json.length > RPC_MAX_BYTES) return { cid: c.cid, ok: false, error: callError(`${c.fn}(): the result is larger than 1 MB`) };
+    return { cid: c.cid, ok: true, value: JSON.parse(json) };
 }

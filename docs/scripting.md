@@ -1072,17 +1072,25 @@ wt.onPage({ url: "*://app.example.com/*", dom: "overlay" }, async () => {
   site can call the overlay too
   ([stores in `onPage` code](#stores-in-onpage-code)). Network handlers have no
   tab: their calls reject.
-- **Not between `onPage` handlers.** An `onPage` handle is the overlay's:
-  calling one from `onPage` code rejects. In isolated code, get page
-  functions from [`ctx.evaluate`](#reading-the-page--ctxevaluate), which
-  returns them:
+- **Isolated code can call `js: "page"` handlers.** A page-world handler's
+  handle works in the script's isolated `onPage` code too — even at
+  `document_start`, where the call waits until the page handler has
+  returned. Its answers are page data: the site can see and fake them, as
+  with [`ctx.evaluate`](#reading-the-page--ctxevaluate). Other `onPage`
+  handles reject there (share those functions in the script directly), and
+  page-world code calls page functions directly.
 
   ```ts
-  wt.onPage("*://app.example.com/*", async (ctx) => {
-      const app = await ctx.evaluate(() => ({ flags: () => Object.keys((window as any).__APP_FLAGS__ ?? {}) }));
+  const app = wt.onPage({ url: "*://app.example.com/*", js: "page", when: "document_start" }, () => ({
+      flags: () => Object.keys((window as any).__APP_FLAGS__ ?? {}),
+  }));
+  wt.onPage({ url: "*://app.example.com/*", when: "document_start" }, async () => {
       console.log(await app.flags());
   });
   ```
+
+- **JSON copies.** Arguments and results are copied as JSON (up to 1 MB),
+  so a store's objects can be passed as they are.
 
 ### The isolated world
 

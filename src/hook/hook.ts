@@ -12,7 +12,7 @@ import { scriptFunction } from "../shared/scriptFn";
 import { makeLibRequire, type ShippedLib } from "../shared/scriptImports";
 import { routeMatches, takesBinary, type DocumentWhen, type RouteMeta } from "../shared/route";
 import { makePageShim, domHandlersFor, scheduleDocument, firePageHandler, type PageDocumentHandler } from "../shared/pageShim";
-import { Exposer, isRpcCall, NOT_RUNNING, RpcClient, TOP_FRAME_ONLY, type RpcResult } from "../shared/rpc";
+import { Exposer, isRpcCall, NOT_RUNNING, RpcClient, TOP_FRAME_ONLY, type RpcCall, type RpcResult } from "../shared/rpc";
 import { inertRemote } from "../shared/remote";
 import { Endpoint } from "../shared/wire";
 import { ReplicaHub, type StoreSnapshots } from "../shared/storeReplica";
@@ -92,6 +92,16 @@ import { createPageLayer, type PageLayer } from "./pageLayer";
     let layersBuilt = false;
     /** per script: answers the overlay's calls into its main-world onPage handles (via the bridge) */
     const exposers = new Map<string, Exposer>();
+    /** calls into onPage handles that arrived before the handlers compiled */
+    const earlyCalls: [string, RpcCall, (r: RpcResult) => void][] = [];
+    function answerCall(s: string, call: RpcCall, reply: (r: RpcResult) => void): void {
+        const ex = exposers.get(s);
+        if (ex) ex.answer(call, reply);
+        else reply({ cid: call.cid, ok: false, error: { name: "WtCallError", message: NOT_RUNNING } });
+    }
+    function flushEarlyCalls(): void {
+        for (const [s, call, reply] of earlyCalls.splice(0)) answerCall(s, call, reply);
+    }
     let reqSeq = 0;
     const pending = new Map<number, (v: any) => void>();
 
@@ -148,9 +158,12 @@ import { createPageLayer, type PageLayer } from "./pageLayer";
                     window.postMessage({ source: HOOK_SOURCE, kind: "rpc.result", s: data.s, result }, window.location.origin);
                 } catch {}
             };
-            const ex = exposers.get(data.s);
-            if (ex) ex.answer(data.call, reply);
-            else reply({ cid: data.call.cid, ok: false, error: { name: "WtCallError", message: NOT_RUNNING } });
+            // before the first status (isolated code at document_start): wait for the handlers
+            if (!layersBuilt && !dead) {
+                if (earlyCalls.length < 1000) earlyCalls.push([data.s, data.call, reply]);
+                return;
+            }
+            answerCall(data.s, data.call, reply);
             return;
         }
         if (data.kind === "watchNav") {
@@ -187,6 +200,7 @@ import { createPageLayer, type PageLayer } from "./pageLayer";
             // nothing here for the hook: the page keeps its own fetch/XHR
             else if (first) unpatch();
             compileAndScheduleDocument(!!data.hot);
+            flushEarlyCalls();
         }
     });
 
@@ -196,6 +210,7 @@ import { createPageLayer, type PageLayer } from "./pageLayer";
         // in-flight relays resolve immediately — no 15s watchdog stalls
         for (const [, resolve] of pending) resolve(null);
         pending.clear();
+        flushEarlyCalls();
         markKnown();
         if (!active && !patched) return;
         active = false;

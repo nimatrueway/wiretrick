@@ -448,6 +448,7 @@ import type { EvalCapture } from "../shared/evalCapture";
                               ? () => inertRemote(TOP_FRAME_ONLY)
                               : undefined
                         : undefined,
+                page: scriptId && world === "isolated" ? (h) => pageClient(scriptId).remote(h) : undefined,
                 // the main-world fallback reports a call into the overlay like the hook does (once per script)
                 onMainWorldCall: (e) => {
                     if (world !== "page" || mainWorldCallers.has(scriptId)) return;
@@ -952,13 +953,32 @@ import type { EvalCapture } from "../shared/evalCapture";
         const fb = fallbackExposers.get(s);
         if (iso?.has(call.h) && !iso.isElsewhere(call.h)) return iso.answer(call, reply);
         if (fb?.has(call.h) && !fb.isElsewhere(call.h)) return fb.answer(call, reply);
-        if (pageScriptIds.has(s) && !hookBroken) {
-            const timer = setTimeout(() => l4Pending.delete(call.cid), RPC_TIMEOUT_MS + 1000);
-            l4Pending.set(call.cid, { s, reply, timer });
-            window.postMessage({ source: MAIN_SOURCE, kind: "rpc.call", s, call }, window.location.origin);
-            return;
-        }
+        if (pageScriptIds.has(s) && !hookBroken) return callHook(s, call, reply);
         (iso ?? fb)?.answer(call, reply) ?? reply(callError(call.cid, NOT_RUNNING));
+    }
+
+    /** a call into the script's main-world onPage code (L4) */
+    function callHook(s: string, call: RpcCall, reply: (r: RpcResult) => void): void {
+        const timer = setTimeout(() => l4Pending.delete(call.cid), RPC_TIMEOUT_MS + 1000);
+        l4Pending.set(call.cid, { s, reply, timer });
+        window.postMessage({ source: MAIN_SOURCE, kind: "rpc.call", s, call }, window.location.origin);
+    }
+
+    /** isolated onPage code → its script's js: "page" handlers (the CSP fallback here, else the hook); the answers are page data */
+    const pageClients = new Map<string, RpcClient>();
+    function pageClient(s: string): RpcClient {
+        let c = pageClients.get(s);
+        if (!c) {
+            const client = new RpcClient((call) => {
+                const reply = (r: RpcResult) => void client.receive(r);
+                const fb = fallbackExposers.get(s);
+                if (fb?.has(call.h) && !fb.isElsewhere(call.h)) return fb.answer(call, reply);
+                if (pageScriptIds.has(s) && !hookBroken) return callHook(s, call, reply);
+                reply(callError(call.cid, NOT_RUNNING));
+            });
+            pageClients.set(s, (c = client));
+        }
+        return c;
     }
 
     /** `wt.fetch(…, { from: "page" })` and the overlay's `fetch`: this frame fetches, as the page (Firefox: the page's own fetch) */

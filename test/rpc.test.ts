@@ -19,9 +19,9 @@ function link(exposer: Exposer, opts?: { timeoutMs?: number }) {
 }
 
 /** run a script's onPage code like a page runtime does, answering its handles */
-function runPage(src: string, opts: { world?: "page" | "isolated"; url?: string; overlay?: (h: string) => any } = {}) {
+function runPage(src: string, opts: { world?: "page" | "isolated"; url?: string; overlay?: (h: string) => any; page?: (h: string) => any } = {}) {
     const exposer = new Exposer();
-    const shim = makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined }, world: opts.world ?? "isolated", exposer, overlay: opts.overlay });
+    const shim = makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined }, world: opts.world ?? "isolated", exposer, overlay: opts.overlay, page: opts.page });
     const moduleObj = { exports: {} as any };
     new Function("wt", "module", "exports", src)(shim.wt, moduleObj, moduleObj.exports);
     const dom = domHandlersFor(shim.dom, opts.url ?? "https://x.com/a", exposer);
@@ -225,12 +225,41 @@ describe("rpc: which world may call the overlay", () => {
         expect(e.message).toBe(REMOTE_MAIN_WORLD);
     });
 
-    it("onPage code calling an onPage handle is told only the overlay calls them (isolated code: use ctx.evaluate)", async () => {
+    it("isolated code calls its js: \"page\" handlers' functions, even before they fired", async () => {
+        const src = `wt.onPage({ url: "*" }, () => ({ own() {} }));\nmodule.exports.page = wt.onPage({ url: "*", js: "page" }, async () => ({ flags: (x) => ({ x, ok: true }) }));\nmodule.exports.iso = wt.onPage({ url: "*" }, () => {});`;
+        const main = runPage(src, { world: "page" });
+        const { client } = link(main.exposer);
+        const iso = runPage(src, { world: "isolated", page: (h) => client.remote(h) });
+        // document_start: the call waits for the page handler's answer
+        const early = iso.exports.page.flags(1);
+        main.fire();
+        expect(await early).toEqual({ x: 1, ok: true });
+        // another isolated handler's handle: not callable here
+        const e = await iso.exports.iso.f().catch((x: any) => x);
+        expect([e.name, e.message]).toEqual(["WtCallError", REMOTE_PAGE_FROM_ISOLATED]);
+    });
+
+    it("arguments and results cross as plain JSON copies (a store's Proxy can be posted)", async () => {
+        const ex = new Exposer();
+        ex.register("page:0");
+        ex.done();
+        const store = new Proxy({ a: 1 }, {});
+        ex.expose("page:0", { echo: (x: any) => ({ x, store }) });
+        const calls: RpcCall[] = [];
+        const results: RpcResult[] = [];
+        const client: RpcClient = new RpcClient((call) => {
+            calls.push(call);
+            ex.answer(structuredClone(call), (r) => (results.push(r), client.receive(structuredClone(r))));
+        });
+        expect(await client.remote("page:0").echo(store)).toEqual({ x: { a: 1 }, store: { a: 1 } });
+        expect(() => structuredClone(calls[0].args)).not.toThrow();
+        expect(() => structuredClone(results[0])).not.toThrow();
+    });
+
+    it("page code calling an onPage handle is told to call it directly; isolated code without a page link is refused", async () => {
         const src = `module.exports.page = wt.onPage({ url: "*", js: "page" }, () => ({ flags() {} }));`;
-        const iso = await runPage(src, { world: "isolated" }).exports.page.flags().catch((x: any) => x);
-        expect([iso.name, iso.message]).toEqual(["WtCallError", REMOTE_PAGE_FROM_ISOLATED]);
-        expect(iso.message).toMatch(/ctx\.evaluate/);
         await expect(runPage(src, { world: "page" }).exports.page.flags()).rejects.toThrow(REMOTE_PAGE_FROM_PAGE);
+        await expect(runPage(src, { world: "isolated" }).exports.page.flags()).rejects.toThrow(REMOTE_PAGE_FROM_ISOLATED);
     });
 
     it("a subframe's isolated-world call into the overlay is refused", async () => {

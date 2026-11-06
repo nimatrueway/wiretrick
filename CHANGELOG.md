@@ -7,6 +7,10 @@ its section below.
 
 ## [Unreleased]
 
+### Added
+
+- Isolated `onPage` code can call the script's `js: "page"` handlers' functions — also at `document_start`, where the call waits for the page handler to return. The answers are page data, as with `ctx.evaluate`. Arguments and results cross as JSON copies, so a store's objects can be passed as they are.
+
 ## [0.18.0-alpha] - 2026-11-06
 
 ### Added
