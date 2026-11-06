@@ -79,7 +79,16 @@ export function makePageEvaluate(win: Window = window, ackMs = PAGE_EVAL_ACK_MS,
         }
     };
     const evaluate: PageEvaluate = (fn, ...args) => {
-        if (typeof fn !== "function") return Promise.reject(new TypeError("ctx.evaluate: pass a function, e.g. ctx.evaluate(() => document.title)"));
+        // the script's call: errors made here point at it, not at Wiretrick's code
+        const site = String(new Error().stack || "");
+        const fail = (message: string, name = "Error"): Error => {
+            const err = name === "TypeError" ? new TypeError(message) : new Error(message);
+            err.name = name;
+            const nl = site.indexOf("\n");
+            if (nl >= 0) err.stack = `${name}: ${message}${site.slice(nl)}`;
+            return err;
+        };
+        if (typeof fn !== "function") return Promise.reject(fail("ctx.evaluate: pass a function, e.g. ctx.evaluate(() => document.title)", "TypeError"));
         const id = `${tag}:${++seq}`;
         const callbacks: Function[] = [];
         const sent = markCallbacks(args, callbacks);
@@ -90,14 +99,23 @@ export function makePageEvaluate(win: Window = window, ackMs = PAGE_EVAL_ACK_MS,
                 // callbacks stay callable after fn returns (e.g. from a page event listener)
                 if (!keepCallbacks || !callbacks.length) win.removeEventListener("message", onMessage);
             };
+            // a page busy past ackMs (a long script) delays the ack, and the browser may run
+            // this timer first: a probe sent through the same message queue, twice, comes back
+            // after any ack the hook already sent, so only a hook that isn't there fails
+            const probe = (hop: number) => win.postMessage({ source: PAGE_EVAL, kind: "probe", id, hop }, "*");
             const timer = setTimeout(() => {
-                if (acked) return;
-                end();
-                reject(new Error("ctx.evaluate: the page world didn't answer (Wiretrick's page hook isn't running in this frame)"));
+                if (!acked) probe(1);
             }, ackMs);
             const onMessage = (e: MessageEvent) => {
                 const d = e.data;
                 if (e.source !== win || !d || d.source !== PAGE_EVAL || d.id !== id) return;
+                if (d.kind === "probe") {
+                    if (acked) return;
+                    if (d.hop === 1) return probe(2);
+                    end();
+                    reject(fail("ctx.evaluate: nothing in the page world answered, so the function didn't run: Wiretrick's page hook isn't in this frame (the page may block it)"));
+                    return;
+                }
                 if (d.kind === "ack") acked = true;
                 if (d.kind === "call") {
                     const cb = callbacks[d.fn];
@@ -111,14 +129,14 @@ export function makePageEvaluate(win: Window = window, ackMs = PAGE_EVAL_ACK_MS,
                 if (d.kind !== "done") return;
                 end(d.ok);
                 if (d.ok) resolve(d.value);
-                else reject(Object.assign(new Error(String(d.error?.message ?? "ctx.evaluate failed")), { name: String(d.error?.name || "Error") }));
+                else reject(fail(String(d.error?.message ?? "ctx.evaluate failed"), String(d.error?.name || "Error")));
             };
             win.addEventListener("message", onMessage);
             try {
                 win.postMessage({ source: PAGE_EVAL, kind: "run", id, src: String(fn), args: sent }, "*");
             } catch (e: any) {
                 end();
-                reject(new TypeError(`ctx.evaluate: arguments must be plain data (${e?.message || e})`));
+                reject(fail(`ctx.evaluate: arguments must be plain data (${e?.message || e})`, "TypeError"));
             }
         });
     };

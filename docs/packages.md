@@ -55,7 +55,8 @@ scripts relative to its folder:
 
 The Editor checks `metadata.json` against its schema and completes its
 fields; in `scripts` it completes the `.ts`/`.tsx` files in the folder (and
-its subfolders) that aren't listed yet. A bundle's scripts can still call `wt.metadata`: their
+its subfolders) that aren't listed yet, and an entry naming no script there
+is an error (in the file and in Problems). A bundle's scripts can still call `wt.metadata`: their
 `description` stays their own tooltip, and their `connect` hosts add to the
 bundle's. Files outside the bundle's folder can't be imported.
 

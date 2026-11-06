@@ -844,7 +844,9 @@ wt.onPage("*://app.example.com/*", async (ctx) => {
   treat the result as [page data](#page-world-results-are-page-data) and
   never pass secrets (store values, tokens) in.
 - It rejects with what `fn` threw, when the page's CSP forbids `eval`, and
-  when Wiretrick's page hook isn't running in the frame. A script variable
+  when Wiretrick's page hook isn't in the frame (a page busy running its own
+  scripts just answers later). The error points at your `ctx.evaluate`
+  call. A script variable
   used in `fn` rejects with "isn't defined in the page world", and the
   Problems view warns about it as you save.
 - A `fetch` made in `fn` is the page's own, so the `page` strategy sees

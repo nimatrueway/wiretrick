@@ -165,9 +165,26 @@ describe("ctx.evaluate", () => {
         expect(reported).toEqual(["left alone"]);
     });
 
-    it("rejects when nothing in the page world answers", async () => {
+    it("rejects when nothing in the page world answers, pointing at the script's call", async () => {
         const win = fakeWindow();
-        await expect(makePageEvaluate(win, 20)(() => 1)).rejects.toThrow(/page world didn't answer/);
+        const e: Error = await makePageEvaluate(win, 20)(() => 1).then(() => new Error("resolved"), (x: Error) => x);
+        expect(e.message).toMatch(/nothing in the page world answered, so the function didn't run/);
+        expect(String(e.stack).split("\n")[0]).toBe(`Error: ${e.message}`);
+        expect(e.stack).toContain("pageEval.test.ts");
+    });
+
+    it("a page too busy to answer in time isn't taken for a missing hook (the timer may run before the queued ack)", async () => {
+        const { evaluate } = setup(0);
+        for (let i = 0; i < 5; i++) expect(await evaluate((n: number) => n * 2, i)).toBe(i * 2);
+    });
+
+    it("what the function threw points at the script's call too", async () => {
+        const { evaluate } = setup();
+        const e: Error = await evaluate(() => {
+            throw new RangeError("far");
+        }).then(() => new Error("resolved"), (x: Error) => x);
+        expect(String(e.stack).split("\n")[0]).toBe("RangeError: far");
+        expect(e.stack).toContain("pageEval.test.ts");
     });
 
     it("a slow function isn't cut off once the page world acknowledged it", async () => {

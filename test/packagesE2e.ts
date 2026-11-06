@@ -213,6 +213,27 @@ export async function checkPackages(ctx: any, mgr: any, origin: string, check: C
     await mgr.keyboard.press("Escape");
     check(t('metadata.json\'s "scripts" completes the scripts in the package\'s folder'), manifestSugg.includes("mklib.ts") && manifestSugg.includes("mkpkg.wiretrick.ts") && !manifestSugg.includes("mkuser.ts"), JSON.stringify({ manifestSugg, manifestAt, manifestId }));
 
+    // ...and a listed script that doesn't exist is an error, in the file and in Problems
+    const manifestOrig = await mgr.evaluate(() => {
+        const m = (window as any).monaco.editor.getEditors()[0].getModel();
+        const v = m.getValue();
+        m.setValue(v.replace('"mkpkg.wiretrick.ts"', '"mkpkg.wiretrick.ts", "gone.ts"'));
+        return v;
+    });
+    const missingMarker = await waitFor(
+        () => mgr.evaluate(() => { const w = window as any; const m = w.monaco.editor.getEditors()[0].getModel(); return w.monaco.editor.getModelMarkers({ resource: m.uri, owner: "wt-manifest" }).map((x: any) => [x.message, m.getValueInRange(x)]); }),
+        (v: any[]) => v.length > 0,
+        5000
+    );
+    const missingInProblems = await waitFor(() => mgr.evaluate(() => document.querySelector("#problems-list, .problems")?.textContent || ""), (v: string) => v.includes("No script at mkpkg/gone.ts"), 5000);
+    await mgr.evaluate((v: string) => (window as any).monaco.editor.getEditors()[0].getModel().setValue(v), manifestOrig);
+    const missingCleared = await waitFor(() => mgr.evaluate(() => { const w = window as any; return w.monaco.editor.getModelMarkers({ resource: w.monaco.editor.getEditors()[0].getModel().uri, owner: "wt-manifest" }).length; }), (n: number) => n === 0, 5000);
+    check(
+        t('metadata.json: a "scripts" entry that names no script is an error, in the file and in Problems'),
+        JSON.stringify(missingMarker) === JSON.stringify([["No script at mkpkg/gone.ts", '"gone.ts"']]) && (missingInProblems || "").includes("gone.ts") && missingCleared === 0,
+        JSON.stringify({ missingMarker, missingInProblems: (missingInProblems || "").slice(0, 300), missingCleared })
+    );
+
     // the folder is a package now: its icon, and Export Package… downloads a zip of it
     const pkgRow = '#script-list li.script-item[data-id="dir:mkpkg"]';
     const icon = await mgr.waitForSelector(`${pkgRow} .file-icon.package`, { timeout: 8000 }).then(() => true, () => false);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { manifestScriptCompletions } from "../src/ui/manifestAssist";
+import { manifestScriptCompletions, manifestScriptProblems } from "../src/ui/manifestAssist";
 
 const FILES = ["pkg/main.ts", "pkg/lib/util.ts", "pkg/view.tsx", "pkg/data.json", "other/x.ts", "root.ts", "PKG2/y.ts"];
 /** `|` marks the cursor */
@@ -43,5 +43,25 @@ describe("metadata.json scripts completions", () => {
 
     it("a package at the root lists every script", () => {
         expect(at('{ "scripts": ["|"] }', "")!.paths).toEqual(["root.ts", "other/x.ts", "pkg/main.ts", "pkg/view.tsx", "PKG2/y.ts", "pkg/lib/util.ts"]);
+    });
+});
+
+describe("metadata.json's missing scripts", () => {
+    const problems = (text: string, folder = "pkg/") => manifestScriptProblems(text, folder, FILES).map((p) => [text.slice(p.start, p.end), p.message]);
+
+    it("flags an entry with no script in the package's folder, on its string", () => {
+        expect(problems('{ "name": "x.ts", "scripts": ["main.ts", "./lib/util.ts", "gone.ts"] }')).toEqual([['"gone.ts"', "No script at pkg/gone.ts"]]);
+    });
+
+    it("hints at a script whose name differs only in case", () => {
+        expect(problems('{ "scripts": ["Main.ts"] }')).toEqual([['"Main.ts"', "No script at pkg/Main.ts (did you mean main.ts?)"]]);
+    });
+
+    it("flags a path out of the folder, leaves non-scripts and other keys to the schema", () => {
+        expect(problems('{ "scripts": ["../other/x.ts", "data.json"], "connect": ["gone.ts"], "x": { "scripts": ["gone.ts"] } }').map((p) => p[0])).toEqual(['"../other/x.ts"']);
+    });
+
+    it("a package at the root resolves from the root", () => {
+        expect(problems('{ "scripts": ["root.ts", "pkg/main.ts", "nope.tsx"] }', "")).toEqual([['"nope.tsx"', "No script at nope.tsx"]]);
     });
 });

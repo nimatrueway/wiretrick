@@ -1133,13 +1133,16 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
         );
         const wanted = ["callback's arguments must be plain data", "evalerr-callback", "evalerr-unhandled", "evalerr-async"];
         let seen: string[] = [];
-        for (let i = 0; i < 40 && seen.length < wanted.length; i++) {
+        let unhandledLine = "";
+        for (let i = 0; i < 40 && (seen.length < wanted.length || !unhandledLine); i++) {
             if (i % 8 === 0) await bp.reload();
             await warm.waitForTimeout(250);
             const lines: string[] = await warm.evaluate(() => [...document.querySelectorAll("#log-entries .log-line.error")].map((l) => (l as HTMLElement).dataset.text || l.textContent || ""));
             seen = wanted.filter((w) => lines.some((l) => l.includes("[Eval errs") && l.includes(w)));
+            unhandledLine = lines.find((l) => l.includes("[Eval errs") && l.includes("evalerr-unhandled") && /Eval errs\.wiretrick:4:\d+/.test(l)) || "";
         }
         check("onPage: async rejections, ctx.evaluate callback errors and unhandled evaluate rejections are the script's errors", seen.length === wanted.length, JSON.stringify(seen));
+        check("onPage: a ctx.evaluate rejection points at the script's ctx.evaluate call (not Wiretrick's code)", !!unhandledLine, unhandledLine || "(no evalerr-unhandled line with Eval errs.wiretrick:4)");
         await warm.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "clearScriptError", scriptId: "s_evalerr" }, r)));
         for (const id of ["s_evalerr", "s_badgebad", "s_badgeiso"]) await warm.evaluate((id: string) => new Promise((r) => chrome.runtime.sendMessage({ type: "deleteScript", id }, r)), id);
         await warm.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "clearScriptError", scriptId: "s_badgebad" }, r)));

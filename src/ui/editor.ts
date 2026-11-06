@@ -12,7 +12,7 @@ import { settingsDiagnostics, settingsCompletions, settingsHover, type AssistScr
 import { badPackageImports, dependantsOf, folderOf, isSvgPath, missingImports } from "../shared/scriptImports";
 import { makeFolderPackagePlan, makePackagePlan } from "../shared/makePackage";
 import { MANIFEST_FILE } from "../shared/packageMetadata";
-import { manifestScriptCompletions } from "./manifestAssist";
+import { manifestScriptCompletions, manifestScriptProblems } from "./manifestAssist";
 import { entryStem } from "../shared/packageModel";
 import { localPackage } from "../shared/localPackage";
 import { writeZip } from "../shared/zip";
@@ -1004,12 +1004,14 @@ function syncDataModels(): void {
             baselines.delete(oldUri);
             old.dispose();
             m.onDidChangeContent(scheduleDataTypings);
+            m.onDidChangeContent(scheduleManifestMarkers);
         }
         if (!m) {
             m = monaco.editor.getModel(uri) || monaco.editor.createModel(d.text, dataLanguage(d.path), uri);
             dataModels.set(d.id, m);
             setBaseline(m, d.text);
             m.onDidChangeContent(scheduleDataTypings);
+            m.onDidChangeContent(scheduleManifestMarkers);
         } else if (m.getValue() !== d.text && !(d.id === selectedId && dirty)) {
             applyingExternal = true;
             m.setValue(d.text);
@@ -1026,6 +1028,30 @@ function syncDataModels(): void {
         }
     }
     updateDataTypings();
+    scheduleManifestMarkers();
+}
+
+/** a package's metadata.json: an error on each "scripts" entry that names no script */
+const MANIFEST_OWNER = "wt-manifest";
+let manifestMarkerTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleManifestMarkers(): void {
+    if (manifestMarkerTimer) clearTimeout(manifestMarkerTimer);
+    manifestMarkerTimer = setTimeout(() => {
+        manifestMarkerTimer = null;
+        const monaco = (window as any).monaco;
+        const files = scripts.map((s) => scriptFileName(s.meta.name));
+        for (const d of dataFiles) {
+            const m = dataModels.get(d.id);
+            if (!m || m.isDisposed() || baseName(d.path) !== MANIFEST_FILE) continue;
+            const markers = manifestScriptProblems(m.getValue(), d.path.slice(0, -MANIFEST_FILE.length), files).map((p) => {
+                const a = m.getPositionAt(p.start);
+                const b = m.getPositionAt(p.end);
+                return { severity: monaco.MarkerSeverity.Error, message: p.message, source: MANIFEST_FILE, startLineNumber: a.lineNumber, startColumn: a.column, endLineNumber: b.lineNumber, endColumn: b.column };
+            });
+            if (markers.length || monaco.editor.getModelMarkers({ resource: m.uri, owner: MANIFEST_OWNER }).length) monaco.editor.setModelMarkers(m, MANIFEST_OWNER, markers);
+        }
+    }, 250);
 }
 
 function scheduleDataTypings(): void {

@@ -7,6 +7,15 @@ its section below.
 
 ## [Unreleased]
 
+### Added
+
+- A package's `metadata.json` marks each `scripts` entry that names no script in its folder as an error, in the file and in Problems.
+
+### Fixed
+
+- `ctx.evaluate` no longer fails with "the page world didn't answer" on a page busy loading its scripts (a local webpack dev build): the browser could run its 3-second timer before the page hook's queued answer. It now confirms the hook is really missing before giving up.
+- A `ctx.evaluate` error points at the script's `ctx.evaluate` call instead of line 1.
+
 ## [0.17.0-alpha] - 2026-11-06
 
 ### Added
