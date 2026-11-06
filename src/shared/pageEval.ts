@@ -52,11 +52,33 @@ export const directEvaluate: PageEvaluate = async (fn, ...args) => {
     return fn(...args);
 };
 
-/** isolated code: ask the page world (the hook) to run `fn` */
-export function makePageEvaluate(win: Window = window, ackMs = PAGE_EVAL_ACK_MS): PageEvaluate {
+/**
+ * isolated code: ask the page world (the hook) to run `fn`. `report` gets
+ * the script's errors nothing else would show: a callback that throws, a
+ * callback the page side couldn't call (its arguments aren't plain data)
+ * and a rejection the script left unhandled.
+ */
+export function makePageEvaluate(win: Window = window, ackMs = PAGE_EVAL_ACK_MS, report?: (e: Error) => void): PageEvaluate {
     let seq = 0;
     const tag = Math.random().toString(36).slice(2);
-    return (fn, ...args) => {
+    /** this script's rejections: reported when it doesn't handle them */
+    const ours = new WeakSet<object>();
+    if (report)
+        win.addEventListener("unhandledrejection", (e: PromiseRejectionEvent) => {
+            if (!e.reason || typeof e.reason !== "object" || !ours.has(e.reason)) return;
+            e.preventDefault();
+            report(e.reason);
+        });
+    const callBack = (cb: Function, args: unknown[]): void => {
+        try {
+            const out = cb(...args);
+            if (report && out && typeof (out as any).then === "function") (out as Promise<unknown>).then(undefined, (e: any) => report(e instanceof Error ? e : new Error(String(e))));
+        } catch (e: any) {
+            if (!report) throw e;
+            report(e instanceof Error ? e : new Error(String(e)));
+        }
+    };
+    const evaluate: PageEvaluate = (fn, ...args) => {
         if (typeof fn !== "function") return Promise.reject(new TypeError("ctx.evaluate: pass a function, e.g. ctx.evaluate(() => document.title)"));
         const id = `${tag}:${++seq}`;
         const callbacks: Function[] = [];
@@ -79,7 +101,11 @@ export function makePageEvaluate(win: Window = window, ackMs = PAGE_EVAL_ACK_MS)
                 if (d.kind === "ack") acked = true;
                 if (d.kind === "call") {
                     const cb = callbacks[d.fn];
-                    if (typeof cb === "function" && Array.isArray(d.args)) cb(...d.args);
+                    if (typeof cb === "function" && Array.isArray(d.args)) callBack(cb, d.args);
+                    return;
+                }
+                if (d.kind === "callError") {
+                    if (report && typeof callbacks[d.fn] === "function") report(new TypeError(String(d.message)));
                     return;
                 }
                 if (d.kind !== "done") return;
@@ -96,6 +122,13 @@ export function makePageEvaluate(win: Window = window, ackMs = PAGE_EVAL_ACK_MS)
             }
         });
     };
+    if (!report) return evaluate;
+    return (fn, ...args) =>
+        evaluate(fn, ...args).catch((e) => {
+            const err = e instanceof Error ? e : new Error(String(e));
+            ours.add(err);
+            throw err;
+        });
 }
 
 /** the page-world side (the hook): run what isolated code asks for */
@@ -108,11 +141,12 @@ export function servePageEvaluate(win: Window = window): void {
         let out: object;
         try {
             const run = new Function("args", `"use strict";\nreturn (${d.src}\n).apply(undefined, args);`);
+            // a failed call is the script's problem: told to its isolated side, not thrown into the site's code
             const args = unmarkCallbacks(Array.isArray(d.args) ? d.args : [], (fn) => (...xs: unknown[]): void => {
                 try {
                     win.postMessage({ source: PAGE_EVAL, kind: "call", id: d.id, fn, args: xs }, "*");
                 } catch (err: any) {
-                    throw new TypeError(`ctx.evaluate: a callback's arguments must be plain data (${err?.message || err})`);
+                    reply({ kind: "callError", fn, message: `ctx.evaluate: a callback's arguments must be plain data (${err?.message || err})` });
                 }
             });
             out = { kind: "done", ok: true, value: await run(args) };

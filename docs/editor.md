@@ -180,7 +180,8 @@ at the right of the toolbar do the same.
   `overlay › host` (its [overlay](scripting.md#overlays--dom-overlay)),
   `isolated › host` or `page › host` (its `onPage` code in the isolated or
   the page world). A page-world `overlay.fn()` call is such an error, with
-  a quick fix (Ctrl+. / ⌘.) that drops `js: "page"`.
+  a quick fix (Ctrl+. / ⌘.) that drops `js: "page"` (or add `unsafe: true`
+  to its route, letting the site call the overlay too).
   On Chrome, isolated `onPage` code (the default world) while
   [user scripts are off](scripting.md#user-scripts-on-chrome) is an error
   whose `chrome://extensions` link opens Wiretrick's details page; the
@@ -486,15 +487,23 @@ text.
 
 ## Import / export
 
-**Settings → Export…** and **Import…** open a checklist: tick the scripts,
-data files and folders (and *Settings (globals)*) to include. Export writes
-one YAML bundle — each script with its code, enabled state and non-default
-params, each data file with its path and text. Import reads a
-bundle and lets you pick which of its items to take; each row says whether
-it's **new** or **replaces existing** (a script of the same name is
-overwritten rather than duplicated). If a picked script imports a library
-or data file that isn't picked, the dialog warns and **Add them** ticks the
-missing ones.
+**Settings → Export…** downloads a zip (`wiretrick-export.zip`) laid out
+like the [synced folder](#synced-folder): scripts as `.ts`/`.tsx`
+files and data files at their paths, empty folders as folders, and
+`settings.yaml` at the root with the global settings and the exported
+scripts' `enabled` state and params. **Import…** takes such a zip — or a
+zip of a synced scripts folder (its `wt-api.d.ts`, `tsconfig.json` and
+`settings.schema.json` are skipped).
+
+Both open the files as a tree, all ticked: tick or untick files, or a whole
+folder (its box shows when only some of its files are ticked). The filter
+box narrows the tree to paths containing what you type, and **Select
+all**/**None** act on what it shows. On import each row says whether it's
+**new** or **replaces existing** (a script at the same path is overwritten
+rather than duplicated). Untick `settings.yaml` to leave settings, params
+and `enabled` state alone. If a picked script imports a library or data
+file that isn't picked, the dialog warns and **Add them** ticks the missing
+ones.
 A plain `.ts`/`.tsx`/`.js` file imports as a single script.
 
 ## `settings.yaml`

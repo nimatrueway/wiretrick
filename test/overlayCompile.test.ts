@@ -108,10 +108,17 @@ describe("page-world onPage handlers using stores or overlay handles (route warn
         const c = compileScript(src);
         expect(c.error).toBeNull();
         const w = mainWorldProblems(src, c.meta.routes);
-        expect(w.map((m) => m.slice(0, m.indexOf(":")))).toEqual(["onPage #2", "onPage #3"]);
+        // the page-world overlay is unsafe: true, which lets it use stores
+        expect(w.map((m) => m.slice(0, m.indexOf(":")))).toEqual(["onPage #2"]);
         expect(w[0]).toContain("accessing the overlay (`ov`)");
-        expect(w[1]).toContain("pageStore (`ps`)");
-        expect(w[1]).toContain("the overlay then runs in its own frame");
+        expect(w[0]).toContain("or add unsafe: true");
+    });
+
+    it("says nothing for unsafe: true page-world handlers", () => {
+        const src = [`const ps = wt.pageStore("ps", { n: 0 });`, `const ov = wt.onPage({ url: "*", dom: "overlay" }, () => ({ pick: () => 1 }));`, `wt.onPage({ url: "*", js: "page", unsafe: true }, () => { ps.n++; void ov.pick(); });`].join("\n");
+        const c = compileScript(src);
+        expect(c.error).toBeNull();
+        expect(mainWorldProblems(src, c.meta.routes)).toEqual([]);
     });
 
     it("says nothing for scripts without stores or overlays", () => {

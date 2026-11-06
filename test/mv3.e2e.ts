@@ -28,8 +28,9 @@ import { resolveBrowser } from "./browserSetup";
 import { checkApiTypingsNav } from "./apiTypingsNav";
 import { checkRulesStrategy, rulesServerRoute } from "./rulesE2e";
 import { checkFoldersAndDataFiles, foldersServerRoute } from "./foldersE2e";
-import { checkOnPageDom, checkOverlayPreview, checkOverlays, checkEarlyRequests, checkOverlayShortcuts, checkPageStores, checkIsoStores, overlayServerRoute } from "./overlayE2e";
+import { checkOnPageDom, checkOverlayPreview, checkOverlays, checkEarlyRequests, checkOverlayShortcuts, checkPageStores, checkIsoStores, checkUnsafePageStores, overlayServerRoute } from "./overlayE2e";
 import { checkPackages, packagesServerRoute } from "./packagesE2e";
+import { readExportZip } from "../src/shared/exportZip";
 
 const EXT_ROOT = path.join(new URL("..", import.meta.url).pathname, "dist-mv3");
 // unpacked extension id = sha256 of the absolute path (hex digits → a-p)
@@ -115,7 +116,7 @@ const proc = spawn(await resolveBrowser(), [
     "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check", "about:blank",
 ], { stdio: "ignore" });
 await new Promise((r) => setTimeout(r, 5000));
-setTimeout(() => { console.log("FAIL  global watchdog timeout"); process.exit(1); }, 240000);
+setTimeout(() => { console.log("FAIL  global watchdog timeout"); process.exit(1); }, 360000);
 
 let failed = 0;
 const check = (name: string, ok: boolean, extra = ""): void => {
@@ -341,6 +342,7 @@ try {
         });
         await checkPageStores(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
         await checkIsoStores(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
+        await checkUnsafePageStores(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
         await checkOnPageDom(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
         await checkEarlyRequests(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
         await checkOverlayShortcuts(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
@@ -925,46 +927,62 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
         (window as any).__captured = null;
         const orig = URL.createObjectURL;
         (URL as any).createObjectURL = (blob: Blob) => {
-            blob.text().then((t) => ((window as any).__captured = t)).catch(() => {});
+            blob.arrayBuffer().then((b) => ((window as any).__captured = Array.from(new Uint8Array(b)))).catch(() => {});
             return orig.call(URL, blob);
         };
         (document.querySelector("#btn-settings") as HTMLElement).click();
     });
     await mgr.waitForTimeout(300);
+    const zipOf = async (bytes: number[] | null) => (Array.isArray(bytes) ? await readExportZip(new Uint8Array(bytes).buffer) : null);
     // partial export: untick "MV3 hook" → it's left out; untick the
     // library api-interceptor imports → the picker warns, "Add them" re-ticks
     await mgr.evaluate(() => { (document.querySelector("#btn-export") as HTMLElement).click(); });
     await mgr.waitForSelector("#bundle-picker .picker-row", { timeout: 5000 });
-    const exportRows = await mgr.evaluate(() => [...document.querySelectorAll("#bundle-picker .picker-label")].map((e) => e.textContent));
-    check("export picker lists every script", exportRows.includes("MV3 hook.wiretrick") && exportRows.includes("api-interceptor.wiretrick") && exportRows.includes("api-lib"), JSON.stringify(exportRows));
+    const exportRows: string[] = await mgr.evaluate(() => [...document.querySelectorAll<HTMLElement>("#bundle-picker .picker-row")].map((e) => e.dataset.path!));
+    check("export picker lists every script and settings.yaml", ["MV3 hook.wiretrick.ts", "api-interceptor.wiretrick.ts", "api-lib.ts", "settings.yaml"].every((p) => exportRows.includes(p)), JSON.stringify(exportRows));
     const pickerWarn = await mgr.evaluate(() => {
-        const rows = [...document.querySelectorAll<HTMLElement>("#bundle-picker .picker-row")];
-        const boxes = new Map(rows.map((r) => [r.querySelector(".picker-label")?.textContent, r.querySelector("input")!]));
-        boxes.get("MV3 hook.wiretrick")!.click();
-        boxes.get("api-lib")!.click();
+        const hook = document.querySelector<HTMLInputElement>('#bundle-picker .picker-row[data-path="MV3 hook.wiretrick.ts"] input')!;
+        const lib = document.querySelector<HTMLInputElement>('#bundle-picker .picker-row[data-path="api-lib.ts"] input')!;
+        hook.click();
+        lib.click();
         const warn = document.querySelector<HTMLElement>("#bundle-picker .picker-warn")!;
         const shown = !warn.hidden && (warn.textContent || "").includes("api-lib");
         (warn.querySelector("button") as HTMLElement).click();
-        return { shown, relinked: boxes.get("api-lib")!.checked && warn.hidden };
+        return { shown, relinked: lib.checked && warn.hidden };
     });
     check("picker warns about an unticked imported library; Add them re-ticks it", pickerWarn.shown && pickerWarn.relinked, JSON.stringify(pickerWarn));
+    const filtered = await mgr.evaluate(() => {
+        const input = document.querySelector<HTMLInputElement>("#bundle-picker .picker-filter")!;
+        const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+        set.call(input, "API-");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        const rows = [...document.querySelectorAll<HTMLElement>("#bundle-picker .picker-row")].map((e) => e.dataset.path);
+        set.call(input, "");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        return rows;
+    });
+    check("picker filter narrows the tree by path", filtered.length > 0 && filtered.every((p: string | undefined) => /api-/i.test(p || "")) && filtered.includes("api-lib.ts"), JSON.stringify(filtered));
     await mgr.evaluate(() => (document.querySelector('#bundle-picker [data-act="ok"]') as HTMLElement).click());
     await mgr.waitForTimeout(800);
-    const partialText: string = await mgr.evaluate(() => (window as any).__captured);
-    check("partial export leaves out the unticked script", typeof partialText === "string" && partialText.includes("api-interceptor.wiretrick") && !partialText.includes("name: MV3 hook.wiretrick"));
+    const partial = await zipOf(await mgr.evaluate(() => (window as any).__captured));
+    const partialFiles = partial ? partial.scripts.map((s) => s.file) : [];
+    check("partial export leaves out the unticked script", partialFiles.includes("api-interceptor.wiretrick.ts") && !partialFiles.includes("MV3 hook.wiretrick.ts"), JSON.stringify(partialFiles));
     await mgr.evaluate(() => { (window as any).__captured = null; (document.querySelector("#btn-export") as HTMLElement).click(); });
     await mgr.waitForSelector("#bundle-picker .picker-row", { timeout: 5000 });
     await mgr.evaluate(() => (document.querySelector('#bundle-picker [data-act="ok"]') as HTMLElement).click());
     await mgr.waitForTimeout(800); // the blob promise resolves async
-    const bundleText = await mgr.evaluate(() => (window as any).__captured);
-    check("export produces a bundle (settings + scripts)", typeof bundleText === "string" && bundleText.includes("wiretrick-bundle") && bundleText.includes("api-interceptor.wiretrick") && bundleText.includes("name: MV3 hook.wiretrick"));
-    const skipName = exportRows.find((n: string | null) => n && !["MV3 hook.wiretrick", "api-interceptor.wiretrick", "api-lib", "Settings (globals)"].includes(n));
+    const zipBytes: number[] | null = await mgr.evaluate(() => (window as any).__captured);
+    const full = await zipOf(zipBytes);
+    const fullFiles = full ? full.scripts.map((s) => s.file) : [];
+    check("export produces a zip (settings.yaml + scripts)", !!full?.settings && fullFiles.includes("api-interceptor.wiretrick.ts") && fullFiles.includes("MV3 hook.wiretrick.ts"), JSON.stringify(fullFiles));
+    const skipPath = exportRows.find((p) => /\.tsx?$/.test(p) && !["MV3 hook.wiretrick.ts", "api-interceptor.wiretrick.ts", "api-lib.ts"].includes(p));
+    const skipName = skipPath?.replace(/\.ts$/, "");
     await mgr.evaluate(() => new Promise((r) => chrome.storage.local.clear(() => r(null))));
     await mgr.reload();
     await mgr.waitForFunction(() => (window as any).monaco?.editor.getEditors().length === 1, null, { timeout: 20000 });
     const wiped = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "listScripts" }, r)));
     check("storage wiped", Array.isArray(wiped) && wiped.length === 0, JSON.stringify(wiped?.length));
-    const importOk = await mgr.evaluate((text: string) => {
+    const importOk = await mgr.evaluate((bytes: number[]) => {
         (window as any).__importInput = null;
         const orig = document.createElement.bind(document);
         (document as any).createElement = (tag: string) => {
@@ -976,20 +994,20 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
         const input = (window as any).__importInput;
         if (!input) return "no input";
         const dt = new DataTransfer();
-        dt.items.add(new File([text], "wiretrick-export.yaml", { type: "text/yaml" }));
+        dt.items.add(new File([new Uint8Array(bytes)], "wiretrick-export.zip", { type: "application/zip" }));
         input.files = dt.files;
         input.dispatchEvent(new Event("change"));
         return "importing";
-    }, bundleText);
+    }, zipBytes || []);
     // partial import: untick one script → it isn't created
     await mgr.waitForSelector("#bundle-picker .picker-row", { timeout: 5000 });
     const importBadges = await mgr.evaluate((skip: string | undefined) => {
         const rows = [...document.querySelectorAll<HTMLElement>("#bundle-picker .picker-row")];
-        if (skip) rows.find((r) => r.querySelector(".picker-label")?.textContent === skip)?.querySelector("input")?.click();
+        if (skip) rows.find((r) => r.dataset.path === skip)?.querySelector("input")?.click();
         const badges = rows.map((r) => r.querySelector(".picker-badge")?.textContent);
         (document.querySelector('#bundle-picker [data-act="ok"]') as HTMLElement).click();
         return badges;
-    }, skipName);
+    }, skipPath);
     check("import picker marks scripts as new", importBadges.filter((b: any) => b === "new").length >= 3, JSON.stringify(importBadges));
     await mgr.waitForFunction(() => (document.querySelector("#editor-status")?.textContent ?? "").includes("imported"), null, { timeout: 20000 }).catch(() => {});
     const imported = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "listScripts" }, r)));
@@ -1053,6 +1071,64 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
         [...document.querySelectorAll("#log-entries .log-line")].some((l) => (l.textContent || "").includes("analyze cache hit"))
     );
     check("getHookBundle served from the session analyze cache (no sandbox round-trip)", cacheHit);
+
+    // ---- MV3 badge: isolated onPage code saved while a page is open isn't
+    // injected into it, so it doesn't count until it runs (the next load);
+    // one that fails there turns the badge red ----
+    {
+        const bp = await ctx.newPage();
+        await bp.goto(`${ORIGIN}/page-badge`);
+        const tabId: number | undefined = await warm.evaluate((u: string) => new Promise((r) => chrome.tabs.query({}, (all) => r(all.find((t) => t.url === u)?.id))), `${ORIGIN}/page-badge`);
+        const ids = (): Promise<string[]> => warm.evaluate((tabId: number | undefined) => new Promise((r) => chrome.runtime.sendMessage({ type: "activeScripts", tabId }, r)), tabId);
+        const save = (id: string, name: string, code: string) => warm.evaluate((m: { id: string; name: string; code: string }) => new Promise((r) => chrome.runtime.sendMessage({ type: "saveScript", ...m }, r)), { id, name, code });
+        await save("s_badgeiso", "Badge iso.wiretrick", `wt.onPage({ url: "*://*:*/page-badge*", when: "document_start" }, () => { document.documentElement.dataset.badgeIso = "1"; });`);
+        await warm.waitForTimeout(1500);
+        const before = await ids();
+        const injected = await bp.evaluate(() => document.documentElement.dataset.badgeIso);
+        check("badge: a document_start onPage script saved while the page is open isn't counted (not injected there)", !before.includes("s_badgeiso") && !injected, JSON.stringify({ before, injected }));
+        await bp.reload();
+        await bp.waitForFunction(() => document.documentElement.dataset.badgeIso === "1", null, { timeout: 15000 }).catch(() => {});
+        let after: string[] = [];
+        for (let i = 0; i < 25 && !after.includes("s_badgeiso"); i++) {
+            await warm.waitForTimeout(200);
+            after = await ids();
+        }
+        check("badge: it counts once it ran on the page (the next load)", after.includes("s_badgeiso"), JSON.stringify(after));
+        await save("s_badgebad", "Badge bad.wiretrick", `wt.onPage("*://*:*/page-badge*", () => { throw new Error("badge-boom"); });`);
+        let look: any = null;
+        // (its user script registers in the background: reload until it ran)
+        for (let i = 0; i < 40; i++) {
+            if (i % 8 === 0) await bp.reload();
+            await warm.waitForTimeout(250);
+            look = await warm.evaluate((tabId: number | undefined) => new Promise((r) => chrome.action.getBadgeBackgroundColor({ tabId: tabId! }, (color) => chrome.action.getTitle({ tabId: tabId! }, (title) => r({ color, title })))), tabId);
+            if (look?.color?.[0] === 241 && /✖ Badge bad/.test(look?.title || "")) break;
+        }
+        check("badge: red when an active script has an error; the tooltip says which", look?.color?.[0] === 241 && look?.color?.[1] === 76 && /✖ Badge bad/.test(look?.title || "") && /Badge iso/.test(look?.title || ""), JSON.stringify(look));
+        // errors that only reached the browser console are the script's own now
+        await save(
+            "s_evalerr",
+            "Eval errs.wiretrick",
+            `wt.onPage("*://*:*/page-badge*", async (ctx) => {
+                ctx.evaluate((cb) => { setTimeout(() => cb(window), 0); }, () => {});
+                ctx.evaluate((cb) => { cb(1); }, () => { throw new Error("evalerr-callback"); });
+                ctx.evaluate(() => { throw new Error("evalerr-unhandled"); });
+                throw new Error("evalerr-async");
+            });`
+        );
+        const wanted = ["callback's arguments must be plain data", "evalerr-callback", "evalerr-unhandled", "evalerr-async"];
+        let seen: string[] = [];
+        for (let i = 0; i < 40 && seen.length < wanted.length; i++) {
+            if (i % 8 === 0) await bp.reload();
+            await warm.waitForTimeout(250);
+            const lines: string[] = await warm.evaluate(() => [...document.querySelectorAll("#log-entries .log-line.error")].map((l) => (l as HTMLElement).dataset.text || l.textContent || ""));
+            seen = wanted.filter((w) => lines.some((l) => l.includes("[Eval errs") && l.includes(w)));
+        }
+        check("onPage: async rejections, ctx.evaluate callback errors and unhandled evaluate rejections are the script's errors", seen.length === wanted.length, JSON.stringify(seen));
+        await warm.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "clearScriptError", scriptId: "s_evalerr" }, r)));
+        for (const id of ["s_evalerr", "s_badgebad", "s_badgeiso"]) await warm.evaluate((id: string) => new Promise((r) => chrome.runtime.sendMessage({ type: "deleteScript", id }, r)), id);
+        await warm.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "clearScriptError", scriptId: "s_badgebad" }, r)));
+        await bp.close();
+    }
 
     // ---- MV3 folder sync: the poller now runs in the service worker ----
     // (a 25s keep-alive ping + a 30s alarms fallback; previously MV3 refused

@@ -90,7 +90,7 @@ Before anything is written, the page shows:
   and a bundle's scripts;
 - **what it can do**, riskiest first:
   - running on every site;
-  - running overlay code in the site's world (`unsafe: true`);
+  - giving the site's own JavaScript the script's stores and overlay (`unsafe: true`);
   - the `debugger` strategy;
   - running code in the site's JavaScript world;
   - the `helper` strategy;

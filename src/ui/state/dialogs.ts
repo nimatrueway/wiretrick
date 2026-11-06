@@ -1,4 +1,5 @@
 import { proxy, ref } from "valtio";
+import type { PickItem } from "../pickTree";
 
 export type HelpTab = "reference" | "samples" | "shortcuts";
 
@@ -12,19 +13,13 @@ export interface ConflictOptions {
     language?: string;
 }
 
-export interface PickRow {
-    label: string;
-    detail?: string;
-    /** short tag after the label, e.g. "library", "replaces existing" */
-    badge?: string;
-    checked?: boolean;
-    disabled?: boolean;
-}
 export interface PickOptions {
     title: string;
     intro?: string;
-    rows: PickRow[];
+    /** shown as a tree (by path) */
+    items: PickItem[];
     confirm: string;
+    /** `checked`: item indices */
     warn?: (checked: number[]) => { text: string; fix?: number[] } | null;
 }
 
@@ -32,7 +27,7 @@ type Request<O, R> = { n: number; opts: O; resolve: (r: R) => void };
 
 /**
  * The Editor's dialogs (all `.overlay`s): which are open and what they show.
- * The save-conflict dialog and the import/export checklist are requests that
+ * The save-conflict dialog and the import/export picker are requests that
  * resolve with the user's choice.
  */
 export const dialogs = proxy({
@@ -69,7 +64,7 @@ export function showHelpTab(tab: HelpTab): void {
     dialogs.helpShown++;
 }
 
-/** Esc: close Settings, Help and Quick Open (the conflict dialog and the checklist handle their own keys). */
+/** Esc: close Settings, Help and Quick Open (the conflict dialog and the picker handle their own keys). */
 export function closeDialogs(): void {
     dialogs.settings = dialogs.help = dialogs.quickOpen = false;
 }
@@ -79,7 +74,7 @@ export function resolveConflict(opts: ConflictOptions): Promise<ConflictChoice> 
     return new Promise((resolve) => void (dialogs.conflict = ref({ n: ++requests, opts, resolve })));
 }
 
-/** Checklist for partial import/export. Resolves with the checked row indices, or null when cancelled. */
-export function pickRows(opts: PickOptions): Promise<number[] | null> {
+/** Tree of checkboxes for partial import/export. Resolves with the checked item indices, or null when cancelled. */
+export function pickItems(opts: PickOptions): Promise<number[] | null> {
     return new Promise((resolve) => void (dialogs.picker = ref({ n: ++requests, opts, resolve })));
 }

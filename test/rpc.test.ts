@@ -251,3 +251,18 @@ describe("rpc: which world may call the overlay", () => {
         expect(handles).toEqual(["onDocument:0", "onDocument:1", "onOverlay:0"]);
     });
 });
+
+describe("firePageHandler", () => {
+    it("an async handler's rejection reaches onError (a sync throw is rethrown)", async () => {
+        const exposer = new Exposer();
+        const shim = makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined }, world: "isolated", exposer });
+        new Function("wt", `wt.onPage("*://x.com/*", async () => { throw new Error("later"); }); wt.onPage("*://x.com/*", () => { throw new Error("now"); });`)(shim.wt);
+        const [later, now] = domHandlersFor(shim.dom, "https://x.com/a", exposer);
+        exposer.done();
+        const errors: string[] = [];
+        firePageHandler(later, { url: "https://x.com/a" }, exposer, (e: any) => errors.push(e.message));
+        expect(() => firePageHandler(now, { url: "https://x.com/a" }, exposer, (e: any) => errors.push(e.message))).toThrow("now");
+        await tick();
+        expect(errors).toEqual(["later"]);
+    });
+});

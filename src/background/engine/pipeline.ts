@@ -22,7 +22,7 @@ import { loadPackages, packagesSnapshot, resolveVersion } from "./packageImports
 import { isUrlSpec, packageClosure } from "../../shared/packageImports";
 import { serveStore } from "./strategies/extensionStrategy";
 import { dlog, dlogLevel } from "../../shared/debugLog";
-import { evaluateProblems, isThenable, mainWorldProblems, registrationProblems, toRunnableJs } from "../../shared/compile";
+import { evaluateProblems, isThenable, mainWorldProblems, registrationProblems, rulesProblems, toRunnableJs } from "../../shared/compile";
 import "../../shared/transpile";
 import { log, noteRan, getScriptErrors, getScriptTypeErrors, getScriptRuleErrors, getScriptRouteWarnings, setScriptRouteWarnings, bodyObservedSince, bodySkipSince, noteBodySkip } from "./logs";
 import { bypassed } from "./bypass";
@@ -174,7 +174,7 @@ export function createPipeline(
                 if (d.tabId >= 0 && d.type === "main_frame") {
                     noteRequestForBadge?.(d.tabId, d.url, true);
                     void updateTabBadge?.(d.tabId, d.url);
-                } else if (d.tabId >= 0 && (noteRequestForBadge?.(d.tabId, d.url) ?? 0) > 0) void updateTabBadge?.(d.tabId, d.url);
+                } else if (d.tabId >= 0) noteRequestForBadge?.(d.tabId, d.url);
                 if (d.type === "websocket" && wsBlind.length) {
                     for (const w of wsBlind) {
                         const key = `${w.id}|${w.route.kind}|${w.route.index}|${d.url}`;
@@ -262,6 +262,7 @@ export function createPipeline(
             const down: string[] = [];
             for (const msg of mainWorldProblems(s.code, s.meta.routes || [])) problems.push({ id: s.id, msg });
             for (const msg of evaluateProblems(s.code)) problems.push({ id: s.id, msg });
+            for (const msg of rulesProblems(s.code, s.meta.routes || [])) problems.push({ id: s.id, msg });
             for (const r of s.meta.routes || []) {
                 // Chrome MV3: isolated onPage code needs chrome.userScripts (an error, see problems.ts)
                 if (userScripts !== "ok" && r.kind === "onDocument" && pageWorld(r) === "isolated") problems.push({ id: s.id, msg: userScriptsProblem(routeLabel(r), userScripts, chrome.runtime.id) });
@@ -582,7 +583,8 @@ export function createPipeline(
      */
     async function hookBundle(url: string, top: boolean, preview?: string) {
         // main-world onPage scripts (hook.ts; the bridge when CSP blocks eval)
-        const domHandlers: { scriptId: string; name: string; src: string; params: Record<string, any> }[] = [];
+        // `unsafe`: a matching page-world route is `unsafe: true` — this frame's page-world code of the script gets its stores and overlay
+        const domHandlers: { scriptId: string; name: string; src: string; params: Record<string, any>; unsafe?: true }[] = [];
         // `js: "isolated"` onPage scripts: never shipped to the page's own world.
         // MV3 runs them in chrome.userScripts worlds that load the code from
         // the owner (`isoRuns`): the bridge only learns their handles, to
@@ -612,18 +614,22 @@ export function createPipeline(
             } else if (!s.enabled) continue;
             if (!a || a.error || !a.meta.active) continue;
             let main = false;
+            let unsafe = false;
             let iso = false;
             const over: RouteMeta[] = [];
             for (const r of a.meta.routes) {
                 if (r.kind === "onDocument") {
                     if (!routeMatches(r, url)) continue;
                     if (pageWorld(r) === "isolated") iso = true;
-                    else main = true;
+                    else {
+                        main = true;
+                        if (r.unsafe) unsafe = true;
+                    }
                 } else if (r.kind === "onOverlay") {
                     // js: "page" overlays run in the page's world (the hook's layer); the Preview runs them in its overlay frame
                     if (preview !== undefined) over.push(r);
                     else if (top && routeMatches(r, url)) {
-                        if (isPageLayer(r)) main = true;
+                        if (isPageLayer(r)) main = unsafe = true;
                         else over.push(r);
                     }
                 } else if (r.kind !== "onResponseHeaders" && effectiveStrategy(r) === "page" && hookCanSee(r)) routes.push(r);
@@ -635,7 +641,7 @@ export function createPipeline(
             }
             if (!main && !iso || preview !== undefined) continue;
             const h = { scriptId: s.id, name: s.meta.name, src: toRunnableJs(s.code), params: resolveParamValues(a.paramDefs || {}, paramValues[s.id]) };
-            if (main) domHandlers.push(h);
+            if (main) domHandlers.push(unsafe ? { ...h, unsafe: true } : h);
             if (iso && __MV3__) {
                 const handles = a.meta.routes.filter((r) => r.kind === "onDocument" && pageWorld(r) === "isolated").map((r) => `page:${r.index}`);
                 isoHandlers.push({ scriptId: s.id, name: s.meta.name, handles });
@@ -687,6 +693,7 @@ export function createPipeline(
         overlayRuns: async (url) => (await hookBundle(url, true)).overlayRuns,
         isoRuns: async (url, top) => (await hookBundle(url, top)).isoRuns,
         isoScripts: async (url, top) => new Set((await hookBundle(url, top)).bundle.isoHandlers.map((h) => h.scriptId)),
+        unsafePageScripts: async (url, top) => new Set((await hookBundle(url, top)).bundle.domHandlers.flatMap((h) => (h.unsafe ? [h.scriptId] : []))),
         userScriptsOff: async () => (await userScriptsStatus()) !== "ok",
         storageGet: (s, key) => scriptStorageGet(s, key),
         storageSet: async (s, key, value) => void (await scriptStorageSet(s, key, value)),
@@ -867,13 +874,17 @@ export function createPipeline(
                 const url = msg.url || "";
                 const { bundle } = await hookBundle(url, sender.frameId === 0 || sender.frameId === undefined);
                 // MV2: the bridge runs isolated onPage code — its stores' current state (this page's wt.pageStore copies), so they read synchronously
+                // unsafe: true page-world code (MV2 and MV3) likewise, for those scripts only (the page can read these)
                 const tabId = sender.tab?.id;
-                if (!__MV3__ && bundle.isoHandlers.length && typeof tabId === "number" && tabId >= 0) {
+                const isoIds = !__MV3__ ? bundle.isoHandlers.map((h) => h.scriptId) : [];
+                const unsafeIds = bundle.domHandlers.flatMap((h) => (h.unsafe ? [h.scriptId] : []));
+                if ((isoIds.length || unsafeIds.length) && typeof tabId === "number" && tabId >= 0) {
                     await pagesReady;
                     // the top frame's page by its document (as its requests' and its bridge's): `current` may still be the pre-commit key
                     const top = sender.frameId === 0 || sender.frameId === undefined;
-                    const isoPage = (top ? pages.forRequest({ tabId, frameId: 0, documentId: (sender as any).documentId }) : pages.current(tabId)) ?? "";
-                    Object.assign(bundle, { isoPage, isoStores: await storeOwner.init(bundle.isoHandlers.map((h) => h.scriptId), { page: isoPage }) });
+                    const page = (top ? pages.forRequest({ tabId, frameId: 0, documentId: (sender as any).documentId }) : pages.current(tabId)) ?? "";
+                    if (isoIds.length) Object.assign(bundle, { isoPage: page, isoStores: await storeOwner.init(isoIds, { page }) });
+                    if (unsafeIds.length) Object.assign(bundle, { pageStorePage: page, pageStores: await storeOwner.init(unsafeIds, { page }) });
                 }
                 dlogLevel("pipeline", "debug", "getHookBundle responding", { routes: bundle.count, dom: bundle.domHandlers.length, iso: bundle.isoHandlers.length, overlays: bundle.overlays.length, url });
                 sendResponse(bundle);

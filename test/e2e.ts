@@ -32,7 +32,7 @@ import { resolveBrowser } from "./browserSetup";
 import { checkApiTypingsNav } from "./apiTypingsNav";
 import { checkRulesStrategy, rulesServerRoute } from "./rulesE2e";
 import { checkFoldersAndDataFiles, foldersServerRoute } from "./foldersE2e";
-import { checkOnPageDom, checkOverlayPreview, checkOverlays, checkEarlyRequests, checkOverlayShortcuts, checkPageStores, checkIsoStores, overlayServerRoute } from "./overlayE2e";
+import { checkOnPageDom, checkOverlayPreview, checkOverlays, checkEarlyRequests, checkOverlayShortcuts, checkPageStores, checkIsoStores, checkUnsafePageStores, overlayServerRoute } from "./overlayE2e";
 import { checkPackages, packagesServerRoute } from "./packagesE2e";
 
 const EXT_ROOT = path.join(new URL("..", import.meta.url).pathname, "dist");
@@ -238,6 +238,29 @@ const badge: any = await mgr.evaluate((): Promise<any> => new Promise((r) => {
 } : { text: "?", ids: [] });
 check("badge: per-tab active scripts (page + resources)", badge.text === "3", `badge=${JSON.stringify(badge.text)}`);
 check("popup: activeScripts lists the scripts behind the badge", badge.ids.length === 3 && badge.ids.includes("s_badge"), JSON.stringify(badge.ids));
+// onPage code counts once it ran on the tab (MV2 re-runs a saved script on
+// open pages); one that fails turns the badge red
+{
+    const tabId: number | undefined = await mgr.evaluate(() => new Promise((r) => chrome.tabs.query({}, (all) => r(all.find((t) => t.url && t.url.includes("/page-fetch"))?.id))));
+    const ids = (): Promise<string[]> => mgr.evaluate((tabId) => new Promise((r) => chrome.runtime.sendMessage({ type: "activeScripts", tabId }, r)), tabId);
+    await saveScript("s_badgepage", `wt.onPage({ url: "${ORIGIN}/page-fetch*", when: "document_start" }, () => { document.documentElement.dataset.badgePage = "1"; });`, "badge page.wiretrick");
+    await p3.waitForFunction(() => document.documentElement.dataset.badgePage === "1", null, { timeout: 8000 }).catch(() => {});
+    await new Promise((r) => setTimeout(r, 400));
+    const ran = await ids();
+    check("badge: onPage code that ran on the open page counts", ran.includes("s_badgepage") && ran.length === 4, JSON.stringify(ran));
+    await saveScript("s_badgebad", `wt.onPage("${ORIGIN}/page-fetch*", () => { throw new Error("badge-boom"); });`, "badge bad.wiretrick");
+    let look: any = null;
+    for (let i = 0; i < 30; i++) {
+        await new Promise((r) => setTimeout(r, 200));
+        look = await mgr.evaluate((tabId) => new Promise((r) => chrome.browserAction.getBadgeBackgroundColor({ tabId }, (color) => chrome.browserAction.getTitle({ tabId }, (title) => chrome.browserAction.getBadgeText({ tabId }, (text) => r({ color, title, text }))))), tabId);
+        if (look?.color?.[0] === 241) break;
+    }
+    check("badge: red when an active script has an error; the tooltip says which", look?.text === "5" && look?.color?.[0] === 241 && look?.color?.[1] === 76 && /✖ badge bad/.test(look?.title || "") && /• badge page/.test(look?.title || ""), JSON.stringify(look));
+    const send = (msg: any): Promise<any> => mgr.evaluate((m) => new Promise((r) => chrome.runtime.sendMessage(m, (x) => r(x ?? null))), msg);
+    await send({ type: "deleteScript", id: "s_badgebad" });
+    await send({ type: "deleteScript", id: "s_badgepage" });
+    await send({ type: "clearScriptError", scriptId: "s_badgebad" });
+}
 await p3.close();
 
 // ---------- 4. onResponseBody via Tier-A hook (XHR) ----------
@@ -565,6 +588,7 @@ await checkFoldersAndDataFiles(ctx, mgr, ORIGIN, check);
 await checkOverlays(ctx, mgr, ORIGIN, check, { isolated: true });
 await checkPageStores(ctx, mgr, ORIGIN, check);
 await checkIsoStores(ctx, mgr, ORIGIN, check);
+await checkUnsafePageStores(ctx, mgr, ORIGIN, check);
 await checkOnPageDom(ctx, mgr, ORIGIN, check);
 await checkEarlyRequests(ctx, mgr, ORIGIN, check);
 await checkOverlayShortcuts(ctx, mgr, ORIGIN, check);

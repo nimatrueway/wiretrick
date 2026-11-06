@@ -28,6 +28,16 @@ describe("packageCaps", () => {
         });
     });
 
+    it("unsafe: true page-world onPage code is unsafe too, and described as what the site can then reach", () => {
+        const c = capabilitiesOf([{ kind: "onDocument", url: ["*://a.com/*"], unsafe: true }] as never, [], []);
+        expect(c.unsafe).toBe(true);
+        expect(c.overlay).toBe(false);
+        expect(capabilitiesOf([{ kind: "onDocument", url: ["*://a.com/*"] }] as never, [], []).unsafe).toBe(false);
+        const lines = describeCapabilities(caps({ urls: ["*://a.com/*"], pageJs: true, unsafe: true, overlay: true }));
+        expect(lines[0]).toEqual({ text: expect.stringMatching(/^Gives the site's own JavaScript its stores and overlay \(unsafe: true\): the site can read and change its stored data and call into its overlay$/), risk: "high" });
+        expect(lines.map((l) => l.text)).toContain("Draws an overlay over pages");
+    });
+
     it("an isolated onDocument doesn't touch the page's JavaScript", () => {
         const c = capabilitiesOf([{ kind: "onDocument", url: ["*://a.com/*"], world: "isolated" }] as never, [], []);
         expect(c.pageJs).toBe(false);
@@ -54,7 +64,7 @@ describe("packageCaps", () => {
             "intercepts with debugger",
             "runs code in the site's own JavaScript world",
             "draws an overlay",
-            "runs overlay code in the site's world (unsafe)",
+            "gives the site its stores and overlay (unsafe)",
             "connects to h",
             "imports p",
         ]);

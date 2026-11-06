@@ -1,4 +1,4 @@
-/** read a .zip's files (stored or deflated — what every zip tool writes), and write one (stored) */
+/** read a .zip's files (stored or deflated — what every zip tool writes), and write one (stored); folder entries end in "/" */
 const MAX_TOTAL = 20 * 1024 * 1024;
 
 async function inflate(bytes: Uint8Array): Promise<Uint8Array> {
@@ -7,6 +7,11 @@ async function inflate(bytes: Uint8Array): Promise<Uint8Array> {
 }
 
 export async function readZip(buf: ArrayBuffer, keep: (path: string) => boolean = () => true): Promise<Record<string, Uint8Array>> {
+    return (await readZipEntries(buf, keep)).files;
+}
+
+/** the files and the folder entries (e.g. empty folders, without their trailing "/") */
+export async function readZipEntries(buf: ArrayBuffer, keep: (path: string) => boolean = () => true): Promise<{ files: Record<string, Uint8Array>; folders: string[] }> {
     const v = new DataView(buf);
     const u8 = new Uint8Array(buf);
     let eocd = -1;
@@ -20,6 +25,7 @@ export async function readZip(buf: ArrayBuffer, keep: (path: string) => boolean 
     let p = v.getUint32(eocd + 16, true);
     const utf8 = new TextDecoder();
     const out: Record<string, Uint8Array> = {};
+    const folders: string[] = [];
     let total = 0;
     for (let k = 0; k < count; k++) {
         if (v.getUint32(p, true) !== 0x02014b50) throw new Error("the zip file is damaged");
@@ -30,7 +36,11 @@ export async function readZip(buf: ArrayBuffer, keep: (path: string) => boolean 
         const local = v.getUint32(p + 42, true);
         const name = utf8.decode(u8.subarray(p + 46, p + 46 + nameLen));
         p += 46 + nameLen + v.getUint16(p + 30, true) + v.getUint16(p + 32, true);
-        if (name.endsWith("/") || !keep(name)) continue;
+        if (!keep(name)) continue;
+        if (name.endsWith("/")) {
+            folders.push(name.slice(0, -1));
+            continue;
+        }
         total += size;
         if (total > MAX_TOTAL) throw new Error("the zip file holds more than 20 MB");
         const start = local + 30 + v.getUint16(local + 26, true) + v.getUint16(local + 28, true);
@@ -39,7 +49,7 @@ export async function readZip(buf: ArrayBuffer, keep: (path: string) => boolean 
         else if (method === 8) out[name] = await inflate(data);
         else throw new Error(`"${name}" is compressed in a way this can't read (method ${method})`);
     }
-    return out;
+    return { files: out, folders };
 }
 
 const CRC_TABLE = (() => {
@@ -58,7 +68,7 @@ function crc32(bytes: Uint8Array): number {
     return (c ^ 0xffffffff) >>> 0;
 }
 
-/** a .zip of these files (path → text or bytes), stored uncompressed — scripts are small */
+/** a .zip of these files (path → text or bytes; a path ending in "/" is a folder), stored uncompressed — scripts are small */
 export function writeZip(files: Record<string, string | Uint8Array>, date = new Date()): Uint8Array {
     const enc = new TextEncoder();
     const time = (date.getHours() << 11) | (date.getMinutes() << 5) | (date.getSeconds() >> 1);
@@ -92,6 +102,7 @@ export function writeZip(files: Record<string, string | Uint8Array>, date = new 
         cv.setUint32(0, 0x02014b50, true);
         cv.setUint16(4, 20, true);
         common(cv, 6);
+        if (path.endsWith("/")) cv.setUint32(38, 0x10, true); // MS-DOS directory attribute
         cv.setUint32(42, offset, true);
         entry.set(name, 46);
         parts.push(local, data);

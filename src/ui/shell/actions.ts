@@ -78,8 +78,8 @@ export const actions = {
     setLaunchMode(_mode: LaunchMode): void {},
     setEditorUrl(_url: string): void {},
     setMonacoVerbose(_on: boolean): void {},
-    /** pick what to export, then download the YAML bundle */
+    /** pick what to export, then download the zip */
     exportBundle(): void {},
-    /** pick a bundle / script file, then what of it to import */
+    /** pick a zip / script file, then what of it to import */
     importBundle(): void {},
 };

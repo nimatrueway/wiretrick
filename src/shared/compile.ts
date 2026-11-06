@@ -10,7 +10,7 @@ import { parseParamValue, resolveParamValues, serializableParamDef, type ParamDe
 import { formatLogArgs, makeScriptConsole, type ScriptLogLevel } from "./scriptLog";
 import { scriptFunction } from "./scriptFn";
 import { callerLine } from "./scriptError";
-import { isPageLayer, normalizeRoute, pageCallKind, pageWorld, routeLabel, type RouteKind, type RouteMeta } from "./route";
+import { normalizeRoute, pageCallKind, pageWorld, routeLabel, type RouteKind, type RouteMeta } from "./route";
 import { inertRemote, MAIN_WORLD_DISALLOWED, REMOTE_FROM_BACKGROUND } from "./remote";
 import { scriptEnv } from "./scriptEnv";
 import { dataFileValue, importLine, importPath, importResolver, isDataSpec } from "./scriptImports";
@@ -1025,32 +1025,84 @@ export function evaluateProblems(code: string): string[] {
     return out;
 }
 
+/** what a `rules` handler might do per request, and what it's for (rulesProblems) */
+const RULES_SIDE_EFFECTS: { re: RegExp; does: string }[] = [
+    { re: /(?<![\w$.])console\s*\.\s*(?:log|info|warn|error|debug|trace|table|dir)\b(?=\s*\()/g, does: "log each request" },
+    { re: /(?<![\w$.])wt\s*\.\s*log\b(?=\s*\()/g, does: "log each request" },
+    { re: /(?<![\w$.])(?:wt\s*\.\s*)?fetch\b(?=\s*\()/g, does: "fetch for each request" },
+    { re: /(?<![\w$.])(?:setTimeout|setInterval)\b(?=\s*\()/g, does: "run code for each request" },
+];
+
+/**
+ * Warnings ("onRequest #N: …", Problems view) for code in `rules` handlers
+ * that looks meant to run per request — logging, fetching, timers, store
+ * writes. A rules handler runs once, when scripts load, to compute a
+ * fixed browser rule; the browser applies the rule itself, so that code
+ * never runs for a request. Handlers written inline in the registration
+ * only (a lightweight scan, not a parser).
+ */
+export function rulesProblems(code: string, routes: RouteMeta[]): string[] {
+    const rules = routes.filter((r) => r.strategy === "rules" && r.line);
+    if (!rules.length) return [];
+    const src = codeOnly(code);
+    const starts = [0];
+    for (let i = 0; i < src.length; i++) if (src[i] === "\n") starts.push(i + 1);
+    const stores = new Set<string>();
+    for (const m of src.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;]+)?=\s*wt\s*\.\s*(?:pageStore|globalStore)\b/g)) stores.add(m[1]);
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const r of rules) {
+        const lineAt = starts[r.line! - 1];
+        if (lineAt === undefined) continue;
+        const call = new RegExp(`(?<![\\w$.])wt\\s*\\.\\s*${r.kind}\\s*(?:<[^()]*>\\s*)?\\(`, "g");
+        call.lastIndex = lineAt;
+        const m = call.exec(src);
+        if (!m || m.index >= (starts[r.line!] ?? src.length)) continue;
+        // a loop registering several routes from one call: warn once
+        const key = `${m.index}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const from = m.index + m[0].length;
+        const args = src.slice(from, closeOf(src, from) - 1);
+        const found: { at: number; text: string; does: string }[] = [];
+        for (const { re, does } of RULES_SIDE_EFFECTS) for (const e of args.matchAll(re)) found.push({ at: e.index!, text: e[0].replace(/\s+/g, ""), does });
+        for (const name of stores) {
+            const esc = name.replace(/\$/g, "\\$");
+            const write = new RegExp(`(?<![\\w$.])${esc}\\s*(?:\\.\\s*[A-Za-z_$][\\w$]*|\\[[^\\]]*\\])\\s*(?:[-+*/%&|^]|\\?\\?|&&|\\|\\||<<|>>>?|\\*\\*)?=(?!=)|(?:\\+\\+|--)\\s*${esc}\\b|(?<![\\w$.])${esc}\\s*\\.\\s*[A-Za-z_$][\\w$]*\\s*(?:\\+\\+|--)`, "g");
+            for (const e of args.matchAll(write)) found.push({ at: e.index!, text: name, does: "update the store for each request" });
+        }
+        for (const f of found.sort((a, b) => a.at - b.at))
+            out.push(
+                `${routeLabel(r)}: \`${f.text}\` runs once, when scripts load — not for each request: on strategy "rules" the handler only computes a fixed rule that the browser then applies by itself. To ${f.does}, use a per-request strategy ("extension", "debugger" or "helper")`
+            );
+    }
+    return out;
+}
+
 /**
  * Warnings ("onPage #N: …", Problems view) for page-world onPage handlers
  * that use a store or an overlay handle: there they throw (stores) or do
- * nothing (overlay calls) — only isolated-world code may.
+ * nothing (overlay calls) — only isolated-world code may, and page-world
+ * code with `unsafe: true`.
  */
 export function mainWorldProblems(code: string, routes: RouteMeta[]): string[] {
     if (!/\bwt\s*\.\s*(?:pageStore|globalStore)\b|\bdom\s*:\s*["'`]overlay/.test(code)) return [];
     const uses = onPageUses(code);
     if (!uses.length) return [];
-    const fix = (r: RouteMeta) =>
-        isPageLayer(r)
-            ? 'drop js: "page" (the overlay then runs in its own frame, where stores and handles work)'
-            : 'drop js: "page" (onPage runs in the isolated world by default; read the page with ctx.evaluate)';
+    const fix = () => 'drop js: "page" (onPage runs in the isolated world by default; read the page with ctx.evaluate), or add unsafe: true to let the page reach them too';
     const names = (n: string[]) => n.map((x) => `\`${x}\``).join(", ");
     const out: string[] = [];
     for (const r of routes) {
-        if (!(r.kind === "onDocument" && pageWorld(r) === "page") && !isPageLayer(r)) continue;
+        if (r.kind !== "onDocument" || pageWorld(r) !== "page" || r.unsafe) continue;
         const u = uses.find((u) => u.nth === (r.n ?? r.index));
         if (!u) continue;
         const at = `${routeLabel(r)}: `;
         if (u.pageStore.length)
             out.push(
-                `${at}your script also accesses pageStore (${names(u.pageStore)}) inside onPage, ${MAIN_WORLD_DISALLOWED} (the page could read and forge it). Changing the request strategy alone won't resolve those accesses. Switching to globalStore would lose per-page isolation and still wouldn't make a one-time rules callback track requests — ${fix(r)}`
+                `${at}your script also accesses pageStore (${names(u.pageStore)}) inside onPage, ${MAIN_WORLD_DISALLOWED} (the page could read and forge it). Changing the request strategy alone won't resolve those accesses. Switching to globalStore would lose per-page isolation and still wouldn't make a one-time rules callback track requests — ${fix()}`
             );
-        if (u.globalStore.length) out.push(`${at}your script also accesses globalStore (${names(u.globalStore)}) inside onPage, ${MAIN_WORLD_DISALLOWED} (the page could read and forge it) — ${fix(r)}`);
-        if (u.overlay.length) out.push(`${at}accessing the overlay (${names(u.overlay)}) inside onPage, ${MAIN_WORLD_DISALLOWED} (the page could call the overlay too) — ${fix(r)}`);
+        if (u.globalStore.length) out.push(`${at}your script also accesses globalStore (${names(u.globalStore)}) inside onPage, ${MAIN_WORLD_DISALLOWED} (the page could read and forge it) — ${fix()}`);
+        if (u.overlay.length) out.push(`${at}accessing the overlay (${names(u.overlay)}) inside onPage, ${MAIN_WORLD_DISALLOWED} (the page could call the overlay too) — ${fix()}`);
     }
     return out;
 }

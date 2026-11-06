@@ -66,6 +66,11 @@ export interface RouteMeta {
      * page-world layer), absent = the overlay frame.
      */
     world?: "isolated" | "page";
+    /**
+     * `unsafe: true` (page-world routes only): the script's page-world code
+     * gets its stores and overlay, which the page can then reach too
+     */
+    unsafe?: true;
     /** the API name it was registered with, when it differs from `kind` (wt.onPage → kind "onDocument" or "onOverlay") */
     api?: "onPage";
     /** wt.onPage: which of the script's calls to it it is (0-based, either kind), when it differs from `index` */
@@ -139,15 +144,14 @@ export function normalizeRoute(kind: RouteKind, raw: unknown, index: number, api
         if (obj.dom !== undefined && !DOMS.includes(obj.dom)) throw new Error(`${where}: dom must be "page" or "overlay", got ${JSON.stringify(obj.dom)}`);
         if (obj.unsafe !== undefined && typeof obj.unsafe !== "boolean") throw new Error(`${where}: unsafe must be true or false, got ${JSON.stringify(obj.unsafe)}`);
         const js: PageWorld = obj.js === "page" ? "page" : "isolated";
+        if (obj.unsafe === true && js !== "page") throw new Error(`${where}: "unsafe" applies only to js: "page" (it opens the script's stores and overlay to page-world code)`);
         if (kind === "onOverlay") {
             if (js === "page") {
                 if (obj.unsafe !== true) throw new Error(`${where}: ${UNSAFE_LAYER}`);
                 route.world = "page";
             }
-        } else {
-            if (obj.unsafe === true) throw new Error(`${where}: "unsafe" applies only to js: "page" with dom: "overlay"`);
-            if (js === "isolated") route.world = "isolated";
-        }
+        } else if (js === "isolated") route.world = "isolated";
+        if (obj.unsafe === true) route.unsafe = true;
         return route;
     }
     if (obj.when !== undefined) throw new Error(`${where}: "when" applies to onPage only`);

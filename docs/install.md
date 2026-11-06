@@ -10,7 +10,7 @@
    Firefox uses the `.xpi` instead — see [Firefox](#firefox).
 2. Open `chrome://extensions`.
 3. Enable **Developer mode** (top-right), click **Load unpacked**, and select the unzipped folder.
-4. Pin the 🧩 icon — the badge shows how many enabled scripts match the current tab; the popup marks them with a green dot. While a saved script is compiled and hot-reloaded, the icon fades and shows a spinner.
+4. Pin the 🧩 icon — the badge shows how many scripts are active on the current tab: a network handler matched one of its requests, or `onPage` code ran on it (a script saved while the page is open counts once its code runs there — an `onPage` script that only runs at `document_start` waits for the next load). The popup marks them with a green dot. The badge turns red when one of them has an error and amber for a warning; hover the icon for the list, and see **Problems** in the Editor. While a saved script is compiled and hot-reloaded, the icon fades and shows a spinner.
 
 ## Firefox
 

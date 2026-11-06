@@ -60,9 +60,12 @@ own GUI over the page.
 2. Chromium: unzip, open `chrome://extensions`, enable **Developer mode** and
    **Load unpacked** the folder. Firefox: drag the `.xpi` onto Firefox (see
    [docs/install.md](docs/install.md#firefox) if it's unsigned).
-3. Pin the icon — its badge counts the enabled scripts matching the current
-   tab (the popup marks which ones with a green dot). While a saved script is
-   compiled and hot-reloaded, the icon fades and shows a spinner.
+3. Pin the icon — its badge counts the scripts active on the current tab (a
+   network handler matched one of its requests, or `onPage` code ran on it;
+   the popup marks which ones with a green dot). The badge turns red when one
+   of them has an error (amber: a warning); hover the icon to see which.
+   While a saved script is compiled and hot-reloaded, the icon fades and
+   shows a spinner.
 
 Signed `.crx` packages, building from source and the optional helper:
 see [docs/install.md](docs/install.md).

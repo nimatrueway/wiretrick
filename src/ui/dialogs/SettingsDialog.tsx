@@ -66,10 +66,10 @@ export function SettingsDialog() {
                         <section id="settings-sec-io" className="settings-section">
                             <h3>Import / Export</h3>
                             <div className="setting">
-                                <span className="setting-label">Bundle</span>
+                                <span className="setting-label">Zip</span>
                                 <div className="setting-control">
                                     <div id="settings-io-row" className="setting-inline"><button id="btn-export" onClick={() => actions.exportBundle()}>Export…</button>{" "}<button id="btn-import" onClick={() => actions.importBundle()}>Import…</button></div>
-                                    <p className="setting-help">Export any subset of scripts (and the global settings) to a YAML bundle. Import a bundle (.yaml/.yml), picking which of its items to take, or a single .ts/.js file.</p>
+                                    <p className="setting-help">Export any subset of scripts, data files, folders and settings.yaml to a zip laid out like the scripts folder. Import such a zip (or a zipped scripts folder), picking which of its files to take, or a single .ts/.tsx/.js file.</p>
                                 </div>
                             </div>
                         </section>

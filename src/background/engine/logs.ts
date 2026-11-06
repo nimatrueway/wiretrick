@@ -78,10 +78,21 @@ export function log(tabId: number, message: string, level: LogEntry["level"] = "
         port.postMessage({ type: "log", entry });
     }
     if (scriptId) annotateFromLog(tabId, scriptId, message, level, netKind, url, requestId);
-    if (scriptId && level === "error" && !/^\[[^\]]*\] console\.error/.test(message)) recordScriptError(scriptId, message, ctx);
+    if (scriptId && level === "error" && !/^\[[^\]]*\] console\.error/.test(message)) {
+        recordScriptError(scriptId, message, ctx);
+        // page code that failed still ran on the tab
+        if (tabId >= 0) for (const cb of activityListeners) cb(tabId, scriptId);
+    }
     if (level === "error") {
         console.error("[Wiretrick]", message);
     }
+}
+
+const activityListeners = new Set<(tabId: number, scriptId: string) => void>();
+/** A script's page code ran on a tab (or failed there): the toolbar badge counts it. */
+export function onScriptActivity(cb: (tabId: number, scriptId: string) => void): () => void {
+    activityListeners.add(cb);
+    return () => activityListeners.delete(cb);
 }
 
 /**
@@ -90,6 +101,7 @@ export function log(tabId: number, message: string, level: LogEntry["level"] = "
  */
 export function noteRan(tabId: number, scriptId: string, name: string, api: unknown, url: unknown): void {
     if (!isRanApi(api) || typeof url !== "string" || !/^https?:/.test(url)) return;
+    if (tabId >= 0) for (const cb of activityListeners) cb(tabId, scriptId);
     log(tabId, `[${String(name).replace(/[\[\]]/g, "") || scriptId}] ${RAN_ACTIONS[api]}`, "debug", scriptId, "observed", url.split("#")[0]);
 }
 
@@ -270,10 +282,29 @@ function loadErrors(): Promise<void> {
     return errorsLoaded;
 }
 
+const problemListeners = new Set<() => void>();
+/** A script's problems (runtime, type, rule errors; route warnings) changed. */
+export function onScriptProblemsChanged(cb: () => void): () => void {
+    problemListeners.add(cb);
+    return () => problemListeners.delete(cb);
+}
+
+/** Each script's worst problem: errors (runtime, type, rules) or route warnings. */
+export async function getScriptProblems(): Promise<Map<string, "error" | "warning">> {
+    await loadErrors();
+    const out = new Map<string, "error" | "warning">();
+    for (const [id, w] of routeWarnings) if (w.length) out.set(id, "warning");
+    for (const id of runtimeErrors.keys()) out.set(id, "error");
+    for (const [id, e] of typeErrors) if (e.length) out.set(id, "error");
+    for (const [id, e] of ruleErrors) if (e.length) out.set(id, "error");
+    return out;
+}
+
 function errorsChanged(): void {
     if (errorsTimer) return;
     errorsTimer = setTimeout(() => {
         errorsTimer = null;
+        for (const cb of problemListeners) cb();
         void sessionArea()?.set({ [ERR_KEY]: Object.fromEntries(runtimeErrors), [TYPE_KEY]: Object.fromEntries(typeErrors), [RULE_KEY]: Object.fromEntries(ruleErrors), [ROUTE_KEY]: Object.fromEntries(routeWarnings) }).catch(() => {});
         broadcastToUi({
             type: "scriptErrors",

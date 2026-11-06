@@ -147,6 +147,8 @@ wt.onResponseBody(
   On `rules` the handler runs once when scripts load and its fixed result
   (block, redirect, headers) becomes a browser-native rule; `exclude`
   isn't supported there ([what `rules` can do](strategies.md#what-rules-can-do)).
+  Its code never runs for a request, so the Problems view warns about
+  `console.log`, `wt.log`, `fetch`, timers and store writes in it.
 
 > **Tip:** `page` is the lightest strategy, but it only sees the page's own
 > fetch/XHR (REST/API) calls. For documents, `<script src>`, images,
@@ -608,7 +610,8 @@ wt.onPage({ url: "https://example.com/*", dom: "overlay" }, () => {
 - **Names.** One name space with `wt.globalStore`: a script can't have a
   global and a page store with the same name.
 - Available in `onPage` code (the copy of its page) and the overlay; not
-  in page-world `onPage` code (`js: "page"`, see below), nor in `rules` handlers (their rules are built once for every
+  in page-world `onPage` code (`js: "page"`, see below) unless it opts in
+  with `unsafe: true`, nor in `rules` handlers (their rules are built once for every
   page).
 
 ### Stores in `onPage` code
@@ -620,13 +623,36 @@ synchronous, writes reach the background, the overlay and other tabs
 Page-world `onPage` code (`js: "page"`) runs in the page's own
 JavaScript, so the page could read the stores and forge writes to them.
 There, `wt.globalStore` and `wt.pageStore` throw, and calls to an
-overlay handle do nothing — there's no privileged escape hatch, since
-anything page-world code can call, the page can call too. Keep such code
-isolated and reach into the page with
+overlay handle reject — anything page-world code can call, the page can
+call too. Keep such code isolated and reach into the page with
 [`ctx.evaluate`](#reading-the-page--ctxevaluate) instead. The Problems view
 warns about a page-world `onPage` handler that uses a store or an
 overlay handle ("…which the API explicitly disallows in the page
 world"); its quick fix drops `js: "page"`.
+
+If the code must live in the page's world anyway, `unsafe: true` on its
+route accepts that risk: that script's page-world code then gets live
+stores (same copies, persistence and cross-tab sync as isolated code)
+and can call its overlay (top frame). The page can then read and change
+**that script's** stores and call its overlay too — never another
+script's: the background only lets a script's stores be reached from the
+page's world when that script has an `unsafe: true` page-world route for
+the frame's URL, and checks again whenever scripts change.
+
+```ts
+const state = wt.globalStore("state", { user: "" });
+const overlay = wt.onPage({ url: "*://app.example.com/*", dom: "overlay" }, () => ({
+    greet: (name: string) => `hi ${name}`,
+}));
+
+wt.onPage({ url: "*://app.example.com/*", js: "page", unsafe: true }, async () => {
+    state.user = (window as any).myApp?.user?.name ?? "";  // the site's globals, directly
+    document.title = await overlay.greet(state.user);
+});
+```
+
+The built-in `react` and `valtio` imports still aren't available there
+(watch a store with a timer or from the overlay instead).
 
 ```ts
 const page = wt.pageStore("page", { hits: 0 });
@@ -753,7 +779,7 @@ timing:
      | `js` | Sees | The page | May use |
      |---|---|---|---|
      | `"isolated"` *(default)* | the DOM; no page globals (`window.myApp`) — read them with [`ctx.evaluate`](#reading-the-page--ctxevaluate) | can't see or tamper with it | stores, calling the overlay ([the isolated world](#the-isolated-world)) |
-     | `"page"` | the DOM and the page's globals; its `fetch`/XHR go through the `page` strategy | sees it, can tamper with it | neither (stores throw, overlay calls reject) |
+     | `"page"` | the DOM and the page's globals; its `fetch`/XHR go through the `page` strategy | sees it, can tamper with it | neither (stores throw, overlay calls reject) — unless `unsafe: true` ([stores in `onPage` code](#stores-in-onpage-code)), which the page then reaches too |
 
      On Chrome (MV3) isolated code needs user scripts turned on
      ([how](#user-scripts-on-chrome)); `js: "page"` code doesn't.
@@ -810,6 +836,10 @@ wt.onPage("*://app.example.com/*", async (ctx) => {
   );
   ```
 
+- Errors are the script's (Problems view, red badge), not the site's: a
+  callback that throws, a callback the page calls with arguments that
+  aren't plain data (the call is dropped), and a rejection your code
+  doesn't handle. So is a rejecting `async` handler.
 - It runs as page code: the page sees the call and can fake the answer, so
   treat the result as [page data](#page-world-results-are-page-data) and
   never pass secrets (store values, tokens) in.
@@ -987,7 +1017,9 @@ wt.onPage({ url: "*://app.example.com/*", dom: "overlay" }, async () => {
   world with the site, which could fake its calls, so `overlay.fn()` there
   rejects with `page-world onPage code can't call the overlay; …`, and
   Problems shows that error with a quick fix (Ctrl+. / ⌘.) that drops
-  `js: "page"`. Network handlers have no
+  `js: "page"` — unless its route says `unsafe: true`, accepting that the
+  site can call the overlay too
+  ([stores in `onPage` code](#stores-in-onpage-code)). Network handlers have no
   tab: their calls reject.
 
 ### The isolated world
@@ -1069,9 +1101,11 @@ wt.onPage({ url: "*://app.example.com/*", js: "page", dom: "overlay", unsafe: tr
 ```
 
 - **What you give up.** The site can see the overlay (its host element is
-  in the page, its window is the site's), call into it and tamper with it,
-  so it gets what any page-world code gets: no stores, no calls to or from
-  it (its handle is inert), no `ctx.evaluate`. `ctx.onNavigate` and
+  in the page, its window is the site's), call into it and tamper with it.
+  Like any `unsafe: true` page-world code it has the script's stores
+  (which the site can then read and change) and can call the script's
+  default overlay, if it has one; nothing calls into it (its handle is
+  inert), and there's no `ctx.evaluate`. `ctx.onNavigate` and
   `ctx.shortcut` work.
 - **How it runs.** The script evaluates again in the page's world (top
   frame only), with `document` set to the overlay's: a transparent frame in

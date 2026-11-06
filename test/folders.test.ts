@@ -1,6 +1,6 @@
 // Folders + JSON data files: path-aware import resolution, JSON imports,
 // dependants, stacking order, path validation, settings.yaml keys with `/`
-// and bundles.
+// and export zips.
 import { describe, it, expect } from "vitest";
 import "../src/shared/transpile";
 import { compileWithLibs } from "../src/shared/compile";
@@ -11,7 +11,7 @@ import { parseSettings, planSettings, renderSettings, type ScriptSettingsState }
 import { patchSettings, renameSettingsSection } from "../src/shared/settingsYamlPatch";
 import { buildSettingsSchema } from "../src/shared/settingsSchema";
 import { errorPosition } from "../src/ui/problems";
-import { buildBundle, parseBundleText, pickBundle } from "../src/ui/bundle";
+import { buildExportZip, readExportZip } from "../src/shared/exportZip";
 
 describe("import paths", () => {
     it("resolves relative to the importer's folder, bare from the root", () => {
@@ -202,14 +202,12 @@ describe("settings.yaml keys with /", () => {
     });
 });
 
-describe("bundles carry data files and folders", () => {
-    it("round-trips them and picks a subset", () => {
-        const text = buildBundle({ settings: null, params: {} }, [{ name: "mock/a", code: "x" }], [{ path: "mock/d.json", text: '{"a":1}' }], ["empty"]);
-        const b = parseBundleText(text)!;
-        expect(b.scripts).toEqual([{ name: "mock/a", code: "x" }]);
-        expect(b.dataFiles).toEqual([{ path: "mock/d.json", text: '{"a":1}' }]);
-        expect(b.folders).toEqual(["empty"]);
-        expect(pickBundle(b, false, [], [0])).toEqual({ scripts: [], dataFiles: b.dataFiles, folders: ["empty"] });
-        expect(pickBundle(b, false, [0])).toEqual({ scripts: b.scripts, folders: ["empty"] });
+describe("export zips carry data files and folders", () => {
+    it("round-trips them at their paths", async () => {
+        const zip = buildExportZip({ scripts: [{ name: "mock/a", code: "x" }], dataFiles: [{ path: "mock/d.json", text: '{"a":1}' }], folders: ["empty"] });
+        const z = await readExportZip(zip.slice().buffer);
+        expect(z.scripts).toEqual([{ name: "mock/a", file: "mock/a.ts", code: "x" }]);
+        expect(z.dataFiles).toEqual([{ path: "mock/d.json", text: '{"a":1}' }]);
+        expect(z.folders).toEqual(["empty"]);
     });
 });

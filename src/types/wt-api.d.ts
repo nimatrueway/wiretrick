@@ -231,6 +231,10 @@ declare namespace Wiretrick {
      * |---|---|---|
      * | `js: "isolated"` (default) | the site's DOM, private JS | its own layer, private JS |
      * | `js: "page"` | the site's DOM and JS | its own layer, the site's JS (`unsafe: true`) |
+     *
+     * Page-world code (`js: "page"`) gets no stores and can't call the
+     * overlay, unless its route says `unsafe: true`
+     * ({@link UnsafePageRouteOptions}).
      */
     interface PageRouteOptions extends DocumentRouteOptions {
         /**
@@ -243,8 +247,9 @@ declare namespace Wiretrick {
          *   shows how).
          * - `"page"`: the site's own world. It reads the site's globals
          *   (`window.myApp`) directly, and the site can see and tamper with
-         *   it, so it gets no stores and can't call the overlay. It can
-         *   answer the overlay's calls.
+         *   it, so it gets no stores and can't call the overlay (unless
+         *   `unsafe: true`, {@link UnsafePageRouteOptions}). It can answer
+         *   the overlay's calls.
          *
          * @example wt.onPage({ url: "*://example.com/*", js: "page" }, () => { … })
          */
@@ -255,10 +260,29 @@ declare namespace Wiretrick {
          * only). See {@link OverlayRouteOptions}.
          */
         dom?: "page";
+        /** Only with `js: "page"`: see {@link UnsafePageRouteOptions}. */
+        unsafe?: false;
+    }
+
+    /**
+     * `wt.onPage({ url, js: "page", unsafe: true })`: page-world code that
+     * may also use this script's stores ({@link wt.globalStore},
+     * {@link wt.pageStore}) and call its overlay (top frame), like
+     * isolated code. Use it at your own risk: the site sees all of it, so
+     * the site can read and change this script's stores (not other
+     * scripts') and call into its overlay. Prefer the default
+     * (`js: "isolated"`, reading the site with {@link PageCtx.evaluate});
+     * reach for this when the code must live in the site's world.
+     */
+    interface UnsafePageRouteOptions extends DocumentRouteOptions {
+        js: "page";
+        dom?: "page";
+        /** Required: you accept that the site can read and change this script's stores and call its overlay. */
+        unsafe: true;
     }
 
     /** Where an `onPage` handler runs: URL pattern(s) or the full {@link PageRouteOptions} form. */
-    type PageRoute = UrlPatterns | PageRouteOptions;
+    type PageRoute = UrlPatterns | PageRouteOptions | UnsafePageRouteOptions;
 
     /**
      * `wt.onPage({ url, dom: "overlay" })`: the handler draws this script's
@@ -284,10 +308,13 @@ declare namespace Wiretrick {
      * overlay's layer runs as the site's own code — `window` is the
      * site's (its globals, directly), `document` is the layer's. Use it
      * at your own risk: the site can see, read and change what it draws,
-     * and call into it. So it gets no stores, can't call or be called by
-     * the script's other code, and `wt.fetch` and the built-in React
-     * aren't available. It runs where the page allows `eval` (its CSP);
-     * the Preview runs it like a default overlay.
+     * and call into it. Like any `unsafe: true` code
+     * ({@link UnsafePageRouteOptions}) it has the script's stores (which
+     * the site can then read and change too) and can call the script's
+     * default overlay, if it has one; the script's other code can't call
+     * it, and `wt.fetch` and the built-in React aren't available. It runs
+     * where the page allows `eval` (its CSP); the Preview runs it like a
+     * default overlay.
      *
      * The script runs once more for it, with that `document`: its
      * top-level variables aren't shared with the script's other `onPage`
@@ -296,7 +323,7 @@ declare namespace Wiretrick {
     interface PageOverlayRouteOptions extends DocumentRouteOptions {
         dom: "overlay";
         js: "page";
-        /** Required: you accept that the site can see and tamper with this overlay. */
+        /** Required: you accept that the site can see and tamper with this overlay, and reach the script's stores. */
         unsafe: true;
     }
 
@@ -943,7 +970,7 @@ declare const wt: {
      * a layer of its own over the page. See
      * {@link Wiretrick.OverlayRouteOptions}.
      *
-     * @param route Frame URL pattern(s), or `{ url, exclude, when, js, dom }`. See
+     * @param route Frame URL pattern(s), or `{ url, exclude, when, js, dom, unsafe }`. See
      * {@link Wiretrick.DocumentOptions.when} for exact timing, the MV3
      * `document_start` race, SPA/re-render behavior and live-update re-runs,
      * and {@link Wiretrick.PageRouteOptions} for where it runs.
@@ -996,7 +1023,8 @@ declare const wt: {
     /**
      * Draw an overlay GUI whose code runs in the **site's** JavaScript
      * world (`window` is the site's, `document` the overlay's). The site
-     * can see and tamper with it: no stores, no calls to or from it. See
+     * can see and tamper with it, and reach the script's stores through
+     * it; nothing calls into it. See
      * {@link Wiretrick.PageOverlayRouteOptions}.
      *
      * @param route `{ url, exclude, when, js: "page", dom: "overlay", unsafe: true }`.
@@ -1090,7 +1118,8 @@ declare const wt: {
      * to watch it. `name` is its key (one store per name per script, shared
      * with {@link pageStore}); values must be JSON (at most 1 MB). Call it
      * at top level. `onPage` code gets a live copy too, except with
-     * `js: "page"` (the page could read and forge it).
+     * `js: "page"` (the page could read and forge it) unless its route
+     * accepts that with `unsafe: true` ({@link Wiretrick.UnsafePageRouteOptions}).
      *
      * @example
      * const state = wt.globalStore("state", { mocking: true, hits: 0 });
@@ -1116,7 +1145,8 @@ declare const wt: {
      * object. Requests that aren't from a page (service workers, other
      * apps through the helper) see a throwaway copy of `initial`.
      * `onPage` code sees its page's copy; not available with
-     * `js: "page"` (the page could read and forge it) or in `rules`
+     * `js: "page"` (the page could read and forge it; unless
+     * `unsafe: true`, {@link Wiretrick.UnsafePageRouteOptions}) or in `rules`
      * handlers (their rules serve every page); kept until the page ends
      * (not across browser restarts).
      *

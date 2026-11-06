@@ -10,51 +10,104 @@ beforeEach(() => {
     vi.resetModules();
 });
 
-describe("bundle picker", () => {
+describe("export/import picker", () => {
     async function open(warn = true) {
         const { BundlePicker } = await import("../src/ui/dialogs/BundlePicker");
-        const { pickRows, dialogs } = await import("../src/ui/state/dialogs");
+        const { pickItems, dialogs } = await import("../src/ui/state/dialogs");
         render(<BundlePicker />);
         let result: Promise<number[] | null>;
         act(() => {
-            result = pickRows({
+            result = pickItems({
                 title: "Export",
-                rows: [{ label: "app" }, { label: "lib", badge: "library" }, { label: "old", disabled: true }],
-                confirm: "Export 2",
-                // "app" imports "lib"
-                warn: warn ? (sel) => (sel.includes(0) && !sel.includes(1) ? { text: "app imports lib", fix: [1] } : null) : undefined,
+                items: [
+                    { path: "app.ts", kind: "script" },
+                    { path: "lib/util.ts", kind: "script", badge: "new" },
+                    { path: "lib/old.ts", kind: "script", checked: false },
+                    { path: "lib/d.json", kind: "data" },
+                    { path: "settings.yaml", kind: "settings" },
+                    { path: "empty", kind: "folder" },
+                ],
+                confirm: "Export",
+                // "app" imports "lib/util"
+                warn: warn ? (sel) => (sel.includes(0) && !sel.includes(1) ? { text: "app imports lib/util", fix: [1] } : null) : undefined,
             });
         });
         return { result: result!, dialogs };
     }
+    const box = (path: string) => $<HTMLInputElement>(`#bundle-picker .picker-row[data-path="${path}"] input`);
+    const labels = () => $$("#bundle-picker .picker-label").map((e) => e.textContent);
+    const type = (text: string) => fireEvent.change($(".picker-filter"), { target: { value: text } });
 
-    it("shows the rows, all enabled ones checked, with OK focused", async () => {
+    it("shows the tree as the Explorer does, checked boxes as given, the filter focused", async () => {
         await open();
-        expect($$("#bundle-picker .picker-label").map((e) => e.textContent)).toEqual(["app", "lib", "old"]);
-        expect($$("#bundle-picker .picker-badge").map((e) => e.textContent)).toEqual(["library"]);
-        expect($$("#bundle-picker .picker-row input").map((b) => (b as HTMLInputElement).checked)).toEqual([true, true, false]);
-        expect($(".picker-count").textContent).toBe("2 of 2 selected");
-        expect(document.activeElement).toBe($('#bundle-picker [data-act="ok"]'));
+        expect(labels()).toEqual(["settings.yaml", "empty", "lib", "util.ts", "old.ts", "d.json", "app.ts"]);
+        expect($$("#bundle-picker .picker-badge").map((e) => e.textContent)).toEqual(["new"]);
+        expect(box("lib/old.ts").checked).toBe(false);
+        expect(box("lib").indeterminate).toBe(true);
+        expect(box("empty").checked).toBe(true);
+        expect($(".picker-count").textContent).toBe("5 of 6 selected");
+        expect(document.activeElement).toBe($(".picker-filter"));
         // a portal: next to the app, as before
         expect($("#bundle-picker").parentElement).toBe(document.body);
     });
 
+    it("a folder's box checks (then unchecks) everything in it", async () => {
+        await open(false);
+        box("lib").click();
+        expect([box("lib/util.ts"), box("lib/old.ts"), box("lib/d.json")].map((b) => b.checked)).toEqual([true, true, true]);
+        expect(box("lib").checked).toBe(true);
+        expect(box("lib").indeterminate).toBe(false);
+        box("lib").click();
+        expect([box("lib/util.ts"), box("lib/old.ts"), box("lib/d.json")].map((b) => b.checked)).toEqual([false, false, false]);
+        expect($(".picker-count").textContent).toBe("3 of 6 selected");
+    });
+
+    it("the twistie collapses a folder", async () => {
+        await open();
+        fireEvent.click($('#bundle-picker .picker-row[data-path="lib"] .picker-twistie'));
+        expect(labels()).toEqual(["settings.yaml", "empty", "lib", "app.ts"]);
+        expect(box("lib").indeterminate).toBe(true);
+        fireEvent.click($('#bundle-picker .picker-row[data-path="lib"] .picker-twistie'));
+        expect(labels()).toContain("util.ts");
+    });
+
+    it("the filter narrows the tree by path; select all/none act on what it shows; Escape clears it", async () => {
+        const { result } = await open(false);
+        type("LIB/");
+        expect(labels()).toEqual(["lib", "util.ts", "old.ts", "d.json"]);
+        type("util");
+        expect(labels()).toEqual(["lib", "util.ts"]);
+        fireEvent.click($('[data-act="none"]'));
+        // the folder's box shows what the filter shows
+        expect(box("lib").checked).toBe(false);
+        expect($(".picker-count").textContent).toBe("4 of 6 selected");
+        type("zzz");
+        expect(labels()).toEqual([]);
+        expect($(".picker-none").textContent).toBe("Nothing matches the filter");
+        fireEvent.keyDown($(".picker-filter"), { key: "Escape" });
+        expect(($(".picker-filter") as HTMLInputElement).value).toBe("");
+        expect(labels()).toHaveLength(7);
+        expect(box("lib/util.ts").checked).toBe(false);
+        fireEvent.click($('[data-act="all"]'));
+        fireEvent.click($('[data-act="ok"]'));
+        await expect(result).resolves.toEqual([0, 1, 2, 3, 4, 5]);
+    });
+
     it("updates the warning as soon as a box is clicked; Add them re-checks the rows", async () => {
         const { result } = await open();
-        const boxes = $$("#bundle-picker .picker-row input") as HTMLInputElement[];
         const warn = $(".picker-warn");
         expect(warn.hidden).toBe(true);
-        boxes[1].click();
+        box("lib/util.ts").click();
         // read right after the click, as the e2e test does
         expect(warn.hidden).toBe(false);
-        expect(warn.textContent).toContain("app imports lib");
+        expect(warn.textContent).toContain("app imports lib/util");
         expect(warn.querySelector("button")!.hidden).toBe(false);
-        expect($(".picker-count").textContent).toBe("1 of 2 selected");
+        expect($(".picker-count").textContent).toBe("4 of 6 selected");
         (warn.querySelector("button") as HTMLElement).click();
-        expect(boxes[1].checked).toBe(true);
+        expect(box("lib/util.ts").checked).toBe(true);
         expect(warn.hidden).toBe(true);
         fireEvent.keyDown(document, { key: "Enter" });
-        await expect(result).resolves.toEqual([0, 1]);
+        await expect(result).resolves.toEqual([0, 1, 3, 4, 5]);
         expect(document.querySelector("#bundle-picker")).toBeNull();
     });
 
@@ -65,9 +118,9 @@ describe("bundle picker", () => {
         fireEvent.keyDown(document, { key: "Enter" });
         expect(document.querySelector("#bundle-picker")).not.toBeNull();
         fireEvent.click($('[data-act="all"]'));
-        expect(($$("#bundle-picker .picker-row input") as HTMLInputElement[]).map((b) => b.checked)).toEqual([true, true, false]);
+        expect($(".picker-count").textContent).toBe("6 of 6 selected");
         fireEvent.click($('[data-act="ok"]'));
-        await expect(result).resolves.toEqual([0, 1]);
+        await expect(result).resolves.toEqual([0, 1, 2, 3, 4, 5]);
     });
 
     it("Escape, Cancel and the backdrop cancel", async () => {

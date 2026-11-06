@@ -79,6 +79,11 @@ wt.onPage({ url: "*", dom: "overlay" }, async () => { const n: number = await pa
         // the page-world overlay exposes nothing, and needs unsafe
         expect(errorsOf(`const l = wt.onPage({ url: "*", js: "page", dom: "overlay", unsafe: true }, () => ({ x: () => 1 }));\nvoid l.x();`)).toHaveLength(1);
         expect(errorsOf(`wt.onPage({ url: "*", js: "page", dom: "overlay" }, () => {});`)).toHaveLength(1);
+        // unsafe: true only with js: "page"; a dom-page one is still callable
+        expect(errorsOf(`const u = wt.onPage({ url: "*", js: "page", unsafe: true }, (ctx) => { void ctx.evaluate(() => 1); return { n: () => 1 }; });\nasync function f() { const n: number = await u.n(); }\nwt.onPage({ url: "*", js: "page", unsafe: false }, () => {});`)).toEqual([]);
+        expect(errorsOf(`wt.onPage({ url: "*", unsafe: true }, () => {});`)).toHaveLength(1);
+        expect(errorsOf(`wt.onPage({ url: "*", js: "isolated", unsafe: true }, () => {});`)).toHaveLength(1);
+        expect(errorsOf(`wt.onPage({ url: "*", dom: "overlay", unsafe: true }, () => {});`)).toHaveLength(1);
         // an overlay has no ctx.evaluate; dom-page code has no ctx.onNavigate
         expect(errorsOf(`wt.onPage({ url: "*", dom: "overlay" }, (ctx) => void ctx.evaluate(() => 1));`)).toHaveLength(1);
         expect(errorsOf(`wt.onPage({ url: "*", js: "page" }, (ctx) => void ctx.onNavigate(() => {}));`)).toHaveLength(1);

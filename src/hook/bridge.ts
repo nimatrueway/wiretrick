@@ -20,6 +20,11 @@
  * and routes calls between the overlay and that script's onPage code
  * (isolated world here; main world through the hook, L4). It also listens
  * for the overlays' `ctx.shortcut` keys in the page.
+ *
+ * `unsafe: true` page-world code (the hook's, or the CSP fallback's here)
+ * gets its script's stores and overlay through the bridge: the hook links
+ * to it over window messages (`wire`), which the page can read and forge —
+ * so only those scripts get through, and the background checks again.
  */
 import { formatScriptError } from "../shared/scriptError";
 import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptContext, type ScriptLogLevel } from "../shared/scriptLog";
@@ -28,9 +33,10 @@ import { makeLibRequire, type ShippedLib } from "../shared/scriptImports";
 import { builtinModule, builtinsReady, ensureBuiltins, setBuiltinLoader, shippedSources, sourceLoader } from "../shared/builtins";
 import { makePageShim, domHandlersFor, scheduleDocument, firePageHandler, type PageDocumentHandler } from "../shared/pageShim";
 import { packBytes, unpackBytes } from "../shared/bytesPack";
-import { endpointPair, messagePortEndpoint, portEndpoint, ISO_STORE_TAG, type Endpoint, type ReqOf, type ReqOps, type ResOf } from "../shared/wire";
+import { Endpoint, endpointPair, messagePortEndpoint, portEndpoint, ISO_STORE_TAG, PAGE_STORE_TAG, type ReqOf, type ReqOps, type ResOf } from "../shared/wire";
 import { ReplicaHub, type StoreSnapshots } from "../shared/storeReplica";
-import { Exposer, RpcClient, isRpcCall, isRpcResult, NOT_RUNNING, RPC_QUEUE_MAX, RPC_TIMEOUT_MS, type RpcCall, type RpcResult } from "../shared/rpc";
+import { Exposer, RpcClient, isRpcCall, isRpcResult, newCid, NOT_RUNNING, RPC_QUEUE_MAX, RPC_TIMEOUT_MS, TOP_FRAME_ONLY, type RpcCall, type RpcResult } from "../shared/rpc";
+import { inertRemote, REMOTE_MAIN_WORLD } from "../shared/remote";
 import type { DocumentWhen, RouteMeta } from "../shared/route";
 import { clipPathFor, normalizeRects } from "../shared/overlayRects";
 import { fromWireRequest, toWireResponse } from "../shared/wtFetch";
@@ -195,8 +201,8 @@ import { makePageEvaluate } from "../shared/pageEval";
         }
         // the hook's answer to an overlay's call (L4). The page can post this
         // too: only a cid we sent and are still waiting for is accepted, and
-        // the value is page data either way. A `rpc.call` from the page is
-        // never forwarded to an overlay.
+        // the value is page data either way. A call from the page reaches an
+        // overlay only over `wire`, for an unsafe: true script.
         if (data.kind === "rpc.result") {
             const p = typeof data.result?.cid === "string" ? l4Pending.get(data.result.cid) : undefined;
             if (!p || p.s !== data.s || !isRpcResult(data.result)) return;
@@ -206,13 +212,14 @@ import { makePageEvaluate } from "../shared/pageEval";
             return;
         }
         if (data.kind === "nav") noteNav();
+        if (data.kind === "wire") hookEp.receive(data.msg);
         });
     });
 
     // ---- onPage code in the isolated world: compiles the FULL script source
     // with a shim so top-level helpers/closures survive; the DOM is shared
     // with the page, window (page JS globals) is not ----
-    interface DocumentHandler { scriptId: string; name: string; src: string; params?: Record<string, any> }
+    interface DocumentHandler { scriptId: string; name: string; src: string; params?: Record<string, any>; unsafe?: true }
 
     /** script ids whose main-world onPage code this frame got (storage relay allow-list) */
     let pageScriptIds = new Set<string>();
@@ -222,7 +229,18 @@ import { makePageEvaluate } from "../shared/pageEval";
         const active = !!(resp && (resp.count > 0 || (resp.domHandlers || []).length));
         // main-world handlers and libraries only: isolated code never reaches the page
         window.postMessage(
-            { source: MAIN_SOURCE, kind: "status", active, routes: (resp && resp.routes) || [], textTypes: resp?.textTypes, domHandlers: (resp && resp.domHandlers) || [], libs: (resp && resp.libs) || [], ...(hot ? { hot: true } : {}) },
+            {
+                source: MAIN_SOURCE,
+                kind: "status",
+                active,
+                routes: (resp && resp.routes) || [],
+                textTypes: resp?.textTypes,
+                domHandlers: (resp && resp.domHandlers) || [],
+                libs: (resp && resp.libs) || [],
+                // unsafe: true scripts' stores only (the page can read them anyway)
+                ...(resp?.pageStores ? { pageStores: resp.pageStores, pageStorePage: resp.pageStorePage } : {}),
+                ...(hot ? { hot: true } : {}),
+            },
             window.location.origin
         );
     }
@@ -232,6 +250,7 @@ import { makePageEvaluate } from "../shared/pageEval";
         if (!resp) return;
         if (resp.count > 0 || (resp.domHandlers || []).length || (resp.isoHandlers || []).length || (resp.overlays || []).length) openPort();
         pageScriptIds = new Set(((resp.domHandlers || []) as DocumentHandler[]).map((h) => h.scriptId));
+        notePageWorld(resp);
         syncOverlays(window === top ? resp.overlays || [] : [], hot);
         if (__MV3__) {
             // MV3 content scripts can't eval: isolated code runs in user-script worlds; this frame only relays the overlay's calls
@@ -262,59 +281,122 @@ import { makePageEvaluate } from "../shared/pageEval";
     //
     // Replicas, primed by the bundle (`isoStores`, this page's wt.pageStore
     // copies). Their ops go over L2 tagged `ISO_STORE_TAG + s`, once the
-    // background granted the script (`iso.stores`) on that link. Main-world
-    // code (and its CSP fallback here) never gets a store.
+    // background granted the script (`iso.stores`) on that link.
     let isoHub: ReplicaHub | null = null;
     /** the hub's side of the relay to L2 */
     let isoOut: Endpoint | null = null;
     let isoPrimed: StoreSnapshots = {};
     let isoPage = "";
     /** per script: L2 granted (null: refused), for the current L2 link */
-    let isoGrants = new Map<string, Promise<Endpoint | null>>();
-    function isoGranted(s: string): Promise<Endpoint | null> {
-        let p = isoGrants.get(s);
-        if (!p) {
-            const grants = isoGrants;
-            p = l2up("iso.stores").then(
-                (ep) => ep.call("iso.stores", { url: location.href }, s).then(() => ep),
-                (e: any) => {
-                    if (grants.get(s) === p) grants.delete(s);
-                    throw e;
+    function storeGrants(op: "iso.stores" | "page.stores", what: string) {
+        let grants = new Map<string, Promise<Endpoint | null>>();
+        return {
+            reset: () => void (grants = new Map()),
+            get(s: string): Promise<Endpoint | null> {
+                let p = grants.get(s);
+                if (!p) {
+                    const mine = grants;
+                    p = l2up(op).then(
+                        (ep) => ep.call(op, { url: location.href }, s).then(() => ep),
+                        (e: any) => {
+                            if (mine.get(s) === p) mine.delete(s);
+                            throw e;
+                        }
+                    );
+                    p = p.catch((e: any) => {
+                        if (e?.name === "DisconnectedError") {
+                            if (mine.get(s) === p) mine.delete(s);
+                        } else dlog("warn", `${what} of ${s}: refused: ${e?.message || e}`);
+                        return null;
+                    });
+                    mine.set(s, p);
                 }
-            );
-            p = p.catch((e: any) => {
-                if (e?.name === "DisconnectedError") {
-                    if (grants.get(s) === p) grants.delete(s);
-                } else dlog("warn", `isolated onPage stores of ${s}: refused: ${e?.message || e}`);
-                return null;
-            });
-            grants.set(s, p);
-        }
-        return p;
+                return p;
+            },
+        };
     }
+    const isoGrants = storeGrants("iso.stores", "isolated onPage stores");
+    const pageGrants = storeGrants("page.stores", "unsafe page-world stores");
+
+    /** a hub's store ops (on `out`) → L2, tagged `tag + s`, for the scripts `allowed` lets through; in order: each op waits for its script's grant */
+    function relayStores(out: Endpoint, grant: (s: string) => Promise<Endpoint | null>, tag: string, allowed: (s: string) => boolean = () => true): void {
+        const ok = (s: string | undefined): s is string => s !== undefined && allowed(s);
+        out.on("store.declare", (a, s) => ok(s) && void grant(s).then((ep) => ep && !ep.closed && ep.push("store.declare", a, tag + s)));
+        out.on("store.set", (a, s) => ok(s) && void grant(s).then((ep) => ep && !ep.closed && ep.push("store.set", a, tag + s)));
+        out.handle("store.sub", async (a, s) => {
+            if (!ok(s)) throw new Error("store.sub: this script's stores aren't reachable here");
+            const ep = await grant(s);
+            if (!ep) throw Object.assign(new Error("store.sub: no link to the extension"), { name: "DisconnectedError" });
+            return ep.call("store.sub", a, tag + s);
+        });
+    }
+
     function isoStores(): ReplicaHub {
         if (isoHub) return isoHub;
         const [hubSide, out] = endpointPair();
         isoOut = out;
-        // in order: each op waits for its script's grant
-        out.on("store.declare", (a, s) => s !== undefined && void isoGranted(s).then((ep) => ep && !ep.closed && ep.push("store.declare", a, ISO_STORE_TAG + s)));
-        out.on("store.set", (a, s) => s !== undefined && void isoGranted(s).then((ep) => ep && !ep.closed && ep.push("store.set", a, ISO_STORE_TAG + s)));
-        out.handle("store.sub", async (a, s) => {
-            const ep = s === undefined ? null : await isoGranted(s);
-            if (!ep) throw Object.assign(new Error("store.sub: no link to the extension"), { name: "DisconnectedError" });
-            return ep.call("store.sub", a, ISO_STORE_TAG + s);
-        });
+        relayStores(out, isoGrants.get, ISO_STORE_TAG);
         isoHub = new ReplicaHub({ ctx: "isolated", log: (s, msg, level) => scriptLog(s, level, msg, "isolated") });
         isoHub.prime(isoPrimed);
         isoHub.attach(hubSide);
         return isoHub;
     }
 
+    // ---- unsafe: true page-world code's stores and overlay calls ----
+    //
+    // The hook's replicas (MAIN world) link here over window messages; the
+    // CSP fallback's live here (`fbStores`). Their ops go over L2 tagged
+    // `PAGE_STORE_TAG + s` once the background granted the script
+    // (`page.stores`). The page can forge the hook's side: only the
+    // scripts whose page-world code here is `unsafe: true` get through.
+    /** scripts whose page-world code in this frame is `unsafe: true` (from the bundle) */
+    let unsafeIds = new Set<string>();
+    let pagePrimed: StoreSnapshots = {};
+    let pageStorePage = "";
+    /** page-world code used a store: keep L2 up (patches, re-sync after a drop) */
+    let pageStoresUsed = false;
+    const unsafeOk = (s: string): boolean => {
+        if (!unsafeIds.has(s)) {
+            dlog("warn", `refused a page-world store op or overlay call for ${s}: its page-world code here isn't unsafe: true`);
+            return false;
+        }
+        pageStoresUsed = true;
+        return true;
+    };
+    const hookEp = new Endpoint((msg) => window.postMessage({ source: MAIN_SOURCE, kind: "wire", msg }, window.location.origin), { debug: (m) => dlog("debug", "hook link:", m) });
+    relayStores(hookEp, pageGrants.get, PAGE_STORE_TAG, unsafeOk);
+    hookEp.on("rpc.call", (c, s) => guard(() => s !== undefined && isRpcCall(c) && callOverlayFromPage(s, c, (r) => hookEp.push("rpc.result", r, s))));
+    let fbHub: ReplicaHub | null = null;
+    let fbOut: Endpoint | null = null;
+    function fbStores(): ReplicaHub {
+        if (fbHub) return fbHub;
+        const [hubSide, out] = endpointPair();
+        fbOut = out;
+        relayStores(out, pageGrants.get, PAGE_STORE_TAG, unsafeOk);
+        fbHub = new ReplicaHub({ ctx: "page", log: (s, msg, level) => scriptLog(s, level, msg, "page") });
+        fbHub.prime(pagePrimed);
+        fbHub.attach(hubSide);
+        return fbHub;
+    }
+    function notePageWorld(resp: any): void {
+        unsafeIds = new Set(((resp.domHandlers || []) as DocumentHandler[]).flatMap((h) => (h.unsafe ? [h.scriptId] : [])));
+        if (resp.pageStores) {
+            pagePrimed = resp.pageStores;
+            pageStorePage = typeof resp.pageStorePage === "string" ? resp.pageStorePage : "";
+            fbHub?.prime(pagePrimed);
+        }
+    }
+
     /** scripts whose main-world fallback code already reported calling the overlay */
     const mainWorldCallers = new Set<string | null>();
 
-    /** ctx.evaluate: asks the hook in the page's world (the CSP fallback's page code too: the page's CSP rejects it there) */
-    const evaluate = makePageEvaluate();
+    /** ctx.evaluate, per script (its errors are its own): asks the hook in the page's world (the CSP fallback's page code too: the page's CSP rejects it there) */
+    const evaluates = new Map<string, ReturnType<typeof makePageEvaluate>>();
+    const evaluateFor = (scriptId: string, name: string, ctx: ScriptContext) => {
+        let ev = evaluates.get(scriptId);
+        if (!ev) evaluates.set(scriptId, (ev = makePageEvaluate(window, undefined, (e) => scriptLog(scriptId, "error", formatScriptError(name, e, "ctx.evaluate"), ctx))));
+        return ev;
+    };
 
     // isolated code's built-in React: evaluated here from the background's copy (a <script> tag would put it in the page)
     if (!__MV3__)
@@ -341,18 +423,28 @@ import { makePageEvaluate } from "../shared/pageEval";
         // the main-world fallback is still page code
         const ctx: ScriptContext = world === "isolated" ? "isolated" : "page";
         for (const id of [...exposers.keys()]) if (!handlers.some((h) => h.scriptId === id)) exposers.delete(id);
+        // the main-world fallback: unsafe: true scripts' code gets stores and the overlay too
+        const unsafe = (id: string | null | undefined): id is string => world === "page" && !!id && unsafeIds.has(id);
         const shimFor = (scriptId: string | null, name: string, params: Record<string, any>, exposer?: Exposer, storesOf?: string) =>
             makePageShim({
                 params,
                 world,
                 exposer,
-                // isolated code only (the shim ignores them for the main-world fallback)
                 stores:
                     world === "isolated" && storesOf
                         ? { store: (n, initial, persist) => isoStores().store(storesOf, n, initial, persist), pageStore: (n, initial) => isoStores().pageStore(storesOf, n, initial, isoPage) }
-                        : undefined,
+                        : unsafe(storesOf)
+                          ? { store: (n, initial, persist) => fbStores().store(storesOf, n, initial, persist), pageStore: (n, initial) => fbStores().pageStore(storesOf, n, initial, pageStorePage) }
+                          : undefined,
                 // isolated code in the top frame may call its overlay; elsewhere the handle explains why not
-                overlay: world === "isolated" && scriptId && window === top ? (h) => overlayClient(scriptId).remote(h) : undefined,
+                overlay:
+                    scriptId && (world === "isolated" || unsafe(scriptId))
+                        ? window === top
+                            ? (h) => overlayClient(scriptId).remote(h)
+                            : world === "page"
+                              ? () => inertRemote(TOP_FRAME_ONLY)
+                              : undefined
+                        : undefined,
                 // the main-world fallback reports a call into the overlay like the hook does (once per script)
                 onMainWorldCall: (e) => {
                     if (world !== "page" || mainWorldCallers.has(scriptId)) return;
@@ -400,7 +492,9 @@ import { makePageEvaluate } from "../shared/pageEval";
             for (const d of matching) {
                 const run = () => {
                     try {
-                        firePageHandler(d, { url: location.href, method: "GET", tabUrl: location.href, resourceType: "main_frame", requestHeaders: {}, groups: {}, evaluate }, exposer);
+                        firePageHandler(d, { url: location.href, method: "GET", tabUrl: location.href, resourceType: "main_frame", requestHeaders: {}, groups: {}, evaluate: evaluateFor(h.scriptId, h.name, ctx) }, exposer, (e) =>
+                            scriptLog(h.scriptId, "error", formatScriptError(h.name, e, "onPage"), ctx)
+                        );
                         scriptRan(h.scriptId, h.name, "onPage");
                     } catch (e: any) {
                         scriptLog(h.scriptId, "error", formatScriptError(h.name, e, "onPage"), ctx);
@@ -420,6 +514,7 @@ import { makePageEvaluate } from "../shared/pageEval";
             // dead bridge: safeSend never answers — resolve empty after a beat
             setTimeout(() => resolve({ domHandlers: [] }), 1000);
         });
+        notePageWorld(bundle);
         runPageScripts(bundle.domHandlers || [], bundle.libs || [], "page", hot);
     }
 
@@ -457,7 +552,12 @@ import { makePageEvaluate } from "../shared/pageEval";
             ep.on(op, (a: any, s) => {
                 if (s === undefined) return;
                 if (s.startsWith(ISO_STORE_TAG)) isoOut?.push(op, a, s.slice(ISO_STORE_TAG.length));
-                else overlays.get(s)?.ep?.push(op, a, s);
+                else if (s.startsWith(PAGE_STORE_TAG)) {
+                    const id = s.slice(PAGE_STORE_TAG.length);
+                    if (!unsafeIds.has(id)) return;
+                    hookEp.push(op, a, id);
+                    fbOut?.push(op, a, id);
+                } else overlays.get(s)?.ep?.push(op, a, s);
             });
         // MV3: the overlay ⇄ isolated-world relay (the background checks tab, frame and script)
         ep.on("iso.result", (r, s) => {
@@ -478,9 +578,12 @@ import { makePageEvaluate } from "../shared/pageEval";
                         (e: any) => dlog("warn", `overlay ${o.info.name}: no longer granted: ${e?.message || e}`)
                     );
         for (const w of l2Waiters.splice(0)) w();
-        // isolated code's replicas re-grant (on first use) and re-subscribe
-        isoGrants = new Map();
+        // isolated and unsafe page-world code's replicas re-grant (on first use) and re-subscribe
+        isoGrants.reset();
+        pageGrants.reset();
         isoHub?.reconnect();
+        fbHub?.reconnect();
+        if (pageStoresUsed) hookEp.push("store.resync", {});
         ep.onClose(() => {
             if (l2 === ep) l2 = null;
             for (const [cid, p] of [...isoPending])
@@ -489,7 +592,7 @@ import { makePageEvaluate } from "../shared/pageEval";
                     clearTimeout(p.timer);
                     p.reply({ cid, ok: false, error: { name: "DisconnectedError", message: "the link to the extension dropped" } });
                 }
-            if (dead || (!l2Holders && !isoHub) || l2Timer) return;
+            if (dead || (!l2Holders && !isoHub && !pageStoresUsed) || l2Timer) return;
             l2Timer = setTimeout(() => {
                 l2Timer = null;
                 openPort();
@@ -565,6 +668,8 @@ import { makePageEvaluate } from "../shared/pageEval";
     const isoPending = new Map<string, { s: string; reply: (r: RpcResult) => void; timer: ReturnType<typeof setTimeout>; ep?: Endpoint }>();
     /** MV3: isolated-world → overlay calls the overlay hasn't answered yet, by cid */
     const isoRelayed = new Map<string, { s: string; timer: ReturnType<typeof setTimeout> }>();
+    /** unsafe page-world → overlay calls the overlay hasn't answered yet, by the cid the bridge gave them */
+    const pageRelayed = new Map<string, { s: string; reply: (r: RpcResult) => void; timer: ReturnType<typeof setTimeout> }>();
     /** overlay → main-world calls waiting for the hook (L4), by cid */
     const l4Pending = new Map<string, { s: string; reply: (r: RpcResult) => void; timer: ReturnType<typeof setTimeout> }>();
     let host: HTMLElement | null = null;
@@ -720,6 +825,12 @@ import { makePageEvaluate } from "../shared/pageEval";
         ep.on("rpc.call", (c) => proven && isRpcCall(c) && routeOverlayCall(s, c, (r) => ep.push("rpc.result", r)));
         ep.on("rpc.result", (r) => {
             if (!proven) return;
+            const pr = isRpcResult(r) ? pageRelayed.get(r.cid) : undefined;
+            if (pr && pr.s === s) {
+                pageRelayed.delete(r.cid);
+                clearTimeout(pr.timer);
+                return pr.reply(r);
+            }
             const rel = isRpcResult(r) ? isoRelayed.get(r.cid) : undefined;
             if (!rel || rel.s !== s) return void overlayClients.get(s)?.receive(r);
             isoRelayed.delete(r.cid);
@@ -755,6 +866,12 @@ import { makePageEvaluate } from "../shared/pageEval";
                 clearTimeout(r.timer);
                 isoRelayed.delete(cid);
             }
+        for (const [cid, r] of [...pageRelayed])
+            if (r.s === s) {
+                clearTimeout(r.timer);
+                pageRelayed.delete(cid);
+                r.reply({ cid, ok: false, error: { name: "DisconnectedError", message: `the overlay ${why}` } });
+            }
         overlayClients.get(s)?.disconnect(`the overlay ${why}`);
         l2?.push("overlay.closed", {}, s);
         l2Holders = overlays.size;
@@ -784,6 +901,24 @@ import { makePageEvaluate } from "../shared/pageEval";
         isoRelayed.set(call.cid, { s, timer: setTimeout(() => isoRelayed.delete(call.cid), RPC_TIMEOUT_MS + 1000) });
         if (o.ep) o.ep.push("rpc.call", call);
         else o.queue.push(call);
+    }
+
+    /**
+     * `unsafe: true` page-world code (the hook) calls script `s`'s overlay.
+     * The call gets a cid of the bridge's: the page picks its own.
+     */
+    function callOverlayFromPage(s: string, call: RpcCall, reply: (r: RpcResult) => void): void {
+        const fail = (message: string) => reply(callError(call.cid, message));
+        if (window !== top) return fail(TOP_FRAME_ONLY);
+        if (!unsafeOk(s)) return fail(REMOTE_MAIN_WORLD);
+        const o = overlays.get(s);
+        if (!o || o.closed) return fail(NOT_RUNNING);
+        if ((!o.ep && o.queue.length >= RPC_QUEUE_MAX) || pageRelayed.size >= RPC_QUEUE_MAX * 10) return fail(`${call.fn}(): too many calls waiting for the overlay`);
+        const cid = newCid();
+        pageRelayed.set(cid, { s, reply: (r) => reply({ ...r, cid: call.cid }), timer: setTimeout(() => pageRelayed.delete(cid), RPC_TIMEOUT_MS + 1000) });
+        const relayed: RpcCall = { cid, h: call.h, fn: call.fn, args: call.args };
+        if (o.ep) o.ep.push("rpc.call", relayed);
+        else o.queue.push(relayed);
     }
 
     /** MV3: the overlay calls isolated code, in a user-script world (through the background) */

@@ -9,15 +9,15 @@ import { RulesStrategy } from "./engine/strategies/rulesStrategy";
 import { createPipeline } from "./engine/pipeline";
 import { startPackageUpdates } from "./engine/packages";
 import { ENTRY_URL_RE } from "../shared/packageSource";
-import { addUiPort, clearTab, clearLogHistory, log, noteRan, broadcastEntry, broadcastToUi, clearScriptErrors, setScriptTypeErrors } from "./engine/logs";
+import { addUiPort, clearTab, clearLogHistory, log, noteRan, broadcastEntry, broadcastToUi, clearScriptErrors, setScriptTypeErrors, onScriptActivity, onScriptProblemsChanged, getScriptProblems } from "./engine/logs";
 import { onScriptsChanged, listScripts, refreshStaleMeta } from "./engine/scriptStore";
 import { dlog, dlogLevel, getDebugBuffer, pushEntry, clearDebugBuffer, setSink } from "../shared/debugLog";
 import * as folderSync from "./folderSync";
 import { addNetworkCountsPort, addNetworkPort } from "./network";
 import { collectDiagnostics } from "./diagnostics";
 import { getSettingsText, applySettingsText, applySettingsDoc } from "./settingsFile";
-import { badgeSetText, badgeSetColor, tabsQueryAll, tabsGet } from "../shared/chromeApi";
-import { createBadgeCounter } from "./badgeCounter";
+import { badgeSetText, badgeSetColor, actionSetTitle, tabsQueryAll, tabsGet } from "../shared/chromeApi";
+import { createBadgeCounter, badgeLook } from "./badgeCounter";
 import { actionIconView, createBusyIndicator } from "./busyIcon";
 import { onBusyChange } from "./engine/busy";
 import { addBridgePort } from "./engine/bridgePorts";
@@ -208,6 +208,7 @@ if (chrome.debugger) {
 chrome.tabs.onRemoved.addListener((tabId) => {
     clearTab(tabId);
     badge.forget(tabId);
+    saveBadge();
 });
 
 // ---- reopen the manager after an extension reload (Chrome kills the
@@ -230,10 +231,27 @@ chrome.runtime.onInstalled.addListener(() => {
     });
 });
 
-// ---- badge: per-tab count of enabled scripts active on the tab
-// (matching the page URL or any underlying resource request) ----
+// ---- badge: per-tab count of enabled scripts active on the tab (a
+// network route matched one of its requests, or its onPage code ran
+// there); its color says whether any of them has a problem ----
 let cachedScripts: import("./engine/scriptStore").Script[] = [];
 const badge = createBadgeCounter(() => cachedScripts);
+const BADGE_KEY = "badgeTabs";
+// MV3: the service worker stops when idle; the counts outlive it
+const badgeRestored: Promise<void> = (async () => {
+    try {
+        const d = await chrome.storage?.session?.get(BADGE_KEY);
+        badge.restore(d?.[BADGE_KEY]);
+    } catch {}
+})();
+let badgeSaveTimer: ReturnType<typeof setTimeout> | null = null;
+function saveBadge(): void {
+    if (badgeSaveTimer || !chrome.storage?.session) return;
+    badgeSaveTimer = setTimeout(() => {
+        badgeSaveTimer = null;
+        chrome.storage.session.set({ [BADGE_KEY]: badge.save() }).catch(() => {});
+    }, 300);
+}
 
 async function refreshCache(): Promise<void> {
     cachedScripts = await listScripts();
@@ -241,10 +259,25 @@ async function refreshCache(): Promise<void> {
 onScriptsChanged(() => void refreshCache());
 void refreshStaleMeta().catch((e) => dlogLevel("bg", "warn", `refreshing stored script meta failed: ${e?.message || e}`));
 
-/** Record scripts matching a request from a tab (a page load starts over); returns the active count. */
+/** Record scripts with a network route matching a request from a tab (a page load starts over; the pipeline redraws it); returns the active count. */
 function noteRequestForBadge(tabId: number, url: string, newPage = false): number {
-    return badge.note(tabId, url, newPage);
+    const before = badge.count(tabId);
+    const n = badge.note(tabId, url, newPage);
+    if (newPage) saveBadge();
+    else if (n !== before) {
+        saveBadge();
+        tabsGet(tabId).then((tab) => updateTabBadge(tabId, tab?.url));
+    }
+    return n;
 }
+// page code ran (or failed) on a tab
+onScriptActivity((tabId, scriptId) => {
+    const before = badge.count(tabId);
+    if (badge.ran(tabId, scriptId) === before) return;
+    saveBadge();
+    tabsGet(tabId).then((tab) => updateTabBadge(tabId, tab?.url));
+});
+onScriptProblemsChanged(() => void updateAllTabs(false));
 
 // toolbar icon while a script change is compiled and hot-reloaded
 onBusyChange(createBusyIndicator(actionIconView()));
@@ -252,18 +285,24 @@ onBusyChange(createBusyIndicator(actionIconView()));
 // the popup asks which scripts make up the badge number on its tab
 chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
     if (msg?.type !== "activeScripts" || typeof msg.tabId !== "number") return false;
-    sendResponse(badge.ids(msg.tabId));
-    return false;
+    badgeRestored.then(() => sendResponse(badge.ids(msg.tabId)));
+    return true;
 });
 
+/** Redraw a tab's badge (`url`: the tab's page). */
 async function updateTabBadge(tabId: number, url: string | undefined): Promise<void> {
-    const n = url && /^https?:/i.test(url) ? badge.note(tabId, url) : 0;
-    await badgeSetColor("#4ec9b0", tabId);
-    await badgeSetText(n > 0 ? String(n) : "", tabId);
+    await badgeRestored;
+    const ids = url && /^https?:/i.test(url) ? badge.ids(tabId) : [];
+    const problems = ids.length ? await getScriptProblems() : new Map();
+    const names = ids.map((id) => cachedScripts.find((s) => s.id === id)?.meta.name || id);
+    const look = badgeLook(names, ids.map((id) => problems.get(id)));
+    await badgeSetColor(look.color, tabId);
+    await badgeSetText(ids.length ? String(ids.length) : "", tabId);
+    await actionSetTitle(look.title, tabId);
 }
 
-async function updateAllTabs(): Promise<void> {
-    await refreshCache();
+async function updateAllTabs(reread = true): Promise<void> {
+    if (reread) await refreshCache();
     for (const tab of await tabsQueryAll()) {
         if (tab.id !== undefined) void updateTabBadge(tab.id, tab.url);
     }

@@ -22,7 +22,7 @@ vi.mock("../src/background/engine/bypass", () => ({
 import { serveLink, serveIsoLink, pushIsoUpdate, confirmNonce, setupOverlayLinks, revalidateOverlayLinks, resetOverlayLinks, type IsoRun, type OverlayRun } from "../src/background/engine/overlayLinks";
 import { NOT_RUNNING, type RpcCall, type RpcResult } from "../src/shared/rpc";
 import { USER_SCRIPTS_OFF } from "../src/shared/userScriptsStatus";
-import { endpointPair, ISO_STORE_TAG, type Endpoint } from "../src/shared/wire";
+import { endpointPair, ISO_STORE_TAG, PAGE_STORE_TAG, type Endpoint } from "../src/shared/wire";
 
 const run = (name: string): OverlayRun => ({ name, code: "code", codeHash: "h", routes: [], params: {}, libs: [], react: false });
 let runs: Record<string, string[]> = {};
@@ -105,6 +105,40 @@ describe("overlay links (L2 per-script grants)", () => {
         // the grant isn't the overlay's
         await expect(b.call("store.sub", { name: "n" } as any, "s2")).rejects.toThrow(/aren.t reachable/);
         expect(attached).toEqual([{ all: false }]);
+    });
+
+    it("unsafe: true page-world code's stores (PAGE-tagged ops) need a page.stores grant, only for a script that opted in here", async () => {
+        let unsafe = new Set(["s3"]);
+        const asked: boolean[] = [];
+        setupOverlayLinks({ overlayRuns: async () => new Map(), unsafePageScripts: async (url, top) => (asked.push(top), url === PAGE ? unsafe : new Set()) });
+        const b = bridge();
+        const tag = PAGE_STORE_TAG + "s3";
+        await expect(b.call("store.sub", { name: "n" } as any, tag)).rejects.toThrow(/aren.t reachable/);
+        await expect(b.call("page.stores", { url: "https://evil.example/" }, "s3")).rejects.toThrow(/refused/);
+        await expect(b.call("page.stores", { url: PAGE }, undefined as any)).rejects.toThrow(/refused/);
+        // the page can forge this for any script: only the unsafe one gets in
+        await expect(b.call("page.stores", { url: PAGE }, "s1")).rejects.toThrow(/no unsafe: true page-world code/);
+        await b.call("page.stores", { url: PAGE }, "s3");
+        expect(asked).toEqual([true, true]);
+        expect(await b.call("store.sub", { name: "n" } as any, tag)).toEqual({ sub: { name: "n" }, s: "s3" });
+        await expect(b.call("store.sub", { name: "n", page: "another" } as any, tag)).rejects.toThrow(/page/);
+        // the grant reaches no other script, nor the overlay's or isolated code's tags
+        await expect(b.call("store.sub", { name: "n" } as any, PAGE_STORE_TAG + "s1")).rejects.toThrow(/aren.t reachable/);
+        await expect(b.call("store.sub", { name: "n" } as any, "s3")).rejects.toThrow(/aren.t reachable/);
+        await expect(b.call("store.sub", { name: "n" } as any, ISO_STORE_TAG + "s3")).rejects.toThrow(/aren.t reachable/);
+        expect(attached).toEqual([{ all: false }]);
+        // dropping unsafe: true revokes it
+        unsafe = new Set();
+        await revalidateOverlayLinks();
+        await expect(b.call("store.sub", { name: "n" } as any, tag)).rejects.toThrow(/aren.t reachable/);
+    });
+
+    it("page.stores in a subframe asks about that frame", async () => {
+        const asked: boolean[] = [];
+        setupOverlayLinks({ overlayRuns: async () => new Map(), unsafePageScripts: async (_url, top) => (asked.push(top), new Set(top ? [] : ["s3"])) });
+        await bridge({ frameId: 3 }).call("page.stores", { url: PAGE }, "s3");
+        await expect(bridge().call("page.stores", { url: PAGE }, "s3")).rejects.toThrow(/no unsafe/);
+        expect(asked).toEqual([false, true]);
     });
 
     it("overlay.closed and a closed link drop the grant", async () => {

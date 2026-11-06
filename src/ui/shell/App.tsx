@@ -12,7 +12,7 @@ import { Workbench } from "./Workbench";
 
 /** The Editor page. */
 export function App() {
-    // Esc closes Settings, Help and Quick Open (the conflict dialog and the checklist take theirs first)
+    // Esc closes Settings, Help and Quick Open (the conflict dialog and the export/import picker take theirs first)
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => void (e.key === "Escape" && closeDialogs());
         document.addEventListener("keydown", onKey);

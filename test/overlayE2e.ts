@@ -58,7 +58,7 @@ window.addEventListener("keydown", (e) => { if (e.altKey && e.code === "KeyP") e
         res.end(PAGE(`<script>window.__site = "SITE-7";</script>`));
         return true;
     }
-    if (url.pathname === "/ov-two" || url.pathname === "/ov-isost") {
+    if (url.pathname === "/ov-two" || url.pathname === "/ov-isost" || url.pathname === "/ov-unsafe") {
         res.writeHead(200, { "content-type": "text/html" });
         res.end(PAGE(""));
         return true;
@@ -802,6 +802,108 @@ export async function checkIsoStores(ctx: any, mgr: any, origin: string, check: 
     await a.close();
     await b.close();
     await send({ type: "deleteScript", id: "s_isost" });
+}
+
+const unsafeCode = (origin: string) => `const g = wt.globalStore("unsg", { n: 0, from: "" }, { persist: false });
+const ps = wt.pageStore("unsps", { hits: 0 });
+
+const overlay = wt.onPage({ url: "${origin}/ov-unsafe*", dom: "overlay" }, () => {
+    const out = document.body.appendChild(document.createElement("output"));
+    out.id = "uns-ov";
+    (window as any).readG = () => JSON.stringify({ n: g.n, from: g.from });
+    (window as any).bump = () => ++g.n;
+    (window as any).askPage = () => (page as any).where();
+    return { greet: (who: string) => "hi " + who + " " + g.n };
+});
+
+const page = wt.onPage({ url: "${origin}/ov-unsafe*", js: "page", unsafe: true }, () => {
+    (window as any).__unsafeSite = "SITE-UNS";
+    g.from = "page:" + location.pathname;
+    ps.hits++;
+    const out = document.body.appendChild(document.createElement("output"));
+    out.id = "uns";
+    setInterval(() => (out.value = JSON.stringify({ g: g.n, from: g.from, ps: ps.hits })), 50);
+    addEventListener("wt-uns-call", () =>
+        overlay.greet("page").then(
+            (v) => (document.body.dataset.greeted = v),
+            (e) => (document.body.dataset.greeted = "rejected: " + e.message)
+        )
+    );
+    return { where: () => (window as any).__unsafeSite + ":" + g.n };
+});
+`;
+
+const safeCode = (origin: string) => `const g = wt.globalStore("other", { secret: 1 });
+wt.onPage({ url: "${origin}/ov-unsafe*", js: "page" }, () => {
+    try {
+        document.body.dataset.safeStore = "read " + g.secret;
+    } catch (e) {
+        document.body.dataset.safeStore = (e as Error).message;
+    }
+});
+`;
+
+/**
+ * \`unsafe: true\` page-world onPage code: live stores shared with the
+ * overlay and other tabs, calls to and from the overlay; another script's
+ * page-world code still gets none, and the page can't reach that
+ * script's stores by forging the hook's messages.
+ */
+export async function checkUnsafePageStores(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
+    const t = (s: string) => `unsafe page-world code${opts.label ?? ""}: ${s}`;
+    const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
+    const saved = await send({ type: "saveScript", id: "s_uns", code: unsafeCode(origin), name: "unsafe stores.wiretrick" });
+    const saved2 = await send({ type: "saveScript", id: "s_uns2", code: safeCode(origin), name: "safe page code.wiretrick" });
+    check(t("the scripts save"), !saved?.error && !saved2?.error, saved?.error || saved2?.error);
+    await mgr.waitForTimeout(800);
+    const open = async (q: string) => {
+        const p = await ctx.newPage();
+        await p.goto(`${origin}/ov-unsafe?t=${q}`, { waitUntil: "load", timeout: 15000 });
+        return p;
+    };
+    const read = (p: any) => p.evaluate(() => JSON.parse((document.getElementById("uns") as HTMLOutputElement | null)?.value || "null")).catch(() => null);
+    const until = (p: any, ok: (v: any) => boolean) => waitFor<any>(() => read(p), (v) => !!v && ok(v), 8000);
+
+    const a = await open("A");
+    const v0 = await until(a, (v) => v.ps === 1 && v.from === "page:/ov-unsafe");
+    const site = await a.evaluate(() => (window as any).__unsafeSite);
+    check(t("runs in the page's world and uses its stores (written, read back)"), site === "SITE-UNS" && v0?.ps === 1 && v0?.from === "page:/ov-unsafe", JSON.stringify({ site, v0 }));
+    const g0 = v0?.g ?? 0;
+    const f = await overlayFrame(a, "#uns-ov");
+    const seen = f ? await waitFor<string>(() => f.evaluate(() => (window as any).readG()).catch(() => ""), (v) => v.includes("page:/ov-unsafe"), 8000) : "";
+    check(t("its write reaches the overlay"), seen === JSON.stringify({ n: g0, from: "page:/ov-unsafe" }), seen);
+    await f?.evaluate(() => (window as any).bump()).catch(() => null);
+    const v1 = await until(a, (v) => v.g === g0 + 1);
+    check(t("the overlay's write shows up live"), v1?.g === g0 + 1, JSON.stringify(v1));
+    await a.evaluate(() => dispatchEvent(new CustomEvent("wt-uns-call")));
+    const greeted = await waitFor<string>(() => a.evaluate(() => document.body.dataset.greeted || ""), (v) => !!v, 8000);
+    check(t("it calls the overlay"), greeted === `hi page ${g0 + 1}`, greeted);
+    const answered = f ? await f.evaluate(() => (window as any).askPage()).catch((e: any) => "rejected: " + e) : "";
+    check(t("the overlay calls it"), answered === `SITE-UNS:${g0 + 1}`, answered);
+    const safeErr = await waitFor<string>(() => a.evaluate(() => document.body.dataset.safeStore || ""), (v) => !!v, 8000);
+    check(t("another script's page-world code still gets no stores, and is told about unsafe: true"), /page-world code/.test(safeErr) && safeErr.includes("add unsafe: true"), safeErr);
+    // the page forges the hook's link: the other script's stores stay out of reach
+    const forged = await a.evaluate(
+        () =>
+            new Promise<string>((r) => {
+                const id = 987654321;
+                addEventListener("message", (e) => {
+                    const d = e.data;
+                    if (d?.source !== "res-override-bridge" || d.kind !== "wire") return;
+                    for (const m of Array.isArray(d.msg) ? d.msg : [d.msg]) if (m?.t === "res" && m.id === id) r(m.ok ? "granted" : m.e.message);
+                });
+                postMessage({ source: "res-override-hook", kind: "wire", msg: { v: 1, t: "req", id, op: "store.sub", s: "s_uns2", a: { name: "other" } } }, location.origin);
+                setTimeout(() => r("no answer"), 5000);
+            })
+    );
+    check(t("a forged store op for a script without unsafe: true is refused"), /aren't reachable/.test(forged), forged);
+    const b = await open("B");
+    const vb = await until(b, (v) => v.ps === 1);
+    check(t("another tab: the same global store, its own page copy"), vb?.g === g0 + 1 && vb?.ps === 1, JSON.stringify(vb));
+    await a.close();
+    await b.close();
+    await send({ type: "deleteScript", id: "s_uns" });
+    await send({ type: "deleteScript", id: "s_uns2" });
 }
 
 /**

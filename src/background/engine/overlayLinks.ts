@@ -23,7 +23,7 @@
  * overlay, for whichever script the Editor names, at a URL it picks.
  */
 import { onBridgeConnect, type BridgeLink } from "./bridgePorts";
-import { endpointPair, portEndpoint, ISO_STORE_TAG, type Endpoint, type IsoInit, type OverlayInit, type WireOps } from "../../shared/wire";
+import { endpointPair, portEndpoint, ISO_STORE_TAG, PAGE_STORE_TAG, type Endpoint, type IsoInit, type OverlayInit, type WireOps } from "../../shared/wire";
 import { isRpcCall, isRpcResult, NOT_RUNNING, RPC_TIMEOUT_MS, type RpcCall, type RpcResult } from "../../shared/rpc";
 import { USER_SCRIPTS_OFF } from "../../shared/userScriptsStatus";
 import { contextTag, type ScriptLogLevel } from "../../shared/scriptLog";
@@ -114,6 +114,8 @@ export interface OverlayLinkDeps {
     isoRuns?(url: string, top: boolean): Promise<Map<string, IsoRun>>;
     /** MV2: the scripts with isolated onPage code for a frame's URL (the bridge runs it) */
     isoScripts?(url: string, top: boolean): Promise<Set<string>>;
+    /** the scripts whose page-world code for a frame's URL is `unsafe: true` (may use its stores) */
+    unsafePageScripts?(url: string, top: boolean): Promise<Set<string>>;
     /** chrome.userScripts can't run (the overlay's calls into isolated code say so) */
     userScriptsOff?(): Promise<boolean>;
     storageGet?(s: string, key: string): Promise<any>;
@@ -128,6 +130,8 @@ export interface OverlayLinkDeps {
 let overlayRuns: (url: string) => Promise<Map<string, OverlayRun>> = async () => new Map();
 let deps: OverlayLinkDeps = { overlayRuns };
 const grants = new Map<BridgeLink, Map<string, Grant>>();
+/** each bridge's `page.stores` grants (revalidated when scripts change: dropping `unsafe: true` revokes them) */
+const pageGrantsOf = new Map<BridgeLink, Map<string, { page: string; url: string; store: Endpoint | null }>>();
 let installed = false;
 
 export const USER_SCRIPT_PORT = "wt-user-script";
@@ -240,6 +244,14 @@ export async function revalidateOverlayLinks(): Promise<void> {
                 mine.delete(s);
             }
         }
+    for (const [link, pg] of pageGrantsOf)
+        for (const [s, g] of [...pg]) {
+            const ok = await (deps.unsafePageScripts?.(g.url, link.frameId === 0) ?? Promise.resolve(new Set<string>())).catch(() => new Set<string>());
+            if (!ok.has(s) && pg.get(s) === g) {
+                g.store?.close("its page-world code is no longer unsafe: true here");
+                pg.delete(s);
+            }
+        }
 }
 
 export function serveLink(link: BridgeLink): void {
@@ -256,29 +268,49 @@ export function serveLink(link: BridgeLink): void {
         return g;
     };
     /** MV2: the scripts whose isolated onPage code (run by this bridge) may use their stores */
-    const isoGrants = new Map<string, { page: string; store: Endpoint | null }>();
+    const isoGrants = new Map<string, { page: string; url?: string; store: Endpoint | null }>();
+    /** the scripts whose `unsafe: true` page-world code in this frame may use their stores (the page can then too) */
+    const pageGrants = new Map<string, { page: string; url: string; store: Endpoint | null }>();
+    pageGrantsOf.set(link, pageGrants);
     link.ep.onClose(() => {
-        for (const g of isoGrants.values()) g.store?.close("the bridge went away");
+        for (const g of [...isoGrants.values(), ...pageGrants.values()]) g.store?.close("the bridge went away");
         isoGrants.clear();
+        pageGrants.clear();
+        pageGrantsOf.delete(link);
     });
-    // the overlay's ops come tagged `s`, isolated code's `ISO_STORE_TAG + s`; patches go back tagged the same
+    // the overlay's ops come tagged `s`, isolated code's `ISO_STORE_TAG + s`, unsafe page code's `PAGE_STORE_TAG + s`; patches go back tagged the same
     serveStoreOps(link.ep, (tag) => {
         if (tag === undefined) return undefined;
-        const iso = tag.startsWith(ISO_STORE_TAG);
-        const s = iso ? tag.slice(ISO_STORE_TAG.length) : tag;
-        const g = iso ? isoGrants.get(s) : mine.get(s);
+        const [grantsOf, s] = tag.startsWith(ISO_STORE_TAG)
+            ? [isoGrants, tag.slice(ISO_STORE_TAG.length)]
+            : tag.startsWith(PAGE_STORE_TAG)
+              ? [pageGrants, tag.slice(PAGE_STORE_TAG.length)]
+              : [mine, tag];
+        const g = grantsOf.get(s);
         return g && { s, page: g.page, link: () => (g.store && !g.store.closed ? g.store : (g.store = ownerLink(link.ep, tag))) };
     });
+    const grantStores = async (op: string, to: Map<string, { page: string; url?: string; store: Endpoint | null }>, s: string, url: string): Promise<{}> => {
+        const page = await pageOfFrame(link.tabId, link.frameId, link.port);
+        if (link.ep.closed) throw new Error(`${op}: closed`);
+        const old = to.get(s);
+        if (old?.page === page) {
+            old.url = url;
+            return {};
+        }
+        old?.store?.close("the page changed");
+        to.set(s, { page, url, store: null });
+        return {};
+    };
     link.ep.handle("iso.stores", async ({ url }, s) => {
         if (__MV3__ || s === undefined || typeof url !== "string" || !sameOrigin(url, link.port.sender?.url)) throw new Error("iso.stores: refused");
         if (!(await deps.isoScripts?.(url, link.frameId === 0))?.has(s)) throw new Error("iso.stores: this script has no isolated onPage code here");
-        const page = await pageOfFrame(link.tabId, link.frameId, link.port);
-        if (link.ep.closed) throw new Error("iso.stores: closed");
-        const old = isoGrants.get(s);
-        if (old?.page === page) return {};
-        old?.store?.close("the page changed");
-        isoGrants.set(s, { page, store: null });
-        return {};
+        return grantStores("iso.stores", isoGrants, s, url);
+    });
+    // the page can drive this (it can forge the hook's messages to the bridge): only a script that opted in with unsafe: true for this URL
+    link.ep.handle("page.stores", async ({ url }, s) => {
+        if (s === undefined || typeof url !== "string" || !sameOrigin(url, link.port.sender?.url)) throw new Error("page.stores: refused");
+        if (!(await deps.unsafePageScripts?.(url, link.frameId === 0))?.has(s)) throw new Error("page.stores: this script has no unsafe: true page-world code here");
+        return grantStores("page.stores", pageGrants, s, url);
     });
 
     link.ep.handle("overlay.open", async ({ nonce, url }, s) => {
@@ -567,6 +599,7 @@ export function pushIsoUpdate(): void {
 /** tests: forget every link */
 export function resetOverlayLinks(): void {
     grants.clear();
+    pageGrantsOf.clear();
     isoLinks.clear();
     topBridges.clear();
     for (const r of relayed.values()) clearTimeout(r.timer);

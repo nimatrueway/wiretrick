@@ -66,10 +66,30 @@ describe("wt.onPage js / dom / unsafe", () => {
         expect(labels).toEqual(["onPage #1@1", "onPage #5@5", "onPage #2@2", "onPage #3@3", "onPage #4@4"]);
     });
 
-    it("js: \"page\" with dom: \"overlay\" needs unsafe: true; unsafe applies to nothing else", () => {
+    it("js: \"page\" with dom: \"overlay\" needs unsafe: true; unsafe applies only to js: \"page\"", () => {
         expect(compileScript(`wt.onPage({ url: "*", js: "page", dom: "overlay" }, () => {});`).error).toMatch(/wt\.onPage: js: "page" with dom: "overlay" .*unsafe: true/);
-        expect(compileScript(`wt.onPage({ url: "*", dom: "overlay", unsafe: true }, () => {});`).error).toBeNull();
-        expect(compileScript(`wt.onPage({ url: "*", js: "page", unsafe: true }, () => {});`).error).toMatch(/"unsafe" applies only to js: "page" with dom: "overlay"/);
+        const iso = /"unsafe" applies only to js: "page" \(it opens the script's stores and overlay to page-world code\)/;
+        expect(compileScript(`wt.onPage({ url: "*", dom: "overlay", unsafe: true }, () => {});`).error).toMatch(iso);
+        expect(compileScript(`wt.onPage({ url: "*", unsafe: true }, () => {});`).error).toMatch(iso);
+        expect(compileScript(`wt.onPage({ url: "*", js: "isolated", unsafe: true }, () => {});`).error).toMatch(iso);
+    });
+
+    it("unsafe: true marks js: \"page\" routes of either dom, and nothing else", () => {
+        const c = compileScript(
+            [
+                `wt.onPage({ url: "*", js: "page", unsafe: true }, () => {});`,
+                `wt.onPage({ url: "*", js: "page", dom: "overlay", unsafe: true }, () => {});`,
+                `wt.onPage({ url: "*", js: "page", unsafe: false }, () => {});`,
+                `wt.onPage({ url: "*", js: "page" }, () => {});`,
+            ].join("\n")
+        );
+        expect(c.error).toBeNull();
+        expect(c.meta.routes.map((r) => [r.kind, pageWorld(r), r.unsafe])).toEqual([
+            ["onDocument", "page", true],
+            ["onDocument", "page", undefined],
+            ["onDocument", "page", undefined],
+            ["onOverlay", "page", true],
+        ]);
     });
 
     it("rejects bad values, and the options on network routes", () => {
@@ -127,7 +147,7 @@ describe("page shim worlds", () => {
         await expect(shim().wt.fetch("/")).rejects.toThrow(/wt\.fetch/);
     });
 
-    it("isolated code gets the stores it's given; page-world code never does", () => {
+    it("isolated code gets the stores it's given; page-world code only when given them (unsafe: true)", () => {
         const made: string[] = [];
         const stores = {
             store: (name: string, initial: object, persist: boolean | string[]) => (made.push(`g:${name}:${JSON.stringify(persist)}`), { ...initial }),
@@ -139,9 +159,27 @@ describe("page shim worlds", () => {
         expect(made).toEqual(['g:a:["n"]', "p:b"]);
         expect(() => iso.wt.pageStore("a", {})).toThrow(/already has a store named "a"/);
         expect(() => iso.wt.globalStore("c", [])).toThrow(/initial must be an object/);
-        const main = makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined }, world: "page", stores });
-        expect(() => main.wt.pageStore("b", { m: 2 }).m).toThrow(/page-world code.*drop js: "page"/);
+        const main = makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined }, world: "page" });
+        expect(() => main.wt.pageStore("b", { m: 2 }).m).toThrow(/page-world code.*drop js: "page".*add unsafe: true to its js: "page" routes/);
         expect(made.length).toBe(2);
+        const unsafe = makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined }, world: "page", stores });
+        expect(unsafe.wt.globalStore("u", { k: 3 }).k).toBe(3);
+        expect(made).toEqual(['g:a:["n"]', "p:b", "g:u:true"]);
+    });
+
+    it("page-world overlay handles reach the overlay only when given a way to (unsafe: true)", async () => {
+        await expect(shim().wt.onPage({ url: "*", dom: "overlay" }, () => {}).ping()).rejects.toThrow(/page-world onPage code can't call the overlay.*add unsafe: true/);
+        const asked: string[] = [];
+        const unsafe = makePageShim({
+            params: {},
+            log: () => {},
+            storage: { get: () => undefined, set: () => undefined },
+            world: "page",
+            overlay: (h) => ((asked.push(h), { ping: async () => "pong" }) as any),
+        });
+        const ov = unsafe.wt.onPage({ url: "*", dom: "overlay" }, () => {});
+        await expect(ov.ping()).resolves.toBe("pong");
+        expect(asked).toEqual(["overlay:0"]);
     });
 });
 

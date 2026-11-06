@@ -44,11 +44,18 @@ export interface PageShimOptions {
     exposer?: Exposer;
     /** why the other world's handles don't answer here (default: not running) */
     otherWorld?: string;
-    /** the isolated world in the top frame: `"overlay:N"` → a live handle */
+    /**
+     * `"overlay:N"` → its handle: the isolated world, and `unsafe: true`
+     * page-world code (absent in page world: calls are rejected)
+     */
     overlay?: (h: string) => any;
-    /** page world: a call into the overlay (rejected; its error has the caller's stack) */
+    /** page world without `overlay`: a call into the overlay (rejected; its error has the caller's stack) */
     onMainWorldCall?: (e: Error) => void;
-    /** the isolated world: the script's store replicas (`wt.pageStore`: this page's copy); page world: never (the page could read and forge them) */
+    /**
+     * the script's store replicas (`wt.pageStore`: this page's copy): the
+     * isolated world, and `unsafe: true` page-world code (the page can read
+     * and forge them); absent: using a store throws NO_STORE
+     */
     stores?: PageStores;
 }
 
@@ -57,7 +64,7 @@ export interface PageStores {
     pageStore(name: string, initial: object): object;
 }
 
-export const NO_STORE = 'wt.globalStore and wt.pageStore aren\'t available in page-world code (the page could read and forge them) — use them in isolated onPage code (the default: drop js: "page"; read the page with ctx.evaluate) or the overlay';
+export const NO_STORE = 'wt.globalStore and wt.pageStore aren\'t available in page-world code (the page could read and forge them) — use them in isolated onPage code (the default: drop js: "page"; read the page with ctx.evaluate) or the overlay — or, accepting that the page can then read and forge this script\'s stores, add unsafe: true to its js: "page" routes';
 const fail = (): never => {
     throw new Error(NO_STORE);
 };
@@ -95,11 +102,10 @@ export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDocumentHa
         return inertRemote("page functions are called from this script's overlay, not from page code");
     };
     const overlayHandle = (h: string) => {
-        if (world === "page") return inertRemote(REMOTE_MAIN_WORLD, o.onMainWorldCall);
-        return o.overlay ? o.overlay(h) : inertRemote(TOP_FRAME_ONLY);
+        if (o.overlay) return o.overlay(h);
+        return world === "page" ? inertRemote(REMOTE_MAIN_WORLD, o.onMainWorldCall) : inertRemote(TOP_FRAME_ONLY);
     };
-    // the isolated world only: page code must never get a store
-    const stores = world === "isolated" ? o.stores : undefined;
+    const stores = o.stores;
     const names = new Map<string, string>();
     const parsed = (key: string, def: ParamDef | undefined) => (def && typeof def === "object" ? parseParamValue(key, def, o.params[key]) : o.params[key]);
     const wt = {
@@ -142,7 +148,7 @@ export function domHandlersFor(dom: PageDocumentHandler[], url: string, exposer?
 }
 
 /** run a handler; what it returns is what its handle exposes (a throw: `not running`, rethrown) */
-export function firePageHandler(d: PageDocumentHandler, ctx: any, exposer?: Exposer): void {
+export function firePageHandler(d: PageDocumentHandler, ctx: any, exposer?: Exposer, onError?: (e: unknown) => void): void {
     let out: unknown;
     try {
         out = d.fn(ctx);
@@ -150,6 +156,8 @@ export function firePageHandler(d: PageDocumentHandler, ctx: any, exposer?: Expo
         exposer?.fail(d.h);
         throw e;
     }
+    // an async handler's rejection: an error like a thrown one
+    if (onError && out && typeof (out as any).then === "function") (out as Promise<unknown>).then(undefined, onError);
     exposer?.expose(d.h, out);
 }
 

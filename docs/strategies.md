@@ -163,6 +163,12 @@ first navigation included, with no banner and no helper.
 | `onRequest` → `{ headers: { set, remove } }` | sets / removes request headers |
 | `onResponseHeaders` → `{ headers: { set, remove } }` | sets / removes response headers |
 
+Code in the handler runs at that one-time run only, never for a request:
+the Problems view warns about calls that look meant to run per request —
+`console.*`, `wt.log`, `fetch`/`wt.fetch`, timers and store writes. To log
+or count requests, use a per-request strategy (`extension`, `debugger` or
+`helper`).
+
 The route works as everywhere: the full URL pattern syntax (named groups,
 optional parts, custom regular expressions, wildcards), `methods` and
 `resourceTypes`. Scripts stack as usual: the first script's block or

@@ -89,6 +89,15 @@ export function badgeSetColor(color: string, tabId?: number): Promise<void> {
     });
 }
 
+export function actionSetTitle(title: string, tabId?: number): Promise<void> {
+    return new Promise((resolve) => {
+        (chrome.browserAction ?? chrome.action).setTitle(tabId !== undefined ? { title, tabId } : { title }, () => {
+            void (chrome.runtime as any).lastError;
+            resolve();
+        });
+    });
+}
+
 export function storageGet(keys: string | string[] | null): Promise<Record<string, any>> {
     return new Promise((resolve) => {
         chrome.storage.local.get(keys as any, (d) => {

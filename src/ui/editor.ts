@@ -15,19 +15,20 @@ import { MANIFEST_FILE } from "../shared/packageMetadata";
 import { entryStem } from "../shared/packageModel";
 import { localPackage } from "../shared/localPackage";
 import { writeZip } from "../shared/zip";
+import { buildExportZip, emptyFolders, EXPORT_ZIP_NAME, importedSettingsDoc, readExportZip, settingsForScripts, type ExportContents } from "../shared/exportZip";
 import { PACKAGE_ORIGIN } from "../shared/packageImports";
 import { isInFolder, movedPath } from "../shared/folders";
 import { baseName, folderPathOfRowId, folderRowId, isFolderRowId, movedCollapsed, type TreeRow } from "./explorerTree";
 import { dataPathOfDecl } from "./jsonTypes";
-import { dialogs, openHelp, openSettings, pickRows, resolveConflict } from "./state/dialogs";
+import { dialogs, openHelp, openSettings, pickItems, resolveConflict } from "./state/dialogs";
 import { folderStateText, setHelperStatus, settings } from "./state/settings";
 import { watchTheme, type Theme } from "./theme";
 import * as fsBridge from "./fsBridge";
 import { cleanScriptName, isTsxName, scriptNameProblem, scriptFileName, scriptFileKey, scriptNameFromFile, uniqueScriptName, dataFilePathProblem, folderPathProblem } from "../shared/scriptName";
 import { jsxElementAt } from "../shared/builtinSpecs";
-import { buildBundle, parseBundleText, bundleSettingsDoc, pickBundle, vscodeTargetPath, editorLaunchUrl, launchAppName, type LaunchMode } from "./bundle";
+import { vscodeTargetPath, editorLaunchUrl, launchAppName, type LaunchMode } from "./bundle";
 import { computeDirty } from "./dirtyState";
-import { parseSettings, SETTINGS_FILE, isBodyCap, BODY_CAP_KEY, DEFAULT_BODY_CAP, type SettingsDoc } from "../shared/settingsYaml";
+import { parseSettings, SETTINGS_FILE, isBodyCap, BODY_CAP_KEY, DEFAULT_BODY_CAP } from "../shared/settingsYaml";
 import { createNetStore, type NetStore } from "./network/netStore";
 import { installTooltips } from "./tooltip";
 import type { ScriptHealthInput } from "../shared/scriptHealth";
@@ -1858,66 +1859,56 @@ function openInEditor(): void {
     chrome.runtime.sendMessage({ type: "debugLog", entry: { at: Date.now(), src: "editor", msg, level: "info" } }, () => void chrome.runtime.lastError);
 }
 
-// ---- import / export: both open a checklist so any subset can travel ----
-const settingsRow = (g: Record<string, any>) => ({
-    label: "Settings (globals)",
-    detail: Object.entries(g).map(([k, v]) => `${k}: ${v}`).join(", "),
-});
-// rows after the settings row: scripts, then data files (`data`, name = path)
-const importsWarning = (names: { name: string; code: string; data?: boolean }[], offset: number) => (checked: number[]) => {
-    const picked = checked.filter((i) => i >= offset).map((i) => i - offset);
-    const missing = missingImports(picked, names);
+// ---- import / export: a zip laid out like the scripts folder; both open a picker so any subset can travel ----
+// the picker's items start with the scripts, then the data files (`data`, name = path)
+const importsWarning = (names: { name: string; code: string; data?: boolean }[]) => (checked: number[]) => {
+    const missing = missingImports(
+        checked.filter((i) => i < names.length),
+        names
+    );
     if (!missing.length) return null;
     return {
         text: `selected scripts import ${missing.map((i) => `"${names[i].name}"`).join(", ")}, which ${missing.length > 1 ? "aren't" : "isn't"} selected`,
-        fix: missing.map((i) => i + offset),
+        fix: missing,
     };
 };
-/** Export…: pick what goes into the YAML bundle, then download it */
+/** Export…: pick what goes into the zip, then download it */
 async function exportBundle(): Promise<void> {
-    // scripts + settings travel together in one YAML document; the
-    // parsed settings.yaml carries globals AND per-script param values
     const { text } = await send({ type: "getSettingsYaml", text: settingsModel?.getValue() });
-    let doc: SettingsDoc = { settings: null, params: {} };
-    try {
-        doc = parseSettings(text);
-    } catch {
-        /* unreachable: getSettingsYaml always returns parsable text */
-    }
-    const globals = doc.settings && Object.keys(doc.settings).length ? doc.settings : null;
-    const offset = globals ? 1 : 0;
     const dataFiles: { path: string; text: string }[] = (await send({ type: "listDataFiles" })) || [];
     const folders: string[] = (await send({ type: "listFolders" })) || [];
     const list = [
-        ...scripts.map((s) => ({ name: s.meta.name, code: s.code, enabled: s.enabled as boolean | undefined, data: false })),
-        ...dataFiles.map((d) => ({ name: d.path, code: d.text, enabled: undefined, data: true })),
+        ...scripts.map((s) => ({ name: s.meta.name, code: s.code, data: false })),
+        ...dataFiles.map((d) => ({ name: d.path, code: d.text, data: true })),
     ];
-    const chosen = await pickRows({
+    const empty = emptyFolders(folders, [...scripts.map((s) => scriptFileName(s.meta.name)), ...dataFiles.map((d) => d.path)]);
+    const settingsAt = list.length;
+    const chosen = await pickItems({
         title: "Export",
-        intro: "Pick what goes into the YAML bundle. Each script carries its code, enabled state and non-default params; each data file its path and text.",
-        rows: [
-            ...(globals ? [settingsRow(globals)] : []),
-            ...list.map((s) => ({ label: s.name, badge: s.data ? "data file" : s.enabled ? undefined : "disabled" })),
+        intro: "Pick what goes into the zip. It's laid out like the scripts folder: scripts and data files by path, and settings.yaml with the globals and the picked scripts' enabled state and params.",
+        items: [
+            ...scripts.map((s) => ({ path: scriptFileName(s.meta.name), kind: "script" as const, badge: s.meta.active !== false && !s.enabled ? "disabled" : undefined })),
+            ...dataFiles.map((d) => ({ path: d.path, kind: "data" as const })),
+            { path: SETTINGS_FILE, kind: "settings" as const, detail: "globals + the picked scripts' enabled state and params" },
+            ...empty.map((f) => ({ path: f, kind: "folder" as const, detail: "empty folder" })),
         ],
         confirm: "Export",
-        warn: importsWarning(list, offset),
+        warn: importsWarning(list),
     });
     if (!chosen) return;
-    const rows = chosen.filter((i) => i >= offset).map((i) => list[i - offset]);
-    const picked = rows.filter((r) => !r.data).map(({ name, code, enabled }) => ({ name, code, enabled }));
-    const pickedData = rows.filter((r) => r.data).map((r) => ({ path: r.name, text: r.code }));
-    // empty folders travel too (the others come with their contents)
-    const paths = list.map((r) => r.name.toLowerCase());
-    const empty = folders.filter((f) => !paths.some((p) => p.startsWith(f.toLowerCase() + "/")));
-    const payload = buildBundle({ ...doc, settings: globals && chosen.includes(0) ? globals : null }, picked, pickedData, empty);
-    const blob = new Blob([payload], { type: "text/yaml" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = picked.length === 1 && chosen.length === 1 ? `${picked[0].name.replace(/.*\//, "")}.wiretrick.yaml` : "wiretrick-export.yaml";
-    a.click();
-    URL.revokeObjectURL(url);
-    status(`exported ${picked.length} script(s)${pickedData.length ? ` + ${pickedData.length} data file(s)` : ""}${offset && chosen.includes(0) ? " + settings" : ""} ✓`);
+    const picked = chosen.filter((i) => i < scripts.length).map((i) => list[i]);
+    const pickedData = chosen.filter((i) => i >= scripts.length && i < settingsAt).map((i) => ({ path: list[i].name, text: list[i].code }));
+    const withSettings = chosen.includes(settingsAt);
+    const pickedFolders = chosen.filter((i) => i > settingsAt).map((i) => empty[i - settingsAt - 1]);
+    const zip = buildExportZip({
+        settings: withSettings ? settingsForScripts(text, picked.map((s) => s.name)) : null,
+        scripts: picked,
+        dataFiles: pickedData,
+        folders: pickedFolders,
+    });
+    download(picked.length === 1 && chosen.length === 1 ? `${baseName(picked[0].name)}.zip` : EXPORT_ZIP_NAME, zip as BlobPart, "application/zip");
+    const parts = [plural(picked.length, "script"), ...(pickedData.length ? [plural(pickedData.length, "data file")] : []), ...(pickedFolders.length ? [plural(pickedFolders.length, "folder")] : []), ...(withSettings ? ["settings"] : [])];
+    status(`exported ${parts.join(" + ")} ✓`);
 }
 // an imported script replaces the existing script of the same name
 const saveImported = async (item: { code: string; name?: string; enabled?: boolean }) => {
@@ -1926,82 +1917,16 @@ const saveImported = async (item: { code: string; name?: string; enabled?: boole
     await send({ type: "saveScript", id: existing?.id ?? uuid(), code: item.code, name: item.name, enabled: item.enabled });
 };
 const existsBadge = (name?: string) => (name && scripts.some((s) => scriptFileKey(s.meta.name) === scriptFileKey(name)) ? "replaces existing" : "new");
-/** Import…: a bundle (pick what of it to import) or a single script file */
+/** Import…: a zip (pick what of it to import) or a single script file */
 function importBundle(): void {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".yaml,.yml,.ts,.tsx,.js";
+    input.accept = ".zip,.ts,.tsx,.js";
     input.onchange = async () => {
         const file = input.files?.[0];
         if (!file) return;
+        if (/\.zip$/i.test(file.name)) return void (await importZip(file));
         const text = await file.text();
-        if (/\.ya?ml$/i.test(file.name)) {
-            const full = parseBundleText(text);
-            if (full) {
-                const offset = full.settings ? 1 : 0;
-                const fullData = full.dataFiles ?? [];
-                const existingData: { id: string; path: string }[] = fullData.length ? (await send({ type: "listDataFiles" })) || [] : [];
-                const dataFileIn = (path: string) => existingData.find((d) => d.path.toLowerCase() === path.toLowerCase());
-                const named = [
-                    ...full.scripts.map((s, i) => ({ name: s.name ?? `script ${i + 1}`, code: s.code, data: false })),
-                    ...fullData.map((d) => ({ name: d.path, code: d.text, data: true })),
-                ];
-                const chosen = await pickRows({
-                    title: `Import ${file.name}`,
-                    intro: "Pick what to import. A script (data file) replaces the existing script (data file) of the same name (path).",
-                    rows: [
-                        ...(full.settings ? [settingsRow(full.settings)] : []),
-                        ...full.scripts.map((s, i) => ({
-                            label: named[i].name,
-                            badge: existsBadge(s.name),
-                            detail: s.params ? `params: ${Object.keys(s.params!).join(", ")}` : undefined,
-                        })),
-                        ...fullData.map((d) => ({ label: d.path, badge: dataFileIn(d.path) ? "replaces existing" : "new data file" })),
-                    ],
-                    confirm: "Import",
-                    warn: importsWarning(named, offset),
-                });
-                if (!chosen) return;
-                const rows = chosen.filter((i) => i >= offset).map((i) => i - offset);
-                const bundle = pickBundle(
-                    full,
-                    offset > 0 && chosen.includes(0),
-                    rows.filter((i) => i < full.scripts.length),
-                    rows.filter((i) => i >= full.scripts.length).map((i) => i - full.scripts.length)
-                );
-                // folders and data files first: the scripts compile against them
-                const failed: string[] = [];
-                for (const f of bundle.folders ?? []) {
-                    const r = await send({ type: "createFolder", path: f });
-                    if (r?.error) failed.push(r.error);
-                }
-                for (const d of bundle.dataFiles ?? []) {
-                    const r = await send({ type: "saveDataFile", id: dataFileIn(d.path)?.id, path: d.path, text: d.text });
-                    if (r?.error) failed.push(r.error);
-                }
-                for (const item of bundle.scripts) await saveImported(item);
-                await refresh();
-                // settings apply through the real path (params +
-                // globals); storage.onChanged refreshes the settings UI
-                const doc = bundleSettingsDoc(bundle);
-                if (doc) {
-                    const res = await send({ type: "applySettingsDoc", doc });
-                    if (res && res.error) {
-                        status(`imported ${bundle.scripts.length} script(s); settings: ${res.error}`, "error");
-                        return;
-                    }
-                }
-                if (failed.length) {
-                    status(`imported ${bundle.scripts.length} script(s); ${failed.join("; ")}`, "error");
-                    return;
-                }
-                const nData = bundle.dataFiles?.length ?? 0;
-                status(`imported ${bundle.scripts.length} script(s)${nData ? ` + ${nData} data file(s)` : ""}${bundle.settings ? " + settings" : ""} ✓`);
-                return;
-            }
-            status('not a Wiretrick export (missing "format: wiretrick-bundle")', "error");
-            return;
-        }
         const base = cleanScriptName(file.name.replace(/\.ts$/i, "")) || "Imported script";
         const name = uniqueScriptName(base, scripts.map((s) => s.meta.name));
         await send({ type: "saveScript", id: uuid(), code: text, name });
@@ -2009,6 +1934,87 @@ function importBundle(): void {
         await refresh();
     };
     input.click();
+}
+async function importZip(file: File): Promise<void> {
+    let zip: ExportContents;
+    try {
+        zip = await readExportZip(await file.arrayBuffer());
+    } catch (e) {
+        status(`${file.name}: not a zip (${(e as Error).message})`, "error");
+        return;
+    }
+    if (!zip.scripts.length && !zip.dataFiles.length && !zip.folders.length && zip.settings === null) {
+        status(`${file.name}: no scripts, data files or settings.yaml in it`, "error");
+        return;
+    }
+    const existingData: { id: string; path: string }[] = zip.dataFiles.length ? (await send({ type: "listDataFiles" })) || [] : [];
+    const dataFileIn = (path: string) => existingData.find((d) => d.path.toLowerCase() === path.toLowerCase());
+    const existingFolders: string[] = zip.folders.length ? (await send({ type: "listFolders" })) || [] : [];
+    let settingsError = "";
+    if (zip.settings !== null) {
+        try {
+            parseSettings(zip.settings);
+        } catch (e) {
+            settingsError = (e as Error).message;
+        }
+    }
+    const named = [...zip.scripts.map((s) => ({ name: s.name, code: s.code, data: false })), ...zip.dataFiles.map((d) => ({ name: d.path, code: d.text, data: true }))];
+    const settingsAt = zip.settings === null ? -1 : named.length;
+    const foldersAt = named.length + (zip.settings === null ? 0 : 1);
+    const ignored = zip.ignored.length ? ` ${plural(zip.ignored.length, "other file")} in it ${zip.ignored.length === 1 ? "isn't" : "aren't"} a script or data file and won't be imported.` : "";
+    const chosen = await pickItems({
+        title: `Import ${file.name}`,
+        intro: `Pick what to import. A script (data file) replaces the existing script (data file) at the same path; settings.yaml applies the globals and the picked scripts' enabled state and params.${ignored}`,
+        items: [
+            ...zip.scripts.map((s) => ({ path: s.file, kind: "script" as const, badge: existsBadge(s.name) })),
+            ...zip.dataFiles.map((d) => ({ path: d.path, kind: "data" as const, badge: dataFileIn(d.path) ? "replaces existing" : "new" })),
+            ...(zip.settings === null
+                ? []
+                : [settingsError ? { path: SETTINGS_FILE, kind: "settings" as const, badge: "YAML error", detail: settingsError, checked: false } : { path: SETTINGS_FILE, kind: "settings" as const }]),
+            ...zip.folders.map((f) => ({ path: f, kind: "folder" as const, badge: existingFolders.some((e) => e.toLowerCase() === f.toLowerCase()) ? "exists" : "new" })),
+        ],
+        confirm: "Import",
+        warn: importsWarning(named),
+    });
+    if (!chosen) return;
+    const pickedScripts = chosen.filter((i) => i < zip.scripts.length).map((i) => zip.scripts[i]);
+    const pickedData = chosen.filter((i) => i >= zip.scripts.length && i < named.length).map((i) => zip.dataFiles[i - zip.scripts.length]);
+    const pickedFolders = chosen.filter((i) => i >= foldersAt).map((i) => zip.folders[i - foldersAt]);
+    const withSettings = settingsAt >= 0 && chosen.includes(settingsAt);
+    // folders and data files first: the scripts compile against them
+    const failed: string[] = [];
+    for (const f of pickedFolders) {
+        if (existingFolders.some((e) => e.toLowerCase() === f.toLowerCase())) continue;
+        const r = await send({ type: "createFolder", path: f });
+        if (r?.error) failed.push(r.error);
+    }
+    for (const d of pickedData) {
+        const r = await send({ type: "saveDataFile", id: dataFileIn(d.path)?.id, path: d.path, text: d.text });
+        if (r?.error) failed.push(r.error);
+    }
+    for (const s of pickedScripts) await saveImported({ name: s.name, code: s.code });
+    await refresh();
+    const parts = [plural(pickedScripts.length, "script"), ...(pickedData.length ? [plural(pickedData.length, "data file")] : []), ...(pickedFolders.length ? [plural(pickedFolders.length, "folder")] : [])];
+    // settings apply through the real path (globals + the scripts'
+    // enabled state and params); storage.onChanged refreshes the settings UI
+    if (withSettings) {
+        let res: any;
+        try {
+            res = await send({ type: "applySettingsDoc", doc: importedSettingsDoc(zip.settings!, pickedScripts.map((s) => s.name)) });
+        } catch (e) {
+            res = { error: (e as Error).message };
+        }
+        if (res && res.error) {
+            status(`imported ${parts.join(" + ")}; settings: ${res.error}`, "error");
+            return;
+        }
+        parts.push("settings");
+    }
+    if (failed.length) {
+        status(`imported ${parts.join(" + ")}; ${failed.join("; ")}`, "error");
+        return;
+    }
+    status(`imported ${parts.join(" + ")} ✓`);
 }
 
 // ---- wiring ----

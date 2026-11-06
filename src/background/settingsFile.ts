@@ -115,10 +115,10 @@ export async function applySettingsText(text: string): Promise<{ error?: string 
 }
 
 /**
- * Apply a structured settings document (import bundle path). Unlike
- * applySettingsText, the stored base text is then re-canonicalized —
- * patching the previous base when parsable — so a bundle's minimal
- * settings shape doesn't freeze the file into that shape.
+ * Apply a structured settings document (Import… of a zip's settings.yaml).
+ * Unlike applySettingsText, the stored base text is then re-canonicalized —
+ * patching the previous base when parsable — so the imported file's shape
+ * doesn't replace this one's.
  */
 export async function applySettingsDoc(doc: SettingsDoc): Promise<{ error?: string }> {
     const { globals, scripts } = await currentSettingsState();

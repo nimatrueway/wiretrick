@@ -7,6 +7,28 @@ its section below.
 
 ## [Unreleased]
 
+## [0.15.0-alpha] - 2026-11-05
+
+### Changed
+
+- A `ctx.evaluate` callback the page side can't call (its arguments aren't plain data) no longer throws into the site's code: it's the script's runtime error, in the Problems view.
+- The toolbar badge counts an `onPage` script only once its code ran on the tab — not because the page's URL matches. A `document_start` script saved while the page is open no longer counts until the next load. Network handlers still count when one of the tab's requests matches (now honoring `exclude`), and the counts survive the MV3 service worker restarting.
+- **Breaking:** `unsafe: true` now applies only to `js: "page"` routes; with `js: "isolated"` (also `dom: "overlay"` alone, where it did nothing) the script fails to compile.
+- A page-world overlay (`js: "page"`, `dom: "overlay"`, `unsafe: true`) now has the script's stores and can call its default overlay, like any `unsafe: true` code (below); an auto-update that adds `unsafe: true` still waits for review.
+- **Breaking:** Settings → Export… downloads a zip (`wiretrick-export.zip`) laid out like the synced folder — scripts and data files at their paths, empty folders, and `settings.yaml` with the globals and the exported scripts' `enabled` state and params — and Import… takes such a zip (or a zipped synced folder) or a single script file. The YAML bundle format is gone.
+
+### Added
+
+- `onPage` errors that used to show only in the browser console are now the script's runtime errors (Problems view, red badge): an async handler that rejects, a `ctx.evaluate` callback that throws, and a `ctx.evaluate` rejection the script doesn't handle.
+- The Problems view warns about code in a `rules` handler that looks meant to run per request — `console.*`, `wt.log`, `fetch`/`wt.fetch`, timers and store writes: a rules handler runs once, when scripts load, so that code never runs for a request.
+- `unsafe: true` on `js: "page"` `onPage` code (`dom: "page"` too): it gets `wt.globalStore` and `wt.pageStore` (live, persisted and synced like isolated code's) and can call the script's overlay, accepting that the site can then read and change that script's stores — never another script's — and call its overlay too. Without it, page-world code still gets neither, and the error now names this opt-in.
+- The toolbar badge turns red when one of the tab's active scripts has an error (runtime, type or rules) and amber for a route warning; the icon's tooltip lists the active scripts and marks the ones with problems.
+- The Export… and Import… dialogs show the files as a tree, with a box per folder that ticks everything in it, and a filter that narrows the tree by path.
+
+### Fixed
+
+- Chrome (MV3): only one script's isolated `onPage` code ran on a page — Chrome injects an extension file once per document, however many user-script registrations name it. Each script's registration now carries the runtime inline.
+
 ## [0.14.0-alpha] - 2026-11-05
 
 ### Removed
@@ -676,7 +698,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.14.0-alpha...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.15.0-alpha...HEAD
+[0.15.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.14.0-alpha...v0.15.0-alpha
 [0.14.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.13.0-alpha...v0.14.0-alpha
 [0.13.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.12.2-alpha...v0.13.0-alpha
 [0.12.2-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.12.1-alpha...v0.12.2-alpha

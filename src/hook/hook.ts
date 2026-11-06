@@ -12,7 +12,10 @@ import { scriptFunction } from "../shared/scriptFn";
 import { makeLibRequire, type ShippedLib } from "../shared/scriptImports";
 import { routeMatches, takesBinary, type DocumentWhen, type RouteMeta } from "../shared/route";
 import { makePageShim, domHandlersFor, scheduleDocument, firePageHandler, type PageDocumentHandler } from "../shared/pageShim";
-import { Exposer, isRpcCall, NOT_RUNNING, type RpcResult } from "../shared/rpc";
+import { Exposer, isRpcCall, NOT_RUNNING, RpcClient, TOP_FRAME_ONLY, type RpcResult } from "../shared/rpc";
+import { inertRemote } from "../shared/remote";
+import { Endpoint } from "../shared/wire";
+import { ReplicaHub, type StoreSnapshots } from "../shared/storeReplica";
 import { bodyKind, setTextTypes } from "../shared/bodyKind";
 import { readFetchBody } from "../shared/requestBody";
 import { directEvaluate, servePageEvaluate } from "../shared/pageEval";
@@ -71,7 +74,8 @@ import { createPageLayer, type PageLayer } from "./pageLayer";
     }
     /** the bridge reported the extension context dead (extension reload) */
     let dead = false;
-    let domHandlers: { scriptId: string; name: string; src: string; params?: Record<string, any> }[] = [];
+    /** `unsafe`: its page-world code here may use its stores and overlay */
+    let domHandlers: { scriptId: string; name: string; src: string; params?: Record<string, any>; unsafe?: true }[] = [];
     let libSources: ShippedLib[] = [];
     let domFired = false;
     // js: "page" overlays (pageLayer.ts), by script
@@ -146,6 +150,10 @@ import { createPageLayer, type PageLayer } from "./pageLayer";
             watchNav();
             return;
         }
+        if (data.kind === "wire") {
+            bridgeEp.receive(data.msg);
+            return;
+        }
         if (data.kind === "callResult" && pending.has(data.reqId)) {
             const resolve = pending.get(data.reqId)!;
             pending.delete(data.reqId);
@@ -161,6 +169,11 @@ import { createPageLayer, type PageLayer } from "./pageLayer";
             setTextTypes(data.textTypes);
             domHandlers = data.domHandlers || [];
             libSources = data.libs || [];
+            if (data.pageStores && typeof data.pageStores === "object") {
+                pagePrimed = data.pageStores;
+                storePage = typeof data.pageStorePage === "string" ? data.pageStorePage : "";
+                pageHub?.prime(pagePrimed);
+            }
             logUp(`status: ${active ? "active" : "inactive"}, dom=${domHandlers.length}${data.hot ? " (hot)" : ""}`, "debug");
             if (active) install();
             else if (wasActive) goDormant();
@@ -202,9 +215,12 @@ import { createPageLayer, type PageLayer } from "./pageLayer";
         // module registry over the shipped library sources and data files:
         // the page-side `require` backing ES imports ("./utils" → the script
         // named utils, "./a.json" → the data file)
-        const requireFrom = makeLibRequire(libSources, (lib, require, moduleObj) =>
-            scriptFunction(lib.src!)(makeDocumentShim(null, lib.name, lib.params || {}).wt, scriptConsole(null, lib.name), require, moduleObj, moduleObj.exports)
-        );
+        // an unsafe: true script's libraries get its stores (their own registry)
+        const requireOf = (storesOf: string | null) =>
+            makeLibRequire(libSources, (lib, require, moduleObj) =>
+                scriptFunction(lib.src!)(makeDocumentShim(null, lib.name, lib.params || {}, undefined, storesOf).wt, scriptConsole(null, lib.name), require, moduleObj, moduleObj.exports)
+            );
+        const requireFrom = requireOf(null);
         const compiledDocument: { scriptId: string; name: string; when: DocumentWhen; d: PageDocumentHandler; exposer: Exposer }[] = [];
         const layered: typeof domHandlers = [];
         let cspBlocked = false;
@@ -222,8 +238,8 @@ import { createPageLayer, type PageLayer } from "./pageLayer";
                 // require resolves the shipped libs
                 const fn = scriptFunction(d.src);
                 const moduleObj = { exports: {} as any };
-                const { wt, dom, layers } = makeDocumentShim(d.scriptId, d.name, d.params || {}, ex);
-                fn(wt, scriptConsole(d.scriptId, d.name), requireFrom(d.name), moduleObj, moduleObj.exports);
+                const { wt, dom, layers } = makeDocumentShim(d.scriptId, d.name, d.params || {}, ex, d.unsafe ? d.scriptId : null);
+                fn(wt, scriptConsole(d.scriptId, d.name), (d.unsafe ? requireOf(d.scriptId) : requireFrom)(d.name), moduleObj, moduleObj.exports);
                 for (const h of domHandlersFor(dom, location.href, ex)) compiledDocument.push({ scriptId: d.scriptId, name: d.name, when: h.when, d: h, exposer });
                 if (relayer && window === window.top && domHandlersFor(layers, location.href).length) layered.push(d);
             } catch (e: any) {
@@ -252,7 +268,7 @@ import { createPageLayer, type PageLayer } from "./pageLayer";
         const fire = ({ scriptId, name, when, d, exposer }: (typeof compiledDocument)[number]) => {
             try {
                 scriptLogUp(scriptId, "debug", scriptLogLine(name, "onPage", `running (${when}) on ${location.href} [${document.readyState}], hook injected via ${injected}`));
-                firePageHandler(d, makeCtx(location.href, "GET", { evaluate: directEvaluate }), exposer);
+                firePageHandler(d, makeCtx(location.href, "GET", { evaluate: directEvaluate }), exposer, (e) => scriptLogUp(scriptId, "error", formatScriptError(name, e, "onPage")));
                 window.postMessage({ source: HOOK_SOURCE, kind: "scriptRan", scriptId, name, api: "onPage" }, window.location.origin);
             } catch (e: any) {
                 scriptLogUp(scriptId, "error", formatScriptError(name, e, "onPage"));
@@ -288,11 +304,12 @@ import { createPageLayer, type PageLayer } from "./pageLayer";
             watchNav();
             let handlers: PageDocumentHandler[];
             try {
+                const storesOf = d.unsafe ? d.scriptId : null;
                 const requireFrom = makeLibRequire(libs, (lib, require, moduleObj) =>
-                    scriptFunction(lib.src!, true)(makeDocumentShim(null, lib.name, lib.params || {}).wt, scriptConsole(null, lib.name), require, moduleObj, moduleObj.exports, layer.doc)
+                    scriptFunction(lib.src!, true)(makeDocumentShim(null, lib.name, lib.params || {}, undefined, storesOf).wt, scriptConsole(null, lib.name), require, moduleObj, moduleObj.exports, layer.doc)
                 );
                 const moduleObj = { exports: {} as any };
-                const shim = makeDocumentShim(d.scriptId, d.name, d.params || {});
+                const shim = makeDocumentShim(d.scriptId, d.name, d.params || {}, undefined, storesOf);
                 scriptFunction(d.src, true)(shim.wt, scriptConsole(d.scriptId, d.name), requireFrom(d.name), moduleObj, moduleObj.exports, layer.doc);
                 handlers = domHandlersFor(shim.layers, location.href);
             } catch (e) {
@@ -353,11 +370,42 @@ import { createPageLayer, type PageLayer } from "./pageLayer";
     /** scripts whose main-world code already reported calling the overlay (once per page) */
     const mainWorldCallers = new Set<string | null>();
 
-    /** shim for compiled dom scripts: log → extension LOG (script-tagged), storage → bridge relay */
-    function makeDocumentShim(scriptId: string | null, name: string, params: Record<string, any>, exposer?: Exposer) {
+    // ---- unsafe: true page-world code: its script's stores and overlay, through the bridge ----
+    // (window messages: the page sees and can forge them — the risk unsafe: true accepts)
+    const bridgeEp = new Endpoint((msg) => window.postMessage({ source: HOOK_SOURCE, kind: "wire", msg }, window.location.origin));
+    let pageHub: ReplicaHub | null = null;
+    let pagePrimed: StoreSnapshots = {};
+    let storePage = "";
+    function pageStores(): ReplicaHub {
+        if (pageHub) return pageHub;
+        pageHub = new ReplicaHub({ ctx: "page", log: (s, msg, level) => scriptLogUp(s, level, msg) });
+        pageHub.prime(pagePrimed);
+        pageHub.attach(bridgeEp);
+        return pageHub;
+    }
+    // the bridge's link to the extension came back
+    bridgeEp.on("store.resync", () => pageHub?.reconnect());
+    const overlayCallers = new Map<string, RpcClient>();
+    function overlayCaller(s: string): RpcClient {
+        let c = overlayCallers.get(s);
+        if (!c) overlayCallers.set(s, (c = new RpcClient((call) => bridgeEp.push("rpc.call", call, s))));
+        return c;
+    }
+    bridgeEp.on("rpc.result", (r, s) => s !== undefined && overlayCallers.get(s)?.receive(r));
+
+    /**
+     * shim for compiled dom scripts: log → extension LOG (script-tagged),
+     * storage → bridge relay; `storesOf`: an unsafe: true script, whose
+     * code here gets its stores (and, but for libraries, its overlay)
+     */
+    function makeDocumentShim(scriptId: string | null, name: string, params: Record<string, any>, exposer?: Exposer, storesOf: string | null = null) {
         return makePageShim({
             params,
             exposer,
+            stores: storesOf
+                ? { store: (n, initial, persist) => pageStores().store(storesOf, n, initial, persist), pageStore: (n, initial) => pageStores().pageStore(storesOf, n, initial, storePage) }
+                : undefined,
+            overlay: storesOf && scriptId ? (window === window.top ? (h) => overlayCaller(scriptId).remote(h) : () => inertRemote(TOP_FRAME_ONLY)) : undefined,
             // a main-world `overlay.fn()` call: a runtime Problem at the call (with a quick fix: `js: "isolated"`)
             onMainWorldCall: (e) => {
                 if (mainWorldCallers.has(scriptId)) return;

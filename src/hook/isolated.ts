@@ -32,8 +32,10 @@ import { makePageEvaluate } from "../shared/pageEval";
     if (!me || !me.routes.some((r) => routeMatches(r, location.href))) return;
     const s = me.s;
     const top = window === window.top;
+    /** the script's name (from iso.load), for errors raised before or outside a run */
+    let scriptName = s;
     /** ctx.evaluate: the hook runs it in the page's world */
-    const evaluate = makePageEvaluate();
+    const evaluate = makePageEvaluate(window, undefined, (e) => log("error", formatScriptError(scriptName, e, "ctx.evaluate")));
 
     let current: Endpoint | null = null;
     let link: Promise<Endpoint> | null = null;
@@ -157,6 +159,7 @@ import { makePageEvaluate } from "../shared/pageEval";
             client.disconnect("the script reloaded");
         }
         codeHash = init.codeHash;
+        scriptName = init.name;
         const { codes, packages } = shippedSources([init.src], init.libs);
         if (builtinsReady(codes, packages)) return exec(init, hot);
         ensureBuiltins(codes, packages).then(
@@ -205,7 +208,9 @@ import { makePageEvaluate } from "../shared/pageEval";
                 d.when,
                 () => {
                     try {
-                        firePageHandler(d, { url: location.href, method: "GET", tabUrl: location.href, resourceType: "main_frame", requestHeaders: {}, groups: {}, evaluate }, exposer);
+                        firePageHandler(d, { url: location.href, method: "GET", tabUrl: location.href, resourceType: "main_frame", requestHeaders: {}, groups: {}, evaluate }, exposer, (e) =>
+                            log("error", formatScriptError(init.name, e, "onPage"))
+                        );
                         noteRan("onPage", init.name);
                     } catch (e: any) {
                         log("error", formatScriptError(init.name, e, "onPage"));

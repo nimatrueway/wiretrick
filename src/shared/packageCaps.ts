@@ -16,7 +16,7 @@ export interface Capabilities {
     pageJs: boolean;
     /** draws an overlay */
     overlay: boolean;
-    /** an overlay whose code runs in the site's world (`unsafe: true`) */
+    /** page-world code with `unsafe: true` (incl. an overlay drawn in the site's world): the site can reach its stores and overlay */
     unsafe: boolean;
     /** hosts its wt.fetch reaches, as its metadata declares (`connect`) */
     connect: string[];
@@ -39,7 +39,7 @@ export function capabilitiesOf(routes: ResMeta["routes"], connect: string[], cod
         strategies: sorted(routes.flatMap((r) => (r.strategy ? [r.strategy] : []))),
         pageJs: routes.some((r) => r.kind === "onDocument" && r.world !== "isolated"),
         overlay: routes.some((r) => r.kind === "onOverlay"),
-        unsafe: routes.some((r) => r.kind === "onOverlay" && r.world === "page"),
+        unsafe: routes.some((r) => !!r.unsafe || (r.kind === "onOverlay" && r.world === "page")),
         connect: sorted(connect),
         packages: sorted(packages),
     };
@@ -56,7 +56,7 @@ export type Risk = "high" | "medium" | "low";
 export function describeCapabilities(c: Capabilities): { text: string; risk: Risk }[] {
     const out: { text: string; risk: Risk }[] = [];
     if (c.urls.some(isAllUrls)) out.push({ text: "Runs on every site", risk: "high" });
-    if (c.unsafe) out.push({ text: "Overlay code runs in the site's own JavaScript (unsafe: true): the site can see and call into it", risk: "high" });
+    if (c.unsafe) out.push({ text: "Gives the site's own JavaScript its stores and overlay (unsafe: true): the site can read and change its stored data and call into its overlay", risk: "high" });
     if (c.strategies.includes("debugger")) out.push({ text: 'Intercepts with the browser debugger (strategy "debugger": a banner shows on the tab)', risk: "high" });
     if (c.pageJs) out.push({ text: "Runs code in the site's own JavaScript world", risk: "medium" });
     if (c.strategies.includes("helper")) out.push({ text: 'Intercepts through the local helper process (strategy "helper")', risk: "medium" });
@@ -64,7 +64,7 @@ export function describeCapabilities(c: Capabilities): { text: string; risk: Ris
     if (sites.length) out.push({ text: `Runs on ${sites.join(", ")}`, risk: "low" });
     const nets = c.strategies.filter((s) => s !== "debugger" && s !== "helper");
     if (nets.length) out.push({ text: `Intercepts requests (${nets.join(", ")})`, risk: "low" });
-    if (c.overlay && !c.unsafe) out.push({ text: "Draws an overlay over pages", risk: "low" });
+    if (c.overlay) out.push({ text: "Draws an overlay over pages", risk: "low" });
     if (c.connect.length) out.push({ text: `Connects to ${c.connect.join(", ")}`, risk: "low" });
     if (c.packages.length) out.push({ text: `Imports ${c.packages.join(", ")} from unpkg`, risk: "low" });
     if (!out.length) out.push({ text: "Registers no handlers (a library)", risk: "low" });
@@ -82,7 +82,7 @@ export function addedCapabilities(prev: Capabilities, next: Capabilities): strin
     if (strategies.length) out.push(`intercepts with ${strategies.join(", ")}`);
     if (next.pageJs && !prev.pageJs) out.push("runs code in the site's own JavaScript world");
     if (next.overlay && !prev.overlay) out.push("draws an overlay");
-    if (next.unsafe && !prev.unsafe) out.push("runs overlay code in the site's world (unsafe)");
+    if (next.unsafe && !prev.unsafe) out.push("gives the site its stores and overlay (unsafe)");
     const connect = next.connect.filter((h) => !prev.connect.includes(h));
     if (connect.length) out.push(`connects to ${connect.join(", ")}`);
     const packages = next.packages.filter((p) => !prev.packages.includes(p));

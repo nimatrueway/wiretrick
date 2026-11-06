@@ -4,7 +4,9 @@
  * string. Each script with isolated onPage handlers is registered once
  * (`wt-iso-<scriptId>`, every frame, `document_start`): a one-line prelude
  * naming the script and its isolated routes, then the packaged runtime
- * (`isolated.js`, src/hook/isolated.ts). In a frame its routes match, the
+ * (`isolated.js`, src/hook/isolated.ts) — inlined as code, not listed as a
+ * `file`: Chrome injects an extension file once per document however many
+ * registrations name it, so only one script's runtime would start. In a frame its routes match, the
  * runtime opens the L6 port (`wt-user-script`) and asks the owner for the
  * code (`iso.load`, overlayLinks.ts), so the source never sits in the
  * registration and a save reaches open pages as `iso.update`.
@@ -91,6 +93,17 @@ export function onUserScriptsStatus(fn: (s: UserScriptsStatus) => void): void {
 
 const preludeFor = (s: IsoScript): string => `(globalThis.__wtIsoQ ||= []).push(${JSON.stringify({ s: s.id, routes: s.routes })});`;
 
+let runtime: Promise<string> | null = null;
+/** the packaged runtime's source (read once) */
+function runtimeSource(): Promise<string> {
+    runtime ??= fetch(chrome.runtime.getURL("isolated.js")).then((r) => {
+        if (!r.ok) throw new Error(`isolated.js: HTTP ${r.status}`);
+        return r.text();
+    });
+    runtime.catch(() => (runtime = null));
+    return runtime;
+}
+
 /**
  * Register exactly `scripts` (and configure their worlds); does nothing
  * while user scripts are off — `syncUserScripts()` again (no argument)
@@ -109,11 +122,12 @@ async function doSync(want: IsoScript[]): Promise<void> {
     const us = api();
     if (!us) return;
     const perWorld = typeof us.getWorldConfigurations === "function";
+    const source = await runtimeSource();
     const have = new Map<string, any>(((await us.getScripts()) as any[]).filter((r) => r.id.startsWith(ID_PREFIX)).map((r) => [r.id, r]));
     const add: any[] = [];
     const change: any[] = [];
     for (const s of want) {
-        const reg: any = { id: ID_PREFIX + s.id, matches: ["<all_urls>"], allFrames: true, runAt: "document_start", world: "USER_SCRIPT", js: [{ code: preludeFor(s) }, { file: "isolated.js" }] };
+        const reg: any = { id: ID_PREFIX + s.id, matches: ["<all_urls>"], allFrames: true, runAt: "document_start", world: "USER_SCRIPT", js: [{ code: `${preludeFor(s)}\n${source}` }] };
         if (perWorld) reg.worldId = s.id;
         const old = have.get(reg.id);
         have.delete(reg.id);
@@ -137,4 +151,5 @@ export function resetUserScripts(): void {
     listeners.length = 0;
     wanted = [];
     syncing = Promise.resolve();
+    runtime = null;
 }

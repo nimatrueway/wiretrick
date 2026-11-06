@@ -168,7 +168,7 @@ Already past the moment? Runs immediately.
 
 Isolation — two settings: js (which JavaScript the code shares) and dom (which document it draws in):
 - js: "isolated" (default) — a private world: none of the site's JavaScript; the site can't see it, so it may use the script's stores and call its overlay. Chrome (MV3) needs user scripts turned on — the Editor shows how
-- js: "page" — the site's own JavaScript world: it sees the site's globals (window.myApp), and the site can see and tamper with it — no stores, and it can answer the overlay's calls but not call it
+- js: "page" — the site's own JavaScript world: it sees the site's globals (window.myApp), and the site can see and tamper with it — no stores, and it can answer the overlay's calls but not call it, unless unsafe: true
 - dom: "page" (default) — the site's document, in every matching frame
 - dom: "overlay" — the script's own GUI: a transparent document over the tab (next section)
 
@@ -176,7 +176,13 @@ Isolation — two settings: js (which JavaScript the code shares) and dom (which
   isolated      default             the overlay (its own frame)
   page          the site's world    needs unsafe: true
 
-js: "page" with dom: "overlay" runs the overlay's code in the site's JavaScript world, drawing in its own document (a transparent frame in a closed shadow root over the page; document is that frame's, window the site's): the site's globals are at hand, but the site can see, call and tamper with it — no stores, no calls to or from it, and it doesn't run where the page's CSP forbids eval. The Preview tab runs it in its frame.
+unsafe: true (js: "page" only) gives page-world code the script's stores and lets it call the overlay (top frame), like isolated code — at your own risk: the site sees it all, so it can read and change this script's stores (not other scripts') and call into its overlay too.
+
+wt.onPage({ url: "*://example.com/*", js: "page", unsafe: true }, () => {
+    state.user = (window as any).myApp?.user?.name ?? null;  // state: a wt.globalStore
+});
+
+js: "page" with dom: "overlay" runs the overlay's code in the site's JavaScript world, drawing in its own document (a transparent frame in a closed shadow root over the page; document is that frame's, window the site's): the site's globals are at hand, but the site can see, call and tamper with it — like any unsafe: true code it has the script's stores (the site can reach them too) and can call its default overlay, nothing calls into it, and it doesn't run where the page's CSP forbids eval. The Preview tab runs it in its frame.
 
 ctx.evaluate(fn, ...args) — from isolated code, run fn in the site's own world and get its (awaited) result: read the site's globals without leaving the isolated world. fn is sent as source — it can't use the script's variables, so pass them as args; arguments and result are plain data, except functions (also inside plain objects and arrays): those are callbacks fn can call (also later, from the site's events) to run code back in isolated code, with copied arguments. The site can see the call and fake the answer: check what comes back, never pass secrets. Rejects where the page's CSP forbids eval.
 
@@ -235,7 +241,7 @@ wt.onPage({ url: "*://example.com/*", dom: "overlay" }, async () => {
 
 - A handler that returns a plain object of functions exposes them; any other return value exposes nothing.
 - Arguments and results are JSON (≤ 1 MB). A call made before the other side's handler returned waits for it. Errors: WtTimeoutError (10 s), WtCallError (the function threw or doesn't exist, not JSON, the handler isn't running here), DisconnectedError (the overlay closed, the script reloaded, the page navigated).
-- The overlay may call any dom: "page" onPage code (top frame). Page-world onPage code (js: "page") can only answer — the site could fake its calls — so only isolated onPage code (the default) calls the overlay (Problems offers that quick fix).
+- The overlay may call any dom: "page" onPage code (top frame). Page-world onPage code (js: "page") can only answer — the site could fake its calls — so only isolated onPage code (the default) calls the overlay (Problems offers that quick fix), unless its route says unsafe: true (accepting that the site can call the overlay too).
 - Register both at the top level of the script (not in a function, if or loop); Problems flags a call elsewhere.
 - Page-world results are page data: the site could have changed them. Check them before they decide what your network handlers do.`,
     },
@@ -264,7 +270,7 @@ wt.onRequest({ url: "https://api.example.com/*", strategy: "helper" }, (ctx) => 
 - read it before the handler's first await (after it, the handler no longer knows its page and it throws)
 - a navigation's own requests belong to the page being left; requests from no page get a throwaway copy of initial
 - not kept across browser restarts; not in rules handlers
-- both stores: live in onPage code, like the overlay — except js: "page" code (the page could read and forge them; the Problems view warns, with a quick fix)
+- both stores: live in onPage code, like the overlay — except js: "page" code (the page could read and forge them; the Problems view warns, with a quick fix), unless its route says unsafe: true
 
 wt.fetch(url, init) — fetch for scripts. In handlers it runs in the background with the extension's host permissions (no CORS) and the browser's cookies; in an overlay it fetches as the page by default (from: "background" to switch). bypass: true keeps every script's handlers — this one's too — off the request, e.g. to get the real response a mock replaces:
 

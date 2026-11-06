@@ -32,7 +32,8 @@ function mockChrome(o: { granted?: boolean; off?: "throw" | "reject" | "missing"
     };
     if (o.perWorld !== false) us.getWorldConfigurations = vi.fn(async () => worlds);
     else delete us.resetWorldConfiguration;
-    const chromeMock: any = { runtime: { id: "ext" }, permissions: { contains: vi.fn(async () => o.granted !== false) } };
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: url === "chrome-extension://ext/isolated.js", status: 200, text: async () => "/*isolated runtime*/" })));
+    const chromeMock: any = { runtime: { id: "ext", getURL: (p: string) => `chrome-extension://ext/${p}` }, permissions: { contains: vi.fn(async () => o.granted !== false) } };
     if (o.off === "throw")
         Object.defineProperty(chromeMock, "userScripts", {
             get() {
@@ -89,7 +90,10 @@ describe("chrome.userScripts (MV3 isolated onPage)", () => {
         // the prelude names the script and its routes; the code itself is fetched over L6
         expect(r.js[0].code).toContain('"s":"s1"');
         expect(r.js[0].code).toContain("https://a.example/*");
-        expect(r.js[1]).toEqual({ file: "isolated.js" });
+        // the runtime inlined: Chrome injects a file only once per document, whatever registrations name it
+        expect(r.js).toHaveLength(1);
+        expect(r.js[0].code.endsWith("\n/*isolated runtime*/")).toBe(true);
+        expect(m.registered.get("wt-iso-s2").js[0].code).toContain("/*isolated runtime*/");
         expect([...m.registered.keys()]).toEqual(["wt-iso-s1", "wt-iso-s2"]);
     });
 

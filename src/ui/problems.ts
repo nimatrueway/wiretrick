@@ -217,6 +217,30 @@ function evaluateUseRange(msg: string, s: ProblemScript, taken: Set<number>): Ra
     return undefined;
 }
 
+/**
+ * A "`console.log` runs once, when scripts load" warning (a `rules`
+ * handler) → that call in the handler: the first one there not already
+ * `taken` by an earlier warning.
+ */
+function rulesUseRange(msg: string, s: ProblemScript, taken: Set<number>): Range | undefined {
+    const text = /: `([^`]+)` runs once, when scripts load/.exec(msg)?.[1];
+    const h = text && s.code ? handlerRange(msg, s) : undefined;
+    if (!h) return undefined;
+    const code = s.code!;
+    const lines = code.split("\n");
+    const from = lineStart(lines, h.line);
+    const next = code.slice(from + 1).search(/\bwt\s*\.\s*on[A-Z]\w*\s*\(/);
+    const end = next < 0 ? code.length : from + 1 + next;
+    const use = new RegExp(`(?<![\\w$.])${text!.replace(/[$]/g, "\\$").split(".").join("\\s*\\.\\s*")}(?![\\w$])`, "g");
+    use.lastIndex = from;
+    for (let m = use.exec(code); m && m.index < end; m = use.exec(code))
+        if (!taken.has(m.index)) {
+            taken.add(m.index);
+            return rangeAt(lines, m.index, m[0].length);
+        }
+    return undefined;
+}
+
 /** a stack position → the token there (or the rest of the line) */
 function tokenRange(lines: string[], p: Position): Range {
     if (!p.column) return lineRange(lines, p.line);
@@ -273,7 +297,7 @@ export function collectProblems(scripts: ProblemScript[], liveMarkers: Map<strin
         // (isolated onPage code that can't run is an error: user scripts are off)
         const taken = new Set<number>();
         for (const w of s.routeWarnings || [])
-            problems.push({ severity: w.includes(USER_SCRIPTS_PROBLEM) ? "error" : "warning", kind: "route", message: w, ...(evaluateUseRange(w, s, taken) ?? handler(w)) });
+            problems.push({ severity: w.includes(USER_SCRIPTS_PROBLEM) ? "error" : "warning", kind: "route", message: w, ...(evaluateUseRange(w, s, taken) ?? rulesUseRange(w, s, taken) ?? handler(w)) });
         if (problems.length) groups.push({ id: s.id, label: s.label, file: s.label.endsWith(".tsx") ? "tsx" : "ts", problems: problems.sort(byPosition) });
     }
     for (const d of dataFiles) if (d.markers.length) groups.push({ id: d.id, label: d.label, file: "json", problems: fromMarkers(d.markers, "json").sort(byPosition) });

@@ -105,9 +105,53 @@ describe("ctx.evaluate", () => {
         await expect(evaluate(() => (globalThis as any).eval("cfgMissing.env"))).rejects.toThrow(/`cfgMissing` isn't defined in the page world .* ctx\.evaluate\(\(cfgMissing\) => …, cfgMissing\)/);
     });
 
-    it("a callback's arguments must be plain data", async () => {
-        const { evaluate } = setup();
-        await expect(evaluate((cb: (x: unknown) => void) => cb(() => 1), () => {})).rejects.toThrow(/callback's arguments must be plain data/);
+    it("a callback whose arguments aren't plain data is the script's problem, not thrown into the page", async () => {
+        const win = fakeWindow();
+        servePageEvaluate(win);
+        const reported: Error[] = [];
+        const evaluate = makePageEvaluate(win, undefined, (e) => reported.push(e));
+        expect(await evaluate((cb: (x: unknown) => void) => (cb(() => 1), "ok"), () => {})).toBe("ok");
+        await new Promise((r) => setTimeout(r, 20));
+        expect(reported.map((e) => e.message)).toEqual([expect.stringMatching(/callback's arguments must be plain data/)]);
+    });
+
+    it("reports a callback that throws or rejects", async () => {
+        const win = fakeWindow();
+        servePageEvaluate(win);
+        const reported: string[] = [];
+        const evaluate = makePageEvaluate(win, undefined, (e) => reported.push(e.message));
+        await evaluate(
+            (a: () => void, b: () => void) => {
+                a();
+                b();
+            },
+            () => {
+                throw new Error("sync boom");
+            },
+            async () => {
+                throw new Error("async boom");
+            }
+        );
+        await new Promise((r) => setTimeout(r, 20));
+        expect(reported.sort()).toEqual(["async boom", "sync boom"]);
+    });
+
+    it("reports its rejections the script leaves unhandled, only its own", async () => {
+        const win = fakeWindow();
+        servePageEvaluate(win);
+        const reported: string[] = [];
+        const evaluate = makePageEvaluate(win, undefined, (e) => reported.push(e.message));
+        const err = await evaluate(() => {
+            throw new Error("left alone");
+        }).then(() => null, (e: Error) => e);
+        const unhandled = (reason: unknown) => {
+            const ev = Object.assign(new Event("unhandledrejection", { cancelable: true }), { reason });
+            win.dispatchEvent(ev);
+            return ev.defaultPrevented;
+        };
+        expect(unhandled(err)).toBe(true);
+        expect(unhandled(new Error("someone else's"))).toBe(false);
+        expect(reported).toEqual(["left alone"]);
     });
 
     it("rejects when nothing in the page world answers", async () => {

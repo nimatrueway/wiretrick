@@ -129,6 +129,12 @@ export interface WireOps {
      * go over L2 tagged `ISO_STORE_TAG + s` (the overlay's are tagged `s`).
      */
     "iso.stores": { req: { url: string }; res: {} };
+    /**
+     * L2 (MV2 and MV3): let script `s`'s `unsafe: true` page-world code at
+     * `url` use its stores (refused unless it has such a route there). Its
+     * store ops then go over L2 tagged `PAGE_STORE_TAG + s`.
+     */
+    "page.stores": { req: { url: string }; res: {} };
     /** L6: this world's onPage code ran on its document (tags the document's Network row) */
     ran: { push: { api: "onPage"; name: string } };
     /** L6: scripts changed: load again, re-run when the code hash moved */
@@ -167,6 +173,9 @@ export interface IsoInit {
 
 /** L2: the tag prefix of isolated onPage code's store ops (MV2/Firefox) */
 export const ISO_STORE_TAG = "iso\u0000";
+
+/** L2: the tag prefix of `unsafe: true` page-world code's store ops */
+export const PAGE_STORE_TAG = "page\u0000";
 
 /** what an overlay frame needs to run its script */
 export interface OverlayInit {
