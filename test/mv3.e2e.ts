@@ -1156,16 +1156,18 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
             const suffixed = (v: string) => v + SUFFIX;
             wt.onPage("*://*:*/page-badge*", async (ctx) => {
                 const r = await ctx.evaluate((n) => { mark(suffixed("v" + n)); return (window as any).__evcap; }, 1);
-                document.documentElement.dataset.evcap = String(r);
+                const api = await ctx.evaluate(() => ({ get: () => (window as any).__evcap, set: (v: string) => { (window as any).__evcap = v; } }));
+                await api.set(r + "-ret");
+                document.documentElement.dataset.evcap = String(await api.get());
             });`
         );
         let evcap: any = null;
-        for (let i = 0; i < 40 && evcap?.iso !== "v1-ok"; i++) {
+        for (let i = 0; i < 40 && evcap?.iso !== "v1-ok-ret"; i++) {
             if (i % 8 === 0) await bp.reload();
             await warm.waitForTimeout(250);
             evcap = await bp.evaluate(() => ({ page: (window as any).__evcap, iso: document.documentElement.dataset.evcap })).catch(() => null);
         }
-        check("onPage: ctx.evaluate's function uses the script's imports and top-level helpers in the page world", evcap?.page === "v1-ok" && evcap?.iso === "v1-ok", JSON.stringify(evcap));
+        check("onPage: ctx.evaluate's function uses the script's imports and top-level helpers in the page world; functions it returns are callable", evcap?.page === "v1-ok-ret" && evcap?.iso === "v1-ok-ret", JSON.stringify(evcap));
         for (const id of ["s_evcap", "s_evcaplib"]) await warm.evaluate((id: string) => new Promise((r) => chrome.runtime.sendMessage({ type: "deleteScript", id }, r)), id);
         await bp.close();
     }

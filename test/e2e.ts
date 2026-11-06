@@ -269,17 +269,19 @@ const SUFFIX = "-ok";
 const suffixed = (v: string) => v + SUFFIX;
 wt.onPage("${ORIGIN}/page-fetch*", async (ctx) => {
     const r = await ctx.evaluate((n) => { mark(suffixed("v" + n)); return (window as any).__evcap; }, 1);
-    document.documentElement.dataset.evcap = String(r);
+    const api = await ctx.evaluate(() => ({ get: () => (window as any).__evcap, set: (v: string) => { (window as any).__evcap = v; } }));
+    await api.set(r + "-ret");
+    document.documentElement.dataset.evcap = String(await api.get());
 });`,
         "eval capture.wiretrick"
     );
     let evcap: any = null;
-    for (let i = 0; i < 30 && evcap?.iso !== "v1-ok"; i++) {
+    for (let i = 0; i < 30 && evcap?.iso !== "v1-ok-ret"; i++) {
         if (i === 10 || i === 20) await p3.reload();
         await new Promise((r) => setTimeout(r, 300));
         evcap = await p3.evaluate(() => ({ page: (window as any).__evcap, iso: document.documentElement.dataset.evcap })).catch(() => null);
     }
-    check("onPage: ctx.evaluate's function uses the script's imports and top-level helpers in the page world", evcap?.page === "v1-ok" && evcap?.iso === "v1-ok", JSON.stringify(evcap));
+    check("onPage: ctx.evaluate's function uses the script's imports and top-level helpers in the page world; functions it returns are callable", evcap?.page === "v1-ok-ret" && evcap?.iso === "v1-ok-ret", JSON.stringify(evcap));
     await send({ type: "deleteScript", id: "s_evcap" });
     await send({ type: "deleteScript", id: "s_evcaplib" });
 }

@@ -11,6 +11,7 @@ its section below.
 
 - A package's `metadata.json` marks each `scripts` entry that names no script in its folder as an error, in the file and in Problems.
 - `ctx.evaluate`'s function can use the script's imports and top-level helpers and constants: they come along to the page world (re-created there from their declarations). Only the handler's own variables still need passing as arguments, and the Problems view now warns about just those — and about stores or overlay handles used in the page.
+- `ctx.evaluate` can return functions (also inside plain objects and arrays — a Redux store, a small page-side API): they come back as async stand-ins that call them in the page, with `this` the object they came on, for as long as the document lives. Its result type says so.
 
 ### Changed
 

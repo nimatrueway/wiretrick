@@ -7,7 +7,10 @@
  * answer is untrusted data. Arguments and results are structured clones,
  * except functions (also inside plain objects and arrays): `fn` gets
  * stand-ins that call them back here (for as long as the document lives),
- * with copied, untrusted arguments.
+ * with copied, untrusted arguments. The other way round, functions in what
+ * `fn` returns (also inside plain objects and arrays) come back as async
+ * stand-ins that call them in the page (`invoke`), for as long as the
+ * document lives.
  *
  * What `fn` uses from the script's top level (its imports, helpers,
  * constants: shared/evalCapture) comes along: the run message carries
@@ -21,6 +24,8 @@ import type { ShippedLib } from "./scriptImports";
 export const PAGE_EVAL = "wt-page-eval";
 /** marks a function argument in the run message: its index among the call's callbacks */
 const PAGE_EVAL_FN = "wt-page-eval-fn";
+/** marks a function in a result: its index among the call's returned functions */
+const PAGE_EVAL_RET = "wt-page-eval-ret";
 /** the hook acknowledges at once; no ack: it isn't in this frame */
 export const PAGE_EVAL_ACK_MS = 3000;
 
@@ -32,24 +37,30 @@ const isPlain = (v: unknown): v is Record<string, unknown> => {
     return proto === Object.prototype || proto === null;
 };
 
-/** `v` with its functions (also in plain objects and arrays) swapped for markers into `callbacks` */
-function markCallbacks(v: unknown, callbacks: Function[], seen = new Map<object, unknown>()): unknown {
-    if (typeof v === "function") return { [PAGE_EVAL_FN]: callbacks.push(v) - 1 };
+/** a function to mark, and the object it was found on (its `this` when called) */
+interface Marked {
+    fn: Function;
+    self: unknown;
+}
+
+/** `v` with its functions (also in plain objects and arrays) swapped for `key` markers into `fns` */
+function markFunctions(v: unknown, fns: Marked[], key: string, self?: unknown, seen = new Map<object, unknown>()): unknown {
+    if (typeof v === "function") return { [key]: fns.push({ fn: v, self }) - 1 };
     if (!Array.isArray(v) && !isPlain(v)) return v;
     if (seen.has(v)) return seen.get(v);
     const out: any = Array.isArray(v) ? [] : {};
     seen.set(v, out);
-    for (const k of Object.keys(v)) out[k] = markCallbacks((v as any)[k], callbacks, seen);
+    for (const k of Object.keys(v)) out[k] = markFunctions((v as any)[k], fns, key, v, seen);
     return out;
 }
 
-/** the page side: markers (also in plain objects and arrays, in place) → `stub(index)` */
-function unmarkCallbacks(v: unknown, stub: (fn: number) => Function, seen = new Set<object>()): unknown {
+/** `v` with its `key` markers (also in plain objects and arrays, in place) → `stub(index)` */
+function unmarkFunctions(v: unknown, key: string, stub: (fn: number) => Function, seen = new Set<object>()): unknown {
     if (!Array.isArray(v) && !isPlain(v)) return v;
-    if (typeof (v as any)[PAGE_EVAL_FN] === "number" && Object.keys(v).length === 1) return stub((v as any)[PAGE_EVAL_FN]);
+    if (typeof (v as any)[key] === "number" && Object.keys(v).length === 1) return stub((v as any)[key]);
     if (seen.has(v)) return v;
     seen.add(v);
-    for (const k of Object.keys(v)) (v as any)[k] = unmarkCallbacks((v as any)[k], stub, seen);
+    for (const k of Object.keys(v)) (v as any)[k] = unmarkFunctions((v as any)[k], key, stub, seen);
     return v;
 }
 
@@ -135,26 +146,63 @@ export function makePageEvaluate(win: Window = window, ackMs = PAGE_EVAL_ACK_MS,
             report(e instanceof Error ? e : new Error(String(e)));
         }
     };
+    /** an error whose stack points at the script's call (`site`), not at Wiretrick's code */
+    const errorAt = (site: string, message: string, name = "Error"): Error => {
+        const err = name === "TypeError" ? new TypeError(message) : new Error(message);
+        err.name = name;
+        const nl = site.indexOf("\n");
+        if (nl >= 0) err.stack = `${name}: ${message}${site.slice(nl)}`;
+        return err;
+    };
+    /** a rejection the script may leave unhandled: reported */
+    const own = <T>(p: Promise<T>): Promise<T> =>
+        report
+            ? p.catch((e) => {
+                  const err = e instanceof Error ? e : new Error(String(e));
+                  ours.add(err);
+                  throw err;
+              })
+            : p;
     const evaluate: PageEvaluate = (fn, ...args) => {
         // the script's call: errors made here point at it, not at Wiretrick's code
         const site = String(new Error().stack || "");
-        const fail = (message: string, name = "Error"): Error => {
-            const err = name === "TypeError" ? new TypeError(message) : new Error(message);
-            err.name = name;
-            const nl = site.indexOf("\n");
-            if (nl >= 0) err.stack = `${name}: ${message}${site.slice(nl)}`;
-            return err;
-        };
+        const fail = (message: string, name = "Error"): Error => errorAt(site, message, name);
         if (typeof fn !== "function") return Promise.reject(fail("ctx.evaluate: pass a function, e.g. ctx.evaluate(() => document.title)", "TypeError"));
         const id = `${tag}:${++seq}`;
-        const callbacks: Function[] = [];
-        const sent = markCallbacks(args, callbacks);
+        const marked: Marked[] = [];
+        const sent = markFunctions(args, marked, PAGE_EVAL_FN);
+        // (the call's callbacks: also those passed to its returned functions later)
+        const callbacks = marked;
+        /** the returned functions' calls waiting for their answers */
+        const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void; site: string }>();
+        let invokes = 0;
+        let returnsFns = false;
+        /** a function `fn` returned (`index` among them): calling it calls it in the page */
+        const stand = (index: number) => {
+            returnsFns = true;
+            return (...xs: unknown[]): Promise<unknown> => {
+                const site = String(new Error().stack || "");
+                return own(
+                    new Promise((resolve, reject) => {
+                        const cid = ++invokes;
+                        try {
+                            win.postMessage({ source: PAGE_EVAL, kind: "invoke", id, fn: index, cid, args: markFunctions(xs, callbacks, PAGE_EVAL_FN) }, "*");
+                            pending.set(cid, { resolve, reject, site });
+                        } catch (e: any) {
+                            reject(errorAt(site, `ctx.evaluate: a returned function's arguments must be plain data (${e?.message || e})`, "TypeError"));
+                        }
+                    })
+                );
+            };
+        };
+        const unmarkResult = (v: unknown) => unmarkFunctions(v, PAGE_EVAL_RET, stand);
+        let settled = false;
         return new Promise((resolve, reject) => {
             let acked = false;
-            const end = (keepCallbacks = false) => {
+            const end = (keep = false) => {
                 clearTimeout(timer);
-                // callbacks stay callable after fn returns (e.g. from a page event listener)
-                if (!keepCallbacks || !callbacks.length) win.removeEventListener("message", onMessage);
+                // callbacks and returned functions stay callable after fn returns (e.g. from a page event listener)
+                if (!keep) win.removeEventListener("message", onMessage);
             };
             // a page busy past ackMs (a long script) delays the ack, and the browser may run
             // this timer first: a probe sent through the same message queue, twice, comes back
@@ -175,17 +223,27 @@ export function makePageEvaluate(win: Window = window, ackMs = PAGE_EVAL_ACK_MS,
                 }
                 if (d.kind === "ack") acked = true;
                 if (d.kind === "call") {
-                    const cb = callbacks[d.fn];
+                    const cb = callbacks[d.fn]?.fn;
                     if (typeof cb === "function" && Array.isArray(d.args)) callBack(cb, d.args);
                     return;
                 }
                 if (d.kind === "callError") {
-                    if (report && typeof callbacks[d.fn] === "function") report(new TypeError(String(d.message)));
+                    if (report && typeof callbacks[d.fn]?.fn === "function") report(new TypeError(String(d.message)));
                     return;
                 }
-                if (d.kind !== "done") return;
-                end(d.ok);
-                if (d.ok) resolve(d.value);
+                if (d.kind === "invoked") {
+                    const p = pending.get(d.cid);
+                    if (!p) return;
+                    pending.delete(d.cid);
+                    if (d.ok) p.resolve(unmarkResult(d.value));
+                    else p.reject(errorAt(p.site, String(d.error?.message ?? "ctx.evaluate: the returned function failed"), String(d.error?.name || "Error")));
+                    return;
+                }
+                if (d.kind !== "done" || settled) return;
+                settled = true;
+                const value = d.ok ? unmarkResult(d.value) : undefined;
+                end(d.ok && (callbacks.length > 0 || returnsFns));
+                if (d.ok) resolve(value);
                 else reject(fail(String(d.error?.message ?? "ctx.evaluate failed"), String(d.error?.name || "Error")));
             };
             win.addEventListener("message", onMessage);
@@ -200,13 +258,7 @@ export function makePageEvaluate(win: Window = window, ackMs = PAGE_EVAL_ACK_MS,
             }
         });
     };
-    if (!report) return evaluate;
-    return (fn, ...args) =>
-        evaluate(fn, ...args).catch((e) => {
-            const err = e instanceof Error ? e : new Error(String(e));
-            ours.add(err);
-            throw err;
-        });
+    return (fn, ...args) => own(evaluate(fn, ...args));
 }
 
 /** what the page world gives isolated code's functions: the script's `wt` and `console`, and `require` over its libraries */
@@ -243,10 +295,57 @@ export function servePageEvaluate(win: Window = window, env?: PageEvalEnv): void
         if (Array.isArray(mod.libs) && !m.libs) m.libs = mod.libs;
         return m;
     };
+    /** per call: the functions its results returned (callable for as long as the document lives) */
+    const returned = new Map<string, Marked[]>();
+    /** what a failure says to the script */
+    const errorOf = (err: any) => {
+        const undef = err?.name === "ReferenceError" && /^([\w$]+) is not defined$/.exec(String(err?.message));
+        const message = CSP_BLOCKED.test(String(err?.message))
+            ? "ctx.evaluate: this page's Content-Security-Policy forbids running code in the page world"
+            : undef
+              ? `ctx.evaluate: \`${undef[1]}\` isn't defined in the page world — the function runs there; your script's top-level declarations and imports come along, its handler's variables don't: pass it as an argument: ctx.evaluate((${undef[1]}) => …, ${undef[1]})`
+              : String(err?.message ?? err);
+        return { name: String(err?.name || "Error"), message };
+    };
+    /** `d.id`'s callbacks: the isolated side runs them */
+    const callbacksOf = (d: any, reply: (m: object) => void) => (fn: number) => (...xs: unknown[]): void => {
+        try {
+            win.postMessage({ source: PAGE_EVAL, kind: "call", id: d.id, fn, args: xs }, "*");
+        } catch (err: any) {
+            reply({ kind: "callError", fn, message: `ctx.evaluate: a callback's arguments must be plain data (${err?.message || err})` });
+        }
+    };
+    /** a result, its functions swapped for markers the isolated side turns into stand-ins */
+    const markResult = (id: string, v: unknown) => {
+        const fns = returned.get(id) || [];
+        const out = markFunctions(v, fns, PAGE_EVAL_RET);
+        if (fns.length) returned.set(id, fns);
+        return out;
+    };
+    const sendResult = (reply: (m: object) => void, out: object, kind: string, extra: object = {}) => {
+        try {
+            reply(out);
+        } catch (err: any) {
+            reply({ kind, ok: false, ...extra, error: { name: "DataCloneError", message: `ctx.evaluate: the result must be plain data (${err?.message || err})` } });
+        }
+    };
     win.addEventListener("message", async (e: MessageEvent) => {
         const d = e.data;
-        if (e.source !== win || !d || d.source !== PAGE_EVAL || d.kind !== "run" || typeof d.id !== "string" || typeof d.src !== "string") return;
+        if (e.source !== win || !d || d.source !== PAGE_EVAL || typeof d.id !== "string") return;
         const reply = (m: object) => win.postMessage({ source: PAGE_EVAL, id: d.id, ...m }, "*");
+        if (d.kind === "invoke") {
+            const f = returned.get(d.id)?.[d.fn];
+            if (!f || typeof d.cid !== "number") return;
+            let out: object;
+            try {
+                const args = unmarkFunctions(Array.isArray(d.args) ? d.args : [], PAGE_EVAL_FN, callbacksOf(d, reply)) as unknown[];
+                out = { kind: "invoked", cid: d.cid, ok: true, value: markResult(d.id, await f.fn.apply(f.self, args)) };
+            } catch (err: any) {
+                out = { kind: "invoked", cid: d.cid, ok: false, error: errorOf(err) };
+            }
+            return sendResult(reply, out, "invoked", { cid: d.cid });
+        }
+        if (d.kind !== "run" || typeof d.src !== "string") return;
         reply({ kind: "ack" });
         let out: object;
         try {
@@ -269,27 +368,11 @@ export function servePageEvaluate(win: Window = window, env?: PageEvalEnv): void
                 run = (args) => f(args);
             }
             // a failed call is the script's problem: told to its isolated side, not thrown into the site's code
-            const args = unmarkCallbacks(Array.isArray(d.args) ? d.args : [], (fn) => (...xs: unknown[]): void => {
-                try {
-                    win.postMessage({ source: PAGE_EVAL, kind: "call", id: d.id, fn, args: xs }, "*");
-                } catch (err: any) {
-                    reply({ kind: "callError", fn, message: `ctx.evaluate: a callback's arguments must be plain data (${err?.message || err})` });
-                }
-            });
-            out = { kind: "done", ok: true, value: await run(args) };
+            const args = unmarkFunctions(Array.isArray(d.args) ? d.args : [], PAGE_EVAL_FN, callbacksOf(d, reply));
+            out = { kind: "done", ok: true, value: markResult(d.id, await run(args)) };
         } catch (err: any) {
-            const undef = err?.name === "ReferenceError" && /^([\w$]+) is not defined$/.exec(String(err?.message));
-            const message = CSP_BLOCKED.test(String(err?.message))
-                ? "ctx.evaluate: this page's Content-Security-Policy forbids running code in the page world"
-                : undef
-                  ? `ctx.evaluate: \`${undef[1]}\` isn't defined in the page world — the function runs there; your script's top-level declarations and imports come along, its handler's variables don't: pass it as an argument: ctx.evaluate((${undef[1]}) => …, ${undef[1]})`
-                  : String(err?.message ?? err);
-            out = { kind: "done", ok: false, error: { name: String(err?.name || "Error"), message } };
+            out = { kind: "done", ok: false, error: errorOf(err) };
         }
-        try {
-            reply(out);
-        } catch (err: any) {
-            reply({ kind: "done", ok: false, error: { name: "DataCloneError", message: `ctx.evaluate: the result must be plain data (${err?.message || err})` } });
-        }
+        sendResult(reply, out, "done");
     });
 }

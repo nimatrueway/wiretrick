@@ -72,7 +72,7 @@ describe("ctx.evaluate", () => {
         const { evaluate } = setup();
         await expect(evaluate("document.title")).rejects.toThrow(/pass a function/);
         await expect(evaluate((f: unknown) => f, new WeakMap())).rejects.toThrow(/arguments must be plain data/);
-        await expect(evaluate(() => () => 1)).rejects.toThrow(/result must be plain data/);
+        await expect(evaluate(() => new WeakMap())).rejects.toThrow(/result must be plain data/);
     });
 
     it("function arguments are callbacks: the page calls them, they run here — also after fn returned", async () => {
@@ -200,6 +200,52 @@ describe("ctx.evaluate", () => {
         const got = evaluate(() => "mine");
         win.postMessage({ source: "wt-page-eval", kind: "done", id: "other", ok: true, value: "forged" }, "*");
         expect(await got).toBe("mine");
+    });
+
+    it("functions it returns (also in plain objects and arrays) are async stand-ins that call them in the page", async () => {
+        const { evaluate } = setup();
+        const app: any = await evaluate(() => {
+            let n = 0;
+            const store = {
+                state: { n: 0 },
+                getState() {
+                    return this.state;
+                },
+                add: (k: number) => (n += k),
+                later: async () => {
+                    await new Promise((r) => setTimeout(r, 5));
+                    return "later";
+                },
+                fail: () => {
+                    throw new RangeError("nope");
+                },
+            };
+            return { name: "app", store, list: [() => n], twice: () => (x: number) => x * 2 };
+        });
+        expect(app.name).toBe("app");
+        expect(await app.store.add(2)).toBe(2);
+        expect(await app.store.add(3)).toBe(5);
+        expect(await app.list[0]()).toBe(5);
+        // `this` is the object it came on
+        expect(await app.store.getState()).toEqual({ n: 0 });
+        expect(await app.store.later()).toBe("later");
+        const e: Error = await app.store.fail().then(() => new Error("resolved"), (x: Error) => x);
+        expect([e.name, e.message]).toEqual(["RangeError", "nope"]);
+        // a function's result may hold functions too
+        const twice = await app.twice();
+        expect(await twice(21)).toBe(42);
+    });
+
+    it("a returned function takes plain data and callbacks", async () => {
+        const { evaluate } = setup();
+        const on: any = await evaluate(() => (cb: (v: number) => void, v: number) => {
+            setTimeout(() => cb(v + 1), 0);
+            return "queued";
+        });
+        let queued: unknown;
+        const got = await new Promise(async (r) => (queued = await on(r, 1)));
+        expect([queued, got]).toEqual(["queued", 2]);
+        await expect(on(() => {}, new WeakMap())).rejects.toThrow(/returned function's arguments must be plain data/);
     });
 
     it("page-world code just calls the function", async () => {

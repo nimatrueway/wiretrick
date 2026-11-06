@@ -345,19 +345,38 @@ declare namespace Wiretrick {
         ? { readonly [K in keyof T]: T[K] extends (...a: infer A) => infer R ? (...a: A) => Promise<Awaited<R>> : never }
         : {};
 
+    /**
+     * What `ctx.evaluate` resolves with: `fn`'s result, its functions (also
+     * inside plain objects and arrays) turned into async stand-ins that call
+     * them in the page.
+     */
+    type PageValue<T> = T extends (...a: infer A) => infer R
+        ? (...a: A) => Promise<PageValue<Awaited<R>>>
+        : T extends Date | RegExp | Error | ArrayBuffer | ArrayBufferView | Map<unknown, unknown> | Set<unknown> | Blob
+          ? T
+          : T extends object
+            ? { [K in keyof T]: PageValue<T[K]> }
+            : T;
+
     /** The context an `onPage` handler gets (`url` is the frame's URL). */
     interface PageCtx extends RequestCtx {
         /**
          * Run `fn` in the page's own JavaScript world and get what it
          * returns: how isolated code reads the site's globals
          * (`window.myApp`). `fn` runs there as page code, so it can't see
-         * this script's variables (pass what it needs as `args`). Arguments
-         * and the result are copied (plain data; a promise is awaited).
+         * the handler's variables (pass what it needs as `args`); what it
+         * uses from the script's top level (imports, helpers, constants)
+         * comes along. Arguments and the result are copied (plain data; a
+         * promise is awaited).
          *
          * A function argument (also inside a plain object or array) is a callback: `fn` gets a stand-in that calls
          * it back here (where stores and the overlay are), also later — from
          * the site's events — for as long as the document lives. Its
          * arguments are copied page data; it returns nothing to `fn`.
+         *
+         * A function in the result (also inside a plain object or array)
+         * comes back as an async stand-in that calls it in the page (`this`
+         * is the object it came on), for as long as the document lives.
          *
          * The page can see the call and fake its answer: treat the result
          * as untrusted input, and never pass secrets. Rejects when the
@@ -378,8 +397,13 @@ declare namespace Wiretrick {
          * }, (name: unknown) => {
          *     if (typeof name === "string") state.user = name;
          * });
+         *
+         * @example
+         * // call the site's Redux store from isolated code
+         * const store = await ctx.evaluate(() => (window as any).__store as { dispatch(a: object): void; getState(): any });
+         * await store.dispatch({ type: "flag", on: true });
          */
-        evaluate<A extends unknown[], R>(fn: (...args: A) => R, ...args: A): Promise<Awaited<R>>;
+        evaluate<A extends unknown[], R>(fn: (...args: A) => R, ...args: A): Promise<PageValue<Awaited<R>>>;
     }
 
     /** The context an overlay handler (`dom: "overlay"`) gets (`url` is the page's URL). */

@@ -821,8 +821,8 @@ wt.onPage("*://app.example.com/*", async (ctx) => {
   the script), so a top-level `let` starts at its initial value there and
   a later `cfg.x = 1` doesn't come along. The handler's own variables
   (`ctx`, its locals and parameters) don't — pass them as `args`.
-  Arguments and the result are plain data (structured-clonable); anything
-  else rejects.
+  Arguments and the result are plain data (structured-clonable) or
+  functions (below); anything else rejects.
 
   ```ts
   import { installReduxHooks } from "./redux";
@@ -859,6 +859,32 @@ wt.onPage("*://app.example.com/*", async (ctx) => {
   );
   ```
 
+- A function in the **result** (also one inside a plain object or array)
+  comes back as an async stand-in that calls it in the page: it always
+  returns a promise of its (plain-data) result, `this` is the object it
+  came on, and it keeps working for as long as the document lives. Its
+  arguments follow the same rules as `fn`'s (plain data and callbacks), and
+  functions in its result come back the same way. So you can hand isolated
+  code a small page-side API once and call it whenever you like:
+
+  ```ts
+  wt.onPage("*://app.example.com/*", async (ctx) => {
+      const store = await ctx.evaluate(() => (window as any).__store); // a Redux store
+      await store.dispatch({ type: "flag", key: "darkMode", on: true });
+      const state = await store.getState();
+
+      const app = await ctx.evaluate(() => ({
+          user: () => (window as any).app.user?.name,
+          go: (path: string) => (window as any).app.router.push(path),
+      }));
+      if ((await app.user()) === "") await app.go("/login");
+  });
+  ```
+
+  Only plain objects carry their functions (a class instance isn't plain
+  data), and what they return is page data like any result. Overlays can't
+  hold stand-ins — expose them through an isolated handler's
+  [handle](#calls-between-the-overlay-and-the-page).
 - Errors are the script's (Problems view, red badge), not the site's: a
   callback that throws, a callback the page calls with arguments that
   aren't plain data (the call is dropped), and a rejection your code
