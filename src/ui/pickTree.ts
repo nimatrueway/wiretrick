@@ -7,7 +7,8 @@
  */
 import { baseName } from "./explorerTree";
 
-export type PickKind = "settings" | "script" | "data" | "folder";
+/** `section`: a part of the diagnostic report (kept in the given order, before folders) */
+export type PickKind = "settings" | "section" | "script" | "data" | "folder";
 
 export interface PickItem {
     /** path as in the scripts folder: `mock/helpers.ts`, `mock/d.json`, `settings.yaml`; an (empty) folder's: `mock/empty` */
@@ -39,7 +40,7 @@ export interface PickRow {
 export type CheckState = "on" | "off" | "mixed";
 
 const byName = (a: string, b: string): number => a.localeCompare(b, undefined, { sensitivity: "base" }) || (a < b ? -1 : a > b ? 1 : 0);
-const RANK: Record<PickKind, number> = { settings: 0, folder: 1, script: 2, data: 3 };
+const RANK: Record<PickKind, number> = { settings: 0, section: 1, folder: 2, script: 3, data: 4 };
 
 export function buildPickTree(items: PickItem[]): PickNode[] {
     const root: PickNode = { path: "", name: "", children: [] };
@@ -66,8 +67,8 @@ export function buildPickTree(items: PickItem[]): PickNode[] {
     const kind = (n: PickNode): PickKind => (n.children ? "folder" : items[n.item!].kind);
     const sort = (n: PickNode): void => {
         if (!n.children) return;
-        // stable: scripts keep their order (the stacking order)
-        n.children.sort((a, b) => RANK[kind(a)] - RANK[kind(b)] || (kind(a) === "script" ? 0 : byName(a.name, b.name)));
+        // stable: scripts keep their order (the stacking order), sections the report's
+        n.children.sort((a, b) => RANK[kind(a)] - RANK[kind(b)] || (kind(a) === "script" || kind(a) === "section" ? 0 : byName(a.name, b.name)));
         n.children.forEach(sort);
     };
     sort(root);

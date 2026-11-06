@@ -8,7 +8,7 @@ const PACKAGE_ICON = `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidde
 /** the explorer twistie (VS Code's chevron-right) */
 const CHEVRON = `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
-export type Icon = "ts" | "tsx" | "yaml" | "json" | "svg" | "folder" | "folder-open" | "package";
+export type Icon = "ts" | "tsx" | "yaml" | "json" | "svg" | "folder" | "folder-open" | "package" | "section";
 
 export function FileIcon({ kind }: { kind: Icon }) {
     if (kind === "package") return <span className="file-icon folder package" aria-hidden="true" dangerouslySetInnerHTML={{ __html: PACKAGE_ICON }} />;
@@ -17,7 +17,7 @@ export function FileIcon({ kind }: { kind: Icon }) {
         <span className="file-icon folder" aria-hidden="true" dangerouslySetInnerHTML={{ __html: kind === "folder" ? FOLDER_ICON : FOLDER_OPEN_ICON }} />
     ) : (
         <span className={`file-icon ${kind}`} aria-hidden="true">
-            {kind === "ts" ? "TS" : kind === "tsx" ? "⚛" : kind === "json" ? "{}" : kind === "svg" ? "◈" : "⚙"}
+            {kind === "ts" ? "TS" : kind === "tsx" ? "⚛" : kind === "json" ? "{}" : kind === "svg" ? "◈" : kind === "section" ? "¶" : "⚙"}
         </span>
     );
 }

@@ -1,5 +1,6 @@
 /** Settings → About (version, build, browser, OS, helper) and the
  * "Collect diagnostics…" report (assembled by the background page). */
+import type { DiagnosticsInclude } from "../shared/diagnosticsSections";
 
 interface UaBrand {
     brand: string;
@@ -165,7 +166,8 @@ function requestManagement(): Promise<boolean> {
     });
 }
 
-async function installedExtensions(): Promise<unknown> {
+/** Other installed extensions, or why they aren't listed; call straight from a click (it asks for "management"). */
+export async function installedExtensions(): Promise<unknown> {
     if (!(await requestManagement())) return "permission declined";
     try {
         const all = await new Promise<chrome.management.ExtensionInfo[]>((r, j) =>
@@ -179,12 +181,13 @@ async function installedExtensions(): Promise<unknown> {
     }
 }
 
-/** Ask the background for the Markdown report; `ui` adds manager-side context, `problems` the Problems view. */
-export async function collectDiagnostics(ui: Record<string, unknown>, problems?: unknown[]): Promise<string> {
-    const extensions = await installedExtensions();
+/**
+ * Ask the background for the Markdown report; `ui` adds manager-side context, `problems` the Problems view,
+ * `extensions` comes from installedExtensions() (started in the click), `include` limits what's in it.
+ */
+export async function collectDiagnostics(ui: Record<string, unknown>, opts: { problems?: unknown[]; extensions?: unknown; include?: DiagnosticsInclude } = {}): Promise<string> {
     const extra = {
-        extensions,
-        problems,
+        ...opts,
         ui: {
             userAgentData: await uaHighEntropy(),
             screen: { width: screen.width, height: screen.height, availWidth: screen.availWidth, availHeight: screen.availHeight, devicePixelRatio },

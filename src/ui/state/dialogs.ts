@@ -21,6 +21,8 @@ export interface PickOptions {
     confirm: string;
     /** `checked`: item indices */
     warn?: (checked: number[]) => { text: string; fix?: number[] } | null;
+    /** runs inside the confirming click/keypress, while it still counts as a user gesture (e.g. for permissions.request) */
+    onConfirm?: (checked: number[]) => void;
 }
 
 type Request<O, R> = { n: number; opts: O; resolve: (r: R) => void };

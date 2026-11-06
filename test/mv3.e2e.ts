@@ -975,6 +975,22 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
     const full = await zipOf(zipBytes);
     const fullFiles = full ? full.scripts.map((s) => s.file) : [];
     check("export produces a zip (settings.yaml + scripts)", !!full?.settings && fullFiles.includes("api-interceptor.wiretrick.ts") && fullFiles.includes("MV3 hook.wiretrick.ts"), JSON.stringify(fullFiles));
+    // Collect diagnostics… opens the same picker: sections, and the scripts under "Scripts"
+    await mgr.evaluate(() => { (window as any).__captured = null; (document.querySelector("#btn-diagnostics") as HTMLElement).click(); });
+    await mgr.waitForSelector("#bundle-picker .picker-row", { timeout: 5000 });
+    const diagRows: string[] = await mgr.evaluate(() => [...document.querySelectorAll<HTMLElement>("#bundle-picker .picker-row")].map((e) => e.dataset.path!));
+    check("diagnostics picker lists the report's sections and every script", ["Environment", "Network", "settings.yaml", "Scripts", "Scripts/MV3 hook.wiretrick.ts", "Scripts/api-interceptor.wiretrick.ts"].every((p) => diagRows.includes(p)), JSON.stringify(diagRows));
+    await mgr.evaluate(() => {
+        for (const p of ["Network", "Other installed extensions", "Scripts/api-interceptor.wiretrick.ts"]) document.querySelector<HTMLInputElement>(`#bundle-picker .picker-row[data-path="${p}"] input`)!.click();
+        (document.querySelector('#bundle-picker [data-act="ok"]') as HTMLElement).click();
+    });
+    await mgr.waitForFunction(() => Array.isArray((window as any).__captured), null, { timeout: 10000 }).catch(() => {});
+    const diagReport: string = await mgr.evaluate(() => new TextDecoder().decode(new Uint8Array((window as any).__captured || [])));
+    check(
+        "diagnostics report holds only what was picked and says what was left out",
+        diagReport.includes("### MV3 hook.wiretrick.ts") && !diagReport.includes("### api-interceptor.wiretrick.ts") && !diagReport.includes("## Network") && !diagReport.includes("## Other installed extensions") && diagReport.includes("## Log (") && /Left out by the sender: Other installed extensions, Network, 1 of \d+ scripts/.test(diagReport),
+        diagReport.slice(0, 600)
+    );
     const skipPath = exportRows.find((p) => /\.tsx?$/.test(p) && !["MV3 hook.wiretrick.ts", "api-interceptor.wiretrick.ts", "api-lib.ts"].includes(p));
     const skipName = skipPath?.replace(/\.ts$/, "");
     await mgr.evaluate(() => new Promise((r) => chrome.storage.local.clear(() => r(null))));

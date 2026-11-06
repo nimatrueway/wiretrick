@@ -12,6 +12,7 @@ import { settingsDiagnostics, settingsCompletions, settingsHover, type AssistScr
 import { badPackageImports, dependantsOf, folderOf, isSvgPath, missingImports } from "../shared/scriptImports";
 import { makeFolderPackagePlan, makePackagePlan } from "../shared/makePackage";
 import { MANIFEST_FILE } from "../shared/packageMetadata";
+import { manifestScriptCompletions } from "./manifestAssist";
 import { entryStem } from "../shared/packageModel";
 import { localPackage } from "../shared/localPackage";
 import { writeZip } from "../shared/zip";
@@ -51,7 +52,8 @@ import { toolbar, type SaveState } from "./state/toolbar";
 import { refreshUserScripts } from "./state/userScripts";
 import { MAIN_WORLD_DISALLOWED, REMOTE_MAIN_WORLD } from "../shared/remote";
 import { isolatedRouteEdit } from "./isolatedFix";
-import { collectDiagnostics, diagnosticsFileName, downloadText } from "./about";
+import { collectDiagnostics, diagnosticsFileName, downloadText, installedExtensions } from "./about";
+import { DIAG_SECTIONS } from "../shared/diagnosticsSections";
 
 // ---- state ----
 let scripts: (Script & { runtimeError?: ScriptHealthInput["runtimeError"]; typeErrors?: string[]; ruleErrors?: string[]; routeWarnings?: string[] })[] = [];
@@ -213,6 +215,31 @@ function registerSettingsAssist(): void {
             const a = model.getPositionAt(h.start);
             const b = model.getPositionAt(h.end);
             return { contents: [{ value: h.markdown }], range: { startLineNumber: a.lineNumber, startColumn: a.column, endLineNumber: b.lineNumber, endColumn: b.column } };
+        },
+    });
+    // a package's metadata.json: "scripts" completes the .ts/.tsx files in its folder
+    monaco.languages.registerCompletionItemProvider("json", {
+        triggerCharacters: ['"', "/"],
+        provideCompletionItems(model: any, position: any) {
+            const path = decodeURIComponent(model.uri.path).replace(/^\//, "");
+            if (baseName(path) !== MANIFEST_FILE) return { suggestions: [] };
+            const folder = path.slice(0, path.length - MANIFEST_FILE.length).replace(/\/$/, "");
+            const r = manifestScriptCompletions(model.getValue(), model.getOffsetAt(position), folder, scripts.map((s) => scriptFileName(s.meta.name)));
+            if (!r) return { suggestions: [] };
+            const a = model.getPositionAt(r.replaceFrom);
+            const b = model.getPositionAt(r.replaceTo);
+            const range = { startLineNumber: a.lineNumber, startColumn: a.column, endLineNumber: b.lineNumber, endColumn: b.column };
+            return {
+                suggestions: r.paths.map((p, i) => ({
+                    label: p,
+                    kind: monaco.languages.CompletionItemKind.File,
+                    insertText: r.inString ? p : JSON.stringify(p),
+                    filterText: r.inString ? p : JSON.stringify(p),
+                    detail: "script in this package's folder",
+                    sortText: String(i).padStart(4, "0"),
+                    range,
+                })),
+            };
         },
     });
 }
@@ -1572,14 +1599,32 @@ function managerUiState(): Record<string, unknown> {
 }
 
 /** Runs from a click or editor command: the permission prompt needs that gesture. */
+/** Collect diagnostics…: pick the report's sections and scripts (all by default), then download it */
 async function runDiagnostics(): Promise<void> {
     const d = settings.diagnostics;
+    if (d.busy) return;
+    const listed = scripts.slice();
+    let extensions: Promise<unknown> | undefined;
+    const chosen = await pickItems({
+        title: "Collect diagnostics",
+        intro: "Pick what goes into the report. Review the file before sharing: scripts, settings and URLs are included as-is; cookies and authorization headers are redacted.",
+        items: [
+            ...DIAG_SECTIONS.map((x) => ({ path: x.label, kind: x.id === "settings" ? ("settings" as const) : ("section" as const), detail: x.detail })),
+            ...listed.map((s) => ({ path: `Scripts/${scriptFileName(s.meta.name)}`, kind: "script" as const, badge: s.enabled ? undefined : "disabled" })),
+        ],
+        confirm: "Download",
+        // in the click: the management permission prompt needs the user gesture
+        onConfirm: (checked) => void (checked.includes(DIAG_SECTIONS.findIndex((x) => x.id === "extensions")) && (extensions = installedExtensions())),
+    });
+    if (!chosen) return;
+    const sections = DIAG_SECTIONS.filter((_, i) => chosen.includes(i)).map((x) => x.id);
+    const include = { sections, scripts: chosen.filter((i) => i >= DIAG_SECTIONS.length).map((i) => listed[i - DIAG_SECTIONS.length].id) };
     const netState = (state: "busy" | "ok" | "error", title: string) => void (panel.diagnostics = { state, title });
     Object.assign(d, { busy: true, report: "", text: "collecting…" });
     netState("busy", "Collecting diagnostics…");
     try {
         const name = diagnosticsFileName();
-        const report = await collectDiagnostics(managerUiState(), problemGroups);
+        const report = await collectDiagnostics(managerUiState(), { problems: sections.includes("problems") ? problemGroups : undefined, extensions: await extensions, include });
         downloadText(name, report, "text/markdown");
         Object.assign(d, { report, text: `downloaded (${Math.ceil(report.length / 1024)} KB)`, title: name });
         netState("ok", `Diagnostics downloaded: ${name}`);

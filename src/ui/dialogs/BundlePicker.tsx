@@ -20,6 +20,7 @@ export function BundlePicker() {
         const req = dialogs.picker;
         if (!req) return;
         flushSync(() => void (dialogs.picker = null));
+        if (v) req.opts.onConfirm?.(v);
         req.resolve(v);
     };
     return createPortal(<Picker key={picker.n} opts={picker.opts as PickOptions} finish={finish} />, document.body);
@@ -28,6 +29,7 @@ export function BundlePicker() {
 const iconOf = (it: PickItem | undefined, open: boolean | undefined): Icon => {
     if (!it || it.kind === "folder") return open ? "folder-open" : "folder";
     if (it.kind === "settings") return "yaml";
+    if (it.kind === "section") return "section";
     if (it.kind === "data") return /\.svg$/i.test(it.path) ? "svg" : "json";
     return /\.tsx$/i.test(it.path) ? "tsx" : "ts";
 };

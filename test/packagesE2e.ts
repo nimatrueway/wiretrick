@@ -188,6 +188,31 @@ export async function checkPackages(ctx: any, mgr: any, origin: string, check: C
         JSON.stringify({ dialog: dialogs[0], mkNames, manifest, entry: entry?.code.slice(0, 200), data: made.data.map((d) => d.path) }),
     );
 
+    // its metadata.json: "scripts" completes the .ts/.tsx files in the package's folder
+    const manifestId = made.data.find((d) => d.path === "mkpkg/metadata.json")?.id;
+    const manifestRow = `#script-list li.script-item[data-id="${manifestId}"]`;
+    await mgr.bringToFront();
+    if (!(await mgr.$(manifestRow))) await mgr.click('#script-list li.script-item[data-id="dir:mkpkg"]').catch(() => {});
+    await mgr.click(manifestRow, { timeout: 5000 }).catch(() => {});
+    await mgr.waitForFunction(() => { const m = (window as any).monaco.editor.getEditors()[0].getModel(); return m?.uri.path.endsWith("/metadata.json") && m.getValue().includes('"mkpkg.wiretrick.ts"'); }, null, { timeout: 8000 }).catch(() => {});
+    // the Explorer lists the moved scripts (the completions come from its list)
+    await mgr.waitForSelector('#script-list li.script-item[data-id="mkpkg-entry"]', { timeout: 8000 }).catch(() => {});
+    // a late refresh of the open file cancels a pending suggest, so trigger again until the list shows
+    for (let i = 0; i < 6; i++) {
+        await mgr.evaluate(() => {
+            const ed = (window as any).monaco.editor.getEditors()[0];
+            const model = ed.getModel();
+            ed.setPosition(model.getPositionAt(model.getValue().indexOf('"mkpkg.wiretrick.ts"') + 1));
+            ed.focus();
+            ed.trigger("t", "editor.action.triggerSuggest", {});
+        });
+        if (await mgr.waitForSelector(".suggest-widget.visible .monaco-list-row", { timeout: 4000 }).then(() => true, () => false)) break;
+    }
+    const manifestSugg = await mgr.evaluate(() => [...document.querySelectorAll(".suggest-widget.visible .monaco-list-row .label-name")].map((e) => e.textContent));
+    const manifestAt = await mgr.evaluate(() => { const m = (window as any).monaco.editor.getEditors()[0].getModel(); return [m?.uri.path, document.hasFocus(), document.querySelector(".suggest-widget")?.className, document.querySelector(".suggest-widget .message")?.textContent]; });
+    await mgr.keyboard.press("Escape");
+    check(t('metadata.json\'s "scripts" completes the scripts in the package\'s folder'), manifestSugg.includes("mklib.ts") && manifestSugg.includes("mkpkg.wiretrick.ts") && !manifestSugg.includes("mkuser.ts"), JSON.stringify({ manifestSugg, manifestAt, manifestId }));
+
     // the folder is a package now: its icon, and Export Package… downloads a zip of it
     const pkgRow = '#script-list li.script-item[data-id="dir:mkpkg"]';
     const icon = await mgr.waitForSelector(`${pkgRow} .file-icon.package`, { timeout: 8000 }).then(() => true, () => false);

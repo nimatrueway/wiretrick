@@ -25,6 +25,17 @@ const find = (path: string, nodes = roots): PickNode => {
 const ALL = ITEMS.map(() => true);
 
 describe("pick tree", () => {
+    it("keeps the diagnostic report's sections in their order, after settings.yaml and before folders", () => {
+        const t = buildPickTree([
+            { path: "Network", kind: "section" },
+            { path: "Environment", kind: "section" },
+            { path: "Scripts/a.ts", kind: "script" },
+            { path: "settings.yaml", kind: "settings" },
+            { path: "Log", kind: "section" },
+        ]);
+        expect(shape(t)).toEqual(["settings.yaml", "Network", "Environment", "Log", { Scripts: ["a.ts"] }]);
+    });
+
     it("orders as the Explorer: settings.yaml, folders, scripts (in their order), data files", () => {
         expect(shape(roots)).toEqual(["settings.yaml", { mock: [{ deep: ["x.tsx"] }, "empty", "helpers.ts", "A.json", "b.json"] }, "Other", "zeta.ts", "alpha.ts"]);
         expect(find("mock/empty").item).toBe(7);

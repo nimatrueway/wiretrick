@@ -475,8 +475,11 @@ Code view's F1 menu, and **Download diagnostics** at the right of the
 Log and Network panel header) downloads a Markdown report meant to be handed to a person
 or an LLM: environment, the Problems view's current problems, scripts,
 settings.yaml, recent log and network
-entries, and Editor state (theme, layout). It first asks for the optional
-*management* permission to list your other extensions (they can interfere
+entries, and Editor state (theme, layout). It first opens a picker, like
+[Export…](#import--export)'s: every section and every script (under
+*Scripts*), all ticked — untick what shouldn't go in; the report says what
+was left out. With *Other installed extensions* ticked, **Download** asks for
+the optional *management* permission to list them (they can interfere
 with request interception); declining just leaves them out. Set Log level to
 debug and open the Network view, reproduce the problem, then collect. Review
 the file before sharing — scripts, settings and URLs are included;

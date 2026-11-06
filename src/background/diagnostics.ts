@@ -12,6 +12,7 @@ import { getSettingsText } from "./settingsFile";
 import type { NetBody, NetEntry } from "../shared/netTypes";
 import { routeLabel } from "../shared/route";
 import type { ProblemGroup } from "../ui/problems";
+import { DIAG_SECTIONS, type DiagSection, type DiagnosticsInclude } from "../shared/diagnosticsSections";
 
 const SECRET_HEADERS = /^(cookie|set-cookie|authorization|proxy-authorization|x-api-key|x-auth-token|x-csrf-token|x-xsrf-token)$/i;
 const BODY_CAP = 4000;
@@ -26,6 +27,8 @@ export interface DiagnosticsExtra {
     state?: Record<string, unknown>;
     /** the Editor's Problems view as shown (live type errors included) */
     problems?: ProblemGroup[];
+    /** what the sender chose to put in the report (default: everything) */
+    include?: DiagnosticsInclude;
 }
 
 /** the Problems view as text: per file, `severity line:col [kind] message` */
@@ -108,28 +111,43 @@ async function environment(): Promise<Record<string, unknown>> {
 
 export async function collectDiagnostics(extra: DiagnosticsExtra = {}): Promise<string> {
     const now = Date.now();
-    const [env, scripts, params] = await Promise.all([environment(), listScripts(), loadAllParamValues()]);
+    const has = (id: DiagSection) => !extra.include?.sections || extra.include.sections.includes(id);
+    const [env, allScripts, params] = await Promise.all([has("environment") ? environment() : null, listScripts(), loadAllParamValues()]);
+    const picked = extra.include?.scripts;
+    const scripts = picked ? allScripts.filter((s) => picked.includes(s.id)) : allScripts;
     let settings = "";
-    try {
-        settings = await getSettingsText();
-    } catch (e: any) {
-        settings = `# could not render settings.yaml: ${e?.message || e}`;
-    }
-    const tabs: { id?: number; url?: string; title?: string }[] = await new Promise((r) => {
+    if (has("settings")) {
         try {
-            chrome.tabs.query({}, (t) => r((t || []).map((x) => ({ id: x.id, url: x.url, title: x.title }))));
-        } catch {
-            r([]);
+            settings = await getSettingsText();
+        } catch (e: any) {
+            settings = `# could not render settings.yaml: ${e?.message || e}`;
         }
-    });
+    }
+    const tabs: { id?: number; url?: string; title?: string }[] = !has("state")
+        ? []
+        : await new Promise((r) => {
+              try {
+                  chrome.tabs.query({}, (t) => r((t || []).map((x) => ({ id: x.id, url: x.url, title: x.title }))));
+              } catch {
+                  r([]);
+              }
+          });
     const logs = allLogs();
     const debug = getDebugBuffer();
-    const net = networkSnapshot().slice(-NET_CAP).map(redactEntry);
+    const net = has("network") ? networkSnapshot().slice(-NET_CAP).map(redactEntry) : [];
+    const left = [
+        ...DIAG_SECTIONS.filter((x) => !has(x.id)).map((x) => x.label),
+        ...(scripts.length < allScripts.length ? [`${allScripts.length - scripts.length} of ${allScripts.length} scripts`] : []),
+    ];
 
     const out: string[] = [];
     out.push(`# Wiretrick diagnostic report`);
     out.push("");
     out.push(`Generated ${iso(now)}. Request headers like cookies/authorization are redacted; bodies are capped at ${BODY_CAP} chars. Review before sharing — scripts, settings and URLs are included as-is.`);
+    if (left.length) {
+        out.push("");
+        out.push(`Left out by the sender: ${left.join(", ")}.`);
+    }
     out.push("");
     out.push(`## Problem description (fill in)`);
     out.push("");
@@ -149,54 +167,72 @@ export async function collectDiagnostics(extra: DiagnosticsExtra = {}): Promise<
         ].join("\n")
     );
     out.push("");
-    out.push(`## Environment`);
-    out.push("");
-    out.push(fence("json", JSON.stringify({ ...env, ui: extra.ui }, null, 2)));
-    out.push("");
-    out.push(`## Other installed extensions`);
-    out.push("");
-    if (Array.isArray(extra.extensions)) {
-        out.push(fence("json", JSON.stringify(extra.extensions, null, 2)));
-    } else {
-        out.push(`_not collected: ${extra.extensions || "management permission not granted"}_`);
+    if (env) {
+        out.push(`## Environment`);
+        out.push("");
+        out.push(fence("json", JSON.stringify({ ...env, ui: extra.ui }, null, 2)));
+        out.push("");
     }
-    out.push("");
-    out.push(`## Engine state`);
-    out.push("");
-    out.push(fence("json", JSON.stringify({ ...extra.state, networkRecording: isRecording(), openTabs: tabs }, null, 2)));
-    out.push("");
-    out.push(...problemsSection(extra.problems));
-    out.push("");
-    out.push(`## settings.yaml`);
-    out.push("");
-    out.push(fence("yaml", settings));
-    out.push("");
-    out.push(`## Scripts (${scripts.length})`);
-    for (const s of scripts) {
+    if (has("extensions")) {
+        out.push(`## Other installed extensions`);
         out.push("");
-        out.push(`### ${s.meta.name}.ts — ${s.enabled ? "enabled" : "disabled"}`);
+        if (Array.isArray(extra.extensions)) {
+            out.push(fence("json", JSON.stringify(extra.extensions, null, 2)));
+        } else {
+            out.push(`_not collected: ${extra.extensions || "management permission not granted"}_`);
+        }
         out.push("");
-        out.push(
-            fence(
-                "json",
-                JSON.stringify({ id: s.id, active: s.meta.active, description: s.meta.description, routes: (s.meta.routes || []).map((r) => ({ handler: routeLabel(r), ...r, kind: undefined, index: undefined })), error: s.error, params: params[s.id] || {}, updatedAt: iso(s.updatedAt) }, null, 2)
-            )
-        );
-        out.push("");
-        out.push(fence("ts", s.code));
     }
-    out.push("");
-    out.push(`## Log (${logs.length} lines)`);
-    out.push("");
-    out.push(fence("text", logs.map((l) => `${iso(l.at)} ${l.level.toUpperCase().padEnd(5)} tab=${l.tabId}${l.scriptId ? ` script=${l.scriptId}` : ""} ${l.message}`).join("\n") || "(empty)"));
-    out.push("");
-    out.push(`## Debug log (${debug.length} entries)`);
-    out.push("");
-    out.push(fence("text", debug.map((d) => `${iso(d.at)} ${(d.level || "debug").toUpperCase().padEnd(5)} [${d.src}] ${d.msg}`).join("\n") || "(empty)"));
-    out.push("");
-    out.push(`## Network (${net.length} requests${isRecording() ? "" : " — recording is OFF, only script-touched requests are kept: open the Editor's Network view, reproduce, then collect again for full detail"})`);
-    out.push("");
-    out.push(fence("json", net.length ? net.map((e) => JSON.stringify(e)).join("\n") : "(empty)"));
-    out.push("");
+    if (has("state")) {
+        out.push(`## Engine state`);
+        out.push("");
+        out.push(fence("json", JSON.stringify({ ...extra.state, networkRecording: isRecording(), openTabs: tabs }, null, 2)));
+        out.push("");
+    }
+    if (has("problems")) {
+        out.push(...problemsSection(extra.problems));
+        out.push("");
+    }
+    if (has("settings")) {
+        out.push(`## settings.yaml`);
+        out.push("");
+        out.push(fence("yaml", settings));
+        out.push("");
+    }
+    if (scripts.length || !picked) {
+        out.push(`## Scripts (${scripts.length}${picked ? ` of ${allScripts.length}` : ""})`);
+        for (const s of scripts) {
+            out.push("");
+            out.push(`### ${s.meta.name}.ts — ${s.enabled ? "enabled" : "disabled"}`);
+            out.push("");
+            out.push(
+                fence(
+                    "json",
+                    JSON.stringify({ id: s.id, active: s.meta.active, description: s.meta.description, routes: (s.meta.routes || []).map((r) => ({ handler: routeLabel(r), ...r, kind: undefined, index: undefined })), error: s.error, params: params[s.id] || {}, updatedAt: iso(s.updatedAt) }, null, 2)
+                )
+            );
+            out.push("");
+            out.push(fence("ts", s.code));
+        }
+        out.push("");
+    }
+    if (has("log")) {
+        out.push(`## Log (${logs.length} lines)`);
+        out.push("");
+        out.push(fence("text", logs.map((l) => `${iso(l.at)} ${l.level.toUpperCase().padEnd(5)} tab=${l.tabId}${l.scriptId ? ` script=${l.scriptId}` : ""} ${l.message}`).join("\n") || "(empty)"));
+        out.push("");
+    }
+    if (has("debug")) {
+        out.push(`## Debug log (${debug.length} entries)`);
+        out.push("");
+        out.push(fence("text", debug.map((d) => `${iso(d.at)} ${(d.level || "debug").toUpperCase().padEnd(5)} [${d.src}] ${d.msg}`).join("\n") || "(empty)"));
+        out.push("");
+    }
+    if (has("network")) {
+        out.push(`## Network (${net.length} requests${isRecording() ? "" : " — recording is OFF, only script-touched requests are kept: open the Editor's Network view, reproduce, then collect again for full detail"})`);
+        out.push("");
+        out.push(fence("json", net.length ? net.map((e) => JSON.stringify(e)).join("\n") : "(empty)"));
+        out.push("");
+    }
     return out.join("\n");
 }

@@ -7,6 +7,18 @@ its section below.
 
 ## [Unreleased]
 
+### Added
+
+- In a package's `metadata.json`, `scripts` completes the `.ts`/`.tsx` files in its folder and subfolders that aren't listed yet.
+
+### Changed
+
+- **Collect diagnostics…** (and the panel's **Download diagnostics**) first opens a picker, like Export…'s: the report's sections and every script, all ticked. Untick what shouldn't go in; the report says what was left out. The *management* permission is only asked for when *Other installed extensions* is ticked.
+
+### Fixed
+
+- `?.` and `??` inside a `ctx.evaluate` callback no longer fail with "`_optionalChain` isn't defined in the page world": scripts' modern syntax is kept as written instead of being rewritten into helpers the page doesn't have.
+
 ## [0.16.0-alpha] - 2026-11-05
 
 ### Added
