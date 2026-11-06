@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { directEvaluate, makePageEvaluate, servePageEvaluate } from "../src/shared/pageEval";
+import { toRunnableJs } from "../src/shared/compile";
+import "../src/shared/transpile";
 
 /** a window whose postMessage delivers a structured clone to its listeners (both worlds share it) */
 function fakeWindow(): Window {
@@ -34,6 +36,15 @@ describe("ctx.evaluate", () => {
         const { evaluate } = setup();
         const secret = 42;
         await expect(evaluate(() => secret)).rejects.toThrow(/`secret` isn.t defined in the page world/);
+    });
+
+    it("a script's ?. and ?? survive transpiling: no module helpers the page lacks", async () => {
+        const { evaluate } = setup();
+        const js = toRunnableJs(`export const f = (o: any) => o?.a?.[0] ?? "none";\nclass A { x = 1 }`);
+        expect(js).not.toMatch(/_optionalChain|_nullishCoalesce/);
+        const f = new Function("exports", js + "\nreturn exports.f;")({});
+        expect(await evaluate(f, { a: ["x"] })).toBe("x");
+        expect(await evaluate(f, {})).toBe("none");
     });
 
     it("rejects with what the function threw", async () => {
