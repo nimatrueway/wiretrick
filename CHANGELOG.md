@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.19.0-alpha] - 2026-11-06
+
 ### Added
 
 - Isolated `onPage` code can call the script's `js: "page"` handlers' functions — also at `document_start`, where the call waits for the page handler to return. The answers are page data, as with `ctx.evaluate`. Arguments and results cross as JSON copies, so a store's objects can be passed as they are.
@@ -750,7 +752,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.18.0-alpha...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.19.0-alpha...HEAD
+[0.19.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.18.0-alpha...v0.19.0-alpha
 [0.18.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.17.0-alpha...v0.18.0-alpha
 [0.17.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.16.0-alpha...v0.17.0-alpha
 [0.16.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.15.0-alpha...v0.16.0-alpha
