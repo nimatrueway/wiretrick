@@ -213,8 +213,8 @@ at the right of the toolbar do the same.
   exceptions in handlers are logged at ERROR, and the script gets a ⚠
   indicator in the list and the popup — as it does for compile, TypeScript
   and rules errors, which go to the Problems view instead of the Log. The
-  panel header's two actions sit in the same place on Log and Network:
-  **Clear** empties both the Log and Network, and **Download diagnostics**
+  panel header's actions sit in the same place on Log, Network and
+  Problems: **Clear** (Log and Network) empties both the Log and Network, and **Download diagnostics**
   saves the [diagnostics report](#about-and-diagnostics) (the log, the full
   debug log, network requests, scripts and settings) — attach it when
   reporting issues.
@@ -472,7 +472,7 @@ from **?** → **Welcome** (top right of the Help dialog); ✕ closes it.
 
 **Collect diagnostics…** (also *Wiretrick: Collect Diagnostics…* in the
 Code view's F1 menu, and **Download diagnostics** at the right of the
-Log and Network panel header) downloads a Markdown report meant to be handed to a person
+Log, Network and Problems panel header) downloads a Markdown report meant to be handed to a person
 or an LLM: environment, the Problems view's current problems, scripts,
 settings.yaml, recent log and network
 entries, and Editor state (theme, layout). It first opens a picker, like

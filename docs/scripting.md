@@ -1072,6 +1072,17 @@ wt.onPage({ url: "*://app.example.com/*", dom: "overlay" }, async () => {
   site can call the overlay too
   ([stores in `onPage` code](#stores-in-onpage-code)). Network handlers have no
   tab: their calls reject.
+- **Not between `onPage` handlers.** An `onPage` handle is the overlay's:
+  calling one from `onPage` code rejects. In isolated code, get page
+  functions from [`ctx.evaluate`](#reading-the-page--ctxevaluate), which
+  returns them:
+
+  ```ts
+  wt.onPage("*://app.example.com/*", async (ctx) => {
+      const app = await ctx.evaluate(() => ({ flags: () => Object.keys((window as any).__APP_FLAGS__ ?? {}) }));
+      console.log(await app.flags());
+  });
+  ```
 
 ### The isolated world
 

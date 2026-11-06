@@ -522,6 +522,9 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
     await netFilter("");
     const netTools = await mgr.evaluate(() => ({ net: !(document.querySelector("#net-tools") as HTMLElement).hidden, log: !(document.querySelector("#log-tools") as HTMLElement).hidden, label: document.querySelector("#panel-actions #btn-panel-diagnostics")?.getAttribute("aria-label"), filter: !!document.querySelector("#net-tools .net-qbox") }));
     check("the Network tab shows its filter, and the shared diagnostics action in the panel header (not the Log tools)", netTools.net && !netTools.log && netTools.label === "Download diagnostics" && netTools.filter, JSON.stringify(netTools));
+    await mgr.click("#problems-tab");
+    const probActs = await mgr.evaluate(() => ["#btn-panel-diagnostics", "#btn-clear-panel"].map((q) => getComputedStyle(document.querySelector(q)!).visibility));
+    check("the Problems tab shows Download diagnostics (not Clear) in the panel header", probActs[0] === "visible" && probActs[1] === "hidden", JSON.stringify(probActs));
     await mgr.click("#log-header-title");
     // Network panel count: recorded observed/modified requests, until cleared
     // fresh (cache-busted) script tags: gz.js → modified (Cdp transform), auto.js → observed (Watcher)

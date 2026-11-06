@@ -19,7 +19,7 @@
  * is inert.
  */
 import { isPageLayer, normalizeRoute, pageCallKind, pageWorld, routeMatches, type DocumentWhen, type PageWorld, type RouteMeta } from "./route";
-import { inertRemote, REMOTE_MAIN_WORLD, REMOTE_PAGE_LAYER } from "./remote";
+import { inertRemote, REMOTE_MAIN_WORLD, REMOTE_PAGE_FROM_ISOLATED, REMOTE_PAGE_FROM_PAGE, REMOTE_PAGE_LAYER } from "./remote";
 import { NOT_RUNNING, TOP_FRAME_ONLY, type Exposer } from "./rpc";
 import { parseParamValue, type ParamDef } from "./scriptDef";
 import { scriptEnv } from "./scriptEnv";
@@ -99,7 +99,7 @@ export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDocumentHa
             o.exposer?.register(h);
             dom.push({ h, route: r, when: r.when || "document_end", fn: fn as any });
         } else o.exposer?.elsewhere(h, o.otherWorld ?? NOT_RUNNING);
-        return inertRemote("page functions are called from this script's overlay, not from page code");
+        return inertRemote(world === "isolated" ? REMOTE_PAGE_FROM_ISOLATED : REMOTE_PAGE_FROM_PAGE);
     };
     const overlayHandle = (h: string) => {
         if (o.overlay) return o.overlay(h);

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { DisconnectedError, Exposer, NOT_RUNNING, RPC_QUEUE_MAX, RpcClient, TOP_FRAME_ONLY, WtCallError, WtTimeoutError, isRpcCall, isRpcResult, type RpcCall, type RpcResult } from "../src/shared/rpc";
 import { makePageShim, domHandlersFor, firePageHandler } from "../src/shared/pageShim";
-import { REMOTE_MAIN_WORLD } from "../src/shared/remote";
+import { REMOTE_MAIN_WORLD, REMOTE_PAGE_FROM_ISOLATED, REMOTE_PAGE_FROM_PAGE } from "../src/shared/remote";
 import { compileScript } from "../src/shared/compile";
 
 const tick = async () => {
@@ -223,6 +223,14 @@ describe("rpc: which world may call the overlay", () => {
         const e = await p.exports.overlay.picked("a").catch((x: any) => x);
         expect(e).toBeInstanceOf(WtCallError);
         expect(e.message).toBe(REMOTE_MAIN_WORLD);
+    });
+
+    it("onPage code calling an onPage handle is told only the overlay calls them (isolated code: use ctx.evaluate)", async () => {
+        const src = `module.exports.page = wt.onPage({ url: "*", js: "page" }, () => ({ flags() {} }));`;
+        const iso = await runPage(src, { world: "isolated" }).exports.page.flags().catch((x: any) => x);
+        expect([iso.name, iso.message]).toEqual(["WtCallError", REMOTE_PAGE_FROM_ISOLATED]);
+        expect(iso.message).toMatch(/ctx\.evaluate/);
+        await expect(runPage(src, { world: "page" }).exports.page.flags()).rejects.toThrow(REMOTE_PAGE_FROM_PAGE);
     });
 
     it("a subframe's isolated-world call into the overlay is refused", async () => {

@@ -15,12 +15,14 @@ its section below.
 
 ### Changed
 
+- The Problems view's header has **Download diagnostics** too, in the same place as on Log and Network.
 - In a `ctx.evaluate` function, `console` and `wt` are the script's: its logs go to the script's Log instead of the page's console.
 
 ### Fixed
 
 - `ctx.evaluate` no longer fails with "the page world didn't answer" on a page busy loading its scripts (a local webpack dev build): the browser could run its 3-second timer before the page hook's queued answer. It now confirms the hook is really missing before giving up.
 - A `ctx.evaluate` error points at the script's `ctx.evaluate` call instead of line 1.
+- Calling an `onPage` handle from isolated `onPage` code said "not from page code"; it now says only the overlay calls them and shows how to get page functions from `ctx.evaluate` instead.
 
 ## [0.17.0-alpha] - 2026-11-06
 
