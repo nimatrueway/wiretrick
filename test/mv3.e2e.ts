@@ -1146,6 +1146,27 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
         await warm.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "clearScriptError", scriptId: "s_evalerr" }, r)));
         for (const id of ["s_evalerr", "s_badgebad", "s_badgeiso"]) await warm.evaluate((id: string) => new Promise((r) => chrome.runtime.sendMessage({ type: "deleteScript", id }, r)), id);
         await warm.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "clearScriptError", scriptId: "s_badgebad" }, r)));
+        // ctx.evaluate's function takes the script's imports and top-level declarations along to the page world
+        await save("s_evcaplib", "evcap-lib", `export function mark(v: string) { (window as any).__evcap = v; }`);
+        await save(
+            "s_evcap",
+            "Eval capture.wiretrick",
+            `import { mark } from "./evcap-lib";
+            const SUFFIX = "-ok";
+            const suffixed = (v: string) => v + SUFFIX;
+            wt.onPage("*://*:*/page-badge*", async (ctx) => {
+                const r = await ctx.evaluate((n) => { mark(suffixed("v" + n)); return (window as any).__evcap; }, 1);
+                document.documentElement.dataset.evcap = String(r);
+            });`
+        );
+        let evcap: any = null;
+        for (let i = 0; i < 40 && evcap?.iso !== "v1-ok"; i++) {
+            if (i % 8 === 0) await bp.reload();
+            await warm.waitForTimeout(250);
+            evcap = await bp.evaluate(() => ({ page: (window as any).__evcap, iso: document.documentElement.dataset.evcap })).catch(() => null);
+        }
+        check("onPage: ctx.evaluate's function uses the script's imports and top-level helpers in the page world", evcap?.page === "v1-ok" && evcap?.iso === "v1-ok", JSON.stringify(evcap));
+        for (const id of ["s_evcap", "s_evcaplib"]) await warm.evaluate((id: string) => new Promise((r) => chrome.runtime.sendMessage({ type: "deleteScript", id }, r)), id);
         await bp.close();
     }
 

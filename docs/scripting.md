@@ -814,9 +814,32 @@ wt.onPage("*://app.example.com/*", async (ctx) => {
 });
 ```
 
-- `fn` is sent as source and runs on its own: it can't use the script's
-  variables, imports or `wt` — pass what it needs as `args`. Arguments and
-  the result are plain data (structured-clonable); anything else rejects.
+- `fn` is sent as source. What it uses from the script's **top level**
+  comes along: imports (libraries and packages), helper functions,
+  constants — and what those use in turn. They're re-created in the page
+  from their declarations on every call (libraries run once per version of
+  the script), so a top-level `let` starts at its initial value there and
+  a later `cfg.x = 1` doesn't come along. The handler's own variables
+  (`ctx`, its locals and parameters) don't — pass them as `args`.
+  Arguments and the result are plain data (structured-clonable); anything
+  else rejects.
+
+  ```ts
+  import { installReduxHooks } from "./redux";
+  const FLAG = "darkMode";
+
+  wt.onPage("*://app.example.com/*", (ctx) =>
+      ctx.evaluate((on: boolean) => {
+          installReduxHooks(); // runs in the page
+          (window as any).__store.dispatch({ type: "flag", key: FLAG, on });
+      }, true)
+  );
+  ```
+
+  In `fn`, `wt` and `console` are the script's (logs go to its Log, like
+  `js: "page"` code). Built-in modules (`react`…), stores and overlay
+  handles don't work in the page — the Problems view says so. The page can
+  see the code that comes along.
 - A function argument (also one inside a plain object or array) is a
   **callback**: `fn` gets a stand-in that calls it back in isolated code, where stores and the overlay are — also later, from
   the site's own events, for as long as the document lives. Its arguments
@@ -846,7 +869,7 @@ wt.onPage("*://app.example.com/*", async (ctx) => {
 - It rejects with what `fn` threw, when the page's CSP forbids `eval`, and
   when Wiretrick's page hook isn't in the frame (a page busy running its own
   scripts just answers later). The error points at your `ctx.evaluate`
-  call. A script variable
+  call. A handler variable
   used in `fn` rejects with "isn't defined in the page world", and the
   Problems view warns about it as you save.
 - A `fetch` made in `fn` is the page's own, so the `page` strategy sees

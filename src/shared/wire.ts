@@ -14,6 +14,7 @@ import { packBytes, unpackBytes } from "./bytesPack";
 import type { RouteMeta } from "./route";
 import type { ShippedLib } from "./scriptImports";
 import type { RpcCall, RpcResult } from "./rpc";
+import type { EvalCapture } from "./evalCapture";
 
 export type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
 
@@ -163,6 +164,8 @@ export interface IsoInit {
     codeHash: string;
     params: Record<string, any>;
     libs: ShippedLib[];
+    /** its `ctx.evaluate` functions that use its top-level declarations (shared/evalCapture) */
+    evals?: EvalCapture[];
     /** the script has an overlay on this page (top frame) */
     overlay: boolean;
     /** the script's stores now (its `wt.pageStore` copies: this page's), keyed like `store.init` */

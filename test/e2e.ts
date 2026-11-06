@@ -260,6 +260,28 @@ check("popup: activeScripts lists the scripts behind the badge", badge.ids.lengt
     await send({ type: "deleteScript", id: "s_badgebad" });
     await send({ type: "deleteScript", id: "s_badgepage" });
     await send({ type: "clearScriptError", scriptId: "s_badgebad" });
+    // ctx.evaluate's function takes the script's imports and top-level declarations along to the page world
+    await saveScript("s_evcaplib", `export function mark(v: string) { (window as any).__evcap = v; }`, "evcap-lib");
+    await saveScript(
+        "s_evcap",
+        `import { mark } from "./evcap-lib";
+const SUFFIX = "-ok";
+const suffixed = (v: string) => v + SUFFIX;
+wt.onPage("${ORIGIN}/page-fetch*", async (ctx) => {
+    const r = await ctx.evaluate((n) => { mark(suffixed("v" + n)); return (window as any).__evcap; }, 1);
+    document.documentElement.dataset.evcap = String(r);
+});`,
+        "eval capture.wiretrick"
+    );
+    let evcap: any = null;
+    for (let i = 0; i < 30 && evcap?.iso !== "v1-ok"; i++) {
+        if (i === 10 || i === 20) await p3.reload();
+        await new Promise((r) => setTimeout(r, 300));
+        evcap = await p3.evaluate(() => ({ page: (window as any).__evcap, iso: document.documentElement.dataset.evcap })).catch(() => null);
+    }
+    check("onPage: ctx.evaluate's function uses the script's imports and top-level helpers in the page world", evcap?.page === "v1-ok" && evcap?.iso === "v1-ok", JSON.stringify(evcap));
+    await send({ type: "deleteScript", id: "s_evcap" });
+    await send({ type: "deleteScript", id: "s_evcaplib" });
 }
 await p3.close();
 

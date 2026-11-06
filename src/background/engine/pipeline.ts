@@ -22,8 +22,9 @@ import { loadPackages, packagesSnapshot, resolveVersion } from "./packageImports
 import { isUrlSpec, packageClosure } from "../../shared/packageImports";
 import { serveStore } from "./strategies/extensionStrategy";
 import { dlog, dlogLevel } from "../../shared/debugLog";
-import { evaluateProblems, isThenable, mainWorldProblems, registrationProblems, rulesProblems, toRunnableJs } from "../../shared/compile";
+import { isThenable, mainWorldProblems, registrationProblems, rulesProblems, toRunnableJs } from "../../shared/compile";
 import "../../shared/transpile";
+import { evalCaptures, evaluateProblems, type EvalCapture } from "../../shared/evalCapture";
 import { log, noteRan, getScriptErrors, getScriptTypeErrors, getScriptRuleErrors, getScriptRouteWarnings, setScriptRouteWarnings, bodyObservedSince, bodySkipSince, noteBodySkip } from "./logs";
 import { bypassed } from "./bypass";
 import { prepareStores, storeOwner } from "./stores";
@@ -589,7 +590,7 @@ export function createPipeline(
         // MV3 runs them in chrome.userScripts worlds that load the code from
         // the owner (`isoRuns`): the bridge only learns their handles, to
         // relay the overlay's calls
-        const isoHandlers: (typeof domHandlers[number] | { scriptId: string; name: string; handles: string[] })[] = [];
+        const isoHandlers: ((typeof domHandlers[number] & { evals?: EvalCapture[] }) | { scriptId: string; name: string; handles: string[] })[] = [];
         const isoRuns = new Map<string, IsoRun>();
         // onOverlay routes only — overlay code never goes through the page
         const overlays: { scriptId: string; name: string; routes: RouteMeta[]; codeHash: string }[] = [];
@@ -642,19 +643,22 @@ export function createPipeline(
             if (!main && !iso || preview !== undefined) continue;
             const h = { scriptId: s.id, name: s.meta.name, src: toRunnableJs(s.code), params: resolveParamValues(a.paramDefs || {}, paramValues[s.id]) };
             if (main) domHandlers.push(unsafe ? { ...h, unsafe: true } : h);
+            // isolated code's ctx.evaluate functions: what they use from the script comes along to the page
+            const evals = iso ? evalCaptures(h.src) : [];
             if (iso && __MV3__) {
                 const handles = a.meta.routes.filter((r) => r.kind === "onDocument" && pageWorld(r) === "isolated").map((r) => `page:${r.index}`);
                 isoHandlers.push({ scriptId: s.id, name: s.meta.name, handles });
-                isoRuns.set(s.id, { name: s.meta.name, src: h.src, params: h.params, libs: [], codeHash: "", overlay: !!over.length });
+                isoRuns.set(s.id, { name: s.meta.name, src: h.src, params: h.params, libs: [], codeHash: "", overlay: !!over.length, ...(evals.length ? { evals } : {}) });
                 isoScriptDeps.set(s.id, new Set(a.deps));
-            } else if (iso) isoHandlers.push(h);
+            } else if (iso) isoHandlers.push(evals.length ? { ...h, evals } : h);
             if (main) for (const d of a.deps) mainDeps.add(d);
             if (iso && !__MV3__) for (const d of a.deps) isoDeps.add(d);
         }
         // ship the transitively imported library sources (and data files, package modules) once per world
         const dataFiles = mainDeps.size || isoDeps.size || overlayDeps.size || isoScriptDeps.size ? await listDataFiles() : [];
         const pkgs = packagesSnapshot();
-        const libsOf = (depNames: Set<string>): ShippedLib[] => {
+        // `isolated`: with their ctx.evaluate captures (shared/evalCapture)
+        const libsOf = (depNames: Set<string>, isolated = false): ShippedLib[] => {
             const libs = new Map<string, ShippedLib>();
             const urls = [...depNames].filter(isUrlSpec);
             for (const u of urls) if (pkgs.aliases[u]) libs.set(u, { name: u, alias: pkgs.aliases[u] });
@@ -666,12 +670,14 @@ export function createPipeline(
                 if (data && !libs.has(data.path)) libs.set(data.path, { name: data.path, json: data.text });
                 if (!lib || libs.has(lib.meta.name)) continue;
                 const defs = analyzed.get(lib.id)?.paramDefs || {};
-                libs.set(lib.meta.name, { name: lib.meta.name, src: toRunnableJs(lib.code), params: resolveParamValues(defs, paramValues[lib.id]) });
+                const src = toRunnableJs(lib.code);
+                const evals = isolated ? evalCaptures(src) : [];
+                libs.set(lib.meta.name, { name: lib.meta.name, src, params: resolveParamValues(defs, paramValues[lib.id]), ...(evals.length ? { evals } : {}) });
             }
             return [...libs.values()];
         };
         const libs = libsOf(mainDeps);
-        const isoLibs = isoDeps.size ? libsOf(isoDeps) : [];
+        const isoLibs = isoDeps.size ? libsOf(isoDeps, true) : [];
         // an overlay reloads when its code, params or imports change
         for (const o of overlays) {
             const run = overlayRuns.get(o.scriptId)!;
@@ -681,7 +687,7 @@ export function createPipeline(
         }
         // a user-script world re-runs when its code, params or imports change
         for (const [id, run] of isoRuns) {
-            run.libs = libsOf(isoScriptDeps.get(id)!);
+            run.libs = libsOf(isoScriptDeps.get(id)!, true);
             run.codeHash = contentHash(JSON.stringify([run.src, run.params, run.libs.map((l) => [l.name, l.src ?? l.json ?? l.alias ?? ""])]));
         }
         // MV3 without user scripts: the overlay's calls into isolated code say why at once

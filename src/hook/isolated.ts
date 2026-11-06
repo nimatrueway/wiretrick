@@ -25,7 +25,7 @@ import { portEndpoint, type Endpoint, type IsoInit } from "../shared/wire";
 import { Exposer, RpcClient, isRpcCall, type RpcResult } from "../shared/rpc";
 import { routeMatches, type RouteMeta } from "../shared/route";
 import { ReplicaHub } from "../shared/storeReplica";
-import { makePageEvaluate } from "../shared/pageEval";
+import { evalModule, makePageEvaluate, type EvalModule } from "../shared/pageEval";
 
 (() => {
     const me = ((globalThis as any).__wtIsoQ as { s: string; routes: RouteMeta[] }[] | undefined)?.shift();
@@ -35,7 +35,9 @@ import { makePageEvaluate } from "../shared/pageEval";
     /** the script's name (from iso.load), for errors raised before or outside a run */
     let scriptName = s;
     /** ctx.evaluate: the hook runs it in the page's world */
-    const evaluate = makePageEvaluate(window, undefined, (e) => log("error", formatScriptError(scriptName, e, "ctx.evaluate")));
+    /** the running code's module: what its ctx.evaluate functions take along to the page */
+    let evalMod: EvalModule | undefined;
+    const evaluate = makePageEvaluate(window, undefined, (e) => log("error", formatScriptError(scriptName, e, "ctx.evaluate")), () => evalMod);
 
     let current: Endpoint | null = null;
     let link: Promise<Endpoint> | null = null;
@@ -183,6 +185,7 @@ import { makePageEvaluate } from "../shared/pageEval";
                 },
             });
         const consoleProxy = makeScriptConsole((level, source, text) => log(level, scriptLogLine(init.name, source, text)));
+        evalMod = evalModule(s, init.name, init.params, init.evals, init.libs);
         let dom: PageDocumentHandler[];
         try {
             const codeOf = (importer: string) => (importer === init.name ? init.src : (init.libs.find((l) => l.name === importer)?.src ?? ""));

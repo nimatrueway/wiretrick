@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { directEvaluate, makePageEvaluate, servePageEvaluate } from "../src/shared/pageEval";
+import { directEvaluate, evalModule, makePageEvaluate, servePageEvaluate, type EvalModule } from "../src/shared/pageEval";
+import { evalCaptures } from "../src/shared/evalCapture";
+import { makeLibRequire, type ShippedLib } from "../src/shared/scriptImports";
+import { scriptFunction } from "../src/shared/scriptFn";
 import { toRunnableJs } from "../src/shared/compile";
 import "../src/shared/transpile";
 
@@ -204,5 +207,81 @@ describe("ctx.evaluate", () => {
         expect(await directEvaluate((n: number) => (ran++, n * 2), 4)).toBe(8);
         expect(ran).toBe(1);
         await expect(directEvaluate(1)).rejects.toThrow(/pass a function/);
+    });
+});
+
+describe("ctx.evaluate takes the script's top level along", () => {
+    const LIB = `export const NAME = "lib";
+(globalThis as any).__libRuns = ((globalThis as any).__libRuns || 0) + 1;
+export function installHooks() { (globalThis as any).__hooked = ((globalThis as any).__hooked || 0) + 1; }
+const tag = (s: string) => "[" + s + "]";
+export const viaLib = (evaluate: any) => evaluate(() => tag(NAME) + wt.params({}).who);`;
+    const MAIN = `import { installHooks, NAME, viaLib } from "./redux";
+let calls = 0;
+export const PREFIX = "p:";
+const label = (s: string) => PREFIX + s + ":" + NAME;
+export const run = (ctx: any, n: number) =>
+    ctx.evaluate((n: number) => {
+        installHooks();
+        console.log("hi", ++calls);
+        return label(String(n)) + ":" + wt.params({}).who;
+    }, n);
+export const lib = (ctx: any) => viaLib(ctx.evaluate);
+export const local = (ctx: any) => { const x = 1; return ctx.evaluate(() => x); };`;
+    const setup = () => {
+        const win = fakeWindow();
+        const logs: unknown[][] = [];
+        servePageEvaluate(win, {
+            wt: (who) => ({ params: () => ({ who: `${who.scriptId}/${who.name}` }) }),
+            console: (who) => ({ log: (...a: unknown[]) => logs.push([who.name, ...a]) }),
+            libRequire: (libs) => makeLibRequire(libs, (l, require, m) => scriptFunction(l.src!)({}, console, require, m, m.exports)),
+        });
+        const libJs = toRunnableJs(LIB);
+        const libs: ShippedLib[] = [{ name: "redux", src: libJs, params: {}, evals: evalCaptures(libJs) }];
+        const js = toRunnableJs(MAIN);
+        // the isolated side runs the script (a lib copy of its own)
+        const req = makeLibRequire(libs, (l, require, m) => scriptFunction(l.src!)({}, console, require, m, m.exports));
+        const m = { exports: {} as any };
+        scriptFunction(js)({ params: () => ({}) }, console, req("main"), m, m.exports);
+        let mod: EvalModule = evalModule("s1", "main", {}, evalCaptures(js), libs);
+        const evaluate = makePageEvaluate(win, undefined, undefined, () => mod);
+        return { exports: m.exports, evaluate, logs, reload: () => (mod = evalModule("s1", "main", {}, evalCaptures(js), libs)) };
+    };
+    const g = globalThis as any;
+    const reset = () => {
+        delete g.__libRuns;
+        delete g.__hooked;
+    };
+
+    it("imports, helpers and constants come along; the libraries run once, the declarations per call", async () => {
+        reset();
+        const { exports, evaluate, logs, reload } = setup();
+        const isoRuns = g.__libRuns;
+        expect(await exports.run({ evaluate }, 1)).toBe("p:1:lib:s1/main");
+        expect(await exports.run({ evaluate }, 2)).toBe("p:2:lib:s1/main");
+        expect(g.__libRuns - isoRuns).toBe(1);
+        expect(g.__hooked).toBe(2);
+        // `calls` is re-declared each time: the page gets its initial value
+        expect(logs).toEqual([
+            ["main", "hi", 1],
+            ["main", "hi", 1],
+        ]);
+        // a new version of the script: its libraries come again
+        reload();
+        expect(await exports.run({ evaluate }, 3)).toBe("p:3:lib:s1/main");
+        expect(g.__libRuns - isoRuns).toBe(2);
+        reset();
+    });
+
+    it("a library's function runs with the library's top level and wt", async () => {
+        reset();
+        const { exports, evaluate } = setup();
+        expect(await exports.lib({ evaluate })).toBe("[lib]null/redux");
+        reset();
+    });
+
+    it("the handler's own variables still don't come along", async () => {
+        const { exports, evaluate } = setup();
+        await expect(exports.local({ evaluate })).rejects.toThrow(/`x` isn.t defined in the page world .* its handler's variables don't: pass it as an argument/);
     });
 });

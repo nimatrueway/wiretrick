@@ -10,6 +10,11 @@ its section below.
 ### Added
 
 - A package's `metadata.json` marks each `scripts` entry that names no script in its folder as an error, in the file and in Problems.
+- `ctx.evaluate`'s function can use the script's imports and top-level helpers and constants: they come along to the page world (re-created there from their declarations). Only the handler's own variables still need passing as arguments, and the Problems view now warns about just those — and about stores or overlay handles used in the page.
+
+### Changed
+
+- In a `ctx.evaluate` function, `console` and `wt` are the script's: its logs go to the script's Log instead of the page's console.
 
 ### Fixed
 

@@ -8,7 +8,16 @@
  * except functions (also inside plain objects and arrays): `fn` gets
  * stand-ins that call them back here (for as long as the document lives),
  * with copied, untrusted arguments.
+ *
+ * What `fn` uses from the script's top level (its imports, helpers,
+ * constants: shared/evalCapture) comes along: the run message carries
+ * those declarations (`prelude`) and, once per module version, the
+ * libraries they import, and the page re-creates them around `fn`. There
+ * `wt` and `console` are the script's (logs go to its Log).
  */
+import type { EvalCapture } from "./evalCapture";
+import type { ShippedLib } from "./scriptImports";
+
 export const PAGE_EVAL = "wt-page-eval";
 /** marks a function argument in the run message: its index among the call's callbacks */
 const PAGE_EVAL_FN = "wt-page-eval-fn";
@@ -46,6 +55,37 @@ function unmarkCallbacks(v: unknown, stub: (fn: number) => Function, seen = new 
 
 export type PageEvaluate = (fn: unknown, ...args: unknown[]) => Promise<unknown>;
 
+/** whose `wt` and `console` page-world code gets: a script's, or (scriptId null) one of its libraries' */
+export interface EvalWho {
+    scriptId: string | null;
+    name: string;
+    params: Record<string, any>;
+}
+
+/** a running script's module, for its `ctx.evaluate` calls: what their functions take along to the page */
+export interface EvalModule {
+    /** new for each version of the script's code (a hot update) */
+    key: string;
+    scriptId: string;
+    name: string;
+    params: Record<string, any>;
+    libs: ShippedLib[];
+    /** a function's source → its capture, and whose module it's in */
+    evals: Map<string, { prelude: string; libs?: true; importer: string; who: EvalWho }>;
+}
+
+let moduleSeq = 0;
+/** `scriptId`'s module, from its code's captures (`evals`) and its libraries' */
+export function evalModule(scriptId: string, name: string, params: Record<string, any> | undefined, evals: EvalCapture[] | undefined, libs: ShippedLib[]): EvalModule {
+    const m: EvalModule = { key: `${Math.random().toString(36).slice(2)}:${++moduleSeq}`, scriptId, name, params: params || {}, libs, evals: new Map() };
+    const add = (caps: EvalCapture[] | undefined, importer: string, who: EvalWho) => {
+        for (const c of caps || []) if (!m.evals.has(c.fn)) m.evals.set(c.fn, { prelude: c.prelude, ...(c.libs ? { libs: true as const } : {}), importer, who });
+    };
+    add(evals, name, { scriptId, name, params: m.params });
+    for (const l of libs) if (l.evals?.length) add(l.evals, l.name, { scriptId: null, name: l.name, params: l.params || {} });
+    return m;
+}
+
 /** page-world code: `fn` is already where it should run */
 export const directEvaluate: PageEvaluate = async (fn, ...args) => {
     if (typeof fn !== "function") throw new TypeError("ctx.evaluate: pass a function, e.g. ctx.evaluate(() => document.title)");
@@ -58,8 +98,25 @@ export const directEvaluate: PageEvaluate = async (fn, ...args) => {
  * callback the page side couldn't call (its arguments aren't plain data)
  * and a rejection the script left unhandled.
  */
-export function makePageEvaluate(win: Window = window, ackMs = PAGE_EVAL_ACK_MS, report?: (e: Error) => void): PageEvaluate {
+export function makePageEvaluate(win: Window = window, ackMs = PAGE_EVAL_ACK_MS, report?: (e: Error) => void, module?: () => EvalModule | undefined): PageEvaluate {
     let seq = 0;
+    /** module versions whose libraries the page has */
+    const libsSent = new Set<string>();
+    /** what `fn` takes along to the page (with its libraries, the first time they're needed) */
+    const modOf = (src: string) => {
+        const m = module?.();
+        if (!m) return undefined;
+        const cap = m.evals.get(src);
+        const withLibs = !!cap?.libs && !libsSent.has(m.key);
+        return {
+            key: m.key,
+            owner: m.scriptId,
+            who: cap?.who || { scriptId: m.scriptId, name: m.name, params: m.params },
+            importer: cap?.importer ?? m.name,
+            prelude: cap?.prelude ?? "",
+            ...(withLibs ? { libs: m.libs.map(({ evals, ...l }) => l) } : {}),
+        };
+    };
     const tag = Math.random().toString(36).slice(2);
     /** this script's rejections: reported when it doesn't handle them */
     const ours = new WeakSet<object>();
@@ -133,7 +190,10 @@ export function makePageEvaluate(win: Window = window, ackMs = PAGE_EVAL_ACK_MS,
             };
             win.addEventListener("message", onMessage);
             try {
-                win.postMessage({ source: PAGE_EVAL, kind: "run", id, src: String(fn), args: sent }, "*");
+                const src = String(fn);
+                const mod = modOf(src);
+                win.postMessage({ source: PAGE_EVAL, kind: "run", id, src, args: sent, ...(mod ? { mod } : {}) }, "*");
+                if (mod?.libs) libsSent.add(mod.key);
             } catch (e: any) {
                 end();
                 reject(fail(`ctx.evaluate: arguments must be plain data (${e?.message || e})`, "TypeError"));
@@ -149,8 +209,40 @@ export function makePageEvaluate(win: Window = window, ackMs = PAGE_EVAL_ACK_MS,
         });
 }
 
+/** what the page world gives isolated code's functions: the script's `wt` and `console`, and `require` over its libraries */
+export interface PageEvalEnv {
+    wt: (who: EvalWho) => any;
+    console: (who: EvalWho) => any;
+    /** `requireFrom(importer)` over `libs` (run once each) */
+    libRequire: (libs: ShippedLib[]) => (importer: string) => (spec: string) => any;
+}
+
+interface ModuleEntry {
+    owner: string;
+    libs?: ShippedLib[];
+    requireFrom?: (importer: string) => (spec: string) => any;
+    /** per who: its wt and console */
+    apis: Map<string, { wt: any; console: any }>;
+}
+
+const noRequire = (spec: string) => {
+    throw new Error(`ctx.evaluate: cannot import "${spec}" in the page world: its libraries didn't come along`);
+};
+
 /** the page-world side (the hook): run what isolated code asks for */
-export function servePageEvaluate(win: Window = window): void {
+export function servePageEvaluate(win: Window = window, env?: PageEvalEnv): void {
+    const modules = new Map<string, ModuleEntry>();
+    /** `d.mod`'s entry; a module's new version drops its old ones */
+    const entryOf = (mod: any): ModuleEntry | undefined => {
+        if (!mod || typeof mod.key !== "string") return undefined;
+        let m = modules.get(mod.key);
+        if (!m) {
+            for (const [k, o] of modules) if (o.owner === mod.owner) modules.delete(k);
+            modules.set(mod.key, (m = { owner: String(mod.owner), apis: new Map() }));
+        }
+        if (Array.isArray(mod.libs) && !m.libs) m.libs = mod.libs;
+        return m;
+    };
     win.addEventListener("message", async (e: MessageEvent) => {
         const d = e.data;
         if (e.source !== win || !d || d.source !== PAGE_EVAL || d.kind !== "run" || typeof d.id !== "string" || typeof d.src !== "string") return;
@@ -158,7 +250,24 @@ export function servePageEvaluate(win: Window = window): void {
         reply({ kind: "ack" });
         let out: object;
         try {
-            const run = new Function("args", `"use strict";\nreturn (${d.src}\n).apply(undefined, args);`);
+            const mod = env ? d.mod : undefined;
+            const entry = entryOf(mod);
+            let run: (args: unknown) => unknown;
+            if (entry && env && mod.who && typeof mod.who.name === "string") {
+                const who: EvalWho = { scriptId: mod.who.scriptId ?? null, name: mod.who.name, params: mod.who.params || {} };
+                const whoKey = `${who.scriptId}|${who.name}`;
+                let api = entry.apis.get(whoKey);
+                if (!api) entry.apis.set(whoKey, (api = { wt: env.wt(who), console: env.console(who) }));
+                const prelude = typeof mod.prelude === "string" ? mod.prelude : "";
+                const require = entry.libs ? (entry.requireFrom ??= env.libRequire(entry.libs))(String(mod.importer)) : noRequire;
+                const moduleObj = { exports: {} };
+                // fresh copies of the script's declarations per call; its libraries run once
+                const f = new Function("wt", "console", "require", "module", "exports", "__wtArgs", `"use strict";\n${prelude}\nreturn (${d.src}\n).apply(undefined, __wtArgs);`);
+                run = (args) => f(api!.wt, api!.console, require, moduleObj, moduleObj.exports, args);
+            } else {
+                const f = new Function("args", `"use strict";\nreturn (${d.src}\n).apply(undefined, args);`);
+                run = (args) => f(args);
+            }
             // a failed call is the script's problem: told to its isolated side, not thrown into the site's code
             const args = unmarkCallbacks(Array.isArray(d.args) ? d.args : [], (fn) => (...xs: unknown[]): void => {
                 try {
@@ -173,7 +282,7 @@ export function servePageEvaluate(win: Window = window): void {
             const message = CSP_BLOCKED.test(String(err?.message))
                 ? "ctx.evaluate: this page's Content-Security-Policy forbids running code in the page world"
                 : undef
-                  ? `ctx.evaluate: \`${undef[1]}\` isn't defined in the page world — the function runs there as page code and can't use your script's variables; pass it as an argument: ctx.evaluate((${undef[1]}) => …, ${undef[1]})`
+                  ? `ctx.evaluate: \`${undef[1]}\` isn't defined in the page world — the function runs there; your script's top-level declarations and imports come along, its handler's variables don't: pass it as an argument: ctx.evaluate((${undef[1]}) => …, ${undef[1]})`
                   : String(err?.message ?? err);
             out = { kind: "done", ok: false, error: { name: String(err?.name || "Error"), message } };
         }

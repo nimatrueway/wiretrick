@@ -32,8 +32,15 @@ import { createPageLayer, type PageLayer } from "./pageLayer";
     if (w.chrome?.runtime?.id || w.browser?.runtime?.id) return;
     if (w.__resOverrideHooked) return;
     w.__resOverrideHooked = true;
-    // isolated onPage code's ctx.evaluate runs here
-    servePageEvaluate();
+    // isolated onPage code's ctx.evaluate runs here, with the script's wt, console and libraries
+    servePageEvaluate(window, {
+        wt: (who) => makeDocumentShim(who.scriptId, who.name, who.params).wt,
+        console: (who) => scriptConsole(who.scriptId, who.name),
+        libRequire: (libs) =>
+            makeLibRequire(libs, (lib, require, moduleObj) =>
+                scriptFunction(lib.src!)(makeDocumentShim(null, lib.name, lib.params || {}).wt, scriptConsole(null, lib.name), require, moduleObj, moduleObj.exports)
+            ),
+    });
 
     const BRIDGE_SOURCE = "res-override-bridge";
     const HOOK_SOURCE = "res-override-hook";

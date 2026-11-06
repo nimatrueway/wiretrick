@@ -42,7 +42,8 @@ import { clipPathFor, normalizeRects } from "../shared/overlayRects";
 import { fromWireRequest, toWireResponse } from "../shared/wtFetch";
 import { ShortcutRegistry, watchShortcuts } from "../shared/shortcut";
 import type { RanApi } from "../shared/netTypes";
-import { makePageEvaluate } from "../shared/pageEval";
+import { evalModule, makePageEvaluate, type EvalModule } from "../shared/pageEval";
+import type { EvalCapture } from "../shared/evalCapture";
 
 (() => {
     const MAIN_SOURCE = "res-override-bridge";
@@ -219,7 +220,7 @@ import { makePageEvaluate } from "../shared/pageEval";
     // ---- onPage code in the isolated world: compiles the FULL script source
     // with a shim so top-level helpers/closures survive; the DOM is shared
     // with the page, window (page JS globals) is not ----
-    interface DocumentHandler { scriptId: string; name: string; src: string; params?: Record<string, any>; unsafe?: true }
+    interface DocumentHandler { scriptId: string; name: string; src: string; params?: Record<string, any>; unsafe?: true; evals?: EvalCapture[] }
 
     /** script ids whose main-world onPage code this frame got (storage relay allow-list) */
     let pageScriptIds = new Set<string>();
@@ -392,9 +393,11 @@ import { makePageEvaluate } from "../shared/pageEval";
 
     /** ctx.evaluate, per script (its errors are its own): asks the hook in the page's world (the CSP fallback's page code too: the page's CSP rejects it there) */
     const evaluates = new Map<string, ReturnType<typeof makePageEvaluate>>();
+    /** isolated scripts' current modules: what their ctx.evaluate functions take along to the page */
+    const evalModules = new Map<string, EvalModule>();
     const evaluateFor = (scriptId: string, name: string, ctx: ScriptContext) => {
         let ev = evaluates.get(scriptId);
-        if (!ev) evaluates.set(scriptId, (ev = makePageEvaluate(window, undefined, (e) => scriptLog(scriptId, "error", formatScriptError(name, e, "ctx.evaluate"), ctx))));
+        if (!ev) evaluates.set(scriptId, (ev = makePageEvaluate(window, undefined, (e) => scriptLog(scriptId, "error", formatScriptError(name, e, "ctx.evaluate"), ctx), () => evalModules.get(scriptId))));
         return ev;
     };
 
@@ -464,6 +467,7 @@ import { makePageEvaluate } from "../shared/pageEval";
             // shadow console like the MAIN-world path: script console.*
             // calls go to the extension LOG, not the page console
             const consoleProxy = makeScriptConsole((level, source, text) => scriptLog(h.scriptId, level, scriptLogLine(h.name, source, text), ctx));
+            if (world === "isolated") evalModules.set(h.scriptId, evalModule(h.scriptId, h.name, h.params, h.evals, libSources));
             let dom: PageDocumentHandler[];
             try {
                 // page-side require over the shipped library sources and data files

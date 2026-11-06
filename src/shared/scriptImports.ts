@@ -10,6 +10,7 @@
  */
 import { builtinSpec, jsxImportSource, usesJsx } from "./builtinSpecs";
 import { isUrlSpec, makePackageLoader, PACKAGE_ORIGIN, parsePackageUrl, type PackageModule, type PackageModules } from "./packageImports";
+import type { EvalCapture } from "./evalCapture";
 
 const IMPORT_RE = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["']([^"'\n]+)["']/g;
 
@@ -202,6 +203,8 @@ export interface ShippedLib {
     pkg?: PackageModule;
     /** a package URL a script imports (`name`) → its module's final URL */
     alias?: string;
+    /** a library's `ctx.evaluate` functions that use its top-level declarations (shared/evalCapture) */
+    evals?: EvalCapture[];
 }
 
 /** what page-world code gets for a built-in import: the module graph still loads, using it throws */
