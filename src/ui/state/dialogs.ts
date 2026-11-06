@@ -1,7 +1,7 @@
 import { proxy, ref } from "valtio";
 import type { PickItem } from "../pickTree";
 
-export type HelpTab = "reference" | "samples" | "shortcuts";
+export type HelpTab = "samples" | "shortcuts";
 
 export type ConflictChoice = "overwrite" | "theirs" | "cancel";
 /** `kind`/`language`: a data file is a "data file" shown as "json" (default: a script, "typescript") */
@@ -35,7 +35,7 @@ export const dialogs = proxy({
     /** scroll Settings to this section; `n` makes a repeat count */
     settingsSection: null as { id: string; n: number } | null,
     help: false,
-    helpTab: "reference" as HelpTab,
+    helpTab: "samples" as HelpTab,
     /** bumped when a Help tab is shown, to focus its filter */
     helpShown: 0,
     quickOpen: false,

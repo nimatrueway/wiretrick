@@ -208,7 +208,8 @@ describe("help dialog", () => {
         await act(async () => openHelp("samples"));
         expect($("#help-panel").classList.contains("hidden")).toBe(false);
         expect($("#samples-body").hidden).toBe(false);
-        expect($("#help-body").hidden).toBe(true);
+        expect($("#shortcuts-body").hidden).toBe(true);
+        expect($$('[data-help-tab]').map((b) => b.getAttribute("data-help-tab"))).toEqual(["samples", "shortcuts"]);
         expect($$("#samples-list .sample")).toHaveLength(SAMPLES.length);
         await act(tick);
         expect(document.activeElement).toBe($("#samples-filter"));
@@ -228,21 +229,6 @@ describe("help dialog", () => {
         fireEvent.click($("#help-panel .btn-close"));
         await act(tick);
         expect($("#help-panel").classList.contains("hidden")).toBe(true);
-    });
-
-    it("has the strategy pros/cons table in the reference, found by searching its text", async () => {
-        const { HelpDialog } = await import("../src/ui/dialogs/HelpDialog");
-        const { openHelp } = await import("../src/ui/state/dialogs");
-        const { STRATEGIES } = await import("../src/shared/route");
-        render(<HelpDialog />);
-        await act(async () => openHelp("reference"));
-        const rows = $$("#help-strategy-table tr").slice(1);
-        expect(rows.map((r) => r.querySelector("code")!.textContent)).toEqual([...STRATEGIES]);
-        expect($("#help-strategy-doc").getAttribute("href")).toContain("strategies.md#compatibility");
-        fireEvent.change($("#help-filter"), { target: { value: "No banner" } });
-        const shown = $$("#help-list .api-section:not([hidden])");
-        expect(shown).toHaveLength(1);
-        expect(shown[0].querySelector("#help-strategy-table")).not.toBeNull();
     });
 });
 

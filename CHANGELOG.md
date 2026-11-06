@@ -7,6 +7,10 @@ its section below.
 
 ## [Unreleased]
 
+### Removed
+
+- Help (**?**) no longer has a Reference tab (nor the Welcome page its **API reference** button): the samples cover the API, the editor's completions and hovers document each call, and [docs/scripting.md](docs/scripting.md) has the full reference. The strategy pros and cons table lives in [docs/strategies.md](docs/strategies.md). Help opens on Samples.
+
 ## [0.15.0-alpha] - 2026-11-05
 
 ### Changed

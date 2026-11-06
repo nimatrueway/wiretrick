@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useSnapshot } from "valtio";
 import { actions } from "../shell/actions";
-import { dialogs, openHelp } from "../state/dialogs";
+import { dialogs } from "../state/dialogs";
 import { explorer } from "../state/explorer";
 import { SAMPLES, sampleStrategies, sampleSummary, sampleTryUrl, type SampleScript } from "../samples";
 
@@ -24,8 +24,6 @@ export function Welcome() {
                 </div>
                 <div className="welcome-foot">
                     <button id="welcome-new" onClick={() => actions.startCreate("script")}>New empty script</button>
-                    {" "}
-                    <button id="welcome-reference" onClick={() => openHelp("reference")}>API reference</button>
                     {" "}
                     <span className="muted">Reopen this page from Help (?) → Welcome.</span>
                 </div>

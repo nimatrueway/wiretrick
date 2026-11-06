@@ -45,8 +45,6 @@ handler off one.
 
 ## Pros and cons
 
-The same text is shown in the Editor under Help (**?**) → Reference → *Strategies*.
-
 | strategy | pros | cons |
 |---|---|---|
 | `helper` | Sees everything: documents, `<script src>`, CSS, images, workers, the first navigation. No banner. Async handlers, any status code, URL unchanged. | Chromium only. One-time install of the local helper and trust in the helper certificate. Matched hosts go through a local proxy (PAC); cert-pinned / mTLS sites break. Small per-request latency; bodies are buffered for `onResponseBody`. |

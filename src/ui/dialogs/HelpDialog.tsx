@@ -2,64 +2,22 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { useSnapshot } from "valtio";
 import { actions } from "../shell/actions";
 import { dialogs, showHelpTab, type HelpTab } from "../state/dialogs";
-import { API_REFERENCE } from "../apiReference";
 import { SAMPLES } from "../samples";
 import { SHORTCUTS, filterShortcuts, formatKey, keysFor } from "../shortcuts";
 import { Overlay, matchesFilter } from "./controls";
-import { STRATEGIES } from "../../shared/route";
-import { STRATEGY_DOC_URL, STRATEGY_INFO, strategyUnsupported } from "../../shared/strategyInfo";
 
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
-const strategyEnv = { firefox: typeof (globalThis as any).browser?.webRequest?.filterResponseData === "function", mv3: __MV3__ };
-const strategyText = STRATEGIES.map((s) => `${s} ${STRATEGY_INFO[s].pros} ${STRATEGY_INFO[s].cons}`).join(" ");
-
-/** every strategy's pros and cons; the ones this browser can't run are greyed out with why */
-function StrategyTable() {
-    return (
-        <>
-            <table id="help-strategy-table" className="strategy-table">
-                <tbody>
-                    <tr>
-                        <th>Strategy</th>
-                        <th>Pros</th>
-                        <th>Cons</th>
-                    </tr>
-                    {STRATEGIES.map((s) => {
-                        const why = strategyUnsupported(s, strategyEnv);
-                        return (
-                            <tr key={s} className={why ? "unavailable" : undefined}>
-                                <td>
-                                    <code>{s}</code>
-                                    {why && <div className="strategy-why">{why}</div>}
-                                </td>
-                                <td>{STRATEGY_INFO[s].pros}</td>
-                                <td>{STRATEGY_INFO[s].cons}</td>
-                            </tr>
-                        );
-                    })}
-                </tbody>
-            </table>
-            <p className="muted strategy-doc">
-                Which strategy works in which browser:{" "}
-                <a id="help-strategy-doc" href={STRATEGY_DOC_URL} target="_blank" rel="noopener">
-                    Compatibility
-                </a>
-            </p>
-        </>
-    );
-}
 
 const TABS: [HelpTab, string][] = [
-    ["reference", "Reference"],
     ["samples", "Samples"],
     ["shortcuts", "Shortcuts"],
 ];
 
-/** Help (?): API reference, samples and keyboard shortcuts. */
+/** Help (?): samples and keyboard shortcuts. */
 export function HelpDialog() {
     const snap = useSnapshot(dialogs);
     const tab = snap.helpTab;
-    const [filter, setFilter] = useState<Record<HelpTab, string>>({ reference: "", samples: "", shortcuts: "" });
+    const [filter, setFilter] = useState<Record<HelpTab, string>>({ samples: "", shortcuts: "" });
     const inputs = useRef<Partial<Record<HelpTab, HTMLInputElement | null>>>({});
     // a tab shown: its filter takes the keyboard
     useEffect(() => {
@@ -80,7 +38,6 @@ export function HelpDialog() {
             onChange={(e) => setFilter({ ...filter, [pane]: e.target.value })}
         />
     );
-    const reference = API_REFERENCE.map((s) => ({ s, shown: matchesFilter(s.title + s.body + (s.table === "strategies" ? strategyText : ""), filter.reference) }));
     // a card's text (as the filter sees it) includes its button
     const samples = SAMPLES.map((s) => ({ s, shown: matchesFilter(s.name + "Use this" + s.blurb + s.code, filter.samples) }));
     const shortcuts = filterShortcuts(SHORTCUTS, filter.shortcuts, isMac);
@@ -111,19 +68,6 @@ export function HelpDialog() {
                         {" "}
                         <button className="btn-close" data-close="">✕</button>
                     </span>
-                </div>
-                <div className="dialog-body" id="help-body" data-pane="reference" hidden={tab !== "reference"}>
-                    {filterBox("reference", "help-filter", "Type to search the API reference (e.g. replaceResponse, onPage, strategy)")}
-                    <div id="help-list">
-                        {reference.map(({ s, shown }) => (
-                            <div key={s.title} className="api-section" hidden={!shown}>
-                                <div className="api-title">{s.title}</div>
-                                <pre>{s.body}</pre>
-                                {s.table === "strategies" && <StrategyTable />}
-                            </div>
-                        ))}
-                    </div>
-                    <p id="help-empty" className="muted" hidden={reference.some((r) => r.shown)}>No matching sections.</p>
                 </div>
                 <div className="dialog-body" id="samples-body" data-pane="samples" hidden={tab !== "samples"}>
                     {filterBox("samples", "samples-filter", "Type to search samples (e.g. cors, replace, headers)")}

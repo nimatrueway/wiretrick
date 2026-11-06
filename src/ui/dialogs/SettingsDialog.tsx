@@ -374,7 +374,7 @@ function About() {
                 {" "}
                 <button
                     id="btn-about-help"
-                    title="API reference, sample scripts and keyboard shortcuts (the ? in the editor toolbar)"
+                    title="Sample scripts and keyboard shortcuts (the ? in the editor toolbar)"
                     onClick={() => {
                         dialogs.settings = false;
                         openHelp();

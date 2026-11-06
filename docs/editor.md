@@ -447,10 +447,8 @@ or *Light*. It applies to the Editor (Code view included) and the popup.
 
 ## Strategies
 
-Help (**?**) → Reference → *Strategies* explains every
-[strategy](strategies.md) and has a table of their pros and cons. Strategies
-the current browser can't use are greyed out with the reason; **Compatibility**
-links to [the full table](strategies.md#compatibility). There is no default
+[Strategies](strategies.md) explains every strategy, with a table of their
+pros and cons and [which browsers run which](strategies.md#compatibility). There is no default
 strategy: every network handler names its own
 (`wt.onRequest({ url, strategy: "helper" }, fn)`). There is no fallback
 either: a handler whose strategy isn't available doesn't run — the script
@@ -463,7 +461,7 @@ gets a ⚠ and the Problems view a warning.
 GitHub when About opens, with a download link when there's an update), commit and build time,
 the build (MV2/MV3), browser, OS, extension ID and the local helper's state.
 **Copy** puts that on the clipboard as text — paste it into bug reports.
-**Help…** opens the API reference, samples and keyboard shortcuts (the
+**Help…** opens the samples and keyboard shortcuts (the
 editor toolbar's **?**).
 
 **Welcome page.** With no scripts yet, the Editor opens on a welcome page

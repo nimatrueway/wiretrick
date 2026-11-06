@@ -20,7 +20,7 @@ export function Workbench() {
             <aside id="sidebar" style={snap.sidebarW ? { width: `${snap.sidebarW}px` } : undefined}>
                 <div id="brand" title="Drag to move the explorer to the left or right edge" onMouseDown={(e) => startSidebarDrag(e.nativeEvent)}>
                     <h1>Explorer</h1>
-                    <div id="toolbar"><button id="btn-help" title="API reference and sample scripts" aria-label="Help" onClick={() => openHelp()}>?</button>{" "}<button id="btn-settings" title="Settings (⌘,)" aria-label="Settings" onClick={() => openSettings()}>⚙</button></div>
+                    <div id="toolbar"><button id="btn-help" title="Sample scripts and keyboard shortcuts" aria-label="Help" onClick={() => openHelp()}>?</button>{" "}<button id="btn-settings" title="Settings (⌘,)" aria-label="Settings" onClick={() => openSettings()}>⚙</button></div>
                 </div>
                 <ExplorerSection />
             </aside>
