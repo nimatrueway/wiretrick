@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.18.0-alpha] - 2026-11-06
+
 ### Added
 
 - A package's `metadata.json` marks each `scripts` entry that names no script in its folder as an error, in the file and in Problems.
@@ -744,7 +746,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.17.0-alpha...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.18.0-alpha...HEAD
+[0.18.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.17.0-alpha...v0.18.0-alpha
 [0.17.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.16.0-alpha...v0.17.0-alpha
 [0.16.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.15.0-alpha...v0.16.0-alpha
 [0.15.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.14.0-alpha...v0.15.0-alpha
