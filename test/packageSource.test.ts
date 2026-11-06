@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { crawl, fetchPackage, parseSource, pickStart, sourceLabel, ENTRY_URL_RE, type Net } from "../src/shared/packageSource";
+import { crawl, fetchPackage, isRemote, parseSource, pickStart, sourceLabel, ENTRY_URL_RE, type Net } from "../src/shared/packageSource";
+import { writeZip } from "../src/shared/zip";
 
 describe("parseSource", () => {
     it("GitHub file, folder and repository URLs", () => {
@@ -20,6 +21,13 @@ describe("parseSource", () => {
         expect(parseSource("https://x.dev/kit/metadata.json")).toEqual({ kind: "url", url: "https://x.dev/kit/metadata.json" });
         expect(typeof parseSource("https://x.dev/p/a.js")).toBe("string");
         expect(typeof parseSource("ftp://x/a.wiretrick.ts")).toBe("string");
+    });
+    it("zip URLs, GitHub's archives and release assets too", () => {
+        expect(parseSource("https://x.dev/kit.zip#a")).toEqual({ kind: "zip", url: "https://x.dev/kit.zip" });
+        expect(parseSource("https://github.com/me/s/archive/refs/heads/main.zip")).toEqual({ kind: "zip", url: "https://github.com/me/s/archive/refs/heads/main.zip" });
+        expect(parseSource("https://github.com/me/s/releases/download/v1/kit.ZIP")).toMatchObject({ kind: "zip" });
+        expect(isRemote({ kind: "zip", url: "https://x.dev/kit.zip" })).toBe(true);
+        expect(isRemote({ kind: "zip", url: "file:///kit.zip" })).toBe(false);
     });
     it("labels", () => {
         expect(sourceLabel({ kind: "github", owner: "me", repo: "s", ref: "HEAD", path: "", tree: true })).toBe("github.com/me/s");
@@ -85,7 +93,12 @@ describe("crawl", () => {
 
 describe("fetchPackage", () => {
     const calls: string[] = [];
+    const zip = writeZip({ "kit-1.0/metadata.json": '{"name":"Kit","scripts":["a.ts"]}', "kit-1.0/a.ts": 'import "./lib/b";', "kit-1.0/lib/b.ts": "export {};", "kit-1.0/README.md": "hi", "kit-1.0/lib/c.ts": "export {};" });
     const net: Net = {
+        async bytes(url) {
+            calls.push(url);
+            return url === "https://x.dev/kit.zip" ? (zip.buffer.slice(zip.byteOffset, zip.byteOffset + zip.byteLength) as ArrayBuffer) : null;
+        },
         async text(url) {
             calls.push(url);
             const files: Record<string, string> = {
@@ -118,5 +131,12 @@ describe("fetchPackage", () => {
         const p = await fetchPackage({ kind: "url", url: "https://x.dev/p/a.wiretrick.ts" }, net);
         expect(p.entries).toEqual(["a.wiretrick.ts"]);
         expect(p.revision).toMatch(/^[0-9a-f]{24}$/);
+    });
+    it("zip URL: its one folder's metadata.json and what the scripts import", async () => {
+        const p = await fetchPackage({ kind: "zip", url: "https://x.dev/kit.zip" }, net);
+        expect(p.entries).toEqual(["a.ts"]);
+        expect(Object.keys(p.files).sort()).toEqual(["a.ts", "lib/b.ts", "metadata.json"]);
+        expect(p.revision).toMatch(/^[0-9a-f]{24}$/);
+        await expect(fetchPackage({ kind: "zip", url: "https://x.dev/none.zip" }, net)).rejects.toThrow(/can't read/);
     });
 });

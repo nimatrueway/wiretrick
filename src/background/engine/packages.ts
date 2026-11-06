@@ -19,6 +19,7 @@ import {
     type InstalledPackage,
     type PackageVersion,
     type PendingUpdate,
+    updateSource,
 } from "../../shared/packageModel";
 import { SCRIPT_FILE_RE, fetchPackage, hashText, isRemote, parseSource, webNet } from "../../shared/packageSource";
 import { allFolders } from "../../shared/folders";
@@ -39,7 +40,7 @@ import {
 
 /** what an install / update page sends: the crawled files */
 export interface FetchedPackage {
-    /** where it updates from; "" = a folder or zip (no updates) */
+    /** where it was installed from; "" = a folder or zip (it updates only from metadata.updateURL) */
     source: string;
     entries: string[];
     files: Record<string, string>;
@@ -248,13 +249,14 @@ export function installPackage(fetched: FetchedPackage, opts: { enabled: boolean
             metadata: a.metadata,
             caps: a.caps,
             files,
-            autoUpdate: opts.autoUpdate && !!fetched.source,
+            autoUpdate: opts.autoUpdate && !!(fetched.source || a.metadata.updateURL),
             installedAt: now,
             updatedAt: now,
         };
         await putPackage(pkg);
         // not ending in the URL: the Network view would take it for the package's request
-        log(-1, `[packages] installed "${a.name}"${a.metadata.version ? ` ${a.metadata.version}` : ""}${fetched.source ? ` from ${fetched.source} (auto-update ${pkg.autoUpdate ? "on" : "off"})` : ""}`, "info", entryIds(pkg)[0]);
+        const from = updateSource(pkg);
+        log(-1, `[packages] installed "${a.name}"${a.metadata.version ? ` ${a.metadata.version}` : ""}${fetched.source ? ` from ${fetched.source}` : ""}${from ? `${from !== fetched.source ? `, updating from ${from}` : ""} (auto-update ${pkg.autoUpdate ? "on" : "off"})` : ""}`, "info", entryIds(pkg)[0]);
         return pkg;
     });
 }
@@ -313,6 +315,12 @@ async function offer(pkg: InstalledPackage, fetched: FetchedPackage, manual: boo
         await putPackage(checked);
         return checked;
     }
+    // the same files under another revision (a commit elsewhere in the repository, the first check of a new updateURL)
+    if (await sameFiles(pkg, fetched)) {
+        const same = { ...checked, revision: fetched.revision, pending: undefined };
+        await putPackage(same);
+        return same;
+    }
     const a = await analyze(fetched, pkg);
     if (a.error) {
         const failed = { ...checked, lastError: `the update (${a.metadata.version || fetched.revision.slice(0, 8)}) doesn't compile: ${a.error.split("\n")[0]}` };
@@ -325,6 +333,8 @@ async function offer(pkg: InstalledPackage, fetched: FetchedPackage, manual: boo
     if (added.length) reasons.push(`it can do more: ${added.join("; ")}`);
     if (modified.length) reasons.push(`changed here since installed: ${modified.join(", ")}`);
     if (compareVersions(a.metadata.version, pkg.metadata.version) < 0) reasons.push(`the version goes down (${pkg.metadata.version} → ${a.metadata.version})`);
+    const from = updateSource({ source: pkg.source, metadata: a.metadata });
+    if (from !== updateSource(pkg)) reasons.push(from ? `it updates from somewhere else: ${from}` : "it stops updating");
     const next: PackageVersion = { revision: fetched.revision, entries: fetched.entries, files: fetched.files, metadata: a.metadata, caps: a.caps };
     if (reasons.length || !pkg.autoUpdate) {
         const pending: PendingUpdate = { ...next, reasons, added, at: Date.now() };
@@ -336,10 +346,18 @@ async function offer(pkg: InstalledPackage, fetched: FetchedPackage, manual: boo
     return apply(checked, next);
 }
 
-/** fetch a package's source: https here; file: URLs only from an extension page (the Editor offers them) */
+async function sameFiles(pkg: InstalledPackage, fetched: Pick<FetchedPackage, "entries" | "files">): Promise<boolean> {
+    const rels = Object.keys(fetched.files);
+    if (rels.length !== Object.keys(pkg.files).length || fetched.entries.join("\0") !== pkg.entries.join("\0")) return false;
+    for (const rel of rels) if (pkg.files[rel]?.hash !== (await hashText(fetched.files[rel]))) return false;
+    return true;
+}
+
+/** fetch where a package updates from: https here; file: URLs only from an extension page (the Editor offers them) */
 async function fetchSource(pkg: InstalledPackage): Promise<FetchedPackage | null> {
-    if (!pkg.source) return null; // installed from a folder or zip
-    const src = parseSource(pkg.source);
+    const from = updateSource(pkg);
+    if (!from) return null; // installed from a folder or zip, no updateURL
+    const src = parseSource(from);
     if (typeof src === "string") throw new Error(src);
     if (!isRemote(src)) return null;
     const p = await fetchPackage(src, webNet);

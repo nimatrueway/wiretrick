@@ -25,6 +25,7 @@ wt.metadata({
     author: "me",
     license: "MIT",
     homepage: "https://github.com/me/scripts",
+    updateURL: "https://github.com/me/scripts/blob/main/dark.wiretrick.ts",
     connect: ["api.github.com"],
 });
 wt.onPage({ url: "*://github.com/*" }, () => { … });
@@ -34,6 +35,10 @@ Every field is optional. `description` is also the script's tooltip in the Edito
 `version` is compared part by part (`1.10.0` is newer than `1.9`).
 `connect` lists the hosts the script's `wt.fetch` calls reach. An update that
 adds one waits for your approval.
+`updateURL` is where updates come from, instead of where the package was
+installed from. It takes any URL the install page reads, as listed in the table under
+[Install a package](#install-a-package): a script, `metadata.json` or `.zip` URL, a GitHub
+file or folder, a gist, or a gist's raw file. See [Updates](#updates).
 
 A bundle's `metadata.json` has the same fields plus `scripts`, the bundle's
 scripts relative to its folder:
@@ -74,20 +79,25 @@ The install page accepts:
 | A GitHub file | `https://github.com/me/scripts/blob/main/dark.ts`, `https://raw.githubusercontent.com/me/scripts/main/kit/metadata.json` | the branch or tag (each update is pinned to a commit) |
 | A GitHub folder | `https://github.com/me/scripts/tree/main/kit`, `https://github.com/me/dark-mode` | the same |
 | A gist | `https://gist.github.com/me/0123abcd` | the gist's latest revision |
+| A gist's file | `https://gist.githubusercontent.com/me/0123abcd/raw/dark.wiretrick.ts` | the same |
 | Any other URL of a script or `metadata.json` | `https://example.com/tools/dark.wiretrick.ts`, `file:///home/me/kit/metadata.json` | the same URL; imports are read next to it |
-| A folder | **Choose a folder…** | — |
-| A `.zip` | **Choose a .zip…** (a zip of one folder works too) | — |
+| A `.zip` URL | `https://example.com/kit.zip`, a release asset, `https://github.com/me/kit/archive/refs/heads/main.zip` | the same URL |
+| A folder | **Choose a folder…** | its `updateURL`, if any |
+| A `.zip` file | **Choose a .zip…** | its `updateURL`, if any |
 
-A folder, gist or zip installs its `metadata.json`. Without one, it installs
+Each package's `updateURL` overrides the **Updates from** column.
+
+A zip of a single folder counts as that folder. A folder, gist or zip installs its `metadata.json`. Without one, it installs
 its single `*.wiretrick.ts` file, or else its single script. When a local
 folder or zip holds several scripts at its top level and no `metadata.json`,
-the page asks which one to install. A package holds at most 200 files and
+the page asks which one to install. A zip URL needs a `metadata.json` or a
+single script at its top level. A package holds at most 200 files and
 5 MB.
 
 Before anything is written, the page shows:
 
 - the metadata: name, version, description, author, license and homepage,
-  and a bundle's scripts;
+  where it updates from when `updateURL` names another place, and a bundle's scripts;
 - **what it can do**, riskiest first:
   - running on every site;
   - giving the site's own JavaScript the script's stores and overlay (`unsafe: true`);
@@ -142,8 +152,13 @@ A package installed from a URL with auto-update on is checked once a day. It
 is also checked when the browser starts, if the last check is more than a
 day old. Right-click the package's folder or script → **Check for Updates**
 checks it now. A `file://` package is read again whenever the Editor's window
-gains focus. Packages installed from a folder or zip don't update. A bundle
-updates as one: all its scripts, or none.
+gains focus. A bundle updates as one: all its scripts, or none.
+
+When the installed version's metadata has an `updateURL`, updates come from
+there instead of from where the package was installed from. A package
+installed from a folder or zip updates only this way. Without an
+`updateURL`, it doesn't update. If the files at the new place match the installed ones,
+nothing changes.
 
 An update applies by itself only when all of these hold:
 
@@ -152,6 +167,7 @@ An update applies by itself only when all of these hold:
   packages;
 - you haven't edited, renamed or deleted any of the package's files;
 - its `version` doesn't go down;
+- it doesn't change where updates come from (its `updateURL`);
 - it compiles.
 
 Otherwise it waits for review. The Explorer shows ⬆ on the package (click

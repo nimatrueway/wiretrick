@@ -1,6 +1,6 @@
 /** installed packages (see shared/packageModel), kept live for the Explorer */
 import { proxy, ref } from "valtio";
-import { entryIds, PACKAGES_KEY, packageName, type InstalledPackage } from "../../shared/packageModel";
+import { entryIds, PACKAGES_KEY, packageName, updateSource, type InstalledPackage } from "../../shared/packageModel";
 import { parseSource, sourceLabel } from "../../shared/packageSource";
 import { fetchFrom, packagesApi } from "../install/api";
 
@@ -16,14 +16,20 @@ export function packageOf(row: { kind: string; id: string; path: string }): Inst
 /** the row that carries a package's badge: its folder, or (a single file) its entry */
 export const badgeRowOf = (p: InstalledPackage): { folder: string } | { id: string } => (p.folder ? { folder: p.folder } : { id: entryIds(p)[0] });
 
+const labelOf = (url: string) => {
+    const src = parseSource(url);
+    return typeof src === "string" ? url : sourceLabel(src);
+};
+
 export function packageTitle(p: InstalledPackage): string {
-    const src = p.source ? parseSource(p.source) : null;
+    const from = updateSource(p);
     return [
         `Package “${packageName(p)}”${p.metadata.version ? ` ${p.metadata.version}` : ""}`,
-        src ? `from ${typeof src === "string" ? p.source : sourceLabel(src)}` : "installed from local files",
+        p.source ? `from ${labelOf(p.source)}` : "installed from local files",
+        from && from !== p.source ? `updates from ${labelOf(from)}` : "",
         p.pending ? "An update waits for your review — right-click → Review Update…" : "",
         p.lastError ? `Last update check failed: ${p.lastError}` : "",
-        p.source ? (p.autoUpdate ? "Updates itself" : "Auto-update is off") : "",
+        from ? (p.autoUpdate ? "Updates itself" : "Auto-update is off") : "",
     ]
         .filter(Boolean)
         .join("\n");
@@ -37,9 +43,10 @@ async function recheckLocal(): Promise<void> {
     if (Date.now() - lastLocalCheck < 5000) return;
     lastLocalCheck = Date.now();
     for (const p of Object.values(packages.byId)) {
-        if (!p.autoUpdate || !/^file:/i.test(p.source)) continue;
+        const from = updateSource(p);
+        if (!p.autoUpdate || !/^file:/i.test(from)) continue;
         try {
-            const fetched = await fetchFrom(p.source);
+            const fetched = { ...(await fetchFrom(from)), source: p.source };
             if (fetched.revision !== p.revision && fetched.revision !== p.skipped && fetched.revision !== p.pending?.revision) await packagesApi.offer(p.id, fetched, false);
         } catch {
             // moved or unreadable: the next focus tries again

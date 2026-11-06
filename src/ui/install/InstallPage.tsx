@@ -6,12 +6,11 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Analysis } from "../../background/engine/packages";
 import { describeCapabilities } from "../../shared/packageCaps";
-import { entryIds, packageName, type InstalledPackage, type PackageVersion } from "../../shared/packageModel";
+import { entryIds, packageName, updateSource, type InstalledPackage, type PackageVersion } from "../../shared/packageModel";
 import { isManifestPath, MANIFEST_FILE } from "../../shared/packageMetadata";
 import { parseSource, sourceLabel } from "../../shared/packageSource";
-import { isPackageFile, localPackage, startsIn } from "../../shared/localPackage";
+import { isPackageFile, localPackage, startsIn, unzipPackage } from "../../shared/localPackage";
 import { diffHunks, lineDiff } from "../../shared/lineDiff";
-import { readZip } from "../../shared/zip";
 import { fetchFrom, installedTexts, packagesApi, type Fetched } from "./api";
 
 type State =
@@ -39,7 +38,8 @@ export function InstallPage() {
     async function review(fetched: Fetched) {
         setState({ phase: "loading", what: "Checking what it does…" });
         const all = await packagesApi.list();
-        const existing = fetched.source ? Object.values(all).find((p) => p.source === fetched.source) : undefined;
+        // installing again from where it came from, or from its updateURL, updates it
+        const existing = fetched.source ? Object.values(all).find((p) => p.source === fetched.source) ?? Object.values(all).find((p) => updateSource(p) === fetched.source) : undefined;
         const analysis = await packagesApi.analyze(fetched, existing?.id);
         const before = existing ? await installedTexts(existing) : undefined;
         setState({ phase: "review", fetched, analysis, existing, before });
@@ -113,17 +113,7 @@ export function InstallPage() {
         if (!file) return;
         setState({ phase: "loading", what: `Reading ${file.name}…` });
         try {
-            const raw = await readZip(await file.arrayBuffer(), isPackageFile);
-            const utf8 = new TextDecoder();
-            let files: Record<string, string> = {};
-            for (const [p, bytes] of Object.entries(raw)) files[p] = utf8.decode(bytes);
-            // a zip of a folder: drop the folder
-            const tops = new Set(Object.keys(files).map((p) => (p.includes("/") ? p.split("/")[0] : "")));
-            if (tops.size === 1 && !tops.has("")) {
-                const top = [...tops][0].length + 1;
-                files = Object.fromEntries(Object.entries(files).map(([p, t]) => [p.slice(top), t]));
-            }
-            await pickLocal(file.name, files);
+            await pickLocal(file.name, await unzipPackage(await file.arrayBuffer()));
         } catch (e) {
             setState({ phase: "pick", error: errText(e) });
         }
@@ -157,7 +147,7 @@ export function InstallPage() {
                     <Header name={packageName(state.pkg)} metadata={state.pkg.metadata} scripts={state.pkg.entries} source={state.pkg.source} />
                     <p>{state.note ?? "No update is waiting for review."}</p>
                     <div className="actions">
-                        {state.pkg.source && (
+                        {updateSource(state.pkg) && (
                             <button
                                 className="primary"
                                 onClick={async () => {
@@ -214,7 +204,7 @@ function Picker(props: {
         <main>
             <h1>Install a script</h1>
             <p className="dim">
-                A script's URL (<code>.ts</code>), a bundle's <code>{MANIFEST_FILE}</code>, a GitHub repository or folder, or a gist. It installs with the files it imports and can keep itself up to date.
+                A script's URL (<code>.ts</code>), a bundle's <code>{MANIFEST_FILE}</code>, a <code>.zip</code>, a GitHub repository or folder, or a gist. It installs with the files it imports and can keep itself up to date.
             </p>
             <form
                 className="row"
@@ -238,7 +228,9 @@ function Picker(props: {
                     <input id="install-zip" type="file" hidden accept=".zip,application/zip" onChange={(e) => props.onZip(e.target.files?.[0])} />
                 </label>
             </div>
-            <p className="dim small">Scripts from a folder or zip don't update themselves.</p>
+            <p className="dim small">
+                Scripts from a folder or zip update themselves only when their metadata has an <code>updateURL</code>.
+            </p>
             {error && <p className="err">{error}</p>}
             {local && (
                 <div>
@@ -274,6 +266,7 @@ function Header(props: { name: string; metadata: Analysis["metadata"]; scripts: 
             )}
             <p className="meta dim">
                 {props.source ? <>From {label(props.source)}</> : <>From local files</>}
+                {header.updateURL && header.updateURL !== props.source && <> · updates from {label(header.updateURL)}</>}
                 {header.author && <> · by {header.author}</>}
                 {header.license && <> · {header.license}</>}
                 {header.homepage && /^https?:\/\//i.test(header.homepage) && (
@@ -388,7 +381,8 @@ function Diff(props: { before: string; after: string }) {
 
 function Review(props: { state: Extract<State, { phase: "review" }>; setState: (s: State) => void }) {
     const { fetched, analysis, existing, before } = props.state;
-    const [autoUpdate, setAutoUpdate] = useState(existing?.autoUpdate ?? !!fetched.source);
+    const updatable = !!(fetched.source || analysis.metadata.updateURL);
+    const [autoUpdate, setAutoUpdate] = useState(existing?.autoUpdate ?? updatable);
     const [busy, setBusy] = useState(false);
     const same = existing && existing.revision === fetched.revision && !existing.pending;
     async function run(fn: () => Promise<void>) {
@@ -424,7 +418,7 @@ function Review(props: { state: Extract<State, { phase: "review" }>; setState: (
             <Warnings analysis={analysis} fetched={fetched} modified={analysis.modified} />
             <Files files={fetched.files} analysis={analysis} before={before} />
             <footer>
-                {fetched.source ? (
+                {updatable ? (
                     <label className="check">
                         <input id="install-auto-update" type="checkbox" checked={autoUpdate} onChange={(e) => setAutoUpdate(e.target.checked)} /> Keep it up to date (updates that can do more wait for your review)
                     </label>

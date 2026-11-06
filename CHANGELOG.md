@@ -7,6 +7,15 @@ its section below.
 
 ## [Unreleased]
 
+### Added
+
+- `updateURL` in `wt.metadata` and `metadata.json`: where a package updates from, instead of where it was installed from. It can be a script, `metadata.json` or `.zip` URL, a GitHub file or folder, a gist or a gist's raw file. A package installed from a folder or zip now updates when it has one. An update that changes it waits for review.
+- Installing from a `.zip` URL (a release asset, a GitHub archive): its top-level `metadata.json` or single script, read from the zip's one folder if it has a single top folder.
+
+### Changed
+
+- An update check whose files match the installed ones only records the new revision. Before, a commit elsewhere in the repository came up as an update.
+
 ### Removed
 
 - Help (**?**) no longer has a Reference tab (nor the Welcome page its **API reference** button): the samples cover the API, the editor's completions and hovers document each call, and [docs/scripting.md](docs/scripting.md) has the full reference. The strategy pros and cons table lives in [docs/strategies.md](docs/strategies.md). Help opens on Samples.

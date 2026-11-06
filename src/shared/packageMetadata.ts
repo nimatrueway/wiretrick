@@ -12,7 +12,11 @@
  *
  * `connect` names the hosts the scripts' wt.fetch calls reach; the install
  * page shows them and an update that adds one asks for approval.
+ * `updateURL` is where updates come from instead of where it was installed
+ * from (any source parseSource reads); a package from local files with
+ * one updates too.
  */
+import { parseSource } from "./packageSource";
 
 export interface PackageMetadata {
     name?: string;
@@ -21,6 +25,8 @@ export interface PackageMetadata {
     homepage?: string;
     author?: string;
     license?: string;
+    /** where updates come from (a script, metadata.json or .zip URL, a GitHub file or folder, a gist) */
+    updateURL?: string;
     connect: string[];
 }
 
@@ -35,7 +41,7 @@ export const MANIFEST_FILE = "metadata.json";
 /** a bundle's manifest (at any folder depth) */
 export const isManifestPath = (path: string): boolean => path === MANIFEST_FILE || path.endsWith("/" + MANIFEST_FILE);
 
-const TEXT_KEYS = ["name", "version", "description", "homepage", "author", "license"] as const;
+const TEXT_KEYS = ["name", "version", "description", "homepage", "author", "license", "updateURL"] as const;
 
 /** validate wt.metadata's argument or a manifest's fields (unknown keys are ignored: a newer script may add some) */
 export function readMetadata(raw: unknown, where: string): PackageMetadata {
@@ -47,6 +53,10 @@ export function readMetadata(raw: unknown, where: string): PackageMetadata {
         if (v === undefined) continue;
         if (typeof v !== "string") throw new Error(`${where}: "${k}" must be a string`);
         if (v.trim()) out[k] = v.trim();
+    }
+    if (out.updateURL) {
+        const src = parseSource(out.updateURL);
+        if (typeof src === "string") throw new Error(`${where}: "updateURL" — ${src}`);
     }
     if (r.connect !== undefined) {
         if (!Array.isArray(r.connect) || r.connect.some((h) => typeof h !== "string")) throw new Error(`${where}: "connect" must be a list of host names`);
@@ -85,6 +95,10 @@ export const MANIFEST_SCHEMA = {
         homepage: { type: "string", description: "A link shown when installing" },
         author: { type: "string" },
         license: { type: "string" },
+        updateURL: {
+            type: "string",
+            description: "Where updates come from instead of where it was installed from: a metadata.json, script or .zip URL, a GitHub folder or file, a gist (an update that changes it waits for review)",
+        },
         connect: { type: "array", items: { type: "string" }, uniqueItems: true, description: "Hosts the scripts' wt.fetch calls reach; an update that adds one waits for review" },
         scripts: {
             type: "array",

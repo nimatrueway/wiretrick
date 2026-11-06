@@ -32,7 +32,7 @@ import { FileIcon, indent } from "./icons";
 import { badgeRowOf, openInstallPage, packageOf, packages, packageTitle } from "../state/packages";
 import { packageFolders } from "../../shared/makePackage";
 import { packagesApi } from "../install/api";
-import { packageName, type InstalledPackage } from "../../shared/packageModel";
+import { packageName, updateSource, type InstalledPackage } from "../../shared/packageModel";
 import { MANIFEST_FILE } from "../../shared/packageMetadata";
 
 /** the path the explorer's Copy Path copies (a script's is its file's) */
@@ -68,11 +68,12 @@ async function checkUpdates(p?: InstalledPackage): Promise<void> {
 
 /** a package's items in a menu on one of its rows */
 function packageMenu(p: InstalledPackage): MenuItem[] {
-    const src = p.source && /^https?:/i.test(p.source) ? p.source : "";
+    const from = updateSource(p);
+    const src = [p.source, from].find((u) => /^https?:/i.test(u) && !/\.zip([?#]|$)/i.test(u)) ?? "";
     return [
         ...(p.pending ? [{ label: "Review Update…", run: () => openInstallPage(`?update=${encodeURIComponent(p.id)}`) }] : []),
-        ...(p.source ? [{ label: "Check for Updates", run: () => pkgAction(() => checkUpdates(p)) }] : []),
-        ...(p.source ? [{ label: p.autoUpdate ? "Turn Auto-Update Off" : "Turn Auto-Update On", run: () => pkgAction(() => packagesApi.setAutoUpdate(p.id, !p.autoUpdate), `auto-update ${p.autoUpdate ? "off" : "on"} for ${pkgLabel(p)}`) }] : []),
+        ...(from ? [{ label: "Check for Updates", run: () => pkgAction(() => checkUpdates(p)) }] : []),
+        ...(from ? [{ label: p.autoUpdate ? "Turn Auto-Update Off" : "Turn Auto-Update On", run: () => pkgAction(() => packagesApi.setAutoUpdate(p.id, !p.autoUpdate), `auto-update ${p.autoUpdate ? "off" : "on"} for ${pkgLabel(p)}`) }] : []),
         ...(p.previous ? [{ label: `Roll Back to ${p.previous.metadata.version || "the Previous Version"}`, run: () => pkgAction(() => packagesApi.rollback(p.id), `rolled ${pkgLabel(p)} back (auto-update is off now)`) }] : []),
         ...(src ? [{ label: "Open Source Page", run: () => void chrome.tabs.create({ url: src }) }] : []),
         { label: "Forget Package (Keep Files)", run: () => pkgAction(() => packagesApi.forget(p.id), `${pkgLabel(p)} won't update anymore`) },
@@ -91,7 +92,7 @@ function newItemsMenu(folder: string): MenuItem[] {
 function installMenu(): MenuItem[] {
     return [
         { label: "Install Script…", run: () => openInstallPage() },
-        ...(Object.values(packages.byId).some((p) => p.source && p.autoUpdate) ? [{ label: "Check for Script Updates", run: () => pkgAction(() => checkUpdates()) }] : []),
+        ...(Object.values(packages.byId).some((p) => updateSource(p) && p.autoUpdate) ? [{ label: "Check for Script Updates", run: () => pkgAction(() => checkUpdates()) }] : []),
     ];
 }
 

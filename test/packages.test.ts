@@ -132,6 +132,36 @@ describe("installed packages", () => {
         expect((await ss.listDataFiles()).map((d) => d.path)).toEqual(["Kit/metadata.json"]);
     });
 
+    it("updates from metadata's updateURL, even installed from local files", async () => {
+        const U = "https://example.com/u/dark.wiretrick.ts";
+        const withUrl = (url: string, ver = "1.0.0") => entry("*://a.com/*").replace('version: "1.0.0"', `version: "${ver}", updateURL: "${url}"`);
+        let remote: Record<string, string> = {};
+        const serve = (f: Record<string, string>) => (remote = Object.fromEntries(Object.entries(f).map(([k, v]) => [`https://example.com/u/${k}`, v])));
+        (globalThis as any).fetch = async (url: string) => (url in remote ? { ok: true, status: 200, text: async () => remote[url] } : { ok: false, status: 404 });
+
+        const v1 = files(withUrl(U));
+        const pkg = await pk.installPackage(await fetched(v1, ""), { enabled: true, autoUpdate: true });
+        expect(pkg).toMatchObject({ source: "", autoUpdate: true, metadata: { updateURL: U } });
+
+        // the same files: only the revision moves
+        serve(v1);
+        const same = (await pk.checkPackages())[pkg.id];
+        expect(same.pending).toBeUndefined();
+        expect(same.lastError).toBeUndefined();
+        expect(same.updatedAt).toBe(pkg.updatedAt);
+
+        serve(files(withUrl(U, "1.1.0"), "export const tint = (n: number) => n * 3;\n"));
+        const after = (await pk.checkPackages())[pkg.id];
+        expect(after).toMatchObject({ source: "", metadata: { version: "1.1.0" } });
+        expect((await ss.listScripts()).find((s) => s.meta.name === "dark/lib")!.code).toContain("n * 3");
+
+        // moving the updates elsewhere waits for review
+        serve(files(withUrl("https://github.com/me/s/tree/main/dark", "1.2.0")));
+        const moved = (await pk.checkPackages())[pkg.id];
+        expect(moved.pending?.reasons).toEqual(["it updates from somewhere else: https://github.com/me/s/tree/main/dark"]);
+        expect(moved.metadata.version).toBe("1.1.0");
+    });
+
     it("forgets a package whose entry is deleted", async () => {
         const pkg = await pk.installPackage(await fetched(files(entry("*://a.com/*"))), { enabled: true, autoUpdate: true });
         await pk.forgetPackage(pkg.id);

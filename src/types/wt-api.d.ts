@@ -658,6 +658,14 @@ declare namespace Wiretrick {
         homepage?: string;
         author?: string;
         license?: string;
+        /**
+         * Where updates come from, instead of where it was installed from: a
+         * script, metadata.json or .zip URL, a GitHub file or folder
+         * (`github.com/o/r/tree/main/dir`), a gist (`gist.github.com/u/id`) or a
+         * gist's raw file URL. A copy installed from a folder or zip updates
+         * from it too. An update that changes it waits for review.
+         */
+        updateURL?: string;
         /** hosts this script's wt.fetch calls reach — an update that adds one waits for review */
         connect?: string[];
     }

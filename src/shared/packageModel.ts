@@ -43,7 +43,7 @@ export interface PendingUpdate extends PackageVersion {
 
 export interface InstalledPackage {
     id: string;
-    /** the source URL as given (parseSource reads it) */
+    /** where it was installed from, as given (parseSource reads it); "" = local files. metadata.updateURL overrides it for updates (see updateSource) */
     source: string;
     /** the folder its files went into; "" = the root (a single file) */
     folder: string;
@@ -63,6 +63,9 @@ export interface InstalledPackage {
     /** the version before the last update (Roll back) */
     previous?: PackageVersion;
 }
+
+/** where a package updates from: its metadata's updateURL, else where it was installed from ("": it doesn't) */
+export const updateSource = (p: { source: string; metadata: PackageMetadata }): string => p.metadata.updateURL || p.source;
 
 export const isDataPath = (rel: string): boolean => /\.(json|svg)$/i.test(rel);
 

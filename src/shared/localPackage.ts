@@ -1,8 +1,7 @@
 /** a package from local files (a chosen folder or a .zip) */
 import { crawl, filesHash, type CrawledPackage } from "./packageSource";
 
-/** the files a package can use */
-export const isPackageFile = (path: string): boolean => /\.(tsx?|json|svg)$/i.test(path) && !/(^|\/)(node_modules|\.git)\//.test(path);
+export { isPackageFile, unzipPackage } from "./packageSource";
 
 /** the scripts and bundles (metadata.json) a set of files has, shallowest first (a folder's own before its subfolders') */
 export function startsIn(paths: string[]): string[] {

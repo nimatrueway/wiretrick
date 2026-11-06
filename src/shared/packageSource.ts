@@ -12,6 +12,8 @@
  *     gist's revision
  *   - any other http(s) or file:// URL of the script or metadata.json; the
  *     files are fetched next to it
+ *   - a .zip URL (a release asset, `github.com/o/r/archive/…zip`): its
+ *     root's package (see pickStart; a zip of one folder is that folder)
  *
  * A `*.wiretrick.ts` URL opened in a tab installs (a share link, like
  * GreaseMonkey's `.user.js`).
@@ -20,11 +22,13 @@ import { builtinSpec } from "./builtinSpecs";
 import { isManifestPath, MANIFEST_FILE, parseManifest, type Manifest } from "./packageMetadata";
 import { isUrlSpec } from "./packageImports";
 import { importPath, importSpecs, isDataSpec } from "./scriptImports";
+import { readZip } from "./zip";
 
 export type PackageSource =
     | { kind: "github"; owner: string; repo: string; ref: string; path: string; tree: boolean }
     | { kind: "gist"; id: string; file?: string }
-    | { kind: "url"; url: string };
+    | { kind: "url"; url: string }
+    | { kind: "zip"; url: string };
 
 /** a URL that installs as a package when opened in a tab */
 export const ENTRY_URL_RE = /^(https?|file):\/\/[^?#]*\.wiretrick\.tsx?([?#]|$)/i;
@@ -45,6 +49,10 @@ export function parseSource(input: string): PackageSource | string {
     }
     const seg = u.pathname.split("/").filter(Boolean).map(decodeURIComponent);
     const host = u.hostname.toLowerCase();
+    if (/^(https?|file):$/.test(u.protocol) && /\.zip$/i.test(u.pathname)) {
+        u.hash = "";
+        return { kind: "zip", url: u.href };
+    }
     if (host === "github.com" || host === "www.github.com") {
         const [owner, repo, mode, ref, ...rest] = seg;
         if (!owner || !repo) return "a GitHub URL needs the owner and repository";
@@ -72,7 +80,7 @@ export function parseSource(input: string): PackageSource | string {
         return { kind: "gist", id, file: rest.length ? rest[rest.length - 1] : undefined };
     }
     if (u.protocol === "http:" || u.protocol === "https:" || u.protocol === "file:") {
-        if (!SCRIPT_FILE_RE.test(u.pathname) && !isManifestPath(u.pathname)) return "the URL must end in .ts (a script) or metadata.json (a bundle)";
+        if (!SCRIPT_FILE_RE.test(u.pathname) && !isManifestPath(u.pathname)) return "the URL must end in .ts (a script), metadata.json (a bundle) or .zip";
         u.hash = "";
         return { kind: "url", url: u.href };
     }
@@ -87,12 +95,28 @@ export function sourceLabel(src: PackageSource): string {
 }
 
 /** a source updates in the background (a local file only when the Editor reads it) */
-export const isRemote = (src: PackageSource): boolean => src.kind !== "url" || /^https?:/i.test(src.url);
+export const isRemote = (src: PackageSource): boolean => (src.kind !== "url" && src.kind !== "zip") || /^https?:/i.test(src.url);
 
-/** how the reader gets at the network: text of a URL (null: not found), and JSON */
+/** how the reader gets at the network: text or bytes of a URL (null: not found), and JSON */
 export interface Net {
     text(url: string): Promise<string | null>;
+    bytes(url: string): Promise<ArrayBuffer | null>;
     json(url: string): Promise<any>;
+}
+
+/** the files a package can use */
+export const isPackageFile = (path: string): boolean => /\.(tsx?|json|svg)$/i.test(path) && !/(^|\/)(node_modules|\.git)\//.test(path);
+
+/** a zip's package files, as text; a zip of one folder is that folder's */
+export async function unzipPackage(buf: ArrayBuffer): Promise<Record<string, string>> {
+    const raw = await readZip(buf, isPackageFile);
+    const utf8 = new TextDecoder();
+    const files: Record<string, string> = {};
+    for (const [p, bytes] of Object.entries(raw)) files[p] = utf8.decode(bytes);
+    const tops = new Set(Object.keys(files).map((p) => (p.includes("/") ? p.split("/")[0] : "")));
+    if (tops.size !== 1 || tops.has("")) return files;
+    const cut = [...tops][0].length + 1;
+    return Object.fromEntries(Object.entries(files).map(([p, t]) => [p.slice(cut), t]));
 }
 
 /** a source, opened: where its entry or metadata.json is, how to read a path, and the revision it's pinned to */
@@ -139,6 +163,14 @@ export async function openSource(src: PackageSource, net: Net): Promise<OpenedSo
                 return f.truncated || f.content === undefined ? (f.raw_url ? net.text(f.raw_url) : null) : f.content;
             },
         };
+    }
+    if (src.kind === "zip") {
+        const buf = await net.bytes(src.url);
+        if (!buf) throw new Error(`can't read ${src.url}`);
+        if (buf.byteLength > 4 * MAX_BYTES) throw new Error(`the zip is over ${(4 * MAX_BYTES) / 1024 / 1024} MB`);
+        const files = await unzipPackage(buf);
+        const start = pickStart(Object.keys(files).filter((p) => !p.includes("/")), "the zip", "list them in a metadata.json at its root");
+        return { start, read: async (p) => files[p] ?? null };
     }
     // a plain URL: paths are from its origin's root, so `../` imports work
     const u = new URL(src.url);
@@ -300,6 +332,13 @@ export const webNet: Net = {
         if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
         return r.text();
     },
+    async bytes(url) {
+        if (url.startsWith("file:")) return readFileUrl(url, true);
+        const r = await fetch(url, { cache: "no-store", credentials: "omit" });
+        if (r.status === 404) return null;
+        if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
+        return r.arrayBuffer();
+    },
     async json(url) {
         const r = await fetch(url, { cache: "no-store", credentials: "omit", headers: { accept: "application/vnd.github+json" } });
         if (!r.ok) {
@@ -310,11 +349,14 @@ export const webNet: Net = {
     },
 };
 
-function readFileUrl(url: string): Promise<string | null> {
+function readFileUrl(url: string): Promise<string | null>;
+function readFileUrl(url: string, binary: true): Promise<ArrayBuffer | null>;
+function readFileUrl(url: string, binary = false): Promise<any> {
     return new Promise((resolve, reject) => {
         const x = new XMLHttpRequest();
         x.open("GET", url);
-        x.onload = () => resolve(x.status === 0 || x.status === 200 ? x.responseText : null);
+        if (binary) x.responseType = "arraybuffer";
+        x.onload = () => resolve(x.status === 0 || x.status === 200 ? (binary ? x.response : x.responseText) : null);
         // a missing file and no file access look the same: an error
         x.onerror = () => reject(new Error(`can't read ${url} — allow "Access to file URLs" for Wiretrick in the browser's extension settings, or install the folder instead`));
         x.send();

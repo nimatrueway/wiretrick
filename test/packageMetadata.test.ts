@@ -27,6 +27,12 @@ describe("compiling", () => {
         expect(c.meta.description).toBe("Hello");
         expect(c.meta.metadata).toEqual({ name: "Dark", version: "1.2.0", description: "Hello", connect: ["api.github.com", "a.com"] });
     });
+    it("reads and checks updateURL", () => {
+        const ok = compileWithLibs({ id: "a", name: "x.wiretrick", code: `wt.metadata({ updateURL: "https://github.com/me/s/tree/main/kit" });\n${SCRIPT}` }, []);
+        expect(ok.meta.metadata).toEqual({ updateURL: "https://github.com/me/s/tree/main/kit", connect: [] });
+        expect(compileWithLibs({ id: "a", name: "x.wiretrick", code: `wt.metadata({ updateURL: "https://x.dev/a.js" });` }, []).error).toMatch(/"updateURL" — the URL must end in/);
+        expect(parseManifest(JSON.stringify({ updateURL: "https://x.dev/kit.zip", scripts: ["a.ts"] })).updateURL).toBe("https://x.dev/kit.zip");
+    });
     it("rejects a wrong wt.metadata", () => {
         expect(compileWithLibs({ id: "a", name: "x.wiretrick", code: `wt.metadata({ version: 1 } as any);` }, []).error).toMatch(/"version" must be a string/);
         expect(compileWithLibs({ id: "a", name: "x.wiretrick", code: `wt.metadata({}); wt.metadata({});` }, []).error).toMatch(/once/);
