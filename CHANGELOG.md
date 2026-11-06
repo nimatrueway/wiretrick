@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.16.0-alpha] - 2026-11-05
+
 ### Added
 
 - `updateURL` in `wt.metadata` and `metadata.json`: where a package updates from, instead of where it was installed from. It can be a script, `metadata.json` or `.zip` URL, a GitHub file or folder, a gist or a gist's raw file. A package installed from a folder or zip now updates when it has one. An update that changes it waits for review.
@@ -711,7 +713,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.15.0-alpha...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.16.0-alpha...HEAD
+[0.16.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.15.0-alpha...v0.16.0-alpha
 [0.15.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.14.0-alpha...v0.15.0-alpha
 [0.14.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.13.0-alpha...v0.14.0-alpha
 [0.13.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.12.2-alpha...v0.13.0-alpha
