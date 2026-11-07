@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.21.0-alpha] - 2026-11-07
+
 ### Added
 
 - `wt.siteStore(name, initial)`: a store whose data lives in the site's own world — the one store `onSite` code can use. `onSite` code reads and writes it synchronously; `onPage` and `onOverlay` code hold a live mirror (valtio, `useSnapshot`, `subscribe` as usual). It holds page data: one copy per document, gone on reload, and the site can read it.
@@ -802,7 +804,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.20.0-alpha...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.21.0-alpha...HEAD
+[0.21.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.20.0-alpha...v0.21.0-alpha
 [0.20.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.19.0-alpha...v0.20.0-alpha
 [0.19.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.18.0-alpha...v0.19.0-alpha
 [0.18.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.17.0-alpha...v0.18.0-alpha
