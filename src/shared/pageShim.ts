@@ -17,7 +17,7 @@
  * aren't there.
  */
 import { normalizeRoute, placeApi, placeKeyer, placeKind, routeMatches, type DocumentWhen, type PageWorld, type PlaceApi, type RouteMeta } from "./route";
-import { inertRemote, siteRemote, SITE_NO_STORES, type SiteCannotCallError } from "./remote";
+import { inertRemote, LIB_SITE_STORE, siteRemote, SITE_NO_STORES, unusableStore, type SiteCannotCallError } from "./remote";
 import type { Exposer } from "./rpc";
 import type { Generation, ScriptLife } from "./runLifecycle";
 import { parseParamValue, type ParamDef } from "./scriptDef";
@@ -50,6 +50,8 @@ export interface PageShimOptions {
     onSiteCall?: (e: SiteCannotCallError) => void;
     /** the script's store replicas (`wt.pageStore`: this page's copy): the isolated world only */
     stores?: PageStores;
+    /** `wt.siteStore`: the site's world's store (onSite code) or a mirror of it (absent: a library's, which throws when used) */
+    siteStore?: (name: string, initial: object) => object;
 }
 
 export interface PageStores {
@@ -57,10 +59,8 @@ export interface PageStores {
     pageStore(name: string, initial: object): object;
 }
 
-const fail = (): never => {
-    throw new Error(SITE_NO_STORES);
-};
-const noStore = new Proxy(Object.create(null), { get: (_t, p) => (p === "then" || typeof p === "symbol" ? undefined : fail()), set: fail, has: fail, ownKeys: fail, deleteProperty: fail });
+const noStore = unusableStore(SITE_NO_STORES);
+const libSiteStore = unusableStore(LIB_SITE_STORE);
 const NO_FETCH = "wt.fetch isn't available in page code — use the page's own fetch";
 /** a library's handles: its handlers don't run */
 const LIB_HANDLE = "handles from an imported library don't connect; register the handler in the script itself";
@@ -90,6 +90,7 @@ export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDocumentHa
     };
     const stores = world === "isolated" ? o.stores : undefined;
     const names = new Map<string, string>();
+    const siteNames = new Map<string, string>();
     const parsed = (key: string, def: ParamDef | undefined) => (def && typeof def === "object" ? parseParamValue(key, def, o.params[key]) : o.params[key]);
     const wt = {
         onRequest: inert,
@@ -111,6 +112,12 @@ export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDocumentHa
             claimStoreName(names, "wt.pageStore", name, initial);
             names.set(name, "wt.pageStore");
             return stores.pageStore(name, initial);
+        },
+        siteStore: (name: string, initial: object) => {
+            if (!o.siteStore) return libSiteStore;
+            claimStoreName(siteNames, "wt.siteStore", name, initial);
+            siteNames.set(name, "wt.siteStore");
+            return o.siteStore(name, initial);
         },
         fetch: () => Promise.reject(new Error(NO_FETCH)),
         metadata: inert,

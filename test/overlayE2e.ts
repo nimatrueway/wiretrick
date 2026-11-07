@@ -64,7 +64,7 @@ window.addEventListener("keydown", (e) => { if (e.altKey && e.code === "KeyP") e
         res.end(PAGE(`<p id="lifec" class="life-color">c</p>`));
         return true;
     }
-    if (url.pathname === "/ov-two" || url.pathname === "/ov-isost" || url.pathname === "/ov-unsafe") {
+    if (url.pathname === "/ov-two" || url.pathname === "/ov-isost" || url.pathname === "/ov-unsafe" || url.pathname === "/ov-site") {
         res.writeHead(200, { "content-type": "text/html" });
         res.end(PAGE(""));
         return true;
@@ -904,6 +904,94 @@ export async function checkSiteHandles(ctx: any, mgr: any, origin: string, check
     check(t("a forged store op from the page goes unanswered"), forged === "no answer", forged);
     await a.close();
     await send({ type: "deleteScript", id: "s_uns" });
+}
+
+const siteStoreCode = (origin: string, v: number) => `import { subscribe } from "valtio";
+import { useSnapshot } from "valtio";
+
+// v${v}
+const ss = wt.siteStore("ss", { n: 0, on: false });
+
+wt.onSite("${origin}/ov-site*", () => {
+    (window as any).__ss = { read: () => JSON.stringify({ n: ss.n, on: ss.on }), bump: () => ++ss.n };
+});
+
+wt.onPage("${origin}/ov-site*", (ctx) => {
+    const show = () => (document.body.dataset.ssPage = String(ss.n));
+    show();
+    ctx.signal.addEventListener("abort", subscribe(ss, show));
+});
+
+wt.onOverlay("${origin}/ov-site*", (ctx) => {
+    (window as any).toggleSS = () => (ss.on = !ss.on);
+    function N() {
+        const snap = useSnapshot(ss);
+        return <b id="ss-n">{snap.n}</b>;
+    }
+    ctx.mount(<N />);
+});
+`;
+
+/**
+ * wt.siteStore: onSite code's writes re-render the overlay and reach onPage
+ * code; the overlay's write is read synchronously in the site's world; ten
+ * saves keep the values and one subscription per mirror; a forged message
+ * for an unknown subscription changes nothing.
+ */
+export async function checkSiteStores(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
+    const t = (s: string) => `site stores${opts.label ?? ""}: ${s}`;
+    const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
+    const saved = await send({ type: "saveScript", id: "s_site", code: siteStoreCode(origin, 0), name: "site stores.wiretrick" });
+    check(t("the script saves"), !saved?.error, saved?.error);
+    await mgr.waitForTimeout(800);
+    const warns = ((await send({ type: "listScripts" })) || []).find((s: any) => s.id === "s_site")?.routeWarnings ?? [];
+    check(t("no Problems"), !warns.length, JSON.stringify(warns));
+    const a = await ctx.newPage();
+    await a.goto(`${origin}/ov-site`, { waitUntil: "load", timeout: 15000 });
+    const siteRead = (): Promise<any> => a.evaluate(() => JSON.parse((window as any).__ss?.read() ?? "null")).catch(() => null);
+    await waitFor(siteRead, (v) => !!v, 8000);
+    const f = await overlayFrame(a, "#ss-n");
+    const shown = (): Promise<string> => f?.evaluate(() => document.getElementById("ss-n")?.textContent ?? "").catch(() => "") ?? Promise.resolve("");
+    const onPage = (): Promise<string> => a.evaluate(() => document.body.dataset.ssPage ?? "");
+    await a.evaluate(() => (window as any).__ss.bump());
+    await a.evaluate(() => (window as any).__ss.bump());
+    const n2 = await waitFor(shown, (v) => v === "2", 8000);
+    const p2 = await waitFor(onPage, (v) => v === "2", 8000);
+    check(t("onSite code's writes re-render the overlay and reach onPage code"), n2 === "2" && p2 === "2", JSON.stringify({ n2, p2 }));
+    await f?.evaluate(() => (window as any).toggleSS());
+    const on = await waitFor(siteRead, (v) => v?.on === true, 8000);
+    check(t("the overlay's write is read synchronously in the site's world"), on?.on === true && on?.n === 2, JSON.stringify(on));
+    for (let v = 1; v <= 10; v++) {
+        const r = await send({ type: "saveScript", id: "s_site", code: siteStoreCode(origin, v), name: "site stores.wiretrick" });
+        if (r?.error) check(t(`save ${v}`), false, r.error);
+        await mgr.waitForTimeout(150);
+    }
+    await mgr.waitForTimeout(1200);
+    // the page sees every answer the site's world sends: count the subscriptions one write reaches
+    const subs = await a.evaluate(
+        () =>
+            new Promise<string[]>((r) => {
+                const seen = new Set<string>();
+                addEventListener("message", (e) => {
+                    if (e.data?.source === "res-override-hook" && e.data.kind === "site.ops") seen.add(e.data.sub);
+                });
+                (window as any).__ss.bump();
+                setTimeout(() => r([...seen]), 1500);
+            })
+    );
+    const after = await siteRead();
+    const n3 = await waitFor(shown, (v) => v === "3", 8000);
+    const p3 = await waitFor(onPage, (v) => v === "3", 8000);
+    check(t("ten saves keep the values and one subscription per mirror (overlay, onPage)"), after?.n === 3 && after?.on === true && n3 === "3" && p3 === "3" && subs.length === 2, JSON.stringify({ after, n3, p3, subs }));
+    await a.evaluate(() => {
+        postMessage({ source: "res-override-hook", kind: "site.snapshot", sub: "forged.1", value: { n: 999, on: false } }, location.origin);
+        postMessage({ source: "res-override-hook", kind: "site.ops", sub: "forged.1", ops: [["set", ["n"], 999]], acks: [] }, location.origin);
+    });
+    await mgr.waitForTimeout(800);
+    const still = { overlay: await shown(), page: await onPage() };
+    check(t("a forged message for an unknown subscription changes no mirror"), still.overlay === "3" && still.page === "3", JSON.stringify(still));
+    await a.close();
+    await send({ type: "deleteScript", id: "s_site" });
 }
 
 const lifeCode = (origin: string, v: string, red: number, boom = false) => `const site = wt.onSite("${origin}/ov-life*", (ctx) => {

@@ -276,6 +276,55 @@ wt.onOverlay("*://en.wikipedia.org/wiki/*", async (ctx) => {
 });`,
     },
     {
+        name: "Watch and mock the site's fetch (wt.siteStore)",
+        blurb: "Share state with the site's own JavaScript: onSite code wraps the site's fetch, records the last URL and mocks /users/1 when the panel's switch is on — all through a wt.siteStore the overlay sees live. Try it: open dummyjson.com — use the panel at the bottom left.",
+        code: `// Try it: open https://dummyjson.com/ — click Fetch, then tick "Mock /users/1"
+// in the panel at the bottom left and click Fetch again
+import { useState } from "react";
+import { useSnapshot } from "valtio";
+
+wt.metadata({ description: "Watch and mock the site's own fetch from a panel" });
+
+// lives in the site's world: onSite code reads it synchronously, the panel gets a
+// live copy. It's page data — the site can read and change it too
+const shared = wt.siteStore("shared", { mock: false, lastUrl: "" });
+
+const site = wt.onSite("https://dummyjson.com/*", (ctx) => {
+    const realFetch = window.fetch;
+    window.fetch = (input, init) => {
+        const url = input instanceof Request ? input.url : String(input);
+        shared.lastUrl = url;
+        if (shared.mock && url.endsWith("/users/1")) return Promise.resolve(Response.json({ firstName: "Mocked", lastName: "User" }));
+        return realFetch(input, init);
+    };
+    // a save runs this again: put the site's fetch back first
+    ctx.signal.addEventListener("abort", () => (window.fetch = realFetch));
+    return { user: () => window.fetch("/users/1").then((r) => r.json()) };
+});
+
+wt.onOverlay("https://dummyjson.com/*", (ctx) => {
+    function Panel() {
+        const snap = useSnapshot(shared);
+        const [user, setUser] = useState("");
+        const fetchUser = async () => {
+            const u = await site.user();
+            setUser(u.firstName + " " + u.lastName);
+        };
+        return (
+            <div style={{ position: "fixed", left: 16, bottom: 16, display: "grid", gap: 8, padding: 12, font: "14px system-ui", background: "#fff", border: "1px solid #ccc", borderRadius: 8, boxShadow: "0 2px 8px #0003" }}>
+                <label>
+                    <input id="wt-site-mock" type="checkbox" checked={snap.mock} onChange={() => (shared.mock = !shared.mock)} /> Mock /users/1
+                </label>
+                <button id="wt-site-fetch" onClick={fetchUser}>Fetch /users/1</button>
+                <output id="wt-site-user">{user}</output>
+                <small id="wt-site-last">Last fetch: {snap.lastUrl || "none yet"}</small>
+            </div>
+        );
+    }
+    ctx.mount(<Panel />);
+});`,
+    },
+    {
         name: "Per-script storage",
         blurb: "Keep state between page loads with wt.storage. Try it: open any Wikipedia article and reload — the counter at the top goes up.",
         code: `// Try it: open https://en.wikipedia.org/wiki/Cat and reload a few times

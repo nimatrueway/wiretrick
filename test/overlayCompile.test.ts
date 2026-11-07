@@ -2,6 +2,7 @@
 // the built-in React's automatic runtime, or another via a pragma) and
 // what page code gets for built-in imports.
 import { describe, it, expect } from "vitest";
+import { siteBuiltin } from "../src/shared/siteBuiltin";
 import "../src/shared/transpile";
 import { compileScript, keyPlaceCalls, onSiteUses, siteProblems, toRunnableJs } from "../src/shared/compile";
 import { SITE_DISALLOWED, SITE_NO_HANDLES, SITE_NO_STORES } from "../src/shared/remote";
@@ -124,8 +125,18 @@ describe("built-in imports in onSite code", () => {
         const req = makeLibRequire([], () => {})("main");
         const React = req("react");
         expect(React.__esModule).toBe(true);
-        expect(() => React.useState).toThrow(/aren't available in onSite code/);
-        expect(() => req("valtio").proxy({})).toThrow(/aren't available in onSite code/);
+        expect(() => React.useState).toThrow(/cannot use "react" in onSite code/);
+        expect(() => req("valtio").proxy({})).toThrow(/cannot use "valtio" in onSite code/);
+    });
+
+    it("the site's world has valtio's core (for its site stores), not its React hooks", () => {
+        const req = makeLibRequire([], () => {}, { builtin: siteBuiltin })("main");
+        const v = req("valtio");
+        const p = v.proxy({ n: 1 });
+        expect(v.snapshot(p)).toEqual({ n: 1 });
+        expect(req("valtio/vanilla").proxy).toBe(v.proxy);
+        expect(() => v.useSnapshot(p)).toThrow(/needs React/);
+        expect(() => req("react").useState).toThrow(/cannot use "react" in onSite code/);
     });
 
     it("a page shim compiles an overlay script that imports React", () => {

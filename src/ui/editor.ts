@@ -50,8 +50,8 @@ import { watchPackages } from "./state/packages";
 import { createCodeEditor } from "./shell/codeEditor";
 import { toolbar, type SaveState } from "./state/toolbar";
 import { refreshUserScripts } from "./state/userScripts";
-import { SITE_DISALLOWED } from "../shared/remote";
-import { onPageEdit } from "./placeFix";
+import { SITE_DISALLOWED, SITE_NO_STORES } from "../shared/remote";
+import { onPageEdit, siteStoreEdits, type TextEdit } from "./placeFix";
 import { collectDiagnostics, diagnosticsFileName, downloadText, installedExtensions } from "./about";
 import { DIAG_SECTIONS } from "../shared/diagnosticsSections";
 
@@ -858,7 +858,8 @@ function registerPinImportFix(): void {
 /**
  * Quick fixes for where a handler runs: an onSite handler calling a handle
  * (a runtime Problem) or using a store / handle (a route warning) moves to
- * wt.onPage.
+ * wt.onPage; one using a store can keep running in the site, its stores
+ * becoming `wt.siteStore`s.
  */
 function registerPlaceFixes(): void {
     const monaco = (window as any).monaco;
@@ -870,17 +871,28 @@ function registerPlaceFixes(): void {
                 if (!msg.includes(SITE_DISALLOWED)) continue;
                 // the marker's end: inside the call, or (a route warning, on the registration line) past `wt.onSite(`
                 const offset = model.getOffsetAt({ lineNumber: mk.endLineNumber, column: mk.endColumn });
+                const textEdit = (fix: TextEdit) => {
+                    const a = model.getPositionAt(fix.start);
+                    const b = model.getPositionAt(fix.end);
+                    return { resource: model.uri, versionId: model.getVersionId(), textEdit: { range: { startLineNumber: a.lineNumber, startColumn: a.column, endLineNumber: b.lineNumber, endColumn: b.column }, text: fix.text } };
+                };
                 const fix = onPageEdit(model.getValue(), offset);
                 if (!fix) continue;
-                const a = model.getPositionAt(fix.start);
-                const b = model.getPositionAt(fix.end);
                 actions.push({
                     title: "Move this handler to wt.onPage (the isolated world)",
                     kind: "quickfix",
                     isPreferred: true,
                     diagnostics: [mk],
-                    edit: { edits: [{ resource: model.uri, versionId: model.getVersionId(), textEdit: { range: { startLineNumber: a.lineNumber, startColumn: a.column, endLineNumber: b.lineNumber, endColumn: b.column }, text: fix.text } }] },
+                    edit: { edits: [textEdit(fix)] },
                 });
+                const site = msg.includes(SITE_NO_STORES) ? siteStoreEdits(model.getValue(), offset) : [];
+                if (site.length)
+                    actions.push({
+                        title: "Change to wt.siteStore (its data becomes page data)",
+                        kind: "quickfix",
+                        diagnostics: [mk],
+                        edit: { edits: site.map(textEdit) },
+                    });
             }
             return { actions, dispose() {} };
         },

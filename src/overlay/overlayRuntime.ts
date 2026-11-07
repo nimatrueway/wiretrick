@@ -17,6 +17,7 @@
 import { compileScript, type ResApiOverrides } from "../shared/compile";
 import { messagePortEndpoint, type Endpoint, type OverlayInit } from "../shared/wire";
 import { ReplicaHub } from "../shared/storeReplica";
+import { SiteMirrors } from "../shared/siteStoreMirror";
 import { builtinModule, ensureBuiltins } from "../shared/builtins";
 import { makeLibRequire } from "../shared/scriptImports";
 import type { PackageModules } from "../shared/packageImports";
@@ -68,6 +69,10 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
     hub.prime({ [s]: init.stores });
     hub.attach(ep);
     ep.on("store.resync", () => hub.reconnect());
+    // `wt.siteStore`: the page's (the bridge relays, for this script's own)
+    const site = new SiteMirrors({ ctx: "overlay", post: (m) => !ep.closed && ep.push("site.up", m), log: (_s, msg, level) => log(level, msg) });
+    ep.on("site.down", (m) => site.receive(m));
+    ep.onClose(() => site.dispose());
 
     const client = new RpcClient((call) => {
         if (ep.closed) throw new Error("the overlay was closed");
@@ -144,6 +149,7 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
         store: (name, initial, persist) => hub.store(s, name, initial, persist),
         // the overlay's own page's copy
         pageStore: (name, initial) => hub.pageStore(s, name, initial, init.page),
+        siteStore: (name, initial) => site.store(s, name, initial),
         fetch: (request, bypass) => ep.call("fetch", { request, bypass }),
         pageFetch: page,
     };

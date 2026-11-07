@@ -42,6 +42,14 @@ _Avoid_: world option, `js: "page"`, `dom: "overlay"`
 What `wt.onSite`, `wt.onPage` or `wt.onOverlay` returns: the functions its handler returned, callable (async) from `onPage` and `onOverlay` code. Calls wait for the handler and never time out.
 _Avoid_: remote, proxy, stub
 
+**Site store**:
+A `wt.siteStore`: a store that lives in the site's JavaScript world, one copy per page, which `onSite` code uses directly and the site can read and change — page data.
+_Avoid_: page-world store, unsafe store
+
+**Mirror**:
+A site store's live copy in `onPage` or `onOverlay` code: it follows the site's copy and sends its changes there.
+_Avoid_: replica (that's a copy of a `wt.globalStore` or `wt.pageStore`)
+
 **Run**:
 One execution of a page handler in one frame. A save, navigation or disable ends it, aborting `ctx.signal`.
 _Avoid_: instance, session

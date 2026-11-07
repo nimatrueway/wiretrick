@@ -31,7 +31,19 @@ export const SITE_DISALLOWED = "which the site's JavaScript world can't be trust
 /** a handle used in onSite code */
 export const SITE_NO_HANDLES = `onSite code can't call handles (${SITE_DISALLOWED}: the site could call them too) — call them from wt.onPage or wt.onOverlay code, and have those read the site through an onSite handle`;
 /** a store used in onSite code */
-export const SITE_NO_STORES = `wt.globalStore and wt.pageStore aren't available in onSite code (${SITE_DISALLOWED}: the site could read and forge them) — use them in wt.onPage or wt.onOverlay code, and pass what onSite code needs as arguments`;
+export const SITE_NO_STORES = `wt.globalStore and wt.pageStore aren't available in onSite code (${SITE_DISALLOWED}: the site could read and forge them) — keep what the site may see in a wt.siteStore, or use them in wt.onPage or wt.onOverlay code`;
+/** `wt.siteStore` where there's no page (network handlers) */
+export const NO_SITE_STORE = "wt.siteStore needs a page; network handlers have none — use it in wt.onSite, wt.onPage or wt.onOverlay code";
+/** `wt.siteStore` in an imported library */
+export const LIB_SITE_STORE = "wt.siteStore: declare site stores in the script itself, not in an imported library";
+
+/** a store that can be declared (top-level code runs everywhere) but throws `message` when used */
+export function unusableStore(message: string): any {
+    const fail = (): never => {
+        throw new Error(message);
+    };
+    return new Proxy(Object.create(null), { get: (_t, p) => (p === "then" || typeof p === "symbol" ? undefined : fail()), set: fail, has: fail, ownKeys: fail, deleteProperty: fail });
+}
 
 /** thrown where onSite code calls a handle's function */
 export class SiteCannotCallError extends Error {

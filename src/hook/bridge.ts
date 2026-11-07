@@ -35,6 +35,9 @@ import { ScriptLife, type Generation, type ReactDomClient } from "../shared/runL
 import { packBytes, unpackBytes } from "../shared/bytesPack";
 import { Endpoint, endpointPair, messagePortEndpoint, portEndpoint, ISO_STORE_TAG, type ReqOf, type ReqOps, type ResOf } from "../shared/wire";
 import { ReplicaHub, type StoreSnapshots } from "../shared/storeReplica";
+import { SiteMirrors } from "../shared/siteStoreMirror";
+import { siteBuiltin } from "../shared/siteBuiltin";
+import { SITE_DOWN_KINDS, SITE_UP_KINDS, type SiteDown, type SiteUp } from "../shared/siteStoreHost";
 import { Exposer, RpcClient, isRpcCall, isRpcResult, NOT_RUNNING, RPC_QUEUE_MAX, TOP_FRAME_ONLY, type RpcCall, type RpcResult } from "../shared/rpc";
 import { inertRemote } from "../shared/remote";
 import type { DocumentWhen, PlaceApi, RouteMeta } from "../shared/route";
@@ -202,6 +205,12 @@ import type { RanApi } from "../shared/netTypes";
         // too: only a cid we sent and are still waiting for is accepted, and
         // the value is page data either way. A call from the page never
         // reaches trusted code.
+        // the site's world's `wt.siteStore` answers: to this world's mirrors and the overlays' (page data, for their own subscriptions)
+        if (SITE_DOWN_KINDS.has(data.kind)) {
+            siteMirrors?.receive(data);
+            relaySiteDown(data);
+            return;
+        }
         if (data.kind === "rpc.result") {
             const p = typeof data.result?.cid === "string" ? l4Pending.get(data.result.cid) : undefined;
             if (!p || p.s !== data.s || !isRpcResult(data.result)) return;
@@ -342,6 +351,49 @@ import type { RanApi } from "../shared/netTypes";
         return isoHub;
     }
 
+    // ---- `wt.siteStore`: the hook holds them; mirrors here (MV2 onPage code,
+    // the onSite fallback) and in the overlays (relayed) connect over window messages ----
+    let siteMirrors: SiteMirrors | null = null;
+    const postSite = (m: SiteUp) => window.postMessage({ source: MAIN_SOURCE, ...m }, location.origin);
+    const siteStores = () => (siteMirrors ??= new SiteMirrors({ ctx: "bridge", post: postSite, log: (s, msg, level) => scriptLog(s, level, msg, "isolated") }));
+    /** an overlay's subscriptions: sub → its script */
+    const overlaySubs = new Map<string, string>();
+
+    /** an overlay's mirror message → the hook: for its own script's stores only */
+    function relaySiteUp(s: string, m: any): void {
+        if (!m || !SITE_UP_KINDS.has(m.kind) || (m.kind !== "site.set" && typeof m.sub !== "string")) return;
+        if (m.kind === "site.disconnect") {
+            if (overlaySubs.get(m.sub) !== s) return;
+            overlaySubs.delete(m.sub);
+        } else {
+            if (m.s !== s) return;
+            if (m.kind === "site.connect") {
+                const had = overlaySubs.get(m.sub);
+                if (had !== undefined && had !== s) return;
+                overlaySubs.set(m.sub, s);
+            }
+        }
+        postSite(m);
+    }
+
+    function relaySiteDown(d: SiteDown): void {
+        if (d.kind === "site.ready") {
+            for (const o of overlays.values()) o.ep?.push("site.down", d);
+            return;
+        }
+        const s = typeof d.sub === "string" ? overlaySubs.get(d.sub) : undefined;
+        if (s !== undefined) overlays.get(s)?.ep?.push("site.down", d);
+    }
+
+    /** script `s`'s overlay went: its subscriptions end */
+    function dropOverlaySubs(s: string): void {
+        for (const [sub, of] of [...overlaySubs])
+            if (of === s) {
+                overlaySubs.delete(sub);
+                postSite({ kind: "site.disconnect", sub });
+            }
+    }
+
     /** scripts whose onSite fallback code already reported calling a handle */
     const siteCallers = new Set<string | null>();
 
@@ -405,6 +457,7 @@ import type { RanApi } from "../shared/netTypes";
                         ? { store: (n, initial, persist) => isoStores().store(storesOf, n, initial, persist), pageStore: (n, initial) => isoStores().pageStore(storesOf, n, initial, isoPage) }
                         : undefined,
                 call: scriptId && gen && world === "isolated" ? handle(scriptId, gen) : undefined,
+                siteStore: scriptId ? (n, initial) => siteStores().store(scriptId, n, initial) : undefined,
                 // the onSite fallback reports a handle call like the hook does (once per script)
                 onSiteCall: (e) => {
                     if (siteCallers.has(scriptId)) return;
@@ -438,8 +491,8 @@ import type { RanApi } from "../shared/netTypes";
                 const requireFrom = makeLibRequire(
                     libSources,
                     (lib, require, moduleObj) => scriptFunction(lib.src!)(shimFor(null, lib.name, lib.params || {}, undefined, h.scriptId).wt, consoleProxy, require, moduleObj, moduleObj.exports),
-                    // the built-ins: isolated code only (page code gets modules that say why not)
-                    world === "isolated" ? { builtin: (spec, importer, loadUrl) => builtinModule(spec, codeOf(importer), loadUrl) } : {}
+                    // the built-ins: isolated code all of them, the onSite fallback valtio's core
+                    world === "isolated" ? { builtin: (spec, importer, loadUrl) => builtinModule(spec, codeOf(importer), loadUrl) } : { builtin: siteBuiltin }
                 );
                 const moduleObj = { exports: {} as any };
                 const shim = shimFor(h.scriptId, h.name, h.params || {}, exposer, h.scriptId, gen);
@@ -792,6 +845,7 @@ import type { RanApi } from "../shared/netTypes";
         });
         ep.on("shortcut.remove", (a) => proven && typeof a?.id === "string" && shortcuts.remove(s, a.id));
         ep.on("rpc.call", (c) => proven && isRpcCall(c) && routeOverlayCall(s, c, (r) => ep.push("rpc.result", r)));
+        ep.on("site.up", (m) => proven && !o.closed && relaySiteUp(s, m));
         ep.on("rpc.result", (r) => {
             if (!proven) return;
             const rel = isRpcResult(r) ? isoRelayed.get(r.cid) : undefined;
@@ -819,6 +873,7 @@ import type { RanApi } from "../shared/netTypes";
         overlays.delete(s);
         o.closed = true;
         shortcuts.removeScript(s);
+        dropOverlaySubs(s);
         o.frame?.remove();
         o.ep?.close(why);
         for (const call of o.queue.splice(0)) overlayClients.get(s)?.receive(callError(call.cid, NOT_RUNNING));

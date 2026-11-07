@@ -9,6 +9,7 @@
  * background (counted for the toolbar's badge) and calls to onPage code
  * fail. It reloads when the script (or what it imports) changes.
  */
+import { SiteStoreHost, SITE_UP_KINDS } from "../../shared/siteStoreHost";
 import { proxy } from "valtio";
 import { messagePortEndpoint, portEndpoint, type Endpoint, type ReqOf } from "../../shared/wire";
 import { isRpcCall, NO_PAGE_IN_PREVIEW } from "../../shared/rpc";
@@ -205,6 +206,9 @@ export function attachFrame(win: Window | null | undefined): void {
     ep.handle("storage.set", mine((a: ReqOf<"storage.set">) => up.call("storage.set", a, s)));
     ep.on("log", (a) => proven && up.push("log", a, s));
     ep.on("rpc.call", (c) => proven && isRpcCall(c) && ep.push("rpc.result", { cid: c.cid, ok: false, error: { name: "WtCallError", message: NO_PAGE_IN_PREVIEW } }));
+    // the checkerboard "page" holds the overlay's `wt.siteStore`s, for the frame's life
+    const site = new SiteStoreHost({ post: (m) => !ep.closed && ep.push("site.down", m), log: (_s, msg, level) => up.push("log", { level, msg }, s) });
+    ep.on("site.up", (m) => proven && SITE_UP_KINDS.has(m?.kind) && (m.kind === "site.disconnect" || m.s === s) && site.receive(m));
     // the frame fills the "page"; keys pressed in it are matched in it
     for (const op of ["rects", "focus", "shortcut.add", "shortcut.remove", "rpc.result"] as const) ep.on(op, () => {});
     ep.onClose(() => {

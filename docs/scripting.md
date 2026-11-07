@@ -552,7 +552,17 @@ HTTPS, so you trust unpkg to serve npm's files unaltered. Only the extension
 background downloads them (when scripts are saved, imported or compiled);
 pages never fetch them.
 
-## Shared state and fetching — `wt.globalStore`, `wt.pageStore`, `wt.fetch`
+## Shared state and fetching — `wt.globalStore`, `wt.pageStore`, `wt.siteStore`, `wt.fetch`
+
+Three kinds of store; the name says who owns the data and how far it
+reaches. **Anything the site may read or write goes in `wt.siteStore`;
+everything else goes in the other two.**
+
+| store | owner | one copy for | the site can read and change it | available in |
+|---|---|---|---|---|
+| `wt.globalStore(name, initial)` | the background (yours) | every page, every tab, kept across restarts | no | network handlers, `onPage`, `onOverlay` |
+| `wt.pageStore(name, initial)` | the background (yours) | each page | no | network handlers, `onPage`, `onOverlay` |
+| `wt.siteStore(name, initial)` | the site's JavaScript world (theirs) | each page | **yes** | `onSite`, `onPage`, `onOverlay` |
 
 ### `wt.globalStore`
 
@@ -631,7 +641,7 @@ wt.onOverlay("https://example.com/*", (ctx) => {
   or closing the tab); it's never saved to disk. Values follow the same
   JSON rules as `wt.globalStore`.
 - **Names.** One name space with `wt.globalStore`: a script can't have a
-  global and a page store with the same name.
+  global and a page store with the same name (a site store can).
 - Available in `onPage` and `onOverlay` code (the copy of their page);
   not in `onSite` code (see below), nor in `rules` handlers (their rules
   are built once for every page).
@@ -663,11 +673,13 @@ wt.onPage("https://example.com/*", (ctx) => {
 `onSite` code runs among the site's own scripts, which could read the
 stores and forge writes to them. There, using `wt.globalStore` or
 `wt.pageStore` throws (declaring one at top level is fine: that line runs
-there too). Keep the stores in `onPage` code, read the site through an
-`onSite` [handle](#handles--calls-between-places), and pass what `onSite`
-code needs as arguments. The Problems view warns about an `onSite` handler
-that uses a store or a handle; its quick fix moves the handler to
-`wt.onPage`.
+there too). Either keep what the site may see in a
+[`wt.siteStore`](#wtsitestore), or keep the stores in `onPage` code, read
+the site through an `onSite` [handle](#handles--calls-between-places), and
+pass what `onSite` code needs as arguments. An `onSite` handler that uses
+one of them is an error in the Problems view; its quick fixes move the
+handler to `wt.onPage`, or change the stores to `wt.siteStore` (their data
+becomes page data).
 
 ```ts
 const site = wt.onSite("*://app.example.com/*", () => ({
@@ -680,6 +692,57 @@ wt.onPage("*://app.example.com/*", async () => {
     if (typeof name === "string") state.user = name; // the site's data: check it
 });
 ```
+
+### `wt.siteStore`
+
+`wt.siteStore(name, initial)` is a store that lives in the site's
+JavaScript world, one copy per page, for the data `onSite` code and the
+site share: `onSite` code reads and changes it synchronously, and the
+script's `onPage` and `onOverlay` code on that page get a live copy — it
+changes when the site's does, and their changes go back.
+
+```tsx
+import { useSnapshot } from "valtio";
+
+const site = wt.siteStore("site", { loggedIn: false, mockCart: false });
+
+wt.onSite("https://shop.example/*", (ctx) => {
+    // in the site's world: read its globals, react to the switch synchronously
+    site.loggedIn = !!(window as any).app?.user;
+    const realFetch = window.fetch;
+    window.fetch = (input, init) => (site.mockCart && String(input).includes("/cart") ? Promise.resolve(Response.json({ items: [] })) : realFetch(input, init));
+    ctx.signal.addEventListener("abort", () => (window.fetch = realFetch)); // a save runs this again
+});
+
+wt.onOverlay("https://shop.example/*", (ctx) => {
+    function Panel() {
+        const snap = useSnapshot(site);
+        return (
+            <label style={{ position: "fixed", right: 16, bottom: 16 }}>
+                <input type="checkbox" checked={snap.mockCart} onChange={() => (site.mockCart = !site.mockCart)} /> Empty cart
+                {snap.loggedIn ? "" : " (logged out)"}
+            </label>
+        );
+    }
+    ctx.mount(<Panel />);
+});
+```
+
+- **Page data.** The site can read it, change it and fake its values, like
+  anything else in its world. Check what you read from it before it
+  decides what trusted code does, and never put secrets in it.
+- **Lifetime.** One copy per page: a navigation or reload starts from
+  `initial` (a single-page app's route change doesn't). Saving the script
+  keeps its values.
+- **Values.** JSON only, at most 1 MB, as the other stores; functions on
+  the object stay local to each copy.
+- **Names.** Its own name space: `wt.pageStore("x")` and `wt.siteStore("x")`
+  are different stores.
+- **Watching.** `subscribe` and `snapshot` from `"valtio"` work in `onSite`
+  code (the site's world has valtio's core, not React); `useSnapshot` in
+  overlays.
+- Not in network handlers: they have no page, so it throws there (an
+  error in the Problems view).
 
 ### `wt.fetch`
 
@@ -736,9 +799,9 @@ Each runs in its own place:
 
 | | runs in | sees | the site | has |
 |---|---|---|---|---|
-| `wt.onSite` | the site's own JavaScript world | the DOM and the site's globals (`window.myApp`); its `fetch`/XHR go through the `page` strategy | sees it and can tamper with it: **untrusted** | no stores, no handle calls, no React |
-| `wt.onPage` | an isolated world | the DOM, none of the site's globals | can't see or reach it | stores, handle calls, React (`ctx.mount`) |
-| `wt.onOverlay` | the script's own frame over the page (top frame) | its own DOM | can't see or reach it | stores, handle calls, React, shortcuts, `fetch` as the page |
+| `wt.onSite` | the site's own JavaScript world | the DOM and the site's globals (`window.myApp`); its `fetch`/XHR go through the `page` strategy | sees it and can tamper with it: **untrusted** | `wt.siteStore` only, no handle calls, no React |
+| `wt.onPage` | an isolated world | the DOM, none of the site's globals | can't see or reach it | all stores, handle calls, React (`ctx.mount`) |
+| `wt.onOverlay` | the script's own frame over the page (top frame) | its own DOM | can't see or reach it | all stores, handle calls, React, shortcuts, `fetch` as the page |
 
 Use `onPage` for DOM changes, `onSite` only for what needs the site's
 JavaScript (its globals, wrapping its functions), and `onOverlay` for a
@@ -835,13 +898,15 @@ wt.onSite({ url: "*://app.example.com/*", when: "document_start" }, (ctx) => {
 The site can see that code, call the functions it returns and fake their
 answers, so `onSite` code is untrusted:
 
-- **No stores, no handle calls.** `wt.globalStore` and `wt.pageStore`
-  throw there ([stores in page code](#stores-in-page-code)); calling a
-  handle throws `SiteCannotCallError` — the site could make the same call.
+- **Only site stores, no handle calls.** `wt.globalStore` and
+  `wt.pageStore` throw there ([stores in page code](#stores-in-page-code));
+  [`wt.siteStore`](#wtsitestore) is the store for it. Calling a handle
+  throws `SiteCannotCallError` — the site could make the same call.
   Problems shows both, with a quick fix (**Ctrl+.** / **⌘.**) that moves
   the handler to `wt.onPage`. Call your own functions directly.
-- **No built-in React or valtio** (using one throws), so no `ctx.mount` or
-  `ctx.each`; no `wt.fetch` (use `fetch`). `wt.log`, `wt.params`,
+- **No built-in React** (using it throws), so no `ctx.mount` or
+  `ctx.each`; of valtio only its core (`subscribe`, `snapshot`); no
+  `wt.fetch` (use `fetch`). `wt.log`, `wt.params`,
   `wt.storage` and `console` work; logs go to the Log tagged `page › host`.
 - **Its results are page data.** The site can replace `Object.keys`, patch
   your functions or answer in their place. Fine to show; check them before
@@ -857,7 +922,7 @@ answers, so `onSite` code is untrusted:
 the same DOM, none of the site's globals (read those through an
 [`onSite` handle](#handles--calls-between-places)). It's trusted: it gets
 `wt.storage`, `wt.log`, `wt.params` and `console` (lines go to the Log
-tagged `isolated › host`), live [stores](#stores-in-page-code), the
+tagged `isolated › host`), live [stores](#stores-in-page-code) (site stores too), the
 built-in React and valtio, and calls the script's handles. It has no
 `wt.fetch`; its `fetch` isn't seen by the `page` strategy.
 
@@ -1138,7 +1203,8 @@ it right away, and the value survives restarts.
   its `onOverlay` handlers run: network, `onSite` and `onPage` handlers
   register nothing there (their handles work). Stores are live copies of
   the background's, so the GUI and the handlers see the same values; a
-  `wt.pageStore` is the copy of the overlay's page. `wt.log`, `console.*`,
+  `wt.pageStore` is the copy of the overlay's page, and a `wt.siteStore`
+  the copy of its page's site. `wt.log`, `console.*`,
   errors and unhandled rejections go to the script's Log, tagged
   `overlay › host`.
 - **Isolation.** The page's CSS can't reach the GUI and the GUI's CSS

@@ -291,7 +291,8 @@ on every save, as on a page ([hot reload](scripting.md#hot-reload--runs-and-ctx)
 - **Real stores.** The preview's `wt.globalStore`s are live copies of the
   background's, like a page's overlay: flipping a switch in the preview
   turns a mock on or off for the pages in your tabs, and their overlays
-  follow.
+  follow. Its `wt.siteStore`s belong to the checkerboard "page": they
+  start from `initial` and last while the preview does.
 - **URL.** The field in the panel header is the URL the overlay gets as
   `ctx.url`, and the base for its relative `fetch` URLs. It starts at a URL
   made from the script's first overlay route (`*://app.example.com/*`

@@ -19,15 +19,11 @@
  * forwarding proxy that picks the copy of the page whose handler is running
  * (src/shared/currentPage.ts); an overlay gets its page's replica.
  */
-import { proxy, subscribe, unstable_enableOp, unstable_getInternalStates } from "valtio/vanilla";
+import { proxy, subscribe } from "valtio/vanilla";
 import type { Endpoint, Json, StoreOp, StorePersist } from "./wire";
-import { STORE_MAX_BYTES, applyOps, cloneJson, isPlainObject, jsonBytes, jsonEqual, missingOps, storeKey, withMissing } from "./storeOps";
+import { STORE_MAX_BYTES, applyOps, cloneJson, isPlainObject, jsonBytes, missingOps, storeKey, withMissing } from "./storeOps";
 import { currentCall, currentPage, RULES_PAGE } from "./currentPage";
-
-// replicas read valtio's mutation ops (off by default)
-unstable_enableOp(true);
-
-const { refSet } = unstable_getInternalStates();
+import { isLocalField, splitInitial, toJson, writeDiff, type Template } from "./storeView";
 
 interface Replica {
     s: string;
@@ -61,11 +57,6 @@ export interface ReplicaHubOptions {
     onChange?: (scriptId: string, name: string, page?: string) => void;
 }
 
-interface Template {
-    json: Record<string, Json>;
-    local: [string, PropertyDescriptor][];
-}
-
 export type StoreSnapshots = { [scriptId: string]: { [name: string]: { rev: number; data: Json } } };
 
 const keyOf = (s: string, name: string, page?: string) => `${s}\u0000${storeKey(name, page)}`;
@@ -73,80 +64,6 @@ const keyOf = (s: string, name: string, page?: string) => `${s}\u0000${storeKey(
 /** `wt.pageStore` outside a handler's synchronous part */
 export const noPageError = (name: string) =>
     new Error(`wt.pageStore("${name}"): no page here — a page's copy is reachable while a handler runs for one of the page's requests, until the handler's first await (read what you need before awaiting). Top-level code and timers have no page.`);
-
-function isLocalField(obj: object, k: PropertyKey): boolean {
-    const d = Object.getOwnPropertyDescriptor(obj, k);
-    return !!d && (!("value" in d) || typeof d.value === "function");
-}
-
-/** a mutation's value as JSON (reading through nested proxies), or throws why it can't be */
-function toJson(v: unknown, seen = new Set<object>()): Json {
-    if (v === null || typeof v === "string" || typeof v === "boolean") return v;
-    if (typeof v === "number") {
-        if (!Number.isFinite(v)) throw `${v} isn't JSON`;
-        return v;
-    }
-    if (typeof v === "function") throw "a function can only be a top-level field (it stays local)";
-    if (typeof v !== "object") throw `a ${typeof v} isn't JSON`;
-    if (refSet.has(v)) throw "a ref() value isn't JSON";
-    if (seen.has(v)) throw "a cycle isn't JSON";
-    seen.add(v);
-    try {
-        if (Array.isArray(v)) return v.map((x) => (x === undefined ? null : toJson(x, seen)));
-        if (!isPlainObject(v)) throw `a ${(v as any).constructor?.name || "non-plain object"} isn't JSON`;
-        const out: Record<string, Json> = {};
-        for (const k of Object.keys(v)) {
-            const x = (v as any)[k];
-            if (x !== undefined) out[k] = toJson(x, seen);
-        }
-        return out;
-    } finally {
-        seen.delete(v);
-    }
-}
-
-/** `initial` → its JSON data fields + its local (function/accessor) field descriptors */
-function splitInitial(name: string, initial: object, api = "wt.globalStore"): Template {
-    const json: Record<string, Json> = {};
-    const local: [string, PropertyDescriptor][] = [];
-    for (const k of Object.keys(initial)) {
-        const d = Object.getOwnPropertyDescriptor(initial, k)!;
-        if (!("value" in d) || typeof d.value === "function") {
-            local.push([k, d]);
-            continue;
-        }
-        if (d.value === undefined) continue;
-        try {
-            json[k] = toJson(d.value);
-        } catch (why) {
-            throw new TypeError(`${api}("${name}"): initial.${k}: ${why} — store values must be JSON (plain objects, arrays, strings, numbers, booleans, null)`);
-        }
-    }
-    return { json, local };
-}
-
-/**
- * Bring `target` (a proxy) to `want` by writing only what differs. Local
- * fields are never touched; arrays shrink through `length`.
- */
-function writeDiff(target: any, want: Json): void {
-    if (Array.isArray(target) && Array.isArray(want)) {
-        for (let i = 0; i < want.length; i++) writeKey(target, String(i), want[i]);
-        if (target.length > want.length) target.length = want.length;
-        return;
-    }
-    if (!isPlainObject(want)) return;
-    for (const k of Object.keys(target)) if (!Object.prototype.hasOwnProperty.call(want, k) && !isLocalField(target, k)) delete target[k];
-    for (const k of Object.keys(want)) writeKey(target, k, (want as any)[k]);
-}
-
-function writeKey(target: any, k: string, want: Json): void {
-    if (isLocalField(target, k)) return;
-    const cur = target[k];
-    const sameKind = (Array.isArray(cur) && Array.isArray(want)) || (isPlainObject(cur) && isPlainObject(want) && !refSet.has(cur));
-    if (sameKind) writeDiff(cur, want);
-    else if (!(Object.prototype.hasOwnProperty.call(target, k) && jsonEqual(cur, want))) target[k] = cloneJson(want);
-}
 
 const pageOf = (rep: Replica): { page?: string } => (rep.page ? { page: rep.page } : {});
 

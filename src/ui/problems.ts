@@ -6,6 +6,7 @@
 import { EVAL_WRAPPER_LINES } from "../shared/scriptError";
 import { userFrames } from "../shared/scriptHealth";
 import { USER_SCRIPTS_PROBLEM } from "../shared/userScriptsStatus";
+import { NO_SITE_STORE, SITE_NO_STORES } from "../shared/remote";
 import type { TabBadge } from "./logBadge";
 
 export type ProblemSeverity = "error" | "warning";
@@ -192,11 +193,12 @@ function handlerRange(msg: string, s: ProblemScript): Range | { line: number } |
 }
 
 /**
- * An onSite handler's "uses `x` — …" warning (a store or a handle the
- * site's world can't have) → the first use of `x` in that handler.
+ * A handler's "uses `x` — …" problem (a store or a handle the site's world
+ * can't have; `wt.siteStore` in a network handler) → the first use of `x`
+ * in that handler.
  */
 function siteUseRange(msg: string, s: ProblemScript): Range | undefined {
-    const name = /^onSite #\d+[^:]*: uses `([\w$.]+)`/.exec(msg)?.[1];
+    const name = /^on\w+ #\d+[^:]*: uses `([\w$.]+)`/.exec(msg)?.[1];
     const h = name && s.code ? handlerRange(msg, s) : undefined;
     if (!h) return undefined;
     const code = s.code!;
@@ -287,10 +289,10 @@ export function collectProblems(scripts: ProblemScript[], liveMarkers: Map<strin
         if (live) problems.push(...fromMarkers(s.error ? live.filter((m) => !s.error!.includes(m.message)) : live, "ts"));
         // (the saved code's type errors aren't checked while it fails to compile)
         else if (!s.error) problems.push(...(s.typeErrors || []).map(storedTypeError));
-        // (isolated onPage code that can't run is an error: user scripts are off)
+        // (errors: isolated onPage code that can't run — user scripts are off; a store a place can't have — they throw there)
         const taken = new Set<number>();
         for (const w of s.routeWarnings || [])
-            problems.push({ severity: w.includes(USER_SCRIPTS_PROBLEM) ? "error" : "warning", kind: "route", message: w, ...(siteUseRange(w, s) ?? rulesUseRange(w, s, taken) ?? handler(w)) });
+            problems.push({ severity: w.includes(USER_SCRIPTS_PROBLEM) || w.includes(NO_SITE_STORE) || w.includes(SITE_NO_STORES) ? "error" : "warning", kind: "route", message: w, ...(siteUseRange(w, s) ?? rulesUseRange(w, s, taken) ?? handler(w)) });
         if (problems.length) groups.push({ id: s.id, label: s.label, file: s.label.endsWith(".tsx") ? "tsx" : "ts", problems: problems.sort(byPosition) });
     }
     for (const d of dataFiles) if (d.markers.length) groups.push({ id: d.id, label: d.label, file: "json", problems: fromMarkers(d.markers, "json").sort(byPosition) });

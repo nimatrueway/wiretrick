@@ -62,6 +62,20 @@ const VERIFY: Record<string, (p: Page) => Promise<[boolean, string]>> = {
         const real = await fetchUser(mocked);
         return [mocked === "Mocked User" && !!real && real !== "Mocked User", `${mocked} → ${real}`];
     },
+    "Watch and mock the site's fetch (wt.siteStore)": async (p) => {
+        await open(p, "https://dummyjson.com/");
+        const f = await overlayFrame(p, "#wt-site-fetch");
+        if (!f) return [false, "no overlay panel"];
+        const fetchUser = async (prev: string) => {
+            await f.evaluate(() => (document.getElementById("wt-site-fetch") as HTMLButtonElement).click());
+            return until(() => f.evaluate(() => document.getElementById("wt-site-user")?.textContent || ""), (v) => !!v && v !== prev);
+        };
+        const real = await fetchUser("");
+        const last = await until(() => f.evaluate(() => document.getElementById("wt-site-last")?.textContent || ""), (v) => v.includes("/users/1"));
+        await f.evaluate(() => (document.getElementById("wt-site-mock") as HTMLInputElement).click());
+        const mocked = await fetchUser(real);
+        return [!!real && real !== "Mocked User" && mocked === "Mocked User" && !!last, `${real} → ${mocked} (${last})`];
+    },
     "Overlay outline (calls + shortcut)": async (p) => {
         await open(p, "https://en.wikipedia.org/wiki/Cat");
         const f = await overlayFrame(p, "#wt-outline a");

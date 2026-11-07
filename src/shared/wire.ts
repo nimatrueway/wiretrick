@@ -14,6 +14,7 @@ import { packBytes, unpackBytes } from "./bytesPack";
 import type { RouteMeta } from "./route";
 import type { ShippedLib } from "./scriptImports";
 import type { RpcCall, RpcResult } from "./rpc";
+import type { SiteDown, SiteUp } from "./siteStoreHost";
 
 export type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
 
@@ -113,6 +114,10 @@ export interface WireOps {
     "shortcut.remove": { push: { id: string } };
     /** L3: a shortcut's keys were pressed in the page */
     "shortcut.fire": { push: { id: string } };
+    /** L3: the overlay's `wt.siteStore` mirrors → the site's world (the bridge relays them for this script) */
+    "site.up": { push: SiteUp };
+    /** L3: the site's world's answers to this overlay's subscriptions */
+    "site.down": { push: SiteDown };
     /** L3: the page's L2 link came back: replicas re-subscribe */
     "store.resync": { push: {} };
     /** a call between the overlay and onPage code (shared/rpc.ts) */

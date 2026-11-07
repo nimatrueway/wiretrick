@@ -1156,6 +1156,37 @@ declare const wt: {
     pageStore<T extends object>(name: string, initial: T): T;
 
     /**
+     * A live object the page's site may see: it lives in the site's
+     * JavaScript world, one copy per page (a navigation or reload starts
+     * from `initial`; single-page-app route changes don't), and `onSite`,
+     * `onPage` and `onOverlay` code of this script on that page share it —
+     * `onSite` code reads and changes it synchronously, the others get a
+     * live copy that changes when it does (and changes it back). It's a
+     * [valtio](https://valtio.dev) proxy: read and change it like a plain
+     * object; `import { subscribe } from "valtio"` to watch it
+     * (`useSnapshot` in overlays).
+     *
+     * Its data is page data: the site can read and change it, so keep
+     * what the site mustn't see in a {@link globalStore} or
+     * {@link pageStore} (which `onSite` code can't use). Values must be
+     * JSON (at most 1 MB); functions in `initial` stay local to each copy.
+     * `name` is its key (one store per name per script, apart from the
+     * other two kinds'). Saving the script keeps its values. Network
+     * handlers have no page: it throws there.
+     *
+     * @example
+     * const flags = wt.siteStore("flags", { loggedIn: false, mock: false });
+     * wt.onSite("https://example.com/*", () => {
+     *     flags.loggedIn = !!document.cookie.match(/session=/);
+     *     if (flags.mock) (window as any).__MOCK__ = true;
+     * });
+     * wt.onOverlay("https://example.com/*", () => {
+     *     // a checkbox bound to flags.mock (useSnapshot(flags) from "valtio")
+     * });
+     */
+    siteStore<T extends object>(name: string, initial: T): T;
+
+    /**
      * `fetch` for scripts. By default it runs in the background with the
      * extension's host permissions (no CORS) and the browser's cookies.
      * `bypass: true` keeps every script's handlers — this one's too — off

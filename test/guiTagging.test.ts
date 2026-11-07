@@ -3,11 +3,11 @@ import { collectProblems, extensionsLink, type ProblemMarker, type ProblemScript
 import { addUiPort, log } from "../src/background/engine/logs";
 import { appendLog, shownLines } from "../src/ui/state/log";
 import { contextTag } from "../src/shared/scriptLog";
-import { SITE_DISALLOWED, SITE_NO_HANDLES, siteRemote } from "../src/shared/remote";
+import { NO_SITE_STORE, SITE_DISALLOWED, SITE_NO_HANDLES, SITE_NO_STORES, siteRemote } from "../src/shared/remote";
 import "../src/shared/transpile";
 import { compileScript, siteProblems } from "../src/shared/compile";
 import { userScriptsProblem } from "../src/shared/userScriptsStatus";
-import { onPageEdit } from "../src/ui/placeFix";
+import { onPageEdit, siteStoreEdits } from "../src/ui/placeFix";
 
 const script = (id: string, over: Partial<ProblemScript> = {}): ProblemScript => ({ id, label: `${id}.ts`, error: null, ...over });
 const none = new Map<string, ProblemMarker[]>();
@@ -91,5 +91,48 @@ describe("onSite code calling a handle", () => {
         const lines = code.split("\n");
         const end = lines.slice(0, p.endLine - 1).reduce((n, l) => n + l.length + 1, 0) + p.endColumn - 1;
         expect(fix(code, end)).toBe(moved);
+        expect(msg).toContain(SITE_NO_STORES);
+        expect(toSite(code, end)).toBe(code.replace("wt.pageStore", "wt.siteStore"));
+    });
+
+    it("wt.siteStore in a network handler is an error at its use; in onSite code it's fine", () => {
+        const code = `const flags = wt.siteStore("flags", { on: false });\nwt.onRequest("https://a/*", (req) => {\n    if (flags.on) req.url = "https://b/";\n});\nwt.onSite("https://a/*", () => { flags.on = true; });\nwt.onResponseBody("https://a/*", () => wt.siteStore("x", {}));`;
+        const all = [
+            { kind: "onRequest", index: 0, url: ["https://a/*"], line: 2 },
+            { kind: "onDocument", api: "onSite", index: 0, n: 0, url: ["https://a/*"], line: 5 },
+            { kind: "onResponseBody", index: 0, url: ["https://a/*"], line: 6 },
+        ] as any[];
+        const msgs = siteProblems(code, all);
+        expect(msgs).toEqual([`onRequest #1: uses \`flags\` — ${NO_SITE_STORE}`, `onResponseBody #1: uses \`wt.siteStore\` — ${NO_SITE_STORE}`]);
+        const [g] = collectProblems([script("a", { code, routeWarnings: msgs, routes: all })], none);
+        expect(g.problems.map((p: any) => [p.severity, p.line, p.column])).toEqual([
+            ["error", 3, 9],
+            ["error", 6, 40],
+        ]);
+    });
+
+    const toSite = (code: string, at: number) => {
+        let out = code;
+        for (const e of siteStoreEdits(code, at).reverse()) out = out.slice(0, e.start) + e.text + out.slice(e.end);
+        return out;
+    };
+    it("the siteStore fix changes the stores the nearest onSite handler uses, bound or direct, and drops a globalStore's persist", () => {
+        const code = [
+            `const a = wt.globalStore("a", { n: 0 }, { persist: "local" });`,
+            `const b: { n: number } = wt.pageStore("b", { n: 0 });`,
+            `const c = wt.pageStore("c", { n: 0 });`,
+            `wt.onSite("https://a/*", () => { a.n++; b.n++; wt.globalStore("d", { x: [1, 2] }, "session").x; });`,
+        ].join("\n");
+        expect(toSite(code, code.indexOf("a.n++"))).toBe(
+            [
+                `const a = wt.siteStore("a", { n: 0 });`,
+                `const b: { n: number } = wt.siteStore("b", { n: 0 });`,
+                `const c = wt.pageStore("c", { n: 0 });`,
+                `wt.onSite("https://a/*", () => { a.n++; b.n++; wt.siteStore("d", { x: [1, 2] }).x; });`,
+            ].join("\n")
+        );
+        // "a.n" in a string, and a handler that uses none
+        expect(siteStoreEdits(`const a = wt.pageStore("a", {});\nwt.onSite("x", () => "a.n");`, 40)).toEqual([]);
+        expect(siteStoreEdits(`const a = wt.pageStore("a", {});`, 10)).toEqual([]);
     });
 });

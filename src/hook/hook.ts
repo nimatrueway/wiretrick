@@ -16,6 +16,8 @@ import { ScriptLife, type Generation } from "../shared/runLifecycle";
 import { Exposer, isRpcCall, NOT_RUNNING, type RpcCall, type RpcResult } from "../shared/rpc";
 import { bodyKind, setTextTypes } from "../shared/bodyKind";
 import { readFetchBody } from "../shared/requestBody";
+import { SiteStoreHost, SITE_UP_KINDS } from "../shared/siteStoreHost";
+import { siteBuiltin } from "../shared/siteBuiltin";
 
 (() => {
     // tells the MV2 bridge its inline copy ran (a page CSP may block it)
@@ -150,6 +152,10 @@ import { readFetchBody } from "../shared/requestBody";
             answerCall(data.s, data.call, reply);
             return;
         }
+        if (SITE_UP_KINDS.has(data.kind)) {
+            siteStores.receive(data);
+            return;
+        }
         if (data.kind === "watchNav") {
             watchNav();
             return;
@@ -209,8 +215,10 @@ import { readFetchBody } from "../shared/requestBody";
         // module registry over the shipped library sources and data files:
         // the page-side `require` backing ES imports ("./utils" → the script
         // named utils, "./a.json" → the data file)
-        const requireFrom = makeLibRequire(libSources, (lib, require, moduleObj) =>
-            scriptFunction(lib.src!)(makeDocumentShim(null, lib.name, lib.params || {}).wt, scriptConsole(null, lib.name), require, moduleObj, moduleObj.exports)
+        const requireFrom = makeLibRequire(
+            libSources,
+            (lib, require, moduleObj) => scriptFunction(lib.src!)(makeDocumentShim(null, lib.name, lib.params || {}).wt, scriptConsole(null, lib.name), require, moduleObj, moduleObj.exports),
+            { builtin: siteBuiltin }
         );
         const compiledDocument: { scriptId: string; name: string; when: DocumentWhen; d: PageDocumentHandler; exposer: Exposer; life: ScriptLife; gen: Generation }[] = [];
         const gens: [ScriptLife, Generation][] = [];
@@ -329,6 +337,16 @@ import { readFetchBody } from "../shared/requestBody";
         return makeScriptConsole((level, source, text) => scriptLogUp(scriptId, level, scriptLogLine(name, source, text)));
     }
 
+    /** `wt.siteStore`s: they live here, for the document's life; onPage and onOverlay code mirror them */
+    const siteStores = new SiteStoreHost({
+        post: (m) => {
+            try {
+                window.postMessage({ source: HOOK_SOURCE, ...m }, window.location.origin);
+            } catch {}
+        },
+        log: (s, msg, level) => scriptLogUp(s, level, msg),
+    });
+
     /** scripts whose onSite code already reported calling a handle (once per page) */
     const siteCallers = new Set<string | null>();
 
@@ -340,6 +358,7 @@ import { readFetchBody } from "../shared/requestBody";
         return makePageShim({
             params,
             exposer,
+            siteStore: scriptId ? (n, initial) => siteStores.store(scriptId, n, initial) : undefined,
             // a handle call in onSite code: a runtime Problem at the call (once per script and page)
             onSiteCall: (e) => {
                 if (siteCallers.has(scriptId)) return;
@@ -703,4 +722,6 @@ import { readFetchBody } from "../shared/requestBody";
         markKnown();
     }, STATUS_WAIT_MS);
     requestStatus();
+    // mirrors that connected before this world was ready connect again
+    siteStores.ready();
 })();

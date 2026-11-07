@@ -14,7 +14,8 @@
  * onSite handles go to the hook over window messages; into its own onPage
  * handles, straight to this world's handlers. Its stores
  * (`wt.globalStore`, this page's `wt.pageStore` copies) are replicas
- * primed by `iso.load` and synced over L6. A save arrives as
+ * primed by `iso.load` and synced over L6; its `wt.siteStore`s are
+ * mirrors of the hook's, over window messages. A save arrives as
  * `iso.update`: load again, re-run if the code changed.
  */
 import { formatScriptError } from "../shared/scriptError";
@@ -29,6 +30,8 @@ import { Exposer, RpcClient, isRpcCall, TOP_FRAME_ONLY, type RpcResult } from ".
 import { inertRemote } from "../shared/remote";
 import { routeMatches, type PlaceApi, type RouteMeta } from "../shared/route";
 import { ReplicaHub } from "../shared/storeReplica";
+import { SiteMirrors } from "../shared/siteStoreMirror";
+import { SITE_DOWN_KINDS } from "../shared/siteStoreHost";
 
 (() => {
     const me = ((globalThis as any).__wtIsoQ as { s: string; routes: RouteMeta[] }[] | undefined)?.shift();
@@ -78,7 +81,9 @@ import { ReplicaHub } from "../shared/storeReplica";
     const life = new ScriptLife({ doc: document, react: () => reactDom() });
     window.addEventListener("message", (e: MessageEvent) => {
         const d = e.data;
-        if (e.source === window && d && d.source === "res-override-hook" && d.kind === "rpc.result" && d.s === s) pageClient.receive(d.result);
+        if (e.source !== window || !d || d.source !== "res-override-hook") return;
+        if (d.kind === "rpc.result" && d.s === s) pageClient.receive(d.result);
+        else if (SITE_DOWN_KINDS.has(d.kind)) site?.receive(d);
     });
 
     /** the bound link (opened and loaded on demand); rejects when the owner is unreachable or refused */
@@ -131,6 +136,7 @@ import { ReplicaHub } from "../shared/storeReplica";
                 stopped = true;
                 exposer.close();
                 life.stop();
+                site?.dispose();
                 for (const c of [client, local, pageClient]) c.abort("the script stopped");
                 ep.close("refused");
             }
@@ -142,6 +148,15 @@ import { ReplicaHub } from "../shared/storeReplica";
         primed = init.stores;
         if (init.codeHash !== codeHash) run(init, codeHash !== null);
     }
+
+    /** the script's `wt.siteStore` mirrors (made when its code first uses one) */
+    let site: SiteMirrors | null = null;
+    const siteStores = () =>
+        (site ??= new SiteMirrors({
+            ctx: "isolated",
+            post: (m) => window.postMessage({ source: "res-override-bridge", ...m }, location.origin),
+            log: (_s, msg, level) => log(level, msg),
+        }));
 
     let primed: IsoInit["stores"] = {};
     function stores(): ReplicaHub {
@@ -194,6 +209,7 @@ import { ReplicaHub } from "../shared/storeReplica";
                 params,
                 world: "isolated",
                 stores: { store: (n, initial, persist) => stores().store(s, n, initial, persist), pageStore: (n, initial) => stores().pageStore(s, n, initial, page) },
+                siteStore: mine ? (n, initial) => siteStores().store(s, n, initial) : undefined,
                 exposer: mine ? exposer : undefined,
                 call: mine ? handle(gen) : undefined,
                 log: (...args: any[]) => log("info", scriptLogLine(name, "wt.log", formatLogArgs(args))),

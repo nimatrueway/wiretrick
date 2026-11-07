@@ -96,7 +96,7 @@ running (later: **?** → **Welcome** or **?** → **Samples**).
 | | |
 |---|---|
 | [Installing](docs/install.md) | release zips, signed crx, building from source |
-| [Writing scripts](docs/scripting.md) | the `wt` API, routes, parameters, libraries, imports and data files, `wt.globalStore`/`wt.pageStore`/`wt.fetch`, page code (`wt.onSite`, `wt.onPage`, `wt.onOverlay`), handles, hot reload, overlays, stacking, async handlers |
+| [Writing scripts](docs/scripting.md) | the `wt` API, routes, parameters, libraries, imports and data files, `wt.globalStore`/`wt.pageStore`/`wt.siteStore`/`wt.fetch`, page code (`wt.onSite`, `wt.onPage`, `wt.onOverlay`), handles, hot reload, overlays, stacking, async handlers |
 | [Installing and sharing scripts](docs/packages.md) | install from a URL, GitHub, a gist, a folder or a zip; the header; where files go; updates and rollback |
 | [Interception strategies](docs/strategies.md) | `page` / `debugger` / `extension` / `helper` / `rules`, the default and per-handler choice, [which strategies keep the URL when replacing a response](docs/strategies.md#how-each-strategy-serves-a-replacement), the Missed warning, browser compatibility |
 | [Local helper](docs/local-helper.md) | the `helper` strategy: install, how it works, security notes |

@@ -10,8 +10,8 @@ import { parseParamValue, resolveParamValues, serializableParamDef, type ParamDe
 import { formatLogArgs, makeScriptConsole, type ScriptLogLevel } from "./scriptLog";
 import { scriptFunction } from "./scriptFn";
 import { callerLine } from "./scriptError";
-import { normalizeRoute, placeApi, placeKeyer, placeKind, placeOf, routeLabel, type PlaceApi, type RouteKind, type RouteMeta } from "./route";
-import { inertRemote, REMOTE_FROM_BACKGROUND, SITE_NO_HANDLES, SITE_NO_STORES } from "./remote";
+import { isNetKind, normalizeRoute, placeApi, placeKeyer, placeKind, placeOf, routeLabel, type PlaceApi, type RouteKind, type RouteMeta } from "./route";
+import { inertRemote, NO_SITE_STORE, REMOTE_FROM_BACKGROUND, SITE_NO_HANDLES, SITE_NO_STORES, unusableStore } from "./remote";
 import { scriptEnv } from "./scriptEnv";
 import { dataFileValue, importLine, importPath, importResolver, isDataSpec } from "./scriptImports";
 import { isUrlSpec, makePackageLoader, PackageImportError, type PackageModules } from "./packageImports";
@@ -20,6 +20,7 @@ import { builtinSpec } from "./builtinSpecs";
 import { proxy } from "valtio/vanilla";
 import { ReplicaHub } from "./storeReplica";
 import { claimStoreName, storePersist } from "./storeOps";
+import { closeOf, codeOnly } from "./codeScan";
 import type { StorePersist, WireRequest, WireResponse } from "./wire";
 import { fromWireResponse, splitFetchInit, toWireRequest, type WtFetchInit } from "./wtFetch";
 
@@ -82,6 +83,8 @@ export interface ResApiOverrides {
     store?: (name: string, initial: object, persist: StorePersist) => object;
     /** `wt.pageStore`: the script's per-page store (default: per-page copies local to this instance) */
     pageStore?: (name: string, initial: object) => object;
+    /** `wt.siteStore`: a mirror of the site's world's store (default — no page here: a store that throws when used) */
+    siteStore?: (name: string, initial: object) => object;
     /** `wt.fetch(…, { from: "background" })` (default: this context's own fetch, no bypass) */
     fetch?: (request: WireRequest, bypass: boolean) => Promise<WireResponse>;
     /** `wt.fetch(…, { from: "page" })`, then the default `from` (the overlay); `url` resolves relative URLs */
@@ -566,9 +569,14 @@ function createOwner(meta: ResMeta, storedValues?: Record<string, any>) {
     };
 }
 
-/** `wt.globalStore` and `wt.pageStore` for one compiled instance: each name once, across both */
-function makeStores(overrides?: ResApiOverrides): { globalStore: (name: string, initial: object, opts?: unknown) => object; pageStore: (name: string, initial: object) => object } {
+/** `wt.globalStore`, `wt.pageStore` (each name once, across both) and `wt.siteStore` (its own names) for one compiled instance */
+function makeStores(overrides?: ResApiOverrides): {
+    globalStore: (name: string, initial: object, opts?: unknown) => object;
+    pageStore: (name: string, initial: object) => object;
+    siteStore: (name: string, initial: object) => object;
+} {
     const names = new Map<string, string>();
+    const siteNames = new Map<string, string>();
     let local: ReplicaHub | null = null;
     return {
         globalStore: (name, initial, opts) => {
@@ -585,6 +593,13 @@ function makeStores(overrides?: ResApiOverrides): { globalStore: (name: string, 
             claimStoreName(names, "wt.pageStore", name, initial);
             const out = overrides?.pageStore ? overrides.pageStore(name, initial) : (local ??= new ReplicaHub({ ctx: "local" })).pageStore("local", name, initial);
             names.set(name, "wt.pageStore");
+            return out;
+        },
+        siteStore: (name, initial) => {
+            if (isStub(name) || isStub(initial)) return makeStubModule();
+            claimStoreName(siteNames, "wt.siteStore", name, initial);
+            const out = overrides?.siteStore ? overrides.siteStore(name, initial) : unusableStore(NO_SITE_STORE);
+            siteNames.set(name, "wt.siteStore");
             return out;
         },
     };
@@ -676,85 +691,6 @@ function makeShim(owner: ReturnType<typeof createOwner>, overrides?: ResApiOverr
     };
 }
 
-/**
- * `code` with comments and string/regex literal contents blanked to spaces
- * (same length, newlines kept); a template's `${…}` code is kept.
- */
-function codeOnly(code: string): string {
-    const out = code.split("");
-    const blank = (from: number, to: number) => {
-        for (let j = from; j < to; j++) if (out[j] !== "\n") out[j] = " ";
-    };
-    const n = code.length;
-    let prev = "";
-    let i = 0;
-    /** brace depth inside each open template's `${…}` */
-    const tpl: number[] = [];
-    const string = (quote: string) => {
-        // from just past the opening quote; returns where the literal (or the template chunk) ends
-        let cls = false;
-        let j = i;
-        while (j < n) {
-            const d = code[j];
-            if (d === "\\") {
-                j += 2;
-                continue;
-            }
-            if (d === "\n" && quote !== "`") break;
-            if (quote === "/") {
-                if (d === "[") cls = true;
-                else if (d === "]") cls = false;
-                else if (d === "/" && !cls) break;
-            }
-            if (quote === "`" && d === "$" && code[j + 1] === "{") {
-                blank(i, j);
-                tpl.push(0);
-                return j + 2;
-            }
-            if (d === quote) break;
-            j++;
-        }
-        // an unclosed "regex" is a division or JSX's `/>`: leave the line be
-        if (quote === "/" && code[j] !== "/") return i;
-        blank(i, Math.min(j, n));
-        return j + 1;
-    };
-    while (i < n) {
-        const c = code[i];
-        if (c === "/" && code[i + 1] === "/") {
-            const end = code.indexOf("\n", i);
-            blank(i, end < 0 ? n : end);
-            i = end < 0 ? n : end;
-            continue;
-        }
-        if (c === "/" && code[i + 1] === "*") {
-            const end = code.indexOf("*/", i + 2);
-            const stop = end < 0 ? n : end + 2;
-            blank(i, stop);
-            i = stop;
-            continue;
-        }
-        if (tpl.length && c === "}" && tpl[tpl.length - 1] === 0) {
-            // back in the template's text
-            tpl.pop();
-            i++;
-            i = string("`");
-            prev = "a";
-            continue;
-        }
-        if (tpl.length && c === "{") tpl[tpl.length - 1]++;
-        else if (tpl.length && c === "}") tpl[tpl.length - 1]--;
-        if (c === '"' || c === "'" || c === "`" || (c === "/" && (prev === "" || /[(,=:[!&|?{};+\-*%<>~^]/.test(prev)))) {
-            i++;
-            i = string(c);
-            prev = "a";
-            continue;
-        }
-        if (!/\s/.test(c)) prev = c;
-        i++;
-    }
-    return out.join("");
-}
 
 /**
  * `js` with each `wt.onSite(` / `wt.onPage(` / `wt.onOverlay(` call
@@ -815,17 +751,6 @@ export function onSiteUses(code: string): SiteUse[] {
     return out;
 }
 
-/** where the bracketed group opening just before `from` closes (the index past it) */
-function closeOf(src: string, from: number): number {
-    let depth = 1;
-    let to = from;
-    while (to < src.length && depth) {
-        const c = src[to++];
-        if (c === "(" || c === "[" || c === "{") depth++;
-        else if (c === ")" || c === "]" || c === "}") depth--;
-    }
-    return to;
-}
 
 /** what a `rules` handler might do per request, and what it's for (rulesProblems) */
 const RULES_SIDE_EFFECTS: { re: RegExp; does: string }[] = [
@@ -882,16 +807,49 @@ export function rulesProblems(code: string, routes: RouteMeta[]): string[] {
 }
 
 /**
+ * Network handlers (by their registration line, as rulesProblems) that use
+ * `wt.siteStore` — directly or through a top-level variable bound to it:
+ * "onRequest #N: uses `x` — …" (an error in the Problems view). They have
+ * no page, so it throws there.
+ */
+function netSiteStoreProblems(src: string, routes: RouteMeta[]): string[] {
+    const bound: string[] = [];
+    for (const m of src.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;]+)?=\s*wt\s*\.\s*siteStore\b/g)) bound.push(m[1]);
+    const starts = [0];
+    for (let i = 0; i < src.length; i++) if (src[i] === "\n") starts.push(i + 1);
+    const out: string[] = [];
+    const seen = new Set<number>();
+    for (const r of routes) {
+        if (!isNetKind(r.kind) || !r.line) continue;
+        const lineAt = starts[r.line - 1];
+        if (lineAt === undefined) continue;
+        const call = new RegExp(`(?<![\\w$.])wt\\s*\\.\\s*${r.api || r.kind}\\s*(?:<[^()]*>\\s*)?\\(`, "g");
+        call.lastIndex = lineAt;
+        const m = call.exec(src);
+        if (!m || m.index >= (starts[r.line] ?? src.length) || seen.has(m.index)) continue;
+        seen.add(m.index);
+        const from = m.index + m[0].length;
+        const args = src.slice(from, closeOf(src, from) - 1);
+        const used = bound.filter((name) => new RegExp(`(?<![\\w$.])${name.replace(/\$/g, "\\$")}(?![\\w$]|\\s*:(?!:))`).test(args));
+        if (/(?<![\w$.])wt\s*\.\s*siteStore\b/.test(args)) used.push("wt.siteStore");
+        if (used.length) out.push(`${routeLabel(r)}: uses ${used.map((x) => `\`${x}\``).join(", ")} — ${NO_SITE_STORE}`);
+    }
+    return out;
+}
+
+/**
  * Warnings ("onSite #N: …", Problems view) for onSite handlers that use a
  * store or a handle: in the site's world stores throw and handle calls
- * throw (SiteCannotCallError).
+ * throw (SiteCannotCallError). And errors for network handlers that use
+ * `wt.siteStore` (which needs a page).
  */
 export function siteProblems(code: string, routes: RouteMeta[]): string[] {
-    if (!/\bonSite\b/.test(code)) return [];
+    const net = /\bsiteStore\b/.test(code) ? netSiteStoreProblems(codeOnly(code), routes) : [];
+    if (!/\bonSite\b/.test(code)) return net;
     const uses = onSiteUses(code);
-    if (!uses.length) return [];
+    if (!uses.length) return net;
     const names = (n: string[]) => n.map((x) => `\`${x}\``).join(", ");
-    const out: string[] = [];
+    const out: string[] = [...net];
     for (const r of routes) {
         if (r.kind !== "onDocument" || placeOf(r) !== "onSite") continue;
         const u = uses.find((u) => u.nth === (r.n ?? r.index));

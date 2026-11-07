@@ -7,6 +7,18 @@ its section below.
 
 ## [Unreleased]
 
+### Added
+
+- `wt.siteStore(name, initial)`: a store whose data lives in the site's own world — the one store `onSite` code can use. `onSite` code reads and writes it synchronously; `onPage` and `onOverlay` code hold a live mirror (valtio, `useSnapshot`, `subscribe` as usual). It holds page data: one copy per document, gone on reload, and the site can read it.
+- `onSite` code can import valtio's core (`proxy`, `subscribe`, `snapshot` from `"valtio"` or `"valtio/vanilla"`).
+- Problems: a quick fix "Change to wt.siteStore" on a store used in `onSite` code, and an error for `wt.siteStore` used in a network handler.
+- A sample: "Watch and mock the site's fetch (wt.siteStore)".
+
+### Changed
+
+- A store used in `onSite` code is now an error in Problems, not a warning.
+- The Explorer's Install Script button shows a document with a down arrow.
+
 ## [0.20.0-alpha] - 2026-11-07
 
 ### Breaking
