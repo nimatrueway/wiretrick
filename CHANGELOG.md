@@ -7,6 +7,12 @@ its section below.
 
 ## [Unreleased]
 
+## [0.22.1-alpha] - 2026-11-07
+
+### Fixed
+
+- Package imports follow a dependency's `exports` map for paths into it, and a folder's own `package.json`. `cmdk@1.1.1` failed with `cannot import "@radix-ui/primitive/is-development" … HTTP 404`, and then on `react-remove-scroll-bar/constants`.
+
 ## [0.22.0-alpha] - 2026-11-07
 
 ### Breaking
@@ -816,7 +822,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.22.0-alpha...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.22.1-alpha...HEAD
+[0.22.1-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.0-alpha...v0.22.1-alpha
 [0.22.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.21.0-alpha...v0.22.0-alpha
 [0.21.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.20.0-alpha...v0.21.0-alpha
 [0.20.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.19.0-alpha...v0.20.0-alpha

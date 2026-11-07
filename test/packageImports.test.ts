@@ -10,6 +10,7 @@ import { errorPosition } from "../src/ui/problems";
 import {
     classifyNested,
     declarationRefs,
+    exportsFile,
     isEsModule,
     makePackageLoader,
     packageClosure,
@@ -132,6 +133,22 @@ describe("downloading a package's module graph", () => {
         delete (globalThis as any).wtUmdSloppyGlobal;
         // stored for later runs (offline)
         expect(Object.keys(store[PACKAGE_MODULES_KEY].modules)).toHaveLength(6);
+    });
+
+    it("a subpath only package.json `exports` maps, or a folder's own package.json, resolves through it (production, ES module first)", async () => {
+        const p = await bg();
+        const sub = "https://unpkg.com/cond-lib@1.0.0/is-dev";
+        await p.ensurePackages([`import u from "https://unpkg.com/cond-user@1.0.0"; import { IS_DEV } from "${sub}";`]);
+        const pkgs = p.packagesSnapshot();
+        expect(pkgs.modules["https://unpkg.com/cond-user@1.0.0/index.js"].requires["cond-lib/is-dev"]).toBe("https://unpkg.com/cond-lib@1.0.0/prod.mjs");
+        expect(pkgs.aliases[sub]).toBe("https://unpkg.com/cond-lib@1.0.0/prod.mjs");
+        const load = makePackageLoader(pkgs);
+        expect(pkgs.modules["https://unpkg.com/cond-user@1.0.0/index.js"].requires["cond-lib/consts"]).toBe("https://unpkg.com/cond-lib@1.0.0/dist/consts.js");
+        expect(load("https://unpkg.com/cond-user@1.0.0")).toEqual({ dev: false, gap: 7 });
+        expect(load(sub).IS_DEV).toBe(false);
+        expect(exportsFile({ exports: { "./a": [{ worker: "./w.js" }, "./a.js"] } }, "a")).toBe("a.js");
+        expect(exportsFile({ exports: { "./a": { node: "./n.js" } } }, "a")).toBeUndefined();
+        expect(exportsFile({ main: "x.js" }, "a")).toBeUndefined();
     });
 
     it("a library's require of a Node.js built-in or a missing file throws a clear error only when run", async () => {

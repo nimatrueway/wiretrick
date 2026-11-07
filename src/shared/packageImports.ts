@@ -211,6 +211,35 @@ function exportsEntry(exp: any, key: string): any {
     return undefined;
 }
 
+/** conditions a library's runtime import matches in `exports`: a production browser build, ES module or CommonJS */
+const RUN_CONDITIONS = new Set(["browser", "production", "import", "module", "require", "default"]);
+
+/**
+ * The file (inside the package) its package.json `exports` gives runtime
+ * subpath `sub` ("" = the root), conditions matched in the map's order;
+ * undefined when `exports` doesn't map it.
+ */
+export function exportsFile(pkg: any, sub: string): string | undefined {
+    const pick = (v: any): string | undefined => {
+        if (typeof v === "string") return /\.d\.[mc]?ts$/.test(v) ? undefined : clean(v);
+        if (Array.isArray(v)) {
+            for (const x of v) {
+                const f = pick(x);
+                if (f) return f;
+            }
+            return undefined;
+        }
+        if (!v || typeof v !== "object") return undefined;
+        for (const [k, x] of Object.entries(v)) {
+            if (!RUN_CONDITIONS.has(k)) continue;
+            const f = pick(x);
+            if (f) return f;
+        }
+        return undefined;
+    };
+    return pick(exportsEntry(pkg?.exports, sub ? `./${sub}` : "."));
+}
+
 function clean(p: string): string {
     return p.replace(/^\.\//, "").replace(/^\//, "");
 }

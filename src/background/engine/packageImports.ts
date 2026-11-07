@@ -26,6 +26,7 @@ import {
     declarationCandidates,
     declarationRefs,
     dependencyRange,
+    exportsFile,
     finalUrl,
     isEsModule,
     isNodeBuiltin,
@@ -220,6 +221,37 @@ export async function resolveVersion(name: string, range: string): Promise<strin
     return p.version;
 }
 
+/**
+ * The file URL a package subpath maps to through the package's `exports`
+ * (`@radix-ui/primitive/is-development` → `…/dist/internal/is-development.false.mjs`);
+ * unpkg serves only real paths. Undefined when `exports` doesn't map it.
+ */
+async function viaExports(name: string, range: string | undefined, sub: string): Promise<string | undefined> {
+    try {
+        const version = await resolveVersion(name, range ?? "");
+        const file = exportsFile(await packageJson(name, version), sub);
+        return file ? `${packageRoot({ name, version })}/${file}` : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+/**
+ * A folder's own entry point (`react-remove-scroll-bar/constants` →
+ * its `constants/package.json` → `../dist/es5/constants.js`), which
+ * unpkg doesn't follow. Undefined when there's none.
+ */
+async function folderEntry(url: string): Promise<string | undefined> {
+    try {
+        const r = await fetchText(`${url.replace(/\/$/, "")}/package.json`);
+        const pkg = JSON.parse(r.text);
+        const main = typeof pkg.browser === "string" ? pkg.browser : (pkg.module ?? pkg.main);
+        return typeof main === "string" && main ? new URL(main, r.url).href : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
 /** library code → CommonJS run by makePackageLoader */
 function toCommonJs(url: string, text: string): string {
     const path = new URL(url).pathname;
@@ -252,7 +284,11 @@ async function downloadGraph(top: string, into: { aliases: Record<string, string
         let p = inflight.get(requested);
         if (!p) {
             p = (async () => {
-                const r = await fetchText(requested);
+                const r = await fetchText(requested).catch(async (e) => {
+                    const entry = e instanceof HttpError && e.status === 404 ? await folderEntry(requested) : undefined;
+                    if (!entry) throw e;
+                    return fetchText(entry);
+                });
                 if (r.url !== requested) into.aliases[requested] = r.url;
                 // another specifier redirected to the same file first
                 if (known(r.url)) return r.url;
@@ -276,7 +312,7 @@ async function downloadGraph(top: string, into: { aliases: Record<string, string
         const own = typeof owner === "string" ? undefined : owner;
         const range = own && own.name === c.bare ? own.version : own ? dependencyRange(await packageJson(own.name, own.version), c.bare) : undefined;
         if (range === undefined && isNodeBuiltin(spec)) throw new Error(builtinMessage(spec));
-        const url = rangeUrl(c.bare, range, c.sub);
+        const url = (c.sub && (await viaExports(c.bare, range, c.sub))) || rangeUrl(c.bare, range, c.sub);
         if (!url) throw new Error(`cannot import "${spec}": unsupported dependency range "${range}"`);
         return fetchModule(url);
     };
@@ -292,7 +328,9 @@ async function downloadGraph(top: string, into: { aliases: Record<string, string
             })
         );
     };
-    const final = await fetchModule(top);
+    const p = parsePackageUrl(top);
+    const start = typeof p !== "string" && p.sub ? ((await viaExports(p.name, p.version, p.sub)) ?? top) : top;
+    const final = await fetchModule(start);
     while (pending.size) await Promise.all([...pending]);
     if (overCap) throw new Error(overCap);
     return final;

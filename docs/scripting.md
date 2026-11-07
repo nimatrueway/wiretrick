@@ -500,7 +500,11 @@ hosts, `http://` URLs and query strings aren't allowed.
 
 **How it works.** Saving a script downloads the package (or the file you
 named) and everything it imports: relative files, and the package's own
-dependencies at the versions its `package.json` asks for. ES modules are
+dependencies at the versions its `package.json` asks for. A path into a
+package (`@radix-ui/primitive/is-development`) goes where the package's
+`exports` map sends it (the production browser build: conditions
+`browser`, `production`, `import`, `module`, `require`, `default`), or to
+the `main` of a folder's own `package.json`. ES modules are
 converted to CommonJS, and CommonJS/UMD files run as they are, like in
 Node.js (`process.env.NODE_ENV` is `"production"`). The download is kept in
 the extension's storage, so the script also runs offline and after a

@@ -96,6 +96,33 @@ export const REGISTRY: Registry = {
         },
         "4.0.0": { "package.json": pj({ name: "dep-lib", version: "4.0.0" }), "index.js": `exports.upper = () => "v4";\n` },
     },
+    // a subpath only its `exports` maps (conditionally), like @radix-ui/primitive/is-development
+    "cond-lib": {
+        "1.0.0": {
+            "package.json": pj({
+                name: "cond-lib",
+                version: "1.0.0",
+                main: "index.js",
+                exports: {
+                    ".": "./index.js",
+                    "./is-dev": { development: "./dev.js", production: { types: "./prod.d.ts", import: "./prod.mjs", require: "./prod.js" }, default: "./prod.js" },
+                },
+            }),
+            "index.js": `exports.root = true;\n`,
+            "dev.js": `exports.IS_DEV = true;\n`,
+            "prod.js": `exports.IS_DEV = "cjs";\n`,
+            "prod.mjs": `export const IS_DEV = false;\n`,
+            // a folder entry point with its own package.json, like react-remove-scroll-bar/constants
+            "consts/package.json": pj({ private: true, main: "../dist/consts.js" }),
+            "dist/consts.js": `exports.GAP = 7;\n`,
+        },
+    },
+    "cond-user": {
+        "1.0.0": {
+            "package.json": pj({ name: "cond-user", version: "1.0.0", main: "index.js", dependencies: { "cond-lib": "^1.0.0" } }),
+            "index.js": `var d = require("cond-lib/is-dev");\nexports.dev = d.IS_DEV;\nexports.gap = require("cond-lib/consts").GAP;\n`,
+        },
+    },
     "umd-lib": {
         "1.0.0": {
             "package.json": pj({ name: "umd-lib", version: "1.0.0", main: "umd.js" }),
