@@ -151,6 +151,30 @@ describe("downloading a package's module graph", () => {
         expect(exportsFile({ main: "x.js" }, "a")).toBeUndefined();
     });
 
+    it("a save retries a stored package's failed nested requires (a download from before a fix, a flaky one)", async () => {
+        const top = "https://unpkg.com/cond-user@1.0.0";
+        const code = `import u from "${top}";`;
+        await (await bg()).ensurePackages([code]);
+        const user = "https://unpkg.com/cond-user@1.0.0/index.js";
+        // as an older version stored it: the nested require failed, a built-in too
+        store[PACKAGE_MODULES_KEY].modules[user].requires["cond-lib/is-dev"] = `!cannot import "cond-lib/is-dev" (required by ${user}): HTTP 404`;
+        store[PACKAGE_MODULES_KEY].modules[user].requires["fs"] = `!"fs" is a Node.js built-in — not available in Wiretrick scripts`;
+        let p = await bg();
+        expect(await p.ensurePackages([code])).toBe(false); // not on a plain ensure (startup, page loads)
+        expect(p.packagesSnapshot().modules[user].requires["cond-lib/is-dev"]).toMatch(/^!/);
+        unpkg.calls.length = 0;
+        expect(await p.ensurePackages([code], { retry: true })).toBe(true);
+        expect(p.packagesSnapshot().modules[user].requires["cond-lib/is-dev"]).toBe("https://unpkg.com/cond-lib@1.0.0/prod.mjs");
+        expect(p.packagesSnapshot().modules[user].requires["fs"]).toMatch(/Node\.js built-in/);
+        expect(unpkg.calls.filter((u) => u.includes("cond-user") && !u.endsWith("/package.json"))).toEqual([]); // the stored module isn't downloaded again
+        p = await bg();
+        await p.loadPackages();
+        expect(makePackageLoader(p.packagesSnapshot())(top).dev).toBe(false); // stored
+        unpkg.calls.length = 0;
+        expect(await p.ensurePackages([code], { retry: true })).toBe(false); // nothing left to retry
+        expect(unpkg.calls).toEqual([]);
+    });
+
     it("a library's require of a Node.js built-in or a missing file throws a clear error only when run", async () => {
         const p = await bg();
         await p.ensurePackages([`import a from "https://unpkg.com/builtin-lib@1.0.0"; import b from "https://unpkg.com/nested-fail@1.0.0";`]);

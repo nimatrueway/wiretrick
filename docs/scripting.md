@@ -514,7 +514,8 @@ scripts. If the download fails (offline, a typo, a missing file), the import
 line gets a compile error such as `cannot import "https://unpkg.com/…":
 download failed (HTTP 404 — no such package, version or file)`; save again to retry. A dependency of the
 package that fails to download isn't an error until the package `require`s
-it at runtime, so optional dependencies don't break anything. Node.js
+it at runtime, so optional dependencies don't break anything; saving the
+script tries it again. Node.js
 built-ins (`fs`, `path`, `crypto`, …) aren't available: `require("fs")`
 throws `"fs" is a Node.js built-in — not available in Wiretrick scripts`.
 Packages work on every strategy and in `wt.onSite`, `wt.onPage` and

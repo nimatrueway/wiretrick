@@ -7,6 +7,10 @@ its section below.
 
 ## [Unreleased]
 
+### Fixed
+
+- Saving a script retries the failed dependencies of a package it already downloaded. Before, a package stored with a failed dependency (like `cmdk@1.1.1` before 0.22.1) kept the error until it was no longer imported.
+
 ## [0.22.1-alpha] - 2026-11-07
 
 ### Fixed

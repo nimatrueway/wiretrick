@@ -266,7 +266,22 @@ function toCommonJs(url: string, text: string): string {
     return transform(meta, { transforms: ["imports"], filePath: url }).code;
 }
 
-/** download the module graph of a package URL into `into` (new modules only); resolves to its final URL */
+/** a nested require that failed and may work on another try (not a Node.js built-in) */
+function retriable(target: string): boolean {
+    return target.startsWith("!") && !target.includes("Node.js built-in");
+}
+
+/** does a stored package's module graph have a nested require to retry? */
+function hasRetriable(url: string): boolean {
+    for (const u of packageClosure(state, [url])) if (Object.values(state.modules[u].requires).some(retriable)) return true;
+    return false;
+}
+
+/**
+ * Download the module graph of a package URL into `into` (new modules
+ * only), and retry the failed nested requires of the stored modules it
+ * loads (copies go into `into`); resolves to its final URL.
+ */
 async function downloadGraph(top: string, into: { aliases: Record<string, string>; modules: Record<string, PackageModule> }): Promise<string> {
     let count = 0;
     let bytes = 0;
@@ -316,21 +331,30 @@ async function downloadGraph(top: string, into: { aliases: Record<string, string
         if (!url) throw new Error(`cannot import "${spec}": unsupported dependency range "${range}"`);
         return fetchModule(url);
     };
-    const resolveRequires = async (url: string, mod: PackageModule) => {
+    const resolveRequires = async (url: string, mod: PackageModule, only?: (spec: string) => boolean) => {
         await Promise.all(
-            requireSpecs(mod.js).map(async (spec) => {
-                try {
-                    mod.requires[spec] = await resolveNested(spec, url);
-                } catch (e: any) {
-                    const msg = String(e?.message ?? e);
-                    mod.requires[spec] = "!" + (msg.startsWith("cannot import") || msg.includes("Node.js built-in") ? msg : `cannot import "${spec}" (required by ${url}): ${msg}`);
-                }
-            })
+            requireSpecs(mod.js)
+                .filter((spec) => !only || only(spec))
+                .map(async (spec) => {
+                    try {
+                        mod.requires[spec] = await resolveNested(spec, url);
+                    } catch (e: any) {
+                        const msg = String(e?.message ?? e);
+                        mod.requires[spec] = "!" + (msg.startsWith("cannot import") || msg.includes("Node.js built-in") ? msg : `cannot import "${spec}" (required by ${url}): ${msg}`);
+                    }
+                })
         );
     };
     const p = parsePackageUrl(top);
     const start = typeof p !== "string" && p.sub ? ((await viaExports(p.name, p.version, p.sub)) ?? top) : top;
     const final = await fetchModule(start);
+    for (const u of packageClosure(state, [final])) {
+        const stored = state.modules[u];
+        if (!Object.values(stored.requires).some(retriable)) continue;
+        const mod: PackageModule = { js: stored.js, requires: { ...stored.requires } };
+        into.modules[u] = mod;
+        track(resolveRequires(u, mod, (spec) => retriable(mod.requires[spec] ?? "")));
+    }
     while (pending.size) await Promise.all([...pending]);
     if (overCap) throw new Error(overCap);
     return final;
@@ -347,7 +371,7 @@ export async function ensurePackages(codes: Iterable<string>, opts?: { retry?: b
     await loadPackages();
     const tops = [...packageUrlsIn(codes)].filter((u) => typeof parsePackageUrl(u) !== "string");
     for (const u of tops) ensuredAt.set(u, Date.now());
-    const due = (u: string) => !finalUrl(state, u) && (opts?.retry || !failed.has(u) || Date.now() - failed.get(u)!.at > RETRY_MS);
+    const due = (u: string) => (!finalUrl(state, u) && (opts?.retry || !failed.has(u) || Date.now() - failed.get(u)!.at > RETRY_MS)) || (!!opts?.retry && hasRetriable(u));
     let changed = false;
     if (tops.some(due))
         changed = await serial(async () => {
