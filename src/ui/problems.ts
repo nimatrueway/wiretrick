@@ -6,7 +6,6 @@
 import { EVAL_WRAPPER_LINES } from "../shared/scriptError";
 import { userFrames } from "../shared/scriptHealth";
 import { USER_SCRIPTS_PROBLEM } from "../shared/userScriptsStatus";
-import { REMOVED_EVALUATE } from "../shared/compile";
 import type { TabBadge } from "./logBadge";
 
 export type ProblemSeverity = "error" | "warning";
@@ -211,13 +210,6 @@ function siteUseRange(msg: string, s: ProblemScript): Range | undefined {
     return m && m.index < end ? rangeAt(lines, m.index, m[0].length) : undefined;
 }
 
-/** a removed API's error ("ctx.evaluate is gone: …") → its first use */
-function removedUseRange(msg: string, s: ProblemScript): Range | undefined {
-    if (!msg.startsWith(REMOVED_EVALUATE) || !s.code) return undefined;
-    const m = /\.\s*evaluate\s*\(/.exec(s.code);
-    return m ? rangeAt(s.code.split("\n"), m.index + 1, m[0].length - 2) : undefined;
-}
-
 /**
  * A "`console.log` runs once, when scripts load" warning (a `rules`
  * handler) → that call in the handler: the first one there not already
@@ -298,7 +290,7 @@ export function collectProblems(scripts: ProblemScript[], liveMarkers: Map<strin
         // (isolated onPage code that can't run is an error: user scripts are off)
         const taken = new Set<number>();
         for (const w of s.routeWarnings || [])
-            problems.push({ severity: w.includes(USER_SCRIPTS_PROBLEM) || w.startsWith(REMOVED_EVALUATE) ? "error" : "warning", kind: "route", message: w, ...(siteUseRange(w, s) ?? removedUseRange(w, s) ?? rulesUseRange(w, s, taken) ?? handler(w)) });
+            problems.push({ severity: w.includes(USER_SCRIPTS_PROBLEM) ? "error" : "warning", kind: "route", message: w, ...(siteUseRange(w, s) ?? rulesUseRange(w, s, taken) ?? handler(w)) });
         if (problems.length) groups.push({ id: s.id, label: s.label, file: s.label.endsWith(".tsx") ? "tsx" : "ts", problems: problems.sort(byPosition) });
     }
     for (const d of dataFiles) if (d.markers.length) groups.push({ id: d.id, label: d.label, file: "json", problems: fromMarkers(d.markers, "json").sort(byPosition) });

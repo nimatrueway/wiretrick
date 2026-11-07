@@ -51,8 +51,7 @@ import { createCodeEditor } from "./shell/codeEditor";
 import { toolbar, type SaveState } from "./state/toolbar";
 import { refreshUserScripts } from "./state/userScripts";
 import { SITE_DISALLOWED } from "../shared/remote";
-import { LEGACY_OPTIONS } from "../shared/route";
-import { legacyRouteEdit, onPageEdit } from "./placeFix";
+import { onPageEdit } from "./placeFix";
 import { collectDiagnostics, diagnosticsFileName, downloadText, installedExtensions } from "./about";
 import { DIAG_SECTIONS } from "../shared/diagnosticsSections";
 
@@ -859,8 +858,7 @@ function registerPinImportFix(): void {
 /**
  * Quick fixes for where a handler runs: an onSite handler calling a handle
  * (a runtime Problem) or using a store / handle (a route warning) moves to
- * wt.onPage; a route with the removed js / dom / unsafe options moves to the
- * API that replaces them.
+ * wt.onPage.
  */
 function registerPlaceFixes(): void {
     const monaco = (window as any).monaco;
@@ -869,17 +867,15 @@ function registerPlaceFixes(): void {
             const actions: any[] = [];
             for (const mk of context.markers) {
                 const msg = String(mk.message);
-                const site = msg.includes(SITE_DISALLOWED);
-                const legacy = !site && Object.values(LEGACY_OPTIONS).some((v) => msg.includes(v));
-                if (!site && !legacy) continue;
+                if (!msg.includes(SITE_DISALLOWED)) continue;
                 // the marker's end: inside the call, or (a route warning, on the registration line) past `wt.onSite(`
                 const offset = model.getOffsetAt({ lineNumber: mk.endLineNumber, column: mk.endColumn });
-                const fix = site ? onPageEdit(model.getValue(), offset) : legacyRouteEdit(model.getValue(), offset);
+                const fix = onPageEdit(model.getValue(), offset);
                 if (!fix) continue;
                 const a = model.getPositionAt(fix.start);
                 const b = model.getPositionAt(fix.end);
                 actions.push({
-                    title: site ? "Move this handler to wt.onPage (the isolated world)" : `Use wt.${fix.text.slice(0, fix.text.search(/[^\w]/))}`,
+                    title: "Move this handler to wt.onPage (the isolated world)",
                     kind: "quickfix",
                     isPreferred: true,
                     diagnostics: [mk],

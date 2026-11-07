@@ -3,7 +3,7 @@
 // what page code gets for built-in imports.
 import { describe, it, expect } from "vitest";
 import "../src/shared/transpile";
-import { compileScript, keyPlaceCalls, onSiteUses, removedApiProblems, siteProblems, toRunnableJs } from "../src/shared/compile";
+import { compileScript, keyPlaceCalls, onSiteUses, siteProblems, toRunnableJs } from "../src/shared/compile";
 import { SITE_DISALLOWED, SITE_NO_HANDLES, SITE_NO_STORES } from "../src/shared/remote";
 import { jsxImportSource, usesJsx } from "../src/shared/builtinSpecs";
 import { importSpecs, makeLibRequire } from "../src/shared/scriptImports";
@@ -83,12 +83,6 @@ describe("onSite handlers using stores or handles (route warnings)", () => {
     });
 });
 
-describe("removedApiProblems", () => {
-    it("reports ctx.evaluate, not other evaluates", () => {
-        expect(removedApiProblems(`wt.onPage("*", (ctx) => ctx.evaluate(() => 1));`)).toEqual([expect.stringMatching(/^ctx\.evaluate is gone: .*wt\.onSite/)]);
-        expect(removedApiProblems(`wt.onPage("*", () => document.evaluate("//a", document));`)).toEqual([]);
-    });
-});
 
 describe(".tsx scripts", () => {
     it("compile with the built-in React's automatic runtime", () => {

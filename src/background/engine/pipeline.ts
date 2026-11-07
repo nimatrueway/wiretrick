@@ -22,7 +22,7 @@ import { loadPackages, packagesSnapshot, resolveVersion } from "./packageImports
 import { isUrlSpec, packageClosure } from "../../shared/packageImports";
 import { serveStore } from "./strategies/extensionStrategy";
 import { dlog, dlogLevel } from "../../shared/debugLog";
-import { isThenable, removedApiProblems, rulesProblems, siteProblems, toRunnableJs } from "../../shared/compile";
+import { isThenable, rulesProblems, siteProblems, toRunnableJs } from "../../shared/compile";
 import "../../shared/transpile";
 import { log, noteRan, getScriptErrors, getScriptTypeErrors, getScriptRuleErrors, getScriptRouteWarnings, setScriptRouteWarnings, bodyObservedSince, bodySkipSince, noteBodySkip } from "./logs";
 import { bypassed } from "./bypass";
@@ -258,7 +258,6 @@ export function createPipeline(
             if (!s.meta.active) continue;
             const down: string[] = [];
             for (const msg of siteProblems(s.code, s.meta.routes || [])) problems.push({ id: s.id, msg });
-            for (const msg of removedApiProblems(s.code)) problems.push({ id: s.id, msg });
             for (const msg of rulesProblems(s.code, s.meta.routes || [])) problems.push({ id: s.id, msg });
             for (const r of s.meta.routes || []) {
                 // Chrome MV3: isolated onPage code needs chrome.userScripts (an error, see problems.ts)

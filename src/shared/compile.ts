@@ -881,16 +881,6 @@ export function rulesProblems(code: string, routes: RouteMeta[]): string[] {
     return out;
 }
 
-export const REMOVED_EVALUATE = "ctx.evaluate is gone";
-
-/** APIs this version removed, with what replaces them (Problems view) */
-export function removedApiProblems(code: string): string[] {
-    const out: string[] = [];
-    if (/\.\s*evaluate\s*\(/.test(code) && /\bctx\b/.test(code))
-        out.push(REMOVED_EVALUATE + ": register the page-world code with wt.onSite(route, (ctx) => ({ read: () => … })) and call its handle from onPage — `const site = wt.onSite(…); await site.read()`");
-    return out;
-}
-
 /**
  * Warnings ("onSite #N: …", Problems view) for onSite handlers that use a
  * store or a handle: in the site's world stores throw and handle calls

@@ -7,7 +7,7 @@ import { SITE_DISALLOWED, SITE_NO_HANDLES, siteRemote } from "../src/shared/remo
 import "../src/shared/transpile";
 import { compileScript, siteProblems } from "../src/shared/compile";
 import { userScriptsProblem } from "../src/shared/userScriptsStatus";
-import { legacyRouteEdit, onPageEdit } from "../src/ui/placeFix";
+import { onPageEdit } from "../src/ui/placeFix";
 
 const script = (id: string, over: Partial<ProblemScript> = {}): ProblemScript => ({ id, label: `${id}.ts`, error: null, ...over });
 const none = new Map<string, ProblemMarker[]>();
@@ -91,26 +91,5 @@ describe("onSite code calling a handle", () => {
         const lines = code.split("\n");
         const end = lines.slice(0, p.endLine - 1).reduce((n, l) => n + l.length + 1, 0) + p.endColumn - 1;
         expect(fix(code, end)).toBe(moved);
-    });
-});
-
-describe("legacy route options quick fix", () => {
-    const fix = (code: string, at = code.length) => {
-        const e = legacyRouteEdit(code, at);
-        return e && code.slice(0, e.start) + e.text + code.slice(e.end);
-    };
-    it("picks the API the options asked for and drops them", () => {
-        expect(fix(`wt.onPage({ url: "https://a/*", js: "page" }, () => {});`)).toBe(`wt.onSite({ url: "https://a/*" }, () => {});`);
-        expect(fix(`wt.onPage({ url: "https://a/*", dom: "overlay" }, () => {});`)).toBe(`wt.onOverlay({ url: "https://a/*" }, () => {});`);
-        expect(fix(`wt.onPage({ url: "https://a/*", js: 'isolated' }, () => {});`)).toBe(`wt.onPage({ url: "https://a/*" }, () => {});`);
-        expect(fix(`wt.onPage({ js: "page", dom: "overlay", unsafe: true, url: "https://a/*" }, () => {});`)).toBe(`wt.onOverlay({ url: "https://a/*" }, () => {});`);
-        expect(fix(`wt.onPage({\n    url: "https://a/*",\n    js: "page",\n}, () => {});`)).toBe(`wt.onSite({\n    url: "https://a/*",\n}, () => {});`);
-    });
-    it("picks the nearest registration before the marker, and gives up on what it can't rewrite", () => {
-        const two = `wt.onPage({ url: "https://a/*", js: "page" }, () => {});\nwt.onPage({ url: "https://b/*", dom: "overlay" }, () => {});`;
-        expect(fix(two)).toBe(`wt.onPage({ url: "https://a/*", js: "page" }, () => {});\nwt.onOverlay({ url: "https://b/*" }, () => {});`);
-        expect(fix(two, 10)).toBe(`wt.onSite({ url: "https://a/*" }, () => {});\nwt.onPage({ url: "https://b/*", dom: "overlay" }, () => {});`);
-        expect(legacyRouteEdit(`wt.onPage("https://a/*", () => {});`, 30)).toBeNull();
-        expect(legacyRouteEdit(`wt.onPage({ url: "https://a/*" }, () => {});`, 30)).toBeNull();
     });
 });

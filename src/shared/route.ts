@@ -62,13 +62,6 @@ export function placeApi<R>(register: (route: unknown, fn: unknown, n?: number) 
     return api;
 }
 
-/** the route options the three-places API replaced: what to write instead */
-export const LEGACY_OPTIONS: Record<string, string> = {
-    js: '"js" is gone: wt.onSite(route, handler) runs in the site\'s own JavaScript world, wt.onPage(route, handler) in the isolated world (same DOM, none of the site\'s globals)',
-    dom: '"dom" is gone: draw the overlay with wt.onOverlay(route, handler)',
-    unsafe: '"unsafe" is gone: the site\'s world (wt.onSite) never gets the script\'s stores or overlay — use them from wt.onPage and read the site through an onSite handle',
-};
-
 export type DocumentWhen = "document_start" | "document_end" | "document_idle";
 const DOCUMENT_WHENS: DocumentWhen[] = ["document_start", "document_end", "document_idle"];
 
@@ -172,7 +165,6 @@ export function normalizeRoute(kind: RouteKind, raw: unknown, index: number, api
             if (!DOCUMENT_WHENS.includes(obj.when)) throw new Error(`${where}: when must be one of ${DOCUMENT_WHENS.join(", ")}`);
             route.when = obj.when;
         } else route.when = "document_end";
-        for (const k of ["dom", "js", "unsafe"]) if (obj[k] !== undefined) throw new Error(`${where}: ${LEGACY_OPTIONS[k]}`);
         if (kind === "onDocument") route.world = api === "onSite" ? "page" : "isolated";
         return route;
     }

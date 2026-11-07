@@ -54,13 +54,6 @@ describe("wt.onOverlay", () => {
     });
 });
 
-describe("removed route options", () => {
-    it("js, dom and unsafe throw with what replaces them", () => {
-        expect(compileScript(`wt.onPage({ url: "*", js: "page" }, () => {});`).error).toMatch(/"js" is gone: wt\.onSite/);
-        expect(compileScript(`wt.onPage({ url: "*", dom: "overlay" }, () => {});`).error).toMatch(/"dom" is gone: .*wt\.onOverlay/);
-        expect(compileScript(`wt.onSite({ url: "*", unsafe: true }, () => {});`).error).toMatch(/"unsafe" is gone/);
-    });
-});
 
 describe("page shim worlds", () => {
     const src = (wt: any) => {

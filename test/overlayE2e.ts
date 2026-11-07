@@ -672,25 +672,11 @@ wt.onPage("${origin}/ov-layer*", async () => {
 /**
  * The three places a page handler runs: wt.onSite (the site's own world),
  * wt.onPage (the isolated world) and wt.onOverlay (the overlay frame) — and
- * the route options and ctx.evaluate they replaced are refused or flagged.
+ * what each can reach.
  */
 export async function checkPlaces(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
     const t = (s: string) => `onSite/onPage/onOverlay${opts.label ?? ""}: ${s}`;
     const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
-    const legacy: [string, string, RegExp][] = [
-        ["js", `wt.onPage({ url: "${origin}/nope", js: "page" }, () => {});`, /"js" is gone: wt\.onSite/],
-        ["dom", `wt.onPage({ url: "${origin}/nope", dom: "overlay" }, () => {});`, /"dom" is gone: .*wt\.onOverlay/],
-        ["unsafe", `wt.onSite({ url: "${origin}/nope", unsafe: true }, () => {});`, /"unsafe" is gone/],
-    ];
-    for (const [opt, code, want] of legacy) {
-        const bad = await send({ type: "saveScript", id: "s_legacy_" + opt, code, name: `legacy ${opt}.wiretrick` });
-        check(t(`a route with the removed "${opt}" option fails to compile, naming what replaces it`), want.test(bad?.error ?? ""), bad?.error);
-        await send({ type: "deleteScript", id: "s_legacy_" + opt });
-    }
-    const evalSaved = await send({ type: "saveScript", id: "s_evaluate", code: `wt.onPage("${origin}/nope", async (ctx) => {\n    await (ctx as any).evaluate(() => 1);\n});\n`, name: "evaluate.wiretrick" });
-    const evalWarn = await waitFor<string[]>(async () => ((await send({ type: "listScripts" })) || []).find((s: any) => s.id === "s_evaluate")?.routeWarnings ?? [], (w) => w.length > 0, 5000);
-    check(t("a script still calling ctx.evaluate saves, flagged in Problems with the onSite replacement"), !evalSaved?.error && evalWarn.some((w) => w.startsWith("ctx.evaluate is gone") && w.includes("wt.onSite")), JSON.stringify({ error: evalSaved?.error, evalWarn }));
-    await send({ type: "deleteScript", id: "s_evaluate" });
     const saved = await send({ type: "saveScript", id: "s_layer", code: placeCode(origin), name: "places.wiretrick" });
     check(t("the script saves"), !saved?.error, saved?.error);
     await mgr.waitForTimeout(800);

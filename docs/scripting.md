@@ -1290,30 +1290,6 @@ wt.onOverlay("*://app.example.com/*", async () => {
 - **Per-tab switch:** a `wt.pageStore` field, so turning it on in one tab
   leaves the others alone and a reload turns it off again.
 
-## Migrating from 0.19
-
-0.19 had one `wt.onPage` with `js`, `dom` and `unsafe` options. Those
-options are gone: a route with one fails to load, and the Problems view
-says what to use, with a quick fix to `wt.onSite` / `wt.onOverlay`. It
-flags a `ctx.evaluate` call too.
-
-| 0.19 | now |
-|---|---|
-| `wt.onPage({ url, dom: "overlay" }, fn)` | `wt.onOverlay(url, fn)` |
-| `wt.onPage({ url, js: "page" }, fn)` | `wt.onSite(url, fn)` |
-| `wt.onPage({ url, js: "isolated" }, fn)` | `wt.onPage(url, fn)` |
-| `unsafe: true`, page-world overlays | gone: the site's world never gets the script's stores or overlay. Keep them in `onPage` code and read the site through an `onSite` handle |
-| `ctx.evaluate(fn, ...args)` | an `onSite` handler returning `{ fn }`; `await site.fn(...args)` |
-| a callback passed to `ctx.evaluate` | an `onSite` function returning a promise, looped over with [`ctx.each`](#waiting-for-events--ctxeach) |
-| functions in `ctx.evaluate`'s result | more functions in the `onSite` handler's result |
-| `WtTimeoutError` after 10 s | gone: calls wait, and fail only with `AbortError`, `ReloadedError`, `DisconnectedError` or `WtCallError` |
-| `createRoot(document.body.appendChild(…)).render(<UI />)` | `ctx.mount(<UI />)` |
-| saving reloads the overlay / re-runs handlers ("keep them idempotent") | saving runs handlers again in place; set things up through `ctx` ([hot reload](#hot-reload--runs-and-ctx)) |
-
-`wt.onOverlay` was deprecated in 0.13 and removed in 0.14 in favour of
-`dom: "overlay"`. It's back under its old name, with the new behaviour: a
-save runs its handlers again in place instead of reloading the frame.
-
 ## Multiple handlers — how they stack
 
 The same rules apply on every strategy. When several handlers match a

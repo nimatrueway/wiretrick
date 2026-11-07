@@ -22,7 +22,6 @@ A simpler page API: three places to run code, each a function of its own, and sa
 | `WtTimeoutError` (calls gave up after 10 s) | calls don't time out; see the errors below |
 
 - `wt.onOverlay` is back under its old name, now with the overlay's new behaviour: a save no longer reloads its frame — the handlers run again in place. Overlay code that adds to the DOM directly (`document.body.appendChild`, `createRoot(...)`) now adds a second copy on every save: draw with `ctx.mount(<Ui />)` instead.
-- The Problems view flags the removed `js`, `dom` and `unsafe` options, with a quick fix to `wt.onSite` / `wt.onOverlay`.
 - A handle called from `onSite` code throws `SiteCannotCallError`: the site's world can answer calls but never make them.
 - Handle calls reject with `AbortError` when the calling run ends (a save, the page navigating), and the call is cancelled on the other side too; with `ReloadedError` when the called script is saved mid-call (safe to retry; `ctx.each` does); with `DisconnectedError` when the other side is gone.
 
