@@ -10,6 +10,8 @@ its section below.
 ### Fixed
 
 - Error stack traces point at the right file and line. A script's `onSite` error listed Wiretrick's own page code as lines of the script (like `feature-flag-override.tsx:2504:6` in a 330-line file), and a library script's lines carried the importing script's name. Each frame now names the script it's in, and the rest are left out. The Problems view goes to the line in the script itself.
+- A script whose imports define React components at their top level (like `const Item = memo(…)`) no longer fails its `onSite` handlers with `cannot use "react" in onSite code`. In the site's world those calls do nothing at load, and only using React in `onSite` handler code throws. Before, the whole `onSite` side failed to load, so an `onPage` handler waiting on it timed out.
+- An error's `cause` shows in the log and Problems as `Caused by: …`, so an error like `Action failed after 101 attempts.` shows why the last attempt failed.
 
 ## [0.22.3-alpha] - 2026-11-07
 

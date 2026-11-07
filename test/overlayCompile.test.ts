@@ -7,7 +7,7 @@ import "../src/shared/transpile";
 import { compileScript, keyPlaceCalls, onSiteUses, siteProblems, toRunnableJs } from "../src/shared/compile";
 import { SITE_DISALLOWED, SITE_NO_HANDLES, SITE_NO_STORES } from "../src/shared/remote";
 import { jsxImportSource, usesJsx } from "../src/shared/builtinSpecs";
-import { importSpecs, makeLibRequire } from "../src/shared/scriptImports";
+import { importSpecs, makeLibRequire, topLevel } from "../src/shared/scriptImports";
 import { tsconfigText } from "../src/shared/generatedFiles";
 
 describe("keyPlaceCalls (handle names by source order)", () => {
@@ -151,6 +151,23 @@ describe("built-in imports in onSite code", () => {
         // elsewhere the load error stays a compile error
         const iso = makeLibRequire(libs, () => {}, { builtin: siteBuiltin })("main");
         expect(() => iso(url)).toThrow(/cannot import "https:\/\/unpkg\.com\/ui-lib@1\.0\.0": cannot use "react"/);
+    });
+
+    it("the site's world runs a module's top-level React calls (memo, forwardRef, a class component) inertly; using the result in a handler throws", () => {
+        const url = "https://unpkg.com/ui-lib@1.0.0";
+        const libs = [
+            { name: `${url}/index.js`, pkg: { js: `var React = require("react");\nexports.Button = React.forwardRef(function () {});\nexports.Button.displayName = "Button";\nexports.v = parseInt(React.version) + "" + React.version;\n`, requires: {} } },
+            { name: url, alias: `${url}/index.js` },
+            { name: "gui", src: toRunnableJs(`import { memo, createContext, Component } from "react";\nimport { Button } from "${url}";\nexport const Item = memo(function Item() { return null; });\nItem.displayName = "Item";\nexport const Ctx = createContext(null);\nexport class Box extends Component {}\nexport const Wrapped = memo(Button);\nfor (const _ of [...Object.keys(Ctx)]) {}`) },
+        ];
+        const requireFrom = makeLibRequire(libs, (lib, require, m) => new Function("require", "module", "exports", lib.src!)(require, m, m.exports), { builtin: siteBuiltin, onSite: true });
+        const js = toRunnableJs(`import { Item } from "./gui";\nimport { memo } from "react";\nconst Top = memo(() => null);\nexport const handler = () => Item.type;\nexport const top = () => Top.type;`);
+        const m = { exports: {} as any };
+        expect(() => topLevel(() => new Function("require", "module", "exports", js)(requireFrom("main"), m, m.exports))).not.toThrow();
+        expect(() => m.exports.handler()).toThrow(/cannot use "react" in onSite code/);
+        expect(() => m.exports.top()).toThrow(/cannot use "react" in onSite code/);
+        // outside a top level, using a stand-in throws right away
+        expect(() => requireFrom("main")("react").memo).toThrow(/cannot use "react" in onSite code/);
     });
 
     it("a page shim compiles an overlay script that imports React", () => {

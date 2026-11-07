@@ -113,6 +113,20 @@ describe("formatScriptError / rewriteFrame", () => {
         expect(rewriteFrame("  continued message")).toBe("  continued message");
     });
 
+    it("each cause follows, its frames mapped too", () => {
+        const inner = new Error("Redux store is not captured yet.");
+        inner.stack = "Error: Redux store is not captured yet.\n    at f (wiretrick-script:///s.ts:9:2)\n    at <anonymous>:1:1";
+        const outer = Object.assign(new Error("Action failed after 101 attempts."), { cause: inner });
+        outer.stack = "Error: Action failed after 101 attempts.\n    at retry (wiretrick-script:///lib.tsx:55:23)";
+        expect(formatScriptError("S", outer, "onPage").split("\n")).toEqual([
+            "[S] onPage: Error: Action failed after 101 attempts.",
+            "    at retry (lib.tsx:52:23)",
+            "Caused by: Error: Redux store is not captured yet.",
+            "    at f (s.ts:6:2)",
+        ]);
+        expect(formatScriptError("S", Object.assign(new Error("x"), { cause: "why" })).split("\n").pop()).toBe("Caused by: why");
+    });
+
     it("context is inserted after the name; non-Error values work", () => {
         expect(formatScriptError("S", "plain failure", "onRequest")).toBe("[S] onRequest: plain failure");
         expect(formatScriptError("S", new TypeError("boom"), undefined)).toContain("[S] TypeError: boom");

@@ -9,7 +9,7 @@
 import { formatScriptError } from "../shared/scriptError";
 import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
 import { scriptFunction } from "../shared/scriptFn";
-import { makeLibRequire, type ShippedLib } from "../shared/scriptImports";
+import { makeLibRequire, topLevel, type ShippedLib } from "../shared/scriptImports";
 import { routeMatches, takesBinary, type DocumentWhen, type RouteMeta } from "../shared/route";
 import { makePageShim, domHandlersFor, scheduleDocument, fireRun, type PageDocumentHandler } from "../shared/pageShim";
 import { ScriptLife, type Generation } from "../shared/runLifecycle";
@@ -254,7 +254,7 @@ import { siteBuiltin } from "../shared/siteBuiltin";
                 const fn = scriptFunction(d.src, d.name);
                 const moduleObj = { exports: {} as any };
                 const { wt, dom } = makeDocumentShim(d.scriptId, d.name, d.params || {}, ex);
-                fn(wt, scriptConsole(d.scriptId, d.name), requireFrom(d.name), moduleObj, moduleObj.exports);
+                topLevel(() => fn(wt, scriptConsole(d.scriptId, d.name), requireFrom(d.name), moduleObj, moduleObj.exports));
                 if (gen) for (const h of domHandlersFor(dom, location.href, ex)) compiledDocument.push({ scriptId: d.scriptId, name: d.name, when: h.when, d: h, exposer, life, gen });
             } catch (e: any) {
                 // the previous code keeps running (none: calls get `not running`)

@@ -209,18 +209,55 @@ export function pageBuiltin(spec: string): any {
     return unusable(`cannot use "${spec}" in onSite code: of the built-in modules it only has valtio's core ("valtio", "valtio/vanilla") — use the others in onPage or onOverlay code`);
 }
 
-/** a module stand-in: importing it works, using it throws `message` */
+let topLevels = 0;
+
+/**
+ * Run a script's top level (and so its imports'): in the site's world a
+ * module that defines components at its top level (`memo(…)`,
+ * `forwardRef(…)`, `createContext(…)`, `class … extends Component`) still
+ * loads — the stand-ins below are inert while it runs.
+ */
+export function topLevel<T>(fn: () => T): T {
+    topLevels++;
+    try {
+        return fn();
+    } finally {
+        topLevels--;
+    }
+}
+
+/**
+ * A module stand-in: importing it works, and so does a module's top level
+ * using it (`topLevel`: each use gives another stand-in); a use anywhere
+ * else — handler code — throws `message`.
+ */
 function unusable(message: string): any {
     const fail = (): never => {
         throw new Error(message);
     };
-    return new Proxy(Object.create(null), {
-        // the CommonJS interop reads __esModule at import; anything else is a use
-        get: (_t, p) => (p === "__esModule" ? true : p === "then" || typeof p === "symbol" ? undefined : fail()),
-        set: fail,
-        has: () => false,
-        ownKeys: () => [],
-        apply: fail,
+    const inert = (): any => {
+        if (!topLevels) fail();
+        return unusable(message);
+    };
+    return new Proxy(function () {}, {
+        get: (_t, p) => {
+            // the CommonJS interop reads __esModule at import; `then` must stay undefined (awaiting it); anything else is a use
+            if (p === "__esModule") return true;
+            if (p === "then") return undefined;
+            if (typeof p === "symbol") {
+                if (!topLevels) return undefined;
+                if (p === Symbol.toPrimitive) return (hint: string) => (hint === "number" ? NaN : "");
+                if (p === Symbol.iterator) return function* () {};
+                return undefined;
+            }
+            return inert();
+        },
+        set: () => (inert(), true),
+        // (the function target's `prototype` can't be hidden)
+        has: (_t, p) => p === "prototype",
+        ownKeys: () => ["prototype"],
+        apply: inert,
+        construct: inert,
     });
 }
 

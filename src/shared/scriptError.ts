@@ -42,15 +42,19 @@ export function scriptFrame(line: string): { name: string; line: number; column:
 
 /**
  * `[name] TypeError: msg` + the user-code stack frames mapped to source
- * positions. `context` (e.g. "onRequest") is inserted after the name.
+ * positions, then each `cause` the same way (`Caused by: …`). `context`
+ * (e.g. "onRequest") is inserted after the name.
  */
 export function formatScriptError(name: string, e: any, context?: string): string {
-    const stack = e && e.stack ? String(e.stack) : String(e);
-    const nl = stack.indexOf("\n");
-    const head = nl < 0 ? stack : stack.slice(0, nl);
-    const frames = nl < 0 ? [] : stack.slice(nl + 1).split("\n");
-    const rewritten = frames.map(rewriteFrame).filter((f): f is string => !!f);
-    return [`[${name}]${context ? ` ${context}:` : ""} ${head}`, ...rewritten].join("\n");
+    const lines: string[] = [];
+    for (let err = e, depth = 0; err != null && depth < 4; err = err instanceof Error ? (err as any).cause : undefined, depth++) {
+        const stack = err.stack ? String(err.stack) : String(err);
+        const nl = stack.indexOf("\n");
+        const head = nl < 0 ? stack : stack.slice(0, nl);
+        const frames = nl < 0 ? [] : stack.slice(nl + 1).split("\n");
+        lines.push(depth ? `Caused by: ${head}` : `[${name}]${context ? ` ${context}:` : ""} ${head}`, ...frames.map(rewriteFrame).filter((f): f is string => !!f));
+    }
+    return lines.join("\n");
 }
 
 /**
