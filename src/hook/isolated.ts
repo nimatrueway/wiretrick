@@ -121,8 +121,8 @@ import { ReplicaHub } from "../shared/storeReplica";
             if (e?.name !== "DisconnectedError" && e?.name !== "TimeoutError") {
                 // disabled, deleted or no longer isolated here
                 stopped = true;
-                exposer.reset();
-                exposer.done();
+                exposer.close();
+                for (const c of [client, local, pageClient]) c.abort("the script stopped");
                 ep.close("refused");
             }
             throw e;
@@ -169,8 +169,7 @@ import { ReplicaHub } from "../shared/storeReplica";
     function run(init: IsoInit, hot: boolean): void {
         if (codeHash !== null) {
             exposer.reset();
-            client.disconnect("the script reloaded");
-            local.disconnect("the script reloaded");
+            for (const c of [client, local, pageClient]) c.abort("the script reloaded");
         }
         codeHash = init.codeHash;
         scriptName = init.name;

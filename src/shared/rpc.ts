@@ -3,17 +3,21 @@
  * page.highlight("a")`, `overlay.picked(tag)`), shared by the overlay
  * runtime, the bridge's isolated-world runtime and the main-world hook.
  *
- * The caller side is an `RpcClient`: each handle (`"page:0"`, the script's
- * first onPage registration; `"overlay:1"`, its second onOverlay one) is a
- * Proxy whose properties are async functions. A call sends `{ cid, h, fn,
- * args }` and waits up to 10 s for the `{ cid, ok, value | error }` with
- * the same `cid`.
+ * The caller side is an `RpcClient`: each handle (`"onSite:0"`, the
+ * script's first wt.onSite call; `"onOverlay:1"`, its second wt.onOverlay
+ * one) is a Proxy whose properties are async functions. A call sends `{ cid,
+ * h, fn, args }` and waits — with no time limit — for the `{ cid, ok, value |
+ * error }` with the same `cid`. When the caller's run ends first, the call
+ * rejects with AbortError and a cancel (the same `cid`, `fn` = CANCEL_FN)
+ * goes the same way, so the callee drops it.
  *
  * The callee side is an `Exposer`: a handler's return value is what it
  * exposes (a plain object's own functions; anything else exposes
  * nothing). Until the handler has returned, calls queue (at most 100 per
- * handle); a handler that won't run here (its route didn't match, it
- * threw, it's for the other world) answers `not running on this page`.
+ * handle), also across a reload of the script; a handler that won't run
+ * here (its route didn't match, it threw) answers `not running on this
+ * page`. A call still running when the script reloads rejects with
+ * ReloadedError (call again: the new run answers).
  *
  * Arguments and results are JSON, ≤ 1 MB, checked on both sides; a callee
  * error crosses as its message only.
@@ -21,7 +25,6 @@
 import type { Json } from "./wire";
 import { badValue, isPlainObject, jsonBytes } from "./storeOps";
 
-export const RPC_TIMEOUT_MS = 10_000;
 export const RPC_QUEUE_MAX = 100;
 export const RPC_MAX_BYTES = 1024 * 1024;
 
@@ -30,11 +33,22 @@ export const NO_SUCH_FUNCTION = "no such function";
 export const TOP_FRAME_ONLY = "only the top frame can call the overlay";
 export const NO_PAGE_IN_PREVIEW = "there's no page in the Editor preview: onPage code doesn't run there";
 
-/** the callee didn't answer in time */
-export class WtTimeoutError extends Error {
+/** a call's `fn` that cancels the call with the same `cid` (no function has this name) */
+export const CANCEL_FN = "\u0000cancel";
+
+/** the caller's run ended (the script reloaded, or the page navigated) before the answer */
+export class AbortError extends Error {
     constructor(message: string) {
         super(message);
-        this.name = "WtTimeoutError";
+        this.name = "AbortError";
+    }
+}
+
+/** the callee's script reloaded while the call ran: call again, the new run answers */
+export class ReloadedError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = "ReloadedError";
     }
 }
 
@@ -103,51 +117,69 @@ const callError = (message: string): RpcResult["error"] => ({ name: "WtCallError
 /** an error from a result, as the caller sees it */
 export function resultError(e: RpcResult["error"]): Error {
     const msg = String(e?.message ?? "error");
-    if (e?.name === "WtTimeoutError") return new WtTimeoutError(msg);
     if (e?.name === "DisconnectedError") return new DisconnectedError(msg);
+    if (e?.name === "AbortError") return new AbortError(msg);
+    if (e?.name === "ReloadedError") return new ReloadedError(msg);
     return new WtCallError(msg);
 }
 
+type Pending = { h: string; fn: string; resolve: (v: any) => void; reject: (e: Error) => void; unlisten?: () => void };
+
 /** the caller side: handles and pending calls */
 export class RpcClient {
-    private readonly pending = new Map<string, { h: string; resolve: (v: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
+    private readonly pending = new Map<string, Pending>();
 
-    constructor(
-        private readonly send: (call: RpcCall) => void,
-        private readonly opts: { timeoutMs?: number } = {}
-    ) {}
+    constructor(private readonly send: (call: RpcCall) => void) {}
 
-    /** the handle for `h`: every string property is an async function */
-    remote(h: string): any {
+    /** the handle for `h`: every string property is an async function; `signal()` is the calling run's (its end aborts the call) */
+    remote(h: string, signal?: () => AbortSignal | undefined): any {
         return new Proxy(Object.create(null), {
             get: (_t, prop) => {
                 // not a thenable (`await handle` must not hang), no symbol methods
                 if (typeof prop !== "string" || prop === "then" || prop === "toJSON") return undefined;
-                return (...args: unknown[]) => this.call(h, prop, args);
+                return (...args: unknown[]) => this.call(h, prop, args, signal?.());
             },
             set: () => false,
         });
     }
 
-    /** call `fn` on handle `h`; non-JSON arguments throw right here */
-    call(h: string, fn: string, args: unknown[]): Promise<any> {
+    /** call `fn` on handle `h`; non-JSON arguments throw right here. `signal` aborting rejects the call with AbortError and cancels it. */
+    call(h: string, fn: string, args: unknown[], signal?: AbortSignal): Promise<any> {
         const json = toJsonArgs(fn, args);
+        if (signal?.aborted) return Promise.reject(new AbortError(`${fn}(): ${abortReason(signal)}`));
         const cid = newCid();
         return new Promise((resolve, reject) => {
-            const ms = this.opts.timeoutMs ?? RPC_TIMEOUT_MS;
-            const timer = setTimeout(() => {
-                this.pending.delete(cid);
-                reject(new WtTimeoutError(`${fn}(): no answer within ${Math.round(ms / 1000)} s`));
-            }, ms);
-            this.pending.set(cid, { h, resolve, reject, timer });
+            const p: Pending = { h, fn, resolve, reject };
+            if (signal) {
+                const onAbort = () => this.cancel(cid, abortReason(signal));
+                signal.addEventListener("abort", onAbort);
+                p.unlisten = () => signal.removeEventListener("abort", onAbort);
+            }
+            this.pending.set(cid, p);
             try {
                 this.send({ cid, h, fn, args: json });
             } catch (e: any) {
-                clearTimeout(timer);
                 this.pending.delete(cid);
+                p.unlisten?.();
                 reject(new DisconnectedError(`${fn}(): ${e?.message || e}`));
             }
         });
+    }
+
+    /** the caller's run ended: reject pending calls (all, or those whose handle `which` accepts) with AbortError and cancel them */
+    abort(reason: string, which?: (h: string) => boolean): void {
+        for (const [cid, p] of [...this.pending]) if (!which || which(p.h)) this.cancel(cid, reason);
+    }
+
+    private cancel(cid: string, reason: string): void {
+        const p = this.pending.get(cid);
+        if (!p) return;
+        this.pending.delete(cid);
+        p.unlisten?.();
+        p.reject(new AbortError(`${p.fn}(): ${reason}`));
+        try {
+            this.send({ cid, h: p.h, fn: CANCEL_FN, args: [] });
+        } catch {}
     }
 
     /** a result arrived; unknown or settled `cid`s are dropped. Returns whether it was ours. */
@@ -156,7 +188,7 @@ export class RpcClient {
         const p = this.pending.get(r.cid);
         if (!p) return false;
         this.pending.delete(r.cid);
-        clearTimeout(p.timer);
+        p.unlisten?.();
         if (r.ok) p.resolve(r.value);
         else p.reject(resultError(r.error));
         return true;
@@ -167,10 +199,22 @@ export class RpcClient {
         for (const [cid, p] of this.pending) {
             if (which && !which(p.h)) continue;
             this.pending.delete(cid);
-            clearTimeout(p.timer);
+            p.unlisten?.();
             p.reject(new DisconnectedError(reason));
         }
     }
+}
+
+function abortReason(signal: AbortSignal): string {
+    const r = signal.reason;
+    return typeof r === "string" ? r : r instanceof Error && r.name !== "AbortError" ? r.message : "the calling run ended";
+}
+
+/** the call whose function is running right now (synchronously): its signal aborts on cancel or reload */
+let running: AbortSignal | undefined;
+/** inside an exposed function (its synchronous part): the call's signal — aborted when the caller cancels or this script reloads */
+export function callSignal(): AbortSignal | undefined {
+    return running;
 }
 
 type Reply = (r: RpcResult) => void;
@@ -182,6 +226,8 @@ export class Exposer {
     /** calls for handles not registered yet (the script hasn't compiled) */
     private early: [RpcCall, Reply][] = [];
     private settled = false;
+    /** calls whose function is running (its promise pending) */
+    private readonly inflight = new Map<string, { reply: Reply; ctl: AbortController }>();
 
     /** a handler registered; its calls queue until `expose` / `fail` */
     register(h: string): void {
@@ -215,11 +261,23 @@ export class Exposer {
         for (const [c, reply] of early) this.answer(c, reply);
     }
 
-    /** the script is recompiling (hot reload): handles register again */
+    /** the script is recompiling (hot reload): handles register again. Waiting calls wait for the new run; running ones reject with ReloadedError. */
     reset(): void {
-        for (const s of this.slots.values()) if (s.state === "pending") for (const [c, reply] of s.queue) reply({ cid: c.cid, ok: false, error: { name: "DisconnectedError", message: "the script reloaded" } });
+        for (const s of this.slots.values()) if (s.state === "pending") this.early.push(...s.queue);
         this.slots.clear();
         this.settled = false;
+        for (const [cid, f] of [...this.inflight]) {
+            this.inflight.delete(cid);
+            f.ctl.abort("the script reloaded");
+            f.reply({ cid, ok: false, error: { name: "ReloadedError", message: "the script reloaded while the call ran: call again" } });
+        }
+    }
+
+    /** the script stopped here (disabled, deleted, the page went away): every call answers `why` */
+    close(why = NOT_RUNNING): void {
+        this.reset();
+        for (const [c, reply] of this.early.splice(0)) reply({ cid: c.cid, ok: false, error: callError(why) });
+        this.settled = true;
     }
 
     /** is `h` a handle this runtime has (in any state)? */
@@ -229,6 +287,7 @@ export class Exposer {
 
     /** answer a call (now, or once its handler has returned) */
     answer(c: RpcCall, reply: Reply): void {
+        if (c.fn === CANCEL_FN) return this.cancel(c, reply);
         const slot = this.slots.get(c.h);
         if (!slot) {
             if (this.settled) return reply({ cid: c.cid, ok: false, error: callError(NOT_RUNNING) });
@@ -245,16 +304,44 @@ export class Exposer {
         const obj = slot.obj;
         const fn = obj && Object.prototype.hasOwnProperty.call(obj, c.fn) ? obj[c.fn] : undefined;
         if (typeof fn !== "function") return reply({ cid: c.cid, ok: false, error: callError(`${NO_SUCH_FUNCTION}: ${c.fn}`) });
+        const ctl = new AbortController();
         let out: unknown;
+        const outer = running;
+        running = ctl.signal;
         try {
             out = fn.apply(obj, c.args);
         } catch (e: any) {
             return reply({ cid: c.cid, ok: false, error: callError(errorMessage(e)) });
+        } finally {
+            running = outer;
         }
+        const f = { reply, ctl };
+        this.inflight.set(c.cid, f);
+        const done = (r: RpcResult) => {
+            if (this.inflight.get(c.cid) !== f) return;
+            this.inflight.delete(c.cid);
+            reply(r);
+        };
         Promise.resolve(out).then(
-            (v) => reply(okResult(c, v)),
-            (e) => reply({ cid: c.cid, ok: false, error: callError(errorMessage(e)) })
+            (v) => done(okResult(c, v)),
+            (e) => done({ cid: c.cid, ok: false, error: callError(errorMessage(e)) })
         );
+    }
+
+    /** the caller gave up on call `c.cid`: drop it (queued or running) and answer AbortError, which also clears relays */
+    private cancel(c: RpcCall, reply: Reply): void {
+        const drop = (q: [RpcCall, Reply][]) => {
+            const i = q.findIndex(([x]) => x.cid === c.cid);
+            if (i >= 0) q.splice(i, 1);
+        };
+        drop(this.early);
+        for (const s of this.slots.values()) if (s.state === "pending") drop(s.queue);
+        const f = this.inflight.get(c.cid);
+        if (f) {
+            this.inflight.delete(c.cid);
+            f.ctl.abort("the caller gave up");
+        }
+        reply({ cid: c.cid, ok: false, error: { name: "AbortError", message: "the caller gave up" } });
     }
 
     private settle(h: string, next: Slot): void {

@@ -213,7 +213,12 @@ import { readFetchBody } from "../shared/requestBody";
         let cspBlocked = false;
         // a repeated status after the handlers fired recompiles but fires nothing: the exposers stay
         const refire = hot || !domFired;
-        if (refire) for (const id of [...exposers.keys()]) if (!domHandlers.some((d) => d.scriptId === id)) exposers.delete(id);
+        if (refire)
+            for (const [id, ex] of [...exposers])
+                if (!domHandlers.some((d) => d.scriptId === id)) {
+                    ex.close();
+                    exposers.delete(id);
+                }
         for (const d of domHandlers) {
             let exposer = exposers.get(d.scriptId);
             if (!exposer) exposers.set(d.scriptId, (exposer = new Exposer()));

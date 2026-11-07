@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { DisconnectedError, Exposer, NOT_RUNNING, RPC_QUEUE_MAX, RpcClient, WtCallError, WtTimeoutError, isRpcCall, isRpcResult, type RpcCall, type RpcResult } from "../src/shared/rpc";
+import { AbortError, CANCEL_FN, DisconnectedError, Exposer, NOT_RUNNING, RPC_QUEUE_MAX, ReloadedError, RpcClient, WtCallError, callSignal, isRpcCall, isRpcResult, type RpcCall, type RpcResult } from "../src/shared/rpc";
 import { makePageShim, domHandlersFor, firePageHandler } from "../src/shared/pageShim";
 import { inertRemote, SiteCannotCallError } from "../src/shared/remote";
 import { compileScript, keyPlaceCalls } from "../src/shared/compile";
@@ -10,13 +10,19 @@ const tick = async () => {
 };
 
 /** a client wired straight to an exposer (as the bridge does for the isolated world) */
-function link(exposer: Exposer, opts?: { timeoutMs?: number }) {
+function link(exposer: Exposer) {
     const sent: RpcCall[] = [];
+    const replies: RpcResult[] = [];
     const client: RpcClient = new RpcClient((call) => {
         sent.push(call);
-        exposer.answer(call, (r) => queueMicrotask(() => client.receive(r)));
-    }, opts);
-    return { client, sent };
+        exposer.answer(call, (r) =>
+            queueMicrotask(() => {
+                replies.push(r);
+                client.receive(r);
+            })
+        );
+    });
+    return { client, sent, replies };
 }
 
 /** run a script's onSite / onPage code like a page runtime does, answering its handles */
@@ -120,15 +126,108 @@ describe("rpc: calls between the overlay and onPage code", () => {
         }
     });
 
-    it("times out with WtTimeoutError", async () => {
+    it("has no time limit: a call waits as long as the function does", async () => {
         vi.useFakeTimers();
         const client = new RpcClient(() => {});
-        const call = client.remote("onPage:0").f();
-        const out = call.catch((e: any) => e);
-        await vi.advanceTimersByTimeAsync(10_000);
-        const e = await out;
-        expect(e).toBeInstanceOf(WtTimeoutError);
-        expect(e.message).toMatch(/10 s/);
+        let settled = false;
+        void client.remote("onPage:0").f().finally(() => (settled = true));
+        await vi.advanceTimersByTimeAsync(10 * 60_000);
+        expect(settled).toBe(false);
+    });
+
+    it("the caller's run ending rejects its calls with AbortError and cancels them at the callee", async () => {
+        const p = runPage(`let release; wt.onPage("*", () => ({ wait: () => new Promise((r) => (release = r)), quick: () => 1 }));`);
+        p.fire();
+        const { client, sent, replies } = link(p.exposer);
+        const run = new AbortController();
+        const page = client.remote("onPage:0", () => run.signal);
+        const waiting = page.wait().catch((e: any) => e);
+        await tick();
+        run.abort("the script reloaded");
+        const e = await waiting;
+        expect(e).toBeInstanceOf(AbortError);
+        expect(e.message).toBe("wait(): the script reloaded");
+        expect(sent.map((c) => c.fn)).toEqual(["wait", CANCEL_FN]);
+        expect(sent[1].cid).toBe(sent[0].cid);
+        await tick();
+        // the callee answers the cancel (which clears relays on the way)
+        expect(replies.map((r) => r.error?.name)).toEqual(["AbortError"]);
+        // an aborted run's later calls reject without being sent
+        await expect(page.quick()).rejects.toBeInstanceOf(AbortError);
+        expect(sent).toHaveLength(2);
+    });
+
+    it("abort() ends the pending calls of some handles; a cancel drops a call still waiting for its handler", async () => {
+        const ex = new Exposer();
+        ex.register("onPage:0");
+        ex.register("onOverlay:0");
+        ex.done();
+        const { client, sent, replies } = link(ex);
+        const a = client.remote("onPage:0").f().catch((e: any) => e);
+        const b = client.remote("onOverlay:0").f().catch((e: any) => e);
+        client.abort("the script stopped", (h) => h === "onPage:0");
+        expect(await a).toBeInstanceOf(AbortError);
+        await tick();
+        expect(sent.map((c) => c.fn)).toEqual(["f", "f", CANCEL_FN]);
+        // the queued call is gone: exposing doesn't run it
+        let ran = 0;
+        ex.expose("onPage:0", { f: () => ran++ });
+        await tick();
+        expect(ran).toBe(0);
+        expect(replies.filter((r) => r.cid === sent[0].cid).map((r) => r.error?.name)).toEqual(["AbortError"]);
+        client.abort("bye");
+        expect((await b).name).toBe("AbortError");
+    });
+
+    it("callSignal(): an exposed function sees its call's signal, aborted when the caller cancels", async () => {
+        const ex = new Exposer();
+        ex.register("onPage:0");
+        let seen: AbortSignal | undefined;
+        ex.expose("onPage:0", { wait: () => ((seen = callSignal()), new Promise(() => {})) });
+        ex.done();
+        expect(callSignal()).toBeUndefined();
+        const run = new AbortController();
+        const call = link(ex).client.remote("onPage:0", () => run.signal).wait().catch(() => {});
+        await tick();
+        expect(seen?.aborted).toBe(false);
+        run.abort();
+        await call;
+        await tick();
+        expect(seen?.aborted).toBe(true);
+    });
+
+    it("a reload: running calls reject with ReloadedError; calls waiting for the handler wait for the new run", async () => {
+        const ex = new Exposer();
+        ex.register("onSite:0");
+        let seen: AbortSignal | undefined;
+        ex.expose("onSite:0", { next: () => ((seen = callSignal()), new Promise(() => {})) });
+        ex.register("onSite:1");
+        ex.done();
+        const { client } = link(ex);
+        const running = client.remote("onSite:0").next().catch((e: any) => e);
+        const queued = client.remote("onSite:1").v();
+        await tick();
+        ex.reset();
+        const e = await running;
+        expect(e).toBeInstanceOf(ReloadedError);
+        expect(seen?.aborted).toBe(true);
+        // the new run: the queued call is answered by it
+        ex.register("onSite:0");
+        ex.register("onSite:1");
+        ex.done();
+        ex.expose("onSite:1", { v: () => "new" });
+        expect(await queued).toBe("new");
+    });
+
+    it("close(): the script stopped here — waiting calls answer `not running`", async () => {
+        const ex = new Exposer();
+        ex.register("onPage:0");
+        const { client } = link(ex);
+        const a = client.remote("onPage:0").f();
+        const b = client.remote("onPage:9").f();
+        ex.close();
+        await expect(a).rejects.toThrow(NOT_RUNNING);
+        await expect(b).rejects.toThrow(NOT_RUNNING);
     });
 
     it("rejects pending calls with DisconnectedError when the other side closes; later calls still work", async () => {
@@ -200,20 +299,23 @@ describe("rpc: calls between the overlay and onPage code", () => {
         expect(isRpcResult({ cid: "1", ok: true, value: "x".repeat(2 * 1024 * 1024) })).toBe(false);
     });
 
-    it("a reloaded script's queued calls get DisconnectedError, and its handles register again", async () => {
+    it("a reloaded script's queued calls wait for its handles to register again", async () => {
         const ex = new Exposer();
         ex.register("onPage:0");
         const replies: RpcResult[] = [];
         ex.answer({ cid: "1", h: "onPage:0", fn: "f", args: [] }, (r) => replies.push(r));
         ex.reset();
-        expect(replies[0].error?.name).toBe("DisconnectedError");
-        // before the recompiled script registered: the call waits
+        expect(replies).toEqual([]);
+        // before the recompiled script registered: this one waits too
         ex.answer({ cid: "2", h: "onPage:0", fn: "f", args: [] }, (r) => replies.push(r));
         ex.register("onPage:0");
         ex.done();
         ex.expose("onPage:0", { f: () => "new" });
         await tick();
-        expect(replies[1]).toEqual({ cid: "2", ok: true, value: "new" });
+        expect(replies).toEqual([
+            { cid: "1", ok: true, value: "new" },
+            { cid: "2", ok: true, value: "new" },
+        ]);
     });
 });
 

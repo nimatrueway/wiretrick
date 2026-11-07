@@ -246,10 +246,15 @@ declare namespace Wiretrick {
      *
      * Call a handle from `onPage` or `onOverlay` code (trusted code). In
      * `onSite` code a call throws: the site could make it too. A call
-     * waits until the handler has run in that frame; arguments and results
-     * are JSON (≤ 1 MB), and it rejects with a `DisconnectedError` when the
-     * other side goes away. Results from an `onSite` handle are the
-     * site's data: treat them as untrusted input.
+     * waits — with no time limit — until the handler has run in that
+     * frame, also across a reload of the script; arguments and results are
+     * JSON (≤ 1 MB). It rejects with:
+     * - `DisconnectedError`: the other side went away (the frame navigated, the overlay closed);
+     * - `AbortError`: the calling code's run ended first (its script reloaded); the call is cancelled;
+     * - `ReloadedError`: the handler's script reloaded while the function ran — call again, the new run answers;
+     * - `WtCallError`: the function threw, doesn't exist, or the value isn't JSON.
+     *
+     * Results from an `onSite` handle are the site's data: treat them as untrusted input.
      *
      * @example
      * const site = wt.onSite("*://example.com/*", () => ({ user: () => (window as any).myApp?.user?.name as string | undefined }));

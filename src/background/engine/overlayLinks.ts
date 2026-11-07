@@ -24,7 +24,7 @@
  */
 import { onBridgeConnect, type BridgeLink } from "./bridgePorts";
 import { endpointPair, portEndpoint, ISO_STORE_TAG, type Endpoint, type IsoInit, type OverlayInit, type WireOps } from "../../shared/wire";
-import { isRpcCall, isRpcResult, NOT_RUNNING, RPC_TIMEOUT_MS, type RpcCall, type RpcResult } from "../../shared/rpc";
+import { isRpcCall, isRpcResult, NOT_RUNNING, type RpcCall, type RpcResult } from "../../shared/rpc";
 import { USER_SCRIPTS_OFF } from "../../shared/userScriptsStatus";
 import { contextTag, type ScriptLogLevel } from "../../shared/scriptLog";
 import { dlogLevel } from "../../shared/debugLog";
@@ -150,8 +150,8 @@ interface IsoLink {
 const topBridges = new Map<number, BridgeLink>();
 /** bound links: `${tabId}:${frameId}:${scriptId}` */
 const isoLinks = new Map<string, IsoLink>();
-/** relayed calls by cid: `toIso` = the overlay called isolated code, `toOverlay` = the other way */
-const relayed = new Map<string, { dir: "toIso" | "toOverlay"; s: string; iso: IsoLink; bridge: BridgeLink; timer: ReturnType<typeof setTimeout> }>();
+/** relayed calls by cid (until answered, or a link closes: calls have no time limit): `toIso` = the overlay called isolated code, `toOverlay` = the other way */
+const relayed = new Map<string, { dir: "toIso" | "toOverlay"; s: string; iso: IsoLink; bridge: BridgeLink }>();
 /** woken whenever a bridge or isolated link comes up */
 const linkWaiters = new Set<() => void>();
 const isoKey = (tabId: number, frameId: number, s: string) => `${tabId}:${frameId}:${s}`;
@@ -182,13 +182,9 @@ function whenLinked<T>(find: () => T | undefined): Promise<T | undefined> {
 }
 
 function track(cid: string, entry: { dir: "toIso" | "toOverlay"; s: string; iso: IsoLink; bridge: BridgeLink }): void {
-    const timer = setTimeout(() => relayed.delete(cid), RPC_TIMEOUT_MS + 1000);
-    relayed.set(cid, { ...entry, timer });
+    relayed.set(cid, entry);
 }
 function untrack(cid: string): void {
-    const r = relayed.get(cid);
-    if (!r) return;
-    clearTimeout(r.timer);
     relayed.delete(cid);
 }
 
@@ -574,7 +570,6 @@ export function resetOverlayLinks(): void {
     grants.clear();
     isoLinks.clear();
     topBridges.clear();
-    for (const r of relayed.values()) clearTimeout(r.timer);
     relayed.clear();
     linkWaiters.clear();
     previews.clear();

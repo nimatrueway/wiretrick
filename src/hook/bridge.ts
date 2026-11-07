@@ -34,7 +34,7 @@ import { makePageShim, domHandlersFor, scheduleDocument, firePageHandler, type P
 import { packBytes, unpackBytes } from "../shared/bytesPack";
 import { Endpoint, endpointPair, messagePortEndpoint, portEndpoint, ISO_STORE_TAG, type ReqOf, type ReqOps, type ResOf } from "../shared/wire";
 import { ReplicaHub, type StoreSnapshots } from "../shared/storeReplica";
-import { Exposer, RpcClient, isRpcCall, isRpcResult, NOT_RUNNING, RPC_QUEUE_MAX, RPC_TIMEOUT_MS, TOP_FRAME_ONLY, type RpcCall, type RpcResult } from "../shared/rpc";
+import { Exposer, RpcClient, isRpcCall, isRpcResult, NOT_RUNNING, RPC_QUEUE_MAX, TOP_FRAME_ONLY, type RpcCall, type RpcResult } from "../shared/rpc";
 import { inertRemote } from "../shared/remote";
 import type { DocumentWhen, PlaceApi, RouteMeta } from "../shared/route";
 import { clipPathFor, normalizeRects } from "../shared/overlayRects";
@@ -205,7 +205,6 @@ import type { RanApi } from "../shared/netTypes";
             const p = typeof data.result?.cid === "string" ? l4Pending.get(data.result.cid) : undefined;
             if (!p || p.s !== data.s || !isRpcResult(data.result)) return;
             l4Pending.delete(data.result.cid);
-            clearTimeout(p.timer);
             p.reply(data.result);
             return;
         }
@@ -370,7 +369,12 @@ import type { RanApi } from "../shared/netTypes";
         const exposers = world === "isolated" ? isoExposers : fallbackExposers;
         // the onSite fallback is still page code
         const ctx: ScriptContext = world === "isolated" ? "isolated" : "page";
-        for (const id of [...exposers.keys()]) if (!handlers.some((h) => h.scriptId === id)) exposers.delete(id);
+        for (const [id, ex] of [...exposers])
+            if (!handlers.some((h) => h.scriptId === id)) {
+                ex.close();
+                exposers.delete(id);
+                if (world === "isolated") abortCalls(id, "the script stopped");
+            }
         // onPage code's handles: its onSite handlers (the page's world), its own (here), its overlay (top frame)
         const handle = (scriptId: string) => (api: PlaceApi, key: string) =>
             api === "onSite" ? pageClient(scriptId).remote(key) : api === "onPage" ? localClient(scriptId).remote(key) : window === top ? overlayClient(scriptId).remote(key) : inertRemote(TOP_FRAME_ONLY);
@@ -399,7 +403,10 @@ import type { RanApi } from "../shared/netTypes";
         for (const h of handlers) {
             let exposer = exposers.get(h.scriptId);
             if (!exposer) exposers.set(h.scriptId, (exposer = new Exposer()));
-            else exposer.reset();
+            else {
+                exposer.reset();
+                if (world === "isolated") abortCalls(h.scriptId, "the script reloaded");
+            }
             // shadow console like the MAIN-world path: script console.*
             // calls go to the extension LOG, not the page console
             const consoleProxy = makeScriptConsole((level, source, text) => scriptLog(h.scriptId, level, scriptLogLine(h.name, source, text), ctx));
@@ -494,7 +501,6 @@ import type { RanApi } from "../shared/netTypes";
             const p = isRpcResult(r) ? isoPending.get(r.cid) : undefined;
             if (!p || p.s !== s) return;
             isoPending.delete(r.cid);
-            clearTimeout(p.timer);
             p.reply(r);
         });
         ep.on("iso.call", (c, s) => guard(() => s !== undefined && isRpcCall(c) && callOverlayFromIso(s, c)));
@@ -516,7 +522,6 @@ import type { RanApi } from "../shared/netTypes";
             for (const [cid, p] of [...isoPending])
                 if (p.ep === ep) {
                     isoPending.delete(cid);
-                    clearTimeout(p.timer);
                     p.reply({ cid, ok: false, error: { name: "DisconnectedError", message: "the link to the extension dropped" } });
                 }
             if (dead || (!l2Holders && !isoHub) || l2Timer) return;
@@ -592,11 +597,11 @@ import type { RanApi } from "../shared/netTypes";
     /** isolated-world `overlay.fn()` callers, per script */
     const overlayClients = new Map<string, RpcClient>();
     /** MV3: overlay → isolated-world calls waiting for the background's answer (L2), by cid */
-    const isoPending = new Map<string, { s: string; reply: (r: RpcResult) => void; timer: ReturnType<typeof setTimeout>; ep?: Endpoint }>();
+    const isoPending = new Map<string, { s: string; reply: (r: RpcResult) => void; ep?: Endpoint }>();
     /** MV3: isolated-world → overlay calls the overlay hasn't answered yet, by cid */
-    const isoRelayed = new Map<string, { s: string; timer: ReturnType<typeof setTimeout> }>();
+    const isoRelayed = new Map<string, { s: string }>();
     /** overlay → main-world calls waiting for the hook (L4), by cid */
-    const l4Pending = new Map<string, { s: string; reply: (r: RpcResult) => void; timer: ReturnType<typeof setTimeout> }>();
+    const l4Pending = new Map<string, { s: string; reply: (r: RpcResult) => void }>();
     let host: HTMLElement | null = null;
     let shadow: ShadowRoot | null = null;
     let zTop = 0;
@@ -753,7 +758,6 @@ import type { RanApi } from "../shared/netTypes";
             const rel = isRpcResult(r) ? isoRelayed.get(r.cid) : undefined;
             if (!rel || rel.s !== s) return void overlayClients.get(s)?.receive(r);
             isoRelayed.delete(r.cid);
-            clearTimeout(rel.timer);
             l2?.push("iso.result", r, s);
         });
         ep.onClose(() => {
@@ -781,10 +785,7 @@ import type { RanApi } from "../shared/netTypes";
         for (const call of o.queue.splice(0)) overlayClients.get(s)?.receive(callError(call.cid, NOT_RUNNING));
         // MV3: the isolated side's calls end with the `overlay.closed` below
         for (const [cid, r] of [...isoRelayed])
-            if (r.s === s) {
-                clearTimeout(r.timer);
-                isoRelayed.delete(cid);
-            }
+            if (r.s === s) isoRelayed.delete(cid);
         overlayClients.get(s)?.disconnect(`the overlay ${why}`);
         l2?.push("overlay.closed", {}, s);
         l2Holders = overlays.size;
@@ -811,7 +812,7 @@ import type { RanApi } from "../shared/netTypes";
         const fail = (message: string) => l2?.push("iso.result", callError(call.cid, message), s);
         if (!o || o.closed) return void fail(NOT_RUNNING);
         if (!o.ep && o.queue.length >= RPC_QUEUE_MAX) return void fail(`${call.fn}(): too many calls waiting for the overlay`);
-        isoRelayed.set(call.cid, { s, timer: setTimeout(() => isoRelayed.delete(call.cid), RPC_TIMEOUT_MS + 1000) });
+        isoRelayed.set(call.cid, { s });
         if (o.ep) o.ep.push("rpc.call", call);
         else o.queue.push(call);
     }
@@ -819,7 +820,7 @@ import type { RanApi } from "../shared/netTypes";
     /** MV3: the overlay calls isolated code, in a user-script world (through the background) */
     function callIso(s: string, call: RpcCall, reply: (r: RpcResult) => void): void {
         if (isoOff) return reply(callError(call.cid, isoOff));
-        const p: { s: string; reply: (r: RpcResult) => void; timer: ReturnType<typeof setTimeout>; ep?: Endpoint } = { s, reply, timer: setTimeout(() => isoPending.delete(call.cid), RPC_TIMEOUT_MS + 1000) };
+        const p: { s: string; reply: (r: RpcResult) => void; ep?: Endpoint } = { s, reply };
         isoPending.set(call.cid, p);
         l2up("iso.call").then(
             (ep) => {
@@ -830,7 +831,6 @@ import type { RanApi } from "../shared/netTypes";
             (e: any) => {
                 if (isoPending.get(call.cid) !== p) return;
                 isoPending.delete(call.cid);
-                clearTimeout(p.timer);
                 reply({ cid: call.cid, ok: false, error: { name: "DisconnectedError", message: String(e?.message || e) } });
             }
         );
@@ -857,8 +857,7 @@ import type { RanApi } from "../shared/netTypes";
 
     /** a call into the script's main-world onPage code (L4) */
     function callHook(s: string, call: RpcCall, reply: (r: RpcResult) => void): void {
-        const timer = setTimeout(() => l4Pending.delete(call.cid), RPC_TIMEOUT_MS + 1000);
-        l4Pending.set(call.cid, { s, reply, timer });
+        l4Pending.set(call.cid, { s, reply });
         window.postMessage({ source: MAIN_SOURCE, kind: "rpc.call", s, call }, window.location.origin);
     }
 
@@ -871,6 +870,13 @@ import type { RanApi } from "../shared/netTypes";
             pageClients.set(s, (c = client));
         }
         return c;
+    }
+
+    /** the script's onPage code reloaded or stopped: its pending calls end (AbortError) and are cancelled */
+    function abortCalls(s: string, reason: string): void {
+        pageClients.get(s)?.abort(reason);
+        localClients.get(s)?.abort(reason);
+        overlayClients.get(s)?.abort(reason);
     }
 
     /** onPage code → its own onPage handlers (MV2: here) */
