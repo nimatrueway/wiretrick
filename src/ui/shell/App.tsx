@@ -4,6 +4,7 @@ import { PanelDock } from "../panel/PanelDock";
 import { BundlePicker } from "../dialogs/BundlePicker";
 import { ConflictDialog } from "../dialogs/ConflictDialog";
 import { HelpDialog } from "../dialogs/HelpDialog";
+import { InstallDialog } from "../dialogs/InstallDialog";
 import { QuickOpen } from "../dialogs/QuickOpen";
 import { SettingsDialog } from "../dialogs/SettingsDialog";
 import { closeDialogs } from "../state/dialogs";
@@ -12,7 +13,7 @@ import { Workbench } from "./Workbench";
 
 /** The Editor page. */
 export function App() {
-    // Esc closes Settings, Help and Quick Open (the conflict dialog and the export/import picker take theirs first)
+    // Esc closes Settings, Help, Quick Open and Install Script (the conflict dialog and the export/import picker take theirs first)
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => void (e.key === "Escape" && closeDialogs());
         document.addEventListener("keydown", onKey);
@@ -26,6 +27,7 @@ export function App() {
             <QuickOpen />
             <SettingsDialog />
             <HelpDialog />
+            <InstallDialog />
             <ContextMenu />
             <ConflictDialog />
             <BundlePicker />

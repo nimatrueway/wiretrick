@@ -291,6 +291,12 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 /* drag-and-drop: the folder (and what's in it) or the root a drop lands in */
 .script-item.drop-target { background: var(--bg-active); }
 #script-list.drop-root { box-shadow: inset 0 0 0 1px var(--accent); }
+/* files or a link dragged over the explorer: dropping opens Install Script with them */
+#sidebar.install-drop { position: relative; box-shadow: inset 0 0 0 2px var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--bg-panel)); }
+#sidebar.install-drop::after {
+    content: "Drop to install"; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 5; white-space: nowrap;
+    background: var(--accent); color: #fff; font-weight: 600; padding: 6px 16px; border-radius: 16px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35); pointer-events: none;
+}
 .script-item.creating { cursor: default; }
 .script-item:hover { background: var(--bg-hover); }
 .script-item.selected { background: var(--bg-active); }

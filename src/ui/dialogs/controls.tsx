@@ -1,12 +1,13 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type HTMLAttributes, type ReactNode } from "react";
 
 /**
  * A dialog's backdrop (`.overlay`, `.hidden` while closed): a press on the
  * backdrop itself closes it, as do its `[data-close]` buttons.
  */
-export function Overlay(props: { id: string; open: boolean; onClose: () => void; children: ReactNode }) {
+export function Overlay(props: { id: string; open: boolean; onClose: () => void; children: ReactNode; extra?: HTMLAttributes<HTMLDivElement> }) {
     return (
         <div
+            {...props.extra}
             id={props.id}
             className={props.open ? "overlay" : "overlay hidden"}
             onMouseDown={(e) => void (e.target === e.currentTarget && props.onClose())}

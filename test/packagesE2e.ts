@@ -3,9 +3,12 @@
  * `.wiretrick.ts` URL. The tab goes to the install page, which lists what
  * the package can do; installing writes the entry, its library and its
  * JSON file into the package's folder and the entry runs. An update that
- * adds a route waits for review (the Explorer marks it), the review page
- * applies it, and rolling back restores the first version. A bundle (a
- * metadata.json listing two scripts) installs both together. Make Package…
+ * adds a route waits for review (the Explorer marks it; clicking the mark
+ * reviews it in the Editor's Install dialog), applying it installs it, and
+ * rolling back restores the first version. The Explorer's Install Script…
+ * button opens the dialog, which takes a dropped file; a link dropped on the
+ * Explorer opens the dialog on it. A bundle (a metadata.json listing two
+ * scripts) installs both together. Make Package…
  * and Export Package… in the Explorer.
  *
  * `packagesServerRoute` serves the package; call it in the suite's test server.
@@ -108,14 +111,14 @@ export async function checkPackages(ctx: any, mgr: any, origin: string, check: C
     const pendingBadge = await mgr.waitForSelector("#script-list .pkg-ind.pending", { timeout: 8000 }).then(() => true, () => false);
     check(t("the Explorer marks the waiting update"), pendingBadge);
 
-    const rv = await ctx.newPage();
-    await rv.goto(`chrome-extension://${new URL(mgr.url()).host}/install.html?update=${encodeURIComponent(pkg.id)}`, { timeout: 15000 });
-    const applyShown = await rv.waitForSelector("#update-apply", { timeout: 15000 }).then(() => true, () => false);
-    const rvText = await rv.evaluate(() => document.body.innerText);
-    check(t("the review page shows what the update adds"), applyShown && rvText.includes("1.1.0") && rvText.includes("/pkg-other"), rvText.slice(0, 400));
-    if (applyShown) await rv.click("#update-apply");
-    await rv.waitForSelector("text=Open in the Editor", { timeout: 15000 }).catch(() => {});
-    await rv.close();
+    // clicking the mark reviews the update in the Install dialog
+    await mgr.click("#script-list .pkg-ind.pending").catch(() => {});
+    const applyShown = await mgr.waitForSelector("#install-dialog #update-apply", { timeout: 15000 }).then(() => true, () => false);
+    const rvText = await mgr.evaluate(() => (document.querySelector("#install-dialog") as HTMLElement | null)?.innerText || "");
+    check(t("the update review (a dialog in the Editor) shows what the update adds"), applyShown && rvText.includes("Review Update") && rvText.includes("1.1.0") && rvText.includes("/pkg-other"), rvText.slice(0, 400));
+    if (applyShown) await mgr.click("#update-apply");
+    await mgr.waitForSelector("#install-dialog >> text=Open in the Editor", { timeout: 15000 }).catch(() => {});
+    await mgr.keyboard.press("Escape");
     const updated = (await send({ type: "listPackages" }))?.[pkg.id];
     const other = await waitFor(() => page.evaluate(() => fetch("/pkg-other").then((r) => r.text())).catch(() => ""), (v) => v === "OTHER", 10000);
     check(t("applying the update installs it"), updated?.metadata?.version === "1.1.0" && !updated.pending && other === "OTHER", JSON.stringify({ version: updated?.metadata?.version, other }));
@@ -128,20 +131,49 @@ export async function checkPackages(ctx: any, mgr: any, origin: string, check: C
     for (const d of (await send({ type: "listDataFiles" })) || []) if (d.path.startsWith("demo/")) await send({ type: "deleteDataFile", id: d.id });
     await send({ type: "packageForget", id: pkg.id });
 
-    // a bundle: metadata.json lists two scripts; they install (and run) together
+    // the Explorer's Install Script… button opens the dialog on the picker; a script file dropped on it goes to its review
+    await mgr.click("#btn-install");
+    const picker = await mgr.waitForSelector("#install-dialog #install-drop", { timeout: 8000 }).then(() => true, () => false);
+    const dropOn = (sel: string, what: { file?: [string, string]; link?: string }) =>
+        mgr.evaluate(
+            async ([sel, what]: [string, any]) => {
+                const dt = new DataTransfer();
+                if (what.file) dt.items.add(new File([what.file[1]], what.file[0]));
+                if (what.link) dt.setData("text/uri-list", what.link);
+                const el = document.querySelector(sel)!;
+                el.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: dt }));
+                await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 50)));
+                const lit = !!document.querySelector("#sidebar.install-drop, .install-dialog.dropping");
+                el.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));
+                return lit;
+            },
+            [sel, what]
+        );
+    const fileLit = await dropOn("#install-drop", { file: ["dropped.wiretrick.ts", 'wt.metadata({ name: "Dropped", version: "0.1.0" });\n'] });
+    const fileReview = await mgr.waitForSelector("#install-dialog #install-confirm", { timeout: 8000 }).then(() => true, () => false);
+    const fileText = await mgr.evaluate(() => (document.querySelector("#install-dialog") as HTMLElement | null)?.innerText || "");
+    check(t("Install Script… opens a dialog; a file dropped on it is reviewed"), picker && fileLit && fileReview && fileText.includes("Dropped") && fileText.includes("0.1.0"), JSON.stringify({ picker, fileLit, fileReview, text: fileText.slice(0, 300) }));
+    await mgr.click("#install-dialog .btn-close");
+    const closed = await mgr.waitForSelector("#install-dialog", { state: "detached", timeout: 5000 }).then(() => true, () => false);
+    check(t("the Install dialog closes"), closed);
+
+    // a bundle: metadata.json lists two scripts; they install (and run) together. Its link dropped on the Explorer opens the dialog on it.
     const kitSrc = `${origin}/kit/metadata.json`;
-    const kt = await ctx.newPage();
-    await kt.goto(`chrome-extension://${new URL(mgr.url()).host}/install.html?url=${encodeURIComponent(kitSrc)}`, { timeout: 15000 });
-    const kitConfirm = await kt.waitForSelector("#install-confirm:not([disabled])", { timeout: 15000 }).then(() => true, () => false);
-    const kitReview = await kt.evaluate(() => document.body.innerText);
+    const linkLit = await dropOn("#script-list", { link: kitSrc });
+    const kitConfirm = await mgr.waitForSelector("#install-dialog #install-confirm:not([disabled])", { timeout: 15000 }).then(() => true, () => false);
+    const kitReview = await mgr.evaluate(() => (document.querySelector("#install-dialog") as HTMLElement | null)?.innerText || "");
     check(
-        t("a bundle's review shows its name, version and scripts"),
-        kitConfirm && kitReview.includes("Kit") && kitReview.includes("3.0.0") && kitReview.includes("A bundle of 2 scripts") && kitReview.includes(`${origin}/kit-a`) && kitReview.includes(`${origin}/kit-b`),
-        kitReview.slice(0, 400)
+        t("a link dropped on the Explorer opens its review: a bundle's name, version and scripts"),
+        linkLit && kitConfirm && kitReview.includes("Kit") && kitReview.includes("3.0.0") && kitReview.includes("A bundle of 2 scripts") && kitReview.includes(`${origin}/kit-a`) && kitReview.includes(`${origin}/kit-b`),
+        JSON.stringify({ linkLit, review: kitReview.slice(0, 400) })
     );
-    if (kitConfirm) await kt.click("#install-confirm");
-    await kt.waitForSelector("text=Open in the Editor", { timeout: 15000 }).catch(() => {});
-    await kt.close();
+    if (kitConfirm) await mgr.click("#install-confirm");
+    const kitDone = await mgr.waitForSelector("#install-dialog >> text=Open in the Editor", { timeout: 15000 }).then(() => true, () => false);
+    if (kitDone) await mgr.click("#install-dialog >> text=Open in the Editor");
+    const kitOpened = await mgr.waitForSelector("#install-dialog", { state: "detached", timeout: 8000 }).then(() => true, () => false);
+    const kitIds = (((await send({ type: "listScripts" })) || []) as any[]).filter((s) => s.meta.name.startsWith("Kit/")).map((s) => s.id);
+    const kitSel = await waitFor(() => mgr.evaluate(() => document.querySelector("#script-list li.script-item.selected")?.getAttribute("data-id") || ""), (v: string) => kitIds.includes(v), 8000);
+    check(t("Open in the Editor closes the dialog and selects the installed script"), kitOpened && kitIds.includes(kitSel), JSON.stringify({ kitDone, kitOpened, kitSel, kitIds }));
     const kit: any = Object.values((await send({ type: "listPackages" })) || {}).find((p: any) => p.source === kitSrc);
     const kitNames = (((await send({ type: "listScripts" })) || []) as any[]).filter((s) => s.meta.name.startsWith("Kit/")).map((s) => s.meta.name).sort();
     const kp = await ctx.newPage();

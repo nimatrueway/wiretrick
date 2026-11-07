@@ -85,7 +85,8 @@ Click the **Wiretrick** header to collapse the whole tree.
 
 Hovering the explorer shows the header buttons: **New Script…**, **New JSON
 File…**, **New Folder…**, **Install Script…** (opens the [install
-page](packages.md#install-a-script)) and **Collapse Folders in Explorer**. A new item
+dialog](packages.md#install-a-script); you can also drop a link, a file, a folder
+or a `.zip` on the explorer) and **Collapse Folders in Explorer**. A new item
 goes into the selected folder (or the selected file's folder) and is named in
 an inline box, like VS Code (Enter creates, Esc cancels). A new data file
 is `.json` (starting as `{}`) unless you type `.svg` (an empty `<svg>`) and

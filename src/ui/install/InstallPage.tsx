@@ -1,7 +1,9 @@
 /**
- * The install page: opened for a *.wiretrick.ts URL (the background sends
- * such tabs here, like GreaseMonkey's .user.js), from the Explorer's "Install from URL / folder / zip",
- * and to review a held update (`?update=<package id>`).
+ * The install flow: read a package (a URL, a folder, a zip, or a drop of any of
+ * them), show what it does, install it; or review a held update. The Editor
+ * shows it in its Install Script dialog (dialogs/InstallDialog); install.html
+ * shows it as a page, for a *.wiretrick.ts URL (the background sends such tabs
+ * there, like GreaseMonkey's .user.js) and `?update=<package id>`.
  */
 import { useEffect, useMemo, useState } from "react";
 import type { Analysis } from "../../background/engine/packages";
@@ -12,6 +14,21 @@ import { parseSource, sourceLabel } from "../../shared/packageSource";
 import { isPackageFile, localPackage, startsIn, unzipPackage } from "../../shared/localPackage";
 import { diffHunks, lineDiff } from "../../shared/lineDiff";
 import { fetchFrom, installedTexts, packagesApi, type Fetched } from "./api";
+import { useInstallDrop, type Dropped } from "./drop";
+
+/** what to start with: a URL to read, an update to review, or a drop; else the picker */
+export interface InstallRequest {
+    url?: string;
+    update?: string;
+    drop?: Promise<Dropped>;
+}
+
+/** where the flow runs: the Editor's dialog (`embedded`: its head names it) or the install page */
+export interface InstallHost {
+    embedded?: boolean;
+    close(): void;
+    openEditor(scriptId: string): void;
+}
 
 type State =
     | { phase: "pick"; error?: string; local?: { label: string; files: Record<string, string>; entries: string[] } }
@@ -22,8 +39,6 @@ type State =
     | { phase: "done"; pkg: InstalledPackage; verb: string }
     | { phase: "error"; error: string; retry?: () => void };
 
-const closeTab = () => chrome.tabs.getCurrent((t) => (t?.id !== undefined ? chrome.tabs.remove(t.id) : window.close()));
-const openEditor = (scriptId: string) => location.assign(chrome.runtime.getURL("editor.html") + `?script=${encodeURIComponent(scriptId)}`);
 const errText = (e: any) => String(e?.message || e);
 const label = (source: string) => {
     const s = parseSource(source);
@@ -31,9 +46,26 @@ const label = (source: string) => {
 };
 const versionOf = (h: { version?: string }) => (h.version ? ` ${h.version}` : "");
 
+const pageHost: InstallHost = {
+    close: () => chrome.tabs.getCurrent((t) => (t?.id !== undefined ? chrome.tabs.remove(t.id) : window.close())),
+    openEditor: (scriptId) => location.assign(chrome.runtime.getURL("editor.html") + `?script=${encodeURIComponent(scriptId)}`),
+};
+
+/** install.html: the flow as a page; a drop anywhere on it starts over with what was dropped */
 export function InstallPage() {
-    const params = useMemo(() => new URLSearchParams(location.search), []);
+    const first = useMemo(() => new URLSearchParams(location.search), []);
+    const [req, setReq] = useState<InstallRequest & { n: number }>(() => ({ n: 0, url: first.get("url") || undefined, update: first.get("update") || undefined }));
+    const { over, handlers } = useInstallDrop((drop) => setReq((r) => ({ n: r.n + 1, drop })));
+    return (
+        <div className={"install-page" + (over ? " dropping" : "")} {...handlers}>
+            <InstallFlow key={req.n} request={req} host={pageHost} />
+        </div>
+    );
+}
+
+export function InstallFlow({ request, host }: { request: InstallRequest; host: InstallHost }) {
     const [state, setState] = useState<State>({ phase: "loading", what: "" });
+    const { close } = host;
 
     async function review(fetched: Fetched) {
         setState({ phase: "loading", what: "Checking what it does…" });
@@ -68,11 +100,19 @@ export function InstallPage() {
         }
     }
 
+    async function onDrop(drop: Promise<Dropped>) {
+        setState({ phase: "loading", what: "Reading what you dropped…" });
+        const d = await drop;
+        if ("url" in d) await load(d.url);
+        else if ("zip" in d) await onZip(d.zip);
+        else if ("files" in d) await pickLocal(d.label, d.files);
+        else setState({ phase: "pick", error: d.error });
+    }
+
     useEffect(() => {
-        const url = params.get("url");
-        const update = params.get("update");
-        if (update) void loadUpdate(update);
-        else if (url) void load(url);
+        if (request.drop) void onDrop(request.drop);
+        else if (request.update) void loadUpdate(request.update);
+        else if (request.url) void load(request.url);
         else setState({ phase: "pick" });
     }, []);
 
@@ -119,80 +159,85 @@ export function InstallPage() {
         }
     }
 
-    switch (state.phase) {
-        case "loading":
-            return <main className="center dim">{state.what}</main>;
-        case "error":
-            return (
-                <main>
-                    <h1>Can't install this</h1>
-                    <p className="err">{state.error}</p>
-                    {/file URLs/i.test(state.error) && (
-                        <p className="dim">
-                            Turn on <b>Allow access to file URLs</b> on Wiretrick's page in <code>chrome://extensions</code>, or use <b>Choose a folder…</b> below.
-                        </p>
-                    )}
-                    <div className="actions">
-                        {state.retry && <button onClick={state.retry}>Try again</button>}
-                        <button onClick={() => setState({ phase: "pick" })}>Install something else…</button>
-                        <button onClick={closeTab}>Close</button>
-                    </div>
-                </main>
-            );
-        case "pick":
-            return <Picker state={state} onUrl={(u) => void load(u)} onFolder={(l) => void onFolder(l)} onZip={(f) => void onZip(f)} onEntry={(files, e) => void installLocal(files, e)} />;
-        case "nothing":
-            return (
-                <main>
-                    <Header name={packageName(state.pkg)} metadata={state.pkg.metadata} scripts={state.pkg.entries} source={state.pkg.source} />
-                    <p>{state.note ?? "No update is waiting for review."}</p>
-                    <div className="actions">
-                        {updateSource(state.pkg) && (
-                            <button
-                                className="primary"
-                                onClick={async () => {
-                                    setState({ phase: "loading", what: "Checking for updates…" });
-                                    try {
-                                        await packagesApi.check(state.pkg.id);
-                                        const pkg = (await packagesApi.list())[state.pkg.id];
-                                        if (pkg?.pending) return void loadUpdate(pkg.id);
-                                        setState({ phase: "nothing", pkg: pkg ?? state.pkg, note: pkg?.lastError ? `Checking failed: ${pkg.lastError}` : pkg && pkg.updatedAt > state.pkg.updatedAt ? "It updated to the latest version." : "It's up to date." });
-                                    } catch (e) {
-                                        setState({ phase: "error", error: errText(e) });
-                                    }
-                                }}
-                            >
-                                Check now
-                            </button>
+    return <div className="install-flow">{body()}</div>;
+
+    function body() {
+        switch (state.phase) {
+            case "loading":
+                return <main className="center dim">{state.what}</main>;
+            case "error":
+                return (
+                    <main>
+                        <h1>Can't install this</h1>
+                        <p className="err">{state.error}</p>
+                        {/file URLs/i.test(state.error) && (
+                            <p className="dim">
+                                Turn on <b>Allow access to file URLs</b> on Wiretrick's page in <code>chrome://extensions</code>, or use <b>Choose a folder…</b> below.
+                            </p>
                         )}
-                        <button onClick={closeTab}>Close</button>
-                    </div>
-                </main>
-            );
-        case "done":
-            return (
-                <main>
-                    <h1>
-                        {state.verb} “{packageName(state.pkg)}”{versionOf(state.pkg.metadata)}
-                    </h1>
-                    <p className="dim">{state.pkg.folder ? <>Its files are in the Explorer's <b>{state.pkg.folder}</b> folder.</> : <>It's in the Explorer's root.</>}</p>
-                    <div className="actions">
-                        <button className="primary" onClick={() => openEditor(entryIds(state.pkg)[0])}>
-                            Open in the Editor
-                        </button>
-                        <button onClick={closeTab}>Close</button>
-                    </div>
-                </main>
-            );
-        case "review":
-            return <Review state={state} setState={setState} />;
-        case "pending":
-            return <PendingReview state={state} setState={setState} />;
+                        <div className="actions">
+                            {state.retry && <button onClick={state.retry}>Try again</button>}
+                            <button onClick={() => setState({ phase: "pick" })}>Install something else…</button>
+                            <button onClick={close}>Close</button>
+                        </div>
+                    </main>
+                );
+            case "pick":
+                return <Picker state={state} embedded={host.embedded} onUrl={(u) => void load(u)} onFolder={(l) => void onFolder(l)} onZip={(f) => void onZip(f)} onEntry={(files, e) => void installLocal(files, e)} />;
+            case "nothing":
+                return (
+                    <main>
+                        <Header name={packageName(state.pkg)} metadata={state.pkg.metadata} scripts={state.pkg.entries} source={state.pkg.source} />
+                        <p>{state.note ?? "No update is waiting for review."}</p>
+                        <div className="actions">
+                            {updateSource(state.pkg) && (
+                                <button
+                                    className="primary"
+                                    onClick={async () => {
+                                        setState({ phase: "loading", what: "Checking for updates…" });
+                                        try {
+                                            await packagesApi.check(state.pkg.id);
+                                            const pkg = (await packagesApi.list())[state.pkg.id];
+                                            if (pkg?.pending) return void loadUpdate(pkg.id);
+                                            setState({ phase: "nothing", pkg: pkg ?? state.pkg, note: pkg?.lastError ? `Checking failed: ${pkg.lastError}` : pkg && pkg.updatedAt > state.pkg.updatedAt ? "It updated to the latest version." : "It's up to date." });
+                                        } catch (e) {
+                                            setState({ phase: "error", error: errText(e) });
+                                        }
+                                    }}
+                                >
+                                    Check now
+                                </button>
+                            )}
+                            <button onClick={close}>Close</button>
+                        </div>
+                    </main>
+                );
+            case "done":
+                return (
+                    <main>
+                        <h1>
+                            {state.verb} “{packageName(state.pkg)}”{versionOf(state.pkg.metadata)}
+                        </h1>
+                        <p className="dim">{state.pkg.folder ? <>Its files are in the Explorer's <b>{state.pkg.folder}</b> folder.</> : <>It's in the Explorer's root.</>}</p>
+                        <div className="actions">
+                            <button className="primary" onClick={() => host.openEditor(entryIds(state.pkg)[0])}>
+                                Open in the Editor
+                            </button>
+                            <button onClick={close}>Close</button>
+                        </div>
+                    </main>
+                );
+            case "review":
+                return <Review state={state} setState={setState} close={close} />;
+            case "pending":
+                return <PendingReview state={state} setState={setState} close={close} />;
+        }
     }
 }
 
 function Picker(props: {
     state: Extract<State, { phase: "pick" }>;
+    embedded?: boolean;
     onUrl: (url: string) => void;
     onFolder: (l: FileList | null) => void;
     onZip: (f: File | undefined) => void;
@@ -202,7 +247,7 @@ function Picker(props: {
     const { local, error } = props.state;
     return (
         <main>
-            <h1>Install a script</h1>
+            {!props.embedded && <h1>Install a script</h1>}
             <p className="dim">
                 A script's URL (<code>.ts</code>), a bundle's <code>{MANIFEST_FILE}</code>, a <code>.zip</code>, a GitHub repository or folder, or a gist. It installs with the files it imports and can keep itself up to date.
             </p>
@@ -218,15 +263,19 @@ function Picker(props: {
                     Read
                 </button>
             </form>
-            <div className="row">
-                <label className="button">
-                    Choose a folder…
-                    <input id="install-folder" type="file" hidden {...({ webkitdirectory: "" } as any)} onChange={(e) => props.onFolder(e.target.files)} />
-                </label>
-                <label className="button">
-                    Choose a .zip…
-                    <input id="install-zip" type="file" hidden accept=".zip,application/zip" onChange={(e) => props.onZip(e.target.files?.[0])} />
-                </label>
+            <div id="install-drop" className="drop-zone">
+                <svg viewBox="0 0 16 16" width="28" height="28" aria-hidden="true"><path fill="none" stroke="currentColor" strokeWidth="1" strokeLinejoin="round" d="M8 1.5l5.5 3v7L8 14.5l-5.5-3v-7zM2.5 4.5L8 7.5l5.5-3M8 7.5v7" /></svg>
+                <div>Drop a script, a folder, a <code>.zip</code> or a link here</div>
+                <div className="row">
+                    <label className="button">
+                        Choose a folder…
+                        <input id="install-folder" type="file" hidden {...({ webkitdirectory: "" } as any)} onChange={(e) => props.onFolder(e.target.files)} />
+                    </label>
+                    <label className="button">
+                        Choose a .zip…
+                        <input id="install-zip" type="file" hidden accept=".zip,application/zip" onChange={(e) => props.onZip(e.target.files?.[0])} />
+                    </label>
+                </div>
             </div>
             <p className="dim small">
                 Scripts from a folder or zip update themselves only when their metadata has an <code>updateURL</code>.
@@ -379,7 +428,7 @@ function Diff(props: { before: string; after: string }) {
     );
 }
 
-function Review(props: { state: Extract<State, { phase: "review" }>; setState: (s: State) => void }) {
+function Review(props: { state: Extract<State, { phase: "review" }>; setState: (s: State) => void; close: () => void }) {
     const { fetched, analysis, existing, before } = props.state;
     const updatable = !!(fetched.source || analysis.metadata.updateURL);
     const [autoUpdate, setAutoUpdate] = useState(existing?.autoUpdate ?? updatable);
@@ -440,14 +489,14 @@ function Review(props: { state: Extract<State, { phase: "review" }>; setState: (
                             </button>
                         </>
                     )}
-                    <button onClick={closeTab}>Cancel</button>
+                    <button onClick={props.close}>Cancel</button>
                 </div>
             </footer>
         </main>
     );
 }
 
-function PendingReview(props: { state: Extract<State, { phase: "pending" }>; setState: (s: State) => void }) {
+function PendingReview(props: { state: Extract<State, { phase: "pending" }>; setState: (s: State) => void; close: () => void }) {
     const { pkg, pending, before, analysis } = props.state;
     const [busy, setBusy] = useState(false);
     async function run(fn: () => Promise<void>) {
@@ -496,7 +545,7 @@ function PendingReview(props: { state: Extract<State, { phase: "pending" }>; set
                     >
                         Skip this version
                     </button>
-                    <button onClick={closeTab}>Cancel</button>
+                    <button onClick={props.close}>Cancel</button>
                 </div>
             </footer>
         </main>

@@ -232,6 +232,30 @@ describe("help dialog", () => {
     });
 });
 
+describe("install dialog", () => {
+    it("opens on the picker, starts over with a drop, highlights a drag and closes", async () => {
+        const { InstallDialog } = await import("../src/ui/dialogs/InstallDialog");
+        const { openInstall, dialogs } = await import("../src/ui/state/dialogs");
+        render(<InstallDialog />);
+        expect($("#install-dialog")).toBeNull();
+        await act(async () => openInstall());
+        expect($("#install-dialog-title").textContent).toBe("Install Script");
+        expect($("#install-drop")).not.toBeNull();
+        expect($("#install-dialog h1")).toBeNull();
+        const dataTransfer = { types: ["Files"], items: [], files: [new File(["# hi"], "notes.md")], getData: () => "", dropEffect: "" };
+        fireEvent.dragOver($("#install-dialog"), { dataTransfer });
+        expect($(".install-dialog").classList.contains("dropping")).toBe(true);
+        await act(async () => void fireEvent.drop($("#install-drop"), { dataTransfer }));
+        await act(tick);
+        expect($(".install-dialog").classList.contains("dropping")).toBe(false);
+        expect($("#install-dialog .err").textContent).toContain("notes.md has no script");
+        fireEvent.click($("#install-dialog .btn-close"));
+        await act(tick);
+        expect(dialogs.install).toBeNull();
+        expect($("#install-dialog")).toBeNull();
+    });
+});
+
 describe("settings dialog", () => {
     it("has no Strategies section", async () => {
         const { SettingsDialog } = await import("../src/ui/dialogs/SettingsDialog");

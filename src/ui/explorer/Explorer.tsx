@@ -29,7 +29,8 @@ import {
 import { showContextMenu } from "./ContextMenu";
 import { NameInput } from "./NameInput";
 import { FileIcon, indent } from "./icons";
-import { badgeRowOf, openInstallPage, packageOf, packages, packageTitle } from "../state/packages";
+import { badgeRowOf, packageOf, packages, packageTitle } from "../state/packages";
+import { openInstall } from "../state/dialogs";
 import { packageFolders } from "../../shared/makePackage";
 import { packagesApi } from "../install/api";
 import { packageName, updateSource, type InstalledPackage } from "../../shared/packageModel";
@@ -61,7 +62,7 @@ async function checkUpdates(p?: InstalledPackage): Promise<void> {
     const all = await packagesApi.check(p?.id);
     const after = p ? all[p.id] : undefined;
     if (p && after?.lastError) actions.status(`checking ${pkgLabel(p)} failed: ${after.lastError}`, "error");
-    else if (p && after?.pending) openInstallPage(`?update=${encodeURIComponent(p.id)}`);
+    else if (p && after?.pending) openInstall({ update: p.id });
     else if (p) actions.status(after && before && after.updatedAt > before.updatedAt ? `updated ${pkgLabel(p)}` : `${pkgLabel(p)} is up to date`);
     else actions.status("checked installed scripts for updates");
 }
@@ -71,7 +72,7 @@ function packageMenu(p: InstalledPackage): MenuItem[] {
     const from = updateSource(p);
     const src = [p.source, from].find((u) => /^https?:/i.test(u) && !/\.zip([?#]|$)/i.test(u)) ?? "";
     return [
-        ...(p.pending ? [{ label: "Review Update…", run: () => openInstallPage(`?update=${encodeURIComponent(p.id)}`) }] : []),
+        ...(p.pending ? [{ label: "Review Update…", run: () => openInstall({ update: p.id }) }] : []),
         ...(from ? [{ label: "Check for Updates", run: () => pkgAction(() => checkUpdates(p)) }] : []),
         ...(from ? [{ label: p.autoUpdate ? "Turn Auto-Update Off" : "Turn Auto-Update On", run: () => pkgAction(() => packagesApi.setAutoUpdate(p.id, !p.autoUpdate), `auto-update ${p.autoUpdate ? "off" : "on"} for ${pkgLabel(p)}`) }] : []),
         ...(p.previous ? [{ label: `Roll Back to ${p.previous.metadata.version || "the Previous Version"}`, run: () => pkgAction(() => packagesApi.rollback(p.id), `rolled ${pkgLabel(p)} back (auto-update is off now)`) }] : []),
@@ -91,7 +92,7 @@ function newItemsMenu(folder: string): MenuItem[] {
 
 function installMenu(): MenuItem[] {
     return [
-        { label: "Install Script…", run: () => openInstallPage() },
+        { label: "Install Script…", run: () => openInstall() },
         ...(Object.values(packages.byId).some((p) => updateSource(p) && p.autoUpdate) ? [{ label: "Check for Script Updates", run: () => pkgAction(() => checkUpdates()) }] : []),
     ];
 }
@@ -141,8 +142,8 @@ export function ExplorerSection() {
                         <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" d="M8.5 13.5h-7v-10h4.3l1.5 1.5h7.2v3.5M12 9.5v5M9.5 12h5" /></svg>
                     </button>
                     {" "}
-                    <button id="btn-install" title="Install Script… (from a URL, GitHub, a gist, a folder or a zip)" aria-label="Install Script" onClick={button(() => openInstallPage())}>
-                        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" d="M8 1.5v8M5 6.5l3 3 3-3M2.5 10.5v3h11v-3" /></svg>
+                    <button id="btn-install" title="Install Script… (from a URL, GitHub, a gist, a folder or a zip; or drop one on the Explorer)" aria-label="Install Script" onClick={button(() => openInstall())}>
+                        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" d="M6.5 1.5L11 4v4.5M6.5 1.5L2 4v6l4.5 2.5M2 4l4.5 2.5L11 4M6.5 6.5v6M12.5 10v5M10 12.5h5" /></svg>
                     </button>
                     {" "}
                     <button id="btn-collapse-all" title="Collapse Folders in Explorer" aria-label="Collapse Folders in Explorer" onClick={button(collapseAll)}>
@@ -377,7 +378,7 @@ export function ExplorerTree() {
                     p.pending
                         ? (e) => {
                               e.stopPropagation();
-                              openInstallPage(`?update=${encodeURIComponent(p.id)}`);
+                              openInstall({ update: p.id });
                           }
                         : undefined
                 }

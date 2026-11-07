@@ -35,8 +35,6 @@ export function packageTitle(p: InstalledPackage): string {
         .join("\n");
 }
 
-export const openInstallPage = (query = ""): void => void chrome.tabs.create({ url: chrome.runtime.getURL("install.html") + query });
-
 /** packages installed from file: URLs: read again here (an extension page can read files; the background can't) */
 let lastLocalCheck = 0;
 async function recheckLocal(): Promise<void> {

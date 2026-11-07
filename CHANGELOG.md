@@ -7,6 +7,15 @@ its section below.
 
 ## [Unreleased]
 
+### Added
+
+- Drag and drop to install: drop a link, a script file, a folder or a `.zip` onto the install dialog or page, or onto the Explorer to open the dialog with it. The drop target lights up while you drag.
+
+### Changed
+
+- **Install Script…** and **Review Update…** open as a dialog in the Editor instead of a new tab. The install page still serves links to `.wiretrick.ts` files.
+- The Explorer's **Install Script…** button has a new icon (a box with a +), so it no longer looks like a download.
+
 ## [0.19.0-alpha] - 2026-11-06
 
 ### Added

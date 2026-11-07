@@ -70,11 +70,16 @@ bundle's. Files outside the bundle's folder can't be imported.
   (`github.com/…/blob/…`) stays as it is. Add `#wt-raw` to any URL to just
   view the file. The suffix only marks share links: the script runs
   whatever it's named.
-- **From the Explorer.** The **Install Script…** button (or right-click the
-  empty area → **Install Script…**) opens the install page. There you can
-  paste a URL, choose a folder or choose a `.zip`.
+- **From the Explorer.** The **Install Script…** button (a box with a +), or
+  right-click the empty area → **Install Script…**, opens the install dialog
+  in the Editor. There you can paste a URL, choose a folder or choose a
+  `.zip`.
+- **Drag and drop.** Drop a link, a script file (`.ts`), a `metadata.json`, a
+  folder or a `.zip` onto the install dialog or the install page. Dropping one
+  onto the Explorer opens the dialog with it. A dropped folder's
+  `node_modules` and `.git` are skipped.
 
-The install page accepts:
+The install dialog and page accept:
 
 | Source | Example | Updates from |
 | --- | --- | --- |
@@ -174,7 +179,7 @@ An update applies by itself only when all of these hold:
 
 Otherwise it waits for review. The Explorer shows ⬆ on the package (click
 it, or right-click → **Review Update…**) and the Log says why. The review
-page lists what the update adds and why it waited, and shows each changed
+(a dialog in the Editor) lists what the update adds and why it waited, and shows each changed
 file as a diff. **Update** applies it. **Skip this version** keeps the
 installed one, and later checks don't offer that revision again. An update
 that doesn't compile is never applied; the package's tooltip says why.
