@@ -492,7 +492,7 @@ import type { RanApi } from "../shared/netTypes";
                     libSources,
                     (lib, require, moduleObj) => scriptFunction(lib.src!)(shimFor(null, lib.name, lib.params || {}, undefined, h.scriptId).wt, consoleProxy, require, moduleObj, moduleObj.exports),
                     // the built-ins: isolated code all of them, the onSite fallback valtio's core
-                    world === "isolated" ? { builtin: (spec, importer, loadUrl) => builtinModule(spec, codeOf(importer), loadUrl) } : { builtin: siteBuiltin }
+                    world === "isolated" ? { builtin: (spec, importer, loadUrl) => builtinModule(spec, codeOf(importer), loadUrl) } : { builtin: siteBuiltin, onSite: true }
                 );
                 const moduleObj = { exports: {} as any };
                 const shim = shimFor(h.scriptId, h.name, h.params || {}, exposer, h.scriptId, gen);

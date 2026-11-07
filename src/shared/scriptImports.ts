@@ -206,8 +206,13 @@ export interface ShippedLib {
 
 /** what page-world code gets for a built-in import: the module graph still loads, using it throws */
 export function pageBuiltin(spec: string): any {
+    return unusable(`cannot use "${spec}" in onSite code: of the built-in modules it only has valtio's core ("valtio", "valtio/vanilla") — use the others in onPage or onOverlay code`);
+}
+
+/** a module stand-in: importing it works, using it throws `message` */
+function unusable(message: string): any {
     const fail = (): never => {
-        throw new Error(`cannot use "${spec}" in onSite code: of the built-in modules it only has valtio's core ("valtio", "valtio/vanilla") — use the others in onPage or onOverlay code`);
+        throw new Error(message);
     };
     return new Proxy(Object.create(null), {
         // the CommonJS interop reads __esModule at import; anything else is a use
@@ -224,6 +229,12 @@ export interface LibRequireOptions {
     builtin?: (spec: string, importer: string, loadUrl: (url: string) => any) => any;
     /** a `.css` package import's text (the overlay adds a <style>; default: ignored) */
     style?: (css: string, url: string) => void;
+    /**
+     * The site's world: a package that can't load there (one needing React)
+     * still imports, and using it throws, like the built-ins there. The
+     * script's onPage/onOverlay code imports it too.
+     */
+    onSite?: boolean;
 }
 
 /**
@@ -256,7 +267,15 @@ export function makeLibRequire<L extends ShippedLib>(libs: L[], run: (lib: L, re
         (spec: string): any => {
             const r = isUrlSpec(spec) ? null : resolve(importer, spec);
             if (!r && builtinSpec(spec)) return builtin ? builtin(spec, importer, loadPackage) : pageBuiltin(spec);
-            if (isUrlSpec(spec)) return loadPackage(spec);
+            if (isUrlSpec(spec)) {
+                if (!opts.onSite) return loadPackage(spec);
+                try {
+                    return loadPackage(spec);
+                } catch (e: any) {
+                    const why = String(e?.message ?? e).replace(/^cannot import "[^"]*": /, "");
+                    return unusable(`cannot use "${spec}" in onSite code: it doesn't load there (${why}) — a package that needs React works in onPage or onOverlay code`);
+                }
+            }
             if (!r) throw new Error(`cannot import "${spec}" — is the ${isDataSpec(spec) ? "data file" : "library script"} saved?`);
             if (r.kind === "data") return dataFileValue(r.path, scriptLibs.find((l) => l.json !== undefined && l.name === r.path)!.json!);
             if (modules.has(r.name)) return modules.get(r.name);

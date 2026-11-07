@@ -7,6 +7,10 @@ its section below.
 
 ## [Unreleased]
 
+### Fixed
+
+- A script importing a package that needs React (like `cmdk` for its overlay) no longer fails its `onSite` handlers with `React.forwardRef is not a function`. The package doesn't load in the site's world, which has no React, and only using it in `onSite` code throws.
+
 ## [0.22.2-alpha] - 2026-11-07
 
 ### Fixed

@@ -218,7 +218,7 @@ import { siteBuiltin } from "../shared/siteBuiltin";
         const requireFrom = makeLibRequire(
             libSources,
             (lib, require, moduleObj) => scriptFunction(lib.src!)(makeDocumentShim(null, lib.name, lib.params || {}).wt, scriptConsole(null, lib.name), require, moduleObj, moduleObj.exports),
-            { builtin: siteBuiltin }
+            { builtin: siteBuiltin, onSite: true }
         );
         const compiledDocument: { scriptId: string; name: string; when: DocumentWhen; d: PageDocumentHandler; exposer: Exposer; life: ScriptLife; gen: Generation }[] = [];
         const gens: [ScriptLife, Generation][] = [];

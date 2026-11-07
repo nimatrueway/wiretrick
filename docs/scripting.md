@@ -520,7 +520,9 @@ built-ins (`fs`, `path`, `crypto`, …) aren't available: `require("fs")`
 throws `"fs" is a Node.js built-in — not available in Wiretrick scripts`.
 Packages work on every strategy and in `wt.onSite`, `wt.onPage` and
 `wt.onOverlay` handlers (the downloaded code is sent to the page along
-with the script).
+with the script). `onSite` code has no React, so a package that needs it
+(a UI library like `cmdk`) doesn't load there: the script still runs its
+`onSite` handlers, and only using that package in `onSite` code throws.
 
 **Types.** Wiretrick also downloads the package's TypeScript declarations:
 its own (`types`, `typings`, `exports` or a `.d.ts` next to the file), else

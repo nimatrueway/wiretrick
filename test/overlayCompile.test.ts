@@ -139,6 +139,20 @@ describe("built-in imports in onSite code", () => {
         expect(() => req("react").useState).toThrow(/cannot use "react" in onSite code/);
     });
 
+    it("the site's world still compiles a script importing a package that needs React (for its onOverlay code); using it there throws", () => {
+        const url = "https://unpkg.com/ui-lib@1.0.0";
+        const libs = [{ name: `${url}/index.js`, pkg: { js: `var React = require("react");\nexports.Button = React.forwardRef(function () {});\n`, requires: {} } }, { name: url, alias: `${url}/index.js` }];
+        const req = makeLibRequire(libs, () => {}, { builtin: siteBuiltin, onSite: true })("main");
+        const js = toRunnableJs(`import { Button } from "${url}";\nimport * as UI from "${url}";\nimport Def from "${url}";\nexport const use = () => Button;\nexport const all = () => UI.Button;`);
+        const m = { exports: {} as any };
+        expect(() => new Function("require", "module", "exports", js)(req, m, m.exports)).not.toThrow();
+        expect(() => m.exports.use()).toThrow(/cannot use "https:\/\/unpkg\.com\/ui-lib@1\.0\.0" in onSite code: it doesn't load there \(cannot use "react" in onSite code.*onPage or onOverlay/s);
+        expect(() => m.exports.all()).toThrow(/in onSite code/);
+        // elsewhere the load error stays a compile error
+        const iso = makeLibRequire(libs, () => {}, { builtin: siteBuiltin })("main");
+        expect(() => iso(url)).toThrow(/cannot import "https:\/\/unpkg\.com\/ui-lib@1\.0\.0": cannot use "react"/);
+    });
+
     it("a page shim compiles an overlay script that imports React", () => {
         const req = makeLibRequire([], () => {})("main");
         const js = toRunnableJs(`import { useState } from "react";\nexport const App = () => { useState(0); return <div />; };`);
