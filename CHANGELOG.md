@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.22.2-alpha] - 2026-11-07
+
 ### Fixed
 
 - Saving a script retries the failed dependencies of a package it already downloaded. Before, a package stored with a failed dependency (like `cmdk@1.1.1` before 0.22.1) kept the error until it was no longer imported.
@@ -826,7 +828,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.22.1-alpha...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.22.2-alpha...HEAD
+[0.22.2-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.1-alpha...v0.22.2-alpha
 [0.22.1-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.0-alpha...v0.22.1-alpha
 [0.22.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.21.0-alpha...v0.22.0-alpha
 [0.21.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.20.0-alpha...v0.21.0-alpha
