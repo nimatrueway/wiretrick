@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.22.4-alpha] - 2026-11-07
+
 ### Fixed
 
 - Error stack traces point at the right file and line. A script's `onSite` error listed Wiretrick's own page code as lines of the script (like `feature-flag-override.tsx:2504:6` in a 330-line file), and a library script's lines carried the importing script's name. Each frame now names the script it's in, and the rest are left out. The Problems view goes to the line in the script itself.
@@ -840,7 +842,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.22.3-alpha...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.22.4-alpha...HEAD
+[0.22.4-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.3-alpha...v0.22.4-alpha
 [0.22.3-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.2-alpha...v0.22.3-alpha
 [0.22.2-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.1-alpha...v0.22.2-alpha
 [0.22.1-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.0-alpha...v0.22.1-alpha
