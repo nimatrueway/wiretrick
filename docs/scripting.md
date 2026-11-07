@@ -28,14 +28,22 @@ wt.onResponseHeaders(API, () => ({
 // Stream-modify the body:
 wt.onResponseBody({ url: "*://app.example.com/api/user*", strategy: "helper" }, (ctx, body) => String(body).replace('"role":"user"', '"role":"admin"'));
 
-// Patch the page itself:
-wt.onPage("*://app.example.com/*", () => {
-    document.title = "🎯 " + document.title;
+// Change the page (its DOM, in a world the site's JavaScript can't see):
+wt.onPage("*://app.example.com/*", (ctx) => {
+    const title = ctx.once("title", () => document.title); // the page's own title, kept across saves
+    document.title = "🎯 " + title;
 });
 
+// Run in the site's own JavaScript and return functions the other places call:
+const site = wt.onSite("*://app.example.com/*", () => ({
+    user: () => (window as any).myApp?.user?.name as string | undefined,
+}));
+
 // Draw the script's own GUI over the page:
-wt.onPage({ url: "*://app.example.com/*", dom: "overlay" }, () => {
-    document.body.append("Hello from the overlay");
+wt.onOverlay("*://app.example.com/*", async (ctx) => {
+    const hello = document.body.appendChild(document.createElement("output"));
+    hello.value = `Hello ${(await site.user()) ?? "stranger"}`;
+    ctx.signal.addEventListener("abort", () => hello.remove()); // a save runs this again
 });
 ```
 
@@ -44,6 +52,11 @@ Register handlers synchronously at top level. A registration after an
 registers no handlers is a [library](#libraries-and-recipes). To share a
 script, publish it at a URL ending in `.wiretrick.ts`; opening that URL
 [installs it](packages.md).
+
+Saving a script applies it in place: network handlers change for the next
+request, and page code runs again on open pages without reloading them —
+see [page code](#page-code--wtonsite-wtonpage-wtonoverlay) and [hot
+reload](#hot-reload--runs-and-ctx).
 
 ## Routes
 
@@ -57,7 +70,7 @@ fails to load and the Problems view points at the call):
 | one URL pattern | `wt.onRequest({ url: "*://example.com/*", strategy: "helper" }, fn)` |
 | a list | `wt.onRequest({ url: ["*://a.example.com/*", "*://b.example.com/*"], strategy: "helper" }, fn)` |
 | all options | `wt.onRequest({ url, exclude, methods, resourceTypes, strategy }, fn)` |
-| `onPage` (no strategy) | `wt.onPage("*://example.com/*", fn)` or `wt.onPage({ url, exclude, when, js, dom, unsafe }, fn)` |
+| page code (no strategy) | `wt.onPage("*://example.com/*", fn)` or `wt.onPage({ url, exclude, when }, fn)`; the same for `wt.onSite` and `wt.onOverlay` |
 
 An empty list matches **nothing**, never everything.
 
@@ -128,7 +141,7 @@ wt.onResponseBody(
   | `page` | Only sees page fetch/XHR (`xmlhttprequest`). A list without `xmlhttprequest` means the handler never runs, and the Problems view warns. |
   | `rules` | Part of the browser-native rule: other types never match. |
 
-  `onPage` routes have no `resourceTypes` or `methods`.
+  `onSite`, `onPage` and `onOverlay` routes have no `resourceTypes` or `methods`.
 - **`strategy`** — **required**: the [strategy](strategies.md) that runs
   this handler: `"helper"`, `"page"`, `"extension"`, `"debugger"` or
   `"rules"`. There is no default — a route without one (or a bare URL
@@ -500,8 +513,9 @@ package that fails to download isn't an error until the package `require`s
 it at runtime, so optional dependencies don't break anything. Node.js
 built-ins (`fs`, `path`, `crypto`, …) aren't available: `require("fs")`
 throws `"fs" is a Node.js built-in — not available in Wiretrick scripts`.
-Packages work on every strategy and in `wt.onPage` (and overlay)
-handlers (the downloaded code is sent to the page along with the script).
+Packages work on every strategy and in `wt.onSite`, `wt.onPage` and
+`wt.onOverlay` handlers (the downloaded code is sent to the page along
+with the script).
 
 **Types.** Wiretrick also downloads the package's TypeScript declarations:
 its own (`types`, `typings`, `exports` or a `.d.ts` next to the file), else
@@ -518,8 +532,9 @@ VS Code and `tsc` type-check the same imports.
   native code, WebAssembly fetched at runtime, or a bundler (`import.meta.url`
   assets, CSS imported from inside a package's JavaScript) don't work.
 - A `.css` file (`import "https://unpkg.com/daisyui@5.0.43/daisyui.css"`)
-  becomes a `<style>` in the script's [overlay](#overlays--dom-overlay);
-  everywhere else it's ignored.
+  becomes a `<style>` in the script's [overlay](#overlays--wtonoverlay);
+  everywhere else it's ignored (use [`ctx.style`](#hot-reload--runs-and-ctx)
+  in `onPage` code).
 - Top-level `await` in a package isn't supported. A script's `import()` of a
   package URL must be a string literal so the save finds and downloads it.
 - Per import: at most 1000 files, 5 MB per file and 20 MB in total; typings
@@ -583,17 +598,25 @@ A network handler sees the copy of the page its request comes from, and an
 overlay sees its own page's — so the overlay and the handlers of that
 page's requests share state, and other tabs aren't affected.
 
-```ts
+```tsx
+import { useSnapshot } from "valtio";
+
 const page = wt.pageStore("page", { staging: false });
 
 wt.onRequest({ url: "https://api.example.com/*", strategy: "helper" }, (ctx) => {
     if (page.staging) return { redirect: ctx.url.replace("api.", "staging-api.") };
 });
 
-wt.onPage({ url: "https://example.com/*", dom: "overlay" }, () => {
-    const box = document.body.appendChild(document.createElement("input"));
-    box.type = "checkbox";
-    box.onchange = () => (page.staging = box.checked); // this tab only
+wt.onOverlay("https://example.com/*", (ctx) => {
+    function Switch() {
+        const snap = useSnapshot(page);
+        return (
+            <label style={{ position: "fixed", right: 16, bottom: 16 }}>
+                <input type="checkbox" checked={snap.staging} onChange={() => (page.staging = !page.staging)} /> Staging (this tab)
+            </label>
+        );
+    }
+    ctx.mount(<Switch />);
 });
 ```
 
@@ -609,61 +632,52 @@ wt.onPage({ url: "https://example.com/*", dom: "overlay" }, () => {
   JSON rules as `wt.globalStore`.
 - **Names.** One name space with `wt.globalStore`: a script can't have a
   global and a page store with the same name.
-- Available in `onPage` code (the copy of its page) and the overlay; not
-  in page-world `onPage` code (`js: "page"`, see below) unless it opts in
-  with `unsafe: true`, nor in `rules` handlers (their rules are built once for every
-  page).
+- Available in `onPage` and `onOverlay` code (the copy of their page);
+  not in `onSite` code (see below), nor in `rules` handlers (their rules
+  are built once for every page).
 
-### Stores in `onPage` code
+### Stores in page code
 
-`onPage` code (isolated, the default world) gets live copies of the script's stores, like the overlay: reads are
-synchronous, writes reach the background, the overlay and other tabs
-(`wt.pageStore`: this page's copy only), and their changes come back.
-
-Page-world `onPage` code (`js: "page"`) runs in the page's own
-JavaScript, so the page could read the stores and forge writes to them.
-There, `wt.globalStore` and `wt.pageStore` throw, and calls to an
-overlay handle reject — anything page-world code can call, the page can
-call too. Keep such code isolated and reach into the page with
-[`ctx.evaluate`](#reading-the-page--ctxevaluate) instead. The Problems view
-warns about a page-world `onPage` handler that uses a store or an
-overlay handle ("…which the API explicitly disallows in the page
-world"); its quick fix drops `js: "page"`.
-
-If the code must live in the page's world anyway, `unsafe: true` on its
-route accepts that risk: that script's page-world code then gets live
-stores (same copies, persistence and cross-tab sync as isolated code)
-and can call its overlay (top frame). The page can then read and change
-**that script's** stores and call its overlay too — never another
-script's: the background only lets a script's stores be reached from the
-page's world when that script has an `unsafe: true` page-world route for
-the frame's URL, and checks again whenever scripts change.
+`onPage` and `onOverlay` code get live copies of the script's stores:
+reads are synchronous, writes reach the background, the overlay and other
+tabs (`wt.pageStore`: this page's copy only), and their changes come back.
 
 ```ts
-const state = wt.globalStore("state", { user: "" });
-const overlay = wt.onPage({ url: "*://app.example.com/*", dom: "overlay" }, () => ({
-    greet: (name: string) => `hi ${name}`,
-}));
+import { subscribe } from "valtio";
 
-wt.onPage({ url: "*://app.example.com/*", js: "page", unsafe: true }, async () => {
-    state.user = (window as any).myApp?.user?.name ?? "";  // the site's globals, directly
-    document.title = await overlay.greet(state.user);
-});
-```
-
-The built-in `react` and `valtio` imports still aren't available there
-(watch a store with a timer or from the overlay instead).
-
-```ts
 const page = wt.pageStore("page", { hits: 0 });
 
 wt.replaceResponse({ url: "https://example.com/api/*", strategy: "page" }, () => {
     page.hits++;
 });
 
-wt.onPage("https://example.com/*", () => {
+wt.onPage("https://example.com/*", (ctx) => {
     const badge = document.body.appendChild(document.createElement("output"));
-    setInterval(() => (badge.value = `${page.hits} API calls`), 500);
+    const show = () => (badge.value = `${page.hits} API calls`);
+    show();
+    const stop = subscribe(page, show);
+    ctx.signal.addEventListener("abort", () => (stop(), badge.remove())); // a save runs this again
+});
+```
+
+`onSite` code runs among the site's own scripts, which could read the
+stores and forge writes to them. There, using `wt.globalStore` or
+`wt.pageStore` throws (declaring one at top level is fine: that line runs
+there too). Keep the stores in `onPage` code, read the site through an
+`onSite` [handle](#handles--calls-between-places), and pass what `onSite`
+code needs as arguments. The Problems view warns about an `onSite` handler
+that uses a store or a handle; its quick fix moves the handler to
+`wt.onPage`.
+
+```ts
+const site = wt.onSite("*://app.example.com/*", () => ({
+    user: () => (window as any).myApp?.user?.name as string | undefined,
+}));
+const state = wt.globalStore("state", { user: "" });
+
+wt.onPage("*://app.example.com/*", async () => {
+    const name = await site.user();
+    if (typeof name === "string") state.user = name; // the site's data: check it
 });
 ```
 
@@ -687,8 +701,10 @@ wt.replaceResponse({ url: "*://api.example.com/user", strategy: "helper" }, asyn
   `signal` (abort) isn't supported.
 - `from: "background"` is the default in handlers. `from: "page"` fetches
   as the page — its origin, cookies and CORS rules — and works only in
-  [overlays](#overlays--dom-overlay), where it's the default (relative URLs
+  [overlays](#overlays--wtonoverlay), where it's the default (relative URLs
   resolve against the page); in handlers it rejects.
+- `onSite` and `onPage` code has no `wt.fetch` (it rejects): use `fetch`,
+  or call a function of the overlay.
 
 ### Built-in valtio and React
 
@@ -700,10 +716,10 @@ JSX (`<div />`) goes in a `.tsx` script — one whose name ends in `.tsx`,
 like `ui/Panel.tsx` (create or rename it with the extension; a plain
 script's `.ts` is implied). It compiles with React's automatic runtime, so
 components need no `import React`. JSX in a `.ts` script is an error with a
-**Rename to Name.tsx** quick fix. The built-ins work in `wt.onPage`
-code too (the default isolated world: React loads into it on first use,
-and handlers that import it start once it has), but not with
-`js: "page"`, where using one throws.
+**Rename to Name.tsx** quick fix. The built-ins work in `wt.onOverlay`
+and `wt.onPage` code too (in the isolated world React loads on first use,
+and handlers that import it start once it has), but not in `wt.onSite`
+code, where using one throws.
 
 ```ts
 import { subscribe } from "valtio";
@@ -712,209 +728,379 @@ const state = wt.globalStore("state", { mocking: false });
 subscribe(state, () => wt.log("mocking is now", state.mocking));
 ```
 
-## DOM changes — `wt.onPage`
+## Page code — `wt.onSite`, `wt.onPage`, `wt.onOverlay`
 
-`wt.onPage` is not a network strategy — it registers a **DOM-ready callback
-that runs in the page**: by default in an isolated world (same DOM, none of
-the page's own JS), or with `js: "page"` in the page's own JavaScript
-world; with `dom: "overlay"` it draws the script's [own GUI](#overlays--dom-overlay)
-instead. Its route is frame URL pattern(s), or `{ url, exclude, when, js, dom, unsafe }`.
-A script may register several, each with its own route, `when`, `js` and `dom`. Exact
-timing:
+Three handlers run code in the page instead of on its requests. They
+aren't strategies: they work the same whatever the network handlers use.
+Each runs in its own place:
 
-1. **Injection**: our bridge content script (`document_start`, isolated
-   world) injects `hook.js` into the page via a script tag before any page
-   script runs. The hook (page world) and the isolated runtime ask the
-   background for the scripts with an `onPage` route matching this frame's
-   URL and compile them.
-2. **Registration**: while compiling, the `wt.onPage(route, handler)` calls
-   whose route matches the frame are captured (the handler is stored, not
-   yet run).
-3. **Execution**: by default (`when: "document_end"`) the captured handlers
-   run exactly once, when the `DOMContentLoaded` event fires — i.e. the
-   full DOM is parsed and queryable, but stylesheets/images may still be loading, and framework
-   hydration (React/Vue) has *not* necessarily finished yet.
-   - If the hook's bundle arrives **after** `DOMContentLoaded` already fired
-     (late bundle, bfcache restore), handlers run immediately at
-     registration time.
-4. **Context**: handlers get full DOM access — `document.title` writes,
-   observers, etc. They can be `async` (the engine doesn't await
-   them). `ctx` is the same request-context shape (`url`, `method`, …) with
-   the frame URL.
-5. **Timing — `when`**: the route object picks the moment. Handlers with
-   the same `when` run in script-list order, then registration order.
+| | runs in | sees | the site | has |
+|---|---|---|---|---|
+| `wt.onSite` | the site's own JavaScript world | the DOM and the site's globals (`window.myApp`); its `fetch`/XHR go through the `page` strategy | sees it and can tamper with it: **untrusted** | no stores, no handle calls, no React |
+| `wt.onPage` | an isolated world | the DOM, none of the site's globals | can't see or reach it | stores, handle calls, React (`ctx.mount`) |
+| `wt.onOverlay` | the script's own frame over the page (top frame) | its own DOM | can't see or reach it | stores, handle calls, React, shortcuts, `fetch` as the page |
 
-   ```ts
-   wt.onPage("*://example.com/*", () => { ... });                                       // default: document_end
-   wt.onPage({ url: "*://example.com/*", when: "document_start" }, () => { ... });      // while HTML is still parsing
-   wt.onPage({ url: "*://example.com/*", when: "document_end" }, () => { ... });        // DOMContentLoaded (DOM parsed)
-   wt.onPage({ url: "*://example.com/*", when: "document_idle" }, () => { ... });       // after the page's load event
-   ```
-
-   | `when` | Runs | DOM state | Use for |
-   |---|---|---|---|
-   | `document_start` | as soon as the script is compiled | `<html>` only; `head`/`body` usually `null` | stubbing globals, `MutationObserver` on `document`, capture listeners — getting in ahead of page code |
-   | `document_end` *(default)* | at `DOMContentLoaded` (DOM parsed), `defer`/module scripts done | complete DOM; images/CSS/iframes may still load; framework hydration may not have happened | most title/text/attribute changes |
-   | `document_idle` | after the page's `load` event | everything loaded | final layout/sizes, content built during load |
-
-   - **Already past that moment?** (slow bundle, bfcache restore) The
-     handler runs immediately.
-   - **`document_start` race:** in the MV2 build the bundle arrives in ~1ms
-     and reliably beats page scripts. In the MV3 build a cold service
-     worker can take ~50-100ms, so early inline `<script>`s may already
-     have run. When page code *must* see your change, rewrite the response
-     with `onResponseBody` instead.
-   - **`document_idle` always waits for the page's `load` event**, unlike
-     Chrome's content-script `run_at: "document_idle"` (which can fire
-     before `load`); one slow image or ad iframe delays it.
-   - **Once per document, per matching frame.** Every frame (iframes too)
-     is matched against its *own* URL. SPA soft navigations (`pushState`)
-     and framework re-renders don't re-run it — start a `MutationObserver`
-     inside the handler to keep re-applying. Hard navigations start over.
-   - **Live edits re-run immediately**, regardless of `when`, when you save
-     the script with the page open — keep handlers idempotent.
-   - **Async handlers** aren't awaited; `when` only sets when they start.
-   - **`js`** — which JavaScript world the handler runs in:
-
-     | `js` | Sees | The page | May use |
-     |---|---|---|---|
-     | `"isolated"` *(default)* | the DOM; no page globals (`window.myApp`) — read them with [`ctx.evaluate`](#reading-the-page--ctxevaluate) | can't see or tamper with it | stores, calling the overlay ([the isolated world](#the-isolated-world)) |
-     | `"page"` | the DOM and the page's globals; its `fetch`/XHR go through the `page` strategy | sees it, can tamper with it | neither (stores throw, overlay calls reject) — unless `unsafe: true` ([stores in `onPage` code](#stores-in-onpage-code)), which the page then reaches too |
-
-     On Chrome (MV3) isolated code needs user scripts turned on
-     ([how](#user-scripts-on-chrome)); `js: "page"` code doesn't.
-
-     ```ts
-     wt.onPage("*://example.com/*", () => { ... });                       // isolated
-     wt.onPage({ url: "*://example.com/*", js: "page" }, () => { ... });  // the page's own world
-     ```
-   - **`dom`** — which document it draws in: `"page"` *(default)*, the
-     site's, in every matching frame; or `"overlay"`, the script's own
-     ([overlays](#overlays--dom-overlay)). Together:
-
-     | `js` \\ `dom` | `"page"` | `"overlay"` |
-     |---|---|---|
-     | `"isolated"` | the default | the overlay, in its own frame |
-     | `"page"` | the site's world | the overlay's document, the site's world — needs `unsafe: true` ([below](#page-world-overlays--unsafe-true)) |
-   - **CSP fallback:** if the page forbids `eval`, `js: "page"` handlers
-     run in the extension's isolated world — same DOM and timing, but page
-     globals aren't visible.
-
-### Reading the page — `ctx.evaluate`
-
-`ctx.evaluate(fn, ...args)` runs `fn` in the page's own JavaScript world
-from isolated code and resolves with its result (awaited if it returns a
-promise) — so you can read the site's globals without moving the whole
-handler into the page:
+Use `onPage` for DOM changes, `onSite` only for what needs the site's
+JavaScript (its globals, wrapping its functions), and `onOverlay` for a
+GUI the page can't touch. Each returns a
+[handle](#handles--calls-between-places) to the functions its handler
+returns, so the places work together:
 
 ```ts
+// the site's world: read its globals, hand them over as functions
+const site = wt.onSite("*://app.example.com/*", () => ({
+    flags: () => Object.keys((window as any).__APP_FLAGS__ ?? {}),
+}));
+
+// isolated: change the DOM, ask the site
 wt.onPage("*://app.example.com/*", async (ctx) => {
-    const user = await ctx.evaluate((key: string) => (window as any).app?.[key], "user");
-    if (typeof user?.name === "string") panel.textContent = user.name;
+    const title = ctx.once("title", () => document.title);
+    const flags = await site.flags(); // string[], typed from the onSite handler
+    document.title = `${flags.length} flags · ${title}`;
 });
 ```
 
-- `fn` is sent as source. What it uses from the script's **top level**
-  comes along: imports (libraries and packages), helper functions,
-  constants — and what those use in turn. They're re-created in the page
-  from their declarations on every call (libraries run once per version of
-  the script), so a top-level `let` starts at its initial value there and
-  a later `cfg.x = 1` doesn't come along. The handler's own variables
-  (`ctx`, its locals and parameters) don't — pass them as `args`.
-  Arguments and the result are plain data (structured-clonable) or
-  functions (below); anything else rejects.
+- **Route.** URL pattern(s), or `{ url, exclude, when }`, matched against
+  each frame's own URL (iframes too); `onOverlay` matches the tab's top
+  page. A script may register several of each, with different routes and
+  `when`s.
+- **Register at top level.** Like every handler, unconditionally and
+  synchronously: the n-th `wt.onPage` call is the same handler in every
+  place the script runs. That's how a handle finds its handler, and how a
+  save matches new runs to old ones ([hot reload](#hot-reload--runs-and-ctx)).
+- Because it runs in the page, page code works however the response
+  arrived — service-worker-served HTML, cached pages, or hydration
+  overwriting a body transform — which is why it's the resilient choice
+  for title/DOM changes on SPAs.
+
+### When page code runs — `when`
+
+In every frame, Wiretrick's hook starts at `document_start`, asks the
+background for the scripts with a page route matching that frame's URL,
+compiles them and captures the matching handlers (stored, not yet run).
+Each then runs once, at its route's `when`. Handlers with the same `when`
+run in script-list order, then registration order.
+
+```ts
+wt.onPage("*://example.com/*", () => { ... });                                       // default: document_end
+wt.onPage({ url: "*://example.com/*", when: "document_start" }, () => { ... });      // while HTML is still parsing
+wt.onPage({ url: "*://example.com/*", when: "document_end" }, () => { ... });        // DOMContentLoaded (DOM parsed)
+wt.onPage({ url: "*://example.com/*", when: "document_idle" }, () => { ... });       // after the page's load event
+```
+
+| `when` | Runs | DOM state | Use for |
+|---|---|---|---|
+| `document_start` | as soon as the script is compiled | `<html>` only; `head`/`body` usually `null` | stubbing globals, `MutationObserver` on `document`, capture listeners — getting in ahead of page code |
+| `document_end` *(default)* | at `DOMContentLoaded` (DOM parsed), `defer`/module scripts done | complete DOM; images/CSS/iframes may still load; framework hydration may not have happened | most title/text/attribute changes |
+| `document_idle` | after the page's `load` event | everything loaded | final layout/sizes, content built during load |
+
+- **Already past that moment?** (slow bundle, bfcache restore) The
+  handler runs immediately.
+- **`document_start` race:** in the MV2 build the bundle arrives in ~1ms
+  and reliably beats page scripts. In the MV3 build a cold service
+  worker can take ~50-100ms, so early inline `<script>`s may already
+  have run. When page code *must* see your change, rewrite the response
+  with `onResponseBody` instead.
+- **`document_idle` always waits for the page's `load` event**, unlike
+  Chrome's content-script `run_at: "document_idle"` (which can fire
+  before `load`); one slow image or ad iframe delays it.
+- **Once per document, per matching frame.** SPA soft navigations
+  (`pushState`) and framework re-renders don't re-run it — start a
+  `MutationObserver` inside the handler to keep re-applying (the overlay
+  has [`ctx.onNavigate`](#overlays--wtonoverlay)). Hard navigations start
+  over.
+- **Saving the script** runs the handlers again right away, whatever their
+  `when`, without reloading the page ([hot reload](#hot-reload--runs-and-ctx)).
+- **Async handlers** aren't awaited; `when` only sets when they start.
+- `ctx` has the request-context shape: `ctx.url` is the frame's URL (the
+  page's in an overlay); `method`, `resourceType` and `groups` are
+  placeholders (`"GET"`, `"main_frame"`, `{}`).
+
+### `wt.onSite` — the site's world
+
+`onSite` code runs among the site's own scripts: it reads `window.myApp`
+or a Redux store directly, wraps the site's functions with
+[`ctx.patch`](#hot-reload--runs-and-ctx), and its `fetch`/XHR go through
+the `page` strategy (a `fetch` in `onPage` code doesn't).
+
+```ts
+wt.onSite({ url: "*://app.example.com/*", when: "document_start" }, (ctx) => {
+    ctx.patch(window, "fetch", (orig) => (input, init) => {
+        console.log("fetch", String(input));
+        return orig(input, init);
+    });
+});
+```
+
+The site can see that code, call the functions it returns and fake their
+answers, so `onSite` code is untrusted:
+
+- **No stores, no handle calls.** `wt.globalStore` and `wt.pageStore`
+  throw there ([stores in page code](#stores-in-page-code)); calling a
+  handle throws `SiteCannotCallError` — the site could make the same call.
+  Problems shows both, with a quick fix (**Ctrl+.** / **⌘.**) that moves
+  the handler to `wt.onPage`. Call your own functions directly.
+- **No built-in React or valtio** (using one throws), so no `ctx.mount` or
+  `ctx.each`; no `wt.fetch` (use `fetch`). `wt.log`, `wt.params`,
+  `wt.storage` and `console` work; logs go to the Log tagged `page › host`.
+- **Its results are page data.** The site can replace `Object.keys`, patch
+  your functions or answer in their place. Fine to show; check them before
+  they decide what your network handlers do (which URLs to redirect, which
+  headers to set), and never pass secrets (store values, tokens) in.
+- **CSP fallback.** If the page's CSP forbids `eval`, `onSite` handlers run
+  in the isolated world instead: same DOM and timing, but the site's
+  globals aren't visible. They're still treated as site code.
+
+### `wt.onPage` — the isolated world
+
+`onPage` code runs where the site's JavaScript can't see or imitate it:
+the same DOM, none of the site's globals (read those through an
+[`onSite` handle](#handles--calls-between-places)). It's trusted: it gets
+`wt.storage`, `wt.log`, `wt.params` and `console` (lines go to the Log
+tagged `isolated › host`), live [stores](#stores-in-page-code), the
+built-in React and valtio, and calls the script's handles. It has no
+`wt.fetch`; its `fetch` isn't seen by the `page` strategy.
+
+```tsx
+wt.onPage("*://app.example.com/*", (ctx) => {
+    ctx.style(`.ad-banner { display: none !important }`);
+    ctx.mount("#header", <button onClick={() => alert("hi")}>Hi</button>); // in a closed shadow root
+});
+```
+
+#### User scripts on Chrome
+
+Firefox and the Chromium MV2 build run `onPage` code in the extension's
+content-script world. The Chrome (MV3) build runs it through Chrome's
+user scripts API, which is off until you turn it on:
+
+1. **Grant the permission.** When a script has `onPage` code, the Editor
+   shows a banner: click **Grant permission** (the optional "user
+   scripts" permission).
+2. **Allow user scripts.** Chrome 138 and later: turn on **Allow User
+   Scripts** on Wiretrick's details page (`chrome://extensions/?id=…`; the
+   banner's **Open extension details** button and the Problems error link
+   there). Chrome 120–137: turn on **Developer mode** at the top right of
+   `chrome://extensions` instead.
+
+Until then the handler doesn't run, Problems shows an error on its
+`wt.onPage` line saying how to turn user scripts on, and the overlay's
+calls into it reject with `not running on this page (user scripts are
+off)`. Once they're on, pages loaded from then on run it (reload open
+ones); after that, saving the script updates open pages in place.
+`onSite` and `onOverlay` code don't need user scripts.
+
+Chrome 133 and later give each script's `onPage` code a world of its
+own; before that, scripts share one user-script world (each still in its
+own scope, apart from the site's JavaScript).
+
+## Handles — calls between places
+
+`wt.onSite`, `wt.onPage` and `wt.onOverlay` return a **handle** to the
+functions their handler returns. Call them from another place with
+`await`:
+
+```ts
+const page = wt.onPage("*://app.example.com/*", () => ({
+    highlight(sel: string) {
+        const els = [...document.querySelectorAll<HTMLElement>(sel)];
+        els.forEach((el) => (el.style.outline = "2px solid red"));
+        return els.length;
+    },
+}));
+
+wt.onOverlay("*://app.example.com/*", (ctx) => {
+    const input = ctx.once("input", () => document.body.appendChild(document.createElement("input")));
+    input.onchange = async () => (input.title = `${await page.highlight(input.value)} matches`);
+});
+```
+
+- **Exposing.** A handler that returns a plain object of functions exposes
+  them; any other return value (nothing, a string, an element) exposes
+  nothing. Types follow: `page.highlight` is
+  `(sel: string) => Promise<number>`, and a wrong argument is a compile
+  error. A function may return a promise: the caller gets its value.
+- **Who can call whom.**
+
+  | calling from \ handle of | `onSite` | `onPage` | `onOverlay` |
+  |---|---|---|---|
+  | `onSite` code | ✗ throws | ✗ throws | ✗ throws |
+  | `onPage` code | ✓ same frame | ✓ same frame | ✓ from the top frame only |
+  | `onOverlay` code | ✓ top frame | ✓ top frame | ✓ |
+  | network handlers | ✗ rejects | ✗ rejects | ✗ rejects |
+
+  An `onPage` call to the overlay from an iframe rejects with `only the top
+  frame can call the overlay`. Handles from an imported library don't
+  connect: register the handler in the script itself.
+- **Calls wait — with no time limit.** A call made before the handler has
+  run in that frame (an overlay calling `onPage` code at `document_start`,
+  a save in between) waits for it: up to 100 calls per handle queue.
+  Arguments and results are JSON, at most 1 MB each, so a store's objects
+  can be passed as they are.
+- **Errors.** A call rejects with:
+  - `AbortError` — the calling run ended first (the script was saved,
+    disabled or deleted); the call is cancelled on the other side too;
+  - `ReloadedError` — the handler's script was saved while the function
+    ran; call again and the new run answers ([`ctx.each`](#waiting-for-events--ctxeach)
+    does it for you);
+  - `DisconnectedError` — the other side went away (the overlay closed,
+    the frame navigated);
+  - `WtCallError` — the function threw (its message only), doesn't exist,
+    a value isn't JSON or is too big, or the handler isn't running on this
+    page (its route didn't match, or it threw before ever returning). In
+    the Editor's [Preview](editor.md#preview), calls into `onSite` and
+    `onPage` code reject with `there's no page in the Editor preview`.
+
+  Check `e.name`: `catch (e: any) { if (e.name === "ReloadedError") … }`.
+- **Answers from `onSite` are the site's data** — see [the site's
+  world](#wtonsite--the-sites-world).
+
+### Waiting for events — `ctx.each`
+
+A function that returns a promise answers when the promise does, however
+long that takes. To hear about the site's events, keep a queue in `onSite`
+code, return a `next()` that waits for the next item, and loop over it with
+`ctx.each(fn, ...args)` in `onPage` or `onOverlay` code:
+
+```ts
+const site = wt.onSite("*://app.example.com/*", (ctx) => {
+    const logins: string[] = [];
+    const waiting: ((user: string) => void)[] = [];
+    window.addEventListener("app:login", (e) => {
+        const user = String((e as CustomEvent).detail);
+        const w = waiting.shift();
+        if (w) w(user);
+        else logins.push(user);
+    }, { signal: ctx.signal });
+    return {
+        nextLogin: () => (logins.length ? Promise.resolve(logins.shift()!) : new Promise<string>((r) => waiting.push(r))),
+    };
+});
+
+const state = wt.globalStore("state", { lastLogin: "" });
+
+wt.onPage("*://app.example.com/*", async (ctx) => {
+    for await (const user of ctx.each(site.nextLogin)) state.lastLogin = user;
+});
+```
+
+`ctx.each` calls the function again after each answer, makes a call cut by
+the other side's reload (`ReloadedError`) again, and ends quietly when its
+own run ends. Other errors end the loop with that error.
+
+## Hot reload — runs and `ctx`
+
+Saving a script applies it to open pages in place: neither the page nor
+the overlay frame reloads, and stores keep their values. The script's
+code evaluates again in every place, and each page handler runs again —
+a new **run** — right away, whatever its `when`.
+
+What a run sets up through `ctx` belongs to it, and a save reconciles it:
+the new run takes over what it sets up again, and the rest is undone.
+What your code does directly — appending elements, adding listeners,
+starting timers — isn't undone, and the new run does it again: an
+`appendChild` in a handler adds a second element on every save. So:
+
+| `ctx` | `onSite` | `onPage` | `onOverlay` | |
+|---|---|---|---|---|
+| `url` | frame URL | frame URL | page URL | where it runs |
+| `signal` | ✓ | ✓ | ✓ | an `AbortSignal` that aborts when this run ends: pass it to `addEventListener`, `fetch`, or listen for `abort` to clean up |
+| `once(key, fn)` | ✓ | ✓ | ✓ | `fn()`'s value, made once per page and kept across saves while a run asks for it |
+| `patch(obj, prop, wrap)` | ✓ | ✓ | ✓ | replace the function `obj[prop]` with `wrap(original)`; a save swaps the wrapper |
+| `style(css)` | ✓ | ✓ | ✓ | add CSS to the page (and to each `ctx.mount`) |
+| `mount(ui)`, `mount(target, ui)` | — | ✓ | ✓ | render React UI (JSX); a save re-renders it, state kept |
+| `each(fn, ...args)` | — | ✓ | ✓ | [loop over a handle function's answers](#waiting-for-events--ctxeach) |
+| `onNavigate(fn)` | — | — | ✓ | [in-place navigations](#overlays--wtonoverlay) |
+| `shortcut(keys, fn, opts)` | — | — | ✓ | [keyboard shortcuts](#keyboard-shortcuts) |
+
+```ts
+wt.onPage("*://app.example.com/*", (ctx) => {
+    document.addEventListener("click", (e) => console.log("clicked", e.target), { signal: ctx.signal });
+    const t = setInterval(() => console.log("tick"), 1000);
+    ctx.signal.addEventListener("abort", () => clearInterval(t));
+    const seen = ctx.once("seen", () => new Set<string>()); // the same Set after a save
+});
+```
+
+- **`ctx.signal`** aborts when the run ends: a save replaced it, its
+  handler was removed or no longer matches, or the script was disabled or
+  deleted. `ctx.onNavigate` and `ctx.shortcut` registrations end with it.
+- **`ctx.once(key, fn)`** calls `fn` the first time a run asks for `key`
+  on this page; later runs get the same value. A save that no longer asks
+  for `key` drops it. Use it for state that should survive saves (a cache,
+  the page's original title) — a top-level `let` starts over on every
+  save.
+- **`ctx.patch(obj, prop, wrap)`** installs a stand-in for `obj[prop]`
+  once (the site may keep a reference to it) and points it at
+  `wrap(original)`; a save points it at the new wrapper. Once no run
+  patches it any more it calls the original. It keeps `new`, `name`,
+  `length` and `instanceof` working, and throws if `obj[prop]` isn't a
+  function or can't be replaced. Two handlers patching the same function
+  each add a layer.
 
   ```ts
-  import { installReduxHooks } from "./redux";
-  const FLAG = "darkMode";
-
-  wt.onPage("*://app.example.com/*", (ctx) =>
-      ctx.evaluate((on: boolean) => {
-          installReduxHooks(); // runs in the page
-          (window as any).__store.dispatch({ type: "flag", key: FLAG, on });
-      }, true)
-  );
-  ```
-
-  In `fn`, `wt` and `console` are the script's (logs go to its Log, like
-  `js: "page"` code). Built-in modules (`react`…), stores and overlay
-  handles don't work in the page — the Problems view says so. The page can
-  see the code that comes along.
-- A function argument (also one inside a plain object or array) is a
-  **callback**: `fn` gets a stand-in that calls it back in isolated code, where stores and the overlay are — also later, from
-  the site's own events, for as long as the document lives. Its arguments
-  are copied plain data the site could fake; it returns nothing to `fn`.
-
-  ```ts
-  const ps = wt.pageStore("app", { user: "" });
-
-  wt.onPage("*://app.example.com/*", (ctx) =>
-      ctx.evaluate((setUser) => {
-          const app = (window as any).app;
-          setUser(app.user?.name);
-          app.on("login", (u: any) => setUser(u?.name));
-      }, (name: unknown) => {
-          if (typeof name === "string") ps.user = name;
-      })
-  );
-  ```
-
-- A function in the **result** (also one inside a plain object or array)
-  comes back as an async stand-in that calls it in the page: it always
-  returns a promise of its (plain-data) result, `this` is the object it
-  came on, and it keeps working for as long as the document lives. Its
-  arguments follow the same rules as `fn`'s (plain data and callbacks), and
-  functions in its result come back the same way. So you can hand isolated
-  code a small page-side API once and call it whenever you like:
-
-  ```ts
-  wt.onPage("*://app.example.com/*", async (ctx) => {
-      const store = await ctx.evaluate(() => (window as any).__store); // a Redux store
-      await store.dispatch({ type: "flag", key: "darkMode", on: true });
-      const state = await store.getState();
-
-      const app = await ctx.evaluate(() => ({
-          user: () => (window as any).app.user?.name,
-          go: (path: string) => (window as any).app.router.push(path),
-      }));
-      if ((await app.user()) === "") await app.go("/login");
+  wt.onSite("*://app.example.com/*", (ctx) => {
+      ctx.patch(history, "pushState", (orig) => function (this: History, ...args: any[]) {
+          console.log("navigating to", args[2]);
+          return orig.apply(this, args as Parameters<History["pushState"]>);
+      });
   });
   ```
+- **`ctx.style(css)`** adds one `<style>` to the document's `<head>` per
+  distinct CSS, copied into each `ctx.mount`'s shadow root; removed once no
+  run adds it.
+- **`ctx.mount(ui)` / `ctx.mount(target, ui)`** renders JSX (a `.tsx`
+  script; without React it throws `ctx.mount needs React`) with the
+  [built-in React](#built-in-valtio-and-react). A save renders into the
+  same React root, so component state survives; once no run mounts there
+  any more, it unmounts and its element goes.
+  - In `onPage` the UI sits in a `<wiretrick-mount>` element with a closed
+    shadow root: the page's CSS doesn't reach it (`ctx.style` does).
+    Without a target it floats over the page (`position: fixed` at the top
+    left); with one (a selector or an element) it's appended inside it, and
+    put back if the page removed it when `ctx.mount` runs again. A selector
+    that matches nothing throws.
+  - In `onOverlay` it's a plain `<div>` in the overlay's `<body>` (or the
+    target).
+  - A handler has one mount per target: calling `ctx.mount` again with
+    the same target (or again without one) re-renders that mount, also
+    later in the same run (from a listener or a shortcut). Mount into two
+    places with two targets.
 
-  Only plain objects carry their functions (a class instance isn't plain
-  data), and what they return is page data like any result. Overlays can't
-  hold stand-ins — expose them through an isolated handler's
-  [handle](#calls-between-the-overlay-and-the-page).
-- Errors are the script's (Problems view, red badge), not the site's: a
-  callback that throws, a callback the page calls with arguments that
-  aren't plain data (the call is dropped), and a rejection your code
-  doesn't handle. So is a rejecting `async` handler.
-- It runs as page code: the page sees the call and can fake the answer, so
-  treat the result as [page data](#page-world-results-are-page-data) and
-  never pass secrets (store values, tokens) in.
-- It rejects with what `fn` threw, when the page's CSP forbids `eval`, and
-  when Wiretrick's page hook isn't in the frame (a page busy running its own
-  scripts just answers later). The error points at your `ctx.evaluate`
-  call. A handler variable
-  used in `fn` rejects with "isn't defined in the page world", and the
-  Problems view warns about it as you save.
-- A `fetch` made in `fn` is the page's own, so the `page` strategy sees
-  it; a `fetch` made in isolated code isn't.
+**What a save does, in order:**
 
-Because it runs in the page, `wt.onPage` works regardless of how the response
-arrived — service-worker-served HTML, cached pages, or hydration overwriting
-a body transform — which is exactly why it's the resilient choice for
-title/DOM changes on SPAs.
+1. The script compiles again. A compile error keeps the whole previous
+   version running (Problems shows the error).
+2. Each matching handler runs: a new run, with a fresh `ctx`. If it throws,
+   only the new run ends — the old run and the functions its handle
+   exposes keep going (Problems shows the error).
+3. When the new run returns, the old run's `signal` aborts.
+4. When the new run's promise settles (right away for a sync handler), the
+   old run's claims are released: what the new run set up again stays (a
+   mount re-renders, a patch has its new wrapper, a `once` value is kept),
+   the rest is undone (unmounted, style removed, patch passing through,
+   `once` value dropped).
+5. A handler removed from the script, or whose route no longer matches,
+   has its run ended. Disabling or deleting the script ends every run.
 
-## Overlays — `dom: "overlay"`
+Handle calls carry across a save: calls waiting for a handler are answered
+by the new run, a function still running in the old run rejects with
+`ReloadedError`, and the old runs' own pending calls reject with
+`AbortError`.
 
-`wt.onPage({ url, dom: "overlay" }, fn)` gives a script its own GUI on a page: `fn` runs
+Handlers are told apart by position: the n-th `wt.onPage` (or `onSite`,
+`onOverlay`) call in the script. Moving one before another of the same
+kind swaps their keys, so their mounts start over and their `once` values
+are made again.
+
+## Overlays — `wt.onOverlay`
+
+`wt.onOverlay(route, fn)` gives a script its own GUI on a page: `fn` runs
 in a transparent frame laid over the tab, and whatever it draws in that
 frame's `document` shows on top of the page. Clicks on empty areas go
 through to the page.
 
 ```tsx
-import { createRoot } from "react-dom/client";
 import { useSnapshot } from "valtio";
 
 const mock = wt.globalStore("mock", { enabled: false });
@@ -922,7 +1108,7 @@ const mock = wt.globalStore("mock", { enabled: false });
 wt.replaceResponse({ url: "*://app.example.com/api/me", strategy: "helper" }, () =>
     mock.enabled ? { name: "Test user", plan: "pro" } : undefined);
 
-wt.onPage({ url: "*://app.example.com/*", dom: "overlay" }, () => {
+wt.onOverlay("*://app.example.com/*", (ctx) => {
     function Panel() {
         const snap = useSnapshot(mock);
         return (
@@ -932,26 +1118,26 @@ wt.onPage({ url: "*://app.example.com/*", dom: "overlay" }, () => {
             </label>
         );
     }
-    createRoot(document.body.appendChild(document.createElement("div"))).render(<Panel />);
+    ctx.mount(<Panel />);
 });
 ```
 
 Clicking the box changes `mock.enabled`; the next `/api/me` request sees
 it right away, and the value survives restarts.
 
-- **Route.** The same as any `wt.onPage` (`{ url, exclude, when, dom:
-  "overlay" }`), matched against the tab's top page. Overlays exist in
-  the top frame only.
+- **Route.** `{ url, exclude, when }` or URL pattern(s), matched against
+  the tab's top page. Overlays exist in the top frame only.
 - **One overlay per script per tab.** Every matching overlay handler of
   the script runs in the same frame, in registration order, sharing the
   script's top-level variables. The frame is created at the earliest
   matching `when`; a script whose routes don't match gets none.
 - **What runs there.** The whole script evaluates in the frame, but only
-  its overlay handlers run: network handlers and `dom: "page"` handlers
-  register nothing there. Stores (`wt.globalStore`) are live copies of the
-  background's, so the GUI and the handlers see the same values; a
-  `wt.pageStore` is the copy of the overlay's page. `wt.log`,
-  `console.*`, errors and unhandled rejections go to the script's Log.
+  its `onOverlay` handlers run: network, `onSite` and `onPage` handlers
+  register nothing there (their handles work). Stores are live copies of
+  the background's, so the GUI and the handlers see the same values; a
+  `wt.pageStore` is the copy of the overlay's page. `wt.log`, `console.*`,
+  errors and unhandled rejections go to the script's Log, tagged
+  `overlay › host`.
 - **Isolation.** The page's CSS can't reach the GUI and the GUI's CSS
   can't leak into the page. The page can't find the frame (it sits in a
   closed shadow root) or read the script's code, which comes from the
@@ -960,19 +1146,22 @@ it right away, and the value survives restarts.
   visible elements take clicks and everything else lets them through to
   the page. A full-viewport element (a modal backdrop) takes every click.
   With several scripts' overlays, the one last clicked is on top.
-- **Saving and disabling.** Saving the script reloads its overlay (store
-  values stay); disabling it removes the overlay.
+- **Saving and disabling.** Saving the script updates the overlay in
+  place: the frame stays and its handlers run again
+  ([hot reload](#hot-reload--runs-and-ctx)) — draw with `ctx.mount`, or
+  clean up on `ctx.signal`, so the GUI isn't added twice. Disabling the
+  script removes the overlay.
 - **Preview in the Editor.** The Editor's **Preview** tab (⌥⇧V) runs the
-  open script's overlay without its page, with the real stores, and reloads
-  it on save; see [Preview](editor.md#preview).
+  open script's overlay without its page, with the real stores, and
+  updates it on save; see [Preview](editor.md#preview).
 - **`ctx`.** `ctx.url` is the page's URL. `ctx.onNavigate(fn)` runs `fn(url)`
   whenever the page navigates in place (`pushState`, back/forward,
   `#hash`), as single-page apps do; the overlay stays. It returns a
-  function that stops listening.
+  function that stops listening; it also stops when the run ends.
 
   ```ts
-  wt.onPage({ url: "*://app.example.com/*", dom: "overlay" }, (ctx) => {
-      const badge = document.body.appendChild(document.createElement("div"));
+  wt.onOverlay("*://app.example.com/*", (ctx) => {
+      const badge = ctx.once("badge", () => document.body.appendChild(document.createElement("div")));
       badge.textContent = "In the cart";
       const show = (url: string) => (badge.hidden = !url.includes("/cart"));
       show(ctx.url);
@@ -985,8 +1174,8 @@ it right away, and the value survives restarts.
 `ctx.shortcut(keys, fn)` runs `fn` when the keys are pressed on the page:
 
 ```ts
-wt.onPage({ url: "*://app.example.com/*", dom: "overlay" }, (ctx) => {
-    const box = document.body.appendChild(document.createElement("div"));
+wt.onOverlay("*://app.example.com/*", (ctx) => {
+    const box = ctx.once("box", () => document.body.appendChild(document.createElement("div")));
     box.textContent = "Hello";
     box.hidden = true;
     ctx.shortcut("Alt+Shift+H", () => (box.hidden = !box.hidden));   // beats the page's own shortcuts
@@ -1008,7 +1197,8 @@ wt.onPage({ url: "*://app.example.com/*", dom: "overlay" }, (ctx) => {
 - **Several scripts.** If two scripts' overlays use the same keys, the
   one higher in the script list gets them; the other's Log says so.
 - `ctx.shortcut` returns a function that removes the shortcut. Shortcuts
-  go away with the overlay (save, disable).
+  also go away when the run ends (a save sets them up again) and with the
+  overlay (disable).
 
 ### Fetching from the overlay
 
@@ -1016,207 +1206,45 @@ The overlay's own `fetch` is the page's: the page's content script makes
 the request, with the page's origin, cookies and CORS rules, and relative
 URLs resolve against the page. Your scripts' handlers see it like any
 request — on every strategy except `page`, which only sees the page's own
-JavaScript. `wt.fetch` defaults to the same in an overlay; `bypass: true`
-keeps every script's handlers off the request, and `from: "background"`
-fetches from the extension instead (host permissions, no CORS).
+JavaScript (to go through `page`, fetch from an [`onSite`
+handle](#handles--calls-between-places)). `wt.fetch` defaults to the same
+in an overlay; `bypass: true` keeps every script's handlers off the
+request, and `from: "background"` fetches from the extension instead (host
+permissions, no CORS).
 
 ```ts
-wt.onPage({ url: "*://app.example.com/*", dom: "overlay" }, async () => {
+wt.onOverlay("*://app.example.com/*", async () => {
     const me = await (await fetch("/api/me")).json();                            // as the page, through your handlers
     const real = await (await wt.fetch("/api/me", { bypass: true })).json();     // as the page, skipping all handlers
     const other = await wt.fetch("https://other.site/x", { from: "background" }); // from the extension, no CORS
 });
 ```
 
-### Calls between the overlay and the page
-
-`wt.onPage` returns a handle to the functions its
-handler returns. Call them from the other side with `await`:
-
-```ts
-const app = wt.onPage("*://app.example.com/*", () => ({
-    flags: () => Object.keys((window as any).__APP_FLAGS__ ?? {}),
-}));
-
-wt.onPage({ url: "*://app.example.com/*", dom: "overlay" }, async () => {
-    const names = await app.flags();   // string[], inferred
-    const list = document.body.appendChild(document.createElement("pre"));
-    list.textContent = names.join("\n");
-});
-```
-
-- **Exposing.** A handler that returns a plain object of functions exposes
-  them; any other return value exposes nothing. Types follow: `app.flags`
-  is `() => Promise<string[]>`, and a wrong argument is a compile error.
-- **Calls are async.** Arguments and results are JSON, at most 1 MB each.
-  A call made before the other side's handler has returned waits for it.
-  A call fails with:
-  - `WtTimeoutError` after 10 s without an answer;
-  - `WtCallError` when the function threw (its message only), doesn't
-    exist, the value isn't JSON or is too big, or the handler isn't
-    running on this page (its route didn't match, or it threw);
-  - `DisconnectedError` when the other side went away (the overlay
-    closed, the script reloaded, the page navigated).
-- **Top frame only.** The overlay talks to the script's `onPage` code in
-  the top frame.
-- **Register at top level.** `wt.onPage` must be called
-  at the top level of the script (not inside a function, `if` or loop), so
-  both sides number their handlers the same way; Problems flags a call
-  elsewhere. Handles from an imported library don't connect.
-- **Who can call whom.** The overlay can call any `onPage` code.
-  Page-world `onPage` code (`js: "page"`) can only answer: it shares its
-  world with the site, which could fake its calls, so `overlay.fn()` there
-  rejects with `page-world onPage code can't call the overlay; …`, and
-  Problems shows that error with a quick fix (Ctrl+. / ⌘.) that drops
-  `js: "page"` — unless its route says `unsafe: true`, accepting that the
-  site can call the overlay too
-  ([stores in `onPage` code](#stores-in-onpage-code)). Network handlers have no
-  tab: their calls reject.
-- **Isolated code can call `js: "page"` handlers.** A page-world handler's
-  handle works in the script's isolated `onPage` code too — even at
-  `document_start`, where the call waits until the page handler has
-  returned. Its answers are page data: the site can see and fake them, as
-  with [`ctx.evaluate`](#reading-the-page--ctxevaluate). Other `onPage`
-  handles reject there (share those functions in the script directly), and
-  page-world code calls page functions directly.
-
-  ```ts
-  const app = wt.onPage({ url: "*://app.example.com/*", js: "page", when: "document_start" }, () => ({
-      flags: () => Object.keys((window as any).__APP_FLAGS__ ?? {}),
-  }));
-  wt.onPage({ url: "*://app.example.com/*", when: "document_start" }, async () => {
-      console.log(await app.flags());
-  });
-  ```
-
-- **JSON copies.** Arguments and results are copied as JSON (up to 1 MB),
-  so a store's objects can be passed as they are.
-
-### The isolated world
-
-`onPage` code runs, by default, where the site's JavaScript can't see or
-imitate it: same DOM, none of the site's globals (read them with
-[`ctx.evaluate`](#reading-the-page--ctxevaluate)). That code can call the
-overlay:
-
-```ts
-const page = wt.onPage("*://app.example.com/*", () => {
-    document.addEventListener("click", (e) => {
-        if (e.altKey) overlay.picked((e.target as Element).tagName);   // calls the GUI
-    }, true);
-    return {
-        highlight(sel: string) {
-            const els = [...document.querySelectorAll<HTMLElement>(sel)];
-            els.forEach((el) => (el.style.outline = "2px solid red"));
-            return els.length;
-        },
-    };
-});
-
-const overlay = wt.onPage({ url: "*://app.example.com/*", dom: "overlay" }, () => {
-    const input = document.body.appendChild(document.createElement("input"));
-    input.onchange = async () => (input.title = `${await page.highlight(input.value)} matches`);
-    return {
-        picked(tag: string) { input.value = tag.toLowerCase(); },
-    };
-});
-```
-
-Isolated code gets `wt.storage`, `wt.log`, `wt.params` and `console`
-(lines go to the Log tagged `isolated › host`, as the overlay's are
-`overlay › host` and page-world code's `page › host`); `wt.globalStore`
-and `wt.pageStore` are live copies, as in the overlay (see
-[Stores in `onPage` code](#stores-in-onpage-code)), and `wt.fetch` is the
-overlay's.
-
-#### User scripts on Chrome
-
-Firefox and the Chromium MV2 build run isolated code in the extension's
-content-script world. The Chrome (MV3) build runs it through Chrome's
-user scripts API, which is off until you turn it on:
-
-1. **Grant the permission.** When a script has isolated `onPage` code,
-   the Editor shows a banner: click **Grant permission** (the optional
-   "user scripts" permission).
-2. **Allow user scripts.** Chrome 138 and later: turn on **Allow User
-   Scripts** on Wiretrick's details page (`chrome://extensions/?id=…`; the
-   banner's **Open extension details** button and the Problems error link
-   there). Chrome 120–137: turn on **Developer mode** at the top right of
-   `chrome://extensions` instead.
-
-Until then the handler doesn't run, Problems shows an error on its
-`wt.onPage` line saying how to turn user scripts on, and the overlay's
-calls into it reject with `not running on this page (user scripts are
-off)`. Once they're on, pages loaded from then on run it (reload open
-ones); after that, saving the script updates open pages in place.
-
-Chrome 133 and later give each script's isolated code a world of its
-own; before that, scripts share one user-script world (each still in its
-own scope, apart from the site's JavaScript).
-
-### Page-world overlays — `unsafe: true`
-
-`js: "page"` with `dom: "overlay"` draws in an overlay document but runs
-in the site's JavaScript world, for a GUI that needs the site's globals
-at hand (`window.myApp`) instead of going through
-[`ctx.evaluate`](#reading-the-page--ctxevaluate). It's opt-in at your own
-risk — without `unsafe: true` the script doesn't compile:
-
-```ts
-wt.onPage({ url: "*://app.example.com/*", js: "page", dom: "overlay", unsafe: true }, (ctx) => {
-    const app = (window as any).myApp;          // the site's window
-    const b = document.body.appendChild(document.createElement("button"));  // the overlay's document
-    b.textContent = `user: ${app?.user?.name}`;
-});
-```
-
-- **What you give up.** The site can see the overlay (its host element is
-  in the page, its window is the site's), call into it and tamper with it.
-  Like any `unsafe: true` page-world code it has the script's stores
-  (which the site can then read and change) and can call the script's
-  default overlay, if it has one; nothing calls into it (its handle is
-  inert), and there's no `ctx.evaluate`. `ctx.onNavigate` and
-  `ctx.shortcut` work.
-- **How it runs.** The script evaluates again in the page's world (top
-  frame only), with `document` set to the overlay's: a transparent frame in
-  a closed shadow root over the page, clicks on its empty areas going
-  through. Its top-level variables aren't shared with the script's other
-  `js: "page"` handlers.
-- **CSP.** Where the page's CSP forbids `eval` it doesn't run, and the Log
-  says so. The Editor's Preview tab runs it in its own frame instead.
-
-### Page-world results are page data
-
-Page-world `onPage` code and `ctx.evaluate` run among the site's own scripts, which can
-replace `Object.keys`, patch your functions or answer in their place. Its
-results are fine to show, but treat them like anything else the site
-sends: check them before they decide what your network handlers do (which
-URLs to redirect, which headers to set). The isolated world and the
-overlay can't be reached by the site.
-
 ### Frameworks and CSS
 
 - **React and valtio** are [built in](#built-in-valtio-and-react). A `.tsx`
-  script's JSX compiles with the automatic runtime against the built-in React.
+  script's JSX compiles with the automatic runtime against the built-in
+  React; `ctx.mount` renders it.
 - **Another JSX runtime:** a `/** @jsxImportSource <url> */` comment at the
   top switches the file to it, e.g. Preact from unpkg
   (`/** @jsxImportSource https://unpkg.com/preact@10.26.4 */`, with hooks
   from `https://unpkg.com/preact@10.26.4/hooks`). Lit, Solid or plain DOM by
   [package import](#packages-from-unpkg) work too. Pin one version so
-  everything shares a single copy.
+  everything shares a single copy. `ctx.mount` is React's only: render
+  with the framework's own `render`, and undo it on `ctx.signal`.
 - **CSS:** a `.css` [package import](#packages-from-unpkg) becomes a
-  `<style>` in the overlay; inline styles and `<style>` elements you add
-  work as usual.
+  `<style>` in the overlay, added once; `ctx.style(css)` works in every
+  place and reaches `ctx.mount`'s shadow roots; inline styles work as
+  usual.
 - **Tailwind 4 + daisyUI:** Tailwind's browser build generates CSS from the
   classes it finds in the overlay's document. Load it with a dynamic
   `import()` inside the handler so it only runs in the overlay:
 
   ```tsx
   import "https://unpkg.com/daisyui@5.0.43/daisyui.css";
-  import { createRoot } from "react-dom/client";
   import { useState } from "react";
 
-  wt.onPage({ url: "*://app.example.com/*", dom: "overlay" }, async () => {
+  wt.onOverlay("*://app.example.com/*", async (ctx) => {
       await import("https://unpkg.com/@tailwindcss/browser@4.1.11");
       function Modal() {
           const [open, setOpen] = useState(true);
@@ -1229,7 +1257,7 @@ overlay can't be reached by the site.
               </div>
           ) : null;
       }
-      createRoot(document.body.appendChild(document.createElement("div"))).render(<Modal />);
+      ctx.mount(<Modal />);
   });
   ```
 
@@ -1244,8 +1272,8 @@ overlay can't be reached by the site.
   wt.onRequest({ url: "*://cdn.example.com/app.js", strategy: "helper" }, () =>
       redirect.target ? { redirect: redirect.target } : undefined);
 
-  wt.onPage({ url: "*://app.example.com/*", dom: "overlay" }, () => {
-      const input = document.body.appendChild(document.createElement("input"));
+  wt.onOverlay("*://app.example.com/*", (ctx) => {
+      const input = ctx.once("input", () => document.body.appendChild(document.createElement("input")));
       input.value = redirect.target;
       input.onchange = () => (redirect.target = input.value);   // the next app.js load is redirected
   });
@@ -1258,6 +1286,30 @@ overlay can't be reached by the site.
   reloads and is the same in every tab.
 - **Per-tab switch:** a `wt.pageStore` field, so turning it on in one tab
   leaves the others alone and a reload turns it off again.
+
+## Migrating from 0.19
+
+0.19 had one `wt.onPage` with `js`, `dom` and `unsafe` options. Those
+options are gone: a route with one fails to load, and the Problems view
+says what to use, with a quick fix to `wt.onSite` / `wt.onOverlay`. It
+flags a `ctx.evaluate` call too.
+
+| 0.19 | now |
+|---|---|
+| `wt.onPage({ url, dom: "overlay" }, fn)` | `wt.onOverlay(url, fn)` |
+| `wt.onPage({ url, js: "page" }, fn)` | `wt.onSite(url, fn)` |
+| `wt.onPage({ url, js: "isolated" }, fn)` | `wt.onPage(url, fn)` |
+| `unsafe: true`, page-world overlays | gone: the site's world never gets the script's stores or overlay. Keep them in `onPage` code and read the site through an `onSite` handle |
+| `ctx.evaluate(fn, ...args)` | an `onSite` handler returning `{ fn }`; `await site.fn(...args)` |
+| a callback passed to `ctx.evaluate` | an `onSite` function returning a promise, looped over with [`ctx.each`](#waiting-for-events--ctxeach) |
+| functions in `ctx.evaluate`'s result | more functions in the `onSite` handler's result |
+| `WtTimeoutError` after 10 s | gone: calls wait, and fail only with `AbortError`, `ReloadedError`, `DisconnectedError` or `WtCallError` |
+| `createRoot(document.body.appendChild(…)).render(<UI />)` | `ctx.mount(<UI />)` |
+| saving reloads the overlay / re-runs handlers ("keep them idempotent") | saving runs handlers again in place; set things up through `ctx` ([hot reload](#hot-reload--runs-and-ctx)) |
+
+`wt.onOverlay` was deprecated in 0.13 and removed in 0.14 in favour of
+`dom: "overlay"`. It's back under its old name, with the new behaviour: a
+save runs its handlers again in place instead of reloading the frame.
 
 ## Multiple handlers — how they stack
 
@@ -1373,7 +1425,7 @@ result depends on the handler's strategy:
 | `onResponseHeaders` | — (not on `page`) | ⚠ ignored + error | ✅ awaited | ✅ awaited, merged into the fulfilled headers | ✅ awaited |
 | `replaceResponse` | ✅ awaited — the page's `fetch`/XHR promise simply takes as long as the handler needs | ⚠ result ignored + error (a sync redirect can't be built late) | ✅ awaited, written in place (URL kept) | ✅ awaited at the Request stage, upstream never contacted | ✅ awaited, upstream never contacted |
 | `onResponseBody` | ✅ awaited (chained between handlers) | — (can't read bodies) | ✅ awaited | ✅ awaited | ✅ awaited (served `no-store`) |
-| `onPage` | run in the page / overlay on every strategy; not awaited (fire-and-forget) | | | | |
+| `onSite`, `onPage`, `onOverlay` | run in the page / overlay on every strategy; not awaited (fire-and-forget) — a save waits for the new run's promise before undoing what the old run set up ([hot reload](#hot-reload--runs-and-ctx)) | | | | |
 
 Practical rules of thumb:
 

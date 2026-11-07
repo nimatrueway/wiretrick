@@ -7,8 +7,36 @@ its section below.
 
 ## [Unreleased]
 
+### Breaking
+
+A simpler page API: three places to run code, each a function of its own, and saving a script updates the page in place.
+
+| 0.19 | now |
+|---|---|
+| `wt.onPage({ url, js: "page" }, fn)` | `wt.onSite(url, fn)` — the site's own JavaScript world |
+| `wt.onPage({ url, dom: "overlay" }, fn)` | `wt.onOverlay(url, fn)` — the script's own GUI over the page |
+| `unsafe: true`, page-world overlays | gone: stores and overlay handles can't reach the site's world |
+| `ctx.evaluate(fn, ...args)` | an `wt.onSite` handler that returns `{ fn }`; call `await site.fn(...args)` from `onPage` or `onOverlay` |
+| a callback passed to `ctx.evaluate` | an `onSite` function that returns a promise, looped with `for await (const v of ctx.each(site.next))` |
+| functions in a `ctx.evaluate` result | more functions on the `onSite` handler's object |
+| `WtTimeoutError` (calls gave up after 10 s) | calls don't time out; see the errors below |
+
+- `wt.onOverlay` is back under its old name, now with the overlay's new behaviour: a save no longer reloads its frame — the handlers run again in place. Overlay code that adds to the DOM directly (`document.body.appendChild`, `createRoot(...)`) now adds a second copy on every save: draw with `ctx.mount(<Ui />)` instead.
+- The Problems view flags the removed `js`, `dom` and `unsafe` options, with a quick fix to `wt.onSite` / `wt.onOverlay`.
+- A handle called from `onSite` code throws `SiteCannotCallError`: the site's world can answer calls but never make them.
+- Handle calls reject with `AbortError` when the calling run ends (a save, the page navigating), and the call is cancelled on the other side too; with `ReloadedError` when the called script is saved mid-call (safe to retry; `ctx.each` does); with `DisconnectedError` when the other side is gone.
+
 ### Added
 
+- Hot apply in the page: saving a script runs its handlers again in place, and each run keeps only what it claims again. New on `ctx`:
+  - `ctx.signal` aborts when the run is replaced or ends — pass it to listeners, timers and `fetch`;
+  - `ctx.once(key, fn)` keeps a value across saves;
+  - `ctx.patch(obj, prop, wrap)` wraps a function once; saves swap the wrapper, and dropping the patch passes calls straight through;
+  - `ctx.style(css)` adds a stylesheet, removed when no run asks for it;
+  - `ctx.mount(ui)` / `ctx.mount(selector, ui)` (`onPage` and `onOverlay`) renders React UI once per target, re-rendered on save and unmounted when dropped; in `onPage` it sits in a closed shadow root the page can't restyle;
+  - `ctx.each(fn, ...args)` loops over a function's answers until the run ends.
+- A save whose handler throws keeps the previous run (and its handle's functions) working; a compile error keeps the whole previous version.
+- `ctx.onNavigate` and `ctx.shortcut` registrations end with their run.
 - Drag and drop to install: drop a link, a script file, a folder or a `.zip` onto the install dialog or page, or onto the Explorer to open the dialog with it. The drop target lights up while you drag.
 
 ### Changed

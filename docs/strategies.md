@@ -32,12 +32,13 @@ most once.
 | `debugger` | `chrome.debugger` + CDP Fetch domain: pause → run handlers → continue or fulfill | **everything**: documents, script tags, images, fonts, XHR — even requests the page didn't initiate | **yes** — Chrome shows a yellow "being debugged" bar while attached | Chromium-only; attach/detach is lazy and automatic |
 | `rules` | each handler runs **once** when scripts load; its result becomes a browser-native rule (`declarativeNetRequest`) that the browser applies itself | **everything**, the first navigation included | **never** | block, redirect and request/response headers only, with a fixed result ([what `rules` can do](#what-rules-can-do)); Chrome MV3, Chromium MV2 and Firefox 113+ |
 
-`wt.onPage` (and its overlays) aren't network strategies: they run in the
-page whatever the setting ([onPage](scripting.md#dom-changes--wtonpage),
-[overlays](scripting.md#overlays--dom-overlay)).
+`wt.onSite`, `wt.onPage` and `wt.onOverlay` aren't network strategies: they
+run in the page whatever the setting ([page
+code](scripting.md#page-code--wtonsite-wtonpage-wtonoverlay),
+[overlays](scripting.md#overlays--wtonoverlay)).
 
 **Requests from an overlay.** An
-[overlay](scripting.md#overlays--dom-overlay)'s `fetch` (and its
+[overlay](scripting.md#overlays--wtonoverlay)'s `fetch` (and its
 `wt.fetch`, which fetches as the page by default) goes through your
 handlers like any request the tab makes, on every strategy except `page`,
 which only sees the page's own JavaScript. `{ bypass: true }` keeps every
@@ -374,9 +375,9 @@ Which strategies each browser and build gives you
 ([strategies](#interception-strategies) explained above). The Settings
 strategy picker disables the ones the current browser can't use.
 
-| | `helper` (local helper) | `page` (page fetch/XHR) | `extension` (blocking webRequest) | `debugger` (chrome.debugger) | `rules` (browser-native rules) | `wt.onPage` |
+| | `helper` (local helper) | `page` (page fetch/XHR) | `extension` (blocking webRequest) | `debugger` (chrome.debugger) | `rules` (browser-native rules) | page code (`wt.onSite`, `wt.onPage`, `wt.onOverlay`) |
 |---|---|---|---|---|---|---|
-| **Chrome / Edge / Brave / Vivaldi, current** — `dist-mv3/` | ✅ no banner | ✅ | ❌ | ✅ banner shown | ✅ | ✅ (needs [user scripts](scripting.md#user-scripts-on-chrome) unless `js: "page"`) |
+| **Chrome / Edge / Brave / Vivaldi, current** — `dist-mv3/` | ✅ no banner | ✅ | ❌ | ✅ banner shown | ✅ | ✅ (`wt.onPage` needs [user scripts](scripting.md#user-scripts-on-chrome); `wt.onSite` and `wt.onOverlay` don't) |
 | **Chromium with MV2** (ungoogled-chromium, Brave, Arc… — any Chromium that still loads MV2 extensions) — `dist/` | ✅ no banner | ✅ | ✅ no banner — redirect, block, headers, sync replaceResponse; no body streaming or async (see [async](scripting.md#async-handlers)) | ✅ banner shown | ✅ | ✅ |
 | **Firefox** — `dist/` | ❌ (not needed: `extension` reaches everything) | ✅ | ✅ no banner | ❌ | ✅ 113+ | ✅ |
 

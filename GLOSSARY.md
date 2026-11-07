@@ -31,8 +31,28 @@ A function exported by a library that registers handlers on behalf of the script
 _Avoid_: macro, preset
 
 **Handler**:
-One registration in a script (`wt.onRequest`, `wt.onResponseHeaders`, `wt.onResponseBody`, `wt.replaceResponse`, `wt.onPage` or `wt.onOverlay`) pairing a route with a function.
+One registration in a script (`wt.onRequest`, `wt.onResponseHeaders`, `wt.onResponseBody`, `wt.replaceResponse`, `wt.onSite`, `wt.onPage` or `wt.onOverlay`) pairing a route with a function.
 _Avoid_: hook, rule, interceptor, listener, onDom
+
+**Place**:
+Where a page handler's code runs: the site's own JavaScript world (`wt.onSite`, untrusted), the isolated world over the same DOM (`wt.onPage`), or the script's own GUI frame (`wt.onOverlay`).
+_Avoid_: world option, `js: "page"`, `dom: "overlay"`
+
+**Handle**:
+What `wt.onSite`, `wt.onPage` or `wt.onOverlay` returns: the functions its handler returned, callable (async) from `onPage` and `onOverlay` code. Calls wait for the handler and never time out.
+_Avoid_: remote, proxy, stub
+
+**Run**:
+One execution of a page handler in one frame. A save, navigation or disable ends it, aborting `ctx.signal`.
+_Avoid_: instance, session
+
+**Claim**:
+What a run asks for through `ctx.once`, `ctx.patch`, `ctx.style` or `ctx.mount`. A save keeps what the new run claims again and tears down the rest.
+_Avoid_: resource, effect
+
+**Trampoline**:
+The one stand-in `ctx.patch` installs on an object's property; saves swap what it calls, and an unclaimed patch passes straight through to the original.
+_Avoid_: hook, monkey-patch wrapper
 
 **Body handler**:
 A `wt.onResponseBody` or `wt.replaceResponse` handler: one that works on a response body.
@@ -67,7 +87,7 @@ How several handlers matching the same request combine, in explorer order (each 
 _Avoid_: chaining, priority, precedence
 
 **Hot apply**:
-A saved script, data file, param or setting change taking effect right away, without reloading the extension or the browser.
+A saved script, data file, param or setting change taking effect right away, without reloading the extension or the browser. In a page, its handlers run again in place (a new run per handler), without reloading the page or the overlay.
 _Avoid_: hot reload, live reload, restart
 
 **Compile error**:

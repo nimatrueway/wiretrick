@@ -107,9 +107,8 @@ Before anything is written, the page shows:
   where it updates from when `updateURL` names another place, and a bundle's scripts;
 - **what it can do**, riskiest first:
   - running on every site;
-  - giving the site's own JavaScript the script's stores and overlay (`unsafe: true`);
   - the `debugger` strategy;
-  - running code in the site's JavaScript world;
+  - running code in the site's JavaScript world (`wt.onSite`);
   - the `helper` strategy;
   - the sites it runs on;
   - the other strategies;
@@ -170,8 +169,7 @@ nothing changes.
 An update applies by itself only when all of these hold:
 
 - it can't do more than the installed version: no new sites, strategies,
-  page-world code, overlays, `unsafe: true`, `connect` hosts or unpkg
-  packages;
+  `wt.onSite` code, overlays, `connect` hosts or unpkg packages;
 - you haven't edited, renamed or deleted any of the package's files;
 - its `version` doesn't go down;
 - it doesn't change where updates come from (its `updateURL`);

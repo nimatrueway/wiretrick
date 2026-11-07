@@ -178,12 +178,13 @@ at the right of the toolbar do the same.
   rules errors and route warnings appear only here, not in the Log; a
   runtime error appears in both (the Log has every occurrence, with its URL).
   A runtime error from script code that runs on a page says where it ran first:
-  `overlay › host` (its [overlay](scripting.md#overlays--dom-overlay)),
-  `isolated › host` or `page › host` (its `onPage` code in the isolated or
-  the page world). A page-world `overlay.fn()` call is such an error, with
-  a quick fix (Ctrl+. / ⌘.) that drops `js: "page"` (or add `unsafe: true`
-  to its route, letting the site call the overlay too).
-  On Chrome, isolated `onPage` code (the default world) while
+  `overlay › host` (its [overlay](scripting.md#overlays--wtonoverlay)),
+  `isolated › host` (its `onPage` code) or `page › host` (its `onSite`
+  code). A handle call in `onSite` code (`SiteCannotCallError`) is such an
+  error, with a quick fix (Ctrl+. / ⌘.) that moves the handler to
+  `wt.onPage`; a route with the removed `js`, `dom` or `unsafe` option gets
+  one to `wt.onSite` / `wt.onOverlay`.
+  On Chrome, `onPage` code while
   [user scripts are off](scripting.md#user-scripts-on-chrome) is an error
   whose `chrome://extensions` link opens Wiretrick's details page; the
   Editor also shows a one-time banner with a **Grant permission** (or
@@ -276,15 +277,16 @@ at the right of the toolbar do the same.
     [Missed warning](strategies.md#missed-warning)). It is logged as
     a WARN line and shown as a yellow *missed* entry in the request's
     details; it does not mark the row observed or modified.
-- **Preview view** — the open script's [overlay](scripting.md#overlays--dom-overlay),
+- **Preview view** — the open script's [overlay](scripting.md#overlays--wtonoverlay),
   live, over a placeholder page; see [Preview](#preview).
 
 ### Preview
 
-The **Preview** tab (⌥⇧V) runs the overlay (`dom: "overlay"`) of the script
+The **Preview** tab (⌥⇧V) runs the overlay (`wt.onOverlay`) of the script
 open in the Code view in a frame inside the Editor, without opening its
 page, so you can work on the GUI before going to the site; a script that's
-turned off previews too. It runs the saved script and reloads on every save.
+turned off previews too. It runs the saved script and updates it in place
+on every save, as on a page ([hot reload](scripting.md#hot-reload--runs-and-ctx)).
 
 - **Real stores.** The preview's `wt.globalStore`s are live copies of the
   background's, like a page's overlay: flipping a switch in the preview
@@ -301,8 +303,9 @@ turned off previews too. It runs the saved script and reloads on every save.
   instead — host permissions, no CORS, the browser's cookies — and the
   header shows **fetch runs from the background** once it has. Your
   scripts' handlers see these requests like `wt.fetch`'s.
-- **No page.** `onPage` code doesn't run in the preview: the overlay's calls
-  into it reject with `there's no page in the Editor preview`.
+- **No page.** `onSite` and `onPage` code don't run in the preview: the
+  overlay's calls into them reject with `there's no page in the Editor
+  preview`.
 - **Viewport.** The menu next to the URL sizes the frame: the panel's size
   (*Fit*), or a laptop, tablet or phone size. ↻ reloads the preview.
 - Logs and errors go to the script's Log with `overlay › preview`.

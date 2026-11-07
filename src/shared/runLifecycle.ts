@@ -58,7 +58,6 @@ interface Run {
     gen: Gen;
     ctl: AbortController;
     claims: Set<string>;
-    mounts: number;
     released: boolean;
 }
 
@@ -102,6 +101,9 @@ export class ScriptLife {
     /** ctx.style elements, mirrored into each mount's shadow root */
     private readonly styles = new Map<string, { css: string; els: Element[] }>();
     private readonly mounts = new Map<string, Mount>();
+    /** element targets of ctx.mount: a stable id each, so a mount there keeps its key */
+    private readonly targetIds = new WeakMap<Element, number>();
+    private nextTargetId = 0;
     private stopped = false;
 
     constructor(private readonly o: LifeOptions) {}
@@ -136,7 +138,7 @@ export class ScriptLife {
         // a handler scheduled by a generation that was replaced since
         if (g.ended || g !== this.latest) return;
         g.tried.add(h);
-        const run: Run = { h, gen: g, ctl: new AbortController(), claims: new Set(), mounts: 0, released: false };
+        const run: Run = { h, gen: g, ctl: new AbortController(), claims: new Set(), released: false };
         g.runs.add(run);
         const quiet = (e: unknown) => {
             if (!(run.ctl.signal.aborted && isAbort(e))) report(e);
@@ -342,7 +344,8 @@ export class ScriptLife {
         const shadow = this.o.shadow !== false;
         const at = typeof target === "string" ? doc.querySelector(target) : (target ?? (shadow ? doc.documentElement : doc.body || doc.documentElement));
         if (!at) throw new Error(`ctx.mount: nothing on the page matches "${target}"`);
-        const key = "mount:" + run.h + (typeof target === "string" ? ":" + target : "#" + run.mounts++);
+        // one mount per (handler, target): mounting there again re-renders it
+        const key = "mount:" + run.h + (typeof target === "string" ? ":" + target : target ? "@" + this.targetId(target) : "");
         let client: ReactDomClient;
         try {
             client = this.o.react!();
@@ -378,6 +381,12 @@ export class ScriptLife {
         // the page re-rendered the target (or dropped the host): put it back
         if (m.host.parentNode !== at) at.appendChild(m.host);
         m.root.render(jsx);
+    }
+
+    private targetId(el: Element): number {
+        let id = this.targetIds.get(el);
+        if (id === undefined) this.targetIds.set(el, (id = this.nextTargetId++));
+        return id;
     }
 }
 

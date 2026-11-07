@@ -33,10 +33,11 @@ own GUI over the page.
   only sees fetch/XHR (REST) calls; use `helper`, `extension` or `debugger` for
   robust interception; `rules` turns fixed blocks, redirects and header
   changes into browser-native rules.
-- **Your own GUI on the page** — `wt.onPage({ url, dom: "overlay" }, …)` draws a script's panel in an
+- **Your own GUI on the page** — `wt.onOverlay(url, …)` draws a script's panel in an
   overlay the page can't see or restyle (React and valtio built in);
   `wt.globalStore` (or per page, `wt.pageStore`) shares live state between it and the handlers, and `wt.onPage`
-  code answers its calls ([overlays](docs/scripting.md#overlays--dom-overlay)).
+  and `wt.onSite` code answers its calls ([overlays](docs/scripting.md#overlays--wtonoverlay)).
+  Saving a script updates open pages and overlays in place.
 - **No debugger banner needed** — the optional [local helper](docs/local-helper.md)
   intercepts at network level on Chrome without the "being debugged" bar.
 - **Built-in devtools** — the Problems view lists what's wrong with your scripts
@@ -95,7 +96,7 @@ running (later: **?** → **Welcome** or **?** → **Samples**).
 | | |
 |---|---|
 | [Installing](docs/install.md) | release zips, signed crx, building from source |
-| [Writing scripts](docs/scripting.md) | the `wt` API, routes, parameters, libraries, imports and data files, `wt.globalStore`/`wt.pageStore`/`wt.fetch`, `onPage`, overlays (`dom: "overlay"`), stacking, async handlers |
+| [Writing scripts](docs/scripting.md) | the `wt` API, routes, parameters, libraries, imports and data files, `wt.globalStore`/`wt.pageStore`/`wt.fetch`, page code (`wt.onSite`, `wt.onPage`, `wt.onOverlay`), handles, hot reload, overlays, stacking, async handlers |
 | [Installing and sharing scripts](docs/packages.md) | install from a URL, GitHub, a gist, a folder or a zip; the header; where files go; updates and rollback |
 | [Interception strategies](docs/strategies.md) | `page` / `debugger` / `extension` / `helper` / `rules`, the default and per-handler choice, [which strategies keep the URL when replacing a response](docs/strategies.md#how-each-strategy-serves-a-replacement), the Missed warning, browser compatibility |
 | [Local helper](docs/local-helper.md) | the `helper` strategy: install, how it works, security notes |

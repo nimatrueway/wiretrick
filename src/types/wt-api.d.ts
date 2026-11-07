@@ -330,7 +330,9 @@ declare namespace Wiretrick {
          * re-renders the same React root (its state survives); once no run
          * mounts there any more it unmounts. In `onPage` the UI sits in a
          * closed shadow root (the page's CSS doesn't reach it; `ctx.style`
-         * does). In `onOverlay` it goes into the overlay's `<body>`.
+         * does). In `onOverlay` it goes into the overlay's `<body>`. A
+         * handler has one mount per target: mounting again there (also
+         * later in the run) re-renders it.
          *
          * @example
          * wt.onPage("*://example.com/*", (ctx) => {
@@ -586,9 +588,10 @@ declare namespace Wiretrick {
          * - Runs **once** per document load, per matching frame. SPA route
          *   changes (`pushState`) and framework re-renders do *not* re-run it —
          *   start a `MutationObserver` inside the handler to keep re-applying.
-         * - Saving the script while the page is open re-runs the handler
-         *   **immediately**, regardless of `when` (live update) — make
-         *   handlers idempotent.
+         * - Saving the script while the page is open runs the handler again
+         *   **immediately**, regardless of `when` (a new run): what it sets
+         *   up with `ctx.once` / `ctx.patch` / `ctx.style` / `ctx.mount` is
+         *   kept or undone, the previous run's `ctx.signal` aborts.
          * - A script may register several page handlers, each with its
          *   own route and `when`. Handlers with the same `when` run in
          *   script-list order, then registration order.
@@ -978,7 +981,7 @@ declare const wt: {
      * Editor shows how).
      *
      * The handler may return an object of functions, for the script's
-     * overlay to call ({@link Wiretrick.Remote}).
+     * other `onPage` and `onOverlay` code to call ({@link Wiretrick.Remote}).
      *
      * @param route Frame URL pattern(s), or `{ url, exclude, when }`. See
      * {@link Wiretrick.DocumentOptions.when} for exact timing, the MV3

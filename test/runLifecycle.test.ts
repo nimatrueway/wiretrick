@@ -34,6 +34,7 @@ describe("ScriptLife", () => {
     beforeEach(() => {
         document.head.innerHTML = "";
         document.body.innerHTML = `<div id="slot"></div>`;
+        for (const m of document.querySelectorAll("wiretrick-mount")) m.remove();
         errors = [];
         react = fakeReact();
         life = new ScriptLife({ doc: document, react: () => react.client, onError: (e) => errors.push(e) });
@@ -152,6 +153,24 @@ describe("ScriptLife", () => {
         reload((ctx) => (ctx as any).mount("#slot", "v3"));
         expect(document.querySelector("#slot > wiretrick-mount")).toBe(slotHost);
         expect(() => reload((ctx) => (ctx as any).mount("#nope", "x"))).toThrow(/nothing on the page matches "#nope"/);
+    });
+
+    it("ctx.mount again in the same run (no target, or the same element) re-renders that mount", () => {
+        const slot = document.querySelector("#slot")!;
+        const { ctx } = reload((ctx) => {
+            (ctx as any).mount("a");
+            (ctx as any).mount(slot, "x");
+        });
+        (ctx as any).mount("b");
+        (ctx as any).mount(slot, "y");
+        expect(react.roots.length).toBe(2);
+        expect(react.roots.map((r) => r.rendered)).toEqual([["a", "b"], ["x", "y"]]);
+        reload((ctx) => {
+            (ctx as any).mount("c");
+            (ctx as any).mount(slot, "z");
+        });
+        expect(react.roots.length).toBe(2);
+        expect(document.querySelectorAll("wiretrick-mount").length).toBe(2);
     });
 
     it("ctx.mount: needs React; there's no mount without it", () => {

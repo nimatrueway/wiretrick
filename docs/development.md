@@ -142,24 +142,19 @@ loaded with a `<script>` tag only when a script imports it. Bumping
 changelog. `.tsx` scripts compile with the automatic JSX runtime
 (`"jsx": "react-jsx"` in the generated `tsconfig.json`).
 
-A script's overlay GUI (`wt.onPage` with `dom: "overlay"`) runs in `overlay.html` + `overlay.js`
+A script's overlay GUI (`wt.onOverlay`) runs in `overlay.html` + `overlay.js`
 (`src/overlay/overlayRuntime.ts`), a web-accessible page the bridge
 (`src/hook/bridge.ts`) frames into the top page inside a closed shadow
 root, one frame per script. The bridge hands the frame a `MessagePort`;
 the frame's code, stores and `from: "page"` fetches go through the
 bridge's extension port (`src/background/engine/overlayLinks.ts`
-authorizes each script on it). Calls between the overlay and `onPage`
-code use `src/shared/rpc.ts`. On Chromium (MV2 and MV3) the manifest lists
+authorizes each script on it). Calls between the overlay, `onPage` and
+`onSite` code (handles) use `src/shared/rpc.ts`; a save re-runs handlers
+in place through `src/shared/runLifecycle.ts`. On Chromium (MV2 and MV3) the manifest lists
 `overlay.html` as a sandbox page, so it runs scripts without the extension
 CSP and has an opaque origin; Firefox has no manifest sandbox, so there it's
 a normal extension page that checks a one-time nonce with the background
 before it accepts a port.
-
-A `js: "page"` overlay (`unsafe: true`) skips all that: the bundle ships
-it with the page-world scripts, and the hook (`src/hook/pageLayer.ts`)
-builds its layer — a srcdoc frame in a closed shadow root, click-through
-like the overlay frame — and evaluates the script again with `document`
-bound to the layer's.
 
 ## How the MV3 build works
 
@@ -217,8 +212,8 @@ pages, and drops blocking `webRequest`):
   keep-alive ping (any extension API call resets the SW's ~30s idle
   timer) holds the worker open while a folder is connected, with a 30s
   `chrome.alarms` poll as the fallback if the worker is reaped anyway.
-- onPage runs in the isolated world by default (MV3: a `chrome.userScripts`
-  world); `js: "page"` runs it in the MAIN world when the page CSP allows,
+- onPage runs in the isolated world (MV3: a `chrome.userScripts`
+  world); onSite runs in the MAIN world when the page CSP allows,
   isolated fallback otherwise. **`document_start` timing caveat:** in MV2 the
   always-alive background answers the bundle in ~1ms, so onPage handlers
   reliably beat the page's own scripts. In MV3 the service worker must
