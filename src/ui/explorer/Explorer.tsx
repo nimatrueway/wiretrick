@@ -143,7 +143,7 @@ export function ExplorerSection() {
                     </button>
                     {" "}
                     <button id="btn-install" title="Install Script… (from a URL, GitHub, a gist, a folder or a zip; or drop one on the Explorer)" aria-label="Install Script" onClick={button(() => openInstall())}>
-                        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" d="M6.5 1.5L11 4v4.5M6.5 1.5L2 4v6l4.5 2.5M2 4l4.5 2.5L11 4M6.5 6.5v6M12.5 10v5M10 12.5h5" /></svg>
+                        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" strokeLinecap="round" d="M3 1.5h6.5l3.5 3.5v9.5H3zM9.5 1.5V5H13M6.5 6v5.5M4.5 9.5l2 2 2-2" /><circle cx="10.5" cy="11.2" r="1.2" fill="none" stroke="currentColor" strokeWidth="1.1" /></svg>
                     </button>
                     {" "}
                     <button id="btn-collapse-all" title="Collapse Folders in Explorer" aria-label="Collapse Folders in Explorer" onClick={button(collapseAll)}>

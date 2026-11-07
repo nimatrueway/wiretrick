@@ -70,7 +70,7 @@ bundle's. Files outside the bundle's folder can't be imported.
   (`github.com/…/blob/…`) stays as it is. Add `#wt-raw` to any URL to just
   view the file. The suffix only marks share links: the script runs
   whatever it's named.
-- **From the Explorer.** The **Install Script…** button (a box with a +), or
+- **From the Explorer.** The **Install Script…** button (a document with a down arrow), or
   right-click the empty area → **Install Script…**, opens the install dialog
   in the Editor. There you can paste a URL, choose a folder or choose a
   `.zip`.
