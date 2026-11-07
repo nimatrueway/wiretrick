@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.22.3-alpha] - 2026-11-07
+
 ### Fixed
 
 - A script importing a package that needs React (like `cmdk` for its overlay) no longer fails its `onSite` handlers with `React.forwardRef is not a function`. The package doesn't load in the site's world, which has no React, and only using it in `onSite` code throws.
@@ -832,7 +834,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.22.2-alpha...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.22.3-alpha...HEAD
+[0.22.3-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.2-alpha...v0.22.3-alpha
 [0.22.2-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.1-alpha...v0.22.2-alpha
 [0.22.1-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.0-alpha...v0.22.1-alpha
 [0.22.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.21.0-alpha...v0.22.0-alpha
