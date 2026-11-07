@@ -12,12 +12,10 @@ export interface Capabilities {
     urls: string[];
     /** network strategies it intercepts with */
     strategies: string[];
-    /** onPage code in the site's own JavaScript world */
+    /** onSite code: runs in the site's own JavaScript world */
     pageJs: boolean;
     /** draws an overlay */
     overlay: boolean;
-    /** page-world code with `unsafe: true` (incl. an overlay drawn in the site's world): the site can reach its stores and overlay */
-    unsafe: boolean;
     /** hosts its wt.fetch reaches, as its metadata declares (`connect`) */
     connect: string[];
     /** unpkg packages it imports (names) */
@@ -39,7 +37,6 @@ export function capabilitiesOf(routes: ResMeta["routes"], connect: string[], cod
         strategies: sorted(routes.flatMap((r) => (r.strategy ? [r.strategy] : []))),
         pageJs: routes.some((r) => r.kind === "onDocument" && r.world !== "isolated"),
         overlay: routes.some((r) => r.kind === "onOverlay"),
-        unsafe: routes.some((r) => !!r.unsafe || (r.kind === "onOverlay" && r.world === "page")),
         connect: sorted(connect),
         packages: sorted(packages),
     };
@@ -56,7 +53,6 @@ export type Risk = "high" | "medium" | "low";
 export function describeCapabilities(c: Capabilities): { text: string; risk: Risk }[] {
     const out: { text: string; risk: Risk }[] = [];
     if (c.urls.some(isAllUrls)) out.push({ text: "Runs on every site", risk: "high" });
-    if (c.unsafe) out.push({ text: "Gives the site's own JavaScript its stores and overlay (unsafe: true): the site can read and change its stored data and call into its overlay", risk: "high" });
     if (c.strategies.includes("debugger")) out.push({ text: 'Intercepts with the browser debugger (strategy "debugger": a banner shows on the tab)', risk: "high" });
     if (c.pageJs) out.push({ text: "Runs code in the site's own JavaScript world", risk: "medium" });
     if (c.strategies.includes("helper")) out.push({ text: 'Intercepts through the local helper process (strategy "helper")', risk: "medium" });
@@ -82,7 +78,6 @@ export function addedCapabilities(prev: Capabilities, next: Capabilities): strin
     if (strategies.length) out.push(`intercepts with ${strategies.join(", ")}`);
     if (next.pageJs && !prev.pageJs) out.push("runs code in the site's own JavaScript world");
     if (next.overlay && !prev.overlay) out.push("draws an overlay");
-    if (next.unsafe && !prev.unsafe) out.push("gives the site its stores and overlay (unsafe)");
     const connect = next.connect.filter((h) => !prev.connect.includes(h));
     if (connect.length) out.push(`connects to ${connect.join(", ")}`);
     const packages = next.packages.filter((p) => !prev.packages.includes(p));

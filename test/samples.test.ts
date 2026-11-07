@@ -50,7 +50,7 @@ describe("bundled samples", () => {
 
 describe("sample helpers", () => {
     it("the type check catches a wrong call", () => {
-        expect(typeErrors(`const p = wt.onPage("*://a/*", () => ({ n: () => 1 }));\nwt.onPage({ url: "*://a/*", dom: "overlay" }, async () => { const s: string = await p.n(); });`)).toHaveLength(1);
+        expect(typeErrors(`const p = wt.onPage("*://a/*", () => ({ n: () => 1 }));\nwt.onOverlay("*://a/*", async () => { const s: string = await p.n(); });`)).toHaveLength(1);
         expect(typeErrors(`import { useState } from "react";\nconst [n] = useState(0);\nconst el = <div>{n}</div>;`)).toEqual([]);
     });
     it("reads the Try it URL", () => {
@@ -61,8 +61,9 @@ describe("sample helpers", () => {
         expect(sampleStrategies(`wt.onRequest({ url: "*://a/*", strategy: "rules" }, f);`)).toEqual(["rules"]);
         expect(sampleStrategies(`wt.onResponseBody({ url: "*://a/*", strategy: wt.isFirefox ? "extension" : "debugger" }, f);`)).toEqual(["debugger", "extension"]);
         expect(sampleStrategies(`wt.onPage("*://a/*", () => {});`)).toEqual(["onPage"]);
-        expect(sampleStrategies(`wt.onRequest({ url: "*://a/*", strategy: "page" }, f);\nwt.onPage("*://a/*", f);\nwt.onPage({ url: "*://a/*", dom: "overlay" }, f);`)).toEqual(["page", "overlay"]);
-        expect(sampleStrategies(`wt.onPage({ url: "*://a/*", dom: "overlay" }, f);`)).toEqual(["overlay"]);
+        expect(sampleStrategies(`wt.onRequest({ url: "*://a/*", strategy: "page" }, f);\nwt.onPage("*://a/*", f);\nwt.onOverlay("*://a/*", f);`)).toEqual(["page", "overlay"]);
+        expect(sampleStrategies(`wt.onOverlay("*://a/*", f);`)).toEqual(["overlay"]);
+        expect(sampleStrategies(`wt.onSite("*://a/*", f);`)).toEqual(["onPage"]);
     });
     it("drops the Try it sentence from the blurb", () => {
         expect(sampleSummary("Send any request elsewhere. Try it: open a.com — b.")).toBe("Send any request elsewhere.");

@@ -91,9 +91,9 @@ describe("overlay runtime", () => {
         const h = await start(`
             wt.onRequest({ url: "*", strategy: "page" }, () => { throw new Error("network handlers don't run here"); });
             wt.onPage("*", () => { document.body.dataset.page = "ran"; });
-            wt.onPage({ url: "*://x.com/*", dom: "overlay" }, (ctx) => { document.body.dataset.a = ctx.url; });
-            wt.onPage({ url: "*://x.com/*", dom: "overlay", when: "document_idle" }, () => { document.body.dataset.b = "1"; });
-            wt.onPage({ url: "*://other.com/*", dom: "overlay" }, () => { document.body.dataset.c = "1"; });
+            wt.onOverlay("*://x.com/*", (ctx) => { document.body.dataset.a = ctx.url; });
+            wt.onOverlay({ url: "*://x.com/*", when: "document_idle" }, () => { document.body.dataset.b = "1"; });
+            wt.onOverlay("*://other.com/*", () => { document.body.dataset.c = "1"; });
         `);
         expect(document.body.dataset.a).toBe("https://x.com/app/page");
         expect(document.body.dataset.b).toBeUndefined();
@@ -107,19 +107,19 @@ describe("overlay runtime", () => {
     });
 
     it("reports handler errors and compile errors to the script's log", async () => {
-        const h = await start(`wt.onPage({ url: "*", dom: "overlay" }, () => { throw new Error("kaboom"); });`);
+        const h = await start(`wt.onOverlay("*", () => { throw new Error("kaboom"); });`);
         await settle();
         expect(h.logs.some((l) => l.level === "error" && /kaboom/.test(l.msg) && /demo/.test(l.msg))).toBe(true);
-        const r = await callOverlay(h, { h: "overlay:0", fn: "f", args: [] });
+        const r = await callOverlay(h, { h: "onOverlay:0", fn: "f", args: [] });
         expect(r.error?.message).toMatch(/not running/);
-        const bad = await start(`wt.onPage({ url: "*", dom: "overlay" }, () => {}`);
+        const bad = await start(`wt.onOverlay("*", () => {}`);
         await settle();
         expect(bad.logs.some((l) => l.level === "error" && /compile/.test(l.msg))).toBe(true);
     });
 
     it("`fetch` and `wt.fetch` fetch as the page (relative URLs against the page); from: \"background\" goes to the background", async () => {
-        const g = await start(`wt.onPage({ url: "*", dom: "overlay" }, () => ({ go: async () => [await (await fetch("/api/x")).json(), await (await wt.fetch("https://x.com/y", { method: "POST", body: "b" })).json(), await (await wt.fetch("https://api.z/q", { from: "background" })).text()] }));`);
-        const r = await callOverlay(g, { h: "overlay:0", fn: "go", args: [] });
+        const g = await start(`wt.onOverlay("*", () => ({ go: async () => [await (await fetch("/api/x")).json(), await (await wt.fetch("https://x.com/y", { method: "POST", body: "b" })).json(), await (await wt.fetch("https://api.z/q", { from: "background" })).text()] }));`);
+        const r = await callOverlay(g, { h: "onOverlay:0", fn: "go", args: [] });
         expect(r.ok).toBe(true);
         expect(r.value).toEqual([{ from: "page", url: "https://x.com/api/x" }, { from: "page", url: "https://x.com/y" }, "bg"]);
         expect(g.pageFetches.map((f) => [f.method, f.url])).toEqual([
@@ -130,15 +130,15 @@ describe("overlay runtime", () => {
     });
 
     it("wt.fetch bypass passes through to the bridge", async () => {
-        const g = await start(`wt.onPage({ url: "*", dom: "overlay" }, () => ({ go: async () => (await wt.fetch("/raw", { bypass: true })).status }));`);
-        expect((await callOverlay(g, { h: "overlay:0", fn: "go", args: [] })).value).toBe(200);
+        const g = await start(`wt.onOverlay("*", () => ({ go: async () => (await wt.fetch("/raw", { bypass: true })).status }));`);
+        expect((await callOverlay(g, { h: "onOverlay:0", fn: "go", args: [] })).value).toBe(200);
         expect(g.pageFetches[0]).toMatchObject({ url: "https://x.com/raw", bypass: true });
     });
 
     it("stores are replicas of the background's, live both ways", async () => {
-        const h = await start(`const st = wt.globalStore("ui", { on: false, n: 0 });\nwt.onPage({ url: "*", dom: "overlay" }, () => ({ flip: () => { st.on = !st.on; return st.on; }, read: () => ({ ...st }) }));`);
+        const h = await start(`const st = wt.globalStore("ui", { on: false, n: 0 });\nwt.onOverlay("*", () => ({ flip: () => { st.on = !st.on; return st.on; }, read: () => ({ ...st }) }));`);
         await settle();
-        expect((await callOverlay(h, { h: "overlay:0", fn: "flip", args: [] })).value).toBe(true);
+        expect((await callOverlay(h, { h: "onOverlay:0", fn: "flip", args: [] })).value).toBe(true);
         await settle();
         expect(h.owner.get("s1", "ui")?.data).toEqual({ on: true, n: 0 });
         // another context (the background, another tab) changes it
@@ -150,74 +150,74 @@ describe("overlay runtime", () => {
         await settle();
         st.n = 9;
         await settle();
-        expect((await callOverlay(h, { h: "overlay:0", fn: "read", args: [] })).value).toEqual({ on: true, n: 9 });
+        expect((await callOverlay(h, { h: "onOverlay:0", fn: "read", args: [] })).value).toEqual({ on: true, n: 9 });
     });
 
     it("its first render sees the snapshot from hello", async () => {
-        const h = await start(`const st = wt.globalStore("ui", { on: false });\nwt.onPage({ url: "*", dom: "overlay" }, () => { document.body.dataset.on = String(st.on); });`, { stores: { ui: { rev: 3, data: { on: true } } as any } });
+        const h = await start(`const st = wt.globalStore("ui", { on: false });\nwt.onOverlay("*", () => { document.body.dataset.on = String(st.on); });`, { stores: { ui: { rev: 3, data: { on: true } } as any } });
         expect(document.body.dataset.on).toBe("true");
         void h;
     });
 
     it("wt.storage goes to the script's storage through the bridge", async () => {
-        const h = await start(`wt.onPage({ url: "*", dom: "overlay" }, () => ({ go: async () => { await wt.storage.set("k", 4); return wt.storage.get("k"); } }));`);
-        expect((await callOverlay(h, { h: "overlay:0", fn: "go", args: [] })).value).toBe(4);
+        const h = await start(`wt.onOverlay("*", () => ({ go: async () => { await wt.storage.set("k", 4); return wt.storage.get("k"); } }));`);
+        expect((await callOverlay(h, { h: "onOverlay:0", fn: "go", args: [] })).value).toBe(4);
         expect(h.storage.get("k")).toBe(4);
     });
 
     it("ctx.onNavigate fires for in-place navigations, and ctx.url follows", async () => {
-        const h = await start(`wt.onPage({ url: "*", dom: "overlay" }, (ctx) => { const seen = []; const off = ctx.onNavigate((u) => seen.push(u)); return { seen: () => seen, off: () => off() }; });`);
+        const h = await start(`wt.onOverlay("*", (ctx) => { const seen = []; const off = ctx.onNavigate((u) => seen.push(u)); return { seen: () => seen, off: () => off() }; });`);
         h.bridge.push("nav", { url: "https://x.com/app/other" });
         await settle();
-        expect((await callOverlay(h, { h: "overlay:0", fn: "seen", args: [] })).value).toEqual(["https://x.com/app/other"]);
-        await callOverlay(h, { h: "overlay:0", fn: "off", args: [] });
+        expect((await callOverlay(h, { h: "onOverlay:0", fn: "seen", args: [] })).value).toEqual(["https://x.com/app/other"]);
+        await callOverlay(h, { h: "onOverlay:0", fn: "off", args: [] });
         h.bridge.push("nav", { url: "https://x.com/app/third" });
         await settle();
-        expect((await callOverlay(h, { h: "overlay:0", fn: "seen", args: [] })).value).toEqual(["https://x.com/app/other"]);
+        expect((await callOverlay(h, { h: "onOverlay:0", fn: "seen", args: [] })).value).toEqual(["https://x.com/app/other"]);
         // later handlers see the new URL; relative fetches resolve against it
-        const g = await start(`wt.onPage({ url: "*", dom: "overlay", when: "document_idle" }, (ctx) => ({ url: () => ctx.url, f: async () => (await (await fetch("rel")).json()).url }));`);
+        const g = await start(`wt.onOverlay({ url: "*", when: "document_idle" }, (ctx) => ({ url: () => ctx.url, f: async () => (await (await fetch("rel")).json()).url }));`);
         g.bridge.push("nav", { url: "https://x.com/b/c" });
         g.bridge.push("when", { phase: "document_idle" });
         await settle();
-        expect((await callOverlay(g, { h: "overlay:0", fn: "url", args: [] })).value).toBe("https://x.com/b/c");
-        expect((await callOverlay(g, { h: "overlay:0", fn: "f", args: [] })).value).toBe("https://x.com/b/rel");
+        expect((await callOverlay(g, { h: "onOverlay:0", fn: "url", args: [] })).value).toBe("https://x.com/b/c");
+        expect((await callOverlay(g, { h: "onOverlay:0", fn: "f", args: [] })).value).toBe("https://x.com/b/rel");
     });
 
-    it("calls onPage functions through the bridge (page:N), and answers calls into its handles (overlay:N)", async () => {
-        const h = await start(`const page = wt.onPage("*", () => ({ count: () => 0 }));\nwt.onPage({ url: "*", dom: "overlay" }, () => ({ ask: async (sel) => "matches: " + (await page.count(sel)), picked: (t) => "got " + t }));`);
-        const asked = callOverlay(h, { h: "overlay:0", fn: "ask", args: ["a"] });
+    it("calls onPage functions through the bridge (onPage:N), and answers calls into its handles (onOverlay:N)", async () => {
+        const h = await start(`const page = wt.onPage("*", () => ({ count: () => 0 }));\nwt.onOverlay("*", () => ({ ask: async (sel) => "matches: " + (await page.count(sel)), picked: (t) => "got " + t }));`);
+        const asked = callOverlay(h, { h: "onOverlay:0", fn: "ask", args: ["a"] });
         await settle();
         expect(h.calls).toHaveLength(1);
-        expect(h.calls[0]).toMatchObject({ h: "page:0", fn: "count", args: ["a"] });
+        expect(h.calls[0]).toMatchObject({ h: "onPage:0", fn: "count", args: ["a"] });
         answer(h, 3);
         expect((await asked).value).toBe("matches: 3");
-        expect((await callOverlay(h, { h: "overlay:0", fn: "picked", args: ["DIV"] })).value).toBe("got DIV");
-        expect((await callOverlay(h, { h: "overlay:0", fn: "nope", args: [] })).error?.message).toMatch(/no such function/);
+        expect((await callOverlay(h, { h: "onOverlay:0", fn: "picked", args: ["DIV"] })).value).toBe("got DIV");
+        expect((await callOverlay(h, { h: "onOverlay:0", fn: "nope", args: [] })).error?.message).toMatch(/no such function/);
     });
 
     it("calls into a handler that hasn't run yet wait for it", async () => {
-        const h = await start(`wt.onPage({ url: "*", dom: "overlay", when: "document_idle" }, () => ({ ping: () => "pong" }));`);
-        const r = callOverlay(h, { h: "overlay:0", fn: "ping", args: [] });
+        const h = await start(`wt.onOverlay({ url: "*", when: "document_idle" }, () => ({ ping: () => "pong" }));`);
+        const r = callOverlay(h, { h: "onOverlay:0", fn: "ping", args: [] });
         await settle();
         h.bridge.push("when", { phase: "document_idle" });
         expect((await r).value).toBe("pong");
     });
 
     it("pending calls into onPage code reject with DisconnectedError when the link closes", async () => {
-        const h = await start(`const page = wt.onPage("*", () => ({}));\nwt.onPage({ url: "*", dom: "overlay" }, () => ({ ask: () => page.count().catch((e) => e.name) }));`);
-        const asked = callOverlay(h, { h: "overlay:0", fn: "ask", args: [] });
+        const h = await start(`const page = wt.onPage("*", () => ({}));\nwt.onOverlay("*", () => ({ ask: () => page.count().catch((e) => e.name) }));`);
+        const asked = callOverlay(h, { h: "onOverlay:0", fn: "ask", args: [] });
         await settle();
         expect(h.calls).toHaveLength(1);
         // only the overlay's pending calls fail; a client of its own handles is rejected the same way
         const client = h.rt.client;
-        const p = client.remote("page:0").x().catch((e: any) => e);
+        const p = client.remote("onPage:0").x().catch((e: any) => e);
         h.bridge.close("the bridge went away");
         expect(await p).toBeInstanceOf(DisconnectedError);
         void asked;
     });
 
     it("ctx.shortcut registers with the bridge, runs on shortcut.fire and on keys pressed in the frame, and unregisters", async () => {
-        const h = await start(`wt.onPage({ url: "*", dom: "overlay" }, (ctx) => {
+        const h = await start(`wt.onOverlay("*", (ctx) => {
             const seen = [];
             const off = ctx.shortcut("Alt+Shift+H", () => seen.push("h"));
             ctx.shortcut("Mod+K", async () => { seen.push("k"); throw new Error("boom"); }, { priority: "after-page" });
@@ -227,7 +227,7 @@ describe("overlay runtime", () => {
         expect(h.keys).toEqual(["add 1 Alt+Shift+H before-page", "add 2 Mod+K after-page"]);
         h.bridge.push("shortcut.fire", { id: "2" });
         await settle();
-        expect((await callOverlay(h, { h: "overlay:0", fn: "seen", args: [] })).value).toEqual(["k"]);
+        expect((await callOverlay(h, { h: "onOverlay:0", fn: "seen", args: [] })).value).toEqual(["k"]);
         expect(h.logs.some((l) => l.level === "error" && l.msg.includes("ctx.shortcut") && l.msg.includes("boom"))).toBe(true);
         // focus in the frame: it matches its own keys (not in its text fields)
         const e = new KeyboardEvent("keydown", { key: "H", code: "KeyH", altKey: true, shiftKey: true, bubbles: true, cancelable: true });
@@ -235,21 +235,21 @@ describe("overlay runtime", () => {
         expect(e.defaultPrevented).toBe(true);
         const input = document.body.appendChild(document.createElement("input"));
         input.dispatchEvent(new KeyboardEvent("keydown", { key: "H", code: "KeyH", altKey: true, shiftKey: true, bubbles: true, cancelable: true }));
-        expect((await callOverlay(h, { h: "overlay:0", fn: "seen", args: [] })).value).toEqual(["k", "h"]);
-        await callOverlay(h, { h: "overlay:0", fn: "off", args: [] });
+        expect((await callOverlay(h, { h: "onOverlay:0", fn: "seen", args: [] })).value).toEqual(["k", "h"]);
+        await callOverlay(h, { h: "onOverlay:0", fn: "off", args: [] });
         await settle();
         expect(h.keys[h.keys.length - 1]).toBe("remove 1");
         h.bridge.push("shortcut.fire", { id: "1" });
         document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "H", code: "KeyH", altKey: true, shiftKey: true, bubbles: true, cancelable: true }));
         await settle();
-        expect((await callOverlay(h, { h: "overlay:0", fn: "seen", args: [] })).value).toEqual(["k", "h"]);
-        expect((await callOverlay(h, { h: "overlay:0", fn: "bad", args: ["Hyper+K"] })).value).toMatch(/unknown modifier/);
-        expect((await callOverlay(h, { h: "overlay:0", fn: "bad", args: ["Alt+K", "first"] })).value).toMatch(/priority/);
+        expect((await callOverlay(h, { h: "onOverlay:0", fn: "seen", args: [] })).value).toEqual(["k", "h"]);
+        expect((await callOverlay(h, { h: "onOverlay:0", fn: "bad", args: ["Hyper+K"] })).value).toMatch(/unknown modifier/);
+        expect((await callOverlay(h, { h: "onOverlay:0", fn: "bad", args: ["Alt+K", "first"] })).value).toMatch(/priority/);
         expect(h.keys).toHaveLength(3);
     });
 
     it("reports its visible areas", async () => {
-        const h = await start(`wt.onPage({ url: "*", dom: "overlay" }, () => { document.body.innerHTML = "<button>hi</button>"; });`);
+        const h = await start(`wt.onOverlay("*", () => { document.body.innerHTML = "<button>hi</button>"; });`);
         h.rt.measure();
         await settle();
         expect(h.rects.length).toBeGreaterThan(0);

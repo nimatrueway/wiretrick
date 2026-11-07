@@ -10,7 +10,7 @@ export function UserScriptsBanner() {
     return (
         <div id="userscripts-banner" className="wt-banner" role="status" data-status={s.status}>
             <span className="wt-banner-text">
-                <b>User scripts are off:</b> onPage code doesn't run (except <code>js: "page"</code>). To run it, {userScriptsHowTo(s.status, s.extensionId)}.
+                <b>User scripts are off:</b> onPage code doesn't run (onSite code still does). To run it, {userScriptsHowTo(s.status, s.extensionId)}.
             </span>
             {s.status === "no-permission" ? (
                 <button id="userscripts-grant" onClick={() => requestUserScripts()}>

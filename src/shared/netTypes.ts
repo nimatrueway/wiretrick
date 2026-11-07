@@ -34,7 +34,7 @@ export function kindSkipLine(scriptName: string, url: string, binaryBody: boolea
 }
 
 /** page-side script code that ran for a document or fetched as it: the action its Network row shows */
-export const RAN_ACTIONS = { onPage: "onPage ran", onOverlay: "overlay shown", pageFetch: "fetched by its overlay" } as const;
+export const RAN_ACTIONS = { onSite: "onSite ran", onPage: "onPage ran", onOverlay: "overlay shown", pageFetch: "fetched by its overlay" } as const;
 export type RanApi = keyof typeof RAN_ACTIONS;
 export const isRanApi = (x: unknown): x is RanApi => typeof x === "string" && Object.prototype.hasOwnProperty.call(RAN_ACTIONS, x);
 

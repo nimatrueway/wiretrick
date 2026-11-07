@@ -11,7 +11,7 @@
  *
  * Modern syntax (`?.`, `??`, class fields) stays as written: Sucrase would
  * otherwise rewrite it into helpers declared at the top of the module, which
- * a function ctx.evaluate sends to the page (by its source) doesn't have.
+ * code run from its source elsewhere wouldn't have.
  */
 import { transform } from "sucrase";
 import { jsxImportSource } from "./builtinSpecs";

@@ -1,27 +1,29 @@
 import { describe, expect, it } from "vitest";
+import { removedApiProblems } from "../src/shared/compile";
 import { collectProblems, filterProblems, problemCounts, ProblemsBadge, SETTINGS_GROUP, settingsLink, type ProblemMarker, type ProblemScript } from "../src/ui/problems";
 
 const script = (id: string, over: Partial<ProblemScript> = {}): ProblemScript => ({ id, label: `${id}.ts`, error: null, ...over });
 const none = new Map<string, ProblemMarker[]>();
 
 describe("collectProblems", () => {
-    it("a ctx.evaluate script-variable warning points at the variable's use in each evaluate function", () => {
+    it("an onSite handler's store/handle warning points at the name's first use in that handler", () => {
         const code = [
-            "const cfg = { a: 1 };", //
-            'wt.onPage("*", (ctx) => {',
-            "    const cb = { cfg: 1 };",
-            "    ctx.evaluate((a) => {",
-            "        a.cfg = cfg.a;",
-            "    }, cb);",
-            "    ctx.evaluate(() => [cfg]);",
+            "const cfg = wt.pageStore(\"cfg\", { a: 1 });", //
+            'wt.onPage("*", () => cfg.a);',
+            'wt.onSite("*", () => {',
+            "    const x = 1;",
+            "    return cfg.a + x;",
             "});",
         ].join("\n");
-        const w = "onPage #1: ctx.evaluate's function uses `cfg` from your script, but …";
-        const [g] = collectProblems([script("a", { code, routeWarnings: [w, w] })], none);
-        expect(g.problems.map((p) => [p.line, p.column, p.endColumn])).toEqual([
-            [5, 17, 20],
-            [7, 25, 28],
-        ]);
+        const w = "onSite #1: uses `cfg` — …";
+        const [g] = collectProblems([script("a", { code, routeWarnings: [w] })], none);
+        expect(g.problems.map((p) => [p.severity, p.line, p.column, p.endColumn])).toEqual([["warning", 5, 12, 15]]);
+    });
+    it("the removed ctx.evaluate is an error at its first use", () => {
+        const code = 'wt.onPage("*", async (ctx) => {\n    await ctx.evaluate(() => 1);\n});';
+        const [g] = collectProblems([script("a", { code, routeWarnings: [removedApiProblems(code)[0]] })], none);
+        expect(g.problems.map((p) => [p.severity, p.line, p.column, p.endColumn])).toEqual([["error", 2, 15, 23]]);
+        expect(removedApiProblems('wt.onPage("*", () => document.evaluate("//a", document))')).toEqual([]);
     });
     it("an import that can't load points at its URL and isn't listed twice with its live marker", () => {
         const code = `// x\nimport { sleep } from 'https://unpkg.com/asyncbox';\n`;

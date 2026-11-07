@@ -5,26 +5,25 @@
  *
  *   hook (MAIN, no eval) ← postMessage → bridge (isolated) ⇄ background
  *
- * Also runs wt.onPage code in the isolated world: `js: "isolated"`
- * handlers (MV2; MV3 has no eval in content scripts, so they run in
- * chrome.userScripts worlds — src/hook/isolated.ts — and the bridge relays
- * the overlay's calls to them through the background, L2), and main-world
- * ones when the page CSP blocks eval there. The background sends the scripts'
+ * Also runs wt.onPage code in the isolated world (MV2; MV3 has no eval in
+ * content scripts, so it runs in chrome.userScripts worlds —
+ * src/hook/isolated.ts — and the bridge relays the overlay's calls to it
+ * through the background, L2), and wt.onSite code when the page CSP
+ * blocks eval in the page. The background sends the scripts'
  * SOURCES, the bridge compiles them and runs them at the requested DOM
  * moment — the isolated world shares the page's DOM, not its JS world.
  *
- * In the top frame it also hosts the scripts' overlays (`dom: "overlay"`): one
+ * In the top frame it also hosts the scripts' overlays (`wt.onOverlay`): one
  * iframe per script inside a closed shadow root, linked to this bridge by
  * a MessagePort (L3). The bridge relays what each overlay may do to the
  * background over the `wt-bridge` port (L2), fetches as the page for it,
- * and routes calls between the overlay and that script's onPage code
- * (isolated world here; main world through the hook, L4). It also listens
+ * and routes the overlay's calls into that script's handles by their key:
+ * `onPage:` (isolated world here, or through the background on MV3),
+ * `onSite:` (the CSP fallback here, else the hook, L4). It also listens
  * for the overlays' `ctx.shortcut` keys in the page.
  *
- * `unsafe: true` page-world code (the hook's, or the CSP fallback's here)
- * gets its script's stores and overlay through the bridge: the hook links
- * to it over window messages (`wire`), which the page can read and forge —
- * so only those scripts get through, and the background checks again.
+ * Nothing in the page's world calls trusted code: what the page posts
+ * toward it is dropped (and logged).
  */
 import { formatScriptError } from "../shared/scriptError";
 import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptContext, type ScriptLogLevel } from "../shared/scriptLog";
@@ -33,17 +32,15 @@ import { makeLibRequire, type ShippedLib } from "../shared/scriptImports";
 import { builtinModule, builtinsReady, ensureBuiltins, setBuiltinLoader, shippedSources, sourceLoader } from "../shared/builtins";
 import { makePageShim, domHandlersFor, scheduleDocument, firePageHandler, type PageDocumentHandler } from "../shared/pageShim";
 import { packBytes, unpackBytes } from "../shared/bytesPack";
-import { Endpoint, endpointPair, messagePortEndpoint, portEndpoint, ISO_STORE_TAG, PAGE_STORE_TAG, type ReqOf, type ReqOps, type ResOf } from "../shared/wire";
+import { Endpoint, endpointPair, messagePortEndpoint, portEndpoint, ISO_STORE_TAG, type ReqOf, type ReqOps, type ResOf } from "../shared/wire";
 import { ReplicaHub, type StoreSnapshots } from "../shared/storeReplica";
-import { Exposer, RpcClient, isRpcCall, isRpcResult, newCid, NOT_RUNNING, RPC_QUEUE_MAX, RPC_TIMEOUT_MS, TOP_FRAME_ONLY, type RpcCall, type RpcResult } from "../shared/rpc";
-import { inertRemote, REMOTE_MAIN_WORLD } from "../shared/remote";
-import type { DocumentWhen, RouteMeta } from "../shared/route";
+import { Exposer, RpcClient, isRpcCall, isRpcResult, NOT_RUNNING, RPC_QUEUE_MAX, RPC_TIMEOUT_MS, TOP_FRAME_ONLY, type RpcCall, type RpcResult } from "../shared/rpc";
+import { inertRemote } from "../shared/remote";
+import type { DocumentWhen, PlaceApi, RouteMeta } from "../shared/route";
 import { clipPathFor, normalizeRects } from "../shared/overlayRects";
 import { fromWireRequest, toWireResponse } from "../shared/wtFetch";
 import { ShortcutRegistry, watchShortcuts } from "../shared/shortcut";
 import type { RanApi } from "../shared/netTypes";
-import { evalModule, makePageEvaluate, type EvalModule } from "../shared/pageEval";
-import type { EvalCapture } from "../shared/evalCapture";
 
 (() => {
     const MAIN_SOURCE = "res-override-bridge";
@@ -197,13 +194,13 @@ import type { EvalCapture } from "../shared/evalCapture";
         if (data.kind === "scriptLog") {
             safeSend({ type: "scriptLog", scriptId: data.scriptId ?? null, level: data.level, msg: data.msg, ctx: "page" });
         }
-        if (data.kind === "scriptRan" && (data.api === "onPage" || data.api === "onOverlay")) {
+        if (data.kind === "scriptRan" && data.api === "onSite") {
             scriptRan(data.scriptId, data.name, data.api);
         }
         // the hook's answer to an overlay's call (L4). The page can post this
         // too: only a cid we sent and are still waiting for is accepted, and
-        // the value is page data either way. A call from the page reaches an
-        // overlay only over `wire`, for an unsafe: true script.
+        // the value is page data either way. A call from the page never
+        // reaches trusted code.
         if (data.kind === "rpc.result") {
             const p = typeof data.result?.cid === "string" ? l4Pending.get(data.result.cid) : undefined;
             if (!p || p.s !== data.s || !isRpcResult(data.result)) return;
@@ -213,16 +210,22 @@ import type { EvalCapture } from "../shared/evalCapture";
             return;
         }
         if (data.kind === "nav") noteNav();
-        if (data.kind === "wire") hookEp.receive(data.msg);
+        if (data.kind === "wire") dropped("a page-world message to trusted code");
         });
     });
 
     // ---- onPage code in the isolated world: compiles the FULL script source
     // with a shim so top-level helpers/closures survive; the DOM is shared
     // with the page, window (page JS globals) is not ----
-    interface DocumentHandler { scriptId: string; name: string; src: string; params?: Record<string, any>; unsafe?: true; evals?: EvalCapture[] }
+    interface DocumentHandler { scriptId: string; name: string; src: string; params?: Record<string, any> }
 
-    /** script ids whose main-world onPage code this frame got (storage relay allow-list) */
+    /** page-world messages toward trusted code: dropped, logged (a few per page) */
+    let droppedN = 0;
+    function dropped(what: string): void {
+        if (droppedN++ < 5) dlog("warn", `dropped ${what}: code in the page's world can't call trusted code`);
+    }
+
+    /** script ids whose onSite code this frame got (storage relay allow-list) */
     let pageScriptIds = new Set<string>();
     let isoFired = false;
 
@@ -238,8 +241,6 @@ import type { EvalCapture } from "../shared/evalCapture";
                 textTypes: resp?.textTypes,
                 domHandlers: (resp && resp.domHandlers) || [],
                 libs: (resp && resp.libs) || [],
-                // unsafe: true scripts' stores only (the page can read them anyway)
-                ...(resp?.pageStores ? { pageStores: resp.pageStores, pageStorePage: resp.pageStorePage } : {}),
                 ...(hot ? { hot: true } : {}),
             },
             window.location.origin
@@ -251,11 +252,10 @@ import type { EvalCapture } from "../shared/evalCapture";
         if (!resp) return;
         if (resp.count > 0 || (resp.domHandlers || []).length || (resp.isoHandlers || []).length || (resp.overlays || []).length) openPort();
         pageScriptIds = new Set(((resp.domHandlers || []) as DocumentHandler[]).map((h) => h.scriptId));
-        notePageWorld(resp);
         syncOverlays(window === top ? resp.overlays || [] : [], hot);
         if (__MV3__) {
             // MV3 content scripts can't eval: isolated code runs in user-script worlds; this frame only relays the overlay's calls
-            isoHandles = new Map(((resp.isoHandlers || []) as { scriptId: string; handles?: string[] }[]).map((h) => [h.scriptId, new Set(h.handles || [])]));
+            isoScripts = new Set(((resp.isoHandlers || []) as { scriptId: string }[]).map((h) => h.scriptId));
             isoOff = typeof resp.isoOff === "string" ? resp.isoOff : null;
             return;
         }
@@ -270,11 +270,11 @@ import type { EvalCapture } from "../shared/evalCapture";
         runPageScripts(iso, resp.isoLibs || [], "isolated", hot);
     }
 
-    /** MV3: per script, the handles of its isolated onPage code (run by chrome.userScripts) */
-    let isoHandles = new Map<string, Set<string>>();
+    /** MV3: the scripts whose onPage code runs in this frame (in chrome.userScripts worlds) */
+    let isoScripts = new Set<string>();
     /** MV3: why that code doesn't run (user scripts are off), if it doesn't */
     let isoOff: string | null = null;
-    /** per script, what answers the overlay's calls into onPage code run here: isolated world (MV2), and the main-world CSP fallback */
+    /** per script, what answers calls into handlers run here: onPage (MV2), and onSite when the page CSP blocks eval */
     const isoExposers = new Map<string, Exposer>();
     const fallbackExposers = new Map<string, Exposer>();
 
@@ -289,7 +289,7 @@ import type { EvalCapture } from "../shared/evalCapture";
     let isoPrimed: StoreSnapshots = {};
     let isoPage = "";
     /** per script: L2 granted (null: refused), for the current L2 link */
-    function storeGrants(op: "iso.stores" | "page.stores", what: string) {
+    function storeGrants(op: "iso.stores", what: string) {
         let grants = new Map<string, Promise<Endpoint | null>>();
         return {
             reset: () => void (grants = new Map()),
@@ -317,7 +317,6 @@ import type { EvalCapture } from "../shared/evalCapture";
         };
     }
     const isoGrants = storeGrants("iso.stores", "isolated onPage stores");
-    const pageGrants = storeGrants("page.stores", "unsafe page-world stores");
 
     /** a hub's store ops (on `out`) → L2, tagged `tag + s`, for the scripts `allowed` lets through; in order: each op waits for its script's grant */
     function relayStores(out: Endpoint, grant: (s: string) => Promise<Endpoint | null>, tag: string, allowed: (s: string) => boolean = () => true): void {
@@ -343,63 +342,8 @@ import type { EvalCapture } from "../shared/evalCapture";
         return isoHub;
     }
 
-    // ---- unsafe: true page-world code's stores and overlay calls ----
-    //
-    // The hook's replicas (MAIN world) link here over window messages; the
-    // CSP fallback's live here (`fbStores`). Their ops go over L2 tagged
-    // `PAGE_STORE_TAG + s` once the background granted the script
-    // (`page.stores`). The page can forge the hook's side: only the
-    // scripts whose page-world code here is `unsafe: true` get through.
-    /** scripts whose page-world code in this frame is `unsafe: true` (from the bundle) */
-    let unsafeIds = new Set<string>();
-    let pagePrimed: StoreSnapshots = {};
-    let pageStorePage = "";
-    /** page-world code used a store: keep L2 up (patches, re-sync after a drop) */
-    let pageStoresUsed = false;
-    const unsafeOk = (s: string): boolean => {
-        if (!unsafeIds.has(s)) {
-            dlog("warn", `refused a page-world store op or overlay call for ${s}: its page-world code here isn't unsafe: true`);
-            return false;
-        }
-        pageStoresUsed = true;
-        return true;
-    };
-    const hookEp = new Endpoint((msg) => window.postMessage({ source: MAIN_SOURCE, kind: "wire", msg }, window.location.origin), { debug: (m) => dlog("debug", "hook link:", m) });
-    relayStores(hookEp, pageGrants.get, PAGE_STORE_TAG, unsafeOk);
-    hookEp.on("rpc.call", (c, s) => guard(() => s !== undefined && isRpcCall(c) && callOverlayFromPage(s, c, (r) => hookEp.push("rpc.result", r, s))));
-    let fbHub: ReplicaHub | null = null;
-    let fbOut: Endpoint | null = null;
-    function fbStores(): ReplicaHub {
-        if (fbHub) return fbHub;
-        const [hubSide, out] = endpointPair();
-        fbOut = out;
-        relayStores(out, pageGrants.get, PAGE_STORE_TAG, unsafeOk);
-        fbHub = new ReplicaHub({ ctx: "page", log: (s, msg, level) => scriptLog(s, level, msg, "page") });
-        fbHub.prime(pagePrimed);
-        fbHub.attach(hubSide);
-        return fbHub;
-    }
-    function notePageWorld(resp: any): void {
-        unsafeIds = new Set(((resp.domHandlers || []) as DocumentHandler[]).flatMap((h) => (h.unsafe ? [h.scriptId] : [])));
-        if (resp.pageStores) {
-            pagePrimed = resp.pageStores;
-            pageStorePage = typeof resp.pageStorePage === "string" ? resp.pageStorePage : "";
-            fbHub?.prime(pagePrimed);
-        }
-    }
-
-    /** scripts whose main-world fallback code already reported calling the overlay */
-    const mainWorldCallers = new Set<string | null>();
-
-    /** ctx.evaluate, per script (its errors are its own): asks the hook in the page's world (the CSP fallback's page code too: the page's CSP rejects it there) */
-    const evaluates = new Map<string, ReturnType<typeof makePageEvaluate>>();
-    /** isolated scripts' current modules: what their ctx.evaluate functions take along to the page */
-    const evalModules = new Map<string, EvalModule>();
-    const evaluateFor = (scriptId: string, name: string, ctx: ScriptContext) => {
-        let ev = evaluates.get(scriptId);
-        if (!ev) evaluates.set(scriptId, (ev = makePageEvaluate(window, undefined, (e) => scriptLog(scriptId, "error", formatScriptError(name, e, "ctx.evaluate"), ctx), () => evalModules.get(scriptId))));
-        return ev;
-    };
+    /** scripts whose onSite fallback code already reported calling a handle */
+    const siteCallers = new Set<string | null>();
 
     // isolated code's built-in React: evaluated here from the background's copy (a <script> tag would put it in the page)
     if (!__MV3__)
@@ -414,20 +358,22 @@ import type { EvalCapture } from "../shared/evalCapture";
             if (!builtinsReady(codes, packages)) {
                 ensureBuiltins(codes, packages)
                     .catch((e: any) => {
-                        for (const h of handlers) scriptLog(h.scriptId, "error", formatScriptError(h.name, new Error(`the built-in React didn't load: ${e?.message || e}`), "onPage (isolated world)"), "isolated");
+                        for (const h of handlers) scriptLog(h.scriptId, "error", formatScriptError(h.name, new Error(`the built-in React didn't load: ${e?.message || e}`), "onPage"), "isolated");
                     })
                     .then(() => runPageScripts(handlers, libSources, world, hot, true));
                 return;
             }
         }
-        const what = world === "isolated" ? "onPage (isolated world)" : "onPage (isolated-world fallback)";
+        const api: PlaceApi = world === "isolated" ? "onPage" : "onSite";
+        const what = world === "isolated" ? "onPage" : "onSite (isolated-world fallback)";
         dlog("debug", `${what}: running ${handlers.length} script(s)${hot ? " (hot refire)" : ""}`);
         const exposers = world === "isolated" ? isoExposers : fallbackExposers;
-        // the main-world fallback is still page code
+        // the onSite fallback is still page code
         const ctx: ScriptContext = world === "isolated" ? "isolated" : "page";
         for (const id of [...exposers.keys()]) if (!handlers.some((h) => h.scriptId === id)) exposers.delete(id);
-        // the main-world fallback: unsafe: true scripts' code gets stores and the overlay too
-        const unsafe = (id: string | null | undefined): id is string => world === "page" && !!id && unsafeIds.has(id);
+        // onPage code's handles: its onSite handlers (the page's world), its own (here), its overlay (top frame)
+        const handle = (scriptId: string) => (api: PlaceApi, key: string) =>
+            api === "onSite" ? pageClient(scriptId).remote(key) : api === "onPage" ? localClient(scriptId).remote(key) : window === top ? overlayClient(scriptId).remote(key) : inertRemote(TOP_FRAME_ONLY);
         const shimFor = (scriptId: string | null, name: string, params: Record<string, any>, exposer?: Exposer, storesOf?: string) =>
             makePageShim({
                 params,
@@ -436,24 +382,13 @@ import type { EvalCapture } from "../shared/evalCapture";
                 stores:
                     world === "isolated" && storesOf
                         ? { store: (n, initial, persist) => isoStores().store(storesOf, n, initial, persist), pageStore: (n, initial) => isoStores().pageStore(storesOf, n, initial, isoPage) }
-                        : unsafe(storesOf)
-                          ? { store: (n, initial, persist) => fbStores().store(storesOf, n, initial, persist), pageStore: (n, initial) => fbStores().pageStore(storesOf, n, initial, pageStorePage) }
-                          : undefined,
-                // isolated code in the top frame may call its overlay; elsewhere the handle explains why not
-                overlay:
-                    scriptId && (world === "isolated" || unsafe(scriptId))
-                        ? window === top
-                            ? (h) => overlayClient(scriptId).remote(h)
-                            : world === "page"
-                              ? () => inertRemote(TOP_FRAME_ONLY)
-                              : undefined
                         : undefined,
-                page: scriptId && world === "isolated" ? (h) => pageClient(scriptId).remote(h) : undefined,
-                // the main-world fallback reports a call into the overlay like the hook does (once per script)
-                onMainWorldCall: (e) => {
-                    if (world !== "page" || mainWorldCallers.has(scriptId)) return;
-                    mainWorldCallers.add(scriptId);
-                    scriptLog(scriptId, "error", formatScriptError(name, e, "onPage"), ctx);
+                call: scriptId && world === "isolated" ? handle(scriptId) : undefined,
+                // the onSite fallback reports a handle call like the hook does (once per script)
+                onSiteCall: (e) => {
+                    if (siteCallers.has(scriptId)) return;
+                    siteCallers.add(scriptId);
+                    scriptLog(scriptId, "error", formatScriptError(name, e, "onSite"), ctx);
                 },
                 log: (...args: any[]) => scriptLog(scriptId, "info", scriptLogLine(name, "wt.log", formatLogArgs(args)), ctx),
                 storage: {
@@ -468,7 +403,6 @@ import type { EvalCapture } from "../shared/evalCapture";
             // shadow console like the MAIN-world path: script console.*
             // calls go to the extension LOG, not the page console
             const consoleProxy = makeScriptConsole((level, source, text) => scriptLog(h.scriptId, level, scriptLogLine(h.name, source, text), ctx));
-            if (world === "isolated") evalModules.set(h.scriptId, evalModule(h.scriptId, h.name, h.params, h.evals, libSources));
             let dom: PageDocumentHandler[];
             try {
                 // page-side require over the shipped library sources and data files
@@ -483,9 +417,6 @@ import type { EvalCapture } from "../shared/evalCapture";
                 const shim = shimFor(h.scriptId, h.name, h.params || {}, exposer, h.scriptId);
                 scriptFunction(h.src)(shim.wt, consoleProxy, requireFrom(h.name), moduleObj, moduleObj.exports);
                 dom = shim.dom;
-                // a js: "page" overlay needs eval in the page, which its CSP forbids
-                if (world === "page" && window === top && domHandlersFor(shim.layers, location.href).length)
-                    scriptLog(h.scriptId, "error", scriptLogLine(h.name, "onPage", `the page-world overlay (js: "page", dom: "overlay") can't run on this page: its CSP forbids eval in the page — drop js: "page" to run the overlay in its own frame`), ctx);
             } catch (e: any) {
                 exposer.reset();
                 exposer.done();
@@ -497,12 +428,12 @@ import type { EvalCapture } from "../shared/evalCapture";
             for (const d of matching) {
                 const run = () => {
                     try {
-                        firePageHandler(d, { url: location.href, method: "GET", tabUrl: location.href, resourceType: "main_frame", requestHeaders: {}, groups: {}, evaluate: evaluateFor(h.scriptId, h.name, ctx) }, exposer, (e) =>
-                            scriptLog(h.scriptId, "error", formatScriptError(h.name, e, "onPage"), ctx)
+                        firePageHandler(d, { url: location.href, method: "GET", tabUrl: location.href, resourceType: "main_frame", requestHeaders: {}, groups: {} }, exposer, (e) =>
+                            scriptLog(h.scriptId, "error", formatScriptError(h.name, e, api), ctx)
                         );
-                        scriptRan(h.scriptId, h.name, "onPage");
+                        scriptRan(h.scriptId, h.name, api);
                     } catch (e: any) {
-                        scriptLog(h.scriptId, "error", formatScriptError(h.name, e, "onPage"), ctx);
+                        scriptLog(h.scriptId, "error", formatScriptError(h.name, e, api), ctx);
                     }
                 };
                 scheduleDocument(d.when, run, hot);
@@ -510,7 +441,7 @@ import type { EvalCapture } from "../shared/evalCapture";
         }
     }
 
-    /** main-world handlers, here because the page CSP blocks eval in the page */
+    /** onSite handlers, here because the page CSP blocks eval in the page */
     async function runDocumentHandlers(hot: boolean): Promise<void> {
         if (dead) return;
         // handlers come embedded in the hook bundle (getHookBundle)
@@ -519,7 +450,6 @@ import type { EvalCapture } from "../shared/evalCapture";
             // dead bridge: safeSend never answers — resolve empty after a beat
             setTimeout(() => resolve({ domHandlers: [] }), 1000);
         });
-        notePageWorld(bundle);
         runPageScripts(bundle.domHandlers || [], bundle.libs || [], "page", hot);
     }
 
@@ -557,12 +487,7 @@ import type { EvalCapture } from "../shared/evalCapture";
             ep.on(op, (a: any, s) => {
                 if (s === undefined) return;
                 if (s.startsWith(ISO_STORE_TAG)) isoOut?.push(op, a, s.slice(ISO_STORE_TAG.length));
-                else if (s.startsWith(PAGE_STORE_TAG)) {
-                    const id = s.slice(PAGE_STORE_TAG.length);
-                    if (!unsafeIds.has(id)) return;
-                    hookEp.push(op, a, id);
-                    fbOut?.push(op, a, id);
-                } else overlays.get(s)?.ep?.push(op, a, s);
+                else overlays.get(s)?.ep?.push(op, a, s);
             });
         // MV3: the overlay ⇄ isolated-world relay (the background checks tab, frame and script)
         ep.on("iso.result", (r, s) => {
@@ -583,12 +508,9 @@ import type { EvalCapture } from "../shared/evalCapture";
                         (e: any) => dlog("warn", `overlay ${o.info.name}: no longer granted: ${e?.message || e}`)
                     );
         for (const w of l2Waiters.splice(0)) w();
-        // isolated and unsafe page-world code's replicas re-grant (on first use) and re-subscribe
+        // isolated code's replicas re-grant (on first use) and re-subscribe
         isoGrants.reset();
-        pageGrants.reset();
         isoHub?.reconnect();
-        fbHub?.reconnect();
-        if (pageStoresUsed) hookEp.push("store.resync", {});
         ep.onClose(() => {
             if (l2 === ep) l2 = null;
             for (const [cid, p] of [...isoPending])
@@ -597,7 +519,7 @@ import type { EvalCapture } from "../shared/evalCapture";
                     clearTimeout(p.timer);
                     p.reply({ cid, ok: false, error: { name: "DisconnectedError", message: "the link to the extension dropped" } });
                 }
-            if (dead || (!l2Holders && !isoHub && !pageStoresUsed) || l2Timer) return;
+            if (dead || (!l2Holders && !isoHub) || l2Timer) return;
             l2Timer = setTimeout(() => {
                 l2Timer = null;
                 openPort();
@@ -673,8 +595,6 @@ import type { EvalCapture } from "../shared/evalCapture";
     const isoPending = new Map<string, { s: string; reply: (r: RpcResult) => void; timer: ReturnType<typeof setTimeout>; ep?: Endpoint }>();
     /** MV3: isolated-world → overlay calls the overlay hasn't answered yet, by cid */
     const isoRelayed = new Map<string, { s: string; timer: ReturnType<typeof setTimeout> }>();
-    /** unsafe page-world → overlay calls the overlay hasn't answered yet, by the cid the bridge gave them */
-    const pageRelayed = new Map<string, { s: string; reply: (r: RpcResult) => void; timer: ReturnType<typeof setTimeout> }>();
     /** overlay → main-world calls waiting for the hook (L4), by cid */
     const l4Pending = new Map<string, { s: string; reply: (r: RpcResult) => void; timer: ReturnType<typeof setTimeout> }>();
     let host: HTMLElement | null = null;
@@ -830,12 +750,6 @@ import type { EvalCapture } from "../shared/evalCapture";
         ep.on("rpc.call", (c) => proven && isRpcCall(c) && routeOverlayCall(s, c, (r) => ep.push("rpc.result", r)));
         ep.on("rpc.result", (r) => {
             if (!proven) return;
-            const pr = isRpcResult(r) ? pageRelayed.get(r.cid) : undefined;
-            if (pr && pr.s === s) {
-                pageRelayed.delete(r.cid);
-                clearTimeout(pr.timer);
-                return pr.reply(r);
-            }
             const rel = isRpcResult(r) ? isoRelayed.get(r.cid) : undefined;
             if (!rel || rel.s !== s) return void overlayClients.get(s)?.receive(r);
             isoRelayed.delete(r.cid);
@@ -871,12 +785,6 @@ import type { EvalCapture } from "../shared/evalCapture";
                 clearTimeout(r.timer);
                 isoRelayed.delete(cid);
             }
-        for (const [cid, r] of [...pageRelayed])
-            if (r.s === s) {
-                clearTimeout(r.timer);
-                pageRelayed.delete(cid);
-                r.reply({ cid, ok: false, error: { name: "DisconnectedError", message: `the overlay ${why}` } });
-            }
         overlayClients.get(s)?.disconnect(`the overlay ${why}`);
         l2?.push("overlay.closed", {}, s);
         l2Holders = overlays.size;
@@ -908,24 +816,6 @@ import type { EvalCapture } from "../shared/evalCapture";
         else o.queue.push(call);
     }
 
-    /**
-     * `unsafe: true` page-world code (the hook) calls script `s`'s overlay.
-     * The call gets a cid of the bridge's: the page picks its own.
-     */
-    function callOverlayFromPage(s: string, call: RpcCall, reply: (r: RpcResult) => void): void {
-        const fail = (message: string) => reply(callError(call.cid, message));
-        if (window !== top) return fail(TOP_FRAME_ONLY);
-        if (!unsafeOk(s)) return fail(REMOTE_MAIN_WORLD);
-        const o = overlays.get(s);
-        if (!o || o.closed) return fail(NOT_RUNNING);
-        if ((!o.ep && o.queue.length >= RPC_QUEUE_MAX) || pageRelayed.size >= RPC_QUEUE_MAX * 10) return fail(`${call.fn}(): too many calls waiting for the overlay`);
-        const cid = newCid();
-        pageRelayed.set(cid, { s, reply: (r) => reply({ ...r, cid: call.cid }), timer: setTimeout(() => pageRelayed.delete(cid), RPC_TIMEOUT_MS + 1000) });
-        const relayed: RpcCall = { cid, h: call.h, fn: call.fn, args: call.args };
-        if (o.ep) o.ep.push("rpc.call", relayed);
-        else o.queue.push(relayed);
-    }
-
     /** MV3: the overlay calls isolated code, in a user-script world (through the background) */
     function callIso(s: string, call: RpcCall, reply: (r: RpcResult) => void): void {
         if (isoOff) return reply(callError(call.cid, isoOff));
@@ -946,15 +836,23 @@ import type { EvalCapture } from "../shared/evalCapture";
         );
     }
 
-    /** an overlay's call into its script's onPage code: the isolated world (here, or a user-script world on MV3), the CSP fallback (here), else the main world (hook) */
+    /** an overlay's call into one of its script's handles, by the handle's key: onPage (here, or a user-script world on MV3), onSite (the CSP fallback here, else the hook) */
     function routeOverlayCall(s: string, call: RpcCall, reply: (r: RpcResult) => void): void {
-        if (__MV3__ && isoHandles.get(s)?.has(call.h)) return callIso(s, call, reply);
-        const iso = isoExposers.get(s);
+        if (call.h.startsWith("onPage:")) {
+            if (__MV3__) return isoScripts.has(s) ? callIso(s, call, reply) : reply(callError(call.cid, NOT_RUNNING));
+            const iso = isoExposers.get(s);
+            return iso ? iso.answer(call, reply) : reply(callError(call.cid, NOT_RUNNING));
+        }
+        if (call.h.startsWith("onSite:")) return callSite(s, call, reply);
+        reply(callError(call.cid, NOT_RUNNING));
+    }
+
+    /** a call into the script's onSite code: the CSP fallback here, else the hook (L4) */
+    function callSite(s: string, call: RpcCall, reply: (r: RpcResult) => void): void {
         const fb = fallbackExposers.get(s);
-        if (iso?.has(call.h) && !iso.isElsewhere(call.h)) return iso.answer(call, reply);
-        if (fb?.has(call.h) && !fb.isElsewhere(call.h)) return fb.answer(call, reply);
+        if (fb?.has(call.h)) return fb.answer(call, reply);
         if (pageScriptIds.has(s) && !hookBroken) return callHook(s, call, reply);
-        (iso ?? fb)?.answer(call, reply) ?? reply(callError(call.cid, NOT_RUNNING));
+        reply(callError(call.cid, NOT_RUNNING));
     }
 
     /** a call into the script's main-world onPage code (L4) */
@@ -964,19 +862,28 @@ import type { EvalCapture } from "../shared/evalCapture";
         window.postMessage({ source: MAIN_SOURCE, kind: "rpc.call", s, call }, window.location.origin);
     }
 
-    /** isolated onPage code → its script's js: "page" handlers (the CSP fallback here, else the hook); the answers are page data */
+    /** onPage code → its script's onSite handlers; the answers are page data */
     const pageClients = new Map<string, RpcClient>();
     function pageClient(s: string): RpcClient {
         let c = pageClients.get(s);
         if (!c) {
-            const client = new RpcClient((call) => {
-                const reply = (r: RpcResult) => void client.receive(r);
-                const fb = fallbackExposers.get(s);
-                if (fb?.has(call.h) && !fb.isElsewhere(call.h)) return fb.answer(call, reply);
-                if (pageScriptIds.has(s) && !hookBroken) return callHook(s, call, reply);
-                reply(callError(call.cid, NOT_RUNNING));
-            });
+            const client: RpcClient = new RpcClient((call) => callSite(s, call, (r) => client.receive(r)));
             pageClients.set(s, (c = client));
+        }
+        return c;
+    }
+
+    /** onPage code → its own onPage handlers (MV2: here) */
+    const localClients = new Map<string, RpcClient>();
+    function localClient(s: string): RpcClient {
+        let c = localClients.get(s);
+        if (!c) {
+            const client: RpcClient = new RpcClient((call) => {
+                const ex = isoExposers.get(s);
+                if (ex) ex.answer(call, (r) => client.receive(r));
+                else client.receive(callError(call.cid, NOT_RUNNING));
+            });
+            localClients.set(s, (c = client));
         }
         return c;
     }

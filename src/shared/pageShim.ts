@@ -1,32 +1,30 @@
 /**
- * The `wt` object a script sees when its onPage handlers compile in the
- * page (hook.ts, MAIN world: `js: "page"` handlers) or the isolated world
- * (bridge.ts: default-world handlers, and the page-world CSP fallback).
- * Network registrations and overlay handlers are inert here (they run in
- * the background / the overlay); onPage registrations for this shim's
- * `world` are collected with their routes (the other world's are skipped),
- * and params resolve to the raw values the background shipped in the
- * bundle (each def's `parse` runs here, in the page).
+ * The `wt` object a script sees when its page handlers compile in the
+ * site's JavaScript world (hook.ts: `wt.onSite` handlers; bridge.ts: the
+ * same when the page CSP forbids eval there) or the isolated world
+ * (bridge.ts in MV2, isolated.ts in MV3: `wt.onPage` handlers). Network
+ * registrations and overlay handlers are inert here (they run in the
+ * background / the overlay); this world's handlers are collected with
+ * their routes (the other world's are skipped), and params resolve to the
+ * raw values the background shipped in the bundle (each def's `parse`
+ * runs here, in the page).
  *
- * With an `exposer`, each onPage registration is a handle the overlay can
- * call (`"page:N"`, shared/rpc.ts): this world's handlers expose what they
- * return (`firePageHandler`), the other world's are marked elsewhere.
- *
- * `wt.onPage({ dom: "overlay" })` registers an overlay handler: with
- * `overlay`, it returns a live handle (isolated world, top frame). With
- * `js: "page"` too, it's the page-world layer (`layers`): the hook runs
- * it with its own `document`; everywhere else it's skipped and its handle
- * is inert.
+ * Each onSite / onPage / onOverlay registration is a handle named by its
+ * route's `key` (`"onPage:0"`, shared/rpc.ts). With an `exposer`, this
+ * world's handlers expose what they return (`firePageHandler`). In the
+ * isolated world a handle calls its handler wherever it runs (`call`); in
+ * the site's world no handle can be called (siteRemote), and the stores
+ * aren't there.
  */
-import { isPageLayer, normalizeRoute, pageCallKind, pageWorld, routeMatches, type DocumentWhen, type PageWorld, type RouteMeta } from "./route";
-import { inertRemote, REMOTE_MAIN_WORLD, REMOTE_PAGE_FROM_ISOLATED, REMOTE_PAGE_FROM_PAGE, REMOTE_PAGE_LAYER } from "./remote";
-import { NOT_RUNNING, TOP_FRAME_ONLY, type Exposer } from "./rpc";
+import { normalizeRoute, placeApi, placeKeyer, placeKind, routeMatches, type DocumentWhen, type PageWorld, type PlaceApi, type RouteMeta } from "./route";
+import { inertRemote, siteRemote, SITE_NO_STORES, type SiteCannotCallError } from "./remote";
+import type { Exposer } from "./rpc";
 import { parseParamValue, type ParamDef } from "./scriptDef";
 import { scriptEnv } from "./scriptEnv";
 import { claimStoreName, storePersist } from "./storeOps";
 
 export interface PageDocumentHandler {
-    /** its RPC handle id (`"page:N"`) */
+    /** its RPC handle id: the route's key (`"onPage:0"`) */
     h: string;
     route: RouteMeta;
     when: DocumentWhen;
@@ -38,29 +36,18 @@ export interface PageShimOptions {
     params: Record<string, any>;
     log: (...args: any[]) => void;
     storage: { get(key: string): any; set(key: string, value: any): any };
-    /** which onPage handlers this shim collects (default "page") */
+    /** which handlers this shim collects: "page" (wt.onSite, the default) or "isolated" (wt.onPage) */
     world?: PageWorld;
-    /** answers the overlay's calls into this script's onPage handles */
+    /** answers calls into this world's handles */
     exposer?: Exposer;
-    /** why the other world's handles don't answer here (default: not running) */
-    otherWorld?: string;
     /**
-     * `"overlay:N"` → its handle: the isolated world, and `unsafe: true`
-     * page-world code (absent in page world: calls are rejected)
+     * isolated world: a handle → what calls it (`api`: where its handler
+     * runs); absent: handles are inert (a library's)
      */
-    overlay?: (h: string) => any;
-    /**
-     * isolated world: `"page:N"` (a `js: "page"` handler) → its handle; its
-     * answers are page data (absent: calls are rejected)
-     */
-    page?: (h: string) => any;
-    /** page world without `overlay`: a call into the overlay (rejected; its error has the caller's stack) */
-    onMainWorldCall?: (e: Error) => void;
-    /**
-     * the script's store replicas (`wt.pageStore`: this page's copy): the
-     * isolated world, and `unsafe: true` page-world code (the page can read
-     * and forge them); absent: using a store throws NO_STORE
-     */
+    call?: (api: PlaceApi, key: string) => any;
+    /** site's world: a handle's function was called (it throws SiteCannotCallError; its stack is the caller's) */
+    onSiteCall?: (e: SiteCannotCallError) => void;
+    /** the script's store replicas (`wt.pageStore`: this page's copy): the isolated world only */
     stores?: PageStores;
 }
 
@@ -69,51 +56,38 @@ export interface PageStores {
     pageStore(name: string, initial: object): object;
 }
 
-export const NO_STORE = 'wt.globalStore and wt.pageStore aren\'t available in page-world code (the page could read and forge them) — use them in isolated onPage code (the default: drop js: "page"; read the page with ctx.evaluate) or the overlay — or, accepting that the page can then read and forge this script\'s stores, add unsafe: true to its js: "page" routes';
 const fail = (): never => {
-    throw new Error(NO_STORE);
+    throw new Error(SITE_NO_STORES);
 };
 const noStore = new Proxy(Object.create(null), { get: (_t, p) => (p === "then" || typeof p === "symbol" ? undefined : fail()), set: fail, has: fail, ownKeys: fail, deleteProperty: fail });
 const NO_FETCH = "wt.fetch isn't available in page code — use the page's own fetch";
+/** a library's handles: its handlers don't run */
+const LIB_HANDLE = "handles from an imported library don't connect; register the handler in the script itself";
 
-export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDocumentHandler[]; layers: PageDocumentHandler[] } {
+export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDocumentHandler[] } {
     const dom: PageDocumentHandler[] = [];
-    const layers: PageDocumentHandler[] = [];
     const world = o.world || "page";
+    const mine: PlaceApi = world === "page" ? "onSite" : "onPage";
     const inert = () => {};
+    const keyOf = placeKeyer();
     // registrations always count, so indexes match the background's
     let pageIndex = 0;
     let overlayIndex = 0;
-    let pageCalls = 0;
-    const onPage = (route: unknown, fn: unknown) => {
-        if (typeof fn !== "function") throw new Error("wt.onPage: second argument must be the handler function");
-        if (pageCallKind(route) === "onOverlay") {
-            const r = normalizeRoute("onOverlay", route, overlayIndex++, "onPage");
-            if (pageCalls !== r.index) r.n = pageCalls;
-            pageCalls++;
-            const h = `overlay:${r.index}`;
-            if (!isPageLayer(r)) return overlayHandle(h);
-            layers.push({ h, route: r, when: r.when || "document_end", fn: fn as any });
-            return inertRemote(REMOTE_PAGE_LAYER);
+    const register = (api: PlaceApi) => (route: unknown, fn: unknown, n?: number) => {
+        if (typeof fn !== "function") throw new Error(`wt.${api}: second argument must be the handler function`);
+        const kind = placeKind(api);
+        const r = normalizeRoute(kind, route, kind === "onOverlay" ? overlayIndex++ : pageIndex++, api);
+        const k = keyOf(api, n);
+        r.key = k.key;
+        if (api !== "onOverlay" && k.n !== r.index) r.n = k.n;
+        if (api === mine) {
+            o.exposer?.register(k.key);
+            dom.push({ h: k.key, route: r, when: r.when || "document_end", fn: fn as any });
         }
-        const r = normalizeRoute("onDocument", route, pageIndex++, "onPage");
-        if (pageCalls !== r.index) r.n = pageCalls;
-        pageCalls++;
-        const h = `page:${r.index}`;
-        if (pageWorld(r) === world) {
-            o.exposer?.register(h);
-            dom.push({ h, route: r, when: r.when || "document_end", fn: fn as any });
-        } else {
-            o.exposer?.elsewhere(h, o.otherWorld ?? NOT_RUNNING);
-            if (world === "isolated" && o.page) return o.page(h);
-        }
-        return inertRemote(world === "isolated" ? REMOTE_PAGE_FROM_ISOLATED : REMOTE_PAGE_FROM_PAGE);
+        if (world === "page") return siteRemote(o.onSiteCall);
+        return o.call ? o.call(api, k.key) : inertHandle();
     };
-    const overlayHandle = (h: string) => {
-        if (o.overlay) return o.overlay(h);
-        return world === "page" ? inertRemote(REMOTE_MAIN_WORLD, o.onMainWorldCall) : inertRemote(TOP_FRAME_ONLY);
-    };
-    const stores = o.stores;
+    const stores = world === "isolated" ? o.stores : undefined;
     const names = new Map<string, string>();
     const parsed = (key: string, def: ParamDef | undefined) => (def && typeof def === "object" ? parseParamValue(key, def, o.params[key]) : o.params[key]);
     const wt = {
@@ -121,7 +95,9 @@ export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDocumentHa
         onResponseHeaders: inert,
         replaceResponse: inert,
         onResponseBody: inert,
-        onPage,
+        onSite: placeApi(register("onSite")),
+        onPage: placeApi(register("onPage")),
+        onOverlay: placeApi(register("onOverlay")),
         // without stores, declaring one at top level is fine (that code runs here too); using it isn't
         globalStore: (name: string, initial: object, opts?: unknown) => {
             if (!stores) return noStore;
@@ -143,7 +119,11 @@ export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDocumentHa
         storage: o.storage,
         ...scriptEnv(),
     };
-    return { wt, dom, layers };
+    return { wt, dom };
+}
+
+function inertHandle(): any {
+    return inertRemote(LIB_HANDLE);
 }
 
 /** the handlers whose route matches this frame's URL (the others' handles answer `not running`) */

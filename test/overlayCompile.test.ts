@@ -3,132 +3,96 @@
 // what page code gets for built-in imports.
 import { describe, it, expect } from "vitest";
 import "../src/shared/transpile";
-import { compileScript, mainWorldProblems, onPageUses, registrationProblems, toRunnableJs } from "../src/shared/compile";
+import { compileScript, keyPlaceCalls, onSiteUses, removedApiProblems, siteProblems, toRunnableJs } from "../src/shared/compile";
+import { SITE_DISALLOWED, SITE_NO_HANDLES, SITE_NO_STORES } from "../src/shared/remote";
 import { jsxImportSource, usesJsx } from "../src/shared/builtinSpecs";
 import { importSpecs, makeLibRequire } from "../src/shared/scriptImports";
 import { tsconfigText } from "../src/shared/generatedFiles";
 
-describe("registration check (wt.onPage at the top level)", () => {
-    it("accepts top-level registrations, including assigned and exported ones", () => {
+describe("keyPlaceCalls (handle names by source order)", () => {
+    // it runs on the transpiled JavaScript: no type arguments left
+    it("numbers each API's calls in source order, wherever they are", () => {
         const code = [
             `const page = wt.onPage("*", () => ({ a: () => 1 }));`,
-            `export const overlay = wt.onPage({ url: "*", dom: "overlay", when: "document_idle" }, (ctx) => {`,
-            `    if (ctx.url) { return { f: () => 2 }; }`,
-            `});`,
-            `wt.onPage<{ x(): void }>(`,
+            `export const overlay = wt.onOverlay({ url: "*", when: "document_idle" }, (ctx) => ({ f: () => 2 }));`,
+            `function later() { wt.onPage("*", () => {}); }`,
+            `wt.onSite(`,
             `    "*",`,
             `    () => ({ x() {} })`,
             `)`,
             `const s = "wt.onPage(inside a string)"; // wt.onPage( in a comment`,
             `/* if (x) wt.onPage("*", f) */`,
+            `if (ok) wt.onSite("*", f);`,
         ].join("\n");
-        expect(registrationProblems(code)).toEqual([]);
+        const out = keyPlaceCalls(code);
+        expect(out.split("\n")).toHaveLength(code.split("\n").length);
+        expect([...out.matchAll(/wt\.(on\w+)\.k\((\d+)\)\(/g)].map((m) => `${m[1]}:${m[2]}`)).toEqual(["onPage:0", "onOverlay:0", "onPage:1", "onSite:0", "onSite:1"]);
+        expect(out).toContain(`"wt.onPage(inside a string)"`);
+        expect(out).toContain(`// wt.onPage( in a comment`);
+        expect(keyPlaceCalls(`wt.onRequest({ url: "*", strategy: "page" }, f);`)).toBe(`wt.onRequest({ url: "*", strategy: "page" }, f);`);
     });
 
-    it("reports a call inside a function, block, condition, loop or callback, with its line and which call it is", () => {
-        const code = [
-            `wt.onPage("*", () => {});`, // onPage #1
-            `function later() {`,
-            `    wt.onPage("*", () => {});`, // onPage #2
-            `}`,
-            `if (location.host) wt.onPage({ url: "*", dom: "overlay" }, () => {});`, // onPage #3
-            `for (const u of ["a"]) {`,
-            `    wt.onPage(u, () => {});`, // onPage #4
-            `}`,
-            `setTimeout(() => wt.onPage({ url: "*", dom: "overlay" }, () => {}));`, // onPage #5
-            `const h = cond ? wt.onPage("*", f) : null;`, // onPage #6
-            `ok && wt.onPage("*", f);`, // onPage #7
-        ].join("\n");
-        expect(registrationProblems(code)).toEqual([
-            { api: "onPage", line: 3, nth: 1 },
-            { api: "onPage", line: 5, nth: 2 },
-            { api: "onPage", line: 7, nth: 3 },
-            { api: "onPage", line: 9, nth: 4 },
-            { api: "onPage", line: 10, nth: 5 },
-            { api: "onPage", line: 11, nth: 6 },
-        ]);
+    it("scans template literal code, and isn't fooled by JSX or regex literals", () => {
+        expect(keyPlaceCalls("const t = `${wt.onPage(\"*\", f)}`;")).toBe("const t = `${wt.onPage.k(0)(\"*\", f)}`;");
+        const jsx = `wt.onOverlay("*", () => {\n    f(() => <A port={cfg.port} />);\n});\nwt.onOverlay("*", f);`;
+        expect(keyPlaceCalls(jsx)).toContain(`wt.onOverlay.k(1)("*", f)`);
+        expect(keyPlaceCalls(`const r = /{/;\nconst d = a / b;\nwt.onPage("*", f);`)).toContain(`wt.onPage.k(0)("*", f)`);
     });
 
-    it("scans template literal code", () => {
-        expect(registrationProblems("const t = `${wt.onPage(\"*\", f)}`;")).toEqual([{ api: "onPage", line: 1, nth: 0 }]);
-    });
-
-    it("isn't fooled by JSX's `/>` after an attribute's `}`", () => {
-        const code = `wt.onPage("*", () => {\n    f(() => <A port={cfg.port} />);\n});\nwt.onPage("*", f);`;
-        expect(registrationProblems(code)).toEqual([]);
-        expect(registrationProblems(`${code}\nif (x) wt.onPage("*", f);`)).toEqual([{ api: "onPage", line: 5, nth: 2 }]);
-    });
-
-    it("isn't fooled by regex literals or division", () => {
-        expect(registrationProblems(`const r = /{/;\nconst d = a / b;\nwt.onPage("*", f);`)).toEqual([]);
+    it("compiled handlers get their keys, the same in the background and the page", () => {
+        const c = compileScript(`function reg() { return wt.onPage("*", () => {}); }\nwt.onSite("*", () => {});\nreg();\nwt.onPage("*", () => {});\nreg();`);
+        expect(c.error).toBeNull();
+        expect(c.meta.routes.map((r) => r.key)).toEqual(["onSite:0", "onPage:0", "onPage:1", "onPage:0#1"]);
     });
 });
 
-describe("page-world onPage handlers using stores or overlay handles (route warnings)", () => {
+describe("onSite handlers using stores or handles (route warnings)", () => {
     const code = [
         `const g = wt.globalStore("g", { n: 0 });`,
         `const ps: { hits: number } = wt.pageStore("ps", { hits: 0 });`,
-        `const ov = wt.onPage({ url: "*", dom: "overlay" }, () => ({ ping: () => 1 }));`, // #1 the overlay
-        `wt.onPage({ url: "*", js: "page" }, () => { document.title = String(ps.hits); });`, // #2 page: pageStore
-        `wt.onPage("*", () => { g.n++; ps.hits++; ov.ping(); });`, // #3 isolated (the default): fine
-        `wt.onPage({ url: "*", js: "page" }, async () => { await ov.ping(); g.n = wt.pageStore("x", {}).y; });`, // #4 page: all three
-        `wt.onPage({ url: "*", js: "page" }, () => { const o = { g: 1, ps: 2 }; console.log("g ps ov", o.g, /ov/); /* ps */ });`, // #5 keys, strings, comments: nothing
-        "wt.onPage({ url: \"*\", js: \"page\" }, () => { document.title = `${g.n}`; });", // #6 template code counts
+        `const ov = wt.onOverlay("*", () => ({ ping: () => 1 }));`,
+        `wt.onSite("*", () => { document.title = String(ps.hits); });`, // #1: pageStore
+        `wt.onPage("*", () => { g.n++; ps.hits++; ov.ping(); });`, // onPage: fine
+        `wt.onSite("*", async () => { await ov.ping(); g.n = wt.pageStore("x", {}).y; });`, // #2: all three
+        `wt.onSite("*", () => { const o = { g: 1, ps: 2 }; console.log("g ps ov", o.g, /ov/); /* ps */ });`, // #3 keys, strings, comments: nothing
+        "wt.onSite(\"*\", () => { document.title = `${g.n}`; });", // #4 template code counts
     ].join("\n");
 
-    it("finds, per onPage call, the stores and overlay handles its handler uses", () => {
-        expect(onPageUses(code)).toEqual([
-            { nth: 1, pageStore: ["ps"], globalStore: [], overlay: [] },
-            { nth: 2, pageStore: ["ps"], globalStore: ["g"], overlay: ["ov"] },
-            { nth: 3, pageStore: ["wt.pageStore"], globalStore: ["g"], overlay: ["ov"] },
-            { nth: 5, pageStore: [], globalStore: ["g"], overlay: [] },
+    it("finds, per onSite call, the stores and handles its handler uses", () => {
+        expect(onSiteUses(code)).toEqual([
+            { nth: 0, pageStore: ["ps"], globalStore: [], handles: [] },
+            { nth: 1, pageStore: ["wt.pageStore"], globalStore: ["g"], handles: ["ov"] },
+            { nth: 3, pageStore: [], globalStore: ["g"], handles: [] },
         ]);
     });
 
-    it("warns for page-world handlers only, in the API's words, with the isolated-world fix", () => {
+    it("warns for onSite handlers only, with the move-to-onPage fix", () => {
         const c = compileScript(code);
         expect(c.error).toBeNull();
-        const w = mainWorldProblems(code, c.meta.routes);
-        expect(w.map((m) => m.slice(0, m.indexOf(":")))).toEqual(["onPage #2", "onPage #4", "onPage #4", "onPage #4", "onPage #6"]);
-        expect(w[0]).toContain("your script also accesses pageStore (`ps`) inside onPage, which the API explicitly disallows in the page world");
-        expect(w[0]).toContain("Changing the request strategy alone won't resolve those accesses. Switching to globalStore would lose per-page isolation and still wouldn't make a one-time rules callback track requests");
-        expect(w[2]).toContain("your script also accesses globalStore (`g`) inside onPage, which the API explicitly disallows in the page world");
-        expect(w[3]).toContain("accessing the overlay (`ov`) inside onPage, which the API explicitly disallows in the page world");
-        for (const m of w) expect(m).toContain('drop js: "page"');
+        const w = siteProblems(code, c.meta.routes);
+        expect(w.map((m) => m.slice(0, m.indexOf(":")))).toEqual(["onSite #1", "onSite #2", "onSite #2", "onSite #4"]);
+        expect(w[0]).toBe(`onSite #1: uses \`ps\` — ${SITE_NO_STORES}`);
+        expect(w[1]).toBe(`onSite #2: uses \`wt.pageStore\`, \`g\` — ${SITE_NO_STORES}`);
+        expect(w[2]).toBe(`onSite #2: uses \`ov\` — ${SITE_NO_HANDLES}`);
+        for (const m of w) expect(m).toContain(SITE_DISALLOWED);
     });
 
-    it("covers the page-world overlay, numbered among wt.onPage calls, and dom: \"overlay\" handles", () => {
-        const src = [
-            `const ps = wt.pageStore("ps", { n: 0 });`,
-            `const ov = wt.onPage({ url: "*", dom: "overlay" }, () => ({ pick: () => 1 }));`,
-            `wt.onPage({ url: "*", js: "page" }, () => { void ov.pick(); });`,
-            `wt.onPage({ url: "*", js: "page", dom: "overlay", unsafe: true }, () => { ps.n++; });`,
-            `wt.onPage({ url: "*", dom: "overlay" }, () => { ps.n++; });`,
-        ].join("\n");
-        const c = compileScript(src);
-        expect(c.error).toBeNull();
-        const w = mainWorldProblems(src, c.meta.routes);
-        // the page-world overlay is unsafe: true, which lets it use stores
-        expect(w.map((m) => m.slice(0, m.indexOf(":")))).toEqual(["onPage #2"]);
-        expect(w[0]).toContain("accessing the overlay (`ov`)");
-        expect(w[0]).toContain("or add unsafe: true");
+    it("says nothing for scripts without stores or handles in onSite code", () => {
+        const src = `const ps = wt.pageStore("ps", {});\nwt.onPage("*", () => ps);\nwt.onSite("*", () => {});`;
+        expect(siteProblems(src, compileScript(src).meta.routes)).toEqual([]);
     });
+});
 
-    it("says nothing for unsafe: true page-world handlers", () => {
-        const src = [`const ps = wt.pageStore("ps", { n: 0 });`, `const ov = wt.onPage({ url: "*", dom: "overlay" }, () => ({ pick: () => 1 }));`, `wt.onPage({ url: "*", js: "page", unsafe: true }, () => { ps.n++; void ov.pick(); });`].join("\n");
-        const c = compileScript(src);
-        expect(c.error).toBeNull();
-        expect(mainWorldProblems(src, c.meta.routes)).toEqual([]);
-    });
-
-    it("says nothing for scripts without stores or overlays", () => {
-        expect(mainWorldProblems(`wt.onPage("*", () => {});`, compileScript(`wt.onPage("*", () => {});`).handlers.onDocument.map((h) => h.route))).toEqual([]);
+describe("removedApiProblems", () => {
+    it("reports ctx.evaluate, not other evaluates", () => {
+        expect(removedApiProblems(`wt.onPage("*", (ctx) => ctx.evaluate(() => 1));`)).toEqual([expect.stringMatching(/^ctx\.evaluate is gone: .*wt\.onSite/)]);
+        expect(removedApiProblems(`wt.onPage("*", () => document.evaluate("//a", document));`)).toEqual([]);
     });
 });
 
 describe(".tsx scripts", () => {
     it("compile with the built-in React's automatic runtime", () => {
-        const code = `import { useState } from "react";\nwt.onPage({ url: "*", dom: "overlay" }, () => {});\nexport const App = ({ n }: { n: number }) => <div className="x">{n}<></></div>;`;
+        const code = `import { useState } from "react";\nwt.onOverlay("*", () => {});\nexport const App = ({ n }: { n: number }) => <div className="x">{n}<></></div>;`;
         expect(usesJsx(code)).toBe(true);
         expect(importSpecs(code).has("react/jsx-runtime")).toBe(true);
         const js = toRunnableJs(code);
@@ -161,13 +125,13 @@ describe(".tsx scripts", () => {
     });
 });
 
-describe("built-in imports in page-world code", () => {
+describe("built-in imports in onSite code", () => {
     it("load (the module graph still evaluates) but throw when used", () => {
         const req = makeLibRequire([], () => {})("main");
         const React = req("react");
         expect(React.__esModule).toBe(true);
-        expect(() => React.useState).toThrow(/aren't available in page-world code/);
-        expect(() => req("valtio").proxy({})).toThrow(/aren't available in page-world code/);
+        expect(() => React.useState).toThrow(/aren't available in onSite code/);
+        expect(() => req("valtio").proxy({})).toThrow(/aren't available in onSite code/);
     });
 
     it("a page shim compiles an overlay script that imports React", () => {

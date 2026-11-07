@@ -1,5 +1,5 @@
 /**
- * Chrome MV3: the runtime for one script's `js: "isolated"` onPage code,
+ * Chrome MV3: the runtime for one script's `wt.onPage` code,
  * in a `chrome.userScripts` USER_SCRIPT world (background/userScripts.ts
  * registers it after a one-line prelude naming the script). The world
  * shares the page's DOM, not its JavaScript, and the page can't reach it.
@@ -10,7 +10,9 @@
  * (`runPageScripts`) and runs the handlers at their `when`. Over L6 go the
  * script's Log lines and `wt.storage`, and — in the top frame — the calls
  * between this code and the script's overlay, which the owner relays
- * through the page's bridge (L2) to the overlay frame (L3). Its stores
+ * through the page's bridge (L2) to the overlay frame (L3). Calls into its
+ * onSite handles go to the hook over window messages; into its own onPage
+ * handles, straight to this world's handlers. Its stores
  * (`wt.globalStore`, this page's `wt.pageStore` copies) are replicas
  * primed by `iso.load` and synced over L6. A save arrives as
  * `iso.update`: load again, re-run if the code changed.
@@ -22,10 +24,10 @@ import { makeLibRequire } from "../shared/scriptImports";
 import { builtinModule, builtinsReady, ensureBuiltins, setBuiltinLoader, shippedSources, sourceLoader } from "../shared/builtins";
 import { makePageShim, domHandlersFor, scheduleDocument, firePageHandler, type PageDocumentHandler } from "../shared/pageShim";
 import { portEndpoint, type Endpoint, type IsoInit } from "../shared/wire";
-import { Exposer, RpcClient, isRpcCall, type RpcResult } from "../shared/rpc";
-import { routeMatches, type RouteMeta } from "../shared/route";
+import { Exposer, RpcClient, isRpcCall, TOP_FRAME_ONLY, type RpcResult } from "../shared/rpc";
+import { inertRemote } from "../shared/remote";
+import { routeMatches, type PlaceApi, type RouteMeta } from "../shared/route";
 import { ReplicaHub } from "../shared/storeReplica";
-import { evalModule, makePageEvaluate, type EvalModule } from "../shared/pageEval";
 
 (() => {
     const me = ((globalThis as any).__wtIsoQ as { s: string; routes: RouteMeta[] }[] | undefined)?.shift();
@@ -34,10 +36,6 @@ import { evalModule, makePageEvaluate, type EvalModule } from "../shared/pageEva
     const top = window === window.top;
     /** the script's name (from iso.load), for errors raised before or outside a run */
     let scriptName = s;
-    /** ctx.evaluate: the hook runs it in the page's world */
-    /** the running code's module: what its ctx.evaluate functions take along to the page */
-    let evalMod: EvalModule | undefined;
-    const evaluate = makePageEvaluate(window, undefined, (e) => log("error", formatScriptError(scriptName, e, "ctx.evaluate")), () => evalMod);
 
     let current: Endpoint | null = null;
     let link: Promise<Endpoint> | null = null;
@@ -62,10 +60,14 @@ import { evalModule, makePageEvaluate, type EvalModule } from "../shared/pageEva
         );
     });
 
-    // calls into the script's js: "page" handlers: straight to the hook (main
+    // calls into the script's onSite handlers: straight to the hook (main
     // world) over window messages. The page sees and can forge both ways, so
-    // the answers are page data — like ctx.evaluate's.
+    // the answers are page data.
     const pageClient = new RpcClient((call) => window.postMessage({ source: "res-override-bridge", kind: "rpc.call", s, call }, location.origin));
+    // calls into its own onPage handlers: answered here (JSON copies, like any handle's)
+    const local: RpcClient = new RpcClient((call) => exposer.answer(call, (r) => local.receive(r)));
+    const handle = (api: PlaceApi, key: string) =>
+        api === "onSite" ? pageClient.remote(key) : api === "onPage" ? local.remote(key) : top ? client.remote(key) : inertRemote(TOP_FRAME_ONLY);
     window.addEventListener("message", (e: MessageEvent) => {
         const d = e.data;
         if (e.source === window && d && d.source === "res-override-hook" && d.kind === "rpc.result" && d.s === s) pageClient.receive(d.result);
@@ -168,6 +170,7 @@ import { evalModule, makePageEvaluate, type EvalModule } from "../shared/pageEva
         if (codeHash !== null) {
             exposer.reset();
             client.disconnect("the script reloaded");
+            local.disconnect("the script reloaded");
         }
         codeHash = init.codeHash;
         scriptName = init.name;
@@ -175,7 +178,7 @@ import { evalModule, makePageEvaluate, type EvalModule } from "../shared/pageEva
         if (builtinsReady(codes, packages)) return exec(init, hot);
         ensureBuiltins(codes, packages).then(
             () => codeHash === init.codeHash && exec(init, hot),
-            (e: any) => log("error", formatScriptError(init.name, new Error(`the built-in React didn't load: ${e?.message || e}`), "onPage (isolated world)"))
+            (e: any) => log("error", formatScriptError(init.name, new Error(`the built-in React didn't load: ${e?.message || e}`), "onPage"))
         );
     }
 
@@ -186,8 +189,7 @@ import { evalModule, makePageEvaluate, type EvalModule } from "../shared/pageEva
                 world: "isolated",
                 stores: { store: (n, initial, persist) => stores().store(s, n, initial, persist), pageStore: (n, initial) => stores().pageStore(s, n, initial, page) },
                 exposer: mine ? exposer : undefined,
-                overlay: mine && top ? (h) => client.remote(h) : undefined,
-                page: mine ? (h) => pageClient.remote(h) : undefined,
+                call: mine ? handle : undefined,
                 log: (...args: any[]) => log("info", scriptLogLine(name, "wt.log", formatLogArgs(args))),
                 storage: {
                     get: (key: string) => linkUp().then((ep) => ep.call("storage.get", { key }, s)).then((r) => r.value, () => undefined),
@@ -195,7 +197,6 @@ import { evalModule, makePageEvaluate, type EvalModule } from "../shared/pageEva
                 },
             });
         const consoleProxy = makeScriptConsole((level, source, text) => log(level, scriptLogLine(init.name, source, text)));
-        evalMod = evalModule(s, init.name, init.params, init.evals, init.libs);
         let dom: PageDocumentHandler[];
         try {
             const codeOf = (importer: string) => (importer === init.name ? init.src : (init.libs.find((l) => l.name === importer)?.src ?? ""));
@@ -211,7 +212,7 @@ import { evalModule, makePageEvaluate, type EvalModule } from "../shared/pageEva
         } catch (e: any) {
             exposer.reset();
             exposer.done();
-            log("error", formatScriptError(init.name, e, "onPage (isolated world) compile"));
+            log("error", formatScriptError(init.name, e, "onPage compile"));
             return;
         }
         const matching = domHandlersFor(dom, location.href, exposer);
@@ -221,7 +222,7 @@ import { evalModule, makePageEvaluate, type EvalModule } from "../shared/pageEva
                 d.when,
                 () => {
                     try {
-                        firePageHandler(d, { url: location.href, method: "GET", tabUrl: location.href, resourceType: "main_frame", requestHeaders: {}, groups: {}, evaluate }, exposer, (e) =>
+                        firePageHandler(d, { url: location.href, method: "GET", tabUrl: location.href, resourceType: "main_frame", requestHeaders: {}, groups: {} }, exposer, (e) =>
                             log("error", formatScriptError(init.name, e, "onPage"))
                         );
                         noteRan("onPage", init.name);

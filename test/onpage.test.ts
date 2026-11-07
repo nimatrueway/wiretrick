@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { compileScript } from "../src/shared/compile";
 import { makePageShim, domHandlersFor } from "../src/shared/pageShim";
-import { isNetKind, isPageLayer, normalizeRoute, pageWorld, routeLabel } from "../src/shared/route";
-import { inertRemote } from "../src/shared/remote";
+import { isNetKind, normalizeRoute, pageWorld, routeLabel } from "../src/shared/route";
+import { inertRemote, SITE_NO_STORES, SiteCannotCallError } from "../src/shared/remote";
 
 const shim = (world?: "page" | "isolated") => makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined }, world });
 
@@ -17,13 +17,15 @@ describe("wt.onPage", () => {
         expect([routeLabel(a), routeLabel(b)]).toEqual(["onPage #1", "onPage #2"]);
     });
 
-    it("runs isolated by default; js \"page\" runs in the page", () => {
-        const c = compileScript(`wt.onPage({ url: "*", js: "isolated" }, () => {});\nwt.onPage({ url: "*", js: "page" }, () => {});\nwt.onPage("*", () => {});`);
+    it("wt.onSite runs in the site's world, wt.onPage in the isolated world", () => {
+        const c = compileScript(`wt.onPage("*", () => {});\nwt.onSite("*", () => {});\nwt.onPage({ url: "*", when: "document_idle" }, () => {});`);
         expect(c.error).toBeNull();
-        const [iso, page, plain] = c.handlers.onDocument.map((h) => h.route);
-        expect(iso.world).toBe("isolated");
-        expect("world" in page).toBe(false);
-        expect([iso, page, plain].map(pageWorld)).toEqual(["isolated", "page", "isolated"]);
+        const [iso, site, idle] = c.handlers.onDocument.map((h) => h.route);
+        expect([iso, site, idle].map(pageWorld)).toEqual(["isolated", "page", "isolated"]);
+        expect([iso, site, idle].map((r) => r.api)).toEqual(["onPage", "onSite", "onPage"]);
+        expect([iso, site, idle].map((r) => r.key)).toEqual(["onPage:0", "onSite:0", "onPage:1"]);
+        expect([iso, site, idle].map(routeLabel)).toEqual(["onPage #1", "onSite #1", "onPage #2"]);
+        expect(idle.when).toBe("document_idle");
     });
 
     it("returns a handle whose calls reject in the background", async () => {
@@ -35,109 +37,86 @@ describe("wt.onPage", () => {
     });
 });
 
-describe("wt.onPage js / dom / unsafe", () => {
-    const code = [
-        `wt.onPage({ url: "*", js: "page" }, () => {});`,
-        `wt.onPage({ url: "*", dom: "overlay" }, () => {});`,
-        `wt.onPage({ url: "*", dom: "overlay", when: "document_idle" }, () => {});`,
-        `wt.onPage({ url: "*", js: "page", dom: "overlay", unsafe: true }, () => {});`,
-        `wt.onPage({ url: "*", js: "isolated", dom: "page" }, () => {});`,
-    ].join("\n");
+describe("wt.onOverlay", () => {
+    const code = [`wt.onSite("*", () => {});`, `wt.onOverlay("*", () => {});`, `wt.onOverlay({ url: "*", when: "document_idle" }, () => {});`, `wt.onPage("*", () => {});`].join("\n");
 
-    it("js picks the world, dom: \"overlay\" registers an overlay handler", () => {
+    it("registers overlay handlers, keyed and labelled apart from page handlers", () => {
         const c = compileScript(code);
         expect(c.error).toBeNull();
-        const [page, iso] = c.handlers.onDocument.map((h) => h.route);
-        expect(pageWorld(page)).toBe("page");
-        expect(pageWorld(iso)).toBe("isolated");
-        const [frame, idle, layer] = c.handlers.onOverlay.map((h) => h.route);
-        expect([frame.index, idle.index, layer.index]).toEqual([0, 1, 2]);
-        expect([frame.api, idle.api, layer.api]).toEqual(["onPage", "onPage", "onPage"]);
+        const [frame, idle] = c.handlers.onOverlay.map((h) => h.route);
+        expect([frame.index, idle.index]).toEqual([0, 1]);
+        expect([frame.key, idle.key]).toEqual(["onOverlay:0", "onOverlay:1"]);
         expect([frame.when, idle.when]).toEqual(["document_end", "document_idle"]);
-        expect([frame, idle, layer].map(isPageLayer)).toEqual([false, false, true]);
         expect(isNetKind(frame.kind)).toBe(false);
         expect(isNetKind("onDocument")).toBe(false);
         expect(isNetKind("onRequest")).toBe(true);
+        expect(c.meta.routes.map((r) => `${routeLabel(r)}@${r.line}`)).toEqual(["onSite #1@1", "onPage #1@4", "onOverlay #1@2", "onOverlay #2@3"]);
     });
+});
 
-    it("labels number wt.onPage calls in source order, of either kind", () => {
-        const c = compileScript(code);
-        const labels = c.meta.routes.map((r) => `${routeLabel(r)}@${r.line}`);
-        expect(labels).toEqual(["onPage #1@1", "onPage #5@5", "onPage #2@2", "onPage #3@3", "onPage #4@4"]);
-    });
-
-    it("js: \"page\" with dom: \"overlay\" needs unsafe: true; unsafe applies only to js: \"page\"", () => {
-        expect(compileScript(`wt.onPage({ url: "*", js: "page", dom: "overlay" }, () => {});`).error).toMatch(/wt\.onPage: js: "page" with dom: "overlay" .*unsafe: true/);
-        const iso = /"unsafe" applies only to js: "page" \(it opens the script's stores and overlay to page-world code\)/;
-        expect(compileScript(`wt.onPage({ url: "*", dom: "overlay", unsafe: true }, () => {});`).error).toMatch(iso);
-        expect(compileScript(`wt.onPage({ url: "*", unsafe: true }, () => {});`).error).toMatch(iso);
-        expect(compileScript(`wt.onPage({ url: "*", js: "isolated", unsafe: true }, () => {});`).error).toMatch(iso);
-    });
-
-    it("unsafe: true marks js: \"page\" routes of either dom, and nothing else", () => {
-        const c = compileScript(
-            [
-                `wt.onPage({ url: "*", js: "page", unsafe: true }, () => {});`,
-                `wt.onPage({ url: "*", js: "page", dom: "overlay", unsafe: true }, () => {});`,
-                `wt.onPage({ url: "*", js: "page", unsafe: false }, () => {});`,
-                `wt.onPage({ url: "*", js: "page" }, () => {});`,
-            ].join("\n")
-        );
-        expect(c.error).toBeNull();
-        expect(c.meta.routes.map((r) => [r.kind, pageWorld(r), r.unsafe])).toEqual([
-            ["onDocument", "page", true],
-            ["onDocument", "page", undefined],
-            ["onDocument", "page", undefined],
-            ["onOverlay", "page", true],
-        ]);
-    });
-
-    it("rejects bad values, and the options on network routes", () => {
-        expect(() => normalizeRoute("onDocument", { url: "*", js: "main" }, 0, "onPage")).toThrow(/js must be "isolated" or "page"/);
-        expect(() => normalizeRoute("onDocument", { url: "*", dom: "layer" }, 0, "onPage")).toThrow(/dom must be "page" or "overlay"/);
-        expect(() => normalizeRoute("onOverlay", { url: "*", unsafe: "yes" }, 0, "onPage")).toThrow(/unsafe must be true or false/);
-        expect(() => normalizeRoute("onRequest", { url: "*", strategy: "page", js: "page" }, 0)).toThrow(/"js" applies to onPage only/);
-        expect(() => normalizeRoute("onRequest", { url: "*", strategy: "page", dom: "overlay" }, 0)).toThrow(/"dom" applies to onPage only/);
-    });
-
-    it("the page shim counts overlay calls like the background, and collects the page-world overlay apart", () => {
-        const s = shim();
-        s.wt.onPage({ url: "*", js: "page" }, () => "page");
-        s.wt.onPage({ url: "*", dom: "overlay" }, () => "frame");
-        s.wt.onPage({ url: "*", dom: "overlay" }, () => "frame 2");
-        s.wt.onPage({ url: "*", js: "page", dom: "overlay", unsafe: true }, () => "layer");
-        expect(s.dom.map((d) => d.fn({}))).toEqual(["page"]);
-        expect(s.layers.map((d) => [d.h, d.fn({}), routeLabel(d.route)])).toEqual([["overlay:2", "layer", "onPage #4"]]);
-        const iso = shim("isolated");
-        iso.wt.onPage({ url: "*", js: "page", dom: "overlay", unsafe: true }, () => {});
-        expect(iso.dom).toEqual([]);
+describe("removed route options", () => {
+    it("js, dom and unsafe throw with what replaces them", () => {
+        expect(compileScript(`wt.onPage({ url: "*", js: "page" }, () => {});`).error).toMatch(/"js" is gone: wt\.onSite/);
+        expect(compileScript(`wt.onPage({ url: "*", dom: "overlay" }, () => {});`).error).toMatch(/"dom" is gone: .*wt\.onOverlay/);
+        expect(compileScript(`wt.onSite({ url: "*", unsafe: true }, () => {});`).error).toMatch(/"unsafe" is gone/);
     });
 });
 
 describe("page shim worlds", () => {
     const src = (wt: any) => {
-        wt.onPage({ url: "*://a.com/*", js: "page" }, () => "page");
+        wt.onSite("*://a.com/*", () => "site");
         wt.onPage("*://a.com/*", () => "iso");
-        wt.onPage({ url: "*://a.com/*", js: "page" }, () => "page 2");
+        wt.onOverlay("*://a.com/*", () => "overlay");
+        wt.onSite("*://a.com/*", () => "site 2");
     };
 
-    it("page collects only page-world handlers, with background-matching indexes", () => {
+    it("the site's world collects only onSite handlers, keyed like the background", () => {
         const s = shim();
         src(s.wt);
-        expect(s.dom.map((d) => d.fn({}))).toEqual(["page", "page 2"]);
-        expect(s.dom.map((d) => d.route.index)).toEqual([0, 2]);
+        expect(s.dom.map((d) => d.fn({}))).toEqual(["site", "site 2"]);
+        expect(s.dom.map((d) => [d.h, d.route.index])).toEqual([
+            ["onSite:~0", 0],
+            ["onSite:~1", 2],
+        ]);
     });
 
-    it("isolated collects only isolated handlers", () => {
+    it("the isolated world collects only onPage handlers", () => {
         const s = shim("isolated");
         src(s.wt);
-        expect(s.dom.map((d) => d.fn({}))).toEqual(["iso"]);
+        expect(s.dom.map((d) => [d.h, d.fn({})])).toEqual([["onPage:~0", "iso"]]);
         expect(domHandlersFor(s.dom, "https://b.com/").length).toBe(0);
     });
 
-    it("overlay handles reject; the page world says why", async () => {
-        await expect(shim().wt.onPage({ url: "*", dom: "overlay" }, () => {}).ping()).rejects.toThrow(/isolated/);
-        await expect(shim("isolated").wt.onPage({ url: "*", dom: "overlay" }, () => {}).ping()).rejects.toThrow(/overlay/);
+    it("the compiler's keys win over call order", () => {
+        const s = shim("isolated");
+        s.wt.onPage.k(3)("*", () => 0);
+        s.wt.onPage("*", () => 1);
+        s.wt.onPage.k(3)("*", () => 2);
+        expect(s.dom.map((d) => d.h)).toEqual(["onPage:3", "onPage:~1", "onPage:3#1"]);
+    });
+
+    it("in the site's world handles throw SiteCannotCallError where they're called, and are reported", () => {
+        const seen: Error[] = [];
+        const s = makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined }, onSiteCall: (e) => seen.push(e) });
+        const h = s.wt.onOverlay("*", () => {});
+        expect(() => h.ping()).toThrow(SiteCannotCallError);
+        expect(() => s.wt.onSite("*", () => {}).ping()).toThrow(/onSite code can't call handles/);
+        expect(seen.map((e) => e.name)).toEqual(["SiteCannotCallError", "SiteCannotCallError"]);
+    });
+
+    it("isolated handles go through `call`, with where their handler runs; without it they're inert", async () => {
+        const asked: string[] = [];
+        const iso = makePageShim({
+            params: {},
+            log: () => {},
+            storage: { get: () => undefined, set: () => undefined },
+            world: "isolated",
+            call: (api, key) => ((asked.push(`${api}/${key}`), { ping: async () => "pong" }) as any),
+        });
+        await expect(iso.wt.onOverlay("*", () => {}).ping()).resolves.toBe("pong");
+        iso.wt.onSite("*", () => {});
+        expect(asked).toEqual(["onOverlay/onOverlay:~0", "onSite/onSite:~0"]);
+        await expect(shim("isolated").wt.onOverlay("*", () => {}).ping()).rejects.toThrow();
     });
 
     it("store can be declared at top level but not used; fetch rejects", async () => {
@@ -147,7 +126,7 @@ describe("page shim worlds", () => {
         await expect(shim().wt.fetch("/")).rejects.toThrow(/wt\.fetch/);
     });
 
-    it("isolated code gets the stores it's given; page-world code only when given them (unsafe: true)", () => {
+    it("isolated code gets the stores it's given; the site's world never does", () => {
         const made: string[] = [];
         const stores = {
             store: (name: string, initial: object, persist: boolean | string[]) => (made.push(`g:${name}:${JSON.stringify(persist)}`), { ...initial }),
@@ -159,27 +138,9 @@ describe("page shim worlds", () => {
         expect(made).toEqual(['g:a:["n"]', "p:b"]);
         expect(() => iso.wt.pageStore("a", {})).toThrow(/already has a store named "a"/);
         expect(() => iso.wt.globalStore("c", [])).toThrow(/initial must be an object/);
-        const main = makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined }, world: "page" });
-        expect(() => main.wt.pageStore("b", { m: 2 }).m).toThrow(/page-world code.*drop js: "page".*add unsafe: true to its js: "page" routes/);
+        const site = makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined }, world: "page", stores });
+        expect(() => site.wt.pageStore("b", { m: 2 }).m).toThrow(SITE_NO_STORES);
         expect(made.length).toBe(2);
-        const unsafe = makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined }, world: "page", stores });
-        expect(unsafe.wt.globalStore("u", { k: 3 }).k).toBe(3);
-        expect(made).toEqual(['g:a:["n"]', "p:b", "g:u:true"]);
-    });
-
-    it("page-world overlay handles reach the overlay only when given a way to (unsafe: true)", async () => {
-        await expect(shim().wt.onPage({ url: "*", dom: "overlay" }, () => {}).ping()).rejects.toThrow(/page-world onPage code can't call the overlay.*add unsafe: true/);
-        const asked: string[] = [];
-        const unsafe = makePageShim({
-            params: {},
-            log: () => {},
-            storage: { get: () => undefined, set: () => undefined },
-            world: "page",
-            overlay: (h) => ((asked.push(h), { ping: async () => "pong" }) as any),
-        });
-        const ov = unsafe.wt.onPage({ url: "*", dom: "overlay" }, () => {});
-        await expect(ov.ping()).resolves.toBe("pong");
-        expect(asked).toEqual(["overlay:0"]);
     });
 });
 

@@ -3,11 +3,11 @@ import { collectProblems, extensionsLink, type ProblemMarker, type ProblemScript
 import { addUiPort, log } from "../src/background/engine/logs";
 import { appendLog, shownLines } from "../src/ui/state/log";
 import { contextTag } from "../src/shared/scriptLog";
-import { inertRemote, MAIN_WORLD_DISALLOWED, REMOTE_MAIN_WORLD } from "../src/shared/remote";
+import { SITE_DISALLOWED, SITE_NO_HANDLES, siteRemote } from "../src/shared/remote";
 import "../src/shared/transpile";
-import { compileScript, mainWorldProblems } from "../src/shared/compile";
+import { compileScript, siteProblems } from "../src/shared/compile";
 import { userScriptsProblem } from "../src/shared/userScriptsStatus";
-import { isolatedRouteEdit } from "../src/ui/isolatedFix";
+import { legacyRouteEdit, onPageEdit } from "../src/ui/placeFix";
 
 const script = (id: string, over: Partial<ProblemScript> = {}): ProblemScript => ({ id, label: `${id}.ts`, error: null, ...over });
 const none = new Map<string, ProblemMarker[]>();
@@ -55,44 +55,62 @@ describe("GUI context tags (Log / Problems)", () => {
     });
 });
 
-describe("page-world overlay.fn()", () => {
-    it("the inert remote reports the call (with the call site) and rejects", async () => {
+describe("onSite code calling a handle", () => {
+    it("the site remote reports the call and throws right there", () => {
         const seen: Error[] = [];
-        const r: any = inertRemote(REMOTE_MAIN_WORLD, (e) => seen.push(e));
-        await expect(r.pick()).rejects.toThrow(REMOTE_MAIN_WORLD);
+        const r: any = siteRemote((e) => seen.push(e));
+        expect(() => r.pick()).toThrow(SITE_NO_HANDLES);
         expect(seen).toHaveLength(1);
-        expect(seen[0].name).toBe("WtCallError");
+        expect(seen[0].name).toBe("SiteCannotCallError");
+        expect(r.then).toBeUndefined();
     });
 
     const fix = (code: string, at = code.indexOf("overlay.")) => {
-        const e = isolatedRouteEdit(code, at);
+        const e = onPageEdit(code, at);
         return e && code.slice(0, e.start) + e.text + code.slice(e.end);
     };
-    it("the quick fix moves the handler to the isolated world", () => {
-        expect(fix(`wt.onPage({ url: "https://a/*", js: "page" }, (x) => x.overlay.pick());`)).toBe(`wt.onPage({ url: "https://a/*", js: "isolated" }, (x) => x.overlay.pick());`);
-        expect(fix(`wt.onPage({ url: "https://a/*", js: 'page' }, (x) => x.overlay.pick());`)).toBe(`wt.onPage({ url: "https://a/*", js: "isolated" }, (x) => x.overlay.pick());`);
-        expect(fix(`wt.onPage({ url: "https://a/*", js: "page", dom: "overlay", unsafe: true }, (x) => x.overlay.pick());`)).toBe(`wt.onPage({ url: "https://a/*", js: "isolated", dom: "overlay", unsafe: true }, (x) => x.overlay.pick());`);
-    });
-    it("picks the nearest handler and gives up on what it can't rewrite", () => {
-        const two = `wt.onPage({ url: "https://a/*", js: "page" }, () => {});\nwt.onPage({ url: "https://b/*", js: "page" }, (x) => x.overlay.pick());`;
-        expect(fix(two)).toBe(`wt.onPage({ url: "https://a/*", js: "page" }, () => {});\nwt.onPage({ url: "https://b/*", js: "isolated" }, (x) => x.overlay.pick());`);
-        expect(isolatedRouteEdit(`x.overlay.pick()`, 2)).toBeNull();
-        expect(isolatedRouteEdit(`wt.onPage({ url: "https://a/*", js: w }, (x) => x.overlay.pick());`, 50)).toBeNull();
-        expect(isolatedRouteEdit(`wt.onPage("https://a/*", (x) => x.overlay.pick());`, 30)).toBeNull();
-        expect(isolatedRouteEdit(`wt.onPage("https://a/*`, 20)).toBeNull();
+    it("the quick fix moves the nearest onSite handler to onPage", () => {
+        expect(fix(`wt.onSite("https://a/*", (x) => overlay.pick());`)).toBe(`wt.onPage("https://a/*", (x) => overlay.pick());`);
+        const two = `wt.onSite("https://a/*", () => {});\nwt.onSite({ url: "https://b/*" }, () => overlay.pick());`;
+        expect(fix(two)).toBe(`wt.onSite("https://a/*", () => {});\nwt.onPage({ url: "https://b/*" }, () => overlay.pick());`);
+        expect(onPageEdit(`x.overlay.pick()`, 2)).toBeNull();
+        expect(onPageEdit(`wt.onPage("https://a/*", () => overlay.pick());`, 30)).toBeNull();
     });
 
-    it("a page-world store/overlay route warning points at its registration line, and the fix applies from the marker's end", () => {
-        const code = `const ps = wt.pageStore("ps", { n: 0 });\nwt.onPage({ url: "https://a/*", js: "page" }, () => {\n    ps.n++;\n});`;
-        const msg = mainWorldProblems(code, compileScript(code).handlers.onDocument.map((h) => h.route))[0];
-        expect(msg).toContain(MAIN_WORLD_DISALLOWED);
-        expect(msg).toContain('drop js: "page"');
-        expect(mainWorldProblems(code.replace(', js: "page"', ""), compileScript(code.replace(', js: "page"', "")).handlers.onDocument.map((h) => h.route))).toEqual([]);
-        const [g] = collectProblems([script("a", { code, routeWarnings: [msg], routes: compileScript(code).handlers.onDocument.map((h) => h.route) })], none);
+    it("an onSite store/handle warning points at its registration line, and the fix applies from the marker's end", () => {
+        const code = `const ps = wt.pageStore("ps", { n: 0 });\nwt.onSite("https://a/*", () => {\n    ps.n++;\n});`;
+        const routes = compileScript(code).handlers.onDocument.map((h) => h.route);
+        const msg = siteProblems(code, routes)[0];
+        expect(msg).toContain(SITE_DISALLOWED);
+        expect(msg).toMatch(/^onSite #1\b.*uses `ps`/);
+        const moved = code.replace("onSite", "onPage");
+        expect(siteProblems(moved, compileScript(moved).handlers.onDocument.map((h) => h.route))).toEqual([]);
+        const [g] = collectProblems([script("a", { code, routeWarnings: [msg], routes })], none);
         const p = g.problems[0] as any;
-        expect(p.line).toBe(2);
+        expect(p.line).toBe(3);
         const lines = code.split("\n");
         const end = lines.slice(0, p.endLine - 1).reduce((n, l) => n + l.length + 1, 0) + p.endColumn - 1;
-        expect(fix(code, end)).toBe(`const ps = wt.pageStore("ps", { n: 0 });\nwt.onPage({ url: "https://a/*", js: "isolated" }, () => {\n    ps.n++;\n});`);
+        expect(fix(code, end)).toBe(moved);
+    });
+});
+
+describe("legacy route options quick fix", () => {
+    const fix = (code: string, at = code.length) => {
+        const e = legacyRouteEdit(code, at);
+        return e && code.slice(0, e.start) + e.text + code.slice(e.end);
+    };
+    it("picks the API the options asked for and drops them", () => {
+        expect(fix(`wt.onPage({ url: "https://a/*", js: "page" }, () => {});`)).toBe(`wt.onSite({ url: "https://a/*" }, () => {});`);
+        expect(fix(`wt.onPage({ url: "https://a/*", dom: "overlay" }, () => {});`)).toBe(`wt.onOverlay({ url: "https://a/*" }, () => {});`);
+        expect(fix(`wt.onPage({ url: "https://a/*", js: 'isolated' }, () => {});`)).toBe(`wt.onPage({ url: "https://a/*" }, () => {});`);
+        expect(fix(`wt.onPage({ js: "page", dom: "overlay", unsafe: true, url: "https://a/*" }, () => {});`)).toBe(`wt.onOverlay({ url: "https://a/*" }, () => {});`);
+        expect(fix(`wt.onPage({\n    url: "https://a/*",\n    js: "page",\n}, () => {});`)).toBe(`wt.onSite({\n    url: "https://a/*",\n}, () => {});`);
+    });
+    it("picks the nearest registration before the marker, and gives up on what it can't rewrite", () => {
+        const two = `wt.onPage({ url: "https://a/*", js: "page" }, () => {});\nwt.onPage({ url: "https://b/*", dom: "overlay" }, () => {});`;
+        expect(fix(two)).toBe(`wt.onPage({ url: "https://a/*", js: "page" }, () => {});\nwt.onOverlay({ url: "https://b/*" }, () => {});`);
+        expect(fix(two, 10)).toBe(`wt.onSite({ url: "https://a/*" }, () => {});\nwt.onPage({ url: "https://b/*", dom: "overlay" }, () => {});`);
+        expect(legacyRouteEdit(`wt.onPage("https://a/*", () => {});`, 30)).toBeNull();
+        expect(legacyRouteEdit(`wt.onPage({ url: "https://a/*" }, () => {});`, 30)).toBeNull();
     });
 });

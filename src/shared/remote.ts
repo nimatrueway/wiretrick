@@ -1,5 +1,5 @@
 /**
- * Handles returned by `wt.onPage`: the other side's
+ * Handles returned by `wt.onSite` / `wt.onPage` / `wt.onOverlay`: the other side's
  * functions as async calls (`await page.highlight("a")`). Where a call
  * can't go anywhere (background code, or a world that may not call), the
  * handle is inert: every method rejects with the reason. Live handles are
@@ -25,14 +25,35 @@ export function inertRemote(reason: string, onCall?: (e: WtCallError) => void): 
     });
 }
 
-export const REMOTE_FROM_BACKGROUND = "onPage handles can't be called from network handlers: an onPage handler's functions are called from this script's overlay, an overlay's from its isolated-world onPage code";
-/** an isolated onPage handle used in isolated onPage code (it may call js: "page" handles only) */
-export const REMOTE_PAGE_FROM_ISOLATED =
-    "isolated onPage code can call js: \"page\" handlers' functions, not another isolated handler's (those are for the overlay) — share the functions in the script directly";
-export const REMOTE_PAGE_FROM_PAGE = "an onPage handler's functions are called from this script's overlay, not from onPage code — page-world code can call them directly";
-export const REMOTE_MAIN_WORLD =
-    'page-world onPage code can\'t call the overlay; run it in the isolated world (the default: drop js: "page") and read the page with ctx.evaluate — or, accepting that the page can then call the overlay too, add unsafe: true to its js: "page" routes';
-/** in every warning about page-world onPage code using what only the isolated world may (the editor offers the isolated-world quick fix) */
-export const MAIN_WORLD_DISALLOWED = "which the API explicitly disallows in the page world";
-export const REMOTE_PAGE_LAYER = 'a js: "page" overlay runs as page code, so it exposes no functions (the page could fake their answers) — use the default js: "isolated" to call it';
-export const REMOTE_OVERLAY_SELF = "the overlay can't call its own overlay handles — call the functions directly";
+export const REMOTE_FROM_BACKGROUND = "handles can't be called from network handlers: call a handler's functions from onPage or onOverlay code";
+/** in every message about onSite code using what only trusted code may (the editor offers the move-to-onPage quick fix) */
+export const SITE_DISALLOWED = "which the site's JavaScript world can't be trusted with";
+/** a handle used in onSite code */
+export const SITE_NO_HANDLES = `onSite code can't call handles (${SITE_DISALLOWED}: the site could call them too) — call them from wt.onPage or wt.onOverlay code, and have those read the site through an onSite handle`;
+/** a store used in onSite code */
+export const SITE_NO_STORES = `wt.globalStore and wt.pageStore aren't available in onSite code (${SITE_DISALLOWED}: the site could read and forge them) — use them in wt.onPage or wt.onOverlay code, and pass what onSite code needs as arguments`;
+
+/** thrown where onSite code calls a handle's function */
+export class SiteCannotCallError extends Error {
+    constructor(message = SITE_NO_HANDLES) {
+        super(message);
+        this.name = "SiteCannotCallError";
+    }
+}
+
+/** a handle in onSite code: calling any of its functions throws SiteCannotCallError right there (`onCall` sees each) */
+export function siteRemote(onCall?: (e: SiteCannotCallError) => void): any {
+    return new Proxy(Object.create(null), {
+        get(_t, prop) {
+            if (typeof prop !== "string" || prop === "then" || prop === "toJSON") return undefined;
+            return () => {
+                const e = new SiteCannotCallError();
+                onCall?.(e);
+                throw e;
+            };
+        },
+        set() {
+            return false;
+        },
+    });
+}

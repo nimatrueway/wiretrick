@@ -6,7 +6,7 @@
  * extension port, never through the page.
  *
  * Here the script's module graph evaluates with network and onPage
- * registrations inert; its overlay handlers (`dom: "overlay"`) run at their `when`. Stores
+ * registrations inert; its overlay handlers (`wt.onOverlay`) run at their `when`. Stores
  * are replicas (shared/storeReplica.ts), `fetch` and `wt.fetch` fetch as
  * the page (the bridge does it, with the page's cookies), calls into
  * onPage code and back go through shared/rpc.ts, and the frame reports
@@ -19,8 +19,8 @@ import { builtinModule, ensureBuiltins } from "../shared/builtins";
 import { makeLibRequire } from "../shared/scriptImports";
 import type { PackageModules } from "../shared/packageImports";
 import { Exposer, RpcClient, isRpcCall } from "../shared/rpc";
-import { inertRemote, REMOTE_OVERLAY_SELF } from "../shared/remote";
-import { isPageLayer, routeMatches, type DocumentWhen } from "../shared/route";
+import { inertRemote } from "../shared/remote";
+import { routeMatches, type DocumentWhen } from "../shared/route";
 import { fromWireResponse, toWireRequest } from "../shared/wtFetch";
 import { formatScriptError } from "../shared/scriptError";
 import { formatLogArgs, scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
@@ -30,7 +30,7 @@ import { ShortcutRegistry, watchShortcuts, type ShortcutPriority } from "../shar
 const PHASES: DocumentWhen[] = ["document_start", "document_end", "document_idle"];
 const rank = (p: DocumentWhen | undefined) => PHASES.indexOf(p ?? "document_end");
 
-const LIB_REMOTE = "wt.onPage handles from an imported library don't connect; register them in the script itself";
+const LIB_REMOTE = "handles from an imported library don't connect; register the handler in the script itself";
 
 export interface OverlayRuntime {
     client: RpcClient;
@@ -75,6 +75,9 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
         if (isRpcCall(c)) exposer.answer(c, (r) => ep.push("rpc.result", r));
     });
     ep.onClose((why) => client.disconnect(`the overlay was closed (${why})`));
+    // the overlay's own onOverlay handles, answered here
+    const local: RpcClient = new RpcClient((call) => exposer.answer(call, (r) => local.receive(r)));
+    ep.onClose((why) => local.disconnect(`the overlay was closed (${why})`));
 
     // the bridge's `when` and `nav` can come while React loads: keep the latest
     const ran = new Set<number>();
@@ -175,10 +178,10 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
         ...common,
         paramValues: init.params,
         importModule: requireFrom(init.name),
-        remote: (kind, index) => {
-            if (kind === "onDocument") return client.remote(`page:${index}`);
-            exposer.register(`overlay:${index}`);
-            return inertRemote(REMOTE_OVERLAY_SELF);
+        remote: (r) => {
+            if (r.kind === "onDocument") return client.remote(r.key!);
+            exposer.register(r.key!);
+            return local.remote(r.key!);
         },
     });
 
@@ -189,9 +192,8 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
         handlers = [];
     }
     handlers = handlers.filter(({ route }) => {
-        // js: "page" overlays run in the page (the hook's layer): here only when the bridge lists them (the Editor's Preview)
-        const on = routeMatches(route, init.url) && (!isPageLayer(route) || init.routes.some((r) => r.index === route.index));
-        if (!on) exposer.fail(`overlay:${route.index}`);
+        const on = routeMatches(route, init.url);
+        if (!on) exposer.fail(route.key!);
         return on;
     });
     exposer.done();
@@ -214,7 +216,7 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
         for (const { fn, route } of handlers) {
             if (ran.has(route.index) || rank(route.when) > rank(phase)) continue;
             ran.add(route.index);
-            const h = `overlay:${route.index}`;
+            const h = route.key!;
             let out: any;
             try {
                 out = fn(ctx() as any);

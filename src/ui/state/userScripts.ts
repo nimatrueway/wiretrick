@@ -5,7 +5,7 @@ const DISMISSED_KEY = "wt.userScriptsBanner.dismissed";
 
 /**
  * Chrome MV3: the Editor's one-time "user scripts are off" banner, shown
- * while an enabled script has `js: "isolated"` onPage code that can't
+ * while an enabled script has onPage code that can't
  * run (the Problems error stays until it can).
  */
 export const userScriptsBanner = proxy({

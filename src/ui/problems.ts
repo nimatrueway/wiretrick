@@ -6,6 +6,7 @@
 import { EVAL_WRAPPER_LINES } from "../shared/scriptError";
 import { userFrames } from "../shared/scriptHealth";
 import { USER_SCRIPTS_PROBLEM } from "../shared/userScriptsStatus";
+import { REMOVED_EVALUATE } from "../shared/compile";
 import type { TabBadge } from "./logBadge";
 
 export type ProblemSeverity = "error" | "warning";
@@ -134,7 +135,7 @@ export function errorPosition(msg: string): Position | undefined {
     return syntax ? { line: Number(syntax[1]) } : undefined;
 }
 
-const HANDLER = /\b(onRequest|onResponseHeaders|replaceResponse|onResponseBody|onPage) #(\d+)\b/;
+const HANDLER = /\b(onRequest|onResponseHeaders|replaceResponse|onResponseBody|onSite|onPage|onOverlay) #(\d+)\b/;
 
 interface Range {
     line: number;
@@ -192,29 +193,29 @@ function handlerRange(msg: string, s: ProblemScript): Range | { line: number } |
 }
 
 /**
- * A "ctx.evaluate's function uses `x`" warning → that use of `x`: the first
- * one after an `.evaluate(` in the handler (one not already `taken` by an
- * earlier warning, for a handler with several evaluate calls).
+ * An onSite handler's "uses `x` — …" warning (a store or a handle the
+ * site's world can't have) → the first use of `x` in that handler.
  */
-function evaluateUseRange(msg: string, s: ProblemScript, taken: Set<number>): Range | undefined {
-    const name = /ctx\.evaluate's function uses `([\w$]+)`/.exec(msg)?.[1];
+function siteUseRange(msg: string, s: ProblemScript): Range | undefined {
+    const name = /^onSite #\d+[^:]*: uses `([\w$.]+)`/.exec(msg)?.[1];
     const h = name && s.code ? handlerRange(msg, s) : undefined;
     if (!h) return undefined;
     const code = s.code!;
     const lines = code.split("\n");
     const from = lineStart(lines, h.line);
     const next = code.slice(from + 1).search(/\bwt\s*\.\s*on[A-Z]\w*\s*\(/);
-    const region = code.slice(0, next < 0 ? code.length : from + 1 + next);
-    const use = new RegExp(`(?<![\\w$.])${name!.replace(/\$/g, "\\$")}(?![\\w$])`, "g");
-    for (const e of region.slice(from).matchAll(/\.\s*evaluate\s*\(/g)) {
-        use.lastIndex = from + e.index! + e[0].length;
-        const m = use.exec(region);
-        if (m && !taken.has(m.index)) {
-            taken.add(m.index);
-            return rangeAt(lines, m.index, name!.length);
-        }
-    }
-    return undefined;
+    const end = next < 0 ? code.length : from + 1 + next;
+    const use = new RegExp(`(?<![\\w$.])${name!.replace(/\$/g, "\\$").split(".").join("\\s*\\.\\s*")}(?![\\w$])`, "g");
+    use.lastIndex = from;
+    const m = use.exec(code);
+    return m && m.index < end ? rangeAt(lines, m.index, m[0].length) : undefined;
+}
+
+/** a removed API's error ("ctx.evaluate is gone: …") → its first use */
+function removedUseRange(msg: string, s: ProblemScript): Range | undefined {
+    if (!msg.startsWith(REMOVED_EVALUATE) || !s.code) return undefined;
+    const m = /\.\s*evaluate\s*\(/.exec(s.code);
+    return m ? rangeAt(s.code.split("\n"), m.index + 1, m[0].length - 2) : undefined;
 }
 
 /**
@@ -297,7 +298,7 @@ export function collectProblems(scripts: ProblemScript[], liveMarkers: Map<strin
         // (isolated onPage code that can't run is an error: user scripts are off)
         const taken = new Set<number>();
         for (const w of s.routeWarnings || [])
-            problems.push({ severity: w.includes(USER_SCRIPTS_PROBLEM) ? "error" : "warning", kind: "route", message: w, ...(evaluateUseRange(w, s, taken) ?? rulesUseRange(w, s, taken) ?? handler(w)) });
+            problems.push({ severity: w.includes(USER_SCRIPTS_PROBLEM) || w.startsWith(REMOVED_EVALUATE) ? "error" : "warning", kind: "route", message: w, ...(siteUseRange(w, s) ?? removedUseRange(w, s) ?? rulesUseRange(w, s, taken) ?? handler(w)) });
         if (problems.length) groups.push({ id: s.id, label: s.label, file: s.label.endsWith(".tsx") ? "tsx" : "ts", problems: problems.sort(byPosition) });
     }
     for (const d of dataFiles) if (d.markers.length) groups.push({ id: d.id, label: d.label, file: "json", problems: fromMarkers(d.markers, "json").sort(byPosition) });

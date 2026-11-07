@@ -174,7 +174,7 @@ export class RpcClient {
 }
 
 type Reply = (r: RpcResult) => void;
-type Slot = { state: "pending"; queue: [RpcCall, Reply][] } | { state: "ready"; obj: Record<string, any> | null } | { state: "not-running"; why: string; elsewhere?: boolean };
+type Slot = { state: "pending"; queue: [RpcCall, Reply][] } | { state: "ready"; obj: Record<string, any> | null } | { state: "not-running"; why: string };
 
 /** the callee side: one script's handles in one runtime */
 export class Exposer {
@@ -205,17 +205,6 @@ export class Exposer {
     /** the handler won't answer here (didn't match, threw) */
     fail(h: string, why = NOT_RUNNING): void {
         this.settle(h, { state: "not-running", why });
-    }
-
-    /** the handler belongs to the other world: a router may try there */
-    elsewhere(h: string, why = NOT_RUNNING): void {
-        this.settle(h, { state: "not-running", why, elsewhere: true });
-    }
-
-    /** is `h` registered for the other world? */
-    isElsewhere(h: string): boolean {
-        const s = this.slots.get(h);
-        return s?.state === "not-running" && !!s.elsewhere;
     }
 
     /** every handle is registered: calls for unknown ones answer `not running` */

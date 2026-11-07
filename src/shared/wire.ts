@@ -14,7 +14,6 @@ import { packBytes, unpackBytes } from "./bytesPack";
 import type { RouteMeta } from "./route";
 import type { ShippedLib } from "./scriptImports";
 import type { RpcCall, RpcResult } from "./rpc";
-import type { EvalCapture } from "./evalCapture";
 
 export type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
 
@@ -130,12 +129,6 @@ export interface WireOps {
      * go over L2 tagged `ISO_STORE_TAG + s` (the overlay's are tagged `s`).
      */
     "iso.stores": { req: { url: string }; res: {} };
-    /**
-     * L2 (MV2 and MV3): let script `s`'s `unsafe: true` page-world code at
-     * `url` use its stores (refused unless it has such a route there). Its
-     * store ops then go over L2 tagged `PAGE_STORE_TAG + s`.
-     */
-    "page.stores": { req: { url: string }; res: {} };
     /** L6: this world's onPage code ran on its document (tags the document's Network row) */
     ran: { push: { api: "onPage"; name: string } };
     /** L6: scripts changed: load again, re-run when the code hash moved */
@@ -155,7 +148,7 @@ export interface WireOps {
     "preview.open": { req: { nonce: string; url: string }; res: { url: string; name: string; handlers: number; matching: number } };
 }
 
-/** what a user-script world needs to run a script's `js: "isolated"` onPage code */
+/** what a user-script world needs to run a script's onPage code */
 export interface IsoInit {
     s: string;
     name: string;
@@ -164,8 +157,6 @@ export interface IsoInit {
     codeHash: string;
     params: Record<string, any>;
     libs: ShippedLib[];
-    /** its `ctx.evaluate` functions that use its top-level declarations (shared/evalCapture) */
-    evals?: EvalCapture[];
     /** the script has an overlay on this page (top frame) */
     overlay: boolean;
     /** the script's stores now (its `wt.pageStore` copies: this page's), keyed like `store.init` */
@@ -176,9 +167,6 @@ export interface IsoInit {
 
 /** L2: the tag prefix of isolated onPage code's store ops (MV2/Firefox) */
 export const ISO_STORE_TAG = "iso\u0000";
-
-/** L2: the tag prefix of `unsafe: true` page-world code's store ops */
-export const PAGE_STORE_TAG = "page\u0000";
 
 /** what an overlay frame needs to run its script */
 export interface OverlayInit {

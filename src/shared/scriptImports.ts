@@ -10,7 +10,6 @@
  */
 import { builtinSpec, jsxImportSource, usesJsx } from "./builtinSpecs";
 import { isUrlSpec, makePackageLoader, PACKAGE_ORIGIN, parsePackageUrl, type PackageModule, type PackageModules } from "./packageImports";
-import type { EvalCapture } from "./evalCapture";
 
 const IMPORT_RE = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["']([^"'\n]+)["']/g;
 
@@ -203,14 +202,12 @@ export interface ShippedLib {
     pkg?: PackageModule;
     /** a package URL a script imports (`name`) → its module's final URL */
     alias?: string;
-    /** a library's `ctx.evaluate` functions that use its top-level declarations (shared/evalCapture) */
-    evals?: EvalCapture[];
 }
 
 /** what page-world code gets for a built-in import: the module graph still loads, using it throws */
 function pageBuiltin(spec: string): any {
     const fail = (): never => {
-        throw new Error(`cannot use "${spec}": the built-in modules aren't available in page-world code (js: "page") — use them in isolated onPage code (the default), the overlay or the background`);
+        throw new Error(`cannot use "${spec}": the built-in modules aren't available in onSite code — use them in onPage or onOverlay code`);
     };
     return new Proxy(Object.create(null), {
         // the CommonJS interop reads __esModule at import; anything else is a use

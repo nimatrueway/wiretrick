@@ -6,7 +6,7 @@ import { diffHunks, lineDiff } from "../src/shared/lineDiff";
 import { readZip } from "../src/shared/zip";
 import { isPackageFile, localPackage, startsIn } from "../src/shared/localPackage";
 
-const caps = (c: Partial<Capabilities> = {}): Capabilities => ({ urls: [], strategies: [], pageJs: false, overlay: false, unsafe: false, connect: [], packages: [], ...c });
+const caps = (c: Partial<Capabilities> = {}): Capabilities => ({ urls: [], strategies: [], pageJs: false, overlay: false, connect: [], packages: [], ...c });
 
 describe("packageCaps", () => {
     it("reads what a script's routes and imports can do", () => {
@@ -14,7 +14,7 @@ describe("packageCaps", () => {
             { kind: "onRequest", url: ["*://b.com/*", "*://a.com/*"], strategy: "fetch" },
             { kind: "onDocument", url: ["*://a.com/*"] },
             { kind: "onDocument", url: ["*://c.com/*"], world: "isolated" },
-            { kind: "onOverlay", url: ["*://a.com/*"], world: "page" },
+            { kind: "onOverlay", url: ["*://a.com/*"] },
         ];
         const c = capabilitiesOf(routes as never, ["api.x.com"], ['import confetti from "https://unpkg.com/canvas-confetti@1.9.3";', 'import "./lib";']);
         expect(c).toEqual({
@@ -22,20 +22,9 @@ describe("packageCaps", () => {
             strategies: ["fetch"],
             pageJs: true,
             overlay: true,
-            unsafe: true,
             connect: ["api.x.com"],
             packages: ["canvas-confetti"],
         });
-    });
-
-    it("unsafe: true page-world onPage code is unsafe too, and described as what the site can then reach", () => {
-        const c = capabilitiesOf([{ kind: "onDocument", url: ["*://a.com/*"], unsafe: true }] as never, [], []);
-        expect(c.unsafe).toBe(true);
-        expect(c.overlay).toBe(false);
-        expect(capabilitiesOf([{ kind: "onDocument", url: ["*://a.com/*"] }] as never, [], []).unsafe).toBe(false);
-        const lines = describeCapabilities(caps({ urls: ["*://a.com/*"], pageJs: true, unsafe: true, overlay: true }));
-        expect(lines[0]).toEqual({ text: expect.stringMatching(/^Gives the site's own JavaScript its stores and overlay \(unsafe: true\): the site can read and change its stored data and call into its overlay$/), risk: "high" });
-        expect(lines.map((l) => l.text)).toContain("Draws an overlay over pages");
     });
 
     it("an isolated onDocument doesn't touch the page's JavaScript", () => {
@@ -59,12 +48,11 @@ describe("packageCaps", () => {
         const prev = caps({ urls: ["*://a.com/*"], strategies: ["fetch"] });
         expect(addedCapabilities(prev, prev)).toEqual([]);
         expect(addedCapabilities(prev, caps({ urls: ["*://a.com/*"] }))).toEqual([]);
-        expect(addedCapabilities(prev, caps({ urls: ["*://a.com/*", "*://b.com/*"], strategies: ["fetch", "debugger"], pageJs: true, unsafe: true, overlay: true, connect: ["h"], packages: ["p"] }))).toEqual([
+        expect(addedCapabilities(prev, caps({ urls: ["*://a.com/*", "*://b.com/*"], strategies: ["fetch", "debugger"], pageJs: true, overlay: true, connect: ["h"], packages: ["p"] }))).toEqual([
             "runs on *://b.com/*",
             "intercepts with debugger",
             "runs code in the site's own JavaScript world",
             "draws an overlay",
-            "gives the site its stores and overlay (unsafe)",
             "connects to h",
             "imports p",
         ]);

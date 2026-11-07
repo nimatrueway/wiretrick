@@ -50,8 +50,9 @@ import { watchPackages } from "./state/packages";
 import { createCodeEditor } from "./shell/codeEditor";
 import { toolbar, type SaveState } from "./state/toolbar";
 import { refreshUserScripts } from "./state/userScripts";
-import { MAIN_WORLD_DISALLOWED, REMOTE_MAIN_WORLD } from "../shared/remote";
-import { isolatedRouteEdit } from "./isolatedFix";
+import { SITE_DISALLOWED } from "../shared/remote";
+import { LEGACY_OPTIONS } from "../shared/route";
+import { legacyRouteEdit, onPageEdit } from "./placeFix";
 import { collectDiagnostics, diagnosticsFileName, downloadText, installedExtensions } from "./about";
 import { DIAG_SECTIONS } from "../shared/diagnosticsSections";
 
@@ -855,22 +856,30 @@ function registerPinImportFix(): void {
     });
 }
 
-/** a page-world `overlay.fn()` call (a runtime Problem) or a page-world onPage handler using a store / overlay handle (a route warning): quick fix: the onPage route around it runs isolated */
-function registerIsolatedWorldFix(): void {
+/**
+ * Quick fixes for where a handler runs: an onSite handler calling a handle
+ * (a runtime Problem) or using a store / handle (a route warning) moves to
+ * wt.onPage; a route with the removed js / dom / unsafe options moves to the
+ * API that replaces them.
+ */
+function registerPlaceFixes(): void {
     const monaco = (window as any).monaco;
     monaco.languages.registerCodeActionProvider("typescript", {
         provideCodeActions(model: any, _range: unknown, context: { markers: any[] }) {
             const actions: any[] = [];
             for (const mk of context.markers) {
                 const msg = String(mk.message);
-                if (!msg.includes(REMOTE_MAIN_WORLD) && !msg.includes(MAIN_WORLD_DISALLOWED)) continue;
-                // the marker's end: inside the call, or (a route warning, on the registration line) past `wt.onPage(`
-                const fix = isolatedRouteEdit(model.getValue(), model.getOffsetAt({ lineNumber: mk.endLineNumber, column: mk.endColumn }));
+                const site = msg.includes(SITE_DISALLOWED);
+                const legacy = !site && Object.values(LEGACY_OPTIONS).some((v) => msg.includes(v));
+                if (!site && !legacy) continue;
+                // the marker's end: inside the call, or (a route warning, on the registration line) past `wt.onSite(`
+                const offset = model.getOffsetAt({ lineNumber: mk.endLineNumber, column: mk.endColumn });
+                const fix = site ? onPageEdit(model.getValue(), offset) : legacyRouteEdit(model.getValue(), offset);
                 if (!fix) continue;
                 const a = model.getPositionAt(fix.start);
                 const b = model.getPositionAt(fix.end);
                 actions.push({
-                    title: "Run this onPage handler in the isolated world",
+                    title: site ? "Move this handler to wt.onPage (the isolated world)" : `Use wt.${fix.text.slice(0, fix.text.search(/[^\w]/))}`,
                     kind: "quickfix",
                     isPreferred: true,
                     diagnostics: [mk],
@@ -2201,7 +2210,7 @@ async function main(): Promise<void> {
         scheduleImportMarkers(m);
     }
     registerPinImportFix();
-    registerIsolatedWorldFix();
+    registerPlaceFixes();
     registerTsxFix();
     // VS Code shortcuts: ⌘P quick-open (scripts + settings.yaml), ⌘, opens
     // the Settings dialog, ⌘⇧E focuses the explorer, ⌘B / ⌘J toggle the
