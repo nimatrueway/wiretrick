@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.20.0-alpha] - 2026-11-07
+
 ### Breaking
 
 A simpler page API: three places to run code, each a function of its own, and saving a script updates the page in place.
@@ -788,7 +790,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.19.0-alpha...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.20.0-alpha...HEAD
+[0.20.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.19.0-alpha...v0.20.0-alpha
 [0.19.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.18.0-alpha...v0.19.0-alpha
 [0.18.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.17.0-alpha...v0.18.0-alpha
 [0.17.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.16.0-alpha...v0.17.0-alpha
