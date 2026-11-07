@@ -203,6 +203,19 @@ describe("ScriptLife", () => {
         expect(document.head.querySelector("style")).toBe(el);
     });
 
+    it("a handler that ends in a ctx.each loop: starting the loop releases what the old run claimed alone", async () => {
+        const forever = async () => new Promise<number>(() => {});
+        const run = (css: string) =>
+            reload(async (ctx) => {
+                ctx.style(css);
+                for await (const _ of ctx.each(forever));
+            });
+        run("a{}");
+        run("b{}");
+        await new Promise((r) => setTimeout(r, 0));
+        expect([...document.head.querySelectorAll("style")].map((s) => s.textContent)).toEqual(["b{}"]);
+    });
+
     it("an ended run can't claim, and its AbortError isn't reported", async () => {
         const reported: unknown[] = [];
         let go!: () => void;

@@ -968,8 +968,8 @@ const site = wt.onSite("*://app.example.com/*", (ctx) => {
     const waiting: ((user: string) => void)[] = [];
     window.addEventListener("app:login", (e) => {
         const user = String((e as CustomEvent).detail);
-        const w = waiting.shift();
-        if (w) w(user);
+        // answer every waiting call: one may be from a run that ended since
+        if (waiting.length) for (const w of waiting.splice(0)) w(user);
         else logins.push(user);
     }, { signal: ctx.signal });
     return {
@@ -986,7 +986,10 @@ wt.onPage("*://app.example.com/*", async (ctx) => {
 
 `ctx.each` calls the function again after each answer, makes a call cut by
 the other side's reload (`ReloadedError`) again, and ends quietly when its
-own run ends. Other errors end the loop with that error.
+own run ends. Other errors end the loop with that error. A call whose run
+ended (the `onPage` code was saved) still waits on the `onSite` side, so
+answer every waiting call, as above — otherwise that stale call takes the
+next item and the new run never sees it.
 
 ## Hot reload — runs and `ctx`
 
@@ -1075,8 +1078,8 @@ wt.onPage("*://app.example.com/*", (ctx) => {
    only the new run ends — the old run and the functions its handle
    exposes keep going (Problems shows the error).
 3. When the new run returns, the old run's `signal` aborts.
-4. When the new run's promise settles (right away for a sync handler), the
-   old run's claims are released: what the new run set up again stays (a
+4. When the new run's promise settles (right away for a sync handler), or
+   it starts a `ctx.each` loop, the old run's claims are released: what the new run set up again stays (a
    mount re-renders, a patch has its new wrapper, a `once` value is kept),
    the rest is undone (unmounted, style removed, patch passing through,
    `once` value dropped).

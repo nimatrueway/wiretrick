@@ -59,6 +59,10 @@ interface Run {
     ctl: AbortController;
     claims: Set<string>;
     released: boolean;
+    /** the run's setup is done (it returned, settled, or started a ctx.each loop): the previous run's leftovers go */
+    settle?: () => void;
+    /** ctx.each was called before the handler returned */
+    looping?: boolean;
 }
 
 interface Owner {
@@ -155,9 +159,15 @@ export class ScriptLife {
         this.current.set(h, run);
         if (!old) return;
         this.end(old, "the script reloaded");
-        const release = () => this.release(old);
-        if (out && typeof (out as any).then === "function") (out as Promise<unknown>).then(release, release);
-        else release();
+        const release = () => {
+            run.settle = undefined;
+            this.release(old);
+        };
+        if (out && typeof (out as any).then === "function" && !run.looping) {
+            // a handler that ends in a ctx.each loop never settles: starting the loop counts
+            run.settle = release;
+            (out as Promise<unknown>).then(release, release);
+        } else release();
     }
 
     /** `gen` fired its due handlers: old runs of handlers it no longer has (or that don't match) end */
@@ -261,7 +271,11 @@ export class ScriptLife {
             },
             patch: (obj, prop, wrap) => this.patch(run, obj, prop, wrap),
             style: (css) => this.style(run, css),
-            each: (fn, ...args) => each(run.ctl.signal, fn, args),
+            each: (fn, ...args) => {
+                run.looping = true;
+                run.settle?.();
+                return each(run.ctl.signal, fn, args);
+            },
         };
         if (this.o.react) ctx.mount = (...args: unknown[]) => (args.length < 2 ? this.mount(run, undefined, args[0]) : this.mount(run, args[0] as any, args[1]));
         return ctx;

@@ -351,7 +351,8 @@ declare namespace Wiretrick {
          * @example
          * const site = wt.onSite("*://example.com/*", (ctx) => {
          *     const logins: string[] = [], waiting: ((u: string) => void)[] = [];
-         *     window.addEventListener("app:login", (e: any) => (waiting.shift() ?? ((u) => logins.push(u)))(e.detail), { signal: ctx.signal });
+         *     // answer every waiting call: one may be from a run that ended since
+         *     window.addEventListener("app:login", (e: any) => (waiting.length ? waiting.splice(0).forEach((w) => w(e.detail)) : logins.push(e.detail)), { signal: ctx.signal });
          *     return { nextLogin: () => (logins.length ? Promise.resolve(logins.shift()!) : new Promise<string>((r) => waiting.push(r))) };
          * });
          * wt.onPage("*://example.com/*", async (ctx) => {
