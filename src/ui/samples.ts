@@ -122,8 +122,9 @@ wt.replaceResponse({ url: "*://dummyjson.com/users/:id", strategy: "page" }, (ct
     role: "admin",
 }));
 
-// the demo: a fetch made from dummyjson.com's own JavaScript world (wt.onSite, so the "page" strategy sees it)
-wt.onSite("https://dummyjson.com/", async () => {
+// the demo: a fetch made from dummyjson.com's own JavaScript world (wt.onSite, so the "page" strategy sees it),
+// once the DOM is ready (onSite runs before the site's own scripts by default; it draws here)
+wt.onSite({ url: "https://dummyjson.com/", when: "document_end" }, async () => {
     const out = document.createElement("pre");
     out.style.cssText = "margin: 0; padding: 8px; font: 14px monospace; color: #fff; background: #2a7";
     document.body.prepend(out);
@@ -145,8 +146,9 @@ wt.onResponseBody({ url: "*://dummyjson.com/todos/*", strategy: "page" }, (ctx, 
     return JSON.stringify(json, null, 2);
 });
 
-// the demo: a fetch made from dummyjson.com's own JavaScript world (wt.onSite, so the "page" strategy sees it)
-wt.onSite("https://dummyjson.com/", async () => {
+// the demo: a fetch made from dummyjson.com's own JavaScript world (wt.onSite, so the "page" strategy sees it),
+// once the DOM is ready (onSite runs before the site's own scripts by default; it draws here)
+wt.onSite({ url: "https://dummyjson.com/", when: "document_end" }, async () => {
     const out = document.createElement("pre");
     out.style.cssText = "margin: 0; padding: 8px; font: 14px monospace; color: #fff; background: #27a";
     document.body.prepend(out);

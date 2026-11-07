@@ -7,6 +7,16 @@ its section below.
 
 ## [Unreleased]
 
+### Breaking
+
+- `wt.onSite` now runs at `document_start` by default, before the site's own scripts, so `ctx.patch(window, "fetch", …)` is in place before site code holds the original. `document.body` is usually `null` then; an `onSite` that reads the DOM or globals set up while the page loads needs `when: "document_end"`. `onPage` and `onOverlay` still default to `document_end`. Rule of thumb: `onSite` runs before the site, `onPage`/`onOverlay` when the DOM is ready; `when` changes that.
+
+### Changed
+
+- `ctx.mount(target, ui)` waits for a selector that matches nothing yet, instead of throwing, until the run ends. An `onPage` at `document_start` can now mount too.
+- Saving a script runs its overlay handlers right away, whatever their `when`, like page handlers already did.
+- The two dummyjson samples that draw on the page set `when: "document_end"`.
+
 ## [0.21.0-alpha] - 2026-11-07
 
 ### Added

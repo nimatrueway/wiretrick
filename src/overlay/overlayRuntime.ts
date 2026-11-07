@@ -92,6 +92,8 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
     const ran = new Set<number>();
     const navFns = new Set<(url: string) => void>();
     let phase = init.phase ?? "document_start";
+    /** a save's handlers run at once, whatever their `when` */
+    let hotNow = false;
     let runDue = () => {};
     const page = { url: init.url, fetch: (request: any, bypass: boolean) => ep.call("pagefetch", { request, bypass }) };
     ep.on("when", (a) => {
@@ -235,6 +237,7 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
         exposer.done();
         gen = g;
         ran.clear();
+        hotNow = hot;
         runDue();
         life.commit(g);
     };
@@ -258,7 +261,7 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
         const g = gen;
         if (!g) return;
         for (const d of handlers) {
-            if (ran.has(d.route.index) || rank(d.route.when) > rank(phase)) continue;
+            if (ran.has(d.route.index) || (!hotNow && rank(d.route.when) > rank(phase))) continue;
             ran.add(d.route.index);
             try {
                 fireRun(life, g, d, ctx, exposer, (e) => log("error", errorLine(e, "onOverlay")));

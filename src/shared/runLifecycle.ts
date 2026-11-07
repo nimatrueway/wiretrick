@@ -26,7 +26,7 @@ export interface LifeOptions {
     react?: () => ReactDomClient;
     /** mount hosts get a closed shadow root (default true; the overlay frame is isolated already) */
     shadow?: boolean;
-    /** a teardown failed */
+    /** a teardown, or a ctx.mount that waited for its target, failed */
     onError?: (e: unknown) => void;
 }
 
@@ -107,6 +107,8 @@ export class ScriptLife {
     private readonly mounts = new Map<string, Mount>();
     /** element targets of ctx.mount: a stable id each, so a mount there keeps its key */
     private readonly targetIds = new WeakMap<Element, number>();
+    /** ctx.mount targets not on the page yet, per mount key: the latest UI waits for them */
+    private readonly waiting = new Map<string, { run: Run; jsx: unknown; stop: () => void }>();
     private nextTargetId = 0;
     private stopped = false;
 
@@ -356,16 +358,17 @@ export class ScriptLife {
         if (target !== undefined && typeof target !== "string" && !isTarget(target)) throw new TypeError("ctx.mount: the target must be a selector or an element");
         const doc = this.o.doc;
         const shadow = this.o.shadow !== false;
-        const at = typeof target === "string" ? doc.querySelector(target) : (target ?? (shadow ? doc.documentElement : doc.body || doc.documentElement));
-        if (!at) throw new Error(`ctx.mount: nothing on the page matches "${target}"`);
-        // one mount per (handler, target): mounting there again re-renders it
-        const key = "mount:" + run.h + (typeof target === "string" ? ":" + target : target ? "@" + this.targetId(target) : "");
         let client: ReactDomClient;
         try {
             client = this.o.react!();
         } catch {
             throw new Error("ctx.mount needs React: write the UI with JSX (it loads the built-in React)");
         }
+        // one mount per (handler, target): mounting there again re-renders it
+        const key = "mount:" + run.h + (typeof target === "string" ? ":" + target : target ? "@" + this.targetId(target) : "");
+        const at = typeof target === "string" ? doc.querySelector(target) : (target ?? (shadow ? doc.documentElement : doc.body || doc.documentElement));
+        if (!at) return this.awaitTarget(run, key, target as string, jsx);
+        this.waiting.get(key)?.stop();
         this.claim(run, key, () => {
             let host: Element;
             let container: Element;
@@ -395,6 +398,40 @@ export class ScriptLife {
         // the page re-rendered the target (or dropped the host): put it back
         if (m.host.parentNode !== at) at.appendChild(m.host);
         m.root.render(jsx);
+    }
+
+    /** mount once `target` is on the page (a later mount there in the run replaces `jsx`); the run ending stops the wait */
+    private awaitTarget(run: Run, key: string, target: string, jsx: unknown): void {
+        const sig = run.ctl.signal;
+        if (sig.aborted) throw sig.reason;
+        const w = this.waiting.get(key);
+        if (w?.run === run) {
+            w.jsx = jsx;
+            return;
+        }
+        w?.stop();
+        const doc = this.o.doc;
+        const mo = new MutationObserver(() => {
+            if (!doc.querySelector(target)) return;
+            entry.stop();
+            try {
+                this.mount(run, target, entry.jsx);
+            } catch (e) {
+                if (!sig.aborted) this.o.onError?.(e);
+            }
+        });
+        const entry = {
+            run,
+            jsx,
+            stop: () => {
+                mo.disconnect();
+                sig.removeEventListener("abort", entry.stop);
+                if (this.waiting.get(key) === entry) this.waiting.delete(key);
+            },
+        };
+        this.waiting.set(key, entry);
+        sig.addEventListener("abort", entry.stop, { once: true });
+        mo.observe(doc, { childList: true, subtree: true });
     }
 
     private targetId(el: Element): number {

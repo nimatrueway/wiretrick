@@ -172,9 +172,9 @@ const rpcCode = (origin: string) => `const overlay = wt.onOverlay("${origin}/ov-
 wt.onSite("${origin}/ov-app*", () => {
     try {
         void overlay.hit();
-        document.body.dataset.mainCall = "called";
+        document.documentElement.dataset.mainCall = "called";
     } catch (e) {
-        document.body.dataset.mainCall = "threw " + (e as Error).name + ": " + (e as Error).message;
+        document.documentElement.dataset.mainCall = "threw " + (e as Error).name + ": " + (e as Error).message;
     }
 });
 
@@ -311,7 +311,7 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
         JSON.stringify(seen)
     );
 
-    const mainCall = await waitFor<string>(() => page.evaluate(() => document.body.dataset.mainCall || ""), (v) => !!v, 5000);
+    const mainCall = await waitFor<string>(() => page.evaluate(() => document.documentElement.dataset.mainCall || ""), (v) => !!v, 5000);
     check(t("overlay.fn() in onSite code throws SiteCannotCallError"), /^threw SiteCannotCallError: onSite code can't call handles/.test(mainCall), mainCall);
     const mainProblem = await waitFor<any>(async () => ((await send({ type: "listScripts" })) || []).find((s: any) => s.id === "s_ov_rpc")?.runtimeError, (e) => !!e?.ctx, 5000);
     check(
@@ -652,7 +652,7 @@ export async function checkPageStores(ctx: any, mgr: any, origin: string, check:
     await send({ type: "deleteScript", id: "s_two" });
 }
 
-const placeCode = (origin: string) => `const site = wt.onSite("${origin}/ov-layer*", (ctx) => {
+const placeCode = (origin: string) => `const site = wt.onSite({ url: "${origin}/ov-layer*", when: "document_end" }, (ctx) => {
     document.body.dataset.siteRan = String((window as any).__site);
     return { site: () => (window as any).__site + ":" + ctx.url };
 });
@@ -715,9 +715,9 @@ wt.onOverlay("${origin}/ov-isost*", () => {
 const site = wt.onSite("${origin}/ov-isost*", (ctx) => {
     (window as any).__isoSecret = "PAGE-GLOBAL-42";
     try {
-        document.body.dataset.mainStore = "read " + ps.hits;
+        document.documentElement.dataset.mainStore = "read " + ps.hits;
     } catch (e) {
-        document.body.dataset.mainStore = (e as Error).message;
+        document.documentElement.dataset.mainStore = (e as Error).message;
     }
     const pings: string[] = [], waiting: ((v: string) => void)[] = [];
     addEventListener("wt-e2e-ping", (e: any) => {
@@ -785,7 +785,7 @@ export async function checkIsoStores(ctx: any, mgr: any, origin: string, check: 
     const v0 = await until(a, () => true);
     check(t("isolated code reads its stores (primed)"), v0?.ps === 0 && typeof v0?.g === "number", JSON.stringify(v0));
     const g0 = v0?.g ?? 0;
-    const mainErr = await waitFor<string>(() => a.evaluate(() => document.body.dataset.mainStore || ""), (v) => !!v, 8000);
+    const mainErr = await waitFor<string>(() => a.evaluate(() => document.documentElement.dataset.mainStore || ""), (v) => !!v, 8000);
     check(t("onSite code can't use them, and is told to use them in wt.onPage"), mainErr.includes("aren't available in onSite code") && mainErr.includes("use them in wt.onPage"), mainErr);
     const evaluated = await waitFor<string>(() => a.evaluate(() => document.body.dataset.evaluated || ""), (v) => !!v, 8000);
     const isoGlobal = await a.evaluate(() => document.body.dataset.isoGlobal || "");
@@ -837,9 +837,9 @@ const site = wt.onSite("${origin}/ov-unsafe*", () => {
     (window as any).__unsafeSite = "SITE-UNS";
     try {
         void overlay.greet("site");
-        document.body.dataset.siteCall = "called";
+        document.documentElement.dataset.siteCall = "called";
     } catch (e) {
-        document.body.dataset.siteCall = (e as Error).name + ": " + (e as Error).message;
+        document.documentElement.dataset.siteCall = (e as Error).name + ": " + (e as Error).message;
     }
     return {
         where: () => (window as any).__unsafeSite + ":" + location.pathname,
@@ -874,7 +874,7 @@ export async function checkSiteHandles(ctx: any, mgr: any, origin: string, check
     await mgr.waitForTimeout(800);
     const a = await ctx.newPage();
     await a.goto(`${origin}/ov-unsafe?t=A`, { waitUntil: "load", timeout: 15000 });
-    const siteCall = await waitFor<string>(() => a.evaluate(() => document.body.dataset.siteCall || ""), (v) => !!v, 8000);
+    const siteCall = await waitFor<string>(() => a.evaluate(() => document.documentElement.dataset.siteCall || ""), (v) => !!v, 8000);
     check(t("a handle call in onSite code throws SiteCannotCallError"), siteCall.startsWith("SiteCannotCallError: onSite code can't call handles"), siteCall);
     const f = await overlayFrame(a, "#uns-ov");
     const asked = f ? await f.evaluate(() => (window as any).askSite()).catch((e: any) => "rejected: " + e) : "";

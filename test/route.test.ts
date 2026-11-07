@@ -18,8 +18,12 @@ describe("normalizeRoute", () => {
         });
     });
 
-    it("onDocument: when defaults to document_end; request-only options are rejected", () => {
+    it("when defaults per place (onSite: document_start; onPage, onOverlay: document_end); request-only options are rejected", () => {
         expect(normalizeRoute("onDocument", "*", 0).when).toBe("document_end");
+        expect(normalizeRoute("onDocument", "*", 0, "onPage").when).toBe("document_end");
+        expect(normalizeRoute("onDocument", "*", 0, "onSite").when).toBe("document_start");
+        expect(normalizeRoute("onOverlay", "*", 0, "onOverlay").when).toBe("document_end");
+        expect(normalizeRoute("onDocument", { url: "*", when: "document_end" }, 0, "onSite").when).toBe("document_end");
         expect(normalizeRoute("onDocument", { url: "*", when: "document_idle" }, 0).when).toBe("document_idle");
         expect(() => normalizeRoute("onDocument", { url: "*", when: "later" }, 0)).toThrow(/when must be one of/);
         expect(() => normalizeRoute("onDocument", { url: "*", when: "DOMContentLoaded" }, 0)).toThrow(/when must be one of document_start, document_end, document_idle$/);

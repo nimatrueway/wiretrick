@@ -152,7 +152,28 @@ describe("ScriptLife", () => {
         document.body.innerHTML = `<div id="slot"></div>`;
         reload((ctx) => (ctx as any).mount("#slot", "v3"));
         expect(document.querySelector("#slot > wiretrick-mount")).toBe(slotHost);
-        expect(() => reload((ctx) => (ctx as any).mount("#nope", "x"))).toThrow(/nothing on the page matches "#nope"/);
+    });
+
+    it("ctx.mount waits for a target that isn't on the page yet (the latest UI); the run ending stops the wait", async () => {
+        const tick = () => new Promise((r) => setTimeout(r, 0));
+        const { ctx } = reload((ctx) => (ctx as any).mount("#later", "a"));
+        (ctx as any).mount("#later", "b");
+        expect(react.roots.length).toBe(0);
+        document.body.appendChild(Object.assign(document.createElement("div"), { id: "later" }));
+        await tick();
+        expect(react.roots.length).toBe(1);
+        expect(react.roots[0].rendered).toEqual(["b"]);
+        expect(document.querySelector("#later > wiretrick-mount")).not.toBeNull();
+        // a reload whose target is gone: the old mount goes, and nothing mounts once the run ends
+        document.body.innerHTML = "";
+        reload((ctx) => (ctx as any).mount("#gone", "c"));
+        expect(react.roots[0].unmounted).toBe(true);
+        reload(() => {});
+        document.body.appendChild(Object.assign(document.createElement("div"), { id: "gone" }));
+        await tick();
+        expect(react.roots.length).toBe(1);
+        expect(errors).toEqual([]);
+        expect(() => reload((ctx) => (ctx as any).mount("#bad[", "x"))).toThrow();
     });
 
     it("ctx.mount again in the same run (no target, or the same element) re-renders that mount", () => {

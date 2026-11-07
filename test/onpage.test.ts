@@ -25,7 +25,7 @@ describe("wt.onPage", () => {
         expect([iso, site, idle].map((r) => r.api)).toEqual(["onPage", "onSite", "onPage"]);
         expect([iso, site, idle].map((r) => r.key)).toEqual(["onPage:0", "onSite:0", "onPage:1"]);
         expect([iso, site, idle].map(routeLabel)).toEqual(["onPage #1", "onSite #1", "onPage #2"]);
-        expect(idle.when).toBe("document_idle");
+        expect([iso, site, idle].map((r) => r.when)).toEqual(["document_end", "document_start", "document_idle"]);
     });
 
     it("returns a handle whose calls reject in the background", async () => {

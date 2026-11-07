@@ -332,7 +332,8 @@ declare namespace Wiretrick {
          * closed shadow root (the page's CSS doesn't reach it; `ctx.style`
          * does). In `onOverlay` it goes into the overlay's `<body>`. A
          * handler has one mount per target: mounting again there (also
-         * later in the run) re-renders it.
+         * later in the run) re-renders it. A selector that matches nothing
+         * yet is waited for (until the run ends).
          *
          * @example
          * wt.onPage("*://example.com/*", (ctx) => {
@@ -544,7 +545,11 @@ declare namespace Wiretrick {
     interface DocumentOptions {
         /**
          * **When** the handler runs, relative to the page's own loading.
-         * Default: `"document_end"`.
+         * `onSite` runs before the site, `onPage`/`onOverlay` when the DOM
+         * is ready; `when` changes that. Default: `"document_start"` for
+         * `wt.onSite` (to get in ahead of the site's scripts: patch
+         * `fetch`, catch a store as it's created), `"document_end"` for
+         * `wt.onPage` and `wt.onOverlay` (DOM work needs `<body>`).
          *
          * **How it gets there:** in every frame (top page *and* iframes) the
          * extension injects a small hook at `document_start`. The hook asks
@@ -554,8 +559,8 @@ declare namespace Wiretrick {
          *
          * | `when` | Fires | DOM state |
          * |---|---|---|
-         * | `"document_start"` | as soon as the script is compiled | only `<html>`; `head`/`body` usually `null` |
-         * | `"document_end"` *(default)* | at `DOMContentLoaded` (DOM parsed) | whole DOM queryable; images/iframes may still load |
+         * | `"document_start"` *(onSite)* | as soon as the script is compiled | only `<html>`; `head`/`body` usually `null` |
+         * | `"document_end"` *(onPage, onOverlay)* | at `DOMContentLoaded` (DOM parsed) | whole DOM queryable; images/iframes may still load |
          * | `"document_idle"` | after the page's `load` event | every subresource finished |
          *
          * **`"document_start"`** — runs while the HTML is still being parsed,
@@ -592,7 +597,10 @@ declare namespace Wiretrick {
          * - Saving the script while the page is open runs the handler again
          *   **immediately**, regardless of `when` (a new run): what it sets
          *   up with `ctx.once` / `ctx.patch` / `ctx.style` / `ctx.mount` is
-         *   kept or undone, the previous run's `ctx.signal` aborts.
+         *   kept or undone, the previous run's `ctx.signal` aborts. No
+         *   `document.readyState` guards needed.
+         * - `ctx.mount(target, ui)` waits for `target`, so an `onPage` at
+         *   `document_start` can still draw once the target appears.
          * - A script may register several page handlers, each with its
          *   own route and `when`. Handlers with the same `when` run in
          *   script-list order, then registration order.
@@ -603,7 +611,7 @@ declare namespace Wiretrick {
          *   page-defined globals (e.g. `window.myApp`) are not visible.
          *
          * @example
-         * // default: document_end (DOMContentLoaded)
+         * // onPage default: document_end (DOMContentLoaded)
          * wt.onPage("*://example.com/*", () => {
          *     document.title = "🎯 " + document.title;
          * });
@@ -954,7 +962,8 @@ declare const wt: {
      * `onOverlay` code to call ({@link Wiretrick.Remote}).
      *
      * Runs once per document load in every frame whose URL matches the
-     * route (default `when: "document_end"`). See
+     * route, by default before the site's own scripts (`when:
+     * "document_start"`; `document.body` is usually `null` then). See
      * {@link Wiretrick.DocumentOptions.when} for timing and
      * {@link Wiretrick.PageRoute} for the three places.
      *

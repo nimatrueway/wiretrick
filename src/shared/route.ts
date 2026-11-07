@@ -164,7 +164,7 @@ export function normalizeRoute(kind: RouteKind, raw: unknown, index: number, api
         if (obj.when !== undefined) {
             if (!DOCUMENT_WHENS.includes(obj.when)) throw new Error(`${where}: when must be one of ${DOCUMENT_WHENS.join(", ")}`);
             route.when = obj.when;
-        } else route.when = "document_end";
+        } else route.when = api === "onSite" ? "document_start" : "document_end"; // onSite: ahead of the site's own code
         if (kind === "onDocument") route.world = api === "onSite" ? "page" : "isolated";
         return route;
     }

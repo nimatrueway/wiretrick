@@ -106,6 +106,20 @@ describe("overlay runtime", () => {
         expect(h.logs.filter((l) => l.level === "error")).toEqual([]);
     });
 
+    it("a save runs its handlers at once, whatever their `when`", async () => {
+        const code = `wt.onOverlay({ url: "*", when: "document_idle" }, () => { document.body.dataset.idle = String(Number(document.body.dataset.idle || 0) + 1); });`;
+        const h = await start(code, { phase: "document_start" });
+        await settle();
+        expect(document.body.dataset.idle).toBeUndefined();
+        h.bridge.push("overlay.update", { s: "s1", name: "demo", code: code + "\n// v2", codeHash: "h2", routes: [], url: "https://x.com/app/page", params: {}, stores: {}, page: "p1", libs: [], react: false, phase: "document_start" } as OverlayInit);
+        await settle();
+        expect(document.body.dataset.idle).toBe("1");
+        h.bridge.push("when", { phase: "document_idle" });
+        await settle();
+        expect(document.body.dataset.idle).toBe("1");
+        delete document.body.dataset.idle;
+    });
+
     it("reports handler errors and compile errors to the script's log", async () => {
         const h = await start(`wt.onOverlay("*", () => { throw new Error("kaboom"); });`);
         await settle();

@@ -707,8 +707,8 @@ import { useSnapshot } from "valtio";
 const site = wt.siteStore("site", { loggedIn: false, mockCart: false });
 
 wt.onSite("https://shop.example/*", (ctx) => {
-    // in the site's world: read its globals, react to the switch synchronously
-    site.loggedIn = !!(window as any).app?.user;
+    // in the site's world, ahead of its own scripts: react to the switch synchronously
+    site.loggedIn = /(^|; )session=/.test(document.cookie);
     const realFetch = window.fetch;
     window.fetch = (input, init) => (site.mockCart && String(input).includes("/cart") ? Promise.resolve(Response.json({ items: [] })) : realFetch(input, init));
     ctx.signal.addEventListener("abort", () => (window.fetch = realFetch)); // a save runs this again
@@ -838,6 +838,15 @@ wt.onPage("*://app.example.com/*", async (ctx) => {
 
 ### When page code runs — `when`
 
+**`onSite` runs before the site, `onPage`/`onOverlay` when the DOM is
+ready; `when` changes that.**
+
+| Place | Default `when` | Why |
+|---|---|---|
+| `wt.onSite` | `document_start` | it's there to get in *before* the site: `ctx.patch(window, "fetch", …)`, catching a store as the site creates it. By `document_end` most of what you'd patch has run, and site code may already hold the original functions |
+| `wt.onPage` | `document_end` | DOM work needs `<body>`; at `document_start` `querySelector` finds (almost) nothing |
+| `wt.onOverlay` | `document_end` | a GUI: nothing to gain by racing the parser |
+
 In every frame, Wiretrick's hook starts at `document_start`, asks the
 background for the scripts with a page route matching that frame's URL,
 compiles them and captures the matching handlers (stored, not yet run).
@@ -845,17 +854,23 @@ Each then runs once, at its route's `when`. Handlers with the same `when`
 run in script-list order, then registration order.
 
 ```ts
+wt.onSite("*://example.com/*", () => { ... });                                       // default: document_start
 wt.onPage("*://example.com/*", () => { ... });                                       // default: document_end
-wt.onPage({ url: "*://example.com/*", when: "document_start" }, () => { ... });      // while HTML is still parsing
-wt.onPage({ url: "*://example.com/*", when: "document_end" }, () => { ... });        // DOMContentLoaded (DOM parsed)
-wt.onPage({ url: "*://example.com/*", when: "document_idle" }, () => { ... });       // after the page's load event
+wt.onSite({ url: "*://example.com/*", when: "document_idle" }, () => { ... });       // reads globals the site sets up while loading
+wt.onPage({ url: "*://example.com/*", when: "document_start" }, () => { ... });      // sees the parser's first nodes
 ```
 
 | `when` | Runs | DOM state | Use for |
 |---|---|---|---|
-| `document_start` | as soon as the script is compiled | `<html>` only; `head`/`body` usually `null` | stubbing globals, `MutationObserver` on `document`, capture listeners — getting in ahead of page code |
-| `document_end` *(default)* | at `DOMContentLoaded` (DOM parsed), `defer`/module scripts done | complete DOM; images/CSS/iframes may still load; framework hydration may not have happened | most title/text/attribute changes |
+| `document_start` *(`onSite`)* | as soon as the script is compiled | `<html>` only; `head`/`body` usually `null` | stubbing globals, `MutationObserver` on `document`, capture listeners — getting in ahead of page code |
+| `document_end` *(`onPage`, `onOverlay`)* | at `DOMContentLoaded` (DOM parsed), `defer`/module scripts done | complete DOM; images/CSS/iframes may still load; framework hydration may not have happened | most title/text/attribute changes |
 | `document_idle` | after the page's `load` event | everything loaded | final layout/sizes, content built during load |
+
+`when` stays on all three for the exceptions: an `onSite` that reads
+globals the site sets up while loading, an `onPage` that must see the
+parser's first nodes. An `onPage` at `document_start` can still draw:
+[`ctx.mount(target, ui)`](#hot-reload--runs-and-ctx) waits for `target`,
+so one handler can add an early listener and a late mount.
 
 - **Already past that moment?** (slow bundle, bfcache restore) The
   handler runs immediately.
@@ -874,6 +889,9 @@ wt.onPage({ url: "*://example.com/*", when: "document_idle" }, () => { ... });  
   over.
 - **Saving the script** runs the handlers again right away, whatever their
   `when`, without reloading the page ([hot reload](#hot-reload--runs-and-ctx)).
+  What they set up with `ctx.once`/`ctx.patch`/`ctx.style`/`ctx.mount` is
+  kept, not added twice, so no `if (document.readyState …)` guards are
+  needed.
 - **Async handlers** aren't awaited; `when` only sets when they start.
 - `ctx` has the request-context shape: `ctx.url` is the frame's URL (the
   page's in an overlay); `method`, `resourceType` and `groups` are
@@ -887,7 +905,8 @@ or a Redux store directly, wraps the site's functions with
 the `page` strategy (a `fetch` in `onPage` code doesn't).
 
 ```ts
-wt.onSite({ url: "*://app.example.com/*", when: "document_start" }, (ctx) => {
+// by default before the site's own scripts: they get the patched fetch
+wt.onSite("*://app.example.com/*", (ctx) => {
     ctx.patch(window, "fetch", (orig) => (input, init) => {
         console.log("fetch", String(input));
         return orig(input, init);
@@ -1127,7 +1146,9 @@ wt.onPage("*://app.example.com/*", (ctx) => {
     Without a target it floats over the page (`position: fixed` at the top
     left); with one (a selector or an element) it's appended inside it, and
     put back if the page removed it when `ctx.mount` runs again. A selector
-    that matches nothing throws.
+    that matches nothing yet is waited for (the latest UI mounts when it
+    appears; the run ending stops the wait), so `ctx.mount` works from
+    `document_start` too.
   - In `onOverlay` it's a plain `<div>` in the overlay's `<body>` (or the
     target).
   - A handler has one mount per target: calling `ctx.mount` again with
