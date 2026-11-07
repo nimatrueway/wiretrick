@@ -1514,7 +1514,7 @@ function updateProblems(): void {
     // explorer order (settings.yaml first)
     const order = new Map(treeRows(true).map((r, i) => [r.id, i]));
     problemGroups = collectProblems(
-        scripts.map((s) => ({ id: s.id, label: scriptFileName(s.meta.name), error: s.error, ruleErrors: s.ruleErrors, runtimeError: s.runtimeError, typeErrors: s.typeErrors, routeWarnings: s.routeWarnings, routes: s.meta.routes, code: s.code })),
+        scripts.map((s) => ({ id: s.id, label: scriptFileName(s.meta.name), name: s.meta.name, error: s.error, ruleErrors: s.ruleErrors, runtimeError: s.runtimeError, typeErrors: s.typeErrors, routeWarnings: s.routeWarnings, routes: s.meta.routes, code: s.code })),
         live,
         settings,
         data

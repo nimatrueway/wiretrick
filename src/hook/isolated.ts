@@ -224,12 +224,12 @@ import { SITE_DOWN_KINDS } from "../shared/siteStoreHost";
             const codeOf = (importer: string) => (importer === init.name ? init.src : (init.libs.find((l) => l.name === importer)?.src ?? ""));
             const requireFrom = makeLibRequire(
                 init.libs,
-                (lib, require, moduleObj) => scriptFunction(lib.src!)(shimFor(lib.name, lib.params || {}, false).wt, consoleProxy, require, moduleObj, moduleObj.exports),
+                (lib, require, moduleObj) => scriptFunction(lib.src!, lib.name)(shimFor(lib.name, lib.params || {}, false).wt, consoleProxy, require, moduleObj, moduleObj.exports),
                 { builtin: (spec, importer, loadUrl) => builtinModule(spec, codeOf(importer), loadUrl) }
             );
             const moduleObj = { exports: {} as any };
             const shim = shimFor(init.name, init.params || {}, true);
-            scriptFunction(init.src)(shim.wt, consoleProxy, requireFrom(init.name), moduleObj, moduleObj.exports);
+            scriptFunction(init.src, init.name)(shim.wt, consoleProxy, requireFrom(init.name), moduleObj, moduleObj.exports);
             dom = shim.dom;
             reactDom = () => requireFrom(init.name)("react-dom/client");
         } catch (e: any) {

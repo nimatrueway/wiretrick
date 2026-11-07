@@ -192,7 +192,7 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
         const requireFrom = makeLibRequire(
             next.libs,
             (lib, require, moduleObj) => {
-                const c = compileScript(lib.src!, { ...common, paramValues: lib.params, importModule: require, remote: () => inertRemote(LIB_REMOTE) });
+                const c = compileScript(lib.src!, { ...common, name: lib.name, paramValues: lib.params, importModule: require, remote: () => inertRemote(LIB_REMOTE) });
                 if (c.error) throw new Error(`${lib.name}: ${c.error}`);
                 moduleObj.exports = c.exports;
             },
@@ -210,6 +210,7 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
         const sig = () => g.signal;
         const compiled = compileScript(next.code, {
             ...common,
+            name: init.name,
             paramValues: next.params,
             importModule: requireFrom(init.name),
             remote: (r) => {

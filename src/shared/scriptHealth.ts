@@ -1,3 +1,5 @@
+import { rewriteFrame, scriptFrame } from "./scriptError";
+
 /** A script's error state as shown by the manager list and the popup. */
 export interface ScriptHealthInput {
     error: string | null;
@@ -16,11 +18,15 @@ export interface ScriptHealth {
     tooltip: string;
 }
 
-/** Drop engine-internal stack frames (extension / anonymous) — keep the user's. */
+/** The user's stack frames: raw script frames mapped to the source, every other raw frame (extension, hook, package) dropped. */
 export function userFrames(msg: string): string {
     return msg
         .split("\n")
-        .filter((l) => !/^\s*at .*(chrome-extension:|moz-extension:|<anonymous>)/.test(l))
+        .flatMap((l) => {
+            if (!/^\s*at\s/.test(l)) return [l];
+            if (scriptFrame(l)) return [rewriteFrame(l)!];
+            return /:\/\/|<anonymous>|\(native\)/.test(l) ? [] : [l];
+        })
         .join("\n");
 }
 

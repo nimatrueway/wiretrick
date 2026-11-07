@@ -217,7 +217,7 @@ import { siteBuiltin } from "../shared/siteBuiltin";
         // named utils, "./a.json" → the data file)
         const requireFrom = makeLibRequire(
             libSources,
-            (lib, require, moduleObj) => scriptFunction(lib.src!)(makeDocumentShim(null, lib.name, lib.params || {}).wt, scriptConsole(null, lib.name), require, moduleObj, moduleObj.exports),
+            (lib, require, moduleObj) => scriptFunction(lib.src!, lib.name)(makeDocumentShim(null, lib.name, lib.params || {}).wt, scriptConsole(null, lib.name), require, moduleObj, moduleObj.exports),
             { builtin: siteBuiltin, onSite: true }
         );
         const compiledDocument: { scriptId: string; name: string; when: DocumentWhen; d: PageDocumentHandler; exposer: Exposer; life: ScriptLife; gen: Generation }[] = [];
@@ -251,7 +251,7 @@ import { siteBuiltin } from "../shared/siteBuiltin";
                 // shadow `console` inside the script so its console.* calls
                 // land in the extension LOG (not the page console);
                 // require resolves the shipped libs
-                const fn = scriptFunction(d.src);
+                const fn = scriptFunction(d.src, d.name);
                 const moduleObj = { exports: {} as any };
                 const { wt, dom } = makeDocumentShim(d.scriptId, d.name, d.params || {}, ex);
                 fn(wt, scriptConsole(d.scriptId, d.name), requireFrom(d.name), moduleObj, moduleObj.exports);

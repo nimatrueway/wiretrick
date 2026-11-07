@@ -109,8 +109,15 @@ describe("collectProblems", () => {
         expect(at("route", "unknown handler")).toMatchObject({ line: 1 });
         expect(at("runtime", "TypeError")).toMatchObject({ line: 17, column: 3 });
         // raw eval frames (stored compile errors) are past the 3 wrapper lines
-        const raw = "Error: top\n    at eval (eval at scriptFunction (chrome-extension://x/bg.js:1:2), <anonymous>:7:9)\n    at new Function (<anonymous>)";
+        const raw = "Error: top\n    at hook (<anonymous>:2504:6)\n    at eval (wiretrick-script:///b:7:9)\n    at new Function (<anonymous>)";
         expect(collectProblems([script("b", { error: raw })], none)[0].problems[0]).toMatchObject({ kind: "compile", line: 4, column: 9 });
+        // the script's own frame, not an imported library's (and the message shows source positions)
+        const viaLib = "Error: top\n    at f (wiretrick-script:///lib/u.ts:9:2)\n    at eval (wiretrick-script:///main.ts:5:3)";
+        const p = collectProblems([script("m", { name: "main.ts", error: viaLib })], none)[0].problems[0];
+        expect(p).toMatchObject({ line: 2, column: 3 });
+        expect(p.message).toBe("Error: top\n    at f (lib/u.ts:6:2)\n    at main.ts:2:3");
+        const fmt = "[main.ts] onPage: Error: x\n    at f (lib/u.ts:6:2)\n    at main.ts:2:3";
+        expect(collectProblems([script("n", { name: "main.ts", runtimeError: { message: fmt, at: 0, count: 1 } })], none)[0].problems[0]).toMatchObject({ line: 2, column: 3 });
         expect(collectProblems([script("c", { error: "SyntaxError: Unexpected token (line 6)" })], none)[0].problems[0]).toMatchObject({ line: 6 });
         // no position at all: the first live error, else line 1
         const live = new Map<string, ProblemMarker[]>([["d", [{ severity: "error", message: "';' expected.", line: 5, column: 2 }]]]);

@@ -69,7 +69,7 @@ export function compileMv2(scripts: ScriptLike[], paramValues: { [scriptId: stri
     const out: CompiledEntry[] = [];
     for (const s of scripts) {
         if (!s.enabled || !want(s)) continue;
-        const compiled = compileScript(s.code, overridesFor({ id: s.id, name: s.meta.name, code: s.code }));
+        const compiled = compileScript(s.code, { ...overridesFor({ id: s.id, name: s.meta.name, code: s.code }), name: s.meta.name });
         // errored compiles stay in so the strategy logs the error (meta.active is false then)
         if (compiled.meta.active || compiled.error) out.push({ id: s.id, name: s.meta.name, compiled });
     }

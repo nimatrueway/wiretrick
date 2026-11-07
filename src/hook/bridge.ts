@@ -490,13 +490,13 @@ import type { RanApi } from "../shared/netTypes";
                 const codeOf = (importer: string) => (importer === h.name ? h.src : (libSources.find((l) => l.name === importer)?.src ?? ""));
                 const requireFrom = makeLibRequire(
                     libSources,
-                    (lib, require, moduleObj) => scriptFunction(lib.src!)(shimFor(null, lib.name, lib.params || {}, undefined, h.scriptId).wt, consoleProxy, require, moduleObj, moduleObj.exports),
+                    (lib, require, moduleObj) => scriptFunction(lib.src!, lib.name)(shimFor(null, lib.name, lib.params || {}, undefined, h.scriptId).wt, consoleProxy, require, moduleObj, moduleObj.exports),
                     // the built-ins: isolated code all of them, the onSite fallback valtio's core
                     world === "isolated" ? { builtin: (spec, importer, loadUrl) => builtinModule(spec, codeOf(importer), loadUrl) } : { builtin: siteBuiltin, onSite: true }
                 );
                 const moduleObj = { exports: {} as any };
                 const shim = shimFor(h.scriptId, h.name, h.params || {}, exposer, h.scriptId, gen);
-                scriptFunction(h.src)(shim.wt, consoleProxy, requireFrom(h.name), moduleObj, moduleObj.exports);
+                scriptFunction(h.src, h.name)(shim.wt, consoleProxy, requireFrom(h.name), moduleObj, moduleObj.exports);
                 dom = shim.dom;
                 if (world === "isolated") reactDoms.set(h.scriptId, () => requireFrom(h.name)("react-dom/client"));
             } catch (e: any) {

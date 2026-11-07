@@ -72,6 +72,8 @@ export function isAsyncFn(fn: any): boolean {
 }
 
 export interface ResApiOverrides {
+    /** the script's name: labels its stack frames */
+    name?: string;
     storage?: { get(key: string): Promise<any>; set(key: string, value: any): Promise<void> };
     /** receives the script's wt.log and console.* output (source: "wt.log", "console.warn", …) */
     logSink?: (level: ScriptLogLevel, source: string, text: string) => void;
@@ -156,7 +158,7 @@ export function compileScript(code: string, overrides?: ResApiOverrides): Compil
         js = keyPlaceCalls(js);
         const moduleObj = { exports: {} as any };
         // eslint-disable-next-line no-new-func
-        const fn = scriptFunction(js);
+        const fn = scriptFunction(js, overrides?.name ?? "");
         const shim = makeShim(owner, overrides);
         const requireShim = overrides?.importModule
             ? overrides.importModule
@@ -413,7 +415,7 @@ export function makeModuleResolver(
         // calls register into the importer's collector
         try {
             withCollector(createCollector(), () =>
-                scriptFunction(js)(
+                scriptFunction(js, lib.name)(
                     makeShim(createOwner(defaultMeta(lib.name), libOverrides.paramValues), libOverrides),
                     makeForwardingConsole(libOverrides.logSink),
                     resolveFrom(lib.name),
@@ -459,7 +461,7 @@ export function compileWithLibs(
         (lib) => ({ paramValues: paramValues?.[lib.id] }),
         { stubUnresolved: true, dataFiles, packages }
     );
-    const c = compileScript(target.code, { importModule: resolver.resolveFrom(target.name), paramValues: paramValues?.[target.id] });
+    const c = compileScript(target.code, { name: target.name, importModule: resolver.resolveFrom(target.name), paramValues: paramValues?.[target.id] });
     return { ...c, deps: [...resolver.deps] };
 }
 

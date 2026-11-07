@@ -9,6 +9,7 @@ import { ExtensionStrategy } from "../src/background/engine/strategies/extension
 import { DebuggerStrategy } from "../src/background/engine/strategies/debuggerStrategy";
 import { addUiPort, type LogEntry } from "../src/background/engine/logs";
 import { compileScript } from "../src/shared/compile";
+import { scriptFunction } from "../src/shared/scriptFn";
 import type { Script } from "../src/background/engine/scriptStore";
 
 // ---- log capture via a fake UI port ----
@@ -85,24 +86,31 @@ x.split(".");
 `;
 
 describe("formatScriptError / rewriteFrame", () => {
+    // a library's function, called from the script's top level, called by
+    // the page hook (an inline <script>: Chrome names its frames <anonymous>)
     const STACK = `TypeError: Cannot read properties of undefined (reading 'split')
-    at boom (eval at run (file:///x/scratch.mjs:15:20), <anonymous>:8:14)
-    at eval (eval at run (file:///x/scratch.mjs:15:20), <anonymous>:10:1)
-    at run (file:///x/scratch.mjs:16:9)
-    at ModuleJob.run (node:internal/modules/esm/module_job:343:25)`;
+    at boom (wiretrick-script:///lib/My%20Lib.ts:8:14)
+    at eval (wiretrick-script:///My%20Script:10:1)
+    at requireFrom (<anonymous>:2504:6)
+    at <anonymous>:2442:5
+    at Object.eval (https://unpkg.com/cmdk@1.1.1/dist/index.js:1:200)
+    at run (file:///x/scratch.mjs:16:9)`;
 
-    it("maps <anonymous> frames to the user source (constant wrapper offset)", () => {
+    it("maps each script's frames to its own source (constant wrapper offset); drops the rest", () => {
         const out = formatScriptError("My Script", STACK);
         expect(out.split("\n")).toEqual([
             "[My Script] TypeError: Cannot read properties of undefined (reading 'split')",
-            "    at boom (My Script:5:14)", // named user function, line 8 − 3
+            "    at boom (lib/My Lib.ts:5:14)", // the library's named function, line 8 − 3
             "    at My Script:7:1", // top-level body frame, line 10 − 3
         ]);
     });
 
-    it("drops extension/eval frames and keeps the message", () => {
-        expect(rewriteFrame("S", "    at run (file:///x.mjs:16:9)")).toBeNull();
-        expect(rewriteFrame("S", "    at ModuleJob.run (node:internal/x)")).toBeNull();
+    it("drops extension/hook/eval frames and keeps the message", () => {
+        expect(rewriteFrame("    at run (file:///x.mjs:16:9)")).toBeNull();
+        expect(rewriteFrame("    at ModuleJob.run (node:internal/x)")).toBeNull();
+        expect(rewriteFrame("    at <anonymous>:240:11")).toBeNull();
+        expect(rewriteFrame("    at f (wiretrick-script:///S:2:1)")).toBeNull(); // inside the wrapper
+        expect(rewriteFrame("  continued message")).toBe("  continued message");
     });
 
     it("context is inserted after the name; non-Error values work", () => {
@@ -110,15 +118,21 @@ describe("formatScriptError / rewriteFrame", () => {
         expect(formatScriptError("S", new TypeError("boom"), undefined)).toContain("[S] TypeError: boom");
     });
 
-    it("EVAL_WRAPPER_LINES matches the real new Function wrapper", () => {
-        // empirical: a throw at user line 1 reports <anonymous>:(1+OFFSET)
-        let line = 0;
+    it("a real scriptFunction names its frames; EVAL_WRAPPER_LINES matches the wrapper", () => {
+        const lib = scriptFunction(`module.exports = () => {\n    throw new Error("x");\n};`, "lib/a b.ts");
+        const libMod: any = { exports: {} };
+        lib({}, console, null, libMod, libMod.exports);
+        let err: any;
         try {
-            new Function("wt", `"use strict";\nthrow new Error("x");`)({});
-        } catch (e: any) {
-            line = Number(e.stack.match(/<anonymous>:(\d+):\d+/)?.[1]);
+            scriptFunction(`// one\nrequire()();`, "redwood/main.tsx")({}, console, () => libMod.exports, {}, {});
+        } catch (e) {
+            err = e;
         }
-        expect(line).toBe(1 + EVAL_WRAPPER_LINES);
+        expect(Number(err.stack.match(/wiretrick-script:\/\/\/lib\/a%20b\.ts:(\d+):\d+/)?.[1])).toBe(2 + EVAL_WRAPPER_LINES);
+        const frames = formatScriptError("redwood/main.tsx", err).split("\n").slice(1);
+        expect(frames).toHaveLength(2); // the test runner's frames are dropped
+        expect(frames[0]).toMatch(/lib\/a b\.ts:2:\d+\)?$/);
+        expect(frames[1]).toMatch(/^ {4}at redwood\/main\.tsx:2:\d+$/);
     });
 });
 
@@ -142,7 +156,7 @@ describe("extension strategy: error logs carry name + user line:col", () => {
         const good = storedScript("a", "Thrower", TOPLEVEL.replace(`x.split(".");`, ""));
         s.reload([{ ...good, code: TOPLEVEL }]);
         expect(entries.filter((e) => e.level === "error")).toEqual([]);
-        const err = compileScript(TOPLEVEL).error;
+        const err = compileScript(TOPLEVEL, { name: "Thrower" }).error;
         expect(formatScriptError("Thrower", err)).toContain("[Thrower]");
         expect(formatScriptError("Thrower", err)).toMatch(/Thrower:4:\d+/);
     });

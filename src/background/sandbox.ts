@@ -238,6 +238,7 @@ function ensureCompiled(scripts: PlainScript[], paramValues: Record<string, any>
         const deps = new Set<string>();
         currentDeps = deps;
         const compiledScript = compileScript(s.code, {
+            name: s.name,
             importModule: resolveImport(s.name),
             paramValues: paramValues?.[s.id],
             storage: {

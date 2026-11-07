@@ -7,6 +7,10 @@ its section below.
 
 ## [Unreleased]
 
+### Fixed
+
+- Error stack traces point at the right file and line. A script's `onSite` error listed Wiretrick's own page code as lines of the script (like `feature-flag-override.tsx:2504:6` in a 330-line file), and a library script's lines carried the importing script's name. Each frame now names the script it's in, and the rest are left out. The Problems view goes to the line in the script itself.
+
 ## [0.22.3-alpha] - 2026-11-07
 
 ### Fixed

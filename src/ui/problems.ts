@@ -3,7 +3,7 @@
  * file, and settings.yaml). Unlike Log lines, a Problem goes away by itself once it is
  * fixed — type errors live as you type, the rest when the script is saved.
  */
-import { EVAL_WRAPPER_LINES } from "../shared/scriptError";
+import { scriptFrame } from "../shared/scriptError";
 import { userFrames } from "../shared/scriptHealth";
 import { USER_SCRIPTS_PROBLEM } from "../shared/userScriptsStatus";
 import { NO_SITE_STORE, SITE_NO_STORES } from "../shared/remote";
@@ -74,6 +74,8 @@ export interface ProblemScript {
     id: string;
     /** shown name (e.g. "Foo.ts") */
     label: string;
+    /** the stored name its stack frames carry (default: any frame is its own) */
+    name?: string;
     error?: string | null;
     ruleErrors?: string[];
     runtimeError?: { message: string; at: number; count: number; ctx?: string } | null;
@@ -114,20 +116,22 @@ interface Position {
 
 /**
  * Where an error points in the user's source: a frame rewritten to the
- * source (`at fn (Name:12:5)`), a raw eval frame (`<anonymous>:15:5`, past
- * the wrapper lines) or a syntax error's `(line 12)`. The first user frame
- * is where it was thrown.
+ * source (`at fn (Name:12:5)`), a raw script frame
+ * (`wiretrick-script:///Name:15:5`, past the wrapper lines) or a syntax
+ * error's `(line 12)`. The first frame of the script `name` (any script's,
+ * without one) is where it was thrown — an imported library's frames point
+ * into that library.
  */
-export function errorPosition(msg: string): Position | undefined {
+export function errorPosition(msg: string, name?: string): Position | undefined {
+    const own = name === undefined ? null : new RegExp(`(?:\\(|^\\s*at\\s+)${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:\\d+:\\d+\\)?\\s*$`);
     for (const l of msg.split("\n")) {
         if (!/^\s*at\s/.test(l)) continue;
-        const raw = /<anonymous>:(\d+):(\d+)/.exec(l);
-        if (raw) {
-            const line = Number(raw[1]) - EVAL_WRAPPER_LINES;
-            if (line >= 1) return { line, column: Number(raw[2]) };
+        const f = scriptFrame(l);
+        if (f) {
+            if (name === undefined || f.name === name) return { line: f.line, column: f.column };
             continue;
         }
-        if (/chrome-extension:|moz-extension:/.test(l)) continue;
+        if (/:\/\/|<anonymous>/.test(l) || (own && !own.test(l))) continue;
         const src = /:(\d+):(\d+)\)?\s*$/.exec(l);
         if (src) return { line: Number(src[1]), column: Number(src[2]) };
     }
@@ -275,7 +279,7 @@ export function collectProblems(scripts: ProblemScript[], liveMarkers: Map<strin
             const imp = /\bcannot import "([^"]+)"/.exec(raw);
             const spec = imp && lines ? s.code!.search(new RegExp(`["']${imp[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`)) : -1;
             if (spec >= 0) return rangeAt(lines!, spec + 1, imp![1].length);
-            const pos = errorPosition(raw);
+            const pos = errorPosition(raw, s.name);
             if (pos) return lines ? tokenRange(lines, pos) : pos;
             const h = handlerRange(raw, s);
             if (h) return h;
