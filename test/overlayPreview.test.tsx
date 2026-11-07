@@ -135,20 +135,24 @@ describe("preview host (state/preview.ts)", () => {
         frame.close();
     });
 
-    it("reloads on save only when the script's overlay changed; a new URL is remembered per script", async () => {
+    it("a save updates the running frame in place when the overlay changed; a new URL is remembered per script", async () => {
         mod.showPreview("s1");
         await tick();
         const f = fakeFrame();
         mod.attachFrame(f.win);
-        await f.ep().call("hello", { nonce: mod.preview.nonce });
+        const fep = f.ep();
+        const updates: any[] = [];
+        fep.on("overlay.update", (a) => void updates.push(a));
+        await fep.call("hello", { nonce: mod.preview.nonce });
         bg.links[0].push("bundle.update", { scripts: [] });
         await tick();
-        expect(bg.opens()).toHaveLength(1);
+        expect(updates).toHaveLength(0);
         bg.setHash("h2");
         bg.links[0].push("bundle.update", { scripts: [] });
         await tick();
-        expect(bg.opens()).toHaveLength(2);
-        expect(mod.preview).toMatchObject({ status: "loading", frameKey: 2 });
+        expect(bg.opens()).toHaveLength(1);
+        expect(updates).toEqual([expect.objectContaining({ codeHash: "h2", phase: "document_idle" })]);
+        expect(mod.preview).toMatchObject({ status: "ready", frameKey: 1 });
 
         mod.setPreviewUrl("https://nowhere.example/x");
         await tick();

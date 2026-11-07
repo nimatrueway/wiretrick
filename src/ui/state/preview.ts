@@ -153,11 +153,12 @@ async function scriptsChanged(): Promise<void> {
     if (!s || !l5) return;
     if (preview.status !== "ready") return void reloadPreview();
     const my = gen;
-    const hash = await l5.call("overlay.init", {}, s).then(
-        (init) => init.codeHash,
-        () => ""
-    );
-    if (my === gen && hash !== codeHash) void reloadPreview();
+    const init = await l5.call("overlay.init", {}, s).catch(() => null);
+    if (my !== gen || init?.codeHash === codeHash) return;
+    // a running frame recompiles in place
+    if (!init || !frame || frame.closed) return void reloadPreview();
+    codeHash = init.codeHash;
+    frame.push("overlay.update", { ...init, phase: "document_idle" });
 }
 
 /** the frame loaded: hand it a port; it proves itself with the nonce */

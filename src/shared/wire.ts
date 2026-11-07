@@ -91,6 +91,8 @@ export interface WireOps {
     "overlay.init": { req: {}; res: OverlayInit };
     /** L2: script `s`'s overlay closed or reloaded */
     "overlay.closed": { push: {} };
+    /** bridge/preview → overlay frame: the script changed; recompile in place */
+    "overlay.update": { push: OverlayInit };
     /** L3: `wt.fetch(…, { from: "page" })` — the bridge fetches, with the page's cookies */
     pagefetch: { req: { request: WireRequest; bypass: boolean }; res: WireResponse };
     /** L3: the page reached a `when` phase */

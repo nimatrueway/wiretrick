@@ -6,7 +6,9 @@
  * extension port, never through the page.
  *
  * Here the script's module graph evaluates with network and onPage
- * registrations inert; its overlay handlers (`wt.onOverlay`) run at their `when`. Stores
+ * registrations inert; its overlay handlers (`wt.onOverlay`) run at their
+ * `when`. A save recompiles here (`overlay.update`) and re-runs the
+ * handlers as new runs (shared/runLifecycle.ts): the frame stays. Stores
  * are replicas (shared/storeReplica.ts), `fetch` and `wt.fetch` fetch as
  * the page (the bridge does it, with the page's cookies), calls into
  * onPage code and back go through shared/rpc.ts, and the frame reports
@@ -21,6 +23,8 @@ import type { PackageModules } from "../shared/packageImports";
 import { Exposer, RpcClient, isRpcCall } from "../shared/rpc";
 import { inertRemote } from "../shared/remote";
 import { routeMatches, type DocumentWhen } from "../shared/route";
+import { fireRun, pageCtxBase, type PageDocumentHandler } from "../shared/pageShim";
+import { ScriptLife, type Generation, type ReactDomClient } from "../shared/runLifecycle";
 import { fromWireResponse, toWireRequest } from "../shared/wtFetch";
 import { formatScriptError } from "../shared/scriptError";
 import { formatLogArgs, scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
@@ -131,14 +135,6 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
         };
     };
 
-    const pkgs: PackageModules = { aliases: {}, modules: {} };
-    for (const l of init.libs) {
-        if (l.pkg) pkgs.modules[l.name] = l.pkg;
-        else if (l.alias !== undefined) pkgs.aliases[l.name] = l.alias;
-    }
-    if (init.react)
-        await ensureBuiltins([init.code, ...init.libs.map((l) => l.src ?? "")], pkgs).catch((e: any) => log("error", scriptLogLine(init.name, "overlay", `the built-in React failed to load: ${e?.message || e}`)));
-
     const common: ResApiOverrides = {
         storage: {
             get: async (key) => (await ep.call("storage.get", { key })).value,
@@ -156,79 +152,116 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
         win.fetch = async (input: RequestInfo | URL, rinit?: RequestInit) => fromWireResponse(await page.fetch(await toWireRequest(input, rinit ?? {}, page.url), false));
     }
 
-    const codeOf = (importer: string) => (importer === init.name ? init.code : (init.libs.find((l) => l.name === importer)?.src ?? ""));
-    const requireFrom = makeLibRequire(
-        init.libs,
-        (lib, require, moduleObj) => {
-            const c = compileScript(lib.src!, { ...common, paramValues: lib.params, importModule: require, remote: () => inertRemote(LIB_REMOTE) });
-            if (c.error) throw new Error(`${lib.name}: ${c.error}`);
-            moduleObj.exports = c.exports;
-        },
-        {
-            builtin: (spec, importer, loadUrl) => builtinModule(spec, codeOf(importer), loadUrl),
-            style: (css) => {
-                const el = doc.createElement("style");
-                el.textContent = css;
-                (doc.head || doc.documentElement).appendChild(el);
-            },
+    // runs, claims and hot reload (shared/runLifecycle.ts): the frame stays, the code changes
+    let reactDom: () => ReactDomClient = () => {
+        throw new Error("no React");
+    };
+    const life = new ScriptLife({ doc, shadow: false, react: () => reactDom(), onError: (e) => log("error", errorLine(e, "teardown")) });
+    let gen: Generation | null = null;
+    let handlers: PageDocumentHandler[] = [];
+    /** CSS imported by the script's libraries, added once */
+    const libCss = new Set<string>();
+    let loads = 0;
+
+    /** compile `next` and run its due handlers; a failed compile keeps the running code */
+    const load = async (next: OverlayInit, hot: boolean): Promise<void> => {
+        const my = ++loads;
+        const pkgs: PackageModules = { aliases: {}, modules: {} };
+        for (const l of next.libs) {
+            if (l.pkg) pkgs.modules[l.name] = l.pkg;
+            else if (l.alias !== undefined) pkgs.aliases[l.name] = l.alias;
         }
-    );
+        if (next.react)
+            await ensureBuiltins([next.code, ...next.libs.map((l) => l.src ?? "")], pkgs).catch((e: any) => log("error", scriptLogLine(init.name, "overlay", `the built-in React failed to load: ${e?.message || e}`)));
+        // a newer update came while React loaded
+        if (my !== loads) return;
+        if (hot) {
+            hub.prime({ [s]: next.stores });
+            exposer.reset();
+        }
+        const g = life.begin();
+        const codeOf = (importer: string) => (importer === init.name ? next.code : (next.libs.find((l) => l.name === importer)?.src ?? ""));
+        const requireFrom = makeLibRequire(
+            next.libs,
+            (lib, require, moduleObj) => {
+                const c = compileScript(lib.src!, { ...common, paramValues: lib.params, importModule: require, remote: () => inertRemote(LIB_REMOTE) });
+                if (c.error) throw new Error(`${lib.name}: ${c.error}`);
+                moduleObj.exports = c.exports;
+            },
+            {
+                builtin: (spec, importer, loadUrl) => builtinModule(spec, codeOf(importer), loadUrl),
+                style: (css) => {
+                    if (libCss.has(css)) return;
+                    libCss.add(css);
+                    const el = doc.createElement("style");
+                    el.textContent = css;
+                    (doc.head || doc.documentElement).appendChild(el);
+                },
+            }
+        );
+        const sig = () => g.signal;
+        const compiled = compileScript(next.code, {
+            ...common,
+            paramValues: next.params,
+            importModule: requireFrom(init.name),
+            remote: (r) => {
+                if (r.kind === "onDocument") return client.remote(r.key!, sig);
+                exposer.register(r.key!);
+                return local.remote(r.key!, sig);
+            },
+        });
+        if (compiled.error) {
+            log("error", `[${init.name}] overlay compile: ${compiled.error}`);
+            // the previous code keeps running
+            exposer.revert();
+            exposer.done();
+            life.discard(g);
+            return;
+        }
+        reactDom = () => requireFrom(init.name)("react-dom/client");
+        handlers = compiled.handlers.onOverlay
+            .filter(({ route }) => {
+                const on = routeMatches(route, page.url);
+                if (!on) exposer.fail(route.key!);
+                return on;
+            })
+            .map(({ fn, route }) => ({ h: route.key!, route, when: route.when || "document_end", fn }));
+        exposer.done();
+        gen = g;
+        ran.clear();
+        runDue();
+        life.commit(g);
+    };
 
-    const compiled = compileScript(init.code, {
-        ...common,
-        paramValues: init.params,
-        importModule: requireFrom(init.name),
-        remote: (r) => {
-            if (r.kind === "onDocument") return client.remote(r.key!);
-            exposer.register(r.key!);
-            return local.remote(r.key!);
-        },
-    });
-
-    let handlers = compiled.handlers.onOverlay;
-    if (compiled.error) {
-        log("error", `[${init.name}] overlay compile: ${compiled.error}`);
-        exposer.reset();
-        handlers = [];
-    }
-    handlers = handlers.filter(({ route }) => {
-        const on = routeMatches(route, init.url);
-        if (!on) exposer.fail(route.key!);
-        return on;
-    });
-    exposer.done();
-
-    const ctx = () => ({
-        url: page.url,
-        method: "GET",
-        tabUrl: page.url,
-        resourceType: "main_frame",
-        requestHeaders: {},
-        groups: {},
+    const ctx = (signal: AbortSignal) => ({
+        ...pageCtxBase(page.url),
         onNavigate(fn: (url: string) => void) {
             if (typeof fn !== "function") throw new TypeError("ctx.onNavigate: the argument must be a function");
             navFns.add(fn);
-            return () => void navFns.delete(fn);
+            const off = () => void navFns.delete(fn);
+            signal.addEventListener("abort", off, { once: true });
+            return off;
         },
-        shortcut,
+        shortcut(combo: string, fn: () => void, opts?: { priority?: ShortcutPriority }) {
+            const off = shortcut(combo, fn, opts);
+            signal.addEventListener("abort", off, { once: true });
+            return off;
+        },
     });
     runDue = () => {
-        for (const { fn, route } of handlers) {
-            if (ran.has(route.index) || rank(route.when) > rank(phase)) continue;
-            ran.add(route.index);
-            const h = route.key!;
-            let out: any;
+        const g = gen;
+        if (!g) return;
+        for (const d of handlers) {
+            if (ran.has(d.route.index) || rank(d.route.when) > rank(phase)) continue;
+            ran.add(d.route.index);
             try {
-                out = fn(ctx() as any);
+                fireRun(life, g, d, ctx, exposer, (e) => log("error", errorLine(e, "onOverlay")));
             } catch (e) {
-                exposer.fail(h);
                 log("error", errorLine(e, "onOverlay"));
-                continue;
             }
-            exposer.expose(h, out);
-            if (out && typeof out.then === "function") out.then(undefined, (e: any) => log("error", errorLine(e, "onOverlay")));
         }
     };
+    ep.on("overlay.update", (next) => void load(next, true));
     const onError = (ev: ErrorEvent) => log("error", ev.error ? errorLine(ev.error, "overlay") : scriptLogLine(init.name, "overlay", ev.message));
     const onRejection = (ev: PromiseRejectionEvent) => log("error", ev.reason instanceof Error ? errorLine(ev.reason, "overlay (unhandled rejection)") : scriptLogLine(init.name, "overlay (unhandled rejection)", formatLogArgs([ev.reason])));
     const onPointer = () => ep.push("focus", {});
@@ -246,9 +279,10 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
     };
     const stopRects = env.watchRects === false ? () => {} : watchRects(doc, win, measure);
 
-    runDue();
+    await load(init, false);
     measure();
     const stop = () => {
+        life.stop();
         stopRects();
         stopKeys();
         win.removeEventListener("error", onError);
@@ -256,6 +290,7 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
         win.removeEventListener("pointerdown", onPointer, true);
         ep.close("stopped");
     };
+    ep.onClose(() => life.stop("the overlay closed"));
     ep.onClose(stopRects);
     ep.onClose(stopKeys);
     return { client, exposer, ran, measure, stop };

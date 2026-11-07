@@ -197,7 +197,6 @@ wt.replaceResponse({ url: "*://en.wikipedia.org/robots.txt", strategy: wt.isFire
         code: `// Try it: open https://dummyjson.com/ — tick and untick "Mock /users/1" in
 // the panel at the bottom right, then click Fetch
 import { useState } from "react";
-import { createRoot } from "react-dom/client";
 import { useSnapshot } from "valtio";
 
 wt.metadata({ description: "A panel that turns a mock on and off" });
@@ -215,7 +214,7 @@ const site = wt.onSite("https://dummyjson.com/*", () => ({
 }));
 
 // the panel, drawn in this script's overlay: the page can't see or restyle it
-wt.onOverlay("https://dummyjson.com/*", () => {
+wt.onOverlay("https://dummyjson.com/*", (ctx) => {
     function Panel() {
         const snap = useSnapshot(mock);
         const [user, setUser] = useState("");
@@ -233,7 +232,8 @@ wt.onOverlay("https://dummyjson.com/*", () => {
             </div>
         );
     }
-    createRoot(document.body.appendChild(document.createElement("div"))).render(<Panel />);
+    // one panel, re-rendered in place when you save the script
+    ctx.mount(<Panel />);
 });`,
     },
     {
@@ -254,23 +254,25 @@ const page = wt.onPage("*://en.wikipedia.org/wiki/*", () => {
     };
 });
 
-// runs in this script's overlay (plain DOM here; React works too)
+// runs in this script's overlay; ctx.mount keeps one outline across saves
 wt.onOverlay("*://en.wikipedia.org/wiki/*", async (ctx) => {
-    const nav = document.body.appendChild(document.createElement("nav"));
-    nav.id = "wt-outline";
-    nav.style.cssText = "position: fixed; right: 16px; top: 80px; max-height: 70vh; overflow: auto; padding: 8px 12px; font: 13px system-ui; background: #fff; border: 1px solid #ccc; border-radius: 8px; box-shadow: 0 2px 8px #0003";
     const titles = await page.titles(); // string[], typed from the onPage handler
-    titles.forEach((title, i) => {
-        const a = nav.appendChild(document.createElement("a"));
-        a.href = "#";
-        a.textContent = title;
-        a.style.cssText = "display: block; padding: 2px 0; color: #36c; text-decoration: none";
-        a.onclick = (e) => {
-            e.preventDefault();
-            void page.scrollTo(i);
-        };
+    let hidden = false;
+    const render = () =>
+        ctx.mount(
+            <nav id="wt-outline" hidden={hidden} style={{ position: "fixed", right: 16, top: 80, maxHeight: "70vh", overflow: "auto", padding: "8px 12px", font: "13px system-ui", background: "#fff", border: "1px solid #ccc", borderRadius: 8, boxShadow: "0 2px 8px #0003" }}>
+                {titles.map((title, i) => (
+                    <a key={i} href="#" style={{ display: "block", padding: "2px 0", color: "#36c", textDecoration: "none" }} onClick={(e) => (e.preventDefault(), void page.scrollTo(i))}>
+                        {title}
+                    </a>
+                ))}
+            </nav>
+        );
+    render();
+    ctx.shortcut("Alt+Shift+O", () => {
+        hidden = !hidden;
+        render();
     });
-    ctx.shortcut("Alt+Shift+O", () => (nav.hidden = !nav.hidden));
 });`,
     },
     {

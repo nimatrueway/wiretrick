@@ -22,7 +22,8 @@ import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } 
 import { scriptFunction } from "../shared/scriptFn";
 import { makeLibRequire } from "../shared/scriptImports";
 import { builtinModule, builtinsReady, ensureBuiltins, setBuiltinLoader, shippedSources, sourceLoader } from "../shared/builtins";
-import { makePageShim, domHandlersFor, scheduleDocument, firePageHandler, type PageDocumentHandler } from "../shared/pageShim";
+import { makePageShim, domHandlersFor, scheduleDocument, fireRun, pageCtxBase, type PageDocumentHandler } from "../shared/pageShim";
+import { ScriptLife, type Generation, type ReactDomClient } from "../shared/runLifecycle";
 import { portEndpoint, type Endpoint, type IsoInit } from "../shared/wire";
 import { Exposer, RpcClient, isRpcCall, TOP_FRAME_ONLY, type RpcResult } from "../shared/rpc";
 import { inertRemote } from "../shared/remote";
@@ -66,8 +67,15 @@ import { ReplicaHub } from "../shared/storeReplica";
     const pageClient = new RpcClient((call) => window.postMessage({ source: "res-override-bridge", kind: "rpc.call", s, call }, location.origin));
     // calls into its own onPage handlers: answered here (JSON copies, like any handle's)
     const local: RpcClient = new RpcClient((call) => exposer.answer(call, (r) => local.receive(r)));
-    const handle = (api: PlaceApi, key: string) =>
-        api === "onSite" ? pageClient.remote(key) : api === "onPage" ? local.remote(key) : top ? client.remote(key) : inertRemote(TOP_FRAME_ONLY);
+    // a compile's handles call with its signal: they abort once a reload replaced it and its runs ended
+    const handle = (gen: Generation) => (api: PlaceApi, key: string) => {
+        const sig = () => gen.signal;
+        return api === "onSite" ? pageClient.remote(key, sig) : api === "onPage" ? local.remote(key, sig) : top ? client.remote(key, sig) : inertRemote(TOP_FRAME_ONLY);
+    };
+    let reactDom: () => ReactDomClient = () => {
+        throw new Error("no React");
+    };
+    const life = new ScriptLife({ doc: document, react: () => reactDom() });
     window.addEventListener("message", (e: MessageEvent) => {
         const d = e.data;
         if (e.source === window && d && d.source === "res-override-hook" && d.kind === "rpc.result" && d.s === s) pageClient.receive(d.result);
@@ -122,6 +130,7 @@ import { ReplicaHub } from "../shared/storeReplica";
                 // disabled, deleted or no longer isolated here
                 stopped = true;
                 exposer.close();
+                life.stop();
                 for (const c of [client, local, pageClient]) c.abort("the script stopped");
                 ep.close("refused");
             }
@@ -167,10 +176,7 @@ import { ReplicaHub } from "../shared/storeReplica";
     setBuiltinLoader(sourceLoader(() => linkUp().then((ep) => ep.call("builtin.react", {}, s))));
 
     function run(init: IsoInit, hot: boolean): void {
-        if (codeHash !== null) {
-            exposer.reset();
-            for (const c of [client, local, pageClient]) c.abort("the script reloaded");
-        }
+        if (codeHash !== null) exposer.reset();
         codeHash = init.codeHash;
         scriptName = init.name;
         const { codes, packages } = shippedSources([init.src], init.libs);
@@ -182,13 +188,14 @@ import { ReplicaHub } from "../shared/storeReplica";
     }
 
     function exec(init: IsoInit, hot: boolean): void {
+        const gen = life.begin();
         const shimFor = (name: string, params: Record<string, any>, mine: boolean) =>
             makePageShim({
                 params,
                 world: "isolated",
                 stores: { store: (n, initial, persist) => stores().store(s, n, initial, persist), pageStore: (n, initial) => stores().pageStore(s, n, initial, page) },
                 exposer: mine ? exposer : undefined,
-                call: mine ? handle : undefined,
+                call: mine ? handle(gen) : undefined,
                 log: (...args: any[]) => log("info", scriptLogLine(name, "wt.log", formatLogArgs(args))),
                 storage: {
                     get: (key: string) => linkUp().then((ep) => ep.call("storage.get", { key }, s)).then((r) => r.value, () => undefined),
@@ -208,9 +215,12 @@ import { ReplicaHub } from "../shared/storeReplica";
             const shim = shimFor(init.name, init.params || {}, true);
             scriptFunction(init.src)(shim.wt, consoleProxy, requireFrom(init.name), moduleObj, moduleObj.exports);
             dom = shim.dom;
+            reactDom = () => requireFrom(init.name)("react-dom/client");
         } catch (e: any) {
-            exposer.reset();
+            // the previous code keeps running
+            exposer.revert();
             exposer.done();
+            life.discard(gen);
             log("error", formatScriptError(init.name, e, "onPage compile"));
             return;
         }
@@ -221,9 +231,7 @@ import { ReplicaHub } from "../shared/storeReplica";
                 d.when,
                 () => {
                     try {
-                        firePageHandler(d, { url: location.href, method: "GET", tabUrl: location.href, resourceType: "main_frame", requestHeaders: {}, groups: {} }, exposer, (e) =>
-                            log("error", formatScriptError(init.name, e, "onPage"))
-                        );
+                        fireRun(life, gen, d, pageCtxBase(location.href), exposer, (e) => log("error", formatScriptError(init.name, e, "onPage")));
                         noteRan("onPage", init.name);
                     } catch (e: any) {
                         log("error", formatScriptError(init.name, e, "onPage"));
@@ -231,6 +239,7 @@ import { ReplicaHub } from "../shared/storeReplica";
                 },
                 hot
             );
+        life.commit(gen);
     }
 
     linkUp().catch(() => {});

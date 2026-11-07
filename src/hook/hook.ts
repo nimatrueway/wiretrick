@@ -11,7 +11,8 @@ import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } 
 import { scriptFunction } from "../shared/scriptFn";
 import { makeLibRequire, type ShippedLib } from "../shared/scriptImports";
 import { routeMatches, takesBinary, type DocumentWhen, type RouteMeta } from "../shared/route";
-import { makePageShim, domHandlersFor, scheduleDocument, firePageHandler, type PageDocumentHandler } from "../shared/pageShim";
+import { makePageShim, domHandlersFor, scheduleDocument, fireRun, type PageDocumentHandler } from "../shared/pageShim";
+import { ScriptLife, type Generation } from "../shared/runLifecycle";
 import { Exposer, isRpcCall, NOT_RUNNING, type RpcCall, type RpcResult } from "../shared/rpc";
 import { bodyKind, setTextTypes } from "../shared/bodyKind";
 import { readFetchBody } from "../shared/requestBody";
@@ -73,6 +74,8 @@ import { readFetchBody } from "../shared/requestBody";
     let compiled = false;
     /** per script: answers calls into its onSite handles (from its onPage / onOverlay code, via the bridge) */
     const exposers = new Map<string, Exposer>();
+    /** per script: its onSite runs here (shared/runLifecycle.ts; no ctx.mount: React isn't in the page) */
+    const lives = new Map<string, ScriptLife>();
     /** calls into onSite handles that arrived before the handlers compiled */
     const earlyCalls: [string, RpcCall, (r: RpcResult) => void][] = [];
     function answerCall(s: string, call: RpcCall, reply: (r: RpcResult) => void): void {
@@ -209,7 +212,9 @@ import { readFetchBody } from "../shared/requestBody";
         const requireFrom = makeLibRequire(libSources, (lib, require, moduleObj) =>
             scriptFunction(lib.src!)(makeDocumentShim(null, lib.name, lib.params || {}).wt, scriptConsole(null, lib.name), require, moduleObj, moduleObj.exports)
         );
-        const compiledDocument: { scriptId: string; name: string; when: DocumentWhen; d: PageDocumentHandler; exposer: Exposer }[] = [];
+        const compiledDocument: { scriptId: string; name: string; when: DocumentWhen; d: PageDocumentHandler; exposer: Exposer; life: ScriptLife; gen: Generation }[] = [];
+        const gens: [ScriptLife, Generation][] = [];
+        const commit = () => gens.forEach(([life, gen]) => life.commit(gen));
         let cspBlocked = false;
         // a repeated status after the handlers fired recompiles but fires nothing: the exposers stay
         const refire = hot || !domFired;
@@ -218,12 +223,22 @@ import { readFetchBody } from "../shared/requestBody";
                 if (!domHandlers.some((d) => d.scriptId === id)) {
                     ex.close();
                     exposers.delete(id);
+                    lives.get(id)?.stop();
+                    lives.delete(id);
                 }
         for (const d of domHandlers) {
             let exposer = exposers.get(d.scriptId);
             if (!exposer) exposers.set(d.scriptId, (exposer = new Exposer()));
             else if (refire) exposer.reset();
             const ex = refire ? exposer : undefined;
+            let life = lives.get(d.scriptId);
+            if (!life) {
+                const { scriptId, name } = d;
+                lives.set(scriptId, (life = new ScriptLife({ doc: document, onError: (e) => scriptLogUp(scriptId, "error", formatScriptError(name, e, "teardown")) })));
+            }
+            // a repeated status recompiles but fires nothing: no new generation
+            const gen = refire ? life.begin() : null;
+            if (gen) gens.push([life, gen]);
             try {
                 // shadow `console` inside the script so its console.* calls
                 // land in the extension LOG (not the page console);
@@ -232,10 +247,14 @@ import { readFetchBody } from "../shared/requestBody";
                 const moduleObj = { exports: {} as any };
                 const { wt, dom } = makeDocumentShim(d.scriptId, d.name, d.params || {}, ex);
                 fn(wt, scriptConsole(d.scriptId, d.name), requireFrom(d.name), moduleObj, moduleObj.exports);
-                for (const h of domHandlersFor(dom, location.href, ex)) compiledDocument.push({ scriptId: d.scriptId, name: d.name, when: h.when, d: h, exposer });
+                if (gen) for (const h of domHandlersFor(dom, location.href, ex)) compiledDocument.push({ scriptId: d.scriptId, name: d.name, when: h.when, d: h, exposer, life, gen });
             } catch (e: any) {
-                // nothing registered here answers: the overlay's calls get `not running`
-                ex?.reset();
+                // the previous code keeps running (none: calls get `not running`)
+                ex?.revert();
+                if (gen) {
+                    life.discard(gen);
+                    gens.pop();
+                }
                 if (/Evaluating a string as JavaScript|unsafe-eval/i.test(e.message || "")) {
                     cspBlocked = true;
                 } else {
@@ -250,15 +269,15 @@ import { readFetchBody } from "../shared/requestBody";
                 window.postMessage({ source: HOOK_SOURCE, kind: "cspBlocked" }, window.location.origin);
             } catch {}
         }
-        if (compiledDocument.length === 0) return;
+        if (compiledDocument.length === 0) return commit();
 
         const injected = (document.currentScript as HTMLScriptElement | null)
             ? "document.currentScript"
             : (document.querySelector("script[data-res-override-hook]") ? "script tag (already in DOM)" : "bundle message");
-        const fire = ({ scriptId, name, when, d, exposer }: (typeof compiledDocument)[number]) => {
+        const fire = ({ scriptId, name, when, d, exposer, life, gen }: (typeof compiledDocument)[number]) => {
             try {
                 scriptLogUp(scriptId, "debug", scriptLogLine(name, "onSite", `running (${when}) on ${location.href} [${document.readyState}], hook injected via ${injected}`));
-                firePageHandler(d, makeCtx(location.href, "GET"), exposer, (e) => scriptLogUp(scriptId, "error", formatScriptError(name, e, "onSite")));
+                fireRun(life, gen, d, makeCtx(location.href, "GET"), exposer, (e) => scriptLogUp(scriptId, "error", formatScriptError(name, e, "onSite")));
                 window.postMessage({ source: HOOK_SOURCE, kind: "scriptRan", scriptId, name, api: "onSite" }, window.location.origin);
             } catch (e: any) {
                 scriptLogUp(scriptId, "error", formatScriptError(name, e, "onSite"));
@@ -266,12 +285,13 @@ import { readFetchBody } from "../shared/requestBody";
         };
         if (hot) {
             compiledDocument.forEach(fire); // hot update: refire immediately so edits are visible live
-            return;
+            return commit();
         }
         if (domFired) return; // initial + ready re-sends fire only once
         domFired = true;
         // each handler keeps its own { when } (same as the isolated-world fallback)
         for (const h of compiledDocument) scheduleDocument(h.when, () => fire(h));
+        commit();
     }
 
     /**

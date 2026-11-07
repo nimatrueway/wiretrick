@@ -266,18 +266,112 @@ declare namespace Wiretrick {
         ? { readonly [K in keyof T]: T[K] extends (...a: infer A) => infer R ? (...a: A) => Promise<Awaited<R>> : never }
         : {};
 
-    /** The context an `onSite` handler gets (`url` is the frame's URL). */
-    interface SiteCtx extends RequestCtx {}
+    /**
+     * What every page handler's ctx has: its **run** and what the run sets
+     * up. Saving the script runs the handler again (a new run); when it
+     * returns, the old run's `signal` aborts, and what the old run set up
+     * with `once`, `patch`, `style` and `mount` stays only if the new run
+     * set it up too (a mount re-renders, a patch swaps its function) — the
+     * rest is undone. If the new run throws, the old one keeps running.
+     */
+    interface RunCtx {
+        /**
+         * Aborts when this run ends: the script was saved (a new run took
+         * over), disabled or deleted. Pass it to `addEventListener`,
+         * `fetch` and the like so they stop with the run.
+         *
+         * @example
+         * wt.onPage("*://example.com/*", (ctx) => {
+         *     document.addEventListener("click", onClick, { signal: ctx.signal });
+         *     const t = setInterval(poll, 1000);
+         *     ctx.signal.addEventListener("abort", () => clearInterval(t));
+         * });
+         */
+        readonly signal: AbortSignal;
+        /**
+         * `fn()`'s value, made once per page: later runs with the same
+         * `key` get the same value (the cache is dropped when a run stops
+         * asking for it).
+         *
+         * @example
+         * const db = ctx.once("db", () => new Map<string, string>()); // survives saves
+         */
+        once<T>(key: string, fn: () => T): T;
+        /**
+         * Replace the function `obj[prop]` with `wrap(original)`. The
+         * replacement is installed once (the site may keep a reference to
+         * it); each run sets what it does, and once no run patches it any
+         * more it calls the original.
+         *
+         * @example
+         * wt.onSite("*://example.com/*", (ctx) => {
+         *     ctx.patch(history, "pushState", (orig) => function (this: History, ...args: any[]) {
+         *         console.log("navigating to", args[2]);
+         *         return orig.apply(this, args);
+         *     });
+         * });
+         */
+        patch<O extends object, K extends keyof O>(obj: O, prop: K, wrap: (orig: O[K]) => O[K]): void;
+        /**
+         * Add `css` to the page (its `<head>`, and each `ctx.mount` of the
+         * script); removed once no run adds it any more.
+         *
+         * @example
+         * ctx.style(`.ad-banner { display: none !important }`);
+         */
+        style(css: string): void;
+    }
+
+    /** What `onPage` and `onOverlay` ctx add: React UI and handle loops. */
+    interface TrustedRunCtx extends RunCtx {
+        /**
+         * Render `ui` (JSX) into the page: inside `target` (a selector or an
+         * element), or floating over the page without one. Each save
+         * re-renders the same React root (its state survives); once no run
+         * mounts there any more it unmounts. In `onPage` the UI sits in a
+         * closed shadow root (the page's CSS doesn't reach it; `ctx.style`
+         * does). In `onOverlay` it goes into the overlay's `<body>`.
+         *
+         * @example
+         * wt.onPage("*://example.com/*", (ctx) => {
+         *     ctx.mount("#header", <button onClick={() => alert("hi")}>Hi</button>);
+         * });
+         * wt.onOverlay("*://example.com/*", (ctx) => ctx.mount(<Panel />));
+         */
+        mount(ui: unknown): void;
+        mount(target: string | Element, ui: unknown): void;
+        /**
+         * Call `fn(...args)` over and over, yielding each answer — for a
+         * handle function that answers when something happens. A call cut
+         * by the other side's reload is made again; the loop ends when this
+         * run does.
+         *
+         * @example
+         * const site = wt.onSite("*://example.com/*", (ctx) => {
+         *     const logins: string[] = [], waiting: ((u: string) => void)[] = [];
+         *     window.addEventListener("app:login", (e: any) => (waiting.shift() ?? ((u) => logins.push(u)))(e.detail), { signal: ctx.signal });
+         *     return { nextLogin: () => (logins.length ? Promise.resolve(logins.shift()!) : new Promise<string>((r) => waiting.push(r))) };
+         * });
+         * wt.onPage("*://example.com/*", async (ctx) => {
+         *     for await (const user of ctx.each(site.nextLogin)) wt.log("login:", user);
+         * });
+         */
+        each<A extends any[], T>(fn: (...args: A) => Promise<T>, ...args: A): AsyncIterableIterator<T>;
+    }
+
+    /** The context an `onSite` handler gets (`url` is the frame's URL). No `mount`: React isn't in the site's world. */
+    interface SiteCtx extends RequestCtx, RunCtx {}
 
     /** The context an `onPage` handler gets (`url` is the frame's URL). */
-    interface PageCtx extends RequestCtx {}
+    interface PageCtx extends RequestCtx, TrustedRunCtx {}
 
     /** The context an `onOverlay` handler gets (`url` is the page's URL). */
-    interface OverlayCtx extends RequestCtx {
+    interface OverlayCtx extends RequestCtx, TrustedRunCtx {
         /**
          * Run `fn` with the page's new URL whenever it navigates in place
          * (history API, back/forward, `#hash` changes), as single-page apps
-         * do. The overlay stays; returns a function that stops listening.
+         * do. The overlay stays; returns a function that stops listening
+         * (it also stops when the run ends).
          *
          * @example
          * wt.onOverlay("*://example.com/*", (ctx) => {
@@ -294,7 +388,8 @@ declare namespace Wiretrick {
          * beats the page (which never sees the key); `"after-page"` fires
          * only if the page didn't handle it. Keys pressed while the overlay
          * has focus work too. If another script has the same keys, the
-         * one higher in the script list wins (a Log warning). Returns a function that removes it.
+         * one higher in the script list wins (a Log warning). Returns a
+         * function that removes it (it's also removed when the run ends).
          *
          * @example
          * wt.onOverlay("*://example.com/*", (ctx) => {

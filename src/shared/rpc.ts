@@ -223,6 +223,8 @@ type Slot = { state: "pending"; queue: [RpcCall, Reply][] } | { state: "ready"; 
 /** the callee side: one script's handles in one runtime */
 export class Exposer {
     private readonly slots = new Map<string, Slot>();
+    /** the ready handles before the last `reset` (a failed reload goes back to them) */
+    private prev = new Map<string, Slot>();
     /** calls for handles not registered yet (the script hasn't compiled) */
     private early: [RpcCall, Reply][] = [];
     private settled = false;
@@ -253,6 +255,18 @@ export class Exposer {
         this.settle(h, { state: "not-running", why });
     }
 
+    /**
+     * The reload of `h` failed (its handler threw; no `h`: the script didn't
+     * compile): it answers from the run that's still alive, when it had one
+     */
+    revert(h?: string): void {
+        for (const k of h === undefined ? new Set([...this.slots.keys(), ...this.prev.keys()]) : [h]) {
+            const p = this.prev.get(k);
+            if (p) this.settle(k, p);
+            else this.fail(k);
+        }
+    }
+
     /** every handle is registered: calls for unknown ones answer `not running` */
     done(): void {
         this.settled = true;
@@ -263,6 +277,7 @@ export class Exposer {
 
     /** the script is recompiling (hot reload): handles register again. Waiting calls wait for the new run; running ones reject with ReloadedError. */
     reset(): void {
+        this.prev = new Map([...this.slots].filter(([, s]) => s.state === "ready"));
         for (const s of this.slots.values()) if (s.state === "pending") this.early.push(...s.queue);
         this.slots.clear();
         this.settled = false;
@@ -276,6 +291,7 @@ export class Exposer {
     /** the script stopped here (disabled, deleted, the page went away): every call answers `why` */
     close(why = NOT_RUNNING): void {
         this.reset();
+        this.prev.clear();
         for (const [c, reply] of this.early.splice(0)) reply({ cid: c.cid, ok: false, error: callError(why) });
         this.settled = true;
     }

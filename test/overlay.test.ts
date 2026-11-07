@@ -248,6 +248,37 @@ describe("overlay runtime", () => {
         expect(h.keys).toHaveLength(3);
     });
 
+    it("overlay.update recompiles in place: handlers run again, claims carry over, the old run's listeners go", async () => {
+        const v1 = `wt.onOverlay("*", (ctx) => {
+            ctx.style("b{}");
+            const box = ctx.once("box", () => document.body.appendChild(document.createElement("i")));
+            box.textContent = "v1";
+            ctx.shortcut("Mod+K", () => {});
+            return { who: () => "v1" };
+        });`;
+        const h = await start(v1);
+        await settle();
+        expect(document.querySelectorAll("i").length).toBe(1);
+        const keysBefore = h.keys.length;
+        h.bridge.push("overlay.update", { s: "s1", name: "demo", code: v1.replace(/v1/g, "v2"), codeHash: "h2", routes: [], url: "https://x.com/app/page", params: {}, stores: {}, page: "p1", libs: [], react: false, phase: "document_end" } as OverlayInit);
+        await settle();
+        expect(document.querySelectorAll("i").length).toBe(1);
+        expect(document.querySelector("i")!.textContent).toBe("v2");
+        expect(document.head.querySelectorAll("style").length).toBe(1);
+        expect((await callOverlay(h, { h: "onOverlay:0", fn: "who", args: [] })).value).toBe("v2");
+        // the old run's shortcut went; the new run's came
+        expect(h.keys.slice(keysBefore).map((k) => k.split(" ")[0])).toEqual(expect.arrayContaining(["remove", "add"]));
+        // a broken save keeps the running code
+        h.bridge.push("overlay.update", { s: "s1", name: "demo", code: `wt.onOverlay("*", () => {`, codeHash: "h3", routes: [], url: "https://x.com/app/page", params: {}, stores: {}, page: "p1", libs: [], react: false, phase: "document_end" } as OverlayInit);
+        await settle();
+        expect((await callOverlay(h, { h: "onOverlay:0", fn: "who", args: [] })).value).toBe("v2");
+        expect(document.querySelectorAll("i").length).toBe(1);
+        // a save without the handler drops what it claimed
+        h.bridge.push("overlay.update", { s: "s1", name: "demo", code: ``, codeHash: "h4", routes: [], url: "https://x.com/app/page", params: {}, stores: {}, page: "p1", libs: [], react: false, phase: "document_end" } as OverlayInit);
+        await settle();
+        expect(document.head.querySelectorAll("style").length).toBe(0);
+    });
+
     it("reports its visible areas", async () => {
         const h = await start(`wt.onOverlay("*", () => { document.body.innerHTML = "<button>hi</button>"; });`);
         h.rt.measure();

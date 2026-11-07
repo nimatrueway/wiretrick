@@ -19,6 +19,7 @@
 import { normalizeRoute, placeApi, placeKeyer, placeKind, routeMatches, type DocumentWhen, type PageWorld, type PlaceApi, type RouteMeta } from "./route";
 import { inertRemote, siteRemote, SITE_NO_STORES, type SiteCannotCallError } from "./remote";
 import type { Exposer } from "./rpc";
+import type { Generation, ScriptLife } from "./runLifecycle";
 import { parseParamValue, type ParamDef } from "./scriptDef";
 import { scriptEnv } from "./scriptEnv";
 import { claimStoreName, storePersist } from "./storeOps";
@@ -135,18 +136,23 @@ export function domHandlersFor(dom: PageDocumentHandler[], url: string, exposer?
     });
 }
 
-/** run a handler; what it returns is what its handle exposes (a throw: `not running`, rethrown) */
-export function firePageHandler(d: PageDocumentHandler, ctx: any, exposer?: Exposer, onError?: (e: unknown) => void): void {
+/**
+ * Run a handler; what it returns is what its handle exposes. A throw is
+ * rethrown, and the handle answers from the previous run when there's one
+ * still alive (a failed reload), else `not running`.
+ */
+export function firePageHandler(d: PageDocumentHandler, ctx: any, exposer?: Exposer, onError?: (e: unknown) => void): unknown {
     let out: unknown;
     try {
         out = d.fn(ctx);
     } catch (e) {
-        exposer?.fail(d.h);
+        exposer?.revert(d.h);
         throw e;
     }
     // an async handler's rejection: an error like a thrown one
     if (onError && out && typeof (out as any).then === "function") (out as Promise<unknown>).then(undefined, onError);
     exposer?.expose(d.h, out);
+    return out;
 }
 
 /** run `run` at the handler's `when` (immediately when `now`) */
@@ -157,4 +163,12 @@ export function scheduleDocument(when: DocumentWhen, run: () => void, now = fals
         else window.addEventListener("load", run, { once: true });
     } else if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", run, { once: true });
     else run();
+}
+
+/** the ctx every page handler starts from */
+export const pageCtxBase = (url: string) => ({ url, method: "GET", tabUrl: url, resourceType: "main_frame", requestHeaders: {}, groups: {} });
+
+/** run handler `d` as a run of `gen` (shared/runLifecycle.ts): its ctx gets signal, once, patch, style, mount, each */
+export function fireRun(life: ScriptLife, gen: Generation, d: PageDocumentHandler, base: object | ((signal: AbortSignal) => object), exposer: Exposer | undefined, report: (e: unknown) => void): void {
+    life.fire(gen, d.h, report, (ctx, quiet) => firePageHandler(d, { ...(typeof base === "function" ? base(ctx.signal) : base), ...ctx }, exposer, quiet));
 }

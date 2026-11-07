@@ -30,7 +30,8 @@ import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptContext, ty
 import { scriptFunction } from "../shared/scriptFn";
 import { makeLibRequire, type ShippedLib } from "../shared/scriptImports";
 import { builtinModule, builtinsReady, ensureBuiltins, setBuiltinLoader, shippedSources, sourceLoader } from "../shared/builtins";
-import { makePageShim, domHandlersFor, scheduleDocument, firePageHandler, type PageDocumentHandler } from "../shared/pageShim";
+import { makePageShim, domHandlersFor, scheduleDocument, fireRun, pageCtxBase, type PageDocumentHandler } from "../shared/pageShim";
+import { ScriptLife, type Generation, type ReactDomClient } from "../shared/runLifecycle";
 import { packBytes, unpackBytes } from "../shared/bytesPack";
 import { Endpoint, endpointPair, messagePortEndpoint, portEndpoint, ISO_STORE_TAG, type ReqOf, type ReqOps, type ResOf } from "../shared/wire";
 import { ReplicaHub, type StoreSnapshots } from "../shared/storeReplica";
@@ -350,6 +351,11 @@ import type { RanApi } from "../shared/netTypes";
             sourceLoader(() => new Promise((resolve, reject) => safeSend({ type: "getBuiltinReact" }, (r: any) => (typeof r?.src === "string" ? resolve(r.src) : reject(new Error(r?.error || "no answer from the extension"))))))
         );
 
+    /** per world, per script: its runs here (shared/runLifecycle.ts) */
+    const lives = { isolated: new Map<string, ScriptLife>(), page: new Map<string, ScriptLife>() };
+    /** per script: its `react-dom/client` (for `ctx.mount` in onPage code) */
+    const reactDoms = new Map<string, () => ReactDomClient>();
+
     function runPageScripts(handlers: DocumentHandler[], libSources: ShippedLib[], world: "page" | "isolated", hot: boolean, loaded = false): void {
         if (dead) return;
         if (world === "isolated" && !loaded) {
@@ -373,12 +379,23 @@ import type { RanApi } from "../shared/netTypes";
             if (!handlers.some((h) => h.scriptId === id)) {
                 ex.close();
                 exposers.delete(id);
+                lives[world].get(id)?.stop();
+                lives[world].delete(id);
                 if (world === "isolated") abortCalls(id, "the script stopped");
             }
         // onPage code's handles: its onSite handlers (the page's world), its own (here), its overlay (top frame)
-        const handle = (scriptId: string) => (api: PlaceApi, key: string) =>
-            api === "onSite" ? pageClient(scriptId).remote(key) : api === "onPage" ? localClient(scriptId).remote(key) : window === top ? overlayClient(scriptId).remote(key) : inertRemote(TOP_FRAME_ONLY);
-        const shimFor = (scriptId: string | null, name: string, params: Record<string, any>, exposer?: Exposer, storesOf?: string) =>
+        // a compile's handles call with its signal: they abort once a reload replaced it and its runs ended
+        const handle = (scriptId: string, gen: Generation) => (api: PlaceApi, key: string) => {
+            const sig = () => gen.signal;
+            return api === "onSite"
+                ? pageClient(scriptId).remote(key, sig)
+                : api === "onPage"
+                  ? localClient(scriptId).remote(key, sig)
+                  : window === top
+                    ? overlayClient(scriptId).remote(key, sig)
+                    : inertRemote(TOP_FRAME_ONLY);
+        };
+        const shimFor = (scriptId: string | null, name: string, params: Record<string, any>, exposer?: Exposer, storesOf?: string, gen?: Generation) =>
             makePageShim({
                 params,
                 world,
@@ -387,7 +404,7 @@ import type { RanApi } from "../shared/netTypes";
                     world === "isolated" && storesOf
                         ? { store: (n, initial, persist) => isoStores().store(storesOf, n, initial, persist), pageStore: (n, initial) => isoStores().pageStore(storesOf, n, initial, isoPage) }
                         : undefined,
-                call: scriptId && world === "isolated" ? handle(scriptId) : undefined,
+                call: scriptId && gen && world === "isolated" ? handle(scriptId, gen) : undefined,
                 // the onSite fallback reports a handle call like the hook does (once per script)
                 onSiteCall: (e) => {
                     if (siteCallers.has(scriptId)) return;
@@ -403,10 +420,14 @@ import type { RanApi } from "../shared/netTypes";
         for (const h of handlers) {
             let exposer = exposers.get(h.scriptId);
             if (!exposer) exposers.set(h.scriptId, (exposer = new Exposer()));
-            else {
-                exposer.reset();
-                if (world === "isolated") abortCalls(h.scriptId, "the script reloaded");
+            else exposer.reset();
+            let life = lives[world].get(h.scriptId);
+            if (!life) {
+                const id = h.scriptId;
+                life = new ScriptLife({ doc: document, react: world === "isolated" ? () => reactDoms.get(id)!() : undefined, onError: (e) => scriptLog(id, "error", formatScriptError(h.name, e, "teardown"), ctx) });
+                lives[world].set(id, life);
             }
+            const gen = life.begin();
             // shadow console like the MAIN-world path: script console.*
             // calls go to the extension LOG, not the page console
             const consoleProxy = makeScriptConsole((level, source, text) => scriptLog(h.scriptId, level, scriptLogLine(h.name, source, text), ctx));
@@ -421,12 +442,15 @@ import type { RanApi } from "../shared/netTypes";
                     world === "isolated" ? { builtin: (spec, importer, loadUrl) => builtinModule(spec, codeOf(importer), loadUrl) } : {}
                 );
                 const moduleObj = { exports: {} as any };
-                const shim = shimFor(h.scriptId, h.name, h.params || {}, exposer, h.scriptId);
+                const shim = shimFor(h.scriptId, h.name, h.params || {}, exposer, h.scriptId, gen);
                 scriptFunction(h.src)(shim.wt, consoleProxy, requireFrom(h.name), moduleObj, moduleObj.exports);
                 dom = shim.dom;
+                if (world === "isolated") reactDoms.set(h.scriptId, () => requireFrom(h.name)("react-dom/client"));
             } catch (e: any) {
-                exposer.reset();
+                // the previous code keeps running
+                exposer.revert();
                 exposer.done();
+                life.discard(gen);
                 scriptLog(h.scriptId, "error", formatScriptError(h.name, e, `${what} compile`), ctx);
                 continue;
             }
@@ -435,9 +459,7 @@ import type { RanApi } from "../shared/netTypes";
             for (const d of matching) {
                 const run = () => {
                     try {
-                        firePageHandler(d, { url: location.href, method: "GET", tabUrl: location.href, resourceType: "main_frame", requestHeaders: {}, groups: {} }, exposer, (e) =>
-                            scriptLog(h.scriptId, "error", formatScriptError(h.name, e, api), ctx)
-                        );
+                        fireRun(life, gen, d, pageCtxBase(location.href), exposer, (e) => scriptLog(h.scriptId, "error", formatScriptError(h.name, e, api), ctx));
                         scriptRan(h.scriptId, h.name, api);
                     } catch (e: any) {
                         scriptLog(h.scriptId, "error", formatScriptError(h.name, e, api), ctx);
@@ -445,6 +467,7 @@ import type { RanApi } from "../shared/netTypes";
                 };
                 scheduleDocument(d.when, run, hot);
             }
+            life.commit(gen);
         }
     }
 
@@ -632,7 +655,7 @@ import type { RanApi } from "../shared/netTypes";
                 })
         );
 
-    /** the bundle's overlays for this page: start new ones, reload changed ones (code hash), drop the rest */
+    /** the bundle's overlays for this page: start new ones, update changed ones in place (code hash), drop the rest */
     function syncOverlays(list: OverlayInfo[], hot: boolean): void {
         if (dead) return;
         lastOverlays = list;
@@ -642,6 +665,12 @@ import type { RanApi } from "../shared/netTypes";
             const old = overlays.get(info.scriptId);
             if (old && old.info.codeHash === info.codeHash) {
                 old.info = info;
+                continue;
+            }
+            // a running frame recompiles in place (its runs reconcile); one still starting starts over
+            if (old?.ep && !old.closed) {
+                old.info = info;
+                updateOverlay(old);
                 continue;
             }
             if (old) removeOverlay(info.scriptId, "reloaded");
@@ -656,6 +685,16 @@ import type { RanApi } from "../shared/netTypes";
         overlays.set(info.scriptId, o);
         const first = PHASES[Math.min(...info.routes.map((r) => PHASES.indexOf(r.when || "document_end")))] || "document_end";
         scheduleDocument(first, () => guard(() => void mountOverlay(o)), now);
+    }
+
+    function updateOverlay(o: Overlay): void {
+        const s = o.info.scriptId;
+        l2call("overlay.init", {}, s).then(
+            (init) => {
+                if (!o.closed && o.ep && overlays.get(s) === o) o.ep.push("overlay.update", { ...init, phase: phaseNow() });
+            },
+            (e: any) => scriptLog(s, "error", scriptLogLine(o.info.name, "overlay", `couldn't update: ${e?.message || e}`))
+        );
     }
 
     function ensureHost(): ShadowRoot {
