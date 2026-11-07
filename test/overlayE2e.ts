@@ -1,17 +1,18 @@
 /**
- * Shared E2E check (MV2 + MV3): overlays (wt.onPage({ dom: "overlay" })). A `.tsx` switch
+ * Shared E2E check (MV2 + MV3): overlays (wt.onOverlay). A `.tsx` switch
  * with the built-in React and valtio toggles a page-strategy mock live;
  * clicks on empty areas reach the page; a strict-CSP page still shows the
  * overlay; the page can't find the frame or read the overlay's code; the
  * overlay's `fetch` carries the page's cookies; in-place navigation reaches
- * `ctx.onNavigate`; a page-posted call never reaches an overlay; page-world
- * `overlay.fn()` rejects; on save the overlay reloads with its store kept;
- * disabling removes it. With `isolated` (the MV2 builds): an Alt+click in
- * isolated onPage code calls the overlay, which calls back to highlight.
- * With `userScripts` (MV3): while user scripts are off, isolated handlers
- * don't run, the overlay's calls into them reject with the hint, and the
- * Problems error and the Editor's banner say how to turn them on; then
- * `grant()` turns them on and the same round trip runs through them.
+ * `ctx.onNavigate`; a page-posted call never reaches an overlay; a handle
+ * call in onSite code throws SiteCannotCallError; on save the overlay
+ * updates in place with its store kept; disabling removes it. With
+ * `isolated` (the MV2 builds): an Alt+click in isolated onPage code calls
+ * the overlay, which calls back to highlight. With `userScripts` (MV3):
+ * while user scripts are off, isolated handlers don't run, the overlay's
+ * calls into them reject with the hint, and the Problems error and the
+ * Editor's banner say how to turn them on; then `grant()` turns them on and
+ * the same round trip runs through them.
  *
  * `overlayServerRoute` serves the pages; call it in the suite's test server.
  */
@@ -56,6 +57,11 @@ window.addEventListener("keydown", (e) => { if (e.altKey && e.code === "KeyP") e
     if (url.pathname === "/ov-layer") {
         res.writeHead(200, { "content-type": "text/html" });
         res.end(PAGE(`<script>window.__site = "SITE-7";</script>`));
+        return true;
+    }
+    if (url.pathname === "/ov-life") {
+        res.writeHead(200, { "content-type": "text/html" });
+        res.end(PAGE(`<p id="lifec" class="life-color">c</p>`));
         return true;
     }
     if (url.pathname === "/ov-two" || url.pathname === "/ov-isost" || url.pathname === "/ov-unsafe") {
@@ -115,15 +121,14 @@ x.send();
     return false;
 }
 
-const switchCode = (origin: string, label: string) => `import { createRoot } from "react-dom/client";
-import { useSnapshot } from "valtio";
+const switchCode = (origin: string, label: string) => `import { useSnapshot } from "valtio";
 
 const mock = wt.globalStore("ovmock", { enabled: false });
 
 wt.replaceResponse({ url: "${origin}/ov-me", strategy: "page" }, () =>
     mock.enabled ? JSON.stringify({ name: "MOCKED" }) : undefined);
 
-wt.onPage({ url: "${origin}/ov-*", dom: "overlay" }, () => {
+wt.onOverlay("${origin}/ov-*", (ctx) => {
     const secret = "OV-SECRET-MARKER";
     void fetch("/ov-cookie");
     function Panel() {
@@ -134,11 +139,11 @@ wt.onPage({ url: "${origin}/ov-*", dom: "overlay" }, () => {
             </label>
         );
     }
-    createRoot(document.body.appendChild(document.createElement("div"))).render(<Panel />);
+    ctx.mount(<Panel />);
 });
 `;
 
-const rpcCode = (origin: string) => `const overlay = wt.onPage({ url: "${origin}/ov-*", dom: "overlay" }, (ctx) => {
+const rpcCode = (origin: string) => `const overlay = wt.onOverlay("${origin}/ov-*", (ctx) => {
     const out = document.body.appendChild(document.createElement("output"));
     out.id = "picked";
     out.style.cssText = "position:fixed;left:16px;bottom:16px;background:white;padding:8px";
@@ -164,11 +169,16 @@ const rpcCode = (origin: string) => `const overlay = wt.onPage({ url: "${origin}
     };
 });
 
-wt.onPage({ url: "${origin}/ov-app*", js: "page" }, () => {
-    overlay.hit().then(() => (document.body.dataset.mainCall = "resolved"), (e) => (document.body.dataset.mainCall = "rejected: " + e.message));
+wt.onSite("${origin}/ov-app*", () => {
+    try {
+        void overlay.hit();
+        document.body.dataset.mainCall = "called";
+    } catch (e) {
+        document.body.dataset.mainCall = "threw " + (e as Error).name + ": " + (e as Error).message;
+    }
 });
 
-const iso = wt.onPage({ url: "${origin}/ov-*", js: "isolated" }, () => {
+const iso = wt.onPage("${origin}/ov-*", () => {
     document.addEventListener("click", (e) => {
         if (e.altKey) void overlay.picked((e.target as Element).tagName);
     }, true);
@@ -248,7 +258,7 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
     const after = await waitFor<string>(fetchMe, (v) => v.includes("MOCKED"), 5000);
     check(t("clicking the switch toggles the mock live"), before.includes("REAL") && checked && after.includes("MOCKED"), JSON.stringify({ before, checked, after }));
 
-    // Network: the document row names the scripts whose onPage handlers ran on it; the overlay's fetch names its script
+    // Network: the document row names the scripts whose page handlers ran on it; the overlay's fetch names its script
     // (no Network tab recording: rows are synthetic)
     type NetRow = { url: string; type: string; synthetic?: boolean; startedAt: number; outcomes: { scriptName: string; action: string; kind: string }[] };
     const netRows = (): Promise<NetRow[]> =>
@@ -261,8 +271,8 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
     const docTags = tagsOf(net, "/ov-app");
     const docRow = net.find((e) => e.url === `${origin}/ov-app` && e.startedAt >= loadedAt - 50 && e.outcomes.length);
     check(
-        t("Network: the page's document row names the scripts whose onPage handlers ran on it"),
-        (docRow?.type === "main_frame" || !!docRow?.synthetic) && ["overlay switch.wiretrick: overlay shown", "overlay rpc.wiretrick: overlay shown", "overlay rpc.wiretrick: onPage ran"].every((x) => docTags.includes(x)) && docRow.outcomes.every((o) => o.kind === "observed"),
+        t("Network: the page's document row names the scripts whose onSite/onOverlay handlers ran on it"),
+        (docRow?.type === "main_frame" || !!docRow?.synthetic) && ["overlay switch.wiretrick: overlay shown", "overlay rpc.wiretrick: overlay shown", "overlay rpc.wiretrick: onSite ran"].every((x) => docTags.includes(x)) && docRow.outcomes.every((o) => o.kind === "observed"),
         JSON.stringify({ type: docRow?.type, synthetic: docRow?.synthetic, docTags })
     );
     check(t("Network: the overlay's fetch names its script"), tagsOf(net, "/ov-cookie").includes("overlay switch.wiretrick: fetched by its overlay"), JSON.stringify(tagsOf(net, "/ov-cookie")));
@@ -302,19 +312,21 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
     );
 
     const mainCall = await waitFor<string>(() => page.evaluate(() => document.body.dataset.mainCall || ""), (v) => !!v, 5000);
-    check(t("page-world overlay.fn() rejects"), /^rejected: .*page-world onPage code can't call the overlay/.test(mainCall), mainCall);
+    check(t("overlay.fn() in onSite code throws SiteCannotCallError"), /^threw SiteCannotCallError: onSite code can't call handles/.test(mainCall), mainCall);
     const mainProblem = await waitFor<any>(async () => ((await send({ type: "listScripts" })) || []).find((s: any) => s.id === "s_ov_rpc")?.runtimeError, (e) => !!e?.ctx, 5000);
     check(
-        t("page-world overlay.fn() is a Problems error tagged page › host"),
-        !!mainProblem?.message.includes("page-world onPage code can't call the overlay") && mainProblem.ctx === `page › ${new URL(origin).host}`,
+        t("overlay.fn() in onSite code is a Problems error tagged page › host"),
+        !!mainProblem?.message.includes("onSite code can't call handles") && mainProblem.ctx === `page › ${new URL(origin).host}`,
         JSON.stringify(mainProblem)
     );
 
     await page.evaluate((s: string) => {
-        const call = { cid: "page-forged-1", h: "overlay:0", fn: "hit", args: [] };
-        for (const source of ["res-override-hook", "res-override-bridge"]) {
-            window.postMessage({ source, kind: "rpc.call", s, call }, "*");
-            window.postMessage({ source, kind: "rpc.call", scriptId: s, call, ...call }, "*");
+        for (const h of ["onOverlay:0", "overlay:0"]) {
+            const call = { cid: "page-forged-" + h, h, fn: "hit", args: [] };
+            for (const source of ["res-override-hook", "res-override-bridge"]) {
+                window.postMessage({ source, kind: "rpc.call", s, call }, "*");
+                window.postMessage({ source, kind: "rpc.call", scriptId: s, call, ...call }, "*");
+            }
         }
     }, "s_ov_rpc");
     await page.waitForTimeout(1500);
@@ -379,17 +391,30 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
         check(t("isolated onPage → overlay → isolated round trip (element picker)"), picked === "P:1" && outline.includes("red") && hits.includes("?picked=1"), JSON.stringify({ picked, outline, hits }));
     }
 
-    // save: the overlay reloads with the new code; the store keeps its value
+    // save: the overlay updates in place (the same frame: a mark on its window stays) with the new code; the store keeps its value
+    const marked = await overlayFrame(page, "#sw");
+    await marked?.evaluate(() => ((window as any).__wtSameFrame = 1)).catch(() => null);
+    const frameCount = () => page.frames().filter((f: any) => f.url().includes("/overlay.html")).length;
+    const framesBefore = frameCount();
     await save("s_ov_switch", switchCode(origin, "Mock v2"), "overlay switch.wiretrick");
     const v2 = await waitFor(
         async () => {
             const f = await overlayFrame(page, "#sw");
-            return f ? await f.evaluate(() => ({ text: document.getElementById("sw")!.textContent || "", on: (document.getElementById("box") as HTMLInputElement).checked })).catch(() => null) : null;
+            return f
+                ? await f
+                      .evaluate(() => ({
+                          text: document.getElementById("sw")!.textContent || "",
+                          on: (document.getElementById("box") as HTMLInputElement).checked,
+                          mounts: document.querySelectorAll("#sw").length,
+                          same: (window as any).__wtSameFrame === 1,
+                      }))
+                      .catch(() => null)
+                : null;
         },
         (v) => !!v?.text.includes("Mock v2"),
         8000
     );
-    check(t("on save the overlay reloads and its store survives"), !!v2?.text.includes("Mock v2") && !!v2?.on, JSON.stringify(v2));
+    check(t("on save the overlay updates in place: the same frame, new content, one mount, its store kept"), !!v2?.text.includes("Mock v2") && !!v2?.on && v2?.mounts === 1 && !!v2?.same && frameCount() === framesBefore, JSON.stringify({ ...v2, framesBefore, framesAfter: frameCount() }));
 
     const csp = await ctx.newPage();
     await csp.goto(`${origin}/ov-csp`, { waitUntil: "load", timeout: 15000 });
@@ -414,7 +439,7 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
     await send({ type: "deleteScript", id: "s_ov_rpc" });
 }
 
-const keysCode = (origin: string, id: string) => `wt.onPage({ url: "${origin}/ov-keys", dom: "overlay" }, (ctx) => {
+const keysCode = (origin: string, id: string) => `wt.onOverlay("${origin}/ov-keys", (ctx) => {
     const box = document.body.appendChild(document.createElement("div"));
     box.id = "${id}";
     box.textContent = "Hello";
@@ -497,7 +522,7 @@ export async function checkOverlayShortcuts(ctx: any, mgr: any, origin: string, 
 /**
  * The Editor's Preview tab: the open script's overlay runs in a frame in
  * the Editor, with real store replicas — its switch flips the mock for a
- * page in a tab — and reloads on save.
+ * page in a tab — and updates on save.
  */
 export async function checkOverlayPreview(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
     const t = (s: string) => `overlay preview${opts.label ?? ""}: ${s}`;
@@ -535,7 +560,7 @@ export async function checkOverlayPreview(ctx: any, mgr: any, origin: string, ch
         (v) => !!v?.text.includes("Preview v2"),
         8000
     );
-    check(t("it reloads on save, the store kept"), !!v2?.text.includes("Preview v2") && !!v2?.on, JSON.stringify(v2));
+    check(t("it updates on save, the store kept"), !!v2?.text.includes("Preview v2") && !!v2?.on, JSON.stringify(v2));
 
     await page.close();
     await mgr.click("#log-header-title");
@@ -553,7 +578,7 @@ wt.replaceResponse({ url: "${origin}/ov-ps", strategy: "page" }, () => {
     }
 });
 
-wt.onPage({ url: "${origin}/ov-two*", dom: "overlay" }, () => {
+wt.onOverlay("${origin}/ov-two*", () => {
     const out = document.body.appendChild(document.createElement("output"));
     out.id = "two";
     out.value = "pending";
@@ -566,13 +591,13 @@ wt.onPage({ url: "${origin}/ov-two*", dom: "overlay" }, () => {
     void ask();
 });
 
-const pg = wt.onPage({ url: "${origin}/ov-two*", js: "page" }, () => ({
+const pg = wt.onSite("${origin}/ov-two*", () => ({
     whoami: () => ({ q: location.search }),
 }));
 `;
 
 /**
- * Two tabs, one overlay + onPage script: each overlay's calls reach
+ * Two tabs, one overlay + onSite script: each overlay's calls reach
  * its own tab's page, and each page has its own wt.pageStore copy (a
  * reload starts over; a pushState doesn't).
  */
@@ -613,7 +638,7 @@ export async function checkPageStores(ctx: any, mgr: any, origin: string, check:
     check(t("each page counts its own requests"), counts.join() === "1,2,1", counts.join());
     const wa = await asked(a, (v) => v?.n === 2);
     const wb = await asked(b, (v) => v?.n === 1);
-    check(t("each tab's overlay reaches its own page (onPage + its page's store)"), wa?.q === "?t=A" && wa?.n === 2 && wb?.q === "?t=B" && wb?.n === 1, JSON.stringify({ wa, wb }));
+    check(t("each tab's overlay reaches its own page (onSite + its page's store)"), wa?.q === "?t=A" && wa?.n === 2 && wb?.q === "?t=B" && wb?.n === 1, JSON.stringify({ wa, wb }));
     await a.evaluate(() => history.pushState({}, "", "/ov-two?t=A2"));
     const spa = await hit(a);
     check(t("a pushState keeps the page's copy"), spa === "3", spa);
@@ -627,64 +652,59 @@ export async function checkPageStores(ctx: any, mgr: any, origin: string, check:
     await send({ type: "deleteScript", id: "s_two" });
 }
 
-const layerCode = (origin: string) => `const ov = wt.onPage({ url: "${origin}/ov-layer*", dom: "overlay" }, () => {
+const placeCode = (origin: string) => `const site = wt.onSite("${origin}/ov-layer*", (ctx) => {
+    document.body.dataset.siteRan = String((window as any).__site);
+    return { site: () => (window as any).__site + ":" + ctx.url };
+});
+
+wt.onOverlay("${origin}/ov-layer*", async () => {
     const o = document.body.appendChild(document.createElement("output"));
     o.id = "domov";
     o.value = "frame";
-    return { ping: () => "pong" };
+    o.value = await site.site();
 });
 
-wt.onPage({ url: "${origin}/ov-layer*", js: "page", dom: "overlay", unsafe: true }, (ctx) => {
-    const b = document.body.appendChild(document.createElement("button"));
-    b.id = "layerbtn";
-    b.textContent = "L:" + (window as any).__site;
-    b.style.cssText = "position: fixed; right: 20px; bottom: 20px; width: 140px; height: 40px";
-    b.onclick = () => ((window as any).__layerClicked = ctx.url);
+wt.onPage("${origin}/ov-layer*", async () => {
+    document.body.dataset.pageSaw = typeof (window as any).__site + "|" + (await site.site());
 });
 `;
 
 /**
- * wt.onPage's dom option: dom: "overlay" is the overlay frame; with
- * js: "page" (and unsafe: true) the GUI runs in the site's world, drawing
- * in its own click-through layer; without unsafe the script doesn't compile.
+ * The three places a page handler runs: wt.onSite (the site's own world),
+ * wt.onPage (the isolated world) and wt.onOverlay (the overlay frame) — and
+ * the route options and ctx.evaluate they replaced are refused or flagged.
  */
-export async function checkOnPageDom(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
-    const t = (s: string) => `onPage dom${opts.label ?? ""}: ${s}`;
+export async function checkPlaces(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
+    const t = (s: string) => `onSite/onPage/onOverlay${opts.label ?? ""}: ${s}`;
     const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
-    const bad = await send({ type: "saveScript", id: "s_layer_bad", code: `wt.onPage({ url: "${origin}/nope", js: "page", dom: "overlay" }, () => {});`, name: "layer no unsafe.wiretrick" });
-    check(t('js: "page" + dom: "overlay" without unsafe: true fails to compile'), /unsafe: true/.test(bad?.error ?? ""), bad?.error);
-    await send({ type: "deleteScript", id: "s_layer_bad" });
-    const saved = await send({ type: "saveScript", id: "s_layer", code: layerCode(origin), name: "layers.wiretrick" });
+    const legacy: [string, string, RegExp][] = [
+        ["js", `wt.onPage({ url: "${origin}/nope", js: "page" }, () => {});`, /"js" is gone: wt\.onSite/],
+        ["dom", `wt.onPage({ url: "${origin}/nope", dom: "overlay" }, () => {});`, /"dom" is gone: .*wt\.onOverlay/],
+        ["unsafe", `wt.onSite({ url: "${origin}/nope", unsafe: true }, () => {});`, /"unsafe" is gone/],
+    ];
+    for (const [opt, code, want] of legacy) {
+        const bad = await send({ type: "saveScript", id: "s_legacy_" + opt, code, name: `legacy ${opt}.wiretrick` });
+        check(t(`a route with the removed "${opt}" option fails to compile, naming what replaces it`), want.test(bad?.error ?? ""), bad?.error);
+        await send({ type: "deleteScript", id: "s_legacy_" + opt });
+    }
+    const evalSaved = await send({ type: "saveScript", id: "s_evaluate", code: `wt.onPage("${origin}/nope", async (ctx) => {\n    await (ctx as any).evaluate(() => 1);\n});\n`, name: "evaluate.wiretrick" });
+    const evalWarn = await waitFor<string[]>(async () => ((await send({ type: "listScripts" })) || []).find((s: any) => s.id === "s_evaluate")?.routeWarnings ?? [], (w) => w.length > 0, 5000);
+    check(t("a script still calling ctx.evaluate saves, flagged in Problems with the onSite replacement"), !evalSaved?.error && evalWarn.some((w) => w.startsWith("ctx.evaluate is gone") && w.includes("wt.onSite")), JSON.stringify({ error: evalSaved?.error, evalWarn }));
+    await send({ type: "deleteScript", id: "s_evaluate" });
+    const saved = await send({ type: "saveScript", id: "s_layer", code: placeCode(origin), name: "places.wiretrick" });
     check(t("the script saves"), !saved?.error, saved?.error);
     await mgr.waitForTimeout(800);
     const page = await ctx.newPage();
     page.on("console", (m: any) => console.log("  [ov-layer]", m.text().slice(0, 160)));
     await page.goto(`${origin}/ov-layer`, { waitUntil: "load", timeout: 15000 });
     const frame = await overlayFrame(page, "#domov");
-    check(t('dom: "overlay" renders in the overlay frame'), !!frame);
-    const layer = await waitFor(
-        async () => {
-            for (const f of page.frames().filter((f: any) => !f.url().includes("/overlay.html") && f !== page.mainFrame()))
-                if (await f.evaluate(() => !!document.getElementById("layerbtn")).catch(() => false)) return f;
-            return null;
-        },
-        (f) => !!f
-    );
-    const text = layer ? await layer.evaluate(() => document.getElementById("layerbtn")!.textContent) : null;
-    check(t('js: "page" overlay draws in its own layer, with the site\'s globals'), text === "L:SITE-7", String(text));
-    const seen = await page.evaluate(() => !!document.querySelector("wiretrick-layer") && !document.getElementById("layerbtn"));
-    check(t("the site sees the layer's host but not its document"), seen);
-    if (layer) {
-        const at = await centerOf(layer, "#layerbtn");
-        await waitFor<string>(() => page.evaluate(({ x, y }: { x: number; y: number }) => document.elementFromPoint(x, y)?.tagName ?? "", at), (v) => v === "WIRETRICK-LAYER", 5000);
-        await page.mouse.click(at.x, at.y);
-    }
-    const clicked = await waitFor<string>(() => page.evaluate(() => (window as any).__layerClicked ?? ""), (v) => !!v, 5000);
-    check(t("its handlers run in the site's world"), clicked === `${origin}/ov-layer`, clicked);
-    const pass = await centerOf(page.mainFrame(), "#pass");
-    await page.mouse.click(pass.x, pass.y);
-    const through = await page.evaluate(() => document.body.dataset.clicked ?? "");
-    check(t("clicks on its empty areas reach the page"), through === "1", through);
+    check(t("onOverlay renders in the overlay frame"), !!frame);
+    const answer = frame ? await waitFor<string>(() => frame.evaluate(() => (document.getElementById("domov") as HTMLOutputElement).value).catch(() => ""), (v) => v !== "frame", 8000) : "";
+    check(t("the overlay calls onSite code, which sees the site's globals"), answer === `SITE-7:${origin}/ov-layer`, answer);
+    const siteRan = await waitFor<string>(() => page.evaluate(() => document.body.dataset.siteRan || ""), (v) => !!v, 5000);
+    check(t("onSite code runs in the site's world"), siteRan === "SITE-7", siteRan);
+    const pageSaw = await waitFor<string>(() => page.evaluate(() => document.body.dataset.pageSaw || ""), (v) => !!v, 8000);
+    check(t("onPage code doesn't see the site's globals, but reads them through the onSite handle"), pageSaw === `undefined|SITE-7:${origin}/ov-layer`, pageSaw);
     await page.close();
     await send({ type: "deleteScript", id: "s_layer" });
 }
@@ -698,7 +718,7 @@ const ps = wt.pageStore("isops", { hits: 0 });
 
 wt.replaceResponse({ url: "${origin}/ov-isops", strategy: "page" }, () => String(++ps.hits));
 
-wt.onPage({ url: "${origin}/ov-isost*", dom: "overlay" }, () => {
+wt.onOverlay("${origin}/ov-isost*", () => {
     const out = document.body.appendChild(document.createElement("output"));
     out.id = "isost-ov";
     out.value = "overlay";
@@ -706,19 +726,33 @@ wt.onPage({ url: "${origin}/ov-isost*", dom: "overlay" }, () => {
     (window as any).bump = () => ++g.n;
 });
 
+const site = wt.onSite("${origin}/ov-isost*", (ctx) => {
+    (window as any).__isoSecret = "PAGE-GLOBAL-42";
+    try {
+        document.body.dataset.mainStore = "read " + ps.hits;
+    } catch (e) {
+        document.body.dataset.mainStore = (e as Error).message;
+    }
+    const pings: string[] = [], waiting: ((v: string) => void)[] = [];
+    addEventListener("wt-e2e-ping", (e: any) => {
+        const v = e.detail + ":" + (window as any).__isoSecret;
+        (waiting.shift() ?? ((v: string) => pings.push(v)))(v);
+    }, { signal: ctx.signal });
+    return {
+        read: (k: string) => new Promise((r) => {
+            const t0 = Date.now();
+            const poll = () => ((window as any)[k] || Date.now() - t0 > 2000 ? r((window as any)[k] + "|" + location.pathname) : setTimeout(poll, 20));
+            poll();
+        }),
+        nextPing: () => (pings.length ? Promise.resolve(pings.shift()!) : new Promise<string>((r) => waiting.push(r))),
+    };
+});
+
 wt.onPage("${origin}/ov-isost*", async (ctx) => {
     document.body.dataset.isoGlobal = String(typeof (window as any).__isoSecret);
-    document.body.dataset.evaluated = await ctx.evaluate((k: string) => new Promise((r) => {
-        const t0 = Date.now();
-        const poll = () => ((window as any)[k] || Date.now() - t0 > 2000 ? r((window as any)[k] + "|" + location.pathname) : setTimeout(poll, 20));
-        poll();
-    }), "__isoSecret").then(String, (e) => "rejected: " + e.message);
-    await ctx.evaluate((on) => {
-        addEventListener("wt-e2e-ping", (e: any) => on.ping(e.detail + ":" + (window as any).__isoSecret));
-    }, { ping: (v: string) => {
-        document.body.dataset.pinged = v + ":" + typeof (window as any).__isoSecret + ":" + g.n;
-    } });
+    document.body.dataset.evaluated = await site.read("__isoSecret").then(String, (e) => "rejected: " + e.message);
     document.body.dataset.subscribed = "1";
+    for await (const v of ctx.each(site.nextPing)) document.body.dataset.pinged = v + ":" + typeof (window as any).__isoSecret + ":" + g.n;
 })
 
 wt.onPage("${origin}/ov-isost*", () => {
@@ -736,27 +770,21 @@ wt.onPage("${origin}/ov-isost*", () => {
         ps.hits += 100;
     };
 });
-
-wt.onPage({ url: "${origin}/ov-isost*", js: "page" }, () => {
-    (window as any).__isoSecret = "PAGE-GLOBAL-42";
-    try {
-        document.body.dataset.mainStore = "read " + ps.hits;
-    } catch (e) {
-        document.body.dataset.mainStore = (e as Error).message;
-    }
-});
 `;
 
 /**
  * Stores in isolated-world onPage code: primed, live both ways with the
- * overlay and the background, this page's wt.pageStore copy only; page-world
- * onPage code can't use them.
+ * overlay and the background, this page's wt.pageStore copy only; onSite
+ * code can't use them, and onPage code reads the site through an onSite
+ * handle (promise-returning functions, and a ctx.each loop).
  */
 export async function checkIsoStores(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
     const t = (s: string) => `isolated stores${opts.label ?? ""}: ${s}`;
     const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
     const saved = await send({ type: "saveScript", id: "s_isost", code: isoStoreCode(origin), name: "iso stores.wiretrick" });
     check(t("the script saves"), !saved?.error, saved?.error);
+    const warns = await waitFor<string[]>(async () => ((await send({ type: "listScripts" })) || []).find((s: any) => s.id === "s_isost")?.routeWarnings ?? [], (w) => w.length > 0, 5000);
+    check(t("Problems flags the store use in onSite code"), warns.some((w) => w.includes("uses `ps`") && w.includes("aren't available in onSite code")), JSON.stringify(warns));
     await mgr.waitForTimeout(800);
     const open = async (q: string) => {
         const p = await ctx.newPage();
@@ -772,14 +800,14 @@ export async function checkIsoStores(ctx: any, mgr: any, origin: string, check: 
     check(t("isolated code reads its stores (primed)"), v0?.ps === 0 && typeof v0?.g === "number", JSON.stringify(v0));
     const g0 = v0?.g ?? 0;
     const mainErr = await waitFor<string>(() => a.evaluate(() => document.body.dataset.mainStore || ""), (v) => !!v, 8000);
-    check(t("page-world onPage code can't use them, and is told to drop js: \"page\""), /page-world code/.test(mainErr) && mainErr.includes('drop js: "page"'), mainErr);
+    check(t("onSite code can't use them, and is told to use them in wt.onPage"), mainErr.includes("aren't available in onSite code") && mainErr.includes("use them in wt.onPage"), mainErr);
     const evaluated = await waitFor<string>(() => a.evaluate(() => document.body.dataset.evaluated || ""), (v) => !!v, 8000);
     const isoGlobal = await a.evaluate(() => document.body.dataset.isoGlobal || "");
-    check(t("default-world onPage code is isolated: no page globals, ctx.evaluate reads them (awaited)"), isoGlobal === "undefined" && evaluated === "PAGE-GLOBAL-42|/ov-isost", JSON.stringify({ isoGlobal, evaluated }));
+    check(t("onPage code is isolated: no page globals; an onSite handle reads them (promise-returning)"), isoGlobal === "undefined" && evaluated === "PAGE-GLOBAL-42|/ov-isost", JSON.stringify({ isoGlobal, evaluated }));
     await waitFor<string>(() => a.evaluate(() => document.body.dataset.subscribed || ""), (v) => !!v, 8000);
     await a.evaluate(() => dispatchEvent(new CustomEvent("wt-e2e-ping", { detail: "hi" })));
     const pinged = await waitFor<string>(() => a.evaluate(() => document.body.dataset.pinged || ""), (v) => !!v, 8000);
-    check(t("ctx.evaluate callbacks: a page event calls back into isolated code (page global there, store here)"), pinged === `hi:PAGE-GLOBAL-42:undefined:${g0}`, pinged);
+    check(t("ctx.each over an onSite function: a page event reaches isolated code (page global there, store here)"), pinged === `hi:PAGE-GLOBAL-42:undefined:${g0}`, pinged);
     const first = await hit(a);
     const v1 = await until(a, (v) => v.ps === 1);
     const reactText = await waitFor<string>(() => a.evaluate(() => [...document.querySelectorAll("b")].map((b) => b.textContent).join()), (v) => v === "react:1", 8000);
@@ -804,85 +832,76 @@ export async function checkIsoStores(ctx: any, mgr: any, origin: string, check: 
     await send({ type: "deleteScript", id: "s_isost" });
 }
 
-const unsafeCode = (origin: string) => `const g = wt.globalStore("unsg", { n: 0, from: "" }, { persist: false });
-const ps = wt.pageStore("unsps", { hits: 0 });
+const siteHandlesCode = (origin: string) => `const g = wt.globalStore("unsg", { n: 0 }, { persist: false });
 
-const overlay = wt.onPage({ url: "${origin}/ov-unsafe*", dom: "overlay" }, () => {
+const overlay = wt.onOverlay("${origin}/ov-unsafe*", () => {
     const out = document.body.appendChild(document.createElement("output"));
     out.id = "uns-ov";
-    (window as any).readG = () => JSON.stringify({ n: g.n, from: g.from });
     (window as any).bump = () => ++g.n;
-    (window as any).askPage = () => (page as any).where();
+    (window as any).askSite = async () => {
+        const where = await site.where();
+        const later = await site.later(30);
+        const boom = await site.boom().then((v) => "resolved " + v, (e) => (e as Error).message);
+        return JSON.stringify({ where, later, boom });
+    };
     return { greet: (who: string) => "hi " + who + " " + g.n };
 });
 
-const page = wt.onPage({ url: "${origin}/ov-unsafe*", js: "page", unsafe: true }, () => {
+const site = wt.onSite("${origin}/ov-unsafe*", () => {
     (window as any).__unsafeSite = "SITE-UNS";
-    g.from = "page:" + location.pathname;
-    ps.hits++;
-    const out = document.body.appendChild(document.createElement("output"));
-    out.id = "uns";
-    setInterval(() => (out.value = JSON.stringify({ g: g.n, from: g.from, ps: ps.hits })), 50);
-    addEventListener("wt-uns-call", () =>
-        overlay.greet("page").then(
-            (v) => (document.body.dataset.greeted = v),
-            (e) => (document.body.dataset.greeted = "rejected: " + e.message)
-        )
-    );
-    return { where: () => (window as any).__unsafeSite + ":" + g.n };
-});
-`;
-
-const safeCode = (origin: string) => `const g = wt.globalStore("other", { secret: 1 });
-wt.onPage({ url: "${origin}/ov-unsafe*", js: "page" }, () => {
     try {
-        document.body.dataset.safeStore = "read " + g.secret;
+        void overlay.greet("site");
+        document.body.dataset.siteCall = "called";
     } catch (e) {
-        document.body.dataset.safeStore = (e as Error).message;
+        document.body.dataset.siteCall = (e as Error).name + ": " + (e as Error).message;
     }
+    return {
+        where: () => (window as any).__unsafeSite + ":" + location.pathname,
+        later: (ms: number) => new Promise<string>((r) => setTimeout(() => r("later:" + ms), ms)),
+        boom: (): string => {
+            throw new Error("site boom");
+        },
+    };
+});
+
+wt.onPage("${origin}/ov-unsafe*", (ctx) => {
+    addEventListener("wt-uns-call", async () => {
+        const where = await site.where();
+        const greet = await overlay.greet("page").catch((e) => "rejected: " + e.message);
+        document.body.dataset.fromPage = JSON.stringify({ where, greet });
+    }, { signal: ctx.signal });
 });
 `;
 
 /**
- * \`unsafe: true\` page-world onPage code: live stores shared with the
- * overlay and other tabs, calls to and from the overlay; another script's
- * page-world code still gets none, and the page can't reach that
- * script's stores by forging the hook's messages.
+ * onSite handles: the overlay and onPage code call onSite functions (plain,
+ * promise-returning, throwing); onSite code can't call any handle, and the
+ * page can't reach the script's stores by forging the hook's messages.
  */
-export async function checkUnsafePageStores(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
-    const t = (s: string) => `unsafe page-world code${opts.label ?? ""}: ${s}`;
+export async function checkSiteHandles(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
+    const t = (s: string) => `onSite handles${opts.label ?? ""}: ${s}`;
     const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
-    const saved = await send({ type: "saveScript", id: "s_uns", code: unsafeCode(origin), name: "unsafe stores.wiretrick" });
-    const saved2 = await send({ type: "saveScript", id: "s_uns2", code: safeCode(origin), name: "safe page code.wiretrick" });
-    check(t("the scripts save"), !saved?.error && !saved2?.error, saved?.error || saved2?.error);
+    const saved = await send({ type: "saveScript", id: "s_uns", code: siteHandlesCode(origin), name: "site handles.wiretrick" });
+    check(t("the script saves"), !saved?.error, saved?.error);
+    const warns = await waitFor<string[]>(async () => ((await send({ type: "listScripts" })) || []).find((s: any) => s.id === "s_uns")?.routeWarnings ?? [], (w) => w.length > 0, 5000);
+    check(t("Problems flags the handle call in onSite code"), warns.some((w) => w.includes("uses `overlay`") && w.includes("onSite code can't call handles")), JSON.stringify(warns));
     await mgr.waitForTimeout(800);
-    const open = async (q: string) => {
-        const p = await ctx.newPage();
-        await p.goto(`${origin}/ov-unsafe?t=${q}`, { waitUntil: "load", timeout: 15000 });
-        return p;
-    };
-    const read = (p: any) => p.evaluate(() => JSON.parse((document.getElementById("uns") as HTMLOutputElement | null)?.value || "null")).catch(() => null);
-    const until = (p: any, ok: (v: any) => boolean) => waitFor<any>(() => read(p), (v) => !!v && ok(v), 8000);
-
-    const a = await open("A");
-    const v0 = await until(a, (v) => v.ps === 1 && v.from === "page:/ov-unsafe");
-    const site = await a.evaluate(() => (window as any).__unsafeSite);
-    check(t("runs in the page's world and uses its stores (written, read back)"), site === "SITE-UNS" && v0?.ps === 1 && v0?.from === "page:/ov-unsafe", JSON.stringify({ site, v0 }));
-    const g0 = v0?.g ?? 0;
+    const a = await ctx.newPage();
+    await a.goto(`${origin}/ov-unsafe?t=A`, { waitUntil: "load", timeout: 15000 });
+    const siteCall = await waitFor<string>(() => a.evaluate(() => document.body.dataset.siteCall || ""), (v) => !!v, 8000);
+    check(t("a handle call in onSite code throws SiteCannotCallError"), siteCall.startsWith("SiteCannotCallError: onSite code can't call handles"), siteCall);
     const f = await overlayFrame(a, "#uns-ov");
-    const seen = f ? await waitFor<string>(() => f.evaluate(() => (window as any).readG()).catch(() => ""), (v) => v.includes("page:/ov-unsafe"), 8000) : "";
-    check(t("its write reaches the overlay"), seen === JSON.stringify({ n: g0, from: "page:/ov-unsafe" }), seen);
-    await f?.evaluate(() => (window as any).bump()).catch(() => null);
-    const v1 = await until(a, (v) => v.g === g0 + 1);
-    check(t("the overlay's write shows up live"), v1?.g === g0 + 1, JSON.stringify(v1));
+    const asked = f ? await f.evaluate(() => (window as any).askSite()).catch((e: any) => "rejected: " + e) : "";
+    check(
+        t("the overlay calls onSite functions: plain, promise-returning (awaited) and throwing (rejects with its message)"),
+        asked === JSON.stringify({ where: "SITE-UNS:/ov-unsafe", later: "later:30", boom: "site boom" }),
+        asked
+    );
+    const g0 = f ? await f.evaluate(() => (window as any).bump()).catch(() => null) : null;
     await a.evaluate(() => dispatchEvent(new CustomEvent("wt-uns-call")));
-    const greeted = await waitFor<string>(() => a.evaluate(() => document.body.dataset.greeted || ""), (v) => !!v, 8000);
-    check(t("it calls the overlay"), greeted === `hi page ${g0 + 1}`, greeted);
-    const answered = f ? await f.evaluate(() => (window as any).askPage()).catch((e: any) => "rejected: " + e) : "";
-    check(t("the overlay calls it"), answered === `SITE-UNS:${g0 + 1}`, answered);
-    const safeErr = await waitFor<string>(() => a.evaluate(() => document.body.dataset.safeStore || ""), (v) => !!v, 8000);
-    check(t("another script's page-world code still gets no stores, and is told about unsafe: true"), /page-world code/.test(safeErr) && safeErr.includes("add unsafe: true"), safeErr);
-    // the page forges the hook's link: the other script's stores stay out of reach
+    const fromPage = await waitFor<string>(() => a.evaluate(() => document.body.dataset.fromPage || ""), (v) => !!v, 8000);
+    check(t("onPage code calls onSite functions and the overlay"), fromPage === JSON.stringify({ where: "SITE-UNS:/ov-unsafe", greet: `hi page ${g0}` }), fromPage);
+    // the page forges the hook's link: page-world messages never reach trusted code
     const forged = await a.evaluate(
         () =>
             new Promise<string>((r) => {
@@ -892,18 +911,151 @@ export async function checkUnsafePageStores(ctx: any, mgr: any, origin: string, 
                     if (d?.source !== "res-override-bridge" || d.kind !== "wire") return;
                     for (const m of Array.isArray(d.msg) ? d.msg : [d.msg]) if (m?.t === "res" && m.id === id) r(m.ok ? "granted" : m.e.message);
                 });
-                postMessage({ source: "res-override-hook", kind: "wire", msg: { v: 1, t: "req", id, op: "store.sub", s: "s_uns2", a: { name: "other" } } }, location.origin);
-                setTimeout(() => r("no answer"), 5000);
+                postMessage({ source: "res-override-hook", kind: "wire", msg: { v: 1, t: "req", id, op: "store.sub", s: "s_uns", a: { name: "unsg" } } }, location.origin);
+                setTimeout(() => r("no answer"), 2000);
             })
     );
-    check(t("a forged store op for a script without unsafe: true is refused"), /aren't reachable/.test(forged), forged);
-    const b = await open("B");
-    const vb = await until(b, (v) => v.ps === 1);
-    check(t("another tab: the same global store, its own page copy"), vb?.g === g0 + 1 && vb?.ps === 1, JSON.stringify(vb));
+    check(t("a forged store op from the page goes unanswered"), forged === "no answer", forged);
     await a.close();
-    await b.close();
     await send({ type: "deleteScript", id: "s_uns" });
-    await send({ type: "deleteScript", id: "s_uns2" });
+}
+
+const lifeCode = (origin: string, v: string, red: number, boom = false) => `const site = wt.onSite("${origin}/ov-life*", (ctx) => {
+    if (${boom}) throw new Error("site boom ${v}");
+    document.documentElement.dataset.siteVersion = "${v}";
+    const queue: string[] = [], waiting: ((x: string) => void)[] = [];
+    addEventListener("life-tick", (e: any) => {
+        const val = "${v}:" + e.detail;
+        // every waiter: a reloaded caller's abandoned call may still be waiting
+        const ws = waiting.splice(0);
+        if (ws.length) ws.forEach((w) => w(val));
+        else queue.push(val);
+    }, { signal: ctx.signal });
+    return {
+        next: () => (queue.length ? Promise.resolve(queue.shift()!) : new Promise<string>((r) => waiting.push(r))),
+        version: () => "${v}",
+    };
+});
+
+wt.onPage("${origin}/ov-life*", (ctx) => {
+    if (${boom}) throw new Error("page boom ${v}");
+    const d = document.documentElement.dataset;
+    const w = window as any;
+    const api = w.__lifeApi || (w.__lifeApi = { greet: (x: string) => "orig:" + x });
+    ctx.patch(api, "greet", (orig: (x: string) => string) => (x: string) => {
+        d.patchCalls = String(Number(d.patchCalls || 0) + 1);
+        return "${v}:" + orig(x);
+    });
+    document.addEventListener("life-call", () => (d.greeted = api.greet("a")), { signal: ctx.signal });
+    ctx.style(".life-color { color: rgb(${red}, 0, 0) }");
+    ctx.mount(<b>mount ${v}</b>);
+});
+
+wt.onPage("${origin}/ov-life*", async (ctx) => {
+    const d = document.documentElement.dataset;
+    d.loopVersion = "${v}";
+    d.siteAnswer = "${v}>" + (await site.version());
+    for await (const val of ctx.each(site.next)) d.lifeLog = (d.lifeLog || "") + "|${v}<" + val + ">";
+});
+`;
+
+/** the text inside each <wiretrick-mount> host (closed shadow roots included: read over CDP) */
+async function mountTexts(page: any): Promise<string[]> {
+    const cdp = await page.context().newCDPSession(page);
+    try {
+        const { root } = await cdp.send("DOM.getDocument", { depth: -1, pierce: true });
+        const kids = (n: any): any[] => [...(n.shadowRoots || []), ...(n.children || [])];
+        const text = (n: any): string => (n.nodeName === "STYLE" || n.nodeName === "SCRIPT" ? "" : n.nodeType === 3 ? n.nodeValue : kids(n).map(text).join(""));
+        const out: string[] = [];
+        const walk = (n: any): void => {
+            if (String(n.nodeName).toUpperCase() === "WIRETRICK-MOUNT") out.push(text(n));
+            else kids(n).forEach(walk);
+        };
+        walk(root);
+        return out;
+    } finally {
+        await cdp.detach().catch(() => {});
+    }
+}
+
+/**
+ * Hot apply on a page: saving re-runs a script's handlers in place —
+ * ctx.mount / ctx.style / ctx.patch don't pile up, an onSite promise loop
+ * (ctx.each) carries on with the new run, and a handler that throws on
+ * save keeps its old run.
+ */
+export async function checkHotReload(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
+    const t = (s: string) => `hot apply${opts.label ?? ""}: ${s}`;
+    const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
+    const save = (v: string, red: number, boom = false) => send({ type: "saveScript", id: "s_life", code: lifeCode(origin, v, red, boom), name: "life.wiretrick" });
+    const saved = await save("v1", 10);
+    check(t("the script saves"), !saved?.error, saved?.error);
+    await mgr.waitForTimeout(800);
+    const page = await ctx.newPage();
+    page.on("console", (m: any) => console.log("  [ov-life]", m.text().slice(0, 160)));
+    await page.goto(`${origin}/ov-life`, { waitUntil: "load", timeout: 15000 });
+    const data = (): Promise<Record<string, string>> => page.evaluate(() => ({ ...document.documentElement.dataset }) as Record<string, string>).catch(() => ({}));
+    const ready = (v: string, site = v) => waitFor(data, (d) => d.siteAnswer === `${v}>${site}`, 8000);
+    const tick = (x: string) => page.evaluate((detail: string) => dispatchEvent(new CustomEvent("life-tick", { detail })), x);
+    const logIs = (want: string) => waitFor(data, (d) => d.lifeLog === want, 5000).then((d) => d.lifeLog ?? "");
+    const state = async () => ({
+        mounts: await mountTexts(page),
+        styles: await page.evaluate(() => [...document.head.querySelectorAll("style")].filter((s) => s.textContent!.includes("life-color")).length),
+        color: await page.evaluate(() => getComputedStyle(document.getElementById("lifec")!).color),
+    });
+    const call = async () => {
+        const before = Number((await data()).patchCalls || 0);
+        await page.evaluate(() => {
+            delete document.documentElement.dataset.greeted;
+            document.dispatchEvent(new CustomEvent("life-call"));
+        });
+        const d = await waitFor(data, (d) => !!d.greeted, 5000);
+        await page.waitForTimeout(200);
+        return { greeted: d.greeted, calls: Number((await data()).patchCalls || 0) - before };
+    };
+
+    await ready("v1");
+    await tick("a");
+    const log1 = await logIs("|v1<v1:a>");
+    check(t("an onPage loop over an onSite function (ctx.each) gets the site's values"), log1 === "|v1<v1:a>", log1);
+
+    await save("v2", 20);
+    await ready("v2");
+    await save("v3", 30);
+    await ready("v3");
+    await page.waitForTimeout(500);
+    const s3 = await waitFor(state, (s) => s.mounts.length === 1 && s.mounts[0] === "mount v3" && s.styles === 1, 5000);
+    check(t("after two saves: one ctx.mount host, showing the newest run's UI"), s3.mounts.length === 1 && s3.mounts[0] === "mount v3", JSON.stringify(s3.mounts));
+    check(t("after two saves: one ctx.style element, the newest css applied"), s3.styles === 1 && s3.color === "rgb(30, 0, 0)", JSON.stringify(s3));
+    const c3 = await call();
+    check(t("after two saves: ctx.patch wraps once (one call each), with the newest wrapper"), c3.greeted === "v3:orig:a" && c3.calls === 1, JSON.stringify(c3));
+    await tick("b");
+    await logIs("|v1<v1:a>|v3<v3:b>");
+    await tick("c");
+    const log3 = await logIs("|v1<v1:a>|v3<v3:b>|v3<v3:c>");
+    check(t("the onSite promise loop survives the saves: later values reach the new run, each once"), log3 === "|v1<v1:a>|v3<v3:b>|v3<v3:c>", log3);
+
+    const boom = await save("v4", 40, true);
+    check(t("a script whose handlers throw still saves"), !boom?.error, boom?.error);
+    const d4 = await ready("v4", "v3");
+    check(t("an onSite handler that throws on save keeps its old run: its handle still answers"), d4.siteAnswer === "v4>v3" && d4.siteVersion === "v3", JSON.stringify(d4));
+    await page.waitForTimeout(500);
+    const s4 = await state();
+    check(
+        t("an onPage handler that throws on save keeps its old run: its mount and style stay"),
+        s4.mounts.length === 1 && s4.mounts[0] === "mount v3" && s4.styles === 1 && s4.color === "rgb(30, 0, 0)",
+        JSON.stringify(s4)
+    );
+    const c4 = await call();
+    check(t("…and its patch and listener stay"), c4.greeted === "v3:orig:a" && c4.calls === 1, JSON.stringify(c4));
+    await tick("d");
+    const log4 = await logIs("|v1<v1:a>|v3<v3:b>|v3<v3:c>|v4<v3:d>");
+    check(t("the new onPage loop reads the kept onSite run"), log4 === "|v1<v1:a>|v3<v3:b>|v3<v3:c>|v4<v3:d>", log4);
+
+    await send({ type: "deleteScript", id: "s_life" });
+    const gone = await waitFor(state, (s) => !s.mounts.length && !s.styles, 5000);
+    check(t("deleting the script removes its mount and style"), !gone.mounts.length && !gone.styles, JSON.stringify(gone));
+    await page.close();
 }
 
 /**

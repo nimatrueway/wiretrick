@@ -28,7 +28,7 @@ import { resolveBrowser } from "./browserSetup";
 import { checkApiTypingsNav } from "./apiTypingsNav";
 import { checkRulesStrategy, rulesServerRoute } from "./rulesE2e";
 import { checkFoldersAndDataFiles, foldersServerRoute } from "./foldersE2e";
-import { checkOnPageDom, checkOverlayPreview, checkOverlays, checkEarlyRequests, checkOverlayShortcuts, checkPageStores, checkIsoStores, checkUnsafePageStores, overlayServerRoute } from "./overlayE2e";
+import { checkPlaces, checkOverlayPreview, checkOverlays, checkEarlyRequests, checkHotReload, checkOverlayShortcuts, checkPageStores, checkIsoStores, checkSiteHandles, overlayServerRoute } from "./overlayE2e";
 import { checkPackages, packagesServerRoute } from "./packagesE2e";
 import { readExportZip } from "../src/shared/exportZip";
 
@@ -340,10 +340,11 @@ try {
                 },
             },
         });
+        await checkHotReload(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
         await checkPageStores(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
         await checkIsoStores(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
-        await checkUnsafePageStores(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
-        await checkOnPageDom(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
+        await checkSiteHandles(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
+        await checkPlaces(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
         await checkEarlyRequests(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
         await checkOverlayShortcuts(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
         await checkOverlayPreview(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
@@ -1071,21 +1072,21 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
     });
     await warm.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_dom", name: "Early dom.wiretrick",
-        code: `wt.onPage({ url: "*://*:*/*", when: "document_start", js: "page" }, (ctx) => { document.title = "DOM-RAN:" + document.readyState; });`,
+        code: `wt.onSite({ url: "*://*:*/*", when: "document_start" }, (ctx) => { document.title = "DOM-RAN:" + document.readyState; });`,
     }, r)));
     // a second script with its own `when` must not inherit the first's
     await warm.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_idle", name: "Idle dom.wiretrick",
-        code: `wt.onPage({ url: "*://*:*/*", when: "document_idle", js: "page" }, () => { document.documentElement.dataset.idle = document.readyState; });`,
+        code: `wt.onSite({ url: "*://*:*/*", when: "document_idle" }, () => { document.documentElement.dataset.idle = document.readyState; });`,
     }, r)));
     await warm.waitForTimeout(1500); // cache refresh (pipeline reload warm)
     const domPage = await ctx.newPage();
     await domPage.goto(`${ORIGIN}/page`);
     await domPage.waitForFunction(() => document.title.startsWith("DOM-RAN"), null, { timeout: 15000 });
-    check("onPage document_start runs in MV3", true, await domPage.title());
+    check("onSite document_start runs in MV3", true, await domPage.title());
     await domPage.waitForFunction(() => !!document.documentElement.dataset.idle, null, { timeout: 15000 }).catch(() => null);
     const idleState = await domPage.evaluate(() => document.documentElement.dataset.idle);
-    check("onPage: each script keeps its own when (document_idle runs after load)", idleState === "complete", String(idleState));
+    check("onSite: each script keeps its own when (document_idle runs after load)", idleState === "complete", String(idleState));
     const cacheHit = await warm.evaluate(() =>
         [...document.querySelectorAll("#log-entries .log-line")].some((l) => (l.textContent || "").includes("analyze cache hit"))
     );
@@ -1127,29 +1128,29 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
         await save(
             "s_evalerr",
             "Eval errs.wiretrick",
-            `wt.onPage("*://*:*/page-badge*", async (ctx) => {
-                ctx.evaluate((cb) => { setTimeout(() => cb(window), 0); }, () => {});
-                ctx.evaluate((cb) => { cb(1); }, () => { throw new Error("evalerr-callback"); });
-                ctx.evaluate(() => { throw new Error("evalerr-unhandled"); });
+            `const site = wt.onSite("*://*:*/page-badge*", () => ({
+                boom: (): string => { throw new Error("evalerr-site"); },
+            }));
+            wt.onPage("*://*:*/page-badge*", async () => {
+                await site.boom();
+            });
+            wt.onPage("*://*:*/page-badge*", async () => {
                 throw new Error("evalerr-async");
             });`
         );
-        const wanted = ["callback's arguments must be plain data", "evalerr-callback", "evalerr-unhandled", "evalerr-async"];
+        const wanted = ["evalerr-site", "evalerr-async"];
         let seen: string[] = [];
-        let unhandledLine = "";
-        for (let i = 0; i < 40 && (seen.length < wanted.length || !unhandledLine); i++) {
+        for (let i = 0; i < 40 && seen.length < wanted.length; i++) {
             if (i % 8 === 0) await bp.reload();
             await warm.waitForTimeout(250);
             const lines: string[] = await warm.evaluate(() => [...document.querySelectorAll("#log-entries .log-line.error")].map((l) => (l as HTMLElement).dataset.text || l.textContent || ""));
             seen = wanted.filter((w) => lines.some((l) => l.includes("[Eval errs") && l.includes(w)));
-            unhandledLine = lines.find((l) => l.includes("[Eval errs") && l.includes("evalerr-unhandled") && /Eval errs\.wiretrick:4:\d+/.test(l)) || "";
         }
-        check("onPage: async rejections, ctx.evaluate callback errors and unhandled evaluate rejections are the script's errors", seen.length === wanted.length, JSON.stringify(seen));
-        check("onPage: a ctx.evaluate rejection points at the script's ctx.evaluate call (not Wiretrick's code)", !!unhandledLine, unhandledLine || "(no evalerr-unhandled line with Eval errs.wiretrick:4)");
+        check("onPage: async rejections, including an onSite function's error it awaits, are the script's errors", seen.length === wanted.length, JSON.stringify(seen));
         await warm.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "clearScriptError", scriptId: "s_evalerr" }, r)));
         for (const id of ["s_evalerr", "s_badgebad", "s_badgeiso"]) await warm.evaluate((id: string) => new Promise((r) => chrome.runtime.sendMessage({ type: "deleteScript", id }, r)), id);
         await warm.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "clearScriptError", scriptId: "s_badgebad" }, r)));
-        // ctx.evaluate's function takes the script's imports and top-level declarations along to the page world
+        // onSite code uses the script's imports and top-level declarations in the page world
         await save("s_evcaplib", "evcap-lib", `export function mark(v: string) { (window as any).__evcap = v; }`);
         await save(
             "s_evcap",
@@ -1157,11 +1158,15 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
             `import { mark } from "./evcap-lib";
             const SUFFIX = "-ok";
             const suffixed = (v: string) => v + SUFFIX;
-            wt.onPage("*://*:*/page-badge*", async (ctx) => {
-                const r = await ctx.evaluate((n) => { mark(suffixed("v" + n)); return (window as any).__evcap; }, 1);
-                const api = await ctx.evaluate(() => ({ get: () => (window as any).__evcap, set: (v: string) => { (window as any).__evcap = v; } }));
-                await api.set(r + "-ret");
-                document.documentElement.dataset.evcap = String(await api.get());
+            const site = wt.onSite("*://*:*/page-badge*", () => ({
+                mark: (n: number) => { mark(suffixed("v" + n)); return (window as any).__evcap as string; },
+                get: () => (window as any).__evcap as string,
+                set: (v: string) => new Promise<void>((r) => setTimeout(() => { (window as any).__evcap = v; r(); }, 10)),
+            }));
+            wt.onPage("*://*:*/page-badge*", async () => {
+                const r = await site.mark(1);
+                await site.set(r + "-ret");
+                document.documentElement.dataset.evcap = String(await site.get());
             });`
         );
         let evcap: any = null;
@@ -1170,13 +1175,13 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
             await warm.waitForTimeout(250);
             evcap = await bp.evaluate(() => ({ page: (window as any).__evcap, iso: document.documentElement.dataset.evcap })).catch(() => null);
         }
-        check("onPage: ctx.evaluate's function uses the script's imports and top-level helpers in the page world; functions it returns are callable", evcap?.page === "v1-ok-ret" && evcap?.iso === "v1-ok-ret", JSON.stringify(evcap));
+        check("onSite: its functions use the script's imports and top-level helpers in the page world; onPage awaits them (promise-returning too)", evcap?.page === "v1-ok-ret" && evcap?.iso === "v1-ok-ret", JSON.stringify(evcap));
         for (const id of ["s_evcap", "s_evcaplib"]) await warm.evaluate((id: string) => new Promise((r) => chrome.runtime.sendMessage({ type: "deleteScript", id }, r)), id);
-        // isolated code at document_start calls a js: "page" handler's functions (it answers once ready)
+        // isolated code at document_start calls an onSite handler's functions (it answers once ready)
         await save(
             "s_pagecall",
             "Page call.wiretrick",
-            `const page = wt.onPage({ url: "*://*:*/page-badge*", js: "page", when: "document_start" }, async () => {
+            `const page = wt.onSite({ url: "*://*:*/page-badge*", when: "document_start" }, async () => {
                 (window as any).__pagecallMark = 1;
                 await new Promise((r) => setTimeout(r, 50));
                 return { read: (k: string) => k + ":" + typeof (window as any).__pagecallMark };
@@ -1191,7 +1196,7 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
             await warm.waitForTimeout(250);
             pagecall = await bp.evaluate(() => document.documentElement.dataset.pagecall).catch(() => null);
         }
-        check("onPage: isolated code calls a js: \"page\" handler's functions at document_start", pagecall === "main:number", String(pagecall));
+        check("onPage: isolated code calls an onSite handler's functions at document_start", pagecall === "main:number", String(pagecall));
         await warm.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "deleteScript", id: "s_pagecall" }, r)));
         await bp.close();
     }

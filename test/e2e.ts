@@ -32,7 +32,7 @@ import { resolveBrowser } from "./browserSetup";
 import { checkApiTypingsNav } from "./apiTypingsNav";
 import { checkRulesStrategy, rulesServerRoute } from "./rulesE2e";
 import { checkFoldersAndDataFiles, foldersServerRoute } from "./foldersE2e";
-import { checkOnPageDom, checkOverlayPreview, checkOverlays, checkEarlyRequests, checkOverlayShortcuts, checkPageStores, checkIsoStores, checkUnsafePageStores, overlayServerRoute } from "./overlayE2e";
+import { checkPlaces, checkOverlayPreview, checkOverlays, checkEarlyRequests, checkHotReload, checkOverlayShortcuts, checkPageStores, checkIsoStores, checkSiteHandles, overlayServerRoute } from "./overlayE2e";
 import { checkPackages, packagesServerRoute } from "./packagesE2e";
 
 const EXT_ROOT = path.join(new URL("..", import.meta.url).pathname, "dist");
@@ -260,18 +260,22 @@ check("popup: activeScripts lists the scripts behind the badge", badge.ids.lengt
     await send({ type: "deleteScript", id: "s_badgebad" });
     await send({ type: "deleteScript", id: "s_badgepage" });
     await send({ type: "clearScriptError", scriptId: "s_badgebad" });
-    // ctx.evaluate's function takes the script's imports and top-level declarations along to the page world
+    // onSite code uses the script's imports and top-level declarations in the page world
     await saveScript("s_evcaplib", `export function mark(v: string) { (window as any).__evcap = v; }`, "evcap-lib");
     await saveScript(
         "s_evcap",
         `import { mark } from "./evcap-lib";
 const SUFFIX = "-ok";
 const suffixed = (v: string) => v + SUFFIX;
-wt.onPage("${ORIGIN}/page-fetch*", async (ctx) => {
-    const r = await ctx.evaluate((n) => { mark(suffixed("v" + n)); return (window as any).__evcap; }, 1);
-    const api = await ctx.evaluate(() => ({ get: () => (window as any).__evcap, set: (v: string) => { (window as any).__evcap = v; } }));
-    await api.set(r + "-ret");
-    document.documentElement.dataset.evcap = String(await api.get());
+const site = wt.onSite("${ORIGIN}/page-fetch*", () => ({
+    mark: (n: number) => { mark(suffixed("v" + n)); return (window as any).__evcap as string; },
+    get: () => (window as any).__evcap as string,
+    set: (v: string) => new Promise<void>((r) => setTimeout(() => { (window as any).__evcap = v; r(); }, 10)),
+}));
+wt.onPage("${ORIGIN}/page-fetch*", async () => {
+    const r = await site.mark(1);
+    await site.set(r + "-ret");
+    document.documentElement.dataset.evcap = String(await site.get());
 });`,
         "eval capture.wiretrick"
     );
@@ -281,13 +285,13 @@ wt.onPage("${ORIGIN}/page-fetch*", async (ctx) => {
         await new Promise((r) => setTimeout(r, 300));
         evcap = await p3.evaluate(() => ({ page: (window as any).__evcap, iso: document.documentElement.dataset.evcap })).catch(() => null);
     }
-    check("onPage: ctx.evaluate's function uses the script's imports and top-level helpers in the page world; functions it returns are callable", evcap?.page === "v1-ok-ret" && evcap?.iso === "v1-ok-ret", JSON.stringify(evcap));
+    check("onSite: its functions use the script's imports and top-level helpers in the page world; onPage awaits them (promise-returning too)", evcap?.page === "v1-ok-ret" && evcap?.iso === "v1-ok-ret", JSON.stringify(evcap));
     await send({ type: "deleteScript", id: "s_evcap" });
     await send({ type: "deleteScript", id: "s_evcaplib" });
-    // isolated code at document_start calls a js: "page" handler's functions (it answers once ready)
+    // isolated code at document_start calls an onSite handler's functions (it answers once ready)
     await saveScript(
         "s_pagecall",
-        `const page = wt.onPage({ url: "${ORIGIN}/page-fetch*", js: "page", when: "document_start" }, async () => {
+        `const page = wt.onSite({ url: "${ORIGIN}/page-fetch*", when: "document_start" }, async () => {
     (window as any).__pagecallMark = 1;
     await new Promise((r) => setTimeout(r, 50));
     return { read: (k: string) => k + ":" + typeof (window as any).__pagecallMark };
@@ -303,7 +307,7 @@ wt.onPage({ url: "${ORIGIN}/page-fetch*", when: "document_start" }, async () => 
         await new Promise((r) => setTimeout(r, 300));
         pagecall = await p3.evaluate(() => document.documentElement.dataset.pagecall).catch(() => null);
     }
-    check("onPage: isolated code calls a js: \"page\" handler's functions at document_start", pagecall === "main:number", String(pagecall));
+    check("onPage: isolated code calls an onSite handler's functions at document_start", pagecall === "main:number", String(pagecall));
     await send({ type: "deleteScript", id: "s_pagecall" });
 }
 await p3.close();
@@ -629,12 +633,13 @@ await checkRulesStrategy(ctx, mgr, ORIGIN, check);
 // ---------- 10h. folders and JSON data files ----------
 await checkFoldersAndDataFiles(ctx, mgr, ORIGIN, check);
 
-// ---------- 10i. overlays (wt.onPage({ dom: "overlay" })) and calls between the overlay and the page ----------
+// ---------- 10i. overlays (wt.onOverlay) and calls between the overlay and the page ----------
 await checkOverlays(ctx, mgr, ORIGIN, check, { isolated: true });
+await checkHotReload(ctx, mgr, ORIGIN, check);
 await checkPageStores(ctx, mgr, ORIGIN, check);
 await checkIsoStores(ctx, mgr, ORIGIN, check);
-await checkUnsafePageStores(ctx, mgr, ORIGIN, check);
-await checkOnPageDom(ctx, mgr, ORIGIN, check);
+await checkSiteHandles(ctx, mgr, ORIGIN, check);
+await checkPlaces(ctx, mgr, ORIGIN, check);
 await checkEarlyRequests(ctx, mgr, ORIGIN, check);
 await checkOverlayShortcuts(ctx, mgr, ORIGIN, check);
 await checkOverlayPreview(ctx, mgr, ORIGIN, check);
