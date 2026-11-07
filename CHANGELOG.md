@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.22.0-alpha] - 2026-11-07
+
 ### Breaking
 
 - `wt.onSite` now runs at `document_start` by default, before the site's own scripts, so `ctx.patch(window, "fetch", …)` is in place before site code holds the original. `document.body` is usually `null` then; an `onSite` that reads the DOM or globals set up while the page loads needs `when: "document_end"`. `onPage` and `onOverlay` still default to `document_end`. Rule of thumb: `onSite` runs before the site, `onPage`/`onOverlay` when the DOM is ready; `when` changes that.
@@ -814,7 +816,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.21.0-alpha...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.22.0-alpha...HEAD
+[0.22.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.21.0-alpha...v0.22.0-alpha
 [0.21.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.20.0-alpha...v0.21.0-alpha
 [0.20.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.19.0-alpha...v0.20.0-alpha
 [0.19.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.18.0-alpha...v0.19.0-alpha
