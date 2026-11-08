@@ -970,7 +970,8 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
     cursor: pointer;
 }
 
-.script-item.utility .script-name { color: var(--fg-dim); font-style: italic; }
+/* scripts (they register handlers) stand out from libraries, data files and settings */
+.script-item.handlers .script-name { font-weight: 600; }
 
 /* quick-open palette (⌘P) */
 .qo-dialog {

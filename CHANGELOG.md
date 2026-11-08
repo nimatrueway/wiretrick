@@ -7,6 +7,14 @@ its section below.
 
 ## [Unreleased]
 
+### Added
+
+- `wt.isMac`, `wt.isWindows` and `wt.isLinux`, which work everywhere `wt.isChrome` does. On Android and ChromeOS all three are `false`.
+
+### Changed
+
+- In the Explorer, scripts that register handlers are in bold. Libraries and `settings.yaml` are no longer gray and italic.
+
 ## [0.22.6-alpha] - 2026-11-07
 
 ### Fixed

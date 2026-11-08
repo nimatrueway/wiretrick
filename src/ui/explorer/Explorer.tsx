@@ -452,7 +452,7 @@ export function ExplorerTree() {
     const items: ReactNode[] = [
         li(
             SETTINGS_ID,
-            " utility",
+            "",
             0,
             <>
                 <FileIcon kind="yaml" />
@@ -511,7 +511,7 @@ export function ExplorerTree() {
             items.push(
                 li(
                     r.id,
-                    (isLib ? " utility" : "") + (off ? " disabled" : ""),
+                    (isLib ? "" : " handlers") + (off ? " disabled" : ""),
                     r.depth,
                     <>
                         <FileIcon kind={isTsxName(script.meta.name) ? "tsx" : "ts"} />
