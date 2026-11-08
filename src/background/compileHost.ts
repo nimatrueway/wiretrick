@@ -27,6 +27,7 @@ import { dataFilesSig, ensureDataFiles } from "./engine/dataFiles";
 import { ensurePackages, loadPackages, packagesSig, packagesSnapshot } from "./engine/packageImports";
 import { ensureBuiltins } from "../shared/builtins";
 import { SW_EPOCH } from "./engine/stores";
+import { watchCall } from "../shared/callWatch";
 
 interface PlainScript {
     id: string;
@@ -59,11 +60,22 @@ let seq = 0;
 
 function sandboxCall(payload: any): Promise<any> {
     return new Promise((resolve, reject) => {
-        const reqId = "sw_" + ++seq;
-        const timer = setTimeout(() => reject(new Error("sandbox RPC timeout")), 20000);
+        // unique across SW restarts: the offscreen document may outlive us
+        const reqId = `sw_${SW_EPOCH}_${++seq}`;
+        // no time limit while the offscreen document says the call is still
+        // running (a handler may wait for the user) — only lost calls fail
+        const watch = watchCall({
+            checkMs: 20000,
+            graceMs: 5000,
+            ask: () =>
+                chrome.runtime.sendMessage({ type: "__resSandboxAlive?", reqId }, (r: any) => {
+                    if (!chrome.runtime.lastError && r?.alive) watch.alive();
+                }),
+            onLost: () => reject(new Error("sandbox RPC timeout")),
+        });
         // the epoch tells the sandbox when the SW (the store owner) restarted
         chrome.runtime.sendMessage({ type: "__resSandbox", reqId, extId: chrome.runtime.id, payload: { ...payload, epoch: SW_EPOCH } }, (resp: any) => {
-            clearTimeout(timer);
+            watch.stop();
             if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
             if (resp?.error) return reject(new Error(resp.error));
             resolve(resp);

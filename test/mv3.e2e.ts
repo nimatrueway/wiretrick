@@ -400,6 +400,31 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
         await send({ type: "setEnabled", id: "s_pg", enabled: true });
     }
 
+    // ---- a handler may take as long as it likes (e.g. waiting for the
+    // user): no layer's watchdog — hook 15 s, SW and offscreen 20 s — cuts
+    // it off while the call is still running ----
+    {
+        const slowMs = Number(process.env.WT_SLOW_MS) || 30000; // WT_SLOW_MS=330000 probes Chrome's 5-minute limit
+        const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
+        await send({ type: "setEnabled", id: "s_pg", enabled: false });
+        await send({
+            type: "saveScript", id: "s_slow", name: "Slow handler.wiretrick",
+            code: `wt.replaceResponse({ url: "${ORIGIN}/slow-data", strategy: "page" }, async () => {
+    await new Promise((r) => setTimeout(r, ${slowMs}));
+    return "SLOW-REPLACED";
+});`,
+        });
+        await mgr.waitForTimeout(1500);
+        const slowPage = await ctx.newPage();
+        await slowPage.goto(`${ORIGIN}/data`);
+        const t0 = Date.now();
+        const got = await slowPage.evaluate((origin: string) => fetch(`${origin}/slow-data`).then((r: any) => r.text()), ORIGIN).catch((e: any) => String(e));
+        check(`a ${slowMs / 1000}-second page handler still applies its result (MV3)`, got === "SLOW-REPLACED", `${got.slice(0, 80)} after ${Math.round((Date.now() - t0) / 1000)} s`);
+        await slowPage.close();
+        await send({ type: "deleteScript", id: "s_slow" });
+        await send({ type: "setEnabled", id: "s_pg", enabled: true });
+    }
+
     // ---- MV3 debugger tier: browser-initiated loads (<script src>) ARE
     // intercepted for strategy cdp routes — CDP Fetch pauses in the
     // SW, decisions computed in the sandbox. The user's scenario: page on

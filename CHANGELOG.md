@@ -15,6 +15,10 @@ its section below.
 
 - In the Explorer, scripts that register handlers are in bold. Libraries and `settings.yaml` are no longer gray and italic.
 
+### Fixed
+
+- A `page` handler that takes a long time, like one waiting for the user to resume a paused request, is no longer cut off after 15 seconds (20 on Chrome MV3) with the request let through untouched. Each hop now asks the next whether the call is still running and only gives up when it stops answering.
+
 ## [0.22.6-alpha] - 2026-11-07
 
 ### Fixed

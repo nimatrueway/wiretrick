@@ -132,6 +132,8 @@ import type { RanApi } from "../shared/netTypes";
      * waits as little as possible
      */
     let earlyBundle: Promise<any> | null = null;
+    /** the hook's calls still waiting on the extension (by the hook's reqId) */
+    const hookCalls = new Set<number>();
 
     window.addEventListener("message", (event: MessageEvent) => {
         if (event.source !== window) return;
@@ -148,6 +150,12 @@ import type { RanApi } from "../shared/netTypes";
             }));
             return;
         }
+        if (data.kind === "alive?") {
+            // the hook's watchdog: is this call still waiting on the extension?
+            // (if the extension's end dies, sendMessage's callback says so)
+            if (hookCalls.has(data.reqId)) window.postMessage({ source: MAIN_SOURCE, kind: "alive", reqId: data.reqId }, window.location.origin);
+            return;
+        }
         if (data.kind === "claim") {
             safeSend({ type: "claimRequest", url: data.url });
             return;
@@ -161,9 +169,11 @@ import type { RanApi } from "../shared/netTypes";
                 return;
             }
             const storageType = data.op === "storageGet" ? "scriptStorageGet" : "scriptStorageSet";
+            hookCalls.add(data.reqId);
             safeSend(
                 { type: storageType, scriptId: data.scriptId, key: data.key, value: data.value },
                 (resp: any) => {
+                    hookCalls.delete(data.reqId);
                     window.postMessage(
                         { source: MAIN_SOURCE, kind: "callResult", reqId: data.reqId, result: resp || null },
                         window.location.origin
@@ -175,9 +185,11 @@ import type { RanApi } from "../shared/netTypes";
         if (data.kind === "call") {
             const bgType = data.op === "replace" ? "runReplace" : data.op === "respond" ? "runRequestDecision" : "runTransform";
             // runtime messaging is JSON: binary bodies travel as base64 both ways
+            hookCalls.add(data.reqId);
             safeSend(
                 packBytes({ type: bgType, url: data.url, method: data.method, body: data.body, status: data.status, contentType: data.contentType, requestBody: data.requestBody }),
                 (resp: any) => {
+                    hookCalls.delete(data.reqId);
                     window.postMessage(
                         { source: MAIN_SOURCE, kind: "callResult", reqId: data.reqId, result: unpackBytes(resp) || null },
                         window.location.origin

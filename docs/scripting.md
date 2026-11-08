@@ -1516,3 +1516,10 @@ Practical rules of thumb:
   route.
 - **Static replacement from an async source** (file read, fetch): async
   `replaceResponse` on `helper`, `debugger` or `page` is all you need.
+- **No time limit on `page`.** A handler may wait as long as it likes — for
+  the user to decide on a paused request, say — and the page's request waits
+  with it. Wiretrick only lets a request through untouched when the
+  extension stops answering "is this call still running?" for a few seconds
+  (the extension reloaded, or a message got lost), never because a handler
+  is slow. On Chrome MV3, Chrome itself may still stop the extension's
+  service worker after about 5 minutes on one call.

@@ -360,6 +360,29 @@ await new Promise((r) => setTimeout(r, 600));
 }
 await setEnabled("s_storefetch", false);
 
+// ---------- 5c. a slow handler (waiting for the user, say) isn't cut off ----------
+// the hook asks the bridge whether the call still runs instead of giving up after 15 s
+await saveScript(
+    "s_slow",
+    `wt.replaceResponse({ url: "${ORIGIN}/slow-data", strategy: "page" }, async () => {
+    await new Promise((r) => setTimeout(r, 22000));
+    return "SLOW-REPLACED";
+});`,
+    "slow handler.wiretrick"
+);
+await new Promise((r) => setTimeout(r, 600));
+{
+    const p = await ctx.newPage();
+    await p.goto(`${ORIGIN}/html`, { waitUntil: "domcontentloaded" });
+    await p.reload({ waitUntil: "domcontentloaded" });
+    await p.waitForTimeout(1500);
+    const t0 = Date.now();
+    const r = await p.evaluate(async () => (await fetch("/slow-data")).text()).catch((e: any) => String(e));
+    check("a 22-second page handler still applies its result", r === "SLOW-REPLACED", `${r.slice(0, 80)} after ${Math.round((Date.now() - t0) / 1000)} s`);
+    await p.close();
+}
+await setEnabled("s_slow", false);
+
 // ---------- 6. request headers ----------
 const p6 = await ctx.newPage();
 await p6.goto(`${ORIGIN}/html`, { waitUntil: "domcontentloaded" });

@@ -10,10 +10,13 @@
  * (structured clone keeps Uint8Array); results are packed on the way back.
  */
 import { packBytes, unpackBytes } from "../shared/bytesPack";
+import { watchCall, type CallWatch } from "../shared/callWatch";
 
 const pending = new Map<string, Pending>();
 let seq = 0;
-const RPC_TIMEOUT = 20000;
+/** quiet time before asking the sandbox whether a call still runs (no limit while it does) */
+const RPC_CHECK_MS = 20000;
+const RPC_GRACE_MS = 5000;
 /** the extension id, learned from the SW's first RPC — feeds the sandbox's chrome shim */
 let extId: string | null = null;
 /** true while the iframe reloads (extId learned → src rewrite → load event) */
@@ -56,7 +59,9 @@ function forward(reqId: string, payload: any): void {
 
 interface Pending {
     resolve: (r: any) => void;
-    timer: ReturnType<typeof setTimeout>;
+    watch: CallWatch;
+    /** the SW's id for this call (its own watchdog asks about it) */
+    swReqId: string;
 }
 
 function dbg(msg: string): void {
@@ -75,6 +80,11 @@ chrome.runtime.onMessage.addListener((msg: any, _sender, sendResponse) => {
         document.querySelector<HTMLIFrameElement>("#sb")?.contentWindow?.postMessage({ kind: "wire", msg: unpackBytes(msg.msg) }, "*");
         return false;
     }
+    if (msg?.type === "__resSandboxAlive?") {
+        // the SW's watchdog: is this call still running in the sandbox?
+        sendResponse({ alive: [...pending.values()].some((p) => p.swReqId === msg.reqId) });
+        return false;
+    }
     if (!msg || msg.type !== "__resSandbox") return false;
     // the SW tags every call with its runtime.id — the first one teaches us
     // the id the sandbox's chrome shim should present (iframe reloads once)
@@ -83,17 +93,23 @@ chrome.runtime.onMessage.addListener((msg: any, _sender, sendResponse) => {
         sandboxFrame();
     }
     const reqId = "sb_" + ++seq;
-    const timer = setTimeout(() => {
-        pending.delete(reqId);
-        sendResponse({ error: "sandbox timeout" });
-    }, RPC_TIMEOUT);
+    const watch = watchCall({
+        checkMs: RPC_CHECK_MS,
+        graceMs: RPC_GRACE_MS,
+        ask: () => document.querySelector<HTMLIFrameElement>("#sb")?.contentWindow?.postMessage({ kind: "sandboxAlive?", reqId }, "*"),
+        onLost: () => {
+            pending.delete(reqId);
+            sendResponse({ error: "sandbox timeout" });
+        },
+    });
     pending.set(reqId, {
         resolve: (result) => {
-            clearTimeout(timer);
+            watch.stop();
             pending.delete(reqId);
             sendResponse(packBytes(result));
         },
-        timer,
+        watch,
+        swReqId: msg.reqId,
     });
     const payload = msg.payload?.args ? { ...msg.payload, args: unpackBytes(msg.payload.args) } : msg.payload;
     forward(reqId, payload);
@@ -105,6 +121,10 @@ window.addEventListener("message", (event) => {
     if (data?.kind === "wire") {
         if (event.source !== document.querySelector<HTMLIFrameElement>("#sb")?.contentWindow) return;
         chrome.runtime.sendMessage({ type: "__resWire", msg: packBytes(data.msg) }, () => void chrome.runtime.lastError);
+        return;
+    }
+    if (data?.kind === "sandboxAlive") {
+        if (event.source === document.querySelector<HTMLIFrameElement>("#sb")?.contentWindow) pending.get(data.reqId)?.watch.alive();
         return;
     }
     if (!data || (data.kind !== "sandboxResult" && data.kind !== "reverse")) return;

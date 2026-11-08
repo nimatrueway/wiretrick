@@ -18,6 +18,7 @@ import { bodyKind, setTextTypes } from "../shared/bodyKind";
 import { readFetchBody } from "../shared/requestBody";
 import { SiteStoreHost, SITE_UP_KINDS } from "../shared/siteStoreHost";
 import { siteBuiltin } from "../shared/siteBuiltin";
+import { watchCall, type CallWatch } from "../shared/callWatch";
 
 (() => {
     // tells the MV2 bridge its inline copy ran (a page CSP may block it)
@@ -110,21 +111,30 @@ import { siteBuiltin } from "../shared/siteBuiltin";
         return new Promise((resolve) => {
             if (dead) return resolve(null); // extension reloaded — pass through, no watchdog stall
             const reqId = ++reqSeq;
+            // watchdog: never hang the page's fetch on a lost message — but
+            // no time limit while the bridge says the call is still running
+            const watch = watchCall({
+                checkMs: 15000,
+                graceMs: 5000,
+                ask: () => window.postMessage({ source: HOOK_SOURCE, kind: "alive?", reqId }, window.location.origin),
+                onLost: () => settle(reqId, null),
+            });
+            watches.set(reqId, watch);
             pending.set(reqId, resolve);
             try {
                 window.postMessage({ source: HOOK_SOURCE, kind: "call", reqId, ...msg }, window.location.origin);
             } catch {
-                pending.delete(reqId);
-                resolve(null);
+                settle(reqId, null);
             }
-            // watchdog: never hang the page's fetch
-            setTimeout(() => {
-                if (pending.has(reqId)) {
-                    pending.delete(reqId);
-                    resolve(null);
-                }
-            }, 15000);
         });
+    }
+    const watches = new Map<number, CallWatch>();
+    function settle(reqId: number, result: any): void {
+        watches.get(reqId)?.stop();
+        watches.delete(reqId);
+        const resolve = pending.get(reqId);
+        pending.delete(reqId);
+        resolve?.(result);
     }
 
     window.addEventListener("message", (event: MessageEvent) => {
@@ -161,9 +171,11 @@ import { siteBuiltin } from "../shared/siteBuiltin";
             return;
         }
         if (data.kind === "callResult" && pending.has(data.reqId)) {
-            const resolve = pending.get(data.reqId)!;
-            pending.delete(data.reqId);
-            resolve(data.result);
+            settle(data.reqId, data.result);
+            return;
+        }
+        if (data.kind === "alive") {
+            watches.get(data.reqId)?.alive();
             return;
         }
         if (data.kind === "status") {
@@ -188,9 +200,8 @@ import { siteBuiltin } from "../shared/siteBuiltin";
     /** Stop intercepting: restore the page's own fetch/XHR, drop state. */
     function goDormant(): void {
         dead = true;
-        // in-flight relays resolve immediately — no 15s watchdog stalls
-        for (const [, resolve] of pending) resolve(null);
-        pending.clear();
+        // in-flight relays resolve immediately — no watchdog stalls
+        for (const reqId of [...pending.keys()]) settle(reqId, null);
         flushEarlyCalls();
         markKnown();
         if (!active && !patched) return;

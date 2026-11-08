@@ -349,6 +349,9 @@ async function prepare(scripts: PlainScript[], paramValues: Record<string, any>)
 
 // ---- message pump ----
 
+/** calls still running (a handler may wait for the user as long as it likes) */
+const inflight = new Set<string>();
+
 window.addEventListener("message", async (event) => {
     const data = event.data;
     // only the host page (the offscreen document embedding this iframe) talks to us
@@ -362,8 +365,14 @@ window.addEventListener("message", async (event) => {
         pendingReverse.delete(data.reqId);
         return;
     }
+    if (data.kind === "sandboxAlive?") {
+        // the offscreen document's watchdog: still working on this call?
+        if (inflight.has(data.reqId)) post({ kind: "sandboxAlive", reqId: data.reqId });
+        return;
+    }
     if (data.kind !== "sandboxCall") return;
 
+    inflight.add(data.reqId);
     try {
         const { op, scripts, paramValues, runOp: bodyOp, args } = data.payload;
         let result: any;
@@ -389,5 +398,7 @@ window.addEventListener("message", async (event) => {
         post({ kind: "sandboxResult", reqId: data.reqId, result });
     } catch (e: any) {
         post({ kind: "sandboxResult", reqId: data.reqId, result: { error: String(e?.message || e) } });
+    } finally {
+        inflight.delete(data.reqId);
     }
 });
