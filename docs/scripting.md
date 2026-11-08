@@ -149,7 +149,8 @@ wt.onResponseBody(
   isn't available, the handler doesn't run and the Log view says why.
   To pick per browser or build, use `wt.isChrome`, `wt.isFirefox`,
   `wt.isMV2` and `wt.isMV3` (Chromium-based browsers count as Chrome;
-  MV3 is the `dist-mv3/` build):
+  MV3 is the `dist-mv3/` build); per OS, `wt.isMac`, `wt.isWindows` and
+  `wt.isLinux`:
 
   ```ts
   wt.onResponseBody({ url: "*://example.com/app.js", strategy: wt.isFirefox ? "extension" : "helper" }, (ctx, body) => body.replace("DEBUG=false", "DEBUG=true"));
@@ -1287,7 +1288,8 @@ wt.onOverlay("*://app.example.com/*", (ctx) => {
   order) then one key: a character (`K`, `1`, `/`) or a name (`Esc`,
   `Enter`, `Space`, `Up`, `F2`, `Plus`). `Mod` is ⌘ on macOS and Ctrl
   elsewhere. Modifiers must match exactly; `Alt+L` works with Option on
-  macOS too.
+  macOS too. For other per-OS choices, use `wt.isMac`, `wt.isWindows`
+  and `wt.isLinux` (desktop only: none of them on Android or ChromeOS).
 - **Before or after the page.** By default the shortcut wins: the page
   never sees the key. With `{ priority: "after-page" }` it runs only if
   the page didn't handle the key (didn't call `preventDefault` or stop it).

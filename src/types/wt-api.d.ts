@@ -1240,6 +1240,21 @@ declare const wt: {
      * wt.onRequest({ url: "*://api.example.com/*", strategy: wt.isMV3 ? "debugger" : "extension" }, fn);
      */
     readonly isMV3: boolean;
+
+    /**
+     * `true` on macOS. At most one of `isMac`, {@link isWindows} and
+     * {@link isLinux} is `true`; on Android and ChromeOS none is.
+     *
+     * @example
+     * ctx.shortcut(wt.isMac ? "Meta+Shift+P" : "Ctrl+Shift+P", openPalette);
+     */
+    readonly isMac: boolean;
+
+    /** `true` on Windows. See {@link isMac}. */
+    readonly isWindows: boolean;
+
+    /** `true` on desktop Linux (not Android or ChromeOS). See {@link isMac}. */
+    readonly isLinux: boolean;
 };
 
 /*
