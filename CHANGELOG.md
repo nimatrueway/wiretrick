@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.22.5-alpha] - 2026-11-07
+
 ### Changed
 
 - A module that uses React at its top level (like `const Item = memo(…)`) fails `onSite` code again, as it did before 0.22.4, instead of loading with a `memo` that does nothing. The error now names where React is used and how the script imports it, so you know which module to split: `cannot use "react" in onSite code: redwood/feature-flag/gui.tsx:96 uses it at its top level, and onSite code imports it (redwood/feature-flag-override.tsx → redwood/feature-flag/gui.tsx)`.
@@ -846,7 +848,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.22.4-alpha...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.22.5-alpha...HEAD
+[0.22.5-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.4-alpha...v0.22.5-alpha
 [0.22.4-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.3-alpha...v0.22.4-alpha
 [0.22.3-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.2-alpha...v0.22.3-alpha
 [0.22.2-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.1-alpha...v0.22.2-alpha
