@@ -125,6 +125,16 @@ export function resultError(e: RpcResult["error"]): Error {
 
 type Pending = { h: string; fn: string; resolve: (v: any) => void; reject: (e: Error) => void; unlisten?: () => void };
 
+/**
+ * `e` with the stack of the call that `at` was made at: an error built when
+ * a result arrives (a message event) has no frames of the caller's code.
+ */
+function atCall(e: Error, at: Error): Error {
+    const frames = String(at.stack || "").split("\n").slice(1).join("\n");
+    if (frames) e.stack = `${e.name}: ${e.message}\n${frames}`;
+    return e;
+}
+
 /** the caller side: handles and pending calls */
 export class RpcClient {
     private readonly pending = new Map<string, Pending>();
@@ -148,8 +158,9 @@ export class RpcClient {
         const json = toJsonArgs(fn, args);
         if (signal?.aborted) return Promise.reject(new AbortError(`${fn}(): ${abortReason(signal)}`));
         const cid = newCid();
+        const at = new Error();
         return new Promise((resolve, reject) => {
-            const p: Pending = { h, fn, resolve, reject };
+            const p: Pending = { h, fn, resolve, reject: (e) => reject(atCall(e, at)) };
             if (signal) {
                 const onAbort = () => this.cancel(cid, abortReason(signal));
                 signal.addEventListener("abort", onAbort);

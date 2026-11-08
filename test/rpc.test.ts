@@ -4,6 +4,7 @@ import { makePageShim, domHandlersFor, firePageHandler } from "../src/shared/pag
 import { inertRemote, SiteCannotCallError } from "../src/shared/remote";
 import { compileScript, keyPlaceCalls } from "../src/shared/compile";
 import type { PlaceApi } from "../src/shared/route";
+import { formatScriptError, scriptUrl } from "../src/shared/scriptError";
 
 const tick = async () => {
     for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
@@ -45,6 +46,17 @@ function runPage(src: string, opts: { world?: "page" | "isolated"; url?: string;
 afterEach(() => vi.useRealTimers());
 
 describe("rpc: calls between the overlay and onPage code", () => {
+    it("a failed call's error has the stack of the script line that made the call", async () => {
+        const p = runPage(`wt.onPage("*://x.com/*", () => ({ when: () => new Date(0) }));`);
+        p.fire();
+        const { client } = link(p.exposer);
+        const page = client.remote("onPage:0");
+        const caller = new Function("page", `"use strict";\nreturn async function load() {\n  return await page.when();\n};\n//# sourceURL=${scriptUrl("main.ts")}`)(page);
+        const err = await caller().catch((e: any) => e);
+        expect(err).toBeInstanceOf(WtCallError);
+        expect(formatScriptError("main.ts", err)).toBe("[main.ts] WtCallError: when(): the result must be JSON — a Date isn't JSON\n    at load (main.ts:2:21)");
+    });
+
     it("round-trips results and thrown errors (message only)", async () => {
         const p = runPage(`wt.onPage("*://x.com/*", () => ({ add: (a, b) => a + b, slow: async (x) => ({ x }), boom: () => { const e = new TypeError("nope"); e.secret = 1; throw e; }, later: async () => { throw new Error("async nope"); } }));`);
         p.fire();

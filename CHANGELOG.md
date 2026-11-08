@@ -7,6 +7,10 @@ its section below.
 
 ## [Unreleased]
 
+### Fixed
+
+- An error from calling another place's handle (like `Caused by: WtCallError: getSettings(): the result must be JSON — a Date isn't JSON`) shows the line of your script that made the call. Before, it had no stack trace.
+
 ## [0.22.5-alpha] - 2026-11-07
 
 ### Changed
