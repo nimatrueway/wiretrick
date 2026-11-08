@@ -9,6 +9,7 @@
  * is a package import (shared/packageImports), never a script path.
  */
 import { builtinSpec, jsxImportSource, usesJsx } from "./builtinSpecs";
+import { scriptFrame } from "./scriptError";
 import { isUrlSpec, makePackageLoader, PACKAGE_ORIGIN, parsePackageUrl, type PackageModule, type PackageModules } from "./packageImports";
 
 const IMPORT_RE = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["']([^"'\n]+)["']/g;
@@ -206,58 +207,34 @@ export interface ShippedLib {
 
 /** what page-world code gets for a built-in import: the module graph still loads, using it throws */
 export function pageBuiltin(spec: string): any {
-    return unusable(`cannot use "${spec}" in onSite code: of the built-in modules it only has valtio's core ("valtio", "valtio/vanilla") — use the others in onPage or onOverlay code`);
+    return unusable(spec, `of the built-in modules it only has valtio's core ("valtio", "valtio/vanilla") — use the others in onPage or onOverlay code`);
 }
 
-let topLevels = 0;
+/** the script modules whose top level is running (makeLibRequire), outermost first, after the script that imported the first */
+const loading: string[] = [];
 
 /**
- * Run a script's top level (and so its imports'): in the site's world a
- * module that defines components at its top level (`memo(…)`,
- * `forwardRef(…)`, `createContext(…)`, `class … extends Component`) still
- * loads — the stand-ins below are inert while it runs.
+ * A module stand-in: importing it works, using it throws. Used while an
+ * imported module loads (`const Item = memo(…)` at its top level), the error
+ * says where and through which imports, so the user can split the module.
  */
-export function topLevel<T>(fn: () => T): T {
-    topLevels++;
-    try {
-        return fn();
-    } finally {
-        topLevels--;
-    }
-}
-
-/**
- * A module stand-in: importing it works, and so does a module's top level
- * using it (`topLevel`: each use gives another stand-in); a use anywhere
- * else — handler code — throws `message`.
- */
-function unusable(message: string): any {
+function unusable(spec: string, why: string): any {
     const fail = (): never => {
-        throw new Error(message);
+        if (loading.length < 2) throw new Error(`cannot use "${spec}" in onSite code: ${why}`);
+        const at = String(new Error().stack || "")
+            .split("\n")
+            .map(scriptFrame)
+            .find((f) => f);
+        const where = at ? `${at.name}:${at.line}` : loading[loading.length - 1];
+        throw new Error(`cannot use "${spec}" in onSite code: ${where} uses it at its top level, and onSite code imports it (${loading.join(" → ")}) — move what onSite code needs into a module that doesn't use "${spec}"`);
     };
-    const inert = (): any => {
-        if (!topLevels) fail();
-        return unusable(message);
-    };
-    return new Proxy(function () {}, {
-        get: (_t, p) => {
-            // the CommonJS interop reads __esModule at import; `then` must stay undefined (awaiting it); anything else is a use
-            if (p === "__esModule") return true;
-            if (p === "then") return undefined;
-            if (typeof p === "symbol") {
-                if (!topLevels) return undefined;
-                if (p === Symbol.toPrimitive) return (hint: string) => (hint === "number" ? NaN : "");
-                if (p === Symbol.iterator) return function* () {};
-                return undefined;
-            }
-            return inert();
-        },
-        set: () => (inert(), true),
-        // (the function target's `prototype` can't be hidden)
-        has: (_t, p) => p === "prototype",
-        ownKeys: () => ["prototype"],
-        apply: inert,
-        construct: inert,
+    return new Proxy(Object.create(null), {
+        // the CommonJS interop reads __esModule at import; anything else is a use
+        get: (_t, p) => (p === "__esModule" ? true : p === "then" || typeof p === "symbol" ? undefined : fail()),
+        set: fail,
+        has: () => false,
+        ownKeys: () => [],
+        apply: fail,
     });
 }
 
@@ -310,7 +287,7 @@ export function makeLibRequire<L extends ShippedLib>(libs: L[], run: (lib: L, re
                     return loadPackage(spec);
                 } catch (e: any) {
                     const why = String(e?.message ?? e).replace(/^cannot import "[^"]*": /, "");
-                    return unusable(`cannot use "${spec}" in onSite code: it doesn't load there (${why}) — a package that needs React works in onPage or onOverlay code`);
+                    return unusable(spec, `it doesn't load there (${why}) — a package that needs React works in onPage or onOverlay code`);
                 }
             }
             if (!r) throw new Error(`cannot import "${spec}" — is the ${isDataSpec(spec) ? "data file" : "library script"} saved?`);
@@ -319,7 +296,14 @@ export function makeLibRequire<L extends ShippedLib>(libs: L[], run: (lib: L, re
             const lib = scriptLibs.find((l) => l.json === undefined && l.name === r.name)!;
             const moduleObj = { exports: {} as any };
             modules.set(r.name, moduleObj.exports); // early: cycle protection
-            run(lib, requireFrom(lib.name), moduleObj);
+            if (!loading.length) loading.push(importer);
+            loading.push(lib.name);
+            try {
+                run(lib, requireFrom(lib.name), moduleObj);
+            } finally {
+                loading.pop();
+                if (loading.length === 1) loading.pop();
+            }
             modules.set(r.name, moduleObj.exports);
             return moduleObj.exports;
         };

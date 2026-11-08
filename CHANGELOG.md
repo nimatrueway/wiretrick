@@ -7,6 +7,10 @@ its section below.
 
 ## [Unreleased]
 
+### Changed
+
+- A module that uses React at its top level (like `const Item = memo(…)`) fails `onSite` code again, as it did before 0.22.4, instead of loading with a `memo` that does nothing. The error now names where React is used and how the script imports it, so you know which module to split: `cannot use "react" in onSite code: redwood/feature-flag/gui.tsx:96 uses it at its top level, and onSite code imports it (redwood/feature-flag-override.tsx → redwood/feature-flag/gui.tsx)`.
+
 ## [0.22.4-alpha] - 2026-11-07
 
 ### Fixed

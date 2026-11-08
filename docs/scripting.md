@@ -930,10 +930,11 @@ answers, so `onSite` code is untrusted:
   throws `SiteCannotCallError` — the site could make the same call.
   Problems shows both, with a quick fix (**Ctrl+.** / **⌘.**) that moves
   the handler to `wt.onPage`. Call your own functions directly.
-- **No built-in React** (using it in a handler throws), so no `ctx.mount`
-  or `ctx.each`. A script or library that defines components at its top
-  level (`memo(…)`, `forwardRef(…)`, `createContext(…)`) still loads there,
-  so its `onSite` handlers run; of valtio only its core (`subscribe`, `snapshot`); no
+- **No built-in React** (using it throws), so no `ctx.mount`
+  or `ctx.each`. A library script that uses React at its top level
+  (`const Item = memo(…)`) fails the `onSite` side of every script that
+  imports it; the error names the line and the import chain, so keep what
+  `onSite` code needs in a module without React. Of valtio only its core (`subscribe`, `snapshot`); no
   `wt.fetch` (use `fetch`). `wt.log`, `wt.params`,
   `wt.storage` and `console` work; logs go to the Log tagged `page › host`.
 - **Its results are page data.** The site can replace `Object.keys`, patch

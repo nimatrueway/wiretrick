@@ -28,7 +28,7 @@
 import { formatScriptError } from "../shared/scriptError";
 import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptContext, type ScriptLogLevel } from "../shared/scriptLog";
 import { scriptFunction } from "../shared/scriptFn";
-import { makeLibRequire, topLevel, type ShippedLib } from "../shared/scriptImports";
+import { makeLibRequire, type ShippedLib } from "../shared/scriptImports";
 import { builtinModule, builtinsReady, ensureBuiltins, setBuiltinLoader, shippedSources, sourceLoader } from "../shared/builtins";
 import { makePageShim, domHandlersFor, scheduleDocument, fireRun, pageCtxBase, type PageDocumentHandler } from "../shared/pageShim";
 import { ScriptLife, type Generation, type ReactDomClient } from "../shared/runLifecycle";
@@ -496,7 +496,7 @@ import type { RanApi } from "../shared/netTypes";
                 );
                 const moduleObj = { exports: {} as any };
                 const shim = shimFor(h.scriptId, h.name, h.params || {}, exposer, h.scriptId, gen);
-                topLevel(() => scriptFunction(h.src, h.name)(shim.wt, consoleProxy, requireFrom(h.name), moduleObj, moduleObj.exports));
+                scriptFunction(h.src, h.name)(shim.wt, consoleProxy, requireFrom(h.name), moduleObj, moduleObj.exports);
                 dom = shim.dom;
                 if (world === "isolated") reactDoms.set(h.scriptId, () => requireFrom(h.name)("react-dom/client"));
             } catch (e: any) {
