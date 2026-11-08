@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.22.6-alpha] - 2026-11-07
+
 ### Fixed
 
 - An error from calling another place's handle (like `Caused by: WtCallError: getSettings(): the result must be JSON — a Date isn't JSON`) shows the line of your script that made the call. Before, it had no stack trace.
@@ -852,7 +854,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.22.5-alpha...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.22.6-alpha...HEAD
+[0.22.6-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.5-alpha...v0.22.6-alpha
 [0.22.5-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.4-alpha...v0.22.5-alpha
 [0.22.4-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.3-alpha...v0.22.4-alpha
 [0.22.3-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.2-alpha...v0.22.3-alpha
