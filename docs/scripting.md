@@ -1521,5 +1521,4 @@ Practical rules of thumb:
   with it. Wiretrick only lets a request through untouched when the
   extension stops answering "is this call still running?" for a few seconds
   (the extension reloaded, or a message got lost), never because a handler
-  is slow. On Chrome MV3, Chrome itself may still stop the extension's
-  service worker after about 5 minutes on one call.
+  is slow.

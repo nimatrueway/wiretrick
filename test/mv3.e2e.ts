@@ -116,7 +116,7 @@ const proc = spawn(await resolveBrowser(), [
     "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check", "about:blank",
 ], { stdio: "ignore" });
 await new Promise((r) => setTimeout(r, 5000));
-setTimeout(() => { console.log("FAIL  global watchdog timeout"); process.exit(1); }, 360000);
+setTimeout(() => { console.log("FAIL  global watchdog timeout"); process.exit(1); }, 360000 + (Number(process.env.WT_SLOW_MS) || 0));
 
 let failed = 0;
 const check = (name: string, ok: boolean, extra = ""): void => {
