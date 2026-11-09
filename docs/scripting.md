@@ -501,8 +501,9 @@ or the light bulb) rewrites it to the version unpkg serves now, e.g.
 `https://unpkg.com/dayjs` → `https://unpkg.com/dayjs@1.11.13`. Other
 hosts, `http://` URLs and query strings aren't allowed.
 
-**How it works.** Saving a script downloads the package (or the file you
-named) and everything it imports: relative files, and the package's own
+**How it works.** The Editor downloads the package (or the file you
+named) as soon as you type a pinned URL, and saving a script downloads any
+it doesn't have yet. The download takes everything the package imports: relative files, and the package's own
 dependencies at the versions its `package.json` asks for. A path into a
 package (`@radix-ui/primitive/is-development`) goes where the package's
 `exports` map sends it (the production browser build: conditions
@@ -515,7 +516,10 @@ restart. A pinned npm version never changes, so it isn't downloaded again.
 Downloads no script imports any more are deleted when you save or delete
 scripts. If the download fails (offline, a typo, a missing file), the import
 line gets a compile error such as `cannot import "https://unpkg.com/…":
-download failed (HTTP 404 — no such package, version or file)`; save again to retry. A dependency of the
+download failed (HTTP 404 — no such package, version or file)`; save again to retry. While a package
+and its types are still downloading, the Editor shows a warning on the URL
+(`downloading "https://unpkg.com/…" from unpkg…`, then `fetching the types
+of …`) instead of TypeScript's `Cannot find module` error. A dependency of the
 package that fails to download isn't an error until the package `require`s
 it at runtime, so optional dependencies don't break anything; saving the
 script tries it again. Node.js

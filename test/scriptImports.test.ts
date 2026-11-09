@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { badPackageImports, dependantsOf, importKeys, missingImports } from "../src/shared/scriptImports";
+import { badPackageImports, coveredMissingModule, dependantsOf, packageImportMarks, importKeys, missingImports } from "../src/shared/scriptImports";
 
 describe("script imports", () => {
     it("reads import specifiers", () => {
@@ -47,5 +47,43 @@ describe("badPackageImports", () => {
         expect(bad).toHaveLength(1);
         expect(bad[0].pin).toBeUndefined();
         expect(bad[0].message).toMatch(/only pinned https:\/\/unpkg.com\//);
+    });
+});
+
+describe("packageImportMarks", () => {
+    const A = "https://unpkg.com/a-lib@1.0.0";
+    const code = `import a from "${A}";\nimport b from "https://unpkg.com/b-lib@2";\nimport c from "./lib";\n`;
+    const at = (st: any) => packageImportMarks(code, (u) => (u === A ? st : undefined));
+
+    it("an unpinned URL is an error; a valid one not asked about yet (or ready) has no marker", () => {
+        for (const st of [undefined, { state: "ready" }]) {
+            const marks = at(st);
+            expect(marks).toHaveLength(1);
+            expect(marks[0]).toMatchObject({ spec: "https://unpkg.com/b-lib@2", severity: "error", pin: { name: "b-lib", range: "2" } });
+        }
+    });
+
+    it("a download or types under way is a warning on the specifier, not a failure", () => {
+        const dl = at({ state: "downloading" })[0];
+        expect(dl).toMatchObject({ spec: A, severity: "warning", message: `downloading "${A}" from unpkg… (its types follow)` });
+        expect(code.slice(dl.offset, dl.offset + dl.length)).toBe(A);
+        expect(at({ state: "typing" })[0]).toMatchObject({ severity: "warning", message: `fetching the types of "${A}"…` });
+        expect(at({ state: "untyped", reason: "Failed to fetch" })[0]).toMatchObject({ severity: "warning", message: expect.stringContaining("(Failed to fetch) — it still runs") });
+        expect(at({ state: "missing" })[0]).toMatchObject({ severity: "warning", message: expect.stringContaining("save the script to download it") });
+    });
+
+    it("a failed download is an error worded as the compile error (so Problems lists it once)", () => {
+        expect(at({ state: "failed", reason: "download failed (Failed to fetch)" })[0]).toMatchObject({ severity: "error", message: `cannot import "${A}": download failed (Failed to fetch)` });
+    });
+
+    it("TypeScript's \"Cannot find module\" on a URL import is covered until the package is ready", () => {
+        const msg = (u: string) => `Cannot find module '${u}' or its corresponding type declarations.`;
+        const ready = (st: string) => () => ({ state: st }) as any;
+        expect(coveredMissingModule(msg("https://unpkg.com/b-lib@2"), () => undefined)).toBe(true);
+        expect(coveredMissingModule(msg(A), () => undefined)).toBe(true);
+        expect(coveredMissingModule(msg(A), ready("downloading"))).toBe(true);
+        expect(coveredMissingModule(msg(A), ready("ready"))).toBe(false);
+        expect(coveredMissingModule(msg("./lib"), () => undefined)).toBe(false);
+        expect(coveredMissingModule("Cannot find name 'x'.", () => undefined)).toBe(false);
     });
 });

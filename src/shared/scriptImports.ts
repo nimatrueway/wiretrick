@@ -10,7 +10,7 @@
  */
 import { builtinSpec, jsxImportSource, usesJsx } from "./builtinSpecs";
 import { scriptFrame } from "./scriptError";
-import { isUrlSpec, makePackageLoader, PACKAGE_ORIGIN, parsePackageUrl, type PackageModule, type PackageModules } from "./packageImports";
+import { isUrlSpec, makePackageLoader, PACKAGE_ORIGIN, parsePackageUrl, type PackageModule, type PackageModules, type PackageStatus } from "./packageImports";
 
 const IMPORT_RE = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["']([^"'\n]+)["']/g;
 
@@ -57,6 +57,51 @@ export function badPackageImports(code: string): BadPackageImport[] {
         out.push({ offset, length: spec.length, spec, message, pin });
     }
     return out;
+}
+
+const isPackageUrl = (spec: string) => isUrlSpec(spec) && !builtinSpec(spec) && typeof parsePackageUrl(spec) !== "string";
+
+/** the valid package URLs code imports */
+export function packageUrls(code: string): string[] {
+    return [...new Set([...code.matchAll(IMPORT_RE)].map((m) => m[1]).filter(isPackageUrl))];
+}
+
+/** an Editor marker on a URL import: why it can't load, or that it's still on its way */
+export interface PackageImportMark extends BadPackageImport {
+    severity: "error" | "warning";
+}
+
+/**
+ * The markers of code's URL imports: the bad ones (errors), and for valid
+ * ones what the background says (`statusOf`, undefined: not asked yet) —
+ * a download or types still under way is a warning, not a failure.
+ */
+export function packageImportMarks(code: string, statusOf: (url: string) => PackageStatus | undefined): PackageImportMark[] {
+    const out: PackageImportMark[] = badPackageImports(code).map((b) => ({ ...b, severity: "error" }));
+    for (const m of code.matchAll(IMPORT_RE)) {
+        const spec = m[1];
+        if (!isPackageUrl(spec)) continue;
+        const st = statusOf(spec);
+        if (!st || st.state === "ready") continue;
+        const offset = m.index! + m[0].length - 1 - spec.length;
+        const mark = (severity: "error" | "warning", message: string) => out.push({ offset, length: spec.length, spec, severity, message });
+        if (st.state === "downloading") mark("warning", `downloading "${spec}" from unpkg… (its types follow)`);
+        else if (st.state === "typing") mark("warning", `fetching the types of "${spec}"…`);
+        else if (st.state === "missing") mark("warning", `cannot import "${spec}": not downloaded yet — save the script to download it`);
+        else if (st.state === "failed") mark("error", `cannot import "${spec}": ${st.reason}`);
+        else mark("warning", `couldn't fetch the types of "${spec}" (${st.reason}) — it still runs; they're retried in a minute`);
+    }
+    return out.sort((a, b) => a.offset - b.offset);
+}
+
+/**
+ * Is a TypeScript "Cannot find module" error about a URL import whose
+ * own marker (packageImportMarks) explains it better — one that can't
+ * load, or whose package (and types) are still on their way?
+ */
+export function coveredMissingModule(message: string, statusOf: (url: string) => PackageStatus | undefined): boolean {
+    const spec = /^Cannot find module '([^']+)'/.exec(message)?.[1];
+    return !!spec && isUrlSpec(spec) && !builtinSpec(spec) && statusOf(spec)?.state !== "ready";
 }
 
 /** code with each import specifier replaced by what `to` returns for it (undefined: kept) */

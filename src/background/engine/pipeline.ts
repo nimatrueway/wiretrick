@@ -18,7 +18,7 @@ import {
 } from "./scriptStore";
 import { loadDataFiles } from "./dataFiles";
 import { analyzePackage, applyPending, checkPackages, dismissPending, forgetPackage, installPackage, listPackages, offerPackage, rollbackPackage, setAutoUpdate } from "./packages";
-import { loadPackages, packagesSnapshot, resolveVersion } from "./packageImports";
+import { loadPackages, packagesSnapshot, requestPackages, resolveVersion } from "./packageImports";
 import { isUrlSpec, packageClosure } from "../../shared/packageImports";
 import { serveStore } from "./strategies/extensionStrategy";
 import { dlog, dlogLevel } from "../../shared/debugLog";
@@ -721,6 +721,14 @@ export function createPipeline(
         if (msg && msg.type === "resolvePackageVersion") {
             resolveVersion(String(msg.name), String(msg.range || "latest")).then(
                 (version) => sendResponse({ version }),
+                (e) => sendResponse({ error: String(e?.message ?? e) })
+            );
+            return true;
+        }
+        // the Editor's package import markers: where each URL stands (starting the downloads it needs)
+        if (msg && msg.type === "packageStatus") {
+            requestPackages(Array.isArray(msg.urls) ? msg.urls.map(String) : []).then(
+                (statuses) => sendResponse({ statuses }),
                 (e) => sendResponse({ error: String(e?.message ?? e) })
             );
             return true;

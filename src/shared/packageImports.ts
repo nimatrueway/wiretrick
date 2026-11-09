@@ -51,6 +51,19 @@ export interface StoredTypings {
     tops: Record<string, string[]>;
 }
 
+/**
+ * Where a script's package URL stands in the background, for the Editor:
+ * being downloaded, its types being fetched, ready, or failed (with why).
+ * `missing`: not downloaded and nothing under way.
+ */
+export type PackageStatus =
+    | { state: "downloading" }
+    | { state: "typing" }
+    | { state: "ready" }
+    | { state: "missing" }
+    | { state: "failed"; reason: string }
+    | { state: "untyped"; reason: string };
+
 const NAME = "[a-z0-9~-][a-z0-9._~-]*";
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 

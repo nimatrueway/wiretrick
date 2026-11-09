@@ -4,12 +4,12 @@
 
 import "./shell/mount";
 import { loadMonaco, STARTER_TEMPLATE, apiTypingsText, ensureBuiltinTypings, setDataFileTypings, setPackageTypings } from "./monacoSetup";
-import { PACKAGE_TYPINGS_KEY, type StoredTypings } from "../shared/packageImports";
+import { PACKAGE_MODULES_KEY, PACKAGE_TYPINGS_KEY, type PackageStatus, type StoredTypings } from "../shared/packageImports";
 import { API_TYPINGS_URI } from "./apiLinks";
 import { NavHistory } from "./navHistory";
 import type { SampleScript } from "./samples";
 import { settingsDiagnostics, settingsCompletions, settingsHover, type AssistScript } from "../shared/settingsAssist";
-import { badPackageImports, dependantsOf, folderOf, isSvgPath, missingImports } from "../shared/scriptImports";
+import { badPackageImports, coveredMissingModule, dependantsOf, folderOf, isSvgPath, missingImports, packageImportMarks, packageUrls } from "../shared/scriptImports";
 import { makeFolderPackagePlan, makePackagePlan } from "../shared/makePackage";
 import { MANIFEST_FILE } from "../shared/packageMetadata";
 import { manifestScriptCompletions, manifestScriptProblems } from "./manifestAssist";
@@ -714,26 +714,31 @@ async function revalidateModel(m: any): Promise<void> {
     }
 }
 
-// ---- package imports that can't load (unpinned unpkg URLs, other hosts) ----
+// ---- package imports: ones that can't load (unpinned unpkg URLs, other
+// hosts), and ones still on their way ----
 // Marked on the URL as you type, before a save would fail to compile; an
 // unpinned one gets a quick fix that pins the version unpkg resolves now.
+// A valid URL is downloaded as soon as it's typed (the background reports
+// where each one stands): a warning while it and its types download, an
+// error if that fails — never TypeScript's "Cannot find module" meanwhile.
 const IMPORT_OWNER = "wt-imports";
 const UNPINNED = "unpinned-import";
 const importMarkerTimers = new WeakMap<any, number>();
+const packageStatuses = new Map<string, PackageStatus>();
+const packageStatusOf = (u: string) => packageStatuses.get(u);
 function updateImportMarkers(m: any): void {
     const monaco = (window as any).monaco;
     if (m.isDisposed() || m.getLanguageId() !== "typescript") return;
-    const bad = badPackageImports(m.getValue());
-    if (!bad.length && !monaco.editor.getModelMarkers({ resource: m.uri, owner: IMPORT_OWNER }).length) return;
-    ownMarkerWrites.add(m.uri.toString());
-    monaco.editor.setModelMarkers(
-        m,
-        IMPORT_OWNER,
-        bad.map((b) => {
+    const code = m.getValue();
+    askPackageStatus(packageUrls(code).filter((u) => packageStatusOf(u)?.state !== "ready"));
+    const bad = packageImportMarks(code, packageStatusOf);
+    const had = monaco.editor.getModelMarkers({ resource: m.uri, owner: IMPORT_OWNER });
+    if (!bad.length && !had.length) return;
+    const markers = bad.map((b) => {
             const a = m.getPositionAt(b.offset);
             const e = m.getPositionAt(b.offset + b.length);
             return {
-                severity: monaco.MarkerSeverity.Error,
+                severity: b.severity === "error" ? monaco.MarkerSeverity.Error : monaco.MarkerSeverity.Warning,
                 source: "wiretrick",
                 code: b.pin ? UNPINNED : "package-import",
                 message: b.message,
@@ -742,9 +747,57 @@ function updateImportMarkers(m: any): void {
                 endLineNumber: e.lineNumber,
                 endColumn: e.column,
             };
-        })
-    );
+        });
+    const key = (x: any) => `${x.severity} ${x.startLineNumber}:${x.startColumn}-${x.endLineNumber}:${x.endColumn} ${x.message}`;
+    if (markers.map(key).join("\n") === had.map(key).join("\n")) return;
+    ownMarkerWrites.add(m.uri.toString());
+    monaco.editor.setModelMarkers(m, IMPORT_OWNER, markers);
+    hideCoveredImportErrors(m);
 }
+
+/** drop TypeScript's "Cannot find module" on URL imports our own marker explains (packageImportMarks) */
+function hideCoveredImportErrors(m: any): void {
+    const monaco = (window as any).monaco;
+    if (m.isDisposed()) return;
+    const ts = monaco.editor.getModelMarkers({ resource: m.uri, owner: "typescript" });
+    const keep = ts.filter((mk: any) => !((typeof mk.code === "object" ? mk.code?.value : mk.code) === "2307" && coveredMissingModule(String(mk.message), packageStatusOf)));
+    if (keep.length === ts.length) return;
+    ownMarkerWrites.add(m.uri.toString());
+    monaco.editor.setModelMarkers(m, "typescript", keep);
+}
+
+/** URLs to ask the background about (batched); ones still on their way are asked again until they settle */
+const askedUrls = new Set<string>();
+let askTimer: number | undefined;
+function askPackageStatus(urls: string[], delay = 150): void {
+    if (!urls.length) return;
+    for (const u of urls) askedUrls.add(u);
+    if (askTimer !== undefined) return;
+    askTimer = window.setTimeout(async () => {
+        askTimer = undefined;
+        const ask = [...askedUrls];
+        askedUrls.clear();
+        const r = await send<{ statuses?: Record<string, PackageStatus> }>({ type: "packageStatus", urls: ask }).catch(() => undefined);
+        const statuses = r?.statuses;
+        if (!statuses) return;
+        let changed = false;
+        for (const [u, st] of Object.entries(statuses)) {
+            if (JSON.stringify(packageStatuses.get(u)) !== JSON.stringify(st)) changed = true;
+            packageStatuses.set(u, st);
+        }
+        if (changed) for (const x of models.values()) updateImportMarkers(x);
+        askPackageStatus(Object.keys(statuses).filter((u) => /^(downloading|typing)$/.test(statuses[u].state)), 1000);
+    }, delay);
+}
+
+/** a download or typings landed (or were pruned): ask again about the URLs the scripts import (asking downloads them) */
+function watchPackageStatus(): void {
+    chrome.storage.onChanged.addListener((c, area) => {
+        if (area !== "local" || !(c[PACKAGE_MODULES_KEY] || c[PACKAGE_TYPINGS_KEY])) return;
+        askPackageStatus([...new Set([...models.values()].filter((m) => !m.isDisposed()).flatMap((m) => packageUrls(m.getValue())))]);
+    });
+}
+
 function scheduleImportMarkers(m: any): void {
     clearTimeout(importMarkerTimers.get(m));
     importMarkerTimers.set(m, window.setTimeout(() => {
@@ -2188,6 +2241,7 @@ async function main(): Promise<void> {
     } satisfies typeof actions);
     await loadMonaco();
     watchPackageTypings();
+    watchPackageStatus();
     watchPackages();
     // test/e2e seam: adopt an arbitrary directory handle (e.g. OPFS) for watching
     (window as any).__resAdoptFolder = (h: any) => fsBridge.adoptForWatch(h);
@@ -2206,6 +2260,10 @@ async function main(): Promise<void> {
     registerLayoutActions();
     (window as any).monaco.editor.onDidChangeMarkers((uris: Uri[]) => {
         for (const u of uris) if (!ownMarkerWrites.delete(u.toString())) checkedUris.add(u.toString());
+        for (const u of uris) {
+            const m = (window as any).monaco.editor.getModel(u);
+            if (m?.getLanguageId() === "typescript") hideCoveredImportErrors(m);
+        }
         scheduleDiagnostics();
         scheduleProblems();
     });

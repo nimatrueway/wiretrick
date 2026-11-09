@@ -7,6 +7,14 @@ its section below.
 
 ## [Unreleased]
 
+### Added
+
+- The Editor downloads a package import as soon as you type its pinned unpkg URL, not only when you save. While the package and its types download, the URL shows a warning (`downloading "…" from unpkg…`, then `fetching the types of "…"…`). If the download fails, the URL shows the actual reason, such as an HTTP 404.
+
+### Fixed
+
+- A package URL that can't load, either unpinned like `https://unpkg.com/@codemirror/state@6` or still downloading, no longer also shows TypeScript's `Cannot find module` error. Each import now shows one problem instead of two.
+
 ## [0.23.0-alpha] - 2026-11-09
 
 ### Added

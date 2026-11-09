@@ -244,6 +244,25 @@ describe("downloading a package's module graph", () => {
         expect(p.packagesSig()).not.toBe(sig);
     });
 
+    it("the Editor's status request starts the download: downloading → typing → ready, or failed with why", async () => {
+        const p = await bg();
+        const u = "https://unpkg.com/esm-lib@1.0.0";
+        expect(await p.requestPackages([u, "https://unpkg.com/esm-lib@1", "./x"])).toEqual({ [u]: { state: "downloading" } });
+        await vi.waitFor(() => expect(p.packageStatus(u).state).toMatch(/^(typing|ready)$/));
+        await p.packageTypingsIdle();
+        expect(p.packageStatus(u)).toEqual({ state: "ready" });
+        expect(await p.requestPackages([u])).toEqual({ [u]: { state: "ready" } });
+
+        const v = "https://unpkg.com/cjs-lib@2.0.0";
+        unpkg.setOffline(true);
+        await p.requestPackages([v]);
+        await vi.waitFor(() => expect(p.packageStatus(v)).toEqual({ state: "failed", reason: "download failed (Failed to fetch)" }));
+        // asking again within the minute doesn't hammer the network
+        const n = unpkg.calls.length;
+        expect(await p.requestPackages([v])).toEqual({ [v]: { state: "failed", reason: "download failed (Failed to fetch)" } });
+        expect(unpkg.calls.length).toBe(n);
+    });
+
     it("prunes modules and typings no script imports any more", async () => {
         const p = await bg();
         const a = `import x from "https://unpkg.com/esm-lib@1.0.0";`;
@@ -391,5 +410,6 @@ describe("package typings", () => {
         await p.packageTypingsIdle();
         expect(p.packagesSnapshot().failed).toEqual({});
         expect(p.packageTypings().tops).toEqual({});
+        expect(p.packageStatus("https://unpkg.com/esm-lib@1.0.0")).toMatchObject({ state: "untyped", reason: expect.stringContaining("Failed to fetch") });
     });
 });

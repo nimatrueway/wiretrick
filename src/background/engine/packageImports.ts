@@ -46,6 +46,7 @@ import {
     typingsStub,
     type PackageModule,
     type PackageModules,
+    type PackageStatus,
     type PackageUrl,
     type StoredTypings,
 } from "../../shared/packageImports";
@@ -64,7 +65,11 @@ let typings: StoredTypings = { files: {}, tops: {} };
 let loaded: Promise<void> | null = null;
 /** package URLs whose download failed (not stored: retried) */
 const failed = new Map<string, { reason: string; at: number }>();
-const typingsFailedAt = new Map<string, number>();
+const typingsFailed = new Map<string, { reason: string; at: number }>();
+/** package URLs whose download is queued or under way */
+const downloading = new Set<string>();
+/** package URLs whose typings are queued or being fetched */
+const typingsPending = new Set<string>();
 /** when each package URL was last ensured: a prune racing a save that stores its importer later keeps it */
 const ensuredAt = new Map<string, number>();
 let snapshot: PackageModules = { aliases: {}, modules: {} };
@@ -369,10 +374,16 @@ async function downloadGraph(top: string, into: { aliases: Record<string, string
  */
 export async function ensurePackages(codes: Iterable<string>, opts?: { retry?: boolean }): Promise<boolean> {
     await loadPackages();
-    const tops = [...packageUrlsIn(codes)].filter((u) => typeof parsePackageUrl(u) !== "string");
+    return ensureUrls([...packageUrlsIn(codes)].filter((u) => typeof parsePackageUrl(u) !== "string"), opts);
+}
+
+/** ensurePackages for valid package URLs (after loadPackages); what's due is `downloading` right away */
+async function ensureUrls(tops: string[], opts?: { retry?: boolean }): Promise<boolean> {
     for (const u of tops) ensuredAt.set(u, Date.now());
     const due = (u: string) => (!finalUrl(state, u) && (opts?.retry || !failed.has(u) || Date.now() - failed.get(u)!.at > RETRY_MS)) || (!!opts?.retry && hasRetriable(u));
     let changed = false;
+    const queued = tops.filter((u) => due(u) && !downloading.has(u));
+    for (const u of queued) downloading.add(u);
     if (tops.some(due))
         changed = await serial(async () => {
             const todo = tops.filter(due);
@@ -398,9 +409,32 @@ export async function ensurePackages(codes: Iterable<string>, opts?: { retry?: b
             if (Object.keys(into.modules).length || Object.keys(into.aliases).length) await storageSet({ [PACKAGE_MODULES_KEY]: state });
             rebuildSnapshot();
             return true;
+        }).finally(() => {
+            for (const u of queued) downloading.delete(u);
         });
     ensureTypings(tops);
     return changed;
+}
+
+/**
+ * The Editor's view of package URLs it shows: each one's status, after
+ * starting the download (and typings) of those that need it — so a pinned
+ * URL is fetched as it's typed, not only on save. Invalid URLs are left out.
+ */
+export async function requestPackages(urls: string[]): Promise<Record<string, PackageStatus>> {
+    await loadPackages();
+    const tops = [...new Set(urls)].filter((u) => isUrlSpec(u) && typeof parsePackageUrl(u) !== "string");
+    void ensureUrls(tops);
+    return Object.fromEntries(tops.map((u) => [u, packageStatus(u)]));
+}
+
+/** where a valid package URL stands (see PackageStatus) */
+export function packageStatus(u: string): PackageStatus {
+    if (downloading.has(u)) return { state: "downloading" };
+    if (!finalUrl(state, u)) return failed.has(u) ? { state: "failed", reason: failed.get(u)!.reason } : { state: "missing" };
+    if (typings.tops[u]) return { state: "ready" };
+    const tf = typingsFailed.get(u);
+    return tf && !typingsPending.has(u) ? { state: "untyped", reason: tf.reason } : { state: "typing" };
 }
 
 /** drop stored modules and typings no script imports any more */
@@ -434,22 +468,26 @@ export async function prunePackages(codes: Iterable<string>): Promise<void> {
 
 /** fetch (in the background) the typings of downloaded package URLs that have none yet */
 function ensureTypings(tops: string[]): void {
-    const due = (u: string) => !typings.tops[u] && !!finalUrl(state, u) && Date.now() - (typingsFailedAt.get(u) ?? 0) > RETRY_MS;
-    if (!tops.some(due)) return;
+    const due = (u: string) => !typings.tops[u] && !!finalUrl(state, u) && !typingsPending.has(u) && Date.now() - (typingsFailed.get(u)?.at ?? 0) > RETRY_MS;
+    const todo = tops.filter(due);
+    if (!todo.length) return;
+    for (const u of todo) typingsPending.add(u);
     typingsChain = typingsChain.then(async () => {
         let changed = false;
-        for (const u of tops.filter(due)) {
+        for (const u of todo) {
             try {
                 const files = await crawlTypings(u, typings.files);
                 typings = { files: { ...typings.files, ...Object.fromEntries(files) }, tops: { ...typings.tops, [u]: [...files.keys()].sort() } };
                 changed = true;
-                typingsFailedAt.delete(u);
+                typingsFailed.delete(u);
             } catch (e: any) {
-                typingsFailedAt.set(u, Date.now());
+                typingsFailed.set(u, { reason: String(e?.message ?? e), at: Date.now() });
                 dlogLevel("packages", "warn", `fetching the typings of ${u} failed: ${e?.message ?? e}`);
             }
         }
         if (changed) await storageSet({ [PACKAGE_TYPINGS_KEY]: typings });
+    }).finally(() => {
+        for (const u of todo) typingsPending.delete(u);
     });
 }
 
