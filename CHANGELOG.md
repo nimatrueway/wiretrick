@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.23.0-alpha] - 2026-11-09
+
 ### Added
 
 - `wt.isMac`, `wt.isWindows` and `wt.isLinux`, which work everywhere `wt.isChrome` does. On Android and ChromeOS all three are `false`.
@@ -871,7 +873,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.22.6-alpha...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.23.0-alpha...HEAD
+[0.23.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.6-alpha...v0.23.0-alpha
 [0.22.6-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.5-alpha...v0.22.6-alpha
 [0.22.5-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.4-alpha...v0.22.5-alpha
 [0.22.4-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.3-alpha...v0.22.4-alpha
