@@ -19,6 +19,8 @@ export interface PickItem {
     detail?: string;
     /** default: checked */
     checked?: boolean;
+    /** an existing file that picking deletes (shown struck through) */
+    removed?: boolean;
 }
 
 export interface PickNode {

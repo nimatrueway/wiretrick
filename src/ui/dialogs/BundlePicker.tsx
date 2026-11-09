@@ -113,7 +113,7 @@ function Picker({ opts, finish }: { opts: PickOptions; finish: (v: number[] | nu
                             return (
                                 <div
                                     key={(it ? "f:" : "d:") + node.path}
-                                    className={"picker-row" + (it ? "" : " folder")}
+                                    className={"picker-row" + (it ? "" : " folder") + (it?.removed ? " removed" : "")}
                                     data-path={node.path}
                                     role="treeitem"
                                     aria-expanded={parent ? open : undefined}

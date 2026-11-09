@@ -10,6 +10,7 @@ its section below.
 ### Added
 
 - `wt.isMac`, `wt.isWindows` and `wt.isLinux`, which work everywhere `wt.isChrome` does. On Android and ChromeOS all three are `false`.
+- When **Import…** brings in a new version of a package, the files you have in that package that the new version doesn't are listed as **deleted**. They're ticked, so importing deletes them. Untick any you want to keep.
 
 ### Changed
 

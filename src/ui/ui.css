@@ -1362,6 +1362,8 @@ body.net-dragging { user-select: none; }
 .picker-tree:hover .indent-guide { border-left-color: var(--border); }
 .picker-label { overflow: hidden; text-overflow: ellipsis; }
 .picker-badge { flex-shrink: 0; margin-left: 2px; font-size: 11px; line-height: 15px; padding: 0 6px; border-radius: 8px; border: 1px solid var(--border); color: var(--fg-dim); }
+.picker-row.removed .picker-label { text-decoration: line-through; color: var(--fg-dim); }
+.picker-row.removed .picker-badge { border-color: var(--err); color: var(--err); }
 .picker-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 12px; color: var(--fg-dim); }
 .picker-none { padding: 4px 10px; font-size: 12px; }
 .picker-warn { margin-top: 10px; color: var(--warn); font-size: 12px; display: flex; gap: 8px; align-items: center; }

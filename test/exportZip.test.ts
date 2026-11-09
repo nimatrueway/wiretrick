@@ -4,7 +4,7 @@
  * the globals and the exported scripts' enabled state and params).
  */
 import { describe, it, expect } from "vitest";
-import { buildExportZip, emptyFolders, importedSettingsDoc, readExportZip, settingsForScripts } from "../src/shared/exportZip";
+import { buildExportZip, emptyFolders, filesGoneFrom, importedSettingsDoc, packageRoots, readExportZip, settingsForScripts } from "../src/shared/exportZip";
 import { readZipEntries, writeZip } from "../src/shared/zip";
 import { parseSettings, renderSettings, type GlobalSettings, type ScriptSettingsState } from "../src/shared/settingsYaml";
 
@@ -166,5 +166,29 @@ describe("settings.yaml in the zip", () => {
         expect((await ss.getScript(id))!.enabled).toBe(false);
         expect((await ss.getParamValues(id)).level).toBe("debug");
         expect(store.resLogLevel).toBe("warn");
+    });
+});
+
+describe("Import… of a package's new version", () => {
+    const zip = (paths: string[], settings: string | null = null) => ({
+        settings,
+        scripts: paths.filter((p) => /\.tsx?$/.test(p)).map((p) => ({ name: p.replace(/\.ts$/, ""), file: p, code: "" })),
+        dataFiles: paths.filter((p) => !/\.tsx?$/.test(p) && !p.endsWith("/")).map((p) => ({ path: p, text: "" })),
+        folders: paths.filter((p) => p.endsWith("/")).map((p) => p.slice(0, -1)),
+    });
+
+    it("its packages: the one folder everything is in (Export Package…), and folders with a metadata.json", () => {
+        expect(packageRoots(zip(["kit/a.ts", "kit/lib/b.ts"]))).toEqual(["kit"]);
+        expect(packageRoots(zip(["kit/a.ts", "x.ts"]))).toEqual([]);
+        expect(packageRoots(zip(["kit/a.ts"], "globals: {}"))).toEqual([]);
+        expect(packageRoots(zip(["a/metadata.json", "a/x.ts", "b/y.ts", "metadata.json"]))).toEqual(["a"]);
+        // one inside another counts as the outer one
+        expect(packageRoots(zip(["kit/metadata.json", "kit/sub/metadata.json", "kit/sub/x.ts"]))).toEqual(["kit"]);
+    });
+
+    it("existing files in those packages that the zip doesn't have (any case), and nothing outside them", () => {
+        const existing = ["kit/a.ts", "kit/old.ts", "kit/lib/data.json", "Kit/Lib/B.ts", "other/c.ts", "kitten/d.ts", "e.ts"];
+        expect(filesGoneFrom(zip(["kit/a.ts", "kit/lib/b.ts"]), existing)).toEqual(["kit/old.ts", "kit/lib/data.json"]);
+        expect(filesGoneFrom(zip(["kit/a.ts", "x.ts"]), existing)).toEqual([]);
     });
 });

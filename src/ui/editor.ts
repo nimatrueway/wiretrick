@@ -16,7 +16,7 @@ import { manifestScriptCompletions, manifestScriptProblems } from "./manifestAss
 import { entryStem } from "../shared/packageModel";
 import { localPackage } from "../shared/localPackage";
 import { writeZip } from "../shared/zip";
-import { buildExportZip, emptyFolders, EXPORT_ZIP_NAME, importedSettingsDoc, readExportZip, settingsForScripts, type ExportContents } from "../shared/exportZip";
+import { buildExportZip, emptyFolders, EXPORT_ZIP_NAME, filesGoneFrom, importedSettingsDoc, readExportZip, settingsForScripts, type ExportContents } from "../shared/exportZip";
 import { PACKAGE_ORIGIN } from "../shared/packageImports";
 import { isInFolder, movedPath } from "../shared/folders";
 import { baseName, folderPathOfRowId, folderRowId, isFolderRowId, movedCollapsed, type TreeRow } from "./explorerTree";
@@ -2035,7 +2035,7 @@ async function importZip(file: File): Promise<void> {
         status(`${file.name}: no scripts, data files or settings.yaml in it`, "error");
         return;
     }
-    const existingData: { id: string; path: string }[] = zip.dataFiles.length ? (await send({ type: "listDataFiles" })) || [] : [];
+    const existingData: { id: string; path: string }[] = (await send({ type: "listDataFiles" })) || [];
     const dataFileIn = (path: string) => existingData.find((d) => d.path.toLowerCase() === path.toLowerCase());
     const existingFolders: string[] = zip.folders.length ? (await send({ type: "listFolders" })) || [] : [];
     let settingsError = "";
@@ -2049,10 +2049,15 @@ async function importZip(file: File): Promise<void> {
     const named = [...zip.scripts.map((s) => ({ name: s.name, code: s.code, data: false })), ...zip.dataFiles.map((d) => ({ name: d.path, code: d.text, data: true }))];
     const settingsAt = zip.settings === null ? -1 : named.length;
     const foldersAt = named.length + (zip.settings === null ? 0 : 1);
+    // a package's new version: its files that version doesn't have go (unless unchecked)
+    const existingFiles = [...scripts.map((s) => ({ path: scriptFileName(s.meta.name), id: s.id, kind: "script" as const })), ...existingData.map((d) => ({ path: d.path, id: d.id, kind: "data" as const }))];
+    const gonePaths = new Set(filesGoneFrom(zip, existingFiles.map((f) => f.path)));
+    const gone = existingFiles.filter((f) => gonePaths.has(f.path));
+    const goneAt = foldersAt + zip.folders.length;
     const ignored = zip.ignored.length ? ` ${plural(zip.ignored.length, "other file")} in it ${zip.ignored.length === 1 ? "isn't" : "aren't"} a script or data file and won't be imported.` : "";
     const chosen = await pickItems({
         title: `Import ${file.name}`,
-        intro: `Pick what to import. A script (data file) replaces the existing script (data file) at the same path; settings.yaml applies the globals and the picked scripts' enabled state and params.${ignored}`,
+        intro: `Pick what to import. A script (data file) replaces the existing script (data file) at the same path; settings.yaml applies the globals and the picked scripts' enabled state and params.${gone.length ? " Files marked deleted are in the package here but not in this version: checked, they're deleted." : ""}${ignored}`,
         items: [
             ...zip.scripts.map((s) => ({ path: s.file, kind: "script" as const, badge: existsBadge(s.name) })),
             ...zip.dataFiles.map((d) => ({ path: d.path, kind: "data" as const, badge: dataFileIn(d.path) ? "replaces existing" : "new" })),
@@ -2060,6 +2065,7 @@ async function importZip(file: File): Promise<void> {
                 ? []
                 : [settingsError ? { path: SETTINGS_FILE, kind: "settings" as const, badge: "YAML error", detail: settingsError, checked: false } : { path: SETTINGS_FILE, kind: "settings" as const }]),
             ...zip.folders.map((f) => ({ path: f, kind: "folder" as const, badge: existingFolders.some((e) => e.toLowerCase() === f.toLowerCase()) ? "exists" : "new" })),
+            ...gone.map((f) => ({ path: f.path, kind: f.kind, badge: "deleted", detail: "not in this version", removed: true })),
         ],
         confirm: "Import",
         warn: importsWarning(named),
@@ -2067,7 +2073,8 @@ async function importZip(file: File): Promise<void> {
     if (!chosen) return;
     const pickedScripts = chosen.filter((i) => i < zip.scripts.length).map((i) => zip.scripts[i]);
     const pickedData = chosen.filter((i) => i >= zip.scripts.length && i < named.length).map((i) => zip.dataFiles[i - zip.scripts.length]);
-    const pickedFolders = chosen.filter((i) => i >= foldersAt).map((i) => zip.folders[i - foldersAt]);
+    const pickedFolders = chosen.filter((i) => i >= foldersAt && i < goneAt).map((i) => zip.folders[i - foldersAt]);
+    const pickedGone = chosen.filter((i) => i >= goneAt).map((i) => gone[i - goneAt]);
     const withSettings = settingsAt >= 0 && chosen.includes(settingsAt);
     // folders and data files first: the scripts compile against them
     const failed: string[] = [];
@@ -2081,8 +2088,12 @@ async function importZip(file: File): Promise<void> {
         if (r?.error) failed.push(r.error);
     }
     for (const s of pickedScripts) await saveImported({ name: s.name, code: s.code });
+    for (const f of pickedGone) {
+        const r = await send({ type: f.kind === "script" ? "deleteScript" : "deleteDataFile", id: f.id });
+        if (r?.error) failed.push(`can't delete "${f.path}": ${r.error}`);
+    }
     await refresh();
-    const parts = [plural(pickedScripts.length, "script"), ...(pickedData.length ? [plural(pickedData.length, "data file")] : []), ...(pickedFolders.length ? [plural(pickedFolders.length, "folder")] : [])];
+    const parts = [plural(pickedScripts.length, "script"), ...(pickedData.length ? [plural(pickedData.length, "data file")] : []), ...(pickedFolders.length ? [plural(pickedFolders.length, "folder")] : []), ...(pickedGone.length ? [`${plural(pickedGone.length, "file")} deleted`] : [])];
     // settings apply through the real path (globals + the scripts'
     // enabled state and params); storage.onChanged refreshes the settings UI
     if (withSettings) {

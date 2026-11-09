@@ -1065,6 +1065,43 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
     check("partial import skips the unticked script", !!skipName && !byName.has(skipName), String(skipName));
     check("import status shows success", (await mgr.evaluate(() => document.querySelector("#editor-status")?.textContent ?? "")).includes("imported"));
 
+    // a package's new version: its files that version lacks are listed as deleted and, checked, deleted
+    {
+        const { buildExportZip } = await import("../src/shared/exportZip");
+        for (const m of [{ id: "s_kit_a", name: "kit/a" }, { id: "s_kit_old", name: "kit/old" }])
+            await mgr.evaluate((m: any) => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "saveScript", ...m, code: "export const x = 1;" }, r)), m);
+        await mgr.reload();
+        await mgr.waitForSelector("#btn-import", { state: "attached", timeout: 10000 });
+        await mgr.waitForSelector('#script-list li[data-id="dir:kit"]', { state: "attached", timeout: 10000 });
+        const kitZip = [...buildExportZip({ scripts: [{ name: "kit/a", code: "export const a = 2;" }], dataFiles: [] })];
+        await mgr.evaluate((bytes: number[]) => {
+            const orig = document.createElement.bind(document);
+            (document as any).createElement = function (tag: string) {
+                const el = orig(tag);
+                if (tag === "input") (window as any).__importInput = el;
+                return el;
+            };
+            (document.querySelector("#btn-import") as HTMLElement).click();
+            const dt = new DataTransfer();
+            dt.items.add(new File([new Uint8Array(bytes)], "kit.zip", { type: "application/zip" }));
+            const input = (window as any).__importInput;
+            input.files = dt.files;
+            input.dispatchEvent(new Event("change"));
+        }, kitZip);
+        await mgr.waitForSelector("#bundle-picker .picker-row", { timeout: 5000 });
+        const goneRow = await mgr.evaluate(() => {
+            const row = document.querySelector<HTMLElement>('#bundle-picker .picker-row[data-path="kit/old.ts"]');
+            const r = { removed: !!row?.classList.contains("removed"), badge: row?.querySelector(".picker-badge")?.textContent, checked: !!row?.querySelector("input")?.checked };
+            (document.querySelector('#bundle-picker [data-act="ok"]') as HTMLElement).click();
+            return r;
+        });
+        check("import picker lists the package's missing file as deleted, checked", goneRow.removed && goneRow.badge === "deleted" && goneRow.checked, JSON.stringify(goneRow));
+        await mgr.waitForFunction(() => (document.querySelector("#editor-status")?.textContent ?? "").includes("deleted"), null, { timeout: 20000 }).catch(() => {});
+        const kit = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "listScripts" }, r)));
+        const kitNames = (kit || []).map((s: any) => s.meta.name).filter((n: string) => n.startsWith("kit/"));
+        check("import deletes the package's file its new version lacks", JSON.stringify(kitNames) === '["kit/a"]', JSON.stringify(kitNames) + " " + (await mgr.evaluate(() => document.querySelector("#editor-status")?.textContent)));
+    }
+
     // the user's scenario: the popup is the FIRST thing opened after the SW
     // idled out (MV3 kills it ~30s after the last event) — the popup must
     // wake it and still list. Close every extension page, wait out the SW,

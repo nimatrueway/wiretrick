@@ -22,6 +22,31 @@ import { isInFolder } from "./folders";
 
 export const EXPORT_ZIP_NAME = "wiretrick-export.zip";
 
+const MANIFEST = "metadata.json";
+
+/**
+ * The package folders an Import… zip brings a version of: each folder with
+ * a metadata.json, and the zip's one folder when everything is in it (what
+ * Export Package… makes).
+ */
+export function packageRoots(zip: Pick<ExportContents, "settings" | "scripts" | "dataFiles" | "folders">): string[] {
+    const roots = new Map<string, string>();
+    const add = (f: string) => void (f && !roots.has(f.toLowerCase()) && roots.set(f.toLowerCase(), f));
+    for (const d of zip.dataFiles) if (d.path.toLowerCase().endsWith("/" + MANIFEST)) add(d.path.slice(0, -MANIFEST.length - 1));
+    const paths = [...zip.scripts.map((s) => s.file), ...zip.dataFiles.map((d) => d.path), ...zip.folders];
+    const top = paths.length ? paths[0].split("/")[0] : "";
+    if (zip.settings === null && top && paths.every((p) => p.includes("/") && p.split("/")[0].toLowerCase() === top.toLowerCase())) add(top);
+    // a package inside another is part of it
+    return [...roots.values()].filter((r, _, all) => !all.some((o) => o !== r && isInFolder(r, o)));
+}
+
+/** of `existing` paths, those inside the zip's package folders that the zip doesn't have: the imported version deleted them */
+export function filesGoneFrom(zip: Pick<ExportContents, "settings" | "scripts" | "dataFiles" | "folders">, existing: string[]): string[] {
+    const roots = packageRoots(zip);
+    const has = new Set([...zip.scripts.map((s) => s.file), ...zip.dataFiles.map((d) => d.path)].map((p) => p.toLowerCase()));
+    return existing.filter((p) => roots.some((r) => isInFolder(p, r)) && !has.has(p.toLowerCase()));
+}
+
 export interface ExportContents {
     /** settings.yaml text; null when the zip has none */
     settings: string | null;

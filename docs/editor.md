@@ -510,6 +510,12 @@ rather than duplicated). Untick `settings.yaml` to leave settings, params
 and `enabled` state alone. If a picked script imports a library or data
 file that isn't picked, the dialog warns and **Add them** ticks the missing
 ones.
+
+Importing a new version of a package (a zip from **Export Package…**, whose
+files are all in one folder, or any folder in the zip with a
+`metadata.json`) also lists the files you have in that folder that the new
+version doesn't, struck through and marked **deleted**. They're ticked, so
+importing deletes them. Untick any you want to keep.
 A plain `.ts`/`.tsx`/`.js` file imports as a single script.
 
 ## `settings.yaml`
