@@ -1,24 +1,28 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { ScriptLife, type RunCtx, type ReactDomClient } from "../src/shared/runLifecycle";
 import { Exposer, RpcClient, ReloadedError } from "../src/shared/rpc";
 import { firePageHandler, type PageDocumentHandler } from "../src/shared/pageShim";
 
 /** a react-dom/client stand-in: records what each root renders */
 function fakeReact() {
-    const roots: { el: Element; rendered: unknown[]; unmounted: boolean }[] = [];
+    const roots: { el: Element; rendered: unknown[]; keys: unknown[]; unmounted: boolean }[] = [];
     const client: ReactDomClient = {
         createRoot(el) {
-            const r = { el, rendered: [] as unknown[], unmounted: false };
+            const r = { el, rendered: [] as unknown[], keys: [] as unknown[], unmounted: false };
             roots.push(r);
             return {
-                render: (n) => {
-                    r.rendered.push(n);
-                    el.textContent = String(n);
+                render: (n: any) => {
+                    // an element of a function component: what it renders (no hooks here)
+                    const v = n && typeof n === "object" && typeof n.type === "function" ? n.type(n.props) : n;
+                    r.rendered.push(v);
+                    r.keys.push(n?.props?.key);
+                    el.textContent = String(v);
                 },
                 unmount: () => void (r.unmounted = true),
             };
         },
+        createElement: (type: unknown, props: unknown) => ({ type, props }),
     };
     return { roots, client };
 }
@@ -39,6 +43,8 @@ describe("ScriptLife", () => {
         react = fakeReact();
         life = new ScriptLife({ doc: document, react: () => react.client, onError: (e) => errors.push(e) });
     });
+    // a live ScriptLife keeps watching the page: end it so it can't mount into the next test
+    afterEach(() => life.stop());
     /** compile + run handler "onPage:0" with `fn`; returns its ctx */
     const reload = (fn: (ctx: RunCtx) => unknown, h = "onPage:0") => {
         const gen = life.begin();
@@ -135,22 +141,23 @@ describe("ScriptLife", () => {
     });
 
     it("ctx.mount: one root per target, re-rendered on reload, unmounted when dropped", () => {
+        const first = { first: true };
         reload((ctx) => {
-            (ctx as any).mount("#slot", "v1");
+            (ctx as any).mount("#slot", "v1", first);
             (ctx as any).mount("floating");
         });
         expect(react.roots.length).toBe(2);
         const slotHost = document.querySelector("#slot > wiretrick-mount");
         expect(slotHost).not.toBeNull();
-        reload((ctx) => (ctx as any).mount("#slot", "v2"));
+        reload((ctx) => (ctx as any).mount("#slot", "v2", first));
         expect(react.roots.length).toBe(2);
         expect(react.roots[0].rendered).toEqual(["v1", "v2"]);
         expect(react.roots[0].unmounted).toBe(false);
         expect(react.roots[1].unmounted).toBe(true);
         expect(document.querySelectorAll("wiretrick-mount").length).toBe(1);
-        // the page replaced the target: the host moves to the new one
+        // the page replaced the target: a first-match host moves to the new one
         document.body.innerHTML = `<div id="slot"></div>`;
-        reload((ctx) => (ctx as any).mount("#slot", "v3"));
+        reload((ctx) => (ctx as any).mount("#slot", "v3", first));
         expect(document.querySelector("#slot > wiretrick-mount")).toBe(slotHost);
     });
 
@@ -192,6 +199,100 @@ describe("ScriptLife", () => {
         });
         expect(react.roots.length).toBe(2);
         expect(document.querySelectorAll("wiretrick-mount").length).toBe(2);
+    });
+
+    it("ctx.mount(selector): a root on every match, now and later; a gone match unmounts", async () => {
+        const tick = () => new Promise((r) => setTimeout(r, 0));
+        document.body.innerHTML = `<i class="a">1</i><i class="a">2</i>`;
+        reload((ctx) => (ctx as any).mount(".a", (el: Element) => "on " + el.firstChild!.textContent));
+        expect([...document.querySelectorAll(".a > wiretrick-mount")].map((h) => h.previousSibling!.textContent)).toEqual(["1", "2"]);
+        expect(react.roots.map((r) => r.rendered)).toEqual([["on 1"], ["on 2"]]);
+        const third = Object.assign(document.createElement("i"), { className: "a", textContent: "3" });
+        document.body.appendChild(third);
+        await tick();
+        expect(react.roots.length).toBe(3);
+        expect(react.roots[2].rendered).toEqual(["on 3"]);
+        document.querySelector(".a")!.remove();
+        await tick();
+        expect(react.roots.map((r) => r.unmounted)).toEqual([true, false, false]);
+        // a match inside our own UI isn't one
+        reload((ctx) => (ctx as any).mount(".a", "<i class=a>"));
+        expect(react.roots.length).toBe(3);
+        expect(errors).toEqual([]);
+    });
+
+    it("ctx.mount positions: inside-first, before, after; overlay makes a static anchor relative until it's gone", () => {
+        document.body.innerHTML = `<p id="t"><b>x</b></p>`;
+        const t = document.querySelector("#t") as HTMLElement;
+        reload((ctx) => {
+            (ctx as any).mount("#t", "f", { position: "inside-first" });
+            (ctx as any).mount("#t", "b", { position: "before" });
+            (ctx as any).mount("#t", "a", { position: "after" });
+            (ctx as any).mount("#t", "o", { position: "overlay" });
+        });
+        const names = (n: Node) => [...n.childNodes].map((c) => (c.nodeName === "WIRETRICK-MOUNT" ? "mount" : c.nodeName.toLowerCase()));
+        expect(names(document.body)).toEqual(["mount", "p", "mount"]);
+        expect(names(t)).toEqual(["mount", "b", "mount"]);
+        expect(t.style.position).toBe("relative");
+        expect((t.lastChild as HTMLElement).style.position).toBe("absolute");
+        reload((ctx) => (ctx as any).mount("#t", "f", { position: "inside-first" }));
+        expect(names(document.body)).toEqual(["p"]);
+        expect(names(t)).toEqual(["mount", "b"]);
+        expect(t.style.position).toBe("");
+        expect(() => reload((ctx) => (ctx as any).mount("#t", "x", { position: "beside" }))).toThrow(/position must be one of/);
+        expect(() => reload((ctx) => (ctx as any).mount("#t", "x", { key: 1 }))).toThrow(/key must be a string/);
+        expect(() => reload((ctx) => (ctx as any).mount(5, "x"))).toThrow(/selector or an element/);
+    });
+
+    it("ctx.mount: a key makes a second mount on the same anchor; dispose drops it", () => {
+        let off!: () => void;
+        reload((ctx) => {
+            (ctx as any).mount("#slot", "one");
+            off = (ctx as any).mount("#slot", "two", { key: "b" });
+        });
+        expect(document.querySelectorAll("#slot > wiretrick-mount").length).toBe(2);
+        off();
+        expect(document.querySelectorAll("#slot > wiretrick-mount").length).toBe(1);
+        expect(react.roots[1].unmounted).toBe(true);
+        off();
+        expect(react.roots[0].unmounted).toBe(false);
+    });
+
+    it("ctx.mount: a render function re-renders with the latest code; a hook change remounts it", () => {
+        const useState = (v: unknown) => [v];
+        reload((ctx) => (ctx as any).mount("#slot", () => "v1"));
+        reload((ctx) => (ctx as any).mount("#slot", () => "v2"));
+        reload((ctx) => (ctx as any).mount("#slot", () => (useState(0), "v3")));
+        expect(react.roots.length).toBe(1);
+        expect(react.roots[0].rendered).toEqual(["v1", "v2", "v3"]);
+        const [k1, k2, k3] = react.roots[0].keys;
+        expect(k2).toBe(k1);
+        expect(k3).not.toBe(k1);
+        expect(react.roots[0].unmounted).toBe(false);
+    });
+
+    it("ctx.mount autoRestore: the page removing the UI puts it back; a fight with the page stops it", async () => {
+        const tick = () => new Promise((r) => setTimeout(r, 0));
+        const slot = document.querySelector("#slot")!;
+        reload((ctx) => (ctx as any).mount("#slot", "x", { autoRestore: true }));
+        const host = slot.firstChild!;
+        slot.textContent = "";
+        await tick();
+        expect(slot.firstChild).toBe(host);
+        expect(react.roots.length).toBe(1);
+        for (let i = 0; i < 25; i++) {
+            slot.textContent = "";
+            await tick();
+        }
+        expect(slot.firstChild).toBeNull();
+        expect(String(errors[0])).toMatch(/keeps removing the UI, so autoRestore stopped/);
+        // without autoRestore the page's removal stands
+        errors.length = 0;
+        reload((ctx) => (ctx as any).mount(slot, "y"));
+        slot.textContent = "";
+        await tick();
+        expect(slot.firstChild).toBeNull();
+        expect(errors).toEqual([]);
     });
 
     it("ctx.mount: needs React; there's no mount without it", () => {

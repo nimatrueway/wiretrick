@@ -15,9 +15,18 @@
  * a newer compile replaced it and none of its runs is alive.
  */
 import { AbortError } from "./rpc";
+import { hookSignature, notHot } from "./hotRefresh";
 
 export interface ReactDomClient {
     createRoot(el: Element): { render(node: unknown): void; unmount(): void };
+    /** React's, for a render-function `ui` */
+    createElement?(type: any, props: any): unknown;
+}
+
+/** a script's `react-dom/client` and `createElement`, as its React (or Preact) is */
+export function reactOf(require: (spec: string) => any): ReactDomClient {
+    const dom = require("react-dom/client");
+    return { createRoot: (el) => dom.createRoot(el), createElement: require("react").createElement };
 }
 
 export interface LifeOptions {
@@ -26,7 +35,7 @@ export interface LifeOptions {
     react?: () => ReactDomClient;
     /** mount hosts get a closed shadow root (default true; the overlay frame is isolated already) */
     shadow?: boolean;
-    /** a teardown, or a ctx.mount that waited for its target, failed */
+    /** a teardown, or a ctx.mount that followed the page (a new match, autoRestore), failed */
     onError?: (e: unknown) => void;
 }
 
@@ -36,7 +45,7 @@ export interface RunCtx {
     once<T>(key: string, fn: () => T): T;
     patch(obj: object, prop: PropertyKey, wrap: (orig: any) => any): void;
     style(css: string): void;
-    mount?: (a: unknown, b?: unknown) => void;
+    mount?: (a: unknown, b?: unknown, c?: unknown) => () => void;
     each<A extends any[], T>(fn: (...args: A) => Promise<T>, ...args: A): AsyncIterableIterator<T>;
 }
 
@@ -77,11 +86,45 @@ interface Trampoline {
     n: number;
 }
 
-interface Mount {
+export type MountPosition = "inside-last" | "inside-first" | "before" | "after" | "overlay";
+const POSITIONS: readonly MountPosition[] = ["inside-last", "inside-first", "before", "after", "overlay"];
+
+/** one root of a ctx.mount: at one anchor (or floating) */
+interface Slot {
+    /** where it goes (null: floating) */
+    anchor: Element | null;
     host: Element;
     container: Element;
     root: { render(node: unknown): void; unmount(): void };
+    /** ctx.style copies in its shadow root */
+    styleEls: Element[];
+    /** it made its overlay anchor `position: relative` */
+    positioned?: Element;
 }
+
+/** a ctx.mount key's owner: its UI on every anchor */
+interface MountOwner extends Owner {
+    /** what was asked for */
+    target: string | Element | undefined;
+    pos: MountPosition;
+    /** one root, moving to the current match (`first`, an element, floating) */
+    single: boolean;
+    autoRestore: boolean;
+    ui: unknown;
+    client: ReactDomClient;
+    /** renders a render-function `ui` (stable, so its state stays across saves) */
+    Fn: (p: { anchor?: Element }) => unknown;
+    slots: Map<Element | null, Slot>;
+    mo?: MutationObserver;
+    /** autoRestore re-insertions in the last second (a page fighting back) */
+    restores: number[];
+    restoreOff?: boolean;
+}
+
+/** marks a mount's host: page changes there are ours, and anchors inside aren't matches */
+const HOST_ATTR = "data-wiretrick-mount";
+/** autoRestore gives up after this many re-insertions in a second */
+const MAX_RESTORES = 20;
 
 const isAbort = (e: any) => e?.name === "AbortError";
 
@@ -104,11 +147,11 @@ export class ScriptLife {
     private trampN = 0;
     /** ctx.style elements, mirrored into each mount's shadow root */
     private readonly styles = new Map<string, { css: string; els: Element[] }>();
-    private readonly mounts = new Map<string, Mount>();
+    private readonly slots = new Set<Slot>();
     /** element targets of ctx.mount: a stable id each, so a mount there keeps its key */
     private readonly targetIds = new WeakMap<Element, number>();
-    /** ctx.mount targets not on the page yet, per mount key: the latest UI waits for them */
-    private readonly waiting = new Map<string, { run: Run; jsx: unknown; stop: () => void }>();
+    /** overlay anchors made `position: relative`: by how many mounts, and their own inline position */
+    private readonly positioned = new WeakMap<Element, { n: number; prev: string }>();
     private nextTargetId = 0;
     private stopped = false;
 
@@ -279,7 +322,7 @@ export class ScriptLife {
                 return each(run.ctl.signal, fn, args);
             },
         };
-        if (this.o.react) ctx.mount = (...args: unknown[]) => (args.length < 2 ? this.mount(run, undefined, args[0]) : this.mount(run, args[0] as any, args[1]));
+        if (this.o.react) ctx.mount = (...args: unknown[]) => (args.length < 2 ? this.mount(run, undefined, args[0], undefined) : this.mount(run, args[0], args[1], args[2]));
         return ctx;
     }
 
@@ -330,7 +373,7 @@ export class ScriptLife {
             (doc.head || doc.documentElement).appendChild(els[0]);
             const entry = { css, els };
             this.styles.set(key, entry);
-            for (const m of this.mounts.values()) this.mirror(m, entry);
+            for (const m of this.slots) this.mirror(m, entry);
             return {
                 claimers: new Set<Run>(),
                 teardown: () => {
@@ -347,91 +390,263 @@ export class ScriptLife {
         return el;
     }
 
-    private mirror(m: Mount, entry: { css: string; els: Element[] }): void {
+    private mirror(m: Slot, entry: { css: string; els: Element[] }): void {
         if (m.host === m.container) return;
         const el = this.styleEl(entry.css);
         entry.els.push(el);
+        m.styleEls.push(el);
         m.container.parentNode!.insertBefore(el, m.container);
     }
 
-    private mount(run: Run, target: string | Element | undefined, jsx: unknown): void {
+    /** `run` drops its claim on `key` (a ctx.mount's dispose) */
+    private unclaim(run: Run, key: string): void {
+        if (!run.claims.delete(key)) return;
+        const o = this.owners.get(key);
+        if (!o) return;
+        o.claimers.delete(run);
+        if (o.claimers.size) return;
+        this.owners.delete(key);
+        this.teardown(o);
+    }
+
+    private mount(run: Run, target: unknown, ui: unknown, opts: unknown): () => void {
         if (target !== undefined && typeof target !== "string" && !isTarget(target)) throw new TypeError("ctx.mount: the target must be a selector or an element");
+        if (opts !== undefined && (opts === null || typeof opts !== "object")) throw new TypeError("ctx.mount: the options must be an object");
+        const o = (opts ?? {}) as { position?: unknown; key?: unknown; first?: unknown; autoRestore?: unknown };
+        const pos = (o.position ?? "inside-last") as MountPosition;
+        if (!POSITIONS.includes(pos)) throw new TypeError(`ctx.mount: position must be one of ${POSITIONS.map((p) => `"${p}"`).join(", ")}`);
+        if (o.key !== undefined && typeof o.key !== "string") throw new TypeError("ctx.mount: the key must be a string");
         const doc = this.o.doc;
-        const shadow = this.o.shadow !== false;
+        if (typeof target === "string") {
+            try {
+                doc.querySelectorAll(target);
+            } catch {
+                throw new SyntaxError(`ctx.mount: "${target}" isn't a valid selector`);
+            }
+        }
         let client: ReactDomClient;
         try {
             client = this.o.react!();
         } catch {
             throw new Error("ctx.mount needs React: write the UI with JSX (it loads the built-in React)");
         }
-        // one mount per (handler, target): mounting there again re-renders it
-        const key = "mount:" + run.h + (typeof target === "string" ? ":" + target : target ? "@" + this.targetId(target) : "");
-        const at = typeof target === "string" ? doc.querySelector(target) : (target ?? (shadow ? doc.documentElement : doc.body || doc.documentElement));
-        if (!at) return this.awaitTarget(run, key, target as string, jsx);
-        this.waiting.get(key)?.stop();
-        this.claim(run, key, () => {
-            let host: Element;
-            let container: Element;
-            if (shadow) {
-                host = doc.createElement("wiretrick-mount");
-                const root = host.attachShadow({ mode: "closed" });
-                container = doc.createElement("div");
-                root.appendChild(container);
-                if (target === undefined) (host as HTMLElement).style.cssText = "all:initial;position:fixed;top:0;left:0;z-index:2147483646";
-            } else host = container = doc.createElement("div");
-            const m: Mount = { host, container, root: client.createRoot(container) };
-            this.mounts.set(key, m);
-            for (const entry of this.styles.values()) this.mirror(m, entry);
-            return {
+        if (typeof ui === "function" && !client.createElement) throw new TypeError("ctx.mount: a render-function UI needs React's createElement");
+        const single = typeof target !== "string" || !!o.first;
+        // one mount per (handler, target, position, key): mounting there again re-renders it
+        const where = typeof target === "string" ? ":" + target : target ? "@" + this.targetId(target as Element) : "";
+        const key = "mount:" + run.h + where + (target === undefined ? "" : "|" + pos + (single ? "|first" : "")) + (o.key ? "#" + o.key : "");
+        const owner = this.claim(run, key, (): MountOwner => {
+            const m: MountOwner = {
                 claimers: new Set<Run>(),
+                target: target as string | Element | undefined,
+                pos,
+                single,
+                autoRestore: !!o.autoRestore,
+                ui,
+                client,
+                Fn: notHot((p: { anchor?: Element }) => (m.ui as (a?: Element) => unknown)(p.anchor)),
+                slots: new Map(),
+                restores: [],
                 teardown: () => {
-                    this.mounts.delete(key);
-                    try {
-                        m.root.unmount();
-                    } finally {
-                        host.remove();
-                    }
+                    m.mo?.disconnect();
+                    const errs: unknown[] = [];
+                    for (const sl of [...m.slots.values()])
+                        try {
+                            this.dropSlot(m, sl);
+                        } catch (e) {
+                            errs.push(e);
+                        }
+                    if (errs.length) throw errs[0];
                 },
             };
+            // a selector follows the page; autoRestore watches for the page removing the UI
+            if (typeof target === "string" || m.autoRestore) {
+                m.mo = new MutationObserver((records) => {
+                    // changes inside our UI, and our own insertions, aren't the page's (a removal of ours may be: autoRestore)
+                    if (records.every((r) => isOurs(r.target) || (!r.removedNodes.length && ([...r.addedNodes] as Node[]).every(isOurs)))) return;
+                    try {
+                        this.syncMount(m, false);
+                    } catch (e) {
+                        this.o.onError?.(e);
+                    }
+                });
+                m.mo.observe(doc, { childList: true, subtree: true });
+            }
+            return m;
         });
-        const m = this.mounts.get(key)!;
-        // the page re-rendered the target (or dropped the host): put it back
-        if (m.host.parentNode !== at) at.appendChild(m.host);
-        m.root.render(jsx);
+        owner.ui = ui;
+        owner.client = client;
+        owner.autoRestore = !!o.autoRestore;
+        owner.restoreOff = false;
+        this.syncMount(owner, true);
+        return () => this.unclaim(run, key);
     }
 
-    /** mount once `target` is on the page (a later mount there in the run replaces `jsx`); the run ending stops the wait */
-    private awaitTarget(run: Run, key: string, target: string, jsx: unknown): void {
-        const sig = run.ctl.signal;
-        if (sig.aborted) throw sig.reason;
-        const w = this.waiting.get(key);
-        if (w?.run === run) {
-            w.jsx = jsx;
+    /** the anchors `m` goes on now */
+    private anchorsOf(m: MountOwner): Element[] {
+        const doc = this.o.doc;
+        const t = m.target;
+        if (t === undefined) return [];
+        if (typeof t !== "string") return [t];
+        if (m.single) {
+            const cur = m.slots.get(null)?.anchor;
+            // the current match stays while it's still one
+            if (cur && cur.isConnected && cur.matches(t) && !inHost(cur)) return [cur];
+            for (const el of doc.querySelectorAll(t)) if (!inHost(el)) return [el];
+            return [];
+        }
+        return [...doc.querySelectorAll(t)].filter((el) => !inHost(el));
+    }
+
+    /**
+     * Bring `m`'s roots in line with the page: a root on each anchor (a
+     * gone anchor's root unmounts; `single` keeps its root and moves it).
+     * `rendered`: a ctx.mount call, which re-renders and re-places them all;
+     * otherwise (the page changed) only new roots render, and a host the page
+     * removed goes back only with autoRestore.
+     */
+    private syncMount(m: MountOwner, rendered: boolean): void {
+        const doc = this.o.doc;
+        if (m.target === undefined) {
+            const sl = m.slots.get(null) ?? this.addSlot(m, null, null);
+            const base = this.o.shadow !== false ? doc.documentElement : doc.body || doc.documentElement;
+            if (sl.host.parentNode !== base) base.appendChild(sl.host);
+            sl.root.render(this.uiOf(m, undefined));
             return;
         }
-        w?.stop();
-        const doc = this.o.doc;
-        const mo = new MutationObserver(() => {
-            if (!doc.querySelector(target)) return;
-            entry.stop();
-            try {
-                this.mount(run, target, entry.jsx);
-            } catch (e) {
-                if (!sig.aborted) this.o.onError?.(e);
+        const anchors = this.anchorsOf(m);
+        if (m.single) {
+            const a = anchors[0];
+            let sl = m.slots.get(null);
+            if (!a) {
+                if (rendered && sl) sl.root.render(this.uiOf(m, sl.anchor ?? undefined));
+                return;
             }
-        });
-        const entry = {
-            run,
-            jsx,
-            stop: () => {
-                mo.disconnect();
-                sig.removeEventListener("abort", entry.stop);
-                if (this.waiting.get(key) === entry) this.waiting.delete(key);
-            },
-        };
-        this.waiting.set(key, entry);
-        sig.addEventListener("abort", entry.stop, { once: true });
-        mo.observe(doc, { childList: true, subtree: true });
+            const fresh = !sl;
+            if (!sl) sl = this.addSlot(m, null, a);
+            else if (sl.anchor !== a) {
+                this.unposition(sl);
+                sl.anchor = a;
+            }
+            this.place(m, sl, rendered || fresh);
+            if (rendered || fresh) sl.root.render(this.uiOf(m, a));
+            return;
+        }
+        const live = new Set(anchors);
+        for (const [a, sl] of [...m.slots]) if (!live.has(a!)) this.dropSlot(m, sl);
+        for (const a of anchors) {
+            let sl = m.slots.get(a);
+            const fresh = !sl;
+            if (!sl) sl = this.addSlot(m, a, a);
+            this.place(m, sl, rendered || fresh);
+            if (rendered || fresh) sl.root.render(this.uiOf(m, a));
+        }
+    }
+
+    private uiOf(m: MountOwner, anchor: Element | undefined): unknown {
+        if (typeof m.ui !== "function") return m.ui;
+        // a hook-call change remounts it (rather than throwing)
+        return m.client.createElement!(m.Fn, { key: hookSignature(m.ui as Function), anchor });
+    }
+
+    private addSlot(m: MountOwner, at: Element | null, anchor: Element | null): Slot {
+        const doc = this.o.doc;
+        const shadow = this.o.shadow !== false;
+        const overlay = m.pos === "overlay";
+        let host: Element;
+        let container: Element;
+        if (shadow) {
+            host = doc.createElement("wiretrick-mount");
+            const root = host.attachShadow({ mode: "closed" });
+            container = doc.createElement("div");
+            root.appendChild(container);
+            if (m.target === undefined) (host as HTMLElement).style.cssText = "all:initial;position:fixed;top:0;left:0;z-index:2147483646";
+            else if (overlay) {
+                (host as HTMLElement).style.cssText = "display:block;position:absolute;inset:0;pointer-events:none";
+                (container as HTMLElement).style.cssText = "display:contents;pointer-events:auto";
+            } else {
+                // inline in the page's layout: a label next to text stays on its line
+                (host as HTMLElement).style.cssText = "display:contents";
+                (container as HTMLElement).style.cssText = "display:contents";
+            }
+        } else {
+            host = container = doc.createElement("div");
+            if (overlay) (host as HTMLElement).style.cssText = "position:absolute;inset:0;pointer-events:none";
+            else if (m.target !== undefined) (host as HTMLElement).style.cssText = "display:contents";
+        }
+        host.setAttribute(HOST_ATTR, "");
+        const sl: Slot = { anchor, host, container, root: m.client.createRoot(container), styleEls: [] };
+        m.slots.set(at, sl);
+        this.slots.add(sl);
+        for (const entry of this.styles.values()) this.mirror(sl, entry);
+        return sl;
+    }
+
+    private dropSlot(m: MountOwner, sl: Slot): void {
+        for (const [k, v] of m.slots) if (v === sl) m.slots.delete(k);
+        this.slots.delete(sl);
+        if (sl.styleEls.length) for (const entry of this.styles.values()) entry.els = entry.els.filter((el) => !sl.styleEls.includes(el));
+        this.unposition(sl);
+        try {
+            sl.root.unmount();
+        } finally {
+            sl.host.remove();
+        }
+    }
+
+    /** put `sl`'s host where `m.pos` says (`force`: also when it's only missing, not just moved) */
+    private place(m: MountOwner, sl: Slot, force: boolean): void {
+        const a = sl.anchor!;
+        const h = sl.host;
+        const inside = m.pos === "inside-last" || m.pos === "inside-first" || m.pos === "overlay";
+        const parent = inside ? a : a.parentNode;
+        if (!parent || h.parentNode === parent) {
+            if (m.pos === "overlay") this.position(sl);
+            return;
+        }
+        if (!force) {
+            // the page removed it: back only with autoRestore, and not in a fight with the page
+            if (!m.autoRestore || m.restoreOff) return;
+            const now = Date.now();
+            m.restores = m.restores.filter((t) => now - t < 1000);
+            m.restores.push(now);
+            if (m.restores.length > MAX_RESTORES) {
+                m.restoreOff = true;
+                this.o.onError?.(new Error(`ctx.mount(${typeof m.target === "string" ? JSON.stringify(m.target) : "element"}): the page keeps removing the UI, so autoRestore stopped (until the next save)`));
+                return;
+            }
+        }
+        if (m.pos === "inside-first") a.insertBefore(h, a.firstChild);
+        else if (m.pos === "before") parent.insertBefore(h, a);
+        else if (m.pos === "after") parent.insertBefore(h, a.nextSibling);
+        else a.appendChild(h);
+        if (m.pos === "overlay") this.position(sl);
+    }
+
+    /** an overlay's anchor gets `position: relative` while it's `static` */
+    private position(sl: Slot): void {
+        const a = sl.anchor as HTMLElement;
+        if (sl.positioned === a || !a.style) return;
+        const view = this.o.doc.defaultView;
+        const p = this.positioned.get(a);
+        if (p) p.n++;
+        else {
+            const cur = view?.getComputedStyle(a).position;
+            if (!view || (cur && cur !== "static")) return;
+            this.positioned.set(a, { n: 1, prev: a.style.position });
+            a.style.position = "relative";
+        }
+        sl.positioned = a;
+    }
+
+    private unposition(sl: Slot): void {
+        const a = sl.positioned as HTMLElement | undefined;
+        if (!a) return;
+        sl.positioned = undefined;
+        const p = this.positioned.get(a);
+        if (!p || --p.n > 0) return;
+        this.positioned.delete(a);
+        if (a.style.position === "relative") a.style.position = p.prev;
     }
 
     private targetId(el: Element): number {
@@ -443,6 +658,15 @@ export class ScriptLife {
 
 function isTarget(v: unknown): v is Element {
     return !!v && typeof v === "object" && (v as any).nodeType === 1;
+}
+
+/** a mount's host, or inside one */
+function isOurs(n: Node): boolean {
+    return n.nodeType === 1 ? !!(n as Element).closest(`[${HOST_ATTR}]`) : !!n.parentElement?.closest(`[${HOST_ATTR}]`);
+}
+
+function inHost(el: Element): boolean {
+    return !!el.closest(`[${HOST_ATTR}]`);
 }
 
 /**

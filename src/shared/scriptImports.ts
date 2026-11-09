@@ -268,7 +268,7 @@ export function makeLibRequire<L extends ShippedLib>(libs: L[], run: (lib: L, re
     const loadPackage = makePackageLoader(
         pkgs,
         builtin ? (spec, from) => (builtinSpec(spec) && !/^https:\/\/unpkg\.com\/(react|react-dom|scheduler|valtio)@/.test(from) ? { module: builtin(spec, from, (u) => loadPackage(u)) } : undefined) : undefined,
-        { style: opts.style }
+        { style: opts.style, shared: opts.onSite ? "site" : "page" }
     );
     const scriptLibs = libs.filter((l) => !l.pkg && l.alias === undefined);
     const resolve = importResolver(

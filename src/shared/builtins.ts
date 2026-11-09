@@ -17,6 +17,7 @@ import { createProxy, isChanged } from "proxy-compare";
 import { builtinNeedsReact, builtinSpec, preactRoot, preactTarget, REACT_BUILTINS } from "./builtinSpecs";
 import { importSpecs, type ShippedLib } from "./scriptImports";
 import type { PackageModules } from "./packageImports";
+import type { HotCompile } from "./hotRefresh";
 
 export const REACT_CHUNK = "builtins-react.js";
 const CHUNK_GLOBAL = "__wtBuiltinReact";
@@ -177,7 +178,7 @@ function withHooks(base: object, hooks: () => { useSnapshot: any; useProxy: any 
  * source is `code`. `loadUrl` loads a downloaded package (a Preact
  * file's `preact/compat`).
  */
-export function builtinModule(spec: string, code = "", loadUrl?: (url: string) => any): any {
+export function builtinModule(spec: string, code = "", loadUrl?: (url: string) => any, hot?: { compile: HotCompile; path: string }): any {
     const name = builtinSpec(spec);
     if (!name) throw new Error(`"${spec}" isn't a built-in module`);
     const root = preactRoot(code);
@@ -201,7 +202,21 @@ export function builtinModule(spec: string, code = "", loadUrl?: (url: string) =
             return { useSnapshot: hooks().useSnapshot };
         case "valtio/react/utils":
             return { useProxy: hooks().useProxy };
-        default:
-            return reactBuiltin(name);
+        default: {
+            const mod = reactBuiltin(name);
+            return hot && !root ? hot.compile.wrap(name, mod, hot.path, code, reactBuiltin("react")) : mod;
+        }
     }
+}
+
+/**
+ * The `builtin` of a page runtime's script compile (`makeLibRequire`):
+ * a script file's React is hot (shared/hotRefresh.ts) when `hot` is given;
+ * a package's isn't.
+ */
+export function scriptBuiltin(codeOf: (importer: string) => string | undefined, hot?: HotCompile): (spec: string, importer: string, loadUrl: (url: string) => any) => any {
+    return (spec, importer, loadUrl) => {
+        const code = codeOf(importer);
+        return builtinModule(spec, code, loadUrl, hot && !/^[a-z][\w+.-]*:/i.test(importer) ? { compile: hot, path: importer } : undefined);
+    };
 }

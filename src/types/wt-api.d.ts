@@ -322,27 +322,63 @@ declare namespace Wiretrick {
         style(css: string): void;
     }
 
+    /** Where and how `ctx.mount(target, ui, opts)` places its UI. */
+    interface MountOptions {
+        /**
+         * Where the UI goes, relative to each match:
+         * - `"inside-last"` (default) / `"inside-first"`: its last or first child.
+         * - `"before"` / `"after"`: its sibling.
+         * - `"overlay"`: covering it (`position: absolute; inset: 0`, clicks
+         *   pass through to the page except on your UI). A `static` match
+         *   becomes `position: relative` while the overlay is there.
+         */
+        position?: "inside-last" | "inside-first" | "before" | "after" | "overlay";
+        /** Tells apart two mounts at the same target and position. */
+        key?: string;
+        /** Only the first match. It moves to the next match when the page replaces it. */
+        first?: boolean;
+        /**
+         * Put the UI back when the page removes it, for example when a
+         * framework re-renders the match's children. It stops, with an
+         * error in Problems, if the page keeps removing it (a fight).
+         */
+        autoRestore?: boolean;
+    }
+
     /** What `onPage` and `onOverlay` ctx add: React UI and handle loops. */
     interface TrustedRunCtx extends RunCtx {
         /**
-         * Render `ui` (JSX) into the page: inside `target` (a selector or an
-         * element), or floating over the page without one. Each save
-         * re-renders the same React root (its state survives); once no run
-         * mounts there any more it unmounts. In `onPage` the UI sits in a
-         * closed shadow root (the page's CSS doesn't reach it; `ctx.style`
-         * does). In `onOverlay` it goes into the overlay's `<body>`. A
-         * handler has one mount per target: mounting again there (also
-         * later in the run) re-renders it. A selector that matches nothing
-         * yet is waited for (until the run ends).
+         * Render `ui` (JSX) into the page. Without a target it floats over
+         * the page. With one, it goes on every element the selector matches,
+         * now and later (or on that element), at `opts.position`. A match
+         * that goes away unmounts its UI.
+         *
+         * `ui` can be a function. It's called with the anchor element, may
+         * use hooks, and is re-run with the latest code on each save.
+         *
+         * Each save re-renders the same React roots, and named function
+         * components keep their state, nested ones too (see "Component
+         * state across saves" in docs/scripting.md). Once no run mounts
+         * there any more it unmounts.
+         *
+         * In `onPage` the UI sits in a closed shadow root: the page's CSS
+         * doesn't reach it, but `ctx.style` does. In `onOverlay` it goes into
+         * the overlay's `<body>`.
+         *
+         * A handler has one mount per (target, position, key). Mounting there
+         * again, also later in the run, re-renders it.
+         *
+         * Returns a function that removes this mount early.
          *
          * @example
          * wt.onPage("*://example.com/*", (ctx) => {
          *     ctx.mount("#header", <button onClick={() => alert("hi")}>Hi</button>);
+         *     ctx.mount(".card", (card) => <Badge id={card.id} />, { position: "overlay" });
          * });
          * wt.onOverlay("*://example.com/*", (ctx) => ctx.mount(<Panel />));
          */
-        mount(ui: unknown): void;
-        mount(target: string | Element, ui: unknown): void;
+        mount(ui: unknown): () => void;
+        mount(target: string | Element, ui: unknown | ((anchor: Element) => unknown), opts?: MountOptions): () => void;
         /**
          * Call `fn(...args)` over and over, yielding each answer — for a
          * handle function that answers when something happens. A call cut

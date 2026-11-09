@@ -362,6 +362,38 @@ export function packageClosure(pkgs: PackageModules, urls: Iterable<string>): Se
     return out;
 }
 
+/** package modules shared loaders ran in this realm, by cache and URL */
+const sharedModules = new Map<string, { js: string; exports: any }>();
+
+/** functions a package exports (two levels deep: `Command.Input` too) */
+const packageFns = new WeakSet<Function>();
+
+function markPackageExports(v: any, depth = 0): void {
+    if (typeof v === "function") packageFns.add(v);
+    else if (!v || typeof v !== "object") return;
+    if (depth > 1) return;
+    let keys: string[];
+    try {
+        keys = Object.keys(v);
+    } catch {
+        return;
+    }
+    for (const k of keys) {
+        let x: any;
+        try {
+            x = v[k];
+        } catch {
+            continue;
+        }
+        if (typeof x === "function" || (x && typeof x === "object")) markPackageExports(x, depth + 1);
+    }
+}
+
+/** a function a downloaded package exports: hot refresh leaves it alone (the package may compare `element.type` with it) */
+export function isPackageExport(fn: Function): boolean {
+    return packageFns.has(fn);
+}
+
 const PROCESS = { env: { NODE_ENV: "production" }, browser: true, versions: {}, argv: [], platform: "browser" };
 
 /**
@@ -373,8 +405,13 @@ const PROCESS = { env: { NODE_ENV: "production" }, browser: true, versions: {}, 
  * load throws a PackageImportError. `builtin` may answer a nested require
  * first (a package's `require("react")` → the built-in React). A `.css`
  * module calls `style(text, url)` (the overlay adds a <style>).
+ *
+ * `shared` names a cache: a module whose code didn't change since another
+ * loader with that cache ran it in this realm is reused, so a page
+ * runtime's saves keep the same package components (and their state,
+ * shared/hotRefresh.ts). Loaders whose `builtin` differ use different caches.
  */
-export function makePackageLoader(pkgs: PackageModules | undefined, builtin?: (spec: string, from: string) => { module: any } | undefined, opts?: { style?: (css: string, url: string) => void }): (url: string) => any {
+export function makePackageLoader(pkgs: PackageModules | undefined, builtin?: (spec: string, from: string) => { module: any } | undefined, opts?: { style?: (css: string, url: string) => void; shared?: string }): (url: string) => any {
     const style = opts?.style ?? (() => {});
     const cache = new Map<string, { exports: any }>();
     const run = (url: string): any => {
@@ -382,6 +419,11 @@ export function makePackageLoader(pkgs: PackageModules | undefined, builtin?: (s
         if (hit) return hit.exports;
         const mod = pkgs?.modules[url];
         if (!mod) throw new Error(`cannot import "${url}": it wasn't downloaded`);
+        const kept = opts?.shared ? sharedModules.get(opts.shared + " " + url) : undefined;
+        if (kept && kept.js === mod.js) {
+            cache.set(url, kept);
+            return kept.exports;
+        }
         const module = { exports: {} as any };
         cache.set(url, module);
         const require = (spec: string): any => {
@@ -400,6 +442,8 @@ export function makePackageLoader(pkgs: PackageModules | undefined, builtin?: (s
             cache.delete(url);
             throw e;
         }
+        markPackageExports(module.exports);
+        if (opts?.shared) sharedModules.set(opts.shared + " " + url, { js: mod.js, exports: module.exports });
         return module.exports;
     };
     return (spec) => {

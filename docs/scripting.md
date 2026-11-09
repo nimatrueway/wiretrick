@@ -1108,7 +1108,7 @@ starting timers — isn't undone, and the new run does it again: an
 | `once(key, fn)` | ✓ | ✓ | ✓ | `fn()`'s value, made once per page and kept across saves while a run asks for it |
 | `patch(obj, prop, wrap)` | ✓ | ✓ | ✓ | replace the function `obj[prop]` with `wrap(original)`; a save swaps the wrapper |
 | `style(css)` | ✓ | ✓ | ✓ | add CSS to the page (and to each `ctx.mount`) |
-| `mount(ui)`, `mount(target, ui)` | — | ✓ | ✓ | render React UI (JSX); a save re-renders it, state kept |
+| `mount(ui)`, `mount(target, ui, opts?)` | — | ✓ | ✓ | render React UI (JSX) on every match; a save re-renders it, state kept |
 | `each(fn, ...args)` | — | ✓ | ✓ | [loop over a handle function's answers](#waiting-for-events--ctxeach) |
 | `onNavigate(fn)` | — | — | ✓ | [in-place navigations](#overlays--wtonoverlay) |
 | `shortcut(keys, fn, opts)` | — | — | ✓ | [keyboard shortcuts](#keyboard-shortcuts) |
@@ -1149,25 +1149,80 @@ wt.onPage("*://app.example.com/*", (ctx) => {
 - **`ctx.style(css)`** adds one `<style>` to the document's `<head>` per
   distinct CSS, copied into each `ctx.mount`'s shadow root; removed once no
   run adds it.
-- **`ctx.mount(ui)` / `ctx.mount(target, ui)`** renders JSX (a `.tsx`
-  script; without React it throws `ctx.mount needs React`) with the
+- **`ctx.mount(ui)` / `ctx.mount(target, ui, opts?)`** renders JSX (a
+  `.tsx` script; without React it throws `ctx.mount needs React`) with the
   [built-in React](#built-in-valtio-and-react). A save renders into the
-  same React root, so component state survives; once no run mounts there
-  any more, it unmounts and its element goes.
-  - In `onPage` the UI sits in a `<wiretrick-mount>` element with a closed
-    shadow root: the page's CSS doesn't reach it (`ctx.style` does).
-    Without a target it floats over the page (`position: fixed` at the top
-    left); with one (a selector or an element) it's appended inside it, and
-    put back if the page removed it when `ctx.mount` runs again. A selector
-    that matches nothing yet is waited for (the latest UI mounts when it
-    appears; the run ending stops the wait), so `ctx.mount` works from
+  same React roots, so component state survives (see
+  [Component state across saves](#component-state-across-saves)); once no
+  run mounts there any more, it unmounts and its element goes. It returns
+  a function that removes the mount early.
+  - **Target.** Without one the UI floats over the page (`position: fixed`
+    at the top left). A selector puts it on **every** match, now and
+    later: a match that appears gets its own root, and one that goes away
+    unmounts it. An element target, or `{ first: true }`, means one root
+    that moves to the next match when the page replaces the first. Matches
+    inside your own UI don't count. A selector that matches nothing yet is
+    waited for (the run ending stops the wait), so `ctx.mount` works from
     `document_start` too.
+  - **`ui`** is JSX, or a function of the anchor element that returns JSX.
+    The function may use hooks and is re-run with the latest code on each
+    save; changing which hooks it calls remounts it.
+  - **`position`**: `"inside-last"` (default) or `"inside-first"` puts it in
+    the match as its last or first child, `"before"` / `"after"` next to it,
+    and `"overlay"` covers it (`position: absolute; inset: 0`). Clicks pass
+    through an overlay to the page except on your UI, and a `static` match
+    becomes `position: relative` while the overlay is there.
+  - **`autoRestore: true`** puts the UI back when the page removes it (a
+    framework re-rendering the match's children). If the page keeps
+    removing it, more than 20 times a second, it stops and Problems says so
+    (until the next save). Without it the UI goes back only when
+    `ctx.mount` runs again.
+  - In `onPage` the UI sits in a `<wiretrick-mount>` element with a closed
+    shadow root: the page's CSS doesn't reach it (`ctx.style` does). It's
+    `display: contents`, so a label next to text stays on its line.
   - In `onOverlay` it's a plain `<div>` in the overlay's `<body>` (or the
     target).
-  - A handler has one mount per target: calling `ctx.mount` again with
-    the same target (or again without one) re-renders that mount, also
-    later in the same run (from a listener or a shortcut). Mount into two
-    places with two targets.
+  - A handler has one mount per (target, position, `key`): calling
+    `ctx.mount` again with the same ones (or again without a target)
+    re-renders that mount, also later in the same run (from a listener or
+    a shortcut). Use `key` for two mounts at the same place.
+
+  ```tsx
+  wt.onPage("*://app.example.com/*", (ctx) => {
+      // a label after every version tag, also ones the app adds later
+      ctx.mount('[data-testid="version"]', <Label />, { position: "after" });
+      // a badge over the avatar, put back when the app re-renders the header
+      ctx.mount("#avatar", (el) => <Badge user={el.title} />, { position: "overlay", autoRestore: true });
+  });
+  ```
+
+### Component state across saves
+
+A save keeps the state of your components, nested ones too: a counter
+stays at its count, an open panel stays open, and the new code renders it.
+React Refresh needs a development build of React, so Wiretrick does its
+own, smaller version of it on the built-in (production) React:
+
+- Each **named function component** in your script (`function Panel()`,
+  `const Panel = () => …`) is kept across saves by its file and name. React
+  sees the same component, so its state stays, and it renders the new code.
+- **Changing the hooks it calls** (adding a `useState`, reordering) remounts
+  that component: its state starts over, the rest of the page keeps its own.
+  If a render after a save throws (a custom hook's hooks changed), it
+  remounts once.
+- **Effects, `useMemo` and `useCallback`** in a file you changed run again
+  after the save, so a new interval or listener takes effect. Their cleanups
+  run first.
+- **Contexts** made at top level (`createContext`) stay the same object, so
+  providers don't remount what's under them.
+
+These remount on a save (their state starts over):
+
+- Anonymous components (`export default () => …`) and class components.
+- Components from a downloaded package. They keep their state when the
+  package didn't change, since the same functions are reused.
+- A name bound to two functions in one compile: a component defined inside
+  another one, or two imports with the same name.
 
 **What a save does, in order:**
 

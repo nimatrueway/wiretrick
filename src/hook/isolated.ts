@@ -22,9 +22,10 @@ import { formatScriptError } from "../shared/scriptError";
 import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
 import { scriptFunction } from "../shared/scriptFn";
 import { makeLibRequire } from "../shared/scriptImports";
-import { builtinModule, builtinsReady, ensureBuiltins, setBuiltinLoader, shippedSources, sourceLoader } from "../shared/builtins";
+import { builtinsReady, scriptBuiltin, ensureBuiltins, setBuiltinLoader, shippedSources, sourceLoader } from "../shared/builtins";
 import { makePageShim, domHandlersFor, scheduleDocument, fireRun, pageCtxBase, type PageDocumentHandler } from "../shared/pageShim";
-import { ScriptLife, type Generation, type ReactDomClient } from "../shared/runLifecycle";
+import { reactOf, ScriptLife, type Generation, type ReactDomClient } from "../shared/runLifecycle";
+import { hotRegistry } from "../shared/hotRefresh";
 import { portEndpoint, type Endpoint, type IsoInit } from "../shared/wire";
 import { Exposer, RpcClient, isRpcCall, TOP_FRAME_ONLY, type RpcResult } from "../shared/rpc";
 import { inertRemote } from "../shared/remote";
@@ -225,13 +226,13 @@ import { SITE_DOWN_KINDS } from "../shared/siteStoreHost";
             const requireFrom = makeLibRequire(
                 init.libs,
                 (lib, require, moduleObj) => scriptFunction(lib.src!, lib.name)(shimFor(lib.name, lib.params || {}, false).wt, consoleProxy, require, moduleObj, moduleObj.exports),
-                { builtin: (spec, importer, loadUrl) => builtinModule(spec, codeOf(importer), loadUrl) }
+                { builtin: scriptBuiltin(codeOf, hotRegistry(init.name).begin()) }
             );
             const moduleObj = { exports: {} as any };
             const shim = shimFor(init.name, init.params || {}, true);
             scriptFunction(init.src, init.name)(shim.wt, consoleProxy, requireFrom(init.name), moduleObj, moduleObj.exports);
             dom = shim.dom;
-            reactDom = () => requireFrom(init.name)("react-dom/client");
+            reactDom = () => reactOf(requireFrom(init.name));
         } catch (e: any) {
             // the previous code keeps running
             exposer.revert();

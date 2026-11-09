@@ -29,9 +29,10 @@ import { formatScriptError } from "../shared/scriptError";
 import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptContext, type ScriptLogLevel } from "../shared/scriptLog";
 import { scriptFunction } from "../shared/scriptFn";
 import { makeLibRequire, type ShippedLib } from "../shared/scriptImports";
-import { builtinModule, builtinsReady, ensureBuiltins, setBuiltinLoader, shippedSources, sourceLoader } from "../shared/builtins";
+import { builtinsReady, scriptBuiltin, ensureBuiltins, setBuiltinLoader, shippedSources, sourceLoader } from "../shared/builtins";
 import { makePageShim, domHandlersFor, scheduleDocument, fireRun, pageCtxBase, type PageDocumentHandler } from "../shared/pageShim";
-import { ScriptLife, type Generation, type ReactDomClient } from "../shared/runLifecycle";
+import { reactOf, ScriptLife, type Generation, type ReactDomClient } from "../shared/runLifecycle";
+import { hotRegistry } from "../shared/hotRefresh";
 import { packBytes, unpackBytes } from "../shared/bytesPack";
 import { Endpoint, endpointPair, messagePortEndpoint, portEndpoint, ISO_STORE_TAG, type ReqOf, type ReqOps, type ResOf } from "../shared/wire";
 import { ReplicaHub, type StoreSnapshots } from "../shared/storeReplica";
@@ -504,13 +505,13 @@ import type { RanApi } from "../shared/netTypes";
                     libSources,
                     (lib, require, moduleObj) => scriptFunction(lib.src!, lib.name)(shimFor(null, lib.name, lib.params || {}, undefined, h.scriptId).wt, consoleProxy, require, moduleObj, moduleObj.exports),
                     // the built-ins: isolated code all of them, the onSite fallback valtio's core
-                    world === "isolated" ? { builtin: (spec, importer, loadUrl) => builtinModule(spec, codeOf(importer), loadUrl) } : { builtin: siteBuiltin, onSite: true }
+                    world === "isolated" ? { builtin: scriptBuiltin(codeOf, hotRegistry(h.scriptId).begin()) } : { builtin: siteBuiltin, onSite: true }
                 );
                 const moduleObj = { exports: {} as any };
                 const shim = shimFor(h.scriptId, h.name, h.params || {}, exposer, h.scriptId, gen);
                 scriptFunction(h.src, h.name)(shim.wt, consoleProxy, requireFrom(h.name), moduleObj, moduleObj.exports);
                 dom = shim.dom;
-                if (world === "isolated") reactDoms.set(h.scriptId, () => requireFrom(h.name)("react-dom/client"));
+                if (world === "isolated") reactDoms.set(h.scriptId, () => reactOf(requireFrom(h.name)));
             } catch (e: any) {
                 // the previous code keeps running
                 exposer.revert();

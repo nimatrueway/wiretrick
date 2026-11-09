@@ -260,6 +260,49 @@ check("popup: activeScripts lists the scripts behind the badge", badge.ids.lengt
     await send({ type: "deleteScript", id: "s_badgebad" });
     await send({ type: "deleteScript", id: "s_badgepage" });
     await send({ type: "clearScriptError", scriptId: "s_badgebad" });
+    // hot refresh: a save keeps a nested component's state (its [] effect re-runs: 1 → 2);
+    // changing its hooks remounts it (back to 1)
+    const hotCode = (v: string, extraHook: boolean) => `import { useState, useEffect } from "react";
+function Count({ v }: { v: string }) {
+    const [n, setN] = useState(0);
+    ${extraHook ? "useState(1);" : ""}
+    useEffect(() => { setN((x) => x + 1); }, []);
+    useEffect(() => { document.documentElement.dataset.hot = n + ":" + v; });
+    return <b>{n}</b>;
+}
+function Panel() { return <div><Count v="${v}" /></div>; }
+wt.onPage("${ORIGIN}/page-fetch*", (ctx) => { ctx.mount(<Panel />); });`;
+    const hotAt = async (want: string): Promise<string | undefined> => {
+        await p3.waitForFunction((w: string) => (document.documentElement.dataset.hot || "").endsWith(":" + w), want, { timeout: 8000 }).catch(() => {});
+        await new Promise((r) => setTimeout(r, 300));
+        return p3.evaluate(() => document.documentElement.dataset.hot);
+    };
+    await saveScript("s_hot", hotCode("V1", false), "hot mount.wiretrick");
+    const h1 = await hotAt("V1");
+    await saveScript("s_hot", hotCode("V2", false), "hot mount.wiretrick");
+    const h2 = await hotAt("V2");
+    await saveScript("s_hot", hotCode("V3", true), "hot mount.wiretrick");
+    const h3 = await hotAt("V3");
+    check("ctx.mount hot refresh: a save keeps a nested component's state and re-runs its effects; a hook change remounts it", h1 === "1:V1" && h2 === "2:V2" && h3 === "1:V3", JSON.stringify([h1, h2, h3]));
+    await send({ type: "deleteScript", id: "s_hot" });
+    // a selector mounts on every match, also ones the page adds later; overlay makes a static match relative
+    await p3.evaluate(() => {
+        for (const m of document.querySelectorAll(".wtm")) m.remove();
+        const el = document.createElement("i");
+        el.className = "wtm";
+        document.body.appendChild(el);
+    });
+    await saveScript("s_every", `wt.onPage("${ORIGIN}/page-fetch*", (ctx) => { ctx.mount(".wtm", (el) => <b>{el.className}</b>, { position: "overlay" }); });`, "every mount.wiretrick");
+    await p3.waitForFunction(() => !!document.querySelector(".wtm > wiretrick-mount"), null, { timeout: 8000 }).catch(() => {});
+    await p3.evaluate(() => document.body.appendChild(Object.assign(document.createElement("i"), { className: "wtm" })));
+    await p3.waitForFunction(() => document.querySelectorAll(".wtm > wiretrick-mount").length === 2, null, { timeout: 5000 }).catch(() => {});
+    const every = await p3.evaluate(() => [...document.querySelectorAll(".wtm")].map((el) => el.querySelectorAll("wiretrick-mount").length + ":" + (el as HTMLElement).style.position));
+    check("ctx.mount(selector): every match gets the UI, also one added later; overlay makes it relative", JSON.stringify(every) === JSON.stringify(["1:relative", "1:relative"]), JSON.stringify(every));
+    await send({ type: "deleteScript", id: "s_every" });
+    await p3.waitForFunction(() => !document.querySelector("wiretrick-mount[data-wiretrick-mount]"), null, { timeout: 5000 }).catch(() => {});
+    const gone = await p3.evaluate(() => [...document.querySelectorAll(".wtm")].map((el) => el.querySelectorAll("wiretrick-mount").length + ":" + (el as HTMLElement).style.position));
+    check("ctx.mount: deleting the script removes every mount and restores the anchors", JSON.stringify(gone) === JSON.stringify(["0:", "0:"]), JSON.stringify(gone));
+    await p3.evaluate(() => { for (const m of document.querySelectorAll(".wtm")) m.remove(); });
     // onSite code uses the script's imports and top-level declarations in the page world
     await saveScript("s_evcaplib", `export function mark(v: string) { (window as any).__evcap = v; }`, "evcap-lib");
     await saveScript(

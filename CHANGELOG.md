@@ -11,10 +11,13 @@ its section below.
 
 - `wt.isMac`, `wt.isWindows` and `wt.isLinux`, which work everywhere `wt.isChrome` does. On Android and ChromeOS all three are `false`.
 - `shortcut` params: `wt.params({ toggle: { type: "shortcut", default: "Alt+Shift+H" } })`. In the ⚙ dialog you click the field and press the keys to set it, with buttons to remove it or reset it to the default. Its value goes straight into `ctx.shortcut(cfg.toggle, fn)`. `ctx.shortcut("")` now does nothing, so a removed shortcut needs no special case.
+- `ctx.mount(target, ui, { position, key, first, autoRestore })`. `position` places the UI `"inside-last"` (default), `"inside-first"`, `"before"`, `"after"` or as an `"overlay"` covering the match. `key` allows two mounts at one place, `autoRestore` puts the UI back when the page's framework removes it, and `ui` can be a function of the anchor element that uses hooks. `ctx.mount` returns a function that removes the mount.
+- A save keeps the state of every named function component, nested ones too, not just the mounted root. Effects in a changed file run again, and a component whose hooks changed starts over. See "Component state across saves" in the scripting docs.
 - When **Import…** brings in a new version of a package, the files you have in that package that the new version doesn't are listed as **deleted**. They're ticked, so importing deletes them. Untick any you want to keep.
 
 ### Changed
 
+- **Breaking:** `ctx.mount(selector, ui)` now mounts on every element the selector matches, now and later, not only the first one. Pass `{ first: true }` for the old behavior.
 - In the Explorer, scripts that register handlers are in bold. Libraries and `settings.yaml` are no longer gray and italic.
 
 ### Fixed

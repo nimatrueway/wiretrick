@@ -18,14 +18,15 @@ import { compileScript, type ResApiOverrides } from "../shared/compile";
 import { messagePortEndpoint, type Endpoint, type OverlayInit } from "../shared/wire";
 import { ReplicaHub } from "../shared/storeReplica";
 import { SiteMirrors } from "../shared/siteStoreMirror";
-import { builtinModule, ensureBuiltins } from "../shared/builtins";
+import { ensureBuiltins, scriptBuiltin } from "../shared/builtins";
 import { makeLibRequire } from "../shared/scriptImports";
 import type { PackageModules } from "../shared/packageImports";
 import { Exposer, RpcClient, isRpcCall } from "../shared/rpc";
 import { inertRemote } from "../shared/remote";
 import { routeMatches, type DocumentWhen } from "../shared/route";
 import { fireRun, pageCtxBase, type PageDocumentHandler } from "../shared/pageShim";
-import { ScriptLife, type Generation, type ReactDomClient } from "../shared/runLifecycle";
+import { reactOf, ScriptLife, type Generation, type ReactDomClient } from "../shared/runLifecycle";
+import { hotRegistry } from "../shared/hotRefresh";
 import { fromWireResponse, toWireRequest } from "../shared/wtFetch";
 import { formatScriptError } from "../shared/scriptError";
 import { formatLogArgs, scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
@@ -199,7 +200,7 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
                 moduleObj.exports = c.exports;
             },
             {
-                builtin: (spec, importer, loadUrl) => builtinModule(spec, codeOf(importer), loadUrl),
+                builtin: scriptBuiltin(codeOf, hotRegistry(init.name).begin()),
                 style: (css) => {
                     if (libCss.has(css)) return;
                     libCss.add(css);
@@ -229,7 +230,7 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
             life.discard(g);
             return;
         }
-        reactDom = () => requireFrom(init.name)("react-dom/client");
+        reactDom = () => reactOf(requireFrom(init.name));
         handlers = compiled.handlers.onOverlay
             .filter(({ route }) => {
                 const on = routeMatches(route, page.url);
