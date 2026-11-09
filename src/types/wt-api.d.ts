@@ -388,6 +388,8 @@ declare namespace Wiretrick {
         /**
          * Run `fn` when the user presses `keys` on the page: "Alt+Shift+M",
          * "Mod+K" (Mod = Cmd on macOS, Ctrl elsewhere), "Shift+F2", "Esc".
+         * `""` adds nothing, so a `shortcut` param the user cleared just
+         * works: `ctx.shortcut(cfg.toggle, fn)`.
          * Ignored while typing in a text field. By default the shortcut
          * beats the page (which never sees the key); `"after-page"` fires
          * only if the page didn't handle it. Keys pressed while the overlay
@@ -771,8 +773,34 @@ declare namespace Wiretrick {
          */
         parse?: (raw: string[]) => unknown;
     }
+    /**
+     * Keys for {@link OverlayCtx.shortcut} — the ⚙ dialog records them as
+     * you press them, with buttons to remove the shortcut and reset it to
+     * the default. The value is the keys ("Mod+Shift+K", Mod being Cmd on
+     * macOS and Ctrl elsewhere), or `""` once removed.
+     *
+     * @example
+     * const cfg = wt.params({ toggle: { type: "shortcut", default: "Alt+Shift+H" } });
+     * wt.onOverlay("*://example.com/*", (ctx) => {
+     *     ctx.shortcut(cfg.toggle, () => (box.hidden = !box.hidden));
+     * });
+     */
+    interface ParamDefShortcut {
+        type: "shortcut";
+        /** Default `""` (none). A default that isn't a shortcut is a script error. */
+        default?: string;
+        /** Shown next to the control and in settings.yaml. */
+        description?: string;
+        /**
+         * Turn the raw value into what the script receives — the param's
+         * type becomes this function's return type. The ⚙ dialog, Editor and
+         * settings.yaml keep editing the raw value; `parse` re-runs whenever
+         * it changes. A throw is a script error naming the param.
+         */
+        parse?: (raw: string) => unknown;
+    }
     /** One adjustable parameter, discriminated by `type`. */
-    type ParamDef = ParamDefBoolean | ParamDefNumber | ParamDefString | ParamDefEnum | ParamDefStringList;
+    type ParamDef = ParamDefBoolean | ParamDefNumber | ParamDefString | ParamDefEnum | ParamDefStringList | ParamDefShortcut;
 
     /** The raw (stored, edited) value type of a param def — what `parse` receives. */
     type ParamRawValue<D extends ParamDef> = D extends ParamDefBoolean
@@ -785,7 +813,9 @@ declare namespace Wiretrick {
               ? D["choices"][number]
               : D extends ParamDefStringList
                 ? string[]
-                : never;
+                : D extends ParamDefShortcut
+                  ? string
+                  : never;
 
     /**
      * The value type a param def resolves to: `parse`'s return type when

@@ -87,6 +87,8 @@ function paramSchema(d: ParamDef): Record<string, any> {
             return { type: "string", enum: d.choices, ...base };
         case "stringList":
             return { type: "array", items: { type: "string" }, ...base };
+        case "shortcut":
+            return { type: "string", ...base, description: `${d.description ? d.description + " — " : ""}keys, e.g. "Mod+Shift+K" (Mod = Cmd on macOS, Ctrl elsewhere); "" for none` };
     }
 }
 

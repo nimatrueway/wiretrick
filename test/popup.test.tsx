@@ -209,6 +209,43 @@ describe("Popup", () => {
         expect(container.querySelector(".param-fold")).toBeNull();
     });
 
+    it("records a shortcut param by pressing it; clears it and resets it to the default", async () => {
+        const params: ScriptParams = { defs: { toggle: { type: "shortcut", default: "Alt+Shift+H" } }, values: { toggle: "Alt+Shift+H" } };
+        const api = fakeApi([script("a", "Alpha", { paramDefs: params.defs })], { a: params });
+        const { container } = render(<Popup api={api} />);
+        fireEvent.click(await screen.findByLabelText("Toggle parameters"));
+        const rec = await waitFor(() => {
+            const el = container.querySelector<HTMLButtonElement>(".param-fold .shortcut-rec");
+            if (!el) throw new Error("fold not loaded");
+            return el;
+        });
+        const caps = () => [...rec.querySelectorAll("kbd")].map((k) => k.textContent);
+        expect(caps()).toEqual(["Alt", "Shift", "H"]);
+        expect(container.querySelector('.param-fold [aria-label="Reset to default"]')).toBeNull();
+
+        fireEvent.click(rec);
+        expect(rec.textContent).toMatch(/Press keys/);
+        fireEvent.keyDown(rec, { key: "Control", code: "ControlLeft", ctrlKey: true });
+        expect(caps()).toEqual(["Ctrl"]);
+        fireEvent.keyDown(rec, { key: "J", code: "KeyJ", ctrlKey: true, shiftKey: true });
+        expect(caps()).toEqual(["Ctrl", "Shift", "J"]);
+
+        fireEvent.click(rec);
+        fireEvent.keyDown(rec, { key: "Escape", code: "Escape" }); // cancels
+        expect(caps()).toEqual(["Ctrl", "Shift", "J"]);
+
+        fireEvent.click(container.querySelector('.param-fold [aria-label="Remove shortcut"]')!);
+        expect(rec.textContent).toMatch(/None/);
+        fireEvent.click(container.querySelector('.param-fold [aria-label="Reset to default"]')!);
+        expect(caps()).toEqual(["Alt", "Shift", "H"]);
+
+        expect(api.calls).toEqual([
+            ["setParam", "a", "toggle", "Mod+Shift+J"],
+            ["setParam", "a", "toggle", ""],
+            ["setParam", "a", "toggle", "Alt+Shift+H"],
+        ]);
+    });
+
     it("keeps edited param values when the list re-renders", async () => {
         const params: ScriptParams = { defs: { note: { type: "string" } }, values: { note: "hi" } };
         const api = fakeApi([script("a", "Alpha", { paramDefs: params.defs })], { a: params });

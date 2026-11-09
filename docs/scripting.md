@@ -355,7 +355,9 @@ Param values persist per script and apply on save — the change is hot applied
 like a code edit. Parameter types: `boolean` (switch), `number` (with
 optional `min`, `max`, `step`), `string` (text; add `multiline: true` for a
 textarea, written to `settings.yaml` as a `|` block scalar when it contains
-newlines), `enum` (dropdown of `choices`), `stringList` (add/remove list).
+newlines), `enum` (dropdown of `choices`), `stringList` (add/remove list),
+`shortcut` (keys, recorded by pressing them; see
+[Keyboard shortcuts](#keyboard-shortcuts)).
 
 Every param type accepts an optional `parse` function that turns the raw
 value into something more convenient for the script. The param's type
@@ -1301,6 +1303,26 @@ wt.onOverlay("*://app.example.com/*", (ctx) => {
 - `ctx.shortcut` returns a function that removes the shortcut. Shortcuts
   also go away when the run ends (a save sets them up again) and with the
   overlay (disable).
+
+To let the user pick the keys, make them a `shortcut` param:
+
+```ts
+const cfg = wt.params({
+    toggle: { type: "shortcut", default: "Alt+Shift+H", description: "Show or hide the box" },
+});
+wt.onOverlay("*://app.example.com/*", (ctx) => {
+    ctx.shortcut(cfg.toggle, () => (box.hidden = !box.hidden));
+});
+```
+
+In the ⚙ dialog the param shows its keys as keycaps (⌥⇧H on macOS).
+Click it and press the new keys to change them (Esc cancels). **×**
+removes the shortcut and **↺** puts the default back. A recorded `Mod`
+means ⌘ on macOS and Ctrl elsewhere, so the setting works on both. The
+value is the keys as a string, or `""` once removed, and
+`ctx.shortcut("")` adds nothing. In `settings.yaml` you can type the
+keys yourself; keys that aren't a shortcut are flagged and ignored. A
+`default` that isn't a shortcut is a script error.
 
 ### Fetching from the overlay
 

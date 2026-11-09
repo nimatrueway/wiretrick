@@ -139,7 +139,7 @@ export function commentedDefaultLines(key: string, d: ParamDef | undefined): str
         option(out, 0, "enabled", "Run this script", true, true);
         return out;
     }
-    const note = d.type === "enum" ? `${d.description ?? key} (${d.choices.join(" | ")})` : (d.description ?? key);
+    const note = paramNote(key, d);
     option(out, 0, key, note, paramDefault(d), paramDefault(d), d.type === "string" && !!d.multiline);
     return out;
 }
@@ -161,6 +161,12 @@ export function globalOptionLines(key: (typeof GLOBAL_KEYS)[number], g: GlobalSe
 }
 
 /** Canonical, deterministic text for the given state. */
+function paramNote(key: string, d: ParamDef): string {
+    if (d.type === "enum") return `${d.description ?? key} (${d.choices.join(" | ")})`;
+    if (d.type === "shortcut") return `${d.description ?? key} (keys, e.g. Mod+Shift+K)`;
+    return d.description ?? key;
+}
+
 export function renderSettings(g: GlobalSettings, scripts: ScriptSettingsState[]): string {
     const out: string[] = [
         SCHEMA_MODELINE,
@@ -191,7 +197,7 @@ export function scriptBlock(s: ScriptSettingsState, indent = 2): string[] | null
     const vals = resolveParamValues(s.defs, s.values);
     for (const k of keys) {
         const d = s.defs[k];
-        const note = d.type === "enum" ? `${d.description ?? k} (${d.choices.join(" | ")})` : (d.description ?? k);
+        const note = paramNote(k, d);
         option(out, indent + 2, k, note, vals[k], paramDefault(d), d.type === "string" && !!d.multiline);
     }
     return out;

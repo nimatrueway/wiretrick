@@ -2,6 +2,7 @@
  * Script parameters: wt.params({...}) / wt.defineParam(name, def).
  * Values are edited in the manager / popup / settings.yaml.
  */
+import { isShortcut } from "./shortcut";
 
 export interface ParamDefBoolean {
     type: "boolean";
@@ -42,7 +43,14 @@ export interface ParamDefStringList {
     description?: string;
     parse?: (raw: string[]) => unknown;
 }
-export type ParamDef = ParamDefBoolean | ParamDefNumber | ParamDefString | ParamDefEnum | ParamDefStringList;
+export interface ParamDefShortcut {
+    type: "shortcut";
+    /** keys as ctx.shortcut takes them ("Mod+Shift+K"); "" (the default) is none */
+    default?: string;
+    description?: string;
+    parse?: (raw: string) => unknown;
+}
+export type ParamDef = ParamDefBoolean | ParamDefNumber | ParamDefString | ParamDefEnum | ParamDefStringList | ParamDefShortcut;
 
 /** the stored/edited value type of a def (what `parse` receives) */
 export type ParamRawValue<D extends ParamDef> = D extends ParamDefBoolean
@@ -55,7 +63,9 @@ export type ParamRawValue<D extends ParamDef> = D extends ParamDefBoolean
           ? D["choices"][number]
           : D extends ParamDefStringList
             ? string[]
-            : never;
+            : D extends ParamDefShortcut
+              ? string
+              : never;
 
 /** what the script sees: the parser's return type when `parse` is set, else the raw value */
 export type ParamValue<D extends ParamDef> = D extends { parse: (raw: never) => infer R } ? R : ParamRawValue<D>;
@@ -77,6 +87,8 @@ export function paramDefault(def: ParamDef): any {
             return def.choices[0] ?? "";
         case "stringList":
             return [];
+        case "shortcut":
+            return "";
     }
 }
 
@@ -103,6 +115,8 @@ export function isValidParamValue(def: ParamDef, v: any): boolean {
             return typeof v === "string" && def.choices.includes(v);
         case "stringList":
             return Array.isArray(v) && v.every((x) => typeof x === "string");
+        case "shortcut":
+            return isShortcut(v);
     }
 }
 

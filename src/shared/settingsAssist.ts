@@ -34,6 +34,8 @@ function typeLabel(d: ParamDef): string {
             return d.choices.map((c) => JSON.stringify(c)).join(" | ");
         case "stringList":
             return "list of strings";
+        case "shortcut":
+            return 'keys like "Mod+Shift+K" (or "" for none)';
         case "number":
             return d.min !== undefined || d.max !== undefined ? `number (${d.min ?? "−∞"}…${d.max ?? "∞"})` : "number";
         default:

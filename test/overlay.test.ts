@@ -259,6 +259,9 @@ describe("overlay runtime", () => {
         expect((await callOverlay(h, { h: "onOverlay:0", fn: "seen", args: [] })).value).toEqual(["k", "h"]);
         expect((await callOverlay(h, { h: "onOverlay:0", fn: "bad", args: ["Hyper+K"] })).value).toMatch(/unknown modifier/);
         expect((await callOverlay(h, { h: "onOverlay:0", fn: "bad", args: ["Alt+K", "first"] })).value).toMatch(/priority/);
+        // "" (a cleared shortcut param) adds nothing
+        expect((await callOverlay(h, { h: "onOverlay:0", fn: "bad", args: [""] })).value).toBe("ok");
+        await settle();
         expect(h.keys).toHaveLength(3);
     });
 

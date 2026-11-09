@@ -1,8 +1,9 @@
-import { useEffect, useRef, type InputHTMLAttributes, type TextareaHTMLAttributes } from "react";
+import { useEffect, useRef, useState, type InputHTMLAttributes, type KeyboardEvent, type TextareaHTMLAttributes } from "react";
 import { Switch } from "./Switch";
+import { formatShortcut, isMacPlatform, shortcutFromEvent } from "../../shared/shortcut";
 
 export interface ParamDef {
-    type: "boolean" | "number" | "string" | "enum" | "stringList";
+    type: "boolean" | "number" | "string" | "enum" | "stringList" | "shortcut";
     default?: any;
     choices?: string[];
     description?: string;
@@ -47,6 +48,68 @@ function CommitInput({ value, onCommit, multiline, ...rest }: CommitProps & { mu
     return multiline ? <textarea ref={el} defaultValue={value} {...rest} /> : <input ref={el} defaultValue={value} {...rest} />;
 }
 
+const Caps = ({ keys }: { keys: string[] }) => (
+    <>
+        {keys.map((k, i) => (
+            <kbd key={i}>{k}</kbd>
+        ))}
+    </>
+);
+
+/**
+ * A shortcut param: click, then press the keys (Esc cancels, clicking away
+ * too). Held modifiers show while recording. × removes the shortcut, ↺
+ * puts the default back.
+ */
+function ShortcutInput({ value, def, onChange }: { value: string; def: ParamDef; onChange: (v: string) => void }) {
+    const mac = isMacPlatform();
+    const [rec, setRec] = useState(false);
+    const [held, setHeld] = useState<string[]>([]);
+    const dflt = typeof def.default === "string" ? def.default : "";
+    const stop = () => (setRec(false), setHeld([]));
+    const onKey = (e: KeyboardEvent<HTMLButtonElement>) => {
+        if (!rec) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const n = e.nativeEvent;
+        if (n.key === "Escape" && !n.ctrlKey && !n.altKey && !n.shiftKey && !n.metaKey) return stop();
+        const keys = shortcutFromEvent(n, mac);
+        if (!keys) {
+            const mods = mac ? [n.ctrlKey && "⌃", n.altKey && "⌥", n.shiftKey && "⇧", n.metaKey && "⌘"] : [n.ctrlKey && "Ctrl", n.altKey && "Alt", n.shiftKey && "Shift", n.metaKey && "Meta"];
+            return setHeld(mods.filter(Boolean) as string[]);
+        }
+        stop();
+        if (keys !== value) onChange(keys);
+    };
+    const shown = rec ? held : formatShortcut(value, mac);
+    return (
+        <div className="shortcut-field">
+            <button
+                type="button"
+                className={"shortcut-rec" + (rec ? " recording" : "") + (!rec && !value ? " none" : "")}
+                title={rec ? "Press the keys — Esc cancels" : "Click, then press the keys"}
+                onClick={() => (rec ? stop() : setRec(true))}
+                onKeyDown={onKey}
+                onKeyUp={(e) => rec && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && setHeld([])}
+                onBlur={stop}
+            >
+                <Caps keys={shown} />
+                {rec ? <span className="shortcut-hint">{held.length ? "…" : "Press keys…"}</span> : !value && <span className="shortcut-hint">None</span>}
+            </button>
+            {value && !rec && (
+                <button type="button" className="btn-icon shortcut-act" aria-label="Remove shortcut" title="Remove shortcut" onClick={() => onChange("")}>
+                    ×
+                </button>
+            )}
+            {value !== dflt && dflt && !rec && (
+                <button type="button" className="btn-icon shortcut-act" aria-label="Reset to default" title={`Reset to ${formatShortcut(dflt, mac).join(mac ? "" : "+")}`} onClick={() => onChange(dflt)}>
+                    ↺
+                </button>
+            )}
+        </div>
+    );
+}
+
 /** One script parameter: label, description and a type-appropriate input.
  * Controlled by `value`; text-like inputs commit on change (blur/enter),
  * switches immediately. */
@@ -83,6 +146,8 @@ export function ParamField(props: { name: string; def: ParamDef; value: any; onC
                 ))}
             </select>
         );
+    } else if (def.type === "shortcut") {
+        control = <ShortcutInput value={typeof props.value === "string" ? props.value : ""} def={def} onChange={onChange} />;
     } else if (def.type === "stringList") {
         control = (
             <CommitInput

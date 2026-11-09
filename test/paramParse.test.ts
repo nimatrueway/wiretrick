@@ -13,6 +13,7 @@ import { parseParamValue, serializableParamDef } from "../src/shared/scriptDef";
 import { formatScriptError } from "../src/shared/scriptError";
 import { renderSettings, parseSettings, planSettings } from "../src/shared/settingsYaml";
 import { buildSettingsSchema } from "../src/shared/settingsSchema";
+import { settingsDiagnostics } from "../src/shared/settingsAssist";
 
 const CODE = `
 const cfg = wt.params({
@@ -169,5 +170,36 @@ const host = wt.defineParam("host", { type: "string" });
     it("rejects a parser whose input doesn't match the param type", () => {
         const { errors } = typesOf(`wt.params({ n: { type: "number", parse: (s: string) => s } });`);
         expect(errors.join("\n")).toMatch(/not assignable/);
+    });
+});
+
+describe("shortcut params", () => {
+    const CODE = `const k = wt.defineParam("toggle", { type: "shortcut", default: "Alt+Shift+H", description: "Hide the box" });
+wt.log(JSON.stringify(k));
+wt.onRequest({ url: "*://a.com/*", strategy: "helper" }, () => {});`;
+
+    it("the script gets the keys: the default, a stored value, \"\" when cleared; invalid stored keys fall back", () => {
+        expect(logged(CODE).lines).toEqual(['"Alt+Shift+H"']);
+        expect(logged(CODE, { toggle: "Mod+K" }).lines).toEqual(['"Mod+K"']);
+        expect(logged(CODE, { toggle: "" }).lines).toEqual(['""']);
+        expect(logged(CODE, { toggle: "Hyper+K" }).lines).toEqual(['"Alt+Shift+H"']);
+        expect(logged(CODE).c.paramDefs).toEqual({ toggle: { type: "shortcut", default: "Alt+Shift+H", description: "Hide the box" } });
+    });
+
+    it("a default that isn't a shortcut is a script error", () => {
+        const { c } = logged(`wt.params({ k: { type: "shortcut", default: "Hyper+K" } });`);
+        expect(c.error).toMatch(/shortcut parameter "k": "Hyper\+K" has an unknown modifier "Hyper"/);
+    });
+
+    it("settings.yaml: documented with an example, typed as a string in the schema, bad keys flagged", () => {
+        const defs = { toggle: { type: "shortcut", default: "Alt+Shift+H", description: "Hide the box" } } as const;
+        const text = renderSettings({ logLevel: "warn", logCap: 500 }, [{ name: "s", enabled: true, declared: true, defs, values: { toggle: "Mod+K" } }]);
+        expect(text).toMatch(/Hide the box \(keys, e\.g\. Mod\+Shift\+K\)/);
+        expect(text).toMatch(/toggle: Mod\+K/);
+        const schema: any = buildSettingsSchema([{ name: "s", enabled: true, declared: true, defs, values: {} }]);
+        expect(schema.properties.params.properties.s.properties.toggle).toMatchObject({ type: "string", default: "Alt+Shift+H" });
+        const bad = 'params:\n  s:\n    toggle: "Hyper+K"\n';
+        expect(settingsDiagnostics(bad, [{ name: "s", declared: true, defs }]).map((d) => d.message)).toEqual(['Expected keys like "Mod+Shift+K" (or "" for none) — this value is ignored']);
+        expect(settingsDiagnostics('params:\n  s:\n    toggle: ""\n', [{ name: "s", declared: true, defs }])).toEqual([]);
     });
 });

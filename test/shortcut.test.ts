@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, afterEach } from "vitest";
-import { parseShortcut, matchesCombo, isEditable, ShortcutRegistry, watchShortcuts, type KeyLike } from "../src/shared/shortcut";
+import { parseShortcut, matchesCombo, isEditable, ShortcutRegistry, watchShortcuts, shortcutFromEvent, formatShortcut, isShortcut, type KeyLike } from "../src/shared/shortcut";
 
 const key = (k: string, code: string, mods: Partial<Pick<KeyLike, "ctrlKey" | "altKey" | "shiftKey" | "metaKey">> = {}): KeyLike => ({ key: k, code, ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, ...mods });
 
@@ -183,5 +183,52 @@ describe("watchShortcuts", () => {
         stops.pop()!();
         press();
         expect(fired).toEqual([]);
+    });
+});
+
+describe("shortcut params: recording, showing, checking", () => {
+    it("records a pressed combo as portable keys (Mod = the platform's main modifier) that match the same press", () => {
+        const cases: [KeyLike, boolean, string][] = [
+            [key("K", "KeyK", { ctrlKey: true, shiftKey: true }), false, "Mod+Shift+K"],
+            [key("k", "KeyK", { metaKey: true, shiftKey: true }), true, "Mod+Shift+K"],
+            [key("k", "KeyK", { ctrlKey: true }), true, "Ctrl+K"],
+            [key("k", "KeyK", { metaKey: true }), false, "Meta+K"],
+            [key("ø", "KeyO", { altKey: true }), true, "Alt+O"], // Option changes the character on macOS
+            [key("?", "Slash", { shiftKey: true }), false, "Shift+/"],
+            [key("!", "Digit1", { ctrlKey: true, shiftKey: true }), false, "Mod+Shift+1"],
+            [key("F2", "F2"), false, "F2"],
+            [key(" ", "Space", { ctrlKey: true }), false, "Mod+Space"],
+            [key("ArrowUp", "ArrowUp", { altKey: true }), false, "Alt+Up"],
+            [key("Escape", "Escape", { shiftKey: true }), false, "Shift+Esc"],
+            [key("Л", "KeyK", { ctrlKey: true }), false, "Mod+K"], // non-Latin layouts: the key's position
+        ];
+        for (const [e, mac, want] of cases) {
+            expect(shortcutFromEvent(e, mac)).toBe(want);
+            expect(matchesCombo(parseShortcut(want, mac), e)).toBe(true);
+        }
+    });
+
+    it("records nothing while only modifiers are down", () => {
+        expect(shortcutFromEvent(key("Shift", "ShiftLeft", { shiftKey: true }), false)).toBeNull();
+        expect(shortcutFromEvent(key("Meta", "MetaLeft", { metaKey: true }), true)).toBeNull();
+        expect(shortcutFromEvent(key("Unidentified", ""), false)).toBeNull();
+    });
+
+    it("shows keys as keycaps: symbols in macOS order there, names elsewhere", () => {
+        expect(formatShortcut("Mod+Shift+K", true)).toEqual(["⇧", "⌘", "K"]);
+        expect(formatShortcut("Mod+Shift+K", false)).toEqual(["Ctrl", "Shift", "K"]);
+        expect(formatShortcut("Meta+Ctrl+Alt+Shift+k", true)).toEqual(["⌃", "⌥", "⇧", "⌘", "K"]);
+        expect(formatShortcut("Alt+Up", false)).toEqual(["Alt", "↑"]);
+        expect(formatShortcut("Ctrl+Space", false)).toEqual(["Ctrl", "Space"]);
+        expect(formatShortcut("Shift+Esc", false)).toEqual(["Shift", "Esc"]);
+        expect(formatShortcut("", false)).toEqual([]);
+        expect(formatShortcut("Hyper+K", false)).toEqual(["Hyper+K"]);
+    });
+
+    it("a shortcut param's value: keys ctx.shortcut takes, or \"\" for none", () => {
+        expect(isShortcut("")).toBe(true);
+        expect(isShortcut("Mod+K")).toBe(true);
+        expect(isShortcut("Hyper+K")).toBe(false);
+        expect(isShortcut(42)).toBe(false);
     });
 });

@@ -97,6 +97,59 @@ export function parseShortcut(keys: string, mac = isMacPlatform()): Combo {
 
 export type KeyLike = Pick<KeyboardEvent, "key" | "code" | "ctrlKey" | "altKey" | "shiftKey" | "metaKey">;
 
+/** a shortcut param's value: keys `ctx.shortcut` takes, or "" for none */
+export function isShortcut(v: unknown): v is string {
+    if (v === "") return true;
+    if (typeof v !== "string") return false;
+    try {
+        parseShortcut(v, false);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+const MODIFIER_KEYS = new Set(["Control", "Alt", "AltGraph", "Shift", "Meta", "OS", "Hyper", "Super", "CapsLock", "Fn", "FnLock"]);
+const CODE_PUNCT: Record<string, string> = Object.fromEntries(Object.entries(PUNCT_CODES).map(([k, c]) => [c, k]));
+const KEY_NAMES: Record<string, string> = { " ": "Space", Escape: "Esc", ArrowUp: "Up", ArrowDown: "Down", ArrowLeft: "Left", ArrowRight: "Right", "+": "Plus" };
+
+/**
+ * The keys a press makes, as a shortcut param stores them: "Mod+Shift+K"
+ * (Mod for Cmd on macOS and Ctrl elsewhere, so it works on both). Letters,
+ * digits and punctuation by position, so Shift, Option and the layout
+ * don't change them. null while only modifiers are down.
+ */
+export function shortcutFromEvent(e: KeyLike, mac = isMacPlatform()): string | null {
+    if (!e.key || MODIFIER_KEYS.has(e.key) || e.key === "Unidentified" || e.key === "Dead") return null;
+    const code = e.code || "";
+    let k = /^Key[A-Z]$/.test(code) ? code.slice(3) : /^Digit[0-9]$/.test(code) ? code.slice(5) : CODE_PUNCT[code] ?? (code === "Space" ? "Space" : KEY_NAMES[e.key] ?? (e.key.length === 1 ? e.key.toUpperCase() : e.key));
+    if (k === "+") k = "Plus";
+    const mods = [(mac ? e.metaKey : e.ctrlKey) && "Mod", mac && e.ctrlKey && "Ctrl", e.altKey && "Alt", e.shiftKey && "Shift", !mac && e.metaKey && "Meta"].filter(Boolean);
+    const keys = [...mods, k].join("+");
+    try {
+        parseShortcut(keys, mac);
+        return keys;
+    } catch {
+        return null;
+    }
+}
+
+const KEY_CAPS: Record<string, string> = { " ": "Space", Escape: "Esc", ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→", Enter: "Enter", Tab: "Tab", Backspace: "Backspace", Delete: "Delete" };
+
+/** keycap labels for keys: ⌃ ⌥ ⇧ ⌘ K on macOS, Ctrl Alt Shift Meta K elsewhere; [] for "", [keys] when they aren't a shortcut */
+export function formatShortcut(keys: string, mac = isMacPlatform()): string[] {
+    if (!keys) return [];
+    let c: Combo;
+    try {
+        c = parseShortcut(keys, mac);
+    } catch {
+        return [keys];
+    }
+    const key = KEY_CAPS[c.key] ?? (c.key.length === 1 ? c.key.toUpperCase() : c.key);
+    const mods = mac ? [c.ctrl && "⌃", c.alt && "⌥", c.shift && "⇧", c.meta && "⌘"] : [c.ctrl && "Ctrl", c.alt && "Alt", c.shift && "Shift", c.meta && "Meta"];
+    return [...(mods.filter(Boolean) as string[]), key];
+}
+
 /**
  * Exact modifiers, and the key by `key`. Where `key` isn't a plain letter
  * or digit (Option on macOS, Shift on digits, non-Latin layouts) it falls

@@ -170,6 +170,41 @@ body.resizing * { pointer-events: none; }
     margin-bottom: 2px;
 }
 .param-desc { color: var(--fg-dim); font-size: 11px; margin-bottom: 5px; line-height: 1.35; }
+.shortcut-field { display: flex; align-items: center; gap: 4px; }
+.shortcut-rec {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    min-height: 24px;
+    box-sizing: border-box;
+    padding: 2px 6px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--fg);
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+}
+.shortcut-rec:hover { border-color: var(--fg-dim); }
+.shortcut-rec:focus-visible, .shortcut-rec.recording { border-color: var(--accent); outline: none; }
+.shortcut-rec.recording { box-shadow: 0 0 0 1px var(--accent) inset; }
+.shortcut-rec kbd {
+    display: inline-block;
+    min-width: 12px;
+    padding: 0 5px;
+    font: 11px/17px ui-monospace, SFMono-Regular, monospace;
+    text-align: center;
+    color: var(--fg);
+    background: var(--bg-sunk);
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 3px;
+}
+.shortcut-hint { color: var(--fg-dim); font-style: normal; }
+.shortcut-act { flex-shrink: 0; width: 24px; height: 24px; justify-content: center; font-size: 13px; line-height: 1; padding: 0; }
 .param-row input[type="text"], .param-row input[type="number"] {
     width: 100%;
     box-sizing: border-box;

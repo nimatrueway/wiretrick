@@ -131,6 +131,8 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
         if (typeof fn !== "function") throw new TypeError("ctx.shortcut: the second argument must be a function");
         const priority = opts?.priority ?? "before-page";
         if (priority !== "before-page" && priority !== "after-page") throw new TypeError(`ctx.shortcut: priority must be "before-page" or "after-page"`);
+        // a shortcut param the user cleared
+        if (combo === "") return () => {};
         const id = String(++keyIds);
         keys.add(s, id, combo, priority);
         keyFns.set(id, fn);

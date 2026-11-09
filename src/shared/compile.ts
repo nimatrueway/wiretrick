@@ -7,6 +7,7 @@
 import { defaultMeta, finishMeta, type ResMeta } from "./metaParser";
 import { readMetadata } from "./packageMetadata";
 import { parseParamValue, resolveParamValues, serializableParamDef, type ParamDef } from "./scriptDef";
+import { parseShortcut } from "./shortcut";
 import { formatLogArgs, makeScriptConsole, type ScriptLogLevel } from "./scriptLog";
 import { scriptFunction } from "./scriptFn";
 import { callerLine } from "./scriptError";
@@ -524,7 +525,7 @@ function routesOf(h: ScriptHandlers): RouteMeta[] {
     return [...h.onRequest, ...h.onResponseHeaders, ...h.replaceResponse, ...h.onResponseBody, ...h.onDocument, ...h.onOverlay].map((x) => x.route);
 }
 
-const PARAM_TYPES = ["boolean", "number", "string", "enum", "stringList"];
+const PARAM_TYPES = ["boolean", "number", "string", "enum", "stringList", "shortcut"];
 
 /** per-script state behind wt.metadata / wt.params / wt.defineParam */
 function createOwner(meta: ResMeta, storedValues?: Record<string, any>) {
@@ -558,6 +559,13 @@ function createOwner(meta: ResMeta, storedValues?: Record<string, any>) {
                     throw new Error(`${where}: parameter "${k}" needs a type (${PARAM_TYPES.join(", ")})`);
                 }
                 if ((d as any).type === "enum" && !Array.isArray((d as any).choices)) throw new Error(`${where}: enum parameter "${k}" needs choices`);
+                if ((d as any).type === "shortcut" && (d as any).default !== undefined && (d as any).default !== "") {
+                    try {
+                        parseShortcut((d as any).default);
+                    } catch (e: any) {
+                        throw new Error(`${where}: shortcut parameter "${k}": ${String(e?.message ?? e).replace(/^ctx\.shortcut: /, "")}`);
+                    }
+                }
                 known[k] = d;
             }
             if (Object.keys(known).length) defs = { ...(defs || {}), ...Object.fromEntries(Object.entries(known).map(([k, d]) => [k, serializableParamDef(d)])) };

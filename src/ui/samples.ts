@@ -240,10 +240,13 @@ wt.onOverlay("https://dummyjson.com/*", (ctx) => {
     },
     {
         name: "Overlay outline (calls + shortcut)",
-        blurb: "An overlay that asks the page for its headings and scrolls it on click — wt.onPage returns functions, the overlay awaits them — with a keyboard shortcut to hide it. Try it: open any Wikipedia article and press Alt+Shift+O.",
+        blurb: "An overlay that asks the page for its headings and scrolls it on click — wt.onPage returns functions, the overlay awaits them — with a keyboard shortcut (a param you can re-record in ⚙) to hide it. Try it: open any Wikipedia article and press Alt+Shift+O.",
         code: `// Try it: open https://en.wikipedia.org/wiki/Cat — press Alt+Shift+O to hide
-// or show the outline
+// or show the outline (change the keys in the popup's ⚙)
 wt.metadata({ description: "Floating outline for Wikipedia articles" });
+const cfg = wt.params({
+    toggle: { type: "shortcut", default: "Alt+Shift+O", description: "Hide or show the outline" },
+});
 
 // runs in the page (isolated world); returns the functions the overlay calls
 const page = wt.onPage("*://en.wikipedia.org/wiki/*", () => {
@@ -271,7 +274,7 @@ wt.onOverlay("*://en.wikipedia.org/wiki/*", async (ctx) => {
             </nav>
         );
     render();
-    ctx.shortcut("Alt+Shift+O", () => {
+    ctx.shortcut(cfg.toggle, () => {
         hidden = !hidden;
         render();
     });

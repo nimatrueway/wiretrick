@@ -10,6 +10,7 @@ its section below.
 ### Added
 
 - `wt.isMac`, `wt.isWindows` and `wt.isLinux`, which work everywhere `wt.isChrome` does. On Android and ChromeOS all three are `false`.
+- `shortcut` params: `wt.params({ toggle: { type: "shortcut", default: "Alt+Shift+H" } })`. In the ⚙ dialog you click the field and press the keys to set it, with buttons to remove it or reset it to the default. Its value goes straight into `ctx.shortcut(cfg.toggle, fn)`. `ctx.shortcut("")` now does nothing, so a removed shortcut needs no special case.
 - When **Import…** brings in a new version of a package, the files you have in that package that the new version doesn't are listed as **deleted**. They're ticked, so importing deletes them. Untick any you want to keep.
 
 ### Changed
