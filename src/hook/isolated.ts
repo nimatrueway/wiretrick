@@ -270,7 +270,7 @@ import { FrameShortcuts } from "../shared/shortcut";
                             life,
                             gen,
                             d,
-                            (signal) => ({ ...base, shortcut: (combo: string, fn: () => void, opts?: any) => keys.add(s, combo, fn, opts, signal) }),
+                            (signal) => ({ ...base, shortcut: (combo: string, fn: () => unknown, opts?: any) => keys.add(s, combo, fn, opts, signal) }),
                             exposer,
                             (e) => log("error", formatScriptError(init.name, e, "onPage"))
                         );

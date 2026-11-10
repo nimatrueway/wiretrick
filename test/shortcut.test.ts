@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, afterEach } from "vitest";
-import { parseShortcut, matchesCombo, isEditable, ShortcutRegistry, watchShortcuts, shortcutFromEvent, formatShortcut, isShortcut, FrameShortcuts, type KeyLike } from "../src/shared/shortcut";
+import { parseShortcut, matchesCombo, ShortcutRegistry, watchShortcuts, shortcutFromEvent, formatShortcut, isShortcut, FrameShortcuts, type KeyLike } from "../src/shared/shortcut";
 
 const key = (k: string, code: string, mods: Partial<Pick<KeyLike, "ctrlKey" | "altKey" | "shiftKey" | "metaKey">> = {}): KeyLike => ({ key: k, code, ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, ...mods });
 
@@ -59,25 +59,6 @@ describe("matchesCombo", () => {
     });
 });
 
-describe("isEditable", () => {
-    it("text fields and contenteditable are; buttons, checkboxes and plain elements aren't", () => {
-        const el = (html: string) => {
-            document.body.innerHTML = html;
-            return document.body.firstElementChild;
-        };
-        expect(isEditable(el("<input>"))).toBe(true);
-        expect(isEditable(el('<input type="search">'))).toBe(true);
-        expect(isEditable(el("<textarea></textarea>"))).toBe(true);
-        expect(isEditable(el("<select></select>"))).toBe(true);
-        expect(isEditable(el('<div contenteditable="true"></div>'))).toBe(true);
-        expect(isEditable(el('<input type="checkbox">'))).toBe(false);
-        expect(isEditable(el("<button></button>"))).toBe(false);
-        expect(isEditable(el("<div></div>"))).toBe(false);
-        expect(isEditable(null)).toBe(false);
-        expect(isEditable(window)).toBe(false);
-    });
-});
-
 describe("ShortcutRegistry", () => {
     it("the first script to take some keys keeps them; the next takes over when it goes", () => {
         const r = new ShortcutRegistry(false);
@@ -117,11 +98,11 @@ describe("watchShortcuts", () => {
         document.body.innerHTML = "";
     });
 
-    function setup(priority: "before-page" | "after-page", trusted = true) {
+    function setup(priority: "before-page" | "after-page", trusted = true, consumed = true) {
         const r = new ShortcutRegistry(false);
         r.add("a", "1", "Alt+K", priority);
         const fired: string[] = [];
-        stops.push(watchShortcuts(window, (e) => r.find(e), (hits) => fired.push(...hits.map((h) => h.id)), { trusted: () => trusted }));
+        stops.push(watchShortcuts(window, (e) => r.find(e), (hits) => (fired.push(...hits.map((h) => h.id)), consumed), { trusted: () => trusted }));
         const page: string[] = [];
         return { fired, page };
     }
@@ -165,17 +146,34 @@ describe("watchShortcuts", () => {
         expect(e.defaultPrevented).toBe(true);
     });
 
-    it("ignores keys typed in text fields, and synthetic events", () => {
+    it("fires in text fields too (hot keys work at all times); ignores synthetic events", () => {
         const { fired } = setup("before-page");
         document.body.innerHTML = "<input id=i><div id=d contenteditable=true></div>";
         const e = press(document.getElementById("i")!);
-        expect(e.defaultPrevented).toBe(false);
+        expect(e.defaultPrevented).toBe(true);
         press(document.getElementById("d")!);
-        expect(fired).toEqual([]);
+        expect(fired).toEqual(["1", "1"]);
+        document.body.innerHTML = "";
         stops.pop()!();
         const untrusted = setup("before-page", false);
         press();
         expect(untrusted.fired).toEqual([]);
+    });
+
+    it("a fire that didn't consume the key leaves it to the page", () => {
+        const { fired } = setup("before-page", true, false);
+        const page: string[] = [];
+        const onPage = () => page.push("page");
+        document.addEventListener("keydown", onPage);
+        const e = press();
+        document.removeEventListener("keydown", onPage);
+        expect(fired).toEqual(["1"]);
+        expect(page).toEqual(["page"]);
+        expect(e.defaultPrevented).toBe(false);
+        stops.pop()!();
+        const after = setup("after-page", true, false);
+        expect(press().defaultPrevented).toBe(false);
+        expect(after.fired).toEqual(["1"]);
     });
 
     it("stops listening", () => {
@@ -227,6 +225,23 @@ describe("FrameShortcuts (onPage's ctx.shortcut)", () => {
         ac.abort();
         expect(press().defaultPrevented).toBe(false);
         expect(n).toBe(2);
+    });
+
+    it('a function returning "pass" leaves the key to the page; anything else consumes it', () => {
+        const { h } = setup();
+        const sig = new AbortController().signal;
+        let pass = true;
+        const page: string[] = [];
+        const onPage = () => page.push("page");
+        h.add("a", "Alt+K", () => (pass ? "pass" : false), undefined, sig);
+        document.addEventListener("keydown", onPage);
+        const e = press();
+        expect(page).toEqual(["page"]);
+        expect(e.defaultPrevented).toBe(false);
+        pass = false;
+        expect(press().defaultPrevented).toBe(true);
+        document.removeEventListener("keydown", onPage);
+        expect(page).toEqual(["page"]);
     });
 
     it('"" adds nothing; bad arguments throw', () => {

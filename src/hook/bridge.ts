@@ -546,7 +546,7 @@ import type { RanApi } from "../shared/netTypes";
                             life,
                             gen,
                             d,
-                            keys ? (signal) => ({ ...base, shortcut: (combo: string, fn: () => void, opts?: any) => keys.add(h.scriptId, combo, fn, opts, signal) }) : base,
+                            keys ? (signal) => ({ ...base, shortcut: (combo: string, fn: () => unknown, opts?: any) => keys.add(h.scriptId, combo, fn, opts, signal) }) : base,
                             exposer,
                             (e) => scriptLog(h.scriptId, "error", formatScriptError(h.name, e, api), ctx)
                         );

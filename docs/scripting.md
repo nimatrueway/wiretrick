@@ -1360,8 +1360,9 @@ wt.onOverlay("*://app.example.com/*", (ctx) => {
     const box = ctx.once("box", () => document.body.appendChild(document.createElement("div")));
     box.textContent = "Hello";
     box.hidden = true;
-    ctx.shortcut("Alt+Shift+H", () => (box.hidden = !box.hidden));   // beats the page's own shortcuts
-    // ctx.shortcut("Mod+K", fn, { priority: "after-page" })          // only if the page didn't handle it
+    ctx.shortcut("Alt+Shift+H", () => { box.hidden = !box.hidden; });   // beats the page's own shortcuts
+    // ctx.shortcut("Mod+K", fn, { priority: "after-page" })            // only if the page didn't handle it
+    ctx.shortcut("Esc", () => (box.hidden ? "pass" : void (box.hidden = true)));   // the page gets Esc while the box is hidden
 });
 ```
 
@@ -1374,12 +1375,19 @@ wt.onOverlay("*://app.example.com/*", (ctx) => {
 - **Before or after the page.** By default the shortcut wins: the page
   never sees the key. With `{ priority: "after-page" }` it runs only if
   the page didn't handle the key (didn't call `preventDefault` or stop it).
+- **Passing the key on.** Return `"pass"` from `fn` and the page gets the
+  key as if no shortcut matched: decide each time whether it's yours.
+  Anything else (`undefined`, `false`, a promise, a throw) consumes it.
+  In an overlay this works for keys pressed while the overlay has focus.
+  A key pressed in the page reaches the overlay's code only after the
+  page's turn, so it's always consumed there; use `wt.onPage` when that
+  matters.
 - **Where.** An overlay's: on the page (its top frame) and while the
   overlay has focus. An `onPage` handler's: in the frame it runs in, so
   it keeps working when another extension's debugger (such as
-  Playwriter) removes overlays. Keys typed into a text field, `<select>`
-  or editable area are left alone, and events the page makes up itself
-  don't count.
+  Playwriter) removes overlays. Shortcuts are hot keys: they work at all
+  times, also while typing in a text field or editable area. Only events
+  the page makes up itself don't count.
 - **Several scripts.** If two overlays use the same keys, the one higher
   in the script list gets them; the other's Log says so. The same goes
   for two `onPage` scripts in MV2 builds. In MV3 each `onPage` script
@@ -1397,7 +1405,7 @@ const cfg = wt.params({
     toggle: { type: "shortcut", default: "Alt+Shift+H", description: "Show or hide the box" },
 });
 wt.onOverlay("*://app.example.com/*", (ctx) => {
-    ctx.shortcut(cfg.toggle, () => (box.hidden = !box.hidden));
+    ctx.shortcut(cfg.toggle, () => { box.hidden = !box.hidden; });
 });
 ```
 

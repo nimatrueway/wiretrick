@@ -409,23 +409,29 @@ declare namespace Wiretrick {
          * "Mod+K" (Mod = Cmd on macOS, Ctrl elsewhere), "Shift+F2", "Esc".
          * `""` adds nothing, so a `shortcut` param the user cleared just
          * works: `ctx.shortcut(cfg.toggle, fn)`.
-         * Ignored while typing in a text field. By default the shortcut
+         * Works at all times, text fields included. By default the shortcut
          * beats the page (which never sees the key); `"after-page"` fires
-         * only if the page didn't handle it. If another script has the same
+         * only if the page didn't handle it. Return `"pass"` from `fn` to
+         * hand the key on to the page as if no shortcut matched (anything
+         * else, `undefined` included, consumes it). If another script has the same
          * keys, the one higher in the script list wins (a Log warning).
          * Returns a function that removes it (it's also removed when the
          * run ends).
          *
          * onPage: keys pressed in the frame the handler runs in. Overlay:
-         * keys pressed in the page or in the overlay.
+         * keys pressed in the page or in the overlay. `"pass"` works for
+         * keys pressed in the overlay only: a page key reaches the overlay
+         * after the page's turn, so it stays consumed.
          *
          * @example
          * wt.onPage("*://example.com/*", (ctx) => {
-         *     ctx.shortcut("Alt+Shift+H", () => (box.hidden = !box.hidden));
+         *     ctx.shortcut("Alt+Shift+H", () => { box.hidden = !box.hidden; });
          *     ctx.shortcut("Mod+K", openSearch, { priority: "after-page" });
+         *     // Esc closes the box when it's open; otherwise the page gets Esc
+         *     ctx.shortcut("Esc", () => (box.hidden ? "pass" : void (box.hidden = true)));
          * });
          */
-        shortcut(keys: string, fn: () => void, opts?: { priority?: "before-page" | "after-page" }): () => void;
+        shortcut(keys: string, fn: () => unknown, opts?: { priority?: "before-page" | "after-page" }): () => void;
     }
 
     /** The context an `onOverlay` handler gets (`url` is the page's URL). */
@@ -822,7 +828,7 @@ declare namespace Wiretrick {
      * @example
      * const cfg = wt.params({ toggle: { type: "shortcut", default: "Alt+Shift+H" } });
      * wt.onOverlay("*://example.com/*", (ctx) => {
-     *     ctx.shortcut(cfg.toggle, () => (box.hidden = !box.hidden));
+     *     ctx.shortcut(cfg.toggle, () => { box.hidden = !box.hidden; });
      * });
      */
     interface ParamDefShortcut {

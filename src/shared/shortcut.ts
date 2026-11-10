@@ -165,16 +165,19 @@ export function matchesCombo(c: Combo, e: KeyLike): boolean {
     return !!c.code && e.code === c.code && !/^[a-z0-9]$/.test(key ?? "");
 }
 
-const TEXTLESS_INPUTS = new Set(["button", "submit", "reset", "checkbox", "radio", "range", "color", "file", "image", "hidden"]);
+/** what a `ctx.shortcut` function returns to leave the key to the page */
+export const PASS = "pass";
 
-/** typing goes there: shortcuts stay out of it */
-export function isEditable(t: EventTarget | null | undefined): boolean {
-    const el = t as HTMLElement | null;
-    if (!el || typeof el.tagName !== "string") return false;
-    if (el.isContentEditable) return true;
-    const tag = el.tagName.toUpperCase();
-    if (tag === "TEXTAREA" || tag === "SELECT") return true;
-    return tag === "INPUT" && !TEXTLESS_INPUTS.has(((el as HTMLInputElement).type || "text").toLowerCase());
+/** run a shortcut's function; false when it returned "pass" (a throw or a promise consumes the key) */
+export function runShortcut(fn: () => unknown, error: (e: unknown) => void): boolean {
+    try {
+        const out: any = fn();
+        if (out && typeof out.then === "function") out.then(undefined, error);
+        return out !== PASS;
+    } catch (e) {
+        error(e);
+        return true;
+    }
 }
 
 export interface ShortcutEntry {
@@ -240,28 +243,29 @@ export class ShortcutRegistry {
  * it runs before the page's) fires `before-page` matches and stops the
  * event; a bubble listener, moved to the end of the window's list on each
  * key, fires `after-page` matches unless the page prevented the default or
- * stopped the event. Untrusted (synthetic) events, IME composition and
- * keys typed into editable fields are ignored.
+ * stopped the event. `fire` returns false when the key wasn't consumed
+ * (the functions returned "pass"): the page gets it as if nothing matched.
+ * Keys count everywhere, text fields included (they're hot keys); only
+ * untrusted (synthetic) events are ignored.
  */
-export function watchShortcuts(win: Window, find: (e: KeyboardEvent) => ShortcutEntry[], fire: (hits: ShortcutEntry[], e: KeyboardEvent) => void, opts: { trusted?: (e: KeyboardEvent) => boolean } = {}): () => void {
+export function watchShortcuts(win: Window, find: (e: KeyboardEvent) => ShortcutEntry[], fire: (hits: ShortcutEntry[], e: KeyboardEvent) => boolean | void, opts: { trusted?: (e: KeyboardEvent) => boolean } = {}): () => void {
     const trusted = opts.trusted ?? ((e: KeyboardEvent) => e.isTrusted);
-    const usable = (e: KeyboardEvent) => trusted(e) && !e.isComposing && !isEditable(e.composedPath?.()[0] ?? e.target);
     const bubble = (e: KeyboardEvent) => {
         if (e.defaultPrevented) return;
         const hits = find(e).filter((h) => h.priority === "after-page");
-        if (!hits.length || !usable(e)) return;
-        e.preventDefault();
-        fire(hits, e);
+        if (!hits.length || !trusted(e)) return;
+        if (fire(hits, e) !== false) e.preventDefault();
     };
     const capture = (e: KeyboardEvent) => {
         const hits = find(e);
-        if (!hits.length || !usable(e)) return;
+        if (!hits.length || !trusted(e)) return;
         const now = hits.filter((h) => h.priority === "before-page");
-        if (now.length) {
+        if (now.length && fire(now, e) !== false) {
             e.preventDefault();
             e.stopImmediatePropagation();
-            return fire(now, e);
+            return;
         }
+        if (now.length === hits.length) return;
         // after the page's own window listeners
         win.removeEventListener("keydown", bubble);
         win.addEventListener("keydown", bubble);
@@ -306,11 +310,11 @@ export class FrameShortcuts {
         }
     ) {
         this.reg = new ShortcutRegistry(opts.mac ?? isMacPlatform(), opts.rank);
-        this.unwatch = watchShortcuts(win, (e) => (this.reg.size ? this.reg.find(e) : []), (hits) => hits.forEach((h) => this.fire(h)), { trusted: opts.trusted });
+        this.unwatch = watchShortcuts(win, (e) => (this.reg.size ? this.reg.find(e) : []), (hits) => hits.map((h) => this.fire(h)).includes(true), { trusted: opts.trusted });
     }
 
     /** register for script `s` until the returned function runs or `signal` aborts */
-    add(s: string, keys: string, fn: () => void, opts: { priority?: ShortcutPriority } | undefined, signal: AbortSignal): () => void {
+    add(s: string, keys: string, fn: () => unknown, opts: { priority?: ShortcutPriority } | undefined, signal: AbortSignal): () => void {
         const priority = shortcutPriority(fn, opts);
         // a shortcut param the user cleared
         if (keys === "" || signal.aborted) return () => {};
@@ -338,14 +342,9 @@ export class FrameShortcuts {
         this.unwatch = null;
     }
 
-    private fire(h: ShortcutEntry): void {
+    /** false: the function returned "pass" */
+    private fire(h: ShortcutEntry): boolean {
         const fn = this.fns.get(h.id);
-        if (!fn) return;
-        try {
-            const out: any = fn();
-            if (out && typeof out.then === "function") out.then(undefined, (e: unknown) => this.opts.error(h.s, e));
-        } catch (e) {
-            this.opts.error(h.s, e);
-        }
+        return fn ? runShortcut(fn, (e) => this.opts.error(h.s, e)) : false;
     }
 }

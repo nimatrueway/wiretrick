@@ -243,26 +243,41 @@ describe("overlay runtime", () => {
         await settle();
         expect((await callOverlay(h, { h: "onOverlay:0", fn: "seen", args: [] })).value).toEqual(["k"]);
         expect(h.logs.some((l) => l.level === "error" && l.msg.includes("ctx.shortcut") && l.msg.includes("boom"))).toBe(true);
-        // focus in the frame: it matches its own keys (not in its text fields)
+        // focus in the frame: it matches its own keys (in its text fields too)
         const e = new KeyboardEvent("keydown", { key: "H", code: "KeyH", altKey: true, shiftKey: true, bubbles: true, cancelable: true });
         document.body.dispatchEvent(e);
         expect(e.defaultPrevented).toBe(true);
         const input = document.body.appendChild(document.createElement("input"));
         input.dispatchEvent(new KeyboardEvent("keydown", { key: "H", code: "KeyH", altKey: true, shiftKey: true, bubbles: true, cancelable: true }));
-        expect((await callOverlay(h, { h: "onOverlay:0", fn: "seen", args: [] })).value).toEqual(["k", "h"]);
+        input.remove();
+        expect((await callOverlay(h, { h: "onOverlay:0", fn: "seen", args: [] })).value).toEqual(["k", "h", "h"]);
         await callOverlay(h, { h: "onOverlay:0", fn: "off", args: [] });
         await settle();
         expect(h.keys[h.keys.length - 1]).toBe("remove 1");
         h.bridge.push("shortcut.fire", { id: "1" });
         document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "H", code: "KeyH", altKey: true, shiftKey: true, bubbles: true, cancelable: true }));
         await settle();
-        expect((await callOverlay(h, { h: "onOverlay:0", fn: "seen", args: [] })).value).toEqual(["k", "h"]);
+        expect((await callOverlay(h, { h: "onOverlay:0", fn: "seen", args: [] })).value).toEqual(["k", "h", "h"]);
         expect((await callOverlay(h, { h: "onOverlay:0", fn: "bad", args: ["Hyper+K"] })).value).toMatch(/unknown modifier/);
         expect((await callOverlay(h, { h: "onOverlay:0", fn: "bad", args: ["Alt+K", "first"] })).value).toMatch(/priority/);
         // "" (a cleared shortcut param) adds nothing
         expect((await callOverlay(h, { h: "onOverlay:0", fn: "bad", args: [""] })).value).toBe("ok");
         await settle();
         expect(h.keys).toHaveLength(3);
+    });
+
+    it('ctx.shortcut: a function returning "pass" leaves a key pressed in the frame to the frame', async () => {
+        const h = await start(`wt.onOverlay("*", (ctx) => {
+            let n = 0;
+            ctx.shortcut("Alt+P", () => (n++ % 2 ? undefined : "pass"));
+        });`);
+        await settle();
+        const press = () => {
+            const e = new KeyboardEvent("keydown", { key: "p", code: "KeyP", altKey: true, bubbles: true, cancelable: true });
+            document.body.dispatchEvent(e);
+            return e.defaultPrevented;
+        };
+        expect([press(), press()]).toEqual([false, true]);
     });
 
     it("overlay.update recompiles in place: handlers run again, claims carry over, the old run's listeners go", async () => {

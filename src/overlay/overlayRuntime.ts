@@ -31,7 +31,7 @@ import { fromWireResponse, toWireRequest } from "../shared/wtFetch";
 import { formatScriptError } from "../shared/scriptError";
 import { formatLogArgs, scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
 import { collectRects, normalizeRects, watchRects } from "../shared/overlayRects";
-import { ShortcutRegistry, watchShortcuts, shortcutPriority, type ShortcutPriority } from "../shared/shortcut";
+import { ShortcutRegistry, watchShortcuts, shortcutPriority, runShortcut, type ShortcutPriority } from "../shared/shortcut";
 
 const PHASES: DocumentWhen[] = ["document_start", "document_end", "document_idle"];
 const rank = (p: DocumentWhen | undefined) => PHASES.indexOf(p ?? "document_end");
@@ -112,23 +112,19 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
     });
 
     // ctx.shortcut: the bridge matches keys pressed in the page and says which
-    // fired; keys pressed in this frame are matched here
+    // fired (by then the page's key is consumed: "pass" can't give it back);
+    // keys pressed in this frame are matched here
     const keys = new ShortcutRegistry();
-    const keyFns = new Map<string, () => void>();
+    const keyFns = new Map<string, () => unknown>();
     let keyIds = 0;
-    const fireKey = (id: string) => {
+    /** false: the function returned "pass" */
+    const fireKey = (id: string): boolean => {
         const fn = keyFns.get(id);
-        if (!fn) return;
-        try {
-            const out: any = fn();
-            if (out && typeof out.then === "function") out.then(undefined, (e: any) => log("error", errorLine(e, "ctx.shortcut")));
-        } catch (e) {
-            log("error", errorLine(e, "ctx.shortcut"));
-        }
+        return fn ? runShortcut(fn, (e: any) => log("error", errorLine(e, "ctx.shortcut"))) : false;
     };
-    ep.on("shortcut.fire", ({ id }) => fireKey(id));
-    const stopKeys = watchShortcuts(win, (e) => keys.find(e), (hits) => hits.forEach((h) => fireKey(h.id)), { trusted: env.trustedKey });
-    const shortcut = (combo: string, fn: () => void, opts?: { priority?: ShortcutPriority }) => {
+    ep.on("shortcut.fire", ({ id }) => void fireKey(id));
+    const stopKeys = watchShortcuts(win, (e) => keys.find(e), (hits) => hits.map((h) => fireKey(h.id)).includes(true), { trusted: env.trustedKey });
+    const shortcut = (combo: string, fn: () => unknown, opts?: { priority?: ShortcutPriority }) => {
         const priority = shortcutPriority(fn, opts);
         // a shortcut param the user cleared
         if (combo === "") return () => {};
@@ -253,7 +249,7 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
             signal.addEventListener("abort", off, { once: true });
             return off;
         },
-        shortcut(combo: string, fn: () => void, opts?: { priority?: ShortcutPriority }) {
+        shortcut(combo: string, fn: () => unknown, opts?: { priority?: ShortcutPriority }) {
             const off = shortcut(combo, fn, opts);
             signal.addEventListener("abort", off, { once: true });
             return off;

@@ -7,9 +7,19 @@ its section below.
 
 ## [Unreleased]
 
+### Added
+
+- A `ctx.shortcut` function can return `"pass"` to hand the key on to the page, as if no shortcut matched, so a handler can decide each time whether the key is its own. Any other return value still consumes the key. In an overlay, this works for keys pressed while the overlay has focus. Keys pressed in the page are always consumed, because they reach the overlay after the page's turn.
+
 ### Changed
 
+- `ctx.shortcut` keys now work at all times, including while typing in a text field, `<select>` or editable area. Before, shortcuts were ignored there. Only events the page makes up itself still don't count.
+
 - A call from `onPage` code to an `onSite` handle no longer waits a fixed time when the page doesn't have that `onSite` code. If the handle's route matches the page, the call waits only until the page gets that version of the script, and answers as soon as it arrives. Otherwise it fails at once. In 0.24.0-alpha, any call to `onSite` code the page didn't have waited up to 3 seconds, so calls to handles that don't run on the page were slow to fail.
+
+### Fixed
+
+- When the Editor opened with many scripts that import each other, scripts were briefly flagged with errors like "Cannot find module '../lib/util'" until things settled. TypeScript checked some scripts before the scripts they import had reached it. The Editor now shows such an error only after checking the script with every other script loaded. Scripts with a real error also no longer lose their error flag for a moment while the Editor loads.
 
 ## [0.24.0-alpha] - 2026-11-10
 

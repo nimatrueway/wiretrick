@@ -456,7 +456,7 @@ const keysCode = (origin: string, id: string) => `wt.onOverlay("${origin}/ov-key
 /**
  * `ctx.shortcut`: a shortcut toggles the GUI and the page never sees a
  * `before-page` key; `after-page` yields to a page that handles the key;
- * keys typed in a page field and page-made key events don't count; the
+ * keys typed in a page field count (hot keys), page-made key events don't; the
  * same keys in a script later in the list stay with the first (a Log warning).
  */
 export async function checkOverlayShortcuts(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
@@ -499,13 +499,15 @@ export async function checkOverlayShortcuts(ctx: any, mgr: any, origin: string, 
 
     await page.focus("#field");
     await page.keyboard.press("Alt+Shift+KeyH");
+    const typed = await waitFor(state, (v) => !!v.shown, 3000);
+    check(t("keys pressed in a page field trigger it too"), typed.shown === true, JSON.stringify(typed));
     await page.evaluate(() => {
         (document.activeElement as HTMLElement).blur();
         document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "H", code: "KeyH", altKey: true, shiftKey: true, bubbles: true, cancelable: true }));
     });
     await page.waitForTimeout(500);
-    const typed = await state();
-    check(t("keys typed in a page field and page-made key events don't trigger it"), typed.shown === false, JSON.stringify(typed));
+    const made = await state();
+    check(t("page-made key events don't trigger it"), made.shown === true, JSON.stringify(made));
 
     const lines: string[] = await mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line")].map((l) => (l as HTMLElement).dataset.text || ""));
     check(
