@@ -392,8 +392,10 @@ pick **Debug+** there to see `level:debug` lines.
 
 ## Synced folder
 
-Click **Folder…** and pick a folder (e.g. `~/Wiretricks`) — that becomes your
-synced folder. Its subfolders mirror the explorer's folders (empty ones too),
+In **Settings → Synced folder**, click **Choose Folder…** and pick a folder
+(e.g. `~/Wiretricks`) — that becomes your synced folder. **Change Folder…**
+switches to another one (cancelling the picker keeps the current folder),
+and **Disconnect** stops syncing; the folder's files stay. Its subfolders mirror the explorer's folders (empty ones too),
 `.ts` and `.tsx` files are scripts and `.json` and `.svg` files are
 [data files](scripting.md#imports-folders-and-data-files), at their relative
 paths. Dot entries (`.git`, `.vscode`, `.wiretrick-backup`, …),
@@ -431,7 +433,7 @@ and the script's version goes to `.wiretrick-backup/`. Saving in the Editor
 over a script that changed elsewhere shows a diff to overwrite or take theirs. The folder choice is remembered —
 the Editor reconnects automatically on open (one click to re-grant after a
 browser restart, per Chrome's File System Access rules — click the toolbar
-notice or the button).
+notice or **Reconnect**).
 
 The folder button next to **Save** shows the sync state: no badge (off), a
 green dot (connected), a triangle moving up **▲** (writing a change made in the

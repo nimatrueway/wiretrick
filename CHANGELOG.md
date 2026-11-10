@@ -15,6 +15,8 @@ its section below.
 ### Fixed
 
 - When another extension removes a script's overlay frame, the Log now shows a warning naming the script and saying how to start it again. This happens when a tool like Playwriter attaches its debugger to the tab, because Chrome doesn't allow that while another extension's frame is in the page. Previously the overlay's GUI and shortcuts stopped without any message. Wiretrick doesn't put the frame back on its own, because the other tool would just remove it again.
+- Cancelling the folder picker no longer stops the folder sync. Clicking the folder button in **Settings → Synced folder** used to stop syncing straight away, and clicking it again opened the picker. Now the button always opens the picker (**Choose Folder…**, or **Change Folder…** once a folder is synced), and the current folder keeps syncing until you pick another one. A new **Disconnect** button next to it stops syncing.
+- Right after a save, `onPage` code calling its script's `onSite` handles could fail with `WtCallError: not running on this page`. This happened on Chrome when a save added `onSite` code to an open tab (for example, when you change a `pages` param so the tab now matches), because the `onPage` code could start before the page had the new `onSite` code. Such a call now waits up to 3 seconds for it.
 - A package URL that can't load, either unpinned like `https://unpkg.com/@codemirror/state@6` or still downloading, no longer also shows TypeScript's `Cannot find module` error. Each import now shows one problem instead of two.
 
 ## [0.23.0-alpha] - 2026-11-09

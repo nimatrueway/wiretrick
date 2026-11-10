@@ -1048,7 +1048,10 @@ wt.onOverlay("*://app.example.com/*", (ctx) => {
     the frame navigated);
   - `WtCallError` — the function threw (its message only), doesn't exist,
     a value isn't JSON or is too big, or the handler isn't running on this
-    page (its route didn't match, or it threw before ever returning). In
+    page (its route didn't match, or it threw before ever returning). A
+    call into `onSite` code the page doesn't have yet waits up to 3 s for
+    it, since after a save your `onPage` code can start a moment before
+    the page gets the new `onSite` code. In
     the Editor's [Preview](editor.md#preview), calls into `onSite` and
     `onPage` code reject with `there's no page in the Editor preview`.
 

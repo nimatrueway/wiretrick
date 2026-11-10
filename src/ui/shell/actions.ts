@@ -72,8 +72,10 @@ export const actions = {
     /** back from the welcome page to the scripts */
     closeWelcome(): void {},
     // ---- settings ----
-    /** Settings → Scripts Folder…: start / stop syncing, or reconnect */
+    /** Settings → Choose / Change Folder… (or Reconnect) */
     folderButton(): void {},
+    /** Settings → Disconnect: stop syncing the folder */
+    folderDisconnect(): void {},
     setVscodePath(_path: string): void {},
     setLaunchMode(_mode: LaunchMode): void {},
     setEditorUrl(_url: string): void {},

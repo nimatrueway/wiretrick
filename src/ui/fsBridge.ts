@@ -60,6 +60,7 @@ export async function adoptForWatch(handle: any): Promise<boolean> {
 /**
  * Pick a folder (user gesture required) and hand it to the background
  * watcher, which runs a two-way initial sync and writes the support files.
+ * It replaces the folder synced so far; cancelling keeps that one.
  */
 export async function openFolder(handlers?: FolderSyncHandlers): Promise<void> {
     void handlers;
@@ -76,6 +77,8 @@ export async function openFolder(handlers?: FolderSyncHandlers): Promise<void> {
         );
         if (!ok) throw new DOMException("folder sync cancelled", "AbortError");
     }
+    // the old folder (if any) stops only now: a cancelled pick keeps it synced
+    if (cachedActive) await sendRaw({ type: "folderSyncStop" });
     await saveHandle(dirHandle);
     const started = await sendRaw({ type: "folderSyncStart", fresh: true });
     if (!started || !started.ok) {

@@ -81,13 +81,44 @@ import { watchCall, type CallWatch } from "../shared/callWatch";
     const lives = new Map<string, ScriptLife>();
     /** calls into onSite handles that arrived before the handlers compiled */
     const earlyCalls: [string, RpcCall, (r: RpcResult) => void][] = [];
+    /**
+     * Calls into a script with no onSite code here yet. A hot update reaches
+     * its onPage code (MV3: a user-script world) and this hook separately, so
+     * that code can call before the status that adds the handlers: such calls
+     * wait for it, at most CALL_WAIT_MS. After a wait runs out, the script's
+     * calls fail at once until the next status.
+     */
+    const CALL_WAIT_MS = 3000;
+    const waitingCalls = new Set<{ s: string; call: RpcCall; reply: (r: RpcResult) => void; timer: ReturnType<typeof setTimeout> }>();
+    const notHere = new Set<string>();
+    const notRunning = (call: RpcCall): RpcResult => ({ cid: call.cid, ok: false, error: { name: "WtCallError", message: NOT_RUNNING } });
     function answerCall(s: string, call: RpcCall, reply: (r: RpcResult) => void): void {
         const ex = exposers.get(s);
-        if (ex) ex.answer(call, reply);
-        else reply({ cid: call.cid, ok: false, error: { name: "WtCallError", message: NOT_RUNNING } });
+        if (ex) return ex.answer(call, reply);
+        if (dead || notHere.has(s) || waitingCalls.size >= 1000) return reply(notRunning(call));
+        const w = {
+            s,
+            call,
+            reply,
+            timer: setTimeout(() => {
+                waitingCalls.delete(w);
+                notHere.add(s);
+                reply(notRunning(call));
+            }, CALL_WAIT_MS),
+        };
+        waitingCalls.add(w);
     }
     function flushEarlyCalls(): void {
         for (const [s, call, reply] of earlyCalls.splice(0)) answerCall(s, call, reply);
+        notHere.clear();
+        for (const w of [...waitingCalls]) {
+            const ex = exposers.get(w.s);
+            if (!ex && !dead) continue;
+            clearTimeout(w.timer);
+            waitingCalls.delete(w);
+            if (ex) ex.answer(w.call, w.reply);
+            else w.reply(notRunning(w.call));
+        }
     }
     let reqSeq = 0;
     const pending = new Map<number, (v: any) => void>();

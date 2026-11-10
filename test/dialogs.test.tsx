@@ -264,6 +264,32 @@ describe("settings dialog", () => {
         expect(document.querySelector(".strategy-table")).toBeNull();
         expect(document.body.textContent).not.toContain("Strategies");
     });
+
+    it("picks a folder with one button and disconnects with another", async () => {
+        const { SettingsDialog } = await import("../src/ui/dialogs/SettingsDialog");
+        const { settings } = await import("../src/ui/state/settings");
+        const { actions } = await import("../src/ui/shell/actions");
+        const folderButton = vi.fn();
+        const folderDisconnect = vi.fn();
+        Object.assign(actions, { folderButton, folderDisconnect });
+        settings.folder.supported = true;
+        settings.folder.mode = "off";
+        render(<SettingsDialog />);
+        expect($("#btn-vscode").textContent).toBe("Choose Folder…");
+        expect($("#btn-folder-disconnect")).toBeNull();
+        await act(async () => void Object.assign(settings.folder, { mode: "synced", path: "scripts" }));
+        // picking again replaces the folder (a cancelled pick keeps it): stopping is its own button
+        expect($("#btn-vscode").textContent).toBe("Change Folder…");
+        fireEvent.click($("#btn-vscode"));
+        expect(folderButton).toHaveBeenCalledTimes(1);
+        expect(folderDisconnect).not.toHaveBeenCalled();
+        fireEvent.click($("#btn-folder-disconnect"));
+        expect(folderDisconnect).toHaveBeenCalledTimes(1);
+        await act(async () => void (settings.folder.mode = "reconnect"));
+        expect($("#btn-vscode").textContent).toBe("Reconnect");
+        expect($("#btn-folder-disconnect")).not.toBeNull();
+        await act(async () => void (settings.folder.mode = "off"));
+    });
 });
 
 describe("quick open", () => {

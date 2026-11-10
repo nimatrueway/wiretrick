@@ -1872,20 +1872,13 @@ function newId(): string {
     return "s_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
 }
 
-/** Settings → Scripts Folder… while a saved folder waits for its permission click: that click (also) reconnects */
-let folderReconnect: (() => Promise<void>) | null = null;
-
-/** Settings → Scripts Folder…: stop syncing, or pick a folder to sync */
+/** Settings → Choose / Change Folder…: pick a folder to sync (cancelling keeps the current one); Reconnect: re-grant the saved one */
 async function folderButtonClicked(): Promise<void> {
-    if (fsBridge.isSyncing()) {
-        await fsBridge.stopSync();
-        syncActive = false;
-        fsBridge.setCachedActive(false);
-        settings.folder.mode = "off";
-        folderNeedsGrant = false;
-        renderFolderSync({ active: false });
-        updateOpenVscode();
-        void checkFolderPath();
+    if (settings.folder.mode === "reconnect") {
+        if (await fsBridge.reconnectClicked()) {
+            await markFolderSynced();
+            status("synced folder reconnected ✓");
+        }
         return;
     }
     try {
@@ -1901,6 +1894,20 @@ async function folderButtonClicked(): Promise<void> {
     await checkFolderPath(true);
 }
 
+/** Settings → Disconnect: stop syncing and forget the folder (its files stay) */
+async function folderDisconnectClicked(): Promise<void> {
+    await fsBridge.stopSync();
+    syncActive = false;
+    fsBridge.setCachedActive(false);
+    settings.folder.mode = "off";
+    settings.folder.path = "";
+    folderNeedsGrant = false;
+    renderFolderSync({ active: false });
+    updateOpenVscode();
+    void checkFolderPath();
+    status("folder sync disconnected");
+}
+
 async function autoReconnectFolder(): Promise<void> {
     if (!fsBridge.isSupported()) return;
     const st = await fsBridge.autoReconnect();
@@ -1911,7 +1918,6 @@ async function autoReconnectFolder(): Promise<void> {
         settings.folder.mode = "reconnect";
         renderFolderSync({ active: false, paused: true });
         const reconnect = async (): Promise<void> => {
-            if (folderReconnect === reconnect) folderReconnect = null;
             if (fsBridge.isSyncing()) return;
             const ok = await fsBridge.reconnectClicked();
             if (ok) {
@@ -1919,7 +1925,6 @@ async function autoReconnectFolder(): Promise<void> {
                 status("synced folder reconnected ✓");
             }
         };
-        folderReconnect = reconnect;
         status("synced folder needs reconnect — click to reconnect", "dirty", () => void reconnect());
     }
 }
@@ -2214,11 +2219,8 @@ async function main(): Promise<void> {
             showWelcome(false);
             if (!selectedId && scripts.length) selectReal(scripts[0].id);
         },
-        folderButton: () => {
-            void folderButtonClicked();
-            // reconnect mode: the same click also re-grants the saved folder
-            void folderReconnect?.();
-        },
+        folderButton: () => void folderButtonClicked(),
+        folderDisconnect: () => void folderDisconnectClicked(),
         setVscodePath: (path: string) => {
             settings.vscodePath = path;
             chrome.storage.local.set({ resVscodePath: path }, () => void refreshSyncPath());

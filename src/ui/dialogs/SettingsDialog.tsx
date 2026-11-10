@@ -138,7 +138,7 @@ function SyncedFolder() {
         path.current!.focus({ preventScroll: true });
     }, [folder.flash]);
     useLayoutEffect(() => void row.current!.classList.toggle("needs-path", !!folder.pathWarning), [folder.pathWarning]);
-    const label = folder.mode === "synced" ? "Scripts Folder ✓" : folder.mode === "reconnect" ? "Scripts Folder… (reconnect)" : "Scripts Folder…";
+    const label = folder.mode === "synced" ? "Change Folder…" : folder.mode === "reconnect" ? "Reconnect" : "Choose Folder…";
     return (
         <section id="settings-sec-folder" className="settings-section">
             <h3>Synced folder</h3>
@@ -148,13 +148,20 @@ function SyncedFolder() {
                     <div id="settings-folder-row" className="setting-inline">
                         <button
                             id="btn-vscode"
-                            className={folder.mode === "synced" ? "active" : undefined}
                             disabled={!folder.supported}
                             title={folder.supported ? undefined : "File System Access API unavailable (Firefox) — use Import/Export"}
                             onClick={() => actions.folderButton()}
                         >
                             {label}
                         </button>
+                        {folder.mode !== "off" && (
+                            <>
+                                {" "}
+                                <button id="btn-folder-disconnect" title="Stop syncing this folder; its files stay" onClick={() => actions.folderDisconnect()}>
+                                    Disconnect
+                                </button>
+                            </>
+                        )}
                         {" "}
                         <span id="folder-state" className="muted">{folderStateText(folder)}</span>
                     </div>
