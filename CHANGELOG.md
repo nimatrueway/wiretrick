@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.24.0-alpha] - 2026-11-10
+
 ### Added
 
 - The Editor downloads a package import as soon as you type its pinned unpkg URL, not only when you save. While the package and its types download, the URL shows a warning (`downloading "…" from unpkg…`, then `fetching the types of "…"…`). If the download fails, the URL shows the actual reason, such as an HTTP 404.
@@ -885,7 +887,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.23.0-alpha...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.24.0-alpha...HEAD
+[0.24.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.23.0-alpha...v0.24.0-alpha
 [0.23.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.6-alpha...v0.23.0-alpha
 [0.22.6-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.5-alpha...v0.22.6-alpha
 [0.22.5-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.4-alpha...v0.22.5-alpha
