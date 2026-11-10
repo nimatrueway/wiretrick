@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.25.0-alpha] - 2026-11-10
+
 ### Added
 
 - A `ctx.shortcut` function can return `"pass"` to hand the key on to the page, as if no shortcut matched, so a handler can decide each time whether the key is its own. Any other return value still consumes the key. In an overlay, this works for keys pressed while the overlay has focus. Keys pressed in the page are always consumed, because they reach the overlay after the page's turn.
@@ -901,7 +903,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.24.0-alpha...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.25.0-alpha...HEAD
+[0.25.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.24.0-alpha...v0.25.0-alpha
 [0.24.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.23.0-alpha...v0.24.0-alpha
 [0.23.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.6-alpha...v0.23.0-alpha
 [0.22.6-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.5-alpha...v0.22.6-alpha
