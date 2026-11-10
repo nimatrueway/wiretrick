@@ -1095,6 +1095,16 @@ declare const wt: {
      * script's matching overlay handlers run in it, sharing top-level
      * variables.
      *
+     * Warning: the frame is a Wiretrick extension page (that's what lets
+     * the script run on sites whose CSP blocks scripts and `eval`, and
+     * keeps the site out). Chrome won't let another extension attach its
+     * debugger to a tab with such a frame, so tools like Playwriter remove
+     * it: the GUI and its shortcuts stop, with a Log warning. A same-origin
+     * `about:blank` frame wouldn't be removed, but it's under the page's
+     * CSP and open to the page, so Wiretrick doesn't offer one. For a GUI
+     * that must survive those tools, use `wt.onPage` with `ctx.mount` and
+     * `ctx.shortcut` instead.
+     *
      * @param route Page URL pattern(s), or `{ url, exclude, when }`.
      * @param handler Draws the GUI. May return functions for this script's
      * onPage code to call.

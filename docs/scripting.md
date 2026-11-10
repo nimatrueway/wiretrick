@@ -1319,6 +1319,13 @@ it right away, and the value survives restarts.
   GUI and shortcuts then stop and the Log shows a warning. Wiretrick
   doesn't put the frame back on its own, since the other tool would just
   remove it again. Reload the page or change the script to start it again.
+  The frame is an extension page on purpose: that's how overlays run on
+  sites whose CSP blocks scripts and `eval`, and why the site can't reach
+  them. An `about:blank` frame wouldn't be removed, but it would inherit
+  the page's CSP and be open to the page. For a GUI that must survive
+  these tools, use `wt.onPage` with `ctx.mount` and `ctx.shortcut`: it
+  renders into the page (in a closed shadow root) with no extension
+  frame.
 - **Preview in the Editor.** The Editor's **Preview** tab (⌥⇧V) runs the
   open script's overlay without its page, with the real stores, and
   updates it on save; see [Preview](editor.md#preview).
