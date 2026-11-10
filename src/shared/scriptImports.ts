@@ -104,6 +104,12 @@ export function coveredMissingModule(message: string, statusOf: (url: string) =>
     return !!spec && isUrlSpec(spec) && !builtinSpec(spec) && statusOf(spec)?.state !== "ready";
 }
 
+/** TS's "Cannot find module" for a relative import: another script or a data file */
+export function missingLocalModule(message: string): boolean {
+    const spec = /^Cannot find module '([^']+)'/.exec(message)?.[1];
+    return !!spec && /^\.\.?\//.test(spec);
+}
+
 /** code with each import specifier replaced by what `to` returns for it (undefined: kept) */
 export function rewriteImports(code: string, to: (spec: string) => string | undefined): string {
     return code.replace(IMPORT_RE, (m, spec: string) => {

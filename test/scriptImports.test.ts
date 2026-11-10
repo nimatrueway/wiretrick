@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { badPackageImports, coveredMissingModule, dependantsOf, packageImportMarks, importKeys, missingImports } from "../src/shared/scriptImports";
+import { badPackageImports, coveredMissingModule, missingLocalModule, dependantsOf, packageImportMarks, importKeys, missingImports } from "../src/shared/scriptImports";
 
 describe("script imports", () => {
     it("reads import specifiers", () => {
@@ -85,5 +85,14 @@ describe("packageImportMarks", () => {
         expect(coveredMissingModule(msg(A), ready("ready"))).toBe(false);
         expect(coveredMissingModule(msg("./lib"), () => undefined)).toBe(false);
         expect(coveredMissingModule("Cannot find name 'x'.", () => undefined)).toBe(false);
+    });
+    it("tells a missing script or data file import (the worker may not have it yet) from other errors", () => {
+        const msg = (spec: string) => `Cannot find module '${spec}' or its corresponding type declarations.`;
+        expect(missingLocalModule(msg("./lib"))).toBe(true);
+        expect(missingLocalModule(msg("../lib/l1"))).toBe(true);
+        expect(missingLocalModule(msg("./data/a.json"))).toBe(true);
+        expect(missingLocalModule(msg("https://unpkg.com/a@1.0.0"))).toBe(false);
+        expect(missingLocalModule(msg("react"))).toBe(false);
+        expect(missingLocalModule("Cannot find name 'x'.")).toBe(false);
     });
 });

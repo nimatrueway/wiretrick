@@ -9,7 +9,7 @@ import { API_TYPINGS_URI } from "./apiLinks";
 import { NavHistory } from "./navHistory";
 import type { SampleScript } from "./samples";
 import { settingsDiagnostics, settingsCompletions, settingsHover, type AssistScript } from "../shared/settingsAssist";
-import { badPackageImports, coveredMissingModule, dependantsOf, folderOf, isSvgPath, missingImports, packageImportMarks, packageUrls } from "../shared/scriptImports";
+import { badPackageImports, coveredMissingModule, dependantsOf, folderOf, isSvgPath, missingImports, missingLocalModule, packageImportMarks, packageUrls } from "../shared/scriptImports";
 import { makeFolderPackagePlan, makePackagePlan } from "../shared/makePackage";
 import { MANIFEST_FILE } from "../shared/packageMetadata";
 import { manifestScriptCompletions, manifestScriptProblems } from "./manifestAssist";
@@ -629,6 +629,8 @@ function scheduleDiagnostics(): void {
         for (const s of scripts) {
             const m = models.get(s.id);
             if (!m || m.isDisposed?.() || m.getValue() !== s.code) continue;
+            // not checked yet, or partly (until the check with every script in the worker): keep what's stored
+            if (!checkedUris.has(m.uri.toString()) || recheckingStale.has(m)) continue;
             // a compile failure is already badged + logged; don't echo its syntax errors
             const errors = s.error ? [] : monaco.editor
                 .getModelMarkers({ resource: m.uri, owner: "typescript" })
@@ -645,7 +647,7 @@ function scheduleDiagnostics(): void {
 
 // ---- re-check importers when a utility changes, moves or goes ----
 const changedModels = new Set<any>();
-/** scripts moved (re-checked themselves: they may have been checked mid-batch, before the files they import moved) */
+/** scripts re-checked themselves: moved ones (they may have been checked mid-batch, before the files they import moved), and new models with stored type errors */
 const movedModels = new Set<any>();
 /** paths scripts left (moved or deleted): their importers now point at nothing */
 const leftNames = new Set<string>();
@@ -682,14 +684,31 @@ function scheduleDependantRecheck(m: any, left?: string): void {
     }, 500);
 }
 
-/** what Monaco's TS diagnostics adapter does on an edit, for a model that wasn't edited */
+/**
+ * Per model: the version last checked with every script synced to the TS
+ * worker. Monaco syncs a model to the worker only when that model is checked,
+ * so on startup a script can be checked before the scripts it imports reach
+ * the worker: its "Cannot find module './lib'" is shown only once a check
+ * with all of them confirms it (hideCoveredImportErrors).
+ */
+const fullyChecked = new WeakMap<any, number>();
+const recheckingStale = new WeakSet<any>();
+
+/** what Monaco's TS diagnostics adapter does on an edit, for a model that wasn't edited — with every script in the worker */
 async function revalidateModel(m: any): Promise<void> {
     const monaco = (window as any).monaco;
     try {
-        const worker = await (await monaco.languages.typescript.getTypeScriptWorker())(m.uri);
+        const version = m.getVersionId();
+        const all = monaco.editor.getModels().filter((x: any) => x.getLanguageId() === "typescript").map((x: any) => x.uri);
+        const worker = await (await monaco.languages.typescript.getTypeScriptWorker())(m.uri, ...all);
         const uri = m.uri.toString();
         const diags = [...(await worker.getSyntacticDiagnostics(uri)), ...(await worker.getSemanticDiagnostics(uri))];
         if (m.isDisposed()) return;
+        fullyChecked.set(m, version);
+        // setting no markers where there were none fires no marker event
+        checkedUris.add(uri);
+        scheduleDiagnostics();
+        scheduleProblems();
         const flatten = (t: any): string => (typeof t === "string" ? t : [t.messageText, ...(t.next || []).map(flatten)].join("\n  "));
         const sev = (c: number) => (c === 1 ? monaco.MarkerSeverity.Error : c === 0 ? monaco.MarkerSeverity.Warning : c === 2 ? monaco.MarkerSeverity.Hint : monaco.MarkerSeverity.Info);
         monaco.editor.setModelMarkers(
@@ -760,7 +779,18 @@ function hideCoveredImportErrors(m: any): void {
     const monaco = (window as any).monaco;
     if (m.isDisposed()) return;
     const ts = monaco.editor.getModelMarkers({ resource: m.uri, owner: "typescript" });
-    const keep = ts.filter((mk: any) => !((typeof mk.code === "object" ? mk.code?.value : mk.code) === "2307" && coveredMissingModule(String(mk.message), packageStatusOf)));
+    const unsure = fullyChecked.get(m) !== m.getVersionId();
+    let stale = false;
+    const keep = ts.filter((mk: any) => {
+        if ((typeof mk.code === "object" ? mk.code?.value : mk.code) !== "2307") return true;
+        if (coveredMissingModule(String(mk.message), packageStatusOf)) return false;
+        if (unsure && missingLocalModule(String(mk.message))) return !(stale = true);
+        return true;
+    });
+    if (stale && !recheckingStale.has(m)) {
+        recheckingStale.add(m);
+        void revalidateModel(m).finally(() => recheckingStale.delete(m));
+    }
     if (keep.length === ts.length) return;
     ownMarkerWrites.add(m.uri.toString());
     monaco.editor.setModelMarkers(m, "typescript", keep);
@@ -1016,7 +1046,9 @@ function syncModels(): void {
             models.set(s.id, m);
             setBaseline(m, s.code);
             // a script checked before this library existed (import, folder
-            // sync) still says "Cannot find module" — re-check its importers
+            // sync) still says "Cannot find module" — re-check its importers.
+            // Its own stored errors too: a check that finds none publishes no markers
+            if (s.typeErrors?.length) movedModels.add(m);
             scheduleDependantRecheck(m);
         } else if (m.getValue() !== s.code && !(s.id === selectedId && dirty)) {
             applyingExternal = true;
@@ -1553,7 +1585,7 @@ function updateProblems(): void {
         for (const s of scripts) {
             const m = models.get(s.id);
             if (!m || m.isDisposed()) continue;
-            if (!checkedUris.has(m.uri.toString()) && m.getValue() === s.code && s.typeErrors?.length) continue;
+            if ((!checkedUris.has(m.uri.toString()) || recheckingStale.has(m)) && m.getValue() === s.code && s.typeErrors?.length) continue;
             live.set(s.id, modelProblems(m));
         }
     }

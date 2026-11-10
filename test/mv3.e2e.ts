@@ -1397,6 +1397,39 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
     check("MV3 folder sync: a deleted script's settings.yaml section is commented out",
         /# script "Sync guinea.wiretrick" no longer exists/.test(yamlDel) && !/^  Sync guinea.wiretrick:/m.test(yamlDel), yamlDel.slice(0, 400));
     await fPage.close();
+
+    // many interdependent scripts: while the Editor loads them, none is
+    // flagged with a "Cannot find module" it doesn't have (the TS worker gets
+    // scripts one by one); a genuinely missing import stays flagged throughout
+    const sPage = await ctx.newPage();
+    await sPage.goto(`chrome-extension://${extId}/editor.html`);
+    await sPage.waitForFunction(() => (window as any).monaco?.editor.getEditors().length === 1, null, { timeout: 20000 });
+    const sSend = (m: any) => sPage.evaluate((m: any) => new Promise<any>((r) => chrome.runtime.sendMessage(m, r)), m);
+    const SN = 8;
+    const settleIds: string[] = [];
+    for (let i = 0; i < SN; i++) {
+        settleIds.push(`s_sl${i}`, `s_sa${i}`);
+        await sSend({ type: "saveScript", id: `s_sl${i}`, name: `settle/lib/l${i}`, code: `${i ? `import { f${i - 1} } from "./l${i - 1}";\n` : ""}export function f${i}(): number { return ${i ? `1 + f${i - 1}()` : "0"}; }\n` });
+    }
+    for (let i = 0; i < SN; i++)
+        await sSend({ type: "saveScript", id: `s_sa${i}`, name: `settle/app/a${i}`, code: `import { f${SN - 1} } from "../lib/l${SN - 1}";\n${i < SN - 1 ? `import { f${i} } from "../lib/l${i}";` : ""}\nwt.onRequest({ url: "*://settle.invalid/*", strategy: "page" }, () => { console.log(f${SN - 1}() + f${i}()); });\n` });
+    settleIds.push("s_sbad");
+    await sSend({ type: "saveScript", id: "s_sbad", name: "settle/app/bad", code: `import { q } from "../lib/nope";\nconsole.log(q);\n` });
+    await sPage.waitForTimeout(4000);
+    await sPage.reload();
+    const settleSeen = new Set<string>();
+    let badMissing = 0;
+    for (const t0 = Date.now(); Date.now() - t0 < 9000; ) {
+        const f: string[] = await sPage.evaluate(() => [...document.querySelectorAll("#script-list .error, #script-list .has-error")].map((e) => (e.closest("li") as HTMLElement)?.textContent?.trim() || "?")).catch(() => []);
+        for (const x of f) settleSeen.add(x);
+        if (Date.now() - t0 > 1500 && !f.some((x) => /^.{0,4}bad/.test(x))) badMissing++;
+        await sPage.waitForTimeout(50);
+    }
+    const wrongly = [...settleSeen].filter((x) => !/^.{0,4}bad/.test(x));
+    check("Editor loading many interdependent scripts: none is briefly flagged with a 'Cannot find module' it doesn't have", !wrongly.length, wrongly.join(" | "));
+    check("Editor loading many interdependent scripts: a genuinely missing import stays flagged", badMissing === 0 && [...settleSeen].some((x) => /bad/.test(x)), `${badMissing} samples without it; seen: ${[...settleSeen].join(" | ")}`);
+    for (const id of settleIds) await sSend({ type: "deleteScript", id });
+    await sPage.close();
 } catch (e) {
     failed++;
     console.log("FAIL  exception —", e);
