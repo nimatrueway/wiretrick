@@ -1313,6 +1313,12 @@ it right away, and the value survives restarts.
   ([hot reload](#hot-reload--runs-and-ctx)) — draw with `ctx.mount`, or
   clean up on `ctx.signal`, so the GUI isn't added twice. Disabling the
   script removes the overlay.
+- **Debuggers from other extensions.** Chrome won't let an extension attach
+  its debugger to a tab holding another extension's frame, so tools like
+  Playwriter remove the overlay's frame when they attach. The overlay's
+  GUI and shortcuts then stop and the Log shows a warning. Wiretrick
+  doesn't put the frame back on its own, since the other tool would just
+  remove it again. Reload the page or change the script to start it again.
 - **Preview in the Editor.** The Editor's **Preview** tab (⌥⇧V) runs the
   open script's overlay without its page, with the real stores, and
   updates it on save; see [Preview](editor.md#preview).

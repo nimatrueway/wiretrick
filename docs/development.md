@@ -154,7 +154,10 @@ in place through `src/shared/runLifecycle.ts`. On Chromium (MV2 and MV3) the man
 `overlay.html` as a sandbox page, so it runs scripts without the extension
 CSP and has an opaque origin; Firefox has no manifest sandbox, so there it's
 a normal extension page that checks a one-time nonce with the background
-before it accepts a port.
+before it accepts a port. If something else removes a frame (another
+extension's debugger attach; the page can't reach the shadow root), the
+bridge logs a warning and closes that overlay, and doesn't start it again
+until its code hash changes or the page reloads.
 
 ## How the MV3 build works
 

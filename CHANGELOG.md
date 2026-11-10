@@ -13,6 +13,7 @@ its section below.
 
 ### Fixed
 
+- When another extension removes a script's overlay frame, the Log now shows a warning naming the script and saying how to start it again. This happens when a tool like Playwriter attaches its debugger to the tab, because Chrome doesn't allow that while another extension's frame is in the page. Previously the overlay's GUI and shortcuts stopped without any message. Wiretrick doesn't put the frame back on its own, because the other tool would just remove it again.
 - A package URL that can't load, either unpinned like `https://unpkg.com/@codemirror/state@6` or still downloading, no longer also shows TypeScript's `Cannot find module` error. Each import now shows one problem instead of two.
 
 ## [0.23.0-alpha] - 2026-11-09

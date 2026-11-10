@@ -514,6 +514,28 @@ export async function checkOverlayShortcuts(ctx: any, mgr: any, origin: string, 
         lines.filter((l) => l.includes("keys")).join(" | ").slice(0, 300)
     );
 
+    // another extension (Playwriter's debugger attach) removes a frame from the closed shadow root
+    const kboxFrames = async () => {
+        let n = 0;
+        for (const f of page.frames().filter((f: any) => f.url().includes("/overlay.html"))) if (await f.evaluate(() => !!document.getElementById("kbox")).catch(() => false)) n++;
+        return n;
+    };
+    await (await f1.frameElement()).evaluate((el: Element) => el.remove());
+    const evictLines = () => mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line")].map((l) => (l as HTMLElement).dataset.text || "").filter((l) => l.includes("removed by another extension")));
+    const evicted: string[] = await waitFor(evictLines, (v) => v.length > 0, 5000);
+    check(t("a frame removed by another extension logs a warning naming the script"), evicted.length === 1 && evicted[0].includes("[keys first.wiretrick]"), JSON.stringify(evicted));
+    await page.keyboard.press("Alt+Shift+KeyH");
+    const shown2 = () => f2.evaluate(() => !document.getElementById("kbox2")!.hidden).catch(() => null);
+    const freed = await waitFor(shown2, (v) => v === true, 3000);
+    check(t("its shortcuts are dropped (the next script gets the keys)"), freed === true, String(freed));
+    await send({ type: "saveScript", id: "s_ov_keys2", code: keysCode(origin, "kbox2") + "\n// v2", name: "keys second.wiretrick" });
+    await page.waitForTimeout(1500);
+    check(t("it isn't re-created when another script changes"), (await kboxFrames()) === 0, String(await kboxFrames()));
+    await send({ type: "saveScript", id: "s_ov_keys", code: keysCode(origin, "kbox") + "\n// v2", name: "keys first.wiretrick" });
+    const back = await waitFor(kboxFrames, (n) => n === 1, 8000);
+    check(t("changing its code starts it again"), back === 1, String(back));
+    check(t("the warning is logged once"), (await evictLines()).length === 1, JSON.stringify(await evictLines()));
+
     await page.close();
     await send({ type: "deleteScript", id: "s_ov_keys" });
     await send({ type: "deleteScript", id: "s_ov_keys2" });

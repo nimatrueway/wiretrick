@@ -695,6 +695,15 @@ import type { RanApi } from "../shared/netTypes";
     let shadow: ShadowRoot | null = null;
     let zTop = 0;
     let lastOverlays: OverlayInfo[] = [];
+    /**
+     * Overlays whose frame something else removed (another extension: a page
+     * can't reach the closed shadow root), by script → code hash. Chrome won't
+     * let an extension attach its debugger (Playwriter, ...) to a tab with
+     * another extension's frame, so it removes ours; putting it back would
+     * only start a tug-of-war. They start again when their code changes or
+     * the page reloads.
+     */
+    const evicted = new Map<string, string>();
 
     const newNonce = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
     const PHASES: DocumentWhen[] = ["document_start", "document_end", "document_idle"];
@@ -727,7 +736,9 @@ import type { RanApi } from "../shared/netTypes";
         lastOverlays = list;
         const want = new Map(list.map((o) => [o.scriptId, o]));
         for (const s of [...overlays.keys()]) if (!want.has(s)) removeOverlay(s, "was disabled or no longer matches this page");
+        for (const [s, hash] of [...evicted]) if (want.get(s)?.codeHash !== hash) evicted.delete(s);
         for (const info of list) {
+            if (evicted.has(info.scriptId)) continue;
             const old = overlays.get(info.scriptId);
             if (old && old.info.codeHash === info.codeHash) {
                 old.info = info;
@@ -777,6 +788,7 @@ import type { RanApi } from "../shared/netTypes";
                     syncOverlays(lastOverlays, true);
                 }
             }).observe(document, { childList: true, subtree: true });
+            new MutationObserver((records) => guard(() => noteRemovedFrames(records))).observe(shadow, { childList: true });
         }
         document.documentElement.appendChild(host);
         return shadow;
@@ -878,6 +890,18 @@ import type { RanApi } from "../shared/netTypes";
                 log("warn", scriptLogLine(o.info.name, "overlay", "the overlay frame didn't start"));
             }
         }, 15000);
+    }
+
+    /** frames we didn't remove ourselves (removeOverlay closes the overlay first) */
+    function noteRemovedFrames(records: MutationRecord[]): void {
+        for (const r of records)
+            for (const node of r.removedNodes)
+                for (const [s, o] of overlays)
+                    if (o.frame === node && !o.closed) {
+                        evicted.set(s, o.info.codeHash);
+                        scriptLog(s, "warn", scriptLogLine(o.info.name, "overlay", "the overlay frame was removed by another extension (e.g. a debugger such as Playwriter attaching to this tab): its GUI and shortcuts stopped. Reload the page or change the script to start it again."));
+                        removeOverlay(s, "was removed by another extension");
+                    }
     }
 
     function removeOverlay(s: string, why: string): void {
