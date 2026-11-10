@@ -814,7 +814,7 @@ Each runs in its own place:
 | | runs in | sees | the site | has |
 |---|---|---|---|---|
 | `wt.onSite` | the site's own JavaScript world | the DOM and the site's globals (`window.myApp`); its `fetch`/XHR go through the `page` strategy | sees it and can tamper with it: **untrusted** | `wt.siteStore` only, no handle calls, no React |
-| `wt.onPage` | an isolated world | the DOM, none of the site's globals | can't see or reach it | all stores, handle calls, React (`ctx.mount`) |
+| `wt.onPage` | an isolated world | the DOM, none of the site's globals | can't see or reach it | all stores, handle calls, React (`ctx.mount`), shortcuts |
 | `wt.onOverlay` | the script's own frame over the page (top frame) | its own DOM | can't see or reach it | all stores, handle calls, React, shortcuts, `fetch` as the page |
 
 Use `onPage` for DOM changes, `onSite` only for what needs the site's
@@ -1115,7 +1115,7 @@ starting timers — isn't undone, and the new run does it again: an
 | `mount(ui)`, `mount(target, ui, opts?)` | — | ✓ | ✓ | render React UI (JSX) on every match; a save re-renders it, state kept |
 | `each(fn, ...args)` | — | ✓ | ✓ | [loop over a handle function's answers](#waiting-for-events--ctxeach) |
 | `onNavigate(fn)` | — | — | ✓ | [in-place navigations](#overlays--wtonoverlay) |
-| `shortcut(keys, fn, opts)` | — | — | ✓ | [keyboard shortcuts](#keyboard-shortcuts) |
+| `shortcut(keys, fn, opts)` | — | ✓ | ✓ | [keyboard shortcuts](#keyboard-shortcuts) |
 
 ```ts
 wt.onPage("*://app.example.com/*", (ctx) => {
@@ -1339,7 +1339,8 @@ it right away, and the value survives restarts.
 
 ### Keyboard shortcuts
 
-`ctx.shortcut(keys, fn)` runs `fn` when the keys are pressed on the page:
+`ctx.shortcut(keys, fn)` runs `fn` when the keys are pressed on the page,
+in `onPage` and `onOverlay` handlers:
 
 ```ts
 wt.onOverlay("*://app.example.com/*", (ctx) => {
@@ -1360,14 +1361,21 @@ wt.onOverlay("*://app.example.com/*", (ctx) => {
 - **Before or after the page.** By default the shortcut wins: the page
   never sees the key. With `{ priority: "after-page" }` it runs only if
   the page didn't handle the key (didn't call `preventDefault` or stop it).
-- **Where.** On the page (its top frame) and while the overlay has focus.
-  Keys typed into a text field, `<select>` or editable area are left
-  alone, and events the page makes up itself don't count.
-- **Several scripts.** If two scripts' overlays use the same keys, the
-  one higher in the script list gets them; the other's Log says so.
+- **Where.** An overlay's: on the page (its top frame) and while the
+  overlay has focus. An `onPage` handler's: in the frame it runs in, so
+  it keeps working when another extension's debugger (such as
+  Playwriter) removes overlays. Keys typed into a text field, `<select>`
+  or editable area are left alone, and events the page makes up itself
+  don't count.
+- **Several scripts.** If two overlays use the same keys, the one higher
+  in the script list gets them; the other's Log says so. The same goes
+  for two `onPage` scripts in MV2 builds. In MV3 each `onPage` script
+  runs on its own, so the first to add the keys gets them, with no
+  warning. An `onPage` shortcut and an overlay's with the same keys
+  aren't ranked either: give them different keys.
 - `ctx.shortcut` returns a function that removes the shortcut. Shortcuts
-  also go away when the run ends (a save sets them up again) and with the
-  overlay (disable).
+  also go away when the run ends (a save sets them up again) and when
+  the script is disabled.
 
 To let the user pick the keys, make them a `shortcut` param:
 

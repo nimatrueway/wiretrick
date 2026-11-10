@@ -541,6 +541,69 @@ export async function checkOverlayShortcuts(ctx: any, mgr: any, origin: string, 
     await send({ type: "deleteScript", id: "s_ov_keys2" });
 }
 
+const pageKeysCode = (origin: string, id: string) => `wt.onPage("${origin}/ov-keys*", (ctx) => {
+    const out = document.getElementById("${id}") ?? document.body.appendChild(Object.assign(document.createElement("output"), { id: "${id}" }));
+    ctx.shortcut("Alt+Shift+J", () => (out.dataset.n = String(Number(out.dataset.n || 0) + 1)));
+    ctx.shortcut("", () => {});
+});
+`;
+
+/**
+ * onPage's `ctx.shortcut`: keys pressed in the page run it and the page
+ * doesn't see them; a hot save keeps one registration; the script higher
+ * in the list keeps shared keys (MV2: the scripts share a world); it stops
+ * with the script.
+ */
+export async function checkPageShortcuts(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string; separateWorlds?: boolean } = {}): Promise<void> {
+    const t = (s: string) => `page shortcuts${opts.label ?? ""}: ${s}`;
+    const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
+    const a = await send({ type: "saveScript", id: "s_pk1", code: pageKeysCode(origin, "pk1"), name: "page keys first.wiretrick" });
+    await mgr.waitForTimeout(300);
+    const b = opts.separateWorlds ? null : await send({ type: "saveScript", id: "s_pk2", code: pageKeysCode(origin, "pk2"), name: "page keys second.wiretrick" });
+    check(t("scripts save without errors"), !a?.error && !b?.error, JSON.stringify({ a: a?.error, b: b?.error }));
+    await mgr.waitForTimeout(800);
+
+    const page = await ctx.newPage();
+    await page.goto(`${origin}/ov-keys`, { waitUntil: "load", timeout: 15000 });
+    const state = (): Promise<{ n1: string | null; n2: string | null; pageKeys: string[] }> =>
+        page.evaluate(() => ({
+            n1: document.getElementById("pk1")?.dataset.n ?? (document.getElementById("pk1") ? "0" : null),
+            n2: document.getElementById("pk2")?.dataset.n ?? (document.getElementById("pk2") ? "0" : null),
+            pageKeys: (window as any).__keys as string[],
+        }));
+    await waitFor(state, (v) => v.n1 !== null, 8000);
+    await page.bringToFront();
+    await page.keyboard.press("Alt+Shift+KeyJ");
+    const one = await waitFor(state, (v) => v.n1 === "1", 3000);
+    check(t("a shortcut runs its function"), one.n1 === "1", JSON.stringify(one));
+    check(t("the page doesn't see a before-page key"), !one.pageKeys.includes("KeyJ"), JSON.stringify(one.pageKeys));
+    if (!opts.separateWorlds) {
+        check(t("the same keys in a second script stay with the first"), one.n2 === "0", JSON.stringify(one));
+        const lines: string[] = await mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line")].map((l) => (l as HTMLElement).dataset.text || ""));
+        check(
+            t("a Log warning names the script that keeps the keys"),
+            lines.some((l) => l.includes("[page keys second.wiretrick] onPage: shortcut Alt+Shift+J") && l.includes('"page keys first.wiretrick" (earlier in the list)')),
+            lines.filter((l) => l.includes("page keys")).join(" | ").slice(0, 300)
+        );
+    }
+
+    await send({ type: "saveScript", id: "s_pk1", code: pageKeysCode(origin, "pk1") + "\n// v2", name: "page keys first.wiretrick" });
+    await page.waitForTimeout(1500);
+    await page.keyboard.press("Alt+Shift+KeyJ");
+    await page.waitForTimeout(500);
+    const hot = await state();
+    check(t("after a hot save it runs once"), hot.n1 === "2", JSON.stringify(hot));
+
+    await send({ type: "deleteScript", id: "s_pk1" });
+    await page.waitForTimeout(1500);
+    await page.keyboard.press("Alt+Shift+KeyJ");
+    const gone = await waitFor(state, (v) => opts.separateWorlds || v.n2 === "1", 3000);
+    check(t("it stops with the script" + (opts.separateWorlds ? "" : " (the next script gets the keys)")), gone.n1 === "2" && (opts.separateWorlds || gone.n2 === "1"), JSON.stringify(gone));
+
+    await page.close();
+    if (!opts.separateWorlds) await send({ type: "deleteScript", id: "s_pk2" });
+}
+
 /**
  * The Editor's Preview tab: the open script's overlay runs in a frame in
  * the Editor, with real store replicas — its switch flips the mock for a

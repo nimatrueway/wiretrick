@@ -10,6 +10,7 @@ its section below.
 ### Added
 
 - The Editor downloads a package import as soon as you type its pinned unpkg URL, not only when you save. While the package and its types download, the URL shows a warning (`downloading "…" from unpkg…`, then `fetching the types of "…"…`). If the download fails, the URL shows the actual reason, such as an HTTP 404.
+- `ctx.shortcut` now works in `onPage` handlers too, for keys pressed in the frame the handler runs in. Unlike an overlay's, an `onPage` shortcut keeps working when another extension's debugger, such as Playwriter, removes Wiretrick's overlay frames.
 
 ### Fixed
 

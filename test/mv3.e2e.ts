@@ -28,7 +28,7 @@ import { resolveBrowser } from "./browserSetup";
 import { checkApiTypingsNav } from "./apiTypingsNav";
 import { checkRulesStrategy, rulesServerRoute } from "./rulesE2e";
 import { checkFoldersAndDataFiles, foldersServerRoute } from "./foldersE2e";
-import { checkPlaces, checkOverlayPreview, checkOverlays, checkEarlyRequests, checkHotReload, checkOverlayShortcuts, checkPageStores, checkIsoStores, checkSiteHandles, checkSiteStores, overlayServerRoute } from "./overlayE2e";
+import { checkPlaces, checkOverlayPreview, checkOverlays, checkEarlyRequests, checkHotReload, checkOverlayShortcuts, checkPageShortcuts, checkPageStores, checkIsoStores, checkSiteHandles, checkSiteStores, overlayServerRoute } from "./overlayE2e";
 import { checkPackages, packagesServerRoute } from "./packagesE2e";
 import { readExportZip } from "../src/shared/exportZip";
 
@@ -348,6 +348,7 @@ try {
         await checkPlaces(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
         await checkEarlyRequests(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
         await checkOverlayShortcuts(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
+        await checkPageShortcuts(ctx, mgr, ORIGIN, check, { label: " (MV3)", separateWorlds: true });
         await checkOverlayPreview(ctx, mgr, ORIGIN, check, { label: " (MV3)" });
         for (const id of on) await send({ type: "setEnabled", id, enabled: true });
     }

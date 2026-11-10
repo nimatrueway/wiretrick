@@ -1,9 +1,12 @@
 /**
- * `ctx.shortcut` (overlays): parsing "Alt+Shift+M" / "Mod+K", matching key
- * events, first-wins across scripts, and the before/after-page listeners.
- * The bridge owns the page's listeners (keys pressed in the page) and each
- * overlay frame matches its own shortcuts while it has focus.
+ * `ctx.shortcut`: parsing "Alt+Shift+M" / "Mod+K", matching key events,
+ * first-wins across scripts, and the before/after-page listeners. For
+ * overlays the bridge owns the page's listeners (keys pressed in the page)
+ * and each overlay frame matches its own shortcuts while it has focus;
+ * onPage code listens in its own frame (`FrameShortcuts`).
  */
+
+import { scriptLogLine } from "./scriptLog";
 
 export type ShortcutPriority = "before-page" | "after-page";
 
@@ -269,4 +272,80 @@ export function watchShortcuts(win: Window, find: (e: KeyboardEvent) => Shortcut
         win.removeEventListener("keydown", capture, true);
         win.removeEventListener("keydown", bubble);
     };
+}
+
+/** check `ctx.shortcut`'s function and options; returns the priority */
+export function shortcutPriority(fn: unknown, opts?: { priority?: ShortcutPriority }): ShortcutPriority {
+    if (typeof fn !== "function") throw new TypeError("ctx.shortcut: the second argument must be a function");
+    const priority = opts?.priority ?? "before-page";
+    if (priority !== "before-page" && priority !== "after-page") throw new TypeError(`ctx.shortcut: priority must be "before-page" or "after-page"`);
+    return priority;
+}
+
+/**
+ * onPage's `ctx.shortcut`: keys pressed in this frame run the functions
+ * here, in the world the handler runs in. Make it at document_start: its
+ * capture listener must come before the page's. The scripts in this world
+ * share keys by `rank` (list order).
+ */
+export class FrameShortcuts {
+    private readonly reg: ShortcutRegistry;
+    private readonly fns = new Map<string, () => unknown>();
+    private ids = 0;
+    private unwatch: (() => void) | null;
+
+    constructor(
+        win: Window,
+        private readonly opts: {
+            name: (s: string) => string;
+            error: (s: string, e: unknown) => void;
+            warn: (s: string, msg: string) => void;
+            rank?: (s: string) => number;
+            mac?: boolean;
+            trusted?: (e: KeyboardEvent) => boolean;
+        }
+    ) {
+        this.reg = new ShortcutRegistry(opts.mac ?? isMacPlatform(), opts.rank);
+        this.unwatch = watchShortcuts(win, (e) => (this.reg.size ? this.reg.find(e) : []), (hits) => hits.forEach((h) => this.fire(h)), { trusted: opts.trusted });
+    }
+
+    /** register for script `s` until the returned function runs or `signal` aborts */
+    add(s: string, keys: string, fn: () => void, opts: { priority?: ShortcutPriority } | undefined, signal: AbortSignal): () => void {
+        const priority = shortcutPriority(fn, opts);
+        // a shortcut param the user cleared
+        if (keys === "" || signal.aborted) return () => {};
+        const id = String(++this.ids);
+        const r = this.reg.add(s, id, keys, priority);
+        this.fns.set(id, fn);
+        const lost = (x: string) => this.opts.warn(x, scriptLogLine(this.opts.name(x), "onPage", `shortcut ${keys}: "${this.opts.name(r.taken ?? s)}" (earlier in the list) uses these keys too and keeps them`));
+        if (r.taken) lost(s);
+        if (r.displaced) lost(r.displaced);
+        const off = () => {
+            signal.removeEventListener("abort", off);
+            if (!this.fns.delete(id)) return;
+            this.reg.remove(s, id);
+        };
+        signal.addEventListener("abort", off, { once: true });
+        return off;
+    }
+
+    removeScript(s: string): void {
+        this.reg.removeScript(s);
+    }
+
+    stop(): void {
+        this.unwatch?.();
+        this.unwatch = null;
+    }
+
+    private fire(h: ShortcutEntry): void {
+        const fn = this.fns.get(h.id);
+        if (!fn) return;
+        try {
+            const out: any = fn();
+            if (out && typeof out.then === "function") out.then(undefined, (e: unknown) => this.opts.error(h.s, e));
+        } catch (e) {
+            this.opts.error(h.s, e);
+        }
+    }
 }

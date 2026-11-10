@@ -33,6 +33,7 @@ import { routeMatches, type PlaceApi, type RouteMeta } from "../shared/route";
 import { ReplicaHub } from "../shared/storeReplica";
 import { SiteMirrors } from "../shared/siteStoreMirror";
 import { SITE_DOWN_KINDS } from "../shared/siteStoreHost";
+import { FrameShortcuts } from "../shared/shortcut";
 
 (() => {
     const me = ((globalThis as any).__wtIsoQ as { s: string; routes: RouteMeta[] }[] | undefined)?.shift();
@@ -80,6 +81,12 @@ import { SITE_DOWN_KINDS } from "../shared/siteStoreHost";
         throw new Error("no React");
     };
     const life = new ScriptLife({ doc: document, react: () => reactDom() });
+    /** ctx.shortcut: keys pressed in this frame (listening from the start, before the page) */
+    const keys = new FrameShortcuts(window, {
+        name: () => scriptName,
+        error: (_s, e) => log("error", formatScriptError(scriptName, e, "ctx.shortcut")),
+        warn: (_s, msg) => log("warn", msg),
+    });
     window.addEventListener("message", (e: MessageEvent) => {
         const d = e.data;
         if (e.source !== window || !d || d.source !== "res-override-hook") return;
@@ -137,6 +144,7 @@ import { SITE_DOWN_KINDS } from "../shared/siteStoreHost";
                 stopped = true;
                 exposer.close();
                 life.stop();
+                keys.stop();
                 site?.dispose();
                 for (const c of [client, local, pageClient]) c.abort("the script stopped");
                 ep.close("refused");
@@ -248,7 +256,15 @@ import { SITE_DOWN_KINDS } from "../shared/siteStoreHost";
                 d.when,
                 () => {
                     try {
-                        fireRun(life, gen, d, pageCtxBase(location.href), exposer, (e) => log("error", formatScriptError(init.name, e, "onPage")));
+                        const base = pageCtxBase(location.href);
+                        fireRun(
+                            life,
+                            gen,
+                            d,
+                            (signal) => ({ ...base, shortcut: (combo: string, fn: () => void, opts?: any) => keys.add(s, combo, fn, opts, signal) }),
+                            exposer,
+                            (e) => log("error", formatScriptError(init.name, e, "onPage"))
+                        );
                         noteRan("onPage", init.name);
                     } catch (e: any) {
                         log("error", formatScriptError(init.name, e, "onPage"));

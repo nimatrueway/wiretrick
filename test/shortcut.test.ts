@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, afterEach } from "vitest";
-import { parseShortcut, matchesCombo, isEditable, ShortcutRegistry, watchShortcuts, shortcutFromEvent, formatShortcut, isShortcut, type KeyLike } from "../src/shared/shortcut";
+import { parseShortcut, matchesCombo, isEditable, ShortcutRegistry, watchShortcuts, shortcutFromEvent, formatShortcut, isShortcut, FrameShortcuts, type KeyLike } from "../src/shared/shortcut";
 
 const key = (k: string, code: string, mods: Partial<Pick<KeyLike, "ctrlKey" | "altKey" | "shiftKey" | "metaKey">> = {}): KeyLike => ({ key: k, code, ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, ...mods });
 
@@ -183,6 +183,103 @@ describe("watchShortcuts", () => {
         stops.pop()!();
         press();
         expect(fired).toEqual([]);
+    });
+});
+
+describe("FrameShortcuts (onPage's ctx.shortcut)", () => {
+    let host: FrameShortcuts | null = null;
+    afterEach(() => {
+        host?.stop();
+        host = null;
+    });
+    const press = (init: KeyboardEventInit = { key: "k", code: "KeyK", altKey: true }) => {
+        const e = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, ...init });
+        document.body.dispatchEvent(e);
+        return e;
+    };
+    function setup(order = ["a", "b"]) {
+        const errors: string[] = [];
+        const warns: string[] = [];
+        host = new FrameShortcuts(window, {
+            mac: false,
+            rank: (s) => order.indexOf(s),
+            name: (s) => `script ${s}`,
+            error: (s, e: any) => errors.push(`${s}: ${e?.message ?? e}`),
+            warn: (s, msg) => warns.push(`${s}: ${msg}`),
+            trusted: () => true,
+        });
+        return { h: host, errors, warns };
+    }
+
+    it("runs the function when the keys are pressed, until removed or the run's signal aborts", () => {
+        const { h } = setup();
+        let n = 0;
+        const ac = new AbortController();
+        const off = h.add("a", "Alt+K", () => n++, undefined, ac.signal);
+        expect(press().defaultPrevented).toBe(true);
+        expect(n).toBe(1);
+        off();
+        press();
+        expect(n).toBe(1);
+        h.add("a", "Alt+K", () => n++, undefined, ac.signal);
+        press();
+        expect(n).toBe(2);
+        ac.abort();
+        expect(press().defaultPrevented).toBe(false);
+        expect(n).toBe(2);
+    });
+
+    it('"" adds nothing; bad arguments throw', () => {
+        const { h } = setup();
+        const sig = new AbortController().signal;
+        expect(() => h.add("a", "", () => {}, undefined, sig)()).not.toThrow();
+        expect(() => h.add("a", "Alt+K", "x" as any, undefined, sig)).toThrow(/function/);
+        expect(() => h.add("a", "Alt+K", () => {}, { priority: "soon" as any }, sig)).toThrow(/priority/);
+        expect(() => h.add("a", "Alt+Nope", () => {}, undefined, sig)).toThrow();
+        expect(press().defaultPrevented).toBe(false);
+    });
+
+    it("the script higher in the list keeps shared keys; the other gets them back when it stops", () => {
+        const { h, warns } = setup();
+        const fired: string[] = [];
+        const sig = new AbortController().signal;
+        h.add("b", "Alt+K", () => fired.push("b"), undefined, sig);
+        h.add("a", "Alt+K", () => fired.push("a"), undefined, sig);
+        press();
+        expect(fired).toEqual(["a"]);
+        expect(warns).toEqual(['b: [script b] onPage: shortcut Alt+K: "script a" (earlier in the list) uses these keys too and keeps them']);
+        h.add("b", "Alt+K", () => fired.push("b2"), undefined, sig);
+        expect(warns[1]).toBe('b: [script b] onPage: shortcut Alt+K: "script a" (earlier in the list) uses these keys too and keeps them');
+        h.removeScript("a");
+        press();
+        expect(fired).toEqual(["a", "b", "b2"]);
+    });
+
+    it("reports a throwing or rejecting function to its script", async () => {
+        const { h, errors } = setup();
+        const sig = new AbortController().signal;
+        h.add("a", "Alt+K", () => {
+            throw new Error("boom");
+        }, undefined, sig);
+        h.add("a", "Alt+J", () => Promise.reject(new Error("later")) as any, undefined, sig);
+        press();
+        press({ key: "j", code: "KeyJ", altKey: true });
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(errors).toEqual(["a: boom", "a: later"]);
+    });
+
+    it("listens from the start, so its capture listener comes before the page's", () => {
+        const { h } = setup();
+        const page: string[] = [];
+        const onPage = () => page.push("page");
+        window.addEventListener("keydown", onPage, true);
+        let n = 0;
+        h.add("a", "Alt+K", () => n++, undefined, new AbortController().signal);
+        press();
+        window.removeEventListener("keydown", onPage, true);
+        expect(n).toBe(1);
+        expect(page).toEqual([]);
     });
 });
 

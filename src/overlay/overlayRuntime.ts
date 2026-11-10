@@ -31,7 +31,7 @@ import { fromWireResponse, toWireRequest } from "../shared/wtFetch";
 import { formatScriptError } from "../shared/scriptError";
 import { formatLogArgs, scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
 import { collectRects, normalizeRects, watchRects } from "../shared/overlayRects";
-import { ShortcutRegistry, watchShortcuts, type ShortcutPriority } from "../shared/shortcut";
+import { ShortcutRegistry, watchShortcuts, shortcutPriority, type ShortcutPriority } from "../shared/shortcut";
 
 const PHASES: DocumentWhen[] = ["document_start", "document_end", "document_idle"];
 const rank = (p: DocumentWhen | undefined) => PHASES.indexOf(p ?? "document_end");
@@ -129,9 +129,7 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
     ep.on("shortcut.fire", ({ id }) => fireKey(id));
     const stopKeys = watchShortcuts(win, (e) => keys.find(e), (hits) => hits.forEach((h) => fireKey(h.id)), { trusted: env.trustedKey });
     const shortcut = (combo: string, fn: () => void, opts?: { priority?: ShortcutPriority }) => {
-        if (typeof fn !== "function") throw new TypeError("ctx.shortcut: the second argument must be a function");
-        const priority = opts?.priority ?? "before-page";
-        if (priority !== "before-page" && priority !== "after-page") throw new TypeError(`ctx.shortcut: priority must be "before-page" or "after-page"`);
+        const priority = shortcutPriority(fn, opts);
         // a shortcut param the user cleared
         if (combo === "") return () => {};
         const id = String(++keyIds);

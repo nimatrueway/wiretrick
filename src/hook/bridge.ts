@@ -44,7 +44,7 @@ import { inertRemote } from "../shared/remote";
 import type { DocumentWhen, PlaceApi, RouteMeta } from "../shared/route";
 import { clipPathFor, normalizeRects } from "../shared/overlayRects";
 import { fromWireRequest, toWireResponse } from "../shared/wtFetch";
-import { ShortcutRegistry, watchShortcuts } from "../shared/shortcut";
+import { ShortcutRegistry, watchShortcuts, FrameShortcuts } from "../shared/shortcut";
 import type { RanApi } from "../shared/netTypes";
 
 (() => {
@@ -299,6 +299,17 @@ import type { RanApi } from "../shared/netTypes";
     /** per script, what answers calls into handlers run here: onPage (MV2), and onSite when the page CSP blocks eval */
     const isoExposers = new Map<string, Exposer>();
     const fallbackExposers = new Map<string, Exposer>();
+    /** MV2 onPage `ctx.shortcut`: keys pressed in this frame (listening from the start, before the page); shared keys go by list order */
+    let pageOrder: { id: string; name: string }[] = [];
+    const pageKeys = new FrameShortcuts(window, {
+        rank: (s) => {
+            const i = pageOrder.findIndex((x) => x.id === s);
+            return i < 0 ? Infinity : i;
+        },
+        name: (s) => pageOrder.find((x) => x.id === s)?.name ?? s,
+        error: (s, e) => scriptLog(s, "error", formatScriptError(pageOrder.find((x) => x.id === s)?.name ?? s, e, "ctx.shortcut"), "isolated"),
+        warn: (s, msg) => scriptLog(s, "warn", msg, "isolated"),
+    });
 
     // ---- isolated onPage code's stores (MV2: it runs here) ----
     //
@@ -446,8 +457,12 @@ import type { RanApi } from "../shared/netTypes";
                 exposers.delete(id);
                 lives[world].get(id)?.stop();
                 lives[world].delete(id);
-                if (world === "isolated") abortCalls(id, "the script stopped");
+                if (world === "isolated") {
+                    abortCalls(id, "the script stopped");
+                    pageKeys.removeScript(id);
+                }
             }
+        if (world === "isolated") pageOrder = handlers.map((h) => ({ id: h.scriptId, name: h.name }));
         // onPage code's handles: its onSite handlers (the page's world), its own (here), its overlay (top frame)
         // a compile's handles call with its signal: they abort once a reload replaced it and its runs ended
         const handle = (scriptId: string, gen: Generation) => (api: PlaceApi, key: string) => {
@@ -525,7 +540,16 @@ import type { RanApi } from "../shared/netTypes";
             for (const d of matching) {
                 const run = () => {
                     try {
-                        fireRun(life, gen, d, pageCtxBase(location.href), exposer, (e) => scriptLog(h.scriptId, "error", formatScriptError(h.name, e, api), ctx));
+                        const base = pageCtxBase(location.href);
+                        const keys = world === "isolated" ? pageKeys : null;
+                        fireRun(
+                            life,
+                            gen,
+                            d,
+                            keys ? (signal) => ({ ...base, shortcut: (combo: string, fn: () => void, opts?: any) => keys.add(h.scriptId, combo, fn, opts, signal) }) : base,
+                            exposer,
+                            (e) => scriptLog(h.scriptId, "error", formatScriptError(h.name, e, api), ctx)
+                        );
                         scriptRan(h.scriptId, h.name, api);
                     } catch (e: any) {
                         scriptLog(h.scriptId, "error", formatScriptError(h.name, e, api), ctx);

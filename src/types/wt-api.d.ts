@@ -403,10 +403,33 @@ declare namespace Wiretrick {
     interface SiteCtx extends RequestCtx, RunCtx {}
 
     /** The context an `onPage` handler gets (`url` is the frame's URL). */
-    interface PageCtx extends RequestCtx, TrustedRunCtx {}
+    interface PageCtx extends RequestCtx, TrustedRunCtx {
+        /**
+         * Run `fn` when the user presses `keys` on the page: "Alt+Shift+M",
+         * "Mod+K" (Mod = Cmd on macOS, Ctrl elsewhere), "Shift+F2", "Esc".
+         * `""` adds nothing, so a `shortcut` param the user cleared just
+         * works: `ctx.shortcut(cfg.toggle, fn)`.
+         * Ignored while typing in a text field. By default the shortcut
+         * beats the page (which never sees the key); `"after-page"` fires
+         * only if the page didn't handle it. If another script has the same
+         * keys, the one higher in the script list wins (a Log warning).
+         * Returns a function that removes it (it's also removed when the
+         * run ends).
+         *
+         * onPage: keys pressed in the frame the handler runs in. Overlay:
+         * keys pressed in the page or in the overlay.
+         *
+         * @example
+         * wt.onPage("*://example.com/*", (ctx) => {
+         *     ctx.shortcut("Alt+Shift+H", () => (box.hidden = !box.hidden));
+         *     ctx.shortcut("Mod+K", openSearch, { priority: "after-page" });
+         * });
+         */
+        shortcut(keys: string, fn: () => void, opts?: { priority?: "before-page" | "after-page" }): () => void;
+    }
 
     /** The context an `onOverlay` handler gets (`url` is the page's URL). */
-    interface OverlayCtx extends RequestCtx, TrustedRunCtx {
+    interface OverlayCtx extends RequestCtx, TrustedRunCtx, Pick<PageCtx, "shortcut"> {
         /**
          * Run `fn` with the page's new URL whenever it navigates in place
          * (history API, back/forward, `#hash` changes), as single-page apps
@@ -421,25 +444,6 @@ declare namespace Wiretrick {
          * });
          */
         onNavigate(fn: (url: string) => void): () => void;
-        /**
-         * Run `fn` when the user presses `keys` on the page: "Alt+Shift+M",
-         * "Mod+K" (Mod = Cmd on macOS, Ctrl elsewhere), "Shift+F2", "Esc".
-         * `""` adds nothing, so a `shortcut` param the user cleared just
-         * works: `ctx.shortcut(cfg.toggle, fn)`.
-         * Ignored while typing in a text field. By default the shortcut
-         * beats the page (which never sees the key); `"after-page"` fires
-         * only if the page didn't handle it. Keys pressed while the overlay
-         * has focus work too. If another script has the same keys, the
-         * one higher in the script list wins (a Log warning). Returns a
-         * function that removes it (it's also removed when the run ends).
-         *
-         * @example
-         * wt.onOverlay("*://example.com/*", (ctx) => {
-         *     ctx.shortcut("Alt+Shift+H", () => (box.hidden = !box.hidden));
-         *     ctx.shortcut("Mod+K", openSearch, { priority: "after-page" });
-         * });
-         */
-        shortcut(keys: string, fn: () => void, opts?: { priority?: "before-page" | "after-page" }): () => void;
     }
 
     /** Header edits. */
@@ -810,7 +814,7 @@ declare namespace Wiretrick {
         parse?: (raw: string[]) => unknown;
     }
     /**
-     * Keys for {@link OverlayCtx.shortcut} — the ⚙ dialog records them as
+     * Keys for {@link PageCtx.shortcut} — the ⚙ dialog records them as
      * you press them, with buttons to remove the shortcut and reset it to
      * the default. The value is the keys ("Mod+Shift+K", Mod being Cmd on
      * macOS and Ctrl elsewhere), or `""` once removed.
