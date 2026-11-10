@@ -1262,6 +1262,27 @@ wt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
         }
         check("onPage: isolated code calls an onSite handler's functions at document_start", pagecall === "main:number", String(pagecall));
         await warm.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "deleteScript", id: "s_pagecall" }, r)));
+        // an onSite handle not on this page fails at once; a save that puts it here answers the onPage code's call
+        const hotCall = (where: string) =>
+            `const site = wt.onSite("*://*:*/${where}*", () => ({ who: () => "site-${where}" }));
+            wt.onPage("*://*:*/page-badge*", async () => {
+                const t = Date.now();
+                const r = await site.who().catch((e: any) => e.message);
+                document.documentElement.dataset.hotcall = r + "|" + (Date.now() - t < 1500 ? "fast" : "slow");
+            });`;
+        await save("s_hotcall", "Hot call.wiretrick", hotCall("nowhere"));
+        let hotcall: any = null;
+        for (let i = 0; i < 40 && !hotcall; i++) {
+            if (i % 8 === 0) await bp.reload();
+            await warm.waitForTimeout(250);
+            hotcall = await bp.evaluate(() => document.documentElement.dataset.hotcall).catch(() => null);
+        }
+        check("onPage: a call to an onSite handle that isn't on the page fails at once", /not running on this page\|fast$/.test(String(hotcall)), String(hotcall));
+        await save("s_hotcall", "Hot call.wiretrick", hotCall("page-badge"));
+        await bp.waitForFunction(() => /^site-page-badge/.test(document.documentElement.dataset.hotcall || ""), null, { timeout: 10000 }).catch(() => {});
+        hotcall = await bp.evaluate(() => document.documentElement.dataset.hotcall).catch(() => null);
+        check("onPage: a save that brings the onSite code to the open page answers its call (no reload)", hotcall === "site-page-badge|fast", String(hotcall));
+        await warm.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "deleteScript", id: "s_hotcall" }, r)));
         await bp.close();
     }
 

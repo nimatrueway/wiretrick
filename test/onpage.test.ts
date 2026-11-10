@@ -99,16 +99,18 @@ describe("page shim worlds", () => {
 
     it("isolated handles go through `call`, with where their handler runs; without it they're inert", async () => {
         const asked: string[] = [];
+        const routes: any[] = [];
         const iso = makePageShim({
             params: {},
             log: () => {},
             storage: { get: () => undefined, set: () => undefined },
             world: "isolated",
-            call: (api, key) => ((asked.push(`${api}/${key}`), { ping: async () => "pong" }) as any),
+            call: (api, key, route) => ((asked.push(`${api}/${key}`), routes.push(route), { ping: async () => "pong" }) as any),
         });
         await expect(iso.wt.onOverlay("*", () => {}).ping()).resolves.toBe("pong");
-        iso.wt.onSite("*", () => {});
+        iso.wt.onSite("*://a.test/*", () => {});
         expect(asked).toEqual(["onOverlay/onOverlay:~0", "onSite/onSite:~0"]);
+        expect(routes.map((r) => r.url)).toEqual([["*"], ["*://a.test/*"]]);
         await expect(shim("isolated").wt.onOverlay("*", () => {}).ping()).rejects.toThrow();
     });
 

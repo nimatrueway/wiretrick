@@ -43,9 +43,9 @@ export interface PageShimOptions {
     exposer?: Exposer;
     /**
      * isolated world: a handle → what calls it (`api`: where its handler
-     * runs); absent: handles are inert (a library's)
+     * runs, `route`: its route); absent: handles are inert (a library's)
      */
-    call?: (api: PlaceApi, key: string) => any;
+    call?: (api: PlaceApi, key: string, route: RouteMeta) => any;
     /** site's world: a handle's function was called (it throws SiteCannotCallError; its stack is the caller's) */
     onSiteCall?: (e: SiteCannotCallError) => void;
     /** the script's store replicas (`wt.pageStore`: this page's copy): the isolated world only */
@@ -86,7 +86,7 @@ export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDocumentHa
             dom.push({ h: k.key, route: r, when: r.when || "document_end", fn: fn as any });
         }
         if (world === "page") return siteRemote(o.onSiteCall);
-        return o.call ? o.call(api, k.key) : inertHandle();
+        return o.call ? o.call(api, k.key, r) : inertHandle();
     };
     const stores = world === "isolated" ? o.stores : undefined;
     const names = new Map<string, string>();

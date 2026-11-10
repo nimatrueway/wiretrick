@@ -140,7 +140,7 @@ describe("overlay links (L2 per-script grants)", () => {
 });
 
 describe("the L6 ⇄ L2 relay (MV3 isolated world ⇄ overlay)", () => {
-    const isoRun = (name: string): IsoRun => ({ name, src: "src", codeHash: "c", params: {}, libs: [], overlay: true });
+    const isoRun = (name: string): IsoRun => ({ name, src: "src", codeHash: "c", siteV: "", params: {}, libs: [], overlay: true });
     let isoRunsFor: Record<string, string[]> = {};
     let off = false;
     const logs: any[] = [];

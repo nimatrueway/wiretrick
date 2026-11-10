@@ -68,13 +68,20 @@ import { FrameShortcuts } from "../shared/shortcut";
 
     // calls into the script's onSite handlers: straight to the hook (main
     // world) over window messages. The page sees and can forge both ways, so
-    // the answers are page data.
-    const pageClient = new RpcClient((call) => window.postMessage({ source: "res-override-bridge", kind: "rpc.call", s, call }, location.origin));
+    // the answers are page data. A handle whose route matches the page tags
+    // its calls with this version of the onSite code: the hook waits for it
+    // when a save reached this world first (hook.ts answerCall).
+    let siteV = "";
+    let siteHere = new Set<string>();
+    const pageClient = new RpcClient((call) =>
+        window.postMessage({ source: "res-override-bridge", kind: "rpc.call", s, call, v: siteHere.has(call.h) ? siteV : undefined }, location.origin)
+    );
     // calls into its own onPage handlers: answered here (JSON copies, like any handle's)
     const local: RpcClient = new RpcClient((call) => exposer.answer(call, (r) => local.receive(r)));
     // a compile's handles call with its signal: they abort once a reload replaced it and its runs ended
-    const handle = (gen: Generation) => (api: PlaceApi, key: string) => {
+    const handle = (gen: Generation) => (api: PlaceApi, key: string, route: RouteMeta) => {
         const sig = () => gen.signal;
+        if (api === "onSite" && routeMatches(route, location.href)) siteHere.add(key);
         return api === "onSite" ? pageClient.remote(key, sig) : api === "onPage" ? local.remote(key, sig) : top ? client.remote(key, sig) : inertRemote(TOP_FRAME_ONLY);
     };
     let reactDom: () => ReactDomClient = () => {
@@ -202,6 +209,8 @@ import { FrameShortcuts } from "../shared/shortcut";
     function run(init: IsoInit, hot: boolean): void {
         if (codeHash !== null) exposer.reset();
         codeHash = init.codeHash;
+        siteV = init.siteV;
+        siteHere = new Set();
         scriptName = init.name;
         const { codes, packages } = shippedSources([init.src], init.libs);
         if (builtinsReady(codes, packages)) return exec(init, hot);

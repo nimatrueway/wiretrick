@@ -13,7 +13,7 @@ import { makeLibRequire, type ShippedLib } from "../shared/scriptImports";
 import { routeMatches, takesBinary, type DocumentWhen, type RouteMeta } from "../shared/route";
 import { makePageShim, domHandlersFor, scheduleDocument, fireRun, type PageDocumentHandler } from "../shared/pageShim";
 import { ScriptLife, type Generation } from "../shared/runLifecycle";
-import { Exposer, isRpcCall, NOT_RUNNING, type RpcCall, type RpcResult } from "../shared/rpc";
+import { CANCEL_FN, Exposer, isRpcCall, NOT_RUNNING, type RpcCall, type RpcResult } from "../shared/rpc";
 import { bodyKind, setTextTypes } from "../shared/bodyKind";
 import { readFetchBody } from "../shared/requestBody";
 import { SiteStoreHost, SITE_UP_KINDS } from "../shared/siteStoreHost";
@@ -70,7 +70,7 @@ import { watchCall, type CallWatch } from "../shared/callWatch";
     }
     /** the bridge reported the extension context dead (extension reload) */
     let dead = false;
-    let domHandlers: { scriptId: string; name: string; src: string; params?: Record<string, any> }[] = [];
+    let domHandlers: { scriptId: string; name: string; src: string; params?: Record<string, any>; v?: string }[] = [];
     let libSources: ShippedLib[] = [];
     let domFired = false;
     /** the handlers compiled at least once (calls before that wait) */
@@ -80,44 +80,56 @@ import { watchCall, type CallWatch } from "../shared/callWatch";
     /** per script: its onSite runs here (shared/runLifecycle.ts; no ctx.mount: React isn't in the page) */
     const lives = new Map<string, ScriptLife>();
     /** calls into onSite handles that arrived before the handlers compiled */
-    const earlyCalls: [string, RpcCall, (r: RpcResult) => void][] = [];
+    const earlyCalls: [string, RpcCall, (r: RpcResult) => void, string | undefined][] = [];
     /**
-     * Calls into a script with no onSite code here yet. A hot update reaches
-     * its onPage code (MV3: a user-script world) and this hook separately, so
-     * that code can call before the status that adds the handlers: such calls
-     * wait for it, at most CALL_WAIT_MS. After a wait runs out, the script's
-     * calls fail at once until the next status.
+     * Calls from onPage code whose onSite code isn't here yet. A save reaches
+     * that code (MV3: a user-script world) and this hook separately, so it can
+     * call before the status that brings the onSite code. It tags calls to
+     * handles whose route matches the page with `v`, its version of the
+     * script (`domHandlers[].v`): a call for a version this hook hasn't
+     * compiled waits for the status that brings it (at most CALL_WAIT_MS:
+     * e.g. the page navigated in place and won't get it). Every other call
+     * answers from what's here, at once.
      */
-    const CALL_WAIT_MS = 3000;
-    const waitingCalls = new Set<{ s: string; call: RpcCall; reply: (r: RpcResult) => void; timer: ReturnType<typeof setTimeout> }>();
-    const notHere = new Set<string>();
+    const CALL_WAIT_MS = 5000;
+    const waitingCalls = new Set<{ s: string; v: string; call: RpcCall; reply: (r: RpcResult) => void; timer: ReturnType<typeof setTimeout> }>();
+    /** `s\0v` of every version compiled here */
+    const versions = new Set<string>();
     const notRunning = (call: RpcCall): RpcResult => ({ cid: call.cid, ok: false, error: { name: "WtCallError", message: NOT_RUNNING } });
-    function answerCall(s: string, call: RpcCall, reply: (r: RpcResult) => void): void {
+    function answerCall(s: string, call: RpcCall, reply: (r: RpcResult) => void, v?: string): void {
+        if (call.fn === CANCEL_FN)
+            for (const w of waitingCalls)
+                if (w.s === s && w.call.cid === call.cid) {
+                    clearTimeout(w.timer);
+                    waitingCalls.delete(w);
+                    return reply({ cid: call.cid, ok: false, error: { name: "AbortError", message: "the caller gave up" } });
+                }
+        if (v && !dead && !versions.has(s + "\0" + v) && call.fn !== CANCEL_FN) {
+            if (waitingCalls.size >= 1000) return reply(notRunning(call));
+            const w = {
+                s,
+                v,
+                call,
+                reply,
+                timer: setTimeout(() => {
+                    waitingCalls.delete(w);
+                    reply(notRunning(call));
+                }, CALL_WAIT_MS),
+            };
+            waitingCalls.add(w);
+            return;
+        }
         const ex = exposers.get(s);
-        if (ex) return ex.answer(call, reply);
-        if (dead || notHere.has(s) || waitingCalls.size >= 1000) return reply(notRunning(call));
-        const w = {
-            s,
-            call,
-            reply,
-            timer: setTimeout(() => {
-                waitingCalls.delete(w);
-                notHere.add(s);
-                reply(notRunning(call));
-            }, CALL_WAIT_MS),
-        };
-        waitingCalls.add(w);
+        if (ex) ex.answer(call, reply);
+        else reply(notRunning(call));
     }
     function flushEarlyCalls(): void {
-        for (const [s, call, reply] of earlyCalls.splice(0)) answerCall(s, call, reply);
-        notHere.clear();
+        for (const [s, call, reply, v] of earlyCalls.splice(0)) answerCall(s, call, reply, v);
         for (const w of [...waitingCalls]) {
-            const ex = exposers.get(w.s);
-            if (!ex && !dead) continue;
+            if (!dead && !versions.has(w.s + "\0" + w.v)) continue;
             clearTimeout(w.timer);
             waitingCalls.delete(w);
-            if (ex) ex.answer(w.call, w.reply);
-            else w.reply(notRunning(w.call));
+            answerCall(w.s, w.call, w.reply);
         }
     }
     let reqSeq = 0;
@@ -186,11 +198,12 @@ import { watchCall, type CallWatch } from "../shared/callWatch";
                 } catch {}
             };
             // before the first status (isolated code at document_start): wait for the handlers
+            const v = typeof data.v === "string" ? data.v : undefined;
             if (!compiled && !dead) {
-                if (earlyCalls.length < 1000) earlyCalls.push([data.s, data.call, reply]);
+                if (earlyCalls.length < 1000) earlyCalls.push([data.s, data.call, reply, v]);
                 return;
             }
-            answerCall(data.s, data.call, reply);
+            answerCall(data.s, data.call, reply, v);
             return;
         }
         if (SITE_UP_KINDS.has(data.kind)) {
@@ -217,6 +230,7 @@ import { watchCall, type CallWatch } from "../shared/callWatch";
             routes = data.routes || [];
             setTextTypes(data.textTypes);
             domHandlers = data.domHandlers || [];
+            for (const d of domHandlers) if (d.v) versions.add(d.scriptId + "\0" + d.v);
             libSources = data.libs || [];
             logUp(`status: ${active ? "active" : "inactive"}, dom=${domHandlers.length}${data.hot ? " (hot)" : ""}`, "debug");
             if (active) install();

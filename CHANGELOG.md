@@ -7,6 +7,10 @@ its section below.
 
 ## [Unreleased]
 
+### Changed
+
+- A call from `onPage` code to an `onSite` handle no longer waits a fixed time when the page doesn't have that `onSite` code. If the handle's route matches the page, the call waits only until the page gets that version of the script, and answers as soon as it arrives. Otherwise it fails at once. In 0.24.0-alpha, any call to `onSite` code the page didn't have waited up to 3 seconds, so calls to handles that don't run on the page were slow to fail.
+
 ## [0.24.0-alpha] - 2026-11-10
 
 ### Added

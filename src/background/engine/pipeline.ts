@@ -579,7 +579,8 @@ export function createPipeline(
      */
     async function hookBundle(url: string, top: boolean, preview?: string) {
         // onSite scripts (hook.ts; the bridge when CSP blocks eval)
-        const domHandlers: { scriptId: string; name: string; src: string; params: Record<string, any> }[] = [];
+        // `v`: the onSite code's version — onPage code tags its calls with it, and the hook waits for that version (hook.ts answerCall)
+        const domHandlers: { scriptId: string; name: string; src: string; params: Record<string, any>; v: string }[] = [];
         // onPage scripts: never shipped to the page's own world. MV3 runs
         // them in chrome.userScripts worlds that load the code from the owner
         // (`isoRuns`): the bridge only learns which scripts, to relay the
@@ -626,11 +627,13 @@ export function createPipeline(
                 overlayDeps.set(s.id, new Set(a.deps));
             }
             if (!main && !iso || preview !== undefined) continue;
-            const h = { scriptId: s.id, name: s.meta.name, src: toRunnableJs(s.code), params: resolveParamValues(a.paramDefs || {}, paramValues[s.id]) };
+            const src = toRunnableJs(s.code);
+            const params = resolveParamValues(a.paramDefs || {}, paramValues[s.id]);
+            const h = { scriptId: s.id, name: s.meta.name, src, params, v: contentHash(JSON.stringify([src, params])) };
             if (main) domHandlers.push(h);
             if (iso && __MV3__) {
                 isoHandlers.push({ scriptId: s.id, name: s.meta.name });
-                isoRuns.set(s.id, { name: s.meta.name, src: h.src, params: h.params, libs: [], codeHash: "", overlay: !!over.length });
+                isoRuns.set(s.id, { name: s.meta.name, src: h.src, siteV: h.v, params: h.params, libs: [], codeHash: "", overlay: !!over.length });
                 isoScriptDeps.set(s.id, new Set(a.deps));
             } else if (iso) isoHandlers.push(h);
             if (main) for (const d of a.deps) mainDeps.add(d);

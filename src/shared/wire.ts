@@ -162,6 +162,8 @@ export interface IsoInit {
     /** the script's runnable JS */
     src: string;
     codeHash: string;
+    /** the version of its onSite code (the hook's `domHandlers[].v`): calls to its onSite handles matching the page carry it */
+    siteV: string;
     params: Record<string, any>;
     libs: ShippedLib[];
     /** the script has an overlay on this page (top frame) */
