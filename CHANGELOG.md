@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.26.0-alpha] - 2026-11-11
+
 ### Changed
 
 - The object `wt.params` returns can now be changed, like a valtio proxy. Assign a param (`cfg.enabled = false`) or change a list in place (`cfg.hosts.push("a.com")`) from onPage, onOverlay or network handler code. The value is checked against the param's type, the code sees it right away, and it's saved like a change in the ⚙ dialog: logged, written to `settings.yaml`, and the script hot-reloads with it. It throws at the top level (each change re-runs the script), in onSite code, and for params with `parse`. A library's params can be changed by scripts that import it.
@@ -911,7 +913,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.25.0-alpha...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.26.0-alpha...HEAD
+[0.26.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.25.0-alpha...v0.26.0-alpha
 [0.25.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.24.0-alpha...v0.25.0-alpha
 [0.24.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.23.0-alpha...v0.24.0-alpha
 [0.23.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.6-alpha...v0.23.0-alpha
