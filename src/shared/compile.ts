@@ -126,6 +126,41 @@ let transpiler: Transpiler | null = null;
 /** Register the TS stripper (done by the background via shared/transpile). */
 export function setTranspiler(fn: Transpiler): void {
     transpiler = fn;
+    runnable.clear();
+    runnableChars = 0;
+}
+
+// the same source is transpiled again and again (each dependant's compile,
+// each strategy, each frame's bundle): keep the results, most recent last
+const runnable = new Map<string, { js: string; syntax: unknown }>();
+let runnableChars = 0;
+const RUNNABLE_MAX_CHARS = 8_000_000;
+
+/** transpiled + keyPlaceCalls'd code, and the transpiler's error (the code then runs as written) */
+function runnableOf(code: string): { js: string; syntax: unknown } {
+    const hit = runnable.get(code);
+    if (hit) {
+        runnable.delete(code);
+        runnable.set(code, hit);
+        return hit;
+    }
+    let js = code;
+    let syntax: unknown = null;
+    try {
+        if (transpiler) js = transpiler(code);
+    } catch (e) {
+        syntax = e;
+        js = code;
+    }
+    const out = { js: keyPlaceCalls(js), syntax };
+    runnable.set(code, out);
+    runnableChars += code.length + out.js.length;
+    for (const [k, v] of runnable) {
+        if (runnableChars <= RUNNABLE_MAX_CHARS || runnable.size <= 1) break;
+        runnable.delete(k);
+        runnableChars -= k.length + v.js.length;
+    }
+    return out;
 }
 
 /**
@@ -134,12 +169,7 @@ export function setTranspiler(fn: Transpiler): void {
  * without one (the page hook) receive already-transpiled code.
  */
 export function toRunnableJs(code: string): string {
-    if (!transpiler) return keyPlaceCalls(code);
-    try {
-        return keyPlaceCalls(transpiler(code));
-    } catch {
-        return keyPlaceCalls(code);
-    }
+    return runnableOf(code).js;
 }
 
 /**
@@ -153,13 +183,9 @@ export function compileScript(code: string, overrides?: ResApiOverrides): Compil
     const store = createCollector();
     let syntax: any = null;
     try {
-        let js = code;
-        try {
-            if (transpiler) js = transpiler(code);
-        } catch (e) {
-            syntax = e;
-        }
-        js = keyPlaceCalls(js);
+        const r = runnableOf(code);
+        syntax = r.syntax;
+        const js = r.js;
         const moduleObj = { exports: {} as any };
         // eslint-disable-next-line no-new-func
         const fn = scriptFunction(js, overrides?.name ?? "");
@@ -349,6 +375,14 @@ export function makeModuleResolver(
     const cache = new Map<string, any>();
     const compiling = new Set<string>();
     const deps = new Set<string>();
+    // what each library imports, transitively: a second importer of a cached
+    // library gets its deps too (callers clear `deps` between scripts)
+    const libDeps = new Map<string, Set<string>>();
+    const loading: Set<string>[] = [];
+    const addDep = (d: string) => {
+        deps.add(d);
+        for (const f of loading) f.add(d);
+    };
     const dataFiles = opts?.dataFiles || [];
     const lookup = importResolver(
         scripts.map((s) => s.name),
@@ -377,7 +411,7 @@ export function makeModuleResolver(
         if (builtinSpec(spec) && (isUrlSpec(spec) || !lookup(importer, spec))) {
             try {
                 return builtinModule(spec, byName.get(importer)?.code, (url) => {
-                    deps.add(url);
+                    addDep(url);
                     return loadPackage(url);
                 });
             } catch (e: any) {
@@ -387,7 +421,7 @@ export function makeModuleResolver(
             }
         }
         if (isUrlSpec(spec)) {
-            deps.add(spec);
+            addDep(spec);
             return loadPackage(spec);
         }
         const found = lookup(importer, spec);
@@ -400,15 +434,21 @@ export function makeModuleResolver(
             throw new Error(`unknown module "${spec}" — no script named "${spec.replace(/^\.\//, "").replace(/\.(ts|js)$/, "")}"`);
         }
         if (found.kind === "data") {
-            deps.add(found.path);
+            addDep(found.path);
             return parseDataFile(spec, dataFiles.find((d) => d.path === found.path)!);
         }
         const key = found.name;
-        if (cache.has(key)) return cache.get(key);
+        if (cache.has(key)) {
+            addDep(key);
+            for (const d of libDeps.get(key) ?? []) addDep(d);
+            return cache.get(key);
+        }
         const lib = byName.get(key)!;
-        deps.add(lib.name);
+        addDep(lib.name);
         if (compiling.has(key)) return cache.get(key); // cycle: partial exports
         compiling.add(key);
+        const own = new Set<string>();
+        libDeps.set(key, own);
         const moduleObj = { exports: {} as any };
         cache.set(key, moduleObj.exports); // early, for cycles
         const js = toRunnableJs(lib.code);
@@ -417,6 +457,7 @@ export function makeModuleResolver(
         // the lib's own top-level registrations make IT active (it's compiled
         // on its own as a script too); recipes it exports and the importer
         // calls register into the importer's collector
+        loading.push(own);
         try {
             withCollector(createCollector(), { name: lib.name, remote: libOverrides.remote }, () =>
                 scriptFunction(js, lib.name)(
@@ -428,6 +469,7 @@ export function makeModuleResolver(
                 )
             );
         } catch (e) {
+            loading.splice(loading.indexOf(own), 1);
             compiling.delete(key);
             if (isFatalImportError(e)) {
                 cache.delete(key);
@@ -439,6 +481,7 @@ export function makeModuleResolver(
             cache.set(key, stub);
             return stub;
         }
+        loading.splice(loading.indexOf(own), 1);
         compiling.delete(key);
         cache.set(key, moduleObj.exports);
         return moduleObj.exports;
@@ -467,6 +510,30 @@ export function compileWithLibs(
     );
     const c = compileScript(target.code, { name: target.name, importModule: resolver.resolveFrom(target.name), paramValues: paramValues?.[target.id] });
     return { ...c, deps: [...resolver.deps] };
+}
+
+/**
+ * `compileWithLibs` for several of the stored scripts at once (a library
+ * changed: every script importing it): one resolver, so each library is
+ * transpiled and run once for all of them.
+ */
+export function compileManyWithLibs(
+    ids: string[],
+    scripts: { id: string; name: string; code: string }[],
+    paramValues?: { [scriptId: string]: Record<string, any> | undefined },
+    dataFiles?: DataFileSource[],
+    packages?: PackageModules
+): Map<string, CompiledScript & { deps: string[] }> {
+    const resolver = makeModuleResolver(scripts, (lib) => ({ paramValues: paramValues?.[lib.id] }), { stubUnresolved: true, dataFiles, packages });
+    const out = new Map<string, CompiledScript & { deps: string[] }>();
+    for (const id of ids) {
+        const s = scripts.find((x) => x.id === id);
+        if (!s) continue;
+        resolver.deps.clear();
+        const c = compileScript(s.code, { name: s.name, importModule: resolver.resolveFrom(s.name), paramValues: paramValues?.[s.id] });
+        out.set(id, { ...c, deps: [...resolver.deps] });
+    }
+    return out;
 }
 
 /**

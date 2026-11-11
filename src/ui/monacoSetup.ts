@@ -119,6 +119,9 @@ export async function loadMonaco(): Promise<any> {
         { content: JSON_FALLBACK_DTS, filePath: "file:///__wt__/json-modules.d.ts" },
     ]);
     monacoApi.languages.typescript.typescriptDefaults.setCompilerOptions(editorCompilerOptions(monacoApi.languages.typescript));
+    // the worker gets every script's model when it (re)starts, not only the
+    // one being checked: imports resolve at once instead of briefly failing
+    monacoApi.languages.typescript.typescriptDefaults.setEagerModelSync(true);
     registerTsHover(monacoApi);
     monacoApi.languages.json?.jsonDefaults?.setDiagnosticsOptions({
         validate: true,

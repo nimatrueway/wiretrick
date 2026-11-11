@@ -4,7 +4,7 @@
 import { whileBusy } from "./busy";
 import { dependantsOf, folderOf } from "../../shared/scriptImports";
 import type { ResMeta } from "../../shared/metaParser";
-import { compileForStorage, SANDBOX_COMPILE_FAILED } from "../compileHost";
+import { compileForStorage, compileManyForStorage, SANDBOX_COMPILE_FAILED } from "../compileHost";
 import { ensurePackages, packageUrlsIn, prunePackages } from "./packageImports";
 import { dlogLevel } from "../../shared/debugLog";
 import { clearScriptErrors, clearScriptTypeErrors, log } from "./logs";
@@ -91,6 +91,7 @@ export function saveScript(partial: Pick<Script, "id" | "code"> & Partial<Script
 }
 
 async function saveScriptNow(partial: Pick<Script, "id" | "code"> & Partial<Script> & { name?: string }): Promise<Script> {
+    const t0 = performance.now();
     const obj = await storageGet([STORE_KEY, ORDER_KEY]);
     const byId: { [id: string]: Script } = obj[STORE_KEY] || {};
     const order: string[] = obj[ORDER_KEY] || Object.keys(byId);
@@ -148,7 +149,9 @@ async function saveScriptNow(partial: Pick<Script, "id" | "code"> & Partial<Scri
             for (const id of [x.id, ...dependantsOf(x.meta.name, plain(byId))]) if (id !== script.id && !importers.includes(id)) importers.push(id);
         }
     }
+    const t1 = performance.now();
     if (importers.length) await recompileMeta(byId, importers, allValues);
+    const t2 = performance.now();
     const items: Record<string, any> = { [STORE_KEY]: byId, [ORDER_KEY]: order };
     // moved out of a folder: the folder stays (as on disk)
     if (prev && folderOf(prev.meta.name) !== folderOf(script.meta.name)) {
@@ -167,6 +170,7 @@ async function saveScriptNow(partial: Pick<Script, "id" | "code"> & Partial<Scri
         const all = Object.values(byId).map((x) => ({ id: x.id, name: x.meta.name, code: x.code }));
         for (const id of dependantsOf(script.meta.name, all)) if (id !== script.id) void clearScriptErrors(id);
     }
+    dlogLevel("compile", "debug", `timing: saved "${script.meta.name}" — ${Math.round(performance.now() - t0)} ms (compile ${Math.round(t1 - t0)}, ${importers.length} importer(s) ${Math.round(t2 - t1)})`);
     notify();
     return script;
 }
@@ -184,11 +188,12 @@ function plain(byId: { [id: string]: Script }): { id: string; name: string; code
  */
 async function recompileMeta(byId: { [id: string]: Script }, ids: string[], allValues: { [scriptId: string]: Record<string, any> }): Promise<string[]> {
     const changed: string[] = [];
+    // one pass for all of them: a library they share is transpiled and run once
+    const compiled = await compileManyForStorage(plain(byId), ids.filter((id) => byId[id]), allValues);
     for (const id of ids) {
         const s = byId[id];
-        if (!s) continue;
-        const c = await compileForStorage(s.code, s.meta.name, allValues[id], { id, scripts: plain(byId), paramValues: allValues });
-        if (c.error === SANDBOX_COMPILE_FAILED) continue; // keep what we have
+        const c = compiled.get(id);
+        if (!s || !c) continue; // not compiled (sandbox host failed): keep what we have
         const meta = { ...c.meta, name: s.meta.name };
         const paramDefs = c.paramDefs ?? s.paramDefs;
         if (JSON.stringify([meta, paramDefs, c.error]) === JSON.stringify([s.meta, s.paramDefs, s.error])) continue;

@@ -7,6 +7,15 @@ its section below.
 
 ## [Unreleased]
 
+### Changed
+
+- Saving a script and hot reload are faster with many scripts. Each script's TypeScript is transpiled once and reused until its code changes. When a library is saved, all the scripts that import it are compiled together in one pass, so each library runs once instead of once per importer. In Firefox and other MV2 browsers, the analysis of all scripts is reused until a script, param, data file or package changes. The debug log's "compile" category now shows how long saves, analyses, reloads and page bundles take (`timing:` lines).
+- The Editor's TypeScript checker loads every open script's model up front, so imports between scripts resolve at once instead of briefly showing errors.
+
+### Fixed
+
+- A library imported by several scripts is now shipped to pages for each of them. Before, only the first script to import it listed the library, so a page that matched only another importer could miss it.
+
 ## [0.26.0-alpha] - 2026-11-11
 
 ### Changed

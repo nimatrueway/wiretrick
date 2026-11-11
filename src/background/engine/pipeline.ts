@@ -578,6 +578,7 @@ export function createPipeline(
      * with every onOverlay route — matching `url` or not, enabled or not.
      */
     async function hookBundle(url: string, top: boolean, preview?: string) {
+        const t0 = performance.now();
         // onSite scripts (hook.ts; the bridge when CSP blocks eval)
         // `v`: the onSite code's version — onPage code tags its calls with it, and the hook waits for that version (hook.ts answerCall)
         const domHandlers: { scriptId: string; name: string; src: string; params: Record<string, any>; v: string }[] = [];
@@ -675,6 +676,7 @@ export function createPipeline(
         }
         // MV3 without user scripts: the overlay's calls into isolated code say why at once
         const isoOff = isoRuns.size && (await userScriptsStatus()) !== "ok" ? USER_SCRIPTS_OFF : undefined;
+        dlogLevel("compile", "debug", `timing: page bundle for ${url.slice(0, 80)} — ${Math.round(performance.now() - t0)} ms`);
         return { bundle: { count: routes.length, routes, textTypes: getTextTypes(), domHandlers, isoHandlers, overlays, libs, isoLibs, ...(isoOff ? { isoOff } : {}) }, overlayRuns, isoRuns, previewWhy };
     }
     installPages();
@@ -1001,6 +1003,7 @@ export function createPipeline(
     }
     async function reloadNow(): Promise<void> {
         const seq = ++reloadSeq;
+        const t0 = performance.now();
         await loadTextTypes();
         await loadDataFiles();
         await loadPackages();
@@ -1014,6 +1017,7 @@ export function createPipeline(
         // also warms the analyze cache so the next getHookBundle is served
         // without waking the sandbox (keeps onDocument document_start early).
         let scripts = stored;
+        const t1 = performance.now();
         try {
             scripts = withAnalyzedMeta(stored, await analyzeScripts(stored.map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt })), paramValues));
         } catch (e: any) {
@@ -1026,12 +1030,14 @@ export function createPipeline(
         const usStatus = isoScripts.length ? await userScriptsStatus(true) : "ok";
         if (seq !== reloadSeq) return; // superseded by a newer reload
         dlog("pipeline", "reload", { total: scripts.length, enabled: scripts.filter((x) => x.enabled).map((x) => x.meta.name) });
+        const t2 = performance.now();
         extensionStrategy.reload(scripts, paramValues);
         pageStrategy.reload(scripts, paramValues);
         cdp.reload(scripts, paramValues);
         helperStrategy.reload(scripts, paramValues);
         rulesApplied = rulesStrategy.reload(scripts, paramValues);
         settledSeq = seq;
+        dlogLevel("compile", "debug", `timing: reload — ${Math.round(performance.now() - t0)} ms (load ${Math.round(t1 - t0)}, analyze ${Math.round(t2 - t1)}, strategies ${Math.round(performance.now() - t2)})`);
         refreshBodyWatch(scripts);
         setSkipRoutes(scripts);
         warnRoutes(scripts, usStatus);

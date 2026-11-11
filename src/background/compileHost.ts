@@ -9,6 +9,7 @@
  * document) — the ONLY eval-permitted context in MV3:
  *
  *   compileForStorage                  → sandbox 'compileOne'
+ *   compileManyForStorage              → sandbox 'compileMany'
  *   analyzeScripts                     → sandbox 'analyze'
  *   runBodyOp                          → sandbox 'run'
  *   probeRules                         → sandbox 'rules'
@@ -16,7 +17,7 @@
  * scriptStore and the pipeline never call compileScript directly; they go
  * through this module.
  */
-import { compileScript, compileWithLibs, makeModuleResolver, withData, type DataFileSource } from "../shared/compile";
+import { compileManyWithLibs, compileScript, compileWithLibs, makeModuleResolver, withData, type DataFileSource } from "../shared/compile";
 import { defaultMeta, type ResMeta } from "../shared/metaParser";
 import type { ParamDef } from "../shared/scriptDef";
 import { dlogLevel } from "../shared/debugLog";
@@ -263,6 +264,47 @@ export async function compileForStorage(
     return { meta: r.meta, paramDefs: r.paramDefs, error: r.error };
 }
 
+type StorageCompiled = { meta: ResMeta; paramDefs: Record<string, ParamDef>; error: string | null };
+
+/**
+ * `compileForStorage` for several stored scripts at once (the importers of
+ * a changed library): one compile pass and, in MV3, one sandbox call, so
+ * the shared libraries are transpiled and run once. A script missing from
+ * the result failed in the sandbox host (keep what's stored).
+ */
+export async function compileManyForStorage(
+    scripts: { id: string; name: string; code: string }[],
+    ids: string[],
+    paramValues: ParamValues
+): Promise<Map<string, StorageCompiled>> {
+    const out = new Map<string, StorageCompiled>();
+    if (!ids.length) return out;
+    const t0 = performance.now();
+    await ensurePackages(scripts.map((s) => s.code));
+    const note = (id: string, r: { meta: ResMeta; paramDefs?: Record<string, ParamDef>; error: string | null; deps?: string[] }) => {
+        const name = scripts.find((s) => s.id === id)?.name;
+        dlogLevel("compile", "debug", `compiled "${name}" → active=${r.meta.active} match=${JSON.stringify(r.meta.match)} params=[${Object.keys(r.paramDefs || {}).join(", ")}] deps=[${(r.deps || []).join(", ")}]${r.error ? " — compile error (in the Problems view)" : ""}`);
+        out.set(id, { meta: r.meta, paramDefs: r.paramDefs || {}, error: r.error });
+    };
+    if (!__MV3__) {
+        await ensureBuiltins(scripts.map((s) => s.code), packagesSnapshot()).catch(() => {});
+        for (const [id, c] of compileManyWithLibs(ids, scripts, paramValues, await ensureDataFiles(), packagesSnapshot())) note(id, c);
+    } else {
+        await ensureOffscreen();
+        const resp = await sandboxCallWithData({ op: "compileMany", ids, scripts, paramValues });
+        for (const id of ids) {
+            const r = resp?.results?.[id];
+            if (r) note(id, r);
+            else dlogLevel("compile", "warn", `compileManyForStorage: sandbox returned nothing for "${scripts.find((s) => s.id === id)?.name}" — its meta is NOT updated`);
+        }
+    }
+    dlogLevel("compile", "debug", `timing: compiled ${ids.length} importer(s) in one pass — ${Math.round(performance.now() - t0)} ms`);
+    return out;
+}
+
+// MV2: the last analyze (every frame's bundle asks; scripts rarely change in between)
+let mv2Analyzed: { key: string; out: Map<string, Analyzed> } | null = null;
+
 /**
  * Analyze ALL scripts (meta.routes/paramDefs/deps) with the stored param
  * values — routes may be built from params. Reload + getHookBundle path.
@@ -289,6 +331,12 @@ export async function analyzeScripts(scripts: { id: string; name: string; code: 
     }
     if (!__MV3__) {
         // MV2: in-page compile, same as before
+        const key = sig + "\n" + JSON.stringify(scripts.map((s) => [s.id, s.name, s.updatedAt]));
+        if (mv2Analyzed?.key === key) {
+            dlogLevel("compile", "debug", `analyze cache hit — ${scripts.length} script(s)`);
+            return new Map(mv2Analyzed.out);
+        }
+        const t0 = performance.now();
         await ensureBuiltins(scripts.map((s) => s.code), packagesSnapshot()).catch(() => {});
         const resolver = makeModuleResolver(
             scripts.map((s) => ({ id: s.id, name: s.name, code: s.code })),
@@ -296,6 +344,7 @@ export async function analyzeScripts(scripts: { id: string; name: string; code: 
             { dataFiles: await ensureDataFiles(), packages: packagesSnapshot() }
         );
         for (const s of scripts) {
+            resolver.deps.clear();
             const c = compileScript(s.code, { name: s.name, importModule: resolver.resolveFrom(s.name), paramValues: paramValues?.[s.id] });
             out.set(s.id, {
                 meta: c.meta,
@@ -304,9 +353,12 @@ export async function analyzeScripts(scripts: { id: string; name: string; code: 
                 deps: [...resolver.deps],
             });
         }
+        mv2Analyzed = { key, out: new Map(out) };
+        dlogLevel("compile", "debug", `timing: analyzed ${scripts.length} script(s) — ${Math.round(performance.now() - t0)} ms`);
         return out;
     }
     await ensureOffscreen();
+    const t0 = performance.now();
     const resp = await sandboxCallWithData({ op: "analyze", scripts: scripts.map((s) => ({ ...s, enabled: true })), paramValues: paramValues || {} });
     if (!resp) {
         dlogLevel("compile", "error", `sandbox analyze FAILED for ${scripts.length} script(s) — the page bundle serves WITHOUT them (no interception/onDocument until the next successful analyze)`);
@@ -317,6 +369,7 @@ export async function analyzeScripts(scripts: { id: string; name: string; code: 
         if (r) out.set(s.id, r);
         else dlogLevel("compile", "warn", `sandbox analyze returned no result for "${s.name}" — it will not intercept in this bundle`);
     }
+    dlogLevel("compile", "debug", `timing: sandbox analyzed ${scripts.length} script(s) — ${Math.round(performance.now() - t0)} ms`);
     await persistAnalyzeCache(
         scripts.filter((s) => out.has(s.id)).map((s) => ({ id: s.id, name: s.name, updatedAt: s.updatedAt, paramSig: sig, analyzed: out.get(s.id)! }))
     );

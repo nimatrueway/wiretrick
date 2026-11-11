@@ -27,7 +27,7 @@
  * Reverse calls (wt.storage.* and script logging) travel the other way
  * with the same reqId pattern.
  */
-import { compileScript, compileWithLibs, withData, isFatalImportError, makeModuleResolver, makeStubModule, type CompiledScript, type DataFileSource, type ResApiOverrides } from "../shared/compile";
+import { compileManyWithLibs, compileScript, compileWithLibs, withData, isFatalImportError, makeModuleResolver, makeStubModule, type CompiledScript, type DataFileSource, type ResApiOverrides } from "../shared/compile";
 import { runOp, type BodyOp, type OpScript } from "../shared/bodyOps";
 import { compileDecision } from "../shared/pac";
 import "../shared/transpile";
@@ -201,6 +201,7 @@ function ensureCompiled(scripts: PlainScript[], paramValues: Record<string, any>
     if (sig === cacheSig && cache.size) return; // unchanged: keep the compiled handlers
     cacheSig = sig;
     cache.clear();
+    const t0 = performance.now();
     // per-script overrides: storage is script-scoped (get(key)), routed
     // through the reverse channel to the SW
     const overridesForScript = (sid: string) => ({
@@ -220,9 +221,7 @@ function ensureCompiled(scripts: PlainScript[], paramValues: Record<string, any>
     // import fails must still run its body so its handlers register
     // (otherwise it silently stores as a utility: 𝑓 icon, never matches).
     // A data file or package that fails to import is the importer's compile error.
-    let currentDeps: Set<string> | null = null;
     const resolveImport = (importer: string) => (spec: string): any => {
-        const before = new Set(resolver.deps);
         try {
             const out = resolver.resolveFrom(importer)(spec);
             sandboxLog(`import "${spec}" → module resolved`, "debug");
@@ -231,13 +230,11 @@ function ensureCompiled(scripts: PlainScript[], paramValues: Record<string, any>
             if (isFatalImportError(e)) throw e;
             sandboxLog(`import "${spec}" → STUB (no script with that name; its exports are inert in meta-only compiles)`, "debug");
             return makeStubModule();
-        } finally {
-            if (currentDeps) for (const d of resolver.deps) if (!before.has(d)) currentDeps.add(d);
         }
     };
     for (const s of scripts) {
-        const deps = new Set<string>();
-        currentDeps = deps;
+        // the resolver adds a cached library's deps for each importer
+        resolver.deps.clear();
         const compiledScript = compileScript(s.code, {
             name: s.name,
             importModule: resolveImport(s.name),
@@ -249,7 +246,7 @@ function ensureCompiled(scripts: PlainScript[], paramValues: Record<string, any>
             logSink: (level, source, text) => scriptLog(s.id, level, scriptLogLine(s.name, source, text)),
             ...liveApis(s.id),
         });
-        currentDeps = null;
+        const deps = new Set(resolver.deps);
         cache.set(s.id, {
             s,
             compiled: compiledScript,
@@ -261,6 +258,7 @@ function ensureCompiled(scripts: PlainScript[], paramValues: Record<string, any>
             },
         });
     }
+    sandboxLog(`timing: ran ${scripts.length} script(s) top level — ${Math.round(performance.now() - t0)} ms`, "debug");
 }
 
 function analyze(scripts: PlainScript[], paramValues: Record<string, any>): { results: Record<string, AnalyzeResult> } {
@@ -291,6 +289,16 @@ function compileOne(
     const summary = `compileOne "${target.name}" → active=${c.meta.active} params=[${Object.keys(c.paramDefs || {}).join(", ")}] deps=[${c.deps.join(", ")}]`;
     sandboxLog(c.error ? `${summary} ERROR ${c.error.split("\n")[0]}` : summary, c.error ? "error" : "debug");
     return { result: { meta: c.meta, paramDefs: c.paramDefs || {}, error: c.error, deps: c.deps } };
+}
+
+function compileMany(ids: string[], scripts: { id: string; name: string; code: string }[], paramValues: Record<string, any>): { results: Record<string, AnalyzeResult> } {
+    const results: Record<string, AnalyzeResult> = {};
+    for (const [id, c] of compileManyWithLibs(ids, scripts || [], paramValues || {}, dataFiles, packages)) {
+        results[id] = { meta: c.meta, paramDefs: c.paramDefs || {}, error: c.error, deps: c.deps };
+        const summary = `compileMany "${scripts.find((s) => s.id === id)?.name}" → active=${c.meta.active} params=[${Object.keys(c.paramDefs || {}).join(", ")}] deps=[${c.deps.join(", ")}]`;
+        sandboxLog(c.error ? `${summary} ERROR ${c.error.split("\n")[0]}` : summary, c.error ? "error" : "debug");
+    }
+    return { results };
 }
 
 // ---- body ops: shared chain semantics (src/shared/bodyOps.ts) ----
@@ -393,6 +401,9 @@ window.addEventListener("message", async (event) => {
         } else if (op === "compileOne") {
             await builtins([data.payload.target, ...(scripts || [])]);
             result = compileOne(data.payload.target, scripts, paramValues, data.payload.extraData);
+        } else if (op === "compileMany") {
+            await builtins(scripts || []);
+            result = compileMany(data.payload.ids || [], scripts, paramValues);
         }
         else if (op === "pac") result = { result: pacDecision(data.payload.source)(args.url, args.host) };
         else result = { error: `unknown op ${op}` };
