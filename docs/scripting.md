@@ -381,6 +381,41 @@ A parser that throws is a script error naming the param, e.g.
 shows its error indicator and the Log an ERROR line, like any other load
 error. For `enum`, `parse` receives the choice typed as `string`.
 
+### Changing params from code
+
+The object `wt.params` returns can be changed, like a valtio proxy. Assign
+a param, or change a list in place, from a handler: onPage, onOverlay or
+network code.
+
+```ts
+const cfg = wt.params({
+    enabled: { type: "boolean", default: true },
+    hosts:   { type: "stringList", default: [] },
+});
+
+wt.onOverlay("*://app.example.com/*", (ctx) => {
+    const btn = ctx.once("btn", () => document.body.appendChild(document.createElement("button")));
+    btn.textContent = cfg.enabled ? "Mock: on" : "Mock: off";
+    btn.onclick = () => (cfg.enabled = !cfg.enabled);
+    ctx.shortcut("Alt+H", () => cfg.hosts.push(new URL(ctx.url).host));
+});
+```
+
+The new value is checked against the param's type: a wrong type, an
+unknown choice or an unknown name throws. The code sees it right away, and
+it's saved like a change in the ⚙ dialog: the Log shows
+`param enabled = false (set by the script)`, `settings.yaml` gets it, and
+the script hot-reloads with it (what you keep with `ctx.once` stays).
+Changes made in one go are saved once per param, with the last value.
+
+- Not from the top level: each change re-runs the script, so it would
+  never settle. Doing it throws.
+- Not from onSite code: it runs in the site's world, where the site's own
+  code could reach the setter.
+- A param with `parse` can't be assigned; change it in ⚙ or
+  `settings.yaml`.
+- A library's params can be changed by any script that imports it.
+
 ## Libraries and recipes
 
 A file that registers no handlers is a **library**: it never runs on its

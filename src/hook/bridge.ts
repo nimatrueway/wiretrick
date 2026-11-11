@@ -498,6 +498,8 @@ import type { RanApi } from "../shared/netTypes";
                     get: (key: string) => new Promise((r) => safeSend({ type: "scriptStorageGet", scriptId, key }, (x: any) => r(x && x.value))),
                     set: (key: string, value: any) => new Promise((r) => safeSend({ type: "scriptStorageSet", scriptId, key, value }, () => r(null))),
                 },
+                // isolated code (MV2: here) saves params for its script (`storesOf`) or that script's library
+                setParam: world === "isolated" && storesOf ? (key, value, lib) => new Promise((r) => safeSend({ type: "scriptParamSet", scriptId: storesOf, key, value, lib }, () => r())) : undefined,
             });
         for (const h of handlers) {
             let exposer = exposers.get(h.scriptId);
@@ -873,6 +875,7 @@ import type { RanApi } from "../shared/netTypes";
         ep.handle("pagefetch", mine((a: ReqOf<"pagefetch">) => pageFetch(s, a.request, !!a.bypass)));
         ep.handle("storage.get", mine((a: ReqOf<"storage.get">) => new Promise((r) => safeSend({ type: "scriptStorageGet", scriptId: s, key: a.key }, (x: any) => r({ value: x?.value })))));
         ep.handle("storage.set", mine((a: ReqOf<"storage.set">) => new Promise((r) => safeSend({ type: "scriptStorageSet", scriptId: s, key: a.key, value: a.value }, () => r({})))));
+        ep.handle("param.set", mine((a: ReqOf<"param.set">) => new Promise((r) => safeSend({ type: "scriptParamSet", scriptId: s, key: a.key, value: a.value, lib: a.lib }, () => r({})))));
         ep.on("log", (a) => proven && scriptLog(s, ["debug", "info", "warn", "error"].includes(a?.level) ? a.level : "info", String(a?.msg ?? ""), "overlay"));
         ep.on("rects", (a) => {
             if (proven && o.frame && Array.isArray(a?.rects)) o.frame.style.clipPath = clipPathFor(normalizeRects(a.rects, window.innerWidth, window.innerHeight));

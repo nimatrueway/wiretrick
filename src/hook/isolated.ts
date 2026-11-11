@@ -236,6 +236,7 @@ import { FrameShortcuts } from "../shared/shortcut";
                     get: (key: string) => linkUp().then((ep) => ep.call("storage.get", { key }, s)).then((r) => r.value, () => undefined),
                     set: (key: string, value: any) => linkUp().then((ep) => ep.call("storage.set", { key, value }, s)).then(() => null, () => null),
                 },
+                setParam: (key, value, lib) => linkUp().then((ep) => ep.call("param.set", { key, value, lib }, s)).then(() => undefined),
             });
         const consoleProxy = makeScriptConsole((level, source, text) => log(level, scriptLogLine(init.name, source, text)));
         let dom: PageDocumentHandler[];

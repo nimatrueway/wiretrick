@@ -181,6 +181,10 @@ if (__MV3__) {
             sendResponse({});
             return false;
         }
+        if (payload.op === "paramSet") {
+            import("./engine/scriptStore").then(({ setParamFromCode }) => setParamFromCode(payload.scriptId, payload.key, payload.value)).then(() => sendResponse({}), () => sendResponse({}));
+            return true;
+        }
         if (payload.op === "storageGet" || payload.op === "storageSet") {
             void (async () => {
                 const { scriptStorageGet, scriptStorageSet } = await import("./engine/scriptStore");

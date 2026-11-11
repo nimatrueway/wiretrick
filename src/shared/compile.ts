@@ -7,6 +7,7 @@
 import { defaultMeta, finishMeta, type ResMeta } from "./metaParser";
 import { readMetadata } from "./packageMetadata";
 import { parseParamValue, resolveParamValues, serializableParamDef, type ParamDef } from "./scriptDef";
+import { paramsProxy, PARAM_AT_TOP, PARAM_NOT_HERE } from "./paramsProxy";
 import { parseShortcut } from "./shortcut";
 import { formatLogArgs, makeScriptConsole, type ScriptLogLevel } from "./scriptLog";
 import { scriptFunction } from "./scriptFn";
@@ -94,6 +95,8 @@ export interface ResApiOverrides {
     pageFetch?: { url: string; fetch: (request: WireRequest, bypass: boolean) => Promise<WireResponse> };
     /** what a `wt.onSite` / `wt.onPage` / `wt.onOverlay` registration returns (default: an inert handle) */
     remote?: (route: RouteMeta) => any;
+    /** a param assigned by the code (`cfg.on = false`): save it like the ⚙ panel (absent: params can't change) */
+    setParam?: (key: string, value: any) => Promise<void>;
 }
 
 /** Standard overrides for a stored script: storage wired by id, log → sink. */
@@ -103,7 +106,7 @@ export function makeScriptOverrides(
     logSink: (scriptId: string, level: ScriptLogLevel, source: string, text: string) => void,
     paramValues?: Record<string, any>,
     importModule?: (spec: string) => any,
-    extra?: Pick<ResApiOverrides, "store" | "pageStore" | "fetch">
+    extra?: Pick<ResApiOverrides, "store" | "pageStore" | "fetch" | "setParam">
 ): ResApiOverrides {
     return {
         ...extra,
@@ -544,10 +547,16 @@ function createOwner(meta: ResMeta, storedValues?: Record<string, any>) {
             if (meta.metadata.description) meta.description = meta.metadata.description;
         },
         add(next: Record<string, ParamDef>, where: string): Record<string, any> {
+            const r = this.declare(next, where);
+            if (isStub(r)) return r;
+            return { ...Object.fromEntries(Object.entries(r.known).map(([k, d]) => [k, parseParamValue(k, d, r.raw[k])])), ...r.unknown };
+        },
+        /** `next` declared: its defs (with their parsers), raw values, and the stubbed ones' values */
+        declare(next: Record<string, ParamDef>, where: string): { known: Record<string, ParamDef>; raw: Record<string, any>; unknown: Record<string, any> } {
             // defs that come from a stubbed import (meta-only compiles) are
             // unknown here, not invalid: skip them — their values read as
             // stubs — instead of failing the whole script
-            if (isStub(next)) return next;
+            if (isStub(next)) return next as any;
             if (!next || typeof next !== "object") throw new Error(`${where}: expected an object of parameter definitions`);
             // `known` keeps the parsers (to resolve values); `defs` — stored,
             // messaged, diffed — holds them stripped
@@ -573,9 +582,7 @@ function createOwner(meta: ResMeta, storedValues?: Record<string, any>) {
                 known[k] = d;
             }
             if (Object.keys(known).length) defs = { ...(defs || {}), ...Object.fromEntries(Object.entries(known).map(([k, d]) => [k, serializableParamDef(d)])) };
-            const raw = resolveParamValues(known, storedValues);
-            const values = Object.fromEntries(Object.entries(known).map(([k, d]) => [k, parseParamValue(k, d, raw[k])]));
-            return { ...values, ...unknown };
+            return { known, raw: resolveParamValues(known, storedValues), unknown };
         },
         get defs() {
             return defs;
@@ -694,8 +701,13 @@ function makeShim(owner: ReturnType<typeof createOwner>, overrides: ResApiOverri
         onOverlay: place("onOverlay"),
         metadata: (m: unknown) => owner.metadata(m),
         params: (defs: Record<string, ParamDef>) => {
-            const values = owner.add(defs, "wt.params");
-            return isStub(values) ? values : Object.freeze(values); // a stub proxy can't be frozen
+            const r = owner.declare(defs, "wt.params");
+            if (isStub(r)) return r;
+            const setParam = overrides?.setParam;
+            return paramsProxy(r.known, r.raw, r.unknown, {
+                blocked: () => (collectors.length ? PARAM_AT_TOP : setParam ? undefined : PARAM_NOT_HERE),
+                send: (k, v) => void setParam!(k, v).catch(() => {}),
+            });
         },
         defineParam: (name: string, def: ParamDef) => {
             if (typeof name !== "string" || !name) throw new Error("wt.defineParam: first argument must be the parameter name");

@@ -187,8 +187,9 @@ function compileSignature(scripts: PlainScript[], paramValues: Record<string, an
  * the param values change (runs are per-request — reuse the handlers).
  */
 /** a script's wt.globalStore / wt.pageStore (hub replicas) and wt.fetch (run by the SW) */
-function liveApis(sid: string): Pick<ResApiOverrides, "store" | "pageStore" | "fetch"> {
+function liveApis(sid: string): Pick<ResApiOverrides, "store" | "pageStore" | "fetch" | "setParam"> {
     return {
+        setParam: (key, value) => reverseCall({ op: "paramSet", scriptId: sid, key, value }).then(() => undefined),
         store: (name, initial, persist) => hub.store(sid, name, initial, persist),
         pageStore: (name, initial) => hub.pageStore(sid, name, initial),
         fetch: (request, bypass) => link.call("fetch", { request, bypass }, sid),

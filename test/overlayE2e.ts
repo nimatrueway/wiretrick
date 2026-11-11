@@ -808,6 +808,40 @@ export async function checkPlaces(ctx: any, mgr: any, origin: string, check: Che
     await p2.close();
     await send({ type: "deleteScript", id: "s_layer_user" });
     await send({ type: "deleteScript", id: "s_layer_lib" });
+
+    // wt.params is assignable from onPage and onOverlay code: saved like a ⚙ change, and the script re-runs with it
+    const ps = await send({ type: "saveScript", id: "s_param_set", name: "param-set.wiretrick", code: `const cfg = wt.params({ on: { type: "boolean", default: true }, hits: { type: "stringList", default: [] } });
+wt.onPage("${u}", (ctx) => {
+    document.body.dataset.paramOn = cfg.on + "|" + cfg.hits.join(",");
+    const b = ctx.once("b", () => { const b = document.body.appendChild(document.createElement("button")); b.id = "pflip"; return b; });
+    b.onclick = () => { cfg.on = !cfg.on; cfg.hits.push("page"); };
+});
+wt.onOverlay("${u}", (ctx) => {
+    const o = ctx.once("o", () => { const o = document.body.appendChild(document.createElement("button")); o.id = "oflip"; return o; });
+    o.textContent = cfg.on + "|" + cfg.hits.join(",");
+    o.onclick = () => { cfg.on = !cfg.on; cfg.hits.push("ov"); };
+});` });
+    check(t("params: a script that changes them saves"), !ps?.error, ps?.error);
+    await mgr.waitForTimeout(800);
+    const p3 = await ctx.newPage();
+    p3.on("console", (m: any) => console.log("  [param-set]", m.text().slice(0, 160)));
+    await p3.goto(`${origin}/ov-layer`, { waitUntil: "load", timeout: 15000 });
+    const before = await waitFor<string>(() => p3.evaluate(() => document.body.dataset.paramOn || ""), (v) => !!v, 8000);
+    check(t("params: onPage reads the defaults"), before === "true|", before);
+    await p3.evaluate(() => document.getElementById("pflip")?.click());
+    const afterPage = await waitFor<string>(() => p3.evaluate(() => document.body.dataset.paramOn || ""), (v) => v === "false|page", 8000);
+    check(t("params: onPage code assigns a param and pushes to a list; the script re-runs with them"), afterPage === "false|page", afterPage);
+    const stored = await send({ type: "getScriptParams", scriptId: "s_param_set" });
+    check(t("params: the change is saved like a ⚙ change"), stored?.values?.on === false && JSON.stringify(stored?.values?.hits) === '["page"]', JSON.stringify(stored?.values));
+    const f3 = await overlayFrame(p3, "#oflip");
+    const ovBefore = f3 ? await waitFor<string>(() => f3.evaluate(() => document.getElementById("oflip")?.textContent || "").catch(() => ""), (v) => v === "false|page", 8000) : "";
+    check(t("params: the overlay re-ran with the page's change"), ovBefore === "false|page", ovBefore);
+    await f3?.evaluate(() => document.getElementById("oflip")?.click()).catch(() => {});
+    const ovAfter = f3 ? await waitFor<string>(() => f3.evaluate(() => document.getElementById("oflip")?.textContent || "").catch(() => ""), (v) => v === "true|page,ov", 8000) : "";
+    const pageAfter = await waitFor<string>(() => p3.evaluate(() => document.body.dataset.paramOn || ""), (v) => v === "true|page,ov", 8000);
+    check(t("params: onOverlay code changes them too; the page's onPage re-runs with them"), ovAfter === "true|page,ov" && pageAfter === "true|page,ov", `${ovAfter} / ${pageAfter}`);
+    await p3.close();
+    await send({ type: "deleteScript", id: "s_param_set" });
 }
 
 const isoStoreCode = (origin: string) => `import { createElement } from "react";

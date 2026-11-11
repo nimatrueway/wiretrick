@@ -167,6 +167,23 @@ const host = wt.defineParam("host", { type: "string" });
         });
     });
 
+    it("params without parse are assignable, with their raw type; with parse, read-only", () => {
+        const ok = typesOf(`export {};
+const cfg = wt.params({ on: { type: "boolean" }, mode: { type: "enum", choices: ["a", "b"] }, list: { type: "stringList" } });
+cfg.on = false;
+cfg.mode = "b";
+cfg.list.push("x");
+`);
+        expect(ok.errors).toEqual([]);
+        const bad = typesOf(`export {};
+const cfg = wt.params({ mode: { type: "enum", choices: ["a", "b"] }, url: { type: "string", parse: (s) => new URL(s) } });
+cfg.mode = "c";
+cfg.url = new URL("https://a.com");
+`);
+        expect(bad.errors.join("\n")).toMatch(/"c"' is not assignable/);
+        expect(bad.errors.join("\n")).toMatch(/read-only property/);
+    });
+
     it("rejects a parser whose input doesn't match the param type", () => {
         const { errors } = typesOf(`wt.params({ n: { type: "number", parse: (s: string) => s } });`);
         expect(errors.join("\n")).toMatch(/not assignable/);

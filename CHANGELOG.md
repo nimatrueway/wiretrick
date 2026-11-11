@@ -7,6 +7,10 @@ its section below.
 
 ## [Unreleased]
 
+### Changed
+
+- The object `wt.params` returns can now be changed, like a valtio proxy. Assign a param (`cfg.enabled = false`) or change a list in place (`cfg.hosts.push("a.com")`) from onPage, onOverlay or network handler code. The value is checked against the param's type, the code sees it right away, and it's saved like a change in the ⚙ dialog: logged, written to `settings.yaml`, and the script hot-reloads with it. It throws at the top level (each change re-runs the script), in onSite code, and for params with `parse`. A library's params can be changed by scripts that import it.
+
 ### Fixed
 
 - `wt.onSite`, `wt.onPage` and `wt.onOverlay` handlers that a library's exported function registers, when a script calls it from its top level, now run on the page. Before, the Editor listed them but the page skipped them, and their names could clash with the script's own handlers.

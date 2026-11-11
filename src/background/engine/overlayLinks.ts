@@ -118,6 +118,8 @@ export interface OverlayLinkDeps {
     userScriptsOff?(): Promise<boolean>;
     storageGet?(s: string, key: string): Promise<any>;
     storageSet?(s: string, key: string, value: any): Promise<void>;
+    /** script `s`'s code assigned a param (`lib`: an imported library's) */
+    paramSet?(s: string, key: string, value: any, lib?: string): Promise<void>;
     log?(tabId: number, s: string, level: ScriptLogLevel, msg: string, ctx: string): void;
     /** isolated onPage code ran on the frame's document */
     ran?(tabId: number, s: string, name: string, api: string, url: string): void;
@@ -424,6 +426,11 @@ export function serveIsoLink(link: IsoLink): void {
         await deps.storageSet?.(s, key, value);
         return {};
     });
+    ep.handle("param.set", async ({ key, value, lib }, s) => {
+        if (!bound(s)) throw new Error("param.set: refused");
+        await deps.paramSet?.(s, key, value, lib);
+        return {};
+    });
     // isolated code calls its overlay (top frame only)
     ep.on("rpc.call", (call, s) => {
         if (!bound(s) || !isRpcCall(call)) return;
@@ -546,6 +553,10 @@ export function servePreviewLink(ep: Endpoint, tabId?: number): void {
         const g = granted("storage.set", s);
         if (typeof key !== "string") throw new Error("storage.set: refused");
         await deps.storageSet?.(g.s, key, value);
+        return {};
+    });
+    ep.handle("param.set", async ({ key, value, lib }, s) => {
+        await deps.paramSet?.(granted("param.set", s).s, key, value, lib);
         return {};
     });
     ep.on("log", (a, s) => {

@@ -13,7 +13,7 @@ import { IS_FIREFOX, onHelperActiveChange, helperActive, strategyUnavailable } f
 import type { HeaderChanges } from "./strategies/types";
 import type { Script } from "./scriptStore";
 import {
-    listScripts, getScript, onScriptsChanged, saveScript, deleteScript, setEnabled, newId, scriptStorageGet, scriptStorageSet, loadAllParamValues, getParamValues, setParamValue,
+    listScripts, getScript, onScriptsChanged, saveScript, deleteScript, setEnabled, newId, scriptStorageGet, scriptStorageSet, loadAllParamValues, getParamValues, setParamValue, setParamFromCode,
     listDataFiles, getDataFile, saveDataFile, deleteDataFile, listFolders, createFolder, renameFolder, deleteFolder,
 } from "./scriptStore";
 import { loadDataFiles } from "./dataFiles";
@@ -685,6 +685,7 @@ export function createPipeline(
         userScriptsOff: async () => (await userScriptsStatus()) !== "ok",
         storageGet: (s, key) => scriptStorageGet(s, key),
         storageSet: async (s, key, value) => void (await scriptStorageSet(s, key, value)),
+        paramSet: (s, key, value, lib) => setParamFromCode(s, key, value, lib),
         log: (tabId, s, level, msg, ctx) => log(tabId, msg, level, s, undefined, undefined, undefined, ctx),
         ran: (tabId, s, name, api, url) => noteRan(tabId, s, name, api, url),
         previewRun: async (s) => {
@@ -918,6 +919,10 @@ export function createPipeline(
                 }
                 sendResponse({});
             })();
+            return true;
+        }
+        if (msg && msg.type === "scriptParamSet") {
+            setParamFromCode(msg.scriptId, msg.key, msg.value, msg.lib).then(() => sendResponse({}), () => sendResponse({}));
             return true;
         }
         if (msg && msg.type === "scriptStorageSet") {

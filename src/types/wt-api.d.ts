@@ -869,9 +869,14 @@ declare namespace Wiretrick {
      */
     type ParamValue<D extends ParamDef> = D extends { parse: (raw: never) => infer R } ? R : ParamRawValue<D>;
 
-    /** Resolved parameter values, typed from the defs you passed. */
+    /**
+     * Resolved parameter values, typed from the defs you passed. Assignable
+     * from handler code (`cfg.on = false`), except params with `parse`.
+     */
     type ParamsOf<T extends Record<string, ParamDef>> = {
-        readonly [K in keyof T]: ParamValue<T[K]>;
+        -readonly [K in keyof T as T[K] extends { parse: Function } ? never : K]: ParamValue<T[K]>;
+    } & {
+        readonly [K in keyof T as T[K] extends { parse: Function } ? K : never]: ParamValue<T[K]>;
     };
 
 }
@@ -1149,6 +1154,14 @@ declare const wt: {
      * that registers handlers only for some value becomes a script then).
      * Definitions may come from an import (`{ env: envParam }`, `{ ...defs }`).
      *
+     * The values can be changed, like a valtio proxy: assign one
+     * (`cfg.enabled = false`) or change a list in place
+     * (`cfg.hosts.push("a.com")`) from a handler — onPage, onOverlay or
+     * network code, not onSite code and not the top level. The value is
+     * checked against its type (a wrong one throws), seen right away, and
+     * saved like a ⚙ change: logged, written to settings.yaml, and the
+     * script hot-reloads with it. A param with `parse` can't be assigned.
+     *
      * @param defs Parameter name → definition (`type`, `default`, optional
      *   `description` and `parse`); see {@link Wiretrick.ParamDef}. With
      *   `parse`, the param's value is the parser's result (raw value in,
@@ -1164,6 +1177,14 @@ declare const wt: {
      *
      * wt.onRequest({ url: cfg.hosts.map((h) => `*://${h}/api/*`), strategy: "helper" }, () => {
      *     if (cfg.enabled) return { replaceResponse: { status: Number(cfg.status), body: { error: "forced" } } };
+     * });
+     *
+     * @example
+     * // a page button turns the mock off and on (saved, the script re-runs)
+     * wt.onOverlay("*://app.example.com/*", (ctx) => {
+     *     const btn = ctx.once("btn", () => document.body.appendChild(document.createElement("button")));
+     *     btn.textContent = cfg.enabled ? "Mock: on" : "Mock: off";
+     *     btn.onclick = () => (cfg.enabled = !cfg.enabled);
      * });
      *
      * @example

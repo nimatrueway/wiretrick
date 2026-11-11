@@ -204,6 +204,7 @@ export function attachFrame(win: Window | null | undefined): void {
     );
     ep.handle("storage.get", mine((a: ReqOf<"storage.get">) => up.call("storage.get", a, s)));
     ep.handle("storage.set", mine((a: ReqOf<"storage.set">) => up.call("storage.set", a, s)));
+    ep.handle("param.set", mine((a: ReqOf<"param.set">) => up.call("param.set", a, s)));
     ep.on("log", (a) => proven && up.push("log", a, s));
     ep.on("rpc.call", (c) => proven && isRpcCall(c) && ep.push("rpc.result", { cid: c.cid, ok: false, error: { name: "WtCallError", message: NO_PAGE_IN_PREVIEW } }));
     // the checkerboard "page" holds the overlay's `wt.siteStore`s, for the frame's life

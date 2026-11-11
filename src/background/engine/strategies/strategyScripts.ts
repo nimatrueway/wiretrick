@@ -8,7 +8,7 @@ import { effectiveStrategy, isNetKind, type RouteMeta, type Strategy } from "../
 import type { ResMeta } from "../../../shared/metaParser";
 import { scriptLogLine } from "../../../shared/scriptLog";
 import { log } from "../logs";
-import { scriptStorageGet, scriptStorageSet } from "../scriptStore";
+import { scriptStorageGet, scriptStorageSet, setParamFromCode } from "../scriptStore";
 import { dataFilesSnapshot } from "../dataFiles";
 import { packagesSnapshot } from "../packageImports";
 import { backgroundHub } from "../stores";
@@ -60,6 +60,7 @@ export function compileMv2(scripts: ScriptLike[], paramValues: { [scriptId: stri
             store: (name, initial, persist) => backgroundHub().store(s.id, name, initial, persist),
             pageStore: (name, initial) => backgroundHub().pageStore(s.id, name, initial),
             fetch: (request, bypass) => backgroundFetch(request, { bypass, scriptId: s.id, scriptName: s.name }),
+            setParam: (key, value) => setParamFromCode(s.id, key, value),
         });
     resolveFrom = makeModuleResolver(
         scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code })),

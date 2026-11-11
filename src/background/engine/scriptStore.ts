@@ -7,7 +7,8 @@ import type { ResMeta } from "../../shared/metaParser";
 import { compileForStorage, SANDBOX_COMPILE_FAILED } from "../compileHost";
 import { ensurePackages, packageUrlsIn, prunePackages } from "./packageImports";
 import { dlogLevel } from "../../shared/debugLog";
-import { clearScriptErrors, clearScriptTypeErrors } from "./logs";
+import { clearScriptErrors, clearScriptTypeErrors, log } from "./logs";
+import { isValidParamValue, resolveParamValues } from "../../shared/scriptDef";
 import { DATA_FILES_KEY, FOLDERS_KEY, MAX_DATA_FILE, setDataFilesSnapshot, type DataFile } from "./dataFiles";
 import { allFolders, ancestorFolders, isInFolder, movedPath, stackingOrder } from "../../shared/folders";
 import { dataFilePathProblem, folderPathProblem, scriptNameProblem, scriptFileKey } from "../../shared/scriptName";
@@ -511,7 +512,48 @@ export async function getParamValues(scriptId: string): Promise<Record<string, a
     return (await loadAllParamValues())[scriptId] || {};
 }
 
-export async function setParamValue(scriptId: string, key: string, value: any): Promise<void> {
+/**
+ * A script's code assigned a param (`cfg.on = false`, shared/paramsProxy):
+ * saved like a ⚙ change and logged. `lib`: a library's param, which the
+ * script (`scriptId`) must import.
+ */
+// one write at a time: each reads, changes and writes back all values, so
+// two at once (code setting two params in one click) would lose one
+let paramWrites: Promise<void> = Promise.resolve();
+function oneParamWrite(fn: () => Promise<void>): Promise<void> {
+    const run = paramWrites.then(fn);
+    paramWrites = run.catch(() => {});
+    return run;
+}
+
+export function setParamFromCode(scriptId: string, key: unknown, value: unknown, lib?: unknown): Promise<void> {
+    return oneParamWrite(() => paramFromCode(scriptId, key, value, lib));
+}
+
+async function paramFromCode(scriptId: string, key: unknown, value: unknown, lib?: unknown): Promise<void> {
+    const byId: { [id: string]: Script } = (await storageGet(STORE_KEY))[STORE_KEY] || {};
+    const s = byId[scriptId];
+    if (!s || typeof key !== "string") return;
+    let t: Script | undefined = s;
+    if (lib !== undefined) {
+        const users = typeof lib === "string" ? dependantsOf(lib, plain(byId)) : [];
+        t = Object.values(byId).find((x) => x.meta.name === lib && users.includes(scriptId));
+        if (!t) return log(-1, `[${s.meta.name}] param ${key}: ${JSON.stringify(lib)} isn't a library this script imports`, "error", scriptId);
+    }
+    const def = t.paramDefs && Object.prototype.hasOwnProperty.call(t.paramDefs, key) ? t.paramDefs[key] : undefined;
+    if (!def) return log(-1, `[${t.meta.name}] param ${key}: there's no such parameter`, "error", scriptId);
+    if (!isValidParamValue(def, value)) return log(-1, `[${t.meta.name}] param ${key} can't be ${JSON.stringify(value)}`, "error", scriptId);
+    const now = resolveParamValues({ [key]: def }, await getParamValues(t.id))[key];
+    if (JSON.stringify(now) === JSON.stringify(value)) return;
+    await writeParamValue(t.id, key, value);
+    log(-1, `[${t.meta.name}] param ${key} = ${JSON.stringify(value)} (set by ${t === s ? "the script" : s.meta.name})`, "info", t.id);
+}
+
+export function setParamValue(scriptId: string, key: string, value: any): Promise<void> {
+    return oneParamWrite(() => writeParamValue(scriptId, key, value));
+}
+
+async function writeParamValue(scriptId: string, key: string, value: any): Promise<void> {
     const all = await loadAllParamValues();
     all[scriptId] = { ...(all[scriptId] || {}), [key]: value };
     await storageSet({ [PARAMS_KEY]: all });

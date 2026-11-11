@@ -22,6 +22,7 @@ import type { Exposer } from "./rpc";
 import type { Generation, ScriptLife } from "./runLifecycle";
 import { parseParamValue, type ParamDef } from "./scriptDef";
 import { libBodyRunning } from "./scriptImports";
+import { paramsProxy, PARAM_AT_TOP, PARAM_NOT_HERE, PARAM_ON_SITE } from "./paramsProxy";
 import { scriptEnv } from "./scriptEnv";
 import { claimStoreName, storePersist } from "./storeOps";
 
@@ -59,6 +60,12 @@ export interface PageShimOptions {
      * the script — is the script's; its own top level's isn't
      */
     lib?: string;
+    /**
+     * a param the code assigned (`cfg.on = false`), to be saved — `lib`:
+     * a library's (this shim's `lib`). Absent: params can't change here
+     * (onSite code never can).
+     */
+    setParam?: (key: string, value: any, lib?: string) => Promise<void>;
 }
 
 type Register = (api: PlaceApi) => (route: unknown, fn: unknown, n?: number, lib?: string) => any;
@@ -144,7 +151,14 @@ export function makePageShim(o: PageShimOptions): PageShim {
         },
         fetch: () => Promise.reject(new Error(NO_FETCH)),
         metadata: inert,
-        params: (defs: Record<string, ParamDef>) => Object.freeze(Object.fromEntries(Object.entries(defs || {}).map(([k, d]) => [k, parsed(k, d)]))),
+        params: (defs: Record<string, ParamDef>) => {
+            const known = Object.fromEntries(Object.entries(defs || {}).filter(([, d]) => d && typeof d === "object"));
+            const unknown = Object.fromEntries(Object.entries(defs || {}).filter(([, d]) => !d || typeof d !== "object").map(([k]) => [k, o.params[k]]));
+            return paramsProxy(known, o.params, unknown, {
+                blocked: () => (world === "page" ? PARAM_ON_SITE : running || libBodyRunning() ? PARAM_AT_TOP : o.setParam ? undefined : PARAM_NOT_HERE),
+                send: (k, v) => void o.setParam!(k, v, o.lib).catch(() => {}),
+            });
+        },
         defineParam: (name: string, def: ParamDef) => parsed(name, def),
         log: o.log,
         storage: o.storage,

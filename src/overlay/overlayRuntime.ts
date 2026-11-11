@@ -144,6 +144,7 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
             get: async (key) => (await ep.call("storage.get", { key })).value,
             set: async (key, value) => void (await ep.call("storage.set", { key, value })),
         },
+        setParam: async (key, value) => void (await ep.call("param.set", { key, value })),
         logSink: (level, source, text) => log(level, scriptLogLine(init.name, `overlay ${source}`, text)),
         store: (name, initial, persist) => hub.store(s, name, initial, persist),
         // the overlay's own page's copy
@@ -189,7 +190,7 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
         const requireFrom = makeLibRequire(
             next.libs,
             (lib, require, moduleObj) => {
-                const c = compileScript(lib.src!, { ...common, name: lib.name, paramValues: lib.params, importModule: require, remote: () => inertRemote(LIB_REMOTE) });
+                const c = compileScript(lib.src!, { ...common, name: lib.name, paramValues: lib.params, setParam: async (key, value) => void (await ep.call("param.set", { key, value, lib: lib.name })), importModule: require, remote: () => inertRemote(LIB_REMOTE) });
                 if (c.error) throw new Error(`${lib.name}: ${c.error}`);
                 moduleObj.exports = c.exports;
             },

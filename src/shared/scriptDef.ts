@@ -70,8 +70,11 @@ export type ParamRawValue<D extends ParamDef> = D extends ParamDefBoolean
 /** what the script sees: the parser's return type when `parse` is set, else the raw value */
 export type ParamValue<D extends ParamDef> = D extends { parse: (raw: never) => infer R } ? R : ParamRawValue<D>;
 
+/** assignable from handler code (shared/paramsProxy), except params with `parse` */
 export type ParamsOf<T extends Record<string, ParamDef>> = {
-    readonly [K in keyof T]: ParamValue<T[K]>;
+    -readonly [K in keyof T as T[K] extends { parse: Function } ? never : K]: ParamValue<T[K]>;
+} & {
+    readonly [K in keyof T as T[K] extends { parse: Function } ? K : never]: ParamValue<T[K]>;
 };
 
 export function paramDefault(def: ParamDef): any {
