@@ -21,6 +21,7 @@ import { inertRemote, LIB_SITE_STORE, siteRemote, SITE_NO_STORES, unusableStore,
 import type { Exposer } from "./rpc";
 import type { Generation, ScriptLife } from "./runLifecycle";
 import { parseParamValue, type ParamDef } from "./scriptDef";
+import { libBodyRunning } from "./scriptImports";
 import { scriptEnv } from "./scriptEnv";
 import { claimStoreName, storePersist } from "./storeOps";
 
@@ -52,7 +53,17 @@ export interface PageShimOptions {
     stores?: PageStores;
     /** `wt.siteStore`: the site's world's store (onSite code) or a mirror of it (absent: a library's, which throws when used) */
     siteStore?: (name: string, initial: object) => object;
+    /**
+     * a library's shim (its name): what its code registers while a
+     * script's top level runs (`top`) — a function it exports, called by
+     * the script — is the script's; its own top level's isn't
+     */
+    lib?: string;
 }
+
+type Register = (api: PlaceApi) => (route: unknown, fn: unknown, n?: number, lib?: string) => any;
+/** the script whose top level is running (PageShim.top): where libraries' registrations go */
+let running: Register | null = null;
 
 export interface PageStores {
     store(name: string, initial: object, persist: boolean | string[]): object;
@@ -65,7 +76,14 @@ const NO_FETCH = "wt.fetch isn't available in page code — use the page's own f
 /** a library's handles: its handlers don't run */
 const LIB_HANDLE = "handles from an imported library don't connect; register the handler in the script itself";
 
-export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDocumentHandler[] } {
+export interface PageShim {
+    wt: any;
+    dom: PageDocumentHandler[];
+    /** run the script's top level (`run`): libraries' functions it calls register into it, like the background's */
+    top<T>(run: () => T): T;
+}
+
+export function makePageShim(o: PageShimOptions): PageShim {
     const dom: PageDocumentHandler[] = [];
     const world = o.world || "page";
     const mine: PlaceApi = world === "page" ? "onSite" : "onPage";
@@ -74,13 +92,16 @@ export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDocumentHa
     // registrations always count, so indexes match the background's
     let pageIndex = 0;
     let overlayIndex = 0;
-    const register = (api: PlaceApi) => (route: unknown, fn: unknown, n?: number) => {
+    const own: Register = (api) => (route, fn, n, lib) => {
         if (typeof fn !== "function") throw new Error(`wt.${api}: second argument must be the handler function`);
         const kind = placeKind(api);
         const r = normalizeRoute(kind, route, kind === "onOverlay" ? overlayIndex++ : pageIndex++, api);
-        const k = keyOf(api, n);
+        const k = keyOf(api, n, lib);
         r.key = k.key;
-        if (api !== "onOverlay" && k.n !== r.index) r.n = k.n;
+        if (lib !== undefined) {
+            r.lib = lib;
+            r.n = k.n;
+        } else if (api !== "onOverlay" && k.n !== r.index) r.n = k.n;
         if (api === mine) {
             o.exposer?.register(k.key);
             dom.push({ h: k.key, route: r, when: r.when || "document_end", fn: fn as any });
@@ -88,6 +109,8 @@ export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDocumentHa
         if (world === "page") return siteRemote(o.onSiteCall);
         return o.call ? o.call(api, k.key, r) : inertHandle();
     };
+    const register = (api: PlaceApi) => (route: unknown, fn: unknown, n?: number) =>
+        o.lib !== undefined && running && !libBodyRunning() ? running(api)(route, fn, n, o.lib) : own(api)(route, fn, n);
     const stores = world === "isolated" ? o.stores : undefined;
     const names = new Map<string, string>();
     const siteNames = new Map<string, string>();
@@ -127,7 +150,16 @@ export function makePageShim(o: PageShimOptions): { wt: any; dom: PageDocumentHa
         storage: o.storage,
         ...scriptEnv(),
     };
-    return { wt, dom };
+    const top = <T>(run: () => T): T => {
+        const prev = running;
+        running = own;
+        try {
+            return run();
+        } finally {
+            running = prev;
+        }
+    };
+    return { wt, dom, top };
 }
 
 function inertHandle(): any {

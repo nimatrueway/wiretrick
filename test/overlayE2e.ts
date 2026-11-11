@@ -780,6 +780,34 @@ export async function checkPlaces(ctx: any, mgr: any, origin: string, check: Che
     check(t("onPage code doesn't see the site's globals, but reads them through the onSite handle"), pageSaw === `undefined|SITE-7:${origin}/ov-layer`, pageSaw);
     await page.close();
     await send({ type: "deleteScript", id: "s_layer" });
+
+    // Handlers a library's exported function registers, called from the script's top level, are the script's.
+    const u = `${origin}/ov-layer*`;
+    const lib = await send({ type: "saveScript", id: "s_layer_lib", name: "places-lib", code: `export function install() {
+    const site = wt.onSite({ url: "${u}", when: "document_end" }, () => ({ v: () => (window as any).__site }));
+    wt.onPage("${u}", async () => { document.body.dataset.libPage = typeof (window as any).__site + "|" + (await site.v()); });
+    wt.onOverlay("${u}", async () => {
+        const o = document.body.appendChild(document.createElement("output"));
+        o.id = "libov";
+        o.value = "frame";
+        o.value = await site.v();
+    });
+}` });
+    const user = await send({ type: "saveScript", id: "s_layer_user", name: "places-user.wiretrick", code: `import { install } from "./places-lib";\nwt.onPage("${u}", () => { document.body.dataset.rootPage = "1"; });\ninstall();` });
+    check(t("a library and its importer save"), !lib?.error && !user?.error, lib?.error || user?.error);
+    await mgr.waitForTimeout(800);
+    const p2 = await ctx.newPage();
+    p2.on("console", (m: any) => console.log("  [ov-layer-lib]", m.text().slice(0, 160)));
+    await p2.goto(`${origin}/ov-layer`, { waitUntil: "load", timeout: 15000 });
+    const libPage = await waitFor<string>(() => p2.evaluate(() => document.body.dataset.libPage || ""), (v) => !!v, 8000);
+    check(t("onPage/onSite registered by a library's install() run, and the handle connects"), libPage === "undefined|SITE-7", libPage);
+    check(t("the script's own onPage still runs beside them"), (await p2.evaluate(() => document.body.dataset.rootPage || "")) === "1");
+    const f2 = await overlayFrame(p2, "#libov");
+    const ov = f2 ? await waitFor<string>(() => f2.evaluate(() => (document.getElementById("libov") as HTMLOutputElement).value).catch(() => ""), (v) => v !== "frame", 8000) : "";
+    check(t("onOverlay registered by a library's install() renders and calls its onSite"), ov === "SITE-7", ov);
+    await p2.close();
+    await send({ type: "deleteScript", id: "s_layer_user" });
+    await send({ type: "deleteScript", id: "s_layer_lib" });
 }
 
 const isoStoreCode = (origin: string) => `import { createElement } from "react";

@@ -480,6 +480,7 @@ import type { RanApi } from "../shared/netTypes";
                 params,
                 world,
                 exposer,
+                lib: scriptId ? undefined : name,
                 stores:
                     world === "isolated" && storesOf
                         ? { store: (n, initial, persist) => isoStores().store(storesOf, n, initial, persist), pageStore: (n, initial) => isoStores().pageStore(storesOf, n, initial, isoPage) }
@@ -524,7 +525,7 @@ import type { RanApi } from "../shared/netTypes";
                 );
                 const moduleObj = { exports: {} as any };
                 const shim = shimFor(h.scriptId, h.name, h.params || {}, exposer, h.scriptId, gen);
-                scriptFunction(h.src, h.name)(shim.wt, consoleProxy, requireFrom(h.name), moduleObj, moduleObj.exports);
+                shim.top(() => scriptFunction(h.src, h.name)(shim.wt, consoleProxy, requireFrom(h.name), moduleObj, moduleObj.exports));
                 dom = shim.dom;
                 if (world === "isolated") reactDoms.set(h.scriptId, () => reactOf(requireFrom(h.name)));
             } catch (e: any) {

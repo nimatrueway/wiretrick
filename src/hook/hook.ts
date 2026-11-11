@@ -309,9 +309,9 @@ import { watchCall, type CallWatch } from "../shared/callWatch";
                 // require resolves the shipped libs
                 const fn = scriptFunction(d.src, d.name);
                 const moduleObj = { exports: {} as any };
-                const { wt, dom } = makeDocumentShim(d.scriptId, d.name, d.params || {}, ex);
-                fn(wt, scriptConsole(d.scriptId, d.name), requireFrom(d.name), moduleObj, moduleObj.exports);
-                if (gen) for (const h of domHandlersFor(dom, location.href, ex)) compiledDocument.push({ scriptId: d.scriptId, name: d.name, when: h.when, d: h, exposer, life, gen });
+                const shim = makeDocumentShim(d.scriptId, d.name, d.params || {}, ex);
+                shim.top(() => fn(shim.wt, scriptConsole(d.scriptId, d.name), requireFrom(d.name), moduleObj, moduleObj.exports));
+                if (gen) for (const h of domHandlersFor(shim.dom, location.href, ex)) compiledDocument.push({ scriptId: d.scriptId, name: d.name, when: h.when, d: h, exposer, life, gen });
             } catch (e: any) {
                 // the previous code keeps running (none: calls get `not running`)
                 ex?.revert();
@@ -414,6 +414,8 @@ import { watchCall, type CallWatch } from "../shared/callWatch";
         return makePageShim({
             params,
             exposer,
+            // a library's (scriptId null): what its functions register while a script's top level runs is the script's
+            lib: scriptId ? undefined : name,
             siteStore: scriptId ? (n, initial) => siteStores.store(scriptId, n, initial) : undefined,
             // a handle call in onSite code: a runtime Problem at the call (once per script and page)
             onSiteCall: (e) => {

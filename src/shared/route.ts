@@ -39,16 +39,18 @@ export const placeOf = (route: Pick<RouteMeta, "kind" | "world">): PlaceApi => (
  * The compiler numbers each API's calls in the source (`wt.onPage(` →
  * `wt.onPage.k(2)(`, keyPlaceCalls), so a name doesn't depend on which
  * calls ran before it; a call it couldn't see (an alias) is numbered by
- * call order (`onPage:~0`). A call that runs again (a helper registering
- * twice) gets `#1`, `#2`, ….
+ * call order (`onPage:~0`). A call in a library's code (its exported
+ * function, called by the script) is numbered in the library's source and
+ * named after it (`onPage:0@utils/x`). A call that runs again (a helper
+ * registering twice) gets `#1`, `#2`, ….
  */
-export function placeKeyer(): (api: PlaceApi, n?: number) => { key: string; n: number } {
+export function placeKeyer(): (api: PlaceApi, n?: number, lib?: string) => { key: string; n: number } {
     const seen = new Map<string, number>();
     const counts: Partial<Record<PlaceApi, number>> = {};
-    return (api, n) => {
+    return (api, n, lib) => {
         const count = counts[api] ?? 0;
         counts[api] = count + 1;
-        const base = typeof n === "number" ? `${api}:${n}` : `${api}:~${count}`;
+        const base = (typeof n === "number" ? `${api}:${n}` : `${api}:~${count}`) + (lib === undefined ? "" : `@${lib}`);
         const again = seen.get(base) ?? 0;
         seen.set(base, again + 1);
         return { key: again ? `${base}#${again}` : base, n: typeof n === "number" ? n : count };
@@ -94,6 +96,8 @@ export interface RouteMeta {
     api?: "onSite" | "onPage";
     /** wt.onSite / wt.onPage: which of the script's calls to that API it is (0-based), when it differs from `index` */
     n?: number;
+    /** a call in this library's code (a function it exports, called by the script): `n` counts that library's calls */
+    lib?: string;
     /**
      * onSite / onPage / onOverlay: the handler's stable name, `"onPage:2"`
      * (its API and which of the source's calls to it it is): its handle's
@@ -240,9 +244,13 @@ export function sampleUrl(routes: RouteMeta[]): string {
     return parsed || "https://example.com/";
 }
 
-/** label for logs: `onResponseBody #2` (an onSite / onPage route is labeled with its API, numbered by its calls to that API) */
+/**
+ * label for logs: `onResponseBody #2` (an onSite / onPage route is labeled
+ * with its API, numbered by its calls to that API; one a library's code
+ * registered is numbered in that library: `onPage #1 (utils/x)`)
+ */
 export function routeLabel(route: RouteMeta): string {
-    return `${route.api || route.kind} #${(route.n ?? route.index) + 1}`;
+    return `${route.api || route.kind} #${(route.n ?? route.index) + 1}${route.lib === undefined ? "" : ` (${route.lib})`}`;
 }
 
 /** the world an onDocument route runs in */

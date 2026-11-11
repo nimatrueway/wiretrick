@@ -226,6 +226,7 @@ import { FrameShortcuts } from "../shared/shortcut";
             makePageShim({
                 params,
                 world: "isolated",
+                lib: mine ? undefined : name,
                 stores: { store: (n, initial, persist) => stores().store(s, n, initial, persist), pageStore: (n, initial) => stores().pageStore(s, n, initial, page) },
                 siteStore: mine ? (n, initial) => siteStores().store(s, n, initial) : undefined,
                 exposer: mine ? exposer : undefined,
@@ -247,7 +248,7 @@ import { FrameShortcuts } from "../shared/shortcut";
             );
             const moduleObj = { exports: {} as any };
             const shim = shimFor(init.name, init.params || {}, true);
-            scriptFunction(init.src, init.name)(shim.wt, consoleProxy, requireFrom(init.name), moduleObj, moduleObj.exports);
+            shim.top(() => scriptFunction(init.src, init.name)(shim.wt, consoleProxy, requireFrom(init.name), moduleObj, moduleObj.exports));
             dom = shim.dom;
             reactDom = () => reactOf(requireFrom(init.name));
         } catch (e: any) {

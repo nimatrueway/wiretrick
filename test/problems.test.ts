@@ -157,6 +157,19 @@ describe("collectProblems", () => {
         expect(c.problems[0]).toMatchObject({ line: 1, column: 12, endColumn: 12 + pat.length });
     });
 
+    it("places a library's handler (\"onPage #1 (lib)\") at the script's call of the library", () => {
+        const code = [`import { install } from "./lib";`, `wt.onPage("*", () => {});`, `install();`].join("\n");
+        const routes = [
+            { kind: "onDocument", api: "onPage", index: 0, line: 2, url: ["*"] },
+            { kind: "onDocument", api: "onPage", index: 1, n: 0, lib: "lib", line: 3, url: ["*"] },
+        ];
+        const at = (w: string) => collectProblems([script("a", { code, routes, routeWarnings: [w] })], none)[0].problems[0];
+        expect(at("onPage #1 (lib): x")).toMatchObject({ line: 3 });
+        expect(at("onPage #1: x")).toMatchObject({ line: 2 });
+        // no stored line: not the script's own Nth call
+        expect(collectProblems([script("a", { code, routes: [{ ...routes[1], line: undefined }], routeWarnings: ["onPage #1 (lib): x"] })], none)[0].problems[0].line).not.toBe(2);
+    });
+
     it("sorts errors before warnings, then by line/column", () => {
         const live = new Map<string, ProblemMarker[]>([
             [

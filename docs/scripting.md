@@ -410,6 +410,11 @@ import { mockJson } from "./mocks";
 mockJson("*://api.example.com/me", { id: 1, role: "admin" });
 ```
 
+Recipes can register `wt.onSite`, `wt.onPage` and `wt.onOverlay` handlers
+too. Call them from your script's top level; a call made later (from a
+handler or a timer) registers nothing. The Problems panel names them like
+"onPage #2 (mocks)".
+
 Libraries may declare params too, as shared config. They're editable in the
 popup (marked 𝑓, no enabled switch), the Editor and `settings.yaml`, and
 importers see the library's values. Whether a file is a library is decided

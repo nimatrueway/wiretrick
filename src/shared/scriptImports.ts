@@ -264,6 +264,9 @@ export function pageBuiltin(spec: string): any {
 /** the script modules whose top level is running (makeLibRequire), outermost first, after the script that imported the first */
 const loading: string[] = [];
 
+/** a library module's top level is running (makeLibRequire): what it registers is its own script's, not the importer's */
+export const libBodyRunning = (): boolean => loading.length > 0;
+
 /**
  * A module stand-in: importing it works, using it throws. Used while an
  * imported module loads (`const Item = memo(…)` at its top level), the error

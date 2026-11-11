@@ -7,6 +7,10 @@ its section below.
 
 ## [Unreleased]
 
+### Fixed
+
+- `wt.onSite`, `wt.onPage` and `wt.onOverlay` handlers that a library's exported function registers, when a script calls it from its top level, now run on the page. Before, the Editor listed them but the page skipped them, and their names could clash with the script's own handlers.
+
 ## [0.25.0-alpha] - 2026-11-10
 
 ### Added

@@ -160,13 +160,13 @@ export function compileScript(code: string, overrides?: ResApiOverrides): Compil
         const moduleObj = { exports: {} as any };
         // eslint-disable-next-line no-new-func
         const fn = scriptFunction(js, overrides?.name ?? "");
-        const shim = makeShim(owner, overrides);
+        const shim = makeShim(owner, overrides, overrides?.name ?? "");
         const requireShim = overrides?.importModule
             ? overrides.importModule
             : (spec: string) => {
                   throw new Error(`cannot import "${spec}" here — imports resolve in the background/hook contexts`);
               };
-        withCollector(store, () => fn(shim, makeForwardingConsole(overrides?.logSink), requireShim, moduleObj, moduleObj.exports));
+        withCollector(store, { name: overrides?.name ?? "", remote: overrides?.remote }, () => fn(shim, makeForwardingConsole(overrides?.logSink), requireShim, moduleObj, moduleObj.exports));
         meta.routes = routesOf(store);
         finishMeta(meta);
         return { meta, handlers: store, error: null, code, paramDefs: owner.defs, exports: moduleObj.exports };
@@ -415,9 +415,9 @@ export function makeModuleResolver(
         // on its own as a script too); recipes it exports and the importer
         // calls register into the importer's collector
         try {
-            withCollector(createCollector(), () =>
+            withCollector(createCollector(), { name: lib.name, remote: libOverrides.remote }, () =>
                 scriptFunction(js, lib.name)(
-                    makeShim(createOwner(defaultMeta(lib.name), libOverrides.paramValues), libOverrides),
+                    makeShim(createOwner(defaultMeta(lib.name), libOverrides.paramValues), libOverrides, lib.name),
                     makeForwardingConsole(libOverrides.logSink),
                     resolveFrom(lib.name),
                     moduleObj,
@@ -511,8 +511,12 @@ function makeForwardingConsole(sink?: ResApiOverrides["logSink"]): Console {
  * importer's top level belong to the importer). Empty = too late.
  */
 const collectors: ScriptHandlers[] = [];
+/** a collector's script: its name, its handles (`remote`) and its handler names (placeKeyer: one numbering per script run) */
+type CollectorOwner = { name: string; remote?: ResApiOverrides["remote"] };
+const collectorOf = new WeakMap<ScriptHandlers, CollectorOwner & { keyOf: ReturnType<typeof placeKeyer> }>();
 
-function withCollector<T>(c: ScriptHandlers, run: () => T): T {
+function withCollector<T>(c: ScriptHandlers, owner: CollectorOwner, run: () => T): T {
+    if (!collectorOf.has(c)) collectorOf.set(c, { ...owner, keyOf: placeKeyer() });
     collectors.push(c);
     try {
         return run();
@@ -642,13 +646,17 @@ function guardStoreKeys(storage: { get(key: string): any; set(key: string, value
     };
 }
 
-function makeShim(owner: ReturnType<typeof createOwner>, overrides?: ResApiOverrides): any {
-    const keyOf = placeKeyer();
+/** `module`: the script or library whose code this shim is given to */
+function makeShim(owner: ReturnType<typeof createOwner>, overrides: ResApiOverrides | undefined, module: string): any {
     const register = (kind: RouteKind, api?: PlaceApi) => (route: unknown, fn: unknown, n?: number) => {
         const name = api || kind;
         const top = collectors[collectors.length - 1];
+        const c = top && collectorOf.get(top);
+        // a library's exported function, called from the script's top level: numbered in the library, the script's handle
+        const lib = c && c.name !== module ? module : undefined;
+        const toRemote = lib !== undefined ? c!.remote : overrides?.remote;
         // page/overlay registrations hand back an RPC handle; in the background it's inert
-        const remote = (r?: RouteMeta) => (!api ? undefined : r && overrides?.remote ? overrides.remote(r) : inertRemote(REMOTE_FROM_BACKGROUND));
+        const remote = (r?: RouteMeta) => (!api ? undefined : r && toRemote ? toRemote(r) : inertRemote(REMOTE_FROM_BACKGROUND));
         if (!top) {
             const msg = `wt.${name} called after the script's top level finished — handlers must be registered synchronously at top level (not after await / in callbacks); ignored`;
             if (overrides?.logSink) overrides.logSink("error", "wt", msg);
@@ -665,9 +673,12 @@ function makeShim(owner: ReturnType<typeof createOwner>, overrides?: ResApiOverr
         const line = callerLine();
         if (line) r.line = line;
         if (api) {
-            const k = keyOf(api, n);
+            const k = c!.keyOf(api, n, lib);
             r.key = k.key;
-            if (api !== "onOverlay" && k.n !== r.index) r.n = k.n;
+            if (lib !== undefined) {
+                r.lib = lib;
+                r.n = k.n;
+            } else if (api !== "onOverlay" && k.n !== r.index) r.n = k.n;
         }
         list.push({ fn: fn as HandlerFn, route: r });
         return remote(r);
@@ -861,7 +872,7 @@ export function siteProblems(code: string, routes: RouteMeta[]): string[] {
     const names = (n: string[]) => n.map((x) => `\`${x}\``).join(", ");
     const out: string[] = [...net];
     for (const r of routes) {
-        if (r.kind !== "onDocument" || placeOf(r) !== "onSite") continue;
+        if (r.kind !== "onDocument" || placeOf(r) !== "onSite" || r.lib !== undefined) continue;
         const u = uses.find((u) => u.nth === (r.n ?? r.index));
         if (!u) continue;
         const at = `${routeLabel(r)}: `;

@@ -83,7 +83,7 @@ export interface ProblemScript {
     typeErrors?: string[];
     routeWarnings?: string[];
     /** the script's handlers and their registration lines ("onRequest #2" → its line) */
-    routes?: { kind: string; api?: string; index: number; n?: number; line?: number; url?: string[] }[];
+    routes?: { kind: string; api?: string; index: number; n?: number; lib?: string; line?: number; url?: string[] }[];
     /** the saved source: positions get a range (the token, the URL pattern) */
     code?: string;
 }
@@ -139,7 +139,7 @@ export function errorPosition(msg: string, name?: string): Position | undefined 
     return syntax ? { line: Number(syntax[1]) } : undefined;
 }
 
-const HANDLER = /\b(onRequest|onResponseHeaders|replaceResponse|onResponseBody|onSite|onPage|onOverlay) #(\d+)\b/;
+const HANDLER = /\b(onRequest|onResponseHeaders|replaceResponse|onResponseBody|onSite|onPage|onOverlay) #(\d+)\b(?: \(([^)]+)\))?/;
 
 interface Range {
     line: number;
@@ -174,12 +174,14 @@ function lineRange(lines: string[], line: number): Range {
 function handlerRange(msg: string, s: ProblemScript): Range | { line: number } | undefined {
     const m = HANDLER.exec(msg);
     if (!m) return undefined;
-    const route = s.routes?.find((r) => (r.api || r.kind) === m[1] && (r.n ?? r.index) === Number(m[2]) - 1);
+    // "onPage #1 (utils/x)": the one a library's code registered (routeLabel)
+    const nth = (r: NonNullable<ProblemScript["routes"]>[number]) => (r.api || r.kind) === m[1] && (r.n ?? r.index) === Number(m[2]) - 1;
+    const route = s.routes?.find((r) => nth(r) && r.lib === m[3]) ?? s.routes?.find((r) => nth(r) && r.lib === undefined);
     const code = s.code;
     if (!code) return route?.line ? { line: route.line } : undefined;
     const lines = code.split("\n");
     let line = route?.line;
-    if (!line) {
+    if (!line && !m[3]) {
         const calls = [...code.matchAll(new RegExp(`\\bwt\\s*\\.\\s*${m[1]}\\s*\\(`, "g"))];
         const call = calls[Number(m[2]) - 1];
         if (call) line = code.slice(0, call.index).split("\n").length;
