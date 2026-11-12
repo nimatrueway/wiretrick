@@ -110,7 +110,7 @@ declare namespace TangiTweak {
      *   that can't become a rule doesn't run, and its script shows an error.
      *   Chrome (MV3 and MV2) and Firefox.
      *
-     * @see https://github.com/nimatrueway/tangitweak/blob/main/docs/strategies.md#compatibility
+     * @see https://github.com/tangistudio/TangiTweak/blob/master/docs/strategies.md#compatibility
      */
     type Strategy = "helper" | "page" | "extension" | "debugger" | "rules";
 
@@ -182,7 +182,7 @@ declare namespace TangiTweak {
          *   without it means the handler never runs (the Log view warns).
          *
          * @example { url: "https://app.example.com/*", resourceTypes: ["main_frame"] } // navigations only
-         * @see https://github.com/nimatrueway/tangitweak/blob/main/docs/strategies.md#compatibility
+         * @see https://github.com/tangistudio/TangiTweak/blob/master/docs/strategies.md#compatibility
          */
         resourceTypes?: ResourceType[];
         /**
@@ -210,7 +210,7 @@ declare namespace TangiTweak {
          * handler — keep these routes narrow.
          *
          * @example { url: "*://cdn.example.com/*.png", binary: true }
-         * @see https://github.com/nimatrueway/tangitweak/blob/main/docs/scripting.md#binary-bodies
+         * @see https://github.com/tangistudio/TangiTweak/blob/master/docs/scripting.md#binary-bodies
          */
         binary?: boolean | "both";
     }

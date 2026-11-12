@@ -4,7 +4,7 @@
 
 ## From a release (recommended)
 
-1. Grab a zip from [Releases](https://github.com/nimatrueway/tangitweak/releases) and unzip it:
+1. Grab a zip from [Releases](https://github.com/tangistudio/TangiTweak/releases) and unzip it:
    `tangitweak-mv3-vX.Y.Z.zip` for current Chrome / Edge / Brave, or
    `tangitweak-mv2-vX.Y.Z.zip` (its `dist` folder) for MV2-capable Chromium.
    Firefox uses the `.xpi` instead — see [Firefox](#firefox).
@@ -15,7 +15,7 @@
 ## Firefox
 
 Each release ships `tangitweak-firefox-vX.Y.Z.xpi` (add-on id
-`tangitweak@nimatrueway`). When the release was signed through AMO, drag the
+`tangitweak@tangistudio`). When the release was signed through AMO, drag the
 file onto Firefox to install it. An unsigned `.xpi` (the release notes say
 which) installs permanently only on Developer Edition, Nightly or ESR with
 `xpinstall.signatures.required` set to `false` in `about:config`; on regular
@@ -39,7 +39,7 @@ in Developer mode; otherwise use the zip.
 ## From source
 
 ```bash
-git clone https://github.com/nimatrueway/tangitweak.git
+git clone https://github.com/tangistudio/TangiTweak.git
 cd tangitweak
 npm install && npm run build
 # then: chrome://extensions → Developer mode → Load unpacked → dist/

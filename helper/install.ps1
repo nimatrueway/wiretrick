@@ -2,7 +2,7 @@
 # SHA-256, and runs `tangitweak-helper install` (which copies itself to
 # %APPDATA%\tangitweak-helper and registers the native host).
 #
-#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/nimatrueway/tangitweak/master/helper/install.ps1))) -ExtensionId <id> -TrustCa
+#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/tangistudio/TangiTweak/master/helper/install.ps1))) -ExtensionId <id> -TrustCa
 #
 # $env:TANGITWEAK_HELPER_VERSION = "v1.2.3" pins a release (default: latest).
 param(
@@ -13,7 +13,7 @@ param(
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
-$repo = "nimatrueway/tangitweak"
+$repo = "tangistudio/TangiTweak"
 $version = if ($env:TANGITWEAK_HELPER_VERSION) { $env:TANGITWEAK_HELPER_VERSION } else { "latest" }
 $base = if ($env:TANGITWEAK_HELPER_BASE_URL) { $env:TANGITWEAK_HELPER_BASE_URL } elseif ($version -eq "latest") { "https://github.com/$repo/releases/latest/download" } else { "https://github.com/$repo/releases/download/$version" }
 # x64 build; Windows on Arm runs it under emulation

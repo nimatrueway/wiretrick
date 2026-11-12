@@ -54,7 +54,7 @@ own GUI over the page.
 
 ## Install
 
-1. Download from [Releases](https://github.com/nimatrueway/tangitweak/releases):
+1. Download from [Releases](https://github.com/tangistudio/TangiTweak/releases):
    `tangitweak-mv3-vX.Y.Z.zip` for current Chrome / Edge / Brave,
    `tangitweak-firefox-vX.Y.Z.xpi` for Firefox, or
    `tangitweak-mv2-vX.Y.Z.zip` for MV2-capable Chromium.

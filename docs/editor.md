@@ -464,7 +464,7 @@ gets a ⚠ and the Problems view a warning.
 ## About and diagnostics
 
 **Settings → About** shows the installed version and the latest
-[release](https://github.com/nimatrueway/tangitweak/releases) (checked on
+[release](https://github.com/tangistudio/TangiTweak/releases) (checked on
 GitHub when About opens, with a download link when there's an update), commit and build time,
 the build (MV2/MV3), browser, OS, extension ID and the local helper's state.
 **Copy** puts that on the clipboard as text — paste it into bug reports.

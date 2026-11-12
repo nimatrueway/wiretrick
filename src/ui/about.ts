@@ -76,8 +76,8 @@ async function firefoxInfo(): Promise<{ name: string; version: string } | null> 
     }
 }
 
-export const RELEASES_URL = "https://github.com/nimatrueway/tangitweak/releases";
-const LATEST_RELEASE_API = "https://api.github.com/repos/nimatrueway/tangitweak/releases/latest";
+export const RELEASES_URL = "https://github.com/tangistudio/TangiTweak/releases";
+const LATEST_RELEASE_API = "https://api.github.com/repos/tangistudio/TangiTweak/releases/latest";
 
 export interface LatestRelease {
     version: string;

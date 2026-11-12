@@ -96,4 +96,4 @@ including the Limited Use requirements.
 
 Changes to this policy are listed in the [changelog](../CHANGELOG.md).
 Questions: open an issue at
-<https://github.com/nimatrueway/tangitweak/issues>.
+<https://github.com/tangistudio/TangiTweak/issues>.

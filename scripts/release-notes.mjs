@@ -21,7 +21,7 @@ function unwrap(md) {
     return out.join("\n");
 }
 
-export function releaseNotes(changelog, version, repo = "nimatrueway/tangitweak") {
+export function releaseNotes(changelog, version, repo = "tangistudio/TangiTweak") {
     const lines = changelog.split("\n");
     const start = lines.findIndex(l => l.startsWith(`## [${version}]`));
     if (start < 0) throw new Error(`CHANGELOG.md has no "## [${version}]" section`);

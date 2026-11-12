@@ -40,7 +40,7 @@ describe("About section", () => {
     });
 
     it("describes the latest release", () => {
-        const latest = { version: "0.3.9", url: "https://github.com/nimatrueway/tangitweak/releases/tag/v0.3.9" };
+        const latest = { version: "0.3.9", url: "https://github.com/tangistudio/TangiTweak/releases/tag/v0.3.9" };
         expect(describeLatest(latest, "0.3.8")).toEqual({ text: "0.3.9 — update available", url: latest.url, update: true });
         expect(describeLatest(latest, "0.3.9")).toEqual({ text: "0.3.9 — up to date" });
     });

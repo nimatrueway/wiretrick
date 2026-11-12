@@ -39,12 +39,12 @@ the release's `SHA256SUMS`, and runs `tangitweak-helper install`:
 
 ```sh
 # macOS / Linux
-curl -fsSL https://raw.githubusercontent.com/nimatrueway/tangitweak/master/helper/install.sh | sh -s -- --extension-id <extension id> --trust-ca
+curl -fsSL https://raw.githubusercontent.com/tangistudio/TangiTweak/master/helper/install.sh | sh -s -- --extension-id <extension id> --trust-ca
 ```
 
 ```powershell
 # Windows (PowerShell)
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/nimatrueway/tangitweak/master/helper/install.ps1))) -ExtensionId <extension id> -TrustCa
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/tangistudio/TangiTweak/master/helper/install.ps1))) -ExtensionId <extension id> -TrustCa
 ```
 
 Then click Retry in Settings → Local helper (or reload the extension). In

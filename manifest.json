@@ -1,7 +1,7 @@
 {
     "name": "TangiTweak",
-    "version": "0.27.0",
-    "version_name": "0.27.0-alpha",
+    "version": "0.28.0",
+    "version_name": "0.28.0-alpha",
     "description": "Override requests and responses with TypeScript scripts: redirect, change headers, mock or rewrite response bodies.",
     "icons": {
         "16": "icons/icon-16x16.png",
@@ -54,7 +54,7 @@
     "manifest_version": 2,
     "browser_specific_settings": {
         "gecko": {
-            "id": "tangitweak@nimatrueway",
+            "id": "tangitweak@tangistudio",
             "strict_min_version": "115.0"
         }
     }
