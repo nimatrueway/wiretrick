@@ -2,7 +2,7 @@
     "name": "Wiretrick",
     "version": "0.26.0",
     "version_name": "0.26.0-alpha",
-    "description": "Script-based request and response override: write TypeScript-style scripts that redirect, modify headers, or transform response bodies.",
+    "description": "Override requests and responses with TypeScript scripts: redirect, change headers, mock or rewrite response bodies.",
     "icons": {
         "16": "icons/icon-16x16.png",
         "32": "icons/icon-32x32.png",

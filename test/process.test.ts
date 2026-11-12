@@ -187,6 +187,21 @@ describe("HelperStrategy ⇄ helper protocol", () => {
         expect(p.status().state).toBe("idle");
     });
 
+    it("no nativeMessaging permission → waits for Allow, then connects", async () => {
+        let granted = false;
+        (globalThis as any).chrome.permissions = { contains: async () => granted };
+        const p = new HelperStrategy();
+        p.reload([makeScript("a", `wt.onRequest({ url: "*", strategy: "helper" }, () => {});`)]);
+        await settle();
+        expect(fake.connects).toBe(0);
+        expect(p.status().state).toBe("permission");
+        granted = true;
+        p.permissionsChanged();
+        await settle();
+        expect(fake.connects).toBe(1);
+        expect(p.status().state).toBe("connecting");
+    });
+
     it("ready → config, PAC install, active; user proxy captured & respected", async () => {
         fake.proxyValue = { mode: "fixed_servers", rules: { singleProxy: { scheme: "http", host: "corp", port: 3128 } } };
         const p = new HelperStrategy();

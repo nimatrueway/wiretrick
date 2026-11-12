@@ -2,7 +2,7 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useSnapshot } from "valtio";
 import { actions } from "../shell/actions";
 import { dialogs, openHelp } from "../state/dialogs";
-import { aboutInfo, folderStateText, helperView, queryHelperStatus, refreshAbout, settings, type HelperReport } from "../state/settings";
+import { aboutInfo, folderStateText, grantHelperPermission, helperView, queryHelperStatus, refreshAbout, settings, type HelperReport } from "../state/settings";
 import { logState } from "../state/log";
 import { panel } from "../state/panel";
 import { saveTheme, type ThemePref } from "../theme";
@@ -224,6 +224,10 @@ function LocalHelper() {
                 <div className="setting-control">
                     <div id="process-row" className="setting-inline">
                         <span id="process-state">{view ? view.state : "…"}</span>
+                        {" "}
+                        <button id="btn-process-grant" hidden={!view?.grant} onClick={grantHelperPermission}>
+                            Allow
+                        </button>
                         {" "}
                         <button
                             id="btn-process-copy"

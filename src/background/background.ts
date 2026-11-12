@@ -40,6 +40,12 @@ const pageStrategy = new PageStrategy();
 const debuggerStrategy = new DebuggerStrategy();
 const helperStrategy = new HelperStrategy();
 helperStrategy.onStatus = (status) => broadcastToUi({ type: "processStatus", status });
+// MV3: talking to the helper needs the optional `nativeMessaging` permission (Settings → Local helper → Allow)
+const onHelperPermission = (p: chrome.permissions.Permissions) => {
+    if (p.permissions?.includes("nativeMessaging")) helperStrategy.permissionsChanged();
+};
+chrome.permissions?.onAdded?.addListener(onHelperPermission);
+chrome.permissions?.onRemoved?.addListener(onHelperPermission);
 
 createPipeline(extensionStrategy, pageStrategy, debuggerStrategy, helperStrategy, new RulesStrategy(), updateTabBadge, noteRequestForBadge);
 

@@ -140,10 +140,12 @@ function mv3Manifest(mv2) {
         options_ui: mv2.options_ui,
         background: { service_worker: "background.js" },
         content_scripts: [HOOK_MAIN, ...mv2.content_scripts],
-        permissions: ["storage", "unlimitedStorage", "tabs", "debugger", "offscreen", "webNavigation", "webRequest", "alarms", "proxy", "nativeMessaging", "browsingData", "declarativeNetRequestWithHostAccess"],
+        permissions: ["storage", "unlimitedStorage", "tabs", "debugger", "offscreen", "webNavigation", "webRequest", "alarms", "proxy", "declarativeNetRequestWithHostAccess"],
         host_permissions: ["<all_urls>"],
-        // userScripts: world: "isolated" onPage code (src/background/userScripts.ts), asked for from the Editor
-        optional_permissions: [...mv2.optional_permissions, "userScripts"],
+        // userScripts: world: "isolated" onPage code (src/background/userScripts.ts), asked for from the Editor;
+        // nativeMessaging + browsingData: the local helper only, asked for from Settings → Local helper
+        // (debugger and proxy can't be optional in Chrome)
+        optional_permissions: [...mv2.optional_permissions, "userScripts", "nativeMessaging", "browsingData"],
         web_accessible_resources: [{ resources: mv2.web_accessible_resources, matches: ["<all_urls>"] }],
         // sandbox pages are exempt from the extension CSP — sandbox.html hosts
         // the script compiler/runner (see src/background/sandbox.ts), overlay.html

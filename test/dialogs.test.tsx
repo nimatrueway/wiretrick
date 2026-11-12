@@ -349,6 +349,10 @@ describe("settings store", () => {
         expect(ready.detail.split("\n")[0]).toBe("Scripts: one");
         expect(ready).toMatchObject({ installCommand: "", retry: false, trust: true });
         expect(helperView({ state: "idle", extensionId: "" } as any).retry).toBe(false);
+        const perm = helperView({ state: "permission", extensionId: "abc" } as any);
+        expect(perm).toMatchObject({ state: "needs your permission", grant: true, retry: false, installCommand: "" });
+        expect(perm.detail).toContain("Click Allow");
+        expect(ready.grant).toBe(false);
     });
 });
 

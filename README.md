@@ -102,6 +102,7 @@ running (later: **?** → **Welcome** or **?** → **Samples**).
 | [Local helper](docs/local-helper.md) | the `helper` strategy: install, how it works, security notes |
 | [The Editor](docs/editor.md) | Code view, Problems, Log & Network views, folder sync, `settings.yaml` |
 | [Glossary](GLOSSARY.md) | the words we use for Wiretrick's concepts |
+| [Privacy policy](docs/privacy.md) | what Wiretrick accesses and stores, the requests it makes, and why it needs each permission |
 | [Development](docs/development.md) | build, tests, releases, how the MV3 build works |
 
 ## License

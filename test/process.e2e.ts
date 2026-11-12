@@ -13,7 +13,7 @@
  * (Linux: needs certutil from nss tools; E2E_CHROMIUM=/usr/bin/chromium)
  */
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, readFileSync, mkdirSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, cpSync, mkdirSync, existsSync } from "node:fs";
 import { tmpdir, networkInterfaces } from "node:os";
 import path from "node:path";
 import http from "node:http";
@@ -23,7 +23,14 @@ import { chromium } from "playwright-core";
 import { resolveBrowser } from "./browserSetup";
 
 const ROOT = path.join(new URL("..", import.meta.url).pathname);
-const EXT_ROOT = path.join(ROOT, "dist-mv3");
+// The store build asks for nativeMessaging from Settings → Local helper → Allow
+// (test/process.test.ts covers that wait); headless Chrome can't answer the
+// permission prompt, so this loads a copy with it granted up front.
+const BUILT = JSON.parse(readFileSync(path.join(ROOT, "dist-mv3/manifest.json"), "utf8"));
+const EXT_ROOT = mkdtempSync(path.join(tmpdir(), "reso-proc-ext-"));
+cpSync(path.join(ROOT, "dist-mv3"), EXT_ROOT, { recursive: true });
+const OPTIONAL_HELPER = ["nativeMessaging", "browsingData"].every((p) => BUILT.optional_permissions.includes(p) && !BUILT.permissions.includes(p));
+writeFileSync(path.join(EXT_ROOT, "manifest.json"), JSON.stringify({ ...BUILT, permissions: [...BUILT.permissions, "nativeMessaging", "browsingData"] }));
 const HELPER = path.join(ROOT, "helper/target/release", process.platform === "win32" ? "wiretrick-helper.exe" : "wiretrick-helper");
 const EXT_ID = crypto.createHash("sha256").update(EXT_ROOT, "utf8").digest("hex").split("").map((c) => String.fromCharCode(parseInt(c, 16) + 97)).join("").slice(0, 32);
 
@@ -152,6 +159,7 @@ wt.onResponseBody({ url: "${ORIGIN}/*", strategy: "helper" }, (c, body) => (c.ur
         code: `wt.onResponseBody({ url: "https://example.com/*", strategy: "helper" }, (c, body) => body.replace("<title>Example Domain", "<title>Process Domain"));`,
     });
 
+    check("store build: nativeMessaging and browsingData are optional", OPTIONAL_HELPER, JSON.stringify({ permissions: BUILT.permissions, optional: BUILT.optional_permissions }));
     let st: any = null;
     for (let i = 0; i < 40; i++) {
         st = await send({ type: "processStatus" });
@@ -232,6 +240,7 @@ wt.onResponseBody({ url: "${ORIGIN}/*", strategy: "helper" }, (c, body) => (c.ur
     userProxy.close();
     await new Promise((r) => setTimeout(r, 500));
     rmSync(home, { recursive: true, force: true });
+    rmSync(EXT_ROOT, { recursive: true, force: true });
 }
 console.log(failed ? `\n${failed} FAILED` : "\nALL PASSED");
 process.exit(failed ? 1 : 0);

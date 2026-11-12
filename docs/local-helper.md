@@ -47,7 +47,11 @@ curl -fsSL https://raw.githubusercontent.com/nimatrueway/wiretrick/master/helper
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/nimatrueway/wiretrick/master/helper/install.ps1))) -ExtensionId <extension id> -TrustCa
 ```
 
-Then click Retry in Settings → Local helper (or reload the extension).
+Then click Retry in Settings → Local helper (or reload the extension). In
+Chrome, the first time a script uses the helper, Settings → Local helper asks
+for permission: click **Allow** and accept Chrome's prompt to "communicate with
+cooperating native applications" (and clear browsing data, used to drop
+cached copies of the pages the helper routes).
 `WIRETRICK_HELPER_VERSION=v1.2.3` pins a release. With a binary you already
 have, run `wiretrick-helper install --extension-id <extension id> --trust-ca`.
 The installer copies the helper to `<config dir>/bin` and registers it there.

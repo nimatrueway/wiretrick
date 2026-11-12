@@ -73,7 +73,8 @@ interface HelperReady {
 }
 
 export interface ProcessStatus {
-    state: "idle" | "unsupported" | "connecting" | "ready" | "missing" | "error";
+    /** permission: Chrome hasn't granted the optional `nativeMessaging` permission yet (the Editor asks) */
+    state: "idle" | "unsupported" | "permission" | "connecting" | "ready" | "missing" | "error";
     extensionId: string;
     /** scripts with helper-owned handlers (names) */
     scripts: string[];
@@ -143,6 +144,16 @@ interface PauseContext {
     requestId?: string;
 }
 
+/** Chrome MV3: `nativeMessaging` is optional (asked for from Settings → Local helper); MV2 has it up front */
+async function hasHelperPermission(): Promise<boolean> {
+    if (typeof chrome.permissions?.contains !== "function") return true;
+    try {
+        return await chrome.permissions.contains({ permissions: ["nativeMessaging"] });
+    } catch {
+        return false;
+    }
+}
+
 export class HelperStrategy {
     /** status changes (manager UI) */
     onStatus: (s: ProcessStatus) => void = () => {};
@@ -173,6 +184,7 @@ export class HelperStrategy {
     private backoff = 1000;
     private retryTimer: ReturnType<typeof setTimeout> | null = null;
     private pushing: Promise<void> = Promise.resolve();
+    private last: { scripts: Script[]; paramValues: { [scriptId: string]: Record<string, any> } } = { scripts: [], paramValues: {} };
 
     constructor() {
         this.routing.onLost = () => {
@@ -191,7 +203,16 @@ export class HelperStrategy {
 
     private async load(scripts: Script[], paramValues: { [scriptId: string]: Record<string, any> }): Promise<void> {
         // routes come from the pipeline's analyzed meta (with real params)
+        this.last = { scripts, paramValues };
         const owned = ownedRoutes(scripts, "helper");
+        if (!IS_FIREFOX && owned.length && !(await hasHelperPermission())) {
+            if (this.port) this.disconnect();
+            this.owned = owned;
+            if (this.state !== "permission") dlogLevel("helper", "warn", `handlers using the "helper" strategy don't run until Wiretrick may talk to the local helper — click Allow in Settings → Local helper`);
+            this.state = "permission";
+            this.emit();
+            return;
+        }
         if (IS_FIREFOX || typeof (chrome.runtime as any).connectNative !== "function") {
             this.owned = [];
             this.state = owned.length ? "unsupported" : "idle";
@@ -210,6 +231,16 @@ export class HelperStrategy {
         }
         if (!this.port) this.connect();
         else if (this.helper) await this.pushConfig();
+    }
+
+    /** the user granted or revoked `nativeMessaging`: start (or stop) the helper */
+    permissionsChanged(): void {
+        if (this.state !== "permission") this.disconnect();
+        void hasHelperPermission().then((ok) => {
+            // a running worker may not pick up a just-granted API: start over once
+            if (ok && !IS_FIREFOX && typeof (chrome.runtime as any).connectNative !== "function") chrome.runtime.reload();
+            else this.reload(this.last.scripts, this.last.paramValues);
+        });
     }
 
     /** reconnect now (manager "Retry" after installing the helper) */

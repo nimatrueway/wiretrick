@@ -60,6 +60,7 @@ export function helperView(st: HelperReport) {
     const labels: Record<string, string> = {
         idle: "not needed — no enabled handler uses the \"helper\" strategy",
         unsupported: "unavailable in this browser (Chrome only) — handlers using \"helper\" don't run",
+        permission: "needs your permission",
         connecting: "connecting…",
         ready: `running${st.version ? ` (v${st.version})` : ""}${st.port ? ` on 127.0.0.1:${st.port}` : ""}`,
         missing: "not installed",
@@ -67,6 +68,7 @@ export function helperView(st: HelperReport) {
     };
     const lines: string[] = [];
     if (st.scripts?.length) lines.push(`Scripts: ${st.scripts.join(", ")}`);
+    if (st.state === "permission") lines.push("Click Allow so Wiretrick can start the helper and clear cached copies of the pages it routes. Chrome asks to let it communicate with cooperating native applications.");
     if (st.state === "missing") {
         lines.push(`Install the helper: paste this into ${helperInstallShell()}, then click Retry:`);
         lines.push(`  ${helperInstallCommand(st.extensionId)}`);
@@ -91,12 +93,21 @@ export function helperView(st: HelperReport) {
         trust: st.state === "ready" && st.caTrusted !== true,
         /** the install command to copy, or "" */
         installCommand: needsInstall ? helperInstallCommand(st.extensionId) : "",
-        retry: !((st.state === "ready" && !st.outdated) || st.state === "idle" || st.state === "unsupported"),
+        grant: st.state === "permission",
+        retry: !((st.state === "ready" && !st.outdated) || st.state === "idle" || st.state === "unsupported" || st.state === "permission"),
     };
 }
 
 export function setHelperStatus(st: HelperReport | null | undefined): void {
     if (st) settings.helper = ref(st);
+}
+
+/** Must run straight from a click: permissions.request needs the user gesture. The background starts the helper once granted. */
+export function grantHelperPermission(): void {
+    chrome.permissions.request({ permissions: ["nativeMessaging", "browsingData"] }, () => {
+        void chrome.runtime.lastError;
+        queryHelperStatus();
+    });
 }
 
 /** Ask the background for the helper's status. */
