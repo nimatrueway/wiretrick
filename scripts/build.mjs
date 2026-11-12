@@ -153,7 +153,7 @@ function mv3Manifest(mv2) {
         // the script compiler/runner (see src/background/sandbox.ts), overlay.html
         // a script's overlay (src/overlay/overlayRuntime.ts)
         sandbox: { pages: ["sandbox.html", ...mv2.sandbox.pages] },
-        minimum_chrome_version: "116",
+        minimum_chrome_version: "120",
         manifest_version: 3,
     };
 }

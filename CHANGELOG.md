@@ -7,6 +7,8 @@ its section below.
 
 ## [Unreleased]
 
+## [0.27.0-alpha] - 2026-11-11
+
 ### Added
 
 - A [privacy policy](docs/privacy.md): what Wiretrick accesses and stores, the requests it makes, and why it needs each permission.
@@ -15,6 +17,7 @@ its section below.
 
 - Chrome no longer asks for the "native messaging" and "browsing data" permissions at install. They're asked for the first time a script uses the `helper` strategy: Settings → Local helper shows "needs your permission" and an **Allow** button. Handlers on `helper` wait until then.
 - Shorter extension description, within the Chrome Web Store's 132-character limit.
+- Chrome 120 or later is required (was 116): the user scripts API that runs `onPage` and `onSite` code needs it.
 - Chrome: `wt.onSite` code now runs through Chrome's user scripts API, like `wt.onPage`, so it needs [user scripts turned on](docs/scripting.md#user-scripts-on-chrome). Until they are, it doesn't run, and Problems and the Editor's banner say how to turn them on. The extension no longer compiles code in the page, which the Chrome Web Store doesn't allow. Saved `onSite` changes update open pages in place on Chrome 135 and later; on older versions, reload the page.
 
 - Saving a script and hot reload are faster with many scripts. Each script's TypeScript is transpiled once and reused until its code changes. When a library is saved, all the scripts that import it are compiled together in one pass, so each library runs once instead of once per importer. In Firefox and other MV2 browsers, the analysis of all scripts is reused until a script, param, data file or package changes. The debug log's "compile" category now shows how long saves, analyses, reloads and page bundles take (`timing:` lines).
@@ -930,7 +933,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.26.0-alpha...HEAD
+[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.27.0-alpha...HEAD
+[0.27.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.26.0-alpha...v0.27.0-alpha
 [0.26.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.25.0-alpha...v0.26.0-alpha
 [0.25.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.24.0-alpha...v0.25.0-alpha
 [0.24.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.23.0-alpha...v0.24.0-alpha
