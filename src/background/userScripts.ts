@@ -22,6 +22,15 @@
  * default USER_SCRIPT world (each still in its own function scope), and
  * `configureWorld({ worldId })` would silently reconfigure the default
  * world, so the id is only passed where `getWorldConfigurations` exists.
+ *
+ * onSite code runs in the page's own world, so it comes the same way:
+ * each script with onSite handlers is registered in the MAIN world
+ * (`wt-main-<scriptId>`, every frame, `document_start`) as its units — the
+ * script, the library scripts and package modules it imports, each a
+ * function the hook picks up (shared/siteCode.ts). Here the code itself
+ * is the registration (the MAIN world has no messaging to ask for it), so
+ * a save updates it and, from Chrome 135, `execute`s the new units into
+ * open tabs, where the hook runs them as a hot update.
  */
 import type { RouteMeta } from "../shared/route";
 import type { UserScriptsStatus } from "../shared/userScriptsStatus";
@@ -29,6 +38,7 @@ import { dlogLevel } from "../shared/debugLog";
 
 export const USER_SCRIPT_PORT = "wt-user-script";
 const ID_PREFIX = "wt-iso-";
+const SITE_PREFIX = "wt-main-";
 /** the runtime compiles the script with `new Function`; the page's CSP doesn't apply */
 export const ISO_WORLD_CSP = "script-src 'self' 'unsafe-eval'; object-src 'self'";
 const STATUS_TTL_MS = 2000;
@@ -40,10 +50,18 @@ export interface IsoScript {
     routes: RouteMeta[];
 }
 
+/** a script with onSite handlers: its units (shared/siteCode.ts scriptUnit / packageUnit), its own first */
+export interface SiteScript {
+    id: string;
+    units: string[];
+}
+
 let status: { value: UserScriptsStatus; at: number } | null = null;
 let checking: Promise<UserScriptsStatus> | null = null;
 const listeners: ((s: UserScriptsStatus) => void)[] = [];
-let wanted: IsoScript[] = [];
+let wanted: { iso: IsoScript[]; site: SiteScript[] } = { iso: [], site: [] };
+/** a sync went through since the worker started (the first one doesn't push units into open tabs: an extension update leaves no hook there) */
+let synced = false;
 let syncing: Promise<void> = Promise.resolve();
 
 const api = (): any => {
@@ -105,25 +123,27 @@ function runtimeSource(): Promise<string> {
 }
 
 /**
- * Register exactly `scripts` (and configure their worlds); does nothing
- * while user scripts are off — `syncUserScripts()` again (no argument)
- * once they're on. Calls run one at a time.
+ * Register exactly `scripts` (and configure their worlds) and `site`
+ * (none: the last `site`);
+ * does nothing while user scripts are off — `syncUserScripts()` again (no
+ * argument) once they're on. Calls run one at a time.
  */
-export function syncUserScripts(scripts?: IsoScript[]): Promise<void> {
+export function syncUserScripts(scripts?: IsoScript[], site?: SiteScript[]): Promise<void> {
     if (!__MV3__) return Promise.resolve();
-    if (scripts) wanted = scripts;
+    if (scripts) wanted = { iso: scripts, site: site ?? wanted.site };
     const want = wanted;
     syncing = syncing.then(() => doSync(want)).catch((e: any) => dlogLevel("userScripts", "warn", `syncing user scripts failed: ${e?.message || e}`));
     return syncing;
 }
 
-async function doSync(want: IsoScript[]): Promise<void> {
+async function doSync({ iso: want, site }: typeof wanted): Promise<void> {
     if ((await userScriptsStatus(true)) !== "ok") return;
     const us = api();
     if (!us) return;
     const perWorld = typeof us.getWorldConfigurations === "function";
     const source = await runtimeSource();
-    const have = new Map<string, any>(((await us.getScripts()) as any[]).filter((r) => r.id.startsWith(ID_PREFIX)).map((r) => [r.id, r]));
+    const registered = (await us.getScripts()) as any[];
+    const have = new Map<string, any>(registered.filter((r) => r.id.startsWith(ID_PREFIX)).map((r) => [r.id, r]));
     const add: any[] = [];
     const change: any[] = [];
     for (const s of want) {
@@ -142,6 +162,38 @@ async function doSync(want: IsoScript[]): Promise<void> {
     if (change.length) await us.update(change);
     if (add.length) await us.register(add);
     dlogLevel("userScripts", "debug", `user scripts: ${want.length} registered (${add.length} new, ${change.length} changed, ${have.size} removed)${perWorld ? "" : ", shared world"}`);
+    await syncSite(us, site, registered.filter((r) => r.id.startsWith(SITE_PREFIX)));
+    synced = true;
+}
+
+/** the MAIN-world registrations (onSite code); new units go into open tabs too (Chrome 135+) */
+async function syncSite(us: any, want: SiteScript[], registered: any[]): Promise<void> {
+    const have = new Map<string, any>(registered.map((r) => [r.id, r]));
+    const old = new Set<string>(registered.flatMap((r) => (r.js || []).map((j: any) => j.code)));
+    const add: any[] = [];
+    const change: any[] = [];
+    for (const s of want) {
+        const reg = { id: SITE_PREFIX + s.id, matches: ["*://*/*"], allFrames: true, runAt: "document_start", world: "MAIN", js: s.units.map((code) => ({ code })) };
+        const was = have.get(reg.id);
+        have.delete(reg.id);
+        if (!was) add.push(reg);
+        else if ((was.js || []).map((j: any) => j.code).join("\0") !== s.units.join("\0")) change.push(reg);
+    }
+    if (have.size) await us.unregister({ ids: [...have.keys()] });
+    if (change.length) await us.update(change);
+    if (add.length) await us.register(add);
+    const fresh = [...new Set(want.flatMap((s) => s.units))].filter((u) => !old.has(u));
+    dlogLevel("userScripts", "debug", `user scripts (onSite): ${want.length} registered (${add.length} new, ${change.length} changed, ${have.size} removed)`);
+    if (!synced || !fresh.length || typeof us.execute !== "function") return;
+    // open pages: the hook takes the new units and runs the hot update the bundle brings
+    const tabs = await chrome.tabs.query({ url: ["*://*/*"] }).catch(() => [] as chrome.tabs.Tab[]);
+    await Promise.all(
+        tabs.map((t) =>
+            t.id === undefined || t.discarded
+                ? undefined
+                : us.execute({ target: { tabId: t.id, allFrames: true }, world: "MAIN", injectImmediately: true, js: fresh.map((code) => ({ code })) }).catch(() => {})
+        )
+    );
 }
 
 /** tests: forget the cached status and registrations */
@@ -149,7 +201,8 @@ export function resetUserScripts(): void {
     status = null;
     checking = null;
     listeners.length = 0;
-    wanted = [];
+    wanted = { iso: [], site: [] };
+    synced = false;
     syncing = Promise.resolve();
     runtime = null;
 }

@@ -19,7 +19,8 @@ import {
 import { loadDataFiles } from "./dataFiles";
 import { analyzePackage, applyPending, checkPackages, dismissPending, forgetPackage, installPackage, listPackages, offerPackage, rollbackPackage, setAutoUpdate } from "./packages";
 import { loadPackages, packagesSnapshot, requestPackages, resolveVersion } from "./packageImports";
-import { isUrlSpec, packageClosure } from "../../shared/packageImports";
+import { isUrlSpec, packageClosure, type PackageModules } from "../../shared/packageImports";
+import { packageUnit, scriptUnit, siteKey } from "../../shared/siteCode";
 import { serveStore } from "./strategies/extensionStrategy";
 import { dlog, dlogLevel } from "../../shared/debugLog";
 import { isThenable, rulesProblems, siteProblems, toRunnableJs } from "../../shared/compile";
@@ -46,7 +47,7 @@ import type { RequestBody } from "../../shared/requestBody";
 import { pushBundleUpdate } from "./bridgePorts";
 import { installPages, pages, pagesReady } from "./pages";
 import { pushIsoUpdate, pushPreviewUpdate, revalidateOverlayLinks, setupOverlayLinks, type IsoRun, type OverlayRun } from "./overlayLinks";
-import { onUserScriptsStatus, syncUserScripts, userScriptsStatus, type IsoScript } from "../userScripts";
+import { onUserScriptsStatus, syncUserScripts, userScriptsStatus, type IsoScript, type SiteScript } from "../userScripts";
 import { USER_SCRIPTS_OFF, userScriptsProblem, type UserScriptsStatus } from "../../shared/userScriptsStatus";
 import { contentHash } from "../../shared/folderSync";
 import { reactChunkSource } from "../reactChunk";
@@ -91,6 +92,51 @@ function withAnalyzedMeta(scripts: Script[], analyzed: Map<string, Analyzed>): S
         const a = analyzed.get(s.id);
         return a ? { ...s, meta: { ...a.meta, name: s.meta.name } } : s;
     });
+}
+
+/** `libsOf(deps)`: the library sources, data files and package modules a set of imports ships (transitively) */
+function shippedLibs(pageScripts: Script[], analyzed: Map<string, Analyzed>, dataFiles: { path: string; text: string }[], pkgs: PackageModules, paramValues: { [scriptId: string]: Record<string, any> }): (depNames: Set<string>) => ShippedLib[] {
+    return (depNames) => {
+        const libs = new Map<string, ShippedLib>();
+        const urls = [...depNames].filter(isUrlSpec);
+        for (const u of urls) if (pkgs.aliases[u]) libs.set(u, { name: u, alias: pkgs.aliases[u] });
+        for (const u of packageClosure(pkgs, urls)) libs.set(u, { name: u, pkg: pkgs.modules[u] });
+        for (const depName of depNames) {
+            if (isUrlSpec(depName)) continue;
+            const lib = pageScripts.find((x) => x.meta.name === depName);
+            const data = !lib && dataFiles.find((d) => d.path === depName);
+            if (data && !libs.has(data.path)) libs.set(data.path, { name: data.path, json: data.text });
+            if (!lib || libs.has(lib.meta.name)) continue;
+            const defs = analyzed.get(lib.id)?.paramDefs || {};
+            const src = toRunnableJs(lib.code);
+            libs.set(lib.meta.name, { name: lib.meta.name, src, params: resolveParamValues(defs, paramValues[lib.id]) });
+        }
+        return [...libs.values()];
+    };
+}
+
+/** MV3: a shipped library or package module with its user-script unit's key (shared/siteCode.ts) */
+const withUnitKey = (l: ShippedLib): ShippedLib => (l.src !== undefined ? { ...l, fk: siteKey(l.name, l.src) } : l.pkg ? { ...l, fk: siteKey(l.name, l.pkg.js) } : l);
+
+/**
+ * MV3: the user-script registrations of the scripts with onSite handlers
+ * (any page's): each script's unit, then its imports' (background/userScripts.ts).
+ */
+export function siteScripts(scripts: Script[], analyzed: Map<string, Analyzed>, pkgs: PackageModules): SiteScript[] {
+    const libsOf = shippedLibs(scripts, analyzed, [], pkgs, {});
+    const out: SiteScript[] = [];
+    for (const s of scripts) {
+        const a = analyzed.get(s.id);
+        if (!s.enabled || !a || a.error || !a.meta.active) continue;
+        if (!a.meta.routes.some((r) => r.kind === "onDocument" && pageWorld(r) !== "isolated")) continue;
+        const units = [scriptUnit(s.meta.name, toRunnableJs(s.code))];
+        for (const l of libsOf(new Set(a.deps))) {
+            if (l.src !== undefined) units.push(scriptUnit(l.name, l.src));
+            else if (l.pkg) units.push(packageUnit(l.name, l.pkg.js));
+        }
+        out.push({ id: s.id, units });
+    }
+    return out;
 }
 
 export interface Pipeline {
@@ -260,8 +306,8 @@ export function createPipeline(
             for (const msg of siteProblems(s.code, s.meta.routes || [])) problems.push({ id: s.id, msg });
             for (const msg of rulesProblems(s.code, s.meta.routes || [])) problems.push({ id: s.id, msg });
             for (const r of s.meta.routes || []) {
-                // Chrome MV3: isolated onPage code needs chrome.userScripts (an error, see problems.ts)
-                if (userScripts !== "ok" && r.kind === "onDocument" && pageWorld(r) === "isolated") problems.push({ id: s.id, msg: userScriptsProblem(routeLabel(r), userScripts, chrome.runtime.id) });
+                // Chrome MV3: onPage and onSite code need chrome.userScripts (an error, see problems.ts)
+                if (userScripts !== "ok" && r.kind === "onDocument") problems.push({ id: s.id, msg: userScriptsProblem(routeLabel(r), userScripts, chrome.runtime.id) });
                 if (!isNetKind(r.kind)) continue;
                 const strategy = effectiveStrategy(r);
                 const msg = routeProblem({ kind: r.kind, strategy, resourceTypes: r.resourceTypes }, { firefox: IS_FIREFOX, mv3: __MV3__ });
@@ -581,7 +627,7 @@ export function createPipeline(
         const t0 = performance.now();
         // onSite scripts (hook.ts; the bridge when CSP blocks eval)
         // `v`: the onSite code's version — onPage code tags its calls with it, and the hook waits for that version (hook.ts answerCall)
-        const domHandlers: { scriptId: string; name: string; src: string; params: Record<string, any>; v: string }[] = [];
+        const domHandlers: { scriptId: string; name: string; src: string; params: Record<string, any>; v: string; fk?: string }[] = [];
         // onPage scripts: never shipped to the page's own world. MV3 runs
         // them in chrome.userScripts worlds that load the code from the owner
         // (`isoRuns`): the bridge only learns which scripts, to relay the
@@ -643,24 +689,10 @@ export function createPipeline(
         // ship the transitively imported library sources (and data files, package modules) once per world
         const dataFiles = mainDeps.size || isoDeps.size || overlayDeps.size || isoScriptDeps.size ? await listDataFiles() : [];
         const pkgs = packagesSnapshot();
-        const libsOf = (depNames: Set<string>): ShippedLib[] => {
-            const libs = new Map<string, ShippedLib>();
-            const urls = [...depNames].filter(isUrlSpec);
-            for (const u of urls) if (pkgs.aliases[u]) libs.set(u, { name: u, alias: pkgs.aliases[u] });
-            for (const u of packageClosure(pkgs, urls)) libs.set(u, { name: u, pkg: pkgs.modules[u] });
-            for (const depName of depNames) {
-                if (isUrlSpec(depName)) continue;
-                const lib = pageScripts.find((x) => x.meta.name === depName);
-                const data = !lib && dataFiles.find((d) => d.path === depName);
-                if (data && !libs.has(data.path)) libs.set(data.path, { name: data.path, json: data.text });
-                if (!lib || libs.has(lib.meta.name)) continue;
-                const defs = analyzed.get(lib.id)?.paramDefs || {};
-                const src = toRunnableJs(lib.code);
-                libs.set(lib.meta.name, { name: lib.meta.name, src, params: resolveParamValues(defs, paramValues[lib.id]) });
-            }
-            return [...libs.values()];
-        };
-        const libs = libsOf(mainDeps);
+        const libsOf = shippedLibs(pageScripts, analyzed, dataFiles, pkgs, paramValues);
+        // MV3: the onSite code itself comes as user scripts — the hook finds each unit by its key
+        const libs = __MV3__ ? libsOf(mainDeps).map(withUnitKey) : libsOf(mainDeps);
+        if (__MV3__) for (const h of domHandlers) h.fk = siteKey(h.name, h.src);
         const isoLibs = isoDeps.size ? libsOf(isoDeps) : [];
         // an overlay reloads when its code, params or imports change
         for (const o of overlays) {
@@ -676,8 +708,10 @@ export function createPipeline(
         }
         // MV3 without user scripts: the overlay's calls into isolated code say why at once
         const isoOff = isoRuns.size && (await userScriptsStatus()) !== "ok" ? USER_SCRIPTS_OFF : undefined;
+        // MV3 without user scripts: no onSite code either (the hook answers calls into it with why)
+        const siteOff = __MV3__ && domHandlers.length && (await userScriptsStatus()) !== "ok" ? USER_SCRIPTS_OFF : undefined;
         dlogLevel("compile", "debug", `timing: page bundle for ${url.slice(0, 80)} — ${Math.round(performance.now() - t0)} ms`);
-        return { bundle: { count: routes.length, routes, textTypes: getTextTypes(), domHandlers, isoHandlers, overlays, libs, isoLibs, ...(isoOff ? { isoOff } : {}) }, overlayRuns, isoRuns, previewWhy };
+        return { bundle: { count: routes.length, routes, textTypes: getTextTypes(), domHandlers, isoHandlers, overlays, libs, isoLibs, ...(isoOff ? { isoOff } : {}), ...(siteOff ? { siteOff } : {}) }, overlayRuns, isoRuns, previewWhy };
     }
     installPages();
     setupOverlayLinks({
@@ -741,7 +775,7 @@ export function createPipeline(
         }
         // the Editor's "user scripts are off" banner (Chrome MV3)
         if (msg && msg.type === "userScriptsStatus") {
-            void userScriptsStatus(true).then((status) => sendResponse({ status, scripts: isoScriptCount, id: chrome.runtime.id }));
+            void userScriptsStatus(true).then((status) => sendResponse({ status, scripts: userScriptCount, id: chrome.runtime.id }));
             return true;
         }
         // the Editor's welcome page: wait until a just-saved script runs before opening its page
@@ -981,8 +1015,8 @@ export function createPipeline(
     let rulesApplied: Promise<unknown> = Promise.resolve();
     /** the reloadSeq of the last reload that applied the scripts */
     let settledSeq = 0;
-    /** enabled scripts with onPage code (the Editor's "user scripts are off" banner) */
-    let isoScriptCount = 0;
+    /** MV3: enabled scripts with onPage or onSite code, which needs user scripts (the Editor's "user scripts are off" banner) */
+    let userScriptCount = 0;
     /** reload and wait until the current scripts are fully applied, rules included */
     async function settle(): Promise<void> {
         for (let i = 0; i < 5; i++) {
@@ -1017,9 +1051,11 @@ export function createPipeline(
         // also warms the analyze cache so the next getHookBundle is served
         // without waking the sandbox (keeps onDocument document_start early).
         let scripts = stored;
+        let analyzed: Map<string, Analyzed> | undefined;
         const t1 = performance.now();
         try {
-            scripts = withAnalyzedMeta(stored, await analyzeScripts(stored.map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt })), paramValues));
+            analyzed = await analyzeScripts(stored.map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt })), paramValues);
+            scripts = withAnalyzedMeta(stored, analyzed);
         } catch (e: any) {
             dlogLevel("pipeline", "warn", `script analysis failed, using saved routes: ${e?.message || e}`);
         }
@@ -1027,7 +1063,9 @@ export function createPipeline(
             .filter((x) => x.enabled && x.meta.active)
             .map((x) => ({ id: x.id, routes: (x.meta.routes || []).filter((r) => r.kind === "onDocument" && pageWorld(r) === "isolated") }))
             .filter((x) => x.routes.length);
-        const usStatus = isoScripts.length ? await userScriptsStatus(true) : "ok";
+        // MV3 onSite code: user scripts in the page's world
+        const site = __MV3__ && analyzed ? siteScripts(stored, analyzed, packagesSnapshot()) : [];
+        const usStatus = isoScripts.length || site.length ? await userScriptsStatus(true) : "ok";
         if (seq !== reloadSeq) return; // superseded by a newer reload
         dlog("pipeline", "reload", { total: scripts.length, enabled: scripts.filter((x) => x.enabled).map((x) => x.meta.name) });
         const t2 = performance.now();
@@ -1041,9 +1079,9 @@ export function createPipeline(
         refreshBodyWatch(scripts);
         setSkipRoutes(scripts);
         warnRoutes(scripts, usStatus);
-        isoScriptCount = isoScripts.length;
-        // MV3 isolated onPage code: (un)register the user-script worlds; open ones load again
-        void syncUserScripts(isoScripts).then(() => pushIsoUpdate());
+        userScriptCount = new Set([...isoScripts, ...site].map((x) => x.id)).size;
+        // MV3 onPage and onSite code: (un)register the user scripts (onSite: as they were if the analysis failed); open isolated worlds load again
+        void syncUserScripts(isoScripts, analyzed ? site : undefined).then(() => pushIsoUpdate());
 
         // HOT RELOAD: push the new bundle to every open tab's hook so
         // changes apply without reloading the target tab. Bridges with an

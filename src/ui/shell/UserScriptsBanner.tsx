@@ -2,7 +2,7 @@ import { useSnapshot } from "valtio";
 import { userScriptsHowTo } from "../../shared/userScriptsStatus";
 import { bannerShown, dismissUserScriptsBanner, requestUserScripts, userScriptsBanner } from "../state/userScripts";
 
-/** Chrome MV3: isolated onPage code needs user scripts — say how to turn them on */
+/** Chrome MV3: onPage and onSite code need user scripts — say how to turn them on */
 export function UserScriptsBanner() {
     const s = useSnapshot(userScriptsBanner);
     if (!bannerShown(s) || s.status === "ok") return null;
@@ -10,7 +10,7 @@ export function UserScriptsBanner() {
     return (
         <div id="userscripts-banner" className="wt-banner" role="status" data-status={s.status}>
             <span className="wt-banner-text">
-                <b>User scripts are off:</b> onPage code doesn't run (onSite code still does). To run it, {userScriptsHowTo(s.status, s.extensionId)}.
+                <b>User scripts are off:</b> onPage and onSite code don't run (onOverlay code and network handlers still do). To run them, {userScriptsHowTo(s.status, s.extensionId)}.
             </span>
             {s.status === "no-permission" ? (
                 <button id="userscripts-grant" onClick={() => requestUserScripts()}>

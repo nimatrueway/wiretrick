@@ -15,6 +15,7 @@ its section below.
 
 - Chrome no longer asks for the "native messaging" and "browsing data" permissions at install. They're asked for the first time a script uses the `helper` strategy: Settings → Local helper shows "needs your permission" and an **Allow** button. Handlers on `helper` wait until then.
 - Shorter extension description, within the Chrome Web Store's 132-character limit.
+- Chrome: `wt.onSite` code now runs through Chrome's user scripts API, like `wt.onPage`, so it needs [user scripts turned on](docs/scripting.md#user-scripts-on-chrome). Until they are, it doesn't run, and Problems and the Editor's banner say how to turn them on. The extension no longer compiles code in the page, which the Chrome Web Store doesn't allow. Saved `onSite` changes update open pages in place on Chrome 135 and later; on older versions, reload the page.
 
 - Saving a script and hot reload are faster with many scripts. Each script's TypeScript is transpiled once and reused until its code changes. When a library is saved, all the scripts that import it are compiled together in one pass, so each library runs once instead of once per importer. In Firefox and other MV2 browsers, the analysis of all scripts is reused until a script, param, data file or package changes. The debug log's "compile" category now shows how long saves, analyses, reloads and page bundles take (`timing:` lines).
 - The Editor's TypeScript checker loads every open script's model up front, so imports between scripts resolve at once instead of briefly showing errors.

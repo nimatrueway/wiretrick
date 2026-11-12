@@ -184,7 +184,7 @@ at the right of the toolbar do the same.
   error, with a quick fix (Ctrl+. / ⌘.) that moves the handler to
   `wt.onPage`; a route with the removed `js`, `dom` or `unsafe` option gets
   one to `wt.onSite` / `wt.onOverlay`.
-  On Chrome, `onPage` code while
+  On Chrome, `onPage` or `onSite` code while
   [user scripts are off](scripting.md#user-scripts-on-chrome) is an error
   whose `chrome://extensions` link opens Wiretrick's details page; the
   Editor also shows a one-time banner with a **Grant permission** (or

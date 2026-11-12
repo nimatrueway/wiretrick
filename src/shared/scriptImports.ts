@@ -11,6 +11,7 @@
 import { builtinSpec, jsxImportSource, usesJsx } from "./builtinSpecs";
 import { scriptFrame } from "./scriptError";
 import { isUrlSpec, makePackageLoader, PACKAGE_ORIGIN, parsePackageUrl, type PackageModule, type PackageModules, type PackageStatus } from "./packageImports";
+import type { PackageFn } from "./siteCode";
 
 const IMPORT_RE = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["']([^"'\n]+)["']/g;
 
@@ -254,6 +255,8 @@ export interface ShippedLib {
     pkg?: PackageModule;
     /** a package URL a script imports (`name`) → its module's final URL */
     alias?: string;
+    /** MV3 onSite: the key of a library's or package module's user-script unit (shared/siteCode.ts) */
+    fk?: string;
 }
 
 /** what page-world code gets for a built-in import: the module graph still loads, using it throws */
@@ -292,7 +295,7 @@ function unusable(spec: string, why: string): any {
     });
 }
 
-export interface LibRequireOptions {
+export interface LibRequireOptions<L extends ShippedLib = ShippedLib> {
     /** a built-in import (`react`, `valtio`…) from `importer` (default: a module that throws when used) */
     builtin?: (spec: string, importer: string, loadUrl: (url: string) => any) => any;
     /** a `.css` package import's text (the overlay adds a <style>; default: ignored) */
@@ -303,6 +306,8 @@ export interface LibRequireOptions {
      * script's onPage/onOverlay code imports it too.
      */
     onSite?: boolean;
+    /** a package module's function (default: compiled from its code) */
+    packageFn?: (lib: L) => PackageFn;
 }
 
 /**
@@ -311,10 +316,14 @@ export interface LibRequireOptions {
  * the background does. Libraries and package modules run once (`run`);
  * data files parse fresh per import.
  */
-export function makeLibRequire<L extends ShippedLib>(libs: L[], run: (lib: L, require: (spec: string) => any, module: { exports: any }) => void, opts: LibRequireOptions = {}): (importer: string) => (spec: string) => any {
+export function makeLibRequire<L extends ShippedLib>(libs: L[], run: (lib: L, require: (spec: string) => any, module: { exports: any }) => void, opts: LibRequireOptions<L> = {}): (importer: string) => (spec: string) => any {
     const pkgs: PackageModules = { aliases: {}, modules: {} };
+    const pkgLibs = new Map<string, L>();
     for (const l of libs) {
-        if (l.pkg) pkgs.modules[l.name] = l.pkg;
+        if (l.pkg) {
+            pkgs.modules[l.name] = l.pkg;
+            pkgLibs.set(l.name, l);
+        }
         else if (l.alias !== undefined) pkgs.aliases[l.name] = l.alias;
     }
     const builtin = opts.builtin;
@@ -322,7 +331,7 @@ export function makeLibRequire<L extends ShippedLib>(libs: L[], run: (lib: L, re
     const loadPackage = makePackageLoader(
         pkgs,
         builtin ? (spec, from) => (builtinSpec(spec) && !/^https:\/\/unpkg\.com\/(react|react-dom|scheduler|valtio)@/.test(from) ? { module: builtin(spec, from, (u) => loadPackage(u)) } : undefined) : undefined,
-        { style: opts.style, shared: opts.onSite ? "site" : "page" }
+        { style: opts.style, shared: opts.onSite ? "site" : "page", compile: opts.packageFn ? (url) => opts.packageFn!(pkgLibs.get(url)!) : undefined }
     );
     const scriptLibs = libs.filter((l) => !l.pkg && l.alias === undefined);
     const resolve = importResolver(

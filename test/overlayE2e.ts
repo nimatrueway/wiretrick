@@ -9,10 +9,11 @@
  * updates in place with its store kept; disabling removes it. With
  * `isolated` (the MV2 builds): an Alt+click in isolated onPage code calls
  * the overlay, which calls back to highlight. With `userScripts` (MV3):
- * while user scripts are off, isolated handlers don't run, the overlay's
+ * while user scripts are off, isolated and onSite handlers don't run, the overlay's
  * calls into them reject with the hint, and the Problems error and the
  * Editor's banner say how to turn them on; then `grant()` turns them on and
- * the same round trip runs through them.
+ * the same round trip runs through them, and onSite code (which doesn't
+ * run while they're off) runs too.
  *
  * `overlayServerRoute` serves the pages; call it in the suite's test server.
  */
@@ -266,15 +267,27 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
             const port = chrome.runtime.connect({ name: "network" });
             port.onMessage.addListener((m: any) => { if (m.type === "netSnapshot") { port.disconnect(); resolve(m.entries); } });
         }));
-    const tagsOf = (rows: NetRow[], path: string) => rows.filter((e) => e.url === origin + path && e.startedAt >= loadedAt - 50).flatMap((e) => e.outcomes.map((o) => `${o.scriptName}: ${o.action}`));
-    const net = await waitFor<NetRow[]>(netRows, (rows) => tagsOf(rows, "/ov-app").length >= 3 && tagsOf(rows, "/ov-cookie").length >= 1, 5000);
-    const docTags = tagsOf(net, "/ov-app");
-    const docRow = net.find((e) => e.url === `${origin}/ov-app` && e.startedAt >= loadedAt - 50 && e.outcomes.length);
-    check(
-        t("Network: the page's document row names the scripts whose onSite/onOverlay handlers ran on it"),
-        (docRow?.type === "main_frame" || !!docRow?.synthetic) && ["overlay switch.wiretrick: overlay shown", "overlay rpc.wiretrick: overlay shown", "overlay rpc.wiretrick: onSite ran"].every((x) => docTags.includes(x)) && docRow.outcomes.every((o) => o.kind === "observed"),
-        JSON.stringify({ type: docRow?.type, synthetic: docRow?.synthetic, docTags })
-    );
+    const tagsOf = (rows: NetRow[], path: string, since = loadedAt) => rows.filter((e) => e.url === origin + path && e.startedAt >= since - 50).flatMap((e) => e.outcomes.map((o) => `${o.scriptName}: ${o.action}`));
+    // onSite code runs (MV3: once user scripts are on): the document row names it, and its handle call throws
+    const siteChecks = async (since: number, path = "/ov-app") => {
+        const net = await waitFor<NetRow[]>(netRows, (rows) => tagsOf(rows, path, since).length >= 3, 5000);
+        const docTags = tagsOf(net, path, since);
+        const docRow = net.find((e) => e.url === origin + path && e.startedAt >= since - 50 && e.outcomes.length);
+        check(
+            t("Network: the page's document row names the scripts whose onSite/onOverlay handlers ran on it"),
+            (docRow?.type === "main_frame" || !!docRow?.synthetic) && ["overlay switch.wiretrick: overlay shown", "overlay rpc.wiretrick: overlay shown", "overlay rpc.wiretrick: onSite ran"].every((x) => docTags.includes(x)) && docRow.outcomes.every((o) => o.kind === "observed"),
+            JSON.stringify({ type: docRow?.type, synthetic: docRow?.synthetic, docTags })
+        );
+        const mainCall = await waitFor<string>(() => page.evaluate(() => document.documentElement.dataset.mainCall || ""), (v) => !!v, 5000);
+        check(t("overlay.fn() in onSite code throws SiteCannotCallError"), /^threw SiteCannotCallError: onSite code can't call handles/.test(mainCall), mainCall);
+        const mainProblem = await waitFor<any>(async () => ((await send({ type: "listScripts" })) || []).find((s: any) => s.id === "s_ov_rpc")?.runtimeError, (e) => !!e?.ctx, 5000);
+        check(
+            t("overlay.fn() in onSite code is a Problems error tagged page › host"),
+            !!mainProblem?.message.includes("onSite code can't call handles") && mainProblem.ctx === `page › ${new URL(origin).host}`,
+            JSON.stringify(mainProblem)
+        );
+    };
+    const net = await waitFor<NetRow[]>(netRows, (rows) => tagsOf(rows, "/ov-cookie").length >= 1, 5000);
     check(t("Network: the overlay's fetch names its script"), tagsOf(net, "/ov-cookie").includes("overlay switch.wiretrick: fetched by its overlay"), JSON.stringify(tagsOf(net, "/ov-cookie")));
 
     const pass = await page.evaluate(() => {
@@ -311,14 +324,7 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
         JSON.stringify(seen)
     );
 
-    const mainCall = await waitFor<string>(() => page.evaluate(() => document.documentElement.dataset.mainCall || ""), (v) => !!v, 5000);
-    check(t("overlay.fn() in onSite code throws SiteCannotCallError"), /^threw SiteCannotCallError: onSite code can't call handles/.test(mainCall), mainCall);
-    const mainProblem = await waitFor<any>(async () => ((await send({ type: "listScripts" })) || []).find((s: any) => s.id === "s_ov_rpc")?.runtimeError, (e) => !!e?.ctx, 5000);
-    check(
-        t("overlay.fn() in onSite code is a Problems error tagged page › host"),
-        !!mainProblem?.message.includes("onSite code can't call handles") && mainProblem.ctx === `page › ${new URL(origin).host}`,
-        JSON.stringify(mainProblem)
-    );
+    if (!opts.userScripts) await siteChecks(loadedAt);
 
     await page.evaluate((s: string) => {
         for (const h of ["onOverlay:0", "overlay:0"]) {
@@ -355,10 +361,12 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
         const picked = navFrame ? await navFrame.evaluate(() => (document.getElementById("picked") as HTMLOutputElement).value) : "";
         const outline = await page.evaluate(() => document.getElementById("target")!.style.outline);
         check(t("user scripts off: isolated onPage handlers don't run"), picked === "none" && !outline, JSON.stringify({ picked, outline }));
+        const mainCall = await page.evaluate(() => document.documentElement.dataset.mainCall || "");
+        check(t("user scripts off: onSite code doesn't run"), !mainCall, mainCall);
         const warnings: string[] = ((await send({ type: "listScripts" })) || []).find((s: any) => s.id === "s_ov_rpc")?.routeWarnings ?? [];
         check(
             t("user scripts off: a Problems error says how to turn them on"),
-            warnings.some((w) => w.includes(`isolated onPage code doesn't run: user scripts are off`) && /chrome:\/\/extensions\/\?id=[a-p]{32}/.test(w)),
+            ["onPage", "onSite"].every((api) => warnings.some((w) => w.startsWith(api) && w.includes(`this code doesn't run: user scripts are off`) && /chrome:\/\/extensions\/\?id=[a-p]{32}/.test(w))),
             JSON.stringify(warnings)
         );
         const banner = await mgr.waitForSelector("#userscripts-banner[data-status=no-permission] #userscripts-grant", { timeout: 8000 }).then(
@@ -378,8 +386,11 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
         );
         check(t("granting user scripts clears the banner and the Problems error"), gone && !listed.some((x) => x.includes("user scripts are off")), JSON.stringify({ gone, listed }));
         // a newly registered user script runs from the next page load
+        const reloadedAt = Date.now();
         await page.reload({ waitUntil: "load", timeout: 15000 });
         navFrame = await overlayFrame(page, "#nav");
+        // (the page is at ?nav=1 since the pushState above)
+        await siteChecks(reloadedAt, "/ov-app?nav=1");
     }
     if (opts.isolated || opts.userScripts) {
         const probe = await probeOf(navFrame);

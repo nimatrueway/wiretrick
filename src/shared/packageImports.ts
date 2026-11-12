@@ -6,6 +6,7 @@
  * background, the sandbox, the page hook and the Editor: URL validation,
  * nested specifier rules, typings paths and the runtime loader.
  */
+import type { PackageFn } from "./siteCode";
 
 export const PACKAGE_ORIGIN = "https://unpkg.com/";
 /** where package typings live: Monaco's `file:///<root>/…` and the synced folder's `<root>/…` */
@@ -407,6 +408,13 @@ export function isPackageExport(fn: Function): boolean {
     return packageFns.has(fn);
 }
 
+const evalPackage = (url: string, js: string): PackageFn =>
+    // eslint-disable-next-line no-new-func
+    new Function("require", "module", "exports", "process", "global", "__wtStyle", `${js}\n//# sourceURL=${url}`) as PackageFn;
+const noEval = (url: string): never => {
+    throw new Error(`cannot run ${url} here`);
+};
+
 const PROCESS = { env: { NODE_ENV: "production" }, browser: true, versions: {}, argv: [], platform: "browser" };
 
 /**
@@ -423,9 +431,17 @@ const PROCESS = { env: { NODE_ENV: "production" }, browser: true, versions: {}, 
  * loader with that cache ran it in this realm is reused, so a page
  * runtime's saves keep the same package components (and their state,
  * shared/hotRefresh.ts). Loaders whose `builtin` differ use different caches.
+ *
+ * `compile` turns a module into its function (default: `new Function`;
+ * the MV3 hook can't, it gets them as user scripts — shared/siteCode.ts).
  */
-export function makePackageLoader(pkgs: PackageModules | undefined, builtin?: (spec: string, from: string) => { module: any } | undefined, opts?: { style?: (css: string, url: string) => void; shared?: string }): (url: string) => any {
+export function makePackageLoader(
+    pkgs: PackageModules | undefined,
+    builtin?: (spec: string, from: string) => { module: any } | undefined,
+    opts?: { style?: (css: string, url: string) => void; shared?: string; compile?: (url: string, js: string) => PackageFn }
+): (url: string) => any {
     const style = opts?.style ?? (() => {});
+    const compile = opts?.compile ?? (__NO_EVAL__ ? noEval : evalPackage);
     const cache = new Map<string, { exports: any }>();
     const run = (url: string): any => {
         const hit = cache.get(url);
@@ -448,8 +464,7 @@ export function makePackageLoader(pkgs: PackageModules | undefined, builtin?: (s
             return run(to);
         };
         try {
-            // eslint-disable-next-line no-new-func
-            const fn = new Function("require", "module", "exports", "process", "global", "__wtStyle", `${mod.js}\n//# sourceURL=${url}`);
+            const fn = compile(url, mod.js);
             fn.call(module.exports, require, module, module.exports, PROCESS, globalThis, style);
         } catch (e) {
             cache.delete(url);

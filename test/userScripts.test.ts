@@ -142,6 +142,31 @@ describe("chrome.userScripts (MV3 isolated onPage)", () => {
         expect([...m.registered.keys()]).toEqual(["wt-iso-s1"]);
     });
 
+    it("onSite: one MAIN-world registration per script; only syncs after the first run the new units into open tabs", async () => {
+        const m = mockChrome();
+        m.us.execute = vi.fn(async () => []);
+        m.chrome.tabs = { query: vi.fn(async () => [{ id: 1 }, { id: 2, discarded: true }, { id: 3 }]) };
+        await syncUserScripts([], [{ id: "s1", units: ["u1", "lib"] }]);
+        const reg = m.registered.get("wt-main-s1");
+        expect(reg).toMatchObject({ matches: ["*://*/*"], allFrames: true, runAt: "document_start", world: "MAIN", js: [{ code: "u1" }, { code: "lib" }] });
+        expect(m.us.execute).not.toHaveBeenCalled();
+        // a save: changed units update the registration and run in tabs that aren't discarded
+        await syncUserScripts([], [{ id: "s1", units: ["u2", "lib"] }, { id: "s2", units: ["v1"] }]);
+        expect(m.calls).toEqual(["register wt-main-s1", "update wt-main-s1", "register wt-main-s2"]);
+        expect(m.us.execute.mock.calls.map(([a]: any) => [a.target.tabId, a.world, a.js.map((j: any) => j.code)])).toEqual([
+            [1, "MAIN", ["u2", "v1"]],
+            [3, "MAIN", ["u2", "v1"]],
+        ]);
+        // unchanged: nothing re-registered or run; undefined keeps the onSite list
+        m.us.execute.mockClear();
+        await syncUserScripts([{ id: "s1", routes: [route("https://a.example/*")] }]);
+        expect(m.registered.has("wt-main-s1") && m.registered.has("wt-main-s2")).toBe(true);
+        expect(m.us.execute).not.toHaveBeenCalled();
+        await syncUserScripts([], [{ id: "s2", units: ["v1"] }]);
+        expect(m.registered.has("wt-main-s1")).toBe(false);
+        expect(m.us.execute).not.toHaveBeenCalled();
+    });
+
     it("the Problems text says how to turn them on", () => {
         const p = userScriptsProblem("onPage #1", "no-permission", "abc");
         expect(p).toContain(USER_SCRIPTS_PROBLEM);

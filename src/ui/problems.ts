@@ -295,7 +295,7 @@ export function collectProblems(scripts: ProblemScript[], liveMarkers: Map<strin
         if (live) problems.push(...fromMarkers(s.error ? live.filter((m) => !s.error!.includes(m.message)) : live, "ts"));
         // (the saved code's type errors aren't checked while it fails to compile)
         else if (!s.error) problems.push(...(s.typeErrors || []).map(storedTypeError));
-        // (errors: isolated onPage code that can't run — user scripts are off; a store a place can't have — they throw there)
+        // (errors: onPage and onSite code that can't run — user scripts are off; a store a place can't have — they throw there)
         const taken = new Set<number>();
         for (const w of s.routeWarnings || [])
             problems.push({ severity: w.includes(USER_SCRIPTS_PROBLEM) || w.includes(NO_SITE_STORE) || w.includes(SITE_NO_STORES) ? "error" : "warning", kind: "route", message: w, ...(siteUseRange(w, s) ?? rulesUseRange(w, s, taken) ?? handler(w)) });

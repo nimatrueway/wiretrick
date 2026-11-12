@@ -1046,7 +1046,9 @@ declare const wt: {
      * route, by default before the site's own scripts (`when:
      * "document_start"`; `document.body` is usually `null` then). See
      * {@link Wiretrick.DocumentOptions.when} for timing and
-     * {@link Wiretrick.PageRoute} for the three places.
+     * {@link Wiretrick.PageRoute} for the three places. On Chrome (MV3) it
+     * runs through user scripts, which must be turned on (the Editor shows
+     * how).
      *
      * @example
      * const site = wt.onSite("*://example.com/*", () => ({

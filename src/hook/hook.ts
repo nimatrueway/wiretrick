@@ -1,6 +1,8 @@
 /**
  * Page strategy — MAIN-world page hook. STATIC file: contains no eval and no user
- * code, so page CSP (however strict) cannot break it.
+ * code, so page CSP (however strict) cannot break it. (MV2 compiles onSite
+ * code here with `new Function`; Chrome MV3 gets it as user scripts —
+ * shared/siteCode.ts — and this build has no eval at all.)
  *
  * It patches fetch/XHR and, per request, relays bodies through the
  * isolated-world bridge to the background, where user transforms run.
@@ -8,7 +10,8 @@
  */
 import { formatScriptError } from "../shared/scriptError";
 import { makeScriptConsole, formatLogArgs, scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
-import { scriptFunction } from "../shared/scriptFn";
+import { scriptFunction, type ScriptFn } from "../shared/scriptFn";
+import { siteUnits, type PackageFn } from "../shared/siteCode";
 import { makeLibRequire, type ShippedLib } from "../shared/scriptImports";
 import { routeMatches, takesBinary, type DocumentWhen, type RouteMeta } from "../shared/route";
 import { makePageShim, domHandlersFor, scheduleDocument, fireRun, type PageDocumentHandler } from "../shared/pageShim";
@@ -70,8 +73,39 @@ import { watchCall, type CallWatch } from "../shared/callWatch";
     }
     /** the bridge reported the extension context dead (extension reload) */
     let dead = false;
-    let domHandlers: { scriptId: string; name: string; src: string; params?: Record<string, any>; v?: string }[] = [];
+    let domHandlers: { scriptId: string; name: string; src: string; params?: Record<string, any>; v?: string; fk?: string }[] = [];
     let libSources: ShippedLib[] = [];
+    /** MV3: why onSite code doesn't run (user scripts are off), if it doesn't */
+    let siteOff: string | null = null;
+    /**
+     * MV3: the onSite code that arrived as user scripts (shared/siteCode.ts).
+     * A status naming units that aren't here yet (a hot update: the save
+     * `execute`s them into open tabs, Chrome 135+) compiles once they are,
+     * or after UNITS_WAIT_MS with what is.
+     */
+    const UNITS_WAIT_MS = 5000;
+    let unitsWait: { hot: boolean; timer: ReturnType<typeof setTimeout> } | null = null;
+    const units = __NO_EVAL__ ? siteUnits(() => unitsWait && !missingUnits().length && compileWhenReady(false)) : null;
+    function missingUnits(): string[] {
+        if (!units) return [];
+        const out: string[] = [];
+        for (const d of domHandlers) if (d.fk && !units.get(d.fk)) out.push(d.name);
+        for (const l of libSources) if (l.fk && !units.get(l.fk)) out.push(l.name);
+        return out;
+    }
+    /** a script's or library's function (`fk`: its unit, MV3) */
+    function scriptFn(name: string, src: string, fk?: string): ScriptFn {
+        if (!__NO_EVAL__) return scriptFunction(src, name);
+        const fn = fk ? units!.get(fk) : undefined;
+        if (!fn) throw new Error(`${name}'s onSite code isn't on this page: reload the page to run it`);
+        return fn as ScriptFn;
+    }
+    /** a package module's function (MV3: its unit) */
+    function packageFn(lib: ShippedLib): PackageFn {
+        const fn = lib.fk ? units!.get(lib.fk) : undefined;
+        if (!fn) throw new Error(`${lib.name} isn't on this page: reload the page to run it`);
+        return fn as PackageFn;
+    }
     let domFired = false;
     /** the handlers compiled at least once (calls before that wait) */
     let compiled = false;
@@ -104,6 +138,7 @@ import { watchCall, type CallWatch } from "../shared/callWatch";
                     waitingCalls.delete(w);
                     return reply({ cid: call.cid, ok: false, error: { name: "AbortError", message: "the caller gave up" } });
                 }
+        if (siteOff !== null && !dead && call.fn !== CANCEL_FN) return reply({ cid: call.cid, ok: false, error: { name: "WtCallError", message: siteOff } });
         if (v && !dead && !versions.has(s + "\0" + v) && call.fn !== CANCEL_FN) {
             if (waitingCalls.size >= 1000) return reply(notRunning(call));
             const w = {
@@ -230,17 +265,43 @@ import { watchCall, type CallWatch } from "../shared/callWatch";
             routes = data.routes || [];
             setTextTypes(data.textTypes);
             domHandlers = data.domHandlers || [];
-            for (const d of domHandlers) if (d.v) versions.add(d.scriptId + "\0" + d.v);
             libSources = data.libs || [];
+            siteOff = typeof data.siteOff === "string" ? data.siteOff : null;
             logUp(`status: ${active ? "active" : "inactive"}, dom=${domHandlers.length}${data.hot ? " (hot)" : ""}`, "debug");
             if (active) install();
             else if (wasActive) goDormant();
             // nothing here for the hook: the page keeps its own fetch/XHR
             else if (first) unpatch();
-            compileAndScheduleDocument(!!data.hot);
-            flushEarlyCalls();
+            compileWhenReady(!!data.hot);
         }
     });
+
+    /** compile the onSite code once its units are here (MV3; MV2: now) */
+    function compileWhenReady(hot: boolean): void {
+        if (unitsWait) {
+            hot ||= unitsWait.hot;
+            clearTimeout(unitsWait.timer);
+            unitsWait = null;
+        }
+        if (siteOff === null && missingUnits().length) {
+            const wait = (unitsWait = {
+                hot,
+                timer: setTimeout(() => {
+                    if (unitsWait !== wait) return;
+                    unitsWait = null;
+                    logUp(`onSite code not on this page after ${UNITS_WAIT_MS} ms: ${missingUnits().join(", ")}`, "warn");
+                    compileNow(hot);
+                }, UNITS_WAIT_MS),
+            });
+            return;
+        }
+        compileNow(hot);
+    }
+    function compileNow(hot: boolean): void {
+        for (const d of domHandlers) if (d.v) versions.add(d.scriptId + "\0" + d.v);
+        compileAndScheduleDocument(hot);
+        flushEarlyCalls();
+    }
 
     /** Stop intercepting: restore the page's own fetch/XHR, drop state. */
     function goDormant(): void {
@@ -267,14 +328,15 @@ import { watchCall, type CallWatch } from "../shared/callWatch";
      */
     function compileAndScheduleDocument(hot: boolean): void {
         compiled = true;
-        if (domHandlers.length === 0) return;
+        // MV3 with user scripts off: none of it is here (calls say why, answerCall)
+        if (domHandlers.length === 0 || siteOff !== null) return;
         // module registry over the shipped library sources and data files:
         // the page-side `require` backing ES imports ("./utils" → the script
         // named utils, "./a.json" → the data file)
         const requireFrom = makeLibRequire(
             libSources,
-            (lib, require, moduleObj) => scriptFunction(lib.src!, lib.name)(makeDocumentShim(null, lib.name, lib.params || {}).wt, scriptConsole(null, lib.name), require, moduleObj, moduleObj.exports),
-            { builtin: siteBuiltin, onSite: true }
+            (lib, require, moduleObj) => scriptFn(lib.name, lib.src!, lib.fk)(makeDocumentShim(null, lib.name, lib.params || {}).wt, scriptConsole(null, lib.name), require, moduleObj, moduleObj.exports),
+            { builtin: siteBuiltin, onSite: true, ...(__NO_EVAL__ ? { packageFn } : {}) }
         );
         const compiledDocument: { scriptId: string; name: string; when: DocumentWhen; d: PageDocumentHandler; exposer: Exposer; life: ScriptLife; gen: Generation }[] = [];
         const gens: [ScriptLife, Generation][] = [];
@@ -307,7 +369,7 @@ import { watchCall, type CallWatch } from "../shared/callWatch";
                 // shadow `console` inside the script so its console.* calls
                 // land in the extension LOG (not the page console);
                 // require resolves the shipped libs
-                const fn = scriptFunction(d.src, d.name);
+                const fn = scriptFn(d.name, d.src, d.fk);
                 const moduleObj = { exports: {} as any };
                 const shim = makeDocumentShim(d.scriptId, d.name, d.params || {}, ex);
                 shim.top(() => fn(shim.wt, scriptConsole(d.scriptId, d.name), requireFrom(d.name), moduleObj, moduleObj.exports));

@@ -1012,10 +1012,11 @@ wt.onPage("*://app.example.com/*", (ctx) => {
 #### User scripts on Chrome
 
 Firefox and the Chromium MV2 build run `onPage` code in the extension's
-content-script world. The Chrome (MV3) build runs it through Chrome's
-user scripts API, which is off until you turn it on:
+content-script world and `onSite` code in the site's. The Chrome (MV3)
+build runs both through Chrome's user scripts API, which is off until you
+turn it on:
 
-1. **Grant the permission.** When a script has `onPage` code, the Editor
+1. **Grant the permission.** When a script has `onPage` or `onSite` code, the Editor
    shows a banner: click **Grant permission** (the optional "user
    scripts" permission).
 2. **Allow user scripts.** Chrome 138 and later: turn on **Allow User
@@ -1025,11 +1026,13 @@ user scripts API, which is off until you turn it on:
    `chrome://extensions` instead.
 
 Until then the handler doesn't run, Problems shows an error on its
-`wt.onPage` line saying how to turn user scripts on, and the overlay's
-calls into it reject with `not running on this page (user scripts are
-off)`. Once they're on, pages loaded from then on run it (reload open
-ones); after that, saving the script updates open pages in place.
-`onSite` and `onOverlay` code don't need user scripts.
+`wt.onPage` or `wt.onSite` line saying how to turn user scripts on, and
+the overlay's calls into it reject with `not running on this page (user
+scripts are off)`. Once they're on, pages loaded from then on run it
+(reload open ones); after that, saving the script updates open pages in
+place. On Chrome before 135, saved `onSite` changes reach a page only
+when you reload it (the old code keeps running until then).
+`onOverlay` code and network handlers don't need user scripts.
 
 Chrome 133 and later give each script's `onPage` code a world of its
 own; before that, scripts share one user-script world (each still in its

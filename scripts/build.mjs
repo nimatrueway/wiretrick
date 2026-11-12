@@ -98,9 +98,11 @@ function entriesFor(dist, mv3) {
             }
         );
     }
+    // MV3 content scripts: no code from strings (the page world gets onSite code as user scripts, src/shared/siteCode.ts)
+    const noEval = (e) => mv3 && /[/\\](hook|bridge)\.js$/.test(e.output.file);
     for (const e of list) {
         e.transform = {
-            define: { __MV3__: mv3 ? "true" : "false", __COMMIT__: JSON.stringify(gitCommit()), __BUILD_TIME__: JSON.stringify(new Date().toISOString()), "process.env.NODE_ENV": JSON.stringify("production") },
+            define: { __MV3__: mv3 ? "true" : "false", __NO_EVAL__: noEval(e) ? "true" : "false", __COMMIT__: JSON.stringify(gitCommit()), __BUILD_TIME__: JSON.stringify(new Date().toISOString()), "process.env.NODE_ENV": JSON.stringify("production") },
             jsx: { runtime: "automatic", importSource: "react" },
         };
     }

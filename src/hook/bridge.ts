@@ -263,6 +263,7 @@ import type { RanApi } from "../shared/netTypes";
                 textTypes: resp?.textTypes,
                 domHandlers: (resp && resp.domHandlers) || [],
                 libs: (resp && resp.libs) || [],
+                ...(typeof resp?.siteOff === "string" ? { siteOff: resp.siteOff } : {}),
                 ...(hot ? { hot: true } : {}),
             },
             window.location.origin
@@ -433,7 +434,8 @@ import type { RanApi } from "../shared/netTypes";
     const reactDoms = new Map<string, () => ReactDomClient>();
 
     function runPageScripts(handlers: DocumentHandler[], libSources: ShippedLib[], world: "page" | "isolated", hot: boolean, loaded = false): void {
-        if (dead) return;
+        // MV3: no eval here — isolated code runs in user-script worlds, onSite code comes as user scripts (no CSP fallback needed)
+        if (__NO_EVAL__ || dead) return;
         if (world === "isolated" && !loaded) {
             const { codes, packages } = shippedSources(handlers.map((h) => h.src), libSources);
             if (!builtinsReady(codes, packages)) {

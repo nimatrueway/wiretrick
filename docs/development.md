@@ -216,8 +216,19 @@ pages, and drops blocking `webRequest`):
   timer) holds the worker open while a folder is connected, with a 30s
   `chrome.alarms` poll as the fallback if the worker is reaped anyway.
 - onPage runs in the isolated world (MV3: a `chrome.userScripts`
-  world); onSite runs in the MAIN world when the page CSP allows,
-  isolated fallback otherwise. **`document_start` timing caveat:** in MV2 the
+  world); onSite runs in the MAIN world (MV2: when the page CSP allows,
+  isolated fallback otherwise).
+- **No `eval` in content scripts (MV3).** The Chrome Web Store allows
+  running code that isn't in the package only through `chrome.userScripts`
+  and `chrome.debugger`, so `hook.js` and `bridge.js` are built with
+  `__NO_EVAL__` and never compile code. Each onSite script, the library
+  scripts it imports and its package modules are registered as
+  `chrome.userScripts` with `world: "MAIN"` (`wt-main-<id>`,
+  `src/shared/siteCode.ts`): each pushes its function onto a queue on the
+  page's global, keyed by name and code hash, and the hook takes them from
+  there. Saving a script also runs the new functions in open tabs
+  (`userScripts.execute`, Chrome 135+). With user scripts off, onSite
+  code doesn't run. **`document_start` timing caveat:** in MV2 the
   always-alive background answers the bundle in ~1ms, so onPage handlers
   reliably beat the page's own scripts. In MV3 the service worker must
   wake first — analyses are cached in `chrome.storage.session` (and

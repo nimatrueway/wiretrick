@@ -82,7 +82,7 @@ data is used only to clear cached copies of the pages the helper routes.
 | `tabs` | open the Editor and link requests to tabs |
 | `storage`, `unlimitedStorage` | save your scripts, settings and script data |
 | `offscreen`, `alarms` | run script code in the background, and keep folder sync running |
-| `userScripts` (optional) | run your `wt.onPage` code in an isolated world |
+| `userScripts` (optional) | run your `wt.onPage` code in an isolated world, and your `wt.onSite` code in the site's |
 | `nativeMessaging`, `browsingData` (optional) | the local helper, see above |
 | `management` (optional) | list your other extensions in a diagnostics report |
 
