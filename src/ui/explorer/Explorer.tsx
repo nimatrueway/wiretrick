@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState, type DragEvent, type KeyboardEvent, 
 import { useSnapshot } from "valtio";
 import { isInFolder } from "../../shared/folders";
 import { scriptHealth } from "../../shared/scriptHealth";
-import { folderOf, isSvgPath } from "../../shared/scriptImports";
+import { folderOf, isDataSpec, isImageDataPath, isSvgPath } from "../../shared/scriptImports";
 import { cleanScriptName, fileExtension, isTsxName, scriptFileName, scriptNameFromInput } from "../../shared/scriptName";
 import { baseName, dropPlan, explorerTree, folderRowId, isFolderRowId, joinPath, targetFolder, type TreeRow } from "../explorerTree";
 import { actions } from "../shell/actions";
@@ -33,7 +33,7 @@ import { badgeRowOf, packageOf, packages, packageTitle } from "../state/packages
 import { openInstall } from "../state/dialogs";
 import { packageFolders } from "../../shared/makePackage";
 import { packagesApi } from "../install/api";
-import { packageName, updateSource, type InstalledPackage } from "../../shared/packageModel";
+import { packageName, resolveWorkspaceIcons, updateSource, type InstalledPackage } from "../../shared/packageModel";
 import { MANIFEST_FILE } from "../../shared/packageMetadata";
 
 /** the path the explorer's Copy Path copies (a script's is its file's) */
@@ -41,8 +41,8 @@ const rowFilePath = (row: TreeRow): string => (row.kind === "script" ? scriptFil
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-/** a new data file's path: `.json` unless it names an `.svg` */
-const withJson = (path: string): string => (/\.(json|svg)$/i.test(path) ? path : path + ".json");
+/** a new data file's path: `.json` unless it names an `.svg` or image extension */
+const withJson = (path: string): string => (isDataSpec(path) ? path : path + ".json");
 
 const copy = (text: string, done: string): void => void navigator.clipboard?.writeText(text).then(() => actions.status(done));
 
@@ -364,6 +364,7 @@ export function ExplorerTree() {
         pkgByRow.set("folder" in at ? folderRowId(at.folder) : at.id, p);
     }
     const localPkgs = localPackageFolders(snap.dataFiles);
+    const { scriptIcons, folderIcons } = resolveWorkspaceIcons(snap.scripts, snap.dataFiles, pkgSnap.byId as Record<string, InstalledPackage>);
     const pkgBadge = (id: string) => {
         const p = pkgByRow.get(id);
         // a package folder's icon says it's a package: its badge is for news only
@@ -469,7 +470,7 @@ export function ExplorerTree() {
                     " folder",
                     r.depth,
                     <>
-                        <FileIcon kind={pkgByRow.get(r.id) || localPkgs.has(r.path) ? "package" : r.expanded ? "folder-open" : "folder"} />
+                        <FileIcon kind={pkgByRow.get(r.id) || localPkgs.has(r.path) ? "package" : r.expanded ? "folder-open" : "folder"} src={folderIcons.get(r.path)} />
                         {name(r, r.name, [r.path, pkgByRow.get(r.id) ? packageTitle(pkgByRow.get(r.id)!) : localPkgs.has(r.path) ? `A package (${MANIFEST_FILE}) — right-click → Export Package… to share it` : "", "F2 to rename · drag to move"].filter(Boolean).join("\n"))}
                         {pkgBadge(r.id)}
                     </>,
@@ -480,14 +481,23 @@ export function ExplorerTree() {
         } else if (r.kind === "data") {
             const bad = snap.jsonErrorIds.has(r.id);
             const svg = isSvgPath(r.path);
-            const title = [r.path, `Data file — import it from a script (import ${svg ? "markup" : "data"} from "./${baseName(r.path)}"${svg ? ": the SVG markup, a string" : ""})`, bad ? "Its JSON has errors — see the Problems view" : "", "Double-click or F2 to rename · drag to move"].filter(Boolean).join("\n");
+            const img = isImageDataPath(r.path);
+            const dataFile = explorer.dataFiles.find((d) => d.id === r.id);
+            const title = [
+                r.path,
+                `Data file — import it from a script (import ${svg ? "markup" : img ? "iconUrl" : "data"} from "./${baseName(r.path)}"${svg ? ": the SVG markup, a string" : img ? ": a data: URL string" : ""})`,
+                bad ? "Its JSON has errors — see the Problems view" : "",
+                "Double-click or F2 to rename · drag to move",
+            ]
+                .filter(Boolean)
+                .join("\n");
             items.push(
                 li(
                     r.id,
                     " data" + (bad ? " has-error" : ""),
                     r.depth,
                     <>
-                        <FileIcon kind={svg ? "svg" : "json"} />
+                        <FileIcon kind={svg ? "svg" : img ? "img" : "json"} src={img ? dataFile?.text : undefined} />
                         {name(r, r.name, title, bad ? " error" : "")}
                         {del(r, "Delete data file (Delete)")}
                     </>,
@@ -514,7 +524,7 @@ export function ExplorerTree() {
                     (isLib ? "" : " handlers") + (off ? " disabled" : ""),
                     r.depth,
                     <>
-                        <FileIcon kind={isTsxName(script.meta.name) ? "tsx" : "ts"} />
+                        <FileIcon kind={isTsxName(script.meta.name) ? "tsx" : "ts"} src={scriptIcons.get(script.id)} />
                         {name(r, baseName(scriptFileName(script.meta.name)), title, health ? " error" : "")}
                         {pkgBadge(r.id)}
                         {health && (

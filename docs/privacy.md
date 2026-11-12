@@ -1,5 +1,7 @@
 # Privacy policy
 
+[<img src="../icons/icon.svg" width="16" height="16" align="absmiddle" alt=""> README](../README.md) · [Glossary](../GLOSSARY.md)
+
 Last updated: 2026-11-11
 
 TangiTweak is a developer tool that runs scripts you write or install to read

@@ -8,7 +8,7 @@ import { compileForStorage, compileManyForStorage, SANDBOX_COMPILE_FAILED } from
 import { ensurePackages, packageUrlsIn, prunePackages } from "./packageImports";
 import { dlogLevel } from "../../shared/debugLog";
 import { clearScriptErrors, clearScriptTypeErrors, log } from "./logs";
-import { isValidParamValue, resolveParamValues } from "../../shared/scriptDef";
+import { findParamDef, getParamAtPath, isValidParamValue, resolveParamValues, setParamAtPath, type ParamTree } from "../../shared/scriptDef";
 import { DATA_FILES_KEY, FOLDERS_KEY, MAX_DATA_FILE, setDataFilesSnapshot, type DataFile } from "./dataFiles";
 import { allFolders, ancestorFolders, isInFolder, movedPath, stackingOrder } from "../../shared/folders";
 import { dataFilePathProblem, folderPathProblem, scriptNameProblem, scriptFileKey } from "../../shared/scriptName";
@@ -22,7 +22,7 @@ export interface Script {
     error: string | null;
     meta: ResMeta;
     /** param definitions from tt.params / tt.defineParam (captured at save time) */
-    paramDefs?: Record<string, import("../../shared/scriptDef").ParamDef>;
+    paramDefs?: ParamTree;
 }
 
 const STORE_KEY = "resScripts";
@@ -545,12 +545,12 @@ async function paramFromCode(scriptId: string, key: unknown, value: unknown, lib
         t = Object.values(byId).find((x) => x.meta.name === lib && users.includes(scriptId));
         if (!t) return log(-1, `[${s.meta.name}] param ${key}: ${JSON.stringify(lib)} isn't a library this script imports`, "error", scriptId);
     }
-    const def = t.paramDefs && Object.prototype.hasOwnProperty.call(t.paramDefs, key) ? t.paramDefs[key] : undefined;
-    if (!def) return log(-1, `[${t.meta.name}] param ${key}: there's no such parameter`, "error", scriptId);
-    if (!isValidParamValue(def, value)) return log(-1, `[${t.meta.name}] param ${key} can't be ${JSON.stringify(value)}`, "error", scriptId);
-    const now = resolveParamValues({ [key]: def }, await getParamValues(t.id))[key];
+    const found = findParamDef(t.paramDefs, key);
+    if (!found) return log(-1, `[${t.meta.name}] param ${key}: there's no such parameter`, "error", scriptId);
+    if (!isValidParamValue(found.def, value)) return log(-1, `[${t.meta.name}] param ${key} can't be ${JSON.stringify(value)}`, "error", scriptId);
+    const now = getParamAtPath(resolveParamValues(t.paramDefs!, await getParamValues(t.id)), found.path);
     if (JSON.stringify(now) === JSON.stringify(value)) return;
-    await writeParamValue(t.id, key, value);
+    await writeParamValue(t.id, key, value, found.path);
     log(-1, `[${t.meta.name}] param ${key} = ${JSON.stringify(value)} (set by ${t === s ? "the script" : s.meta.name})`, "info", t.id);
 }
 
@@ -558,16 +558,17 @@ export function setParamValue(scriptId: string, key: string, value: any): Promis
     return oneParamWrite(() => writeParamValue(scriptId, key, value));
 }
 
-async function writeParamValue(scriptId: string, key: string, value: any): Promise<void> {
+async function writeParamValue(scriptId: string, key: string, value: any, knownPath?: string[]): Promise<void> {
+    const obj = await storageGet(STORE_KEY);
+    const byId: { [id: string]: Script } = obj[STORE_KEY] || {};
+    const s = byId[scriptId];
+    const path = knownPath ?? findParamDef(s?.paramDefs, key)?.path ?? (key.includes(".") ? key.split(".") : [key]);
     const all = await loadAllParamValues();
-    all[scriptId] = { ...(all[scriptId] || {}), [key]: value };
+    all[scriptId] = setParamAtPath(all[scriptId], path, value);
     await storageSet({ [PARAMS_KEY]: all });
     // handlers/params may depend on param values (a utility that registers
     // handlers only when a param is on turns into a script): refresh the
     // stored meta of the script and its importers
-    const obj = await storageGet(STORE_KEY);
-    const byId: { [id: string]: Script } = obj[STORE_KEY] || {};
-    const s = byId[scriptId];
     const changed = s ? await recompileMeta(byId, [scriptId, ...dependantsOf(s.meta.name, plain(byId)).filter((id) => id !== scriptId)], all) : [];
     if (changed.length) {
         // re-read: a save may have landed while compiling (MV3: sandbox RPC)

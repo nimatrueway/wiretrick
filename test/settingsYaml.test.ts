@@ -308,6 +308,40 @@ describe("multiline string params", () => {
     });
 });
 
+describe("nested parameter sections in settings.yaml", () => {
+    const nestedDefs: any = {
+        on: { type: "boolean", default: true, description: "Master switch" },
+        network: {
+            host: { type: "string", default: "api.example.com", description: "Target host" },
+            retries: {
+                max: { type: "number", default: 3, description: "Max retries" },
+            },
+        },
+    };
+    const mk = (values: Record<string, any> = {}): ScriptSettingsState => ({
+        name: "Redwood",
+        declared: true,
+        enabled: true,
+        defs: nestedDefs,
+        values,
+    });
+
+    it("renders nested maps, round-trips defaults and user values, and patches nested entries in place", () => {
+        const base = renderSettings(G, [mk()]);
+        expect(base).toContain("  Redwood:\n");
+        expect(base).toContain("    network:\n      # Target host\n      # host: api.example.com\n      retries:\n        # Max retries\n        # max: 3\n");
+        expect(planSettings(parseSettings(base), G, [mk()])).toEqual({ globals: {}, scripts: [] });
+
+        const patched = patchSettings(base, G, [mk({ network: { host: "staging.example.com", retries: { max: 5 } } })])!;
+        expect(patched).toContain("      # host: api.example.com\n      host: staging.example.com\n");
+        expect(patched).toContain("        # max: 3\n        max: 5\n");
+        expect(planSettings(parseSettings(patched), G, [mk()])).toEqual({
+            globals: {},
+            scripts: [{ name: "Redwood", params: { "network.host": "staging.example.com", "network.retries.max": 5 } }],
+        });
+    });
+});
+
 describe("renameSettingsSection", () => {
     const text = "# top\nparams:\n  old:\n    n: 9 # tuned\n  other:\n    x: 1\n";
     it("moves the section, keeping values and comments", () => {

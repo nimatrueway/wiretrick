@@ -1,6 +1,6 @@
 /** What a drop onto the install dialog, the install page or the Explorer brings: a link, a .zip, or files (a folder's). */
 import { useState, type DragEvent } from "react";
-import { isPackageFile } from "../../shared/packageSource";
+import { isPackageFile, readPackageBrowserFile } from "../../shared/packageSource";
 
 export type Dropped = { url: string } | { zip: File } | { label: string; files: Record<string, string> } | { error: string };
 
@@ -25,7 +25,7 @@ async function readEntry(e: FileSystemEntry, prefix: string, out: Record<string,
     const rel = prefix + e.name;
     if (e.isDirectory) {
         if (e.name !== "node_modules" && e.name !== ".git") await readDir(e as FileSystemDirectoryEntry, rel + "/", out);
-    } else if (e.isFile && isPackageFile(rel)) out[rel] = await (await fileOf(e as FileSystemFileEntry)).text();
+    } else if (e.isFile && isPackageFile(rel)) out[rel] = await readPackageBrowserFile(rel, await fileOf(e as FileSystemFileEntry));
 }
 
 /** the first link a drag carries */
@@ -57,7 +57,7 @@ export function readDrop(dt: DataTransfer): Promise<Dropped> {
             return { label: `The folder "${one.name}"`, files: out };
         }
         if (entries.length && entries.every(Boolean)) for (const e of entries) await readEntry(e!, "", out);
-        else for (const f of files) if (isPackageFile(f.name)) out[f.name] = await f.text();
+        else for (const f of files) if (isPackageFile(f.name)) out[f.name] = await readPackageBrowserFile(f.name, f);
         return { label: files.length === 1 ? files[0].name : "The dropped files", files: out };
     })().catch((e) => ({ error: String(e?.message || e) }));
 }

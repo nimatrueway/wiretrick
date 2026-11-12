@@ -188,6 +188,34 @@ cfg.url = new URL("https://a.com");
         const { errors } = typesOf(`tt.params({ n: { type: "number", parse: (s: string) => s } });`);
         expect(errors.join("\n")).toMatch(/not assignable/);
     });
+
+    it("types nested section objects recursively, keeping leaf mutability and parse inference", () => {
+        const { errors, types } = typesOf(`export {};
+const cfg = tt.params({
+    on: { type: "boolean", default: true },
+    network: {
+        host: { type: "string", default: "a.com" },
+        origin: { type: "string", default: "https://a.com", parse: (raw) => new URL(raw) },
+        filter: {
+            type: { type: "enum", choices: ["xhr", "fetch"] },
+        },
+    },
+});
+const host = cfg.network.host, origin = cfg.network.origin, kind = cfg.network.filter.type;
+cfg.network.host = "b.com";
+cfg.network.filter.type = "fetch";
+`);
+        expect(errors).toEqual([]);
+        expect(types).toMatchObject({ raw: "string", host: "string", origin: "URL", kind: '"xhr" | "fetch"' });
+
+        const bad = typesOf(`export {};
+const cfg = tt.params({ network: { host: { type: "string" }, origin: { type: "string", parse: (s) => new URL(s) } } });
+cfg.network = {} as any;
+cfg.network.origin = new URL("https://b.com");
+`);
+        expect(bad.errors).toHaveLength(2);
+        expect(bad.errors.every((e) => /read-only property/.test(e))).toBe(true);
+    });
 });
 
 describe("shortcut params", () => {

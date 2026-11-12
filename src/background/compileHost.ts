@@ -19,7 +19,7 @@
  */
 import { compileManyWithLibs, compileScript, compileWithLibs, makeModuleResolver, withData, type DataFileSource } from "../shared/compile";
 import { defaultMeta, type ResMeta } from "../shared/metaParser";
-import type { ParamDef } from "../shared/scriptDef";
+import type { ParamTree } from "../shared/scriptDef";
 import { dlogLevel } from "../shared/debugLog";
 import { compileDecision } from "../shared/pac";
 import { packBytes, unpackBytes } from "../shared/bytesPack";
@@ -40,7 +40,7 @@ interface PlainScript {
 
 export interface Analyzed {
     meta: ResMeta;
-    paramDefs: Record<string, ParamDef>;
+    paramDefs: ParamTree;
     error: string | null;
     deps: string[];
 }
@@ -232,7 +232,7 @@ export async function compileForStorage(
     name?: string,
     paramValues?: Record<string, any>,
     ctx?: StorageCompileContext
-): Promise<{ meta: ResMeta; paramDefs: Record<string, ParamDef>; error: string | null }> {
+): Promise<{ meta: ResMeta; paramDefs: ParamTree; error: string | null }> {
     const label = name || "x";
     const id = ctx?.id ?? "x";
     const target = { id, name: label, code };
@@ -264,7 +264,7 @@ export async function compileForStorage(
     return { meta: r.meta, paramDefs: r.paramDefs, error: r.error };
 }
 
-type StorageCompiled = { meta: ResMeta; paramDefs: Record<string, ParamDef>; error: string | null };
+type StorageCompiled = { meta: ResMeta; paramDefs: ParamTree; error: string | null };
 
 /**
  * `compileForStorage` for several stored scripts at once (the importers of
@@ -281,7 +281,7 @@ export async function compileManyForStorage(
     if (!ids.length) return out;
     const t0 = performance.now();
     await ensurePackages(scripts.map((s) => s.code));
-    const note = (id: string, r: { meta: ResMeta; paramDefs?: Record<string, ParamDef>; error: string | null; deps?: string[] }) => {
+    const note = (id: string, r: { meta: ResMeta; paramDefs?: ParamTree; error: string | null; deps?: string[] }) => {
         const name = scripts.find((s) => s.id === id)?.name;
         dlogLevel("compile", "debug", `compiled "${name}" → active=${r.meta.active} match=${JSON.stringify(r.meta.match)} params=[${Object.keys(r.paramDefs || {}).join(", ")}] deps=[${(r.deps || []).join(", ")}]${r.error ? " — compile error (in the Problems view)" : ""}`);
         out.set(id, { meta: r.meta, paramDefs: r.paramDefs || {}, error: r.error });

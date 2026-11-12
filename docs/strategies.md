@@ -1,6 +1,6 @@
 # Interception strategies
 
-[← README](../README.md) · [Glossary](../GLOSSARY.md)
+[<img src="../icons/icon.svg" width="16" height="16" align="absmiddle" alt=""> README](../README.md) · [Glossary](../GLOSSARY.md)
 
 Chrome and Firefox have fundamentally different extension APIs, and Chrome
 itself can only reach some resources through some paths. TangiTweak therefore

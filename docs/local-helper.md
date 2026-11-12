@@ -1,6 +1,6 @@
 # Local helper (strategy `"helper"`)
 
-[← README](../README.md) · [Glossary](../GLOSSARY.md)
+[<img src="../icons/icon.svg" width="16" height="16" align="absmiddle" alt=""> README](../README.md) · [Glossary](../GLOSSARY.md)
 
 `tangitweak-helper` is a small (~3 MB) Rust program for Linux, macOS and
 Windows. Chrome starts it through **native messaging** when an enabled

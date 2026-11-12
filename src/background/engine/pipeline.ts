@@ -18,6 +18,7 @@ import {
 } from "./scriptStore";
 import { loadDataFiles } from "./dataFiles";
 import { analyzePackage, applyPending, checkPackages, dismissPending, forgetPackage, installPackage, listPackages, offerPackage, rollbackPackage, setAutoUpdate } from "./packages";
+import { resolveWorkspaceIcons, singleScriptBundles } from "../../shared/packageModel";
 import { loadPackages, packagesSnapshot, requestPackages, resolveVersion } from "./packageImports";
 import { isUrlSpec, packageClosure, type PackageModules } from "../../shared/packageImports";
 import { packageUnit, scriptUnit, siteKey } from "../../shared/siteCode";
@@ -740,19 +741,31 @@ export function createPipeline(
                 // (with every script: imported param definitions resolve)
                 const missing = scripts.some((s) => s.paramDefs === undefined);
                 const analyzed = missing ? await analyzeScripts(scripts.map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt })), await loadAllParamValues()) : new Map<string, Analyzed>();
-                const errors = await getScriptErrors();
-                const typeErrors = await getScriptTypeErrors();
-                const ruleErrors = await getScriptRuleErrors();
-                const routeWarnings = await getScriptRouteWarnings();
+                const [errors, typeErrors, ruleErrors, routeWarnings, dataFiles, installedPkgs] = await Promise.all([
+                    getScriptErrors(),
+                    getScriptTypeErrors(),
+                    getScriptRuleErrors(),
+                    getScriptRouteWarnings(),
+                    listDataFiles(),
+                    listPackages(),
+                ]);
+                const bundles = singleScriptBundles(scripts, dataFiles, installedPkgs);
+                const { scriptIcons } = resolveWorkspaceIcons(scripts, dataFiles, installedPkgs);
                 sendResponse(
-                    scripts.map((s) => ({
-                        ...s,
-                        paramDefs: s.paramDefs === undefined ? analyzed.get(s.id)?.paramDefs || {} : s.paramDefs,
-                        runtimeError: errors.get(s.id) ?? null,
-                        typeErrors: typeErrors.get(s.id) ?? [],
-                        ruleErrors: ruleErrors.get(s.id) ?? [],
-                        routeWarnings: routeWarnings.get(s.id) ?? [],
-                    }))
+                    scripts.map((s) => {
+                        const b = bundles.get(s.id);
+                        const iconUrl = scriptIcons.get(s.id);
+                        return {
+                            ...s,
+                            ...(b ? { bundleName: b.name, ...(b.description ? { bundleDescription: b.description } : {}) } : {}),
+                            ...(iconUrl ? { iconUrl } : {}),
+                            paramDefs: s.paramDefs === undefined ? analyzed.get(s.id)?.paramDefs || {} : s.paramDefs,
+                            runtimeError: errors.get(s.id) ?? null,
+                            typeErrors: typeErrors.get(s.id) ?? [],
+                            ruleErrors: ruleErrors.get(s.id) ?? [],
+                            routeWarnings: routeWarnings.get(s.id) ?? [],
+                        };
+                    })
                 );
             });
             return true;

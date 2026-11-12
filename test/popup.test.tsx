@@ -263,4 +263,52 @@ describe("Popup", () => {
         await new Promise((r) => setTimeout(r, 20));
         expect(container.querySelector<HTMLInputElement>('.param-fold input[type="text"]')!.value).toBe("edited");
     });
+
+    it("shows just the bundle name and renders custom iconUrl on the popup menu", async () => {
+        const api = fakeApi([
+            script("s1", "redwood/devtools.tsx", { bundleName: "Redwood", bundleDescription: "Atlas bundle", iconUrl: "data:image/png;base64,AAAA" }),
+            script("s2", "multi/a"),
+            script("s3", "multi/b"),
+        ]);
+        const { container } = render(<Popup api={api} />);
+        await waitFor(() => expect(names(container)).toEqual(["Redwood", "multi/a", "multi/b"]));
+        expect(container.querySelector(".script-name")?.getAttribute("title")).toBe("Atlas bundle");
+        expect(container.querySelector<HTMLImageElement>("img.script-icon")?.getAttribute("src")).toBe("data:image/png;base64,AAAA");
+        expect(container.querySelectorAll("img.script-icon")).toHaveLength(1);
+    });
+
+    it("renders nested tt.params objects as collapsible sections and updates dotted paths", async () => {
+        const params: ScriptParams = {
+            defs: {
+                enabled: { type: "boolean", default: true },
+                network: {
+                    host: { type: "string", default: "api.example.com", description: "Target host" },
+                    retries: {
+                        max: { type: "number", default: 3, min: 0, max: 10 },
+                    },
+                },
+            },
+            values: { enabled: true, network: { host: "api.example.com", retries: { max: 3 } } },
+        };
+        const api = fakeApi([script("a", "Alpha", { paramDefs: params.defs })], { a: params });
+        const { container } = render(<Popup api={api} />);
+        fireEvent.click(await screen.findByLabelText("Toggle parameters"));
+        await screen.findByText("Target host");
+
+        const sections = [...container.querySelectorAll(".param-section-title")].map((el) => el.textContent);
+        expect(sections).toEqual(["network", "retries"]);
+        expect(container.querySelectorAll("details.param-section[open]")).toHaveLength(2);
+
+        const hostInput = container.querySelector<HTMLInputElement>('.param-section input[type="text"]')!;
+        hostInput.value = "staging.example.com";
+        fireEvent.change(hostInput);
+        const maxInput = container.querySelector<HTMLInputElement>('.param-section input[type="number"]')!;
+        maxInput.value = "7";
+        fireEvent.change(maxInput);
+
+        expect(api.calls).toEqual([
+            ["setParam", "a", "network.host", "staging.example.com"],
+            ["setParam", "a", "network.retries.max", 7],
+        ]);
+    });
 });

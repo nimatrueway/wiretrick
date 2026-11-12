@@ -3,13 +3,13 @@
  */
 
 import "./shell/mount";
-import { loadMonaco, STARTER_TEMPLATE, apiTypingsText, ensureBuiltinTypings, setDataFileTypings, setPackageTypings } from "./monacoSetup";
-import { PACKAGE_MODULES_KEY, PACKAGE_TYPINGS_KEY, type PackageStatus, type StoredTypings } from "../shared/packageImports";
+import { loadMonaco, STARTER_TEMPLATE, apiTypingsText } from "./monacoSetup";
+import { createMonacoTsWorkspace, IMPORT_OWNER, JSX_IN_TS, UNPINNED, type TsWorkspace } from "./tsWorkspace";
 import { API_TYPINGS_URI } from "./apiLinks";
 import { NavHistory } from "./navHistory";
 import type { SampleScript } from "./samples";
 import { settingsDiagnostics, settingsCompletions, settingsHover, type AssistScript } from "../shared/settingsAssist";
-import { badPackageImports, coveredMissingModule, dependantsOf, folderOf, isSvgPath, missingImports, missingLocalModule, packageImportMarks, packageUrls } from "../shared/scriptImports";
+import { badPackageImports, folderOf, imageDataUrlToBytes, isImageDataPath, isSvgPath, missingImports } from "../shared/scriptImports";
 import { makeFolderPackagePlan, makePackagePlan } from "../shared/makePackage";
 import { MANIFEST_FILE } from "../shared/packageMetadata";
 import { manifestScriptCompletions, manifestScriptProblems } from "./manifestAssist";
@@ -62,6 +62,7 @@ let dataFiles: DataFile[] = [];
 let folders: string[] = [];
 let selectedId: string | null = null;
 let editor: any = null;
+let tsWorkspace: TsWorkspace | null = null;
 let dirty = false;
 /** tt-api.d.ts is shown read-only over the selected script (whose model,
  * unsaved edits included, stays as it is underneath) */
@@ -303,8 +304,7 @@ async function refresh(): Promise<void> {
     }
     renderList();
     pruneCollapsed();
-    syncModels();
-    syncDataModels();
+    syncWorkspace();
     scheduleDiagnostics();
     scheduleSettingsMarkers();
     if (selectedId && selectedId !== SETTINGS_ID && !known(selectedId)) {
@@ -474,8 +474,8 @@ async function exportPackage(start: string): Promise<void> {
     }
     const paths = Object.keys(pkg.files);
     const stem = (pkg.manifest ? baseName(folderOf(start)) : entryStem(pkg.entries[0])) || "package";
-    if (paths.length === 1) download(baseName(paths[0]), pkg.files[paths[0]], "text/plain");
-    else download(`${stem}.zip`, writeZip(Object.fromEntries(paths.map((p) => [`${stem}/${p}`, pkg.files[p]]))) as BlobPart, "application/zip");
+    if (paths.length === 1) download(baseName(paths[0]), isImageDataPath(paths[0]) ? (imageDataUrlToBytes(pkg.files[paths[0]]) as BlobPart) : pkg.files[paths[0]], "text/plain");
+    else download(`${stem}.zip`, writeZip(Object.fromEntries(paths.map((p) => [`${stem}/${p}`, isImageDataPath(p) ? imageDataUrlToBytes(pkg.files[p]) : pkg.files[p]]))) as BlobPart, "application/zip");
     const warn = [
         pkg.bare.length ? `imports by bare name stay behind: ${[...new Set(pkg.bare.map((b) => `"${b.spec}"`))].join(", ")}` : "",
         pkg.missing.length ? `imports that point at no file: ${pkg.missing.map((m) => `"${m.spec}"`).join(", ")}` : "",
@@ -629,8 +629,8 @@ function scheduleDiagnostics(): void {
         for (const s of scripts) {
             const m = models.get(s.id);
             if (!m || m.isDisposed?.() || m.getValue() !== s.code) continue;
-            // not checked yet, or partly (until the check with every script in the worker): keep what's stored
-            if (!checkedUris.has(m.uri.toString()) || recheckingStale.has(m)) continue;
+            // not checked yet at its current version: keep what's stored
+            if (!tsWorkspace?.isChecked(m)) continue;
             // a compile failure is already badged + logged; don't echo its syntax errors
             const errors = s.error ? [] : monaco.editor
                 .getModelMarkers({ resource: m.uri, owner: "typescript" })
@@ -645,232 +645,9 @@ function scheduleDiagnostics(): void {
     }, 600);
 }
 
-// ---- re-check importers when a utility changes, moves or goes ----
-const changedModels = new Set<any>();
-/** scripts re-checked themselves: moved ones (they may have been checked mid-batch, before the files they import moved), and new models with stored type errors */
-const movedModels = new Set<any>();
-/** paths scripts left (moved or deleted): their importers now point at nothing */
-const leftNames = new Set<string>();
-let recheckTimer: ReturnType<typeof setTimeout> | null = null;
-
-function scheduleDependantRecheck(m: any, left?: string): void {
-    if (m) changedModels.add(m);
-    if (left !== undefined) {
-        leftNames.add(left);
-        if (m) movedModels.add(m);
-    }
-    if (recheckTimer) clearTimeout(recheckTimer);
-    recheckTimer = setTimeout(() => {
-        recheckTimer = null;
-        const changed = [...changedModels];
-        const left = [...leftNames];
-        const targets = new Set<any>([...movedModels].filter((x) => !x.isDisposed?.()));
-        changedModels.clear();
-        leftNames.clear();
-        movedModels.clear();
-        const live = [...models.entries()]
-            .filter(([, x]) => !x.isDisposed?.())
-            .map(([id, x]) => ({ id, model: x, name: scripts.find((s) => s.id === id)?.meta.name ?? "", code: x.getValue() }));
-        for (const name of left) for (const id of dependantsOf(name, live)) targets.add(live.find((x) => x.id === id)!.model);
-        for (const c of changed) {
-            const src = live.find((x) => x.model === c);
-            if (!src) continue;
-            for (const id of dependantsOf(src.name, live)) {
-                const t = live.find((x) => x.id === id)!.model;
-                if (t !== c) targets.add(t);
-            }
-        }
-        for (const t of targets) void revalidateModel(t);
-    }, 500);
-}
-
-/**
- * Per model: the version last checked with every script synced to the TS
- * worker. Monaco syncs a model to the worker only when that model is checked,
- * so on startup a script can be checked before the scripts it imports reach
- * the worker: its "Cannot find module './lib'" is shown only once a check
- * with all of them confirms it (hideCoveredImportErrors).
- */
-const fullyChecked = new WeakMap<any, number>();
-const recheckingStale = new WeakSet<any>();
-
-/** what Monaco's TS diagnostics adapter does on an edit, for a model that wasn't edited — with every script in the worker */
-async function revalidateModel(m: any): Promise<void> {
-    const monaco = (window as any).monaco;
-    try {
-        const version = m.getVersionId();
-        const all = monaco.editor.getModels().filter((x: any) => x.getLanguageId() === "typescript").map((x: any) => x.uri);
-        const worker = await (await monaco.languages.typescript.getTypeScriptWorker())(m.uri, ...all);
-        const uri = m.uri.toString();
-        const diags = [...(await worker.getSyntacticDiagnostics(uri)), ...(await worker.getSemanticDiagnostics(uri))];
-        if (m.isDisposed()) return;
-        fullyChecked.set(m, version);
-        // setting no markers where there were none fires no marker event
-        checkedUris.add(uri);
-        scheduleDiagnostics();
-        scheduleProblems();
-        const flatten = (t: any): string => (typeof t === "string" ? t : [t.messageText, ...(t.next || []).map(flatten)].join("\n  "));
-        const sev = (c: number) => (c === 1 ? monaco.MarkerSeverity.Error : c === 0 ? monaco.MarkerSeverity.Warning : c === 2 ? monaco.MarkerSeverity.Hint : monaco.MarkerSeverity.Info);
-        monaco.editor.setModelMarkers(
-            m,
-            "typescript",
-            diags.map((d: any) => {
-                const a = m.getPositionAt(d.start || 0);
-                const b = m.getPositionAt((d.start || 0) + (d.length || 1));
-                return {
-                    severity: sev(d.category),
-                    startLineNumber: a.lineNumber,
-                    startColumn: a.column,
-                    endLineNumber: b.lineNumber,
-                    endColumn: b.column,
-                    message: flatten(d.messageText),
-                    code: String(d.code),
-                };
-            })
-        );
-    } catch {
-        /* worker restarting / model gone — the next edit re-checks */
-    }
-}
-
-// ---- package imports: ones that can't load (unpinned unpkg URLs, other
-// hosts), and ones still on their way ----
-// Marked on the URL as you type, before a save would fail to compile; an
-// unpinned one gets a quick fix that pins the version unpkg resolves now.
-// A valid URL is downloaded as soon as it's typed (the background reports
-// where each one stands): a warning while it and its types download, an
-// error if that fails — never TypeScript's "Cannot find module" meanwhile.
-const IMPORT_OWNER = "tt-imports";
-const UNPINNED = "unpinned-import";
-const importMarkerTimers = new WeakMap<any, number>();
-const packageStatuses = new Map<string, PackageStatus>();
-const packageStatusOf = (u: string) => packageStatuses.get(u);
-function updateImportMarkers(m: any): void {
-    const monaco = (window as any).monaco;
-    if (m.isDisposed() || m.getLanguageId() !== "typescript") return;
-    const code = m.getValue();
-    askPackageStatus(packageUrls(code).filter((u) => packageStatusOf(u)?.state !== "ready"));
-    const bad = packageImportMarks(code, packageStatusOf);
-    const had = monaco.editor.getModelMarkers({ resource: m.uri, owner: IMPORT_OWNER });
-    if (!bad.length && !had.length) return;
-    const markers = bad.map((b) => {
-            const a = m.getPositionAt(b.offset);
-            const e = m.getPositionAt(b.offset + b.length);
-            return {
-                severity: b.severity === "error" ? monaco.MarkerSeverity.Error : monaco.MarkerSeverity.Warning,
-                source: "tangitweak",
-                code: b.pin ? UNPINNED : "package-import",
-                message: b.message,
-                startLineNumber: a.lineNumber,
-                startColumn: a.column,
-                endLineNumber: e.lineNumber,
-                endColumn: e.column,
-            };
-        });
-    const key = (x: any) => `${x.severity} ${x.startLineNumber}:${x.startColumn}-${x.endLineNumber}:${x.endColumn} ${x.message}`;
-    if (markers.map(key).join("\n") === had.map(key).join("\n")) return;
-    ownMarkerWrites.add(m.uri.toString());
-    monaco.editor.setModelMarkers(m, IMPORT_OWNER, markers);
-    hideCoveredImportErrors(m);
-}
-
-/** drop TypeScript's "Cannot find module" on URL imports our own marker explains (packageImportMarks) */
-function hideCoveredImportErrors(m: any): void {
-    const monaco = (window as any).monaco;
-    if (m.isDisposed()) return;
-    const ts = monaco.editor.getModelMarkers({ resource: m.uri, owner: "typescript" });
-    const unsure = fullyChecked.get(m) !== m.getVersionId();
-    let stale = false;
-    const keep = ts.filter((mk: any) => {
-        if ((typeof mk.code === "object" ? mk.code?.value : mk.code) !== "2307") return true;
-        if (coveredMissingModule(String(mk.message), packageStatusOf)) return false;
-        if (unsure && missingLocalModule(String(mk.message))) return !(stale = true);
-        return true;
-    });
-    if (stale && !recheckingStale.has(m)) {
-        recheckingStale.add(m);
-        void revalidateModel(m).finally(() => recheckingStale.delete(m));
-    }
-    if (keep.length === ts.length) return;
-    ownMarkerWrites.add(m.uri.toString());
-    monaco.editor.setModelMarkers(m, "typescript", keep);
-}
-
-/** URLs to ask the background about (batched); ones still on their way are asked again until they settle */
-const askedUrls = new Set<string>();
-let askTimer: number | undefined;
-function askPackageStatus(urls: string[], delay = 150): void {
-    if (!urls.length) return;
-    for (const u of urls) askedUrls.add(u);
-    if (askTimer !== undefined) return;
-    askTimer = window.setTimeout(async () => {
-        askTimer = undefined;
-        const ask = [...askedUrls];
-        askedUrls.clear();
-        const r = await send<{ statuses?: Record<string, PackageStatus> }>({ type: "packageStatus", urls: ask }).catch(() => undefined);
-        const statuses = r?.statuses;
-        if (!statuses) return;
-        let changed = false;
-        for (const [u, st] of Object.entries(statuses)) {
-            if (JSON.stringify(packageStatuses.get(u)) !== JSON.stringify(st)) changed = true;
-            packageStatuses.set(u, st);
-        }
-        if (changed) for (const x of models.values()) updateImportMarkers(x);
-        askPackageStatus(Object.keys(statuses).filter((u) => /^(downloading|typing)$/.test(statuses[u].state)), 1000);
-    }, delay);
-}
-
-/** a download or typings landed (or were pruned): ask again about the URLs the scripts import (asking downloads them) */
-function watchPackageStatus(): void {
-    chrome.storage.onChanged.addListener((c, area) => {
-        if (area !== "local" || !(c[PACKAGE_MODULES_KEY] || c[PACKAGE_TYPINGS_KEY])) return;
-        askPackageStatus([...new Set([...models.values()].filter((m) => !m.isDisposed()).flatMap((m) => packageUrls(m.getValue())))]);
-    });
-}
-
-function scheduleImportMarkers(m: any): void {
-    clearTimeout(importMarkerTimers.get(m));
-    importMarkerTimers.set(m, window.setTimeout(() => {
-        if (!m.isDisposed()) ensureBuiltinTypings(m.getValue());
-        updateImportMarkers(m);
-        updateJsxMarker(m);
-    }, 250));
-}
-
-// ---- JSX in a .ts script ----
-// TypeScript parses JSX only in .tsx files: a .ts script's JSX gets a
-// marker naming the fix, with a quick fix that renames the script.
-const JSX_OWNER = "tt-jsx";
-const JSX_IN_TS = "jsx-in-ts";
+// ---- JSX in a .ts script: quick fix that renames the script to .tsx ----
 const RENAME_TO_TSX = "tt.renameToTsx";
 const scriptIdOfModel = (m: any): string | undefined => [...models].find(([, x]) => x === m)?.[0];
-function updateJsxMarker(m: any): void {
-    const monaco = (window as any).monaco;
-    if (m.isDisposed() || m.getLanguageId() !== "typescript") return;
-    const s = scripts.find((x) => x.id === scriptIdOfModel(m));
-    const at = s && !isTsxName(s.meta.name) ? jsxElementAt(m.getValue()) : -1;
-    if (at < 0 && !monaco.editor.getModelMarkers({ resource: m.uri, owner: JSX_OWNER }).length) return;
-    const a = m.getPositionAt(at);
-    ownMarkerWrites.add(m.uri.toString());
-    monaco.editor.setModelMarkers(
-        m,
-        JSX_OWNER,
-        at < 0
-            ? []
-            : [
-                  {
-                      severity: monaco.MarkerSeverity.Error,
-                      source: "tangitweak",
-                      code: JSX_IN_TS,
-                      message: `JSX needs a .tsx file — rename this script to "${baseName(s!.meta.name)}.tsx"`,
-                      startLineNumber: a.lineNumber,
-                      startColumn: a.column,
-                      endLineNumber: a.lineNumber,
-                      endColumn: a.column + 1,
-                  },
-              ]
-    );
-}
 
 async function renameToTsx(id: string): Promise<void> {
     const s = scripts.find((x) => x.id === id);
@@ -986,8 +763,6 @@ function registerPlaceFixes(): void {
 /** One Monaco model per script so `import "./utilities"` resolves across
  * the editor's virtual workspace (file:///<name>.ts per script). */
 const models = new Map<string, any>();
-/** script id → the name its model was created under (to know where a moved script came from) */
-const modelNames = new Map<string, string>();
 
 /** Per-file cursor/scroll memory: view state is captured when a model is
  * switched away from and restored when the user comes back (VS Code-style,
@@ -1038,18 +813,11 @@ function syncModels(): void {
             viewStates.delete(oldUri);
             baselines.delete(oldUri);
             old.dispose();
-            scheduleDependantRecheck(m, modelNames.get(s.id));
         }
-        modelNames.set(s.id, s.meta.name);
         if (!m) {
             m = monaco.editor.getModel(uri) || monaco.editor.createModel(s.code, "typescript", uri);
             models.set(s.id, m);
             setBaseline(m, s.code);
-            // a script checked before this library existed (import, folder
-            // sync) still says "Cannot find module" — re-check its importers.
-            // Its own stored errors too: a check that finds none publishes no markers
-            if (s.typeErrors?.length) movedModels.add(m);
-            scheduleDependantRecheck(m);
         } else if (m.getValue() !== s.code && !(s.id === selectedId && dirty)) {
             applyingExternal = true;
             m.setValue(s.code);
@@ -1063,9 +831,6 @@ function syncModels(): void {
             baselines.delete(m.uri.toString());
             m.dispose();
             models.delete(id);
-            const name = modelNames.get(id);
-            modelNames.delete(id);
-            if (name !== undefined) scheduleDependantRecheck(null, name);
         }
     }
 }
@@ -1078,8 +843,8 @@ const dataUri = (path: string): any => (window as any).monaco.Uri.file("/" + pat
 const isDataId = (id: string | null): boolean => !!id && dataFiles.some((d) => d.id === id);
 
 /** syncModels for data files: renamed ones move, clean ones follow external changes, deleted ones go */
-/** a data file's Monaco language: an .svg is XML */
-const dataLanguage = (path: string): string => (isSvgPath(path) ? "xml" : "json");
+/** a data file's Monaco language: .svg is XML, raster images are plaintext (no JSON diagnostics) */
+const dataLanguage = (path: string): string => (isSvgPath(path) ? "xml" : isImageDataPath(path) ? "plaintext" : "json");
 
 function syncDataModels(): void {
     if (!editor) return;
@@ -1129,8 +894,35 @@ function syncDataModels(): void {
             dataModels.delete(id);
         }
     }
-    updateDataTypings();
     scheduleManifestMarkers();
+}
+
+/** Stage script + data-file model changes as one atomic TypeScript workspace commit. */
+function syncWorkspace(): void {
+    if (!editor || !tsWorkspace) return;
+    const shown = editor.getModel();
+    const changedDecls = tsWorkspace.sync(
+        () => {
+            syncModels();
+            syncDataModels();
+        },
+        () =>
+            scripts.flatMap((s) => {
+                const model = models.get(s.id);
+                return model ? [{ id: s.id, name: s.meta.name, model }] : [];
+            }),
+        () => dataFiles.map((d) => ({ path: d.path, text: dataModels.get(d.id)?.getValue() ?? d.text }))
+    );
+    disposeStaleDeclModels(changedDecls, shown);
+}
+
+/** a declaration Go to Definition opened as a model hides the new extraLib from TypeScript */
+function disposeStaleDeclModels(changedUris: string[], shown: any): void {
+    const monaco = (window as any).monaco;
+    for (const uri of changedUris) {
+        const stale = monaco.editor.getModel(monaco.Uri.parse(uri));
+        if (stale && stale !== shown) stale.dispose();
+    }
 }
 
 /** a package's metadata.json: an error on each "scripts" entry that names no script */
@@ -1166,21 +958,10 @@ function scheduleDataTypings(): void {
 
 /** what TypeScript sees of each data file (a JSON import's type), unsaved edits included */
 function updateDataTypings(): void {
+    if (!tsWorkspace) return;
     const shown = editor?.getModel();
-    for (const uri of setDataFileTypings(dataFiles.map((d) => ({ path: d.path, text: dataModels.get(d.id)?.getValue() ?? d.text })))) {
-        // a declaration Go to Definition opened as a model hides the new one from TypeScript
-        const stale = (window as any).monaco.editor.getModel((window as any).monaco.Uri.parse(uri));
-        if (stale && stale !== shown) stale.dispose();
-    }
-}
-
-/** package imports' typings (downloaded when a script importing them is saved), kept live */
-function watchPackageTypings(): void {
-    const apply = (t: StoredTypings | undefined) => setPackageTypings(t?.files ?? {});
-    chrome.storage.local.get(PACKAGE_TYPINGS_KEY, (d) => apply(d?.[PACKAGE_TYPINGS_KEY]));
-    chrome.storage.onChanged.addListener((c, area) => {
-        if (area === "local" && c[PACKAGE_TYPINGS_KEY]) apply(c[PACKAGE_TYPINGS_KEY].newValue);
-    });
+    const changed = tsWorkspace.setDataFiles(dataFiles.map((d) => ({ path: d.path, text: dataModels.get(d.id)?.getValue() ?? d.text })));
+    disposeStaleDeclModels(changed, shown);
 }
 
 async function renderEditorEmpty(): Promise<void> {
@@ -1222,8 +1003,7 @@ function selectReal(id: string): void {
     const data = script ? undefined : dataFiles.find((d) => d.id === id);
     if (!script && !data) return;
     showWelcome(false);
-    if (script) syncModels();
-    else syncDataModels();
+    syncWorkspace();
     const m = script ? models.get(id) : dataModels.get(id);
     if (m && editor.getModel() !== m) {
         captureViewState();
@@ -1499,8 +1279,6 @@ function watchNetCounts(): void {
 // Problems). Entries go away by themselves once fixed; the Log keeps history. ----
 let problemGroups: ProblemGroup[] = [];
 let problemsTimer: ReturnType<typeof setTimeout> | null = null;
-/** models Monaco has published markers for: until then a script's stored (saved-code) type errors stand in */
-const checkedUris = new Set<string>();
 
 /** Coalesces, but never postpones: a stream of marker events (the TS worker
  *  checking script after script) can't hold the view back past 200 ms. */
@@ -1533,12 +1311,15 @@ function registerSettingsCommand(): void {
 const PROBLEM_OWNER = "tangitweak";
 /** model → the problems its markers show */
 const problemMarkerKeys = new WeakMap<any, string>();
-/** URIs whose marker change is our own: not a sign TypeScript has checked them */
-const ownMarkerWrites = new Set<string>();
+let writingProblemMarkers = false;
 
 function setProblemMarkers(m: any, markers: any[]): void {
-    ownMarkerWrites.add(m.uri.toString());
-    (window as any).monaco.editor.setModelMarkers(m, PROBLEM_OWNER, markers);
+    writingProblemMarkers = true;
+    try {
+        (window as any).monaco.editor.setModelMarkers(m, PROBLEM_OWNER, markers);
+    } finally {
+        writingProblemMarkers = false;
+    }
 }
 
 /**
@@ -1585,7 +1366,7 @@ function updateProblems(): void {
         for (const s of scripts) {
             const m = models.get(s.id);
             if (!m || m.isDisposed()) continue;
-            if ((!checkedUris.has(m.uri.toString()) || recheckingStale.has(m)) && m.getValue() === s.code && s.typeErrors?.length) continue;
+            if (!tsWorkspace?.isChecked(m) && m.getValue() === s.code && s.typeErrors?.length) continue;
             live.set(s.id, modelProblems(m));
         }
     }
@@ -2274,8 +2055,6 @@ async function main(): Promise<void> {
         },
     } satisfies typeof actions);
     await loadMonaco();
-    watchPackageTypings();
-    watchPackageStatus();
     watchPackages();
     // test/e2e seam: adopt an arbitrary directory handle (e.g. OPFS) for watching
     (window as any).__resAdoptFolder = (h: any) => fsBridge.adoptForWatch(h);
@@ -2290,36 +2069,26 @@ async function main(): Promise<void> {
         wordWrap: layout.wordWrap ? "on" : "off",
         hover: { sticky: true }, // reachable, so tooltip.ts can copy it on click
     });
+    tsWorkspace = createMonacoTsWorkspace({
+        monaco: (window as any).monaco,
+        getActiveModel: () => editor?.getModel() ?? null,
+        send,
+        onChecked: () => {
+            scheduleDiagnostics();
+            scheduleProblems();
+        },
+    });
+    editor.onDidChangeModel(() => tsWorkspace?.prioritize(editor.getModel()));
     editor.addCommand((window as any).monaco.KeyMod.CtrlCmd | (window as any).monaco.KeyCode.KeyS, () => void saveCurrent());
     registerLayoutActions();
-    (window as any).monaco.editor.onDidChangeMarkers((uris: Uri[]) => {
-        for (const u of uris) if (!ownMarkerWrites.delete(u.toString())) checkedUris.add(u.toString());
-        for (const u of uris) {
-            const m = (window as any).monaco.editor.getModel(u);
-            if (m?.getLanguageId() === "typescript") hideCoveredImportErrors(m);
-        }
-        scheduleDiagnostics();
-        scheduleProblems();
+    (window as any).monaco.editor.onDidChangeMarkers(() => {
+        if (!writingProblemMarkers) scheduleProblems();
     });
     (window as any).monaco.editor.onWillDisposeModel((m: any) => {
-        checkedUris.delete(m.uri.toString());
         if ((problemMarkerKeys.get(m) ?? "[]") !== "[]") setProblemMarkers(m, []);
         scheduleProblems();
     });
     registerSettingsAssist();
-    // Monaco re-checks only the edited file; its importers keep stale errors
-    (window as any).monaco.editor.onDidCreateModel((m: any) => {
-        if (m.getLanguageId() !== "typescript") return;
-        m.onDidChangeContent(() => scheduleDependantRecheck(m));
-        m.onDidChangeContent(() => scheduleImportMarkers(m));
-        scheduleImportMarkers(m);
-    });
-    for (const m of models.values()) {
-        m.onDidChangeContent(() => scheduleDependantRecheck(m));
-        if (m.getLanguageId() !== "typescript") continue;
-        m.onDidChangeContent(() => scheduleImportMarkers(m));
-        scheduleImportMarkers(m);
-    }
     registerPinImportFix();
     registerPlaceFixes();
     registerTsxFix();

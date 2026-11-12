@@ -19,10 +19,10 @@
  * patched text expresses exactly the target state; otherwise null.
  */
 import { parseDocument, isMap, isScalar, Scalar, stringify, type YAMLMap } from "yaml";
-import { resolveParamValues, paramDefault } from "./scriptDef";
+import { isParamDef, isParamGroup, resolveParamValues, paramDefault, type ParamTree } from "./scriptDef";
 import {
-    parseSettings, planSettings, scriptKeys, scriptBlock, entryLines, commentedDefaultLines, renderedKeyText, globalOptionLines,
-    DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL, DEFAULT_BODY_CAP,
+    parseSettings, planSettings, scriptBlock, groupBlockLines, entryLines, commentedDefaultLines, renderedKeyText, globalOptionLines,
+    DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL, DEFAULT_BODY_CAP, isObj,
     type GlobalSettings, type ScriptSettingsState,
 } from "./settingsYaml";
 import { DEFAULT_TEXT_TYPES } from "./bodyKind";
@@ -79,9 +79,10 @@ function sectionSource(src: string, pair: any): string {
     return src.slice(pair.key.range[0], end);
 }
 
-/** does the section's source already document this key (a commented `# key:` entry)? */
-function documentedIn(srcSlice: string, key: string): boolean {
-    const re = new RegExp(`^[ \\t]*#[ \\t]*${escapeRegExp(renderedKeyText(key))}[ \\t]*:`, "m");
+/** does the section's source already document this key (a commented `# key:` entry at `indent` if given)? */
+function documentedIn(srcSlice: string, key: string, indent?: number): boolean {
+    const pad = indent !== undefined ? `[ ]{${indent}}` : `[ \\t]*`;
+    const re = new RegExp(`^${pad}#[ \\t]*${escapeRegExp(renderedKeyText(key))}[ \\t]*:`, "m");
     return re.test(srcSlice);
 }
 
@@ -90,20 +91,23 @@ const DOCUMENTS_ENTRIES = /^[ \t]*#[ \t]*[^\s#][^:\n]*:/m;
 
 /**
  * End offset (line content end) of the commented `# key: …` entry in the
- * section, consuming any more-indented comment continuation lines (a
- * commented block-scalar default spans several). null when not present.
+ * section (at `indent` if given), consuming any more-indented comment continuation
+ * lines (a commented block-scalar default spans several). null when not present.
  */
-function commentedEntryEnd(src: string, sectionPair: any, key: string): number | null {
+function commentedEntryEnd(src: string, sectionPair: any, key: string, indent?: number): number | null {
     const slice = sectionSource(src, sectionPair);
-    const re = new RegExp(`^[ \\t]*#[ \\t]*${escapeRegExp(renderedKeyText(key))}[ \\t]*:.*$`, "m");
+    const pad = indent !== undefined ? `[ ]{${indent}}` : `[ \\t]*`;
+    const re = new RegExp(`^${pad}#[ \\t]*${escapeRegExp(renderedKeyText(key))}[ \\t]*:.*$`, "m");
     const m = re.exec(slice);
     if (!m || m.index === undefined) return null;
     let end = lineContentEnd(src, sectionPair.key.range[0] + m.index);
+    const contIndent = indent !== undefined ? `[ ]{${indent}}#[ \\t][ \\t]` : `^[ \\t]*#[ \\t][ \\t]`;
+    const contRe = new RegExp(`^${contIndent.replace(/^\^/, "")}`);
     for (;;) {
         const nl = src.indexOf("\n", end);
         if (nl < 0) break;
         const nextEnd = lineContentEnd(src, nl + 1);
-        if (!/^[ \t]*#[ \t][ \t]/.test(src.slice(nl + 1, nextEnd))) break; // not an indented comment continuation
+        if (!contRe.test(src.slice(nl + 1, nextEnd))) break; // not an indented comment continuation
         end = nextEnd;
     }
     return end;
@@ -305,11 +309,20 @@ export function patchSettings(existing: string, g: GlobalSettings, scripts: Scri
         return true;
     };
 
+    const childIndentOf = (sectionPair: any, target: MapTarget & { kind: "map" | "empty" }): number => {
+        if (target.kind === "map" && target.node.items.length) {
+            const first: any = target.node.items[0];
+            if (first?.key?.range) return columnOf(existing, first.key.range[0]);
+        }
+        return columnOf(existing, sectionPair.key.range[0]) + 2;
+    };
+
     /** queue inserting a live entry for `key` — right under its commented default when the section documents one */
     const insertEntry = (sectionPair: any, target: MapTarget & { kind: "map" | "empty" }, key: string, lines: string[]): boolean => {
-        const underDoc = commentedEntryEnd(existing, sectionPair, key);
+        const indent = childIndentOf(sectionPair, target);
+        const underDoc = commentedEntryEnd(existing, sectionPair, key, indent);
         if (underDoc !== null) {
-            queueAt(underDoc, columnOf(existing, sectionPair.key.range[0]) + 2, lines);
+            queueAt(underDoc, indent, lines);
             return true;
         }
         return insertInto(target, lines);
@@ -351,14 +364,89 @@ export function patchSettings(existing: string, g: GlobalSettings, scripts: Scri
         if (undocumented.length && !insertInto(settingsTarget, undocumented)) return null;
     }
 
+    const patchParamMap = (
+        sectionPair: any,
+        target: MapTarget & { kind: "map" | "empty" },
+        defs: ParamTree,
+        vals: Record<string, any> | undefined,
+        docTable: Record<string, any> | undefined,
+        rootScript?: { declared: boolean; enabled: boolean }
+    ): boolean => {
+        const srcSlice = sectionSource(existing, sectionPair);
+        const childIndent = childIndentOf(sectionPair, target);
+        const sectionDocuments = target.kind === "empty" || DOCUMENTS_ENTRIES.test(srcSlice);
+        const leaves: [string, any, any, any][] = rootScript?.declared ? [["enabled", rootScript.enabled, true, undefined]] : [];
+        const groups: [string, ParamTree][] = [];
+        for (const [k, node] of Object.entries(defs)) {
+            if (rootScript && k === "enabled") continue;
+            if (isParamDef(node)) leaves.push([k, vals?.[k], paramDefault(node), node]);
+            else if (isParamGroup(node)) groups.push([k, node]);
+        }
+
+        if (target.kind === "empty") {
+            const batch: string[] = [];
+            for (const [k, v, d, def] of leaves) {
+                if (!same(v, d)) {
+                    if (!insertEntry(sectionPair, target, k, entryLines(k, v, { block: isMulti(def) }))) return false;
+                } else if (!documentedIn(srcSlice, k, childIndent)) {
+                    batch.push(...commentedDefaultLines(k, def));
+                }
+            }
+            for (const [k, group] of groups) batch.push(...groupBlockLines(k, group, vals?.[k]));
+            if (batch.length && !insertInto(target, batch)) return false;
+            return true;
+        }
+
+        const mapNode = target.node;
+        for (const [k, v, d, def] of leaves) {
+            const pair = findPair(mapNode, k);
+            if (pair) {
+                if (!same(docTable?.[k] ?? d, v)) {
+                    const edit = replaceValueEdit(existing, pair, v, eol);
+                    if (!edit) return false;
+                    edits.push(edit);
+                }
+                continue;
+            }
+            if (!same(docTable?.[k] ?? d, v)) {
+                if (!insertEntry(sectionPair, target, k, entryLines(k, v, { block: isMulti(def) }))) return false;
+            } else if (sectionDocuments && !documentedIn(srcSlice, k, childIndent)) {
+                if (!insertInto(target, commentedDefaultLines(k, def))) return false;
+            }
+        }
+
+        for (const [k, group] of groups) {
+            const pair = findPair(mapNode, k);
+            if (!pair) {
+                if (!insertInto(target, groupBlockLines(k, group, vals?.[k]))) return false;
+                continue;
+            }
+            const subNode = pair.value;
+            const subEmpty = subNode == null || (isScalar(subNode) && subNode.value == null);
+            if (!subEmpty && !isMap(subNode)) return false;
+            const subDoc = isObj(docTable?.[k]) ? docTable![k] : {};
+            if (!patchParamMap(pair, subEmpty ? { kind: "empty", pair } : { kind: "map", node: subNode }, group, vals?.[k], subDoc)) return false;
+        }
+
+        // params or sections removed from the script: comment out their stale live entries
+        for (const pair of mapNode.items) {
+            const k = isScalar(pair.key) ? pair.key.value : undefined;
+            if (typeof k !== "string") continue;
+            const stale = rootScript && k === "enabled" ? !rootScript.declared : !Object.prototype.hasOwnProperty.call(defs, k);
+            if (!stale) continue;
+            const edit = commentOutEdit(existing, pair, eol);
+            if (!edit) return false;
+            edits.push(edit);
+        }
+        return true;
+    };
+
     // --- scripts ---
     const paramsTarget = classify(root, "params");
     if (paramsTarget === null) return null;
     const missingBlocks: string[][] = []; // canonical blocks of scripts with no section yet
     for (const s of scripts) {
-        const want: [string, any, any][] = s.declared ? [["enabled", s.enabled, true]] : [];
         const vals = resolveParamValues(s.defs, s.values);
-        for (const k of scriptKeys(s)) want.push([k, vals[k], paramDefault(s.defs[k])]);
         const scriptPair = paramsTarget.kind === "map" ? findPair(paramsTarget.node, s.name) : undefined;
         const scriptNode = scriptPair?.value;
         const scriptMissing = !scriptPair && paramsTarget.kind !== "missing";
@@ -372,56 +460,8 @@ export function patchSettings(existing: string, g: GlobalSettings, scripts: Scri
             if (block) missingBlocks.push(block);
             continue;
         }
-        if (scriptEmpty) {
-            // an all-commented section: insert live entries for non-default
-            // values (right under their commented default when present), and
-            // document params the file doesn't mention yet (a newly declared
-            // param must appear even at its default)
-            const srcSlice = sectionSource(existing, scriptPair);
-            const batch: string[] = [];
-            for (const [k, v, d] of want) {
-                if (!same(v, d)) {
-                    const lines = entryLines(k, v, { block: isMulti(s.defs[k]) });
-                    if (!insertEntry(scriptPair, { kind: "empty", pair: scriptPair }, k, lines)) return null;
-                } else if (!documentedIn(srcSlice, k)) {
-                    batch.push(...commentedDefaultLines(k, s.defs[k]));
-                }
-            }
-            if (batch.length && !insertInto({ kind: "empty", pair: scriptPair }, batch)) return null;
-            continue;
-        }
-        // existing map section: patch entry-wise
-        const docTable = current.params[s.name];
-        const srcSlice = sectionSource(existing, scriptPair);
-        const sectionDocuments = DOCUMENTS_ENTRIES.test(srcSlice); // follow the section's own convention
-        for (const [k, v, d] of want) {
-            const pair = findPair(scriptNode, k);
-            if (pair) {
-                if (!same(docTable?.[k] ?? d, v)) {
-                    const edit = replaceValueEdit(existing, pair, v, eol);
-                    if (!edit) return null;
-                    edits.push(edit);
-                }
-                continue;
-            }
-            if (!same(docTable?.[k] ?? d, v)) {
-                // no live entry, non-default value → insert a live line
-                if (!insertEntry(scriptPair, { kind: "map", node: scriptNode }, k, entryLines(k, v, { block: isMulti(s.defs[k]) }))) return null;
-            } else if (sectionDocuments && !documentedIn(srcSlice, k)) {
-                // newly declared param at its default in a documented section
-                if (!insertInto({ kind: "map", node: scriptNode }, commentedDefaultLines(k, s.defs[k]))) return null;
-            }
-        }
-        // params removed from the script: comment out their stale live
-        // entries (a live value would otherwise silently map to nothing)
-        for (const pair of scriptNode.items) {
-            const k = isScalar(pair.key) ? pair.key.value : undefined;
-            if (typeof k !== "string") continue;
-            const stale = k === "enabled" ? !s.declared : !Object.prototype.hasOwnProperty.call(s.defs, k);
-            if (!stale) continue;
-            const edit = commentOutEdit(existing, pair, eol);
-            if (!edit) return null;
-            edits.push(edit);
+        if (!patchParamMap(scriptPair, scriptEmpty ? { kind: "empty", pair: scriptPair } : { kind: "map", node: scriptNode }, s.defs, vals, current.params[s.name], { declared: s.declared, enabled: s.enabled })) {
+            return null;
         }
     }
 

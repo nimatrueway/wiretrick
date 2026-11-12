@@ -24,10 +24,9 @@ import {
     type NavTreeItem,
     type Span,
 } from "./apiLinks";
-import { JSON_FALLBACK_DTS, jsonDeclPath, jsonModuleDts } from "./jsonTypes";
+import { JSON_FALLBACK_DTS } from "./jsonTypes";
 import { packagePaths, TYPINGS_ROOT } from "../shared/packageImports";
-import { importSpecs, isSvgPath } from "../shared/scriptImports";
-import { builtinPaths, builtinSpec } from "../shared/builtinSpecs";
+import { builtinPaths } from "../shared/builtinSpecs";
 import { MANIFEST_FILE, MANIFEST_SCHEMA } from "../shared/packageMetadata";
 
 let monacoApi: any = null;
@@ -68,29 +67,9 @@ export function editorCompilerOptions(ts: { ScriptTarget: any; ModuleKind: any; 
     };
 }
 
-/** where the built-in modules' typings go (ensureBuiltinTypings), and the bare specifiers that map to them */
-const BUILTIN_ROOT = "file:///node_modules";
+/** where the built-in modules' typings go (tsWorkspace), and the bare specifiers that map to them */
+export const BUILTIN_ROOT = "file:///node_modules";
 const BUILTIN_PATHS = builtinPaths(BUILTIN_ROOT);
-
-let builtinTypings: Promise<void> | null = null;
-
-/**
- * Load the built-in valtio/React typings (lib/builtin-types.json, ~1.3 MB)
- * the first time a script imports a built-in by its bare name.
- */
-export function ensureBuiltinTypings(code: string): void {
-    if (builtinTypings || !monacoApi) return;
-    if (![...importSpecs(code)].some((s) => builtinSpec(s) === s)) return;
-    const ts = monacoApi.languages.typescript.typescriptDefaults;
-    builtinTypings = fetch(chrome.runtime.getURL("lib/builtin-types.json"))
-        .then((r) => r.json())
-        .then((files: Record<string, string>) => {
-            for (const [p, text] of Object.entries(files)) ts.addExtraLib(text, `${BUILTIN_ROOT}/${p}`);
-        })
-        .catch(() => {
-            builtinTypings = null;
-        });
-}
 
 export async function loadMonaco(): Promise<any> {
     if (monacoApi) return monacoApi;
@@ -129,56 +108,6 @@ export async function loadMonaco(): Promise<any> {
     });
 
     return monacoApi;
-}
-
-const dataFileLibs = new Map<string, { content: string; lib: { dispose(): void } }>();
-
-/**
- * Type the data files for the TS worker (text as in the Code view, unsaved
- * edits included): one declaration per file next to it. TypeScript looks it
- * up by the importer's model path, which is %-encoded when a folder has a
- * space — so a path with one gets both spellings. Returns the URIs whose
- * declaration changed or went away.
- */
-export function setDataFileTypings(files: { path: string; text: string }[]): string[] {
-    const ts = monacoApi.languages.typescript.typescriptDefaults;
-    const want = new Map<string, string>();
-    const changed: string[] = [];
-    for (const f of files) {
-        // an .svg is typed by tt-api.d.ts's `declare module "*.svg"`
-        if (isSvgPath(f.path)) continue;
-        const decl = jsonDeclPath(f.path);
-        const content = jsonModuleDts(f.text);
-        want.set("file:///" + decl, content);
-        want.set(monacoApi.Uri.file("/" + decl).toString(), content);
-    }
-    for (const [uri, cur] of dataFileLibs) {
-        if (want.get(uri) === cur.content) continue;
-        cur.lib.dispose();
-        dataFileLibs.delete(uri);
-        changed.push(uri);
-    }
-    for (const [uri, content] of want) if (!dataFileLibs.has(uri)) dataFileLibs.set(uri, { content, lib: ts.addExtraLib(content, uri) });
-    return changed;
-}
-
-const packageLibs = new Map<string, { content: string; lib: { dispose(): void } }>();
-
-/**
- * Type package imports: the stored package typings (path → text, see
- * background/engine/packageImports) as extra libs under
- * `file:///.tangitweak/types/`, where the `paths` compiler option maps
- * package URLs. Monaco re-checks open models when they change.
- */
-export function setPackageTypings(files: Record<string, string>): void {
-    const ts = monacoApi.languages.typescript.typescriptDefaults;
-    const want = new Map(Object.entries(files).map(([p, text]) => [`file:///${TYPINGS_ROOT}/${p}`, text]));
-    for (const [uri, cur] of packageLibs) {
-        if (want.get(uri) === cur.content) continue;
-        cur.lib.dispose();
-        packageLibs.delete(uri);
-    }
-    for (const [uri, content] of want) if (!packageLibs.has(uri)) packageLibs.set(uri, { content, lib: ts.addExtraLib(content, uri) });
 }
 
 // TS ScriptElementKind → Monaco CompletionItemKind name (as tsMode.js maps it)
@@ -264,7 +193,8 @@ interface DrillState {
  */
 function registerTsHover(monaco: any): void {
     const defaults = monaco.languages.typescript.typescriptDefaults;
-    defaults.setModeConfiguration({ ...defaults.modeConfiguration, hovers: false, completionItems: false, signatureHelp: false });
+    // tsWorkspace owns diagnostics so scripts are checked only once workspace typings and models are staged
+    defaults.setModeConfiguration({ ...defaults.modeConfiguration, hovers: false, completionItems: false, signatureHelp: false, diagnostics: false });
     const workerFor = async (uri: any) => (await monaco.languages.typescript.getTypeScriptWorker())(uri);
     const completionKind = (k: string) => monaco.languages.CompletionItemKind[KIND[k] ?? "Property"];
 

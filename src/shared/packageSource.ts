@@ -21,7 +21,7 @@
 import { builtinSpec } from "./builtinSpecs";
 import { isManifestPath, MANIFEST_FILE, parseManifest, type Manifest } from "./packageMetadata";
 import { isUrlSpec } from "./packageImports";
-import { importPath, importSpecs, isDataSpec } from "./scriptImports";
+import { bytesToImageDataUrl, importPath, importSpecs, isDataSpec, isImageDataPath, isRelativeIconSpec, metadataIconSpec } from "./scriptImports";
 import { readZip } from "./zip";
 
 export type PackageSource =
@@ -97,22 +97,37 @@ export function sourceLabel(src: PackageSource): string {
 /** a source updates in the background (a local file only when the Editor reads it) */
 export const isRemote = (src: PackageSource): boolean => (src.kind !== "url" && src.kind !== "zip") || /^https?:/i.test(src.url);
 
+/** progress reported while downloading a package's archive or files */
+export interface DownloadProgress {
+    /** completed units (files or bytes), when `total` is known */
+    done?: number;
+    /** total units (files or bytes), when known; omit for an indeterminate bar */
+    total?: number;
+    /** short progress detail, e.g. "3 / 12 files" or "420 KB / 1.8 MB" */
+    detail?: string;
+}
+
 /** how the reader gets at the network: text or bytes of a URL (null: not found), and JSON */
 export interface Net {
     text(url: string): Promise<string | null>;
-    bytes(url: string): Promise<ArrayBuffer | null>;
+    bytes(url: string, onBytes?: (loaded: number, total?: number) => void): Promise<ArrayBuffer | null>;
     json(url: string): Promise<any>;
 }
 
 /** the files a package can use */
-export const isPackageFile = (path: string): boolean => /\.(tsx?|json|svg)$/i.test(path) && !/(^|\/)(node_modules|\.git)\//.test(path);
+export const isPackageFile = (path: string): boolean => /\.(tsx?|json|svg|png|jpe?g|gif|webp|ico|avif)$/i.test(path) && !/(^|\/)(node_modules|\.git)\//.test(path);
 
-/** a zip's package files, as text; a zip of one folder is that folder's */
+/** read a browser `File` as package content (raster images become `data:image/...;base64,...`) */
+export async function readPackageBrowserFile(path: string, file: File): Promise<string> {
+    return isImageDataPath(path) ? bytesToImageDataUrl(path, new Uint8Array(await file.arrayBuffer())) : file.text();
+}
+
+/** a zip's package files, as text (raster images as `data:` URLs); a zip of one folder is that folder's */
 export async function unzipPackage(buf: ArrayBuffer): Promise<Record<string, string>> {
     const raw = await readZip(buf, isPackageFile);
     const utf8 = new TextDecoder();
     const files: Record<string, string> = {};
-    for (const [p, bytes] of Object.entries(raw)) files[p] = utf8.decode(bytes);
+    for (const [p, bytes] of Object.entries(raw)) files[p] = isImageDataPath(p) ? bytesToImageDataUrl(p, bytes) : utf8.decode(bytes);
     const tops = new Set(Object.keys(files).map((p) => (p.includes("/") ? p.split("/")[0] : "")));
     if (tops.size !== 1 || tops.has("")) return files;
     const cut = [...tops][0].length + 1;
@@ -130,8 +145,15 @@ export interface OpenedSource {
 
 const GITHUB_API = "https://api.github.com";
 
-export async function openSource(src: PackageSource, net: Net): Promise<OpenedSource> {
+function formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export async function openSource(src: PackageSource, net: Net, onProgress?: (p: DownloadProgress) => void): Promise<OpenedSource> {
     if (src.kind === "github") {
+        onProgress?.({});
         const base = `${GITHUB_API}/repos/${src.owner}/${src.repo}`;
         const commit = await net.json(`${base}/commits/${encodeURIComponent(src.ref)}`);
         const sha: string | undefined = commit?.sha;
@@ -146,9 +168,16 @@ export async function openSource(src: PackageSource, net: Net): Promise<OpenedSo
             start = pickStart(here, dir || "the repository", "open the one to install, or list them in a metadata.json");
         }
         const raw = `https://raw.githubusercontent.com/${src.owner}/${src.repo}/${sha}/`;
-        return { start, revision: sha, read: (p) => net.text(raw + p.split("/").map(encodeURIComponent).join("/")) };
+        const readRemote = async (p: string) => {
+            const url = raw + p.split("/").map(encodeURIComponent).join("/");
+            if (!isImageDataPath(p)) return net.text(url);
+            const b = await net.bytes(url);
+            return b ? bytesToImageDataUrl(p, new Uint8Array(b)) : null;
+        };
+        return { start, revision: sha, read: readRemote };
     }
     if (src.kind === "gist") {
+        onProgress?.({});
         const g = await net.json(`${GITHUB_API}/gists/${src.id}`);
         const files: Record<string, { content?: string; truncated?: boolean; raw_url?: string }> = g?.files ?? {};
         const names = Object.keys(files);
@@ -160,12 +189,17 @@ export async function openSource(src: PackageSource, net: Net): Promise<OpenedSo
             read: async (p) => {
                 const f = files[p];
                 if (!f) return null;
+                if (isImageDataPath(p) && f.raw_url) {
+                    const b = await net.bytes(f.raw_url);
+                    return b ? bytesToImageDataUrl(p, new Uint8Array(b)) : null;
+                }
                 return f.truncated || f.content === undefined ? (f.raw_url ? net.text(f.raw_url) : null) : f.content;
             },
         };
     }
     if (src.kind === "zip") {
-        const buf = await net.bytes(src.url);
+        onProgress?.({});
+        const buf = await net.bytes(src.url, onProgress ? (loaded, total) => onProgress(total ? { done: loaded, total, detail: `${formatBytes(loaded)} / ${formatBytes(total)}` } : { detail: formatBytes(loaded) }) : undefined);
         if (!buf) throw new Error(`can't read ${src.url}`);
         if (buf.byteLength > 4 * MAX_BYTES) throw new Error(`the zip is over ${(4 * MAX_BYTES) / 1024 / 1024} MB`);
         const files = await unzipPackage(buf);
@@ -177,7 +211,12 @@ export async function openSource(src: PackageSource, net: Net): Promise<OpenedSo
     const origin = u.protocol === "file:" ? "file://" : u.origin;
     return {
         start: decodeURIComponent(u.pathname.replace(/^\//, "")),
-        read: (p) => net.text(`${origin}/${p.split("/").map(encodeURIComponent).join("/")}`),
+        read: async (p) => {
+            const url = `${origin}/${p.split("/").map(encodeURIComponent).join("/")}`;
+            if (!isImageDataPath(p)) return net.text(url);
+            const b = await net.bytes(url);
+            return b ? bytesToImageDataUrl(p, new Uint8Array(b)) : null;
+        },
     };
 }
 
@@ -222,7 +261,7 @@ export function candidates(path: string): string[] {
  * files' common folder — a bundle's own folder (importing from outside it
  * is an error).
  */
-export async function crawl(start: string, read: (path: string) => Promise<string | null>): Promise<CrawledPackage> {
+export async function crawl(start: string, read: (path: string) => Promise<string | null>, onProgress?: (p: DownloadProgress) => void): Promise<CrawledPackage> {
     const files: Record<string, string> = {};
     const cache = new Map<string, Promise<string | null>>();
     const get = (p: string) => {
@@ -231,6 +270,19 @@ export async function crawl(start: string, read: (path: string) => Promise<strin
     };
     const missing: CrawledPackage["missing"] = [];
     const bare: CrawledPackage["bare"] = [];
+    const knownKey = (p: string) => (isDataSpec(p) ? p.toLowerCase() : p.replace(/\.(tsx?|js)$/i, "").toLowerCase());
+    const known = new Set<string>([knownKey(start)]);
+    let filesDone = 0;
+    const report = (hasMore: boolean) => {
+        if (!onProgress) return;
+        if (known.size <= 1 && !hasMore) {
+            onProgress({});
+            return;
+        }
+        const total = Math.max(known.size, filesDone + (hasMore ? 1 : 0));
+        onProgress({ done: filesDone, total, detail: `${filesDone} / ${total} files` });
+    };
+    onProgress?.({});
     // the first read's error says why (no file access, rate limit…)
     const first = async (p: string, what: string) => {
         const t = await read(p);
@@ -244,21 +296,55 @@ export async function crawl(start: string, read: (path: string) => Promise<strin
     const dir = start.slice(0, start.lastIndexOf("/") + 1);
     if (isManifestPath(start)) {
         manifest = parseManifest(await first(start, start), start);
+        filesDone = 1;
         entries = manifest.scripts.map((s) => dir + s);
-        for (const e of entries) await first(e, `${e}, listed in ${start}`);
-    } else await first(start, start);
+        for (const e of entries) known.add(knownKey(e));
+        const iconPath = isRelativeIconSpec(manifest.icon) ? importPath(start, /^\.\.?(\/|$)/.test(manifest.icon) ? manifest.icon : `./${manifest.icon}`) : null;
+        if (iconPath) known.add(knownKey(iconPath));
+        report(true);
+        for (const e of entries) {
+            await first(e, `${e}, listed in ${start}`);
+            filesDone++;
+            report(true);
+        }
+        if (iconPath && files[iconPath] === undefined) {
+            const t = await get(iconPath);
+            if (t !== null) files[iconPath] = t;
+            else missing.push({ from: start, spec: manifest.icon! });
+            filesDone++;
+            report(entries.length > 0);
+        }
+    } else {
+        await first(start, start);
+        filesDone = 1;
+    }
     const queue = [...entries];
     let bytes = Object.values(files).reduce((n, t) => n + t.length, 0);
     while (queue.length) {
         const from = queue.shift()!;
         if (isDataSpec(from)) continue;
-        for (const spec of importSpecs(files[from])) {
+        const iconSpec = metadataIconSpec(files[from]);
+        const specs = [...importSpecs(files[from]), ...(iconSpec ? [/^\.\.?(\/|$)/.test(iconSpec) ? iconSpec : `./${iconSpec}`] : [])];
+        const freshTargets = new Set<string>();
+        for (const spec of specs) {
+            if (isUrlSpec(spec) || builtinSpec(spec) || !/^\.\.?(\/|$)/.test(spec)) continue;
+            const path = importPath(from, spec);
+            if (path === null || candidates(path).some((c) => files[c] !== undefined)) continue;
+            const k = knownKey(path);
+            if (!known.has(k)) {
+                known.add(k);
+                freshTargets.add(k);
+            }
+        }
+        if (freshTargets.size) report(true);
+        for (const spec of specs) {
             if (isUrlSpec(spec) || builtinSpec(spec)) continue;
             if (!/^\.\.?(\/|$)/.test(spec)) {
                 bare.push({ from, spec });
                 continue;
             }
             const path = importPath(from, spec);
+            const k = path !== null ? knownKey(path) : null;
             let found: string | null = null;
             for (const c of path === null ? [] : candidates(path)) {
                 if (files[c] !== undefined) {
@@ -276,8 +362,13 @@ export async function crawl(start: string, read: (path: string) => Promise<strin
                 break;
             }
             if (found === null) missing.push({ from, spec });
+            if (k && freshTargets.delete(k)) {
+                filesDone++;
+                report(queue.length > 0 || freshTargets.size > 0);
+            }
         }
     }
+    if (known.size > 1) report(false);
     // relative to the common folder
     const dirs = Object.keys(files).map((p) => p.split("/").slice(0, -1));
     let common = dirs[0];
@@ -317,9 +408,9 @@ export async function filesHash(files: Record<string, string>): Promise<string> 
 }
 
 /** read a source: its pinned files */
-export async function fetchPackage(src: PackageSource, net: Net): Promise<CrawledPackage & { revision: string }> {
-    const o = await openSource(src, net);
-    const c = await crawl(o.start, o.read);
+export async function fetchPackage(src: PackageSource, net: Net, onProgress?: (p: DownloadProgress) => void): Promise<CrawledPackage & { revision: string }> {
+    const o = await openSource(src, net, onProgress);
+    const c = await crawl(o.start, o.read, src.kind === "zip" ? undefined : onProgress);
     return { ...c, revision: o.revision ?? (await filesHash(c.files)) };
 }
 
@@ -332,12 +423,30 @@ export const webNet: Net = {
         if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
         return r.text();
     },
-    async bytes(url) {
+    async bytes(url, onBytes) {
         if (url.startsWith("file:")) return readFileUrl(url, true);
         const r = await fetch(url, { cache: "no-store", credentials: "omit" });
         if (r.status === 404) return null;
         if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
-        return r.arrayBuffer();
+        const len = Number(r.headers?.get?.("content-length") || 0);
+        if (!onBytes || !r.body?.getReader) return r.arrayBuffer();
+        const reader = r.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let loaded = 0;
+        for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value);
+            loaded += value.byteLength;
+            onBytes(loaded, len > 0 ? len : undefined);
+        }
+        const out = new Uint8Array(loaded);
+        let at = 0;
+        for (const c of chunks) {
+            out.set(c, at);
+            at += c.byteLength;
+        }
+        return out.buffer;
     },
     async json(url) {
         const r = await fetch(url, { cache: "no-store", credentials: "omit", headers: { accept: "application/vnd.github+json" } });

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type InputHTMLAttributes, type KeyboardEvent, type TextareaHTMLAttributes } from "react";
 import { Switch } from "./Switch";
+import { isParamDef, isParamGroup, type ParamTree } from "../../shared/scriptDef";
 import { formatShortcut, isMacPlatform, shortcutFromEvent } from "../../shared/shortcut";
 
 export interface ParamDef {
@@ -171,5 +172,51 @@ export function ParamField(props: { name: string; def: ParamDef; value: any; onC
             {def.description && <div className="param-desc">{def.description}</div>}
             {control}
         </div>
+    );
+}
+
+/**
+ * Renders a tree of parameter definitions: leaf controls directly, and
+ * nested section objects as collapsible `<details>` groups.
+ */
+export function ParamTreeFields(props: {
+    defs: ParamTree;
+    values: Record<string, any> | undefined;
+    onChange: (path: string[], value: any) => void;
+    prefix?: string[];
+}) {
+    const prefix = props.prefix ?? [];
+    return (
+        <>
+            {Object.entries(props.defs).map(([key, node]) => {
+                const path = [...prefix, key];
+                if (isParamDef(node)) {
+                    return (
+                        <ParamField
+                            key={key}
+                            name={key}
+                            def={node as ParamDef}
+                            value={props.values?.[key]}
+                            onChange={(v) => props.onChange(path, v)}
+                        />
+                    );
+                }
+                if (isParamGroup(node)) {
+                    const subVals = props.values && typeof props.values[key] === "object" && !Array.isArray(props.values[key]) ? props.values[key] : undefined;
+                    return (
+                        <details key={key} className="param-section" open>
+                            <summary className="param-section-head">
+                                <span className="param-section-chev" aria-hidden="true">▸</span>
+                                <span className="param-section-title">{key}</span>
+                            </summary>
+                            <div className="param-section-body">
+                                <ParamTreeFields defs={node} values={subVals} onChange={props.onChange} prefix={path} />
+                            </div>
+                        </details>
+                    );
+                }
+                return null;
+            })}
+        </>
     );
 }

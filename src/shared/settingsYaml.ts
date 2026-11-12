@@ -32,7 +32,7 @@
  * that name).
  */
 import { parse, stringify, Document, isScalar, Scalar } from "yaml";
-import { resolveParamValues, isValidParamValue, paramDefault, type ParamDef } from "./scriptDef";
+import { isParamDef, isParamGroup, resolveParamValues, isValidParamValue, paramDefault, type ParamDef, type ParamGroup, type ParamNode, type ParamTree } from "./scriptDef";
 import { DEFAULT_TEXT_TYPES } from "./bodyKind";
 
 export const SETTINGS_FILE = "settings.yaml";
@@ -70,7 +70,7 @@ export interface ScriptSettingsState {
     /** registers handlers (utilities have no enabled switch) */
     declared: boolean;
     enabled: boolean;
-    defs: Record<string, ParamDef>;
+    defs: ParamTree;
     /** raw stored values (unresolved) */
     values: Record<string, any>;
 }
@@ -133,14 +133,26 @@ export function option(out: string[], indent: number, key: string, desc: string,
  * (description + commented entry) — used when inserting a newly declared
  * param into an existing file section.
  */
-export function commentedDefaultLines(key: string, d: ParamDef | undefined): string[] {
+export function commentedDefaultLines(key: string, d: ParamNode | undefined): string[] {
     const out: string[] = [];
     if (key === "enabled" || !d) {
         option(out, 0, "enabled", "Run this script", true, true);
         return out;
     }
-    const note = paramNote(key, d);
-    option(out, 0, key, note, paramDefault(d), paramDefault(d), d.type === "string" && !!d.multiline);
+    if (isParamDef(d)) {
+        const note = paramNote(key, d);
+        option(out, 0, key, note, paramDefault(d), paramDefault(d), d.type === "string" && !!d.multiline);
+        return out;
+    }
+    out.push(`${yamlKey(key)}:`);
+    renderParamTree(out, 2, d, resolveParamValues(d, undefined), false);
+    return out;
+}
+
+/** Canonical lines of a nested parameter section at relative indent 0 (`key:` + its children). */
+export function groupBlockLines(key: string, group: ParamGroup, vals: Record<string, any> | undefined): string[] {
+    const out = [`${yamlKey(key)}:`];
+    renderParamTree(out, 2, group, vals, false);
     return out;
 }
 
@@ -188,6 +200,18 @@ export function renderSettings(g: GlobalSettings, scripts: ScriptSettingsState[]
 
 export const scriptKeys = (s: ScriptSettingsState): string[] => Object.keys(s.defs).filter((k) => k !== "enabled");
 
+function renderParamTree(out: string[], indent: number, defs: ParamTree, vals: Record<string, any> | undefined, skipEnabled: boolean): void {
+    for (const [k, node] of Object.entries(defs)) {
+        if (skipEnabled && k === "enabled") continue;
+        if (isParamDef(node)) {
+            option(out, indent, k, paramNote(k, node), vals?.[k], paramDefault(node), node.type === "string" && !!node.multiline);
+        } else if (isParamGroup(node)) {
+            out.push(`${" ".repeat(indent)}${yamlKey(k)}:`);
+            renderParamTree(out, indent + 2, node, vals?.[k], false);
+        }
+    }
+}
+
 /** canonical lines of one script's map (null: nothing to list); `indent` = the name line's indent */
 export function scriptBlock(s: ScriptSettingsState, indent = 2): string[] | null {
     const keys = scriptKeys(s);
@@ -195,11 +219,7 @@ export function scriptBlock(s: ScriptSettingsState, indent = 2): string[] | null
     const out = [`${" ".repeat(indent)}${yamlKey(s.name)}:`];
     if (s.declared) option(out, indent + 2, "enabled", "Run this script", s.enabled, true);
     const vals = resolveParamValues(s.defs, s.values);
-    for (const k of keys) {
-        const d = s.defs[k];
-        const note = paramNote(k, d);
-        option(out, indent + 2, k, note, vals[k], paramDefault(d), d.type === "string" && !!d.multiline);
-    }
+    renderParamTree(out, indent + 2, s.defs, vals, true);
     return out;
 }
 
@@ -262,11 +282,21 @@ export function planSettings(doc: SettingsDoc, current: GlobalSettings, scripts:
             if (typeof e === "boolean" && e !== s.enabled) plan.enabled = e;
         }
         const cur = resolveParamValues(s.defs, s.values);
-        for (const [k, d] of Object.entries(s.defs)) {
-            if (k === "enabled") continue;
-            const v = t[k] === undefined ? paramDefault(d) : t[k];
-            if (isValidParamValue(d, v) && JSON.stringify(v) !== JSON.stringify(cur[k])) plan.params[k] = v;
-        }
+        const planGroup = (defs: ParamTree, docMap: Record<string, any>, curMap: Record<string, any> | undefined, prefix: string, skipEnabled: boolean) => {
+            for (const [k, node] of Object.entries(defs)) {
+                if (skipEnabled && k === "enabled") continue;
+                const full = prefix ? `${prefix}.${k}` : k;
+                if (isParamDef(node)) {
+                    const v = docMap[k] === undefined ? paramDefault(node) : docMap[k];
+                    if (isValidParamValue(node, v) && JSON.stringify(v) !== JSON.stringify(curMap?.[k])) plan.params[full] = v;
+                } else if (isParamGroup(node)) {
+                    const sub = docMap[k];
+                    if (sub === undefined || sub === null) planGroup(node, {}, curMap?.[k], full, false);
+                    else if (isObj(sub)) planGroup(node, sub, curMap?.[k], full, false);
+                }
+            }
+        };
+        planGroup(s.defs, t, cur, "", true);
         if (plan.enabled !== undefined || Object.keys(plan.params).length) plans.push(plan);
     }
     return { globals, scripts: plans };

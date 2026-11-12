@@ -5,13 +5,15 @@
  * shows it as a page, for a *.tangitweak.ts URL (the background sends such tabs
  * there, like GreaseMonkey's .user.js) and `?update=<package id>`.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Analysis } from "../../background/engine/packages";
 import { describeCapabilities } from "../../shared/packageCaps";
-import { entryIds, packageName, updateSource, type InstalledPackage, type PackageVersion } from "../../shared/packageModel";
+import type { PackageStatus } from "../../shared/packageImports";
+import { entryIds, packageName, resolvePackageIcon, updateSource, type InstalledPackage, type PackageVersion } from "../../shared/packageModel";
 import { isManifestPath, MANIFEST_FILE } from "../../shared/packageMetadata";
-import { parseSource, sourceLabel } from "../../shared/packageSource";
+import { parseSource, readPackageBrowserFile, sourceLabel, type DownloadProgress } from "../../shared/packageSource";
 import { isPackageFile, localPackage, startsIn, unzipPackage } from "../../shared/localPackage";
+import { isDataSpec, isImageDataPath, packageUrls } from "../../shared/scriptImports";
 import { diffHunks, lineDiff } from "../../shared/lineDiff";
 import { fetchFrom, installedTexts, packagesApi, type Fetched } from "./api";
 import { useInstallDrop, type Dropped } from "./drop";
@@ -32,11 +34,11 @@ export interface InstallHost {
 
 type State =
     | { phase: "pick"; error?: string; local?: { label: string; files: Record<string, string>; entries: string[] } }
-    | { phase: "loading"; what: string }
+    | { phase: "loading"; what: string; progress?: DownloadProgress }
     | { phase: "review"; fetched: Fetched; analysis: Analysis; existing?: InstalledPackage; before?: Record<string, string> }
     | { phase: "pending"; pkg: InstalledPackage; pending: PackageVersion & { reasons: string[]; added: string[] }; before: Record<string, string>; analysis: Analysis }
-    | { phase: "nothing"; pkg: InstalledPackage; note?: string }
-    | { phase: "done"; pkg: InstalledPackage; verb: string }
+    | { phase: "nothing"; pkg: InstalledPackage; iconUrl?: string; note?: string }
+    | { phase: "done"; pkg: InstalledPackage; verb: string; iconUrl?: string }
     | { phase: "error"; error: string; retry?: () => void };
 
 const errText = (e: any) => String(e?.message || e);
@@ -65,47 +67,114 @@ export function InstallPage() {
 
 export function InstallFlow({ request, host }: { request: InstallRequest; host: InstallHost }) {
     const [state, setState] = useState<State>({ phase: "loading", what: "" });
+    const runSeq = useRef(0);
     const { close } = host;
 
-    async function review(fetched: Fetched) {
-        setState({ phase: "loading", what: "Checking what it does…" });
+    useEffect(() => () => void runSeq.current++, []);
+
+    async function analyzeWithProgress(fetched: Fetched, myRun: number, updateOf?: string, wasDownloading = false): Promise<Analysis> {
+        const urls = [...new Set(Object.entries(fetched.files).filter(([p]) => !isDataSpec(p)).flatMap(([, code]) => packageUrls(code)))];
+        let timer: ReturnType<typeof setInterval> | undefined;
+        try {
+            if (urls.length) {
+                const initial = await packagesApi.packageStatus(urls).catch(() => undefined);
+                if (runSeq.current !== myRun) return packagesApi.analyze(fetched, updateOf);
+                const pendingCount = (st: Record<string, PackageStatus> | undefined) =>
+                    urls.filter((u) => {
+                        const s = st?.[u]?.state;
+                        return !s || s === "missing" || s === "downloading";
+                    }).length;
+                const left0 = pendingCount(initial?.statuses);
+                if (left0 > 0) {
+                    const show = (left: number) => {
+                        if (runSeq.current !== myRun) return;
+                        const done = urls.length - left;
+                        setState({
+                            phase: "loading",
+                            what: "Downloading packages…",
+                            progress: { done, total: urls.length, detail: `${done} / ${urls.length} packages` },
+                        });
+                    };
+                    show(left0);
+                    timer = setInterval(() => {
+                        void packagesApi.packageStatus(urls).then(
+                            (res) => timer !== undefined && show(pendingCount(res?.statuses)),
+                            () => {}
+                        );
+                    }, 150);
+                } else {
+                    setState({ phase: "loading", what: "Checking what it does…", ...(wasDownloading ? { progress: { done: 1, total: 1 } } : {}) });
+                }
+            } else {
+                setState({ phase: "loading", what: "Checking what it does…", ...(wasDownloading ? { progress: { done: 1, total: 1 } } : {}) });
+            }
+            return await packagesApi.analyze(fetched, updateOf);
+        } finally {
+            if (timer !== undefined) {
+                clearInterval(timer);
+                timer = undefined;
+            }
+        }
+    }
+
+    async function review(fetched: Fetched, myRun: number, wasDownloading = false) {
         const all = await packagesApi.list();
+        if (runSeq.current !== myRun) return;
         // installing again from where it came from, or from its updateURL, updates it
         const existing = fetched.source ? Object.values(all).find((p) => p.source === fetched.source) ?? Object.values(all).find((p) => updateSource(p) === fetched.source) : undefined;
-        const analysis = await packagesApi.analyze(fetched, existing?.id);
+        const analysis = await analyzeWithProgress(fetched, myRun, existing?.id, wasDownloading);
+        if (runSeq.current !== myRun) return;
         const before = existing ? await installedTexts(existing) : undefined;
+        if (runSeq.current !== myRun) return;
         setState({ phase: "review", fetched, analysis, existing, before });
     }
 
     async function load(source: string) {
-        setState({ phase: "loading", what: `Reading ${label(source)}…` });
+        const myRun = ++runSeq.current;
+        const what = `Downloading ${label(source)}…`;
+        setState({ phase: "loading", what, progress: {} });
         try {
-            await review(await fetchFrom(source));
+            const fetched = await fetchFrom(source, (progress) => {
+                if (runSeq.current === myRun) setState({ phase: "loading", what, progress });
+            });
+            if (runSeq.current !== myRun) return;
+            await review(fetched, myRun, true);
         } catch (e) {
-            setState({ phase: "error", error: errText(e), retry: () => void load(source) });
+            if (runSeq.current === myRun) setState({ phase: "error", error: errText(e), retry: () => void load(source) });
         }
     }
 
     async function loadUpdate(id: string) {
+        const myRun = ++runSeq.current;
         setState({ phase: "loading", what: "Reading the update…" });
         try {
             const pkg = (await packagesApi.list())[id];
+            if (runSeq.current !== myRun) return;
             if (!pkg) throw new Error("That package isn't installed anymore.");
-            if (!pkg.pending) return setState({ phase: "nothing", pkg });
+            if (!pkg.pending) {
+                const files = await installedTexts(pkg);
+                if (runSeq.current !== myRun) return;
+                return setState({ phase: "nothing", pkg, iconUrl: resolvePackageIcon({ entries: pkg.entries, files, metadata: pkg.metadata }) });
+            }
             const fetched: Fetched = { source: pkg.source, entries: pkg.pending.entries, files: pkg.pending.files, revision: pkg.pending.revision, missing: [], bare: [] };
-            const analysis = await packagesApi.analyze(fetched, id);
-            setState({ phase: "pending", pkg, pending: pkg.pending, before: await installedTexts(pkg), analysis });
+            const analysis = await analyzeWithProgress(fetched, myRun, id);
+            if (runSeq.current !== myRun) return;
+            const before = await installedTexts(pkg);
+            if (runSeq.current !== myRun) return;
+            setState({ phase: "pending", pkg, pending: pkg.pending, before, analysis });
         } catch (e) {
-            setState({ phase: "error", error: errText(e) });
+            if (runSeq.current === myRun) setState({ phase: "error", error: errText(e) });
         }
     }
 
     async function onDrop(drop: Promise<Dropped>) {
+        const myRun = ++runSeq.current;
         setState({ phase: "loading", what: "Reading what you dropped…" });
         const d = await drop;
+        if (runSeq.current !== myRun) return;
         if ("url" in d) await load(d.url);
         else if ("zip" in d) await onZip(d.zip);
-        else if ("files" in d) await pickLocal(d.label, d.files);
+        else if ("files" in d) await pickLocal(d.label, d.files, myRun);
         else setState({ phase: "pick", error: d.error });
     }
 
@@ -116,27 +185,29 @@ export function InstallFlow({ request, host }: { request: InstallRequest; host: 
         else setState({ phase: "pick" });
     }, []);
 
-    async function pickLocal(label: string, files: Record<string, string>) {
+    async function pickLocal(label: string, files: Record<string, string>, myRun = ++runSeq.current) {
         const entries = startsIn(Object.keys(files));
         if (!entries.length) return setState({ phase: "pick", error: `${label} has no script or ${MANIFEST_FILE} to install.` });
         const top = entries.filter((e) => e.split("/").length === entries[0].split("/").length);
         // a metadata.json at the top is the bundle to install
         const bundle = top.find(isManifestPath);
         if (top.length > 1 && !bundle) return setState({ phase: "pick", local: { label, files, entries } });
-        await installLocal(files, bundle ?? entries[0]);
+        await installLocal(files, bundle ?? entries[0], myRun);
     }
 
-    async function installLocal(files: Record<string, string>, start: string) {
+    async function installLocal(files: Record<string, string>, start: string, myRun = ++runSeq.current) {
         try {
             const p = await localPackage(files, start);
-            await review({ source: "", entries: p.entries, files: p.files, revision: p.revision, missing: p.missing, bare: p.bare });
+            if (runSeq.current !== myRun) return;
+            await review({ source: "", entries: p.entries, files: p.files, revision: p.revision, missing: p.missing, bare: p.bare }, myRun, false);
         } catch (e) {
-            setState({ phase: "pick", error: errText(e) });
+            if (runSeq.current === myRun) setState({ phase: "pick", error: errText(e) });
         }
     }
 
     async function onFolder(list: FileList | null) {
         if (!list?.length) return;
+        const myRun = ++runSeq.current;
         setState({ phase: "loading", what: "Reading the folder…" });
         const files: Record<string, string> = {};
         let root = "";
@@ -144,18 +215,22 @@ export function InstallFlow({ request, host }: { request: InstallRequest; host: 
             const rel = (f as any).webkitRelativePath || f.name;
             root = rel.split("/")[0];
             const inner = rel.split("/").slice(1).join("/") || rel;
-            if (isPackageFile(inner)) files[inner] = await f.text();
+            if (isPackageFile(inner)) files[inner] = await readPackageBrowserFile(inner, f);
         }
-        await pickLocal(`The folder "${root}"`, files);
+        if (runSeq.current !== myRun) return;
+        await pickLocal(`The folder "${root}"`, files, myRun);
     }
 
     async function onZip(file: File | undefined) {
         if (!file) return;
+        const myRun = ++runSeq.current;
         setState({ phase: "loading", what: `Reading ${file.name}…` });
         try {
-            await pickLocal(file.name, await unzipPackage(await file.arrayBuffer()));
+            const files = await unzipPackage(await file.arrayBuffer());
+            if (runSeq.current !== myRun) return;
+            await pickLocal(file.name, files, myRun);
         } catch (e) {
-            setState({ phase: "pick", error: errText(e) });
+            if (runSeq.current === myRun) setState({ phase: "pick", error: errText(e) });
         }
     }
 
@@ -163,8 +238,31 @@ export function InstallFlow({ request, host }: { request: InstallRequest; host: 
 
     function body() {
         switch (state.phase) {
-            case "loading":
-                return <main className="center dim">{state.what}</main>;
+            case "loading": {
+                const p = state.progress;
+                const determinate = p !== undefined && p.total !== undefined && p.total > 0 && p.done !== undefined;
+                const pct = determinate ? Math.max(0, Math.min(100, Math.round((p.done! / p.total!) * 100))) : undefined;
+                return (
+                    <main className="center dim install-loading">
+                        {state.what && <div>{state.what}</div>}
+                        {p && (
+                            <>
+                                <div
+                                    className={"install-progress" + (determinate ? "" : " indeterminate")}
+                                    role="progressbar"
+                                    aria-label={state.what || "Downloading"}
+                                    aria-valuemin={determinate ? 0 : undefined}
+                                    aria-valuemax={determinate ? 100 : undefined}
+                                    aria-valuenow={pct}
+                                >
+                                    <div className="install-progress-bar" style={determinate ? { width: `${pct}%` } : undefined} />
+                                </div>
+                                {p.detail && <div className="install-progress-detail small">{p.detail}</div>}
+                            </>
+                        )}
+                    </main>
+                );
+            }
             case "error":
                 return (
                     <main>
@@ -187,21 +285,29 @@ export function InstallFlow({ request, host }: { request: InstallRequest; host: 
             case "nothing":
                 return (
                     <main>
-                        <Header name={packageName(state.pkg)} metadata={state.pkg.metadata} scripts={state.pkg.entries} source={state.pkg.source} />
+                        <Header name={packageName(state.pkg)} metadata={state.pkg.metadata} scripts={state.pkg.entries} source={state.pkg.source} iconUrl={state.iconUrl} />
                         <p>{state.note ?? "No update is waiting for review."}</p>
                         <div className="actions">
                             {updateSource(state.pkg) && (
                                 <button
                                     className="primary"
                                     onClick={async () => {
-                                        setState({ phase: "loading", what: "Checking for updates…" });
+                                        const myRun = ++runSeq.current;
+                                        const prevPkg = state.pkg;
+                                        setState({ phase: "loading", what: "Checking for updates…", progress: {} });
                                         try {
-                                            await packagesApi.check(state.pkg.id);
-                                            const pkg = (await packagesApi.list())[state.pkg.id];
+                                            await packagesApi.check(prevPkg.id);
+                                            if (runSeq.current !== myRun) return;
+                                            const pkg = (await packagesApi.list())[prevPkg.id];
+                                            if (runSeq.current !== myRun) return;
                                             if (pkg?.pending) return void loadUpdate(pkg.id);
-                                            setState({ phase: "nothing", pkg: pkg ?? state.pkg, note: pkg?.lastError ? `Checking failed: ${pkg.lastError}` : pkg && pkg.updatedAt > state.pkg.updatedAt ? "It updated to the latest version." : "It's up to date." });
+                                            const nextPkg = pkg ?? prevPkg;
+                                            const files = await installedTexts(nextPkg);
+                                            if (runSeq.current !== myRun) return;
+                                            const iconUrl = resolvePackageIcon({ entries: nextPkg.entries, files, metadata: nextPkg.metadata });
+                                            setState({ phase: "nothing", pkg: nextPkg, iconUrl, note: pkg?.lastError ? `Checking failed: ${pkg.lastError}` : pkg && pkg.updatedAt > prevPkg.updatedAt ? "It updated to the latest version." : "It's up to date." });
                                         } catch (e) {
-                                            setState({ phase: "error", error: errText(e) });
+                                            if (runSeq.current === myRun) setState({ phase: "error", error: errText(e) });
                                         }
                                     }}
                                 >
@@ -215,8 +321,11 @@ export function InstallFlow({ request, host }: { request: InstallRequest; host: 
             case "done":
                 return (
                     <main>
-                        <h1>
-                            {state.verb} “{packageName(state.pkg)}”{versionOf(state.pkg.metadata)}
+                        <h1 className="done-title">
+                            <PackageIcon src={state.iconUrl} className="pkg-icon-done" />
+                            <span>
+                                {state.verb} “{packageName(state.pkg)}”{versionOf(state.pkg.metadata)}
+                            </span>
                         </h1>
                         <p className="dim">{state.pkg.folder ? <>Its files are in the Explorer's <b>{state.pkg.folder}</b> folder.</> : <>It's in the Explorer's root.</>}</p>
                         <div className="actions">
@@ -285,13 +394,17 @@ function Picker(props: {
                 <div>
                     <p>{local.label} has more than one script (and no {MANIFEST_FILE} listing them) — which one?</p>
                     <ul className="entries">
-                        {local.entries.map((e) => (
-                            <li key={e}>
-                                <button className="link" onClick={() => props.onEntry(local.files, e)}>
-                                    {e}
-                                </button>
-                            </li>
-                        ))}
+                        {local.entries.map((e) => {
+                            const entryIcon = resolvePackageIcon({ entries: [e], files: local.files });
+                            return (
+                                <li key={e}>
+                                    <button className="link entry-pick" onClick={() => props.onEntry(local.files, e)}>
+                                        <PackageIcon src={entryIcon} className="pkg-icon-entry" />
+                                        <span>{e}</span>
+                                    </button>
+                                </li>
+                            );
+                        })}
                     </ul>
                 </div>
             )}
@@ -299,35 +412,45 @@ function Picker(props: {
     );
 }
 
-function Header(props: { name: string; metadata: Analysis["metadata"]; scripts: string[]; source: string }) {
+function PackageIcon({ src, className = "pkg-icon" }: { src?: string; className?: string }) {
+    const [broken, setBroken] = useState(false);
+    useEffect(() => setBroken(false), [src]);
+    if (!src || broken) return null;
+    return <img className={className} src={src} alt="" onError={() => setBroken(true)} />;
+}
+
+function Header(props: { name: string; metadata: Analysis["metadata"]; scripts: string[]; source: string; iconUrl?: string }) {
     const { metadata: header } = props;
     return (
-        <header>
-            <h1>
-                {props.name}
-                {header.version && <span className="version">{header.version}</span>}
-            </h1>
-            {header.description && <p className="desc">{header.description}</p>}
-            {props.scripts.length > 1 && (
-                <p className="meta">
-                    A bundle of {props.scripts.length} scripts: {props.scripts.join(", ")}
-                </p>
-            )}
-            <p className="meta dim">
-                {props.source ? <>From {label(props.source)}</> : <>From local files</>}
-                {header.updateURL && header.updateURL !== props.source && <> · updates from {label(header.updateURL)}</>}
-                {header.author && <> · by {header.author}</>}
-                {header.license && <> · {header.license}</>}
-                {header.homepage && /^https?:\/\//i.test(header.homepage) && (
-                    <>
-                        {" "}
-                        ·{" "}
-                        <a href={header.homepage} target="_blank" rel="noreferrer">
-                            homepage
-                        </a>
-                    </>
+        <header className="install-header">
+            <PackageIcon src={props.iconUrl} />
+            <div className="install-header-body">
+                <h1>
+                    {props.name}
+                    {header.version && <span className="version">{header.version}</span>}
+                </h1>
+                {header.description && <p className="desc">{header.description}</p>}
+                {props.scripts.length > 1 && (
+                    <p className="meta">
+                        A bundle of {props.scripts.length} scripts: {props.scripts.join(", ")}
+                    </p>
                 )}
-            </p>
+                <p className="meta dim">
+                    {props.source ? <>From {label(props.source)}</> : <>From local files</>}
+                    {header.updateURL && header.updateURL !== props.source && <> · updates from {label(header.updateURL)}</>}
+                    {header.author && <> · by {header.author}</>}
+                    {header.license && <> · {header.license}</>}
+                    {header.homepage && /^https?:\/\//i.test(header.homepage) && (
+                        <>
+                            {" "}
+                            ·{" "}
+                            <a href={header.homepage} target="_blank" rel="noreferrer">
+                                homepage
+                            </a>
+                        </>
+                    )}
+                </p>
+            </div>
         </header>
     );
 }
@@ -388,14 +511,23 @@ function Files(props: { files: Record<string, string>; analysis: Analysis; befor
             <h2>Files</h2>
             {rels.map((rel) => {
                 const status = !before ? "" : !(rel in before) ? "added" : before[rel] === files[rel] ? "same" : "changed";
+                const img = isImageDataPath(rel);
                 return (
                     <details key={rel} className={`file ${status}`}>
                         <summary>
                             <code>{fileLabel(analysis.items[rel])}</code>
                             {status && status !== "same" && <span className={`tag ${status}`}>{status}</span>}
-                            <span className="dim small">{files[rel].split("\n").length} lines</span>
+                            <span className="dim small">{img ? "image" : `${files[rel].split("\n").length} lines`}</span>
                         </summary>
-                        {status === "changed" ? <Diff before={before![rel]} after={files[rel]} /> : <pre>{files[rel]}</pre>}
+                        {img ? (
+                            <div className="file-img">
+                                <img src={files[rel]} alt={rel} />
+                            </div>
+                        ) : status === "changed" ? (
+                            <Diff before={before![rel]} after={files[rel]} />
+                        ) : (
+                            <pre>{files[rel]}</pre>
+                        )}
                     </details>
                 );
             })}
@@ -445,7 +577,7 @@ function Review(props: { state: Extract<State, { phase: "review" }>; setState: (
     const install = (enabled: boolean) =>
         run(async () => {
             const pkg = await packagesApi.install(fetched, enabled, autoUpdate);
-            props.setState({ phase: "done", pkg, verb: "Installed" });
+            props.setState({ phase: "done", pkg, verb: "Installed", iconUrl: analysis.iconUrl });
         });
     const update = () =>
         run(async () => {
@@ -453,11 +585,11 @@ function Review(props: { state: Extract<State, { phase: "review" }>; setState: (
             if (!pkg) throw new Error("That package isn't installed anymore.");
             if (pkg.pending) pkg = await packagesApi.apply(pkg.id);
             if (autoUpdate !== pkg.autoUpdate) await packagesApi.setAutoUpdate(pkg.id, autoUpdate);
-            props.setState({ phase: "done", pkg, verb: "Updated" });
+            props.setState({ phase: "done", pkg, verb: "Updated", iconUrl: analysis.iconUrl });
         });
     return (
         <main>
-            <Header name={analysis.name} metadata={analysis.metadata} scripts={fetched.entries} source={fetched.source} />
+            <Header name={analysis.name} metadata={analysis.metadata} scripts={fetched.entries} source={fetched.source} iconUrl={analysis.iconUrl} />
             {existing && (
                 <p className="note">
                     {same ? "This version is already installed." : <>Installed: {existing.metadata.version || existing.revision.slice(0, 8)} — installing this updates it in place (its settings stay).</>}
@@ -509,7 +641,7 @@ function PendingReview(props: { state: Extract<State, { phase: "pending" }>; set
     }
     return (
         <main>
-            <Header name={analysis.name} metadata={pending.metadata} scripts={pending.entries} source={pkg.source} />
+            <Header name={analysis.name} metadata={pending.metadata} scripts={pending.entries} source={pkg.source} iconUrl={analysis.iconUrl} />
             <p className="note">
                 An update from {pkg.metadata.version || pkg.revision.slice(0, 8)} to {pending.metadata.version || pending.revision.slice(0, 8)} waits for your review
                 {pending.reasons.length ? <>: {pending.reasons.join("; ")}.</> : "."}
@@ -527,7 +659,7 @@ function PendingReview(props: { state: Extract<State, { phase: "pending" }>; set
                         onClick={() =>
                             run(async () => {
                                 const next = await packagesApi.apply(pkg.id);
-                                props.setState({ phase: "done", pkg: next, verb: "Updated" });
+                                props.setState({ phase: "done", pkg: next, verb: "Updated", iconUrl: analysis.iconUrl });
                             })
                         }
                     >
@@ -539,7 +671,9 @@ function PendingReview(props: { state: Extract<State, { phase: "pending" }>; set
                         onClick={() =>
                             run(async () => {
                                 await packagesApi.dismiss(pkg.id);
-                                props.setState({ phase: "nothing", pkg, note: "Skipped — the next newer version will be offered." });
+                                const files = await installedTexts(pkg);
+                                const iconUrl = resolvePackageIcon({ entries: pkg.entries, files, metadata: pkg.metadata });
+                                props.setState({ phase: "nothing", pkg, iconUrl, note: "Skipped — the next newer version will be offered." });
                             })
                         }
                     >

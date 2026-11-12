@@ -1,7 +1,8 @@
 /** the background's package messages (see engine/packages) */
 import type { Analysis, FetchedPackage } from "../../background/engine/packages";
+import type { PackageStatus } from "../../shared/packageImports";
 import type { InstalledPackage } from "../../shared/packageModel";
-import { fetchPackage, parseSource, webNet, type CrawledPackage } from "../../shared/packageSource";
+import { fetchPackage, parseSource, webNet, type CrawledPackage, type DownloadProgress } from "../../shared/packageSource";
 
 export function send<T>(msg: Record<string, unknown>): Promise<T> {
     return new Promise((resolve, reject) =>
@@ -16,10 +17,10 @@ export function send<T>(msg: Record<string, unknown>): Promise<T> {
 export type Fetched = FetchedPackage & Pick<CrawledPackage, "missing" | "bare">;
 
 /** read a package from its URL (GitHub, gist, any https or file: URL) */
-export async function fetchFrom(source: string): Promise<Fetched> {
+export async function fetchFrom(source: string, onProgress?: (p: DownloadProgress) => void): Promise<Fetched> {
     const src = parseSource(source);
     if (typeof src === "string") throw new Error(src);
-    const p = await fetchPackage(src, webNet);
+    const p = await fetchPackage(src, webNet, onProgress);
     return { source, entries: p.entries, files: p.files, revision: p.revision, missing: p.missing, bare: p.bare };
 }
 
@@ -28,6 +29,7 @@ const plain = (f: Fetched): FetchedPackage => ({ source: f.source, entries: f.en
 export const packagesApi = {
     list: () => send<Record<string, InstalledPackage>>({ type: "listPackages" }),
     analyze: (f: Fetched, updateOf?: string) => send<Analysis>({ type: "packageAnalyze", fetched: plain(f), updateOf }),
+    packageStatus: (urls: string[]) => send<{ statuses?: Record<string, PackageStatus> }>({ type: "packageStatus", urls }),
     install: (f: Fetched, enabled: boolean, autoUpdate: boolean) => send<InstalledPackage>({ type: "packageInstall", fetched: plain(f), enabled, autoUpdate }),
     offer: (id: string, f: Fetched, manual: boolean) => send<InstalledPackage | null>({ type: "packageOffer", id, fetched: plain(f), manual }),
     check: (id?: string) => send<Record<string, InstalledPackage>>({ type: "packageCheck", id }),

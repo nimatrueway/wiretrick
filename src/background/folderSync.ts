@@ -34,10 +34,11 @@ import { getSettingsText, applySettingsText, rememberSettingsText, currentSettin
 import { SETTINGS_FILE, SCHEMA_FILE } from "../shared/settingsYaml";
 import { renameSettingsSection } from "../shared/settingsYamlPatch";
 import { settingsSchemaJson } from "../shared/settingsSchema";
-import { API_DTS_FILE, BUILTIN_TYPINGS_ROOT, TSCONFIG_FILE, apiDtsText, tsconfigText } from "../shared/generatedFiles";
+import { API_DTS_FILE, BUILTIN_TYPINGS_ROOT, PACKAGE_JSON_FILE, TSCONFIG_FILE, apiDtsText, packageJsonText, tsconfigText } from "../shared/generatedFiles";
 import { broadcastToUi } from "./engine/logs";
 import { dlogLevel } from "../shared/debugLog";
 import { folderPathProblem, isConfigJsonPath, scriptFileName, scriptNameFromFile } from "../shared/scriptName";
+import { bytesToImageDataUrl, imageDataUrlToBytes, isDataSpec, isImageDataPath } from "../shared/scriptImports";
 import { ancestorFolders, isInFolder } from "../shared/folders";
 import { PACKAGE_TYPINGS_KEY, TYPINGS_ROOT, type StoredTypings } from "../shared/packageImports";
 const POLL_MS = 1000;
@@ -49,7 +50,7 @@ function canonicalFileName(name: string): string {
 }
 
 const isScriptFile = (name: string) => (name.endsWith(".ts") && !name.endsWith(".d.ts")) || name.endsWith(".tsx");
-const isDataFile = (path: string) => /\.(json|svg)$/i.test(path) && !isConfigJsonPath(path) && !baseName(path).startsWith(".");
+const isDataFile = (path: string) => isDataSpec(path) && !isConfigJsonPath(path) && !baseName(path).startsWith(".");
 const isSyncedFile = (path: string) => isScriptFile(path) || isDataFile(path);
 const baseName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 /** `known` signature of a folder (they only appear and vanish) */
@@ -213,9 +214,17 @@ async function fileHandleAt(path: string, create = false, root: any = dirHandle)
     return (await parentDir(path, create, root)).getFileHandle(baseName(path), create ? { create: true } : undefined);
 }
 
+async function readDiskContent(fileName: string, handle: any = dirHandle): Promise<string> {
+    const f = await (await fileHandleAt(fileName, false, handle)).getFile();
+    if (isImageDataPath(fileName)) {
+        const bytes = typeof f.arrayBuffer === "function" ? new Uint8Array(await f.arrayBuffer()) : new TextEncoder().encode(await f.text());
+        return bytesToImageDataUrl(fileName, bytes);
+    }
+    return await f.text();
+}
+
 async function readText(fileName: string): Promise<string> {
-    const fh = await fileHandleAt(fileName);
-    return await (await fh.getFile()).text();
+    return readDiskContent(fileName);
 }
 
 /** the file's text, or null when it doesn't exist (any more) */
@@ -246,7 +255,7 @@ async function writeFile(fileName: string, content: string): Promise<boolean> {
     try {
         const fh = await fileHandleAt(fileName, true);
         const w = await fh.createWritable();
-        await w.write(content);
+        await w.write(isImageDataPath(fileName) ? (imageDataUrlToBytes(content) as BlobPart) : content);
         await w.close();
         signal(writeKind);
     } catch (e: any) {
@@ -308,7 +317,7 @@ async function backup(fileName: string, content: string, why: string): Promise<v
     try {
         const d = await parentDir(name, true, await dirHandle.getDirectoryHandle(BACKUP_DIR, { create: true }));
         const w = await (await d.getFileHandle(baseName(name), { create: true })).createWritable();
-        await w.write(content);
+        await w.write(isImageDataPath(fileName) ? (imageDataUrlToBytes(content) as BlobPart) : content);
         await w.close();
         dlogLevel("sync", "warn", `Folder sync: ${why} — the other version was saved to ${BACKUP_DIR}/${name}`);
     } catch (e: any) {
@@ -804,7 +813,7 @@ async function initialSync(opts: { dry?: boolean; handle?: any; base?: Map<strin
     const scripts = await listScripts();
     const byFile = new Map(scripts.map((s) => [canonicalFileName(s.meta.name), s]));
     const out: FolderPreview = { imported: [], written: [], conflicts: [] };
-    const readFrom = async (name: string) => (await (await fileHandleAt(name, false, handle)).getFile()).text();
+    const readFrom = (name: string) => readDiskContent(name, handle);
     /** files of scripts renamed while the folder wasn't watched (unchanged on disk since): script id → old file */
     const movedFrom = new Map<string, string>();
     for (const [fileName, sig] of seen) {
@@ -1030,6 +1039,7 @@ async function ensureSupportFiles(): Promise<void> {
         dlogLevel("sync", "warn", `Folder sync: could not refresh ${API_DTS_FILE}: ${e?.message || e}`);
     }
     await ensureFile(TSCONFIG_FILE, tsconfigText());
+    await ensureFile(PACKAGE_JSON_FILE, packageJsonText());
     await ensureSchemaFile();
     await ensurePackageTypingsFiles();
 }

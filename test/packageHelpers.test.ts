@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { deflateRawSync } from "node:zlib";
 import { addedCapabilities, capabilitiesOf, describeCapabilities, isAllUrls, type Capabilities } from "../src/shared/packageCaps";
-import { modifiedFiles, packageFolder, packageName, storeItemOf, uniqueEntryName } from "../src/shared/packageModel";
+import { modifiedFiles, packageFolder, packageName, singleScriptBundles, storeItemOf, uniqueEntryName } from "../src/shared/packageModel";
 import { diffHunks, lineDiff } from "../src/shared/lineDiff";
 import { readZip } from "../src/shared/zip";
 import { isPackageFile, localPackage, startsIn } from "../src/shared/localPackage";
@@ -100,6 +100,38 @@ describe("packageModel", () => {
         } as const;
         const now: Record<string, { name: string; hash: string }> = { "1": { name: "p/a", hash: "h1" }, "2": { name: "p/b", hash: "edited" }, "3": { name: "q/c.json", hash: "h3" } };
         expect(modifiedFiles(pkg as never, (f) => now[f.id])).toEqual(["b.ts", "c.json", "d.ts"]);
+    });
+
+    it("resolves bundle display names only for bundles with a single script", () => {
+        const scripts = [
+            { id: "s1", meta: { name: "redwood/devtools.tsx", active: true } },
+            { id: "s2", meta: { name: "redwood/shared/lib", active: false } },
+            { id: "s3", meta: { name: "multi/a", active: true } },
+            { id: "s4", meta: { name: "multi/b", active: true } },
+            { id: "s5", meta: { name: "unnamed/main", active: true } },
+            { id: "s6", meta: { name: "demo/demo.tangitweak", active: true } },
+        ];
+        const dataFiles = [
+            { path: "redwood/metadata.json", text: JSON.stringify({ name: "Redwood Devtools", description: "Atlas tools", scripts: ["devtools.tsx"] }) },
+            { path: "multi/metadata.json", text: JSON.stringify({ name: "Multi Kit", scripts: ["a.ts", "b.ts"] }) },
+            { path: "unnamed/metadata.json", text: JSON.stringify({ scripts: ["main.ts"] }) },
+        ];
+        const installed = {
+            p1: {
+                id: "p1",
+                folder: "demo",
+                entries: ["demo.tangitweak.ts"],
+                metadata: { name: "Demo Package", description: "From URL", connect: [] },
+                files: { "demo.tangitweak.ts": { kind: "script", id: "s6", name: "demo/demo.tangitweak", hash: "h" } },
+            } as any,
+        };
+        const map = singleScriptBundles(scripts, dataFiles, installed);
+        expect(map.get("s1")).toEqual({ name: "Redwood Devtools", description: "Atlas tools" });
+        expect(map.has("s2")).toBe(false);
+        expect(map.has("s3")).toBe(false);
+        expect(map.has("s4")).toBe(false);
+        expect(map.get("s5")).toEqual({ name: "unnamed", description: undefined });
+        expect(map.get("s6")).toEqual({ name: "Demo Package", description: "From URL" });
     });
 });
 

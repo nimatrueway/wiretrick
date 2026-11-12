@@ -234,4 +234,24 @@ describe("explorer tree", () => {
         act(() => s.startCreate("script", ""));
         expect(list.querySelectorAll(":scope > li")[1].className).toBe("script-item creating");
     });
+
+    it("renders custom script and bundle icons on Explorer script and package folder rows", async () => {
+        const { s, row } = await mount();
+        act(() =>
+            s.syncExplorer({
+                ...fixture,
+                scripts: [
+                    script("s_a", "alpha", { meta: { name: "alpha", match: ["*://example.com/*"], active: true, metadata: { icon: "data:image/png;base64,BBBB", connect: [] } } }),
+                    script("s_b", "mock/beta"),
+                ],
+                dataFiles: [
+                    { id: "d_m", path: "mock/metadata.json", text: JSON.stringify({ name: "Mock Kit", icon: "icon.svg", scripts: ["beta.ts"] }), savedAt: 1 },
+                    { id: "d_i", path: "mock/icon.svg", text: '<svg viewBox="0 0 8 8"><rect width="8" height="8"/></svg>', savedAt: 1 },
+                ],
+            })
+        );
+        expect(row("s_a").querySelector<HTMLImageElement>(".file-icon img")?.getAttribute("src")).toBe("data:image/png;base64,BBBB");
+        expect(row("dir:mock").querySelector<HTMLImageElement>(".file-icon.package img")?.getAttribute("src")).toMatch(/^data:image\/svg\+xml/);
+        expect(row("s_b").querySelector<HTMLImageElement>(".file-icon img")?.getAttribute("src")).toMatch(/^data:image\/svg\+xml/);
+    });
 });

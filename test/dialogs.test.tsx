@@ -254,6 +254,104 @@ describe("install dialog", () => {
         expect(dialogs.install).toBeNull();
         expect($("#install-dialog")).toBeNull();
     });
+
+    it("shows a progressbar while downloading files and packages, and displays the script's icon on review and done", async () => {
+        let resolveLib!: (r: Response) => void;
+        let resolveAnalyze!: (a: any) => void;
+        let pkgState: "downloading" | "ready" = "downloading";
+
+        vi.stubGlobal("fetch", (url: string) => {
+            if (url === "https://example.com/dark.tangitweak.ts") {
+                return Promise.resolve(
+                    new Response('import "./lib";\nimport "https://unpkg.com/cmdk@1.1.1";\ntt.metadata({ name: "Dark", version: "1.2.0", icon: "data:image/png;base64,CAFE" });\n', { status: 200 })
+                );
+            }
+            if (url === "https://example.com/lib.ts") {
+                return new Promise<Response>((res) => (resolveLib = res));
+            }
+            return Promise.resolve(new Response(null, { status: 404 }));
+        });
+
+        const prevChrome = (globalThis as any).chrome;
+        (globalThis as any).chrome = {
+            runtime: {
+                lastError: undefined,
+                sendMessage(msg: any, cb: (r: any) => void) {
+                    if (msg.type === "listPackages") return cb({});
+                    if (msg.type === "packageStatus") return cb({ statuses: { "https://unpkg.com/cmdk@1.1.1": { state: pkgState } } });
+                    if (msg.type === "packageAnalyze") return void new Promise((res) => (resolveAnalyze = res)).then(cb);
+                    if (msg.type === "packageInstall") {
+                        return cb({
+                            id: "pkg_1",
+                            source: msg.fetched.source,
+                            folder: "dark",
+                            entries: msg.fetched.entries,
+                            revision: msg.fetched.revision,
+                            metadata: { name: "Dark", version: "1.2.0", icon: "data:image/png;base64,CAFE", connect: [] },
+                            caps: { urls: [], strategies: [], pageJs: false, overlay: false, connect: [], packages: [] },
+                            files: { "dark.tangitweak.ts": { kind: "script", id: "s_1", name: "dark/dark.tangitweak", hash: "h" } },
+                            autoUpdate: true,
+                            installedAt: 1,
+                            updatedAt: 1,
+                        });
+                    }
+                    cb({});
+                },
+            },
+        };
+
+        try {
+            const { InstallDialog } = await import("../src/ui/dialogs/InstallDialog");
+            const { openInstall, dialogs } = await import("../src/ui/state/dialogs");
+            render(<InstallDialog />);
+            await act(async () => openInstall({ url: "https://example.com/dark.tangitweak.ts" }));
+            await act(tick);
+
+            // File 1 fetched, waiting on lib.ts -> determinate file progress bar (1 / 2 files)
+            const bar1 = $('#install-dialog [role="progressbar"]');
+            expect(bar1).not.toBeNull();
+            expect(bar1.getAttribute("aria-valuenow")).toBe("50");
+            expect($("#install-dialog .install-progress-detail").textContent).toBe("1 / 2 files");
+
+            // Finish lib.ts -> transitions to package download progress bar (0 / 1 packages)
+            await act(async () => resolveLib(new Response("export {};\n", { status: 200 })));
+            for (let i = 0; i < 6; i++) await act(tick);
+            expect($("#install-dialog .install-loading").textContent).toContain("Downloading packages…");
+            expect($('#install-dialog [role="progressbar"]').getAttribute("aria-valuenow")).toBe("0");
+            expect($("#install-dialog .install-progress-detail").textContent).toBe("0 / 1 packages");
+
+            // Finish analyze -> Review screen shows the script's custom icon
+            pkgState = "ready";
+            await act(async () =>
+                resolveAnalyze({
+                    name: "Dark",
+                    metadata: { name: "Dark", version: "1.2.0", icon: "data:image/png;base64,CAFE", connect: [] },
+                    iconUrl: "data:image/png;base64,CAFE",
+                    bundle: false,
+                    caps: { urls: [], strategies: [], pageJs: false, overlay: false, connect: [], packages: [] },
+                    error: null,
+                    folder: "dark",
+                    items: {
+                        "dark.tangitweak.ts": { kind: "script", name: "dark/dark.tangitweak" },
+                        "lib.ts": { kind: "script", name: "dark/lib" },
+                    },
+                })
+            );
+            await act(tick);
+            expect(document.querySelector('#install-dialog [role="progressbar"]')).toBeNull();
+            expect($<HTMLImageElement>("#install-dialog img.pkg-icon").getAttribute("src")).toBe("data:image/png;base64,CAFE");
+
+            // Clicking Install -> Done screen also shows the script's icon
+            await act(async () => void fireEvent.click($("#install-confirm")));
+            await act(tick);
+            expect($<HTMLImageElement>("#install-dialog img.pkg-icon-done").getAttribute("src")).toBe("data:image/png;base64,CAFE");
+
+            dialogs.install = null;
+        } finally {
+            (globalThis as any).chrome = prevChrome;
+            vi.unstubAllGlobals();
+        }
+    });
 });
 
 describe("settings dialog", () => {

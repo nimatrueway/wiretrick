@@ -12,7 +12,7 @@
  */
 import { LOG_LEVELS, DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL, TEXT_TYPES_DESC, DEFAULT_BODY_CAP, BODY_CAP_MIN, BODY_CAP_MAX, type ScriptSettingsState } from "./settingsYaml";
 import { DEFAULT_TEXT_TYPES } from "./bodyKind";
-import { paramDefault, type ParamDef } from "./scriptDef";
+import { isParamDef, paramDefault, type ParamNode } from "./scriptDef";
 import { GENERATED_NOTE } from "./generatedFiles";
 
 export const SETTINGS_SCHEMA = {
@@ -73,7 +73,12 @@ export const SETTINGS_SCHEMA = {
     },
 };
 
-function paramSchema(d: ParamDef): Record<string, any> {
+function paramSchema(d: ParamNode): Record<string, any> {
+    if (!isParamDef(d)) {
+        const properties: Record<string, any> = {};
+        for (const [k, sub] of Object.entries(d)) properties[k] = paramSchema(sub);
+        return { type: ["object", "null"], properties, additionalProperties: false };
+    }
     const base: Record<string, any> = { default: paramDefault(d) };
     if (d.description) base.description = d.description;
     switch (d.type) {

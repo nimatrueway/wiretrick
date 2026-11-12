@@ -6,7 +6,7 @@
  */
 import { defaultMeta, finishMeta, type ResMeta } from "./metaParser";
 import { readMetadata } from "./packageMetadata";
-import { parseParamValue, resolveParamValues, serializableParamDef, type ParamDef } from "./scriptDef";
+import { PARAM_TYPES, parseParamTree, resolveParamValues, serializableParamTree, type ParamDef, type ParamTree } from "./scriptDef";
 import { paramsProxy, PARAM_AT_TOP, PARAM_NOT_HERE } from "./paramsProxy";
 import { parseShortcut } from "./shortcut";
 import { formatLogArgs, makeScriptConsole, type ScriptLogLevel } from "./scriptLog";
@@ -58,7 +58,7 @@ export interface CompiledScript {
     /** original full source */
     code: string;
     /** parameter definitions collected from tt.params / tt.defineParam (if any) */
-    paramDefs?: Record<string, ParamDef>;
+    paramDefs?: ParamTree;
     /** the module's exports (utility scripts: importable by others) */
     exports?: any;
 }
@@ -599,11 +599,54 @@ function routesOf(h: ScriptHandlers): RouteMeta[] {
     return [...h.onRequest, ...h.onResponseHeaders, ...h.replaceResponse, ...h.onResponseBody, ...h.onDocument, ...h.onOverlay].map((x) => x.route);
 }
 
-const PARAM_TYPES = ["boolean", "number", "string", "enum", "stringList", "shortcut"];
-
 /** per-script state behind tt.metadata / tt.params / tt.defineParam */
 function createOwner(meta: ResMeta, storedValues?: Record<string, any>) {
-    let defs: Record<string, ParamDef> | undefined;
+    let defs: ParamTree | undefined;
+    const isChildObject = (v: unknown): boolean => !!v && typeof v === "object" && !Array.isArray(v) && !isStub(v);
+    const readGroup = (obj: Record<string, any>, where: string, prefix: string, leafOnly = false): { known: ParamTree; unknown: Record<string, any> } => {
+        const known: ParamTree = {};
+        const unknown: Record<string, any> = {};
+        for (const [k, d] of Object.entries(obj)) {
+            const label = prefix ? `${prefix}.${k}` : k;
+            if (!prefix && defs && k in defs) throw new Error(`${where}: parameter "${k}" is already defined`);
+            if (isStub(d)) {
+                unknown[k] = makeStubModule();
+                continue;
+            }
+            if (!d || typeof d !== "object" || Array.isArray(d)) {
+                throw new Error(`${where}: parameter "${label}" needs a type (${PARAM_TYPES.join(", ")})`);
+            }
+            // A section object holds nested defs/sub-sections (no string/stub `type`); `{ type: { type: "enum", ... } }` is a section with a child named `type`.
+            const looksLikeSection = !leafOnly && !("type" in d && !isChildObject((d as any).type));
+            if (looksLikeSection) {
+                const entries = Object.entries(d);
+                if (!entries.length || entries.some(([, v]) => !isStub(v) && !isChildObject(v))) {
+                    throw new Error(`${where}: parameter "${label}" needs a type (${PARAM_TYPES.join(", ")})`);
+                }
+                const sub = readGroup(d, where, label, false);
+                if (Object.keys(sub.known).length) known[k] = sub.known;
+                if (Object.keys(sub.unknown).length) unknown[k] = sub.unknown;
+                continue;
+            }
+            if (Object.values(d).some(isStub)) {
+                unknown[k] = makeStubModule();
+                continue;
+            }
+            if (!PARAM_TYPES.includes((d as any).type)) {
+                throw new Error(`${where}: parameter "${label}" needs a type (${PARAM_TYPES.join(", ")})`);
+            }
+            if ((d as any).type === "enum" && !Array.isArray((d as any).choices)) throw new Error(`${where}: enum parameter "${label}" needs choices`);
+            if ((d as any).type === "shortcut" && (d as any).default !== undefined && (d as any).default !== "") {
+                try {
+                    parseShortcut((d as any).default);
+                } catch (e: any) {
+                    throw new Error(`${where}: shortcut parameter "${label}": ${String(e?.message ?? e).replace(/^ctx\.shortcut: /, "")}`);
+                }
+            }
+            known[k] = d as ParamDef;
+        }
+        return { known, unknown };
+    };
     return {
         metadata(raw: unknown) {
             if (meta.metadata) throw new Error("tt.metadata: call it once");
@@ -613,42 +656,22 @@ function createOwner(meta: ResMeta, storedValues?: Record<string, any>) {
             meta.metadata = readMetadata(known, "tt.metadata");
             if (meta.metadata.description) meta.description = meta.metadata.description;
         },
-        add(next: Record<string, ParamDef>, where: string): Record<string, any> {
-            const r = this.declare(next, where);
+        add(next: ParamTree, where: string, leafOnly = false): Record<string, any> {
+            const r = this.declare(next, where, leafOnly);
             if (isStub(r)) return r;
-            return { ...Object.fromEntries(Object.entries(r.known).map(([k, d]) => [k, parseParamValue(k, d, r.raw[k])])), ...r.unknown };
+            return { ...parseParamTree(r.known, r.raw), ...r.unknown };
         },
         /** `next` declared: its defs (with their parsers), raw values, and the stubbed ones' values */
-        declare(next: Record<string, ParamDef>, where: string): { known: Record<string, ParamDef>; raw: Record<string, any>; unknown: Record<string, any> } {
+        declare(next: ParamTree, where: string, leafOnly = false): { known: ParamTree; raw: Record<string, any>; unknown: Record<string, any> } {
             // defs that come from a stubbed import (meta-only compiles) are
             // unknown here, not invalid: skip them — their values read as
             // stubs — instead of failing the whole script
             if (isStub(next)) return next as any;
-            if (!next || typeof next !== "object") throw new Error(`${where}: expected an object of parameter definitions`);
+            if (!next || typeof next !== "object" || Array.isArray(next)) throw new Error(`${where}: expected an object of parameter definitions`);
             // `known` keeps the parsers (to resolve values); `defs` — stored,
             // messaged, diffed — holds them stripped
-            const known: Record<string, ParamDef> = {};
-            const unknown: Record<string, any> = {};
-            for (const [k, d] of Object.entries(next)) {
-                if (defs && k in defs) throw new Error(`${where}: parameter "${k}" is already defined`);
-                if (isStub(d) || (d && typeof d === "object" && Object.values(d).some(isStub))) {
-                    unknown[k] = makeStubModule();
-                    continue;
-                }
-                if (!d || typeof d !== "object" || !PARAM_TYPES.includes((d as any).type)) {
-                    throw new Error(`${where}: parameter "${k}" needs a type (${PARAM_TYPES.join(", ")})`);
-                }
-                if ((d as any).type === "enum" && !Array.isArray((d as any).choices)) throw new Error(`${where}: enum parameter "${k}" needs choices`);
-                if ((d as any).type === "shortcut" && (d as any).default !== undefined && (d as any).default !== "") {
-                    try {
-                        parseShortcut((d as any).default);
-                    } catch (e: any) {
-                        throw new Error(`${where}: shortcut parameter "${k}": ${String(e?.message ?? e).replace(/^ctx\.shortcut: /, "")}`);
-                    }
-                }
-                known[k] = d;
-            }
-            if (Object.keys(known).length) defs = { ...(defs || {}), ...Object.fromEntries(Object.entries(known).map(([k, d]) => [k, serializableParamDef(d)])) };
+            const { known, unknown } = readGroup(next, where, "", leafOnly);
+            if (Object.keys(known).length) defs = { ...(defs || {}), ...serializableParamTree(known) };
             return { known, raw: resolveParamValues(known, storedValues), unknown };
         },
         get defs() {
@@ -767,7 +790,7 @@ function makeShim(owner: ReturnType<typeof createOwner>, overrides: ResApiOverri
         onPage: place("onPage"),
         onOverlay: place("onOverlay"),
         metadata: (m: unknown) => owner.metadata(m),
-        params: (defs: Record<string, ParamDef>) => {
+        params: (defs: ParamTree) => {
             const r = owner.declare(defs, "tt.params");
             if (isStub(r)) return r;
             const setParam = overrides?.setParam;
@@ -778,7 +801,7 @@ function makeShim(owner: ReturnType<typeof createOwner>, overrides: ResApiOverri
         },
         defineParam: (name: string, def: ParamDef) => {
             if (typeof name !== "string" || !name) throw new Error("tt.defineParam: first argument must be the parameter name");
-            return owner.add({ [name]: def }, "tt.defineParam")[name];
+            return owner.add({ [name]: def }, "tt.defineParam", true)[name];
         },
         storage: guardStoreKeys(overrides?.storage || {
             get: () => undefined,

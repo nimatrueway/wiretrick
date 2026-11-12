@@ -3,9 +3,10 @@
  * inline, open the full manager on a specific script.
  */
 import { scriptHealth } from "../../shared/scriptHealth";
+import { setParamAtPath } from "../../shared/scriptDef";
 import { useEffect, useState, type MouseEvent } from "react";
 import { Switch } from "../components/Switch";
-import { ParamField } from "../components/ParamField";
+import { ParamTreeFields } from "../components/ParamField";
 import { IconPen } from "../components/icons";
 import type { PopupApi, ScriptInfo, ScriptParams } from "./api";
 
@@ -90,6 +91,8 @@ const hasParams = (s: ScriptInfo) => !!s.paramDefs && Object.keys(s.paramDefs).l
 
 function ScriptRow({ script, api, onChanged, version, activeHere }: { script: ScriptInfo; api: PopupApi; onChanged: () => void; version: number; activeHere: boolean }) {
     const [open, setOpen] = useState(false);
+    const [iconBroken, setIconBroken] = useState(false);
+    useEffect(() => setIconBroken(false), [script.iconUrl]);
     const isLib = script.meta.active === false;
     const health = scriptHealth(script);
     return (
@@ -116,8 +119,9 @@ function ScriptRow({ script, api, onChanged, version, activeHere }: { script: Sc
                     aria-label={activeHere ? "active on this tab" : undefined}
                     title={activeHere ? "Active on this tab — matched the page or one of its requests (counted in the badge)" : undefined}
                 />
-                <span className={health ? "script-name error" : "script-name"} title={script.meta.description}>
-                    {script.meta.name}
+                {script.iconUrl && !iconBroken && <img className="script-icon" src={script.iconUrl} alt="" onError={() => setIconBroken(true)} />}
+                <span className={health ? "script-name error" : "script-name"} title={script.meta.description || script.bundleDescription}>
+                    {script.bundleName || script.meta.name}
                 </span>
                 {health && (
                     <span
@@ -169,20 +173,18 @@ function ParamFold({ scriptId, api, version }: { scriptId: string; api: PopupApi
     const entries = Object.entries(params.defs);
     return (
         <li className="param-fold">
-            {entries.length === 0
-                ? "This script declares no parameters."
-                : entries.map(([key, def]) => (
-                      <ParamField
-                          key={key}
-                          name={key}
-                          def={def}
-                          value={params.values[key]}
-                          onChange={(v) => {
-                              setParams({ ...params, values: { ...params.values, [key]: v } });
-                              void api.setParam(scriptId, key, v);
-                          }}
-                      />
-                  ))}
+            {entries.length === 0 ? (
+                "This script declares no parameters."
+            ) : (
+                <ParamTreeFields
+                    defs={params.defs}
+                    values={params.values}
+                    onChange={(path, v) => {
+                        setParams({ ...params, values: setParamAtPath(params.values, path, v) });
+                        void api.setParam(scriptId, path.join("."), v);
+                    }}
+                />
+            )}
         </li>
     );
 }

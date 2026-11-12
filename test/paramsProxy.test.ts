@@ -97,6 +97,29 @@ describe("paramsProxy", () => {
         await tick();
         expect(sent).toEqual([]);
     });
+
+    it("supports nested section proxies: assigns leaf paths, mutates nested lists, and forbids overwriting a section", async () => {
+        const sent: [string, any][] = [];
+        const nestedDefs = {
+            network: {
+                host: { type: "string", default: "a.com" },
+                tags: { type: "stringList", default: ["v1"] },
+                filter: { type: { type: "enum", choices: ["xhr", "fetch"], default: "xhr" } },
+            },
+        } as any;
+        const raw = { network: { host: "a.com", tags: ["v1"], filter: { type: "xhr" } } };
+        const cfg = paramsProxy(nestedDefs, raw, {}, { blocked: () => undefined, send: (k, v) => sent.push([k, v]) });
+        cfg.network.host = "b.com";
+        cfg.network.tags.push("v2");
+        cfg.network.filter.type = "fetch";
+        expect(() => ((cfg as any).network = {})).toThrow(/parameter section/);
+        await tick();
+        expect(sent).toEqual([
+            ["network.host", "b.com"],
+            ["network.tags", ["v1", "v2"]],
+            ["network.filter.type", "fetch"],
+        ]);
+    });
 });
 
 describe("tt.params in the background and the overlay (compileScript)", () => {

@@ -1,6 +1,6 @@
 # Writing scripts
 
-[← README](../README.md) · [Glossary](../GLOSSARY.md)
+[<img src="../icons/icon.svg" width="16" height="16" align="absmiddle" alt=""> README](../README.md) · [Glossary](../GLOSSARY.md)
 
 A script registers **handlers** at top level. Each handler takes its own
 [route](#routes) first, then the function:
@@ -308,7 +308,7 @@ It is the same in `onRequest`, `replaceResponse`, `onResponseHeaders` and
 
 `tt.metadata({ description: "…" })` sets a one-line description, shown as
 the script's tooltip in the Editor and in the popup. Its other fields —
-`name`, `version`, `homepage`, `author`, `license`, `updateURL` and `connect` — describe
+`name`, `version`, `icon`, `homepage`, `author`, `license`, `updateURL` and `connect` — describe
 the script as a shared package (see [Packages](packages.md)). Call it once.
 
 `tt.params` declares typed knobs the user changes from the popup's ⚙
@@ -337,6 +337,20 @@ and defining the same name twice is an error:
 
 ```ts
 const host = tt.defineParam("host", { type: "string", default: "api.example.com" });
+```
+
+Large parameter sets can be grouped into collapsible sections by nesting
+plain objects inside `tt.params` (and nested maps in `settings.yaml`):
+
+```ts
+const cfg = tt.params({
+    enabled: { type: "boolean", default: true },
+    network: {
+        host: { type: "string", default: "api.example.com" },
+        delay: { type: "number", default: 200, min: 0, max: 5000 },
+    },
+});
+// cfg.network.host: string · cfg.network.delay: number
 ```
 
 Routes may be built from params. A param change re-runs the script and

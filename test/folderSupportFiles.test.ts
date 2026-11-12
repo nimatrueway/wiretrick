@@ -54,21 +54,26 @@ describe("folder sync support files", () => {
         expect(ts.startsWith(`// ${GENERATED_NOTE}\n`)).toBe(true);
         expect(JSON.parse(ts.slice(ts.indexOf("\n") + 1)).include).toEqual(["**/*.ts", "**/*.tsx"]);
         expect(JSON.parse(ts.slice(ts.indexOf("\n") + 1)).compilerOptions.paths).toMatchObject({ "https://unpkg.com/*": ["./.tangitweak/types/unpkg.com/*"], react: ["./.tangitweak/types/builtin/@types/react/index.d.ts"] });
+        const pkg = JSON.parse(files.get("package.json")!.text);
+        expect(pkg.$comment).toContain(GENERATED_NOTE);
+        expect(pkg).toMatchObject({ private: true, type: "module" });
         expect(JSON.parse(files.get("settings.schema.json")!.text).$comment).toBe(GENERATED_NOTE);
-        const stamps = ["tt-api.d.ts", "tsconfig.json", "settings.schema.json"].map((f) => files.get(f)!.t);
+        const stamps = ["tt-api.d.ts", "tsconfig.json", "package.json", "settings.schema.json"].map((f) => files.get(f)!.t);
 
         // unchanged → nothing rewritten on the next start
         sync.halt();
         await sync.startFromStoredHandle({ fresh: true });
-        expect(["tt-api.d.ts", "tsconfig.json", "settings.schema.json"].map((f) => files.get(f)!.t)).toEqual(stamps);
+        expect(["tt-api.d.ts", "tsconfig.json", "package.json", "settings.schema.json"].map((f) => files.get(f)!.t)).toEqual(stamps);
 
-        // extension update with new APIs + a hand-edited tsconfig → both restored
+        // extension update with new APIs + hand-edited tsconfig/package.json → restored
         dts = "declare const tt: { v2: true };\n";
         files.set("tsconfig.json", { text: "{}", t: clock++ });
+        files.set("package.json", { text: "{}", t: clock++ });
         sync.halt();
         await sync.startFromStoredHandle({ fresh: true });
         expect(files.get("tt-api.d.ts")!.text).toContain("v2: true");
         expect(files.get("tsconfig.json")!.text).toBe(ts);
+        expect(JSON.parse(files.get("package.json")!.text).$comment).toContain(GENERATED_NOTE);
         sync.halt();
     });
 });

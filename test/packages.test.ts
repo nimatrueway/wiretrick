@@ -107,10 +107,11 @@ describe("installed packages", () => {
         expect(out!.revision).toBe(pkg.revision);
     });
 
-    it("installs a bundle: its scripts together, metadata from metadata.json", async () => {
+    it("installs a bundle: its scripts together, metadata and iconUrl from metadata.json", async () => {
         const run = (u: string) => `import { k } from "./shared";\ntt.onRequest({ url: "${u}", strategy: "page" }, async (r) => (k, r));\n`;
         const b = {
-            "metadata.json": JSON.stringify({ name: "Kit", version: "2.0.0", connect: ["api.x.com"], scripts: ["a.ts", "tools/b.ts"] }),
+            "metadata.json": JSON.stringify({ name: "Kit", version: "2.0.0", icon: "./logo.svg", connect: ["api.x.com"], scripts: ["a.ts", "tools/b.ts"] }),
+            "logo.svg": '<svg viewBox="0 0 8 8"><circle r="4"/></svg>',
             "a.ts": run("*://a.com/*"),
             "tools/b.ts": run("*://b.com/*").replace("./shared", "../shared"),
             "shared.ts": "export const k = 1;\n",
@@ -121,6 +122,7 @@ describe("installed packages", () => {
         expect(a.bundle).toBe(true);
         expect(a.name).toBe("Kit");
         expect(a.folder).toBe("Kit");
+        expect(a.iconUrl).toMatch(/^data:image\/svg\+xml;charset=utf-8,/);
         expect(a.caps.urls).toEqual(["*://a.com/*", "*://b.com/*"]);
         expect(a.caps.connect).toEqual(["api.x.com"]);
         const pkg = await pk.installPackage(f, { enabled: true, autoUpdate: true });
@@ -129,7 +131,7 @@ describe("installed packages", () => {
         const names = (await ss.listScripts()).map((s) => s.meta.name).sort();
         expect(names).toEqual(["Kit/a", "Kit/shared", "Kit/tools/b"]);
         expect((await ss.listScripts()).filter((s) => s.meta.active).map((s) => s.meta.name).sort()).toEqual(["Kit/a", "Kit/tools/b"]);
-        expect((await ss.listDataFiles()).map((d) => d.path)).toEqual(["Kit/metadata.json"]);
+        expect((await ss.listDataFiles()).map((d) => d.path).sort()).toEqual(["Kit/logo.svg", "Kit/metadata.json"]);
     });
 
     it("updates from metadata's updateURL, even installed from local files", async () => {

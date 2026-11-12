@@ -22,6 +22,8 @@ export interface PackageMetadata {
     name?: string;
     version?: string;
     description?: string;
+    /** relative .svg/.png/… path, data: URL, https:// URL, or inline <svg> */
+    icon?: string;
     homepage?: string;
     author?: string;
     license?: string;
@@ -41,7 +43,7 @@ export const MANIFEST_FILE = "metadata.json";
 /** a bundle's manifest (at any folder depth) */
 export const isManifestPath = (path: string): boolean => path === MANIFEST_FILE || path.endsWith("/" + MANIFEST_FILE);
 
-const TEXT_KEYS = ["name", "version", "description", "homepage", "author", "license", "updateURL"] as const;
+const TEXT_KEYS = ["name", "version", "description", "icon", "homepage", "author", "license", "updateURL"] as const;
 
 /** validate tt.metadata's argument or a manifest's fields (unknown keys are ignored: a newer script may add some) */
 export function readMetadata(raw: unknown, where: string): PackageMetadata {
@@ -92,6 +94,7 @@ export const MANIFEST_SCHEMA = {
         name: { type: "string", description: "The bundle's name, shown when installing and in the Explorer" },
         version: { type: "string", description: 'Dotted version ("1.2.0"); an update to a lower one waits for review' },
         description: { type: "string", description: "One line about what it does" },
+        icon: { type: "string", description: "Icon shown in the Explorer and popup: a relative .svg/.png/… file path in this folder, a data: or https:// URL, or inline <svg>" },
         homepage: { type: "string", description: "A link shown when installing" },
         author: { type: "string" },
         license: { type: "string" },

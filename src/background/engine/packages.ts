@@ -13,6 +13,7 @@ import {
     modifiedFiles,
     packageFolder,
     packageName,
+    resolvePackageIcon,
     storeItemOf,
     uniqueEntryName,
     type InstalledFile,
@@ -50,6 +51,8 @@ export interface FetchedPackage {
 export interface Analysis {
     name: string;
     metadata: PackageMetadata;
+    /** resolved `<img src>` URL when the script or bundle declares an icon */
+    iconUrl?: string;
     /** a bundle (a metadata.json lists its scripts) */
     bundle: boolean;
     caps: Capabilities;
@@ -167,7 +170,12 @@ async function analyze(version: Pick<FetchedPackage, "entries" | "files">, pkg?:
         metadata.connect,
         Object.keys(files).filter((rel) => !isDataPath(rel)).map((rel) => files[rel])
     );
-    return { name: packageName({ entries, metadata }), metadata, bundle: !!manifest, caps, error, folder, items };
+    const iconUrl = resolvePackageIcon(
+        { entries, files, metadata },
+        declared.map((d) => d?.icon),
+        dataFiles
+    );
+    return { name: packageName({ entries, metadata }), metadata, ...(iconUrl ? { iconUrl } : {}), bundle: !!manifest, caps, error, folder, items };
 }
 
 /** the install / update page's preview */

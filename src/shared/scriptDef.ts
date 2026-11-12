@@ -50,7 +50,16 @@ export interface ParamDefShortcut {
     description?: string;
     parse?: (raw: string) => unknown;
 }
+export const PARAM_TYPES = ["boolean", "number", "string", "enum", "stringList", "shortcut"] as const;
+
 export type ParamDef = ParamDefBoolean | ParamDefNumber | ParamDefString | ParamDefEnum | ParamDefStringList | ParamDefShortcut;
+
+/** A nested section grouping parameters (or sub-sections) in the UI and settings.yaml. */
+export interface ParamGroup {
+    [key: string]: ParamNode;
+}
+export type ParamNode = ParamDef | ParamGroup;
+export type ParamTree = Record<string, ParamNode>;
 
 /** the stored/edited value type of a def (what `parse` receives) */
 export type ParamRawValue<D extends ParamDef> = D extends ParamDefBoolean
@@ -70,12 +79,25 @@ export type ParamRawValue<D extends ParamDef> = D extends ParamDefBoolean
 /** what the script sees: the parser's return type when `parse` is set, else the raw value */
 export type ParamValue<D extends ParamDef> = D extends { parse: (raw: never) => infer R } ? R : ParamRawValue<D>;
 
-/** assignable from handler code (shared/paramsProxy), except params with `parse` */
-export type ParamsOf<T extends Record<string, ParamDef>> = {
-    -readonly [K in keyof T as T[K] extends { parse: Function } ? never : K]: ParamValue<T[K]>;
+type IsReadonlyParam<V> = V extends ParamDef ? (V extends { parse: Function } ? true : false) : true;
+type ParamEntryValue<V> = V extends ParamDef ? ParamValue<V> : V extends ParamGroup ? ParamsOf<V> : never;
+
+/** assignable from handler code (shared/paramsProxy), except params with `parse` and section objects themselves */
+export type ParamsOf<T extends ParamGroup> = {
+    -readonly [K in keyof T as IsReadonlyParam<T[K]> extends false ? K : never]: ParamEntryValue<T[K]>;
 } & {
-    readonly [K in keyof T as T[K] extends { parse: Function } ? K : never]: ParamValue<T[K]>;
+    readonly [K in keyof T as IsReadonlyParam<T[K]> extends true ? K : never]: ParamEntryValue<T[K]>;
 };
+
+const isPlainObj = (v: unknown): v is Record<string, any> => !!v && typeof v === "object" && !Array.isArray(v);
+
+export function isParamDef(v: unknown): v is ParamDef {
+    return isPlainObj(v) && typeof v.type === "string" && (PARAM_TYPES as readonly string[]).includes(v.type);
+}
+
+export function isParamGroup(v: unknown): v is ParamGroup {
+    return isPlainObj(v) && !isParamDef(v) && typeof v.type !== "string";
+}
 
 export function paramDefault(def: ParamDef): any {
     if (def.default !== undefined) return def.default;
@@ -95,14 +117,50 @@ export function paramDefault(def: ParamDef): any {
     }
 }
 
-/** Merge user-provided values over defaults; invalid values fall back. */
-export function resolveParamValues(defs: Record<string, ParamDef>, stored: Record<string, any> | undefined): Record<string, any> {
+/** Merge user-provided values over defaults (recursively across parameter sections); invalid values fall back. */
+export function resolveParamValues(defs: ParamTree, stored: Record<string, any> | undefined): Record<string, any> {
     const out: Record<string, any> = {};
-    for (const [key, def] of Object.entries(defs)) {
-        const v = stored?.[key];
-        out[key] = isValidParamValue(def, v) ? v : paramDefault(def);
+    for (const [key, node] of Object.entries(defs)) {
+        if (isParamDef(node)) {
+            const v = stored?.[key];
+            out[key] = isValidParamValue(node, v) ? v : paramDefault(node);
+        } else if (isParamGroup(node)) {
+            out[key] = resolveParamValues(node, isPlainObj(stored?.[key]) ? stored[key] : undefined);
+        }
     }
     return out;
+}
+
+/** Resolve a leaf parameter by key or `"."`-joined section path (`"network.host"`). */
+export function findParamDef(defs: ParamTree | undefined, key: string, prefix: string[] = []): { path: string[]; def: ParamDef } | undefined {
+    if (!defs) return undefined;
+    if (Object.prototype.hasOwnProperty.call(defs, key)) {
+        const node = defs[key];
+        if (isParamDef(node)) return { path: [...prefix, key], def: node };
+    }
+    for (const [k, node] of Object.entries(defs)) {
+        if (isParamGroup(node) && key.startsWith(k + ".")) {
+            const hit = findParamDef(node, key.slice(k.length + 1), [...prefix, k]);
+            if (hit) return hit;
+        }
+    }
+    return undefined;
+}
+
+export function getParamAtPath(values: Record<string, any> | undefined, path: readonly string[]): any {
+    let cur: any = values;
+    for (const seg of path) {
+        if (!isPlainObj(cur)) return undefined;
+        cur = cur[seg];
+    }
+    return cur;
+}
+
+export function setParamAtPath(values: Record<string, any> | undefined, path: readonly string[], value: any): Record<string, any> {
+    const base = isPlainObj(values) ? values : {};
+    if (!path.length) return base;
+    const [head, ...rest] = path;
+    return { ...base, [head]: rest.length === 0 ? value : setParamAtPath(isPlainObj(base[head]) ? base[head] : undefined, rest, value) };
 }
 
 export function isValidParamValue(def: ParamDef, v: any): boolean {
@@ -130,6 +188,15 @@ export function serializableParamDef<D extends ParamDef>(def: D): D {
     return rest as D;
 }
 
+/** a tree of defs/sections with `parse` functions stripped from every leaf */
+export function serializableParamTree(defs: ParamTree): ParamTree {
+    const out: ParamTree = {};
+    for (const [k, node] of Object.entries(defs)) {
+        out[k] = isParamDef(node) ? serializableParamDef(node) : serializableParamTree(node);
+    }
+    return out;
+}
+
 /**
  * Run the def's `parse` (if any) over a resolved raw value. A throwing
  * parser becomes an error naming the param and the value.
@@ -145,4 +212,14 @@ export function parseParamValue(key: string, def: ParamDef, raw: any): any {
         if (shown.length > 200) shown = shown.slice(0, 200) + "…";
         throw new Error(`param "${key}": parse failed for value ${shown}: ${e && typeof e.message === "string" ? e.message : String(e)}`);
     }
+}
+
+/** Run `parseParamValue` across every leaf in a parameter tree. */
+export function parseParamTree(defs: ParamTree, raw: Record<string, any> | undefined, prefix = ""): Record<string, any> {
+    const out: Record<string, any> = {};
+    for (const [k, node] of Object.entries(defs)) {
+        const path = prefix ? `${prefix}.${k}` : k;
+        out[k] = isParamDef(node) ? parseParamValue(path, node, raw?.[k]) : parseParamTree(node, isPlainObj(raw?.[k]) ? raw[k] : undefined, path);
+    }
+    return out;
 }

@@ -1,5 +1,6 @@
 import { send, sendWake } from "../lib/messaging";
-import type { ParamDef } from "../components/ParamField";
+import { PACKAGES_KEY } from "../../shared/packageModel";
+import type { ParamTree } from "../../shared/scriptDef";
 import type { ScriptHealthInput } from "../../shared/scriptHealth";
 
 export interface ScriptInfo {
@@ -10,11 +11,16 @@ export interface ScriptInfo {
     typeErrors?: string[];
     ruleErrors?: string[];
     meta: { name: string; active?: boolean; description?: string };
-    paramDefs?: Record<string, any>;
+    /** when the script is the sole entry of a bundle, the bundle's display name */
+    bundleName?: string;
+    bundleDescription?: string;
+    /** resolved `<img src>` URL from script or bundle metadata `icon` */
+    iconUrl?: string;
+    paramDefs?: ParamTree;
 }
 
 export interface ScriptParams {
-    defs: Record<string, ParamDef>;
+    defs: ParamTree;
     values: Record<string, any>;
 }
 
@@ -61,7 +67,7 @@ export const chromePopupApi: PopupApi = {
     saveSize: (size) => void chrome.storage.local.set({ resPopupSize: size }),
     onChange(fn) {
         const l = (c: Record<string, chrome.storage.StorageChange>, area: string) => {
-            if (area === "local" && (c.resScripts || c.resScriptOrder || c.resParams)) fn();
+            if (area === "local" && (c.resScripts || c.resScriptOrder || c.resParams || c.resDataFiles || c[PACKAGES_KEY])) fn();
         };
         chrome.storage.onChanged.addListener(l);
         return () => chrome.storage.onChanged.removeListener(l);

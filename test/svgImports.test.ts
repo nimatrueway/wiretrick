@@ -1,21 +1,30 @@
 // `.svg` data files: importing one gives its markup, a string.
+import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
 import "../src/shared/transpile";
 import { compileWithLibs } from "../src/shared/compile";
-import { dataFileValue, dependantsOf, importResolver, isDataSpec, makeLibRequire } from "../src/shared/scriptImports";
+import { bytesToImageDataUrl, dataFileValue, dependantsOf, imageDataUrlToBytes, importResolver, isDataSpec, makeLibRequire } from "../src/shared/scriptImports";
 import { dataFilePathProblem } from "../src/shared/scriptName";
 
 const LOGO = '<svg xmlns="http://www.w3.org/2000/svg"><circle r="4"/></svg>';
 const data = [{ path: "icons/logo.svg", text: LOGO }];
 
 describe(".svg data files", () => {
-    it("are data files by path", () => {
+    it("are data files by path (.svg and raster images)", () => {
         expect(isDataSpec("./icons/Logo.SVG")).toBe(true);
+        expect(isDataSpec("./icons/Logo.PNG")).toBe(true);
         expect(dataFilePathProblem("icons/logo.svg")).toBe("");
+        expect(dataFilePathProblem("icons/logo.png")).toBe("");
         expect(dataFilePathProblem("icons/.svg")).toMatch(/just \.svg/);
-        expect(dataFilePathProblem("icons/logo.png")).toMatch(/\.json or \.svg/);
-        expect(importResolver([], ["icons/logo.svg"])("ui/panel", "../icons/logo.svg")).toEqual({ kind: "data", path: "icons/logo.svg" });
+        expect(dataFilePathProblem("icons/.png")).toMatch(/just \.png/);
+        expect(dataFilePathProblem("icons/logo.txt")).toMatch(/\.json, \.svg or image/);
+        expect(importResolver([], ["icons/logo.svg", "icons/logo.png"])("ui/panel", "../icons/logo.png")).toEqual({ kind: "data", path: "icons/logo.png" });
         expect(dependantsOf("icons/logo.svg", [{ id: "a", name: "a", code: 'import l from "./icons/logo.svg";' }], "data")).toEqual(["a"]);
+        const raw = new Uint8Array([137, 80, 78, 71, 1, 2, 3]);
+        const url = bytesToImageDataUrl("icons/logo.png", raw);
+        expect(url).toMatch(/^data:image\/png;base64,/);
+        expect(Array.from(imageDataUrlToBytes(url))).toEqual(Array.from(raw));
+        expect(dataFileValue("icons/logo.png", url)).toBe(url);
     });
 
     it("import as their markup (never parsed), in scripts and libraries", () => {
@@ -37,5 +46,11 @@ describe(".svg data files", () => {
     it("the page-side require gives the markup too", () => {
         const requireFrom = makeLibRequire([{ name: "icons/logo.svg", json: LOGO }], () => {});
         expect(requireFrom("main")("./icons/logo.svg")).toBe(LOGO);
+    });
+
+    it("build.mjs keeps Monaco's xml basic-language bundle for .svg models", () => {
+        const buildSrc = readFileSync("scripts/build.mjs", "utf8");
+        const langs = [...(buildSrc.match(/MONACO_BASIC_LANGUAGES\s*=\s*new Set\(\[([^\]]+)\]/)?.[1] ?? "").matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+        expect(langs).toEqual(expect.arrayContaining(["typescript", "javascript", "yaml", "xml"]));
     });
 });

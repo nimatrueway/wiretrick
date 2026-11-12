@@ -14,7 +14,7 @@ import { MANIFEST_FILE } from "./packageMetadata";
 import { entryStem } from "./packageModel";
 import { isUrlSpec } from "./packageImports";
 import { candidates, SCRIPT_FILE_RE } from "./packageSource";
-import { folderOf, importPath, importSpecs, isDataSpec, rewriteImports } from "./scriptImports";
+import { folderOf, importPath, importSpecs, isDataSpec, metadataIconSpec, rewriteImports } from "./scriptImports";
 
 export interface PackagePlan {
     /** the package's folder ("" for a script at the root) */
@@ -133,12 +133,16 @@ export function makePackagePlan(entry: string, files: Record<string, string>, fo
     const missing: PackagePlan["missing"] = [];
     /** what each file's specifiers point at (relative ones that resolve) */
     const targets = new Map<string, Map<string, string>>();
+    const specsOf = (code: string): string[] => {
+        const ic = metadataIconSpec(code);
+        return [...importSpecs(code), ...(ic ? [/^\.\.?(\/|$)/.test(ic) ? ic : `./${ic}`] : [])];
+    };
     const resolve = (from: string): Map<string, string> => {
         let out = targets.get(from);
         if (out) return out;
         targets.set(from, (out = new Map()));
         if (isDataSpec(from)) return out;
-        for (const spec of importSpecs(files[from])) {
+        for (const spec of specsOf(files[from])) {
             if (!isRelative(spec)) continue;
             const path = importPath(from, spec);
             const hit = (path === null ? [] : candidates(path)).map((c) => lower.get(c.toLowerCase())).find((p) => p !== undefined);
@@ -153,7 +157,7 @@ export function makePackagePlan(entry: string, files: Record<string, string>, fo
         const from = set[i];
         if (isDataSpec(from)) continue;
         const found = resolve(from);
-        for (const spec of importSpecs(files[from])) {
+        for (const spec of specsOf(files[from])) {
             if (isUrlSpec(spec) || builtinSpec(spec)) continue;
             if (!isRelative(spec)) bare.push({ from, spec });
             else if (!found.has(spec)) missing.push({ from, spec });

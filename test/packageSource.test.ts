@@ -139,4 +139,23 @@ describe("fetchPackage", () => {
         expect(p.revision).toMatch(/^[0-9a-f]{24}$/);
         await expect(fetchPackage({ kind: "zip", url: "https://x.dev/none.zip" }, net)).rejects.toThrow(/can't read/);
     });
+    it("reports monotonic file and byte download progress", async () => {
+        const fileEvents: any[] = [];
+        await fetchPackage({ kind: "github", owner: "me", repo: "s", ref: "main", path: "dark", tree: true }, net, (p) => fileEvents.push(p));
+        expect(fileEvents[0]).toEqual({});
+        expect(fileEvents[fileEvents.length - 1]).toEqual({ done: 2, total: 2, detail: "2 / 2 files" });
+
+        const zipEvents: any[] = [];
+        const streamingNet: Net = {
+            ...net,
+            async bytes(url, onBytes) {
+                onBytes?.(120, 240);
+                onBytes?.(240, 240);
+                return net.bytes(url);
+            },
+        };
+        await fetchPackage({ kind: "zip", url: "https://x.dev/kit.zip" }, streamingNet, (p) => zipEvents.push(p));
+        expect(zipEvents).toContainEqual({ done: 120, total: 240, detail: "120 B / 240 B" });
+        expect(zipEvents[zipEvents.length - 1]).toEqual({ done: 240, total: 240, detail: "240 B / 240 B" });
+    });
 });

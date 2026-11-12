@@ -1,5 +1,7 @@
 # Installing and sharing scripts
 
+[<img src="../icons/icon.svg" width="16" height="16" align="absmiddle" alt=""> README](../README.md) · [Glossary](../GLOSSARY.md)
+
 You share scripts as a **package**, which is one of two things:
 
 - **A script.** One `.ts` or `.tsx` file, plus every file it imports by a
@@ -22,6 +24,7 @@ tt.metadata({
     name: "GitHub dark mode",
     version: "1.2.0",
     description: "Forces the dark theme on github.com",
+    icon: "./icon.svg",
     author: "me",
     license: "MIT",
     homepage: "https://github.com/me/scripts",
@@ -32,6 +35,7 @@ tt.onPage({ url: "*://github.com/*" }, () => { … });
 ```
 
 Every field is optional. `description` is also the script's tooltip in the Editor and the popup.
+`icon` sets a custom icon shown in the Explorer and the popup: pass a relative file path (`.svg`, `.png`, `.webp`, `.jpg`, `.gif`, `.ico`, `.avif`), a `data:` or `https://` URL, or inline `<svg>` markup.
 `version` is compared part by part (`1.10.0` is newer than `1.9`).
 `connect` lists the hosts the script's `tt.fetch` calls reach. An update that
 adds one waits for your approval.

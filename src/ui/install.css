@@ -12,6 +12,39 @@ body.install-body {
     padding: 28px 24px 96px;
 }
 .install-flow main.center { text-align: center; padding-top: 80px; }
+.install-flow main.install-loading { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.install-flow .install-progress {
+    width: min(300px, 100%);
+    height: 4px;
+    background: var(--bg-sunk);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    overflow: hidden;
+}
+.install-flow .install-progress-bar {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 999px;
+    transition: width 0.15s ease-out;
+}
+.install-flow .install-progress.indeterminate .install-progress-bar {
+    width: 38%;
+    animation: install-progress-slide 1.1s ease-in-out infinite;
+}
+.install-flow .install-progress-detail { font-variant-numeric: tabular-nums; }
+@keyframes install-progress-slide {
+    0% { transform: translateX(-110%); }
+    100% { transform: translateX(270%); }
+}
+.install-flow .install-header { display: flex; align-items: flex-start; gap: 14px; }
+.install-flow .install-header-body { min-width: 0; flex: 1; }
+.install-flow .pkg-icon { width: 40px; height: 40px; flex-shrink: 0; object-fit: contain; border-radius: 6px; margin-top: 2px; display: block; }
+.install-flow .done-title { display: flex; align-items: center; gap: 10px; }
+.install-flow .pkg-icon-done { width: 24px; height: 24px; flex-shrink: 0; object-fit: contain; border-radius: 4px; display: block; }
+.install-flow .entry-pick { display: inline-flex; align-items: center; gap: 6px; }
+.install-flow .pkg-icon-entry { width: 16px; height: 16px; flex-shrink: 0; object-fit: contain; display: block; }
+.install-flow details.file .file-img { padding: 12px; background: var(--bg-sunk); border-top: 1px solid var(--border); display: flex; justify-content: center; }
+.install-flow details.file .file-img img { max-width: 128px; max-height: 128px; object-fit: contain; display: block; }
 .install-flow h1 { font-size: 20px; font-weight: 600; margin: 0 0 6px; }
 .install-flow h2 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-dim); margin: 22px 0 8px; }
 .install-flow .version { margin-left: 10px; font-size: 12px; font-weight: 500; color: var(--fg-dim); border: 1px solid var(--border); border-radius: 10px; padding: 1px 8px; vertical-align: middle; }

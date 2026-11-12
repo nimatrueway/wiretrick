@@ -4,9 +4,8 @@
  * can't know: the per-script params each script defines (tt.params / tt.defineParam).
  * Pure (offsets in, offsets out) so Monaco wiring stays thin and testable.
  */
-import { parseDocument, parse, isMap, isPair, isScalar, type Node } from "yaml";
-import type { ParamDef } from "./scriptDef";
-import { isValidParamValue, paramDefault } from "./scriptDef";
+import { parseDocument, parse, isMap, isPair, isScalar, type Node, type YAMLMap } from "yaml";
+import { isParamDef, isParamGroup, isValidParamValue, paramDefault, type ParamDef, type ParamGroup, type ParamTree } from "./scriptDef";
 import { LOG_LEVELS, DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL, yamlKey, isTextTypes, isBodyCap, DEFAULT_BODY_CAP, BODY_CAP_MIN, BODY_CAP_MAX } from "./settingsYaml";
 import { DEFAULT_TEXT_TYPES } from "./bodyKind";
 import { SETTINGS_SCHEMA } from "./settingsSchema";
@@ -15,7 +14,7 @@ export interface AssistScript {
     name: string;
     /** registers handlers (utilities have no enabled switch) */
     declared: boolean;
-    defs: Record<string, ParamDef>;
+    defs: ParamTree;
 }
 
 export interface AssistDiag {
@@ -109,25 +108,36 @@ export function settingsDiagnostics(text: string, scripts: AssistScript[]): Assi
                     at(sv, "error", `Values for "${name}" must be a map`);
                     continue;
                 }
-                for (const p of sv.items) {
-                    const pk = isScalar(p.key) ? String(p.key.value) : "";
-                    const v = (p.value as any)?.toJSON?.() ?? null;
-                    if (pk === "enabled") {
-                        if (!s.declared) at(p.key as Node, "warning", `"${name}" is a library (registers no handlers) — it has no enabled switch`);
-                        else if (v !== null && typeof v !== "boolean") at(p.value as Node, "error", "Expected true or false");
-                        continue;
+                const checkGroup = (map: YAMLMap, defs: ParamTree, prefix: string, allowEnabled: boolean) => {
+                    for (const p of map.items) {
+                        const pk = isScalar(p.key) ? String(p.key.value) : "";
+                        const full = prefix ? `${prefix}.${pk}` : pk;
+                        const valNode = p.value as Node | null;
+                        const v = (valNode as any)?.toJSON?.() ?? null;
+                        if (allowEnabled && pk === "enabled") {
+                            if (!s.declared) at(p.key as Node, "warning", `"${name}" is a library (registers no handlers) — it has no enabled switch`);
+                            else if (v !== null && typeof v !== "boolean") at(valNode, "error", "Expected true or false");
+                            continue;
+                        }
+                        const d = Object.prototype.hasOwnProperty.call(defs, pk) ? defs[pk] : undefined;
+                        if (!d) {
+                            const known = Object.keys(defs).filter((x) => !(allowEnabled && x === "enabled"));
+                            at(p.key as Node, "warning", `"${name}" declares no param "${full}"${known.length ? ` (params: ${known.join(", ")})` : ""}`);
+                            continue;
+                        }
+                        if (isParamGroup(d)) {
+                            if (!valNode || (isScalar(valNode) && valNode.value === null)) continue;
+                            if (!isMap(valNode)) at(valNode, "error", `Section "${full}" must be a map`);
+                            else checkGroup(valNode, d, full, false);
+                            continue;
+                        }
+                        if (v === null || !isParamDef(d)) continue;
+                        if (!isValidParamValue(d, v)) at(valNode, "error", `Expected ${typeLabel(d)} — this value is ignored`);
+                        else if (d.type === "number" && ((d.min !== undefined && v < d.min) || (d.max !== undefined && v > d.max)))
+                            at(valNode, "warning", `Outside ${typeLabel(d)}`);
                     }
-                    const d = s.defs[pk];
-                    if (!d) {
-                        const known = Object.keys(s.defs).filter((x) => x !== "enabled");
-                        at(p.key as Node, "warning", `"${name}" declares no param "${pk}"${known.length ? ` (params: ${known.join(", ")})` : ""}`);
-                        continue;
-                    }
-                    if (v === null) continue;
-                    if (!isValidParamValue(d, v)) at(p.value as Node, "error", `Expected ${typeLabel(d)} — this value is ignored`);
-                    else if (d.type === "number" && ((d.min !== undefined && v < d.min) || (d.max !== undefined && v > d.max)))
-                        at(p.value as Node, "warning", `Outside ${typeLabel(d)}`);
-                }
+                };
+                checkGroup(sv, s.defs, "", true);
             }
         } else {
             at(key, "warning", `Unknown top-level key "${k}" (expected settings, params)`);
@@ -217,6 +227,16 @@ function valueChoices(d: { type: string; choices?: string[]; enum?: string[] }):
     return c ? c.map((x) => (/^[\w.-]+$/.test(x) && !/^(true|false|null|~|yes|no|on|off|-?\d)/i.test(x) ? x : JSON.stringify(x))) : [];
 }
 
+function resolveGroupAt(defs: ParamTree, subPath: string[]): ParamGroup | undefined {
+    let cur: ParamGroup = defs;
+    for (const seg of subPath) {
+        const next = Object.prototype.hasOwnProperty.call(cur, seg) ? cur[seg] : undefined;
+        if (!isParamGroup(next)) return undefined;
+        cur = next;
+    }
+    return cur;
+}
+
 export function settingsCompletions(text: string, offset: number, scripts: AssistScript[]): { items: AssistCompletion[]; replaceFrom: number } {
     const c = lineContext(text, offset);
     const items: AssistCompletion[] = [];
@@ -224,13 +244,17 @@ export function settingsCompletions(text: string, offset: number, scripts: Assis
         if (!c.siblings.has(k)) items.push({ label: k, insertText: `${yamlKey(k)}:${block ? "\n  " : " "}`, kind, detail, documentation });
     };
     const values = (vs: string[], detail?: string) => vs.forEach((v) => items.push({ label: v, insertText: v, kind: "value", detail }));
-    const [a, b] = c.path;
+    const [a, b, ...subPath] = c.path;
     const s = b !== undefined ? scripts.find((x) => x.name === b) : undefined;
+    const group = s && c.path.length >= 2 && a === "params" ? resolveGroupAt(s.defs, subPath) : undefined;
     if (c.valueOf !== null) {
         if (c.path.length === 1 && a === "settings" && GLOBAL_PROPS[c.valueOf]) values(valueChoices(GLOBAL_PROPS[c.valueOf]), GLOBAL_PROPS[c.valueOf].description);
-        else if (c.path.length === 2 && a === "params" && s) {
-            if (c.valueOf === "enabled") values(["true", "false"], "Run this script");
-            else if (s.defs[c.valueOf]) values(valueChoices(s.defs[c.valueOf] as any), s.defs[c.valueOf].description);
+        else if (group) {
+            if (c.path.length === 2 && c.valueOf === "enabled") values(["true", "false"], "Run this script");
+            else {
+                const node = group[c.valueOf];
+                if (isParamDef(node)) values(valueChoices(node as any), node.description);
+            }
         }
         return { items, replaceFrom: c.wordStart };
     }
@@ -241,15 +265,30 @@ export function settingsCompletions(text: string, offset: number, scripts: Assis
         for (const [k, d] of Object.entries(GLOBAL_PROPS)) key(k, `${d.type}, default ${JSON.stringify(d.default)}`, d.description);
     } else if (c.path.length === 1 && a === "params") {
         for (const x of scripts) key(x.name, x.declared ? "script" : "library", paramSummary(x), "module", true);
-    } else if (c.path.length === 2 && a === "params" && s) {
-        if (s.declared) key("enabled", "boolean, default true", "Run this script");
-        for (const [k, d] of Object.entries(s.defs)) if (k !== "enabled") key(k, `${typeLabel(d)}, default ${JSON.stringify(paramDefault(d))}`, d.description);
+    } else if (group) {
+        if (c.path.length === 2 && s!.declared) key("enabled", "boolean, default true", "Run this script");
+        for (const [k, d] of Object.entries(group)) {
+            if (c.path.length === 2 && k === "enabled") continue;
+            if (isParamDef(d)) key(k, `${typeLabel(d)}, default ${JSON.stringify(paramDefault(d))}`, d.description);
+            else if (isParamGroup(d)) key(k, "parameter section", undefined, "module", true);
+        }
     }
     return { items, replaceFrom: c.wordStart };
 }
 
+function flattenLeaves(defs: ParamTree, prefix = "", skipEnabled = false): [string, ParamDef][] {
+    const out: [string, ParamDef][] = [];
+    for (const [k, d] of Object.entries(defs)) {
+        if (skipEnabled && k === "enabled") continue;
+        const full = prefix ? `${prefix}.${k}` : k;
+        if (isParamDef(d)) out.push([full, d]);
+        else if (isParamGroup(d)) out.push(...flattenLeaves(d, full, false));
+    }
+    return out;
+}
+
 function paramSummary(s: AssistScript): string {
-    const ks = Object.entries(s.defs).filter(([k]) => k !== "enabled");
+    const ks = flattenLeaves(s.defs, "", true);
     const head = s.declared ? "" : "Library (registers no handlers): no enabled switch.\n\n";
     return head + (ks.length ? ks.map(([k, d]) => `- \`${k}\`: ${typeLabel(d)}${d.description ? " — " + d.description : ""}`).join("\n") : "No params.");
 }
@@ -266,7 +305,7 @@ export function settingsHover(text: string, offset: number, scripts: AssistScrip
     const keyStart = ls + indentOf(line);
     if (offset < keyStart || offset > ls + line.length) return null;
     const c = lineContext(text, keyStart);
-    const [a, b] = c.path;
+    const [a, b, ...subPath] = c.path;
     const span = { start: keyStart, end: ls + (colon < 0 ? line.length : colon) };
     let md: string | null = null;
     if (c.path.length === 0) {
@@ -280,12 +319,18 @@ export function settingsHover(text: string, offset: number, scripts: AssistScrip
     } else if (c.path.length === 1 && a === "params") {
         const s = scripts.find((x) => x.name === k);
         md = s ? `**${k}**\n\n${paramSummary(s)}` : `No script named **${k}** — ignored`;
-    } else if (c.path.length === 2 && a === "params") {
+    } else if (c.path.length >= 2 && a === "params") {
         const s = scripts.find((x) => x.name === b);
-        if (s && k === "enabled") md = s.declared ? "**enabled** — Run this script\n\n`boolean` · default `true`" : `"${b}" is a library — it has no enabled switch`;
-        else if (s?.defs[k]) {
-            const d = s.defs[k];
-            md = `**${k}**${d.description ? " — " + d.description : ""}\n\n\`${typeLabel(d)}\` · default \`${JSON.stringify(paramDefault(d))}\``;
+        const group = s ? resolveGroupAt(s.defs, subPath) : undefined;
+        if (s && c.path.length === 2 && k === "enabled") md = s.declared ? "**enabled** — Run this script\n\n`boolean` · default `true`" : `"${b}" is a library — it has no enabled switch`;
+        else if (group && Object.prototype.hasOwnProperty.call(group, k)) {
+            const d = group[k];
+            if (isParamDef(d)) {
+                md = `**${k}**${d.description ? " — " + d.description : ""}\n\n\`${typeLabel(d)}\` · default \`${JSON.stringify(paramDefault(d))}\``;
+            } else if (isParamGroup(d)) {
+                const leaves = flattenLeaves(d);
+                md = `**${k}** — parameter section\n\n${leaves.map(([lk, ld]) => `- \`${lk}\`: ${typeLabel(ld)}`).join("\n")}`;
+            }
         }
     }
     return md ? { markdown: md, ...span } : null;

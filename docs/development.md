@@ -1,6 +1,6 @@
 # Development
 
-[← README](../README.md) · [Glossary](../GLOSSARY.md)
+[<img src="../icons/icon.svg" width="16" height="16" align="absmiddle" alt=""> README](../README.md) · [Glossary](../GLOSSARY.md)
 
 ```bash
 npm install

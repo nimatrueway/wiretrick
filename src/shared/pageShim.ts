@@ -20,7 +20,7 @@ import { normalizeRoute, placeApi, placeKeyer, placeKind, routeMatches, type Doc
 import { inertRemote, LIB_SITE_STORE, siteRemote, SITE_NO_STORES, unusableStore, type SiteCannotCallError } from "./remote";
 import type { Exposer } from "./rpc";
 import type { Generation, ScriptLife } from "./runLifecycle";
-import { parseParamValue, type ParamDef } from "./scriptDef";
+import { isParamDef, isParamGroup, parseParamValue, type ParamDef, type ParamTree } from "./scriptDef";
 import { libBodyRunning } from "./scriptImports";
 import { paramsProxy, PARAM_AT_TOP, PARAM_NOT_HERE, PARAM_ON_SITE } from "./paramsProxy";
 import { scriptEnv } from "./scriptEnv";
@@ -151,9 +151,21 @@ export function makePageShim(o: PageShimOptions): PageShim {
         },
         fetch: () => Promise.reject(new Error(NO_FETCH)),
         metadata: inert,
-        params: (defs: Record<string, ParamDef>) => {
-            const known = Object.fromEntries(Object.entries(defs || {}).filter(([, d]) => d && typeof d === "object"));
-            const unknown = Object.fromEntries(Object.entries(defs || {}).filter(([, d]) => !d || typeof d !== "object").map(([k]) => [k, o.params[k]]));
+        params: (defs: ParamTree) => {
+            const split = (obj: Record<string, any>): { known: ParamTree; unknown: Record<string, any> } => {
+                const known: ParamTree = {};
+                const unknown: Record<string, any> = {};
+                for (const [k, d] of Object.entries(obj || {})) {
+                    if (isParamDef(d)) known[k] = d;
+                    else if (isParamGroup(d)) {
+                        const sub = split(d);
+                        known[k] = sub.known;
+                        if (Object.keys(sub.unknown).length) unknown[k] = sub.unknown;
+                    } else unknown[k] = o.params?.[k];
+                }
+                return { known, unknown };
+            };
+            const { known, unknown } = split(defs || {});
             return paramsProxy(known, o.params, unknown, {
                 blocked: () => (world === "page" ? PARAM_ON_SITE : running || libBodyRunning() ? PARAM_AT_TOP : o.setParam ? undefined : PARAM_NOT_HERE),
                 send: (k, v) => void o.setParam!(k, v, o.lib).catch(() => {}),

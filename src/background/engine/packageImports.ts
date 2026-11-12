@@ -397,15 +397,18 @@ async function ensureUrls(tops: string[], opts?: { retry?: boolean }): Promise<b
                         if (f !== u) own.aliases[u] = f;
                         Object.assign(into.aliases, own.aliases);
                         Object.assign(into.modules, own.modules);
+                        state = { aliases: { ...state.aliases, ...own.aliases }, modules: { ...state.modules, ...own.modules } };
+                        rebuildSnapshot();
                         failed.delete(u);
                         dlogLevel("packages", "info", `downloaded ${u}`);
                     } catch (e: any) {
                         failed.set(u, { reason: `download failed (${e?.message ?? e})`, at: Date.now() });
                         dlogLevel("packages", "warn", `downloading ${u} failed: ${e?.message ?? e}`);
+                    } finally {
+                        downloading.delete(u);
                     }
                 })
             );
-            state = { aliases: { ...state.aliases, ...into.aliases }, modules: { ...state.modules, ...into.modules } };
             if (Object.keys(into.modules).length || Object.keys(into.aliases).length) await storageSet({ [PACKAGE_MODULES_KEY]: state });
             rebuildSnapshot();
             return true;

@@ -1,5 +1,7 @@
 # TangiTweak
 
+[<img src="icons/icon.svg" width="16" height="16" align="absmiddle" alt=""> README](README.md)
+
 TangiTweak lets a user rewrite browser requests and responses with small
 TypeScript scripts. This glossary fixes the words we use for its concepts in
 docs, UI text, issues and conversation.

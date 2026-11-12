@@ -105,12 +105,6 @@ export function coveredMissingModule(message: string, statusOf: (url: string) =>
     return !!spec && isUrlSpec(spec) && !builtinSpec(spec) && statusOf(spec)?.state !== "ready";
 }
 
-/** TS's "Cannot find module" for a relative import: another script or a data file */
-export function missingLocalModule(message: string): boolean {
-    const spec = /^Cannot find module '([^']+)'/.exec(message)?.[1];
-    return !!spec && /^\.\.?\//.test(spec);
-}
-
 /** code with each import specifier replaced by what `to` returns for it (undefined: kept) */
 export function rewriteImports(code: string, to: (spec: string) => string | undefined): string {
     return code.replace(IMPORT_RE, (m, spec: string) => {
@@ -125,9 +119,51 @@ export function importLine(code: string, spec: string): number | undefined {
     return undefined;
 }
 
-/** does the specifier (or path) name a data file (`.json`, or `.svg`)? */
+const IMAGE_MIMES: Record<string, string> = {
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+    webp: "image/webp",
+    ico: "image/x-icon",
+    avif: "image/avif",
+};
+
+/** does the path name a raster image data file (.png, .jpg, .webp, .gif, .ico, .avif)? */
+export function isImageDataPath(path: string): boolean {
+    const ext = /\.([a-z0-9]+)$/i.exec(path)?.[1]?.toLowerCase();
+    return !!ext && Object.prototype.hasOwnProperty.call(IMAGE_MIMES, ext);
+}
+
+/** encode binary image bytes as a canonical `data:image/...;base64,...` URL */
+export function bytesToImageDataUrl(path: string, bytes: Uint8Array): string {
+    const ext = /\.([a-z0-9]+)$/i.exec(path)?.[1]?.toLowerCase() ?? "png";
+    const mime = IMAGE_MIMES[ext] ?? "application/octet-stream";
+    let bin = "";
+    for (let i = 0; i < bytes.length; i += 8192) {
+        bin += String.fromCharCode(...bytes.subarray(i, i + 8192));
+    }
+    return `data:${mime};base64,${btoa(bin)}`;
+}
+
+/** decode a `data:...;base64,...` URL back into raw bytes (for folder sync and zip export) */
+export function imageDataUrlToBytes(text: string): Uint8Array {
+    const m = /^data:[^,]*;base64,([\s\S]*)$/.exec(text);
+    if (!m) return new TextEncoder().encode(text);
+    const bin = atob(m[1].replace(/\s+/g, ""));
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+}
+
+/** encode inline SVG markup as a safe `data:image/svg+xml` URL for `<img>` */
+export function svgToDataUrl(svg: string): string {
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg.trim())}`;
+}
+
+/** does the specifier (or path) name a data file (`.json`, `.svg` or an image)? */
 export function isDataSpec(spec: string): boolean {
-    return /\.(json|svg)$/i.test(spec);
+    return /\.(json|svg|png|jpe?g|gif|webp|ico|avif)$/i.test(spec);
 }
 
 /** an `.svg` data file: importing it gives its markup, a string */
@@ -135,9 +171,52 @@ export function isSvgPath(path: string): boolean {
     return /\.svg$/i.test(path);
 }
 
-/** what importing a data file gives: an `.svg`'s markup, a `.json`'s parsed value */
+/** what importing a data file gives: an `.svg`'s markup, a raster image's `data:` URL, or a `.json`'s parsed value */
 export function dataFileValue(path: string, text: string): any {
-    return isSvgPath(path) ? text : JSON.parse(text);
+    return isSvgPath(path) || isImageDataPath(path) ? text : JSON.parse(text);
+}
+
+/** true when `icon` names a workspace/package file path rather than a `data:`/`http(s):` URL or inline `<svg>` */
+export function isRelativeIconSpec(icon: string | undefined): icon is string {
+    const s = icon?.trim();
+    return !!s && !/^(data:|https?:\/\/|<svg[\s>])/i.test(s) && !/^[a-z][a-z0-9+.-]*:/i.test(s);
+}
+
+/** literal `icon: "..."` inside a `tt.metadata({ ... })` call */
+export function metadataIconValue(code: string): string | undefined {
+    const m = /\btt\s*\.\s*metadata\s*\(\s*\{[\s\S]*?\bicon\s*:\s*(["'`])([^"'`\n]+)\1/.exec(code);
+    return m ? m[2].trim() : undefined;
+}
+
+/** literal `icon: "..."` inside a `tt.metadata({ ... })` call, if relative, so package export/crawl includes the file */
+export function metadataIconSpec(code: string): string | undefined {
+    const v = metadataIconValue(code);
+    return isRelativeIconSpec(v) ? v : undefined;
+}
+
+/**
+ * Resolve a script or package `icon` (`./icon.svg`, `icon.png`, `data:image/...`,
+ * `https://...`, or inline `<svg>...</svg>`) against `baseFolder` and `dataFiles`
+ * into an `<img src>` URL; undefined when unset or unresolvable.
+ */
+export function resolveIconSrc(
+    icon: string | undefined,
+    baseFolder: string,
+    dataFiles: readonly { path: string; text: string }[]
+): string | undefined {
+    const raw = icon?.trim();
+    if (!raw) return undefined;
+    if (/^data:image\//i.test(raw) || /^https?:\/\//i.test(raw)) return raw;
+    if (/^<svg[\s>]/i.test(raw)) return svgToDataUrl(raw);
+    if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return undefined;
+    const relSpec = /^\.\.?(\/|$)/.test(raw) ? raw : `./${raw}`;
+    const target = importPath(baseFolder ? `${baseFolder}/_` : "_", relSpec);
+    const find = (p: string | null) => (p ? dataFiles.find((d) => d.path.toLowerCase() === p.toLowerCase()) : undefined);
+    const hit = find(target) ?? (!/^\.\.?(\/|$)/.test(raw) && baseFolder ? find(importPath("_", `./${raw}`)) : undefined);
+    if (!hit) return undefined;
+    if (isSvgPath(hit.path)) return svgToDataUrl(hit.text);
+    if (isImageDataPath(hit.path) || /^data:image\//i.test(hit.text)) return hit.text;
+    return undefined;
 }
 
 /** folder part of a path ("" at the root) */

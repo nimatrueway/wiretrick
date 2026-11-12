@@ -699,6 +699,8 @@ declare namespace TangiTweak {
         version?: string;
         /** one line about what it does: the Editor's and popup's tooltip */
         description?: string;
+        /** icon shown in the Explorer and popup: a relative .svg/.png/… path, data: or https:// URL, or inline <svg> */
+        icon?: string;
         /** a link shown when installing */
         homepage?: string;
         author?: string;
@@ -848,6 +850,14 @@ declare namespace TangiTweak {
     /** One adjustable parameter, discriminated by `type`. */
     type ParamDef = ParamDefBoolean | ParamDefNumber | ParamDefString | ParamDefEnum | ParamDefStringList | ParamDefShortcut;
 
+    /**
+     * A nested object grouping parameters (or sub-sections) into collapsible
+     * sections in the popup and nested maps in settings.yaml.
+     */
+    interface ParamGroup {
+        readonly [key: string]: ParamDef | ParamGroup;
+    }
+
     /** The raw (stored, edited) value type of a param def — what `parse` receives. */
     type ParamRawValue<D extends ParamDef> = D extends ParamDefBoolean
         ? boolean
@@ -869,14 +879,19 @@ declare namespace TangiTweak {
      */
     type ParamValue<D extends ParamDef> = D extends { parse: (raw: never) => infer R } ? R : ParamRawValue<D>;
 
+    type ParamIsReadonly<V> = V extends ParamDef ? (V extends { parse: Function } ? true : false) : true;
+    type ParamEntryValue<V> = V extends ParamDef ? ParamValue<V> : V extends ParamGroup ? ParamsOf<V> : never;
+
     /**
-     * Resolved parameter values, typed from the defs you passed. Assignable
-     * from handler code (`cfg.on = false`), except params with `parse`.
+     * Resolved parameter values, typed from the defs (and nested sections)
+     * you passed. Leaf params are assignable from handler code
+     * (`cfg.on = false`, `cfg.network.host = "b.com"`), except params with
+     * `parse`.
      */
-    type ParamsOf<T extends Record<string, ParamDef>> = {
-        -readonly [K in keyof T as T[K] extends { parse: Function } ? never : K]: ParamValue<T[K]>;
+    type ParamsOf<T extends ParamGroup> = {
+        -readonly [K in keyof T as ParamIsReadonly<T[K]> extends false ? K : never]: ParamEntryValue<T[K]>;
     } & {
-        readonly [K in keyof T as T[K] extends { parse: Function } ? K : never]: ParamValue<T[K]>;
+        readonly [K in keyof T as ParamIsReadonly<T[K]> extends true ? K : never]: ParamEntryValue<T[K]>;
     };
 
 }
@@ -1165,20 +1180,24 @@ declare const tt: {
      * script hot-reloads with it. A param with `parse` can't be assigned.
      *
      * @param defs Parameter name → definition (`type`, `default`, optional
-     *   `description` and `parse`); see {@link TangiTweak.ParamDef}. With
-     *   `parse`, the param's value is the parser's result (raw value in,
-     *   e.g. a `URL` out) while the stored/edited value stays raw.
+     *   `description` and `parse`; see {@link TangiTweak.ParamDef}), or a
+     *   nested section object ({@link TangiTweak.ParamGroup}) grouping
+     *   related parameters in the popup and settings.yaml. With `parse`, the
+     *   param's value is the parser's result (raw value in, e.g. a `URL` out)
+     *   while the stored/edited value stays raw.
      * @returns The current values, typed from `defs`.
      *
      * @example
      * const cfg = tt.params({
      *     enabled: { type: "boolean", default: true, description: "Return errors" },
-     *     status: { type: "enum", choices: ["500", "503"], default: "500" },
-     *     hosts: { type: "stringList", default: ["staging.example.com"] },
+     *     network: {
+     *         status: { type: "enum", choices: ["500", "503"], default: "500" },
+     *         hosts: { type: "stringList", default: ["staging.example.com"] },
+     *     },
      * });
      *
-     * tt.onRequest({ url: cfg.hosts.map((h) => `*://${h}/api/*`), strategy: "helper" }, () => {
-     *     if (cfg.enabled) return { replaceResponse: { status: Number(cfg.status), body: { error: "forced" } } };
+     * tt.onRequest({ url: cfg.network.hosts.map((h) => `*://${h}/api/*`), strategy: "helper" }, () => {
+     *     if (cfg.enabled) return { replaceResponse: { status: Number(cfg.network.status), body: { error: "forced" } } };
      * });
      *
      * @example
@@ -1198,7 +1217,7 @@ declare const tt: {
      *     headers: { set: { "access-control-allow-origin": cfg.origin.origin } },
      * }));
      */
-    params<const T extends Record<string, TangiTweak.ParamDef>>(defs: T): TangiTweak.ParamsOf<T>;
+    params<const T extends TangiTweak.ParamGroup>(defs: T): TangiTweak.ParamsOf<T>;
 
     /**
      * Declare a single parameter and get its current value (same store as
@@ -1444,4 +1463,37 @@ declare var URLPattern: {
 declare module "*.svg" {
     const markup: string;
     export default markup;
+}
+
+/**
+ * Image data files import as their `data:image/...;base64,...` URL:
+ * `import icon from "./icon.png"; tt.metadata({ icon });`
+ */
+declare module "*.png" {
+    const url: string;
+    export default url;
+}
+declare module "*.jpg" {
+    const url: string;
+    export default url;
+}
+declare module "*.jpeg" {
+    const url: string;
+    export default url;
+}
+declare module "*.gif" {
+    const url: string;
+    export default url;
+}
+declare module "*.webp" {
+    const url: string;
+    export default url;
+}
+declare module "*.ico" {
+    const url: string;
+    export default url;
+}
+declare module "*.avif" {
+    const url: string;
+    export default url;
 }

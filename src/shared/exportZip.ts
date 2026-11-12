@@ -16,7 +16,8 @@
 import { parseDocument, isMap, isScalar, type YAMLMap } from "yaml";
 import { readZipEntries, writeZip } from "./zip";
 import { SETTINGS_FILE, SCHEMA_FILE, parseSettings, type SettingsDoc } from "./settingsYaml";
-import { API_DTS_FILE, TSCONFIG_FILE } from "./generatedFiles";
+import { API_DTS_FILE, PACKAGE_JSON_FILE, TSCONFIG_FILE } from "./generatedFiles";
+import { bytesToImageDataUrl, imageDataUrlToBytes, isImageDataPath } from "./scriptImports";
 import { dataFilePathProblem, folderPathProblem, scriptFileName, scriptNameFromFile, scriptNameProblem } from "./scriptName";
 import { isInFolder } from "./folders";
 
@@ -59,7 +60,7 @@ export interface ExportContents {
     ignored: string[];
 }
 
-const GENERATED = new Set([API_DTS_FILE, TSCONFIG_FILE, SCHEMA_FILE]);
+const GENERATED = new Set([API_DTS_FILE, TSCONFIG_FILE, PACKAGE_JSON_FILE, SCHEMA_FILE]);
 const isScriptFile = (p: string) => (/\.ts$/.test(p) && !/\.d\.ts$/.test(p)) || /\.tsx$/.test(p);
 
 /** the folders with nothing in them: no path and no other folder inside */
@@ -75,11 +76,11 @@ export function emptyFolders(folders: string[], paths: string[]): string[] {
 
 /** the export zip: scripts at their file paths, data files, empty folders and settings.yaml */
 export function buildExportZip(c: { settings?: string | null; scripts: { name: string; code: string }[]; dataFiles: { path: string; text: string }[]; folders?: string[] }, date?: Date): Uint8Array {
-    const files: Record<string, string> = {};
+    const files: Record<string, string | Uint8Array> = {};
     if (c.settings != null) files[SETTINGS_FILE] = c.settings;
     for (const f of c.folders ?? []) files[f + "/"] = "";
     for (const s of c.scripts) files[scriptFileName(s.name)] = s.code;
-    for (const d of c.dataFiles) files[d.path] = d.text;
+    for (const d of c.dataFiles) files[d.path] = isImageDataPath(d.path) ? imageDataUrlToBytes(d.text) : d.text;
     return writeZip(files, date);
 }
 
@@ -102,7 +103,7 @@ export async function readExportZip(buf: ArrayBuffer): Promise<ExportContents> {
         if (p === SETTINGS_FILE) out.settings = utf8.decode(bytes);
         else if (GENERATED.has(p)) continue;
         else if (isScriptFile(p) && !scriptNameProblem(scriptNameFromFile(p))) out.scripts.push({ name: scriptNameFromFile(p), file: p, code: utf8.decode(bytes) });
-        else if (!dataFilePathProblem(p)) out.dataFiles.push({ path: p, text: utf8.decode(bytes) });
+        else if (!dataFilePathProblem(p)) out.dataFiles.push({ path: p, text: isImageDataPath(p) ? bytesToImageDataUrl(p, bytes) : utf8.decode(bytes) });
         else out.ignored.push(p);
     }
     const paths = [...out.scripts.map((s) => s.file), ...out.dataFiles.map((d) => d.path)];

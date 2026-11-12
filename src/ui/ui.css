@@ -331,9 +331,11 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 .file-icon.yaml { color: #a074c4; font-size: 13px; font-weight: 400; }
 .file-icon.json { color: #b8a200; font-size: 10px; letter-spacing: 0; }
 :root:not([data-theme="light"]) .file-icon.json { color: #cbcb41; }
-.file-icon.svg { color: #c75e00; font-size: 13px; font-weight: 400; }
+.file-icon.svg, .file-icon.img { color: #c75e00; font-size: 13px; font-weight: 400; }
 .file-icon.section { color: var(--fg-dim); font-size: 13px; font-weight: 400; }
-:root:not([data-theme="light"]) .file-icon.svg { color: #ffb13b; }
+:root:not([data-theme="light"]) .file-icon.svg, :root:not([data-theme="light"]) .file-icon.img { color: #ffb13b; }
+.file-icon.custom { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; }
+.file-icon.custom img { width: 16px; height: 16px; object-fit: contain; display: block; }
 .file-icon.folder { display: inline-flex; height: 16px; color: #c09553; }
 :root:not([data-theme="light"]) .file-icon.folder { color: #dcb67a; }
 .file-icon.folder.package { color: #8a63c4; }

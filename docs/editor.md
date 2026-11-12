@@ -1,6 +1,6 @@
 # The Editor
 
-[← README](../README.md) · [Glossary](../GLOSSARY.md)
+[<img src="../icons/icon.svg" width="16" height="16" align="absmiddle" alt=""> README](../README.md) · [Glossary](../GLOSSARY.md)
 
 The Editor is TangiTweak's full-page UI. Its **Code view** embeds **Monaco** (the VS Code editor) with full TypeScript
 IntelliSense for the `tt` API — completions, hover docs, and diagnostics work
@@ -412,16 +412,16 @@ since the last sync wins, so a backup is made only when both changed.
 A slow drive (network share, cloud folder) that reports an earlier TangiTweak
 write back late isn't mistaken for an outside edit; the newer text is
 written again.
-`tt-api.d.ts`, `tsconfig.json` and `settings.schema.json` are written alongside. Edit in VS Code (or any editor) with full
+`tt-api.d.ts`, `tsconfig.json`, `package.json` and `settings.schema.json` are written alongside. Edit in VS Code (or any editor) with full
 TypeScript completions; saves hot apply instantly. The typings of
 [package imports](scripting.md#packages-from-unpkg) go to
 `.tangitweak/types/`, which TangiTweak owns: it rewrites and prunes them as
 scripts change. The built-ins' (`valtio`, `react`, `react-dom`) go to
 `.tangitweak/types/builtin/`, so their imports resolve there too.
 
-Those three are managed files: they're refreshed on every browser start
+Those four are managed files: they're refreshed on every browser start
 and extension update, so new APIs and settings reach an already-synced folder.
-Don't edit them; your changes are overwritten. `settings.yaml` is yours: an
+Don't edit them; changing them has no effect on TangiTweak and your changes are overwritten. `settings.yaml` is yours: an
 update only adds documentation for settings it doesn't mention yet.
 
 Sync is two-way and watches the folder for **creates, renames/moves and
