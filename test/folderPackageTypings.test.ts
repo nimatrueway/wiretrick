@@ -21,7 +21,7 @@ const listeners: ((c: Record<string, any>) => void)[] = [];
     },
     runtime: { lastError: undefined, sendMessage: () => {}, getURL: (p: string) => `chrome-extension://x/${p}` },
 };
-(globalThis as any).fetch = async () => ({ ok: true, status: 200, text: async () => "declare const wt: any;\n" });
+(globalThis as any).fetch = async () => ({ ok: true, status: 200, text: async () => "declare const tt: any;\n" });
 
 type Entry = { kind: "file"; text: string; t: number } | { kind: "directory"; dir: Dir };
 interface Dir {
@@ -84,10 +84,10 @@ function tree(d: Dir, prefix = ""): Record<string, string> {
     }
     return out;
 }
-const typingsOnDisk = () => Object.fromEntries(Object.entries(tree(root)).filter(([p]) => p.startsWith(".wiretrick/")));
+const typingsOnDisk = () => Object.fromEntries(Object.entries(tree(root)).filter(([p]) => p.startsWith(".tangitweak/")));
 
 describe("folder sync package typings", () => {
-    it("mirrors the stored typings under .wiretrick/types and removes stale ones", async () => {
+    it("mirrors the stored typings under .tangitweak/types and removes stale ones", async () => {
         store[PACKAGE_TYPINGS_KEY] = {
             files: {
                 "unpkg.com/a@1.0.0/package.json": '{"types":"./index.d.ts"}',
@@ -100,9 +100,9 @@ describe("folder sync package typings", () => {
         const sync = await import("../src/background/folderSync");
         await sync.startFromStoredHandle({ fresh: true });
         await sync.flush();
-        expect(typingsOnDisk()).toEqual(Object.fromEntries(Object.entries(store[PACKAGE_TYPINGS_KEY].files).map(([p, t]) => [`.wiretrick/types/${p}`, t])));
+        expect(typingsOnDisk()).toEqual(Object.fromEntries(Object.entries(store[PACKAGE_TYPINGS_KEY].files).map(([p, t]) => [`.tangitweak/types/${p}`, t])));
         // dot folders aren't scripts or data files
-        for (const k of ["resScripts", "resDataFiles", "resFolders"]) expect(JSON.stringify(store[k] ?? null)).not.toContain(".wiretrick");
+        for (const k of ["resScripts", "resDataFiles", "resFolders"]) expect(JSON.stringify(store[k] ?? null)).not.toContain(".tangitweak");
 
         // b no longer imported; a's entry changed
         chrome.storage.local.set({
@@ -116,14 +116,14 @@ describe("folder sync package typings", () => {
         });
         await sync.flush();
         expect(typingsOnDisk()).toEqual({
-            ".wiretrick/types/unpkg.com/a@1.0.0/package.json": '{"types":"./index.d.ts"}',
-            ".wiretrick/types/unpkg.com/a@1.0.0/index.d.ts": "export declare const a: string;\n",
+            ".tangitweak/types/unpkg.com/a@1.0.0/package.json": '{"types":"./index.d.ts"}',
+            ".tangitweak/types/unpkg.com/a@1.0.0/index.d.ts": "export declare const a: string;\n",
         });
 
         // nothing left → the folder goes
         chrome.storage.local.set({ [PACKAGE_TYPINGS_KEY]: { files: {}, tops: {} } });
         await sync.flush();
-        expect(root.entries.has(".wiretrick")).toBe(false);
+        expect(root.entries.has(".tangitweak")).toBe(false);
         expect(root.entries.has("tsconfig.json")).toBe(true);
         sync.halt();
     });

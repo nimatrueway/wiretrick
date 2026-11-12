@@ -1,5 +1,5 @@
 {
-  "name": "wiretrick",
+  "name": "tangitweak",
   "version": "0.27.0-alpha",
   "description": "Script-based request/response override extension (TypeScript rewrite)",
   "private": true,

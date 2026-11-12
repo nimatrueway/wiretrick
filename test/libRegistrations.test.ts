@@ -1,5 +1,5 @@
 // A library's exported function that registers handlers (`export function
-// install() { wt.onPage(…) }`), called from the importer's top level: the
+// install() { tt.onPage(…) }`), called from the importer's top level: the
 // handlers are the importer's — in the background and in the page alike,
 // with the same keys.
 import { describe, it, expect } from "vitest";
@@ -10,9 +10,9 @@ import { makeLibRequire } from "../src/shared/scriptImports";
 import { scriptFunction } from "../src/shared/scriptFn";
 import { routeLabel } from "../src/shared/route";
 
-const A = `export function install(p: string) { wt.onPage(p, () => "a1"); return wt.onPage(p, () => "a2"); }\nwt.onPage("*", () => "a-own");`;
-const B = `export const install = () => wt.onPage("*", () => "b");\nexport const site = () => wt.onSite("*", () => "s");`;
-const ROOT = `import { install as a } from "./a";\nimport { install as b, site } from "./b";\na("*");\nwt.onPage("*", () => "root");\nb();\nsite();\na("*");`;
+const A = `export function install(p: string) { tt.onPage(p, () => "a1"); return tt.onPage(p, () => "a2"); }\ntt.onPage("*", () => "a-own");`;
+const B = `export const install = () => tt.onPage("*", () => "b");\nexport const site = () => tt.onSite("*", () => "s");`;
+const ROOT = `import { install as a } from "./a";\nimport { install as b, site } from "./b";\na("*");\ntt.onPage("*", () => "root");\nb();\nsite();\na("*");`;
 const KEYS = ["onPage:0@a", "onPage:1@a", "onPage:0", "onPage:0@b", "onSite:0@b", "onPage:0@a#1", "onPage:1@a#1"];
 
 const base = { params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined } };
@@ -22,11 +22,11 @@ function pageRun(world: "isolated" | "page") {
         { name: "a", src: toRunnableJs(A) },
         { name: "b", src: toRunnableJs(B) },
     ];
-    const requireFrom = makeLibRequire(libs, (lib, require, m) => scriptFunction(lib.src!, lib.name)(makePageShim({ ...base, world, lib: lib.name }).wt, console, require, m, m.exports));
+    const requireFrom = makeLibRequire(libs, (lib, require, m) => scriptFunction(lib.src!, lib.name)(makePageShim({ ...base, world, lib: lib.name }).tt, console, require, m, m.exports));
     const run = (name: string, code: string) => {
         const shim = makePageShim({ ...base, world });
         const m = { exports: {} as any };
-        shim.top(() => scriptFunction(toRunnableJs(code), name)(shim.wt, console, requireFrom(name), m, m.exports));
+        shim.top(() => scriptFunction(toRunnableJs(code), name)(shim.tt, console, requireFrom(name), m, m.exports));
         return shim;
     };
     return { run, requireFrom };
@@ -83,7 +83,7 @@ describe("handlers registered by a library's function, for the importer", () => 
 
     it("onSite warnings check the importer's own calls only", () => {
         const scripts = [{ id: "b", name: "b", code: B }];
-        const code = `import { site } from "./b";\nconst ps = wt.pageStore("ps", {});\nsite();\nwt.onSite("*", () => ps);`;
+        const code = `import { site } from "./b";\nconst ps = tt.pageStore("ps", {});\nsite();\ntt.onSite("*", () => ps);`;
         const c = compileScript(code, { name: "root", importModule: makeModuleResolver(scripts, () => ({})).resolveFrom("root") });
         expect(c.error).toBeNull();
         expect(siteProblems(code, c.meta.routes).map((m) => m.slice(0, m.indexOf(":")))).toEqual(["onSite #1"]);

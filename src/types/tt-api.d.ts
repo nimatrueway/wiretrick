@@ -1,9 +1,9 @@
 /**
- * Public `wt` API typings — shipped into the editor as an extra lib and
+ * Public `tt` API typings — shipped into the editor as an extra lib and
  * written into the VS Code folder so scripts get full IntelliSense.
  */
 
-declare namespace Wiretrick {
+declare namespace TangiTweak {
     /** A value, or a Promise of it — every handler may be async. */
     type Awaitable<T> = T | Promise<T>;
 
@@ -35,7 +35,7 @@ declare namespace Wiretrick {
          * `"0"`, `"1"`… for `*` wildcards). `{}` when nothing was captured.
          *
          * @example
-         * wt.onRequest({ url: "https://api.example.com/users/:id", strategy: "helper" }, (ctx) => {
+         * tt.onRequest({ url: "https://api.example.com/users/:id", strategy: "helper" }, (ctx) => {
          *     if (ctx.groups.id === "42") return { replaceResponse: { body: { id: 42 } } };
          * });
          */
@@ -59,7 +59,7 @@ declare namespace Wiretrick {
          * - `rules`: no request — reading it is an error.
          *
          * @example
-         * wt.onRequest({ url: "https://api.example.com/*", methods: ["POST"], strategy: "helper" }, (ctx) => {
+         * tt.onRequest({ url: "https://api.example.com/*", methods: ["POST"], strategy: "helper" }, (ctx) => {
          *     if (typeof ctx.requestBody === "string" && ctx.requestBody.includes("debug=1")) return { block: true };
          * });
          */
@@ -71,7 +71,7 @@ declare namespace Wiretrick {
          * its second argument.
          *
          * @example
-         * wt.replaceResponse({ url: "https://api.example.com/graphql", strategy: "helper" }, (ctx) => {
+         * tt.replaceResponse({ url: "https://api.example.com/graphql", strategy: "helper" }, (ctx) => {
          *     const q = ctx.json<{ operationName?: string }>();
          *     if (q?.operationName === "GetFlags") return { flags: { beta: true } };
          * });
@@ -85,7 +85,7 @@ declare namespace Wiretrick {
      * default and no fallback: when the strategy isn't available, the
      * handler doesn't run and the Log view says why.
      *
-     * - `"helper"` — the local wiretrick-helper (a proxy). Sees every
+     * - `"helper"` — the local tangitweak-helper (a proxy). Sees every
      *   request incl. documents, scripts and service workers; no banner.
      *   Needs the helper installed. Chromium only.
      * - `"page"` — patches the page's own `fetch`/XHR. Lightest (no banner,
@@ -110,7 +110,7 @@ declare namespace Wiretrick {
      *   that can't become a rule doesn't run, and its script shows an error.
      *   Chrome (MV3 and MV2) and Firefox.
      *
-     * @see https://github.com/nimatrueway/wiretrick/blob/main/docs/strategies.md#compatibility
+     * @see https://github.com/nimatrueway/tangitweak/blob/main/docs/strategies.md#compatibility
      */
     type Strategy = "helper" | "page" | "extension" | "debugger" | "rules";
 
@@ -182,7 +182,7 @@ declare namespace Wiretrick {
          *   without it means the handler never runs (the Log view warns).
          *
          * @example { url: "https://app.example.com/*", resourceTypes: ["main_frame"] } // navigations only
-         * @see https://github.com/nimatrueway/wiretrick/blob/main/docs/strategies.md#compatibility
+         * @see https://github.com/nimatrueway/tangitweak/blob/main/docs/strategies.md#compatibility
          */
         resourceTypes?: ResourceType[];
         /**
@@ -190,12 +190,12 @@ declare namespace Wiretrick {
          * default. A single value, no fallback. See {@link Strategy}.
          *
          * @example { url: "*://example.com/app/*.js", resourceTypes: ["script"], strategy: "debugger" }
-         * @example { url: "*://ads.example.com/*", strategy: wt.isMV3 ? "rules" : "extension" }
+         * @example { url: "*://ads.example.com/*", strategy: tt.isMV3 ? "rules" : "extension" }
          */
         strategy: Strategy;
     }
 
-    /** Full route form for `wt.onResponseBody`. */
+    /** Full route form for `tt.onResponseBody`. */
     interface BodyRouteOptions extends RouteOptions {
         /**
          * Which bodies the handler gets. Which Content-Types are text is set
@@ -210,12 +210,12 @@ declare namespace Wiretrick {
          * handler — keep these routes narrow.
          *
          * @example { url: "*://cdn.example.com/*.png", binary: true }
-         * @see https://github.com/nimatrueway/wiretrick/blob/main/docs/scripting.md#binary-bodies
+         * @see https://github.com/nimatrueway/tangitweak/blob/main/docs/scripting.md#binary-bodies
          */
         binary?: boolean | "both";
     }
 
-    /** Route fields shared by `wt.onSite`, `wt.onPage` and `wt.onOverlay`. */
+    /** Route fields shared by `tt.onSite`, `tt.onPage` and `tt.onOverlay`. */
     interface DocumentRouteOptions extends DocumentOptions {
         /** Frame URLs (top page and iframes) to run in. See {@link UrlPatterns}. */
         url: UrlPatterns;
@@ -229,9 +229,9 @@ declare namespace Wiretrick {
      *
      * | | runs in | sees | trusted |
      * |---|---|---|---|
-     * | `wt.onSite` | the site's JavaScript world | the site's DOM and globals (`window.myApp`) | no — the site can see and tamper with it |
-     * | `wt.onPage` | an isolated world | the site's DOM, none of its globals | yes |
-     * | `wt.onOverlay` | the script's own frame over the page (top frame) | its own DOM | yes |
+     * | `tt.onSite` | the site's JavaScript world | the site's DOM and globals (`window.myApp`) | no — the site can see and tamper with it |
+     * | `tt.onPage` | an isolated world | the site's DOM, none of its globals | yes |
+     * | `tt.onOverlay` | the script's own frame over the page (top frame) | its own DOM | yes |
      */
     type PageRoute = UrlPatterns | DocumentRouteOptions;
 
@@ -239,8 +239,8 @@ declare namespace Wiretrick {
     type Fn = (...args: any[]) => unknown;
 
     /**
-     * A **handle**: the handler's functions, made async — what `wt.onSite`,
-     * `wt.onPage` and `wt.onOverlay` return. A handler that returns a
+     * A **handle**: the handler's functions, made async — what `tt.onSite`,
+     * `tt.onPage` and `tt.onOverlay` return. A handler that returns a
      * plain object of functions exposes them; any other return value
      * (nothing, a string, an element) exposes nothing.
      *
@@ -257,8 +257,8 @@ declare namespace Wiretrick {
      * Results from an `onSite` handle are the site's data: treat them as untrusted input.
      *
      * @example
-     * const site = wt.onSite("*://example.com/*", () => ({ user: () => (window as any).myApp?.user?.name as string | undefined }));
-     * wt.onPage("*://example.com/*", async () => {
+     * const site = tt.onSite("*://example.com/*", () => ({ user: () => (window as any).myApp?.user?.name as string | undefined }));
+     * tt.onPage("*://example.com/*", async () => {
      *     const name = await site.user(); // string | undefined
      * });
      */
@@ -281,7 +281,7 @@ declare namespace Wiretrick {
          * `fetch` and the like so they stop with the run.
          *
          * @example
-         * wt.onPage("*://example.com/*", (ctx) => {
+         * tt.onPage("*://example.com/*", (ctx) => {
          *     document.addEventListener("click", onClick, { signal: ctx.signal });
          *     const t = setInterval(poll, 1000);
          *     ctx.signal.addEventListener("abort", () => clearInterval(t));
@@ -304,7 +304,7 @@ declare namespace Wiretrick {
          * more it calls the original.
          *
          * @example
-         * wt.onSite("*://example.com/*", (ctx) => {
+         * tt.onSite("*://example.com/*", (ctx) => {
          *     ctx.patch(history, "pushState", (orig) => function (this: History, ...args: any[]) {
          *         console.log("navigating to", args[2]);
          *         return orig.apply(this, args);
@@ -371,11 +371,11 @@ declare namespace Wiretrick {
          * Returns a function that removes this mount early.
          *
          * @example
-         * wt.onPage("*://example.com/*", (ctx) => {
+         * tt.onPage("*://example.com/*", (ctx) => {
          *     ctx.mount("#header", <button onClick={() => alert("hi")}>Hi</button>);
          *     ctx.mount(".card", (card) => <Badge id={card.id} />, { position: "overlay" });
          * });
-         * wt.onOverlay("*://example.com/*", (ctx) => ctx.mount(<Panel />));
+         * tt.onOverlay("*://example.com/*", (ctx) => ctx.mount(<Panel />));
          */
         mount(ui: unknown): () => void;
         mount(target: string | Element, ui: unknown | ((anchor: Element) => unknown), opts?: MountOptions): () => void;
@@ -386,14 +386,14 @@ declare namespace Wiretrick {
          * run does.
          *
          * @example
-         * const site = wt.onSite("*://example.com/*", (ctx) => {
+         * const site = tt.onSite("*://example.com/*", (ctx) => {
          *     const logins: string[] = [], waiting: ((u: string) => void)[] = [];
          *     // answer every waiting call: one may be from a run that ended since
          *     window.addEventListener("app:login", (e: any) => (waiting.length ? waiting.splice(0).forEach((w) => w(e.detail)) : logins.push(e.detail)), { signal: ctx.signal });
          *     return { nextLogin: () => (logins.length ? Promise.resolve(logins.shift()!) : new Promise<string>((r) => waiting.push(r))) };
          * });
-         * wt.onPage("*://example.com/*", async (ctx) => {
-         *     for await (const user of ctx.each(site.nextLogin)) wt.log("login:", user);
+         * tt.onPage("*://example.com/*", async (ctx) => {
+         *     for await (const user of ctx.each(site.nextLogin)) tt.log("login:", user);
          * });
          */
         each<A extends any[], T>(fn: (...args: A) => Promise<T>, ...args: A): AsyncIterableIterator<T>;
@@ -424,7 +424,7 @@ declare namespace Wiretrick {
          * after the page's turn, so it stays consumed.
          *
          * @example
-         * wt.onPage("*://example.com/*", (ctx) => {
+         * tt.onPage("*://example.com/*", (ctx) => {
          *     ctx.shortcut("Alt+Shift+H", () => { box.hidden = !box.hidden; });
          *     ctx.shortcut("Mod+K", openSearch, { priority: "after-page" });
          *     // Esc closes the box when it's open; otherwise the page gets Esc
@@ -443,7 +443,7 @@ declare namespace Wiretrick {
          * (it also stops when the run ends).
          *
          * @example
-         * wt.onOverlay("*://example.com/*", (ctx) => {
+         * tt.onOverlay("*://example.com/*", (ctx) => {
          *     const show = (url: string) => (badge.hidden = !url.includes("/cart"));
          *     show(ctx.url);
          *     ctx.onNavigate(show);
@@ -550,22 +550,22 @@ declare namespace Wiretrick {
          * Read a value; resolves to `undefined` when the key was never set.
          *
          * @example
-         * const hits = (await wt.storage.get("hits")) ?? 0;
+         * const hits = (await tt.storage.get("hits")) ?? 0;
          */
         get(key: string): Promise<any>;
         /**
          * Store a value (persists across reloads and browser restarts).
          *
          * @example
-         * await wt.storage.set("hits", hits + 1);
+         * await tt.storage.set("hits", hits + 1);
          */
         set(key: string, value: any): Promise<void>;
     }
 
-    /** A JSON value: what a {@link wt.globalStore} may hold. */
+    /** A JSON value: what a {@link tt.globalStore} may hold. */
     type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
 
-    /** Options for {@link wt.globalStore}. */
+    /** Options for {@link tt.globalStore}. */
     interface StoreOptions<T> {
         /**
          * What survives a browser restart: `true` (default) the whole store,
@@ -575,7 +575,7 @@ declare namespace Wiretrick {
         persist?: boolean | (keyof T & string)[];
     }
 
-    /** `wt.fetch` options: `RequestInit` plus where the request comes from. */
+    /** `tt.fetch` options: `RequestInit` plus where the request comes from. */
     interface FetchInit extends RequestInit {
         /**
          * `"background"`: the extension fetches, with its host permissions
@@ -589,15 +589,15 @@ declare namespace Wiretrick {
         bypass?: boolean;
     }
 
-    /** Timing for `wt.onSite`, `wt.onPage` and `wt.onOverlay` (part of the route object). */
+    /** Timing for `tt.onSite`, `tt.onPage` and `tt.onOverlay` (part of the route object). */
     interface DocumentOptions {
         /**
          * **When** the handler runs, relative to the page's own loading.
          * `onSite` runs before the site, `onPage`/`onOverlay` when the DOM
          * is ready; `when` changes that. Default: `"document_start"` for
-         * `wt.onSite` (to get in ahead of the site's scripts: patch
+         * `tt.onSite` (to get in ahead of the site's scripts: patch
          * `fetch`, catch a store as it's created), `"document_end"` for
-         * `wt.onPage` and `wt.onOverlay` (DOM work needs `<body>`).
+         * `tt.onPage` and `tt.onOverlay` (DOM work needs `<body>`).
          *
          * **How it gets there:** in every frame (top page *and* iframes) the
          * extension injects a small hook at `document_start`. The hook asks
@@ -660,13 +660,13 @@ declare namespace Wiretrick {
          *
          * @example
          * // onPage default: document_end (DOMContentLoaded)
-         * wt.onPage("*://example.com/*", () => {
+         * tt.onPage("*://example.com/*", () => {
          *     document.title = "🎯 " + document.title;
          * });
          *
          * @example
          * // before page scripts (best effort, see race caveat)
-         * wt.onPage({ url: "*://example.com/*", when: "document_start" }, () => {
+         * tt.onPage({ url: "*://example.com/*", when: "document_start" }, () => {
          *     Object.defineProperty(navigator, "webdriver", {
          *         get: () => false,
          *     });
@@ -674,7 +674,7 @@ declare namespace Wiretrick {
          *
          * @example
          * // after everything loaded, then keep it applied across re-renders
-         * wt.onPage({ url: "*://example.com/*", when: "document_idle" }, () => {
+         * tt.onPage({ url: "*://example.com/*", when: "document_idle" }, () => {
          *     const apply = () => {
          *         for (const ad of document.querySelectorAll(".ad")) ad.remove();
          *     };
@@ -688,10 +688,10 @@ declare namespace Wiretrick {
         when?: "document_start" | "document_end" | "document_idle";
     }
 
-    // ---- wt.params / wt.defineParam: typed, user-adjustable parameters ----
+    // ---- tt.params / tt.defineParam: typed, user-adjustable parameters ----
 
     /** An on/off switch — a checkbox in the ⚙ dialog. */
-    /** {@link wt.metadata}'s argument (a bundle's metadata.json has the same fields, plus `scripts`) */
+    /** {@link tt.metadata}'s argument (a bundle's metadata.json has the same fields, plus `scripts`) */
     interface Metadata {
         /** shown when installing and in the Explorer (default: the file name) */
         name?: string;
@@ -711,7 +711,7 @@ declare namespace Wiretrick {
          * from it too. An update that changes it waits for review.
          */
         updateURL?: string;
-        /** hosts this script's wt.fetch calls reach — an update that adds one waits for review */
+        /** hosts this script's tt.fetch calls reach — an update that adds one waits for review */
         connect?: string[];
     }
 
@@ -826,8 +826,8 @@ declare namespace Wiretrick {
      * macOS and Ctrl elsewhere), or `""` once removed.
      *
      * @example
-     * const cfg = wt.params({ toggle: { type: "shortcut", default: "Alt+Shift+H" } });
-     * wt.onOverlay("*://example.com/*", (ctx) => {
+     * const cfg = tt.params({ toggle: { type: "shortcut", default: "Alt+Shift+H" } });
+     * tt.onOverlay("*://example.com/*", (ctx) => {
      *     ctx.shortcut(cfg.toggle, () => { box.hidden = !box.hidden; });
      * });
      */
@@ -865,7 +865,7 @@ declare namespace Wiretrick {
 
     /**
      * The value type a param def resolves to: `parse`'s return type when
-     * the def has one, else {@link Wiretrick.ParamRawValue}.
+     * the def has one, else {@link TangiTweak.ParamRawValue}.
      */
     type ParamValue<D extends ParamDef> = D extends { parse: (raw: never) => infer R } ? R : ParamRawValue<D>;
 
@@ -889,7 +889,7 @@ declare namespace Wiretrick {
  * (`url`, `exclude`, `methods`, `resourceTypes`, `strategy`) — then the handler:
  *
  * ```ts
- * wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, (ctx) => ({ headers: { set: { "x-debug": "1" } } }));
+ * tt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, (ctx) => ({ headers: { set: { "x-debug": "1" } } }));
  * ```
  *
  * A file that registers **no** handlers is a *library*: other scripts
@@ -906,14 +906,14 @@ declare namespace Wiretrick {
  * - `replaceResponse`: the first handler returning a body wins.
  *
  * Handlers on different strategies run independently, each on its own
- * strategy (see {@link Wiretrick.Strategy}).
+ * strategy (see {@link TangiTweak.Strategy}).
  *
  * **Async** — every handler may return a Promise. On Chromium's
  * `"extension"` strategy `onRequest`/`onResponseHeaders` must be
  * synchronous (an async result is ignored with a warning); every other
  * strategy awaits it.
  */
-declare const wt: {
+declare const tt: {
     /**
      * Intercept a request before it is sent. Return **one** of
      * `{ replaceResponse }`, `{ redirect }`, `{ block }` or `{ headers }`
@@ -929,33 +929,33 @@ declare const wt: {
      *
      * **Not final:** `{ headers }` — applied, and later handlers still run.
      *
-     * @param route Where it applies — see {@link Wiretrick.RouteOptions}.
+     * @param route Where it applies — see {@link TangiTweak.RouteOptions}.
      * @param handler Called once per matching request with its context.
      *
      * @example
      * // answer an endpoint without the network
-     * wt.onRequest({ url: "https://api.example.com/users/:id", strategy: "helper" }, (ctx) => ({
+     * tt.onRequest({ url: "https://api.example.com/users/:id", strategy: "helper" }, (ctx) => ({
      *     replaceResponse: { body: { id: Number(ctx.groups.id), name: "Mock" } },
      * }));
      *
      * @example
      * // add a header to every POST, on the debugger
-     * wt.onRequest({ url: "*://example.com/*", methods: ["POST"], strategy: "debugger" }, () => ({
+     * tt.onRequest({ url: "*://example.com/*", methods: ["POST"], strategy: "debugger" }, () => ({
      *     headers: { set: { "x-debug": "1" } },
      * }));
      */
-    onRequest(route: Wiretrick.RouteOptions, handler: (ctx: Wiretrick.RequestCtx) => Wiretrick.Awaitable<Wiretrick.RequestResult | void>): void;
+    onRequest(route: TangiTweak.RouteOptions, handler: (ctx: TangiTweak.RequestCtx) => TangiTweak.Awaitable<TangiTweak.RequestResult | void>): void;
 
     /**
      * Inspect / modify response headers. **All** matching handlers run.
      * Not available on the `"page"` strategy (the page can't change headers
      * before the browser enforces them).
      *
-     * @param route Where it applies — see {@link Wiretrick.RouteOptions}.
+     * @param route Where it applies — see {@link TangiTweak.RouteOptions}.
      * @param handler Called when the response headers arrive.
      *
      * @example
-     * wt.onResponseHeaders({ url: "*://api.example.com/*", strategy: "helper" }, () => ({
+     * tt.onResponseHeaders({ url: "*://api.example.com/*", strategy: "helper" }, () => ({
      *     headers: {
      *         set: { "access-control-allow-origin": "*" },
      *         remove: ["content-security-policy"],
@@ -963,8 +963,8 @@ declare const wt: {
      * }));
      */
     onResponseHeaders(
-        route: Wiretrick.RouteOptions,
-        handler: (ctx: Wiretrick.ResponseHeaderCtx) => Wiretrick.Awaitable<Wiretrick.ResponseHeaderResult | void>
+        route: TangiTweak.RouteOptions,
+        handler: (ctx: TangiTweak.ResponseHeaderCtx) => TangiTweak.Awaitable<TangiTweak.ResponseHeaderResult | void>
     ): void;
 
     /**
@@ -972,22 +972,22 @@ declare const wt: {
      * an object (sent as JSON), or `{ file: "<path or data url>" }`; return
      * nothing to leave the response alone.
      *
-     * @param route Where it applies — see {@link Wiretrick.RouteOptions}.
+     * @param route Where it applies — see {@link TangiTweak.RouteOptions}.
      * @param handler Called per matching response; its result becomes the body.
      *
      * @example
-     * wt.replaceResponse({ url: "*://api.example.com/flags", strategy: "helper" }, () => ({ beta: true }));
+     * tt.replaceResponse({ url: "*://api.example.com/flags", strategy: "helper" }, () => ({ beta: true }));
      *
      * @example
      * // serve a fixture fetched elsewhere
-     * wt.replaceResponse({ url: "*://api.example.com/user", strategy: "helper" }, async () => {
+     * tt.replaceResponse({ url: "*://api.example.com/user", strategy: "helper" }, async () => {
      *     const res = await fetch("https://fixtures.local/user.json");
      *     return await res.text();
      * });
      */
     replaceResponse(
-        route: Wiretrick.RouteOptions,
-        handler: (ctx: Wiretrick.ReplaceCtx) => Wiretrick.Awaitable<string | Uint8Array | object | { file: string } | null | void>
+        route: TangiTweak.RouteOptions,
+        handler: (ctx: TangiTweak.ReplaceCtx) => TangiTweak.Awaitable<string | Uint8Array | object | { file: string } | null | void>
     ): void;
 
     /**
@@ -1005,34 +1005,34 @@ declare const wt: {
      * `"extension"` strategy can't read bodies — the handler doesn't run there and
      * the Log view says so.
      *
-     * @param route Where it applies — see {@link Wiretrick.RouteOptions}.
+     * @param route Where it applies — see {@link TangiTweak.RouteOptions}.
      * @param transform Receives the context and the original body; returns
      * the new body, or nothing (`undefined` / `null`) to leave it as it is.
      * Any body returned counts as a change — even the same one: it's
      * re-encoded and served in place of the original.
      *
      * @example
-     * wt.onResponseBody({ url: "*://example.com/app/*.js", resourceTypes: ["script"], strategy: "helper" }, (ctx, body) => {
+     * tt.onResponseBody({ url: "*://example.com/app/*.js", resourceTypes: ["script"], strategy: "helper" }, (ctx, body) => {
      *     return body.replace("DEBUG=false", "DEBUG=true");
      * });
      * @example
      * // binary: true — swap an image
-     * wt.onResponseBody({ url: "*://example.com/logo.png", binary: true, strategy: "helper" }, async (ctx, body) => {
+     * tt.onResponseBody({ url: "*://example.com/logo.png", binary: true, strategy: "helper" }, async (ctx, body) => {
      *     const res = await fetch("https://example.org/other.png");
      *     return new Uint8Array(await res.arrayBuffer());
      * });
      */
     onResponseBody(
-        route: Wiretrick.BodyRouteOptions & { binary?: false },
-        transform: (ctx: Wiretrick.BodyCtx, body: string) => Wiretrick.Awaitable<string | Uint8Array | void>
+        route: TangiTweak.BodyRouteOptions & { binary?: false },
+        transform: (ctx: TangiTweak.BodyCtx, body: string) => TangiTweak.Awaitable<string | Uint8Array | void>
     ): void;
     onResponseBody(
-        route: Wiretrick.BodyRouteOptions & { binary: true },
-        transform: (ctx: Wiretrick.BodyCtx, body: Uint8Array) => Wiretrick.Awaitable<string | Uint8Array | void>
+        route: TangiTweak.BodyRouteOptions & { binary: true },
+        transform: (ctx: TangiTweak.BodyCtx, body: Uint8Array) => TangiTweak.Awaitable<string | Uint8Array | void>
     ): void;
     onResponseBody(
-        route: Wiretrick.BodyRouteOptions,
-        transform: (ctx: Wiretrick.BodyCtx, body: string | Uint8Array) => Wiretrick.Awaitable<string | Uint8Array | void>
+        route: TangiTweak.BodyRouteOptions,
+        transform: (ctx: TangiTweak.BodyCtx, body: string | Uint8Array) => TangiTweak.Awaitable<string | Uint8Array | void>
     ): void;
 
     /**
@@ -1040,23 +1040,23 @@ declare const wt: {
      * site's globals (`window.myApp`, its Redux store) directly. The site
      * can see and tamper with it, so it's untrusted: no stores, and it
      * can't call handles. Return functions for the script's `onPage` and
-     * `onOverlay` code to call ({@link Wiretrick.Remote}).
+     * `onOverlay` code to call ({@link TangiTweak.Remote}).
      *
      * Runs once per document load in every frame whose URL matches the
      * route, by default before the site's own scripts (`when:
      * "document_start"`; `document.body` is usually `null` then). See
-     * {@link Wiretrick.DocumentOptions.when} for timing and
-     * {@link Wiretrick.PageRoute} for the three places. On Chrome (MV3) it
+     * {@link TangiTweak.DocumentOptions.when} for timing and
+     * {@link TangiTweak.PageRoute} for the three places. On Chrome (MV3) it
      * runs through user scripts, which must be turned on (the Editor shows
      * how).
      *
      * @example
-     * const site = wt.onSite("*://example.com/*", () => ({
+     * const site = tt.onSite("*://example.com/*", () => ({
      *     user: () => (window as any).myApp?.user?.name as string | undefined,
      *     dispatch: (action: { type: string }) => (window as any).__store.dispatch(action),
      * }));
      */
-    onSite<T = void>(route: Wiretrick.PageRoute, handler: (ctx: Wiretrick.SiteCtx) => Wiretrick.Awaitable<T>): Wiretrick.Remote<T>;
+    onSite<T = void>(route: TangiTweak.PageRoute, handler: (ctx: TangiTweak.SiteCtx) => TangiTweak.Awaitable<T>): TangiTweak.Remote<T>;
 
     /**
      * Run a handler in the page — the resilient way to change titles, text
@@ -1074,29 +1074,29 @@ declare const wt: {
      * Editor shows how).
      *
      * The handler may return an object of functions, for the script's
-     * other `onPage` and `onOverlay` code to call ({@link Wiretrick.Remote}).
+     * other `onPage` and `onOverlay` code to call ({@link TangiTweak.Remote}).
      *
      * @param route Frame URL pattern(s), or `{ url, exclude, when }`. See
-     * {@link Wiretrick.DocumentOptions.when} for exact timing, the MV3
+     * {@link TangiTweak.DocumentOptions.when} for exact timing, the MV3
      * `document_start` race, SPA/re-render behavior and live-update re-runs.
      * @param handler Receives the same `ctx` shape as `onRequest` (`url` is
      * the frame's URL). May be async (not awaited).
      *
      * @example
-     * wt.onPage("*://example.com/*", () => {
+     * tt.onPage("*://example.com/*", () => {
      *     document.title = "🎯 " + document.title;
      * });
      *
      * @example
      * // read the site's state through an onSite handle
-     * const site = wt.onSite("*://example.com/*", () => ({ user: () => (window as any).myApp?.user?.name }));
-     * const state = wt.pageStore("state", { user: "" });
-     * wt.onPage("*://example.com/*", async () => {
+     * const site = tt.onSite("*://example.com/*", () => ({ user: () => (window as any).myApp?.user?.name }));
+     * const state = tt.pageStore("state", { user: "" });
+     * tt.onPage("*://example.com/*", async () => {
      *     const u = await site.user();
      *     if (typeof u === "string") state.user = u;
      * });
      */
-    onPage<T = void>(route: Wiretrick.PageRoute, handler: (ctx: Wiretrick.PageCtx) => Wiretrick.Awaitable<T>): Wiretrick.Remote<T>;
+    onPage<T = void>(route: TangiTweak.PageRoute, handler: (ctx: TangiTweak.PageCtx) => TangiTweak.Awaitable<T>): TangiTweak.Remote<T>;
 
     /**
      * Draw this script's **overlay**: a transparent frame over the page
@@ -1108,14 +1108,14 @@ declare const wt: {
      * script's matching overlay handlers run in it, sharing top-level
      * variables.
      *
-     * Warning: the frame is a Wiretrick extension page (that's what lets
+     * Warning: the frame is a TangiTweak extension page (that's what lets
      * the script run on sites whose CSP blocks scripts and `eval`, and
      * keeps the site out). Chrome won't let another extension attach its
      * debugger to a tab with such a frame, so tools like Playwriter remove
      * it: the GUI and its shortcuts stop, with a Log warning. A same-origin
      * `about:blank` frame wouldn't be removed, but it's under the page's
-     * CSP and open to the page, so Wiretrick doesn't offer one. For a GUI
-     * that must survive those tools, use `wt.onPage` with `ctx.mount` and
+     * CSP and open to the page, so TangiTweak doesn't offer one. For a GUI
+     * that must survive those tools, use `tt.onPage` with `ctx.mount` and
      * `ctx.shortcut` instead.
      *
      * @param route Page URL pattern(s), or `{ url, exclude, when }`.
@@ -1123,13 +1123,13 @@ declare const wt: {
      * onPage code to call.
      *
      * @example
-     * wt.onOverlay("*://example.com/*", () => {
+     * tt.onOverlay("*://example.com/*", () => {
      *     const b = document.body.appendChild(document.createElement("button"));
      *     b.textContent = "Hi";
      *     b.style.cssText = "position:fixed;right:16px;bottom:16px";
      * });
      */
-    onOverlay<T = void>(route: Wiretrick.PageRoute, handler: (ctx: Wiretrick.OverlayCtx) => Wiretrick.Awaitable<T>): Wiretrick.Remote<T>;
+    onOverlay<T = void>(route: TangiTweak.PageRoute, handler: (ctx: TangiTweak.OverlayCtx) => TangiTweak.Awaitable<T>): TangiTweak.Remote<T>;
 
     /**
      * The script's metadata. `description` is shown as a tooltip in the
@@ -1138,14 +1138,14 @@ declare const wt: {
      * orders its updates. Call it once.
      *
      * @example
-     * wt.metadata({
+     * tt.metadata({
      *     name: "GitHub dark mode",
      *     version: "1.2.0",
      *     description: "Darker GitHub, every page",
      *     connect: ["api.github.com"],
      * });
      */
-    metadata(metadata: Wiretrick.Metadata): void;
+    metadata(metadata: TangiTweak.Metadata): void;
 
     /**
      * Declare adjustable parameters, editable from the popup's ⚙ dialog,
@@ -1165,25 +1165,25 @@ declare const wt: {
      * script hot-reloads with it. A param with `parse` can't be assigned.
      *
      * @param defs Parameter name → definition (`type`, `default`, optional
-     *   `description` and `parse`); see {@link Wiretrick.ParamDef}. With
+     *   `description` and `parse`); see {@link TangiTweak.ParamDef}. With
      *   `parse`, the param's value is the parser's result (raw value in,
      *   e.g. a `URL` out) while the stored/edited value stays raw.
      * @returns The current values, typed from `defs`.
      *
      * @example
-     * const cfg = wt.params({
+     * const cfg = tt.params({
      *     enabled: { type: "boolean", default: true, description: "Return errors" },
      *     status: { type: "enum", choices: ["500", "503"], default: "500" },
      *     hosts: { type: "stringList", default: ["staging.example.com"] },
      * });
      *
-     * wt.onRequest({ url: cfg.hosts.map((h) => `*://${h}/api/*`), strategy: "helper" }, () => {
+     * tt.onRequest({ url: cfg.hosts.map((h) => `*://${h}/api/*`), strategy: "helper" }, () => {
      *     if (cfg.enabled) return { replaceResponse: { status: Number(cfg.status), body: { error: "forced" } } };
      * });
      *
      * @example
      * // a page button turns the mock off and on (saved, the script re-runs)
-     * wt.onOverlay("*://app.example.com/*", (ctx) => {
+     * tt.onOverlay("*://app.example.com/*", (ctx) => {
      *     const btn = ctx.once("btn", () => document.body.appendChild(document.createElement("button")));
      *     btn.textContent = cfg.enabled ? "Mock: on" : "Mock: off";
      *     btn.onclick = () => (cfg.enabled = !cfg.enabled);
@@ -1191,39 +1191,39 @@ declare const wt: {
      *
      * @example
      * // parse: the script gets a URL (cfg.origin: URL), the ⚙ dialog edits the string
-     * const cfg = wt.params({
+     * const cfg = tt.params({
      *     origin: { type: "string", default: "https://app.example.com", parse: (s) => new URL(s) },
      * });
-     * wt.onResponseHeaders({ url: "*://api.example.com/*", strategy: "helper" }, () => ({
+     * tt.onResponseHeaders({ url: "*://api.example.com/*", strategy: "helper" }, () => ({
      *     headers: { set: { "access-control-allow-origin": cfg.origin.origin } },
      * }));
      */
-    params<const T extends Record<string, Wiretrick.ParamDef>>(defs: T): Wiretrick.ParamsOf<T>;
+    params<const T extends Record<string, TangiTweak.ParamDef>>(defs: T): TangiTweak.ParamsOf<T>;
 
     /**
      * Declare a single parameter and get its current value (same store as
-     * {@link wt.params}).
+     * {@link tt.params}).
      *
      * @example
-     * const host = wt.defineParam("host", { type: "string", default: "api.example.com" });
-     * wt.onRequest({ url: `*://${host}/*`, strategy: "helper" }, () => ({ headers: { set: { "x-debug": "1" } } }));
+     * const host = tt.defineParam("host", { type: "string", default: "api.example.com" });
+     * tt.onRequest({ url: `*://${host}/*`, strategy: "helper" }, () => ({ headers: { set: { "x-debug": "1" } } }));
      *
      * @example
      * // parse: hosts is a Set<string>; the stored value stays a list
-     * const hosts = wt.defineParam("hosts", { type: "stringList", parse: (l) => new Set(l) });
+     * const hosts = tt.defineParam("hosts", { type: "stringList", parse: (l) => new Set(l) });
      */
-    defineParam<const D extends Wiretrick.ParamDef>(name: string, def: D): Wiretrick.ParamValue<D>;
+    defineParam<const D extends TangiTweak.ParamDef>(name: string, def: D): TangiTweak.ParamValue<D>;
 
     /**
      * Per-script key/value storage (async, persistent).
      *
      * @example
-     * wt.onRequest({ url: "*://example.com/*", strategy: "helper" }, async () => {
-     *     const hits = ((await wt.storage.get("hits")) ?? 0) + 1;
-     *     await wt.storage.set("hits", hits);
+     * tt.onRequest({ url: "*://example.com/*", strategy: "helper" }, async () => {
+     *     const hits = ((await tt.storage.get("hits")) ?? 0) + 1;
+     *     await tt.storage.set("hits", hits);
      * });
      */
-    storage: Wiretrick.Storage;
+    storage: TangiTweak.Storage;
 
     /**
      * A live object shared by every place the script runs — its handlers
@@ -1236,13 +1236,13 @@ declare const wt: {
      * `onSite` code doesn't (the site could read and forge it).
      *
      * @example
-     * const state = wt.globalStore("state", { mocking: true, hits: 0 });
-     * wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, () => {
+     * const state = tt.globalStore("state", { mocking: true, hits: 0 });
+     * tt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, () => {
      *     state.hits++;
      *     if (state.mocking) return { replaceResponse: { body: { mocked: true } } };
      * });
      */
-    globalStore<T extends object>(name: string, initial: T, opts?: Wiretrick.StoreOptions<T>): T;
+    globalStore<T extends object>(name: string, initial: T, opts?: TangiTweak.StoreOptions<T>): T;
 
     /**
      * Like {@link globalStore}, but one copy per page: each tab's page
@@ -1263,11 +1263,11 @@ declare const wt: {
      * (not across browser restarts).
      *
      * @example
-     * const page = wt.pageStore("page", { staging: false });
-     * wt.onRequest({ url: "https://api.example.com/*", strategy: "helper" }, (ctx) => {
+     * const page = tt.pageStore("page", { staging: false });
+     * tt.onRequest({ url: "https://api.example.com/*", strategy: "helper" }, (ctx) => {
      *     if (page.staging) return { redirect: ctx.url.replace("api.", "staging-api.") };
      * });
-     * wt.onOverlay("https://example.com/*", () => {
+     * tt.onOverlay("https://example.com/*", () => {
      *     // a checkbox bound to page.staging (useSnapshot(page) from "valtio")
      * });
      */
@@ -1293,12 +1293,12 @@ declare const wt: {
      * handlers have no page: it throws there.
      *
      * @example
-     * const flags = wt.siteStore("flags", { loggedIn: false, mock: false });
-     * wt.onSite("https://example.com/*", () => {
+     * const flags = tt.siteStore("flags", { loggedIn: false, mock: false });
+     * tt.onSite("https://example.com/*", () => {
      *     flags.loggedIn = !!document.cookie.match(/session=/);
      *     if (flags.mock) (window as any).__MOCK__ = true;
      * });
-     * wt.onOverlay("https://example.com/*", () => {
+     * tt.onOverlay("https://example.com/*", () => {
      *     // a checkbox bound to flags.mock (useSnapshot(flags) from "valtio")
      * });
      */
@@ -1311,15 +1311,15 @@ declare const wt: {
      * the request, e.g. to get the real response a mock replaces.
      *
      * @example
-     * const real = await (await wt.fetch("https://api.example.com/user", { bypass: true })).json();
+     * const real = await (await tt.fetch("https://api.example.com/user", { bypass: true })).json();
      */
-    fetch(input: string | URL | Request, init?: Wiretrick.FetchInit): Promise<Response>;
+    fetch(input: string | URL | Request, init?: TangiTweak.FetchInit): Promise<Response>;
 
     /**
      * Log to the Editor's Log view for the current tab.
      *
      * @example
-     * wt.log("request to", ctx.url, { method: ctx.method });
+     * tt.log("request to", ctx.url, { method: ctx.method });
      */
     log(...args: unknown[]): void;
 
@@ -1328,7 +1328,7 @@ declare const wt: {
      * Always the opposite of {@link isFirefox}.
      *
      * @example
-     * wt.onResponseBody({ url: "*://example.com/app.js", strategy: wt.isFirefox ? "extension" : "helper" }, (ctx, body) => body.replace("DEBUG=false", "DEBUG=true"));
+     * tt.onResponseBody({ url: "*://example.com/app.js", strategy: tt.isFirefox ? "extension" : "helper" }, (ctx, body) => body.replace("DEBUG=false", "DEBUG=true"));
      */
     readonly isChrome: boolean;
 
@@ -1346,7 +1346,7 @@ declare const wt: {
      * where the `extension` strategy isn't available.
      *
      * @example
-     * wt.onRequest({ url: "*://api.example.com/*", strategy: wt.isMV3 ? "debugger" : "extension" }, fn);
+     * tt.onRequest({ url: "*://api.example.com/*", strategy: tt.isMV3 ? "debugger" : "extension" }, fn);
      */
     readonly isMV3: boolean;
 
@@ -1355,7 +1355,7 @@ declare const wt: {
      * {@link isLinux} is `true`; on Android and ChromeOS none is.
      *
      * @example
-     * ctx.shortcut(wt.isMac ? "Meta+Shift+P" : "Ctrl+Shift+P", openPalette);
+     * ctx.shortcut(tt.isMac ? "Meta+Shift+P" : "Ctrl+Shift+P", openPalette);
      */
     readonly isMac: boolean;
 
@@ -1368,7 +1368,7 @@ declare const wt: {
 
 /*
  * Newer web platform APIs that the editor's bundled TypeScript doesn't know
- * yet. Wiretrick targets current browsers, so scripts may use them freely.
+ * yet. TangiTweak targets current browsers, so scripts may use them freely.
  */
 
 /** Input accepted by `URLPattern` (each URL component as a pattern string). */
@@ -1410,7 +1410,7 @@ interface URLPatternResult {
 
 /**
  * Matches URLs against a pattern, e.g. `new URLPattern("https://*.example.com/users/:id")`.
- * The same syntax as handler routes (`wt.onRequest({ url: pattern, strategy }, fn)`).
+ * The same syntax as handler routes (`tt.onRequest({ url: pattern, strategy }, fn)`).
  *
  * @see https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API
  */

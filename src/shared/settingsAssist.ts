@@ -1,7 +1,7 @@
 /**
  * Editor assistance for settings.yaml in the manager (diagnostics,
  * completion, hover). Mirrors settings.schema.json, plus what the schema
- * can't know: the per-script params each script defines (wt.params / wt.defineParam).
+ * can't know: the per-script params each script defines (tt.params / tt.defineParam).
  * Pure (offsets in, offsets out) so Monaco wiring stays thin and testable.
  */
 import { parseDocument, parse, isMap, isPair, isScalar, type Node } from "yaml";

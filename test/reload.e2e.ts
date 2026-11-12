@@ -61,8 +61,8 @@ try {
     const seed = await ctx.newPage();
     await seed.goto(`chrome-extension://${extId}/editor.html`);
     await seed.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
-        type: "saveScript", id: "s_h", name: "Hooked.wiretrick",
-        code: `wt.onResponseBody({ url: "*://*:*/*", strategy: "page" }, (ctx, body) => body.replace("ORIGINAL", "HOOKED"));`,
+        type: "saveScript", id: "s_h", name: "Hooked.tangitweak",
+        code: `tt.onResponseBody({ url: "*://*:*/*", strategy: "page" }, (ctx, body) => body.replace("ORIGINAL", "HOOKED"));`,
     }, r)));
     await seed.close();
 

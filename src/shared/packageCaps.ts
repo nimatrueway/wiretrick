@@ -16,7 +16,7 @@ export interface Capabilities {
     pageJs: boolean;
     /** draws an overlay */
     overlay: boolean;
-    /** hosts its wt.fetch reaches, as its metadata declares (`connect`) */
+    /** hosts its tt.fetch reaches, as its metadata declares (`connect`) */
     connect: string[];
     /** unpkg packages it imports (names) */
     packages: string[];

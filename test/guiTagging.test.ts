@@ -70,15 +70,15 @@ describe("onSite code calling a handle", () => {
         return e && code.slice(0, e.start) + e.text + code.slice(e.end);
     };
     it("the quick fix moves the nearest onSite handler to onPage", () => {
-        expect(fix(`wt.onSite("https://a/*", (x) => overlay.pick());`)).toBe(`wt.onPage("https://a/*", (x) => overlay.pick());`);
-        const two = `wt.onSite("https://a/*", () => {});\nwt.onSite({ url: "https://b/*" }, () => overlay.pick());`;
-        expect(fix(two)).toBe(`wt.onSite("https://a/*", () => {});\nwt.onPage({ url: "https://b/*" }, () => overlay.pick());`);
+        expect(fix(`tt.onSite("https://a/*", (x) => overlay.pick());`)).toBe(`tt.onPage("https://a/*", (x) => overlay.pick());`);
+        const two = `tt.onSite("https://a/*", () => {});\ntt.onSite({ url: "https://b/*" }, () => overlay.pick());`;
+        expect(fix(two)).toBe(`tt.onSite("https://a/*", () => {});\ntt.onPage({ url: "https://b/*" }, () => overlay.pick());`);
         expect(onPageEdit(`x.overlay.pick()`, 2)).toBeNull();
-        expect(onPageEdit(`wt.onPage("https://a/*", () => overlay.pick());`, 30)).toBeNull();
+        expect(onPageEdit(`tt.onPage("https://a/*", () => overlay.pick());`, 30)).toBeNull();
     });
 
     it("an onSite store/handle warning points at its registration line, and the fix applies from the marker's end", () => {
-        const code = `const ps = wt.pageStore("ps", { n: 0 });\nwt.onSite("https://a/*", () => {\n    ps.n++;\n});`;
+        const code = `const ps = tt.pageStore("ps", { n: 0 });\ntt.onSite("https://a/*", () => {\n    ps.n++;\n});`;
         const routes = compileScript(code).handlers.onDocument.map((h) => h.route);
         const msg = siteProblems(code, routes)[0];
         expect(msg).toContain(SITE_DISALLOWED);
@@ -92,18 +92,18 @@ describe("onSite code calling a handle", () => {
         const end = lines.slice(0, p.endLine - 1).reduce((n, l) => n + l.length + 1, 0) + p.endColumn - 1;
         expect(fix(code, end)).toBe(moved);
         expect(msg).toContain(SITE_NO_STORES);
-        expect(toSite(code, end)).toBe(code.replace("wt.pageStore", "wt.siteStore"));
+        expect(toSite(code, end)).toBe(code.replace("tt.pageStore", "tt.siteStore"));
     });
 
-    it("wt.siteStore in a network handler is an error at its use; in onSite code it's fine", () => {
-        const code = `const flags = wt.siteStore("flags", { on: false });\nwt.onRequest("https://a/*", (req) => {\n    if (flags.on) req.url = "https://b/";\n});\nwt.onSite("https://a/*", () => { flags.on = true; });\nwt.onResponseBody("https://a/*", () => wt.siteStore("x", {}));`;
+    it("tt.siteStore in a network handler is an error at its use; in onSite code it's fine", () => {
+        const code = `const flags = tt.siteStore("flags", { on: false });\ntt.onRequest("https://a/*", (req) => {\n    if (flags.on) req.url = "https://b/";\n});\ntt.onSite("https://a/*", () => { flags.on = true; });\ntt.onResponseBody("https://a/*", () => tt.siteStore("x", {}));`;
         const all = [
             { kind: "onRequest", index: 0, url: ["https://a/*"], line: 2 },
             { kind: "onDocument", api: "onSite", index: 0, n: 0, url: ["https://a/*"], line: 5 },
             { kind: "onResponseBody", index: 0, url: ["https://a/*"], line: 6 },
         ] as any[];
         const msgs = siteProblems(code, all);
-        expect(msgs).toEqual([`onRequest #1: uses \`flags\` — ${NO_SITE_STORE}`, `onResponseBody #1: uses \`wt.siteStore\` — ${NO_SITE_STORE}`]);
+        expect(msgs).toEqual([`onRequest #1: uses \`flags\` — ${NO_SITE_STORE}`, `onResponseBody #1: uses \`tt.siteStore\` — ${NO_SITE_STORE}`]);
         const [g] = collectProblems([script("a", { code, routeWarnings: msgs, routes: all })], none);
         expect(g.problems.map((p: any) => [p.severity, p.line, p.column])).toEqual([
             ["error", 3, 9],
@@ -118,21 +118,21 @@ describe("onSite code calling a handle", () => {
     };
     it("the siteStore fix changes the stores the nearest onSite handler uses, bound or direct, and drops a globalStore's persist", () => {
         const code = [
-            `const a = wt.globalStore("a", { n: 0 }, { persist: "local" });`,
-            `const b: { n: number } = wt.pageStore("b", { n: 0 });`,
-            `const c = wt.pageStore("c", { n: 0 });`,
-            `wt.onSite("https://a/*", () => { a.n++; b.n++; wt.globalStore("d", { x: [1, 2] }, "session").x; });`,
+            `const a = tt.globalStore("a", { n: 0 }, { persist: "local" });`,
+            `const b: { n: number } = tt.pageStore("b", { n: 0 });`,
+            `const c = tt.pageStore("c", { n: 0 });`,
+            `tt.onSite("https://a/*", () => { a.n++; b.n++; tt.globalStore("d", { x: [1, 2] }, "session").x; });`,
         ].join("\n");
         expect(toSite(code, code.indexOf("a.n++"))).toBe(
             [
-                `const a = wt.siteStore("a", { n: 0 });`,
-                `const b: { n: number } = wt.siteStore("b", { n: 0 });`,
-                `const c = wt.pageStore("c", { n: 0 });`,
-                `wt.onSite("https://a/*", () => { a.n++; b.n++; wt.siteStore("d", { x: [1, 2] }).x; });`,
+                `const a = tt.siteStore("a", { n: 0 });`,
+                `const b: { n: number } = tt.siteStore("b", { n: 0 });`,
+                `const c = tt.pageStore("c", { n: 0 });`,
+                `tt.onSite("https://a/*", () => { a.n++; b.n++; tt.siteStore("d", { x: [1, 2] }).x; });`,
             ].join("\n")
         );
         // "a.n" in a string, and a handler that uses none
-        expect(siteStoreEdits(`const a = wt.pageStore("a", {});\nwt.onSite("x", () => "a.n");`, 40)).toEqual([]);
-        expect(siteStoreEdits(`const a = wt.pageStore("a", {});`, 10)).toEqual([]);
+        expect(siteStoreEdits(`const a = tt.pageStore("a", {});\ntt.onSite("x", () => "a.n");`, 40)).toEqual([]);
+        expect(siteStoreEdits(`const a = tt.pageStore("a", {});`, 10)).toEqual([]);
     });
 });

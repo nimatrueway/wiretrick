@@ -19,7 +19,7 @@ const EXT_ID = crypto.createHash("sha256").update(EXT_ROOT, "utf8").digest("hex"
 const SHOWN = ["Replace a fetch/XHR response", "CORS unlock", "DOM / title changes", "Rewrite page HTML"];
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-const profile = mkdtempSync(path.join(tmpdir(), "wiretrick-shots-"));
+const profile = mkdtempSync(path.join(tmpdir(), "tangitweak-shots-"));
 const proc = spawn(await resolveBrowser(), ["--headless=new", `--user-data-dir=${profile}`, `--load-extension=${EXT_ROOT}`, "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check", "about:blank"], { stdio: "ignore" });
 await sleep(5000);
 let browser: any;

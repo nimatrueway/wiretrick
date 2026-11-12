@@ -8,9 +8,9 @@ pub fn home() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
-/// `$XDG_CONFIG_HOME/wiretrick-helper`, `~/Library/Application Support/wiretrick-helper`, `%APPDATA%\wiretrick-helper`
+/// `$XDG_CONFIG_HOME/tangitweak-helper`, `~/Library/Application Support/tangitweak-helper`, `%APPDATA%\tangitweak-helper`
 pub fn config_dir() -> PathBuf {
-    if let Some(d) = std::env::var_os("WIRETRICK_HELPER_HOME") {
+    if let Some(d) = std::env::var_os("TANGITWEAK_HELPER_HOME") {
         return PathBuf::from(d);
     }
     let base = if cfg!(windows) {
@@ -25,5 +25,5 @@ pub fn config_dir() -> PathBuf {
             .filter(|p| p.is_absolute())
             .unwrap_or_else(|| home().join(".config"))
     };
-    base.join("wiretrick-helper")
+    base.join("tangitweak-helper")
 }

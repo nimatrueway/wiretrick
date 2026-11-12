@@ -1,5 +1,5 @@
 /**
- * `wt.globalStore` data helpers shared by the owner (background) and the
+ * `tt.globalStore` data helpers shared by the owner (background) and the
  * replicas (every context running the script): applying ops, checking
  * paths and values, merging an `initial` into existing data.
  */
@@ -158,7 +158,7 @@ export const jsonBytes = (v: unknown): number => {
     }
 };
 
-/** a store's key among its script's stores: `name`, or `name␀page` for a page's copy of a `wt.pageStore` */
+/** a store's key among its script's stores: `name`, or `name␀page` for a page's copy of a `tt.pageStore` */
 export const storeKey = (name: string, page?: string): string => (page ? `${name}\u0000${page}` : name);
 
 /** `storeKey`'s parts */
@@ -167,15 +167,15 @@ export function splitStoreKey(key: string): { name: string; page?: string } {
     return i < 0 ? { name: key } : { name: key.slice(0, i), page: key.slice(i + 1) };
 }
 
-/** `wt.globalStore`'s `persist` option, checked */
+/** `tt.globalStore`'s `persist` option, checked */
 export function storePersist(name: string, opts: unknown): StorePersist {
     if (opts === undefined || opts === null) return true;
-    if (typeof opts !== "object") throw new TypeError(`wt.globalStore("${name}"): the third argument must be an options object`);
+    if (typeof opts !== "object") throw new TypeError(`tt.globalStore("${name}"): the third argument must be an options object`);
     const p = (opts as { persist?: unknown }).persist;
     if (p === undefined) return true;
     if (typeof p === "boolean") return p;
     if (Array.isArray(p) && p.every((k) => typeof k === "string")) return [...p];
-    throw new TypeError(`wt.globalStore("${name}"): persist must be true, false or a list of top-level field names`);
+    throw new TypeError(`tt.globalStore("${name}"): persist must be true, false or a list of top-level field names`);
 }
 
 /** a store's name and initial value, checked; `names` (name → the API that took it) holds each name once per script */

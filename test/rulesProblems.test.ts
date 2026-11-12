@@ -5,21 +5,21 @@ import type { RouteMeta } from "../src/shared/route";
 
 const route = (over: Partial<RouteMeta>): RouteMeta => ({ kind: "onRequest", index: 0, url: ["*://a/*"], strategy: "rules", ...over }) as RouteMeta;
 
-const code = `const counts = wt.globalStore("c", { n: 0 });
-wt.onRequest({ url: "*://a/*", strategy: "rules" }, (ctx) => {
+const code = `const counts = tt.globalStore("c", { n: 0 });
+tt.onRequest({ url: "*://a/*", strategy: "rules" }, (ctx) => {
     console.log("blocked", ctx.url);
     counts.n++;
-    wt.log(\`console.log("x")\`);
+    tt.log(\`console.log("x")\`);
     return { block: true };
 });
-wt.onRequest({ url: "*://b/*", strategy: "extension" }, () => {
+tt.onRequest({ url: "*://b/*", strategy: "extension" }, () => {
     console.log("per request");
     fetch("https://log.example/");
 });
-wt.onResponseHeaders({ url: "*://c/*", strategy: "rules" }, () => {
+tt.onResponseHeaders({ url: "*://c/*", strategy: "rules" }, () => {
     counts.n = counts.n + 1;
     setTimeout(() => {}, 1);
-    void wt.fetch("https://x/");
+    void tt.fetch("https://x/");
     return { headers: { remove: ["x"] } };
 });`;
 const routes = [route({ index: 0, line: 2 }), route({ index: 1, line: 8, strategy: "extension" }), route({ kind: "onResponseHeaders", index: 0, line: 12 })];
@@ -30,17 +30,17 @@ describe("rulesProblems", () => {
         expect(out.map((m) => /^(\w+ #\d+): `([^`]+)`/.exec(m)!.slice(1).join(" "))).toEqual([
             "onRequest #1 console.log",
             "onRequest #1 counts",
-            "onRequest #1 wt.log",
+            "onRequest #1 tt.log",
             "onResponseHeaders #1 counts",
             "onResponseHeaders #1 setTimeout",
-            "onResponseHeaders #1 wt.fetch",
+            "onResponseHeaders #1 tt.fetch",
         ]);
         expect(out[0]).toMatch(/runs once, when scripts load — not for each request.*To log each request, use a per-request strategy/);
     });
 
     it("nothing on rules: nothing to say; a store read is fine", () => {
         expect(rulesProblems(code, [routes[1]])).toEqual([]);
-        expect(rulesProblems(`const s = wt.globalStore("c", { on: true });\nwt.onRequest({ url: "*://a/*", strategy: "rules" }, () => (s.on ? { block: true } : null));`, [route({ line: 2 })])).toEqual([]);
+        expect(rulesProblems(`const s = tt.globalStore("c", { on: true });\ntt.onRequest({ url: "*://a/*", strategy: "rules" }, () => (s.on ? { block: true } : null));`, [route({ line: 2 })])).toEqual([]);
     });
 
     it("each warning points at its own call in the handler", () => {

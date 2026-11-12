@@ -1,7 +1,7 @@
 /**
  * L2 for overlays: what a page's bridge may do for a script's overlay
- * (`wt.onOverlay`) over its `wt-bridge` port — get the script's code, use
- * its stores, `wt.fetch` from the background, and bypass page fetches.
+ * (`tt.onOverlay`) over its `tt-bridge` port — get the script's code, use
+ * its stores, `tt.fetch` from the background, and bypass page fetches.
  *
  * A renderer may be compromised, so the bridge is only trusted as far as
  * its frame: everything is per script and granted by `overlay.open`, which
@@ -13,12 +13,12 @@
  * `chrome.userScripts` world (background/userScripts.ts, hook/isolated.ts)
  * whose port comes here. It gets its code (`iso.load`, only where the
  * script has isolated onPage code for the frame's URL), its Log lines and
- * `wt.storage`, and — top frame only — the calls to and from the script's
+ * `tt.storage`, and — top frame only — the calls to and from the script's
  * overlay, relayed through that tab's top-frame bridge (L2 `iso.call` /
  * `iso.result`). Each side only reaches the same tab's top frame and the
  * same script; anything else is dropped.
  *
- * L5: the Editor's Preview tab (`wt-preview`, the Editor page only) runs
+ * L5: the Editor's Preview tab (`tt-preview`, the Editor page only) runs
  * one script's overlay in a frame of its own: the same grant as a page's
  * overlay, for whichever script the Editor names, at a URL it picks.
  */
@@ -50,12 +50,12 @@ interface Grant {
     url: string;
     name: string;
     nonce: string;
-    /** the overlay frame confirmed its nonce (Firefox: wtOverlayNonce) */
+    /** the overlay frame confirmed its nonce (Firefox: ttOverlayNonce) */
     seen: boolean;
     expires: number;
     /** the overlay's link to the store owner (created on first use) */
     store: Endpoint | null;
-    /** the page the overlay is on: the only one whose `wt.pageStore` copies it reaches */
+    /** the page the overlay is on: the only one whose `tt.pageStore` copies it reaches */
     page: string;
 }
 
@@ -132,7 +132,7 @@ let deps: OverlayLinkDeps = { overlayRuns };
 const grants = new Map<BridgeLink, Map<string, Grant>>();
 let installed = false;
 
-export const USER_SCRIPT_PORT = "wt-user-script";
+export const USER_SCRIPT_PORT = "tt-user-script";
 /** how long a relayed call waits for the other side's link (a page still loading) */
 const LINK_WAIT_MS = 5000;
 
@@ -207,7 +207,7 @@ export function setupOverlayLinks(d: OverlayLinkDeps): void {
     installed = true;
     onBridgeConnect(serveLink);
     (globalThis as any).chrome?.runtime?.onMessage?.addListener?.((msg: any, sender: chrome.runtime.MessageSender, sendResponse: (r: any) => void) => {
-        if (msg?.type !== "wtOverlayNonce") return false;
+        if (msg?.type !== "ttOverlayNonce") return false;
         sendResponse(confirmNonce(sender, msg.nonce));
         return false;
     });
@@ -456,7 +456,7 @@ export function serveIsoLink(link: IsoLink): void {
 
 // ---- L5: the Editor preview ----
 
-export const PREVIEW_PORT = "wt-preview";
+export const PREVIEW_PORT = "tt-preview";
 
 interface PreviewLink {
     ep: Endpoint;

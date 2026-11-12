@@ -2,7 +2,7 @@
 
 [← README](../README.md) · [Glossary](../GLOSSARY.md)
 
-`wiretrick-helper` is a small (~3 MB) Rust program for Linux, macOS and
+`tangitweak-helper` is a small (~3 MB) Rust program for Linux, macOS and
 Windows. Chrome starts it through **native messaging** when an enabled
 script has a handler on the `helper` strategy (the Chromium default — see
 [strategies](strategies.md)), and it exits when no such handler is left (or
@@ -35,16 +35,16 @@ Chrome closes):
 Once per machine. Settings → Local helper shows this command
 with your extension id filled in, plus a **Copy install command** button. It
 downloads the right binary from the latest GitHub release, checks it against
-the release's `SHA256SUMS`, and runs `wiretrick-helper install`:
+the release's `SHA256SUMS`, and runs `tangitweak-helper install`:
 
 ```sh
 # macOS / Linux
-curl -fsSL https://raw.githubusercontent.com/nimatrueway/wiretrick/master/helper/install.sh | sh -s -- --extension-id <extension id> --trust-ca
+curl -fsSL https://raw.githubusercontent.com/nimatrueway/tangitweak/master/helper/install.sh | sh -s -- --extension-id <extension id> --trust-ca
 ```
 
 ```powershell
 # Windows (PowerShell)
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/nimatrueway/wiretrick/master/helper/install.ps1))) -ExtensionId <extension id> -TrustCa
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/nimatrueway/tangitweak/master/helper/install.ps1))) -ExtensionId <extension id> -TrustCa
 ```
 
 Then click Retry in Settings → Local helper (or reload the extension). In
@@ -52,8 +52,8 @@ Chrome, the first time a script uses the helper, Settings → Local helper asks
 for permission: click **Allow** and accept Chrome's prompt to "communicate with
 cooperating native applications" (and clear browsing data, used to drop
 cached copies of the pages the helper routes).
-`WIRETRICK_HELPER_VERSION=v1.2.3` pins a release. With a binary you already
-have, run `wiretrick-helper install --extension-id <extension id> --trust-ca`.
+`TANGITWEAK_HELPER_VERSION=v1.2.3` pins a release. With a binary you already
+have, run `tangitweak-helper install --extension-id <extension id> --trust-ca`.
 The installer copies the helper to `<config dir>/bin` and registers it there.
 
 `--trust-ca` adds the helper certificate to the user's trust store: the login
@@ -68,7 +68,7 @@ are attached to each GitHub release. To build from source, run
 The browser updates the extension but not the helper. The helper is
 versioned on its own and the extension declares the oldest helper it works
 with, so most extension updates need no helper upgrade. When one is needed,
-Wiretrick logs an error with the install command
+TangiTweak logs an error with the install command
 and Settings → Local helper shows it with a **Copy install command** button.
 Re-run the command, then click **Retry** to restart the helper on the new
 binary.
@@ -76,8 +76,8 @@ binary.
 ## Things to know
 
 - The helper certificate's private key stays in the helper's config dir
-  (`$XDG_CONFIG_HOME/wiretrick-helper`, `~/Library/Application Support/wiretrick-helper`,
-  or `%APPDATA%\wiretrick-helper`). It is generated on your machine and never
+  (`$XDG_CONFIG_HOME/tangitweak-helper`, `~/Library/Application Support/tangitweak-helper`,
+  or `%APPDATA%\tangitweak-helper`). It is generated on your machine and never
   leaves it. Anyone who can read it can impersonate sites to this browser
   profile, so treat it like a password. `untrust-ca` removes trust.
 - Sites that pin certificates or require client certificates (mTLS) fail

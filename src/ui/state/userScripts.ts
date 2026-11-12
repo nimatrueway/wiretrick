@@ -1,7 +1,7 @@
 import { proxy } from "valtio";
 import type { UserScriptsStatus } from "../../shared/userScriptsStatus";
 
-const DISMISSED_KEY = "wt.userScriptsBanner.dismissed";
+const DISMISSED_KEY = "wt.userScriptsBanner.dismissed"; // the extension's former name (Wiretrick): kept so stored data survives
 
 /**
  * Chrome MV3: the Editor's one-time "user scripts are off" banner, shown

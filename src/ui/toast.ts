@@ -8,7 +8,7 @@ let timer: ReturnType<typeof setTimeout> | undefined;
 export function showToast(text: string, ms = 1500): void {
     if (!el || !el.isConnected) {
         el = document.createElement("div");
-        el.className = "wt-toast";
+        el.className = "tt-toast";
         el.setAttribute("role", "status");
         el.setAttribute("aria-live", "polite");
         document.body.append(el);

@@ -1,7 +1,7 @@
 /**
  * Network tab of the manager's bottom panel — a devtools-style request
  * table (query filter, sortable columns, waterfall) with a details
- * pane showing headers and what Wiretrick scripts did to the request.
+ * pane showing headers and what TangiTweak scripts did to the request.
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
@@ -36,7 +36,7 @@ const COLUMNS: { key: SortKey; label: string; cls: string }[] = [
     { key: "status", label: "Status", cls: "c-status" },
     { key: "method", label: "Method", cls: "c-method" },
     { key: "type", label: "Type", cls: "c-type" },
-    { key: "script", label: "Wiretrick", cls: "c-script" },
+    { key: "script", label: "TangiTweak", cls: "c-script" },
     { key: "size", label: "Size", cls: "c-size" },
     { key: "time", label: "Time", cls: "c-time" },
     { key: "start", label: "Waterfall", cls: "c-wf" },
@@ -48,7 +48,7 @@ interface Layout {
     widths: Partial<Record<SortKey, number>>;
     detailsWidth: number | null;
 }
-const LAYOUT_KEY = "wt.network.layout";
+const LAYOUT_KEY = "wt.network.layout"; // the extension's former name (Wiretrick): kept so stored data survives
 const DEFAULT_LAYOUT: Layout = { hidden: [], widths: {}, detailsWidth: null };
 const MIN_COL = 36;
 
@@ -635,10 +635,10 @@ function Row({
     }
 }
 
-type DetailTab = "headers" | "payload" | "response" | "wiretrick";
+type DetailTab = "headers" | "payload" | "response" | "tangitweak";
 
 function Details({ e, width, onClose }: { e: NetEntry; width: number | null; onClose: () => void }) {
-    const [tab, setTab] = useState<DetailTab>(e.outcomes.length ? "wiretrick" : "headers");
+    const [tab, setTab] = useState<DetailTab>(e.outcomes.length ? "tangitweak" : "headers");
     const general: [string, string | undefined][] = [
         ["Request URL", e.url],
         ["Request Method", e.method],
@@ -671,8 +671,8 @@ function Details({ e, width, onClose }: { e: NetEntry; width: number | null; onC
                 <button className={tab === "response" ? "active" : ""} onClick={() => setTab("response")}>
                     Response
                 </button>
-                <button className={tab === "wiretrick" ? "active" : ""} onClick={() => setTab("wiretrick")}>
-                    Wiretrick
+                <button className={tab === "tangitweak" ? "active" : ""} onClick={() => setTab("tangitweak")}>
+                    TangiTweak
                     {e.outcomes.length ? ` (${e.outcomes.length})` : ""}
                 </button>
             </div>
@@ -698,7 +698,7 @@ function Details({ e, width, onClose }: { e: NetEntry; width: number | null; onC
                         ))}
                     </ul>
                 ) : (
-                    <div className="net-empty">No Wiretrick script handler ran on this request.</div>
+                    <div className="net-empty">No TangiTweak script handler ran on this request.</div>
                 )}
             </div>
         </div>
@@ -748,7 +748,7 @@ function ResponseView({ e }: { e: NetEntry }) {
     if (!e.responseBody)
         return (
             <div className="net-empty">
-                Response body not available — browsers don't expose response bodies to extensions, so it is captured only for responses a Wiretrick script
+                Response body not available — browsers don't expose response bodies to extensions, so it is captured only for responses a TangiTweak script
                 handled.
             </div>
         );

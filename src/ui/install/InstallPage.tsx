@@ -2,7 +2,7 @@
  * The install flow: read a package (a URL, a folder, a zip, or a drop of any of
  * them), show what it does, install it; or review a held update. The Editor
  * shows it in its Install Script dialog (dialogs/InstallDialog); install.html
- * shows it as a page, for a *.wiretrick.ts URL (the background sends such tabs
+ * shows it as a page, for a *.tangitweak.ts URL (the background sends such tabs
  * there, like GreaseMonkey's .user.js) and `?update=<package id>`.
  */
 import { useEffect, useMemo, useState } from "react";
@@ -172,7 +172,7 @@ export function InstallFlow({ request, host }: { request: InstallRequest; host: 
                         <p className="err">{state.error}</p>
                         {/file URLs/i.test(state.error) && (
                             <p className="dim">
-                                Turn on <b>Allow access to file URLs</b> on Wiretrick's page in <code>chrome://extensions</code>, or use <b>Choose a folder…</b> below.
+                                Turn on <b>Allow access to file URLs</b> on TangiTweak's page in <code>chrome://extensions</code>, or use <b>Choose a folder…</b> below.
                             </p>
                         )}
                         <div className="actions">
@@ -258,7 +258,7 @@ function Picker(props: {
                     if (url.trim()) props.onUrl(url.trim());
                 }}
             >
-                <input id="install-url" autoFocus placeholder="https://github.com/you/scripts/blob/main/dark.wiretrick.ts" value={url} onChange={(e) => setUrl(e.target.value)} />
+                <input id="install-url" autoFocus placeholder="https://github.com/you/scripts/blob/main/dark.tangitweak.ts" value={url} onChange={(e) => setUrl(e.target.value)} />
                 <button className="primary" type="submit">
                     Read
                 </button>

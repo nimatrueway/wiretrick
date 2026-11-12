@@ -1,5 +1,5 @@
 /**
- * The `wt.globalStore` owner (background): the one true state of every script's
+ * The `tt.globalStore` owner (background): the one true state of every script's
  * stores. Replicas declare and change stores over wire endpoints
  * (src/shared/storeReplica.ts); the owner validates each change, applies
  * it, bumps the store's rev and patches every replica of the script.
@@ -9,7 +9,7 @@
  * `chrome.storage.session` so a service-worker restart resumes at the
  * same rev.
  *
- * `wt.pageStore`: a declare with `scope: "page"` sets the template; each
+ * `tt.pageStore`: a declare with `scope: "page"` sets the template; each
  * page's copy is made from it when a context first uses it on that page
  * (rev 0) and dropped when the page ends (`dropPage`). Copies are keyed
  * `storeKey(name, page)` and never persisted (MV3: session only).
@@ -18,12 +18,12 @@ import type { Endpoint, Json, StoreOp, StorePersist, StoreSnapshot } from "../..
 import { STORE_MAX_BYTES, applyOps, badPath, badValue, cloneJson, isPlainObject, jsonBytes, missingOps, persistedPart, splitStoreKey, storeKey } from "../../shared/storeOps";
 
 export const STORE_KEY_PREFIX = "$store:";
-const SESSION_PREFIX = "wtStores.";
+const SESSION_PREFIX = "ttStores.";
 const RING = 256;
 const page = (p: unknown): string | undefined => (typeof p === "string" && p ? p : undefined);
 
 export interface StoreOwnerDeps {
-    /** the script's storage object (`wt.storage`), where `$store:<name>` keys live */
+    /** the script's storage object (`tt.storage`), where `$store:<name>` keys live */
     storageAll(scriptId: string): Promise<Record<string, any>>;
     storageSet(scriptId: string, key: string, value: unknown): Promise<void>;
     /** chrome.storage.session (MV3); absent: state lives as long as this context */
@@ -50,7 +50,7 @@ interface Entry {
 interface ScriptState {
     /** by `storeKey(name, page)` */
     stores: Map<string, Entry>;
-    /** `wt.pageStore` names → the initial state of each page's copy */
+    /** `tt.pageStore` names → the initial state of each page's copy */
     templates: Map<string, Json>;
     chain: Promise<unknown>;
     loaded: Promise<void> | null;
@@ -120,7 +120,7 @@ export class StoreOwner {
         return e && { rev: e.rev, data: cloneJson(e.data) };
     }
 
-    /** the pages a script has `wt.pageStore` copies on */
+    /** the pages a script has `tt.pageStore` copies on */
     pagesOf(scriptId: string): Set<string> {
         const out = new Set<string>();
         for (const k of this.scripts.get(scriptId)?.stores.keys() ?? []) {
@@ -229,7 +229,7 @@ export class StoreOwner {
         return e;
     }
 
-    /** `wt.pageStore(name, initial)`: the template, its new fields merged into the copies too */
+    /** `tt.pageStore(name, initial)`: the template, its new fields merged into the copies too */
     private declarePage(s: string, name: string, initial: Json): void {
         if (typeof name !== "string" || !name || badValue(initial) || !isPlainObject(initial)) return;
         const st = this.state(s);

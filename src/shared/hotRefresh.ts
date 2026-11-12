@@ -26,7 +26,7 @@
 import { isPackageExport } from "./packageImports";
 
 const MEMO = Symbol.for("react.memo");
-const NOT_HOT = Symbol.for("wiretrick.notHot");
+const NOT_HOT = Symbol.for("tangitweak.notHot");
 
 const DEP_HOOKS = ["useEffect", "useLayoutEffect", "useInsertionEffect", "useMemo", "useCallback"] as const;
 /** contexts a module keeps across saves (more are made fresh: a context made while rendering) */
@@ -58,7 +58,7 @@ interface HotModule {
     jsx?: any;
 }
 
-/** a function component that hot refresh leaves alone (Wiretrick's own wrappers) */
+/** a function component that hot refresh leaves alone (TangiTweak's own wrappers) */
 export function notHot<F extends Function>(fn: F): F {
     (fn as any)[NOT_HOT] = true;
     return fn;

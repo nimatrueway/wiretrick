@@ -442,7 +442,7 @@ async function prune(): Promise<void> {
     await storageSet({ [PACKAGES_KEY]: all });
 }
 
-export const UPDATE_ALARM = "wtPackageUpdates";
+export const UPDATE_ALARM = "wtPackageUpdates"; // the extension's former name (Wiretrick): kept so stored data survives
 const DAY = 24 * 60 * 60 * 1000;
 
 /** daily update checks (and one at startup when they're overdue) */

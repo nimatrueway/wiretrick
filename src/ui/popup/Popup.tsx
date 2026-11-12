@@ -59,7 +59,7 @@ export function Popup({ api }: { api: PopupApi }) {
     return (
         <>
             <div id="header">
-                <span id="title">Wiretrick</span>
+                <span id="title">TangiTweak</span>
                 {nActive > 0 && (
                     <span id="active-summary" title="Scripts counted in the toolbar badge: enabled, and matched this tab's page or one of its requests since it loaded">
                         <span className="active-dot" />

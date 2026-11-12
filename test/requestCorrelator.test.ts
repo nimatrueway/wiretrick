@@ -207,8 +207,8 @@ describe("two requests to the same URL", () => {
         L.before({ ...wr("2"), timeStamp: Date.now() } as any);
         const script = (id: string, code: string) => ({ id, code, enabled: true, createdAt: 0, updatedAt: 0, error: null, meta: { ...compileScript(code).meta, name: id } });
         setSkipRoutes([
-            script("a", `wt.onRequest({ url: "*://cdn.test/*", strategy: "helper" }, () => ({ block: true }));`),
-            script("b", `wt.onResponseBody({ url: "*://cdn.test/*", strategy: "helper" }, (ctx, body) => body);`),
+            script("a", `tt.onRequest({ url: "*://cdn.test/*", strategy: "helper" }, () => ({ block: true }));`),
+            script("b", `tt.onResponseBody({ url: "*://cdn.test/*", strategy: "helper" }, (ctx, body) => body);`),
         ] as any);
         reportSkipped(4, { url: URL, method: "GET", type: "xmlhttprequest" }, { scriptId: "a", scriptName: "a", kind: "onRequest", index: 1, strategy: "extension", outcome: "block" }, "1");
         expect(entries.get("1")!.outcomes.length).toBeGreaterThan(0);

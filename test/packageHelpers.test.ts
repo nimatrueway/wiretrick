@@ -63,30 +63,30 @@ describe("packageCaps", () => {
 
 describe("packageModel", () => {
     it("maps package files to store items", () => {
-        expect(storeItemOf("", "x.wiretrick.ts")).toEqual({ kind: "script", name: "x.wiretrick" });
+        expect(storeItemOf("", "x.tangitweak.ts")).toEqual({ kind: "script", name: "x.tangitweak" });
         expect(storeItemOf("x", "lib/a.ts")).toEqual({ kind: "script", name: "x/lib/a" });
         expect(storeItemOf("x", "ui.tsx")).toEqual({ kind: "script", name: "x/ui.tsx" });
         expect(storeItemOf("x", "data/c.json")).toEqual({ kind: "data", name: "x/data/c.json" });
     });
 
     it("names a package by its metadata, else its first script", () => {
-        expect(packageName({ entries: ["a/dark.wiretrick.ts"], metadata: {} })).toBe("dark");
+        expect(packageName({ entries: ["a/dark.tangitweak.ts"], metadata: {} })).toBe("dark");
         expect(packageName({ entries: ["dark.ts"], metadata: {} })).toBe("dark");
-        expect(packageName({ entries: ["dark.wiretrick.ts"], metadata: { name: "Dark Mode" } })).toBe("Dark Mode");
+        expect(packageName({ entries: ["dark.tangitweak.ts"], metadata: { name: "Dark Mode" } })).toBe("Dark Mode");
     });
 
     it("puts a single file at the root and more in a unique folder", () => {
-        expect(packageFolder({ entries: ["dark.wiretrick.ts"], files: { "dark.wiretrick.ts": "" } }, ["dark"])).toBe("");
-        const files = { "dark.wiretrick.ts": "", "lib.ts": "" };
-        expect(packageFolder({ entries: ["dark.wiretrick.ts"], files }, [])).toBe("dark");
-        expect(packageFolder({ entries: ["dark.wiretrick.ts"], files }, ["Dark/x", "dark (2)/y.json"])).toBe("dark (3)");
+        expect(packageFolder({ entries: ["dark.tangitweak.ts"], files: { "dark.tangitweak.ts": "" } }, ["dark"])).toBe("");
+        const files = { "dark.tangitweak.ts": "", "lib.ts": "" };
+        expect(packageFolder({ entries: ["dark.tangitweak.ts"], files }, [])).toBe("dark");
+        expect(packageFolder({ entries: ["dark.tangitweak.ts"], files }, ["Dark/x", "dark (2)/y.json"])).toBe("dark (3)");
         expect(packageFolder({ entries: ["a.ts", "b.ts"], files: { "a.ts": "", "b.ts": "" }, bundleName: "My/Kit" }, [])).toBe("My-Kit");
     });
 
     it("keeps a renamed root entry an entry", () => {
-        expect(uniqueEntryName("x.wiretrick", [])).toBe("x.wiretrick");
-        expect(uniqueEntryName("x.wiretrick", ["x.wiretrick", "x (2).wiretrick"])).toBe("x (3).wiretrick");
-        expect(uniqueEntryName("x.wiretrick.tsx", ["x.wiretrick.tsx"])).toBe("x (2).wiretrick.tsx");
+        expect(uniqueEntryName("x.tangitweak", [])).toBe("x.tangitweak");
+        expect(uniqueEntryName("x.tangitweak", ["x.tangitweak", "x (2).tangitweak"])).toBe("x (3).tangitweak");
+        expect(uniqueEntryName("x.tangitweak.tsx", ["x.tangitweak.tsx"])).toBe("x (2).tangitweak.tsx");
     });
 
     it("finds files edited, renamed or deleted since install", () => {
@@ -175,15 +175,15 @@ describe("readZip", () => {
     it("reads stored and deflated files, skipping folders and unwanted ones", async () => {
         const zip = makeZip([
             ["pkg/", "", "store"],
-            ["pkg/x.wiretrick.ts", 'import "./lib";\n', "store"],
+            ["pkg/x.tangitweak.ts", 'import "./lib";\n', "store"],
             ["pkg/lib.ts", "export const a = 1;\n".repeat(50), "deflate"],
             ["pkg/readme.md", "hi", "store"],
         ]);
         const out = await readZip(zip, isPackageFile);
         const dec = new TextDecoder();
-        expect(Object.keys(out).sort()).toEqual(["pkg/lib.ts", "pkg/x.wiretrick.ts"]);
+        expect(Object.keys(out).sort()).toEqual(["pkg/lib.ts", "pkg/x.tangitweak.ts"]);
         expect(dec.decode(out["pkg/lib.ts"])).toBe("export const a = 1;\n".repeat(50));
-        expect(dec.decode(out["pkg/x.wiretrick.ts"])).toBe('import "./lib";\n');
+        expect(dec.decode(out["pkg/x.tangitweak.ts"])).toBe('import "./lib";\n');
     });
 
     it("rejects what isn't a zip", async () => {
@@ -197,18 +197,18 @@ describe("localPackage", () => {
         expect(isPackageFile("a/b.svg")).toBe(true);
         expect(isPackageFile("node_modules/x/index.ts")).toBe(false);
         expect(isPackageFile("readme.md")).toBe(false);
-        expect(startsIn(["sub/b.ts", "lib.ts", "a.wiretrick.tsx", "t.d.ts", "c.json"])).toEqual(["a.wiretrick.tsx", "lib.ts", "sub/b.ts"]);
+        expect(startsIn(["sub/b.ts", "lib.ts", "a.tangitweak.tsx", "t.d.ts", "c.json"])).toEqual(["a.tangitweak.tsx", "lib.ts", "sub/b.ts"]);
         // a bundle's scripts install with it
         expect(startsIn(["kit/metadata.json", "kit/a.ts", "kit/sub/b.ts", "x.ts"])).toEqual(["x.ts", "kit/metadata.json"]);
     });
 
     it("takes the entry and what it imports", async () => {
-        const files = { "x.wiretrick.ts": 'import { a } from "./lib";\nimport c from "./c.json";\nimport "./gone";', "lib.ts": "export const a = 1;", "c.json": "{}", "other.ts": "" };
-        const p = await localPackage(files, "x.wiretrick.ts");
-        expect(Object.keys(p.files).sort()).toEqual(["c.json", "lib.ts", "x.wiretrick.ts"]);
+        const files = { "x.tangitweak.ts": 'import { a } from "./lib";\nimport c from "./c.json";\nimport "./gone";', "lib.ts": "export const a = 1;", "c.json": "{}", "other.ts": "" };
+        const p = await localPackage(files, "x.tangitweak.ts");
+        expect(Object.keys(p.files).sort()).toEqual(["c.json", "lib.ts", "x.tangitweak.ts"]);
         expect(p.missing.length).toBe(1);
         expect(p.revision).toMatch(/^[0-9a-f]+$/);
-        const again = await localPackage({ ...files, "other.ts": "changed" }, "x.wiretrick.ts");
+        const again = await localPackage({ ...files, "other.ts": "changed" }, "x.tangitweak.ts");
         expect(again.revision).toBe(p.revision);
     });
 });

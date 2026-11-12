@@ -14,7 +14,7 @@ export function Welcome() {
             <div className="welcome-inner">
                 {/* nothing to go back to without scripts: no close button then */}
                 <button id="welcome-close" className="btn-close" title="Close the welcome page" aria-label="Close the welcome page" hidden={!scripts.length} onClick={() => actions.closeWelcome()}>✕</button>
-                <h1 id="welcome-title">Welcome to Wiretrick</h1>
+                <h1 id="welcome-title">Welcome to TangiTweak</h1>
                 <p className="welcome-lead">Redirect, block or rewrite the requests your browser makes — headers, API responses, whole pages — with a few lines of TypeScript.</p>
                 <p className="welcome-lead">Pick a sample to start. <b>Try it</b> adds it to your scripts, turns it on and opens its page in a new tab. They all use built-in strategies: nothing to install.</p>
                 <div id="welcome-samples">

@@ -131,7 +131,7 @@ export const REGISTRY: Registry = {
   else if (typeof module === "object" && module.exports) module.exports = factory(root);
   else root.umdLib = factory(root);
 })(this, function (root) {
-  wtUmdSloppyGlobal = 1; // sloppy mode: an undeclared assignment
+  ttUmdSloppyGlobal = 1; // sloppy mode: an undeclared assignment
   var self = (function () { return this; })();
   return { rootIsExports: root !== undefined && typeof root === "object", sloppy: self === globalThis, nodeEnv: process.env.NODE_ENV };
 });

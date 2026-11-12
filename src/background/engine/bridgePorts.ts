@@ -1,5 +1,5 @@
 /**
- * L2: the `wt-bridge` ports content-script bridges open to the background,
+ * L2: the `tt-bridge` ports content-script bridges open to the background,
  * one per frame, kept in a registry by tab and frame. Phase 1 uses them
  * for `bundle.update` only. The overlay (Phase 2) adds its store, fetch
  * and bypass handlers through `onBridgeConnect`, each checking that the
@@ -9,7 +9,7 @@
 import { portEndpoint, type Endpoint } from "../../shared/wire";
 import { dlogLevel } from "../../shared/debugLog";
 
-export const BRIDGE_PORT = "wt-bridge";
+export const BRIDGE_PORT = "tt-bridge";
 
 export interface BridgeLink {
     tabId: number;
@@ -21,7 +21,7 @@ export interface BridgeLink {
 const links = new Map<number, Map<number, BridgeLink>>();
 const connectFns: ((link: BridgeLink) => void)[] = [];
 
-/** a bridge connected (runtime.onConnect, port name `wt-bridge`); false if the port isn't one */
+/** a bridge connected (runtime.onConnect, port name `tt-bridge`); false if the port isn't one */
 export function addBridgePort(port: chrome.runtime.Port): boolean {
     if (port.name !== BRIDGE_PORT) return false;
     const tabId = port.sender?.tab?.id;

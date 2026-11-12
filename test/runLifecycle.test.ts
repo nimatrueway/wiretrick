@@ -38,7 +38,7 @@ describe("ScriptLife", () => {
     beforeEach(() => {
         document.head.innerHTML = "";
         document.body.innerHTML = `<div id="slot"></div>`;
-        for (const m of document.querySelectorAll("wiretrick-mount")) m.remove();
+        for (const m of document.querySelectorAll("tangitweak-mount")) m.remove();
         errors = [];
         react = fakeReact();
         life = new ScriptLife({ doc: document, react: () => react.client, onError: (e) => errors.push(e) });
@@ -147,18 +147,18 @@ describe("ScriptLife", () => {
             (ctx as any).mount("floating");
         });
         expect(react.roots.length).toBe(2);
-        const slotHost = document.querySelector("#slot > wiretrick-mount");
+        const slotHost = document.querySelector("#slot > tangitweak-mount");
         expect(slotHost).not.toBeNull();
         reload((ctx) => (ctx as any).mount("#slot", "v2", first));
         expect(react.roots.length).toBe(2);
         expect(react.roots[0].rendered).toEqual(["v1", "v2"]);
         expect(react.roots[0].unmounted).toBe(false);
         expect(react.roots[1].unmounted).toBe(true);
-        expect(document.querySelectorAll("wiretrick-mount").length).toBe(1);
+        expect(document.querySelectorAll("tangitweak-mount").length).toBe(1);
         // the page replaced the target: a first-match host moves to the new one
         document.body.innerHTML = `<div id="slot"></div>`;
         reload((ctx) => (ctx as any).mount("#slot", "v3", first));
-        expect(document.querySelector("#slot > wiretrick-mount")).toBe(slotHost);
+        expect(document.querySelector("#slot > tangitweak-mount")).toBe(slotHost);
     });
 
     it("ctx.mount waits for a target that isn't on the page yet (the latest UI); the run ending stops the wait", async () => {
@@ -170,7 +170,7 @@ describe("ScriptLife", () => {
         await tick();
         expect(react.roots.length).toBe(1);
         expect(react.roots[0].rendered).toEqual(["b"]);
-        expect(document.querySelector("#later > wiretrick-mount")).not.toBeNull();
+        expect(document.querySelector("#later > tangitweak-mount")).not.toBeNull();
         // a reload whose target is gone: the old mount goes, and nothing mounts once the run ends
         document.body.innerHTML = "";
         reload((ctx) => (ctx as any).mount("#gone", "c"));
@@ -198,14 +198,14 @@ describe("ScriptLife", () => {
             (ctx as any).mount(slot, "z");
         });
         expect(react.roots.length).toBe(2);
-        expect(document.querySelectorAll("wiretrick-mount").length).toBe(2);
+        expect(document.querySelectorAll("tangitweak-mount").length).toBe(2);
     });
 
     it("ctx.mount(selector): a root on every match, now and later; a gone match unmounts", async () => {
         const tick = () => new Promise((r) => setTimeout(r, 0));
         document.body.innerHTML = `<i class="a">1</i><i class="a">2</i>`;
         reload((ctx) => (ctx as any).mount(".a", (el: Element) => "on " + el.firstChild!.textContent));
-        expect([...document.querySelectorAll(".a > wiretrick-mount")].map((h) => h.previousSibling!.textContent)).toEqual(["1", "2"]);
+        expect([...document.querySelectorAll(".a > tangitweak-mount")].map((h) => h.previousSibling!.textContent)).toEqual(["1", "2"]);
         expect(react.roots.map((r) => r.rendered)).toEqual([["on 1"], ["on 2"]]);
         const third = Object.assign(document.createElement("i"), { className: "a", textContent: "3" });
         document.body.appendChild(third);
@@ -230,7 +230,7 @@ describe("ScriptLife", () => {
             (ctx as any).mount("#t", "a", { position: "after" });
             (ctx as any).mount("#t", "o", { position: "overlay" });
         });
-        const names = (n: Node) => [...n.childNodes].map((c) => (c.nodeName === "WIRETRICK-MOUNT" ? "mount" : c.nodeName.toLowerCase()));
+        const names = (n: Node) => [...n.childNodes].map((c) => (c.nodeName === "TANGITWEAK-MOUNT" ? "mount" : c.nodeName.toLowerCase()));
         expect(names(document.body)).toEqual(["mount", "p", "mount"]);
         expect(names(t)).toEqual(["mount", "b", "mount"]);
         expect(t.style.position).toBe("relative");
@@ -250,9 +250,9 @@ describe("ScriptLife", () => {
             (ctx as any).mount("#slot", "one");
             off = (ctx as any).mount("#slot", "two", { key: "b" });
         });
-        expect(document.querySelectorAll("#slot > wiretrick-mount").length).toBe(2);
+        expect(document.querySelectorAll("#slot > tangitweak-mount").length).toBe(2);
         off();
-        expect(document.querySelectorAll("#slot > wiretrick-mount").length).toBe(1);
+        expect(document.querySelectorAll("#slot > tangitweak-mount").length).toBe(1);
         expect(react.roots[1].unmounted).toBe(true);
         off();
         expect(react.roots[0].unmounted).toBe(false);
@@ -379,7 +379,7 @@ describe("ScriptLife", () => {
         expect(a.ctx.signal.aborted).toBe(true);
         expect(a.gen.signal.aborted).toBe(true);
         expect(document.head.querySelectorAll("style").length).toBe(0);
-        expect(document.querySelectorAll("wiretrick-mount").length).toBe(0);
+        expect(document.querySelectorAll("tangitweak-mount").length).toBe(0);
         expect(react.roots[0].unmounted).toBe(true);
     });
 
@@ -424,7 +424,7 @@ describe("ScriptLife", () => {
         } finally {
             Element.prototype.attachShadow = origAttach;
         }
-        expect(host.tagName.toLowerCase()).toBe("wiretrick-mount");
+        expect(host.tagName.toLowerCase()).toBe("tangitweak-mount");
         expect([...shadow.querySelectorAll("style")].map((s) => s.textContent)).toEqual(["a{}", "b{}"]);
         reload((ctx) => {
             ctx.style("b{}");

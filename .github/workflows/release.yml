@@ -41,7 +41,7 @@ jobs:
           if ! git diff --quiet "$PREV" HEAD -- $INPUTS; then
             echo "helper changed since $PREV → build"; git diff --stat "$PREV" HEAD -- $INPUTS; exit 0
           fi
-          N=$(gh release view "$PREV" --json assets -q '[.assets[].name | select(startswith("wiretrick-helper-"))] | length')
+          N=$(gh release view "$PREV" --json assets -q '[.assets[].name | select(startswith("tangitweak-helper-"))] | length')
           if [ "$N" != "$ASSETS" ]; then echo "$PREV has $N helper binaries, not $ASSETS → build"; exit 0; fi
           echo "helper unchanged since $PREV → reusing its binaries"
           echo "reuse=$PREV" >> "$GITHUB_OUTPUT"
@@ -57,10 +57,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: linux-x64, os: ubuntu-latest, targets: x86_64-unknown-linux-gnu, exe: wiretrick-helper }
-          - { name: linux-arm64, os: ubuntu-24.04-arm, targets: aarch64-unknown-linux-gnu, exe: wiretrick-helper }
-          - { name: macos, os: macos-15-intel, targets: x86_64-apple-darwin aarch64-apple-darwin, exe: wiretrick-helper }
-          - { name: windows-x64, os: windows-latest, targets: x86_64-pc-windows-msvc, exe: wiretrick-helper.exe }
+          - { name: linux-x64, os: ubuntu-latest, targets: x86_64-unknown-linux-gnu, exe: tangitweak-helper }
+          - { name: linux-arm64, os: ubuntu-24.04-arm, targets: aarch64-unknown-linux-gnu, exe: tangitweak-helper }
+          - { name: macos, os: macos-15-intel, targets: x86_64-apple-darwin aarch64-apple-darwin, exe: tangitweak-helper }
+          - { name: windows-x64, os: windows-latest, targets: x86_64-pc-windows-msvc, exe: tangitweak-helper.exe }
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -100,7 +100,7 @@ jobs:
             SIZE=$(wc -c < "$BIN")
             echo "$BIN: $SIZE bytes"
             if [ "$SIZE" -gt 6291456 ]; then echo "::error::helper binary grew past 6 MB ($SIZE bytes)"; exit 1; fi
-            NAME="wiretrick-helper-$T"
+            NAME="tangitweak-helper-$T"
             if [ "${{ runner.os }}" = "Windows" ]; then
               cp "$BIN" "../helper-dist/$NAME.exe"
             else
@@ -157,10 +157,10 @@ jobs:
       - name: Package zip
         run: |
           VERSION=$(node -p "const m = require('./dist/manifest.json'); m.version_name || m.version")
-          zip -qr "wiretrick-mv2-v${VERSION}.zip" dist
-          (cd dist-mv3 && zip -qr "../wiretrick-mv3-v${VERSION}.zip" .)
-          echo "ZIP_NAME=wiretrick-mv2-v${VERSION}.zip" >> "$GITHUB_ENV"
-          echo "ZIP_MV3_NAME=wiretrick-mv3-v${VERSION}.zip" >> "$GITHUB_ENV"
+          zip -qr "tangitweak-mv2-v${VERSION}.zip" dist
+          (cd dist-mv3 && zip -qr "../tangitweak-mv3-v${VERSION}.zip" .)
+          echo "ZIP_NAME=tangitweak-mv2-v${VERSION}.zip" >> "$GITHUB_ENV"
+          echo "ZIP_MV3_NAME=tangitweak-mv3-v${VERSION}.zip" >> "$GITHUB_ENV"
           echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
 
       - name: Package crx (signed with CRX_PRIVATE_KEY → stable extension id)
@@ -170,21 +170,21 @@ jobs:
           if [ -z "$CRX_PRIVATE_KEY" ]; then echo "::warning::CRX_PRIVATE_KEY secret not set — skipping .crx"; exit 0; fi
           KEY="$RUNNER_TEMP/crx-key.pem"
           printf '%s\n' "$CRX_PRIVATE_KEY" > "$KEY"
-          npx -y crx3@2.0.0 -p "$KEY" -o "wiretrick-mv2-v${VERSION}.crx" -- dist
-          npx -y crx3@2.0.0 -p "$KEY" -o "wiretrick-mv3-v${VERSION}.crx" -- dist-mv3
+          npx -y crx3@2.0.0 -p "$KEY" -o "tangitweak-mv2-v${VERSION}.crx" -- dist
+          npx -y crx3@2.0.0 -p "$KEY" -o "tangitweak-mv3-v${VERSION}.crx" -- dist-mv3
           rm -f "$KEY"
           ls -la *.crx
 
       - name: Upload build artifact (every run)
         uses: actions/upload-artifact@v4
         with:
-          name: wiretrick
+          name: tangitweak
           path: dist/**
 
       - name: Upload the Firefox build (signed by the firefox job)
         uses: actions/upload-artifact@v4
         with:
-          name: wiretrick-firefox
+          name: tangitweak-firefox
           path: dist-firefox/**
 
       - name: Download helper binaries
@@ -201,13 +201,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           FROM: ${{ needs.helper-plan.outputs.reuse }}
         run: |
-          gh release download "$FROM" -p 'wiretrick-helper-*' -p SHA256SUMS -D helper-dist
+          gh release download "$FROM" -p 'tangitweak-helper-*' -p SHA256SUMS -D helper-dist
           (cd helper-dist && sha256sum -c SHA256SUMS && rm SHA256SUMS)
 
       - name: Checksums
         run: |
           cd helper-dist
-          sha256sum wiretrick-helper-* > SHA256SUMS
+          sha256sum tangitweak-helper-* > SHA256SUMS
           cat SHA256SUMS
 
       - name: Create GitHub release
@@ -217,7 +217,7 @@ jobs:
           files: |
             ${{ env.ZIP_NAME }}
             ${{ env.ZIP_MV3_NAME }}
-            wiretrick-*.crx
+            tangitweak-*.crx
             helper-dist/*
           body_path: release-notes.md
 
@@ -230,7 +230,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: wiretrick-firefox
+          name: tangitweak-firefox
           path: dist-firefox
 
       - uses: actions/setup-node@v4
@@ -244,7 +244,7 @@ jobs:
         run: |
           VERSION=$(node -p "require('./dist-firefox/manifest.json').version")
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then VERSION="${GITHUB_REF_NAME#v}"; fi
-          XPI="wiretrick-firefox-v${VERSION}.xpi"
+          XPI="tangitweak-firefox-v${VERSION}.xpi"
           # pasted secrets often carry a trailing newline/space
           AMO_JWT_ISSUER=$(printf %s "$AMO_JWT_ISSUER" | tr -d '[:space:]')
           AMO_JWT_SECRET=$(printf %s "$AMO_JWT_SECRET" | tr -d '[:space:]')
@@ -269,5 +269,5 @@ jobs:
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         uses: actions/upload-artifact@v4
         with:
-          name: wiretrick-firefox-xpi
+          name: tangitweak-firefox-xpi
           path: ${{ env.XPI_NAME }}

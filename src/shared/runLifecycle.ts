@@ -122,7 +122,7 @@ interface MountOwner extends Owner {
 }
 
 /** marks a mount's host: page changes there are ours, and anchors inside aren't matches */
-const HOST_ATTR = "data-wiretrick-mount";
+const HOST_ATTR = "data-tangitweak-mount";
 /** autoRestore gives up after this many re-insertions in a second */
 const MAX_RESTORES = 20;
 
@@ -556,7 +556,7 @@ export class ScriptLife {
         let host: Element;
         let container: Element;
         if (shadow) {
-            host = doc.createElement("wiretrick-mount");
+            host = doc.createElement("tangitweak-mount");
             const root = host.attachShadow({ mode: "closed" });
             container = doc.createElement("div");
             root.appendChild(container);

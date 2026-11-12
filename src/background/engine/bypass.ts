@@ -1,5 +1,5 @@
 /**
- * `wt.fetch(url, { bypass: true })`: a short-lived registry of requests no
+ * `tt.fetch(url, { bypass: true })`: a short-lived registry of requests no
  * script's handlers may touch. The fetch registers its method + URL before
  * it starts; each strategy asks `bypassed()` when it sees a request, which
  * takes the entry and remembers the strategy's request id so the later
@@ -53,7 +53,7 @@ export function addBypass(req: { method: string; url: string; tabId?: number; sc
 }
 
 /**
- * Is this request a bypassed `wt.fetch`? `id` is the strategy's own id for
+ * Is this request a bypassed `tt.fetch`? `id` is the strategy's own id for
  * the request (e.g. `"wr:" + requestId`): a later stage with the same id
  * is bypassed without an entry. The first match is logged.
  */
@@ -72,7 +72,7 @@ export function bypassed(req: { method: string; url: string; tabId?: number }, i
     if (i < 0) return false;
     const [e] = entries.splice(i, 1);
     if (id) ids.set(id, now + ID_TTL_MS);
-    log(tabId, `[${e.scriptName}] wt.fetch bypass: ${method} ${req.url} — no script's handlers run for it`, "info", e.scriptId, "observed", req.url);
+    log(tabId, `[${e.scriptName}] tt.fetch bypass: ${method} ${req.url} — no script's handlers run for it`, "info", e.scriptId, "observed", req.url);
     return true;
 }
 

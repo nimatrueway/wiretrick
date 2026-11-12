@@ -12,7 +12,7 @@
 import { contentHash } from "./folderSync";
 import { scriptUrl } from "./scriptError";
 
-export const SITE_QUEUE = "wiretrick.site";
+export const SITE_QUEUE = "tangitweak.site";
 
 /** a package module's function: runs with `this` = `module.exports`, sloppy mode */
 export type PackageFn = (require: (spec: string) => any, module: { exports: any }, exports: any, process: any, global: any, style: (css: string, url: string) => void) => void;
@@ -35,12 +35,12 @@ const push = (key: string, params: string) => `(globalThis[Symbol.for(${JSON.str
  * scriptFunction (EVAL_WRAPPER_LINES), so error positions map the same way.
  */
 export function scriptUnit(name: string, js: string): string {
-    return `${push(siteKey(name, js), "wt, console, require, module, exports")}\n\n"use strict";\n${js}\n}]);\n//# sourceURL=${scriptUrl(name)}`;
+    return `${push(siteKey(name, js), "tt, console, require, module, exports")}\n\n"use strict";\n${js}\n}]);\n//# sourceURL=${scriptUrl(name)}`;
 }
 
 /** a package module's unit (`url`: its final URL) */
 export function packageUnit(url: string, js: string): string {
-    return `${push(siteKey(url, js), "require, module, exports, process, global, __wtStyle")}\n${js}\n}]);\n//# sourceURL=${url}`;
+    return `${push(siteKey(url, js), "require, module, exports, process, global, __ttStyle")}\n${js}\n}]);\n//# sourceURL=${url}`;
 }
 
 /**

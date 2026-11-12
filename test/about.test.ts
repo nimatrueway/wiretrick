@@ -28,8 +28,8 @@ describe("About section", () => {
     });
 
     it("formats copyable text and the report file name", () => {
-        expect(aboutText([["Version", "1.0"], ["Extension ID", "abc"]])).toBe("Wiretrick\nVersion:      1.0\nExtension ID: abc");
-        expect(diagnosticsFileName(new Date("2025-01-02T03:04:05.678Z"))).toBe("wiretrick-diagnostics-2025-01-02T03-04-05Z.md");
+        expect(aboutText([["Version", "1.0"], ["Extension ID", "abc"]])).toBe("TangiTweak\nVersion:      1.0\nExtension ID: abc");
+        expect(diagnosticsFileName(new Date("2025-01-02T03:04:05.678Z"))).toBe("tangitweak-diagnostics-2025-01-02T03-04-05Z.md");
     });
 
     it("compares release versions numerically", () => {
@@ -40,7 +40,7 @@ describe("About section", () => {
     });
 
     it("describes the latest release", () => {
-        const latest = { version: "0.3.9", url: "https://github.com/nimatrueway/wiretrick/releases/tag/v0.3.9" };
+        const latest = { version: "0.3.9", url: "https://github.com/nimatrueway/tangitweak/releases/tag/v0.3.9" };
         expect(describeLatest(latest, "0.3.8")).toEqual({ text: "0.3.9 — update available", url: latest.url, update: true });
         expect(describeLatest(latest, "0.3.9")).toEqual({ text: "0.3.9 — up to date" });
     });

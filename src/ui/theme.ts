@@ -3,7 +3,7 @@
 export type ThemePref = "system" | "dark" | "light";
 export type Theme = "dark" | "light";
 export const THEME_KEY = "resTheme";
-const LOCAL_KEY = "wtTheme";
+const LOCAL_KEY = "wtTheme"; // the extension's former name (Wiretrick): kept so stored data survives
 
 export function resolveTheme(pref: unknown, systemLight: boolean): Theme {
     if (pref === "light" || pref === "dark") return pref;

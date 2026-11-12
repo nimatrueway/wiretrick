@@ -7,9 +7,9 @@ const none = new Map<string, ProblemMarker[]>();
 describe("collectProblems", () => {
     it("an onSite handler's store/handle warning points at the name's first use in that handler", () => {
         const code = [
-            "const cfg = wt.pageStore(\"cfg\", { a: 1 });", //
-            'wt.onPage("*", () => cfg.a);',
-            'wt.onSite("*", () => {',
+            "const cfg = tt.pageStore(\"cfg\", { a: 1 });", //
+            'tt.onPage("*", () => cfg.a);',
+            'tt.onSite("*", () => {',
             "    const x = 1;",
             "    return cfg.a + x;",
             "});",
@@ -109,10 +109,10 @@ describe("collectProblems", () => {
         expect(at("route", "unknown handler")).toMatchObject({ line: 1 });
         expect(at("runtime", "TypeError")).toMatchObject({ line: 17, column: 3 });
         // raw eval frames (stored compile errors) are past the 3 wrapper lines
-        const raw = "Error: top\n    at hook (<anonymous>:2504:6)\n    at eval (wiretrick-script:///b:7:9)\n    at new Function (<anonymous>)";
+        const raw = "Error: top\n    at hook (<anonymous>:2504:6)\n    at eval (tangitweak-script:///b:7:9)\n    at new Function (<anonymous>)";
         expect(collectProblems([script("b", { error: raw })], none)[0].problems[0]).toMatchObject({ kind: "compile", line: 4, column: 9 });
         // the script's own frame, not an imported library's (and the message shows source positions)
-        const viaLib = "Error: top\n    at f (wiretrick-script:///lib/u.ts:9:2)\n    at eval (wiretrick-script:///main.ts:5:3)";
+        const viaLib = "Error: top\n    at f (tangitweak-script:///lib/u.ts:9:2)\n    at eval (tangitweak-script:///main.ts:5:3)";
         const p = collectProblems([script("m", { name: "main.ts", error: viaLib })], none)[0].problems[0];
         expect(p).toMatchObject({ line: 2, column: 3 });
         expect(p.message).toBe("Error: top\n    at f (lib/u.ts:6:2)\n    at main.ts:2:3");
@@ -127,7 +127,7 @@ describe("collectProblems", () => {
 
     it("with the source: ranges on the URL pattern, the registration, the thrown-at token", () => {
         const pat = "https://a.test/:p+/:name";
-        const code = ["// x", "wt.onRequest({", `    url: ${JSON.stringify(pat)},`, '    strategy: "rules",', "}, () => ({ block: true }));", "", '  wt.onResponseBody({ url: "*://b.test/*", strategy: "helper" }, (c, b) => b);', "const v = boom();"].join("\n");
+        const code = ["// x", "tt.onRequest({", `    url: ${JSON.stringify(pat)},`, '    strategy: "rules",', "}, () => ({ block: true }));", "", '  tt.onResponseBody({ url: "*://b.test/*", strategy: "helper" }, (c, b) => b);', "const v = boom();"].join("\n");
         const routes = [
             { kind: "onRequest", index: 0, line: 2, url: [pat] },
             { kind: "onResponseBody", index: 0, line: 7, url: ["*://b.test/*"] },
@@ -148,17 +148,17 @@ describe("collectProblems", () => {
         expect(of("rules")).toMatchObject({ line: 3, column: 11, endLine: 3, endColumn: 11 + pat.length });
         expect(of("route")).toMatchObject({ line: 7, column: 3, endColumn: code.split("\n")[6].length + 1 });
         expect(of("runtime")).toMatchObject({ line: 8, column: 11, endColumn: 15 });
-        // stale meta (no stored lines): the Nth wt.<kind>( call in the source
+        // stale meta (no stored lines): the Nth tt.<kind>( call in the source
         const [stale] = collectProblems([script("b", { code, routes: routes.map(({ line, ...r }) => r), routeWarnings: ["onResponseBody #1: never runs"] })], none);
         expect(stale.problems[0]).toMatchObject({ line: 7, column: 3 });
         // a pattern held in a constant above the registration
-        const code2 = [`const P = ${JSON.stringify(pat)};`, "wt.onRequest({ url: P, strategy: \"rules\" }, () => ({ block: true }));"].join("\n");
+        const code2 = [`const P = ${JSON.stringify(pat)};`, "tt.onRequest({ url: P, strategy: \"rules\" }, () => ({ block: true }));"].join("\n");
         const [c] = collectProblems([script("c", { code: code2, routes: [{ kind: "onRequest", index: 0, line: 2, url: [pat] }], ruleErrors: [`onRequest #1: url pattern "${pat}" is too complex`] })], none);
         expect(c.problems[0]).toMatchObject({ line: 1, column: 12, endColumn: 12 + pat.length });
     });
 
     it("places a library's handler (\"onPage #1 (lib)\") at the script's call of the library", () => {
-        const code = [`import { install } from "./lib";`, `wt.onPage("*", () => {});`, `install();`].join("\n");
+        const code = [`import { install } from "./lib";`, `tt.onPage("*", () => {});`, `install();`].join("\n");
         const routes = [
             { kind: "onDocument", api: "onPage", index: 0, line: 2, url: ["*"] },
             { kind: "onDocument", api: "onPage", index: 1, n: 0, lib: "lib", line: 3, url: ["*"] },

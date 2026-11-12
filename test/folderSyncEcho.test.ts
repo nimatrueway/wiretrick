@@ -55,7 +55,7 @@ function fakeDir(m: F, name: string, prefix = ""): any {
             };
         },
         async getDirectoryHandle(n: string) {
-            if (n !== ".wiretrick-backup") throw new Error("nf");
+            if (n !== ".tangitweak-backup") throw new Error("nf");
             return fakeDir(new Map(), n, n + "/");
         },
         async removeEntry(n: string) {
@@ -79,7 +79,7 @@ vi.mock("../src/background/engine/logs", async (orig) => ({
 const put = (name: string, text: string) => files.set(name, { text, t: clock++ });
 const ss = () => import("../src/background/engine/scriptStore");
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const PARAMS = `wt.params({ n: { type: "number", default: 1 } });`;
+const PARAMS = `tt.params({ n: { type: "number", default: 1 } });`;
 
 async function settled(sync: typeof import("../src/background/folderSync")) {
     // let debounced storage → disk work fire on its own, as in the browser
@@ -154,7 +154,7 @@ describe("folder sync: received changes are not echoed back", () => {
 
     it("an external edit declaring a param is only received", async () => {
         const sync = await setup();
-        put("plain.ts", `wt.params({ m: { type: "number", default: 2 } });`);
+        put("plain.ts", `tt.params({ m: { type: "number", default: 2 } });`);
         await settled(sync);
         expect(files.get("settings.yaml")!.text).toMatch(/plain:[\s\S]*# m: 2/);
         expect(shown).toEqual(["receiving"]);
@@ -165,7 +165,7 @@ describe("folder sync: received changes are not echoed back", () => {
     it("an external add is only received", async () => {
         const sync = await setup();
         put("added.ts", "// added");
-        put("Added Params.ts", `wt.params({ k: { type: "boolean", default: true } });`);
+        put("Added Params.ts", `tt.params({ k: { type: "boolean", default: true } });`);
         await settled(sync);
         expect(await names()).toEqual(["Added Params", "added", "plain", "withParams"].sort());
         expect(shown).toEqual(["receiving"]);

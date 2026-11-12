@@ -76,8 +76,8 @@ async function firefoxInfo(): Promise<{ name: string; version: string } | null> 
     }
 }
 
-export const RELEASES_URL = "https://github.com/nimatrueway/wiretrick/releases";
-const LATEST_RELEASE_API = "https://api.github.com/repos/nimatrueway/wiretrick/releases/latest";
+export const RELEASES_URL = "https://github.com/nimatrueway/tangitweak/releases";
+const LATEST_RELEASE_API = "https://api.github.com/repos/nimatrueway/tangitweak/releases/latest";
 
 export interface LatestRelease {
     version: string;
@@ -139,11 +139,11 @@ export async function aboutRows(helper: HelperStatus | null): Promise<[string, s
 
 export function aboutText(rows: [string, string][]): string {
     const w = Math.max(...rows.map(([k]) => k.length));
-    return ["Wiretrick", ...rows.map(([k, v]) => `${(k + ":").padEnd(w + 2)}${v}`)].join("\n");
+    return ["TangiTweak", ...rows.map(([k, v]) => `${(k + ":").padEnd(w + 2)}${v}`)].join("\n");
 }
 
 export function diagnosticsFileName(d = new Date()): string {
-    return `wiretrick-diagnostics-${d.toISOString().replace(/[:.]/g, "-").replace(/-\d{3}Z$/, "Z")}.md`;
+    return `tangitweak-diagnostics-${d.toISOString().replace(/[:.]/g, "-").replace(/-\d{3}Z$/, "Z")}.md`;
 }
 
 export function downloadText(name: string, text: string, type = "text/plain"): void {

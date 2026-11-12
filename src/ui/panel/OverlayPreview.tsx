@@ -90,7 +90,7 @@ export function OverlayPreview({ hidden }: { hidden: boolean }) {
     useEffect(() => () => stopPreview(), []);
     // the frame loads again when the panel is docked elsewhere: its nonce is spent
     const loaded = useRef(0);
-    const msg = !script ? "Open a script with an overlay handler (wt.onPage with dom: \"overlay\") to preview its overlay here." : snap.status === "error" ? snap.message : "";
+    const msg = !script ? "Open a script with an overlay handler (tt.onPage with dom: \"overlay\") to preview its overlay here." : snap.status === "error" ? snap.message : "";
     return (
         <div id="preview-view" hidden={hidden}>
             {msg ? <div className="preview-msg">{msg}</div> : null}

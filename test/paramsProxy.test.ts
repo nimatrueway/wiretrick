@@ -1,4 +1,4 @@
-// `wt.params` returns a proxy: assigning a param (or changing a list in
+// `tt.params` returns a proxy: assigning a param (or changing a list in
 // place) is checked against its type, seen right away and sent to be
 // saved like a ⚙ change — once per param per turn. Not from a top level
 // (each change re-runs the script) and not from onSite code.
@@ -99,9 +99,9 @@ describe("paramsProxy", () => {
     });
 });
 
-describe("wt.params in the background and the overlay (compileScript)", () => {
-    const CODE = `const cfg = wt.params({ on: { type: "boolean", default: true } });
-wt.onRequest({ url: "*://a.com/*", strategy: "helper" }, () => { cfg.on = !cfg.on; return { block: cfg.on }; });`;
+describe("tt.params in the background and the overlay (compileScript)", () => {
+    const CODE = `const cfg = tt.params({ on: { type: "boolean", default: true } });
+tt.onRequest({ url: "*://a.com/*", strategy: "helper" }, () => { cfg.on = !cfg.on; return { block: cfg.on }; });`;
 
     it("a handler's assignment goes to overrides.setParam", async () => {
         const sent: [string, any][] = [];
@@ -113,7 +113,7 @@ wt.onRequest({ url: "*://a.com/*", strategy: "helper" }, () => { cfg.on = !cfg.o
     });
 
     it("not at the top level", () => {
-        const c = compileScript(`const cfg = wt.params({ on: { type: "boolean" } });\ncfg.on = true;`, { setParam: async () => {} });
+        const c = compileScript(`const cfg = tt.params({ on: { type: "boolean" } });\ncfg.on = true;`, { setParam: async () => {} });
         expect(c.error).toContain(PARAM_AT_TOP);
     });
 
@@ -123,15 +123,15 @@ wt.onRequest({ url: "*://a.com/*", strategy: "helper" }, () => { cfg.on = !cfg.o
     });
 });
 
-describe("wt.params in page code (makePageShim)", () => {
+describe("tt.params in page code (makePageShim)", () => {
     const base = { log: () => {}, storage: { get: () => undefined, set: () => undefined } };
-    const CODE = `const cfg = wt.params({ on: { type: "boolean", default: true }, tags: { type: "stringList" } });
+    const CODE = `const cfg = tt.params({ on: { type: "boolean", default: true }, tags: { type: "stringList" } });
 export const flip = () => { cfg.on = !cfg.on; cfg.tags.push("t"); return cfg.on; };`;
 
     function run(world: "isolated" | "page", setParam?: (k: string, v: any, lib?: string) => Promise<void>) {
         const shim = makePageShim({ ...base, params: { on: true, tags: [] }, world, setParam });
         const m = { exports: {} as any };
-        shim.top(() => scriptFunction(toRunnableJs(CODE), "s")(shim.wt, console, () => ({}), m, m.exports));
+        shim.top(() => scriptFunction(toRunnableJs(CODE), "s")(shim.tt, console, () => ({}), m, m.exports));
         return m.exports;
     }
 
@@ -153,17 +153,17 @@ export const flip = () => { cfg.on = !cfg.on; cfg.tags.push("t"); return cfg.on;
 
     it("not at the top level", () => {
         const shim = makePageShim({ ...base, params: {}, world: "isolated", setParam: async () => {} });
-        expect(() => shim.top(() => scriptFunction(toRunnableJs(`const c = wt.params({ on: { type: "boolean" } }); c.on = true;`), "s")(shim.wt, console, () => ({}), { exports: {} }, {}))).toThrow(PARAM_AT_TOP);
+        expect(() => shim.top(() => scriptFunction(toRunnableJs(`const c = tt.params({ on: { type: "boolean" } }); c.on = true;`), "s")(shim.tt, console, () => ({}), { exports: {} }, {}))).toThrow(PARAM_AT_TOP);
     });
 
     it("a library's params are sent with its name", async () => {
         const sent: any[] = [];
         const setParam = async (k: string, v: any, lib?: string) => void sent.push([k, v, lib]);
-        const libs = [{ name: "gate", src: toRunnableJs(`export const cfg = wt.params({ on: { type: "boolean" } });`) }];
-        const requireFrom = makeLibRequire(libs, (lib, require, m) => scriptFunction(lib.src!, lib.name)(makePageShim({ ...base, params: { on: false }, world: "isolated", lib: lib.name, setParam }).wt, console, require, m, m.exports));
+        const libs = [{ name: "gate", src: toRunnableJs(`export const cfg = tt.params({ on: { type: "boolean" } });`) }];
+        const requireFrom = makeLibRequire(libs, (lib, require, m) => scriptFunction(lib.src!, lib.name)(makePageShim({ ...base, params: { on: false }, world: "isolated", lib: lib.name, setParam }).tt, console, require, m, m.exports));
         const shim = makePageShim({ ...base, params: {}, world: "isolated", setParam });
         const m = { exports: {} as any };
-        shim.top(() => scriptFunction(toRunnableJs(`import { cfg } from "./gate";\nexport const on = () => (cfg.on = true);`), "s")(shim.wt, console, requireFrom("s"), m, m.exports));
+        shim.top(() => scriptFunction(toRunnableJs(`import { cfg } from "./gate";\nexport const on = () => (cfg.on = true);`), "s")(shim.tt, console, requireFrom("s"), m, m.exports));
         m.exports.on();
         await tick();
         expect(sent).toEqual([["on", true, "gate"]]);

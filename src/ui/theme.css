@@ -79,7 +79,7 @@
 }
 
 /* ---- shared by every page: tooltips (tooltip.ts) and toasts (toast.ts) ---- */
-.wt-tip {
+.tt-tip {
     position: fixed;
     z-index: 2147483000;
     max-width: min(480px, calc(100vw - 12px));
@@ -97,10 +97,10 @@
     user-select: text;
     cursor: copy;
 }
-.wt-tip[hidden] { display: none; }
+.tt-tip[hidden] { display: none; }
 .monaco-hover .monaco-hover-content { cursor: copy; }
 .monaco-hover .monaco-hover-content :is(a, .verbosity-actions, .status-bar) { cursor: pointer; }
-.wt-toast {
+.tt-toast {
     position: fixed;
     z-index: 2147483001;
     left: 50%;
@@ -119,4 +119,4 @@
     pointer-events: none;
     transition: opacity 0.15s, transform 0.15s, visibility 0.15s;
 }
-.wt-toast.show { opacity: 1; visibility: visible; transform: translate(-50%, 0); }
+.tt-toast.show { opacity: 1; visibility: visible; transform: translate(-50%, 0); }

@@ -325,11 +325,11 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
 onScriptsChanged(() => void updateAllTabs());
 void updateAllTabs();
 
-// opening a *.wiretrick.ts URL (a raw GitHub or gist file, any site, a
+// opening a *.tangitweak.ts URL (a raw GitHub or gist file, any site, a
 // local file) offers to install it, like a userscript manager
 chrome.tabs.onUpdated.addListener((tabId, info) => {
     const url = info.url;
-    if (!url || !ENTRY_URL_RE.test(url) || /#wt-raw$/.test(url)) return;
+    if (!url || !ENTRY_URL_RE.test(url) || /#tt-raw$/.test(url)) return;
     if (/^https?:\/\/(gist\.)?github\.com\//i.test(url)) return; // GitHub's own page for the file
     chrome.tabs.update(tabId, { url: chrome.runtime.getURL(`install.html?url=${encodeURIComponent(url)}`) }, () => void chrome.runtime.lastError);
 });
@@ -350,4 +350,4 @@ if (__MV3__) {
     })();
 }
 
-console.log(`[Wiretrick] background ready (${__MV3__ ? "mv3/sandbox" : IS_FIREFOX ? "firefox/webRequest+filterResponseData" : "chrome/mv2"})`);
+console.log(`[TangiTweak] background ready (${__MV3__ ? "mv3/sandbox" : IS_FIREFOX ? "firefox/webRequest+filterResponseData" : "chrome/mv2"})`);

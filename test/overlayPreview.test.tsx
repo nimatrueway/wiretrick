@@ -54,7 +54,7 @@ function background() {
 /** a stand-in for the frame's window: catches the port the host hands it */
 function fakeFrame() {
     let port: MessagePort | null = null;
-    const win = { postMessage: (msg: any, _o: string, ports: MessagePort[]) => msg?.wtOverlay === true && (port = ports[0]) } as unknown as Window;
+    const win = { postMessage: (msg: any, _o: string, ports: MessagePort[]) => msg?.ttOverlay === true && (port = ports[0]) } as unknown as Window;
     return { win, ep: () => messagePortEndpoint(port!) };
 }
 

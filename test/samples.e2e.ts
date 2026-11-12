@@ -49,42 +49,42 @@ const overlayFrame = (p: Page, sel: string) =>
 
 // sample name → how to see its effect (opens the page itself)
 const VERIFY: Record<string, (p: Page) => Promise<[boolean, string]>> = {
-    "Overlay panel (React + wt.globalStore)": async (p) => {
+    "Overlay panel (React + tt.globalStore)": async (p) => {
         await open(p, "https://dummyjson.com/");
-        const f = await overlayFrame(p, "#wt-fetch");
+        const f = await overlayFrame(p, "#tt-fetch");
         if (!f) return [false, "no overlay panel"];
         const fetchUser = async (prev: string) => {
-            await f.evaluate(() => (document.getElementById("wt-fetch") as HTMLButtonElement).click());
-            return until(() => f.evaluate(() => document.getElementById("wt-user")?.textContent || ""), (v) => !!v && v !== prev);
+            await f.evaluate(() => (document.getElementById("tt-fetch") as HTMLButtonElement).click());
+            return until(() => f.evaluate(() => document.getElementById("tt-user")?.textContent || ""), (v) => !!v && v !== prev);
         };
         const mocked = await fetchUser("");
-        await f.evaluate(() => (document.getElementById("wt-mock") as HTMLInputElement).click());
+        await f.evaluate(() => (document.getElementById("tt-mock") as HTMLInputElement).click());
         const real = await fetchUser(mocked);
         return [mocked === "Mocked User" && !!real && real !== "Mocked User", `${mocked} → ${real}`];
     },
-    "Watch and mock the site's fetch (wt.siteStore)": async (p) => {
+    "Watch and mock the site's fetch (tt.siteStore)": async (p) => {
         await open(p, "https://dummyjson.com/");
-        const f = await overlayFrame(p, "#wt-site-fetch");
+        const f = await overlayFrame(p, "#tt-site-fetch");
         if (!f) return [false, "no overlay panel"];
         const fetchUser = async (prev: string) => {
-            await f.evaluate(() => (document.getElementById("wt-site-fetch") as HTMLButtonElement).click());
-            return until(() => f.evaluate(() => document.getElementById("wt-site-user")?.textContent || ""), (v) => !!v && v !== prev);
+            await f.evaluate(() => (document.getElementById("tt-site-fetch") as HTMLButtonElement).click());
+            return until(() => f.evaluate(() => document.getElementById("tt-site-user")?.textContent || ""), (v) => !!v && v !== prev);
         };
         const real = await fetchUser("");
-        const last = await until(() => f.evaluate(() => document.getElementById("wt-site-last")?.textContent || ""), (v) => v.includes("/users/1"));
-        await f.evaluate(() => (document.getElementById("wt-site-mock") as HTMLInputElement).click());
+        const last = await until(() => f.evaluate(() => document.getElementById("tt-site-last")?.textContent || ""), (v) => v.includes("/users/1"));
+        await f.evaluate(() => (document.getElementById("tt-site-mock") as HTMLInputElement).click());
         const mocked = await fetchUser(real);
         return [!!real && real !== "Mocked User" && mocked === "Mocked User" && !!last, `${real} → ${mocked} (${last})`];
     },
     "Overlay outline (calls + shortcut)": async (p) => {
         await open(p, "https://en.wikipedia.org/wiki/Cat");
-        const f = await overlayFrame(p, "#wt-outline a");
+        const f = await overlayFrame(p, "#tt-outline a");
         if (!f) return [false, "no outline"];
-        const links = await f.evaluate(() => document.querySelectorAll("#wt-outline a").length);
-        await f.evaluate(() => (document.querySelectorAll("#wt-outline a")[3] as HTMLElement).click());
+        const links = await f.evaluate(() => document.querySelectorAll("#tt-outline a").length);
+        await f.evaluate(() => (document.querySelectorAll("#tt-outline a")[3] as HTMLElement).click());
         const scrolled = await until(() => p.evaluate(() => scrollY), (y) => y > 500);
         await p.keyboard.press("Alt+Shift+O");
-        const hidden = await until(() => f.evaluate(() => (document.getElementById("wt-outline") as HTMLElement).hidden), (h) => h);
+        const hidden = await until(() => f.evaluate(() => (document.getElementById("tt-outline") as HTMLElement).hidden), (h) => h);
         return [links > 3 && scrolled > 500 && hidden, JSON.stringify({ links, scrolled, hidden })];
     },
     "Redirect a URL": async (p) => {
@@ -100,7 +100,7 @@ const VERIFY: Record<string, (p: Page) => Promise<[boolean, string]>> = {
     "Modify request headers": async (p) => {
         await open(p, "https://postman-echo.com/headers");
         const t = await text(p);
-        return [t.includes("hello from Wiretrick"), t.slice(0, 120)];
+        return [t.includes("hello from TangiTweak"), t.slice(0, 120)];
     },
     "CORS unlock": async (p) => {
         await open(p, "https://example.org/");
@@ -115,36 +115,36 @@ const VERIFY: Record<string, (p: Page) => Promise<[boolean, string]>> = {
     "Transform an API response": async (p) => {
         await open(p, "https://dummyjson.com/");
         const t = await p.waitForFunction(() => /\/todos\/1"\) → \{/.test(document.body?.innerText || "") && document.body.innerText, null, { timeout: 15000 }).then((h) => h.jsonValue() as Promise<string>);
-        return [t.includes("Transformed by Wiretrick") && t.includes('"completed":true'), t.slice(0, 160)];
+        return [t.includes("Transformed by TangiTweak") && t.includes('"completed":true'), t.slice(0, 160)];
     },
     "Rewrite page HTML": async (p) => {
         await open(p, "https://example.com/");
         const t = await text(p);
-        return [t.includes("Rewritten by Wiretrick") && (await p.title()) === "Rewritten Domain", await p.title()];
+        return [t.includes("Rewritten by TangiTweak") && (await p.title()) === "Rewritten Domain", await p.title()];
     },
     "DOM / title changes": async (p) => {
         await open(p, "https://en.wikipedia.org/wiki/Cat");
         await p.waitForTimeout(1000);
         const h1 = await p.evaluate(() => document.querySelector("h1")?.textContent || "");
-        return [h1 === "Hello from Wiretrick" && (await p.title()).startsWith("🎯"), h1];
+        return [h1 === "Hello from TangiTweak" && (await p.title()).startsWith("🎯"), h1];
     },
     "Serve a local file": async (p) => {
         await open(p, "https://en.wikipedia.org/robots.txt");
         const t = await text(p);
-        return [t.includes("Served by Wiretrick"), t.slice(0, 80)];
+        return [t.includes("Served by TangiTweak"), t.slice(0, 80)];
     },
     "Per-script storage": async (p) => {
-        const hits = async () => Number(((await p.waitForSelector("#wt-visits", { timeout: 15000 }).then((e) => e?.textContent())) || "").match(/(\d+)$/)?.[1] || 0);
+        const hits = async () => Number(((await p.waitForSelector("#tt-visits", { timeout: 15000 }).then((e) => e?.textContent())) || "").match(/(\d+)$/)?.[1] || 0);
         await open(p, "https://en.wikipedia.org/wiki/Cat");
         const a = await hits();
         await p.reload();
         const b = await hits();
         return [a > 0 && b === a + 1, `${a} → ${b}`];
     },
-    "Parameters (wt.params)": async (p) => {
+    "Parameters (tt.params)": async (p) => {
         await open(p, "https://postman-echo.com/headers");
         const t = await text(p);
-        return [/"x-mode":\s*"dev"/.test(t) && /"x-retries":\s*"3"/.test(t) && /"x-tags":\s*"wiretrick"/.test(t), t.slice(0, 200)];
+        return [/"x-mode":\s*"dev"/.test(t) && /"x-retries":\s*"3"/.test(t) && /"x-tags":\s*"tangitweak"/.test(t), t.slice(0, 200)];
     },
 };
 

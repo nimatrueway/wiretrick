@@ -37,8 +37,8 @@ export function EditorToolbar() {
                 <span>Enabled</span>
             </label>
             {" "}
-            <span id="typings-note" hidden={!t.typings} title="The wt API typings, read-only. Go Back (Alt+← / ⌃- on macOS) returns to your script.">
-                <span className="file-icon dts" aria-hidden="true">d.ts</span>wt-api.d.ts<span className="muted">read-only</span>
+            <span id="typings-note" hidden={!t.typings} title="The tt API typings, read-only. Go Back (Alt+← / ⌃- on macOS) returns to your script.">
+                <span className="file-icon dts" aria-hidden="true">d.ts</span>tt-api.d.ts<span className="muted">read-only</span>
             </span>
             {" "}
             <span id="editor-status" className={[status.cls, status.onClick && "clickable"].filter(Boolean).join(" ")} onClick={() => status.onClick?.()}>

@@ -15,7 +15,7 @@ export type MenuItem = { label: string; key?: string; run: () => void } | null;
 /** the inline name input: renaming a row, or naming a new item in `folder` */
 export type Editing = { mode: "rename"; id: string; refocusList: boolean } | { mode: "create"; kind: NewKind; folder: string };
 
-const COLLAPSED_KEY = "wtExplorerCollapsed";
+const COLLAPSED_KEY = "wtExplorerCollapsed"; // the extension's former name (Wiretrick): kept so stored data survives
 
 function loadCollapsed(): string[] {
     try {
@@ -37,7 +37,7 @@ export const explorer = proxy({
     folders: ref([]) as readonly string[],
     /** the open file */
     selectedId: null as string | null,
-    /** wt-api.d.ts is shown over the open file (no row is the open file) */
+    /** tt-api.d.ts is shown over the open file (no row is the open file) */
     typingsShown: false,
     /** the open file has unsaved changes */
     dirty: false,

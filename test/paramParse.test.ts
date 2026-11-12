@@ -16,15 +16,15 @@ import { buildSettingsSchema } from "../src/shared/settingsSchema";
 import { settingsDiagnostics } from "../src/shared/settingsAssist";
 
 const CODE = `
-const cfg = wt.params({
+const cfg = tt.params({
     origin: { type: "string", default: "https://a.com", parse: (s) => new URL(s) },
     n: { type: "number", default: 2, parse: (sec) => sec * 1000 },
     plain: { type: "boolean" },
 });
-const hosts = wt.defineParam("hosts", { type: "stringList", default: ["a.com"], parse: (l) => new Set(l) });
-const mode = wt.defineParam("mode", { type: "enum", choices: ["x", "y"], parse: (c) => c.toUpperCase() });
-wt.log(cfg.origin.host, cfg.n, cfg.plain, [...hosts].join("+"), mode);
-wt.onRequest({ url: \`*://\${cfg.origin.host}/*\`, strategy: "helper" }, () => {});
+const hosts = tt.defineParam("hosts", { type: "stringList", default: ["a.com"], parse: (l) => new Set(l) });
+const mode = tt.defineParam("mode", { type: "enum", choices: ["x", "y"], parse: (c) => c.toUpperCase() });
+tt.log(cfg.origin.host, cfg.n, cfg.plain, [...hosts].join("+"), mode);
+tt.onRequest({ url: \`*://\${cfg.origin.host}/*\`, strategy: "helper" }, () => {});
 `;
 
 function logged(code: string, paramValues?: Record<string, any>) {
@@ -59,7 +59,7 @@ describe("param parse (runtime)", () => {
 
     it("the parser gets a copy of list values", () => {
         const stored = { l: ["a"] };
-        compileScript(`wt.defineParam("l", { type: "stringList", parse: (l) => { l.push("x"); return l; } });`, { paramValues: stored });
+        compileScript(`tt.defineParam("l", { type: "stringList", parse: (l) => { l.push("x"); return l; } });`, { paramValues: stored });
         expect(stored.l).toEqual(["a"]);
     });
 
@@ -69,8 +69,8 @@ describe("param parse (runtime)", () => {
         expect(c.meta.active).toBe(false);
         expect(c.paramDefs!.origin).toBeDefined(); // the ⚙ dialog can still fix the value
         expect(formatScriptError("my script", c.error).split("\n")[0]).toMatch(/^\[my script\] Error: param "origin": parse failed for value "xyz": Invalid URL/);
-        expect(compileScript(`wt.defineParam("a", { type: "number", parse: () => { throw "nope"; } });`).error).toMatch(/param "a": parse failed for value 0: nope/);
-        expect(compileScript(`wt.defineParam("a", { type: "number", parse: 5 });`).error).toMatch(/param "a": parse must be a function/);
+        expect(compileScript(`tt.defineParam("a", { type: "number", parse: () => { throw "nope"; } });`).error).toMatch(/param "a": parse failed for value 0: nope/);
+        expect(compileScript(`tt.defineParam("a", { type: "number", parse: 5 });`).error).toMatch(/param "a": parse must be a function/);
     });
 
     it("helpers: serializableParamDef / parseParamValue", () => {
@@ -83,12 +83,12 @@ describe("param parse (runtime)", () => {
     });
 
     it("page (onDocument) shim parses the raw bundle values", () => {
-        const { wt } = makePageShim({ params: { origin: "https://p.dev", hosts: ["h"] }, log: () => {}, storage: { get: () => undefined, set: () => undefined } });
-        const cfg = wt.params({ origin: { type: "string", parse: (s: string) => new URL(s) } });
+        const { tt } = makePageShim({ params: { origin: "https://p.dev", hosts: ["h"] }, log: () => {}, storage: { get: () => undefined, set: () => undefined } });
+        const cfg = tt.params({ origin: { type: "string", parse: (s: string) => new URL(s) } });
         expect(cfg.origin).toBeInstanceOf(URL);
         expect(cfg.origin.host).toBe("p.dev");
-        expect(wt.defineParam("hosts", { type: "stringList", parse: (l: string[]) => new Set(l) })).toEqual(new Set(["h"]));
-        expect(() => wt.params({ origin: { type: "string", parse: () => { throw new Error("bad"); } } })).toThrow('param "origin": parse failed for value "https://p.dev": bad');
+        expect(tt.defineParam("hosts", { type: "stringList", parse: (l: string[]) => new Set(l) })).toEqual(new Set(["h"]));
+        expect(() => tt.params({ origin: { type: "string", parse: () => { throw new Error("bad"); } } })).toThrow('param "origin": parse failed for value "https://p.dev": bad');
     });
 });
 
@@ -107,19 +107,19 @@ describe("param parse (settings keep raw values)", () => {
     });
 });
 
-// ---- typings: run the TS compiler over wt-api.d.ts + snippets ----
+// ---- typings: run the TS compiler over tt-api.d.ts + snippets ----
 
-const DTS = readFileSync(new URL("../src/types/wt-api.d.ts", import.meta.url), "utf8");
+const DTS = readFileSync(new URL("../src/types/tt-api.d.ts", import.meta.url), "utf8");
 
 function typesOf(snippet: string): { errors: string[]; types: Record<string, string> } {
-    const files: Record<string, string> = { "/wt-api.d.ts": DTS, "/snippet.ts": snippet };
+    const files: Record<string, string> = { "/tt-api.d.ts": DTS, "/snippet.ts": snippet };
     const options: ts.CompilerOptions = { strict: true, noEmit: true, target: ts.ScriptTarget.ES2020, lib: ["lib.es2020.d.ts", "lib.dom.d.ts"], types: [], skipLibCheck: true };
     const host = ts.createCompilerHost(options);
     const getSourceFile = host.getSourceFile;
     host.getSourceFile = (name, lang, ...rest) => (name in files ? ts.createSourceFile(name, files[name], lang) : getSourceFile.call(host, name, lang, ...rest));
     host.fileExists = ((exists) => (name: string) => name in files || exists(name))(host.fileExists);
     host.readFile = ((read) => (name: string) => files[name] ?? read(name))(host.readFile);
-    const program = ts.createProgram(["/wt-api.d.ts", "/snippet.ts"], options, host);
+    const program = ts.createProgram(["/tt-api.d.ts", "/snippet.ts"], options, host);
     const sf = program.getSourceFile("/snippet.ts")!;
     const errors = ts.getPreEmitDiagnostics(program, sf).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"));
     const checker = program.getTypeChecker();
@@ -135,7 +135,7 @@ function typesOf(snippet: string): { errors: string[]; types: Record<string, str
 describe("param parse (typings)", () => {
     it("contextually types the parser and resolves to its return type", () => {
         const { errors, types } = typesOf(`export {};
-const cfg = wt.params({
+const cfg = tt.params({
     origin: { type: "string", default: "https://a.com", parse: (s) => new URL(s) },
     n: { type: "number" },
     secs: { type: "number", parse: (sec) => sec * 1000 },
@@ -145,8 +145,8 @@ const cfg = wt.params({
     list: { type: "stringList" },
 });
 const origin = cfg.origin, n = cfg.n, secs = cfg.secs, on = cfg.on, mode = cfg.mode, plainMode = cfg.plainMode, list = cfg.list;
-const hosts = wt.defineParam("hosts", { type: "stringList", parse: (l) => new Set(l) });
-const host = wt.defineParam("host", { type: "string" });
+const hosts = tt.defineParam("hosts", { type: "stringList", parse: (l) => new Set(l) });
+const host = tt.defineParam("host", { type: "string" });
 `);
         expect(errors).toEqual([]);
         expect(types).toMatchObject({
@@ -169,14 +169,14 @@ const host = wt.defineParam("host", { type: "string" });
 
     it("params without parse are assignable, with their raw type; with parse, read-only", () => {
         const ok = typesOf(`export {};
-const cfg = wt.params({ on: { type: "boolean" }, mode: { type: "enum", choices: ["a", "b"] }, list: { type: "stringList" } });
+const cfg = tt.params({ on: { type: "boolean" }, mode: { type: "enum", choices: ["a", "b"] }, list: { type: "stringList" } });
 cfg.on = false;
 cfg.mode = "b";
 cfg.list.push("x");
 `);
         expect(ok.errors).toEqual([]);
         const bad = typesOf(`export {};
-const cfg = wt.params({ mode: { type: "enum", choices: ["a", "b"] }, url: { type: "string", parse: (s) => new URL(s) } });
+const cfg = tt.params({ mode: { type: "enum", choices: ["a", "b"] }, url: { type: "string", parse: (s) => new URL(s) } });
 cfg.mode = "c";
 cfg.url = new URL("https://a.com");
 `);
@@ -185,15 +185,15 @@ cfg.url = new URL("https://a.com");
     });
 
     it("rejects a parser whose input doesn't match the param type", () => {
-        const { errors } = typesOf(`wt.params({ n: { type: "number", parse: (s: string) => s } });`);
+        const { errors } = typesOf(`tt.params({ n: { type: "number", parse: (s: string) => s } });`);
         expect(errors.join("\n")).toMatch(/not assignable/);
     });
 });
 
 describe("shortcut params", () => {
-    const CODE = `const k = wt.defineParam("toggle", { type: "shortcut", default: "Alt+Shift+H", description: "Hide the box" });
-wt.log(JSON.stringify(k));
-wt.onRequest({ url: "*://a.com/*", strategy: "helper" }, () => {});`;
+    const CODE = `const k = tt.defineParam("toggle", { type: "shortcut", default: "Alt+Shift+H", description: "Hide the box" });
+tt.log(JSON.stringify(k));
+tt.onRequest({ url: "*://a.com/*", strategy: "helper" }, () => {});`;
 
     it("the script gets the keys: the default, a stored value, \"\" when cleared; invalid stored keys fall back", () => {
         expect(logged(CODE).lines).toEqual(['"Alt+Shift+H"']);
@@ -204,7 +204,7 @@ wt.onRequest({ url: "*://a.com/*", strategy: "helper" }, () => {});`;
     });
 
     it("a default that isn't a shortcut is a script error", () => {
-        const { c } = logged(`wt.params({ k: { type: "shortcut", default: "Hyper+K" } });`);
+        const { c } = logged(`tt.params({ k: { type: "shortcut", default: "Hyper+K" } });`);
         expect(c.error).toMatch(/shortcut parameter "k": "Hyper\+K" has an unknown modifier "Hyper"/);
     });
 

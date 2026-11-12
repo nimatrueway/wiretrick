@@ -16,7 +16,7 @@ export const USER_SCRIPTS_PROBLEM = "this code doesn't run: user scripts are off
 
 /** how to turn them on (Chrome's own wording for the switch) */
 export function userScriptsHowTo(status: Exclude<UserScriptsStatus, "ok">, extensionId: string): string {
-    const allow = `turn on "Allow User Scripts" on Wiretrick's details page (chrome://extensions/?id=${extensionId}; before Chrome 138: Developer mode on chrome://extensions)`;
+    const allow = `turn on "Allow User Scripts" on TangiTweak's details page (chrome://extensions/?id=${extensionId}; before Chrome 138: Developer mode on chrome://extensions)`;
     return status === "no-permission" ? `grant the "user scripts" permission from the Editor's banner, then ${allow}` : allow;
 }
 

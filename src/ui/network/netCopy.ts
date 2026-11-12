@@ -120,7 +120,7 @@ function harEntry(e: NetEntry) {
         timings: { send: 0, wait: time, receive: 0 },
         ...(e.ip ? { serverIPAddress: e.ip } : {}),
         _resourceType: e.synthetic ? "other" : (HAR_TYPES[e.type] ?? e.type ?? "other"),
-        ...(e.outcomes.length ? { _wiretrick: e.outcomes.map((o) => ({ script: o.scriptName, action: o.action, kind: o.kind })) } : {}),
+        ...(e.outcomes.length ? { _tangitweak: e.outcomes.map((o) => ({ script: o.scriptName, action: o.action, kind: o.kind })) } : {}),
     };
 }
 
@@ -131,7 +131,7 @@ export function asHar(list: NetEntry[]): string {
         version = (globalThis as any).chrome?.runtime?.getManifest?.().version ?? "";
     } catch {}
     const entries = [...list].sort((a, b) => a.startedAt - b.startedAt).map(harEntry);
-    return JSON.stringify({ log: { version: "1.2", creator: { name: "Wiretrick", version }, pages: [], entries } }, null, 2);
+    return JSON.stringify({ log: { version: "1.2", creator: { name: "TangiTweak", version }, pages: [], entries } }, null, 2);
 }
 
 export type CopyKind = "url" | "curl" | "fetch" | "har";

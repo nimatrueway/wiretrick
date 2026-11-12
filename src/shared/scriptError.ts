@@ -2,9 +2,9 @@
  * Script error formatting for the log: the stored script name + the error,
  * with stack frames rewritten back to the user's source.
  *
- * Scripts compile via `new Function("wt", …, "\"use strict\";\n" + js +
- * "\n//# sourceURL=wiretrick-script:///<name>")` (scriptFn.ts). The sourceURL
- * names each script's frames — `at fn (wiretrick-script:///lib/a.ts:8:14)` —
+ * Scripts compile via `new Function("tt", …, "\"use strict\";\n" + js +
+ * "\n//# sourceURL=tangitweak-script:///<name>")` (scriptFn.ts). The sourceURL
+ * names each script's frames — `at fn (tangitweak-script:///lib/a.ts:8:14)` —
  * so a library script's frames carry its own name, and the page hook's own
  * frames (an inline <script>: `<anonymous>:L:C` in Chrome) aren't mistaken
  * for the script's. The synthetic source adds exactly EVAL_WRAPPER_LINES
@@ -17,7 +17,7 @@
 /** lines the new Function wrapper adds before the user's line 1 */
 export const EVAL_WRAPPER_LINES = 3;
 
-const SCRIPT_URL = "wiretrick-script:///";
+const SCRIPT_URL = "tangitweak-script:///";
 
 /** the `//# sourceURL` that names a script's stack frames */
 export function scriptUrl(name: string): string {
@@ -26,7 +26,7 @@ export function scriptUrl(name: string): string {
 
 /** a script frame's position in its user source (null: not a script frame, or inside the wrapper) */
 export function scriptFrame(line: string): { name: string; line: number; column: number; fn: string | null } | null {
-    const m = /wiretrick-script:\/\/\/([^\s():]*):(\d+):(\d+)/.exec(line);
+    const m = /tangitweak-script:\/\/\/([^\s():]*):(\d+):(\d+)/.exec(line);
     if (!m) return null;
     const userLine = Number(m[2]) - EVAL_WRAPPER_LINES;
     if (userLine < 1) return null;
@@ -60,7 +60,7 @@ export function formatScriptError(name: string, e: any, context?: string): strin
 /**
  * The user-source line of the outermost script frame on the current stack:
  * the line in the script's top level that made the current call (for
- * `wt.onRequest(…)`, its registration — also when a recipe from an imported
+ * `tt.onRequest(…)`, its registration — also when a recipe from an imported
  * utility registered it). Firefox may not name `new Function` frames by
  * their sourceURL: there they read `… > Function:L:C`.
  */
@@ -70,7 +70,7 @@ export function callerLine(): number | undefined {
     E.stackTraceLimit = 100;
     const stack = String(new Error().stack || "");
     E.stackTraceLimit = limit;
-    const frame = /(?:wiretrick-script:\/\/\/[^\s():]*|> Function):(\d+):\d+/g;
+    const frame = /(?:tangitweak-script:\/\/\/[^\s():]*|> Function):(\d+):\d+/g;
     let line: number | undefined;
     for (let m = frame.exec(stack); m; m = frame.exec(stack)) {
         const l = Number(m[1]) - EVAL_WRAPPER_LINES;

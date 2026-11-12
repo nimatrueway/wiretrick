@@ -21,7 +21,7 @@ export interface MissedCase {
     helperActive: boolean;
     /** the debugger strategy's own "was NOT intercepted" warning already covers this load */
     cdpWarned: boolean;
-    /** page strategy: false when the request's frame has no page hook (the tab was open before Wiretrick started) */
+    /** page strategy: false when the request's frame has no page hook (the tab was open before TangiTweak started) */
     hookLoaded?: boolean;
     /** the request went to localhost / 127.x / [::1] (see isLoopbackUrl) */
     loopback?: boolean;
@@ -37,7 +37,7 @@ export interface MissedCase {
 
 export const MISSED_REASONS = {
     hookNotFetch: `the "page" strategy only sees the page's own fetch/XHR — set strategy: "debugger" or "helper" on the route for other loads`,
-    hookNotLoaded: `the page hook isn't loaded in this tab (it was open before Wiretrick started or updated) — reload the tab`,
+    hookNotLoaded: `the page hook isn't loaded in this tab (it was open before TangiTweak started or updated) — reload the tab`,
     cache: "served from the browser cache — reload with cache disabled / hard reload",
     helperDown: "the local helper isn't running",
     helperLoopback: `the helper can't see localhost — Chrome never sends loopback requests through a proxy; set strategy: "page" or "debugger" on the route for these URLs`,
@@ -163,7 +163,7 @@ export function makeMissedThrottle(perKeyMs = 60000, perMinute = 20): (key: stri
 
 /**
  * Does the frame answer the bridge's "hookPing"? A tab loaded before
- * Wiretrick started has no bridge (no receiver). No reply in time (a busy
+ * TangiTweak started has no bridge (no receiver). No reply in time (a busy
  * page) counts as loaded — only a definite "no receiver" warns.
  */
 export function frameHasHook(tabs: { sendMessage: (...a: any[]) => void }, lastError: () => unknown, tabId: number, frameId = 0, timeoutMs = 1000): Promise<boolean> {

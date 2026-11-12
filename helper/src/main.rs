@@ -1,6 +1,6 @@
-//! wiretrick-helper — local interception helper for Wiretrick's
+//! tangitweak-helper — local interception helper for TangiTweak's
 //! `process` strategy. Started by the browser over native messaging; also a
-//! small CLI for installing itself (`wiretrick-helper install …`).
+//! small CLI for installing itself (`tangitweak-helper install …`).
 
 mod ca;
 mod install;
@@ -20,21 +20,21 @@ use crate::nm::{In, Nm, Out};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-const USAGE: &str = "wiretrick-helper — local interception helper for Wiretrick
+const USAGE: &str = "tangitweak-helper — local interception helper for TangiTweak
 
 USAGE:
-  wiretrick-helper install --extension-id ID [--extension-id ID]... [--browser NAME]...
+  tangitweak-helper install --extension-id ID [--extension-id ID]... [--browser NAME]...
                           [--user-data-dir DIR]... [--trust-ca] [--nssdb DIR]
-  wiretrick-helper uninstall [--user-data-dir DIR]... [--nssdb DIR]
-  wiretrick-helper trust-ca [--nssdb DIR]
-  wiretrick-helper untrust-ca [--nssdb DIR]
-  wiretrick-helper ca-path
-  wiretrick-helper version
+  tangitweak-helper uninstall [--user-data-dir DIR]... [--nssdb DIR]
+  tangitweak-helper trust-ca [--nssdb DIR]
+  tangitweak-helper untrust-ca [--nssdb DIR]
+  tangitweak-helper ca-path
+  tangitweak-helper version
 
 Browsers: chrome, chrome-beta, chrome-dev, chrome-canary, chromium, brave, edge, vivaldi
 (default: every installed one). Started without a command (or with a
 chrome-extension:// origin, as the browser does) it speaks native messaging.
-State lives in $WIRETRICK_HELPER_HOME or the per-user config dir.";
+State lives in $TANGITWEAK_HELPER_HOME or the per-user config dir.";
 
 pub fn client_tls_config() -> rustls::ClientConfig {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
@@ -76,7 +76,7 @@ fn main() {
             })
             .map_err(|e| e.to_string()),
         "version" | "--version" | "-V" => {
-            println!("{} {VERSION}", ui::bold("wiretrick-helper"));
+            println!("{} {VERSION}", ui::bold("tangitweak-helper"));
             Ok(())
         }
         "help" | "--help" | "-h" => {
@@ -85,7 +85,7 @@ fn main() {
         }
         other => Err(format!(
             "unknown command {other:?} — see {}",
-            ui::cyan("wiretrick-helper --help")
+            ui::cyan("tangitweak-helper --help")
         )),
     };
     if let Err(e) = r {

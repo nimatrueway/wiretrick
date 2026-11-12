@@ -15,34 +15,34 @@ describe("keyPlaceCalls (handle names by source order)", () => {
     // it runs on the transpiled JavaScript: no type arguments left
     it("numbers each API's calls in source order, wherever they are", () => {
         const code = [
-            `const page = wt.onPage("*", () => ({ a: () => 1 }));`,
-            `export const overlay = wt.onOverlay({ url: "*", when: "document_idle" }, (ctx) => ({ f: () => 2 }));`,
-            `function later() { wt.onPage("*", () => {}); }`,
-            `wt.onSite(`,
+            `const page = tt.onPage("*", () => ({ a: () => 1 }));`,
+            `export const overlay = tt.onOverlay({ url: "*", when: "document_idle" }, (ctx) => ({ f: () => 2 }));`,
+            `function later() { tt.onPage("*", () => {}); }`,
+            `tt.onSite(`,
             `    "*",`,
             `    () => ({ x() {} })`,
             `)`,
-            `const s = "wt.onPage(inside a string)"; // wt.onPage( in a comment`,
-            `/* if (x) wt.onPage("*", f) */`,
-            `if (ok) wt.onSite("*", f);`,
+            `const s = "tt.onPage(inside a string)"; // tt.onPage( in a comment`,
+            `/* if (x) tt.onPage("*", f) */`,
+            `if (ok) tt.onSite("*", f);`,
         ].join("\n");
         const out = keyPlaceCalls(code);
         expect(out.split("\n")).toHaveLength(code.split("\n").length);
-        expect([...out.matchAll(/wt\.(on\w+)\.k\((\d+)\)\(/g)].map((m) => `${m[1]}:${m[2]}`)).toEqual(["onPage:0", "onOverlay:0", "onPage:1", "onSite:0", "onSite:1"]);
-        expect(out).toContain(`"wt.onPage(inside a string)"`);
-        expect(out).toContain(`// wt.onPage( in a comment`);
-        expect(keyPlaceCalls(`wt.onRequest({ url: "*", strategy: "page" }, f);`)).toBe(`wt.onRequest({ url: "*", strategy: "page" }, f);`);
+        expect([...out.matchAll(/tt\.(on\w+)\.k\((\d+)\)\(/g)].map((m) => `${m[1]}:${m[2]}`)).toEqual(["onPage:0", "onOverlay:0", "onPage:1", "onSite:0", "onSite:1"]);
+        expect(out).toContain(`"tt.onPage(inside a string)"`);
+        expect(out).toContain(`// tt.onPage( in a comment`);
+        expect(keyPlaceCalls(`tt.onRequest({ url: "*", strategy: "page" }, f);`)).toBe(`tt.onRequest({ url: "*", strategy: "page" }, f);`);
     });
 
     it("scans template literal code, and isn't fooled by JSX or regex literals", () => {
-        expect(keyPlaceCalls("const t = `${wt.onPage(\"*\", f)}`;")).toBe("const t = `${wt.onPage.k(0)(\"*\", f)}`;");
-        const jsx = `wt.onOverlay("*", () => {\n    f(() => <A port={cfg.port} />);\n});\nwt.onOverlay("*", f);`;
-        expect(keyPlaceCalls(jsx)).toContain(`wt.onOverlay.k(1)("*", f)`);
-        expect(keyPlaceCalls(`const r = /{/;\nconst d = a / b;\nwt.onPage("*", f);`)).toContain(`wt.onPage.k(0)("*", f)`);
+        expect(keyPlaceCalls("const t = `${tt.onPage(\"*\", f)}`;")).toBe("const t = `${tt.onPage.k(0)(\"*\", f)}`;");
+        const jsx = `tt.onOverlay("*", () => {\n    f(() => <A port={cfg.port} />);\n});\ntt.onOverlay("*", f);`;
+        expect(keyPlaceCalls(jsx)).toContain(`tt.onOverlay.k(1)("*", f)`);
+        expect(keyPlaceCalls(`const r = /{/;\nconst d = a / b;\ntt.onPage("*", f);`)).toContain(`tt.onPage.k(0)("*", f)`);
     });
 
     it("compiled handlers get their keys, the same in the background and the page", () => {
-        const c = compileScript(`function reg() { return wt.onPage("*", () => {}); }\nwt.onSite("*", () => {});\nreg();\nwt.onPage("*", () => {});\nreg();`);
+        const c = compileScript(`function reg() { return tt.onPage("*", () => {}); }\ntt.onSite("*", () => {});\nreg();\ntt.onPage("*", () => {});\nreg();`);
         expect(c.error).toBeNull();
         expect(c.meta.routes.map((r) => r.key)).toEqual(["onSite:0", "onPage:0", "onPage:1", "onPage:0#1"]);
     });
@@ -50,20 +50,20 @@ describe("keyPlaceCalls (handle names by source order)", () => {
 
 describe("onSite handlers using stores or handles (route warnings)", () => {
     const code = [
-        `const g = wt.globalStore("g", { n: 0 });`,
-        `const ps: { hits: number } = wt.pageStore("ps", { hits: 0 });`,
-        `const ov = wt.onOverlay("*", () => ({ ping: () => 1 }));`,
-        `wt.onSite("*", () => { document.title = String(ps.hits); });`, // #1: pageStore
-        `wt.onPage("*", () => { g.n++; ps.hits++; ov.ping(); });`, // onPage: fine
-        `wt.onSite("*", async () => { await ov.ping(); g.n = wt.pageStore("x", {}).y; });`, // #2: all three
-        `wt.onSite("*", () => { const o = { g: 1, ps: 2 }; console.log("g ps ov", o.g, /ov/); /* ps */ });`, // #3 keys, strings, comments: nothing
-        "wt.onSite(\"*\", () => { document.title = `${g.n}`; });", // #4 template code counts
+        `const g = tt.globalStore("g", { n: 0 });`,
+        `const ps: { hits: number } = tt.pageStore("ps", { hits: 0 });`,
+        `const ov = tt.onOverlay("*", () => ({ ping: () => 1 }));`,
+        `tt.onSite("*", () => { document.title = String(ps.hits); });`, // #1: pageStore
+        `tt.onPage("*", () => { g.n++; ps.hits++; ov.ping(); });`, // onPage: fine
+        `tt.onSite("*", async () => { await ov.ping(); g.n = tt.pageStore("x", {}).y; });`, // #2: all three
+        `tt.onSite("*", () => { const o = { g: 1, ps: 2 }; console.log("g ps ov", o.g, /ov/); /* ps */ });`, // #3 keys, strings, comments: nothing
+        "tt.onSite(\"*\", () => { document.title = `${g.n}`; });", // #4 template code counts
     ].join("\n");
 
     it("finds, per onSite call, the stores and handles its handler uses", () => {
         expect(onSiteUses(code)).toEqual([
             { nth: 0, pageStore: ["ps"], globalStore: [], handles: [] },
-            { nth: 1, pageStore: ["wt.pageStore"], globalStore: ["g"], handles: ["ov"] },
+            { nth: 1, pageStore: ["tt.pageStore"], globalStore: ["g"], handles: ["ov"] },
             { nth: 3, pageStore: [], globalStore: ["g"], handles: [] },
         ]);
     });
@@ -74,13 +74,13 @@ describe("onSite handlers using stores or handles (route warnings)", () => {
         const w = siteProblems(code, c.meta.routes);
         expect(w.map((m) => m.slice(0, m.indexOf(":")))).toEqual(["onSite #1", "onSite #2", "onSite #2", "onSite #4"]);
         expect(w[0]).toBe(`onSite #1: uses \`ps\` — ${SITE_NO_STORES}`);
-        expect(w[1]).toBe(`onSite #2: uses \`wt.pageStore\`, \`g\` — ${SITE_NO_STORES}`);
+        expect(w[1]).toBe(`onSite #2: uses \`tt.pageStore\`, \`g\` — ${SITE_NO_STORES}`);
         expect(w[2]).toBe(`onSite #2: uses \`ov\` — ${SITE_NO_HANDLES}`);
         for (const m of w) expect(m).toContain(SITE_DISALLOWED);
     });
 
     it("says nothing for scripts without stores or handles in onSite code", () => {
-        const src = `const ps = wt.pageStore("ps", {});\nwt.onPage("*", () => ps);\nwt.onSite("*", () => {});`;
+        const src = `const ps = tt.pageStore("ps", {});\ntt.onPage("*", () => ps);\ntt.onSite("*", () => {});`;
         expect(siteProblems(src, compileScript(src).meta.routes)).toEqual([]);
     });
 });
@@ -88,7 +88,7 @@ describe("onSite handlers using stores or handles (route warnings)", () => {
 
 describe(".tsx scripts", () => {
     it("compile with the built-in React's automatic runtime", () => {
-        const code = `import { useState } from "react";\nwt.onOverlay("*", () => {});\nexport const App = ({ n }: { n: number }) => <div className="x">{n}<></></div>;`;
+        const code = `import { useState } from "react";\ntt.onOverlay("*", () => {});\nexport const App = ({ n }: { n: number }) => <div className="x">{n}<></></div>;`;
         expect(usesJsx(code)).toBe(true);
         expect(importSpecs(code).has("react/jsx-runtime")).toBe(true);
         const js = toRunnableJs(code);

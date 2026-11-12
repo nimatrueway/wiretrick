@@ -9,7 +9,7 @@ import * as ReactDOMClient from "react-dom/client";
 import * as JsxRuntime from "react/jsx-runtime";
 import * as JsxDevRuntime from "react/jsx-dev-runtime";
 
-(globalThis as any).__wtBuiltinReact = {
+(globalThis as any).__ttBuiltinReact = {
     react: React,
     "react-dom": ReactDOM,
     "react-dom/client": ReactDOMClient,

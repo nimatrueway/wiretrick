@@ -1,11 +1,11 @@
 /**
  * Built-in modules: the extension's own valtio (^2.3) and React 19, which
  * script imports of `valtio`, `react`, `react-dom`, … (bare or esm.sh,
- * see builtinSpecs.ts) resolve to — one copy, so `wt.globalStore` proxies and
+ * see builtinSpecs.ts) resolve to — one copy, so `tt.globalStore` proxies and
  * hooks just work.
  *
  * valtio's vanilla parts are bundled with the compiler (they're small and
- * `wt.globalStore` is built on them). React is a separate chunk
+ * `tt.globalStore` is built on them). React is a separate chunk
  * (`builtins-react.js`, scripts/build.mjs) loaded with a <script> tag only
  * when a script imports it: `ensureBuiltins(codes)` before compiling.
  * `valtio/react` is built over whichever React the importer uses (the
@@ -20,7 +20,7 @@ import type { PackageModules } from "./packageImports";
 import type { HotCompile } from "./hotRefresh";
 
 export const REACT_CHUNK = "builtins-react.js";
-const CHUNK_GLOBAL = "__wtBuiltinReact";
+const CHUNK_GLOBAL = "__ttBuiltinReact";
 
 export type ReactBuiltins = Record<(typeof REACT_BUILTINS)[number], any>;
 

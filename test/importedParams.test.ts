@@ -1,8 +1,8 @@
 /**
  * Param definitions imported from a utility script:
- *   import { envParam } from "./utils"; wt.params({ intercept_environments: envParam })
+ *   import { envParam } from "./utils"; tt.params({ intercept_environments: envParam })
  * The save-time (meta-only) compile used to stub every import, so the def
- * reached wt.params as the stub proxy and the explorer showed a bogus
+ * reached tt.params as the stub proxy and the explorer showed a bogus
  * "needs a type" compile error while the editor's TypeScript was happy.
  */
 import { describe, it, expect, beforeEach } from "vitest";
@@ -38,14 +38,14 @@ export const choices = ["x", "y"];
 
 const IMPORTER = `
 import { envParam } from "./utils";
-const p = wt.params({ intercept_environments: envParam });
-wt.onRequest({ url: "*://*/*", strategy: "helper" }, () => { void p.intercept_environments; });
+const p = tt.params({ intercept_environments: envParam });
+tt.onRequest({ url: "*://*/*", strategy: "helper" }, () => { void p.intercept_environments; });
 `;
 
 const SPREAD = `
 import { defs, choices } from "./utils";
-const p = wt.params({ ...defs, pick: { type: "enum", choices, default: "y" } });
-wt.onRequest({ url: "*://*/*", strategy: "helper" }, () => { void p.mode; });
+const p = tt.params({ ...defs, pick: { type: "enum", choices, default: "y" } });
+tt.onRequest({ url: "*://*/*", strategy: "helper" }, () => { void p.mode; });
 `;
 
 describe("imported param definitions", () => {
@@ -53,9 +53,9 @@ describe("imported param definitions", () => {
         for (const code of [
             IMPORTER,
             SPREAD,
-            `import { envParam } from "./utils"; wt.defineParam("e", envParam); wt.onRequest({ url: "*://*/*", strategy: "helper" }, () => {});`,
-            `import { defs } from "./utils"; wt.params(defs); wt.onRequest({ url: "*://*/*", strategy: "helper" }, () => {});`,
-            `import { t } from "./utils"; wt.params({ x: { type: t, default: 1 } }); wt.onRequest({ url: "*://*/*", strategy: "helper" }, () => {});`,
+            `import { envParam } from "./utils"; tt.defineParam("e", envParam); tt.onRequest({ url: "*://*/*", strategy: "helper" }, () => {});`,
+            `import { defs } from "./utils"; tt.params(defs); tt.onRequest({ url: "*://*/*", strategy: "helper" }, () => {});`,
+            `import { t } from "./utils"; tt.params({ x: { type: t, default: 1 } }); tt.onRequest({ url: "*://*/*", strategy: "helper" }, () => {});`,
         ]) {
             const c = compileScript(code, { importModule: () => makeStubModule() });
             expect(c.error, code).toBeNull();
@@ -64,33 +64,33 @@ describe("imported param definitions", () => {
     });
 
     it("a genuinely invalid inline def still errors", () => {
-        const c = compileScript(`wt.params({ x: { default: 1 } }); wt.onRequest({ url: "*://*/*", strategy: "helper" }, () => {});`, { importModule: () => makeStubModule() });
+        const c = compileScript(`tt.params({ x: { default: 1 } }); tt.onRequest({ url: "*://*/*", strategy: "helper" }, () => {});`, { importModule: () => makeStubModule() });
         expect(c.error).toMatch(/parameter "x" needs a type/);
     });
 
     it("compileWithLibs resolves imports against the stored scripts (real defs)", () => {
         const scripts = [{ id: "u", name: "utils", code: UTILS }];
-        const c = compileWithLibs({ id: "m", name: "main.wiretrick", code: IMPORTER }, scripts, {});
+        const c = compileWithLibs({ id: "m", name: "main.tangitweak", code: IMPORTER }, scripts, {});
         expect(c.error).toBeNull();
         expect(c.paramDefs?.intercept_environments).toEqual({ type: "stringList", default: ["dev", "staging"], description: "environments" });
         expect(c.deps).toEqual(["utils"]);
-        const s = compileWithLibs({ id: "m", name: "main.wiretrick", code: SPREAD }, scripts, { m: { mode: "a" } });
+        const s = compileWithLibs({ id: "m", name: "main.tangitweak", code: SPREAD }, scripts, { m: { mode: "a" } });
         expect(s.error).toBeNull();
         expect(Object.keys(s.paramDefs || {})).toEqual(["verbose", "mode", "pick"]);
         expect(s.paramDefs?.pick).toEqual({ type: "enum", choices: ["x", "y"], default: "y" });
     });
 
     it("compileWithLibs stubs imports that don't resolve (missing / broken library)", () => {
-        const missing = compileWithLibs({ id: "m", name: "main.wiretrick", code: IMPORTER }, [], {});
+        const missing = compileWithLibs({ id: "m", name: "main.tangitweak", code: IMPORTER }, [], {});
         expect(missing.error).toBeNull();
         expect(missing.meta.active).toBe(true);
-        const broken = compileWithLibs({ id: "m", name: "main.wiretrick", code: IMPORTER }, [{ id: "u", name: "utils", code: "throw new Error('boom')" }], {});
+        const broken = compileWithLibs({ id: "m", name: "main.tangitweak", code: IMPORTER }, [{ id: "u", name: "utils", code: "throw new Error('boom')" }], {});
         expect(broken.error).toBeNull();
         expect(broken.meta.active).toBe(true);
     });
 
     it("compileForStorage (MV2) captures imported defs when given the stored scripts", async () => {
-        const c = await compileForStorage(IMPORTER, "main.wiretrick", undefined, { id: "m", scripts: [{ id: "u", name: "utils", code: UTILS }] });
+        const c = await compileForStorage(IMPORTER, "main.tangitweak", undefined, { id: "m", scripts: [{ id: "u", name: "utils", code: UTILS }] });
         expect(c.error).toBeNull();
         expect(c.paramDefs.intercept_environments?.type).toBe("stringList");
     });
@@ -103,7 +103,7 @@ describe("saveScript with imported params", () => {
 
     it("stores paramDefs from the imported def and no compile error", async () => {
         await saveScript({ id: "u", name: "utils", code: UTILS });
-        const s = await saveScript({ id: "m", name: "main.wiretrick", code: IMPORTER });
+        const s = await saveScript({ id: "m", name: "main.tangitweak", code: IMPORTER });
         expect(s.error).toBeNull();
         expect(s.meta.active).toBe(true);
         expect(s.paramDefs?.intercept_environments).toMatchObject({ type: "stringList" });
@@ -111,7 +111,7 @@ describe("saveScript with imported params", () => {
 
     it("saving the library refreshes the importers' paramDefs", async () => {
         await saveScript({ id: "u", name: "utils", code: `export const envParam = { type: "boolean", default: true };` });
-        await saveScript({ id: "m", name: "main.wiretrick", code: IMPORTER });
+        await saveScript({ id: "m", name: "main.tangitweak", code: IMPORTER });
         await saveScript({ id: "u", code: UTILS });
         const main = (await listScripts()).find((x) => x.id === "m")!;
         expect(main.paramDefs?.intercept_environments).toMatchObject({ type: "stringList" });
@@ -119,7 +119,7 @@ describe("saveScript with imported params", () => {
     });
 
     it("a script saved before its library exists is fixed once the library is saved", async () => {
-        const first = await saveScript({ id: "m", name: "main.wiretrick", code: IMPORTER });
+        const first = await saveScript({ id: "m", name: "main.tangitweak", code: IMPORTER });
         expect(first.error).toBeNull();
         await saveScript({ id: "u", name: "utils", code: UTILS });
         const main = (await listScripts()).find((x) => x.id === "m")!;
@@ -128,7 +128,7 @@ describe("saveScript with imported params", () => {
 
     it("param values of the importer apply to imported defs", async () => {
         await saveScript({ id: "u", name: "utils", code: UTILS });
-        await saveScript({ id: "m", name: "main.wiretrick", code: `import { envParam } from "./utils";\nconst p = wt.params({ e: envParam });\nif (p.e.includes("prod")) wt.onRequest({ url: "*://*/*", strategy: "helper" }, () => {});` });
+        await saveScript({ id: "m", name: "main.tangitweak", code: `import { envParam } from "./utils";\nconst p = tt.params({ e: envParam });\nif (p.e.includes("prod")) tt.onRequest({ url: "*://*/*", strategy: "helper" }, () => {});` });
         await setParamValue("m", "e", ["prod"]);
         const main = (await listScripts()).find((x) => x.id === "m")!;
         expect(main.meta.active).toBe(true);

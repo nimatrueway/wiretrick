@@ -10,7 +10,7 @@ export const toolbar = proxy({
     save: { state: "saved" as SaveState, disabled: true, dim: false },
     /** the open script's Enabled switch; null hides it (settings.yaml, data files, libraries, the typings) */
     enabled: null as boolean | null,
-    /** wt-api.d.ts is shown read-only */
+    /** tt-api.d.ts is shown read-only */
     typings: false,
     /** the status line; with `onClick` it is a link-like action */
     status: { text: "", cls: "", onClick: null as (() => void) | null },

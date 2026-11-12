@@ -169,11 +169,11 @@ const bad: string = useSnapshot(s).n;
         }
     });
 
-    it("an .svg import is its markup, a string, in the synced folder (wt-api.d.ts; real tsc)", () => {
+    it("an .svg import is its markup, a string, in the synced folder (tt-api.d.ts; real tsc)", () => {
         const dir = mkdtempSync(join(process.cwd(), ".tmp-svg-typings-"));
         try {
             writeFileSync(join(dir, "tsconfig.json"), tsconfigText());
-            writeFileSync(join(dir, "wt-api.d.ts"), readFileSync("src/types/wt-api.d.ts", "utf8"));
+            writeFileSync(join(dir, "tt-api.d.ts"), readFileSync("src/types/tt-api.d.ts", "utf8"));
             mkdirSync(join(dir, "icons"));
             writeFileSync(join(dir, "icons", "logo.svg"), "<svg/>");
             writeFileSync(join(dir, "c.ts"), `import logo from "./icons/logo.svg";\nexport const s: string = logo;\nexport const n: number = logo;\n`);

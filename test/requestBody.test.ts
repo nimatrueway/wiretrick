@@ -124,10 +124,10 @@ describe("page strategy: fetch / XHR bodies", () => {
             s.reload([
                 makeScript(
                     "a",
-                    `wt.onRequest({ url: "*://x.test/*", strategy: "page" }, (c) => ${SEEN});
-wt.onResponseBody({ url: "*://x.test/*", strategy: "page" }, (c, body) => body + ":" + c.json().n);`
+                    `tt.onRequest({ url: "*://x.test/*", strategy: "page" }, (c) => ${SEEN});
+tt.onResponseBody({ url: "*://x.test/*", strategy: "page" }, (c, body) => body + ":" + c.json().n);`
                 ),
-                makeScript("b", `wt.replaceResponse({ url: "*://x.test/*", strategy: "page" }, (c) => "replaced " + c.requestBody);`),
+                makeScript("b", `tt.replaceResponse({ url: "*://x.test/*", strategy: "page" }, (c) => "replaced " + c.requestBody);`),
             ]);
             const d: any = await s.runRequestDecision(url, "POST", -1, '{"n":7}');
             expect(seen(d.url)).toEqual({ kind: "text", body: '{"n":7}', json: { n: 7 } });
@@ -162,8 +162,8 @@ describe("debugger strategy: Fetch.requestPaused post data", () => {
         c.reload([
             makeScript(
                 "a",
-                `wt.onRequest({ url: "*://x.test/*", strategy: "debugger" }, (c) => ${SEEN});
-wt.onResponseBody({ url: "*://x.test/*", strategy: "debugger" }, (c, body) => body + "|" + c.requestBody);`
+                `tt.onRequest({ url: "*://x.test/*", strategy: "debugger" }, (c) => ${SEEN});
+tt.onResponseBody({ url: "*://x.test/*", strategy: "debugger" }, (c, body) => body + "|" + c.requestBody);`
             ),
         ]);
         return c;
@@ -229,8 +229,8 @@ describe("extension strategy: webRequest requestBody", () => {
         s.reload([
             makeScript(
                 "a",
-                `wt.onRequest({ url: "*://x.test/*", strategy: "extension" }, (c) => (c.json() ? ${SEEN} : undefined));
-wt.onResponseHeaders({ url: "*://x.test/*", strategy: "extension" }, (c) => ({ headers: { set: { "x-req": c.requestBody ?? "none" } } }));`
+                `tt.onRequest({ url: "*://x.test/*", strategy: "extension" }, (c) => (c.json() ? ${SEEN} : undefined));
+tt.onResponseHeaders({ url: "*://x.test/*", strategy: "extension" }, (c) => ({ headers: { set: { "x-req": c.requestBody ?? "none" } } }));`
             ),
         ]);
         const details = { url: "https://x.test/a", method: "POST", tabId: 1, type: "xmlhttprequest", requestId: "r1", requestHeaders: [], responseHeaders: [], statusCode: 200, statusLine: "HTTP/1.1 200 OK" };
@@ -286,8 +286,8 @@ describe("helper strategy: reqBody chunks", () => {
         p.reload([
             makeScript(
                 "a",
-                `wt.onRequest({ url: "https://x.test/*", strategy: "helper" }, (c) => ${SEEN});
-wt.onResponseBody({ url: "https://x.test/*", strategy: "helper" }, (c, body) => body + "|" + c.json().n);`
+                `tt.onRequest({ url: "https://x.test/*", strategy: "helper" }, (c) => ${SEEN});
+tt.onResponseBody({ url: "https://x.test/*", strategy: "helper" }, (c, body) => body + "|" + c.json().n);`
             ),
         ]);
         await settle();
@@ -314,7 +314,7 @@ wt.onResponseBody({ url: "https://x.test/*", strategy: "helper" }, (c, body) => 
 
 describe("rules strategy", () => {
     it("reading ctx.requestBody / ctx.json() is an error (no real request)", async () => {
-        const c = compileScript(`wt.onRequest({ url: "*://a.test/*", strategy: "rules" }, (ctx) => (ctx.json()?.x ? { block: true } : undefined));`);
+        const c = compileScript(`tt.onRequest({ url: "*://a.test/*", strategy: "rules" }, (ctx) => (ctx.json()?.x ? { block: true } : undefined));`);
         const r = await probeScriptRules(c.handlers);
         expect(r.errors[0]).toMatch(/ctx\.json/);
     });

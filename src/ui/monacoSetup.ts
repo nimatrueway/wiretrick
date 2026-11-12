@@ -1,6 +1,6 @@
 /**
  * Monaco loader + editor configuration. Uses the classic AMD build (copied
- * into dist/lib/monaco) and wires TS IntelliSense to the `wt` API typings.
+ * into dist/lib/monaco) and wires TS IntelliSense to the `tt` API typings.
  */
 
 import {
@@ -31,16 +31,16 @@ import { builtinPaths, builtinSpec } from "../shared/builtinSpecs";
 import { MANIFEST_FILE, MANIFEST_SCHEMA } from "../shared/packageMetadata";
 
 let monacoApi: any = null;
-let wtApiDts = "";
+let ttApiDts = "";
 
-/** wt-api.d.ts as loaded into IntelliSense (for the read-only Code view) */
-export const apiTypingsText = (): string => wtApiDts;
+/** tt-api.d.ts as loaded into IntelliSense (for the read-only Code view) */
+export const apiTypingsText = (): string => ttApiDts;
 
 /** the TS worker's compiler options (`ts`: Monaco's typescript namespace or the typescript package) */
 export function editorCompilerOptions(ts: { ScriptTarget: any; ModuleKind: any; ModuleResolutionKind: any }): Record<string, any> {
     return {
         // scripts run in current browsers: offer the newest JS/DOM APIs
-        // (wt-api.d.ts adds web APIs newer than the bundled TypeScript)
+        // (tt-api.d.ts adds web APIs newer than the bundled TypeScript)
         target: ts.ScriptTarget.ESNext,
         // Monaco passes options straight to the TS API (no tsconfig parsing),
         // so libs must be file names — "dom" alone silently loads nothing
@@ -102,7 +102,7 @@ export async function loadMonaco(): Promise<any> {
             chrome.runtime.getURL("lib/monaco/vs/base/worker/workerMain.js"),
     };
 
-    wtApiDts = await fetch(chrome.runtime.getURL("lib/wt-api.d.ts")).then((r) => r.text());
+    ttApiDts = await fetch(chrome.runtime.getURL("lib/tt-api.d.ts")).then((r) => r.text());
 
     await new Promise<void>((resolve, reject) => {
         (window as any).require.config({ paths: { vs: "lib/monaco/vs" } });
@@ -113,10 +113,10 @@ export async function loadMonaco(): Promise<any> {
 
     monacoApi.languages.typescript.typescriptDefaults.setExtraLibs([
         {
-            content: wtApiDts,
+            content: ttApiDts,
             filePath: API_TYPINGS_URI,
         },
-        { content: JSON_FALLBACK_DTS, filePath: "file:///__wt__/json-modules.d.ts" },
+        { content: JSON_FALLBACK_DTS, filePath: "file:///__tt__/json-modules.d.ts" },
     ]);
     monacoApi.languages.typescript.typescriptDefaults.setCompilerOptions(editorCompilerOptions(monacoApi.languages.typescript));
     // the worker gets every script's model when it (re)starts, not only the
@@ -125,7 +125,7 @@ export async function loadMonaco(): Promise<any> {
     registerTsHover(monacoApi);
     monacoApi.languages.json?.jsonDefaults?.setDiagnosticsOptions({
         validate: true,
-        schemas: [{ uri: "wiretrick://schema/metadata.json", fileMatch: ["**/" + MANIFEST_FILE], schema: MANIFEST_SCHEMA }],
+        schemas: [{ uri: "tangitweak://schema/metadata.json", fileMatch: ["**/" + MANIFEST_FILE], schema: MANIFEST_SCHEMA }],
     });
 
     return monacoApi;
@@ -145,7 +145,7 @@ export function setDataFileTypings(files: { path: string; text: string }[]): str
     const want = new Map<string, string>();
     const changed: string[] = [];
     for (const f of files) {
-        // an .svg is typed by wt-api.d.ts's `declare module "*.svg"`
+        // an .svg is typed by tt-api.d.ts's `declare module "*.svg"`
         if (isSvgPath(f.path)) continue;
         const decl = jsonDeclPath(f.path);
         const content = jsonModuleDts(f.text);
@@ -167,7 +167,7 @@ const packageLibs = new Map<string, { content: string; lib: { dispose(): void } 
 /**
  * Type package imports: the stored package typings (path → text, see
  * background/engine/packageImports) as extra libs under
- * `file:///.wiretrick/types/`, where the `paths` compiler option maps
+ * `file:///.tangitweak/types/`, where the `paths` compiler option maps
  * package URLs. Monaco re-checks open models when they change.
  */
 export function setPackageTypings(files: Record<string, string>): void {
@@ -236,10 +236,10 @@ async function colorize(monaco: any, text: string): Promise<ColoredText[]> {
     return [{ text }];
 }
 
-const SHOW_TYPE_COMMAND = "wt.hoverShowType";
-const HOVER_BACK_COMMAND = "wt.hoverBack";
+const SHOW_TYPE_COMMAND = "tt.hoverShowType";
+const HOVER_BACK_COMMAND = "tt.hoverBack";
 
-/** a type the hover drilled into: its name's offset in wt-api.d.ts */
+/** a type the hover drilled into: its name's offset in tt-api.d.ts */
 interface Drill {
     label: string;
     start: number;
@@ -256,7 +256,7 @@ interface DrillState {
  * flatten @example/@param into one paragraph and print signatures on one
  * line) with VS Code-style rendering of the same TS worker data.
  *
- * Types from wt-api.d.ts in a hover's signature (and its {@link}s to them)
+ * Types from tt-api.d.ts in a hover's signature (and its {@link}s to them)
  * are links that swap the same hover's content for that type's hover, with
  * a Back link. That rides on Monaco's hover verbosity mechanism, the one
  * API that re-asks a provider and redraws a hover part in place; its +/−
@@ -299,7 +299,7 @@ function registerTsHover(monaco: any): void {
         const row = link?.closest(".monaco-hover-content > *");
         const index = row ? Array.from(row.parentElement!.children).indexOf(row) : -1;
         pending = op;
-        ed.trigger("wt", "editor.action.increaseHoverVerbosityLevel", index >= 0 ? { index, focus: true } : { focus: true });
+        ed.trigger("tt", "editor.action.increaseHoverVerbosityLevel", index >= 0 ? { index, focus: true } : { focus: true });
     };
     monaco.editor.registerCommand(SHOW_TYPE_COMMAND, (_accessor: unknown, to: Drill) => {
         if (to && typeof to.start === "number") redrawHover({ label: String(to.label), start: to.start });
@@ -339,10 +339,10 @@ function registerTsHover(monaco: any): void {
             // the signature <pre> takes the Code view's font, like a code block
             const ed = monaco.editor.getEditors().find((e: any) => e.getModel() === model);
             const font = ed?.getOption(monaco.editor.EditorOption.fontInfo)?.fontFamily;
-            if (font) document.documentElement.style.setProperty("--wt-hover-code-font", font);
+            if (font) document.documentElement.style.setProperty("--tt-hover-code-font", font);
 
             let stack: Drill[] = [];
-            const previous: DrillState | undefined = context?.verbosityRequest?.previousHover?.wtDrill;
+            const previous: DrillState | undefined = context?.verbosityRequest?.previousHover?.ttDrill;
             if (context?.verbosityRequest) {
                 const op = pending;
                 pending = null;
@@ -356,7 +356,7 @@ function registerTsHover(monaco: any): void {
                 if (!info || model.isDisposed()) return null;
                 const back = stack.length > 1 ? stack[stack.length - 2].label : previous.root;
                 const contents = await hoverContents(info, nav, true, { start: top.start, length: 0 }, back);
-                return { range: previous.range, contents, canIncreaseVerbosity: true, wtDrill: { ...previous, stack } };
+                return { range: previous.range, contents, canIncreaseVerbosity: true, ttDrill: { ...previous, stack } };
             }
 
             const offset = model.getOffsetAt(position);
@@ -366,7 +366,7 @@ function registerTsHover(monaco: any): void {
             ]);
             if (!info || model.isDisposed()) return null;
             const inTypings = uri.toString() === API_TYPINGS_URI;
-            // hovering a wt-api.d.ts type: don't link it to itself
+            // hovering a tt-api.d.ts type: don't link it to itself
             const def = (defs ?? []).find((d: any) => d.fileName === API_TYPINGS_URI);
             const start = model.getPositionAt(info.textSpan.start);
             const end = model.getPositionAt(info.textSpan.start + info.textSpan.length);
@@ -374,7 +374,7 @@ function registerTsHover(monaco: any): void {
             const contents = await hoverContents(info, nav, inTypings, def?.textSpan ?? null);
             if (model.isDisposed()) return null;
             const state: DrillState = { root: previous?.root ?? model.getValueInRange(range), range: previous?.range ?? range, stack: [] };
-            return { range, contents, canIncreaseVerbosity: true, wtDrill: state };
+            return { range, contents, canIncreaseVerbosity: true, ttDrill: state };
         },
     });
 
@@ -462,10 +462,10 @@ function registerTsHover(monaco: any): void {
     });
 }
 
-export const STARTER_TEMPLATE = `wt.metadata({ description: "What this script does" });
+export const STARTER_TEMPLATE = `tt.metadata({ description: "What this script does" });
 
 // Adjustable parameters (editable in settings.yaml / the popup ⚙ dialog):
-const cfg = wt.params({
+const cfg = tt.params({
     host: { type: "string", default: "*.example.com", description: "Host pattern to intercept" },
     debug: { type: "boolean", default: true, description: "Log every request" },
 });
@@ -473,19 +473,19 @@ const cfg = wt.params({
 // Each handler takes a route: its URL pattern(s) and the strategy that runs it
 // (helper | page | extension | debugger | rules — see Help → Reference → Strategies).
 // Modify request headers / redirect / cancel:
-wt.onRequest({ url: \`*://\${cfg.host}/*\`, strategy: "helper" }, (ctx) => {
-    if (cfg.debug) wt.log("request to", ctx.url);
+tt.onRequest({ url: \`*://\${cfg.host}/*\`, strategy: "helper" }, (ctx) => {
+    if (cfg.debug) tt.log("request to", ctx.url);
     // return { redirect: "https://example.com/other" };
     // return { block: true };
     // return { headers: { set: { "x-debug": "1" } } };
 });
 
 // Modify response headers:
-// wt.onResponseHeaders({ url: \`*://\${cfg.host}/*\`, strategy: "helper" }, (ctx) => ({ headers: { set: { "access-control-allow-origin": "*" } } }));
+// tt.onResponseHeaders({ url: \`*://\${cfg.host}/*\`, strategy: "helper" }, (ctx) => ({ headers: { set: { "access-control-allow-origin": "*" } } }));
 
 // Replace the whole response body:
-// wt.replaceResponse({ url: \`*://\${cfg.host}/api/*\`, strategy: "helper" }, (ctx) => ({ mocked: true }));
+// tt.replaceResponse({ url: \`*://\${cfg.host}/api/*\`, strategy: "helper" }, (ctx) => ({ mocked: true }));
 
 // Modify the response body (more route options: exclude / methods / resourceTypes):
-// wt.onResponseBody({ url: \`*://\${cfg.host}/*\`, exclude: "*://*/*.png", strategy: "page" }, (ctx, body) => body.replace("foo", "bar"));
+// tt.onResponseBody({ url: \`*://\${cfg.host}/*\`, exclude: "*://*/*.png", strategy: "page" }, (ctx, body) => body.replace("foo", "bar"));
 `;

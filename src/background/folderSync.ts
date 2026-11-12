@@ -18,7 +18,7 @@
  *  - everything runs one-at-a-time through `serial()`: a poll never
  *    interleaves with a write.
  *  - when both sides changed, the newer one wins and the other copy is kept
- *    in .wiretrick-backup/ (nothing is silently lost).
+ *    in .tangitweak-backup/ (nothing is silently lost).
  *  - the folder is scanned recursively: subfolders are Folders, `.ts` files
  *    scripts (named by their path), `.json`/`.svg` files data files (`ownedData`
  *    is their `owned`). Dot-entries, node_modules and tooling config JSON
@@ -41,7 +41,7 @@ import { folderPathProblem, isConfigJsonPath, scriptFileName, scriptNameFromFile
 import { ancestorFolders, isInFolder } from "../shared/folders";
 import { PACKAGE_TYPINGS_KEY, TYPINGS_ROOT, type StoredTypings } from "../shared/packageImports";
 const POLL_MS = 1000;
-export const BACKUP_DIR = ".wiretrick-backup";
+export const BACKUP_DIR = ".tangitweak-backup";
 
 /** canonical script file name for a display name */
 function canonicalFileName(name: string): string {
@@ -356,7 +356,7 @@ async function pullChange(file: string, text: string, s: Script): Promise<boolea
         return false;
     }
     if (rec && rec.file === file && isStaleEcho(file, h)) {
-        dlogLevel("sync", "debug", `Folder sync: "${file}" reported an earlier version written by Wiretrick — kept script "${s.meta.name}" and rewrote the file`);
+        dlogLevel("sync", "debug", `Folder sync: "${file}" reported an earlier version written by TangiTweak — kept script "${s.meta.name}" and rewrote the file`);
         rewrite.add(s.id);
         scheduleReconcile();
         return false;
@@ -734,7 +734,7 @@ async function writeOut(ownedMap: Map<string, Owned>, id: string, file: string, 
 /**
  * Folders follow the explorer: missing ones are created (empty ones too),
  * ones deleted or moved away in the extension are removed — only when
- * empty, so files that aren't Wiretrick's stay. true when `known` changed.
+ * empty, so files that aren't TangiTweak's stay. true when `known` changed.
  */
 async function reconcileFoldersToDisk(): Promise<boolean> {
     const folders = await listFolders();
@@ -761,7 +761,7 @@ async function reconcileFoldersToDisk(): Promise<boolean> {
             await (await parentDir(path)).removeEntry(baseName(path));
             signal(writeKind);
         } catch (e: any) {
-            // not empty (files Wiretrick doesn't sync, or edits it left on disk)
+            // not empty (files TangiTweak doesn't sync, or edits it left on disk)
             if (e?.name !== "NotFoundError") continue;
         }
         known.delete(key);
@@ -998,7 +998,7 @@ async function exportSettings(base?: string): Promise<void> {
     }
 }
 
-/** write a Wiretrick-owned file unless it already has exactly this content */
+/** write a TangiTweak-owned file unless it already has exactly this content */
 async function ensureFile(fileName: string, content: string): Promise<void> {
     if (!dirHandle) return;
     try {
@@ -1021,7 +1021,7 @@ async function ensureSchemaFile(): Promise<void> {
  */
 async function ensureSupportFiles(): Promise<void> {
     try {
-        const dts = await fetch(chrome.runtime.getURL("lib/wt-api.d.ts")).then((r) => {
+        const dts = await fetch(chrome.runtime.getURL("lib/tt-api.d.ts")).then((r) => {
             if (!r.ok) throw new Error(`HTTP ${r.status}`);
             return r.text();
         });
@@ -1055,9 +1055,9 @@ function builtinTypingFiles(): Promise<Record<string, string>> {
 }
 
 /**
- * The package imports' typings under .wiretrick/types/ (the tsconfig maps
+ * The package imports' typings under .tangitweak/types/ (the tsconfig maps
  * package URLs there), as stored, and the built-ins' (valtio, React) under
- * .wiretrick/types/builtin/; package typings no script needs any more go.
+ * .tangitweak/types/builtin/; package typings no script needs any more go.
  * Dot folders aren't scanned, so these never come back as scripts or data.
  */
 async function ensurePackageTypingsFiles(): Promise<void> {
@@ -1095,7 +1095,7 @@ async function ensurePackageTypingsFiles(): Promise<void> {
             return kept;
         };
         if (await prune(root, `${TYPINGS_ROOT}/`)) return;
-        // no typings left: drop the folder, and .wiretrick too when that empties it
+        // no typings left: drop the folder, and .tangitweak too when that empties it
         const owner = await parentDir(TYPINGS_ROOT);
         await owner.removeEntry(baseName(TYPINGS_ROOT), { recursive: true });
         if (owner !== dirHandle && (await owner.values().next()).done) await (await parentDir(TYPINGS_ROOT.slice(0, TYPINGS_ROOT.lastIndexOf("/")))).removeEntry(owner.name);

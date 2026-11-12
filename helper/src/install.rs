@@ -8,7 +8,7 @@ use crate::ca::CA_NAME;
 use crate::paths::{config_dir, home};
 use crate::ui;
 
-pub const HOST_NAME: &str = "com.wiretrick.helper";
+pub const HOST_NAME: &str = "com.tangitweak.helper";
 
 /// (label, per-user NativeMessagingHosts dir or registry key)
 fn browser_targets() -> Vec<(&'static str, PathBuf)> {
@@ -67,7 +67,7 @@ fn manifest_json(exe: &Path, ids: &[String]) -> String {
         .collect();
     serde_json::to_string_pretty(&serde_json::json!({
         "name": HOST_NAME,
-        "description": "Wiretrick local interception helper (process strategy)",
+        "description": "TangiTweak local interception helper (process strategy)",
         "path": exe.to_string_lossy(),
         "type": "stdio",
         "allowed_origins": origins,
@@ -81,9 +81,9 @@ fn stable_exe() -> std::io::Result<PathBuf> {
     let dir = config_dir().join("bin");
     std::fs::create_dir_all(&dir)?;
     let dest = dir.join(if cfg!(windows) {
-        "wiretrick-helper.exe"
+        "tangitweak-helper.exe"
     } else {
-        "wiretrick-helper"
+        "tangitweak-helper"
     });
     let same = std::fs::canonicalize(&me).ok() == std::fs::canonicalize(&dest).ok();
     if !same {
@@ -116,7 +116,7 @@ fn reg(args: &[&str]) -> bool {
 pub fn install(o: &InstallOpts) -> Result<(), String> {
     if o.extension_ids.is_empty() {
         return Err(
-            "--extension-id is required (shown in Wiretrick's Settings → Local helper)".into(),
+            "--extension-id is required (shown in TangiTweak's Settings → Local helper)".into(),
         );
     }
     for id in &o.extension_ids {
@@ -368,7 +368,7 @@ mod tests {
     #[test]
     fn manifest_shape() {
         let m: serde_json::Value = serde_json::from_str(&manifest_json(
-            Path::new("/x/wiretrick-helper"),
+            Path::new("/x/tangitweak-helper"),
             &["abcdefghijklmnopabcdefghijklmnop".into()],
         ))
         .unwrap();

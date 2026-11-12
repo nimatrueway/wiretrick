@@ -85,7 +85,7 @@ describe("chrome.userScripts (MV3 isolated onPage)", () => {
             { worldId: "s1", csp: ISO_WORLD_CSP, messaging: true },
             { worldId: "s2", csp: ISO_WORLD_CSP, messaging: true },
         ]);
-        const r = m.registered.get("wt-iso-s1");
+        const r = m.registered.get("tt-iso-s1");
         expect(r).toMatchObject({ matches: ["<all_urls>"], allFrames: true, runAt: "document_start", world: "USER_SCRIPT", worldId: "s1" });
         // the prelude names the script and its routes; the code itself is fetched over L6
         expect(r.js[0].code).toContain('"s":"s1"');
@@ -93,8 +93,8 @@ describe("chrome.userScripts (MV3 isolated onPage)", () => {
         // the runtime inlined: Chrome injects a file only once per document, whatever registrations name it
         expect(r.js).toHaveLength(1);
         expect(r.js[0].code.endsWith("\n/*isolated runtime*/")).toBe(true);
-        expect(m.registered.get("wt-iso-s2").js[0].code).toContain("/*isolated runtime*/");
-        expect([...m.registered.keys()]).toEqual(["wt-iso-s1", "wt-iso-s2"]);
+        expect(m.registered.get("tt-iso-s2").js[0].code).toContain("/*isolated runtime*/");
+        expect([...m.registered.keys()]).toEqual(["tt-iso-s1", "tt-iso-s2"]);
     });
 
     it("before Chrome 133 (no per-script worlds): the default world is configured once, no worldId", async () => {
@@ -104,7 +104,7 @@ describe("chrome.userScripts (MV3 isolated onPage)", () => {
             { id: "s2", routes: [route("https://b.example/*")] },
         ]);
         expect(m.worlds).toEqual([{ csp: ISO_WORLD_CSP, messaging: true }]);
-        expect(m.registered.get("wt-iso-s1").worldId).toBeUndefined();
+        expect(m.registered.get("tt-iso-s1").worldId).toBeUndefined();
     });
 
     it("re-syncing on save: unchanged registrations stay, changed routes update, removed scripts go (and their worlds reset)", async () => {
@@ -121,8 +121,8 @@ describe("chrome.userScripts (MV3 isolated onPage)", () => {
         ]);
         expect(m.calls).toEqual([]);
         await syncUserScripts([{ id: "s1", routes: [route("https://c.example/*")] }, { id: "s3", routes: [route("https://d.example/*")] }]);
-        expect(m.calls).toEqual(["unregister wt-iso-s2", "reset s2", "update wt-iso-s1", "register wt-iso-s3"]);
-        expect(m.registered.get("wt-iso-s1").js[0].code).toContain("https://c.example/*");
+        expect(m.calls).toEqual(["unregister tt-iso-s2", "reset s2", "update tt-iso-s1", "register tt-iso-s3"]);
+        expect(m.registered.get("tt-iso-s1").js[0].code).toContain("https://c.example/*");
         // other extensions' ids (or a user's) are never touched
         m.registered.set("other", { id: "other", js: [] });
         await syncUserScripts([]);
@@ -139,7 +139,7 @@ describe("chrome.userScripts (MV3 isolated onPage)", () => {
         expect(await userScriptsStatus(true)).toBe("ok");
         expect(seen).toEqual(["ok"]);
         await syncUserScripts();
-        expect([...m.registered.keys()]).toEqual(["wt-iso-s1"]);
+        expect([...m.registered.keys()]).toEqual(["tt-iso-s1"]);
     });
 
     it("onSite: one MAIN-world registration per script; only syncs after the first run the new units into open tabs", async () => {
@@ -147,12 +147,12 @@ describe("chrome.userScripts (MV3 isolated onPage)", () => {
         m.us.execute = vi.fn(async () => []);
         m.chrome.tabs = { query: vi.fn(async () => [{ id: 1 }, { id: 2, discarded: true }, { id: 3 }]) };
         await syncUserScripts([], [{ id: "s1", units: ["u1", "lib"] }]);
-        const reg = m.registered.get("wt-main-s1");
+        const reg = m.registered.get("tt-main-s1");
         expect(reg).toMatchObject({ matches: ["*://*/*"], allFrames: true, runAt: "document_start", world: "MAIN", js: [{ code: "u1" }, { code: "lib" }] });
         expect(m.us.execute).not.toHaveBeenCalled();
         // a save: changed units update the registration and run in tabs that aren't discarded
         await syncUserScripts([], [{ id: "s1", units: ["u2", "lib"] }, { id: "s2", units: ["v1"] }]);
-        expect(m.calls).toEqual(["register wt-main-s1", "update wt-main-s1", "register wt-main-s2"]);
+        expect(m.calls).toEqual(["register tt-main-s1", "update tt-main-s1", "register tt-main-s2"]);
         expect(m.us.execute.mock.calls.map(([a]: any) => [a.target.tabId, a.world, a.js.map((j: any) => j.code)])).toEqual([
             [1, "MAIN", ["u2", "v1"]],
             [3, "MAIN", ["u2", "v1"]],
@@ -160,11 +160,19 @@ describe("chrome.userScripts (MV3 isolated onPage)", () => {
         // unchanged: nothing re-registered or run; undefined keeps the onSite list
         m.us.execute.mockClear();
         await syncUserScripts([{ id: "s1", routes: [route("https://a.example/*")] }]);
-        expect(m.registered.has("wt-main-s1") && m.registered.has("wt-main-s2")).toBe(true);
+        expect(m.registered.has("tt-main-s1") && m.registered.has("tt-main-s2")).toBe(true);
         expect(m.us.execute).not.toHaveBeenCalled();
         await syncUserScripts([], [{ id: "s2", units: ["v1"] }]);
-        expect(m.registered.has("wt-main-s1")).toBe(false);
+        expect(m.registered.has("tt-main-s1")).toBe(false);
         expect(m.us.execute).not.toHaveBeenCalled();
+    });
+
+    it("registrations under an older version's ids are removed", async () => {
+        const m = mockChrome();
+        m.registered.set("wt-iso-s1", { id: "wt-iso-s1" });
+        m.registered.set("wt-main-s1", { id: "wt-main-s1" });
+        await syncUserScripts([{ id: "s1", routes: [route("https://a.example/*")] }], []);
+        expect([...m.registered.keys()]).toEqual(["tt-iso-s1"]);
     });
 
     it("the Problems text says how to turn them on", () => {

@@ -146,24 +146,24 @@ const setEnabled = (id: string, enabled: boolean): Promise<void> =>
 // ---------- the sample scripts ----------
 interface SampleScript { id: string; name: string; code: string }
 const SCRIPTS: Record<string, SampleScript> = {
-    matcherRedirect: { id: "s_matcher", name: "redirect main frame.wiretrick", code: `wt.onRequest({ url: "${ORIGIN}/redirect-target", strategy: "extension" }, (ctx) => ({ redirect: "${ORIGIN}/redirected" }));` },
-    cancel: { id: "s_cancel", name: "cancel blocked.js.wiretrick", code: `wt.onRequest({ url: "${ORIGIN}/blocked.js", strategy: "extension" }, () => ({ block: true }));` },
-    reqHeaders: { id: "s_reqheaders", name: "request header.wiretrick", code: `wt.onRequest({ url: "${ORIGIN}/echo-headers", strategy: "extension" }, () => ({ headers: { set: { "x-resso": "injected" } } }));` },
-    resHeaders: { id: "s_resheaders", name: "response header.wiretrick", code: `wt.onResponseHeaders({ url: "${ORIGIN}/api", strategy: "extension" }, () => ({ headers: { set: { "x-mock-header": "hello" } } }));` },
-    replaceMain: { id: "s_replacemain", name: "replace main frame.wiretrick", code: `wt.replaceResponse({ url: "${ORIGIN}/serve-me", strategy: "debugger" }, () => "<html><body><h1>SERVE-PAGE-WORKS</h1></body></html>");` },
-    replaceFetch: { id: "s_replacefetch", name: "replace fetch body.wiretrick", code: `wt.replaceResponse({ url: "${ORIGIN}/api-replace", strategy: "page" }, () => JSON.stringify({ value: "REPLACED-BY-HOOK" }));` },
-    modifyTierA: { id: "s_modifya", name: "modify response (hook tier).wiretrick", code: `wt.onResponseBody({ url: "${ORIGIN}/api", strategy: "page" }, (ctx, body) => body.replace("original-value", "TIERA-VALUE"));` },
-    modifyCdp: { id: "s_modifycdp", name: "modify response (cdp tier).wiretrick", code: `wt.onResponseBody({ url: "${ORIGIN}/app.js", strategy: "debugger" }, (ctx, body) => body.replace("ORIGINAL-MARKER", "CDP-MARKER"));` },
-    badgeProbe: { id: "s_badge", name: "badge probe.wiretrick", code: `wt.onRequest({ url: "${ORIGIN}/page-fetch*", strategy: "page" }, () => {});` },
-    modifyMain: { id: "s_modifymain", name: "modify main frame html.wiretrick", code: `wt.onResponseBody({ url: "${ORIGIN}/page-title", strategy: "debugger" }, (ctx, body) => (typeof body === "string" ? body : new TextDecoder().decode(body)).replace("SITE-TITLE-PLACEHOLDER", "CDP-HTML-MARKER"));\nwt.onPage("${ORIGIN}/page-title", () => { document.title = "DOM-HOOK-TITLE"; });` },
+    matcherRedirect: { id: "s_matcher", name: "redirect main frame.tangitweak", code: `tt.onRequest({ url: "${ORIGIN}/redirect-target", strategy: "extension" }, (ctx) => ({ redirect: "${ORIGIN}/redirected" }));` },
+    cancel: { id: "s_cancel", name: "cancel blocked.js.tangitweak", code: `tt.onRequest({ url: "${ORIGIN}/blocked.js", strategy: "extension" }, () => ({ block: true }));` },
+    reqHeaders: { id: "s_reqheaders", name: "request header.tangitweak", code: `tt.onRequest({ url: "${ORIGIN}/echo-headers", strategy: "extension" }, () => ({ headers: { set: { "x-resso": "injected" } } }));` },
+    resHeaders: { id: "s_resheaders", name: "response header.tangitweak", code: `tt.onResponseHeaders({ url: "${ORIGIN}/api", strategy: "extension" }, () => ({ headers: { set: { "x-mock-header": "hello" } } }));` },
+    replaceMain: { id: "s_replacemain", name: "replace main frame.tangitweak", code: `tt.replaceResponse({ url: "${ORIGIN}/serve-me", strategy: "debugger" }, () => "<html><body><h1>SERVE-PAGE-WORKS</h1></body></html>");` },
+    replaceFetch: { id: "s_replacefetch", name: "replace fetch body.tangitweak", code: `tt.replaceResponse({ url: "${ORIGIN}/api-replace", strategy: "page" }, () => JSON.stringify({ value: "REPLACED-BY-HOOK" }));` },
+    modifyTierA: { id: "s_modifya", name: "modify response (hook tier).tangitweak", code: `tt.onResponseBody({ url: "${ORIGIN}/api", strategy: "page" }, (ctx, body) => body.replace("original-value", "TIERA-VALUE"));` },
+    modifyCdp: { id: "s_modifycdp", name: "modify response (cdp tier).tangitweak", code: `tt.onResponseBody({ url: "${ORIGIN}/app.js", strategy: "debugger" }, (ctx, body) => body.replace("ORIGINAL-MARKER", "CDP-MARKER"));` },
+    badgeProbe: { id: "s_badge", name: "badge probe.tangitweak", code: `tt.onRequest({ url: "${ORIGIN}/page-fetch*", strategy: "page" }, () => {});` },
+    modifyMain: { id: "s_modifymain", name: "modify main frame html.tangitweak", code: `tt.onResponseBody({ url: "${ORIGIN}/page-title", strategy: "debugger" }, (ctx, body) => (typeof body === "string" ? body : new TextDecoder().decode(body)).replace("SITE-TITLE-PLACEHOLDER", "CDP-HTML-MARKER"));\ntt.onPage("${ORIGIN}/page-title", () => { document.title = "DOM-HOOK-TITLE"; });` },
 };
 for (const s of Object.values(SCRIPTS)) await saveScript(s.id, s.code, s.name);
 
 // ---------- 0. imported param definitions + param-gated library ----------
 {
     const send = (msg: any): Promise<any> => mgr.evaluate((m) => new Promise((r) => chrome.runtime.sendMessage(m, (x) => r(x ?? null))), msg);
-    await saveScript("s_plib", `export const envParam = { type: "stringList", default: ["dev"] } as const;\nconst p = wt.params({ on: { type: "boolean", default: false } });\nif (p.on) wt.onRequest({ url: "*://never.invalid/*", strategy: "extension" }, () => {});`, "param-lib");
-    const user = await saveScript("s_puser", `import { envParam } from "./param-lib";\nwt.params({ intercept_environments: envParam });\nwt.onRequest({ url: "*://never.invalid/*", strategy: "extension" }, () => {});`, "param-user.wiretrick");
+    await saveScript("s_plib", `export const envParam = { type: "stringList", default: ["dev"] } as const;\nconst p = tt.params({ on: { type: "boolean", default: false } });\nif (p.on) tt.onRequest({ url: "*://never.invalid/*", strategy: "extension" }, () => {});`, "param-lib");
+    const user = await saveScript("s_puser", `import { envParam } from "./param-lib";\ntt.params({ intercept_environments: envParam });\ntt.onRequest({ url: "*://never.invalid/*", strategy: "extension" }, () => {});`, "param-user.tangitweak");
     check("imported param def: no bogus compile error, def captured", !user?.error && user?.paramDefs?.intercept_environments?.type === "stringList", JSON.stringify({ error: user?.error?.split("\n")[0], defs: user?.paramDefs }));
     const lib = (await send({ type: "listScripts" })).find((s: any) => s.id === "s_plib");
     check("param-gated library stored as a library with params", lib?.meta?.active === false && lib?.paramDefs?.on?.type === "boolean", JSON.stringify(lib?.meta));
@@ -174,14 +174,14 @@ for (const s of Object.values(SCRIPTS)) await saveScript(s.id, s.code, s.name);
     await send({ type: "deleteScript", id: "s_plib" });
 
     // param `parse`: the script gets the parsed value, defs are stored without the function
-    const pp = await saveScript("s_pparse", 'const c = wt.params({ origin: { type: "string", default: "https://a.com", parse: (s) => new URL(s) } });\nwt.onRequest({ url: `*://${c.origin.host}/never/*`, strategy: "extension" }, () => {});', "param-parse.wiretrick");
+    const pp = await saveScript("s_pparse", 'const c = tt.params({ origin: { type: "string", default: "https://a.com", parse: (s) => new URL(s) } });\ntt.onRequest({ url: `*://${c.origin.host}/never/*`, strategy: "extension" }, () => {});', "param-parse.tangitweak");
     check("param parse: parsed value feeds the route, def stored without parse", !pp?.error && pp?.meta?.match?.[0] === "*://a.com/never/*" && pp?.paramDefs?.origin?.type === "string" && !("parse" in pp.paramDefs.origin), JSON.stringify({ error: pp?.error?.split("\n")[0], match: pp?.meta?.match, defs: pp?.paramDefs }));
     await send({ type: "setScriptParam", scriptId: "s_pparse", key: "origin", value: "xyz" });
     const ppBroken = (await send({ type: "listScripts" })).find((s: any) => s.id === "s_pparse");
     check("param parse failure: script error naming the param and value", /param "origin": parse failed for value "xyz"/.test(ppBroken?.error || ""), String(ppBroken?.error).split("\n")[0]);
     const ppProblem = await mgr.waitForFunction(() => [...document.querySelectorAll("#problems-list .pb-item.error")].some((l) => /param "origin": parse failed for value "xyz"/.test(l.textContent || "") && /\[Ln 1\b/.test(l.textContent || "")), null, { timeout: 8000 }).then(() => true, () => false);
     const ppLogged = await mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line")].map((l) => (l as HTMLElement).dataset.text || l.textContent || "").filter((t) => /parse failed for value "xyz"/.test(t)));
-    check("param parse failure: a compile error in Problems at the wt.params line, not in the Log", ppProblem && !ppLogged.length, JSON.stringify({ ppProblem, ppLogged }));
+    check("param parse failure: a compile error in Problems at the tt.params line, not in the Log", ppProblem && !ppLogged.length, JSON.stringify({ ppProblem, ppLogged }));
     await send({ type: "deleteScript", id: "s_pparse" });
 }
 
@@ -211,7 +211,7 @@ await p2.waitForTimeout(300);
 check("replaceResponse: main frame in place (cdp → debugger tier, URL kept)", (await p2.content()).includes("SERVE-PAGE-WORKS") && p2.url() === `${ORIGIN}/serve-me`, `url=${p2.url()}`);
 await p2.close();
 // "extension" listed first: Chromium's webRequest can only redirect — page loads go to serve.html
-await saveScript("s_replaceserve", `wt.replaceResponse({ url: "${ORIGIN}/serve-wr", strategy: "extension" }, () => "<html><body><h1>SERVE-PAGE-WORKS</h1></body></html>");`, "replace via serve page.wiretrick");
+await saveScript("s_replaceserve", `tt.replaceResponse({ url: "${ORIGIN}/serve-wr", strategy: "extension" }, () => "<html><body><h1>SERVE-PAGE-WORKS</h1></body></html>");`, "replace via serve page.tangitweak");
 await new Promise((r) => setTimeout(r, 600));
 const p2b = await newPage("/serve-wr");
 check("replaceResponse: webrequest-first main frame via serve page (redirect)", (await p2b.content()).includes("SERVE-PAGE-WORKS") && p2b.url().includes("/serve.html"), `url=${p2b.url()}`);
@@ -243,12 +243,12 @@ check("popup: activeScripts lists the scripts behind the badge", badge.ids.lengt
 {
     const tabId: number | undefined = await mgr.evaluate(() => new Promise((r) => chrome.tabs.query({}, (all) => r(all.find((t) => t.url && t.url.includes("/page-fetch"))?.id))));
     const ids = (): Promise<string[]> => mgr.evaluate((tabId) => new Promise((r) => chrome.runtime.sendMessage({ type: "activeScripts", tabId }, r)), tabId);
-    await saveScript("s_badgepage", `wt.onPage({ url: "${ORIGIN}/page-fetch*", when: "document_start" }, () => { document.documentElement.dataset.badgePage = "1"; });`, "badge page.wiretrick");
+    await saveScript("s_badgepage", `tt.onPage({ url: "${ORIGIN}/page-fetch*", when: "document_start" }, () => { document.documentElement.dataset.badgePage = "1"; });`, "badge page.tangitweak");
     await p3.waitForFunction(() => document.documentElement.dataset.badgePage === "1", null, { timeout: 8000 }).catch(() => {});
     await new Promise((r) => setTimeout(r, 400));
     const ran = await ids();
     check("badge: onPage code that ran on the open page counts", ran.includes("s_badgepage") && ran.length === 4, JSON.stringify(ran));
-    await saveScript("s_badgebad", `wt.onPage("${ORIGIN}/page-fetch*", () => { throw new Error("badge-boom"); });`, "badge bad.wiretrick");
+    await saveScript("s_badgebad", `tt.onPage("${ORIGIN}/page-fetch*", () => { throw new Error("badge-boom"); });`, "badge bad.tangitweak");
     let look: any = null;
     for (let i = 0; i < 30; i++) {
         await new Promise((r) => setTimeout(r, 200));
@@ -271,17 +271,17 @@ function Count({ v }: { v: string }) {
     return <b>{n}</b>;
 }
 function Panel() { return <div><Count v="${v}" /></div>; }
-wt.onPage("${ORIGIN}/page-fetch*", (ctx) => { ctx.mount(<Panel />); });`;
+tt.onPage("${ORIGIN}/page-fetch*", (ctx) => { ctx.mount(<Panel />); });`;
     const hotAt = async (want: string): Promise<string | undefined> => {
         await p3.waitForFunction((w: string) => (document.documentElement.dataset.hot || "").endsWith(":" + w), want, { timeout: 8000 }).catch(() => {});
         await new Promise((r) => setTimeout(r, 300));
         return p3.evaluate(() => document.documentElement.dataset.hot);
     };
-    await saveScript("s_hot", hotCode("V1", false), "hot mount.wiretrick");
+    await saveScript("s_hot", hotCode("V1", false), "hot mount.tangitweak");
     const h1 = await hotAt("V1");
-    await saveScript("s_hot", hotCode("V2", false), "hot mount.wiretrick");
+    await saveScript("s_hot", hotCode("V2", false), "hot mount.tangitweak");
     const h2 = await hotAt("V2");
-    await saveScript("s_hot", hotCode("V3", true), "hot mount.wiretrick");
+    await saveScript("s_hot", hotCode("V3", true), "hot mount.tangitweak");
     const h3 = await hotAt("V3");
     check("ctx.mount hot refresh: a save keeps a nested component's state and re-runs its effects; a hook change remounts it", h1 === "1:V1" && h2 === "2:V2" && h3 === "1:V3", JSON.stringify([h1, h2, h3]));
     await send({ type: "deleteScript", id: "s_hot" });
@@ -292,15 +292,15 @@ wt.onPage("${ORIGIN}/page-fetch*", (ctx) => { ctx.mount(<Panel />); });`;
         el.className = "wtm";
         document.body.appendChild(el);
     });
-    await saveScript("s_every", `wt.onPage("${ORIGIN}/page-fetch*", (ctx) => { ctx.mount(".wtm", (el) => <b>{el.className}</b>, { position: "overlay" }); });`, "every mount.wiretrick");
-    await p3.waitForFunction(() => !!document.querySelector(".wtm > wiretrick-mount"), null, { timeout: 8000 }).catch(() => {});
+    await saveScript("s_every", `tt.onPage("${ORIGIN}/page-fetch*", (ctx) => { ctx.mount(".wtm", (el) => <b>{el.className}</b>, { position: "overlay" }); });`, "every mount.tangitweak");
+    await p3.waitForFunction(() => !!document.querySelector(".wtm > tangitweak-mount"), null, { timeout: 8000 }).catch(() => {});
     await p3.evaluate(() => document.body.appendChild(Object.assign(document.createElement("i"), { className: "wtm" })));
-    await p3.waitForFunction(() => document.querySelectorAll(".wtm > wiretrick-mount").length === 2, null, { timeout: 5000 }).catch(() => {});
-    const every = await p3.evaluate(() => [...document.querySelectorAll(".wtm")].map((el) => el.querySelectorAll("wiretrick-mount").length + ":" + (el as HTMLElement).style.position));
+    await p3.waitForFunction(() => document.querySelectorAll(".wtm > tangitweak-mount").length === 2, null, { timeout: 5000 }).catch(() => {});
+    const every = await p3.evaluate(() => [...document.querySelectorAll(".wtm")].map((el) => el.querySelectorAll("tangitweak-mount").length + ":" + (el as HTMLElement).style.position));
     check("ctx.mount(selector): every match gets the UI, also one added later; overlay makes it relative", JSON.stringify(every) === JSON.stringify(["1:relative", "1:relative"]), JSON.stringify(every));
     await send({ type: "deleteScript", id: "s_every" });
-    await p3.waitForFunction(() => !document.querySelector("wiretrick-mount[data-wiretrick-mount]"), null, { timeout: 5000 }).catch(() => {});
-    const gone = await p3.evaluate(() => [...document.querySelectorAll(".wtm")].map((el) => el.querySelectorAll("wiretrick-mount").length + ":" + (el as HTMLElement).style.position));
+    await p3.waitForFunction(() => !document.querySelector("tangitweak-mount[data-tangitweak-mount]"), null, { timeout: 5000 }).catch(() => {});
+    const gone = await p3.evaluate(() => [...document.querySelectorAll(".wtm")].map((el) => el.querySelectorAll("tangitweak-mount").length + ":" + (el as HTMLElement).style.position));
     check("ctx.mount: deleting the script removes every mount and restores the anchors", JSON.stringify(gone) === JSON.stringify(["0:", "0:"]), JSON.stringify(gone));
     await p3.evaluate(() => { for (const m of document.querySelectorAll(".wtm")) m.remove(); });
     // onSite code uses the script's imports and top-level declarations in the page world
@@ -310,17 +310,17 @@ wt.onPage("${ORIGIN}/page-fetch*", (ctx) => { ctx.mount(<Panel />); });`;
         `import { mark } from "./evcap-lib";
 const SUFFIX = "-ok";
 const suffixed = (v: string) => v + SUFFIX;
-const site = wt.onSite("${ORIGIN}/page-fetch*", () => ({
+const site = tt.onSite("${ORIGIN}/page-fetch*", () => ({
     mark: (n: number) => { mark(suffixed("v" + n)); return (window as any).__evcap as string; },
     get: () => (window as any).__evcap as string,
     set: (v: string) => new Promise<void>((r) => setTimeout(() => { (window as any).__evcap = v; r(); }, 10)),
 }));
-wt.onPage("${ORIGIN}/page-fetch*", async () => {
+tt.onPage("${ORIGIN}/page-fetch*", async () => {
     const r = await site.mark(1);
     await site.set(r + "-ret");
     document.documentElement.dataset.evcap = String(await site.get());
 });`,
-        "eval capture.wiretrick"
+        "eval capture.tangitweak"
     );
     let evcap: any = null;
     for (let i = 0; i < 30 && evcap?.iso !== "v1-ok-ret"; i++) {
@@ -334,15 +334,15 @@ wt.onPage("${ORIGIN}/page-fetch*", async () => {
     // isolated code at document_start calls an onSite handler's functions (it answers once ready)
     await saveScript(
         "s_pagecall",
-        `const page = wt.onSite({ url: "${ORIGIN}/page-fetch*", when: "document_start" }, async () => {
+        `const page = tt.onSite({ url: "${ORIGIN}/page-fetch*", when: "document_start" }, async () => {
     (window as any).__pagecallMark = 1;
     await new Promise((r) => setTimeout(r, 50));
     return { read: (k: string) => k + ":" + typeof (window as any).__pagecallMark };
 });
-wt.onPage({ url: "${ORIGIN}/page-fetch*", when: "document_start" }, async () => {
+tt.onPage({ url: "${ORIGIN}/page-fetch*", when: "document_start" }, async () => {
     document.documentElement.dataset.pagecall = await page.read("main");
 });`,
-        "page call.wiretrick"
+        "page call.tangitweak"
     );
     let pagecall: any = null;
     for (let i = 0; i < 30 && !pagecall; i++) {
@@ -372,20 +372,20 @@ const r5 = await p5.evaluate(async () => (await (await fetch("/api-replace")).js
 check("replaceResponse: fetch short-circuit (hook)", r5 === "REPLACED-BY-HOOK", r5);
 await p5.close();
 
-// ---------- 5b. wt.globalStore shared across strategies + wt.fetch bypass ----------
+// ---------- 5b. tt.globalStore shared across strategies + tt.fetch bypass ----------
 // the extension handler mocks /byp (redirect) and counts in the store; the
 // page handler fetches /byp twice from the background — with bypass it gets
 // the real body and the mock doesn't run
 await saveScript(
     "s_storefetch",
-    `const st = wt.globalStore("st", { n: 0 }, { persist: false });
-wt.onRequest({ url: "${ORIGIN}/byp", strategy: "extension" }, () => { st.n++; return { redirect: "${ORIGIN}/redirected" }; });
-wt.replaceResponse({ url: "${ORIGIN}/byp-data", strategy: "page" }, async () => {
-    const real = await (await wt.fetch("${ORIGIN}/byp", { bypass: true })).text();
-    const mocked = await (await wt.fetch("${ORIGIN}/byp")).text();
+    `const st = tt.globalStore("st", { n: 0 }, { persist: false });
+tt.onRequest({ url: "${ORIGIN}/byp", strategy: "extension" }, () => { st.n++; return { redirect: "${ORIGIN}/redirected" }; });
+tt.replaceResponse({ url: "${ORIGIN}/byp-data", strategy: "page" }, async () => {
+    const real = await (await tt.fetch("${ORIGIN}/byp", { bypass: true })).text();
+    const mocked = await (await tt.fetch("${ORIGIN}/byp")).text();
     return JSON.stringify({ real, mocked: mocked.includes("REDIRECTED-OK"), n: st.n });
 });`,
-    "store + fetch.wiretrick"
+    "store + fetch.tangitweak"
 );
 await new Promise((r) => setTimeout(r, 600));
 {
@@ -396,9 +396,9 @@ await new Promise((r) => setTimeout(r, 600));
     const r = await p.evaluate(async () => (await fetch("/byp-data")).text()).catch((e: any) => String(e));
     let j: any = {};
     try { j = JSON.parse(r); } catch {}
-    check("wt.fetch bypass: the script's own mock skips the request", j.real === "BYP-REAL", r);
-    check("wt.fetch without bypass: the mock applies", j.mocked === true, r);
-    check("wt.globalStore: one store across the extension and page handlers", j.n === 1, r);
+    check("tt.fetch bypass: the script's own mock skips the request", j.real === "BYP-REAL", r);
+    check("tt.fetch without bypass: the mock applies", j.mocked === true, r);
+    check("tt.globalStore: one store across the extension and page handlers", j.n === 1, r);
     await p.close();
 }
 await setEnabled("s_storefetch", false);
@@ -407,11 +407,11 @@ await setEnabled("s_storefetch", false);
 // the hook asks the bridge whether the call still runs instead of giving up after 15 s
 await saveScript(
     "s_slow",
-    `wt.replaceResponse({ url: "${ORIGIN}/slow-data", strategy: "page" }, async () => {
+    `tt.replaceResponse({ url: "${ORIGIN}/slow-data", strategy: "page" }, async () => {
     await new Promise((r) => setTimeout(r, 22000));
     return "SLOW-REPLACED";
 });`,
-    "slow handler.wiretrick"
+    "slow handler.tangitweak"
 );
 await new Promise((r) => setTimeout(r, 600));
 {
@@ -534,7 +534,7 @@ if (HEADLESS) {
     // that cold load reached the page before the debugger attached → warned
     await new Promise((r) => setTimeout(r, 600));
     const missLog: string = await mgr.evaluate(() => document.getElementById("log-entries")!.textContent || "");
-    check("cdp: missed first page load is logged as a warning", /page load \S*\/page-title was NOT intercepted by "modify main frame html.wiretrick"/.test(missLog), missLog.match(/.{0,40}NOT intercepted.{0,60}/)?.[0] || "(no warning)");
+    check("cdp: missed first page load is logged as a warning", /page load \S*\/page-title was NOT intercepted by "modify main frame html.tangitweak"/.test(missLog), missLog.match(/.{0,40}NOT intercepted.{0,60}/)?.[0] || "(no warning)");
 }
 
 // ---------- 10. disable a script → behavior stops ----------
@@ -551,8 +551,8 @@ await p10.close();
 // debugger tier must fulfill it — and every log line must name the stored script.
 await saveScript(
     "s_respond500",
-    `wt.onRequest({ url: "${ORIGIN}/nav-500", strategy: "debugger" }, () => ({ replaceResponse: { status: 500, body: { error: "e2e-500" }, mime: "application/json" } }));`,
-    "e2e respond 500.wiretrick"
+    `tt.onRequest({ url: "${ORIGIN}/nav-500", strategy: "debugger" }, () => ({ replaceResponse: { status: 500, body: { error: "e2e-500" }, mime: "application/json" } }));`,
+    "e2e respond 500.tangitweak"
 );
 const p10b = await ctx.newPage();
 await p10b.goto(`${ORIGIN}/nav-500`, { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {}); // warm-up: attaches the debugger
@@ -562,12 +562,12 @@ const navBody = await p10b.evaluate(() => document.body.innerText).catch(() => "
 check("respond 500: main frame fulfilled via debugger tier", navResp?.status() === 500 && navBody.includes("e2e-500"), `status=${navResp?.status()} body=${navBody.slice(0, 60)}`);
 await p10b.waitForTimeout(800);
 const logText10b: string = await mgr.evaluate(() => document.getElementById("log-entries")!.textContent || "");
-check("logs: respond 500 attributed to the stored script name", logText10b.includes("[e2e respond 500.wiretrick] onRequest → replaceResponse 500"));
+check("logs: respond 500 attributed to the stored script name", logText10b.includes("[e2e respond 500.tangitweak] onRequest → replaceResponse 500"));
 check("logs: no [Untitled script] anywhere", !logText10b.includes("[Untitled script]"));
 await p10b.close();
 
 // ---------- 10c. strategy ["debugger"] replaceResponse on a page load: in place, URL kept ----------
-await saveScript("s_cdpreplace", `wt.replaceResponse({ url: "${ORIGIN}/cdp-replace", strategy: "debugger" }, () => "<html><body><h1>CDP-REPLACED</h1></body></html>");`, "cdp replace page.wiretrick");
+await saveScript("s_cdpreplace", `tt.replaceResponse({ url: "${ORIGIN}/cdp-replace", strategy: "debugger" }, () => "<html><body><h1>CDP-REPLACED</h1></body></html>");`, "cdp replace page.tangitweak");
 await new Promise((r) => setTimeout(r, 600));
 const p10c = await ctx.newPage();
 await p10c.goto(`${ORIGIN}/cdp-replace`, { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {}); // warm-up: attaches the debugger
@@ -580,7 +580,7 @@ check("replaceResponse [\"cdp\"]: page body replaced in place", body10c.includes
 await p10c.close();
 await new Promise((r) => setTimeout(r, 400));
 const log10c: string[] = await mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line")].map((l) => (l as HTMLElement).dataset.text || l.textContent || ""));
-const replLines10c = log10c.filter((l) => l.includes("[cdp replace page.wiretrick] replaceResponse →") && l.includes("/cdp-replace"));
+const replLines10c = log10c.filter((l) => l.includes("[cdp replace page.tangitweak] replaceResponse →") && l.includes("/cdp-replace"));
 check("replaceResponse [\"cdp\"]: handler ran once per load (one log line per load, no serve.html)", replLines10c.length >= 1 && replLines10c.length <= 2 && !log10c.some((l) => l.includes("/cdp-replace") && l.includes("serve.html")), JSON.stringify(replLines10c));
 
 // ---------- 10d. "never ran" warnings: a hook route hit by a page load (per request), and a webrequest onResponseBody on Chromium (up front) ----------
@@ -599,20 +599,20 @@ check("network: script activity from before the tab was opened is listed", early
 const chips10d = await mgr.evaluate(() => [...document.querySelectorAll("#net-filter-host .net-qchip")].map((c) => (c.textContent || "").replace("×", "")));
 check("the Network view shows Touched requests by default", JSON.stringify(chips10d) === '["is:touched"]', JSON.stringify(chips10d));
 await mgr.click("#net-filter-host .net-qchip-x"); // show all requests from here on
-await saveScript("s_missed", `wt.onResponseBody({ url: "${ORIGIN}/html-missed", strategy: "page" }, (ctx, body) => body.replace("MISSED-ORIGINAL", "NEVER"));`, "missed probe.wiretrick");
-await saveScript("s_missed_wr", `wt.onResponseBody({ url: "${ORIGIN}/html-missed-wr", strategy: "extension" }, (ctx, body) => body);`, "webrequest body probe.wiretrick");
+await saveScript("s_missed", `tt.onResponseBody({ url: "${ORIGIN}/html-missed", strategy: "page" }, (ctx, body) => body.replace("MISSED-ORIGINAL", "NEVER"));`, "missed probe.tangitweak");
+await saveScript("s_missed_wr", `tt.onResponseBody({ url: "${ORIGIN}/html-missed-wr", strategy: "extension" }, (ctx, body) => body);`, "webrequest body probe.tangitweak");
 await new Promise((r) => setTimeout(r, 600));
 const p10d = await newPage("/html-missed");
 await p10d.waitForTimeout(2500); // the check runs 1.5 s after the load completes
 const log10d: string = await mgr.evaluate(() => document.getElementById("log-entries")!.textContent || "");
-check("missed: WARN 'onResponseBody never ran' for a hook route hit by a page load", log10d.includes(`[missed probe.wiretrick] onResponseBody #1 never ran for ${ORIGIN}/html-missed (document) — the "page" strategy only sees`), log10d.match(/.{0,20}never ran.{0,120}/)?.[0] || "(no warning)");
+check("missed: WARN 'onResponseBody never ran' for a hook route hit by a page load", log10d.includes(`[missed probe.tangitweak] onResponseBody #1 never ran for ${ORIGIN}/html-missed (document) — the "page" strategy only sees`), log10d.match(/.{0,20}never ran.{0,120}/)?.[0] || "(no warning)");
 check("an up-front route warning is a Problem, not a Log line", !log10d.includes("never runs with"), log10d.match(/.{0,40}never runs with.{0,80}/)?.[0] || "");
 const pbRoute10d = () => mgr.evaluate(() => {
     const items = [...document.querySelectorAll("#problems-list .pb-item.warn")].map((e) => e.textContent || "");
     return { heads: [...document.querySelectorAll("#problems-list .pb-file")].map((e) => e.textContent), route: items.filter((t) => t.includes("never runs with") && /\broute\b/.test(t)), warnings: Number(document.querySelector('#sb-problems .sb-n[data-k="warn"]')?.textContent) };
 });
 const pb10d = await pbRoute10d();
-check("the up-front route warning is a Problem (warning) of its script", pb10d.heads.includes("webrequest body probe.wiretrick.ts") && pb10d.route.length === 1 && pb10d.warnings >= 1, JSON.stringify(pb10d));
+check("the up-front route warning is a Problem (warning) of its script", pb10d.heads.includes("webrequest body probe.tangitweak.ts") && pb10d.route.length === 1 && pb10d.warnings >= 1, JSON.stringify(pb10d));
 const row10d: { cls: string; badges: string[] } | null = await mgr.evaluate(() => {
     const tr = [...document.querySelectorAll("#network-view tbody tr")].find((t) => (t.querySelector(".net-name")?.textContent || "").includes("html-missed"));
     return tr ? { cls: tr.className, badges: [...tr.querySelectorAll(".net-badge")].map((b) => b.className) } : null;
@@ -621,13 +621,13 @@ check("missed: the Network row is not marked observed or modified", !!row10d && 
 await p10d.close();
 await setEnabled("s_missed", false);
 await setEnabled("s_missed_wr", false);
-await mgr.waitForFunction(() => ![...document.querySelectorAll("#problems-list .pb-file")].some((e) => e.textContent === "webrequest body probe.wiretrick.ts"), null, { timeout: 5000 }).catch(() => {});
+await mgr.waitForFunction(() => ![...document.querySelectorAll("#problems-list .pb-file")].some((e) => e.textContent === "webrequest body probe.tangitweak.ts"), null, { timeout: 5000 }).catch(() => {});
 const pbGone10d = await pbRoute10d();
-check("disabling the script removes its route warning from Problems", !pbGone10d.heads.includes("webrequest body probe.wiretrick.ts") && pbGone10d.warnings < pb10d.warnings, JSON.stringify(pbGone10d));
+check("disabling the script removes its route warning from Problems", !pbGone10d.heads.includes("webrequest body probe.tangitweak.ts") && pbGone10d.warnings < pb10d.warnings, JSON.stringify(pbGone10d));
 
 // ---------- 10e. row markers: every observed-only row carries the dashed marker (incl. consecutive ones) ----------
-await saveScript("s_tapper", `wt.onResponseBody({ url: "${ORIGIN}/tap-api/*", strategy: "page" }, () => undefined);`, "marker tapper.wiretrick");
-await saveScript("s_marker_mod", `wt.onResponseBody({ url: "${ORIGIN}/tap-api/m*", strategy: "page" }, (ctx, body) => String(body).replace("tap-api", "TAP-API"));`, "marker modifier.wiretrick");
+await saveScript("s_tapper", `tt.onResponseBody({ url: "${ORIGIN}/tap-api/*", strategy: "page" }, () => undefined);`, "marker tapper.tangitweak");
+await saveScript("s_marker_mod", `tt.onResponseBody({ url: "${ORIGIN}/tap-api/m*", strategy: "page" }, (ctx, body) => String(body).replace("tap-api", "TAP-API"));`, "marker modifier.tangitweak");
 await new Promise((r) => setTimeout(r, 600));
 const p10e = await newPage("/page-taps");
 await p10e.waitForSelector("body[data-done]", { timeout: 10000 }).catch(() => {});
@@ -666,15 +666,15 @@ await setEnabled("s_marker_mod", false);
 // ---------- 10f. webrequest header changes on a page opened from the manager ----------
 await saveScript(
     "s_hdr_wr",
-    `wt.onRequest({ url: "${ORIGIN}/echo-headers", strategy: "extension" }, () => ({ headers: { set: { "x-wt-req": "1" }, remove: ["accept-language"] } }));\nwt.onResponseHeaders({ url: "${ORIGIN}/echo-headers", strategy: "extension" }, () => ({ headers: { set: { "x-wt-res": "1" } } }));`,
-    "header probe.wiretrick"
+    `tt.onRequest({ url: "${ORIGIN}/echo-headers", strategy: "extension" }, () => ({ headers: { set: { "x-tt-req": "1" }, remove: ["accept-language"] } }));\ntt.onResponseHeaders({ url: "${ORIGIN}/echo-headers", strategy: "extension" }, () => ({ headers: { set: { "x-tt-res": "1" } } }));`,
+    "header probe.tangitweak"
 );
 await new Promise((r) => setTimeout(r, 600));
 const t10f = Date.now();
 const [p10f] = await Promise.all([ctx.waitForEvent("page"), mgr.evaluate((u) => void window.open(u), `${ORIGIN}/echo-headers`)]);
 await p10f.waitForLoadState("domcontentloaded");
 const echoed10f = JSON.parse((await p10f.textContent("body")) || "{}");
-check("webrequest onRequest: Accept-Language removed (extraHeaders) and x-wt-req set", echoed10f["x-wt-req"] === "1" && !("accept-language" in echoed10f), JSON.stringify(echoed10f));
+check("webrequest onRequest: Accept-Language removed (extraHeaders) and x-tt-req set", echoed10f["x-tt-req"] === "1" && !("accept-language" in echoed10f), JSON.stringify(echoed10f));
 await p10f.waitForTimeout(500);
 const net10f: any[] = await mgr.evaluate(() => new Promise((resolve) => {
     const port = chrome.runtime.connect({ name: "network" });
@@ -688,7 +688,7 @@ check(
     !!page10f && page10f.outcomes.length >= 2 && !rows10f.some((e) => e.synthetic),
     JSON.stringify(rows10f.map((e) => [e.id, e.type, e.outcomes.length]))
 );
-check("network: recorded response headers include onResponseHeaders changes", !!page10f?.responseHeaders?.some(([n, v]: string[]) => n.toLowerCase() === "x-wt-res" && v === "1"), JSON.stringify(page10f?.responseHeaders));
+check("network: recorded response headers include onResponseHeaders changes", !!page10f?.responseHeaders?.some(([n, v]: string[]) => n.toLowerCase() === "x-tt-res" && v === "1"), JSON.stringify(page10f?.responseHeaders));
 await p10f.close();
 await setEnabled("s_hdr_wr", false);
 await mgr.click("#log-header-title");
@@ -699,7 +699,7 @@ await checkRulesStrategy(ctx, mgr, ORIGIN, check);
 // ---------- 10h. folders and JSON data files ----------
 await checkFoldersAndDataFiles(ctx, mgr, ORIGIN, check);
 
-// ---------- 10i. overlays (wt.onOverlay) and calls between the overlay and the page ----------
+// ---------- 10i. overlays (tt.onOverlay) and calls between the overlay and the page ----------
 await checkOverlays(ctx, mgr, ORIGIN, check, { isolated: true });
 await checkHotReload(ctx, mgr, ORIGIN, check);
 await checkPageStores(ctx, mgr, ORIGIN, check);
@@ -716,8 +716,8 @@ await checkPackages(ctx, mgr, ORIGIN, check);
 // ---------- 11. logs: script output tunnelled to the Log view, page console not captured ----------
 await saveScript(
     "s_logtunnel",
-    `wt.onPage("${ORIGIN}/html", () => { console.warn("E2E-CONSOLE-MARKER", { a: 1 }); wt.log("E2E-RESLOG-MARKER"); });`,
-    "log tunnel.wiretrick"
+    `tt.onPage("${ORIGIN}/html", () => { console.warn("E2E-CONSOLE-MARKER", { a: 1 }); tt.log("E2E-RESLOG-MARKER"); });`,
+    "log tunnel.tangitweak"
 );
 await new Promise((r) => setTimeout(r, 800));
 const p11 = await ctx.newPage();
@@ -731,10 +731,10 @@ await p11.close();
 await setEnabled("s_logtunnel", false);
 const logLines11: string[] = await mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line")].map((l) => (l as HTMLElement).dataset.text || ""));
 const warnLine = logLines11.find((l) => l.includes("E2E-CONSOLE-MARKER")) || "";
-check("logs: script console.warn reaches the Log view, attributed", warnLine.includes("[log tunnel.wiretrick] console.warn: E2E-CONSOLE-MARKER {\"a\":1}"), warnLine.slice(0, 160));
-check("logs: script wt.log reaches the Log view", logLines11.some((l) => l.includes("[log tunnel.wiretrick] wt.log: E2E-RESLOG-MARKER")));
+check("logs: script console.warn reaches the Log view, attributed", warnLine.includes("[log tunnel.tangitweak] console.warn: E2E-CONSOLE-MARKER {\"a\":1}"), warnLine.slice(0, 160));
+check("logs: script tt.log reaches the Log view", logLines11.some((l) => l.includes("[log tunnel.tangitweak] tt.log: E2E-RESLOG-MARKER")));
 check("logs: script console output not echoed to the page console", !pageConsole11.some((t) => t.includes("E2E-CONSOLE-MARKER") || t.includes("E2E-RESLOG-MARKER")), pageConsole11.join(" | ").slice(0, 200));
-check("logs: extension adds nothing to the page console", !pageConsole11.some((t) => /\[res:|\[Wiretrick\]/.test(t)), pageConsole11.join(" | ").slice(0, 200));
+check("logs: extension adds nothing to the page console", !pageConsole11.some((t) => /\[res:|\[TangiTweak\]/.test(t)), pageConsole11.join(" | ").slice(0, 200));
 const dbgAll: any = await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "getDebugLogs" }, (x) => r(x))));
 const entries: any[] = dbgAll.entries || [];
 const logText = entries.map((e: any) => e.msg).join("\n");

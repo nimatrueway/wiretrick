@@ -80,10 +80,10 @@ describe("editor toolbar", () => {
         const sync = $<HTMLButtonElement>("#btn-folder-sync");
         expect(sync.dataset.state).toBe("off");
         expect(sync.title).toBe("Folder sync is off — click to set it up");
-        act(() => void (toolbar.sync = { state: "connected", path: "/home/me/wt" }));
+        act(() => void (toolbar.sync = { state: "connected", path: "/home/me/tt" }));
         expect(sync.dataset.state).toBe("connected");
         expect(sync.getAttribute("aria-label")).toBe("Folder sync: connected");
-        expect(sync.title).toBe('Synced with "/home/me/wt" — click for folder sync settings');
+        expect(sync.title).toBe('Synced with "/home/me/tt" — click for folder sync settings');
         await act(async () => void (settings.folder.supported = false));
         expect(sync.disabled).toBe(true);
         expect(sync.title).toContain("not in Firefox");

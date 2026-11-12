@@ -12,7 +12,7 @@ import { scriptStorageGet, scriptStorageSet, setParamFromCode } from "../scriptS
 import { dataFilesSnapshot } from "../dataFiles";
 import { packagesSnapshot } from "../packageImports";
 import { backgroundHub } from "../stores";
-import { backgroundFetch } from "../wtFetch";
+import { backgroundFetch } from "../ttFetch";
 
 export interface ScriptLike {
     id: string;

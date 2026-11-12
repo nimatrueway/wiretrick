@@ -1,5 +1,5 @@
 /**
- * `wt.siteStore`'s source of truth: one valtio proxy per script and name,
+ * `tt.siteStore`'s source of truth: one valtio proxy per script and name,
  * living in the site's JavaScript world (the page hook, hook.ts) for the
  * life of the document. onSite code reads and writes it directly; the
  * script's onPage and onOverlay code see it through mirrors
@@ -59,9 +59,9 @@ export class SiteStoreHost {
         this.o.post({ kind: "site.ready" });
     }
 
-    /** `wt.siteStore(name, initial)` in script `s`'s onSite code (the same proxy on every run) */
+    /** `tt.siteStore(name, initial)` in script `s`'s onSite code (the same proxy on every run) */
     store(s: string, name: string, initial: object): object {
-        const t = splitInitial(name, initial, "wt.siteStore");
+        const t = splitInitial(name, initial, "tt.siteStore");
         const st = this.get(s, name, t.json);
         for (const [k, d] of t.local) Object.defineProperty(st.proxy, k, { ...d, configurable: true });
         return st.proxy;
@@ -181,7 +181,7 @@ export class SiteStoreHost {
     private warn(st: HostStore, why: string): void {
         if (st.warned) return;
         st.warned = true;
-        this.o.log?.(st.s, `wt.siteStore("${st.name}"): ${why} — onPage and onOverlay code only see JSON values (plain objects, arrays, strings, numbers, booleans, null)`, "warn");
+        this.o.log?.(st.s, `tt.siteStore("${st.name}"): ${why} — onPage and onOverlay code only see JSON values (plain objects, arrays, strings, numbers, booleans, null)`, "warn");
     }
 }
 

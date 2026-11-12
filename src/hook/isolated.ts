@@ -1,20 +1,20 @@
 /**
- * Chrome MV3: the runtime for one script's `wt.onPage` code,
+ * Chrome MV3: the runtime for one script's `tt.onPage` code,
  * in a `chrome.userScripts` USER_SCRIPT world (background/userScripts.ts
  * registers it after a one-line prelude naming the script). The world
  * shares the page's DOM, not its JavaScript, and the page can't reach it.
  *
  * Where one of the script's isolated routes matches the frame, it opens the
- * L6 port (`wt-user-script`) to the owner and asks for the code
+ * L6 port (`tt-user-script`) to the owner and asks for the code
  * (`iso.load`), then compiles it the way the bridge does in MV2
  * (`runPageScripts`) and runs the handlers at their `when`. Over L6 go the
- * script's Log lines and `wt.storage`, and — in the top frame — the calls
+ * script's Log lines and `tt.storage`, and — in the top frame — the calls
  * between this code and the script's overlay, which the owner relays
  * through the page's bridge (L2) to the overlay frame (L3). Calls into its
  * onSite handles go to the hook over window messages; into its own onPage
  * handles, straight to this world's handlers. Its stores
- * (`wt.globalStore`, this page's `wt.pageStore` copies) are replicas
- * primed by `iso.load` and synced over L6; its `wt.siteStore`s are
+ * (`tt.globalStore`, this page's `tt.pageStore` copies) are replicas
+ * primed by `iso.load` and synced over L6; its `tt.siteStore`s are
  * mirrors of the hook's, over window messages. A save arrives as
  * `iso.update`: load again, re-run if the code changed.
  */
@@ -36,7 +36,7 @@ import { SITE_DOWN_KINDS } from "../shared/siteStoreHost";
 import { FrameShortcuts } from "../shared/shortcut";
 
 (() => {
-    const me = ((globalThis as any).__wtIsoQ as { s: string; routes: RouteMeta[] }[] | undefined)?.shift();
+    const me = ((globalThis as any).__ttIsoQ as { s: string; routes: RouteMeta[] }[] | undefined)?.shift();
     if (!me || !me.routes.some((r) => routeMatches(r, location.href))) return;
     const s = me.s;
     const top = window === window.top;
@@ -106,7 +106,7 @@ import { FrameShortcuts } from "../shared/shortcut";
         if (stopped) return Promise.reject(new Error("stopped"));
         if (link) return link;
         const p = (async () => {
-            const port = chrome.runtime.connect({ name: "wt-user-script" });
+            const port = chrome.runtime.connect({ name: "tt-user-script" });
             const ep = portEndpoint(port);
             ep.on("rpc.call", (c) => isRpcCall(c) && exposer.answer(c, (r: RpcResult) => ep.push("rpc.result", r, s)));
             ep.on("rpc.result", (r) => client.receive(r));
@@ -165,7 +165,7 @@ import { FrameShortcuts } from "../shared/shortcut";
         if (init.codeHash !== codeHash) run(init, codeHash !== null);
     }
 
-    /** the script's `wt.siteStore` mirrors (made when its code first uses one) */
+    /** the script's `tt.siteStore` mirrors (made when its code first uses one) */
     let site: SiteMirrors | null = null;
     const siteStores = () =>
         (site ??= new SiteMirrors({
@@ -231,7 +231,7 @@ import { FrameShortcuts } from "../shared/shortcut";
                 siteStore: mine ? (n, initial) => siteStores().store(s, n, initial) : undefined,
                 exposer: mine ? exposer : undefined,
                 call: mine ? handle(gen) : undefined,
-                log: (...args: any[]) => log("info", scriptLogLine(name, "wt.log", formatLogArgs(args))),
+                log: (...args: any[]) => log("info", scriptLogLine(name, "tt.log", formatLogArgs(args))),
                 storage: {
                     get: (key: string) => linkUp().then((ep) => ep.call("storage.get", { key }, s)).then((r) => r.value, () => undefined),
                     set: (key: string, value: any) => linkUp().then((ep) => ep.call("storage.set", { key, value }, s)).then(() => null, () => null),
@@ -244,12 +244,12 @@ import { FrameShortcuts } from "../shared/shortcut";
             const codeOf = (importer: string) => (importer === init.name ? init.src : (init.libs.find((l) => l.name === importer)?.src ?? ""));
             const requireFrom = makeLibRequire(
                 init.libs,
-                (lib, require, moduleObj) => scriptFunction(lib.src!, lib.name)(shimFor(lib.name, lib.params || {}, false).wt, consoleProxy, require, moduleObj, moduleObj.exports),
+                (lib, require, moduleObj) => scriptFunction(lib.src!, lib.name)(shimFor(lib.name, lib.params || {}, false).tt, consoleProxy, require, moduleObj, moduleObj.exports),
                 { builtin: scriptBuiltin(codeOf, hotRegistry(init.name).begin()) }
             );
             const moduleObj = { exports: {} as any };
             const shim = shimFor(init.name, init.params || {}, true);
-            shim.top(() => scriptFunction(init.src, init.name)(shim.wt, consoleProxy, requireFrom(init.name), moduleObj, moduleObj.exports));
+            shim.top(() => scriptFunction(init.src, init.name)(shim.tt, consoleProxy, requireFrom(init.name), moduleObj, moduleObj.exports));
             dom = shim.dom;
             reactDom = () => reactOf(requireFrom(init.name));
         } catch (e: any) {

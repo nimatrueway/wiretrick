@@ -4,9 +4,9 @@
 
 ## From a release (recommended)
 
-1. Grab a zip from [Releases](https://github.com/nimatrueway/wiretrick/releases) and unzip it:
-   `wiretrick-mv3-vX.Y.Z.zip` for current Chrome / Edge / Brave, or
-   `wiretrick-mv2-vX.Y.Z.zip` (its `dist` folder) for MV2-capable Chromium.
+1. Grab a zip from [Releases](https://github.com/nimatrueway/tangitweak/releases) and unzip it:
+   `tangitweak-mv3-vX.Y.Z.zip` for current Chrome / Edge / Brave, or
+   `tangitweak-mv2-vX.Y.Z.zip` (its `dist` folder) for MV2-capable Chromium.
    Firefox uses the `.xpi` instead — see [Firefox](#firefox).
 2. Open `chrome://extensions`.
 3. Enable **Developer mode** (top-right), click **Load unpacked**, and select the unzipped folder.
@@ -14,8 +14,8 @@
 
 ## Firefox
 
-Each release ships `wiretrick-firefox-vX.Y.Z.xpi` (add-on id
-`wiretrick@nimatrueway`). When the release was signed through AMO, drag the
+Each release ships `tangitweak-firefox-vX.Y.Z.xpi` (add-on id
+`tangitweak@nimatrueway`). When the release was signed through AMO, drag the
 file onto Firefox to install it. An unsigned `.xpi` (the release notes say
 which) installs permanently only on Developer Edition, Nightly or ESR with
 `xpinstall.signatures.required` set to `false` in `about:config`; on regular
@@ -29,7 +29,7 @@ unlisted (self-distributed) add-on.
 
 ## Signed `.crx`
 
-Each release also ships signed `wiretrick-mv3-vX.Y.Z.crx` / `wiretrick-mv2-vX.Y.Z.crx`
+Each release also ships signed `tangitweak-mv3-vX.Y.Z.crx` / `tangitweak-mv2-vX.Y.Z.crx`
 packages with a fixed extension id (`jcoealmhehnajkglhfchcnjdpkhnkdei`). Chrome
 keeps a `.crx` from outside the Web Store enabled only when it's allowed by
 enterprise policy (`ExtensionInstallAllowlist` / `ExtensionInstallForcelist`,
@@ -39,8 +39,8 @@ in Developer mode; otherwise use the zip.
 ## From source
 
 ```bash
-git clone https://github.com/nimatrueway/wiretrick.git
-cd wiretrick
+git clone https://github.com/nimatrueway/tangitweak.git
+cd tangitweak
 npm install && npm run build
 # then: chrome://extensions → Developer mode → Load unpacked → dist/
 ```

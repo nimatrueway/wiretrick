@@ -3,7 +3,7 @@ import { compileScript } from "../src/shared/compile";
 import { makePageShim } from "../src/shared/pageShim";
 import { detectFirefox, detectOs, scriptEnv } from "../src/shared/scriptEnv";
 
-describe("wt.isChrome / isFirefox / isMV2 / isMV3 / isMac / isWindows / isLinux", () => {
+describe("tt.isChrome / isFirefox / isMV2 / isMV3 / isMac / isWindows / isLinux", () => {
     it("detects the desktop OS from navigator.platform, then the user agent; Android and ChromeOS are none", () => {
         expect(detectOs({ platform: "MacIntel" })).toBe("mac");
         expect(detectOs({ platform: "Win32" })).toBe("windows");
@@ -27,20 +27,20 @@ describe("wt.isChrome / isFirefox / isMV2 / isMV3 / isMac / isWindows / isLinux"
         expect(scriptEnv(true, false, "mac")).toEqual({ isChrome: true, isFirefox: false, isMV2: false, isMV3: true, isMac: true, isWindows: false, isLinux: false });
     });
 
-    it("scripts see them on wt (background compile and page shim)", () => {
-        const c = compileScript(`wt.metadata({ description: [wt.isChrome, wt.isFirefox, wt.isMV2, wt.isMV3].join(",") });`);
+    it("scripts see them on tt (background compile and page shim)", () => {
+        const c = compileScript(`tt.metadata({ description: [tt.isChrome, tt.isFirefox, tt.isMV2, tt.isMV3].join(",") });`);
         expect(c.error).toBeFalsy();
         expect(c.meta.description).toBe("true,false,true,false"); // vitest: MV2 build, not Firefox
-        const { wt } = makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined } });
-        expect([wt.isChrome, wt.isFirefox, wt.isMV2, wt.isMV3]).toEqual([true, false, true, false]);
-        const os = [wt.isMac, wt.isWindows, wt.isLinux];
+        const { tt } = makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined } });
+        expect([tt.isChrome, tt.isFirefox, tt.isMV2, tt.isMV3]).toEqual([true, false, true, false]);
+        const os = [tt.isMac, tt.isWindows, tt.isLinux];
         expect(os.filter(Boolean).length).toBe(["mac", "windows", "linux"].includes(detectOs()) ? 1 : 0);
-        const c2 = compileScript(`wt.metadata({ description: [wt.isMac, wt.isWindows, wt.isLinux].join(",") });`);
+        const c2 = compileScript(`tt.metadata({ description: [tt.isMac, tt.isWindows, tt.isLinux].join(",") });`);
         expect(c2.meta.description).toBe(os.join(","));
     });
 
     it("can pick a route's strategy", () => {
-        const c = compileScript(`wt.onRequest({ url: "*://a.com/*", strategy: wt.isFirefox ? "extension" : "debugger" }, () => {});`);
+        const c = compileScript(`tt.onRequest({ url: "*://a.com/*", strategy: tt.isFirefox ? "extension" : "debugger" }, () => {});`);
         expect(c.meta.routes[0].strategy).toBe("debugger");
     });
 });

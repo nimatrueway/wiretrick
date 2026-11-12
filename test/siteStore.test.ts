@@ -37,7 +37,7 @@ function world(opts: { hostUp?: boolean } = {}) {
     return { ups, downs, mirrors, start, host: () => host!, forge: (m: SiteDown) => toMirrors(m) };
 }
 
-describe("wt.siteStore: host and mirrors", () => {
+describe("tt.siteStore: host and mirrors", () => {
     it("seeds from initial, then takes the site's snapshot", async () => {
         const w = world();
         const site = w.host().store("s1", "login", { user: "ann", n: 1 }) as any;
@@ -142,7 +142,7 @@ describe("wt.siteStore: host and mirrors", () => {
         site.other = new Map();
         await settle();
         expect(log).toHaveBeenCalledTimes(1);
-        expect(log.mock.calls[0][1]).toMatch(/wt\.siteStore\("st"\): when: a Date isn't JSON/);
+        expect(log.mock.calls[0][1]).toMatch(/tt\.siteStore\("st"\): when: a Date isn't JSON/);
         void w;
     });
 

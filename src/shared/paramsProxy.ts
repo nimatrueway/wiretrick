@@ -1,5 +1,5 @@
 /**
- * What `wt.params` returns: the script's param values, assignable like a
+ * What `tt.params` returns: the script's param values, assignable like a
  * valtio proxy. `cfg.on = false` (or `cfg.hosts.push("a")` on a list) is
  * checked against the param's type, seen right away by the code, and saved
  * like a change in the ⚙ panel — the script then hot-reloads with it.
@@ -14,9 +14,9 @@ export interface ParamWriter {
     send(key: string, value: any): void;
 }
 
-export const PARAM_AT_TOP = "wt.params: change a param from a handler, not from the script's top level (each change re-runs the script)";
-export const PARAM_ON_SITE = "wt.params: onSite code can't change params (it runs in the site's world, where the site's code could too) — change them from onPage, onOverlay or network handlers";
-export const PARAM_NOT_HERE = "wt.params: params can't be changed here";
+export const PARAM_AT_TOP = "tt.params: change a param from a handler, not from the script's top level (each change re-runs the script)";
+export const PARAM_ON_SITE = "tt.params: onSite code can't change params (it runs in the site's world, where the site's code could too) — change them from onPage, onOverlay or network handlers";
+export const PARAM_NOT_HERE = "tt.params: params can't be changed here";
 
 const LIST_METHODS = new Set(["push", "pop", "shift", "unshift", "splice", "sort", "reverse", "fill", "copyWithin"]);
 const hasParse = (d: ParamDef) => (d as { parse?: unknown }).parse !== undefined;
@@ -55,13 +55,13 @@ export function paramsProxy(defs: Record<string, ParamDef>, raw: Record<string, 
     Object.assign(target, unknown);
     const pending = new Map<string, any>();
     const assign = (k: PropertyKey, v: any): void => {
-        if (!own(defs, k)) throw new Error(`wt.params: there's no parameter ${JSON.stringify(String(k))}${own(unknown, k) ? " here (it comes from an import)" : ""}`);
+        if (!own(defs, k)) throw new Error(`tt.params: there's no parameter ${JSON.stringify(String(k))}${own(unknown, k) ? " here (it comes from an import)" : ""}`);
         const key = k as string;
         const def = defs[key];
-        if (hasParse(def)) throw new Error(`wt.params: "${key}" has a parse function, so it can't be assigned — change it in ⚙ or settings.yaml`);
+        if (hasParse(def)) throw new Error(`tt.params: "${key}" has a parse function, so it can't be assigned — change it in ⚙ or settings.yaml`);
         const why = w.blocked();
         if (why) throw new Error(why);
-        if (!isValidParamValue(def, v)) throw new TypeError(`wt.params: "${key}" can't be ${shown(v)}: it takes ${expected(def)}`);
+        if (!isValidParamValue(def, v)) throw new TypeError(`tt.params: "${key}" can't be ${shown(v)}: it takes ${expected(def)}`);
         const next = Array.isArray(v) ? [...v] : v;
         if (JSON.stringify(next) === JSON.stringify(cur[key])) return;
         cur[key] = next;
@@ -99,7 +99,7 @@ export function paramsProxy(defs: Record<string, ParamDef>, raw: Record<string, 
                     return true;
                 },
                 deleteProperty: () => {
-                    throw new Error(`wt.params: remove items from "${k}" with splice, pop or a new array`);
+                    throw new Error(`tt.params: remove items from "${k}" with splice, pop or a new array`);
                 },
                 has: (_t, p) => Reflect.has(cur[k], p),
                 ownKeys: () => Reflect.ownKeys(cur[k]),
@@ -116,10 +116,10 @@ export function paramsProxy(defs: Record<string, ParamDef>, raw: Record<string, 
             return true;
         },
         deleteProperty: (_t, p) => {
-            throw new Error(`wt.params: a param can't be deleted (${String(p)})`);
+            throw new Error(`tt.params: a param can't be deleted (${String(p)})`);
         },
         defineProperty: (_t, p) => {
-            throw new Error(`wt.params: assign a param instead of defining it (${String(p)})`);
+            throw new Error(`tt.params: assign a param instead of defining it (${String(p)})`);
         },
     });
 }

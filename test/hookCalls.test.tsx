@@ -26,7 +26,7 @@ describe("page hook: calls into a script it doesn't run yet", () => {
         n++;
         s1 = `s1-${n}`;
         s2 = `s2-${n}`;
-        script = { scriptId: s1, name: "one", src: `wt.onSite("*://*/*", () => ({ ping: () => "pong" }));` };
+        script = { scriptId: s1, name: "one", src: `tt.onSite("*://*/*", () => ({ ping: () => "pong" }));` };
         const postMessage = window.postMessage.bind(window);
         vi.spyOn(window, "postMessage").mockImplementation((data: any, ...rest: any[]) => {
             record(data);

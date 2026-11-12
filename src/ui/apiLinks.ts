@@ -1,11 +1,11 @@
 /**
- * Clickable `wt` API types in hovers: which declared types a TS signature
- * mentions and where they live in wt-api.d.ts (so a hover can show theirs).
+ * Clickable `tt` API types in hovers: which declared types a TS signature
+ * mentions and where they live in tt-api.d.ts (so a hover can show theirs).
  */
 
 import type { SymbolPart } from "./hoverMarkdown";
 
-export const API_TYPINGS_URI = "file:///wt-api.d.ts";
+export const API_TYPINGS_URI = "file:///tt-api.d.ts";
 
 export interface Span {
     start: number;
@@ -24,7 +24,7 @@ export interface NavTreeItem {
 
 const TYPE_NAV_KINDS = new Set(["interface", "type", "class", "enum"]);
 
-/** TS navigation tree of wt-api.d.ts → qualified type name → name span */
+/** TS navigation tree of tt-api.d.ts → qualified type name → name span */
 export function indexTypeDeclarations(root: NavTreeItem): Map<string, Span> {
     const map = new Map<string, Span>();
     const walk = (item: NavTreeItem, prefix: string): void => {
@@ -39,8 +39,8 @@ export function indexTypeDeclarations(root: NavTreeItem): Map<string, Span> {
 }
 
 /**
- * Where `name` is declared in wt-api.d.ts. Outside the typings TS always
- * qualifies namespace members (`Wiretrick.Route`); inside them it doesn't,
+ * Where `name` is declared in tt-api.d.ts. Outside the typings TS always
+ * qualifies namespace members (`TangiTweak.Route`); inside them it doesn't,
  * so there a bare name also matches a namespace member.
  */
 export function resolveTypeName(index: Map<string, Span>, name: string, inTypings: boolean): Span | undefined {
@@ -55,19 +55,19 @@ export function commandUri(command: string, args: unknown): string {
     return `command:${command}?${encodeURIComponent(JSON.stringify(args)).replace(/\(/g, "%28").replace(/\)/g, "%29")}`;
 }
 
-/** A type name inside a signature that links to its wt-api.d.ts declaration */
+/** A type name inside a signature that links to its tt-api.d.ts declaration */
 export interface TypeRef {
     /** offsets in the signature's plain text */
     start: number;
     end: number;
-    /** qualified name (`Wiretrick.Route`) */
+    /** qualified name (`TangiTweak.Route`) */
     name: string;
-    /** the declaration's name in wt-api.d.ts */
+    /** the declaration's name in tt-api.d.ts */
     span: Span;
 }
 
 /**
- * Every type name in a signature that's declared in wt-api.d.ts, except the
+ * Every type name in a signature that's declared in tt-api.d.ts, except the
  * hovered declaration itself (`exclude`: its name span).
  */
 export function typeRefs(parts: SymbolPart[] | undefined, index: Map<string, Span>, inTypings: boolean, exclude?: Span | null): TypeRef[] {

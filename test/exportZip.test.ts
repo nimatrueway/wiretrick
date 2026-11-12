@@ -73,7 +73,7 @@ describe("export zip layout", () => {
         const zip = writeZip({
             "Scripts/": "",
             "Scripts/settings.yaml": "settings:\n",
-            "Scripts/wt-api.d.ts": "declare const wt: any;",
+            "Scripts/tt-api.d.ts": "declare const tt: any;",
             "Scripts/tsconfig.json": "{}",
             "Scripts/settings.schema.json": "{}",
             "Scripts/.vscode/settings.json": "{}",
@@ -151,7 +151,7 @@ describe("settings.yaml in the zip", () => {
     it("lands enabled state, params and globals through the real apply path", async () => {
         const ss = await import("../src/background/engine/scriptStore");
         const sf = await import("../src/background/settingsFile");
-        const code = `wt.params({ level: { type: "string", default: "warn" } });\nwt.onRequest({ url: "*", strategy: "extension" }, () => {});\n`;
+        const code = `tt.params({ level: { type: "string", default: "warn" } });\ntt.onRequest({ url: "*", strategy: "extension" }, () => {});\n`;
         const zip = buildExportZip({
             settings: settingsForScripts(SETTINGS, ["Debug header"]),
             scripts: [{ name: "Debug header", code }],

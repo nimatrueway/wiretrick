@@ -88,7 +88,7 @@ const details = (over: Record<string, any> = {}) => ({
     ...over,
 });
 
-const RESPOND_500 = `wt.onRequest({ url: "*://api.example.com/*", strategy: "extension" }, (ctx) => {
+const RESPOND_500 = `tt.onRequest({ url: "*://api.example.com/*", strategy: "extension" }, (ctx) => {
     if (ctx.url.includes("/v1/")) return { replaceResponse: { status: 500, body: { error: "boom" }, mime: "application/json" } };
 });`;
 
@@ -106,7 +106,7 @@ describe("extension strategy: log lines use the stored script name", () => {
 
     it("sync respond 200 → served + named serve log", () => {
         const s = new ExtensionStrategy();
-        s.reload([storedScript("a", "API mocker", `wt.onRequest({ url: "*", strategy: "extension" }, () => ({ replaceResponse: { body: "ok", mime: "text/plain" } }));`)]);
+        s.reload([storedScript("a", "API mocker", `tt.onRequest({ url: "*", strategy: "extension" }, () => ({ replaceResponse: { body: "ok", mime: "text/plain" } }));`)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("redirect");
         const line = entries.find((e) => e.message.includes("replaceResponse 200"));
@@ -116,7 +116,7 @@ describe("extension strategy: log lines use the stored script name", () => {
 
     it("redirect/cancel log uses the stored name", () => {
         const s = new ExtensionStrategy();
-        s.reload([storedScript("a", "API mocker", `wt.onRequest({ url: "*", strategy: "extension" }, () => ({ redirect: "https://mocked.example.com/x" }));`)]);
+        s.reload([storedScript("a", "API mocker", `tt.onRequest({ url: "*", strategy: "extension" }, () => ({ redirect: "https://mocked.example.com/x" }));`)]);
         s.handleBeforeRequest(details(), null);
         const line = entries.find((e) => e.message.includes("onRequest →"));
         expect(line, "a redirect log line must exist").toBeTruthy();
@@ -125,7 +125,7 @@ describe("extension strategy: log lines use the stored script name", () => {
 
     it("replaceResponse log uses the stored name", () => {
         const s = new ExtensionStrategy();
-        s.reload([storedScript("a", "API mocker", `wt.replaceResponse({ url: "*", strategy: "extension" }, () => '{"mocked":true}');`)]);
+        s.reload([storedScript("a", "API mocker", `tt.replaceResponse({ url: "*", strategy: "extension" }, () => '{"mocked":true}');`)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("redirect");
         const line = entries.find((e) => e.message.includes("replaceResponse →"));
@@ -136,7 +136,7 @@ describe("extension strategy: log lines use the stored script name", () => {
 
     it("no-match (handler returns undefined) logs only a DEBUG 'observed (no change)' line", () => {
         const s = new ExtensionStrategy();
-        s.reload([storedScript("a", "API mocker", `wt.onRequest({ url: "*", strategy: "extension" }, () => undefined);`)]);
+        s.reload([storedScript("a", "API mocker", `tt.onRequest({ url: "*", strategy: "extension" }, () => undefined);`)]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("allow");
         const lines = entries.filter((e) => e.message.includes("onRequest →"));
@@ -147,9 +147,9 @@ describe("extension strategy: log lines use the stored script name", () => {
     it("replaceResponse → null and no-op onResponseHeaders are observed; header changes stay INFO", () => {
         const s = new ExtensionStrategy();
         s.reload([
-            storedScript("a", "Looker", `wt.replaceResponse({ url: "*", strategy: "extension" }, () => null);
-wt.onResponseHeaders({ url: "*", strategy: "extension" }, () => undefined);`),
-            storedScript("b", "Hdr", `wt.onResponseHeaders({ url: "*", strategy: "extension" }, () => ({ headers: { set: { "x-a": "1" } } }));`),
+            storedScript("a", "Looker", `tt.replaceResponse({ url: "*", strategy: "extension" }, () => null);
+tt.onResponseHeaders({ url: "*", strategy: "extension" }, () => undefined);`),
+            storedScript("b", "Hdr", `tt.onResponseHeaders({ url: "*", strategy: "extension" }, () => ({ headers: { set: { "x-a": "1" } } }));`),
         ]);
         s.handleBeforeRequest(details(), null);
         s.handleHeadersReceived(details(), null);
@@ -193,7 +193,7 @@ describe("CDP tier: request-stage respond fulfillment", () => {
     });
 
     it("sync respond 200 is fulfilled in place by the debugger tier (no redirect)", async () => {
-        const code = `wt.onRequest({ url: "*", strategy: "debugger" }, () => ({ replaceResponse: { body: "<h1>mock</h1>", mime: "text/html" } }));`;
+        const code = `tt.onRequest({ url: "*", strategy: "debugger" }, () => ({ replaceResponse: { body: "<h1>mock</h1>", mime: "text/html" } }));`;
         const c = new DebuggerStrategy();
         c.reload([storedScript("a", "Page mock", code)]);
         await c.handlePaused("tab:1", paused({ resourceType: "Document" }));
@@ -206,7 +206,7 @@ describe("CDP tier: request-stage respond fulfillment", () => {
     });
 
     it("sync replaceResponse runs once, in the debugger tier, at the request stage (no network)", async () => {
-        const code = `wt.replaceResponse({ url: "*", strategy: "debugger" }, () => "<h1>replaced</h1>");`;
+        const code = `tt.replaceResponse({ url: "*", strategy: "debugger" }, () => "<h1>replaced</h1>");`;
         const w = new ExtensionStrategy();
         const c = new DebuggerStrategy();
         w.reload([storedScript("a", "Page mock", code)]);
@@ -225,8 +225,8 @@ describe("CDP tier: request-stage respond fulfillment", () => {
     it("routes on another strategy are not run by the debugger tier", async () => {
         const c = new DebuggerStrategy();
         c.reload([
-            storedScript("a", "API mocker", `wt.onRequest({ url: "*", strategy: "extension" }, () => ({ redirect: "https://mocked.example.com/x" }));`),
-            storedScript("b", "Responder", `wt.onRequest({ url: "*", strategy: "extension" }, () => ({ replaceResponse: { body: "ok" } }));`),
+            storedScript("a", "API mocker", `tt.onRequest({ url: "*", strategy: "extension" }, () => ({ redirect: "https://mocked.example.com/x" }));`),
+            storedScript("b", "Responder", `tt.onRequest({ url: "*", strategy: "extension" }, () => ({ replaceResponse: { body: "ok" } }));`),
         ]);
         await c.handlePaused("tab:1", paused());
         expect(debuggerCalls.filter((x) => x.command === "Fetch.fulfillRequest")).toEqual([]);
@@ -238,7 +238,7 @@ describe("CDP tier: request-stage respond fulfillment", () => {
 
     it("async onRequest respond is fulfilled", async () => {
         const c = new DebuggerStrategy();
-        c.reload([storedScript("a", "API mocker", `wt.onRequest({ url: "*", strategy: "debugger" }, async () => ({ replaceResponse: { status: 503, body: "later" } }));`)]);
+        c.reload([storedScript("a", "API mocker", `tt.onRequest({ url: "*", strategy: "debugger" }, async () => ({ replaceResponse: { status: 503, body: "later" } }));`)]);
         await c.handlePaused("tab:1", paused());
         const fulfill = debuggerCalls.find((x) => x.command === "Fetch.fulfillRequest");
         expect(fulfill).toBeTruthy();
@@ -295,7 +295,7 @@ describe("per-script TypeScript error tracking", () => {
 });
 
 describe("Chromium extension strategy: how it serves replacements (redirect)", () => {
-    const REPLACE = `wt.replaceResponse({ url: "*", strategy: "extension" }, () => "<h1>x</h1>");`;
+    const REPLACE = `tt.replaceResponse({ url: "*", strategy: "extension" }, () => "<h1>x</h1>");`;
     it("a page load is served via serve.html", () => {
         const s = new ExtensionStrategy();
         s.reload([storedScript("a", "Wr page", REPLACE)]);
@@ -312,7 +312,7 @@ describe("Chromium extension strategy: how it serves replacements (redirect)", (
     });
     it("a route on another strategy is left alone", () => {
         const s = new ExtensionStrategy();
-        s.reload([storedScript("a", "Cdp api", `wt.replaceResponse({ url: "*", strategy: "debugger" }, () => "<h1>x</h1>");`)]);
+        s.reload([storedScript("a", "Cdp api", `tt.replaceResponse({ url: "*", strategy: "debugger" }, () => "<h1>x</h1>");`)]);
         expect((s.handleBeforeRequest(details(), null) as any).kind).toBe("allow");
         expect(entries.filter((e) => e.scriptId === "a")).toEqual([]);
     });

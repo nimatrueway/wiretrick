@@ -21,7 +21,7 @@ describe("outcomeKind", () => {
         expect(outcomeKind("debug", "[S] whatever https://a/")).toBe("observed");
         expect(outcomeKind("error", "[S] onRequest threw: x https://a/")).toBe("observed");
         expect(outcomeKind("info", "[S] console.log: fetching https://a/")).toBe("observed");
-        expect(outcomeKind("warn", "[S] wt.log: hi https://a/")).toBe("observed");
+        expect(outcomeKind("warn", "[S] tt.log: hi https://a/")).toBe("observed");
     });
 
     it("formats the observed line with the handler and the URL last", () => {

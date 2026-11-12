@@ -16,9 +16,9 @@ export const hostOs = (platform: string): HostOs => (/Mac|iPhone|iPad/.test(plat
 
 /** How to copy a folder's absolute path on this OS (the browser can't read it), and an example path. */
 export function copyPathHint(os: HostOs): { hint: string; example: string } {
-    if (os === "mac") return { hint: "In Finder, select the folder and press ⌥⌘C (Copy as Pathname), then paste it here.", example: "/Users/you/Wiretrick" };
-    if (os === "windows") return { hint: "In File Explorer, select the folder and press Ctrl+Shift+C (or Shift+right-click → Copy as path), then paste it here.", example: "C:\\Users\\you\\Wiretrick" };
-    return { hint: "In your file manager, open the folder and press Ctrl+L to show its path, or run pwd in a terminal there, then paste it here.", example: "/home/you/Wiretrick" };
+    if (os === "mac") return { hint: "In Finder, select the folder and press ⌥⌘C (Copy as Pathname), then paste it here.", example: "/Users/you/TangiTweak" };
+    if (os === "windows") return { hint: "In File Explorer, select the folder and press Ctrl+Shift+C (or Shift+right-click → Copy as path), then paste it here.", example: "C:\\Users\\you\\TangiTweak" };
+    return { hint: "In your file manager, open the folder and press Ctrl+L to show its path, or run pwd in a terminal there, then paste it here.", example: "/home/you/TangiTweak" };
 }
 
 /** A pasted folder path, cleaned up: quotes from Windows' Copy as path, a file:// URI some file managers copy, a trailing slash. */

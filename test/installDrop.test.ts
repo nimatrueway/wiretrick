@@ -59,7 +59,7 @@ describe("install drops", () => {
     });
 
     it("reads dropped scripts by name", async () => {
-        expect(await readDrop(transfer({ entries: [fileEntry("dark.wiretrick.ts", "D")] }))).toEqual({ label: "dark.wiretrick.ts", files: { "dark.wiretrick.ts": "D" } });
+        expect(await readDrop(transfer({ entries: [fileEntry("dark.tangitweak.ts", "D")] }))).toEqual({ label: "dark.tangitweak.ts", files: { "dark.tangitweak.ts": "D" } });
         const two = await readDrop(transfer({ entries: [fileEntry("a.ts", "A"), fileEntry("cfg.json", "{}")] }));
         expect(two).toEqual({ label: "The dropped files", files: { "a.ts": "A", "cfg.json": "{}" } });
     });

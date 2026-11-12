@@ -120,9 +120,9 @@ const scripts = async () => (await (await ss()).listScripts()).map((s) => s.meta
 const dataPaths = async () => (await (await ss()).listDataFiles()).map((d) => d.path);
 const folders = async () => (await ss()).listFolders();
 /** the ops on synced files and folders (not the generated support files) */
-const syncedOps = () => ops.filter((o) => !/ (settings\.yaml|settings\.schema\.json|tsconfig\.json|wiretrick\.d\.ts|\.wiretrick-backup.*)$/.test(o));
+const syncedOps = () => ops.filter((o) => !/ (settings\.yaml|settings\.schema\.json|tsconfig\.json|tangitweak\.d\.ts|\.tangitweak-backup.*)$/.test(o));
 
-const IMPORTER = `import limits from "./mock/rate-limits.json";\nwt.params({ max: { type: "number", default: limits.max } });`;
+const IMPORTER = `import limits from "./mock/rate-limits.json";\ntt.params({ max: { type: "number", default: limits.max } });`;
 
 /** a synced folder with a folder `mock` (a library, a data file), an importer at the root and an empty folder */
 async function setup() {
@@ -170,7 +170,7 @@ describe("folder sync: folders and data files", () => {
         await sync.stop();
     });
 
-    it("writes the built-ins' typings (valtio, React) under .wiretrick/types/builtin/ for external editors", async () => {
+    it("writes the built-ins' typings (valtio, React) under .tangitweak/types/builtin/ for external editors", async () => {
         const rt = (globalThis as any).chrome.runtime;
         rt.getURL = (p: string) => `chrome-extension://t/${p}`;
         vi.stubGlobal("fetch", async (url: string) => {
@@ -179,8 +179,8 @@ describe("folder sync: folders and data files", () => {
         });
         try {
             const sync = await setup();
-            expect(read(".wiretrick/types/builtin/valtio/esm/index.d.mts")).toBe("export declare const v: 1;");
-            expect(read(".wiretrick/types/builtin/@types/react/index.d.ts")).toBe("export = React;");
+            expect(read(".tangitweak/types/builtin/valtio/esm/index.d.mts")).toBe("export declare const v: 1;");
+            expect(read(".tangitweak/types/builtin/@types/react/index.d.ts")).toBe("export = React;");
             // not scripts
             expect((await scripts()).sort()).toEqual(["main", "mock/helpers"]);
             await sync.stop();
@@ -262,7 +262,7 @@ describe("folder sync: folders and data files", () => {
         await sync.stop();
     });
 
-    it("a folder holding files Wiretrick doesn't sync stays on disk", async () => {
+    it("a folder holding files TangiTweak doesn't sync stays on disk", async () => {
         put("mock/README.md", "notes");
         const sync = await setup();
         await (await ss()).deleteFolder("mock");
@@ -282,11 +282,11 @@ describe("folder sync: folders and data files", () => {
         sync = await import("../src/background/folderSync");
         await sync.startFromStoredHandle();
         await settled(sync);
-        const backups = tree(dirAt(".wiretrick-backup/mock")!).filter((p) => p.startsWith("rate-limits ") && p.endsWith(".json.bak"));
+        const backups = tree(dirAt(".tangitweak-backup/mock")!).filter((p) => p.startsWith("rate-limits ") && p.endsWith(".json.bak"));
         expect(backups).toHaveLength(1);
         const kept = (await (await ss()).listDataFiles())[0].text;
         expect(read("mock/rate-limits.json")).toBe(kept);
-        expect(dirAt(".wiretrick-backup/mock")!.files.get(backups[0])!.text).toBe(kept === '{ "max": 1 }' ? '{ "max": 2 }' : '{ "max": 1 }');
+        expect(dirAt(".tangitweak-backup/mock")!.files.get(backups[0])!.text).toBe(kept === '{ "max": 1 }' ? '{ "max": 2 }' : '{ "max": 1 }');
         await sync.stop();
     });
 });

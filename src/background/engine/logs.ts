@@ -84,7 +84,7 @@ export function log(tabId: number, message: string, level: LogEntry["level"] = "
         if (tabId >= 0) for (const cb of activityListeners) cb(tabId, scriptId);
     }
     if (level === "error") {
-        console.error("[Wiretrick]", message);
+        console.error("[TangiTweak]", message);
     }
 }
 
@@ -233,10 +233,10 @@ export interface ScriptRuntimeError {
     ctx?: string;
 }
 
-const ERR_KEY = "wtScriptErrors";
-const TYPE_KEY = "wtScriptTypeErrors";
-const RULE_KEY = "wtScriptRuleErrors";
-const ROUTE_KEY = "wtScriptRouteWarnings";
+const ERR_KEY = "ttScriptErrors";
+const TYPE_KEY = "ttScriptTypeErrors";
+const RULE_KEY = "ttScriptRuleErrors";
+const ROUTE_KEY = "ttScriptRouteWarnings";
 const runtimeErrors = new Map<string, ScriptRuntimeError>();
 /** TypeScript diagnostics of the SAVED code, reported by the manager's editor */
 const typeErrors = new Map<string, string[]>();

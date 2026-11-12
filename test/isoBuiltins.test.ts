@@ -8,7 +8,7 @@ describe("built-ins in isolated onPage code", () => {
         setBuiltinLoader(
             sourceLoader(async () => {
                 asked++;
-                return `globalThis.__wtBuiltinReact = { react: { tag: "R" }, "react-dom/client": { createRoot: () => "root" } };`;
+                return `globalThis.__ttBuiltinReact = { react: { tag: "R" }, "react-dom/client": { createRoot: () => "root" } };`;
             })
         );
         expect(builtinsReady([`import { subscribe } from "valtio";`])).toBe(true);

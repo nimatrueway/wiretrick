@@ -1,6 +1,6 @@
 /**
  * Script metadata. A script is ACTIVE when its top-level code registers at
- * least one handler (wt.onRequest(route, fn), …); a source that registers
+ * least one handler (tt.onRequest(route, fn), …); a source that registers
  * nothing is a utility module — inert on its own, importable by others.
  */
 import { scriptUrls, type RouteMeta } from "./route";
@@ -10,9 +10,9 @@ export type { Strategy } from "./route";
 
 export interface ResMeta {
     name: string;
-    /** wt.metadata({ description }) */
+    /** tt.metadata({ description }) */
     description?: string;
-    /** wt.metadata(…): the script's package metadata */
+    /** tt.metadata(…): the script's package metadata */
     metadata?: PackageMetadata;
     /** registered at least one handler at top level (else: utility) */
     active: boolean;

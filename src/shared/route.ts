@@ -1,10 +1,10 @@
 /**
- * Handler routes: the first argument of every wt.onXxx registration.
+ * Handler routes: the first argument of every tt.onXxx registration.
  *
- *   wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, fn)
- *   wt.onResponseBody({ url: [...], exclude, methods, resourceTypes, strategy, binary }, fn)
- *   wt.onSite / wt.onPage ("*://example.com/*" or { url, exclude, when }, fn): kind
- *   "onDocument" (world "page" / "isolated"); wt.onOverlay: kind "onOverlay"
+ *   tt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, fn)
+ *   tt.onResponseBody({ url: [...], exclude, methods, resourceTypes, strategy, binary }, fn)
+ *   tt.onSite / tt.onPage ("*://example.com/*" or { url, exclude, when }, fn): kind
+ *   "onDocument" (world "page" / "isolated"); tt.onOverlay: kind "onOverlay"
  *
  * Each network route is owned by exactly one strategy: its own, required,
  * `strategy` — there is no default.
@@ -15,7 +15,7 @@ export type Strategy = "page" | "extension" | "debugger" | "helper" | "rules";
 export const STRATEGIES: Strategy[] = ["helper", "page", "extension", "debugger", "rules"];
 
 export type NetKind = "onRequest" | "onResponseHeaders" | "replaceResponse" | "onResponseBody";
-/** page handlers (wt.onSite, wt.onPage) and overlay handlers (wt.onOverlay) */
+/** page handlers (tt.onSite, tt.onPage) and overlay handlers (tt.onOverlay) */
 export type DocKind = "onDocument" | "onOverlay";
 export type RouteKind = NetKind | DocKind;
 export const NET_KINDS: NetKind[] = ["onRequest", "onResponseHeaders", "replaceResponse", "onResponseBody"];
@@ -23,7 +23,7 @@ export const NET_KINDS: NetKind[] = ["onRequest", "onResponseHeaders", "replaceR
 /** a network handler's kind (one that a strategy runs), not a page/overlay one */
 export const isNetKind = (kind: RouteKind): kind is NetKind => kind !== "onDocument" && kind !== "onOverlay";
 
-/** where a page handler's JavaScript runs: a private world (wt.onPage), or the site's own JS world (wt.onSite) */
+/** where a page handler's JavaScript runs: a private world (tt.onPage), or the site's own JS world (tt.onSite) */
 export type PageWorld = "isolated" | "page";
 
 /** the three places: the site's JS world, the isolated world, the overlay frame */
@@ -36,8 +36,8 @@ export const placeOf = (route: Pick<RouteMeta, "kind" | "world">): PlaceApi => (
 
 /**
  * Names a script's onSite / onPage / onOverlay handlers (RouteMeta.key).
- * The compiler numbers each API's calls in the source (`wt.onPage(` →
- * `wt.onPage.k(2)(`, keyPlaceCalls), so a name doesn't depend on which
+ * The compiler numbers each API's calls in the source (`tt.onPage(` →
+ * `tt.onPage.k(2)(`, keyPlaceCalls), so a name doesn't depend on which
  * calls ran before it; a call it couldn't see (an alias) is numbered by
  * call order (`onPage:~0`). A call in a library's code (its exported
  * function, called by the script) is numbered in the library's source and
@@ -57,7 +57,7 @@ export function placeKeyer(): (api: PlaceApi, n?: number, lib?: string) => { key
     };
 }
 
-/** `register(route, fn, n?)` as `wt.onX`: callable, plus the compiler's `.k(n)` form */
+/** `register(route, fn, n?)` as `tt.onX`: callable, plus the compiler's `.k(n)` form */
 export function placeApi<R>(register: (route: unknown, fn: unknown, n?: number) => R): ((route: unknown, fn: unknown) => R) & { k(n: number): (route: unknown, fn: unknown) => R } {
     const api = (route: unknown, fn: unknown) => register(route, fn);
     api.k = (n: number) => (route: unknown, fn: unknown) => register(route, fn, n);
@@ -77,7 +77,7 @@ export interface RouteMeta {
     kind: RouteKind;
     /** registration order within kind (0-based) */
     index: number;
-    /** the source line of the wt.* call that registered it (Problems view) */
+    /** the source line of the tt.* call that registered it (Problems view) */
     line?: number;
     /** URLPatterns; [] matches nothing */
     url: string[];
@@ -90,11 +90,11 @@ export interface RouteMeta {
     strategy?: Strategy;
     /** onDocument / onOverlay only */
     when?: DocumentWhen;
-    /** onDocument: the JavaScript world — "isolated" (wt.onPage) or "page" (wt.onSite) */
+    /** onDocument: the JavaScript world — "isolated" (tt.onPage) or "page" (tt.onSite) */
     world?: PageWorld;
-    /** the API name it was registered with, when it differs from `kind` (wt.onSite / wt.onPage → kind "onDocument") */
+    /** the API name it was registered with, when it differs from `kind` (tt.onSite / tt.onPage → kind "onDocument") */
     api?: "onSite" | "onPage";
-    /** wt.onSite / wt.onPage: which of the script's calls to that API it is (0-based), when it differs from `index` */
+    /** tt.onSite / tt.onPage: which of the script's calls to that API it is (0-based), when it differs from `index` */
     n?: number;
     /** a call in this library's code (a function it exports, called by the script): `n` counts that library's calls */
     lib?: string;
@@ -141,9 +141,9 @@ function checkPatterns(ps: string[], what: string, where: string): void {
  */
 export function normalizeRoute(kind: RouteKind, raw: unknown, index: number, api?: PlaceApi): RouteMeta {
     const name = api || kind;
-    const where = `wt.${name}`;
+    const where = `tt.${name}`;
     const doc = !isNetKind(kind);
-    const example = doc ? `wt.${name}("*://example.com/*", handler)` : `wt.${kind}({ url: "*://example.com/*", strategy: "helper" }, handler)`;
+    const example = doc ? `tt.${name}("*://example.com/*", handler)` : `tt.${kind}({ url: "*://example.com/*", strategy: "helper" }, handler)`;
     const shape = doc ? "a URL pattern (string, string[] or { url })" : "a route { url, strategy }";
     if (typeof raw === "function" || raw === undefined || raw === null) throw new Error(`${where}: first argument must be ${shape} — e.g. ${example}`);
     let obj: any;

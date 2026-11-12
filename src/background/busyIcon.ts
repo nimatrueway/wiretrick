@@ -40,8 +40,8 @@ export function createBusyIndicator(view: BusyView, t = { showAfter: 150, minSho
     };
 }
 
-const IDLE_TITLE = "Wiretrick";
-const BUSY_TITLE = "Wiretrick — applying script changes…";
+const IDLE_TITLE = "TangiTweak";
+const BUSY_TITLE = "TangiTweak — applying script changes…";
 
 /** Draws on the browser action (Chrome MV3 `action`, MV2/Firefox `browserAction`). */
 export function actionIconView(): BusyView {

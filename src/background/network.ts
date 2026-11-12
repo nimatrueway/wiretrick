@@ -448,7 +448,7 @@ export interface NetBodyRecord {
     requestId?: string;
 }
 
-/** Attach a body Wiretrick handled to its request (no-op unless recording). */
+/** Attach a body TangiTweak handled to its request (no-op unless recording). */
 export function recordNetBody(r: NetBodyRecord): void {
     if (!ports.size) return;
     try {

@@ -1,13 +1,13 @@
 [package]
-name = "wiretrick-helper"
+name = "tangitweak-helper"
 version = "0.4.1"
 edition = "2024"
-description = "Local interception helper for the Wiretrick extension (process strategy)"
+description = "Local interception helper for the TangiTweak extension (process strategy)"
 license = "MIT"
 publish = false
 
 [[bin]]
-name = "wiretrick-helper"
+name = "tangitweak-helper"
 path = "src/main.rs"
 
 [dependencies]

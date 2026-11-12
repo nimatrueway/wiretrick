@@ -19,7 +19,7 @@ function fakePort(name: string, sender: any) {
     return port;
 }
 
-describe("L2 wt-bridge ports", () => {
+describe("L2 tt-bridge ports", () => {
     beforeEach(() => {
         vi.stubGlobal("chrome", { runtime: { id: "ext" } });
         for (const l of bridgeLinks()) l.ep.close();
@@ -27,7 +27,7 @@ describe("L2 wt-bridge ports", () => {
 
     it("ignores other ports and refuses a sender without a tab", () => {
         expect(addBridgePort(fakePort("logs", {}))).toBe(false);
-        const p = fakePort("wt-bridge", { id: "ext", frameId: 0 });
+        const p = fakePort("tt-bridge", { id: "ext", frameId: 0 });
         expect(addBridgePort(p)).toBe(true);
         expect(p.disconnected).toBe(true);
         expect(bridgeLinks()).toHaveLength(0);
@@ -36,12 +36,12 @@ describe("L2 wt-bridge ports", () => {
     it("registers by tab and frame, replaces a frame's old port, forgets a dropped one", () => {
         const seen: number[] = [];
         onBridgeConnect((l) => seen.push(l.tabId));
-        const a = fakePort("wt-bridge", { id: "ext", tab: { id: 5 }, frameId: 0 });
-        const b = fakePort("wt-bridge", { id: "ext", tab: { id: 5 }, frameId: 3 });
+        const a = fakePort("tt-bridge", { id: "ext", tab: { id: 5 }, frameId: 0 });
+        const b = fakePort("tt-bridge", { id: "ext", tab: { id: 5 }, frameId: 3 });
         addBridgePort(a);
         addBridgePort(b);
         expect(bridgeLinks(5).map((l) => l.frameId).sort()).toEqual([0, 3]);
-        const a2 = fakePort("wt-bridge", { id: "ext", tab: { id: 5 }, frameId: 0 });
+        const a2 = fakePort("tt-bridge", { id: "ext", tab: { id: 5 }, frameId: 0 });
         addBridgePort(a2);
         expect(a.disconnected).toBe(true);
         expect(bridgeLinks(5)).toHaveLength(2);
@@ -52,7 +52,7 @@ describe("L2 wt-bridge ports", () => {
 
     it("pushes bundle.update to every open bridge", () => {
         vi.useFakeTimers();
-        const p = fakePort("wt-bridge", { id: "ext", tab: { id: 9 }, frameId: 0 });
+        const p = fakePort("tt-bridge", { id: "ext", tab: { id: 9 }, frameId: 0 });
         addBridgePort(p);
         expect(pushBundleUpdate([{ s: "s1", codeHash: "h" }])).toBe(1);
         vi.advanceTimersByTime(20); // pushes are batched

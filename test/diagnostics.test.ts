@@ -4,7 +4,7 @@ const store: Record<string, any> = {};
 beforeEach(() => {
     (globalThis as any).__MV3__ = false;
     (globalThis as any).chrome = {
-        runtime: { id: "testid", getManifest: () => ({ name: "Wiretrick", version: "9.9.9", manifest_version: 2 }), getPlatformInfo: (cb: any) => cb({ os: "linux", arch: "x86-64" }), getURL: (p: string) => `chrome-extension://testid/${p}`, connectNative: () => {} },
+        runtime: { id: "testid", getManifest: () => ({ name: "TangiTweak", version: "9.9.9", manifest_version: 2 }), getPlatformInfo: (cb: any) => cb({ os: "linux", arch: "x86-64" }), getURL: (p: string) => `chrome-extension://testid/${p}`, connectNative: () => {} },
         storage: { local: { get: async (keys: any) => { const o: any = {}; for (const k of [keys].flat()) if (k in store) o[k] = store[k]; return o; }, set: async (o: any) => Object.assign(store, o) } },
         tabs: { query: (_q: any, cb: any) => cb([{ id: 1, url: "https://example.com/", title: "Ex" }]) },
         webRequest: { onBeforeRequest: {} },

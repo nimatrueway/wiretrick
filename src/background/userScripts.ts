@@ -2,12 +2,12 @@
  * Chrome MV3: onPage code runs in a `chrome.userScripts`
  * USER_SCRIPT world — the only place an MV3 extension may run code from a
  * string. Each script with isolated onPage handlers is registered once
- * (`wt-iso-<scriptId>`, every frame, `document_start`): a one-line prelude
+ * (`tt-iso-<scriptId>`, every frame, `document_start`): a one-line prelude
  * naming the script and its isolated routes, then the packaged runtime
  * (`isolated.js`, src/hook/isolated.ts) — inlined as code, not listed as a
  * `file`: Chrome injects an extension file once per document however many
  * registrations name it, so only one script's runtime would start. In a frame its routes match, the
- * runtime opens the L6 port (`wt-user-script`) and asks the owner for the
+ * runtime opens the L6 port (`tt-user-script`) and asks the owner for the
  * code (`iso.load`, overlayLinks.ts), so the source never sits in the
  * registration and a save reaches open pages as `iso.update`.
  *
@@ -25,7 +25,7 @@
  *
  * onSite code runs in the page's own world, so it comes the same way:
  * each script with onSite handlers is registered in the MAIN world
- * (`wt-main-<scriptId>`, every frame, `document_start`) as its units — the
+ * (`tt-main-<scriptId>`, every frame, `document_start`) as its units — the
  * script, the library scripts and package modules it imports, each a
  * function the hook picks up (shared/siteCode.ts). Here the code itself
  * is the registration (the MAIN world has no messaging to ask for it), so
@@ -36,9 +36,9 @@ import type { RouteMeta } from "../shared/route";
 import type { UserScriptsStatus } from "../shared/userScriptsStatus";
 import { dlogLevel } from "../shared/debugLog";
 
-export const USER_SCRIPT_PORT = "wt-user-script";
-const ID_PREFIX = "wt-iso-";
-const SITE_PREFIX = "wt-main-";
+export const USER_SCRIPT_PORT = "tt-user-script";
+const ID_PREFIX = "tt-iso-";
+const SITE_PREFIX = "tt-main-";
 /** the runtime compiles the script with `new Function`; the page's CSP doesn't apply */
 export const ISO_WORLD_CSP = "script-src 'self' 'unsafe-eval'; object-src 'self'";
 const STATUS_TTL_MS = 2000;
@@ -109,7 +109,7 @@ export function onUserScriptsStatus(fn: (s: UserScriptsStatus) => void): void {
     listeners.push(fn);
 }
 
-const preludeFor = (s: IsoScript): string => `(globalThis.__wtIsoQ ||= []).push(${JSON.stringify({ s: s.id, routes: s.routes })});`;
+const preludeFor = (s: IsoScript): string => `(globalThis.__ttIsoQ ||= []).push(${JSON.stringify({ s: s.id, routes: s.routes })});`;
 
 let runtime: Promise<string> | null = null;
 /** the packaged runtime's source (read once) */
@@ -143,6 +143,9 @@ async function doSync({ iso: want, site }: typeof wanted): Promise<void> {
     const perWorld = typeof us.getWorldConfigurations === "function";
     const source = await runtimeSource();
     const registered = (await us.getScripts()) as any[];
+    // registrations under the ids of the extension's former name (Wiretrick) would run stale code
+    const stale = registered.filter((r) => /^wt-(iso|main)-/.test(r.id)).map((r) => r.id);
+    if (stale.length) await us.unregister({ ids: stale });
     const have = new Map<string, any>(registered.filter((r) => r.id.startsWith(ID_PREFIX)).map((r) => [r.id, r]));
     const add: any[] = [];
     const change: any[] = [];

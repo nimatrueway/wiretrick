@@ -1,5 +1,5 @@
 /**
- * The "helper" strategy — a local helper (wiretrick-helper, Rust)
+ * The "helper" strategy — a local helper (tangitweak-helper, Rust)
  * is a loopback MITM proxy that Chrome reaches through a PAC
  * (helperRouting.ts) for the hosts of helper-owned routes only. It
  * pauses matching requests CDP-Fetch style over native messaging; this
@@ -32,7 +32,7 @@ import { HelperRouting } from "../../helperRouting";
 import { IS_FIREFOX, setHelperActive } from "./helperState";
 import { compileMv2, ownedRoutes, ownsAny, type OwnedRoute } from "./strategyScripts";
 
-export const NM_HOST = "com.wiretrick.helper";
+export const NM_HOST = "com.tangitweak.helper";
 
 type Pairs = [string, string][];
 
@@ -208,7 +208,7 @@ export class HelperStrategy {
         if (!IS_FIREFOX && owned.length && !(await hasHelperPermission())) {
             if (this.port) this.disconnect();
             this.owned = owned;
-            if (this.state !== "permission") dlogLevel("helper", "warn", `handlers using the "helper" strategy don't run until Wiretrick may talk to the local helper — click Allow in Settings → Local helper`);
+            if (this.state !== "permission") dlogLevel("helper", "warn", `handlers using the "helper" strategy don't run until TangiTweak may talk to the local helper — click Allow in Settings → Local helper`);
             this.state = "permission";
             this.emit();
             return;
@@ -356,7 +356,7 @@ export class HelperStrategy {
         const ok = await this.routing.probe();
         if (ok !== this.caTrusted) {
             this.caTrusted = ok;
-            if (!ok) dlogLevel("helper", "warn", `Chrome does not trust the helper certificate yet — intercepted HTTPS sites will show certificate errors. Run: wiretrick-helper trust-ca (or use "Trust certificate" in the Editor)`);
+            if (!ok) dlogLevel("helper", "warn", `Chrome does not trust the helper certificate yet — intercepted HTTPS sites will show certificate errors. Run: tangitweak-helper trust-ca (or use "Trust certificate" in the Editor)`);
             this.emit();
         }
     }

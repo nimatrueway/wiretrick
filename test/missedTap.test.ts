@@ -22,7 +22,7 @@ describe("missedReason", () => {
         expect(reason({ strategy: "page" })).toBe(MISSED_REASONS.hookNotFetch);
     });
 
-    it("hook: fetch/XHR in a tab without the page hook (opened before Wiretrick started)", () => {
+    it("hook: fetch/XHR in a tab without the page hook (opened before TangiTweak started)", () => {
         expect(reason({ strategy: "page", type: "xmlhttprequest", hookLoaded: false })).toBe(MISSED_REASONS.hookNotLoaded);
         expect(reason({ strategy: "page", type: "xmlhttprequest", hookLoaded: true })).toBeNull();
     });

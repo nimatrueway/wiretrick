@@ -1,5 +1,5 @@
 /**
- * `wt.globalStore` replicas: the valtio proxy a script gets in one context, kept
+ * `tt.globalStore` replicas: the valtio proxy a script gets in one context, kept
  * in sync with the background owner (src/background/engine/storeOwner.ts)
  * over a wire Endpoint.
  *
@@ -13,7 +13,7 @@
  * Top-level function and accessor fields of `initial` stay local (methods,
  * computed values); everything else must be JSON.
  *
- * `wt.pageStore`: one replica per page, made from the store's template
+ * `tt.pageStore`: one replica per page, made from the store's template
  * when first used there (or when the owner patches that page's copy) and
  * dropped with the page (`store.drop`). Code serving every tab gets a
  * forwarding proxy that picks the copy of the page whose handler is running
@@ -28,7 +28,7 @@ import { isLocalField, splitInitial, toJson, writeDiff, type Template } from "./
 interface Replica {
     s: string;
     name: string;
-    /** a page's copy of a `wt.pageStore` */
+    /** a page's copy of a `tt.pageStore` */
     page?: string;
     proxy: Record<string, any>;
     /** the proxy's target: local (function/accessor) fields live there */
@@ -61,16 +61,16 @@ export type StoreSnapshots = { [scriptId: string]: { [name: string]: { rev: numb
 
 const keyOf = (s: string, name: string, page?: string) => `${s}\u0000${storeKey(name, page)}`;
 
-/** `wt.pageStore` outside a handler's synchronous part */
+/** `tt.pageStore` outside a handler's synchronous part */
 export const noPageError = (name: string) =>
-    new Error(`wt.pageStore("${name}"): no page here — a page's copy is reachable while a handler runs for one of the page's requests, until the handler's first await (read what you need before awaiting). Top-level code and timers have no page.`);
+    new Error(`tt.pageStore("${name}"): no page here — a page's copy is reachable while a handler runs for one of the page's requests, until the handler's first await (read what you need before awaiting). Top-level code and timers have no page.`);
 
 const pageOf = (rep: Replica): { page?: string } => (rep.page ? { page: rep.page } : {});
 
 export class ReplicaHub {
     private ep: Endpoint | null = null;
     private readonly reps = new Map<string, Replica>();
-    /** `wt.pageStore` templates by `keyOf(s, name)` */
+    /** `tt.pageStore` templates by `keyOf(s, name)` */
     private readonly templates = new Map<string, Template>();
     /** a page-less handler call's throwaway copy, per store */
     private readonly scratch = new Map<string, { call: number; obj: object }>();
@@ -92,7 +92,7 @@ export class ReplicaHub {
         this.reconnect();
     }
 
-    /** the owner's current stores, so `wt.globalStore` returns them synchronously when a script compiles */
+    /** the owner's current stores, so `tt.globalStore` returns them synchronously when a script compiles */
     prime(snaps: StoreSnapshots): void {
         for (const [s, stores] of Object.entries(snaps)) this.primed.set(s, { ...(this.primed.get(s) ?? {}), ...stores });
     }
@@ -125,10 +125,10 @@ export class ReplicaHub {
         for (const k of [...this.templates.keys()]) if (!keep.has(k.slice(0, k.indexOf("\u0000")))) this.templates.delete(k);
     }
 
-    /** `wt.globalStore(name, initial, opts)` for script `s` */
+    /** `tt.globalStore(name, initial, opts)` for script `s` */
     store<T extends object>(s: string, name: string, initial: T, persist: StorePersist = true): T {
-        if (typeof name !== "string" || !name) throw new TypeError("wt.globalStore: the first argument must be the store's name (a non-empty string)");
-        if (!initial || typeof initial !== "object" || Array.isArray(initial)) throw new TypeError(`wt.globalStore("${name}"): initial must be an object`);
+        if (typeof name !== "string" || !name) throw new TypeError("tt.globalStore: the first argument must be the store's name (a non-empty string)");
+        if (!initial || typeof initial !== "object" || Array.isArray(initial)) throw new TypeError(`tt.globalStore("${name}"): initial must be an object`);
         const { json, local } = splitInitial(name, initial);
         const key = keyOf(s, name);
         const old = this.reps.get(key);
@@ -150,14 +150,14 @@ export class ReplicaHub {
     }
 
     /**
-     * `wt.pageStore(name, initial)` for script `s`. `page`: the overlay's
+     * `tt.pageStore(name, initial)` for script `s`. `page`: the overlay's
      * page — its replica; absent: code serving every page — a proxy to the
      * copy of the page whose handler is running.
      */
     pageStore<T extends object>(s: string, name: string, initial: T, page?: string): T {
-        if (typeof name !== "string" || !name) throw new TypeError("wt.pageStore: the first argument must be the store's name (a non-empty string)");
-        if (!initial || typeof initial !== "object" || Array.isArray(initial)) throw new TypeError(`wt.pageStore("${name}"): initial must be an object`);
-        const t = splitInitial(name, initial, "wt.pageStore");
+        if (typeof name !== "string" || !name) throw new TypeError("tt.pageStore: the first argument must be the store's name (a non-empty string)");
+        if (!initial || typeof initial !== "object" || Array.isArray(initial)) throw new TypeError(`tt.pageStore("${name}"): initial must be an object`);
+        const t = splitInitial(name, initial, "tt.pageStore");
         const tk = keyOf(s, name);
         const recompiled = this.templates.has(tk);
         this.templates.set(tk, t);
@@ -175,7 +175,7 @@ export class ReplicaHub {
             const pg = currentPage();
             if (pg === undefined) throw noPageError(name);
             if (pg === null) return this.scratchCopy(tk);
-            if (pg === RULES_PAGE) throw new Error(`wt.pageStore("${name}") can't be read by a strategy "rules" handler — its rules are built once for every page; use another strategy`);
+            if (pg === RULES_PAGE) throw new Error(`tt.pageStore("${name}") can't be read by a strategy "rules" handler — its rules are built once for every page; use another strategy`);
             return this.pageReplica(s, name, pg)!.proxy;
         };
         // `then`: an `await store` outside a handler shouldn't throw
@@ -194,7 +194,7 @@ export class ReplicaHub {
         });
     }
 
-    /** page `page`'s replica of a `wt.pageStore`, made from its template on first use */
+    /** page `page`'s replica of a `tt.pageStore`, made from its template on first use */
     private pageReplica(s: string, name: string, page: string): Replica | undefined {
         const key = keyOf(s, name, page);
         const have = this.reps.get(key);

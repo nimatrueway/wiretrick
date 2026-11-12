@@ -1,6 +1,6 @@
 /**
  * Shared E2E check (MV2 + MV3): installing a package by opening its
- * `.wiretrick.ts` URL. The tab goes to the install page, which lists what
+ * `.tangitweak.ts` URL. The tab goes to the install page, which lists what
  * the package can do; installing writes the entry, its library and its
  * JSON file into the package's folder and the entry runs. An update that
  * adds a route waits for review (the Explorer marks it; clicking the mark
@@ -22,9 +22,9 @@ let version = 1;
 
 const entry = (origin: string) => `import { shout } from "./lib";
 import cfg from "./cfg.json";
-wt.metadata({ name: "Demo package", version: "1.${version - 1}.0" });
-wt.replaceResponse({ url: "${origin}/pkg-api", strategy: "page" }, () => shout(cfg.word));
-${version > 1 ? `wt.replaceResponse({ url: "${origin}/pkg-other", strategy: "page" }, () => "OTHER");\n` : ""}`;
+tt.metadata({ name: "Demo package", version: "1.${version - 1}.0" });
+tt.replaceResponse({ url: "${origin}/pkg-api", strategy: "page" }, () => shout(cfg.word));
+${version > 1 ? `tt.replaceResponse({ url: "${origin}/pkg-other", strategy: "page" }, () => "OTHER");\n` : ""}`;
 
 export function packagesServerRoute(req: http.IncomingMessage, res: http.ServerResponse, origin: string): boolean {
     const url = new URL(req.url || "/", origin);
@@ -32,12 +32,12 @@ export function packagesServerRoute(req: http.IncomingMessage, res: http.ServerR
         res.writeHead(200, { "content-type": ct, "cache-control": "no-store" });
         res.end(body);
     };
-    if (url.pathname === "/pkg/demo.wiretrick.ts") return send("text/plain", entry(origin)), true;
+    if (url.pathname === "/pkg/demo.tangitweak.ts") return send("text/plain", entry(origin)), true;
     if (url.pathname === "/pkg/lib.ts") return send("text/plain", 'export const shout = (s: string) => s.toUpperCase() + "!";\n'), true;
     if (url.pathname === "/pkg/cfg.json") return send("application/json", '{ "word": "pkg-ok" }'), true;
     if (url.pathname === "/kit/metadata.json") return send("application/json", JSON.stringify({ name: "Kit", version: "3.0.0", description: "Two scripts", scripts: ["a.ts", "tools/b.ts"] })), true;
-    if (url.pathname === "/kit/a.ts") return send("text/plain", `import { tag } from "./shared";\nwt.replaceResponse({ url: "${origin}/kit-a", strategy: "page" }, () => tag("A"));\n`), true;
-    if (url.pathname === "/kit/tools/b.ts") return send("text/plain", `import { tag } from "../shared";\nwt.replaceResponse({ url: "${origin}/kit-b", strategy: "page" }, () => tag("B"));\n`), true;
+    if (url.pathname === "/kit/a.ts") return send("text/plain", `import { tag } from "./shared";\ntt.replaceResponse({ url: "${origin}/kit-a", strategy: "page" }, () => tag("A"));\n`), true;
+    if (url.pathname === "/kit/tools/b.ts") return send("text/plain", `import { tag } from "../shared";\ntt.replaceResponse({ url: "${origin}/kit-b", strategy: "page" }, () => tag("B"));\n`), true;
     if (url.pathname === "/kit/shared.ts") return send("text/plain", 'export const tag = (s: string) => "KIT-" + s;\n'), true;
     if (url.pathname === "/pkg-page") return send("text/html", "<html><body>PKG</body></html>"), true;
     if (url.pathname === "/pkg-api") return send("text/plain", "REAL"), true;
@@ -58,13 +58,13 @@ export async function checkPackages(ctx: any, mgr: any, origin: string, check: C
     const t = (s: string) => `packages${opts.label ?? ""}: ${s}`;
     const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
     version = 1;
-    const src = `${origin}/pkg/demo.wiretrick.ts`;
+    const src = `${origin}/pkg/demo.tangitweak.ts`;
 
     // opening the entry's URL lands on the install page
     const tab = await ctx.newPage();
     await tab.goto(src, { timeout: 15000 }).catch(() => {});
     const landed = await waitFor<string>(async () => tab.url(), (u) => u.includes("install.html"), 10000);
-    check(t("opening a .wiretrick.ts URL opens the install page"), landed.includes("install.html?url=") && landed.includes(encodeURIComponent(src)), landed);
+    check(t("opening a .tangitweak.ts URL opens the install page"), landed.includes("install.html?url=") && landed.includes(encodeURIComponent(src)), landed);
 
     const confirm = await tab.waitForSelector("#install-confirm:not([disabled])", { timeout: 15000 }).then(() => true, () => false);
     const review = await tab.evaluate(() => document.body.innerText);
@@ -83,7 +83,7 @@ export async function checkPackages(ctx: any, mgr: any, origin: string, check: C
     const names = scripts.filter((s) => s.meta.name.startsWith("demo/")).map((s) => s.meta.name).sort();
     check(
         t("installing writes the entry, its library and its JSON into the package's folder"),
-        done && !!pkg && JSON.stringify(names) === '["demo/demo.wiretrick","demo/lib"]' && data.some((d) => d.path === "demo/cfg.json") && pkg.autoUpdate === true,
+        done && !!pkg && JSON.stringify(names) === '["demo/demo.tangitweak","demo/lib"]' && data.some((d) => d.path === "demo/cfg.json") && pkg.autoUpdate === true,
         JSON.stringify({ done, names, data: data.map((d) => d.path), pkg: pkg && { folder: pkg.folder, autoUpdate: pkg.autoUpdate } })
     );
     await tab.close();
@@ -149,7 +149,7 @@ export async function checkPackages(ctx: any, mgr: any, origin: string, check: C
             },
             [sel, what]
         );
-    const fileLit = await dropOn("#install-drop", { file: ["dropped.wiretrick.ts", 'wt.metadata({ name: "Dropped", version: "0.1.0" });\n'] });
+    const fileLit = await dropOn("#install-drop", { file: ["dropped.tangitweak.ts", 'tt.metadata({ name: "Dropped", version: "0.1.0" });\n'] });
     const fileReview = await mgr.waitForSelector("#install-dialog #install-confirm", { timeout: 8000 }).then(() => true, () => false);
     const fileText = await mgr.evaluate(() => (document.querySelector("#install-dialog") as HTMLElement | null)?.innerText || "");
     check(t("Install Script… opens a dialog; a file dropped on it is reviewed"), picker && fileLit && fileReview && fileText.includes("Dropped") && fileText.includes("0.1.0"), JSON.stringify({ picker, fileLit, fileReview, text: fileText.slice(0, 300) }));
@@ -192,7 +192,7 @@ export async function checkPackages(ctx: any, mgr: any, origin: string, check: C
     await send({ type: "saveScript", id: "mkpkg-lib", code: "export const v = 1;\n", name: "mklib" });
     await send({ type: "saveScript", id: "mkpkg-user", code: 'import { v } from "./mklib";\nexport const w = v;\n', name: "mkuser" });
     await send({ type: "saveDataFile", path: "mkcfg.json", text: '{ "a": 1 }\n' });
-    await send({ type: "saveScript", id: "mkpkg-entry", code: 'import { v } from "./mklib";\nimport cfg from "./mkcfg.json";\nconsole.log(v, cfg);\n', name: "mkpkg.wiretrick" });
+    await send({ type: "saveScript", id: "mkpkg-entry", code: 'import { v } from "./mklib";\nimport cfg from "./mkcfg.json";\nconsole.log(v, cfg);\n', name: "mkpkg.tangitweak" });
     const dialogs: string[] = [];
     const onDialog = (d: any): void => void (dialogs.push(d.message()), d.accept());
     mgr.on("dialog", onDialog);
@@ -202,7 +202,7 @@ export async function checkPackages(ctx: any, mgr: any, origin: string, check: C
     await mgr.click('.ctx-menu li:has-text("Make Package…")');
     const made = await waitFor(
         async () => ({ scripts: ((await send({ type: "listScripts" })) || []) as any[], data: ((await send({ type: "listDataFiles" })) || []) as any[] }),
-        ({ scripts, data }) => scripts.some((x) => x.id === "mkpkg-entry" && x.meta.name === "mkpkg/mkpkg.wiretrick") && data.some((d) => d.path === "mkpkg/mkcfg.json") && data.some((d) => d.path === "mkpkg/metadata.json"),
+        ({ scripts, data }) => scripts.some((x) => x.id === "mkpkg-entry" && x.meta.name === "mkpkg/mkpkg.tangitweak") && data.some((d) => d.path === "mkpkg/mkcfg.json") && data.some((d) => d.path === "mkpkg/metadata.json"),
     );
     mgr.off("dialog", onDialog);
     const entry = made.scripts.find((x) => x.id === "mkpkg-entry");
@@ -212,7 +212,7 @@ export async function checkPackages(ctx: any, mgr: any, origin: string, check: C
         t("Make Package… moves the script and what it imports into a folder, copying what others use, and adds a metadata.json"),
         /Copies[\s\S]*mklib\.ts → mkpkg\/mklib\.ts/.test(dialogs[0] || "") &&
             manifest.name === "mkpkg" &&
-            JSON.stringify(manifest.scripts) === '["mkpkg.wiretrick.ts"]' &&
+            JSON.stringify(manifest.scripts) === '["mkpkg.tangitweak.ts"]' &&
             entry?.code.includes('from "./mklib"') &&
             mkNames.includes("mkpkg/mklib") &&
             mkNames.includes("mklib") &&
@@ -226,7 +226,7 @@ export async function checkPackages(ctx: any, mgr: any, origin: string, check: C
     await mgr.bringToFront();
     if (!(await mgr.$(manifestRow))) await mgr.click('#script-list li.script-item[data-id="dir:mkpkg"]').catch(() => {});
     await mgr.click(manifestRow, { timeout: 5000 }).catch(() => {});
-    await mgr.waitForFunction(() => { const m = (window as any).monaco.editor.getEditors()[0].getModel(); return m?.uri.path.endsWith("/metadata.json") && m.getValue().includes('"mkpkg.wiretrick.ts"'); }, null, { timeout: 8000 }).catch(() => {});
+    await mgr.waitForFunction(() => { const m = (window as any).monaco.editor.getEditors()[0].getModel(); return m?.uri.path.endsWith("/metadata.json") && m.getValue().includes('"mkpkg.tangitweak.ts"'); }, null, { timeout: 8000 }).catch(() => {});
     // the Explorer lists the moved scripts (the completions come from its list)
     await mgr.waitForSelector('#script-list li.script-item[data-id="mkpkg-entry"]', { timeout: 8000 }).catch(() => {});
     // a late refresh of the open file cancels a pending suggest, so trigger again until the list shows
@@ -234,7 +234,7 @@ export async function checkPackages(ctx: any, mgr: any, origin: string, check: C
         await mgr.evaluate(() => {
             const ed = (window as any).monaco.editor.getEditors()[0];
             const model = ed.getModel();
-            ed.setPosition(model.getPositionAt(model.getValue().indexOf('"mkpkg.wiretrick.ts"') + 1));
+            ed.setPosition(model.getPositionAt(model.getValue().indexOf('"mkpkg.tangitweak.ts"') + 1));
             ed.focus();
             ed.trigger("t", "editor.action.triggerSuggest", {});
         });
@@ -243,23 +243,23 @@ export async function checkPackages(ctx: any, mgr: any, origin: string, check: C
     const manifestSugg = await mgr.evaluate(() => [...document.querySelectorAll(".suggest-widget.visible .monaco-list-row .label-name")].map((e) => e.textContent));
     const manifestAt = await mgr.evaluate(() => { const m = (window as any).monaco.editor.getEditors()[0].getModel(); return [m?.uri.path, document.hasFocus(), document.querySelector(".suggest-widget")?.className, document.querySelector(".suggest-widget .message")?.textContent]; });
     await mgr.keyboard.press("Escape");
-    check(t('metadata.json\'s "scripts" completes the scripts in the package\'s folder'), manifestSugg.includes("mklib.ts") && manifestSugg.includes("mkpkg.wiretrick.ts") && !manifestSugg.includes("mkuser.ts"), JSON.stringify({ manifestSugg, manifestAt, manifestId }));
+    check(t('metadata.json\'s "scripts" completes the scripts in the package\'s folder'), manifestSugg.includes("mklib.ts") && manifestSugg.includes("mkpkg.tangitweak.ts") && !manifestSugg.includes("mkuser.ts"), JSON.stringify({ manifestSugg, manifestAt, manifestId }));
 
     // ...and a listed script that doesn't exist is an error, in the file and in Problems
     const manifestOrig = await mgr.evaluate(() => {
         const m = (window as any).monaco.editor.getEditors()[0].getModel();
         const v = m.getValue();
-        m.setValue(v.replace('"mkpkg.wiretrick.ts"', '"mkpkg.wiretrick.ts", "gone.ts"'));
+        m.setValue(v.replace('"mkpkg.tangitweak.ts"', '"mkpkg.tangitweak.ts", "gone.ts"'));
         return v;
     });
     const missingMarker = await waitFor(
-        () => mgr.evaluate(() => { const w = window as any; const m = w.monaco.editor.getEditors()[0].getModel(); return w.monaco.editor.getModelMarkers({ resource: m.uri, owner: "wt-manifest" }).map((x: any) => [x.message, m.getValueInRange(x)]); }),
+        () => mgr.evaluate(() => { const w = window as any; const m = w.monaco.editor.getEditors()[0].getModel(); return w.monaco.editor.getModelMarkers({ resource: m.uri, owner: "tt-manifest" }).map((x: any) => [x.message, m.getValueInRange(x)]); }),
         (v: any[]) => v.length > 0,
         5000
     );
     const missingInProblems = await waitFor(() => mgr.evaluate(() => document.querySelector("#problems-list, .problems")?.textContent || ""), (v: string) => v.includes("No script at mkpkg/gone.ts"), 5000);
     await mgr.evaluate((v: string) => (window as any).monaco.editor.getEditors()[0].getModel().setValue(v), manifestOrig);
-    const missingCleared = await waitFor(() => mgr.evaluate(() => { const w = window as any; return w.monaco.editor.getModelMarkers({ resource: w.monaco.editor.getEditors()[0].getModel().uri, owner: "wt-manifest" }).length; }), (n: number) => n === 0, 5000);
+    const missingCleared = await waitFor(() => mgr.evaluate(() => { const w = window as any; return w.monaco.editor.getModelMarkers({ resource: w.monaco.editor.getEditors()[0].getModel().uri, owner: "tt-manifest" }).length; }), (n: number) => n === 0, 5000);
     check(
         t('metadata.json: a "scripts" entry that names no script is an error, in the file and in Problems'),
         JSON.stringify(missingMarker) === JSON.stringify([["No script at mkpkg/gone.ts", '"gone.ts"']]) && (missingInProblems || "").includes("gone.ts") && missingCleared === 0,
@@ -271,24 +271,24 @@ export async function checkPackages(ctx: any, mgr: any, origin: string, check: C
     const icon = await mgr.waitForSelector(`${pkgRow} .file-icon.package`, { timeout: 8000 }).then(() => true, () => false);
     await mgr.evaluate(() => {
         const w = window as any;
-        w.__wtDownload = null;
-        w.__wtClick = HTMLAnchorElement.prototype.click;
+        w.__ttDownload = null;
+        w.__ttClick = HTMLAnchorElement.prototype.click;
         HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
-            if (!this.download) return w.__wtClick.call(this);
+            if (!this.download) return w.__ttClick.call(this);
             const name = this.download;
             void fetch(this.href)
                 .then((r) => r.arrayBuffer())
-                .then((b) => (w.__wtDownload = { name, bytes: Array.from(new Uint8Array(b)) }));
+                .then((b) => (w.__ttDownload = { name, bytes: Array.from(new Uint8Array(b)) }));
         };
     });
     await mgr.click(`${pkgRow} .script-name`, { button: "right" });
     await mgr.click('.ctx-menu li:has-text("Export Package…")');
-    const dl = await waitFor(() => mgr.evaluate(() => (window as any).__wtDownload), (v: any) => !!v, 8000);
-    await mgr.evaluate(() => void (HTMLAnchorElement.prototype.click = (window as any).__wtClick));
+    const dl = await waitFor(() => mgr.evaluate(() => (window as any).__ttDownload), (v: any) => !!v, 8000);
+    await mgr.evaluate(() => void (HTMLAnchorElement.prototype.click = (window as any).__ttClick));
     const zipped = dl ? await readZip(new Uint8Array(dl.bytes).buffer) : {};
     check(
         t("a package folder has the package icon, and Export Package… downloads its files as a zip"),
-        icon && dl?.name === "mkpkg.zip" && Object.keys(zipped).sort().join() === "mkpkg/metadata.json,mkpkg/mkcfg.json,mkpkg/mklib.ts,mkpkg/mkpkg.wiretrick.ts",
+        icon && dl?.name === "mkpkg.zip" && Object.keys(zipped).sort().join() === "mkpkg/metadata.json,mkpkg/mkcfg.json,mkpkg/mklib.ts,mkpkg/mkpkg.tangitweak.ts",
         JSON.stringify({ icon, name: dl?.name, files: Object.keys(zipped) })
     );
     await send({ type: "deleteFolder", path: "mkpkg" });

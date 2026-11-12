@@ -1,6 +1,6 @@
 /**
  * The built-in modules onSite code gets (hook.ts; bridge.ts when the page
- * CSP blocks eval): valtio's core — the same copy its `wt.siteStore`s
+ * CSP blocks eval): valtio's core — the same copy its `tt.siteStore`s
  * use, so `subscribe` and `snapshot` work on them — and no React.
  */
 import * as vanilla from "valtio/vanilla";

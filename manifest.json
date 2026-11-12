@@ -1,5 +1,5 @@
 {
-    "name": "Wiretrick",
+    "name": "TangiTweak",
     "version": "0.27.0",
     "version_name": "0.27.0-alpha",
     "description": "Override requests and responses with TypeScript scripts: redirect, change headers, mock or rewrite response bodies.",
@@ -10,7 +10,7 @@
         "128": "icons/icon-128x128.png"
     },
     "browser_action": {
-        "default_title": "Wiretrick",
+        "default_title": "TangiTweak",
         "default_popup": "popup.html",
         "default_icon": {
             "16": "icons/icon-16x16.png",
@@ -54,7 +54,7 @@
     "manifest_version": 2,
     "browser_specific_settings": {
         "gecko": {
-            "id": "wiretrick@nimatrueway",
+            "id": "tangitweak@nimatrueway",
             "strict_min_version": "115.0"
         }
     }

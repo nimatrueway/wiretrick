@@ -10,7 +10,7 @@
  *   mock/empty/            an empty folder (a folder entry)
  *
  * Import also takes a zip of the synced folder itself (one top folder
- * holding settings.yaml, tsconfig.json or wt-api.d.ts is unwrapped); the
+ * holding settings.yaml, tsconfig.json or tt-api.d.ts is unwrapped); the
  * support files folder sync writes, dot entries and node_modules are skipped.
  */
 import { parseDocument, isMap, isScalar, type YAMLMap } from "yaml";
@@ -20,7 +20,7 @@ import { API_DTS_FILE, TSCONFIG_FILE } from "./generatedFiles";
 import { dataFilePathProblem, folderPathProblem, scriptFileName, scriptNameFromFile, scriptNameProblem } from "./scriptName";
 import { isInFolder } from "./folders";
 
-export const EXPORT_ZIP_NAME = "wiretrick-export.zip";
+export const EXPORT_ZIP_NAME = "tangitweak-export.zip";
 
 const MANIFEST = "metadata.json";
 

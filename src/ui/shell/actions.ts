@@ -36,7 +36,7 @@ export const actions = {
     select(_id: string): void {},
     /** asks, then deletes */
     deleteRows(_rows: TreeRow[]): void {},
-    /** Make Package… on a script: name it with wt.metadata, or bundle it with what it imports */
+    /** Make Package… on a script: name it with tt.metadata, or bundle it with what it imports */
     makePackage(_id: string): void {},
     /** Make Package… on a folder: a metadata.json listing its scripts */
     makeFolderPackage(_folder: string): void {},

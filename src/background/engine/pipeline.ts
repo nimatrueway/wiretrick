@@ -599,10 +599,10 @@ export function createPipeline(
             traced.delete(d.requestId);
         }, FILTER);
         // another extension's conflicting change won (e.g. two copies of
-        // Wiretrick, or an ad blocker redirecting the same request)
+        // TangiTweak, or an ad blocker redirecting the same request)
         (chrome.webRequest as any).onActionIgnored?.addListener((d: any) => {
             const t = traced.get(d.requestId);
-            log(t?.tabId ?? -1, `[extension] the browser IGNORED this extension's "${d.action}"${t ? ` for ${t.url}` : ""} — another extension's change to the same request took precedence (disable other request-modifying extensions, e.g. a second Wiretrick install)`, "warn");
+            log(t?.tabId ?? -1, `[extension] the browser IGNORED this extension's "${d.action}"${t ? ` for ${t.url}` : ""} — another extension's change to the same request took precedence (disable other request-modifying extensions, e.g. a second TangiTweak install)`, "warn");
         });
     } else {
         dlog("pipeline", "MV3: no blocking webRequest — the page strategy carries page fetch/XHR; the debugger or helper strategy carries browser-initiated loads");
@@ -653,7 +653,7 @@ export function createPipeline(
             const a = analyzed.get(s.id);
             if (preview !== undefined) {
                 if (s.id !== preview) continue;
-                previewWhy = !a || a.error ? "the script doesn't compile" : "the script has no overlay handler (wt.onOverlay)";
+                previewWhy = !a || a.error ? "the script doesn't compile" : "the script has no overlay handler (tt.onOverlay)";
             } else if (!s.enabled) continue;
             if (!a || a.error || !a.meta.active) continue;
             let main = false;
@@ -906,7 +906,7 @@ export function createPipeline(
             void (async () => {
                 const url = msg.url || "";
                 const { bundle } = await hookBundle(url, sender.frameId === 0 || sender.frameId === undefined);
-                // MV2: the bridge runs isolated onPage code — its stores' current state (this page's wt.pageStore copies), so they read synchronously
+                // MV2: the bridge runs isolated onPage code — its stores' current state (this page's tt.pageStore copies), so they read synchronously
                 const tabId = sender.tab?.id;
                 const isoIds = !__MV3__ ? bundle.isoHandlers.map((h) => h.scriptId) : [];
                 if (isoIds.length && typeof tabId === "number" && tabId >= 0) {

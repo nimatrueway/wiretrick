@@ -1,5 +1,5 @@
 /**
- * Handles returned by `wt.onSite` / `wt.onPage` / `wt.onOverlay`: the other side's
+ * Handles returned by `tt.onSite` / `tt.onPage` / `tt.onOverlay`: the other side's
  * functions as async calls (`await page.highlight("a")`). Where a call
  * can't go anywhere (background code, or a world that may not call), the
  * handle is inert: every method rejects with the reason. Live handles are
@@ -29,13 +29,13 @@ export const REMOTE_FROM_BACKGROUND = "handles can't be called from network hand
 /** in every message about onSite code using what only trusted code may (the editor offers the move-to-onPage quick fix) */
 export const SITE_DISALLOWED = "which the site's JavaScript world can't be trusted with";
 /** a handle used in onSite code */
-export const SITE_NO_HANDLES = `onSite code can't call handles (${SITE_DISALLOWED}: the site could call them too) — call them from wt.onPage or wt.onOverlay code, and have those read the site through an onSite handle`;
+export const SITE_NO_HANDLES = `onSite code can't call handles (${SITE_DISALLOWED}: the site could call them too) — call them from tt.onPage or tt.onOverlay code, and have those read the site through an onSite handle`;
 /** a store used in onSite code */
-export const SITE_NO_STORES = `wt.globalStore and wt.pageStore aren't available in onSite code (${SITE_DISALLOWED}: the site could read and forge them) — keep what the site may see in a wt.siteStore, or use them in wt.onPage or wt.onOverlay code`;
-/** `wt.siteStore` where there's no page (network handlers) */
-export const NO_SITE_STORE = "wt.siteStore needs a page; network handlers have none — use it in wt.onSite, wt.onPage or wt.onOverlay code";
-/** `wt.siteStore` in an imported library */
-export const LIB_SITE_STORE = "wt.siteStore: declare site stores in the script itself, not in an imported library";
+export const SITE_NO_STORES = `tt.globalStore and tt.pageStore aren't available in onSite code (${SITE_DISALLOWED}: the site could read and forge them) — keep what the site may see in a tt.siteStore, or use them in tt.onPage or tt.onOverlay code`;
+/** `tt.siteStore` where there's no page (network handlers) */
+export const NO_SITE_STORE = "tt.siteStore needs a page; network handlers have none — use it in tt.onSite, tt.onPage or tt.onOverlay code";
+/** `tt.siteStore` in an imported library */
+export const LIB_SITE_STORE = "tt.siteStore: declare site stores in the script itself, not in an imported library";
 
 /** a store that can be declared (top-level code runs everywhere) but throws `message` when used */
 export function unusableStore(message: string): any {

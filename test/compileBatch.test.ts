@@ -10,8 +10,8 @@ import { transform } from "sucrase";
 
 const lib = { id: "l", name: "lib", code: `import { base } from "./base";\nexport const hosts: string[] = [base + ".com"];\nglobalThis.__libRuns = (globalThis.__libRuns || 0) + 1;` };
 const base = { id: "b", name: "base", code: `export const base = "api";` };
-const a = { id: "a", name: "a", code: `import { hosts } from "./lib";\nwt.onRequest({ url: "*://" + hosts[0] + "/*", strategy: "helper" }, () => {});` };
-const b = { id: "c", name: "b", code: `import { hosts } from "./lib";\nwt.params({ host: { type: "string", default: hosts[0] } });` };
+const a = { id: "a", name: "a", code: `import { hosts } from "./lib";\ntt.onRequest({ url: "*://" + hosts[0] + "/*", strategy: "helper" }, () => {});` };
+const b = { id: "c", name: "b", code: `import { hosts } from "./lib";\ntt.params({ host: { type: "string", default: hosts[0] } });` };
 const scripts = [base, lib, a, b];
 
 describe("compileManyWithLibs", () => {
@@ -58,13 +58,13 @@ describe("transpile cache", () => {
             return transform(code, { transforms: ["typescript", "imports"], disableESTransforms: true }).code;
         });
         try {
-            const src = `const n: number = 1;\nwt.onPage("*://x/*", () => {});`;
+            const src = `const n: number = 1;\ntt.onPage("*://x/*", () => {});`;
             const first = toRunnableJs(src);
             expect(toRunnableJs(src)).toBe(first);
             expect(compileScript(src).error).toBeNull();
             expect(calls).toBe(1);
             expect(first).not.toContain(": number");
-            expect(first).toContain(`wt.onPage`);
+            expect(first).toContain(`tt.onPage`);
         } finally {
             setTranspiler((code) => transform(code, { transforms: ["typescript", "imports"], disableESTransforms: true }).code);
         }

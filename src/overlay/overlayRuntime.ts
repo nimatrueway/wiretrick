@@ -6,10 +6,10 @@
  * extension port, never through the page.
  *
  * Here the script's module graph evaluates with network and onPage
- * registrations inert; its overlay handlers (`wt.onOverlay`) run at their
+ * registrations inert; its overlay handlers (`tt.onOverlay`) run at their
  * `when`. A save recompiles here (`overlay.update`) and re-runs the
  * handlers as new runs (shared/runLifecycle.ts): the frame stays. Stores
- * are replicas (shared/storeReplica.ts), `fetch` and `wt.fetch` fetch as
+ * are replicas (shared/storeReplica.ts), `fetch` and `tt.fetch` fetch as
  * the page (the bridge does it, with the page's cookies), calls into
  * onPage code and back go through shared/rpc.ts, and the frame reports
  * its visible areas so the bridge lets clicks through everywhere else.
@@ -27,7 +27,7 @@ import { routeMatches, type DocumentWhen } from "../shared/route";
 import { fireRun, pageCtxBase, type PageDocumentHandler } from "../shared/pageShim";
 import { reactOf, ScriptLife, type Generation, type ReactDomClient } from "../shared/runLifecycle";
 import { hotRegistry } from "../shared/hotRefresh";
-import { fromWireResponse, toWireRequest } from "../shared/wtFetch";
+import { fromWireResponse, toWireRequest } from "../shared/ttFetch";
 import { formatScriptError } from "../shared/scriptError";
 import { formatLogArgs, scriptLogLine, type ScriptLogLevel } from "../shared/scriptLog";
 import { collectRects, normalizeRects, watchRects } from "../shared/overlayRects";
@@ -70,7 +70,7 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
     hub.prime({ [s]: init.stores });
     hub.attach(ep);
     ep.on("store.resync", () => hub.reconnect());
-    // `wt.siteStore`: the page's (the bridge relays, for this script's own)
+    // `tt.siteStore`: the page's (the bridge relays, for this script's own)
     const site = new SiteMirrors({ ctx: "overlay", post: (m) => !ep.closed && ep.push("site.up", m), log: (_s, msg, level) => log(level, msg) });
     ep.on("site.down", (m) => site.receive(m));
     ep.onClose(() => site.dispose());
@@ -307,7 +307,7 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
 // ---- boot (only in overlay.html) ----
 
 /**
- * The bridge posts `{ wtOverlay: true }` with the port; this frame proves
+ * The bridge posts `{ ttOverlay: true }` with the port; this frame proves
  * itself by saying hello with the nonce from its URL hash, which the page
  * can't read (a frame the page navigated elsewhere can't). Where this frame has
  * extension APIs (Firefox: no manifest sandbox), the background confirms
@@ -318,11 +318,11 @@ function boot(): void {
     const nonce = location.hash.slice(1);
     if (!nonce) return;
     const onMessage = async (ev: MessageEvent) => {
-        if (ev.source !== window.parent || ev.data?.wtOverlay !== true || !ev.ports?.[0]) return;
+        if (ev.source !== window.parent || ev.data?.ttOverlay !== true || !ev.ports?.[0]) return;
         window.removeEventListener("message", onMessage);
         const rt = (globalThis as any).chrome?.runtime;
         if (rt?.id && typeof rt.sendMessage === "function") {
-            const ok = await rt.sendMessage({ type: "wtOverlayNonce", nonce }).catch(() => false);
+            const ok = await rt.sendMessage({ type: "ttOverlayNonce", nonce }).catch(() => false);
             if (ok !== true) return;
         }
         const ep = messagePortEndpoint(ev.ports[0]);
@@ -335,4 +335,4 @@ function boot(): void {
     window.addEventListener("message", onMessage);
 }
 
-if (typeof document !== "undefined" && document.documentElement?.dataset.wtOverlay === "1") boot();
+if (typeof document !== "undefined" && document.documentElement?.dataset.ttOverlay === "1") boot();

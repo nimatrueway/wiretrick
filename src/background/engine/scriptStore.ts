@@ -21,7 +21,7 @@ export interface Script {
     updatedAt: number;
     error: string | null;
     meta: ResMeta;
-    /** param definitions from wt.params / wt.defineParam (captured at save time) */
+    /** param definitions from tt.params / tt.defineParam (captured at save time) */
     paramDefs?: Record<string, import("../../shared/scriptDef").ParamDef>;
 }
 
@@ -490,7 +490,7 @@ export async function scriptStorageGet(scriptId: string, key: string): Promise<a
     return (obj[SCRIPT_STORE_PREFIX + scriptId] || {})[key];
 }
 
-/** every key of a script's storage (wt.storage and the `$store:` persistence) */
+/** every key of a script's storage (tt.storage and the `$store:` persistence) */
 export async function scriptStorageAll(scriptId: string): Promise<Record<string, any>> {
     const obj = await storageGet(SCRIPT_STORE_PREFIX + scriptId);
     return obj[SCRIPT_STORE_PREFIX + scriptId] || {};
@@ -504,7 +504,7 @@ export async function scriptStorageSet(scriptId: string, key: string, value: any
     await storageSet({ [storeKey]: data });
 }
 
-// ---- per-script parameter values (wt.params / wt.defineParam) ----
+// ---- per-script parameter values (tt.params / tt.defineParam) ----
 const PARAMS_KEY = "resParams";
 
 /** Load all stored param values: { scriptId: { key: value } }. */

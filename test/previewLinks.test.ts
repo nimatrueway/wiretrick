@@ -56,7 +56,7 @@ describe("the Editor preview link (L5)", () => {
     afterEach(() => vi.unstubAllGlobals());
 
     it("only the Editor page of this extension gets a preview port", () => {
-        const port = (sender: any, name = "wt-preview") => ({ name, sender, disconnect: vi.fn(), onMessage: { addListener() {} }, onDisconnect: { addListener() {} }, postMessage() {} }) as any;
+        const port = (sender: any, name = "tt-preview") => ({ name, sender, disconnect: vi.fn(), onMessage: { addListener() {} }, onDisconnect: { addListener() {} }, postMessage() {} }) as any;
         const other = port({ id: "ext", url: "chrome-extension://ext/editor.html" }, "logs");
         expect(addPreviewPort(other)).toBe(false);
         for (const sender of [

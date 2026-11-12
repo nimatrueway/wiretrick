@@ -54,7 +54,7 @@ const openManager = async (): Promise<any> => {
 const seed = await openManager();
 const save = (id: string, name: string, code: string) =>
     seed.evaluate(({ id, name, code }: any) => new Promise((r) => chrome.runtime.sendMessage({ type: "saveScript", id, name, code }, r)), { id, name, code });
-await save("s_main", "main script", 'import { helper } from "./utilities";\nwt.onRequest({ url: "*://example.invalid/*", strategy: "page" }, () => {});\nfunction local() {}\nhelper(1);\nlocal();\n');
+await save("s_main", "main script", 'import { helper } from "./utilities";\ntt.onRequest({ url: "*://example.invalid/*", strategy: "page" }, () => {});\nfunction local() {}\nhelper(1);\nlocal();\n');
 await save("u_util", "utilities", "export function helper(x: number) {\n    return x + 1;\n}\n");
 await seed.close();
 
@@ -225,7 +225,7 @@ check("rename: reserved name refused", (await listScripts()).find((s: any) => s.
 
 // an import by the exact (spaced) name resolves in the editor
 await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "saveScript", id: "u_sp", name: "my lib (v2)", code: "export const answer = 42;\n" }, r)));
-await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "saveScript", id: "s_sp", name: "uses lib.wiretrick", code: 'import { answer } from "./my lib (v2)";\nexport const n: number = answer;\n' }, r)));
+await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "saveScript", id: "s_sp", name: "uses lib.tangitweak", code: 'import { answer } from "./my lib (v2)";\nexport const n: number = answer;\n' }, r)));
 answer = true;
 await mgr.reload();
 await mgr.waitForFunction(() => (window as any).monaco?.editor?.getEditors?.().length);
@@ -254,11 +254,11 @@ await setLib("export const answer = 42;\n");
 check("dependant: importer cleared when the library is fixed", (await usesLibMarkers()) === 0);
 
 // scripts run in current browsers: newer JS/web APIs type-check (URLPattern
-// is declared by wt-api.d.ts; esnext lib for the rest). The deliberate type
+// is declared by tt-api.d.ts; esnext lib for the rest). The deliberate type
 // error proves diagnostics are live.
 await clickScript("main script");
 await mgr.evaluate((c: string) => (window as any).monaco.editor.getEditors()[0].setValue(c), [
-    'wt.onRequest({ url: "*://example.invalid/*", strategy: "helper" }, () => {});',
+    'tt.onRequest({ url: "*://example.invalid/*", strategy: "helper" }, () => {});',
     'const p = new URLPattern("https://example.com/users/:id");',
     'const id: string | undefined = p.exec("https://example.com/users/42")?.pathname.groups.id;',
     "const last = [1, 2, 3].findLast((n) => n > 1);",

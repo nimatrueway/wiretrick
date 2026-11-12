@@ -265,7 +265,7 @@ function toCommonJs(url: string, text: string): string {
         return `module.exports = ${text};`;
     }
     // a stylesheet: the overlay adds it as a <style> (elsewhere it's ignored)
-    if (/\.css$/i.test(path)) return `__wtStyle(${JSON.stringify(text)}, ${JSON.stringify(url)});`;
+    if (/\.css$/i.test(path)) return `__ttStyle(${JSON.stringify(text)}, ${JSON.stringify(url)});`;
     if (!isEsModule(text)) return text;
     const meta = text.replace(/\bimport\.meta\.url\b/g, JSON.stringify(url)).replace(/\bimport\.meta\b/g, `({ url: ${JSON.stringify(url)} })`);
     return transform(meta, { transforms: ["imports"], filePath: url }).code;

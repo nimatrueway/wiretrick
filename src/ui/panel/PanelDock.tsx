@@ -31,7 +31,7 @@ const ICONS: Record<PanelTab, ReactElement> = {
 const TABS: { tab: PanelTab; id: string; label: string; title: string; key: string }[] = [
     { tab: "problems", id: "problems-tab", label: "Problems", title: "Problems — what is wrong with your scripts right now; each one goes away once fixed", key: "Alt+Shift+P" },
     { tab: "log", id: "log-header-title", label: "Log", title: "Extension and script log", key: "Alt+Shift+L" },
-    { tab: "network", id: "network-tab", label: "Network", title: "Network activity, with what Wiretrick scripts did to each request", key: "Alt+Shift+N" },
+    { tab: "network", id: "network-tab", label: "Network", title: "Network activity, with what TangiTweak scripts did to each request", key: "Alt+Shift+N" },
     { tab: "preview", id: "preview-tab", label: "Preview", title: "Preview — the open script's overlay (dom: \"overlay\"), live, over a placeholder page", key: "Alt+Shift+V" },
 ];
 

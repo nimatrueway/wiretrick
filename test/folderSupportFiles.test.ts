@@ -15,9 +15,9 @@ const store: Record<string, any> = {};
     },
     runtime: { lastError: undefined, sendMessage: () => {}, getURL: (p: string) => `chrome-extension://x/${p}` },
 };
-let dts = "declare const wt: { v1: true };\n";
+let dts = "declare const tt: { v1: true };\n";
 (globalThis as any).fetch = async (url: string) => {
-    expect(url).toBe("chrome-extension://x/lib/wt-api.d.ts");
+    expect(url).toBe("chrome-extension://x/lib/tt-api.d.ts");
     return { ok: true, status: 200, text: async () => dts };
 };
 const files = new Map<string, { text: string; t: number }>();
@@ -47,27 +47,27 @@ describe("folder sync support files", () => {
     it("writes typings, tsconfig and schema on start and refreshes them after an update", async () => {
         const sync = await import("../src/background/folderSync");
         await sync.startFromStoredHandle({ fresh: true });
-        const d = files.get("wt-api.d.ts")!;
+        const d = files.get("tt-api.d.ts")!;
         expect(d.text).toContain(GENERATED_NOTE);
         expect(d.text).toContain("v1: true");
         const ts = files.get("tsconfig.json")!.text;
         expect(ts.startsWith(`// ${GENERATED_NOTE}\n`)).toBe(true);
         expect(JSON.parse(ts.slice(ts.indexOf("\n") + 1)).include).toEqual(["**/*.ts", "**/*.tsx"]);
-        expect(JSON.parse(ts.slice(ts.indexOf("\n") + 1)).compilerOptions.paths).toMatchObject({ "https://unpkg.com/*": ["./.wiretrick/types/unpkg.com/*"], react: ["./.wiretrick/types/builtin/@types/react/index.d.ts"] });
+        expect(JSON.parse(ts.slice(ts.indexOf("\n") + 1)).compilerOptions.paths).toMatchObject({ "https://unpkg.com/*": ["./.tangitweak/types/unpkg.com/*"], react: ["./.tangitweak/types/builtin/@types/react/index.d.ts"] });
         expect(JSON.parse(files.get("settings.schema.json")!.text).$comment).toBe(GENERATED_NOTE);
-        const stamps = ["wt-api.d.ts", "tsconfig.json", "settings.schema.json"].map((f) => files.get(f)!.t);
+        const stamps = ["tt-api.d.ts", "tsconfig.json", "settings.schema.json"].map((f) => files.get(f)!.t);
 
         // unchanged → nothing rewritten on the next start
         sync.halt();
         await sync.startFromStoredHandle({ fresh: true });
-        expect(["wt-api.d.ts", "tsconfig.json", "settings.schema.json"].map((f) => files.get(f)!.t)).toEqual(stamps);
+        expect(["tt-api.d.ts", "tsconfig.json", "settings.schema.json"].map((f) => files.get(f)!.t)).toEqual(stamps);
 
         // extension update with new APIs + a hand-edited tsconfig → both restored
-        dts = "declare const wt: { v2: true };\n";
+        dts = "declare const tt: { v2: true };\n";
         files.set("tsconfig.json", { text: "{}", t: clock++ });
         sync.halt();
         await sync.startFromStoredHandle({ fresh: true });
-        expect(files.get("wt-api.d.ts")!.text).toContain("v2: true");
+        expect(files.get("tt-api.d.ts")!.text).toContain("v2: true");
         expect(files.get("tsconfig.json")!.text).toBe(ts);
         sync.halt();
     });

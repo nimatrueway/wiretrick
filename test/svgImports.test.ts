@@ -21,7 +21,7 @@ describe(".svg data files", () => {
     it("import as their markup (never parsed), in scripts and libraries", () => {
         expect(dataFileValue("a.svg", LOGO)).toBe(LOGO);
         const lib = { id: "l", name: "ui/icons", code: `import logo from "../icons/logo.svg";\nexport const html = logo;` };
-        const main = { id: "m", name: "main", code: `import { html } from "./ui/icons";\nimport logo from "./icons/logo.svg";\nwt.params({ a: { type: "string", default: html }, b: { type: "string", default: logo } });` };
+        const main = { id: "m", name: "main", code: `import { html } from "./ui/icons";\nimport logo from "./icons/logo.svg";\ntt.params({ a: { type: "string", default: html }, b: { type: "string", default: logo } });` };
         const c = compileWithLibs(main, [lib], {}, data);
         expect(c.error).toBeNull();
         expect(c.paramDefs?.a.default).toBe(LOGO);

@@ -1,5 +1,5 @@
 /**
- * `wt.siteStore` mirrors: the valtio proxy onPage and onOverlay code get,
+ * `tt.siteStore` mirrors: the valtio proxy onPage and onOverlay code get,
  * kept in sync with the store in the site's world (siteStoreHost.ts).
  *
  * A mirror's view = the last state the site's world sent (`data`) + this
@@ -57,9 +57,9 @@ export class SiteMirrors {
         this.id = `${o.ctx}.${Math.random().toString(36).slice(2, 10)}`;
     }
 
-    /** `wt.siteStore(name, initial)` for script `s` */
+    /** `tt.siteStore(name, initial)` for script `s` */
     store(s: string, name: string, initial: object): object {
-        const t = splitInitial(name, initial, "wt.siteStore");
+        const t = splitInitial(name, initial, "tt.siteStore");
         const key = `${s}\u0000${name}`;
         const have = this.mirrors.get(key);
         if (have) {
@@ -161,7 +161,7 @@ export class SiteMirrors {
                 m.warned = true;
                 this.o.log?.(
                     m.s,
-                    `wt.siteStore("${m.name}"): the site's world hasn't answered after ${SITE_CONNECT_WARN_MS / 1000}s — the store keeps its local values until it does (Wiretrick's page hook may not run on this page)`,
+                    `tt.siteStore("${m.name}"): the site's world hasn't answered after ${SITE_CONNECT_WARN_MS / 1000}s — the store keeps its local values until it does (TangiTweak's page hook may not run on this page)`,
                     "warn"
                 );
             }, SITE_CONNECT_WARN_MS);
@@ -211,7 +211,7 @@ export class SiteMirrors {
         m.batch = [];
         m.bad = null;
         if (bad) {
-            this.o.log?.(m.s, `wt.siteStore("${m.name}"): ${bad} — the change was reverted (store values must be JSON)`, "error");
+            this.o.log?.(m.s, `tt.siteStore("${m.name}"): ${bad} — the change was reverted (store values must be JSON)`, "error");
             this.render(m);
             return;
         }
@@ -220,7 +220,7 @@ export class SiteMirrors {
         m.pending.push({ op, ops: batch });
         if (jsonBytes(this.view(m)) > STORE_MAX_BYTES) {
             m.pending.pop();
-            this.o.log?.(m.s, `wt.siteStore("${m.name}"): over ${STORE_MAX_BYTES / 1024 / 1024} MB — the change was reverted`, "error");
+            this.o.log?.(m.s, `tt.siteStore("${m.name}"): over ${STORE_MAX_BYTES / 1024 / 1024} MB — the change was reverted`, "error");
             this.render(m);
             return;
         }

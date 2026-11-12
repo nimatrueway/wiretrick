@@ -246,7 +246,7 @@ function LocalHelper() {
                         <button id="btn-process-trust" hidden={!view?.trust} onClick={() => chrome.runtime.sendMessage({ type: "processTrustCa" }, () => void chrome.runtime.lastError)}>Trust certificate</button>
                     </div>
                     <pre id="process-detail" className="setting-pre">{view?.detail ?? ""}</pre>
-                    <p className="setting-help">Handlers using the <code>helper</code> strategy are intercepted by wiretrick-helper, a small local proxy — no debugger banner, every resource type, Chrome only. More robust than <code>page</code>, which only sees the page's own fetch/XHR calls. Your own proxy setting stays in effect for everything else.</p>
+                    <p className="setting-help">Handlers using the <code>helper</code> strategy are intercepted by tangitweak-helper, a small local proxy — no debugger banner, every resource type, Chrome only. More robust than <code>page</code>, which only sees the page's own fetch/XHR calls. Your own proxy setting stays in effect for everything else.</p>
                 </div>
             </div>
         </section>

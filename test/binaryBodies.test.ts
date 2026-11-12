@@ -72,7 +72,7 @@ describe("packBytes / unpackBytes", () => {
         const all = new Uint8Array(256).map((_, i) => i);
         const v = { a: all, list: [new Uint8Array([0, 255]), "s", 1, null], deep: { x: { y: new Uint8Array(0) } }, body: "text" };
         const wire = JSON.parse(JSON.stringify(packBytes(v)));
-        expect(wire.a).toEqual({ __wtBytes: expect.any(String) });
+        expect(wire.a).toEqual({ __ttBytes: expect.any(String) });
         const back = unpackBytes(wire);
         expect(back.a).toBeInstanceOf(Uint8Array);
         expect([...back.a]).toEqual([...all]);
@@ -82,10 +82,10 @@ describe("packBytes / unpackBytes", () => {
         expect(back.body).toBe("text");
     });
 
-    it("leaves values without bytes alone; only a lone __wtBytes key is unpacked", () => {
+    it("leaves values without bytes alone; only a lone __ttBytes key is unpacked", () => {
         expect(packBytes("x")).toBe("x");
         expect(unpackBytes(null)).toBe(null);
-        expect(unpackBytes({ __wtBytes: "AA==", other: 1 })).toEqual({ __wtBytes: "AA==", other: 1 });
+        expect(unpackBytes({ __ttBytes: "AA==", other: 1 })).toEqual({ __ttBytes: "AA==", other: 1 });
         const big = new Uint8Array(200_000).map((_, i) => i % 251);
         expect([...unpackBytes(JSON.parse(JSON.stringify(packBytes(big))))]).toEqual([...big]);
     });

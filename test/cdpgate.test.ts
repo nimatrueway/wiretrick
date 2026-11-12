@@ -24,21 +24,21 @@ describe("tier C participation gate (route ownership)", () => {
 
     it("a hook route is NOT loaded into DebuggerStrategy", () => {
         const c = new DebuggerStrategy();
-        c.reload([makeScript("a", `wt.onResponseBody({ url: "*", strategy: "page" }, (c, b) => b);`)]);
+        c.reload([makeScript("a", `tt.onResponseBody({ url: "*", strategy: "page" }, (c, b) => b);`)]);
         expect(c.hasOwners()).toBe(false);
         expect(needsAny(c)).toBe(false);
     });
 
     it("a cdp route IS loaded", () => {
         const c = new DebuggerStrategy();
-        c.reload([makeScript("a", `wt.onResponseBody({ url: "*", strategy: "debugger" }, (c, b) => b);`)]);
+        c.reload([makeScript("a", `tt.onResponseBody({ url: "*", strategy: "debugger" }, (c, b) => b);`)]);
         expect(c.hasOwners()).toBe(true);
         expect(needsAny(c)).toBe(true);
     });
 
     it("only matching url / method / type are needed", () => {
         const c = new DebuggerStrategy();
-        c.reload([makeScript("a", `wt.onRequest({ url: "https://x.com/api/*", exclude: "https://x.com/api/health", methods: ["POST"], resourceTypes: ["xmlhttprequest"], strategy: "debugger" }, () => ({ block: true }));`)]);
+        c.reload([makeScript("a", `tt.onRequest({ url: "https://x.com/api/*", exclude: "https://x.com/api/health", methods: ["POST"], resourceTypes: ["xmlhttprequest"], strategy: "debugger" }, () => ({ block: true }));`)]);
         const req = (url: string, method = "POST", type = "xmlhttprequest") => c.needs({ url, method, type });
         expect(req("https://x.com/api/users")).toBe(true);
         expect(req("https://x.com/api/users", "post")).toBe(true);
@@ -49,7 +49,7 @@ describe("tier C participation gate (route ownership)", () => {
     });
 
     it("disabled scripts never load", () => {
-        const s = makeScript("a", `wt.onResponseBody({ url: "*", strategy: "debugger" }, (c, b) => b);`);
+        const s = makeScript("a", `tt.onResponseBody({ url: "*", strategy: "debugger" }, (c, b) => b);`);
         s.enabled = false;
         const c = new DebuggerStrategy();
         c.reload([s]);

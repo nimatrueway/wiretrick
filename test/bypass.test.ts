@@ -4,7 +4,7 @@ const logged: any[][] = [];
 vi.mock("../src/background/engine/logs", () => ({ log: (...a: any[]) => logged.push(a) }));
 
 import { addBypass, bypassed, bypassRule, resetBypass, withBypassRule, BYPASS_RULE_BASE } from "../src/background/engine/bypass";
-import { backgroundFetch } from "../src/background/engine/wtFetch";
+import { backgroundFetch } from "../src/background/engine/ttFetch";
 
 const req = { method: "GET", url: "https://api.example.com/x?a=1", scriptId: "s1", scriptName: "One" };
 
@@ -23,7 +23,7 @@ describe("bypass registry", () => {
         expect(bypassed({ method: "get", url: "https://api.example.com/x?a=1#frag" })).toBe(true);
         expect(bypassed({ method: "GET", url: "https://api.example.com/x?a=1" })).toBe(false);
         expect(logged).toHaveLength(1);
-        expect(logged[0][1]).toMatch(/\[One\] wt\.fetch bypass: GET/);
+        expect(logged[0][1]).toMatch(/\[One\] tt\.fetch bypass: GET/);
         expect(logged[0][3]).toBe("s1");
     });
 

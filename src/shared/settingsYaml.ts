@@ -170,7 +170,7 @@ function paramNote(key: string, d: ParamDef): string {
 export function renderSettings(g: GlobalSettings, scripts: ScriptSettingsState[]): string {
     const out: string[] = [
         SCHEMA_MODELINE,
-        "# Wiretrick settings — edit and save; options left commented use their default.",
+        "# TangiTweak settings — edit and save; options left commented use their default.",
         "",
         "settings:",
     ];

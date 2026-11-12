@@ -177,7 +177,7 @@ import { watchCall, type CallWatch } from "../shared/callWatch";
         } catch {}
     }
 
-    /** a user script's own output (wt.log / console.* / errors) → extension LOG, attributed to the script */
+    /** a user script's own output (tt.log / console.* / errors) → extension LOG, attributed to the script */
     function scriptLogUp(scriptId: string | null, level: ScriptLogLevel, msg: string): void {
         try {
             window.postMessage({ source: HOOK_SOURCE, kind: "scriptLog", scriptId, level, msg }, window.location.origin);
@@ -335,7 +335,7 @@ import { watchCall, type CallWatch } from "../shared/callWatch";
         // named utils, "./a.json" → the data file)
         const requireFrom = makeLibRequire(
             libSources,
-            (lib, require, moduleObj) => scriptFn(lib.name, lib.src!, lib.fk)(makeDocumentShim(null, lib.name, lib.params || {}).wt, scriptConsole(null, lib.name), require, moduleObj, moduleObj.exports),
+            (lib, require, moduleObj) => scriptFn(lib.name, lib.src!, lib.fk)(makeDocumentShim(null, lib.name, lib.params || {}).tt, scriptConsole(null, lib.name), require, moduleObj, moduleObj.exports),
             { builtin: siteBuiltin, onSite: true, ...(__NO_EVAL__ ? { packageFn } : {}) }
         );
         const compiledDocument: { scriptId: string; name: string; when: DocumentWhen; d: PageDocumentHandler; exposer: Exposer; life: ScriptLife; gen: Generation }[] = [];
@@ -372,7 +372,7 @@ import { watchCall, type CallWatch } from "../shared/callWatch";
                 const fn = scriptFn(d.name, d.src, d.fk);
                 const moduleObj = { exports: {} as any };
                 const shim = makeDocumentShim(d.scriptId, d.name, d.params || {}, ex);
-                shim.top(() => fn(shim.wt, scriptConsole(d.scriptId, d.name), requireFrom(d.name), moduleObj, moduleObj.exports));
+                shim.top(() => fn(shim.tt, scriptConsole(d.scriptId, d.name), requireFrom(d.name), moduleObj, moduleObj.exports));
                 if (gen) for (const h of domHandlersFor(shim.dom, location.href, ex)) compiledDocument.push({ scriptId: d.scriptId, name: d.name, when: h.when, d: h, exposer, life, gen });
             } catch (e: any) {
                 // the previous code keeps running (none: calls get `not running`)
@@ -455,7 +455,7 @@ import { watchCall, type CallWatch } from "../shared/callWatch";
         return makeScriptConsole((level, source, text) => scriptLogUp(scriptId, level, scriptLogLine(name, source, text)));
     }
 
-    /** `wt.siteStore`s: they live here, for the document's life; onPage and onOverlay code mirror them */
+    /** `tt.siteStore`s: they live here, for the document's life; onPage and onOverlay code mirror them */
     const siteStores = new SiteStoreHost({
         post: (m) => {
             try {
@@ -485,7 +485,7 @@ import { watchCall, type CallWatch } from "../shared/callWatch";
                 siteCallers.add(scriptId);
                 scriptLogUp(scriptId, "error", formatScriptError(name, e, "onSite"));
             },
-            log: (...args: any[]) => scriptLogUp(scriptId, "info", scriptLogLine(name, "wt.log", formatLogArgs(args))),
+            log: (...args: any[]) => scriptLogUp(scriptId, "info", scriptLogLine(name, "tt.log", formatLogArgs(args))),
             storage: {
                 // the background answers { value } (same as the isolated-world shim unwraps)
                 get: (key: string) => viaBridge({ op: "storageGet", scriptId, key }).then((r) => r?.value),
@@ -601,11 +601,11 @@ import { watchCall, type CallWatch } from "../shared/callWatch";
                 // a blocked request fails like a network error (as the browser's own block does)
                 if (dec?.kind === "cancel") throw new PassthroughError(new TypeError("Failed to fetch"));
                 if (dec?.kind === "redirect" && typeof dec.url === "string") {
-                    const hops: number = (init as any)?.__wtHops ?? 0;
+                    const hops: number = (init as any)?.__ttHops ?? 0;
                     if (hops >= 20) throw new PassthroughError(new TypeError("Failed to fetch"));
                     // the target goes through the hook again (its own handlers run)
                     const next = input instanceof Request ? new Request(dec.url, input) : dec.url;
-                    return w.fetch(next, { ...(init || {}), __wtHops: hops + 1 });
+                    return w.fetch(next, { ...(init || {}), __ttHops: hops + 1 });
                 }
                 if (dec?.kind === "headers" && dec.changes) {
                     const hdrs = new Headers(input instanceof Request ? input.headers : undefined);

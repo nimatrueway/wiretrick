@@ -63,7 +63,7 @@ let folders: string[] = [];
 let selectedId: string | null = null;
 let editor: any = null;
 let dirty = false;
-/** wt-api.d.ts is shown read-only over the selected script (whose model,
+/** tt-api.d.ts is shown read-only over the selected script (whose model,
  * unsaved edits included, stays as it is underneath) */
 let typingsShown = false;
 
@@ -172,7 +172,7 @@ function scheduleSettingsMarkers(): void {
                 source: "settings.yaml",
             };
         });
-        monaco.editor.setModelMarkers(m, "wt-settings", markers);
+        monaco.editor.setModelMarkers(m, "tt-settings", markers);
     }, 250);
 }
 
@@ -497,7 +497,7 @@ async function saveQuietly(msg: Record<string, unknown>, path: string): Promise<
 }
 
 /**
- * Explorer → Make Package… on a script: name it with wt.metadata, or — when
+ * Explorer → Make Package… on a script: name it with tt.metadata, or — when
  * it imports files — move it and them into a folder of their own with a
  * metadata.json (copying those other scripts use too) and rewrite their
  * imports (shared/makePackage).
@@ -510,12 +510,12 @@ async function makePackage(id: string): Promise<void> {
     const changed = [...plan.files.filter((f) => !f.copy && (f.to !== f.from || f.text !== files[f.from])).map((f) => f.from), ...plan.edits.map((e) => e.path)];
     const open = changed.map((p) => owner.get(p)?.script?.id ?? owner.get(p)?.data?.id).find((x) => x === selectedId);
     if (open && dirty) return void status(`save "${treeRow(open)?.path ?? ""}" first — making the package changes it`, "error");
-    if (!plan.manifest && !changed.length) return void status(`"${s.meta.name}" names itself (wt.metadata) already — share its URL, or Export Package…`);
+    if (!plan.manifest && !changed.length) return void status(`"${s.meta.name}" names itself (tt.metadata) already — share its URL, or Export Package…`);
     const moved = plan.files.filter((f) => !f.copy && f.to !== f.from);
     const copied = plan.files.filter((f) => f.copy);
     const lines = [
         !plan.manifest
-            ? `Make "${scriptFileName(s.meta.name)}" a package? It gets a wt.metadata({ name, version… }) to fill in.`
+            ? `Make "${scriptFileName(s.meta.name)}" a package? It gets a tt.metadata({ name, version… }) to fill in.`
             : plan.inPlace
               ? `"${plan.folder}/" holds this script and what it imports: make it a package with a ${MANIFEST_FILE}?`
               : `Make "${scriptFileName(s.meta.name)}" a package in the folder "${plan.folder}/" (with a ${MANIFEST_FILE})?`,
@@ -542,7 +542,7 @@ async function makePackage(id: string): Promise<void> {
         const m = dataFiles.find((d) => d.path === plan.manifest!.path);
         await select(m?.id ?? id);
     } else await select(id);
-    if (ok) status(plan.manifest ? `"${plan.folder}/" is a package — fill in its ${MANIFEST_FILE}, then share the folder (or Export Package…)` : `"${s.meta.name}" is a package — fill in its wt.metadata, then share its URL (or Export Package…)`);
+    if (ok) status(plan.manifest ? `"${plan.folder}/" is a package — fill in its ${MANIFEST_FILE}, then share the folder (or Export Package…)` : `"${s.meta.name}" is a package — fill in its tt.metadata, then share its URL (or Export Package…)`);
 }
 
 /** Explorer → Make Package… on a folder: a metadata.json listing its scripts (shared/makePackage) */
@@ -740,7 +740,7 @@ async function revalidateModel(m: any): Promise<void> {
 // A valid URL is downloaded as soon as it's typed (the background reports
 // where each one stands): a warning while it and its types download, an
 // error if that fails — never TypeScript's "Cannot find module" meanwhile.
-const IMPORT_OWNER = "wt-imports";
+const IMPORT_OWNER = "tt-imports";
 const UNPINNED = "unpinned-import";
 const importMarkerTimers = new WeakMap<any, number>();
 const packageStatuses = new Map<string, PackageStatus>();
@@ -758,7 +758,7 @@ function updateImportMarkers(m: any): void {
             const e = m.getPositionAt(b.offset + b.length);
             return {
                 severity: b.severity === "error" ? monaco.MarkerSeverity.Error : monaco.MarkerSeverity.Warning,
-                source: "wiretrick",
+                source: "tangitweak",
                 code: b.pin ? UNPINNED : "package-import",
                 message: b.message,
                 startLineNumber: a.lineNumber,
@@ -840,9 +840,9 @@ function scheduleImportMarkers(m: any): void {
 // ---- JSX in a .ts script ----
 // TypeScript parses JSX only in .tsx files: a .ts script's JSX gets a
 // marker naming the fix, with a quick fix that renames the script.
-const JSX_OWNER = "wt-jsx";
+const JSX_OWNER = "tt-jsx";
 const JSX_IN_TS = "jsx-in-ts";
-const RENAME_TO_TSX = "wt.renameToTsx";
+const RENAME_TO_TSX = "tt.renameToTsx";
 const scriptIdOfModel = (m: any): string | undefined => [...models].find(([, x]) => x === m)?.[0];
 function updateJsxMarker(m: any): void {
     const monaco = (window as any).monaco;
@@ -860,7 +860,7 @@ function updateJsxMarker(m: any): void {
             : [
                   {
                       severity: monaco.MarkerSeverity.Error,
-                      source: "wiretrick",
+                      source: "tangitweak",
                       code: JSX_IN_TS,
                       message: `JSX needs a .tsx file — rename this script to "${baseName(s!.meta.name)}.tsx"`,
                       startLineNumber: a.lineNumber,
@@ -941,8 +941,8 @@ function registerPinImportFix(): void {
 /**
  * Quick fixes for where a handler runs: an onSite handler calling a handle
  * (a runtime Problem) or using a store / handle (a route warning) moves to
- * wt.onPage; one using a store can keep running in the site, its stores
- * becoming `wt.siteStore`s.
+ * tt.onPage; one using a store can keep running in the site, its stores
+ * becoming `tt.siteStore`s.
  */
 function registerPlaceFixes(): void {
     const monaco = (window as any).monaco;
@@ -952,7 +952,7 @@ function registerPlaceFixes(): void {
             for (const mk of context.markers) {
                 const msg = String(mk.message);
                 if (!msg.includes(SITE_DISALLOWED)) continue;
-                // the marker's end: inside the call, or (a route warning, on the registration line) past `wt.onSite(`
+                // the marker's end: inside the call, or (a route warning, on the registration line) past `tt.onSite(`
                 const offset = model.getOffsetAt({ lineNumber: mk.endLineNumber, column: mk.endColumn });
                 const textEdit = (fix: TextEdit) => {
                     const a = model.getPositionAt(fix.start);
@@ -962,7 +962,7 @@ function registerPlaceFixes(): void {
                 const fix = onPageEdit(model.getValue(), offset);
                 if (!fix) continue;
                 actions.push({
-                    title: "Move this handler to wt.onPage (the isolated world)",
+                    title: "Move this handler to tt.onPage (the isolated world)",
                     kind: "quickfix",
                     isPreferred: true,
                     diagnostics: [mk],
@@ -971,7 +971,7 @@ function registerPlaceFixes(): void {
                 const site = msg.includes(SITE_NO_STORES) ? siteStoreEdits(model.getValue(), offset) : [];
                 if (site.length)
                     actions.push({
-                        title: "Change to wt.siteStore (its data becomes page data)",
+                        title: "Change to tt.siteStore (its data becomes page data)",
                         kind: "quickfix",
                         diagnostics: [mk],
                         edit: { edits: site.map(textEdit) },
@@ -1134,7 +1134,7 @@ function syncDataModels(): void {
 }
 
 /** a package's metadata.json: an error on each "scripts" entry that names no script */
-const MANIFEST_OWNER = "wt-manifest";
+const MANIFEST_OWNER = "tt-manifest";
 let manifestMarkerTimer: ReturnType<typeof setTimeout> | null = null;
 
 function scheduleManifestMarkers(): void {
@@ -1239,7 +1239,7 @@ function selectReal(id: string): void {
     updateOpenVscode();
 }
 
-// ---- wt-api.d.ts, read-only (Go to Definition) ----
+// ---- tt-api.d.ts, read-only (Go to Definition) ----
 function typingsModel(): any {
     const monaco = (window as any).monaco;
     const uri = monaco.Uri.parse(API_TYPINGS_URI);
@@ -1253,7 +1253,7 @@ function showTypings(): void {
     typingsShown = true;
     const m = typingsModel();
     editor.setModel(m);
-    editor.updateOptions({ readOnly: true, readOnlyMessage: { value: "wt-api.d.ts is the Wiretrick API typings — read-only" } });
+    editor.updateOptions({ readOnly: true, readOnlyMessage: { value: "tt-api.d.ts is the TangiTweak API typings — read-only" } });
     restoreViewState(m);
     toolbar.typings = true;
     Object.assign(toolbar.save, { disabled: true, dim: true });
@@ -1275,7 +1275,7 @@ interface NavEntry {
     target: string;
     view: any;
 }
-const TYPINGS_ID = "__wt_api_typings__";
+const TYPINGS_ID = "__tt_api_typings__";
 const navHistory = new NavHistory<NavEntry>();
 
 function currentPlace(): NavEntry | null {
@@ -1300,7 +1300,7 @@ function revealSelection(selection?: IRange | IPosition): void {
     }
 }
 
-/** Show a declaration in wt-api.d.ts read-only. */
+/** Show a declaration in tt-api.d.ts read-only. */
 function openTypingsAt(selection?: IRange | IPosition): void {
     pushNav();
     showTypings();
@@ -1521,7 +1521,7 @@ function modelProblems(m: any): ProblemMarker[] {
 }
 
 /** command behind a problem hover's settings link (command:…?["settings-sec-helper"]) */
-const OPEN_SETTINGS_SECTION = "wt.openSettingsSection";
+const OPEN_SETTINGS_SECTION = "tt.openSettingsSection";
 let settingsCommandRegistered = false;
 function registerSettingsCommand(): void {
     if (settingsCommandRegistered) return;
@@ -1529,8 +1529,8 @@ function registerSettingsCommand(): void {
     (window as any).monaco.editor.registerCommand(OPEN_SETTINGS_SECTION, (_accessor: unknown, section?: string) => openSettings(section));
 }
 
-/** the owner of the markers for Wiretrick's own problems (compile, rules, runtime, route) */
-const PROBLEM_OWNER = "wiretrick";
+/** the owner of the markers for TangiTweak's own problems (compile, rules, runtime, route) */
+const PROBLEM_OWNER = "tangitweak";
 /** model → the problems its markers show */
 const problemMarkerKeys = new WeakMap<any, string>();
 /** URIs whose marker change is our own: not a sign TypeScript has checked them */
@@ -1572,7 +1572,7 @@ function markProblems(): void {
                 // "(Settings → Local helper)" in the message: the hover links there
                 const link = settingsLink(p.message);
                 const code = link ? { value: ` · Open ${link.text}`, target: monaco.Uri.parse(`command:${OPEN_SETTINGS_SECTION}?${encodeURIComponent(JSON.stringify([link.section]))}`) } : p.kind;
-                return { severity, message: p.message, source: "Wiretrick", code, startLineNumber: line, startColumn: column, endLineNumber: endLine, endColumn };
+                return { severity, message: p.message, source: "TangiTweak", code, startLineNumber: line, startColumn: column, endLineNumber: endLine, endColumn };
             })
         );
     }
@@ -2426,25 +2426,25 @@ function navKeybindings(): { back: number[]; forward: number[] } {
 function registerLayoutActions(): void {
     const { KeyMod, KeyCode } = (window as any).monaco;
     const actions: [string, string, number[], () => void][] = [
-        ["wt.toggleWordWrap", "View: Toggle Word Wrap", [KeyMod.Alt | KeyCode.KeyZ], toggleWordWrap],
-        ["wt.focusExplorer", "View: Focus on Explorer", [KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyE], focusExplorer],
-        ["wt.toggleSidebar", "View: Toggle Explorer Visibility", [KeyMod.CtrlCmd | KeyCode.KeyB], toggleSidebar],
-        ["wt.togglePanel", "View: Toggle Panel Visibility", [KeyMod.CtrlCmd | KeyCode.KeyJ, KeyMod.CtrlCmd | KeyCode.Backquote], togglePanel],
-        ["wt.toggleProblems", "View: Show Problems", [KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyM, KeyMod.Alt | KeyMod.Shift | KeyCode.KeyP], toggleProblems],
-        ["wt.showLog", "View: Show Log", [KeyMod.Alt | KeyMod.Shift | KeyCode.KeyL], () => focusPanelView("log")],
-        ["wt.showNetwork", "View: Show Network", [KeyMod.Alt | KeyMod.Shift | KeyCode.KeyN], () => focusPanelView("network")],
-        ["wt.showPreview", "View: Show Preview", [KeyMod.Alt | KeyMod.Shift | KeyCode.KeyV], () => focusPanelView("preview")],
-        ["wt.clearPanel", "View: Clear Log / Network", [KeyMod.Alt | KeyMod.Shift | KeyCode.KeyK], clearPanelView],
-        ["wt.showShortcuts", "Help: Keyboard Shortcuts", [], () => openHelp("shortcuts")],
-        ["wt.navigateBack", "Go Back", navKeybindings().back, navigateBack],
-        ["wt.navigateForward", "Go Forward", navKeybindings().forward, navigateForward],
+        ["tt.toggleWordWrap", "View: Toggle Word Wrap", [KeyMod.Alt | KeyCode.KeyZ], toggleWordWrap],
+        ["tt.focusExplorer", "View: Focus on Explorer", [KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyE], focusExplorer],
+        ["tt.toggleSidebar", "View: Toggle Explorer Visibility", [KeyMod.CtrlCmd | KeyCode.KeyB], toggleSidebar],
+        ["tt.togglePanel", "View: Toggle Panel Visibility", [KeyMod.CtrlCmd | KeyCode.KeyJ, KeyMod.CtrlCmd | KeyCode.Backquote], togglePanel],
+        ["tt.toggleProblems", "View: Show Problems", [KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyM, KeyMod.Alt | KeyMod.Shift | KeyCode.KeyP], toggleProblems],
+        ["tt.showLog", "View: Show Log", [KeyMod.Alt | KeyMod.Shift | KeyCode.KeyL], () => focusPanelView("log")],
+        ["tt.showNetwork", "View: Show Network", [KeyMod.Alt | KeyMod.Shift | KeyCode.KeyN], () => focusPanelView("network")],
+        ["tt.showPreview", "View: Show Preview", [KeyMod.Alt | KeyMod.Shift | KeyCode.KeyV], () => focusPanelView("preview")],
+        ["tt.clearPanel", "View: Clear Log / Network", [KeyMod.Alt | KeyMod.Shift | KeyCode.KeyK], clearPanelView],
+        ["tt.showShortcuts", "Help: Keyboard Shortcuts", [], () => openHelp("shortcuts")],
+        ["tt.navigateBack", "Go Back", navKeybindings().back, navigateBack],
+        ["tt.navigateForward", "Go Forward", navKeybindings().forward, navigateForward],
     ];
     for (const [id, label, keybindings, run] of actions) editor.addAction({ id, label, keybindings, run });
-    editor.addAction({ id: "wt.openSettings", label: "Preferences: Open Settings", run: () => openSettings() });
+    editor.addAction({ id: "tt.openSettings", label: "Preferences: Open Settings", run: () => openSettings() });
     registerSettingsCommand();
     editor.addAction({
-        id: "wt.collectDiagnostics",
-        label: "Wiretrick: Collect Diagnostics…",
+        id: "tt.collectDiagnostics",
+        label: "TangiTweak: Collect Diagnostics…",
         run: () => {
             openSettings("settings-sec-about");
             void runDiagnostics();
@@ -2537,10 +2537,10 @@ async function traceDefinition(trigger: string, pos?: IPosition): Promise<void> 
 function openScriptAt(resource: Uri, selection?: IRange | IPosition): boolean {
     try {
         const known = [...models].map(([id, m]) => `${id}=${m.uri.toString()}`);
-        navLog(`open ${resource.toString()} sel=${JSON.stringify(selection)} from=${typingsShown ? "wt-api.d.ts" : selectedId} dirty=${dirty}`);
+        navLog(`open ${resource.toString()} sel=${JSON.stringify(selection)} from=${typingsShown ? "tt-api.d.ts" : selectedId} dirty=${dirty}`);
         if (resource.toString() === API_TYPINGS_URI) {
             openTypingsAt(selection);
-            navLog("opened wt-api.d.ts (read-only)");
+            navLog("opened tt-api.d.ts (read-only)");
             return true;
         }
         // a JSON import's declaration (mock/a.d.json.ts) stands for the data file

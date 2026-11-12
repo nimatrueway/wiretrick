@@ -68,7 +68,7 @@ export function helperView(st: HelperReport) {
     };
     const lines: string[] = [];
     if (st.scripts?.length) lines.push(`Scripts: ${st.scripts.join(", ")}`);
-    if (st.state === "permission") lines.push("Click Allow so Wiretrick can start the helper and clear cached copies of the pages it routes. Chrome asks to let it communicate with cooperating native applications.");
+    if (st.state === "permission") lines.push("Click Allow so TangiTweak can start the helper and clear cached copies of the pages it routes. Chrome asks to let it communicate with cooperating native applications.");
     if (st.state === "missing") {
         lines.push(`Install the helper: paste this into ${helperInstallShell()}, then click Retry:`);
         lines.push(`  ${helperInstallCommand(st.extensionId)}`);
@@ -81,7 +81,7 @@ export function helperView(st: HelperReport) {
         if (st.routing && !st.routing.active && st.routing.reason) lines.push(`Routing inactive: ${st.routing.reason}`);
         if (st.routing?.active) lines.push(`Other traffic: your proxy setting (${st.routing.mode})`);
         if (st.routing?.note) lines.push(st.routing.note);
-        if (st.caTrusted === false) lines.push("Chrome does not trust the helper certificate yet — click Trust certificate (or run: wiretrick-helper trust-ca).");
+        if (st.caTrusted === false) lines.push("Chrome does not trust the helper certificate yet — click Trust certificate (or run: tangitweak-helper trust-ca).");
         if (st.caTrusted === true) lines.push("Helper certificate trusted ✓");
         if (st.caFingerprint) lines.push(`Helper certificate: ${st.caPath} (SHA-256 ${st.caFingerprint})`);
     }

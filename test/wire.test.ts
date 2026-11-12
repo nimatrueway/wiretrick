@@ -102,8 +102,8 @@ describe("wire Endpoint", () => {
         };
         const ep = portEndpoint(port);
         ep.handle("fetch", (a) => ({ status: 200, statusText: "OK", url: a.request.url, headers: [], body: new Uint8Array([1, 2, 3]) }));
-        listeners[0]({ v: 1, t: "req", id: 1, op: "fetch", a: { request: { url: "u", method: "GET", headers: [], body: { __wtBytes: "AQI=" } }, bypass: false } });
+        listeners[0]({ v: 1, t: "req", id: 1, op: "fetch", a: { request: { url: "u", method: "GET", headers: [], body: { __ttBytes: "AQI=" } }, bypass: false } });
         await tick();
-        expect(posted[0].r.body).toEqual({ __wtBytes: "AQID" });
+        expect(posted[0].r.body).toEqual({ __ttBytes: "AQID" });
     });
 });

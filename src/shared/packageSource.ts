@@ -15,7 +15,7 @@
  *   - a .zip URL (a release asset, `github.com/o/r/archive/…zip`): its
  *     root's package (see pickStart; a zip of one folder is that folder)
  *
- * A `*.wiretrick.ts` URL opened in a tab installs (a share link, like
+ * A `*.tangitweak.ts` URL opened in a tab installs (a share link, like
  * GreaseMonkey's `.user.js`).
  */
 import { builtinSpec } from "./builtinSpecs";
@@ -31,10 +31,10 @@ export type PackageSource =
     | { kind: "zip"; url: string };
 
 /** a URL that installs as a package when opened in a tab */
-export const ENTRY_URL_RE = /^(https?|file):\/\/[^?#]*\.wiretrick\.tsx?([?#]|$)/i;
+export const ENTRY_URL_RE = /^(https?|file):\/\/[^?#]*\.tangitweak\.tsx?([?#]|$)/i;
 
 /** a share link's script name */
-export const ENTRY_FILE_RE = /\.wiretrick\.tsx?$/i;
+export const ENTRY_FILE_RE = /\.tangitweak\.tsx?$/i;
 
 /** a script's file name */
 export const SCRIPT_FILE_RE = /\.tsx?$/i;
@@ -181,7 +181,7 @@ export async function openSource(src: PackageSource, net: Net): Promise<OpenedSo
     };
 }
 
-/** what a folder's files install as: its metadata.json, else its one *.wiretrick.ts file, else its one script */
+/** what a folder's files install as: its metadata.json, else its one *.tangitweak.ts file, else its one script */
 export function pickStart(paths: string[], where: string, hint: string): string {
     const manifest = paths.find(isManifestPath);
     if (manifest) return manifest;
@@ -358,7 +358,7 @@ function readFileUrl(url: string, binary = false): Promise<any> {
         if (binary) x.responseType = "arraybuffer";
         x.onload = () => resolve(x.status === 0 || x.status === 200 ? (binary ? x.response : x.responseText) : null);
         // a missing file and no file access look the same: an error
-        x.onerror = () => reject(new Error(`can't read ${url} — allow "Access to file URLs" for Wiretrick in the browser's extension settings, or install the folder instead`));
+        x.onerror = () => reject(new Error(`can't read ${url} — allow "Access to file URLs" for TangiTweak in the browser's extension settings, or install the folder instead`));
         x.send();
     });
 }

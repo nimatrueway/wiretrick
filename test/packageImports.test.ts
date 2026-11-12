@@ -130,7 +130,7 @@ describe("downloading a package's module graph", () => {
         expect(esm.where).toBe("https://unpkg.com/esm-lib@1.0.0/index.js");
         expect(load(urls[1]).shout("hi")).toBe("HI!");
         expect(load(urls[2])).toEqual({ rootIsExports: true, sloppy: true, nodeEnv: "production" });
-        delete (globalThis as any).wtUmdSloppyGlobal;
+        delete (globalThis as any).ttUmdSloppyGlobal;
         // stored for later runs (offline)
         expect(Object.keys(store[PACKAGE_MODULES_KEY].modules)).toHaveLength(6);
     });
@@ -158,7 +158,7 @@ describe("downloading a package's module graph", () => {
         const user = "https://unpkg.com/cond-user@1.0.0/index.js";
         // as an older version stored it: the nested require failed, a built-in too
         store[PACKAGE_MODULES_KEY].modules[user].requires["cond-lib/is-dev"] = `!cannot import "cond-lib/is-dev" (required by ${user}): HTTP 404`;
-        store[PACKAGE_MODULES_KEY].modules[user].requires["fs"] = `!"fs" is a Node.js built-in — not available in Wiretrick scripts`;
+        store[PACKAGE_MODULES_KEY].modules[user].requires["fs"] = `!"fs" is a Node.js built-in — not available in TangiTweak scripts`;
         let p = await bg();
         expect(await p.ensurePackages([code])).toBe(false); // not on a plain ensure (startup, page loads)
         expect(p.packagesSnapshot().modules[user].requires["cond-lib/is-dev"]).toMatch(/^!/);
@@ -181,8 +181,8 @@ describe("downloading a package's module graph", () => {
         const load = makePackageLoader(p.packagesSnapshot());
         expect(load("https://unpkg.com/builtin-lib@1.0.0")).toEqual({
             ok: true,
-            err: `"fs" is a Node.js built-in — not available in Wiretrick scripts`,
-            err2: `"node:path" is a Node.js built-in — not available in Wiretrick scripts`,
+            err: `"fs" is a Node.js built-in — not available in TangiTweak scripts`,
+            err2: `"node:path" is a Node.js built-in — not available in TangiTweak scripts`,
         });
         const nf = load("https://unpkg.com/nested-fail@1.0.0");
         expect(nf.ok).toBe(1);
@@ -296,8 +296,8 @@ describe("package imports in scripts", () => {
     const SCRIPT = `import twice from "https://unpkg.com/esm-lib@1.0.0";
 import { shout } from "https://unpkg.com/cjs-lib@2.0.0";
 export const run = () => shout(String(twice(21)) + "x");
-wt.params({ n: { type: "number", default: twice(2) } });
-wt.onRequest({ url: "*://a.test/*", strategy: "helper" }, () => {});`;
+tt.params({ n: { type: "number", default: twice(2) } });
+tt.onRequest({ url: "*://a.test/*", strategy: "helper" }, () => {});`;
 
     it("compile and run through the background resolver", async () => {
         const p = await bg();
@@ -328,7 +328,7 @@ wt.onRequest({ url: "*://a.test/*", strategy: "helper" }, () => {});`;
             const c = compileWithLibs({ id: "m", name: "main", code }, [], {}, [], pkgs);
             return { error: c.error, line: c.error ? errorPosition(c.error)?.line : undefined };
         };
-        const unpinned = at(`// x\n\nimport d from "https://unpkg.com/dayjs";\nwt.onRequest({ url: "*://a/*", strategy: "helper" }, () => d());`);
+        const unpinned = at(`// x\n\nimport d from "https://unpkg.com/dayjs";\ntt.onRequest({ url: "*://a/*", strategy: "helper" }, () => d());`);
         expect(unpinned.error).toMatch(/cannot import "https:\/\/unpkg\.com\/dayjs": pin an exact version, e\.g\. https:\/\/unpkg\.com\/dayjs@1\.2\.3/);
         expect(unpinned.line).toBe(3);
         expect(at(`import d from "https://example.com/x.js";\nd();`).error).toMatch(/only pinned https:\/\/unpkg\.com/);
@@ -337,7 +337,7 @@ wt.onRequest({ url: "*://a.test/*", strategy: "helper" }, () => {});`;
             line: 2,
         });
 
-        const missing = `\nimport x from "https://unpkg.com/nope@1.0.0";\nwt.onRequest({ url: "*://a/*", strategy: "helper" }, () => x());`;
+        const missing = `\nimport x from "https://unpkg.com/nope@1.0.0";\ntt.onRequest({ url: "*://a/*", strategy: "helper" }, () => x());`;
         await p.ensurePackages([missing], { retry: true });
         expect(at(missing)).toEqual({ error: expect.stringMatching(/cannot import "https:\/\/unpkg\.com\/nope@1\.0\.0": download failed \(HTTP 404 — no such package, version or file\)/), line: 2 });
 

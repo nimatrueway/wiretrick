@@ -72,7 +72,7 @@ const details = (over: Record<string, any> = {}) => ({
 // line 4 throws (x is undefined):
 // line 4 throws inside the handler
 const throws = (strategy: string, async = "") => `// a handler that throws
-wt.onRequest({ url: "*", strategy: "${strategy}" }, ${async}(ctx) => {
+tt.onRequest({ url: "*", strategy: "${strategy}" }, ${async}(ctx) => {
     const x = undefined;
     return x.split(".");
 });`;
@@ -80,7 +80,7 @@ const THROWS = throws("extension");
 
 // line 4 throws at module top level (compile-time):
 const TOPLEVEL = `
-wt.onRequest({ url: "*", strategy: "extension" }, () => {});
+tt.onRequest({ url: "*", strategy: "extension" }, () => {});
 const x = undefined;
 x.split(".");
 `;
@@ -89,8 +89,8 @@ describe("formatScriptError / rewriteFrame", () => {
     // a library's function, called from the script's top level, called by
     // the page hook (an inline <script>: Chrome names its frames <anonymous>)
     const STACK = `TypeError: Cannot read properties of undefined (reading 'split')
-    at boom (wiretrick-script:///lib/My%20Lib.ts:8:14)
-    at eval (wiretrick-script:///My%20Script:10:1)
+    at boom (tangitweak-script:///lib/My%20Lib.ts:8:14)
+    at eval (tangitweak-script:///My%20Script:10:1)
     at requireFrom (<anonymous>:2504:6)
     at <anonymous>:2442:5
     at Object.eval (https://unpkg.com/cmdk@1.1.1/dist/index.js:1:200)
@@ -109,15 +109,15 @@ describe("formatScriptError / rewriteFrame", () => {
         expect(rewriteFrame("    at run (file:///x.mjs:16:9)")).toBeNull();
         expect(rewriteFrame("    at ModuleJob.run (node:internal/x)")).toBeNull();
         expect(rewriteFrame("    at <anonymous>:240:11")).toBeNull();
-        expect(rewriteFrame("    at f (wiretrick-script:///S:2:1)")).toBeNull(); // inside the wrapper
+        expect(rewriteFrame("    at f (tangitweak-script:///S:2:1)")).toBeNull(); // inside the wrapper
         expect(rewriteFrame("  continued message")).toBe("  continued message");
     });
 
     it("each cause follows, its frames mapped too", () => {
         const inner = new Error("Redux store is not captured yet.");
-        inner.stack = "Error: Redux store is not captured yet.\n    at f (wiretrick-script:///s.ts:9:2)\n    at <anonymous>:1:1";
+        inner.stack = "Error: Redux store is not captured yet.\n    at f (tangitweak-script:///s.ts:9:2)\n    at <anonymous>:1:1";
         const outer = Object.assign(new Error("Action failed after 101 attempts."), { cause: inner });
-        outer.stack = "Error: Action failed after 101 attempts.\n    at retry (wiretrick-script:///lib.tsx:55:23)";
+        outer.stack = "Error: Action failed after 101 attempts.\n    at retry (tangitweak-script:///lib.tsx:55:23)";
         expect(formatScriptError("S", outer, "onPage").split("\n")).toEqual([
             "[S] onPage: Error: Action failed after 101 attempts.",
             "    at retry (lib.tsx:52:23)",
@@ -142,7 +142,7 @@ describe("formatScriptError / rewriteFrame", () => {
         } catch (e) {
             err = e;
         }
-        expect(Number(err.stack.match(/wiretrick-script:\/\/\/lib\/a%20b\.ts:(\d+):\d+/)?.[1])).toBe(2 + EVAL_WRAPPER_LINES);
+        expect(Number(err.stack.match(/tangitweak-script:\/\/\/lib\/a%20b\.ts:(\d+):\d+/)?.[1])).toBe(2 + EVAL_WRAPPER_LINES);
         const frames = formatScriptError("redwood/main.tsx", err).split("\n").slice(1);
         expect(frames).toHaveLength(2); // the test runner's frames are dropped
         expect(frames[0]).toMatch(/lib\/a b\.ts:2:\d+\)?$/);
@@ -195,7 +195,7 @@ describe("CDP tier: error logs carry name + user line:col", () => {
 
 describe("compile: positions for the Problems view", () => {
     it("each route records the line of its registration (also in a loop / helper)", () => {
-        const c = compileScript(["// a", 'wt.onRequest({ url: "*://a.test/*", strategy: "helper" }, () => {});', "", "function reg(u) {", "    wt.onResponseBody({ url: u, strategy: \"helper\" }, (ctx, b) => b);", "}", 'reg("*://b.test/*");', 'wt.onRequest({ url: "*://c.test/*", strategy: "helper" }, () => {});'].join("\n"));
+        const c = compileScript(["// a", 'tt.onRequest({ url: "*://a.test/*", strategy: "helper" }, () => {});', "", "function reg(u) {", "    tt.onResponseBody({ url: u, strategy: \"helper\" }, (ctx, b) => b);", "}", 'reg("*://b.test/*");', 'tt.onRequest({ url: "*://c.test/*", strategy: "helper" }, () => {});'].join("\n"));
         expect(c.error).toBeNull();
         expect(c.meta.routes.map((r) => [r.kind, r.index, r.line])).toEqual([
             ["onRequest", 0, 2],
@@ -206,7 +206,7 @@ describe("compile: positions for the Problems view", () => {
 
     it("a syntax error names the line the transpiler found", async () => {
         await import("../src/shared/transpile");
-        const c = compileScript(["const a: number = 1;", 'wt.onRequest({ url: "*://a.test/*", strategy: "helper" }, () => {});', "foo(", "const b = 2;"].join("\n"));
+        const c = compileScript(["const a: number = 1;", 'tt.onRequest({ url: "*://a.test/*", strategy: "helper" }, () => {});', "foo(", "const b = 2;"].join("\n"));
         expect(c.error).toMatch(/^SyntaxError: .* \(line 4\)$/);
     });
 });

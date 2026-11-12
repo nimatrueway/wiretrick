@@ -7,19 +7,19 @@ const t = (text: string, kind = "text") => ({ text, kind });
 const sp = (start: number, length = 1) => ({ start, length });
 const nav = (text: string, kind: string, start: number, childItems?: NavTreeItem[]): NavTreeItem => ({ text, kind, spans: [sp(start - 1, 50)], nameSpan: sp(start, text.length), childItems });
 
-// (method) onRequest(route: Wiretrick.Route, handler: (ctx: Wiretrick.RequestCtx) => Wiretrick.Awaitable<...>): void
+// (method) onRequest(route: TangiTweak.Route, handler: (ctx: TangiTweak.RequestCtx) => TangiTweak.Awaitable<...>): void
 const onRequestParts = [
     t("(method) "), t("onRequest", "methodName"), t("("), t("route", "parameterName"), t(": "),
-    t("Wiretrick", "moduleName"), t(".", "punctuation"), t("Route", "aliasName"), t(", "),
+    t("TangiTweak", "moduleName"), t(".", "punctuation"), t("Route", "aliasName"), t(", "),
     t("handler", "parameterName"), t(": ("), t("ctx", "parameterName"), t(": "),
-    t("Wiretrick", "moduleName"), t(".", "punctuation"), t("RequestCtx", "interfaceName"), t(") => "),
-    t("Wiretrick", "moduleName"), t(".", "punctuation"), t("Awaitable", "aliasName"), t("<"), t("T", "typeParameterName"), t(" | "),
-    t("Wiretrick", "moduleName"), t(".", "punctuation"), t("Route", "aliasName"), t(" | "), t("Response", "interfaceName"), t(">): void"),
+    t("TangiTweak", "moduleName"), t(".", "punctuation"), t("RequestCtx", "interfaceName"), t(") => "),
+    t("TangiTweak", "moduleName"), t(".", "punctuation"), t("Awaitable", "aliasName"), t("<"), t("T", "typeParameterName"), t(" | "),
+    t("TangiTweak", "moduleName"), t(".", "punctuation"), t("Route", "aliasName"), t(" | "), t("Response", "interfaceName"), t(">): void"),
 ];
 
 const tree: NavTreeItem = nav("<global>", "script", 0, [
-    nav("Wiretrick", "module", 10, [nav("Route", "type", 100), nav("RequestCtx", "interface", 200, [nav("url", "property", 210)]), nav("Awaitable", "type", 300)]),
-    nav("wt", "const", 400),
+    nav("TangiTweak", "module", 10, [nav("Route", "type", 100), nav("RequestCtx", "interface", 200, [nav("url", "property", 210)]), nav("Awaitable", "type", 300)]),
+    nav("tt", "const", 400),
     nav("URLPattern", "interface", 500),
     nav("URLPattern", "var", 600),
 ]);
@@ -27,27 +27,27 @@ const tree: NavTreeItem = nav("<global>", "script", 0, [
 describe("api type links", () => {
     it("indexes namespace members and top-level types from the navigation tree", () => {
         const index = indexTypeDeclarations(tree);
-        expect([...index.keys()]).toEqual(["Wiretrick.Route", "Wiretrick.RequestCtx", "Wiretrick.Awaitable", "URLPattern"]);
+        expect([...index.keys()]).toEqual(["TangiTweak.Route", "TangiTweak.RequestCtx", "TangiTweak.Awaitable", "URLPattern"]);
         expect(index.get("URLPattern")).toEqual(sp(500, 10)); // the interface, not the var
-        expect(index.get("Wiretrick.RequestCtx")).toEqual(sp(200, 10));
+        expect(index.get("TangiTweak.RequestCtx")).toEqual(sp(200, 10));
     });
 
     it("resolves bare namespace members only inside the typings", () => {
         const index = indexTypeDeclarations(tree);
-        expect(resolveTypeName(index, "Wiretrick.Route", false)).toEqual(sp(100, 5));
+        expect(resolveTypeName(index, "TangiTweak.Route", false)).toEqual(sp(100, 5));
         expect(resolveTypeName(index, "Route", false)).toBeUndefined();
         expect(resolveTypeName(index, "Route", true)).toEqual(sp(100, 5));
         expect(resolveTypeName(index, "Response", true)).toBeUndefined();
     });
 
-    it("finds every wt-api.d.ts type in a signature, minus the hovered declaration itself", () => {
+    it("finds every tt-api.d.ts type in a signature, minus the hovered declaration itself", () => {
         const index = indexTypeDeclarations(tree);
         const sig = partsToMarkdown(onRequestParts);
         const refs = typeRefs(onRequestParts, index, false);
         expect(refs.map((r) => sig.slice(r.start, r.end))).toEqual(["Route", "RequestCtx", "Awaitable", "Route"]);
-        expect(refs.map((r) => r.name)).toEqual(["Wiretrick.Route", "Wiretrick.RequestCtx", "Wiretrick.Awaitable", "Wiretrick.Route"]);
+        expect(refs.map((r) => r.name)).toEqual(["TangiTweak.Route", "TangiTweak.RequestCtx", "TangiTweak.Awaitable", "TangiTweak.Route"]);
         expect(refs[1].span).toEqual(sp(200, 10));
-        expect(typeRefs(onRequestParts, index, false, sp(100, 5)).map((r) => r.name)).toEqual(["Wiretrick.RequestCtx", "Wiretrick.Awaitable"]);
+        expect(typeRefs(onRequestParts, index, false, sp(100, 5)).map((r) => r.name)).toEqual(["TangiTweak.RequestCtx", "TangiTweak.Awaitable"]);
         // inside the typings TS doesn't qualify namespace members
         expect(typeRefs([t("x: "), t("Route", "aliasName")], index, true)).toEqual([{ start: 3, end: 8, name: "Route", span: sp(100, 5) }]);
         expect(typeRefs([t("x: "), t("Route", "aliasName")], index, false)).toEqual([]);
@@ -56,7 +56,7 @@ describe("api type links", () => {
 
     it("maps a {@link} target (a whole declaration) to the declaration's name", () => {
         const items = flattenNavTree(tree);
-        expect(items.map((i) => i.text)).toEqual(["Wiretrick", "Route", "RequestCtx", "url", "Awaitable", "wt", "URLPattern", "URLPattern"]);
+        expect(items.map((i) => i.text)).toEqual(["TangiTweak", "Route", "RequestCtx", "url", "Awaitable", "tt", "URLPattern", "URLPattern"]);
         expect(declarationName(items, sp(199, 50))).toEqual(sp(200, 10)); // interface RequestCtx
         expect(declarationName(items, sp(209, 50))).toEqual(sp(210, 3)); // RequestCtx.url
         expect(declarationName(items, sp(205, 3))).toEqual(sp(200, 10)); // inside RequestCtx: innermost container
@@ -64,24 +64,24 @@ describe("api type links", () => {
     });
 
     it("builds command links Monaco can execute", () => {
-        const uri = commandUri("wt.x", { start: 5, label: "Route" });
-        expect(uri).toBe(`command:wt.x?${encodeURIComponent('{"start":5,"label":"Route"}')}`);
+        const uri = commandUri("tt.x", { start: 5, label: "Route" });
+        expect(uri).toBe(`command:tt.x?${encodeURIComponent('{"start":5,"label":"Route"}')}`);
         expect(JSON.parse(decodeURIComponent(uri.split("?")[1]))).toEqual({ start: 5, label: "Route" });
         expect(commandUri("x", { a: "f(1)" })).not.toMatch(/[()]/);
     });
 
     it("links {@link X} when the resolver knows its target, else keeps `X`", () => {
-        const target = { fileName: "file:///wt-api.d.ts", textSpan: sp(100, 5) };
-        const parts = [t("See "), t("{@link ", "link"), { ...t("Wiretrick.Route", "linkName"), target }, t("}", "link"), t(" and "), t("{@link ", "link"), t("Other", "linkName"), t("}", "link")];
-        const resolve = (_: string, p: any) => (p.target?.fileName === "file:///wt-api.d.ts" ? "command:go" : undefined);
-        expect(partsToMarkdown(parts, resolve)).toBe("See [`Wiretrick.Route`](command:go) and `Other`");
-        expect(partsToMarkdown(parts)).toBe("See `Wiretrick.Route` and `Other`");
+        const target = { fileName: "file:///tt-api.d.ts", textSpan: sp(100, 5) };
+        const parts = [t("See "), t("{@link ", "link"), { ...t("TangiTweak.Route", "linkName"), target }, t("}", "link"), t(" and "), t("{@link ", "link"), t("Other", "linkName"), t("}", "link")];
+        const resolve = (_: string, p: any) => (p.target?.fileName === "file:///tt-api.d.ts" ? "command:go" : undefined);
+        expect(partsToMarkdown(parts, resolve)).toBe("See [`TangiTweak.Route`](command:go) and `Other`");
+        expect(partsToMarkdown(parts)).toBe("See `TangiTweak.Route` and `Other`");
         const labelled = [t("{@link ", "link"), { ...t("A", "linkName"), target }, t("the A", "linkText"), t("}", "link")];
         expect(partsToMarkdown(labelled, resolve)).toBe("[the A](command:go)");
         // tags too, but never inside @example code
         const tags = [{ name: "see", text: parts }, { name: "example", text: parts }];
         expect(docsToMarkdown(undefined, tags, undefined, resolve)).toBe(
-            "*@see* — See [`Wiretrick.Route`](command:go) and `Other`\n\n*@example*  \n```typescript\nSee `Wiretrick.Route` and `Other`\n```"
+            "*@see* — See [`TangiTweak.Route`](command:go) and `Other`\n\n*@example*  \n```typescript\nSee `TangiTweak.Route` and `Other`\n```"
         );
     });
 });

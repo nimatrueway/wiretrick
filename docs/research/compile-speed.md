@@ -223,7 +223,7 @@ Native (non-WASM) builds cannot run in a browser. They are listed only to show t
   - `scriptFunction` puts `"use strict"` on line 1 so that stack offsets work (`src/shared/scriptFn.ts:12`).
   - Routes record their registration `line`.
   - Scripts get `require`, `module` and `exports`.
-- Calling `new Function` on the output costs about a third of the transpile, and the top level (user code plus `wt` registrations) runs on top of that. So the cost of a save depends mostly on **how many times** we transpile and run, not on how fast one transpile is.
+- Calling `new Function` on the output costs about a third of the transpile, and the top level (user code plus `tt` registrations) runs on top of that. So the cost of a save depends mostly on **how many times** we transpile and run, not on how fast one transpile is.
 - A cache lookup is cheap. A full SHA-1 of a 123 KB source takes 0.15 ms, against 11 ms to transpile it. A `Map` keyed on the source string is cheaper still, because V8 hashes a string once and caches the hash.
 - esbuild-wasm looks especially bad here because in Node it runs in a child process with async IPC. In browsers it defaults to running in a Web Worker and has no synchronous API ([esbuild API docs](https://esbuild.github.io/api/#browser)). It would be async there too.
 - The [Sucrase README](https://github.com/alangpierce/sucrase#readme) benchmark (Jest codebase, no warm-up) puts Sucrase ahead of swc and esbuild. Our warm, large-file numbers disagree, but on small inputs they agree.
@@ -308,7 +308,7 @@ Only worth revisiting if item 1 shows long single transpiles on the main thread 
   - Extension pages get `script-src 'self'` with no `'unsafe-eval'` ([Chrome CSP](https://developer.chrome.com/docs/extensions/reference/manifest/content-security-policy)). A worker there could transpile (Sucrase is plain JS) but could not run the top level.
   - Only one offscreen document can exist at a time, and we already use it.
 - **Sandbox iframe:** has `'unsafe-eval'` and a unique origin ([Chrome sandbox docs](https://developer.chrome.com/docs/extensions/how-to/security/sandboxing-eval)). It is **unverified** whether it can start a worker (from a blob or `data:` URL), and whether that worker would keep `'unsafe-eval'`. This needs a spike.
-- **Running top levels in a worker:** would need the `wt` API surface (the storage, fetch and log reverse channels, `reverseCall` and `liveApis` in `sandbox.ts:105-120,190-197`) proxied into the worker. That is a large change.
+- **Running top levels in a worker:** would need the `tt` API surface (the storage, fetch and log reverse channels, `reverseCall` and `liveApis` in `sandbox.ts:105-120,190-197`) proxied into the worker. That is a large change.
 - **Firefox:** uses background pages (event pages), not service workers ([MDN background](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/background)). Workers are available there, and our MV2 CSP already allows `worker-src 'self' blob:` (`manifest.json:53`).
 - **Transfer cost:** strings are copied by structured clone. A per-script transpile takes about 0.1 to 1 ms, which is comparable to a message round trip. A pool only pays off for big files.
 

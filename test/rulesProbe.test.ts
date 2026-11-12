@@ -15,28 +15,28 @@ async function rulesOf(code: string) {
 describe("rules probe (tripwire ctx)", () => {
     it("turns fixed handlers into rules and skips other strategies", async () => {
         const r = await rulesOf(`
-            wt.onRequest({ url: "*://ads.example.com/*", strategy: "rules" }, () => ({ block: true }));
-            wt.onRequest({ url: "*://example.com/*", strategy: "page" }, (ctx) => ({ redirect: ctx.method }));
-            wt.onResponseHeaders({ url: "*://example.com/*", strategy: "rules" }, () => ({ headers: { set: { "x-wt": "1" }, remove: ["server"] } }));
+            tt.onRequest({ url: "*://ads.example.com/*", strategy: "rules" }, () => ({ block: true }));
+            tt.onRequest({ url: "*://example.com/*", strategy: "page" }, (ctx) => ({ redirect: ctx.method }));
+            tt.onResponseHeaders({ url: "*://example.com/*", strategy: "rules" }, () => ({ headers: { set: { "x-tt": "1" }, remove: ["server"] } }));
         `);
         expect(r.errors).toEqual([]);
         expect(r.rules.map((x) => x.specs[0].action.type)).toEqual(["block", "modifyHeaders"]);
     });
 
-    it("wt.pageStore in a rules handler is an error (rules serve every page)", async () => {
-        const r = await rulesOf(`const ps = wt.pageStore("p", { on: true });
-            wt.onRequest({ url: "*://a.com/*", strategy: "rules" }, () => (ps.on ? { block: true } : undefined));`);
+    it("tt.pageStore in a rules handler is an error (rules serve every page)", async () => {
+        const r = await rulesOf(`const ps = tt.pageStore("p", { on: true });
+            tt.onRequest({ url: "*://a.com/*", strategy: "rules" }, () => (ps.on ? { block: true } : undefined));`);
         expect(r.errors.join("\n")).toMatch(/strategy "rules" handler/);
     });
 
     it("an async handler on rules", async () => {
-        const r = await rulesOf(`wt.onRequest({ url: "*://a.com/*", strategy: "rules" }, async () => ({ headers: { set: { a: 1 } } }));`);
+        const r = await rulesOf(`tt.onRequest({ url: "*://a.com/*", strategy: "rules" }, async () => ({ headers: { set: { a: 1 } } }));`);
         expect(r.rules[0].specs[0].action.requestHeaders).toEqual([{ header: "a", operation: "set", value: "1" }]);
     });
 
     it("captures and ctx.url as-is in a redirect → regexSubstitution", async () => {
         const r = await rulesOf(`
-            wt.onRequest({ url: "http://127.0.0.1:8907/rr{/v:ver}?/:name", strategy: "rules" },
+            tt.onRequest({ url: "http://127.0.0.1:8907/rr{/v:ver}?/:name", strategy: "rules" },
                 (ctx) => ({ redirect: \`http://127.0.0.1:8907/echo?name=\${ctx.groups.name}&ver=\${ctx.groups.ver ?? ""}\` }));
         `);
         expect(r.errors).toEqual([]);
@@ -48,9 +48,9 @@ describe("rules probe (tripwire ctx)", () => {
 
     it("the docs' optional-group redirect example works; another fallback is an error", async () => {
         const r = await rulesOf(`
-            wt.onRequest({ url: "https://example.com/api{/v:ver}?/users/:id(\\\\d+)", strategy: "rules" },
+            tt.onRequest({ url: "https://example.com/api{/v:ver}?/users/:id(\\\\d+)", strategy: "rules" },
                 (ctx) => ({ redirect: \`https://staging.example.com/users/\${ctx.groups.id}?v=\${ctx.groups.ver ?? ""}\` }));
-            wt.onRequest({ url: "https://example.com/b{/v:ver}?", strategy: "rules" },
+            tt.onRequest({ url: "https://example.com/b{/v:ver}?", strategy: "rules" },
                 (ctx) => ({ redirect: \`https://x.com/\${ctx.groups.ver ?? "1"}\` }));
         `);
         expect(r.errors).toHaveLength(1);
@@ -64,17 +64,17 @@ describe("rules probe (tripwire ctx)", () => {
 
     it("errors name the handler; the script's other handlers still become rules", async () => {
         const r = await rulesOf(`
-            wt.onRequest({ url: "*://a.com/*", strategy: "rules" }, () => ({ block: true }));
-            wt.onRequest({ url: "*://b.com/*", strategy: "rules" }, (ctx) => ctx.method === "POST" ? { block: true } : undefined);
-            wt.onRequest({ url: "*://c.com/:id", strategy: "rules" }, (ctx) => ({ redirect: "https://x.com/" + ctx.groups.id.toUpperCase() }));
-            wt.onRequest({ url: "*://d.com/:id", strategy: "rules" }, (ctx) => ({ headers: { set: { id: ctx.groups.id } } }));
-            wt.onRequest({ url: "*://e.com/*", strategy: "rules" }, () => ({ replaceResponse: { body: "x" } }));
-            wt.onRequest({ url: "*://f.com/*", strategy: "rules" }, () => { throw new Error("nope"); });
-            wt.onRequest({ url: "*://g.com/*", strategy: "rules" }, () => {});
-            wt.onRequest({ url: "*://h.com/*", strategy: "rules" }, ({ requestHeaders }) => ({ block: !!requestHeaders.cookie }));
-            wt.onRequest({ url: "*://i.com/x{/:v}?", strategy: "rules" }, (ctx) => ({ redirect: "https://x.com/" + (ctx.groups.v || "none") }));
-            wt.onResponseBody({ url: "*://j.com/*", strategy: "rules" }, (ctx, body) => body);
-            wt.replaceResponse({ url: "*://k.com/*", strategy: "rules" }, () => "x");
+            tt.onRequest({ url: "*://a.com/*", strategy: "rules" }, () => ({ block: true }));
+            tt.onRequest({ url: "*://b.com/*", strategy: "rules" }, (ctx) => ctx.method === "POST" ? { block: true } : undefined);
+            tt.onRequest({ url: "*://c.com/:id", strategy: "rules" }, (ctx) => ({ redirect: "https://x.com/" + ctx.groups.id.toUpperCase() }));
+            tt.onRequest({ url: "*://d.com/:id", strategy: "rules" }, (ctx) => ({ headers: { set: { id: ctx.groups.id } } }));
+            tt.onRequest({ url: "*://e.com/*", strategy: "rules" }, () => ({ replaceResponse: { body: "x" } }));
+            tt.onRequest({ url: "*://f.com/*", strategy: "rules" }, () => { throw new Error("nope"); });
+            tt.onRequest({ url: "*://g.com/*", strategy: "rules" }, () => {});
+            tt.onRequest({ url: "*://h.com/*", strategy: "rules" }, ({ requestHeaders }) => ({ block: !!requestHeaders.cookie }));
+            tt.onRequest({ url: "*://i.com/x{/:v}?", strategy: "rules" }, (ctx) => ({ redirect: "https://x.com/" + (ctx.groups.v || "none") }));
+            tt.onResponseBody({ url: "*://j.com/*", strategy: "rules" }, (ctx, body) => body);
+            tt.replaceResponse({ url: "*://k.com/*", strategy: "rules" }, () => "x");
         `);
         expect(r.rules.map((x) => x.route.url[0])).toEqual(["*://a.com/*"]);
         const e = r.errors.join("\n");
@@ -91,7 +91,7 @@ describe("rules probe (tripwire ctx)", () => {
     });
 
     it("times out a handler that never settles", async () => {
-        const r = await rulesOf(`wt.onRequest({ url: "*://a.com/*", strategy: "rules" }, () => new Promise(() => {}));`);
+        const r = await rulesOf(`tt.onRequest({ url: "*://a.com/*", strategy: "rules" }, () => new Promise(() => {}));`);
         expect(r.errors[0]).toMatch(/onRequest #1: threw during its one-time run: timed out/);
     }, 5000);
 });

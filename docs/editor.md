@@ -2,8 +2,8 @@
 
 [← README](../README.md) · [Glossary](../GLOSSARY.md)
 
-The Editor is Wiretrick's full-page UI. Its **Code view** embeds **Monaco** (the VS Code editor) with full TypeScript
-IntelliSense for the `wt` API — completions, hover docs, and diagnostics work
+The Editor is TangiTweak's full-page UI. Its **Code view** embeds **Monaco** (the VS Code editor) with full TypeScript
+IntelliSense for the `tt` API — completions, hover docs, and diagnostics work
 out of the box. Shortcuts follow VS Code (⌘ = Ctrl on Windows/Linux; F1
 lists the Code view commands, and the **?** dialog's **Shortcuts** tab has a
 searchable list of all of them):
@@ -24,15 +24,15 @@ searchable list of all of them):
 | ⌘, | Open Settings |
 | ⌘/, ⌘F, ⌘D | Comment, find, select next occurrence (Monaco) |
 | F8 / ⇧F8 | Go to the next / previous problem in the script (TypeScript, compile, rules, runtime, route) |
-| F12 | Go to definition — also into the `wt` API typings; on a JSON import it opens the data file |
+| F12 | Go to definition — also into the `tt` API typings; on a JSON import it opens the data file |
 | Alt+← / Alt+→ (⌃- / ⌃⇧- on macOS) | Go back / forward after a definition jump or a hover type link |
 
-In a hover, the `wt` API types in the signature (`RouteOptions`, `RequestCtx`, …,
+In a hover, the `tt` API types in the signature (`RouteOptions`, `RequestCtx`, …,
 dotted underline) and `{@link}`s in its docs are clickable: a click swaps the
 same hover for that type's signature and docs, so you can drill down type by
 type without leaving your script; **← Back to …** at the top walks back up.
-To read the source, press F12 / ⌘-click on `wt.onRequest`, `ctx.url`, a
-`Wiretrick.*` type: the API typings (`wt-api.d.ts`) open read-only in the
+To read the source, press F12 / ⌘-click on `tt.onRequest`, `ctx.url`, a
+`TangiTweak.*` type: the API typings (`tt-api.d.ts`) open read-only in the
 Code view at that declaration. Hovers and F12 work there too, so you can keep
 digging; Go back returns to your script with its cursor and unsaved edits
 intact.
@@ -81,7 +81,7 @@ red when its JSON is invalid; ◈ for an `.svg`). Each folder lists its subfolde
 (alphabetical), then its scripts (in stacking order), then its data files
 (alphabetical); ⚙ **settings.yaml** stays at the top. Scripts without a
 folder sit at the root, as before. Which folders are collapsed is remembered.
-Click the **Wiretrick** header to collapse the whole tree.
+Click the **TangiTweak** header to collapse the whole tree.
 
 Hovering the explorer shows the header buttons: **New Script…**, **New JSON
 File…**, **New Folder…**, **Install Script…** (opens the [install
@@ -123,7 +123,7 @@ offers **Copy Paths**. Items inside a selected folder go with it. The
 
 Double-click a file (or F2 on a file or folder) to rename it (Enter saves, Esc cancels).
 The box shows the full file name, extension included (`My script.ts`,
-`users.json`), with only the name before it selected (`.wiretrick.ts` too); the `.ts` of a script is
+`users.json`), with only the name before it selected (`.tangitweak.ts` too); the `.ts` of a script is
 optional when you type, while `.tsx` makes it a [`.tsx` script](scripting.md#built-in-valtio-and-react). The name is the path in the synced folder; a `/`
 moves it into a folder (`mock/api mock` → `mock/api mock.ts`; renaming a
 folder moves everything in it). Each segment may hold anything
@@ -169,7 +169,7 @@ at the right of the toolbar do the same.
   themselves once fixed: TypeScript problems update live as you type (even
   before saving); compile, rules and route problems on save; a runtime error
   on save or with its ×. Every entry has a line and column: where the error
-  was thrown, the URL pattern a rules error is about, or the `wt.*` call that
+  was thrown, the URL pattern a rules error is about, or the `tt.*` call that
   registered the handler it names — and is squiggled there in the editor
   like TypeScript errors (its hover comes before the API docs; F8 reaches it). Click an entry (or
   Enter) to open the file at that line; ↑/↓ move, ←/→ collapse/expand a file; the filter box in
@@ -182,11 +182,11 @@ at the right of the toolbar do the same.
   `isolated › host` (its `onPage` code) or `page › host` (its `onSite`
   code). A handle call in `onSite` code (`SiteCannotCallError`) is such an
   error, with a quick fix (Ctrl+. / ⌘.) that moves the handler to
-  `wt.onPage`; a route with the removed `js`, `dom` or `unsafe` option gets
-  one to `wt.onSite` / `wt.onOverlay`.
+  `tt.onPage`; a route with the removed `js`, `dom` or `unsafe` option gets
+  one to `tt.onSite` / `tt.onOverlay`.
   On Chrome, `onPage` or `onSite` code while
   [user scripts are off](scripting.md#user-scripts-on-chrome) is an error
-  whose `chrome://extensions` link opens Wiretrick's details page; the
+  whose `chrome://extensions` link opens TangiTweak's details page; the
   Editor also shows a one-time banner with a **Grant permission** (or
   **Open extension details**) button.
 - **Log view** — engine and script log lines with a [filter bar](#log-filter)
@@ -223,7 +223,7 @@ at the right of the toolbar do the same.
 - **Network view** — a devtools-style request table: a [filter bar](#network-filter), per-type
   toggles, a tab picker (closed tabs stay listed, dimmed under *Closed tabs*,
   until the log is cleared), a script-activity filter, a script picker
-  (only requests one script ran on — the *Wiretrick* column; the activity
+  (only requests one script ran on — the *TangiTweak* column; the activity
   filter then judges that script alone),
   sortable/resizable columns (right-click the header to pick columns) and a
   waterfall. Requests a script handled are flagged with their outcome:
@@ -250,7 +250,7 @@ at the right of the toolbar do the same.
   outlined badge on its title (a request that goes from observed to modified
   moves to the modified count); they stay until the Network log is cleared, and
   are live before the Network view is first opened. Selecting a request shows its headers, request payload, the response
-  body (modified and original, when Wiretrick handled it) and what each
+  body (modified and original, when TangiTweak handled it) and what each
   script did (observed entries muted). **Copy** above a payload or response
   body puts it on the clipboard (pretty-printed JSON, as shown). Each body is
   kept up to 2 MB (2048 kB) by default; a longer one is cut and says so — raise the
@@ -282,16 +282,16 @@ at the right of the toolbar do the same.
 
 ### Preview
 
-The **Preview** tab (⌥⇧V) runs the overlay (`wt.onOverlay`) of the script
+The **Preview** tab (⌥⇧V) runs the overlay (`tt.onOverlay`) of the script
 open in the Code view in a frame inside the Editor, without opening its
 page, so you can work on the GUI before going to the site; a script that's
 turned off previews too. It runs the saved script and updates it in place
 on every save, as on a page ([hot reload](scripting.md#hot-reload--runs-and-ctx)).
 
-- **Real stores.** The preview's `wt.globalStore`s are live copies of the
+- **Real stores.** The preview's `tt.globalStore`s are live copies of the
   background's, like a page's overlay: flipping a switch in the preview
   turns a mock on or off for the pages in your tabs, and their overlays
-  follow. Its `wt.siteStore`s belong to the checkerboard "page": they
+  follow. Its `tt.siteStore`s belong to the checkerboard "page": they
   start from `initial` and last while the preview does.
 - **URL.** The field in the panel header is the URL the overlay gets as
   `ctx.url`, and the base for its relative `fetch` URLs. It starts at a URL
@@ -300,10 +300,10 @@ on every save, as on a page ([hot reload](scripting.md#hot-reload--runs-and-ctx)
   it, Esc puts back the current one. Only the handlers whose route matches
   it run, as on a page; **no handler matches** shows when none does.
 - **Fetches.** There's no page behind the preview, so the overlay's `fetch`
-  (and `wt.fetch`, `from: "page"`) goes from the extension background
+  (and `tt.fetch`, `from: "page"`) goes from the extension background
   instead — host permissions, no CORS, the browser's cookies — and the
   header shows **fetch runs from the background** once it has. Your
-  scripts' handlers see these requests like `wt.fetch`'s.
+  scripts' handlers see these requests like `tt.fetch`'s.
 - **No page.** `onSite` and `onPage` code don't run in the preview: the
   overlay's calls into them reject with `there's no page in the Editor
   preview`.
@@ -393,31 +393,31 @@ pick **Debug+** there to see `level:debug` lines.
 ## Synced folder
 
 In **Settings → Synced folder**, click **Choose Folder…** and pick a folder
-(e.g. `~/Wiretricks`) — that becomes your synced folder. **Change Folder…**
+(e.g. `~/TangiTweaks`) — that becomes your synced folder. **Change Folder…**
 switches to another one (cancelling the picker keeps the current folder),
 and **Disconnect** stops syncing; the folder's files stay. Its subfolders mirror the explorer's folders (empty ones too),
 `.ts` and `.tsx` files are scripts and `.json` and `.svg` files are
 [data files](scripting.md#imports-folders-and-data-files), at their relative
-paths. Dot entries (`.git`, `.vscode`, `.wiretrick-backup`, …),
+paths. Dot entries (`.git`, `.vscode`, `.tangitweak-backup`, …),
 `node_modules`, `.d.ts` files and config JSON (`package.json`,
 `package-lock.json`, `tsconfig*.json`, `jsconfig.json`, the root
 `settings.schema.json`) are left alone. Connecting runs a two-way initial
 sync: files without a script or data file are imported, scripts and data
 files without a file are written out, and where both exist but differ the
 newer one wins (file modified time vs. the last save) and the other copy is
-kept in `.wiretrick-backup/` at the same relative path — the Editor lists
+kept in `.tangitweak-backup/` at the same relative path — the Editor lists
 these before connecting so you can cancel. The same reconcile runs on every
 reconnect and browser restart; there, only the side that actually changed
 since the last sync wins, so a backup is made only when both changed.
-A slow drive (network share, cloud folder) that reports an earlier Wiretrick
+A slow drive (network share, cloud folder) that reports an earlier TangiTweak
 write back late isn't mistaken for an outside edit; the newer text is
 written again.
-`wt-api.d.ts`, `tsconfig.json` and `settings.schema.json` are written alongside. Edit in VS Code (or any editor) with full
+`tt-api.d.ts`, `tsconfig.json` and `settings.schema.json` are written alongside. Edit in VS Code (or any editor) with full
 TypeScript completions; saves hot apply instantly. The typings of
 [package imports](scripting.md#packages-from-unpkg) go to
-`.wiretrick/types/`, which Wiretrick owns: it rewrites and prunes them as
+`.tangitweak/types/`, which TangiTweak owns: it rewrites and prunes them as
 scripts change. The built-ins' (`valtio`, `react`, `react-dom`) go to
-`.wiretrick/types/builtin/`, so their imports resolve there too.
+`.tangitweak/types/builtin/`, so their imports resolve there too.
 
 Those three are managed files: they're refreshed on every browser start
 and extension update, so new APIs and settings reach an already-synced folder.
@@ -429,7 +429,7 @@ deletes** too: a new `.ts`/`.tsx` file becomes a script, deleting a file removes
 script, renaming or moving a file renames the script (its `settings.yaml`
 section moves with it); the same goes for `.json`/`.svg` files and data files, and
 for subfolders and folders. If a file and its script both change before a sync, the file wins
-and the script's version goes to `.wiretrick-backup/`. Saving in the Editor
+and the script's version goes to `.tangitweak-backup/`. Saving in the Editor
 over a script that changed elsewhere shows a diff to overwrite or take theirs. The folder choice is remembered —
 the Editor reconnects automatically on open (one click to re-grant after a
 browser restart, per Chrome's File System Access rules — click the toolbar
@@ -457,14 +457,14 @@ or *Light*. It applies to the Editor (Code view included) and the popup.
 [Strategies](strategies.md) explains every strategy, with a table of their
 pros and cons and [which browsers run which](strategies.md#compatibility). There is no default
 strategy: every network handler names its own
-(`wt.onRequest({ url, strategy: "helper" }, fn)`). There is no fallback
+(`tt.onRequest({ url, strategy: "helper" }, fn)`). There is no fallback
 either: a handler whose strategy isn't available doesn't run — the script
 gets a ⚠ and the Problems view a warning.
 
 ## About and diagnostics
 
 **Settings → About** shows the installed version and the latest
-[release](https://github.com/nimatrueway/wiretrick/releases) (checked on
+[release](https://github.com/nimatrueway/tangitweak/releases) (checked on
 GitHub when About opens, with a download link when there's an update), commit and build time,
 the build (MV2/MV3), browser, OS, extension ID and the local helper's state.
 **Copy** puts that on the clipboard as text — paste it into bug reports.
@@ -477,7 +477,7 @@ it's running and opens its page in a new tab, already changed; **Open** just
 adds it. None of the samples need the local helper. Reopen the page any time
 from **?** → **Welcome** (top right of the Help dialog); ✕ closes it.
 
-**Collect diagnostics…** (also *Wiretrick: Collect Diagnostics…* in the
+**Collect diagnostics…** (also *TangiTweak: Collect Diagnostics…* in the
 Code view's F1 menu, and **Download diagnostics** at the right of the
 Log, Network and Problems panel header) downloads a Markdown report meant to be handed to a person
 or an LLM: environment, the Problems view's current problems, scripts,
@@ -495,12 +495,12 @@ text.
 
 ## Import / export
 
-**Settings → Export…** downloads a zip (`wiretrick-export.zip`) laid out
+**Settings → Export…** downloads a zip (`tangitweak-export.zip`) laid out
 like the [synced folder](#synced-folder): scripts as `.ts`/`.tsx`
 files and data files at their paths, empty folders as folders, and
 `settings.yaml` at the root with the global settings and the exported
 scripts' `enabled` state and params. **Import…** takes such a zip — or a
-zip of a synced scripts folder (its `wt-api.d.ts`, `tsconfig.json` and
+zip of a synced scripts folder (its `tt-api.d.ts`, `tsconfig.json` and
 `settings.schema.json` are skipped).
 
 Both open the files as a tree, all ticked: tick or untick files, or a whole

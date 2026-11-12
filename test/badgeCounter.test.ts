@@ -89,14 +89,14 @@ describe("badge counter", () => {
 
 describe("badge look", () => {
     it("is the usual color with a list of the active scripts", () => {
-        expect(badgeLook([], [])).toEqual({ color: BADGE_OK, title: "Wiretrick" });
-        expect(badgeLook(["One"], [undefined])).toEqual({ color: BADGE_OK, title: "Wiretrick — 1 active script\n• One" });
+        expect(badgeLook([], [])).toEqual({ color: BADGE_OK, title: "TangiTweak" });
+        expect(badgeLook(["One"], [undefined])).toEqual({ color: BADGE_OK, title: "TangiTweak — 1 active script\n• One" });
     });
 
     it("turns amber for warnings and red for errors, and says which", () => {
         expect(badgeLook(["A", "B"], [undefined, "warning"]).color).toBe(BADGE_WARN);
         const look = badgeLook(["A", "B", "C"], ["error", "warning", undefined]);
         expect(look.color).toBe(BADGE_ERROR);
-        expect(look.title).toBe("Wiretrick — 3 active scripts\n✖ A\n⚠ B\n• C\n1 with errors, 1 with warnings — see Problems in the Editor");
+        expect(look.title).toBe("TangiTweak — 3 active scripts\n✖ A\n⚠ B\n• C\n1 with errors, 1 with warnings — see Problems in the Editor");
     });
 });

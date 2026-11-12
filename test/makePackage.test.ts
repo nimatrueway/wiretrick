@@ -7,8 +7,8 @@ const byFrom = (plan: ReturnType<typeof makePackagePlan>) => Object.fromEntries(
 
 describe("makePackagePlan", () => {
     it("moves a root script and what only it uses into a folder named after it, with a metadata.json", () => {
-        const plan = makePackagePlan("dark.wiretrick.ts", {
-            "dark.wiretrick.ts": 'import { a } from "./lib";\nimport cfg from "./cfg.json";\nwt.fetch("https://api.example.com/x");\n',
+        const plan = makePackagePlan("dark.tangitweak.ts", {
+            "dark.tangitweak.ts": 'import { a } from "./lib";\nimport cfg from "./cfg.json";\ntt.fetch("https://api.example.com/x");\n',
             "lib.ts": "export const a = 1;\n",
             "cfg.json": "{}\n",
             "other.ts": "export const b = 2;\n",
@@ -16,7 +16,7 @@ describe("makePackagePlan", () => {
         expect(plan.inPlace).toBe(false);
         expect(plan.folder).toBe("dark");
         expect(plan.files.map((f) => [f.from, f.to, f.copy])).toEqual([
-            ["dark.wiretrick.ts", "dark/dark.wiretrick.ts", false],
+            ["dark.tangitweak.ts", "dark/dark.tangitweak.ts", false],
             ["lib.ts", "dark/lib.ts", false],
             ["cfg.json", "dark/cfg.json", false],
         ]);
@@ -24,90 +24,90 @@ describe("makePackagePlan", () => {
         expect(entry).toContain('from "./lib"');
         expect(entry).toContain('from "./cfg.json"');
         expect(plan.manifest!.path).toBe("dark/metadata.json");
-        expect(parseManifest(plan.manifest!.text)).toMatchObject({ name: "dark", version: "1.0.0", connect: ["api.example.com"], scripts: ["dark.wiretrick.ts"] });
+        expect(parseManifest(plan.manifest!.text)).toMatchObject({ name: "dark", version: "1.0.0", connect: ["api.example.com"], scripts: ["dark.tangitweak.ts"] });
         expect(plan.edits).toEqual([]);
     });
 
     it("keeps the layout under the entry's folder and copies what other scripts still use", () => {
-        const plan = makePackagePlan("site/x.wiretrick.ts", {
-            "site/x.wiretrick.ts": 'import "./parts/p";\nimport { u } from "../shared/u.js";\n',
+        const plan = makePackagePlan("site/x.tangitweak.ts", {
+            "site/x.tangitweak.ts": 'import "./parts/p";\nimport { u } from "../shared/u.js";\n',
             "site/parts/p.ts": "export {};\n",
             "shared/u.ts": "export const u = 1;\n",
-            "y.wiretrick.ts": 'import { u } from "./shared/u";\n',
+            "y.tangitweak.ts": 'import { u } from "./shared/u";\n',
         });
         expect(plan.folder).toBe("site/x");
         const f = byFrom(plan);
         expect(f["site/parts/p.ts"]).toMatchObject({ to: "site/x/parts/p.ts", copy: false });
         expect(f["shared/u.ts"]).toMatchObject({ to: "site/x/u.ts", copy: true });
-        expect(f["site/x.wiretrick.ts"].text).toContain('from "./u.js"');
-        expect(f["site/x.wiretrick.ts"].text).toContain('import "./parts/p"');
+        expect(f["site/x.tangitweak.ts"].text).toContain('from "./u.js"');
+        expect(f["site/x.tangitweak.ts"].text).toContain('import "./parts/p"');
         expect(plan.edits).toEqual([]);
     });
 
     it("copies what a copied file's original still imports", () => {
-        const plan = makePackagePlan("e.wiretrick.ts", {
-            "e.wiretrick.ts": 'import "./a";\n',
+        const plan = makePackagePlan("e.tangitweak.ts", {
+            "e.tangitweak.ts": 'import "./a";\n',
             "a.ts": 'import "./b";\n',
             "b.ts": "export {};\n",
-            "o.wiretrick.ts": 'import "./a";\n',
+            "o.tangitweak.ts": 'import "./a";\n',
         });
         expect(plan.files.map((f) => [f.from, f.copy])).toEqual([
-            ["e.wiretrick.ts", false],
+            ["e.tangitweak.ts", false],
             ["a.ts", true],
             ["b.ts", true],
         ]);
     });
 
     it("rewrites other files that import the entry", () => {
-        const plan = makePackagePlan("e.wiretrick.ts", { "e.wiretrick.ts": 'import "./c.json";\nexport const k = 1;\n', "c.json": "{}", "lib.ts": 'export { k } from "./e.wiretrick";\n' });
-        expect(plan.edits).toEqual([{ path: "lib.ts", text: 'export { k } from "./e/e.wiretrick";\n' }]);
+        const plan = makePackagePlan("e.tangitweak.ts", { "e.tangitweak.ts": 'import "./c.json";\nexport const k = 1;\n', "c.json": "{}", "lib.ts": 'export { k } from "./e.tangitweak";\n' });
+        expect(plan.edits).toEqual([{ path: "lib.ts", text: 'export { k } from "./e/e.tangitweak";\n' }]);
     });
 
     it("leaves a script that's alone in its folder in place: only a metadata.json is added", () => {
-        const files = { "pkg/main.wiretrick.ts": 'import "./lib";\n', "pkg/lib.ts": "export {};\n" };
-        const plan = makePackagePlan("pkg/main.wiretrick.ts", files);
+        const files = { "pkg/main.tangitweak.ts": 'import "./lib";\n', "pkg/lib.ts": "export {};\n" };
+        const plan = makePackagePlan("pkg/main.tangitweak.ts", files);
         expect(plan.inPlace).toBe(true);
         expect(plan.folder).toBe("pkg");
-        expect(plan.files.map((f) => f.to)).toEqual(["pkg/main.wiretrick.ts", "pkg/lib.ts"]);
+        expect(plan.files.map((f) => f.to)).toEqual(["pkg/main.tangitweak.ts", "pkg/lib.ts"]);
         expect(plan.files.map((f) => f.text)).toEqual(Object.values(files));
-        expect(parseManifest(plan.manifest!.text)).toMatchObject({ name: "main", scripts: ["main.wiretrick.ts"] });
+        expect(parseManifest(plan.manifest!.text)).toMatchObject({ name: "main", scripts: ["main.tangitweak.ts"] });
     });
 
     it("isn't in place when its folder holds other files, and picks a free folder name", () => {
-        const plan = makePackagePlan("pkg/a.wiretrick.ts", { "pkg/a.wiretrick.ts": 'import "./u";', "pkg/u.ts": "", "pkg/b.ts": "", "pkg/a/x.ts": "" }, ["pkg/a 2"]);
+        const plan = makePackagePlan("pkg/a.tangitweak.ts", { "pkg/a.tangitweak.ts": 'import "./u";', "pkg/u.ts": "", "pkg/b.ts": "", "pkg/a/x.ts": "" }, ["pkg/a 2"]);
         expect(plan.inPlace).toBe(false);
         expect(plan.folder).toBe("pkg/a 3");
     });
 
     it("reports bare and missing imports", () => {
-        const plan = makePackagePlan("e.wiretrick.ts", { "e.wiretrick.ts": 'import "utils";\nimport "./gone";\nimport x from "https://unpkg.com/x@1.0.0";\n', "utils.ts": "" });
-        expect(plan.bare).toEqual([{ from: "e.wiretrick.ts", spec: "utils" }]);
-        expect(plan.missing).toEqual([{ from: "e.wiretrick.ts", spec: "./gone" }]);
+        const plan = makePackagePlan("e.tangitweak.ts", { "e.tangitweak.ts": 'import "utils";\nimport "./gone";\nimport x from "https://unpkg.com/x@1.0.0";\n', "utils.ts": "" });
+        expect(plan.bare).toEqual([{ from: "e.tangitweak.ts", spec: "utils" }]);
+        expect(plan.missing).toEqual([{ from: "e.tangitweak.ts", spec: "./gone" }]);
     });
 
-    it("names a script that imports nothing in place, with wt.metadata", () => {
-        const plan = makePackagePlan("p/e.ts", { "p/e.ts": 'wt.fetch("https://x.io/a");\n', "p/o.ts": "" });
+    it("names a script that imports nothing in place, with tt.metadata", () => {
+        const plan = makePackagePlan("p/e.ts", { "p/e.ts": 'tt.fetch("https://x.io/a");\n', "p/o.ts": "" });
         expect(plan.inPlace).toBe(true);
         expect(plan.manifest).toBeUndefined();
-        expect(plan.files).toEqual([{ from: "p/e.ts", to: "p/e.ts", copy: false, text: 'wt.metadata({ name: "e", version: "1.0.0", connect: ["x.io"] });\n\nwt.fetch("https://x.io/a");\n' }]);
+        expect(plan.files).toEqual([{ from: "p/e.ts", to: "p/e.ts", copy: false, text: 'tt.metadata({ name: "e", version: "1.0.0", connect: ["x.io"] });\n\ntt.fetch("https://x.io/a");\n' }]);
     });
 });
 
 describe("withMetadata", () => {
     it("adds what's missing to an existing call", () => {
-        expect(withMetadata('wt.metadata({ description: "Hi {x}" });\n', "x")).toBe('wt.metadata({ name: "x", version: "1.0.0", description: "Hi {x}" });\n');
-        expect(withMetadata("wt.metadata({});", "x")).toBe('wt.metadata({ name: "x", version: "1.0.0" });');
-        expect(withMetadata('wt.metadata({\n    version: "2.0.0",\n});', "x")).toBe('wt.metadata({\n    name: "x",\n    version: "2.0.0",\n});');
+        expect(withMetadata('tt.metadata({ description: "Hi {x}" });\n', "x")).toBe('tt.metadata({ name: "x", version: "1.0.0", description: "Hi {x}" });\n');
+        expect(withMetadata("tt.metadata({});", "x")).toBe('tt.metadata({ name: "x", version: "1.0.0" });');
+        expect(withMetadata('tt.metadata({\n    version: "2.0.0",\n});', "x")).toBe('tt.metadata({\n    name: "x",\n    version: "2.0.0",\n});');
     });
 
     it("keeps a call that names the script", () => {
-        const code = 'wt.metadata({ name: "Mine", version: "3" });';
+        const code = 'tt.metadata({ name: "Mine", version: "3" });';
         expect(withMetadata(code, "x", ["a.com"])).toBe(code);
     });
 
     it("adds a call after the imports", () => {
-        expect(withMetadata('import { a,\n  b } from "./lib";\nimport "./c";\n\nrun();\n', "x")).toBe('import { a,\n  b } from "./lib";\nimport "./c";\n\nwt.metadata({ name: "x", version: "1.0.0" });\n\nrun();\n');
-        expect(withMetadata("run();\n", "x")).toBe('wt.metadata({ name: "x", version: "1.0.0" });\n\nrun();\n');
+        expect(withMetadata('import { a,\n  b } from "./lib";\nimport "./c";\n\nrun();\n', "x")).toBe('import { a,\n  b } from "./lib";\nimport "./c";\n\ntt.metadata({ name: "x", version: "1.0.0" });\n\nrun();\n');
+        expect(withMetadata("run();\n", "x")).toBe('tt.metadata({ name: "x", version: "1.0.0" });\n\nrun();\n');
     });
 });
 
@@ -139,8 +139,8 @@ describe("relativeSpec", () => {
 });
 
 describe("fetchHosts", () => {
-    it("reads literal wt.fetch URLs", () => {
-        expect(fetchHosts(['wt.fetch("https://A.example.com:8080/x"); wt.fetch(`https://b.io/${x}`); wt.fetch(url);'])).toEqual(["a.example.com", "b.io"]);
+    it("reads literal tt.fetch URLs", () => {
+        expect(fetchHosts(['tt.fetch("https://A.example.com:8080/x"); tt.fetch(`https://b.io/${x}`); tt.fetch(url);'])).toEqual(["a.example.com", "b.io"]);
     });
 });
 
@@ -155,11 +155,11 @@ describe("packageFolders", () => {
 
 describe("writeZip", () => {
     it("writes what readZip reads", async () => {
-        const zip = writeZip({ "p/p.wiretrick.ts": "export {};\n", "p/ü.json": '{"a":1}', "p/b.bin": new Uint8Array([0, 255, 7]) });
+        const zip = writeZip({ "p/p.tangitweak.ts": "export {};\n", "p/ü.json": '{"a":1}', "p/b.bin": new Uint8Array([0, 255, 7]) });
         const back = await readZip(zip.buffer as ArrayBuffer);
         const text = (b: Uint8Array) => new TextDecoder().decode(b);
-        expect(Object.keys(back)).toEqual(["p/p.wiretrick.ts", "p/ü.json", "p/b.bin"]);
-        expect(text(back["p/p.wiretrick.ts"])).toBe("export {};\n");
+        expect(Object.keys(back)).toEqual(["p/p.tangitweak.ts", "p/ü.json", "p/b.bin"]);
+        expect(text(back["p/p.tangitweak.ts"])).toBe("export {};\n");
         expect(text(back["p/ü.json"])).toBe('{"a":1}');
         expect([...back["p/b.bin"]]).toEqual([0, 255, 7]);
     });

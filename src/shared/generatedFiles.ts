@@ -1,8 +1,8 @@
 /**
  * Support files folder sync keeps in the scripts folder for VS Code:
- * wt-api.d.ts (typings), tsconfig.json and settings.schema.json, plus the
+ * tt-api.d.ts (typings), tsconfig.json and settings.schema.json, plus the
  * package imports' and the built-in modules' (valtio, React) typings under
- * .wiretrick/types/. Wiretrick owns them:
+ * .tangitweak/types/. TangiTweak owns them:
  * they are rewritten whenever sync starts (every browser start and
  * extension update) if their content differs, so edits don't stick.
  */
@@ -12,10 +12,10 @@ import { packagePaths, TYPINGS_ROOT } from "./packageImports";
 /** the built-in modules' typings in the scripts folder (lib/builtin-types.json keys go under it) */
 export const BUILTIN_TYPINGS_ROOT = `${TYPINGS_ROOT}/builtin`;
 
-export const API_DTS_FILE = "wt-api.d.ts";
+export const API_DTS_FILE = "tt-api.d.ts";
 export const TSCONFIG_FILE = "tsconfig.json";
 
-export const GENERATED_NOTE = "Managed by Wiretrick: rewritten on every browser start and extension update. Don't edit: your changes will be lost.";
+export const GENERATED_NOTE = "Managed by TangiTweak: rewritten on every browser start and extension update. Don't edit: your changes will be lost.";
 
 /** the extension's typings with the do-not-edit header */
 export const apiDtsText = (dts: string): string => `// ${GENERATED_NOTE}\n\n${dts}`;
@@ -26,7 +26,7 @@ export function tsconfigText(): string {
         compilerOptions: {
             target: "esnext",
             lib: ["esnext", "dom", "dom.iterable"],
-            // wt-api.d.ts declares web APIs (URLPattern…) that newer TS libs may also have
+            // tt-api.d.ts declares web APIs (URLPattern…) that newer TS libs may also have
             skipLibCheck: true,
             module: "esnext",
             moduleResolution: "bundler",

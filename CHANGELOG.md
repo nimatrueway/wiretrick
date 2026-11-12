@@ -7,6 +7,15 @@ its section below.
 
 ## [Unreleased]
 
+### Changed
+
+- Wiretrick is now **TangiTweak**. Scripts use the `tt` global instead of `wt` (`tt.onRequest`, `tt.onSite`, `tt.params`…) and the `TangiTweak.*` types instead of `Wiretrick.*`: update existing scripts. Other renames:
+  - shareable script files end in `.tangitweak.ts`;
+  - a synced folder's generated files move to `.tangitweak/` and conflict backups to `.tangitweak-backup/` (delete the old `.wiretrick` folders);
+  - the local helper is `tangitweak-helper`, with the native messaging host `com.tangitweak.helper` and `TANGITWEAK_HELPER_*` environment variables: reinstall the helper;
+  - the repository and release links point to `nimatrueway/tangitweak`.
+- Firefox: the add-on ID is now `tangitweak@nimatrueway`, so Firefox installs it as a new add-on. Export your scripts from the old one first and remove it.
+
 ## [0.27.0-alpha] - 2026-11-11
 
 ### Added
@@ -933,71 +942,71 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/nimatrueway/wiretrick/compare/v0.27.0-alpha...HEAD
-[0.27.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.26.0-alpha...v0.27.0-alpha
-[0.26.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.25.0-alpha...v0.26.0-alpha
-[0.25.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.24.0-alpha...v0.25.0-alpha
-[0.24.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.23.0-alpha...v0.24.0-alpha
-[0.23.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.6-alpha...v0.23.0-alpha
-[0.22.6-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.5-alpha...v0.22.6-alpha
-[0.22.5-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.4-alpha...v0.22.5-alpha
-[0.22.4-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.3-alpha...v0.22.4-alpha
-[0.22.3-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.2-alpha...v0.22.3-alpha
-[0.22.2-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.1-alpha...v0.22.2-alpha
-[0.22.1-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.22.0-alpha...v0.22.1-alpha
-[0.22.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.21.0-alpha...v0.22.0-alpha
-[0.21.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.20.0-alpha...v0.21.0-alpha
-[0.20.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.19.0-alpha...v0.20.0-alpha
-[0.19.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.18.0-alpha...v0.19.0-alpha
-[0.18.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.17.0-alpha...v0.18.0-alpha
-[0.17.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.16.0-alpha...v0.17.0-alpha
-[0.16.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.15.0-alpha...v0.16.0-alpha
-[0.15.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.14.0-alpha...v0.15.0-alpha
-[0.14.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.13.0-alpha...v0.14.0-alpha
-[0.13.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.12.2-alpha...v0.13.0-alpha
-[0.12.2-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.12.1-alpha...v0.12.2-alpha
-[0.12.1-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.12.0-alpha...v0.12.1-alpha
-[0.12.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.11.1-alpha...v0.12.0-alpha
-[0.11.1-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.11.0-alpha...v0.11.1-alpha
-[0.11.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.10.0-alpha...v0.11.0-alpha
-[0.10.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.18-alpha...v0.10.0-alpha
-[0.9.18-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.17-alpha...v0.9.18-alpha
-[0.9.17-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.16-alpha...v0.9.17-alpha
-[0.9.16-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.15-alpha...v0.9.16-alpha
-[0.9.15-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.14-alpha...v0.9.15-alpha
-[0.9.14-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.13-alpha...v0.9.14-alpha
-[0.9.13-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.12-alpha...v0.9.13-alpha
-[0.9.12-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.11-alpha...v0.9.12-alpha
-[0.9.11-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.10-alpha...v0.9.11-alpha
-[0.9.10-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.9-alpha...v0.9.10-alpha
-[0.9.9-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.8-alpha...v0.9.9-alpha
-[0.9.8-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.7-alpha...v0.9.8-alpha
-[0.9.7-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.6-alpha...v0.9.7-alpha
-[0.9.6-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.5-alpha...v0.9.6-alpha
-[0.9.5-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.4-alpha...v0.9.5-alpha
-[0.9.4-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.3-alpha...v0.9.4-alpha
-[0.9.3-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.2-alpha...v0.9.3-alpha
-[0.9.2-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.1-alpha...v0.9.2-alpha
-[0.9.1-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.9.0-alpha...v0.9.1-alpha
-[0.9.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.8.3-alpha...v0.9.0-alpha
-[0.8.3-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.8.2-alpha...v0.8.3-alpha
-[0.8.2-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.8.1-alpha...v0.8.2-alpha
-[0.8.1-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.8.0-alpha...v0.8.1-alpha
-[0.8.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.7.0-alpha...v0.8.0-alpha
-[0.7.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.6.0-alpha...v0.7.0-alpha
-[0.6.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.5.0-alpha...v0.6.0-alpha
-[0.5.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.4.0-alpha...v0.5.0-alpha
-[0.4.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.3.9-alpha...v0.4.0-alpha
-[0.3.9-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.3.8-alpha...v0.3.9-alpha
-[0.3.8-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.3.7-alpha...v0.3.8-alpha
-[0.3.7-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.3.6-alpha...v0.3.7-alpha
-[0.3.6-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.3.5-alpha...v0.3.6-alpha
-[0.3.5-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.3.4-alpha...v0.3.5-alpha
-[0.3.4-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.3.3-alpha...v0.3.4-alpha
-[0.3.3-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.3.2-alpha...v0.3.3-alpha
-[0.3.2-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.3.1-alpha...v0.3.2-alpha
-[0.3.1-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.3.0-alpha...v0.3.1-alpha
-[0.3.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.2.0-alpha...v0.3.0-alpha
-[0.2.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.1.0-alpha...v0.2.0-alpha
-[0.1.0-alpha]: https://github.com/nimatrueway/wiretrick/compare/v0.0.1-alpha...v0.1.0-alpha
-[0.0.1-alpha]: https://github.com/nimatrueway/wiretrick/releases/tag/v0.0.1-alpha
+[Unreleased]: https://github.com/nimatrueway/tangitweak/compare/v0.27.0-alpha...HEAD
+[0.27.0-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.26.0-alpha...v0.27.0-alpha
+[0.26.0-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.25.0-alpha...v0.26.0-alpha
+[0.25.0-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.24.0-alpha...v0.25.0-alpha
+[0.24.0-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.23.0-alpha...v0.24.0-alpha
+[0.23.0-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.22.6-alpha...v0.23.0-alpha
+[0.22.6-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.22.5-alpha...v0.22.6-alpha
+[0.22.5-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.22.4-alpha...v0.22.5-alpha
+[0.22.4-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.22.3-alpha...v0.22.4-alpha
+[0.22.3-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.22.2-alpha...v0.22.3-alpha
+[0.22.2-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.22.1-alpha...v0.22.2-alpha
+[0.22.1-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.22.0-alpha...v0.22.1-alpha
+[0.22.0-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.21.0-alpha...v0.22.0-alpha
+[0.21.0-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.20.0-alpha...v0.21.0-alpha
+[0.20.0-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.19.0-alpha...v0.20.0-alpha
+[0.19.0-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.18.0-alpha...v0.19.0-alpha
+[0.18.0-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.17.0-alpha...v0.18.0-alpha
+[0.17.0-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.16.0-alpha...v0.17.0-alpha
+[0.16.0-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.15.0-alpha...v0.16.0-alpha
+[0.15.0-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.14.0-alpha...v0.15.0-alpha
+[0.14.0-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.13.0-alpha...v0.14.0-alpha
+[0.13.0-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.12.2-alpha...v0.13.0-alpha
+[0.12.2-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.12.1-alpha...v0.12.2-alpha
+[0.12.1-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.12.0-alpha...v0.12.1-alpha
+[0.12.0-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.11.1-alpha...v0.12.0-alpha
+[0.11.1-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.11.0-alpha...v0.11.1-alpha
+[0.11.0-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.10.0-alpha...v0.11.0-alpha
+[0.10.0-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.9.18-alpha...v0.10.0-alpha
+[0.9.18-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.9.17-alpha...v0.9.18-alpha
+[0.9.17-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.9.16-alpha...v0.9.17-alpha
+[0.9.16-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.9.15-alpha...v0.9.16-alpha
+[0.9.15-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.9.14-alpha...v0.9.15-alpha
+[0.9.14-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.9.13-alpha...v0.9.14-alpha
+[0.9.13-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.9.12-alpha...v0.9.13-alpha
+[0.9.12-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.9.11-alpha...v0.9.12-alpha
+[0.9.11-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.9.10-alpha...v0.9.11-alpha
+[0.9.10-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.9.9-alpha...v0.9.10-alpha
+[0.9.9-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.9.8-alpha...v0.9.9-alpha
+[0.9.8-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.9.7-alpha...v0.9.8-alpha
+[0.9.7-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.9.6-alpha...v0.9.7-alpha
+[0.9.6-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.9.5-alpha...v0.9.6-alpha
+[0.9.5-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.9.4-alpha...v0.9.5-alpha
+[0.9.4-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.9.3-alpha...v0.9.4-alpha
+[0.9.3-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.9.2-alpha...v0.9.3-alpha
+[0.9.2-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.9.1-alpha...v0.9.2-alpha
+[0.9.1-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.9.0-alpha...v0.9.1-alpha
+[0.9.0-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.8.3-alpha...v0.9.0-alpha
+[0.8.3-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.8.2-alpha...v0.8.3-alpha
+[0.8.2-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.8.1-alpha...v0.8.2-alpha
+[0.8.1-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.8.0-alpha...v0.8.1-alpha
+[0.8.0-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.7.0-alpha...v0.8.0-alpha
+[0.7.0-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.6.0-alpha...v0.7.0-alpha
+[0.6.0-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.5.0-alpha...v0.6.0-alpha
+[0.5.0-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.4.0-alpha...v0.5.0-alpha
+[0.4.0-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.3.9-alpha...v0.4.0-alpha
+[0.3.9-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.3.8-alpha...v0.3.9-alpha
+[0.3.8-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.3.7-alpha...v0.3.8-alpha
+[0.3.7-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.3.6-alpha...v0.3.7-alpha
+[0.3.6-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.3.5-alpha...v0.3.6-alpha
+[0.3.5-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.3.4-alpha...v0.3.5-alpha
+[0.3.4-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.3.3-alpha...v0.3.4-alpha
+[0.3.3-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.3.2-alpha...v0.3.3-alpha
+[0.3.2-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.3.1-alpha...v0.3.2-alpha
+[0.3.1-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.3.0-alpha...v0.3.1-alpha
+[0.3.0-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.2.0-alpha...v0.3.0-alpha
+[0.2.0-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.1.0-alpha...v0.2.0-alpha
+[0.1.0-alpha]: https://github.com/nimatrueway/tangitweak/compare/v0.0.1-alpha...v0.1.0-alpha
+[0.0.1-alpha]: https://github.com/nimatrueway/tangitweak/releases/tag/v0.0.1-alpha

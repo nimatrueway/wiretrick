@@ -1,7 +1,7 @@
 /**
- * Which page the running handler call belongs to, for `wt.pageStore`.
+ * Which page the running handler call belongs to, for `tt.pageStore`.
  *
- * One compiled script serves every tab, so its `wt.pageStore` proxy asks
+ * One compiled script serves every tab, so its `tt.pageStore` proxy asks
  * here which page's copy to use. The runner wraps each handler call in
  * `withPage`; the page is known only during the call's synchronous part —
  * after the handler's first `await` it runs from a microtask, outside any

@@ -1,5 +1,5 @@
 /**
- * Script parameters: wt.params({...}) / wt.defineParam(name, def).
+ * Script parameters: tt.params({...}) / tt.defineParam(name, def).
  * Values are edited in the manager / popup / settings.yaml.
  */
 import { isShortcut } from "./shortcut";

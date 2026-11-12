@@ -6,41 +6,41 @@ A script registers **handlers** at top level. Each handler takes its own
 [route](#routes) first, then the function:
 
 ```ts
-wt.metadata({ description: "Debug the user API" });
+tt.metadata({ description: "Debug the user API" });
 
 const API = { url: "*://app.example.com/api/*", strategy: "helper" } as const;
 
 // Redirect / block / request headers / replaceResponse:
-wt.onRequest(API, (ctx) => {
+tt.onRequest(API, (ctx) => {
     // return { redirect: "https://myserver/user.json" };
     // return { block: true };
     return { headers: { set: { "x-debug": "1" } } };
 });
 
 // Response headers:
-wt.onResponseHeaders(API, () => ({
+tt.onResponseHeaders(API, () => ({
     headers: { set: { "access-control-allow-origin": "*" } },
 }));
 
 // Replace the whole body:
-// wt.replaceResponse({ ...API, url: "*://app.example.com/api/flags" }, () => ({ beta: true }));
+// tt.replaceResponse({ ...API, url: "*://app.example.com/api/flags" }, () => ({ beta: true }));
 
 // Stream-modify the body:
-wt.onResponseBody({ url: "*://app.example.com/api/user*", strategy: "helper" }, (ctx, body) => String(body).replace('"role":"user"', '"role":"admin"'));
+tt.onResponseBody({ url: "*://app.example.com/api/user*", strategy: "helper" }, (ctx, body) => String(body).replace('"role":"user"', '"role":"admin"'));
 
 // Change the page (its DOM, in a world the site's JavaScript can't see):
-wt.onPage("*://app.example.com/*", (ctx) => {
+tt.onPage("*://app.example.com/*", (ctx) => {
     const title = ctx.once("title", () => document.title); // the page's own title, kept across saves
     document.title = "🎯 " + title;
 });
 
 // Run in the site's own JavaScript and return functions the other places call:
-const site = wt.onSite("*://app.example.com/*", () => ({
+const site = tt.onSite("*://app.example.com/*", () => ({
     user: () => (window as any).myApp?.user?.name as string | undefined,
 }));
 
 // Draw the script's own GUI over the page:
-wt.onOverlay("*://app.example.com/*", async (ctx) => {
+tt.onOverlay("*://app.example.com/*", async (ctx) => {
     const hello = document.body.appendChild(document.createElement("output"));
     hello.value = `Hello ${(await site.user()) ?? "stranger"}`;
     ctx.signal.addEventListener("abort", () => hello.remove()); // a save runs this again
@@ -50,7 +50,7 @@ wt.onOverlay("*://app.example.com/*", async (ctx) => {
 Register handlers synchronously at top level. A registration after an
 `await` or inside a callback logs an error and is ignored. A file that
 registers no handlers is a [library](#libraries-and-recipes). To share a
-script, publish it at a URL ending in `.wiretrick.ts`; opening that URL
+script, publish it at a URL ending in `.tangitweak.ts`; opening that URL
 [installs it](packages.md).
 
 Saving a script applies it in place: network handlers change for the next
@@ -67,10 +67,10 @@ fails to load and the Problems view points at the call):
 
 | form | example |
 |---|---|
-| one URL pattern | `wt.onRequest({ url: "*://example.com/*", strategy: "helper" }, fn)` |
-| a list | `wt.onRequest({ url: ["*://a.example.com/*", "*://b.example.com/*"], strategy: "helper" }, fn)` |
-| all options | `wt.onRequest({ url, exclude, methods, resourceTypes, strategy }, fn)` |
-| page code (no strategy) | `wt.onPage("*://example.com/*", fn)` or `wt.onPage({ url, exclude, when }, fn)`; the same for `wt.onSite` and `wt.onOverlay` |
+| one URL pattern | `tt.onRequest({ url: "*://example.com/*", strategy: "helper" }, fn)` |
+| a list | `tt.onRequest({ url: ["*://a.example.com/*", "*://b.example.com/*"], strategy: "helper" }, fn)` |
+| all options | `tt.onRequest({ url, exclude, methods, resourceTypes, strategy }, fn)` |
+| page code (no strategy) | `tt.onPage("*://example.com/*", fn)` or `tt.onPage({ url, exclude, when }, fn)`; the same for `tt.onSite` and `tt.onOverlay` |
 
 An empty list matches **nothing**, never everything.
 
@@ -96,7 +96,7 @@ registration throw. The error shows on the script.
 Named groups land in `ctx.groups` (`*` wildcards as `"0"`, `"1"`, …):
 
 ```ts
-wt.onRequest({ url: "https://api.example.com/users/:id", strategy: "helper" }, (ctx) => {
+tt.onRequest({ url: "https://api.example.com/users/:id", strategy: "helper" }, (ctx) => {
     if (ctx.groups.id === "42") return { replaceResponse: { body: { id: 42, name: "Mock" } } };
 });
 ```
@@ -104,7 +104,7 @@ wt.onRequest({ url: "https://api.example.com/users/:id", strategy: "helper" }, (
 ### Route object: `exclude`, `methods`, `resourceTypes`, `strategy`
 
 ```ts
-wt.onResponseBody(
+tt.onResponseBody(
     {
         url: "https://example.com/app/*",
         exclude: ["https://example.com/app/vendor/*"],
@@ -147,22 +147,22 @@ wt.onResponseBody(
   `"rules"`. There is no default — a route without one (or a bare URL
   pattern) makes the script fail to load. There is no fallback: when the strategy
   isn't available, the handler doesn't run and the Log view says why.
-  To pick per browser or build, use `wt.isChrome`, `wt.isFirefox`,
-  `wt.isMV2` and `wt.isMV3` (Chromium-based browsers count as Chrome;
-  MV3 is the `dist-mv3/` build); per OS, `wt.isMac`, `wt.isWindows` and
-  `wt.isLinux`:
+  To pick per browser or build, use `tt.isChrome`, `tt.isFirefox`,
+  `tt.isMV2` and `tt.isMV3` (Chromium-based browsers count as Chrome;
+  MV3 is the `dist-mv3/` build); per OS, `tt.isMac`, `tt.isWindows` and
+  `tt.isLinux`:
 
   ```ts
-  wt.onResponseBody({ url: "*://example.com/app.js", strategy: wt.isFirefox ? "extension" : "helper" }, (ctx, body) => body.replace("DEBUG=false", "DEBUG=true"));
-  wt.onRequest({ url: "*://api.example.com/*", strategy: wt.isMV3 ? "debugger" : "extension" }, fn);
-  wt.onRequest({ url: "*://ads.example.com/*", strategy: wt.isMV3 ? "rules" : "extension" }, () => ({ block: true }));
+  tt.onResponseBody({ url: "*://example.com/app.js", strategy: tt.isFirefox ? "extension" : "helper" }, (ctx, body) => body.replace("DEBUG=false", "DEBUG=true"));
+  tt.onRequest({ url: "*://api.example.com/*", strategy: tt.isMV3 ? "debugger" : "extension" }, fn);
+  tt.onRequest({ url: "*://ads.example.com/*", strategy: tt.isMV3 ? "rules" : "extension" }, () => ({ block: true }));
   ```
 
   On `rules` the handler runs once when scripts load and its fixed result
   (block, redirect, headers) becomes a browser-native rule; `exclude`
   isn't supported there ([what `rules` can do](strategies.md#what-rules-can-do)).
   Its code never runs for a request, so the Problems view warns about
-  `console.log`, `wt.log`, `fetch`, timers and store writes in it.
+  `console.log`, `tt.log`, `fetch`, timers and store writes in it.
 
 > **Tip:** `page` is the lightest strategy, but it only sees the page's own
 > fetch/XHR (REST/API) calls. For documents, `<script src>`, images,
@@ -190,19 +190,19 @@ fonts, wasm, PDFs, archives, as a `Uint8Array`:
 
 ```ts
 // swap a logo for another image
-wt.onResponseBody({ url: "*://example.com/img/logo*.png", binary: true, strategy: "helper" }, async (ctx, body) => {
+tt.onResponseBody({ url: "*://example.com/img/logo*.png", binary: true, strategy: "helper" }, async (ctx, body) => {
     const res = await fetch("https://example.org/other.png");
     return new Uint8Array(await res.arrayBuffer());
 });
 
 // look into everything on a CDN without changing it: playlists and segments
-wt.onResponseBody({ url: "*://cdn.example.com/*", binary: "both", strategy: "helper" }, (ctx, body) => {
+tt.onResponseBody({ url: "*://cdn.example.com/*", binary: "both", strategy: "helper" }, (ctx, body) => {
     if (typeof body === "string") console.log(ctx.url, "text", body.length, "chars");
     else console.log(ctx.url, body.length, "bytes, sync byte", body[0] === 0x47);
 });
 
 // text only, and no warning for the images it skips
-wt.onResponseBody({ url: "*://example.com/*", binary: false, strategy: "helper" }, (ctx, body) => console.log(ctx.url, body.length));
+tt.onResponseBody({ url: "*://example.com/*", binary: false, strategy: "helper" }, (ctx, body) => console.log(ctx.url, body.length));
 ```
 
 A `"both"` handler gets either, so check `typeof body`. Return values
@@ -284,7 +284,7 @@ decided by the request's `Content-Type` exactly like
 parses it as JSON — the *request* body, not the response.
 
 ```ts
-wt.onRequest({ url: "*://app.example.com/api/*", methods: ["POST"], strategy: "helper" }, (ctx) => {
+tt.onRequest({ url: "*://app.example.com/api/*", methods: ["POST"], strategy: "helper" }, (ctx) => {
     const q = ctx.json(); // undefined without a body; throws on invalid JSON
     if (q?.operationName === "GetFlags") return { replaceResponse: { body: { beta: true } } };
 });
@@ -306,18 +306,18 @@ It is the same in `onRequest`, `replaceResponse`, `onResponseHeaders` and
 
 ## Description and parameters
 
-`wt.metadata({ description: "…" })` sets a one-line description, shown as
+`tt.metadata({ description: "…" })` sets a one-line description, shown as
 the script's tooltip in the Editor and in the popup. Its other fields —
 `name`, `version`, `homepage`, `author`, `license`, `updateURL` and `connect` — describe
 the script as a shared package (see [Packages](packages.md)). Call it once.
 
-`wt.params` declares typed knobs the user changes from the popup's ⚙
+`tt.params` declares typed knobs the user changes from the popup's ⚙
 dialog, the Editor or `settings.yaml` without touching the script:
 
 ```ts
-wt.metadata({ description: "Force failures on the posts API" });
+tt.metadata({ description: "Force failures on the posts API" });
 
-const cfg = wt.params({
+const cfg = tt.params({
     enabled: { type: "boolean", default: true, description: "Master switch" },
     status:  { type: "enum", choices: ["500", "503"], default: "500" },
     note:    { type: "string", default: "forced failure" },
@@ -325,28 +325,28 @@ const cfg = wt.params({
 });
 // cfg.enabled: boolean · cfg.status: "500" | "503" · cfg.note: string · cfg.tags: string[]
 
-wt.onRequest({ url: "*://app.example.com/posts/*", strategy: "helper" }, () => {
+tt.onRequest({ url: "*://app.example.com/posts/*", strategy: "helper" }, () => {
     if (!cfg.enabled) return;
     return { replaceResponse: { status: Number(cfg.status), body: { error: cfg.note, tags: cfg.tags } } };
 });
 ```
 
-`wt.defineParam(name, def)` declares one param and returns its value. It
-writes to the same set as `wt.params`; the UI lists params in call order,
+`tt.defineParam(name, def)` declares one param and returns its value. It
+writes to the same set as `tt.params`; the UI lists params in call order,
 and defining the same name twice is an error:
 
 ```ts
-const host = wt.defineParam("host", { type: "string", default: "api.example.com" });
+const host = tt.defineParam("host", { type: "string", default: "api.example.com" });
 ```
 
 Routes may be built from params. A param change re-runs the script and
 re-arms its routes:
 
 ```ts
-const cfg = wt.params({
+const cfg = tt.params({
     hosts: { type: "stringList", default: ["staging.example.com"], description: "Hosts to unlock" },
 });
-wt.onResponseHeaders({ url: cfg.hosts.map((h) => `*://${h}/*`), strategy: "helper" }, () => ({
+tt.onResponseHeaders({ url: cfg.hosts.map((h) => `*://${h}/*`), strategy: "helper" }, () => ({
     headers: { set: { "access-control-allow-origin": "*" } },
 }));
 ```
@@ -366,13 +366,13 @@ becomes the parser's return type; the ⚙ dialog, the Editor and
 on every change:
 
 ```ts
-const cfg = wt.params({
+const cfg = tt.params({
     origin: { type: "string", default: "https://app.example.com", parse: (s) => new URL(s) },
     delay:  { type: "number", default: 2, description: "Seconds", parse: (sec) => sec * 1000 },
 });
 // cfg.origin: URL · cfg.delay: number (ms)
 
-const hosts = wt.defineParam("hosts", { type: "stringList", default: ["a.com"], parse: (l) => new Set(l) });
+const hosts = tt.defineParam("hosts", { type: "stringList", default: ["a.com"], parse: (l) => new Set(l) });
 // hosts: Set<string>
 ```
 
@@ -383,17 +383,17 @@ error. For `enum`, `parse` receives the choice typed as `string`.
 
 ### Changing params from code
 
-The object `wt.params` returns can be changed, like a valtio proxy. Assign
+The object `tt.params` returns can be changed, like a valtio proxy. Assign
 a param, or change a list in place, from a handler: onPage, onOverlay or
 network code.
 
 ```ts
-const cfg = wt.params({
+const cfg = tt.params({
     enabled: { type: "boolean", default: true },
     hosts:   { type: "stringList", default: [] },
 });
 
-wt.onOverlay("*://app.example.com/*", (ctx) => {
+tt.onOverlay("*://app.example.com/*", (ctx) => {
     const btn = ctx.once("btn", () => document.body.appendChild(document.createElement("button")));
     btn.textContent = cfg.enabled ? "Mock: on" : "Mock: off";
     btn.onclick = () => (cfg.enabled = !cfg.enabled);
@@ -437,7 +437,7 @@ entry and params):
 ```ts
 // mocks.ts:
 export function mockJson(url: string, body: object) {
-    wt.onRequest({ url, strategy: "helper" }, () => ({ replaceResponse: { body } }));
+    tt.onRequest({ url, strategy: "helper" }, () => ({ replaceResponse: { body } }));
 }
 
 // script:
@@ -445,7 +445,7 @@ import { mockJson } from "./mocks";
 mockJson("*://api.example.com/me", { id: 1, role: "admin" });
 ```
 
-Recipes can register `wt.onSite`, `wt.onPage` and `wt.onOverlay` handlers
+Recipes can register `tt.onSite`, `tt.onPage` and `tt.onOverlay` handlers
 too. Call them from your script's top level; a call made later (from a
 handler or a timer) registers nothing. The Problems panel names them like
 "onPage #2 (mocks)".
@@ -458,12 +458,12 @@ for some value becomes a script when you change it (and back):
 
 ```ts
 // gate.ts: a library until "on" is switched on
-const p = wt.params({ on: { type: "boolean", default: false } });
-if (p.on) wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, () => ({ block: true }));
+const p = tt.params({ on: { type: "boolean", default: false } });
+if (p.on) tt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, () => ({ block: true }));
 ```
 
 Param definitions can be shared too — export them from a library and pass
-them to `wt.params` (directly or spread); the importer gets its own values:
+them to `tt.params` (directly or spread); the importer gets its own values:
 
 ```ts
 // utils.ts:
@@ -471,7 +471,7 @@ export const envParam = { type: "stringList", default: ["dev"] } as const;
 
 // script:
 import { envParam } from "./utils";
-const cfg = wt.params({ intercept_environments: envParam });
+const cfg = tt.params({ intercept_environments: envParam });
 ```
 
 ## Imports, folders and data files
@@ -499,7 +499,7 @@ never runs, scripts import it by its path:
 import limits from "./mock/rate-limits.json"; // the whole object
 import { max } from "./mock/rate-limits.json"; // one property
 
-wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, () => ({ headers: { set: { "x-limit": String(max) } } }));
+tt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, () => ({ headers: { set: { "x-limit": String(max) } } }));
 ```
 
 An `.svg` imports as its markup, a string (`import logo from
@@ -526,7 +526,7 @@ import dayjs from "https://unpkg.com/dayjs@1.11.13";
 import { addDays } from "https://unpkg.com/date-fns@4.1.0/addDays.js"; // a file inside the package
 import { chunk } from "https://unpkg.com/lodash-es@4.17.21";
 
-wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, () => ({
+tt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, () => ({
     headers: { set: { "x-tomorrow": dayjs(addDays(new Date(), 1)).format("YYYY-MM-DD") } },
 }));
 ```
@@ -564,19 +564,19 @@ package that fails to download isn't an error until the package `require`s
 it at runtime, so optional dependencies don't break anything; saving the
 script tries it again. Node.js
 built-ins (`fs`, `path`, `crypto`, …) aren't available: `require("fs")`
-throws `"fs" is a Node.js built-in — not available in Wiretrick scripts`.
-Packages work on every strategy and in `wt.onSite`, `wt.onPage` and
-`wt.onOverlay` handlers (the downloaded code is sent to the page along
+throws `"fs" is a Node.js built-in — not available in TangiTweak scripts`.
+Packages work on every strategy and in `tt.onSite`, `tt.onPage` and
+`tt.onOverlay` handlers (the downloaded code is sent to the page along
 with the script). `onSite` code has no React, so a package that needs it
 (a UI library like `cmdk`) doesn't load there: the script still runs its
 `onSite` handlers, and only using that package in `onSite` code throws.
 
-**Types.** Wiretrick also downloads the package's TypeScript declarations:
+**Types.** TangiTweak also downloads the package's TypeScript declarations:
 its own (`types`, `typings`, `exports` or a `.d.ts` next to the file), else
 the matching `@types/<package>` major version. Packages with neither are
 typed `any`. In the Code view, hovers, completions and errors work as soon as
 the save that downloads them finishes. In the [synced
-folder](editor.md#synced-folder) they're written to `.wiretrick/types/`, and
+folder](editor.md#synced-folder) they're written to `.tangitweak/types/`, and
 the generated `tsconfig.json` maps `https://unpkg.com/*` there (`paths`), so
 VS Code and `tsc` type-check the same imports.
 
@@ -600,35 +600,35 @@ VS Code and `tsc` type-check the same imports.
 **Security.** A package is third-party code that runs with the same powers as
 your script: it sees and can change the requests and pages your handlers
 touch. Import only packages you trust. Pinning means the code can't change
-after you review it: npm versions are immutable, and the copy Wiretrick
+after you review it: npm versions are immutable, and the copy TangiTweak
 stored is the one that runs. Downloads come straight from unpkg.com over
 HTTPS, so you trust unpkg to serve npm's files unaltered. Only the extension
 background downloads them (when scripts are saved, imported or compiled);
 pages never fetch them.
 
-## Shared state and fetching — `wt.globalStore`, `wt.pageStore`, `wt.siteStore`, `wt.fetch`
+## Shared state and fetching — `tt.globalStore`, `tt.pageStore`, `tt.siteStore`, `tt.fetch`
 
 Three kinds of store; the name says who owns the data and how far it
-reaches. **Anything the site may read or write goes in `wt.siteStore`;
+reaches. **Anything the site may read or write goes in `tt.siteStore`;
 everything else goes in the other two.**
 
 | store | owner | one copy for | the site can read and change it | available in |
 |---|---|---|---|---|
-| `wt.globalStore(name, initial)` | the background (yours) | every page, every tab, kept across restarts | no | network handlers, `onPage`, `onOverlay` |
-| `wt.pageStore(name, initial)` | the background (yours) | each page | no | network handlers, `onPage`, `onOverlay` |
-| `wt.siteStore(name, initial)` | the site's JavaScript world (theirs) | each page | **yes** | `onSite`, `onPage`, `onOverlay` |
+| `tt.globalStore(name, initial)` | the background (yours) | every page, every tab, kept across restarts | no | network handlers, `onPage`, `onOverlay` |
+| `tt.pageStore(name, initial)` | the background (yours) | each page | no | network handlers, `onPage`, `onOverlay` |
+| `tt.siteStore(name, initial)` | the site's JavaScript world (theirs) | each page | **yes** | `onSite`, `onPage`, `onOverlay` |
 
-### `wt.globalStore`
+### `tt.globalStore`
 
-`wt.globalStore(name, initial)` returns a live object that every copy of the
+`tt.globalStore(name, initial)` returns a live object that every copy of the
 script shares: its handlers on every strategy see the same values, and
 changes survive a browser restart. It's a [valtio](https://valtio.dev)
 proxy — read and assign like a plain object.
 
 ```ts
-const state = wt.globalStore("state", { mocking: true, hits: 0, seen: [] as string[] });
+const state = tt.globalStore("state", { mocking: true, hits: 0, seen: [] as string[] });
 
-wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, (ctx) => {
+tt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, (ctx) => {
     state.hits++;
     state.seen.push(ctx.url);
     if (state.mocking) return { replaceResponse: { body: { mocked: true } } };
@@ -636,7 +636,7 @@ wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, (ctx) => {
 ```
 
 - **Name.** The first argument is the store's key: one store per name per
-  script. A script with two stores uses two names. Call `wt.globalStore` at top
+  script. A script with two stores uses two names. Call `tt.globalStore` at top
   level and share the result; a second call with the same name throws.
 - **Initial.** Used the first time. Later, the saved values win and
   `initial` only adds fields that are missing, so you can add fields
@@ -650,12 +650,12 @@ wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, (ctx) => {
 - **Watching.** `import { subscribe } from "valtio"` runs code when the
   store changes. A `rules` handler that reads a store is re-run (and its
   rules rebuilt) when the store changes.
-- The saved copy lives in `wt.storage` as `"$store:<name>"`; change the
+- The saved copy lives in `tt.storage` as `"$store:<name>"`; change the
   store, not that key (writing it logs a warning).
 
-### `wt.pageStore`
+### `tt.pageStore`
 
-`wt.pageStore(name, initial)` is a store with one copy per page. Each
+`tt.pageStore(name, initial)` is a store with one copy per page. Each
 tab's page starts from `initial`; a navigation or a reload starts a new
 page, so its copy starts over (a single-page app's route change doesn't).
 A network handler sees the copy of the page its request comes from, and an
@@ -665,13 +665,13 @@ page's requests share state, and other tabs aren't affected.
 ```tsx
 import { useSnapshot } from "valtio";
 
-const page = wt.pageStore("page", { staging: false });
+const page = tt.pageStore("page", { staging: false });
 
-wt.onRequest({ url: "https://api.example.com/*", strategy: "helper" }, (ctx) => {
+tt.onRequest({ url: "https://api.example.com/*", strategy: "helper" }, (ctx) => {
     if (page.staging) return { redirect: ctx.url.replace("api.", "staging-api.") };
 });
 
-wt.onOverlay("https://example.com/*", (ctx) => {
+tt.onOverlay("https://example.com/*", (ctx) => {
     function Switch() {
         const snap = useSnapshot(page);
         return (
@@ -693,8 +693,8 @@ wt.onOverlay("https://example.com/*", (ctx) => {
   `initial` for that call.
 - **Lifetime.** A page's copy goes when the page ends (navigation, reload
   or closing the tab); it's never saved to disk. Values follow the same
-  JSON rules as `wt.globalStore`.
-- **Names.** One name space with `wt.globalStore`: a script can't have a
+  JSON rules as `tt.globalStore`.
+- **Names.** One name space with `tt.globalStore`: a script can't have a
   global and a page store with the same name (a site store can).
 - Available in `onPage` and `onOverlay` code (the copy of their page);
   not in `onSite` code (see below), nor in `rules` handlers (their rules
@@ -704,18 +704,18 @@ wt.onOverlay("https://example.com/*", (ctx) => {
 
 `onPage` and `onOverlay` code get live copies of the script's stores:
 reads are synchronous, writes reach the background, the overlay and other
-tabs (`wt.pageStore`: this page's copy only), and their changes come back.
+tabs (`tt.pageStore`: this page's copy only), and their changes come back.
 
 ```ts
 import { subscribe } from "valtio";
 
-const page = wt.pageStore("page", { hits: 0 });
+const page = tt.pageStore("page", { hits: 0 });
 
-wt.replaceResponse({ url: "https://example.com/api/*", strategy: "page" }, () => {
+tt.replaceResponse({ url: "https://example.com/api/*", strategy: "page" }, () => {
     page.hits++;
 });
 
-wt.onPage("https://example.com/*", (ctx) => {
+tt.onPage("https://example.com/*", (ctx) => {
     const badge = document.body.appendChild(document.createElement("output"));
     const show = () => (badge.value = `${page.hits} API calls`);
     show();
@@ -725,31 +725,31 @@ wt.onPage("https://example.com/*", (ctx) => {
 ```
 
 `onSite` code runs among the site's own scripts, which could read the
-stores and forge writes to them. There, using `wt.globalStore` or
-`wt.pageStore` throws (declaring one at top level is fine: that line runs
+stores and forge writes to them. There, using `tt.globalStore` or
+`tt.pageStore` throws (declaring one at top level is fine: that line runs
 there too). Either keep what the site may see in a
-[`wt.siteStore`](#wtsitestore), or keep the stores in `onPage` code, read
+[`tt.siteStore`](#wtsitestore), or keep the stores in `onPage` code, read
 the site through an `onSite` [handle](#handles--calls-between-places), and
 pass what `onSite` code needs as arguments. An `onSite` handler that uses
 one of them is an error in the Problems view; its quick fixes move the
-handler to `wt.onPage`, or change the stores to `wt.siteStore` (their data
+handler to `tt.onPage`, or change the stores to `tt.siteStore` (their data
 becomes page data).
 
 ```ts
-const site = wt.onSite("*://app.example.com/*", () => ({
+const site = tt.onSite("*://app.example.com/*", () => ({
     user: () => (window as any).myApp?.user?.name as string | undefined,
 }));
-const state = wt.globalStore("state", { user: "" });
+const state = tt.globalStore("state", { user: "" });
 
-wt.onPage("*://app.example.com/*", async () => {
+tt.onPage("*://app.example.com/*", async () => {
     const name = await site.user();
     if (typeof name === "string") state.user = name; // the site's data: check it
 });
 ```
 
-### `wt.siteStore`
+### `tt.siteStore`
 
-`wt.siteStore(name, initial)` is a store that lives in the site's
+`tt.siteStore(name, initial)` is a store that lives in the site's
 JavaScript world, one copy per page, for the data `onSite` code and the
 site share: `onSite` code reads and changes it synchronously, and the
 script's `onPage` and `onOverlay` code on that page get a live copy — it
@@ -758,9 +758,9 @@ changes when the site's does, and their changes go back.
 ```tsx
 import { useSnapshot } from "valtio";
 
-const site = wt.siteStore("site", { loggedIn: false, mockCart: false });
+const site = tt.siteStore("site", { loggedIn: false, mockCart: false });
 
-wt.onSite("https://shop.example/*", (ctx) => {
+tt.onSite("https://shop.example/*", (ctx) => {
     // in the site's world, ahead of its own scripts: react to the switch synchronously
     site.loggedIn = /(^|; )session=/.test(document.cookie);
     const realFetch = window.fetch;
@@ -768,7 +768,7 @@ wt.onSite("https://shop.example/*", (ctx) => {
     ctx.signal.addEventListener("abort", () => (window.fetch = realFetch)); // a save runs this again
 });
 
-wt.onOverlay("https://shop.example/*", (ctx) => {
+tt.onOverlay("https://shop.example/*", (ctx) => {
     function Panel() {
         const snap = useSnapshot(site);
         return (
@@ -790,7 +790,7 @@ wt.onOverlay("https://shop.example/*", (ctx) => {
   keeps its values.
 - **Values.** JSON only, at most 1 MB, as the other stores; functions on
   the object stay local to each copy.
-- **Names.** Its own name space: `wt.pageStore("x")` and `wt.siteStore("x")`
+- **Names.** Its own name space: `tt.pageStore("x")` and `tt.siteStore("x")`
   are different stores.
 - **Watching.** `subscribe` and `snapshot` from `"valtio"` work in `onSite`
   code (the site's world has valtio's core, not React); `useSnapshot` in
@@ -798,16 +798,16 @@ wt.onOverlay("https://shop.example/*", (ctx) => {
 - Not in network handlers: they have no page, so it throws there (an
   error in the Problems view).
 
-### `wt.fetch`
+### `tt.fetch`
 
-`wt.fetch(url, init)` is `fetch` for scripts. It runs in the background,
+`tt.fetch(url, init)` is `fetch` for scripts. It runs in the background,
 with the extension's host permissions (no CORS) and the browser's cookies,
 and returns a normal `Response`.
 
 ```ts
 // the real response, even though this script mocks the same URL
-wt.replaceResponse({ url: "*://api.example.com/user", strategy: "helper" }, async () => {
-    const real = await (await wt.fetch("https://api.example.com/user", { bypass: true })).json();
+tt.replaceResponse({ url: "*://api.example.com/user", strategy: "helper" }, async () => {
+    const real = await (await tt.fetch("https://api.example.com/user", { bypass: true })).json();
     return { ...real, role: "admin" };
 });
 ```
@@ -820,7 +820,7 @@ wt.replaceResponse({ url: "*://api.example.com/user", strategy: "helper" }, asyn
   as the page — its origin, cookies and CORS rules — and works only in
   [overlays](#overlays--wtonoverlay), where it's the default (relative URLs
   resolve against the page); in handlers it rejects.
-- `onSite` and `onPage` code has no `wt.fetch` (it rejects): use `fetch`,
+- `onSite` and `onPage` code has no `tt.fetch` (it rejects): use `fetch`,
   or call a function of the overlay.
 
 ### Built-in valtio and React
@@ -833,19 +833,19 @@ JSX (`<div />`) goes in a `.tsx` script — one whose name ends in `.tsx`,
 like `ui/Panel.tsx` (create or rename it with the extension; a plain
 script's `.ts` is implied). It compiles with React's automatic runtime, so
 components need no `import React`. JSX in a `.ts` script is an error with a
-**Rename to Name.tsx** quick fix. The built-ins work in `wt.onOverlay`
-and `wt.onPage` code too (in the isolated world React loads on first use,
-and handlers that import it start once it has), but not in `wt.onSite`
+**Rename to Name.tsx** quick fix. The built-ins work in `tt.onOverlay`
+and `tt.onPage` code too (in the isolated world React loads on first use,
+and handlers that import it start once it has), but not in `tt.onSite`
 code, where using one throws.
 
 ```ts
 import { subscribe } from "valtio";
 
-const state = wt.globalStore("state", { mocking: false });
-subscribe(state, () => wt.log("mocking is now", state.mocking));
+const state = tt.globalStore("state", { mocking: false });
+subscribe(state, () => tt.log("mocking is now", state.mocking));
 ```
 
-## Page code — `wt.onSite`, `wt.onPage`, `wt.onOverlay`
+## Page code — `tt.onSite`, `tt.onPage`, `tt.onOverlay`
 
 Three handlers run code in the page instead of on its requests. They
 aren't strategies: they work the same whatever the network handlers use.
@@ -853,9 +853,9 @@ Each runs in its own place:
 
 | | runs in | sees | the site | has |
 |---|---|---|---|---|
-| `wt.onSite` | the site's own JavaScript world | the DOM and the site's globals (`window.myApp`); its `fetch`/XHR go through the `page` strategy | sees it and can tamper with it: **untrusted** | `wt.siteStore` only, no handle calls, no React |
-| `wt.onPage` | an isolated world | the DOM, none of the site's globals | can't see or reach it | all stores, handle calls, React (`ctx.mount`), shortcuts |
-| `wt.onOverlay` | the script's own frame over the page (top frame) | its own DOM | can't see or reach it | all stores, handle calls, React, shortcuts, `fetch` as the page |
+| `tt.onSite` | the site's own JavaScript world | the DOM and the site's globals (`window.myApp`); its `fetch`/XHR go through the `page` strategy | sees it and can tamper with it: **untrusted** | `tt.siteStore` only, no handle calls, no React |
+| `tt.onPage` | an isolated world | the DOM, none of the site's globals | can't see or reach it | all stores, handle calls, React (`ctx.mount`), shortcuts |
+| `tt.onOverlay` | the script's own frame over the page (top frame) | its own DOM | can't see or reach it | all stores, handle calls, React, shortcuts, `fetch` as the page |
 
 Use `onPage` for DOM changes, `onSite` only for what needs the site's
 JavaScript (its globals, wrapping its functions), and `onOverlay` for a
@@ -865,12 +865,12 @@ returns, so the places work together:
 
 ```ts
 // the site's world: read its globals, hand them over as functions
-const site = wt.onSite("*://app.example.com/*", () => ({
+const site = tt.onSite("*://app.example.com/*", () => ({
     flags: () => Object.keys((window as any).__APP_FLAGS__ ?? {}),
 }));
 
 // isolated: change the DOM, ask the site
-wt.onPage("*://app.example.com/*", async (ctx) => {
+tt.onPage("*://app.example.com/*", async (ctx) => {
     const title = ctx.once("title", () => document.title);
     const flags = await site.flags(); // string[], typed from the onSite handler
     document.title = `${flags.length} flags · ${title}`;
@@ -882,7 +882,7 @@ wt.onPage("*://app.example.com/*", async (ctx) => {
   page. A script may register several of each, with different routes and
   `when`s.
 - **Register at top level.** Like every handler, unconditionally and
-  synchronously: the n-th `wt.onPage` call is the same handler in every
+  synchronously: the n-th `tt.onPage` call is the same handler in every
   place the script runs. That's how a handle finds its handler, and how a
   save matches new runs to old ones ([hot reload](#hot-reload--runs-and-ctx)).
 - Because it runs in the page, page code works however the response
@@ -897,21 +897,21 @@ ready; `when` changes that.**
 
 | Place | Default `when` | Why |
 |---|---|---|
-| `wt.onSite` | `document_start` | it's there to get in *before* the site: `ctx.patch(window, "fetch", …)`, catching a store as the site creates it. By `document_end` most of what you'd patch has run, and site code may already hold the original functions |
-| `wt.onPage` | `document_end` | DOM work needs `<body>`; at `document_start` `querySelector` finds (almost) nothing |
-| `wt.onOverlay` | `document_end` | a GUI: nothing to gain by racing the parser |
+| `tt.onSite` | `document_start` | it's there to get in *before* the site: `ctx.patch(window, "fetch", …)`, catching a store as the site creates it. By `document_end` most of what you'd patch has run, and site code may already hold the original functions |
+| `tt.onPage` | `document_end` | DOM work needs `<body>`; at `document_start` `querySelector` finds (almost) nothing |
+| `tt.onOverlay` | `document_end` | a GUI: nothing to gain by racing the parser |
 
-In every frame, Wiretrick's hook starts at `document_start`, asks the
+In every frame, TangiTweak's hook starts at `document_start`, asks the
 background for the scripts with a page route matching that frame's URL,
 compiles them and captures the matching handlers (stored, not yet run).
 Each then runs once, at its route's `when`. Handlers with the same `when`
 run in script-list order, then registration order.
 
 ```ts
-wt.onSite("*://example.com/*", () => { ... });                                       // default: document_start
-wt.onPage("*://example.com/*", () => { ... });                                       // default: document_end
-wt.onSite({ url: "*://example.com/*", when: "document_idle" }, () => { ... });       // reads globals the site sets up while loading
-wt.onPage({ url: "*://example.com/*", when: "document_start" }, () => { ... });      // sees the parser's first nodes
+tt.onSite("*://example.com/*", () => { ... });                                       // default: document_start
+tt.onPage("*://example.com/*", () => { ... });                                       // default: document_end
+tt.onSite({ url: "*://example.com/*", when: "document_idle" }, () => { ... });       // reads globals the site sets up while loading
+tt.onPage({ url: "*://example.com/*", when: "document_start" }, () => { ... });      // sees the parser's first nodes
 ```
 
 | `when` | Runs | DOM state | Use for |
@@ -951,7 +951,7 @@ so one handler can add an early listener and a late mount.
   page's in an overlay); `method`, `resourceType` and `groups` are
   placeholders (`"GET"`, `"main_frame"`, `{}`).
 
-### `wt.onSite` — the site's world
+### `tt.onSite` — the site's world
 
 `onSite` code runs among the site's own scripts: it reads `window.myApp`
 or a Redux store directly, wraps the site's functions with
@@ -960,7 +960,7 @@ the `page` strategy (a `fetch` in `onPage` code doesn't).
 
 ```ts
 // by default before the site's own scripts: they get the patched fetch
-wt.onSite("*://app.example.com/*", (ctx) => {
+tt.onSite("*://app.example.com/*", (ctx) => {
     ctx.patch(window, "fetch", (orig) => (input, init) => {
         console.log("fetch", String(input));
         return orig(input, init);
@@ -971,19 +971,19 @@ wt.onSite("*://app.example.com/*", (ctx) => {
 The site can see that code, call the functions it returns and fake their
 answers, so `onSite` code is untrusted:
 
-- **Only site stores, no handle calls.** `wt.globalStore` and
-  `wt.pageStore` throw there ([stores in page code](#stores-in-page-code));
-  [`wt.siteStore`](#wtsitestore) is the store for it. Calling a handle
+- **Only site stores, no handle calls.** `tt.globalStore` and
+  `tt.pageStore` throw there ([stores in page code](#stores-in-page-code));
+  [`tt.siteStore`](#wtsitestore) is the store for it. Calling a handle
   throws `SiteCannotCallError` — the site could make the same call.
   Problems shows both, with a quick fix (**Ctrl+.** / **⌘.**) that moves
-  the handler to `wt.onPage`. Call your own functions directly.
+  the handler to `tt.onPage`. Call your own functions directly.
 - **No built-in React** (using it throws), so no `ctx.mount`
   or `ctx.each`. A library script that uses React at its top level
   (`const Item = memo(…)`) fails the `onSite` side of every script that
   imports it; the error names the line and the import chain, so keep what
   `onSite` code needs in a module without React. Of valtio only its core (`subscribe`, `snapshot`); no
-  `wt.fetch` (use `fetch`). `wt.log`, `wt.params`,
-  `wt.storage` and `console` work; logs go to the Log tagged `page › host`.
+  `tt.fetch` (use `fetch`). `tt.log`, `tt.params`,
+  `tt.storage` and `console` work; logs go to the Log tagged `page › host`.
 - **Its results are page data.** The site can replace `Object.keys`, patch
   your functions or answer in their place. Fine to show; check them before
   they decide what your network handlers do (which URLs to redirect, which
@@ -992,18 +992,18 @@ answers, so `onSite` code is untrusted:
   in the isolated world instead: same DOM and timing, but the site's
   globals aren't visible. They're still treated as site code.
 
-### `wt.onPage` — the isolated world
+### `tt.onPage` — the isolated world
 
 `onPage` code runs where the site's JavaScript can't see or imitate it:
 the same DOM, none of the site's globals (read those through an
 [`onSite` handle](#handles--calls-between-places)). It's trusted: it gets
-`wt.storage`, `wt.log`, `wt.params` and `console` (lines go to the Log
+`tt.storage`, `tt.log`, `tt.params` and `console` (lines go to the Log
 tagged `isolated › host`), live [stores](#stores-in-page-code) (site stores too), the
 built-in React and valtio, and calls the script's handles. It has no
-`wt.fetch`; its `fetch` isn't seen by the `page` strategy.
+`tt.fetch`; its `fetch` isn't seen by the `page` strategy.
 
 ```tsx
-wt.onPage("*://app.example.com/*", (ctx) => {
+tt.onPage("*://app.example.com/*", (ctx) => {
     ctx.style(`.ad-banner { display: none !important }`);
     ctx.mount("#header", <button onClick={() => alert("hi")}>Hi</button>); // in a closed shadow root
 });
@@ -1020,13 +1020,13 @@ turn it on:
    shows a banner: click **Grant permission** (the optional "user
    scripts" permission).
 2. **Allow user scripts.** Chrome 138 and later: turn on **Allow User
-   Scripts** on Wiretrick's details page (`chrome://extensions/?id=…`; the
+   Scripts** on TangiTweak's details page (`chrome://extensions/?id=…`; the
    banner's **Open extension details** button and the Problems error link
    there). Chrome 120–137: turn on **Developer mode** at the top right of
    `chrome://extensions` instead.
 
 Until then the handler doesn't run, Problems shows an error on its
-`wt.onPage` or `wt.onSite` line saying how to turn user scripts on, and
+`tt.onPage` or `tt.onSite` line saying how to turn user scripts on, and
 the overlay's calls into it reject with `not running on this page (user
 scripts are off)`. Once they're on, pages loaded from then on run it
 (reload open ones); after that, saving the script updates open pages in
@@ -1040,12 +1040,12 @@ own scope, apart from the site's JavaScript).
 
 ## Handles — calls between places
 
-`wt.onSite`, `wt.onPage` and `wt.onOverlay` return a **handle** to the
+`tt.onSite`, `tt.onPage` and `tt.onOverlay` return a **handle** to the
 functions their handler returns. Call them from another place with
 `await`:
 
 ```ts
-const page = wt.onPage("*://app.example.com/*", () => ({
+const page = tt.onPage("*://app.example.com/*", () => ({
     highlight(sel: string) {
         const els = [...document.querySelectorAll<HTMLElement>(sel)];
         els.forEach((el) => (el.style.outline = "2px solid red"));
@@ -1053,7 +1053,7 @@ const page = wt.onPage("*://app.example.com/*", () => ({
     },
 }));
 
-wt.onOverlay("*://app.example.com/*", (ctx) => {
+tt.onOverlay("*://app.example.com/*", (ctx) => {
     const input = ctx.once("input", () => document.body.appendChild(document.createElement("input")));
     input.onchange = async () => (input.title = `${await page.highlight(input.value)} matches`);
 });
@@ -1113,7 +1113,7 @@ code, return a `next()` that waits for the next item, and loop over it with
 `ctx.each(fn, ...args)` in `onPage` or `onOverlay` code:
 
 ```ts
-const site = wt.onSite("*://app.example.com/*", (ctx) => {
+const site = tt.onSite("*://app.example.com/*", (ctx) => {
     const logins: string[] = [];
     const waiting: ((user: string) => void)[] = [];
     window.addEventListener("app:login", (e) => {
@@ -1127,9 +1127,9 @@ const site = wt.onSite("*://app.example.com/*", (ctx) => {
     };
 });
 
-const state = wt.globalStore("state", { lastLogin: "" });
+const state = tt.globalStore("state", { lastLogin: "" });
 
-wt.onPage("*://app.example.com/*", async (ctx) => {
+tt.onPage("*://app.example.com/*", async (ctx) => {
     for await (const user of ctx.each(site.nextLogin)) state.lastLogin = user;
 });
 ```
@@ -1167,7 +1167,7 @@ starting timers — isn't undone, and the new run does it again: an
 | `shortcut(keys, fn, opts)` | — | ✓ | ✓ | [keyboard shortcuts](#keyboard-shortcuts) |
 
 ```ts
-wt.onPage("*://app.example.com/*", (ctx) => {
+tt.onPage("*://app.example.com/*", (ctx) => {
     document.addEventListener("click", (e) => console.log("clicked", e.target), { signal: ctx.signal });
     const t = setInterval(() => console.log("tick"), 1000);
     ctx.signal.addEventListener("abort", () => clearInterval(t));
@@ -1192,7 +1192,7 @@ wt.onPage("*://app.example.com/*", (ctx) => {
   each add a layer.
 
   ```ts
-  wt.onSite("*://app.example.com/*", (ctx) => {
+  tt.onSite("*://app.example.com/*", (ctx) => {
       ctx.patch(history, "pushState", (orig) => function (this: History, ...args: any[]) {
           console.log("navigating to", args[2]);
           return orig.apply(this, args as Parameters<History["pushState"]>);
@@ -1230,7 +1230,7 @@ wt.onPage("*://app.example.com/*", (ctx) => {
     removing it, more than 20 times a second, it stops and Problems says so
     (until the next save). Without it the UI goes back only when
     `ctx.mount` runs again.
-  - In `onPage` the UI sits in a `<wiretrick-mount>` element with a closed
+  - In `onPage` the UI sits in a `<tangitweak-mount>` element with a closed
     shadow root: the page's CSS doesn't reach it (`ctx.style` does). It's
     `display: contents`, so a label next to text stays on its line.
   - In `onOverlay` it's a plain `<div>` in the overlay's `<body>` (or the
@@ -1241,7 +1241,7 @@ wt.onPage("*://app.example.com/*", (ctx) => {
     a shortcut). Use `key` for two mounts at the same place.
 
   ```tsx
-  wt.onPage("*://app.example.com/*", (ctx) => {
+  tt.onPage("*://app.example.com/*", (ctx) => {
       // a label after every version tag, also ones the app adds later
       ctx.mount('[data-testid="version"]', <Label />, { position: "after" });
       // a badge over the avatar, put back when the app re-renders the header
@@ -1253,7 +1253,7 @@ wt.onPage("*://app.example.com/*", (ctx) => {
 
 A save keeps the state of your components, nested ones too: a counter
 stays at its count, an open panel stays open, and the new code renders it.
-React Refresh needs a development build of React, so Wiretrick does its
+React Refresh needs a development build of React, so TangiTweak does its
 own, smaller version of it on the built-in (production) React:
 
 - Each **named function component** in your script (`function Panel()`,
@@ -1298,14 +1298,14 @@ by the new run, a function still running in the old run rejects with
 `ReloadedError`, and the old runs' own pending calls reject with
 `AbortError`.
 
-Handlers are told apart by position: the n-th `wt.onPage` (or `onSite`,
+Handlers are told apart by position: the n-th `tt.onPage` (or `onSite`,
 `onOverlay`) call in the script. Moving one before another of the same
 kind swaps their keys, so their mounts start over and their `once` values
 are made again.
 
-## Overlays — `wt.onOverlay`
+## Overlays — `tt.onOverlay`
 
-`wt.onOverlay(route, fn)` gives a script its own GUI on a page: `fn` runs
+`tt.onOverlay(route, fn)` gives a script its own GUI on a page: `fn` runs
 in a transparent frame laid over the tab, and whatever it draws in that
 frame's `document` shows on top of the page. Clicks on empty areas go
 through to the page.
@@ -1313,12 +1313,12 @@ through to the page.
 ```tsx
 import { useSnapshot } from "valtio";
 
-const mock = wt.globalStore("mock", { enabled: false });
+const mock = tt.globalStore("mock", { enabled: false });
 
-wt.replaceResponse({ url: "*://app.example.com/api/me", strategy: "helper" }, () =>
+tt.replaceResponse({ url: "*://app.example.com/api/me", strategy: "helper" }, () =>
     mock.enabled ? { name: "Test user", plan: "pro" } : undefined);
 
-wt.onOverlay("*://app.example.com/*", (ctx) => {
+tt.onOverlay("*://app.example.com/*", (ctx) => {
     function Panel() {
         const snap = useSnapshot(mock);
         return (
@@ -1345,8 +1345,8 @@ it right away, and the value survives restarts.
   its `onOverlay` handlers run: network, `onSite` and `onPage` handlers
   register nothing there (their handles work). Stores are live copies of
   the background's, so the GUI and the handlers see the same values; a
-  `wt.pageStore` is the copy of the overlay's page, and a `wt.siteStore`
-  the copy of its page's site. `wt.log`, `console.*`,
+  `tt.pageStore` is the copy of the overlay's page, and a `tt.siteStore`
+  the copy of its page's site. `tt.log`, `console.*`,
   errors and unhandled rejections go to the script's Log, tagged
   `overlay › host`.
 - **Isolation.** The page's CSS can't reach the GUI and the GUI's CSS
@@ -1365,14 +1365,14 @@ it right away, and the value survives restarts.
 - **Debuggers from other extensions.** Chrome won't let an extension attach
   its debugger to a tab holding another extension's frame, so tools like
   Playwriter remove the overlay's frame when they attach. The overlay's
-  GUI and shortcuts then stop and the Log shows a warning. Wiretrick
+  GUI and shortcuts then stop and the Log shows a warning. TangiTweak
   doesn't put the frame back on its own, since the other tool would just
   remove it again. Reload the page or change the script to start it again.
   The frame is an extension page on purpose: that's how overlays run on
   sites whose CSP blocks scripts and `eval`, and why the site can't reach
   them. An `about:blank` frame wouldn't be removed, but it would inherit
   the page's CSP and be open to the page. For a GUI that must survive
-  these tools, use `wt.onPage` with `ctx.mount` and `ctx.shortcut`: it
+  these tools, use `tt.onPage` with `ctx.mount` and `ctx.shortcut`: it
   renders into the page (in a closed shadow root) with no extension
   frame.
 - **Preview in the Editor.** The Editor's **Preview** tab (⌥⇧V) runs the
@@ -1384,7 +1384,7 @@ it right away, and the value survives restarts.
   function that stops listening; it also stops when the run ends.
 
   ```ts
-  wt.onOverlay("*://app.example.com/*", (ctx) => {
+  tt.onOverlay("*://app.example.com/*", (ctx) => {
       const badge = ctx.once("badge", () => document.body.appendChild(document.createElement("div")));
       badge.textContent = "In the cart";
       const show = (url: string) => (badge.hidden = !url.includes("/cart"));
@@ -1399,7 +1399,7 @@ it right away, and the value survives restarts.
 in `onPage` and `onOverlay` handlers:
 
 ```ts
-wt.onOverlay("*://app.example.com/*", (ctx) => {
+tt.onOverlay("*://app.example.com/*", (ctx) => {
     const box = ctx.once("box", () => document.body.appendChild(document.createElement("div")));
     box.textContent = "Hello";
     box.hidden = true;
@@ -1413,8 +1413,8 @@ wt.onOverlay("*://app.example.com/*", (ctx) => {
   order) then one key: a character (`K`, `1`, `/`) or a name (`Esc`,
   `Enter`, `Space`, `Up`, `F2`, `Plus`). `Mod` is ⌘ on macOS and Ctrl
   elsewhere. Modifiers must match exactly; `Alt+L` works with Option on
-  macOS too. For other per-OS choices, use `wt.isMac`, `wt.isWindows`
-  and `wt.isLinux` (desktop only: none of them on Android or ChromeOS).
+  macOS too. For other per-OS choices, use `tt.isMac`, `tt.isWindows`
+  and `tt.isLinux` (desktop only: none of them on Android or ChromeOS).
 - **Before or after the page.** By default the shortcut wins: the page
   never sees the key. With `{ priority: "after-page" }` it runs only if
   the page didn't handle the key (didn't call `preventDefault` or stop it).
@@ -1423,7 +1423,7 @@ wt.onOverlay("*://app.example.com/*", (ctx) => {
   Anything else (`undefined`, `false`, a promise, a throw) consumes it.
   In an overlay this works for keys pressed while the overlay has focus.
   A key pressed in the page reaches the overlay's code only after the
-  page's turn, so it's always consumed there; use `wt.onPage` when that
+  page's turn, so it's always consumed there; use `tt.onPage` when that
   matters.
 - **Where.** An overlay's: on the page (its top frame) and while the
   overlay has focus. An `onPage` handler's: in the frame it runs in, so
@@ -1444,10 +1444,10 @@ wt.onOverlay("*://app.example.com/*", (ctx) => {
 To let the user pick the keys, make them a `shortcut` param:
 
 ```ts
-const cfg = wt.params({
+const cfg = tt.params({
     toggle: { type: "shortcut", default: "Alt+Shift+H", description: "Show or hide the box" },
 });
-wt.onOverlay("*://app.example.com/*", (ctx) => {
+tt.onOverlay("*://app.example.com/*", (ctx) => {
     ctx.shortcut(cfg.toggle, () => { box.hidden = !box.hidden; });
 });
 ```
@@ -1468,16 +1468,16 @@ the request, with the page's origin, cookies and CORS rules, and relative
 URLs resolve against the page. Your scripts' handlers see it like any
 request — on every strategy except `page`, which only sees the page's own
 JavaScript (to go through `page`, fetch from an [`onSite`
-handle](#handles--calls-between-places)). `wt.fetch` defaults to the same
+handle](#handles--calls-between-places)). `tt.fetch` defaults to the same
 in an overlay; `bypass: true` keeps every script's handlers off the
 request, and `from: "background"` fetches from the extension instead (host
 permissions, no CORS).
 
 ```ts
-wt.onOverlay("*://app.example.com/*", async () => {
+tt.onOverlay("*://app.example.com/*", async () => {
     const me = await (await fetch("/api/me")).json();                            // as the page, through your handlers
-    const real = await (await wt.fetch("/api/me", { bypass: true })).json();     // as the page, skipping all handlers
-    const other = await wt.fetch("https://other.site/x", { from: "background" }); // from the extension, no CORS
+    const real = await (await tt.fetch("/api/me", { bypass: true })).json();     // as the page, skipping all handlers
+    const other = await tt.fetch("https://other.site/x", { from: "background" }); // from the extension, no CORS
 });
 ```
 
@@ -1505,7 +1505,7 @@ wt.onOverlay("*://app.example.com/*", async () => {
   import "https://unpkg.com/daisyui@5.0.43/daisyui.css";
   import { useState } from "react";
 
-  wt.onOverlay("*://app.example.com/*", async (ctx) => {
+  tt.onOverlay("*://app.example.com/*", async (ctx) => {
       await import("https://unpkg.com/@tailwindcss/browser@4.1.11");
       function Modal() {
           const [open, setOpen] = useState(true);
@@ -1528,12 +1528,12 @@ wt.onOverlay("*://app.example.com/*", async () => {
   to it.
 
   ```ts
-  const redirect = wt.globalStore("redirect", { target: "" });
+  const redirect = tt.globalStore("redirect", { target: "" });
 
-  wt.onRequest({ url: "*://cdn.example.com/app.js", strategy: "helper" }, () =>
+  tt.onRequest({ url: "*://cdn.example.com/app.js", strategy: "helper" }, () =>
       redirect.target ? { redirect: redirect.target } : undefined);
 
-  wt.onOverlay("*://app.example.com/*", (ctx) => {
+  tt.onOverlay("*://app.example.com/*", (ctx) => {
       const input = ctx.once("input", () => document.body.appendChild(document.createElement("input")));
       input.value = redirect.target;
       input.onchange = () => (redirect.target = input.value);   // the next app.js load is redirected
@@ -1545,7 +1545,7 @@ wt.onOverlay("*://app.example.com/*", async () => {
 - **Toast:** a fixed element plus `setTimeout` to remove it.
 - **Remember open/closed:** a store field (`ui.open`), so it survives
   reloads and is the same in every tab.
-- **Per-tab switch:** a `wt.pageStore` field, so turning it on in one tab
+- **Per-tab switch:** a `tt.pageStore` field, so turning it on in one tab
   leaves the others alone and a reload turns it off again.
 
 ## Multiple handlers — how they stack
@@ -1565,20 +1565,20 @@ its handlers from every script in list order before the next stage starts:
 onRequest → replaceResponse → (network) → onResponseHeaders → onResponseBody
 ```
 
-So a `wt.onRequest` block in the last script still wins over a
-`wt.replaceResponse` in the first one.
+So a `tt.onRequest` block in the last script still wins over a
+`tt.replaceResponse` in the first one.
 
 ### Final results end the request
 
 A **final result** is an `onRequest` `block`, `redirect` or
-`replaceResponse`, or a body returned by `wt.replaceResponse`. The first
+`replaceResponse`, or a body returned by `tt.replaceResponse`. The first
 one wins. Nothing runs on that request after it: no later handler of the
 same stage, and no later stage. A replaced response never reaches the
 network, `onResponseHeaders` or `onResponseBody`. A redirect starts a new
 request to the target, and the handlers matching the target run on it.
 
 ```ts
-wt.onRequest({ url: "*://api.example.com/me", strategy: "helper" }, () => ({
+tt.onRequest({ url: "*://api.example.com/me", strategy: "helper" }, () => ({
     replaceResponse: {
         body: { id: 1, name: "Mocked User" },  // object → JSON; strings/bytes pass through
         status: 200,                            // default 200
@@ -1598,12 +1598,12 @@ loads), so the URL changes. See
 
 ### Results that stack
 
-- **Header edits** (`onRequest` `headers`, `wt.onResponseHeaders`): every
+- **Header edits** (`onRequest` `headers`, `tt.onResponseHeaders`): every
   handler runs. For each header (case-insensitive) the **later handler in
   the list wins**, whether it sets or removes it. A later `remove` deletes an
   earlier `set`, and a later `set` undoes an earlier `remove`. Request
   header edits still apply when a later `onRequest` handler redirects.
-- **`wt.onResponseBody`**: transforms **compose** like a pipeline. Handler
+- **`tt.onResponseBody`**: transforms **compose** like a pipeline. Handler
   A's output becomes handler B's input, in list order.
 
 ```text
@@ -1652,7 +1652,7 @@ Each warning is logged at most once a minute per handler and URL.
 
 ## Async handlers
 
-All `wt.*` handlers may be `async` (return a Promise). What happens with the
+All `tt.*` handlers may be `async` (return a Promise). What happens with the
 result depends on the handler's strategy:
 
 | handler | `page` (page fetch/XHR) | `extension`, Chromium MV2 | `extension`, Firefox | `debugger` | `helper` |
@@ -1667,7 +1667,7 @@ result depends on the handler's strategy:
 Practical rules of thumb:
 
 - **Mocking/transforming APIs (fetch/XHR)?** Async just works — write
-  `wt.onResponseBody(API, async (ctx, body) => { const j = await translate(body); return …; })`.
+  `tt.onResponseBody(API, async (ctx, body) => { const j = await translate(body); return …; })`.
 - **Redirect/block or header changes decided asynchronously** on Chromium?
   Use `helper` or `debugger` (both await). Only
   the `extension` strategy on Chromium can't: there an async result logs an error and the
@@ -1677,7 +1677,7 @@ Practical rules of thumb:
   `replaceResponse` on `helper`, `debugger` or `page` is all you need.
 - **No time limit on `page`.** A handler may wait as long as it likes — for
   the user to decide on a paused request, say — and the page's request waits
-  with it. Wiretrick only lets a request through untouched when the
+  with it. TangiTweak only lets a request through untouched when the
   extension stops answering "is this call still running?" for a few seconds
   (the extension reloaded, or a message got lost), never because a handler
   is slow.

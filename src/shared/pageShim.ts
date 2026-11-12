@@ -1,8 +1,8 @@
 /**
- * The `wt` object a script sees when its page handlers compile in the
- * site's JavaScript world (hook.ts: `wt.onSite` handlers; bridge.ts: the
+ * The `tt` object a script sees when its page handlers compile in the
+ * site's JavaScript world (hook.ts: `tt.onSite` handlers; bridge.ts: the
  * same when the page CSP forbids eval there) or the isolated world
- * (bridge.ts in MV2, isolated.ts in MV3: `wt.onPage` handlers). Network
+ * (bridge.ts in MV2, isolated.ts in MV3: `tt.onPage` handlers). Network
  * registrations and overlay handlers are inert here (they run in the
  * background / the overlay); this world's handlers are collected with
  * their routes (the other world's are skipped), and params resolve to the
@@ -39,7 +39,7 @@ export interface PageShimOptions {
     params: Record<string, any>;
     log: (...args: any[]) => void;
     storage: { get(key: string): any; set(key: string, value: any): any };
-    /** which handlers this shim collects: "page" (wt.onSite, the default) or "isolated" (wt.onPage) */
+    /** which handlers this shim collects: "page" (tt.onSite, the default) or "isolated" (tt.onPage) */
     world?: PageWorld;
     /** answers calls into this world's handles */
     exposer?: Exposer;
@@ -50,9 +50,9 @@ export interface PageShimOptions {
     call?: (api: PlaceApi, key: string, route: RouteMeta) => any;
     /** site's world: a handle's function was called (it throws SiteCannotCallError; its stack is the caller's) */
     onSiteCall?: (e: SiteCannotCallError) => void;
-    /** the script's store replicas (`wt.pageStore`: this page's copy): the isolated world only */
+    /** the script's store replicas (`tt.pageStore`: this page's copy): the isolated world only */
     stores?: PageStores;
-    /** `wt.siteStore`: the site's world's store (onSite code) or a mirror of it (absent: a library's, which throws when used) */
+    /** `tt.siteStore`: the site's world's store (onSite code) or a mirror of it (absent: a library's, which throws when used) */
     siteStore?: (name: string, initial: object) => object;
     /**
      * a library's shim (its name): what its code registers while a
@@ -79,12 +79,12 @@ export interface PageStores {
 
 const noStore = unusableStore(SITE_NO_STORES);
 const libSiteStore = unusableStore(LIB_SITE_STORE);
-const NO_FETCH = "wt.fetch isn't available in page code — use the page's own fetch";
+const NO_FETCH = "tt.fetch isn't available in page code — use the page's own fetch";
 /** a library's handles: its handlers don't run */
 const LIB_HANDLE = "handles from an imported library don't connect; register the handler in the script itself";
 
 export interface PageShim {
-    wt: any;
+    tt: any;
     dom: PageDocumentHandler[];
     /** run the script's top level (`run`): libraries' functions it calls register into it, like the background's */
     top<T>(run: () => T): T;
@@ -100,7 +100,7 @@ export function makePageShim(o: PageShimOptions): PageShim {
     let pageIndex = 0;
     let overlayIndex = 0;
     const own: Register = (api) => (route, fn, n, lib) => {
-        if (typeof fn !== "function") throw new Error(`wt.${api}: second argument must be the handler function`);
+        if (typeof fn !== "function") throw new Error(`tt.${api}: second argument must be the handler function`);
         const kind = placeKind(api);
         const r = normalizeRoute(kind, route, kind === "onOverlay" ? overlayIndex++ : pageIndex++, api);
         const k = keyOf(api, n, lib);
@@ -122,7 +122,7 @@ export function makePageShim(o: PageShimOptions): PageShim {
     const names = new Map<string, string>();
     const siteNames = new Map<string, string>();
     const parsed = (key: string, def: ParamDef | undefined) => (def && typeof def === "object" ? parseParamValue(key, def, o.params[key]) : o.params[key]);
-    const wt = {
+    const tt = {
         onRequest: inert,
         onResponseHeaders: inert,
         replaceResponse: inert,
@@ -133,20 +133,20 @@ export function makePageShim(o: PageShimOptions): PageShim {
         // without stores, declaring one at top level is fine (that code runs here too); using it isn't
         globalStore: (name: string, initial: object, opts?: unknown) => {
             if (!stores) return noStore;
-            claimStoreName(names, "wt.globalStore", name, initial);
-            names.set(name, "wt.globalStore");
+            claimStoreName(names, "tt.globalStore", name, initial);
+            names.set(name, "tt.globalStore");
             return stores.store(name, initial, storePersist(name, opts));
         },
         pageStore: (name: string, initial: object) => {
             if (!stores) return noStore;
-            claimStoreName(names, "wt.pageStore", name, initial);
-            names.set(name, "wt.pageStore");
+            claimStoreName(names, "tt.pageStore", name, initial);
+            names.set(name, "tt.pageStore");
             return stores.pageStore(name, initial);
         },
         siteStore: (name: string, initial: object) => {
             if (!o.siteStore) return libSiteStore;
-            claimStoreName(siteNames, "wt.siteStore", name, initial);
-            siteNames.set(name, "wt.siteStore");
+            claimStoreName(siteNames, "tt.siteStore", name, initial);
+            siteNames.set(name, "tt.siteStore");
             return o.siteStore(name, initial);
         },
         fetch: () => Promise.reject(new Error(NO_FETCH)),
@@ -173,7 +173,7 @@ export function makePageShim(o: PageShimOptions): PageShim {
             running = prev;
         }
     };
-    return { wt, dom, top };
+    return { tt, dom, top };
 }
 
 function inertHandle(): any {

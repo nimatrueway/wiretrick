@@ -5,18 +5,18 @@
  *
  *   hook (MAIN, no eval) ← postMessage → bridge (isolated) ⇄ background
  *
- * Also runs wt.onPage code in the isolated world (MV2; MV3 has no eval in
+ * Also runs tt.onPage code in the isolated world (MV2; MV3 has no eval in
  * content scripts, so it runs in chrome.userScripts worlds —
  * src/hook/isolated.ts — and the bridge relays the overlay's calls to it
- * through the background, L2), and wt.onSite code when the page CSP
+ * through the background, L2), and tt.onSite code when the page CSP
  * blocks eval in the page. The background sends the scripts'
  * SOURCES, the bridge compiles them and runs them at the requested DOM
  * moment — the isolated world shares the page's DOM, not its JS world.
  *
- * In the top frame it also hosts the scripts' overlays (`wt.onOverlay`): one
+ * In the top frame it also hosts the scripts' overlays (`tt.onOverlay`): one
  * iframe per script inside a closed shadow root, linked to this bridge by
  * a MessagePort (L3). The bridge relays what each overlay may do to the
- * background over the `wt-bridge` port (L2), fetches as the page for it,
+ * background over the `tt-bridge` port (L2), fetches as the page for it,
  * and routes the overlay's calls into that script's handles by their key:
  * `onPage:` (isolated world here, or through the background on MV3),
  * `onSite:` (the CSP fallback here, else the hook, L4). It also listens
@@ -43,7 +43,7 @@ import { Exposer, RpcClient, isRpcCall, isRpcResult, NOT_RUNNING, RPC_QUEUE_MAX,
 import { inertRemote } from "../shared/remote";
 import type { DocumentWhen, PlaceApi, RouteMeta } from "../shared/route";
 import { clipPathFor, normalizeRects } from "../shared/overlayRects";
-import { fromWireRequest, toWireResponse } from "../shared/wtFetch";
+import { fromWireRequest, toWireResponse } from "../shared/ttFetch";
 import { ShortcutRegistry, watchShortcuts, FrameShortcuts } from "../shared/shortcut";
 import type { RanApi } from "../shared/netTypes";
 
@@ -218,7 +218,7 @@ import type { RanApi } from "../shared/netTypes";
         // too: only a cid we sent and are still waiting for is accepted, and
         // the value is page data either way. A call from the page never
         // reaches trusted code.
-        // the site's world's `wt.siteStore` answers: to this world's mirrors and the overlays' (page data, for their own subscriptions)
+        // the site's world's `tt.siteStore` answers: to this world's mirrors and the overlays' (page data, for their own subscriptions)
         if (SITE_DOWN_KINDS.has(data.kind)) {
             siteMirrors?.receive(data);
             relaySiteDown(data);
@@ -314,7 +314,7 @@ import type { RanApi } from "../shared/netTypes";
 
     // ---- isolated onPage code's stores (MV2: it runs here) ----
     //
-    // Replicas, primed by the bundle (`isoStores`, this page's wt.pageStore
+    // Replicas, primed by the bundle (`isoStores`, this page's tt.pageStore
     // copies). Their ops go over L2 tagged `ISO_STORE_TAG + s`, once the
     // background granted the script (`iso.stores`) on that link.
     let isoHub: ReplicaHub | null = null;
@@ -376,7 +376,7 @@ import type { RanApi } from "../shared/netTypes";
         return isoHub;
     }
 
-    // ---- `wt.siteStore`: the hook holds them; mirrors here (MV2 onPage code,
+    // ---- `tt.siteStore`: the hook holds them; mirrors here (MV2 onPage code,
     // the onSite fallback) and in the overlays (relayed) connect over window messages ----
     let siteMirrors: SiteMirrors | null = null;
     const postSite = (m: SiteUp) => window.postMessage({ source: MAIN_SOURCE, ...m }, location.origin);
@@ -495,7 +495,7 @@ import type { RanApi } from "../shared/netTypes";
                     siteCallers.add(scriptId);
                     scriptLog(scriptId, "error", formatScriptError(name, e, "onSite"), ctx);
                 },
-                log: (...args: any[]) => scriptLog(scriptId, "info", scriptLogLine(name, "wt.log", formatLogArgs(args)), ctx),
+                log: (...args: any[]) => scriptLog(scriptId, "info", scriptLogLine(name, "tt.log", formatLogArgs(args)), ctx),
                 storage: {
                     get: (key: string) => new Promise((r) => safeSend({ type: "scriptStorageGet", scriptId, key }, (x: any) => r(x && x.value))),
                     set: (key: string, value: any) => new Promise((r) => safeSend({ type: "scriptStorageSet", scriptId, key, value }, () => r(null))),
@@ -523,13 +523,13 @@ import type { RanApi } from "../shared/netTypes";
                 const codeOf = (importer: string) => (importer === h.name ? h.src : (libSources.find((l) => l.name === importer)?.src ?? ""));
                 const requireFrom = makeLibRequire(
                     libSources,
-                    (lib, require, moduleObj) => scriptFunction(lib.src!, lib.name)(shimFor(null, lib.name, lib.params || {}, undefined, h.scriptId).wt, consoleProxy, require, moduleObj, moduleObj.exports),
+                    (lib, require, moduleObj) => scriptFunction(lib.src!, lib.name)(shimFor(null, lib.name, lib.params || {}, undefined, h.scriptId).tt, consoleProxy, require, moduleObj, moduleObj.exports),
                     // the built-ins: isolated code all of them, the onSite fallback valtio's core
                     world === "isolated" ? { builtin: scriptBuiltin(codeOf, hotRegistry(h.scriptId).begin()) } : { builtin: siteBuiltin, onSite: true }
                 );
                 const moduleObj = { exports: {} as any };
                 const shim = shimFor(h.scriptId, h.name, h.params || {}, exposer, h.scriptId, gen);
-                shim.top(() => scriptFunction(h.src, h.name)(shim.wt, consoleProxy, requireFrom(h.name), moduleObj, moduleObj.exports));
+                shim.top(() => scriptFunction(h.src, h.name)(shim.tt, consoleProxy, requireFrom(h.name), moduleObj, moduleObj.exports));
                 dom = shim.dom;
                 if (world === "isolated") reactDoms.set(h.scriptId, () => reactOf(requireFrom(h.name)));
             } catch (e: any) {
@@ -580,7 +580,7 @@ import type { RanApi } from "../shared/netTypes";
 
     let hookBroken = false;
 
-    // ---- L2: the `wt-bridge` port to the background ----
+    // ---- L2: the `tt-bridge` port to the background ----
     //
     // Opened once this frame has scripts, so bundle updates come over it;
     // frames without one keep getting the one-shot `bundleUpdate`. A drop
@@ -598,12 +598,12 @@ import type { RanApi } from "../shared/netTypes";
         if (dead || l2) return;
         let port: chrome.runtime.Port;
         try {
-            port = chrome.runtime.connect({ name: "wt-bridge" });
+            port = chrome.runtime.connect({ name: "tt-bridge" });
         } catch (e: any) {
             if (CONTEXT_DEAD.test(e?.message || "")) markDead();
             return;
         }
-        const ep = portEndpoint(port, { debug: (m) => dlog("debug", "wt-bridge:", m) });
+        const ep = portEndpoint(port, { debug: (m) => dlog("debug", "tt-bridge:", m) });
         l2 = ep;
         ep.on("bundle.update", () => guard(() => onBundleUpdate()));
         // an overlay's store updates (the background only sends those of scripts with an overlay here)
@@ -806,7 +806,7 @@ import type { RanApi } from "../shared/netTypes";
     function ensureHost(): ShadowRoot {
         if (host && shadow && host.isConnected) return shadow;
         if (!host || !shadow) {
-            host = document.createElement("wiretrick-ui");
+            host = document.createElement("tangitweak-ui");
             shadow = host.attachShadow({ mode: "closed" });
             host.style.cssText = "all:initial!important;display:block!important;position:fixed!important;inset:0!important;width:auto!important;height:auto!important;z-index:2147483647!important;pointer-events:none!important;visibility:visible!important;opacity:1!important;transform:none!important;contain:strict!important";
             // a page that rewrites its <html> drops the host: put it back (its frames reload)
@@ -837,7 +837,7 @@ import type { RanApi } from "../shared/netTypes";
         o.frame = frame;
         frame.src = chrome.runtime.getURL("overlay.html") + "#" + o.nonce;
         frame.setAttribute("allowtransparency", "true");
-        frame.setAttribute("aria-label", `${o.info.name} (Wiretrick)`);
+        frame.setAttribute("aria-label", `${o.info.name} (TangiTweak)`);
         // same color-scheme inside and out, or Chromium paints the frame opaque
         frame.style.cssText = `all:initial;position:fixed;inset:0;width:100%;height:100%;border:0;margin:0;padding:0;background:transparent;color-scheme:normal;pointer-events:auto;z-index:${++zTop};clip-path:${clipPathFor([])}`;
         frame.addEventListener("load", () => guard(() => connectOverlay(o)), { once: true });
@@ -912,7 +912,7 @@ import type { RanApi } from "../shared/netTypes";
             if (o.ep === ep) removeOverlay(s, "closed");
         });
         // not the nonce: the frame has to know it
-        o.frame.contentWindow.postMessage({ wtOverlay: true }, "*", [port2]);
+        o.frame.contentWindow.postMessage({ ttOverlay: true }, "*", [port2]);
         // a frame that never says hello (navigated away, blocked) is dropped
         setTimeout(() => {
             if (!proven && !o.closed) {
@@ -1055,7 +1055,7 @@ import type { RanApi } from "../shared/netTypes";
         return c;
     }
 
-    /** `wt.fetch(…, { from: "page" })` and the overlay's `fetch`: this frame fetches, as the page (Firefox: the page's own fetch) */
+    /** `tt.fetch(…, { from: "page" })` and the overlay's `fetch`: this frame fetches, as the page (Firefox: the page's own fetch) */
     async function pageFetch(s: string, request: ReqOf<"pagefetch">["request"], bypass: boolean): Promise<ResOf<"pagefetch">> {
         const [url, init] = fromWireRequest(request, { credentials: "include" });
         const abs = new URL(url, location.href).href;

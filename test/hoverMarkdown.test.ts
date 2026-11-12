@@ -16,13 +16,13 @@ describe("hover markdown", () => {
         const [, body] = quickInfoToMarkdown({
             displayParts: [t("x")],
             tags: [
-                { name: "example", text: [t("wt.log(1);\nwt.log(2);")] },
+                { name: "example", text: [t("tt.log(1);\ntt.log(2);")] },
                 { name: "example", text: [t("```js\nfoo()\n```")] },
                 { name: "example", text: [t("<caption>Cap</caption>\nbar()")] },
             ],
         });
         expect(body).toBe(
-            "*@example*  \n```typescript\nwt.log(1);\nwt.log(2);\n```\n\n" +
+            "*@example*  \n```typescript\ntt.log(1);\ntt.log(2);\n```\n\n" +
                 "*@example*  \n```js\nfoo()\n```\n\n" +
                 "*@example*  \nCap\n```typescript\nbar()\n```"
         );
@@ -50,8 +50,8 @@ describe("hover markdown", () => {
 
     it("wraps long signatures: one parameter per line, long unions one member per line", () => {
         expect(formatSignature("(method) onDocument(): void")).toBe("(method) onDocument(): void");
-        expect(formatSignature("(method) f<T extends Record<string, X>>(def: Wiretrick.ScriptDef<T>, opts?: { a: (x: number) => void; b: string }): R<T>", 40)).toBe(
-            "(method) f<T extends Record<string, X>>(\n    def: Wiretrick.ScriptDef<T>,\n    opts?: { a: (x: number) => void; b: string }\n): R<T>"
+        expect(formatSignature("(method) f<T extends Record<string, X>>(def: TangiTweak.ScriptDef<T>, opts?: { a: (x: number) => void; b: string }): R<T>", 40)).toBe(
+            "(method) f<T extends Record<string, X>>(\n    def: TangiTweak.ScriptDef<T>,\n    opts?: { a: (x: number) => void; b: string }\n): R<T>"
         );
         expect(formatSignature('(property) A.when?: "document_idle" | "document_start" | "a, b" | "document_end"', 40)).toBe(
             '(property) A.when?:\n    | "document_idle"\n    | "document_start"\n    | "a, b"\n    | "document_end"'
@@ -67,9 +67,9 @@ describe("hover markdown", () => {
 
 describe("signature html", () => {
     it("maps offsets into the wrapped signature", () => {
-        const raw = "(method) onRequest(route: Wiretrick.Route, handler: (ctx: Wiretrick.RequestCtx) => void, extra: Wiretrick.Route): void";
+        const raw = "(method) onRequest(route: TangiTweak.Route, handler: (ctx: TangiTweak.RequestCtx) => void, extra: TangiTweak.Route): void";
         const wrapped = formatSignature(raw);
-        expect(wrapped).toContain("\n    route: Wiretrick.Route,\n");
+        expect(wrapped).toContain("\n    route: TangiTweak.Route,\n");
         for (const name of ["Route", "RequestCtx"]) {
             const at = raw.indexOf(name);
             const [s, e] = mapToFormatted(raw, wrapped, at, at + name.length);
@@ -85,18 +85,18 @@ describe("signature html", () => {
             [
                 { text: "x", color: "#001080" },
                 { text: ": ", color: "#000000" },
-                { text: "Wiretrick.Route", color: "#267f99" },
+                { text: "TangiTweak.Route", color: "#267f99" },
                 { text: " | " },
                 { text: "Map<a, b>", color: "#267f99" },
             ],
             [
-                { start: 13, end: 18, href: "command:go?1", title: 'W.R "x"' },
-                { start: 21, end: 24, href: "command:go?2" },
+                { start: 14, end: 19, href: "command:go?1", title: 'W.R "x"' },
+                { start: 22, end: 25, href: "command:go?2" },
             ]
         );
         expect(html).toBe(
             '<pre><span style="color:#001080;">x</span><span style="color:#000000;">: </span>' +
-                '<span style="color:#267f99;">Wiretrick.</span><a href="command:go?1" title="W.R &quot;x&quot;"><span style="color:#267f99;">Route</span></a> | ' +
+                '<span style="color:#267f99;">TangiTweak.</span><a href="command:go?1" title="W.R &quot;x&quot;"><span style="color:#267f99;">Route</span></a> | ' +
                 '<a href="command:go?2"><span style="color:#267f99;">Map</span></a><span style="color:#267f99;">&lt;a, b&gt;</span></pre>'
         );
     });

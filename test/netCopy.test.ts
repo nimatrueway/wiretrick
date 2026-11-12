@@ -50,7 +50,7 @@ describe("Network copy", () => {
             outcomes: [{ scriptId: "s", scriptName: "Mock", action: "onResponseBody → body", level: "info", kind: "modified", at: 0 }],
         });
         const doc = JSON.parse(copyRequests([post, req({ type: "main_frame", startedAt: Date.UTC(2026, 0, 1), status: 302, redirectTo: "https://b.test/" })], "har"));
-        expect(doc.log).toMatchObject({ version: "1.2", creator: { name: "Wiretrick" }, pages: [] });
+        expect(doc.log).toMatchObject({ version: "1.2", creator: { name: "TangiTweak" }, pages: [] });
         const [first, e] = doc.log.entries;
         expect(first).toMatchObject({ _resourceType: "document", response: { status: 302, redirectURL: "https://b.test/", content: { comment: "response body not captured" } } });
         expect(e).toMatchObject({
@@ -58,7 +58,7 @@ describe("Network copy", () => {
             time: 125,
             serverIPAddress: "10.0.0.1",
             _resourceType: "xhr",
-            _wiretrick: [{ script: "Mock", action: "onResponseBody → body", kind: "modified" }],
+            _tangitweak: [{ script: "Mock", action: "onResponseBody → body", kind: "modified" }],
             request: {
                 method: "POST",
                 queryString: [{ name: "x", value: "1" }, { name: "y", value: "two" }],

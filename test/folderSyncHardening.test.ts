@@ -37,7 +37,7 @@ function fakeDir(m: F, name: string): any {
             };
         },
         async getDirectoryHandle(n: string) {
-            if (n !== ".wiretrick-backup") throw new Error("nf");
+            if (n !== ".tangitweak-backup") throw new Error("nf");
             return fakeDir(backups, n);
         },
         async removeEntry(n: string) {
@@ -51,7 +51,7 @@ vi.mock("../src/shared/folderSync", async (orig) => ({ ...(await orig<any>()), l
 const put = (name: string, text: string) => files.set(name, { text, t: clock++ });
 const ss = () => import("../src/background/engine/scriptStore");
 const all = async () => (await (await ss()).listScripts()).map((s) => ({ id: s.id, name: s.meta.name, code: s.code })).sort((a, b) => a.name.localeCompare(b.name));
-const scriptFiles = () => [...files.keys()].filter((n) => n.endsWith(".ts") && n !== "wt-api.d.ts").sort();
+const scriptFiles = () => [...files.keys()].filter((n) => n.endsWith(".ts") && n !== "tt-api.d.ts").sort();
 
 async function started() {
     const sync = await import("../src/background/folderSync");
@@ -156,7 +156,7 @@ describe("folder sync: the background is the only writer", () => {
     it("renaming in the store renames the script's settings.yaml section", async () => {
         const sync = await started();
         const { saveScript } = await ss();
-        const code = `wt.params({ n: { type: "number", default: 1 } });`;
+        const code = `tt.params({ n: { type: "number", default: 1 } });`;
         await saveScript({ id: "p", code, name: "old" });
         await sync.flush();
         put("settings.yaml", files.get("settings.yaml")!.text.replace(/# n: 1|n: 1/, "n: 9 # tuned"));

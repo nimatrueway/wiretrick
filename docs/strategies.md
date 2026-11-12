@@ -3,43 +3,43 @@
 [← README](../README.md) · [Glossary](../GLOSSARY.md)
 
 Chrome and Firefox have fundamentally different extension APIs, and Chrome
-itself can only reach some resources through some paths. Wiretrick therefore
+itself can only reach some resources through some paths. TangiTweak therefore
 has five **interception strategies**. Every network handler names exactly
 **one** of them in its route's `strategy` — it is required, and there is
 no default:
 
 ```ts
-wt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, fn);
-wt.onResponseBody({ url: "https://example.com/app/*.js", strategy: "debugger" }, fn);
+tt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, fn);
+tt.onResponseBody({ url: "https://example.com/app/*.js", strategy: "debugger" }, fn);
 ```
 
 A route without `strategy` (or a bare URL pattern such as
-`wt.onRequest("*://example.com/*", fn)`) makes the script fail to load: the
+`tt.onRequest("*://example.com/*", fn)`) makes the script fail to load: the
 Problems view shows the error at that line until the route names one.
 
 `strategy` is a single value — there are no priority lists and no `auto`.
 **There is no fallback:** when the chosen strategy isn't available, the
-handler doesn't run and Wiretrick says so (see
+handler doesn't run and TangiTweak says so (see
 [below](#when-a-strategy-isnt-available)). Handlers of one script may use
 different strategies; each request is still handled by each handler at
 most once.
 
 | strategy | how it works | can see | banner? | notes |
 |---|---|---|---|---|
-| `helper` | a tiny local helper ([wiretrick-helper](local-helper.md)) is a loopback HTTPS proxy; a PAC routes only the hosts of `helper` handlers to it and it pauses requests for your handlers | **everything**: documents, script tags, images, workers, XHR — MV2 and MV3 | **never** | **Chromium-only**, needs the helper installed + the helper certificate trusted; your own proxy setting stays in effect |
+| `helper` | a tiny local helper ([tangitweak-helper](local-helper.md)) is a loopback HTTPS proxy; a PAC routes only the hosts of `helper` handlers to it and it pauses requests for your handlers | **everything**: documents, script tags, images, workers, XHR — MV2 and MV3 | **never** | **Chromium-only**, needs the helper installed + the helper certificate trusted; your own proxy setting stays in effect |
 | `page` | MAIN-world content script overrides `fetch` and `XMLHttpRequest` | requests the page's own JS makes (fetch/XHR — the majority of API traffic) | **never** | misses `<script src>`, `<img>`, documents, workers and requests made before the page patch loads; no `onResponseHeaders` |
 | `extension` | the extension handles each request: blocking `webRequest` (+ `filterResponseData` on Firefox) | everything | never | **MV2 builds only** — Firefox and Chromium browsers that still run MV2 (ungoogled-chromium, Brave, Arc…). Redirect, block, request/response headers and synchronous `replaceResponse` (handler or `onRequest` result) work on both (Chromium serves replacements by redirecting, Firefox in place — see [below](#how-each-strategy-serves-a-replacement)); `onResponseBody` and awaiting async handlers are Firefox-only (Chromium has no `filterResponseData`, and its blocking webRequest can't await) |
 | `debugger` | `chrome.debugger` + CDP Fetch domain: pause → run handlers → continue or fulfill | **everything**: documents, script tags, images, fonts, XHR — even requests the page didn't initiate | **yes** — Chrome shows a yellow "being debugged" bar while attached | Chromium-only; attach/detach is lazy and automatic |
 | `rules` | each handler runs **once** when scripts load; its result becomes a browser-native rule (`declarativeNetRequest`) that the browser applies itself | **everything**, the first navigation included | **never** | block, redirect and request/response headers only, with a fixed result ([what `rules` can do](#what-rules-can-do)); Chrome MV3, Chromium MV2 and Firefox 113+ |
 
-`wt.onSite`, `wt.onPage` and `wt.onOverlay` aren't network strategies: they
+`tt.onSite`, `tt.onPage` and `tt.onOverlay` aren't network strategies: they
 run in the page whatever the setting ([page
 code](scripting.md#page-code--wtonsite-wtonpage-wtonoverlay),
 [overlays](scripting.md#overlays--wtonoverlay)).
 
 **Requests from an overlay.** An
 [overlay](scripting.md#overlays--wtonoverlay)'s `fetch` (and its
-`wt.fetch`, which fetches as the page by default) goes through your
+`tt.fetch`, which fetches as the page by default) goes through your
 handlers like any request the tab makes, on every strategy except `page`,
 which only sees the page's own JavaScript. `{ bypass: true }` keeps every
 handler off one.
@@ -69,7 +69,7 @@ handler off one.
 > extension's `serve.html` — the address bar shows a `chrome-extension://…`
 > URL and the page loses its origin (cookies, relative links, same-origin
 > calls). To rewrite or replace the page itself on Chromium, use `helper`
-> or `debugger` on that handler (`wt.onPage` for DOM/title tweaks). Firefox's
+> or `debugger` on that handler (`tt.onPage` for DOM/title tweaks). Firefox's
 > `extension` doesn't have this limit.
 
 > **WebSockets (`ws:`/`wss:`).** On a WebSocket handshake only **block** and
@@ -77,7 +77,7 @@ handler off one.
 > No strategy can redirect a socket or replace its response: Chrome ignores
 > redirects on WebSocket handshakes (even from its own `declarativeNetRequest`),
 > and browsers never follow a redirect response there. `debugger` and `page`
-> never see the handshake at all. Wiretrick logs a warning when a script tries
+> never see the handshake at all. TangiTweak logs a warning when a script tries
 > any of these, and flags routes aimed only at WebSockets with
 > `replaceResponse`/`onResponseBody` in Problems. To point a socket elsewhere,
 > change the URL the page opens it with (e.g. rewrite the `new WebSocket(…)`
@@ -102,7 +102,7 @@ samples (Help → Samples) only use those.
   `{ url, resourceTypes: ["xmlhttprequest"], strategy: "page" }`.
 - **Rewrite page HTML / `<script src>` bodies** → `helper` or `debugger` on
   Chromium, `extension` on Firefox — not `page`.
-- **Change title/DOM after render** → `wt.onPage` — no network interception
+- **Change title/DOM after render** → `tt.onPage` — no network interception
   at all, works even when the HTML is service-worker served or hydration
   re-renders it (the resilient choice for SPA title/DOM tweaks).
 - **Keep a route off assets** → set `resourceTypes`. On `debugger` other types are never
@@ -150,7 +150,7 @@ Body handlers that matched a request but didn't run on it get the
 ## What `rules` can do
 
 A `rules` handler doesn't run per request. When scripts load (after every
-save, param change or enable toggle) Wiretrick runs it **once** and turns
+save, param change or enable toggle) TangiTweak runs it **once** and turns
 what it returns into browser-native rules (`declarativeNetRequest` session
 rules) that the browser then applies by itself — to every request, the
 first navigation included, with no banner and no helper.
@@ -164,7 +164,7 @@ first navigation included, with no banner and no helper.
 
 Code in the handler runs at that one-time run only, never for a request:
 the Problems view warns about calls that look meant to run per request —
-`console.*`, `wt.log`, `fetch`/`wt.fetch`, timers and store writes. To log
+`console.*`, `tt.log`, `fetch`/`tt.fetch`, timers and store writes. To log
 or count requests, use a per-request strategy (`extension`, `debugger` or
 `helper`).
 
@@ -176,15 +176,15 @@ wins. A block or redirect makes the same handler's `headers` moot, as on
 every strategy.
 
 ```ts
-wt.onRequest({ url: "*://ads.example.com/*", strategy: "rules" }, () => ({ block: true }));
-wt.onRequest({ url: "https://api.example.com/*", strategy: "rules" }, () => ({
+tt.onRequest({ url: "*://ads.example.com/*", strategy: "rules" }, () => ({ block: true }));
+tt.onRequest({ url: "https://api.example.com/*", strategy: "rules" }, () => ({
     headers: { set: { "x-debug": "1" }, remove: ["cookie"] },
 }));
-wt.onResponseHeaders({ url: "https://example.com/*", strategy: "rules" }, () => ({
+tt.onResponseHeaders({ url: "https://example.com/*", strategy: "rules" }, () => ({
     headers: { remove: ["content-security-policy"] },
 }));
 // rules where the browser has them, the per-request extension strategy elsewhere
-wt.onRequest({ url: "*://tracker.example.com/*", strategy: wt.isMV3 ? "rules" : "extension" }, () => ({ block: true }));
+tt.onRequest({ url: "*://tracker.example.com/*", strategy: tt.isMV3 ? "rules" : "extension" }, () => ({ block: true }));
 ```
 
 ### Captures in a redirect
@@ -196,7 +196,7 @@ browser substitutes them per request:
 ```ts
 // /api/users/7    → https://staging.example.com/users/7?v=
 // /api/v2/users/7 → https://staging.example.com/users/7?v=2
-wt.onRequest(
+tt.onRequest(
     { url: "https://example.com/api{/v:ver}?/users/:id(\\d+)", strategy: "rules" },
     (ctx) => ({ redirect: `https://staging.example.com/users/${ctx.groups.id}?v=${ctx.groups.ver ?? ""}` }),
 );
@@ -239,7 +239,7 @@ doesn't run, the rest of the script does:
   reached), with the browser's reason.
 
 > **State is frozen at load.** The one run sees params, but anything else the
-> handler reads — the time, `wt.storage`, `Math.random()`, a counter — is
+> handler reads — the time, `tt.storage`, `Math.random()`, a counter — is
 > read once and baked into the rule. It's refreshed only when scripts
 > reload (a save, a param change, an enable toggle). Use another strategy
 > for results that must change per request.
@@ -255,7 +255,7 @@ it is info level.
   settles — the banner clears while you keep browsing; MV3 keeps matching
   tabs attached.
 - **Strict**: only handlers on `debugger` ever attach the debugger. Avoid the
-  banner by picking `helper`, `page` or `extension` and use `wt.onPage` for
+  banner by picking `helper`, `page` or `extension` and use `tt.onPage` for
   page changes.
 - **Narrow with `resourceTypes`**: a `debugger` route only pauses its `resourceTypes`, so
   `resourceTypes: ["main_frame"]` leaves the page's assets and API calls alone.
@@ -267,7 +267,7 @@ then traces every request an `extension` handler matches — which scripts
 ran, what each `onRequest` returned, whether the browser followed the
 redirect, and how the request ended. Failures (`request FAILED net::…`) and
 changes the browser **ignored** because another extension (e.g. a second
-Wiretrick install) modified the same request are logged as warnings even
+TangiTweak install) modified the same request are logged as warnings even
 without debug. No `[extension]` line at all for a URL means the browser
 never showed that request to the extension (e.g. served by a service worker
 or the blocking listener could not be registered — that is logged as an
@@ -294,7 +294,7 @@ To keep the URL on Chromium, use `helper` or `debugger` for that handler.
 ### Missed warning
 
 A body handler that silently does nothing is hard to spot, so after a
-request completes (~1.5 s later) Wiretrick checks every enabled script's
+request completes (~1.5 s later) TangiTweak checks every enabled script's
 `onResponseBody` and `replaceResponse` handlers whose route covers the
 request (and `onRequest` handlers on `page`, for page fetch/XHR). If none of the script's body handlers ran for it, a WARN line
 attributed to the script is logged, e.g.
@@ -308,7 +308,7 @@ The reason is picked from the situation:
 - the handler is on `page` and the request isn't page fetch/XHR → set
   `strategy: "debugger"` or `"helper"` on the route;
 - the handler is on `page` and the tab has no page hook (it was open
-  before Wiretrick started or updated, so its content scripts never
+  before TangiTweak started or updated, so its content scripts never
   loaded) → reload the tab;
 - on `helper` and the request went to localhost (127.x, `[::1]`) → Chrome
   never sends loopback requests through a proxy, so the helper can't see
@@ -375,9 +375,9 @@ Which strategies each browser and build gives you
 ([strategies](#interception-strategies) explained above). The Settings
 strategy picker disables the ones the current browser can't use.
 
-| | `helper` (local helper) | `page` (page fetch/XHR) | `extension` (blocking webRequest) | `debugger` (chrome.debugger) | `rules` (browser-native rules) | page code (`wt.onSite`, `wt.onPage`, `wt.onOverlay`) |
+| | `helper` (local helper) | `page` (page fetch/XHR) | `extension` (blocking webRequest) | `debugger` (chrome.debugger) | `rules` (browser-native rules) | page code (`tt.onSite`, `tt.onPage`, `tt.onOverlay`) |
 |---|---|---|---|---|---|---|
-| **Chrome / Edge / Brave / Vivaldi, current** — `dist-mv3/` | ✅ no banner | ✅ | ❌ | ✅ banner shown | ✅ | ✅ (`wt.onPage` and `wt.onSite` need [user scripts](scripting.md#user-scripts-on-chrome); `wt.onOverlay` doesn't) |
+| **Chrome / Edge / Brave / Vivaldi, current** — `dist-mv3/` | ✅ no banner | ✅ | ❌ | ✅ banner shown | ✅ | ✅ (`tt.onPage` and `tt.onSite` need [user scripts](scripting.md#user-scripts-on-chrome); `tt.onOverlay` doesn't) |
 | **Chromium with MV2** (ungoogled-chromium, Brave, Arc… — any Chromium that still loads MV2 extensions) — `dist/` | ✅ no banner | ✅ | ✅ no banner — redirect, block, headers, sync replaceResponse; no body streaming or async (see [async](scripting.md#async-handlers)) | ✅ banner shown | ✅ | ✅ |
 | **Firefox** — `dist/` | ❌ (not needed: `extension` reaches everything) | ✅ | ✅ no banner | ❌ | ✅ 113+ | ✅ |
 

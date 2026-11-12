@@ -40,13 +40,13 @@ describe("import paths", () => {
 const LIMIT_SCRIPT = `import limits from "./mock/rate-limits.json";
 import { max } from "./mock/rate-limits.json";
 export const both = [limits.max, max];
-wt.onRequest({ url: "*://a.test/*", strategy: "helper" }, () => {});`;
+tt.onRequest({ url: "*://a.test/*", strategy: "helper" }, () => {});`;
 
 describe("JSON data file imports", () => {
     const data = [{ path: "mock/rate-limits.json", text: '{ "max": 7 }' }];
 
     it("default import is the whole object, a named import a property", () => {
-        const c = compileWithLibs({ id: "m", name: "main.wiretrick", code: LIMIT_SCRIPT }, [], {}, data);
+        const c = compileWithLibs({ id: "m", name: "main.tangitweak", code: LIMIT_SCRIPT }, [], {}, data);
         expect(c.error).toBeNull();
         expect(c.deps).toEqual(["mock/rate-limits.json"]);
         expect(c.meta.routes).toHaveLength(1);
@@ -54,7 +54,7 @@ describe("JSON data file imports", () => {
 
     it("libraries in folders import relative to their own folder", () => {
         const lib = { id: "l", name: "mock/helpers", code: `import d from "./rate-limits.json"; export const max = d.max;` };
-        const main = { id: "m", name: "main", code: `import { max } from "./mock/helpers";\nwt.params({ n: { type: "number", default: max } });` };
+        const main = { id: "m", name: "main", code: `import { max } from "./mock/helpers";\ntt.params({ n: { type: "number", default: max } });` };
         const c = compileWithLibs(main, [lib], {}, data);
         expect(c.error).toBeNull();
         expect(c.paramDefs?.n.default).toBe(7);
@@ -63,19 +63,19 @@ describe("JSON data file imports", () => {
 
     it("parses fresh per import: a mutation doesn't leak", () => {
         const lib = { id: "l", name: "a", code: `import d from "./mock/rate-limits.json"; d.max = 99; export const x = 1;` };
-        const main = { id: "m", name: "main", code: `import "./a";\nimport d from "./mock/rate-limits.json";\nwt.params({ n: { type: "number", default: d.max } });` };
+        const main = { id: "m", name: "main", code: `import "./a";\nimport d from "./mock/rate-limits.json";\ntt.params({ n: { type: "number", default: d.max } });` };
         expect(compileWithLibs(main, [lib], {}, data).paramDefs?.n.default).toBe(7);
     });
 
     it("invalid JSON is the importer's compile error, naming the file and position, at the import line", () => {
         const bad = [{ path: "mock/rate-limits.json", text: '{\n  "max": 7,\n}' }];
-        const c = compileWithLibs({ id: "m", name: "main.wiretrick", code: "// x\n" + LIMIT_SCRIPT }, [], {}, bad);
+        const c = compileWithLibs({ id: "m", name: "main.tangitweak", code: "// x\n" + LIMIT_SCRIPT }, [], {}, bad);
         expect(c.error).toMatch(/cannot import "\.\/mock\/rate-limits\.json": mock\/rate-limits\.json:3:1 is not valid JSON/);
         expect(errorPosition(c.error!)?.line).toBe(2);
     });
 
     it("a missing data file is a compile error too (never a stub)", () => {
-        const c = compileWithLibs({ id: "m", name: "main.wiretrick", code: LIMIT_SCRIPT }, [], {}, []);
+        const c = compileWithLibs({ id: "m", name: "main.tangitweak", code: LIMIT_SCRIPT }, [], {}, []);
         expect(c.error).toMatch(/no data file "mock\/rate-limits\.json"/);
         expect(errorPosition(c.error!)?.line).toBe(1);
     });

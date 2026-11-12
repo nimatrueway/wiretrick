@@ -5,8 +5,8 @@
  *   SW ⇄ chrome.runtime ⇄ HERE ⇄ window.postMessage ⇄ sandbox iframe
  *
  * Pure transport — no logic. Besides the request/response ops it relays
- * the L1 wire link (`wire` messages: wt.globalStore, wt.fetch) both ways. chrome.runtime messaging is JSON, so body
- * bytes arrive packed ({ __wtBytes }) and are unpacked for postMessage
+ * the L1 wire link (`wire` messages: tt.globalStore, tt.fetch) both ways. chrome.runtime messaging is JSON, so body
+ * bytes arrive packed ({ __ttBytes }) and are unpacked for postMessage
  * (structured clone keeps Uint8Array); results are packed on the way back.
  */
 import { packBytes, unpackBytes } from "../shared/bytesPack";

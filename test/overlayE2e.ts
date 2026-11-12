@@ -1,5 +1,5 @@
 /**
- * Shared E2E check (MV2 + MV3): overlays (wt.onOverlay). A `.tsx` switch
+ * Shared E2E check (MV2 + MV3): overlays (tt.onOverlay). A `.tsx` switch
  * with the built-in React and valtio toggles a page-strategy mock live;
  * clicks on empty areas reach the page; a strict-CSP page still shows the
  * overlay; the page can't find the frame or read the overlay's code; the
@@ -124,12 +124,12 @@ x.send();
 
 const switchCode = (origin: string, label: string) => `import { useSnapshot } from "valtio";
 
-const mock = wt.globalStore("ovmock", { enabled: false });
+const mock = tt.globalStore("ovmock", { enabled: false });
 
-wt.replaceResponse({ url: "${origin}/ov-me", strategy: "page" }, () =>
+tt.replaceResponse({ url: "${origin}/ov-me", strategy: "page" }, () =>
     mock.enabled ? JSON.stringify({ name: "MOCKED" }) : undefined);
 
-wt.onOverlay("${origin}/ov-*", (ctx) => {
+tt.onOverlay("${origin}/ov-*", (ctx) => {
     const secret = "OV-SECRET-MARKER";
     void fetch("/ov-cookie");
     function Panel() {
@@ -144,7 +144,7 @@ wt.onOverlay("${origin}/ov-*", (ctx) => {
 });
 `;
 
-const rpcCode = (origin: string) => `const overlay = wt.onOverlay("${origin}/ov-*", (ctx) => {
+const rpcCode = (origin: string) => `const overlay = tt.onOverlay("${origin}/ov-*", (ctx) => {
     const out = document.body.appendChild(document.createElement("output"));
     out.id = "picked";
     out.style.cssText = "position:fixed;left:16px;bottom:16px;background:white;padding:8px";
@@ -170,7 +170,7 @@ const rpcCode = (origin: string) => `const overlay = wt.onOverlay("${origin}/ov-
     };
 });
 
-wt.onSite("${origin}/ov-app*", () => {
+tt.onSite("${origin}/ov-app*", () => {
     try {
         void overlay.hit();
         document.documentElement.dataset.mainCall = "called";
@@ -179,7 +179,7 @@ wt.onSite("${origin}/ov-app*", () => {
     }
 });
 
-const iso = wt.onPage("${origin}/ov-*", () => {
+const iso = tt.onPage("${origin}/ov-*", () => {
     document.addEventListener("click", (e) => {
         if (e.altKey) void overlay.picked((e.target as Element).tagName);
     }, true);
@@ -226,8 +226,8 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
     const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
     const save = (id: string, code: string, name: string) => send({ type: "saveScript", id, code, name });
 
-    const sw = await save("s_ov_switch", switchCode(origin, "Mock /api/me"), "overlay switch.wiretrick");
-    const rpc = await save("s_ov_rpc", rpcCode(origin), "overlay rpc.wiretrick");
+    const sw = await save("s_ov_switch", switchCode(origin, "Mock /api/me"), "overlay switch.tangitweak");
+    const rpc = await save("s_ov_rpc", rpcCode(origin), "overlay rpc.tangitweak");
     check(t("tsx overlay + RPC scripts save without errors"), !sw?.error && !rpc?.error, JSON.stringify({ sw: sw?.error?.split("\n")[0], rpc: rpc?.error?.split("\n")[0] }));
     await mgr.waitForTimeout(800);
 
@@ -235,10 +235,10 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
     page.on("console", (m: any) => console.log("  [ov-app]", m.text().slice(0, 160)));
     // everything the page's own window sees posted (the hook's traffic included)
     await page.addInitScript(() => {
-        (window as any).__wtMsgs = [];
+        (window as any).__ttMsgs = [];
         addEventListener("message", (e) => {
             try {
-                (window as any).__wtMsgs.push(JSON.stringify(e.data));
+                (window as any).__ttMsgs.push(JSON.stringify(e.data));
             } catch {}
         }, true);
     });
@@ -252,7 +252,7 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
     if (swFrame) {
         const at = await centerOf(swFrame, "#box");
         // the frame takes clicks once it reported where it draws (clip-path)
-        await waitFor<string>(() => page.evaluate(({ x, y }: { x: number; y: number }) => document.elementFromPoint(x, y)?.tagName ?? "", at), (v) => v === "WIRETRICK-UI", 5000);
+        await waitFor<string>(() => page.evaluate(({ x, y }: { x: number; y: number }) => document.elementFromPoint(x, y)?.tagName ?? "", at), (v) => v === "TANGITWEAK-UI", 5000);
         await page.mouse.click(at.x, at.y);
     }
     const checked = swFrame ? await waitFor<boolean>(() => swFrame.evaluate(() => (document.getElementById("box") as HTMLInputElement).checked), (v) => v, 5000) : false;
@@ -275,7 +275,7 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
         const docRow = net.find((e) => e.url === origin + path && e.startedAt >= since - 50 && e.outcomes.length);
         check(
             t("Network: the page's document row names the scripts whose onSite/onOverlay handlers ran on it"),
-            (docRow?.type === "main_frame" || !!docRow?.synthetic) && ["overlay switch.wiretrick: overlay shown", "overlay rpc.wiretrick: overlay shown", "overlay rpc.wiretrick: onSite ran"].every((x) => docTags.includes(x)) && docRow.outcomes.every((o) => o.kind === "observed"),
+            (docRow?.type === "main_frame" || !!docRow?.synthetic) && ["overlay switch.tangitweak: overlay shown", "overlay rpc.tangitweak: overlay shown", "overlay rpc.tangitweak: onSite ran"].every((x) => docTags.includes(x)) && docRow.outcomes.every((o) => o.kind === "observed"),
             JSON.stringify({ type: docRow?.type, synthetic: docRow?.synthetic, docTags })
         );
         const mainCall = await waitFor<string>(() => page.evaluate(() => document.documentElement.dataset.mainCall || ""), (v) => !!v, 5000);
@@ -288,7 +288,7 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
         );
     };
     const net = await waitFor<NetRow[]>(netRows, (rows) => tagsOf(rows, "/ov-cookie").length >= 1, 5000);
-    check(t("Network: the overlay's fetch names its script"), tagsOf(net, "/ov-cookie").includes("overlay switch.wiretrick: fetched by its overlay"), JSON.stringify(tagsOf(net, "/ov-cookie")));
+    check(t("Network: the overlay's fetch names its script"), tagsOf(net, "/ov-cookie").includes("overlay switch.tangitweak: fetched by its overlay"), JSON.stringify(tagsOf(net, "/ov-cookie")));
 
     const pass = await page.evaluate(() => {
         const r = document.getElementById("pass")!.getBoundingClientRect();
@@ -314,7 +314,7 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
             shadows: all.filter((e) => e.shadowRoot).length,
             html: document.documentElement.outerHTML.includes("OV-SECRET-MARKER"),
             timing: performance.getEntries().filter((e) => e.name.includes("overlay.html")).map((e) => e.name),
-            posted: ((window as any).__wtMsgs as string[]).filter((m) => m.includes("OV-SECRET-MARKER") || m.includes("overlay.html")).length,
+            posted: ((window as any).__ttMsgs as string[]).filter((m) => m.includes("OV-SECRET-MARKER") || m.includes("overlay.html")).length,
             frameDoc,
         };
     });
@@ -404,10 +404,10 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
 
     // save: the overlay updates in place (the same frame: a mark on its window stays) with the new code; the store keeps its value
     const marked = await overlayFrame(page, "#sw");
-    await marked?.evaluate(() => ((window as any).__wtSameFrame = 1)).catch(() => null);
+    await marked?.evaluate(() => ((window as any).__ttSameFrame = 1)).catch(() => null);
     const frameCount = () => page.frames().filter((f: any) => f.url().includes("/overlay.html")).length;
     const framesBefore = frameCount();
-    await save("s_ov_switch", switchCode(origin, "Mock v2"), "overlay switch.wiretrick");
+    await save("s_ov_switch", switchCode(origin, "Mock v2"), "overlay switch.tangitweak");
     const v2 = await waitFor(
         async () => {
             const f = await overlayFrame(page, "#sw");
@@ -417,7 +417,7 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
                           text: document.getElementById("sw")!.textContent || "",
                           on: (document.getElementById("box") as HTMLInputElement).checked,
                           mounts: document.querySelectorAll("#sw").length,
-                          same: (window as any).__wtSameFrame === 1,
+                          same: (window as any).__ttSameFrame === 1,
                       }))
                       .catch(() => null)
                 : null;
@@ -450,7 +450,7 @@ export async function checkOverlays(ctx: any, mgr: any, origin: string, check: C
     await send({ type: "deleteScript", id: "s_ov_rpc" });
 }
 
-const keysCode = (origin: string, id: string) => `wt.onOverlay("${origin}/ov-keys", (ctx) => {
+const keysCode = (origin: string, id: string) => `tt.onOverlay("${origin}/ov-keys", (ctx) => {
     const box = document.body.appendChild(document.createElement("div"));
     box.id = "${id}";
     box.textContent = "Hello";
@@ -473,9 +473,9 @@ const keysCode = (origin: string, id: string) => `wt.onOverlay("${origin}/ov-key
 export async function checkOverlayShortcuts(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
     const t = (s: string) => `overlay shortcuts${opts.label ?? ""}: ${s}`;
     const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
-    const a = await send({ type: "saveScript", id: "s_ov_keys", code: keysCode(origin, "kbox"), name: "keys first.wiretrick" });
+    const a = await send({ type: "saveScript", id: "s_ov_keys", code: keysCode(origin, "kbox"), name: "keys first.tangitweak" });
     await mgr.waitForTimeout(300);
-    const b = await send({ type: "saveScript", id: "s_ov_keys2", code: keysCode(origin, "kbox2"), name: "keys second.wiretrick" });
+    const b = await send({ type: "saveScript", id: "s_ov_keys2", code: keysCode(origin, "kbox2"), name: "keys second.tangitweak" });
     check(t("scripts save without errors"), !a?.error && !b?.error, JSON.stringify({ a: a?.error, b: b?.error }));
     await mgr.waitForTimeout(800);
 
@@ -523,7 +523,7 @@ export async function checkOverlayShortcuts(ctx: any, mgr: any, origin: string, 
     const lines: string[] = await mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line")].map((l) => (l as HTMLElement).dataset.text || ""));
     check(
         t("a Log warning names the script that keeps the keys"),
-        lines.some((l) => l.includes("[keys second.wiretrick]") && l.includes("Alt+Shift+H") && l.includes('"keys first.wiretrick" (earlier in the list) uses these keys too')),
+        lines.some((l) => l.includes("[keys second.tangitweak]") && l.includes("Alt+Shift+H") && l.includes('"keys first.tangitweak" (earlier in the list) uses these keys too')),
         lines.filter((l) => l.includes("keys")).join(" | ").slice(0, 300)
     );
 
@@ -536,15 +536,15 @@ export async function checkOverlayShortcuts(ctx: any, mgr: any, origin: string, 
     await (await f1.frameElement()).evaluate((el: Element) => el.remove());
     const evictLines = () => mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line")].map((l) => (l as HTMLElement).dataset.text || "").filter((l) => l.includes("removed by another extension")));
     const evicted: string[] = await waitFor(evictLines, (v) => v.length > 0, 5000);
-    check(t("a frame removed by another extension logs a warning naming the script"), evicted.length === 1 && evicted[0].includes("[keys first.wiretrick]"), JSON.stringify(evicted));
+    check(t("a frame removed by another extension logs a warning naming the script"), evicted.length === 1 && evicted[0].includes("[keys first.tangitweak]"), JSON.stringify(evicted));
     await page.keyboard.press("Alt+Shift+KeyH");
     const shown2 = () => f2.evaluate(() => !document.getElementById("kbox2")!.hidden).catch(() => null);
     const freed = await waitFor(shown2, (v) => v === true, 3000);
     check(t("its shortcuts are dropped (the next script gets the keys)"), freed === true, String(freed));
-    await send({ type: "saveScript", id: "s_ov_keys2", code: keysCode(origin, "kbox2") + "\n// v2", name: "keys second.wiretrick" });
+    await send({ type: "saveScript", id: "s_ov_keys2", code: keysCode(origin, "kbox2") + "\n// v2", name: "keys second.tangitweak" });
     await page.waitForTimeout(1500);
     check(t("it isn't re-created when another script changes"), (await kboxFrames()) === 0, String(await kboxFrames()));
-    await send({ type: "saveScript", id: "s_ov_keys", code: keysCode(origin, "kbox") + "\n// v2", name: "keys first.wiretrick" });
+    await send({ type: "saveScript", id: "s_ov_keys", code: keysCode(origin, "kbox") + "\n// v2", name: "keys first.tangitweak" });
     const back = await waitFor(kboxFrames, (n) => n === 1, 8000);
     check(t("changing its code starts it again"), back === 1, String(back));
     check(t("the warning is logged once"), (await evictLines()).length === 1, JSON.stringify(await evictLines()));
@@ -554,7 +554,7 @@ export async function checkOverlayShortcuts(ctx: any, mgr: any, origin: string, 
     await send({ type: "deleteScript", id: "s_ov_keys2" });
 }
 
-const pageKeysCode = (origin: string, id: string) => `wt.onPage("${origin}/ov-keys*", (ctx) => {
+const pageKeysCode = (origin: string, id: string) => `tt.onPage("${origin}/ov-keys*", (ctx) => {
     const out = document.getElementById("${id}") ?? document.body.appendChild(Object.assign(document.createElement("output"), { id: "${id}" }));
     ctx.shortcut("Alt+Shift+J", () => (out.dataset.n = String(Number(out.dataset.n || 0) + 1)));
     ctx.shortcut("", () => {});
@@ -570,9 +570,9 @@ const pageKeysCode = (origin: string, id: string) => `wt.onPage("${origin}/ov-ke
 export async function checkPageShortcuts(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string; separateWorlds?: boolean } = {}): Promise<void> {
     const t = (s: string) => `page shortcuts${opts.label ?? ""}: ${s}`;
     const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
-    const a = await send({ type: "saveScript", id: "s_pk1", code: pageKeysCode(origin, "pk1"), name: "page keys first.wiretrick" });
+    const a = await send({ type: "saveScript", id: "s_pk1", code: pageKeysCode(origin, "pk1"), name: "page keys first.tangitweak" });
     await mgr.waitForTimeout(300);
-    const b = opts.separateWorlds ? null : await send({ type: "saveScript", id: "s_pk2", code: pageKeysCode(origin, "pk2"), name: "page keys second.wiretrick" });
+    const b = opts.separateWorlds ? null : await send({ type: "saveScript", id: "s_pk2", code: pageKeysCode(origin, "pk2"), name: "page keys second.tangitweak" });
     check(t("scripts save without errors"), !a?.error && !b?.error, JSON.stringify({ a: a?.error, b: b?.error }));
     await mgr.waitForTimeout(800);
 
@@ -595,12 +595,12 @@ export async function checkPageShortcuts(ctx: any, mgr: any, origin: string, che
         const lines: string[] = await mgr.evaluate(() => [...document.querySelectorAll("#log-entries .log-line")].map((l) => (l as HTMLElement).dataset.text || ""));
         check(
             t("a Log warning names the script that keeps the keys"),
-            lines.some((l) => l.includes("[page keys second.wiretrick] onPage: shortcut Alt+Shift+J") && l.includes('"page keys first.wiretrick" (earlier in the list)')),
+            lines.some((l) => l.includes("[page keys second.tangitweak] onPage: shortcut Alt+Shift+J") && l.includes('"page keys first.tangitweak" (earlier in the list)')),
             lines.filter((l) => l.includes("page keys")).join(" | ").slice(0, 300)
         );
     }
 
-    await send({ type: "saveScript", id: "s_pk1", code: pageKeysCode(origin, "pk1") + "\n// v2", name: "page keys first.wiretrick" });
+    await send({ type: "saveScript", id: "s_pk1", code: pageKeysCode(origin, "pk1") + "\n// v2", name: "page keys first.tangitweak" });
     await page.waitForTimeout(1500);
     await page.keyboard.press("Alt+Shift+KeyJ");
     await page.waitForTimeout(500);
@@ -625,7 +625,7 @@ export async function checkPageShortcuts(ctx: any, mgr: any, origin: string, che
 export async function checkOverlayPreview(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
     const t = (s: string) => `overlay preview${opts.label ?? ""}: ${s}`;
     const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
-    const saved = await send({ type: "saveScript", id: "s_ov_prev", code: switchCode(origin, "Preview switch"), name: "overlay preview.wiretrick" });
+    const saved = await send({ type: "saveScript", id: "s_ov_prev", code: switchCode(origin, "Preview switch"), name: "overlay preview.tangitweak" });
     check(t("the script saves"), !saved?.error, saved?.error);
     await mgr.bringToFront();
     await mgr.waitForSelector('#script-list li[data-id="s_ov_prev"]', { timeout: 8000 });
@@ -649,7 +649,7 @@ export async function checkOverlayPreview(ctx: any, mgr: any, origin: string, ch
     const onPage = pageFrame ? await waitFor<boolean>(() => pageFrame.evaluate(() => (document.getElementById("box") as HTMLInputElement).checked).catch(() => false), (v) => v, 5000) : false;
     check(t("its switch flips the store: a request in a tab gets mocked, the page's overlay follows"), before.includes("REAL") && checked && after.includes("MOCKED") && onPage, JSON.stringify({ before, checked, after, onPage }));
 
-    await send({ type: "saveScript", id: "s_ov_prev", code: switchCode(origin, "Preview v2"), name: "overlay preview.wiretrick" });
+    await send({ type: "saveScript", id: "s_ov_prev", code: switchCode(origin, "Preview v2"), name: "overlay preview.tangitweak" });
     const v2 = await waitFor(
         async () => {
             const f = await overlayFrame(mgr, "#sw");
@@ -665,9 +665,9 @@ export async function checkOverlayPreview(ctx: any, mgr: any, origin: string, ch
     await send({ type: "deleteScript", id: "s_ov_prev" });
 }
 
-const twoTabCode = (origin: string) => `const ps = wt.pageStore("ps", { n: 0 });
+const twoTabCode = (origin: string) => `const ps = tt.pageStore("ps", { n: 0 });
 
-wt.replaceResponse({ url: "${origin}/ov-ps", strategy: "page" }, () => {
+tt.replaceResponse({ url: "${origin}/ov-ps", strategy: "page" }, () => {
     try {
         ps.n++;
         return String(ps.n);
@@ -676,7 +676,7 @@ wt.replaceResponse({ url: "${origin}/ov-ps", strategy: "page" }, () => {
     }
 });
 
-wt.onOverlay("${origin}/ov-two*", () => {
+tt.onOverlay("${origin}/ov-two*", () => {
     const out = document.body.appendChild(document.createElement("output"));
     out.id = "two";
     out.value = "pending";
@@ -689,20 +689,20 @@ wt.onOverlay("${origin}/ov-two*", () => {
     void ask();
 });
 
-const pg = wt.onSite("${origin}/ov-two*", () => ({
+const pg = tt.onSite("${origin}/ov-two*", () => ({
     whoami: () => ({ q: location.search }),
 }));
 `;
 
 /**
  * Two tabs, one overlay + onSite script: each overlay's calls reach
- * its own tab's page, and each page has its own wt.pageStore copy (a
+ * its own tab's page, and each page has its own tt.pageStore copy (a
  * reload starts over; a pushState doesn't).
  */
 export async function checkPageStores(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
     const t = (s: string) => `pageStore${opts.label ?? ""}: ${s}`;
     const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
-    const saved = await send({ type: "saveScript", id: "s_two", code: twoTabCode(origin), name: "two tabs.wiretrick" });
+    const saved = await send({ type: "saveScript", id: "s_two", code: twoTabCode(origin), name: "two tabs.tangitweak" });
     check(t("the script saves"), !saved?.error, saved?.error);
     await mgr.waitForTimeout(800);
     const open = async (q: string) => {
@@ -750,32 +750,32 @@ export async function checkPageStores(ctx: any, mgr: any, origin: string, check:
     await send({ type: "deleteScript", id: "s_two" });
 }
 
-const placeCode = (origin: string) => `const site = wt.onSite({ url: "${origin}/ov-layer*", when: "document_end" }, (ctx) => {
+const placeCode = (origin: string) => `const site = tt.onSite({ url: "${origin}/ov-layer*", when: "document_end" }, (ctx) => {
     document.body.dataset.siteRan = String((window as any).__site);
     return { site: () => (window as any).__site + ":" + ctx.url };
 });
 
-wt.onOverlay("${origin}/ov-layer*", async () => {
+tt.onOverlay("${origin}/ov-layer*", async () => {
     const o = document.body.appendChild(document.createElement("output"));
     o.id = "domov";
     o.value = "frame";
     o.value = await site.site();
 });
 
-wt.onPage("${origin}/ov-layer*", async () => {
+tt.onPage("${origin}/ov-layer*", async () => {
     document.body.dataset.pageSaw = typeof (window as any).__site + "|" + (await site.site());
 });
 `;
 
 /**
- * The three places a page handler runs: wt.onSite (the site's own world),
- * wt.onPage (the isolated world) and wt.onOverlay (the overlay frame) — and
+ * The three places a page handler runs: tt.onSite (the site's own world),
+ * tt.onPage (the isolated world) and tt.onOverlay (the overlay frame) — and
  * what each can reach.
  */
 export async function checkPlaces(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
     const t = (s: string) => `onSite/onPage/onOverlay${opts.label ?? ""}: ${s}`;
     const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
-    const saved = await send({ type: "saveScript", id: "s_layer", code: placeCode(origin), name: "places.wiretrick" });
+    const saved = await send({ type: "saveScript", id: "s_layer", code: placeCode(origin), name: "places.tangitweak" });
     check(t("the script saves"), !saved?.error, saved?.error);
     await mgr.waitForTimeout(800);
     const page = await ctx.newPage();
@@ -795,16 +795,16 @@ export async function checkPlaces(ctx: any, mgr: any, origin: string, check: Che
     // Handlers a library's exported function registers, called from the script's top level, are the script's.
     const u = `${origin}/ov-layer*`;
     const lib = await send({ type: "saveScript", id: "s_layer_lib", name: "places-lib", code: `export function install() {
-    const site = wt.onSite({ url: "${u}", when: "document_end" }, () => ({ v: () => (window as any).__site }));
-    wt.onPage("${u}", async () => { document.body.dataset.libPage = typeof (window as any).__site + "|" + (await site.v()); });
-    wt.onOverlay("${u}", async () => {
+    const site = tt.onSite({ url: "${u}", when: "document_end" }, () => ({ v: () => (window as any).__site }));
+    tt.onPage("${u}", async () => { document.body.dataset.libPage = typeof (window as any).__site + "|" + (await site.v()); });
+    tt.onOverlay("${u}", async () => {
         const o = document.body.appendChild(document.createElement("output"));
         o.id = "libov";
         o.value = "frame";
         o.value = await site.v();
     });
 }` });
-    const user = await send({ type: "saveScript", id: "s_layer_user", name: "places-user.wiretrick", code: `import { install } from "./places-lib";\nwt.onPage("${u}", () => { document.body.dataset.rootPage = "1"; });\ninstall();` });
+    const user = await send({ type: "saveScript", id: "s_layer_user", name: "places-user.tangitweak", code: `import { install } from "./places-lib";\ntt.onPage("${u}", () => { document.body.dataset.rootPage = "1"; });\ninstall();` });
     check(t("a library and its importer save"), !lib?.error && !user?.error, lib?.error || user?.error);
     await mgr.waitForTimeout(800);
     const p2 = await ctx.newPage();
@@ -820,14 +820,14 @@ export async function checkPlaces(ctx: any, mgr: any, origin: string, check: Che
     await send({ type: "deleteScript", id: "s_layer_user" });
     await send({ type: "deleteScript", id: "s_layer_lib" });
 
-    // wt.params is assignable from onPage and onOverlay code: saved like a ⚙ change, and the script re-runs with it
-    const ps = await send({ type: "saveScript", id: "s_param_set", name: "param-set.wiretrick", code: `const cfg = wt.params({ on: { type: "boolean", default: true }, hits: { type: "stringList", default: [] } });
-wt.onPage("${u}", (ctx) => {
+    // tt.params is assignable from onPage and onOverlay code: saved like a ⚙ change, and the script re-runs with it
+    const ps = await send({ type: "saveScript", id: "s_param_set", name: "param-set.tangitweak", code: `const cfg = tt.params({ on: { type: "boolean", default: true }, hits: { type: "stringList", default: [] } });
+tt.onPage("${u}", (ctx) => {
     document.body.dataset.paramOn = cfg.on + "|" + cfg.hits.join(",");
     const b = ctx.once("b", () => { const b = document.body.appendChild(document.createElement("button")); b.id = "pflip"; return b; });
     b.onclick = () => { cfg.on = !cfg.on; cfg.hits.push("page"); };
 });
-wt.onOverlay("${u}", (ctx) => {
+tt.onOverlay("${u}", (ctx) => {
     const o = ctx.once("o", () => { const o = document.body.appendChild(document.createElement("button")); o.id = "oflip"; return o; });
     o.textContent = cfg.on + "|" + cfg.hits.join(",");
     o.onclick = () => { cfg.on = !cfg.on; cfg.hits.push("ov"); };
@@ -859,12 +859,12 @@ const isoStoreCode = (origin: string) => `import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { useSnapshot } from "valtio";
 
-const g = wt.globalStore("isog", { n: 0 }, { persist: false });
-const ps = wt.pageStore("isops", { hits: 0 });
+const g = tt.globalStore("isog", { n: 0 }, { persist: false });
+const ps = tt.pageStore("isops", { hits: 0 });
 
-wt.replaceResponse({ url: "${origin}/ov-isops", strategy: "page" }, () => String(++ps.hits));
+tt.replaceResponse({ url: "${origin}/ov-isops", strategy: "page" }, () => String(++ps.hits));
 
-wt.onOverlay("${origin}/ov-isost*", () => {
+tt.onOverlay("${origin}/ov-isost*", () => {
     const out = document.body.appendChild(document.createElement("output"));
     out.id = "isost-ov";
     out.value = "overlay";
@@ -872,7 +872,7 @@ wt.onOverlay("${origin}/ov-isost*", () => {
     (window as any).bump = () => ++g.n;
 });
 
-const site = wt.onSite("${origin}/ov-isost*", (ctx) => {
+const site = tt.onSite("${origin}/ov-isost*", (ctx) => {
     (window as any).__isoSecret = "PAGE-GLOBAL-42";
     try {
         document.documentElement.dataset.mainStore = "read " + ps.hits;
@@ -880,7 +880,7 @@ const site = wt.onSite("${origin}/ov-isost*", (ctx) => {
         document.documentElement.dataset.mainStore = (e as Error).message;
     }
     const pings: string[] = [], waiting: ((v: string) => void)[] = [];
-    addEventListener("wt-e2e-ping", (e: any) => {
+    addEventListener("tt-e2e-ping", (e: any) => {
         const v = e.detail + ":" + (window as any).__isoSecret;
         (waiting.shift() ?? ((v: string) => pings.push(v)))(v);
     }, { signal: ctx.signal });
@@ -894,14 +894,14 @@ const site = wt.onSite("${origin}/ov-isost*", (ctx) => {
     };
 });
 
-wt.onPage("${origin}/ov-isost*", async (ctx) => {
+tt.onPage("${origin}/ov-isost*", async (ctx) => {
     document.body.dataset.isoGlobal = String(typeof (window as any).__isoSecret);
     document.body.dataset.evaluated = await site.read("__isoSecret").then(String, (e) => "rejected: " + e.message);
     document.body.dataset.subscribed = "1";
     for await (const v of ctx.each(site.nextPing)) document.body.dataset.pinged = v + ":" + typeof (window as any).__isoSecret + ":" + g.n;
 })
 
-wt.onPage("${origin}/ov-isost*", () => {
+tt.onPage("${origin}/ov-isost*", () => {
     const Hits = () => createElement("b", null, "react:" + useSnapshot(ps).hits);
     createRoot(document.body.appendChild(document.createElement("div"))).render(createElement(Hits));
     const out = document.body.appendChild(document.createElement("output"));
@@ -920,14 +920,14 @@ wt.onPage("${origin}/ov-isost*", () => {
 
 /**
  * Stores in isolated-world onPage code: primed, live both ways with the
- * overlay and the background, this page's wt.pageStore copy only; onSite
+ * overlay and the background, this page's tt.pageStore copy only; onSite
  * code can't use them, and onPage code reads the site through an onSite
  * handle (promise-returning functions, and a ctx.each loop).
  */
 export async function checkIsoStores(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
     const t = (s: string) => `isolated stores${opts.label ?? ""}: ${s}`;
     const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
-    const saved = await send({ type: "saveScript", id: "s_isost", code: isoStoreCode(origin), name: "iso stores.wiretrick" });
+    const saved = await send({ type: "saveScript", id: "s_isost", code: isoStoreCode(origin), name: "iso stores.tangitweak" });
     check(t("the script saves"), !saved?.error, saved?.error);
     const warns = await waitFor<string[]>(async () => ((await send({ type: "listScripts" })) || []).find((s: any) => s.id === "s_isost")?.routeWarnings ?? [], (w) => w.length > 0, 5000);
     check(t("Problems flags the store use in onSite code"), warns.some((w) => w.includes("uses `ps`") && w.includes("aren't available in onSite code")), JSON.stringify(warns));
@@ -946,12 +946,12 @@ export async function checkIsoStores(ctx: any, mgr: any, origin: string, check: 
     check(t("isolated code reads its stores (primed)"), v0?.ps === 0 && typeof v0?.g === "number", JSON.stringify(v0));
     const g0 = v0?.g ?? 0;
     const mainErr = await waitFor<string>(() => a.evaluate(() => document.documentElement.dataset.mainStore || ""), (v) => !!v, 8000);
-    check(t("onSite code can't use them, and is told to use them in wt.onPage"), mainErr.includes("aren't available in onSite code") && mainErr.includes("use them in wt.onPage"), mainErr);
+    check(t("onSite code can't use them, and is told to use them in tt.onPage"), mainErr.includes("aren't available in onSite code") && mainErr.includes("use them in tt.onPage"), mainErr);
     const evaluated = await waitFor<string>(() => a.evaluate(() => document.body.dataset.evaluated || ""), (v) => !!v, 8000);
     const isoGlobal = await a.evaluate(() => document.body.dataset.isoGlobal || "");
     check(t("onPage code is isolated: no page globals; an onSite handle reads them (promise-returning)"), isoGlobal === "undefined" && evaluated === "PAGE-GLOBAL-42|/ov-isost", JSON.stringify({ isoGlobal, evaluated }));
     await waitFor<string>(() => a.evaluate(() => document.body.dataset.subscribed || ""), (v) => !!v, 8000);
-    await a.evaluate(() => dispatchEvent(new CustomEvent("wt-e2e-ping", { detail: "hi" })));
+    await a.evaluate(() => dispatchEvent(new CustomEvent("tt-e2e-ping", { detail: "hi" })));
     const pinged = await waitFor<string>(() => a.evaluate(() => document.body.dataset.pinged || ""), (v) => !!v, 8000);
     check(t("ctx.each over an onSite function: a page event reaches isolated code (page global there, store here)"), pinged === `hi:PAGE-GLOBAL-42:undefined:${g0}`, pinged);
     const first = await hit(a);
@@ -978,9 +978,9 @@ export async function checkIsoStores(ctx: any, mgr: any, origin: string, check: 
     await send({ type: "deleteScript", id: "s_isost" });
 }
 
-const siteHandlesCode = (origin: string) => `const g = wt.globalStore("unsg", { n: 0 }, { persist: false });
+const siteHandlesCode = (origin: string) => `const g = tt.globalStore("unsg", { n: 0 }, { persist: false });
 
-const overlay = wt.onOverlay("${origin}/ov-unsafe*", () => {
+const overlay = tt.onOverlay("${origin}/ov-unsafe*", () => {
     const out = document.body.appendChild(document.createElement("output"));
     out.id = "uns-ov";
     (window as any).bump = () => ++g.n;
@@ -993,7 +993,7 @@ const overlay = wt.onOverlay("${origin}/ov-unsafe*", () => {
     return { greet: (who: string) => "hi " + who + " " + g.n };
 });
 
-const site = wt.onSite("${origin}/ov-unsafe*", () => {
+const site = tt.onSite("${origin}/ov-unsafe*", () => {
     (window as any).__unsafeSite = "SITE-UNS";
     try {
         void overlay.greet("site");
@@ -1010,8 +1010,8 @@ const site = wt.onSite("${origin}/ov-unsafe*", () => {
     };
 });
 
-wt.onPage("${origin}/ov-unsafe*", (ctx) => {
-    addEventListener("wt-uns-call", async () => {
+tt.onPage("${origin}/ov-unsafe*", (ctx) => {
+    addEventListener("tt-uns-call", async () => {
         const where = await site.where();
         const greet = await overlay.greet("page").catch((e) => "rejected: " + e.message);
         document.body.dataset.fromPage = JSON.stringify({ where, greet });
@@ -1027,7 +1027,7 @@ wt.onPage("${origin}/ov-unsafe*", (ctx) => {
 export async function checkSiteHandles(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
     const t = (s: string) => `onSite handles${opts.label ?? ""}: ${s}`;
     const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
-    const saved = await send({ type: "saveScript", id: "s_uns", code: siteHandlesCode(origin), name: "site handles.wiretrick" });
+    const saved = await send({ type: "saveScript", id: "s_uns", code: siteHandlesCode(origin), name: "site handles.tangitweak" });
     check(t("the script saves"), !saved?.error, saved?.error);
     const warns = await waitFor<string[]>(async () => ((await send({ type: "listScripts" })) || []).find((s: any) => s.id === "s_uns")?.routeWarnings ?? [], (w) => w.length > 0, 5000);
     check(t("Problems flags the handle call in onSite code"), warns.some((w) => w.includes("uses `overlay`") && w.includes("onSite code can't call handles")), JSON.stringify(warns));
@@ -1044,7 +1044,7 @@ export async function checkSiteHandles(ctx: any, mgr: any, origin: string, check
         asked
     );
     const g0 = f ? await f.evaluate(() => (window as any).bump()).catch(() => null) : null;
-    await a.evaluate(() => dispatchEvent(new CustomEvent("wt-uns-call")));
+    await a.evaluate(() => dispatchEvent(new CustomEvent("tt-uns-call")));
     const fromPage = await waitFor<string>(() => a.evaluate(() => document.body.dataset.fromPage || ""), (v) => !!v, 8000);
     check(t("onPage code calls onSite functions and the overlay"), fromPage === JSON.stringify({ where: "SITE-UNS:/ov-unsafe", greet: `hi page ${g0}` }), fromPage);
     // the page forges the hook's link: page-world messages never reach trusted code
@@ -1070,19 +1070,19 @@ const siteStoreCode = (origin: string, v: number) => `import { subscribe } from 
 import { useSnapshot } from "valtio";
 
 // v${v}
-const ss = wt.siteStore("ss", { n: 0, on: false });
+const ss = tt.siteStore("ss", { n: 0, on: false });
 
-wt.onSite("${origin}/ov-site*", () => {
+tt.onSite("${origin}/ov-site*", () => {
     (window as any).__ss = { read: () => JSON.stringify({ n: ss.n, on: ss.on }), bump: () => ++ss.n };
 });
 
-wt.onPage("${origin}/ov-site*", (ctx) => {
+tt.onPage("${origin}/ov-site*", (ctx) => {
     const show = () => (document.body.dataset.ssPage = String(ss.n));
     show();
     ctx.signal.addEventListener("abort", subscribe(ss, show));
 });
 
-wt.onOverlay("${origin}/ov-site*", (ctx) => {
+tt.onOverlay("${origin}/ov-site*", (ctx) => {
     (window as any).toggleSS = () => (ss.on = !ss.on);
     function N() {
         const snap = useSnapshot(ss);
@@ -1093,7 +1093,7 @@ wt.onOverlay("${origin}/ov-site*", (ctx) => {
 `;
 
 /**
- * wt.siteStore: onSite code's writes re-render the overlay and reach onPage
+ * tt.siteStore: onSite code's writes re-render the overlay and reach onPage
  * code; the overlay's write is read synchronously in the site's world; ten
  * saves keep the values and one subscription per mirror; a forged message
  * for an unknown subscription changes nothing.
@@ -1101,7 +1101,7 @@ wt.onOverlay("${origin}/ov-site*", (ctx) => {
 export async function checkSiteStores(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
     const t = (s: string) => `site stores${opts.label ?? ""}: ${s}`;
     const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
-    const saved = await send({ type: "saveScript", id: "s_site", code: siteStoreCode(origin, 0), name: "site stores.wiretrick" });
+    const saved = await send({ type: "saveScript", id: "s_site", code: siteStoreCode(origin, 0), name: "site stores.tangitweak" });
     check(t("the script saves"), !saved?.error, saved?.error);
     await mgr.waitForTimeout(800);
     const warns = ((await send({ type: "listScripts" })) || []).find((s: any) => s.id === "s_site")?.routeWarnings ?? [];
@@ -1122,7 +1122,7 @@ export async function checkSiteStores(ctx: any, mgr: any, origin: string, check:
     const on = await waitFor(siteRead, (v) => v?.on === true, 8000);
     check(t("the overlay's write is read synchronously in the site's world"), on?.on === true && on?.n === 2, JSON.stringify(on));
     for (let v = 1; v <= 10; v++) {
-        const r = await send({ type: "saveScript", id: "s_site", code: siteStoreCode(origin, v), name: "site stores.wiretrick" });
+        const r = await send({ type: "saveScript", id: "s_site", code: siteStoreCode(origin, v), name: "site stores.tangitweak" });
         if (r?.error) check(t(`save ${v}`), false, r.error);
         await mgr.waitForTimeout(150);
     }
@@ -1154,7 +1154,7 @@ export async function checkSiteStores(ctx: any, mgr: any, origin: string, check:
     await send({ type: "deleteScript", id: "s_site" });
 }
 
-const lifeCode = (origin: string, v: string, red: number, boom = false) => `const site = wt.onSite("${origin}/ov-life*", (ctx) => {
+const lifeCode = (origin: string, v: string, red: number, boom = false) => `const site = tt.onSite("${origin}/ov-life*", (ctx) => {
     if (${boom}) throw new Error("site boom ${v}");
     document.documentElement.dataset.siteVersion = "${v}";
     const queue: string[] = [], waiting: ((x: string) => void)[] = [];
@@ -1171,7 +1171,7 @@ const lifeCode = (origin: string, v: string, red: number, boom = false) => `cons
     };
 });
 
-wt.onPage("${origin}/ov-life*", (ctx) => {
+tt.onPage("${origin}/ov-life*", (ctx) => {
     if (${boom}) throw new Error("page boom ${v}");
     const d = document.documentElement.dataset;
     const w = window as any;
@@ -1185,7 +1185,7 @@ wt.onPage("${origin}/ov-life*", (ctx) => {
     ctx.mount(<b>mount ${v}</b>);
 });
 
-wt.onPage("${origin}/ov-life*", async (ctx) => {
+tt.onPage("${origin}/ov-life*", async (ctx) => {
     const d = document.documentElement.dataset;
     d.loopVersion = "${v}";
     d.siteAnswer = "${v}>" + (await site.version());
@@ -1193,7 +1193,7 @@ wt.onPage("${origin}/ov-life*", async (ctx) => {
 });
 `;
 
-/** the text inside each <wiretrick-mount> host (closed shadow roots included: read over CDP) */
+/** the text inside each <tangitweak-mount> host (closed shadow roots included: read over CDP) */
 async function mountTexts(page: any): Promise<string[]> {
     const cdp = await page.context().newCDPSession(page);
     try {
@@ -1202,7 +1202,7 @@ async function mountTexts(page: any): Promise<string[]> {
         const text = (n: any): string => (n.nodeName === "STYLE" || n.nodeName === "SCRIPT" ? "" : n.nodeType === 3 ? n.nodeValue : kids(n).map(text).join(""));
         const out: string[] = [];
         const walk = (n: any): void => {
-            if (String(n.nodeName).toUpperCase() === "WIRETRICK-MOUNT") out.push(text(n));
+            if (String(n.nodeName).toUpperCase() === "TANGITWEAK-MOUNT") out.push(text(n));
             else kids(n).forEach(walk);
         };
         walk(root);
@@ -1221,7 +1221,7 @@ async function mountTexts(page: any): Promise<string[]> {
 export async function checkHotReload(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
     const t = (s: string) => `hot apply${opts.label ?? ""}: ${s}`;
     const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
-    const save = (v: string, red: number, boom = false) => send({ type: "saveScript", id: "s_life", code: lifeCode(origin, v, red, boom), name: "life.wiretrick" });
+    const save = (v: string, red: number, boom = false) => send({ type: "saveScript", id: "s_life", code: lifeCode(origin, v, red, boom), name: "life.tangitweak" });
     const saved = await save("v1", 10);
     check(t("the script saves"), !saved?.error, saved?.error);
     await mgr.waitForTimeout(800);
@@ -1301,8 +1301,8 @@ export async function checkHotReload(ctx: any, mgr: any, origin: string, check: 
 export async function checkEarlyRequests(ctx: any, mgr: any, origin: string, check: Check, opts: { label?: string } = {}): Promise<void> {
     const t = (s: string) => `early requests${opts.label ?? ""}: ${s}`;
     const send = (msg: any): Promise<any> => mgr.evaluate((m: any) => new Promise((r) => chrome.runtime.sendMessage(m, (x: any) => r(x ?? null))), msg);
-    const code = `wt.replaceResponse({ url: "${origin}/early-data*", strategy: "page" }, (ctx) => "MOD:" + new URL(ctx.url).searchParams.get("via"));\n`;
-    const saved = await send({ type: "saveScript", id: "s_early", code, name: "early.wiretrick" });
+    const code = `tt.replaceResponse({ url: "${origin}/early-data*", strategy: "page" }, (ctx) => "MOD:" + new URL(ctx.url).searchParams.get("via"));\n`;
+    const saved = await send({ type: "saveScript", id: "s_early", code, name: "early.tangitweak" });
     check(t("the script saves"), !saved?.error, saved?.error);
     await mgr.waitForTimeout(800);
     const p = await ctx.newPage();

@@ -618,7 +618,7 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 }
 
 /* Chrome MV3: "user scripts are off" (UserScriptsBanner.tsx) */
-.wt-banner {
+.tt-banner {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -628,9 +628,9 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
     background: color-mix(in srgb, var(--warn) 14%, transparent);
     border-bottom: 1px solid var(--border);
 }
-.wt-banner-text { flex: 1; min-width: 0; }
-.wt-banner button { flex: none; }
-.wt-banner-close { background: none; border: none; color: var(--fg-dim); cursor: pointer; }
+.tt-banner-text { flex: 1; min-width: 0; }
+.tt-banner button { flex: none; }
+.tt-banner-close { background: none; border: none; color: var(--fg-dim); cursor: pointer; }
 
 #editor-toolbar {
     display: flex;
@@ -672,11 +672,11 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 }
 
 /* TS hovers: the signature is a highlighted <pre> (monacoSetup.ts) whose
-   wt-api.d.ts types are links — styled like Monaco's own code block */
+   tt-api.d.ts types are links — styled like Monaco's own code block */
 .monaco-hover .markdown-hover > .hover-contents:has(pre) { max-width: none; }
 .monaco-hover .markdown-hover .hover-contents pre {
     margin: 8px 0;
-    font-family: var(--wt-hover-code-font, var(--monaco-monospace-font, monospace));
+    font-family: var(--tt-hover-code-font, var(--monaco-monospace-font, monospace));
     font-size: inherit;
     line-height: inherit;
     white-space: pre-wrap;
@@ -721,11 +721,11 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 #btn-save .save-ind { width: 8px; height: 8px; border-radius: 50%; box-sizing: border-box; flex: none; }
 #btn-save[data-state="unsaved"] .save-ind { background: currentColor; }
 #btn-save[data-state="unsaved"]:disabled { opacity: 0.4; }
-#btn-save[data-state="saving"] .save-ind { border: 1.5px solid rgba(255, 255, 255, 0.35); border-top-color: #fff; animation: wt-spin 0.7s linear infinite; }
+#btn-save[data-state="saving"] .save-ind { border: 1.5px solid rgba(255, 255, 255, 0.35); border-top-color: #fff; animation: tt-spin 0.7s linear infinite; }
 #btn-save[data-state="saved"] { background: transparent; border-color: var(--border); color: var(--fg-dim); }
 #btn-save[data-state="saved"] .save-ind { width: auto; height: auto; border-radius: 0; color: var(--ok, #3fb950); }
 #btn-save[data-state="saved"] .save-ind::before { content: "✓"; }
-@keyframes wt-spin { to { transform: rotate(360deg); } }
+@keyframes tt-spin { to { transform: rotate(360deg); } }
 
 /* folder sync: folder icon + a badge for the link state */
 #btn-folder-sync {
@@ -773,10 +773,10 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
     border-left: 5px solid transparent;
     border-right: 5px solid transparent;
 }
-#btn-folder-sync[data-state="sending"] .sync-ind { border-bottom: 7px solid var(--accent); animation: wt-sync-up 0.8s ease-in-out infinite; }
-#btn-folder-sync[data-state="receiving"] .sync-ind { border-top: 7px solid var(--accent); animation: wt-sync-down 0.8s ease-in-out infinite; }
-@keyframes wt-sync-up { from { transform: translateY(3px); opacity: 0.4; } to { transform: translateY(-3px); opacity: 1; } }
-@keyframes wt-sync-down { from { transform: translateY(-3px); opacity: 0.4; } to { transform: translateY(3px); opacity: 1; } }
+#btn-folder-sync[data-state="sending"] .sync-ind { border-bottom: 7px solid var(--accent); animation: tt-sync-up 0.8s ease-in-out infinite; }
+#btn-folder-sync[data-state="receiving"] .sync-ind { border-top: 7px solid var(--accent); animation: tt-sync-down 0.8s ease-in-out infinite; }
+@keyframes tt-sync-up { from { transform: translateY(3px); opacity: 0.4; } to { transform: translateY(-3px); opacity: 1; } }
+@keyframes tt-sync-down { from { transform: translateY(-3px); opacity: 0.4; } to { transform: translateY(3px); opacity: 1; } }
 
 #btn-open-vscode {
     display: inline-flex;
@@ -901,8 +901,8 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 .setting-warn { margin: 6px 0 0; padding: 5px 8px; font-size: 12px; color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, transparent); border-left: 2px solid var(--warn); border-radius: 2px; }
 #settings-folder-path { margin-left: -8px; margin-right: -8px; padding: 6px 8px; border-radius: 4px; }
 #settings-folder-path.needs-path input { border-color: var(--warn); }
-#settings-folder-path.flash { animation: wt-attention 0.6s ease-in-out 3; }
-@keyframes wt-attention { 50% { background: color-mix(in srgb, var(--warn) 22%, transparent); box-shadow: 0 0 0 2px var(--warn); } }
+#settings-folder-path.flash { animation: tt-attention 0.6s ease-in-out 3; }
+@keyframes tt-attention { 50% { background: color-mix(in srgb, var(--warn) 22%, transparent); box-shadow: 0 0 0 2px var(--warn); } }
 .setting-inline { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-height: 26px; }
 .setting-help { margin: 4px 0 0; color: var(--fg-dim); font-size: 12px; line-height: 1.45; }
 .setting-check { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; padding-top: 4px; cursor: pointer; }

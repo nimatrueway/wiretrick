@@ -1190,5 +1190,5 @@ export const NET: Dialect = dialect({
         ["size:>100kb OR time:>1s", "Heavy or slow"],
         ["(type:fetch OR type:doc) -is:cached", "Fresh XHR/fetch and documents"],
     ],
-    note: "`req-body`/`res-body` search only bodies Wiretrick recorded. Script, tab and activity menus to the right also apply.",
+    note: "`req-body`/`res-body` search only bodies TangiTweak recorded. Script, tab and activity menus to the right also apply.",
 });

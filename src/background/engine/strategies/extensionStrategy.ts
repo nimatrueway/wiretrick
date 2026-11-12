@@ -38,7 +38,7 @@ import { makeMissedThrottle } from "../../../shared/missedTap";
 import { reportSkipped } from "../skipped";
 import { requestBodyCtx, requestBodyFromWebRequest, type RequestBody } from "../../../shared/requestBody";
 
-/** the page a webRequest event is for (`wt.pageStore`) */
+/** the page a webRequest event is for (`tt.pageStore`) */
 const pageOf = (d: { tabId: number; type?: string; requestId: string; frameId?: number }) => pages.forRequest({ tabId: d.tabId, type: d.type, requestId: d.requestId, frameId: d.frameId, documentId: (d as any).documentId, documentLifecycle: (d as any).documentLifecycle });
 
 type Kind = "onRequest" | "onResponseHeaders" | "replaceResponse" | "onResponseBody";

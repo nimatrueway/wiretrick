@@ -18,7 +18,7 @@ import { GENERATED_NOTE } from "./generatedFiles";
 export const SETTINGS_SCHEMA = {
     $schema: "http://json-schema.org/draft-07/schema#",
     $comment: GENERATED_NOTE,
-    title: "Wiretrick settings",
+    title: "TangiTweak settings",
     description: "Extension settings + per-script params & enabled state (settings.yaml)",
     type: "object",
     additionalProperties: false,
@@ -63,7 +63,7 @@ export const SETTINGS_SCHEMA = {
                 "Per-script values keyed by script name: `enabled` toggles the script, other keys are its declared params",
             additionalProperties: {
                 type: "object",
-                description: "Values for one script (params from its wt.params / wt.defineParam)",
+                description: "Values for one script (params from its tt.params / tt.defineParam)",
                 properties: {
                     enabled: { type: "boolean", default: true, description: "Run this script" },
                 },

@@ -2,7 +2,7 @@
  * A package's metadata. A single script declares it in its code, read when
  * it compiles:
  *
- *     wt.metadata({ name: "GitHub dark mode", version: "1.2.0", connect: ["api.github.com"] });
+ *     tt.metadata({ name: "GitHub dark mode", version: "1.2.0", connect: ["api.github.com"] });
  *
  * A bundle — scripts that install and update together — is a folder with a
  * metadata.json at its root, which lists them:
@@ -10,7 +10,7 @@
  *     { "name": "GitHub tweaks", "version": "2.0.0",
  *       "scripts": ["dark.ts", "pr-tools.ts"] }
  *
- * `connect` names the hosts the scripts' wt.fetch calls reach; the install
+ * `connect` names the hosts the scripts' tt.fetch calls reach; the install
  * page shows them and an update that adds one asks for approval.
  * `updateURL` is where updates come from instead of where it was installed
  * from (any source parseSource reads); a package from local files with
@@ -43,7 +43,7 @@ export const isManifestPath = (path: string): boolean => path === MANIFEST_FILE 
 
 const TEXT_KEYS = ["name", "version", "description", "homepage", "author", "license", "updateURL"] as const;
 
-/** validate wt.metadata's argument or a manifest's fields (unknown keys are ignored: a newer script may add some) */
+/** validate tt.metadata's argument or a manifest's fields (unknown keys are ignored: a newer script may add some) */
 export function readMetadata(raw: unknown, where: string): PackageMetadata {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`${where}: expected an object`);
     const r = raw as Record<string, unknown>;
@@ -99,7 +99,7 @@ export const MANIFEST_SCHEMA = {
             type: "string",
             description: "Where updates come from instead of where it was installed from: a metadata.json, script or .zip URL, a GitHub folder or file, a gist (an update that changes it waits for review)",
         },
-        connect: { type: "array", items: { type: "string" }, uniqueItems: true, description: "Hosts the scripts' wt.fetch calls reach; an update that adds one waits for review" },
+        connect: { type: "array", items: { type: "string" }, uniqueItems: true, description: "Hosts the scripts' tt.fetch calls reach; an update that adds one waits for review" },
         scripts: {
             type: "array",
             minItems: 1,

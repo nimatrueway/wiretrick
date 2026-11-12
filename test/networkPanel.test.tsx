@@ -186,7 +186,7 @@ describe("NetworkPanel", () => {
         expect(rowNames(container)).toEqual(["b.js", "c.js", "a.js"]);
     });
 
-    it("opens details with headers and Wiretrick actions", () => {
+    it("opens details with headers and TangiTweak actions", () => {
         const hit = entry("api", {
             responseHeaders: [["content-type", "application/json"]],
             requestHeaders: [["accept", "*/*"]],
@@ -194,7 +194,7 @@ describe("NetworkPanel", () => {
         });
         const { container, getByText } = setup([hit]);
         fireEvent.click(container.querySelector("tbody tr")!);
-        // a script ran on it → opens on the Wiretrick tab
+        // a script ran on it → opens on the TangiTweak tab
         expect(container.querySelector(".net-action")!.textContent).toContain("onResponseBody applied");
         fireEvent.click(getByText("Headers"));
         const text = container.querySelector(".net-details-body")!.textContent!;

@@ -16,7 +16,7 @@
 
 import { hostGlobOf } from "./matcher";
 
-export const PROBE_HOST = "wiretrick-helper.probe";
+export const PROBE_HOST = "tangitweak-helper.probe";
 
 /** ES5 port of the helper's `matcher::matches` (first-occurrence splits) */
 const MATCH_SRC = `function __resM(p, s) {
@@ -217,7 +217,7 @@ export function buildPac(port: number, matchPatterns: string[], user: UserDecisi
     const hosts = [...new Set(matchPatterns.map(hostPatternOf))];
     const any = hosts.includes(null);
     const list = hosts.filter((h): h is string => h !== null);
-    return asciiOnly(`// Wiretrick — helper routing (managed by Wiretrick)
+    return asciiOnly(`// TangiTweak — helper routing (managed by TangiTweak)
 ${MATCH_SRC}
 ${BYPASS_SRC}
 ${user.source}

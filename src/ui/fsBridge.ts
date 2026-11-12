@@ -73,7 +73,7 @@ export async function openFolder(handlers?: FolderSyncHandlers): Promise<void> {
         const lines = preview.conflicts.map((c: any) => `• ${c.name} — keeping the ${c.winner === "file" ? "file in the folder" : "script in the extension"}`);
         const ok = confirm(
             `${preview.conflicts.length} script(s) differ between the extension and "${dirHandle.name}":\n\n${lines.join("\n")}\n\n` +
-                `The newer copy wins; the other is saved to .wiretrick-backup/ in the folder. Continue?`
+                `The newer copy wins; the other is saved to .tangitweak-backup/ in the folder. Continue?`
         );
         if (!ok) throw new DOMException("folder sync cancelled", "AbortError");
     }

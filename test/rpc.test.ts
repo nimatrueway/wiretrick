@@ -31,7 +31,7 @@ function runPage(src: string, opts: { world?: "page" | "isolated"; url?: string;
     const exposer = new Exposer();
     const shim = makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined }, world: opts.world ?? "isolated", exposer, call: opts.call });
     const moduleObj = { exports: {} as any };
-    new Function("wt", "module", "exports", keyPlaceCalls(src))(shim.wt, moduleObj, moduleObj.exports);
+    new Function("tt", "module", "exports", keyPlaceCalls(src))(shim.tt, moduleObj, moduleObj.exports);
     const dom = domHandlersFor(shim.dom, opts.url ?? "https://x.com/a", exposer);
     exposer.done();
     const fire = () => {
@@ -47,7 +47,7 @@ afterEach(() => vi.useRealTimers());
 
 describe("rpc: calls between the overlay and onPage code", () => {
     it("a failed call's error has the stack of the script line that made the call", async () => {
-        const p = runPage(`wt.onPage("*://x.com/*", () => ({ when: () => new Date(0) }));`);
+        const p = runPage(`tt.onPage("*://x.com/*", () => ({ when: () => new Date(0) }));`);
         p.fire();
         const { client } = link(p.exposer);
         const page = client.remote("onPage:0");
@@ -58,7 +58,7 @@ describe("rpc: calls between the overlay and onPage code", () => {
     });
 
     it("round-trips results and thrown errors (message only)", async () => {
-        const p = runPage(`wt.onPage("*://x.com/*", () => ({ add: (a, b) => a + b, slow: async (x) => ({ x }), boom: () => { const e = new TypeError("nope"); e.secret = 1; throw e; }, later: async () => { throw new Error("async nope"); } }));`);
+        const p = runPage(`tt.onPage("*://x.com/*", () => ({ add: (a, b) => a + b, slow: async (x) => ({ x }), boom: () => { const e = new TypeError("nope"); e.secret = 1; throw e; }, later: async () => { throw new Error("async nope"); } }));`);
         p.fire();
         const { client } = link(p.exposer);
         const page = client.remote("onPage:0");
@@ -72,7 +72,7 @@ describe("rpc: calls between the overlay and onPage code", () => {
     });
 
     it("queues calls made before the handler returned, then answers them in order", async () => {
-        const p = runPage(`wt.onPage({ url: "*://x.com/*", when: "document_idle" }, () => ({ echo: (x) => x }));`);
+        const p = runPage(`tt.onPage({ url: "*://x.com/*", when: "document_idle" }, () => ({ echo: (x) => x }));`);
         const { client } = link(p.exposer);
         const page = client.remote("onPage:0");
         const got: any[] = [];
@@ -85,7 +85,7 @@ describe("rpc: calls between the overlay and onPage code", () => {
     });
 
     it("waits for a handler that returns a Promise", async () => {
-        const p = runPage(`wt.onPage("*", async () => { await null; return { v: () => 7 }; });`);
+        const p = runPage(`tt.onPage("*", async () => { await null; return { v: () => 7 }; });`);
         const { client } = link(p.exposer);
         const call = client.remote("onPage:0").v();
         p.fire();
@@ -93,7 +93,7 @@ describe("rpc: calls between the overlay and onPage code", () => {
     });
 
     it("bounds the queue", async () => {
-        const p = runPage(`wt.onPage("*", () => ({ f: () => 1 }));`);
+        const p = runPage(`tt.onPage("*", () => ({ f: () => 1 }));`);
         const { client } = link(p.exposer);
         const page = client.remote("onPage:0");
         const calls = Array.from({ length: RPC_QUEUE_MAX + 1 }, () => page.f().then(() => "ok", (e: any) => e.message));
@@ -105,7 +105,7 @@ describe("rpc: calls between the overlay and onPage code", () => {
     });
 
     it("answers `not running on this page` for a route that didn't match, a handler that threw, or no such handle", async () => {
-        const p = runPage(`wt.onPage("*://other.com/*", () => ({ f: () => 1 }));\nwt.onPage("*", () => { throw new Error("x"); });`);
+        const p = runPage(`tt.onPage("*://other.com/*", () => ({ f: () => 1 }));\ntt.onPage("*", () => { throw new Error("x"); });`);
         p.fire();
         const { client } = link(p.exposer);
         await expect(client.remote("onPage:0").f()).rejects.toThrow(NOT_RUNNING);
@@ -114,14 +114,14 @@ describe("rpc: calls between the overlay and onPage code", () => {
     });
 
     it("answers `not running` for the other world's handles", async () => {
-        const p = runPage(`wt.onPage("*", () => ({ f: () => 1 }));`, { world: "page" });
+        const p = runPage(`tt.onPage("*", () => ({ f: () => 1 }));`, { world: "page" });
         p.fire();
         const { client } = link(p.exposer);
         await expect(client.remote("onPage:0").f()).rejects.toThrow(NOT_RUNNING);
     });
 
     it("rejects `no such function`, and doesn't reach inherited or non-function members", async () => {
-        const p = runPage(`wt.onPage("*", () => ({ f: () => 1, v: 3 }));`);
+        const p = runPage(`tt.onPage("*", () => ({ f: () => 1, v: 3 }));`);
         p.fire();
         const page = link(p.exposer).client.remote("onPage:0");
         await expect(page.g()).rejects.toThrow(/no such function: g/);
@@ -132,7 +132,7 @@ describe("rpc: calls between the overlay and onPage code", () => {
 
     it("a non-plain return value (a string, an Element-like object, a class instance) exposes nothing", async () => {
         for (const ret of [`"hello"`, `new (class El { f() { return 1 } })()`, `null`, `[() => 1]`]) {
-            const p = runPage(`wt.onPage("*", () => ${ret});`);
+            const p = runPage(`tt.onPage("*", () => ${ret});`);
             p.fire();
             await expect(link(p.exposer).client.remote("onPage:0").f()).rejects.toThrow(/no such function/);
         }
@@ -148,7 +148,7 @@ describe("rpc: calls between the overlay and onPage code", () => {
     });
 
     it("the caller's run ending rejects its calls with AbortError and cancels them at the callee", async () => {
-        const p = runPage(`let release; wt.onPage("*", () => ({ wait: () => new Promise((r) => (release = r)), quick: () => 1 }));`);
+        const p = runPage(`let release; tt.onPage("*", () => ({ wait: () => new Promise((r) => (release = r)), quick: () => 1 }));`);
         p.fire();
         const { client, sent, replies } = link(p.exposer);
         const run = new AbortController();
@@ -288,7 +288,7 @@ describe("rpc: calls between the overlay and onPage code", () => {
         // undefined arguments travel as null
         void page.f(undefined, 1);
         expect(sent[0].args).toEqual([null, 1]);
-        const p = runPage(`wt.onPage("*", () => ({ el: () => ({ fn() {} }), big: () => "x".repeat(1024 * 1024 + 1), none: () => undefined }));`);
+        const p = runPage(`tt.onPage("*", () => ({ el: () => ({ fn() {} }), big: () => "x".repeat(1024 * 1024 + 1), none: () => undefined }));`);
         p.fire();
         const h = link(p.exposer).client.remote("onPage:0");
         await expect(h.el()).rejects.toThrow(/must be JSON/);
@@ -333,13 +333,13 @@ describe("rpc: calls between the overlay and onPage code", () => {
 
 describe("rpc: which place may call which handle", () => {
     it("onSite code calling any handle throws SiteCannotCallError right there", () => {
-        const p = runPage(`module.exports.overlay = wt.onOverlay("*", () => ({ picked() {} }));\nmodule.exports.page = wt.onPage("*", () => ({ f() {} }));`, { world: "page" });
+        const p = runPage(`module.exports.overlay = tt.onOverlay("*", () => ({ picked() {} }));\nmodule.exports.page = tt.onPage("*", () => ({ f() {} }));`, { world: "page" });
         expect(() => p.exports.overlay.picked("a")).toThrow(SiteCannotCallError);
         expect(() => p.exports.page.f()).toThrow(SiteCannotCallError);
     });
 
     it("onPage code calls its onSite handlers' functions, even before they fired", async () => {
-        const src = `wt.onPage("*", () => ({ own() {} }));\nmodule.exports.site = wt.onSite("*", async () => ({ flags: (x) => ({ x, ok: true }) }));`;
+        const src = `tt.onPage("*", () => ({ own() {} }));\nmodule.exports.site = tt.onSite("*", async () => ({ flags: (x) => ({ x, ok: true }) }));`;
         const site = runPage(src, { world: "page" });
         const { client } = link(site.exposer);
         const asked: string[] = [];
@@ -376,13 +376,13 @@ describe("rpc: which place may call which handle", () => {
         overlay.expose("onOverlay:0", { first: () => 0 });
         overlay.expose("onOverlay:1", { picked: (t: string) => `picked ${t}` });
         const { client } = link(overlay);
-        const p = runPage(`wt.onOverlay("*", () => {});\nwt.onPage("*", () => {});\nmodule.exports.overlay = wt.onOverlay("*", () => {});`, { world: "isolated", call: (api, key) => (api === "onOverlay" ? client.remote(key) : inertRemote("elsewhere")) });
+        const p = runPage(`tt.onOverlay("*", () => {});\ntt.onPage("*", () => {});\nmodule.exports.overlay = tt.onOverlay("*", () => {});`, { world: "isolated", call: (api, key) => (api === "onOverlay" ? client.remote(key) : inertRemote("elsewhere")) });
         expect(await p.exports.overlay.picked("DIV")).toBe("picked DIV");
     });
 
     it("the overlay names handles by their route keys", () => {
         const handles: string[] = [];
-        const c = compileScript(`wt.onPage("*", () => {});\nconst page = wt.onPage("*", () => ({}));\nwt.onSite("*", () => {});\nwt.onOverlay("*", () => {});`, {
+        const c = compileScript(`tt.onPage("*", () => {});\nconst page = tt.onPage("*", () => ({}));\ntt.onSite("*", () => {});\ntt.onOverlay("*", () => {});`, {
             remote: (r: any) => (handles.push(r.key), {}),
         } as any);
         expect(c.error).toBeNull();
@@ -394,7 +394,7 @@ describe("firePageHandler", () => {
     it("an async handler's rejection reaches onError (a sync throw is rethrown)", async () => {
         const exposer = new Exposer();
         const shim = makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined }, world: "isolated", exposer });
-        new Function("wt", `wt.onPage("*://x.com/*", async () => { throw new Error("later"); }); wt.onPage("*://x.com/*", () => { throw new Error("now"); });`)(shim.wt);
+        new Function("tt", `tt.onPage("*://x.com/*", async () => { throw new Error("later"); }); tt.onPage("*://x.com/*", () => { throw new Error("now"); });`)(shim.tt);
         const [later, now] = domHandlersFor(shim.dom, "https://x.com/a", exposer);
         exposer.done();
         const errors: string[] = [];

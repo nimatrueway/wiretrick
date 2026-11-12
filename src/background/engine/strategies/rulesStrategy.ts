@@ -40,7 +40,7 @@ interface ActiveRule {
     spec: RuleSpec;
 }
 
-const CACHE_KEY = "wtRulesState";
+const CACHE_KEY = "ttRulesState";
 /** a store change re-probes after this quiet time */
 const REPROBE_MS = 300;
 
@@ -243,7 +243,7 @@ export class RulesStrategy {
         return out;
     }
 
-    /** remove every session rule (the extension owns them all, `wt.fetch` bypass rules aside), then add `rules` */
+    /** remove every session rule (the extension owns them all, `tt.fetch` bypass rules aside), then add `rules` */
     private async replace(rules: any[]): Promise<void> {
         const existing: any[] = ((await dnrCall("getSessionRules")) || []).filter((r: any) => r.id < BYPASS_RULE_BASE);
         if (!existing.length && !rules.length) return;

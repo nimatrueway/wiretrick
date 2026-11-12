@@ -1,6 +1,6 @@
-# Wiretrick
+# TangiTweak
 
-Wiretrick lets a user rewrite browser requests and responses with small
+TangiTweak lets a user rewrite browser requests and responses with small
 TypeScript scripts. This glossary fixes the words we use for its concepts in
 docs, UI text, issues and conversation.
 
@@ -19,7 +19,7 @@ A JSON file (`.json`) in the explorer that scripts import; it never runs.
 _Avoid_: fixture, asset, JSON script
 
 **Package import**:
-An import of an npm package by its pinned unpkg.com URL (`https://unpkg.com/dayjs@1.11.13`); Wiretrick downloads the package, its dependencies and its typings when the script is saved.
+An import of an npm package by its pinned unpkg.com URL (`https://unpkg.com/dayjs@1.11.13`); TangiTweak downloads the package, its dependencies and its typings when the script is saved.
 _Avoid_: CDN import, remote import, URL import, external library
 
 **Folder**:
@@ -31,24 +31,24 @@ A function exported by a library that registers handlers on behalf of the script
 _Avoid_: macro, preset
 
 **Handler**:
-One registration in a script (`wt.onRequest`, `wt.onResponseHeaders`, `wt.onResponseBody`, `wt.replaceResponse`, `wt.onSite`, `wt.onPage` or `wt.onOverlay`) pairing a route with a function.
+One registration in a script (`tt.onRequest`, `tt.onResponseHeaders`, `tt.onResponseBody`, `tt.replaceResponse`, `tt.onSite`, `tt.onPage` or `tt.onOverlay`) pairing a route with a function.
 _Avoid_: hook, rule, interceptor, listener, onDom
 
 **Place**:
-Where a page handler's code runs: the site's own JavaScript world (`wt.onSite`, untrusted), the isolated world over the same DOM (`wt.onPage`), or the script's own GUI frame (`wt.onOverlay`).
+Where a page handler's code runs: the site's own JavaScript world (`tt.onSite`, untrusted), the isolated world over the same DOM (`tt.onPage`), or the script's own GUI frame (`tt.onOverlay`).
 _Avoid_: world option, `js: "page"`, `dom: "overlay"`
 
 **Handle**:
-What `wt.onSite`, `wt.onPage` or `wt.onOverlay` returns: the functions its handler returned, callable (async) from `onPage` and `onOverlay` code. Calls wait for the handler and never time out.
+What `tt.onSite`, `tt.onPage` or `tt.onOverlay` returns: the functions its handler returned, callable (async) from `onPage` and `onOverlay` code. Calls wait for the handler and never time out.
 _Avoid_: remote, proxy, stub
 
 **Site store**:
-A `wt.siteStore`: a store that lives in the site's JavaScript world, one copy per page, which `onSite` code uses directly and the site can read and change — page data.
+A `tt.siteStore`: a store that lives in the site's JavaScript world, one copy per page, which `onSite` code uses directly and the site can read and change — page data.
 _Avoid_: page-world store, unsafe store
 
 **Mirror**:
 A site store's live copy in `onPage` or `onOverlay` code: it follows the site's copy and sends its changes there.
-_Avoid_: replica (that's a copy of a `wt.globalStore` or `wt.pageStore`)
+_Avoid_: replica (that's a copy of a `tt.globalStore` or `tt.pageStore`)
 
 **Run**:
 One execution of a page handler in one frame. A save, navigation or disable ends it, aborting `ctx.signal`.
@@ -63,7 +63,7 @@ The one stand-in `ctx.patch` installs on an object's property; saves swap what i
 _Avoid_: hook, monkey-patch wrapper
 
 **Body handler**:
-A `wt.onResponseBody` or `wt.replaceResponse` handler: one that works on a response body.
+A `tt.onResponseBody` or `tt.replaceResponse` handler: one that works on a response body.
 _Avoid_: response handler, modifyResponse
 
 **Route**:
@@ -87,7 +87,7 @@ An `onRequest` result that ends the request's handler chain: `replaceResponse`, 
 _Avoid_: terminal result, short-circuit, cancel, respond
 
 **Replacement**:
-A whole new response that Wiretrick serves instead of the real one (from a `wt.replaceResponse` handler or an `onRequest` `replaceResponse` result).
+A whole new response that TangiTweak serves instead of the real one (from a `tt.replaceResponse` handler or an `onRequest` `replaceResponse` result).
 _Avoid_: mock, override, fake response, respond
 
 **Stacking**:
@@ -135,7 +135,7 @@ Said of a strategy that can run in the current browser and build right now; a ha
 _Avoid_: supported, enabled, active
 
 **Local helper**:
-The small program (`wiretrick-helper`) the user installs on their machine that powers the `helper` strategy.
+The small program (`tangitweak-helper`) the user installs on their machine that powers the `helper` strategy.
 _Avoid_: proxy, native app, daemon, process helper
 
 **Helper certificate**:
@@ -143,7 +143,7 @@ The certificate authority the local helper creates on the user's machine, which 
 _Avoid_: helper CA, root cert, MITM cert
 
 **Helper routing**:
-Wiretrick sending only the hosts its `helper` handlers need through the local helper.
+TangiTweak sending only the hosts its `helper` handlers need through the local helper.
 _Avoid_: proxy routing, PAC, proxy mode
 
 **User proxy setting**:
@@ -155,7 +155,7 @@ The "being debugged" bar Chrome shows while the `debugger` strategy is attached 
 _Avoid_: yellow bar, infobar
 
 **Page**:
-One document shown in a tab, from the navigation or reload that commits it until the next one or the tab closing; a single-page app's route change stays on the same page. Each page has its own copy of a `wt.pageStore`.
+One document shown in a tab, from the navigation or reload that commits it until the next one or the tab closing; a single-page app's route change stays on the same page. Each page has its own copy of a `tt.pageStore`.
 _Avoid_: tab (a tab shows many pages over time)
 
 **Page load**:
@@ -241,7 +241,7 @@ The number on the toolbar icon: how many enabled scripts have a route matching t
 _Avoid_: counter, indicator
 
 **Settings**:
-Wiretrick's global options (as opposed to a script's params).
+TangiTweak's global options (as opposed to a script's params).
 _Avoid_: preferences, config, params
 
 **settings.yaml**:
@@ -249,7 +249,7 @@ The user-owned file holding settings, every script's params and enabled state.
 _Avoid_: config file, settings file
 
 **Synced folder**:
-A folder the user picks that Wiretrick keeps in two-way sync with the scripts, data files and folders; its subfolders mirror the explorer's folders.
+A folder the user picks that TangiTweak keeps in two-way sync with the scripts, data files and folders; its subfolders mirror the explorer's folders.
 _Avoid_: scripts folder, workspace, dedicated folder
 
 **Folder sync**:
@@ -257,7 +257,7 @@ The two-way mirroring between the explorer (scripts, data files, folders) and th
 _Avoid_: export, backup
 
 **Managed files**:
-`wt-api.d.ts`, `tsconfig.json` and `settings.schema.json`: files Wiretrick writes into the synced folder and rewrites on every start, not meant to be edited.
+`tt-api.d.ts`, `tsconfig.json` and `settings.schema.json`: files TangiTweak writes into the synced folder and rewrites on every start, not meant to be edited.
 _Avoid_: generated files, owned files, support files, typings
 
 **Diagnostics report**:

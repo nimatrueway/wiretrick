@@ -84,7 +84,7 @@ describe("ExtensionStrategy", () => {
     it("onRequest redirect", () => {
         const s = new ExtensionStrategy();
         s.reload([
-            makeScript("a", `wt.onRequest({ url: "*://api.example.com/*", strategy: "extension" }, (ctx) => ({ redirect: "https://mocked.example.com/data" }));`),
+            makeScript("a", `tt.onRequest({ url: "*://api.example.com/*", strategy: "extension" }, (ctx) => ({ redirect: "https://mocked.example.com/data" }));`),
         ]);
         const d = s.handleBeforeRequest(details(), "https://app.example.com/") as any;
         expect(d).toEqual({ kind: "redirect", url: "https://mocked.example.com/data" });
@@ -93,9 +93,9 @@ describe("ExtensionStrategy", () => {
     it("a redirect or replacement of a WebSocket isn't applied, with a warning (Chrome ignores it)", () => {
         const s = new ExtensionStrategy();
         s.reload([
-            named("Socky", `wt.onRequest({ url: "wss://ws.example.com/*", strategy: "extension" }, () => ({ redirect: "wss://other.example.com/ws" }));
-wt.replaceResponse({ url: "wss://ws.example.com/*", strategy: "extension" }, () => "nope");`),
-            named("Hdr", `wt.onRequest({ url: "wss://ws.example.com/*", strategy: "extension" }, () => ({ headers: { set: { "x-a": "1" } } }));`),
+            named("Socky", `tt.onRequest({ url: "wss://ws.example.com/*", strategy: "extension" }, () => ({ redirect: "wss://other.example.com/ws" }));
+tt.replaceResponse({ url: "wss://ws.example.com/*", strategy: "extension" }, () => "nope");`),
+            named("Hdr", `tt.onRequest({ url: "wss://ws.example.com/*", strategy: "extension" }, () => ({ headers: { set: { "x-a": "1" } } }));`),
         ]);
         const ws = details({ url: "wss://ws.example.com/ws", type: "websocket", requestId: "ws1" });
         expect((s.handleBeforeRequest(ws, null) as any).kind).toBe("allow");
@@ -109,7 +109,7 @@ wt.replaceResponse({ url: "wss://ws.example.com/*", strategy: "extension" }, () 
     it("non-matching url → allow", () => {
         const s = new ExtensionStrategy();
         s.reload([
-            makeScript("a", `wt.onRequest({ url: "*://other.com/*", strategy: "extension" }, () => ({ redirect: "https://x.com" }));`),
+            makeScript("a", `tt.onRequest({ url: "*://other.com/*", strategy: "extension" }, () => ({ redirect: "https://x.com" }));`),
         ]);
         expect((s.handleBeforeRequest(details(), null) as any).kind).toBe("allow");
     });
@@ -117,7 +117,7 @@ wt.replaceResponse({ url: "wss://ws.example.com/*", strategy: "extension" }, () 
     it("disabled script does nothing", () => {
         const s = new ExtensionStrategy();
         s.reload([
-            makeScript("a", `wt.onRequest({ url: "*", strategy: "extension" }, () => ({ block: true }));`, false),
+            makeScript("a", `tt.onRequest({ url: "*", strategy: "extension" }, () => ({ block: true }));`, false),
         ]);
         expect((s.handleBeforeRequest(details(), null) as any).kind).toBe("allow");
     });
@@ -125,7 +125,7 @@ wt.replaceResponse({ url: "wss://ws.example.com/*", strategy: "extension" }, () 
     it("static replaceResponse → data url redirect", () => {
         const s = new ExtensionStrategy();
         s.reload([
-            makeScript("a", `wt.replaceResponse({ url: "*://api.example.com/v1/data", strategy: "extension" }, () => JSON.stringify({ mocked: true }));`),
+            makeScript("a", `tt.replaceResponse({ url: "*://api.example.com/v1/data", strategy: "extension" }, () => JSON.stringify({ mocked: true }));`),
         ]);
         const d = s.handleBeforeRequest(details(), null) as any;
         expect(d.kind).toBe("redirect");
@@ -138,7 +138,7 @@ wt.replaceResponse({ url: "wss://ws.example.com/*", strategy: "extension" }, () 
     it("onResponseHeaders modifies headers", () => {
         const s = new ExtensionStrategy();
         s.reload([
-            makeScript("a", `wt.onResponseHeaders({ url: "*://api.example.com/*", strategy: "extension" }, () => ({ headers: { set: { "access-control-allow-origin": "*" }, remove: ["x-frame-options"] } }));`),
+            makeScript("a", `tt.onResponseHeaders({ url: "*://api.example.com/*", strategy: "extension" }, () => ({ headers: { set: { "access-control-allow-origin": "*" }, remove: ["x-frame-options"] } }));`),
         ]);
         const changes = s.handleHeadersReceived(details(), null) as any;
         expect(changes).not.toBeNull();
@@ -148,7 +148,7 @@ wt.replaceResponse({ url: "wss://ws.example.com/*", strategy: "extension" }, () 
 
     it("request header modification via onRequest (run once, cached for header phase)", () => {
         const s = new ExtensionStrategy();
-        const code = `wt.onRequest({ url: "*://api.example.com/*", strategy: "extension" }, () => ({ headers: { set: { authorization: "Bearer x" } } }));`;
+        const code = `tt.onRequest({ url: "*://api.example.com/*", strategy: "extension" }, () => ({ headers: { set: { authorization: "Bearer x" } } }));`;
         s.reload([makeScript("a", code)]);
         // header phase alone does nothing (cache empty — onRequest hasn't run)
         expect(s.handleBeforeSendHeaders(details(), null)).toBeNull();
@@ -161,8 +161,8 @@ wt.replaceResponse({ url: "wss://ws.example.com/*", strategy: "extension" }, () 
     it("same order as every strategy: every onRequest before any replaceResponse", () => {
         const s = new ExtensionStrategy();
         s.reload([
-            makeScript("a", `wt.replaceResponse({ url: "*://api.example.com/*", strategy: "extension" }, () => "mocked");`),
-            makeScript("b", `wt.onRequest({ url: "*://api.example.com/*", strategy: "extension" }, () => ({ block: true }));`),
+            makeScript("a", `tt.replaceResponse({ url: "*://api.example.com/*", strategy: "extension" }, () => "mocked");`),
+            makeScript("b", `tt.onRequest({ url: "*://api.example.com/*", strategy: "extension" }, () => ({ block: true }));`),
         ]);
         expect((s.handleBeforeRequest(details(), null) as any).kind).toBe("cancel");
     });
@@ -170,8 +170,8 @@ wt.replaceResponse({ url: "wss://ws.example.com/*", strategy: "extension" }, () 
     it("the later handler wins per header, and the override is a warning", () => {
         const s = new ExtensionStrategy();
         s.reload([
-            named("a", `wt.onRequest({ url: "*://api.example.com/*", strategy: "extension" }, () => ({ headers: { set: { "X-Mode": "a" }, remove: ["cookie"] } }));`),
-            named("b", `wt.onRequest({ url: "*://api.example.com/*", strategy: "extension" }, () => ({ headers: { remove: ["x-mode"], set: { Cookie: "b=1" } } }));`),
+            named("a", `tt.onRequest({ url: "*://api.example.com/*", strategy: "extension" }, () => ({ headers: { set: { "X-Mode": "a" }, remove: ["cookie"] } }));`),
+            named("b", `tt.onRequest({ url: "*://api.example.com/*", strategy: "extension" }, () => ({ headers: { remove: ["x-mode"], set: { Cookie: "b=1" } } }));`),
         ]);
         s.handleBeforeRequest(details({ requestId: "hdr" }), null);
         const changes = s.handleBeforeSendHeaders(details({ requestId: "hdr" }), null) as any;
@@ -182,8 +182,8 @@ wt.replaceResponse({ url: "wss://ws.example.com/*", strategy: "extension" }, () 
 
     it("a final result warns for each handler it kept from running", () => {
         const scripts = [
-            named("a", `wt.onRequest({ url: "*://api.example.com/*", strategy: "extension" }, () => ({ block: true }));`),
-            named("b", `wt.onRequest({ url: "*://api.example.com/*", strategy: "extension" }, () => ({ headers: { set: { x: "1" } } })); wt.onResponseHeaders({ url: "*://api.example.com/*", strategy: "extension" }, () => null);`),
+            named("a", `tt.onRequest({ url: "*://api.example.com/*", strategy: "extension" }, () => ({ block: true }));`),
+            named("b", `tt.onRequest({ url: "*://api.example.com/*", strategy: "extension" }, () => ({ headers: { set: { x: "1" } } })); tt.onResponseHeaders({ url: "*://api.example.com/*", strategy: "extension" }, () => null);`),
         ];
         setSkipRoutes(scripts);
         const s = new ExtensionStrategy();
@@ -199,7 +199,7 @@ wt.replaceResponse({ url: "wss://ws.example.com/*", strategy: "extension" }, () 
     it("script throwing does not break the pipeline", () => {
         const s = new ExtensionStrategy();
         s.reload([
-            makeScript("a", `wt.onRequest({ url: "*", strategy: "extension" }, () => { throw new Error("boom"); });`),
+            makeScript("a", `tt.onRequest({ url: "*", strategy: "extension" }, () => { throw new Error("boom"); });`),
         ]);
         expect((s.handleBeforeRequest(details(), null) as any).kind).toBe("allow");
     });
@@ -208,16 +208,16 @@ wt.replaceResponse({ url: "wss://ws.example.com/*", strategy: "extension" }, () 
 describe("PageStrategy (hook tier)", () => {
     it("owns only hook routes and never asks for the debugger itself", () => {
         const s = new PageStrategy();
-        s.reload([makeScript("a", `wt.onResponseBody({ url: "*", strategy: "page" }, (ctx, body) => body);`)]);
+        s.reload([makeScript("a", `tt.onResponseBody({ url: "*", strategy: "page" }, (ctx, body) => body);`)]);
         expect(s.hasOwners()).toBe(true);
         expect((s.handleBeforeRequest(details({ type: "script" }), null) as any).kind).toBe("allow");
-        s.reload([makeScript("a", `wt.onResponseBody({ url: "*", strategy: "debugger" }, (ctx, body) => body);`)]);
+        s.reload([makeScript("a", `tt.onResponseBody({ url: "*", strategy: "debugger" }, (ctx, body) => body);`)]);
         expect(s.hasOwners()).toBe(false);
     });
 
     it("claimed urls (tier A) are tracked", () => {
         const s = new PageStrategy();
-        s.reload([makeScript("a", `wt.onResponseBody({ url: "*", strategy: "page" }, (ctx, body) => body);`)]);
+        s.reload([makeScript("a", `tt.onResponseBody({ url: "*", strategy: "page" }, (ctx, body) => body);`)]);
         s.claimRequest("https://cdn.example.com/lib.js");
         expect(s.isClaimed("https://cdn.example.com/lib.js")).toBe(true);
         expect(s.isClaimed("https://cdn.example.com/other.js")).toBe(false);

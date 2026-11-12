@@ -1,7 +1,7 @@
-/** One-line terminal commands that download the right wiretrick-helper
+/** One-line terminal commands that download the right tangitweak-helper
  * release binary (checksum-verified) and register it for this extension. */
 
-const RAW = "https://raw.githubusercontent.com/nimatrueway/wiretrick/master/helper";
+const RAW = "https://raw.githubusercontent.com/nimatrueway/tangitweak/master/helper";
 
 export const isWindows = (): boolean => /Windows/i.test(globalThis.navigator?.userAgent || "");
 

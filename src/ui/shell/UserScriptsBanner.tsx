@@ -8,8 +8,8 @@ export function UserScriptsBanner() {
     if (!bannerShown(s) || s.status === "ok") return null;
     const settings = `chrome://extensions/?id=${s.extensionId}`;
     return (
-        <div id="userscripts-banner" className="wt-banner" role="status" data-status={s.status}>
-            <span className="wt-banner-text">
+        <div id="userscripts-banner" className="tt-banner" role="status" data-status={s.status}>
+            <span className="tt-banner-text">
                 <b>User scripts are off:</b> onPage and onSite code don't run (onOverlay code and network handlers still do). To run them, {userScriptsHowTo(s.status, s.extensionId)}.
             </span>
             {s.status === "no-permission" ? (
@@ -21,7 +21,7 @@ export function UserScriptsBanner() {
                     Open extension details
                 </button>
             )}
-            <button className="wt-banner-close" title="Dismiss (the Problems error stays until user scripts are on)" aria-label="Dismiss" onClick={() => dismissUserScriptsBanner()}>
+            <button className="tt-banner-close" title="Dismiss (the Problems error stays until user scripts are on)" aria-label="Dismiss" onClick={() => dismissUserScriptsBanner()}>
                 ✕
             </button>
         </div>

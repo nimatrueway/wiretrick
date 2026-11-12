@@ -21,9 +21,9 @@ export function badgeLook(names: string[], problems: (ScriptProblem | undefined)
     const errors = problems.filter((p) => p === "error").length;
     const warnings = problems.filter((p) => p === "warning").length;
     const color = errors ? BADGE_ERROR : warnings ? BADGE_WARN : BADGE_OK;
-    if (!names.length) return { color, title: "Wiretrick" };
+    if (!names.length) return { color, title: "TangiTweak" };
     const lines = names.map((n, i) => `${problems[i] === "error" ? "✖" : problems[i] === "warning" ? "⚠" : "•"} ${n}`);
-    const head = `Wiretrick — ${names.length} active script${names.length === 1 ? "" : "s"}`;
+    const head = `TangiTweak — ${names.length} active script${names.length === 1 ? "" : "s"}`;
     const tail = errors || warnings ? [`${[errors && `${errors} with errors`, warnings && `${warnings} with warnings`].filter(Boolean).join(", ")} — see Problems in the Editor`] : [];
     return { color, title: [head, ...lines, ...tail].join("\n") };
 }

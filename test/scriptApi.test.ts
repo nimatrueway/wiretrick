@@ -1,5 +1,5 @@
 /**
- * Script API: per-handler routes, wt.metadata, wt.params / wt.defineParam,
+ * Script API: per-handler routes, tt.metadata, tt.params / tt.defineParam,
  * and utilities (no handlers).
  */
 import { describe, expect, it } from "vitest";
@@ -8,16 +8,16 @@ import { compileScript } from "../src/shared/compile";
 import { paramDefault, resolveParamValues, isValidParamValue } from "../src/shared/scriptDef";
 
 const CODE = `
-wt.metadata({ description: "Blocks things" });
-const cfg = wt.params({
+tt.metadata({ description: "Blocks things" });
+const cfg = tt.params({
     flag: { type: "boolean", default: true },
     note: { type: "string", default: "hi" },
     mode: { type: "enum", choices: ["a", "b"], default: "b" },
 });
-const hosts = wt.defineParam("hosts", { type: "stringList", default: ["x"] });
-wt.log("flag", cfg.flag, hosts.join());
-wt.onRequest({ url: ["*://a.com/*", "*://b.com/*"], strategy: "page" }, () => (cfg.flag ? { block: true } : undefined));
-wt.onResponseBody({ url: "*://b.com/*", strategy: "helper" }, (c, b) => b);
+const hosts = tt.defineParam("hosts", { type: "stringList", default: ["x"] });
+tt.log("flag", cfg.flag, hosts.join());
+tt.onRequest({ url: ["*://a.com/*", "*://b.com/*"], strategy: "page" }, () => (cfg.flag ? { block: true } : undefined));
+tt.onResponseBody({ url: "*://b.com/*", strategy: "helper" }, (c, b) => b);
 `;
 
 describe("script API", () => {
@@ -36,7 +36,7 @@ describe("script API", () => {
         expect(c.handlers.onRequest[0].route.url).toEqual(["*://a.com/*", "*://b.com/*"]);
     });
 
-    it("collects param defs from wt.params and wt.defineParam", () => {
+    it("collects param defs from tt.params and tt.defineParam", () => {
         const c = compileScript(CODE);
         expect(Object.keys(c.paramDefs || {})).toEqual(["flag", "note", "mode", "hosts"]);
     });
@@ -58,19 +58,19 @@ describe("script API", () => {
     });
 
     it("params can feed routes", () => {
-        const c = compileScript(`const p = wt.params({ host: { type: "string", default: "a.com" } });\nwt.onRequest({ url: \`*://\${p.host}/*\`, strategy: "helper" }, () => {});`, { paramValues: { host: "z.org" } });
+        const c = compileScript(`const p = tt.params({ host: { type: "string", default: "a.com" } });\ntt.onRequest({ url: \`*://\${p.host}/*\`, strategy: "helper" }, () => {});`, { paramValues: { host: "z.org" } });
         expect(c.error).toBeNull();
         expect(c.meta.match).toEqual(["*://z.org/*"]);
     });
 
     it("bad param definitions and duplicates are script errors", () => {
-        expect(compileScript(`wt.params({ a: { default: 1 } });`).error).toMatch(/needs a type/);
-        expect(compileScript(`wt.params({ a: { type: "enum" } });`).error).toMatch(/needs choices/);
-        expect(compileScript(`wt.params({ a: { type: "number" } }); wt.defineParam("a", { type: "number" });`).error).toMatch(/already defined/);
+        expect(compileScript(`tt.params({ a: { default: 1 } });`).error).toMatch(/needs a type/);
+        expect(compileScript(`tt.params({ a: { type: "enum" } });`).error).toMatch(/needs choices/);
+        expect(compileScript(`tt.params({ a: { type: "number" } }); tt.defineParam("a", { type: "number" });`).error).toMatch(/already defined/);
     });
 
     it("a script without handlers is a library (params allowed)", () => {
-        const c = compileScript(`wt.params({ n: { type: "number", default: 2 } });\nexport const helper = () => 42;`);
+        const c = compileScript(`tt.params({ n: { type: "number", default: 2 } });\nexport const helper = () => 42;`);
         expect(c.error).toBeNull();
         expect(c.meta.active).toBe(false);
         expect(c.paramDefs).toHaveProperty("n");
@@ -78,16 +78,16 @@ describe("script API", () => {
     });
 
     it("route errors surface as script errors", () => {
-        expect(compileScript(`wt.onRequest(() => {});`).error).toMatch(/first argument must be a route \{ url, strategy \}/);
-        expect(compileScript(`wt.onRequest("*", () => {});`).error).toMatch(/bare URL pattern has no strategy/);
-        expect(compileScript(`wt.onRequest({ url: "*" }, () => {});`).error).toMatch(/missing "strategy"/);
-        expect(compileScript(`wt.onPage("*", () => {});`).error).toBeNull();
-        expect(compileScript(`wt.onRequest({ match: "*", strategy: "helper" }, () => {});`).error).toMatch(/"url", not "match"/);
-        expect(compileScript(`wt.onRequest({ url: "*", strategy: ["page", "debugger"] }, () => {});`).error).toMatch(/single value/);
-        expect(compileScript(`wt.onRequest({ url: "*", strategy: "auto" }, () => {});`).error).toMatch(/unknown strategy/);
-        expect(compileScript(`wt.onRequest({ url: "*", resourceTypes: ["nope"], strategy: "helper" }, () => {});`).error).toMatch(/unknown resource type/);
-        expect(compileScript(`wt.onPage({ url: "*", strategy: "page" }, () => {});`).error).toMatch(/doesn't apply to onPage/);
-        expect(compileScript(`wt.onRequest({ url: "*", strategy: "helper" }, 1);`).error).toMatch(/second argument/);
+        expect(compileScript(`tt.onRequest(() => {});`).error).toMatch(/first argument must be a route \{ url, strategy \}/);
+        expect(compileScript(`tt.onRequest("*", () => {});`).error).toMatch(/bare URL pattern has no strategy/);
+        expect(compileScript(`tt.onRequest({ url: "*" }, () => {});`).error).toMatch(/missing "strategy"/);
+        expect(compileScript(`tt.onPage("*", () => {});`).error).toBeNull();
+        expect(compileScript(`tt.onRequest({ match: "*", strategy: "helper" }, () => {});`).error).toMatch(/"url", not "match"/);
+        expect(compileScript(`tt.onRequest({ url: "*", strategy: ["page", "debugger"] }, () => {});`).error).toMatch(/single value/);
+        expect(compileScript(`tt.onRequest({ url: "*", strategy: "auto" }, () => {});`).error).toMatch(/unknown strategy/);
+        expect(compileScript(`tt.onRequest({ url: "*", resourceTypes: ["nope"], strategy: "helper" }, () => {});`).error).toMatch(/unknown resource type/);
+        expect(compileScript(`tt.onPage({ url: "*", strategy: "page" }, () => {});`).error).toMatch(/doesn't apply to onPage/);
+        expect(compileScript(`tt.onRequest({ url: "*", strategy: "helper" }, 1);`).error).toMatch(/second argument/);
     });
 
     it("exports are importable via the module resolver", async () => {
@@ -96,7 +96,7 @@ describe("script API", () => {
         const user = {
             id: "s1",
             name: "user",
-            code: `import { double } from "./utils";\nwt.onRequest({ url: "*", strategy: "helper" }, () => double(21) === 42 ? { block: true } : undefined);`,
+            code: `import { double } from "./utils";\ntt.onRequest({ url: "*", strategy: "helper" }, () => double(21) === 42 ? { block: true } : undefined);`,
         };
         const resolver = makeModuleResolver([lib, user], () => ({}));
         const c = compileScript(user.code, { importModule: resolver.resolve });
@@ -109,7 +109,7 @@ describe("script API", () => {
     it("missing imports surface as compile errors", async () => {
         const { makeModuleResolver } = await import("../src/shared/compile");
         const resolver = makeModuleResolver([], () => ({}));
-        const c = compileScript(`import { x } from "./nope";\nwt.log(x);`, { importModule: resolver.resolve });
+        const c = compileScript(`import { x } from "./nope";\ntt.log(x);`, { importModule: resolver.resolve });
         expect(c.error).toContain("unknown module");
     });
 });
@@ -149,7 +149,7 @@ describe("saveScript name handling", () => {
             },
         };
         const { saveScript, setEnabled, getScript } = await import("../src/background/engine/scriptStore");
-        await saveScript({ id: "s1", code: `wt.onRequest({ url: "*", strategy: "helper" }, () => {});`, name: "redwood" });
+        await saveScript({ id: "s1", code: `tt.onRequest({ url: "*", strategy: "helper" }, () => {});`, name: "redwood" });
         expect((await getScript("s1"))!.meta.name).toBe("redwood");
         await setEnabled("s1", false);
         expect((await getScript("s1"))!.meta.name).toBe("redwood");

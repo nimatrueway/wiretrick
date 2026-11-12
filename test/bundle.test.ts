@@ -46,10 +46,10 @@ describe("editorLaunchUrl", () => {
 
 describe("synced folder path (pasted in Settings)", () => {
     it("cleans what the OS copy-path commands produce", () => {
-        expect(cleanFolderPath('  "C:\\Users\\me\\Wiretrick"  ')).toBe("C:\\Users\\me\\Wiretrick");
+        expect(cleanFolderPath('  "C:\\Users\\me\\TangiTweak"  ')).toBe("C:\\Users\\me\\TangiTweak");
         expect(cleanFolderPath("file:///home/me/My%20Scripts/")).toBe("/home/me/My Scripts");
-        expect(cleanFolderPath("file:///C:/Users/me/Wiretrick")).toBe("C:/Users/me/Wiretrick");
-        expect(cleanFolderPath("/Users/me/Wiretrick/")).toBe("/Users/me/Wiretrick");
+        expect(cleanFolderPath("file:///C:/Users/me/TangiTweak")).toBe("C:/Users/me/TangiTweak");
+        expect(cleanFolderPath("/Users/me/TangiTweak/")).toBe("/Users/me/TangiTweak");
         expect(cleanFolderPath("/")).toBe("/");
         expect(cleanFolderPath("C:\\")).toBe("C:\\");
         expect(cleanFolderPath("")).toBe("");
@@ -60,6 +60,6 @@ describe("synced folder path (pasted in Settings)", () => {
         expect(hostOs("Win32")).toBe("windows");
         expect(hostOs("Linux x86_64")).toBe("linux");
         expect(copyPathHint("mac").hint).toContain("⌥⌘C");
-        expect(copyPathHint("windows").example).toBe("C:\\Users\\you\\Wiretrick");
+        expect(copyPathHint("windows").example).toBe("C:\\Users\\you\\TangiTweak");
     });
 });

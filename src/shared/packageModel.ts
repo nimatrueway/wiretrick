@@ -12,7 +12,7 @@ import type { PackageMetadata } from "./packageMetadata";
 import { ENTRY_FILE_RE } from "./packageSource";
 import { scriptFileKey } from "./scriptName";
 
-export const PACKAGES_KEY = "wtPackages";
+export const PACKAGES_KEY = "wtPackages"; // the extension's former name (Wiretrick): kept so stored data survives
 
 /** what a package is at one revision: its files' texts */
 export interface PackageVersion {
@@ -77,10 +77,10 @@ export function storeItemOf(folder: string, rel: string): { kind: "script" | "da
     return { kind: "script", name: join(folder, rel).replace(/\.ts$/i, "") };
 }
 
-/** an entry's file name without `.wiretrick.ts` */
+/** an entry's file name without `.tangitweak.ts` */
 export const entryStem = (entry: string): string => entry.replace(/^.*\//, "").replace(ENTRY_FILE_RE, "").replace(/\.tsx?$/i, "");
 
-/** a package's display name: its metadata's name, else its (first) entry's file name without `.wiretrick.ts` */
+/** a package's display name: its metadata's name, else its (first) entry's file name without `.tangitweak.ts` */
 export function packageName(p: { entries: string[]; metadata: Pick<PackageMetadata, "name"> }): string {
     return p.metadata.name || entryStem(p.entries[0] ?? "") || "package";
 }
@@ -91,7 +91,7 @@ export const entryIds = (p: Pick<InstalledPackage, "entries" | "files">): string
 /**
  * Where a package installs: a single file at the root, more in a folder
  * named after the bundle (its metadata.json's name) or the entry
- * (`dark.wiretrick.ts` → `dark/`), then `dark (2)/`… past what's `taken`
+ * (`dark.tangitweak.ts` → `dark/`), then `dark (2)/`… past what's `taken`
  * — script names, data paths and folders.
  */
 export function packageFolder(p: { entries: string[]; files: Record<string, string>; bundleName?: string }, taken: string[]): string {
@@ -102,11 +102,11 @@ export function packageFolder(p: { entries: string[]; files: Record<string, stri
     for (let i = 2; ; i++) if (!keys.has(scriptFileKey(`${stem} (${i})`))) return `${stem} (${i})`;
 }
 
-/** a root single-file entry's name past the `taken` ones: `x.wiretrick` → `x (2).wiretrick` (still an entry) */
+/** a root single-file entry's name past the `taken` ones: `x.tangitweak` → `x (2).tangitweak` (still an entry) */
 export function uniqueEntryName(name: string, taken: string[]): string {
     const keys = new Set(taken.map(scriptFileKey));
     if (!keys.has(scriptFileKey(name))) return name;
-    const m = /^(.*?)(\.wiretrick(?:\.tsx)?)?$/i.exec(name)!;
+    const m = /^(.*?)(\.tangitweak(?:\.tsx)?)?$/i.exec(name)!;
     for (let i = 2; ; i++) {
         const next = `${m[1]} (${i})${m[2] ?? ""}`;
         if (!keys.has(scriptFileKey(next))) return next;

@@ -142,7 +142,7 @@ loaded with a `<script>` tag only when a script imports it. Bumping
 changelog. `.tsx` scripts compile with the automatic JSX runtime
 (`"jsx": "react-jsx"` in the generated `tsconfig.json`).
 
-A script's overlay GUI (`wt.onOverlay`) runs in `overlay.html` + `overlay.js`
+A script's overlay GUI (`tt.onOverlay`) runs in `overlay.html` + `overlay.js`
 (`src/overlay/overlayRuntime.ts`), a web-accessible page the bridge
 (`src/hook/bridge.ts`) frames into the top page inside a closed shadow
 root, one frame per script. The bridge hands the frame a `MessagePort`;
@@ -179,7 +179,7 @@ pages, and drops blocking `webRequest`):
   only MV3 context where `new Function` is allowed. The service worker
   routes compiles/ executions there through an offscreen document
   (`offscreen.html` bridges chrome.runtime ⇄ iframe postMessage). Handler
-  results, script logs and `wt.storage` round-trip back over the same
+  results, script logs and `tt.storage` round-trip back over the same
   channel.
 - **The `page` strategy carries page fetch/XHR interception** (patching in the
   page's MAIN world — same behavior, transforms execute in the sandbox).
@@ -223,7 +223,7 @@ pages, and drops blocking `webRequest`):
   and `chrome.debugger`, so `hook.js` and `bridge.js` are built with
   `__NO_EVAL__` and never compile code. Each onSite script, the library
   scripts it imports and its package modules are registered as
-  `chrome.userScripts` with `world: "MAIN"` (`wt-main-<id>`,
+  `chrome.userScripts` with `world: "MAIN"` (`tt-main-<id>`,
   `src/shared/siteCode.ts`): each pushes its function onto a queue on the
   page's global, keyed by name and code hash, and the hook takes them from
   there. Saving a script also runs the new functions in open tabs

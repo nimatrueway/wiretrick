@@ -10,7 +10,7 @@ import type { PackageFn } from "./siteCode";
 
 export const PACKAGE_ORIGIN = "https://unpkg.com/";
 /** where package typings live: Monaco's `file:///<root>/…` and the synced folder's `<root>/…` */
-export const TYPINGS_ROOT = ".wiretrick/types";
+export const TYPINGS_ROOT = ".tangitweak/types";
 /** tsconfig `paths` mapping package URLs onto the typings mirror (`target` is the typings root, no trailing slash) */
 export function packagePaths(target: string): Record<string, string[]> {
     return { [`${PACKAGE_ORIGIN}*`]: [`${target}/unpkg.com/*`] };
@@ -106,7 +106,7 @@ export function isNodeBuiltin(spec: string): boolean {
 }
 
 export function builtinMessage(spec: string): string {
-    return `"${spec}" is a Node.js built-in — not available in Wiretrick scripts`;
+    return `"${spec}" is a Node.js built-in — not available in TangiTweak scripts`;
 }
 
 /** a bare specifier's package name and path inside it (`@s/x/a/b` → `@s/x`, `a/b`) */
@@ -312,7 +312,7 @@ export function naturalDeclaration(sub: string): string[] {
 
 /** the declaration stub for a module without typings (`any`) */
 export function typingsStub(spec: string): string {
-    return `// Wiretrick found no TypeScript declarations for ${spec}\ndeclare const mod: any;\nexport = mod;\n`;
+    return `// TangiTweak found no TypeScript declarations for ${spec}\ndeclare const mod: any;\nexport = mod;\n`;
 }
 
 /** where a stub for `sub` goes (inside the package folder) */
@@ -410,7 +410,7 @@ export function isPackageExport(fn: Function): boolean {
 
 const evalPackage = (url: string, js: string): PackageFn =>
     // eslint-disable-next-line no-new-func
-    new Function("require", "module", "exports", "process", "global", "__wtStyle", `${js}\n//# sourceURL=${url}`) as PackageFn;
+    new Function("require", "module", "exports", "process", "global", "__ttStyle", `${js}\n//# sourceURL=${url}`) as PackageFn;
 const noEval = (url: string): never => {
     throw new Error(`cannot run ${url} here`);
 };

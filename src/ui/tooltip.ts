@@ -5,7 +5,7 @@
  * selected), and a click on one copies its text. Clicks on Monaco hovers
  * (error markers, hover docs) copy their text the same way.
  *
- * While an anchor is hovered its `title` is parked in `data-wt-title` (that
+ * While an anchor is hovered its `title` is parked in `data-tt-title` (that
  * suppresses the native tooltip) and put back when the pointer leaves, so
  * code reading `title` afterwards sees the usual value. Title changes made
  * while it's parked (`el.title = …`) are picked up and shown live. Titled
@@ -21,7 +21,7 @@ const WARM_MS = 600;
 const GRACE_MS = 180;
 const GAP = 4;
 const MARGIN = 6;
-const PARKED = "data-wt-title";
+const PARKED = "data-tt-title";
 
 let installed = false;
 
@@ -30,7 +30,7 @@ export function installTooltips(): void {
     installed = true;
 
     const tip = document.createElement("div");
-    tip.className = "wt-tip";
+    tip.className = "tt-tip";
     tip.setAttribute("role", "tooltip");
     tip.hidden = true;
 

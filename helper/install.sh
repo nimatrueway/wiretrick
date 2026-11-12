@@ -1,16 +1,16 @@
 #!/bin/sh
-# Downloads the wiretrick-helper binary for this machine from GitHub releases,
-# verifies its SHA-256, and runs `wiretrick-helper install <args>` (which
+# Downloads the tangitweak-helper binary for this machine from GitHub releases,
+# verifies its SHA-256, and runs `tangitweak-helper install <args>` (which
 # copies itself to a per-user location and registers the native host).
 #
-#   curl -fsSL https://raw.githubusercontent.com/nimatrueway/wiretrick/master/helper/install.sh | sh -s -- --extension-id <id> --trust-ca
+#   curl -fsSL https://raw.githubusercontent.com/nimatrueway/tangitweak/master/helper/install.sh | sh -s -- --extension-id <id> --trust-ca
 #
-# WIRETRICK_HELPER_VERSION=v1.2.3 pins a release (default: latest);
-# WIRETRICK_HELPER_BASE_URL overrides the download location (testing).
+# TANGITWEAK_HELPER_VERSION=v1.2.3 pins a release (default: latest);
+# TANGITWEAK_HELPER_BASE_URL overrides the download location (testing).
 set -eu
 
-REPO="nimatrueway/wiretrick"
-VERSION="${WIRETRICK_HELPER_VERSION:-latest}"
+REPO="nimatrueway/tangitweak"
+VERSION="${TANGITWEAK_HELPER_VERSION:-latest}"
 
 if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then
     red=$(printf '\033[1;31m') dim=$(printf '\033[2m') off=$(printf '\033[0m')
@@ -23,7 +23,7 @@ die() { printf '%serror:%s %s\n' "$red" "$off" "$*" >&2; exit 1; }
 case "$(uname -s)" in
     Linux) os="unknown-linux-gnu" ;;
     Darwin) os="apple-darwin" ;;
-    MINGW* | MSYS* | CYGWIN*) die "on Windows use PowerShell: see https://raw.githubusercontent.com/nimatrueway/wiretrick/master/helper/install.ps1" ;;
+    MINGW* | MSYS* | CYGWIN*) die "on Windows use PowerShell: see https://raw.githubusercontent.com/nimatrueway/tangitweak/master/helper/install.ps1" ;;
     *) die "unsupported OS: $(uname -s)" ;;
 esac
 case "$(uname -m)" in
@@ -36,14 +36,14 @@ if [ "$os" = "apple-darwin" ] && [ "$arch" = "x86_64" ] && [ "$(sysctl -n hw.opt
     arch="aarch64"
 fi
 
-if [ -n "${WIRETRICK_HELPER_BASE_URL:-}" ]; then
-    base="$WIRETRICK_HELPER_BASE_URL"
+if [ -n "${TANGITWEAK_HELPER_BASE_URL:-}" ]; then
+    base="$TANGITWEAK_HELPER_BASE_URL"
 elif [ "$VERSION" = "latest" ]; then
     base="https://github.com/$REPO/releases/latest/download"
 else
     base="https://github.com/$REPO/releases/download/$VERSION"
 fi
-asset="wiretrick-helper-$arch-$os.tar.gz"
+asset="tangitweak-helper-$arch-$os.tar.gz"
 
 fetch() {
     if command -v curl >/dev/null 2>&1; then
@@ -55,7 +55,7 @@ fetch() {
     fi
 }
 
-tmp=$(mktemp -d 2>/dev/null || mktemp -d -t wiretrick-helper)
+tmp=$(mktemp -d 2>/dev/null || mktemp -d -t tangitweak-helper)
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
 say "downloading $asset ($VERSION)…"
@@ -76,10 +76,10 @@ else
 fi
 
 tar -xzf "$tmp/$asset" -C "$tmp"
-chmod +x "$tmp/wiretrick-helper"
+chmod +x "$tmp/tangitweak-helper"
 # stdin is this script when piped (`curl | sh`): give the helper the terminal
 if [ ! -t 0 ] && (: </dev/tty) 2>/dev/null; then
-    "$tmp/wiretrick-helper" install "$@" </dev/tty
+    "$tmp/tangitweak-helper" install "$@" </dev/tty
 else
-    "$tmp/wiretrick-helper" install "$@"
+    "$tmp/tangitweak-helper" install "$@"
 fi

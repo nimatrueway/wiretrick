@@ -6,9 +6,9 @@ import { inertRemote, SITE_NO_STORES, SiteCannotCallError } from "../src/shared/
 
 const shim = (world?: "page" | "isolated") => makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined }, world });
 
-describe("wt.onPage", () => {
+describe("tt.onPage", () => {
     it("registers kind onDocument, labelled onPage", () => {
-        const c = compileScript(`wt.onPage("*://a.com/*", () => {});\nwt.onPage("*://b.com/*", () => {});`);
+        const c = compileScript(`tt.onPage("*://a.com/*", () => {});\ntt.onPage("*://b.com/*", () => {});`);
         expect(c.error).toBeNull();
         const [a, b] = c.handlers.onDocument.map((h) => h.route);
         expect(a.kind).toBe("onDocument");
@@ -17,8 +17,8 @@ describe("wt.onPage", () => {
         expect([routeLabel(a), routeLabel(b)]).toEqual(["onPage #1", "onPage #2"]);
     });
 
-    it("wt.onSite runs in the site's world, wt.onPage in the isolated world", () => {
-        const c = compileScript(`wt.onPage("*", () => {});\nwt.onSite("*", () => {});\nwt.onPage({ url: "*", when: "document_idle" }, () => {});`);
+    it("tt.onSite runs in the site's world, tt.onPage in the isolated world", () => {
+        const c = compileScript(`tt.onPage("*", () => {});\ntt.onSite("*", () => {});\ntt.onPage({ url: "*", when: "document_idle" }, () => {});`);
         expect(c.error).toBeNull();
         const [iso, site, idle] = c.handlers.onDocument.map((h) => h.route);
         expect([iso, site, idle].map(pageWorld)).toEqual(["isolated", "page", "isolated"]);
@@ -29,7 +29,7 @@ describe("wt.onPage", () => {
     });
 
     it("returns a handle whose calls reject in the background", async () => {
-        const c = compileScript(`module.exports.h = wt.onPage("*", () => ({ f: () => 1 }));`);
+        const c = compileScript(`module.exports.h = tt.onPage("*", () => ({ f: () => 1 }));`);
         expect(c.error).toBeNull();
         const h = c.exports.h;
         expect(h.then).toBeUndefined();
@@ -37,8 +37,8 @@ describe("wt.onPage", () => {
     });
 });
 
-describe("wt.onOverlay", () => {
-    const code = [`wt.onSite("*", () => {});`, `wt.onOverlay("*", () => {});`, `wt.onOverlay({ url: "*", when: "document_idle" }, () => {});`, `wt.onPage("*", () => {});`].join("\n");
+describe("tt.onOverlay", () => {
+    const code = [`tt.onSite("*", () => {});`, `tt.onOverlay("*", () => {});`, `tt.onOverlay({ url: "*", when: "document_idle" }, () => {});`, `tt.onPage("*", () => {});`].join("\n");
 
     it("registers overlay handlers, keyed and labelled apart from page handlers", () => {
         const c = compileScript(code);
@@ -56,16 +56,16 @@ describe("wt.onOverlay", () => {
 
 
 describe("page shim worlds", () => {
-    const src = (wt: any) => {
-        wt.onSite("*://a.com/*", () => "site");
-        wt.onPage("*://a.com/*", () => "iso");
-        wt.onOverlay("*://a.com/*", () => "overlay");
-        wt.onSite("*://a.com/*", () => "site 2");
+    const src = (tt: any) => {
+        tt.onSite("*://a.com/*", () => "site");
+        tt.onPage("*://a.com/*", () => "iso");
+        tt.onOverlay("*://a.com/*", () => "overlay");
+        tt.onSite("*://a.com/*", () => "site 2");
     };
 
     it("the site's world collects only onSite handlers, keyed like the background", () => {
         const s = shim();
-        src(s.wt);
+        src(s.tt);
         expect(s.dom.map((d) => d.fn({}))).toEqual(["site", "site 2"]);
         expect(s.dom.map((d) => [d.h, d.route.index])).toEqual([
             ["onSite:~0", 0],
@@ -75,25 +75,25 @@ describe("page shim worlds", () => {
 
     it("the isolated world collects only onPage handlers", () => {
         const s = shim("isolated");
-        src(s.wt);
+        src(s.tt);
         expect(s.dom.map((d) => [d.h, d.fn({})])).toEqual([["onPage:~0", "iso"]]);
         expect(domHandlersFor(s.dom, "https://b.com/").length).toBe(0);
     });
 
     it("the compiler's keys win over call order", () => {
         const s = shim("isolated");
-        s.wt.onPage.k(3)("*", () => 0);
-        s.wt.onPage("*", () => 1);
-        s.wt.onPage.k(3)("*", () => 2);
+        s.tt.onPage.k(3)("*", () => 0);
+        s.tt.onPage("*", () => 1);
+        s.tt.onPage.k(3)("*", () => 2);
         expect(s.dom.map((d) => d.h)).toEqual(["onPage:3", "onPage:~1", "onPage:3#1"]);
     });
 
     it("in the site's world handles throw SiteCannotCallError where they're called, and are reported", () => {
         const seen: Error[] = [];
         const s = makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined }, onSiteCall: (e) => seen.push(e) });
-        const h = s.wt.onOverlay("*", () => {});
+        const h = s.tt.onOverlay("*", () => {});
         expect(() => h.ping()).toThrow(SiteCannotCallError);
-        expect(() => s.wt.onSite("*", () => {}).ping()).toThrow(/onSite code can't call handles/);
+        expect(() => s.tt.onSite("*", () => {}).ping()).toThrow(/onSite code can't call handles/);
         expect(seen.map((e) => e.name)).toEqual(["SiteCannotCallError", "SiteCannotCallError"]);
     });
 
@@ -107,18 +107,18 @@ describe("page shim worlds", () => {
             world: "isolated",
             call: (api, key, route) => ((asked.push(`${api}/${key}`), routes.push(route), { ping: async () => "pong" }) as any),
         });
-        await expect(iso.wt.onOverlay("*", () => {}).ping()).resolves.toBe("pong");
-        iso.wt.onSite("*://a.test/*", () => {});
+        await expect(iso.tt.onOverlay("*", () => {}).ping()).resolves.toBe("pong");
+        iso.tt.onSite("*://a.test/*", () => {});
         expect(asked).toEqual(["onOverlay/onOverlay:~0", "onSite/onSite:~0"]);
         expect(routes.map((r) => r.url)).toEqual([["*"], ["*://a.test/*"]]);
-        await expect(shim("isolated").wt.onOverlay("*", () => {}).ping()).rejects.toThrow();
+        await expect(shim("isolated").tt.onOverlay("*", () => {}).ping()).rejects.toThrow();
     });
 
     it("store can be declared at top level but not used; fetch rejects", async () => {
-        const s = shim().wt.globalStore("x", { n: 1 });
+        const s = shim().tt.globalStore("x", { n: 1 });
         expect(s.then).toBeUndefined();
-        expect(() => s.n).toThrow(/wt\.globalStore/);
-        await expect(shim().wt.fetch("/")).rejects.toThrow(/wt\.fetch/);
+        expect(() => s.n).toThrow(/tt\.globalStore/);
+        await expect(shim().tt.fetch("/")).rejects.toThrow(/tt\.fetch/);
     });
 
     it("isolated code gets the stores it's given; the site's world never does", () => {
@@ -128,13 +128,13 @@ describe("page shim worlds", () => {
             pageStore: (name: string, initial: object) => (made.push(`p:${name}`), { ...initial }),
         };
         const iso = makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined }, world: "isolated", stores });
-        expect(iso.wt.globalStore("a", { n: 1 }, { persist: ["n"] }).n).toBe(1);
-        expect(iso.wt.pageStore("b", { m: 2 }).m).toBe(2);
+        expect(iso.tt.globalStore("a", { n: 1 }, { persist: ["n"] }).n).toBe(1);
+        expect(iso.tt.pageStore("b", { m: 2 }).m).toBe(2);
         expect(made).toEqual(['g:a:["n"]', "p:b"]);
-        expect(() => iso.wt.pageStore("a", {})).toThrow(/already has a store named "a"/);
-        expect(() => iso.wt.globalStore("c", [])).toThrow(/initial must be an object/);
+        expect(() => iso.tt.pageStore("a", {})).toThrow(/already has a store named "a"/);
+        expect(() => iso.tt.globalStore("c", [])).toThrow(/initial must be an object/);
         const site = makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined }, world: "page", stores });
-        expect(() => site.wt.pageStore("b", { m: 2 }).m).toThrow(SITE_NO_STORES);
+        expect(() => site.tt.pageStore("b", { m: 2 }).m).toThrow(SITE_NO_STORES);
         expect(made.length).toBe(2);
     });
 });

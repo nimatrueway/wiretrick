@@ -110,10 +110,10 @@ describe("page shim (onPage in the page)", () => {
     const shim = () => makePageShim({ world: "isolated", params: { host: "a.com", n: 3 }, log: () => {}, storage: { get: () => undefined, set: () => undefined } });
 
     it("collects several onPage handlers with routes; network handlers are inert", () => {
-        const { wt, dom } = shim();
-        wt.onRequest({ url: "*", strategy: "helper" }, () => {});
-        wt.onPage({ url: "*://a.com/*", when: "document_idle" }, () => 1);
-        wt.onPage("*://b.com/*", () => 2);
+        const { tt, dom } = shim();
+        tt.onRequest({ url: "*", strategy: "helper" }, () => {});
+        tt.onPage({ url: "*://a.com/*", when: "document_idle" }, () => 1);
+        tt.onPage("*://b.com/*", () => 2);
         expect(dom.map((d) => [d.when, d.route.index])).toEqual([
             ["document_idle", 0],
             ["document_end", 1],
@@ -123,10 +123,10 @@ describe("page shim (onPage in the page)", () => {
     });
 
     it("params resolve from the bundle", () => {
-        const { wt } = shim();
-        expect(wt.params({ host: { type: "string" } })).toEqual({ host: "a.com" });
-        expect(wt.defineParam("n", { type: "number" })).toBe(3);
-        expect(() => wt.onPage("*")).toThrow(/second argument/);
+        const { tt } = shim();
+        expect(tt.params({ host: { type: "string" } })).toEqual({ host: "a.com" });
+        expect(tt.defineParam("n", { type: "number" })).toBe(3);
+        expect(() => tt.onPage("*")).toThrow(/second argument/);
     });
 });
 

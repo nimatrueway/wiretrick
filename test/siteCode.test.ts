@@ -7,9 +7,9 @@ const run = (unit: string, g: any) => new Function("globalThis", unit)(g);
 
 describe("onSite units (Chrome MV3 userScripts in the MAIN world)", () => {
     it("a script unit keeps the user's line 1 at EVAL_WRAPPER_LINES + 1 and runs strict", () => {
-        const js = 'exports.x = wt + 1;\nexports.strict = this === undefined;';
+        const js = 'exports.x = tt + 1;\nexports.strict = this === undefined;';
         const u = scriptUnit("hello.ts", js);
-        expect(u.split("\n").indexOf("exports.x = wt + 1;")).toBe(EVAL_WRAPPER_LINES);
+        expect(u.split("\n").indexOf("exports.x = tt + 1;")).toBe(EVAL_WRAPPER_LINES);
         expect(u).toMatch(/\/\/# sourceURL=\S+$/);
         const g: any = {};
         run(u, g);
@@ -22,9 +22,9 @@ describe("onSite units (Chrome MV3 userScripts in the MAIN world)", () => {
 
     it("a package unit runs sloppy with the CommonJS parameters", () => {
         const g: any = {};
-        run(packageUnit("https://unpkg.com/p@1/index.js", "module.exports = typeof __wtStyle + typeof global;"), g);
+        run(packageUnit("https://unpkg.com/p@1/index.js", "module.exports = typeof __ttStyle + typeof global;"), g);
         const [[key, fn]] = g[Symbol.for(SITE_QUEUE)];
-        expect(key).toBe(siteKey("https://unpkg.com/p@1/index.js", "module.exports = typeof __wtStyle + typeof global;"));
+        expect(key).toBe(siteKey("https://unpkg.com/p@1/index.js", "module.exports = typeof __ttStyle + typeof global;"));
         const module: any = { exports: {} };
         fn(null, module, module.exports, {}, g, () => {});
         expect(module.exports).toBe("functionobject");

@@ -126,9 +126,9 @@ export function ExplorerSection() {
     };
     return (
         <>
-            <div id="explorer-section" role="button" tabIndex={-1} aria-expanded={snap.sectionOpen} title="Wiretrick scripts, data files and folders" onClick={() => void (explorer.sectionOpen = !explorer.sectionOpen)}>
+            <div id="explorer-section" role="button" tabIndex={-1} aria-expanded={snap.sectionOpen} title="TangiTweak scripts, data files and folders" onClick={() => void (explorer.sectionOpen = !explorer.sectionOpen)}>
                 <span className="chevron" aria-hidden="true" />
-                <span className="section-title">Wiretrick</span>
+                <span className="section-title">TangiTweak</span>
                 <div className="section-actions">
                     <button id="btn-new" title="New Script…" aria-label="New Script" onClick={button(() => actions.startCreate("script"))}>
                         <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" strokeWidth="1.1" d="M9.5 1.5h-6v13h5M9.5 1.5l3 3v4M9.5 1.5v3h3M12.5 10.5v5M10 13h5" /></svg>
@@ -391,7 +391,7 @@ export function ExplorerTree() {
     const { selectedId, dirty, sel, editing } = snap;
     const multi = sel.size > 1;
     const cursor = snap.focusedId ?? selectedId;
-    // while wt-api.d.ts is shown no row is the open file (● still marks unsaved edits)
+    // while tt-api.d.ts is shown no row is the open file (● still marks unsaved edits)
     const shown = snap.typingsShown ? null : selectedId;
     const shownIds = new Set([SETTINGS_ID, ...rows.map((r) => r.id)]);
 
@@ -502,7 +502,7 @@ export function ExplorerTree() {
             const title = [
                 r.depth ? scriptFileName(script.meta.name) : "",
                 script.meta.description ?? "",
-                isLib ? "Library — registers no handlers with its current params, importable by other scripts. Register a handler (e.g. wt.onRequest({ url, strategy }, fn)) to make it a script" : script.meta.match.join(", "),
+                isLib ? "Library — registers no handlers with its current params, importable by other scripts. Register a handler (e.g. tt.onRequest({ url, strategy }, fn)) to make it a script" : script.meta.match.join(", "),
                 off ? "Disabled — enable it from the toolbar or the right-click menu" : "",
                 "Double-click or F2 to rename",
             ]
@@ -578,7 +578,7 @@ export function ExplorerTree() {
 function RenameInput({ row, refocusList, list }: { row: TreeRow; refocusList: boolean; list: { current: HTMLUListElement | null } }) {
     const kind: NewKind = row.kind;
     const current = row.kind === "script" ? scriptFileName(cleanScriptName(row.path)) : row.path;
-    // select the name, not its folder or extension (`.wiretrick.ts` included — as VS Code does)
+    // select the name, not its folder or extension (`.tangitweak.ts` included — as VS Code does)
     const ext = kind === "folder" ? 0 : fileExtension(current).length;
     const range: [number, number] = [current.lastIndexOf("/") + 1, current.length - ext];
     return (

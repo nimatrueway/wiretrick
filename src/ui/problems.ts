@@ -117,7 +117,7 @@ interface Position {
 /**
  * Where an error points in the user's source: a frame rewritten to the
  * source (`at fn (Name:12:5)`), a raw script frame
- * (`wiretrick-script:///Name:15:5`, past the wrapper lines) or a syntax
+ * (`tangitweak-script:///Name:15:5`, past the wrapper lines) or a syntax
  * error's `(line 12)`. The first frame of the script `name` (any script's,
  * without one) is where it was thrown — an imported library's frames point
  * into that library.
@@ -169,7 +169,7 @@ function lineRange(lines: string[], line: number): Range {
  * Where a handler named in a message ("onRequest #2: …") is: the URL pattern
  * the message quotes, found in the source (from the registration on, else
  * anywhere — e.g. a constant), else the registration call itself. The
- * registration line comes from the stored route, else the Nth `wt.<kind>(`.
+ * registration line comes from the stored route, else the Nth `tt.<kind>(`.
  */
 function handlerRange(msg: string, s: ProblemScript): Range | { line: number } | undefined {
     const m = HANDLER.exec(msg);
@@ -182,7 +182,7 @@ function handlerRange(msg: string, s: ProblemScript): Range | { line: number } |
     const lines = code.split("\n");
     let line = route?.line;
     if (!line && !m[3]) {
-        const calls = [...code.matchAll(new RegExp(`\\bwt\\s*\\.\\s*${m[1]}\\s*\\(`, "g"))];
+        const calls = [...code.matchAll(new RegExp(`\\btt\\s*\\.\\s*${m[1]}\\s*\\(`, "g"))];
         const call = calls[Number(m[2]) - 1];
         if (call) line = code.slice(0, call.index).split("\n").length;
     }
@@ -200,7 +200,7 @@ function handlerRange(msg: string, s: ProblemScript): Range | { line: number } |
 
 /**
  * A handler's "uses `x` — …" problem (a store or a handle the site's world
- * can't have; `wt.siteStore` in a network handler) → the first use of `x`
+ * can't have; `tt.siteStore` in a network handler) → the first use of `x`
  * in that handler.
  */
 function siteUseRange(msg: string, s: ProblemScript): Range | undefined {
@@ -210,7 +210,7 @@ function siteUseRange(msg: string, s: ProblemScript): Range | undefined {
     const code = s.code!;
     const lines = code.split("\n");
     const from = lineStart(lines, h.line);
-    const next = code.slice(from + 1).search(/\bwt\s*\.\s*on[A-Z]\w*\s*\(/);
+    const next = code.slice(from + 1).search(/\btt\s*\.\s*on[A-Z]\w*\s*\(/);
     const end = next < 0 ? code.length : from + 1 + next;
     const use = new RegExp(`(?<![\\w$.])${name!.replace(/\$/g, "\\$").split(".").join("\\s*\\.\\s*")}(?![\\w$])`, "g");
     use.lastIndex = from;
@@ -230,7 +230,7 @@ function rulesUseRange(msg: string, s: ProblemScript, taken: Set<number>): Range
     const code = s.code!;
     const lines = code.split("\n");
     const from = lineStart(lines, h.line);
-    const next = code.slice(from + 1).search(/\bwt\s*\.\s*on[A-Z]\w*\s*\(/);
+    const next = code.slice(from + 1).search(/\btt\s*\.\s*on[A-Z]\w*\s*\(/);
     const end = next < 0 ? code.length : from + 1 + next;
     const use = new RegExp(`(?<![\\w$.])${text!.replace(/[$]/g, "\\$").split(".").join("\\s*\\.\\s*")}(?![\\w$])`, "g");
     use.lastIndex = from;

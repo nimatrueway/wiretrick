@@ -34,12 +34,12 @@ try {
     const seed = await ctx.newPage();
     await seed.goto(`chrome-extension://${extId}/editor.html`);
     await seed.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
-        type: "saveScript", id: "s_dbg", name: "Debug header.wiretrick",
-        code: 'wt.params({ level: { type: "string", default: "warn", description: "Value of the x-debug header" } });\nwt.onRequest({ url: "*://example.invalid/*", strategy: "page" }, () => {});\n',
+        type: "saveScript", id: "s_dbg", name: "Debug header.tangitweak",
+        code: 'tt.params({ level: { type: "string", default: "warn", description: "Value of the x-debug header" } });\ntt.onRequest({ url: "*://example.invalid/*", strategy: "page" }, () => {});\n',
     }, r)));
     await seed.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
-        type: "saveScript", id: "s_note", name: "Notes.wiretrick",
-        code: 'wt.params({ body: { type: "string", multiline: true, default: "", description: "Free text" } });\nwt.onRequest({ url: "*://example.invalid/*", strategy: "page" }, () => {});\n',
+        type: "saveScript", id: "s_note", name: "Notes.tangitweak",
+        code: 'tt.params({ body: { type: "string", multiline: true, default: "", description: "Free text" } });\ntt.onRequest({ url: "*://example.invalid/*", strategy: "page" }, () => {});\n',
     }, r)));
     await seed.close();
 
@@ -77,7 +77,7 @@ try {
     check("YAML edit applied to params", st.resParams?.s_dbg?.level === "debug");
     check("YAML edit toggled script off", st.resScripts?.s_dbg?.enabled === false, JSON.stringify(st.resScripts?.s_dbg && { enabled: st.resScripts.s_dbg.enabled }));
     const listOff = await mgr.waitForFunction(() => {
-        const li = [...document.querySelectorAll(".script-item")].find((e) => e.textContent?.includes("Debug header.wiretrick"));
+        const li = [...document.querySelectorAll(".script-item")].find((e) => e.textContent?.includes("Debug header.tangitweak"));
         return !!li?.classList.contains("disabled") && !li.querySelector(".switch");
     }, null, { timeout: 5000 }).then(() => true, () => false);
     check("list reflects disabled script", listOff);
@@ -141,13 +141,13 @@ try {
     // ---- schema assistance: markers, completion, hover ----
     const markers = () => mgr.evaluate(() => {
         const m = (window as any).monaco;
-        return m.editor.getModelMarkers({ owner: "wt-settings" }).map((x: any) => x.message);
+        return m.editor.getModelMarkers({ owner: "tt-settings" }).map((x: any) => x.message);
     });
     await set('settings:\n  logLevel: loud\nparams:\n  Debug header:\n    level: 3\n    nope: 1\n  Ghost: {}\n');
     await mgr.waitForTimeout(800);
     const mk = await markers();
     check("marker: bad enum value", mk.some((x: string) => x.startsWith("Expected one of debug")), JSON.stringify(mk));
-    check("marker: param type from wt.params", mk.some((x: string) => x.startsWith("Expected string")), JSON.stringify(mk));
+    check("marker: param type from tt.params", mk.some((x: string) => x.startsWith("Expected string")), JSON.stringify(mk));
     check("marker: undeclared param", mk.some((x: string) => x.includes('declares no param "nope"')), JSON.stringify(mk));
     check("marker: unknown script", mk.some((x: string) => x.includes('No script named "Ghost"')), JSON.stringify(mk));
     await set("params:\n  Debug header:\n    \n");
@@ -172,8 +172,8 @@ try {
     // popup's getScriptParams must resolve imports of other scripts (MV2 compiled the one script alone → no defs)
     await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "saveScript", id: "s_lib", name: "lib", code: "export const x = 1;\n" }, r)));
     await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
-        type: "saveScript", id: "s_imp", name: "Importer.wiretrick",
-        code: 'import { x } from "./lib";\nwt.params({ p: { type: "string", default: String(x) } });\nwt.onRequest({ url: "*://example.invalid/*", strategy: "page" }, () => {});\n',
+        type: "saveScript", id: "s_imp", name: "Importer.tangitweak",
+        code: 'import { x } from "./lib";\ntt.params({ p: { type: "string", default: String(x) } });\ntt.onRequest({ url: "*://example.invalid/*", strategy: "page" }, () => {});\n',
     }, r)));
     const gp: any = await mgr.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "getScriptParams", scriptId: "s_imp" }, r)));
     check("getScriptParams resolves imported library", gp?.defs?.p?.default === "1", JSON.stringify(gp));

@@ -9,10 +9,10 @@ import { SAMPLES, sampleStrategies, sampleSummary, sampleTryUrl } from "../src/u
 // built-in imports (react, valtio) only run inside overlay handlers, which compiling doesn't call
 const stubImports = { importModule: () => ({}) };
 
-/** type errors in a sample, checked like the Editor does (wt-api.d.ts, strict, the built-in React) */
+/** type errors in a sample, checked like the Editor does (tt-api.d.ts, strict, the built-in React) */
 function typeErrors(code: string): string[] {
     // under the repo root, so react and valtio resolve from node_modules
-    const [api, file] = [path.resolve("src/types/wt-api.d.ts"), path.resolve("__sample__.tsx")];
+    const [api, file] = [path.resolve("src/types/tt-api.d.ts"), path.resolve("__sample__.tsx")];
     const files: Record<string, string> = { [api]: readFileSync(api, "utf8"), [file]: code };
     const options: ts.CompilerOptions = {
         strict: true,
@@ -50,20 +50,20 @@ describe("bundled samples", () => {
 
 describe("sample helpers", () => {
     it("the type check catches a wrong call", () => {
-        expect(typeErrors(`const p = wt.onPage("*://a/*", () => ({ n: () => 1 }));\nwt.onOverlay("*://a/*", async () => { const s: string = await p.n(); });`)).toHaveLength(1);
+        expect(typeErrors(`const p = tt.onPage("*://a/*", () => ({ n: () => 1 }));\ntt.onOverlay("*://a/*", async () => { const s: string = await p.n(); });`)).toHaveLength(1);
         expect(typeErrors(`import { useState } from "react";\nconst [n] = useState(0);\nconst el = <div>{n}</div>;`)).toEqual([]);
     });
     it("reads the Try it URL", () => {
-        expect(sampleTryUrl(`// Try it: open https://example.com/a?b=1 and reload\nwt.metadata({ description: "x" });`)).toBe("https://example.com/a?b=1");
-        expect(sampleTryUrl(`wt.metadata({ description: "x" });`)).toBeNull();
+        expect(sampleTryUrl(`// Try it: open https://example.com/a?b=1 and reload\ntt.metadata({ description: "x" });`)).toBe("https://example.com/a?b=1");
+        expect(sampleTryUrl(`tt.metadata({ description: "x" });`)).toBeNull();
     });
     it("lists the strategies routes name, both branches of a ternary", () => {
-        expect(sampleStrategies(`wt.onRequest({ url: "*://a/*", strategy: "rules" }, f);`)).toEqual(["rules"]);
-        expect(sampleStrategies(`wt.onResponseBody({ url: "*://a/*", strategy: wt.isFirefox ? "extension" : "debugger" }, f);`)).toEqual(["debugger", "extension"]);
-        expect(sampleStrategies(`wt.onPage("*://a/*", () => {});`)).toEqual(["onPage"]);
-        expect(sampleStrategies(`wt.onRequest({ url: "*://a/*", strategy: "page" }, f);\nwt.onPage("*://a/*", f);\nwt.onOverlay("*://a/*", f);`)).toEqual(["page", "overlay"]);
-        expect(sampleStrategies(`wt.onOverlay("*://a/*", f);`)).toEqual(["overlay"]);
-        expect(sampleStrategies(`wt.onSite("*://a/*", f);`)).toEqual(["onPage"]);
+        expect(sampleStrategies(`tt.onRequest({ url: "*://a/*", strategy: "rules" }, f);`)).toEqual(["rules"]);
+        expect(sampleStrategies(`tt.onResponseBody({ url: "*://a/*", strategy: tt.isFirefox ? "extension" : "debugger" }, f);`)).toEqual(["debugger", "extension"]);
+        expect(sampleStrategies(`tt.onPage("*://a/*", () => {});`)).toEqual(["onPage"]);
+        expect(sampleStrategies(`tt.onRequest({ url: "*://a/*", strategy: "page" }, f);\ntt.onPage("*://a/*", f);\ntt.onOverlay("*://a/*", f);`)).toEqual(["page", "overlay"]);
+        expect(sampleStrategies(`tt.onOverlay("*://a/*", f);`)).toEqual(["overlay"]);
+        expect(sampleStrategies(`tt.onSite("*://a/*", f);`)).toEqual(["onPage"]);
     });
     it("drops the Try it sentence from the blurb", () => {
         expect(sampleSummary("Send any request elsewhere. Try it: open a.com — b.")).toBe("Send any request elsewhere.");

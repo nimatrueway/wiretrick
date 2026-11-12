@@ -4,7 +4,7 @@
  * runtime, the bridge's isolated-world runtime and the main-world hook.
  *
  * The caller side is an `RpcClient`: each handle (`"onSite:0"`, the
- * script's first wt.onSite call; `"onOverlay:1"`, its second wt.onOverlay
+ * script's first tt.onSite call; `"onOverlay:1"`, its second tt.onOverlay
  * one) is a Proxy whose properties are async functions. A call sends `{ cid,
  * h, fn, args }` and waits — with no time limit — for the `{ cid, ok, value |
  * error }` with the same `cid`. When the caller's run ends first, the call

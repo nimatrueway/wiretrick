@@ -1,7 +1,7 @@
 /**
  * Explorer → Make Package…: turn scripts into a package that can be shared
  * as is (docs/packages.md).
- *   - a script that imports no file of the user's: gets a `wt.metadata({…})`
+ *   - a script that imports no file of the user's: gets a `tt.metadata({…})`
  *     naming it, and stays where it is
  *   - a script that does: moves, with the files it imports by relative
  *     path, into a folder of its own with a metadata.json (a bundle of one).
@@ -25,7 +25,7 @@ export interface PackagePlan {
     files: { from: string; to: string; copy: boolean; text: string }[];
     /** other files whose imports follow a moved file */
     edits: { path: string; text: string }[];
-    /** a bundle: the metadata.json to write (the script's own wt.metadata is left alone) */
+    /** a bundle: the metadata.json to write (the script's own tt.metadata is left alone) */
     manifest?: { path: string; text: string };
     /** imports by bare name: they resolve from the root of the user's scripts, not the package */
     bare: { from: string; spec: string }[];
@@ -41,7 +41,7 @@ const under = (path: string, folder: string): boolean => !folder || path.startsW
 /** `name`, else `name 2`, `name 3`… (a file's before its extension) — whichever `taken` doesn't hold */
 function unique(name: string, taken: (path: string) => boolean, file = true): string {
     if (!taken(name)) return name;
-    const m = file ? /^(.*?)((?:\.wiretrick)?\.[^./]+)?$/i.exec(name)! : [name, name];
+    const m = file ? /^(.*?)((?:\.tangitweak)?\.[^./]+)?$/i.exec(name)! : [name, name];
     for (let i = 2; ; i++) {
         const next = `${m[1]} ${i}${m[2] ?? ""}`;
         if (!taken(next)) return next;
@@ -63,9 +63,9 @@ export function relativeSpec(from: string, target: string, was: string): string 
     return spec;
 }
 
-/** the object literal of the code's `wt.metadata({…})` call: [index of "{", index after "}"] */
+/** the object literal of the code's `tt.metadata({…})` call: [index of "{", index after "}"] */
 function metadataObject(code: string): [number, number] | undefined {
-    const m = /\bwt\s*\.\s*metadata\s*\(\s*\{/.exec(code);
+    const m = /\btt\s*\.\s*metadata\s*\(\s*\{/.exec(code);
     if (!m) return undefined;
     const start = m.index + m[0].length - 1;
     let depth = 0;
@@ -82,7 +82,7 @@ function metadataObject(code: string): [number, number] | undefined {
     return undefined;
 }
 
-/** the script's code with a `wt.metadata({…})` naming it (unchanged when it names itself) */
+/** the script's code with a `tt.metadata({…})` naming it (unchanged when it names itself) */
 export function withMetadata(code: string, name: string, connect: string[] = []): string {
     const at = metadataObject(code);
     const body = at ? code.slice(at[0] + 1, at[1] - 1) : "";
@@ -95,7 +95,7 @@ export function withMetadata(code: string, name: string, connect: string[] = [])
     ];
     if (!keys.length) return code;
     if (!at) {
-        const call = `wt.metadata({ ${keys.join(", ")} });\n`;
+        const call = `tt.metadata({ ${keys.join(", ")} });\n`;
         // after the imports
         let end = 0;
         for (const m of code.matchAll(/^import\b[\s\S]*?["'][^"'\n]+["'][ \t]*;?[ \t]*$/gm)) end = m.index! + m[0].length;
@@ -115,10 +115,10 @@ export function manifestText(name: string, scripts: string[], connect: string[] 
     return JSON.stringify({ name, version: "1.0.0", description: "", ...(connect.length ? { connect } : {}), scripts }, null, 4) + "\n";
 }
 
-/** hosts the code's wt.fetch calls name in a literal URL */
+/** hosts the code's tt.fetch calls name in a literal URL */
 export function fetchHosts(codes: string[]): string[] {
     const out = new Set<string>();
-    for (const code of codes) for (const m of code.matchAll(/\bwt\.fetch\s*\(\s*["'`]https?:\/\/([^/:"'`\s$?#]+)/g)) out.add(m[1].toLowerCase());
+    for (const code of codes) for (const m of code.matchAll(/\btt\.fetch\s*\(\s*["'`]https?:\/\/([^/:"'`\s$?#]+)/g)) out.add(m[1].toLowerCase());
     return [...out].sort();
 }
 

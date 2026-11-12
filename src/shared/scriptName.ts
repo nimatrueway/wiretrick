@@ -58,7 +58,7 @@ export function scriptNameProblem(name: string): string {
 /**
  * JSON files that configure tooling rather than hold data: package.json,
  * package-lock.json, tsconfig*.json and jsconfig.json anywhere, and the
- * settings.schema.json Wiretrick keeps at the root of the synced folder.
+ * settings.schema.json TangiTweak keeps at the root of the synced folder.
  * They are never data files (folder sync skips them).
  */
 export function isConfigJsonPath(path: string): boolean {
@@ -99,9 +99,9 @@ export function isTsxName(name: string): boolean {
     return /[^/]\.tsx$/.test(name);
 }
 
-/** a file name's extension as the Explorer leaves it unselected on rename: `.ts`, `.wiretrick.ts`, `.tsx`, `.json`… */
+/** a file name's extension as the Explorer leaves it unselected on rename: `.ts`, `.tangitweak.ts`, `.tsx`, `.json`… */
 export function fileExtension(fileName: string): string {
-    return /(\.wiretrick)?\.tsx?$|\.(json|svg)$/i.exec(fileName.slice(fileName.lastIndexOf("/") + 1))?.[0] ?? "";
+    return /(\.tangitweak)?\.tsx?$|\.(json|svg)$/i.exec(fileName.slice(fileName.lastIndexOf("/") + 1))?.[0] ?? "";
 }
 
 /** the name as typed in a file name box: "x.ts" → "x"; "x.tsx" stays */

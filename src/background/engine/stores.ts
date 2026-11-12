@@ -1,12 +1,12 @@
 /**
- * The background's `wt.globalStore` owner and the links to it:
+ * The background's `tt.globalStore` owner and the links to it:
  *
  *   MV2 — scripts compile right here: one in-process replica hub, joined
  *         to the owner by an endpoint pair, shared by every strategy's
  *         compiled instance (so a store is one object across them).
  *   MV3 — scripts compile in the sandbox: its hub talks to the owner over
  *         the L1 link (sandbox ⇄ offscreen ⇄ chrome.runtime ⇄ here). The
- *         link also serves the sandbox's `wt.fetch`.
+ *         link also serves the sandbox's `tt.fetch`.
  */
 import { Endpoint, endpointPair, type WireRequest, type WireResponse } from "../../shared/wire";
 import { ReplicaHub } from "../../shared/storeReplica";
@@ -14,7 +14,7 @@ import { packBytes, unpackBytes } from "../../shared/bytesPack";
 import { StoreOwner } from "./storeOwner";
 import { log } from "./logs";
 import { scriptStorageAll, scriptStorageSet, getScript } from "./scriptStore";
-import { backgroundFetch } from "./wtFetch";
+import { backgroundFetch } from "./ttFetch";
 import { pages, pagesReady } from "./pages";
 
 const ownerLog = (s: string, msg: string, level: "info" | "warn" | "error") => log(-1, msg, level, s);
@@ -33,7 +33,7 @@ export const storeOwner = new StoreOwner({
     pageAlive: (p) => pages.isAlive(p),
     ready: () => pagesReady,
 });
-// a page ended: its wt.pageStore copies go
+// a page ended: its tt.pageStore copies go
 pages.onEnd((key) => storeOwner.dropPage(key));
 
 /** a script's name for log lines (its id if it's gone) */
@@ -41,7 +41,7 @@ async function nameOf(scriptId: string): Promise<string> {
     return (await getScript(scriptId).catch(() => undefined))?.meta.name ?? scriptId;
 }
 
-/** `wt.fetch(..., { from: "background" })` for a script */
+/** `tt.fetch(..., { from: "background" })` for a script */
 export async function fetchFor(scriptId: string, request: WireRequest, bypass: boolean): Promise<WireResponse> {
     return backgroundFetch(request, { bypass, scriptId, scriptName: await nameOf(scriptId) });
 }
@@ -63,7 +63,7 @@ export function backgroundHub(): ReplicaHub {
 
 /**
  * Before scripts compile (reload): drop the stores of deleted scripts and,
- * in MV2, load the others' current state into the hub so `wt.globalStore`
+ * in MV2, load the others' current state into the hub so `tt.globalStore`
  * returns real data synchronously.
  */
 export async function prepareStores(scriptIds: string[]): Promise<void> {

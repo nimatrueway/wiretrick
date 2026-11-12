@@ -4,7 +4,7 @@ You share scripts as a **package**, which is one of two things:
 
 - **A script.** One `.ts` or `.tsx` file, plus every file it imports by a
   relative path (`./lib`, `../shared/util.ts`, `./config.json`,
-  `./icon.svg`), followed through those files too. Its `wt.metadata({ … })`
+  `./icon.svg`), followed through those files too. Its `tt.metadata({ … })`
   call says what it is.
 - **A bundle.** A folder whose `metadata.json` lists several scripts. They
   install, update and roll back together, along with what they import.
@@ -13,27 +13,27 @@ Either way, the routes say what it can do.
 
 ## Metadata
 
-A script describes itself with `wt.metadata`, called once at top level. The
+A script describes itself with `tt.metadata`, called once at top level. The
 install page reads it when it compiles the script, before anything is
 installed:
 
 ```ts
-wt.metadata({
+tt.metadata({
     name: "GitHub dark mode",
     version: "1.2.0",
     description: "Forces the dark theme on github.com",
     author: "me",
     license: "MIT",
     homepage: "https://github.com/me/scripts",
-    updateURL: "https://github.com/me/scripts/blob/main/dark.wiretrick.ts",
+    updateURL: "https://github.com/me/scripts/blob/main/dark.tangitweak.ts",
     connect: ["api.github.com"],
 });
-wt.onPage({ url: "*://github.com/*" }, () => { … });
+tt.onPage({ url: "*://github.com/*" }, () => { … });
 ```
 
 Every field is optional. `description` is also the script's tooltip in the Editor and the popup.
 `version` is compared part by part (`1.10.0` is newer than `1.9`).
-`connect` lists the hosts the script's `wt.fetch` calls reach. An update that
+`connect` lists the hosts the script's `tt.fetch` calls reach. An update that
 adds one waits for your approval.
 `updateURL` is where updates come from, instead of where the package was
 installed from. It takes any URL the install page reads, as listed in the table under
@@ -56,18 +56,18 @@ scripts relative to its folder:
 The Editor checks `metadata.json` against its schema and completes its
 fields; in `scripts` it completes the `.ts`/`.tsx` files in the folder (and
 its subfolders) that aren't listed yet, and an entry naming no script there
-is an error (in the file and in Problems). A bundle's scripts can still call `wt.metadata`: their
+is an error (in the file and in Problems). A bundle's scripts can still call `tt.metadata`: their
 `description` stays their own tooltip, and their `connect` hosts add to the
 bundle's. Files outside the bundle's folder can't be imported.
 
 ## Install a package
 
-- **Open its URL.** A tab that opens a URL ending in `.wiretrick.ts` (or
-  `.wiretrick.tsx`) goes to Wiretrick's install page. That covers a link on
+- **Open its URL.** A tab that opens a URL ending in `.tangitweak.ts` (or
+  `.tangitweak.tsx`) goes to TangiTweak's install page. That covers a link on
   a site, a raw GitHub or gist file, a URL you type, or a local `file://`
   path. For local files, turn on **Allow access to file URLs** for
-  Wiretrick in the browser's extension settings. GitHub's own page for a file
-  (`github.com/…/blob/…`) stays as it is. Add `#wt-raw` to any URL to just
+  TangiTweak in the browser's extension settings. GitHub's own page for a file
+  (`github.com/…/blob/…`) stays as it is. Add `#tt-raw` to any URL to just
   view the file. The suffix only marks share links: the script runs
   whatever it's named.
 - **From the Explorer.** The **Install Script…** button (a document with a down arrow), or
@@ -86,8 +86,8 @@ The install dialog and page accept:
 | A GitHub file | `https://github.com/me/scripts/blob/main/dark.ts`, `https://raw.githubusercontent.com/me/scripts/main/kit/metadata.json` | the branch or tag (each update is pinned to a commit) |
 | A GitHub folder | `https://github.com/me/scripts/tree/main/kit`, `https://github.com/me/dark-mode` | the same |
 | A gist | `https://gist.github.com/me/0123abcd` | the gist's latest revision |
-| A gist's file | `https://gist.githubusercontent.com/me/0123abcd/raw/dark.wiretrick.ts` | the same |
-| Any other URL of a script or `metadata.json` | `https://example.com/tools/dark.wiretrick.ts`, `file:///home/me/kit/metadata.json` | the same URL; imports are read next to it |
+| A gist's file | `https://gist.githubusercontent.com/me/0123abcd/raw/dark.tangitweak.ts` | the same |
+| Any other URL of a script or `metadata.json` | `https://example.com/tools/dark.tangitweak.ts`, `file:///home/me/kit/metadata.json` | the same URL; imports are read next to it |
 | A `.zip` URL | `https://example.com/kit.zip`, a release asset, `https://github.com/me/kit/archive/refs/heads/main.zip` | the same URL |
 | A folder | **Choose a folder…** | its `updateURL`, if any |
 | A `.zip` file | **Choose a .zip…** | its `updateURL`, if any |
@@ -95,7 +95,7 @@ The install dialog and page accept:
 Each package's `updateURL` overrides the **Updates from** column.
 
 A zip of a single folder counts as that folder. A folder, gist or zip installs its `metadata.json`. Without one, it installs
-its single `*.wiretrick.ts` file, or else its single script. When a local
+its single `*.tangitweak.ts` file, or else its single script. When a local
 folder or zip holds several scripts at its top level and no `metadata.json`,
 the page asks which one to install. A zip URL needs a `metadata.json` or a
 single script at its top level. A package holds at most 200 files and
@@ -108,7 +108,7 @@ Before anything is written, the page shows:
 - **what it can do**, riskiest first:
   - running on every site;
   - the `debugger` strategy;
-  - running code in the site's JavaScript world (`wt.onSite`);
+  - running code in the site's JavaScript world (`tt.onSite`);
   - the `helper` strategy;
   - the sites it runs on;
   - the other strategies;
@@ -169,7 +169,7 @@ nothing changes.
 An update applies by itself only when all of these hold:
 
 - it can't do more than the installed version: no new sites, strategies,
-  `wt.onSite` code, overlays, `connect` hosts or unpkg packages;
+  `tt.onSite` code, overlays, `connect` hosts or unpkg packages;
 - you haven't edited, renamed or deleted any of the package's files;
 - its `version` doesn't go down;
 - it doesn't change where updates come from (its `updateURL`);
@@ -200,7 +200,7 @@ Right-click a package's folder or script for:
 ## Sharing scripts
 
 - **One script:** put it anywhere with a URL (a gist, a GitHub repository,
-  any web server) and share that URL. Name it `name.wiretrick.ts` so that
+  any web server) and share that URL. Name it `name.tangitweak.ts` so that
   opening the link installs it.
 - **A script with files it imports:** put them in a folder and share the
   script's URL, or the folder's `github.com/…/tree/…` URL.
@@ -215,8 +215,8 @@ A zip of the folder works for people installing from local files.
 package out for you:
 
 - **On a script that imports nothing**, it adds `name` and `version` (and
-  `connect`, for the hosts of `wt.fetch` calls with a literal URL) to its
-  `wt.metadata` call, or adds the call.
+  `connect`, for the hosts of `tt.fetch` calls with a literal URL) to its
+  `tt.metadata` call, or adds the call.
 - **On a script that imports files**, it makes a bundle. The script and every
   file it imports by a relative path move into a folder named after it, and
   a `metadata.json` lists the script. Their layout under the script's folder

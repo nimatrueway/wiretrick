@@ -67,7 +67,7 @@ function entriesFor(dist, mv3) {
             output: { file: path.join(dist, "builtins-react.js"), format: "iife" },
         },
         {
-            // a script's overlay frame (wt.onOverlay), framed into pages by the bridge
+            // a script's overlay frame (tt.onOverlay), framed into pages by the bridge
             input: path.join(root, "src/overlay/overlayRuntime.ts"),
             output: { file: path.join(dist, "overlay.js"), format: "iife" },
         },
@@ -242,10 +242,10 @@ async function copyStatic(dist, mv3) {
         await pruneTsWorkerLibs(path.join(monacoDst, "language/typescript/tsWorker.js"));
     }
 
-    // wt-api typings for the editor + VS Code export
+    // tt-api typings for the editor + VS Code export
     await copyFile(
-        path.join(root, "src/types/wt-api.d.ts"),
-        path.join(dist, "lib/wt-api.d.ts")
+        path.join(root, "src/types/tt-api.d.ts"),
+        path.join(dist, "lib/tt-api.d.ts")
     );
 
     // typings of the built-in modules (src/shared/builtins.ts), which the Editor loads when a script imports one

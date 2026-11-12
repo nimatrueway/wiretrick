@@ -65,7 +65,7 @@ describe("store ops", () => {
     });
 });
 
-describe("wt.globalStore replica + owner", () => {
+describe("tt.globalStore replica + owner", () => {
     it("syncs a set, a nested set and a delete to another context", async () => {
         const t = setup();
         const A = t.hub("a");
@@ -335,11 +335,11 @@ describe("wt.globalStore replica + owner", () => {
     });
 });
 
-describe("wt.globalStore across compiled instances", () => {
+describe("tt.globalStore across compiled instances", () => {
     it("two compiles of a script (MV2 strategy tiers) share one store object", async () => {
         const t = setup();
         const A = t.hub("bg");
-        const code = `export const s = wt.globalStore("ui", { hits: 0 }); export const hit = () => s.hits++;`;
+        const code = `export const s = tt.globalStore("ui", { hits: 0 }); export const hit = () => s.hits++;`;
         const compile = () => compileScript(code, { store: (name, initial, persist) => A.hub.store("s1", name, initial, persist) });
         const one = compile();
         const two = compile();
@@ -353,7 +353,7 @@ describe("wt.globalStore across compiled instances", () => {
     });
 });
 
-describe("wt.globalStore convergence", () => {
+describe("tt.globalStore convergence", () => {
     it("converges with concurrent nested edits on both sides", async () => {
         const t = setup();
         const A = t.hub("a");
@@ -431,7 +431,7 @@ describe("wt.globalStore convergence", () => {
     });
 });
 
-describe("wt.pageStore", () => {
+describe("tt.pageStore", () => {
     it("keeps one copy per page and syncs a page's copy to an overlay of that page", async () => {
         const t = setup();
         const A = t.hub("bg");
@@ -498,7 +498,7 @@ describe("wt.pageStore", () => {
     });
 
     it("one name can't be both a global and a page store", () => {
-        const d = compileScript(`wt.globalStore("x", { n: 1 }); wt.pageStore("x", { n: 1 });`);
+        const d = compileScript(`tt.globalStore("x", { n: 1 }); tt.pageStore("x", { n: 1 });`);
         expect(String(d.error)).toMatch(/already has a store named/);
     });
 });

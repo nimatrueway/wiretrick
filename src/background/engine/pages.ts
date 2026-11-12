@@ -1,5 +1,5 @@
 /**
- * Pages: which document each tab shows, for `wt.pageStore` (one copy per
+ * Pages: which document each tab shows, for `tt.pageStore` (one copy per
  * page). A page starts when a tab's top frame commits a new document (a
  * navigation or reload; a single-page app's route change isn't one) and
  * ends at the next one or when the tab closes — its store copies go then.
@@ -24,7 +24,7 @@ interface PageRec {
     doc?: string;
 }
 
-const SESSION_KEY = "wtPages";
+const SESSION_KEY = "ttPages";
 const NAV_TTL_MS = 5 * 60_000;
 
 export class PageRegistry {
@@ -39,7 +39,7 @@ export class PageRegistry {
 
     constructor(private readonly opts: { save?: (byTab: Record<number, PageRec>) => void } = {}) {}
 
-    /** the page a tab shows now (a tab open before Wiretrick started gets one on first use); null: not a tab */
+    /** the page a tab shows now (a tab open before TangiTweak started gets one on first use); null: not a tab */
     current(tabId: number): string | null {
         if (typeof tabId !== "number" || tabId < 0) return null;
         let rec = this.byTab.get(tabId);
