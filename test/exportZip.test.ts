@@ -81,16 +81,20 @@ describe("export zip layout", () => {
             "__MACOSX/Scripts/._a.ts": "",
             "Scripts/a.ts": "A",
             "Scripts/types.d.ts": "declare const x: 1;",
-            "Scripts/notes.md": "# hi",
+            "Scripts/README.md": "# hi",
+            "Scripts/notes.txt": "skip",
             "Scripts/d/data.json": "[]",
             "Scripts/e/": "",
         });
         const z = await readExportZip(buf(zip));
         expect(z.settings).toBe("settings:\n");
         expect(z.scripts).toEqual([{ name: "a", file: "a.ts", code: "A" }]);
-        expect(z.dataFiles).toEqual([{ path: "d/data.json", text: "[]" }]);
+        expect(z.dataFiles).toEqual([
+            { path: "README.md", text: "# hi" },
+            { path: "d/data.json", text: "[]" },
+        ]);
         expect(z.folders).toEqual(["e"]);
-        expect(z.ignored.sort()).toEqual(["notes.md", "types.d.ts"]);
+        expect(z.ignored.sort()).toEqual(["notes.txt", "types.d.ts"]);
     });
 
     it("keeps a single top folder that is just a folder of scripts", async () => {

@@ -1466,6 +1466,15 @@ declare module "*.svg" {
 }
 
 /**
+ * A `.md` data file imports as its Markdown text, a string:
+ * `import readme from "./README.md";`
+ */
+declare module "*.md" {
+    const markdown: string;
+    export default markdown;
+}
+
+/**
  * Image data files import as their `data:image/...;base64,...` URL:
  * `import icon from "./icon.png"; tt.metadata({ icon });`
  */

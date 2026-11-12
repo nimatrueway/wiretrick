@@ -10,15 +10,19 @@ const LOGO = '<svg xmlns="http://www.w3.org/2000/svg"><circle r="4"/></svg>';
 const data = [{ path: "icons/logo.svg", text: LOGO }];
 
 describe(".svg data files", () => {
-    it("are data files by path (.svg and raster images)", () => {
+    it("are data files by path (.svg, .md and raster images)", () => {
         expect(isDataSpec("./icons/Logo.SVG")).toBe(true);
+        expect(isDataSpec("./README.md")).toBe(true);
         expect(isDataSpec("./icons/Logo.PNG")).toBe(true);
         expect(dataFilePathProblem("icons/logo.svg")).toBe("");
+        expect(dataFilePathProblem("README.md")).toBe("");
         expect(dataFilePathProblem("icons/logo.png")).toBe("");
         expect(dataFilePathProblem("icons/.svg")).toMatch(/just \.svg/);
+        expect(dataFilePathProblem(".md")).toMatch(/just \.md/);
         expect(dataFilePathProblem("icons/.png")).toMatch(/just \.png/);
-        expect(dataFilePathProblem("icons/logo.txt")).toMatch(/\.json, \.svg or image/);
-        expect(importResolver([], ["icons/logo.svg", "icons/logo.png"])("ui/panel", "../icons/logo.png")).toEqual({ kind: "data", path: "icons/logo.png" });
+        expect(dataFilePathProblem("icons/logo.txt")).toMatch(/\.json, \.md, \.svg or image/);
+        expect(importResolver([], ["icons/logo.svg", "README.md", "icons/logo.png"])("ui/panel", "../README.md")).toEqual({ kind: "data", path: "README.md" });
+        expect(dataFileValue("README.md", "# Title\n")).toBe("# Title\n");
         expect(dependantsOf("icons/logo.svg", [{ id: "a", name: "a", code: 'import l from "./icons/logo.svg";' }], "data")).toEqual(["a"]);
         const raw = new Uint8Array([137, 80, 78, 71, 1, 2, 3]);
         const url = bytesToImageDataUrl("icons/logo.png", raw);
@@ -48,9 +52,9 @@ describe(".svg data files", () => {
         expect(requireFrom("main")("./icons/logo.svg")).toBe(LOGO);
     });
 
-    it("build.mjs keeps Monaco's xml basic-language bundle for .svg models", () => {
+    it("build.mjs keeps Monaco's xml and markdown basic-language bundles for .svg and .md models", () => {
         const buildSrc = readFileSync("scripts/build.mjs", "utf8");
         const langs = [...(buildSrc.match(/MONACO_BASIC_LANGUAGES\s*=\s*new Set\(\[([^\]]+)\]/)?.[1] ?? "").matchAll(/"([^"]+)"/g)].map((m) => m[1]);
-        expect(langs).toEqual(expect.arrayContaining(["typescript", "javascript", "yaml", "xml"]));
+        expect(langs).toEqual(expect.arrayContaining(["typescript", "javascript", "yaml", "xml", "markdown"]));
     });
 });

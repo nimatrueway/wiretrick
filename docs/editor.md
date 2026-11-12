@@ -396,7 +396,7 @@ In **Settings → Synced folder**, click **Choose Folder…** and pick a folder
 (e.g. `~/TangiTweaks`) — that becomes your synced folder. **Change Folder…**
 switches to another one (cancelling the picker keeps the current folder),
 and **Disconnect** stops syncing; the folder's files stay. Its subfolders mirror the explorer's folders (empty ones too),
-`.ts` and `.tsx` files are scripts and `.json` and `.svg` files are
+`.ts` and `.tsx` files are scripts and `.json`, `.md`, `.svg` and image files are
 [data files](scripting.md#imports-folders-and-data-files), at their relative
 paths. Dot entries (`.git`, `.vscode`, `.tangitweak-backup`, …),
 `node_modules`, `.d.ts` files and config JSON (`package.json`,

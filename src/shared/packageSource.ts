@@ -115,7 +115,7 @@ export interface Net {
 }
 
 /** the files a package can use */
-export const isPackageFile = (path: string): boolean => /\.(tsx?|json|svg|png|jpe?g|gif|webp|ico|avif)$/i.test(path) && !/(^|\/)(node_modules|\.git)\//.test(path);
+export const isPackageFile = (path: string): boolean => /\.(tsx?|json|svg|md|png|jpe?g|gif|webp|ico|avif)$/i.test(path) && !/(^|\/)(node_modules|\.git)\//.test(path);
 
 /** read a browser `File` as package content (raster images become `data:image/...;base64,...`) */
 export async function readPackageBrowserFile(path: string, file: File): Promise<string> {

@@ -4,7 +4,7 @@ import type { NewKind } from "../state/explorer";
 
 const KIND_TITLE: Record<NewKind, string> = {
     script: 'The name is also the file name: any characters except < > : " \\ | ? * — a / puts the script in a folder (e.g. mock/helpers)',
-    data: "A .json data file — a / puts it in a folder (e.g. mock/users.json)",
+    data: "A .json, .md or .svg file — a / puts it in a folder (e.g. README.md or mock/users.json)",
     folder: "A folder — a / makes nested folders (e.g. mock/api)",
 };
 

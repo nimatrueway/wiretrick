@@ -264,11 +264,13 @@ describe("folder sync: folders and data files", () => {
     });
 
     it("a folder holding files TangiTweak doesn't sync stays on disk", async () => {
-        put("mock/README.md", "notes");
+        put("README.md", "# Docs");
+        put("mock/notes.txt", "notes");
         const sync = await setup();
+        expect(await dataPaths()).toContain("README.md");
         await (await ss()).deleteFolder("mock");
         await settled(sync);
-        expect(tree().filter((p) => p.startsWith("mock"))).toEqual(["mock/", "mock/README.md"]);
+        expect(tree().filter((p) => p.startsWith("mock"))).toEqual(["mock/", "mock/notes.txt"]);
         await sync.stop();
     });
 

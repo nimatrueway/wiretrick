@@ -9,7 +9,7 @@ import { API_TYPINGS_URI } from "./apiLinks";
 import { NavHistory } from "./navHistory";
 import type { SampleScript } from "./samples";
 import { settingsDiagnostics, settingsCompletions, settingsHover, type AssistScript } from "../shared/settingsAssist";
-import { badPackageImports, folderOf, imageDataUrlToBytes, isImageDataPath, isSvgPath, missingImports } from "../shared/scriptImports";
+import { badPackageImports, folderOf, imageDataUrlToBytes, isImageDataPath, isMarkdownPath, isSvgPath, missingImports } from "../shared/scriptImports";
 import { makeFolderPackagePlan, makePackagePlan } from "../shared/makePackage";
 import { MANIFEST_FILE } from "../shared/packageMetadata";
 import { manifestScriptCompletions, manifestScriptProblems } from "./manifestAssist";
@@ -590,7 +590,12 @@ async function createItem(kind: NewKind, path: string): Promise<void> {
         select(id);
         editor?.focus();
     } else if (kind === "data") {
-        const r = await send({ type: "saveDataFile", path, text: isSvgPath(path) ? '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">\n</svg>\n' : "{}\n" });
+        const initial = isSvgPath(path)
+            ? '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">\n</svg>\n'
+            : isMarkdownPath(path)
+              ? `# ${baseName(path).replace(/\.md$/i, "")}\n`
+              : "{}\n";
+        const r = await send({ type: "saveDataFile", path, text: initial });
         if (r?.error || !r?.id) {
             status(`can't create "${path}": ${r?.error ?? "unknown error"}`, "error");
             return;
@@ -843,8 +848,8 @@ const dataUri = (path: string): any => (window as any).monaco.Uri.file("/" + pat
 const isDataId = (id: string | null): boolean => !!id && dataFiles.some((d) => d.id === id);
 
 /** syncModels for data files: renamed ones move, clean ones follow external changes, deleted ones go */
-/** a data file's Monaco language: .svg is XML, raster images are plaintext (no JSON diagnostics) */
-const dataLanguage = (path: string): string => (isSvgPath(path) ? "xml" : isImageDataPath(path) ? "plaintext" : "json");
+/** a data file's Monaco language: .svg is XML, .md is Markdown, raster images are plaintext */
+const dataLanguage = (path: string): string => (isSvgPath(path) ? "xml" : isMarkdownPath(path) ? "markdown" : isImageDataPath(path) ? "plaintext" : "json");
 
 function syncDataModels(): void {
     if (!editor) return;

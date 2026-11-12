@@ -8,7 +8,7 @@
 
 import { builtinSpec, jsxElementAt } from "../shared/builtinSpecs";
 import { PACKAGE_MODULES_KEY, PACKAGE_TYPINGS_KEY, TYPINGS_ROOT, type PackageStatus, type StoredTypings } from "../shared/packageImports";
-import { coveredMissingModule, dependantsOf, importSpecs, isImageDataPath, isSvgPath, packageImportMarks, packageUrls } from "../shared/scriptImports";
+import { coveredMissingModule, dependantsOf, importSpecs, isImageDataPath, isMarkdownPath, isSvgPath, packageImportMarks, packageUrls } from "../shared/scriptImports";
 import { isTsxName } from "../shared/scriptName";
 import { baseName } from "./explorerTree";
 import { jsonDeclPath, jsonModuleDts } from "./jsonTypes";
@@ -459,7 +459,7 @@ export function createTsWorkspace(host: TsWorkspaceHost): TsWorkspace {
         const want = new Map<string, string>();
         const nextDts = new Map<string, string>();
         for (const f of dataFiles) {
-            if (isSvgPath(f.path) || isImageDataPath(f.path)) continue;
+            if (isSvgPath(f.path) || isMarkdownPath(f.path) || isImageDataPath(f.path)) continue;
             const decl = jsonDeclPath(f.path);
             const content = jsonModuleDts(f.text);
             nextDts.set(f.path, content);

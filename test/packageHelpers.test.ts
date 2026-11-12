@@ -210,10 +210,11 @@ describe("readZip", () => {
             ["pkg/x.tangitweak.ts", 'import "./lib";\n', "store"],
             ["pkg/lib.ts", "export const a = 1;\n".repeat(50), "deflate"],
             ["pkg/readme.md", "hi", "store"],
+            ["pkg/notes.txt", "skip", "store"],
         ]);
         const out = await readZip(zip, isPackageFile);
         const dec = new TextDecoder();
-        expect(Object.keys(out).sort()).toEqual(["pkg/lib.ts", "pkg/x.tangitweak.ts"]);
+        expect(Object.keys(out).sort()).toEqual(["pkg/lib.ts", "pkg/readme.md", "pkg/x.tangitweak.ts"]);
         expect(dec.decode(out["pkg/lib.ts"])).toBe("export const a = 1;\n".repeat(50));
         expect(dec.decode(out["pkg/x.tangitweak.ts"])).toBe('import "./lib";\n');
     });
@@ -227,8 +228,9 @@ describe("localPackage", () => {
     it("picks package files and entries, shallowest first", () => {
         expect(isPackageFile("a/b.ts")).toBe(true);
         expect(isPackageFile("a/b.svg")).toBe(true);
+        expect(isPackageFile("readme.md")).toBe(true);
         expect(isPackageFile("node_modules/x/index.ts")).toBe(false);
-        expect(isPackageFile("readme.md")).toBe(false);
+        expect(isPackageFile("notes.txt")).toBe(false);
         expect(startsIn(["sub/b.ts", "lib.ts", "a.tangitweak.tsx", "t.d.ts", "c.json"])).toEqual(["a.tangitweak.tsx", "lib.ts", "sub/b.ts"]);
         // a bundle's scripts install with it
         expect(startsIn(["kit/metadata.json", "kit/a.ts", "kit/sub/b.ts", "x.ts"])).toEqual(["x.ts", "kit/metadata.json"]);

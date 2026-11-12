@@ -161,9 +161,9 @@ export function svgToDataUrl(svg: string): string {
     return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg.trim())}`;
 }
 
-/** does the specifier (or path) name a data file (`.json`, `.svg` or an image)? */
+/** does the specifier (or path) name a data file (`.json`, `.md`, `.svg` or an image)? */
 export function isDataSpec(spec: string): boolean {
-    return /\.(json|svg|png|jpe?g|gif|webp|ico|avif)$/i.test(spec);
+    return /\.(json|svg|md|png|jpe?g|gif|webp|ico|avif)$/i.test(spec);
 }
 
 /** an `.svg` data file: importing it gives its markup, a string */
@@ -171,9 +171,14 @@ export function isSvgPath(path: string): boolean {
     return /\.svg$/i.test(path);
 }
 
-/** what importing a data file gives: an `.svg`'s markup, a raster image's `data:` URL, or a `.json`'s parsed value */
+/** a `.md` data file: shown/edited as Markdown; importing it gives its text, a string */
+export function isMarkdownPath(path: string): boolean {
+    return /\.md$/i.test(path);
+}
+
+/** what importing a data file gives: an `.svg`'s markup, a `.md`'s text, a raster image's `data:` URL, or a `.json`'s parsed value */
 export function dataFileValue(path: string, text: string): any {
-    return isSvgPath(path) || isImageDataPath(path) ? text : JSON.parse(text);
+    return isSvgPath(path) || isMarkdownPath(path) || isImageDataPath(path) ? text : JSON.parse(text);
 }
 
 /** true when `icon` names a workspace/package file path rather than a `data:`/`http(s):` URL or inline `<svg>` */

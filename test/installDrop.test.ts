@@ -50,12 +50,13 @@ describe("install drops", () => {
     it("reads a folder's package files by their paths inside it", async () => {
         const dir = dirEntry("kit", [
             fileEntry("metadata.json", "{}"),
-            dirEntry("tools", [fileEntry("b.ts", "B"), fileEntry("notes.md", "skip")]),
+            fileEntry("README.md", "# Kit"),
+            dirEntry("tools", [fileEntry("b.ts", "B"), fileEntry("notes.txt", "skip")]),
             dirEntry("node_modules", [fileEntry("x.ts", "skip")]),
             fileEntry("a.ts", "A"),
         ]);
         const d = await readDrop(transfer({ entries: [dir] }));
-        expect(d).toEqual({ label: 'The folder "kit"', files: { "metadata.json": "{}", "tools/b.ts": "B", "a.ts": "A" } });
+        expect(d).toEqual({ label: 'The folder "kit"', files: { "metadata.json": "{}", "README.md": "# Kit", "tools/b.ts": "B", "a.ts": "A" } });
     });
 
     it("reads dropped scripts by name", async () => {

@@ -66,11 +66,11 @@ export function isConfigJsonPath(path: string): boolean {
     return /^(package\.json|package-lock\.json|tsconfig.*\.json|jsconfig\.json)$/i.test(base) || /^settings\.schema\.json$/i.test(path);
 }
 
-/** why a data file path (`mock/rate-limits.json`, `icons/logo.svg`, `icons/logo.png`) can't be used, or "" */
+/** why a data file path (`mock/rate-limits.json`, `README.md`, `icons/logo.svg`, `icons/logo.png`) can't be used, or "" */
 export function dataFilePathProblem(path: string): string {
     if (!path) return "path is empty";
-    if (!/\.(json|svg|png|jpe?g|gif|webp|ico|avif)$/i.test(path)) return "data files are .json, .svg or image (.png, .jpg, .webp, .gif, .ico, .avif) files";
-    const justExt = /(?:^|\/)(\.(?:json|svg|png|jpe?g|gif|webp|ico|avif))$/i.exec(path);
+    if (!/\.(json|svg|md|png|jpe?g|gif|webp|ico|avif)$/i.test(path)) return "data files are .json, .md, .svg or image (.png, .jpg, .webp, .gif, .ico, .avif) files";
+    const justExt = /(?:^|\/)(\.(?:json|svg|md|png|jpe?g|gif|webp|ico|avif))$/i.exec(path);
     if (justExt) return `data file names can't be just ${justExt[1]}`;
     if (/(^|\/)\./.test(path)) return "data file names can't start with a dot";
     if (isConfigJsonPath(path)) return "that name is reserved for tooling config (package.json, tsconfig.json…)";
@@ -100,9 +100,9 @@ export function isTsxName(name: string): boolean {
     return /[^/]\.tsx$/.test(name);
 }
 
-/** a file name's extension as the Explorer leaves it unselected on rename: `.ts`, `.tangitweak.ts`, `.tsx`, `.json`… */
+/** a file name's extension as the Explorer leaves it unselected on rename: `.ts`, `.tangitweak.ts`, `.tsx`, `.json`, `.md`… */
 export function fileExtension(fileName: string): string {
-    return /(\.tangitweak)?\.tsx?$|\.(json|svg|png|jpe?g|gif|webp|ico|avif)$/i.exec(fileName.slice(fileName.lastIndexOf("/") + 1))?.[0] ?? "";
+    return /(\.tangitweak)?\.tsx?$|\.(json|svg|md|png|jpe?g|gif|webp|ico|avif)$/i.exec(fileName.slice(fileName.lastIndexOf("/") + 1))?.[0] ?? "";
 }
 
 /** the name as typed in a file name box: "x.ts" → "x"; "x.tsx" stays */

@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState, type DragEvent, type KeyboardEvent, 
 import { useSnapshot } from "valtio";
 import { isInFolder } from "../../shared/folders";
 import { scriptHealth } from "../../shared/scriptHealth";
-import { folderOf, isDataSpec, isImageDataPath, isSvgPath } from "../../shared/scriptImports";
+import { folderOf, isDataSpec, isImageDataPath, isMarkdownPath, isSvgPath } from "../../shared/scriptImports";
 import { cleanScriptName, fileExtension, isTsxName, scriptFileName, scriptNameFromInput } from "../../shared/scriptName";
 import { baseName, dropPlan, explorerTree, folderRowId, isFolderRowId, joinPath, targetFolder, type TreeRow } from "../explorerTree";
 import { actions } from "../shell/actions";
@@ -481,11 +481,14 @@ export function ExplorerTree() {
         } else if (r.kind === "data") {
             const bad = snap.jsonErrorIds.has(r.id);
             const svg = isSvgPath(r.path);
+            const md = isMarkdownPath(r.path);
             const img = isImageDataPath(r.path);
             const dataFile = explorer.dataFiles.find((d) => d.id === r.id);
             const title = [
                 r.path,
-                `Data file — import it from a script (import ${svg ? "markup" : img ? "iconUrl" : "data"} from "./${baseName(r.path)}"${svg ? ": the SVG markup, a string" : img ? ": a data: URL string" : ""})`,
+                md
+                    ? `Markdown file — edit in the Code view or import from a script (import doc from "./${baseName(r.path)}")`
+                    : `Data file — import it from a script (import ${svg ? "markup" : img ? "iconUrl" : "data"} from "./${baseName(r.path)}"${svg ? ": the SVG markup, a string" : img ? ": a data: URL string" : ""})`,
                 bad ? "Its JSON has errors — see the Problems view" : "",
                 "Double-click or F2 to rename · drag to move",
             ]
@@ -497,7 +500,7 @@ export function ExplorerTree() {
                     " data" + (bad ? " has-error" : ""),
                     r.depth,
                     <>
-                        <FileIcon kind={svg ? "svg" : img ? "img" : "json"} src={img ? dataFile?.text : undefined} />
+                        <FileIcon kind={svg ? "svg" : md ? "md" : img ? "img" : "json"} src={img ? dataFile?.text : undefined} />
                         {name(r, r.name, title, bad ? " error" : "")}
                         {del(r, "Delete data file (Delete)")}
                     </>,
@@ -628,7 +631,7 @@ function CreateRow({ kind, folder, list }: { kind: NewKind; folder: string; list
             <NameInput
                 kind={kind}
                 value=""
-                placeholder={kind === "script" ? "script name" : kind === "data" ? "name.json or name.svg" : "folder name"}
+                placeholder={kind === "script" ? "script name" : kind === "data" ? "name.json, .md or .svg" : "folder name"}
                 onDone={(commit, value) => {
                     explorer.editing = null;
                     let name = cleanScriptName(value).trim();

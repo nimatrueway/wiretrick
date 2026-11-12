@@ -128,6 +128,34 @@ describe("ScriptLife", () => {
         const o = { v: 5, get(this: { v: number }) { return this.v; } };
         reload((ctx) => ctx.patch(o, "get", (orig) => function (this: any) { return orig.call(this) * 2; }));
         expect(o.get()).toBe(10);
+
+        // constructor static constants (like WebSocket.OPEN / CLOSED) survive ctx.patch
+        class FakeWS {
+            static readonly CONNECTING = 0;
+            static readonly OPEN = 1;
+            static readonly CLOSING = 2;
+            static readonly CLOSED = 3;
+            readyState = FakeWS.OPEN;
+            constructor(public url: string, public protocols?: string | string[]) {}
+        }
+        const win = { WebSocket: FakeWS };
+        reload((ctx) =>
+            ctx.patch(win, "WebSocket", (Native) =>
+                new Proxy(Native, {
+                    construct(target, [url, protocols]) {
+                        return new target(url === "wss://webpack/ws" ? "ws://localhost:8081/ws" : url, protocols);
+                    },
+                })
+            )
+        );
+        expect(win.WebSocket.OPEN).toBe(1);
+        expect(win.WebSocket.CLOSED).toBe(3);
+        const userWs = new win.WebSocket("wss://app.example.com/live");
+        expect(userWs.url).toBe("wss://app.example.com/live");
+        expect(userWs.readyState === win.WebSocket.OPEN).toBe(true);
+        expect(userWs instanceof win.WebSocket).toBe(true);
+        expect(userWs instanceof FakeWS).toBe(true);
+        expect(new win.WebSocket("wss://webpack/ws").url).toBe("ws://localhost:8081/ws");
     });
 
     it("ctx.patch: two handlers each get a layer", () => {

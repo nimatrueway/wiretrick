@@ -342,16 +342,17 @@ export class ScriptLife {
                 orig,
                 impl: orig,
                 n: ++this.trampN,
-                fn: function (this: unknown, ...args: any[]) {
-                    return new.target ? Reflect.construct(tr.impl, args, new.target === tr.fn ? tr.impl : new.target) : tr.impl.apply(this, args);
-                },
+                fn: null as any,
             };
-            // `x instanceof obj[prop]` keeps working
-            if (orig.prototype) tr.fn.prototype = orig.prototype;
-            try {
-                Object.defineProperty(tr.fn, "name", { value: orig.name, configurable: true });
-                Object.defineProperty(tr.fn, "length", { value: orig.length, configurable: true });
-            } catch {}
+            // Proxy keeps static constants/methods (e.g. WebSocket.OPEN), prototype, instanceof, name and length intact
+            tr.fn = new Proxy(orig, {
+                apply(_target, thisArg, args) {
+                    return Reflect.apply(tr.impl, thisArg, args);
+                },
+                construct(_target, args, newTarget) {
+                    return Reflect.construct(tr.impl, args, newTarget === tr.fn ? tr.impl : newTarget);
+                },
+            });
             obj[prop] = tr.fn;
             if (obj[prop] !== tr.fn) throw new TypeError(`ctx.patch: ${name} can't be replaced (read-only)`);
             byProp.set(tk, (t = tr));

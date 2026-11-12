@@ -7,6 +7,16 @@ its section below.
 
 ## [Unreleased]
 
+## [0.30.0-alpha] - 2026-11-12
+
+### Added
+
+- Markdown (`.md`) data files in the Explorer and Editor: files like `README.md` sync in folders, travel with installed and exported packages/zips, open in Monaco with Markdown syntax highlighting, and import into scripts as strings (`import readme from "./README.md"`).
+
+### Fixed
+
+- `ctx.patch` now installs a `Proxy` stand-in instead of a plain `function` wrapper, keeping static properties on constructors (such as `WebSocket.CONNECTING`, `WebSocket.OPEN`, `WebSocket.CLOSING` and `WebSocket.CLOSED`) intact so patching `window.WebSocket` no longer breaks site code checking `ws.readyState === WebSocket.OPEN`.
+
 ## [0.29.0-alpha] - 2026-11-12
 
 ### Added
@@ -964,7 +974,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/tangistudio/TangiTweak/compare/v0.29.0-alpha...HEAD
+[Unreleased]: https://github.com/tangistudio/TangiTweak/compare/v0.30.0-alpha...HEAD
+[0.30.0-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.29.0-alpha...v0.30.0-alpha
 [0.29.0-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.28.0-alpha...v0.29.0-alpha
 [0.28.0-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.27.0-alpha...v0.28.0-alpha
 [0.27.0-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.26.0-alpha...v0.27.0-alpha

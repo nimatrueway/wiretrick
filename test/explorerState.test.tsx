@@ -226,7 +226,7 @@ describe("explorer tree", () => {
         const ids = [...list.querySelectorAll(":scope > li")].map((l) => l.id || l.className);
         expect(ids.slice(2, 4)).toEqual(["explorer-dir%3Amock", "script-item creating"]);
         const input = list.querySelector("li.creating input") as HTMLInputElement;
-        expect(input.placeholder).toBe("name.json or name.svg");
+        expect(input.placeholder).toBe("name.json, .md or .svg");
         input.value = "users";
         act(() => void fireEvent.keyDown(input, { key: "Enter" }));
         expect(create).toHaveBeenCalledWith("data", "mock/users.json");
@@ -247,11 +247,13 @@ describe("explorer tree", () => {
                 dataFiles: [
                     { id: "d_m", path: "mock/metadata.json", text: JSON.stringify({ name: "Mock Kit", icon: "icon.svg", scripts: ["beta.ts"] }), savedAt: 1 },
                     { id: "d_i", path: "mock/icon.svg", text: '<svg viewBox="0 0 8 8"><rect width="8" height="8"/></svg>', savedAt: 1 },
+                    { id: "d_readme", path: "README.md", text: "# Hello", savedAt: 1 },
                 ],
             })
         );
         expect(row("s_a").querySelector<HTMLImageElement>(".file-icon img")?.getAttribute("src")).toBe("data:image/png;base64,BBBB");
         expect(row("dir:mock").querySelector<HTMLImageElement>(".file-icon.package img")?.getAttribute("src")).toMatch(/^data:image\/svg\+xml/);
         expect(row("s_b").querySelector<HTMLImageElement>(".file-icon img")?.getAttribute("src")).toMatch(/^data:image\/svg\+xml/);
+        expect(row("d_readme").querySelector(".file-icon.md")?.textContent).toBe("MD");
     });
 });

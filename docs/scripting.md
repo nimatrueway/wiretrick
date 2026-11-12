@@ -505,7 +505,7 @@ import { mockJson } from "utils";            // bare: resolved from the root
 The `.ts`/`.tsx`/`.js` extension is optional (with both `x.ts` and `x.tsx`,
 `./x` is the `.ts` one) and matching is case-insensitive.
 
-A **data file** is a JSON or SVG file in the explorer (`.json`, `.svg`); it
+A **data file** is a JSON, Markdown, SVG or image file in the explorer (`.json`, `.md`, `.svg`, `.png`, …); it
 never runs, scripts import it by its path:
 
 ```ts
@@ -516,9 +516,8 @@ import { max } from "./mock/rate-limits.json"; // one property
 tt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, () => ({ headers: { set: { "x-limit": String(max) } } }));
 ```
 
-An `.svg` imports as its markup, a string (`import logo from
-"./icons/logo.svg"` → `'<svg …>…</svg>'`), e.g. for an overlay's
-`innerHTML` or a mocked response body.
+`.md` and `.svg` files import as strings (their Markdown or SVG markup, e.g. `import logo from
+"./icons/logo.svg"` → `'<svg …>…</svg>'`), and raster images import as `data:image/…` URLs.
 
 Each JSON import gets a freshly parsed copy, so a handler changing it doesn't
 affect other scripts. Saving, renaming or deleting a data file hot-applies
@@ -1197,11 +1196,11 @@ tt.onPage("*://app.example.com/*", (ctx) => {
   for `key` drops it. Use it for state that should survive saves (a cache,
   the page's original title) — a top-level `let` starts over on every
   save.
-- **`ctx.patch(obj, prop, wrap)`** installs a stand-in for `obj[prop]`
+- **`ctx.patch(obj, prop, wrap)`** installs a `Proxy` stand-in for `obj[prop]`
   once (the site may keep a reference to it) and points it at
   `wrap(original)`; a save points it at the new wrapper. Once no run
-  patches it any more it calls the original. It keeps `new`, `name`,
-  `length` and `instanceof` working, and throws if `obj[prop]` isn't a
+  patches it any more it calls the original. It keeps `new`, static properties
+  (like `WebSocket.OPEN`), `name`, `length` and `instanceof` working, and throws if `obj[prop]` isn't a
   function or can't be replaced. Two handlers patching the same function
   each add a layer.
 
