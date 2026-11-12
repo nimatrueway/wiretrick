@@ -1,6 +1,6 @@
 {
   "name": "tangitweak",
-  "version": "0.28.0-alpha",
+  "version": "0.29.0-alpha",
   "description": "Script-based request/response override extension (TypeScript rewrite)",
   "private": true,
   "type": "module",
