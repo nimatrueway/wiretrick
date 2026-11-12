@@ -171,7 +171,7 @@ describe("explorer tree", () => {
     });
 
     it("right-click shows the row's menu; a menu item runs and closes it", async () => {
-        const { actions, row } = await mount();
+        const { actions, row, s } = await mount();
         const enable = vi.spyOn(actions, "setScriptEnabled");
         act(() => void fireEvent.contextMenu(row("s_b"), { clientX: 10, clientY: 10 }));
         const items = () => [...document.querySelectorAll(".ctx-menu li")].map((l) => (l.classList.contains("sep") ? "-" : l.textContent));
@@ -180,7 +180,21 @@ describe("explorer tree", () => {
         expect(enable).toHaveBeenCalledWith("s_b", false);
         expect(document.querySelector(".ctx-menu")).toBeNull();
         act(() => void fireEvent.contextMenu(row("dir:mock")));
-        expect(items().slice(0, 3)).toEqual(["Make Package…", "-", "New Script…"]);
+        expect(items().slice(0, 6)).toEqual(["Expand AllCtrl+→", "Fold AllCtrl+←", "-", "Make Package…", "-", "New Script…"]);
+        act(() => void fireEvent.click([...document.querySelectorAll(".ctx-menu li")].find((l) => l.textContent?.startsWith("Fold All"))!));
+        expect([...s.explorer.collapsed].sort()).toEqual(["mock", "mock/deep"]);
+        expect(row("dir:empty").getAttribute("aria-expanded")).toBe("true");
+        act(() => void fireEvent.contextMenu(row("dir:mock")));
+        act(() => void fireEvent.click([...document.querySelectorAll(".ctx-menu li")].find((l) => l.textContent?.startsWith("Expand All"))!));
+        expect([...s.explorer.collapsed]).toEqual([]);
+        expect(row("dir:mock/deep").getAttribute("aria-expanded")).toBe("true");
+        // Ctrl+← / Ctrl+→ (PC) and Alt-click fold/expand recursively
+        const list = document.querySelector("#script-list")!;
+        act(() => void fireEvent.keyDown(list, { key: "ArrowLeft", ctrlKey: true }));
+        expect([...s.explorer.collapsed].sort()).toEqual(["mock", "mock/deep"]);
+        act(() => void fireEvent.click(row("dir:mock"), { altKey: true }));
+        expect([...s.explorer.collapsed]).toEqual([]);
+        act(() => void fireEvent.contextMenu(row("dir:mock")));
         act(() => void fireEvent.keyDown(document, { key: "Escape" }));
         expect(document.querySelector(".ctx-menu")).toBeNull();
     });

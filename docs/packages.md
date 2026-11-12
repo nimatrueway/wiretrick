@@ -67,10 +67,13 @@ bundle's. Files outside the bundle's folder can't be imported.
 ## Install a package
 
 - **Open its URL.** A tab that opens a URL ending in `.tangitweak.ts` (or
-  `.tangitweak.tsx`) goes to TangiTweak's install page. That covers a link on
-  a site, a raw GitHub or gist file, a URL you type, or a local `file://`
+  `.tangitweak.tsx`), or any supported package/bundle URL ending in
+  `#tangitweak:install` (for example
+  `https://github.com/me/my-bundle#tangitweak:install` in a GitHub `README.md`),
+  goes to TangiTweak's install page. That covers a link on
+  a site, a GitHub repository or folder, a raw GitHub or gist file, a URL you type, or a local `file://`
   path. For local files, turn on **Allow access to file URLs** for
-  TangiTweak in the browser's extension settings. GitHub's own page for a file
+  TangiTweak in the browser's extension settings. Without `#tangitweak:install`, GitHub's own page for a file
   (`github.com/…/blob/…`) stays as it is. Add `#tt-raw` to any URL to just
   view the file. The suffix only marks share links: the script runs
   whatever it's named.

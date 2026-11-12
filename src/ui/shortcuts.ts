@@ -24,6 +24,7 @@ export const SHORTCUTS: Shortcut[] = [
     { keys: ["Esc"], action: "Close dialog / return to the editor", where: "Global" },
     { keys: ["↑", "↓", "Home", "End"], action: "Move selection", where: "Explorer" },
     { keys: ["←", "→"], action: "Collapse / expand a folder (←: go to the parent folder)", where: "Explorer" },
+    { keys: ["Ctrl+←", "Ctrl+→"], macKeys: ["Alt+←", "Alt+→"], action: "Fold all / expand all subfolders (or Alt/⌥-click a folder)", where: "Explorer" },
     { keys: ["Enter"], action: "Open the file and focus the editor (a folder: collapse / expand)", where: "Explorer" },
     { keys: ["Space"], action: "Open the file, keep focus in the list", where: "Explorer" },
     { keys: ["F2"], action: "Rename (a / in the name moves it into a folder)", where: "Explorer" },
@@ -66,8 +67,10 @@ export function formatKey(key: string, mac: boolean): string {
         .join("");
 }
 
+export const isMacPlatform = (): boolean => /Mac|iPhone|iPad/.test(navigator.platform);
+
 /** a shortcut as this platform writes it, for tooltips */
-export const keyHint = (key: string): string => formatKey(key, /Mac|iPhone|iPad/.test(navigator.platform));
+export const keyHint = (key: string): string => formatKey(key, isMacPlatform());
 
 /** the keys of a shortcut on this platform */
 export const keysFor = (s: Shortcut, mac: boolean): string[] => (mac && s.macKeys) || s.keys;

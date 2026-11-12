@@ -1,5 +1,5 @@
 import { proxy, ref } from "valtio";
-import { allFolders, ancestorFolders } from "../../shared/folders";
+import { allFolders, ancestorFolders, isInFolder } from "../../shared/folders";
 import type { ScriptHealthInput } from "../../shared/scriptHealth";
 import type { Script } from "../../background/engine/scriptStore";
 import type { DataFile } from "../../background/engine/dataFiles";
@@ -131,11 +131,25 @@ export function revealInExplorer(path: string): void {
     if (shut.length) setCollapsed(new Set([...explorer.collapsed].filter((f) => !shut.includes(f))));
 }
 
+/** expand or collapse `folder` and every subfolder inside it (`""` = every folder in the explorer) */
+export function setSubtreeExpanded(folder: string, expanded: boolean): void {
+    const match = (f: string): boolean => !folder || f.toLowerCase() === folder.toLowerCase() || isInFolder(f, folder);
+    const next = new Set(explorer.collapsed);
+    for (const f of everyFolder()) {
+        if (!match(f)) continue;
+        if (expanded) next.delete(f);
+        else next.add(f);
+    }
+    setCollapsed(next);
+    if (!expanded) {
+        const cur = treeRow(cursorId());
+        const top = cur ? ancestorFolders(cur.path).find((f) => next.has(f)) : undefined;
+        if (top) explorer.focusedId = folderRowId(top);
+    }
+}
+
 export function collapseAll(): void {
-    setCollapsed(new Set(everyFolder()));
-    const cur = treeRow(explorer.focusedId);
-    // the cursor goes to the top-level folder that now hides it
-    if (cur && cur.path.includes("/")) explorer.focusedId = folderRowId(cur.path.slice(0, cur.path.indexOf("/")));
+    setSubtreeExpanded("", false);
 }
 
 // ---- cursor and multi-selection ----

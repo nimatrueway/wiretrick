@@ -2,7 +2,7 @@
 import type { Analysis, FetchedPackage } from "../../background/engine/packages";
 import type { PackageStatus } from "../../shared/packageImports";
 import type { InstalledPackage } from "../../shared/packageModel";
-import { fetchPackage, parseSource, webNet, type CrawledPackage, type DownloadProgress } from "../../shared/packageSource";
+import { fetchPackage, parseSource, stripInstallHash, webNet, type CrawledPackage, type DownloadProgress } from "../../shared/packageSource";
 
 export function send<T>(msg: Record<string, unknown>): Promise<T> {
     return new Promise((resolve, reject) =>
@@ -17,7 +17,8 @@ export function send<T>(msg: Record<string, unknown>): Promise<T> {
 export type Fetched = FetchedPackage & Pick<CrawledPackage, "missing" | "bare">;
 
 /** read a package from its URL (GitHub, gist, any https or file: URL) */
-export async function fetchFrom(source: string, onProgress?: (p: DownloadProgress) => void): Promise<Fetched> {
+export async function fetchFrom(rawSource: string, onProgress?: (p: DownloadProgress) => void): Promise<Fetched> {
+    const source = stripInstallHash(rawSource);
     const src = parseSource(source);
     if (typeof src === "string") throw new Error(src);
     const p = await fetchPackage(src, webNet, onProgress);

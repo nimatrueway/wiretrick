@@ -7,6 +7,19 @@ its section below.
 
 ## [Unreleased]
 
+## [0.31.0-alpha] - 2026-11-12
+
+### Added
+
+- One-click `#tangitweak:install` share links: appending `#tangitweak:install` to any supported package or bundle URL (such as `https://github.com/owner/repo#tangitweak:install` in a GitHub `README.md`) opens TangiTweak's install page directly when clicked or visited.
+- **Expand All** and **Fold All** in the Explorer's right-click menu on folders (and empty tree space), with keyboard shortcuts (`⌥→` / `⌥←` on macOS, `Ctrl+→` / `Ctrl+←` on Windows/Linux) and `⌥`/Alt-click on folders.
+- Hovering a script in the extension popup now shows a larger preview of the script's custom icon inside its tooltip.
+- `PageUp` and `PageDown` keyboard navigation (with automatic scroll-into-view) in the Quick Open (`⌘P` / `Ctrl+P`) dialog.
+
+### Changed
+
+- Scripts in the extension popup that are not active on the current tab now show a muted gray status dot instead of blank space.
+
 ## [0.30.0-alpha] - 2026-11-12
 
 ### Added
@@ -974,7 +987,8 @@ First release of Wiretrick, a TypeScript rewrite of Resource Override:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/tangistudio/TangiTweak/compare/v0.30.0-alpha...HEAD
+[Unreleased]: https://github.com/tangistudio/TangiTweak/compare/v0.31.0-alpha...HEAD
+[0.31.0-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.30.0-alpha...v0.31.0-alpha
 [0.30.0-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.29.0-alpha...v0.30.0-alpha
 [0.29.0-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.28.0-alpha...v0.29.0-alpha
 [0.28.0-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.27.0-alpha...v0.28.0-alpha

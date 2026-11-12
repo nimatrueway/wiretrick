@@ -8,7 +8,7 @@ import { HelperStrategy } from "./engine/strategies/helperStrategy";
 import { RulesStrategy } from "./engine/strategies/rulesStrategy";
 import { createPipeline } from "./engine/pipeline";
 import { startPackageUpdates } from "./engine/packages";
-import { ENTRY_URL_RE } from "../shared/packageSource";
+import { installTargetUrl } from "../shared/packageSource";
 import { addUiPort, clearTab, clearLogHistory, log, noteRan, broadcastEntry, broadcastToUi, clearScriptErrors, setScriptTypeErrors, onScriptActivity, onScriptProblemsChanged, getScriptProblems } from "./engine/logs";
 import { onScriptsChanged, listScripts, refreshStaleMeta } from "./engine/scriptStore";
 import { dlog, dlogLevel, getDebugBuffer, pushEntry, clearDebugBuffer, setSink } from "../shared/debugLog";
@@ -152,6 +152,23 @@ chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
     }
     if (msg && msg.type === "debugLog" && msg.entry) {
         pushEntry(msg.entry); // also mirrors to the UI via the sink
+        sendResponse({});
+        return false;
+    }
+    if (msg && msg.type === "openInstallUrl" && typeof msg.url === "string") {
+        const target = installTargetUrl(msg.url);
+        if (target) {
+            const tab = sender.tab;
+            chrome.tabs.create(
+                {
+                    url: chrome.runtime.getURL(`install.html?url=${encodeURIComponent(target)}`),
+                    ...(tab?.id !== undefined ? { openerTabId: tab.id } : {}),
+                    ...(tab?.index !== undefined ? { index: tab.index + 1 } : {}),
+                    ...(tab?.windowId !== undefined ? { windowId: tab.windowId } : {}),
+                },
+                () => void chrome.runtime.lastError
+            );
+        }
         sendResponse({});
         return false;
     }
@@ -325,13 +342,12 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
 onScriptsChanged(() => void updateAllTabs());
 void updateAllTabs();
 
-// opening a *.tangitweak.ts URL (a raw GitHub or gist file, any site, a
-// local file) offers to install it, like a userscript manager
+// opening a *.tangitweak.ts URL or any package URL marked with
+// #tangitweak:install offers to install it, like a userscript manager
 chrome.tabs.onUpdated.addListener((tabId, info) => {
-    const url = info.url;
-    if (!url || !ENTRY_URL_RE.test(url) || /#tt-raw$/.test(url)) return;
-    if (/^https?:\/\/(gist\.)?github\.com\//i.test(url)) return; // GitHub's own page for the file
-    chrome.tabs.update(tabId, { url: chrome.runtime.getURL(`install.html?url=${encodeURIComponent(url)}`) }, () => void chrome.runtime.lastError);
+    const target = info.url ? installTargetUrl(info.url) : null;
+    if (!target) return;
+    chrome.tabs.update(tabId, { url: chrome.runtime.getURL(`install.html?url=${encodeURIComponent(target)}`) }, () => void chrome.runtime.lastError);
 });
 startPackageUpdates();
 

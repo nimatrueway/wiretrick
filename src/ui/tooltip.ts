@@ -22,6 +22,7 @@ const GRACE_MS = 180;
 const GAP = 4;
 const MARGIN = 6;
 const PARKED = "data-tt-title";
+const ICON = "data-tt-icon";
 
 let installed = false;
 
@@ -38,6 +39,7 @@ export function installTooltips(): void {
     /** titled ancestors of the anchor, their titles removed while it's tracked */
     let ancestors: [HTMLElement, string][] = [];
     let text = "";
+    let icon = "";
     let visible = false;
     let dismissed: HTMLElement | null = null; // clicked/escaped: no tooltip until the pointer leaves it
     let lastHidden = 0;
@@ -47,16 +49,19 @@ export function installTooltips(): void {
     const mouse = { x: 0, y: 0 };
 
     const observer = new MutationObserver(() => {
-        if (!anchor || !anchor.hasAttribute("title")) return;
-        const t = anchor.getAttribute("title")!;
-        if (!t) {
-            text = "";
+        if (!anchor) return;
+        icon = anchor.getAttribute(ICON) || "";
+        if (anchor.hasAttribute("title")) {
+            const t = anchor.getAttribute("title")!;
+            anchor.removeAttribute("title");
+            if (t) anchor.setAttribute(PARKED, t);
+            else anchor.removeAttribute(PARKED);
+            text = t;
+        }
+        if (!text && !icon) {
             release();
             return;
         }
-        anchor.removeAttribute("title");
-        anchor.setAttribute(PARKED, t);
-        text = t;
         if (visible) render();
     });
 
@@ -74,28 +79,33 @@ export function installTooltips(): void {
         if (visible) lastHidden = Date.now();
         visible = false;
         tip.hidden = true;
-        if (anchor) {
+        if (anchor && anchor.hasAttribute(PARKED)) {
             anchor.removeAttribute(PARKED);
             if (!anchor.hasAttribute("title")) anchor.setAttribute("title", text);
         }
         for (const [el, t] of ancestors) if (!el.hasAttribute("title")) el.setAttribute("title", t);
         ancestors = [];
         anchor = null;
+        text = "";
+        icon = "";
     }
 
     function track(el: HTMLElement, show: boolean): void {
         release();
         anchor = el;
         text = el.getAttribute("title") || "";
-        el.removeAttribute("title");
-        el.setAttribute(PARKED, text);
+        icon = el.getAttribute(ICON) || "";
+        if (text) {
+            el.removeAttribute("title");
+            el.setAttribute(PARKED, text);
+        }
         for (let p = el.parentElement; p; p = p.parentElement) {
             const t = p.getAttribute("title");
             if (t === null) continue;
             ancestors.push([p, t]);
             p.removeAttribute("title");
         }
-        observer.observe(el, { attributes: true, attributeFilter: ["title"] });
+        observer.observe(el, { attributes: true, attributeFilter: ["title", ICON] });
         // the anchor going away or hidden (re-render, dialog closed) takes the tooltip with it
         watch = setInterval(() => {
             if (anchor && (!anchor.isConnected || anchor.getClientRects().length === 0)) release();
@@ -104,16 +114,14 @@ export function installTooltips(): void {
     }
 
     function reveal(): void {
-        if (!anchor || !text) return;
+        if (!anchor || (!text && !icon)) return;
         if (!tip.isConnected) document.body.append(tip);
         visible = true;
         render();
     }
 
-    function render(): void {
+    function position(): void {
         if (!anchor) return;
-        tip.textContent = text;
-        tip.hidden = false;
         tip.style.left = "0px";
         tip.style.top = "0px";
         const r = anchor.getBoundingClientRect();
@@ -135,15 +143,47 @@ export function installTooltips(): void {
         tip.style.top = `${Math.round(top)}px`;
     }
 
+    function render(): void {
+        if (!anchor) return;
+        tip.classList.toggle("has-icon", !!icon);
+        tip.classList.toggle("icon-only", !!icon && !text);
+        if (icon) {
+            const img = document.createElement("img");
+            img.className = "tt-tip-icon";
+            img.src = icon;
+            img.alt = "";
+            img.onerror = () => {
+                img.remove();
+                tip.classList.remove("has-icon", "icon-only");
+                if (!text) release();
+                else if (visible) position();
+            };
+            if (text) {
+                const body = document.createElement("span");
+                body.className = "tt-tip-text";
+                body.textContent = text;
+                tip.replaceChildren(img, body);
+            } else {
+                tip.replaceChildren(img);
+            }
+        } else {
+            tip.textContent = text;
+        }
+        tip.hidden = false;
+        position();
+    }
+
     const scheduleHide = (): void => {
         if (anchor && !hideTimer) hideTimer = setTimeout(release, visible ? GRACE_MS : 0);
     };
 
+    const hasTip = (el: Element): boolean => !!(el.getAttribute("title") || el.getAttribute(ICON));
+
     function titledFrom(target: Element): HTMLElement | null {
-        const t = target.closest<HTMLElement>("[title]");
+        const t = target.closest<HTMLElement>(`[title], [${ICON}]`);
         // inside the tracked anchor, unless a titled descendant of it is nearer
-        if (anchor && anchor.contains(target) && (!t || t.contains(anchor))) return anchor;
-        if (!t || !t.getAttribute("title") || t.closest(".monaco-hover")) return null;
+        if (anchor && anchor.contains(target) && (!t || t === anchor || t.contains(anchor))) return anchor;
+        if (!t || !hasTip(t) || t.closest(".monaco-hover")) return null;
         return t;
     }
 
@@ -215,7 +255,7 @@ export function installTooltips(): void {
     let focusBefore: Element | null = null;
     tip.addEventListener("mousedown", () => (focusBefore = document.activeElement));
     tip.addEventListener("click", () => {
-        if (hasSelectionIn(tip)) return; // the user selected text in it
+        if (!text || hasSelectionIn(tip)) return; // icon-only or the user selected text in it
         if (focusBefore instanceof HTMLElement && focusBefore !== document.body && document.activeElement === document.body) focusBefore.focus({ preventScroll: true });
         void copyWithToast(text);
     });

@@ -94,15 +94,16 @@ opens in the Code view.
 
 With the tree focused (⌘⇧E or a click): ↑/↓, Home/End move, ← collapses a
 folder (or goes to its parent folder), → expands it (or goes to its first
-item), Enter opens the file and focuses the Code view (on a folder: expand /
+item), ⌥←/⌥→ on macOS or Ctrl+←/Ctrl+→ on Windows/Linux (or ⌥/Alt-click)
+folds or expands a folder and all its subfolders, Enter opens the file and focuses the Code view (on a folder: expand /
 collapse), Space opens it and keeps focus in the tree, F2 renames, Delete
 (⌘⌫ on macOS) deletes after a confirmation — a folder's warns that it deletes
 its contents, with counts — and Esc returns to the Code view. Right-click a
-row for **Open**, **Enable/Disable** (scripts), **Make Package…** and
+row for **Open** (or **Expand All** / **Fold All** on folders), **Enable/Disable** (scripts), **Make Package…** and
 **Export Package…** (scripts, folders and package folders — see [Sharing
 scripts](packages.md#sharing-scripts)), **New Script…**, **New JSON
 File…**, **New Folder…** (in that folder), **Copy Path**, **Rename…** and
-**Delete**; right-click the empty area for the New items at the root. Drag a
+**Delete**; right-click the empty area for **Expand All** / **Fold All** and the New items at the root. Drag a
 script, data file or folder onto a folder to move it there (onto the empty
 area: to the root); hovering a collapsed folder while dragging expands it.
 A package's folder — [installed](packages.md), or one holding a

@@ -80,7 +80,7 @@ describe("Popup", () => {
         const rows = [...container.querySelectorAll(".script-item")];
         expect(rows.map((r) => r.classList.contains("active-here"))).toEqual([true, false, true]);
         expect(rows[0].querySelector('.active-ind[aria-label="active on this tab"]')).not.toBeNull();
-        expect(rows[1].querySelector(".active-ind")!.getAttribute("aria-label")).toBeNull();
+        expect(rows[1].querySelector('.active-ind[aria-label="not active on this tab"]')).not.toBeNull();
     });
 
     it("shows no summary when nothing is active on the tab", async () => {
@@ -273,7 +273,10 @@ describe("Popup", () => {
         const { container } = render(<Popup api={api} />);
         await waitFor(() => expect(names(container)).toEqual(["Redwood", "multi/a", "multi/b"]));
         expect(container.querySelector(".script-name")?.getAttribute("title")).toBe("Atlas bundle");
+        expect(container.querySelector(".script-name")?.getAttribute("data-tt-icon")).toBe("data:image/png;base64,AAAA");
+        expect(container.querySelectorAll(".script-name")[1]?.hasAttribute("data-tt-icon")).toBe(false);
         expect(container.querySelector<HTMLImageElement>("img.script-icon")?.getAttribute("src")).toBe("data:image/png;base64,AAAA");
+        expect(container.querySelector<HTMLImageElement>("img.script-icon")?.getAttribute("data-tt-icon")).toBe("data:image/png;base64,AAAA");
         expect(container.querySelectorAll("img.script-icon")).toHaveLength(1);
     });
 

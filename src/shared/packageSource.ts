@@ -33,6 +33,23 @@ export type PackageSource =
 /** a URL that installs as a package when opened in a tab */
 export const ENTRY_URL_RE = /^(https?|file):\/\/[^?#]*\.tangitweak\.tsx?([?#]|$)/i;
 
+/** hash suffix marking any package/bundle URL (such as a GitHub repo or folder) as an install link */
+export const INSTALL_HASH = "#tangitweak:install";
+export const INSTALL_HASH_RE = /#tangitweak:install$/i;
+
+export const stripInstallHash = (url: string): string => url.trim().replace(INSTALL_HASH_RE, "");
+
+/** the package URL to open in `install.html` when a tab visits or clicks `url`, or null */
+export function installTargetUrl(url: string): string | null {
+    if (!url || /#tt-raw$/i.test(url)) return null;
+    if (INSTALL_HASH_RE.test(url)) {
+        const clean = stripInstallHash(url);
+        return /^(https?|file):\/\//i.test(clean) ? clean : null;
+    }
+    if (/^https?:\/\/(gist\.)?github\.com\//i.test(url)) return null; // GitHub's own page for the file
+    return ENTRY_URL_RE.test(url) ? url : null;
+}
+
 /** a share link's script name */
 export const ENTRY_FILE_RE = /\.tangitweak\.tsx?$/i;
 

@@ -11,6 +11,7 @@ import {
     clearSel,
     collapseAll,
     cursorId,
+    everyFolder,
     explorer,
     explorerIds,
     moveFocus,
@@ -18,6 +19,7 @@ import {
     selectRange,
     setFolderExpanded,
     setSel,
+    setSubtreeExpanded,
     SETTINGS_ID,
     startRename,
     toggleSel,
@@ -29,6 +31,7 @@ import {
 import { showContextMenu } from "./ContextMenu";
 import { NameInput } from "./NameInput";
 import { FileIcon, indent } from "./icons";
+import { isMacPlatform, keyHint } from "../shortcuts";
 import { badgeRowOf, packageOf, packages, packageTitle } from "../state/packages";
 import { openInstall } from "../state/dialogs";
 import { packageFolders } from "../../shared/makePackage";
@@ -81,6 +84,15 @@ function packageMenu(p: InstalledPackage): MenuItem[] {
         null,
     ];
 }
+
+const expandAllMenuItems = (folders: string[]): MenuItem[] => {
+    const mac = isMacPlatform();
+    return [
+        { label: "Expand All", key: keyHint(mac ? "Alt+→" : "Ctrl+→"), run: () => folders.forEach((f) => setSubtreeExpanded(f, true)) },
+        { label: "Fold All", key: keyHint(mac ? "Alt+←" : "Ctrl+←"), run: () => folders.forEach((f) => setSubtreeExpanded(f, false)) },
+        null,
+    ];
+};
 
 function newItemsMenu(folder: string): MenuItem[] {
     return [
@@ -165,6 +177,8 @@ function onKeyDown(e: KeyboardEvent<HTMLUListElement>): void {
     const rows = visibleRows();
     const row = cur === SETTINGS_ID ? undefined : rows.find((r) => r.id === cur);
     const mod = e.metaKey || e.ctrlKey;
+    const mac = isMacPlatform();
+    const deep = mac ? e.altKey && !mod && !e.shiftKey : e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
     const plain = !mod && !e.altKey && !e.shiftKey;
     let handled = true;
     const nav: Record<string, string> = { ArrowDown: ids[Math.min(i + 1, ids.length - 1)], ArrowUp: ids[Math.max(i - 1, 0)], Home: ids[0], PageUp: ids[0], End: ids[ids.length - 1], PageDown: ids[ids.length - 1] };
@@ -175,6 +189,11 @@ function onKeyDown(e: KeyboardEvent<HTMLUListElement>): void {
     } else if (e.key.toLowerCase() === "a" && mod && !e.shiftKey && !e.altKey) {
         setSel(selectableIds());
         moveFocus(cur);
+    } else if ((e.key === "ArrowRight" || e.key === "ArrowLeft") && deep) {
+        const expand = e.key === "ArrowRight";
+        const dirs = cur && explorer.sel.size > 1 && explorer.sel.has(cur) ? actionRows(cur).filter((r) => r.kind === "folder").map((r) => r.path) : [];
+        if (dirs.length) dirs.forEach((d) => setSubtreeExpanded(d, expand));
+        else setSubtreeExpanded(targetFolder(row), expand);
     } else if (e.key === "ArrowRight" && plain) {
         // expand, or (expanded) go to the first child
         if (row?.kind === "folder" && !row.expanded) setFolderExpanded(row.path, true);
@@ -228,14 +247,27 @@ function onContextMenu(e: MouseEvent<HTMLUListElement>): void {
         // on a multi-selection: what applies to all of it
         moveFocus(id);
         const rows = actionRows(id);
+        const dirs = rows.filter((r) => r.kind === "folder").map((r) => r.path);
         const paths = rows.map(rowFilePath).join("\n");
-        showContextMenu(e.clientX, e.clientY, [{ label: "Copy Paths", run: () => copy(paths, `copied ${plural(rows.length, "path")}`) }, null, { label: `Delete ${rows.length} Items`, key: "Delete", run: () => actions.deleteRows(rows) }]);
+        showContextMenu(e.clientX, e.clientY, [
+            ...(dirs.length === rows.length ? expandAllMenuItems(dirs) : []),
+            { label: "Copy Paths", run: () => copy(paths, `copied ${plural(rows.length, "path")}`) },
+            null,
+            { label: `Delete ${rows.length} Items`, key: "Delete", run: () => actions.deleteRows(rows) },
+        ]);
         return;
     }
     if (!id || id === SETTINGS_ID) {
         // settings.yaml and the empty space below the tree: the root
         if (id) moveFocus(id);
-        showContextMenu(e.clientX, e.clientY, [...(id ? [{ label: "Open", key: "Enter", run: () => open(id) }, null] : []), ...newItemsMenu(""), null, ...installMenu()]);
+        const hasDirs = !id && everyFolder().length > 0;
+        showContextMenu(e.clientX, e.clientY, [
+            ...(id ? [{ label: "Open", key: "Enter", run: () => open(id) }, null] : []),
+            ...(hasDirs ? expandAllMenuItems([""]) : []),
+            ...newItemsMenu(""),
+            null,
+            ...installMenu(),
+        ]);
         return;
     }
     const row = treeRow(id);
@@ -248,7 +280,7 @@ function onContextMenu(e: MouseEvent<HTMLUListElement>): void {
     const exportStart = row.kind === "folder" ? packageStartOf(row.path) : script && !inPkg ? scriptFileName(script.meta.name) : undefined;
     const make = inPkg || exportStart?.endsWith(MANIFEST_FILE) ? undefined : script ? () => actions.makePackage(script.id) : row.kind === "folder" ? () => actions.makeFolderPackage(row.path) : undefined;
     showContextMenu(e.clientX, e.clientY, [
-        ...(row.kind === "folder" ? [] : [{ label: "Open", key: "Enter", run: () => open(id) }, null]),
+        ...(row.kind === "folder" ? expandAllMenuItems([row.path]) : [{ label: "Open", key: "Enter", run: () => open(id) }, null]),
         ...(pkg ? packageMenu(pkg) : []),
         ...(script && !isLib ? [{ label: script.enabled ? "Disable" : "Enable", run: () => actions.setScriptEnabled(script.id, !script.enabled) }, null] : []),
         ...(make ? [{ label: "Make Package…", run: make }] : []),
@@ -443,10 +475,10 @@ export function ExplorerTree() {
             ✕
         </button>
     );
-    const click = (id: string, then: () => void) => ({
-        onClick: () => {
+    const click = (id: string, then: (e: MouseEvent) => void) => ({
+        onClick: (e: MouseEvent) => {
             moveFocus(id);
-            then();
+            then(e);
         },
     });
 
@@ -474,7 +506,11 @@ export function ExplorerTree() {
                         {name(r, r.name, [r.path, pkgByRow.get(r.id) ? packageTitle(pkgByRow.get(r.id)!) : localPkgs.has(r.path) ? `A package (${MANIFEST_FILE}) — right-click → Export Package… to share it` : "", "F2 to rename · drag to move"].filter(Boolean).join("\n"))}
                         {pkgBadge(r.id)}
                     </>,
-                    { "aria-expanded": !!r.expanded, draggable: true, ...click(r.id, () => setFolderExpanded(r.path, !r.expanded)) },
+                    {
+                        "aria-expanded": !!r.expanded,
+                        draggable: true,
+                        ...click(r.id, (e) => (e.altKey ? setSubtreeExpanded(r.path, !r.expanded) : setFolderExpanded(r.path, !r.expanded))),
+                    },
                     r.expanded
                 )
             );

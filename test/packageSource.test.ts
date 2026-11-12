@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { crawl, fetchPackage, isRemote, parseSource, pickStart, sourceLabel, ENTRY_URL_RE, type Net } from "../src/shared/packageSource";
+import { crawl, fetchPackage, installTargetUrl, isRemote, parseSource, pickStart, sourceLabel, stripInstallHash, ENTRY_URL_RE, type Net } from "../src/shared/packageSource";
 import { writeZip } from "../src/shared/zip";
 
 describe("parseSource", () => {
@@ -32,10 +32,16 @@ describe("parseSource", () => {
     it("labels", () => {
         expect(sourceLabel({ kind: "github", owner: "me", repo: "s", ref: "HEAD", path: "", tree: true })).toBe("github.com/me/s");
     });
-    it("recognizes entry URLs opened in a tab", () => {
+    it("recognizes entry URLs and #tangitweak:install links opened in a tab", () => {
         expect(ENTRY_URL_RE.test("https://x.dev/a.tangitweak.ts?raw=1")).toBe(true);
         expect(ENTRY_URL_RE.test("file:///a/b.tangitweak.tsx")).toBe(true);
         expect(ENTRY_URL_RE.test("https://x.dev/a.tangitweak.ts.html")).toBe(false);
+        expect(installTargetUrl("https://raw.githubusercontent.com/me/s/main/a.tangitweak.ts")).toBe("https://raw.githubusercontent.com/me/s/main/a.tangitweak.ts");
+        expect(installTargetUrl("https://raw.githubusercontent.com/me/s/main/a.tangitweak.ts#tt-raw")).toBeNull();
+        expect(installTargetUrl("https://github.com/me/s/blob/main/a.tangitweak.ts")).toBeNull();
+        expect(installTargetUrl("https://github.com/nima-taheri-mongodb/bonsai/#tangitweak:install")).toBe("https://github.com/nima-taheri-mongodb/bonsai/");
+        expect(installTargetUrl("https://github.com/nima-taheri-mongodb/bonsai#tangitweak:install")).toBe("https://github.com/nima-taheri-mongodb/bonsai");
+        expect(stripInstallHash("https://github.com/nima-taheri-mongodb/bonsai#tangitweak:install")).toBe("https://github.com/nima-taheri-mongodb/bonsai");
     });
 });
 

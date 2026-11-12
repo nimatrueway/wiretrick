@@ -95,6 +95,8 @@ function ScriptRow({ script, api, onChanged, version, activeHere }: { script: Sc
     useEffect(() => setIconBroken(false), [script.iconUrl]);
     const isLib = script.meta.active === false;
     const health = scriptHealth(script);
+    const icon = script.iconUrl && !iconBroken ? script.iconUrl : undefined;
+    const desc = script.meta.description || script.bundleDescription;
     return (
         <>
             <li className={"script-item" + (isLib ? " utility" : "") + (activeHere ? " active-here" : "")}>
@@ -115,12 +117,12 @@ function ScriptRow({ script, api, onChanged, version, activeHere }: { script: Sc
                 )}
                 <span
                     className="active-ind"
-                    role={activeHere ? "img" : undefined}
-                    aria-label={activeHere ? "active on this tab" : undefined}
-                    title={activeHere ? "Active on this tab — matched the page or one of its requests (counted in the badge)" : undefined}
+                    role="img"
+                    aria-label={activeHere ? "active on this tab" : "not active on this tab"}
+                    title={activeHere ? "Active on this tab — matched the page or one of its requests (counted in the badge)" : "Not active on this tab"}
                 />
-                {script.iconUrl && !iconBroken && <img className="script-icon" src={script.iconUrl} alt="" onError={() => setIconBroken(true)} />}
-                <span className={health ? "script-name error" : "script-name"} title={script.meta.description || script.bundleDescription}>
+                {icon && <img className="script-icon" src={icon} alt="" title={desc} data-tt-icon={icon} onError={() => setIconBroken(true)} />}
+                <span className={health ? "script-name error" : "script-name"} title={desc} data-tt-icon={icon}>
                     {script.bundleName || script.meta.name}
                 </span>
                 {health && (

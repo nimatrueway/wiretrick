@@ -50,9 +50,9 @@ body.resizing * { pointer-events: none; }
 
 #title { font-weight: 600; }
 #active-summary { flex: 1; margin-left: 10px; font-size: 11px; color: var(--fg-dim); display: flex; align-items: center; gap: 5px; cursor: help; }
-.active-dot, .script-item.active-here .active-ind::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #4ec9b0; flex-shrink: 0; }
-.active-ind { width: 7px; flex-shrink: 0; display: flex; margin-right: -2px; }
-.script-item.active-here .active-ind { cursor: help; }
+.active-dot, .active-ind { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.active-ind { background: var(--pending); margin-right: -2px; cursor: help; }
+.active-dot, .script-item.active-here .active-ind { background: var(--ok); }
 
 #header button {
     background: var(--accent);

@@ -73,6 +73,20 @@ import type { RanApi } from "../shared/netTypes";
         safeSend({ type: "scriptRan", scriptId, name: String(name ?? ""), api, url });
     }
 
+    // Clicking a `#tangitweak:install` link on a page (e.g. a GitHub README)
+    // opens TangiTweak's install tab directly, leaving the current page untouched.
+    document.addEventListener(
+        "click",
+        (e) => {
+            if (dead || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+            const a = (e.target instanceof Element ? e.target : null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+            if (!a || a.hasAttribute("download") || !/#tangitweak:install$/i.test(a.href)) return;
+            e.preventDefault();
+            safeSend({ type: "openInstallUrl", url: a.href });
+        },
+        true
+    );
+
     // ---- MAIN-world hook relaying ----
 
     /**
