@@ -215,7 +215,7 @@ export async function collectDiagnostics(extra: DiagnosticsExtra = {}): Promise<
                     store: st.name,
                     scope: st.scope,
                     ...(st.tabUrl ? { tabUrl: st.tabUrl } : st.tabTitle ? { tab: st.tabTitle } : {}),
-                    persist: st.scope === "page" ? false : st.persist ?? true,
+                    persist: st.scope !== "global" ? false : st.persist ?? true,
                     rev: st.rev,
                     data: raw.length <= BODY_CAP ? st.data : raw.slice(0, BODY_CAP) + `…[cut at ${BODY_CAP} chars]`,
                 };

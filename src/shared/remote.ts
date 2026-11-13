@@ -31,7 +31,7 @@ export const SITE_DISALLOWED = "which the site's JavaScript world can't be trust
 /** a handle used in onSite code */
 export const SITE_NO_HANDLES = `onSite code can't call handles (${SITE_DISALLOWED}: the site could call them too) — call them from tt.onPage or tt.onOverlay code, and have those read the site through an onSite handle`;
 /** a store used in onSite code */
-export const SITE_NO_STORES = `tt.globalStore and tt.pageStore aren't available in onSite code (${SITE_DISALLOWED}: the site could read and forge them) — keep what the site may see in a tt.siteStore, or use them in tt.onPage or tt.onOverlay code`;
+export const SITE_NO_STORES = `tt.globalStore, tt.tabStore and tt.pageStore aren't available in onSite code (${SITE_DISALLOWED}: the site could read and forge them) — keep what the site may see in a tt.siteStore, or use them in tt.onPage or tt.onOverlay code`;
 /** `tt.siteStore` where there's no page (network handlers) */
 export const NO_SITE_STORE = "tt.siteStore needs a page; network handlers have none — use it in tt.onSite, tt.onPage or tt.onOverlay code";
 /** `tt.siteStore` in an imported library */

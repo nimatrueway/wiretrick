@@ -17,6 +17,7 @@
  * the page is taken when the request starts.
  */
 import { onBridgeConnect } from "./bridgePorts";
+import { isTabScope, TAB_SCOPE_PREFIX, tabScope, tabScopeId, tabScopeOfPage } from "../../shared/storeOps";
 
 interface PageRec {
     key: string;
@@ -35,6 +36,7 @@ export class PageRegistry {
     /** a navigation request → the page it leaves */
     private readonly nav = new Map<string, { key: string | null; at: number }>();
     private readonly endFns: ((key: string, tabId: number) => void)[] = [];
+    private readonly tabEndFns: ((tabKey: string, tabId: number) => void)[] = [];
     private seq = 0;
 
     constructor(private readonly opts: { save?: (byTab: Record<number, PageRec>) => void } = {}) {}
@@ -100,13 +102,19 @@ export class PageRegistry {
 
     tabClosed(tabId: number): void {
         const rec = this.byTab.get(tabId);
-        if (!rec) return;
-        this.byTab.delete(tabId);
-        this.end(rec.key, tabId);
-        this.save();
+        if (rec) {
+            this.byTab.delete(tabId);
+            this.end(rec.key, tabId);
+            this.save();
+        }
+        this.endTab(tabScope(tabId), tabId);
     }
 
     isAlive(key: string): boolean {
+        if (isTabScope(key)) {
+            const id = tabScopeId(key);
+            return id !== undefined ? this.byTab.has(id) : this.virtual.has(key.slice(TAB_SCOPE_PREFIX.length));
+        }
         return this.alive.has(key) || this.virtual.has(key);
     }
 
@@ -118,7 +126,10 @@ export class PageRegistry {
     }
 
     endVirtual(key: string): void {
-        if (this.virtual.delete(key)) this.end(key, -1);
+        if (this.virtual.delete(key)) {
+            this.end(key, -1);
+            this.endTab(tabScopeOfPage(key)!, -1);
+        }
     }
 
     /** the tabs' pages, `tabId → key` */
@@ -134,6 +145,10 @@ export class PageRegistry {
 
     onEnd(fn: (key: string, tabId: number) => void): void {
         this.endFns.push(fn);
+    }
+
+    onTabEnd(fn: (tabKey: string, tabId: number) => void): void {
+        this.tabEndFns.push(fn);
     }
 
     /** MV3: the saved map after a service-worker restart (tabs seen since win) */
@@ -166,6 +181,14 @@ export class PageRegistry {
         for (const fn of this.endFns) {
             try {
                 fn(key, tabId);
+            } catch {}
+        }
+    }
+
+    private endTab(tabKey: string, tabId: number): void {
+        for (const fn of this.tabEndFns) {
+            try {
+                fn(tabKey, tabId);
             } catch {}
         }
     }

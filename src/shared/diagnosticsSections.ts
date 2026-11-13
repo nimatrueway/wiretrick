@@ -5,7 +5,7 @@ export const DIAG_SECTIONS = [
     { id: "state", label: "Engine state", detail: "local helper, folder sync, open tabs' URLs" },
     { id: "problems", label: "Problems", detail: "the Problems view" },
     { id: "settings", label: "settings.json", detail: "globals and per-script overrides" },
-    { id: "stores", label: "Stores", detail: "globalStore and open tabs' pageStore data (capped)" },
+    { id: "stores", label: "Stores", detail: "globalStore and open tabs' tabStore / pageStore data (capped)" },
     { id: "log", label: "Log", detail: "the Log view's lines" },
     { id: "debug", label: "Debug log", detail: "debug-level lines" },
     { id: "network", label: "Network", detail: "last 300 requests; credentials redacted, bodies capped" },

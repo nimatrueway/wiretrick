@@ -36,6 +36,7 @@ import { hotRegistry } from "../shared/hotRefresh";
 import { packBytes, unpackBytes } from "../shared/bytesPack";
 import { Endpoint, endpointPair, messagePortEndpoint, portEndpoint, ISO_STORE_TAG, type ReqOf, type ReqOps, type ResOf } from "../shared/wire";
 import { ReplicaHub, type StoreSnapshots } from "../shared/storeReplica";
+import { tabScopeOfPage } from "../shared/storeOps";
 import { SiteMirrors } from "../shared/siteStoreMirror";
 import { siteBuiltin } from "../shared/siteBuiltin";
 import { SITE_DOWN_KINDS, SITE_UP_KINDS, type SiteDown, type SiteUp } from "../shared/siteStoreHost";
@@ -499,7 +500,7 @@ import type { RanApi } from "../shared/netTypes";
                 lib: scriptId ? undefined : name,
                 stores:
                     world === "isolated" && storesOf
-                        ? { store: (n, initial, persist) => isoStores().store(storesOf, n, initial, persist), pageStore: (n, initial) => isoStores().pageStore(storesOf, n, initial, isoPage) }
+                        ? { store: (n, initial, persist) => isoStores().store(storesOf, n, initial, persist), tabStore: (n, initial) => isoStores().tabStore(storesOf, n, initial, tabScopeOfPage(isoPage)), pageStore: (n, initial) => isoStores().pageStore(storesOf, n, initial, isoPage) }
                         : undefined,
                 call: scriptId && gen && world === "isolated" ? handle(scriptId, gen) : undefined,
                 siteStore: scriptId ? (n, initial) => siteStores().store(scriptId, n, initial) : undefined,

@@ -42,8 +42,8 @@ export function siteStoreEdits(code: string, offset: number): TextEdit[] {
             if (drop) out.push(drop);
         }
     };
-    for (const d of args.matchAll(/(?<![\w$.])tt\s*\.\s*(pageStore|globalStore)\b/g)) change(from + d.index! + d[0].length - d[1].length, d[1]);
-    for (const b of src.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;]+)?=\s*tt\s*\.\s*(pageStore|globalStore)\b/g)) {
+    for (const d of args.matchAll(/(?<![\w$.])tt\s*\.\s*(pageStore|tabStore|globalStore)\b/g)) change(from + d.index! + d[0].length - d[1].length, d[1]);
+    for (const b of src.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;]+)?=\s*tt\s*\.\s*(pageStore|tabStore|globalStore)\b/g)) {
         if (b.index! >= from && b.index! < to) continue;
         if (!new RegExp(`(?<![\\w$.])${b[1].replace(/\$/g, "\\$")}(?![\\w$]|\\s*:(?!:))`).test(args)) continue;
         change(b.index! + b[0].length - b[2].length, b[2]);

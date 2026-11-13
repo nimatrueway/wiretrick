@@ -28,7 +28,7 @@ import { compileMv2, ownsAny } from "./strategyScripts";
 import { IS_FIREFOX } from "./helperState";
 import { wsNotApplied } from "../../../shared/websocketLimits";
 import { BYPASS_RULE_BASE } from "../bypass";
-import { storeOwner } from "../stores";
+import { backgroundHub, storeOwner } from "../stores";
 
 type ParamValues = { [scriptId: string]: Record<string, any> };
 
@@ -42,7 +42,7 @@ interface ActiveRule {
 
 const CACHE_KEY = "ttRulesState";
 /** a store change re-probes after this quiet time */
-const REPROBE_MS = 300;
+const REPROBE_MS = 50;
 
 function dnrApi(): any {
     const g = globalThis as any;
@@ -114,25 +114,24 @@ export class RulesStrategy {
     }
 
     /**
-     * A store of `scriptId` changed: if the script owns rules, re-probe
-     * (debounced) — its rules handlers may read the store. Writes made by
-     * the probe itself don't trigger another one.
+     * A global or tab store changed: if any script owns rules, re-probe
+     * (debounced) — a rules handler (or a library it imports) may read it.
+     * Writes made by the probe itself don't trigger another one.
      */
-    storeChanged(scriptId: string): void {
-        if (!this.owners.has(scriptId) || this.probing || Date.now() < this.quietUntil || this.reprobeTimer) return;
+    storeChanged(_scriptId: string): void {
+        if (!this.owners.size || this.probing || Date.now() < this.quietUntil || this.reprobeTimer) return;
         this.reprobeTimer = setTimeout(() => {
             this.reprobeTimer = null;
             if (this.last) void this.reload(this.last.scripts, this.last.paramValues);
         }, REPROBE_MS);
     }
 
-    /** every store's rev of the rules scripts (part of the probe signature) */
-    private async storeRevs(ids: string[]): Promise<Record<string, Record<string, number>>> {
-        // rules can't read page stores: their page copies don't count
-        const snaps = await storeOwner.init(ids, { page: null });
-        const out: Record<string, Record<string, number>> = {};
-        for (const [s, stores] of Object.entries(snaps)) out[s] = Object.fromEntries(Object.entries(stores).map(([n, v]) => [n, v.rev]));
-        return out;
+    /** global + tab store snapshots and revs of `ids` (part of the probe signature; `pageStore` copies don't feed rules) */
+    private async storeState(ids: string[]): Promise<{ snaps: Record<string, Record<string, { rev: number; data: any }>>; revs: Record<string, Record<string, number>>; tabIds: number[] }> {
+        const [snaps, tabIds] = await Promise.all([storeOwner.init(ids, { page: null, tabs: true }), storeOwner.tabsOf(ids)]);
+        const revs: Record<string, Record<string, number>> = {};
+        for (const [s, stores] of Object.entries(snaps)) revs[s] = Object.fromEntries(Object.entries(stores).map(([n, v]) => [n, v.rev]));
+        return { snaps, revs, tabIds };
     }
 
     private async apply(scripts: Script[], paramValues: ParamValues): Promise<void> {
@@ -148,13 +147,14 @@ export class RulesStrategy {
             return;
         }
         const enabled = scripts.filter((s) => s.enabled);
-        const sig = JSON.stringify([enabled.map((s) => [s.id, s.updatedAt, s.meta.name]), paramValues, dataFilesSig(), packagesSig(), await this.storeRevs([...this.owners])]);
+        const state = await this.storeState(enabled.map((s) => s.id));
+        const sig = JSON.stringify([enabled.map((s) => [s.id, s.updatedAt, s.meta.name]), paramValues, dataFilesSig(), packagesSig(), state.revs, state.tabIds]);
         if (__MV3__ && (await this.restoreCache(sig))) return;
 
         let probed: Map<string, ScriptRules>;
         this.probing = true;
         try {
-            probed = await this.probe(scripts, owners, paramValues);
+            probed = await this.probe(scripts, owners, paramValues, state.tabIds, state.snaps);
         } finally {
             this.probing = false;
             this.quietUntil = Date.now() + REPROBE_MS;
@@ -222,12 +222,12 @@ export class RulesStrategy {
         return out;
     }
 
-    private async probe(scripts: Script[], owners: Script[], paramValues: ParamValues): Promise<Map<string, ScriptRules>> {
+    private async probe(scripts: Script[], owners: Script[], paramValues: ParamValues, tabIds: number[], storeSnaps: Record<string, any>): Promise<Map<string, ScriptRules>> {
         const out = new Map<string, ScriptRules>();
         if (__MV3__) {
             // the same script set the other strategies send: keeps the sandbox's compile cache warm
             const plain = scripts.filter((s) => s.enabled).map((s) => ({ id: s.id, name: s.meta.name, code: s.code, updatedAt: s.updatedAt, enabled: true }));
-            const results = await probeRules(plain, paramValues);
+            const results = await probeRules(plain, paramValues, tabIds, storeSnaps);
             if (!results) {
                 dlogLevel("rules", "warn", "the sandbox didn't answer — keeping the current session rules");
                 throw new Error("rules probe failed");
@@ -235,10 +235,11 @@ export class RulesStrategy {
             for (const [id, r] of Object.entries(results)) out.set(id, r);
             return out;
         }
+        backgroundHub().prime(storeSnaps);
         const ownerIds = new Set(owners.map((s) => s.id));
         for (const c of compileMv2(scripts, paramValues, (s) => ownerIds.has(s.id))) {
             if (c.compiled.error) continue;
-            out.set(c.id, await probeScriptRules(c.compiled.handlers));
+            out.set(c.id, await probeScriptRules(c.compiled.handlers, tabIds));
         }
         return out;
     }
@@ -302,7 +303,15 @@ export class RulesStrategy {
         if (!this.active.length || this.seen.has(d.requestId)) return;
         this.seen.add(d.requestId);
         if (this.seen.size > 500) this.seen.delete(this.seen.values().next().value!);
-        const hits = this.active.filter((a) => a.re.test(d.url) && routeMatches(a.rule.route, d.url, d.method, d.type)).map((a) => a.rule);
+        const tabId = d.tabId ?? -1;
+        const hits = this.active
+            .filter((a) => {
+                const c = a.rule.spec.condition;
+                if (Array.isArray(c.tabIds) && !c.tabIds.includes(tabId)) return false;
+                if (Array.isArray(c.excludedTabIds) && c.excludedTabIds.includes(tabId)) return false;
+                return a.re.test(d.url) && routeMatches(a.rule.route, d.url, d.method, d.type);
+            })
+            .map((a) => a.rule);
         if (!hits.length) return;
         const final = hits.find((r) => r.spec.final);
         for (const r of final ? [final] : hits) {

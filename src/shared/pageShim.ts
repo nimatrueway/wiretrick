@@ -74,6 +74,7 @@ let running: Register | null = null;
 
 export interface PageStores {
     store(name: string, initial: object, persist: boolean | string[]): object;
+    tabStore(name: string, initial: object): object;
     pageStore(name: string, initial: object): object;
 }
 
@@ -136,6 +137,12 @@ export function makePageShim(o: PageShimOptions): PageShim {
             claimStoreName(names, "tt.globalStore", name, initial);
             names.set(name, "tt.globalStore");
             return stores.store(name, initial, storePersist(name, opts));
+        },
+        tabStore: (name: string, initial: object) => {
+            if (!stores) return noStore;
+            claimStoreName(names, "tt.tabStore", name, initial);
+            names.set(name, "tt.tabStore");
+            return stores.tabStore(name, initial);
         },
         pageStore: (name: string, initial: object) => {
             if (!stores) return noStore;

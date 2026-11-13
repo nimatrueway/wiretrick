@@ -19,6 +19,7 @@
  * at all.
  */
 import { withPage } from "../../../shared/currentPage";
+import { tabScope } from "../../../shared/storeOps";
 import { pages } from "../pages";
 import { recordNetBody } from "../../network";
 import { isThenable, type Routed } from "../../../shared/compile";
@@ -40,6 +41,7 @@ import { requestBodyCtx, requestBodyFromWebRequest, type RequestBody } from "../
 
 /** the page a webRequest event is for (`tt.pageStore`) */
 const pageOf = (d: { tabId: number; type?: string; requestId: string; frameId?: number }) => pages.forRequest({ tabId: d.tabId, type: d.type, requestId: d.requestId, frameId: d.frameId, documentId: (d as any).documentId, documentLifecycle: (d as any).documentLifecycle });
+const tabOf = (d: { tabId: number }) => (typeof d.tabId === "number" && d.tabId >= 0 ? tabScope(d.tabId) : null);
 
 type Kind = "onRequest" | "onResponseHeaders" | "replaceResponse" | "onResponseBody";
 
@@ -129,7 +131,7 @@ export class ExtensionStrategy implements InterceptionStrategy {
                 const step = steps[i];
                 let result: any;
                 try {
-                    result = withPage(pageOf(details), () => step.h.fn(ctxFor(details, tabUrl, step.h.route)));
+                    result = withPage(pageOf(details), () => step.h.fn(ctxFor(details, tabUrl, step.h.route)), tabOf(details));
                 } catch (e: any) {
                     scriptError(step.entry.id, formatScriptError(step.entry.name, e, step.kind));
                     continue;
@@ -340,7 +342,7 @@ export class ExtensionStrategy implements InterceptionStrategy {
                     const ctx = ctxFor(details, tabUrl, step.h.route);
                     (ctx as any).statusLine = details.statusLine || "";
                     (ctx as any).responseHeaders = details.responseHeaders || [];
-                    result = withPage(pageOf(details), () => step.h.fn(ctx));
+                    result = withPage(pageOf(details), () => step.h.fn(ctx), tabOf(details));
                 } catch (e: any) {
                     scriptError(step.entry.id, formatScriptError(step.entry.name, e, "onResponseHeaders"));
                     continue;
@@ -368,6 +370,7 @@ export class ExtensionStrategy implements InterceptionStrategy {
         // onstop may come after onCompleted pruned the cache
         const requestBody = pendingRequestBodies.get(details.requestId);
         const page = pageOf(details);
+        const tab = tabOf(details);
         try {
             const filter = ((globalThis as any).browser?.webRequest ?? chrome.webRequest).filterResponseData(details.requestId);
             const decoder = new TextDecoder("utf-8");
@@ -401,7 +404,7 @@ export class ExtensionStrategy implements InterceptionStrategy {
                         // a text body an earlier binary route returned as bytes is still text here
                         if (typeof body !== "string" && !takesBinary(h.route)) body = decoder.decode(body);
                         try {
-                            const out = await withPage(page, () => h.fn(ctx, body));
+                            const out = await withPage(page, () => h.fn(ctx, body), tab);
                             if (out !== undefined && out !== null) {
                                 const size = (b: any) => (typeof b === "string" ? b.length : (b?.byteLength ?? 0));
                                 log(details.tabId, `[${scriptName}] onResponseBody applied (${size(body)}b → ${size(out)}b) ${details.url}`, "info", scriptId, undefined, undefined, details.requestId);

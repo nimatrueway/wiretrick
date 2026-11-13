@@ -177,4 +177,37 @@ export async function checkRulesStrategy(ctx: any, mgr: any, origin: string, che
     check(t("an over-limit route → its handler's error says it's too complex, with the regex and its size"), deepErrors?.length === 2 && /^onRequest #2: .*too complex.*Regex: \^http.*\(\d+ chars, \d+ character classes, \d+ groups\) — use fewer groups/.test(deepErrors[0]), JSON.stringify(deepErrors));
     check(t("a route that only overflows with the redirect's captures → the error says so"), /^onRequest #3: .*9 captured for the redirect\) — it fits without captures/.test(deepErrors?.[1] ?? ""), JSON.stringify(deepErrors));
     await send({ type: "deleteScript", id: "s_rules_deep" });
+
+    // tt.tabStore + strategy: "rules": setting tab.staging in Tab A's overlay
+    // redirects Tab A's very first main_frame request on navigation/reload
+    // while Tab B stays untouched
+    const tabCode = [
+        `const tab = tt.tabStore("env", { staging: false });`,
+        `tt.onOverlay(${O} + "/rules-page*", (ctx) => {`,
+        `    if (ctx.url.includes("stage=1")) tab.staging = true;`,
+        `});`,
+        `tt.onRequest({ url: ${O} + "/rules-page", strategy: "rules" }, () => (tab.staging ? { redirect: ${O} + "/rules-echo?from=tabstore" } : undefined));`,
+    ].join("\n");
+    await send({ type: "saveScript", id: "s_rules_tab", name: "rules tabStore.tangitweak", code: tabCode });
+    const tabErrs = (await send({ type: "listScripts" })).find((s: any) => s.id === "s_rules_tab")?.ruleErrors;
+    check(t("tt.tabStore conditional handler starting off → 0 ruleErrors"), !tabErrs?.length, JSON.stringify(tabErrs));
+
+    const tabA = await ctx.newPage();
+    const tabB = await ctx.newPage();
+    await tabA.goto(`${origin}/rules-page?stage=1`, { waitUntil: "domcontentloaded" });
+    await tabB.goto(`${origin}/rules-page`, { waitUntil: "domcontentloaded" });
+    // poll briefly until Tab A's per-tab session rule is live, then navigate both tabs cleanly
+    let urlA = "";
+    for (let i = 0; i < 20; i++) {
+        await tabA.waitForTimeout(150);
+        await tabA.goto(`${origin}/rules-page`, { waitUntil: "domcontentloaded" });
+        urlA = tabA.url();
+        if (urlA === `${origin}/rules-echo?from=tabstore`) break;
+    }
+    await tabB.reload({ waitUntil: "domcontentloaded" });
+    check(t("tt.tabStore ON in Tab A → navigation redirects Tab A's main_frame #1"), urlA === `${origin}/rules-echo?from=tabstore`, urlA);
+    check(t("tt.tabStore OFF in Tab B → Tab B reload stays unredirected"), tabB.url() === `${origin}/rules-page`, tabB.url());
+    await tabA.close();
+    await tabB.close();
+    await send({ type: "deleteScript", id: "s_rules_tab" });
 }

@@ -85,6 +85,8 @@ export interface ResApiOverrides {
     importModule?: (spec: string) => any;
     /** `tt.globalStore`: the script's replicated store (default: a plain local valtio proxy) */
     store?: (name: string, initial: object, persist: StorePersist) => object;
+    /** `tt.tabStore`: the script's per-tab store (default: per-tab copies local to this instance) */
+    tabStore?: (name: string, initial: object) => object;
     /** `tt.pageStore`: the script's per-page store (default: per-page copies local to this instance) */
     pageStore?: (name: string, initial: object) => object;
     /** `tt.siteStore`: a mirror of the site's world's store (default — no page here: a store that throws when used) */
@@ -106,7 +108,7 @@ export function makeScriptOverrides(
     logSink: (scriptId: string, level: ScriptLogLevel, source: string, text: string) => void,
     paramValues?: Record<string, any>,
     importModule?: (spec: string) => any,
-    extra?: Pick<ResApiOverrides, "store" | "pageStore" | "fetch" | "setParam">
+    extra?: Pick<ResApiOverrides, "store" | "tabStore" | "pageStore" | "fetch" | "setParam">
 ): ResApiOverrides {
     return {
         ...extra,
@@ -680,9 +682,10 @@ function createOwner(meta: ResMeta, storedValues?: Record<string, any>) {
     };
 }
 
-/** `tt.globalStore`, `tt.pageStore` (each name once, across both) and `tt.siteStore` (its own names) for one compiled instance */
+/** `tt.globalStore`, `tt.tabStore`, `tt.pageStore` (each name once, across all three) and `tt.siteStore` (its own names) for one compiled instance */
 function makeStores(overrides?: ResApiOverrides): {
     globalStore: (name: string, initial: object, opts?: unknown) => object;
+    tabStore: (name: string, initial: object) => object;
     pageStore: (name: string, initial: object) => object;
     siteStore: (name: string, initial: object) => object;
 } {
@@ -696,7 +699,16 @@ function makeStores(overrides?: ResApiOverrides): {
             claimStoreName(names, "tt.globalStore", name, initial);
             const persist = storePersist(name, opts);
             const out = overrides?.store ? overrides.store(name, initial, persist) : proxy(initial);
+            const top = collectors[collectors.length - 1];
+            if (top) (top as ScriptHandlers & { hasGlobalStore?: boolean }).hasGlobalStore = true;
             names.set(name, "tt.globalStore");
+            return out;
+        },
+        tabStore: (name, initial) => {
+            if (isStub(name) || isStub(initial)) return makeStubModule();
+            claimStoreName(names, "tt.tabStore", name, initial);
+            const out = overrides?.tabStore ? overrides.tabStore(name, initial) : (local ??= new ReplicaHub({ ctx: "local" })).tabStore("local", name, initial);
+            names.set(name, "tt.tabStore");
             return out;
         },
         pageStore: (name, initial) => {
@@ -840,36 +852,44 @@ export function keyPlaceCalls(js: string): string {
 export interface SiteUse {
     /** 0-based: which `tt.onSite(` call of the source it is */
     nth: number;
-    /** the stores it uses: the variable names (or `tt.pageStore` / `tt.globalStore`), by kind */
+    /** the stores it uses: the variable names (or `tt.pageStore` / `tt.tabStore` / `tt.globalStore`), by kind */
     pageStore: string[];
+    tabStore?: string[];
     globalStore: string[];
     /** the handles (variables bound to `tt.onSite` / `tt.onPage` / `tt.onOverlay`) it uses */
     handles: string[];
 }
 
 /**
- * Per `tt.onSite(` call, the stores (`tt.pageStore` / `tt.globalStore`)
+ * Per `tt.onSite(` call, the stores (`tt.pageStore` / `tt.tabStore` / `tt.globalStore`)
  * and handles its arguments use — by the top-level variables they're
  * bound to, or the calls themselves. Only calls that use any. A
  * lightweight scan, not a parser: a local that shadows a name counts too.
  */
 export function onSiteUses(code: string): SiteUse[] {
     const src = codeOnly(code);
-    const bound = new Map<string, "pageStore" | "globalStore" | "handles">();
-    for (const m of src.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;]+)?=\s*tt\s*\.\s*(pageStore|globalStore|onSite|onPage|onOverlay)\b/g))
-        bound.set(m[1], m[2] === "pageStore" || m[2] === "globalStore" ? m[2] : "handles");
+    const bound = new Map<string, "pageStore" | "tabStore" | "globalStore" | "handles">();
+    for (const m of src.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;]+)?=\s*tt\s*\.\s*(pageStore|tabStore|globalStore|onSite|onPage|onOverlay)\b/g))
+        bound.set(m[1], m[2] === "pageStore" || m[2] === "tabStore" || m[2] === "globalStore" ? m[2] : "handles");
     const out: SiteUse[] = [];
     let nth = 0;
     for (const m of src.matchAll(/(?<![\w$.])tt\s*\.\s*onSite\s*(?:<[^()]*>\s*)?\(/g)) {
         const from = m.index! + m[0].length;
         const args = src.slice(from, closeOf(src, from) - 1);
+        const tabStore: string[] = [];
         const use: SiteUse = { nth: nth++, pageStore: [], globalStore: [], handles: [] };
-        for (const [name, kind] of bound) if (new RegExp(`(?<![\\w$.])${name.replace(/\$/g, "\\$")}(?![\\w$]|\\s*:(?!:))`).test(args)) use[kind].push(name);
-        for (const d of args.matchAll(/(?<![\w$.])tt\s*\.\s*(pageStore|globalStore)\b/g)) {
-            const kind = d[1] as "pageStore" | "globalStore";
-            if (!use[kind].includes(`tt.${kind}`)) use[kind].push(`tt.${kind}`);
+        for (const [name, kind] of bound) {
+            if (!new RegExp(`(?<![\\w$.])${name.replace(/\$/g, "\\$")}(?![\\w$]|\\s*:(?!:))`).test(args)) continue;
+            if (kind === "tabStore") tabStore.push(name);
+            else use[kind].push(name);
         }
-        if (use.pageStore.length || use.globalStore.length || use.handles.length) out.push(use);
+        for (const d of args.matchAll(/(?<![\w$.])tt\s*\.\s*(pageStore|tabStore|globalStore)\b/g)) {
+            const kind = d[1] as "pageStore" | "tabStore" | "globalStore";
+            const list = kind === "tabStore" ? tabStore : use[kind];
+            if (!list.includes(`tt.${kind}`)) list.push(`tt.${kind}`);
+        }
+        if (tabStore.length) use.tabStore = tabStore;
+        if (use.pageStore.length || tabStore.length || use.globalStore.length || use.handles.length) out.push(use);
     }
     return out;
 }
@@ -898,7 +918,7 @@ export function rulesProblems(code: string, routes: RouteMeta[]): string[] {
     const starts = [0];
     for (let i = 0; i < src.length; i++) if (src[i] === "\n") starts.push(i + 1);
     const stores = new Set<string>();
-    for (const m of src.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;]+)?=\s*tt\s*\.\s*(?:pageStore|globalStore)\b/g)) stores.add(m[1]);
+    for (const m of src.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;]+)?=\s*tt\s*\.\s*(?:pageStore|tabStore|globalStore)\b/g)) stores.add(m[1]);
     const out: string[] = [];
     const seen = new Set<string>();
     for (const r of rules) {
@@ -978,7 +998,7 @@ export function siteProblems(code: string, routes: RouteMeta[]): string[] {
         const u = uses.find((u) => u.nth === (r.n ?? r.index));
         if (!u) continue;
         const at = `${routeLabel(r)}: `;
-        const stores = [...u.pageStore, ...u.globalStore];
+        const stores = [...u.pageStore, ...(u.tabStore ?? []), ...u.globalStore];
         if (stores.length) out.push(`${at}uses ${names(stores)} — ${SITE_NO_STORES}`);
         if (u.handles.length) out.push(`${at}uses ${names(u.handles)} — ${SITE_NO_HANDLES}`);
     }

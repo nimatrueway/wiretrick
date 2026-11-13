@@ -12,9 +12,10 @@
  * plain data so it can cross the sandbox boundary.
  */
 import { captureToken, patternGroups, rulesForProbe, ruleErrorLine, URL_TOKEN, type ProbeResult, type RuleProbe, type RuleSpec } from "./dnrRules";
-import { effectiveStrategy, NET_KINDS, type RouteMeta, type Strategy } from "./route";
+import { effectiveStrategy, NET_KINDS, type RouteMeta } from "./route";
 import type { HandlerFn, ScriptHandlers } from "./compile";
-import { RULES_PAGE, withPage } from "./currentPage";
+import { withRulesProbe, type RulesProbeReads } from "./currentPage";
+import { tabScope } from "./storeOps";
 
 const PROBE_TIMEOUT_MS = 2000;
 
@@ -79,11 +80,11 @@ function serializeResult(r: any): ProbeResult | null {
     return out;
 }
 
-async function runOnce(fn: HandlerFn, ctx: any): Promise<{ result?: ProbeResult | null; error?: string }> {
+async function runOnce(fn: HandlerFn, ctx: any, tab: string | undefined, reads: RulesProbeReads): Promise<{ result?: ProbeResult | null; error?: string }> {
     let timer: any;
     try {
         const r = await Promise.race([
-            Promise.resolve().then(() => withPage(RULES_PAGE, () => fn(ctx))),
+            Promise.resolve().then(() => withRulesProbe(tab, reads, () => fn(ctx))),
             new Promise((_, reject) => {
                 timer = setTimeout(() => reject(new Error(`timed out after ${PROBE_TIMEOUT_MS / 1000} s (rules run the handler once, at load)`)), PROBE_TIMEOUT_MS);
             }),
@@ -102,8 +103,8 @@ function tokensToEmpty(r: ProbeResult | null | undefined, names: string[]): stri
     return s;
 }
 
-/** run one rules handler with the tripwire ctx */
-export async function probeHandler(fn: HandlerFn, route: RouteMeta): Promise<RuleProbe> {
+/** run one rules handler with the tripwire ctx (`tab`: `"tab:<id>"` for a per-tab override, or `undefined` for `initial`) */
+export async function probeHandler(fn: HandlerFn, route: RouteMeta, tab?: string): Promise<RuleProbe> {
     const kind = route.kind as RuleProbe["kind"];
     const base: RuleProbe = { kind, route, captures: [], urlRead: false };
     if (kind === "onResponseBody" || kind === "replaceResponse") return base;
@@ -115,8 +116,17 @@ export async function probeHandler(fn: HandlerFn, route: RouteMeta): Promise<Rul
     }
     const names = [...groups.keys()];
     const trip: Trip = { forbidden: new Set(), captures: new Set(), urlRead: false };
-    const first = await runOnce(fn, tripwireCtx(route, names, new Set(), trip));
-    const probe: RuleProbe = { ...base, forbidden: [...trip.forbidden], captures: [...trip.captures], urlRead: trip.urlRead, result: first.result };
+    const reads: RulesProbeReads = { conditional: false, tabStores: new Set() };
+    const first = await runOnce(fn, tripwireCtx(route, names, new Set(), trip), tab, reads);
+    const probe: RuleProbe = {
+        ...base,
+        forbidden: [...trip.forbidden],
+        captures: [...trip.captures],
+        urlRead: trip.urlRead,
+        ...(reads.conditional ? { conditional: true } : {}),
+        ...(reads.tabStores.size ? { tabStores: [...reads.tabStores] } : {}),
+        result: first.result,
+    };
     if (first.error) {
         probe.error = trip.forbidden.size ? undefined : `threw during its one-time run: ${first.error}`;
         return probe;
@@ -125,7 +135,7 @@ export async function probeHandler(fn: HandlerFn, route: RouteMeta): Promise<Rul
     // handler must do the same (e.g. `ctx.groups.ver ?? ""`)
     const optional = probe.captures.filter((n) => groups.get(n));
     if (optional.length && !probe.forbidden?.length) {
-        const second = await runOnce(fn, tripwireCtx(route, names, new Set(optional), { forbidden: new Set(), captures: new Set(), urlRead: false }));
+        const second = await runOnce(fn, tripwireCtx(route, names, new Set(optional), { forbidden: new Set(), captures: new Set(), urlRead: false }), tab, { conditional: false, tabStores: new Set() });
         const want = tokensToEmpty(first.result, optional);
         const got = second.error ? null : tokensToEmpty(second.result, []);
         if (got !== want) probe.optionalMismatch = optional;
@@ -140,15 +150,47 @@ export interface ScriptRules {
     errors: string[];
 }
 
-/** probe + translate every handler of a script that runs on `rules` */
-export async function probeScriptRules(handlers: ScriptHandlers): Promise<ScriptRules> {
+/** probe + translate every handler of a script that runs on `rules` (`tabIds`: live tabs holding `tt.tabStore` state) */
+export async function probeScriptRules(handlers: ScriptHandlers, tabIds: readonly number[] = []): Promise<ScriptRules> {
     const out: ScriptRules = { rules: [], errors: [] };
+    const hasGlobal = !!(handlers as ScriptHandlers & { hasGlobalStore?: boolean }).hasGlobalStore;
     for (const kind of NET_KINDS) {
         for (const h of handlers[kind]) {
             if (effectiveStrategy(h.route) !== "rules") continue;
-            const r = rulesForProbe(await probeHandler(h.fn, h.route));
-            if ("error" in r) out.errors.push(ruleErrorLine(h.route, r.error));
-            else out.rules.push({ route: h.route, specs: r.rules });
+            const baseProbe = await probeHandler(h.fn, h.route);
+            if (hasGlobal && !baseProbe.conditional && /\breturn\b|=>\s*(?!\{)/.test(String(h.fn))) baseProbe.conditional = true;
+            const baseRes = rulesForProbe(baseProbe);
+            if ("error" in baseRes) {
+                out.errors.push(ruleErrorLine(h.route, baseRes.error));
+                continue;
+            }
+            if (!baseProbe.tabStores?.length || !tabIds.length) {
+                if (baseRes.rules.length) out.rules.push({ route: h.route, specs: baseRes.rules });
+                continue;
+            }
+            const baseSig = JSON.stringify(baseRes.rules);
+            const excludedTabIds: number[] = [];
+            const perTab: RuleSpec[] = [];
+            let tabErr: string | null = null;
+            for (const tabId of tabIds) {
+                const tr = rulesForProbe(await probeHandler(h.fn, h.route, tabScope(tabId)));
+                if ("error" in tr) {
+                    tabErr = tr.error;
+                    break;
+                }
+                if (JSON.stringify(tr.rules) === baseSig) continue;
+                excludedTabIds.push(tabId);
+                for (const spec of tr.rules) perTab.push({ ...spec, condition: { ...spec.condition, tabIds: [tabId] } });
+            }
+            if (tabErr) {
+                out.errors.push(ruleErrorLine(h.route, tabErr));
+                continue;
+            }
+            const baseSpecs = excludedTabIds.length
+                ? baseRes.rules.map((spec) => ({ ...spec, condition: { ...spec.condition, excludedTabIds } }))
+                : baseRes.rules;
+            const specs = [...baseSpecs, ...perTab];
+            if (specs.length) out.rules.push({ route: h.route, specs });
         }
     }
     return out;

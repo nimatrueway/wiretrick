@@ -125,17 +125,21 @@ describe("page shim worlds", () => {
         const made: string[] = [];
         const stores = {
             store: (name: string, initial: object, persist: boolean | string[]) => (made.push(`g:${name}:${JSON.stringify(persist)}`), { ...initial }),
+            tabStore: (name: string, initial: object) => (made.push(`t:${name}`), { ...initial }),
             pageStore: (name: string, initial: object) => (made.push(`p:${name}`), { ...initial }),
         };
         const iso = makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined }, world: "isolated", stores });
         expect(iso.tt.globalStore("a", { n: 1 }, { persist: ["n"] }).n).toBe(1);
         expect(iso.tt.pageStore("b", { m: 2 }).m).toBe(2);
-        expect(made).toEqual(['g:a:["n"]', "p:b"]);
+        expect(iso.tt.tabStore("d", { k: 3 }).k).toBe(3);
+        expect(made).toEqual(['g:a:["n"]', "p:b", "t:d"]);
         expect(() => iso.tt.pageStore("a", {})).toThrow(/already has a store named "a"/);
+        expect(() => iso.tt.tabStore("b", {})).toThrow(/already has a store named "b"/);
         expect(() => iso.tt.globalStore("c", [])).toThrow(/initial must be an object/);
         const site = makePageShim({ params: {}, log: () => {}, storage: { get: () => undefined, set: () => undefined }, world: "page", stores });
         expect(() => site.tt.pageStore("b", { m: 2 }).m).toThrow(SITE_NO_STORES);
-        expect(made.length).toBe(2);
+        expect(() => site.tt.tabStore("d", { k: 3 }).k).toThrow(SITE_NO_STORES);
+        expect(made.length).toBe(3);
     });
 });
 

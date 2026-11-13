@@ -158,13 +158,35 @@ export const jsonBytes = (v: unknown): number => {
     }
 };
 
-/** a store's key among its script's stores: `name`, or `name␀page` for a page's copy of a `tt.pageStore` */
+/** a store's key among its script's stores: `name`, or `name␀scope` for a `tt.pageStore` / `tt.tabStore` copy */
 export const storeKey = (name: string, page?: string): string => (page ? `${name}\u0000${page}` : name);
 
 /** `storeKey`'s parts */
 export function splitStoreKey(key: string): { name: string; page?: string } {
     const i = key.indexOf("\u0000");
     return i < 0 ? { name: key } : { name: key.slice(0, i), page: key.slice(i + 1) };
+}
+
+export const TAB_SCOPE_PREFIX = "tab:";
+
+/** scope key for `tabId`'s `tt.tabStore` copies */
+export const tabScope = (tabId: number): string => `${TAB_SCOPE_PREFIX}${tabId}`;
+
+export const isTabScope = (scope: string | undefined): boolean => !!scope && scope.startsWith(TAB_SCOPE_PREFIX);
+
+/** real browser `tabId` of a `tab:<id>` scope key, or `undefined` (not a tab scope, or a virtual/test one) */
+export function tabScopeId(scope: string | undefined): number | undefined {
+    if (!scope || !scope.startsWith(TAB_SCOPE_PREFIX)) return undefined;
+    const rest = scope.slice(TAB_SCOPE_PREFIX.length);
+    return /^\d+$/.test(rest) ? Number(rest) : undefined;
+}
+
+/** the `tt.tabStore` scope key of a page key (`"42.1.abc"` → `"tab:42"`, `"v1.abc"` → `"tab:v1.abc"`) */
+export function tabScopeOfPage(page: string | null | undefined): string | null {
+    if (!page) return null;
+    if (page.startsWith(TAB_SCOPE_PREFIX)) return page;
+    const dot = page.indexOf(".");
+    return dot > 0 && /^\d+$/.test(page.slice(0, dot)) ? `${TAB_SCOPE_PREFIX}${page.slice(0, dot)}` : `${TAB_SCOPE_PREFIX}${page}`;
 }
 
 /** `tt.globalStore`'s `persist` option, checked */

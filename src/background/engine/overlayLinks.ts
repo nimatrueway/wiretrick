@@ -30,6 +30,7 @@ import { contextTag, type ScriptLogLevel } from "../../shared/scriptLog";
 import { dlogLevel } from "../../shared/debugLog";
 import { routeMatches, sampleUrl, type RouteMeta } from "../../shared/route";
 import { shippedLibIds, type ShippedLib } from "../../shared/scriptImports";
+import { tabScopeOfPage } from "../../shared/storeOps";
 import { fetchFor, storeOwner } from "./stores";
 import { reactChunkSource } from "../reactChunk";
 import { pages, pagesReady } from "./pages";
@@ -69,8 +70,8 @@ const sameDoc = (a: chrome.runtime.Port | undefined, b: chrome.runtime.Port | un
     const y = docOf(b);
     return !x || !y || x === y;
 };
-/** a store op's page is the grant's (or none: a global store) */
-const pageOk = (a: { page?: unknown } | undefined, g: { page: string }): boolean => a?.page === undefined || a.page === g.page;
+/** a store op's scope is the grant's page, its tab, or none (a global store) */
+const pageOk = (a: { page?: unknown } | undefined, g: { page: string }): boolean => a?.page === undefined || a.page === g.page || (!!g.page && a.page === tabScopeOfPage(g.page));
 
 /** the page a frame is part of: its tab's top document's */
 async function pageOfFrame(tabId: number, frameId: number, port: chrome.runtime.Port): Promise<string> {

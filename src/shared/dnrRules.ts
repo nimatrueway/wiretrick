@@ -603,6 +603,10 @@ export interface RuleProbe {
     /** ctx.groups names read */
     captures: string[];
     urlRead: boolean;
+    /** read dynamic state (`params` / `globalStore` / `tabStore`), so returning nothing means "currently off" */
+    conditional?: boolean;
+    /** `tt.tabStore` names read during the probe */
+    tabStores?: string[];
     /** optional captures whose fallback differs from "" (what a rule substitutes for a missing one) */
     optionalMismatch?: string[];
     result?: ProbeResult | null;
@@ -667,7 +671,9 @@ export function rulesForProbe(o: RuleProbe): { rules: RuleSpec[] } | { error: st
     const block = o.kind === "onRequest" && !redirect && !!r.block;
     // a final action drops header edits (as at runtime)
     const headers = redirect || block ? undefined : r.headers;
-    if (!redirect && !block && !hasHeaderMods(headers)) return fail("does nothing on `rules` (rules can't just observe requests)");
+    if (!redirect && !block && !hasHeaderMods(headers)) {
+        return o.conditional ? { rules: [] } : fail("does nothing on `rules` (rules can't just observe requests)");
+    }
     if (headers && HAS_TOKEN.test(JSON.stringify(headers))) return fail(AS_IS);
     const used = new Set(redirect ? [...redirect.matchAll(ANY_TOKEN)].map((m) => m[0]) : []);
     const lost = o.captures.filter((n) => !used.has(captureToken(n)));
