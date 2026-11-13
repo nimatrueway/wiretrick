@@ -228,17 +228,19 @@ text/*  *json  *xml  *javascript  *ecmascript  *mpegurl  *yaml  *toml  *graphql 
 So `image/svg+xml`, `application/vnd.api+json` and HLS playlists
 (`application/vnd.apple.mpegurl`) are text; `image/png`, `video/mp2t` or
 an Excel file (`application/vnd.openxmlformats-…sheet`) are binary. Set
-`textTypes:` under `settings:` in `settings.yaml` to change it — the list
+`"textTypes"` in `settings.json` to change it — the list
 **replaces** the defaults, so copy the ones you still want:
 
-```yaml
-settings:
-  textTypes:
-    - text/*
-    - "*json"
-    - "*xml"
-    - "*javascript"
-    - application/x-ndjson-custom
+```json
+{
+  "textTypes": [
+    "text/*",
+    "*json",
+    "*xml",
+    "*javascript",
+    "application/x-ndjson-custom"
+  ]
+}
 ```
 
 A non-text `Content-Type` is trusted. A text one is checked against the
@@ -312,7 +314,7 @@ the script's tooltip in the Editor and in the popup. Its other fields —
 the script as a shared package (see [Packages](packages.md)). Call it once.
 
 `tt.params` declares typed knobs the user changes from the popup's ⚙
-dialog, the Editor or `settings.yaml` without touching the script:
+dialog, the Editor or `settings.json` without touching the script:
 
 ```ts
 tt.metadata({ description: "Force failures on the posts API" });
@@ -340,7 +342,7 @@ const host = tt.defineParam("host", { type: "string", default: "api.example.com"
 ```
 
 Large parameter sets can be grouped into collapsible sections by nesting
-plain objects inside `tt.params` (and nested maps in `settings.yaml`):
+plain objects inside `tt.params` (and nested maps in `settings.json`):
 
 ```ts
 const cfg = tt.params({
@@ -368,15 +370,14 @@ tt.onResponseHeaders({ url: cfg.hosts.map((h) => `*://${h}/*`), strategy: "helpe
 Param values persist per script and apply on save — the change is hot applied
 like a code edit. Parameter types: `boolean` (switch), `number` (with
 optional `min`, `max`, `step`), `string` (text; add `multiline: true` for a
-textarea, written to `settings.yaml` as a `|` block scalar when it contains
-newlines), `enum` (dropdown of `choices`), `stringList` (add/remove list),
+textarea), `enum` (dropdown of `choices`), `stringList` (add/remove list),
 `shortcut` (keys, recorded by pressing them; see
 [Keyboard shortcuts](#keyboard-shortcuts)).
 
 Every param type accepts an optional `parse` function that turns the raw
 value into something more convenient for the script. The param's type
 becomes the parser's return type; the ⚙ dialog, the Editor and
-`settings.yaml` keep editing (and storing) the raw value, and `parse` re-runs
+`settings.json` keep editing (and storing) the raw value, and `parse` re-runs
 on every change:
 
 ```ts
@@ -418,7 +419,7 @@ tt.onOverlay("*://app.example.com/*", (ctx) => {
 The new value is checked against the param's type: a wrong type, an
 unknown choice or an unknown name throws. The code sees it right away, and
 it's saved like a change in the ⚙ dialog: the Log shows
-`param enabled = false (set by the script)`, `settings.yaml` gets it, and
+`param enabled = false (set by the script)`, `settings.json` gets it, and
 the script hot-reloads with it (what you keep with `ctx.once` stays).
 Changes made in one go are saved once per param, with the last value.
 
@@ -427,7 +428,7 @@ Changes made in one go are saved once per param, with the last value.
 - Not from onSite code: it runs in the site's world, where the site's own
   code could reach the setter.
 - A param with `parse` can't be assigned; change it in ⚙ or
-  `settings.yaml`.
+  `settings.json`.
 - A library's params can be changed by any script that imports it.
 
 ## Libraries and recipes
@@ -465,7 +466,7 @@ handler or a timer) registers nothing. The Problems panel names them like
 "onPage #2 (mocks)".
 
 Libraries may declare params too, as shared config. They're editable in the
-popup (marked 𝑓, no enabled switch), the Editor and `settings.yaml`, and
+popup (marked 𝑓, no enabled switch), the Editor and `settings.json`, and
 importers see the library's values. Whether a file is a library is decided
 with its current param values, so a library that registers handlers only
 for some value becomes a script when you change it (and back):
@@ -1470,7 +1471,7 @@ Click it and press the new keys to change them (Esc cancels). **×**
 removes the shortcut and **↺** puts the default back. A recorded `Mod`
 means ⌘ on macOS and Ctrl elsewhere, so the setting works on both. The
 value is the keys as a string, or `""` once removed, and
-`ctx.shortcut("")` adds nothing. In `settings.yaml` you can type the
+`ctx.shortcut("")` adds nothing. In `settings.json` you can type the
 keys yourself; keys that aren't a shortcut are flagged and ignored. A
 `default` that isn't a shortcut is a script error.
 

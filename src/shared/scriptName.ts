@@ -63,7 +63,7 @@ export function scriptNameProblem(name: string): string {
  */
 export function isConfigJsonPath(path: string): boolean {
     const base = path.slice(path.lastIndexOf("/") + 1);
-    return /^(package\.json|package-lock\.json|tsconfig.*\.json|jsconfig\.json)$/i.test(base) || /^(settings\.schema\.json|stores\.json)$/i.test(path);
+    return /^(package\.json|package-lock\.json|tsconfig.*\.json|jsconfig\.json)$/i.test(base) || /^(settings\.json|settings\.schema\.json|stores\.json)$/i.test(path);
 }
 
 /** why a data file path (`mock/rate-limits.json`, `README.md`, `icons/logo.svg`, `icons/logo.png`) can't be used, or "" */

@@ -1,6 +1,6 @@
 /**
  * Quick-open palette (Cmd/Ctrl+P): a fuzzy-filtered list of all scripts +
- * the ⚙ settings.yaml row. The filter is pure (unit-tested); the palette
+ * the ⚙ settings.json row. The filter is pure (unit-tested); the palette
  * is dialogs/QuickOpen.tsx.
  */
 

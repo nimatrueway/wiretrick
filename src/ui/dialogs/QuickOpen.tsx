@@ -4,7 +4,7 @@ import { actions } from "../shell/actions";
 import { dialogs } from "../state/dialogs";
 import { filterQuickOpen } from "../quickOpen";
 
-/** ⌘P: go to a script, data file or settings.yaml. Typing filters, ↑/↓/PageUp/PageDown move, Enter opens, Esc closes. */
+/** ⌘P: go to a script, data file or settings.json. Typing filters, ↑/↓/PageUp/PageDown move, Enter opens, Esc closes. */
 export function QuickOpen() {
     const { quickOpen } = useSnapshot(dialogs);
     const [query, setQuery] = useState("");
@@ -48,7 +48,7 @@ export function QuickOpen() {
                     id="qo-input"
                     ref={input}
                     type="text"
-                    placeholder="Go to a script, settings.yaml or stores.json…"
+                    placeholder="Go to a script, settings.json or stores.json…"
                     autoComplete="off"
                     value={query}
                     onChange={(e) => {

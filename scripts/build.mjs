@@ -177,14 +177,14 @@ async function buildOnce(dist, mv3) {
 
 /**
  * Monaco files the editor can load: models are only ever "typescript"
- * (scripts, diff editor), "json" (data files), "xml" (.svg data files),
- * "markdown" (.md files), "plaintext" (raster image data files) and "yaml"
- * (settings) — see monacoSetup.ts and editor.ts — so other languages'
+ * (scripts, diff editor), "json" (settings.json, stores.json, data files),
+ * "xml" (.svg data files), "markdown" (.md files) and "plaintext" (raster
+ * image data files) — see monacoSetup.ts and editor.ts — so other languages'
  * modes/workers are skipped. The
  * nls.messages.<locale> files load only when a locale is configured
  * (we don't), so the editor stays English.
  */
-const MONACO_BASIC_LANGUAGES = new Set(["typescript", "javascript", "yaml", "xml", "markdown"]);
+const MONACO_BASIC_LANGUAGES = new Set(["typescript", "javascript", "xml", "markdown"]);
 const MONACO_SKIPPED_LANGUAGES = new Set(["css", "html"]);
 function keepMonacoFile(rel) {
     const parts = rel.split(path.sep);

@@ -328,7 +328,7 @@ body.dock-dragging iframe, body.dock-dragging #monaco-host { pointer-events: non
 :root:not([data-theme="light"]) .file-icon.ts { color: #519aba; }
 .file-icon.tsx { color: #0a7ea4; font-size: 14px; font-weight: 400; }
 :root:not([data-theme="light"]) .file-icon.tsx { color: #61dafb; }
-.file-icon.yaml { color: #a074c4; font-size: 13px; font-weight: 400; }
+.file-icon.settings { color: #a074c4; font-size: 13px; font-weight: 400; }
 .file-icon.stores { display: inline-flex; height: 16px; color: #16825d; }
 :root:not([data-theme="light"]) .file-icon.stores { color: #4ec9b0; }
 .file-icon.json { color: #b8a200; font-size: 10px; letter-spacing: 0; }

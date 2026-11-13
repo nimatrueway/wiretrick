@@ -114,7 +114,7 @@ beforeEach(async () => {
 
 const names = async () => (await (await ss()).listScripts()).map((s) => s.meta.name).sort();
 const scriptOps = () => ops.filter((o) => o.endsWith(".ts"));
-const DERIVED = ["write settings.yaml", "write settings.schema.json"];
+const DERIVED_SCHEMA = ["write settings.schema.json"];
 
 describe("folder sync: received changes are not echoed back", () => {
     it("an external delete is only received", async () => {
@@ -127,15 +127,13 @@ describe("folder sync: received changes are not echoed back", () => {
         await sync.stop();
     });
 
-    it("an external delete of a script with a settings section is only received", async () => {
+    it("an external delete of a script with params is only received", async () => {
         const sync = await setup();
         files.delete("withParams.ts");
         await settled(sync);
         expect(await names()).toEqual(["plain"]);
-        // its settings.yaml section and schema entry go, as part of receiving the delete
         expect(shown).toEqual(["receiving"]);
-        expect(ops).toEqual(DERIVED);
-        expect(files.get("settings.yaml")!.text).toMatch(/no longer exists/);
+        expect(ops).toEqual(DERIVED_SCHEMA);
         expect(scriptOps()).toEqual([]);
         await sync.stop();
     });
@@ -156,9 +154,9 @@ describe("folder sync: received changes are not echoed back", () => {
         const sync = await setup();
         put("plain.ts", `tt.params({ m: { type: "number", default: 2 } });`);
         await settled(sync);
-        expect(files.get("settings.yaml")!.text).toMatch(/plain\.ts:[\s\S]*# m: 2/);
+        expect(JSON.parse(files.get("settings.schema.json")!.text).properties.scripts.properties["plain.ts"].properties.m).toMatchObject({ type: "number", default: 2 });
         expect(shown).toEqual(["receiving"]);
-        expect(ops).toEqual(DERIVED);
+        expect(ops).toEqual(DERIVED_SCHEMA);
         await sync.stop();
     });
 
@@ -173,9 +171,9 @@ describe("folder sync: received changes are not echoed back", () => {
         await sync.stop();
     });
 
-    it("an external settings.yaml edit is only received", async () => {
+    it("an external settings.json edit is only received", async () => {
         const sync = await setup();
-        put("settings.yaml", files.get("settings.yaml")!.text.replace(/# n: 1|n: 1/, "n: 7"));
+        put("settings.json", JSON.stringify({ scripts: { "withParams.ts": { n: 7 } } }, null, 2) + "\n");
         await settled(sync);
         const { listScripts, getParamValues } = await ss();
         expect(await getParamValues((await listScripts()).find((s) => s.meta.name === "withParams")!.id)).toMatchObject({ n: 7 });
@@ -203,7 +201,7 @@ describe("folder sync: received changes are not echoed back", () => {
         await settled(sync);
         expect(await names()).toEqual(["plain"]);
         expect(shown).toEqual(["sending"]);
-        expect(ops).toEqual(["delete withParams.ts", ...DERIVED]);
+        expect(ops).toEqual(["delete withParams.ts", ...DERIVED_SCHEMA]);
         await sync.stop();
     });
 });

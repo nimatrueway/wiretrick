@@ -1,13 +1,13 @@
 /** Scripts-folder and "open in editor" helpers (src/ui/bundle.ts). */
 import { describe, it, expect } from "vitest";
 import { syncFileNameFor, vscodeTargetPath, editorLaunchUrl, launchAppName, cleanFolderPath, copyPathHint, hostOs } from "../src/ui/bundle";
-import { SETTINGS_FILE } from "../src/shared/settingsYaml";
+import { SETTINGS_FILE } from "../src/shared/settingsJson";
 
 const SETTINGS_ID = "__settings__"; // mirrors editor.ts's virtual entry id
 
 describe("open-in-vscode target path", () => {
-    it("settings entry → <folder>/settings.yaml (virtual row, not a stored script)", () => {
-        expect(vscodeTargetPath("/Users/x/scripts", SETTINGS_ID, undefined, SETTINGS_ID, SETTINGS_FILE)).toBe("/Users/x/scripts/settings.yaml");
+    it("settings entry → <folder>/settings.json (virtual row, not a stored script)", () => {
+        expect(vscodeTargetPath("/Users/x/scripts", SETTINGS_ID, undefined, SETTINGS_ID, SETTINGS_FILE)).toBe("/Users/x/scripts/settings.json");
     });
 
     it("real script → <folder>/<sanitized name>.ts", () => {
@@ -15,11 +15,11 @@ describe("open-in-vscode target path", () => {
     });
 
     it("trailing slashes on the folder are stripped", () => {
-        expect(vscodeTargetPath("/Users/x/scripts//", SETTINGS_ID, undefined, SETTINGS_ID, SETTINGS_FILE)).toBe("/Users/x/scripts/settings.yaml");
+        expect(vscodeTargetPath("/Users/x/scripts//", SETTINGS_ID, undefined, SETTINGS_ID, SETTINGS_FILE)).toBe("/Users/x/scripts/settings.json");
     });
 
     it("syncFileNameFor: settings id wins even if a script name is passed", () => {
-        expect(syncFileNameFor(SETTINGS_ID, "whatever", SETTINGS_ID, SETTINGS_FILE)).toBe("settings.yaml");
+        expect(syncFileNameFor(SETTINGS_ID, "whatever", SETTINGS_ID, SETTINGS_FILE)).toBe("settings.json");
     });
 });
 

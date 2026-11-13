@@ -1,6 +1,6 @@
 /**
  * Export…/Import… zip: laid out like the synced scripts folder (scripts and
- * data files by path, empty folders as folder entries, settings.yaml with
+ * data files by path, empty folders as folder entries, settings.json with
  * the globals and the exported scripts' enabled state and params).
  */
 import { describe, it, expect } from "vitest";
@@ -17,7 +17,7 @@ import {
     storesForScripts,
 } from "../src/shared/exportZip";
 import { readZipEntries, writeZip } from "../src/shared/zip";
-import { parseSettings, renderSettings, type GlobalSettings, type ScriptSettingsState } from "../src/shared/settingsYaml";
+import { parseSettings, renderSettings, type GlobalSettings, type ScriptSettingsState } from "../src/shared/settingsJson";
 
 // in-memory chrome.storage — must exist before scriptStore/settingsFile load
 const store: Record<string, any> = {};
@@ -44,13 +44,12 @@ const script = (name: string, enabled: boolean, values: Record<string, any> = {}
     defs: { level: { type: "string", default: "warn" } } as any,
     values,
 });
-// as the settings file renders it: defaults commented out, sections separated by blank lines
-const SETTINGS = renderSettings(G, [script("Debug header", false, { level: "debug" }), script("mock/helpers", true), script("Other", true, { level: "trace" })]);
+const SETTINGS = renderSettings(G, [script("Debug header.ts", false, { level: "debug" }), script("mock/helpers.ts", true), script("Other.ts", true, { level: "trace" })]);
 
 describe("export zip layout", () => {
-    it("lays files out as the scripts folder: settings.yaml, folders, scripts (.ts/.tsx) and data files by path", async () => {
+    it("lays files out as the scripts folder: settings.json, folders, scripts (.ts/.tsx) and data files by path", async () => {
         const zip = buildExportZip({
-            settings: "settings:\n  logLevel: warn\n",
+            settings: '{"logLevel":"warn"}\n',
             scripts: [
                 { name: "Debug header", code: "a" },
                 { name: "ui/Panel.tsx", code: "b" },
@@ -60,10 +59,10 @@ describe("export zip layout", () => {
             folders: ["mock/empty", "later"],
         });
         const raw = await readZipEntries(buf(zip));
-        expect(Object.keys(raw.files)).toEqual(["settings.yaml", "Debug header.ts", "ui/Panel.tsx", "mock/helpers.ts", "mock/rate-limits.json", "icons/x.svg"]);
+        expect(Object.keys(raw.files)).toEqual(["settings.json", "Debug header.ts", "ui/Panel.tsx", "mock/helpers.ts", "mock/rate-limits.json", "icons/x.svg"]);
         expect(raw.folders).toEqual(["mock/empty", "later"]);
         const z = await readExportZip(buf(zip));
-        expect(z.settings).toBe("settings:\n  logLevel: warn\n");
+        expect(z.settings).toBe('{"logLevel":"warn"}\n');
         expect(z.scripts).toEqual([
             { name: "Debug header", file: "Debug header.ts", code: "a" },
             { name: "ui/Panel.tsx", file: "ui/Panel.tsx", code: "b" },
@@ -74,7 +73,7 @@ describe("export zip layout", () => {
         expect(z.ignored).toEqual([]);
     });
 
-    it("without settings.yaml there's no settings entry", async () => {
+    it("without settings.json there's no settings entry", async () => {
         const z = await readExportZip(buf(buildExportZip({ scripts: [{ name: "a", code: "" }], dataFiles: [] })));
         expect(z.settings).toBeNull();
         expect(z.stores).toBeNull();
@@ -91,7 +90,7 @@ describe("export zip layout", () => {
         expect(parseExportedStores(storesJson!)).toEqual({ "bonsai/index.tsx": { flags: { beta: true } } });
 
         const zip = buildExportZip({
-            settings: "settings:\n",
+            settings: "{}\n",
             stores: storesJson,
             scripts: [{ name: "bonsai/index.tsx", code: "// ok" }],
             dataFiles: [],
@@ -105,7 +104,7 @@ describe("export zip layout", () => {
     it("takes a zipped scripts folder: unwraps its top folder, skips the support files, dot entries and node_modules", async () => {
         const zip = writeZip({
             "Scripts/": "",
-            "Scripts/settings.yaml": "settings:\n",
+            "Scripts/settings.json": "{}\n",
             "Scripts/tt-api.d.ts": "declare const tt: any;",
             "Scripts/tsconfig.json": "{}",
             "Scripts/settings.schema.json": "{}",
@@ -120,7 +119,7 @@ describe("export zip layout", () => {
             "Scripts/e/": "",
         });
         const z = await readExportZip(buf(zip));
-        expect(z.settings).toBe("settings:\n");
+        expect(z.settings).toBe("{}\n");
         expect(z.scripts).toEqual([{ name: "a", file: "a.ts", code: "A" }]);
         expect(z.dataFiles).toEqual([
             { path: "README.md", text: "# hi" },
@@ -146,62 +145,49 @@ describe("export zip layout", () => {
     });
 });
 
-describe("settings.yaml in the zip", () => {
-    it("keeps the globals and only the exported scripts' sections, the rest byte-for-byte", () => {
+describe("settings.json in the zip", () => {
+    it("keeps the globals and only the exported scripts' overrides", () => {
         const out = settingsForScripts(SETTINGS, ["Debug header", "Other"]);
-        expect(out).toBe(SETTINGS.replace(/\n {2}mock\/helpers:\n(?: {4}.*\n)+/, ""));
-        expect(Object.keys(parseSettings(out).params)).toEqual(["Debug header", "Other"]);
-        expect(parseSettings(out).settings).toEqual(parseSettings(SETTINGS).settings);
-        expect(settingsForScripts(SETTINGS, ["Debug header", "mock/helpers", "Other"])).toBe(SETTINGS);
+        expect(Object.keys(parseSettings(out).scripts)).toEqual(["Debug header.ts", "Other.ts"]);
+        expect(parseSettings(out).globals).toEqual(parseSettings(SETTINGS).globals);
     });
 
-    it("drops the first or the last section with its blank separator", () => {
-        const first = settingsForScripts(SETTINGS, ["mock/helpers", "Other"]);
-        expect(Object.keys(parseSettings(first).params)).toEqual(["mock/helpers", "Other"]);
-        expect(first).not.toMatch(/params:\n\n/);
-        const last = settingsForScripts(SETTINGS, ["Debug header"]);
-        expect(Object.keys(parseSettings(last).params)).toEqual(["Debug header"]);
-        expect(last.endsWith("\n\n")).toBe(false);
-    });
-
-    it("no exported script: no params section, just the globals", () => {
+    it("no exported script: no scripts section, just the globals", () => {
         const out = settingsForScripts(SETTINGS, []);
-        expect(out).not.toContain("params:");
-        expect(parseSettings(out)).toEqual({ settings: parseSettings(SETTINGS).settings, params: {} });
+        expect(JSON.parse(out)).toEqual({ logLevel: "warn" });
     });
 
-    it("flow maps and hand-edited text still come out right", () => {
-        expect(parseSettings(settingsForScripts("params: { a: { x: 1 }, b: { y: 2 } }\n", ["b"])).params).toEqual({ b: { y: 2 } });
-        const odd = "settings:\n  logLevel: warn\nparams:\n  a:\n    x: 1\n  # a comment\n  b:\n      y: 2\n  c: {}\n";
-        expect(parseSettings(settingsForScripts(odd, ["b"]))).toEqual({ settings: { logLevel: "warn" }, params: { b: { y: 2 } } });
-        expect(settingsForScripts("not: [valid", ["a"])).toBe("not: [valid");
-    });
-
-    it("an import applies the globals and the picked scripts' sections only", () => {
+    it("leaves malformed JSON unchanged and scopes importedSettingsDoc to picked scripts", () => {
+        expect(settingsForScripts("{oops", ["a"])).toBe("{oops");
         expect(importedSettingsDoc(SETTINGS, ["Debug header"])).toEqual({
-            settings: parseSettings(SETTINGS).settings,
-            params: { "Debug header": parseSettings(SETTINGS).params["Debug header"] },
+            globals: parseSettings(SETTINGS).globals,
+            scripts: { "Debug header.ts": parseSettings(SETTINGS).scripts["Debug header.ts"] },
+            onlyScripts: ["Debug header"],
         });
-        expect(() => importedSettingsDoc("params: [x", [])).toThrow();
+        expect(() => importedSettingsDoc("{oops", [])).toThrow();
     });
 
-    it("lands enabled state, params and globals through the real apply path", async () => {
+    it("lands enabled state, params and globals through the real apply path without touching unpicked scripts", async () => {
         const ss = await import("../src/background/engine/scriptStore");
         const sf = await import("../src/background/settingsFile");
         const code = `tt.params({ level: { type: "string", default: "warn" } });\ntt.onRequest({ url: "*", strategy: "extension" }, () => {});\n`;
+        const untouchedId = ss.newId();
+        await ss.saveScript({ id: untouchedId, name: "Untouched", code });
+        await ss.setEnabled(untouchedId, false);
+
         const zip = buildExportZip({
             settings: settingsForScripts(SETTINGS, ["Debug header"]),
             scripts: [{ name: "Debug header", code }],
             dataFiles: [],
         });
         const z = await readExportZip(buf(zip));
-        // as the Editor imports: scripts saved first (enabled untouched), then settings.yaml applied
         const id = ss.newId();
         await ss.saveScript({ id, name: "Debug header", code: z.scripts[0].code });
         expect((await ss.getScript(id))!.enabled).toBe(true);
         expect(await sf.applySettingsDoc(importedSettingsDoc(z.settings!, ["Debug header"]))).toEqual({});
         expect((await ss.getScript(id))!.enabled).toBe(false);
         expect((await ss.getParamValues(id)).level).toBe("debug");
+        expect((await ss.getScript(untouchedId))!.enabled).toBe(false); // unpicked script untouched!
         expect(store.resLogLevel).toBe("warn");
     });
 });

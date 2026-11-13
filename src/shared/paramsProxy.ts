@@ -81,7 +81,7 @@ export function paramsProxy(defs: ParamTree, raw: Record<string, any>, unknown: 
             const node = group[key];
             if (isParamGroup(node)) throw new Error(`tt.params: "${full}" is a parameter section — assign its parameters instead`);
             if (!isParamDef(node)) throw new Error(`tt.params: there's no parameter ${JSON.stringify(full)}`);
-            if (hasParse(node)) throw new Error(`tt.params: "${full}" has a parse function, so it can't be assigned — change it in ⚙ or settings.yaml`);
+            if (hasParse(node)) throw new Error(`tt.params: "${full}" has a parse function, so it can't be assigned — change it in ⚙ or settings.json`);
             const why = w.blocked();
             if (why) throw new Error(why);
             if (!isValidParamValue(node, v)) throw new TypeError(`tt.params: "${full}" can't be ${shown(v)}: it takes ${expected(node)}`);

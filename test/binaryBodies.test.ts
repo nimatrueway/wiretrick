@@ -4,10 +4,8 @@ import { bodyKind, DEFAULT_TEXT_TYPES, getTextTypes, globMatch, isTextType, mime
 import { packBytes, unpackBytes } from "../src/shared/bytesPack";
 import { normalizeRoute, NET_KINDS } from "../src/shared/route";
 import { runOp } from "../src/shared/bodyOps";
-import { parseSettings, planSettings, renderSettings, type GlobalSettings } from "../src/shared/settingsYaml";
-import { patchSettings } from "../src/shared/settingsYamlPatch";
+import { parseSettings, planSettings, renderSettings, type GlobalSettings } from "../src/shared/settingsJson";
 import { buildSettingsSchema } from "../src/shared/settingsSchema";
-import { settingsDiagnostics } from "../src/shared/settingsAssist";
 
 describe("bodyKind / isTextType", () => {
     afterEach(() => setTextTypes(null));
@@ -183,43 +181,24 @@ describe("transform op: binary bodies reach binary routes only", () => {
 describe("settings.textTypes", () => {
     const G: GlobalSettings = { logLevel: "info", logCap: 500 };
 
-    it("renders the defaults commented, a custom list live", () => {
-        const def = renderSettings(G, []);
-        expect(def).toContain("  # textTypes:\n  #   - text/*\n");
-        expect(def).toContain('binary: true');
+    it("omits defaults and writes a custom list cleanly", () => {
+        expect(renderSettings(G, [])).toBe("{}\n");
         const custom = renderSettings({ ...G, textTypes: ["text/*", "image/svg+xml"] }, []);
-        expect(custom).toContain("  textTypes:\n    - text/*\n    - image/svg+xml\n");
-        expect(parseSettings(custom).settings?.textTypes).toEqual(["text/*", "image/svg+xml"]);
+        expect(JSON.parse(custom)).toEqual({ textTypes: ["text/*", "image/svg+xml"] });
+        expect(parseSettings(custom).globals.textTypes).toEqual(["text/*", "image/svg+xml"]);
     });
 
     it("plans: missing = defaults; invalid lists are skipped", () => {
         const plan = (t: string, cur: GlobalSettings = G) => planSettings(parseSettings(t), cur, []).globals.textTypes;
-        expect(plan("settings:\n  textTypes: [text/*, '*json']\n")).toEqual(["text/*", "*json"]);
-        expect(plan("settings:\n  logLevel: info\n")).toBeUndefined();
-        expect(plan("settings:\n  logLevel: info\n", { ...G, textTypes: ["text/*"] })).toEqual([...DEFAULT_TEXT_TYPES]);
-        expect(plan("settings:\n  textTypes: [text/*]\n", { ...G, textTypes: ["text/*"] })).toBeUndefined();
-        for (const bad of ["[]", "text/*", "[1, 2]", '[""]']) expect(plan(`settings:\n  textTypes: ${bad}\n`), bad).toBeUndefined();
+        expect(plan(JSON.stringify({ textTypes: ["text/*", "*json"] }))).toEqual(["text/*", "*json"]);
+        expect(plan(JSON.stringify({ logLevel: "info" }))).toBeUndefined();
+        expect(plan(JSON.stringify({ logLevel: "info" }), { ...G, textTypes: ["text/*"] })).toEqual([...DEFAULT_TEXT_TYPES]);
+        expect(plan(JSON.stringify({ textTypes: ["text/*"] }), { ...G, textTypes: ["text/*"] })).toBeUndefined();
+        for (const bad of [[], "text/*", [1, 2], [""]]) expect(plan(JSON.stringify({ textTypes: bad }))).toBeUndefined();
     });
 
-    it("patches a file to a custom list and back", () => {
-        const def = renderSettings(G, []);
-        const custom = patchSettings(def, { ...G, textTypes: ["text/*", "image/svg+xml"] }, [])!;
-        expect(custom).not.toBeNull();
-        expect(parseSettings(custom).settings?.textTypes).toEqual(["text/*", "image/svg+xml"]);
-        const back = patchSettings(custom, G, [])!;
-        expect(back).not.toBeNull();
-        // like the other globals, a reverted entry stays live at the default value
-        expect(parseSettings(back).settings?.textTypes).toEqual([...DEFAULT_TEXT_TYPES]);
-        expect(planSettings(parseSettings(back), G, []).globals).toEqual({});
-        expect(patchSettings(def, G, [])).toBe(def);
-    });
-
-    it("schema and diagnostics", () => {
+    it("schema defines textTypes with minItems and default", () => {
         const schema: any = buildSettingsSchema([]);
-        expect(schema.properties.settings.properties.textTypes).toMatchObject({ type: "array", items: { type: "string" }, default: [...DEFAULT_TEXT_TYPES] });
-        const msgs = (t: string) => settingsDiagnostics(t, []).map((d) => d.message);
-        expect(msgs("settings:\n  textTypes: [text/*, image/svg+xml]\n")).toEqual([]);
-        expect(msgs("settings:\n  textTypes: []\n")[0]).toMatch(/non-empty list of Content-Type globs/);
-        expect(msgs("settings:\n  textTypes: text/*\n")[0]).toMatch(/non-empty list of Content-Type globs/);
+        expect(schema.properties.textTypes).toMatchObject({ type: "array", minItems: 1, items: { type: "string", minLength: 1 }, default: [...DEFAULT_TEXT_TYPES] });
     });
 });

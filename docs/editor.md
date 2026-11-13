@@ -11,7 +11,7 @@ searchable list of all of them):
 | Shortcut | Action |
 | --- | --- |
 | ⌘S | Save and hot apply the script (or save the data file) |
-| ⌘P | Quick-open a script, data file, settings.yaml or stores.json by path (cursor position is remembered per file) |
+| ⌘P | Quick-open a script, data file, settings.json or stores.json by path (cursor position is remembered per file) |
 | ⌘⇧E | Focus the explorer |
 | ⌘B | Show/hide the explorer |
 | ⌘J or ⌘` | Show/hide the Problems/Log/Network/Preview views |
@@ -79,7 +79,7 @@ struck through, ● for unsaved changes, ⚠ for errors) and one `name.json` row
 per [data file](scripting.md#imports-folders-and-data-files) (`{}` icon,
 red when its JSON is invalid; ◈ for an `.svg`). Each folder lists its subfolders
 (alphabetical), then its scripts (in stacking order), then its data files
-(alphabetical); ⚙ **settings.yaml** stays at the top. Scripts without a
+(alphabetical); ⚙ **settings.json** stays at the top. Scripts without a
 folder sit at the root, as before. Which folders are collapsed is remembered.
 Click the **TangiTweak** header to collapse the whole tree.
 
@@ -166,7 +166,7 @@ at the right of the toolbar do the same.
   file path like VS Code's (`mock/api mock.ts`): TypeScript errors and warnings, compile errors,
   invalid `rules` handlers, the last runtime error (exception in a handler),
   route warnings (a handler its strategy can't run here, or the helper being
-  down), `settings.yaml` errors and JSON syntax errors in data files. Unlike the Log, entries go away by
+  down), `settings.json` errors and JSON syntax errors in data files. Unlike the Log, entries go away by
   themselves once fixed: TypeScript problems update live as you type (even
   before saving); compile, rules and route problems on save; a runtime error
   on save or with its ×. Every entry has a line and column: where the error
@@ -256,7 +256,7 @@ at the right of the toolbar do the same.
   body puts it on the clipboard (pretty-printed JSON, as shown). Each body is
   kept up to 2 MB (2048 kB) by default; a longer one is cut and says so — raise the
   cap in **Settings → Network → Body capture** (16–16384 kB, `bodyCap:` in
-  `settings.yaml`). It applies to requests captured afterwards.
+  `settings.json`). It applies to requests captured afterwards.
   Select several rows with Shift-click (a range), Ctrl/⌘-click (one more) or
   Ctrl/⌘+A, and right-click for **Open in new tab** and **Copy** → **Copy
   URL**, **Copy as cURL** (bash), **Copy as fetch** or **Copy as HAR**,
@@ -422,12 +422,12 @@ scripts change. The built-ins' (`valtio`, `react`, `react-dom`) go to
 
 Those four are managed files: they're refreshed on every browser start
 and extension update, so new APIs and settings reach an already-synced folder.
-Don't edit them; changing them has no effect on TangiTweak and your changes are overwritten. `settings.yaml` is yours: an
+Don't edit them; changing them has no effect on TangiTweak and your changes are overwritten. `settings.json` is yours: an
 update only adds documentation for settings it doesn't mention yet.
 
 Sync is two-way and watches the folder for **creates, renames/moves and
 deletes** too: a new `.ts`/`.tsx` file becomes a script, deleting a file removes its
-script, renaming or moving a file renames the script (its `settings.yaml`
+script, renaming or moving a file renames the script (its `settings.json`
 section moves with it); the same goes for `.json`/`.svg` files and data files, and
 for subfolders and folders. If a file and its script both change before a sync, the file wins
 and the script's version goes to `.tangitweak-backup/`. Saving in the Editor
@@ -440,7 +440,7 @@ The folder button next to **Save** shows the sync state: no badge (off), a
 green dot (connected), a triangle moving up **▲** (writing a change made in the
 extension to the folder) or down **▼** (picking up a change from it), and a yellow **!** (disconnected — needs
 a re-grant). A change picked up from the folder is never sent back: updating
-`settings.yaml` and its schema to match (e.g. commenting out the section of a
+`settings.json` and its schema to match (e.g. commenting out the section of a
 script whose file was deleted) is part of the **▼**. Clicking it reconnects when disconnected; otherwise it opens
 **Settings → Synced folder**.
 
@@ -482,7 +482,7 @@ from **?** → **Welcome** (top right of the Help dialog); ✕ closes it.
 Code view's F1 menu, and **Download diagnostics** at the right of the
 Log, Network and Problems panel header) downloads a Markdown report meant to be handed to a person
 or an LLM: environment, the Problems view's current problems, scripts,
-settings.yaml, recent log and network
+settings.json, recent log and network
 entries, and Editor state (theme, layout). It first opens a picker, like
 [Export…](#import--export)'s: every section and every script (under
 *Scripts*), all ticked — untick what shouldn't go in; the report says what
@@ -499,7 +499,7 @@ text.
 **Settings → Export…** downloads a zip (`tangitweak-export.zip`) laid out
 like the [synced folder](#synced-folder): scripts as `.ts`/`.tsx`
 files and data files at their paths, empty folders as folders, and
-`settings.yaml` at the root with the global settings and the exported
+`settings.json` at the root with the global settings and the exported
 scripts' `enabled` state and params. **Import…** takes such a zip — or a
 zip of a synced scripts folder (its `tt-api.d.ts`, `tsconfig.json` and
 `settings.schema.json` are skipped).
@@ -509,7 +509,7 @@ folder (its box shows when only some of its files are ticked). The filter
 box narrows the tree to paths containing what you type, and **Select
 all**/**None** act on what it shows. On import each row says whether it's
 **new** or **replaces existing** (a script at the same path is overwritten
-rather than duplicated). Untick `settings.yaml` to leave settings, params
+rather than duplicated). Untick `settings.json` to leave settings, params
 and `enabled` state alone. When any script has persisted `tt.globalStore`
 state, **Export…** also lists `stores.json` (unticked by default, marked
 `opt-in`) so you can include persisted store data when needed; **Import…**
@@ -524,55 +524,28 @@ version doesn't, struck through and marked **deleted**. They're ticked, so
 importing deletes them. Untick any you want to keep.
 A plain `.ts`/`.tsx`/`.js` file imports as a single script.
 
-## `settings.yaml`
+## `settings.json`
 
-The explorer always has a ⚙ **settings.yaml** entry (no folder needed; no
-toggle, not deletable). It is generated from storage: global settings plus
-every script's params and `enabled` state. Saving it in the Code view applies it
-(syntax errors show in the status and change nothing). Popup/list
-changes patch the matching entries. With a synced folder connected the same
-file is mirrored to `settings.yaml` there and edits sync both ways.
+The Explorer always has a ⚙ **settings.json** entry at the top (no folder needed; no
+toggle, not deletable). Like VS Code's `settings.json`, it stores only
+non-default overrides (`{}` when everything is at its default): global settings
+at the top level and per-script `enabled` / `tt.params` overrides under
+`"scripts"`. Omitting any key — or clearing the file to `{}` — resets it to its
+default. With a synced folder connected, `settings.json` syncs two-way on disk
+alongside a generated `settings.schema.json` (which Monaco's built-in JSON
+worker also uses in the Editor for completions, hover descriptions, and
+validation).
 
-The file starts with a `# yaml-language-server: $schema=./settings.schema.json`
-modeline and the folder sync writes that schema next to it. The schema is
-generated from your scripts (each script name, its declared params with their
-types, enum choices, bounds, defaults and descriptions) and rewritten whenever
-a script changes. Install the
-[YAML extension](https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml)
-(`redhat.vscode-yaml`) in VS Code to get the same completion, hover and
-validation as the Editor.
-
-Formatting is preserved: an existing, parsable file is patched in place (only
-the changed value is rewritten; comments, blank lines, spacing and section
-order stay). A value returned to its default is rewritten as a live entry; new
-scripts/keys are inserted into the existing file. The file is generated from
-scratch only when missing or unparsable.
-
-Every option has its description above it; options at their default are
-commented out, only non-default values are live entries. `enabled` is live only
-when `false`. Params are keyed by script name; a library is listed only
-when it declares params (without `enabled` — it never runs on its own).
-
-```yaml
-# yaml-language-server: $schema=./settings.schema.json
-settings:
-  # Minimum log level shown in the panel: debug | info | warn | error
-  # logLevel: info
-  # …
-  # Content-Types onResponseBody gets as text (globs; `*` = anything). …
-  # textTypes:
-  #   - text/*
-  #   - …
-  # Network view: kB of each request/response body kept (16..16384)
-  # bodyCap: 2048
-
-params:
-  Debug header.ts:
-    # Run this script
-    enabled: false
-    # Value of the x-debug header
-    # default: warn
-    level: trace
+```json
+{
+  "logLevel": "debug",
+  "scripts": {
+    "Debug header.ts": {
+      "enabled": false,
+      "level": "trace"
+    }
+  }
+}
 ```
 
 `textTypes` has no control in Settings: edit it here. It lists the
@@ -581,9 +554,9 @@ Content-Types `onResponseBody` gets as text and replaces the defaults
 
 ## `stores.json`
 
-Right below `settings.yaml`, the Explorer has a **stores.json** entry holding
+Right below `settings.json`, the Explorer has a **stores.json** entry holding
 the persisted `tt.globalStore` data of your scripts (`{ "<script file>": { "<store name>": { … } } }`, e.g. `"mock-users.ts"` or `"bonsai/index.tsx"`).
-Stores declared inside an imported library belong to that library's file (and are shared across all scripts that import it), matching `settings.yaml`.
+Stores declared inside an imported library belong to that library's file (and are shared across all scripts that import it), matching `settings.json`.
 As scripts update their persisted global stores, `stores.json` updates live;
 editing and saving it in the Code view (or in `stores.json` at the root of your
 synced folder) updates open tabs and overlays immediately without reloading.

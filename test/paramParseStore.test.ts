@@ -1,6 +1,6 @@
 /**
  * Param `parse` through the store: defs persist without the function, the
- * stored / settings.yaml value stays raw, and a value the parser rejects
+ * stored / settings.json value stays raw, and a value the parser rejects
  * marks the script errored (a compile error naming the param — a problem, not a Log line).
  */
 import { describe, it, expect, beforeEach } from "vitest";
@@ -41,20 +41,19 @@ describe("param parse — store and settings", () => {
         logs.length = 0;
     });
 
-    it("stores defs without parse; values and settings.yaml stay raw", async () => {
+    it("stores defs without parse; values and settings.json stay raw", async () => {
         const s = await saveScript({ id: "p", name: "parsed.tangitweak", code: CODE });
         expect(s.error).toBeNull();
         expect(s.meta.match).toEqual(["*://a.com/*"]);
         expect(s.paramDefs).toEqual({ origin: { type: "string", default: "https://a.com" } });
         expect(JSON.stringify(store.resScripts.p.paramDefs)).not.toContain("parse");
 
-        expect((await applySettingsText("params:\n  parsed.tangitweak:\n    origin: https://b.org\n")).error).toBeUndefined();
+        expect((await applySettingsText(JSON.stringify({ scripts: { "parsed.tangitweak": { origin: "https://b.org" } } }))).error).toBeUndefined();
         expect((await loadAllParamValues()).p).toEqual({ origin: "https://b.org" });
         expect((await get("p")).meta.match).toEqual(["*://b.org/*"]);
         const st = await currentSettingsState();
         expect(st.scripts.find((x) => x.name === "parsed.tangitweak.ts")?.defs.origin).toEqual({ type: "string", default: "https://a.com" });
-        expect(await getSettingsText()).toContain("parsed.tangitweak.ts:");
-        expect(await getSettingsText()).toContain("origin: https://b.org");
+        expect(JSON.parse(await getSettingsText())).toEqual({ scripts: { "parsed.tangitweak.ts": { origin: "https://b.org" } } });
     });
 
     it("a value the parser rejects: a compile error naming the param, not logged", async () => {

@@ -238,5 +238,5 @@ pages, and drops blocking `webRequest`):
   interception is unaffected.
 
 Verify the MV3 bundle: `npx tsx test/mv3.e2e.ts` (SW registration, Editor,
-script save/list through the sandbox, settings.yaml, `page` interception,
+script save/list through the sandbox, settings.json, `page` interception,
 `debugger` `<script src>` interception incl. gzip, lazy chunks and reloads).

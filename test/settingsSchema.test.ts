@@ -18,7 +18,7 @@ describe("settings schema from scripts", () => {
         },
         { name: "utils", declared: false, enabled: true, values: {}, defs: {} },
     ]);
-    const s = schema.properties.params.properties["API mocker"];
+    const s = schema.properties.scripts.properties["API mocker"];
 
     it("types each declared param", () => {
         expect(s.additionalProperties).toBe(false);
@@ -30,10 +30,10 @@ describe("settings schema from scripts", () => {
         expect(s.properties.note).toMatchObject({ type: "string", default: "" });
     });
 
-    it("skips libraries, keeps unknown names allowed, leaves the base schema untouched", () => {
-        expect(schema.properties.params.properties.utils).toBeUndefined();
-        expect(schema.properties.params.additionalProperties.type).toBe("object");
-        expect((SETTINGS_SCHEMA.properties.params as any).properties).toBeUndefined();
+    it("skips libraries without params, keeps unknown names allowed, leaves the base schema untouched", () => {
+        expect(schema.properties.scripts.properties.utils).toBeUndefined();
+        expect(schema.properties.scripts.additionalProperties.type).toBe("object");
+        expect((SETTINGS_SCHEMA.properties.scripts as any).properties).toBeUndefined();
         expect(settingsSchemaJson()).toMatch(/\n$/);
     });
 });

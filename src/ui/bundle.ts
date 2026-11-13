@@ -1,7 +1,7 @@
 /** Scripts-folder and "open in editor" helpers: sync file names, folder paths, the ↗ button's launch URL. */
 import { fileNameFor } from "./fsBridge";
 
-/** File name within the synced folder for a script — or settings.yaml for the virtual settings entry. */
+/** File name within the synced folder for a script — or settings.json for the virtual settings entry. */
 export function syncFileNameFor(selectedId: string, scriptName: string | undefined, settingsId: string, settingsFile: string): string {
     return selectedId === settingsId ? settingsFile : fileNameFor(selectedId, scriptName || "");
 }

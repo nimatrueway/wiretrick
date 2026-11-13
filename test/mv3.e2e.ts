@@ -4,7 +4,7 @@
  *   1. the extension service worker registers and answers messages
  *   2. the manager opens; scripts save + list (SW ⇄ offscreen ⇄ sandbox
  *      analyze round-trip)
- *   3. settings.yaml saves/loads
+ *   3. settings.json saves/loads
  *   4. the hook tier intercepts a page fetch (onResponseBody travels
  *      hook → bridge → SW → sandbox → back)
  *
@@ -191,11 +191,11 @@ try {
         await send({ type: "deleteScript", id: "s_plib" });
     }
 
-    // 3. settings.yaml round-trip
-    const settings = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "getSettingsYaml" }, r)));
-    check("settings.yaml generated (SW storage path)", typeof settings?.text === "string" && settings.text.includes("MV3 hook.tangitweak"));
-    const applyResult = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "applySettingsYaml", text: "settings:\n  logLevel: warn\n" }, r)));
-    check("applySettingsYaml applies", !applyResult?.error, JSON.stringify(applyResult));
+    // 3. settings.json round-trip
+    const settings = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "getSettingsJson" }, r)));
+    check("settings.json generated (SW storage path)", typeof settings?.text === "string" && settings.text.trim().startsWith("{"));
+    const applyResult = await mgr.evaluate(() => new Promise<any>((r) => chrome.runtime.sendMessage({ type: "applySettingsJson", text: '{"logLevel":"warn"}\n' }, r)));
+    check("applySettingsJson applies", !applyResult?.error, JSON.stringify(applyResult));
 
     // 4. hook tier intercepts a page fetch (transform runs in the sandbox)
     const page = await ctx.newPage();
@@ -970,7 +970,7 @@ tt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
     await mgr.evaluate(() => { (document.querySelector("#btn-export") as HTMLElement).click(); });
     await mgr.waitForSelector("#bundle-picker .picker-row", { timeout: 5000 });
     const exportRows: string[] = await mgr.evaluate(() => [...document.querySelectorAll<HTMLElement>("#bundle-picker .picker-row")].map((e) => e.dataset.path!));
-    check("export picker lists every script and settings.yaml", ["MV3 hook.tangitweak.ts", "api-interceptor.tangitweak.ts", "api-lib.ts", "settings.yaml"].every((p) => exportRows.includes(p)), JSON.stringify(exportRows));
+    check("export picker lists every script and settings.json", ["MV3 hook.tangitweak.ts", "api-interceptor.tangitweak.ts", "api-lib.ts", "settings.json"].every((p) => exportRows.includes(p)), JSON.stringify(exportRows));
     const pickerWarn = await mgr.evaluate(() => {
         const hook = document.querySelector<HTMLInputElement>('#bundle-picker .picker-row[data-path="MV3 hook.tangitweak.ts"] input')!;
         const lib = document.querySelector<HTMLInputElement>('#bundle-picker .picker-row[data-path="api-lib.ts"] input')!;
@@ -1005,12 +1005,12 @@ tt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
     const zipBytes: number[] | null = await mgr.evaluate(() => (window as any).__captured);
     const full = await zipOf(zipBytes);
     const fullFiles = full ? full.scripts.map((s) => s.file) : [];
-    check("export produces a zip (settings.yaml + scripts)", !!full?.settings && fullFiles.includes("api-interceptor.tangitweak.ts") && fullFiles.includes("MV3 hook.tangitweak.ts"), JSON.stringify(fullFiles));
+    check("export produces a zip (settings.json + scripts)", !!full?.settings && fullFiles.includes("api-interceptor.tangitweak.ts") && fullFiles.includes("MV3 hook.tangitweak.ts"), JSON.stringify(fullFiles));
     // Collect diagnostics… opens the same picker: sections, and the scripts under "Scripts"
     await mgr.evaluate(() => { (window as any).__captured = null; (document.querySelector("#btn-diagnostics") as HTMLElement).click(); });
     await mgr.waitForSelector("#bundle-picker .picker-row", { timeout: 5000 });
     const diagRows: string[] = await mgr.evaluate(() => [...document.querySelectorAll<HTMLElement>("#bundle-picker .picker-row")].map((e) => e.dataset.path!));
-    check("diagnostics picker lists the report's sections and every script", ["Environment", "Network", "settings.yaml", "Scripts", "Scripts/MV3 hook.tangitweak.ts", "Scripts/api-interceptor.tangitweak.ts"].every((p) => diagRows.includes(p)), JSON.stringify(diagRows));
+    check("diagnostics picker lists the report's sections and every script", ["Environment", "Network", "settings.json", "Scripts", "Scripts/MV3 hook.tangitweak.ts", "Scripts/api-interceptor.tangitweak.ts"].every((p) => diagRows.includes(p)), JSON.stringify(diagRows));
     await mgr.evaluate(() => {
         for (const p of ["Network", "Other installed extensions", "Scripts/api-interceptor.tangitweak.ts"]) document.querySelector<HTMLInputElement>(`#bundle-picker .picker-row[data-path="${p}"] input`)!.click();
         (document.querySelector('#bundle-picker [data-act="ok"]') as HTMLElement).click();
@@ -1323,41 +1323,41 @@ tt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
             await w.close();
         }, [name, text] as any);
 
-    // GUI change → settings.yaml must appear in the folder (commented default)
+    // GUI change → settings.json and settings.schema.json in the folder
     await fPage.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({
         type: "saveScript", id: "s_sync", name: "Sync guinea.tangitweak",
         code: 'tt.params({ token: { type: "string", default: "abc", description: "Sync token" } });\ntt.onRequest({ url: "*://sync.invalid/*", strategy: "page" }, () => {});\n',
     }, r)));
     await fPage.waitForTimeout(2500); // export debounce + SW poller cadence
-    const yaml1 = await opfsText("settings.yaml");
-    check("MV3 folder sync: settings.yaml exported to the folder", !!yaml1 && yaml1.includes("Sync guinea.tangitweak") && yaml1.includes("# token: abc"), (yaml1 || "MISSING").slice(0, 160));
+    const json1 = await opfsText("settings.json");
+    check("MV3 folder sync: settings.json exported to the folder", typeof json1 === "string" && json1.trim().startsWith("{"), (json1 || "MISSING").slice(0, 160));
 
     const schema1 = JSON.parse((await opfsText("settings.schema.json")) || "{}");
     check("MV3 folder sync: settings.schema.json types each script's params (VS Code completion)",
-        schema1?.properties?.params?.properties?.["Sync guinea.tangitweak"]?.properties?.token?.default === "abc", JSON.stringify(schema1?.properties?.params?.properties ?? {}).slice(0, 160));
+        schema1?.properties?.scripts?.properties?.["Sync guinea.tangitweak.ts"]?.properties?.token?.default === "abc", JSON.stringify(schema1?.properties?.scripts?.properties ?? {}).slice(0, 160));
 
     // external whole-file edit applies to storage
-    await opfsWrite("settings.yaml", (yaml1 || "").replace("# token: abc", 'token: "xyz"'));
+    await opfsWrite("settings.json", JSON.stringify({ scripts: { "Sync guinea.tangitweak.ts": { token: "xyz" } } }, null, 2) + "\n");
     await fPage.waitForTimeout(2500);
     const p1 = await fPage.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "getScriptParams", scriptId: "s_sync" }, r)));
-    check("MV3 folder sync: external settings.yaml edit applied", (p1 as any)?.values?.token === "xyz", JSON.stringify(p1));
+    check("MV3 folder sync: external settings.json edit applied", (p1 as any)?.values?.token === "xyz", JSON.stringify(p1));
     const syncStates = await fPage.evaluate(() => (window as any).__syncStates as string[]);
     check("folder sync button: connected, then shows sending and receiving", syncStates[0] !== "off" && syncStates.includes("sending") && syncStates.includes("receiving") && syncStates.at(-1) === "connected", JSON.stringify(syncStates));
 
-    // whole-file sync: a comment-only disk edit reaches the manager's open editor verbatim
-    await fPage.locator(".script-item", { hasText: "settings.yaml" }).click();
-    await fPage.waitForFunction(() => (window as any).monaco.editor.getEditors()[0].getModel()?.uri.toString() === "file:///settings.yaml");
-    const diskText = "# my own note\n" + ((await opfsText("settings.yaml")) || "");
-    await opfsWrite("settings.yaml", diskText);
+    // whole-file sync: a disk edit reaches the manager's open editor
+    await fPage.locator(".script-item", { hasText: "settings.json" }).click();
+    await fPage.waitForFunction(() => (window as any).monaco.editor.getEditors()[0].getModel()?.uri.toString() === "file:///settings.json");
+    const diskText = JSON.stringify({ logLevel: "warn", scripts: { "Sync guinea.tangitweak.ts": { token: "xyz" } } }, null, 2) + "\n";
+    await opfsWrite("settings.json", diskText);
     await fPage.waitForTimeout(2500);
     const mgrText = await fPage.evaluate(() => (window as any).monaco.editor.getEditors()[0].getValue());
-    check("MV3 folder sync: disk settings.yaml becomes the manager's text as a whole", mgrText === diskText, JSON.stringify(mgrText).slice(0, 200));
+    check("MV3 folder sync: disk settings.json reaches the Editor", mgrText === diskText, JSON.stringify(mgrText).slice(0, 200));
 
-    // …and the other way: a manager save lands in the file verbatim
-    const savedText = diskText.replace("# my own note\n", "# saved from the manager\n");
-    await fPage.evaluate((t: string) => new Promise((r) => chrome.runtime.sendMessage({ type: "applySettingsYaml", text: t }, r)), savedText);
+    // …and the other way: a manager save lands in the file
+    const savedText = JSON.stringify({ logLevel: "error", scripts: { "Sync guinea.tangitweak.ts": { token: "xyz" } } }, null, 2) + "\n";
+    await fPage.evaluate((t: string) => new Promise((r) => chrome.runtime.sendMessage({ type: "applySettingsJson", text: t }, r)), savedText);
     await fPage.waitForTimeout(500);
-    check("MV3 folder sync: manager settings.yaml save written to disk as a whole", (await opfsText("settings.yaml")) === savedText);
+    check("MV3 folder sync: manager settings.json save written to disk", (await opfsText("settings.json")) === savedText);
 
     // a new .ts file in the folder inserts a script
     await opfsWrite("imported-sync.ts", 'tt.onRequest({ url: "*://imported.invalid/*", strategy: "page" }, () => {});\n');
@@ -1393,9 +1393,9 @@ tt.replaceResponse({ url: "${ORIGIN}/sf-data", strategy: "page" }, async () => {
         !!lateUser && !(lateUser.typeErrors || []).length, JSON.stringify(lateUser?.typeErrors));
     await fPage.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: "deleteScript", id: "s_sync" }, r)));
     await fPage.waitForTimeout(2500);
-    const yamlDel = (await opfsText("settings.yaml")) || "";
-    check("MV3 folder sync: a deleted script's settings.yaml section is commented out",
-        /# script "Sync guinea.tangitweak" no longer exists/.test(yamlDel) && !/^  Sync guinea.tangitweak:/m.test(yamlDel), yamlDel.slice(0, 400));
+    const jsonDel = JSON.parse((await opfsText("settings.json")) || "{}");
+    check("MV3 folder sync: a deleted script's settings.json entry is removed",
+        !jsonDel?.scripts?.["Sync guinea.tangitweak.ts"], JSON.stringify(jsonDel));
     await fPage.close();
 
     // many interdependent scripts: while the Editor loads them, none is

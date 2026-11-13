@@ -1,16 +1,25 @@
 /**
- * settings.yaml ⇄ storage. Text is always generated from storage, so the
- * manager's virtual file, the popup and the synced folder converge on one
- * source of truth.
+ * settings.json ⇄ storage. Text is rendered deterministically from storage
+ * (sparse overrides only; `{}` when everything uses defaults), so the Editor,
+ * popup and synced folder always converge without patching shadow text.
  */
-import { listScripts, loadAllParamValues, setParamValue, setEnabled, onScriptRenamed } from "./engine/scriptStore";
-import { migrateLegacySettingsKeys, patchSettings, renameSettingsSection } from "../shared/settingsYamlPatch";
+import { listScripts, loadAllParamValues, setParamValue, setEnabled } from "./engine/scriptStore";
 import { scriptFileName, scriptPathKey } from "../shared/scriptName";
 import {
-    renderSettings, parseSettings, planSettings,
-    DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL, DEFAULT_BODY_CAP, BODY_CAP_KEY, isTextTypes, isBodyCap,
-    type GlobalSettings, type ScriptSettingsState, type SettingsDoc, type SettingsPlan,
-} from "../shared/settingsYaml";
+    renderSettings,
+    parseSettings,
+    planSettings,
+    DEFAULT_LOG_CAP,
+    DEFAULT_LOG_LEVEL,
+    DEFAULT_BODY_CAP,
+    BODY_CAP_KEY,
+    isTextTypes,
+    isBodyCap,
+    type GlobalSettings,
+    type ScriptSettingsState,
+    type SettingsDoc,
+    type SettingsPlan,
+} from "../shared/settingsJson";
 import { DEFAULT_TEXT_TYPES } from "../shared/bodyKind";
 
 function storageGet(keys: string[]): Promise<Record<string, any>> {
@@ -19,6 +28,13 @@ function storageGet(keys: string[]): Promise<Record<string, any>> {
 
 function storageSet(items: Record<string, any>): Promise<void> {
     return new Promise((r) => chrome.storage.local.set(items, () => r()));
+}
+
+function storageRemove(key: string): Promise<void> {
+    return new Promise((r) => {
+        if (typeof chrome.storage.local.remove === "function") chrome.storage.local.remove(key, () => r());
+        else chrome.storage.local.set({ [key]: undefined }, () => r());
+    });
 }
 
 export async function currentSettingsState(): Promise<{ globals: GlobalSettings; scripts: ScriptSettingsState[] }> {
@@ -37,23 +53,9 @@ export async function currentSettingsState(): Promise<{ globals: GlobalSettings;
     return { globals, scripts };
 }
 
-/** chrome.storage key of settings.textTypes (absent: DEFAULT_TEXT_TYPES) */
+/** chrome.storage key of textTypes (absent: DEFAULT_TEXT_TYPES) */
 export const TEXT_TYPES_KEY = "resTextTypes";
 
-/** chrome.storage key of the last applied settings.yaml text */
-export const SETTINGS_TEXT_KEY = "resSettingsText";
-const TEXT_KEY = SETTINGS_TEXT_KEY;
-
-// a renamed script keeps its settings section (values, comments)
-onScriptRenamed(async (oldName, newName) => {
-    const text = (await storageGet([TEXT_KEY]))[TEXT_KEY];
-    if (typeof text !== "string") return;
-    let next = renameSettingsSection(text, scriptFileName(oldName), scriptFileName(newName));
-    if (next === text) next = renameSettingsSection(text, oldName, scriptFileName(newName));
-    if (next !== text) await storageSet({ [TEXT_KEY]: next });
-});
-
-/** does this settings.yaml text parse? */
 export function settingsTextParses(text: string): boolean {
     try {
         parseSettings(text);
@@ -63,22 +65,9 @@ export function settingsTextParses(text: string): boolean {
     }
 }
 
-/**
- * Current settings.yaml. Patches `existing` (the synced file / editor text;
- * default: the last applied text) in place so user formatting survives;
- * regenerates canonically only when there is no parsable base.
- */
-export async function getSettingsText(existing?: string): Promise<string> {
+export async function getSettingsText(): Promise<string> {
     const { globals, scripts } = await currentSettingsState();
-    const rawBase = existing ?? (await storageGet([TEXT_KEY]))[TEXT_KEY];
-    const base = typeof rawBase === "string" ? migrateLegacySettingsKeys(rawBase, scripts) : null;
-    return (base !== null ? patchSettings(base, globals, scripts) : null) ?? renderSettings(globals, scripts);
-}
-
-/** The synced file was (re)written with this exact text — it becomes the manager's text too. */
-export async function rememberSettingsText(text: string): Promise<void> {
-    const cur = (await storageGet([TEXT_KEY]))[TEXT_KEY];
-    if (cur !== text) await storageSet({ [TEXT_KEY]: text });
+    return renderSettings(globals, scripts);
 }
 
 async function applyPlan(plan: SettingsPlan): Promise<void> {
@@ -94,19 +83,18 @@ async function applyPlan(plan: SettingsPlan): Promise<void> {
     if (plan.globals.logCap) patch.resLogCap = plan.globals.logCap;
     if (Object.keys(patch).length) await storageSet(patch);
     if (plan.globals.textTypes) {
-        // back at the defaults: forget the list, so a future default change applies
-        if (JSON.stringify(plan.globals.textTypes) === JSON.stringify(DEFAULT_TEXT_TYPES)) await new Promise<void>((r) => chrome.storage.local.remove(TEXT_TYPES_KEY, () => r()));
+        if (JSON.stringify(plan.globals.textTypes) === JSON.stringify(DEFAULT_TEXT_TYPES)) await storageRemove(TEXT_TYPES_KEY);
         else await storageSet({ [TEXT_TYPES_KEY]: plan.globals.textTypes });
     }
     if (plan.globals.bodyCap) {
-        if (plan.globals.bodyCap === DEFAULT_BODY_CAP) await new Promise<void>((r) => chrome.storage.local.remove(BODY_CAP_KEY, () => r()));
+        if (plan.globals.bodyCap === DEFAULT_BODY_CAP) await storageRemove(BODY_CAP_KEY);
         else await storageSet({ [BODY_CAP_KEY]: plan.globals.bodyCap });
     }
 }
 
-/** Apply text to storage (a full-file edit: everything in it applies). Syntax errors leave all state untouched. */
+/** Apply settings.json text to storage (a full-file edit: omitted entries reset to defaults). */
 export async function applySettingsText(text: string): Promise<{ error?: string }> {
-    let doc;
+    let doc: SettingsDoc;
     try {
         doc = parseSettings(text);
     } catch (e: any) {
@@ -114,19 +102,12 @@ export async function applySettingsText(text: string): Promise<{ error?: string 
     }
     const { globals, scripts } = await currentSettingsState();
     await applyPlan(planSettings(doc, globals, scripts));
-    await storageSet({ [TEXT_KEY]: text });
     return {};
 }
 
-/**
- * Apply a structured settings document (Import… of a zip's settings.yaml).
- * Unlike applySettingsText, the stored base text is then re-canonicalized —
- * patching the previous base when parsable — so the imported file's shape
- * doesn't replace this one's.
- */
+/** Apply a structured settings document (Import… of a zip's settings.json). */
 export async function applySettingsDoc(doc: SettingsDoc): Promise<{ error?: string }> {
     const { globals, scripts } = await currentSettingsState();
     await applyPlan(planSettings(doc, globals, scripts));
-    await storageSet({ [TEXT_KEY]: await getSettingsText() });
     return {};
 }

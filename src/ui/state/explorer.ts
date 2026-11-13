@@ -5,7 +5,7 @@ import type { Script } from "../../background/engine/scriptStore";
 import type { DataFile } from "../../background/engine/dataFiles";
 import { explorerTree, folderRowId, idRange, targetFolder, topLevelRows, type TreeRow } from "../explorerTree";
 
-/** settings.yaml and stores.json virtual rows (always first in the Explorer) */
+/** settings.json and stores.json virtual rows (always first in the Explorer) */
 export const SETTINGS_ID = "__settings__";
 export const STORES_ID = "__stores__";
 export const isVirtualRootId = (id: string | null | undefined): boolean => id === SETTINGS_ID || id === STORES_ID;
@@ -98,10 +98,10 @@ export const visibleRows = (): TreeRow[] => treeRows();
 /** a row by id, shown or inside a collapsed folder */
 export const treeRow = (id: string | null): TreeRow | undefined => (id ? treeRows(true).find((r) => r.id === id) : undefined);
 
-/** the rows' ids, settings.yaml and stores.json first */
+/** the rows' ids, settings.json and stores.json first */
 export const explorerIds = (): string[] => [SETTINGS_ID, STORES_ID, ...visibleRows().map((r) => r.id)];
 
-/** the ids a multi-selection can hold (settings.yaml and stores.json aren't selectable items) */
+/** the ids a multi-selection can hold (settings.json and stores.json aren't selectable items) */
 export const selectableIds = (): string[] => visibleRows().map((r) => r.id);
 
 /** the row the cursor is on */

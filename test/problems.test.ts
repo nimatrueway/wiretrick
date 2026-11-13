@@ -186,10 +186,10 @@ describe("collectProblems", () => {
         expect(g.problems.map((p) => p.message)).toEqual(["onRequest #1: x", "e3a", "e3b", "e9", "r", "w1"]);
     });
 
-    it("keeps explorer order; settings.yaml first", () => {
+    it("keeps explorer order; settings.json first", () => {
         const groups = collectProblems([script("z", { error: "bad" }), script("a", { error: "bad" })], none, [{ severity: "error", message: "unknown key", line: 4, column: 3 }]);
         expect(groups.map((g) => [g.id, g.label, g.file])).toEqual([
-            [SETTINGS_GROUP.id, "settings.yaml", "yaml"],
+            [SETTINGS_GROUP.id, "settings.json", "settings"],
             ["z", "z.ts", "ts"],
             ["a", "a.ts", "ts"],
         ]);

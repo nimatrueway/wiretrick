@@ -10,7 +10,7 @@ const STORES_ICON = `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden
 /** the explorer twistie (VS Code's chevron-right) */
 const CHEVRON = `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
-export type Icon = "ts" | "tsx" | "yaml" | "stores" | "json" | "md" | "svg" | "img" | "folder" | "folder-open" | "package" | "section";
+export type Icon = "ts" | "tsx" | "settings" | "stores" | "json" | "md" | "svg" | "img" | "folder" | "folder-open" | "package" | "section";
 
 export function FileIcon({ kind, src }: { kind: Icon; src?: string }) {
     const [broken, setBroken] = useState(false);

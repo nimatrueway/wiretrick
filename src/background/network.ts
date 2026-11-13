@@ -18,7 +18,7 @@
  * knew it (engine/requestCorrelator.ts), else to the newest same-URL row.
  */
 import { outcomeKind, type OutcomeKind, type NetBody, type NetEntry, type NetPortMsg } from "../shared/netTypes";
-import { BODY_CAP_KEY, DEFAULT_BODY_CAP, isBodyCap } from "../shared/settingsYaml";
+import { BODY_CAP_KEY, DEFAULT_BODY_CAP, isBodyCap } from "../shared/settingsJson";
 
 const MAX_ENTRIES = 1000;
 /** rows kept while no Network tab is open (script-touched only) */

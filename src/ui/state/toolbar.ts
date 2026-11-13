@@ -8,7 +8,7 @@ export type SyncState = "off" | "disconnected" | "connected" | "sending" | "rece
 export const toolbar = proxy({
     /** the Save button is the save indicator: ● unsaved, spinner while saving, ✓ saved */
     save: { state: "saved" as SaveState, disabled: true, dim: false },
-    /** the open script's Enabled switch; null hides it (settings.yaml, data files, libraries, the typings) */
+    /** the open script's Enabled switch; null hides it (settings.json, data files, libraries, the typings) */
     enabled: null as boolean | null,
     /** tt-api.d.ts is shown read-only */
     typings: false,

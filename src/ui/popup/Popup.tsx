@@ -101,7 +101,7 @@ function ScriptRow({ script, api, onChanged, version, activeHere }: { script: Sc
         <>
             <li className={"script-item" + (isLib ? " utility" : "") + (activeHere ? " active-here" : "")}>
                 {isLib ? (
-                    // utilities have no enabled switch (same as the manager / settings.yaml)
+                    // utilities have no enabled switch (same as the manager / settings.json)
                     <span className="util-ind" role="img" aria-label="library" title="Library — registers no handlers with its current params; importable by other scripts">
                         𝑓
                     </span>

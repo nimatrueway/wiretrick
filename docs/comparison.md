@@ -59,7 +59,7 @@ Desktop proxies run outside the browser as local TLS man-in-the-middle servers. 
 | **Two-way local folder sync (edit in VS Code / Cursor with generated types)** | **Yes** | Single-file external editor sync | Local file map (desktop) | **Yes** | Script files on disk (`mitmproxy`) |
 | **Page DOM & site-world hooks (`onPage` / `onSite`)** | **Yes** (with `ctx.patch` hot teardown) | **Yes** | Basic JS injection | No | No (must rewrite HTML) |
 | **Isolated Shadow/iframe React + `valtio` page overlays (`onOverlay`)** | **Yes** (built-in) | Manual DOM + `@require` | No | No | No |
-| **Typed UI settings (`tt.params` + `settings.yaml`)** | **Yes** (with nested sections) | `GM_config` libraries | Environment variables (paid) | No | Script env vars |
+| **Typed UI settings (`tt.params` + `settings.json`)** | **Yes** (with nested sections) | `GM_config` libraries | Environment variables (paid) | No | Script env vars |
 | **In-place hot reload without reloading the tab** | **Yes** | No (requires reload) | Rule toggle on next request | Next request | Next request |
 | **In-extension Network diff (`Modified` vs `Original` body) + LLM diagnostics** | **Yes** | No | Basic logger | DevTools Network | **Yes** (full proxy inspector; no LLM bundle) |
 | **Intercepts non-browser traffic (iOS, Android, CLI, backend)** | No (browser only) | No | Desktop app only | No | **Yes** |

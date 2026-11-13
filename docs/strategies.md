@@ -262,7 +262,7 @@ it is info level.
 
 ## Troubleshooting `extension`
 
-Set `logLevel: debug` in `settings.yaml` and reload the page: the Log view
+Set `"logLevel": "debug"` in `settings.json` and reload the page: the Log view
 then traces every request an `extension` handler matches — which scripts
 ran, what each `onRequest` returned, whether the browser followed the
 redirect, and how the request ended. Failures (`request FAILED net::…`) and

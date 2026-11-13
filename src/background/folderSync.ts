@@ -30,11 +30,10 @@ import {
     listDataFiles, saveDataFile, deleteDataFile, newDataFileId, listFolders, createFolder, deleteFolder,
 } from "./engine/scriptStore";
 import type { DataFile } from "./engine/dataFiles";
-import { getSettingsText, applySettingsText, rememberSettingsText, currentSettingsState, settingsTextParses } from "./settingsFile";
+import { getSettingsText, applySettingsText, currentSettingsState, settingsTextParses } from "./settingsFile";
 import { getStoresText, applyStoresText, storesTextParses, STORES_FILE } from "./storesFile";
 import { storeOwner } from "./engine/stores";
-import { SETTINGS_FILE, SCHEMA_FILE } from "../shared/settingsYaml";
-import { renameSettingsSection } from "../shared/settingsYamlPatch";
+import { SETTINGS_FILE, SCHEMA_FILE } from "../shared/settingsJson";
 import { settingsSchemaJson } from "../shared/settingsSchema";
 import { API_DTS_FILE, BUILTIN_TYPINGS_ROOT, PACKAGE_JSON_FILE, TSCONFIG_FILE, apiDtsText, packageJsonText, tsconfigText } from "../shared/generatedFiles";
 import { broadcastToUi } from "./engine/logs";
@@ -107,7 +106,7 @@ function signal(kind: Exclude<SyncActivity, "idle">): void {
 /**
  * What our folder writes count as. A change made in the extension is sent;
  * the follow-up writes of applying a change read from the folder (its
- * settings.yaml section, the schema, a canonical file name) are part of
+ * settings.json section, the schema, a canonical file name) are part of
  * receiving it — they must not show as an upload of that same change.
  * Only set inside serial() operations, so it can't leak into another one.
  */
@@ -385,7 +384,7 @@ async function applyEvents(events: ReturnType<typeof computeEvents>): Promise<vo
     if (!events.changed.length && !events.added.length && !events.removed.length) return;
     await writingAs("receiving", async () => {
         if (!(await applyFolderEvents(events))) return;
-        // the store's settings.yaml / schema follow the scripts now, as part
+        // the store's settings.json / schema follow the scripts now, as part
         // of receiving — the store-change reconcile then finds nothing to write
         await exportSettings();
     });
@@ -781,17 +780,6 @@ async function reconcileFoldersToDisk(): Promise<boolean> {
     return changed;
 }
 
-/** the settings section follows a renamed script in the synced file too */
-async function renameSettingsOnDisk(oldName: string, newName: string): Promise<void> {
-    if (!dirHandle) return;
-    const f = await readSettingsFile();
-    if (!f) return;
-    let next = renameSettingsSection(f.text, scriptFileName(oldName), scriptFileName(newName));
-    if (next === f.text) next = renameSettingsSection(f.text, oldName, scriptFileName(newName));
-    if (next === f.text) return;
-    if (await writeFile(SETTINGS_FILE, next)) settingsSig = (await readSettingsFile())?.sig ?? null;
-}
-
 export interface FolderPreview {
     /** files that become new scripts */
     imported: string[];
@@ -966,7 +954,7 @@ export async function previewStoredHandle(): Promise<FolderPreview | null> {
     return serial(() => initialSync({ dry: true, handle, base: new Map() }));
 }
 
-// ---- settings.yaml: canonical text generated from storage ----
+// ---- settings.json: canonical text generated from storage ----
 
 let settingsSig: FileSig | null = null;
 let settingsBroken = false;
@@ -1069,28 +1057,24 @@ async function pollStores(): Promise<void> {
 }
 
 /**
- * storage → file; patched in place, so an up-to-date file is never
- * rewritten. `base`: text saved in the manager, which wins over the file.
- * A file on disk that doesn't parse is never overwritten by a background
- * change: it holds edits in progress (fixing it re-enables the export).
+ * storage → settings.json. An up-to-date file is never rewritten; a broken
+ * file on disk is left untouched until the user fixes its JSON syntax.
  */
-async function exportSettings(base?: string): Promise<void> {
+async function exportSettings(force = false): Promise<void> {
     if (!dirHandle) return;
     try {
         const existing = await readSettingsFile();
-        if (base === undefined && existing && !settingsTextParses(existing.text)) {
-            if (!settingsBroken) dlogLevel("sync", "warn", `Folder sync: ${SETTINGS_FILE} on disk has a YAML error — it is not overwritten until it is fixed (changes made meanwhile are written then)`);
+        if (!force && existing && !settingsTextParses(existing.text)) {
+            if (!settingsBroken) dlogLevel("sync", "warn", `Folder sync: ${SETTINGS_FILE} on disk has a JSON error — it is not overwritten until it is fixed (changes made meanwhile are written then)`);
             settingsBroken = true;
             return;
         }
         settingsBroken = false;
-        const text = await getSettingsText(base ?? existing?.text);
+        const text = await getSettingsText();
         if (existing?.text !== text) {
             await writeFile(SETTINGS_FILE, text);
             settingsSig = (await readSettingsFile())?.sig ?? null;
         }
-        // the file and the manager's settings.yaml are one document
-        await rememberSettingsText(text);
         await ensureSchemaFile();
     } catch (e: any) {
         dlogLevel("sync", "warn", `Folder sync: writing ${SETTINGS_FILE} failed: ${e?.message || e}`);
@@ -1109,7 +1093,7 @@ async function ensureFile(fileName: string, content: string): Promise<void> {
     await writeFile(fileName, content);
 }
 
-/** the JSON schema the settings.yaml modeline points at (VS Code YAML extension) */
+/** the JSON schema the settings.json modeline points at (VS Code YAML extension) */
 async function ensureSchemaFile(): Promise<void> {
     await ensureFile(SCHEMA_FILE, settingsSchemaJson((await currentSettingsState()).scripts));
 }
@@ -1204,9 +1188,9 @@ async function ensurePackageTypingsFiles(): Promise<void> {
     }
 }
 
-/** settings.yaml was saved in the manager: write that text out as-is */
-export function exportSettingsFrom(text: string): Promise<void> {
-    return serial(() => exportSettings(text));
+/** settings.json was saved in the Editor: export canonical settings to disk */
+export function exportSettingsFrom(_text?: string): Promise<void> {
+    return serial(() => exportSettings(true));
 }
 
 function scheduleReconcile(): void {
@@ -1238,7 +1222,7 @@ export async function flush(): Promise<void> {
     await pollOnce();
 }
 
-/** file → storage, when settings.yaml changed on disk; then re-canonicalize */
+/** file → storage, when settings.json changed on disk; then re-canonicalize */
 async function pollSettings(): Promise<void> {
     const f = await readSettingsFile();
     if (!f) return;
@@ -1394,9 +1378,9 @@ async function start(opts: { fresh?: boolean }): Promise<boolean> {
     if (!settingsHooked) {
         settingsHooked = true;
         onScriptsChanged(scheduleReconcile);
-        onScriptRenamed((oldName, newName) => {
+        onScriptRenamed(() => {
             if (dirHandle) void serial(async () => {
-                await renameSettingsOnDisk(oldName, newName);
+                await exportSettings();
                 await exportStores();
             });
         });

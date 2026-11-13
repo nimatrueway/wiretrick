@@ -1,5 +1,5 @@
 // Folders + JSON data files: path-aware import resolution, JSON imports,
-// dependants, stacking order, path validation, settings.yaml keys with `/`
+// dependants, stacking order, path validation, settings.json keys with `/`
 // and export zips.
 import { describe, it, expect } from "vitest";
 import "../src/shared/transpile";
@@ -7,8 +7,7 @@ import { compileWithLibs } from "../src/shared/compile";
 import { dependantsOf, importPath, importResolver, makeLibRequire, missingImports } from "../src/shared/scriptImports";
 import { stackingOrder, allFolders, movedPath, isInFolder } from "../src/shared/folders";
 import { cleanScriptName, dataFilePathProblem, folderPathProblem, scriptFileName, scriptNameProblem } from "../src/shared/scriptName";
-import { parseSettings, planSettings, renderSettings, type ScriptSettingsState } from "../src/shared/settingsYaml";
-import { patchSettings, renameSettingsSection } from "../src/shared/settingsYamlPatch";
+import { parseSettings, planSettings, renderSettings, type ScriptSettingsState } from "../src/shared/settingsJson";
 import { buildSettingsSchema } from "../src/shared/settingsSchema";
 import { errorPosition } from "../src/ui/problems";
 import { buildExportZip, readExportZip } from "../src/shared/exportZip";
@@ -182,23 +181,18 @@ describe("names are paths", () => {
     });
 });
 
-describe("settings.yaml keys with /", () => {
-    const s: ScriptSettingsState = { name: "mock/helpers", declared: true, enabled: true, defs: { n: { type: "number", default: 1 } } as any, values: {} };
+describe("settings.json keys with /", () => {
+    const s: ScriptSettingsState = { name: "mock/helpers.ts", declared: true, enabled: true, defs: { n: { type: "number", default: 1 } } as any, values: {} };
     const G = { logLevel: "info", logCap: 500 } as any;
-    it("renders, parses and plans a path-named section", () => {
+    it("renders, parses and plans a path-named entry", () => {
         const t = renderSettings(G, [{ ...s, enabled: false, values: { n: 3 } }]);
-        expect(t).toContain("  mock/helpers:\n");
-        expect(parseSettings(t).params["mock/helpers"]).toEqual({ enabled: false, n: 3 });
+        expect(JSON.parse(t)).toEqual({ scripts: { "mock/helpers.ts": { enabled: false, n: 3 } } });
+        expect(parseSettings(t).scripts["mock/helpers.ts"]).toEqual({ enabled: false, n: 3 });
         expect(planSettings(parseSettings(t), G, [{ ...s, enabled: false, values: { n: 3 } }])).toEqual({ globals: {}, scripts: [] });
-    });
-    it("patches and renames it in place", () => {
-        const t = "params:\n  mock/helpers:\n    n: 2\n";
-        expect(patchSettings(t, G, [{ ...s, values: { n: 4 } }])).toBe("params:\n  mock/helpers:\n    n: 4\n");
-        expect(renameSettingsSection(t, "mock/helpers", "fixtures/helpers")).toBe("params:\n  fixtures/helpers:\n    n: 2\n");
     });
     it("is a schema property name", () => {
         const schema: any = buildSettingsSchema([s]);
-        expect(Object.keys(schema.properties.params.properties)).toContain("mock/helpers");
+        expect(Object.keys(schema.properties.scripts.properties)).toContain("mock/helpers.ts");
     });
 });
 

@@ -55,7 +55,7 @@ export const actions = {
     startCreate(_kind: NewKind, _folder?: string): void {},
     setScriptEnabled(_id: string, _enabled: boolean): void {},
     // ---- dialogs ----
-    /** ⌘P's list: settings.yaml, the scripts, the data files */
+    /** ⌘P's list: settings.json, the scripts, the data files */
     quickOpenItems(): QuickOpenItem[] {
         return [];
     },

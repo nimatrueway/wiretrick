@@ -24,7 +24,7 @@ describe("export/import picker", () => {
                     { path: "lib/util.ts", kind: "script", badge: "new" },
                     { path: "lib/old.ts", kind: "script", checked: false },
                     { path: "lib/d.json", kind: "data" },
-                    { path: "settings.yaml", kind: "settings" },
+                    { path: "settings.json", kind: "settings" },
                     { path: "empty", kind: "folder" },
                 ],
                 confirm: "Export",
@@ -40,7 +40,7 @@ describe("export/import picker", () => {
 
     it("shows the tree as the Explorer does, checked boxes as given, the filter focused", async () => {
         await open();
-        expect(labels()).toEqual(["settings.yaml", "empty", "lib", "util.ts", "old.ts", "d.json", "app.ts"]);
+        expect(labels()).toEqual(["settings.json", "empty", "lib", "util.ts", "old.ts", "d.json", "app.ts"]);
         expect($$("#bundle-picker .picker-badge").map((e) => e.textContent)).toEqual(["new"]);
         expect(box("lib/old.ts").checked).toBe(false);
         expect(box("lib").indeterminate).toBe(true);
@@ -65,7 +65,7 @@ describe("export/import picker", () => {
     it("the twistie collapses a folder", async () => {
         await open();
         fireEvent.click($('#bundle-picker .picker-row[data-path="lib"] .picker-twistie'));
-        expect(labels()).toEqual(["settings.yaml", "empty", "lib", "app.ts"]);
+        expect(labels()).toEqual(["settings.json", "empty", "lib", "app.ts"]);
         expect(box("lib").indeterminate).toBe(true);
         fireEvent.click($('#bundle-picker .picker-row[data-path="lib"] .picker-twistie'));
         expect(labels()).toContain("util.ts");
@@ -396,7 +396,7 @@ describe("quick open", () => {
         const { dialogs } = await import("../src/ui/state/dialogs");
         const { actions } = await import("../src/ui/shell/actions");
         actions.quickOpenItems = () => [
-            { id: "s", name: "settings.yaml" },
+            { id: "s", name: "settings.json" },
             { id: "a", name: "alpha" },
             { id: "b", name: "beta" },
         ];
@@ -406,9 +406,9 @@ describe("quick open", () => {
         await act(async () => void (dialogs.quickOpen = true));
         expect($("#quick-open").classList.contains("hidden")).toBe(false);
         expect(document.activeElement).toBe($("#qo-input"));
-        expect($$(".qo-item").map((e) => e.textContent)).toEqual(["settings.yaml", "alpha", "beta"]);
+        expect($$(".qo-item").map((e) => e.textContent)).toEqual(["settings.json", "alpha", "beta"]);
         fireEvent.change($("#qo-input"), { target: { value: "a" } });
-        expect($$(".qo-item").map((e) => e.textContent)).toEqual(["alpha", "beta", "settings.yaml"]);
+        expect($$(".qo-item").map((e) => e.textContent)).toEqual(["alpha", "beta"]);
         fireEvent.keyDown($("#qo-input"), { key: "ArrowDown" });
         expect($(".qo-item.active").dataset.id).toBe("b");
         fireEvent.keyDown($("#qo-input"), { key: "Enter" });

@@ -55,6 +55,6 @@ describe(".svg data files", () => {
     it("build.mjs keeps Monaco's xml and markdown basic-language bundles for .svg and .md models", () => {
         const buildSrc = readFileSync("scripts/build.mjs", "utf8");
         const langs = [...(buildSrc.match(/MONACO_BASIC_LANGUAGES\s*=\s*new Set\(\[([^\]]+)\]/)?.[1] ?? "").matchAll(/"([^"]+)"/g)].map((m) => m[1]);
-        expect(langs).toEqual(expect.arrayContaining(["typescript", "javascript", "yaml", "xml", "markdown"]));
+        expect(langs).toEqual(expect.arrayContaining(["typescript", "javascript", "xml", "markdown"]));
     });
 });

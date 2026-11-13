@@ -114,7 +114,7 @@ async function mount(over: Partial<typeof fixture> = {}) {
 }
 
 describe("explorer tree", () => {
-    it("renders settings.yaml, stores.json, folders, files and their state classes", async () => {
+    it("renders settings.json, stores.json, folders, files and their state classes", async () => {
         const { row, list } = await mount({ dirty: true });
         expect([...list.querySelectorAll(":scope > li")].map((l) => l.id)).toEqual(["explorer-__settings__", "explorer-__stores__", "explorer-dir%3Aempty", "explorer-dir%3Amock", "explorer-dir%3Amock%2Fdeep", "explorer-s_c", "explorer-s_b", "explorer-d_l", "explorer-s_a", "explorer-s_d"]);
         expect(row("s_a").className).toBe("script-item handlers selected focused dirty"); // registers handlers: bold

@@ -28,6 +28,8 @@ import { JSON_FALLBACK_DTS } from "./jsonTypes";
 import { packagePaths, TYPINGS_ROOT } from "../shared/packageImports";
 import { builtinPaths } from "../shared/builtinSpecs";
 import { MANIFEST_FILE, MANIFEST_SCHEMA } from "../shared/packageMetadata";
+import { SETTINGS_FILE, type ScriptSettingsState } from "../shared/settingsJson";
+import { buildSettingsSchema } from "../shared/settingsSchema";
 
 const STORES_SCHEMA = {
     type: "object",
@@ -41,6 +43,17 @@ const STORES_SCHEMA = {
         },
     },
 };
+
+export function updateJsonSchemas(scripts: ScriptSettingsState[] = []): void {
+    monacoApi?.languages.json?.jsonDefaults?.setDiagnosticsOptions({
+        validate: true,
+        schemas: [
+            { uri: "tangitweak://schema/metadata.json", fileMatch: ["**/" + MANIFEST_FILE], schema: MANIFEST_SCHEMA },
+            { uri: "tangitweak://schema/stores.json", fileMatch: ["stores.json", "**/stores.json"], schema: STORES_SCHEMA },
+            { uri: "tangitweak://schema/settings.json", fileMatch: [SETTINGS_FILE, "**/" + SETTINGS_FILE], schema: buildSettingsSchema(scripts) },
+        ],
+    });
+}
 
 let monacoApi: any = null;
 let ttApiDts = "";
@@ -115,13 +128,7 @@ export async function loadMonaco(): Promise<any> {
     // one being checked: imports resolve at once instead of briefly failing
     monacoApi.languages.typescript.typescriptDefaults.setEagerModelSync(true);
     registerTsHover(monacoApi);
-    monacoApi.languages.json?.jsonDefaults?.setDiagnosticsOptions({
-        validate: true,
-        schemas: [
-            { uri: "tangitweak://schema/metadata.json", fileMatch: ["**/" + MANIFEST_FILE], schema: MANIFEST_SCHEMA },
-            { uri: "tangitweak://schema/stores.json", fileMatch: ["stores.json", "**/stores.json"], schema: STORES_SCHEMA },
-        ],
-    });
+    updateJsonSchemas();
 
     return monacoApi;
 }
@@ -410,7 +417,7 @@ function registerTsHover(monaco: any): void {
 
 export const STARTER_TEMPLATE = `tt.metadata({ description: "What this script does" });
 
-// Adjustable parameters (editable in settings.yaml / the popup ⚙ dialog):
+// Adjustable parameters (editable in settings.json / the popup ⚙ dialog):
 const cfg = tt.params({
     host: { type: "string", default: "*.example.com", description: "Host pattern to intercept" },
     debug: { type: "boolean", default: true, description: "Log every request" },

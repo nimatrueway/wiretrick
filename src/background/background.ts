@@ -77,13 +77,13 @@ chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
         sendResponse({});
         return false;
     }
-    if (msg && msg.type === "getSettingsYaml") {
-        getSettingsText(msg.text).then((text) => sendResponse({ text }));
+    if (msg && msg.type === "getSettingsJson") {
+        getSettingsText().then((text) => sendResponse({ text }));
         return true;
     }
-    if (msg && msg.type === "applySettingsYaml") {
+    if (msg && msg.type === "applySettingsJson") {
         applySettingsText(msg.text).then(async (r) => {
-            if (!r.error) await folderSync.exportSettingsFrom(msg.text);
+            if (!r.error) await folderSync.exportSettingsFrom();
             sendResponse(r);
         });
         return true;

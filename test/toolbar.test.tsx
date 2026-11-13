@@ -62,8 +62,8 @@ describe("editor toolbar", () => {
     it("the status line is clickable only with an action", async () => {
         const { toolbar } = await mount();
         const el = $("#editor-status");
-        act(() => void (toolbar.status = { text: "settings.yaml: bad", cls: "error", onClick: null }));
-        expect(el.textContent).toBe("settings.yaml: bad");
+        act(() => void (toolbar.status = { text: "settings.json: bad", cls: "error", onClick: null }));
+        expect(el.textContent).toBe("settings.json: bad");
         expect(el.className).toBe("error");
         const onClick = vi.fn();
         act(() => void (toolbar.status = { text: "Reload", cls: "", onClick }));

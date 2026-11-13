@@ -1,6 +1,6 @@
 /**
  * Script parameters: tt.params({...}) / tt.defineParam(name, def).
- * Values are edited in the manager / popup / settings.yaml.
+ * Values are edited in the manager / popup / settings.json.
  */
 import { isShortcut } from "./shortcut";
 
@@ -24,7 +24,7 @@ export interface ParamDefNumber {
 }
 export interface ParamDefString {
     type: "string";
-    /** edit in a textarea; values with newlines are written as YAML block scalars in settings.yaml */
+    /** edit in a textarea */
     multiline?: boolean;
     default?: string;
     description?: string;
@@ -54,7 +54,7 @@ export const PARAM_TYPES = ["boolean", "number", "string", "enum", "stringList",
 
 export type ParamDef = ParamDefBoolean | ParamDefNumber | ParamDefString | ParamDefEnum | ParamDefStringList | ParamDefShortcut;
 
-/** A nested section grouping parameters (or sub-sections) in the UI and settings.yaml. */
+/** A nested section grouping parameters (or sub-sections) in the UI and settings.json. */
 export interface ParamGroup {
     [key: string]: ParamNode;
 }

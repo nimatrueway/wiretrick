@@ -2,7 +2,7 @@
  * Export…/Import… zip: laid out like the synced scripts folder, so a zip
  * and a synced folder look the same:
  *
- *   settings.yaml          globals + each script's enabled state and params
+ *   settings.json          globals + each script's enabled state and params
  *   Debug header.ts        a script (its name is its path minus ".ts")
  *   ui/Panel.tsx
  *   mock/helpers.ts
@@ -10,12 +10,11 @@
  *   mock/empty/            an empty folder (a folder entry)
  *
  * Import also takes a zip of the synced folder itself (one top folder
- * holding settings.yaml, tsconfig.json or tt-api.d.ts is unwrapped); the
+ * holding settings.json, tsconfig.json or tt-api.d.ts is unwrapped); the
  * support files folder sync writes, dot entries and node_modules are skipped.
  */
-import { parseDocument, isMap, isScalar, type YAMLMap } from "yaml";
 import { readZipEntries, writeZip } from "./zip";
-import { SETTINGS_FILE, SCHEMA_FILE, parseSettings, type SettingsDoc } from "./settingsYaml";
+import { SETTINGS_FILE, SCHEMA_FILE, parseSettings, serializeSettingsDoc, type SettingsDoc } from "./settingsJson";
 import { API_DTS_FILE, PACKAGE_JSON_FILE, TSCONFIG_FILE } from "./generatedFiles";
 import { bytesToImageDataUrl, imageDataUrlToBytes, isImageDataPath } from "./scriptImports";
 import { badValue, isPlainObject } from "./storeOps";
@@ -51,7 +50,7 @@ export function filesGoneFrom(zip: Pick<ExportContents, "settings" | "scripts" |
 }
 
 export interface ExportContents {
-    /** settings.yaml text; null when the zip has none */
+    /** settings.json text; null when the zip has none */
     settings: string | null;
     /** tangitweak-stores.json text; null when the zip has none */
     stores?: string | null;
@@ -78,7 +77,7 @@ export function emptyFolders(folders: string[], paths: string[]): string[] {
     });
 }
 
-/** the export zip: scripts at their file paths, data files, empty folders, settings.yaml and optional tangitweak-stores.json */
+/** the export zip: scripts at their file paths, data files, empty folders, settings.json and optional tangitweak-stores.json */
 export function buildExportZip(
     c: { settings?: string | null; stores?: string | null; scripts: { name: string; code: string }[]; dataFiles: { path: string; text: string }[]; folders?: string[] },
     date?: Date
@@ -151,71 +150,29 @@ export async function readExportZip(buf: ArrayBuffer): Promise<ExportContents> {
     return out;
 }
 
-const indentOf = (l: string) => l.length - l.trimStart().length;
-
 /**
- * settings.yaml cut down to the globals and these scripts' sections (the
- * others are removed line by line, so the rest stays byte-for-byte).
+ * settings.json filtered down to the globals and these scripts' entries.
  */
 export function settingsForScripts(text: string, names: string[]): string {
-    let doc;
+    let doc: SettingsDoc;
     try {
-        doc = parseDocument(text);
+        doc = parseSettings(text);
     } catch {
         return text;
     }
-    if (doc.errors.length || !isMap(doc.contents)) return text;
-    const pair: any = doc.contents.items.find((p: any) => isScalar(p.key) && p.key.value === "params");
-    if (!pair || !isMap(pair.value)) return text;
-    const params = pair.value as YAMLMap;
     const keep = new Set(names.map(scriptPathKey));
-    const items = params.items as any[];
-    const dropped = items.filter((p) => !isScalar(p.key) || !keep.has(scriptPathKey(String(p.key.value))));
-    if (!dropped.length) return text;
-    const want = items.filter((p) => !dropped.includes(p)).map((p) => String(p.key.value));
-    const structural = () => {
-        for (const p of dropped) params.delete(p.key);
-        if (!params.items.length) doc.delete("params");
-        return doc.toString({ lineWidth: 0 });
-    };
-    if (params.flow) return structural();
-    const nl = text.endsWith("\n");
-    const lines = (nl ? text.slice(0, -1) : text).split("\n");
-    const lineOf = (offset: number) => text.slice(0, offset).split("\n").length - 1;
-    const blank = (i: number) => i >= 0 && i < lines.length && lines[i].trim() === "";
-    const cut = new Set<number>();
-    const starts = items.map((p) => lineOf(p.key.range[0]));
-    let lastEnd = lineOf(pair.key.range[0]) + 1;
-    items.forEach((p, i) => {
-        const start = starts[i];
-        const ind = indentOf(lines[start]);
-        const limit = i + 1 < starts.length ? starts[i + 1] : lines.length;
-        let end = start + 1;
-        while (end < limit && (blank(end) || indentOf(lines[end]) > ind)) end++;
-        while (end > start + 1 && blank(end - 1)) end--;
-        lastEnd = end;
-        if (!dropped.includes(p)) return;
-        for (let k = start; k < end; k++) cut.add(k);
-        // and one blank line around it: the separator from its neighbour
-        if (blank(start - 1) && !cut.has(start - 1)) cut.add(start - 1);
-        else if (blank(end)) cut.add(end);
-    });
-    if (!want.length) {
-        const at = lineOf(pair.key.range[0]);
-        for (let k = at; k < lastEnd; k++) cut.add(k);
-        if (blank(at - 1)) cut.add(at - 1);
-    }
-    const out = lines.filter((_, i) => !cut.has(i)).join("\n") + (nl ? "\n" : "");
-    try {
-        const got = Object.keys(parseSettings(out).params);
-        if (JSON.stringify(got) === JSON.stringify(want)) return out;
-    } catch {}
-    return structural();
+    const scripts = Object.fromEntries(Object.entries(doc.scripts).filter(([n]) => keep.has(scriptPathKey(n))));
+    return serializeSettingsDoc({ globals: doc.globals, scripts });
 }
 
-/** the parts of a settings.yaml an import applies: its globals and these scripts' sections */
-export function importedSettingsDoc(text: string, names: string[]): SettingsDoc {
+/** the parts of a settings.json an import applies: its globals and these scripts' entries */
+export function importedSettingsDoc(text: string, names: string[], hasScriptsInZip = true): SettingsDoc {
     const doc = parseSettings(text);
+    if (!hasScriptsInZip) return { ...doc, onlyScripts: Object.keys(doc.scripts) };
     const keep = new Set(names.map(scriptPathKey));
-    return { settings: doc.settings, params: Object.fromEntries(Object.entries(doc.params).filter(([n]) => keep.has(scriptPathKey(n)))) };
+    return {
+        globals: doc.globals,
+        scripts: Object.fromEntries(Object.entries(doc.scripts).filter(([n]) => keep.has(scriptPathKey(n)))),
+        onlyScripts: names,
+    };
 }

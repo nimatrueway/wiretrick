@@ -15,7 +15,7 @@ afterEach(() => {
 const items = [
     { id: "a", name: "Debug header" },
     { id: "b", name: "Notes" },
-    { id: "c", name: "settings.yaml" },
+    { id: "c", name: "settings.json" },
 ];
 
 describe("quick-open filter", () => {

@@ -2,7 +2,7 @@ import { proxy, ref } from "valtio";
 import { aboutRows, checkLatestRelease, describeLatest, RELEASES_URL, type HelperStatus } from "../about";
 import type { LaunchMode } from "../bundle";
 import type { ThemePref } from "../theme";
-import { DEFAULT_BODY_CAP } from "../../shared/settingsYaml";
+import { DEFAULT_BODY_CAP } from "../../shared/settingsJson";
 import { helperInstallCommand, helperInstallShell } from "../../shared/helperInstall";
 
 /** What the local helper reports (`processStatus`). */

@@ -98,7 +98,7 @@ running (later: **?** → **Welcome** or **?** → **Samples**).
 | [Installing and sharing scripts](docs/packages.md) | install from a URL, GitHub, a gist, a folder or a zip; the header; where files go; updates and rollback |
 | [Interception strategies](docs/strategies.md) | `page` / `debugger` / `extension` / `helper` / `rules`, the default and per-handler choice, [which strategies keep the URL when replacing a response](docs/strategies.md#how-each-strategy-serves-a-replacement), the Missed warning, browser compatibility |
 | [Local helper](docs/local-helper.md) | the `helper` strategy: install, how it works, security notes |
-| [The Editor](docs/editor.md) | Code view, Problems, Log & Network views, folder sync, `settings.yaml` |
+| [The Editor](docs/editor.md) | Code view, Problems, Log & Network views, folder sync, `settings.json` |
 | [Feature comparison & prior art](docs/comparison.md) | how TangiTweak compares to Tampermonkey, Violentmonkey, Requestly, Resource Override, Inssman, DevTools Overrides, and desktop proxies |
 | [Glossary](GLOSSARY.md) | the words we use for TangiTweak's concepts |
 | [Privacy policy](docs/privacy.md) | what TangiTweak accesses and stores, the requests it makes, and why it needs each permission |

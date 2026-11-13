@@ -4,7 +4,7 @@ import { explorer } from "../state/explorer";
 import { layout } from "../state/layout";
 import { attachFrame, preview, previewPrefs, reloadPreview, setPreviewUrl, showPreview, stopPreview, VIEWPORTS } from "../state/preview";
 
-/** the open file, if it's a script (not settings.yaml, a data file or the typings) */
+/** the open file, if it's a script (not settings.json, a data file or the typings) */
 function useOpenScript(): string | null {
     const { selectedId, typingsShown, scripts } = useSnapshot(explorer);
     return !typingsShown && selectedId && scripts.some((s) => s.id === selectedId) ? selectedId : null;

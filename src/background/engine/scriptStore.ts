@@ -391,7 +391,7 @@ export async function createFolder(path: string): Promise<void> {
 
 /**
  * Rename/move a folder: every script, data file and subfolder in it moves
- * along (scripts keep their settings.yaml sections, like a script rename).
+ * along (scripts keep their settings.json sections, like a script rename).
  * Import specifiers elsewhere are not rewritten. Throws on an invalid
  * target, a move into itself, or a clash.
  */

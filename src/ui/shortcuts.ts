@@ -9,7 +9,7 @@ export interface Shortcut {
 
 export const SHORTCUTS: Shortcut[] = [
     { keys: ["Mod+S"], action: "Save and hot-apply the script (or save the data file)", where: "Editor" },
-    { keys: ["Mod+P"], action: "Quick open a script, data file, settings.yaml or stores.json", where: "Global" },
+    { keys: ["Mod+P"], action: "Quick open a script, data file, settings.json or stores.json", where: "Global" },
     { keys: ["Mod+,"], action: "Open Settings", where: "Global" },
     { keys: ["F1"], action: "Command palette (all editor commands)", where: "Editor" },
     { keys: ["Mod+Shift+E"], action: "Focus the explorer", where: "Global" },

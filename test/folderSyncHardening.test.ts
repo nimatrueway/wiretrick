@@ -153,21 +153,18 @@ describe("folder sync: the background is the only writer", () => {
         await sync.stop();
     });
 
-    it("renaming in the store renames the script's settings.yaml section", async () => {
+    it("renaming in the store renames the script's settings.json entry", async () => {
         const sync = await started();
         const { saveScript } = await ss();
         const code = `tt.params({ n: { type: "number", default: 1 } });`;
         await saveScript({ id: "p", code, name: "old" });
         await sync.flush();
-        put("settings.yaml", files.get("settings.yaml")!.text.replace(/# n: 1|n: 1/, "n: 9 # tuned"));
+        put("settings.json", JSON.stringify({ scripts: { "old.ts": { n: 9 } } }, null, 2) + "\n");
         await sync.flush();
-        expect(files.get("settings.yaml")!.text).toMatch(/old\.ts:[\s\S]*n: 9 # tuned/);
+        expect(JSON.parse(files.get("settings.json")!.text)).toEqual({ scripts: { "old.ts": { n: 9 } } });
         await saveScript({ id: "p", code, name: "new" });
         await sync.flush();
-        const after = files.get("settings.yaml")!.text;
-        expect(after).toMatch(/new\.ts:[\s\S]*n: 9 # tuned/);
-        expect(after).not.toMatch(/\bold(\.ts)?:/);
-        expect(after).not.toMatch(/no longer exists/);
+        expect(JSON.parse(files.get("settings.json")!.text)).toEqual({ scripts: { "new.ts": { n: 9 } } });
         await sync.stop();
     });
 });
@@ -242,14 +239,14 @@ describe("folder sync: external edits", () => {
         await sync.stop();
     });
 
-    it("a broken settings.yaml is never overwritten", async () => {
+    it("a broken settings.json is never overwritten", async () => {
         const sync = await started();
-        put("settings.yaml", "params: [oops\n");
+        put("settings.json", "{ oops\n");
         await sync.flush();
         const { saveScript } = await ss();
         await saveScript({ id: "s", code: "// s", name: "s" });
         await sync.flush();
-        expect(files.get("settings.yaml")?.text).toBe("params: [oops\n");
+        expect(files.get("settings.json")?.text).toBe("{ oops\n");
         expect(files.get("s.ts")?.text).toBe("// s");
         await sync.stop();
     });

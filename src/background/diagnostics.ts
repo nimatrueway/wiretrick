@@ -122,7 +122,7 @@ export async function collectDiagnostics(extra: DiagnosticsExtra = {}): Promise<
         try {
             settings = await getSettingsText();
         } catch (e: any) {
-            settings = `# could not render settings.yaml: ${e?.message || e}`;
+            settings = JSON.stringify({ error: `could not render settings.json: ${e?.message || e}` });
         }
     }
     const tabs: { id?: number; url?: string; title?: string }[] = !has("state")
@@ -197,9 +197,9 @@ export async function collectDiagnostics(extra: DiagnosticsExtra = {}): Promise<
         out.push("");
     }
     if (has("settings")) {
-        out.push(`## settings.yaml`);
+        out.push(`## settings.json`);
         out.push("");
-        out.push(fence("yaml", settings));
+        out.push(fence("json", settings));
         out.push("");
     }
     if (has("stores")) {

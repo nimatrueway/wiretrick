@@ -8,7 +8,7 @@ const ITEMS: PickItem[] = [
     { path: "mock/deep/x.tsx", kind: "script" },
     { path: "mock/b.json", kind: "data" },
     { path: "mock/A.json", kind: "data" },
-    { path: "settings.yaml", kind: "settings" },
+    { path: "settings.json", kind: "settings" },
     { path: "mock/empty", kind: "folder" },
     { path: "Other", kind: "folder" },
 ];
@@ -25,19 +25,19 @@ const find = (path: string, nodes = roots): PickNode => {
 const ALL = ITEMS.map(() => true);
 
 describe("pick tree", () => {
-    it("keeps the diagnostic report's sections in their order, after settings.yaml and before folders", () => {
+    it("keeps the diagnostic report's sections in their order, after settings.json and before folders", () => {
         const t = buildPickTree([
             { path: "Network", kind: "section" },
             { path: "Environment", kind: "section" },
             { path: "Scripts/a.ts", kind: "script" },
-            { path: "settings.yaml", kind: "settings" },
+            { path: "settings.json", kind: "settings" },
             { path: "Log", kind: "section" },
         ]);
-        expect(shape(t)).toEqual(["settings.yaml", "Network", "Environment", "Log", { Scripts: ["a.ts"] }]);
+        expect(shape(t)).toEqual(["settings.json", "Network", "Environment", "Log", { Scripts: ["a.ts"] }]);
     });
 
-    it("orders as the Explorer: settings.yaml, folders, scripts (in their order), data files", () => {
-        expect(shape(roots)).toEqual(["settings.yaml", { mock: [{ deep: ["x.tsx"] }, "empty", "helpers.ts", "A.json", "b.json"] }, "Other", "zeta.ts", "alpha.ts"]);
+    it("orders as the Explorer: settings.json, folders, scripts (in their order), data files", () => {
+        expect(shape(roots)).toEqual(["settings.json", { mock: [{ deep: ["x.tsx"] }, "empty", "helpers.ts", "A.json", "b.json"] }, "Other", "zeta.ts", "alpha.ts"]);
         expect(find("mock/empty").item).toBe(7);
         expect(find("mock").item).toBeUndefined();
     });
@@ -47,17 +47,17 @@ describe("pick tree", () => {
     });
 
     it("rows: folders expanded unless collapsed", () => {
-        expect(names()).toEqual(["settings.yaml", "mock ▾", "  deep ▾", "    x.tsx", "  empty", "  helpers.ts", "  A.json", "  b.json", "Other", "zeta.ts", "alpha.ts"]);
-        expect(names("", ["mock"])).toEqual(["settings.yaml", "mock ▸", "Other", "zeta.ts", "alpha.ts"]);
+        expect(names()).toEqual(["settings.json", "mock ▾", "  deep ▾", "    x.tsx", "  empty", "  helpers.ts", "  A.json", "  b.json", "Other", "zeta.ts", "alpha.ts"]);
+        expect(names("", ["mock"])).toEqual(["settings.json", "mock ▸", "Other", "zeta.ts", "alpha.ts"]);
     });
 
     it("the filter: case-insensitive path substring; matches keep their folders, shown expanded", () => {
         expect(pathMatches("mock/Deep/x.tsx", " DEEP ")).toBe(true);
-        expect(names("JSON", ["mock"])).toEqual(["mock ▾", "  A.json", "  b.json"]);
+        expect(names("JSON", ["mock"])).toEqual(["settings.json", "mock ▾", "  A.json", "  b.json"]);
         expect(names("mock/")).toEqual(["mock ▾", "  deep ▾", "    x.tsx", "  empty", "  helpers.ts", "  A.json", "  b.json"]);
         expect(names("empty")).toEqual(["mock ▾", "  empty"]);
         expect(names("nothing")).toEqual([]);
-        expect(visibleLeaves(roots, "json")).toEqual([5, 4]);
+        expect(visibleLeaves(roots, "json")).toEqual([6, 5, 4]);
         expect(visibleLeaves(roots).sort()).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
     });
 

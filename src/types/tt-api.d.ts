@@ -721,12 +721,12 @@ declare namespace TangiTweak {
         type: "boolean";
         /** Default `false`. */
         default?: boolean;
-        /** Shown next to the control and in settings.yaml. */
+        /** Shown next to the control and in settings.json. */
         description?: string;
         /**
          * Turn the raw value into what the script receives — the param's
          * type becomes this function's return type. The ⚙ dialog, Editor and
-         * settings.yaml keep editing the raw value; `parse` re-runs whenever
+         * settings.json keep editing the raw value; `parse` re-runs whenever
          * it changes. A throw is a script error naming the param.
          *
          * @example
@@ -739,7 +739,7 @@ declare namespace TangiTweak {
         type: "number";
         /** Default `0`. */
         default?: number;
-        /** Shown next to the control and in settings.yaml. */
+        /** Shown next to the control and in settings.json. */
         description?: string;
         /** Lower bound; the UI clamps typed values. */
         min?: number;
@@ -750,7 +750,7 @@ declare namespace TangiTweak {
         /**
          * Turn the raw value into what the script receives — the param's
          * type becomes this function's return type. The ⚙ dialog, Editor and
-         * settings.yaml keep editing the raw value; `parse` re-runs whenever
+         * settings.json keep editing the raw value; `parse` re-runs whenever
          * it changes. A throw is a script error naming the param.
          *
          * @example
@@ -762,18 +762,17 @@ declare namespace TangiTweak {
     interface ParamDefString {
         type: "string";
         /**
-         * Edit in a textarea. Values with newlines are written as YAML block
-         * scalars in settings.yaml.
+         * Edit in a textarea. Multi-line string parameter.
          */
         multiline?: boolean;
         /** Default `""`. */
         default?: string;
-        /** Shown next to the control and in settings.yaml. */
+        /** Shown next to the control and in settings.json. */
         description?: string;
         /**
          * Turn the raw value into what the script receives — the param's
          * type becomes this function's return type. The ⚙ dialog, Editor and
-         * settings.yaml keep editing the raw value; `parse` re-runs whenever
+         * settings.json keep editing the raw value; `parse` re-runs whenever
          * it changes. A throw is a script error naming the param.
          *
          * @example
@@ -788,12 +787,12 @@ declare namespace TangiTweak {
         choices: string[];
         /** Default: the first choice. */
         default?: string;
-        /** Shown next to the control and in settings.yaml. */
+        /** Shown next to the control and in settings.json. */
         description?: string;
         /**
          * Turn the raw value into what the script receives — the param's
          * type becomes this function's return type. The ⚙ dialog, Editor and
-         * settings.yaml keep editing the raw value; `parse` re-runs whenever
+         * settings.json keep editing the raw value; `parse` re-runs whenever
          * it changes. A throw is a script error naming the param.
          *
          * @example
@@ -808,12 +807,12 @@ declare namespace TangiTweak {
         type: "stringList";
         /** Default `[]`. */
         default?: string[];
-        /** Shown next to the control and in settings.yaml. */
+        /** Shown next to the control and in settings.json. */
         description?: string;
         /**
          * Turn the raw value into what the script receives — the param's
          * type becomes this function's return type. The ⚙ dialog, Editor and
-         * settings.yaml keep editing the raw value; `parse` re-runs whenever
+         * settings.json keep editing the raw value; `parse` re-runs whenever
          * it changes. A throw is a script error naming the param.
          *
          * @example
@@ -837,12 +836,12 @@ declare namespace TangiTweak {
         type: "shortcut";
         /** Default `""` (none). A default that isn't a shortcut is a script error. */
         default?: string;
-        /** Shown next to the control and in settings.yaml. */
+        /** Shown next to the control and in settings.json. */
         description?: string;
         /**
          * Turn the raw value into what the script receives — the param's
          * type becomes this function's return type. The ⚙ dialog, Editor and
-         * settings.yaml keep editing the raw value; `parse` re-runs whenever
+         * settings.json keep editing the raw value; `parse` re-runs whenever
          * it changes. A throw is a script error naming the param.
          */
         parse?: (raw: string) => unknown;
@@ -852,7 +851,7 @@ declare namespace TangiTweak {
 
     /**
      * A nested object grouping parameters (or sub-sections) into collapsible
-     * sections in the popup and nested maps in settings.yaml.
+     * sections in the popup and nested maps in settings.json.
      */
     interface ParamGroup {
         readonly [key: string]: ParamDef | ParamGroup;
@@ -1164,7 +1163,7 @@ declare const tt: {
 
     /**
      * Declare adjustable parameters, editable from the popup's ⚙ dialog,
-     * the Editor and settings.yaml without touching the script. Returns
+     * the Editor and settings.json without touching the script. Returns
      * the current values (stored values over your defaults), typed from
      * your defs. Routes may be built from them — a change re-runs the
      * script. Libraries may declare params too (listed in the popup; one
@@ -1176,13 +1175,13 @@ declare const tt: {
      * (`cfg.hosts.push("a.com")`) from a handler — onPage, onOverlay or
      * network code, not onSite code and not the top level. The value is
      * checked against its type (a wrong one throws), seen right away, and
-     * saved like a ⚙ change: logged, written to settings.yaml, and the
+     * saved like a ⚙ change: logged, written to settings.json, and the
      * script hot-reloads with it. A param with `parse` can't be assigned.
      *
      * @param defs Parameter name → definition (`type`, `default`, optional
      *   `description` and `parse`; see {@link TangiTweak.ParamDef}), or a
      *   nested section object ({@link TangiTweak.ParamGroup}) grouping
-     *   related parameters in the popup and settings.yaml. With `parse`, the
+     *   related parameters in the popup and settings.json. With `parse`, the
      *   param's value is the parser's result (raw value in, e.g. a `URL` out)
      *   while the stored/edited value stays raw.
      * @returns The current values, typed from `defs`.

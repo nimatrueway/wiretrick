@@ -1,8 +1,8 @@
 /**
  * Utility scripts (no handlers at top level) with params: their params are
- * editable (popup / settings.yaml), and a param value may make them
+ * editable (popup / settings.json), and a param value may make them
  * register handlers — changing it must turn the utility into a script
- * (stored meta, settings.yaml `enabled`, reload) and back.
+ * (stored meta, settings.json `enabled`, reload) and back.
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import "../src/shared/transpile";
@@ -73,11 +73,11 @@ describe("library scripts with params", () => {
         expect((await analyzeScripts(scripts, { g: { on: true } })).get("g")!.meta.active).toBe(true);
     });
 
-    it("settings.yaml lists the library's params and gains `enabled` once it's a script", async () => {
+    it("settings.json applies the library's params and gains `enabled` once it's a script", async () => {
         await saveScript({ id: "g", name: "gate.tangitweak", code: GATE });
         let st = await currentSettingsState();
         expect(st.scripts.find((x) => x.name === "gate.tangitweak.ts")).toMatchObject({ declared: false, defs: { on: { type: "boolean" } } });
-        expect((await applySettingsText("params:\n  gate.tangitweak.ts:\n    on: true\n")).error).toBeUndefined();
+        expect((await applySettingsText(JSON.stringify({ scripts: { "gate.tangitweak.ts": { on: true } } }))).error).toBeUndefined();
         expect((await loadAllParamValues()).g).toEqual({ on: true });
         expect((await get("g")).meta.active).toBe(true);
         st = await currentSettingsState();

@@ -1,6 +1,6 @@
 /**
  * Param `parse`: the script sees the parser's result, typed as its return
- * type; storage, settings.yaml, the schema and messaging keep the raw
+ * type; storage, settings.json, the schema and messaging keep the raw
  * value and never see the function.
  */
 import { describe, expect, it } from "vitest";
@@ -11,9 +11,8 @@ import { compileScript, compileWithLibs } from "../src/shared/compile";
 import { makePageShim } from "../src/shared/pageShim";
 import { parseParamValue, serializableParamDef } from "../src/shared/scriptDef";
 import { formatScriptError } from "../src/shared/scriptError";
-import { renderSettings, parseSettings, planSettings } from "../src/shared/settingsYaml";
+import { renderSettings, parseSettings, planSettings } from "../src/shared/settingsJson";
 import { buildSettingsSchema } from "../src/shared/settingsSchema";
-import { settingsDiagnostics } from "../src/shared/settingsAssist";
 
 const CODE = `
 const cfg = tt.params({
@@ -93,15 +92,15 @@ describe("param parse (runtime)", () => {
 });
 
 describe("param parse (settings keep raw values)", () => {
-    it("settings.yaml export/import and the schema see raw values only", () => {
+    it("settings.json export/import and the schema see raw values only", () => {
         const { c } = logged(CODE, { origin: "https://b.org" });
-        const state = { name: "s", declared: true, enabled: true, defs: c.paramDefs!, values: { origin: "https://b.org", hosts: ["p"] } };
+        const state = { name: "s.ts", declared: true, enabled: true, defs: c.paramDefs!, values: { origin: "https://b.org", hosts: ["p"] } };
         const G = { logLevel: "info", logCap: 500 } as const;
-        const yaml = renderSettings(G, [state]);
-        expect(yaml).toContain("origin: https://b.org");
-        expect(yaml).not.toMatch(/parse|=>/);
-        const plan = planSettings(parseSettings(yaml.replace("https://b.org", "https://c.net")), G, [state]);
-        expect(plan.scripts).toEqual([{ name: "s", params: { origin: "https://c.net" } }]);
+        const json = renderSettings(G, [state]);
+        expect(JSON.parse(json)).toEqual({ scripts: { "s.ts": { origin: "https://b.org", hosts: ["p"] } } });
+        expect(json).not.toMatch(/parse|=>/);
+        const plan = planSettings(parseSettings(json.replace("https://b.org", "https://c.net")), G, [state]);
+        expect(plan.scripts).toEqual([{ name: "s.ts", params: { origin: "https://c.net" } }]);
         const schema = JSON.stringify(buildSettingsSchema([state]));
         expect(schema).not.toContain("parse");
     });
@@ -236,15 +235,15 @@ tt.onRequest({ url: "*://a.com/*", strategy: "helper" }, () => {});`;
         expect(c.error).toMatch(/shortcut parameter "k": "Hyper\+K" has an unknown modifier "Hyper"/);
     });
 
-    it("settings.yaml: documented with an example, typed as a string in the schema, bad keys flagged", () => {
+    it("settings.json: rendered when customized, typed as a string in the schema, bad keys skipped on plan", () => {
         const defs = { toggle: { type: "shortcut", default: "Alt+Shift+H", description: "Hide the box" } } as const;
-        const text = renderSettings({ logLevel: "warn", logCap: 500 }, [{ name: "s", enabled: true, declared: true, defs, values: { toggle: "Mod+K" } }]);
-        expect(text).toMatch(/Hide the box \(keys, e\.g\. Mod\+Shift\+K\)/);
-        expect(text).toMatch(/toggle: Mod\+K/);
-        const schema: any = buildSettingsSchema([{ name: "s", enabled: true, declared: true, defs, values: {} }]);
-        expect(schema.properties.params.properties.s.properties.toggle).toMatchObject({ type: "string", default: "Alt+Shift+H" });
-        const bad = 'params:\n  s:\n    toggle: "Hyper+K"\n';
-        expect(settingsDiagnostics(bad, [{ name: "s", declared: true, defs }]).map((d) => d.message)).toEqual(['Expected keys like "Mod+Shift+K" (or "" for none) — this value is ignored']);
-        expect(settingsDiagnostics('params:\n  s:\n    toggle: ""\n', [{ name: "s", declared: true, defs }])).toEqual([]);
+        const text = renderSettings({ logLevel: "warn", logCap: 500 }, [{ name: "s.ts", enabled: true, declared: true, defs, values: { toggle: "Mod+K" } }]);
+        expect(JSON.parse(text)).toEqual({ logLevel: "warn", scripts: { "s.ts": { toggle: "Mod+K" } } });
+        const schema: any = buildSettingsSchema([{ name: "s.ts", enabled: true, declared: true, defs, values: {} }]);
+        expect(schema.properties.scripts.properties["s.ts"].properties.toggle).toMatchObject({ type: "string", default: "Alt+Shift+H" });
+        const bad = JSON.stringify({ scripts: { "s.ts": { toggle: "Hyper+K" } } });
+        expect(planSettings(parseSettings(bad), { logLevel: "info", logCap: 500 }, [{ name: "s.ts", enabled: true, declared: true, defs, values: {} }]).scripts).toEqual([]);
+        const cleared = JSON.stringify({ scripts: { "s.ts": { toggle: "" } } });
+        expect(planSettings(parseSettings(cleared), { logLevel: "info", logCap: 500 }, [{ name: "s.ts", enabled: true, declared: true, defs, values: {} }]).scripts).toEqual([{ name: "s.ts", params: { toggle: "" } }]);
     });
 });

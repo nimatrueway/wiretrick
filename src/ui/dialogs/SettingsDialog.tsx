@@ -8,7 +8,7 @@ import { panel } from "../state/panel";
 import { saveTheme, type ThemePref } from "../theme";
 import { aboutText } from "../about";
 import { cleanFolderPath, copyPathHint, hostOs, type LaunchMode } from "../bundle";
-import { BODY_CAP_KEY, BODY_CAP_MAX, BODY_CAP_MIN, DEFAULT_BODY_CAP } from "../../shared/settingsYaml";
+import { BODY_CAP_KEY, BODY_CAP_MAX, BODY_CAP_MIN, DEFAULT_BODY_CAP } from "../../shared/settingsJson";
 import { Overlay, useControl, useFlash } from "./controls";
 
 const SECTIONS: [string, string][] = [
@@ -69,7 +69,7 @@ export function SettingsDialog() {
                                 <span className="setting-label">Zip</span>
                                 <div className="setting-control">
                                     <div id="settings-io-row" className="setting-inline"><button id="btn-export" onClick={() => actions.exportBundle()}>Export…</button>{" "}<button id="btn-import" onClick={() => actions.importBundle()}>Import…</button></div>
-                                    <p className="setting-help">Export any subset of scripts, data files, folders and settings.yaml to a zip laid out like the scripts folder. Import such a zip (or a zipped scripts folder), picking which of its files to take, or a single .ts/.tsx/.js file.</p>
+                                    <p className="setting-help">Export any subset of scripts, data files, folders, settings.json and stores.json to a zip laid out like the scripts folder. Import such a zip (or a zipped scripts folder), picking which of its files to take, or a single .ts/.tsx/.js file.</p>
                                 </div>
                             </div>
                         </section>

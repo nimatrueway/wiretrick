@@ -1,6 +1,6 @@
 /**
  * Problems view: what is currently wrong with each script (and each data
- * file, and settings.yaml). Unlike Log lines, a Problem goes away by itself once it is
+ * file, and settings.json). Unlike Log lines, a Problem goes away by itself once it is
  * fixed — type errors live as you type, the rest when the script is saved.
  */
 import { scriptFrame } from "../shared/scriptError";
@@ -54,11 +54,11 @@ export interface Problem {
 }
 
 export interface ProblemGroup {
-    /** script / data file id, or the settings id for settings.yaml */
+    /** script / data file id, or the settings id for settings.json */
     id: string;
     /** file path shown in the group header */
     label: string;
-    file: "ts" | "tsx" | "yaml" | "json";
+    file: "ts" | "tsx" | "settings" | "json";
     problems: Problem[];
 }
 
@@ -96,7 +96,7 @@ export interface ProblemDataFile {
     markers: ProblemMarker[];
 }
 
-export const SETTINGS_GROUP = { id: "__settings__", label: "settings.yaml" };
+export const SETTINGS_GROUP = { id: "__settings__", label: "settings.json" };
 
 function runtimeMessage(r: { message: string; at: number; count: number; ctx?: string }): string {
     const when = new Date(r.at).toLocaleTimeString();
@@ -261,7 +261,7 @@ function byPosition(a: Problem, b: Problem): number {
 }
 
 /**
- * Every current problem, one group per file that has any: settings.yaml
+ * Every current problem, one group per file that has any: settings.json
  * first, then the scripts in the given (explorer) order, then the data
  * files. A script with a
  * live editor model uses its markers (`liveMarkers` has its id); otherwise
@@ -269,7 +269,7 @@ function byPosition(a: Problem, b: Problem): number {
  */
 export function collectProblems(scripts: ProblemScript[], liveMarkers: Map<string, ProblemMarker[]>, settingsMarkers?: ProblemMarker[], dataFiles: ProblemDataFile[] = []): ProblemGroup[] {
     const groups: ProblemGroup[] = [];
-    if (settingsMarkers?.length) groups.push({ ...SETTINGS_GROUP, file: "yaml", problems: fromMarkers(settingsMarkers, "settings").sort(byPosition) });
+    if (settingsMarkers?.length) groups.push({ ...SETTINGS_GROUP, file: "settings", problems: fromMarkers(settingsMarkers, "settings").sort(byPosition) });
     for (const s of scripts) {
         const problems: Problem[] = [];
         const live = liveMarkers.get(s.id);

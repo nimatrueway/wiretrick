@@ -260,7 +260,7 @@ function onContextMenu(e: MouseEvent<HTMLUListElement>): void {
         return;
     }
     if (!id || isVirtualRootId(id)) {
-        // settings.yaml, stores.json and the empty space below the tree: the root
+        // settings.json, stores.json and the empty space below the tree: the root
         if (id) moveFocus(id);
         const hasDirs = !id && everyFolder().length > 0;
         showContextMenu(e.clientX, e.clientY, [
@@ -386,7 +386,7 @@ function useDnd() {
     return { dropFolder, handlers };
 }
 
-/** The tree: settings.yaml, then the folders, scripts and data files (one tab stop; the rows aren't focusable). */
+/** The tree: settings.json, then the folders, scripts and data files (one tab stop; the rows aren't focusable). */
 export function ExplorerTree() {
     const snap = useSnapshot(explorer, { sync: true });
     const list = useRef<HTMLUListElement>(null);
@@ -491,8 +491,8 @@ export function ExplorerTree() {
             "",
             0,
             <>
-                <FileIcon kind="yaml" />
-                <span className="script-name">settings.yaml</span>
+                <FileIcon kind="settings" />
+                <span className="script-name">settings.json</span>
             </>,
             { title: "Settings file — global settings and per-script params & enabled state", ...click(SETTINGS_ID, () => actions.select(SETTINGS_ID)) }
         ),

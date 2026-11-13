@@ -1,6 +1,6 @@
 /**
  * The Export…/Import… picker's tree: files under their folders (as in the
- * Explorer: settings.yaml first, then in each folder its subfolders, its
+ * Explorer: settings.json first, then in each folder its subfolders, its
  * scripts, its data files), a checkbox per file and empty folder, folders'
  * boxes derived from what's in them, and a path filter. Pure, so it's
  * unit-tested; dialogs/BundlePicker.tsx renders it.
@@ -11,7 +11,7 @@ import { baseName } from "./explorerTree";
 export type PickKind = "settings" | "section" | "script" | "data" | "folder";
 
 export interface PickItem {
-    /** path as in the scripts folder: `mock/helpers.ts`, `mock/d.json`, `settings.yaml`; an (empty) folder's: `mock/empty` */
+    /** path as in the scripts folder: `mock/helpers.ts`, `mock/d.json`, `settings.json`; an (empty) folder's: `mock/empty` */
     path: string;
     kind: PickKind;
     /** short tag after the name, e.g. "disabled", "replaces existing" */

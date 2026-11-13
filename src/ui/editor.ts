@@ -3,12 +3,11 @@
  */
 
 import "./shell/mount";
-import { loadMonaco, STARTER_TEMPLATE, apiTypingsText } from "./monacoSetup";
+import { loadMonaco, STARTER_TEMPLATE, apiTypingsText, updateJsonSchemas } from "./monacoSetup";
 import { createMonacoTsWorkspace, IMPORT_OWNER, JSX_IN_TS, UNPINNED, type TsWorkspace } from "./tsWorkspace";
 import { API_TYPINGS_URI } from "./apiLinks";
 import { NavHistory } from "./navHistory";
 import type { SampleScript } from "./samples";
-import { settingsDiagnostics, settingsCompletions, settingsHover, type AssistScript } from "../shared/settingsAssist";
 import { badPackageImports, folderOf, imageDataUrlToBytes, isImageDataPath, isMarkdownPath, isSvgPath, missingImports } from "../shared/scriptImports";
 import { makeFolderPackagePlan, makePackagePlan } from "../shared/makePackage";
 import { MANIFEST_FILE } from "../shared/packageMetadata";
@@ -29,7 +28,7 @@ import { cleanScriptName, isTsxName, scriptNameProblem, scriptFileName, scriptFi
 import { jsxElementAt } from "../shared/builtinSpecs";
 import { vscodeTargetPath, editorLaunchUrl, launchAppName, type LaunchMode } from "./bundle";
 import { computeDirty } from "./dirtyState";
-import { parseSettings, SETTINGS_FILE, isBodyCap, BODY_CAP_KEY, DEFAULT_BODY_CAP } from "../shared/settingsYaml";
+import { parseSettings, SETTINGS_FILE, isBodyCap, BODY_CAP_KEY, DEFAULT_BODY_CAP } from "../shared/settingsJson";
 import { createNetStore, type NetStore } from "./network/netStore";
 import { installTooltips } from "./tooltip";
 import type { ScriptHealthInput } from "../shared/scriptHealth";
@@ -132,16 +131,11 @@ let storesModel: any = null;
 async function loadSettingsModel(force = false): Promise<void> {
     if (!editor) return;
     const monaco = (window as any).monaco;
-    // Monaco's built-in yaml basic language provides colorization
-    // the stored text is the whole synced document (comments, order,
-    // formatting) — never patch our own copy key by key
-    const { text } = await send({ type: "getSettingsYaml" });
+    const { text } = await send({ type: "getSettingsJson" });
     if (!settingsModel) {
-        settingsModel = monaco.editor.createModel(text, "yaml", monaco.Uri.parse("file:///settings.yaml"));
+        settingsModel = monaco.editor.createModel(text, "json", monaco.Uri.parse("file:///" + SETTINGS_FILE));
         setBaseline(settingsModel, text);
-        settingsModel.onDidChangeContent(() => scheduleSettingsMarkers());
-        scheduleSettingsMarkers();
-    } else if (settingsModel.getValue() !== text && (force || !dirty)) {
+    } else if (settingsModel.getValue() !== text && (force || !(selectedId === SETTINGS_ID && dirty))) {
         applyingExternal = true;
         settingsModel.setValue(text);
         applyingExternal = false;
@@ -164,76 +158,8 @@ async function loadStoresModel(force = false): Promise<void> {
     }
 }
 
-// ---- settings.yaml assistance: schema + each script's declared params ----
-const assistScripts = (): AssistScript[] =>
-    scripts.map((s: any) => ({ name: scriptFileName(s.meta.name), declared: s.meta.active !== false, defs: s.paramDefs ?? {} }));
-let settingsMarkerTimer: ReturnType<typeof setTimeout> | null = null;
-
-function scheduleSettingsMarkers(): void {
-    if (settingsMarkerTimer) clearTimeout(settingsMarkerTimer);
-    settingsMarkerTimer = setTimeout(() => {
-        settingsMarkerTimer = null;
-        const monaco = (window as any).monaco;
-        const m = settingsModel;
-        if (!m || m.isDisposed()) return;
-        const markers = settingsDiagnostics(m.getValue(), assistScripts()).map((d) => {
-            const a = m.getPositionAt(d.start);
-            const b = m.getPositionAt(d.end);
-            return {
-                severity: d.severity === "error" ? monaco.MarkerSeverity.Error : monaco.MarkerSeverity.Warning,
-                startLineNumber: a.lineNumber,
-                startColumn: a.column,
-                endLineNumber: b.lineNumber,
-                endColumn: b.column,
-                message: d.message,
-                source: "settings.yaml",
-            };
-        });
-        monaco.editor.setModelMarkers(m, "tt-settings", markers);
-    }, 250);
-}
-
-function registerSettingsAssist(): void {
+function registerManifestAssist(): void {
     const monaco = (window as any).monaco;
-    const mine = (model: any) => model === settingsModel;
-    const KIND: Record<string, any> = {
-        property: monaco.languages.CompletionItemKind.Property,
-        value: monaco.languages.CompletionItemKind.Value,
-        module: monaco.languages.CompletionItemKind.Module,
-    };
-    monaco.languages.registerCompletionItemProvider("yaml", {
-        triggerCharacters: [" ", ":"],
-        provideCompletionItems(model: any, position: any) {
-            if (!mine(model)) return { suggestions: [] };
-            const offset = model.getOffsetAt(position);
-            const { items, replaceFrom } = settingsCompletions(model.getValue(), offset, assistScripts());
-            const start = model.getPositionAt(replaceFrom);
-            const range = { startLineNumber: start.lineNumber, startColumn: start.column, endLineNumber: position.lineNumber, endColumn: position.column };
-            return {
-                suggestions: items.map((it, i) => ({
-                    label: it.label,
-                    kind: KIND[it.kind],
-                    insertText: it.insertText,
-                    detail: it.detail,
-                    documentation: it.documentation ? { value: it.documentation } : undefined,
-                    sortText: String(i).padStart(4, "0"),
-                    range,
-                    // a key completion that opens a nested map continues straight into it
-                    command: it.insertText.endsWith("\n") || /\n\s+$/.test(it.insertText) ? { id: "editor.action.triggerSuggest", title: "" } : undefined,
-                })),
-            };
-        },
-    });
-    monaco.languages.registerHoverProvider("yaml", {
-        provideHover(model: any, position: any) {
-            if (!mine(model)) return null;
-            const h = settingsHover(model.getValue(), model.getOffsetAt(position), assistScripts());
-            if (!h) return null;
-            const a = model.getPositionAt(h.start);
-            const b = model.getPositionAt(h.end);
-            return { contents: [{ value: h.markdown }], range: { startLineNumber: a.lineNumber, startColumn: a.column, endLineNumber: b.lineNumber, endColumn: b.column } };
-        },
-    });
     // a package's metadata.json: "scripts" completes the .ts/.tsx files in its folder
     monaco.languages.registerCompletionItemProvider("json", {
         triggerCharacters: ['"', "/"],
@@ -262,7 +188,7 @@ function registerSettingsAssist(): void {
 }
 
 async function selectSettings(): Promise<void> {
-    // back from the typings: settings.yaml's unsaved edits are still in its model
+    // back from the typings: settings.json's unsaved edits are still in its model
     const back = typingsShown && selectedId === SETTINGS_ID;
     leaveTypings();
     selectedId = SETTINGS_ID;
@@ -285,13 +211,13 @@ async function selectSettings(): Promise<void> {
 
 async function saveSettings(): Promise<void> {
     setSaveState("saving");
-    const res = await send({ type: "applySettingsYaml", text: editor.getValue() });
+    const res = await send({ type: "applySettingsJson", text: editor.getValue() });
     if (res && res.error) {
         setSaveState("unsaved");
-        status(`settings.yaml: ${res.error}`, "error");
+        status(`${SETTINGS_FILE}: ${res.error}`, "error");
         return;
     }
-    await loadSettingsModel(true); // re-canonicalize (restores commented defaults)
+    await loadSettingsModel(true);
     setDirty(false);
     status("");
     await refresh();
@@ -356,8 +282,8 @@ async function refresh(): Promise<void> {
     renderList();
     pruneCollapsed();
     syncWorkspace();
+    updateJsonSchemas(scripts.map((s: any) => ({ name: scriptFileName(s.meta.name), declared: s.meta.active !== false, enabled: s.enabled, defs: s.paramDefs ?? {}, values: {} })));
     scheduleDiagnostics();
-    scheduleSettingsMarkers();
     if (selectedId && !isVirtualRootId(selectedId) && !known(selectedId)) {
         selectedId = null;
     }
@@ -425,7 +351,7 @@ async function deleteRows(rows: TreeRow[]): Promise<void> {
     await refresh();
 }
 
-/** Editor toolbar switch: enable/disable the open script (hidden for settings.yaml, data files and libraries). */
+/** Editor toolbar switch: enable/disable the open script (hidden for settings.json, data files and libraries). */
 function updateEnabledToggle(): void {
     const script = typingsShown ? undefined : scripts.find((s) => s.id === selectedId);
     toolbar.enabled = !script || script.meta.active === false ? null : !!script.enabled;
@@ -1386,7 +1312,7 @@ function setProblemMarkers(m: any, markers: any[]): void {
 
 /**
  * Squiggles for the problems Monaco doesn't mark itself (TypeScript and
- * settings.yaml problems are its own markers). Markers, like TypeScript's,
+ * settings.json problems are its own markers). Markers, like TypeScript's,
  * so their hover comes before the API docs one. Their positions are in the
  * saved code, so a model with unsaved edits keeps the ones it has (they move
  * with the edits).
@@ -1442,7 +1368,7 @@ function updateProblems(): void {
               }),
           ]
         : [];
-    // explorer order (settings.yaml, then stores.json, then tree rows)
+    // explorer order (settings.json, then stores.json, then tree rows)
     const order = new Map<string, number>([
         [SETTINGS_ID, -2],
         [STORES_ID, -1],
@@ -1623,7 +1549,7 @@ function setMonacoVerbose(on: boolean, level?: string): void {
     navLog(`verbose logging ${on ? "on" : "off"}`, level);
 }
 
-/** Load the stored settings into the stores, and follow later changes (settings.yaml edits land in storage). */
+/** Load the stored settings into the stores, and follow later changes (settings.json edits land in storage). */
 function setupSettings(): void {
     watchTheme((t, pref) => {
         currentTheme = t;
@@ -1651,9 +1577,9 @@ function setupSettings(): void {
         if (storeChanged || c.resScripts) {
             if (selectedId === STORES_ID || storesModel) void loadStoresModel();
         }
-        if (c.resScripts || c.resParams || c.resLogLevel || c.resLogCap || c[BODY_CAP_KEY] || c.resSettingsText || c.resDataFiles || c.resFolders) {
+        if (c.resScripts || c.resParams || c.resLogLevel || c.resLogCap || c[BODY_CAP_KEY] || c.resDataFiles || c.resFolders) {
             void (async () => {
-                if (selectedId === SETTINGS_ID) await loadSettingsModel();
+                if (selectedId === SETTINGS_ID || settingsModel) await loadSettingsModel();
                 // data files / folders change the script order (folders) or importers' errors
                 if (c.resScripts || c.resDataFiles || c.resFolders) await refresh();
             })();
@@ -1873,8 +1799,8 @@ function openInEditor(): void {
     }
     if (!selectedId || typingsShown) return;
     if (selectedId === STORES_ID) void send({ type: "ensureStoresOnDisk" });
-    // the ⚙ settings.yaml and stores.json entries are virtual (not in `scripts`) — their
-    // targets are <folder>/settings.yaml and <folder>/stores.json, written by folderSync
+    // the ⚙ settings.json and stores.json entries are virtual (not in `scripts`) — their
+    // targets are <folder>/settings.json and <folder>/stores.json, written by folderSync
     const data = dataFiles.find((d) => d.id === selectedId);
     const file =
         selectedId === STORES_ID
@@ -1912,7 +1838,7 @@ const importsWarning = (names: { name: string; code: string; data?: boolean }[])
 };
 /** Export…: pick what goes into the zip, then download it */
 async function exportBundle(): Promise<void> {
-    const { text } = await send({ type: "getSettingsYaml", text: settingsModel?.getValue() });
+    const { text } = selectedId === SETTINGS_ID && dirty && settingsModel ? { text: settingsModel.getValue() } : await send({ type: "getSettingsJson" });
     const dataFiles: { path: string; text: string }[] = (await send({ type: "listDataFiles" })) || [];
     const folders: string[] = (await send({ type: "listFolders" })) || [];
     const allStores: Record<string, Record<string, any>> = (await send({ type: "exportStores" }).catch(() => ({}))) || {};
@@ -1927,7 +1853,7 @@ async function exportBundle(): Promise<void> {
     const foldersAt = settingsAt + 1 + (hasStores ? 1 : 0);
     const chosen = await pickItems({
         title: "Export",
-        intro: "Pick what goes into the zip. It's laid out like the scripts folder: scripts and data files by path, settings.yaml with globals and params, and optionally persisted globalStore data.",
+        intro: "Pick what goes into the zip. It's laid out like the scripts folder: scripts and data files by path, settings.json with globals and params, and optionally persisted globalStore data.",
         items: [
             ...scripts.map((s) => ({ path: scriptFileName(s.meta.name), kind: "script" as const, badge: s.meta.active !== false && !s.enabled ? "disabled" : undefined })),
             ...dataFiles.map((d) => ({ path: d.path, kind: "data" as const })),
@@ -2006,7 +1932,7 @@ async function importZip(file: File): Promise<void> {
         return;
     }
     if (!zip.scripts.length && !zip.dataFiles.length && !zip.folders.length && zip.settings === null && !zip.stores) {
-        status(`${file.name}: no scripts, data files, settings.yaml or ${STORES_FILE} in it`, "error");
+        status(`${file.name}: no scripts, data files, ${SETTINGS_FILE} or ${STORES_FILE} in it`, "error");
         return;
     }
     const existingData: { id: string; path: string }[] = (await send({ type: "listDataFiles" })) || [];
@@ -2041,13 +1967,13 @@ async function importZip(file: File): Promise<void> {
     const ignored = zip.ignored.length ? ` ${plural(zip.ignored.length, "other file")} in it ${zip.ignored.length === 1 ? "isn't" : "aren't"} a script or data file and won't be imported.` : "";
     const chosen = await pickItems({
         title: `Import ${file.name}`,
-        intro: `Pick what to import. A script (data file) replaces the existing script (data file) at the same path; settings.yaml applies the globals and the picked scripts' enabled state and params.${gone.length ? " Files marked deleted are in the package here but not in this version: checked, they're deleted." : ""}${ignored}`,
+        intro: `Pick what to import. A script (data file) replaces the existing script (data file) at the same path; ${SETTINGS_FILE} applies the globals and the picked scripts' enabled state and params.${gone.length ? " Files marked deleted are in the package here but not in this version: checked, they're deleted." : ""}${ignored}`,
         items: [
             ...zip.scripts.map((s) => ({ path: s.file, kind: "script" as const, badge: existsBadge(s.name) })),
             ...zip.dataFiles.map((d) => ({ path: d.path, kind: "data" as const, badge: dataFileIn(d.path) ? "replaces existing" : "new" })),
             ...(zip.settings === null
                 ? []
-                : [settingsError ? { path: SETTINGS_FILE, kind: "settings" as const, badge: "YAML error", detail: settingsError, checked: false } : { path: SETTINGS_FILE, kind: "settings" as const }]),
+                : [settingsError ? { path: SETTINGS_FILE, kind: "settings" as const, badge: "JSON error", detail: settingsError, checked: false } : { path: SETTINGS_FILE, kind: "settings" as const }]),
             ...(!zip.stores
                 ? []
                 : [
@@ -2091,7 +2017,7 @@ async function importZip(file: File): Promise<void> {
     if (withSettings) {
         let res: any;
         try {
-            res = await send({ type: "applySettingsDoc", doc: importedSettingsDoc(zip.settings!, pickedScripts.map((s) => s.name)) });
+            res = await send({ type: "applySettingsDoc", doc: importedSettingsDoc(zip.settings!, pickedScripts.map((s) => s.name), zip.scripts.length > 0) });
         } catch (e) {
             res = { error: (e as Error).message };
         }
@@ -2223,11 +2149,11 @@ async function main(): Promise<void> {
         if ((problemMarkerKeys.get(m) ?? "[]") !== "[]") setProblemMarkers(m, []);
         scheduleProblems();
     });
-    registerSettingsAssist();
+    registerManifestAssist();
     registerPinImportFix();
     registerPlaceFixes();
     registerTsxFix();
-    // VS Code shortcuts: ⌘P quick-open (scripts + settings.yaml), ⌘, opens
+    // VS Code shortcuts: ⌘P quick-open (scripts + settings.json), ⌘, opens
     // the Settings dialog, ⌘⇧E focuses the explorer, ⌘B / ⌘J toggle the
     // explorer / panel, ⌘⇧M or ⌥⇧P/L/N show a panel view (filter focused), ⌥⇧K clears it, ⌥Z toggles word wrap
     // (the last five are also editor actions, so they work while Monaco has
