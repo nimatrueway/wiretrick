@@ -1017,9 +1017,37 @@ Release-only rebuild.
 
 ## [0.0.1-alpha] - 2026-10-19
 
-First release of Wiretrick:
-scripts with typed handlers, interception strategies, a local helper,
-two-way folder sync, and signed MV2/MV3 packages.
+First tagged release (as **Wiretrick**, renamed **TangiTweak** in `0.21.0-alpha`):
+TypeScript scripts with typed handlers and parameters, multi-strategy interception (`page`, `debugger`, `extension`, and the Rust local MITM helper), two-way folder sync, and signed MV2/MV3 packages.
+
+## Pre-release history (2026-10-12 to 2026-10-19)
+
+Before `0.0.1-alpha` was tagged, the extension grew from an initial TypeScript prototype (`res.*` API) into a multi-strategy MV2/MV3 scripting environment over five milestones:
+
+### 2026-10-19: Rust local helper proxy & Wiretrick launch
+
+- Added the Rust local MITM proxy helper (`nativeMessaging` + per-user local CA + selective `chrome.proxy` PAC routing only for matched hosts), enabling banner-free network-level request/response interception with gzip/deflate/brotli decoding, upstream HTTP/HTTPS/SOCKS proxy chaining, and one-line `curl`/PowerShell installers verified against `SHA256SUMS`.
+- Named the extension **Wiretrick**, retargeted sample scripts to live verifiable sites with MV3 Chromium E2E coverage, and set up automated signed MV2 + MV3 `.crx` and `.zip` release publishing.
+
+### 2026-10-17: Manifest V3 build, Quick Open & source-mapped errors
+
+- Added a Chrome Manifest V3 build alongside MV2 using a service worker + sandboxed compile host and session analysis cache.
+- Added Quick Open (`⌘P` / `Ctrl+P`) with per-file cursor and scroll restoration, cross-file Go to Definition in Monaco, schema-validated settings file sync, and source-mapped `line:col` script error attribution.
+
+### 2026-10-15: Typed parameters & multi-file library imports
+
+- Replaced `==ResScript==` / `@directive` comment headers with programmatic declarations and typed parameters (`boolean`, `number`, `string`, `enum`, `stringList`), editable inline via collapsible folds in a drag-resizable popup.
+- Added relative ES module imports across scripts (`import "./utilities"`): files without handler registrations act as reusable library modules (marked `𝑓`), backed by per-script `file:///` Monaco models, generated `tsconfig.json` for VS Code, and `F12` definition navigation.
+
+### 2026-10-13: Eval-free page hook, async handlers & hot reload
+
+- Moved response body execution out of page scripts into the extension background so the `MAIN`-world `fetch`/XHR hook runs completely `eval`-free on strict-CSP pages, with proper `AbortSignal` propagation and automatic `debugger`-tier fallback.
+- Added `async` handler support across all hooks, predictable handler stacking, synthetic networkless responses (`onRequest.respond` with status, MIME type, and headers), live hot reload for open tabs on save, log source filtering, and an **Open in VS Code** toolbar button.
+
+### 2026-10-12: Initial TypeScript engine, Monaco editor & folder sync
+
+- Built the initial TypeScript script engine (in-browser Sucrase transpilation, `res.onRequest` / `res.onDom` / `res.log`, script `console.*` capture), embedded Monaco editor with bundled API typings, movable log panel, popup with per-tab active-script badge, sample scripts, and bundle import/export.
+- Implemented three initial interception tiers (`MAIN`-world `fetch`/XHR hook, MV2 blocking `webRequest`, and `chrome.debugger` `Fetch` for main-frame HTML and subresources with adaptive idle detach), two-way local folder sync via the File System Access API, and the headless Chromium E2E suite.
 
 [Unreleased]: https://github.com/tangistudio/TangiTweak/compare/v0.33.1-alpha...HEAD
 [0.33.1-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.33.0-alpha...v0.33.1-alpha
