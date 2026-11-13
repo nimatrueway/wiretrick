@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { crawl, fetchPackage, installTargetUrl, isRemote, parseSource, pickStart, sourceLabel, stripInstallHash, ENTRY_URL_RE, type Net } from "../src/shared/packageSource";
+import { describe, it, expect, vi } from "vitest";
+import { crawl, fetchPackage, installTargetUrl, isRemote, parseSource, pickStart, sourceLabel, stripInstallHash, webNet, ENTRY_URL_RE, type Net } from "../src/shared/packageSource";
 import { writeZip } from "../src/shared/zip";
 
 describe("parseSource", () => {
@@ -163,5 +163,80 @@ describe("fetchPackage", () => {
         await fetchPackage({ kind: "zip", url: "https://x.dev/kit.zip" }, streamingNet, (p) => zipEvents.push(p));
         expect(zipEvents).toContainEqual({ done: 120, total: 240, detail: "120 B / 240 B" });
         expect(zipEvents[zipEvents.length - 1]).toEqual({ done: 240, total: 240, detail: "240 B / 240 B" });
+    });
+
+    it("falls back to cookie-authenticated github.com archive zip for private repos (root, subfolder, and SSO/404 errors)", async () => {
+        const sha = "9d3dc7db2e7800a90c97ef6c9c72d78771b464b4";
+        const repoZip = writeZip(
+            {
+                [`priv-${sha}/metadata.json`]: JSON.stringify({ name: "PrivRoot", scripts: ["index.tsx"] }),
+                [`priv-${sha}/index.tsx`]: `import "./lib/store";`,
+                [`priv-${sha}/lib/store.ts`]: `export const s = 1;`,
+                [`priv-${sha}/dark/dark.tangitweak.ts`]: `import "./util";`,
+                [`priv-${sha}/dark/util.ts`]: `export {};`,
+            },
+            new Date(),
+            sha
+        );
+        const authCalls: { url: string; auth?: boolean }[] = [];
+        const privNet: Net = {
+            async json(url) {
+                throw new Error(`${url}: HTTP 404`);
+            },
+            async text() {
+                return null;
+            },
+            async bytes(url, onBytes, auth) {
+                authCalls.push({ url, auth });
+                if (!auth) return null;
+                if (url === "https://github.com/me/priv/archive/HEAD.zip" || url === "https://github.com/me/priv/archive/refs/heads/dev.zip") {
+                    onBytes?.(repoZip.byteLength, repoZip.byteLength);
+                    return repoZip.buffer.slice(repoZip.byteOffset, repoZip.byteOffset + repoZip.byteLength) as ArrayBuffer;
+                }
+                if (url === "https://github.com/me/sso-locked/archive/HEAD.zip") {
+                    return new TextEncoder().encode("<!doctype html><html><body>Sign in to SSO</body></html>").buffer as ArrayBuffer;
+                }
+                return null;
+            },
+        };
+
+        const rootPkg = await fetchPackage(parseSource("https://github.com/me/priv") as any, privNet);
+        expect(authCalls[0]).toEqual({ url: "https://github.com/me/priv/archive/HEAD.zip", auth: true });
+        expect(rootPkg.revision).toBe(sha);
+        expect(rootPkg.manifest?.name).toBe("PrivRoot");
+        expect(Object.keys(rootPkg.files).sort()).toEqual(["index.tsx", "lib/store.ts", "metadata.json"]);
+
+        const subPkg = await fetchPackage({ kind: "github", owner: "me", repo: "priv", ref: "refs/heads/dev", path: "dark", tree: true }, privNet);
+        expect(authCalls[1]).toEqual({ url: "https://github.com/me/priv/archive/refs/heads/dev.zip", auth: true });
+        expect(subPkg.revision).toBe(sha);
+        expect(Object.keys(subPkg.files).sort()).toEqual(["dark.tangitweak.ts", "util.ts"]);
+
+        // Subfolder URL on a slash-containing branch (e.g. tree/refs/heads/dev/dark parsed from github.com)
+        const slashBranchUrl = parseSource("https://github.com/me/priv/tree/refs/heads/dev/dark") as any;
+        const slashPkg = await fetchPackage(slashBranchUrl, privNet);
+        expect(slashPkg.revision).toBe(sha);
+        expect(Object.keys(slashPkg.files).sort()).toEqual(["dark.tangitweak.ts", "util.ts"]);
+
+        await expect(fetchPackage(parseSource("https://github.com/me/sso-locked") as any, privNet)).rejects.toThrow(/sign in or authorize SSO/);
+        await expect(fetchPackage(parseSource("https://github.com/me/no-access") as any, privNet)).rejects.toThrow(/sign in to GitHub/);
+    });
+
+    it("webNet retries 404 https fetches with credentials: include, and honors explicit auth=true", async () => {
+        const creds: string[] = [];
+        const origFetch = globalThis.fetch;
+        globalThis.fetch = vi.fn(async (_url: any, init?: RequestInit) => {
+            creds.push(String(init?.credentials));
+            if (init?.credentials === "include") return new Response("private-ok", { status: 200 });
+            return new Response("not found", { status: 404 });
+        }) as any;
+        try {
+            expect(await webNet.text("https://github.com/me/priv/raw/main/a.ts")).toBe("private-ok");
+            expect(creds).toEqual(["omit", "include"]);
+            creds.length = 0;
+            expect(await webNet.text("https://github.com/me/priv/raw/main/a.ts", true)).toBe("private-ok");
+            expect(creds).toEqual(["include"]);
+        } finally {
+            globalThis.fetch = origFetch;
+        }
     });
 });

@@ -10,8 +10,8 @@ export async function readZip(buf: ArrayBuffer, keep: (path: string) => boolean 
     return (await readZipEntries(buf, keep)).files;
 }
 
-/** the files and the folder entries (e.g. empty folders, without their trailing "/") */
-export async function readZipEntries(buf: ArrayBuffer, keep: (path: string) => boolean = () => true): Promise<{ files: Record<string, Uint8Array>; folders: string[] }> {
+/** the files, folder entries (without trailing "/"), and optional archive comment */
+export async function readZipEntries(buf: ArrayBuffer, keep: (path: string) => boolean = () => true): Promise<{ files: Record<string, Uint8Array>; folders: string[]; comment: string }> {
     const v = new DataView(buf);
     const u8 = new Uint8Array(buf);
     let eocd = -1;
@@ -23,7 +23,9 @@ export async function readZipEntries(buf: ArrayBuffer, keep: (path: string) => b
     if (eocd < 0) throw new Error("not a zip file");
     const count = v.getUint16(eocd + 10, true);
     let p = v.getUint32(eocd + 16, true);
+    const commentLen = v.getUint16(eocd + 20, true);
     const utf8 = new TextDecoder();
+    const comment = utf8.decode(u8.subarray(eocd + 22, eocd + 22 + commentLen));
     const out: Record<string, Uint8Array> = {};
     const folders: string[] = [];
     let total = 0;
@@ -49,7 +51,7 @@ export async function readZipEntries(buf: ArrayBuffer, keep: (path: string) => b
         else if (method === 8) out[name] = await inflate(data);
         else throw new Error(`"${name}" is compressed in a way this can't read (method ${method})`);
     }
-    return { files: out, folders };
+    return { files: out, folders, comment };
 }
 
 const CRC_TABLE = (() => {
@@ -69,7 +71,7 @@ function crc32(bytes: Uint8Array): number {
 }
 
 /** a .zip of these files (path → text or bytes; a path ending in "/" is a folder), stored uncompressed — scripts are small */
-export function writeZip(files: Record<string, string | Uint8Array>, date = new Date()): Uint8Array {
+export function writeZip(files: Record<string, string | Uint8Array>, date = new Date(), comment = ""): Uint8Array {
     const enc = new TextEncoder();
     const time = (date.getHours() << 11) | (date.getMinutes() << 5) | (date.getSeconds() >> 1);
     const day = ((Math.max(date.getFullYear(), 1980) - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate();
@@ -110,14 +112,17 @@ export function writeZip(files: Record<string, string | Uint8Array>, date = new 
         offset += local.length + data.length;
     }
     const size = central.reduce((n, c) => n + c.length, 0);
-    const end = new Uint8Array(22);
+    const commentBytes = enc.encode(comment);
+    const end = new Uint8Array(22 + commentBytes.length);
     const ev = new DataView(end.buffer);
     ev.setUint32(0, 0x06054b50, true);
     ev.setUint16(8, central.length, true);
     ev.setUint16(10, central.length, true);
     ev.setUint32(12, size, true);
     ev.setUint32(16, offset, true);
-    const out = new Uint8Array(offset + size + 22);
+    ev.setUint16(20, commentBytes.length, true);
+    end.set(commentBytes, 22);
+    const out = new Uint8Array(offset + size + end.length);
     let at = 0;
     for (const b of [...parts, ...central, end]) {
         out.set(b, at);

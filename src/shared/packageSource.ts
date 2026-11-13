@@ -22,7 +22,7 @@ import { builtinSpec } from "./builtinSpecs";
 import { isManifestPath, MANIFEST_FILE, parseManifest, type Manifest } from "./packageMetadata";
 import { isUrlSpec } from "./packageImports";
 import { bytesToImageDataUrl, importPath, importSpecs, isDataSpec, isImageDataPath, isRelativeIconSpec, metadataIconSpec } from "./scriptImports";
-import { readZip } from "./zip";
+import { readZipEntries } from "./zip";
 
 export type PackageSource =
     | { kind: "github"; owner: string; repo: string; ref: string; path: string; tree: boolean }
@@ -124,10 +124,10 @@ export interface DownloadProgress {
     detail?: string;
 }
 
-/** how the reader gets at the network: text or bytes of a URL (null: not found), and JSON */
+/** how the reader gets at the network: text or bytes of a URL (null: not found), and JSON (`auth`: include browser session cookies) */
 export interface Net {
-    text(url: string): Promise<string | null>;
-    bytes(url: string, onBytes?: (loaded: number, total?: number) => void): Promise<ArrayBuffer | null>;
+    text(url: string, auth?: boolean): Promise<string | null>;
+    bytes(url: string, onBytes?: (loaded: number, total?: number) => void, auth?: boolean): Promise<ArrayBuffer | null>;
     json(url: string): Promise<any>;
 }
 
@@ -139,16 +139,34 @@ export async function readPackageBrowserFile(path: string, file: File): Promise<
     return isImageDataPath(path) ? bytesToImageDataUrl(path, new Uint8Array(await file.arrayBuffer())) : file.text();
 }
 
-/** a zip's package files, as text (raster images as `data:` URLs); a zip of one folder is that folder's */
-export async function unzipPackage(buf: ArrayBuffer): Promise<Record<string, string>> {
-    const raw = await readZip(buf, isPackageFile);
+async function unzipPackageArchive(buf: ArrayBuffer, subPath?: string): Promise<{ files: Record<string, string>; topFolder?: string; comment: string }> {
+    const sub = subPath?.replace(/\/$/, "");
+    let parsed: Awaited<ReturnType<typeof readZipEntries>>;
+    try {
+        parsed = await readZipEntries(buf, isPackageFile);
+    } catch (e: any) {
+        if (!sub || !/more than 20 MB/i.test(String(e?.message || e))) throw e;
+        // Large monorepo: decompress only package files inside `sub/`
+        parsed = await readZipEntries(buf, (name) => {
+            const slash = name.indexOf("/");
+            const rel = slash < 0 ? name : name.slice(slash + 1);
+            return isPackageFile(rel) && (rel === sub || rel.startsWith(sub + "/"));
+        });
+    }
+    const { files: raw, comment } = parsed;
     const utf8 = new TextDecoder();
     const files: Record<string, string> = {};
     for (const [p, bytes] of Object.entries(raw)) files[p] = isImageDataPath(p) ? bytesToImageDataUrl(p, bytes) : utf8.decode(bytes);
     const tops = new Set(Object.keys(files).map((p) => (p.includes("/") ? p.split("/")[0] : "")));
-    if (tops.size !== 1 || tops.has("")) return files;
-    const cut = [...tops][0].length + 1;
-    return Object.fromEntries(Object.entries(files).map(([p, t]) => [p.slice(cut), t]));
+    if (tops.size !== 1 || tops.has("")) return { files, comment };
+    const topFolder = [...tops][0];
+    const cut = topFolder.length + 1;
+    return { files: Object.fromEntries(Object.entries(files).map(([p, t]) => [p.slice(cut), t])), topFolder, comment };
+}
+
+/** a zip's package files, as text (raster images as `data:` URLs); a zip of one folder is that folder's */
+export async function unzipPackage(buf: ArrayBuffer): Promise<Record<string, string>> {
+    return (await unzipPackageArchive(buf)).files;
 }
 
 /** a source, opened: where its entry or metadata.json is, how to read a path, and the revision it's pinned to */
@@ -158,6 +176,8 @@ export interface OpenedSource {
     read(path: string): Promise<string | null>;
     /** commit / gist revision; undefined: the files' hash (crawl result) */
     revision?: string;
+    /** all files came from an archive (byte progress was already reported) */
+    archived?: boolean;
 }
 
 const GITHUB_API = "https://api.github.com";
@@ -168,11 +188,94 @@ function formatBytes(bytes: number): string {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+const encodeGitRef = (ref: string): string => ref.split("/").map(encodeURIComponent).join("/");
+
+/**
+ * Fallback for private GitHub repositories (or when unauthenticated api.github.com
+ * hits its rate limit): fetches `https://github.com/<owner>/<repo>/archive/<ref>.zip`
+ * with browser session cookies (`auth: true`), extracts the 40-char commit SHA from
+ * GitHub's zip comment, and serves the repository files from memory.
+ */
+async function openGitHubArchive(
+    src: Extract<PackageSource, { kind: "github" }>,
+    net: Net,
+    onProgress?: (p: DownloadProgress) => void
+): Promise<OpenedSource> {
+    const byteProgress = onProgress
+        ? (loaded: number, total?: number) => onProgress(total ? { done: loaded, total, detail: `${formatBytes(loaded)} / ${formatBytes(total)}` } : { detail: formatBytes(loaded) })
+        : undefined;
+    let ref = src.ref;
+    let relPath = src.path;
+    const archiveOf = (r: string) => `https://github.com/${encodeURIComponent(src.owner)}/${encodeURIComponent(src.repo)}/archive/${encodeGitRef(r)}.zip`;
+    let buf = await net.bytes(archiveOf(ref), byteProgress, true);
+    // Support slash-containing branch names on folder/file URLs (e.g. tree/feat/x/pkg/dir)
+    if (!buf && relPath) {
+        const segs = relPath.split("/").filter(Boolean);
+        for (let i = 1; i <= Math.min(3, src.tree ? segs.length : segs.length - 1); i++) {
+            const tryRef = `${src.ref}/${segs.slice(0, i).join("/")}`;
+            const tryBuf = await net.bytes(archiveOf(tryRef), byteProgress, true);
+            if (tryBuf) {
+                buf = tryBuf;
+                ref = tryRef;
+                relPath = segs.slice(i).join("/");
+                break;
+            }
+        }
+    }
+    if (!buf) {
+        throw new Error(`can't read github.com/${src.owner}/${src.repo} @ ${src.ref} (if this repository is private, sign in to GitHub in this browser first)`);
+    }
+    const archiveCap = relPath ? 20 * MAX_BYTES : 4 * MAX_BYTES;
+    if (buf.byteLength > archiveCap) {
+        if (!src.tree) {
+            const rawBase = `https://github.com/${encodeURIComponent(src.owner)}/${encodeURIComponent(src.repo)}/raw/${encodeGitRef(ref)}/`;
+            return {
+                start: relPath,
+                read: async (p) => {
+                    const url = rawBase + p.split("/").map(encodeURIComponent).join("/");
+                    if (!isImageDataPath(p)) return net.text(url, true);
+                    const b = await net.bytes(url, undefined, true);
+                    return b ? bytesToImageDataUrl(p, new Uint8Array(b)) : null;
+                },
+            };
+        }
+        throw new Error(`the repository archive is over ${archiveCap / 1024 / 1024} MB`);
+    }
+    let parsed: Awaited<ReturnType<typeof unzipPackageArchive>>;
+    try {
+        parsed = await unzipPackageArchive(buf, relPath);
+    } catch (e: any) {
+        if (/not a zip file/i.test(String(e?.message || e))) {
+            throw new Error(`github.com/${src.owner}/${src.repo} asked to sign in or authorize SSO — open it in a tab and sign in first`);
+        }
+        throw e;
+    }
+    const { files, topFolder, comment } = parsed;
+    const commentSha = comment.trim();
+    const folderSha = topFolder ? /-([0-9a-f]{40})$/i.exec(topFolder)?.[1] : undefined;
+    const sha = /^[0-9a-f]{40}$/i.test(commentSha) ? commentSha.toLowerCase() : folderSha?.toLowerCase();
+    let start = relPath;
+    if (src.tree) {
+        const dir = relPath.replace(/\/$/, "");
+        const here = Object.keys(files).filter((p) => p.slice(0, p.lastIndexOf("/") + 1) === (dir ? dir + "/" : ""));
+        start = pickStart(here, dir || "the repository", "open the one to install, or list them in a metadata.json");
+    }
+    return { start, revision: sha, archived: true, read: async (p) => files[p] ?? null };
+}
+
 export async function openSource(src: PackageSource, net: Net, onProgress?: (p: DownloadProgress) => void): Promise<OpenedSource> {
     if (src.kind === "github") {
         onProgress?.({});
         const base = `${GITHUB_API}/repos/${src.owner}/${src.repo}`;
-        const commit = await net.json(`${base}/commits/${encodeURIComponent(src.ref)}`);
+        let commit: any;
+        try {
+            commit = await net.json(`${base}/commits/${encodeURIComponent(src.ref)}`);
+        } catch (e: any) {
+            if (/HTTP (401|403|404|429)|rate limit/i.test(String(e?.message || e))) {
+                return openGitHubArchive(src, net, onProgress);
+            }
+            throw e;
+        }
         const sha: string | undefined = commit?.sha;
         if (!sha) throw new Error(`no commit for "${src.ref}" in ${src.owner}/${src.repo}`);
         let start = src.path;
@@ -221,7 +324,7 @@ export async function openSource(src: PackageSource, net: Net, onProgress?: (p: 
         if (buf.byteLength > 4 * MAX_BYTES) throw new Error(`the zip is over ${(4 * MAX_BYTES) / 1024 / 1024} MB`);
         const files = await unzipPackage(buf);
         const start = pickStart(Object.keys(files).filter((p) => !p.includes("/")), "the zip", "list them in a metadata.json at its root");
-        return { start, read: async (p) => files[p] ?? null };
+        return { start, archived: true, read: async (p) => files[p] ?? null };
     }
     // a plain URL: paths are from its origin's root, so `../` imports work
     const u = new URL(src.url);
@@ -427,22 +530,30 @@ export async function filesHash(files: Record<string, string>): Promise<string> 
 /** read a source: its pinned files */
 export async function fetchPackage(src: PackageSource, net: Net, onProgress?: (p: DownloadProgress) => void): Promise<CrawledPackage & { revision: string }> {
     const o = await openSource(src, net, onProgress);
-    const c = await crawl(o.start, o.read, src.kind === "zip" ? undefined : onProgress);
+    const c = await crawl(o.start, o.read, o.archived ? undefined : onProgress);
     return { ...c, revision: o.revision ?? (await filesHash(c.files)) };
+}
+
+async function fetchUrl(url: string, auth?: boolean): Promise<Response> {
+    const r = await fetch(url, { cache: "no-store", credentials: auth ? "include" : "omit" });
+    if (!auth && (r.status === 401 || r.status === 403 || r.status === 404) && /^https?:/i.test(url) && !/^https:\/\/api\.github\.com\//i.test(url)) {
+        return fetch(url, { cache: "no-store", credentials: "include" });
+    }
+    return r;
 }
 
 /** the network through fetch (file:// through XHR, which extension pages may read) */
 export const webNet: Net = {
-    async text(url) {
+    async text(url, auth) {
         if (url.startsWith("file:")) return readFileUrl(url);
-        const r = await fetch(url, { cache: "no-store", credentials: "omit" });
+        const r = await fetchUrl(url, auth);
         if (r.status === 404) return null;
         if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
         return r.text();
     },
-    async bytes(url, onBytes) {
+    async bytes(url, onBytes, auth) {
         if (url.startsWith("file:")) return readFileUrl(url, true);
-        const r = await fetch(url, { cache: "no-store", credentials: "omit" });
+        const r = await fetchUrl(url, auth);
         if (r.status === 404) return null;
         if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
         const len = Number(r.headers?.get?.("content-length") || 0);
