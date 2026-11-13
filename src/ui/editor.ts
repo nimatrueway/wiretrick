@@ -10,7 +10,7 @@ import { NavHistory } from "./navHistory";
 import type { SampleScript } from "./samples";
 import { badPackageImports, folderOf, imageDataUrlToBytes, isImageDataPath, isMarkdownPath, isSvgPath, missingImports } from "../shared/scriptImports";
 import { makeFolderPackagePlan, makePackagePlan } from "../shared/makePackage";
-import { MANIFEST_FILE } from "../shared/packageMetadata";
+import { highestVersion, isManifestPath, MANIFEST_FILE, minTangiTweakProblem, parseManifest, scriptMinTangiTweakVersion } from "../shared/packageMetadata";
 import { manifestScriptCompletions, manifestScriptProblems } from "./manifestAssist";
 import { entryStem } from "../shared/packageModel";
 import { localPackage } from "../shared/localPackage";
@@ -1375,7 +1375,19 @@ function updateProblems(): void {
         ...treeRows(true).map((r, i) => [r.id, i] as [string, number]),
     ]);
     problemGroups = collectProblems(
-        scripts.map((s) => ({ id: s.id, label: scriptFileName(s.meta.name), name: s.meta.name, error: s.error, ruleErrors: s.ruleErrors, runtimeError: s.runtimeError, typeErrors: s.typeErrors, routeWarnings: s.routeWarnings, routes: s.meta.routes, code: s.code })),
+        scripts.map((s) => ({
+            id: s.id,
+            label: scriptFileName(s.meta.name),
+            name: s.meta.name,
+            error: s.error,
+            ruleErrors: s.ruleErrors,
+            runtimeError: s.runtimeError,
+            typeErrors: s.typeErrors,
+            routeWarnings: s.routeWarnings,
+            versionWarning: minTangiTweakProblem(s.meta.metadata?.minTangiTweakVersion),
+            routes: s.meta.routes,
+            code: s.code,
+        })),
         live,
         settings,
         data
@@ -1917,8 +1929,10 @@ function importBundle(): void {
         const text = await file.text();
         const base = cleanScriptName(file.name.replace(/\.ts$/i, "")) || "Imported script";
         const name = uniqueScriptName(base, scripts.map((s) => s.meta.name));
-        await send({ type: "saveScript", id: uuid(), code: text, name });
-        status("imported script ✓");
+        const saved = await send({ type: "saveScript", id: uuid(), code: text, name });
+        const verWarn = minTangiTweakProblem(saved?.meta?.metadata?.minTangiTweakVersion ?? scriptMinTangiTweakVersion(text));
+        if (verWarn) status(`imported script — ⚠ ${verWarn}`, "error");
+        else status("imported script ✓");
         await refresh();
     };
     input.click();
@@ -1955,6 +1969,15 @@ async function importZip(file: File): Promise<void> {
             storesError = (e as Error).message;
         }
     }
+    const scriptMinVers = zip.scripts.map((s) => scriptMinTangiTweakVersion(s.code));
+    const dataMinVers = zip.dataFiles.map((d) => {
+        if (!isManifestPath(d.path)) return undefined;
+        try {
+            return parseManifest(d.text, d.path).minTangiTweakVersion;
+        } catch {
+            return undefined;
+        }
+    });
     const named = [...zip.scripts.map((s) => ({ name: s.name, code: s.code, data: false })), ...zip.dataFiles.map((d) => ({ name: d.path, code: d.text, data: true }))];
     const settingsAt = zip.settings === null ? -1 : named.length;
     const storesAt = !zip.stores ? -1 : named.length + (zip.settings === null ? 0 : 1);
@@ -1965,12 +1988,29 @@ async function importZip(file: File): Promise<void> {
     const gone = existingFiles.filter((f) => gonePaths.has(f.path));
     const goneAt = foldersAt + zip.folders.length;
     const ignored = zip.ignored.length ? ` ${plural(zip.ignored.length, "other file")} in it ${zip.ignored.length === 1 ? "isn't" : "aren't"} a script or data file and won't be imported.` : "";
+    const missingWarn = importsWarning(named);
     const chosen = await pickItems({
         title: `Import ${file.name}`,
         intro: `Pick what to import. A script (data file) replaces the existing script (data file) at the same path; ${SETTINGS_FILE} applies the globals and the picked scripts' enabled state and params.${gone.length ? " Files marked deleted are in the package here but not in this version: checked, they're deleted." : ""}${ignored}`,
         items: [
-            ...zip.scripts.map((s) => ({ path: s.file, kind: "script" as const, badge: existsBadge(s.name) })),
-            ...zip.dataFiles.map((d) => ({ path: d.path, kind: "data" as const, badge: dataFileIn(d.path) ? "replaces existing" : "new" })),
+            ...zip.scripts.map((s, idx) => {
+                const verProb = minTangiTweakProblem(scriptMinVers[idx]);
+                return {
+                    path: s.file,
+                    kind: "script" as const,
+                    badge: verProb ? `needs TangiTweak ≥ ${scriptMinVers[idx]}` : existsBadge(s.name),
+                    detail: verProb ?? undefined,
+                };
+            }),
+            ...zip.dataFiles.map((d, idx) => {
+                const verProb = minTangiTweakProblem(dataMinVers[idx]);
+                return {
+                    path: d.path,
+                    kind: "data" as const,
+                    badge: verProb ? `needs TangiTweak ≥ ${dataMinVers[idx]}` : dataFileIn(d.path) ? "replaces existing" : "new",
+                    detail: verProb ?? undefined,
+                };
+            }),
             ...(zip.settings === null
                 ? []
                 : [settingsError ? { path: SETTINGS_FILE, kind: "settings" as const, badge: "JSON error", detail: settingsError, checked: false } : { path: SETTINGS_FILE, kind: "settings" as const }]),
@@ -1985,7 +2025,21 @@ async function importZip(file: File): Promise<void> {
             ...gone.map((f) => ({ path: f.path, kind: f.kind, badge: "deleted", detail: "not in this version", removed: true })),
         ],
         confirm: "Import",
-        warn: importsWarning(named),
+        warn: (picked) => {
+            const miss = missingWarn(picked);
+            if (miss) return miss;
+            const req = highestVersion(
+                picked.map((i) =>
+                    i < zip.scripts.length
+                        ? scriptMinVers[i]
+                        : i < named.length
+                          ? dataMinVers[i - zip.scripts.length]
+                          : undefined
+                )
+            );
+            const verProb = minTangiTweakProblem(req);
+            return verProb ? { text: verProb } : null;
+        },
     });
     if (!chosen) return;
     const pickedScripts = chosen.filter((i) => i < zip.scripts.length).map((i) => zip.scripts[i]);

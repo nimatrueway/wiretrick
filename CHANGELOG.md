@@ -7,6 +7,20 @@ its section below.
 
 ## [Unreleased]
 
+## [0.36.0-alpha] - 2026-11-13
+
+### Added
+
+- **`minTangiTweakVersion`** in `tt.metadata({ minTangiTweakVersion })` and bundle `metadata.json`: scripts and packages can declare the oldest TangiTweak version they support. TangiTweak warns on **Import…** (`.zip` and single files), **Install**, **Upgrade**, and in the Editor **Problems** view when the running extension is older, and holds background auto-updates for review until TangiTweak is updated.
+
+### Changed
+
+- Multi-file package installs and upgrades compile and save scripts in a single batch pass, speeding up large multi-file repository installs by an order of magnitude.
+
+### Fixed
+
+- Passing a `stringList` parameter (`cfg.pages`) into a route (`tt.onSite(cfg.pages, …)` or `tt.onPage({ url: cfg.pages }, …)`) no longer fails with `pattern.trim is not a function` during package analysis or corrupts stored route URLs in `chrome.storage.local`.
+
 ## [0.35.0-alpha] - 2026-11-13
 
 ### Added
@@ -1062,7 +1076,8 @@ Before `0.0.1-alpha` was tagged, the extension grew from an initial TypeScript p
 - Built the initial TypeScript script engine (in-browser Sucrase transpilation, `res.onRequest` / `res.onDom` / `res.log`, script `console.*` capture), embedded Monaco editor with bundled API typings, movable log panel, popup with per-tab active-script badge, sample scripts, and bundle import/export.
 - Implemented three initial interception tiers (`MAIN`-world `fetch`/XHR hook, MV2 blocking `webRequest`, and `chrome.debugger` `Fetch` for main-frame HTML and subresources with adaptive idle detach), two-way local folder sync via the File System Access API, and the headless Chromium E2E suite.
 
-[Unreleased]: https://github.com/tangistudio/TangiTweak/compare/v0.35.0-alpha...HEAD
+[Unreleased]: https://github.com/tangistudio/TangiTweak/compare/v0.36.0-alpha...HEAD
+[0.36.0-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.35.0-alpha...v0.36.0-alpha
 [0.35.0-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.34.0-alpha...v0.35.0-alpha
 [0.34.0-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.33.1-alpha...v0.34.0-alpha
 [0.33.1-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.33.0-alpha...v0.33.1-alpha

@@ -434,6 +434,7 @@ function Header(props: { name: string; metadata: Analysis["metadata"]; scripts: 
                     {header.updateURL && header.updateURL !== props.source && <> · updates from {label(header.updateURL)}</>}
                     {header.author && <> · by {header.author}</>}
                     {header.license && <> · {header.license}</>}
+                    {header.minTangiTweakVersion && <> · TangiTweak ≥ {header.minTangiTweakVersion}</>}
                     {header.homepage && /^https?:\/\//i.test(header.homepage) && (
                         <>
                             {" "}
@@ -476,6 +477,7 @@ function Capabilities(props: { analysis: Analysis; added?: string[] }) {
 function Warnings(props: { analysis: Analysis; fetched?: Fetched; modified?: string[] }) {
     const { analysis, fetched } = props;
     const items: string[] = [];
+    if (analysis.versionWarning) items.push(analysis.versionWarning);
     if (analysis.error) items.push(`It doesn't compile: ${analysis.error.split("\n")[0]}`);
     for (const m of fetched?.missing ?? []) items.push(`${m.from} imports "${m.spec}", which isn't in the package.`);
     for (const b of fetched?.bare ?? []) items.push(`${b.from} imports "${b.spec}" from your own scripts (it resolves from the Explorer's root) — the package doesn't bring it.`);

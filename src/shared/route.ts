@@ -122,10 +122,19 @@ export function effectiveStrategy(route: Pick<RouteMeta, "strategy">): Strategy 
 function list(v: unknown, what: string, where: string): string[] {
     if (v === undefined || v === null) return [];
     const arr = Array.isArray(v) ? v : [v];
+    const out: string[] = [];
     for (const x of arr) {
         if (typeof x !== "string") throw new Error(`${where}: ${what} entries must be strings, got ${typeof x}`);
+        out.push(x);
     }
-    return arr as string[];
+    return out;
+}
+
+/** read a RouteMeta string list defensively (recovers if an older build persisted an array Proxy as `{ "0": ... }`) */
+export function routePatterns(v: unknown): string[] {
+    if (Array.isArray(v)) return v.filter((x): x is string => typeof x === "string");
+    if (v && typeof v === "object") return Object.values(v).filter((x): x is string => typeof x === "string");
+    return typeof v === "string" ? [v] : [];
 }
 
 function checkPatterns(ps: string[], what: string, where: string): void {
@@ -197,8 +206,10 @@ export function normalizeRoute(kind: RouteKind, raw: unknown, index: number, api
 
 /** exact (stage 2) check: url ∧ ¬exclude ∧ method ∧ type */
 export function routeMatches(route: RouteMeta, url: string, method?: string, type?: string): boolean {
-    if (!matchAny(route.url, url)) return false;
-    if (route.exclude.length && matchAny(route.exclude, url)) return false;
+    const urls = routePatterns(route.url);
+    const exclude = routePatterns(route.exclude);
+    if (!matchAny(urls, url)) return false;
+    if (exclude.length && matchAny(exclude, url)) return false;
     if (route.methods && method && !route.methods.includes(method.toUpperCase())) return false;
     if (route.resourceTypes && type && !route.resourceTypes.includes(type)) return false;
     return true;
@@ -206,13 +217,13 @@ export function routeMatches(route: RouteMeta, url: string, method?: string, typ
 
 /** ctx.groups for a matched url */
 export function routeGroups(route: RouteMeta, url: string): Record<string, string> {
-    return matchGroups(route.url, url) || {};
+    return matchGroups(routePatterns(route.url), url) || {};
 }
 
 /** union of a script's route urls (badge / "active on this tab") */
 export function scriptUrls(routes: RouteMeta[] | undefined): string[] {
     const out = new Set<string>();
-    for (const r of routes || []) for (const u of r.url) out.add(u);
+    for (const r of routes || []) for (const u of routePatterns(r.url)) out.add(u);
     return [...out];
 }
 
@@ -231,7 +242,7 @@ export function sampleUrl(routes: RouteMeta[]): string {
             .replace(/\*/g, "");
     let parsed = "";
     for (const r of routes)
-        for (const p of r.url) {
+        for (const p of routePatterns(r.url)) {
             const u = concrete(p);
             try {
                 new URL(u);

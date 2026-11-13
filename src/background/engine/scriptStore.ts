@@ -95,6 +95,88 @@ export function saveScript(partial: Pick<Script, "id" | "code"> & Partial<Script
     return whileBusy(() => saveScriptNow(partial));
 }
 
+export function saveScriptsBatch(partials: (Pick<Script, "id" | "code"> & Partial<Script> & { name?: string })[]): Promise<Script[]> {
+    if (!partials.length) return Promise.resolve([]);
+    return whileBusy(() => saveScriptsBatchNow(partials));
+}
+
+async function saveScriptsBatchNow(partials: (Pick<Script, "id" | "code"> & Partial<Script> & { name?: string })[]): Promise<Script[]> {
+    const obj = await storageGet([STORE_KEY, ORDER_KEY]);
+    const byId: { [id: string]: Script } = obj[STORE_KEY] || {};
+    const order: string[] = obj[ORDER_KEY] || Object.keys(byId);
+    const allValues = await loadAllParamValues();
+    const now = Date.now();
+    const prevById = new Map<string, Script | undefined>();
+    const targetIds: string[] = [];
+
+    for (const partial of partials) {
+        const prev = byId[partial.id];
+        prevById.set(partial.id, prev);
+        const name = partial.name ?? prev?.meta.name ?? "Untitled script";
+        byId[partial.id] = {
+            id: partial.id,
+            code: partial.code,
+            enabled: partial.enabled ?? prev?.enabled ?? true,
+            createdAt: prev?.createdAt ?? now,
+            updatedAt: now,
+            error: prev?.error ?? null,
+            meta: prev?.meta ? { ...prev.meta, name } : { name, active: false, routes: [], match: [] },
+            paramDefs: prev?.paramDefs,
+        };
+        if (!order.includes(partial.id)) order.push(partial.id);
+        targetIds.push(partial.id);
+    }
+
+    await ensurePackages(partials.map((p) => p.code), { retry: true });
+    const toCompile = new Set<string>(targetIds);
+    const allPlain = plain(byId);
+    for (const partial of partials) {
+        const prev = prevById.get(partial.id);
+        const cur = byId[partial.id];
+        if (!prev || prev.code !== cur.code || prev.meta.name !== cur.meta.name) {
+            for (const id of dependantsOf(cur.meta.name, allPlain)) toCompile.add(id);
+            if (prev && prev.meta.name !== cur.meta.name) {
+                for (const id of dependantsOf(prev.meta.name, allPlain)) toCompile.add(id);
+            }
+        }
+    }
+
+    const compiled = await compileManyForStorage(allPlain, [...toCompile], allValues);
+    for (const id of toCompile) {
+        const s = byId[id];
+        const c = compiled.get(id);
+        if (!s || !c || c.error === SANDBOX_COMPILE_FAILED) continue;
+        byId[id] = {
+            ...s,
+            meta: { ...c.meta, name: s.meta.name },
+            paramDefs: c.paramDefs ?? s.paramDefs,
+            error: c.error,
+        };
+    }
+
+    const movedPaths: string[] = [];
+    for (const [id, prev] of prevById) {
+        const cur = byId[id];
+        if (prev && folderOf(prev.meta.name) !== folderOf(cur.meta.name)) movedPaths.push(prev.meta.name);
+    }
+    const items: Record<string, any> = { [STORE_KEY]: byId, [ORDER_KEY]: order };
+    if (movedPaths.length) {
+        const folders = await keptFolders(movedPaths);
+        if (folders) items[FOLDERS_KEY] = folders;
+    }
+    await storageSet(items);
+    void prunePackages(Object.values(byId).map((x) => x.code));
+    for (const [id, prev] of prevById) {
+        const cur = byId[id];
+        if (prev && prev.meta.name !== cur.meta.name) {
+            for (const fn of renameListeners) await fn(prev.meta.name, cur.meta.name);
+        }
+        if (prev && prev.code !== cur.code) void clearScriptErrors(id);
+    }
+    notify();
+    return targetIds.map((id) => byId[id]);
+}
+
 async function saveScriptNow(partial: Pick<Script, "id" | "code"> & Partial<Script> & { name?: string }): Promise<Script> {
     const t0 = performance.now();
     const obj = await storageGet([STORE_KEY, ORDER_KEY]);

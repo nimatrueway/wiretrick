@@ -310,7 +310,7 @@ It is the same in `onRequest`, `replaceResponse`, `onResponseHeaders` and
 
 `tt.metadata({ description: "…" })` sets a one-line description, shown as
 the script's tooltip in the Editor and in the popup. Its other fields —
-`name`, `version`, `icon`, `homepage`, `author`, `license`, `updateURL` and `connect` — describe
+`name`, `version`, `minTangiTweakVersion`, `icon`, `homepage`, `author`, `license`, `updateURL` and `connect` — describe
 the script as a shared package (see [Packages](packages.md)). Call it once.
 
 `tt.params` declares typed knobs the user changes from the popup's ⚙

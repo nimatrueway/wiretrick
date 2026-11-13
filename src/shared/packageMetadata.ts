@@ -21,6 +21,8 @@ import { parseSource } from "./packageSource";
 export interface PackageMetadata {
     name?: string;
     version?: string;
+    /** minimum TangiTweak version required ("0.35.0") */
+    minTangiTweakVersion?: string;
     description?: string;
     /** relative .svg/.png/… path, data: URL, https:// URL, or inline <svg> */
     icon?: string;
@@ -43,7 +45,8 @@ export const MANIFEST_FILE = "metadata.json";
 /** a bundle's manifest (at any folder depth) */
 export const isManifestPath = (path: string): boolean => path === MANIFEST_FILE || path.endsWith("/" + MANIFEST_FILE);
 
-const TEXT_KEYS = ["name", "version", "description", "icon", "homepage", "author", "license", "updateURL"] as const;
+const TEXT_KEYS = ["name", "version", "minTangiTweakVersion", "description", "icon", "homepage", "author", "license", "updateURL"] as const;
+const VERSION_RE = /^v?\d+(\.\d+){0,2}([-+][0-9A-Za-z.-]+)?$/;
 
 /** validate tt.metadata's argument or a manifest's fields (unknown keys are ignored: a newer script may add some) */
 export function readMetadata(raw: unknown, where: string): PackageMetadata {
@@ -55,6 +58,10 @@ export function readMetadata(raw: unknown, where: string): PackageMetadata {
         if (v === undefined) continue;
         if (typeof v !== "string") throw new Error(`${where}: "${k}" must be a string`);
         if (v.trim()) out[k] = v.trim();
+    }
+    if (out.minTangiTweakVersion) {
+        if (!VERSION_RE.test(out.minTangiTweakVersion)) throw new Error(`${where}: "minTangiTweakVersion" must be a version like "0.35.0"`);
+        out.minTangiTweakVersion = out.minTangiTweakVersion.replace(/^v/i, "");
     }
     if (out.updateURL) {
         const src = parseSource(out.updateURL);
@@ -93,6 +100,11 @@ export const MANIFEST_SCHEMA = {
     properties: {
         name: { type: "string", description: "The bundle's name, shown when installing and in the Explorer" },
         version: { type: "string", description: 'Dotted version ("1.2.0"); an update to a lower one waits for review' },
+        minTangiTweakVersion: {
+            type: "string",
+            pattern: "^v?\\d+(\\.\\d+){0,2}([-+][0-9A-Za-z.-]+)?$",
+            description: 'Minimum TangiTweak version required ("0.35.0"); warns on import/install and holds auto-updates if this browser has an older TangiTweak',
+        },
         description: { type: "string", description: "One line about what it does" },
         icon: { type: "string", description: "Icon shown in the Explorer and popup: a relative .svg/.png/… file path in this folder, a data: or https:// URL, or inline <svg>" },
         homepage: { type: "string", description: "A link shown when installing" },
@@ -126,4 +138,44 @@ export function compareVersions(a: string | undefined, b: string | undefined): n
         if (c) return c < 0 ? -1 : 1;
     }
     return 0;
+}
+
+const versionCore = (v: string): string => v.trim().replace(/^v/i, "").split(/[-+]/)[0];
+
+/** the running TangiTweak version (e.g. "0.35.0-alpha") */
+export function currentTangiTweakVersion(): string {
+    try {
+        const m = (globalThis as any).chrome?.runtime?.getManifest?.();
+        return m?.version_name || m?.version || "0.0.0";
+    } catch {
+        return "0.0.0";
+    }
+}
+
+/** the highest required version in `versions`, or undefined */
+export function highestVersion(versions: Iterable<string | undefined>): string | undefined {
+    let best: string | undefined;
+    for (const raw of versions) {
+        const v = raw?.trim().replace(/^v/i, "");
+        if (!v) continue;
+        if (!best || compareVersions(versionCore(v), versionCore(best)) > 0) best = v;
+    }
+    return best;
+}
+
+/** warning message when `required` is newer than `current` (null when satisfied or unset) */
+export function minTangiTweakProblem(required: string | undefined, current = currentTangiTweakVersion()): string | null {
+    const req = required?.trim().replace(/^v/i, "");
+    if (!req || !VERSION_RE.test(req)) return null;
+    if (compareVersions(versionCore(current), versionCore(req)) < 0) {
+        return `Requires TangiTweak ${req} or newer (you have ${current}).`;
+    }
+    return null;
+}
+
+/** literal `minTangiTweakVersion: "..."` inside a `tt.metadata({ ... })` call (for pre-compile zip import checks) */
+export function scriptMinTangiTweakVersion(code: string): string | undefined {
+    const m = /\btt\s*\.\s*metadata\s*\(\s*\{[\s\S]*?\bminTangiTweakVersion\s*:\s*(["'`])([^"'`\n]+)\1/.exec(code);
+    const v = m?.[2]?.trim().replace(/^v/i, "");
+    return v && VERSION_RE.test(v) ? v : undefined;
 }

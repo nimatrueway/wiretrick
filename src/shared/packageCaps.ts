@@ -5,6 +5,7 @@
  */
 import type { ResMeta } from "./metaParser";
 import { isUrlSpec, parsePackageUrl } from "./packageImports";
+import { routePatterns } from "./route";
 import { importSpecs } from "./scriptImports";
 
 export interface Capabilities {
@@ -33,7 +34,7 @@ export function capabilitiesOf(routes: ResMeta["routes"], connect: string[], cod
             if (typeof p !== "string") packages.push(p.name);
         }
     return {
-        urls: sorted(routes.flatMap((r) => r.url)),
+        urls: sorted(routes.flatMap((r) => routePatterns(r.url))),
         strategies: sorted(routes.flatMap((r) => (r.strategy ? [r.strategy] : []))),
         pageJs: routes.some((r) => r.kind === "onDocument" && r.world !== "isolated"),
         overlay: routes.some((r) => r.kind === "onOverlay"),
@@ -43,20 +44,22 @@ export function capabilitiesOf(routes: ResMeta["routes"], connect: string[], cod
 }
 
 const ALL_URLS = /^(<all_urls>|\*:\/\/\*\/\*|\*:\/\/\*(:\*)?\/\*|https?\*?:\/\/\*\/\*|\*)$/;
+const cleanUrls = (urls: unknown): string[] => (Array.isArray(urls) ? urls.flatMap(routePatterns) : routePatterns(urls));
 
 /** a pattern that matches every site */
-export const isAllUrls = (pattern: string): boolean => ALL_URLS.test(pattern.trim());
+export const isAllUrls = (pattern: string): boolean => typeof pattern === "string" && ALL_URLS.test(pattern.trim());
 
 export type Risk = "high" | "medium" | "low";
 
 /** the capabilities, as lines for people, riskiest first */
 export function describeCapabilities(c: Capabilities): { text: string; risk: Risk }[] {
     const out: { text: string; risk: Risk }[] = [];
-    if (c.urls.some(isAllUrls)) out.push({ text: "Runs on every site", risk: "high" });
+    const urls = cleanUrls(c.urls);
+    if (urls.some(isAllUrls)) out.push({ text: "Runs on every site", risk: "high" });
     if (c.strategies.includes("debugger")) out.push({ text: 'Intercepts with the browser debugger (strategy "debugger": a banner shows on the tab)', risk: "high" });
     if (c.pageJs) out.push({ text: "Runs code in the site's own JavaScript world", risk: "medium" });
     if (c.strategies.includes("helper")) out.push({ text: 'Intercepts through the local helper process (strategy "helper")', risk: "medium" });
-    const sites = c.urls.filter((u) => !isAllUrls(u));
+    const sites = urls.filter((u) => !isAllUrls(u));
     if (sites.length) out.push({ text: `Runs on ${sites.join(", ")}`, risk: "low" });
     const nets = c.strategies.filter((s) => s !== "debugger" && s !== "helper");
     if (nets.length) out.push({ text: `Intercepts requests (${nets.join(", ")})`, risk: "low" });
@@ -71,8 +74,10 @@ export function describeCapabilities(c: Capabilities): { text: string; risk: Ris
 /** what `next` can do that `prev` couldn't (empty: same or less) */
 export function addedCapabilities(prev: Capabilities, next: Capabilities): string[] {
     const out: string[] = [];
-    const prevAll = prev.urls.some(isAllUrls);
-    const urls = prevAll ? [] : next.urls.filter((u) => !prev.urls.includes(u));
+    const prevUrls = cleanUrls(prev.urls);
+    const nextUrls = cleanUrls(next.urls);
+    const prevAll = prevUrls.some(isAllUrls);
+    const urls = prevAll ? [] : nextUrls.filter((u) => !prevUrls.includes(u));
     if (urls.length) out.push(`runs on ${urls.join(", ")}`);
     const strategies = next.strategies.filter((s) => !prev.strategies.includes(s));
     if (strategies.length) out.push(`intercepts with ${strategies.join(", ")}`);

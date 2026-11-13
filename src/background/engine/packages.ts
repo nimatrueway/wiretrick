@@ -5,7 +5,7 @@
  */
 import { compileForStorage } from "../compileHost";
 import { addedCapabilities, capabilitiesOf, type Capabilities } from "../../shared/packageCaps";
-import { compareVersions, MANIFEST_FILE, parseManifest, type PackageMetadata } from "../../shared/packageMetadata";
+import { compareVersions, highestVersion, MANIFEST_FILE, minTangiTweakProblem, parseManifest, type PackageMetadata } from "../../shared/packageMetadata";
 import {
     PACKAGES_KEY,
     entryIds,
@@ -39,7 +39,7 @@ import {
     newId,
     onScriptsChanged,
     saveDataFile,
-    saveScript,
+    saveScriptsBatch,
     type Script,
 } from "./scriptStore";
 import type { DataFile } from "./dataFiles";
@@ -77,6 +77,8 @@ export interface Analysis {
     caps: Capabilities;
     /** an entry's compile error */
     error: string | null;
+    /** warning when `minTangiTweakVersion` is newer than the running TangiTweak */
+    versionWarning?: string | null;
     /** where it would install ("" = the root) */
     folder: string;
     /** package file → the store item it becomes */
@@ -182,10 +184,16 @@ async function analyze(version: Pick<FetchedPackage, "entries" | "files">, pkg?:
     let metadata: PackageMetadata;
     if (manifest) {
         const { scripts: _, ...m } = manifest;
-        metadata = { ...m, connect: [...new Set([...m.connect, ...declared.flatMap((d) => d?.connect ?? [])])] };
+        const minVer = highestVersion([m.minTangiTweakVersion, ...declared.map((d) => d?.minTangiTweakVersion)]);
+        metadata = {
+            ...m,
+            ...(minVer ? { minTangiTweakVersion: minVer } : {}),
+            connect: [...new Set([...m.connect, ...declared.flatMap((d) => d?.connect ?? [])])],
+        };
     } else metadata = declared[0] ?? { connect: [] };
     const failed = compiled.find(({ c }) => c.error);
     const error = failed ? (entries.length > 1 ? `${failed.e}: ${failed.c.error}` : failed.c.error) : null;
+    const versionWarning = minTangiTweakProblem(metadata.minTangiTweakVersion);
     const caps = capabilitiesOf(
         compiled.flatMap(({ c }) => c.meta.routes ?? []),
         metadata.connect,
@@ -196,7 +204,7 @@ async function analyze(version: Pick<FetchedPackage, "entries" | "files">, pkg?:
         declared.map((d) => d?.icon),
         dataFiles
     );
-    return { name: packageName({ entries, metadata }), metadata, ...(iconUrl ? { iconUrl } : {}), bundle: !!manifest, caps, error, folder, items };
+    return { name: packageName({ entries, metadata }), metadata, ...(iconUrl ? { iconUrl } : {}), bundle: !!manifest, caps, error, ...(versionWarning ? { versionWarning } : {}), folder, items };
 }
 
 const normSource = (u: string): string => stripInstallHash(u).replace(/\/+$/, "");
@@ -410,15 +418,24 @@ async function writeFiles(version: Pick<PackageVersion, "entries" | "files">, it
     function rank(rel: string) {
         return entries.includes(rel) ? 2 : items[rel].kind === "data" ? 0 : 1;
     }
+    const scriptBatch: { rel: string; id: string; name: string; code: string; enabled?: boolean }[] = [];
     for (const rel of rels) {
         const { kind, name } = items[rel];
         const text = files[rel];
         const old = priorOf(pkg, version, rel);
         const prev = old && old.kind === kind ? old : undefined;
-        let id: string;
-        if (kind === "data") id = (await saveDataFile({ id: prev?.id, path: name, text })).id;
-        else id = (await saveScript({ id: prev?.id ?? newId(), name, code: text, ...(prev ? {} : { enabled }) })).id;
-        out[rel] = { kind, id, name, hash: await hashText(text) };
+        if (kind === "data") {
+            const id = (await saveDataFile({ id: prev?.id, path: name, text })).id;
+            out[rel] = { kind, id, name, hash: await hashText(text) };
+        } else {
+            scriptBatch.push({ rel, id: prev?.id ?? newId(), name, code: text, ...(prev ? {} : { enabled }) });
+        }
+    }
+    if (scriptBatch.length) {
+        await saveScriptsBatch(scriptBatch.map(({ id, name, code, enabled }) => ({ id, name, code, ...(enabled !== undefined ? { enabled } : {}) })));
+        for (const s of scriptBatch) {
+            out[s.rel] = { kind: "script", id: s.id, name: s.name, hash: await hashText(s.code) };
+        }
     }
     if (pkg) {
         const kept = new Set(Object.values(out).map((f) => f.id));
@@ -568,6 +585,7 @@ async function offer(pkg: InstalledPackage, fetched: FetchedPackage, manual: boo
     const added = addedCapabilities(pkg.caps, a.caps);
     const modified = await modifiedNow(pkg);
     const reasons: string[] = [];
+    if (a.versionWarning) reasons.push(a.versionWarning.replace(/\.$/, ""));
     if (added.length) reasons.push(`it can do more: ${added.join("; ")}`);
     if (modified.length) reasons.push(`changed here since installed: ${modified.join(", ")}`);
     if (compareVersions(a.metadata.version, pkg.metadata.version) < 0) reasons.push(`the version goes down (${pkg.metadata.version} → ${a.metadata.version})`);

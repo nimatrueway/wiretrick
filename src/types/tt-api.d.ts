@@ -697,6 +697,8 @@ declare namespace TangiTweak {
         name?: string;
         /** dotted version ("1.2.0"); an update to a lower one waits for review */
         version?: string;
+        /** minimum TangiTweak version required ("0.35.0"); warns on import/install and holds auto-updates if this browser has an older TangiTweak */
+        minTangiTweakVersion?: string;
         /** one line about what it does: the Editor's and popup's tooltip */
         description?: string;
         /** icon shown in the Explorer and popup: a relative .svg/.png/… path, data: or https:// URL, or inline <svg> */

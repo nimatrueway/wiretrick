@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest";
 import "../src/shared/transpile";
 import { compileWithLibs } from "../src/shared/compile";
 import { fileExtension } from "../src/shared/scriptName";
-import { compareVersions, parseManifest } from "../src/shared/packageMetadata";
+import { compareVersions, highestVersion, minTangiTweakProblem, parseManifest, scriptMinTangiTweakVersion } from "../src/shared/packageMetadata";
 import { resolveWorkspaceIcons } from "../src/shared/packageModel";
 
 const SCRIPT = `tt.onRequest({ url: "*://example.com/*", strategy: "extension" }, () => {});`;
@@ -76,5 +76,19 @@ describe("package metadata", () => {
         expect(compareVersions("1.10.0", "1.9")).toBe(1);
         expect(compareVersions("1.0", "1.0.0")).toBe(0);
         expect(compareVersions(undefined, "0.1")).toBe(-1);
+    });
+    it("validates and checks minTangiTweakVersion across scripts and metadata.json", () => {
+        const m = parseManifest(JSON.stringify({ name: "Kit", minTangiTweakVersion: "v0.35.0", scripts: ["a.ts"] }));
+        expect(m.minTangiTweakVersion).toBe("0.35.0");
+        expect(() => parseManifest(JSON.stringify({ minTangiTweakVersion: "latest", scripts: ["a.ts"] }))).toThrow(/minTangiTweakVersion/);
+
+        const code = `tt.metadata({ name: "Solo", minTangiTweakVersion: "0.36.0" });\n${SCRIPT}`;
+        expect(scriptMinTangiTweakVersion(code)).toBe("0.36.0");
+        expect(compileWithLibs({ id: "a", name: "solo", code }, []).meta.metadata?.minTangiTweakVersion).toBe("0.36.0");
+
+        expect(minTangiTweakProblem("0.35.0", "0.35.0-alpha")).toBeNull();
+        expect(minTangiTweakProblem("0.33.0", "0.35.0-alpha")).toBeNull();
+        expect(minTangiTweakProblem("0.36.0", "0.35.0-alpha")).toBe("Requires TangiTweak 0.36.0 or newer (you have 0.35.0-alpha).");
+        expect(highestVersion(["0.32.0", undefined, "0.36.1", "0.35.0"])).toBe("0.36.1");
     });
 });

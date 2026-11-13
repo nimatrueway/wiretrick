@@ -23,6 +23,7 @@ installed:
 tt.metadata({
     name: "GitHub dark mode",
     version: "1.2.0",
+    minTangiTweakVersion: "0.35.0",
     description: "Forces the dark theme on github.com",
     icon: "./icon.svg",
     author: "me",
@@ -37,6 +38,7 @@ tt.onPage({ url: "*://github.com/*" }, () => { … });
 Every field is optional. `description` is also the script's tooltip in the Editor and the popup.
 `icon` sets a custom icon shown in the Explorer and the popup: pass a relative file path (`.svg`, `.png`, `.webp`, `.jpg`, `.gif`, `.ico`, `.avif`), a `data:` or `https://` URL, or inline `<svg>` markup.
 `version` is compared part by part (`1.10.0` is newer than `1.9`).
+`minTangiTweakVersion` declares the oldest TangiTweak version the script or bundle supports (for example `"0.35.0"`): TangiTweak warns on **Import**, **Install**, and **Upgrade** when the running extension is older, and holds background auto-updates for review until TangiTweak is updated.
 `connect` lists the hosts the script's `tt.fetch` calls reach. An update that
 adds one waits for your approval.
 `updateURL` is where updates come from, instead of where the package was
@@ -51,6 +53,7 @@ scripts relative to its folder:
 {
     "name": "PR tools",
     "version": "2.0.0",
+    "minTangiTweakVersion": "0.35.0",
     "description": "Review helpers for GitHub pull requests",
     "connect": ["api.github.com"],
     "scripts": ["pr-tools.ts", "review/diff.ts"]

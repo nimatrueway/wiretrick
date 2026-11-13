@@ -237,4 +237,54 @@ describe("installed packages", () => {
         expect(rolledBack.metadata.version).toBe("0.0.1-alpha");
         expect((await ss.listDataFiles()).map((d) => d.path).sort()).toEqual(["bonsai/metadata.json", "bonsai/old.json"]);
     });
+
+    it("unwraps stringList tt.params Proxies in route.url and recovers legacy object-serialized route.url entries", async () => {
+        const { describeCapabilities } = await import("../src/shared/packageCaps");
+        const paramCode = [
+            `const cfg = tt.params({ pages: { type: "stringList", default: ["http://localhost:8080/*", "https://cloud.mongodb.com/*"] } });`,
+            `tt.onSite(cfg.pages, () => {});`,
+            `tt.onPage({ url: cfg.pages, when: "document_start" }, () => {});`,
+        ].join("\n");
+
+        // Saving to structuredClone-backed storage succeeds (plain string[], not Proxy)
+        const existing = await ss.saveScript({ id: ss.newId(), name: "bonsai/index.tsx", code: paramCode });
+        expect(existing.meta.routes[0].url).toEqual(["http://localhost:8080/*", "https://cloud.mongodb.com/*"]);
+        await ss.saveDataFile({ path: "bonsai/metadata.json", text: JSON.stringify({ name: "bonsai", version: "0.0.1-alpha", scripts: ["index.tsx"] }) });
+
+        // Simulate legacy Chrome storage having serialized an earlier array Proxy as `{ "0": "...", "1": "..." }`
+        store.resScripts[existing.id].meta.routes[0].url = { 0: "http://localhost:8080/*", 1: "https://cloud.mongodb.com/*" };
+
+        const incoming = {
+            source: "https://github.com/nima-taheri-mongodb/bonsai",
+            entries: ["index.tsx"],
+            files: {
+                "metadata.json": JSON.stringify({ name: "bonsai", version: "0.0.2-alpha", scripts: ["index.tsx"] }),
+                "index.tsx": paramCode,
+            },
+            revision: "9d3dc7db",
+        };
+        const a = await pk.analyzePackage(incoming);
+        expect(a.error).toBeNull();
+        expect(a.caps.urls).toEqual(["http://localhost:8080/*", "https://cloud.mongodb.com/*"]);
+        expect(describeCapabilities(a.caps).some((c) => c.text.includes("localhost:8080"))).toBe(true);
+    });
+
+    it("surfaces minTangiTweakVersion warnings on analyze and holds auto-updates when newer TangiTweak is required", async () => {
+        (globalThis as any).chrome.runtime.getManifest = () => ({ version: "0.35.0", version_name: "0.35.0-alpha" });
+        const v1 = await fetched(files(entry("*://a.com/*")));
+        const pkg = await pk.installPackage(v1, { enabled: true, autoUpdate: true });
+
+        // Update requires TangiTweak 0.99.0 -> analyzed with versionWarning AND held as pending instead of auto-applying
+        const v2Files = {
+            ...files(entry("*://a.com/*").replace('version: "1.0.0"', 'version: "2.0.0", minTangiTweakVersion: "0.99.0"')),
+        };
+        const v2 = await fetched(v2Files);
+        const analysis = await pk.analyzePackage(v2, pkg.id);
+        expect(analysis.versionWarning).toBe("Requires TangiTweak 0.99.0 or newer (you have 0.35.0-alpha).");
+
+        const held = await pk.offerPackage(pkg.id, v2, false);
+        expect(held?.metadata.version).toBe("1.0.0"); // not auto-applied
+        expect(held?.pending?.metadata.version).toBe("2.0.0");
+        expect(held?.pending?.reasons).toContain("Requires TangiTweak 0.99.0 or newer (you have 0.35.0-alpha)");
+    });
 });
