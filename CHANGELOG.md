@@ -7,6 +7,12 @@ its section below.
 
 ## [Unreleased]
 
+## [0.35.0-alpha] - 2026-11-13
+
+### Added
+
+- First-class GitLab repository, subfolder (`…/-/tree/<branch>/<folder>`), and file (`…/-/blob/…` / `…/-/raw/…`) installs and updates (including `#tangitweak:install` links, nested subgroups, slash-containing branch names, and self-hosted GitLab instances), working for both public and private repositories when signed in to GitLab in the browser and pinning updates to exact commit SHAs.
+
 ## [0.34.0-alpha] - 2026-11-13
 
 ### Added
@@ -1056,7 +1062,8 @@ Before `0.0.1-alpha` was tagged, the extension grew from an initial TypeScript p
 - Built the initial TypeScript script engine (in-browser Sucrase transpilation, `res.onRequest` / `res.onDom` / `res.log`, script `console.*` capture), embedded Monaco editor with bundled API typings, movable log panel, popup with per-tab active-script badge, sample scripts, and bundle import/export.
 - Implemented three initial interception tiers (`MAIN`-world `fetch`/XHR hook, MV2 blocking `webRequest`, and `chrome.debugger` `Fetch` for main-frame HTML and subresources with adaptive idle detach), two-way local folder sync via the File System Access API, and the headless Chromium E2E suite.
 
-[Unreleased]: https://github.com/tangistudio/TangiTweak/compare/v0.34.0-alpha...HEAD
+[Unreleased]: https://github.com/tangistudio/TangiTweak/compare/v0.35.0-alpha...HEAD
+[0.35.0-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.34.0-alpha...v0.35.0-alpha
 [0.34.0-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.33.1-alpha...v0.34.0-alpha
 [0.33.1-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.33.0-alpha...v0.33.1-alpha
 [0.33.0-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.32.0-alpha...v0.33.0-alpha

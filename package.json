@@ -1,6 +1,6 @@
 {
   "name": "tangitweak",
-  "version": "0.34.0-alpha",
+  "version": "0.35.0-alpha",
   "description": "Rewrite requests, responses, and pages in TypeScript.",
   "private": true,
   "type": "module",

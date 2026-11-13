@@ -10,6 +10,16 @@ describe("parseSource", () => {
         expect(parseSource("https://raw.githubusercontent.com/me/s/main/a%20b.tangitweak.ts")).toMatchObject({ ref: "main", path: "a b.tangitweak.ts", tree: false });
         expect(parseSource("https://raw.githubusercontent.com/me/s/refs/heads/dev/x.tangitweak.ts")).toMatchObject({ ref: "refs/heads/dev", path: "x.tangitweak.ts" });
     });
+    it("GitLab file, folder, nested-subgroup and self-hosted URLs", () => {
+        expect(parseSource("https://gitlab.com/team/sub/repo")).toEqual({ kind: "gitlab", origin: "https://gitlab.com", project: "team/sub/repo", ref: "HEAD", path: "", tree: true });
+        expect(parseSource("https://gitlab.com/team/repo/-/tree/main/tools/kit")).toEqual({ kind: "gitlab", origin: "https://gitlab.com", project: "team/repo", ref: "main", path: "tools/kit", tree: true });
+        expect(parseSource("https://gitlab.com/team/repo/-/blob/main/dark.tangitweak.ts")).toEqual({ kind: "gitlab", origin: "https://gitlab.com", project: "team/repo", ref: "main", path: "dark.tangitweak.ts", tree: false });
+        expect(parseSource("https://git.corp.example/team/repo/-/tree/v1/kit")).toEqual({ kind: "gitlab", origin: "https://git.corp.example", project: "team/repo", ref: "v1", path: "kit", tree: true });
+        expect(sourceLabel({ kind: "gitlab", origin: "https://gitlab.com", project: "team/sub/repo", ref: "main", path: "kit", tree: true })).toBe("gitlab.com/team/sub/repo/kit @ main");
+        expect(installTargetUrl("https://gitlab.com/team/repo/-/blob/main/a.tangitweak.ts")).toBeNull();
+        expect(installTargetUrl("https://gitlab.com/team/repo/-/raw/main/a.tangitweak.ts")).toBe("https://gitlab.com/team/repo/-/raw/main/a.tangitweak.ts");
+        expect(installTargetUrl("https://gitlab.com/team/sub/repo#tangitweak:install")).toBe("https://gitlab.com/team/sub/repo");
+    });
     it("gists", () => {
         expect(parseSource("https://gist.github.com/me/abc123")).toEqual({ kind: "gist", id: "abc123" });
         expect(parseSource("https://gist.githubusercontent.com/me/abc123/raw/def/x.tangitweak.ts")).toEqual({ kind: "gist", id: "abc123", file: "x.tangitweak.ts" });
@@ -219,6 +229,60 @@ describe("fetchPackage", () => {
 
         await expect(fetchPackage(parseSource("https://github.com/me/sso-locked") as any, privNet)).rejects.toThrow(/sign in or authorize SSO/);
         await expect(fetchPackage(parseSource("https://github.com/me/no-access") as any, privNet)).rejects.toThrow(/sign in to GitHub/);
+    });
+
+    it("fetches GitLab repositories and ?path= subfolders (including slash branches, self-hosted, and SSO errors)", async () => {
+        const sha = "4e1a9110ad7fbe4a30fcf8c35c616b09c5e09220";
+        const rootZip = writeZip(
+            {
+                [`repo-HEAD-${sha}/metadata.json`]: JSON.stringify({ name: "GitLabRoot", scripts: ["index.ts"] }),
+                [`repo-HEAD-${sha}/index.ts`]: `export {};`,
+            },
+            new Date(),
+            sha
+        );
+        const subZip = writeZip(
+            {
+                [`repo-feat-auth-${sha}-tools-kit/tools/kit/kit.tangitweak.ts`]: `import "./helper";`,
+                [`repo-feat-auth-${sha}-tools-kit/tools/kit/helper.ts`]: `export const h = 1;`,
+            },
+            new Date(),
+            sha
+        );
+        const seen: { url: string; auth?: boolean }[] = [];
+        const glNet: Net = {
+            async json() {
+                throw new Error("unused");
+            },
+            async text() {
+                return null;
+            },
+            async bytes(url, _onBytes, auth) {
+                seen.push({ url, auth });
+                if (!auth) return null;
+                if (url === "https://gitlab.com/team/sub/repo/-/archive/HEAD/archive.zip") {
+                    return rootZip.buffer.slice(rootZip.byteOffset, rootZip.byteOffset + rootZip.byteLength) as ArrayBuffer;
+                }
+                if (url === "https://git.corp.example/team/repo/-/archive/feat/auth/archive.zip?path=tools%2Fkit") {
+                    return subZip.buffer.slice(subZip.byteOffset, subZip.byteOffset + subZip.byteLength) as ArrayBuffer;
+                }
+                if (url === "https://gitlab.com/team/locked/-/archive/HEAD/archive.zip") {
+                    return new TextEncoder().encode("<!doctype html><html><body>Sign in · GitLab</body></html>").buffer as ArrayBuffer;
+                }
+                return null;
+            },
+        };
+
+        const rPkg = await fetchPackage(parseSource("https://gitlab.com/team/sub/repo") as any, glNet);
+        expect(seen[0]).toEqual({ url: "https://gitlab.com/team/sub/repo/-/archive/HEAD/archive.zip", auth: true });
+        expect(rPkg.revision).toBe(sha);
+        expect(rPkg.manifest?.name).toBe("GitLabRoot");
+
+        const sPkg = await fetchPackage(parseSource("https://git.corp.example/team/repo/-/tree/feat/auth/tools/kit") as any, glNet);
+        expect(sPkg.revision).toBe(sha);
+        expect(Object.keys(sPkg.files).sort()).toEqual(["helper.ts", "kit.tangitweak.ts"]);
+
+        await expect(fetchPackage(parseSource("https://gitlab.com/team/locked") as any, glNet)).rejects.toThrow(/sign in or authorize SSO/);
     });
 
     it("webNet retries 404 https fetches with credentials: include, and honors explicit auth=true", async () => {

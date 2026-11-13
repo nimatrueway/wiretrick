@@ -92,6 +92,7 @@ The install dialog and page accept:
 | --- | --- | --- |
 | A GitHub file | `https://github.com/me/scripts/blob/main/dark.ts`, `https://raw.githubusercontent.com/me/scripts/main/kit/metadata.json` | the branch or tag (each update is pinned to a commit) |
 | A GitHub folder or repo | `https://github.com/me/scripts/tree/main/kit`, `https://github.com/me/dark-mode` (public, or private when signed in to GitHub in this browser) | the same |
+| A GitLab file, folder or repo | `https://gitlab.com/team/sub/kit`, `https://gitlab.com/team/scripts/-/tree/main/kit`, `https://git.corp.example/team/scripts/-/blob/main/dark.ts` (public, or private when signed in) | the same |
 | A gist | `https://gist.github.com/me/0123abcd` | the gist's latest revision |
 | A gist's file | `https://gist.githubusercontent.com/me/0123abcd/raw/dark.tangitweak.ts` | the same |
 | Any other URL of a script or `metadata.json` | `https://example.com/tools/dark.tangitweak.ts`, `file:///home/me/kit/metadata.json` | the same URL; imports are read next to it |

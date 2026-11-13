@@ -26,6 +26,7 @@ import { readZipEntries } from "./zip";
 
 export type PackageSource =
     | { kind: "github"; owner: string; repo: string; ref: string; path: string; tree: boolean }
+    | { kind: "gitlab"; origin: string; project: string; ref: string; path: string; tree: boolean }
     | { kind: "gist"; id: string; file?: string }
     | { kind: "url"; url: string }
     | { kind: "zip"; url: string };
@@ -47,6 +48,7 @@ export function installTargetUrl(url: string): string | null {
         return /^(https?|file):\/\//i.test(clean) ? clean : null;
     }
     if (/^https?:\/\/(gist\.)?github\.com\//i.test(url)) return null; // GitHub's own page for the file
+    if (/^https?:\/\/[^?#]*\/-\/blob\//i.test(url)) return null; // GitLab's own page for the file
     return ENTRY_URL_RE.test(url) ? url : null;
 }
 
@@ -96,6 +98,21 @@ export function parseSource(input: string): PackageSource | string {
         if (!id || raw !== "raw") return "not a raw gist URL";
         return { kind: "gist", id, file: rest.length ? rest[rest.length - 1] : undefined };
     }
+    const dash = seg.indexOf("-");
+    const isGitLabHost = host === "gitlab.com" || host === "www.gitlab.com" || /^gitlab\./i.test(host);
+    if ((u.protocol === "http:" || u.protocol === "https:") && (isGitLabHost || (dash >= 2 && (seg[dash + 1] === "tree" || seg[dash + 1] === "blob" || seg[dash + 1] === "raw")))) {
+        if (dash < 0) {
+            if (seg.length < 2) return "a GitLab URL needs the group/owner and repository";
+            const project = [...seg.slice(0, -1), seg[seg.length - 1].replace(/\.git$/, "")].join("/");
+            return { kind: "gitlab", origin: u.origin, project, ref: "HEAD", path: "", tree: true };
+        }
+        if (dash < 2) return "a GitLab URL needs the group/owner and repository";
+        const project = seg.slice(0, dash).join("/");
+        const [, mode, ref, ...rest] = seg.slice(dash);
+        if ((mode === "blob" || mode === "raw") && ref && rest.length) return { kind: "gitlab", origin: u.origin, project, ref, path: rest.join("/"), tree: false };
+        if (mode === "tree" && ref) return { kind: "gitlab", origin: u.origin, project, ref, path: rest.join("/"), tree: true };
+        return "open a file (…/-/blob/…) or folder (…/-/tree/…) of the repository";
+    }
     if (u.protocol === "http:" || u.protocol === "https:" || u.protocol === "file:") {
         if (!SCRIPT_FILE_RE.test(u.pathname) && !isManifestPath(u.pathname)) return "the URL must end in .ts (a script), metadata.json (a bundle) or .zip";
         u.hash = "";
@@ -107,6 +124,7 @@ export function parseSource(input: string): PackageSource | string {
 /** short text naming a source */
 export function sourceLabel(src: PackageSource): string {
     if (src.kind === "github") return `github.com/${src.owner}/${src.repo}${src.path ? "/" + src.path : ""}${src.ref === "HEAD" ? "" : ` @ ${src.ref}`}`;
+    if (src.kind === "gitlab") return `${new URL(src.origin).host}/${src.project}${src.path ? "/" + src.path : ""}${src.ref === "HEAD" ? "" : ` @ ${src.ref}`}`;
     if (src.kind === "gist") return `gist ${src.id}`;
     return src.url.replace(/^https?:\/\//, "");
 }
@@ -263,7 +281,87 @@ async function openGitHubArchive(
     return { start, revision: sha, archived: true, read: async (p) => files[p] ?? null };
 }
 
+/**
+ * Open a GitLab repository, subfolder (`?path=<dir>`), or file (gitlab.com or
+ * self-hosted GitLab) via `/-/archive/<ref>/archive.zip` with browser session
+ * cookies (`auth: true`), extracting the 40-char commit SHA from GitLab's zip
+ * comment so updates pin to exact commits.
+ */
+async function openGitLabArchive(
+    src: Extract<PackageSource, { kind: "gitlab" }>,
+    net: Net,
+    onProgress?: (p: DownloadProgress) => void
+): Promise<OpenedSource> {
+    const hostLabel = `${new URL(src.origin).host}/${src.project}`;
+    const projPath = src.project.split("/").map(encodeURIComponent).join("/");
+    const byteProgress = onProgress
+        ? (loaded: number, total?: number) => onProgress(total ? { done: loaded, total, detail: `${formatBytes(loaded)} / ${formatBytes(total)}` } : { detail: formatBytes(loaded) })
+        : undefined;
+    let ref = src.ref;
+    let relPath = src.path;
+    const archiveOf = (r: string, p: string) =>
+        `${src.origin}/${projPath}/-/archive/${encodeGitRef(r)}/archive.zip${src.tree && p ? `?path=${encodeURIComponent(p)}` : ""}`;
+    let buf = await net.bytes(archiveOf(ref, relPath), byteProgress, true);
+    if (!buf && relPath) {
+        const segs = relPath.split("/").filter(Boolean);
+        for (let i = 1; i <= Math.min(3, src.tree ? segs.length : segs.length - 1); i++) {
+            const tryRef = `${src.ref}/${segs.slice(0, i).join("/")}`;
+            const tryPath = segs.slice(i).join("/");
+            const tryBuf = await net.bytes(archiveOf(tryRef, tryPath), byteProgress, true);
+            if (tryBuf) {
+                buf = tryBuf;
+                ref = tryRef;
+                relPath = tryPath;
+                break;
+            }
+        }
+    }
+    if (!buf) {
+        throw new Error(`can't read ${hostLabel} @ ${src.ref} (if this repository is private, sign in to GitLab in this browser first)`);
+    }
+    const archiveCap = relPath ? 20 * MAX_BYTES : 4 * MAX_BYTES;
+    if (buf.byteLength > archiveCap) {
+        if (!src.tree) {
+            const rawBase = `${src.origin}/${projPath}/-/raw/${encodeGitRef(ref)}/`;
+            return {
+                start: relPath,
+                read: async (p) => {
+                    const url = rawBase + p.split("/").map(encodeURIComponent).join("/");
+                    if (!isImageDataPath(p)) return net.text(url, true);
+                    const b = await net.bytes(url, undefined, true);
+                    return b ? bytesToImageDataUrl(p, new Uint8Array(b)) : null;
+                },
+            };
+        }
+        throw new Error(`the repository archive is over ${archiveCap / 1024 / 1024} MB`);
+    }
+    let parsed: Awaited<ReturnType<typeof unzipPackageArchive>>;
+    try {
+        parsed = await unzipPackageArchive(buf, relPath);
+    } catch (e: any) {
+        if (/not a zip file/i.test(String(e?.message || e))) {
+            throw new Error(`${hostLabel} asked to sign in or authorize SSO — open it in a tab and sign in first`);
+        }
+        throw e;
+    }
+    const { files, topFolder, comment } = parsed;
+    const commentSha = comment.trim();
+    const folderSha = topFolder ? /-([0-9a-f]{40})(?:-|$)/i.exec(topFolder)?.[1] : undefined;
+    const sha = /^[0-9a-f]{40}$/i.test(commentSha) ? commentSha.toLowerCase() : folderSha?.toLowerCase();
+    let start = relPath;
+    if (src.tree) {
+        const dir = relPath.replace(/\/$/, "");
+        const here = Object.keys(files).filter((p) => p.slice(0, p.lastIndexOf("/") + 1) === (dir ? dir + "/" : ""));
+        start = pickStart(here, dir || "the repository", "open the one to install, or list them in a metadata.json");
+    }
+    return { start, revision: sha, archived: true, read: async (p) => files[p] ?? null };
+}
+
 export async function openSource(src: PackageSource, net: Net, onProgress?: (p: DownloadProgress) => void): Promise<OpenedSource> {
+    if (src.kind === "gitlab") {
+        onProgress?.({});
+        return openGitLabArchive(src, net, onProgress);
+    }
     if (src.kind === "github") {
         onProgress?.({});
         const base = `${GITHUB_API}/repos/${src.owner}/${src.repo}`;
@@ -536,7 +634,8 @@ export async function fetchPackage(src: PackageSource, net: Net, onProgress?: (p
 
 async function fetchUrl(url: string, auth?: boolean): Promise<Response> {
     const r = await fetch(url, { cache: "no-store", credentials: auth ? "include" : "omit" });
-    if (!auth && (r.status === 401 || r.status === 403 || r.status === 404) && /^https?:/i.test(url) && !/^https:\/\/api\.github\.com\//i.test(url)) {
+    const redirectedToLogin = r.redirected && /\/(login|sign_in|sso|oauth|auth)\b/i.test(r.url);
+    if (!auth && (r.status === 401 || r.status === 403 || r.status === 404 || redirectedToLogin) && /^https?:/i.test(url) && !/^https:\/\/api\.github\.com\//i.test(url)) {
         return fetch(url, { cache: "no-store", credentials: "include" });
     }
     return r;
