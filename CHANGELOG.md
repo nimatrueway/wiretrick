@@ -7,6 +7,17 @@ its section below.
 
 ## [Unreleased]
 
+## [0.33.0-alpha] - 2026-11-13
+
+### Breaking
+
+- **`settings.json` replaces `settings.yaml`**: extension settings and per-script `enabled` / `tt.params` overrides now live in a sparse `settings.json` file (`{}` when everything is at its default, with global settings at the top level and script overrides under `"scripts"`). Deleting any key — or saving `{}` — resets it to its default, and Monaco's built-in JSON worker provides schema validation, completions, and hover documentation directly from `settings.schema.json`.
+
+### Added
+
+- **`tt.tabStore(name, initial)`**: live `valtio` store scoped per browser tab across background, MV3 sandbox, overlays, and isolated `onPage` runtimes — surviving reloads and navigations within that tab and dropping automatically when the tab closes.
+- **Reactive per-tab `strategy: "rules"`**: `rules` handlers can now read `tt.tabStore`, `tt.globalStore`, and `tt.params` conditionally (returning `undefined` when off without triggering a probe error), automatically emitting `tabIds` / `excludedTabIds` `declarativeNetRequest` session rules for diverged tabs and attributing Network `Modified` outcomes accurately per tab.
+
 ## [0.32.0-alpha] - 2026-11-12
 
 ### Added
@@ -1004,7 +1015,8 @@ First release of Wiretrick:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/tangistudio/TangiTweak/compare/v0.32.0-alpha...HEAD
+[Unreleased]: https://github.com/tangistudio/TangiTweak/compare/v0.33.0-alpha...HEAD
+[0.33.0-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.32.0-alpha...v0.33.0-alpha
 [0.32.0-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.31.0-alpha...v0.32.0-alpha
 [0.31.0-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.30.0-alpha...v0.31.0-alpha
 [0.30.0-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.29.0-alpha...v0.30.0-alpha
