@@ -2,15 +2,16 @@
 
 <h1 align="center">TangiTweak</h1>
 
-Rewrite any request or response in your browser with a few lines of
-TypeScript. TangiTweak is a ground-up rewrite of
+<p align="center">Rewrite requests, responses, and pages in TypeScript.</p>
+
+TangiTweak is a ground-up rewrite of
 [Resource Override](https://github.com/kylepaulsen/ResourceOverride), also
 inspired by [Inssman](https://github.com/vvmgev/Inssman) and
-[Tampermonkey](https://www.tampermonkey.net/) — userscripts, but built for
-modifying requests and responses. The whole interface is a **script editor**:
-each handler in a script names the URLs it handles and what to do — redirect,
-block, edit headers, transform or replace bodies, patch the DOM, or draw its
-own GUI over the page.
+[Tampermonkey](https://www.tampermonkey.net/) — programmable scripts for
+modifying network requests, responses, and pages. The whole interface is a
+**script editor**: each handler in a script names the URLs it handles and what
+to do — redirect, block, edit headers, transform or replace bodies, patch the
+site's JS or DOM, or draw its own GUI over the page.
 
 > [!WARNING]
 > **TangiTweak is experimental.** I'm constantly experimenting with its
@@ -48,8 +49,8 @@ own GUI over the page.
   report to an LLM with "why isn't this working?". It carries your scripts,
   settings, the recent log and the requests the Network view recorded, with what each script did to them,
   so the model can pinpoint the cause. Cookies and authorization headers are redacted.
-- **Install and share scripts** — open any URL ending in `.tangitweak.ts` (a gist, a GitHub file or folder, any site, a local file) to install it with the files it imports; the install page shows what it can do first. Installed scripts [update themselves](docs/packages.md#updates) unless an update can do more, which waits for your review.
-- **Folder sync** — keep scripts, JSON data files and their folders as plain files in a synced folder of your choice.
+- **Install and share scripts** — open any URL ending in `.tangitweak.ts` or `#tangitweak:install` (a gist, a GitHub repo, file or folder, any site, a local file) to install it with the files it imports; the install page shows what it can do first. Installed scripts [update themselves](docs/packages.md#updates) unless an update can do more, which waits for your review.
+- **Folder sync** — keep scripts, data files (`.json`, `.md`, `.svg`, images) and their folders as plain files in a synced folder of your choice.
 - **Chrome (MV3), MV2 Chromium and Firefox.**
 
 ## Install

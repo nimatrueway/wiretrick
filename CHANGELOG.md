@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Wiretrick. The format follows
+All notable changes to TangiTweak. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/). Each release's notes on GitHub are
 its section below.

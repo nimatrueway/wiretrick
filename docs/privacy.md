@@ -4,9 +4,9 @@
 
 Last updated: 2026-11-11
 
-TangiTweak is a developer tool that runs scripts you write or install to read
-and change your browser's network requests and responses. This page explains
-what it accesses, where that data goes, and why.
+TangiTweak is a developer tool that runs TypeScript scripts you write or
+install to rewrite requests, responses, and pages in your browser. This page
+explains what it accesses, where that data goes, and why.
 
 ## Summary
 
@@ -20,11 +20,11 @@ what it accesses, where that data goes, and why.
 
 ## What TangiTweak accesses
 
-To do its job, TangiTweak can see the requests and responses of the sites your
-scripts target: URLs, headers, bodies, cookies sent in headers, and page
-content. It only acts on what your enabled scripts ask for. This data is
-handled on your device, by your scripts, and is not sent anywhere unless a
-script you run sends it (see below).
+To do its job, TangiTweak can see and modify the requests, responses, and pages
+of the sites your scripts target: URLs, headers, bodies, cookies sent in
+headers, and page content. It only acts on what your enabled scripts ask for.
+This data is handled on your device, by your scripts, and is not sent anywhere
+unless a script you run sends it (see below).
 
 The Log and Network views keep a short history of requests and of what your
 scripts did, in memory and in the browser's session storage, so you can

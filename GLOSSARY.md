@@ -2,9 +2,9 @@
 
 [<img src="icons/icon.svg" width="16" height="16" align="absmiddle" alt=""> README](README.md)
 
-TangiTweak lets a user rewrite browser requests and responses with small
-TypeScript scripts. This glossary fixes the words we use for its concepts in
-docs, UI text, issues and conversation.
+TangiTweak lets you rewrite requests, responses, and pages in TypeScript. This
+glossary fixes the words we use for its concepts in docs, UI text, issues and
+conversation.
 
 ## Scripts
 
@@ -17,7 +17,7 @@ A script that registers no handlers with its current param values; it only runs 
 _Avoid_: utility, lib, helper
 
 **Data file**:
-A JSON file (`.json`) in the explorer that scripts import; it never runs.
+A JSON, Markdown, SVG or image file (`.json`, `.md`, `.svg`, `.png`, …) in the explorer that scripts import; it never runs.
 _Avoid_: fixture, asset, JSON script
 
 **Package import**:
