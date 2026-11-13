@@ -24,7 +24,7 @@ import {
     type PendingUpdate,
     updateSource,
 } from "../../shared/packageModel";
-import { SCRIPT_FILE_RE, fetchPackage, filesHash, hashText, isRemote, parseSource, stripInstallHash, webNet } from "../../shared/packageSource";
+import { SCRIPT_FILE_RE, crawl, fetchPackage, filesHash, hashText, isRemote, parseSource, stripInstallHash, webNet } from "../../shared/packageSource";
 import { allFolders, isInFolder } from "../../shared/folders";
 import { scriptFileKey, scriptFileName } from "../../shared/scriptName";
 import { log } from "./logs";
@@ -215,32 +215,40 @@ interface MatchedTarget {
     copyName: string;
 }
 
-async function synthesizeFolderTarget(dir: string, scripts: Script[], dataFiles: DataFile[]): Promise<InstalledPackage> {
+async function synthesizeFolderTarget(
+    dir: string,
+    scripts: Script[],
+    dataFiles: DataFile[],
+    incomingFiles: Record<string, string>
+): Promise<InstalledPackage> {
     const dirScripts = scripts.filter((s) => isInFolder(s.meta.name, dir));
     const dirData = dataFiles.filter((d) => isInFolder(d.path, dir));
-    const files: Record<string, InstalledFile> = {};
-    const rawTexts: Record<string, string> = {};
+    const allTexts: Record<string, string> = {};
+    const byLower = new Map<string, string>();
     for (const s of dirScripts) {
         const rel = scriptFileName(s.meta.name.slice(dir.length + 1));
-        files[rel] = { kind: "script", id: s.id, name: s.meta.name, hash: await hashText(s.code) };
-        rawTexts[rel] = s.code;
+        allTexts[rel] = s.code;
+        byLower.set(rel.toLowerCase(), rel);
     }
     for (const d of dirData) {
         const rel = d.path.slice(dir.length + 1);
-        files[rel] = { kind: "data", id: d.id, name: d.path, hash: await hashText(d.text) };
-        rawTexts[rel] = d.text;
+        allTexts[rel] = d.text;
+        byLower.set(rel.toLowerCase(), rel);
     }
+
     let metadata: PackageMetadata = { connect: [] };
     let entries: string[] = [];
+    let hasValidManifest = false;
     const mf = dirData.find((d) => d.path.slice(dir.length + 1).toLowerCase() === MANIFEST_FILE);
     if (mf) {
         try {
             const parsed = parseManifest(mf.text);
             const { scripts: sList, ...rest } = parsed;
             entries = sList;
-            metadata = { ...rest, connect: [...new Set([...rest.connect, ...dirScripts.flatMap((s) => s.meta.metadata?.connect ?? [])])] };
+            metadata = rest;
+            hasValidManifest = true;
         } catch {
-            // malformed local metadata.json: still diff all files
+            // malformed local metadata.json: fall back to discovered entries
         }
     }
     if (!entries.length) {
@@ -248,10 +256,59 @@ async function synthesizeFolderTarget(dir: string, scripts: Script[], dataFiles:
         entries = (active.length ? active : dirScripts).map((s) => scriptFileName(s.meta.name.slice(dir.length + 1)));
         if (dirScripts.length === 1 && dirScripts[0].meta.metadata) metadata = dirScripts[0].meta.metadata;
     }
+
+    // Crawl the local package so unimported companion files (README.md, unused
+    // helpers) aren't falsely shown as removed or deleted on Upgrade.
+    const incomingByLower = new Map(Object.keys(incomingFiles).map((r) => [r.toLowerCase(), r]));
+    const includedLower = new Set<string>(incomingByLower.keys());
+    if (mf) includedLower.add(MANIFEST_FILE);
+    const readLocal = (useManifest: boolean) => async (p: string) => {
+        if (!useManifest && p.toLowerCase() === MANIFEST_FILE) return entries.length ? JSON.stringify({ scripts: entries }) : null;
+        const k = byLower.get(p.toLowerCase());
+        return k !== undefined ? allTexts[k] : null;
+    };
+    let crawled = false;
+    for (const useManifest of hasValidManifest ? [true, false] : [false]) {
+        if (!useManifest && !entries.length) break;
+        try {
+            const c = await crawl(MANIFEST_FILE, readLocal(useManifest));
+            for (const p of Object.keys(c.files)) {
+                if (!useManifest && p.toLowerCase() === MANIFEST_FILE) continue;
+                includedLower.add(p.toLowerCase());
+            }
+            crawled = true;
+            break;
+        } catch {
+            // e.g. local manifest lists a missing script; retry from discovered entries
+        }
+    }
+    if (!crawled) for (const k of byLower.keys()) includedLower.add(k);
+
+    const pkgScripts = dirScripts.filter((s) => includedLower.has(scriptFileName(s.meta.name.slice(dir.length + 1)).toLowerCase()));
+    const pkgData = dirData.filter((d) => includedLower.has(d.path.slice(dir.length + 1).toLowerCase()));
+    if (hasValidManifest) {
+        metadata = { ...metadata, connect: [...new Set([...metadata.connect, ...pkgScripts.flatMap((s) => s.meta.metadata?.connect ?? [])])] };
+    }
+
+    const files: Record<string, InstalledFile> = {};
+    const rawTexts: Record<string, string> = {};
+    for (const s of pkgScripts) {
+        const localRel = scriptFileName(s.meta.name.slice(dir.length + 1));
+        const rel = incomingByLower.get(localRel.toLowerCase()) ?? localRel;
+        files[rel] = { kind: "script", id: s.id, name: s.meta.name, hash: await hashText(s.code) };
+        rawTexts[rel] = s.code;
+    }
+    for (const d of pkgData) {
+        const localRel = d.path.slice(dir.length + 1);
+        const rel = incomingByLower.get(localRel.toLowerCase()) ?? localRel;
+        files[rel] = { kind: "data", id: d.id, name: d.path, hash: await hashText(d.text) };
+        rawTexts[rel] = d.text;
+    }
+
     const caps = capabilitiesOf(
-        dirScripts.flatMap((s) => s.meta.routes ?? []),
+        pkgScripts.flatMap((s) => s.meta.routes ?? []),
         metadata.connect,
-        dirScripts.map((s) => s.code)
+        pkgScripts.map((s) => s.code)
     );
     const now = Date.now();
     return {
@@ -341,7 +398,7 @@ async function findExistingTarget(
         });
         if (dir) {
             const hasFiles = scripts.some((s) => isInFolder(s.meta.name, dir)) || dataFiles.some((d) => isInFolder(d.path, dir));
-            if (hasFiles) return { pkg: await synthesizeFolderTarget(dir, scripts, dataFiles), managed: false, copyName };
+            if (hasFiles) return { pkg: await synthesizeFolderTarget(dir, scripts, dataFiles, fetched.files), managed: false, copyName };
         }
     } else if (onlyEntry) {
         const rootScripts = scripts.filter((s) => !s.meta.name.includes("/"));
@@ -413,6 +470,9 @@ async function modifiedNow(pkg: InstalledPackage): Promise<string[]> {
 async function writeFiles(version: Pick<PackageVersion, "entries" | "files">, items: Analysis["items"], folder: string, pkg: InstalledPackage | undefined, enabled: boolean): Promise<Record<string, InstalledFile>> {
     const { entries, files } = version;
     if (folder) await createFolder(folder).catch(() => {}); // exists
+    const [curScripts, curData] = await Promise.all([listScripts(), listDataFiles()]);
+    const scriptByKey = new Map(curScripts.map((s) => [scriptFileKey(s.meta.name), s.id]));
+    const dataByPath = new Map(curData.map((d) => [d.path.toLowerCase(), d.id]));
     const out: Record<string, InstalledFile> = {};
     const rels = Object.keys(files).sort((a, b) => rank(a) - rank(b));
     function rank(rel: string) {
@@ -425,10 +485,10 @@ async function writeFiles(version: Pick<PackageVersion, "entries" | "files">, it
         const old = priorOf(pkg, version, rel);
         const prev = old && old.kind === kind ? old : undefined;
         if (kind === "data") {
-            const id = (await saveDataFile({ id: prev?.id, path: name, text })).id;
+            const id = (await saveDataFile({ id: prev?.id ?? dataByPath.get(name.toLowerCase()), path: name, text })).id;
             out[rel] = { kind, id, name, hash: await hashText(text) };
         } else {
-            scriptBatch.push({ rel, id: prev?.id ?? newId(), name, code: text, ...(prev ? {} : { enabled }) });
+            scriptBatch.push({ rel, id: prev?.id ?? scriptByKey.get(scriptFileKey(name)) ?? newId(), name, code: text, ...(prev ? {} : { enabled }) });
         }
     }
     if (scriptBatch.length) {

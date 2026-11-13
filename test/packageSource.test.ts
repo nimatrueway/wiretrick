@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { crawl, fetchPackage, installTargetUrl, isRemote, parseSource, pickStart, sourceLabel, stripInstallHash, webNet, ENTRY_URL_RE, type Net } from "../src/shared/packageSource";
+import { crawl, fetchPackage, installTargetUrl, isRemote, parseSource, pickStart, sourceLabel, sourcePageUrl, stripInstallHash, webNet, ENTRY_URL_RE, type Net } from "../src/shared/packageSource";
 import { writeZip } from "../src/shared/zip";
 
 describe("parseSource", () => {
@@ -39,8 +39,21 @@ describe("parseSource", () => {
         expect(isRemote({ kind: "zip", url: "https://x.dev/kit.zip" })).toBe(true);
         expect(isRemote({ kind: "zip", url: "file:///kit.zip" })).toBe(false);
     });
-    it("labels", () => {
+    it("labels and sourcePageUrl", () => {
         expect(sourceLabel({ kind: "github", owner: "me", repo: "s", ref: "HEAD", path: "", tree: true })).toBe("github.com/me/s");
+        expect(sourcePageUrl("https://github.com/nima-taheri-mongodb/bonsai")).toBe("https://github.com/nima-taheri-mongodb/bonsai");
+        expect(sourcePageUrl("https://github.com/me/s/tree/v1/dark")).toBe("https://github.com/me/s/tree/v1/dark");
+        const ghFile = sourcePageUrl("https://raw.githubusercontent.com/me/s/refs/heads/main/a.tangitweak.ts")!;
+        expect(ghFile).toBe("https://github.com/me/s/blob/main/a.tangitweak.ts");
+        expect(installTargetUrl(ghFile)).toBeNull();
+        const glFile = sourcePageUrl("https://gitlab.com/team/repo/-/raw/main/a.tangitweak.ts")!;
+        expect(glFile).toBe("https://gitlab.com/team/repo/-/blob/main/a.tangitweak.ts");
+        expect(installTargetUrl(glFile)).toBeNull();
+        expect(sourcePageUrl("https://gist.githubusercontent.com/me/abc123/raw/def/x.tangitweak.ts")).toBe("https://gist.github.com/abc123");
+        const plainEntry = sourcePageUrl("https://x.dev/p/a.tangitweak.ts")!;
+        expect(plainEntry).toBe("https://x.dev/p/a.tangitweak.ts#tt-raw");
+        expect(installTargetUrl(plainEntry)).toBeNull();
+        expect(sourcePageUrl("file:///home/me/p/a.tangitweak.tsx")).toBeNull();
     });
     it("recognizes entry URLs and #tangitweak:install links opened in a tab", () => {
         expect(ENTRY_URL_RE.test("https://x.dev/a.tangitweak.ts?raw=1")).toBe(true);

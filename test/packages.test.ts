@@ -202,11 +202,14 @@ describe("installed packages", () => {
         expect((await ss.listDataFiles()).map((d) => d.path).sort()).toEqual(["dark/cfg.json", "dark/extra.json"]);
     });
 
-    it("detects an unmanaged Explorer folder or root script with the same name, diffs its files, and upgrades or installs a copy", async () => {
-        // Unmanaged bundle folder already in Explorer (e.g. from folder sync)
+    it("detects an unmanaged Explorer folder or root script with the same name, diffs only crawled package files, and preserves unimported companion files", async () => {
+        // Unmanaged bundle folder already in Explorer (e.g. from folder sync with a git checkout)
         await ss.saveDataFile({ path: "bonsai/metadata.json", text: JSON.stringify({ name: "bonsai", version: "0.0.1-alpha", scripts: ["index.tsx"] }) });
-        const existingEntry = await ss.saveScript({ id: ss.newId(), name: "bonsai/index.tsx", code: 'tt.onPage("*://a.com/*", () => {});\n', enabled: false });
+        const existingEntry = await ss.saveScript({ id: ss.newId(), name: "bonsai/index.tsx", code: 'import "./old.json";\ntt.onPage("*://a.com/*", () => {});\n', enabled: false });
         await ss.saveDataFile({ path: "bonsai/old.json", text: "{}" });
+        // Unimported companion files in the synced repo folder (must NOT be reported removed or deleted)
+        const readme = await ss.saveDataFile({ path: "bonsai/README.md", text: "# Bonsai\n" });
+        const unusedUtil = await ss.saveScript({ id: ss.newId(), name: "bonsai/shared/util/text", code: "export const trim = (s: string) => s.trim();\n" });
 
         const incomingFiles = {
             "metadata.json": JSON.stringify({ name: "bonsai", version: "0.0.2-alpha", scripts: ["index.tsx"] }),
@@ -223,7 +226,7 @@ describe("installed packages", () => {
         expect(a.existing?.packageId).toBeUndefined();
         expect(Object.keys(a.existing!.before).sort()).toEqual(["index.tsx", "metadata.json", "old.json"]);
 
-        // Upgrading in place preserves the existing script id & disabled state, removes old.json, and enables Roll Back
+        // Upgrading in place preserves the existing script id & disabled state, removes old.json, keeps companion files, and enables Roll Back
         const upgraded = await pk.upgradePackage(incoming, { autoUpdate: true });
         expect(upgraded.folder).toBe("bonsai");
         expect(upgraded.metadata.version).toBe("0.0.2-alpha");
@@ -231,11 +234,29 @@ describe("installed packages", () => {
         const afterEntry = (await ss.listScripts()).find((s) => s.id === existingEntry.id)!;
         expect(afterEntry.enabled).toBe(false);
         expect(afterEntry.code).toContain('console.log("v2")');
-        expect((await ss.listDataFiles()).map((d) => d.path)).toEqual(["bonsai/metadata.json"]);
+        expect((await ss.listDataFiles()).map((d) => d.path).sort()).toEqual(["bonsai/README.md", "bonsai/metadata.json"]);
+        expect((await ss.listScripts()).map((s) => s.meta.name).sort()).toEqual(["bonsai/index.tsx", "bonsai/shared/util/text"]);
 
         const rolledBack = await pk.rollbackPackage(upgraded.id);
         expect(rolledBack.metadata.version).toBe("0.0.1-alpha");
-        expect((await ss.listDataFiles()).map((d) => d.path).sort()).toEqual(["bonsai/metadata.json", "bonsai/old.json"]);
+        expect((await ss.listDataFiles()).map((d) => d.path).sort()).toEqual(["bonsai/README.md", "bonsai/metadata.json", "bonsai/old.json"]);
+
+        // Later update that begins importing the companion files adopts their existing store ids instead of clashing or duplicating
+        const v3 = {
+            source: "https://github.com/me/bonsai",
+            entries: ["index.tsx"],
+            files: {
+                "metadata.json": JSON.stringify({ name: "bonsai", version: "0.0.3-alpha", scripts: ["index.tsx"] }),
+                "index.tsx": 'import "./README.md";\nimport { trim } from "./shared/util/text";\ntt.onPage("*://a.com/*", () => trim("x"));\n',
+                "README.md": "# Bonsai v3\n",
+                "shared/util/text.ts": "export const trim = (s: string) => s.trim();\n",
+            },
+            revision: "def67890",
+        };
+        const up3 = await pk.upgradePackage(v3, { packageId: rolledBack.id, autoUpdate: true });
+        expect(up3.files["README.md"].id).toBe(readme.id);
+        expect(up3.files["shared/util/text.ts"].id).toBe(unusedUtil.id);
+        expect((await ss.listScripts()).filter((s) => s.meta.name === "bonsai/shared/util/text")).toHaveLength(1);
     });
 
     it("unwraps stringList tt.params Proxies in route.url and recovers legacy object-serialized route.url entries", async () => {

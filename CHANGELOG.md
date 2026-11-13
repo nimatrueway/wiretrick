@@ -7,6 +7,16 @@ its section below.
 
 ## [Unreleased]
 
+## [0.36.1-alpha] - 2026-11-13
+
+### Changed
+
+- Source URLs (`From …` and `updates from …`) in the **Install Script** dialog and `install.html` are now clickable links to the repository, folder, or script source page.
+
+### Fixed
+
+- Upgrading an unmanaged Explorer folder (such as a local git checkout synced via Folder Sync) now diffs only crawled package files instead of every file in the folder, so unimported companion files (`README.md`, unused utilities) are neither reported as `removed` nor deleted on **Upgrade**.
+
 ## [0.36.0-alpha] - 2026-11-13
 
 ### Added
@@ -1076,7 +1086,8 @@ Before `0.0.1-alpha` was tagged, the extension grew from an initial TypeScript p
 - Built the initial TypeScript script engine (in-browser Sucrase transpilation, `res.onRequest` / `res.onDom` / `res.log`, script `console.*` capture), embedded Monaco editor with bundled API typings, movable log panel, popup with per-tab active-script badge, sample scripts, and bundle import/export.
 - Implemented three initial interception tiers (`MAIN`-world `fetch`/XHR hook, MV2 blocking `webRequest`, and `chrome.debugger` `Fetch` for main-frame HTML and subresources with adaptive idle detach), two-way local folder sync via the File System Access API, and the headless Chromium E2E suite.
 
-[Unreleased]: https://github.com/tangistudio/TangiTweak/compare/v0.36.0-alpha...HEAD
+[Unreleased]: https://github.com/tangistudio/TangiTweak/compare/v0.36.1-alpha...HEAD
+[0.36.1-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.36.0-alpha...v0.36.1-alpha
 [0.36.0-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.35.0-alpha...v0.36.0-alpha
 [0.35.0-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.34.0-alpha...v0.35.0-alpha
 [0.34.0-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.33.1-alpha...v0.34.0-alpha

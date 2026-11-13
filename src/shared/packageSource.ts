@@ -129,6 +129,34 @@ export function sourceLabel(src: PackageSource): string {
     return src.url.replace(/^https?:\/\//, "");
 }
 
+/** browser-navigable web URL for `input` that won't re-trigger `install.html`, or null (e.g. `file://`) */
+export function sourcePageUrl(input: string): string | null {
+    const clean = stripInstallHash(input);
+    if (!clean) return null;
+    const src = parseSource(clean);
+    if (typeof src === "string") {
+        if (!/^https?:\/\//i.test(clean)) return null;
+        return ENTRY_URL_RE.test(clean) ? `${clean.replace(/#.*$/, "")}#tt-raw` : clean;
+    }
+    if (src.kind === "github") {
+        const base = `https://github.com/${encodeURIComponent(src.owner)}/${encodeURIComponent(src.repo)}`;
+        if (src.tree && !src.path && src.ref === "HEAD") return base;
+        const ref = encodeGitRef(src.ref.replace(/^refs\/(heads|tags)\//, ""));
+        const path = src.path ? "/" + src.path.split("/").map(encodeURIComponent).join("/") : "";
+        return `${base}/${src.tree ? "tree" : "blob"}/${ref}${path}`;
+    }
+    if (src.kind === "gitlab") {
+        const base = `${src.origin}/${src.project.split("/").map(encodeURIComponent).join("/")}`;
+        if (src.tree && !src.path && src.ref === "HEAD") return base;
+        const ref = encodeGitRef(src.ref.replace(/^refs\/(heads|tags)\//, ""));
+        const path = src.path ? "/" + src.path.split("/").map(encodeURIComponent).join("/") : "";
+        return `${base}/-/${src.tree ? "tree" : "blob"}/${ref}${path}`;
+    }
+    if (src.kind === "gist") return `https://gist.github.com/${encodeURIComponent(src.id)}`;
+    if (!/^https?:/i.test(src.url)) return null;
+    return ENTRY_URL_RE.test(src.url) ? `${src.url}#tt-raw` : src.url;
+}
+
 /** a source updates in the background (a local file only when the Editor reads it) */
 export const isRemote = (src: PackageSource): boolean => (src.kind !== "url" && src.kind !== "zip") || /^https?:/i.test(src.url);
 

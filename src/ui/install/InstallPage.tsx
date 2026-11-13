@@ -11,7 +11,7 @@ import { describeCapabilities } from "../../shared/packageCaps";
 import type { PackageStatus } from "../../shared/packageImports";
 import { entryIds, packageName, resolvePackageIcon, updateSource, type InstalledPackage, type PackageVersion } from "../../shared/packageModel";
 import { compareVersions, isManifestPath, MANIFEST_FILE } from "../../shared/packageMetadata";
-import { parseSource, readPackageBrowserFile, sourceLabel, type DownloadProgress } from "../../shared/packageSource";
+import { parseSource, readPackageBrowserFile, sourceLabel, sourcePageUrl, type DownloadProgress } from "../../shared/packageSource";
 import { isPackageFile, localPackage, startsIn, unzipPackage } from "../../shared/localPackage";
 import { isDataSpec, isImageDataPath, packageUrls } from "../../shared/scriptImports";
 import { diffHunks, lineDiff } from "../../shared/lineDiff";
@@ -413,6 +413,18 @@ function PackageIcon({ src, className = "pkg-icon" }: { src?: string; className?
     return <img className={className} src={src} alt="" onError={() => setBroken(true)} />;
 }
 
+function SourceLink({ url }: { url: string }) {
+    const href = sourcePageUrl(url);
+    const text = label(url);
+    return href ? (
+        <a href={href} target="_blank" rel="noreferrer">
+            {text}
+        </a>
+    ) : (
+        <>{text}</>
+    );
+}
+
 function Header(props: { name: string; metadata: Analysis["metadata"]; scripts: string[]; source: string; iconUrl?: string }) {
     const { metadata: header } = props;
     return (
@@ -430,8 +442,19 @@ function Header(props: { name: string; metadata: Analysis["metadata"]; scripts: 
                     </p>
                 )}
                 <p className="meta dim">
-                    {props.source ? <>From {label(props.source)}</> : <>From local files</>}
-                    {header.updateURL && header.updateURL !== props.source && <> · updates from {label(header.updateURL)}</>}
+                    {props.source ? (
+                        <>
+                            From <SourceLink url={props.source} />
+                        </>
+                    ) : (
+                        <>From local files</>
+                    )}
+                    {header.updateURL && header.updateURL !== props.source && (
+                        <>
+                            {" "}
+                            · updates from <SourceLink url={header.updateURL} />
+                        </>
+                    )}
                     {header.author && <> · by {header.author}</>}
                     {header.license && <> · {header.license}</>}
                     {header.minTangiTweakVersion && <> · TangiTweak ≥ {header.minTangiTweakVersion}</>}

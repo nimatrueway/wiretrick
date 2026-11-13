@@ -37,6 +37,7 @@ import { isMacPlatform, keyHint } from "../shortcuts";
 import { badgeRowOf, packageOf, packages, packageTitle } from "../state/packages";
 import { openInstall } from "../state/dialogs";
 import { packageFolders } from "../../shared/makePackage";
+import { sourcePageUrl } from "../../shared/packageSource";
 import { packagesApi } from "../install/api";
 import { packageName, resolveWorkspaceIcons, updateSource, type InstalledPackage } from "../../shared/packageModel";
 import { MANIFEST_FILE } from "../../shared/packageMetadata";
@@ -75,7 +76,7 @@ async function checkUpdates(p?: InstalledPackage): Promise<void> {
 /** a package's items in a menu on one of its rows */
 function packageMenu(p: InstalledPackage): MenuItem[] {
     const from = updateSource(p);
-    const src = [p.source, from].find((u) => /^https?:/i.test(u) && !/\.zip([?#]|$)/i.test(u)) ?? "";
+    const src = [p.source, from].map((u) => (!/\.zip([?#]|$)/i.test(u) ? sourcePageUrl(u) : null)).find(Boolean) ?? "";
     return [
         ...(p.pending ? [{ label: "Review Update…", run: () => openInstall({ update: p.id }) }] : []),
         ...(from ? [{ label: "Check for Updates", run: () => pkgAction(() => checkUpdates(p)) }] : []),
