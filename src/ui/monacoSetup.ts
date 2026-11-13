@@ -29,6 +29,19 @@ import { packagePaths, TYPINGS_ROOT } from "../shared/packageImports";
 import { builtinPaths } from "../shared/builtinSpecs";
 import { MANIFEST_FILE, MANIFEST_SCHEMA } from "../shared/packageMetadata";
 
+const STORES_SCHEMA = {
+    type: "object",
+    description: "Persisted tt.globalStore data for your scripts, keyed by script name → store name → JSON object.",
+    additionalProperties: {
+        type: "object",
+        description: "Persisted globalStore entries belonging to this script.",
+        additionalProperties: {
+            type: "object",
+            description: "Persisted store state (a plain JSON object).",
+        },
+    },
+};
+
 let monacoApi: any = null;
 let ttApiDts = "";
 
@@ -104,7 +117,10 @@ export async function loadMonaco(): Promise<any> {
     registerTsHover(monacoApi);
     monacoApi.languages.json?.jsonDefaults?.setDiagnosticsOptions({
         validate: true,
-        schemas: [{ uri: "tangitweak://schema/metadata.json", fileMatch: ["**/" + MANIFEST_FILE], schema: MANIFEST_SCHEMA }],
+        schemas: [
+            { uri: "tangitweak://schema/metadata.json", fileMatch: ["**/" + MANIFEST_FILE], schema: MANIFEST_SCHEMA },
+            { uri: "tangitweak://schema/stores.json", fileMatch: ["stores.json", "**/stores.json"], schema: STORES_SCHEMA },
+        ],
     });
 
     return monacoApi;

@@ -11,7 +11,7 @@ searchable list of all of them):
 | Shortcut | Action |
 | --- | --- |
 | ⌘S | Save and hot apply the script (or save the data file) |
-| ⌘P | Quick-open a script, data file or settings.yaml by path (cursor position is remembered per file) |
+| ⌘P | Quick-open a script, data file, settings.yaml or stores.json by path (cursor position is remembered per file) |
 | ⌘⇧E | Focus the explorer |
 | ⌘B | Show/hide the explorer |
 | ⌘J or ⌘` | Show/hide the Problems/Log/Network/Preview views |
@@ -510,7 +510,10 @@ box narrows the tree to paths containing what you type, and **Select
 all**/**None** act on what it shows. On import each row says whether it's
 **new** or **replaces existing** (a script at the same path is overwritten
 rather than duplicated). Untick `settings.yaml` to leave settings, params
-and `enabled` state alone. If a picked script imports a library or data
+and `enabled` state alone. When any script has persisted `tt.globalStore`
+state, **Export…** also lists `stores.json` (unticked by default, marked
+`opt-in`) so you can include persisted store data when needed; **Import…**
+applies `stores.json` when present and ticked. If a picked script imports a library or data
 file that isn't picked, the dialog warns and **Add them** ticks the missing
 ones.
 
@@ -564,7 +567,7 @@ settings:
   # bodyCap: 2048
 
 params:
-  Debug header:
+  Debug header.ts:
     # Run this script
     enabled: false
     # Value of the x-debug header
@@ -575,3 +578,15 @@ params:
 `textTypes` has no control in Settings: edit it here. It lists the
 Content-Types `onResponseBody` gets as text and replaces the defaults
 ([binary bodies](scripting.md#binary-bodies)).
+
+## `stores.json`
+
+Right below `settings.yaml`, the Explorer has a **stores.json** entry holding
+the persisted `tt.globalStore` data of your scripts (`{ "<script file>": { "<store name>": { … } } }`, e.g. `"mock-users.ts"` or `"bonsai/index.tsx"`).
+Stores declared inside an imported library belong to that library's file (and are shared across all scripts that import it), matching `settings.yaml`.
+As scripts update their persisted global stores, `stores.json` updates live;
+editing and saving it in the Code view (or in `stores.json` at the root of your
+synced folder) updates open tabs and overlays immediately without reloading.
+Removing a store entry (or clearing the file to `{}`) clears its persisted
+storage and resets active pages to the script's `initial` defaults.
+

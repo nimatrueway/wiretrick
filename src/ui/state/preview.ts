@@ -10,6 +10,7 @@
  * fail. It reloads when the script (or what it imports) changes.
  */
 import { SiteStoreHost, SITE_UP_KINDS } from "../../shared/siteStoreHost";
+import { shippedLibIds } from "../../shared/scriptImports";
 import { proxy } from "valtio";
 import { messagePortEndpoint, portEndpoint, type Endpoint, type ReqOf } from "../../shared/wire";
 import { isRpcCall, NO_PAGE_IN_PREVIEW } from "../../shared/rpc";
@@ -53,6 +54,7 @@ let connect: () => Endpoint = () => portEndpoint(chrome.runtime.connect({ name: 
 let l5: Endpoint | null = null;
 let frame: Endpoint | null = null;
 let codeHash = "";
+let previewLibs = new Set<string>();
 /** the latest `reloadPreview` (an older one's answer is dropped) */
 let gen = 0;
 let retryMs = RETRY_MIN_MS;
@@ -69,9 +71,10 @@ function link(): Endpoint {
     if (l5 && !l5.closed) return l5;
     const ep = connect();
     l5 = ep;
-    ep.on("store.patch", (a, s) => s === preview.scriptId && frame?.push("store.patch", a));
-    ep.on("store.reject", (a, s) => s === preview.scriptId && frame?.push("store.reject", a));
-    ep.on("store.drop", (a, s) => s === preview.scriptId && frame?.push("store.drop", a));
+    const ownStore = (id: string | undefined): id is string => !!id && (id === preview.scriptId || previewLibs.has(id));
+    ep.on("store.patch", (a, s) => ownStore(s) && frame?.push("store.patch", a, s));
+    ep.on("store.reject", (a, s) => ownStore(s) && frame?.push("store.reject", a, s));
+    ep.on("store.drop", (a, s) => ownStore(s) && frame?.push("store.drop", a, s));
     ep.on("bundle.update", () => void scriptsChanged());
     ep.onClose(() => {
         if (l5 !== ep) return;
@@ -90,6 +93,7 @@ function link(): Endpoint {
 function closeFrame(why: string): void {
     frame?.close(why);
     frame = null;
+    previewLibs = new Set();
     preview.nonce = "";
 }
 
@@ -159,6 +163,7 @@ async function scriptsChanged(): Promise<void> {
     // a running frame recompiles in place
     if (!init || !frame || frame.closed) return void reloadPreview();
     codeHash = init.codeHash;
+    previewLibs = new Set(shippedLibIds(init.libs ?? []));
     frame.push("overlay.update", { ...init, phase: "document_idle" });
 }
 
@@ -174,9 +179,9 @@ export function attachFrame(win: Window | null | undefined): void {
     frame = ep;
     let proven = false;
     const mine =
-        <A, R>(fn: (a: A) => R) =>
-        (a: A): R => {
-            if (proven && frame === ep) return fn(a);
+        <A, R>(fn: (a: A, targetS?: string) => R) =>
+        (a: A, targetS?: string): R => {
+            if (proven && frame === ep) return fn(a, targetS);
             throw new Error("refused");
         };
     ep.handle("hello", async (a) => {
@@ -187,13 +192,14 @@ export function attachFrame(win: Window | null | undefined): void {
         proven = true;
         const init = await up.call("overlay.init", {}, s);
         codeHash = init.codeHash;
+        previewLibs = new Set(shippedLibIds(init.libs ?? []));
         if (frame === ep) preview.status = "ready";
         // there's no page to wait for
         return { ...init, phase: "document_idle" as const };
     });
-    ep.on("store.declare", (a) => proven && up.push("store.declare", a, s));
-    ep.on("store.set", (a) => proven && up.push("store.set", a, s));
-    ep.handle("store.sub", mine((a: ReqOf<"store.sub">) => up.call("store.sub", a, s)));
+    ep.on("store.declare", (a, targetS) => proven && up.push("store.declare", a, targetS ?? s));
+    ep.on("store.set", (a, targetS) => proven && up.push("store.set", a, targetS ?? s));
+    ep.handle("store.sub", mine((a: ReqOf<"store.sub">, targetS) => up.call("store.sub", a, targetS ?? s)));
     ep.handle("fetch", mine((a: ReqOf<"fetch">) => up.call("fetch", { request: a.request, bypass: !!a.bypass }, s)));
     ep.handle(
         "pagefetch",

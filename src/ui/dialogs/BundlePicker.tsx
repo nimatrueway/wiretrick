@@ -28,7 +28,7 @@ export function BundlePicker() {
 
 const iconOf = (it: PickItem | undefined, open: boolean | undefined): Icon => {
     if (!it || it.kind === "folder") return open ? "folder-open" : "folder";
-    if (it.kind === "settings") return "yaml";
+    if (it.kind === "settings") return /\.json$/i.test(it.path) ? "stores" : "yaml";
     if (it.kind === "section") return "section";
     if (it.kind === "data") return /\.svg$/i.test(it.path) ? "svg" : /\.md$/i.test(it.path) ? "md" : /\.(png|jpe?g|gif|webp|ico|avif)$/i.test(it.path) ? "img" : "json";
     return /\.tsx$/i.test(it.path) ? "tsx" : "ts";

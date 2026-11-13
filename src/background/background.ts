@@ -16,6 +16,7 @@ import * as folderSync from "./folderSync";
 import { addNetworkCountsPort, addNetworkPort } from "./network";
 import { collectDiagnostics } from "./diagnostics";
 import { getSettingsText, applySettingsText, applySettingsDoc } from "./settingsFile";
+import { getStoresText, applyStoresText } from "./storesFile";
 import { badgeSetText, badgeSetColor, actionSetTitle, tabsQueryAll, tabsGet } from "../shared/chromeApi";
 import { createBadgeCounter, badgeLook } from "./badgeCounter";
 import { actionIconView, createBusyIndicator } from "./busyIcon";
@@ -89,6 +90,21 @@ chrome.runtime.onMessage.addListener((msg: any, _s, sendResponse) => {
     }
     if (msg && msg.type === "applySettingsDoc") {
         applySettingsDoc(msg.doc).then(sendResponse);
+        return true;
+    }
+    if (msg && msg.type === "getStoresJson") {
+        getStoresText().then((text) => sendResponse({ text }));
+        return true;
+    }
+    if (msg && msg.type === "applyStoresJson") {
+        applyStoresText(msg.text).then(async (r) => {
+            if (!r.error) await folderSync.exportStoresFrom(msg.text);
+            sendResponse(r);
+        });
+        return true;
+    }
+    if (msg && msg.type === "ensureStoresOnDisk") {
+        folderSync.ensureStoresFile().then(() => sendResponse({}));
         return true;
     }
     if (msg && msg.type === "folderSyncAdopt") {

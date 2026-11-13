@@ -10,7 +10,7 @@ import type { Analysis } from "../../background/engine/packages";
 import { describeCapabilities } from "../../shared/packageCaps";
 import type { PackageStatus } from "../../shared/packageImports";
 import { entryIds, packageName, resolvePackageIcon, updateSource, type InstalledPackage, type PackageVersion } from "../../shared/packageModel";
-import { isManifestPath, MANIFEST_FILE } from "../../shared/packageMetadata";
+import { compareVersions, isManifestPath, MANIFEST_FILE } from "../../shared/packageMetadata";
 import { parseSource, readPackageBrowserFile, sourceLabel, type DownloadProgress } from "../../shared/packageSource";
 import { isPackageFile, localPackage, startsIn, unzipPackage } from "../../shared/localPackage";
 import { isDataSpec, isImageDataPath, packageUrls } from "../../shared/scriptImports";
@@ -35,7 +35,7 @@ export interface InstallHost {
 type State =
     | { phase: "pick"; error?: string; local?: { label: string; files: Record<string, string>; entries: string[] } }
     | { phase: "loading"; what: string; progress?: DownloadProgress }
-    | { phase: "review"; fetched: Fetched; analysis: Analysis; existing?: InstalledPackage; before?: Record<string, string> }
+    | { phase: "review"; fetched: Fetched; analysis: Analysis }
     | { phase: "pending"; pkg: InstalledPackage; pending: PackageVersion & { reasons: string[]; added: string[] }; before: Record<string, string>; analysis: Analysis }
     | { phase: "nothing"; pkg: InstalledPackage; iconUrl?: string; note?: string }
     | { phase: "done"; pkg: InstalledPackage; verb: string; iconUrl?: string }
@@ -118,15 +118,9 @@ export function InstallFlow({ request, host }: { request: InstallRequest; host: 
     }
 
     async function review(fetched: Fetched, myRun: number, wasDownloading = false) {
-        const all = await packagesApi.list();
+        const analysis = await analyzeWithProgress(fetched, myRun, undefined, wasDownloading);
         if (runSeq.current !== myRun) return;
-        // installing again from where it came from, or from its updateURL, updates it
-        const existing = fetched.source ? Object.values(all).find((p) => p.source === fetched.source) ?? Object.values(all).find((p) => updateSource(p) === fetched.source) : undefined;
-        const analysis = await analyzeWithProgress(fetched, myRun, existing?.id, wasDownloading);
-        if (runSeq.current !== myRun) return;
-        const before = existing ? await installedTexts(existing) : undefined;
-        if (runSeq.current !== myRun) return;
-        setState({ phase: "review", fetched, analysis, existing, before });
+        setState({ phase: "review", fetched, analysis });
     }
 
     async function load(source: string) {
@@ -502,21 +496,38 @@ function fileLabel(item: { kind: "script" | "data"; name: string }): string {
     return item.kind === "data" || /\.tsx$/i.test(item.name) ? item.name : `${item.name}.ts`;
 }
 
+function diffCounts(files: Record<string, string>, before: Record<string, string>) {
+    let changed = 0;
+    let added = 0;
+    let same = 0;
+    for (const rel of Object.keys(files)) {
+        if (!(rel in before)) added++;
+        else if (before[rel] === files[rel]) same++;
+        else changed++;
+    }
+    const removed = Object.keys(before).filter((r) => !(r in files)).length;
+    return { changed, added, removed, same, identical: changed === 0 && added === 0 && removed === 0 };
+}
+
 function Files(props: { files: Record<string, string>; analysis: Analysis; before?: Record<string, string> }) {
     const { files, analysis, before } = props;
-    const rels = Object.keys(files).sort();
-    const gone = before ? Object.keys(before).filter((r) => !(r in files)) : [];
+    const statusOf = (rel: string): "" | "added" | "changed" | "same" => (!before ? "" : !(rel in before) ? "added" : before[rel] === files[rel] ? "same" : "changed");
+    const rankOf = (s: "" | "added" | "changed" | "same") => (s === "changed" ? 0 : s === "added" ? 1 : 2);
+    const rels = Object.keys(files).sort((a, b) => (before ? rankOf(statusOf(a)) - rankOf(statusOf(b)) : 0) || a.localeCompare(b));
+    const gone = before ? Object.keys(before).filter((r) => !(r in files)).sort() : [];
+    let autoOpened = 0;
     return (
         <section>
             <h2>Files</h2>
             {rels.map((rel) => {
-                const status = !before ? "" : !(rel in before) ? "added" : before[rel] === files[rel] ? "same" : "changed";
+                const status = statusOf(rel);
                 const img = isImageDataPath(rel);
+                const openByDefault = status === "changed" && !img && autoOpened++ < 5;
                 return (
-                    <details key={rel} className={`file ${status}`}>
+                    <details key={rel} className={`file ${status}`} open={openByDefault || undefined}>
                         <summary>
                             <code>{fileLabel(analysis.items[rel])}</code>
-                            {status && status !== "same" && <span className={`tag ${status}`}>{status}</span>}
+                            {status && <span className={`tag ${status}`}>{status === "same" ? "unchanged" : status}</span>}
                             <span className="dim small">{img ? "image" : `${files[rel].split("\n").length} lines`}</span>
                         </summary>
                         {img ? (
@@ -531,11 +542,31 @@ function Files(props: { files: Record<string, string>; analysis: Analysis; befor
                     </details>
                 );
             })}
-            {gone.map((rel) => (
-                <div key={rel} className="file removed">
-                    <code>{rel}</code> <span className="tag removed">removed</span>
-                </div>
-            ))}
+            {gone.map((rel) => {
+                const img = isImageDataPath(rel);
+                return (
+                    <details key={rel} className="file removed">
+                        <summary>
+                            <code>{analysis.folder ? `${analysis.folder}/${rel}` : rel}</code>
+                            <span className="tag removed">removed</span>
+                            <span className="dim small">{img ? "image" : `${before![rel].split("\n").length} lines`}</span>
+                        </summary>
+                        {img ? (
+                            <div className="file-img">
+                                <img src={before![rel]} alt={rel} />
+                            </div>
+                        ) : (
+                            <pre className="diff">
+                                {before![rel].split("\n").map((t, k) => (
+                                    <div key={k} className="del">
+                                        - {t}
+                                    </div>
+                                ))}
+                            </pre>
+                        )}
+                    </details>
+                );
+            })}
         </section>
     );
 }
@@ -560,12 +591,49 @@ function Diff(props: { before: string; after: string }) {
     );
 }
 
+function UpgradePrompt(props: { analysis: Analysis; fetched: Fetched }) {
+    const existing = props.analysis.existing;
+    if (!existing) return null;
+    const oldVer = existing.version || (existing.revision ? existing.revision.slice(0, 8) : "unversioned");
+    const newVer = props.analysis.metadata.version || (props.fetched.revision ? props.fetched.revision.slice(0, 8) : "unversioned");
+    const bothVersioned = !!(existing.version && props.analysis.metadata.version);
+    const cmp = bothVersioned ? compareVersions(props.analysis.metadata.version, existing.version) : undefined;
+    const counts = diffCounts(props.fetched.files, existing.before);
+    const summary = counts.identical
+        ? `All ${counts.same} ${counts.same === 1 ? "file matches" : "files match"} the installed copy.`
+        : [
+              counts.changed ? `${counts.changed} changed` : "",
+              counts.added ? `${counts.added} added` : "",
+              counts.removed ? `${counts.removed} removed` : "",
+              counts.same ? `${counts.same} unchanged` : "",
+          ]
+              .filter(Boolean)
+              .join(" · ");
+    return (
+        <div className="note upgrade-prompt" role="region" aria-label="Existing script comparison">
+            <div className="upgrade-title">
+                <b>“{existing.name}” already exists.</b> Would you like to upgrade it in place (keeping your settings and parameter values)?
+            </div>
+            <div className="upgrade-meta">
+                <span>
+                    Version: <code>{oldVer}</code> → <code>{newVer}</code>
+                </span>
+                {cmp !== undefined && (
+                    <span className={`tag ${cmp > 0 ? "added" : cmp < 0 ? "removed" : "same"}`}>{cmp > 0 ? "newer" : cmp < 0 ? "downgrade" : "same version"}</span>
+                )}
+                <span className="dim">·</span>
+                <span>Files: {summary}</span>
+            </div>
+        </div>
+    );
+}
+
 function Review(props: { state: Extract<State, { phase: "review" }>; setState: (s: State) => void; close: () => void }) {
-    const { fetched, analysis, existing, before } = props.state;
+    const { fetched, analysis } = props.state;
+    const existing = analysis.existing;
     const updatable = !!(fetched.source || analysis.metadata.updateURL);
     const [autoUpdate, setAutoUpdate] = useState(existing?.autoUpdate ?? updatable);
     const [busy, setBusy] = useState(false);
-    const same = existing && existing.revision === fetched.revision && !existing.pending;
     async function run(fn: () => Promise<void>) {
         setBusy(true);
         try {
@@ -579,25 +647,18 @@ function Review(props: { state: Extract<State, { phase: "review" }>; setState: (
             const pkg = await packagesApi.install(fetched, enabled, autoUpdate);
             props.setState({ phase: "done", pkg, verb: "Installed", iconUrl: analysis.iconUrl });
         });
-    const update = () =>
+    const upgrade = () =>
         run(async () => {
-            let pkg = await packagesApi.offer(existing!.id, fetched, true);
-            if (!pkg) throw new Error("That package isn't installed anymore.");
-            if (pkg.pending) pkg = await packagesApi.apply(pkg.id);
-            if (autoUpdate !== pkg.autoUpdate) await packagesApi.setAutoUpdate(pkg.id, autoUpdate);
-            props.setState({ phase: "done", pkg, verb: "Updated", iconUrl: analysis.iconUrl });
+            const pkg = await packagesApi.upgrade(fetched, autoUpdate, existing?.packageId);
+            props.setState({ phase: "done", pkg, verb: "Upgraded", iconUrl: analysis.iconUrl });
         });
     return (
         <main>
             <Header name={analysis.name} metadata={analysis.metadata} scripts={fetched.entries} source={fetched.source} iconUrl={analysis.iconUrl} />
-            {existing && (
-                <p className="note">
-                    {same ? "This version is already installed." : <>Installed: {existing.metadata.version || existing.revision.slice(0, 8)} — installing this updates it in place (its settings stay).</>}
-                </p>
-            )}
+            <UpgradePrompt analysis={analysis} fetched={fetched} />
             <Capabilities analysis={analysis} added={analysis.added} />
             <Warnings analysis={analysis} fetched={fetched} modified={analysis.modified} />
-            <Files files={fetched.files} analysis={analysis} before={before} />
+            <Files files={fetched.files} analysis={analysis} before={existing?.before} />
             <footer>
                 {updatable ? (
                     <label className="check">
@@ -608,15 +669,20 @@ function Review(props: { state: Extract<State, { phase: "review" }>; setState: (
                 )}
                 <div className="actions">
                     {existing ? (
-                        <button id="install-confirm" className="primary" disabled={busy || same || !!analysis.error} onClick={update}>
-                            Update
-                        </button>
+                        <>
+                            <button id="install-confirm" className="primary" disabled={busy || !!analysis.error} onClick={upgrade}>
+                                Upgrade
+                            </button>
+                            <button id="install-copy" disabled={busy || !!analysis.error} onClick={() => install(true)}>
+                                Install as “{existing.copyName}”
+                            </button>
+                        </>
                     ) : (
                         <>
-                            <button id="install-confirm" className="primary" disabled={busy} onClick={() => install(true)}>
+                            <button id="install-confirm" className="primary" disabled={busy || !!analysis.error} onClick={() => install(true)}>
                                 Install
                             </button>
-                            <button id="install-disabled" disabled={busy} onClick={() => install(false)}>
+                            <button id="install-disabled" disabled={busy || !!analysis.error} onClick={() => install(false)}>
                                 Install turned off
                             </button>
                         </>

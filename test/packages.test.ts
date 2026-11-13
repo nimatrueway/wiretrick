@@ -170,4 +170,71 @@ describe("installed packages", () => {
         expect(await pk.listPackages()).toEqual({});
         expect((await ss.listScripts()).length).toBe(2);
     });
+
+    it("detects an already-existing package by name (even from local files or another URL) and upgrades in place", async () => {
+        const v1 = await fetched(files(entry("*://a.com/*")), "https://github.com/me/dark");
+        const pkg1 = await pk.installPackage(v1, { enabled: true, autoUpdate: true });
+        const origIds = entryIds(pkg1);
+
+        // Incoming v1.2.0 from local files (source = "") with same package name "Dark"
+        const v2Files = {
+            ...files(entry("*://a.com/*").replace("1.0.0", "1.2.0"), "export const tint = (n: number) => n * 10;\n"),
+            "extra.json": '{"added": true}',
+        };
+        const v2 = await fetched(v2Files, "");
+        const a = await pk.analyzePackage(v2);
+        expect(a.folder).toBe("dark");
+        expect(a.existing).toMatchObject({
+            packageId: pkg1.id,
+            name: "Dark",
+            version: "1.0.0",
+            copyName: "dark (2)",
+        });
+        expect(a.existing?.before["lib.ts"]).toContain("(n: number) => n");
+
+        const upgraded = await pk.upgradePackage(v2, { packageId: a.existing?.packageId, autoUpdate: true });
+        expect(upgraded.id).toBe(pkg1.id);
+        expect(upgraded.metadata.version).toBe("1.2.0");
+        expect(upgraded.source).toBe("https://github.com/me/dark"); // keeps remote source when upgraded from local files
+        expect(entryIds(upgraded)).toEqual(origIds);
+        expect(upgraded.previous?.metadata.version).toBe("1.0.0");
+        expect((await ss.listScripts()).find((s) => s.meta.name === "dark/lib")!.code).toContain("n * 10");
+        expect((await ss.listDataFiles()).map((d) => d.path).sort()).toEqual(["dark/cfg.json", "dark/extra.json"]);
+    });
+
+    it("detects an unmanaged Explorer folder or root script with the same name, diffs its files, and upgrades or installs a copy", async () => {
+        // Unmanaged bundle folder already in Explorer (e.g. from folder sync)
+        await ss.saveDataFile({ path: "bonsai/metadata.json", text: JSON.stringify({ name: "bonsai", version: "0.0.1-alpha", scripts: ["index.tsx"] }) });
+        const existingEntry = await ss.saveScript({ id: ss.newId(), name: "bonsai/index.tsx", code: 'tt.onPage("*://a.com/*", () => {});\n', enabled: false });
+        await ss.saveDataFile({ path: "bonsai/old.json", text: "{}" });
+
+        const incomingFiles = {
+            "metadata.json": JSON.stringify({ name: "bonsai", version: "0.0.2-alpha", scripts: ["index.tsx"] }),
+            "index.tsx": 'tt.onPage("*://a.com/*", () => { console.log("v2"); });\n',
+        };
+        const incoming = { source: "https://github.com/me/bonsai", entries: ["index.tsx"], files: incomingFiles, revision: "abc12345" };
+        const a = await pk.analyzePackage(incoming);
+        expect(a.folder).toBe("bonsai");
+        expect(a.existing).toMatchObject({
+            name: "bonsai",
+            version: "0.0.1-alpha",
+            copyName: "bonsai (2)",
+        });
+        expect(a.existing?.packageId).toBeUndefined();
+        expect(Object.keys(a.existing!.before).sort()).toEqual(["index.tsx", "metadata.json", "old.json"]);
+
+        // Upgrading in place preserves the existing script id & disabled state, removes old.json, and enables Roll Back
+        const upgraded = await pk.upgradePackage(incoming, { autoUpdate: true });
+        expect(upgraded.folder).toBe("bonsai");
+        expect(upgraded.metadata.version).toBe("0.0.2-alpha");
+        expect(entryIds(upgraded)).toEqual([existingEntry.id]);
+        const afterEntry = (await ss.listScripts()).find((s) => s.id === existingEntry.id)!;
+        expect(afterEntry.enabled).toBe(false);
+        expect(afterEntry.code).toContain('console.log("v2")');
+        expect((await ss.listDataFiles()).map((d) => d.path)).toEqual(["bonsai/metadata.json"]);
+
+        const rolledBack = await pk.rollbackPackage(upgraded.id);
+        expect(rolledBack.metadata.version).toBe("0.0.1-alpha");
+        expect((await ss.listDataFiles()).map((d) => d.path).sort()).toEqual(["bonsai/metadata.json", "bonsai/old.json"]);
+    });
 });

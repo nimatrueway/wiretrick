@@ -7,6 +7,23 @@ its section below.
 
 ## [Unreleased]
 
+## [0.32.0-alpha] - 2026-11-12
+
+### Added
+
+- Root **`stores.json`** in the Explorer (below `settings.yaml`) and Quick Open (`⌘P` / `Ctrl+P`): view and edit persisted `tt.globalStore` data live across open tabs and overlays, sync it two-way at the root of your synced folder, include it selectively in **Export…** and **Import…** `.zip` archives, and inspect a `## Stores` section in **Collect diagnostics**.
+- Same-name upgrade prompt in **Install Script**: when an incoming script or bundle matches an already-installed package or Explorer folder/script by name, TangiTweak shows version changes and expanded file diffs with **Upgrade** (preserving script IDs, `tt.params`, enabled state, and a **Roll Back** snapshot) alongside **Install as "`<name> (2)`"**.
+- Feature comparison matrix and popularity-ordered survey of browser extensions and desktop proxies in [docs/comparison.md](docs/comparison.md).
+
+### Changed
+
+- Consistent `.ts` and `.tsx` file extensions across `settings.yaml` (migrating existing extensionless keys in place), `stores.json`, Quick Open (`⌘P`), and diagnostics reports.
+- Updated extension manifest and documentation descriptions to `"Rewrite requests, responses, and pages in TypeScript."`
+
+### Fixed
+
+- `tt.globalStore` and `tt.pageStore` declared inside an imported library (`B.ts`) now consistently belong to `B.ts` across `onOverlay`, Editor Preview, and `onPage` (MV2 and MV3) instead of creating separate store entries under the importing script.
+
 ## [0.31.0-alpha] - 2026-11-12
 
 ### Added
@@ -987,7 +1004,8 @@ First release of Wiretrick:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/tangistudio/TangiTweak/compare/v0.31.0-alpha...HEAD
+[Unreleased]: https://github.com/tangistudio/TangiTweak/compare/v0.32.0-alpha...HEAD
+[0.32.0-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.31.0-alpha...v0.32.0-alpha
 [0.31.0-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.30.0-alpha...v0.31.0-alpha
 [0.30.0-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.29.0-alpha...v0.30.0-alpha
 [0.29.0-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.28.0-alpha...v0.29.0-alpha

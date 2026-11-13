@@ -15,17 +15,28 @@
  * `storeKey(name, page)` and never persisted (MV3: session only).
  */
 import type { Endpoint, Json, StoreOp, StorePersist, StoreSnapshot } from "../../shared/wire";
-import { STORE_MAX_BYTES, applyOps, badPath, badValue, cloneJson, isPlainObject, jsonBytes, missingOps, persistedPart, splitStoreKey, storeKey } from "../../shared/storeOps";
+import { STORE_MAX_BYTES, applyOps, badPath, badValue, cloneJson, isPlainObject, jsonBytes, jsonEqual, missingOps, persistedPart, splitStoreKey, storeKey } from "../../shared/storeOps";
 
 export const STORE_KEY_PREFIX = "$store:";
 const SESSION_PREFIX = "ttStores.";
 const RING = 256;
 const page = (p: unknown): string | undefined => (typeof p === "string" && p ? p : undefined);
 
+export interface OwnerStoreInfo {
+    name: string;
+    scope: "global" | "page";
+    page?: string;
+    rev: number;
+    persist?: StorePersist;
+    data: Json;
+    hasTemplate: boolean;
+}
+
 export interface StoreOwnerDeps {
     /** the script's storage object (`tt.storage`), where `$store:<name>` keys live */
     storageAll(scriptId: string): Promise<Record<string, any>>;
     storageSet(scriptId: string, key: string, value: unknown): Promise<void>;
+    storageDelete?(scriptId: string, key: string): Promise<void>;
     /** chrome.storage.session (MV3); absent: state lives as long as this context */
     sessionGet?(key: string): Promise<any>;
     sessionSet?(key: string, value: unknown): Promise<void>;
@@ -50,6 +61,8 @@ interface Entry {
 interface ScriptState {
     /** by `storeKey(name, page)` */
     stores: Map<string, Entry>;
+    /** `tt.globalStore` names → initial defaults from `declare` */
+    globalTemplates: Map<string, Json>;
     /** `tt.pageStore` names → the initial state of each page's copy */
     templates: Map<string, Json>;
     chain: Promise<unknown>;
@@ -172,12 +185,157 @@ export class StoreOwner {
         await Promise.all([...persists.map((k) => this.writePersist(k)), ...sessions.map((s) => this.writeSession(s))]);
     }
 
+    /** inspect all global and live page stores for `scriptIds` (hydrating persisted `$store:` keys first) */
+    async inspect(scriptIds: string[]): Promise<Record<string, OwnerStoreInfo[]>> {
+        const out: Record<string, OwnerStoreInfo[]> = {};
+        await Promise.all(
+            scriptIds.map(async (s) => {
+                out[s] = await this.run(s, () => {
+                    const st = this.state(s);
+                    const list: OwnerStoreInfo[] = [];
+                    for (const [key, e] of st.stores) {
+                        const { name, page: pg } = splitStoreKey(key);
+                        if (pg && !this.alive(pg)) continue;
+                        list.push({
+                            name,
+                            scope: pg ? "page" : "global",
+                            ...(pg ? { page: pg } : {}),
+                            rev: e.rev,
+                            persist: e.persist,
+                            data: cloneJson(e.data),
+                            hasTemplate: pg ? st.templates.has(name) : st.globalTemplates.has(name),
+                        });
+                    }
+                    return list;
+                });
+            })
+        );
+        return out;
+    }
+
+    /** replace a store's entire JSON object from the UI or Import…, broadcasting live patches and persisting */
+    replace(scriptId: string, name: string, nextData: unknown, pg?: string): Promise<StoreSnapshot> {
+        return this.run(scriptId, async () => {
+            if (!name) throw new Error("store name is required");
+            if (!isPlainObject(nextData)) throw new Error("store value must be a JSON object ({ … })");
+            const bad = badValue(nextData);
+            if (bad) throw new Error(bad);
+            if (jsonBytes(nextData) > STORE_MAX_BYTES) throw new Error(`store exceeds ${STORE_MAX_BYTES / 1024 / 1024} MB`);
+            if (pg && !this.alive(pg)) throw new Error("that tab's page is no longer open");
+            const e = this.entry(scriptId, name, pg);
+            const cur: Record<string, any> = isPlainObject(e.data) ? e.data : {};
+            const ops: StoreOp[] = [];
+            for (const k of Object.keys(cur)) {
+                if (!Object.prototype.hasOwnProperty.call(nextData, k)) ops.push(["del", [k]]);
+            }
+            for (const [k, v] of Object.entries(nextData)) {
+                if (v === undefined) continue;
+                const badK = badPath([k]);
+                if (badK) throw new Error(badK);
+                if (!jsonEqual(cur[k], v)) ops.push(["set", [k], cloneJson(v)]);
+            }
+            if (!isPlainObject(e.data)) e.data = {};
+            const applied = applyOps(e.data, ops);
+            if (applied.length) {
+                this.commit(scriptId, name, e, applied, undefined, pg);
+            }
+            if (!pg && e.persist !== false) {
+                const timerKey = `${scriptId}\u0000${name}`;
+                const t = this.persistTimers.get(timerKey);
+                if (t) {
+                    clearTimeout(t);
+                    this.persistTimers.delete(timerKey);
+                }
+                await this.deps.storageSet(scriptId, STORE_KEY_PREFIX + name, persistedPart(e.data, e.persist ?? true));
+            }
+            return { rev: e.rev, data: cloneJson(e.data) };
+        });
+    }
+
+    /** reset a store to the `initial` object declared by the script */
+    reset(scriptId: string, name: string, pg?: string): Promise<StoreSnapshot> {
+        const st = this.state(scriptId);
+        const tpl = pg ? st.templates.get(name) : st.globalTemplates.get(name);
+        if (!tpl) return Promise.reject(new Error("this script hasn't declared initial defaults for that store yet"));
+        return this.replace(scriptId, name, cloneJson(tpl), pg);
+    }
+
+    /** delete a store's persisted state (and reset to initial if active, or drop if orphaned / page store) */
+    deleteStore(scriptId: string, name: string, pg?: string): Promise<void> {
+        return this.run(scriptId, async () => {
+            const st = this.state(scriptId);
+            if (pg) {
+                const key = storeKey(name, pg);
+                const tpl = st.templates.get(name);
+                if (tpl && this.alive(pg)) {
+                    await this.replace(scriptId, name, cloneJson(tpl), pg);
+                } else if (st.stores.delete(key)) {
+                    this.scheduleSession(scriptId);
+                    this.changed(scriptId, name, pg);
+                }
+                return;
+            }
+            const timerKey = `${scriptId}\u0000${name}`;
+            const t = this.persistTimers.get(timerKey);
+            if (t) {
+                clearTimeout(t);
+                this.persistTimers.delete(timerKey);
+            }
+            await this.deps.storageDelete?.(scriptId, STORE_KEY_PREFIX + name);
+            const tpl = st.globalTemplates.get(name);
+            const e = st.stores.get(name);
+            if (tpl && e && isPlainObject(tpl)) {
+                const cur: Record<string, any> = isPlainObject(e.data) ? e.data : {};
+                const tplRec = tpl as Record<string, any>;
+                const ops: StoreOp[] = [];
+                for (const k of Object.keys(cur)) if (!Object.prototype.hasOwnProperty.call(tplRec, k)) ops.push(["del", [k]]);
+                for (const [k, v] of Object.entries(tplRec)) if (!jsonEqual(cur[k], v)) ops.push(["set", [k], cloneJson(v)]);
+                if (ops.length) {
+                    applyOps(e.data, ops);
+                    e.rev++;
+                    const patch = { name, rev: e.rev, ops };
+                    for (const ep of this.broadcast) ep.push("store.patch", patch, scriptId);
+                    for (const ep of e.subs) if (!ep.closed) ep.push("store.patch", patch, scriptId);
+                }
+                this.scheduleSession(scriptId);
+                this.changed(scriptId, name);
+            } else if (st.stores.delete(name)) {
+                this.scheduleSession(scriptId);
+                this.changed(scriptId, name);
+            }
+        });
+    }
+
+    /** persisted globalStore objects for `scripts`, keyed by script name → store name → JSON */
+    async exportPersisted(scripts: readonly { id: string; name: string }[]): Promise<Record<string, Record<string, Json>>> {
+        const out: Record<string, Record<string, Json>> = {};
+        for (const s of scripts) {
+            const perScript = await this.run(s.id, async () => {
+                const st = this.state(s.id);
+                const saved = (await this.deps.storageAll(s.id)) ?? {};
+                const stores: Record<string, Json> = {};
+                for (const [key, e] of st.stores) {
+                    const { name, page: pg } = splitStoreKey(key);
+                    if (pg || e.persist === false) continue;
+                    const part = persistedPart(e.data, e.persist ?? true);
+                    const inStorage = Object.prototype.hasOwnProperty.call(saved, STORE_KEY_PREFIX + name);
+                    if (isPlainObject(part) && (Object.keys(part).length > 0 || inStorage)) {
+                        stores[name] = cloneJson(part);
+                    }
+                }
+                return stores;
+            });
+            if (Object.keys(perScript).length > 0) out[s.name] = perScript;
+        }
+        return out;
+    }
+
     // ---- ops (serialized per script) ----
 
     private state(s: string): ScriptState {
         let st = this.scripts.get(s);
         if (!st) {
-            st = { stores: new Map(), templates: new Map(), chain: Promise.resolve(), loaded: null };
+            st = { stores: new Map(), globalTemplates: new Map(), templates: new Map(), chain: Promise.resolve(), loaded: null };
             this.scripts.set(s, st);
         }
         return st;
@@ -247,10 +405,15 @@ export class StoreOwner {
 
     private declare(s: string, name: string, initial: Json, persist: StorePersist): void {
         if (typeof name !== "string" || !name) return;
+        const st = this.state(s);
         const e = this.entry(s, name);
         const persistChanged = JSON.stringify(e.persist) !== JSON.stringify(persist);
         e.persist = persist;
         if (badValue(initial) || !isPlainObject(e.data)) return;
+        if (isPlainObject(initial)) {
+            const tpl = st.globalTemplates.get(name);
+            st.globalTemplates.set(name, tpl && isPlainObject(tpl) ? (applyOps(tpl, missingOps(tpl, initial)), tpl) : cloneJson(initial));
+        }
         const ops = missingOps(e.data, initial);
         if (ops.length) {
             applyOps(e.data, ops);

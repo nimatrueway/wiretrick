@@ -4,7 +4,8 @@
  * source of truth.
  */
 import { listScripts, loadAllParamValues, setParamValue, setEnabled, onScriptRenamed } from "./engine/scriptStore";
-import { patchSettings, renameSettingsSection } from "../shared/settingsYamlPatch";
+import { migrateLegacySettingsKeys, patchSettings, renameSettingsSection } from "../shared/settingsYamlPatch";
+import { scriptFileName, scriptPathKey } from "../shared/scriptName";
 import {
     renderSettings, parseSettings, planSettings,
     DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL, DEFAULT_BODY_CAP, BODY_CAP_KEY, isTextTypes, isBodyCap,
@@ -24,7 +25,7 @@ export async function currentSettingsState(): Promise<{ globals: GlobalSettings;
     const g = await storageGet(["resLogLevel", "resLogCap", TEXT_TYPES_KEY, BODY_CAP_KEY]);
     const stored = await loadAllParamValues();
     const scripts = (await listScripts()).map((s) => ({
-        name: s.meta.name,
+        name: scriptFileName(s.meta.name),
         declared: s.meta.active !== false,
         enabled: s.enabled,
         defs: s.paramDefs ?? {},
@@ -47,7 +48,8 @@ const TEXT_KEY = SETTINGS_TEXT_KEY;
 onScriptRenamed(async (oldName, newName) => {
     const text = (await storageGet([TEXT_KEY]))[TEXT_KEY];
     if (typeof text !== "string") return;
-    const next = renameSettingsSection(text, oldName, newName);
+    let next = renameSettingsSection(text, scriptFileName(oldName), scriptFileName(newName));
+    if (next === text) next = renameSettingsSection(text, oldName, scriptFileName(newName));
     if (next !== text) await storageSet({ [TEXT_KEY]: next });
 });
 
@@ -68,8 +70,9 @@ export function settingsTextParses(text: string): boolean {
  */
 export async function getSettingsText(existing?: string): Promise<string> {
     const { globals, scripts } = await currentSettingsState();
-    const base = existing ?? (await storageGet([TEXT_KEY]))[TEXT_KEY];
-    return (typeof base === "string" ? patchSettings(base, globals, scripts) : null) ?? renderSettings(globals, scripts);
+    const rawBase = existing ?? (await storageGet([TEXT_KEY]))[TEXT_KEY];
+    const base = typeof rawBase === "string" ? migrateLegacySettingsKeys(rawBase, scripts) : null;
+    return (base !== null ? patchSettings(base, globals, scripts) : null) ?? renderSettings(globals, scripts);
 }
 
 /** The synced file was (re)written with this exact text — it becomes the manager's text too. */
@@ -79,9 +82,10 @@ export async function rememberSettingsText(text: string): Promise<void> {
 }
 
 async function applyPlan(plan: SettingsPlan): Promise<void> {
-    const ids = new Map((await listScripts()).map((s) => [s.meta.name, s.id]));
+    const ids = new Map((await listScripts()).map((s) => [scriptPathKey(s.meta.name), s.id]));
     for (const p of plan.scripts) {
-        const id = ids.get(p.name)!;
+        const id = ids.get(scriptPathKey(p.name));
+        if (!id) continue;
         for (const [k, v] of Object.entries(p.params)) await setParamValue(id, k, v);
         if (p.enabled !== undefined) await setEnabled(id, p.enabled);
     }

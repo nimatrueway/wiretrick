@@ -130,6 +130,12 @@ Before anything is written, the page shows:
 off** writes them with the scripts off. **Keep it up to date** (on by default
 for URL installs) turns on auto-update.
 
+If a script or bundle with the same name (or source) already exists in the
+Explorer, the review shows the installed vs. incoming version and a line-by-line
+diff of every changed, added, or removed file, and asks whether to **Upgrade**
+it in place (preserving your settings and parameter values, with **Roll Back**
+available afterwards) or **Install as “… (2)”** alongside it.
+
 ## Where it goes
 
 A script that imports nothing lands at the root of the Explorer under its

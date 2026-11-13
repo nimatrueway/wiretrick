@@ -31,6 +31,8 @@ import {
 } from "./engine/scriptStore";
 import type { DataFile } from "./engine/dataFiles";
 import { getSettingsText, applySettingsText, rememberSettingsText, currentSettingsState, settingsTextParses } from "./settingsFile";
+import { getStoresText, applyStoresText, storesTextParses, STORES_FILE } from "./storesFile";
+import { storeOwner } from "./engine/stores";
 import { SETTINGS_FILE, SCHEMA_FILE } from "../shared/settingsYaml";
 import { renameSettingsSection } from "../shared/settingsYamlPatch";
 import { settingsSchemaJson } from "../shared/settingsSchema";
@@ -784,7 +786,8 @@ async function renameSettingsOnDisk(oldName: string, newName: string): Promise<v
     if (!dirHandle) return;
     const f = await readSettingsFile();
     if (!f) return;
-    const next = renameSettingsSection(f.text, oldName, newName);
+    let next = renameSettingsSection(f.text, scriptFileName(oldName), scriptFileName(newName));
+    if (next === f.text) next = renameSettingsSection(f.text, oldName, scriptFileName(newName));
     if (next === f.text) return;
     if (await writeFile(SETTINGS_FILE, next)) settingsSig = (await readSettingsFile())?.sig ?? null;
 }
@@ -967,7 +970,11 @@ export async function previewStoredHandle(): Promise<FolderPreview | null> {
 
 let settingsSig: FileSig | null = null;
 let settingsBroken = false;
+let storesSig: FileSig | null = null;
+let storesBroken = false;
+let applyingDiskStores = false;
 let reconcileTimer: ReturnType<typeof setTimeout> | null = null;
+let storesTimer: ReturnType<typeof setTimeout> | null = null;
 
 async function readSettingsFile(): Promise<{ text: string; sig: FileSig } | null> {
     try {
@@ -976,6 +983,89 @@ async function readSettingsFile(): Promise<{ text: string; sig: FileSig } | null
     } catch {
         return null;
     }
+}
+
+async function readStoresFile(): Promise<{ text: string; sig: FileSig } | null> {
+    try {
+        const f = await (await dirHandle.getFileHandle(STORES_FILE)).getFile();
+        return { text: await f.text(), sig: { lastModified: f.lastModified, size: f.size } };
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * StoreOwner → stores.json on disk. Only creates the file once at least one
+ * script has persisted globalStore data (or `forceWrite` is set, e.g. saved in
+ * the Editor or opened in VS Code); once present on disk, keeps it synced.
+ * A file on disk with a JSON error is never clobbered until fixed.
+ */
+async function exportStores(forceWrite = false): Promise<void> {
+    if (!dirHandle) return;
+    try {
+        const existing = await readStoresFile();
+        if (!forceWrite && existing && (!storesSig || existing.sig.lastModified !== storesSig.lastModified || existing.sig.size !== storesSig.size)) {
+            await pollStores();
+            return;
+        }
+        if (!forceWrite && existing && !storesTextParses(existing.text)) {
+            if (!storesBroken) dlogLevel("sync", "warn", `Folder sync: ${STORES_FILE} on disk has a JSON error — it is not overwritten until it is fixed`);
+            storesBroken = true;
+            return;
+        }
+        storesBroken = false;
+        const text = await getStoresText();
+        if (!existing && !forceWrite && text === "{}\n") return;
+        if (existing?.text !== text) {
+            await writeFile(STORES_FILE, text);
+            storesSig = (await readStoresFile())?.sig ?? null;
+        } else if (existing) {
+            storesSig = existing.sig;
+        }
+    } catch (e: any) {
+        dlogLevel("sync", "warn", `Folder sync: writing ${STORES_FILE} failed: ${e?.message || e}`);
+    }
+}
+
+export function exportStoresFrom(_text: string): Promise<void> {
+    return serial(() => exportStores(true));
+}
+
+export function ensureStoresFile(): Promise<void> {
+    return serial(() => exportStores(true));
+}
+
+function scheduleStoresExport(): void {
+    if (!dirHandle || applyingDiskStores) return;
+    if (storesTimer) clearTimeout(storesTimer);
+    storesTimer = setTimeout(() => {
+        storesTimer = null;
+        void serial(() => exportStores());
+    }, 500);
+}
+
+/** stores.json on disk → StoreOwner, when changed externally */
+async function pollStores(): Promise<void> {
+    const f = await readStoresFile();
+    if (!f) return;
+    if (storesSig && storesSig.lastModified === f.sig.lastModified && storesSig.size === f.sig.size) return;
+    storesSig = f.sig;
+    applyingDiskStores = true;
+    let error: string | undefined;
+    try {
+        ({ error } = await applyStoresText(f.text));
+    } finally {
+        applyingDiskStores = false;
+    }
+    if (error) {
+        storesBroken = true;
+        dlogLevel("sync", "warn", `Folder sync: ${STORES_FILE} has an error and was not applied: ${error}`);
+        return;
+    }
+    storesBroken = false;
+    signal("receiving");
+    dlogLevel("sync", "info", `Folder sync: ${STORES_FILE} changed on disk — reloaded persisted stores`);
+    await writingAs("receiving", () => exportStores(true));
 }
 
 /**
@@ -1127,18 +1217,22 @@ function scheduleReconcile(): void {
         void serial(async () => {
             await reconcileToDisk();
             await exportSettings();
+            await exportStores();
         });
     }, 300);
 }
 
 /** Test seam: run pending storage → disk work and one poll now. */
 export async function flush(): Promise<void> {
-    if (reconcileTimer) {
-        clearTimeout(reconcileTimer);
+    if (reconcileTimer || storesTimer) {
+        if (reconcileTimer) clearTimeout(reconcileTimer);
+        if (storesTimer) clearTimeout(storesTimer);
         reconcileTimer = null;
+        storesTimer = null;
         await serial(async () => {
             await reconcileToDisk();
             await exportSettings();
+            await exportStores();
         });
     }
     await pollOnce();
@@ -1177,6 +1271,7 @@ async function pollNow(): Promise<void> {
     if (!dirHandle) return;
     try {
         await pollSettings();
+        await pollStores();
         const seen = await scanFolder();
         const events = computeEvents(known, seen);
         known = seen;
@@ -1300,7 +1395,13 @@ async function start(opts: { fresh?: boolean }): Promise<boolean> {
         settingsHooked = true;
         onScriptsChanged(scheduleReconcile);
         onScriptRenamed((oldName, newName) => {
-            if (dirHandle) void serial(() => renameSettingsOnDisk(oldName, newName));
+            if (dirHandle) void serial(async () => {
+                await renameSettingsOnDisk(oldName, newName);
+                await exportStores();
+            });
+        });
+        storeOwner.onChange((_s, _name, page) => {
+            if (!page) scheduleStoresExport();
         });
         chrome.storage.onChanged.addListener((c) => {
             if (c.resLogLevel || c.resLogCap || c.resTextTypes || c.resBodyCap) scheduleReconcile();
@@ -1309,8 +1410,12 @@ async function start(opts: { fresh?: boolean }): Promise<boolean> {
     }
     settingsSig = null;
     settingsBroken = false;
+    storesSig = null;
+    storesBroken = false;
     if (await readSettingsFile()) await pollSettings();
     else await exportSettings();
+    if (await readStoresFile()) await pollStores();
+    else await exportStores();
     await ensureSupportFiles();
     broadcastStatus();
     dlogLevel("sync", "info", `Folder sync: watching "${displayPath}"`);
@@ -1323,6 +1428,8 @@ export function halt(): void {
     timer = null;
     if (reconcileTimer) clearTimeout(reconcileTimer);
     reconcileTimer = null;
+    if (storesTimer) clearTimeout(storesTimer);
+    storesTimer = null;
     stopKeepAlive();
 }
 
@@ -1335,6 +1442,8 @@ async function stopNow(): Promise<void> {
     timer = null;
     if (reconcileTimer) clearTimeout(reconcileTimer);
     reconcileTimer = null;
+    if (storesTimer) clearTimeout(storesTimer);
+    storesTimer = null;
     dirHandle = null;
     paused = false;
     displayPath = "";

@@ -76,12 +76,12 @@ describe("library scripts with params", () => {
     it("settings.yaml lists the library's params and gains `enabled` once it's a script", async () => {
         await saveScript({ id: "g", name: "gate.tangitweak", code: GATE });
         let st = await currentSettingsState();
-        expect(st.scripts.find((x) => x.name === "gate.tangitweak")).toMatchObject({ declared: false, defs: { on: { type: "boolean" } } });
-        expect((await applySettingsText("params:\n  gate.tangitweak:\n    on: true\n")).error).toBeUndefined();
+        expect(st.scripts.find((x) => x.name === "gate.tangitweak.ts")).toMatchObject({ declared: false, defs: { on: { type: "boolean" } } });
+        expect((await applySettingsText("params:\n  gate.tangitweak.ts:\n    on: true\n")).error).toBeUndefined();
         expect((await loadAllParamValues()).g).toEqual({ on: true });
         expect((await get("g")).meta.active).toBe(true);
         st = await currentSettingsState();
-        expect(st.scripts.find((x) => x.name === "gate.tangitweak")?.declared).toBe(true);
+        expect(st.scripts.find((x) => x.name === "gate.tangitweak.ts")?.declared).toBe(true);
     });
 
     it("importers keep working when a library flips (its exports stay importable)", async () => {

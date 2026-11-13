@@ -218,6 +218,40 @@ describe("the L6 ⇄ L2 relay (MV3 isolated world ⇄ overlay)", () => {
         expect((await iso({ frameId: 3 }).call("iso.load", { url: PAGE }, "s1")).page).toBe(init.page);
     });
 
+    it("stores: imported library stores are granted to their importers on L2 and L6, and refused to non-importers", async () => {
+        setupOverlayLinks({
+            overlayRuns: async () =>
+                new Map([
+                    ["s1", { ...run("One"), libs: [{ id: "libB", name: "B", src: "export const x = 1;" }] }],
+                    ["s2", { ...run("Two"), libs: [] }],
+                ]),
+            isoRuns: async () =>
+                new Map([
+                    ["s1", { name: "One", src: "src", codeHash: "h", siteV: "", params: {}, libs: [{ id: "libB", name: "B", src: "export const x = 1;" }], overlay: true }],
+                    ["s2", { name: "Two", src: "src", codeHash: "h", siteV: "", params: {}, libs: [], overlay: false }],
+                ]),
+        });
+
+        const b = bridge();
+        await b.call("overlay.open", { nonce: NONCE, url: PAGE }, "s1");
+        await b.call("overlay.open", { nonce: NONCE, url: PAGE }, "s2");
+        const ovlInit = await b.call("overlay.init", {}, "s1");
+        expect(ovlInit.libStores).toEqual({ libB: { n: { value: 1, persist: false } } });
+        expect(await b.call("store.sub", { name: "n" } as any, "s1\u0000libB")).toEqual({ sub: { name: "n" }, s: "libB" });
+        await expect(b.call("store.sub", { name: "n" } as any, "s2\u0000libB")).rejects.toThrow(/aren.t reachable/);
+        await expect(b.call("store.sub", { name: "n" } as any, "s1\u0000unimported")).rejects.toThrow(/aren.t reachable/);
+
+        const l1 = iso();
+        const isoInit = await l1.call("iso.load", { url: PAGE }, "s1");
+        expect(isoInit.libStores).toEqual({ libB: { n: { value: 1, persist: false } } });
+        expect(await l1.call("store.sub", { name: "n" } as any, "libB")).toEqual({ sub: { name: "n" }, s: "libB" });
+        await expect(l1.call("store.sub", { name: "n" } as any, "unimported")).rejects.toThrow(/aren.t reachable/);
+
+        const l2 = iso();
+        await l2.call("iso.load", { url: PAGE }, "s2");
+        await expect(l2.call("store.sub", { name: "n" } as any, "libB")).rejects.toThrow(/aren.t reachable/);
+    });
+
     it("an unbound link can't log, store or call", async () => {
         const l = iso();
         await expect(l.call("storage.get", { key: "k" }, "s1")).rejects.toThrow(/refused/);

@@ -1,7 +1,7 @@
 {
     "name": "TangiTweak",
-    "version": "0.31.0",
-    "version_name": "0.31.0-alpha",
+    "version": "0.32.0",
+    "version_name": "0.32.0-alpha",
     "description": "Rewrite requests, responses, and pages in TypeScript: redirect, edit headers, mock or transform bodies, and build page overlays.",
     "icons": {
         "16": "icons/icon-16x16.png",

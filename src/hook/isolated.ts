@@ -160,8 +160,8 @@ import { FrameShortcuts } from "../shared/shortcut";
         }
         eager = top && init.overlay;
         page = init.page;
-        hub?.prime({ [s]: init.stores });
-        primed = init.stores;
+        primed = { [s]: init.stores, ...init.libStores };
+        hub?.prime(primed);
         if (init.codeHash !== codeHash) run(init, codeHash !== null);
     }
 
@@ -174,11 +174,11 @@ import { FrameShortcuts } from "../shared/shortcut";
             log: (_s, msg, level) => log(level, msg),
         }));
 
-    let primed: IsoInit["stores"] = {};
+    let primed: Record<string, IsoInit["stores"]> = {};
     function stores(): ReplicaHub {
         if (hub) return hub;
         const h = (hub = new ReplicaHub({ ctx: "isolated", log: (_s, msg, level) => log(level, msg) }));
-        h.prime({ [s]: primed });
+        h.prime(primed);
         // the first use is while the code runs (inside `load`): attach once the link is bound
         if (current) h.attach(current);
         else linkUp().catch(() => {});
@@ -222,12 +222,12 @@ import { FrameShortcuts } from "../shared/shortcut";
 
     function exec(init: IsoInit, hot: boolean): void {
         const gen = life.begin();
-        const shimFor = (name: string, params: Record<string, any>, mine: boolean) =>
+        const shimFor = (storeOwnerId: string, name: string, params: Record<string, any>, mine: boolean) =>
             makePageShim({
                 params,
                 world: "isolated",
                 lib: mine ? undefined : name,
-                stores: { store: (n, initial, persist) => stores().store(s, n, initial, persist), pageStore: (n, initial) => stores().pageStore(s, n, initial, page) },
+                stores: { store: (n, initial, persist) => stores().store(storeOwnerId, n, initial, persist), pageStore: (n, initial) => stores().pageStore(storeOwnerId, n, initial, page) },
                 siteStore: mine ? (n, initial) => siteStores().store(s, n, initial) : undefined,
                 exposer: mine ? exposer : undefined,
                 call: mine ? handle(gen) : undefined,
@@ -244,11 +244,11 @@ import { FrameShortcuts } from "../shared/shortcut";
             const codeOf = (importer: string) => (importer === init.name ? init.src : (init.libs.find((l) => l.name === importer)?.src ?? ""));
             const requireFrom = makeLibRequire(
                 init.libs,
-                (lib, require, moduleObj) => scriptFunction(lib.src!, lib.name)(shimFor(lib.name, lib.params || {}, false).tt, consoleProxy, require, moduleObj, moduleObj.exports),
+                (lib, require, moduleObj) => scriptFunction(lib.src!, lib.name)(shimFor(lib.id ?? s, lib.name, lib.params || {}, false).tt, consoleProxy, require, moduleObj, moduleObj.exports),
                 { builtin: scriptBuiltin(codeOf, hotRegistry(init.name).begin()) }
             );
             const moduleObj = { exports: {} as any };
-            const shim = shimFor(init.name, init.params || {}, true);
+            const shim = shimFor(s, init.name, init.params || {}, true);
             shim.top(() => scriptFunction(init.src, init.name)(shim.tt, consoleProxy, requireFrom(init.name), moduleObj, moduleObj.exports));
             dom = shim.dom;
             reactDom = () => reactOf(requireFrom(init.name));

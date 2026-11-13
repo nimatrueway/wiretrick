@@ -18,10 +18,12 @@ import { readZipEntries, writeZip } from "./zip";
 import { SETTINGS_FILE, SCHEMA_FILE, parseSettings, type SettingsDoc } from "./settingsYaml";
 import { API_DTS_FILE, PACKAGE_JSON_FILE, TSCONFIG_FILE } from "./generatedFiles";
 import { bytesToImageDataUrl, imageDataUrlToBytes, isImageDataPath } from "./scriptImports";
-import { dataFilePathProblem, folderPathProblem, scriptFileName, scriptNameFromFile, scriptNameProblem } from "./scriptName";
+import { badValue, isPlainObject } from "./storeOps";
+import { dataFilePathProblem, folderPathProblem, scriptFileName, scriptNameFromFile, scriptNameProblem, scriptPathKey } from "./scriptName";
 import { isInFolder } from "./folders";
 
 export const EXPORT_ZIP_NAME = "tangitweak-export.zip";
+export const STORES_FILE = "stores.json";
 
 const MANIFEST = "metadata.json";
 
@@ -51,6 +53,8 @@ export function filesGoneFrom(zip: Pick<ExportContents, "settings" | "scripts" |
 export interface ExportContents {
     /** settings.yaml text; null when the zip has none */
     settings: string | null;
+    /** tangitweak-stores.json text; null when the zip has none */
+    stores?: string | null;
     /** `file`: the path in the zip (`mock/helpers.ts`) */
     scripts: { name: string; file: string; code: string }[];
     dataFiles: { path: string; text: string }[];
@@ -74,14 +78,49 @@ export function emptyFolders(folders: string[], paths: string[]): string[] {
     });
 }
 
-/** the export zip: scripts at their file paths, data files, empty folders and settings.yaml */
-export function buildExportZip(c: { settings?: string | null; scripts: { name: string; code: string }[]; dataFiles: { path: string; text: string }[]; folders?: string[] }, date?: Date): Uint8Array {
+/** the export zip: scripts at their file paths, data files, empty folders, settings.yaml and optional tangitweak-stores.json */
+export function buildExportZip(
+    c: { settings?: string | null; stores?: string | null; scripts: { name: string; code: string }[]; dataFiles: { path: string; text: string }[]; folders?: string[] },
+    date?: Date
+): Uint8Array {
     const files: Record<string, string | Uint8Array> = {};
     if (c.settings != null) files[SETTINGS_FILE] = c.settings;
+    if (c.stores != null) files[STORES_FILE] = c.stores;
     for (const f of c.folders ?? []) files[f + "/"] = "";
     for (const s of c.scripts) files[scriptFileName(s.name)] = s.code;
     for (const d of c.dataFiles) files[d.path] = isImageDataPath(d.path) ? imageDataUrlToBytes(d.text) : d.text;
     return writeZip(files, date);
+}
+
+/** filter exported stores `{ [scriptName]: { [storeName]: data } }` down to `scriptNames` and format as JSON (or null if empty) */
+export function storesForScripts(all: Record<string, Record<string, any>>, scriptNames: string[]): string | null {
+    const wanted = new Set(scriptNames.map(scriptPathKey));
+    const filtered: Record<string, Record<string, any>> = {};
+    for (const [scriptName, stores] of Object.entries(all || {})) {
+        if (!wanted.has(scriptPathKey(scriptName)) || !isPlainObject(stores) || !Object.keys(stores).length) continue;
+        filtered[scriptName] = stores;
+    }
+    return Object.keys(filtered).length ? JSON.stringify(filtered, null, 2) + "\n" : null;
+}
+
+/** parse and validate `tangitweak-stores.json` text */
+export function parseExportedStores(text: string): Record<string, Record<string, Record<string, any>>> {
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(text);
+    } catch (e) {
+        throw new Error(`invalid JSON (${(e as Error).message})`);
+    }
+    if (!isPlainObject(parsed)) throw new Error(`${STORES_FILE} must be a JSON object mapping script names to stores`);
+    for (const [scriptName, stores] of Object.entries(parsed)) {
+        if (!isPlainObject(stores)) throw new Error(`${STORES_FILE}: entry for "${scriptName}" must be an object of stores`);
+        for (const [storeName, data] of Object.entries(stores)) {
+            if (!isPlainObject(data)) throw new Error(`${STORES_FILE}: store "${storeName}" of "${scriptName}" must be a JSON object`);
+            const bad = badValue(data);
+            if (bad) throw new Error(`${STORES_FILE}: store "${storeName}" of "${scriptName}": ${bad}`);
+        }
+    }
+    return parsed as Record<string, Record<string, Record<string, any>>>;
 }
 
 /** what an export zip (or a zipped scripts folder) holds */
@@ -92,15 +131,16 @@ export async function readExportZip(buf: ArrayBuffer): Promise<ExportContents> {
     let dirs = raw.folders;
     const all = [...Object.keys(files), ...dirs];
     const top = all.length ? all[0].split("/")[0] : "";
-    if (top && all.every((p) => p === top || p.startsWith(top + "/")) && [SETTINGS_FILE, TSCONFIG_FILE, API_DTS_FILE].some((f) => files[`${top}/${f}`])) {
+    if (top && all.every((p) => p === top || p.startsWith(top + "/")) && [SETTINGS_FILE, STORES_FILE, TSCONFIG_FILE, API_DTS_FILE].some((f) => files[`${top}/${f}`])) {
         const cut = top.length + 1;
         files = Object.fromEntries(Object.entries(files).map(([p, b]) => [p.slice(cut), b]));
         dirs = dirs.filter((d) => d !== top).map((d) => d.slice(cut));
     }
     const utf8 = new TextDecoder();
-    const out: ExportContents = { settings: null, scripts: [], dataFiles: [], folders: [], ignored: [] };
+    const out: ExportContents = { settings: null, stores: null, scripts: [], dataFiles: [], folders: [], ignored: [] };
     for (const [p, bytes] of Object.entries(files)) {
         if (p === SETTINGS_FILE) out.settings = utf8.decode(bytes);
+        else if (p === STORES_FILE) out.stores = utf8.decode(bytes);
         else if (GENERATED.has(p)) continue;
         else if (isScriptFile(p) && !scriptNameProblem(scriptNameFromFile(p))) out.scripts.push({ name: scriptNameFromFile(p), file: p, code: utf8.decode(bytes) });
         else if (!dataFilePathProblem(p)) out.dataFiles.push({ path: p, text: isImageDataPath(p) ? bytesToImageDataUrl(p, bytes) : utf8.decode(bytes) });
@@ -128,9 +168,9 @@ export function settingsForScripts(text: string, names: string[]): string {
     const pair: any = doc.contents.items.find((p: any) => isScalar(p.key) && p.key.value === "params");
     if (!pair || !isMap(pair.value)) return text;
     const params = pair.value as YAMLMap;
-    const keep = new Set(names);
+    const keep = new Set(names.map(scriptPathKey));
     const items = params.items as any[];
-    const dropped = items.filter((p) => !isScalar(p.key) || !keep.has(String(p.key.value)));
+    const dropped = items.filter((p) => !isScalar(p.key) || !keep.has(scriptPathKey(String(p.key.value))));
     if (!dropped.length) return text;
     const want = items.filter((p) => !dropped.includes(p)).map((p) => String(p.key.value));
     const structural = () => {
@@ -176,6 +216,6 @@ export function settingsForScripts(text: string, names: string[]): string {
 /** the parts of a settings.yaml an import applies: its globals and these scripts' sections */
 export function importedSettingsDoc(text: string, names: string[]): SettingsDoc {
     const doc = parseSettings(text);
-    const keep = new Set(names);
-    return { settings: doc.settings, params: Object.fromEntries(Object.entries(doc.params).filter(([n]) => keep.has(n))) };
+    const keep = new Set(names.map(scriptPathKey));
+    return { settings: doc.settings, params: Object.fromEntries(Object.entries(doc.params).filter(([n]) => keep.has(scriptPathKey(n)))) };
 }

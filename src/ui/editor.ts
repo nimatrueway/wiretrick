@@ -16,7 +16,7 @@ import { manifestScriptCompletions, manifestScriptProblems } from "./manifestAss
 import { entryStem } from "../shared/packageModel";
 import { localPackage } from "../shared/localPackage";
 import { writeZip } from "../shared/zip";
-import { buildExportZip, emptyFolders, EXPORT_ZIP_NAME, filesGoneFrom, importedSettingsDoc, readExportZip, settingsForScripts, type ExportContents } from "../shared/exportZip";
+import { buildExportZip, emptyFolders, EXPORT_ZIP_NAME, filesGoneFrom, importedSettingsDoc, parseExportedStores, readExportZip, settingsForScripts, STORES_FILE, storesForScripts, type ExportContents } from "../shared/exportZip";
 import { PACKAGE_ORIGIN } from "../shared/packageImports";
 import { isInFolder, movedPath } from "../shared/folders";
 import { baseName, folderPathOfRowId, folderRowId, isFolderRowId, movedCollapsed, type TreeRow } from "./explorerTree";
@@ -25,7 +25,7 @@ import { dialogs, openHelp, openSettings, pickItems, resolveConflict } from "./s
 import { folderStateText, setHelperStatus, settings } from "./state/settings";
 import { watchTheme, type Theme } from "./theme";
 import * as fsBridge from "./fsBridge";
-import { cleanScriptName, isTsxName, scriptNameProblem, scriptFileName, scriptFileKey, scriptNameFromFile, uniqueScriptName, dataFilePathProblem, folderPathProblem } from "../shared/scriptName";
+import { cleanScriptName, isTsxName, scriptNameProblem, scriptFileName, scriptFileKey, scriptPathKey, scriptNameFromFile, uniqueScriptName, dataFilePathProblem, folderPathProblem } from "../shared/scriptName";
 import { jsxElementAt } from "../shared/builtinSpecs";
 import { vscodeTargetPath, editorLaunchUrl, launchAppName, type LaunchMode } from "./bundle";
 import { computeDirty } from "./dirtyState";
@@ -45,7 +45,7 @@ import { layout, panelTabOf, type PanelTab } from "./state/layout";
 import { appendLog, clearLog, logState } from "./state/log";
 import { badges, badgesChanged, panel, setNetStore, setProblems } from "./state/panel";
 import { actions } from "./shell/actions";
-import { clearSel, everyFolder, explorer, explorerIds, moveFocus, pruneCollapsed, revealInExplorer, setCollapsed, setSel, SETTINGS_ID, startCreate as startCreateRow, syncExplorer, treeRow, treeRows, visibleRows, type NewKind } from "./state/explorer";
+import { clearSel, everyFolder, explorer, explorerIds, isVirtualRootId, moveFocus, pruneCollapsed, revealInExplorer, setCollapsed, setSel, SETTINGS_ID, STORES_ID, startCreate as startCreateRow, syncExplorer, treeRow, treeRows, visibleRows, type NewKind } from "./state/explorer";
 import { watchPackages } from "./state/packages";
 import { createCodeEditor } from "./shell/codeEditor";
 import { toolbar, type SaveState } from "./state/toolbar";
@@ -127,6 +127,7 @@ function status(text: string, cls = "", onClick?: () => void): void {
 
 // ---- script list ----
 let settingsModel: any = null;
+let storesModel: any = null;
 
 async function loadSettingsModel(force = false): Promise<void> {
     if (!editor) return;
@@ -148,9 +149,24 @@ async function loadSettingsModel(force = false): Promise<void> {
     }
 }
 
+async function loadStoresModel(force = false): Promise<void> {
+    if (!editor) return;
+    const monaco = (window as any).monaco;
+    const { text } = await send({ type: "getStoresJson" });
+    if (!storesModel) {
+        storesModel = monaco.editor.createModel(text, "json", monaco.Uri.parse("file:///" + STORES_FILE));
+        setBaseline(storesModel, text);
+    } else if (storesModel.getValue() !== text && (force || !(selectedId === STORES_ID && dirty))) {
+        applyingExternal = true;
+        storesModel.setValue(text);
+        applyingExternal = false;
+        setBaseline(storesModel, text);
+    }
+}
+
 // ---- settings.yaml assistance: schema + each script's declared params ----
 const assistScripts = (): AssistScript[] =>
-    scripts.map((s: any) => ({ name: s.meta.name, declared: s.meta.active !== false, defs: s.paramDefs ?? {} }));
+    scripts.map((s: any) => ({ name: scriptFileName(s.meta.name), declared: s.meta.active !== false, defs: s.paramDefs ?? {} }));
 let settingsMarkerTimer: ReturnType<typeof setTimeout> | null = null;
 
 function scheduleSettingsMarkers(): void {
@@ -281,6 +297,41 @@ async function saveSettings(): Promise<void> {
     await refresh();
 }
 
+async function selectStores(): Promise<void> {
+    const back = typingsShown && selectedId === STORES_ID;
+    leaveTypings();
+    selectedId = STORES_ID;
+    explorer.focusedId = null;
+    showWelcome(false);
+    renderList();
+    await loadStoresModel(!back);
+    if (editor.getModel() !== storesModel) {
+        captureViewState();
+        editor.setModel(storesModel);
+        restoreViewState(storesModel);
+    }
+    if (back) updateDirty();
+    else {
+        setDirty(false);
+        status("");
+    }
+    updateOpenVscode();
+}
+
+async function saveStores(): Promise<void> {
+    setSaveState("saving");
+    const res = await send({ type: "applyStoresJson", text: editor.getValue() });
+    if (res && res.error) {
+        setSaveState("unsaved");
+        status(`${STORES_FILE}: ${res.error}`, "error");
+        return;
+    }
+    await loadStoresModel(true);
+    setDirty(false);
+    status("");
+    await refresh();
+}
+
 async function refresh(): Promise<void> {
     const prev = scripts;
     const prevData = dataFiles;
@@ -289,7 +340,7 @@ async function refresh(): Promise<void> {
     dataFiles = data || [];
     folders = dirs || [];
     const known = (id: string): boolean => scripts.some((s) => s.id === id) || dataFiles.some((d) => d.id === id);
-    if (dirty && selectedId && selectedId !== SETTINGS_ID && !known(selectedId)) {
+    if (dirty && selectedId && !isVirtualRootId(selectedId) && !known(selectedId)) {
         // deleted elsewhere while edited here: keep the buffer (and its
         // model) so the unsaved text isn't lost; saving offers to recreate
         const orphan = prev.find((s) => s.id === selectedId);
@@ -307,10 +358,10 @@ async function refresh(): Promise<void> {
     syncWorkspace();
     scheduleDiagnostics();
     scheduleSettingsMarkers();
-    if (selectedId && selectedId !== SETTINGS_ID && !known(selectedId)) {
+    if (selectedId && !isVirtualRootId(selectedId) && !known(selectedId)) {
         selectedId = null;
     }
-    if (selectedId === SETTINGS_ID) return;
+    if (isVirtualRootId(selectedId)) return;
     if (!selectedId && scripts.length > 0) {
         selectReal(scripts[0].id);
     } else if (!selectedId) {
@@ -1104,10 +1155,15 @@ function openNavEntry(e: NavEntry): boolean | "skip" {
         restore();
         return true;
     }
-    if (e.target !== SETTINGS_ID && !scripts.some((s) => s.id === e.target) && !isDataId(e.target)) return "skip";
+    if (!isVirtualRootId(e.target) && !scripts.some((s) => s.id === e.target) && !isDataId(e.target)) return "skip";
     if (e.target !== selectedId && dirty && selectedId && !confirm("Discard unsaved changes?")) return false;
     if (e.target === SETTINGS_ID) {
         if (typingsShown || selectedId !== SETTINGS_ID) void selectSettings().then(restore);
+        else restore();
+        return true;
+    }
+    if (e.target === STORES_ID) {
+        if (typingsShown || selectedId !== STORES_ID) void selectStores().then(restore);
         else restore();
         return true;
     }
@@ -1138,6 +1194,7 @@ function saveCurrent(): Promise<void> {
 async function saveCurrentNow(): Promise<void> {
     if (typingsShown) return; // read-only
     if (selectedId === SETTINGS_ID) return saveSettings();
+    if (selectedId === STORES_ID) return saveStores();
     if (!selectedId || !editor) return;
     if (isDataId(selectedId)) return saveDataFileNow(selectedId);
     const code = editor.getValue();
@@ -1377,13 +1434,20 @@ function updateProblems(): void {
     }
     const settings = monaco && settingsModel && !settingsModel.isDisposed() ? modelProblems(settingsModel) : undefined;
     const data = monaco
-        ? dataFiles.flatMap((d) => {
-              const m = dataModels.get(d.id);
-              return m && !m.isDisposed() ? [{ id: d.id, label: d.path, markers: modelProblems(m) }] : [];
-          })
+        ? [
+              ...(storesModel && !storesModel.isDisposed() ? [{ id: STORES_ID, label: STORES_FILE, markers: modelProblems(storesModel) }] : []),
+              ...dataFiles.flatMap((d) => {
+                  const m = dataModels.get(d.id);
+                  return m && !m.isDisposed() ? [{ id: d.id, label: d.path, markers: modelProblems(m) }] : [];
+              }),
+          ]
         : [];
-    // explorer order (settings.yaml first)
-    const order = new Map(treeRows(true).map((r, i) => [r.id, i]));
+    // explorer order (settings.yaml, then stores.json, then tree rows)
+    const order = new Map<string, number>([
+        [SETTINGS_ID, -2],
+        [STORES_ID, -1],
+        ...treeRows(true).map((r, i) => [r.id, i] as [string, number]),
+    ]);
     problemGroups = collectProblems(
         scripts.map((s) => ({ id: s.id, label: scriptFileName(s.meta.name), name: s.meta.name, error: s.error, ruleErrors: s.ruleErrors, runtimeError: s.runtimeError, typeErrors: s.typeErrors, routeWarnings: s.routeWarnings, routes: s.meta.routes, code: s.code })),
         live,
@@ -1583,6 +1647,10 @@ function setupSettings(): void {
         if (c[BODY_CAP_KEY]) settings.bodyCap = bodyCap(c[BODY_CAP_KEY].newValue);
         if (c.resLogLevel?.newValue) logState.level = c.resLogLevel.newValue;
         if (c.resLogCap?.newValue) logState.cap = c.resLogCap.newValue;
+        const storeChanged = Object.keys(c).some((k) => k.startsWith("resStore."));
+        if (storeChanged || c.resScripts) {
+            if (selectedId === STORES_ID || storesModel) void loadStoresModel();
+        }
         if (c.resScripts || c.resParams || c.resLogLevel || c.resLogCap || c[BODY_CAP_KEY] || c.resSettingsText || c.resDataFiles || c.resFolders) {
             void (async () => {
                 if (selectedId === SETTINGS_ID) await loadSettingsModel();
@@ -1804,10 +1872,16 @@ function openInEditor(): void {
         return;
     }
     if (!selectedId || typingsShown) return;
-    // the ⚙ settings.yaml entry is virtual (not in `scripts`) — its
-    // target is <folder>/settings.yaml, written by folderSync
+    if (selectedId === STORES_ID) void send({ type: "ensureStoresOnDisk" });
+    // the ⚙ settings.yaml and stores.json entries are virtual (not in `scripts`) — their
+    // targets are <folder>/settings.yaml and <folder>/stores.json, written by folderSync
     const data = dataFiles.find((d) => d.id === selectedId);
-    const file = data ? `${folder.replace(/\/+$/, "")}/${data.path}` : vscodeTargetPath(folder, selectedId, scripts.find((s) => s.id === selectedId)?.meta.name, SETTINGS_ID, SETTINGS_FILE);
+    const file =
+        selectedId === STORES_ID
+            ? `${folder.replace(/\/+$/, "")}/${STORES_FILE}`
+            : data
+              ? `${folder.replace(/\/+$/, "")}/${data.path}`
+              : vscodeTargetPath(folder, selectedId, scripts.find((s) => s.id === selectedId)?.meta.name, SETTINGS_ID, SETTINGS_FILE);
     const url = editorLaunchUrl(settings.launchMode, settings.editorUrl, file, editor?.getPosition?.()?.lineNumber || 1);
     if (!url) return;
     // launch from THIS page (user gesture): external-protocol requests
@@ -1841,19 +1915,34 @@ async function exportBundle(): Promise<void> {
     const { text } = await send({ type: "getSettingsYaml", text: settingsModel?.getValue() });
     const dataFiles: { path: string; text: string }[] = (await send({ type: "listDataFiles" })) || [];
     const folders: string[] = (await send({ type: "listFolders" })) || [];
+    const allStores: Record<string, Record<string, any>> = (await send({ type: "exportStores" }).catch(() => ({}))) || {};
+    const hasStores = Object.keys(allStores).length > 0;
     const list = [
         ...scripts.map((s) => ({ name: s.meta.name, code: s.code, data: false })),
         ...dataFiles.map((d) => ({ name: d.path, code: d.text, data: true })),
     ];
     const empty = emptyFolders(folders, [...scripts.map((s) => scriptFileName(s.meta.name)), ...dataFiles.map((d) => d.path)]);
     const settingsAt = list.length;
+    const storesAt = hasStores ? settingsAt + 1 : -1;
+    const foldersAt = settingsAt + 1 + (hasStores ? 1 : 0);
     const chosen = await pickItems({
         title: "Export",
-        intro: "Pick what goes into the zip. It's laid out like the scripts folder: scripts and data files by path, and settings.yaml with the globals and the picked scripts' enabled state and params.",
+        intro: "Pick what goes into the zip. It's laid out like the scripts folder: scripts and data files by path, settings.yaml with globals and params, and optionally persisted globalStore data.",
         items: [
             ...scripts.map((s) => ({ path: scriptFileName(s.meta.name), kind: "script" as const, badge: s.meta.active !== false && !s.enabled ? "disabled" : undefined })),
             ...dataFiles.map((d) => ({ path: d.path, kind: "data" as const })),
             { path: SETTINGS_FILE, kind: "settings" as const, detail: "globals + the picked scripts' enabled state and params" },
+            ...(hasStores
+                ? [
+                      {
+                          path: STORES_FILE,
+                          kind: "settings" as const,
+                          badge: "opt-in",
+                          detail: "persisted globalStore data for the picked scripts",
+                          checked: false,
+                      },
+                  ]
+                : []),
             ...empty.map((f) => ({ path: f, kind: "folder" as const, detail: "empty folder" })),
         ],
         confirm: "Export",
@@ -1863,15 +1952,24 @@ async function exportBundle(): Promise<void> {
     const picked = chosen.filter((i) => i < scripts.length).map((i) => list[i]);
     const pickedData = chosen.filter((i) => i >= scripts.length && i < settingsAt).map((i) => ({ path: list[i].name, text: list[i].code }));
     const withSettings = chosen.includes(settingsAt);
-    const pickedFolders = chosen.filter((i) => i > settingsAt).map((i) => empty[i - settingsAt - 1]);
+    const withStores = storesAt >= 0 && chosen.includes(storesAt);
+    const pickedFolders = chosen.filter((i) => i >= foldersAt).map((i) => empty[i - foldersAt]);
+    const storesJson = withStores ? storesForScripts(allStores, picked.map((s) => s.name)) : null;
     const zip = buildExportZip({
         settings: withSettings ? settingsForScripts(text, picked.map((s) => s.name)) : null,
+        stores: storesJson,
         scripts: picked,
         dataFiles: pickedData,
         folders: pickedFolders,
     });
     download(picked.length === 1 && chosen.length === 1 ? `${baseName(picked[0].name)}.zip` : EXPORT_ZIP_NAME, zip as BlobPart, "application/zip");
-    const parts = [plural(picked.length, "script"), ...(pickedData.length ? [plural(pickedData.length, "data file")] : []), ...(pickedFolders.length ? [plural(pickedFolders.length, "folder")] : []), ...(withSettings ? ["settings"] : [])];
+    const parts = [
+        plural(picked.length, "script"),
+        ...(pickedData.length ? [plural(pickedData.length, "data file")] : []),
+        ...(pickedFolders.length ? [plural(pickedFolders.length, "folder")] : []),
+        ...(withSettings ? ["settings"] : []),
+        ...(storesJson ? ["stores"] : []),
+    ];
     status(`exported ${parts.join(" + ")} ✓`);
 }
 // an imported script replaces the existing script of the same name
@@ -1907,8 +2005,8 @@ async function importZip(file: File): Promise<void> {
         status(`${file.name}: not a zip (${(e as Error).message})`, "error");
         return;
     }
-    if (!zip.scripts.length && !zip.dataFiles.length && !zip.folders.length && zip.settings === null) {
-        status(`${file.name}: no scripts, data files or settings.yaml in it`, "error");
+    if (!zip.scripts.length && !zip.dataFiles.length && !zip.folders.length && zip.settings === null && !zip.stores) {
+        status(`${file.name}: no scripts, data files, settings.yaml or ${STORES_FILE} in it`, "error");
         return;
     }
     const existingData: { id: string; path: string }[] = (await send({ type: "listDataFiles" })) || [];
@@ -1922,9 +2020,19 @@ async function importZip(file: File): Promise<void> {
             settingsError = (e as Error).message;
         }
     }
+    let parsedStores: Record<string, Record<string, Record<string, any>>> | null = null;
+    let storesError = "";
+    if (zip.stores) {
+        try {
+            parsedStores = parseExportedStores(zip.stores);
+        } catch (e) {
+            storesError = (e as Error).message;
+        }
+    }
     const named = [...zip.scripts.map((s) => ({ name: s.name, code: s.code, data: false })), ...zip.dataFiles.map((d) => ({ name: d.path, code: d.text, data: true }))];
     const settingsAt = zip.settings === null ? -1 : named.length;
-    const foldersAt = named.length + (zip.settings === null ? 0 : 1);
+    const storesAt = !zip.stores ? -1 : named.length + (zip.settings === null ? 0 : 1);
+    const foldersAt = named.length + (zip.settings === null ? 0 : 1) + (zip.stores ? 1 : 0);
     // a package's new version: its files that version doesn't have go (unless unchecked)
     const existingFiles = [...scripts.map((s) => ({ path: scriptFileName(s.meta.name), id: s.id, kind: "script" as const })), ...existingData.map((d) => ({ path: d.path, id: d.id, kind: "data" as const }))];
     const gonePaths = new Set(filesGoneFrom(zip, existingFiles.map((f) => f.path)));
@@ -1940,6 +2048,13 @@ async function importZip(file: File): Promise<void> {
             ...(zip.settings === null
                 ? []
                 : [settingsError ? { path: SETTINGS_FILE, kind: "settings" as const, badge: "YAML error", detail: settingsError, checked: false } : { path: SETTINGS_FILE, kind: "settings" as const }]),
+            ...(!zip.stores
+                ? []
+                : [
+                      storesError
+                          ? { path: STORES_FILE, kind: "settings" as const, badge: "JSON error", detail: storesError, checked: false }
+                          : { path: STORES_FILE, kind: "settings" as const, detail: `persisted globalStore data (${plural(Object.keys(parsedStores || {}).length, "script")})` },
+                  ]),
             ...zip.folders.map((f) => ({ path: f, kind: "folder" as const, badge: existingFolders.some((e) => e.toLowerCase() === f.toLowerCase()) ? "exists" : "new" })),
             ...gone.map((f) => ({ path: f.path, kind: f.kind, badge: "deleted", detail: "not in this version", removed: true })),
         ],
@@ -1952,6 +2067,7 @@ async function importZip(file: File): Promise<void> {
     const pickedFolders = chosen.filter((i) => i >= foldersAt && i < goneAt).map((i) => zip.folders[i - foldersAt]);
     const pickedGone = chosen.filter((i) => i >= goneAt).map((i) => gone[i - goneAt]);
     const withSettings = settingsAt >= 0 && chosen.includes(settingsAt);
+    const withStores = storesAt >= 0 && chosen.includes(storesAt) && !!parsedStores;
     // folders and data files first: the scripts compile against them
     const failed: string[] = [];
     for (const f of pickedFolders) {
@@ -1984,6 +2100,15 @@ async function importZip(file: File): Promise<void> {
             return;
         }
         parts.push("settings");
+    }
+    if (withStores && parsedStores) {
+        const wanted = zip.scripts.length > 0 ? new Set(pickedScripts.map((s) => scriptPathKey(s.name))) : null;
+        const storesToApply = wanted
+            ? Object.fromEntries(Object.entries(parsedStores).filter(([k]) => wanted.has(scriptPathKey(k))))
+            : parsedStores;
+        const res: any = await send({ type: "importStores", stores: storesToApply });
+        if (res && res.error) failed.push(`stores: ${res.error}`);
+        else parts.push("stores");
     }
     if (failed.length) {
         status(`imported ${parts.join(" + ")}; ${failed.join("; ")}`, "error");
@@ -2026,7 +2151,12 @@ async function main(): Promise<void> {
             const script = scripts.find((s) => s.id === id);
             if (script) void setScriptEnabled(script, enabled);
         },
-        quickOpenItems: () => [{ id: SETTINGS_ID, name: "settings.yaml" }, ...scripts.map((s) => ({ id: s.id, name: s.meta.name })), ...dataFiles.map((d) => ({ id: d.id, name: d.path }))],
+        quickOpenItems: () => [
+            { id: SETTINGS_ID, name: SETTINGS_FILE },
+            { id: STORES_ID, name: STORES_FILE },
+            ...scripts.map((s) => ({ id: s.id, name: scriptFileName(s.meta.name) })),
+            ...dataFiles.map((d) => ({ id: d.id, name: d.path })),
+        ],
         openQuick: (id: string) => {
             void select(id);
             editor.focus(); // VS Code behavior: a ⌘P jump focuses the editor
@@ -2233,6 +2363,7 @@ function select(id: string): Promise<void> {
         }
     }
     if (id === SETTINGS_ID) return selectSettings();
+    if (id === STORES_ID) return selectStores();
     const row = treeRow(id);
     if (row) revealInExplorer(row.path);
     selectReal(id);

@@ -5,8 +5,10 @@ import type { Script } from "../../background/engine/scriptStore";
 import type { DataFile } from "../../background/engine/dataFiles";
 import { explorerTree, folderRowId, idRange, targetFolder, topLevelRows, type TreeRow } from "../explorerTree";
 
-/** settings.yaml's row (always first) */
+/** settings.yaml and stores.json virtual rows (always first in the Explorer) */
 export const SETTINGS_ID = "__settings__";
+export const STORES_ID = "__stores__";
+export const isVirtualRootId = (id: string | null | undefined): boolean => id === SETTINGS_ID || id === STORES_ID;
 
 export type ExplorerScript = Script & Partial<ScriptHealthInput> & { routeWarnings?: string[] };
 export type NewKind = "script" | "data" | "folder";
@@ -96,10 +98,10 @@ export const visibleRows = (): TreeRow[] => treeRows();
 /** a row by id, shown or inside a collapsed folder */
 export const treeRow = (id: string | null): TreeRow | undefined => (id ? treeRows(true).find((r) => r.id === id) : undefined);
 
-/** the rows' ids, settings.yaml first */
-export const explorerIds = (): string[] => [SETTINGS_ID, ...visibleRows().map((r) => r.id)];
+/** the rows' ids, settings.yaml and stores.json first */
+export const explorerIds = (): string[] => [SETTINGS_ID, STORES_ID, ...visibleRows().map((r) => r.id)];
 
-/** the ids a multi-selection can hold (settings.yaml isn't one) */
+/** the ids a multi-selection can hold (settings.yaml and stores.json aren't selectable items) */
 export const selectableIds = (): string[] => visibleRows().map((r) => r.id);
 
 /** the row the cursor is on */
@@ -171,7 +173,7 @@ export function setSel(ids: Iterable<string>, anchor: string | null = explorer.s
 /** Shift-click / Shift+↑↓: select from the anchor (default: the cursor) to `id`; `add` keeps what was selected */
 export function selectRange(id: string, add = false): void {
     const cur = cursorId();
-    const anchor = explorer.selAnchor ?? (cur && cur !== SETTINGS_ID ? cur : id);
+    const anchor = explorer.selAnchor ?? (cur && !isVirtualRootId(cur) ? cur : id);
     setSel([...(add ? explorer.sel : []), ...idRange(selectableIds(), anchor, id)], anchor);
     moveFocus(id);
 }
@@ -179,7 +181,7 @@ export function selectRange(id: string, add = false): void {
 /** ⌘/Ctrl-click: add `id` to the selection (with the cursor row, when starting one) or take it out */
 export function toggleSel(id: string): void {
     const cur = cursorId();
-    const next = explorer.sel.size < 2 ? new Set(cur && cur !== SETTINGS_ID && treeRow(cur) ? [cur] : []) : new Set(explorer.sel);
+    const next = explorer.sel.size < 2 ? new Set(cur && !isVirtualRootId(cur) && treeRow(cur) ? [cur] : []) : new Set(explorer.sel);
     if (next.has(id)) next.delete(id);
     else next.add(id);
     setSel(next, id);

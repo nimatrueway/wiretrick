@@ -274,7 +274,7 @@ export function planSettings(doc: SettingsDoc, current: GlobalSettings, scripts:
     }
     const plans: SettingsPlan["scripts"] = [];
     for (const s of scripts) {
-        const t = doc.params[s.name];
+        const t = doc.params[s.name] ?? (s.name.endsWith(".ts") ? doc.params[s.name.slice(0, -3)] : undefined);
         if (!t) continue;
         const plan: SettingsPlan["scripts"][number] = { name: s.name, params: {} };
         if (s.declared) {

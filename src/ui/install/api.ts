@@ -32,6 +32,7 @@ export const packagesApi = {
     analyze: (f: Fetched, updateOf?: string) => send<Analysis>({ type: "packageAnalyze", fetched: plain(f), updateOf }),
     packageStatus: (urls: string[]) => send<{ statuses?: Record<string, PackageStatus> }>({ type: "packageStatus", urls }),
     install: (f: Fetched, enabled: boolean, autoUpdate: boolean) => send<InstalledPackage>({ type: "packageInstall", fetched: plain(f), enabled, autoUpdate }),
+    upgrade: (f: Fetched, autoUpdate: boolean, packageId?: string) => send<InstalledPackage>({ type: "packageUpgrade", fetched: plain(f), autoUpdate, packageId }),
     offer: (id: string, f: Fetched, manual: boolean) => send<InstalledPackage | null>({ type: "packageOffer", id, fetched: plain(f), manual }),
     check: (id?: string) => send<Record<string, InstalledPackage>>({ type: "packageCheck", id }),
     apply: (id: string) => send<InstalledPackage>({ type: "packageApply", id }),

@@ -89,6 +89,12 @@ export function packageName(p: { entries: string[]; metadata: Pick<PackageMetada
 /** the store id of a package's entries */
 export const entryIds = (p: Pick<InstalledPackage, "entries" | "files">): string[] => p.entries.flatMap((e) => (p.files[e] ? [p.files[e].id] : []));
 
+/** the natural folder name a multi-file package wants (`""` for a single file), before collision numbering */
+export function naturalPackageFolder(p: { entries: string[]; files: Record<string, string>; bundleName?: string }): string {
+    if (Object.keys(p.files).length === 1) return "";
+    return (p.bundleName || entryStem(p.entries[0] ?? "")).replace(/[\\/:*?"<>|]+/g, "-").replace(/^[\s.]+|[\s.]+$/g, "") || "package";
+}
+
 /**
  * Where a package installs: a single file at the root, more in a folder
  * named after the bundle (its metadata.json's name) or the entry
@@ -96,8 +102,8 @@ export const entryIds = (p: Pick<InstalledPackage, "entries" | "files">): string
  * — script names, data paths and folders.
  */
 export function packageFolder(p: { entries: string[]; files: Record<string, string>; bundleName?: string }, taken: string[]): string {
-    if (Object.keys(p.files).length === 1) return "";
-    const stem = (p.bundleName || entryStem(p.entries[0] ?? "")).replace(/[\\/:*?"<>|]+/g, "-").replace(/^[\s.]+|[\s.]+$/g, "") || "package";
+    const stem = naturalPackageFolder(p);
+    if (!stem) return "";
     const keys = new Set(taken.map((t) => scriptFileKey(t.split("/")[0])));
     if (!keys.has(scriptFileKey(stem))) return stem;
     for (let i = 2; ; i++) if (!keys.has(scriptFileKey(`${stem} (${i})`))) return `${stem} (${i})`;

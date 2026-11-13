@@ -67,7 +67,7 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
     const errorLine = (e: any, context: string) => formatScriptError(init.name, e, context);
 
     const hub = new ReplicaHub({ ctx: "overlay", log: (_s, msg, level) => log(level, msg) });
-    hub.prime({ [s]: init.stores });
+    hub.prime({ [s]: init.stores, ...init.libStores });
     hub.attach(ep);
     ep.on("store.resync", () => hub.reconnect());
     // `tt.siteStore`: the page's (the bridge relays, for this script's own)
@@ -182,7 +182,7 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
         // a newer update came while React loaded
         if (my !== loads) return;
         if (hot) {
-            hub.prime({ [s]: next.stores });
+            hub.prime({ [s]: next.stores, ...next.libStores });
             exposer.reset();
         }
         const g = life.begin();
@@ -190,7 +190,18 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
         const requireFrom = makeLibRequire(
             next.libs,
             (lib, require, moduleObj) => {
-                const c = compileScript(lib.src!, { ...common, name: lib.name, paramValues: lib.params, setParam: async (key, value) => void (await ep.call("param.set", { key, value, lib: lib.name })), importModule: require, remote: () => inertRemote(LIB_REMOTE) });
+                const libId = lib.id ?? s;
+                const c = compileScript(lib.src!, {
+                    ...common,
+                    name: lib.name,
+                    paramValues: lib.params,
+                    store: (name, initial, persist) => hub.store(libId, name, initial, persist),
+                    pageStore: (name, initial) => hub.pageStore(libId, name, initial, init.page),
+                    siteStore: undefined,
+                    setParam: async (key, value) => void (await ep.call("param.set", { key, value, lib: lib.name })),
+                    importModule: require,
+                    remote: () => inertRemote(LIB_REMOTE),
+                });
                 if (c.error) throw new Error(`${lib.name}: ${c.error}`);
                 moduleObj.exports = c.exports;
             },

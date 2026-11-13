@@ -172,6 +172,8 @@ export interface IsoInit {
     overlay: boolean;
     /** the script's stores now (its `tt.pageStore` copies: this page's), keyed like `store.init` */
     stores: { [name: string]: StoreSnapshot };
+    /** imported libraries' stores now (`lib.id` → stores), keyed like `store.init` */
+    libStores?: { [scriptId: string]: { [name: string]: StoreSnapshot } };
     /** the page the frame is part of (its top frame's document): the only one whose `tt.pageStore` copies it reaches */
     page: string;
 }
@@ -193,6 +195,8 @@ export interface OverlayInit {
     params: Record<string, any>;
     /** global stores, and this page's copies of page stores (`storeKey`) */
     stores: { [name: string]: StoreSnapshot };
+    /** imported libraries' stores now (`lib.id` → stores), keyed like `store.init` */
+    libStores?: { [scriptId: string]: { [name: string]: StoreSnapshot } };
     /** the page the overlay is on (src/background/engine/pages.ts): its `tt.pageStore` copies */
     page: string;
     libs: ShippedLib[];

@@ -4,7 +4,18 @@
  * the globals and the exported scripts' enabled state and params).
  */
 import { describe, it, expect } from "vitest";
-import { buildExportZip, emptyFolders, filesGoneFrom, importedSettingsDoc, packageRoots, readExportZip, settingsForScripts } from "../src/shared/exportZip";
+import {
+    buildExportZip,
+    emptyFolders,
+    filesGoneFrom,
+    importedSettingsDoc,
+    packageRoots,
+    parseExportedStores,
+    readExportZip,
+    settingsForScripts,
+    STORES_FILE,
+    storesForScripts,
+} from "../src/shared/exportZip";
 import { readZipEntries, writeZip } from "../src/shared/zip";
 import { parseSettings, renderSettings, type GlobalSettings, type ScriptSettingsState } from "../src/shared/settingsYaml";
 
@@ -66,7 +77,29 @@ describe("export zip layout", () => {
     it("without settings.yaml there's no settings entry", async () => {
         const z = await readExportZip(buf(buildExportZip({ scripts: [{ name: "a", code: "" }], dataFiles: [] })));
         expect(z.settings).toBeNull();
+        expect(z.stores).toBeNull();
         expect(z.scripts.map((s) => s.name)).toEqual(["a"]);
+    });
+
+    it("round-trips optional stores.json and filters stores by picked scripts", async () => {
+        const allStores = {
+            "bonsai/index.tsx": { flags: { beta: true } },
+            "other/script": { cache: { hits: 3 } },
+        };
+        const storesJson = storesForScripts(allStores, ["Bonsai/Index.tsx"]);
+        expect(storesJson).not.toBeNull();
+        expect(parseExportedStores(storesJson!)).toEqual({ "bonsai/index.tsx": { flags: { beta: true } } });
+
+        const zip = buildExportZip({
+            settings: "settings:\n",
+            stores: storesJson,
+            scripts: [{ name: "bonsai/index.tsx", code: "// ok" }],
+            dataFiles: [],
+        });
+        const z = await readExportZip(buf(zip));
+        expect(z.stores).toBe(storesJson);
+        expect(z.dataFiles).toEqual([]); // STORES_FILE is not misclassified as a user data file
+        expect(() => parseExportedStores("[]")).toThrow(new RegExp(STORES_FILE));
     });
 
     it("takes a zipped scripts folder: unwraps its top folder, skips the support files, dot entries and node_modules", async () => {

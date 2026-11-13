@@ -53,7 +53,7 @@ const chromeShim: any = {
     runtime: {
         id: EXT_ID,
         lastError: undefined,
-        getManifest: () => ({ version: "0.31.0", version_name: "0.31.0-alpha", manifest_version: 3, name: "TangiTweak" }),
+        getManifest: () => ({ version: "0.32.0", version_name: "0.32.0-alpha", manifest_version: 3, name: "TangiTweak" }),
         getURL: (p: string) => `chrome-extension://${EXT_ID}/${p}`,
         sendMessage: (...a: any[]) => {
             const cb = a[a.length - 1];

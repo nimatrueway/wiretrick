@@ -23,6 +23,10 @@ function memDeps(over: Partial<StoreOwnerDeps> = {}) {
             else o[k] = structuredClone(v);
             storage.set(s, o);
         },
+        storageDelete: async (s, k) => {
+            const o = storage.get(s);
+            if (o) delete o[k];
+        },
         sessionGet: async (k) => structuredClone(session.get(k)),
         sessionSet: async (k, v) => void session.set(k, structuredClone(v)),
         persistDelayMs: 1,
@@ -500,5 +504,53 @@ describe("tt.pageStore", () => {
     it("one name can't be both a global and a page store", () => {
         const d = compileScript(`tt.globalStore("x", { n: 1 }); tt.pageStore("x", { n: 1 });`);
         expect(String(d.error)).toMatch(/already has a store named/);
+    });
+
+    it("inspects, replaces, resets, deletes, and exports persisted globalStore state with live replica sync", async () => {
+        const t = setup();
+        const A = t.hub("bg");
+        const O = t.hub("overlay", false);
+        const g = A.hub.store("s1", "prefs", { theme: "dark", count: 1, transient: "skip" }, ["theme", "count"]);
+        const ps = O.hub.pageStore("s1", "tabState", { open: false }, "p1");
+        g.count = 7;
+        ps.open = true;
+        await settle();
+
+        const inspected = await t.owner.inspect(["s1"]);
+        expect(inspected.s1).toEqual([
+            { name: "prefs", scope: "global", rev: expect.any(Number), persist: ["theme", "count"], data: { theme: "dark", count: 7, transient: "skip" }, hasTemplate: true },
+            { name: "tabState", scope: "page", page: "p1", rev: expect.any(Number), persist: undefined, data: { open: true }, hasTemplate: true },
+        ]);
+
+        // Export includes only persisted fields of globalStore (not transient or pageStore)
+        const exported = await t.owner.exportPersisted([{ id: "s1", name: "bonsai/index.tsx" }]);
+        expect(exported).toEqual({
+            "bonsai/index.tsx": {
+                prefs: { theme: "dark", count: 7 },
+            },
+        });
+
+        // Replacing from UI broadcasts live to replica `g` and persists
+        await t.owner.replace("s1", "prefs", { theme: "light", count: 42 });
+        await settle();
+        expect(g.theme).toBe("light");
+        expect(g.count).toBe(42);
+        expect((g as any).transient).toBeUndefined();
+        expect(t.storage.get("s1")?.["$store:prefs"]).toEqual({ theme: "light", count: 42 });
+
+        // Resetting restores declared initial defaults live
+        await t.owner.reset("s1", "prefs");
+        await settle();
+        expect(g).toEqual({ theme: "dark", count: 1, transient: "skip" });
+
+        // Deleting clears persisted storage and resets live replica to initial
+        g.count = 99;
+        await settle();
+        await new Promise((r) => setTimeout(r, 10));
+        expect(t.storage.get("s1")?.["$store:prefs"]).toEqual({ theme: "dark", count: 99 });
+        await t.owner.deleteStore("s1", "prefs");
+        await settle();
+        expect(t.storage.get("s1")?.["$store:prefs"]).toBeUndefined();
+        expect(g.count).toBe(1);
     });
 });

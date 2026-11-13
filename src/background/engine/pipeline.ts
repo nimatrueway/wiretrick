@@ -17,7 +17,7 @@ import {
     listDataFiles, getDataFile, saveDataFile, deleteDataFile, listFolders, createFolder, renameFolder, deleteFolder,
 } from "./scriptStore";
 import { loadDataFiles } from "./dataFiles";
-import { analyzePackage, applyPending, checkPackages, dismissPending, forgetPackage, installPackage, listPackages, offerPackage, rollbackPackage, setAutoUpdate } from "./packages";
+import { analyzePackage, applyPending, checkPackages, dismissPending, forgetPackage, installPackage, listPackages, offerPackage, rollbackPackage, setAutoUpdate, upgradePackage } from "./packages";
 import { resolveWorkspaceIcons, singleScriptBundles } from "../../shared/packageModel";
 import { loadPackages, packagesSnapshot, requestPackages, resolveVersion } from "./packageImports";
 import { isUrlSpec, packageClosure, type PackageModules } from "../../shared/packageImports";
@@ -28,12 +28,12 @@ import { isThenable, rulesProblems, siteProblems, toRunnableJs } from "../../sha
 import "../../shared/transpile";
 import { log, noteRan, getScriptErrors, getScriptTypeErrors, getScriptRuleErrors, getScriptRouteWarnings, setScriptRouteWarnings, bodyObservedSince, bodySkipSince, noteBodySkip } from "./logs";
 import { bypassed } from "./bypass";
-import { prepareStores, storeOwner } from "./stores";
+import { prepareStores, storeOwner, exportPersistedStores, importPersistedStores } from "./stores";
 import { ensureBuiltins, needsReact } from "../../shared/builtins";
 import { missedLine } from "../../shared/netTypes";
 import { binaryOptedOut, frameHasHook as pingHook, isLoopbackUrl, missedReason, missedWhat, routeProblem, MISSED_SKIP_TYPES } from "../../shared/missedTap";
 import { resolveParamValues } from "../../shared/scriptDef";
-import type { ShippedLib } from "../../shared/scriptImports";
+import { shippedLibIds, type ShippedLib } from "../../shared/scriptImports";
 import { effectiveStrategy, hookCanSee, isNetKind, pageWorld, routeLabel, routeMatches, takesBinary, type RouteMeta, type Strategy } from "../../shared/route";
 import { analyzeScripts, runBodyOp, type Analyzed } from "../compileHost";
 import { recordNetBody } from "../network";
@@ -110,7 +110,7 @@ function shippedLibs(pageScripts: Script[], analyzed: Map<string, Analyzed>, dat
             if (!lib || libs.has(lib.meta.name)) continue;
             const defs = analyzed.get(lib.id)?.paramDefs || {};
             const src = toRunnableJs(lib.code);
-            libs.set(lib.meta.name, { name: lib.meta.name, src, params: resolveParamValues(defs, paramValues[lib.id]) });
+            libs.set(lib.meta.name, { id: lib.id, name: lib.meta.name, src, params: resolveParamValues(defs, paramValues[lib.id]) });
         }
         return [...libs.values()];
     };
@@ -718,7 +718,10 @@ export function createPipeline(
     setupOverlayLinks({
         overlayRuns: async (url) => (await hookBundle(url, true)).overlayRuns,
         isoRuns: async (url, top) => (await hookBundle(url, top)).isoRuns,
-        isoScripts: async (url, top) => new Set((await hookBundle(url, top)).bundle.isoHandlers.map((h) => h.scriptId)),
+        isoScripts: async (url, top) => {
+            const { bundle } = await hookBundle(url, top);
+            return new Set([...bundle.isoHandlers.map((h) => h.scriptId), ...shippedLibIds(bundle.isoLibs)]);
+        },
         userScriptsOff: async () => (await userScriptsStatus()) !== "ok",
         storageGet: (s, key) => scriptStorageGet(s, key),
         storageSet: async (s, key, value) => void (await scriptStorageSet(s, key, value)),
@@ -870,6 +873,7 @@ export function createPipeline(
             listPackages: () => listPackages(),
             packageAnalyze: () => analyzePackage(msg.fetched, msg.updateOf),
             packageInstall: () => installPackage(msg.fetched, { enabled: msg.enabled !== false, autoUpdate: msg.autoUpdate !== false }),
+            packageUpgrade: () => upgradePackage(msg.fetched, { packageId: msg.packageId, autoUpdate: msg.autoUpdate !== false }),
             packageCheck: () => checkPackages(msg.id),
             packageOffer: () => offerPackage(msg.id, msg.fetched, !!msg.manual),
             packageApply: () => applyPending(msg.id),
@@ -877,6 +881,8 @@ export function createPipeline(
             packageRollback: () => rollbackPackage(msg.id),
             packageSetAutoUpdate: () => setAutoUpdate(msg.id, !!msg.on),
             packageForget: () => forgetPackage(msg.id),
+            exportStores: () => exportPersistedStores(),
+            importStores: () => importPersistedStores(msg.stores),
         };
         if (msg && Object.prototype.hasOwnProperty.call(pkgOp, msg.type)) {
             pkgOp[msg.type]()
@@ -921,7 +927,7 @@ export function createPipeline(
                 const { bundle } = await hookBundle(url, sender.frameId === 0 || sender.frameId === undefined);
                 // MV2: the bridge runs isolated onPage code — its stores' current state (this page's tt.pageStore copies), so they read synchronously
                 const tabId = sender.tab?.id;
-                const isoIds = !__MV3__ ? bundle.isoHandlers.map((h) => h.scriptId) : [];
+                const isoIds = !__MV3__ ? [...new Set([...bundle.isoHandlers.map((h) => h.scriptId), ...shippedLibIds(bundle.isoLibs)])] : [];
                 if (isoIds.length && typeof tabId === "number" && tabId >= 0) {
                     await pagesReady;
                     // the top frame's page by its document (as its requests' and its bridge's): `current` may still be the pre-commit key

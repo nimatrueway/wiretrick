@@ -21,7 +21,7 @@
 import { parseDocument, isMap, isScalar, Scalar, stringify, type YAMLMap } from "yaml";
 import { isParamDef, isParamGroup, resolveParamValues, paramDefault, type ParamTree } from "./scriptDef";
 import {
-    parseSettings, planSettings, scriptBlock, groupBlockLines, entryLines, commentedDefaultLines, renderedKeyText, globalOptionLines,
+    parseSettings, planSettings, scriptBlock, groupBlockLines, entryLines, commentedDefaultLines, renderedKeyText, globalOptionLines, yamlKey,
     DEFAULT_LOG_CAP, DEFAULT_LOG_LEVEL, DEFAULT_BODY_CAP, isObj,
     type GlobalSettings, type ScriptSettingsState,
 } from "./settingsYaml";
@@ -535,5 +535,14 @@ export function renameSettingsSection(text: string, oldName: string, newName: st
     if (!isMap(params) || findPair(params, newName)) return text;
     const range = findPair(params, oldName)?.key?.range;
     if (!range) return text;
-    return text.slice(0, range[0]) + stringify(newName).trimEnd() + text.slice(range[1]);
+    return text.slice(0, range[0]) + yamlKey(newName) + text.slice(range[1]);
+}
+
+/** Upgrade legacy extensionless `.ts` section keys in place so user comments and values survive. */
+export function migrateLegacySettingsKeys(text: string, scripts: readonly { name: string }[]): string {
+    let out = text;
+    for (const s of scripts) {
+        if (s.name.endsWith(".ts")) out = renameSettingsSection(out, s.name.slice(0, -3), s.name);
+    }
+    return out;
 }

@@ -48,7 +48,7 @@ export function QuickOpen() {
                     id="qo-input"
                     ref={input}
                     type="text"
-                    placeholder="Go to a script or settings.yaml…"
+                    placeholder="Go to a script, settings.yaml or stores.json…"
                     autoComplete="off"
                     value={query}
                     onChange={(e) => {

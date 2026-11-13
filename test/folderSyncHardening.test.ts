@@ -161,12 +161,12 @@ describe("folder sync: the background is the only writer", () => {
         await sync.flush();
         put("settings.yaml", files.get("settings.yaml")!.text.replace(/# n: 1|n: 1/, "n: 9 # tuned"));
         await sync.flush();
-        expect(files.get("settings.yaml")!.text).toMatch(/old:[\s\S]*n: 9 # tuned/);
+        expect(files.get("settings.yaml")!.text).toMatch(/old\.ts:[\s\S]*n: 9 # tuned/);
         await saveScript({ id: "p", code, name: "new" });
         await sync.flush();
         const after = files.get("settings.yaml")!.text;
-        expect(after).toMatch(/new:[\s\S]*n: 9 # tuned/);
-        expect(after).not.toMatch(/\bold:/);
+        expect(after).toMatch(/new\.ts:[\s\S]*n: 9 # tuned/);
+        expect(after).not.toMatch(/\bold(\.ts)?:/);
         expect(after).not.toMatch(/no longer exists/);
         await sync.stop();
     });

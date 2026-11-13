@@ -491,7 +491,7 @@ import type { RanApi } from "../shared/netTypes";
                     ? overlayClient(scriptId).remote(key, sig)
                     : inertRemote(TOP_FRAME_ONLY);
         };
-        const shimFor = (scriptId: string | null, name: string, params: Record<string, any>, exposer?: Exposer, storesOf?: string, gen?: Generation) =>
+        const shimFor = (scriptId: string | null, name: string, params: Record<string, any>, exposer?: Exposer, storesOf?: string, paramOwner?: string, gen?: Generation) =>
             makePageShim({
                 params,
                 world,
@@ -514,8 +514,8 @@ import type { RanApi } from "../shared/netTypes";
                     get: (key: string) => new Promise((r) => safeSend({ type: "scriptStorageGet", scriptId, key }, (x: any) => r(x && x.value))),
                     set: (key: string, value: any) => new Promise((r) => safeSend({ type: "scriptStorageSet", scriptId, key, value }, () => r(null))),
                 },
-                // isolated code (MV2: here) saves params for its script (`storesOf`) or that script's library
-                setParam: world === "isolated" && storesOf ? (key, value, lib) => new Promise((r) => safeSend({ type: "scriptParamSet", scriptId: storesOf, key, value, lib }, () => r())) : undefined,
+                // isolated code (MV2: here) saves params for its script (`paramOwner`) or that script's library
+                setParam: world === "isolated" && paramOwner ? (key, value, lib) => new Promise((r) => safeSend({ type: "scriptParamSet", scriptId: paramOwner, key, value, lib }, () => r())) : undefined,
             });
         for (const h of handlers) {
             let exposer = exposers.get(h.scriptId);
@@ -537,12 +537,13 @@ import type { RanApi } from "../shared/netTypes";
                 const codeOf = (importer: string) => (importer === h.name ? h.src : (libSources.find((l) => l.name === importer)?.src ?? ""));
                 const requireFrom = makeLibRequire(
                     libSources,
-                    (lib, require, moduleObj) => scriptFunction(lib.src!, lib.name)(shimFor(null, lib.name, lib.params || {}, undefined, h.scriptId).tt, consoleProxy, require, moduleObj, moduleObj.exports),
+                    (lib, require, moduleObj) =>
+                        scriptFunction(lib.src!, lib.name)(shimFor(null, lib.name, lib.params || {}, undefined, lib.id ?? h.scriptId, h.scriptId).tt, consoleProxy, require, moduleObj, moduleObj.exports),
                     // the built-ins: isolated code all of them, the onSite fallback valtio's core
                     world === "isolated" ? { builtin: scriptBuiltin(codeOf, hotRegistry(h.scriptId).begin()) } : { builtin: siteBuiltin, onSite: true }
                 );
                 const moduleObj = { exports: {} as any };
-                const shim = shimFor(h.scriptId, h.name, h.params || {}, exposer, h.scriptId, gen);
+                const shim = shimFor(h.scriptId, h.name, h.params || {}, exposer, h.scriptId, h.scriptId, gen);
                 shim.top(() => scriptFunction(h.src, h.name)(shim.tt, consoleProxy, requireFrom(h.name), moduleObj, moduleObj.exports));
                 dom = shim.dom;
                 if (world === "isolated") reactDoms.set(h.scriptId, () => reactOf(requireFrom(h.name)));
@@ -626,7 +627,12 @@ import type { RanApi } from "../shared/netTypes";
             ep.on(op, (a: any, s) => {
                 if (s === undefined) return;
                 if (s.startsWith(ISO_STORE_TAG)) isoOut?.push(op, a, s.slice(ISO_STORE_TAG.length));
-                else overlays.get(s)?.ep?.push(op, a, s);
+                else {
+                    const nul = s.indexOf("\u0000");
+                    const ovlId = nul < 0 ? s : s.slice(0, nul);
+                    const storeId = nul < 0 ? s : s.slice(nul + 1);
+                    overlays.get(ovlId)?.ep?.push(op, a, storeId);
+                }
             });
         // MV3: the overlay ⇄ isolated-world relay (the background checks tab, frame and script)
         ep.on("iso.result", (r, s) => {
@@ -879,14 +885,15 @@ import type { RanApi } from "../shared/netTypes";
             });
             return { ...init, phase: phaseNow() };
         });
-        const mine = <T>(fn: (a: T) => any) => (a: T) => {
-            if (proven && !o.closed) return fn(a);
+        const mine = <T>(fn: (a: T, targetS?: string) => any) => (a: T, targetS?: string) => {
+            if (proven && !o.closed) return fn(a, targetS);
             throw new Error("refused");
         };
-        // the frame's script: its stores, fetches and storage, for script `s` only
-        ep.on("store.declare", (a) => proven && l2?.push("store.declare", a, s));
-        ep.on("store.set", (a) => proven && l2?.push("store.set", a, s));
-        ep.handle("store.sub", mine((a: ReqOf<"store.sub">) => l2call("store.sub", a, s)));
+        const ovlTag = (targetS?: string) => (targetS && targetS !== s ? `${s}\u0000${targetS}` : s);
+        // the frame's script: its stores (and its imported libraries'), fetches and storage
+        ep.on("store.declare", (a, targetS) => proven && l2?.push("store.declare", a, ovlTag(targetS)));
+        ep.on("store.set", (a, targetS) => proven && l2?.push("store.set", a, ovlTag(targetS)));
+        ep.handle("store.sub", mine((a: ReqOf<"store.sub">, targetS) => l2call("store.sub", a, ovlTag(targetS))));
         ep.handle("fetch", mine((a: ReqOf<"fetch">) => l2call("fetch", { request: a.request, bypass: !!a.bypass }, s)));
         ep.handle("pagefetch", mine((a: ReqOf<"pagefetch">) => pageFetch(s, a.request, !!a.bypass)));
         ep.handle("storage.get", mine((a: ReqOf<"storage.get">) => new Promise((r) => safeSend({ type: "scriptStorageGet", scriptId: s, key: a.key }, (x: any) => r({ value: x?.value })))));

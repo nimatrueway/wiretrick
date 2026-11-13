@@ -156,7 +156,7 @@ describe("folder sync: received changes are not echoed back", () => {
         const sync = await setup();
         put("plain.ts", `tt.params({ m: { type: "number", default: 2 } });`);
         await settled(sync);
-        expect(files.get("settings.yaml")!.text).toMatch(/plain:[\s\S]*# m: 2/);
+        expect(files.get("settings.yaml")!.text).toMatch(/plain\.ts:[\s\S]*# m: 2/);
         expect(shown).toEqual(["receiving"]);
         expect(ops).toEqual(DERIVED);
         await sync.stop();

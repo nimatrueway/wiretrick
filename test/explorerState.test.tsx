@@ -114,11 +114,12 @@ async function mount(over: Partial<typeof fixture> = {}) {
 }
 
 describe("explorer tree", () => {
-    it("renders settings.yaml, folders, files and their state classes", async () => {
+    it("renders settings.yaml, stores.json, folders, files and their state classes", async () => {
         const { row, list } = await mount({ dirty: true });
-        expect([...list.querySelectorAll(":scope > li")].map((l) => l.id)).toEqual(["explorer-__settings__", "explorer-dir%3Aempty", "explorer-dir%3Amock", "explorer-dir%3Amock%2Fdeep", "explorer-s_c", "explorer-s_b", "explorer-d_l", "explorer-s_a", "explorer-s_d"]);
+        expect([...list.querySelectorAll(":scope > li")].map((l) => l.id)).toEqual(["explorer-__settings__", "explorer-__stores__", "explorer-dir%3Aempty", "explorer-dir%3Amock", "explorer-dir%3Amock%2Fdeep", "explorer-s_c", "explorer-s_b", "explorer-d_l", "explorer-s_a", "explorer-s_d"]);
         expect(row("s_a").className).toBe("script-item handlers selected focused dirty"); // registers handlers: bold
         expect(row("__settings__").className).toBe("script-item");
+        expect(row("__stores__").className).toBe("script-item");
         expect(row("s_d").className).toBe("script-item handlers has-error");
         expect(row("s_d").querySelector(".err-ind.compile")).not.toBeNull();
         expect(row("s_c").style.getPropertyValue("--depth")).toBe("2");
@@ -130,6 +131,7 @@ describe("explorer tree", () => {
         const { s, actions, row, key, list } = await mount();
         const select = vi.spyOn(actions, "select");
         key("Home");
+        key("ArrowDown");
         key("ArrowDown");
         key("ArrowDown");
         expect(list.getAttribute("aria-activedescendant")).toBe("explorer-dir%3Amock");
@@ -238,7 +240,7 @@ describe("explorer tree", () => {
         const create = vi.spyOn(actions, "createItem");
         act(() => s.startCreate("data", "mock"));
         const ids = [...list.querySelectorAll(":scope > li")].map((l) => l.id || l.className);
-        expect(ids.slice(2, 4)).toEqual(["explorer-dir%3Amock", "script-item creating"]);
+        expect(ids.slice(3, 5)).toEqual(["explorer-dir%3Amock", "script-item creating"]);
         const input = list.querySelector("li.creating input") as HTMLInputElement;
         expect(input.placeholder).toBe("name.json, .md or .svg");
         input.value = "users";
@@ -246,7 +248,7 @@ describe("explorer tree", () => {
         expect(create).toHaveBeenCalledWith("data", "mock/users.json");
         expect(list.querySelector("li.creating")).toBeNull();
         act(() => s.startCreate("script", ""));
-        expect(list.querySelectorAll(":scope > li")[1].className).toBe("script-item creating");
+        expect(list.querySelectorAll(":scope > li")[2].className).toBe("script-item creating");
     });
 
     it("renders custom script and bundle icons on Explorer script and package folder rows", async () => {

@@ -5,12 +5,14 @@
  * fed to an LLM. Credentials in headers are redacted; bodies are capped.
  */
 import { listScripts, loadAllParamValues } from "./engine/scriptStore";
+import { listAllStores } from "./engine/stores";
 import { allLogs } from "./engine/logs";
 import { getDebugBuffer } from "../shared/debugLog";
 import { isRecording, networkSnapshot } from "./network";
 import { getSettingsText } from "./settingsFile";
 import type { NetBody, NetEntry } from "../shared/netTypes";
 import { routeLabel } from "../shared/route";
+import { scriptFileName } from "../shared/scriptName";
 import type { ProblemGroup } from "../ui/problems";
 import { DIAG_SECTIONS, type DiagSection, type DiagnosticsInclude } from "../shared/diagnosticsSections";
 
@@ -135,6 +137,7 @@ export async function collectDiagnostics(extra: DiagnosticsExtra = {}): Promise<
     const logs = allLogs();
     const debug = getDebugBuffer();
     const net = has("network") ? networkSnapshot().slice(-NET_CAP).map(redactEntry) : [];
+    const stores = has("stores") ? await listAllStores(scripts) : [];
     const left = [
         ...DIAG_SECTIONS.filter((x) => !has(x.id)).map((x) => x.label),
         ...(scripts.length < allScripts.length ? [`${allScripts.length - scripts.length} of ${allScripts.length} scripts`] : []),
@@ -197,6 +200,28 @@ export async function collectDiagnostics(extra: DiagnosticsExtra = {}): Promise<
         out.push(`## settings.yaml`);
         out.push("");
         out.push(fence("yaml", settings));
+        out.push("");
+    }
+    if (has("stores")) {
+        out.push(`## Stores (${stores.length})`);
+        out.push("");
+        if (!stores.length) {
+            out.push(`_none_`);
+        } else {
+            const items = stores.map((st) => {
+                const raw = JSON.stringify(st.data, null, 2);
+                return {
+                    script: scriptFileName(st.scriptName),
+                    store: st.name,
+                    scope: st.scope,
+                    ...(st.tabUrl ? { tabUrl: st.tabUrl } : st.tabTitle ? { tab: st.tabTitle } : {}),
+                    persist: st.scope === "page" ? false : st.persist ?? true,
+                    rev: st.rev,
+                    data: raw.length <= BODY_CAP ? st.data : raw.slice(0, BODY_CAP) + `…[cut at ${BODY_CAP} chars]`,
+                };
+            });
+            out.push(fence("json", JSON.stringify(items, null, 2)));
+        }
         out.push("");
     }
     if (scripts.length || !picked) {

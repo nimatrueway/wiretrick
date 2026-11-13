@@ -52,7 +52,8 @@ describe("param parse — store and settings", () => {
         expect((await loadAllParamValues()).p).toEqual({ origin: "https://b.org" });
         expect((await get("p")).meta.match).toEqual(["*://b.org/*"]);
         const st = await currentSettingsState();
-        expect(st.scripts.find((x) => x.name === "parsed.tangitweak")?.defs.origin).toEqual({ type: "string", default: "https://a.com" });
+        expect(st.scripts.find((x) => x.name === "parsed.tangitweak.ts")?.defs.origin).toEqual({ type: "string", default: "https://a.com" });
+        expect(await getSettingsText()).toContain("parsed.tangitweak.ts:");
         expect(await getSettingsText()).toContain("origin: https://b.org");
     });
 

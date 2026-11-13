@@ -33,10 +33,15 @@ const META_VERSION_KEY = "resMetaVersion";
 // MV2 browsers don't support promise-based chrome.storage — wrap callbacks.
 function storageGet(keys: string | string[] | null): Promise<Record<string, any>> {
     return new Promise((resolve) => {
-        chrome.storage.local.get(keys as any, (d) => {
-            void chrome.runtime.lastError; // treat as empty
+        let settled = false;
+        const finish = (d: any) => {
+            if (settled) return;
+            settled = true;
+            void chrome.runtime?.lastError;
             resolve(d || {});
-        });
+        };
+        const ret: any = chrome.storage.local.get(keys as any, finish);
+        if (ret && typeof ret.then === "function") void ret.then(finish, () => finish({}));
     });
 }
 
@@ -501,6 +506,15 @@ export async function scriptStorageSet(scriptId: string, key: string, value: any
     const obj = await storageGet(storeKey);
     const data = obj[storeKey] || {};
     data[key] = value;
+    await storageSet({ [storeKey]: data });
+}
+
+export async function scriptStorageDelete(scriptId: string, key: string): Promise<void> {
+    const storeKey = SCRIPT_STORE_PREFIX + scriptId;
+    const obj = await storageGet(storeKey);
+    const data = obj[storeKey];
+    if (!data || !(key in data)) return;
+    delete data[key];
     await storageSet({ [storeKey]: data });
 }
 

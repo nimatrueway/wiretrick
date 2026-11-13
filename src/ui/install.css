@@ -55,6 +55,10 @@ body.install-body {
 .install-flow a { color: var(--bar); }
 .install-flow code { font-family: ui-monospace, "Cascadia Code", Menlo, monospace; font-size: 12px; }
 .install-flow .note { background: var(--bg-panel); border: 1px solid var(--border); border-left: 3px solid var(--bar); padding: 8px 12px; border-radius: 3px; }
+.install-flow .upgrade-prompt { margin: 14px 0 6px; display: flex; flex-direction: column; gap: 6px; }
+.install-flow .upgrade-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; }
+.install-flow .tag.same { color: var(--fg-dim); }
+.install-flow details.file.removed > summary code { color: var(--fg-dim); text-decoration: line-through; }
 .install-flow ul.caps, .install-flow ul.warnings, .install-flow ul.entries { list-style: none; margin: 0; padding: 0; }
 .install-flow ul.caps li, .install-flow ul.warnings li { padding: 5px 10px 5px 26px; position: relative; border-radius: 3px; margin-bottom: 3px; }
 .install-flow ul.caps li::before { content: ""; position: absolute; left: 10px; top: 11px; width: 8px; height: 8px; border-radius: 50%; }

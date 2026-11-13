@@ -14,6 +14,7 @@ import {
     everyFolder,
     explorer,
     explorerIds,
+    isVirtualRootId,
     moveFocus,
     selectableIds,
     selectRange,
@@ -21,6 +22,7 @@ import {
     setSel,
     setSubtreeExpanded,
     SETTINGS_ID,
+    STORES_ID,
     startRename,
     toggleSel,
     treeRow,
@@ -175,14 +177,14 @@ function onKeyDown(e: KeyboardEvent<HTMLUListElement>): void {
     const cur = cursorId() ?? ids[0];
     const i = Math.max(0, ids.indexOf(cur));
     const rows = visibleRows();
-    const row = cur === SETTINGS_ID ? undefined : rows.find((r) => r.id === cur);
+    const row = isVirtualRootId(cur) ? undefined : rows.find((r) => r.id === cur);
     const mod = e.metaKey || e.ctrlKey;
     const mac = isMacPlatform();
     const deep = mac ? e.altKey && !mod && !e.shiftKey : e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
     const plain = !mod && !e.altKey && !e.shiftKey;
     let handled = true;
     const nav: Record<string, string> = { ArrowDown: ids[Math.min(i + 1, ids.length - 1)], ArrowUp: ids[Math.max(i - 1, 0)], Home: ids[0], PageUp: ids[0], End: ids[ids.length - 1], PageDown: ids[ids.length - 1] };
-    if (e.key in nav && e.shiftKey && !mod && nav[e.key] !== SETTINGS_ID) selectRange(nav[e.key]);
+    if (e.key in nav && e.shiftKey && !mod && !isVirtualRootId(nav[e.key])) selectRange(nav[e.key]);
     else if (e.key in nav) {
         clearSel();
         moveFocus(nav[e.key]);
@@ -228,14 +230,14 @@ function onClickCapture(e: MouseEvent<HTMLUListElement>): void {
     const id = target.closest<HTMLElement>("li.script-item:not(.creating)")?.dataset.id;
     if (!id) return;
     const mod = e.metaKey || e.ctrlKey;
-    if (id !== SETTINGS_ID && (mod || e.shiftKey)) {
+    if (!isVirtualRootId(id) && (mod || e.shiftKey)) {
         e.stopPropagation();
         e.preventDefault();
         if (e.shiftKey) selectRange(id, mod);
         else toggleSel(id);
         return;
     }
-    setSel(id === SETTINGS_ID ? [] : [id], null);
+    setSel(isVirtualRootId(id) ? [] : [id], null);
 }
 
 function onContextMenu(e: MouseEvent<HTMLUListElement>): void {
@@ -257,8 +259,8 @@ function onContextMenu(e: MouseEvent<HTMLUListElement>): void {
         ]);
         return;
     }
-    if (!id || id === SETTINGS_ID) {
-        // settings.yaml and the empty space below the tree: the root
+    if (!id || isVirtualRootId(id)) {
+        // settings.yaml, stores.json and the empty space below the tree: the root
         if (id) moveFocus(id);
         const hasDirs = !id && everyFolder().length > 0;
         showContextMenu(e.clientX, e.clientY, [
@@ -299,7 +301,7 @@ function onContextMenu(e: MouseEvent<HTMLUListElement>): void {
 function onDoubleClick(e: MouseEvent<HTMLUListElement>): void {
     const li = (e.target as HTMLElement).closest<HTMLElement>("li.script-item");
     const id = li?.dataset.id;
-    if (!id || id === SETTINGS_ID || isFolderRowId(id) || !li!.querySelector(".script-name")) return;
+    if (!id || isVirtualRootId(id) || isFolderRowId(id) || !li!.querySelector(".script-name")) return;
     startRename(id);
 }
 
@@ -310,7 +312,7 @@ function useDnd() {
     const drag = useRef<{ rows: TreeRow[]; hoverId: string; timer: ReturnType<typeof setTimeout> | null }>({ rows: [], hoverId: "", timer: null });
     const rowAt = (e: DragEvent): TreeRow | undefined => {
         const id = (e.target as HTMLElement).closest?.<HTMLElement>("li.script-item")?.dataset.id;
-        return id && id !== SETTINGS_ID ? visibleRows().find((r) => r.id === id) : undefined;
+        return id && !isVirtualRootId(id) ? visibleRows().find((r) => r.id === id) : undefined;
     };
     /** the folder the drop lands in, or null when it can't go there */
     const folderAt = (e: DragEvent): string | null => {
@@ -426,7 +428,7 @@ export function ExplorerTree() {
     const cursor = snap.focusedId ?? selectedId;
     // while tt-api.d.ts is shown no row is the open file (● still marks unsaved edits)
     const shown = snap.typingsShown ? null : selectedId;
-    const shownIds = new Set([SETTINGS_ID, ...rows.map((r) => r.id)]);
+    const shownIds = new Set([SETTINGS_ID, STORES_ID, ...rows.map((r) => r.id)]);
 
     useLayoutEffect(() => {
         if (!snap.cursorMoves) return;
@@ -436,7 +438,7 @@ export function ExplorerTree() {
 
     /** `tail`: classes after `selected` (the original's class order) */
     const li = (id: string, cls: string, depth: number, content: ReactNode, extra: Record<string, unknown> = {}, folder?: boolean, tail = "") => {
-        const inDrop = !!dropFolder && id !== SETTINGS_ID && rows.some((r) => r.id === id && ((r.kind === "folder" && r.path === dropFolder) || isInFolder(r.path, dropFolder)));
+        const inDrop = !!dropFolder && !isVirtualRootId(id) && rows.some((r) => r.id === id && ((r.kind === "folder" && r.path === dropFolder) || isInFolder(r.path, dropFolder)));
         return (
             <li
                 key={id}
@@ -482,6 +484,7 @@ export function ExplorerTree() {
         },
     });
 
+    const storesBad = snap.jsonErrorIds.has(STORES_ID);
     const items: ReactNode[] = [
         li(
             SETTINGS_ID,
@@ -492,6 +495,16 @@ export function ExplorerTree() {
                 <span className="script-name">settings.yaml</span>
             </>,
             { title: "Settings file — global settings and per-script params & enabled state", ...click(SETTINGS_ID, () => actions.select(SETTINGS_ID)) }
+        ),
+        li(
+            STORES_ID,
+            storesBad ? " has-error" : "",
+            0,
+            <>
+                <FileIcon kind="stores" />
+                <span className={storesBad ? "script-name error" : "script-name"}>stores.json</span>
+            </>,
+            { title: "Persisted stores — tt.globalStore data for your scripts (synced with stores.json; edit and save to update open pages live)", ...click(STORES_ID, () => actions.select(STORES_ID)) }
         ),
     ];
     for (const r of rows) {
@@ -595,7 +608,7 @@ export function ExplorerTree() {
         }
     }
     if (editing?.mode === "create") {
-        const at = items.findIndex((it) => (it as { key: string }).key === (editing.folder ? folderRowId(editing.folder) : SETTINGS_ID));
+        const at = items.findIndex((it) => (it as { key: string }).key === (editing.folder ? folderRowId(editing.folder) : STORES_ID));
         items.splice(at + 1, 0, <CreateRow key="creating" kind={editing.kind} folder={editing.folder} list={list} />);
     }
 

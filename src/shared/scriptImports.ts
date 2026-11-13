@@ -329,6 +329,8 @@ export function missingImports<T extends { name: string; code: string; data?: bo
 
 /** a library source, data file or package module shipped to the page (getHookBundle `libs`) */
 export interface ShippedLib {
+    /** a library script's id (when `src` is set), so its `tt.globalStore` / `tt.pageStore` belong to it */
+    id?: string;
     name: string;
     /** a library's runnable JS */
     src?: string;
@@ -347,6 +349,9 @@ export interface ShippedLib {
 export function pageBuiltin(spec: string): any {
     return unusable(spec, `of the built-in modules it only has valtio's core ("valtio", "valtio/vanilla") — use the others in onPage or onOverlay code`);
 }
+
+/** ids of shipped script libraries (`src` modules with an `id`) */
+export const shippedLibIds = (libs: readonly ShippedLib[]): string[] => libs.flatMap((l) => (l.id ? [l.id] : []));
 
 /** the script modules whose top level is running (makeLibRequire), outermost first, after the script that imported the first */
 const loading: string[] = [];

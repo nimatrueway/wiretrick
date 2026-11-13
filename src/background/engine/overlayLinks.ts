@@ -29,7 +29,7 @@ import { USER_SCRIPTS_OFF } from "../../shared/userScriptsStatus";
 import { contextTag, type ScriptLogLevel } from "../../shared/scriptLog";
 import { dlogLevel } from "../../shared/debugLog";
 import { routeMatches, sampleUrl, type RouteMeta } from "../../shared/route";
-import type { ShippedLib } from "../../shared/scriptImports";
+import { shippedLibIds, type ShippedLib } from "../../shared/scriptImports";
 import { fetchFor, storeOwner } from "./stores";
 import { reactChunkSource } from "../reactChunk";
 import { pages, pagesReady } from "./pages";
@@ -57,6 +57,8 @@ interface Grant {
     store: Endpoint | null;
     /** the page the overlay is on: the only one whose `tt.pageStore` copies it reaches */
     page: string;
+    /** script ids of libraries imported by this overlay */
+    libs: Set<string>;
 }
 
 /** Chrome's documentId of a port's frame (undefined: Firefox) */
@@ -76,11 +78,11 @@ async function pageOfFrame(tabId: number, frameId: number, port: chrome.runtime.
     return (frameId === 0 ? pages.forRequest({ tabId, frameId: 0, documentId: docOf(port) }) : pages.current(tabId)) ?? "";
 }
 
-/** a link to the store owner for one context of script `s`: the patches of the stores it subscribed to go out on `out`, tagged `tag` */
-function ownerLink(out: Endpoint, tag: string): Endpoint {
+/** a link to the store owner for one context: the patches of the stores it subscribed to go out on `out`, tagged by `tag(storeScriptId)` */
+function ownerLink(out: Endpoint, tag: (s: string) => string): Endpoint {
     const [replicaSide, ownerSide] = endpointPair();
     storeOwner.attach(ownerSide, { all: false });
-    for (const op of ["store.patch", "store.reject", "store.drop"] as const) replicaSide.on(op, (a: any) => !out.closed && out.push(op, a, tag));
+    for (const op of ["store.patch", "store.reject", "store.drop"] as const) replicaSide.on(op, (a: any, s) => s !== undefined && !out.closed && out.push(op, a, tag(s)));
     return replicaSide;
 }
 
@@ -106,7 +108,7 @@ const NONCE_TTL_MS = 60_000;
 const BYPASS_TTL_MS = 10_000;
 
 /** a script's isolated onPage code as its user-script world runs it (pipeline.ts `hookBundle`) */
-export type IsoRun = Omit<IsoInit, "s" | "stores" | "page">;
+export type IsoRun = Omit<IsoInit, "s" | "stores" | "libStores" | "page">;
 
 export interface OverlayLinkDeps {
     overlayRuns(url: string): Promise<Map<string, OverlayRun>>;
@@ -145,6 +147,8 @@ interface IsoLink {
     s: string | null;
     /** the page its frame is part of (set by `iso.load`) */
     page?: string;
+    /** script ids of libraries imported by `s` */
+    libs?: Set<string>;
     /** its link to the store owner (created on first use) */
     store?: Endpoint | null;
 }
@@ -259,12 +263,24 @@ export function serveLink(link: BridgeLink): void {
         for (const g of isoGrants.values()) g.store?.close("the bridge went away");
         isoGrants.clear();
     });
-    // the overlay's ops come tagged `s`, isolated code's `ISO_STORE_TAG + s`; patches go back tagged the same
+    // the overlay's ops come tagged `s` (or `s\0libId`), isolated code's `ISO_STORE_TAG + s`; patches go back tagged the same
     serveStoreOps(link.ep, (tag) => {
         if (tag === undefined) return undefined;
-        const [grantsOf, s] = tag.startsWith(ISO_STORE_TAG) ? [isoGrants, tag.slice(ISO_STORE_TAG.length)] : [mine, tag];
-        const g = grantsOf.get(s);
-        return g && { s, page: g.page, link: () => (g.store && !g.store.closed ? g.store : (g.store = ownerLink(link.ep, tag))) };
+        if (tag.startsWith(ISO_STORE_TAG)) {
+            const s = tag.slice(ISO_STORE_TAG.length);
+            const g = isoGrants.get(s);
+            return g && { s, page: g.page, link: () => (g.store && !g.store.closed ? g.store : (g.store = ownerLink(link.ep, (x) => ISO_STORE_TAG + x))) };
+        }
+        const nul = tag.indexOf("\u0000");
+        const ovlId = nul < 0 ? tag : tag.slice(0, nul);
+        const storeId = nul < 0 ? tag : tag.slice(nul + 1);
+        const g = mine.get(ovlId);
+        if (!g || (storeId !== ovlId && !g.libs.has(storeId))) return undefined;
+        return {
+            s: storeId,
+            page: g.page,
+            link: () => (g.store && !g.store.closed ? g.store : (g.store = ownerLink(link.ep, (x) => (x === ovlId ? ovlId : `${ovlId}\u0000${x}`)))),
+        };
     });
     const grantStores = async (op: string, to: Map<string, { page: string; url?: string; store: Endpoint | null }>, s: string, url: string): Promise<{}> => {
         const page = await pageOfFrame(link.tabId, link.frameId, link.port);
@@ -291,7 +307,7 @@ export function serveLink(link: BridgeLink): void {
         if (!run) throw new Error("overlay.open: this script has no overlay on this page");
         const old = mine.get(s);
         const page = pages.forRequest({ tabId: link.tabId, frameId: 0, documentId: docOf(link.port) }) ?? "";
-        mine.set(s, { url, name: run.name, nonce, seen: false, expires: Date.now() + NONCE_TTL_MS, store: old?.page === page ? old.store : null, page });
+        mine.set(s, { url, name: run.name, nonce, seen: false, expires: Date.now() + NONCE_TTL_MS, store: old?.page === page ? old.store : null, page, libs: new Set(shippedLibIds(run.libs)) });
         if (old?.store && old.page !== page) old.store.close("the page changed");
         return {};
     });
@@ -299,8 +315,24 @@ export function serveLink(link: BridgeLink): void {
         const g = granted("overlay.init", s);
         const run = (await overlayRuns(g.url)).get(s!);
         if (!run) throw new Error("overlay.init: this script has no overlay on this page");
-        const stores = (await storeOwner.init([s!], { page: g.page }))[s!] ?? {};
-        return { s: s!, name: run.name, code: run.code, codeHash: run.codeHash, routes: run.routes, url: g.url, params: run.params, stores, page: g.page, libs: run.libs, react: run.react };
+        const libs = new Set(shippedLibIds(run.libs));
+        g.libs = libs;
+        const initAll = await storeOwner.init([s!, ...libs], { page: g.page });
+        const libStores = libs.size ? Object.fromEntries([...libs].map((id) => [id, initAll[id] ?? {}])) : undefined;
+        return {
+            s: s!,
+            name: run.name,
+            code: run.code,
+            codeHash: run.codeHash,
+            routes: run.routes,
+            url: g.url,
+            params: run.params,
+            stores: initAll[s!] ?? {},
+            ...(libStores ? { libStores } : {}),
+            page: g.page,
+            libs: run.libs,
+            react: run.react,
+        };
     });
     link.ep.on("overlay.closed", (_a, s) => {
         const g = s === undefined ? undefined : mine.get(s);
@@ -396,9 +428,11 @@ export function serveIsoLink(link: IsoLink): void {
         const run = (await deps.isoRuns?.(url, frameId === 0))?.get(s);
         if (!run) throw new Error("iso.load: this script has no isolated onPage code here");
         const page = link.page ?? (await pageOfFrame(tabId, frameId, link.port));
-        const stores = (await storeOwner.init([s], { page }))[s] ?? {};
+        const libs = new Set(shippedLibIds(run.libs));
+        const initAll = await storeOwner.init([s, ...libs], { page });
         if (ep.closed) throw new Error("iso.load: closed");
         link.page = page;
+        link.libs = libs;
         if (link.s === null) {
             link.s = s;
             const key = isoKey(tabId, frameId, s);
@@ -407,9 +441,11 @@ export function serveIsoLink(link: IsoLink): void {
             if (old && old !== link) old.ep.close("replaced by a new link");
             linksChanged();
         }
-        return { s, ...run, stores, page };
+        const libStores = libs.size ? Object.fromEntries([...libs].map((id) => [id, initAll[id] ?? {}])) : undefined;
+        return { s, ...run, stores: initAll[s] ?? {}, ...(libStores ? { libStores } : {}), page };
     });
-    serveStoreOps(ep, (s) => (bound(s) && link.page !== undefined ? { s, page: link.page, link: () => (link.store && !link.store.closed ? link.store : (link.store = ownerLink(ep, s))) } : undefined));
+    const isoStoreAllowed = (id: string | undefined): id is string => id !== undefined && link.s !== null && (id === link.s || !!link.libs?.has(id));
+    serveStoreOps(ep, (id) => (isoStoreAllowed(id) && link.page !== undefined ? { s: id, page: link.page, link: () => (link.store && !link.store.closed ? link.store : (link.store = ownerLink(ep, (x) => x))) } : undefined));
     ep.on("log", (a, s) => {
         if (!bound(s) || !["debug", "info", "warn", "error"].includes(a?.level)) return;
         deps.log?.(tabId, s, a.level, String(a.msg ?? "").slice(0, 8000), contextTag("isolated", link.port.sender?.url));
@@ -507,8 +543,9 @@ export function servePreviewLink(ep: Endpoint, tabId?: number): void {
     };
     const storeOf = (g: Grant & { s: string }): Endpoint => {
         if (g.store && !g.store.closed) return g.store;
-        return (g.store = ownerLink(ep, g.s));
+        return (g.store = ownerLink(ep, (x) => x));
     };
+    const previewStoreAllowed = (g: (Grant & { s: string }) | null, s: string | undefined): s is string => !!g && s !== undefined && (g.s === s || g.libs.has(s));
 
     ep.handle("preview.open", async ({ nonce, url }, s) => {
         if (typeof s !== "string" || typeof nonce !== "string" || nonce.length < 16 || typeof url !== "string") throw new Error("preview.open: refused");
@@ -523,25 +560,41 @@ export function servePreviewLink(ep: Endpoint, tabId?: number): void {
         if (old && old.s !== s) drop("the preview moved to another script");
         // the preview is a page of its own
         const keep = old?.s === s ? old : null;
-        link.grant = { s, url: at, name: run.name, nonce, seen: false, expires: Date.now() + NONCE_TTL_MS, store: keep?.store ?? null, page: keep?.page ?? pages.openVirtual() };
+        link.grant = { s, url: at, name: run.name, nonce, seen: false, expires: Date.now() + NONCE_TTL_MS, store: keep?.store ?? null, page: keep?.page ?? pages.openVirtual(), libs: new Set(shippedLibIds(run.libs ?? [])) };
         return { url: at, name: run.name, handlers: run.routes.length, matching: run.routes.filter((r) => routeMatches(r, at)).length };
     });
     ep.handle("overlay.init", async (_a, s): Promise<OverlayInit> => {
         const g = granted("overlay.init", s);
         const run = await runOf("overlay.init", g.s);
-        const stores = (await storeOwner.init([g.s], { page: g.page }))[g.s] ?? {};
-        return { s: g.s, name: run.name, code: run.code, codeHash: run.codeHash, routes: run.routes, url: g.url, params: run.params, stores, page: g.page, libs: run.libs, react: run.react };
+        const libs = new Set(shippedLibIds(run.libs ?? []));
+        g.libs = libs;
+        const initAll = await storeOwner.init([g.s, ...libs], { page: g.page });
+        const libStores = libs.size ? Object.fromEntries([...libs].map((id) => [id, initAll[id] ?? {}])) : undefined;
+        return {
+            s: g.s,
+            name: run.name,
+            code: run.code,
+            codeHash: run.codeHash,
+            routes: run.routes,
+            url: g.url,
+            params: run.params,
+            stores: initAll[g.s] ?? {},
+            ...(libStores ? { libStores } : {}),
+            page: g.page,
+            libs: run.libs,
+            react: run.react,
+        };
     });
     ep.on("store.declare", (a, s) => {
-        if (link.grant && link.grant.s === s) storeOf(link.grant).push("store.declare", a, s);
+        if (previewStoreAllowed(link.grant, s)) storeOf(link.grant!).push("store.declare", a, s);
     });
     ep.on("store.set", (a, s) => {
-        if (link.grant && link.grant.s === s && pageOk(a, link.grant)) storeOf(link.grant).push("store.set", a, s);
+        if (previewStoreAllowed(link.grant, s) && pageOk(a, link.grant!)) storeOf(link.grant!).push("store.set", a, s);
     });
     ep.handle("store.sub", (a, s) => {
-        const g = granted("store.sub", s);
-        if (!pageOk(a, g)) throw new Error("store.sub: not the preview's page");
-        return storeOf(g).call("store.sub", a, s);
+        if (!previewStoreAllowed(link.grant, s)) throw new Error("store.sub: this script isn't previewed");
+        if (!pageOk(a, link.grant!)) throw new Error("store.sub: not the preview's page");
+        return storeOf(link.grant!).call("store.sub", a, s);
     });
     ep.handle("fetch", (a, s) => fetchFor(granted("fetch", s).s, a.request, !!a.bypass));
     ep.handle("storage.get", async ({ key }, s) => {

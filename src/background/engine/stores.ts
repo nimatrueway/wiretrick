@@ -8,12 +8,14 @@
  *         the L1 link (sandbox ⇄ offscreen ⇄ chrome.runtime ⇄ here). The
  *         link also serves the sandbox's `tt.fetch`.
  */
-import { Endpoint, endpointPair, type WireRequest, type WireResponse } from "../../shared/wire";
+import { Endpoint, endpointPair, type Json, type StorePersist, type WireRequest, type WireResponse } from "../../shared/wire";
 import { ReplicaHub } from "../../shared/storeReplica";
 import { packBytes, unpackBytes } from "../../shared/bytesPack";
+import { jsonBytes } from "../../shared/storeOps";
+import { scriptFileName, scriptPathKey } from "../../shared/scriptName";
 import { StoreOwner } from "./storeOwner";
 import { log } from "./logs";
-import { scriptStorageAll, scriptStorageSet, getScript } from "./scriptStore";
+import { scriptStorageAll, scriptStorageSet, scriptStorageDelete, getScript, listScripts, onScriptsChanged } from "./scriptStore";
 import { backgroundFetch } from "./ttFetch";
 import { pages, pagesReady } from "./pages";
 
@@ -23,6 +25,7 @@ export const storeOwner = new StoreOwner({
     // lambdas: scriptStore is part of an import cycle
     storageAll: (s) => scriptStorageAll(s),
     storageSet: (s, k, v) => scriptStorageSet(s, k, v),
+    storageDelete: (s, k) => scriptStorageDelete(s, k),
     ...(__MV3__
         ? {
               sessionGet: async (k: string) => (await chrome.storage.session.get(k))?.[k],
@@ -35,6 +38,89 @@ export const storeOwner = new StoreOwner({
 });
 // a page ended: its tt.pageStore copies go
 pages.onEnd((key) => storeOwner.dropPage(key));
+
+export interface InspectedStoreEntry {
+    /** unique row key: `${scriptId}\0${name}` or `${scriptId}\0${name}\0${page}` */
+    id: string;
+    scriptId: string;
+    scriptName: string;
+    name: string;
+    scope: "global" | "page";
+    page?: string;
+    tabId?: number;
+    tabTitle?: string;
+    tabUrl?: string;
+    rev: number;
+    persist?: StorePersist;
+    hasTemplate: boolean;
+    bytes: number;
+    data: Json;
+}
+
+async function queryTabsSafe(): Promise<Map<number, { title?: string; url?: string }>> {
+    const out = new Map<number, { title?: string; url?: string }>();
+    try {
+        const tabs: chrome.tabs.Tab[] = await new Promise((resolve) => {
+            if (!chrome?.tabs?.query) return resolve([]);
+            chrome.tabs.query({}, (t) => (void chrome.runtime?.lastError, resolve(t || [])));
+        });
+        for (const t of tabs) if (t.id !== undefined) out.set(t.id, { title: t.title, url: t.url });
+    } catch {}
+    return out;
+}
+
+/** list every script's globalStore and active pageStore entries for the Stores panel and Diagnostics */
+export async function listAllStores(providedScripts?: readonly { id: string; meta: { name: string } }[]): Promise<InspectedStoreEntry[]> {
+    const scripts = providedScripts ?? (await listScripts());
+    const [inspected, tabMap] = await Promise.all([storeOwner.inspect(scripts.map((s) => s.id)), queryTabsSafe()]);
+    const rows: InspectedStoreEntry[] = [];
+    for (const s of scripts) {
+        const entries = inspected[s.id] ?? [];
+        entries.sort((a, b) => (a.scope !== b.scope ? (a.scope === "global" ? -1 : 1) : a.name.localeCompare(b.name) || (a.page ?? "").localeCompare(b.page ?? "")));
+        for (const e of entries) {
+            const tabId = e.page ? pages.tabOf(e.page) : undefined;
+            const tab = tabId !== undefined && tabId >= 0 ? tabMap.get(tabId) : undefined;
+            const isPreview = e.page?.startsWith("v");
+            rows.push({
+                id: e.page ? `${s.id}\u0000${e.name}\u0000${e.page}` : `${s.id}\u0000${e.name}`,
+                scriptId: s.id,
+                scriptName: s.meta.name,
+                name: e.name,
+                scope: e.scope,
+                ...(e.page ? { page: e.page } : {}),
+                ...(tabId !== undefined && tabId >= 0 ? { tabId } : {}),
+                ...(isPreview ? { tabTitle: "Overlay Preview" } : tab?.title ? { tabTitle: tab.title } : {}),
+                ...(tab?.url ? { tabUrl: tab.url } : {}),
+                rev: e.rev,
+                persist: e.persist,
+                hasTemplate: e.hasTemplate,
+                bytes: jsonBytes(e.data),
+                data: e.data,
+            });
+        }
+    }
+    return rows;
+}
+
+export async function exportPersistedStores(): Promise<Record<string, Record<string, Json>>> {
+    const scripts = await listScripts();
+    return storeOwner.exportPersisted(scripts.map((s) => ({ id: s.id, name: scriptFileName(s.meta.name) })));
+}
+
+export async function importPersistedStores(exported: Record<string, Record<string, Json>>): Promise<number> {
+    const scripts = await listScripts();
+    const byKey = new Map(scripts.map((s) => [scriptPathKey(s.meta.name), s.id]));
+    let count = 0;
+    for (const [scriptName, stores] of Object.entries(exported || {})) {
+        const scriptId = byKey.get(scriptPathKey(scriptName));
+        if (!scriptId || !stores || typeof stores !== "object") continue;
+        for (const [storeName, data] of Object.entries(stores)) {
+            await storeOwner.replace(scriptId, storeName, data);
+            count++;
+        }
+    }
+    return count;
+}
 
 /** a script's name for log lines (its id if it's gone) */
 async function nameOf(scriptId: string): Promise<string> {

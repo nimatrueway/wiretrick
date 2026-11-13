@@ -71,7 +71,7 @@ describe("settings.yaml folder sync", () => {
         expect(files.get("settings.yaml")!.text).toContain("\n    n: 7");
 
         // external edit: the WHOLE file applies to storage
-        const hand = '# mine\nsettings:\n  logLevel:   "warn"  # quiet\n\n\nparams:\n  S:\n    n: 9 # nine\n# bye\n';
+        const hand = '# mine\nsettings:\n  logLevel:   "warn"  # quiet\n\n\nparams:\n  S.ts:\n    n: 9 # nine\n# bye\n';
         files.set("settings.yaml", { text: hand, t: clock++ });
         await sleep(1500);
         expect((await ss.getParamValues(id)).n).toBe(9);
@@ -95,7 +95,7 @@ describe("settings.yaml folder sync", () => {
         });
         await sleep(800);
         const withNew = files.get("settings.yaml")!.text;
-        expect(withNew).toContain("\n  New:\n");
+        expect(withNew).toContain("\n  New.ts:\n");
         expect(withNew).toContain("    # x: a");
         expect(withNew).toContain('logLevel:   "warn"  # quiet'); // untouched
         expect(withNew).toContain("n: 5 # nine"); // untouched
@@ -118,7 +118,7 @@ describe("settings.yaml folder sync", () => {
         await sync.startFromStoredHandle();
         await sleep(600);
         // log level only (storage.onChanged is not wired here) + a new comment
-        const edited = "# from the manager\nsettings:\n  logLevel: error\nparams:\n  S:\n    n: 3\n";
+        const edited = "# from the manager\nsettings:\n  logLevel: error\nparams:\n  S.ts:\n    n: 3\n";
         expect((await applySettingsText(edited)).error).toBeUndefined();
         await sync.exportSettingsFrom(edited);
         expect(files.get("settings.yaml")!.text).toBe(edited);
@@ -168,6 +168,65 @@ describe("settings.yaml folder sync", () => {
         expect(text).not.toContain("\n    n: 7\n"); // no longer live
         // …and the value no longer maps to anything, but storage is untouched
         expect((await ss.getParamValues(id)).n).toBe(7);
+        await sync.stop();
+    }, 15000);
+
+    it("syncs root stores.json two-way with StoreOwner, removes deleted store entries, and leaves a broken stores.json untouched", async () => {
+        const sync = await import("../src/background/folderSync");
+        const ss = await import("../src/background/engine/scriptStore");
+        const { storeOwner } = await import("../src/background/engine/stores");
+        const id = ss.newId();
+        const tsId = ss.newId();
+        await ss.saveScript({ id, name: "bonsai/index.tsx", code: "// ok" });
+        await ss.saveScript({ id: tsId, name: "mock/users", code: "// ok" });
+        storeOwner.forget(id);
+        storeOwner.forget(tsId);
+
+        await sync.startFromStoredHandle({ fresh: true });
+        await sleep(300);
+        // No persisted globalStore yet -> no empty stores.json noise on disk
+        expect(files.has("stores.json")).toBe(false);
+
+        // Runtime / StoreOwner write -> writes stores.json with .ts and .tsx extensions
+        await storeOwner.replace(id, "flags", { beta: true, hits: 3 });
+        await storeOwner.replace(tsId, "cache", { count: 2 });
+        await sync.flush();
+        expect(JSON.parse(files.get("stores.json")!.text)).toEqual({
+            "bonsai/index.tsx": { flags: { beta: true, hits: 3 } },
+            "mock/users.ts": { cache: { count: 2 } },
+        });
+
+        // External edit on disk -> updates StoreOwner live
+        files.set(
+            "stores.json",
+            {
+                text: JSON.stringify({ "bonsai/index.tsx": { flags: { beta: false, hits: 10 }, extra: { on: true } }, "mock/users.ts": { cache: { count: 9 } } }, null, 2) + "\n",
+                t: clock++,
+            }
+        );
+        await sync.flush();
+        expect(storeOwner.get(id, "flags")?.data).toEqual({ beta: false, hits: 10 });
+        expect(storeOwner.get(id, "extra")?.data).toEqual({ on: true });
+        expect(storeOwner.get(tsId, "cache")?.data).toEqual({ count: 9 });
+
+        // Removing store entries on disk -> deletes them from StoreOwner
+        files.set(
+            "stores.json",
+            {
+                text: JSON.stringify({ "bonsai/index.tsx": { flags: { beta: false, hits: 10 } } }, null, 2) + "\n",
+                t: clock++,
+            }
+        );
+        await sync.flush();
+        expect(storeOwner.get(id, "extra")).toBeUndefined();
+        expect(storeOwner.get(tsId, "cache")).toBeUndefined();
+
+        // Broken JSON on disk is not overwritten by runtime mutations
+        files.set("stores.json", { text: "{ broken json", t: clock++ });
+        await sync.flush();
+        await storeOwner.replace(id, "flags", { beta: true, hits: 99 });
+        await sync.flush();
+        expect(files.get("stores.json")!.text).toBe("{ broken json");
         await sync.stop();
     }, 15000);
 });

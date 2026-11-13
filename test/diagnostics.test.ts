@@ -39,7 +39,7 @@ describe("diagnostic report", () => {
         log(3, "[extension] request FAILED net::ERR_BLOCKED_BY_CLIENT script https://a/x.js", "warn");
         const { collectDiagnostics } = await import("../src/background/diagnostics");
         const md = await collectDiagnostics({ extensions: [{ name: "uBlock", id: "u", version: "1", enabled: true }], state: { process: { state: "idle" } } });
-        for (const h of ["## Environment", "## Other installed extensions", "## Engine state", "## settings.yaml", "## Scripts (1)", "### redwood.ts — enabled", "## Log (", "## Debug log", "## Network"]) expect(md).toContain(h);
+        for (const h of ["## Environment", "## Other installed extensions", "## Engine state", "## settings.yaml", "## Stores (0)", "## Scripts (1)", "### redwood.ts — enabled", "## Log (", "## Debug log", "## Network"]) expect(md).toContain(h);
         expect(md).toContain("ERR_BLOCKED_BY_CLIENT");
         expect(md).toContain("uBlock");
         expect(md).toContain('"port": "8081"');
@@ -61,7 +61,7 @@ describe("diagnostic report", () => {
         for (const h of ["## Problems", "## Log (", "## Scripts (1 of 3)", "### keep.ts", "// code of keep", "## Problem description"]) expect(md).toContain(h);
         for (const h of ["## Environment", "## Other installed extensions", "uBlock", "## Engine state", "## settings.yaml", "## Debug log", "## Network", "secret", "// code of other"]) expect(md).not.toContain(h);
         expect(settingsText).not.toHaveBeenCalled();
-        expect(md).toContain("Left out by the sender: Environment, Other installed extensions, Engine state, settings.yaml, Debug log, Network, 2 of 3 scripts.");
+        expect(md).toContain("Left out by the sender: Environment, Other installed extensions, Engine state, settings.yaml, Stores, Debug log, Network, 2 of 3 scripts.");
         const none = await collectDiagnostics({ include: { sections: ["log"], scripts: [] } });
         expect(none).not.toContain("## Scripts");
         expect(none).toContain("3 of 3 scripts");

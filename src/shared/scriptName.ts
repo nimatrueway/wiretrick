@@ -63,7 +63,7 @@ export function scriptNameProblem(name: string): string {
  */
 export function isConfigJsonPath(path: string): boolean {
     const base = path.slice(path.lastIndexOf("/") + 1);
-    return /^(package\.json|package-lock\.json|tsconfig.*\.json|jsconfig\.json)$/i.test(base) || /^settings\.schema\.json$/i.test(path);
+    return /^(package\.json|package-lock\.json|tsconfig.*\.json|jsconfig\.json)$/i.test(base) || /^(settings\.schema\.json|stores\.json)$/i.test(path);
 }
 
 /** why a data file path (`mock/rate-limits.json`, `README.md`, `icons/logo.svg`, `icons/logo.png`) can't be used, or "" */
@@ -116,6 +116,11 @@ export function scriptNameFromInput(value: string): string {
  */
 export function scriptFileKey(name: string): string {
     return scriptFileName(name).toLowerCase();
+}
+
+/** Case-insensitive file key accepting either a script name (`"mock/a"`) or its file path (`"mock/a.ts"` / `"mock/a.tsx"`). */
+export function scriptPathKey(nameOrFile: string): string {
+    return scriptFileKey(scriptNameFromInput(nameOrFile));
 }
 
 /** `base`, or `base (2)`, `base (3)`… — the first whose file doesn't clash with `taken` */

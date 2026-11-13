@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, afterEach } from "vitest";
+import "../src/shared/transpile";
 import { endpointPair, type Endpoint, type OverlayInit } from "../src/shared/wire";
 import { StoreOwner, type StoreOwnerDeps } from "../src/background/engine/storeOwner";
 import { startOverlay, type OverlayRuntime } from "../src/overlay/overlayRuntime";
@@ -317,6 +318,47 @@ describe("overlay runtime", () => {
         await settle();
         expect(h.rects.length).toBeGreaterThan(0);
         expect(Array.isArray(h.rects[0])).toBe(true);
+    });
+
+    it("attributes imported library tt.globalStore and tt.pageStore to the library's scriptId, not the importer's", async () => {
+        const libSrc = `export const shared = tt.globalStore("shared", { count: 1 }, { persist: true }); export const perTab = tt.pageStore("perTab", { tab: "init" });`;
+        const h = await start(
+            `
+            import { shared, perTab } from "./lib/B";
+            tt.onOverlay("*", () => {
+                shared.count = 42;
+                perTab.tab = "tab-1";
+            });
+            `,
+            {
+                libs: [{ id: "libB", name: "lib/B", src: libSrc }],
+            }
+        );
+        await settle();
+        await new Promise((r) => setTimeout(r, 10));
+        expect(h.logs).toEqual([]);
+
+        const exported = await h.owner.exportPersisted([
+            { id: "s1", name: "demo.tsx" },
+            { id: "libB", name: "lib/B.ts" },
+        ]);
+        expect(exported).toEqual({
+            "lib/B.ts": {
+                shared: { count: 42 },
+            },
+        });
+        expect(exported["demo.tsx"]).toBeUndefined();
+
+        const [bgSide, ownerSide] = endpointPair();
+        h.owner.attach(ownerSide, { all: true });
+        const bgHub = new ReplicaHub({ ctx: "bg" });
+        bgHub.prime(await h.owner.init(["libB"], { page: "p1" }));
+        bgHub.attach(bgSide);
+        const bgShared = bgHub.store("libB", "shared", { count: 0 }, true) as { count: number };
+        const bgTab = bgHub.pageStore("libB", "perTab", { tab: "" }, "p1") as { tab: string };
+        await settle();
+        expect(bgShared.count).toBe(42);
+        expect(bgTab.tab).toBe("tab-1");
     });
 });
 
