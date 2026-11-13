@@ -1244,14 +1244,19 @@ declare const tt: {
     storage: TangiTweak.Storage;
 
     /**
-     * A live object shared by every place the script runs — its handlers
-     * in every strategy, in every tab, and its overlays — kept across
-     * browser restarts. It's a [valtio](https://valtio.dev) proxy: read and
-     * change it like a plain object; `import { subscribe } from "valtio"`
-     * to watch it. `name` is its key (one store per name per script, shared
-     * with {@link tabStore} and {@link pageStore}); values must be JSON (at most 1 MB). Call it
-     * at top level. `onPage` and `onOverlay` code get a live copy too;
-     * `onSite` code doesn't (the site could read and forge it).
+     * Reactive [valtio](https://valtio.dev) store shared across the entire browser.
+     *
+     * - **Lifetime:** One copy across all tabs and pages. Survives reloads,
+     *   navigations, closing tabs, script saves, and — by default (`persist: true`
+     *   or `persist: ["field"]`) — browser restarts (saved in `stores.json`).
+     *   With `{ persist: false }`, resets when the browser quits.
+     * - **Handlers:** All network handlers (`rules`, `page`, `debugger`,
+     *   `extension`, `helper` — sync and after `await`), `tt.onPage`,
+     *   `tt.onOverlay`, and top-level/timer code. **Throws in `tt.onSite`**
+     *   (untrusted site world — use {@link siteStore}).
+     *
+     * Call at top level; `name` shares a per-script namespace with {@link tabStore}
+     * and {@link pageStore}, and values must be JSON (≤ 1 MB).
      *
      * @example
      * const state = tt.globalStore("state", { mocking: true, hits: 0 });
@@ -1263,20 +1268,17 @@ declare const tt: {
     globalStore<T extends object>(name: string, initial: T, opts?: TangiTweak.StoreOptions<T>): T;
 
     /**
-     * Like {@link globalStore}, but one copy per browser tab: each tab
-     * starts from `initial` and **keeps its state across reloads and
-     * navigations** until the tab closes (not across browser restarts).
+     * Reactive [valtio](https://valtio.dev) store scoped to one browser tab.
      *
-     * Works with every network strategy — **`"rules"` included**: when a
-     * `"rules"` handler reads a `tabStore`, TangiTweak builds per-tab
-     * browser rules (`tabIds` / `excludedTabIds`) and updates them whenever
-     * that tab's store changes, so even a tab refresh's first document and
-     * `<script>` requests get the rule.
-     *
-     * Read it in the handler's synchronous part (before the first `await`);
-     * top-level code and timers have no tab and throw. `onPage` and
-     * `onOverlay` code get a live copy for their tab (`useSnapshot` works);
-     * not available in `onSite` code.
+     * - **Lifetime:** One copy per browser tab (`tabId`; subframes share their
+     *   top tab's copy). **Survives page reloads, cross-page navigations, and
+     *   script saves** in that tab; dropped when the tab closes or the browser
+     *   quits (never persisted to `stores.json`).
+     * - **Handlers:** All network handlers (`rules` included — builds per-tab
+     *   `tabIds` / `excludedTabIds` session rules on change; on `page`,
+     *   `debugger`, `extension`, and `helper`, **read/write synchronously before
+     *   the first `await`**), `tt.onPage`, and `tt.onOverlay`. **Throws in
+     *   `tt.onSite`** and when read at top level or in background timers.
      *
      * @example
      * const tab = tt.tabStore("env", { staging: false });
@@ -1290,22 +1292,17 @@ declare const tt: {
     tabStore<T extends object>(name: string, initial: T): T;
 
     /**
-     * Like {@link globalStore}, but one copy per page: each tab's page
-     * starts from `initial`, and a navigation or reload starts a new page
-     * (single-page-app route changes don't). Use it so a page's overlay and
-     * the handlers of that page's requests share state — e.g. a switch in
-     * the overlay that turns a redirect on for this page only.
+     * Reactive [valtio](https://valtio.dev) store scoped to a single page document load.
      *
-     * A network handler sees the page of the request it handles (requests
-     * of a navigation, like a redirect of it, still belong to the page being
-     * left); an overlay sees its own page. Read it in the handler's
-     * synchronous part: after an `await` the handler no longer knows its
-     * page, so it throws — read what you need first, or keep a nested
-     * object. Requests that aren't from a page (service workers, other
-     * apps through the helper) see a throwaway copy of `initial`.
-     * `onPage` code sees its page's copy; not available in `onSite` code
-     * (the site could read and forge it) or in `rules` handlers (use {@link tabStore} for per-tab rules); kept until the page ends
-     * (not across browser restarts).
+     * - **Lifetime:** One copy per top-frame document (subframes share their top
+     *   page's copy). Survives SPA route changes and script saves; **resets to
+     *   `initial` on reload or cross-document navigation**, and drops when the
+     *   page unloads or the tab closes (never persisted to `stores.json`).
+     * - **Handlers:** Network handlers on `page`, `debugger`, `extension`, and
+     *   `helper` (**synchronously before the first `await`**; pageless requests
+     *   get a throwaway copy of `initial`), `tt.onPage`, and `tt.onOverlay`.
+     *   **Throws in `strategy: "rules"`** (use {@link tabStore} for per-tab
+     *   rules), **`tt.onSite`**, and top-level/timer code.
      *
      * @example
      * const page = tt.pageStore("page", { staging: false });
@@ -1319,23 +1316,19 @@ declare const tt: {
     pageStore<T extends object>(name: string, initial: T): T;
 
     /**
-     * A live object the page's site may see: it lives in the site's
-     * JavaScript world, one copy per page (a navigation or reload starts
-     * from `initial`; single-page-app route changes don't), and `onSite`,
-     * `onPage` and `onOverlay` code of this script on that page share it —
-     * `onSite` code reads and changes it synchronously, the others get a
-     * live copy that changes when it does (and changes it back). It's a
-     * [valtio](https://valtio.dev) proxy: read and change it like a plain
-     * object; `import { subscribe } from "valtio"` to watch it
-     * (`useSnapshot` in overlays).
+     * Reactive [valtio](https://valtio.dev) store living in the site's own JavaScript world.
      *
-     * Its data is page data: the site can read and change it, so keep
-     * what the site mustn't see in a {@link globalStore} or
-     * {@link pageStore} (which `onSite` code can't use). Values must be
-     * JSON (at most 1 MB); functions in `initial` stay local to each copy.
-     * `name` is its key (one store per name per script, apart from the
-     * other two kinds'). Saving the script keeps its values. Network
-     * handlers have no page: it throws there.
+     * - **Lifetime:** One copy per page JS world. Survives SPA route changes and
+     *   hot script saves; **resets to `initial` on reload or navigation**, and
+     *   disappears when the document unloads (never persisted).
+     * - **Handlers:** `tt.onSite` (direct synchronous access), `tt.onPage` (live
+     *   mirror), and `tt.onOverlay` (live mirror of the top frame's copy).
+     *   **Throws in all network handlers** (`onRequest`, `replaceResponse`,
+     *   `onResponseHeaders`, `onResponseBody` on every strategy) and inside
+     *   imported libraries.
+     * - **Trust:** Untrusted page data — the site's own scripts can read, mutate,
+     *   or forge its values. Keep private/trusted state in {@link globalStore},
+     *   {@link tabStore}, or {@link pageStore}.
      *
      * @example
      * const flags = tt.siteStore("flags", { loggedIn: false, mock: false });

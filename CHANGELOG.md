@@ -7,6 +7,12 @@ its section below.
 
 ## [Unreleased]
 
+## [0.33.1-alpha] - 2026-11-13
+
+### Changed
+
+- Clarified store lifetimes, persistence, and per-handler access rules across `tt.globalStore`, `tt.tabStore`, `tt.pageStore`, and `tt.siteStore` in Monaco hover typings (`tt-api.d.ts`) and [docs/scripting.md](docs/scripting.md).
+
 ## [0.33.0-alpha] - 2026-11-13
 
 ### Breaking
@@ -1015,7 +1021,8 @@ First release of Wiretrick:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 
-[Unreleased]: https://github.com/tangistudio/TangiTweak/compare/v0.33.0-alpha...HEAD
+[Unreleased]: https://github.com/tangistudio/TangiTweak/compare/v0.33.1-alpha...HEAD
+[0.33.1-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.33.0-alpha...v0.33.1-alpha
 [0.33.0-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.32.0-alpha...v0.33.0-alpha
 [0.32.0-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.31.0-alpha...v0.32.0-alpha
 [0.31.0-alpha]: https://github.com/tangistudio/TangiTweak/compare/v0.30.0-alpha...v0.31.0-alpha

@@ -622,16 +622,29 @@ pages never fetch them.
 
 ## Shared state and fetching — `tt.globalStore`, `tt.tabStore`, `tt.pageStore`, `tt.siteStore`, `tt.fetch`
 
-Four kinds of store; the name says who owns the data and how far it
-reaches. **Anything the site may read or write goes in `tt.siteStore`;
-everything else goes in the other three.**
+Four reactive [valtio](https://valtio.dev) stores, ordered from widest to
+narrowest lifetime and trust boundary. **Anything the site's own JavaScript may
+read or write goes in `tt.siteStore`; everything else goes in the other three.**
 
-| store | owner | one copy for | the site can read and change it | available in |
-|---|---|---|---|---|
-| `tt.globalStore(name, initial)` | the background (yours) | every page, every tab, kept across restarts | no | network handlers (`rules` included), `onPage`, `onOverlay` |
-| `tt.tabStore(name, initial)` | the background (yours) | each browser tab (survives reloads & navigations) | no | network handlers (`rules` included), `onPage`, `onOverlay` |
-| `tt.pageStore(name, initial)` | the background (yours) | each page document (resets on reload/navigation) | no | network handlers (except `rules`), `onPage`, `onOverlay` |
-| `tt.siteStore(name, initial)` | the site's JavaScript world (theirs) | each page | **yes** | `onSite`, `onPage`, `onOverlay` |
+### Lifetime & persistence
+
+| Store | Scope (one copy per) | Page reload / navigation | Tab closed | Browser restart | Saved in `stores.json` | Site JS can read/forge? |
+|---|---|---|---|---|---|---|
+| `tt.globalStore` | Entire browser (all tabs) | **Kept** | **Kept** | **Kept** (`persist: false` resets) | **Yes** (when persisted) | No |
+| `tt.tabStore` | Browser tab (`tabId`) | **Kept** | Dropped | Dropped | No | No |
+| `tt.pageStore` | Top-frame document load | **Resets** (SPA route changes kept) | Dropped | Dropped | No | No |
+| `tt.siteStore` | Page's JS world | **Resets** (SPA route changes kept) | Dropped | Dropped | No | **Yes** (untrusted page data) |
+
+*(All three background-owned stores — `globalStore`, `tabStore`, and `pageStore` — also survive hot script saves and MV3 service-worker restarts while their tab/page remains open. Stores declared in an imported library belong to that library and are shared across all scripts importing it; `siteStore` must be declared in the entry script itself.)*
+
+### Which handlers can access each store
+
+| Store | `onRequest` (`strategy: "rules"`) | Network handlers (`page`, `debugger`, `extension`, `helper`) | `tt.onPage` | `tt.onOverlay` | `tt.onSite` | Top-level / timers |
+|---|---|---|---|---|---|---|
+| `tt.globalStore` | **Yes** (rebuilds session rules on change) | **Yes** (sync & after `await`) | **Yes** | **Yes** | No (throws) | **Yes** |
+| `tt.tabStore` | **Yes** (builds per-tab `tabIds` rules on change) | **Yes — before first `await`** | **Yes** | **Yes** | No (throws) | Declare only (reading throws) |
+| `tt.pageStore` | No (throws — use `tt.tabStore`) | **Yes — before first `await`** | **Yes** | **Yes** | No (throws) | Declare only (reading throws) |
+| `tt.siteStore` | No (throws) | No (throws) | **Yes** (live mirror) | **Yes** (live mirror) | **Yes** (direct sync) | Declare only |
 
 ### `tt.globalStore`
 
@@ -650,15 +663,20 @@ tt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, (ctx) => {
 });
 ```
 
+- **Lifetime.** Shared across every tab and page; survives reloads,
+  navigations, closing tabs, script saves, and — with `{ persist: true }`
+  (default) or `{ persist: ["mocking"] }` — browser restarts (editable in
+  `stores.json`). With `{ persist: false }`, kept in memory/session until
+  the browser quits.
+- **Handlers.** Every network handler (`rules`, `page`, `debugger`,
+  `extension`, `helper` — both before and after `await`), `tt.onPage`,
+  `tt.onOverlay`, and top-level/timer code. Throws in `tt.onSite`.
 - **Name.** The first argument is the store's key: one store per name per
-  script. A script with two stores uses two names. Call `tt.globalStore` at top
+  script (shared namespace with `tabStore` and `pageStore`). Call `tt.globalStore` at top
   level and share the result; a second call with the same name throws.
 - **Initial.** Used the first time. Later, the saved values win and
   `initial` only adds fields that are missing, so you can add fields
   without losing data.
-- **Persist.** `{ persist: true }` (default) keeps the whole store across
-  browser restarts; `{ persist: false }` keeps it only while the browser
-  runs; `{ persist: ["mocking"] }` keeps only those top-level fields.
 - **Values.** JSON only — objects, arrays, strings, numbers, booleans,
   `null` — at most 1 MB per store. A change that breaks this is undone and
   logged. Functions and getters on the object stay local and aren't shared.
@@ -695,8 +713,18 @@ tt.onOverlay("https://example.com/*", (ctx) => {
 });
 ```
 
-- Same synchronous-before-`await` rule, JSON limit and shared name space as
-  `tt.globalStore` and `tt.pageStore`.
+- **Lifetime.** One copy per browser tab (`tabId`); subframes share their
+  top tab's copy. **Survives page reloads, cross-page navigations, and
+  script saves** in that tab; dropped when the tab closes or the browser
+  quits (never saved to disk or `stores.json`).
+- **Handlers.** Every network handler (`rules`, `page`, `debugger`,
+  `extension`, `helper`), `tt.onPage`, and `tt.onOverlay`. In network
+  handlers, **read/write before the first `await`** (after `await` the
+  handler no longer knows its tab and throws; tabless requests see a
+  throwaway copy of `initial`). Throws in `tt.onSite` and outside a
+  handler at top level.
+- **Names & values.** Shares its per-script name space and 1 MB JSON rule
+  with `tt.globalStore` and `tt.pageStore`.
 
 ### `tt.pageStore`
 
@@ -729,21 +757,21 @@ tt.onOverlay("https://example.com/*", (ctx) => {
 });
 ```
 
-- **Read it before the first `await`.** The handler knows its page only in
-  its synchronous part; after an `await` the store throws. Read what you
-  need first.
+- **Lifetime.** One copy per top-frame document load (subframes share their
+  top page's copy). Survives in-page SPA route changes and script saves;
+  **resets to `initial` on reload or navigation**, and drops when the page
+  unloads or the tab closes (never saved to disk or `stores.json`).
+- **Handlers.** Network handlers on `page`, `debugger`, `extension`, and
+  `helper` (**before the first `await`**), `tt.onPage`, and `tt.onOverlay`.
+  **Not available** in `strategy: "rules"` (throws — use `tt.tabStore` for
+  per-tab rules), `tt.onSite` (throws), or top-level/timer code.
 - **Which page.** A navigation's own requests (the document, a redirect of
-  it) belong to the page being left. Requests that aren't from a page
+  it) still belong to the page being left. Requests that aren't from a page
   (service workers, other apps through the helper) get a throwaway copy of
   `initial` for that call.
-- **Lifetime.** A page's copy goes when the page ends (navigation, reload
-  or closing the tab); it's never saved to disk. Values follow the same
-  JSON rules as `tt.globalStore`.
-- **Names.** One name space with `tt.globalStore`: a script can't have a
-  global and a page store with the same name (a site store can).
-- Available in `onPage` and `onOverlay` code (the copy of their page);
-  not in `onSite` code (see below), nor in `rules` handlers (their rules
-  are built once for every page).
+- **Names & values.** Shares its per-script name space and 1 MB JSON rule
+  with `tt.globalStore` and `tt.tabStore` (a `siteStore` has its own name
+  space).
 
 ### Stores in page code
 
@@ -770,10 +798,10 @@ tt.onPage("https://example.com/*", (ctx) => {
 ```
 
 `onSite` code runs among the site's own scripts, which could read the
-stores and forge writes to them. There, using `tt.globalStore` or
+stores and forge writes to them. There, using `tt.globalStore`, `tt.tabStore`, or
 `tt.pageStore` throws (declaring one at top level is fine: that line runs
 there too). Either keep what the site may see in a
-[`tt.siteStore`](#wtsitestore), or keep the stores in `onPage` code, read
+[`tt.siteStore`](#ttsitestore), or keep the stores in `onPage` code, read
 the site through an `onSite` [handle](#handles--calls-between-places), and
 pass what `onSite` code needs as arguments. An `onSite` handler that uses
 one of them is an error in the Problems view; its quick fixes move the
@@ -827,21 +855,24 @@ tt.onOverlay("https://shop.example/*", (ctx) => {
 });
 ```
 
+- **Lifetime.** One copy per page JS world: survives SPA route changes and
+  hot script saves; **resets to `initial` on full page reload or
+  navigation**, and disappears when the document unloads (never persisted).
+- **Handlers.** `tt.onSite` (direct synchronous access), `tt.onPage` (live
+  mirror), and `tt.onOverlay` (live mirror of the top frame's copy).
+  **Not available in any network handler** (`onRequest`, `replaceResponse`,
+  `onResponseHeaders`, `onResponseBody` — throws and is flagged in
+  Problems) or inside imported libraries.
 - **Page data.** The site can read it, change it and fake its values, like
   anything else in its world. Check what you read from it before it
   decides what trusted code does, and never put secrets in it.
-- **Lifetime.** One copy per page: a navigation or reload starts from
-  `initial` (a single-page app's route change doesn't). Saving the script
-  keeps its values.
 - **Values.** JSON only, at most 1 MB, as the other stores; functions on
   the object stay local to each copy.
 - **Names.** Its own name space: `tt.pageStore("x")` and `tt.siteStore("x")`
   are different stores.
 - **Watching.** `subscribe` and `snapshot` from `"valtio"` work in `onSite`
   code (the site's world has valtio's core, not React); `useSnapshot` in
-  overlays.
-- Not in network handlers: they have no page, so it throws there (an
-  error in the Problems view).
+  `onPage` and `onOverlay`.
 
 ### `tt.fetch`
 
@@ -1016,9 +1047,9 @@ tt.onSite("*://app.example.com/*", (ctx) => {
 The site can see that code, call the functions it returns and fake their
 answers, so `onSite` code is untrusted:
 
-- **Only site stores, no handle calls.** `tt.globalStore` and
+- **Only site stores, no handle calls.** `tt.globalStore`, `tt.tabStore`, and
   `tt.pageStore` throw there ([stores in page code](#stores-in-page-code));
-  [`tt.siteStore`](#wtsitestore) is the store for it. Calling a handle
+  [`tt.siteStore`](#ttsitestore) is the store for it. Calling a handle
   throws `SiteCannotCallError` — the site could make the same call.
   Problems shows both, with a quick fix (**Ctrl+.** / **⌘.**) that moves
   the handler to `tt.onPage`. Call your own functions directly.
@@ -1590,8 +1621,8 @@ tt.onOverlay("*://app.example.com/*", async () => {
 - **Toast:** a fixed element plus `setTimeout` to remove it.
 - **Remember open/closed:** a store field (`ui.open`), so it survives
   reloads and is the same in every tab.
-- **Per-tab switch:** a `tt.pageStore` field, so turning it on in one tab
-  leaves the others alone and a reload turns it off again.
+- **Per-tab switch (kept across reloads):** a `tt.tabStore` field — works with `strategy: "rules"` too.
+- **Per-page switch (resets on reload):** a `tt.pageStore` field, so turning it on affects only this document load.
 
 ## Multiple handlers — how they stack
 
