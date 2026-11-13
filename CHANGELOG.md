@@ -983,7 +983,7 @@ Release-only rebuild.
 
 ## [0.0.1-alpha] - 2026-10-19
 
-First release of Wiretrick, a TypeScript rewrite of Resource Override:
+First release of Wiretrick:
 scripts with typed handlers, interception strategies, a local helper,
 two-way folder sync, and signed MV2/MV3 packages.
 

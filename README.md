@@ -4,14 +4,11 @@
 
 <p align="center">Rewrite requests, responses, and pages in TypeScript.</p>
 
-TangiTweak is a ground-up rewrite of
-[Resource Override](https://github.com/kylepaulsen/ResourceOverride), also
-inspired by [Inssman](https://github.com/vvmgev/Inssman) and
-[Tampermonkey](https://www.tampermonkey.net/) — programmable scripts for
-modifying network requests, responses, and pages. The whole interface is a
-**script editor**: each handler in a script names the URLs it handles and what
-to do — redirect, block, edit headers, transform or replace bodies, patch the
-site's JS or DOM, or draw its own GUI over the page.
+TangiTweak is a programmable browser extension where the entire interface is a
+**TypeScript script editor**. Each handler in a script names the URLs it
+matches and what to do: redirect, block, edit request or response headers,
+transform or replace bodies, patch a site's JavaScript or DOM, or mount its own
+React + `valtio` GUI overlay on the page.
 
 > [!WARNING]
 > **TangiTweak is experimental.** I'm constantly experimenting with its
@@ -105,6 +102,15 @@ running (later: **?** → **Welcome** or **?** → **Samples**).
 | [Glossary](GLOSSARY.md) | the words we use for TangiTweak's concepts |
 | [Privacy policy](docs/privacy.md) | what TangiTweak accesses and stores, the requests it makes, and why it needs each permission |
 | [Development](docs/development.md) | build, tests, releases, how the MV3 build works |
+
+## Prior art
+
+TangiTweak draws inspiration from request-override extensions and userscript managers, while sitting in the space between them:
+
+| Tool | Best at | How TangiTweak compares |
+|---|---|---|
+| **[Resource Override](https://github.com/kylepaulsen/ResourceOverride)** · **[Inssman](https://github.com/vvmgev/Inssman)** · **[Requestly](https://requestly.com/)** | Quick form-based rules for static redirects, header edits, and fixed mock responses without writing code (Inssman and Requestly support MV3; Resource Override is archived on MV2). | Replaces rule forms with full TypeScript/TSX: programmatic branching on payloads and URL groups, multi-file bundles, two-way local folder sync, banner-free network interception via the optional local helper, and interactive page overlays. If you prefer point-and-click rule tables over writing code, Inssman or Requestly is simpler. |
+| **[Tampermonkey](https://www.tampermonkey.net/)** · **[Violentmonkey](https://violentmonkey.github.io/)** | Running the large ecosystem of `.user.js` userscripts for DOM/page tweaks (with Safari support in Tampermonkey). | Unifies page scripts with first-class network interception (`page`, `rules`, `debugger`, `helper`, `extension`), built-in Monaco TypeScript + React/valtio overlays (`tt.onOverlay`), typed UI parameters (`tt.params` + `settings.yaml`), in-place hot reload, and a Network inspector with original vs. modified body diffs. TangiTweak uses its own `tt.*` API rather than `.user.js` and targets Chromium + Firefox (not Safari). |
 
 ## License
 
