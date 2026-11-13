@@ -11,7 +11,7 @@
 import { Endpoint, endpointPair, type Json, type StorePersist, type WireRequest, type WireResponse } from "../../shared/wire";
 import { ReplicaHub } from "../../shared/storeReplica";
 import { packBytes, unpackBytes } from "../../shared/bytesPack";
-import { jsonBytes } from "../../shared/storeOps";
+import { isTabScope, jsonBytes, tabScopeId } from "../../shared/storeOps";
 import { scriptFileName, scriptPathKey } from "../../shared/scriptName";
 import { StoreOwner } from "./storeOwner";
 import { log } from "./logs";
@@ -36,8 +36,9 @@ export const storeOwner = new StoreOwner({
     pageAlive: (p) => pages.isAlive(p),
     ready: () => pagesReady,
 });
-// a page ended: its tt.pageStore copies go
+// a page ended: its tt.pageStore copies go; a tab closed: its tt.tabStore copies go
 pages.onEnd((key) => storeOwner.dropPage(key));
+pages.onTabEnd((tabKey) => storeOwner.dropPage(tabKey));
 
 export interface InspectedStoreEntry {
     /** unique row key: `${scriptId}\0${name}` or `${scriptId}\0${name}\0${page}` */
@@ -45,7 +46,7 @@ export interface InspectedStoreEntry {
     scriptId: string;
     scriptName: string;
     name: string;
-    scope: "global" | "page";
+    scope: "global" | "tab" | "page";
     page?: string;
     tabId?: number;
     tabTitle?: string;
@@ -74,13 +75,14 @@ export async function listAllStores(providedScripts?: readonly { id: string; met
     const scripts = providedScripts ?? (await listScripts());
     const [inspected, tabMap] = await Promise.all([storeOwner.inspect(scripts.map((s) => s.id)), queryTabsSafe()]);
     const rows: InspectedStoreEntry[] = [];
+    const rank = { global: 0, tab: 1, page: 2 } as const;
     for (const s of scripts) {
         const entries = inspected[s.id] ?? [];
-        entries.sort((a, b) => (a.scope !== b.scope ? (a.scope === "global" ? -1 : 1) : a.name.localeCompare(b.name) || (a.page ?? "").localeCompare(b.page ?? "")));
+        entries.sort((a, b) => rank[a.scope] - rank[b.scope] || a.name.localeCompare(b.name) || (a.page ?? "").localeCompare(b.page ?? ""));
         for (const e of entries) {
-            const tabId = e.page ? pages.tabOf(e.page) : undefined;
+            const tabId = e.page ? (isTabScope(e.page) ? tabScopeId(e.page) : pages.tabOf(e.page)) : undefined;
             const tab = tabId !== undefined && tabId >= 0 ? tabMap.get(tabId) : undefined;
-            const isPreview = e.page?.startsWith("v");
+            const isPreview = e.page?.startsWith("v") || e.page?.startsWith("tab:v");
             rows.push({
                 id: e.page ? `${s.id}\u0000${e.name}\u0000${e.page}` : `${s.id}\u0000${e.name}`,
                 scriptId: s.id,

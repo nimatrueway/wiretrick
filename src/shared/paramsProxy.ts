@@ -6,6 +6,7 @@
  * Changes made in one turn are sent once per param (the last value).
  */
 import { isParamDef, isParamGroup, isValidParamValue, parseParamValue, type ParamDef, type ParamTree } from "./scriptDef";
+import { noteRuleCondition } from "./currentPage";
 
 export interface ParamWriter {
     /** why params can't be changed right now (thrown), or undefined */
@@ -128,6 +129,7 @@ export function paramsProxy(defs: ParamTree, raw: Record<string, any>, unknown: 
         };
         return new Proxy(target, {
             get: (t, p, r) => {
+                if (typeof p === "string") noteRuleCondition();
                 const entry = own(group, p) ? group[p as string] : undefined;
                 return isParamDef(entry) && entry.type === "stringList" && !hasParse(entry) ? listOf(p as string) : Reflect.get(t, p, r);
             },

@@ -427,9 +427,9 @@ export async function runBodyOp(
  * MV3: run every enabled script's `rules` handlers once in the sandbox and
  * translate them (src/shared/rulesProbe.ts). null on failure.
  */
-export async function probeRules(scripts: PlainScript[], paramValues: Record<string, any>): Promise<Record<string, ScriptRules> | null> {
+export async function probeRules(scripts: PlainScript[], paramValues: Record<string, any>, tabIds?: number[], storeSnaps?: Record<string, any>): Promise<Record<string, ScriptRules> | null> {
     await ensureOffscreen();
-    const out = await sandboxCallWithData({ op: "rules", scripts, paramValues });
+    const out = await sandboxCallWithData({ op: "rules", scripts, paramValues, tabIds, storeSnaps });
     return out?.results ?? null;
 }
 

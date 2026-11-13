@@ -238,11 +238,14 @@ doesn't run, the rest of the script does:
 - the browser refuses the rule (e.g. its limit on session or regex rules is
   reached), with the browser's reason.
 
-> **State is frozen at load.** The one run sees params, but anything else the
-> handler reads — the time, `tt.storage`, `Math.random()`, a counter — is
-> read once and baked into the rule. It's refreshed only when scripts
-> reload (a save, a param change, an enable toggle). Use another strategy
-> for results that must change per request.
+> **Dynamic stores vs frozen values.** A `rules` handler sees `tt.params`,
+> `tt.globalStore` and `tt.tabStore`: changing any of them re-runs the
+> handler and updates the browser's session rules (`tt.tabStore` scopes
+> rules per tab with `tabIds` / `excludedTabIds`, surviving tab refreshes).
+> Returning `undefined` / `null` after reading one turns that rule off
+> cleanly. Anything else the handler reads — the time, `tt.storage`,
+> `Math.random()`, a counter — is read once and refreshed only on reload;
+> `tt.pageStore` isn't available (it resets on reload; use `tt.tabStore`).
 
 In the Network view a request a rule matched is marked Modified, with the
 rule's action (e.g. `onRequest → block (rules)`). The Log view's line for

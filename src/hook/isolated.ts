@@ -31,6 +31,7 @@ import { Exposer, RpcClient, isRpcCall, TOP_FRAME_ONLY, type RpcResult } from ".
 import { inertRemote } from "../shared/remote";
 import { routeMatches, type PlaceApi, type RouteMeta } from "../shared/route";
 import { ReplicaHub } from "../shared/storeReplica";
+import { tabScopeOfPage } from "../shared/storeOps";
 import { SiteMirrors } from "../shared/siteStoreMirror";
 import { SITE_DOWN_KINDS } from "../shared/siteStoreHost";
 import { FrameShortcuts } from "../shared/shortcut";
@@ -227,7 +228,7 @@ import { FrameShortcuts } from "../shared/shortcut";
                 params,
                 world: "isolated",
                 lib: mine ? undefined : name,
-                stores: { store: (n, initial, persist) => stores().store(storeOwnerId, n, initial, persist), pageStore: (n, initial) => stores().pageStore(storeOwnerId, n, initial, page) },
+                stores: { store: (n, initial, persist) => stores().store(storeOwnerId, n, initial, persist), tabStore: (n, initial) => stores().tabStore(storeOwnerId, n, initial, tabScopeOfPage(page)), pageStore: (n, initial) => stores().pageStore(storeOwnerId, n, initial, page) },
                 siteStore: mine ? (n, initial) => siteStores().store(s, n, initial) : undefined,
                 exposer: mine ? exposer : undefined,
                 call: mine ? handle(gen) : undefined,

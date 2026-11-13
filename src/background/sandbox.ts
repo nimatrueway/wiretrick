@@ -187,10 +187,11 @@ function compileSignature(scripts: PlainScript[], paramValues: Record<string, an
  * the param values change (runs are per-request — reuse the handlers).
  */
 /** a script's tt.globalStore / tt.pageStore (hub replicas) and tt.fetch (run by the SW) */
-function liveApis(sid: string): Pick<ResApiOverrides, "store" | "pageStore" | "fetch" | "setParam"> {
+function liveApis(sid: string): Pick<ResApiOverrides, "store" | "tabStore" | "pageStore" | "fetch" | "setParam"> {
     return {
         setParam: (key, value) => reverseCall({ op: "paramSet", scriptId: sid, key, value }).then(() => undefined),
         store: (name, initial, persist) => hub.store(sid, name, initial, persist),
+        tabStore: (name, initial) => hub.tabStore(sid, name, initial),
         pageStore: (name, initial) => hub.pageStore(sid, name, initial),
         fetch: (request, bypass) => link.call("fetch", { request, bypass }, sid),
     };
@@ -324,13 +325,14 @@ function run(scripts: PlainScript[], paramValues: Record<string, any>, op: BodyO
 
 // ---- rules strategy: run each rules handler once (src/shared/rulesProbe.ts) ----
 
-async function rules(scripts: PlainScript[], paramValues: Record<string, any>): Promise<{ results: Record<string, ScriptRules> }> {
+async function rules(scripts: PlainScript[], paramValues: Record<string, any>, tabIds?: number[], storeSnaps?: Record<string, any>): Promise<{ results: Record<string, ScriptRules> }> {
+    if (storeSnaps) hub.prime(storeSnaps);
     ensureCompiled(scripts, paramValues ?? {});
     const results: Record<string, ScriptRules> = {};
     for (const [id, c] of cache) {
         const s = scripts.find((x) => x.id === id);
         if (!s || !s.enabled || !c.result.meta.active || c.compiled.error) continue;
-        const r = await probeScriptRules(c.compiled.handlers);
+        const r = await probeScriptRules(c.compiled.handlers, tabIds);
         if (r.rules.length || r.errors.length) results[id] = r;
     }
     return { results };
@@ -397,7 +399,7 @@ window.addEventListener("message", async (event) => {
             await prepare(scripts, paramValues);
             if (op === "analyze") result = analyze(scripts, paramValues);
             else if (op === "run") result = await run(scripts, paramValues, bodyOp, args);
-            else result = await rules(scripts, paramValues);
+            else result = await rules(scripts, paramValues, data.payload.tabIds, data.payload.storeSnaps);
         } else if (op === "compileOne") {
             await builtins([data.payload.target, ...(scripts || [])]);
             result = compileOne(data.payload.target, scripts, paramValues, data.payload.extraData);

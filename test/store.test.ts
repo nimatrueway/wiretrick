@@ -3,7 +3,7 @@ import { subscribe } from "valtio/vanilla";
 import { Endpoint, endpointPair } from "../src/shared/wire";
 import { ReplicaHub } from "../src/shared/storeReplica";
 import { StoreOwner, type StoreOwnerDeps } from "../src/background/engine/storeOwner";
-import { applyOps, missingOps } from "../src/shared/storeOps";
+import { applyOps, missingOps, tabScope, tabScopeOfPage } from "../src/shared/storeOps";
 import "../src/shared/transpile";
 import { compileScript } from "../src/shared/compile";
 import { withPage } from "../src/shared/currentPage";
@@ -552,5 +552,59 @@ describe("tt.pageStore", () => {
         await settle();
         expect(t.storage.get("s1")?.["$store:prefs"]).toBeUndefined();
         expect(g.count).toBe(1);
+    });
+});
+
+describe("tt.tabStore", () => {
+    it("survives page reloads in the same tab, isolates tabs, primes overlays after reload, and drops on tab close", async () => {
+        const alivePages = new Set(["42.1.a", "42.2.b", "99.1.a"]);
+        const aliveTabs = new Set(["tab:42", "tab:99"]);
+        const t = setup({ pageAlive: (k) => alivePages.has(k) || aliveTabs.has(k) });
+        const bg = t.hub("bg");
+        const ovl1 = t.hub("ovl1", false);
+        const ts = bg.hub.tabStore("s1", "env", { staging: false });
+        const ps = bg.hub.pageStore("s1", "doc", { hits: 0 });
+
+        // Overlay on Tab 42 document 1 turns staging on
+        const o1 = ovl1.hub.tabStore("s1", "env", { staging: false }, tabScopeOfPage("42.1.a"));
+        withPage("42.1.a", () => (ps.hits = 3));
+        await settle();
+        o1.staging = true;
+        await settle();
+
+        expect(withPage("42.1.a", () => ts.staging)).toBe(true);
+        expect(withPage("99.1.a", () => ts.staging)).toBe(false);
+        expect(await t.owner.tabsOf(["s1"])).toEqual([42]);
+
+        // Tab 42 refreshes → "42.1.a" ends, "42.2.b" starts: pageStore resets, tabStore stays!
+        alivePages.delete("42.1.a");
+        t.owner.dropPage("42.1.a");
+        await settle();
+        expect(withPage("42.2.b", () => ps.hits)).toBe(0);
+        expect(withPage("42.2.b", () => ts.staging)).toBe(true);
+        // Even a navigation request with page = null but tab = tab:42 sees it
+        expect(withPage(null, () => ts.staging, tabScope(42))).toBe(true);
+
+        // Reloaded overlay on "42.2.b" gets primed with tab:42 state immediately
+        const ovl2 = t.hub("ovl2", false);
+        ovl2.hub.prime(await t.owner.init(["s1"], { page: "42.2.b" }));
+        const o2 = ovl2.hub.tabStore("s1", "env", { staging: false }, tabScopeOfPage("42.2.b"));
+        expect(o2.staging).toBe(true);
+
+        // Closing Tab 42 drops tab:42
+        alivePages.delete("42.2.b");
+        aliveTabs.delete("tab:42");
+        t.owner.dropPage("42.2.b");
+        t.owner.dropPage("tab:42");
+        await settle();
+        expect(await t.owner.tabsOf(["s1"])).toEqual([]);
+        expect(withPage("42.3.c", () => ts.staging)).toBe(false);
+    });
+
+    it("throws at top level (Scenario 2) and shares the store name space", () => {
+        const topErr = compileScript(`const tab = tt.tabStore("env", { staging: false }); if (tab.staging) { tt.onRequest({ url: "*://a/*", strategy: "rules" }, () => ({ block: true })); }`);
+        expect(String(topErr.error)).toMatch(/tt\.tabStore\("env"\): no tab here/);
+        const dupErr = compileScript(`tt.tabStore("x", { a: 1 }); tt.pageStore("x", { a: 1 });`);
+        expect(String(dupErr.error)).toMatch(/already has a store named "x"/);
     });
 });

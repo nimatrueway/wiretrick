@@ -81,4 +81,20 @@ describe("page registry", () => {
         expect(again.isAlive(a)).toBe(true);
         expect(again.committed(5, "d5")).toBe(a);
     });
+
+    it("tab scopes survive document reloads/navigations and end only on tab close", () => {
+        const r = new PageRegistry();
+        const tabEnded: [string, number][] = [];
+        r.onTabEnd((k, t) => tabEnded.push([k, t]));
+        const p1 = r.committed(42, "doc1");
+        expect(r.isAlive("tab:42")).toBe(true);
+        const p2 = r.committed(42, "doc2");
+        expect(r.isAlive(p1)).toBe(false);
+        expect(r.isAlive(p2)).toBe(true);
+        expect(r.isAlive("tab:42")).toBe(true);
+        expect(tabEnded).toEqual([]);
+        r.tabClosed(42);
+        expect(r.isAlive("tab:42")).toBe(false);
+        expect(tabEnded).toEqual([["tab:42", 42]]);
+    });
 });

@@ -41,6 +41,7 @@ import { reportSkipped, setSkipRoutes } from "./skipped";
 import { correlator } from "./requestCorrelator";
 import { winnerOf } from "../../shared/precedence";
 import { targetsWebSocket, WS_BLIND, wsUnseen } from "../../shared/websocketLimits";
+import { isTabScope } from "../../shared/storeOps";
 import { TEXT_TYPES_KEY } from "../settingsFile";
 import { getTextTypes, setTextTypes } from "../../shared/bodyKind";
 import { packBytes, unpackBytes } from "../../shared/bytesPack";
@@ -1126,8 +1127,8 @@ export function createPipeline(
         chrome.permissions?.onAdded?.addListener(recheck);
         chrome.permissions?.onRemoved?.addListener(recheck);
     }
-    // rules handlers may read a store: a change re-probes
-    const offStores = storeOwner.onChange((s, _name, page) => page === undefined && rulesStrategy.storeChanged(s));
+    // rules handlers may read a global or tab store: a change re-probes
+    const offStores = storeOwner.onChange((s, _name, page) => (page === undefined || isTabScope(page)) && rulesStrategy.storeChanged(s));
     // ownership moves between the helper strategy and the other strategies
     const offProcess = onHelperActiveChange(() => void reload());
     const onStorage = (changes: Record<string, unknown>, area: string) => {

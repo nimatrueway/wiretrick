@@ -17,6 +17,7 @@
 import { compileScript, type ResApiOverrides } from "../shared/compile";
 import { messagePortEndpoint, type Endpoint, type OverlayInit } from "../shared/wire";
 import { ReplicaHub } from "../shared/storeReplica";
+import { tabScopeOfPage } from "../shared/storeOps";
 import { SiteMirrors } from "../shared/siteStoreMirror";
 import { ensureBuiltins, scriptBuiltin } from "../shared/builtins";
 import { makeLibRequire } from "../shared/scriptImports";
@@ -147,6 +148,7 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
         setParam: async (key, value) => void (await ep.call("param.set", { key, value })),
         logSink: (level, source, text) => log(level, scriptLogLine(init.name, `overlay ${source}`, text)),
         store: (name, initial, persist) => hub.store(s, name, initial, persist),
+        tabStore: (name, initial) => hub.tabStore(s, name, initial, tabScopeOfPage(init.page)),
         // the overlay's own page's copy
         pageStore: (name, initial) => hub.pageStore(s, name, initial, init.page),
         siteStore: (name, initial) => site.store(s, name, initial),
@@ -196,6 +198,7 @@ export async function startOverlay(ep: Endpoint, init: OverlayInit, env: Overlay
                     name: lib.name,
                     paramValues: lib.params,
                     store: (name, initial, persist) => hub.store(libId, name, initial, persist),
+                    tabStore: (name, initial) => hub.tabStore(libId, name, initial, tabScopeOfPage(init.page)),
                     pageStore: (name, initial) => hub.pageStore(libId, name, initial, init.page),
                     siteStore: undefined,
                     setParam: async (key, value) => void (await ep.call("param.set", { key, value, lib: lib.name })),

@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import { compileScript } from "../src/shared/compile";
 import { probeScriptRules } from "../src/shared/rulesProbe";
 import { substitute } from "../src/shared/dnrRules";
+import { ReplicaHub } from "../src/shared/storeReplica";
+import { tabScope } from "../src/shared/storeOps";
 import { scriptHealth } from "../src/shared/scriptHealth";
 import { missedReason } from "../src/shared/missedTap";
 import { strategyUnsupported } from "../src/shared/strategyInfo";
@@ -94,6 +96,64 @@ describe("rules probe (tripwire ctx)", () => {
         const r = await rulesOf(`tt.onRequest({ url: "*://a.com/*", strategy: "rules" }, () => new Promise(() => {}));`);
         expect(r.errors[0]).toMatch(/onRequest #1: threw during its one-time run: timed out/);
     }, 5000);
+
+    it("supports conditional rules with tt.tabStore, tt.params and tt.globalStore (per-tab tabIds / excludedTabIds)", async () => {
+        const hub = new ReplicaHub({ ctx: "test" });
+        const code = `
+            const tab = tt.tabStore("env", { staging: false });
+            const params = tt.params({ staging: { type: "boolean", default: false } });
+            tt.onRequest({ url: "https://api.example.com/*", strategy: "rules" }, () =>
+                (params.staging || tab.staging) ? { redirect: "https://staging.example.com/" } : undefined,
+            );
+        `;
+        const compileWith = (paramValues?: Record<string, any>) =>
+            compileScript(code, {
+                paramValues,
+                store: (n, i, p) => hub.store("s1", n, i, p),
+                tabStore: (n, i) => hub.tabStore("s1", n, i),
+                pageStore: (n, i) => hub.pageStore("s1", n, i),
+            });
+
+        // Default false + no mutated tabs → 0 rules, 0 errors (no "does nothing on rules")
+        const cOff = compileWith({ staging: false });
+        expect(cOff.error).toBeNull();
+        expect(await probeScriptRules(cOff.handlers, [])).toEqual({ rules: [], errors: [] });
+
+        // Tab 42 turns staging ON → 1 rule scoped to tabIds: [42]
+        const t42 = hub.tabStore("s1", "env", { staging: false }, tabScope(42));
+        t42.staging = true;
+        const rTab42 = await probeScriptRules(cOff.handlers, [42, 99]);
+        expect(rTab42.errors).toEqual([]);
+        expect(rTab42.rules[0].specs).toHaveLength(1);
+        expect(rTab42.rules[0].specs[0].condition.tabIds).toEqual([42]);
+        expect(rTab42.rules[0].specs[0].condition.excludedTabIds).toBeUndefined();
+
+        // Global param staging = true → short-circuits to 1 tab-less global rule
+        const cGlobal = compileWith({ staging: true });
+        const rGlobal = await probeScriptRules(cGlobal.handlers, [42, 99]);
+        expect(rGlobal.errors).toEqual([]);
+        expect(rGlobal.rules[0].specs).toHaveLength(1);
+        expect(rGlobal.rules[0].specs[0].condition.tabIds).toBeUndefined();
+        expect(rGlobal.rules[0].specs[0].condition.excludedTabIds).toBeUndefined();
+
+        // Tab 42 turns staging back OFF → matches base again, 0 rules
+        t42.staging = false;
+        expect(await probeScriptRules(cOff.handlers, [42])).toEqual({ rules: [], errors: [] });
+
+        // Default ON (`initial: { staging: true }`), Tab 7 turns OFF → 1 global rule with excludedTabIds: [7]
+        const hub2 = new ReplicaHub({ ctx: "test2" });
+        const cDefOn = compileScript(
+            `const tab = tt.tabStore("env", { staging: true });
+             tt.onRequest({ url: "https://api.example.com/*", strategy: "rules" }, () => tab.staging ? { block: true } : undefined);`,
+            { tabStore: (n, i) => hub2.tabStore("s2", n, i) }
+        );
+        hub2.tabStore("s2", "env", { staging: true }, tabScope(7)).staging = false;
+        const rDefOn = await probeScriptRules(cDefOn.handlers, [7, 8]);
+        expect(rDefOn.errors).toEqual([]);
+        expect(rDefOn.rules[0].specs).toHaveLength(1);
+        expect(rDefOn.rules[0].specs[0].action).toEqual({ type: "block" });
+        expect(rDefOn.rules[0].specs[0].condition.excludedTabIds).toEqual([7]);
+    });
 });
 
 describe("rules in health / missed / availability", () => {

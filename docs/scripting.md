@@ -619,16 +619,17 @@ HTTPS, so you trust unpkg to serve npm's files unaltered. Only the extension
 background downloads them (when scripts are saved, imported or compiled);
 pages never fetch them.
 
-## Shared state and fetching — `tt.globalStore`, `tt.pageStore`, `tt.siteStore`, `tt.fetch`
+## Shared state and fetching — `tt.globalStore`, `tt.tabStore`, `tt.pageStore`, `tt.siteStore`, `tt.fetch`
 
-Three kinds of store; the name says who owns the data and how far it
+Four kinds of store; the name says who owns the data and how far it
 reaches. **Anything the site may read or write goes in `tt.siteStore`;
-everything else goes in the other two.**
+everything else goes in the other three.**
 
 | store | owner | one copy for | the site can read and change it | available in |
 |---|---|---|---|---|
-| `tt.globalStore(name, initial)` | the background (yours) | every page, every tab, kept across restarts | no | network handlers, `onPage`, `onOverlay` |
-| `tt.pageStore(name, initial)` | the background (yours) | each page | no | network handlers, `onPage`, `onOverlay` |
+| `tt.globalStore(name, initial)` | the background (yours) | every page, every tab, kept across restarts | no | network handlers (`rules` included), `onPage`, `onOverlay` |
+| `tt.tabStore(name, initial)` | the background (yours) | each browser tab (survives reloads & navigations) | no | network handlers (`rules` included), `onPage`, `onOverlay` |
+| `tt.pageStore(name, initial)` | the background (yours) | each page document (resets on reload/navigation) | no | network handlers (except `rules`), `onPage`, `onOverlay` |
 | `tt.siteStore(name, initial)` | the site's JavaScript world (theirs) | each page | **yes** | `onSite`, `onPage`, `onOverlay` |
 
 ### `tt.globalStore`
@@ -665,6 +666,36 @@ tt.onRequest({ url: "*://api.example.com/*", strategy: "helper" }, (ctx) => {
   rules rebuilt) when the store changes.
 - The saved copy lives in `tt.storage` as `"$store:<name>"`; change the
   store, not that key (writing it logs a warning).
+
+### `tt.tabStore`
+
+`tt.tabStore(name, initial)` keeps one copy per browser tab: unlike
+`tt.pageStore`, it **survives refreshes and navigations** in that tab and
+goes away only when the tab closes. It works on **`strategy: "rules"`**
+too — TangiTweak builds per-tab browser rules (`tabIds` / `excludedTabIds`)
+and updates them whenever a tab's copy changes, so toggling a switch in an
+overlay and refreshing redirects even the tab's first requests.
+
+```tsx
+import { useSnapshot } from "valtio";
+
+const tab = tt.tabStore("env", { staging: false });
+
+tt.onRequest({ url: "https://api.example.com/*", strategy: "rules" }, (ctx) =>
+    tab.staging ? { redirect: `https://staging-api.example.com/${ctx.groups["0"]}` } : undefined,
+);
+
+tt.onOverlay("https://example.com/*", (ctx) => {
+    function Switch() {
+        const snap = useSnapshot(tab);
+        return <button onClick={() => (tab.staging = !tab.staging)}>Staging: {snap.staging ? "on" : "off"}</button>;
+    }
+    ctx.mount(<Switch />);
+});
+```
+
+- Same synchronous-before-`await` rule, JSON limit and shared name space as
+  `tt.globalStore` and `tt.pageStore`.
 
 ### `tt.pageStore`
 

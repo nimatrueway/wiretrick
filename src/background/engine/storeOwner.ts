@@ -15,7 +15,7 @@
  * `storeKey(name, page)` and never persisted (MV3: session only).
  */
 import type { Endpoint, Json, StoreOp, StorePersist, StoreSnapshot } from "../../shared/wire";
-import { STORE_MAX_BYTES, applyOps, badPath, badValue, cloneJson, isPlainObject, jsonBytes, jsonEqual, missingOps, persistedPart, splitStoreKey, storeKey } from "../../shared/storeOps";
+import { STORE_MAX_BYTES, applyOps, badPath, badValue, cloneJson, isPlainObject, isTabScope, jsonBytes, jsonEqual, missingOps, persistedPart, splitStoreKey, storeKey, tabScopeId, tabScopeOfPage } from "../../shared/storeOps";
 
 export const STORE_KEY_PREFIX = "$store:";
 const SESSION_PREFIX = "ttStores.";
@@ -24,7 +24,7 @@ const page = (p: unknown): string | undefined => (typeof p === "string" && p ? p
 
 export interface OwnerStoreInfo {
     name: string;
-    scope: "global" | "page";
+    scope: "global" | "tab" | "page";
     page?: string;
     rev: number;
     persist?: StorePersist;
@@ -90,7 +90,7 @@ export class StoreOwner {
             this.broadcast.delete(ep);
             for (const st of this.scripts.values()) for (const e of st.stores.values()) e.subs.delete(ep);
         });
-        ep.on("store.declare", (a, s) => s && void this.run(s, () => (a.scope === "page" ? this.declarePage(s, a.name, a.initial) : this.declare(s, a.name, a.initial, a.persist))));
+        ep.on("store.declare", (a, s) => s && void this.run(s, () => (a.scope === "page" || a.scope === "tab" ? this.declarePage(s, a.name, a.initial) : this.declare(s, a.name, a.initial, a.persist))));
         ep.on("store.set", (a, s) => s && void this.run(s, () => this.set(ep, s, a.name, a.op, a.ops, page(a.page))));
         ep.handle("store.sub", (a, s) => {
             if (!s) throw new Error("store.sub: no script");
@@ -108,16 +108,20 @@ export class StoreOwner {
         };
     }
 
-    /** the current stores of some scripts; `only.page`: of the page copies, just that page's (null: none) */
-    async init(scriptIds: string[], only?: { page: string | null }): Promise<{ [s: string]: { [name: string]: StoreSnapshot } }> {
+    /** the current stores of some scripts; `only.page`: of scoped copies, just that page's + its tab's (`null`: none, unless `tabs: true`) */
+    async init(scriptIds: string[], only?: { page: string | null; tabs?: boolean }): Promise<{ [s: string]: { [name: string]: StoreSnapshot } }> {
         const out: { [s: string]: { [name: string]: StoreSnapshot } } = {};
+        const tabOfOnly = only?.page ? tabScopeOfPage(only.page) : null;
         await Promise.all(
             scriptIds.map(async (s) => {
                 out[s] = await this.run(s, () => {
                     const snaps: { [name: string]: StoreSnapshot } = {};
                     for (const [key, e] of this.state(s).stores) {
                         const pg = splitStoreKey(key).page;
-                        if (pg && only && pg !== only.page) continue;
+                        if (pg && only) {
+                            const ok = pg === only.page || (tabOfOnly !== null && pg === tabOfOnly) || (!!only.tabs && isTabScope(pg));
+                            if (!ok) continue;
+                        }
                         snaps[key] = { rev: e.rev, data: cloneJson(e.data) };
                     }
                     return snaps;
@@ -125,6 +129,24 @@ export class StoreOwner {
             })
         );
         return out;
+    }
+
+    /** live browser `tabId`s whose `tt.tabStore` state differs from `initial` on any of `scriptIds` */
+    async tabsOf(scriptIds: string[]): Promise<number[]> {
+        const ids = new Set<number>();
+        await Promise.all(
+            scriptIds.map((s) =>
+                this.run(s, () => {
+                    const st = this.state(s);
+                    for (const [key, e] of st.stores) {
+                        const { name, page: pg } = splitStoreKey(key);
+                        const tid = tabScopeId(pg);
+                        if (tid !== undefined && pg && this.alive(pg) && !jsonEqual(e.data, st.templates.get(name) ?? {})) ids.add(tid);
+                    }
+                })
+            )
+        );
+        return [...ids].sort((a, b) => a - b);
     }
 
     /** a store's current state (tests, rules); `page`: that page's copy */
@@ -198,7 +220,7 @@ export class StoreOwner {
                         if (pg && !this.alive(pg)) continue;
                         list.push({
                             name,
-                            scope: pg ? "page" : "global",
+                            scope: !pg ? "global" : isTabScope(pg) ? "tab" : "page",
                             ...(pg ? { page: pg } : {}),
                             rev: e.rev,
                             persist: e.persist,

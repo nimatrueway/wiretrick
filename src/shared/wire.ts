@@ -57,8 +57,8 @@ export interface StoreSnapshot {
  * messages. `call`, `push`, `handle` and `on` are typed over it.
  */
 export interface WireOps {
-    /** a context ran `tt.globalStore(name, initial)` (or `tt.pageStore`: `scope: "page"`, the template of every page's copy) */
-    "store.declare": { push: { name: string; initial: Json; persist: StorePersist; scope?: "page" } };
+    /** a context ran `tt.globalStore(name, initial)` (or `tt.pageStore` / `tt.tabStore`: `scope: "page" | "tab"`, the template of every copy) */
+    "store.declare": { push: { name: string; initial: Json; persist: StorePersist; scope?: "page" | "tab" } };
     /**
      * The owner's snapshot when `rev` is stale or missing; `ops` = recently
      * applied op ids. `page`: that page's copy of a `tt.pageStore` (the

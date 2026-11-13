@@ -22,7 +22,7 @@
 import { proxy, subscribe } from "valtio/vanilla";
 import type { Endpoint, Json, StoreOp, StorePersist } from "./wire";
 import { STORE_MAX_BYTES, applyOps, cloneJson, isPlainObject, jsonBytes, missingOps, storeKey, withMissing } from "./storeOps";
-import { currentCall, currentPage, RULES_PAGE } from "./currentPage";
+import { currentCall, currentPage, currentTab, noteRuleTabStore, RULES_PAGE, RULES_TAB } from "./currentPage";
 import { isLocalField, splitInitial, toJson, writeDiff, type Template } from "./storeView";
 
 interface Replica {
@@ -65,13 +65,18 @@ const keyOf = (s: string, name: string, page?: string) => `${s}\u0000${storeKey(
 export const noPageError = (name: string) =>
     new Error(`tt.pageStore("${name}"): no page here — a page's copy is reachable while a handler runs for one of the page's requests, until the handler's first await (read what you need before awaiting). Top-level code and timers have no page.`);
 
+/** `tt.tabStore` outside a handler's synchronous part */
+export const noTabError = (name: string) =>
+    new Error(`tt.tabStore("${name}"): no tab here — a tab's copy is reachable while a handler runs for one of the tab's requests, until the handler's first await (read what you need before awaiting). Top-level code and timers have no tab.`);
+
 const pageOf = (rep: Replica): { page?: string } => (rep.page ? { page: rep.page } : {});
 
 export class ReplicaHub {
     private ep: Endpoint | null = null;
     private readonly reps = new Map<string, Replica>();
-    /** `tt.pageStore` templates by `keyOf(s, name)` */
+    /** `tt.pageStore` / `tt.tabStore` templates by `keyOf(s, name)` */
     private readonly templates = new Map<string, Template>();
+    private readonly templateScopes = new Map<string, "page" | "tab">();
     /** a page-less handler call's throwaway copy, per store */
     private readonly scratch = new Map<string, { call: number; obj: object }>();
     private readonly primed = new Map<string, { [name: string]: { rev: number; data: Json } }>();
@@ -92,9 +97,19 @@ export class ReplicaHub {
         this.reconnect();
     }
 
-    /** the owner's current stores, so `tt.globalStore` returns them synchronously when a script compiles */
+    /** the owner's current stores, so stores read them synchronously when scripts compile or probe rules */
     prime(snaps: StoreSnapshots): void {
-        for (const [s, stores] of Object.entries(snaps)) this.primed.set(s, { ...(this.primed.get(s) ?? {}), ...stores });
+        for (const [s, stores] of Object.entries(snaps)) {
+            this.primed.set(s, { ...(this.primed.get(s) ?? {}), ...stores });
+            for (const [k, snap] of Object.entries(stores)) {
+                const rep = this.reps.get(`${s}\u0000${k}`);
+                if (rep && rep.rev < snap.rev) {
+                    rep.data = cloneJson(snap.data);
+                    rep.rev = snap.rev;
+                    this.render(rep);
+                }
+            }
+        }
     }
 
     isPrimed(s: string): boolean {
@@ -105,7 +120,7 @@ export class ReplicaHub {
     reconnect(): void {
         for (const [k, t] of this.templates) {
             const i = k.indexOf("\u0000");
-            this.declarePage(k.slice(0, i), k.slice(i + 1), t);
+            this.declareScoped(k.slice(0, i), k.slice(i + 1), t, this.templateScopes.get(k) ?? "page");
         }
         for (const rep of this.reps.values()) {
             this.declare(rep);
@@ -122,7 +137,11 @@ export class ReplicaHub {
                 this.reps.delete(k);
             }
         for (const s of [...this.primed.keys()]) if (!keep.has(s)) this.primed.delete(s);
-        for (const k of [...this.templates.keys()]) if (!keep.has(k.slice(0, k.indexOf("\u0000")))) this.templates.delete(k);
+        for (const k of [...this.templates.keys()])
+            if (!keep.has(k.slice(0, k.indexOf("\u0000")))) {
+                this.templates.delete(k);
+                this.templateScopes.delete(k);
+            }
     }
 
     /** `tt.globalStore(name, initial, opts)` for script `s` */
@@ -155,13 +174,51 @@ export class ReplicaHub {
      * copy of the page whose handler is running.
      */
     pageStore<T extends object>(s: string, name: string, initial: T, page?: string): T {
-        if (typeof name !== "string" || !name) throw new TypeError("tt.pageStore: the first argument must be the store's name (a non-empty string)");
-        if (!initial || typeof initial !== "object" || Array.isArray(initial)) throw new TypeError(`tt.pageStore("${name}"): initial must be an object`);
-        const t = splitInitial(name, initial, "tt.pageStore");
+        const tk = keyOf(s, name);
+        return this.scopedStore(s, name, initial, "page", page, () => {
+            const pg = currentPage();
+            if (pg === undefined) throw noPageError(name);
+            if (pg === null) return this.scratchCopy(tk);
+            if (pg === RULES_PAGE) throw new Error(`tt.pageStore("${name}") can't be read by a strategy "rules" handler — its rules are built once for every page; use tt.tabStore or another strategy`);
+            return this.pageReplica(s, name, pg)!.proxy;
+        });
+    }
+
+    /**
+     * `tt.tabStore(name, initial)` for script `s`. `tab`: the overlay's or
+     * page script's tab (`"tab:42"`, or `null` when detached) — its replica;
+     * absent: code serving every tab — a proxy to the copy of the tab whose
+     * handler (or `rules` probe) is running.
+     */
+    tabStore<T extends object>(s: string, name: string, initial: T, tab?: string | null): T {
+        const tk = keyOf(s, name);
+        return this.scopedStore(s, name, initial, "tab", tab, () => {
+            const tb = currentTab();
+            if (tb === undefined) throw noTabError(name);
+            if (tb === null) return this.scratchCopy(tk);
+            noteRuleTabStore(name);
+            if (tb === RULES_TAB) return this.scratchCopy(tk);
+            return this.pageReplica(s, name, tb)!.proxy;
+        });
+    }
+
+    private scopedStore<T extends object>(
+        s: string,
+        name: string,
+        initial: T,
+        scope: "page" | "tab",
+        bound: string | null | undefined,
+        target: () => Record<string, any>
+    ): T {
+        const api = scope === "tab" ? "tt.tabStore" : "tt.pageStore";
+        if (typeof name !== "string" || !name) throw new TypeError(`${api}: the first argument must be the store's name (a non-empty string)`);
+        if (!initial || typeof initial !== "object" || Array.isArray(initial)) throw new TypeError(`${api}("${name}"): initial must be an object`);
+        const t = splitInitial(name, initial, api);
         const tk = keyOf(s, name);
         const recompiled = this.templates.has(tk);
         this.templates.set(tk, t);
-        this.declarePage(s, name, t);
+        this.templateScopes.set(tk, scope);
+        this.declareScoped(s, name, t, scope);
         if (recompiled)
             for (const rep of this.reps.values()) {
                 if (rep.s !== s || rep.name !== name || !rep.page) continue;
@@ -170,16 +227,16 @@ export class ReplicaHub {
                 this.render(rep);
                 this.resync(rep, false);
             }
-        if (page !== undefined) return this.pageReplica(s, name, page)!.proxy as T;
-        const target = (): Record<string, any> => {
-            const pg = currentPage();
-            if (pg === undefined) throw noPageError(name);
-            if (pg === null) return this.scratchCopy(tk);
-            if (pg === RULES_PAGE) throw new Error(`tt.pageStore("${name}") can't be read by a strategy "rules" handler — its rules are built once for every page; use another strategy`);
-            return this.pageReplica(s, name, pg)!.proxy;
-        };
+        if (bound === null) {
+            const obj: Record<string, any> = {};
+            for (const [k, d] of t.local) Object.defineProperty(obj, k, d);
+            for (const k of Object.keys(t.json)) if (!(k in obj)) obj[k] = cloneJson(t.json[k]);
+            return proxy(obj) as T;
+        }
+        if (bound !== undefined) return this.pageReplica(s, name, bound)!.proxy as T;
+        const currentCtx = scope === "tab" ? currentTab : currentPage;
         // `then`: an `await store` outside a handler shouldn't throw
-        const quiet = (k: PropertyKey) => (k === "then" || typeof k === "symbol") && currentPage() === undefined;
+        const quiet = (k: PropertyKey) => (k === "then" || typeof k === "symbol") && currentCtx() === undefined;
         return new Proxy({} as T, {
             get: (_t, k) => (quiet(k) ? undefined : Reflect.get(target(), k)),
             set: (_t, k, v) => Reflect.set(target(), k, v),
@@ -264,8 +321,8 @@ export class ReplicaHub {
         if (primed) for (const k of Object.keys(primed)) if (k.endsWith(`\u0000${page}`)) delete primed[k];
     }
 
-    private declarePage(s: string, name: string, t: Template): void {
-        this.ep?.push("store.declare", { name, initial: t.json, persist: false, scope: "page" }, s);
+    private declareScoped(s: string, name: string, t: Template, scope: "page" | "tab"): void {
+        this.ep?.push("store.declare", { name, initial: t.json, persist: false, scope }, s);
     }
 
     // ---- local writes ----

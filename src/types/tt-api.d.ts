@@ -1250,7 +1250,7 @@ declare const tt: {
      * browser restarts. It's a [valtio](https://valtio.dev) proxy: read and
      * change it like a plain object; `import { subscribe } from "valtio"`
      * to watch it. `name` is its key (one store per name per script, shared
-     * with {@link pageStore}); values must be JSON (at most 1 MB). Call it
+     * with {@link tabStore} and {@link pageStore}); values must be JSON (at most 1 MB). Call it
      * at top level. `onPage` and `onOverlay` code get a live copy too;
      * `onSite` code doesn't (the site could read and forge it).
      *
@@ -1262,6 +1262,33 @@ declare const tt: {
      * });
      */
     globalStore<T extends object>(name: string, initial: T, opts?: TangiTweak.StoreOptions<T>): T;
+
+    /**
+     * Like {@link globalStore}, but one copy per browser tab: each tab
+     * starts from `initial` and **keeps its state across reloads and
+     * navigations** until the tab closes (not across browser restarts).
+     *
+     * Works with every network strategy — **`"rules"` included**: when a
+     * `"rules"` handler reads a `tabStore`, TangiTweak builds per-tab
+     * browser rules (`tabIds` / `excludedTabIds`) and updates them whenever
+     * that tab's store changes, so even a tab refresh's first document and
+     * `<script>` requests get the rule.
+     *
+     * Read it in the handler's synchronous part (before the first `await`);
+     * top-level code and timers have no tab and throw. `onPage` and
+     * `onOverlay` code get a live copy for their tab (`useSnapshot` works);
+     * not available in `onSite` code.
+     *
+     * @example
+     * const tab = tt.tabStore("env", { staging: false });
+     * tt.onRequest({ url: "https://api.example.com/*", strategy: "rules" }, (ctx) =>
+     *     tab.staging ? { redirect: `https://staging-api.example.com/${ctx.groups["0"]}` } : undefined,
+     * );
+     * tt.onOverlay("https://example.com/*", () => {
+     *     // toggle tab.staging, then refresh: this tab's requests redirect from the start
+     * });
+     */
+    tabStore<T extends object>(name: string, initial: T): T;
 
     /**
      * Like {@link globalStore}, but one copy per page: each tab's page
@@ -1278,7 +1305,7 @@ declare const tt: {
      * object. Requests that aren't from a page (service workers, other
      * apps through the helper) see a throwaway copy of `initial`.
      * `onPage` code sees its page's copy; not available in `onSite` code
-     * (the site could read and forge it) or in `rules` handlers (their rules serve every page); kept until the page ends
+     * (the site could read and forge it) or in `rules` handlers (use {@link tabStore} for per-tab rules); kept until the page ends
      * (not across browser restarts).
      *
      * @example
